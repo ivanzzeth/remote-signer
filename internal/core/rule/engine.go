@@ -1,0 +1,76 @@
+package rule
+
+import (
+	"context"
+	"errors"
+
+	"github.com/ivanzzeth/remote-signer/internal/core/types"
+)
+
+// ErrBlockedByRule indicates the request was blocked by a blocklist rule
+var ErrBlockedByRule = errors.New("request blocked by rule")
+
+// BlockedError contains details about why a request was blocked
+type BlockedError struct {
+	RuleID   types.RuleID
+	RuleName string
+	Reason   string
+}
+
+func (e *BlockedError) Error() string {
+	return "blocked by rule " + string(e.RuleID) + ": " + e.Reason
+}
+
+func (e *BlockedError) Unwrap() error {
+	return ErrBlockedByRule
+}
+
+// EvaluationResult represents the result of rule evaluation
+type EvaluationResult struct {
+	// Blocked indicates the request was blocked by a blocklist rule
+	Blocked bool
+
+	// BlockedBy contains the rule that blocked the request (if Blocked is true)
+	BlockedBy *types.Rule
+
+	// BlockReason explains why the request was blocked
+	BlockReason string
+
+	// Allowed indicates the request was allowed by a whitelist rule
+	Allowed bool
+
+	// AllowedBy contains the rule that allowed the request (if Allowed is true)
+	AllowedBy *types.Rule
+
+	// AllowReason explains why the request was allowed
+	AllowReason string
+}
+
+// RuleEngine evaluates rules for sign requests
+type RuleEngine interface {
+	// Evaluate performs two-tier rule evaluation:
+	// 1. Check blocklist rules first - ANY violation = blocked (returns BlockedError)
+	// 2. Check whitelist rules - ANY match = allowed
+	// Returns:
+	// - (*RuleID, reason, nil) if whitelisted
+	// - (nil, "", nil) if no whitelist match (needs manual approval)
+	// - (nil, "", BlockedError) if blocked by a blocklist rule
+	Evaluate(ctx context.Context, req *types.SignRequest, parsed *types.ParsedPayload) (*types.RuleID, string, error)
+
+	// EvaluateWithResult returns detailed evaluation result
+	EvaluateWithResult(ctx context.Context, req *types.SignRequest, parsed *types.ParsedPayload) (*EvaluationResult, error)
+
+	// RegisterEvaluator registers a chain-specific rule evaluator
+	RegisterEvaluator(evaluator RuleEvaluator)
+}
+
+// RuleEvaluator evaluates a specific rule type
+type RuleEvaluator interface {
+	// Type returns the rule type this evaluator handles
+	Type() types.RuleType
+
+	// Evaluate evaluates the rule against the request
+	// For whitelist mode: returns (true, reason, nil) if request matches the whitelist
+	// For blocklist mode: returns (true, reason, nil) if request VIOLATES the limit (should be blocked)
+	Evaluate(ctx context.Context, rule *types.Rule, req *types.SignRequest, parsed *types.ParsedPayload) (bool, string, error)
+}
