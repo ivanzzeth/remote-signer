@@ -1,0 +1,60 @@
+# Remote Signer Configuration Example
+# Copy this file to config.yaml and update values
+
+server:
+  host: "0.0.0.0"
+  port: 8080
+  tls:
+    enabled: false
+    cert_file: "/etc/signer/tls/cert.pem"
+    key_file: "/etc/signer/tls/key.pem"
+
+database:
+  # PostgreSQL connection string
+  # Environment variables can be used: ${VAR_NAME}
+  dsn: "postgres://user:password@localhost:5432/remote_signer?sslmode=disable"
+
+chains:
+  evm:
+    enabled: true
+    signers:
+      # Private keys loaded from environment variables
+      private_keys:
+        - address: "0x1234567890abcdef1234567890abcdef12345678"
+          key_env: "EVM_SIGNER_KEY_1"
+      # Keystores with password from environment
+      # keystores:
+      #   - address: "0xabcdef1234567890abcdef1234567890abcdef12"
+      #     path: "/etc/signer/keystores/"
+      #     password_env: "EVM_KEYSTORE_PASSWORD_1"
+
+notify:
+  slack:
+    enabled: false
+    bot_token: "${SLACK_BOT_TOKEN}"
+  pushover:
+    enabled: false
+    app_token: "${PUSHOVER_APP_TOKEN}"
+    retry: 30        # seconds between retries for emergency notifications
+    expire: 300      # seconds until notification expires
+    max_retries: 3   # max HTTP request retries
+    retry_delay: 1   # initial retry delay in seconds
+
+# Notification channels for approval requests
+notify_channels:
+  slack:
+    - "C1234567890"  # Slack channel ID
+  pushover:
+    - "user_key_here"  # Pushover user key
+
+security:
+  # Maximum age of signed requests (prevents replay attacks)
+  max_request_age: "5m"
+  # Default rate limit (requests per minute)
+  rate_limit_default: 100
+
+logger:
+  # Log level: debug, info, warn, error
+  level: "info"
+  # Pretty print (for development)
+  pretty: true

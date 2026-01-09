@@ -1,0 +1,154 @@
+package evm
+
+import (
+	"fmt"
+	"os"
+	"sync"
+
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ivanzzeth/ethsig"
+
+	"github.com/ivanzzeth/remote-signer/internal/core/types"
+)
+
+// SignerConfig defines configuration for EVM signers
+type SignerConfig struct {
+	PrivateKeys []PrivateKeyConfig `yaml:"private_keys"`
+	Keystores   []KeystoreConfig   `yaml:"keystores"`
+}
+
+// PrivateKeyConfig defines a private key signer configuration
+type PrivateKeyConfig struct {
+	Address   string `yaml:"address"`    // Expected address (for verification)
+	KeyEnvVar string `yaml:"key_env"`    // Environment variable containing hex private key
+	Enabled   bool   `yaml:"enabled"`    // Whether this signer is enabled
+}
+
+// KeystoreConfig defines a keystore signer configuration
+type KeystoreConfig struct {
+	Address     string `yaml:"address"`      // Expected address (for verification)
+	Path        string `yaml:"path"`         // Path to keystore file
+	PasswordEnv string `yaml:"password_env"` // Environment variable containing password
+	Enabled     bool   `yaml:"enabled"`      // Whether this signer is enabled
+}
+
+// SignerRegistry manages EVM signers
+type SignerRegistry struct {
+	mu      sync.RWMutex
+	signers map[string]*ethsig.Signer // lowercase address -> signer
+	info    map[string]types.SignerInfo
+}
+
+// NewSignerRegistry creates a new signer registry from configuration
+func NewSignerRegistry(cfg SignerConfig) (*SignerRegistry, error) {
+	registry := &SignerRegistry{
+		signers: make(map[string]*ethsig.Signer),
+		info:    make(map[string]types.SignerInfo),
+	}
+
+	// Load private key signers
+	for _, pk := range cfg.PrivateKeys {
+		if !pk.Enabled {
+			continue
+		}
+
+		keyHex := os.Getenv(pk.KeyEnvVar)
+		if keyHex == "" {
+			return nil, fmt.Errorf("environment variable %s is empty for signer %s", pk.KeyEnvVar, pk.Address)
+		}
+
+		privKeySigner, err := ethsig.NewEthPrivateKeySignerFromPrivateKeyHex(keyHex)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create private key signer for %s: %w", pk.Address, err)
+		}
+
+		// Verify address matches
+		expectedAddr := common.HexToAddress(pk.Address)
+		actualAddr := privKeySigner.GetAddress()
+		if actualAddr != expectedAddr {
+			return nil, fmt.Errorf("address mismatch for %s: expected %s, got %s", pk.Address, expectedAddr.Hex(), actualAddr.Hex())
+		}
+
+		signer := ethsig.NewSigner(privKeySigner)
+		addrKey := normalizeAddress(actualAddr.Hex())
+		registry.signers[addrKey] = signer
+		registry.info[addrKey] = types.SignerInfo{
+			Address: actualAddr.Hex(),
+			Type:    "private_key",
+			Enabled: true,
+		}
+	}
+
+	// Load keystore signers
+	for _, ks := range cfg.Keystores {
+		if !ks.Enabled {
+			continue
+		}
+
+		password := os.Getenv(ks.PasswordEnv)
+		if password == "" {
+			return nil, fmt.Errorf("environment variable %s is empty for keystore %s", ks.PasswordEnv, ks.Address)
+		}
+
+		expectedAddr := common.HexToAddress(ks.Address)
+		keystoreSigner, err := ethsig.NewKeystoreSignerFromPath(ks.Path, expectedAddr, password, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load keystore for %s: %w", ks.Address, err)
+		}
+
+		signer := ethsig.NewSigner(keystoreSigner)
+		addrKey := normalizeAddress(expectedAddr.Hex())
+		registry.signers[addrKey] = signer
+		registry.info[addrKey] = types.SignerInfo{
+			Address: expectedAddr.Hex(),
+			Type:    "keystore",
+			Enabled: true,
+		}
+	}
+
+	if len(registry.signers) == 0 {
+		return nil, fmt.Errorf("no signers configured")
+	}
+
+	return registry, nil
+}
+
+// GetSigner returns the signer for the given address
+func (r *SignerRegistry) GetSigner(address string) (*ethsig.Signer, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	addrKey := normalizeAddress(address)
+	signer, exists := r.signers[addrKey]
+	if !exists {
+		return nil, types.ErrSignerNotFound
+	}
+	return signer, nil
+}
+
+// HasSigner checks if a signer exists for the given address
+func (r *SignerRegistry) HasSigner(address string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	addrKey := normalizeAddress(address)
+	_, exists := r.signers[addrKey]
+	return exists
+}
+
+// ListSigners returns information about all registered signers
+func (r *SignerRegistry) ListSigners() []types.SignerInfo {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	signers := make([]types.SignerInfo, 0, len(r.info))
+	for _, info := range r.info {
+		signers = append(signers, info)
+	}
+	return signers
+}
+
+// normalizeAddress converts an address to lowercase for consistent map keys
+func normalizeAddress(address string) string {
+	return common.HexToAddress(address).Hex()
+}

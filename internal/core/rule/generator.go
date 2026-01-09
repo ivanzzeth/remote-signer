@@ -1,0 +1,235 @@
+package rule
+
+import (
+	"encoding/json"
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/ivanzzeth/remote-signer/internal/core/types"
+)
+
+// RuleGenerateOptions specifies how to generate a rule from an approved request
+type RuleGenerateOptions struct {
+	RuleType types.RuleType `json:"rule_type"` // Required: evm_address_list, evm_contract_method, evm_value_limit
+	RuleMode types.RuleMode `json:"rule_mode"` // Required: whitelist or blocklist
+	RuleName string         `json:"rule_name"` // Optional: custom name, auto-generated if empty
+
+	// For evm_value_limit: explicit max_value (required for this type)
+	MaxValue *string `json:"max_value,omitempty"`
+}
+
+// Validate validates the rule generation options
+func (o *RuleGenerateOptions) Validate() error {
+	if o.RuleType == "" {
+		return fmt.Errorf("rule_type is required")
+	}
+	if o.RuleMode == "" {
+		return fmt.Errorf("rule_mode is required")
+	}
+	if o.RuleMode != types.RuleModeWhitelist && o.RuleMode != types.RuleModeBlocklist {
+		return fmt.Errorf("rule_mode must be 'whitelist' or 'blocklist'")
+	}
+
+	switch o.RuleType {
+	case types.RuleTypeEVMAddressList, types.RuleTypeEVMContractMethod:
+		// These types extract config from parsed payload
+	case types.RuleTypeEVMValueLimit:
+		if o.MaxValue == nil || *o.MaxValue == "" {
+			return fmt.Errorf("max_value is required for evm_value_limit rule type")
+		}
+	default:
+		return fmt.Errorf("unsupported rule_type: %s", o.RuleType)
+	}
+
+	return nil
+}
+
+// RuleGenerator generates rules from approved transactions
+type RuleGenerator interface {
+	// Preview generates a rule preview without saving (for user confirmation)
+	Preview(req *types.SignRequest, parsed *types.ParsedPayload, opts *RuleGenerateOptions) (*types.Rule, error)
+
+	// Generate creates and returns a rule (caller is responsible for saving)
+	Generate(req *types.SignRequest, parsed *types.ParsedPayload, opts *RuleGenerateOptions) (*types.Rule, error)
+
+	// SupportedTypes returns the rule types this generator can create
+	SupportedTypes() []types.RuleType
+}
+
+// DefaultRuleGenerator generates rules from approved transactions
+type DefaultRuleGenerator struct{}
+
+// NewDefaultRuleGenerator creates a new default rule generator
+func NewDefaultRuleGenerator() (*DefaultRuleGenerator, error) {
+	return &DefaultRuleGenerator{}, nil
+}
+
+// Config types duplicated here to avoid import cycle with evm package
+type addressListConfig struct {
+	Addresses []string `json:"addresses"`
+}
+
+type contractMethodConfig struct {
+	Contract   string   `json:"contract"`
+	MethodSigs []string `json:"method_sigs"`
+}
+
+type valueLimitConfig struct {
+	MaxValue string `json:"max_value"`
+}
+
+// SupportedTypes returns the rule types this generator can create
+func (g *DefaultRuleGenerator) SupportedTypes() []types.RuleType {
+	return []types.RuleType{
+		types.RuleTypeEVMAddressList,
+		types.RuleTypeEVMContractMethod,
+		types.RuleTypeEVMValueLimit,
+	}
+}
+
+// Preview generates a rule preview without saving
+func (g *DefaultRuleGenerator) Preview(req *types.SignRequest, parsed *types.ParsedPayload, opts *RuleGenerateOptions) (*types.Rule, error) {
+	return g.generateRule(req, parsed, opts, true)
+}
+
+// Generate creates a rule (caller saves it)
+func (g *DefaultRuleGenerator) Generate(req *types.SignRequest, parsed *types.ParsedPayload, opts *RuleGenerateOptions) (*types.Rule, error) {
+	return g.generateRule(req, parsed, opts, false)
+}
+
+func (g *DefaultRuleGenerator) generateRule(req *types.SignRequest, parsed *types.ParsedPayload, opts *RuleGenerateOptions, isPreview bool) (*types.Rule, error) {
+	if req == nil {
+		return nil, fmt.Errorf("request is required")
+	}
+	if opts == nil {
+		return nil, fmt.Errorf("options are required")
+	}
+	if err := opts.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid options: %w", err)
+	}
+
+	var configBytes []byte
+	var ruleName string
+	var err error
+
+	switch opts.RuleType {
+	case types.RuleTypeEVMAddressList:
+		configBytes, ruleName, err = g.buildAddressListConfig(parsed, opts)
+	case types.RuleTypeEVMContractMethod:
+		configBytes, ruleName, err = g.buildContractMethodConfig(parsed, opts)
+	case types.RuleTypeEVMValueLimit:
+		configBytes, ruleName, err = g.buildValueLimitConfig(parsed, opts)
+	default:
+		return nil, fmt.Errorf("unsupported rule type: %s", opts.RuleType)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Use custom name if provided
+	if opts.RuleName != "" {
+		ruleName = opts.RuleName
+	}
+
+	now := time.Now()
+	chainType := req.ChainType
+
+	// For preview, use a placeholder ID
+	ruleID := types.RuleID(uuid.New().String())
+	if isPreview {
+		ruleID = types.RuleID("preview_" + uuid.New().String()[:8])
+	}
+
+	return &types.Rule{
+		ID:            ruleID,
+		Name:          ruleName,
+		Description:   fmt.Sprintf("Generated from request %s", req.ID),
+		Type:          opts.RuleType,
+		Mode:          opts.RuleMode,
+		Source:        types.RuleSourceAutoGenerated,
+		ChainType:     &chainType,
+		ChainID:       &req.ChainID,
+		APIKeyID:      &req.APIKeyID,
+		SignerAddress: &req.SignerAddress,
+		Config:        configBytes,
+		Enabled:       true,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}, nil
+}
+
+func (g *DefaultRuleGenerator) buildAddressListConfig(parsed *types.ParsedPayload, opts *RuleGenerateOptions) ([]byte, string, error) {
+	if parsed == nil || parsed.Recipient == nil {
+		return nil, "", fmt.Errorf("cannot generate address list rule: no recipient in payload")
+	}
+
+	config := addressListConfig{
+		Addresses: []string{*parsed.Recipient},
+	}
+	configBytes, err := json.Marshal(config)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to marshal config: %w", err)
+	}
+
+	var ruleName string
+	if opts.RuleMode == types.RuleModeBlocklist {
+		ruleName = fmt.Sprintf("Block: %s", *parsed.Recipient)
+	} else {
+		ruleName = fmt.Sprintf("Allow: %s", *parsed.Recipient)
+	}
+
+	return configBytes, ruleName, nil
+}
+
+func (g *DefaultRuleGenerator) buildContractMethodConfig(parsed *types.ParsedPayload, opts *RuleGenerateOptions) ([]byte, string, error) {
+	if parsed == nil || parsed.Contract == nil || parsed.MethodSig == nil {
+		return nil, "", fmt.Errorf("cannot generate contract method rule: no contract or method_sig in payload")
+	}
+
+	config := contractMethodConfig{
+		Contract:   *parsed.Contract,
+		MethodSigs: []string{*parsed.MethodSig},
+	}
+	configBytes, err := json.Marshal(config)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to marshal config: %w", err)
+	}
+
+	var ruleName string
+	if opts.RuleMode == types.RuleModeBlocklist {
+		ruleName = fmt.Sprintf("Block: %s on %s", *parsed.MethodSig, *parsed.Contract)
+	} else {
+		ruleName = fmt.Sprintf("Allow: %s on %s", *parsed.MethodSig, *parsed.Contract)
+	}
+
+	return configBytes, ruleName, nil
+}
+
+func (g *DefaultRuleGenerator) buildValueLimitConfig(parsed *types.ParsedPayload, opts *RuleGenerateOptions) ([]byte, string, error) {
+	if opts.MaxValue == nil || *opts.MaxValue == "" {
+		return nil, "", fmt.Errorf("max_value is required for value limit rule")
+	}
+
+	config := valueLimitConfig{
+		MaxValue: *opts.MaxValue,
+	}
+	configBytes, err := json.Marshal(config)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to marshal config: %w", err)
+	}
+
+	var ruleName string
+	if opts.RuleMode == types.RuleModeBlocklist {
+		ruleName = fmt.Sprintf("Block: value > %s wei", *opts.MaxValue)
+	} else {
+		ruleName = fmt.Sprintf("Allow: value <= %s wei", *opts.MaxValue)
+	}
+
+	return configBytes, ruleName, nil
+}
+
+// Compile-time check
+var _ RuleGenerator = (*DefaultRuleGenerator)(nil)
