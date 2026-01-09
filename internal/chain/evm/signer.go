@@ -52,9 +52,10 @@ func NewSignerRegistry(cfg SignerConfig) (*SignerRegistry, error) {
 			continue
 		}
 
-		keyHex := os.Getenv(pk.KeyEnvVar)
+		// Support both direct hex value and environment variable name
+		keyHex := resolvePrivateKey(pk.KeyEnvVar)
 		if keyHex == "" {
-			return nil, fmt.Errorf("environment variable %s is empty for signer %s", pk.KeyEnvVar, pk.Address)
+			return nil, fmt.Errorf("private key is empty for signer %s (check key_env value or environment variable)", pk.Address)
 		}
 
 		privKeySigner, err := ethsig.NewEthPrivateKeySignerFromPrivateKeyHex(keyHex)
@@ -151,4 +152,32 @@ func (r *SignerRegistry) ListSigners() []types.SignerInfo {
 // normalizeAddress converts an address to lowercase for consistent map keys
 func normalizeAddress(address string) string {
 	return common.HexToAddress(address).Hex()
+}
+
+// resolvePrivateKey resolves a private key from either:
+// 1. Direct hex value (64+ hex chars, with or without 0x prefix)
+// 2. Environment variable name
+func resolvePrivateKey(keyOrEnv string) string {
+	// Check if it looks like a direct hex private key (64 or 128 hex chars)
+	cleaned := keyOrEnv
+	if len(cleaned) >= 2 && cleaned[:2] == "0x" {
+		cleaned = cleaned[2:]
+	}
+
+	// If it's 64 hex chars (32 bytes seed) or 128 hex chars (64 bytes full key), treat as direct value
+	if len(cleaned) == 64 || len(cleaned) == 128 {
+		isHex := true
+		for _, c := range cleaned {
+			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+				isHex = false
+				break
+			}
+		}
+		if isHex {
+			return cleaned
+		}
+	}
+
+	// Otherwise, treat as environment variable name
+	return os.Getenv(keyOrEnv)
 }

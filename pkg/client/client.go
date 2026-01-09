@@ -43,8 +43,12 @@ type Config struct {
 	PrivateKey ed25519.PrivateKey
 
 	// PrivateKeyHex is an alternative way to provide the private key as hex string.
-	// Either PrivateKey or PrivateKeyHex must be provided.
+	// Either PrivateKey, PrivateKeyHex, or PrivateKeyBase64 must be provided.
 	PrivateKeyHex string
+
+	// PrivateKeyBase64 is an alternative way to provide the private key in base64 DER format.
+	// This is the format output by: openssl pkey -in private.pem -outform DER | base64
+	PrivateKeyBase64 string
 
 	// HTTPClient is an optional custom HTTP client.
 	// If nil, a default client with 30s timeout is used.
@@ -84,8 +88,21 @@ func NewClient(cfg Config) (*Client, error) {
 			return nil, fmt.Errorf("invalid private key length: expected %d or %d bytes, got %d",
 				ed25519.SeedSize, ed25519.PrivateKeySize, len(keyBytes))
 		}
+	} else if cfg.PrivateKeyBase64 != "" {
+		derBytes, err := base64.StdEncoding.DecodeString(cfg.PrivateKeyBase64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid PrivateKeyBase64: %w", err)
+		}
+		// Ed25519 private key DER format: header + 32-byte seed
+		// Extract the last 32 bytes as seed
+		if len(derBytes) < ed25519.SeedSize {
+			return nil, fmt.Errorf("invalid base64 private key length: got %d bytes, need at least %d",
+				len(derBytes), ed25519.SeedSize)
+		}
+		seed := derBytes[len(derBytes)-ed25519.SeedSize:]
+		privateKey = ed25519.NewKeyFromSeed(seed)
 	} else {
-		return nil, fmt.Errorf("either PrivateKey or PrivateKeyHex is required")
+		return nil, fmt.Errorf("either PrivateKey, PrivateKeyHex, or PrivateKeyBase64 is required")
 	}
 
 	httpClient := cfg.HTTPClient

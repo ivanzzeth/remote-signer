@@ -2,13 +2,31 @@ package storage
 
 import (
 	"fmt"
+	"strings"
 
 	"gorm.io/driver/postgres"
+	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
+
+// detectDialector returns the appropriate GORM dialector based on DSN format
+func detectDialector(dsn string) (gorm.Dialector, error) {
+	// SQLite: starts with "file:" or ends with ".db"
+	if strings.HasPrefix(dsn, "file:") || strings.HasSuffix(dsn, ".db") {
+		return sqlite.Open(dsn), nil
+	}
+
+	// PostgreSQL: starts with "postgres://" or "postgresql://"
+	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
+		return postgres.Open(dsn), nil
+	}
+
+	// Default: try PostgreSQL for backward compatibility
+	return postgres.Open(dsn), nil
+}
 
 // Config holds database configuration
 type Config struct {
@@ -21,7 +39,12 @@ func NewDB(cfg Config) (*gorm.DB, error) {
 		return nil, fmt.Errorf("database DSN is required")
 	}
 
-	db, err := gorm.Open(postgres.Open(cfg.DSN), &gorm.Config{
+	dialector, err := detectDialector(cfg.DSN)
+	if err != nil {
+		return nil, fmt.Errorf("failed to detect database type: %w", err)
+	}
+
+	db, err := gorm.Open(dialector, &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
@@ -51,7 +74,12 @@ func NewDBWithLogger(cfg Config, logLevel logger.LogLevel) (*gorm.DB, error) {
 		return nil, fmt.Errorf("database DSN is required")
 	}
 
-	db, err := gorm.Open(postgres.Open(cfg.DSN), &gorm.Config{
+	dialector, err := detectDialector(cfg.DSN)
+	if err != nil {
+		return nil, fmt.Errorf("failed to detect database type: %w", err)
+	}
+
+	db, err := gorm.Open(dialector, &gorm.Config{
 		Logger: logger.Default.LogMode(logLevel),
 	})
 	if err != nil {

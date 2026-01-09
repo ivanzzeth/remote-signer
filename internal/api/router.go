@@ -10,6 +10,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/core/auth"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
+	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
 // RouterConfig contains configuration for the router
@@ -22,6 +23,8 @@ type Router struct {
 	mux          *http.ServeMux
 	authVerifier *auth.Verifier
 	signService  *service.SignService
+	ruleRepo     storage.RuleRepository
+	auditRepo    storage.AuditRepository
 	rateLimiter  *middleware.RateLimiter
 	logger       *slog.Logger
 	config       RouterConfig
@@ -31,6 +34,8 @@ type Router struct {
 func NewRouter(
 	authVerifier *auth.Verifier,
 	signService *service.SignService,
+	ruleRepo storage.RuleRepository,
+	auditRepo storage.AuditRepository,
 	logger *slog.Logger,
 	config RouterConfig,
 ) (*Router, error) {
@@ -38,6 +43,8 @@ func NewRouter(
 		mux:          http.NewServeMux(),
 		authVerifier: authVerifier,
 		signService:  signService,
+		ruleRepo:     ruleRepo,
+		auditRepo:    auditRepo,
 		rateLimiter:  middleware.NewRateLimiter(logger),
 		logger:       logger,
 		config:       config,
@@ -81,13 +88,24 @@ func (r *Router) setupRoutes() error {
 		return err
 	}
 
+	ruleHandler, err := evm.NewRuleHandler(r.ruleRepo, r.logger)
+	if err != nil {
+		return err
+	}
+
+	// Audit handler
+	auditHandler, err := handler.NewAuditHandler(r.auditRepo, r.logger)
+	if err != nil {
+		return err
+	}
+
 	// EVM routes (with auth)
 	r.mux.Handle("/api/v1/evm/sign", r.withAuth(signHandler))
 	r.mux.Handle("/api/v1/evm/requests", r.withAuth(listHandler))
 	r.mux.Handle("/api/v1/evm/requests/", r.withAuth(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		// Route to approval handler if path ends with /approve
+		// Route to approval handler if path ends with /approve (admin only)
 		if strings.HasSuffix(req.URL.Path, "/approve") {
-			approvalHandler.ServeHTTP(w, req)
+			r.requireAdmin(approvalHandler).ServeHTTP(w, req)
 			return
 		}
 		// Route to preview-rule handler if path ends with /preview-rule
@@ -99,6 +117,13 @@ func (r *Router) setupRoutes() error {
 		requestHandler.ServeHTTP(w, req)
 	})))
 
+	// Rule management routes (with auth + admin required for all operations)
+	r.mux.Handle("/api/v1/evm/rules", r.withAuthAndAdmin(ruleHandler))
+	r.mux.Handle("/api/v1/evm/rules/", r.withAuthAndAdmin(ruleHandler))
+
+	// Audit routes (with auth)
+	r.mux.Handle("/api/v1/audit", r.withAuth(auditHandler))
+
 	return nil
 }
 
@@ -109,6 +134,23 @@ func (r *Router) withAuth(h http.Handler) http.Handler {
 		middleware.RecoveryMiddleware(r.logger),
 		middleware.LoggingMiddleware(r.logger),
 		middleware.AuthMiddleware(r.authVerifier, r.logger),
+		middleware.RateLimitMiddleware(r.rateLimiter),
+	)
+}
+
+// requireAdmin wraps a handler with admin middleware (must be used after auth)
+func (r *Router) requireAdmin(h http.Handler) http.Handler {
+	return middleware.AdminMiddleware(r.logger)(h)
+}
+
+// withAuthAndAdmin wraps a handler with authentication and admin middleware
+func (r *Router) withAuthAndAdmin(h http.Handler) http.Handler {
+	return r.chain(
+		h,
+		middleware.RecoveryMiddleware(r.logger),
+		middleware.LoggingMiddleware(r.logger),
+		middleware.AuthMiddleware(r.authVerifier, r.logger),
+		middleware.AdminMiddleware(r.logger),
 		middleware.RateLimitMiddleware(r.rateLimiter),
 	)
 }

@@ -5,6 +5,7 @@ package e2e
 import (
 	"context"
 	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"math/big"
@@ -21,6 +22,28 @@ import (
 	"github.com/ivanzzeth/remote-signer/pkg/client"
 )
 
+// Environment variables for external server mode:
+//
+// E2E_EXTERNAL_SERVER  - Set to "true" or "1" to use an external server instead of starting one
+// E2E_BASE_URL         - Base URL of the external server (default: http://localhost:8548)
+// E2E_SIGNER_ADDRESS   - Signer address to use for tests (default: 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266)
+// E2E_CHAIN_ID         - Chain ID to use for tests (default: 1)
+//
+// Admin API key (required for external server mode):
+// E2E_API_KEY_ID       - Admin API key ID
+// E2E_PRIVATE_KEY      - Admin Ed25519 private key (hex or base64, auto-detected)
+//
+// Non-admin API key (optional):
+// E2E_NONADMIN_API_KEY_ID   - Non-admin API key ID
+// E2E_NONADMIN_PRIVATE_KEY  - Non-admin Ed25519 private key (hex or base64, auto-detected)
+//
+// Example usage with external server:
+//   E2E_EXTERNAL_SERVER=true \
+//   E2E_BASE_URL=http://localhost:8548 \
+//   E2E_API_KEY_ID=my-admin-key \
+//   E2E_PRIVATE_KEY=<ed25519-private-key-hex-or-base64> \
+//   go test -tags=e2e ./e2e/...
+
 const (
 	// Well-known test private key (Hardhat/Foundry first account)
 	// Address: 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
@@ -30,78 +53,261 @@ const (
 
 	// Default API port for e2e tests
 	defaultAPIPort = 8548
+
+	// Treasury address from example config (whitelisted in "Allow transfers to treasury" rule)
+	treasuryAddress = "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+
+	// Burn address (blocked by "Block known malicious addresses" rule)
+	burnAddress = "0x000000000000000000000000000000000000dEaD"
 )
 
 var (
-	testServer    *TestServer
-	testClient    *client.Client
-	testAPIKeyID  string
-	testAPIKeyHex string
+	testServer *TestServer
+
+	// Admin client (can manage rules, approve requests)
+	adminClient    *client.Client
+	adminAPIKeyID  string
+	adminAPIKeyHex string
+
+	// Non-admin client (can only submit sign requests)
+	nonAdminClient    *client.Client
+	nonAdminAPIKeyID  string
+	nonAdminAPIKeyHex string
+
+	// External server mode flag
+	useExternalServer bool
+
+	// Configurable test parameters
+	signerAddress string
+	chainID       string
 )
 
 func TestMain(m *testing.M) {
-	// Get port from environment or use default
-	port := defaultAPIPort
-	if portStr := os.Getenv("E2E_API_PORT"); portStr != "" {
-		// Parse port if needed
-		port = defaultAPIPort
+	// Check if using external server
+	extServer := os.Getenv("E2E_EXTERNAL_SERVER")
+	useExternalServer = extServer == "true" || extServer == "1"
+
+	// Set default test parameters
+	signerAddress = testSignerAddress
+	chainID = testChainID
+
+	// Override from environment if set
+	if addr := os.Getenv("E2E_SIGNER_ADDRESS"); addr != "" {
+		signerAddress = addr
+	}
+	if cid := os.Getenv("E2E_CHAIN_ID"); cid != "" {
+		chainID = cid
 	}
 
-	// Generate Ed25519 API key for tests
-	pubKey, privKey, err := ed25519.GenerateKey(nil)
-	if err != nil {
-		panic("failed to generate API key: " + err.Error())
-	}
-	testAPIKeyID = "test-api-key-e2e"
-	testAPIKeyHex = hex.EncodeToString(privKey)
+	var baseURL string
+	var err error
 
-	// Start test server
-	testServer, err = NewTestServer(TestServerConfig{
-		Port:             port,
-		SignerPrivateKey: testSignerPrivateKey,
-		SignerAddress:    testSignerAddress,
-		APIKeyID:         testAPIKeyID,
-		APIKeyPublicKey:  pubKey,
+	if useExternalServer {
+		// External server mode: use environment variables for configuration
+		baseURL = os.Getenv("E2E_BASE_URL")
+		if baseURL == "" {
+			baseURL = fmt.Sprintf("http://localhost:%d", defaultAPIPort)
+		}
+
+		// Admin API key from environment (required)
+		adminAPIKeyID = os.Getenv("E2E_API_KEY_ID")
+		adminPrivKey := os.Getenv("E2E_PRIVATE_KEY")
+		if adminAPIKeyID == "" || adminPrivKey == "" {
+			panic("E2E_API_KEY_ID and E2E_PRIVATE_KEY are required for external server mode")
+		}
+
+		// Convert admin private key to hex (supports both hex and base64)
+		var convertErr error
+		adminAPIKeyHex, convertErr = convertPrivateKeyToHex(adminPrivKey)
+		if convertErr != nil {
+			panic("failed to convert admin private key: " + convertErr.Error())
+		}
+
+		// Non-admin API key from environment (optional)
+		nonAdminAPIKeyID = os.Getenv("E2E_NONADMIN_API_KEY_ID")
+		nonAdminPrivKey := os.Getenv("E2E_NONADMIN_PRIVATE_KEY")
+		if nonAdminPrivKey != "" {
+			nonAdminAPIKeyHex, convertErr = convertPrivateKeyToHex(nonAdminPrivKey)
+			if convertErr != nil {
+				panic("failed to convert non-admin private key: " + convertErr.Error())
+			}
+		}
+
+		fmt.Printf("E2E: Using external server at %s\n", baseURL)
+		fmt.Printf("E2E: Signer address: %s, Chain ID: %s\n", signerAddress, chainID)
+	} else {
+		// Internal server mode: start test server with generated keys
+		port := defaultAPIPort
+		if portStr := os.Getenv("E2E_API_PORT"); portStr != "" {
+			// Parse port if needed
+			port = defaultAPIPort
+		}
+
+		// Generate Ed25519 API key for admin
+		adminPubKey, adminPrivKey, err := ed25519.GenerateKey(nil)
+		if err != nil {
+			panic("failed to generate admin API key: " + err.Error())
+		}
+		adminAPIKeyID = "test-admin-key-e2e"
+		adminAPIKeyHex = hex.EncodeToString(adminPrivKey)
+
+		// Generate Ed25519 API key for non-admin
+		nonAdminPubKey, nonAdminPrivKey, err := ed25519.GenerateKey(nil)
+		if err != nil {
+			panic("failed to generate non-admin API key: " + err.Error())
+		}
+		nonAdminAPIKeyID = "test-nonadmin-key-e2e"
+		nonAdminAPIKeyHex = hex.EncodeToString(nonAdminPrivKey)
+
+		// Start test server
+		testServer, err = NewTestServer(TestServerConfig{
+			Port:                    port,
+			SignerPrivateKey:        testSignerPrivateKey,
+			SignerAddress:           testSignerAddress,
+			APIKeyID:                adminAPIKeyID,
+			APIKeyPublicKey:         adminPubKey,
+			NonAdminAPIKeyID:        nonAdminAPIKeyID,
+			NonAdminAPIKeyPublicKey: nonAdminPubKey,
+		})
+		if err != nil {
+			panic("failed to create test server: " + err.Error())
+		}
+
+		if err := testServer.Start(); err != nil {
+			panic("failed to start test server: " + err.Error())
+		}
+
+		baseURL = testServer.BaseURL()
+	}
+
+	// Set poll interval based on mode:
+	// - Internal mode: 100ms for fast testing
+	// - External mode: 1 second to avoid flooding the server
+	pollInterval := 100 * time.Millisecond
+	pollTimeout := 5 * time.Second
+	if useExternalServer {
+		pollInterval = 1 * time.Second
+		pollTimeout = 30 * time.Second
+	}
+
+	// Create admin client
+	adminClient, err = client.NewClient(client.Config{
+		BaseURL:       baseURL,
+		APIKeyID:      adminAPIKeyID,
+		PrivateKeyHex: adminAPIKeyHex,
+		PollInterval:  pollInterval,
+		PollTimeout:   pollTimeout,
 	})
 	if err != nil {
-		panic("failed to create test server: " + err.Error())
+		if testServer != nil {
+			testServer.Stop()
+		}
+		panic("failed to create admin client: " + err.Error())
 	}
 
-	if err := testServer.Start(); err != nil {
-		panic("failed to start test server: " + err.Error())
-	}
-
-	// Create test client
-	testClient, err = client.NewClient(client.Config{
-		BaseURL:       testServer.BaseURL(),
-		APIKeyID:      testAPIKeyID,
-		PrivateKeyHex: testAPIKeyHex,
-		PollInterval:  100 * time.Millisecond,
-		PollTimeout:   5 * time.Second,
-	})
-	if err != nil {
-		testServer.Stop()
-		panic("failed to create test client: " + err.Error())
+	// Create non-admin client (only if credentials are provided)
+	if nonAdminAPIKeyID != "" && nonAdminAPIKeyHex != "" {
+		nonAdminClient, err = client.NewClient(client.Config{
+			BaseURL:       baseURL,
+			APIKeyID:      nonAdminAPIKeyID,
+			PrivateKeyHex: nonAdminAPIKeyHex,
+			PollInterval:  pollInterval,
+			PollTimeout:   pollTimeout,
+		})
+		if err != nil {
+			if testServer != nil {
+				testServer.Stop()
+			}
+			panic("failed to create non-admin client: " + err.Error())
+		}
 	}
 
 	// Run tests
 	code := m.Run()
 
-	// Cleanup
-	testServer.Stop()
+	// Cleanup (only if we started the server)
+	if testServer != nil {
+		testServer.Stop()
+	}
 
 	os.Exit(code)
 }
 
+// =============================================================================
+// Health Check Tests
+// =============================================================================
+
 func TestHealthCheck(t *testing.T) {
-	health, err := testClient.Health(context.Background())
+	health, err := adminClient.Health(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, "ok", health.Status)
 }
 
-func TestPersonalSign(t *testing.T) {
-	address := common.HexToAddress(testSignerAddress)
-	signer := testClient.GetSigner(address, testChainID)
+// =============================================================================
+// Authentication Tests
+// =============================================================================
+
+func TestAuth_AdminCanAccessAdminEndpoints(t *testing.T) {
+	ctx := context.Background()
+
+	// Admin should be able to list rules
+	rules, err := adminClient.ListRules(ctx, nil)
+	require.NoError(t, err)
+	assert.NotNil(t, rules)
+}
+
+func TestAuth_NonAdminCannotAccessAdminEndpoints(t *testing.T) {
+	if nonAdminClient == nil {
+		t.Skip("Skipping: non-admin client not configured")
+	}
+
+	ctx := context.Background()
+
+	// Non-admin should NOT be able to list rules
+	_, err := nonAdminClient.ListRules(ctx, nil)
+	require.Error(t, err)
+
+	// Should be a 403 Forbidden error
+	apiErr, ok := err.(*client.APIError)
+	require.True(t, ok, "expected APIError, got %T", err)
+	assert.Equal(t, 403, apiErr.StatusCode)
+}
+
+func TestAuth_NonAdminCanSubmitSignRequest(t *testing.T) {
+	if nonAdminClient == nil {
+		t.Skip("Skipping: non-admin client not configured")
+	}
+
+	// Non-admin should be able to submit sign requests
+	// With Example 8 (signer_restriction) and Example 9 (sign_type_restriction), personal_sign is auto-approved
+	address := common.HexToAddress(signerAddress)
+	signer := nonAdminClient.GetSigner(address, chainID)
+
+	sig, err := signer.PersonalSign("Hello from non-admin!")
+	require.NoError(t, err)
+	assert.Len(t, sig, 65)
+}
+
+func TestAuth_AdminCanSubmitSignRequest(t *testing.T) {
+	// Admin should also be able to submit sign requests
+	// With Example 8 (signer_restriction) and Example 9 (sign_type_restriction), personal_sign is auto-approved
+	address := common.HexToAddress(signerAddress)
+	signer := adminClient.GetSigner(address, chainID)
+
+	sig, err := signer.PersonalSign("Hello from admin!")
+	require.NoError(t, err)
+	assert.Len(t, sig, 65)
+}
+
+// =============================================================================
+// Sign Request Tests (using admin client for simplicity)
+// =============================================================================
+
+func TestSign_PersonalSign(t *testing.T) {
+	// With Example 8 (signer_restriction) and Example 9 (sign_type_restriction),
+	// personal_sign is auto-approved for the test signer
+	address := common.HexToAddress(signerAddress)
+	signer := adminClient.GetSigner(address, chainID)
 
 	message := "Hello, Remote Signer!"
 	sig, err := signer.PersonalSign(message)
@@ -115,9 +321,11 @@ func TestPersonalSign(t *testing.T) {
 	assert.Equal(t, address, signer.GetAddress())
 }
 
-func TestSignHash(t *testing.T) {
-	address := common.HexToAddress(testSignerAddress)
-	signer := testClient.GetSigner(address, testChainID)
+func TestSign_Hash(t *testing.T) {
+	// With Example 8 (signer_restriction) and Example 9 (sign_type_restriction),
+	// hash signing is auto-approved for the test signer
+	address := common.HexToAddress(signerAddress)
+	signer := adminClient.GetSigner(address, chainID)
 
 	hash := common.HexToHash("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
 	sig, err := signer.SignHash(hash)
@@ -128,9 +336,11 @@ func TestSignHash(t *testing.T) {
 	assert.Len(t, sig, 65)
 }
 
-func TestSignRawMessage(t *testing.T) {
-	address := common.HexToAddress(testSignerAddress)
-	signer := testClient.GetSigner(address, testChainID)
+func TestSign_RawMessage(t *testing.T) {
+	// With Example 8 (signer_restriction) and Example 9 (sign_type_restriction),
+	// raw_message signing is auto-approved for the test signer
+	address := common.HexToAddress(signerAddress)
+	signer := adminClient.GetSigner(address, chainID)
 
 	rawMessage := []byte("raw message bytes")
 	sig, err := signer.SignRawMessage(rawMessage)
@@ -140,16 +350,13 @@ func TestSignRawMessage(t *testing.T) {
 	assert.Len(t, sig, 65)
 }
 
-func TestSignEIP191Message(t *testing.T) {
-	address := common.HexToAddress(testSignerAddress)
-	signer := testClient.GetSigner(address, testChainID)
+func TestSign_EIP191Message(t *testing.T) {
+	// With Example 8 (signer_restriction) and Example 9 (sign_type_restriction),
+	// eip191 signing is auto-approved for the test signer
+	address := common.HexToAddress(signerAddress)
+	signer := adminClient.GetSigner(address, chainID)
 
-	// EIP-191 format: 0x19 + version byte + version-specific data
-	// Version 0x45 is 'E' which is for Ethereum Signed Message (personal_sign)
-	// The message must include the full EIP-191 format: "\x19Ethereum Signed Message:\n" + len + message
-	// Since ethsig expects this format, we construct it properly
 	rawMessage := "Hello, EIP-191!"
-	// Format: 0x19 + "Ethereum Signed Message:\n" + len(message as string) + message
 	eip191Message := fmt.Sprintf("\x19Ethereum Signed Message:\n%d%s", len(rawMessage), rawMessage)
 
 	sig, err := signer.SignEIP191Message(eip191Message)
@@ -159,9 +366,11 @@ func TestSignEIP191Message(t *testing.T) {
 	assert.Len(t, sig, 65)
 }
 
-func TestSignTypedData(t *testing.T) {
-	address := common.HexToAddress(testSignerAddress)
-	signer := testClient.GetSigner(address, testChainID)
+func TestSign_TypedData(t *testing.T) {
+	// With Example 8 (signer_restriction) and Example 9 (sign_type_restriction),
+	// typed_data signing is auto-approved for the test signer
+	address := common.HexToAddress(signerAddress)
+	signer := adminClient.GetSigner(address, chainID)
 
 	typedData := eip712.TypedData{
 		Types: eip712.Types{
@@ -198,22 +407,24 @@ func TestSignTypedData(t *testing.T) {
 	assert.Len(t, sig, 65)
 }
 
-func TestSignTransaction(t *testing.T) {
-	address := common.HexToAddress(testSignerAddress)
-	signer := testClient.GetSigner(address, testChainID)
+func TestSign_LegacyTransaction(t *testing.T) {
+	address := common.HexToAddress(signerAddress)
+	signer := adminClient.GetSigner(address, chainID)
 
-	to := common.HexToAddress("0x70997970C51812dc3A010C7d01b50e0d17dc79C8")
+	// Send to treasury address (whitelisted in example config "Allow transfers to treasury" rule)
+	// with value <= 1 ETH (within "Max 1 ETH transfer with address check" rule)
+	to := common.HexToAddress(treasuryAddress)
 	tx := types.NewTx(&types.LegacyTx{
 		Nonce:    0,
 		GasPrice: big.NewInt(20000000000), // 20 gwei
 		Gas:      21000,
 		To:       &to,
-		Value:    big.NewInt(1000000000000000000), // 1 ETH
+		Value:    big.NewInt(500000000000000000), // 0.5 ETH (within 1 ETH limit)
 		Data:     nil,
 	})
 
-	chainID := big.NewInt(1)
-	signedTx, err := signer.SignTransactionWithChainID(tx, chainID)
+	chainIDBig := big.NewInt(1)
+	signedTx, err := signer.SignTransactionWithChainID(tx, chainIDBig)
 	require.NoError(t, err)
 	require.NotNil(t, signedTx)
 
@@ -224,25 +435,26 @@ func TestSignTransaction(t *testing.T) {
 	assert.NotNil(t, s)
 }
 
-func TestSignEIP1559Transaction(t *testing.T) {
-	address := common.HexToAddress(testSignerAddress)
-	signer := testClient.GetSigner(address, testChainID)
+func TestSign_EIP1559Transaction(t *testing.T) {
+	address := common.HexToAddress(signerAddress)
+	signer := adminClient.GetSigner(address, chainID)
 
-	to := common.HexToAddress("0x70997970C51812dc3A010C7d01b50e0d17dc79C8")
-	chainID := big.NewInt(1)
+	// Send to treasury address (whitelisted in example config)
+	to := common.HexToAddress(treasuryAddress)
+	chainIDBig := big.NewInt(1)
 
 	tx := types.NewTx(&types.DynamicFeeTx{
-		ChainID:   chainID,
+		ChainID:   chainIDBig,
 		Nonce:     1,
 		GasTipCap: big.NewInt(1000000000),  // 1 gwei
 		GasFeeCap: big.NewInt(20000000000), // 20 gwei
 		Gas:       21000,
 		To:        &to,
-		Value:     big.NewInt(500000000000000000), // 0.5 ETH
+		Value:     big.NewInt(500000000000000000), // 0.5 ETH (within limit)
 		Data:      nil,
 	})
 
-	signedTx, err := signer.SignTransactionWithChainID(tx, chainID)
+	signedTx, err := signer.SignTransactionWithChainID(tx, chainIDBig)
 	require.NoError(t, err)
 	require.NotNil(t, signedTx)
 
@@ -253,17 +465,18 @@ func TestSignEIP1559Transaction(t *testing.T) {
 	assert.NotNil(t, s)
 }
 
-func TestSignerNotFound(t *testing.T) {
+func TestSign_SignerNotFound(t *testing.T) {
 	unknownAddress := common.HexToAddress("0x0000000000000000000000000000000000000001")
-	signer := testClient.GetSigner(unknownAddress, testChainID)
+	signer := adminClient.GetSigner(unknownAddress, testChainID)
 
 	_, err := signer.PersonalSign("test message")
 	require.Error(t, err)
 }
 
-func TestContextCancellation(t *testing.T) {
-	address := common.HexToAddress(testSignerAddress)
-	signer := testClient.GetSigner(address, testChainID)
+func TestSign_ContextCancellation(t *testing.T) {
+	// Test context cancellation behavior
+	address := common.HexToAddress(signerAddress)
+	signer := adminClient.GetSigner(address, chainID)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
@@ -272,12 +485,13 @@ func TestContextCancellation(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestMultipleSignRequests(t *testing.T) {
-	address := common.HexToAddress(testSignerAddress)
-	signer := testClient.GetSigner(address, testChainID)
+func TestSign_MultipleRequests(t *testing.T) {
+	// With Example 8 (signer_restriction) and Example 9 (sign_type_restriction),
+	// personal_sign is auto-approved for the test signer
+	address := common.HexToAddress(signerAddress)
+	signer := adminClient.GetSigner(address, chainID)
 
 	// Sign multiple messages sequentially
-	// Note: Concurrent signing works with PostgreSQL but SQLite has locking issues
 	messages := []string{
 		"Message 1",
 		"Message 2",
@@ -291,17 +505,697 @@ func TestMultipleSignRequests(t *testing.T) {
 	}
 }
 
-func TestDirectSignAPI(t *testing.T) {
+func TestSign_DirectSignAPI(t *testing.T) {
+	// With Example 8 (signer_restriction) and Example 9 (sign_type_restriction),
+	// personal_sign is auto-approved for the test signer
 	ctx := context.Background()
 
 	// Test direct Sign API call
-	resp, err := testClient.Sign(ctx, &client.SignRequest{
-		ChainID:       testChainID,
-		SignerAddress: testSignerAddress,
+	resp, err := adminClient.Sign(ctx, &client.SignRequest{
+		ChainID:       chainID,
+		SignerAddress: signerAddress,
 		SignType:      client.SignTypePersonal,
 		Payload:       []byte(`{"message":"Direct API test"}`),
 	})
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	require.NotEmpty(t, resp.Signature)
+}
+
+// =============================================================================
+// Rule Management Tests (Admin Only)
+// =============================================================================
+
+func TestRule_AdminCanCreateRule(t *testing.T) {
+	ctx := context.Background()
+
+	rule := &client.CreateRuleRequest{
+		Name:    "Test Rule - Address Whitelist",
+		Type:    "evm_address_list",
+		Mode:    "whitelist",
+		Enabled: true,
+		Config: map[string]interface{}{
+			"addresses": []string{
+				"0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+				"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+			},
+		},
+	}
+
+	created, err := adminClient.CreateRule(ctx, rule)
+	require.NoError(t, err)
+	require.NotNil(t, created)
+	assert.Equal(t, rule.Name, created.Name)
+	assert.Equal(t, rule.Type, created.Type)
+	assert.True(t, created.Enabled)
+
+	// Cleanup
+	err = adminClient.DeleteRule(ctx, created.ID)
+	require.NoError(t, err)
+}
+
+func TestRule_AdminCanListRules(t *testing.T) {
+	ctx := context.Background()
+
+	resp, err := adminClient.ListRules(ctx, nil)
+	require.NoError(t, err)
+	assert.NotNil(t, resp)
+	// Should have at least the auto-approve rule created by test server
+	assert.GreaterOrEqual(t, len(resp.Rules), 1)
+}
+
+func TestRule_AdminCanGetRule(t *testing.T) {
+	ctx := context.Background()
+
+	// First create a rule
+	createReq := &client.CreateRuleRequest{
+		Name:    "Test Rule - Get",
+		Type:    "evm_value_limit",
+		Mode:    "whitelist",
+		Enabled: true,
+		Config: map[string]interface{}{
+			"max_value": "1000000000000000000", // 1 ETH
+		},
+	}
+
+	created, err := adminClient.CreateRule(ctx, createReq)
+	require.NoError(t, err)
+
+	// Get the rule
+	rule, err := adminClient.GetRule(ctx, created.ID)
+	require.NoError(t, err)
+	assert.Equal(t, created.ID, rule.ID)
+	assert.Equal(t, created.Name, rule.Name)
+
+	// Cleanup
+	err = adminClient.DeleteRule(ctx, created.ID)
+	require.NoError(t, err)
+}
+
+func TestRule_AdminCanUpdateRule(t *testing.T) {
+	ctx := context.Background()
+
+	// First create a rule
+	createReq := &client.CreateRuleRequest{
+		Name:    "Test Rule - Update Original",
+		Type:    "evm_value_limit",
+		Mode:    "whitelist",
+		Enabled: true,
+		Config: map[string]interface{}{
+			"max_value": "1000000000000000000",
+		},
+	}
+
+	created, err := adminClient.CreateRule(ctx, createReq)
+	require.NoError(t, err)
+
+	// Update the rule
+	updateReq := &client.UpdateRuleRequest{
+		Name:    "Test Rule - Update Modified",
+		Enabled: false, // Disable it
+	}
+
+	updated, err := adminClient.UpdateRule(ctx, created.ID, updateReq)
+	require.NoError(t, err)
+	assert.Equal(t, "Test Rule - Update Modified", updated.Name)
+	assert.False(t, updated.Enabled)
+
+	// Cleanup
+	err = adminClient.DeleteRule(ctx, created.ID)
+	require.NoError(t, err)
+}
+
+func TestRule_AdminCanDeleteRule(t *testing.T) {
+	ctx := context.Background()
+
+	// First create a rule
+	createReq := &client.CreateRuleRequest{
+		Name:    "Test Rule - Delete",
+		Type:    "evm_value_limit",
+		Mode:    "whitelist",
+		Enabled: true,
+		Config: map[string]interface{}{
+			"max_value": "1000000000000000000",
+		},
+	}
+
+	created, err := adminClient.CreateRule(ctx, createReq)
+	require.NoError(t, err)
+
+	// Delete the rule
+	err = adminClient.DeleteRule(ctx, created.ID)
+	require.NoError(t, err)
+
+	// Verify it's deleted
+	_, err = adminClient.GetRule(ctx, created.ID)
+	require.Error(t, err)
+}
+
+func TestRule_AdminCanDisableRule(t *testing.T) {
+	ctx := context.Background()
+
+	// First create an enabled rule
+	createReq := &client.CreateRuleRequest{
+		Name:    "Test Rule - Disable",
+		Type:    "evm_value_limit",
+		Mode:    "whitelist",
+		Enabled: true,
+		Config: map[string]interface{}{
+			"max_value": "1000000000000000000",
+		},
+	}
+
+	created, err := adminClient.CreateRule(ctx, createReq)
+	require.NoError(t, err)
+	assert.True(t, created.Enabled)
+
+	// Disable the rule
+	updateReq := &client.UpdateRuleRequest{
+		Enabled: false,
+	}
+	updated, err := adminClient.UpdateRule(ctx, created.ID, updateReq)
+	require.NoError(t, err)
+	assert.False(t, updated.Enabled)
+
+	// Re-enable the rule
+	updateReq.Enabled = true
+	updated, err = adminClient.UpdateRule(ctx, created.ID, updateReq)
+	require.NoError(t, err)
+	assert.True(t, updated.Enabled)
+
+	// Cleanup
+	err = adminClient.DeleteRule(ctx, created.ID)
+	require.NoError(t, err)
+}
+
+func TestRule_NonAdminCannotCreateRule(t *testing.T) {
+	if nonAdminClient == nil {
+		t.Skip("Skipping: non-admin client not configured")
+	}
+
+	ctx := context.Background()
+
+	rule := &client.CreateRuleRequest{
+		Name:    "Test Rule - Non-Admin Create",
+		Type:    "evm_value_limit",
+		Mode:    "whitelist",
+		Enabled: true,
+		Config: map[string]interface{}{
+			"max_value": "1000000000000000000",
+		},
+	}
+
+	_, err := nonAdminClient.CreateRule(ctx, rule)
+	require.Error(t, err)
+
+	apiErr, ok := err.(*client.APIError)
+	require.True(t, ok)
+	assert.Equal(t, 403, apiErr.StatusCode)
+}
+
+func TestRule_NonAdminCannotUpdateRule(t *testing.T) {
+	if nonAdminClient == nil {
+		t.Skip("Skipping: non-admin client not configured")
+	}
+
+	ctx := context.Background()
+
+	// First create a rule as admin
+	createReq := &client.CreateRuleRequest{
+		Name:    "Test Rule - Non-Admin Update",
+		Type:    "evm_value_limit",
+		Mode:    "whitelist",
+		Enabled: true,
+		Config: map[string]interface{}{
+			"max_value": "1000000000000000000",
+		},
+	}
+
+	created, err := adminClient.CreateRule(ctx, createReq)
+	require.NoError(t, err)
+
+	// Try to update as non-admin
+	updateReq := &client.UpdateRuleRequest{
+		Name: "Modified by non-admin",
+	}
+	_, err = nonAdminClient.UpdateRule(ctx, created.ID, updateReq)
+	require.Error(t, err)
+
+	apiErr, ok := err.(*client.APIError)
+	require.True(t, ok)
+	assert.Equal(t, 403, apiErr.StatusCode)
+
+	// Cleanup
+	err = adminClient.DeleteRule(ctx, created.ID)
+	require.NoError(t, err)
+}
+
+func TestRule_NonAdminCannotDeleteRule(t *testing.T) {
+	if nonAdminClient == nil {
+		t.Skip("Skipping: non-admin client not configured")
+	}
+
+	ctx := context.Background()
+
+	// First create a rule as admin
+	createReq := &client.CreateRuleRequest{
+		Name:    "Test Rule - Non-Admin Delete",
+		Type:    "evm_value_limit",
+		Mode:    "whitelist",
+		Enabled: true,
+		Config: map[string]interface{}{
+			"max_value": "1000000000000000000",
+		},
+	}
+
+	created, err := adminClient.CreateRule(ctx, createReq)
+	require.NoError(t, err)
+
+	// Try to delete as non-admin
+	err = nonAdminClient.DeleteRule(ctx, created.ID)
+	require.Error(t, err)
+
+	apiErr, ok := err.(*client.APIError)
+	require.True(t, ok)
+	assert.Equal(t, 403, apiErr.StatusCode)
+
+	// Cleanup
+	err = adminClient.DeleteRule(ctx, created.ID)
+	require.NoError(t, err)
+}
+
+func TestRule_NonAdminCannotListRules(t *testing.T) {
+	if nonAdminClient == nil {
+		t.Skip("Skipping: non-admin client not configured")
+	}
+
+	ctx := context.Background()
+
+	_, err := nonAdminClient.ListRules(ctx, nil)
+	require.Error(t, err)
+
+	apiErr, ok := err.(*client.APIError)
+	require.True(t, ok)
+	assert.Equal(t, 403, apiErr.StatusCode)
+}
+
+// =============================================================================
+// Rule Evaluation Tests (Sign requests with rules)
+// =============================================================================
+
+func TestRule_TransactionToTreasuryPasses(t *testing.T) {
+	// Test that transactions to treasury address (whitelisted) pass
+	// This verifies the "Allow transfers to treasury" rule in example config
+	address := common.HexToAddress(signerAddress)
+	signer := adminClient.GetSigner(address, chainID)
+
+	to := common.HexToAddress(treasuryAddress)
+	tx := types.NewTx(&types.LegacyTx{
+		Nonce:    100,
+		GasPrice: big.NewInt(20000000000),
+		Gas:      21000,
+		To:       &to,
+		Value:    big.NewInt(100000000000000000), // 0.1 ETH (within limit)
+		Data:     nil,
+	})
+
+	chainIDBig := big.NewInt(1)
+	signedTx, err := signer.SignTransactionWithChainID(tx, chainIDBig)
+	require.NoError(t, err, "Transaction to treasury address should pass whitelist rule")
+	require.NotNil(t, signedTx)
+
+	v, r, s := signedTx.RawSignatureValues()
+	assert.NotNil(t, v)
+	assert.NotNil(t, r)
+	assert.NotNil(t, s)
+}
+
+func TestRule_TransactionToBurnAddressBlocked(t *testing.T) {
+	// Test that transactions to burn address (0xdead) are blocked
+	// This verifies the "Block known malicious addresses" blocklist rule in example config
+	address := common.HexToAddress(signerAddress)
+	signer := adminClient.GetSigner(address, chainID)
+
+	to := common.HexToAddress(burnAddress)
+	tx := types.NewTx(&types.LegacyTx{
+		Nonce:    101,
+		GasPrice: big.NewInt(20000000000),
+		Gas:      21000,
+		To:       &to,
+		Value:    big.NewInt(100000000000000000), // 0.1 ETH
+		Data:     nil,
+	})
+
+	chainIDBig := big.NewInt(1)
+	_, err := signer.SignTransactionWithChainID(tx, chainIDBig)
+	// Should be blocked by the blocklist rule
+	require.Error(t, err, "Transaction to burn address should be blocked by blocklist rule")
+}
+
+func TestRule_SignRequestMatchesWhitelistRule(t *testing.T) {
+	// With Example 8 (signer_restriction) and Example 9 (sign_type_restriction),
+	// personal_sign is auto-approved for the test signer
+	address := common.HexToAddress(signerAddress)
+	signer := adminClient.GetSigner(address, chainID)
+
+	sig, err := signer.PersonalSign("This should match the whitelist rule")
+	require.NoError(t, err)
+	assert.Len(t, sig, 65)
+}
+
+func TestRule_ValueLimitRuleBlocks(t *testing.T) {
+	ctx := context.Background()
+
+	// Create a value limit rule that blocks high-value transactions
+	createReq := &client.CreateRuleRequest{
+		Name:    "Test Value Limit - Block High Value",
+		Type:    "evm_value_limit",
+		Mode:    "blocklist", // Blocklist mode - blocks if value exceeds limit
+		Enabled: true,
+		Config: map[string]interface{}{
+			"max_value": "100000000000000000", // 0.1 ETH - block if value > 0.1 ETH
+		},
+	}
+
+	created, err := adminClient.CreateRule(ctx, createReq)
+	require.NoError(t, err)
+
+	// Try to sign a transaction with value > 0.1 ETH to treasury (treasury is whitelisted)
+	address := common.HexToAddress(signerAddress)
+	signer := adminClient.GetSigner(address, chainID)
+
+	to := common.HexToAddress(treasuryAddress)
+	tx := types.NewTx(&types.LegacyTx{
+		Nonce:    10,
+		GasPrice: big.NewInt(20000000000),
+		Gas:      21000,
+		To:       &to,
+		Value:    big.NewInt(1000000000000000000), // 1 ETH - exceeds our test blocklist limit
+		Data:     nil,
+	})
+
+	chainIDBig := big.NewInt(1)
+	_, err = signer.SignTransactionWithChainID(tx, chainIDBig)
+	// The blocklist rule we created should block this (value > 0.1 ETH)
+	// Note: blocklist rules are evaluated before whitelist rules
+	require.Error(t, err, "Transaction exceeding value limit should be blocked")
+
+	// Cleanup
+	err = adminClient.DeleteRule(ctx, created.ID)
+	require.NoError(t, err)
+}
+
+func TestRule_SignerRestrictionAllowsTestSigner(t *testing.T) {
+	// Test that signer_restriction allows requests from whitelisted signer
+	// This verifies the "Allow hot wallet signer" rule (Example 8)
+	address := common.HexToAddress(signerAddress)
+	signer := adminClient.GetSigner(address, chainID)
+
+	// Personal sign should be allowed because:
+	// - Internal mode: e2e-test-rule (signer_restriction) allows test signer
+	// - External mode: "Allow hot wallet signer" rule allows test signer
+	sig, err := signer.PersonalSign("Test signer restriction allows test signer")
+	require.NoError(t, err, "Signer restriction should allow test signer")
+	assert.Len(t, sig, 65)
+}
+
+func TestRule_SignerRestrictionBlocksUnknownSigner(t *testing.T) {
+	// Test that requests from unknown signer are blocked/need approval
+	// Note: This test uses an unknown signer address that doesn't exist
+	unknownSigner := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	signer := adminClient.GetSigner(unknownSigner, chainID)
+
+	// This should fail because the signer doesn't exist in the registry
+	_, err := signer.PersonalSign("Test signer restriction blocks unknown signer")
+	require.Error(t, err, "Unknown signer should be rejected")
+}
+
+func TestRule_SignTypeRestrictionAllowsPersonalSign(t *testing.T) {
+	// Test that sign_type_restriction allows personal_sign
+	// This verifies the "Allow personal and typed_data signing" rule (Example 9)
+	address := common.HexToAddress(signerAddress)
+	signer := adminClient.GetSigner(address, chainID)
+
+	// Personal sign should be allowed because:
+	// - Internal mode: e2e-sign-type-rule allows "personal" type
+	// - External mode: "Allow personal and typed_data signing" allows "personal"
+	sig, err := signer.PersonalSign("Test sign type restriction allows personal_sign")
+	require.NoError(t, err, "Sign type restriction should allow personal_sign")
+	assert.Len(t, sig, 65)
+}
+
+func TestRule_SignTypeRestrictionAllowsTransaction(t *testing.T) {
+	// Test that sign_type_restriction allows transaction signing
+	address := common.HexToAddress(signerAddress)
+	signer := adminClient.GetSigner(address, chainID)
+
+	to := common.HexToAddress(treasuryAddress)
+	tx := types.NewTx(&types.LegacyTx{
+		Nonce:    102,
+		GasPrice: big.NewInt(20000000000),
+		Gas:      21000,
+		To:       &to,
+		Value:    big.NewInt(100000000000000000), // 0.1 ETH
+		Data:     nil,
+	})
+
+	chainIDBig := big.NewInt(1)
+	signedTx, err := signer.SignTransactionWithChainID(tx, chainIDBig)
+	require.NoError(t, err, "Sign type restriction should allow transaction signing")
+	require.NotNil(t, signedTx)
+}
+
+func TestRule_SignTypeRestrictionAllowsHashSign(t *testing.T) {
+	// Test that sign_type_restriction allows hash signing
+	address := common.HexToAddress(signerAddress)
+	signer := adminClient.GetSigner(address, chainID)
+
+	hash := common.HexToHash("0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890")
+	sig, err := signer.SignHash(hash)
+	require.NoError(t, err, "Sign type restriction should allow hash signing")
+	assert.Len(t, sig, 65)
+}
+
+func TestRule_CreateSignerRestrictionViaAPI(t *testing.T) {
+	// Test creating a signer_restriction rule via API
+	ctx := context.Background()
+
+	// Create a signer restriction rule
+	createReq := &client.CreateRuleRequest{
+		Name:    "Test Signer Restriction via API",
+		Type:    "signer_restriction",
+		Mode:    "whitelist",
+		Enabled: true,
+		Config: map[string]interface{}{
+			"allowed_signers": []string{signerAddress},
+		},
+	}
+
+	created, err := adminClient.CreateRule(ctx, createReq)
+	require.NoError(t, err)
+	assert.Equal(t, "signer_restriction", string(created.Type))
+	assert.Equal(t, "whitelist", string(created.Mode))
+
+	// Cleanup
+	err = adminClient.DeleteRule(ctx, created.ID)
+	require.NoError(t, err)
+}
+
+func TestRule_CreateSignTypeRestrictionViaAPI(t *testing.T) {
+	// Test creating a sign_type_restriction rule via API
+	ctx := context.Background()
+
+	// Create a sign type restriction rule
+	createReq := &client.CreateRuleRequest{
+		Name:    "Test Sign Type Restriction via API",
+		Type:    "sign_type_restriction",
+		Mode:    "whitelist",
+		Enabled: true,
+		Config: map[string]interface{}{
+			"allowed_sign_types": []string{"personal", "transaction"},
+		},
+	}
+
+	created, err := adminClient.CreateRule(ctx, createReq)
+	require.NoError(t, err)
+	assert.Equal(t, "sign_type_restriction", string(created.Type))
+	assert.Equal(t, "whitelist", string(created.Mode))
+
+	// Cleanup
+	err = adminClient.DeleteRule(ctx, created.ID)
+	require.NoError(t, err)
+}
+
+func TestRule_SignTypeRestrictionBlocksDisallowedType(t *testing.T) {
+	ctx := context.Background()
+
+	// Create a sign type restriction rule that ONLY allows transaction
+	// This simulates the "Transaction signing only" rule (Example 10)
+	createReq := &client.CreateRuleRequest{
+		Name:    "Test Sign Type Blocklist - Only Transaction",
+		Type:    "sign_type_restriction",
+		Mode:    "blocklist", // Blocklist mode: if sign type NOT in list, block
+		Enabled: true,
+		Config: map[string]interface{}{
+			"allowed_sign_types": []string{"personal"}, // Block personal sign
+		},
+	}
+
+	created, err := adminClient.CreateRule(ctx, createReq)
+	require.NoError(t, err)
+
+	// Cleanup with defer to ensure rule is deleted even if test fails
+	defer func() {
+		_ = adminClient.DeleteRule(ctx, created.ID)
+	}()
+
+	// Personal sign should be blocked by this blocklist rule
+	address := common.HexToAddress(signerAddress)
+	signer := adminClient.GetSigner(address, chainID)
+
+	_, err = signer.PersonalSign("This should be blocked")
+	// Should be blocked by blocklist rule
+	require.Error(t, err, "Personal sign should be blocked by sign_type_restriction blocklist")
+}
+
+// =============================================================================
+// Request List Tests
+// =============================================================================
+
+func TestRequest_ListRequests(t *testing.T) {
+	ctx := context.Background()
+
+	// First make a sign request (transaction to treasury to match whitelist)
+	address := common.HexToAddress(signerAddress)
+	signer := adminClient.GetSigner(address, chainID)
+
+	to := common.HexToAddress(treasuryAddress)
+	tx := types.NewTx(&types.LegacyTx{
+		Nonce:    200,
+		GasPrice: big.NewInt(20000000000),
+		Gas:      21000,
+		To:       &to,
+		Value:    big.NewInt(100000000000000000), // 0.1 ETH
+		Data:     nil,
+	})
+
+	chainIDBig := big.NewInt(1)
+	_, err := signer.SignTransactionWithChainID(tx, chainIDBig)
+	require.NoError(t, err)
+
+	// List requests
+	requests, err := adminClient.ListRequests(ctx, "", "", "", 10, 0)
+	require.NoError(t, err)
+	assert.NotNil(t, requests)
+	assert.GreaterOrEqual(t, len(requests.Requests), 1)
+}
+
+func TestRequest_GetRequest(t *testing.T) {
+	// With Example 8 (signer_restriction) and Example 9 (sign_type_restriction),
+	// personal_sign is auto-approved for the test signer
+	ctx := context.Background()
+
+	// Submit a sign request and get its ID
+	resp, err := adminClient.Sign(ctx, &client.SignRequest{
+		ChainID:       chainID,
+		SignerAddress: signerAddress,
+		SignType:      client.SignTypePersonal,
+		Payload:       []byte(`{"message":"Get request test"}`),
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, resp.RequestID)
+
+	// Get the request status
+	status, err := adminClient.GetRequest(ctx, resp.RequestID)
+	require.NoError(t, err)
+	assert.Equal(t, resp.RequestID, status.ID)
+	assert.Equal(t, "completed", status.Status)
+}
+
+// =============================================================================
+// Audit Tests
+// =============================================================================
+
+func TestAudit_ListAuditRecords(t *testing.T) {
+	ctx := context.Background()
+
+	// Make some requests first (transaction to treasury to match whitelist)
+	address := common.HexToAddress(signerAddress)
+	signer := adminClient.GetSigner(address, chainID)
+
+	to := common.HexToAddress(treasuryAddress)
+	tx := types.NewTx(&types.LegacyTx{
+		Nonce:    201,
+		GasPrice: big.NewInt(20000000000),
+		Gas:      21000,
+		To:       &to,
+		Value:    big.NewInt(100000000000000000), // 0.1 ETH
+		Data:     nil,
+	})
+
+	chainIDBig := big.NewInt(1)
+	_, _ = signer.SignTransactionWithChainID(tx, chainIDBig)
+
+	// List audit records
+	resp, err := adminClient.ListAuditRecords(ctx, &client.ListAuditFilter{
+		Limit: 10,
+	})
+	require.NoError(t, err)
+	assert.NotNil(t, resp)
+}
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+// isHexKey determines if a key string is hex-encoded (vs base64)
+func isHexKey(key string) bool {
+	// Hex private key should be 128 characters (64 bytes)
+	if len(key) == 128 {
+		for _, c := range key {
+			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+				return false
+			}
+		}
+		return true
+	}
+
+	// Otherwise, try to decode as base64 to see if it's valid
+	_, err := base64.StdEncoding.DecodeString(key)
+	return err != nil // If base64 decode fails, assume hex
+}
+
+// convertPrivateKeyToHex converts a private key from hex or base64 to hex format
+func convertPrivateKeyToHex(key string) (string, error) {
+	if isHexKey(key) {
+		return key, nil
+	}
+
+	// Try to decode as base64
+	derBytes, err := base64.StdEncoding.DecodeString(key)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode base64 key: %w", err)
+	}
+
+	// Ed25519 DER private key is 48 bytes: 16-byte header + 32-byte key
+	// Extract the last 32 bytes (the actual private key seed)
+	if len(derBytes) < 32 {
+		return "", fmt.Errorf("invalid key length: got %d bytes, need at least 32", len(derBytes))
+	}
+
+	// For Ed25519, the private key is 64 bytes (seed + public key)
+	// The DER format contains the 32-byte seed, we need to expand it
+	var privateKey ed25519.PrivateKey
+	if len(derBytes) >= 48 {
+		// PKCS#8 DER format: extract seed from header
+		seed := derBytes[len(derBytes)-32:]
+		privateKey = ed25519.NewKeyFromSeed(seed)
+	} else if len(derBytes) == 32 {
+		// Raw 32-byte seed
+		privateKey = ed25519.NewKeyFromSeed(derBytes)
+	} else {
+		return "", fmt.Errorf("unexpected key format: %d bytes", len(derBytes))
+	}
+
+	return hex.EncodeToString(privateKey), nil
 }

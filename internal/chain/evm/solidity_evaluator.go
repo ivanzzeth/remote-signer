@@ -270,28 +270,50 @@ func (e *SolidityRuleEvaluator) Evaluate(
 		return false, "", nil
 	}
 
+	var passed bool
+	var reason string
+	var err error
+
 	// Determine mode based on which field is populated
 	// Priority: TypedDataExpression/Functions > Functions > Expression
 
 	// EIP-712 Typed Data validation modes
 	if config.TypedDataExpression != "" || config.TypedDataFunctions != "" {
 		// Parse typed data from request payload
-		typedData, err := parseTypedDataFromPayload(req.Payload)
-		if err != nil {
-			return false, "", fmt.Errorf("failed to parse typed data: %w", err)
+		typedData, parseErr := parseTypedDataFromPayload(req.Payload)
+		if parseErr != nil {
+			return false, "", fmt.Errorf("failed to parse typed data: %w", parseErr)
 		}
 
 		if config.TypedDataExpression != "" {
-			return e.evaluateTypedDataExpression(ctx, config.TypedDataExpression, req, typedData)
+			passed, reason, err = e.evaluateTypedDataExpression(ctx, config.TypedDataExpression, req, typedData)
+		} else {
+			passed, reason, err = e.evaluateTypedDataFunctions(ctx, config.TypedDataFunctions, req, typedData)
 		}
-		return e.evaluateTypedDataFunctions(ctx, config.TypedDataFunctions, req, typedData)
+	} else if config.Functions != "" {
+		// Transaction validation with function mode
+		passed, reason, err = e.evaluateFunctions(ctx, config.Functions, req, parsed)
+	} else {
+		// Transaction validation with expression mode
+		passed, reason, err = e.evaluateExpression(ctx, config.Expression, req, parsed)
 	}
 
-	// Transaction validation modes
-	if config.Functions != "" {
-		return e.evaluateFunctions(ctx, config.Functions, req, parsed)
+	if err != nil {
+		return false, "", err
 	}
-	return e.evaluateExpression(ctx, config.Expression, req, parsed)
+
+	// For blocklist mode, invert the result:
+	// - require() passes (no violation) → return false (don't block)
+	// - require() reverts (violation) → return true (block) with revert reason
+	//
+	// For whitelist mode (default):
+	// - require() passes (matches whitelist) → return true (allow)
+	// - require() reverts (no match) → return false (need manual approval)
+	if rule.Mode == types.RuleModeBlocklist {
+		return !passed, reason, nil
+	}
+
+	return passed, reason, nil
 }
 
 // evaluateExpression evaluates a Solidity expression with the given context (Expression mode)

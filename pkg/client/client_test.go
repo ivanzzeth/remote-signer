@@ -80,7 +80,7 @@ func TestNewClient(t *testing.T) {
 				APIKeyID: "test-key",
 			},
 			wantErr: true,
-			errMsg:  "either PrivateKey or PrivateKeyHex is required",
+			errMsg:  "either PrivateKey, PrivateKeyHex, or PrivateKeyBase64 is required",
 		},
 		{
 			name: "invalid private key hex",

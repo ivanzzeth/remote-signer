@@ -11,6 +11,12 @@
 # Test binary, built with `go test -c`
 *.test
 
+# Compiled binaries (project-specific)
+/remote-signer
+/remote-signer-tui
+/cmd/remote-signer/remote-signer
+/cmd/tui/tui
+
 # Code coverage profiles and other test artifacts
 *.out
 coverage.*
@@ -30,3 +36,12 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Data directory - keep .gitkeep, ignore everything else (keys, keystores, etc.)
+data/*
+!data/.gitkeep
+
+config.yaml
+
+remote-signer.db
+*.pem

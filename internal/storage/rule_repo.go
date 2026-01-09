@@ -30,6 +30,7 @@ type RuleRepository interface {
 	Update(ctx context.Context, rule *types.Rule) error
 	Delete(ctx context.Context, id types.RuleID) error
 	List(ctx context.Context, filter RuleFilter) ([]*types.Rule, error)
+	Count(ctx context.Context, filter RuleFilter) (int, error)
 	ListByChainType(ctx context.Context, chainType types.ChainType) ([]*types.Rule, error)
 	IncrementMatchCount(ctx context.Context, id types.RuleID) error
 }
@@ -134,6 +135,40 @@ func (r *GormRuleRepository) List(ctx context.Context, filter RuleFilter) ([]*ty
 		return nil, fmt.Errorf("failed to list rules: %w", err)
 	}
 	return rules, nil
+}
+
+// Count returns the total count of rules matching the filter (ignoring Offset/Limit)
+func (r *GormRuleRepository) Count(ctx context.Context, filter RuleFilter) (int, error) {
+	query := r.db.WithContext(ctx).Model(&types.Rule{})
+
+	if filter.ChainType != nil {
+		query = query.Where("chain_type = ? OR chain_type IS NULL", *filter.ChainType)
+	}
+	if filter.ChainID != nil {
+		query = query.Where("chain_id = ? OR chain_id IS NULL", *filter.ChainID)
+	}
+	if filter.APIKeyID != nil {
+		query = query.Where("api_key_id = ? OR api_key_id IS NULL", *filter.APIKeyID)
+	}
+	if filter.SignerAddress != nil {
+		query = query.Where("signer_address = ? OR signer_address IS NULL", *filter.SignerAddress)
+	}
+	if filter.Type != nil {
+		query = query.Where("type = ?", *filter.Type)
+	}
+	if filter.Source != nil {
+		query = query.Where("source = ?", *filter.Source)
+	}
+	if filter.EnabledOnly {
+		query = query.Where("enabled = ?", true)
+		query = query.Where("expires_at IS NULL OR expires_at > ?", time.Now())
+	}
+
+	var count int64
+	if err := query.Count(&count).Error; err != nil {
+		return 0, fmt.Errorf("failed to count rules: %w", err)
+	}
+	return int(count), nil
 }
 
 // ListByChainType returns all enabled rules for a specific chain type
