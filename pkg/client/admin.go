@@ -12,19 +12,29 @@ import (
 
 // ApproveRequest represents a request to approve a signing request.
 type ApproveRequest struct {
-	Action       string `json:"action"`                  // "approve" or "reject"
-	GenerateRule bool   `json:"generate_rule,omitempty"` // Generate a rule from this approval
-	RuleName     string `json:"rule_name,omitempty"`     // Name for the generated rule
-	ApprovedBy   string `json:"approved_by,omitempty"`   // Who approved (for audit)
+	Approved bool   `json:"approved"`            // true for approve, false for reject
+	RuleType string `json:"rule_type,omitempty"` // evm_address_list, evm_contract_method, evm_value_limit (if set, generates rule)
+	RuleMode string `json:"rule_mode,omitempty"` // whitelist, blocklist
+	RuleName string `json:"rule_name,omitempty"` // Name for the generated rule
+	MaxValue string `json:"max_value,omitempty"` // Required for evm_value_limit
+}
+
+// PreviewRuleRequest represents a request to preview a rule for approval.
+type PreviewRuleRequest struct {
+	RuleType string `json:"rule_type"` // evm_address_list, evm_contract_method, evm_value_limit
+	RuleMode string `json:"rule_mode"` // whitelist, blocklist
+	RuleName string `json:"rule_name,omitempty"`
+	MaxValue string `json:"max_value,omitempty"` // Required for evm_value_limit
 }
 
 // ApproveResponse represents the response from an approval request.
 type ApproveResponse struct {
-	RequestID   string `json:"request_id"`
-	Status      string `json:"status"`
-	Signature   string `json:"signature,omitempty"`
-	SignedData  string `json:"signed_data,omitempty"`
-	RuleCreated *Rule  `json:"rule_created,omitempty"`
+	RequestID     string `json:"request_id"`
+	Status        string `json:"status"`
+	Signature     string `json:"signature,omitempty"`
+	SignedData    string `json:"signed_data,omitempty"`
+	Message       string `json:"message,omitempty"`
+	GeneratedRule *Rule  `json:"generated_rule,omitempty"`
 }
 
 // PreviewRuleResponse represents a rule preview for an approval.
@@ -134,9 +144,14 @@ func (c *Client) ApproveSignRequest(ctx context.Context, requestID string, req *
 }
 
 // PreviewRule previews the rule that would be generated for a pending request.
-func (c *Client) PreviewRule(ctx context.Context, requestID string) (*PreviewRuleResponse, error) {
+func (c *Client) PreviewRule(ctx context.Context, requestID string, req *PreviewRuleRequest) (*PreviewRuleResponse, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
 	path := fmt.Sprintf("/api/v1/evm/requests/%s/preview-rule", requestID)
-	httpReq, err := c.newSignedRequest(ctx, http.MethodPost, path, nil)
+	httpReq, err := c.newSignedRequest(ctx, http.MethodPost, path, body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
