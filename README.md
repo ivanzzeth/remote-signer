@@ -62,12 +62,54 @@ signing → failed       (on sign error)
 | typed_data | Sign EIP-712 typed data |
 | transaction | Sign transaction (Legacy/EIP-2930/EIP-1559) |
 
+## Rule Types
+
+### Standard Rules
+
+| Type | Description |
+|------|-------------|
+| evm_address_whitelist | Whitelist specific recipient addresses |
+| evm_contract_method | Allow specific contract method calls |
+| evm_value_limit | Limit transaction value |
+
+### Solidity Expression Rules
+
+For complex validation logic, use `evm_solidity_expression` rules that allow writing validation using native Solidity syntax with `require()` statements. See [docs/API.md](docs/API.md) for detailed documentation.
+
+Available variables in expressions:
+- `to` (address) - Transaction recipient
+- `value` (uint256) - Transaction value in wei
+- `selector` (bytes4) - Method selector
+- `data` (bytes) - Full calldata
+- `chainId` (uint256) - Chain ID
+- `signer` (address) - Signing address
+
+Example:
+```solidity
+require(value <= 1 ether, "exceeds 1 ETH limit");
+require(to != address(0), "cannot send to zero address");
+```
+
 ## Quick Start
 
 ### Prerequisites
 
 - Go 1.24+
 - PostgreSQL 14+
+- Foundry (optional, for Solidity expression rules)
+
+### Installing Foundry (Optional)
+
+Foundry is required only if you want to use `evm_solidity_expression` rules:
+
+```bash
+# Install Foundry
+curl -L https://foundry.paradigm.xyz | bash
+foundryup
+
+# Verify installation
+forge --version
+```
 
 ### Installation
 
@@ -89,6 +131,124 @@ cp configs/config.example.yaml config.yaml
 # Edit configuration
 vim config.yaml
 ```
+
+#### Configuration File Structure
+
+```yaml
+server:
+  host: "0.0.0.0"
+  port: 8080
+  tls:
+    enabled: false
+    cert_file: "/etc/signer/tls/cert.pem"
+    key_file: "/etc/signer/tls/key.pem"
+
+database:
+  dsn: "postgres://user:password@localhost:5432/remote_signer?sslmode=disable"
+
+chains:
+  evm:
+    enabled: true
+    signers:
+      private_keys:
+        - address: "0x1234567890abcdef1234567890abcdef12345678"
+          key_env: "EVM_SIGNER_KEY_1"  # env var containing private key
+      # keystores:
+      #   - address: "0x..."
+      #     path: "/etc/signer/keystores/"
+      #     password_env: "EVM_KEYSTORE_PASSWORD_1"
+
+    # Foundry configuration (for Solidity expression rules)
+    foundry:
+      enabled: true           # Enable Solidity expression rules
+      forge_path: ""          # Path to forge binary (empty = auto-detect from PATH)
+      cache_dir: "/var/cache/remote-signer/forge"  # Cache for compiled scripts
+      timeout: "30s"          # Max execution time per rule evaluation
+
+notify:
+  slack:
+    enabled: false
+    bot_token: "${SLACK_BOT_TOKEN}"
+  pushover:
+    enabled: false
+    app_token: "${PUSHOVER_APP_TOKEN}"
+
+notify_channels:
+  slack: ["C1234567890"]      # Slack channel IDs
+  pushover: ["user_key"]      # Pushover user keys
+
+security:
+  max_request_age: "5m"       # Prevents replay attacks
+  rate_limit_default: 100     # Requests per minute
+
+logger:
+  level: "info"               # debug, info, warn, error
+  pretty: true                # Pretty print for development
+```
+
+#### Foundry Configuration Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enabled` | bool | `false` | Enable Solidity expression rules |
+| `forge_path` | string | `""` | Path to forge binary. Empty = auto-detect from PATH |
+| `cache_dir` | string | `/tmp/...` | Cache directory for compiled Solidity scripts |
+| `timeout` | duration | `30s` | Maximum execution time per rule evaluation |
+
+#### Rules Configuration
+
+Rules can be defined in config file or via API. See `configs/config.example.yaml` for complete examples.
+
+```yaml
+rules:
+  # Address whitelist
+  - name: "Allow treasury"
+    type: "evm_address_whitelist"
+    mode: "whitelist"
+    enabled: true
+    config:
+      addresses:
+        - "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+
+  # Value limit
+  - name: "Max 10 ETH"
+    type: "evm_value_limit"
+    mode: "whitelist"
+    enabled: true
+    config:
+      max_value: "10000000000000000000"  # 10 ETH in wei
+
+  # Solidity expression (requires Foundry)
+  - name: "Custom validation"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    config:
+      expression: |
+        require(value <= 1 ether, "exceeds limit");
+      description: "Max 1 ETH transfer"
+      test_cases:  # Required - all must pass
+        - name: "pass 0.5 ETH"
+          input: { value: "500000000000000000" }
+          expect_pass: true
+        - name: "reject 2 ETH"
+          input: { value: "2000000000000000000" }
+          expect_pass: false
+          expect_reason: "exceeds limit"
+```
+
+**Rule Types:**
+
+| Type | Description |
+|------|-------------|
+| `evm_address_whitelist` | Whitelist recipient addresses |
+| `evm_contract_method` | Allow specific contract methods |
+| `evm_value_limit` | Limit transaction value |
+| `evm_solidity_expression` | Custom Solidity validation (requires Foundry) |
+
+**Rule Modes:**
+- `whitelist`: Any match = auto-approve
+- `blocklist`: Any match = block (checked first)
 
 ### Environment Variables
 
@@ -169,6 +329,17 @@ To add support for a new chain (e.g., Solana):
 5. Implement rule evaluators: `internal/chain/solana/rule_evaluator.go`
 6. Add API handlers: `internal/api/handler/solana/`
 7. Register adapter in `main.go`
+
+## Roadmap
+
+### Planned Features
+
+- [ ] **Solidity Rule Coverage Enforcement**: Integrate `forge coverage` to enforce minimum branch coverage threshold for `evm_solidity_expression` rules. Rules with insufficient test coverage would be rejected.
+- [ ] **Solana Chain Support**: Add Solana signing adapter
+- [ ] **Cosmos Chain Support**: Add Cosmos/Tendermint signing adapter
+- [ ] **Bitcoin Chain Support**: Add Bitcoin signing adapter
+- [ ] **Web UI**: Admin dashboard for rule management and approval workflow
+- [ ] **Audit Log Export**: Export audit logs to external systems (S3, Elasticsearch)
 
 ## License
 
