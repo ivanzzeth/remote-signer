@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -94,8 +95,11 @@ type AuditRecord struct {
 
 // ListAuditResponse represents the response from listing audit records.
 type ListAuditResponse struct {
-	Records []AuditRecord `json:"records"`
-	Total   int           `json:"total"`
+	Records      []AuditRecord `json:"records"`
+	Total        int           `json:"total"`
+	NextCursor   *string       `json:"next_cursor,omitempty"`
+	NextCursorID *string       `json:"next_cursor_id,omitempty"`
+	HasMore      bool          `json:"has_more"`
 }
 
 // ApproveSignRequest approves or rejects a pending signing request.
@@ -263,7 +267,9 @@ type ListAuditFilter struct {
 	StartTime     *time.Time
 	EndTime       *time.Time
 	Limit         int
-	Offset        int
+	// Cursor-based pagination
+	Cursor   *string
+	CursorID *string
 }
 
 // ListAuditRecords lists audit records with optional filters.
@@ -299,8 +305,11 @@ func (c *Client) ListAuditRecords(ctx context.Context, filter *ListAuditFilter) 
 		if filter.Limit > 0 {
 			params = append(params, fmt.Sprintf("limit=%d", filter.Limit))
 		}
-		if filter.Offset > 0 {
-			params = append(params, fmt.Sprintf("offset=%d", filter.Offset))
+		if filter.Cursor != nil {
+			params = append(params, fmt.Sprintf("cursor=%s", url.QueryEscape(*filter.Cursor)))
+		}
+		if filter.CursorID != nil {
+			params = append(params, fmt.Sprintf("cursor_id=%s", url.QueryEscape(*filter.CursorID)))
 		}
 	}
 

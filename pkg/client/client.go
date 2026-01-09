@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -243,25 +244,32 @@ func (c *Client) GetRequest(ctx context.Context, requestID string) (*RequestStat
 	return &status, nil
 }
 
-// ListRequests lists signing requests with optional filters.
-func (c *Client) ListRequests(ctx context.Context, status, signerAddress, chainID string, limit, offset int) (*ListRequestsResponse, error) {
+// ListRequests lists signing requests with optional filters using cursor-based pagination.
+func (c *Client) ListRequests(ctx context.Context, filter *ListRequestsFilter) (*ListRequestsResponse, error) {
 	path := "/api/v1/evm/requests"
 	params := make([]string, 0)
-	if status != "" {
-		params = append(params, fmt.Sprintf("status=%s", status))
+
+	if filter != nil {
+		if filter.Status != "" {
+			params = append(params, fmt.Sprintf("status=%s", filter.Status))
+		}
+		if filter.SignerAddress != "" {
+			params = append(params, fmt.Sprintf("signer_address=%s", filter.SignerAddress))
+		}
+		if filter.ChainID != "" {
+			params = append(params, fmt.Sprintf("chain_id=%s", filter.ChainID))
+		}
+		if filter.Limit > 0 {
+			params = append(params, fmt.Sprintf("limit=%d", filter.Limit))
+		}
+		if filter.Cursor != nil {
+			params = append(params, fmt.Sprintf("cursor=%s", url.QueryEscape(*filter.Cursor)))
+		}
+		if filter.CursorID != nil {
+			params = append(params, fmt.Sprintf("cursor_id=%s", url.QueryEscape(*filter.CursorID)))
+		}
 	}
-	if signerAddress != "" {
-		params = append(params, fmt.Sprintf("signer_address=%s", signerAddress))
-	}
-	if chainID != "" {
-		params = append(params, fmt.Sprintf("chain_id=%s", chainID))
-	}
-	if limit > 0 {
-		params = append(params, fmt.Sprintf("limit=%d", limit))
-	}
-	if offset > 0 {
-		params = append(params, fmt.Sprintf("offset=%d", offset))
-	}
+
 	if len(params) > 0 {
 		path += "?" + strings.Join(params, "&")
 	}

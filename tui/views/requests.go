@@ -26,18 +26,33 @@ type RequestsModel struct {
 	requests     []client.RequestStatus
 	total        int
 	selectedIdx  int
-	offset       int
 	limit        int
 	statusFilter string
 	showFilter   bool
 	filterInput  textinput.Model
+	// Cursor-based pagination
+	cursor        *string       // Cursor used to fetch current page
+	cursorID      *string       // CursorID used to fetch current page
+	nextCursor    *string       // Cursor for next page (from response)
+	nextCursorID  *string       // CursorID for next page (from response)
+	cursorHistory []cursorState // History for previous page navigation
+	hasMore       bool
+}
+
+// cursorState stores cursor position for pagination history
+type cursorState struct {
+	cursor   *string
+	cursorID *string
 }
 
 // RequestsDataMsg is sent when requests data is loaded
 type RequestsDataMsg struct {
-	Requests []client.RequestStatus
-	Total    int
-	Err      error
+	Requests     []client.RequestStatus
+	Total        int
+	NextCursor   *string
+	NextCursorID *string
+	HasMore      bool
+	Err          error
 }
 
 // NewRequestsModel creates a new requests model
@@ -98,13 +113,37 @@ func (m *RequestsModel) GetSelectedRequestID() string {
 	return m.requests[m.selectedIdx].ID
 }
 
+// resetPagination resets cursor state to first page
+func (m *RequestsModel) resetPagination() {
+	m.cursor = nil
+	m.cursorID = nil
+	m.nextCursor = nil
+	m.nextCursorID = nil
+	m.cursorHistory = nil
+	m.selectedIdx = 0
+	m.hasMore = false
+}
+
 func (m *RequestsModel) loadData() tea.Cmd {
 	return func() tea.Msg {
-		resp, err := m.client.ListRequests(m.ctx, m.statusFilter, "", "", m.limit, m.offset)
+		filter := &client.ListRequestsFilter{
+			Status:   m.statusFilter,
+			Limit:    m.limit,
+			Cursor:   m.cursor,
+			CursorID: m.cursorID,
+		}
+		resp, err := m.client.ListRequests(m.ctx, filter)
 		if err != nil {
 			return RequestsDataMsg{Err: err}
 		}
-		return RequestsDataMsg{Requests: resp.Requests, Total: resp.Total, Err: nil}
+		return RequestsDataMsg{
+			Requests:     resp.Requests,
+			Total:        resp.Total,
+			NextCursor:   resp.NextCursor,
+			NextCursorID: resp.NextCursorID,
+			HasMore:      resp.HasMore,
+			Err:          nil,
+		}
 	}
 }
 
@@ -118,6 +157,10 @@ func (m *RequestsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.requests = msg.Requests
 			m.total = msg.Total
+			m.hasMore = msg.HasMore
+			// Store next page cursor (don't overwrite current cursor)
+			m.nextCursor = msg.NextCursor
+			m.nextCursorID = msg.NextCursorID
 			m.err = nil
 		}
 		return m, nil
@@ -138,8 +181,7 @@ func (m *RequestsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.statusFilter = m.filterInput.Value()
 				m.showFilter = false
 				m.filterInput.Blur()
-				m.offset = 0
-				m.selectedIdx = 0
+				m.resetPagination()
 				return m, m.Refresh()
 			case "esc":
 				m.showFilter = false
@@ -195,19 +237,27 @@ func (m *RequestsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "n":
 			// Next page
-			if m.offset+m.limit < m.total {
-				m.offset += m.limit
+			if m.hasMore && m.nextCursor != nil {
+				// Save current cursor to history for going back
+				m.cursorHistory = append(m.cursorHistory, cursorState{
+					cursor:   m.cursor,
+					cursorID: m.cursorID,
+				})
+				// Use next cursor
+				m.cursor = m.nextCursor
+				m.cursorID = m.nextCursorID
 				m.selectedIdx = 0
 				return m, m.Refresh()
 			}
 			return m, nil
 		case "p":
 			// Previous page
-			if m.offset > 0 {
-				m.offset -= m.limit
-				if m.offset < 0 {
-					m.offset = 0
-				}
+			if len(m.cursorHistory) > 0 {
+				// Pop from history
+				prev := m.cursorHistory[len(m.cursorHistory)-1]
+				m.cursorHistory = m.cursorHistory[:len(m.cursorHistory)-1]
+				m.cursor = prev.cursor
+				m.cursorID = prev.cursorID
 				m.selectedIdx = 0
 				return m, m.Refresh()
 			}
@@ -216,8 +266,7 @@ func (m *RequestsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Clear filter
 			m.statusFilter = ""
 			m.filterInput.SetValue("")
-			m.offset = 0
-			m.selectedIdx = 0
+			m.resetPagination()
 			return m, m.Refresh()
 		}
 	}
@@ -315,17 +364,28 @@ func (m *RequestsModel) renderRequests() string {
 
 	// Pagination info
 	content.WriteString("\n")
-	startIdx := m.offset + 1
-	endIdx := m.offset + len(m.requests)
-	if endIdx > m.total {
-		endIdx = m.total
+	pageNum := len(m.cursorHistory) + 1
+	pagination := fmt.Sprintf("Page %d | Showing %d items | Total: %d", pageNum, len(m.requests), m.total)
+	if m.hasMore {
+		pagination += " | More available"
 	}
-	if len(m.requests) == 0 {
-		startIdx = 0
-		endIdx = 0
-	}
-	pagination := fmt.Sprintf("Showing %d-%d of %d", startIdx, endIdx, m.total)
 	content.WriteString(styles.MutedColor.Render(pagination))
+
+	// Debug: show cursor info
+	content.WriteString("\n")
+	cursorInfo := "Cursor: "
+	if m.cursor != nil {
+		cursorInfo += fmt.Sprintf("'%s'", *m.cursor)
+	} else {
+		cursorInfo += "nil"
+	}
+	cursorInfo += " | NextCursor: "
+	if m.nextCursor != nil {
+		cursorInfo += fmt.Sprintf("'%s'", *m.nextCursor)
+	} else {
+		cursorInfo += "nil"
+	}
+	content.WriteString(styles.MutedColor.Render(cursorInfo))
 
 	// Help
 	content.WriteString("\n\n")

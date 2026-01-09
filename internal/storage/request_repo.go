@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -16,8 +17,12 @@ type RequestFilter struct {
 	ChainType     *types.ChainType
 	ChainID       *string
 	Status        []types.SignRequestStatus
-	Offset        int
-	Limit         int
+	// Cursor-based pagination (preferred over Offset)
+	// Cursor is the created_at timestamp of the last item from previous page
+	Cursor *time.Time
+	// CursorID is the ID of the last item (for tie-breaking when timestamps are equal)
+	CursorID *types.SignRequestID
+	Limit    int
 }
 
 // RequestRepository defines the interface for sign request persistence
@@ -26,6 +31,7 @@ type RequestRepository interface {
 	Get(ctx context.Context, id types.SignRequestID) (*types.SignRequest, error)
 	Update(ctx context.Context, req *types.SignRequest) error
 	List(ctx context.Context, filter RequestFilter) ([]*types.SignRequest, error)
+	Count(ctx context.Context, filter RequestFilter) (int, error)
 	UpdateStatus(ctx context.Context, id types.SignRequestID, status types.SignRequestStatus) error
 }
 
@@ -71,8 +77,54 @@ func (r *GormRequestRepository) Update(ctx context.Context, req *types.SignReque
 	return r.db.WithContext(ctx).Save(req).Error
 }
 
-// List returns sign requests matching the filter
+// List returns sign requests matching the filter using cursor-based pagination
 func (r *GormRequestRepository) List(ctx context.Context, filter RequestFilter) ([]*types.SignRequest, error) {
+	query := r.buildFilterQuery(ctx, filter)
+
+	// Cursor-based pagination: get items older than cursor
+	// Uses (created_at, id) for stable ordering when timestamps are equal
+	if filter.Cursor != nil {
+		if filter.CursorID != nil {
+			// Tie-breaking: items with same timestamp but smaller ID
+			query = query.Where(
+				"(created_at < ?) OR (created_at = ? AND id < ?)",
+				*filter.Cursor, *filter.Cursor, *filter.CursorID,
+			)
+		} else {
+			query = query.Where("created_at < ?", *filter.Cursor)
+		}
+	}
+
+	if filter.Limit > 0 {
+		query = query.Limit(filter.Limit)
+	} else {
+		query = query.Limit(100) // default limit
+	}
+
+	// Order by created_at DESC, id DESC for stable pagination
+	query = query.Order("created_at DESC, id DESC")
+
+	var requests []*types.SignRequest
+	err := query.Find(&requests).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to list requests: %w", err)
+	}
+	return requests, nil
+}
+
+// Count returns the total count of requests matching the filter (ignoring Offset/Limit)
+func (r *GormRequestRepository) Count(ctx context.Context, filter RequestFilter) (int, error) {
+	query := r.buildFilterQuery(ctx, filter)
+
+	var count int64
+	if err := query.Count(&count).Error; err != nil {
+		return 0, fmt.Errorf("failed to count requests: %w", err)
+	}
+	return int(count), nil
+}
+
+// buildFilterQuery builds the base query with filters (without pagination)
+func (r *GormRequestRepository) buildFilterQuery(ctx context.Context, filter RequestFilter) *gorm.DB {
 	query := r.db.WithContext(ctx).Model(&types.SignRequest{})
 
 	if filter.APIKeyID != nil {
@@ -91,23 +143,7 @@ func (r *GormRequestRepository) List(ctx context.Context, filter RequestFilter) 
 		query = query.Where("status IN ?", filter.Status)
 	}
 
-	if filter.Offset > 0 {
-		query = query.Offset(filter.Offset)
-	}
-	if filter.Limit > 0 {
-		query = query.Limit(filter.Limit)
-	} else {
-		query = query.Limit(100) // default limit
-	}
-
-	query = query.Order("created_at DESC")
-
-	var requests []*types.SignRequest
-	err := query.Find(&requests).Error
-	if err != nil {
-		return nil, fmt.Errorf("failed to list requests: %w", err)
-	}
-	return requests, nil
+	return query
 }
 
 // UpdateStatus updates the status of a sign request

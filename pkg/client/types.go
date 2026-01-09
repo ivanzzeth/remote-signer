@@ -46,8 +46,22 @@ type RequestStatus struct {
 
 // ListRequestsResponse represents the response from listing requests.
 type ListRequestsResponse struct {
-	Requests []RequestStatus `json:"requests"`
-	Total    int             `json:"total"`
+	Requests     []RequestStatus `json:"requests"`
+	Total        int             `json:"total"`
+	NextCursor   *string         `json:"next_cursor,omitempty"`
+	NextCursorID *string         `json:"next_cursor_id,omitempty"`
+	HasMore      bool            `json:"has_more"`
+}
+
+// ListRequestsFilter contains filter options for listing requests.
+type ListRequestsFilter struct {
+	Status        string
+	SignerAddress string
+	ChainID       string
+	Limit         int
+	// Cursor-based pagination
+	Cursor   *string
+	CursorID *string
 }
 
 // HealthResponse represents the health check response.
