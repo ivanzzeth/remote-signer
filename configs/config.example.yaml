@@ -54,7 +54,7 @@ notify:
 # Notification channels for approval requests
 notify_channels:
   slack:
-    - "C1234567890"  # Slack channel ID
+    - "you_slack_channel"  # Slack channel ID
   pushover:
     - "user_key_here"  # Pushover user key
 
@@ -160,26 +160,119 @@ rules:
           expect_pass: false
           expect_reason: "blocked: burn address"
 
-  # Example 6: Complex USDC transfer limit with parameter decoding
-  # - name: "USDC transfer limit 10k"
-  #   type: "evm_solidity_expression"
-  #   mode: "whitelist"
-  #   enabled: true
-  #   config:
-  #     expression: |
-  #       require(selector == bytes4(0xa9059cbb), "must be transfer");
-  #       (address recipient, uint256 amount) = abi.decode(data[4:], (address, uint256));
-  #       require(amount <= 10000 * 1e6, "exceeds 10k USDC limit");
-  #     description: "Limit USDC transfers to 10,000 USDC"
-  #     abi_signature: "transfer(address,uint256)"
-  #     test_cases:
-  #       - name: "pass 1000 USDC"
-  #         input:
-  #           selector: "0xa9059cbb"
-  #           data: "0xa9059cbb0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc4000000000000000000000000000000000000000000000000000000003b9aca00"
-  #         expect_pass: true
-  #       - name: "reject non-transfer"
-  #         input:
-  #           selector: "0x095ea7b3"
-  #         expect_pass: false
-  #         expect_reason: "must be transfer"
+  # Example 6: Function Mode - ERC20 transfer/approve validation
+  # Uses function definitions for automatic selector matching and parameter decoding
+  - name: "ERC20 transfer and approve limits"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    config:
+      # Function mode: define functions that match tx selectors
+      # When tx selector matches, function is called with decoded params
+      functions: |
+        function transfer(address to, uint256 amount) external {
+            require(amount <= 10000000000, "exceeds 10k limit");
+            require(to != address(0), "invalid recipient");
+        }
+        function approve(address spender, uint256 amount) external {
+            require(spender != address(0), "cannot approve zero address");
+        }
+      description: "Validate ERC20 transfer and approve with limits"
+      test_cases:
+        - name: "should pass transfer 5k"
+          input:
+            # transfer(0x5B38Da6a701c568545dCfcB03FcB875f56beddC4, 5000000000)
+            data: "0xa9059cbb0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc400000000000000000000000000000000000000000000000000000001dcd65000"
+          expect_pass: true
+        - name: "should reject transfer 20k"
+          input:
+            # transfer(0x5B38Da6a701c568545dCfcB03FcB875f56beddC4, 20000000000)
+            data: "0xa9059cbb0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc40000000000000000000000000000000000000000000000000000000ba43b7400"
+          expect_pass: false
+          expect_reason: "exceeds 10k limit"
+        - name: "should pass approve valid spender"
+          input:
+            # approve(0x5B38Da6a701c568545dCfcB03FcB875f56beddC4, 1000000000000000000)
+            data: "0x095ea7b30000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc40000000000000000000000000000000000000000000000000de0b6b3a7640000"
+          expect_pass: true
+        - name: "should reject approve zero address"
+          input:
+            # approve(0x0000000000000000000000000000000000000000, 1000000000000000000)
+            data: "0x095ea7b300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000de0b6b3a7640000"
+          expect_pass: false
+          expect_reason: "cannot approve zero address"
+
+  # Example 7: EIP-712 Typed Data Validation - Permit (EIP-2612)
+  # Validates EIP-712 signed messages like Permit, Permit2, Seaport orders
+  - name: "EIP-712 Permit validation"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    config:
+      # TypedDataExpression mode: require() statements with EIP-712 context
+      # Available variables:
+      #   - primaryType (string)         - EIP-712 primary type name
+      #   - domainName (string)          - Domain name
+      #   - domainVersion (string)       - Domain version
+      #   - domainChainId (uint256)      - Domain chain ID
+      #   - domainContract (address)     - Verifying contract address
+      #   - signer (address)             - Signing address
+      #   - chainId (uint256)            - Request chain ID
+      #   - [message fields]             - Fields from the typed data message
+      typed_data_expression: |
+        require(value <= 1000000000000000000000, "permit value exceeds 1000 tokens");
+        require(spender != address(0), "cannot permit zero address spender");
+        require(deadline > block.timestamp, "permit deadline expired");
+      sign_type_filter: "typed_data"  # Only apply to typed_data sign requests
+      description: "Validate EIP-2612 Permit: max 1000 tokens, valid spender, future deadline"
+      test_cases:
+        - name: "should pass for 100 tokens"
+          input:
+            typed_data:
+              primaryType: "Permit"
+              domain:
+                name: "TestToken"
+                version: "1"
+                chainId: "1"
+                verifyingContract: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+              message:
+                owner: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+                spender: "0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2"
+                value: "100000000000000000000"
+                nonce: "0"
+                deadline: "1893456000"  # Year 2030
+          expect_pass: true
+        - name: "should reject for 2000 tokens"
+          input:
+            typed_data:
+              primaryType: "Permit"
+              domain:
+                name: "TestToken"
+                version: "1"
+                chainId: "1"
+                verifyingContract: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+              message:
+                owner: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+                spender: "0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2"
+                value: "2000000000000000000000"
+                nonce: "0"
+                deadline: "1893456000"
+          expect_pass: false
+          expect_reason: "permit value exceeds 1000 tokens"
+        - name: "should reject zero address spender"
+          input:
+            typed_data:
+              primaryType: "Permit"
+              domain:
+                name: "TestToken"
+                version: "1"
+                chainId: "1"
+                verifyingContract: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+              message:
+                owner: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+                spender: "0x0000000000000000000000000000000000000000"
+                value: "100000000000000000000"
+                nonce: "0"
+                deadline: "1893456000"
+          expect_pass: false
+          expect_reason: "cannot permit zero address spender"

@@ -20,7 +20,8 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
 
-const solidityTemplate = `// SPDX-License-Identifier: MIT
+// solidityExpressionTemplate is for require-based rules (Expression mode)
+const solidityExpressionTemplate = `// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 contract RuleEvaluator {
@@ -41,6 +42,131 @@ contract RuleEvaluator {
 
         // If we reach here, all require() passed
         return true;
+    }
+}
+`
+
+// solidityFunctionTemplate is for function-based rules (Functions mode)
+// When transaction selector matches a user-defined function, it's called with decoded params
+const solidityFunctionTemplate = `// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+contract RuleEvaluator {
+    // Transaction context available as state variables
+    address public immutable txTo;
+    uint256 public immutable txValue;
+    bytes4 public immutable txSelector;
+    bytes public txData;
+    uint256 public immutable txChainId;
+    address public immutable txSigner;
+
+    constructor() {
+        txTo = {{.To}};
+        txValue = {{.Value}};
+        txSelector = {{.Selector}};
+        txData = {{.Data}};
+        txChainId = {{.ChainID}};
+        txSigner = {{.Signer}};
+    }
+
+    // User-defined functions for automatic selector matching
+    {{.Functions}}
+
+    function run() public returns (bool) {
+        if (txData.length >= 4) {
+            // Forward calldata to matching function
+            // If selector matches a user-defined function, it will be called
+            // with automatically decoded parameters
+            (bool success, bytes memory returnData) = address(this).call(txData);
+            if (!success) {
+                // Propagate revert reason
+                if (returnData.length > 0) {
+                    assembly {
+                        revert(add(returnData, 32), mload(returnData))
+                    }
+                }
+                revert("no matching function or validation failed");
+            }
+        }
+        return true;
+    }
+}
+`
+
+// solidityTypedDataExpressionTemplate is for EIP-712 typed data validation using require() statements
+const solidityTypedDataExpressionTemplate = `// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+contract RuleEvaluator {
+    function run() public pure returns (bool) {
+        // EIP-712 Domain context
+        string memory primaryType = {{.PrimaryType}};
+        string memory domainName = {{.DomainName}};
+        string memory domainVersion = {{.DomainVersion}};
+        uint256 domainChainId = {{.DomainChainId}};
+        address domainContract = {{.DomainContract}};
+
+        // Signer context
+        address signer = {{.Signer}};
+        uint256 chainId = {{.ChainID}};
+
+        // EIP-712 Message fields (dynamically generated based on message content)
+        {{.MessageFields}}
+
+        // Suppress unused variable warnings
+        bytes memory _primaryType = bytes(primaryType);
+        bytes memory _domainName = bytes(domainName);
+        bytes memory _domainVersion = bytes(domainVersion);
+        domainChainId; domainContract; signer; chainId; _primaryType; _domainName; _domainVersion;
+
+        // User-defined validation logic
+        {{.Expression}}
+
+        // If we reach here, all require() passed
+        return true;
+    }
+}
+`
+
+// solidityTypedDataFunctionsTemplate is for EIP-712 typed data validation using struct-based functions
+const solidityTypedDataFunctionsTemplate = `// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+contract RuleEvaluator {
+    // EIP-712 Domain context
+    string public primaryType;
+    string public domainName;
+    string public domainVersion;
+    uint256 public domainChainId;
+    address public domainContract;
+    address public txSigner;
+    uint256 public txChainId;
+
+    // EIP-712 Message encoded as bytes for struct decoding
+    bytes public messageData;
+
+    constructor() {
+        primaryType = {{.PrimaryType}};
+        domainName = {{.DomainName}};
+        domainVersion = {{.DomainVersion}};
+        domainChainId = {{.DomainChainId}};
+        domainContract = {{.DomainContract}};
+        txSigner = {{.Signer}};
+        txChainId = {{.ChainID}};
+        messageData = {{.MessageData}};
+    }
+
+    // User-defined structs and validation functions
+    {{.Functions}}
+
+    function run() public returns (bool) {
+        // Call the validate function with decoded message
+        _validateMessage();
+        return true;
+    }
+
+    function _validateMessage() internal virtual {
+        // Override in user functions if needed
     }
 }
 `
@@ -138,10 +264,37 @@ func (e *SolidityRuleEvaluator) Evaluate(
 		return false, "", fmt.Errorf("invalid solidity expression config: %w", err)
 	}
 
+	// Check SignTypeFilter if specified
+	if config.SignTypeFilter != "" && config.SignTypeFilter != req.SignType {
+		// Rule doesn't apply to this sign type, skip evaluation (pass through)
+		return false, "", nil
+	}
+
+	// Determine mode based on which field is populated
+	// Priority: TypedDataExpression/Functions > Functions > Expression
+
+	// EIP-712 Typed Data validation modes
+	if config.TypedDataExpression != "" || config.TypedDataFunctions != "" {
+		// Parse typed data from request payload
+		typedData, err := parseTypedDataFromPayload(req.Payload)
+		if err != nil {
+			return false, "", fmt.Errorf("failed to parse typed data: %w", err)
+		}
+
+		if config.TypedDataExpression != "" {
+			return e.evaluateTypedDataExpression(ctx, config.TypedDataExpression, req, typedData)
+		}
+		return e.evaluateTypedDataFunctions(ctx, config.TypedDataFunctions, req, typedData)
+	}
+
+	// Transaction validation modes
+	if config.Functions != "" {
+		return e.evaluateFunctions(ctx, config.Functions, req, parsed)
+	}
 	return e.evaluateExpression(ctx, config.Expression, req, parsed)
 }
 
-// evaluateExpression evaluates a Solidity expression with the given context
+// evaluateExpression evaluates a Solidity expression with the given context (Expression mode)
 func (e *SolidityRuleEvaluator) evaluateExpression(
 	ctx context.Context,
 	expression string,
@@ -149,7 +302,7 @@ func (e *SolidityRuleEvaluator) evaluateExpression(
 	parsed *types.ParsedPayload,
 ) (bool, string, error) {
 	// Generate script with transaction context
-	script, err := e.generateScript(expression, req, parsed)
+	script, err := e.generateExpressionScript(expression, req, parsed)
 	if err != nil {
 		return false, "", fmt.Errorf("failed to generate script: %w", err)
 	}
@@ -163,13 +316,34 @@ func (e *SolidityRuleEvaluator) evaluateExpression(
 	return passed, reason, nil
 }
 
-// generateScript generates a Solidity script from the expression and context
-func (e *SolidityRuleEvaluator) generateScript(
+// evaluateFunctions evaluates user-defined functions with the given context (Functions mode)
+func (e *SolidityRuleEvaluator) evaluateFunctions(
+	ctx context.Context,
+	functions string,
+	req *types.SignRequest,
+	parsed *types.ParsedPayload,
+) (bool, string, error) {
+	// Generate script with transaction context and user functions
+	script, err := e.generateFunctionScript(functions, req, parsed)
+	if err != nil {
+		return false, "", fmt.Errorf("failed to generate function script: %w", err)
+	}
+
+	// Execute via forge script
+	passed, reason, err := e.executeScript(ctx, script)
+	if err != nil {
+		return false, "", fmt.Errorf("script execution failed: %w", err)
+	}
+
+	return passed, reason, nil
+}
+
+// generateExpressionScript generates a Solidity script for Expression mode
+func (e *SolidityRuleEvaluator) generateExpressionScript(
 	expression string,
 	req *types.SignRequest,
 	parsed *types.ParsedPayload,
 ) (string, error) {
-	// Prepare template data
 	data := struct {
 		To         string
 		Value      string
@@ -188,7 +362,44 @@ func (e *SolidityRuleEvaluator) generateScript(
 		Expression: expression,
 	}
 
-	tmpl, err := template.New("rule").Parse(solidityTemplate)
+	tmpl, err := template.New("expression").Parse(solidityExpressionTemplate)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("failed to execute template: %w", err)
+	}
+
+	return buf.String(), nil
+}
+
+// generateFunctionScript generates a Solidity script for Functions mode
+func (e *SolidityRuleEvaluator) generateFunctionScript(
+	functions string,
+	req *types.SignRequest,
+	parsed *types.ParsedPayload,
+) (string, error) {
+	data := struct {
+		To        string
+		Value     string
+		Selector  string
+		Data      string
+		ChainID   string
+		Signer    string
+		Functions string
+	}{
+		To:        formatAddress(parsed.Recipient),
+		Value:     formatWei(parsed.Value),
+		Selector:  formatSelector(parsed.MethodSig),
+		Data:      formatBytes(parsed.RawData),
+		ChainID:   formatChainID(req.ChainID),
+		Signer:    formatAddress(&req.SignerAddress),
+		Functions: functions,
+	}
+
+	tmpl, err := template.New("functions").Parse(solidityFunctionTemplate)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse template: %w", err)
 	}
@@ -259,7 +470,7 @@ func (e *SolidityRuleEvaluator) executeScript(ctx context.Context, script string
 	return true, "", nil
 }
 
-// GenerateSyntaxCheckScript generates a script for compilation checking
+// GenerateSyntaxCheckScript generates a script for compilation checking (Expression mode)
 func (e *SolidityRuleEvaluator) GenerateSyntaxCheckScript(expression string) string {
 	return fmt.Sprintf(`// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
@@ -284,6 +495,39 @@ contract SyntaxCheck {
     }
 }
 `, expression)
+}
+
+// GenerateFunctionSyntaxCheckScript generates a script for compilation checking (Functions mode)
+func (e *SolidityRuleEvaluator) GenerateFunctionSyntaxCheckScript(functions string) string {
+	return fmt.Sprintf(`// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+contract SyntaxCheck {
+    // Transaction context available as state variables
+    address public immutable txTo;
+    uint256 public immutable txValue;
+    bytes4 public immutable txSelector;
+    bytes public txData;
+    uint256 public immutable txChainId;
+    address public immutable txSigner;
+
+    constructor() {
+        txTo = address(0);
+        txValue = 0;
+        txSelector = bytes4(0);
+        txData = "";
+        txChainId = 1;
+        txSigner = address(0);
+    }
+
+    // User-defined functions
+    %s
+
+    function run() public returns (bool) {
+        return true;
+    }
+}
+`, functions)
 }
 
 // GetTempDir returns the temp directory path
@@ -342,6 +586,466 @@ func formatChainID(chainID string) string {
 type forgeScriptResult struct {
 	Success bool `json:"success"`
 	Traces  [][]interface{}
+}
+
+// evaluateTypedDataExpression evaluates a Solidity expression with EIP-712 typed data context
+func (e *SolidityRuleEvaluator) evaluateTypedDataExpression(
+	ctx context.Context,
+	expression string,
+	req *types.SignRequest,
+	typedData *TypedDataPayload,
+) (bool, string, error) {
+	// Generate script with typed data context
+	script, err := e.generateTypedDataExpressionScript(expression, req, typedData)
+	if err != nil {
+		return false, "", fmt.Errorf("failed to generate typed data expression script: %w", err)
+	}
+
+	// Execute via forge script
+	passed, reason, err := e.executeScript(ctx, script)
+	if err != nil {
+		return false, "", fmt.Errorf("script execution failed: %w", err)
+	}
+
+	return passed, reason, nil
+}
+
+// evaluateTypedDataFunctions evaluates user-defined functions with EIP-712 typed data context
+func (e *SolidityRuleEvaluator) evaluateTypedDataFunctions(
+	ctx context.Context,
+	functions string,
+	req *types.SignRequest,
+	typedData *TypedDataPayload,
+) (bool, string, error) {
+	// Generate script with typed data context and user functions
+	script, err := e.generateTypedDataFunctionsScript(functions, req, typedData)
+	if err != nil {
+		return false, "", fmt.Errorf("failed to generate typed data functions script: %w", err)
+	}
+
+	// Execute via forge script
+	passed, reason, err := e.executeScript(ctx, script)
+	if err != nil {
+		return false, "", fmt.Errorf("script execution failed: %w", err)
+	}
+
+	return passed, reason, nil
+}
+
+// generateTypedDataExpressionScript generates a Solidity script for TypedDataExpression mode
+func (e *SolidityRuleEvaluator) generateTypedDataExpressionScript(
+	expression string,
+	req *types.SignRequest,
+	typedData *TypedDataPayload,
+) (string, error) {
+	// Generate message field declarations from the typed data message
+	messageFields := generateMessageFieldDeclarations(typedData)
+
+	data := struct {
+		PrimaryType    string
+		DomainName     string
+		DomainVersion  string
+		DomainChainId  string
+		DomainContract string
+		Signer         string
+		ChainID        string
+		MessageFields  string
+		Expression     string
+	}{
+		PrimaryType:    formatString(typedData.PrimaryType),
+		DomainName:     formatString(typedData.Domain.Name),
+		DomainVersion:  formatString(typedData.Domain.Version),
+		DomainChainId:  formatDomainChainId(typedData.Domain.ChainId),
+		DomainContract: formatDomainContract(typedData.Domain.VerifyingContract),
+		Signer:         formatAddress(&req.SignerAddress),
+		ChainID:        formatChainID(req.ChainID),
+		MessageFields:  messageFields,
+		Expression:     expression,
+	}
+
+	tmpl, err := template.New("typedDataExpression").Parse(solidityTypedDataExpressionTemplate)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("failed to execute template: %w", err)
+	}
+
+	return buf.String(), nil
+}
+
+// generateTypedDataFunctionsScript generates a Solidity script for TypedDataFunctions mode
+func (e *SolidityRuleEvaluator) generateTypedDataFunctionsScript(
+	functions string,
+	req *types.SignRequest,
+	typedData *TypedDataPayload,
+) (string, error) {
+	// Encode message data as bytes for struct decoding
+	messageData := encodeMessageData(typedData)
+
+	data := struct {
+		PrimaryType    string
+		DomainName     string
+		DomainVersion  string
+		DomainChainId  string
+		DomainContract string
+		Signer         string
+		ChainID        string
+		MessageData    string
+		Functions      string
+	}{
+		PrimaryType:    formatString(typedData.PrimaryType),
+		DomainName:     formatString(typedData.Domain.Name),
+		DomainVersion:  formatString(typedData.Domain.Version),
+		DomainChainId:  formatDomainChainId(typedData.Domain.ChainId),
+		DomainContract: formatDomainContract(typedData.Domain.VerifyingContract),
+		Signer:         formatAddress(&req.SignerAddress),
+		ChainID:        formatChainID(req.ChainID),
+		MessageData:    messageData,
+		Functions:      functions,
+	}
+
+	tmpl, err := template.New("typedDataFunctions").Parse(solidityTypedDataFunctionsTemplate)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("failed to execute template: %w", err)
+	}
+
+	return buf.String(), nil
+}
+
+// GenerateTypedDataExpressionSyntaxCheckScript generates a syntax check script for TypedDataExpression mode
+func (e *SolidityRuleEvaluator) GenerateTypedDataExpressionSyntaxCheckScript(expression string) string {
+	return fmt.Sprintf(`// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+contract SyntaxCheck {
+    function run() public pure returns (bool) {
+        // EIP-712 Domain context
+        string memory primaryType = "";
+        string memory domainName = "";
+        string memory domainVersion = "";
+        uint256 domainChainId = 1;
+        address domainContract = address(0);
+
+        // Signer context
+        address signer = address(0);
+        uint256 chainId = 1;
+
+        // Suppress unused variable warnings
+        bytes memory _primaryType = bytes(primaryType);
+        bytes memory _domainName = bytes(domainName);
+        bytes memory _domainVersion = bytes(domainVersion);
+        domainChainId; domainContract; signer; chainId; _primaryType; _domainName; _domainVersion;
+
+        // Common EIP-712 message fields for syntax check
+        // Permit fields
+        address owner = address(0);
+        address spender = address(0);
+        uint256 value = 0;
+        uint256 nonce = 0;
+        uint256 deadline = 0;
+
+        // Suppress unused variable warnings
+        owner; spender; value; nonce; deadline;
+
+        // User expression
+        %s
+
+        return true;
+    }
+}
+`, expression)
+}
+
+// GenerateTypedDataFunctionsSyntaxCheckScript generates a syntax check script for TypedDataFunctions mode
+func (e *SolidityRuleEvaluator) GenerateTypedDataFunctionsSyntaxCheckScript(functions string) string {
+	return fmt.Sprintf(`// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+contract SyntaxCheck {
+    // EIP-712 Domain context
+    string public primaryType;
+    string public domainName;
+    string public domainVersion;
+    uint256 public domainChainId;
+    address public domainContract;
+    address public txSigner;
+    uint256 public txChainId;
+
+    // EIP-712 Message encoded as bytes for struct decoding
+    bytes public messageData;
+
+    constructor() {
+        primaryType = "";
+        domainName = "";
+        domainVersion = "";
+        domainChainId = 1;
+        domainContract = address(0);
+        txSigner = address(0);
+        txChainId = 1;
+        messageData = "";
+    }
+
+    // User-defined structs and validation functions
+    %s
+
+    function run() public returns (bool) {
+        return true;
+    }
+
+    function _validateMessage() internal virtual {
+        // Override in user functions if needed
+    }
+}
+`, functions)
+}
+
+// parseTypedDataFromPayload extracts TypedDataPayload from request payload
+func parseTypedDataFromPayload(payload []byte) (*TypedDataPayload, error) {
+	var evmPayload EVMSignPayload
+	if err := json.Unmarshal(payload, &evmPayload); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal EVM payload: %w", err)
+	}
+
+	if evmPayload.TypedData == nil {
+		return nil, fmt.Errorf("typed_data field is required for EIP-712 validation")
+	}
+
+	return evmPayload.TypedData, nil
+}
+
+// generateMessageFieldDeclarations generates Solidity variable declarations from typed data message
+func generateMessageFieldDeclarations(typedData *TypedDataPayload) string {
+	if typedData == nil || typedData.Message == nil {
+		return ""
+	}
+
+	var declarations []string
+
+	// Get type definitions for the primary type
+	fields := typedData.Types[typedData.PrimaryType]
+
+	for _, field := range fields {
+		value, exists := typedData.Message[field.Name]
+		if !exists {
+			continue
+		}
+
+		// Generate declaration based on field type
+		decl := generateFieldDeclaration(field.Name, field.Type, value)
+		if decl != "" {
+			declarations = append(declarations, decl)
+		}
+	}
+
+	return strings.Join(declarations, "\n        ")
+}
+
+// generateFieldDeclaration generates a single Solidity variable declaration
+func generateFieldDeclaration(name, solidityType string, value interface{}) string {
+	// Handle common Solidity types
+	switch {
+	case solidityType == "address":
+		return fmt.Sprintf("address %s = %s;", name, formatInterfaceAsAddress(value))
+	case solidityType == "uint256" || solidityType == "uint":
+		return fmt.Sprintf("uint256 %s = %s;", name, formatInterfaceAsUint(value))
+	case solidityType == "int256" || solidityType == "int":
+		return fmt.Sprintf("int256 %s = %s;", name, formatInterfaceAsInt(value))
+	case solidityType == "bool":
+		return fmt.Sprintf("bool %s = %s;", name, formatInterfaceAsBool(value))
+	case solidityType == "bytes32":
+		return fmt.Sprintf("bytes32 %s = %s;", name, formatInterfaceAsBytes32(value))
+	case solidityType == "bytes":
+		return fmt.Sprintf("bytes memory %s = %s;", name, formatInterfaceAsBytes(value))
+	case solidityType == "string":
+		return fmt.Sprintf("string memory %s = %s;", name, formatInterfaceAsString(value))
+	case strings.HasPrefix(solidityType, "uint"):
+		// uint8, uint16, ..., uint248
+		return fmt.Sprintf("%s %s = %s;", solidityType, name, formatInterfaceAsUint(value))
+	case strings.HasPrefix(solidityType, "int"):
+		// int8, int16, ..., int248
+		return fmt.Sprintf("%s %s = %s;", solidityType, name, formatInterfaceAsInt(value))
+	case strings.HasPrefix(solidityType, "bytes") && len(solidityType) <= 8:
+		// bytes1, bytes2, ..., bytes32
+		return fmt.Sprintf("%s %s = %s;", solidityType, name, formatInterfaceAsFixedBytes(value, solidityType))
+	default:
+		// For custom types or arrays, skip for now (can be extended)
+		return fmt.Sprintf("// Skipped field %s of type %s", name, solidityType)
+	}
+}
+
+// encodeMessageData encodes the message fields as ABI-encoded bytes
+func encodeMessageData(typedData *TypedDataPayload) string {
+	if typedData == nil || typedData.Message == nil {
+		return `hex""`
+	}
+
+	// For simplicity, we encode message as JSON bytes
+	// The user can decode it using abi.decode with their struct definition
+	msgBytes, err := json.Marshal(typedData.Message)
+	if err != nil {
+		return `hex""`
+	}
+
+	return fmt.Sprintf(`hex"%s"`, hex.EncodeToString(msgBytes))
+}
+
+// Helper functions for formatting typed data values
+
+func formatString(s string) string {
+	if s == "" {
+		return `""`
+	}
+	// Escape special characters for Solidity string literal
+	escaped := strings.ReplaceAll(s, `\`, `\\`)
+	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+	return fmt.Sprintf(`"%s"`, escaped)
+}
+
+func formatDomainChainId(chainId string) string {
+	if chainId == "" {
+		return "0"
+	}
+	return chainId
+}
+
+func formatDomainContract(addr string) string {
+	if addr == "" {
+		return "address(0)"
+	}
+	return addr
+}
+
+func formatInterfaceAsAddress(v interface{}) string {
+	switch val := v.(type) {
+	case string:
+		if val == "" {
+			return "address(0)"
+		}
+		return val
+	default:
+		return "address(0)"
+	}
+}
+
+func formatInterfaceAsUint(v interface{}) string {
+	switch val := v.(type) {
+	case string:
+		if val == "" {
+			return "0"
+		}
+		return val
+	case float64:
+		return fmt.Sprintf("%.0f", val)
+	case int:
+		return fmt.Sprintf("%d", val)
+	case int64:
+		return fmt.Sprintf("%d", val)
+	case uint64:
+		return fmt.Sprintf("%d", val)
+	default:
+		return "0"
+	}
+}
+
+func formatInterfaceAsInt(v interface{}) string {
+	switch val := v.(type) {
+	case string:
+		if val == "" {
+			return "0"
+		}
+		return val
+	case float64:
+		return fmt.Sprintf("%.0f", val)
+	case int:
+		return fmt.Sprintf("%d", val)
+	case int64:
+		return fmt.Sprintf("%d", val)
+	default:
+		return "0"
+	}
+}
+
+func formatInterfaceAsBool(v interface{}) string {
+	switch val := v.(type) {
+	case bool:
+		if val {
+			return "true"
+		}
+		return "false"
+	case string:
+		if val == "true" {
+			return "true"
+		}
+		return "false"
+	default:
+		return "false"
+	}
+}
+
+func formatInterfaceAsBytes32(v interface{}) string {
+	switch val := v.(type) {
+	case string:
+		if val == "" {
+			return "bytes32(0)"
+		}
+		if strings.HasPrefix(val, "0x") {
+			return val
+		}
+		return fmt.Sprintf(`hex"%s"`, val)
+	default:
+		return "bytes32(0)"
+	}
+}
+
+func formatInterfaceAsBytes(v interface{}) string {
+	switch val := v.(type) {
+	case string:
+		if val == "" {
+			return `hex""`
+		}
+		if strings.HasPrefix(val, "0x") {
+			return fmt.Sprintf(`hex"%s"`, strings.TrimPrefix(val, "0x"))
+		}
+		return fmt.Sprintf(`hex"%s"`, hex.EncodeToString([]byte(val)))
+	case []byte:
+		return fmt.Sprintf(`hex"%s"`, hex.EncodeToString(val))
+	default:
+		return `hex""`
+	}
+}
+
+func formatInterfaceAsString(v interface{}) string {
+	switch val := v.(type) {
+	case string:
+		escaped := strings.ReplaceAll(val, `\`, `\\`)
+		escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+		return fmt.Sprintf(`"%s"`, escaped)
+	default:
+		return `""`
+	}
+}
+
+func formatInterfaceAsFixedBytes(v interface{}, solidityType string) string {
+	switch val := v.(type) {
+	case string:
+		if val == "" {
+			return fmt.Sprintf("%s(0)", solidityType)
+		}
+		if strings.HasPrefix(val, "0x") {
+			return val
+		}
+		return fmt.Sprintf(`hex"%s"`, val)
+	default:
+		return fmt.Sprintf("%s(0)", solidityType)
+	}
 }
 
 // parseRevertReason extracts the revert reason from forge output
