@@ -62,6 +62,16 @@ type TestCaseResult struct {
 	Error          string `json:"error,omitempty"`
 }
 
+// ValidationMode represents the validation mode for a Solidity rule
+type ValidationMode int
+
+const (
+	ValidationModeExpression ValidationMode = iota
+	ValidationModeFunctions
+	ValidationModeTypedDataExpression
+	ValidationModeTypedDataFunctions
+)
+
 // ValidateRule performs full validation of a Solidity expression rule
 func (v *SolidityRuleValidator) ValidateRule(ctx context.Context, rule *types.Rule) (*ValidationResult, error) {
 	var config SolidityExpressionConfig
@@ -69,11 +79,22 @@ func (v *SolidityRuleValidator) ValidateRule(ctx context.Context, rule *types.Ru
 		return nil, fmt.Errorf("invalid solidity expression config: %w", err)
 	}
 
+	// Determine validation mode and code
+	mode, code := v.determineValidationMode(&config)
+
+	// Validate that at least one mode is specified
+	if code == "" {
+		return nil, fmt.Errorf("either expression, functions, typed_data_expression, or typed_data_functions must be specified")
+	}
+
 	result := &ValidationResult{Valid: true}
 
 	// Step 1: Syntax validation via forge build
-	v.logger.Debug("validating Solidity syntax", "rule_id", rule.ID)
-	syntaxErr, err := v.validateSyntax(ctx, config.Expression)
+	v.logger.Debug("validating Solidity syntax",
+		"rule_id", rule.ID,
+		"mode", v.modeString(mode),
+	)
+	syntaxErr, err := v.validateSyntaxForMode(ctx, code, mode)
 	if err != nil {
 		return nil, fmt.Errorf("syntax validation failed: %w", err)
 	}
@@ -101,7 +122,7 @@ func (v *SolidityRuleValidator) ValidateRule(ctx context.Context, rule *types.Ru
 			"test_case", tc.Name,
 			"index", i,
 		)
-		tcResult := v.executeTestCase(ctx, config.Expression, tc)
+		tcResult := v.executeTestCaseForMode(ctx, code, tc, mode)
 		result.TestCaseResults = append(result.TestCaseResults, tcResult)
 
 		if !tcResult.Passed {
@@ -123,10 +144,241 @@ func (v *SolidityRuleValidator) ValidateRule(ctx context.Context, rule *types.Ru
 	return result, nil
 }
 
-// validateSyntax compiles the Solidity expression to check for syntax errors
+// determineValidationMode determines the validation mode based on config fields
+func (v *SolidityRuleValidator) determineValidationMode(config *SolidityExpressionConfig) (ValidationMode, string) {
+	// Priority: TypedDataExpression > TypedDataFunctions > Functions > Expression
+	if config.TypedDataExpression != "" {
+		return ValidationModeTypedDataExpression, config.TypedDataExpression
+	}
+	if config.TypedDataFunctions != "" {
+		return ValidationModeTypedDataFunctions, config.TypedDataFunctions
+	}
+	if config.Functions != "" {
+		return ValidationModeFunctions, config.Functions
+	}
+	return ValidationModeExpression, config.Expression
+}
+
+// modeString returns a human-readable string for the validation mode
+func (v *SolidityRuleValidator) modeString(mode ValidationMode) string {
+	switch mode {
+	case ValidationModeExpression:
+		return "expression"
+	case ValidationModeFunctions:
+		return "functions"
+	case ValidationModeTypedDataExpression:
+		return "typed_data_expression"
+	case ValidationModeTypedDataFunctions:
+		return "typed_data_functions"
+	default:
+		return "unknown"
+	}
+}
+
+// validateSyntaxForMode compiles the Solidity code to check for syntax errors based on mode
+func (v *SolidityRuleValidator) validateSyntaxForMode(ctx context.Context, code string, mode ValidationMode) (*SyntaxError, error) {
+	var script string
+	switch mode {
+	case ValidationModeExpression:
+		script = v.evaluator.GenerateSyntaxCheckScript(code)
+	case ValidationModeFunctions:
+		script = v.evaluator.GenerateFunctionSyntaxCheckScript(code)
+	case ValidationModeTypedDataExpression:
+		script = v.evaluator.GenerateTypedDataExpressionSyntaxCheckScript(code)
+	case ValidationModeTypedDataFunctions:
+		script = v.evaluator.GenerateTypedDataFunctionsSyntaxCheckScript(code)
+	default:
+		return nil, fmt.Errorf("unknown validation mode: %d", mode)
+	}
+	return v.compileSyntaxCheckScript(ctx, script)
+}
+
+// executeTestCaseForMode runs a single test case based on the validation mode
+func (v *SolidityRuleValidator) executeTestCaseForMode(ctx context.Context, code string, tc SolidityTestCase, mode ValidationMode) TestCaseResult {
+	switch mode {
+	case ValidationModeExpression, ValidationModeFunctions:
+		return v.executeTestCaseWithMode(ctx, code, tc, mode == ValidationModeFunctions)
+	case ValidationModeTypedDataExpression, ValidationModeTypedDataFunctions:
+		return v.executeTypedDataTestCase(ctx, code, tc, mode)
+	default:
+		return TestCaseResult{
+			Name:   tc.Name,
+			Passed: false,
+			Error:  fmt.Sprintf("unknown validation mode: %d", mode),
+		}
+	}
+}
+
+// executeTypedDataTestCase runs a test case for EIP-712 typed data validation
+func (v *SolidityRuleValidator) executeTypedDataTestCase(ctx context.Context, code string, tc SolidityTestCase, mode ValidationMode) TestCaseResult {
+	result := TestCaseResult{
+		Name:           tc.Name,
+		ExpectedPass:   tc.ExpectPass,
+		ExpectedReason: tc.ExpectReason,
+	}
+
+	// Build typed data from test input
+	typedData, err := v.buildTypedDataFromInput(tc.Input)
+	if err != nil {
+		result.Passed = false
+		result.Error = fmt.Sprintf("failed to build typed data from input: %v", err)
+		return result
+	}
+
+	// Convert test input to SignRequest with typed data payload
+	req := v.testInputToTypedDataRequest(tc.Input, typedData)
+
+	// Execute the rule based on mode
+	var passed bool
+	var reason string
+	if mode == ValidationModeTypedDataExpression {
+		passed, reason, err = v.evaluator.evaluateTypedDataExpression(ctx, code, req, typedData)
+	} else {
+		passed, reason, err = v.evaluator.evaluateTypedDataFunctions(ctx, code, req, typedData)
+	}
+
+	if err != nil {
+		result.Passed = false
+		result.Error = err.Error()
+		return result
+	}
+
+	result.ActualPass = passed
+	result.ActualReason = reason
+
+	// Compare with expectation
+	result.Passed = v.compareTestResult(tc.ExpectPass, passed, tc.ExpectReason, reason)
+	if !result.Passed {
+		if tc.ExpectPass && !passed {
+			result.Error = fmt.Sprintf("expected pass but got revert: %s", reason)
+		} else if !tc.ExpectPass && passed {
+			result.Error = "expected revert but passed"
+		} else if tc.ExpectReason != "" && !strings.Contains(reason, tc.ExpectReason) {
+			result.Error = fmt.Sprintf("expected reason containing '%s' but got '%s'", tc.ExpectReason, reason)
+		}
+	}
+
+	return result
+}
+
+// buildTypedDataFromInput constructs a TypedDataPayload from test input
+func (v *SolidityRuleValidator) buildTypedDataFromInput(input SolidityTestInput) (*TypedDataPayload, error) {
+	if input.TypedData == nil {
+		return nil, fmt.Errorf("typed_data field is required for EIP-712 test cases")
+	}
+
+	typedData := &TypedDataPayload{
+		PrimaryType: input.TypedData.PrimaryType,
+		Message:     input.TypedData.Message,
+		Types:       make(map[string][]TypedDataField),
+	}
+
+	// Set default primary type if not specified
+	if typedData.PrimaryType == "" {
+		typedData.PrimaryType = "Permit" // Common default for EIP-2612
+	}
+
+	// Build domain from input
+	if input.TypedData.Domain != nil {
+		typedData.Domain = TypedDataDomain{
+			Name:              input.TypedData.Domain.Name,
+			Version:           input.TypedData.Domain.Version,
+			ChainId:           input.TypedData.Domain.ChainID,
+			VerifyingContract: input.TypedData.Domain.VerifyingContract,
+			Salt:              input.TypedData.Domain.Salt,
+		}
+	}
+
+	// Infer types from message fields if not explicitly provided
+	// This allows test cases to work without explicit type definitions
+	if typedData.Message != nil {
+		fields := make([]TypedDataField, 0, len(typedData.Message))
+		for name, value := range typedData.Message {
+			fieldType := inferSolidityType(value)
+			fields = append(fields, TypedDataField{
+				Name: name,
+				Type: fieldType,
+			})
+		}
+		typedData.Types[typedData.PrimaryType] = fields
+	}
+
+	return typedData, nil
+}
+
+// testInputToTypedDataRequest converts test input to a SignRequest with typed data payload
+func (v *SolidityRuleValidator) testInputToTypedDataRequest(input SolidityTestInput, typedData *TypedDataPayload) *types.SignRequest {
+	req := &types.SignRequest{
+		ChainID:       input.ChainID,
+		SignerAddress: input.Signer,
+		SignType:      SignTypeTypedData,
+	}
+	if req.ChainID == "" {
+		req.ChainID = "1"
+	}
+	if req.SignerAddress == "" {
+		req.SignerAddress = "0x0000000000000000000000000000000000000000"
+	}
+
+	// Encode typed data as payload
+	evmPayload := EVMSignPayload{
+		TypedData: typedData,
+	}
+	payload, _ := json.Marshal(evmPayload)
+	req.Payload = payload
+
+	return req
+}
+
+// inferSolidityType infers the Solidity type from a Go value
+func inferSolidityType(value interface{}) string {
+	switch v := value.(type) {
+	case string:
+		// Check if it's an address (0x + 40 hex chars)
+		if len(v) == 42 && strings.HasPrefix(v, "0x") {
+			return "address"
+		}
+		// Check if it's bytes32 (0x + 64 hex chars)
+		if len(v) == 66 && strings.HasPrefix(v, "0x") {
+			return "bytes32"
+		}
+		// Check if it's a numeric string
+		if _, err := json.Number(v).Int64(); err == nil {
+			return "uint256"
+		}
+		return "string"
+	case float64:
+		return "uint256"
+	case int, int64, uint64:
+		return "uint256"
+	case bool:
+		return "bool"
+	case []byte:
+		return "bytes"
+	default:
+		return "bytes"
+	}
+}
+
+// validateSyntaxWithMode compiles the Solidity code to check for syntax errors
+func (v *SolidityRuleValidator) validateSyntaxWithMode(ctx context.Context, code string, isFunctionMode bool) (*SyntaxError, error) {
+	var script string
+	if isFunctionMode {
+		script = v.evaluator.GenerateFunctionSyntaxCheckScript(code)
+	} else {
+		script = v.evaluator.GenerateSyntaxCheckScript(code)
+	}
+	return v.compileSyntaxCheckScript(ctx, script)
+}
+
+// validateSyntax compiles the Solidity expression to check for syntax errors (legacy, expression mode only)
 func (v *SolidityRuleValidator) validateSyntax(ctx context.Context, expression string) (*SyntaxError, error) {
-	// Generate a test script with dummy values
 	script := v.evaluator.GenerateSyntaxCheckScript(expression)
+	return v.compileSyntaxCheckScript(ctx, script)
+}
+
+// compileSyntaxCheckScript compiles a syntax check script and returns any errors
+func (v *SolidityRuleValidator) compileSyntaxCheckScript(ctx context.Context, script string) (*SyntaxError, error) {
 
 	// Write to temp file
 	scriptPath := filepath.Join(v.evaluator.GetTempDir(), "syntax_check.sol")
@@ -172,8 +424,8 @@ libs = []
 	return nil, nil
 }
 
-// executeTestCase runs a single test case and compares result with expectation
-func (v *SolidityRuleValidator) executeTestCase(ctx context.Context, expression string, tc SolidityTestCase) TestCaseResult {
+// executeTestCaseWithMode runs a single test case with the specified mode
+func (v *SolidityRuleValidator) executeTestCaseWithMode(ctx context.Context, code string, tc SolidityTestCase, isFunctionMode bool) TestCaseResult {
 	result := TestCaseResult{
 		Name:           tc.Name,
 		ExpectedPass:   tc.ExpectPass,
@@ -183,8 +435,16 @@ func (v *SolidityRuleValidator) executeTestCase(ctx context.Context, expression 
 	// Convert test input to SignRequest and ParsedPayload
 	req, parsed := v.testInputToRequest(tc.Input)
 
-	// Execute the rule
-	passed, reason, err := v.evaluator.evaluateExpression(ctx, expression, req, parsed)
+	// Execute the rule based on mode
+	var passed bool
+	var reason string
+	var err error
+	if isFunctionMode {
+		passed, reason, err = v.evaluator.evaluateFunctions(ctx, code, req, parsed)
+	} else {
+		passed, reason, err = v.evaluator.evaluateExpression(ctx, code, req, parsed)
+	}
+
 	if err != nil {
 		result.Passed = false
 		result.Error = err.Error()
@@ -207,6 +467,11 @@ func (v *SolidityRuleValidator) executeTestCase(ctx context.Context, expression 
 	}
 
 	return result
+}
+
+// executeTestCase runs a single test case and compares result with expectation (legacy, expression mode only)
+func (v *SolidityRuleValidator) executeTestCase(ctx context.Context, expression string, tc SolidityTestCase) TestCaseResult {
+	return v.executeTestCaseWithMode(ctx, expression, tc, false)
 }
 
 // compareTestResult compares expected and actual test results

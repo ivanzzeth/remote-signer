@@ -11,6 +11,23 @@ A modular, stateless, secure signing service with multi-chain extensibility. Bui
 - **Auto Rule Generation**: Automatically create rules from approved transactions
 - **PostgreSQL Storage**: GORM with auto-migration for backward-compatible schema changes
 
+## Documentation
+
+For detailed configuration and API usage, refer to the following resources:
+
+| Resource | Description |
+|----------|-------------|
+| [docs/API.md](docs/API.md) | **Complete API reference** - Authentication, endpoints, workflows, rule types, and examples |
+| [configs/config.example.yaml](configs/config.example.yaml) | **Configuration template** - Full example with all options and rule definitions |
+
+**Quick Navigation:**
+- **Getting Started**: See [Quick Start](#quick-start) below
+- **API Authentication**: See [docs/API.md#authentication](docs/API.md#authentication)
+- **Rule Configuration**: See [docs/API.md#rules-configuration](docs/API.md#rules-configuration)
+- **Solidity Expression Rules**: See [docs/API.md#rule-type-evm_solidity_expression](docs/API.md#rule-type-evm_solidity_expression)
+- **EIP-712 Typed Data Validation**: See [docs/API.md#eip-712-typed-data-signing](docs/API.md#eip-712-typed-data-signing)
+- **ERC-20/721/1155 Examples**: See [docs/API.md#mainstream-eip-standard-examples](docs/API.md#mainstream-eip-standard-examples)
+
 ## Architecture
 
 ```
@@ -74,9 +91,11 @@ signing → failed       (on sign error)
 
 ### Solidity Expression Rules
 
-For complex validation logic, use `evm_solidity_expression` rules that allow writing validation using native Solidity syntax with `require()` statements. See [docs/API.md](docs/API.md) for detailed documentation.
+For complex validation logic, use `evm_solidity_expression` rules that allow writing validation using native Solidity syntax. Two modes are supported:
 
-Available variables in expressions:
+#### Mode 1: Expression Mode (require statements)
+
+Write `require()` statements with available context variables:
 - `to` (address) - Transaction recipient
 - `value` (uint256) - Transaction value in wei
 - `selector` (bytes4) - Method selector
@@ -84,11 +103,32 @@ Available variables in expressions:
 - `chainId` (uint256) - Chain ID
 - `signer` (address) - Signing address
 
-Example:
 ```solidity
 require(value <= 1 ether, "exceeds 1 ETH limit");
 require(to != address(0), "cannot send to zero address");
 ```
+
+#### Mode 2: Function Mode (automatic selector matching)
+
+Define functions that match transaction selectors. When a transaction's selector matches a defined function, it's automatically called with decoded parameters:
+
+```solidity
+// When tx selector is 0xa9059cbb (transfer), this function is called
+function transfer(address to, uint256 amount) external {
+    require(amount <= 10000e6, "exceeds 10k USDC limit");
+    require(to != address(0), "invalid recipient");
+}
+
+// When tx selector is 0x095ea7b3 (approve), this function is called
+function approve(address spender, uint256 amount) external {
+    require(spender != address(0), "cannot approve zero address");
+}
+```
+
+Context variables available in Function mode as state variables:
+- `txTo`, `txValue`, `txSelector`, `txData`, `txChainId`, `txSigner`
+
+See [docs/API.md](docs/API.md) for detailed documentation.
 
 ## Quick Start
 
@@ -334,6 +374,7 @@ To add support for a new chain (e.g., Solana):
 
 ### Planned Features
 
+- [x] **EIP-712 Typed Data Validation**: Parameter-level validation for EIP-712 signed messages (Permit, Seaport orders, Permit2, etc.) using `typed_data_expression` and `typed_data_functions` modes
 - [ ] **Solidity Rule Coverage Enforcement**: Integrate `forge coverage` to enforce minimum branch coverage threshold for `evm_solidity_expression` rules. Rules with insufficient test coverage would be rejected.
 - [ ] **Solana Chain Support**: Add Solana signing adapter
 - [ ] **Cosmos Chain Support**: Add Cosmos/Tendermint signing adapter

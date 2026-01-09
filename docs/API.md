@@ -939,6 +939,625 @@ When test cases fail:
 
 ---
 
+### Function Mode for Solidity Expression Rules
+
+In addition to **Expression Mode** (using `require()` statements with context variables), Solidity Expression rules support **Function Mode**. This allows you to define Solidity functions that automatically match transaction selectors and receive decoded parameters.
+
+**Key Benefits:**
+- **Automatic Selector Matching**: When transaction selector matches a defined function, it's automatically called
+- **Automatic Parameter Decoding**: Function parameters are decoded from calldata automatically
+- **Cleaner Syntax**: No need to manually decode with `abi.decode()`
+- **Multiple Functions**: Define multiple functions for different methods in a single rule
+
+**Config for Function Mode:**
+
+```json
+{
+  "type": "evm_solidity_expression",
+  "mode": "whitelist",
+  "config": {
+    "functions": "function transfer(address to, uint256 amount) external { require(amount <= 10000e6, \"exceeds limit\"); }",
+    "description": "Validate ERC20 transfers",
+    "test_cases": [...]
+  }
+}
+```
+
+**Available State Variables in Function Mode:**
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `txTo` | `address` | Transaction recipient address |
+| `txValue` | `uint256` | Transaction value in wei |
+| `txSelector` | `bytes4` | Method selector |
+| `txData` | `bytes` | Full transaction calldata |
+| `txChainId` | `uint256` | Chain ID |
+| `txSigner` | `address` | Signing address |
+
+**How Function Mode Works:**
+
+1. Transaction calldata is passed to the contract
+2. If the selector matches a defined function, that function is called with decoded parameters
+3. If no function matches, validation passes (use Expression Mode for fallback checks)
+4. Any `require()` failure in the function causes the rule to reject
+
+---
+
+## Mainstream EIP Standard Examples
+
+### ERC-20 Token Standard
+
+ERC-20 defines the standard interface for fungible tokens.
+
+**Method Selectors:**
+| Method | Selector | Signature |
+|--------|----------|-----------|
+| `transfer` | `0xa9059cbb` | `transfer(address,uint256)` |
+| `approve` | `0x095ea7b3` | `approve(address,uint256)` |
+| `transferFrom` | `0x23b872dd` | `transferFrom(address,address,uint256)` |
+
+#### Example: ERC-20 Transfer Validation (Function Mode)
+
+```yaml
+# Validate ERC20 transfers with amount limits
+- name: "ERC20 transfer limit"
+  type: "evm_solidity_expression"
+  mode: "whitelist"
+  enabled: true
+  config:
+    functions: |
+      function transfer(address to, uint256 amount) external {
+          require(amount <= 10000e6, "exceeds 10k token limit");
+          require(to != address(0), "cannot transfer to zero address");
+      }
+    description: "Limit ERC20 transfers to 10,000 tokens"
+    test_cases:
+      - name: "should pass transfer 5000 tokens"
+        input:
+          # transfer(0x5B38Da6a701c568545dCfcB03FcB875f56beddC4, 5000000000)
+          data: "0xa9059cbb0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc400000000000000000000000000000000000000000000000000000001dcd65000"
+        expect_pass: true
+      - name: "should reject transfer 20000 tokens"
+        input:
+          # transfer(0x5B38Da6a701c568545dCfcB03FcB875f56beddC4, 20000000000)
+          data: "0xa9059cbb0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc40000000000000000000000000000000000000000000000000000000ba43b7400"
+        expect_pass: false
+        expect_reason: "exceeds 10k token limit"
+```
+
+#### Example: ERC-20 Approve Validation
+
+```yaml
+# Validate ERC20 approvals with spender whitelist
+- name: "ERC20 approve validation"
+  type: "evm_solidity_expression"
+  mode: "whitelist"
+  enabled: true
+  config:
+    functions: |
+      function approve(address spender, uint256 amount) external {
+          require(spender != address(0), "cannot approve zero address");
+          // Optional: limit approval amount
+          require(amount <= type(uint128).max, "approval amount too large");
+      }
+    description: "Validate ERC20 approvals"
+    test_cases:
+      - name: "should pass valid approve"
+        input:
+          # approve(0x5B38Da6a701c568545dCfcB03FcB875f56beddC4, 1000000000000000000)
+          data: "0x095ea7b30000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc40000000000000000000000000000000000000000000000000de0b6b3a7640000"
+        expect_pass: true
+      - name: "should reject approve to zero address"
+        input:
+          # approve(0x0000000000000000000000000000000000000000, 1000000000000000000)
+          data: "0x095ea7b300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000de0b6b3a7640000"
+        expect_pass: false
+        expect_reason: "cannot approve zero address"
+```
+
+#### Example: ERC-20 TransferFrom Validation
+
+```yaml
+# Validate ERC20 transferFrom with sender/recipient checks
+- name: "ERC20 transferFrom validation"
+  type: "evm_solidity_expression"
+  mode: "whitelist"
+  enabled: true
+  config:
+    functions: |
+      function transferFrom(address from, address to, uint256 amount) external {
+          require(from != address(0), "invalid sender");
+          require(to != address(0), "invalid recipient");
+          require(amount <= 100000e6, "exceeds 100k limit");
+      }
+    description: "Validate ERC20 transferFrom operations"
+    test_cases:
+      - name: "should pass valid transferFrom"
+        input:
+          # transferFrom(0x1234..., 0x5678..., 50000e6)
+          data: "0x23b872dd0000000000000000000000001234567890123456789012345678901234567890000000000000000000000000567890123456789012345678901234567890123400000000000000000000000000000000000000000000000000000002e90edd00"
+        expect_pass: true
+      - name: "should reject amount exceeding limit"
+        input:
+          # transferFrom with amount > 100000e6
+          data: "0x23b872dd00000000000000000000000012345678901234567890123456789012345678900000000000000000000000005678901234567890123456789012345678901234000000000000000000000000000000000000000000000000000000174876e800"
+        expect_pass: false
+        expect_reason: "exceeds 100k limit"
+```
+
+#### Example: Combined ERC-20 Operations
+
+```yaml
+# Handle all ERC20 methods in a single rule
+- name: "ERC20 comprehensive validation"
+  type: "evm_solidity_expression"
+  mode: "whitelist"
+  enabled: true
+  config:
+    functions: |
+      // Transfer with amount limit
+      function transfer(address to, uint256 amount) external {
+          require(to != address(0), "invalid recipient");
+          require(amount <= 50000e6, "transfer exceeds 50k limit");
+      }
+
+      // Approve with spender validation
+      function approve(address spender, uint256 amount) external {
+          require(spender != address(0), "invalid spender");
+          // Block unlimited approvals
+          require(amount < type(uint256).max, "unlimited approval not allowed");
+      }
+
+      // TransferFrom with comprehensive checks
+      function transferFrom(address from, address to, uint256 amount) external {
+          require(from != address(0) && to != address(0), "invalid addresses");
+          require(amount <= 50000e6, "transferFrom exceeds 50k limit");
+      }
+    description: "Comprehensive ERC20 validation with limits"
+    test_cases:
+      - name: "pass transfer 10k"
+        input:
+          data: "0xa9059cbb0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc400000000000000000000000000000000000000000000000000000002540be400"
+        expect_pass: true
+      - name: "pass approve 1M tokens"
+        input:
+          data: "0x095ea7b30000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc4000000000000000000000000000000000000000000000000000000e8d4a51000"
+        expect_pass: true
+      - name: "reject unlimited approve"
+        input:
+          data: "0x095ea7b30000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc4ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        expect_pass: false
+        expect_reason: "unlimited approval not allowed"
+```
+
+---
+
+### ERC-721 NFT Standard
+
+ERC-721 defines the standard interface for non-fungible tokens (NFTs).
+
+**Method Selectors:**
+| Method | Selector | Signature |
+|--------|----------|-----------|
+| `transferFrom` | `0x23b872dd` | `transferFrom(address,address,uint256)` |
+| `safeTransferFrom` | `0x42842e0e` | `safeTransferFrom(address,address,uint256)` |
+| `safeTransferFrom` (with data) | `0xb88d4fde` | `safeTransferFrom(address,address,uint256,bytes)` |
+| `approve` | `0x095ea7b3` | `approve(address,uint256)` |
+| `setApprovalForAll` | `0xa22cb465` | `setApprovalForAll(address,bool)` |
+
+#### Example: ERC-721 Transfer Validation
+
+```yaml
+# Validate ERC721 NFT transfers
+- name: "ERC721 transfer validation"
+  type: "evm_solidity_expression"
+  mode: "whitelist"
+  enabled: true
+  config:
+    functions: |
+      // Standard transferFrom
+      function transferFrom(address from, address to, uint256 tokenId) external {
+          require(to != address(0), "cannot transfer to zero address");
+          // Only allow transfers from the signer's own address
+          require(from == txSigner, "can only transfer own NFTs");
+      }
+
+      // safeTransferFrom (3 params)
+      function safeTransferFrom(address from, address to, uint256 tokenId) external {
+          require(to != address(0), "cannot transfer to zero address");
+          require(from == txSigner, "can only transfer own NFTs");
+      }
+    description: "Validate ERC721 transfers - only allow transferring own NFTs"
+    test_cases:
+      - name: "should pass transferFrom own NFT"
+        input:
+          signer: "0x1234567890123456789012345678901234567890"
+          # transferFrom(0x1234...7890, 0x5678...1234, 1)
+          data: "0x23b872dd00000000000000000000000012345678901234567890123456789012345678900000000000000000000000005678901234567890123456789012345678901234000000000000000000000000000000000000000000000000000000000000001"
+        expect_pass: true
+      - name: "should reject transferFrom others NFT"
+        input:
+          signer: "0x1234567890123456789012345678901234567890"
+          # transferFrom(0xAAAA...AAAA, 0x5678...1234, 1) - from different address
+          data: "0x23b872dd000000000000000000000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0000000000000000000000005678901234567890123456789012345678901234000000000000000000000000000000000000000000000000000000000000001"
+        expect_pass: false
+        expect_reason: "can only transfer own NFTs"
+```
+
+#### Example: ERC-721 Approval Validation
+
+```yaml
+# Validate ERC721 approvals with operator whitelist
+- name: "ERC721 approval validation"
+  type: "evm_solidity_expression"
+  mode: "whitelist"
+  enabled: true
+  config:
+    functions: |
+      // Single token approval
+      function approve(address to, uint256 tokenId) external {
+          // Allow approving to zero address (revoke) or valid addresses
+          // Optionally restrict to known marketplaces
+      }
+
+      // Operator approval for all tokens
+      function setApprovalForAll(address operator, bool approved) external {
+          require(operator != address(0), "invalid operator");
+          // Add known marketplace addresses as allowed operators
+          // Example: OpenSea, Blur, etc.
+      }
+    description: "Validate ERC721 approval operations"
+    test_cases:
+      - name: "should pass approve for single token"
+        input:
+          # approve(0x5678...1234, 42)
+          data: "0x095ea7b30000000000000000000000005678901234567890123456789012345678901234000000000000000000000000000000000000000000000000000000000000002a"
+        expect_pass: true
+      - name: "should pass setApprovalForAll"
+        input:
+          # setApprovalForAll(0x5678...1234, true)
+          data: "0xa22cb46500000000000000000000000056789012345678901234567890123456789012340000000000000000000000000000000000000000000000000000000000000001"
+        expect_pass: true
+      - name: "should reject setApprovalForAll to zero address"
+        input:
+          # setApprovalForAll(0x0000...0000, true)
+          data: "0xa22cb46500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001"
+        expect_pass: false
+        expect_reason: "invalid operator"
+```
+
+---
+
+### ERC-1155 Multi-Token Standard
+
+ERC-1155 defines a multi-token standard that supports both fungible and non-fungible tokens.
+
+**Method Selectors:**
+| Method | Selector | Signature |
+|--------|----------|-----------|
+| `safeTransferFrom` | `0xf242432a` | `safeTransferFrom(address,address,uint256,uint256,bytes)` |
+| `safeBatchTransferFrom` | `0x2eb2c2d6` | `safeBatchTransferFrom(address,address,uint256[],uint256[],bytes)` |
+| `setApprovalForAll` | `0xa22cb465` | `setApprovalForAll(address,bool)` |
+
+#### Example: ERC-1155 Transfer Validation
+
+```yaml
+# Validate ERC1155 transfers with amount limits
+- name: "ERC1155 transfer validation"
+  type: "evm_solidity_expression"
+  mode: "whitelist"
+  enabled: true
+  config:
+    functions: |
+      // Single token transfer
+      function safeTransferFrom(
+          address from,
+          address to,
+          uint256 id,
+          uint256 amount,
+          bytes calldata data
+      ) external {
+          require(from == txSigner, "can only transfer own tokens");
+          require(to != address(0), "invalid recipient");
+          require(amount <= 1000, "exceeds max transfer amount");
+      }
+    description: "Validate ERC1155 single transfers"
+    test_cases:
+      - name: "should pass valid transfer"
+        input:
+          signer: "0x1234567890123456789012345678901234567890"
+          # safeTransferFrom(signer, recipient, tokenId=1, amount=100, data="")
+          data: "0xf242432a0000000000000000000000001234567890123456789012345678901234567890000000000000000000000000567890123456789012345678901234567890123400000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000064000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000000"
+        expect_pass: true
+      - name: "should reject amount exceeding limit"
+        input:
+          signer: "0x1234567890123456789012345678901234567890"
+          # safeTransferFrom with amount=2000 (exceeds 1000 limit)
+          data: "0xf242432a00000000000000000000000012345678901234567890123456789012345678900000000000000000000000005678901234567890123456789012345678901234000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000007d0000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000000"
+        expect_pass: false
+        expect_reason: "exceeds max transfer amount"
+```
+
+#### Example: ERC-1155 Batch Transfer Validation (Expression Mode)
+
+For complex batch operations, use Expression Mode with manual decoding:
+
+```yaml
+# Validate ERC1155 batch transfers
+- name: "ERC1155 batch transfer validation"
+  type: "evm_solidity_expression"
+  mode: "whitelist"
+  enabled: true
+  config:
+    expression: |
+      // Check selector for safeBatchTransferFrom
+      require(selector == bytes4(0x2eb2c2d6), "only batch transfer allowed");
+
+      // Decode batch transfer parameters
+      // Note: Complex array decoding requires careful offset handling
+      (address from, address to, , , ) = abi.decode(
+          data[4:],
+          (address, address, uint256[], uint256[], bytes)
+      );
+
+      require(from == signer, "can only transfer own tokens");
+      require(to != address(0), "invalid recipient");
+    description: "Validate ERC1155 batch transfers"
+    test_cases:
+      - name: "should pass valid batch transfer"
+        input:
+          selector: "0x2eb2c2d6"
+          signer: "0x1234567890123456789012345678901234567890"
+          # Minimal test - full encoding would be more complex
+          data: "0x2eb2c2d600000000000000000000000012345678901234567890123456789012345678900000000000000000000000005678901234567890123456789012345678901234..."
+        expect_pass: true
+```
+
+#### Example: ERC-1155 Approval Validation
+
+```yaml
+# Validate ERC1155 operator approvals
+- name: "ERC1155 approval validation"
+  type: "evm_solidity_expression"
+  mode: "whitelist"
+  enabled: true
+  config:
+    functions: |
+      function setApprovalForAll(address operator, bool approved) external {
+          require(operator != address(0), "invalid operator address");
+          // Optionally whitelist known marketplaces
+          // require(isKnownMarketplace(operator), "unknown operator");
+      }
+    description: "Validate ERC1155 operator approvals"
+    test_cases:
+      - name: "should pass valid approval"
+        input:
+          # setApprovalForAll(0x5678...1234, true)
+          data: "0xa22cb46500000000000000000000000056789012345678901234567890123456789012340000000000000000000000000000000000000000000000000000000000000001"
+        expect_pass: true
+      - name: "should reject zero address operator"
+        input:
+          # setApprovalForAll(0x0000...0000, true)
+          data: "0xa22cb46500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001"
+        expect_pass: false
+        expect_reason: "invalid operator address"
+```
+
+---
+
+### EIP-712 Typed Data Signing
+
+EIP-712 defines a standard for signing structured typed data. Unlike transaction rules which validate calldata, EIP-712 rules validate the **message structure and values** being signed.
+
+**Sign Type:** `typed_data`
+
+#### Understanding EIP-712 Structure
+
+```json
+{
+  "types": {
+    "EIP712Domain": [...],
+    "Permit": [
+      {"name": "owner", "type": "address"},
+      {"name": "spender", "type": "address"},
+      {"name": "value", "type": "uint256"},
+      {"name": "nonce", "type": "uint256"},
+      {"name": "deadline", "type": "uint256"}
+    ]
+  },
+  "primaryType": "Permit",
+  "domain": {
+    "name": "USDC",
+    "version": "2",
+    "chainId": "1",
+    "verifyingContract": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+  },
+  "message": {
+    "owner": "0x...",
+    "spender": "0x...",
+    "value": "1000000000",
+    "nonce": "0",
+    "deadline": "1735689600"
+  }
+}
+```
+
+#### Example: EIP-712 Permit Validation (Expression Mode)
+
+For `typed_data` sign type, additional context variables are available:
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `typedDataPrimaryType` | `string` | The primary type name (e.g., "Permit") |
+| `typedDataDomainName` | `string` | Domain name |
+| `typedDataDomainVersion` | `string` | Domain version |
+| `typedDataDomainChainId` | `uint256` | Domain chain ID |
+| `typedDataDomainContract` | `address` | Verifying contract address |
+
+```yaml
+# Validate EIP-2612 Permit signatures
+- name: "EIP-2612 Permit validation"
+  type: "evm_solidity_expression"
+  mode: "whitelist"
+  enabled: true
+  sign_type_filter: "typed_data"  # Only applies to typed_data signing
+  config:
+    # Use typed_data_expression for EIP-712 validation
+    typed_data_expression: |
+      // Validate Permit structure
+      require(
+          keccak256(bytes(primaryType)) == keccak256("Permit"),
+          "only Permit type allowed"
+      );
+
+      // Access message fields
+      require(value <= 1000000e6, "permit value exceeds 1M limit");
+      require(deadline > block.timestamp, "deadline in the past");
+      require(spender != address(0), "invalid spender");
+    description: "Validate EIP-2612 Permit with value limits"
+    test_cases:
+      - name: "should pass valid permit"
+        input:
+          typed_data:
+            primaryType: "Permit"
+            domain:
+              name: "USDC"
+              version: "2"
+              chainId: "1"
+              verifyingContract: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            message:
+              owner: "0x1234567890123456789012345678901234567890"
+              spender: "0x5678901234567890123456789012345678901234"
+              value: "100000000000"
+              nonce: "0"
+              deadline: "1893456000"
+        expect_pass: true
+      - name: "should reject excessive permit value"
+        input:
+          typed_data:
+            primaryType: "Permit"
+            message:
+              value: "2000000000000"  # > 1M limit
+        expect_pass: false
+        expect_reason: "permit value exceeds 1M limit"
+```
+
+#### Example: EIP-712 Domain Validation
+
+```yaml
+# Validate EIP-712 domain to ensure signing for correct contracts
+- name: "EIP-712 domain validation"
+  type: "evm_solidity_expression"
+  mode: "whitelist"
+  enabled: true
+  sign_type_filter: "typed_data"
+  config:
+    typed_data_expression: |
+      // Only allow signing for known contracts
+      require(
+          domainContract == 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48 || // USDC
+          domainContract == 0xdAC17F958D2ee523a2206206994597C13D831ec7,    // USDT
+          "unknown verifying contract"
+      );
+
+      // Ensure correct chain
+      require(domainChainId == 1, "wrong chain ID");
+    description: "Restrict EIP-712 signing to known contracts"
+    test_cases:
+      - name: "should pass USDC contract"
+        input:
+          typed_data:
+            domain:
+              verifyingContract: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+              chainId: "1"
+        expect_pass: true
+      - name: "should reject unknown contract"
+        input:
+          typed_data:
+            domain:
+              verifyingContract: "0x0000000000000000000000000000000000000001"
+              chainId: "1"
+        expect_pass: false
+        expect_reason: "unknown verifying contract"
+```
+
+#### Common EIP-712 Use Cases
+
+**1. EIP-2612 Permit (Gasless Approvals)**
+```yaml
+- name: "Permit signature validation"
+  type: "evm_solidity_expression"
+  mode: "whitelist"
+  config:
+    typed_data_functions: |
+      struct Permit {
+          address owner;
+          address spender;
+          uint256 value;
+          uint256 nonce;
+          uint256 deadline;
+      }
+
+      function validatePermit(Permit memory permit) external {
+          require(permit.spender != address(0), "invalid spender");
+          require(permit.value <= 1000000e6, "value too high");
+          require(permit.deadline > block.timestamp + 1 hours, "deadline too soon");
+      }
+```
+
+**2. Seaport Orders (NFT Marketplace)**
+```yaml
+- name: "Seaport order validation"
+  type: "evm_solidity_expression"
+  mode: "whitelist"
+  config:
+    typed_data_expression: |
+      require(
+          keccak256(bytes(primaryType)) == keccak256("OrderComponents"),
+          "only OrderComponents allowed"
+      );
+      // Validate order parameters
+```
+
+**3. Uniswap Permit2**
+```yaml
+- name: "Permit2 validation"
+  type: "evm_solidity_expression"
+  mode: "whitelist"
+  config:
+    typed_data_expression: |
+      // Validate Permit2 signatures with spending limits
+      require(domainContract == 0x000000000022D473030F116dDEE9F6B43aC78BA3, "invalid Permit2");
+```
+
+---
+
+### Expression Mode vs Function Mode Summary
+
+| Feature | Expression Mode | Function Mode |
+|---------|-----------------|---------------|
+| **Syntax** | `require()` statements | Solidity functions |
+| **Context Variables** | `to`, `value`, `selector`, `data`, etc. | `txTo`, `txValue`, `txSelector`, `txData`, etc. |
+| **Selector Matching** | Manual check with `selector ==` | Automatic based on function signature |
+| **Parameter Decoding** | Manual with `abi.decode()` | Automatic via function parameters |
+| **Multiple Methods** | Multiple `require()` with `if`/`else` | Multiple functions in one rule |
+| **Best For** | Simple checks, custom logic | Standard method validation |
+| **Config Field** | `expression` | `functions` |
+
+**When to Use Expression Mode:**
+- Simple value/address checks
+- Custom validation logic
+- Fallback/catch-all rules
+- Non-standard method signatures
+
+**When to Use Function Mode:**
+- Validating standard ERC methods
+- Multiple methods in one rule
+- Complex parameter validation
+- Cleaner, more readable rules
+
+---
+
 ### Combining Rules
 
 Rules are evaluated in two phases:

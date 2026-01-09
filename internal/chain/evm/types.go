@@ -94,8 +94,13 @@ type ValueLimitConfig struct {
 }
 
 // SolidityExpressionConfig holds the Solidity code for rule evaluation
+// Supports multiple modes:
+//  1. Expression mode: require() statements with context variables (for transactions)
+//  2. Function mode: define functions that auto-match transaction selectors
+//  3. TypedDataExpression mode: require() statements for EIP-712 typed data validation
+//  4. TypedDataFunctions mode: struct-based functions for EIP-712 validation
 type SolidityExpressionConfig struct {
-	// Expression is the Solidity code containing require() statements
+	// Expression is the Solidity code containing require() statements (Mode 1)
 	// Available variables:
 	//   - address to       (transaction recipient)
 	//   - uint256 value    (transaction value in wei)
@@ -103,12 +108,45 @@ type SolidityExpressionConfig struct {
 	//   - bytes data       (full calldata)
 	//   - uint256 chainId  (chain ID)
 	//   - address signer   (signing address)
-	Expression string `json:"expression"`
+	// Example: require(value <= 1 ether, "exceeds limit");
+	Expression string `json:"expression,omitempty"`
+
+	// Functions contains user-defined Solidity functions (Mode 2)
+	// When the transaction selector matches a function, it's called automatically
+	// with decoded parameters. Context variables available as txTo, txValue, etc.
+	// Example:
+	//   function transfer(address to, uint256 amount) external {
+	//       require(amount <= 10000e6, "exceeds 10k limit");
+	//   }
+	Functions string `json:"functions,omitempty"`
+
+	// TypedDataExpression is Solidity code for EIP-712 typed data validation (Mode 3)
+	// Available variables:
+	//   - string primaryType       (primary type name, e.g., "Permit")
+	//   - string domainName        (domain name)
+	//   - string domainVersion     (domain version)
+	//   - uint256 domainChainId    (domain chain ID)
+	//   - address domainContract   (verifying contract address)
+	//   - Plus message fields as defined by the primary type
+	// Example: require(value <= 1000000e6, "permit value exceeds 1M limit");
+	TypedDataExpression string `json:"typed_data_expression,omitempty"`
+
+	// TypedDataFunctions contains struct definitions and validation functions (Mode 4)
+	// Define structs matching EIP-712 types and functions to validate them
+	// Example:
+	//   struct Permit { address owner; address spender; uint256 value; ... }
+	//   function validatePermit(Permit memory permit) external { ... }
+	TypedDataFunctions string `json:"typed_data_functions,omitempty"`
+
+	// SignTypeFilter restricts this rule to specific sign types
+	// If empty, applies to all sign types (default behavior for transaction rules)
+	// Common values: "transaction", "typed_data", "personal", "eip191"
+	SignTypeFilter string `json:"sign_type_filter,omitempty"`
 
 	// Description explains what the rule validates
 	Description string `json:"description,omitempty"`
 
-	// ABISignature defines custom ABI decoding (optional)
+	// ABISignature defines custom ABI decoding (optional, only for Expression mode)
 	// Format: "functionName(type1,type2,...)"
 	ABISignature string `json:"abi_signature,omitempty"`
 
@@ -135,10 +173,36 @@ type SolidityTestCase struct {
 
 // SolidityTestInput defines the transaction context for a test case
 type SolidityTestInput struct {
-	To       string `json:"to,omitempty"`        // recipient address, 0x-prefixed
-	Value    string `json:"value,omitempty"`     // value in wei (decimal string)
-	Selector string `json:"selector,omitempty"`  // method selector, 0x-prefixed 4 bytes
-	Data     string `json:"data,omitempty"`      // full calldata, 0x-prefixed hex
-	ChainID  string `json:"chain_id,omitempty"`  // chain ID (decimal string)
-	Signer   string `json:"signer,omitempty"`    // signer address, 0x-prefixed
+	// Transaction context fields (for transaction rules)
+	To       string `json:"to,omitempty"`       // recipient address, 0x-prefixed
+	Value    string `json:"value,omitempty"`    // value in wei (decimal string)
+	Selector string `json:"selector,omitempty"` // method selector, 0x-prefixed 4 bytes
+	Data     string `json:"data,omitempty"`     // full calldata, 0x-prefixed hex
+	ChainID  string `json:"chain_id,omitempty"` // chain ID (decimal string)
+	Signer   string `json:"signer,omitempty"`   // signer address, 0x-prefixed
+
+	// EIP-712 typed data fields (for typed_data rules)
+	TypedData *TypedDataTestInput `json:"typed_data,omitempty"`
+}
+
+// TypedDataTestInput defines EIP-712 typed data for test cases
+type TypedDataTestInput struct {
+	// PrimaryType is the primary type name (e.g., "Permit")
+	PrimaryType string `json:"primaryType,omitempty"`
+
+	// Domain contains the EIP-712 domain parameters
+	Domain *TypedDataDomainInput `json:"domain,omitempty"`
+
+	// Message contains the typed data message fields
+	// Keys are field names, values are field values (as strings)
+	Message map[string]interface{} `json:"message,omitempty"`
+}
+
+// TypedDataDomainInput defines the EIP-712 domain for test cases
+type TypedDataDomainInput struct {
+	Name              string `json:"name,omitempty"`
+	Version           string `json:"version,omitempty"`
+	ChainID           string `json:"chainId,omitempty"`
+	VerifyingContract string `json:"verifyingContract,omitempty"`
+	Salt              string `json:"salt,omitempty"`
 }
