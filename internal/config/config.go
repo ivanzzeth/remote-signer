@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"regexp"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -105,16 +107,8 @@ func isHexPublicKey(key string) bool {
 
 // ServerConfig contains HTTP server configuration
 type ServerConfig struct {
-	Host string    `yaml:"host"`
-	Port int       `yaml:"port"`
-	TLS  TLSConfig `yaml:"tls"`
-}
-
-// TLSConfig contains TLS configuration
-type TLSConfig struct {
-	Enabled  bool   `yaml:"enabled"`
-	CertFile string `yaml:"cert_file"`
-	KeyFile  string `yaml:"key_file"`
+	Host string `yaml:"host"`
+	Port int    `yaml:"port"`
 }
 
 // ChainsConfig contains chain-specific configurations
@@ -160,8 +154,8 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
-	// Expand environment variables in the config
-	expandedData := os.ExpandEnv(string(data))
+	// Expand environment variables in the config (supports ${VAR:-default} syntax)
+	expandedData := expandEnvWithDefaults(string(data))
 
 	cfg := &Config{}
 	if err := yaml.Unmarshal([]byte(expandedData), cfg); err != nil {
@@ -178,19 +172,46 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
+// expandEnvWithDefaults expands environment variables with support for default values
+// Supports: ${VAR}, ${VAR:-default}, $VAR
+func expandEnvWithDefaults(s string) string {
+	// Pattern matches ${VAR:-default} or ${VAR}
+	re := regexp.MustCompile(`\$\{([^}:]+)(:-([^}]*))?\}`)
+
+	result := re.ReplaceAllStringFunc(s, func(match string) string {
+		submatch := re.FindStringSubmatch(match)
+		if len(submatch) < 2 {
+			return match
+		}
+
+		varName := submatch[1]
+		defaultValue := ""
+		if len(submatch) >= 4 {
+			defaultValue = submatch[3]
+		}
+
+		if value := os.Getenv(varName); value != "" {
+			return value
+		}
+		return defaultValue
+	})
+
+	// Also handle simple $VAR format (without braces)
+	result = os.Expand(result, func(key string) string {
+		// Skip if it contains special characters (already handled above)
+		if strings.Contains(key, ":") || strings.Contains(key, "-") {
+			return ""
+		}
+		return os.Getenv(key)
+	})
+
+	return result
+}
+
 // validate validates the configuration
 func validate(cfg *Config) error {
 	if cfg.Server.Port <= 0 || cfg.Server.Port > 65535 {
 		return fmt.Errorf("invalid server port: %d", cfg.Server.Port)
-	}
-
-	if cfg.Server.TLS.Enabled {
-		if cfg.Server.TLS.CertFile == "" {
-			return fmt.Errorf("TLS cert_file is required when TLS is enabled")
-		}
-		if cfg.Server.TLS.KeyFile == "" {
-			return fmt.Errorf("TLS key_file is required when TLS is enabled")
-		}
 	}
 
 	if cfg.Database.DSN == "" {

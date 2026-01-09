@@ -1,0 +1,54 @@
+# =============================================================================
+# Docker Ignore File
+# Exclude sensitive and unnecessary files from Docker build context
+# =============================================================================
+
+# Environment and configuration files
+.env
+.env.*
+config.yaml
+*.pem
+
+# Data directory (contains keys, keystores, etc.)
+data/
+
+# Git
+.git
+.gitignore
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Compiled binaries
+/remote-signer
+/remote-signer-tui
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test artifacts
+*.test
+*.out
+coverage.*
+*.coverprofile
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Documentation (not needed in image)
+docs/
+*.md
+!README.md
+
+# Scripts (not needed in image)
+scripts/
+
+# Cache directories
+cache/
+.cache/

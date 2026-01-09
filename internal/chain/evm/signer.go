@@ -7,6 +7,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ivanzzeth/ethsig"
+	"github.com/ivanzzeth/ethsig/keystore"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
@@ -26,10 +27,11 @@ type PrivateKeyConfig struct {
 
 // KeystoreConfig defines a keystore signer configuration
 type KeystoreConfig struct {
-	Address     string `yaml:"address"`      // Expected address (for verification)
-	Path        string `yaml:"path"`         // Path to keystore file
-	PasswordEnv string `yaml:"password_env"` // Environment variable containing password
-	Enabled     bool   `yaml:"enabled"`      // Whether this signer is enabled
+	Address       string `yaml:"address"`        // Expected address (for verification)
+	Path          string `yaml:"path"`           // Path to keystore file
+	PasswordEnv   string `yaml:"password_env"`   // Environment variable containing password (used when password_stdin is false)
+	PasswordStdin bool   `yaml:"password_stdin"` // If true, read password from stdin at startup (more secure)
+	Enabled       bool   `yaml:"enabled"`        // Whether this signer is enabled
 }
 
 // SignerRegistry manages EVM signers
@@ -40,7 +42,32 @@ type SignerRegistry struct {
 }
 
 // NewSignerRegistry creates a new signer registry from configuration
+// For keystores with password_stdin=true, passwords will be read from stdin interactively
 func NewSignerRegistry(cfg SignerConfig) (*SignerRegistry, error) {
+	// Check if any keystore requires stdin password
+	hasStdinKeystores := false
+	for _, ks := range cfg.Keystores {
+		if ks.Enabled && ks.PasswordStdin {
+			hasStdinKeystores = true
+			break
+		}
+	}
+
+	// Create composite password provider
+	provider, err := NewCompositePasswordProvider(hasStdinKeystores)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create password provider: %w", err)
+	}
+
+	return NewSignerRegistryWithProvider(cfg, provider)
+}
+
+// NewSignerRegistryWithProvider creates a new signer registry with a custom password provider
+func NewSignerRegistryWithProvider(cfg SignerConfig, provider PasswordProvider) (*SignerRegistry, error) {
+	if provider == nil {
+		return nil, fmt.Errorf("password provider is required")
+	}
+
 	registry := &SignerRegistry{
 		signers: make(map[string]*ethsig.Signer),
 		info:    make(map[string]types.SignerInfo),
@@ -86,13 +113,16 @@ func NewSignerRegistry(cfg SignerConfig) (*SignerRegistry, error) {
 			continue
 		}
 
-		password := os.Getenv(ks.PasswordEnv)
-		if password == "" {
-			return nil, fmt.Errorf("environment variable %s is empty for keystore %s", ks.PasswordEnv, ks.Address)
+		// Get password via provider
+		password, err := provider.GetPassword(ks.Address, ks)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get password for keystore %s: %w", ks.Address, err)
 		}
 
 		expectedAddr := common.HexToAddress(ks.Address)
-		keystoreSigner, err := ethsig.NewKeystoreSignerFromPath(ks.Path, expectedAddr, password, nil)
+		keystoreSigner, err := ethsig.NewKeystoreSignerFromPath(ks.Path, expectedAddr, string(password), nil)
+		// Zeroize password immediately after use, not defer in loop
+		keystore.SecureZeroize(password)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load keystore for %s: %w", ks.Address, err)
 		}
