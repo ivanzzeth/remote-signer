@@ -256,19 +256,9 @@ func run() error {
 	}
 
 	// Build server config
-	var tlsConfig *api.TLSConfig
-	if cfg.Server.TLS.Enabled {
-		tlsConfig = &api.TLSConfig{
-			Enabled:  cfg.Server.TLS.Enabled,
-			CertFile: cfg.Server.TLS.CertFile,
-			KeyFile:  cfg.Server.TLS.KeyFile,
-		}
-	}
-
 	serverConfig := api.ServerConfig{
 		Host: cfg.Server.Host,
 		Port: cfg.Server.Port,
-		TLS:  tlsConfig,
 	}
 
 	// Initialize API server
@@ -286,7 +276,6 @@ func run() error {
 		log.Info("Starting HTTP server",
 			"host", cfg.Server.Host,
 			"port", cfg.Server.Port,
-			"tls", cfg.Server.TLS.Enabled,
 		)
 		errCh <- server.Start()
 	}()

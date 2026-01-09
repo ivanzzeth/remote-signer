@@ -22,6 +22,7 @@ For detailed configuration and API usage, refer to the following resources:
 
 **Quick Navigation:**
 - **Getting Started**: See [Quick Start](#quick-start) below
+- **TLS Configuration**: See [TLS Configuration](#tls-configuration) for HTTPS setup and certificate generation
 - **TUI Management Interface**: See [TUI (Terminal User Interface)](#tui-terminal-user-interface)
 - **API Authentication**: See [docs/API.md#authentication](docs/API.md#authentication)
 - **Rule Configuration**: See [docs/API.md#rules-configuration](docs/API.md#rules-configuration)
@@ -396,6 +397,139 @@ In this blocklist rule:
 - Normal address (e.g., `0x1234...`): `require(to != 0xdEaD)` **passes** → No violation → Transaction allowed
 - Burn address (`0xdEaD`): `require(to != 0xdEaD)` **reverts** → Violation found → Transaction blocked with reason "blocked: burn address"
 
+### TLS Configuration
+
+To enable HTTPS for the signing service, you need to configure TLS with certificate and key files.
+
+#### Option 1: Generate Self-Signed Certificate (Development/Testing)
+
+```bash
+# Create directory for TLS files
+mkdir -p data/tls
+
+# Generate self-signed certificate (valid for 365 days)
+openssl req -x509 -newkey rsa:4096 -keyout data/tls/key.pem -out data/tls/cert.pem -days 365 -nodes \
+  -subj "/C=US/ST=State/L=City/O=Organization/CN=localhost"
+
+# For production with specific domain:
+openssl req -x509 -newkey rsa:4096 -keyout data/tls/key.pem -out data/tls/cert.pem -days 365 -nodes \
+  -subj "/C=US/ST=State/L=City/O=Organization/CN=signer.example.com"
+```
+
+**Parameters explained:**
+- `-x509`: Generate self-signed certificate (not a certificate request)
+- `-newkey rsa:4096`: Generate new 4096-bit RSA key
+- `-keyout`: Output file for private key
+- `-out`: Output file for certificate
+- `-days 365`: Certificate validity period
+- `-nodes`: Don't encrypt the private key (no password required)
+- `-subj`: Certificate subject (CN should match your domain)
+
+#### Option 2: Generate Certificate with Subject Alternative Names (SAN)
+
+For certificates that work with multiple domains/IPs:
+
+```bash
+# Create OpenSSL config file
+cat > data/tls/openssl.cnf << EOF
+[req]
+default_bits = 4096
+prompt = no
+default_md = sha256
+distinguished_name = dn
+x509_extensions = v3_req
+
+[dn]
+C = US
+ST = State
+L = City
+O = Organization
+CN = signer.example.com
+
+[v3_req]
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = signer.example.com
+DNS.2 = localhost
+IP.1 = 127.0.0.1
+IP.2 = 192.168.1.100
+EOF
+
+# Generate certificate with SAN
+openssl req -x509 -newkey rsa:4096 -keyout data/tls/key.pem -out data/tls/cert.pem \
+  -days 365 -nodes -config data/tls/openssl.cnf
+```
+
+#### Option 3: Use Let's Encrypt (Production)
+
+For production environments, use Let's Encrypt for free, trusted certificates:
+
+```bash
+# Install certbot
+# macOS
+brew install certbot
+
+# Ubuntu/Debian
+sudo apt install certbot
+
+# Generate certificate (standalone mode - stops any running server on port 80)
+sudo certbot certonly --standalone -d signer.example.com
+
+# Certificates will be at:
+# /etc/letsencrypt/live/signer.example.com/fullchain.pem
+# /etc/letsencrypt/live/signer.example.com/privkey.pem
+```
+
+#### Enable TLS in Configuration
+
+Update your `config.yaml`:
+
+```yaml
+server:
+  host: "0.0.0.0"
+  port: 8548
+  tls:
+    enabled: true
+    cert_file: "data/tls/cert.pem"    # Path to certificate
+    key_file: "data/tls/key.pem"      # Path to private key
+
+# For Let's Encrypt:
+# tls:
+#   enabled: true
+#   cert_file: "/etc/letsencrypt/live/signer.example.com/fullchain.pem"
+#   key_file: "/etc/letsencrypt/live/signer.example.com/privkey.pem"
+```
+
+#### Verify Certificate
+
+```bash
+# View certificate details
+openssl x509 -in data/tls/cert.pem -text -noout
+
+# Test TLS connection
+openssl s_client -connect localhost:8548 -showcerts
+
+# Test with curl (use -k for self-signed)
+curl -k https://localhost:8548/health
+```
+
+#### TUI with TLS
+
+When connecting to a TLS-enabled server:
+
+```bash
+# Using HTTPS URL
+./remote-signer-tui \
+  -url https://localhost:8548 \
+  -api-key-id your-api-key-id \
+  -private-key your-ed25519-private-key
+
+# For self-signed certificates, you may need to set:
+export SSL_CERT_FILE=data/tls/cert.pem
+# Or disable verification (not recommended for production)
+```
+
 ### Environment Variables
 
 Set sensitive values via environment variables:
@@ -407,6 +541,135 @@ export EVM_SIGNER_KEY_1="your_private_key_hex"
 # Notification tokens (optional)
 export SLACK_BOT_TOKEN="xoxb-..."
 export PUSHOVER_APP_TOKEN="..."
+```
+
+## Docker Deployment
+
+For production deployment, use Docker with the provided scripts.
+
+### Quick Start with Docker
+
+```bash
+# 1. Initialize environment (creates directories, .env, config.yaml)
+./scripts/deploy.sh init
+
+# 2. Edit configuration files
+# - Edit .env with your EVM signer private key
+# - Edit data/config.yaml with your settings
+# - Add the generated API public key to data/config.yaml
+
+# 3. Start services
+./scripts/deploy.sh up
+
+# 4. Check status
+./scripts/deploy.sh status
+```
+
+### Deployment Scripts
+
+| Script | Description |
+|--------|-------------|
+| `scripts/deploy.sh` | Main deployment script (init, up, down, logs, status) |
+| `scripts/generate-api-key.sh` | Generate Ed25519 API key pair |
+| `scripts/generate-tls-cert.sh` | Generate self-signed TLS certificate |
+
+### Deploy Script Commands
+
+```bash
+# Initialize environment (first time setup)
+./scripts/deploy.sh init
+
+# Start all services
+./scripts/deploy.sh up
+
+# Stop all services
+./scripts/deploy.sh down
+
+# View logs
+./scripts/deploy.sh logs
+./scripts/deploy.sh logs -f  # Follow logs
+
+# Check service status
+./scripts/deploy.sh status
+
+# Rebuild Docker images
+./scripts/deploy.sh build
+
+# Clean up (remove containers and volumes)
+./scripts/deploy.sh clean
+```
+
+### Generate Keys
+
+```bash
+# Generate API key pair
+./scripts/generate-api-key.sh
+
+# Generate API key with custom name
+./scripts/generate-api-key.sh -n admin
+
+# Generate TLS certificate
+./scripts/generate-tls-cert.sh
+
+# Generate TLS certificate for specific domain
+./scripts/generate-tls-cert.sh -d signer.example.com
+
+# Generate TLS certificate with additional IPs
+./scripts/generate-tls-cert.sh -d signer.example.com -i 192.168.1.100
+```
+
+### Docker Configuration Files
+
+After running `./scripts/deploy.sh init`, you'll have:
+
+```
+remote-signer/
+├── .env                    # Environment variables (PostgreSQL, EVM keys)
+├── data/
+│   ├── config.yaml         # Service configuration
+│   ├── tls/                # TLS certificates (optional)
+│   │   ├── cert.pem
+│   │   └── key.pem
+│   ├── api_private.pem     # API private key (for TUI client)
+│   └── api_public.pem      # API public key (add to config.yaml)
+└── docker-compose.yml
+```
+
+### Environment Variables (.env)
+
+```bash
+# PostgreSQL
+POSTGRES_USER=signer
+POSTGRES_PASSWORD=your_secure_password
+POSTGRES_DB=remote_signer
+
+# EVM Signer (hex private key, without 0x prefix)
+EVM_SIGNER_KEY_1=your_64_char_hex_private_key
+
+# Optional: Notifications
+SLACK_BOT_TOKEN=xoxb-...
+PUSHOVER_APP_TOKEN=...
+```
+
+### Docker Architecture
+
+```
+┌─────────────────────────────────────────────────────┐
+│                    Docker Network                    │
+│                                                     │
+│  ┌─────────────────┐      ┌─────────────────────┐  │
+│  │   PostgreSQL    │◄────►│   Remote Signer     │  │
+│  │   (postgres)    │      │   (remote-signer)   │  │
+│  │                 │      │                     │  │
+│  │   Port: 5432    │      │   Port: 8548        │  │
+│  └─────────────────┘      │   + Foundry (forge) │  │
+│                           └─────────────────────┘  │
+│                                    │               │
+└────────────────────────────────────┼───────────────┘
+                                     │
+                                     ▼
+                              External Access
+                              (localhost:8548)
 ```
 
 ## TUI (Terminal User Interface)

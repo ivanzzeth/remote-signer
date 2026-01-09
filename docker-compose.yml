@@ -1,0 +1,80 @@
+services:
+  # ==========================================================================
+  # PostgreSQL Database
+  # ==========================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: remote-signer-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-signer}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-signer_password}
+      POSTGRES_DB: ${POSTGRES_DB:-remote_signer}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-signer} -d ${POSTGRES_DB:-remote_signer}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - signer-network
+
+  # ==========================================================================
+  # Remote Signer Service
+  # ==========================================================================
+  remote-signer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: remote-signer
+    restart: unless-stopped
+    # Enable interactive mode for secure password input at startup
+    # Use: docker-compose run --rm remote-signer
+    stdin_open: true
+    tty: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Database connection (auto-configured for docker network)
+      DATABASE_DSN: "postgres://${POSTGRES_USER:-signer}:${POSTGRES_PASSWORD:-signer_password}@postgres:5432/${POSTGRES_DB:-remote_signer}?sslmode=disable"
+      # EVM signer private key (set in .env file)
+      EVM_SIGNER_KEY_1: ${EVM_SIGNER_KEY_1}
+      # Optional: additional signers
+      # EVM_SIGNER_KEY_2: ${EVM_SIGNER_KEY_2}
+      # Notification tokens (optional)
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
+      PUSHOVER_APP_TOKEN: ${PUSHOVER_APP_TOKEN:-}
+    volumes:
+      # Configuration file
+      - ./config.yaml:/app/configs/config.yaml:ro
+      # Keystores - mounted to match project structure
+      - ./data/keystores:/app/data/keystores:ro
+      # Foundry binaries (downloaded to host via deploy.sh init)
+      - ./data/foundry/forge:/usr/local/bin/forge:ro
+      - ./data/foundry/cast:/usr/local/bin/cast:ro
+      # Forge cache for Solidity rules
+      - forge_cache:/var/cache/remote-signer/forge
+    ports:
+      - "${SIGNER_PORT:-8548}:8548"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8548/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    networks:
+      - signer-network
+
+volumes:
+  postgres_data:
+    driver: local
+  forge_cache:
+    driver: local
+
+networks:
+  signer-network:
+    driver: bridge

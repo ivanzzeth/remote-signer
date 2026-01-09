@@ -37,11 +37,25 @@ go.work.sum
 # .idea/
 # .vscode/
 
-# Data directory - keep .gitkeep, ignore everything else (keys, keystores, etc.)
+# Data directory - keep structure, ignore contents (keys, keystores, etc.)
 data/*
 !data/.gitkeep
+!data/keystores/
+data/keystores/*
+!data/keystores/.gitkeep
+!data/keystores/.gitignore
+!data/foundry/
+data/foundry/*
+!data/foundry/.gitkeep
 
+# Configuration files (sensitive)
 config.yaml
-
-remote-signer.db
 *.pem
+
+# Database
+remote-signer.db
+*.db
+
+# Docker volumes and cache
+postgres_data/
+forge_cache/

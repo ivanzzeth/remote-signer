@@ -4,15 +4,12 @@
 server:
   host: "0.0.0.0"
   port: 8548
-  tls:
-    enabled: false
-    cert_file: "/etc/signer/tls/cert.pem"
-    key_file: "/etc/signer/tls/key.pem"
 
 database:
   # PostgreSQL connection string
-  # Environment variables can be used: ${VAR_NAME}
-  dsn: "postgres://user:password@localhost:5432/remote_signer?sslmode=disable"
+  # Uses DATABASE_DSN env var if set (auto-configured by docker-compose)
+  # Falls back to localhost for local development
+  dsn: "${DATABASE_DSN:-postgres://signer:signer_password@localhost:5432/remote_signer?sslmode=disable}"
   # dsn: "file:./data/remote-signer.db?_journal_mode=WAL&_busy_timeout=5000"
 
 chains:
