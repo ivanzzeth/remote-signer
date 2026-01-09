@@ -218,7 +218,7 @@ run_interactive() {
 
     # Wait for postgres to be healthy
     log_info "Waiting for postgres to be healthy..."
-    until docker compose exec -T postgres pg_isready -U ${POSTGRES_USER:-signer} > /dev/null 2>&1; do
+    until docker compose exec -T postgres pg_isready -U ${POSTGRES_USER:-signer} -d ${POSTGRES_DB:-remote_signer} > /dev/null 2>&1; do
         sleep 1
     done
     log_info "Postgres is ready!"
@@ -244,6 +244,15 @@ run_interactive() {
 stop_services() {
     log_info "Stopping services..."
     cd "$PROJECT_DIR"
+
+    # Kill any screen session
+    screen -S remote-signer -X quit 2>/dev/null || true
+
+    # Stop and remove the interactive container (created by docker compose run)
+    docker stop remote-signer-app 2>/dev/null || true
+    docker rm remote-signer-app 2>/dev/null || true
+
+    # Stop all compose services
     docker compose down
     log_info "Services stopped!"
 }
