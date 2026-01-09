@@ -15,6 +15,10 @@ import (
 	"github.com/ivanzzeth/remote-signer/tui/styles"
 )
 
+// Available rule types and modes
+var ruleTypes = []string{"", "evm_address_list", "evm_contract_method", "evm_value_limit"}
+var ruleModes = []string{"whitelist", "blocklist"}
+
 // RequestDetailModel represents the request detail view
 type RequestDetailModel struct {
 	client        *client.Client
@@ -26,10 +30,15 @@ type RequestDetailModel struct {
 	err           error
 	request       *client.RequestStatus
 	previewRule   *client.Rule
+	previewError  string
 	showApprove   bool
 	showReject    bool
 	generateRule  bool
+	ruleTypeIdx   int    // Index into ruleTypes
+	ruleModeIdx   int    // Index into ruleModes
 	ruleNameInput textinput.Model
+	maxValueInput textinput.Model
+	activeInput   string // "name" or "maxvalue"
 	actionResult  string
 	goBack        bool
 }
@@ -66,15 +75,22 @@ func NewRequestDetailModel(c *client.Client, ctx context.Context) (*RequestDetai
 	s.Spinner = spinner.Dot
 	s.Style = styles.SpinnerStyle
 
-	ti := textinput.New()
-	ti.Placeholder = "Rule name (optional)"
-	ti.Width = 50
+	nameInput := textinput.New()
+	nameInput.Placeholder = "Rule name (optional)"
+	nameInput.Width = 50
+
+	maxValueInput := textinput.New()
+	maxValueInput.Placeholder = "Max value in wei (required for value_limit)"
+	maxValueInput.Width = 50
 
 	return &RequestDetailModel{
 		client:        c,
 		ctx:           ctx,
 		spinner:       s,
-		ruleNameInput: ti,
+		ruleNameInput: nameInput,
+		maxValueInput: maxValueInput,
+		ruleTypeIdx:   1, // Default to evm_address_list
+		ruleModeIdx:   0, // Default to whitelist
 	}, nil
 }
 
@@ -94,8 +110,15 @@ func (m *RequestDetailModel) LoadRequest(requestID string) tea.Cmd {
 	m.loading = true
 	m.request = nil
 	m.previewRule = nil
+	m.previewError = ""
 	m.showApprove = false
 	m.showReject = false
+	m.generateRule = false
+	m.ruleTypeIdx = 1 // Reset to default
+	m.ruleModeIdx = 0
+	m.ruleNameInput.SetValue("")
+	m.maxValueInput.SetValue("")
+	m.activeInput = ""
 	m.actionResult = ""
 	m.goBack = false
 
@@ -127,7 +150,22 @@ func (m *RequestDetailModel) loadRequestData(requestID string) tea.Cmd {
 
 func (m *RequestDetailModel) loadPreviewRule(requestID string) tea.Cmd {
 	return func() tea.Msg {
-		preview, err := m.client.PreviewRule(m.ctx, requestID)
+		ruleType := ruleTypes[m.ruleTypeIdx]
+		if ruleType == "" {
+			// No rule generation requested
+			return PreviewRuleMsg{Rule: nil, Err: nil}
+		}
+
+		req := &client.PreviewRuleRequest{
+			RuleType: ruleType,
+			RuleMode: ruleModes[m.ruleModeIdx],
+			RuleName: m.ruleNameInput.Value(),
+		}
+		if ruleType == "evm_value_limit" {
+			req.MaxValue = m.maxValueInput.Value()
+		}
+
+		preview, err := m.client.PreviewRule(m.ctx, requestID, req)
 		if err != nil {
 			return PreviewRuleMsg{Err: err}
 		}
@@ -138,10 +176,17 @@ func (m *RequestDetailModel) loadPreviewRule(requestID string) tea.Cmd {
 func (m *RequestDetailModel) approveRequest() tea.Cmd {
 	return func() tea.Msg {
 		req := &client.ApproveRequest{
-			Action:       "approve",
-			GenerateRule: m.generateRule,
-			RuleName:     m.ruleNameInput.Value(),
-			ApprovedBy:   "tui-admin",
+			Approved: true,
+		}
+
+		// Only set rule fields if generating a rule
+		if m.generateRule && m.ruleTypeIdx > 0 {
+			req.RuleType = ruleTypes[m.ruleTypeIdx]
+			req.RuleMode = ruleModes[m.ruleModeIdx]
+			req.RuleName = m.ruleNameInput.Value()
+			if req.RuleType == "evm_value_limit" {
+				req.MaxValue = m.maxValueInput.Value()
+			}
 		}
 
 		resp, err := m.client.ApproveSignRequest(m.ctx, m.request.ID, req)
@@ -150,8 +195,8 @@ func (m *RequestDetailModel) approveRequest() tea.Cmd {
 		}
 
 		msg := fmt.Sprintf("Request approved. Status: %s", resp.Status)
-		if resp.RuleCreated != nil {
-			msg += fmt.Sprintf("\nRule created: %s", resp.RuleCreated.Name)
+		if resp.GeneratedRule != nil {
+			msg += fmt.Sprintf("\nRule created: %s (%s)", resp.GeneratedRule.Name, resp.GeneratedRule.Type)
 		}
 		return ApprovalResultMsg{Success: true, Message: msg, Err: nil}
 	}
@@ -160,8 +205,7 @@ func (m *RequestDetailModel) approveRequest() tea.Cmd {
 func (m *RequestDetailModel) rejectRequest() tea.Cmd {
 	return func() tea.Msg {
 		req := &client.ApproveRequest{
-			Action:     "reject",
-			ApprovedBy: "tui-admin",
+			Approved: false,
 		}
 
 		resp, err := m.client.ApproveSignRequest(m.ctx, m.request.ID, req)
@@ -192,9 +236,11 @@ func (m *RequestDetailModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case PreviewRuleMsg:
 		if msg.Err != nil {
-			m.err = msg.Err
+			m.previewError = msg.Err.Error()
+			m.previewRule = nil
 		} else {
 			m.previewRule = msg.Rule
+			m.previewError = ""
 		}
 		return m, nil
 
@@ -224,32 +270,93 @@ func (m *RequestDetailModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		// Handle approval dialog
 		if m.showApprove {
+			// Handle text input first if focused
+			if m.ruleNameInput.Focused() {
+				switch msg.String() {
+				case "tab":
+					m.ruleNameInput.Blur()
+					if ruleTypes[m.ruleTypeIdx] == "evm_value_limit" {
+						m.maxValueInput.Focus()
+						m.activeInput = "maxvalue"
+						return m, textinput.Blink
+					}
+					m.activeInput = ""
+					return m, nil
+				case "esc":
+					m.ruleNameInput.Blur()
+					m.activeInput = ""
+					return m, nil
+				default:
+					var cmd tea.Cmd
+					m.ruleNameInput, cmd = m.ruleNameInput.Update(msg)
+					return m, cmd
+				}
+			}
+			if m.maxValueInput.Focused() {
+				switch msg.String() {
+				case "tab":
+					m.maxValueInput.Blur()
+					m.activeInput = ""
+					return m, nil
+				case "esc":
+					m.maxValueInput.Blur()
+					m.activeInput = ""
+					return m, nil
+				default:
+					var cmd tea.Cmd
+					m.maxValueInput, cmd = m.maxValueInput.Update(msg)
+					return m, cmd
+				}
+			}
+
 			switch msg.String() {
 			case "y":
 				m.loading = true
 				return m, tea.Batch(m.spinner.Tick, m.approveRequest())
 			case "n", "esc":
 				m.showApprove = false
+				m.previewRule = nil
+				m.previewError = ""
 				return m, nil
 			case "g":
 				m.generateRule = !m.generateRule
+				if !m.generateRule {
+					m.previewRule = nil
+					m.previewError = ""
+				}
+				return m, nil
+			case "t":
+				// Cycle through rule types
+				if m.generateRule {
+					m.ruleTypeIdx = (m.ruleTypeIdx + 1) % len(ruleTypes)
+					if m.ruleTypeIdx == 0 {
+						m.ruleTypeIdx = 1 // Skip empty type when cycling
+					}
+					m.previewRule = nil
+					m.previewError = ""
+				}
+				return m, nil
+			case "m":
+				// Cycle through rule modes
+				if m.generateRule {
+					m.ruleModeIdx = (m.ruleModeIdx + 1) % len(ruleModes)
+					m.previewRule = nil
+					m.previewError = ""
+				}
+				return m, nil
+			case "p":
+				// Preview rule
+				if m.generateRule && m.request != nil {
+					return m, m.loadPreviewRule(m.request.ID)
+				}
 				return m, nil
 			case "tab":
 				if m.generateRule {
-					if m.ruleNameInput.Focused() {
-						m.ruleNameInput.Blur()
-					} else {
-						m.ruleNameInput.Focus()
-						return m, textinput.Blink
-					}
+					m.ruleNameInput.Focus()
+					m.activeInput = "name"
+					return m, textinput.Blink
 				}
 				return m, nil
-			default:
-				if m.ruleNameInput.Focused() {
-					var cmd tea.Cmd
-					m.ruleNameInput, cmd = m.ruleNameInput.Update(msg)
-					return m, cmd
-				}
 			}
 			return m, nil
 		}
@@ -459,14 +566,46 @@ func (m *RequestDetailModel) renderApproveDialog() string {
 
 	if m.generateRule {
 		content.WriteString("\n")
-		content.WriteString("Rule name: ")
+		content.WriteString(styles.SubtitleStyle.Render("Rule Configuration"))
+		content.WriteString("\n")
+
+		// Rule type selection
+		ruleType := ruleTypes[m.ruleTypeIdx]
+		if ruleType == "" {
+			ruleType = "(none)"
+		}
+		content.WriteString(fmt.Sprintf("Type [t]: %s\n", styles.InfoValueStyle.Render(ruleType)))
+
+		// Rule mode selection
+		content.WriteString(fmt.Sprintf("Mode [m]: %s\n", styles.InfoValueStyle.Render(ruleModes[m.ruleModeIdx])))
+
+		// Rule name input
+		content.WriteString("\nRule name [Tab]: ")
 		content.WriteString(m.ruleNameInput.View())
 		content.WriteString("\n")
 
-		if m.previewRule != nil {
+		// Max value input (only for evm_value_limit)
+		if ruleTypes[m.ruleTypeIdx] == "evm_value_limit" {
+			content.WriteString("\nMax value (wei) [Tab]: ")
+			content.WriteString(m.maxValueInput.View())
+			content.WriteString("\n")
+		}
+
+		// Preview button
+		content.WriteString("\n")
+		content.WriteString(styles.ButtonStyle.Render(" [p] Preview Rule "))
+		content.WriteString("\n")
+
+		// Preview result
+		if m.previewError != "" {
+			content.WriteString("\n")
+			content.WriteString(styles.ErrorStyle.Render(fmt.Sprintf("Preview Error: %s", m.previewError)))
+			content.WriteString("\n")
+		} else if m.previewRule != nil {
 			content.WriteString("\n")
 			content.WriteString(styles.SubtitleStyle.Render("Rule Preview"))
 			content.WriteString("\n")
+			content.WriteString(fmt.Sprintf("Name: %s\n", m.previewRule.Name))
 			content.WriteString(fmt.Sprintf("Type: %s\n", m.previewRule.Type))
 			content.WriteString(fmt.Sprintf("Mode: %s\n", m.previewRule.Mode))
 			if m.previewRule.Config != nil {
@@ -485,7 +624,12 @@ func (m *RequestDetailModel) renderApproveDialog() string {
 	content.WriteString("  ")
 	content.WriteString(styles.ButtonStyle.Render(" [n] No "))
 	content.WriteString("\n\n")
-	content.WriteString(styles.HelpStyle.Render("y: confirm | n/Esc: cancel | g: toggle rule generation"))
+
+	helpText := "y: confirm | n/Esc: cancel | g: toggle rule generation"
+	if m.generateRule {
+		helpText += " | t: type | m: mode | p: preview | Tab: input"
+	}
+	content.WriteString(styles.HelpStyle.Render(helpText))
 
 	return styles.BoxStyle.Render(content.String())
 }
