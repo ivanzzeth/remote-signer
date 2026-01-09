@@ -45,7 +45,16 @@ type ChainsConfig struct {
 // EVMConfig contains EVM chain configuration
 type EVMConfig struct {
 	Enabled bool              `yaml:"enabled"`
-	Signers evm.SignerConfig `yaml:"signers"`
+	Signers evm.SignerConfig  `yaml:"signers"`
+	Foundry FoundryConfig     `yaml:"foundry"`
+}
+
+// FoundryConfig contains Foundry (forge) configuration for Solidity rules
+type FoundryConfig struct {
+	Enabled   bool          `yaml:"enabled"`
+	ForgePath string        `yaml:"forge_path"` // path to forge binary, empty = auto-detect from PATH
+	CacheDir  string        `yaml:"cache_dir"`  // cache directory for compiled scripts
+	Timeout   time.Duration `yaml:"timeout"`    // max execution time per rule (default: 30s)
 }
 
 // SecurityConfig contains security-related settings

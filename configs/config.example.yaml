@@ -28,6 +28,17 @@ chains:
       #     path: "/etc/signer/keystores/"
       #     password_env: "EVM_KEYSTORE_PASSWORD_1"
 
+    # Foundry configuration for Solidity expression rules
+    foundry:
+      # Enable Foundry-based Solidity expression rules
+      enabled: true
+      # Path to forge binary (leave empty to auto-detect from PATH)
+      forge_path: ""
+      # Cache directory for compiled scripts
+      cache_dir: "/var/cache/remote-signer/forge"
+      # Max execution time per rule (default: 30s)
+      timeout: "30s"
+
 notify:
   slack:
     enabled: false
@@ -58,3 +69,117 @@ logger:
   level: "info"
   # Pretty print (for development)
   pretty: true
+
+# Rules configuration
+# Rules can be defined here (config source) or via API (api source)
+# Rule evaluation: blocklist rules checked first, then whitelist rules
+# Mode: "whitelist" = any match allows, "blocklist" = any match blocks
+rules:
+  # Example 1: Simple address whitelist
+  - name: "Allow transfers to treasury"
+    type: "evm_address_whitelist"
+    mode: "whitelist"
+    enabled: true
+    # Scope filters (optional - limit which requests this rule applies to)
+    # chain_id: "1"              # Only Ethereum mainnet
+    # signer_address: "0x..."    # Only specific signer
+    # api_key_id: "key_..."      # Only specific API key
+    config:
+      addresses:
+        - "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"  # Treasury address
+        - "0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2"  # Another allowed address
+
+  # Example 2: Contract method restriction
+  - name: "Only allow ERC20 transfer and approve"
+    type: "evm_contract_method"
+    mode: "whitelist"
+    enabled: true
+    config:
+      contract: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"  # USDC contract
+      method_sigs:
+        - "0xa9059cbb"  # transfer(address,uint256)
+        - "0x095ea7b3"  # approve(address,uint256)
+
+  # Example 3: Value limit
+  - name: "Max 10 ETH per transaction"
+    type: "evm_value_limit"
+    mode: "whitelist"
+    enabled: true
+    config:
+      max_value: "10000000000000000000"  # 10 ETH in wei
+
+  # Example 4: Solidity expression rule (requires Foundry)
+  # Complex validation using native Solidity require() statements
+  - name: "Max 1 ETH transfer with address check"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    config:
+      # Available variables: to, value, selector, data, chainId, signer
+      expression: |
+        require(value <= 1 ether, "exceeds 1 ETH limit");
+        require(to != address(0), "cannot send to zero address");
+      description: "Limits transfers to 1 ETH and blocks zero address"
+      # Test cases are REQUIRED - all must pass during rule loading
+      test_cases:
+        - name: "should pass for 0.5 ETH to valid address"
+          input:
+            value: "500000000000000000"  # 0.5 ETH in wei
+            to: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+          expect_pass: true
+        - name: "should reject for 2 ETH"
+          input:
+            value: "2000000000000000000"  # 2 ETH in wei
+            to: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+          expect_pass: false
+          expect_reason: "exceeds 1 ETH limit"
+        - name: "should reject zero address"
+          input:
+            value: "100000000000000000"  # 0.1 ETH
+            to: "0x0000000000000000000000000000000000000000"
+          expect_pass: false
+          expect_reason: "cannot send to zero address"
+
+  # Example 5: Blocklist rule - checked before whitelist rules
+  - name: "Block known malicious addresses"
+    type: "evm_solidity_expression"
+    mode: "blocklist"  # Blocklist rules block even if whitelist matches
+    enabled: true
+    config:
+      expression: |
+        require(to != 0x000000000000000000000000000000000000dEaD, "blocked: burn address");
+      description: "Block transfers to known bad addresses"
+      test_cases:
+        - name: "should pass for normal address"
+          input:
+            to: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+          expect_pass: true
+        - name: "should block burn address"
+          input:
+            to: "0x000000000000000000000000000000000000dEaD"
+          expect_pass: false
+          expect_reason: "blocked: burn address"
+
+  # Example 6: Complex USDC transfer limit with parameter decoding
+  # - name: "USDC transfer limit 10k"
+  #   type: "evm_solidity_expression"
+  #   mode: "whitelist"
+  #   enabled: true
+  #   config:
+  #     expression: |
+  #       require(selector == bytes4(0xa9059cbb), "must be transfer");
+  #       (address recipient, uint256 amount) = abi.decode(data[4:], (address, uint256));
+  #       require(amount <= 10000 * 1e6, "exceeds 10k USDC limit");
+  #     description: "Limit USDC transfers to 10,000 USDC"
+  #     abi_signature: "transfer(address,uint256)"
+  #     test_cases:
+  #       - name: "pass 1000 USDC"
+  #         input:
+  #           selector: "0xa9059cbb"
+  #           data: "0xa9059cbb0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc4000000000000000000000000000000000000000000000000000000003b9aca00"
+  #         expect_pass: true
+  #       - name: "reject non-transfer"
+  #         input:
+  #           selector: "0x095ea7b3"
+  #         expect_pass: false
+  #         expect_reason: "must be transfer"

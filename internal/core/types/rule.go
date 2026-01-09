@@ -16,9 +16,10 @@ const (
 
 	// EVM-specific rule types (prefixed)
 	// Mode (whitelist/blocklist) determines behavior, not the type name
-	RuleTypeEVMAddressList    RuleType = "evm_address_list"    // address list (whitelist mode = allow, blocklist mode = block)
-	RuleTypeEVMContractMethod RuleType = "evm_contract_method" // contract method restriction
-	RuleTypeEVMValueLimit     RuleType = "evm_value_limit"     // value limit check
+	RuleTypeEVMAddressList         RuleType = "evm_address_list"         // address list (whitelist mode = allow, blocklist mode = block)
+	RuleTypeEVMContractMethod      RuleType = "evm_contract_method"      // contract method restriction
+	RuleTypeEVMValueLimit          RuleType = "evm_value_limit"          // value limit check
+	RuleTypeEVMSolidityExpression  RuleType = "evm_solidity_expression"  // Solidity expression rules (Foundry-based)
 )
 
 // RuleSource represents where the rule came from

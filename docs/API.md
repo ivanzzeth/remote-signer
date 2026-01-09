@@ -737,6 +737,208 @@ tx.value = 50 ETH     ❓ Manual approval          ❌ BLOCKED (no override)
 
 ---
 
+### Rule Type: `evm_solidity_expression`
+
+Write complex validation logic using Solidity syntax with `require()` statements. This rule type uses Foundry's `forge` tool to execute Solidity code for parameter-level risk control.
+
+**Use Cases:**
+- Complex value limits with multiple conditions
+- Parameter-level validation (decode and check calldata fields)
+- Custom logic combining multiple checks
+- Address blocklists with dynamic rules
+
+**Requirements:**
+- Foundry must be installed on the server (`forge` in PATH)
+- Rules must include at least one test case to verify correctness
+- All test cases must pass during rule creation
+
+**Config:**
+
+```json
+{
+  "type": "evm_solidity_expression",
+  "mode": "whitelist",
+  "config": {
+    "expression": "require(value <= 1 ether, \"exceeds 1 ETH limit\");",
+    "description": "Limits transfers to maximum 1 ETH",
+    "test_cases": [
+      {
+        "name": "should pass for 0.5 ETH",
+        "input": {
+          "value": "500000000000000000",
+          "to": "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+        },
+        "expect_pass": true
+      },
+      {
+        "name": "should reject for 2 ETH",
+        "input": {
+          "value": "2000000000000000000",
+          "to": "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+        },
+        "expect_pass": false,
+        "expect_reason": "exceeds 1 ETH limit"
+      }
+    ]
+  }
+}
+```
+
+**Available Variables in Expression:**
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `to` | `address` | Transaction recipient address |
+| `value` | `uint256` | Transaction value in wei |
+| `selector` | `bytes4` | Method selector (first 4 bytes of calldata) |
+| `data` | `bytes` | Full transaction calldata |
+| `chainId` | `uint256` | Chain ID |
+| `signer` | `address` | Signing address |
+
+**Test Case Fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | Yes | Descriptive name for the test case |
+| `input.to` | string | No | Recipient address (0x-prefixed, checksummed) |
+| `input.value` | string | No | Value in wei (decimal string) |
+| `input.selector` | string | No | Method selector (0x-prefixed, 4 bytes) |
+| `input.data` | string | No | Full calldata (0x-prefixed hex) |
+| `input.chain_id` | string | No | Chain ID (decimal string, default: "1") |
+| `input.signer` | string | No | Signer address (0x-prefixed, checksummed) |
+| `expect_pass` | bool | Yes | Whether the rule should pass (true) or revert (false) |
+| `expect_reason` | string | No | Expected revert reason (only when `expect_pass: false`) |
+
+**Important Notes:**
+- Addresses must be checksummed (e.g., `0x5B38Da6a701c568545dCfcB03FcB875f56beddC4`)
+- Use Solidity units like `1 ether`, `1 gwei` in expressions
+- Test cases are executed during rule creation - all must pass
+
+**Example Scenarios:**
+
+```json
+// Scenario 1: Simple value limit
+{
+  "name": "Max 1 ETH transfer",
+  "type": "evm_solidity_expression",
+  "mode": "whitelist",
+  "config": {
+    "expression": "require(value <= 1 ether, \"exceeds limit\");",
+    "description": "Auto-approve transfers up to 1 ETH",
+    "test_cases": [
+      {"name": "pass 0.5 ETH", "input": {"value": "500000000000000000"}, "expect_pass": true},
+      {"name": "reject 2 ETH", "input": {"value": "2000000000000000000"}, "expect_pass": false, "expect_reason": "exceeds limit"}
+    ]
+  }
+}
+
+// Scenario 2: Address blocklist
+{
+  "name": "Block suspicious addresses",
+  "type": "evm_solidity_expression",
+  "mode": "blocklist",
+  "config": {
+    "expression": "require(to != address(0), \"cannot send to zero address\"); require(to != 0x000000000000000000000000000000000000dEaD, \"blocked: dead address\");",
+    "description": "Block transfers to known bad addresses",
+    "test_cases": [
+      {"name": "pass normal address", "input": {"to": "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"}, "expect_pass": true},
+      {"name": "block zero address", "input": {"to": "0x0000000000000000000000000000000000000000"}, "expect_pass": false, "expect_reason": "cannot send to zero address"}
+    ]
+  }
+}
+
+// Scenario 3: Method selector restriction
+{
+  "name": "Only ERC20 transfer",
+  "type": "evm_solidity_expression",
+  "mode": "whitelist",
+  "config": {
+    "expression": "require(selector == bytes4(0xa9059cbb), \"only transfer allowed\");",
+    "description": "Only allow ERC20 transfer method",
+    "test_cases": [
+      {"name": "pass transfer", "input": {"selector": "0xa9059cbb"}, "expect_pass": true},
+      {"name": "reject approve", "input": {"selector": "0x095ea7b3"}, "expect_pass": false, "expect_reason": "only transfer allowed"}
+    ]
+  }
+}
+
+// Scenario 4: Complex - decode and validate parameters
+{
+  "name": "USDC transfer limit",
+  "type": "evm_solidity_expression",
+  "mode": "whitelist",
+  "config": {
+    "expression": "require(selector == bytes4(0xa9059cbb), \"must be transfer\"); (address recipient, uint256 amount) = abi.decode(data[4:], (address, uint256)); require(amount <= 10000 * 1e6, \"exceeds 10k USDC limit\");",
+    "description": "Limit USDC transfers to 10,000 USDC",
+    "abi_signature": "transfer(address,uint256)",
+    "test_cases": [
+      {
+        "name": "pass 1000 USDC",
+        "input": {
+          "selector": "0xa9059cbb",
+          "data": "0xa9059cbb0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc4000000000000000000000000000000000000000000000000000000003b9aca00"
+        },
+        "expect_pass": true
+      },
+      {
+        "name": "reject non-transfer",
+        "input": {"selector": "0x095ea7b3"},
+        "expect_pass": false,
+        "expect_reason": "must be transfer"
+      }
+    ]
+  }
+}
+```
+
+**API Response for Validation Errors:**
+
+When creating a rule with invalid Solidity syntax:
+
+```json
+{
+  "error": "rule validation failed",
+  "validation": {
+    "valid": false,
+    "syntax_error": {
+      "message": "Error: Expected ';' but got '}'",
+      "line": 15,
+      "column": 10,
+      "severity": "error"
+    }
+  }
+}
+```
+
+When test cases fail:
+
+```json
+{
+  "error": "rule validation failed",
+  "validation": {
+    "valid": false,
+    "test_case_results": [
+      {
+        "name": "should pass for 0.5 ETH",
+        "passed": true,
+        "expected_pass": true,
+        "actual_pass": true
+      },
+      {
+        "name": "should reject for 2 ETH",
+        "passed": false,
+        "expected_pass": false,
+        "actual_pass": true,
+        "error": "expected revert but passed"
+      }
+    ],
+    "failed_test_cases": 1
+  }
+}
+```
+
+---
+
 ### Combining Rules
 
 Rules are evaluated in two phases:
@@ -841,6 +1043,7 @@ When approving a request, you can optionally generate a rule to auto-approve sim
 | `evm_address_list` | Whitelist/blocklist recipient address | `rule_type`, `rule_mode` |
 | `evm_contract_method` | Allow/block specific contract methods | `rule_type`, `rule_mode` |
 | `evm_value_limit` | Value-based limit | `rule_type`, `rule_mode`, `max_value` |
+| `evm_solidity_expression` | Custom Solidity logic with require() | `rule_type`, `rule_mode`, `expression`, `test_cases` |
 
 **Workflow:**
 1. Submit sign request → pending manual approval

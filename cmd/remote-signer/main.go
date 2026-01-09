@@ -132,6 +132,20 @@ func run() error {
 	ruleEngine.RegisterEvaluator(&evm.ContractMethodEvaluator{})
 	ruleEngine.RegisterEvaluator(&evm.ValueLimitEvaluator{})
 
+	// Register Solidity expression evaluator if Foundry is enabled
+	if cfg.Chains.EVM != nil && cfg.Chains.EVM.Foundry.Enabled {
+		solidityEval, err := evm.NewSolidityRuleEvaluator(evm.SolidityEvaluatorConfig{
+			ForgePath: cfg.Chains.EVM.Foundry.ForgePath,
+			CacheDir:  cfg.Chains.EVM.Foundry.CacheDir,
+			Timeout:   cfg.Chains.EVM.Foundry.Timeout,
+		}, log)
+		if err != nil {
+			return fmt.Errorf("failed to create Solidity rule evaluator: %w", err)
+		}
+		ruleEngine.RegisterEvaluator(solidityEval)
+		log.Info("Solidity expression evaluator registered (Foundry)")
+	}
+
 	// Initialize notification service
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

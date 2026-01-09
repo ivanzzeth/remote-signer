@@ -92,3 +92,53 @@ type ContractMethodConfig struct {
 type ValueLimitConfig struct {
 	MaxValue string `json:"max_value"` // wei as decimal string
 }
+
+// SolidityExpressionConfig holds the Solidity code for rule evaluation
+type SolidityExpressionConfig struct {
+	// Expression is the Solidity code containing require() statements
+	// Available variables:
+	//   - address to       (transaction recipient)
+	//   - uint256 value    (transaction value in wei)
+	//   - bytes4 selector  (method selector, first 4 bytes of data)
+	//   - bytes data       (full calldata)
+	//   - uint256 chainId  (chain ID)
+	//   - address signer   (signing address)
+	Expression string `json:"expression"`
+
+	// Description explains what the rule validates
+	Description string `json:"description,omitempty"`
+
+	// ABISignature defines custom ABI decoding (optional)
+	// Format: "functionName(type1,type2,...)"
+	ABISignature string `json:"abi_signature,omitempty"`
+
+	// TestCases defines validation cases to verify rule correctness
+	// Each test case is executed during rule creation/update to ensure validity
+	TestCases []SolidityTestCase `json:"test_cases"`
+}
+
+// SolidityTestCase defines a test case for validating a Solidity rule
+type SolidityTestCase struct {
+	// Name describes what this test case validates
+	Name string `json:"name"`
+
+	// Input defines the transaction context for this test
+	Input SolidityTestInput `json:"input"`
+
+	// ExpectPass indicates whether the rule should pass (true) or revert (false)
+	ExpectPass bool `json:"expect_pass"`
+
+	// ExpectReason is the expected revert reason (only used when ExpectPass is false)
+	// If empty, any revert is accepted; if set, must match the revert message
+	ExpectReason string `json:"expect_reason,omitempty"`
+}
+
+// SolidityTestInput defines the transaction context for a test case
+type SolidityTestInput struct {
+	To       string `json:"to,omitempty"`        // recipient address, 0x-prefixed
+	Value    string `json:"value,omitempty"`     // value in wei (decimal string)
+	Selector string `json:"selector,omitempty"`  // method selector, 0x-prefixed 4 bytes
+	Data     string `json:"data,omitempty"`      // full calldata, 0x-prefixed hex
+	ChainID  string `json:"chain_id,omitempty"`  // chain ID (decimal string)
+	Signer   string `json:"signer,omitempty"`    // signer address, 0x-prefixed
+}
