@@ -103,7 +103,10 @@ func (m *DashboardModel) loadData() tea.Cmd {
 		// Get request counts by status
 		statuses := []string{"pending", "authorizing", "signing", "completed", "rejected", "failed"}
 		for _, status := range statuses {
-			resp, err := m.client.ListRequests(m.ctx, status, "", "", 1, 0)
+			resp, err := m.client.ListRequests(m.ctx, &client.ListRequestsFilter{
+				Status: status,
+				Limit:  1,
+			})
 			if err != nil {
 				data.RequestCounts[status] = 0
 				continue

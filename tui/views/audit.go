@@ -27,7 +27,6 @@ type AuditModel struct {
 	records        []client.AuditRecord
 	total          int
 	selectedIdx    int
-	offset         int
 	limit          int
 	eventFilter    string
 	severityFilter string
@@ -35,13 +34,30 @@ type AuditModel struct {
 	filterInput    textinput.Model
 	filterType     string // "event" or "severity"
 	showDetail     bool
+	detailScroll   int // scroll offset for detail view
+	// Cursor-based pagination
+	cursor        *string
+	cursorID      *string
+	nextCursor    *string
+	nextCursorID  *string
+	cursorHistory []auditCursorState
+	hasMore       bool
+}
+
+// auditCursorState stores cursor position for pagination history
+type auditCursorState struct {
+	cursor   *string
+	cursorID *string
 }
 
 // AuditDataMsg is sent when audit data is loaded
 type AuditDataMsg struct {
-	Records []client.AuditRecord
-	Total   int
-	Err     error
+	Records      []client.AuditRecord
+	Total        int
+	NextCursor   *string
+	NextCursorID *string
+	HasMore      bool
+	Err          error
 }
 
 // NewAuditModel creates a new audit model
@@ -94,20 +110,39 @@ func (m *AuditModel) Refresh() tea.Cmd {
 	)
 }
 
+// resetPagination resets cursor state to first page
+func (m *AuditModel) resetPagination() {
+	m.cursor = nil
+	m.cursorID = nil
+	m.nextCursor = nil
+	m.nextCursorID = nil
+	m.cursorHistory = nil
+	m.selectedIdx = 0
+	m.hasMore = false
+}
+
 func (m *AuditModel) loadData() tea.Cmd {
 	return func() tea.Msg {
 		filter := &client.ListAuditFilter{
 			EventType: m.eventFilter,
 			Severity:  m.severityFilter,
 			Limit:     m.limit,
-			Offset:    m.offset,
+			Cursor:    m.cursor,
+			CursorID:  m.cursorID,
 		}
 
 		resp, err := m.client.ListAuditRecords(m.ctx, filter)
 		if err != nil {
 			return AuditDataMsg{Err: err}
 		}
-		return AuditDataMsg{Records: resp.Records, Total: resp.Total, Err: nil}
+		return AuditDataMsg{
+			Records:      resp.Records,
+			Total:        resp.Total,
+			NextCursor:   resp.NextCursor,
+			NextCursorID: resp.NextCursorID,
+			HasMore:      resp.HasMore,
+			Err:          nil,
+		}
 	}
 }
 
@@ -121,6 +156,10 @@ func (m *AuditModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.records = msg.Records
 			m.total = msg.Total
+			m.hasMore = msg.HasMore
+			// Store next page cursor (don't overwrite current cursor)
+			m.nextCursor = msg.NextCursor
+			m.nextCursorID = msg.NextCursorID
 			m.err = nil
 		}
 		return m, nil
@@ -139,6 +178,27 @@ func (m *AuditModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "esc", "enter", "backspace":
 				m.showDetail = false
+				m.detailScroll = 0
+				return m, nil
+			case "up", "k":
+				if m.detailScroll > 0 {
+					m.detailScroll--
+				}
+				return m, nil
+			case "down", "j":
+				m.detailScroll++
+				return m, nil
+			case "pgup", "ctrl+u":
+				m.detailScroll -= 10
+				if m.detailScroll < 0 {
+					m.detailScroll = 0
+				}
+				return m, nil
+			case "pgdown", "ctrl+d":
+				m.detailScroll += 10
+				return m, nil
+			case "home", "g":
+				m.detailScroll = 0
 				return m, nil
 			}
 			return m, nil
@@ -155,8 +215,7 @@ func (m *AuditModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.showFilter = false
 				m.filterInput.Blur()
-				m.offset = 0
-				m.selectedIdx = 0
+				m.resetPagination()
 				return m, m.Refresh()
 			case "esc":
 				m.showFilter = false
@@ -225,19 +284,27 @@ func (m *AuditModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "n":
 			// Next page
-			if m.offset+m.limit < m.total {
-				m.offset += m.limit
+			if m.hasMore && m.nextCursor != nil {
+				// Save current cursor to history for going back
+				m.cursorHistory = append(m.cursorHistory, auditCursorState{
+					cursor:   m.cursor,
+					cursorID: m.cursorID,
+				})
+				// Use next cursor
+				m.cursor = m.nextCursor
+				m.cursorID = m.nextCursorID
 				m.selectedIdx = 0
 				return m, m.Refresh()
 			}
 			return m, nil
 		case "p":
 			// Previous page
-			if m.offset > 0 {
-				m.offset -= m.limit
-				if m.offset < 0 {
-					m.offset = 0
-				}
+			if len(m.cursorHistory) > 0 {
+				// Pop from history
+				prev := m.cursorHistory[len(m.cursorHistory)-1]
+				m.cursorHistory = m.cursorHistory[:len(m.cursorHistory)-1]
+				m.cursor = prev.cursor
+				m.cursorID = prev.cursorID
 				m.selectedIdx = 0
 				return m, m.Refresh()
 			}
@@ -247,8 +314,7 @@ func (m *AuditModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.eventFilter = ""
 			m.severityFilter = ""
 			m.filterInput.SetValue("")
-			m.offset = 0
-			m.selectedIdx = 0
+			m.resetPagination()
 			return m, m.Refresh()
 		}
 	}
@@ -362,17 +428,28 @@ func (m *AuditModel) renderAuditLogs() string {
 
 	// Pagination info
 	content.WriteString("\n")
-	startIdx := m.offset + 1
-	endIdx := m.offset + len(m.records)
-	if endIdx > m.total {
-		endIdx = m.total
+	pageNum := len(m.cursorHistory) + 1
+	pagination := fmt.Sprintf("Page %d | Showing %d items | Total: %d", pageNum, len(m.records), m.total)
+	if m.hasMore {
+		pagination += " | More available"
 	}
-	if len(m.records) == 0 {
-		startIdx = 0
-		endIdx = 0
-	}
-	pagination := fmt.Sprintf("Showing %d-%d of %d", startIdx, endIdx, m.total)
 	content.WriteString(styles.MutedColor.Render(pagination))
+
+	// Debug: show cursor info
+	content.WriteString("\n")
+	cursorInfo := "Cursor: "
+	if m.cursor != nil {
+		cursorInfo += fmt.Sprintf("'%s'", *m.cursor)
+	} else {
+		cursorInfo += "nil"
+	}
+	cursorInfo += " | NextCursor: "
+	if m.nextCursor != nil {
+		cursorInfo += fmt.Sprintf("'%s'", *m.nextCursor)
+	} else {
+		cursorInfo += "nil"
+	}
+	content.WriteString(styles.MutedColor.Render(cursorInfo))
 
 	// Help
 	content.WriteString("\n\n")
@@ -520,10 +597,52 @@ func (m *AuditModel) renderDetail() string {
 		content.WriteString("\n")
 	}
 
-	// Help
-	content.WriteString("\n")
-	helpText := "Press Esc or Enter to go back"
-	content.WriteString(styles.HelpStyle.Render(helpText))
+	// Split content into lines for scrolling
+	lines := strings.Split(content.String(), "\n")
+	totalLines := len(lines)
 
-	return styles.BoxStyle.Width(m.width - 4).Render(content.String())
+	// Calculate visible area (leave room for help text and border)
+	visibleHeight := m.height - 6
+	if visibleHeight < 5 {
+		visibleHeight = 5
+	}
+
+	// Clamp scroll position
+	maxScroll := totalLines - visibleHeight
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if m.detailScroll > maxScroll {
+		m.detailScroll = maxScroll
+	}
+
+	// Get visible lines
+	start := m.detailScroll
+	end := start + visibleHeight
+	if end > totalLines {
+		end = totalLines
+	}
+	visibleLines := lines[start:end]
+
+	// Build final output
+	var output strings.Builder
+	output.WriteString(strings.Join(visibleLines, "\n"))
+
+	// Add scroll indicator
+	output.WriteString("\n\n")
+	scrollInfo := fmt.Sprintf("Line %d-%d of %d", start+1, end, totalLines)
+	if m.detailScroll > 0 {
+		scrollInfo = "^ " + scrollInfo
+	}
+	if m.detailScroll < maxScroll {
+		scrollInfo = scrollInfo + " v"
+	}
+	output.WriteString(styles.MutedColor.Render(scrollInfo))
+
+	// Help
+	output.WriteString("\n")
+	helpText := "Esc: back | j/k: scroll | PgUp/PgDn: fast scroll | g: top"
+	output.WriteString(styles.HelpStyle.Render(helpText))
+
+	return styles.BoxStyle.Width(m.width - 4).Render(output.String())
 }

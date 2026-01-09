@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
@@ -54,8 +56,11 @@ type RequestDetailResponse struct {
 
 // ListRequestsResponse represents the response for listing requests
 type ListRequestsResponse struct {
-	Requests []RequestDetailResponse `json:"requests"`
-	Total    int                     `json:"total"`
+	Requests     []RequestDetailResponse `json:"requests"`
+	Total        int                     `json:"total"`
+	NextCursor   *string                 `json:"next_cursor,omitempty"`
+	NextCursorID *string                 `json:"next_cursor_id,omitempty"`
+	HasMore      bool                    `json:"has_more"`
 }
 
 // ServeHTTP handles GET /api/v1/evm/requests/{id}
@@ -142,7 +147,7 @@ func (h *ListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Build filter
 	filter := storage.RequestFilter{
 		APIKeyID: &apiKey.ID,
-		Limit:    100,
+		Limit:    20, // default limit
 	}
 
 	// Parse query parameters
@@ -160,10 +165,42 @@ func (h *ListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Parse limit
+	if limitStr := query.Get("limit"); limitStr != "" {
+		if limit, err := strconv.Atoi(limitStr); err == nil && limit > 0 && limit <= 100 {
+			filter.Limit = limit
+		}
+	}
+
+	// Parse cursor for pagination
+	if cursorStr := query.Get("cursor"); cursorStr != "" {
+		cursor, err := time.Parse(time.RFC3339Nano, cursorStr)
+		if err == nil {
+			filter.Cursor = &cursor
+		}
+	}
+	if cursorID := query.Get("cursor_id"); cursorID != "" {
+		id := types.SignRequestID(cursorID)
+		filter.CursorID = &id
+	}
+
 	// Add chain type filter for EVM
 	chainType := types.ChainTypeEVM
 	filter.ChainType = &chainType
 
+	// Get total count (without cursor filter)
+	countFilter := filter
+	countFilter.Cursor = nil
+	countFilter.CursorID = nil
+	total, err := h.signService.CountRequests(r.Context(), countFilter)
+	if err != nil {
+		h.logger.Error("failed to count requests", "error", err)
+		h.writeError(w, "failed to count requests", http.StatusInternalServerError)
+		return
+	}
+
+	// Fetch one extra to check if there are more
+	filter.Limit++
 	requests, err := h.signService.ListRequests(r.Context(), filter)
 	if err != nil {
 		h.logger.Error("failed to list requests", "error", err)
@@ -172,12 +209,27 @@ func (h *ListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build response
+	hasMore := len(requests) > filter.Limit-1
+	if hasMore {
+		requests = requests[:filter.Limit-1] // Remove the extra item
+	}
+
 	resp := ListRequestsResponse{
 		Requests: make([]RequestDetailResponse, 0, len(requests)),
-		Total:    len(requests),
+		Total:    total,
+		HasMore:  hasMore,
 	}
 	for _, req := range requests {
 		resp.Requests = append(resp.Requests, toDetailResponse(req))
+	}
+
+	// Set next cursor if there are more results
+	if hasMore && len(requests) > 0 {
+		lastReq := requests[len(requests)-1]
+		cursor := lastReq.CreatedAt.Format(time.RFC3339Nano)
+		cursorID := string(lastReq.ID)
+		resp.NextCursor = &cursor
+		resp.NextCursorID = &cursorID
 	}
 
 	h.writeJSON(w, resp, http.StatusOK)

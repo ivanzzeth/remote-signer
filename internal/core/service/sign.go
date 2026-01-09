@@ -237,6 +237,11 @@ func (s *SignService) ListRequests(ctx context.Context, filter storage.RequestFi
 	return s.requestRepo.List(ctx, filter)
 }
 
+// CountRequests counts sign requests matching the filter
+func (s *SignService) CountRequests(ctx context.Context, filter storage.RequestFilter) (int, error) {
+	return s.requestRepo.Count(ctx, filter)
+}
+
 // ApprovalRequest represents the request to approve or reject a signing request
 type ApprovalRequest struct {
 	Approved   bool                     `json:"approved"`

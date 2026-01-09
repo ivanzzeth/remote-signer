@@ -54,8 +54,11 @@ type AuditRecordResponse struct {
 
 // ListAuditResponse represents the response for listing audit records
 type ListAuditResponse struct {
-	Records []AuditRecordResponse `json:"records"`
-	Total   int                   `json:"total"`
+	Records      []AuditRecordResponse `json:"records"`
+	Total        int                   `json:"total"`
+	NextCursor   *string               `json:"next_cursor,omitempty"`
+	NextCursorID *string               `json:"next_cursor_id,omitempty"`
+	HasMore      bool                  `json:"has_more"`
 }
 
 // ErrorResponse represents an error response
@@ -85,7 +88,7 @@ func (h *AuditHandler) listAuditRecords(w http.ResponseWriter, r *http.Request) 
 
 	// Build filter
 	filter := storage.AuditFilter{
-		Limit: 100,
+		Limit: 30, // default limit
 	}
 
 	// Parse query parameters
@@ -111,16 +114,36 @@ func (h *AuditHandler) listAuditRecords(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	if limitStr := query.Get("limit"); limitStr != "" {
-		if limit, err := strconv.Atoi(limitStr); err == nil && limit > 0 {
+		if limit, err := strconv.Atoi(limitStr); err == nil && limit > 0 && limit <= 100 {
 			filter.Limit = limit
 		}
 	}
-	if offsetStr := query.Get("offset"); offsetStr != "" {
-		if offset, err := strconv.Atoi(offsetStr); err == nil && offset >= 0 {
-			filter.Offset = offset
+
+	// Parse cursor for pagination
+	if cursorStr := query.Get("cursor"); cursorStr != "" {
+		cursor, err := time.Parse(time.RFC3339Nano, cursorStr)
+		if err == nil {
+			filter.Cursor = &cursor
 		}
 	}
+	if cursorID := query.Get("cursor_id"); cursorID != "" {
+		id := types.AuditID(cursorID)
+		filter.CursorID = &id
+	}
 
+	// Get total count (without cursor filter)
+	countFilter := filter
+	countFilter.Cursor = nil
+	countFilter.CursorID = nil
+	total, err := h.auditRepo.Count(r.Context(), countFilter)
+	if err != nil {
+		h.logger.Error("failed to count audit records", "error", err)
+		h.writeError(w, "failed to count audit records", http.StatusInternalServerError)
+		return
+	}
+
+	// Fetch one extra to check if there are more
+	filter.Limit++
 	records, err := h.auditRepo.Query(r.Context(), filter)
 	if err != nil {
 		h.logger.Error("failed to query audit records", "error", err)
@@ -128,12 +151,28 @@ func (h *AuditHandler) listAuditRecords(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Build response
+	hasMore := len(records) > filter.Limit-1
+	if hasMore {
+		records = records[:filter.Limit-1] // Remove the extra item
+	}
+
 	resp := ListAuditResponse{
 		Records: make([]AuditRecordResponse, 0, len(records)),
-		Total:   len(records),
+		Total:   total,
+		HasMore: hasMore,
 	}
 	for _, record := range records {
 		resp.Records = append(resp.Records, h.toAuditRecordResponse(record))
+	}
+
+	// Set next cursor if there are more results
+	if hasMore && len(records) > 0 {
+		lastRecord := records[len(records)-1]
+		cursor := lastRecord.Timestamp.Format(time.RFC3339Nano)
+		cursorID := string(lastRecord.ID)
+		resp.NextCursor = &cursor
+		resp.NextCursorID = &cursorID
 	}
 
 	h.writeJSON(w, resp, http.StatusOK)
