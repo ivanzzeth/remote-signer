@@ -1,0 +1,487 @@
+package tui
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/charmbracelet/bubbles/help"
+	"github.com/charmbracelet/bubbles/key"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/tui/styles"
+	"github.com/ivanzzeth/remote-signer/tui/views"
+)
+
+// ViewType represents the current view
+type ViewType int
+
+const (
+	ViewDashboard ViewType = iota
+	ViewRequests
+	ViewRequestDetail
+	ViewRules
+	ViewRuleDetail
+	ViewAudit
+)
+
+// keyMap defines the key bindings for the application
+type keyMap struct {
+	Tab       key.Binding
+	ShiftTab  key.Binding
+	Enter     key.Binding
+	Back      key.Binding
+	Refresh   key.Binding
+	Approve   key.Binding
+	Reject    key.Binding
+	Filter    key.Binding
+	Help      key.Binding
+	Quit      key.Binding
+	Up        key.Binding
+	Down      key.Binding
+	PageUp    key.Binding
+	PageDown  key.Binding
+	Home      key.Binding
+	End       key.Binding
+	Delete    key.Binding
+	Toggle    key.Binding
+	Generate  key.Binding
+	Number1   key.Binding
+	Number2   key.Binding
+	Number3   key.Binding
+	Number4   key.Binding
+}
+
+func (k keyMap) ShortHelp() []key.Binding {
+	return []key.Binding{k.Tab, k.Enter, k.Back, k.Refresh, k.Help, k.Quit}
+}
+
+func (k keyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{k.Tab, k.ShiftTab, k.Enter, k.Back},
+		{k.Up, k.Down, k.PageUp, k.PageDown},
+		{k.Approve, k.Reject, k.Generate},
+		{k.Filter, k.Refresh, k.Delete, k.Toggle},
+		{k.Number1, k.Number2, k.Number3, k.Number4},
+		{k.Help, k.Quit},
+	}
+}
+
+var keys = keyMap{
+	Tab: key.NewBinding(
+		key.WithKeys("tab"),
+		key.WithHelp("tab", "next tab"),
+	),
+	ShiftTab: key.NewBinding(
+		key.WithKeys("shift+tab"),
+		key.WithHelp("shift+tab", "prev tab"),
+	),
+	Enter: key.NewBinding(
+		key.WithKeys("enter"),
+		key.WithHelp("enter", "select/confirm"),
+	),
+	Back: key.NewBinding(
+		key.WithKeys("esc", "backspace"),
+		key.WithHelp("esc/backspace", "back"),
+	),
+	Refresh: key.NewBinding(
+		key.WithKeys("r"),
+		key.WithHelp("r", "refresh"),
+	),
+	Approve: key.NewBinding(
+		key.WithKeys("a"),
+		key.WithHelp("a", "approve"),
+	),
+	Reject: key.NewBinding(
+		key.WithKeys("x"),
+		key.WithHelp("x", "reject"),
+	),
+	Filter: key.NewBinding(
+		key.WithKeys("f"),
+		key.WithHelp("f", "filter"),
+	),
+	Help: key.NewBinding(
+		key.WithKeys("?"),
+		key.WithHelp("?", "toggle help"),
+	),
+	Quit: key.NewBinding(
+		key.WithKeys("q", "ctrl+c"),
+		key.WithHelp("q", "quit"),
+	),
+	Up: key.NewBinding(
+		key.WithKeys("up", "k"),
+		key.WithHelp("↑/k", "up"),
+	),
+	Down: key.NewBinding(
+		key.WithKeys("down", "j"),
+		key.WithHelp("↓/j", "down"),
+	),
+	PageUp: key.NewBinding(
+		key.WithKeys("pgup", "ctrl+u"),
+		key.WithHelp("pgup", "page up"),
+	),
+	PageDown: key.NewBinding(
+		key.WithKeys("pgdown", "ctrl+d"),
+		key.WithHelp("pgdown", "page down"),
+	),
+	Home: key.NewBinding(
+		key.WithKeys("home", "g"),
+		key.WithHelp("home/g", "go to start"),
+	),
+	End: key.NewBinding(
+		key.WithKeys("end", "G"),
+		key.WithHelp("end/G", "go to end"),
+	),
+	Delete: key.NewBinding(
+		key.WithKeys("d"),
+		key.WithHelp("d", "delete"),
+	),
+	Toggle: key.NewBinding(
+		key.WithKeys("t"),
+		key.WithHelp("t", "toggle enabled"),
+	),
+	Generate: key.NewBinding(
+		key.WithKeys("g"),
+		key.WithHelp("g", "generate rule"),
+	),
+	Number1: key.NewBinding(
+		key.WithKeys("1"),
+		key.WithHelp("1", "dashboard"),
+	),
+	Number2: key.NewBinding(
+		key.WithKeys("2"),
+		key.WithHelp("2", "requests"),
+	),
+	Number3: key.NewBinding(
+		key.WithKeys("3"),
+		key.WithHelp("3", "rules"),
+	),
+	Number4: key.NewBinding(
+		key.WithKeys("4"),
+		key.WithHelp("4", "audit"),
+	),
+}
+
+// Model represents the main application state
+type Model struct {
+	client       *client.Client
+	ctx          context.Context
+	width        int
+	height       int
+	activeTab    int
+	currentView  ViewType
+	previousView ViewType
+	help         help.Model
+	showHelp     bool
+	err          error
+	statusMsg    string
+
+	// Views
+	dashboard     *views.DashboardModel
+	requests      *views.RequestsModel
+	requestDetail *views.RequestDetailModel
+	rules         *views.RulesModel
+	ruleDetail    *views.RuleDetailModel
+	audit         *views.AuditModel
+}
+
+// NewModel creates a new application model
+func NewModel(c *client.Client) (*Model, error) {
+	if c == nil {
+		return nil, fmt.Errorf("client is required")
+	}
+
+	ctx := context.Background()
+	h := help.New()
+	h.ShowAll = false
+
+	dashboard, err := views.NewDashboardModel(c, ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create dashboard view: %w", err)
+	}
+
+	requests, err := views.NewRequestsModel(c, ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create requests view: %w", err)
+	}
+
+	requestDetail, err := views.NewRequestDetailModel(c, ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request detail view: %w", err)
+	}
+
+	rules, err := views.NewRulesModel(c, ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create rules view: %w", err)
+	}
+
+	ruleDetail, err := views.NewRuleDetailModel(c, ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create rule detail view: %w", err)
+	}
+
+	audit, err := views.NewAuditModel(c, ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create audit view: %w", err)
+	}
+
+	return &Model{
+		client:        c,
+		ctx:           ctx,
+		activeTab:     0,
+		currentView:   ViewDashboard,
+		help:          h,
+		dashboard:     dashboard,
+		requests:      requests,
+		requestDetail: requestDetail,
+		rules:         rules,
+		ruleDetail:    ruleDetail,
+		audit:         audit,
+	}, nil
+}
+
+// Init initializes the model
+func (m Model) Init() tea.Cmd {
+	return tea.Batch(
+		m.dashboard.Init(),
+		m.requests.Init(),
+		m.rules.Init(),
+		m.audit.Init(),
+	)
+}
+
+// Update handles messages and updates the model
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		m.help.Width = msg.Width
+
+		// Update all views with new size
+		m.dashboard.SetSize(msg.Width, msg.Height-6)
+		m.requests.SetSize(msg.Width, msg.Height-6)
+		m.requestDetail.SetSize(msg.Width, msg.Height-6)
+		m.rules.SetSize(msg.Width, msg.Height-6)
+		m.ruleDetail.SetSize(msg.Width, msg.Height-6)
+		m.audit.SetSize(msg.Width, msg.Height-6)
+		return m, nil
+
+	case tea.KeyMsg:
+		// Global key handling
+		switch {
+		case key.Matches(msg, keys.Quit):
+			if m.currentView == ViewDashboard || m.currentView == ViewRequests ||
+				m.currentView == ViewRules || m.currentView == ViewAudit {
+				return m, tea.Quit
+			}
+			// If in detail view, go back instead of quitting
+			m.currentView = m.previousView
+			return m, nil
+
+		case key.Matches(msg, keys.Help):
+			m.showHelp = !m.showHelp
+			return m, nil
+
+		case key.Matches(msg, keys.Number1):
+			m.activeTab = 0
+			m.currentView = ViewDashboard
+			return m, m.dashboard.Refresh()
+
+		case key.Matches(msg, keys.Number2):
+			m.activeTab = 1
+			m.currentView = ViewRequests
+			return m, m.requests.Refresh()
+
+		case key.Matches(msg, keys.Number3):
+			m.activeTab = 2
+			m.currentView = ViewRules
+			return m, m.rules.Refresh()
+
+		case key.Matches(msg, keys.Number4):
+			m.activeTab = 3
+			m.currentView = ViewAudit
+			return m, m.audit.Refresh()
+
+		case key.Matches(msg, keys.Tab):
+			// Only switch tabs in main views
+			if m.currentView == ViewDashboard || m.currentView == ViewRequests ||
+				m.currentView == ViewRules || m.currentView == ViewAudit {
+				m.activeTab = (m.activeTab + 1) % 4
+				m.currentView = ViewType(m.activeTab)
+				return m, m.refreshCurrentView()
+			}
+
+		case key.Matches(msg, keys.ShiftTab):
+			// Only switch tabs in main views
+			if m.currentView == ViewDashboard || m.currentView == ViewRequests ||
+				m.currentView == ViewRules || m.currentView == ViewAudit {
+				m.activeTab = (m.activeTab + 3) % 4
+				m.currentView = ViewType(m.activeTab)
+				return m, m.refreshCurrentView()
+			}
+
+		case key.Matches(msg, keys.Back):
+			if m.currentView == ViewRequestDetail || m.currentView == ViewRuleDetail {
+				m.currentView = m.previousView
+				return m, m.refreshCurrentView()
+			}
+		}
+	}
+
+	// Route to current view for handling
+	switch m.currentView {
+	case ViewDashboard:
+		newDashboard, cmd := m.dashboard.Update(msg)
+		m.dashboard = newDashboard.(*views.DashboardModel)
+		cmds = append(cmds, cmd)
+
+	case ViewRequests:
+		newRequests, cmd := m.requests.Update(msg)
+		m.requests = newRequests.(*views.RequestsModel)
+		cmds = append(cmds, cmd)
+
+		// Check if user selected a request
+		if selected := m.requests.GetSelectedRequestID(); selected != "" {
+			if keyMsg, ok := msg.(tea.KeyMsg); ok && key.Matches(keyMsg, keys.Enter) {
+				m.previousView = m.currentView
+				m.currentView = ViewRequestDetail
+				cmds = append(cmds, m.requestDetail.LoadRequest(selected))
+			}
+		}
+
+	case ViewRequestDetail:
+		newDetail, cmd := m.requestDetail.Update(msg)
+		m.requestDetail = newDetail.(*views.RequestDetailModel)
+		cmds = append(cmds, cmd)
+
+		// Check if action was completed and we should go back
+		if m.requestDetail.ShouldGoBack() {
+			m.currentView = ViewRequests
+			m.requestDetail.ResetGoBack()
+			cmds = append(cmds, m.requests.Refresh())
+		}
+
+	case ViewRules:
+		newRules, cmd := m.rules.Update(msg)
+		m.rules = newRules.(*views.RulesModel)
+		cmds = append(cmds, cmd)
+
+		// Check if user selected a rule
+		if selected := m.rules.GetSelectedRuleID(); selected != "" {
+			if keyMsg, ok := msg.(tea.KeyMsg); ok && key.Matches(keyMsg, keys.Enter) {
+				m.previousView = m.currentView
+				m.currentView = ViewRuleDetail
+				cmds = append(cmds, m.ruleDetail.LoadRule(selected))
+			}
+		}
+
+	case ViewRuleDetail:
+		newDetail, cmd := m.ruleDetail.Update(msg)
+		m.ruleDetail = newDetail.(*views.RuleDetailModel)
+		cmds = append(cmds, cmd)
+
+		// Check if action was completed and we should go back
+		if m.ruleDetail.ShouldGoBack() {
+			m.currentView = ViewRules
+			m.ruleDetail.ResetGoBack()
+			cmds = append(cmds, m.rules.Refresh())
+		}
+
+	case ViewAudit:
+		newAudit, cmd := m.audit.Update(msg)
+		m.audit = newAudit.(*views.AuditModel)
+		cmds = append(cmds, cmd)
+	}
+
+	return m, tea.Batch(cmds...)
+}
+
+// View renders the application
+func (m Model) View() string {
+	if m.width == 0 || m.height == 0 {
+		return "Loading..."
+	}
+
+	var s strings.Builder
+
+	// Header with tabs
+	s.WriteString(m.renderHeader())
+	s.WriteString("\n")
+
+	// Content
+	contentHeight := m.height - 6
+	if m.showHelp {
+		contentHeight -= 4
+	}
+
+	content := m.renderContent(contentHeight)
+	s.WriteString(content)
+
+	// Help
+	if m.showHelp {
+		s.WriteString("\n")
+		s.WriteString(m.help.View(keys))
+	} else {
+		s.WriteString("\n")
+		s.WriteString(styles.HelpStyle.Render("Press ? for help"))
+	}
+
+	return s.String()
+}
+
+func (m Model) renderHeader() string {
+	tabs := []string{"Dashboard", "Requests", "Rules", "Audit"}
+	var renderedTabs []string
+
+	for i, tab := range tabs {
+		if i == m.activeTab {
+			renderedTabs = append(renderedTabs, styles.ActiveTabStyle.Render(fmt.Sprintf("[%d] %s", i+1, tab)))
+		} else {
+			renderedTabs = append(renderedTabs, styles.TabStyle.Render(fmt.Sprintf("[%d] %s", i+1, tab)))
+		}
+	}
+
+	title := styles.TitleStyle.Render("Remote Signer TUI")
+	tabLine := lipgloss.JoinHorizontal(lipgloss.Center, renderedTabs...)
+
+	return lipgloss.JoinVertical(lipgloss.Left, title, tabLine)
+}
+
+func (m Model) renderContent(height int) string {
+	switch m.currentView {
+	case ViewDashboard:
+		return m.dashboard.View()
+	case ViewRequests:
+		return m.requests.View()
+	case ViewRequestDetail:
+		return m.requestDetail.View()
+	case ViewRules:
+		return m.rules.View()
+	case ViewRuleDetail:
+		return m.ruleDetail.View()
+	case ViewAudit:
+		return m.audit.View()
+	default:
+		return "Unknown view"
+	}
+}
+
+func (m Model) refreshCurrentView() tea.Cmd {
+	switch m.currentView {
+	case ViewDashboard:
+		return m.dashboard.Refresh()
+	case ViewRequests:
+		return m.requests.Refresh()
+	case ViewRules:
+		return m.rules.Refresh()
+	case ViewAudit:
+		return m.audit.Refresh()
+	default:
+		return nil
+	}
+}

@@ -16,7 +16,8 @@ type APIKey struct {
 	AllowedChainTypes pq.StringArray `json:"allowed_chain_types,omitempty" gorm:"type:text[]"` // empty = all
 	AllowedSigners    pq.StringArray `json:"allowed_signers,omitempty" gorm:"type:text[]"`     // empty = all
 
-	RateLimit int `json:"rate_limit" gorm:"default:100"` // requests per minute
+	RateLimit int  `json:"rate_limit" gorm:"default:100"` // requests per minute
+	Admin     bool `json:"admin" gorm:"default:false"`    // admin keys can approve requests and manage rules
 
 	Enabled    bool       `json:"enabled" gorm:"index;default:true"`
 	CreatedAt  time.Time  `json:"created_at"`

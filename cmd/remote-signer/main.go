@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/joho/godotenv"
 	"github.com/rs/zerolog"
 
 	"github.com/ivanzzeth/remote-signer/internal/api"
@@ -36,7 +37,18 @@ func main() {
 func run() error {
 	// Parse command line flags
 	configPath := flag.String("config", "config.yaml", "path to config file")
+	envFile := flag.String("env", ".env", "path to .env file (optional, ignored if not exists)")
 	flag.Parse()
+
+	// Load .env file if exists (for development)
+	// In production, environment variables should be set directly
+	if err := godotenv.Load(*envFile); err != nil {
+		// Only log if the file exists but failed to load
+		if _, statErr := os.Stat(*envFile); statErr == nil {
+			return fmt.Errorf("failed to load .env file: %w", err)
+		}
+		// .env file not found is OK - use system environment variables
+	}
 
 	// Load configuration
 	cfg, err := config.Load(*configPath)
@@ -89,6 +101,24 @@ func run() error {
 		return fmt.Errorf("failed to create apikey repository: %w", err)
 	}
 
+	// Initialize API keys from config
+	apiKeyInit, err := config.NewAPIKeyInitializer(apiKeyRepo, log)
+	if err != nil {
+		return fmt.Errorf("failed to create API key initializer: %w", err)
+	}
+	if err := apiKeyInit.SyncFromConfig(context.Background(), cfg.APIKeys); err != nil {
+		return fmt.Errorf("failed to sync API keys from config: %w", err)
+	}
+
+	// Initialize rules from config
+	ruleInit, err := config.NewRuleInitializer(ruleRepo, log)
+	if err != nil {
+		return fmt.Errorf("failed to create rule initializer: %w", err)
+	}
+	if err := ruleInit.SyncFromConfig(context.Background(), cfg.Rules); err != nil {
+		return fmt.Errorf("failed to sync rules from config: %w", err)
+	}
+
 	auditRepo, err := storage.NewGormAuditRepository(db)
 	if err != nil {
 		return fmt.Errorf("failed to create audit repository: %w", err)
@@ -131,6 +161,8 @@ func run() error {
 	ruleEngine.RegisterEvaluator(&evm.AddressListEvaluator{})
 	ruleEngine.RegisterEvaluator(&evm.ContractMethodEvaluator{})
 	ruleEngine.RegisterEvaluator(&evm.ValueLimitEvaluator{})
+	ruleEngine.RegisterEvaluator(&evm.SignerRestrictionEvaluator{})
+	ruleEngine.RegisterEvaluator(&evm.SignTypeRestrictionEvaluator{})
 
 	// Register Solidity expression evaluator if Foundry is enabled
 	if cfg.Chains.EVM != nil && cfg.Chains.EVM.Foundry.Enabled {
@@ -216,7 +248,7 @@ func run() error {
 	}
 
 	// Initialize router
-	router, err := api.NewRouter(authVerifier, signService, log, api.RouterConfig{
+	router, err := api.NewRouter(authVerifier, signService, ruleRepo, auditRepo, log, api.RouterConfig{
 		Version: version,
 	})
 	if err != nil {

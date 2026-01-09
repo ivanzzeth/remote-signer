@@ -55,6 +55,12 @@ func AuthMiddleware(verifier *auth.Verifier, logger *slog.Logger) func(http.Hand
 			// Restore body for downstream handlers
 			r.Body = io.NopCloser(bytes.NewBuffer(body))
 
+			// Build full path with query string (client signs with query params)
+			path := r.URL.Path
+			if r.URL.RawQuery != "" {
+				path = path + "?" + r.URL.RawQuery
+			}
+
 			// Verify request
 			apiKey, err := verifier.VerifyRequest(
 				r.Context(),
@@ -62,7 +68,7 @@ func AuthMiddleware(verifier *auth.Verifier, logger *slog.Logger) func(http.Hand
 				timestamp,
 				signature,
 				r.Method,
-				r.URL.Path,
+				path,
 				body,
 			)
 			if err != nil {

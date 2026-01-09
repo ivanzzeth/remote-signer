@@ -30,10 +30,13 @@ import (
 // TestServerConfig holds configuration for the test server
 type TestServerConfig struct {
 	Port             int
-	SignerPrivateKey string          // Hex-encoded private key without 0x prefix
-	SignerAddress    string          // Expected signer address
-	APIKeyID         string          // API key ID for authentication
-	APIKeyPublicKey  ed25519.PublicKey // Ed25519 public key for API auth
+	SignerPrivateKey string            // Hex-encoded private key without 0x prefix
+	SignerAddress    string            // Expected signer address
+	APIKeyID         string            // API key ID for authentication (admin)
+	APIKeyPublicKey  ed25519.PublicKey // Ed25519 public key for API auth (admin)
+	// Non-admin API key
+	NonAdminAPIKeyID        string            // API key ID for non-admin authentication
+	NonAdminAPIKeyPublicKey ed25519.PublicKey // Ed25519 public key for non-admin API auth
 }
 
 // TestServer manages a test instance of the remote-signer service
@@ -128,6 +131,16 @@ func (ts *TestServer) Start() error {
 		return fmt.Errorf("failed to create whitelist rule: %w", err)
 	}
 
+	// Create blocklist rule to block burn address (for testing blocklist functionality)
+	if err := ts.createBlocklistRule(ruleRepo); err != nil {
+		return fmt.Errorf("failed to create blocklist rule: %w", err)
+	}
+
+	// Create sign type restriction rule to allow specific sign types
+	if err := ts.createSignTypeRestrictionRule(ruleRepo); err != nil {
+		return fmt.Errorf("failed to create sign type restriction rule: %w", err)
+	}
+
 	// Initialize chain registry
 	chainRegistry := chain.NewRegistry()
 
@@ -173,6 +186,16 @@ func (ts *TestServer) Start() error {
 	ruleEngine.RegisterEvaluator(&evm.ContractMethodEvaluator{})
 	ruleEngine.RegisterEvaluator(&evm.ValueLimitEvaluator{})
 	ruleEngine.RegisterEvaluator(&evm.SignerRestrictionEvaluator{})
+	ruleEngine.RegisterEvaluator(&evm.SignTypeRestrictionEvaluator{})
+
+	// Register Solidity expression evaluator for blocklist rules
+	solidityEvaluator, err := evm.NewSolidityRuleEvaluator(evm.SolidityEvaluatorConfig{
+		Timeout: 30 * time.Second,
+	}, log)
+	if err != nil {
+		return fmt.Errorf("failed to create solidity evaluator: %w", err)
+	}
+	ruleEngine.RegisterEvaluator(solidityEvaluator)
 
 	// Initialize noop notifier for tests
 	notifier, err := service.NewNoopNotifier()
@@ -219,7 +242,7 @@ func (ts *TestServer) Start() error {
 	}
 
 	// Initialize router
-	router, err := api.NewRouter(authVerifier, signService, log, api.RouterConfig{
+	router, err := api.NewRouter(authVerifier, signService, ruleRepo, auditRepo, log, api.RouterConfig{
 		Version: "e2e-test",
 	})
 	if err != nil {
@@ -314,21 +337,45 @@ func (ts *TestServer) waitForReady(ctx context.Context) error {
 	return fmt.Errorf("server did not become ready in time")
 }
 
-// createAPIKey creates the test API key in the database
+// createAPIKey creates the test API keys in the database (admin and non-admin)
 func (ts *TestServer) createAPIKey(repo storage.APIKeyRepository) error {
 	ctx := context.Background()
 
-	apiKey := &types.APIKey{
+	// Create admin API key
+	adminKey := &types.APIKey{
 		ID:           ts.config.APIKeyID,
-		Name:         "E2E Test API Key",
+		Name:         "E2E Test Admin API Key",
 		PublicKeyHex: hex.EncodeToString(ts.config.APIKeyPublicKey),
 		RateLimit:    1000,
+		Admin:        true, // Admin key
 		Enabled:      true,
 		CreatedAt:    time.Now(),
 		UpdatedAt:    time.Now(),
 	}
 
-	return repo.Create(ctx, apiKey)
+	if err := repo.Create(ctx, adminKey); err != nil {
+		return fmt.Errorf("failed to create admin API key: %w", err)
+	}
+
+	// Create non-admin API key if configured
+	if ts.config.NonAdminAPIKeyID != "" && ts.config.NonAdminAPIKeyPublicKey != nil {
+		nonAdminKey := &types.APIKey{
+			ID:           ts.config.NonAdminAPIKeyID,
+			Name:         "E2E Test Non-Admin API Key",
+			PublicKeyHex: hex.EncodeToString(ts.config.NonAdminAPIKeyPublicKey),
+			RateLimit:    1000,
+			Admin:        false, // Non-admin key
+			Enabled:      true,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+		}
+
+		if err := repo.Create(ctx, nonAdminKey); err != nil {
+			return fmt.Errorf("failed to create non-admin API key: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // createWhitelistRule creates a rule that auto-approves all sign requests
@@ -344,6 +391,58 @@ func (ts *TestServer) createWhitelistRule(repo storage.RuleRepository) error {
 		Name:        "E2E Test Auto-Approve",
 		Description: "Auto-approve all requests for e2e testing from test signer",
 		Type:        types.RuleTypeSignerRestriction,
+		Mode:        types.RuleModeWhitelist,
+		Source:      types.RuleSourceConfig,
+		ChainType:   &chainType,
+		Config:      []byte(config),
+		Enabled:     true,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+
+	return repo.Create(ctx, rule)
+}
+
+// createBlocklistRule creates a blocklist rule to block burn address
+func (ts *TestServer) createBlocklistRule(repo storage.RuleRepository) error {
+	ctx := context.Background()
+
+	// Create a Solidity expression blocklist rule that blocks the burn address
+	// This matches the "Block known malicious addresses" rule in config.example.yaml
+	chainType := types.ChainTypeEVM
+	config := `{
+		"expression": "require(to != 0x000000000000000000000000000000000000dEaD, \"blocked: burn address\");",
+		"description": "Block transfers to burn address for e2e testing"
+	}`
+	rule := &types.Rule{
+		ID:          "e2e-blocklist-rule",
+		Name:        "E2E Test Block Burn Address",
+		Description: "Block transfers to burn address (0xdEaD) for e2e testing",
+		Type:        types.RuleTypeEVMSolidityExpression,
+		Mode:        types.RuleModeBlocklist,
+		Source:      types.RuleSourceConfig,
+		ChainType:   &chainType,
+		Config:      []byte(config),
+		Enabled:     true,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+
+	return repo.Create(ctx, rule)
+}
+
+// createSignTypeRestrictionRule creates a rule to allow specific sign types
+func (ts *TestServer) createSignTypeRestrictionRule(repo storage.RuleRepository) error {
+	ctx := context.Background()
+
+	// Create a sign type restriction rule that allows common sign types
+	chainType := types.ChainTypeEVM
+	config := `{"allowed_sign_types":["personal","typed_data","transaction","hash","raw_message","eip191"]}`
+	rule := &types.Rule{
+		ID:          "e2e-sign-type-rule",
+		Name:        "E2E Test Sign Type Restriction",
+		Description: "Allow all sign types for e2e testing",
+		Type:        types.RuleTypeSignTypeRestriction,
 		Mode:        types.RuleModeWhitelist,
 		Source:      types.RuleSourceConfig,
 		ChainType:   &chainType,

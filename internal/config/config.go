@@ -1,6 +1,8 @@
 package config
 
 import (
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"time"
@@ -21,6 +23,84 @@ type Config struct {
 	NotifyChannel notify.Channel      `yaml:"notify_channels"`
 	Security      SecurityConfig      `yaml:"security"`
 	Logger        LoggerConfig        `yaml:"logger"`
+	APIKeys       []APIKeyConfig      `yaml:"api_keys"`
+	Rules         []RuleConfig        `yaml:"rules"`
+}
+
+// RuleConfig defines a rule in configuration
+type RuleConfig struct {
+	Name          string                 `yaml:"name"`
+	Description   string                 `yaml:"description,omitempty"`
+	Type          string                 `yaml:"type"`
+	Mode          string                 `yaml:"mode"`
+	ChainType     string                 `yaml:"chain_type,omitempty"`
+	ChainID       string                 `yaml:"chain_id,omitempty"`
+	APIKeyID      string                 `yaml:"api_key_id,omitempty"`
+	SignerAddress string                 `yaml:"signer_address,omitempty"`
+	Config        map[string]interface{} `yaml:"config"`
+	Enabled       bool                   `yaml:"enabled"`
+}
+
+// APIKeyConfig defines an API key in configuration
+type APIKeyConfig struct {
+	ID                string   `yaml:"id"`                   // Unique identifier for the API key
+	Name              string   `yaml:"name"`                 // Human-readable name
+	PublicKey         string   `yaml:"public_key"`           // Ed25519 public key (hex or base64, auto-detected)
+	PublicKeyEnv      string   `yaml:"public_key_env"`       // Environment variable containing public key
+	AllowedChainTypes []string `yaml:"allowed_chain_types"`  // Empty = all chains allowed
+	AllowedSigners    []string `yaml:"allowed_signers"`      // Empty = all signers allowed
+	RateLimit         int      `yaml:"rate_limit"`           // Requests per minute (default: 100)
+	Enabled           bool     `yaml:"enabled"`              // Whether the key is active
+	Admin             bool     `yaml:"admin"`                // Admin keys can approve requests and manage rules
+}
+
+// ResolvePublicKey returns the public key hex, resolving from env var and auto-detecting format (hex or base64)
+func (c *APIKeyConfig) ResolvePublicKey() (string, error) {
+	var rawKey string
+
+	if c.PublicKey != "" {
+		rawKey = c.PublicKey
+	} else if c.PublicKeyEnv != "" {
+		rawKey = os.Getenv(c.PublicKeyEnv)
+		if rawKey == "" {
+			return "", fmt.Errorf("environment variable %s is empty for API key %s", c.PublicKeyEnv, c.ID)
+		}
+	} else {
+		return "", fmt.Errorf("API key %s has no public_key or public_key_env configured", c.ID)
+	}
+
+	// Auto-detect format: hex (64 chars) or base64
+	if isHexPublicKey(rawKey) {
+		return rawKey, nil
+	}
+
+	// Try to decode as base64 DER format
+	derBytes, err := base64.StdEncoding.DecodeString(rawKey)
+	if err != nil {
+		return "", fmt.Errorf("invalid public key for API key %s: not valid hex or base64: %w", c.ID, err)
+	}
+
+	// Ed25519 DER public key is 44 bytes: 12-byte header + 32-byte key
+	if len(derBytes) < 32 {
+		return "", fmt.Errorf("invalid public key length for API key %s: got %d bytes, need at least 32", c.ID, len(derBytes))
+	}
+
+	// Extract the last 32 bytes (the actual public key)
+	pubKey := derBytes[len(derBytes)-32:]
+	return hex.EncodeToString(pubKey), nil
+}
+
+// isHexPublicKey checks if a string is a valid hex-encoded Ed25519 public key (64 hex chars = 32 bytes)
+func isHexPublicKey(key string) bool {
+	if len(key) != 64 {
+		return false
+	}
+	for _, c := range key {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 // ServerConfig contains HTTP server configuration
@@ -120,6 +200,27 @@ func validate(cfg *Config) error {
 	// Validate at least one chain is enabled
 	if cfg.Chains.EVM == nil || !cfg.Chains.EVM.Enabled {
 		return fmt.Errorf("at least one chain must be enabled")
+	}
+
+	// Validate API keys
+	seenIDs := make(map[string]bool)
+	for i, key := range cfg.APIKeys {
+		if key.ID == "" {
+			return fmt.Errorf("api_keys[%d]: id is required", i)
+		}
+		if seenIDs[key.ID] {
+			return fmt.Errorf("api_keys[%d]: duplicate id '%s'", i, key.ID)
+		}
+		seenIDs[key.ID] = true
+
+		// Skip public key validation for disabled keys
+		if !key.Enabled {
+			continue
+		}
+
+		if key.PublicKey == "" && key.PublicKeyEnv == "" {
+			return fmt.Errorf("api_keys[%d] (%s): public_key or public_key_env is required", i, key.ID)
+		}
 	}
 
 	return nil

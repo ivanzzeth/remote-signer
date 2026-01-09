@@ -3,7 +3,7 @@
 
 server:
   host: "0.0.0.0"
-  port: 8080
+  port: 8548
   tls:
     enabled: false
     cert_file: "/etc/signer/tls/cert.pem"
@@ -13,20 +13,24 @@ database:
   # PostgreSQL connection string
   # Environment variables can be used: ${VAR_NAME}
   dsn: "postgres://user:password@localhost:5432/remote_signer?sslmode=disable"
+  # dsn: "file:./data/remote-signer.db?_journal_mode=WAL&_busy_timeout=5000"
 
 chains:
   evm:
     enabled: true
     signers:
-      # Private keys loaded from environment variables
+      # Private keys - can use direct hex value or environment variable
       private_keys:
-        - address: "0x1234567890abcdef1234567890abcdef12345678"
-          key_env: "EVM_SIGNER_KEY_1"
+        # This is anvil account 0 test key. DO NOT use it in production!
+        - address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          key_env: "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+          enabled: true
       # Keystores with password from environment
       # keystores:
       #   - address: "0xabcdef1234567890abcdef1234567890abcdef12"
       #     path: "/etc/signer/keystores/"
       #     password_env: "EVM_KEYSTORE_PASSWORD_1"
+      #     enabled: true
 
     # Foundry configuration for Solidity expression rules
     foundry:
@@ -34,8 +38,8 @@ chains:
       enabled: true
       # Path to forge binary (leave empty to auto-detect from PATH)
       forge_path: ""
-      # Cache directory for compiled scripts
-      cache_dir: "/var/cache/remote-signer/forge"
+      # Cache directory for compiled scripts (relative paths are allowed)
+      cache_dir: "./data/forge-cache"
       # Max execution time per rule (default: 30s)
       timeout: "30s"
 
@@ -69,6 +73,61 @@ logger:
   level: "info"
   # Pretty print (for development)
   pretty: true
+
+# API Keys configuration
+# API keys are used for authenticating requests to the service.
+# Each key has an Ed25519 public key stored here; the client keeps the private key.
+# Keys defined here will be synced to the database on startup.
+#
+# Admin vs Non-Admin Keys:
+#   - admin: true  -> Can approve requests, view/manage rules
+#   - admin: false -> Can only submit sign requests and view request status
+api_keys:
+  # Example 1: Admin key with public key from environment variable (recommended for production)
+  - id: "admin-key"
+    name: "Admin Key"
+    public_key: "${ADMIN_PUBLIC_KEY}"  # Read from .env or environment (hex or base64, auto-detected)
+    admin: true                        # Admin can approve requests and manage rules
+    enabled: true
+    rate_limit: 1000
+
+  # Example 2: Non-admin application key (can only submit sign requests)
+  - id: "my-app-key"
+    name: "My Application"
+    public_key: "${MY_APP_PUBLIC_KEY}"  # Read from .env or environment (hex or base64, auto-detected)
+    admin: false                         # Non-admin: cannot approve, view or manage rules
+    enabled: true
+    rate_limit: 100
+    # Optional: restrict to specific chains or signers
+    # allowed_chain_types: ["evm"]       # Empty = all chains allowed
+    # allowed_signers:                   # Empty = all signers allowed
+    #   - "0x1234567890abcdef1234567890abcdef12345678"
+
+  # Example 3: Direct public key in base64 format (for development/testing only)
+  # - id: "dev-key"
+  #   name: "Development Key"
+  #   public_key: "MCowBQYDK2VwAyEA..."  # Base64 DER format (auto-detected)
+  #   admin: true
+  #   enabled: true
+
+  # Example 4: Direct public key in hex format
+  # - id: "hex-key"
+  #   name: "Hex Format Key"
+  #   public_key: "d75a980182b10ab7..."  # Ed25519 public key (64 hex chars = 32 bytes, auto-detected)
+  #   admin: false
+  #   enabled: true
+
+# To generate an Ed25519 key pair:
+# 1. Using openssl (recommended):
+#    openssl genpkey -algorithm ed25519 -out private.pem
+#    openssl pkey -in private.pem -pubout -out public.pem
+#    # Extract base64 keys:
+#    openssl pkey -in private.pem -outform DER | base64        # private key (for TUI/client, keep secret!)
+#    openssl pkey -in public.pem -pubin -outform DER | base64  # public key (for public_key)
+#
+# 2. Using openssl (hex format):
+#    openssl pkey -in private.pem -outform DER | tail -c 32 | xxd -p -c 64        # private key hex
+#    openssl pkey -in public.pem -pubin -outform DER | tail -c 32 | xxd -p -c 64  # public key hex
 
 # Rules configuration
 # Rules can be defined here (config source) or via API (api source)
@@ -276,3 +335,54 @@ rules:
                 deadline: "1893456000"
           expect_pass: false
           expect_reason: "cannot permit zero address spender"
+
+  # Example 8: Signer restriction - auto-approve requests from specific signers
+  # This rule allows any sign type from the specified signers
+  - name: "Allow hot wallet signer"
+    type: "signer_restriction"
+    mode: "whitelist"
+    enabled: true
+    config:
+      allowed_signers:
+        - "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"  # Hot wallet address
+        - "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"  # Another allowed signer
+
+  # Example 9: Sign type restriction - allow only specific signing methods
+  # Useful to limit what types of signing operations are permitted
+  - name: "Allow common signing methods"
+    type: "sign_type_restriction"
+    mode: "whitelist"
+    enabled: true
+    config:
+      # Allowed sign types: hash, raw_message, eip191, personal, typed_data, transaction
+      allowed_sign_types:
+        - "personal"     # Personal message signing (eth_sign, personal_sign)
+        - "typed_data"   # EIP-712 structured data signing (eth_signTypedData_v4)
+        - "transaction"  # Transaction signing
+        - "hash"         # Hash signing
+        - "raw_message"  # Raw message signing
+        - "eip191"       # EIP-191 signing
+
+  # Example 10: Restrict to transaction signing only
+  # Block personal_sign and other non-transaction signing to prevent phishing
+  - name: "Transaction signing only"
+    type: "sign_type_restriction"
+    mode: "whitelist"
+    enabled: true
+    # Scope: only apply to specific API key
+    api_key_id: "my-app-key"
+    config:
+      allowed_sign_types:
+        - "transaction"  # Only allow transaction signing for this API key
+
+  # Example 11: Combined rule - Signer + Sign Type for personal signing
+  # Auto-approve personal_sign from specific signer
+  - name: "Allow personal sign from hot wallet"
+    type: "signer_restriction"
+    mode: "whitelist"
+    enabled: true
+    # Scope filters narrow down when this rule applies
+    signer_address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+    config:
+      allowed_signers:
+        - "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
