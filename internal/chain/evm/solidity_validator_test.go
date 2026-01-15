@@ -290,3 +290,144 @@ func TestSolidityRuleValidator_Type(t *testing.T) {
 	// Verify the rule type constant
 	assert.Equal(t, types.RuleType("evm_solidity_expression"), types.RuleTypeEVMSolidityExpression)
 }
+
+func TestValidateSolidityCodeSecurity(t *testing.T) {
+	tests := []struct {
+		name        string
+		code        string
+		expectError bool
+	}{
+		// Safe code - should pass
+		{
+			name:        "safe require statement",
+			code:        `require(value <= 1 ether, "exceeds limit");`,
+			expectError: false,
+		},
+		{
+			name: "safe function with math",
+			code: `
+				function transfer(address to, uint256 amount) external {
+					require(amount <= 10000, "too much");
+					require(to != address(0), "zero address");
+				}
+			`,
+			expectError: false,
+		},
+		{
+			name:        "safe typed data validation",
+			code:        `require(spender != address(0), "invalid spender");`,
+			expectError: false,
+		},
+
+		// Dangerous patterns - should fail
+		{
+			name: "vm.ffi - command execution",
+			code: `
+				string[] memory inputs = new string[](2);
+				inputs[0] = "cat";
+				inputs[1] = "/etc/passwd";
+				vm.ffi(inputs);
+			`,
+			expectError: true,
+		},
+		{
+			name:        "vm.ffi with spaces",
+			code:        `vm . ffi(inputs);`,
+			expectError: true,
+		},
+		{
+			name:        "vm.readFile - file read",
+			code:        `string memory content = vm.readFile("/etc/passwd");`,
+			expectError: true,
+		},
+		{
+			name:        "vm.writeFile - file write",
+			code:        `vm.writeFile("/tmp/malicious", "data");`,
+			expectError: true,
+		},
+		{
+			name:        "vm.removeFile - file delete",
+			code:        `vm.removeFile("/important/file");`,
+			expectError: true,
+		},
+		{
+			name:        "vm.readDir - directory read",
+			code:        `vm.readDir("/etc");`,
+			expectError: true,
+		},
+		{
+			name:        "vm.fsMetadata - file metadata",
+			code:        `vm.fsMetadata("/etc/passwd");`,
+			expectError: true,
+		},
+		{
+			name:        "vm.envOr - environment variable read",
+			code:        `string memory secret = vm.envOr("SECRET_KEY", "default");`,
+			expectError: true,
+		},
+		{
+			name:        "vm.setEnv - environment variable write",
+			code:        `vm.setEnv("PATH", "/malicious");`,
+			expectError: true,
+		},
+		{
+			name:        "vm.projectRoot - path disclosure",
+			code:        `string memory root = vm.projectRoot();`,
+			expectError: true,
+		},
+		{
+			name:        "vm.rpc - external RPC calls",
+			code:        `vm.rpc("eth_blockNumber", "[]");`,
+			expectError: true,
+		},
+		{
+			name:        "vm.createFork - network access",
+			code:        `vm.createFork("https://mainnet.infura.io");`,
+			expectError: true,
+		},
+		{
+			name:        "vm.selectFork - network access",
+			code:        `vm.selectFork(forkId);`,
+			expectError: true,
+		},
+
+		// Case insensitivity test
+		{
+			name:        "VM.FFI uppercase",
+			code:        `VM.FFI(inputs);`,
+			expectError: true,
+		},
+		{
+			name:        "Vm.ReadFile mixed case",
+			code:        `Vm.ReadFile("/etc/passwd");`,
+			expectError: true,
+		},
+
+		// Edge cases
+		{
+			name:        "vm.ffi in comment should still be detected",
+			code:        `// vm.ffi(inputs); - this is dangerous`,
+			expectError: true,
+		},
+		{
+			name:        "vm.ffi in string literal should still be detected",
+			code:        `string memory s = "vm.ffi(inputs)";`,
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateSolidityCodeSecurity(tt.code)
+
+			if tt.expectError {
+				require.NotNil(t, err, "expected security error but got nil")
+				// Verify that the error message mentions the dangerous pattern
+				assert.Contains(t, err.Message, "dangerous pattern detected",
+					"error message should indicate dangerous pattern")
+			} else {
+				assert.Nil(t, err, "expected no security error but got: %v", err)
+			}
+		})
+	}
+}
