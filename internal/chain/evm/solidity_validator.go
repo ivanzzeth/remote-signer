@@ -9,11 +9,49 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
+
+// dangerousPatterns contains regex patterns for dangerous Foundry cheatcodes
+// These patterns are checked before rule execution to prevent code injection attacks
+var dangerousPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)vm\s*\.\s*ffi\s*\(`),           // vm.ffi() - arbitrary command execution
+	regexp.MustCompile(`(?i)vm\s*\.\s*readFile\s*\(`),      // vm.readFile() - file read
+	regexp.MustCompile(`(?i)vm\s*\.\s*writeFile\s*\(`),     // vm.writeFile() - file write
+	regexp.MustCompile(`(?i)vm\s*\.\s*removeFile\s*\(`),    // vm.removeFile() - file delete
+	regexp.MustCompile(`(?i)vm\s*\.\s*readDir\s*\(`),       // vm.readDir() - directory read
+	regexp.MustCompile(`(?i)vm\s*\.\s*fsMetadata\s*\(`),    // vm.fsMetadata() - file metadata
+	regexp.MustCompile(`(?i)vm\s*\.\s*envOr\s*\(`),         // vm.envOr() - environment variable read
+	regexp.MustCompile(`(?i)vm\s*\.\s*setEnv\s*\(`),        // vm.setEnv() - environment variable write
+	regexp.MustCompile(`(?i)vm\s*\.\s*projectRoot\s*\(`),   // vm.projectRoot() - path disclosure
+	regexp.MustCompile(`(?i)vm\s*\.\s*rpc\s*\(`),           // vm.rpc() - external RPC calls
+	regexp.MustCompile(`(?i)vm\s*\.\s*createFork\s*\(`),    // vm.createFork() - network access
+	regexp.MustCompile(`(?i)vm\s*\.\s*selectFork\s*\(`),    // vm.selectFork() - network access
+}
+
+// SecurityError represents a security validation error
+type SecurityError struct {
+	Pattern string `json:"pattern"`
+	Message string `json:"message"`
+}
+
+// ValidateSolidityCodeSecurity checks code for dangerous patterns
+// Returns nil if code is safe, or SecurityError if dangerous patterns are found
+func ValidateSolidityCodeSecurity(code string) *SecurityError {
+	for _, pattern := range dangerousPatterns {
+		if pattern.MatchString(code) {
+			return &SecurityError{
+				Pattern: pattern.String(),
+				Message: fmt.Sprintf("dangerous pattern detected: %s - this cheatcode is not allowed for security reasons", pattern.String()),
+			}
+		}
+	}
+	return nil
+}
 
 // SolidityRuleValidator validates Solidity expression rules before storage
 type SolidityRuleValidator struct {
@@ -85,6 +123,15 @@ func (v *SolidityRuleValidator) ValidateRule(ctx context.Context, rule *types.Ru
 	// Validate that at least one mode is specified
 	if code == "" {
 		return nil, fmt.Errorf("either expression, functions, typed_data_expression, or typed_data_functions must be specified")
+	}
+
+	// Step 0: Security validation - check for dangerous patterns
+	if secErr := ValidateSolidityCodeSecurity(code); secErr != nil {
+		v.logger.Warn("security validation failed",
+			"rule_id", rule.ID,
+			"pattern", secErr.Pattern,
+		)
+		return nil, fmt.Errorf("security validation failed: %s", secErr.Message)
 	}
 
 	result := &ValidationResult{Valid: true}

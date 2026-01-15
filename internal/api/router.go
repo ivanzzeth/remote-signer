@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/ivanzzeth/remote-signer/internal/api/handler"
 	"github.com/ivanzzeth/remote-signer/internal/api/handler/evm"
@@ -170,5 +171,5 @@ func (r *Router) Handler() http.Handler {
 
 // StartRateLimitCleanup starts the rate limit cleanup routine
 func (r *Router) StartRateLimitCleanup(stop <-chan struct{}) {
-	r.rateLimiter.StartCleanupRoutine(5*60*1000, stop) // every 5 minutes
+	r.rateLimiter.StartCleanupRoutine(5*time.Minute, stop) // every 5 minutes
 }

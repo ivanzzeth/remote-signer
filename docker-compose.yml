@@ -38,6 +38,23 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # Security: Resource limits to prevent DoS attacks from Solidity rule execution
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    # Security: Prevent privilege escalation
+    security_opt:
+      - no-new-privileges:true
+    # Security: Drop all capabilities except what's needed
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
     environment:
       # Database connection (auto-configured for docker network)
       DATABASE_DSN: "postgres://${POSTGRES_USER:-signer}:${POSTGRES_PASSWORD:-signer_password}@postgres:5432/${POSTGRES_DB:-remote_signer}?sslmode=disable"

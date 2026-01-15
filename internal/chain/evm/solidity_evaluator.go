@@ -212,8 +212,9 @@ func NewSolidityRuleEvaluator(cfg SolidityEvaluatorConfig, logger *slog.Logger) 
 		return nil, fmt.Errorf("forge not executable at %s: %w", foundryPath, err)
 	}
 
+	// Create temp directory with restricted permissions (owner-only)
 	tempDir := filepath.Join(os.TempDir(), "remote-signer-rules")
-	if err := os.MkdirAll(tempDir, 0755); err != nil {
+	if err := os.MkdirAll(tempDir, 0700); err != nil {
 		return nil, fmt.Errorf("failed to create temp dir: %w", err)
 	}
 
@@ -221,7 +222,7 @@ func NewSolidityRuleEvaluator(cfg SolidityEvaluatorConfig, logger *slog.Logger) 
 	if cacheDir == "" {
 		cacheDir = filepath.Join(tempDir, "cache")
 	}
-	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+	if err := os.MkdirAll(cacheDir, 0700); err != nil {
 		return nil, fmt.Errorf("failed to create cache dir: %w", err)
 	}
 
@@ -440,9 +441,9 @@ func (e *SolidityRuleEvaluator) executeScript(ctx context.Context, script string
 	hash := sha256.Sum256([]byte(script))
 	hashStr := hex.EncodeToString(hash[:8]) // Use first 8 bytes for shorter filename
 
-	// Create script file
+	// Create script file with restricted permissions (owner-only)
 	scriptPath := filepath.Join(e.tempDir, fmt.Sprintf("rule_%s.sol", hashStr))
-	if err := os.WriteFile(scriptPath, []byte(script), 0644); err != nil {
+	if err := os.WriteFile(scriptPath, []byte(script), 0600); err != nil {
 		return false, "", fmt.Errorf("failed to write script: %w", err)
 	}
 	defer os.Remove(scriptPath)
@@ -461,6 +462,14 @@ func (e *SolidityRuleEvaluator) executeScript(ctx context.Context, script string
 		scriptPath,
 		"--json",
 		"-vvv", // verbose for revert reasons
+	)
+
+	// Security: Disable dangerous Foundry cheatcodes
+	// - FOUNDRY_FFI=false: Prevent arbitrary command execution via vm.ffi()
+	// - FOUNDRY_FS_PERMISSIONS=[]: Prevent file system access via vm.readFile(), vm.writeFile(), etc.
+	cmd.Env = append(os.Environ(),
+		"FOUNDRY_FFI=false",
+		"FOUNDRY_FS_PERMISSIONS=[]",
 	)
 
 	output, err := cmd.CombinedOutput()
