@@ -29,6 +29,9 @@ chains:
       #     password_env: "EVM_KEYSTORE_PASSWORD_1"
       #     enabled: true
 
+    # Directory for storing dynamically created keystores via API
+    keystore_dir: "./data/keystores"
+
     # Foundry configuration for Solidity expression rules
     foundry:
       # Enable Foundry-based Solidity expression rules

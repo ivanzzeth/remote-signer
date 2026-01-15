@@ -25,7 +25,7 @@ type DashboardData struct {
 
 // DashboardModel represents the dashboard view
 type DashboardModel struct {
-	client    *client.Client
+	client    client.ClientInterface
 	ctx       context.Context
 	width     int
 	height    int
@@ -43,7 +43,7 @@ type DashboardDataMsg struct {
 }
 
 // NewDashboardModel creates a new dashboard model
-func NewDashboardModel(c *client.Client, ctx context.Context) (*DashboardModel, error) {
+func NewDashboardModel(c client.ClientInterface, ctx context.Context) (*DashboardModel, error) {
 	if c == nil {
 		return nil, fmt.Errorf("client is required")
 	}

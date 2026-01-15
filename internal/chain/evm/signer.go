@@ -179,6 +179,75 @@ func (r *SignerRegistry) ListSigners() []types.SignerInfo {
 	return signers
 }
 
+// ListSignersWithFilter returns signers matching the filter with pagination
+func (r *SignerRegistry) ListSignersWithFilter(filter types.SignerFilter) types.SignerListResult {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	// Collect all matching signers
+	var allSigners []types.SignerInfo
+	for _, info := range r.info {
+		// Apply type filter
+		if filter.Type != nil && types.SignerType(info.Type) != *filter.Type {
+			continue
+		}
+		allSigners = append(allSigners, info)
+	}
+
+	total := len(allSigners)
+
+	// Apply pagination
+	start := filter.Offset
+	if start > total {
+		start = total
+	}
+
+	end := start + filter.Limit
+	if filter.Limit <= 0 {
+		end = total // No limit means return all
+	}
+	if end > total {
+		end = total
+	}
+
+	hasMore := end < total
+
+	return types.SignerListResult{
+		Signers: allSigners[start:end],
+		Total:   total,
+		HasMore: hasMore,
+	}
+}
+
+// RegisterKeystore dynamically registers a keystore signer
+func (r *SignerRegistry) RegisterKeystore(address string, keystorePath string, password []byte) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	addrKey := normalizeAddress(address)
+
+	// Check if signer already exists
+	if _, exists := r.signers[addrKey]; exists {
+		return types.ErrAlreadyExists
+	}
+
+	expectedAddr := common.HexToAddress(address)
+	keystoreSigner, err := ethsig.NewKeystoreSignerFromPath(keystorePath, expectedAddr, string(password), nil)
+	if err != nil {
+		return fmt.Errorf("failed to load keystore: %w", err)
+	}
+
+	signer := ethsig.NewSigner(keystoreSigner)
+	r.signers[addrKey] = signer
+	r.info[addrKey] = types.SignerInfo{
+		Address: expectedAddr.Hex(),
+		Type:    string(types.SignerTypeKeystore),
+		Enabled: true,
+	}
+
+	return nil
+}
+
 // normalizeAddress converts an address to lowercase for consistent map keys
 func normalizeAddress(address string) string {
 	return common.HexToAddress(address).Hex()

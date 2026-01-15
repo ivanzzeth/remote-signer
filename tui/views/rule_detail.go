@@ -17,7 +17,7 @@ import (
 
 // RuleDetailModel represents the rule detail view
 type RuleDetailModel struct {
-	client       *client.Client
+	client       client.ClientInterface
 	ctx          context.Context
 	width        int
 	height       int
@@ -48,7 +48,7 @@ type RuleDetailActionMsg struct {
 }
 
 // NewRuleDetailModel creates a new rule detail model
-func NewRuleDetailModel(c *client.Client, ctx context.Context) (*RuleDetailModel, error) {
+func NewRuleDetailModel(c client.ClientInterface, ctx context.Context) (*RuleDetailModel, error) {
 	if c == nil {
 		return nil, fmt.Errorf("client is required")
 	}

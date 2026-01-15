@@ -16,7 +16,7 @@ import (
 
 // RulesModel represents the rules list view
 type RulesModel struct {
-	client       *client.Client
+	client       client.ClientInterface
 	ctx          context.Context
 	width        int
 	height       int
@@ -53,7 +53,7 @@ type RuleActionMsg struct {
 }
 
 // NewRulesModel creates a new rules model
-func NewRulesModel(c *client.Client, ctx context.Context) (*RulesModel, error) {
+func NewRulesModel(c client.ClientInterface, ctx context.Context) (*RulesModel, error) {
 	if c == nil {
 		return nil, fmt.Errorf("client is required")
 	}

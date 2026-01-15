@@ -21,7 +21,7 @@ var ruleModes = []string{"whitelist", "blocklist"}
 
 // RequestDetailModel represents the request detail view
 type RequestDetailModel struct {
-	client        *client.Client
+	client        client.ClientInterface
 	ctx           context.Context
 	width         int
 	height        int
@@ -63,7 +63,7 @@ type ApprovalResultMsg struct {
 }
 
 // NewRequestDetailModel creates a new request detail model
-func NewRequestDetailModel(c *client.Client, ctx context.Context) (*RequestDetailModel, error) {
+func NewRequestDetailModel(c client.ClientInterface, ctx context.Context) (*RequestDetailModel, error) {
 	if c == nil {
 		return nil, fmt.Errorf("client is required")
 	}

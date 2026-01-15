@@ -7,8 +7,9 @@ import (
 	"time"
 
 	"github.com/ivanzzeth/remote-signer/internal/api/handler"
-	"github.com/ivanzzeth/remote-signer/internal/api/handler/evm"
+	evmhandler "github.com/ivanzzeth/remote-signer/internal/api/handler/evm"
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
+	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/core/auth"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
@@ -21,34 +22,37 @@ type RouterConfig struct {
 
 // Router handles HTTP routing
 type Router struct {
-	mux          *http.ServeMux
-	authVerifier *auth.Verifier
-	signService  *service.SignService
-	ruleRepo     storage.RuleRepository
-	auditRepo    storage.AuditRepository
-	rateLimiter  *middleware.RateLimiter
-	logger       *slog.Logger
-	config       RouterConfig
+	mux           *http.ServeMux
+	authVerifier  *auth.Verifier
+	signService   *service.SignService
+	signerManager evm.SignerManager
+	ruleRepo      storage.RuleRepository
+	auditRepo     storage.AuditRepository
+	rateLimiter   *middleware.RateLimiter
+	logger        *slog.Logger
+	config        RouterConfig
 }
 
 // NewRouter creates a new router
 func NewRouter(
 	authVerifier *auth.Verifier,
 	signService *service.SignService,
+	signerManager evm.SignerManager,
 	ruleRepo storage.RuleRepository,
 	auditRepo storage.AuditRepository,
 	logger *slog.Logger,
 	config RouterConfig,
 ) (*Router, error) {
 	r := &Router{
-		mux:          http.NewServeMux(),
-		authVerifier: authVerifier,
-		signService:  signService,
-		ruleRepo:     ruleRepo,
-		auditRepo:    auditRepo,
-		rateLimiter:  middleware.NewRateLimiter(logger),
-		logger:       logger,
-		config:       config,
+		mux:           http.NewServeMux(),
+		authVerifier:  authVerifier,
+		signService:   signService,
+		signerManager: signerManager,
+		ruleRepo:      ruleRepo,
+		auditRepo:     auditRepo,
+		rateLimiter:   middleware.NewRateLimiter(logger),
+		logger:        logger,
+		config:        config,
 	}
 
 	if err := r.setupRoutes(); err != nil {
@@ -64,32 +68,37 @@ func (r *Router) setupRoutes() error {
 	r.mux.Handle("/health", healthHandler)
 
 	// EVM handlers
-	signHandler, err := evm.NewSignHandler(r.signService, r.logger)
+	signHandler, err := evmhandler.NewSignHandler(r.signService, r.logger)
 	if err != nil {
 		return err
 	}
 
-	requestHandler, err := evm.NewRequestHandler(r.signService, r.logger)
+	requestHandler, err := evmhandler.NewRequestHandler(r.signService, r.logger)
 	if err != nil {
 		return err
 	}
 
-	listHandler, err := evm.NewListHandler(r.signService, r.logger)
+	listHandler, err := evmhandler.NewListHandler(r.signService, r.logger)
 	if err != nil {
 		return err
 	}
 
-	approvalHandler, err := evm.NewApprovalHandler(r.signService, r.logger)
+	approvalHandler, err := evmhandler.NewApprovalHandler(r.signService, r.logger)
 	if err != nil {
 		return err
 	}
 
-	previewRuleHandler, err := evm.NewPreviewRuleHandler(r.signService, r.logger)
+	previewRuleHandler, err := evmhandler.NewPreviewRuleHandler(r.signService, r.logger)
 	if err != nil {
 		return err
 	}
 
-	ruleHandler, err := evm.NewRuleHandler(r.ruleRepo, r.logger)
+	ruleHandler, err := evmhandler.NewRuleHandler(r.ruleRepo, r.logger)
+	if err != nil {
+		return err
+	}
+
+	signerHandler, err := evmhandler.NewSignerHandler(r.signerManager, r.logger)
 	if err != nil {
 		return err
 	}
@@ -121,6 +130,9 @@ func (r *Router) setupRoutes() error {
 	// Rule management routes (with auth + admin required for all operations)
 	r.mux.Handle("/api/v1/evm/rules", r.withAuthAndAdmin(ruleHandler))
 	r.mux.Handle("/api/v1/evm/rules/", r.withAuthAndAdmin(ruleHandler))
+
+	// Signer management routes (GET with auth, POST with auth + admin)
+	r.mux.Handle("/api/v1/evm/signers", r.withAuth(signerHandler))
 
 	// Audit routes (with auth)
 	r.mux.Handle("/api/v1/audit", r.withAuth(auditHandler))

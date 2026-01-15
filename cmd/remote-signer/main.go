@@ -127,7 +127,8 @@ func run() error {
 	// Initialize chain registry
 	chainRegistry := chain.NewRegistry()
 
-	// Initialize EVM adapter if enabled
+	// Initialize EVM adapter and signer manager if enabled
+	var evmSignerManager evm.SignerManager
 	if cfg.Chains.EVM != nil && cfg.Chains.EVM.Enabled {
 		evmRegistry, err := evm.NewSignerRegistry(cfg.Chains.EVM.Signers)
 		if err != nil {
@@ -143,6 +144,17 @@ func run() error {
 			return fmt.Errorf("failed to register EVM adapter: %w", err)
 		}
 		log.Info("EVM adapter registered")
+
+		// Initialize signer manager for dynamic signer creation
+		keystoreDir := cfg.Chains.EVM.KeystoreDir
+		if keystoreDir == "" {
+			keystoreDir = "./data/keystores" // Default
+		}
+		evmSignerManager, err = evm.NewSignerManager(evmRegistry, keystoreDir, log)
+		if err != nil {
+			return fmt.Errorf("failed to create EVM signer manager: %w", err)
+		}
+		log.Info("EVM signer manager initialized", "keystore_dir", keystoreDir)
 	}
 
 	// Initialize state machine
@@ -248,7 +260,7 @@ func run() error {
 	}
 
 	// Initialize router
-	router, err := api.NewRouter(authVerifier, signService, ruleRepo, auditRepo, log, api.RouterConfig{
+	router, err := api.NewRouter(authVerifier, signService, evmSignerManager, ruleRepo, auditRepo, log, api.RouterConfig{
 		Version: version,
 	})
 	if err != nil {
