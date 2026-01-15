@@ -490,3 +490,110 @@ func (c *Client) ToggleRule(ctx context.Context, ruleID string, enabled bool) (*
 
 	return &rule, nil
 }
+
+// Signer represents a signer configuration.
+type Signer struct {
+	Address string `json:"address"`
+	Type    string `json:"type"`
+	Enabled bool   `json:"enabled"`
+}
+
+// ListSignersResponse represents the response from listing signers.
+type ListSignersResponse struct {
+	Signers []Signer `json:"signers"`
+	Total   int      `json:"total"`
+	HasMore bool     `json:"has_more"`
+}
+
+// CreateSignerRequest represents a request to create a new signer.
+type CreateSignerRequest struct {
+	Type     string                 `json:"type"`
+	Keystore *CreateKeystoreParams  `json:"keystore,omitempty"`
+}
+
+// CreateKeystoreParams contains parameters for creating a keystore signer.
+type CreateKeystoreParams struct {
+	Password string `json:"password"`
+}
+
+// ListSignersFilter contains filter options for listing signers.
+type ListSignersFilter struct {
+	Type   string
+	Offset int
+	Limit  int
+}
+
+// ListSigners lists available signers with optional filters.
+func (c *Client) ListSigners(ctx context.Context, filter *ListSignersFilter) (*ListSignersResponse, error) {
+	path := "/api/v1/evm/signers"
+	params := make([]string, 0)
+
+	if filter != nil {
+		if filter.Type != "" {
+			params = append(params, fmt.Sprintf("type=%s", filter.Type))
+		}
+		if filter.Limit > 0 {
+			params = append(params, fmt.Sprintf("limit=%d", filter.Limit))
+		}
+		if filter.Offset > 0 {
+			params = append(params, fmt.Sprintf("offset=%d", filter.Offset))
+		}
+	}
+
+	if len(params) > 0 {
+		path += "?" + strings.Join(params, "&")
+	}
+
+	httpReq, err := c.newSignedRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, c.parseErrorResponse(resp)
+	}
+
+	var listResp ListSignersResponse
+	if err := json.NewDecoder(resp.Body).Decode(&listResp); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &listResp, nil
+}
+
+// CreateSigner creates a new signer (admin only).
+func (c *Client) CreateSigner(ctx context.Context, req *CreateSignerRequest) (*Signer, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	path := "/api/v1/evm/signers"
+	httpReq, err := c.newSignedRequest(ctx, http.MethodPost, path, body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return nil, c.parseErrorResponse(resp)
+	}
+
+	var signer Signer
+	if err := json.NewDecoder(resp.Body).Decode(&signer); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &signer, nil
+}

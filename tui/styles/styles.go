@@ -185,6 +185,16 @@ var (
 	SuccessStyle = lipgloss.NewStyle().
 			Foreground(SuccessColor).
 			Bold(true)
+
+	// Warning message style
+	WarningStyle = lipgloss.NewStyle().
+			Foreground(WarningColor).
+			Bold(true)
+
+	// Highlight style
+	HighlightStyle = lipgloss.NewStyle().
+			Foreground(SecondaryColor).
+			Bold(true)
 )
 
 // GetStatusStyle returns the appropriate style for a given status

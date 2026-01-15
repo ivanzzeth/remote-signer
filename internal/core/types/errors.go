@@ -21,6 +21,13 @@ var (
 	ErrSigningFailed      = errors.New("signing failed")
 	ErrPendingApproval    = errors.New("pending manual approval")
 	ErrRequestExpired     = errors.New("request expired")
+
+	// Signer creation errors
+	ErrMissingSignerType              = errors.New("signer type is required")
+	ErrUnsupportedSignerType          = errors.New("unsupported signer type")
+	ErrMissingKeystoreParams          = errors.New("keystore parameters are required")
+	ErrEmptyPassword                  = errors.New("password cannot be empty")
+	ErrPrivateKeyCreationNotSupported = errors.New("private key creation via API is not supported")
 )
 
 // TypedError provides structured error information

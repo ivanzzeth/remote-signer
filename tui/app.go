@@ -25,6 +25,7 @@ const (
 	ViewRules
 	ViewRuleDetail
 	ViewAudit
+	ViewSigners
 )
 
 // keyMap defines the key bindings for the application
@@ -52,6 +53,7 @@ type keyMap struct {
 	Number2   key.Binding
 	Number3   key.Binding
 	Number4   key.Binding
+	Number5   key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
@@ -64,7 +66,7 @@ func (k keyMap) FullHelp() [][]key.Binding {
 		{k.Up, k.Down, k.PageUp, k.PageDown},
 		{k.Approve, k.Reject, k.Generate},
 		{k.Filter, k.Refresh, k.Delete, k.Toggle},
-		{k.Number1, k.Number2, k.Number3, k.Number4},
+		{k.Number1, k.Number2, k.Number3, k.Number4, k.Number5},
 		{k.Help, k.Quit},
 	}
 }
@@ -162,6 +164,10 @@ var keys = keyMap{
 		key.WithKeys("4"),
 		key.WithHelp("4", "audit"),
 	),
+	Number5: key.NewBinding(
+		key.WithKeys("5"),
+		key.WithHelp("5", "signers"),
+	),
 }
 
 // Model represents the main application state
@@ -185,6 +191,7 @@ type Model struct {
 	rules         *views.RulesModel
 	ruleDetail    *views.RuleDetailModel
 	audit         *views.AuditModel
+	signers       *views.SignersModel
 }
 
 // NewModel creates a new application model
@@ -227,6 +234,11 @@ func NewModel(c *client.Client) (*Model, error) {
 		return nil, fmt.Errorf("failed to create audit view: %w", err)
 	}
 
+	signers, err := views.NewSignersModel(c, ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create signers view: %w", err)
+	}
+
 	return &Model{
 		client:        c,
 		ctx:           ctx,
@@ -239,6 +251,7 @@ func NewModel(c *client.Client) (*Model, error) {
 		rules:         rules,
 		ruleDetail:    ruleDetail,
 		audit:         audit,
+		signers:       signers,
 	}, nil
 }
 
@@ -249,6 +262,7 @@ func (m Model) Init() tea.Cmd {
 		m.requests.Init(),
 		m.rules.Init(),
 		m.audit.Init(),
+		m.signers.Init(),
 	)
 }
 
@@ -269,6 +283,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.rules.SetSize(msg.Width, msg.Height-6)
 		m.ruleDetail.SetSize(msg.Width, msg.Height-6)
 		m.audit.SetSize(msg.Width, msg.Height-6)
+		m.signers.SetSize(msg.Width, msg.Height-6)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -276,7 +291,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case key.Matches(msg, keys.Quit):
 			if m.currentView == ViewDashboard || m.currentView == ViewRequests ||
-				m.currentView == ViewRules || m.currentView == ViewAudit {
+				m.currentView == ViewRules || m.currentView == ViewAudit ||
+				m.currentView == ViewSigners {
 				return m, tea.Quit
 			}
 			// If in detail view, go back instead of quitting
@@ -307,21 +323,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.currentView = ViewAudit
 			return m, m.audit.Refresh()
 
+		case key.Matches(msg, keys.Number5):
+			m.activeTab = 4
+			m.currentView = ViewSigners
+			return m, m.signers.Refresh()
+
 		case key.Matches(msg, keys.Tab):
 			// Only switch tabs in main views
 			if m.currentView == ViewDashboard || m.currentView == ViewRequests ||
-				m.currentView == ViewRules || m.currentView == ViewAudit {
-				m.activeTab = (m.activeTab + 1) % 4
-				m.currentView = ViewType(m.activeTab)
+				m.currentView == ViewRules || m.currentView == ViewAudit ||
+				m.currentView == ViewSigners {
+				m.activeTab = (m.activeTab + 1) % 5
+				m.currentView = m.tabToView(m.activeTab)
 				return m, m.refreshCurrentView()
 			}
 
 		case key.Matches(msg, keys.ShiftTab):
 			// Only switch tabs in main views
 			if m.currentView == ViewDashboard || m.currentView == ViewRequests ||
-				m.currentView == ViewRules || m.currentView == ViewAudit {
-				m.activeTab = (m.activeTab + 3) % 4
-				m.currentView = ViewType(m.activeTab)
+				m.currentView == ViewRules || m.currentView == ViewAudit ||
+				m.currentView == ViewSigners {
+				m.activeTab = (m.activeTab + 4) % 5
+				m.currentView = m.tabToView(m.activeTab)
 				return m, m.refreshCurrentView()
 			}
 
@@ -396,6 +419,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		newAudit, cmd := m.audit.Update(msg)
 		m.audit = newAudit.(*views.AuditModel)
 		cmds = append(cmds, cmd)
+
+	case ViewSigners:
+		newSigners, cmd := m.signers.Update(msg)
+		m.signers = newSigners.(*views.SignersModel)
+		cmds = append(cmds, cmd)
 	}
 
 	return m, tea.Batch(cmds...)
@@ -435,7 +463,7 @@ func (m Model) View() string {
 }
 
 func (m Model) renderHeader() string {
-	tabs := []string{"Dashboard", "Requests", "Rules", "Audit"}
+	tabs := []string{"Dashboard", "Requests", "Rules", "Audit", "Signers"}
 	var renderedTabs []string
 
 	for i, tab := range tabs {
@@ -452,7 +480,7 @@ func (m Model) renderHeader() string {
 	return lipgloss.JoinVertical(lipgloss.Left, title, tabLine)
 }
 
-func (m Model) renderContent(height int) string {
+func (m Model) renderContent(_ int) string {
 	switch m.currentView {
 	case ViewDashboard:
 		return m.dashboard.View()
@@ -466,6 +494,8 @@ func (m Model) renderContent(height int) string {
 		return m.ruleDetail.View()
 	case ViewAudit:
 		return m.audit.View()
+	case ViewSigners:
+		return m.signers.View()
 	default:
 		return "Unknown view"
 	}
@@ -481,7 +511,27 @@ func (m Model) refreshCurrentView() tea.Cmd {
 		return m.rules.Refresh()
 	case ViewAudit:
 		return m.audit.Refresh()
+	case ViewSigners:
+		return m.signers.Refresh()
 	default:
 		return nil
+	}
+}
+
+// tabToView converts tab index to ViewType
+func (m Model) tabToView(tab int) ViewType {
+	switch tab {
+	case 0:
+		return ViewDashboard
+	case 1:
+		return ViewRequests
+	case 2:
+		return ViewRules
+	case 3:
+		return ViewAudit
+	case 4:
+		return ViewSigners
+	default:
+		return ViewDashboard
 	}
 }

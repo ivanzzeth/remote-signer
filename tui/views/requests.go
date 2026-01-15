@@ -16,7 +16,7 @@ import (
 
 // RequestsModel represents the requests list view
 type RequestsModel struct {
-	client       *client.Client
+	client       client.ClientInterface
 	ctx          context.Context
 	width        int
 	height       int
@@ -56,7 +56,7 @@ type RequestsDataMsg struct {
 }
 
 // NewRequestsModel creates a new requests model
-func NewRequestsModel(c *client.Client, ctx context.Context) (*RequestsModel, error) {
+func NewRequestsModel(c client.ClientInterface, ctx context.Context) (*RequestsModel, error) {
 	if c == nil {
 		return nil, fmt.Errorf("client is required")
 	}

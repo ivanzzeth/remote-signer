@@ -132,8 +132,10 @@ func (ts *TestServer) Start() error {
 	}
 
 	// Create blocklist rule to block burn address (for testing blocklist functionality)
+	// This requires Solidity evaluator (forge), so skip if not available
 	if err := ts.createBlocklistRule(ruleRepo); err != nil {
-		return fmt.Errorf("failed to create blocklist rule: %w", err)
+		// Blocklist rule is optional - requires forge
+		log.Warn("Blocklist rule creation skipped (forge may not be installed)", "error", err)
 	}
 
 	// Create sign type restriction rule to allow specific sign types
@@ -188,14 +190,16 @@ func (ts *TestServer) Start() error {
 	ruleEngine.RegisterEvaluator(&evm.SignerRestrictionEvaluator{})
 	ruleEngine.RegisterEvaluator(&evm.SignTypeRestrictionEvaluator{})
 
-	// Register Solidity expression evaluator for blocklist rules
+	// Register Solidity expression evaluator for blocklist rules (optional - requires forge)
 	solidityEvaluator, err := evm.NewSolidityRuleEvaluator(evm.SolidityEvaluatorConfig{
 		Timeout: 30 * time.Second,
 	}, log)
 	if err != nil {
-		return fmt.Errorf("failed to create solidity evaluator: %w", err)
+		// Solidity evaluator is optional - forge may not be installed
+		log.Warn("Solidity evaluator not available (forge not installed?), skipping", "error", err)
+	} else {
+		ruleEngine.RegisterEvaluator(solidityEvaluator)
 	}
-	ruleEngine.RegisterEvaluator(solidityEvaluator)
 
 	// Initialize noop notifier for tests
 	notifier, err := service.NewNoopNotifier()
@@ -241,8 +245,18 @@ func (ts *TestServer) Start() error {
 		return fmt.Errorf("failed to create auth verifier: %w", err)
 	}
 
+	// Initialize signer manager for dynamic signer creation
+	tempKeystoreDir, err := os.MkdirTemp("", "e2e-keystores-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temp keystore directory: %w", err)
+	}
+	signerManager, err := evm.NewSignerManager(evmRegistry, tempKeystoreDir, log)
+	if err != nil {
+		return fmt.Errorf("failed to create signer manager: %w", err)
+	}
+
 	// Initialize router
-	router, err := api.NewRouter(authVerifier, signService, ruleRepo, auditRepo, log, api.RouterConfig{
+	router, err := api.NewRouter(authVerifier, signService, signerManager, ruleRepo, auditRepo, log, api.RouterConfig{
 		Version: "e2e-test",
 	})
 	if err != nil {

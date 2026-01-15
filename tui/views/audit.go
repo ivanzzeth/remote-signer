@@ -17,7 +17,7 @@ import (
 
 // AuditModel represents the audit logs view
 type AuditModel struct {
-	client         *client.Client
+	client         client.ClientInterface
 	ctx            context.Context
 	width          int
 	height         int
@@ -61,7 +61,7 @@ type AuditDataMsg struct {
 }
 
 // NewAuditModel creates a new audit model
-func NewAuditModel(c *client.Client, ctx context.Context) (*AuditModel, error) {
+func NewAuditModel(c client.ClientInterface, ctx context.Context) (*AuditModel, error) {
 	if c == nil {
 		return nil, fmt.Errorf("client is required")
 	}
