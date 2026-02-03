@@ -1,0 +1,23 @@
+# Treasury Rules
+# This file contains rules for treasury-related transactions
+
+rules:
+  # Whitelist treasury addresses
+  - name: "Allow transfers to treasury"
+    type: "evm_address_whitelist"
+    mode: "whitelist"
+    enabled: true
+    description: "Allow transfers to known treasury addresses"
+    config:
+      addresses:
+        - "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"  # Main treasury
+        - "0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2"  # Backup treasury
+
+  # Limit treasury transfer amounts
+  - name: "Treasury transfer limit"
+    type: "evm_value_limit"
+    mode: "whitelist"
+    enabled: true
+    description: "Limit single treasury transfers to 100 ETH"
+    config:
+      max_value: "100000000000000000000"  # 100 ETH in wei
