@@ -13,6 +13,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/ivanzzeth/remote-signer/internal/api"
+	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/chain"
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/config"
@@ -259,9 +260,23 @@ func run() error {
 		return fmt.Errorf("failed to create auth verifier: %w", err)
 	}
 
+	// Initialize IP whitelist
+	var ipWhitelist *middleware.IPWhitelist
+	if cfg.Security.IPWhitelist.Enabled {
+		ipWhitelist, err = middleware.NewIPWhitelist(cfg.Security.IPWhitelist, log)
+		if err != nil {
+			return fmt.Errorf("failed to create IP whitelist: %w", err)
+		}
+		log.Info("IP whitelist enabled",
+			"allowed_count", len(cfg.Security.IPWhitelist.AllowedIPs),
+			"trust_proxy", cfg.Security.IPWhitelist.TrustProxy,
+		)
+	}
+
 	// Initialize router
 	router, err := api.NewRouter(authVerifier, signService, evmSignerManager, ruleRepo, auditRepo, log, api.RouterConfig{
-		Version: version,
+		Version:           version,
+		IPWhitelistConfig: ipWhitelist,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create router: %w", err)

@@ -134,8 +134,22 @@ type FoundryConfig struct {
 
 // SecurityConfig contains security-related settings
 type SecurityConfig struct {
-	MaxRequestAge    time.Duration `yaml:"max_request_age"`
-	RateLimitDefault int           `yaml:"rate_limit_default"`
+	MaxRequestAge    time.Duration     `yaml:"max_request_age"`
+	RateLimitDefault int               `yaml:"rate_limit_default"`
+	IPWhitelist      IPWhitelistConfig `yaml:"ip_whitelist"`
+}
+
+// IPWhitelistConfig contains IP whitelist settings
+type IPWhitelistConfig struct {
+	// Enabled controls whether IP whitelist is enforced
+	Enabled bool `yaml:"enabled"`
+	// AllowedIPs is a list of allowed IP addresses or CIDR ranges
+	// Examples: "192.168.1.1", "10.0.0.0/8", "::1"
+	AllowedIPs []string `yaml:"allowed_ips"`
+	// AllowedCIDRs is parsed from AllowedIPs during validation (internal use)
+	// TrustProxy enables parsing X-Forwarded-For and X-Real-IP headers
+	// WARNING: Only enable this if running behind a trusted reverse proxy
+	TrustProxy bool `yaml:"trust_proxy"`
 }
 
 // LoggerConfig contains logging configuration

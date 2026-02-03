@@ -17,7 +17,8 @@ import (
 
 // RouterConfig contains configuration for the router
 type RouterConfig struct {
-	Version string
+	Version           string
+	IPWhitelistConfig *middleware.IPWhitelist
 }
 
 // Router handles HTTP routing
@@ -29,6 +30,7 @@ type Router struct {
 	ruleRepo      storage.RuleRepository
 	auditRepo     storage.AuditRepository
 	rateLimiter   *middleware.RateLimiter
+	ipWhitelist   *middleware.IPWhitelist
 	logger        *slog.Logger
 	config        RouterConfig
 }
@@ -51,6 +53,7 @@ func NewRouter(
 		ruleRepo:      ruleRepo,
 		auditRepo:     auditRepo,
 		rateLimiter:   middleware.NewRateLimiter(logger),
+		ipWhitelist:   config.IPWhitelistConfig,
 		logger:        logger,
 		config:        config,
 	}
@@ -142,13 +145,17 @@ func (r *Router) setupRoutes() error {
 
 // withAuth wraps a handler with authentication middleware
 func (r *Router) withAuth(h http.Handler) http.Handler {
-	return r.chain(
-		h,
+	middlewares := []func(http.Handler) http.Handler{
 		middleware.RecoveryMiddleware(r.logger),
 		middleware.LoggingMiddleware(r.logger),
 		middleware.AuthMiddleware(r.authVerifier, r.logger),
 		middleware.RateLimitMiddleware(r.rateLimiter),
-	)
+	}
+	// Add IP whitelist as outermost middleware (checked first)
+	if r.ipWhitelist != nil {
+		middlewares = append(middlewares, middleware.IPWhitelistMiddleware(r.ipWhitelist))
+	}
+	return r.chain(h, middlewares...)
 }
 
 // requireAdmin wraps a handler with admin middleware (must be used after auth)
@@ -158,14 +165,18 @@ func (r *Router) requireAdmin(h http.Handler) http.Handler {
 
 // withAuthAndAdmin wraps a handler with authentication and admin middleware
 func (r *Router) withAuthAndAdmin(h http.Handler) http.Handler {
-	return r.chain(
-		h,
+	middlewares := []func(http.Handler) http.Handler{
 		middleware.RecoveryMiddleware(r.logger),
 		middleware.LoggingMiddleware(r.logger),
 		middleware.AuthMiddleware(r.authVerifier, r.logger),
 		middleware.AdminMiddleware(r.logger),
 		middleware.RateLimitMiddleware(r.rateLimiter),
-	)
+	}
+	// Add IP whitelist as outermost middleware (checked first)
+	if r.ipWhitelist != nil {
+		middlewares = append(middlewares, middleware.IPWhitelistMiddleware(r.ipWhitelist))
+	}
+	return r.chain(h, middlewares...)
 }
 
 // chain applies middlewares in reverse order
