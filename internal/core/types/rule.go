@@ -13,6 +13,7 @@ const (
 	RuleTypeSignerRestriction   RuleType = "signer_restriction"
 	RuleTypeChainRestriction    RuleType = "chain_restriction"
 	RuleTypeSignTypeRestriction RuleType = "sign_type_restriction"
+	RuleTypeMessagePattern      RuleType = "message_pattern" // regex pattern matching for personal sign messages
 
 	// EVM-specific rule types (prefixed)
 	// Mode (whitelist/blocklist) determines behavior, not the type name

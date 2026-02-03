@@ -8,6 +8,9 @@ RUN apk add --no-cache git ca-certificates
 
 WORKDIR /app
 
+# Set Go proxy for China
+ENV GOPROXY=https://goproxy.cn,direct
+
 # Copy go mod files first for better caching
 COPY go.mod go.sum ./
 RUN go mod download

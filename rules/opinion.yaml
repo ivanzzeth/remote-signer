@@ -9,29 +9,86 @@
 # - EIP-712 Order: CTF Exchange order signing
 # - EIP-712 SafeTx: Gnosis Safe transaction signing
 # - Direct Transactions: Safe wallet creation and operations
+#
+# ===========================================================================
+# CONTRACT ADDRESSES (BSC - Chain ID: 56)
+# ===========================================================================
+#
+# Tokens:
+#   USDT:                    0x55d398326f99059fF775485246999027B3197955
+#
+# Protocol Contracts:
+#   CTF Exchange:            0x5F45344126D6488025B0b84A3A8189F2487a7246
+#   ConditionalTokens (CTF): 0xAD1a38cEc043e70E83a3eC30443dB285ED10D774
+#
+# Safe Contracts:
+#   Safe Proxy Factory:      0xa6B71E26C5e0845f74c812102Ca7114b6a896AB2
+#   Safe Singleton:          0xfb1bffC9d739B8D520DaF37dF666da4C687191EA
+#
+# External Wallets:
+#   Opinion API Wallet:      0x0932a1e172ba891Df1F43EfaD738c3A8dbD9F60e
+#   Bitget Wallet:           <REPLACE_WITH_BITGET_ADDRESS>
+#
+# EIP-712 Domains:
+#   CTF Exchange Domain:     "OPINION CTF Exchange" (version: "1")
+#
+# ===========================================================================
 
 rules:
   # ===========================================================================
   # EIP-191 PERSONAL SIGN RULES
   # ===========================================================================
 
-  # Login signature for opinion.trade
+  # Login signature for opinion.trade - validates message format with regex
+  # Expected message format:
+  # ```
+  # app.opinion.trade wants you to sign in with your Ethereum account:
+  # 0x88eD75e9eCE373997221E3c0229e74007C1AD718
+  #
+  # Welcome to opinion.trade! By proceeding, you agree to our Privacy Policy and Terms of Use.
+  #
+  # URI: https://app.opinion.trade
+  # Version: 1
+  # Chain ID: 56
+  # Nonce: 4821202891733693881
+  # Issued At: 2026-01-23T08:46:20.000Z
+  # ```
   - name: "Opinion Login Signature"
-    type: "evm_solidity_expression"
+    type: "message_pattern"
     mode: "whitelist"
     enabled: true
-    description: "Allow EIP-191 login signatures for opinion.trade"
+    description: "Allow EIP-191 login signatures for opinion.trade with strict format validation"
     config:
-      # Personal sign messages should contain opinion.trade domain
-      expression: |
-        // Login signatures are allowed - they don't involve funds
-        // Message format: "app.opinion.trade wants you to sign in..."
-      sign_type_filter: "personal"
-      test_cases:
-        - name: "should pass personal sign"
-          input:
-            sign_type: "personal"
-          expect_pass: true
+      # Regex pattern to validate the opinion.trade login message format
+      # This pattern validates:
+      # 1. Domain: app.opinion.trade
+      # 2. Ethereum address format (0x followed by 40 hex chars)
+      # 3. Welcome message
+      # 4. URI: https://app.opinion.trade
+      # 5. Version: 1
+      # 6. Chain ID: 56 (BSC)
+      # 7. Nonce: numeric value
+      # 8. Issued At: ISO 8601 timestamp
+      pattern: |
+        ^app\.opinion\.trade wants you to sign in with your Ethereum account:\n0x[a-fA-F0-9]{40}\n\nWelcome to opinion\.trade! By proceeding, you agree to our Privacy Policy and Terms of Use\.\n\nURI: https://app\.opinion\.trade\nVersion: 1\nChain ID: 56\nNonce: \d+\nIssued At: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$
+      sign_types:
+        - "personal"
+        - "eip191"
+      description: "Validates opinion.trade SIWE (Sign-In With Ethereum) message format"
+
+  # Alternative: Block non-opinion.trade personal sign messages
+  # Uncomment this rule to reject any personal sign that doesn't match opinion.trade format
+  # - name: "Block non-Opinion personal sign"
+  #   type: "message_pattern"
+  #   mode: "blocklist"
+  #   enabled: false
+  #   description: "Block personal sign messages that are not from opinion.trade"
+  #   config:
+  #     # Match any message that does NOT contain opinion.trade domain
+  #     pattern: "^(?!.*opinion\\.trade).*$"
+  #     sign_types:
+  #       - "personal"
+  #       - "eip191"
 
   # ===========================================================================
   # EIP-712 ORDER SIGNING RULES (CTF Exchange)
@@ -122,11 +179,11 @@ rules:
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
-    description: "Validate Safe wallet transaction signatures on Polygon"
+    description: "Validate Safe wallet transaction signatures on BSC"
     config:
       typed_data_expression: |
-        // Domain validation for Safe on Polygon
-        require(domainChainId == 137, "SafeTx must be on Polygon");
+        // Domain validation for Safe on BSC
+        require(domainChainId == 56, "SafeTx must be on BSC");
         // verifyingContract is the Safe wallet address (validated externally)
 
         // Value must be 0 for token operations
@@ -139,7 +196,7 @@ rules:
             typed_data:
               primaryType: "SafeTx"
               domain:
-                chainId: "137"
+                chainId: "56"
                 verifyingContract: "0x1234567890123456789012345678901234567890"
               message:
                 to: "0x55d398326f99059fF775485246999027B3197955"

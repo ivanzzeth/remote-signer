@@ -68,6 +68,8 @@ services:
     volumes:
       # Configuration file
       - ./config.yaml:/app/configs/config.yaml:ro
+      # Rules directory (for file-based rules)
+      - ./rules:/app/configs/rules:ro
       # Keystores - mounted to match project structure
       - ./data/keystores:/app/data/keystores:ro
       # Foundry binaries (downloaded to host via deploy.sh init)

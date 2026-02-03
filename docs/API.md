@@ -1558,6 +1558,170 @@ For `typed_data` sign type, additional context variables are available:
 
 ---
 
+### Rule Type: `message_pattern`
+
+Validate personal sign (EIP-191) messages using regex pattern matching. This rule type allows you to restrict which messages can be signed based on their content format.
+
+**Sign Types:** `personal`, `eip191`
+
+**Use Cases:**
+- **SIWE (Sign-In With Ethereum)**: Validate login messages from specific domains
+- **Off-chain authorization**: Ensure signed messages follow expected format
+- **Phishing protection**: Block messages that don't match expected patterns
+
+**Config:**
+
+```json
+{
+  "type": "message_pattern",
+  "mode": "whitelist",
+  "config": {
+    "pattern": "^app\\.example\\.com wants you to sign in",
+    "sign_types": ["personal", "eip191"],
+    "description": "Allow SIWE messages from example.com"
+  }
+}
+```
+
+**Config Fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `pattern` | string | Yes* | Regex pattern to match against the message |
+| `patterns` | string[] | Yes* | Array of regex patterns (any match = rule fires) |
+| `sign_types` | string[] | No | Sign types to apply to (default: `["personal", "eip191"]`) |
+| `description` | string | No | Human-readable description of what the pattern validates |
+
+*At least one of `pattern` or `patterns` is required.
+
+**Matching Logic (depends on mode):**
+
+| Mode | Fires When | Result |
+|------|------------|--------|
+| `whitelist` | Message matches ANY pattern | Auto-approve |
+| `blocklist` | Message matches ANY pattern | Immediate block |
+
+**Example 1: SIWE Login Validation (Whitelist)**
+
+Validate Sign-In With Ethereum messages from a specific domain:
+
+```yaml
+- name: "Opinion Trade Login"
+  type: "message_pattern"
+  mode: "whitelist"
+  enabled: true
+  description: "Allow SIWE login signatures for opinion.trade"
+  config:
+    # Regex pattern validates the entire SIWE message format:
+    # - Domain: app.opinion.trade
+    # - Ethereum address format (0x + 40 hex chars)
+    # - Welcome message text
+    # - URI: https://app.opinion.trade
+    # - Version: 1
+    # - Chain ID: 56 (BSC)
+    # - Nonce: numeric value
+    # - Issued At: ISO 8601 timestamp
+    pattern: |
+      ^app\.opinion\.trade wants you to sign in with your Ethereum account:\n0x[a-fA-F0-9]{40}\n\nWelcome to opinion\.trade! By proceeding, you agree to our Privacy Policy and Terms of Use\.\n\nURI: https://app\.opinion\.trade\nVersion: 1\nChain ID: 56\nNonce: \d+\nIssued At: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$
+    sign_types:
+      - "personal"
+      - "eip191"
+    description: "Validates opinion.trade SIWE message format"
+```
+
+**Example SIWE Message that would match:**
+
+```
+app.opinion.trade wants you to sign in with your Ethereum account:
+0x88eD75e9eCE373997221E3c0229e74007C1AD718
+
+Welcome to opinion.trade! By proceeding, you agree to our Privacy Policy and Terms of Use.
+
+URI: https://app.opinion.trade
+Version: 1
+Chain ID: 56
+Nonce: 4821202891733693881
+Issued At: 2026-01-23T08:46:20.000Z
+```
+
+**Example 2: Multiple Domain Whitelist**
+
+Allow SIWE from multiple trusted domains:
+
+```yaml
+- name: "Trusted SIWE Domains"
+  type: "message_pattern"
+  mode: "whitelist"
+  enabled: true
+  config:
+    patterns:
+      - "^app\\.example\\.com wants you to sign in"
+      - "^dapp\\.trusted\\.io wants you to sign in"
+      - "^portal\\.myapp\\.xyz wants you to sign in"
+    sign_types:
+      - "personal"
+      - "eip191"
+```
+
+**Example 3: Block Suspicious Messages (Blocklist)**
+
+Block personal sign requests that appear to be phishing:
+
+```yaml
+- name: "Block Suspicious Messages"
+  type: "message_pattern"
+  mode: "blocklist"
+  enabled: true
+  description: "Block messages from known phishing domains"
+  config:
+    patterns:
+      - "phishing-site\\.com"
+      - "fake-exchange\\.io"
+      - "claim.*free.*tokens"  # Block common scam patterns
+    sign_types:
+      - "personal"
+      - "eip191"
+```
+
+**Example 4: Simple Authorization Message**
+
+Allow a simple authorization signature:
+
+```yaml
+- name: "Simple Auth"
+  type: "message_pattern"
+  mode: "whitelist"
+  enabled: true
+  config:
+    pattern: "^I authorize MyApp to access my account\\. Nonce: [a-f0-9]{32}$"
+    sign_types:
+      - "personal"
+```
+
+**Regex Tips:**
+
+| Pattern | Matches | Notes |
+|---------|---------|-------|
+| `^` | Start of message | Anchor to beginning |
+| `$` | End of message | Anchor to end |
+| `\.` | Literal dot | Escape special chars |
+| `\n` | Newline | For multiline messages |
+| `0x[a-fA-F0-9]{40}` | Ethereum address | 40 hex chars after 0x |
+| `\d+` | One or more digits | For nonces, timestamps |
+| `(?s)` | Dot matches newline | For multiline patterns |
+| `.*` | Any characters | Greedy match |
+| `.*?` | Any characters (lazy) | Non-greedy match |
+
+**Security Considerations:**
+
+1. **Anchor patterns**: Always use `^` and `$` to match the entire message, preventing partial matches
+2. **Escape special characters**: Regex special chars (`.`, `*`, `+`, etc.) must be escaped with `\`
+3. **Validate domains**: Include the domain in the pattern to prevent cross-domain attacks
+4. **Chain ID validation**: For SIWE, include chain ID in pattern to prevent cross-chain replay
+5. **Use whitelist mode**: Prefer whitelist mode to explicitly allow known-good formats
+
+---
+
 ### Combining Rules
 
 Rules are evaluated in two phases:
@@ -1663,6 +1827,7 @@ When approving a request, you can optionally generate a rule to auto-approve sim
 | `evm_contract_method` | Allow/block specific contract methods | `rule_type`, `rule_mode` |
 | `evm_value_limit` | Value-based limit | `rule_type`, `rule_mode`, `max_value` |
 | `evm_solidity_expression` | Custom Solidity logic with require() | `rule_type`, `rule_mode`, `expression`, `test_cases` |
+| `message_pattern` | Regex validation for personal/EIP-191 messages | `rule_type`, `rule_mode`, `pattern` |
 
 **Workflow:**
 1. Submit sign request → pending manual approval
