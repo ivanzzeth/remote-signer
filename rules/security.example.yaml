@@ -1,0 +1,41 @@
+# Security Rules
+# This file contains security-related blocklist rules
+
+rules:
+  # Block known malicious addresses
+  - name: "Block malicious addresses"
+    type: "evm_solidity_expression"
+    mode: "blocklist"
+    enabled: true
+    description: "Block transfers to known malicious or dangerous addresses"
+    config:
+      expression: |
+        require(to != 0x000000000000000000000000000000000000dEaD, "blocked: burn address");
+        require(to != address(0), "blocked: zero address");
+      test_cases:
+        - name: "should pass for normal address"
+          input:
+            to: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+          expect_pass: true
+        - name: "should block burn address"
+          input:
+            to: "0x000000000000000000000000000000000000dEaD"
+          expect_pass: false
+          expect_reason: "blocked: burn address"
+        - name: "should block zero address"
+          input:
+            to: "0x0000000000000000000000000000000000000000"
+          expect_pass: false
+          expect_reason: "blocked: zero address"
+
+  # Restrict allowed sign types
+  - name: "Allowed signing methods"
+    type: "sign_type_restriction"
+    mode: "whitelist"
+    enabled: true
+    description: "Only allow safe signing methods"
+    config:
+      allowed_sign_types:
+        - "personal"     # Personal message signing
+        - "typed_data"   # EIP-712 structured data
+        - "transaction"  # Transaction signing

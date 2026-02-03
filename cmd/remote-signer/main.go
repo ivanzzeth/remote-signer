@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/joho/godotenv"
@@ -116,6 +117,8 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("failed to create rule initializer: %w", err)
 	}
+	// Set config directory for resolving relative paths in rule files
+	ruleInit.SetConfigDir(filepath.Dir(*configPath))
 	if err := ruleInit.SyncFromConfig(context.Background(), cfg.Rules); err != nil {
 		return fmt.Errorf("failed to sync rules from config: %w", err)
 	}

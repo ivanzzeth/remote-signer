@@ -154,7 +154,34 @@ api_keys:
 # Rules can be defined here (config source) or via API (api source)
 # Rule evaluation: blocklist rules checked first, then whitelist rules
 # Mode: "whitelist" = any match allows, "blocklist" = any match blocks
+#
+# Special rule type "file" allows including rules from external YAML files:
+#   - name: "Treasury rules"
+#     type: "file"
+#     config:
+#       path: "rules/treasury.example.yaml"  # Relative to config file directory
+#
+# The external file should have this format:
+#   rules:
+#     - name: "Rule 1"
+#       type: "evm_address_whitelist"
+#       ...
+#
 rules:
+  # Option 1: Include rules from external files for better organization
+  # Copy xxx.example.yaml to xxx.yaml and customize for your needs
+  # - name: "Treasury rules"
+  #   type: "file"
+  #   config:
+  #     path: "rules/treasury.yaml"
+  #
+  # - name: "ERC20 rules"
+  #   type: "file"
+  #   config:
+  #     path: "rules/erc20.yaml"
+
+  # Option 2: Define rules inline (examples below)
+
   # Example 1: Simple address whitelist
   - name: "Allow transfers to treasury"
     type: "evm_address_whitelist"
