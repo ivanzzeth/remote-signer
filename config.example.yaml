@@ -103,20 +103,26 @@ logger:
 # Admin vs Non-Admin Keys:
 #   - admin: true  -> Can approve requests, view/manage rules
 #   - admin: false -> Can only submit sign requests and view request status
+#
+# IMPORTANT: Docker Deployment Note
+# When deploying with Docker, environment variable references (e.g., public_key_env: "VAR_NAME")
+# are NOT automatically passed to the container. You must either:
+#   1. Use direct values: public_key: "MCowBQYDK2VwAyEA..." (recommended for docker)
+#   2. Or manually add each env var to docker-compose.yml environment section
 api_keys:
   # Example 1: Admin key with public key from environment variable (recommended for production)
   - id: "admin-key"
     name: "Admin Key"
-    public_key: "${ADMIN_PUBLIC_KEY}"  # Read from .env or environment (hex or base64, auto-detected)
-    admin: true                        # Admin can approve requests and manage rules
+    public_key_env: "ADMIN_PUBLIC_KEY"  # Read from .env or environment (hex or base64, auto-detected)
+    admin: true                          # Admin can approve requests and manage rules
     enabled: true
     rate_limit: 1000
 
   # Example 2: Non-admin application key (can only submit sign requests)
   - id: "my-app-key"
     name: "My Application"
-    public_key: "${MY_APP_PUBLIC_KEY}"  # Read from .env or environment (hex or base64, auto-detected)
-    admin: false                         # Non-admin: cannot approve, view or manage rules
+    public_key_env: "MY_APP_PUBLIC_KEY"  # Read from .env or environment (hex or base64, auto-detected)
+    admin: false                          # Non-admin: cannot approve, view or manage rules
     enabled: true
     rate_limit: 100
     # Optional: restrict to specific chains or signers

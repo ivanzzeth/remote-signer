@@ -199,14 +199,23 @@ func (a *EVMAdapter) ParsePayload(ctx context.Context, signType string, payload 
 
 	result := &types.ParsedPayload{RawData: payload}
 
-	if signType == SignTypeTransaction && p.Transaction != nil {
-		result.Recipient = p.Transaction.To
-		result.Value = &p.Transaction.Value
+	switch signType {
+	case SignTypeTransaction:
+		if p.Transaction != nil {
+			result.Recipient = p.Transaction.To
+			result.Value = &p.Transaction.Value
 
-		if len(p.Transaction.Data) >= 4 {
-			sig := fmt.Sprintf("0x%s", hex.EncodeToString(p.Transaction.Data[:4]))
-			result.MethodSig = &sig
-			result.Contract = p.Transaction.To
+			if len(p.Transaction.Data) >= 4 {
+				sig := fmt.Sprintf("0x%s", hex.EncodeToString(p.Transaction.Data[:4]))
+				result.MethodSig = &sig
+				result.Contract = p.Transaction.To
+			}
+		}
+
+	case SignTypePersonal, SignTypeEIP191:
+		// Extract message for personal sign / EIP-191
+		if p.Message != "" {
+			result.Message = &p.Message
 		}
 	}
 

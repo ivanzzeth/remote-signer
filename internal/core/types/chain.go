@@ -49,6 +49,7 @@ type ParsedPayload struct {
 	Value     *string `json:"value,omitempty"`      // e.g., tx.Value in wei
 	MethodSig *string `json:"method_sig,omitempty"` // e.g., 4-byte selector
 	Contract  *string `json:"contract,omitempty"`   // e.g., contract address
+	Message   *string `json:"message,omitempty"`    // e.g., personal sign message
 	RawData   []byte  `json:"raw_data,omitempty"`   // original data
 }
 

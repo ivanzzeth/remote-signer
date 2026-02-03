@@ -1,0 +1,692 @@
+# Polymarket Protocol Rules
+# This file contains signing rules for Polymarket protocol
+#
+# Protocol: Polymarket (Prediction Market on Polygon)
+# Chain: Polygon (137)
+#
+# Overview:
+# - EIP-712 ClobAuth: Login authentication for CLOB API key
+# - EIP-712 Order: CTF Exchange order signing
+# - EIP-712 CreateProxy: Safe wallet creation signature
+# - EIP-712 SafeTx: Safe wallet transaction signing
+# - Direct Transactions: Safe wallet creation, execution, token transfers
+#
+# ===========================================================================
+# CONTRACT ADDRESSES (Polygon - Chain ID: 137)
+# ===========================================================================
+#
+# Tokens:
+#   USDC.e (Bridged):        0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174
+#   USDC (Native):           0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359
+#
+# Protocol Contracts:
+#   CTF Exchange:            0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E
+#   NegRiskAdapter:          0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296
+#   NegRiskExchange:         0xC5d563A36AE78145C45a50134d48A1215220f80a
+#   ConditionalTokens (CTF): 0x4D97DCd97eC945f40cF65F87097ACe5EA0476045
+#
+# Safe Contracts:
+#   Safe Proxy Factory:      0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b
+#
+# DEX Contracts:
+#   UniswapV3 Router:        0xE592427A0AEce92De3Edee1F18E0157C05861564
+#
+# External Wallets:
+#   Treasury Wallet:         0x9ce3316b865e940227ea724afdeaaa2759f1aa7c  # Fund distribution & collection
+#
+# EIP-712 Domains:
+#   ClobAuth Domain:         "ClobAuthDomain" (version: "1")
+#   CTF Exchange Domain:     "Polymarket CTF Exchange" (version: "1")
+#   Safe Factory Domain:     "Polymarket Contract Proxy Factory" (no version)
+#
+# ===========================================================================
+
+rules:
+  # ===========================================================================
+  # EIP-712 CLOB AUTH RULES (Login for API Key)
+  # ===========================================================================
+
+  # Login signature for Polymarket CLOB API key
+  - name: "Polymarket CLOB Auth Signature"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "137"
+    description: "Validate ClobAuth signatures for Polymarket API key authentication"
+    config:
+      typed_data_expression: |
+        // Domain validation for ClobAuth
+        require(
+          keccak256(bytes(domainName)) == keccak256(bytes("ClobAuthDomain")),
+          "invalid domain name"
+        );
+        require(
+          keccak256(bytes(domainVersion)) == keccak256(bytes("1")),
+          "invalid domain version"
+        );
+
+        // Message validation
+        // The message field must be the standard attestation message
+        require(
+          keccak256(bytes(message)) == keccak256(bytes("This message attests that I control the given wallet")),
+          "invalid attestation message"
+        );
+      sign_type_filter: "typed_data"
+      description: "ClobAuth login signature with domain and message validation"
+      test_cases:
+        - name: "should pass valid ClobAuth"
+          input:
+            typed_data:
+              primaryType: "ClobAuth"
+              domain:
+                name: "ClobAuthDomain"
+                version: "1"
+                chainId: "137"
+              message:
+                address: "0x1234567890123456789012345678901234567890"
+                timestamp: "1704067200"
+                nonce: "12345"
+                message: "This message attests that I control the given wallet"
+          expect_pass: true
+        - name: "should reject invalid domain"
+          input:
+            typed_data:
+              primaryType: "ClobAuth"
+              domain:
+                name: "WrongDomain"
+                version: "1"
+                chainId: "137"
+              message:
+                address: "0x1234567890123456789012345678901234567890"
+                timestamp: "1704067200"
+                nonce: "12345"
+                message: "This message attests that I control the given wallet"
+          expect_pass: false
+          expect_reason: "invalid domain name"
+
+  # ===========================================================================
+  # EIP-712 ORDER SIGNING RULES (CTF Exchange)
+  # ===========================================================================
+
+  # Order signing for Polymarket CTF Exchange
+  - name: "Polymarket Order Signature"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "137"
+    description: "Validate Polymarket CTF Exchange order signatures"
+    config:
+      typed_data_expression: |
+        // Domain validation
+        require(
+          keccak256(bytes(domainName)) == keccak256(bytes("Polymarket CTF Exchange")),
+          "invalid domain name"
+        );
+        require(
+          keccak256(bytes(domainVersion)) == keccak256(bytes("1")),
+          "invalid domain version"
+        );
+
+        // Order validation
+        // taker must be zero address for public orders (anyone can fill)
+        require(taker == address(0), "taker must be zero address");
+
+        // Fee validation: max 10% (1000 basis points)
+        require(feeRateBps <= 1000, "fee exceeds 10%");
+      sign_type_filter: "typed_data"
+      description: "CTF Exchange order signing with fee limits and zero taker"
+      test_cases:
+        - name: "should pass valid order with zero taker"
+          input:
+            typed_data:
+              primaryType: "Order"
+              domain:
+                name: "Polymarket CTF Exchange"
+                version: "1"
+                chainId: "137"
+                verifyingContract: "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E"
+              message:
+                salt: "12345"
+                maker: "0x1234567890123456789012345678901234567890"
+                signer: "0x1234567890123456789012345678901234567890"
+                taker: "0x0000000000000000000000000000000000000000"
+                tokenId: "1"
+                makerAmount: "1000000000000000000"
+                takerAmount: "1000000000000000000"
+                expiration: "1893456000"
+                nonce: "0"
+                feeRateBps: "100"
+                side: "0"
+                signatureType: "0"
+          expect_pass: true
+        - name: "should reject non-zero taker"
+          input:
+            typed_data:
+              primaryType: "Order"
+              domain:
+                name: "Polymarket CTF Exchange"
+                version: "1"
+                chainId: "137"
+                verifyingContract: "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E"
+              message:
+                salt: "12345"
+                maker: "0x1234567890123456789012345678901234567890"
+                signer: "0x1234567890123456789012345678901234567890"
+                taker: "0x1111111111111111111111111111111111111111"
+                tokenId: "1"
+                makerAmount: "1000000000000000000"
+                takerAmount: "1000000000000000000"
+                expiration: "1893456000"
+                nonce: "0"
+                feeRateBps: "100"
+                side: "0"
+                signatureType: "0"
+          expect_pass: false
+          expect_reason: "taker must be zero address"
+
+  # ===========================================================================
+  # EIP-712 CREATE PROXY RULES (Safe Wallet Creation)
+  # ===========================================================================
+
+  # Safe wallet creation signature for Polymarket
+  - name: "Polymarket Safe Wallet Creation Signature"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "137"
+    description: "Validate Safe wallet creation signature for Polymarket"
+    config:
+      typed_data_expression: |
+        // Domain validation for Safe Factory
+        require(
+          keccak256(bytes(domainName)) == keccak256(bytes("Polymarket Contract Proxy Factory")),
+          "invalid domain name"
+        );
+        // Note: No version field in Polymarket Safe Factory domain
+        require(domainChainId == 137, "must be on Polygon");
+
+        // CreateProxy validation - should be zero payment (free creation)
+        require(paymentToken == address(0), "payment token must be zero");
+        require(payment == 0, "payment must be zero");
+        require(paymentReceiver == address(0), "payment receiver must be zero");
+      sign_type_filter: "typed_data"
+      description: "Safe wallet creation with zero payment"
+      test_cases:
+        - name: "should pass valid CreateProxy with zero payment"
+          input:
+            typed_data:
+              primaryType: "CreateProxy"
+              domain:
+                name: "Polymarket Contract Proxy Factory"
+                chainId: "137"
+                verifyingContract: "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"
+              message:
+                paymentToken: "0x0000000000000000000000000000000000000000"
+                payment: "0"
+                paymentReceiver: "0x0000000000000000000000000000000000000000"
+          expect_pass: true
+        - name: "should reject non-zero payment"
+          input:
+            typed_data:
+              primaryType: "CreateProxy"
+              domain:
+                name: "Polymarket Contract Proxy Factory"
+                chainId: "137"
+                verifyingContract: "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"
+              message:
+                paymentToken: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+                payment: "1000000"
+                paymentReceiver: "0x1234567890123456789012345678901234567890"
+          expect_pass: false
+          expect_reason: "payment token must be zero"
+
+  # ===========================================================================
+  # EIP-712 SAFE TX SIGNING RULES
+  # ===========================================================================
+
+  # Safe transaction signing for Polymarket
+  - name: "Polymarket SafeTx Signature"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "137"
+    description: "Validate Safe wallet transaction signatures on Polygon"
+    config:
+      typed_data_expression: |
+        // Domain validation for Safe on Polygon
+        require(domainChainId == 137, "SafeTx must be on Polygon");
+        // verifyingContract is the Safe wallet address (validated externally)
+
+        // Value must be 0 for token operations (no native token transfer)
+        require(value == 0, "ETH value must be zero");
+      sign_type_filter: "typed_data"
+      description: "Safe transaction signing with value=0 constraint"
+      test_cases:
+        - name: "should pass SafeTx with zero value"
+          input:
+            typed_data:
+              primaryType: "SafeTx"
+              domain:
+                chainId: "137"
+                verifyingContract: "0x1234567890123456789012345678901234567890"
+              message:
+                to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+                value: "0"
+                data: "0x095ea7b3"
+                operation: "0"
+                safeTxGas: "0"
+                baseGas: "0"
+                gasPrice: "0"
+                gasToken: "0x0000000000000000000000000000000000000000"
+                refundReceiver: "0x0000000000000000000000000000000000000000"
+                nonce: "0"
+          expect_pass: true
+
+  # ===========================================================================
+  # ETHEREUM TRANSACTION RULES - SAFE WALLET OPERATIONS
+  # ===========================================================================
+
+  # Safe Proxy Factory - Create new Safe wallet
+  - name: "Polymarket Safe Wallet Creation"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "137"
+    description: "Allow Safe wallet creation on Polymarket Safe Factory"
+    config:
+      functions: |
+        // Polymarket Safe Proxy Factory on Polygon
+        // Contract: 0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b
+        function createProxy(
+            address paymentToken,
+            uint256 payment,
+            address paymentReceiver,
+            bytes memory createSig
+        ) external {
+            // Payment should be zero (free creation)
+            require(paymentToken == address(0), "payment token must be zero");
+            require(payment == 0, "payment must be zero");
+            require(paymentReceiver == address(0), "payment receiver must be zero");
+        }
+      description: "Safe wallet creation with zero payment"
+      test_cases:
+        - name: "should pass with zero payment"
+          input:
+            to: "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"
+            # createProxy with zero payment token and receiver
+            data: "0xa1884d2c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000041"
+          expect_pass: true
+
+  # Safe execTransaction - Execute through Safe wallet
+  - name: "Polymarket Safe Execute Transaction"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "137"
+    description: "Allow Safe wallet execTransaction (already validated via EIP712 signature)"
+    config:
+      functions: |
+        // execTransaction is allowed because the SafeTx EIP712 signature
+        // has already been validated with strict rules
+        function execTransaction(
+            address to,
+            uint256 value,
+            bytes calldata data,
+            uint8 operation,
+            uint256 safeTxGas,
+            uint256 baseGas,
+            uint256 gasPrice,
+            address gasToken,
+            address refundReceiver,
+            bytes memory signatures
+        ) external {
+            // Value must be zero (no native token transfer)
+            require(value == 0, "value must be zero");
+            // Parameters match the signed SafeTx, so this is safe
+        }
+      description: "Safe execution - signature already validated"
+
+  # ===========================================================================
+  # ETHEREUM TRANSACTION RULES - TOKEN SWAPS & TRANSFERS
+  # ===========================================================================
+
+  # USDC Approve for UniswapV3 SwapRouter
+  - name: "Polymarket USDC Approve UniswapV3"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "137"
+    description: "Allow USDC approval to UniswapV3 Router for swaps"
+    config:
+      functions: |
+        // Native USDC on Polygon: 0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359
+        function approve(address spender, uint256 amount) external {
+            // UniswapV3 SwapRouter
+            require(
+                spender == 0xE592427A0AEce92De3Edee1F18E0157C05861564,
+                "spender must be UniswapV3 Router"
+            );
+        }
+      description: "USDC approval for UniswapV3 Router"
+
+  # UniswapV3 Swap - USDC to USDC.e
+  - name: "Polymarket UniswapV3 USDC Swap"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "137"
+    description: "Allow UniswapV3 swap from USDC to USDC.e"
+    config:
+      functions: |
+        // UniswapV3 Router: 0xE592427A0AEce92De3Edee1F18E0157C05861564
+        // Swap USDC (native) to USDC.e (bridged)
+        function exactInputSingle(
+            address tokenIn,
+            address tokenOut,
+            uint24 fee,
+            address recipient,
+            uint256 deadline,
+            uint256 amountIn,
+            uint256 amountOutMinimum,
+            uint160 sqrtPriceLimitX96
+        ) external {
+            // tokenIn must be USDC (native)
+            require(
+                tokenIn == 0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359,
+                "tokenIn must be USDC"
+            );
+            // tokenOut must be USDC.e (bridged)
+            require(
+                tokenOut == 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174,
+                "tokenOut must be USDC.e"
+            );
+        }
+      description: "Swap USDC to USDC.e via UniswapV3"
+
+  # Transfer USDC.e to Treasury
+  - name: "Polymarket USDC.e to Treasury"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "137"
+    description: "Allow USDC.e transfers to Treasury wallet"
+    config:
+      functions: |
+        // USDC.e on Polygon: 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174
+        function transfer(address recipient, uint256 amount) external {
+            // Treasury wallet address
+            require(
+                recipient == 0x9ce3316b865e940227ea724afdeaaa2759f1aa7c,
+                "recipient must be Treasury"
+            );
+        }
+      description: "USDC.e transfer to Treasury (fund collection)"
+
+  # Transfer USDC to Treasury
+  - name: "Polymarket USDC to Treasury"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "137"
+    description: "Allow USDC transfers to Treasury wallet"
+    config:
+      functions: |
+        // USDC (native) on Polygon: 0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359
+        function transfer(address recipient, uint256 amount) external {
+            // Treasury wallet address
+            require(
+                recipient == 0x9ce3316b865e940227ea724afdeaaa2759f1aa7c,
+                "recipient must be Treasury"
+            );
+        }
+      description: "USDC transfer to Treasury (fund collection)"
+
+  # Transfer USDC.e to Safe wallet
+  - name: "Polymarket USDC.e to Safe"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "137"
+    description: "Allow USDC.e transfers to user's Safe wallet"
+    config:
+      functions: |
+        // USDC.e on Polygon: 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174
+        function transfer(address recipient, uint256 amount) external {
+            // recipient should be a Safe wallet - validated externally via signer_address scope
+            // This rule should be scoped to specific Safe addresses via rule configuration
+        }
+      description: "USDC.e transfer to Safe wallet for trading"
+
+  # ===========================================================================
+  # SAFE WALLET INTERNAL TRANSACTION RULES - USDC APPROVALS
+  # ===========================================================================
+
+  # USDC.e Approve to CTF Exchange
+  - name: "Polymarket USDC Approve Exchange"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "137"
+    description: "Allow USDC.e approval to CTF Exchange (via Safe)"
+    config:
+      functions: |
+        // USDC.e on Polygon: 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174
+        function approve(address spender, uint256 amount) external {
+            // CTF Exchange
+            require(
+                spender == 0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E,
+                "spender must be CTF Exchange"
+            );
+        }
+      description: "USDC.e approval for CTF Exchange"
+
+  # USDC.e Approve to NegRiskAdapter
+  - name: "Polymarket USDC Approve NegRiskAdapter"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "137"
+    description: "Allow USDC.e approval to NegRiskAdapter (via Safe)"
+    config:
+      functions: |
+        // USDC.e on Polygon: 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174
+        function approve(address spender, uint256 amount) external {
+            // NegRiskAdapter
+            require(
+                spender == 0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296,
+                "spender must be NegRiskAdapter"
+            );
+        }
+      description: "USDC.e approval for NegRiskAdapter"
+
+  # USDC.e Approve to NegRiskExchange
+  - name: "Polymarket USDC Approve NegRiskExchange"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "137"
+    description: "Allow USDC.e approval to NegRiskExchange (via Safe)"
+    config:
+      functions: |
+        // USDC.e on Polygon: 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174
+        function approve(address spender, uint256 amount) external {
+            // NegRiskExchange
+            require(
+                spender == 0xC5d563A36AE78145C45a50134d48A1215220f80a,
+                "spender must be NegRiskExchange"
+            );
+        }
+      description: "USDC.e approval for NegRiskExchange"
+
+  # ===========================================================================
+  # SAFE WALLET INTERNAL TRANSACTION RULES - CTF APPROVALS
+  # ===========================================================================
+
+  # CTF setApprovalForAll to Exchange
+  - name: "Polymarket CTF Approve Exchange"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "137"
+    description: "Allow CTF (ERC1155) approval to CTF Exchange (via Safe)"
+    config:
+      functions: |
+        // ConditionalTokens on Polygon: 0x4D97DCd97eC945f40cF65F87097ACe5EA0476045
+        function setApprovalForAll(address operator, bool approved) external {
+            // CTF Exchange
+            require(
+                operator == 0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E,
+                "operator must be CTF Exchange"
+            );
+        }
+      description: "CTF ERC1155 approval for Exchange"
+
+  # CTF setApprovalForAll to NegRiskAdapter
+  - name: "Polymarket CTF Approve NegRiskAdapter"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "137"
+    description: "Allow CTF (ERC1155) approval to NegRiskAdapter (via Safe)"
+    config:
+      functions: |
+        // ConditionalTokens on Polygon: 0x4D97DCd97eC945f40cF65F87097ACe5EA0476045
+        function setApprovalForAll(address operator, bool approved) external {
+            // NegRiskAdapter
+            require(
+                operator == 0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296,
+                "operator must be NegRiskAdapter"
+            );
+        }
+      description: "CTF ERC1155 approval for NegRiskAdapter"
+
+  # CTF setApprovalForAll to NegRiskExchange
+  - name: "Polymarket CTF Approve NegRiskExchange"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "137"
+    description: "Allow CTF (ERC1155) approval to NegRiskExchange (via Safe)"
+    config:
+      functions: |
+        // ConditionalTokens on Polygon: 0x4D97DCd97eC945f40cF65F87097ACe5EA0476045
+        function setApprovalForAll(address operator, bool approved) external {
+            // NegRiskExchange
+            require(
+                operator == 0xC5d563A36AE78145C45a50134d48A1215220f80a,
+                "operator must be NegRiskExchange"
+            );
+        }
+      description: "CTF ERC1155 approval for NegRiskExchange"
+
+  # ===========================================================================
+  # SAFE WALLET INTERNAL TRANSACTION RULES - CTF OPERATIONS
+  # ===========================================================================
+
+  # CTF Split Position
+  - name: "Polymarket CTF Split Position"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "137"
+    description: "Allow CTF position splitting (via Safe)"
+    config:
+      functions: |
+        // ConditionalTokens on Polygon: 0x4D97DCd97eC945f40cF65F87097ACe5EA0476045
+        function splitPosition(
+            address collateralToken,
+            bytes32 parentCollectionId,
+            bytes32 conditionId,
+            uint256[] calldata partition,
+            uint256 amount
+        ) external {
+            // Collateral must be USDC.e
+            require(
+                collateralToken == 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174,
+                "collateral must be USDC.e"
+            );
+            // parentCollectionId must be zero for root positions
+            require(
+                parentCollectionId == bytes32(0),
+                "parent must be zero"
+            );
+        }
+      description: "Split USDC.e into conditional tokens"
+
+  # CTF Merge Positions
+  - name: "Polymarket CTF Merge Positions"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "137"
+    description: "Allow CTF position merging (via Safe)"
+    config:
+      functions: |
+        // ConditionalTokens on Polygon: 0x4D97DCd97eC945f40cF65F87097ACe5EA0476045
+        function mergePositions(
+            address collateralToken,
+            bytes32 parentCollectionId,
+            bytes32 conditionId,
+            uint256[] calldata partition,
+            uint256 amount
+        ) external {
+            // Collateral must be USDC.e
+            require(
+                collateralToken == 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174,
+                "collateral must be USDC.e"
+            );
+            // parentCollectionId must be zero for root positions
+            require(
+                parentCollectionId == bytes32(0),
+                "parent must be zero"
+            );
+        }
+      description: "Merge conditional tokens back to USDC.e"
+
+  # CTF Redeem Positions (Standard Market)
+  - name: "Polymarket CTF Redeem Positions"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "137"
+    description: "Allow CTF position redemption for standard markets (via Safe)"
+    config:
+      functions: |
+        // ConditionalTokens on Polygon: 0x4D97DCd97eC945f40cF65F87097ACe5EA0476045
+        function redeemPositions(
+            address collateralToken,
+            bytes32 parentCollectionId,
+            bytes32 conditionId,
+            uint256[] calldata indexSets
+        ) external {
+            // Collateral must be USDC.e
+            require(
+                collateralToken == 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174,
+                "collateral must be USDC.e"
+            );
+            // parentCollectionId must be zero for standard market redemption
+            require(
+                parentCollectionId == bytes32(0),
+                "parent must be zero"
+            );
+        }
+      description: "Redeem resolved conditional tokens for USDC.e (standard market)"
+
+  # NegRiskAdapter Redeem Positions
+  - name: "Polymarket NegRiskAdapter Redeem"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "137"
+    description: "Allow NegRisk market position redemption (via Safe)"
+    config:
+      functions: |
+        // NegRiskAdapter on Polygon: 0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296
+        function redeemPositions(
+            bytes32 conditionId,
+            uint256[] calldata amounts
+        ) external {
+            // No additional validation - conditionId is dynamic per market
+            // Requires CTF -> NegRiskAdapter approval to be set
+        }
+      description: "Redeem NegRisk market positions for USDC.e"

@@ -179,6 +179,7 @@ func run() error {
 	ruleEngine.RegisterEvaluator(&evm.ValueLimitEvaluator{})
 	ruleEngine.RegisterEvaluator(&evm.SignerRestrictionEvaluator{})
 	ruleEngine.RegisterEvaluator(&evm.SignTypeRestrictionEvaluator{})
+	ruleEngine.RegisterEvaluator(&evm.MessagePatternEvaluator{})
 
 	// Register Solidity expression evaluator if Foundry is enabled
 	if cfg.Chains.EVM != nil && cfg.Chains.EVM.Foundry.Enabled {

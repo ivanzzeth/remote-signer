@@ -36,6 +36,7 @@ Commands:
     init        Initialize deployment environment (create directories, generate keys)
     up          Start all services (background mode)
     run         Start remote-signer interactively (for password input)
+    attach      Reattach to running remote-signer session
     down        Stop all services
     restart     Restart remote-signer interactively (for password input)
     logs        View service logs
@@ -210,7 +211,7 @@ run_interactive() {
     fi
 
     # Clean up any existing remote-signer container
-    docker rm remote-signer-app 2>/dev/null || true
+    docker rm -f remote-signer-app 2>/dev/null || true
 
     # Start postgres first (in background)
     log_info "Starting postgres..."
@@ -228,14 +229,15 @@ run_interactive() {
     log_info ""
     log_info ">>> After entering password, press Ctrl+A then D to detach screen <<<"
     log_info ">>> The container will continue running in background.            <<<"
-    log_info ">>> Use 'screen -r remote-signer' to reattach                     <<<"
+    log_info ">>> Use './scripts/deploy.sh attach' to reattach                  <<<"
     log_info ""
 
     # Kill any existing screen session
     screen -S remote-signer -X quit 2>/dev/null || true
 
-    # Start in screen session
-    screen -S remote-signer docker compose run -it --service-ports --name remote-signer-app remote-signer
+    # Start in screen session (interactive)
+    cd "$PROJECT_DIR"
+    exec screen -S remote-signer docker compose run -it --service-ports --name remote-signer-app remote-signer
 }
 
 # =============================================================================
@@ -250,7 +252,7 @@ stop_services() {
 
     # Stop and remove the interactive container (created by docker compose run)
     docker stop remote-signer-app 2>/dev/null || true
-    docker rm remote-signer-app 2>/dev/null || true
+    docker rm -f remote-signer-app 2>/dev/null || true
 
     # Stop all compose services
     docker compose down
@@ -266,21 +268,22 @@ restart_services() {
 
     # Stop remote-signer first
     docker compose stop remote-signer 2>/dev/null || true
-    docker rm remote-signer-app 2>/dev/null || true
+    docker rm -f remote-signer-app 2>/dev/null || true
 
     # Run remote-signer interactively using screen
     log_info "Starting remote-signer (enter keystore password when prompted)..."
     log_info ""
     log_info ">>> After entering password, press Ctrl+A then D to detach screen <<<"
     log_info ">>> The container will continue running in background.            <<<"
-    log_info ">>> Use 'screen -r remote-signer' to reattach                     <<<"
+    log_info ">>> Use './scripts/deploy.sh attach' to reattach                  <<<"
     log_info ""
 
     # Kill any existing screen session
     screen -S remote-signer -X quit 2>/dev/null || true
 
-    # Start in screen session
-    screen -S remote-signer docker compose run -it --service-ports --name remote-signer-app remote-signer
+    # Start in screen session (interactive)
+    cd "$PROJECT_DIR"
+    exec screen -S remote-signer docker compose run -it --service-ports --name remote-signer-app remote-signer
 }
 
 # =============================================================================
@@ -347,6 +350,9 @@ case "${1:-}" in
         ;;
     run)
         run_interactive
+        ;;
+    attach)
+        screen -r remote-signer
         ;;
     down|stop)
         stop_services
