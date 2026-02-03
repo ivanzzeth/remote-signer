@@ -67,6 +67,27 @@ security:
   max_request_age: "5m"
   # Default rate limit (requests per minute)
   rate_limit_default: 100
+  # IP whitelist configuration
+  # When enabled, only requests from allowed IPs can access the API
+  ip_whitelist:
+    enabled: false  # Set to true to enable IP whitelist
+    # List of allowed IP addresses or CIDR ranges
+    # Examples:
+    #   - "127.0.0.1"           # Single IPv4
+    #   - "::1"                 # IPv6 localhost
+    #   - "192.168.1.0/24"      # IPv4 CIDR range
+    #   - "10.0.0.0/8"          # Private network
+    #   - "2001:db8::/32"       # IPv6 CIDR range
+    allowed_ips:
+      - "127.0.0.1"
+      - "::1"
+      # Add your allowed IPs/CIDRs here
+      # - "192.168.1.100"
+      # - "10.0.0.0/8"
+    # Trust proxy headers (X-Forwarded-For, X-Real-IP)
+    # WARNING: Only enable this if running behind a trusted reverse proxy
+    # If enabled, the first IP in X-Forwarded-For will be used as client IP
+    trust_proxy: false
 
 logger:
   # Log level: debug, info, warn, error
