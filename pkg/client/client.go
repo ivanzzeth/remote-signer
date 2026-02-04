@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -28,6 +29,10 @@ type Client struct {
 
 	// PollTimeout is the maximum time to wait for approval.
 	PollTimeout time.Duration
+
+	// UseNonce enables nonce-based replay protection (recommended for production).
+	// When enabled, a random nonce is included in each request signature.
+	UseNonce bool
 }
 
 // Config holds configuration for creating a new Client.
@@ -62,6 +67,11 @@ type Config struct {
 	// PollTimeout is the maximum time to wait for approval.
 	// Default: 5 minutes.
 	PollTimeout time.Duration
+
+	// UseNonce enables nonce-based replay protection (recommended for production).
+	// When enabled, a random nonce is included in each request signature.
+	// Default: true (enabled for security)
+	UseNonce *bool
 }
 
 // NewClient creates a new Client with the given configuration.
@@ -121,6 +131,12 @@ func NewClient(cfg Config) (*Client, error) {
 		pollTimeout = 5 * time.Minute
 	}
 
+	// Default to using nonce for security
+	useNonce := true
+	if cfg.UseNonce != nil {
+		useNonce = *cfg.UseNonce
+	}
+
 	return &Client{
 		baseURL:      strings.TrimSuffix(cfg.BaseURL, "/"),
 		apiKeyID:     cfg.APIKeyID,
@@ -128,6 +144,7 @@ func NewClient(cfg Config) (*Client, error) {
 		httpClient:   httpClient,
 		PollInterval: pollInterval,
 		PollTimeout:  pollTimeout,
+		UseNonce:     useNonce,
 	}, nil
 }
 
@@ -339,6 +356,10 @@ func (c *Client) pollForResult(ctx context.Context, requestID string) (*SignResp
 }
 
 // newSignedRequest creates a new HTTP request with Ed25519 signature.
+// Supports three modes:
+// - Legacy: timestamp|method|path|sha256(body)
+// - Nonce: timestamp|nonce|method|path|sha256(body)
+// - Full (nonce+sequence): timestamp|nonce|sequence|method|path|sha256(body)
 func (c *Client) newSignedRequest(ctx context.Context, method, path string, body []byte) (*http.Request, error) {
 	url := c.baseURL + path
 
@@ -358,7 +379,18 @@ func (c *Client) newSignedRequest(ctx context.Context, method, path string, body
 
 	// Sign the request
 	timestamp := time.Now().UnixMilli()
-	signature := c.signRequest(timestamp, method, path, body)
+
+	var signature string
+
+	if c.UseNonce {
+		// Nonce mode for replay protection
+		nonce := generateNonce()
+		signature = c.signRequestWithNonce(timestamp, nonce, method, path, body)
+		req.Header.Set("X-Nonce", nonce)
+	} else {
+		// Legacy mode
+		signature = c.signRequest(timestamp, method, path, body)
+	}
 
 	req.Header.Set("X-API-Key-ID", c.apiKeyID)
 	req.Header.Set("X-Timestamp", fmt.Sprintf("%d", timestamp))
@@ -367,13 +399,33 @@ func (c *Client) newSignedRequest(ctx context.Context, method, path string, body
 	return req, nil
 }
 
-// signRequest creates the Ed25519 signature for a request.
+// signRequest creates the Ed25519 signature for a request (legacy format).
 // Format: {timestamp}|{method}|{path}|{sha256(body)}
 func (c *Client) signRequest(timestamp int64, method, path string, body []byte) string {
 	bodyHash := sha256.Sum256(body)
 	message := fmt.Sprintf("%d|%s|%s|%x", timestamp, method, path, bodyHash)
 	signature := ed25519.Sign(c.privateKey, []byte(message))
 	return base64.StdEncoding.EncodeToString(signature)
+}
+
+// signRequestWithNonce creates the Ed25519 signature for a request with nonce.
+// Format: {timestamp}|{nonce}|{method}|{path}|{sha256(body)}
+func (c *Client) signRequestWithNonce(timestamp int64, nonce, method, path string, body []byte) string {
+	bodyHash := sha256.Sum256(body)
+	message := fmt.Sprintf("%d|%s|%s|%s|%x", timestamp, nonce, method, path, bodyHash)
+	signature := ed25519.Sign(c.privateKey, []byte(message))
+	return base64.StdEncoding.EncodeToString(signature)
+}
+
+// generateNonce generates a random nonce for replay protection.
+// Returns a 16-byte random value encoded as hex (32 characters).
+func generateNonce() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback to timestamp-based if crypto/rand fails (unlikely)
+		return fmt.Sprintf("%x", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b)
 }
 
 // parseErrorResponse parses an error response from the API.

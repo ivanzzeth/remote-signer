@@ -13,6 +13,14 @@ import (
 // WhitelistRuleEngine implements RuleEngine with two-tier evaluation:
 // 1. Blocklist rules (mandatory): ANY violation = blocked immediately
 // 2. Whitelist rules (permissive): ANY match = allowed
+//
+// Security: Blocklist rules use mandatory Fail-Closed behavior - any blocklist
+// evaluation error results in immediate request rejection. This prevents attackers
+// from bypassing blocklist rules by causing evaluation failures.
+//
+// Whitelist rules use Fail-Open behavior - if a whitelist rule evaluation fails,
+// it's skipped and the next whitelist rule is evaluated. This ensures that one
+// failing whitelist rule doesn't prevent other valid whitelist rules from matching.
 type WhitelistRuleEngine struct {
 	repo       storage.RuleRepository
 	evaluators map[types.RuleType]RuleEvaluator
@@ -28,11 +36,13 @@ func NewWhitelistRuleEngine(repo storage.RuleRepository, logger *slog.Logger) (*
 	if logger == nil {
 		return nil, fmt.Errorf("logger is required")
 	}
-	return &WhitelistRuleEngine{
+	engine := &WhitelistRuleEngine{
 		repo:       repo,
 		evaluators: make(map[types.RuleType]RuleEvaluator),
 		logger:     logger,
-	}, nil
+	}
+	logger.Info("rule engine initialized")
+	return engine, nil
 }
 
 // RegisterEvaluator registers a rule evaluator for a specific rule type
@@ -104,23 +114,39 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
-	// Phase 1: Check blocklist rules first
+	// Phase 1: Check blocklist rules first (mandatory Fail-Closed)
 	// ANY violation = blocked immediately (no manual approval possible)
+	// ANY evaluation error = immediate rejection (Fail-Closed is mandatory for blocklist)
 	for _, rule := range blocklistRules {
 		evaluator, exists := e.evaluators[rule.Type]
 		if !exists {
-			e.logger.Warn("no evaluator for blocklist rule type", "type", rule.Type, "rule_id", rule.ID)
-			continue
+			e.logger.Error("no evaluator for blocklist rule type (Fail-Closed)",
+				"type", rule.Type,
+				"rule_id", rule.ID,
+			)
+			// Fail-Closed (mandatory): missing evaluator is a configuration error, reject immediately
+			return nil, &RuleEvaluationError{
+				RuleID:   rule.ID,
+				RuleName: rule.Name,
+				RuleType: rule.Type,
+				Err:      fmt.Errorf("no evaluator registered for rule type %s", rule.Type),
+			}
 		}
 
 		violated, reason, err := evaluator.Evaluate(ctx, rule, req, parsed)
 		if err != nil {
-			e.logger.Error("blocklist rule evaluation error",
+			e.logger.Error("blocklist rule evaluation error (Fail-Closed)",
 				"rule_id", rule.ID,
 				"type", rule.Type,
 				"error", err,
 			)
-			continue
+			// Fail-Closed (mandatory): evaluation error must reject immediately
+			return nil, &RuleEvaluationError{
+				RuleID:   rule.ID,
+				RuleName: rule.Name,
+				RuleType: rule.Type,
+				Err:      err,
+			}
 		}
 
 		if violated {
@@ -147,20 +173,28 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 
 	// Phase 2: Check whitelist rules
 	// ANY match = allowed
+	// NOTE: Whitelist rules use Fail-Open behavior - if evaluation fails, skip to next rule.
+	// This ensures that one failing whitelist rule doesn't block other valid whitelist rules.
+	// Fail-Closed only applies to Blocklist rules for security.
 	for _, rule := range whitelistRules {
 		evaluator, exists := e.evaluators[rule.Type]
 		if !exists {
-			e.logger.Warn("no evaluator for whitelist rule type", "type", rule.Type, "rule_id", rule.ID)
+			e.logger.Warn("no evaluator for whitelist rule type, skipping",
+				"type", rule.Type,
+				"rule_id", rule.ID,
+			)
+			// Fail-Open for whitelist: skip and continue to next rule
 			continue
 		}
 
 		matched, reason, err := evaluator.Evaluate(ctx, rule, req, parsed)
 		if err != nil {
-			e.logger.Error("whitelist rule evaluation error",
+			e.logger.Warn("whitelist rule evaluation error, skipping",
 				"rule_id", rule.ID,
 				"type", rule.Type,
 				"error", err,
 			)
+			// Fail-Open for whitelist: skip and continue to next rule
 			continue
 		}
 

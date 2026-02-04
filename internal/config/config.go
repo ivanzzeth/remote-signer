@@ -137,6 +137,9 @@ type SecurityConfig struct {
 	MaxRequestAge    time.Duration     `yaml:"max_request_age"`
 	RateLimitDefault int               `yaml:"rate_limit_default"`
 	IPWhitelist      IPWhitelistConfig `yaml:"ip_whitelist"`
+	// NonceRequired enforces nonce for all requests (recommended for production)
+	// When true, requests without X-Nonce header will be rejected
+	NonceRequired *bool `yaml:"nonce_required"`
 }
 
 // IPWhitelistConfig contains IP whitelist settings
@@ -269,11 +272,17 @@ func setDefaults(cfg *Config) {
 	}
 
 	if cfg.Security.MaxRequestAge == 0 {
-		cfg.Security.MaxRequestAge = 5 * time.Minute
+		cfg.Security.MaxRequestAge = 60 * time.Second // Reduced from 5min for security
 	}
 
 	if cfg.Security.RateLimitDefault <= 0 {
 		cfg.Security.RateLimitDefault = 100
+	}
+
+	// Default to requiring nonce for security
+	if cfg.Security.NonceRequired == nil {
+		nonceRequired := true
+		cfg.Security.NonceRequired = &nonceRequired
 	}
 
 	if cfg.Logger.Level == "" {

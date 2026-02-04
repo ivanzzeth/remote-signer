@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -139,8 +140,9 @@ func TestMain(m *testing.M) {
 		// Internal server mode: start test server with generated keys
 		port := defaultAPIPort
 		if portStr := os.Getenv("E2E_API_PORT"); portStr != "" {
-			// Parse port if needed
-			port = defaultAPIPort
+			if p, err := strconv.Atoi(portStr); err == nil {
+				port = p
+			}
 		}
 
 		// Generate Ed25519 API key for admin
