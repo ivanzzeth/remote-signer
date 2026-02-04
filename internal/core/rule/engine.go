@@ -3,12 +3,32 @@ package rule
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
 
 // ErrBlockedByRule indicates the request was blocked by a blocklist rule
 var ErrBlockedByRule = errors.New("request blocked by rule")
+
+// ErrRuleEvaluationFailed indicates rule evaluation failed (Fail-Closed for blocklist)
+var ErrRuleEvaluationFailed = errors.New("rule evaluation failed")
+
+// RuleEvaluationError contains details about a rule evaluation failure
+type RuleEvaluationError struct {
+	RuleID   types.RuleID
+	RuleName string
+	RuleType types.RuleType
+	Err      error
+}
+
+func (e *RuleEvaluationError) Error() string {
+	return fmt.Sprintf("rule %s (%s) evaluation failed: %v", e.RuleName, e.RuleID, e.Err)
+}
+
+func (e *RuleEvaluationError) Unwrap() error {
+	return ErrRuleEvaluationFailed
+}
 
 // BlockedError contains details about why a request was blocked
 type BlockedError struct {

@@ -163,13 +163,17 @@ func TestClient_Sign_AutoApproved(t *testing.T) {
 		signature := r.Header.Get("X-Signature")
 		assert.NotEmpty(t, signature)
 
-		// Verify signature
+		nonce := r.Header.Get("X-Nonce")
+		assert.NotEmpty(t, nonce, "nonce should be present by default")
+
+		// Verify signature with nonce format
 		var body []byte
 		if r.Body != nil {
 			body, _ = readAndRestoreBody(r)
 		}
 		bodyHash := sha256.Sum256(body)
-		message := fmt.Sprintf("%s|%s|%s|%x", timestamp, r.Method, r.URL.Path, bodyHash)
+		// Nonce format: {timestamp}|{nonce}|{method}|{path}|{sha256(body)}
+		message := fmt.Sprintf("%s|%s|%s|%s|%x", timestamp, nonce, r.Method, r.URL.Path, bodyHash)
 		sigBytes, _ := base64.StdEncoding.DecodeString(signature)
 		assert.True(t, ed25519.Verify(publicKey, []byte(message), sigBytes))
 
