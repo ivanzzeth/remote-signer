@@ -32,7 +32,7 @@
 #   UniswapV3 Router:        0xE592427A0AEce92De3Edee1F18E0157C05861564
 #
 # External Wallets:
-#   Treasury Wallet:         0x9ce3316b865e940227ea724afdeaaa2759f1aa7c  # Fund distribution & collection
+#   Treasury Wallet:         0x9Ce3316B865e940227EA724AFdeAAA2759f1AA7C  # Fund distribution & collection
 #
 # EIP-712 Domains:
 #   ClobAuth Domain:         "ClobAuthDomain" (version: "1")
@@ -281,6 +281,26 @@ rules:
                 refundReceiver: "0x0000000000000000000000000000000000000000"
                 nonce: "0"
           expect_pass: true
+        - name: "should reject SafeTx with non-zero value"
+          input:
+            typed_data:
+              primaryType: "SafeTx"
+              domain:
+                chainId: "137"
+                verifyingContract: "0x1234567890123456789012345678901234567890"
+              message:
+                to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+                value: "1000000000000000000"
+                data: "0x095ea7b3"
+                operation: "0"
+                safeTxGas: "0"
+                baseGas: "0"
+                gasPrice: "0"
+                gasToken: "0x0000000000000000000000000000000000000000"
+                refundReceiver: "0x0000000000000000000000000000000000000000"
+                nonce: "0"
+          expect_pass: false
+          expect_reason: "ETH value must be zero"
 
   # ===========================================================================
   # ETHEREUM TRANSACTION RULES - SAFE WALLET OPERATIONS
@@ -316,6 +336,13 @@ rules:
             # createProxy with zero payment token and receiver
             data: "0xa1884d2c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000041"
           expect_pass: true
+        - name: "should reject with non-zero payment token"
+          input:
+            to: "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"
+            # createProxy with USDC.e as payment token (0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174)
+            data: "0xa1884d2c0000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa841740000000000000000000000000000000000000000000000000000000000000001000000000000000000000000123456789012345678901234567890123456789000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000041"
+          expect_pass: false
+          expect_reason: "payment token must be zero"
 
   # Safe execTransaction - Execute through Safe wallet
   - name: "Polymarket Safe Execute Transaction"
@@ -345,6 +372,21 @@ rules:
             // Parameters match the signed SafeTx, so this is safe
         }
       description: "Safe execution - signature already validated"
+      test_cases:
+        - name: "should pass execTransaction with zero value"
+          input:
+            to: "0x1234567890123456789012345678901234567890"
+            # execTransaction(to, 0, data, 0, 0, 0, 0, 0x0, 0x0, signatures)
+            # Function selector: 0x6a761202
+            data: "0x6a7612020000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa8417400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001a0000000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000041"
+          expect_pass: true
+        - name: "should reject execTransaction with non-zero value"
+          input:
+            to: "0x1234567890123456789012345678901234567890"
+            # execTransaction(to, 1 ether, data, 0, 0, 0, 0, 0x0, 0x0, signatures)
+            data: "0x6a7612020000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa841740000000000000000000000000000000000000000000000000de0b6b3a76400000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001a0000000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000041"
+          expect_pass: false
+          expect_reason: "value must be zero"
 
   # ===========================================================================
   # ETHEREUM TRANSACTION RULES - TOKEN SWAPS & TRANSFERS
@@ -368,6 +410,20 @@ rules:
             );
         }
       description: "USDC approval for UniswapV3 Router"
+      test_cases:
+        - name: "should pass approve to UniswapV3 Router"
+          input:
+            to: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
+            # approve(0xE592427A0AEce92De3Edee1F18E0157C05861564, max_uint256)
+            data: "0x095ea7b3000000000000000000000000e592427a0aece92de3edee1f18e0157c05861564ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: true
+        - name: "should reject approve to wrong spender"
+          input:
+            to: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
+            # approve(0x1234..., max_uint256) - wrong spender
+            data: "0x095ea7b30000000000000000000000001234567890123456789012345678901234567890ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: false
+          expect_reason: "spender must be UniswapV3 Router"
 
   # UniswapV3 Swap - USDC to USDC.e
   - name: "Polymarket UniswapV3 USDC Swap"
@@ -402,6 +458,21 @@ rules:
             );
         }
       description: "Swap USDC to USDC.e via UniswapV3"
+      test_cases:
+        - name: "should pass swap USDC to USDC.e"
+          input:
+            to: "0xE592427A0AEce92De3Edee1F18E0157C05861564"
+            # exactInputSingle(tokenIn=USDC, tokenOut=USDC.e, fee=100, recipient, deadline, amountIn, amountOutMin, sqrtPriceLimit)
+            # Function selector: 0x414bf389
+            data: "0x414bf3890000000000000000000000003c499c542cef5e3811e1192ce70d8cc03d5c33590000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa841740000000000000000000000000000000000000000000000000000000000000064000000000000000000000000123456789012345678901234567890123456789000000000000000000000000000000000000000000000000000000000ffffffff0000000000000000000000000000000000000000000000000000000000989680000000000000000000000000000000000000000000000000000000000098968000000000000000000000000000000000000000000000000000000000000000000"
+          expect_pass: true
+        - name: "should reject swap with wrong tokenIn"
+          input:
+            to: "0xE592427A0AEce92De3Edee1F18E0157C05861564"
+            # exactInputSingle with wrong tokenIn (USDC.e instead of USDC)
+            data: "0x414bf3890000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa841740000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa841740000000000000000000000000000000000000000000000000000000000000064000000000000000000000000123456789012345678901234567890123456789000000000000000000000000000000000000000000000000000000000ffffffff0000000000000000000000000000000000000000000000000000000000989680000000000000000000000000000000000000000000000000000000000098968000000000000000000000000000000000000000000000000000000000000000000"
+          expect_pass: false
+          expect_reason: "tokenIn must be USDC"
 
   # Transfer USDC.e to Treasury
   - name: "Polymarket USDC.e to Treasury"
@@ -416,11 +487,25 @@ rules:
         function transfer(address recipient, uint256 amount) external {
             // Treasury wallet address
             require(
-                recipient == 0x9ce3316b865e940227ea724afdeaaa2759f1aa7c,
+                recipient == 0x9Ce3316B865e940227EA724AFdeAAA2759f1AA7C,
                 "recipient must be Treasury"
             );
         }
       description: "USDC.e transfer to Treasury (fund collection)"
+      test_cases:
+        - name: "should pass transfer to Treasury"
+          input:
+            to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+            # transfer(0x9Ce3316B865e940227EA724AFdeAAA2759f1AA7C, 1000000)
+            data: "0xa9059cbb0000000000000000000000009ce3316b865e940227ea724afdeaaa2759f1aa7c00000000000000000000000000000000000000000000000000000000000f4240"
+          expect_pass: true
+        - name: "should reject transfer to wrong recipient"
+          input:
+            to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+            # transfer(0x1234..., 1000000) - wrong recipient
+            data: "0xa9059cbb000000000000000000000000123456789012345678901234567890123456789000000000000000000000000000000000000000000000000000000000000f4240"
+          expect_pass: false
+          expect_reason: "recipient must be Treasury"
 
   # Transfer USDC to Treasury
   - name: "Polymarket USDC to Treasury"
@@ -435,11 +520,25 @@ rules:
         function transfer(address recipient, uint256 amount) external {
             // Treasury wallet address
             require(
-                recipient == 0x9ce3316b865e940227ea724afdeaaa2759f1aa7c,
+                recipient == 0x9Ce3316B865e940227EA724AFdeAAA2759f1AA7C,
                 "recipient must be Treasury"
             );
         }
       description: "USDC transfer to Treasury (fund collection)"
+      test_cases:
+        - name: "should pass USDC transfer to Treasury"
+          input:
+            to: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
+            # transfer(0x9Ce3316B865e940227EA724AFdeAAA2759f1AA7C, 1000000)
+            data: "0xa9059cbb0000000000000000000000009ce3316b865e940227ea724afdeaaa2759f1aa7c00000000000000000000000000000000000000000000000000000000000f4240"
+          expect_pass: true
+        - name: "should reject USDC transfer to wrong recipient"
+          input:
+            to: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
+            # transfer(0x1234..., 1000000) - wrong recipient
+            data: "0xa9059cbb000000000000000000000000123456789012345678901234567890123456789000000000000000000000000000000000000000000000000000000000000f4240"
+          expect_pass: false
+          expect_reason: "recipient must be Treasury"
 
   # Transfer USDC.e to Safe wallet
   - name: "Polymarket USDC.e to Safe"
@@ -456,6 +555,19 @@ rules:
             // This rule should be scoped to specific Safe addresses via rule configuration
         }
       description: "USDC.e transfer to Safe wallet for trading"
+      test_cases:
+        - name: "should pass transfer to any address (Safe wallet)"
+          input:
+            to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+            # transfer(0xABCD..., 1000000)
+            data: "0xa9059cbb000000000000000000000000abcdabcdabcdabcdabcdabcdabcdabcdabcdabcd00000000000000000000000000000000000000000000000000000000000f4240"
+          expect_pass: true
+        - name: "should reject non-transfer function call"
+          input:
+            to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+            # approve(...) instead of transfer
+            data: "0x095ea7b3000000000000000000000000abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: false
 
   # ===========================================================================
   # SAFE WALLET INTERNAL TRANSACTION RULES - USDC APPROVALS
@@ -479,6 +591,20 @@ rules:
             );
         }
       description: "USDC.e approval for CTF Exchange"
+      test_cases:
+        - name: "should pass approve to CTF Exchange"
+          input:
+            to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+            # approve(0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E, max)
+            data: "0x095ea7b30000000000000000000000004bfb41d5b3570defd03c39a9a4d8de6bd8b8982effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: true
+        - name: "should reject approve to wrong spender"
+          input:
+            to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+            # approve(0x1234..., max) - wrong spender
+            data: "0x095ea7b30000000000000000000000001234567890123456789012345678901234567890ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: false
+          expect_reason: "spender must be CTF Exchange"
 
   # USDC.e Approve to NegRiskAdapter
   - name: "Polymarket USDC Approve NegRiskAdapter"
@@ -498,6 +624,20 @@ rules:
             );
         }
       description: "USDC.e approval for NegRiskAdapter"
+      test_cases:
+        - name: "should pass approve to NegRiskAdapter"
+          input:
+            to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+            # approve(0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296, max)
+            data: "0x095ea7b3000000000000000000000000d91e80cf2e7be2e162c6513ced06f1dd0da35296ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: true
+        - name: "should reject approve to wrong spender"
+          input:
+            to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+            # approve(0x1234..., max) - wrong spender
+            data: "0x095ea7b30000000000000000000000001234567890123456789012345678901234567890ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: false
+          expect_reason: "spender must be NegRiskAdapter"
 
   # USDC.e Approve to NegRiskExchange
   - name: "Polymarket USDC Approve NegRiskExchange"
@@ -517,6 +657,20 @@ rules:
             );
         }
       description: "USDC.e approval for NegRiskExchange"
+      test_cases:
+        - name: "should pass approve to NegRiskExchange"
+          input:
+            to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+            # approve(0xC5d563A36AE78145C45a50134d48A1215220f80a, max)
+            data: "0x095ea7b3000000000000000000000000c5d563a36ae78145c45a50134d48a1215220f80affffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: true
+        - name: "should reject approve to wrong spender"
+          input:
+            to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+            # approve(0x1234..., max) - wrong spender
+            data: "0x095ea7b30000000000000000000000001234567890123456789012345678901234567890ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: false
+          expect_reason: "spender must be NegRiskExchange"
 
   # ===========================================================================
   # SAFE WALLET INTERNAL TRANSACTION RULES - CTF APPROVALS
@@ -540,6 +694,20 @@ rules:
             );
         }
       description: "CTF ERC1155 approval for Exchange"
+      test_cases:
+        - name: "should pass setApprovalForAll to CTF Exchange"
+          input:
+            to: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+            # setApprovalForAll(0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E, true)
+            data: "0xa22cb4650000000000000000000000004bfb41d5b3570defd03c39a9a4d8de6bd8b8982e0000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: true
+        - name: "should reject setApprovalForAll to wrong operator"
+          input:
+            to: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+            # setApprovalForAll(0x1234..., true) - wrong operator
+            data: "0xa22cb46500000000000000000000000012345678901234567890123456789012345678900000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: false
+          expect_reason: "operator must be CTF Exchange"
 
   # CTF setApprovalForAll to NegRiskAdapter
   - name: "Polymarket CTF Approve NegRiskAdapter"
@@ -559,6 +727,20 @@ rules:
             );
         }
       description: "CTF ERC1155 approval for NegRiskAdapter"
+      test_cases:
+        - name: "should pass setApprovalForAll to NegRiskAdapter"
+          input:
+            to: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+            # setApprovalForAll(0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296, true)
+            data: "0xa22cb465000000000000000000000000d91e80cf2e7be2e162c6513ced06f1dd0da352960000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: true
+        - name: "should reject setApprovalForAll to wrong operator"
+          input:
+            to: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+            # setApprovalForAll(0x1234..., true) - wrong operator
+            data: "0xa22cb46500000000000000000000000012345678901234567890123456789012345678900000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: false
+          expect_reason: "operator must be NegRiskAdapter"
 
   # CTF setApprovalForAll to NegRiskExchange
   - name: "Polymarket CTF Approve NegRiskExchange"
@@ -578,6 +760,20 @@ rules:
             );
         }
       description: "CTF ERC1155 approval for NegRiskExchange"
+      test_cases:
+        - name: "should pass setApprovalForAll to NegRiskExchange"
+          input:
+            to: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+            # setApprovalForAll(0xC5d563A36AE78145C45a50134d48A1215220f80a, true)
+            data: "0xa22cb465000000000000000000000000c5d563a36ae78145c45a50134d48a1215220f80a0000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: true
+        - name: "should reject setApprovalForAll to wrong operator"
+          input:
+            to: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+            # setApprovalForAll(0x1234..., true) - wrong operator
+            data: "0xa22cb46500000000000000000000000012345678901234567890123456789012345678900000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: false
+          expect_reason: "operator must be NegRiskExchange"
 
   # ===========================================================================
   # SAFE WALLET INTERNAL TRANSACTION RULES - CTF OPERATIONS
@@ -612,6 +808,21 @@ rules:
             );
         }
       description: "Split USDC.e into conditional tokens"
+      test_cases:
+        - name: "should pass splitPosition with USDC.e collateral"
+          input:
+            to: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+            # splitPosition(collateral=USDC.e, parentCollectionId=0, conditionId, partition, amount)
+            # Function selector: 0x72ce4275
+            data: "0x72ce42750000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa8417400000000000000000000000000000000000000000000000000000000000000001234567890123456789012345678901234567890123456789012345678901234000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000f424000000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: true
+        - name: "should reject splitPosition with wrong collateral"
+          input:
+            to: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+            # splitPosition(collateral=USDC, ...) - wrong collateral
+            data: "0x72ce42750000000000000000000000003c499c542cef5e3811e1192ce70d8cc03d5c335900000000000000000000000000000000000000000000000000000000000000001234567890123456789012345678901234567890123456789012345678901234000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000f424000000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: false
+          expect_reason: "collateral must be USDC.e"
 
   # CTF Merge Positions
   - name: "Polymarket CTF Merge Positions"
@@ -642,6 +853,21 @@ rules:
             );
         }
       description: "Merge conditional tokens back to USDC.e"
+      test_cases:
+        - name: "should pass mergePositions with USDC.e collateral"
+          input:
+            to: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+            # mergePositions(collateral=USDC.e, parentCollectionId=0, conditionId, partition, amount)
+            # Function selector: 0x9e7212ad
+            data: "0x9e7212ad0000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa8417400000000000000000000000000000000000000000000000000000000000000001234567890123456789012345678901234567890123456789012345678901234000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000f424000000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: true
+        - name: "should reject mergePositions with wrong collateral"
+          input:
+            to: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+            # mergePositions(collateral=USDC, ...) - wrong collateral
+            data: "0x9e7212ad0000000000000000000000003c499c542cef5e3811e1192ce70d8cc03d5c335900000000000000000000000000000000000000000000000000000000000000001234567890123456789012345678901234567890123456789012345678901234000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000f424000000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: false
+          expect_reason: "collateral must be USDC.e"
 
   # CTF Redeem Positions (Standard Market)
   - name: "Polymarket CTF Redeem Positions"
@@ -671,6 +897,21 @@ rules:
             );
         }
       description: "Redeem resolved conditional tokens for USDC.e (standard market)"
+      test_cases:
+        - name: "should pass redeemPositions with USDC.e collateral"
+          input:
+            to: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+            # redeemPositions(collateral=USDC.e, parentCollectionId=0, conditionId, indexSets)
+            # Function selector: 0x3e15c98f
+            data: "0x3e15c98f0000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa84174000000000000000000000000000000000000000000000000000000000000000012345678901234567890123456789012345678901234567890123456789012340000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002"
+          expect_pass: true
+        - name: "should reject redeemPositions with wrong collateral"
+          input:
+            to: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+            # redeemPositions(collateral=USDC, ...) - wrong collateral
+            data: "0x3e15c98f0000000000000000000000003c499c542cef5e3811e1192ce70d8cc03d5c3359000000000000000000000000000000000000000000000000000000000000000012345678901234567890123456789012345678901234567890123456789012340000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002"
+          expect_pass: false
+          expect_reason: "collateral must be USDC.e"
 
   # NegRiskAdapter Redeem Positions
   - name: "Polymarket NegRiskAdapter Redeem"
@@ -690,3 +931,17 @@ rules:
             // Requires CTF -> NegRiskAdapter approval to be set
         }
       description: "Redeem NegRisk market positions for USDC.e"
+      test_cases:
+        - name: "should pass NegRiskAdapter redeemPositions"
+          input:
+            to: "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296"
+            # redeemPositions(conditionId, amounts)
+            # Function selector: 0xe22c9369
+            data: "0xe22c93691234567890123456789012345678901234567890123456789012345678901234000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000989680000000000000000000000000000000000000000000000000000000000098968"
+          expect_pass: true
+        - name: "should reject non-redeemPositions function"
+          input:
+            to: "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296"
+            # Different function selector (not redeemPositions)
+            data: "0x12345678123456789012345678901234567890123456789012345678901234567890123400000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000002"
+          expect_pass: false

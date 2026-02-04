@@ -1,0 +1,33 @@
+{
+  "version": "1.0.0",
+  "description": "MetaMask Snap for remote-signer service integration",
+  "proposedName": "Remote Signer",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ivanzzeth/remote-signer.git"
+  },
+  "source": {
+    "shasum": "HuFaEWP7k4S8zfp7jHcZ2k+63T0K23b8ub1K9LluznA=",
+    "location": {
+      "http": {
+        "url": "http://127.0.0.1:8549/dist/bundle.js"
+      }
+    }
+  },
+  "initialPermissions": {
+    "endowment:keyring": {
+      "allowedOrigins": [
+        "*"
+      ]
+    },
+    "endowment:rpc": {
+      "dapps": true,
+      "snaps": false
+    },
+    "snap_dialog": {},
+    "snap_manageAccounts": {},
+    "snap_manageState": {},
+    "endowment:network-access": {}
+  },
+  "manifestVersion": "0.1"
+}
