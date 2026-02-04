@@ -210,6 +210,26 @@ rules:
                 refundReceiver: "0x0000000000000000000000000000000000000000"
                 nonce: "0"
           expect_pass: true
+        - name: "should reject SafeTx with non-zero value"
+          input:
+            typed_data:
+              primaryType: "SafeTx"
+              domain:
+                chainId: "56"
+                verifyingContract: "0x1234567890123456789012345678901234567890"
+              message:
+                to: "0x55d398326f99059fF775485246999027B3197955"
+                value: "1000000000000000000"
+                data: "0xa9059cbb"
+                operation: "0"
+                safeTxGas: "0"
+                baseGas: "0"
+                gasPrice: "0"
+                gasToken: "0x0000000000000000000000000000000000000000"
+                refundReceiver: "0x0000000000000000000000000000000000000000"
+                nonce: "0"
+          expect_pass: false
+          expect_reason: "ETH value must be zero"
 
   # ===========================================================================
   # ETHEREUM TRANSACTION RULES
@@ -244,6 +264,13 @@ rules:
             to: "0xa6B71E26C5e0845f74c812102Ca7114b6a896AB2"
             data: "0x1688f0b9000000000000000000000000fb1bffc9d739b8d520daf37df666da4c687191ea"
           expect_pass: true
+        - name: "should reject with wrong singleton"
+          input:
+            to: "0xa6B71E26C5e0845f74c812102Ca7114b6a896AB2"
+            # createProxyWithNonce with wrong singleton address
+            data: "0x1688f0b90000000000000000000000001234567890123456789012345678901234567890"
+          expect_pass: false
+          expect_reason: "invalid singleton"
 
   # Safe execTransaction - Execute through Safe wallet
   - name: "Opinion Safe Execute Transaction"
@@ -270,6 +297,20 @@ rules:
             // Parameters match the signed SafeTx, so this is safe
         }
       description: "Safe execution - signature already validated"
+      test_cases:
+        - name: "should pass execTransaction"
+          input:
+            to: "0x1234567890123456789012345678901234567890"
+            # execTransaction(to, 0, data, 0, 0, 0, 0, 0x0, 0x0, signatures)
+            # Function selector: 0x6a761202
+            data: "0x6a76120200000000000000000000000055d398326f99059ff775485246999027b319795500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001a0000000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000041"
+          expect_pass: true
+        - name: "should reject non-execTransaction function"
+          input:
+            to: "0x1234567890123456789012345678901234567890"
+            # Different function selector
+            data: "0x12345678"
+          expect_pass: false
 
   # ===========================================================================
   # USDT TRANSFER RULES (BSC)
@@ -291,6 +332,19 @@ rules:
             // require(recipient == BITGET_WALLET_ADDRESS, "recipient must be Bitget");
         }
       description: "USDT transfer to Bitget for withdrawal"
+      test_cases:
+        - name: "should pass USDT transfer"
+          input:
+            to: "0x55d398326f99059fF775485246999027B3197955"
+            # transfer(recipient, amount)
+            data: "0xa9059cbb000000000000000000000000abcdabcdabcdabcdabcdabcdabcdabcdabcdabcd00000000000000000000000000000000000000000000000000000000000f4240"
+          expect_pass: true
+        - name: "should reject non-transfer function"
+          input:
+            to: "0x55d398326f99059fF775485246999027B3197955"
+            # approve(...) instead of transfer
+            data: "0x095ea7b3000000000000000000000000abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: false
 
   # Transfer small USDT for API Key application
   - name: "Opinion USDT for API Key"
@@ -317,6 +371,13 @@ rules:
             to: "0x55d398326f99059fF775485246999027B3197955"
             data: "0xa9059cbb0000000000000000000000000932a1e172ba891df1f43efad738c3a8dbd9f60e0000000000000000000000000000000000000000000000000016345785d8a0000"
           expect_pass: true
+        - name: "should reject transfer to wrong wallet"
+          input:
+            to: "0x55d398326f99059fF775485246999027B3197955"
+            # transfer to wrong address
+            data: "0xa9059cbb0000000000000000000000001234567890123456789012345678901234567890000000000000000000000000000000000000000000000000000000000000000a"
+          expect_pass: false
+          expect_reason: "recipient must be Opinion API wallet"
 
   # ===========================================================================
   # SAFE WALLET INTERNAL TRANSACTION RULES
@@ -339,6 +400,20 @@ rules:
             );
         }
       description: "USDT approval for CTF Exchange"
+      test_cases:
+        - name: "should pass approve to CTF Exchange"
+          input:
+            to: "0x55d398326f99059fF775485246999027B3197955"
+            # approve(0x5F45344126D6488025B0b84A3A8189F2487a7246, max)
+            data: "0x095ea7b30000000000000000000000005f45344126d6488025b0b84a3a8189f2487a7246ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: true
+        - name: "should reject approve to wrong spender"
+          input:
+            to: "0x55d398326f99059fF775485246999027B3197955"
+            # approve(0x1234..., max) - wrong spender
+            data: "0x095ea7b30000000000000000000000001234567890123456789012345678901234567890ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: false
+          expect_reason: "spender must be CTF Exchange"
 
   # USDT Approve to CTF Contract
   - name: "Opinion USDT Approve CTF"
@@ -357,6 +432,20 @@ rules:
             );
         }
       description: "USDT approval for CTF contract"
+      test_cases:
+        - name: "should pass approve to CTF"
+          input:
+            to: "0x55d398326f99059fF775485246999027B3197955"
+            # approve(0xAD1a38cEc043e70E83a3eC30443dB285ED10D774, max)
+            data: "0x095ea7b3000000000000000000000000ad1a38cec043e70e83a3ec30443db285ed10d774ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: true
+        - name: "should reject approve to wrong spender"
+          input:
+            to: "0x55d398326f99059fF775485246999027B3197955"
+            # approve(0x1234..., max) - wrong spender
+            data: "0x095ea7b30000000000000000000000001234567890123456789012345678901234567890ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: false
+          expect_reason: "spender must be CTF"
 
   # CTF setApprovalForAll to Exchange
   - name: "Opinion CTF Approve Exchange"
@@ -375,6 +464,20 @@ rules:
             );
         }
       description: "CTF ERC1155 approval for Exchange"
+      test_cases:
+        - name: "should pass setApprovalForAll to CTF Exchange"
+          input:
+            to: "0xAD1a38cEc043e70E83a3eC30443dB285ED10D774"
+            # setApprovalForAll(0x5F45344126D6488025B0b84A3A8189F2487a7246, true)
+            data: "0xa22cb4650000000000000000000000005f45344126d6488025b0b84a3a8189f2487a72460000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: true
+        - name: "should reject setApprovalForAll to wrong operator"
+          input:
+            to: "0xAD1a38cEc043e70E83a3eC30443dB285ED10D774"
+            # setApprovalForAll(0x1234..., true) - wrong operator
+            data: "0xa22cb46500000000000000000000000012345678901234567890123456789012345678900000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: false
+          expect_reason: "operator must be CTF Exchange"
 
   # CTF Split Position
   - name: "Opinion CTF Split Position"
@@ -404,6 +507,21 @@ rules:
             );
         }
       description: "Split USDT into conditional tokens"
+      test_cases:
+        - name: "should pass splitPosition with USDT collateral"
+          input:
+            to: "0xAD1a38cEc043e70E83a3eC30443dB285ED10D774"
+            # splitPosition(collateral=USDT, parentCollectionId=0, ...)
+            # Function selector: 0x72ce4275
+            data: "0x72ce427500000000000000000000000055d398326f99059ff775485246999027b319795500000000000000000000000000000000000000000000000000000000000000001234567890123456789012345678901234567890123456789012345678901234000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000f424000000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: true
+        - name: "should reject splitPosition with wrong collateral"
+          input:
+            to: "0xAD1a38cEc043e70E83a3eC30443dB285ED10D774"
+            # splitPosition(collateral=wrong, ...) - wrong collateral
+            data: "0x72ce42750000000000000000000000001234567890123456789012345678901234567890000000000000000000000000000000000000000000000000000000000000000012345678901234567890123456789012345678901234567890123456789012340000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000f424000000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: false
+          expect_reason: "collateral must be USDT"
 
   # CTF Merge Positions
   - name: "Opinion CTF Merge Positions"
@@ -433,6 +551,21 @@ rules:
             );
         }
       description: "Merge conditional tokens back to USDT"
+      test_cases:
+        - name: "should pass mergePositions with USDT collateral"
+          input:
+            to: "0xAD1a38cEc043e70E83a3eC30443dB285ED10D774"
+            # mergePositions(collateral=USDT, parentCollectionId=0, ...)
+            # Function selector: 0x9e7212ad
+            data: "0x9e7212ad00000000000000000000000055d398326f99059ff775485246999027b319795500000000000000000000000000000000000000000000000000000000000000001234567890123456789012345678901234567890123456789012345678901234000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000f424000000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: true
+        - name: "should reject mergePositions with wrong collateral"
+          input:
+            to: "0xAD1a38cEc043e70E83a3eC30443dB285ED10D774"
+            # mergePositions(collateral=wrong, ...) - wrong collateral
+            data: "0x9e7212ad0000000000000000000000001234567890123456789012345678901234567890000000000000000000000000000000000000000000000000000000000000000012345678901234567890123456789012345678901234567890123456789012340000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000f424000000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: false
+          expect_reason: "collateral must be USDT"
 
   # CTF Redeem Positions
   - name: "Opinion CTF Redeem Positions"
@@ -461,3 +594,18 @@ rules:
             );
         }
       description: "Redeem resolved conditional tokens for USDT"
+      test_cases:
+        - name: "should pass redeemPositions with USDT collateral"
+          input:
+            to: "0xAD1a38cEc043e70E83a3eC30443dB285ED10D774"
+            # redeemPositions(collateral=USDT, parentCollectionId=0, ...)
+            # Function selector: 0x3e15c98f
+            data: "0x3e15c98f00000000000000000000000055d398326f99059ff775485246999027b319795500000000000000000000000000000000000000000000000000000000000000001234567890123456789012345678901234567890123456789012345678901234000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: true
+        - name: "should reject redeemPositions with wrong collateral"
+          input:
+            to: "0xAD1a38cEc043e70E83a3eC30443dB285ED10D774"
+            # redeemPositions(collateral=wrong, ...) - wrong collateral
+            data: "0x3e15c98f00000000000000000000000012345678901234567890123456789012345678900000000000000000000000000000000000000000000000000000000000000000123456789012345678901234567890123456789012345678901234567890123400000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000002"
+          expect_pass: false
+          expect_reason: "collateral must be USDT"

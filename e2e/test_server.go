@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"gorm.io/driver/sqlite"
@@ -19,6 +20,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/api"
 	"github.com/ivanzzeth/remote-signer/internal/chain"
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
+	"github.com/ivanzzeth/remote-signer/internal/config"
 	"github.com/ivanzzeth/remote-signer/internal/core/auth"
 	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
@@ -37,6 +39,8 @@ type TestServerConfig struct {
 	// Non-admin API key
 	NonAdminAPIKeyID        string            // API key ID for non-admin authentication
 	NonAdminAPIKeyPublicKey ed25519.PublicKey // Ed25519 public key for non-admin API auth
+	// Optional: config file path (if set, will load from config.e2e.yaml)
+	ConfigPath string // Path to config.e2e.yaml (default: "config.e2e.yaml")
 }
 
 // TestServer manages a test instance of the remote-signer service
@@ -70,10 +74,50 @@ func (ts *TestServer) Start() error {
 		Level: slog.LevelWarn, // Reduce noise in tests
 	}))
 
+	// Load config from config.e2e.yaml if ConfigPath is set
+	var cfg *config.Config
+	if ts.config.ConfigPath != "" {
+		// Find project root to locate config.e2e.yaml
+		configPath := ts.config.ConfigPath
+		if !filepath.IsAbs(configPath) {
+			// Try to find project root
+			wd, err := os.Getwd()
+			if err == nil {
+				// Go up from current directory to find project root
+				for wd != "/" && wd != "" {
+					testPath := filepath.Join(wd, configPath)
+					if _, err := os.Stat(testPath); err == nil {
+						configPath = testPath
+						break
+					}
+					wd = filepath.Dir(wd)
+				}
+			}
+		}
+
+		var err error
+		cfg, err = config.Load(configPath)
+		if err != nil {
+			log.Warn("Failed to load config.e2e.yaml, using defaults", "error", err, "path", configPath)
+			cfg = nil
+		} else {
+			log.Info("Loaded configuration from config.e2e.yaml", "path", configPath)
+		}
+	}
+
 	// Initialize in-memory SQLite database with shared cache and WAL mode
 	// Using file::memory:?cache=shared ensures all connections share the same database
 	// _journal_mode=WAL and _busy_timeout improve concurrent access handling
-	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared&_journal_mode=WAL&_busy_timeout=5000"), &gorm.Config{
+	dbDSN := "file::memory:?cache=shared&_journal_mode=WAL&_busy_timeout=5000"
+	if cfg != nil && cfg.Database.DSN != "" {
+		// Use config database DSN if provided (but for e2e, we prefer in-memory)
+		// Only use config DSN if it's explicitly in-memory
+		if cfg.Database.DSN == "file::memory:?cache=shared&_journal_mode=WAL&_busy_timeout=5000" {
+			dbDSN = cfg.Database.DSN
+		}
+	}
+
+	db, err := gorm.Open(sqlite.Open(dbDSN), &gorm.Config{
 		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
 	})
 	if err != nil {
@@ -121,43 +165,83 @@ func (ts *TestServer) Start() error {
 		return fmt.Errorf("failed to create audit repository: %w", err)
 	}
 
-	// Create test API key
-	if err := ts.createAPIKey(apiKeyRepo); err != nil {
-		return fmt.Errorf("failed to create API key: %w", err)
+	// Initialize API keys from config if available, otherwise create test keys
+	if cfg != nil && len(cfg.APIKeys) > 0 {
+		apiKeyInit, err := config.NewAPIKeyInitializer(apiKeyRepo, log)
+		if err != nil {
+			return fmt.Errorf("failed to create API key initializer: %w", err)
+		}
+		if err := apiKeyInit.SyncFromConfig(context.Background(), cfg.APIKeys); err != nil {
+			return fmt.Errorf("failed to sync API keys from config: %w", err)
+		}
+		log.Info("API keys loaded from config.e2e.yaml")
+	} else {
+		// Create test API key (fallback to programmatic creation)
+		if err := ts.createAPIKey(apiKeyRepo); err != nil {
+			return fmt.Errorf("failed to create API key: %w", err)
+		}
 	}
 
-	// Create whitelist rule to auto-approve all sign requests for testing
-	if err := ts.createWhitelistRule(ruleRepo); err != nil {
-		return fmt.Errorf("failed to create whitelist rule: %w", err)
-	}
+	// Initialize rules from config if available, otherwise create test rules
+	if cfg != nil && len(cfg.Rules) > 0 {
+		ruleInit, err := config.NewRuleInitializer(ruleRepo, log)
+		if err != nil {
+			return fmt.Errorf("failed to create rule initializer: %w", err)
+		}
+		// Set config directory for resolving relative paths in rule files
+		if ts.config.ConfigPath != "" {
+			ruleInit.SetConfigDir(filepath.Dir(ts.config.ConfigPath))
+		}
+		if err := ruleInit.SyncFromConfig(context.Background(), cfg.Rules); err != nil {
+			return fmt.Errorf("failed to sync rules from config: %w", err)
+		}
+		log.Info("Rules loaded from config.e2e.yaml")
+	} else {
+		// Create whitelist rule to auto-approve all sign requests for testing
+		if err := ts.createWhitelistRule(ruleRepo); err != nil {
+			return fmt.Errorf("failed to create whitelist rule: %w", err)
+		}
 
-	// Create blocklist rule to block burn address (for testing blocklist functionality)
-	// This requires Solidity evaluator (forge), so skip if not available
-	if err := ts.createBlocklistRule(ruleRepo); err != nil {
-		// Blocklist rule is optional - requires forge
-		log.Warn("Blocklist rule creation skipped (forge may not be installed)", "error", err)
-	}
+		// Create blocklist rule to block burn address (for testing blocklist functionality)
+		// This requires Solidity evaluator (forge), so skip if not available
+		if err := ts.createBlocklistRule(ruleRepo); err != nil {
+			// Blocklist rule is optional - requires forge
+			log.Warn("Blocklist rule creation skipped (forge may not be installed)", "error", err)
+		}
 
-	// Create sign type restriction rule to allow specific sign types
-	if err := ts.createSignTypeRestrictionRule(ruleRepo); err != nil {
-		return fmt.Errorf("failed to create sign type restriction rule: %w", err)
+		// Create sign type restriction rule to allow specific sign types
+		if err := ts.createSignTypeRestrictionRule(ruleRepo); err != nil {
+			return fmt.Errorf("failed to create sign type restriction rule: %w", err)
+		}
 	}
 
 	// Initialize chain registry
 	chainRegistry := chain.NewRegistry()
 
-	// Initialize EVM adapter with test signer
-	signerCfg := evm.SignerConfig{
-		PrivateKeys: []evm.PrivateKeyConfig{
-			{
-				Address:   ts.config.SignerAddress,
-				KeyEnvVar: "E2E_TEST_SIGNER_KEY",
-				Enabled:   true,
+	// Initialize EVM adapter - use config if available, otherwise use test signer
+	var evmSignerConfig evm.SignerConfig
+	if cfg != nil && cfg.Chains.EVM != nil && cfg.Chains.EVM.Enabled {
+		evmSignerConfig = cfg.Chains.EVM.Signers
+		// Override signer key env var to use test signer
+		for i := range evmSignerConfig.PrivateKeys {
+			if evmSignerConfig.PrivateKeys[i].Address == ts.config.SignerAddress {
+				evmSignerConfig.PrivateKeys[i].KeyEnvVar = "E2E_TEST_SIGNER_KEY"
+			}
+		}
+	} else {
+		// Fallback to test signer configuration
+		evmSignerConfig = evm.SignerConfig{
+			PrivateKeys: []evm.PrivateKeyConfig{
+				{
+					Address:   ts.config.SignerAddress,
+					KeyEnvVar: "E2E_TEST_SIGNER_KEY",
+					Enabled:   true,
+				},
 			},
-		},
+		}
 	}
 
-	evmRegistry, err := evm.NewSignerRegistry(signerCfg)
+	evmRegistry, err := evm.NewSignerRegistry(evmSignerConfig)
 	if err != nil {
 		return fmt.Errorf("failed to create EVM signer registry: %w", err)
 	}
@@ -191,9 +275,21 @@ func (ts *TestServer) Start() error {
 	ruleEngine.RegisterEvaluator(&evm.SignTypeRestrictionEvaluator{})
 
 	// Register Solidity expression evaluator for blocklist rules (optional - requires forge)
-	solidityEvaluator, err := evm.NewSolidityRuleEvaluator(evm.SolidityEvaluatorConfig{
-		Timeout: 30 * time.Second,
-	}, log)
+	// Use config if available, otherwise use defaults
+	var solidityEvalConfig evm.SolidityEvaluatorConfig
+	if cfg != nil && cfg.Chains.EVM != nil && cfg.Chains.EVM.Foundry.Enabled {
+		solidityEvalConfig = evm.SolidityEvaluatorConfig{
+			ForgePath: cfg.Chains.EVM.Foundry.ForgePath,
+			CacheDir:  cfg.Chains.EVM.Foundry.CacheDir,
+			Timeout:   cfg.Chains.EVM.Foundry.Timeout,
+		}
+	} else {
+		solidityEvalConfig = evm.SolidityEvaluatorConfig{
+			Timeout: 30 * time.Second,
+		}
+	}
+
+	solidityEvaluator, err := evm.NewSolidityRuleEvaluator(solidityEvalConfig, log)
 	if err != nil {
 		// Solidity evaluator is optional - forge may not be installed
 		log.Warn("Solidity evaluator not available (forge not installed?), skipping", "error", err)
@@ -237,15 +333,20 @@ func (ts *TestServer) Start() error {
 		return fmt.Errorf("failed to create sign service: %w", err)
 	}
 
-	// Initialize auth verifier
+	// Initialize auth verifier - use config if available
+	maxRequestAge := 5 * time.Minute
+	if cfg != nil && cfg.Security.MaxRequestAge > 0 {
+		maxRequestAge = cfg.Security.MaxRequestAge
+	}
 	authVerifier, err := auth.NewVerifier(apiKeyRepo, auth.Config{
-		MaxRequestAge: 5 * time.Minute,
+		MaxRequestAge: maxRequestAge,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create auth verifier: %w", err)
 	}
 
 	// Initialize signer manager for dynamic signer creation
+	// Create temp directory for e2e tests (always use temp dir for isolation)
 	tempKeystoreDir, err := os.MkdirTemp("", "e2e-keystores-*")
 	if err != nil {
 		return fmt.Errorf("failed to create temp keystore directory: %w", err)

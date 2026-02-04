@@ -1,6 +1,7 @@
 package evm
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -10,28 +11,44 @@ import (
 	"time"
 
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
+	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
 // RuleHandler handles rule management endpoints
 type RuleHandler struct {
-	ruleRepo storage.RuleRepository
-	logger   *slog.Logger
+	ruleRepo          storage.RuleRepository
+	solidityValidator *evm.SolidityRuleValidator
+	logger            *slog.Logger
+}
+
+// RuleHandlerOption is a functional option for RuleHandler
+type RuleHandlerOption func(*RuleHandler)
+
+// WithSolidityValidator sets the Solidity rule validator for the handler
+func WithSolidityValidator(validator *evm.SolidityRuleValidator) RuleHandlerOption {
+	return func(h *RuleHandler) {
+		h.solidityValidator = validator
+	}
 }
 
 // NewRuleHandler creates a new rule handler
-func NewRuleHandler(ruleRepo storage.RuleRepository, logger *slog.Logger) (*RuleHandler, error) {
+func NewRuleHandler(ruleRepo storage.RuleRepository, logger *slog.Logger, opts ...RuleHandlerOption) (*RuleHandler, error) {
 	if ruleRepo == nil {
 		return nil, fmt.Errorf("rule repository is required")
 	}
 	if logger == nil {
 		return nil, fmt.Errorf("logger is required")
 	}
-	return &RuleHandler{
+	h := &RuleHandler{
 		ruleRepo: ruleRepo,
 		logger:   logger,
-	}, nil
+	}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h, nil
 }
 
 // RuleResponse represents a rule in API responses
@@ -188,6 +205,14 @@ func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
 		rule.SignerAddress = req.SignerAddress
 	}
 
+	// Validate Solidity expression rules if validator is available
+	if rule.Type == types.RuleTypeEVMSolidityExpression && h.solidityValidator != nil {
+		if err := h.validateSolidityRule(r.Context(), rule); err != nil {
+			h.writeError(w, fmt.Sprintf("rule validation failed: %s", err.Error()), http.StatusBadRequest)
+			return
+		}
+	}
+
 	// Create rule
 	if err := h.ruleRepo.Create(r.Context(), rule); err != nil {
 		h.logger.Error("failed to create rule", "error", err)
@@ -237,6 +262,14 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 		rule.Enabled = *req.Enabled
 	}
 	rule.UpdatedAt = time.Now()
+
+	// Validate Solidity expression rules if config was updated and validator is available
+	if req.Config != nil && rule.Type == types.RuleTypeEVMSolidityExpression && h.solidityValidator != nil {
+		if err := h.validateSolidityRule(r.Context(), rule); err != nil {
+			h.writeError(w, fmt.Sprintf("rule validation failed: %s", err.Error()), http.StatusBadRequest)
+			return
+		}
+	}
 
 	// Update rule
 	if err := h.ruleRepo.Update(r.Context(), rule); err != nil {
@@ -407,4 +440,22 @@ func (h *RuleHandler) writeJSON(w http.ResponseWriter, data interface{}, status 
 
 func (h *RuleHandler) writeError(w http.ResponseWriter, message string, status int) {
 	h.writeJSON(w, ErrorResponse{Error: message}, status)
+}
+
+// validateSolidityRule validates a Solidity expression rule using the validator
+func (h *RuleHandler) validateSolidityRule(ctx context.Context, rule *types.Rule) error {
+	result, err := h.solidityValidator.ValidateRule(ctx, rule)
+	if err != nil {
+		return err
+	}
+	if !result.Valid {
+		if result.SyntaxError != nil {
+			return fmt.Errorf("syntax error: %s", result.SyntaxError.Message)
+		}
+		if result.FailedTestCases > 0 {
+			return fmt.Errorf("%d test case(s) failed", result.FailedTestCases)
+		}
+		return fmt.Errorf("validation failed")
+	}
+	return nil
 }

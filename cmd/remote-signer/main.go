@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/joho/godotenv"
@@ -22,6 +23,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/statemachine"
+	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/logger"
 	"github.com/ivanzzeth/remote-signer/internal/notify"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
@@ -123,6 +125,39 @@ func run() error {
 		return fmt.Errorf("failed to sync rules from config: %w", err)
 	}
 
+	// =========================================================================
+	// RULE VALIDATION (BEFORE signer initialization to avoid password prompts)
+	// =========================================================================
+	// Validate Solidity expression rules FIRST, before loading signers.
+	// This ensures rule errors are caught before user needs to enter keystore passwords.
+	var solidityEval *evm.SolidityRuleEvaluator
+	var solidityValidator *evm.SolidityRuleValidator
+	if cfg.Chains.EVM != nil && cfg.Chains.EVM.Foundry.Enabled {
+		solidityEval, err = evm.NewSolidityRuleEvaluator(evm.SolidityEvaluatorConfig{
+			ForgePath: cfg.Chains.EVM.Foundry.ForgePath,
+			CacheDir:  cfg.Chains.EVM.Foundry.CacheDir,
+			Timeout:   cfg.Chains.EVM.Foundry.Timeout,
+		}, log)
+		if err != nil {
+			return fmt.Errorf("failed to create Solidity rule evaluator: %w", err)
+		}
+		log.Info("Solidity expression evaluator created (Foundry)")
+
+		// Create Solidity rule validator (for API rule validation)
+		solidityValidator, err = evm.NewSolidityRuleValidator(solidityEval, log)
+		if err != nil {
+			return fmt.Errorf("failed to create Solidity rule validator: %w", err)
+		}
+
+		// Validate all Solidity expression rules at startup
+		if err := validateSolidityRules(context.Background(), ruleRepo, solidityEval, log); err != nil {
+			return fmt.Errorf("rule validation failed: %w", err)
+		}
+	}
+
+	// =========================================================================
+	// SIGNER INITIALIZATION (after rule validation)
+	// =========================================================================
 	auditRepo, err := storage.NewGormAuditRepository(db)
 	if err != nil {
 		return fmt.Errorf("failed to create audit repository: %w", err)
@@ -181,18 +216,10 @@ func run() error {
 	ruleEngine.RegisterEvaluator(&evm.SignTypeRestrictionEvaluator{})
 	ruleEngine.RegisterEvaluator(&evm.MessagePatternEvaluator{})
 
-	// Register Solidity expression evaluator if Foundry is enabled
-	if cfg.Chains.EVM != nil && cfg.Chains.EVM.Foundry.Enabled {
-		solidityEval, err := evm.NewSolidityRuleEvaluator(evm.SolidityEvaluatorConfig{
-			ForgePath: cfg.Chains.EVM.Foundry.ForgePath,
-			CacheDir:  cfg.Chains.EVM.Foundry.CacheDir,
-			Timeout:   cfg.Chains.EVM.Foundry.Timeout,
-		}, log)
-		if err != nil {
-			return fmt.Errorf("failed to create Solidity rule evaluator: %w", err)
-		}
+	// Register Solidity expression evaluator (already created and validated above)
+	if solidityEval != nil {
 		ruleEngine.RegisterEvaluator(solidityEval)
-		log.Info("Solidity expression evaluator registered (Foundry)")
+		log.Info("Solidity expression evaluator registered")
 	}
 
 	// Initialize notification service
@@ -281,6 +308,7 @@ func run() error {
 	router, err := api.NewRouter(authVerifier, signService, evmSignerManager, ruleRepo, auditRepo, log, api.RouterConfig{
 		Version:           version,
 		IPWhitelistConfig: ipWhitelist,
+		SolidityValidator: solidityValidator,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create router: %w", err)
@@ -368,4 +396,88 @@ func notifyEnabled(cfg *notify.Config) bool {
 		return true
 	}
 	return false
+}
+
+// validateSolidityRules validates all Solidity expression rules at startup.
+// It runs the test cases defined in each rule to ensure they pass.
+// If any rule fails validation, the service will not start.
+func validateSolidityRules(ctx context.Context, ruleRepo storage.RuleRepository, evaluator *evm.SolidityRuleEvaluator, log *slog.Logger) error {
+	// Get all Solidity expression rules
+	ruleType := types.RuleTypeEVMSolidityExpression
+	rules, err := ruleRepo.List(ctx, storage.RuleFilter{
+		Type:        &ruleType,
+		EnabledOnly: true,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to list Solidity rules: %w", err)
+	}
+
+	if len(rules) == 0 {
+		log.Info("No Solidity expression rules to validate")
+		return nil
+	}
+
+	log.Info("Validating Solidity expression rules", "count", len(rules))
+
+	// Create validator
+	validator, err := evm.NewSolidityRuleValidator(evaluator, log)
+	if err != nil {
+		return fmt.Errorf("failed to create rule validator: %w", err)
+	}
+
+	// Validate each rule
+	var failedRules []string
+	for _, rule := range rules {
+		log.Info("Validating rule", "rule_id", rule.ID, "rule_name", rule.Name)
+
+		result, err := validator.ValidateRule(ctx, rule)
+		if err != nil {
+			log.Error("Rule validation error",
+				"rule_id", rule.ID,
+				"rule_name", rule.Name,
+				"error", err,
+			)
+			failedRules = append(failedRules, fmt.Sprintf("%s (%s): %v", rule.Name, rule.ID, err))
+			continue
+		}
+
+		if !result.Valid {
+			// Collect failure details
+			var details string
+			if result.SyntaxError != nil {
+				details = fmt.Sprintf("syntax error: %s", result.SyntaxError.Message)
+			} else if result.FailedTestCases > 0 {
+				// Find the first failed test case for details
+				for _, tc := range result.TestCaseResults {
+					if !tc.Passed {
+						details = fmt.Sprintf("test case '%s' failed: expected_pass=%v, actual_pass=%v, error=%s",
+							tc.Name, tc.ExpectedPass, tc.ActualPass, tc.Error)
+						break
+					}
+				}
+			}
+
+			log.Error("Rule validation failed",
+				"rule_id", rule.ID,
+				"rule_name", rule.Name,
+				"details", details,
+				"failed_test_cases", result.FailedTestCases,
+			)
+			failedRules = append(failedRules, fmt.Sprintf("%s (%s): %s", rule.Name, rule.ID, details))
+		} else {
+			log.Info("Rule validation passed",
+				"rule_id", rule.ID,
+				"rule_name", rule.Name,
+				"test_cases", len(result.TestCaseResults),
+			)
+		}
+	}
+
+	if len(failedRules) > 0 {
+		return fmt.Errorf("%d rule(s) failed validation:\n  - %s",
+			len(failedRules), strings.Join(failedRules, "\n  - "))
+	}
+
+	log.Info("All Solidity expression rules validated successfully", "count", len(rules))
+	return nil
 }

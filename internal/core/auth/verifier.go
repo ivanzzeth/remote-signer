@@ -126,19 +126,19 @@ func (v *Verifier) verifyRequestInternal(
 	}), apiKeyID)
 	if err != nil {
 		if types.IsNotFound(err) {
-			return nil, types.ErrUnauthorized
+			return nil, fmt.Errorf("api_key_id '%s' not found: %w", apiKeyID, types.ErrUnauthorized)
 		}
 		return nil, fmt.Errorf("failed to get API key: %w", err)
 	}
 
 	// Check if API key is enabled
 	if !apiKey.Enabled {
-		return nil, types.ErrUnauthorized
+		return nil, fmt.Errorf("api_key '%s' is disabled: %w", apiKeyID, types.ErrUnauthorized)
 	}
 
 	// Check if API key is expired
 	if apiKey.ExpiresAt != nil && apiKey.ExpiresAt.Before(time.Now()) {
-		return nil, types.ErrUnauthorized
+		return nil, fmt.Errorf("api_key '%s' expired at %s: %w", apiKeyID, apiKey.ExpiresAt.Format(time.RFC3339), types.ErrUnauthorized)
 	}
 
 	// Check timestamp (prevent replay attacks)
@@ -148,23 +148,23 @@ func (v *Verifier) verifyRequestInternal(
 		age = -age // Handle future timestamps
 	}
 	if age > v.config.MaxRequestAge {
-		return nil, fmt.Errorf("request too old or from the future: %w", types.ErrUnauthorized)
+		return nil, fmt.Errorf("request timestamp too old (age: %s, max: %s): %w", age, v.config.MaxRequestAge, types.ErrUnauthorized)
 	}
 
 	// Decode public key
 	publicKeyBytes, err := hex.DecodeString(apiKey.PublicKeyHex)
 	if err != nil {
-		return nil, fmt.Errorf("invalid public key hex: %w", err)
+		return nil, fmt.Errorf("invalid public key hex in config: %w", err)
 	}
 	if len(publicKeyBytes) != ed25519.PublicKeySize {
-		return nil, fmt.Errorf("invalid public key size: expected %d, got %d", ed25519.PublicKeySize, len(publicKeyBytes))
+		return nil, fmt.Errorf("invalid public key size in config: expected %d, got %d", ed25519.PublicKeySize, len(publicKeyBytes))
 	}
 	publicKey := ed25519.PublicKey(publicKeyBytes)
 
 	// Decode signature
 	signatureBytes, err := base64.StdEncoding.DecodeString(signature)
 	if err != nil {
-		return nil, fmt.Errorf("invalid signature encoding: %w", types.ErrUnauthorized)
+		return nil, fmt.Errorf("invalid signature encoding (not valid base64): %w", types.ErrUnauthorized)
 	}
 
 	// Build message to verify based on what fields are provided
@@ -180,7 +180,7 @@ func (v *Verifier) verifyRequestInternal(
 
 	// Verify signature
 	if !ed25519.Verify(publicKey, []byte(message), signatureBytes) {
-		return nil, types.ErrUnauthorized
+		return nil, fmt.Errorf("signature verification failed (public key mismatch or message tampered): %w", types.ErrUnauthorized)
 	}
 
 	// Enforce nonce requirement if configured

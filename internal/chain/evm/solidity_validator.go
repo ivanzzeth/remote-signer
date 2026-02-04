@@ -156,9 +156,26 @@ func (v *SolidityRuleValidator) ValidateRule(ctx context.Context, rule *types.Ru
 	}
 	v.logger.Debug("syntax validation passed", "rule_id", rule.ID)
 
-	// Step 2: Execute test cases
-	if len(config.TestCases) == 0 {
-		return nil, fmt.Errorf("at least one test case is required for Solidity expression rules")
+	// Step 2: Validate test cases requirement
+	// Rules MUST have at least 2 test cases: one positive (expect_pass: true) and one negative (expect_pass: false)
+	if len(config.TestCases) < 2 {
+		return nil, fmt.Errorf("at least 2 test cases required for Solidity expression rules (got %d): need at least one positive (expect_pass: true) and one negative (expect_pass: false)", len(config.TestCases))
+	}
+
+	// Count positive and negative test cases
+	var positiveCount, negativeCount int
+	for _, tc := range config.TestCases {
+		if tc.ExpectPass {
+			positiveCount++
+		} else {
+			negativeCount++
+		}
+	}
+	if positiveCount == 0 {
+		return nil, fmt.Errorf("at least one positive test case (expect_pass: true) is required")
+	}
+	if negativeCount == 0 {
+		return nil, fmt.Errorf("at least one negative test case (expect_pass: false) is required")
 	}
 
 	result.TestCaseResults = make([]TestCaseResult, 0, len(config.TestCases))

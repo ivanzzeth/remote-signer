@@ -1,0 +1,125 @@
+# E2E Test Configuration
+# This configuration is used exclusively for e2e tests
+# It uses in-memory database and test-specific settings
+
+server:
+  host: "127.0.0.1"
+  port: 8548  # Can be overridden by E2E_API_PORT env var
+
+database:
+  # In-memory SQLite for e2e tests (will be overridden by test server)
+  dsn: "file::memory:?cache=shared&_journal_mode=WAL&_busy_timeout=5000"
+
+chains:
+  evm:
+    enabled: true
+    signers:
+      private_keys:
+        # Test signer (Hardhat/Foundry first account)
+        # Address: 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+        - address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          key_env: "E2E_TEST_SIGNER_KEY"  # Will be set by test server
+          enabled: true
+    keystore_dir: "./data/keystores-e2e"
+    foundry:
+      enabled: true
+      forge_path: ""
+      cache_dir: "./data/forge-cache-e2e"
+      timeout: "30s"
+
+notify:
+  slack:
+    enabled: false
+  pushover:
+    enabled: false
+
+notify_channels:
+  slack: []
+  pushover: []
+
+security:
+  max_request_age: "60s"
+  rate_limit_default: 1000
+  nonce_required: true
+  ip_whitelist:
+    enabled: false
+    allowed_ips: []
+    trust_proxy: false
+
+logger:
+  level: "warn"  # Reduce noise in tests
+  pretty: false
+
+# API Keys - will be dynamically created by test server
+# These are placeholders, actual keys are generated at runtime
+api_keys: []
+
+# Rules for e2e testing
+# Rules can be defined here (config source) or via API (api source)
+# Rule evaluation: blocklist rules checked first, then whitelist rules
+# Mode: "whitelist" = any match allows, "blocklist" = any match blocks
+rules:
+  # Example 1: Address whitelist - allow transactions to treasury address
+  # Used by TestRule_TransactionToTreasuryPasses
+  - name: "Allow transfers to treasury"
+    type: "evm_address_whitelist"
+    mode: "whitelist"
+    enabled: true
+    config:
+      addresses:
+        - "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"  # Treasury address
+
+  # Example 2: Blocklist rule - block transactions to burn address
+  # Used by TestRule_TransactionToBurnAddressBlocked
+  - name: "Block known malicious addresses"
+    type: "evm_solidity_expression"
+    mode: "blocklist"
+    enabled: true
+    config:
+      expression: |
+        require(to != 0x000000000000000000000000000000000000dEaD, "blocked: burn address");
+      description: "Block transfers to burn address for e2e testing"
+      test_cases:
+        - name: "should pass for normal address"
+          input:
+            to: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+          expect_pass: true
+        - name: "should block burn address"
+          input:
+            to: "0x000000000000000000000000000000000000dEaD"
+          expect_pass: false
+          expect_reason: "blocked: burn address"
+
+  # Example 3: Value limit rule - block high-value transactions
+  # Can be tested via API: TestRule_ValueLimitRuleBlocks
+  - name: "Max 10 ETH per transaction"
+    type: "evm_value_limit"
+    mode: "whitelist"
+    enabled: true
+    config:
+      max_value: "10000000000000000000"  # 10 ETH in wei
+
+  # Example 4: Signer restriction - auto-approve requests from test signer
+  # Used by TestRule_SignerRestrictionAllowsTestSigner
+  - name: "Allow hot wallet signer"
+    type: "signer_restriction"
+    mode: "whitelist"
+    enabled: true
+    config:
+      allowed_signers:
+        - "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"  # Test signer address
+
+  # Example 5: Sign type restriction - allow specific signing methods
+  # Used by TestRule_SignTypeRestrictionAllowsTransaction, TestRule_SignTypeRestrictionAllowsPersonalSign
+  - name: "Allow common signing methods"
+    type: "sign_type_restriction"
+    mode: "whitelist"
+    enabled: true
+    config:
+      allowed_sign_types:
+        - "personal"     # Personal message signing
+        - "typed_data"   # EIP-712 structured data signing
+        - "transaction"  # Transaction signing
+        - "hash"         # Hash signing
+        - "raw_message"  # Raw message signing
+        - "eip191"       # EIP-191 signing

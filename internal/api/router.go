@@ -17,8 +17,9 @@ import (
 
 // RouterConfig contains configuration for the router
 type RouterConfig struct {
-	Version           string
-	IPWhitelistConfig *middleware.IPWhitelist
+	Version            string
+	IPWhitelistConfig  *middleware.IPWhitelist
+	SolidityValidator  *evm.SolidityRuleValidator
 }
 
 // Router handles HTTP routing
@@ -96,7 +97,11 @@ func (r *Router) setupRoutes() error {
 		return err
 	}
 
-	ruleHandler, err := evmhandler.NewRuleHandler(r.ruleRepo, r.logger)
+	var ruleHandlerOpts []evmhandler.RuleHandlerOption
+	if r.config.SolidityValidator != nil {
+		ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithSolidityValidator(r.config.SolidityValidator))
+	}
+	ruleHandler, err := evmhandler.NewRuleHandler(r.ruleRepo, r.logger, ruleHandlerOpts...)
 	if err != nil {
 		return err
 	}

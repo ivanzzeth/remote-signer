@@ -62,3 +62,43 @@ forge_cache/
 # Build artifacts
 cache/
 out/
+
+# JavaScript/TypeScript projects
+# Node modules
+node_modules/
+pkg/js-client/node_modules/
+app/metamask-snap/node_modules/
+
+# Build outputs
+pkg/js-client/dist/
+app/metamask-snap/dist/
+app/metamask-snap/snap.manifest.json.bak
+
+# Package locks (optional - uncomment if you want to ignore them)
+# package-lock.json
+# pkg/js-client/package-lock.json
+# app/metamask-snap/package-lock.json
+
+# TypeScript
+*.tsbuildinfo
+.tsbuildinfo
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+pnpm-debug.log*
+
+# Testing
+coverage/
+.nyc_output/
+*.lcov
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store

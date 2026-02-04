@@ -189,7 +189,7 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 
 		matched, reason, err := evaluator.Evaluate(ctx, rule, req, parsed)
 		if err != nil {
-			e.logger.Warn("whitelist rule evaluation error, skipping",
+			e.logger.Debug("whitelist rule evaluation error, skipping",
 				"rule_id", rule.ID,
 				"type", rule.Type,
 				"error", err,
