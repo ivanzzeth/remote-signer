@@ -21,21 +21,26 @@ import (
 )
 
 // solidityExpressionTemplate is for require-based rules (Expression mode)
+// Context variables use prefixes to avoid conflicts with user-defined field names:
+// - tx_* : Transaction context (tx_to, tx_value, tx_selector, tx_data)
+// - ctx_* : Signing context (ctx_chainId, ctx_signer)
 const solidityExpressionTemplate = `// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 contract RuleEvaluator {
     function run() public pure returns (bool) {
-        // Transaction context
-        address to = {{.To}};
-        uint256 value = {{.Value}};
-        bytes4 selector = {{.Selector}};
-        bytes memory data = {{.Data}};
-        uint256 chainId = {{.ChainID}};
-        address signer = {{.Signer}};
+        // Transaction context (tx_* prefix)
+        address tx_to = {{.To}};
+        uint256 tx_value = {{.Value}};
+        bytes4 tx_selector = {{.Selector}};
+        bytes memory tx_data = {{.Data}};
+
+        // Signing context (ctx_* prefix)
+        uint256 ctx_chainId = {{.ChainID}};
+        address ctx_signer = {{.Signer}};
 
         // Suppress unused variable warnings
-        to; value; selector; data; chainId; signer;
+        tx_to; tx_value; tx_selector; tx_data; ctx_chainId; ctx_signer;
 
         // User-defined validation logic
         {{.Expression}}
@@ -47,11 +52,13 @@ contract RuleEvaluator {
 `
 
 // solidityFunctionTemplate is for function-based rules (Functions mode)
-// When transaction selector matches a user-defined function, it's called with decoded params
+// Uses two contracts: RuleContract (contains user functions) and RuleEvaluatorTest (forge test)
+// This avoids Foundry's address(this) check by calling an external contract via forge test
 const solidityFunctionTemplate = `// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-contract RuleEvaluator {
+// RuleContract contains user-defined validation functions
+contract RuleContract {
     // Transaction context available as state variables
     address public immutable txTo;
     uint256 public immutable txValue;
@@ -60,24 +67,54 @@ contract RuleEvaluator {
     uint256 public immutable txChainId;
     address public immutable txSigner;
 
-    constructor() {
-        txTo = {{.To}};
-        txValue = {{.Value}};
-        txSelector = {{.Selector}};
-        txData = {{.Data}};
-        txChainId = {{.ChainID}};
-        txSigner = {{.Signer}};
+    constructor(
+        address _txTo,
+        uint256 _txValue,
+        bytes4 _txSelector,
+        bytes memory _txData,
+        uint256 _txChainId,
+        address _txSigner
+    ) {
+        txTo = _txTo;
+        txValue = _txValue;
+        txSelector = _txSelector;
+        txData = _txData;
+        txChainId = _txChainId;
+        txSigner = _txSigner;
+    }
+
+    // Fallback: reject any function call that doesn't match whitelisted selectors
+    fallback() external {
+        revert("function not whitelisted");
     }
 
     // User-defined functions for automatic selector matching
     {{.Functions}}
+}
 
-    function run() public returns (bool) {
+// RuleEvaluatorTest is the forge test entry point
+contract RuleEvaluatorTest {
+    RuleContract public ruleContract;
+
+    function setUp() public {
+        // Create RuleContract with transaction context
+        ruleContract = new RuleContract(
+            {{.To}},
+            {{.Value}},
+            {{.Selector}},
+            {{.Data}},
+            {{.ChainID}},
+            {{.Signer}}
+        );
+    }
+
+    function test_rule() public {
+        // Get txData from the rule contract
+        bytes memory txData = ruleContract.txData();
+
         if (txData.length >= 4) {
-            // Forward calldata to matching function
-            // If selector matches a user-defined function, it will be called
-            // with automatically decoded parameters
-            (bool success, bytes memory returnData) = address(this).call(txData);
+            // Forward calldata to RuleContract - this is an external call, not address(this)
+            (bool success, bytes memory returnData) = address(ruleContract).call(txData);
             if (!success) {
                 // Propagate revert reason
                 if (returnData.length > 0) {
@@ -88,36 +125,41 @@ contract RuleEvaluator {
                 revert("no matching function or validation failed");
             }
         }
-        return true;
     }
 }
 `
 
 // solidityTypedDataExpressionTemplate is for EIP-712 typed data validation using require() statements
+// Context variables use prefixes to avoid conflicts with user-defined field names:
+// - eip712_* : EIP-712 domain context (eip712_primaryType, eip712_domainName, etc.)
+// - ctx_* : Signing context (ctx_chainId, ctx_signer)
+// Message fields are generated directly from typed data without prefixes (e.g., value, to, data)
 const solidityTypedDataExpressionTemplate = `// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 contract RuleEvaluator {
     function run() public pure returns (bool) {
-        // EIP-712 Domain context
-        string memory primaryType = {{.PrimaryType}};
-        string memory domainName = {{.DomainName}};
-        string memory domainVersion = {{.DomainVersion}};
-        uint256 domainChainId = {{.DomainChainId}};
-        address domainContract = {{.DomainContract}};
+        // EIP-712 Domain context (eip712_* prefix)
+        string memory eip712_primaryType = {{.PrimaryType}};
+        string memory eip712_domainName = {{.DomainName}};
+        string memory eip712_domainVersion = {{.DomainVersion}};
+        uint256 eip712_domainChainId = {{.DomainChainId}};
+        address eip712_domainContract = {{.DomainContract}};
 
-        // Signer context
-        address signer = {{.Signer}};
-        uint256 chainId = {{.ChainID}};
+        // Signing context (ctx_* prefix)
+        address ctx_signer = {{.Signer}};
+        uint256 ctx_chainId = {{.ChainID}};
 
         // EIP-712 Message fields (dynamically generated based on message content)
+        // These use the original field names from the typed data message (e.g., value, to, data)
         {{.MessageFields}}
 
         // Suppress unused variable warnings
-        bytes memory _primaryType = bytes(primaryType);
-        bytes memory _domainName = bytes(domainName);
-        bytes memory _domainVersion = bytes(domainVersion);
-        domainChainId; domainContract; signer; chainId; _primaryType; _domainName; _domainVersion;
+        bytes memory _eip712_primaryType = bytes(eip712_primaryType);
+        bytes memory _eip712_domainName = bytes(eip712_domainName);
+        bytes memory _eip712_domainVersion = bytes(eip712_domainVersion);
+        eip712_domainChainId; eip712_domainContract; ctx_signer; ctx_chainId;
+        _eip712_primaryType; _eip712_domainName; _eip712_domainVersion;
 
         // User-defined validation logic
         {{.Expression}}
@@ -129,30 +171,35 @@ contract RuleEvaluator {
 `
 
 // solidityTypedDataFunctionsTemplate is for EIP-712 typed data validation using struct-based functions
+// Context variables use prefixes to avoid conflicts with user-defined field names:
+// - eip712_* : EIP-712 domain context
+// - ctx_* : Signing context
 const solidityTypedDataFunctionsTemplate = `// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 contract RuleEvaluator {
-    // EIP-712 Domain context
-    string public primaryType;
-    string public domainName;
-    string public domainVersion;
-    uint256 public domainChainId;
-    address public domainContract;
-    address public txSigner;
-    uint256 public txChainId;
+    // EIP-712 Domain context (eip712_* prefix)
+    string public eip712_primaryType;
+    string public eip712_domainName;
+    string public eip712_domainVersion;
+    uint256 public eip712_domainChainId;
+    address public eip712_domainContract;
+
+    // Signing context (ctx_* prefix)
+    address public ctx_signer;
+    uint256 public ctx_chainId;
 
     // EIP-712 Message encoded as bytes for struct decoding
     bytes public messageData;
 
     constructor() {
-        primaryType = {{.PrimaryType}};
-        domainName = {{.DomainName}};
-        domainVersion = {{.DomainVersion}};
-        domainChainId = {{.DomainChainId}};
-        domainContract = {{.DomainContract}};
-        txSigner = {{.Signer}};
-        txChainId = {{.ChainID}};
+        eip712_primaryType = {{.PrimaryType}};
+        eip712_domainName = {{.DomainName}};
+        eip712_domainVersion = {{.DomainVersion}};
+        eip712_domainChainId = {{.DomainChainId}};
+        eip712_domainContract = {{.DomainContract}};
+        ctx_signer = {{.Signer}};
+        ctx_chainId = {{.ChainID}};
         messageData = {{.MessageData}};
     }
 
@@ -216,6 +263,22 @@ func NewSolidityRuleEvaluator(cfg SolidityEvaluatorConfig, logger *slog.Logger) 
 	tempDir := filepath.Join(os.TempDir(), "remote-signer-rules")
 	if err := os.MkdirAll(tempDir, 0700); err != nil {
 		return nil, fmt.Errorf("failed to create temp dir: %w", err)
+	}
+
+	// Create foundry.toml for forge test to work properly
+	// Note: Don't specify solc version to let forge auto-detect from pragma
+	// Enable via_ir to avoid "Stack too deep" errors with many local variables
+	foundryConfig := `[profile.default]
+src = "."
+test = "."
+out = "out"
+libs = []
+via_ir = true
+optimizer = false
+`
+	foundryConfigPath := filepath.Join(tempDir, "foundry.toml")
+	if err := os.WriteFile(foundryConfigPath, []byte(foundryConfig), 0600); err != nil {
+		return nil, fmt.Errorf("failed to create foundry.toml: %w", err)
 	}
 
 	cacheDir := cfg.CacheDir
@@ -435,18 +498,27 @@ func (e *SolidityRuleEvaluator) generateFunctionScript(
 	return buf.String(), nil
 }
 
-// executeScript executes the Solidity script and returns pass/fail with reason
+// executeScript executes the Solidity script/test and returns pass/fail with reason
 func (e *SolidityRuleEvaluator) executeScript(ctx context.Context, script string) (bool, string, error) {
 	// Calculate script hash for caching/naming
 	hash := sha256.Sum256([]byte(script))
 	hashStr := hex.EncodeToString(hash[:8]) // Use first 8 bytes for shorter filename
 
+	// Determine if this is a test (contains RuleEvaluatorTest) or a script (contains RuleEvaluator)
+	isTest := strings.Contains(script, "contract RuleEvaluatorTest")
+
 	// Create script file with restricted permissions (owner-only)
-	scriptPath := filepath.Join(e.tempDir, fmt.Sprintf("rule_%s.sol", hashStr))
+	var scriptPath string
+	if isTest {
+		scriptPath = filepath.Join(e.tempDir, fmt.Sprintf("rule_%s.t.sol", hashStr))
+	} else {
+		scriptPath = filepath.Join(e.tempDir, fmt.Sprintf("rule_%s.sol", hashStr))
+	}
 	if err := os.WriteFile(scriptPath, []byte(script), 0600); err != nil {
 		return false, "", fmt.Errorf("failed to write script: %w", err)
 	}
-	defer os.Remove(scriptPath)
+	// DEBUG: Comment out to keep files for debugging
+	// defer os.Remove(scriptPath)
 
 	// Create timeout context if not already set
 	execCtx := ctx
@@ -456,13 +528,28 @@ func (e *SolidityRuleEvaluator) executeScript(ctx context.Context, script string
 		defer cancel()
 	}
 
-	// Execute forge script
-	cmd := exec.CommandContext(execCtx,
-		e.foundryPath, "script",
-		scriptPath,
-		"--json",
-		"-vvv", // verbose for revert reasons
-	)
+	// Execute forge test or forge script based on contract type
+	var cmd *exec.Cmd
+	if isTest {
+		// Use forge test for RuleEvaluatorTest contracts
+		cmd = exec.CommandContext(execCtx,
+			e.foundryPath, "test",
+			"--match-path", scriptPath,
+			"--match-contract", "RuleEvaluatorTest",
+			"-vvv", // verbose for revert reasons
+		)
+	} else {
+		// Use forge script for RuleEvaluator contracts
+		cmd = exec.CommandContext(execCtx,
+			e.foundryPath, "script",
+			scriptPath,
+			"--json",
+			"-vvv", // verbose for revert reasons
+		)
+	}
+
+	// Set working directory to temp dir where foundry.toml exists
+	cmd.Dir = e.tempDir
 
 	// Security: Disable dangerous Foundry cheatcodes
 	// - FOUNDRY_FFI=false: Prevent arbitrary command execution via vm.ffi()
@@ -489,15 +576,16 @@ func (e *SolidityRuleEvaluator) executeScript(ctx context.Context, script string
 			return false, "", fmt.Errorf("script execution timed out after %v", e.timeout)
 		}
 
-		e.logger.Error("forge script failed",
+		e.logger.Error("forge execution failed",
 			"error", err,
 			"output", string(output),
 			"script_hash", hashStr,
+			"is_test", isTest,
 		)
-		return false, "", fmt.Errorf("forge script failed: %w, output: %s", err, string(output))
+		return false, "", fmt.Errorf("forge execution failed: %w, output: %s", err, string(output))
 	}
 
-	e.logger.Debug("rule evaluation passed", "script_hash", hashStr)
+	e.logger.Debug("rule evaluation passed", "script_hash", hashStr, "is_test", isTest)
 	return true, "", nil
 }
 
@@ -508,16 +596,18 @@ pragma solidity ^0.8.20;
 
 contract SyntaxCheck {
     function run() public pure returns (bool) {
-        // Dummy values for syntax check
-        address to = address(0);
-        uint256 value = 0;
-        bytes4 selector = bytes4(0);
-        bytes memory data = "";
-        uint256 chainId = 1;
-        address signer = address(0);
+        // Transaction context (tx_* prefix)
+        address tx_to = address(0);
+        uint256 tx_value = 0;
+        bytes4 tx_selector = bytes4(0);
+        bytes memory tx_data = "";
+
+        // Signing context (ctx_* prefix)
+        uint256 ctx_chainId = 1;
+        address ctx_signer = address(0);
 
         // Suppress unused variable warnings
-        to; value; selector; data; chainId; signer;
+        tx_to; tx_value; tx_selector; tx_data; ctx_chainId; ctx_signer;
 
         // User expression
         %s
@@ -529,11 +619,13 @@ contract SyntaxCheck {
 }
 
 // GenerateFunctionSyntaxCheckScript generates a script for compilation checking (Functions mode)
+// Uses the same two-contract structure as solidityFunctionTemplate for consistency
 func (e *SolidityRuleEvaluator) GenerateFunctionSyntaxCheckScript(functions string) string {
 	return fmt.Sprintf(`// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-contract SyntaxCheck {
+// RuleContract contains user-defined validation functions
+contract RuleContract {
     // Transaction context available as state variables
     address public immutable txTo;
     uint256 public immutable txValue;
@@ -542,20 +634,49 @@ contract SyntaxCheck {
     uint256 public immutable txChainId;
     address public immutable txSigner;
 
-    constructor() {
-        txTo = address(0);
-        txValue = 0;
-        txSelector = bytes4(0);
-        txData = "";
-        txChainId = 1;
-        txSigner = address(0);
+    constructor(
+        address _txTo,
+        uint256 _txValue,
+        bytes4 _txSelector,
+        bytes memory _txData,
+        uint256 _txChainId,
+        address _txSigner
+    ) {
+        txTo = _txTo;
+        txValue = _txValue;
+        txSelector = _txSelector;
+        txData = _txData;
+        txChainId = _txChainId;
+        txSigner = _txSigner;
     }
 
-    // User-defined functions
-    %s
+    // Fallback: reject any function call that doesn't match whitelisted selectors
+    fallback() external {
+        revert("function not whitelisted");
+    }
 
-    function run() public returns (bool) {
-        return true;
+    // User-defined functions for automatic selector matching
+    %s
+}
+
+// RuleEvaluatorTest is the forge test entry point (for syntax check only)
+contract RuleEvaluatorTest {
+    RuleContract public ruleContract;
+
+    function setUp() public {
+        ruleContract = new RuleContract(
+            address(0),
+            0,
+            bytes4(0),
+            hex"",
+            1,
+            address(0)
+        );
+    }
+
+    function test_rule() public view {
+        // Syntax check only - no execution needed
+        ruleContract;
     }
 }
 `, functions)
@@ -758,24 +879,27 @@ pragma solidity ^0.8.20;
 
 contract SyntaxCheck {
     function run() public pure returns (bool) {
-        // EIP-712 Domain context
-        string memory primaryType = "";
-        string memory domainName = "";
-        string memory domainVersion = "";
-        uint256 domainChainId = 1;
-        address domainContract = address(0);
+        // EIP-712 Domain context (eip712_* prefix)
+        string memory eip712_primaryType = "";
+        string memory eip712_domainName = "";
+        string memory eip712_domainVersion = "";
+        uint256 eip712_domainChainId = 1;
+        address eip712_domainContract = address(0);
 
-        // Signer context
-        address signer = address(0);
-        uint256 chainId = 1;
+        // Signing context (ctx_* prefix)
+        address ctx_signer = address(0);
+        uint256 ctx_chainId = 1;
 
         // Suppress unused variable warnings
-        bytes memory _primaryType = bytes(primaryType);
-        bytes memory _domainName = bytes(domainName);
-        bytes memory _domainVersion = bytes(domainVersion);
-        domainChainId; domainContract; signer; chainId; _primaryType; _domainName; _domainVersion;
+        bytes memory _eip712_primaryType = bytes(eip712_primaryType);
+        bytes memory _eip712_domainName = bytes(eip712_domainName);
+        bytes memory _eip712_domainVersion = bytes(eip712_domainVersion);
+        eip712_domainChainId; eip712_domainContract; ctx_signer; ctx_chainId;
+        _eip712_primaryType; _eip712_domainName; _eip712_domainVersion;
 
         // Common EIP-712 message fields for syntax check
+        // These use original field names from typed data (no prefix needed)
+
         // Permit fields
         address owner = address(0);
         address spender = address(0);
@@ -783,8 +907,43 @@ contract SyntaxCheck {
         uint256 nonce = 0;
         uint256 deadline = 0;
 
+        // ClobAuth fields
+        string memory message = "";
+
+        // Order fields (Polymarket/Opinion CTF Exchange)
+        uint256 salt = 0;
+        address maker = address(0);
+        address signer = address(0);
+        address taker = address(0);
+        uint256 tokenId = 0;
+        uint256 makerAmount = 0;
+        uint256 takerAmount = 0;
+        uint256 expiration = 0;
+        uint256 feeRateBps = 0;
+        uint256 side = 0;
+        uint256 signatureType = 0;
+
+        // CreateProxy fields (Polymarket Safe Factory)
+        address paymentToken = address(0);
+        uint256 payment = 0;
+        address paymentReceiver = address(0);
+
+        // SafeTx fields
+        address to = address(0);
+        bytes memory data = "";
+        uint256 operation = 0;
+        uint256 safeTxGas = 0;
+        uint256 baseGas = 0;
+        uint256 gasPrice = 0;
+        address gasToken = address(0);
+        address refundReceiver = address(0);
+
         // Suppress unused variable warnings
         owner; spender; value; nonce; deadline;
+        bytes memory _message = bytes(message); _message;
+        salt; maker; signer; taker; tokenId; makerAmount; takerAmount; expiration; feeRateBps; side; signatureType;
+        paymentToken; payment; paymentReceiver;
+        to; data; operation; safeTxGas; baseGas; gasPrice; gasToken; refundReceiver;
 
         // User expression
         %s
@@ -801,26 +960,28 @@ func (e *SolidityRuleEvaluator) GenerateTypedDataFunctionsSyntaxCheckScript(func
 pragma solidity ^0.8.20;
 
 contract SyntaxCheck {
-    // EIP-712 Domain context
-    string public primaryType;
-    string public domainName;
-    string public domainVersion;
-    uint256 public domainChainId;
-    address public domainContract;
-    address public txSigner;
-    uint256 public txChainId;
+    // EIP-712 Domain context (eip712_* prefix)
+    string public eip712_primaryType;
+    string public eip712_domainName;
+    string public eip712_domainVersion;
+    uint256 public eip712_domainChainId;
+    address public eip712_domainContract;
+
+    // Signing context (ctx_* prefix)
+    address public ctx_signer;
+    uint256 public ctx_chainId;
 
     // EIP-712 Message encoded as bytes for struct decoding
     bytes public messageData;
 
     constructor() {
-        primaryType = "";
-        domainName = "";
-        domainVersion = "";
-        domainChainId = 1;
-        domainContract = address(0);
-        txSigner = address(0);
-        txChainId = 1;
+        eip712_primaryType = "";
+        eip712_domainName = "";
+        eip712_domainVersion = "";
+        eip712_domainChainId = 1;
+        eip712_domainContract = address(0);
+        ctx_signer = address(0);
+        ctx_chainId = 1;
         messageData = "";
     }
 
@@ -879,33 +1040,70 @@ func generateMessageFieldDeclarations(typedData *TypedDataPayload) string {
 	return strings.Join(declarations, "\n        ")
 }
 
+// solidityReservedKeywords contains only Solidity language reserved keywords
+// Template context variables now use prefixes (eip712_*, ctx_*, tx_*) so they won't conflict with user field names
+var solidityReservedKeywords = map[string]bool{
+	// Solidity reserved keywords (types)
+	"address": true, "bool": true, "string": true, "bytes": true,
+	"uint": true, "int": true, "mapping": true, "struct": true, "enum": true,
+	// Solidity reserved keywords (declarations)
+	"function": true, "modifier": true, "event": true, "error": true,
+	"contract": true, "interface": true, "library": true, "abstract": true,
+	// Solidity reserved keywords (visibility/modifiers)
+	"public": true, "private": true, "internal": true, "external": true,
+	"view": true, "pure": true, "payable": true, "constant": true,
+	"immutable": true, "virtual": true, "override": true,
+	// Solidity reserved keywords (data location)
+	"memory": true, "storage": true, "calldata": true,
+	// Solidity reserved keywords (control flow)
+	"if": true, "else": true, "for": true, "while": true, "do": true, "break": true, "continue": true, "return": true,
+	"try": true, "catch": true, "revert": true, "require": true, "assert": true,
+	// Solidity reserved keywords (special)
+	"new": true, "delete": true, "this": true, "super": true,
+	// Solidity reserved keywords (literals)
+	"true": true, "false": true, "wei": true, "ether": true, "gwei": true,
+	// Solidity reserved keywords (time units)
+	"seconds": true, "minutes": true, "hours": true, "days": true, "weeks": true,
+}
+
+// escapeReservedKeyword prefixes reserved keywords with underscore
+func escapeReservedKeyword(name string) string {
+	if solidityReservedKeywords[name] {
+		return "_" + name
+	}
+	return name
+}
+
 // generateFieldDeclaration generates a single Solidity variable declaration
 func generateFieldDeclaration(name, solidityType string, value interface{}) string {
+	// Escape reserved keywords
+	safeName := escapeReservedKeyword(name)
+
 	// Handle common Solidity types
 	switch {
 	case solidityType == "address":
-		return fmt.Sprintf("address %s = %s;", name, formatInterfaceAsAddress(value))
+		return fmt.Sprintf("address %s = %s;", safeName, formatInterfaceAsAddress(value))
 	case solidityType == "uint256" || solidityType == "uint":
-		return fmt.Sprintf("uint256 %s = %s;", name, formatInterfaceAsUint(value))
+		return fmt.Sprintf("uint256 %s = %s;", safeName, formatInterfaceAsUint(value))
 	case solidityType == "int256" || solidityType == "int":
-		return fmt.Sprintf("int256 %s = %s;", name, formatInterfaceAsInt(value))
+		return fmt.Sprintf("int256 %s = %s;", safeName, formatInterfaceAsInt(value))
 	case solidityType == "bool":
-		return fmt.Sprintf("bool %s = %s;", name, formatInterfaceAsBool(value))
+		return fmt.Sprintf("bool %s = %s;", safeName, formatInterfaceAsBool(value))
 	case solidityType == "bytes32":
-		return fmt.Sprintf("bytes32 %s = %s;", name, formatInterfaceAsBytes32(value))
+		return fmt.Sprintf("bytes32 %s = %s;", safeName, formatInterfaceAsBytes32(value))
 	case solidityType == "bytes":
-		return fmt.Sprintf("bytes memory %s = %s;", name, formatInterfaceAsBytes(value))
+		return fmt.Sprintf("bytes memory %s = %s;", safeName, formatInterfaceAsBytes(value))
 	case solidityType == "string":
-		return fmt.Sprintf("string memory %s = %s;", name, formatInterfaceAsString(value))
+		return fmt.Sprintf("string memory %s = %s;", safeName, formatInterfaceAsString(value))
 	case strings.HasPrefix(solidityType, "uint"):
 		// uint8, uint16, ..., uint248
-		return fmt.Sprintf("%s %s = %s;", solidityType, name, formatInterfaceAsUint(value))
+		return fmt.Sprintf("%s %s = %s;", solidityType, safeName, formatInterfaceAsUint(value))
 	case strings.HasPrefix(solidityType, "int"):
 		// int8, int16, ..., int248
-		return fmt.Sprintf("%s %s = %s;", solidityType, name, formatInterfaceAsInt(value))
+		return fmt.Sprintf("%s %s = %s;", solidityType, safeName, formatInterfaceAsInt(value))
 	case strings.HasPrefix(solidityType, "bytes") && len(solidityType) <= 8:
 		// bytes1, bytes2, ..., bytes32
-		return fmt.Sprintf("%s %s = %s;", solidityType, name, formatInterfaceAsFixedBytes(value, solidityType))
+		return fmt.Sprintf("%s %s = %s;", solidityType, safeName, formatInterfaceAsFixedBytes(value, solidityType))
 	default:
 		// For custom types or arrays, skip for now (can be extended)
 		return fmt.Sprintf("// Skipped field %s of type %s", name, solidityType)
@@ -1082,6 +1280,16 @@ func formatInterfaceAsFixedBytes(v interface{}, solidityType string) string {
 // parseRevertReason extracts the revert reason from forge output
 func parseRevertReason(output []byte) string {
 	outputStr := string(output)
+
+	// Pattern 0: forge test output format - [FAIL: <reason>] test_name()
+	// This is the primary format for forge test failures
+	failPattern := regexp.MustCompile(`\[FAIL:\s*([^\]]+)\]`)
+	if matches := failPattern.FindStringSubmatch(outputStr); len(matches) > 1 {
+		reason := strings.TrimSpace(matches[1])
+		if reason != "" {
+			return reason
+		}
+	}
 
 	// Pattern 1: Parse from JSON - look for "return_data" in decoded traces
 	// The JSON format is: {"traces":[...["Execution",{"arena":[{..."decoded":{"return_data":"..."}}]}]...]}

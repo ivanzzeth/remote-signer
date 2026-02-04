@@ -463,16 +463,19 @@ func (v *SolidityRuleValidator) compileSyntaxCheckScript(ctx context.Context, sc
 	)
 
 	// First, we need a foundry.toml in the temp dir
+	// Enable via_ir to avoid "Stack too deep" errors with many local variables
+	// Note: Don't delete foundry.toml after syntax check - it's needed for test execution
 	foundryToml := `[profile.default]
 src = "."
 out = "out"
 libs = []
+via_ir = true
+optimizer = false
 `
 	foundryTomlPath := filepath.Join(v.evaluator.GetTempDir(), "foundry.toml")
 	if err := os.WriteFile(foundryTomlPath, []byte(foundryToml), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write foundry.toml: %w", err)
 	}
-	defer os.Remove(foundryTomlPath)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
