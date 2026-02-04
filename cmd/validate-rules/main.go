@@ -105,6 +105,15 @@ func run() error {
 		return fmt.Errorf("failed to create Solidity evaluator: %w", err)
 	}
 
+	// Debug: Check if foundry.toml was created
+	tempDir := evaluator.GetTempDir()
+	foundryPath := filepath.Join(tempDir, "foundry.toml")
+	if _, statErr := os.Stat(foundryPath); statErr == nil {
+		log.Debug("foundry.toml exists", "path", foundryPath)
+	} else {
+		log.Error("foundry.toml does NOT exist", "path", foundryPath, "error", statErr)
+	}
+
 	// Create validator
 	validator, err := evm.NewSolidityRuleValidator(evaluator, log)
 	if err != nil {
