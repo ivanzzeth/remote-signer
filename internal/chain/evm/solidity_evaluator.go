@@ -133,11 +133,13 @@ contract RuleEvaluatorTest {
 // Context variables use prefixes to avoid conflicts with user-defined field names:
 // - eip712_* : EIP-712 domain context (eip712_primaryType, eip712_domainName, etc.)
 // - ctx_* : Signing context (ctx_chainId, ctx_signer)
-// Message fields are generated directly from typed data without prefixes (e.g., value, to, data)
+// Message fields are accessible via struct instance (e.g., order.taker, permit.value)
 const solidityTypedDataExpressionTemplate = `// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 contract RuleEvaluator {
+    {{.StructDefinition}}
+
     function run() public pure returns (bool) {
         // EIP-712 Domain context (eip712_* prefix)
         string memory eip712_primaryType = {{.PrimaryType}};
@@ -150,9 +152,8 @@ contract RuleEvaluator {
         address ctx_signer = {{.Signer}};
         uint256 ctx_chainId = {{.ChainID}};
 
-        // EIP-712 Message fields (dynamically generated based on message content)
-        // These use the original field names from the typed data message (e.g., value, to, data)
-        {{.MessageFields}}
+        // EIP-712 Message struct instance (access fields via structName.field)
+        {{.StructInstance}}
 
         // Suppress unused variable warnings
         bytes memory _eip712_primaryType = bytes(eip712_primaryType);
@@ -167,6 +168,16 @@ contract RuleEvaluator {
         // If we reach here, all require() passed
         return true;
     }
+}
+`
+
+// solidityBatchTypedDataTestTemplate is for batch testing multiple typed data rules in a single contract
+// This significantly reduces compilation time by compiling once instead of N times
+const solidityBatchTypedDataTestTemplate = `// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+contract BatchRuleEvaluatorTest {
+    {{.TestFunctions}}
 }
 `
 
@@ -268,6 +279,7 @@ func NewSolidityRuleEvaluator(cfg SolidityEvaluatorConfig, logger *slog.Logger) 
 	// Create foundry.toml for forge test to work properly
 	// Note: Don't specify solc version to let forge auto-detect from pragma
 	// Enable via_ir to avoid "Stack too deep" errors with many local variables
+	// Enable incremental compilation for better performance
 	foundryConfig := `[profile.default]
 src = "."
 test = "."
@@ -275,6 +287,7 @@ out = "out"
 libs = []
 via_ir = true
 optimizer = false
+incremental = true
 `
 	foundryConfigPath := filepath.Join(tempDir, "foundry.toml")
 	if err := os.WriteFile(foundryConfigPath, []byte(foundryConfig), 0600); err != nil {
@@ -349,8 +362,28 @@ func (e *SolidityRuleEvaluator) Evaluate(
 			return false, "", fmt.Errorf("failed to parse typed data: %w", parseErr)
 		}
 
+		// If typed_data_struct is defined, parse it and check primaryType match
+		var structDef *StructDefinition
+		if config.TypedDataStruct != "" {
+			var structErr error
+			structDef, structErr = parseStructDefinition(config.TypedDataStruct)
+			if structErr != nil {
+				return false, "", fmt.Errorf("failed to parse typed_data_struct: %w", structErr)
+			}
+
+			// Check if request's primaryType matches the struct name
+			if typedData.PrimaryType != structDef.Name {
+				// Rule doesn't apply to this primaryType, skip evaluation
+				e.logger.Debug("typed_data_struct primaryType mismatch, skipping rule",
+					"rule_struct", structDef.Name,
+					"request_primaryType", typedData.PrimaryType,
+				)
+				return false, "", nil
+			}
+		}
+
 		if config.TypedDataExpression != "" {
-			passed, reason, err = e.evaluateTypedDataExpression(ctx, config.TypedDataExpression, req, typedData)
+			passed, reason, err = e.evaluateTypedDataExpression(ctx, config.TypedDataExpression, req, typedData, structDef)
 		} else {
 			passed, reason, err = e.evaluateTypedDataFunctions(ctx, config.TypedDataFunctions, req, typedData)
 		}
@@ -499,26 +532,60 @@ func (e *SolidityRuleEvaluator) generateFunctionScript(
 }
 
 // executeScript executes the Solidity script/test and returns pass/fail with reason
-func (e *SolidityRuleEvaluator) executeScript(ctx context.Context, script string) (bool, string, error) {
+// filePathHint is an optional hint for grouping scripts from the same file (for better caching)
+func (e *SolidityRuleEvaluator) executeScript(ctx context.Context, script string, filePathHint ...string) (bool, string, error) {
 	// Calculate script hash for caching/naming
 	hash := sha256.Sum256([]byte(script))
 	hashStr := hex.EncodeToString(hash[:8]) // Use first 8 bytes for shorter filename
+	fullHashStr := hex.EncodeToString(hash[:]) // Full hash for cache key
+
+	// If filePathHint is provided, use it to create a file-grouped prefix
+	// This helps forge's incremental compilation by grouping related files
+	var filePrefix string
+	if len(filePathHint) > 0 && filePathHint[0] != "" {
+		fileHash := sha256.Sum256([]byte(filePathHint[0]))
+		filePrefix = hex.EncodeToString(fileHash[:8]) + "_"
+	}
 
 	// Determine if this is a test (contains RuleEvaluatorTest) or a script (contains RuleEvaluator)
 	isTest := strings.Contains(script, "contract RuleEvaluatorTest")
 
-	// Create script file with restricted permissions (owner-only)
+	// Check cache first
+	e.mu.RLock()
+	cachedPath, found := e.scriptCache[fullHashStr]
+	e.mu.RUnlock()
+
 	var scriptPath string
-	if isTest {
-		scriptPath = filepath.Join(e.tempDir, fmt.Sprintf("rule_%s.t.sol", hashStr))
-	} else {
-		scriptPath = filepath.Join(e.tempDir, fmt.Sprintf("rule_%s.sol", hashStr))
+	if found {
+		// Use cached script path if it still exists
+		if _, err := os.Stat(cachedPath); err == nil {
+			scriptPath = cachedPath
+			e.logger.Debug("using cached script", "script_hash", hashStr)
+		} else {
+			// Cache entry is stale, remove it
+			e.mu.Lock()
+			delete(e.scriptCache, fullHashStr)
+			e.mu.Unlock()
+			found = false
+		}
 	}
-	if err := os.WriteFile(scriptPath, []byte(script), 0600); err != nil {
-		return false, "", fmt.Errorf("failed to write script: %w", err)
+
+	// Create script file if not cached
+	if !found {
+		var err error
+		if isTest {
+			scriptPath = filepath.Join(e.tempDir, fmt.Sprintf("%srule_%s.t.sol", filePrefix, hashStr))
+		} else {
+			scriptPath = filepath.Join(e.tempDir, fmt.Sprintf("%srule_%s.sol", filePrefix, hashStr))
+		}
+		if err = os.WriteFile(scriptPath, []byte(script), 0600); err != nil {
+			return false, "", fmt.Errorf("failed to write script: %w", err)
+		}
+		// Update cache
+		e.mu.Lock()
+		e.scriptCache[fullHashStr] = scriptPath
+		e.mu.Unlock()
 	}
-	// DEBUG: Comment out to keep files for debugging
-	// defer os.Remove(scriptPath)
 
 	// Create timeout context if not already set
 	execCtx := ctx
@@ -532,18 +599,22 @@ func (e *SolidityRuleEvaluator) executeScript(ctx context.Context, script string
 	var cmd *exec.Cmd
 	if isTest {
 		// Use forge test for RuleEvaluatorTest contracts
+		// Use cache path to speed up compilation
 		cmd = exec.CommandContext(execCtx,
 			e.foundryPath, "test",
 			"--match-path", scriptPath,
 			"--match-contract", "RuleEvaluatorTest",
+			"--cache-path", filepath.Join(e.cacheDir, "forge-cache"),
 			"-vvv", // verbose for revert reasons
 		)
 	} else {
 		// Use forge script for RuleEvaluator contracts
+		// Use cache path to speed up compilation
 		cmd = exec.CommandContext(execCtx,
 			e.foundryPath, "script",
 			scriptPath,
 			"--json",
+			"--cache-path", filepath.Join(e.cacheDir, "forge-cache"),
 			"-vvv", // verbose for revert reasons
 		)
 	}
@@ -692,6 +763,11 @@ func (e *SolidityRuleEvaluator) GetFoundryPath() string {
 	return e.foundryPath
 }
 
+// GetCacheDir returns the cache directory path
+func (e *SolidityRuleEvaluator) GetCacheDir() string {
+	return e.cacheDir
+}
+
 // Helper functions
 
 func formatAddress(addr *string) string {
@@ -741,14 +817,16 @@ type forgeScriptResult struct {
 }
 
 // evaluateTypedDataExpression evaluates a Solidity expression with EIP-712 typed data context
+// If structDef is provided, it's used for field declarations instead of inferring from request
 func (e *SolidityRuleEvaluator) evaluateTypedDataExpression(
 	ctx context.Context,
 	expression string,
 	req *types.SignRequest,
 	typedData *TypedDataPayload,
+	structDef *StructDefinition,
 ) (bool, string, error) {
 	// Generate script with typed data context
-	script, err := e.generateTypedDataExpressionScript(expression, req, typedData)
+	script, err := e.generateTypedDataExpressionScript(expression, req, typedData, structDef)
 	if err != nil {
 		return false, "", fmt.Errorf("failed to generate typed data expression script: %w", err)
 	}
@@ -785,34 +863,50 @@ func (e *SolidityRuleEvaluator) evaluateTypedDataFunctions(
 }
 
 // generateTypedDataExpressionScript generates a Solidity script for TypedDataExpression mode
+// If structDef is provided, it generates a struct definition and instance variable
+// accessible via structName.field syntax (e.g., order.taker)
 func (e *SolidityRuleEvaluator) generateTypedDataExpressionScript(
 	expression string,
 	req *types.SignRequest,
 	typedData *TypedDataPayload,
+	structDef *StructDefinition,
 ) (string, error) {
-	// Generate message field declarations from the typed data message
-	messageFields := generateMessageFieldDeclarations(typedData)
+	var structDefinition string
+	var structInstance string
+
+	if structDef != nil {
+		// Generate struct definition and instance
+		structDefinition = generateStructDefinition(structDef)
+		structInstance = generateStructInstance(structDef, typedData.Message)
+	} else {
+		// Fall back to generating individual field declarations (legacy behavior)
+		// No struct definition needed
+		structDefinition = ""
+		structInstance = generateMessageFieldDeclarations(typedData)
+	}
 
 	data := struct {
-		PrimaryType    string
-		DomainName     string
-		DomainVersion  string
-		DomainChainId  string
-		DomainContract string
-		Signer         string
-		ChainID        string
-		MessageFields  string
-		Expression     string
+		PrimaryType      string
+		DomainName       string
+		DomainVersion    string
+		DomainChainId    string
+		DomainContract   string
+		Signer           string
+		ChainID          string
+		StructDefinition string
+		StructInstance   string
+		Expression       string
 	}{
-		PrimaryType:    formatString(typedData.PrimaryType),
-		DomainName:     formatString(typedData.Domain.Name),
-		DomainVersion:  formatString(typedData.Domain.Version),
-		DomainChainId:  formatDomainChainId(typedData.Domain.ChainId),
-		DomainContract: formatDomainContract(typedData.Domain.VerifyingContract),
-		Signer:         formatAddress(&req.SignerAddress),
-		ChainID:        formatChainID(req.ChainID),
-		MessageFields:  messageFields,
-		Expression:     expression,
+		PrimaryType:      formatString(typedData.PrimaryType),
+		DomainName:       formatString(typedData.Domain.Name),
+		DomainVersion:    formatString(typedData.Domain.Version),
+		DomainChainId:    formatDomainChainId(typedData.Domain.ChainId),
+		DomainContract:   formatDomainContract(typedData.Domain.VerifyingContract),
+		Signer:           formatAddress(&req.SignerAddress),
+		ChainID:          formatChainID(req.ChainID),
+		StructDefinition: structDefinition,
+		StructInstance:   structInstance,
+		Expression:       expression,
 	}
 
 	tmpl, err := template.New("typedDataExpression").Parse(solidityTypedDataExpressionTemplate)
@@ -873,11 +967,31 @@ func (e *SolidityRuleEvaluator) generateTypedDataFunctionsScript(
 }
 
 // GenerateTypedDataExpressionSyntaxCheckScript generates a syntax check script for TypedDataExpression mode
+// This version supports struct instance syntax when structDef is provided
 func (e *SolidityRuleEvaluator) GenerateTypedDataExpressionSyntaxCheckScript(expression string) string {
-	return fmt.Sprintf(`// SPDX-License-Identifier: MIT
+	// For syntax checking without struct definition, use legacy individual field declarations
+	return e.GenerateTypedDataExpressionSyntaxCheckScriptWithStruct(expression, nil)
+}
+
+// GenerateTypedDataExpressionSyntaxCheckScriptWithStruct generates a syntax check script with struct support
+func (e *SolidityRuleEvaluator) GenerateTypedDataExpressionSyntaxCheckScriptWithStruct(expression string, structDef *StructDefinition) string {
+	if structDef != nil {
+		// Generate struct-based syntax check
+		structDefStr := generateStructDefinition(structDef)
+		instanceName := strings.ToLower(structDef.Name[:1]) + structDef.Name[1:]
+
+		// Generate default struct instance
+		var fieldDefaults []string
+		for _, field := range structDef.Fields {
+			fieldDefaults = append(fieldDefaults, fmt.Sprintf("            %s: %s", field.Name, getDefaultValue(field.Type)))
+		}
+
+		return fmt.Sprintf(`// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 contract SyntaxCheck {
+    %s
+
     function run() public pure returns (bool) {
         // EIP-712 Domain context (eip712_* prefix)
         string memory eip712_primaryType = "";
@@ -897,53 +1011,120 @@ contract SyntaxCheck {
         eip712_domainChainId; eip712_domainContract; ctx_signer; ctx_chainId;
         _eip712_primaryType; _eip712_domainName; _eip712_domainVersion;
 
-        // Common EIP-712 message fields for syntax check
-        // These use original field names from typed data (no prefix needed)
+        // EIP-712 Message struct instance
+        %s memory %s = %s({
+%s
+        });
 
-        // Permit fields
-        address owner = address(0);
-        address spender = address(0);
-        uint256 value = 0;
-        uint256 nonce = 0;
-        uint256 deadline = 0;
+        // User expression
+        %s
 
-        // ClobAuth fields
-        string memory message = "";
+        return true;
+    }
+}
+`, structDefStr, structDef.Name, instanceName, structDef.Name, strings.Join(fieldDefaults, ",\n"), expression)
+	}
 
-        // Order fields (Polymarket/Opinion CTF Exchange)
-        uint256 salt = 0;
-        address maker = address(0);
-        address signer = address(0);
-        address taker = address(0);
-        uint256 tokenId = 0;
-        uint256 makerAmount = 0;
-        uint256 takerAmount = 0;
-        uint256 expiration = 0;
-        uint256 feeRateBps = 0;
-        uint256 side = 0;
-        uint256 signatureType = 0;
+	// Legacy: Generate with common predefined fields for backward compatibility
+	return fmt.Sprintf(`// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
 
-        // CreateProxy fields (Polymarket Safe Factory)
-        address paymentToken = address(0);
-        uint256 payment = 0;
-        address paymentReceiver = address(0);
+contract SyntaxCheck {
+    // Common struct definitions for syntax checking
+    struct Order {
+        uint256 salt;
+        address maker;
+        address signer;
+        address taker;
+        uint256 tokenId;
+        uint256 makerAmount;
+        uint256 takerAmount;
+        uint256 expiration;
+        uint256 nonce;
+        uint256 feeRateBps;
+        uint8 side;
+        uint8 signatureType;
+    }
 
-        // SafeTx fields
-        address to = address(0);
-        bytes memory data = "";
-        uint256 operation = 0;
-        uint256 safeTxGas = 0;
-        uint256 baseGas = 0;
-        uint256 gasPrice = 0;
-        address gasToken = address(0);
-        address refundReceiver = address(0);
+    struct ClobAuth {
+        address address_;
+        string timestamp;
+        uint256 nonce;
+        string message_;
+    }
+
+    struct CreateProxy {
+        address paymentToken;
+        uint256 payment;
+        address paymentReceiver;
+    }
+
+    struct SafeTx {
+        address to;
+        uint256 value;
+        bytes data;
+        uint8 operation;
+        uint256 safeTxGas;
+        uint256 baseGas;
+        uint256 gasPrice;
+        address gasToken;
+        address refundReceiver;
+        uint256 nonce;
+    }
+
+    struct Permit {
+        address owner;
+        address spender;
+        uint256 value;
+        uint256 nonce;
+        uint256 deadline;
+    }
+
+    function run() public pure returns (bool) {
+        // EIP-712 Domain context (eip712_* prefix)
+        string memory eip712_primaryType = "";
+        string memory eip712_domainName = "";
+        string memory eip712_domainVersion = "";
+        uint256 eip712_domainChainId = 1;
+        address eip712_domainContract = address(0);
+
+        // Signing context (ctx_* prefix)
+        address ctx_signer = address(0);
+        uint256 ctx_chainId = 1;
 
         // Suppress unused variable warnings
-        owner; spender; value; nonce; deadline;
-        bytes memory _message = bytes(message); _message;
-        salt; maker; signer; taker; tokenId; makerAmount; takerAmount; expiration; feeRateBps; side; signatureType;
-        paymentToken; payment; paymentReceiver;
-        to; data; operation; safeTxGas; baseGas; gasPrice; gasToken; refundReceiver;
+        bytes memory _eip712_primaryType = bytes(eip712_primaryType);
+        bytes memory _eip712_domainName = bytes(eip712_domainName);
+        bytes memory _eip712_domainVersion = bytes(eip712_domainVersion);
+        eip712_domainChainId; eip712_domainContract; ctx_signer; ctx_chainId;
+        _eip712_primaryType; _eip712_domainName; _eip712_domainVersion;
+
+        // Common struct instances for syntax checking
+        Order memory order = Order({
+            salt: 0, maker: address(0), signer: address(0), taker: address(0),
+            tokenId: 0, makerAmount: 0, takerAmount: 0, expiration: 0,
+            nonce: 0, feeRateBps: 0, side: 0, signatureType: 0
+        });
+
+        ClobAuth memory clobAuth = ClobAuth({
+            address_: address(0), timestamp: "", nonce: 0, message_: ""
+        });
+
+        CreateProxy memory createProxy = CreateProxy({
+            paymentToken: address(0), payment: 0, paymentReceiver: address(0)
+        });
+
+        SafeTx memory safeTx = SafeTx({
+            to: address(0), value: 0, data: "", operation: 0, safeTxGas: 0,
+            baseGas: 0, gasPrice: 0, gasToken: address(0), refundReceiver: address(0), nonce: 0
+        });
+
+        Permit memory permit = Permit({
+            owner: address(0), spender: address(0), value: 0, nonce: 0, deadline: 0
+        });
+
+        // Suppress unused struct warnings
+        order; clobAuth; createProxy; safeTx; permit;
 
         // User expression
         %s
@@ -1024,16 +1205,28 @@ func generateMessageFieldDeclarations(typedData *TypedDataPayload) string {
 	// Get type definitions for the primary type
 	fields := typedData.Types[typedData.PrimaryType]
 
-	for _, field := range fields {
-		value, exists := typedData.Message[field.Name]
-		if !exists {
-			continue
-		}
+	if len(fields) > 0 {
+		// Use type definitions when available
+		for _, field := range fields {
+			value, exists := typedData.Message[field.Name]
+			if !exists {
+				continue
+			}
 
-		// Generate declaration based on field type
-		decl := generateFieldDeclaration(field.Name, field.Type, value)
-		if decl != "" {
-			declarations = append(declarations, decl)
+			// Generate declaration based on field type
+			decl := generateFieldDeclaration(field.Name, field.Type, value)
+			if decl != "" {
+				declarations = append(declarations, decl)
+			}
+		}
+	} else {
+		// Fallback: infer types from message values when Types is missing
+		for name, value := range typedData.Message {
+			inferredType := inferSolidityType(value)
+			decl := generateFieldDeclaration(name, inferredType, value)
+			if decl != "" {
+				declarations = append(declarations, decl)
+			}
 		}
 	}
 

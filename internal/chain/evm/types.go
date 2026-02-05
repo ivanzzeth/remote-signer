@@ -122,14 +122,38 @@ type SolidityExpressionConfig struct {
 
 	// TypedDataExpression is Solidity code for EIP-712 typed data validation (Mode 3)
 	// Available variables:
-	//   - string primaryType       (primary type name, e.g., "Permit")
-	//   - string domainName        (domain name)
-	//   - string domainVersion     (domain version)
-	//   - uint256 domainChainId    (domain chain ID)
-	//   - address domainContract   (verifying contract address)
-	//   - Plus message fields as defined by the primary type
+	//   - string eip712_primaryType       (primary type name, e.g., "Permit")
+	//   - string eip712_domainName        (domain name)
+	//   - string eip712_domainVersion     (domain version)
+	//   - uint256 eip712_domainChainId    (domain chain ID)
+	//   - address eip712_domainContract   (verifying contract address)
+	//   - Plus message fields as defined by TypedDataTypes (or inferred from request)
 	// Example: require(value <= 1000000e6, "permit value exceeds 1M limit");
 	TypedDataExpression string `json:"typed_data_expression,omitempty"`
+
+	// TypedDataStruct defines the expected EIP-712 message structure using Solidity struct syntax
+	// When specified, the rule will:
+	//   1. Only match requests where primaryType matches the struct name (or TypedDataPrimaryType if set)
+	//   2. Generate a struct instance variable with lowercase name (e.g., Order -> order)
+	//   3. Access fields using struct.field syntax (e.g., order.taker, order.feeRateBps)
+	// Example:
+	//   typed_data_struct: |
+	//     struct Order {
+	//         uint256 salt;
+	//         address maker;
+	//         address taker;
+	//         uint256 feeRateBps;
+	//     }
+	//   typed_data_expression: |
+	//     require(order.taker == address(0), "taker must be zero address");
+	//     require(order.feeRateBps <= 1000, "fee exceeds 10%");
+	TypedDataStruct string `json:"typed_data_struct,omitempty"`
+
+	// TypedDataPrimaryType specifies the expected EIP-712 primaryType to match
+	// If not set but TypedDataStruct is defined, uses the struct name as primaryType
+	// The lowercase form of this name is used as the struct instance variable name
+	// Example: "Order" -> instance variable "order" accessible in expressions
+	TypedDataPrimaryType string `json:"typed_data_primary_type,omitempty"`
 
 	// TypedDataFunctions contains struct definitions and validation functions (Mode 4)
 	// Define structs matching EIP-712 types and functions to validate them
