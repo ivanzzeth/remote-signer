@@ -54,6 +54,13 @@ rules:
     chain_id: "137"
     description: "Validate ClobAuth signatures for Polymarket API key authentication"
     config:
+      typed_data_struct: |
+        struct ClobAuth {
+            address address_;  // underscore suffix to escape Solidity reserved keyword, maps to message key "address"
+            string timestamp;
+            uint256 nonce;
+            string message;
+        }
       typed_data_expression: |
         // Domain validation for ClobAuth
         require(
@@ -65,10 +72,9 @@ rules:
           "invalid domain version"
         );
 
-        // Message validation
-        // The message field must be the standard attestation message
+        // Message validation via struct instance
         require(
-          keccak256(bytes(message)) == keccak256(bytes("This message attests that I control the given wallet")),
+          keccak256(bytes(clobAuth.message)) == keccak256(bytes("This message attests that I control the given wallet")),
           "invalid attestation message"
         );
       sign_type_filter: "typed_data"
@@ -116,6 +122,21 @@ rules:
     chain_id: "137"
     description: "Validate Polymarket CTF Exchange order signatures"
     config:
+      typed_data_struct: |
+        struct Order {
+            uint256 salt;
+            address maker;
+            address signer;
+            address taker;
+            uint256 tokenId;
+            uint256 makerAmount;
+            uint256 takerAmount;
+            uint256 expiration;
+            uint256 nonce;
+            uint256 feeRateBps;
+            uint8 side;
+            uint8 signatureType;
+        }
       typed_data_expression: |
         // Domain validation
         require(
@@ -127,12 +148,12 @@ rules:
           "invalid domain version"
         );
 
-        // Order validation
+        // Order validation via struct instance
         // taker must be zero address for public orders (anyone can fill)
-        require(taker == address(0), "taker must be zero address");
+        require(order.taker == address(0), "taker must be zero address");
 
         // Fee validation: max 10% (1000 basis points)
-        require(feeRateBps <= 1000, "fee exceeds 10%");
+        require(order.feeRateBps <= 1000, "fee exceeds 10%");
       sign_type_filter: "typed_data"
       description: "CTF Exchange order signing with fee limits and zero taker"
       test_cases:
@@ -196,6 +217,12 @@ rules:
     chain_id: "137"
     description: "Validate Safe wallet creation signature for Polymarket"
     config:
+      typed_data_struct: |
+        struct CreateProxy {
+            address paymentToken;
+            uint256 payment;
+            address paymentReceiver;
+        }
       typed_data_expression: |
         // Domain validation for Safe Factory
         require(
@@ -205,10 +232,10 @@ rules:
         // Note: No version field in Polymarket Safe Factory domain
         require(eip712_domainChainId == 137, "must be on Polygon");
 
-        // CreateProxy validation - should be zero payment (free creation)
-        require(paymentToken == address(0), "payment token must be zero");
-        require(payment == 0, "payment must be zero");
-        require(paymentReceiver == address(0), "payment receiver must be zero");
+        // CreateProxy validation via struct instance - should be zero payment (free creation)
+        require(createProxy.paymentToken == address(0), "payment token must be zero");
+        require(createProxy.payment == 0, "payment must be zero");
+        require(createProxy.paymentReceiver == address(0), "payment receiver must be zero");
       sign_type_filter: "typed_data"
       description: "Safe wallet creation with zero payment"
       test_cases:
@@ -252,13 +279,27 @@ rules:
     chain_id: "137"
     description: "Validate Safe wallet transaction signatures on Polygon"
     config:
+      typed_data_struct: |
+        struct SafeTx {
+            address to;
+            uint256 value;
+            bytes data;
+            uint8 operation;
+            uint256 safeTxGas;
+            uint256 baseGas;
+            uint256 gasPrice;
+            address gasToken;
+            address refundReceiver;
+            uint256 nonce;
+        }
       typed_data_expression: |
         // Domain validation for Safe on Polygon
         require(eip712_domainChainId == 137, "SafeTx must be on Polygon");
         // verifyingContract is the Safe wallet address (validated externally)
 
         // Value must be 0 for token operations (no native token transfer)
-        require(value == 0, "ETH value must be zero");
+        // Access via struct instance
+        require(safeTx.value == 0, "ETH value must be zero");
       sign_type_filter: "typed_data"
       description: "Safe transaction signing with value=0 constraint"
       test_cases:

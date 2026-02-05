@@ -181,6 +181,9 @@ func validateFile(ctx context.Context, filePath string, validator *evm.SolidityR
 	passed := 0
 	failed := 0
 
+	// Collect all rules that need validation
+	var rulesToValidate []*types.Rule
+	var ruleIndices []int
 	for i, ruleCfg := range ruleFile.Rules {
 		result := ValidationFileResult{
 			RuleName: ruleCfg.Name,
@@ -217,28 +220,64 @@ func validateFile(ctx context.Context, filePath string, validator *evm.SolidityR
 			continue
 		}
 
-		// Validate rule
-		validationResult, err := validator.ValidateRule(ctx, rule)
+		rulesToValidate = append(rulesToValidate, rule)
+		ruleIndices = append(ruleIndices, i)
+	}
+
+	// Batch validate all rules in the file
+	if len(rulesToValidate) > 0 {
+		batchResults, err := validator.ValidateRulesBatch(ctx, rulesToValidate)
 		if err != nil {
-			result.Valid = false
-			result.Error = err.Error()
-			results = append(results, result)
-			failed++
-			continue
-		}
-
-		result.Valid = validationResult.Valid
-		result.SyntaxError = validationResult.SyntaxError
-		result.TestCaseResults = validationResult.TestCaseResults
-		result.FailedTestCases = validationResult.FailedTestCases
-
-		if result.Valid {
-			passed++
+			// Fallback to individual validation if batch fails
+			log.Warn("batch validation failed, falling back to individual validation", "error", err)
+			for _, rule := range rulesToValidate {
+				validationResult, err := validator.ValidateRule(ctx, rule)
+				if err != nil {
+					result := ValidationFileResult{
+						RuleName: rule.Name,
+						RuleType: string(rule.Type),
+						Valid:    false,
+						Error:    err.Error(),
+					}
+					results = append(results, result)
+					failed++
+					continue
+				}
+				result := ValidationFileResult{
+					RuleName:        rule.Name,
+					RuleType:        string(rule.Type),
+					Valid:           validationResult.Valid,
+					SyntaxError:     validationResult.SyntaxError,
+					TestCaseResults: validationResult.TestCaseResults,
+					FailedTestCases: validationResult.FailedTestCases,
+				}
+				if result.Valid {
+					passed++
+				} else {
+					failed++
+				}
+				results = append(results, result)
+			}
 		} else {
-			failed++
+		// Use batch results
+		for idx, validationResult := range batchResults.Results {
+			rule := rulesToValidate[idx]
+				result := ValidationFileResult{
+					RuleName:        rule.Name,
+					RuleType:        string(rule.Type),
+					Valid:           validationResult.Valid,
+					SyntaxError:     validationResult.SyntaxError,
+					TestCaseResults: validationResult.TestCaseResults,
+					FailedTestCases: validationResult.FailedTestCases,
+				}
+				if result.Valid {
+					passed++
+				} else {
+					failed++
+				}
+				results = append(results, result)
+			}
 		}
-
-		results = append(results, result)
 	}
 
 	return results, passed, failed, nil
