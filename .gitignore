@@ -14,6 +14,7 @@
 # Compiled binaries (project-specific)
 /remote-signer
 /remote-signer-tui
+/audit-monitor
 /cmd/remote-signer/remote-signer
 /cmd/tui/tui
 

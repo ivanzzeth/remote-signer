@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"golang.org/x/term"
 
 	"github.com/ivanzzeth/remote-signer/pkg/client"
 	"github.com/ivanzzeth/remote-signer/tui"
@@ -16,9 +18,8 @@ import (
 func main() {
 	// Parse flags
 	var (
-		baseURL    = flag.String("url", "http://localhost:8548", "Remote signer service URL")
-		apiKeyID   = flag.String("api-key-id", "", "API key ID for authentication")
-		privateKey = flag.String("private-key", "", "Ed25519 private key in hex or base64 (or set REMOTE_SIGNER_PRIVATE_KEY env)")
+		baseURL  = flag.String("url", "http://localhost:8548", "Remote signer service URL")
+		apiKeyID = flag.String("api-key-id", "", "API key ID for authentication")
 	)
 	flag.Parse()
 
@@ -31,12 +32,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	if *privateKey == "" {
-		*privateKey = os.Getenv("REMOTE_SIGNER_PRIVATE_KEY")
-	}
-	if *privateKey == "" {
-		fmt.Fprintln(os.Stderr, "Error: Private key is required. Use -private-key flag or set REMOTE_SIGNER_PRIVATE_KEY environment variable.")
-		os.Exit(1)
+	// Resolve private key: env var first, then interactive prompt
+	privateKey := os.Getenv("REMOTE_SIGNER_PRIVATE_KEY")
+	if privateKey == "" {
+		key, err := readPrivateKeyFromPrompt()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading private key: %v\n", err)
+			os.Exit(1)
+		}
+		privateKey = key
 	}
 
 	if *baseURL == "" {
@@ -51,10 +55,10 @@ func main() {
 		BaseURL:  *baseURL,
 		APIKeyID: *apiKeyID,
 	}
-	if isHexKey(*privateKey) {
-		cfg.PrivateKeyHex = *privateKey
+	if isHexKey(privateKey) {
+		cfg.PrivateKeyHex = privateKey
 	} else {
-		cfg.PrivateKeyBase64 = *privateKey
+		cfg.PrivateKeyBase64 = privateKey
 	}
 
 	// Create client
@@ -77,6 +81,22 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// readPrivateKeyFromPrompt securely reads the private key from the terminal
+// without echoing characters.
+func readPrivateKeyFromPrompt() (string, error) {
+	fmt.Fprint(os.Stderr, "Enter Ed25519 private key (hex or base64): ")
+	keyBytes, err := term.ReadPassword(int(syscall.Stdin))
+	fmt.Fprintln(os.Stderr) // newline after hidden input
+	if err != nil {
+		return "", fmt.Errorf("failed to read from terminal: %w", err)
+	}
+	key := strings.TrimSpace(string(keyBytes))
+	if key == "" {
+		return "", fmt.Errorf("private key cannot be empty")
+	}
+	return key, nil
 }
 
 // isHexKey checks if the key appears to be hex encoded (64+ hex characters)

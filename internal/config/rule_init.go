@@ -177,7 +177,7 @@ func (i *RuleInitializer) loadRulesFromFile(fileCfg RuleConfig) ([]RuleConfig, e
 	}
 
 	// Expand environment variables
-	expandedData := expandEnvWithDefaults(string(data))
+	expandedData := ExpandEnvWithDefaults(string(data))
 
 	// Parse YAML
 	var fileContent struct {

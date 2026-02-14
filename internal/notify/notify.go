@@ -4,15 +4,17 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/ivanzzeth/remote-signer/internal/logger"
 	"github.com/rs/zerolog"
 )
 
-// Channel 指定发送到哪些具体渠道
+// Channel specifies which concrete channels to deliver to.
 type Channel struct {
 	Slack    []string `yaml:"slack,omitempty"`    // Slack channel IDs
 	Pushover []string `yaml:"pushover,omitempty"` // Pushover user keys
+	Webhook  []string `yaml:"webhook,omitempty"`  // Webhook URLs
 }
 
 // SlackConfig Slack配置
@@ -31,10 +33,18 @@ type PushoverConfig struct {
 	RetryDelay int  `yaml:"retry_delay"`
 }
 
-// Config 通知服务配置
+// WebhookConfig configures the generic webhook notification channel.
+type WebhookConfig struct {
+	Enabled bool              `yaml:"enabled"`
+	Headers map[string]string `yaml:"headers,omitempty"` // e.g. Authorization: Bearer ...
+	Timeout time.Duration     `yaml:"timeout,omitempty"` // HTTP client timeout
+}
+
+// Config is the root notification service configuration.
 type Config struct {
 	Slack    *SlackConfig    `yaml:"slack,omitempty"`
 	Pushover *PushoverConfig `yaml:"pushover,omitempty"`
+	Webhook  *WebhookConfig  `yaml:"webhook,omitempty"`
 }
 
 // notifyMessage 内部消息结构
@@ -50,6 +60,7 @@ type notifyMessage struct {
 type NotifyService struct {
 	slackClient    *SlackClient
 	pushoverClient *PushoverClient
+	webhookClient  *WebhookClient
 	logger         zerolog.Logger
 
 	// 异步发送相关
@@ -114,6 +125,20 @@ func NewNotifyService(cfg *Config) (*NotifyService, error) {
 		}
 		service.pushoverClient = pushoverClient
 		log.Debug().Msg("Pushover client initialized")
+	}
+
+	// Initialize Webhook client
+	if cfg.Webhook != nil && cfg.Webhook.Enabled {
+		timeout := cfg.Webhook.Timeout
+		if timeout == 0 {
+			timeout = 10 * time.Second
+		}
+		webhookClient, err := NewWebhookClient(timeout, cfg.Webhook.Headers)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create webhook client: %w", err)
+		}
+		service.webhookClient = webhookClient
+		log.Debug().Msg("Webhook client initialized")
 	}
 
 	return service, nil
@@ -214,6 +239,24 @@ func (n *NotifyService) sendSync(channel *Channel, message string, priority int,
 				n.logger.Warn().
 					Err(err).
 					Msg("Failed to send to Pushover users")
+			}
+		}
+	}
+
+	// Send to Webhook URLs
+	if len(channel.Webhook) > 0 {
+		if n.webhookClient == nil {
+			n.logger.Warn().Msg("Webhook client not initialized, skipping webhook URLs")
+		} else {
+			if err := n.webhookClient.SendToURLs(channel.Webhook, message); err != nil {
+				n.logger.Warn().
+					Err(err).
+					Int("url_count", len(channel.Webhook)).
+					Msg("Failed to send to webhook URLs")
+			} else {
+				n.logger.Info().
+					Int("url_count", len(channel.Webhook)).
+					Msg("Successfully sent notification to webhook URLs")
 			}
 		}
 	}

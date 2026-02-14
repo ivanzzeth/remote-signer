@@ -16,6 +16,7 @@ import (
 
 	"github.com/ivanzzeth/remote-signer/internal/api"
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
+	"github.com/ivanzzeth/remote-signer/internal/audit"
 	"github.com/ivanzzeth/remote-signer/internal/chain"
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/config"
@@ -227,8 +228,9 @@ func run() error {
 	defer cancel()
 
 	var notifier service.Notifier
+	var notifyService *notify.NotifyService // kept at function scope for audit monitor
 	if notifyEnabled(&cfg.Notify) {
-		notifyService, err := notify.NewNotifyService(&cfg.Notify)
+		notifyService, err = notify.NewNotifyService(&cfg.Notify)
 		if err != nil {
 			return fmt.Errorf("failed to create notify service: %w", err)
 		}
@@ -251,6 +253,16 @@ func run() error {
 			return fmt.Errorf("failed to create noop notifier: %w", err)
 		}
 		log.Info("Notification service disabled")
+	}
+
+	// Start audit monitor (background anomaly detection)
+	if cfg.AuditMonitor.Enabled && notifyService != nil {
+		auditMonitor, err := audit.NewMonitor(auditRepo, notifyService, &cfg.NotifyChannel, cfg.AuditMonitor, log)
+		if err != nil {
+			return fmt.Errorf("failed to create audit monitor: %w", err)
+		}
+		auditMonitor.Start(ctx)
+		defer auditMonitor.Stop()
 	}
 
 	// Initialize rule generator
@@ -393,6 +405,9 @@ func notifyEnabled(cfg *notify.Config) bool {
 		return true
 	}
 	if cfg.Pushover != nil && cfg.Pushover.Enabled {
+		return true
+	}
+	if cfg.Webhook != nil && cfg.Webhook.Enabled {
 		return true
 	}
 	return false

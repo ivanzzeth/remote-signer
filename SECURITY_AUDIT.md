@@ -311,6 +311,64 @@ os.WriteFile(scriptPath, ..., 0600)  // Owner-only file
 
 ---
 
+## Automated Security Tooling
+
+To prevent regressions and discover new vulnerabilities continuously, the following automated checks are in place. All run locally (no external CI/CD required).
+
+### Pre-Commit Checks (Git Hooks)
+
+```bash
+# Install: ./scripts/install-hooks.sh
+gosec ./...          # Go static security analysis
+govulncheck ./...    # Dependency CVE scanning
+go vet ./...         # Code correctness
+```
+
+### Periodic Scanning (Cron)
+
+```bash
+# Run: ./scripts/security-audit.sh
+# Schedule: daily or weekly via cron
+govulncheck ./...                      # Go dependency CVEs
+gosec ./...                            # Static analysis
+trivy fs .                             # Filesystem vulnerability scan
+trivy image remote-signer:latest       # Docker image CVEs
+```
+
+### Configuration Validation
+
+```bash
+# Run: ./scripts/config-check.sh
+# Validates: no plaintext secrets, TLS enabled, nonce_required=true, sane rate limits
+```
+
+### Fuzz Testing
+
+```bash
+# Auth middleware: go test -fuzz=FuzzAuthMiddleware -fuzztime=5m ./internal/api/middleware/
+# Sign requests: go test -fuzz=FuzzSignRequestParsing -fuzztime=5m ./internal/api/handler/
+# Rule engine:   go test -fuzz=FuzzRuleEvaluation -fuzztime=5m ./internal/chain/evm/
+```
+
+### Adversarial E2E Tests
+
+```bash
+# Run: go test -tags=e2e -run TestSecurity ./e2e/...
+# Covers: replay attacks, auth bypass, rule engine bypass, privilege escalation, race conditions
+```
+
+### Runtime Monitoring
+
+```bash
+# Run: ./scripts/audit-monitor.sh (via cron, hourly)
+# Detects: brute-force auth, rule probing, off-hours activity, DoS patterns
+# Alerts via: Slack/Pushover (existing notification channels)
+```
+
+See `docs/SECURITY_REVIEW.md` § "Security Automation Plan" for full details.
+
+---
+
 ## Changelog
 
 | Date | Issue | Action |
@@ -326,4 +384,5 @@ os.WriteFile(scriptPath, ..., 0600)  // Owner-only file
 | 2026-01-15 | Rate limiter bug | **FIXED**: Changed to 5*time.Minute |
 | 2026-01-15 | Temp permissions | **FIXED**: Changed to 0700/0600 |
 | 2026-01-15 | Docker security | **ADDED**: Resource limits + security options |
+| 2026-02-14 | Security automation | **ADDED**: Git hooks, fuzz tests, adversarial E2E, scanning scripts, runtime monitoring |
 

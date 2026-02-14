@@ -54,6 +54,13 @@ notify:
     expire: 300      # seconds until notification expires
     max_retries: 3   # max HTTP request retries
     retry_delay: 1   # initial retry delay in seconds
+  webhook:
+    enabled: false
+    # Optional custom headers sent with every webhook request
+    headers:
+      Authorization: "Bearer ${WEBHOOK_AUTH_TOKEN}"
+    # HTTP client timeout (default: 10s)
+    timeout: "10s"
 
 # Notification channels for approval requests
 notify_channels:
@@ -61,6 +68,19 @@ notify_channels:
     - "you_slack_channel"  # Slack channel ID
   pushover:
     - "user_key_here"  # Pushover user key
+  webhook:
+    - "https://example.com/webhook"  # Webhook URL
+
+# Background audit monitor — scans audit records for anomaly patterns
+# and sends notifications when thresholds are exceeded.
+audit_monitor:
+  enabled: false
+  interval: "1h"        # scan interval
+  lookback_hours: 1     # hours to look back per scan
+  # Anomaly thresholds (per source per lookback window)
+  auth_failure_threshold: 5       # auth failures per hour
+  blocklist_reject_threshold: 3   # sign rejections per hour
+  high_freq_threshold: 100        # requests per hour
 
 security:
   # Maximum age of signed requests (prevents replay attacks)
