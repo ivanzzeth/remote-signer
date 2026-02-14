@@ -771,7 +771,7 @@ func TestIntegration_TypedDataExpression_PermitValidation(t *testing.T) {
 				SignerAddress: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4",
 			}
 
-			passed, reason, err := evaluator.evaluateTypedDataExpression(context.Background(), expression, req, typedData)
+			passed, reason, err := evaluator.evaluateTypedDataExpression(context.Background(), expression, req, typedData, nil)
 			require.NoError(t, err)
 			assert.Equal(t, tt.expectPass, passed, "pass/fail mismatch")
 
@@ -854,7 +854,7 @@ func TestIntegration_TypedDataExpression_DomainValidation(t *testing.T) {
 				SignerAddress: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4",
 			}
 
-			passed, reason, err := evaluator.evaluateTypedDataExpression(context.Background(), expression, req, typedData)
+			passed, reason, err := evaluator.evaluateTypedDataExpression(context.Background(), expression, req, typedData, nil)
 			require.NoError(t, err)
 			assert.Equal(t, tt.expectPass, passed, "pass/fail mismatch")
 
@@ -1105,5 +1105,449 @@ func TestIntegration_TypedDataExpression_Evaluate(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, passed, "should reject for 2 tokens")
 	assert.Contains(t, reason, "exceeds limit")
+}
+
+// =============================================================================
+// Batch Evaluation Integration Tests
+// =============================================================================
+
+// TestIntegration_BatchEvaluate_MultipleTypedDataRules tests batch evaluation with multiple rules
+func TestIntegration_BatchEvaluate_MultipleTypedDataRules(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	evaluator, err := NewSolidityRuleEvaluator(SolidityEvaluatorConfig{
+		Timeout: 60 * time.Second,
+	}, logger)
+	require.NoError(t, err)
+
+	// Rule 1: Value limit
+	config1 := SolidityExpressionConfig{
+		TypedDataExpression: `require(value <= 1000000000000000000, "exceeds 1 token limit");`,
+		SignTypeFilter:      "typed_data",
+	}
+	configBytes1, _ := json.Marshal(config1)
+
+	// Rule 2: Different value limit
+	config2 := SolidityExpressionConfig{
+		TypedDataExpression: `require(value <= 500000000000000000, "exceeds 0.5 token limit");`,
+		SignTypeFilter:      "typed_data",
+	}
+	configBytes2, _ := json.Marshal(config2)
+
+	// Rule 3: Will pass (very high limit)
+	config3 := SolidityExpressionConfig{
+		TypedDataExpression: `require(value <= 10000000000000000000, "exceeds 10 token limit");`,
+		SignTypeFilter:      "typed_data",
+	}
+	configBytes3, _ := json.Marshal(config3)
+
+	rules := []*types.Rule{
+		{ID: "rule1", Config: configBytes1, Mode: types.RuleModeWhitelist},
+		{ID: "rule2", Config: configBytes2, Mode: types.RuleModeWhitelist},
+		{ID: "rule3", Config: configBytes3, Mode: types.RuleModeWhitelist},
+	}
+
+	// Create typed data with value 0.7 tokens
+	typedData := &TypedDataPayload{
+		PrimaryType: "Permit",
+		Domain: TypedDataDomain{
+			Name:    "TestToken",
+			Version: "1",
+		},
+		Message: map[string]interface{}{
+			"value": "700000000000000000", // 0.7 tokens
+		},
+	}
+	evmPayload := EVMSignPayload{TypedData: typedData}
+	payload, _ := json.Marshal(evmPayload)
+
+	req := &types.SignRequest{
+		ChainID:       "1",
+		SignerAddress: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4",
+		SignType:      "typed_data",
+		Payload:       payload,
+	}
+
+	results, err := evaluator.EvaluateBatch(context.Background(), rules, req, nil)
+	require.NoError(t, err)
+	require.Len(t, results, 3)
+
+	// Rule 1: 0.7 <= 1.0, should pass
+	assert.True(t, results[0].Passed, "rule1 should pass (0.7 <= 1.0)")
+	assert.False(t, results[0].Skipped)
+
+	// Rule 2: 0.7 > 0.5, should fail
+	assert.False(t, results[1].Passed, "rule2 should fail (0.7 > 0.5)")
+	assert.False(t, results[1].Skipped)
+	assert.Contains(t, results[1].Reason, "exceeds 0.5 token limit")
+
+	// Rule 3: 0.7 <= 10, should pass
+	assert.True(t, results[2].Passed, "rule3 should pass (0.7 <= 10)")
+	assert.False(t, results[2].Skipped)
+}
+
+// TestIntegration_BatchEvaluate_MixedSkippedAndApplicable tests batch with some rules skipped
+func TestIntegration_BatchEvaluate_MixedSkippedAndApplicable(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	evaluator, err := NewSolidityRuleEvaluator(SolidityEvaluatorConfig{
+		Timeout: 60 * time.Second,
+	}, logger)
+	require.NoError(t, err)
+
+	// Rule 1: Will be skipped (SignTypeFilter mismatch)
+	config1 := SolidityExpressionConfig{
+		TypedDataExpression: `require(value <= 100, "limit");`,
+		SignTypeFilter:      "personal_sign", // Won't match typed_data
+	}
+	configBytes1, _ := json.Marshal(config1)
+
+	// Rule 2: Will be evaluated
+	config2 := SolidityExpressionConfig{
+		TypedDataExpression: `require(value <= 1000000000000000000, "exceeds limit");`,
+		SignTypeFilter:      "typed_data",
+	}
+	configBytes2, _ := json.Marshal(config2)
+
+	rules := []*types.Rule{
+		{ID: "rule1", Config: configBytes1, Mode: types.RuleModeWhitelist},
+		{ID: "rule2", Config: configBytes2, Mode: types.RuleModeWhitelist},
+	}
+
+	typedData := &TypedDataPayload{
+		PrimaryType: "Permit",
+		Domain:      TypedDataDomain{Name: "Test", Version: "1"},
+		Message:     map[string]interface{}{"value": "500000000000000000"},
+	}
+	evmPayload := EVMSignPayload{TypedData: typedData}
+	payload, _ := json.Marshal(evmPayload)
+
+	req := &types.SignRequest{
+		ChainID:       "1",
+		SignerAddress: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4",
+		SignType:      "typed_data",
+		Payload:       payload,
+	}
+
+	results, err := evaluator.EvaluateBatch(context.Background(), rules, req, nil)
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+
+	// Rule 1: Skipped due to SignTypeFilter mismatch
+	assert.True(t, results[0].Skipped, "rule1 should be skipped")
+
+	// Rule 2: Should pass
+	assert.True(t, results[1].Passed, "rule2 should pass")
+	assert.False(t, results[1].Skipped)
+}
+
+// TestIntegration_BatchEvaluate_WithStructDefinitions tests batch with struct-based rules
+func TestIntegration_BatchEvaluate_WithStructDefinitions(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	evaluator, err := NewSolidityRuleEvaluator(SolidityEvaluatorConfig{
+		Timeout: 60 * time.Second,
+	}, logger)
+	require.NoError(t, err)
+
+	// Rule with struct definition
+	config1 := SolidityExpressionConfig{
+		TypedDataStruct: `struct Order {
+			uint256 salt;
+			address maker;
+			uint256 amount;
+		}`,
+		TypedDataExpression: `require(order.amount <= 1000000000000000000, "order amount exceeds limit");`,
+		SignTypeFilter:      "typed_data",
+	}
+	configBytes1, _ := json.Marshal(config1)
+
+	// Another rule with same struct
+	config2 := SolidityExpressionConfig{
+		TypedDataStruct: `struct Order {
+			uint256 salt;
+			address maker;
+			uint256 amount;
+		}`,
+		TypedDataExpression: `require(order.salt > 0, "order salt must be positive");`,
+		SignTypeFilter:      "typed_data",
+	}
+	configBytes2, _ := json.Marshal(config2)
+
+	rules := []*types.Rule{
+		{ID: "rule1", Config: configBytes1, Mode: types.RuleModeWhitelist},
+		{ID: "rule2", Config: configBytes2, Mode: types.RuleModeWhitelist},
+	}
+
+	typedData := &TypedDataPayload{
+		PrimaryType: "Order",
+		Domain: TypedDataDomain{
+			Name:    "Exchange",
+			Version: "1",
+		},
+		Message: map[string]interface{}{
+			"salt":   "12345",
+			"maker":  "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4",
+			"amount": "500000000000000000", // 0.5 tokens
+		},
+	}
+	evmPayload := EVMSignPayload{TypedData: typedData}
+	payload, _ := json.Marshal(evmPayload)
+
+	req := &types.SignRequest{
+		ChainID:       "1",
+		SignerAddress: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4",
+		SignType:      "typed_data",
+		Payload:       payload,
+	}
+
+	results, err := evaluator.EvaluateBatch(context.Background(), rules, req, nil)
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+
+	// Rule 1: amount 0.5 <= 1.0, should pass
+	assert.True(t, results[0].Passed, "rule1 should pass (amount within limit)")
+	assert.False(t, results[0].Skipped)
+
+	// Rule 2: salt 12345 > 0, should pass
+	assert.True(t, results[1].Passed, "rule2 should pass (salt is positive)")
+	assert.False(t, results[1].Skipped)
+}
+
+// TestIntegration_BatchEvaluate_PrimaryTypeMismatch tests batch with primaryType mismatch
+func TestIntegration_BatchEvaluate_PrimaryTypeMismatch(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	evaluator, err := NewSolidityRuleEvaluator(SolidityEvaluatorConfig{
+		Timeout: 60 * time.Second,
+	}, logger)
+	require.NoError(t, err)
+
+	// Rule expects "Order" primaryType
+	config1 := SolidityExpressionConfig{
+		TypedDataStruct: `struct Order {
+			uint256 salt;
+		}`,
+		TypedDataExpression: `require(order.salt > 0, "invalid salt");`,
+		SignTypeFilter:      "typed_data",
+	}
+	configBytes1, _ := json.Marshal(config1)
+
+	// Rule without struct (matches any primaryType)
+	config2 := SolidityExpressionConfig{
+		TypedDataExpression: `require(value <= 1000000000000000000, "exceeds limit");`,
+		SignTypeFilter:      "typed_data",
+	}
+	configBytes2, _ := json.Marshal(config2)
+
+	rules := []*types.Rule{
+		{ID: "rule1", Config: configBytes1, Mode: types.RuleModeWhitelist},
+		{ID: "rule2", Config: configBytes2, Mode: types.RuleModeWhitelist},
+	}
+
+	// Request has "Permit" primaryType, not "Order"
+	typedData := &TypedDataPayload{
+		PrimaryType: "Permit",
+		Domain:      TypedDataDomain{Name: "Test", Version: "1"},
+		Message:     map[string]interface{}{"value": "500000000000000000"},
+	}
+	evmPayload := EVMSignPayload{TypedData: typedData}
+	payload, _ := json.Marshal(evmPayload)
+
+	req := &types.SignRequest{
+		ChainID:       "1",
+		SignerAddress: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4",
+		SignType:      "typed_data",
+		Payload:       payload,
+	}
+
+	results, err := evaluator.EvaluateBatch(context.Background(), rules, req, nil)
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+
+	// Rule 1: Skipped due to primaryType mismatch (expects Order, got Permit)
+	assert.True(t, results[0].Skipped, "rule1 should be skipped (primaryType mismatch)")
+
+	// Rule 2: Should pass (no struct, matches any primaryType)
+	assert.True(t, results[1].Passed, "rule2 should pass")
+	assert.False(t, results[1].Skipped)
+}
+
+// TestIntegration_BatchEvaluate_BlocklistModeInversion tests blocklist mode result inversion
+func TestIntegration_BatchEvaluate_BlocklistModeInversion(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	evaluator, err := NewSolidityRuleEvaluator(SolidityEvaluatorConfig{
+		Timeout: 60 * time.Second,
+	}, logger)
+	require.NoError(t, err)
+
+	// Blocklist rule: if value > 1000000000000000000, it's blocked
+	// The expression reverts when violated, so we invert the result for blocklist
+	config := SolidityExpressionConfig{
+		TypedDataExpression: `require(value <= 1000000000000000000, "blocked: exceeds limit");`,
+		SignTypeFilter:      "typed_data",
+	}
+	configBytes, _ := json.Marshal(config)
+
+	rules := []*types.Rule{
+		{ID: "blocklist-rule", Config: configBytes, Mode: types.RuleModeBlocklist},
+	}
+
+	// Value within limit - rule passes internally, but for blocklist "pass" means "not blocked"
+	typedData := &TypedDataPayload{
+		PrimaryType: "Permit",
+		Domain:      TypedDataDomain{Name: "Test", Version: "1"},
+		Message:     map[string]interface{}{"value": "500000000000000000"},
+	}
+	evmPayload := EVMSignPayload{TypedData: typedData}
+	payload, _ := json.Marshal(evmPayload)
+
+	req := &types.SignRequest{
+		ChainID:       "1",
+		SignerAddress: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4",
+		SignType:      "typed_data",
+		Payload:       payload,
+	}
+
+	results, err := evaluator.EvaluateBatch(context.Background(), rules, req, nil)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+
+	// For blocklist mode:
+	// - Script passes (value within limit) -> result inverted -> Passed=false (not blocked)
+	// Wait, that's wrong. Let me reconsider...
+	// Actually for blocklist, the semantic is:
+	// - Script passes = condition satisfied = NOT blocked
+	// - Script fails (reverts) = condition violated = BLOCKED
+	// So if the script passes, for blocklist mode, Passed should be true (not blocked)
+	// But the code does: passed = !passed for blocklist
+	// This means if script passes (true), it becomes false (blocked)
+	// That doesn't seem right...
+
+	// Let me check the actual behavior
+	// The code says: "For blocklist mode: returns (true, reason, nil) if request VIOLATES the limit (should be blocked)"
+	// So for blocklist, the evaluator.Evaluate returns true when the request should be blocked
+	// In batch mode, we also invert: passed = !passed for blocklist
+	// So if script passes (no revert), passed=true, then becomes passed=false
+	// If script fails (reverts), passed=false, then becomes passed=true (blocked)
+	// This is correct!
+
+	// For value within limit: script passes -> passed=true -> inverted to false
+	assert.False(t, results[0].Passed, "blocklist rule should return Passed=false when not violated")
+
+	// Test with value exceeding limit
+	typedData.Message["value"] = "2000000000000000000"
+	evmPayload.TypedData = typedData
+	payload, _ = json.Marshal(evmPayload)
+	req.Payload = payload
+
+	results, err = evaluator.EvaluateBatch(context.Background(), rules, req, nil)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+
+	// For value exceeding limit: script fails (reverts) -> passed=false -> inverted to true (blocked)
+	assert.True(t, results[0].Passed, "blocklist rule should return Passed=true when violated (blocked)")
+	assert.Contains(t, results[0].Reason, "blocked")
+}
+
+// TestIntegration_BatchEvaluate_SingleRule tests that single rule falls back to regular Evaluate
+func TestIntegration_BatchEvaluate_SingleRule(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	evaluator, err := NewSolidityRuleEvaluator(SolidityEvaluatorConfig{
+		Timeout: 60 * time.Second,
+	}, logger)
+	require.NoError(t, err)
+
+	config := SolidityExpressionConfig{
+		TypedDataExpression: `require(value <= 1000000000000000000, "exceeds limit");`,
+		SignTypeFilter:      "typed_data",
+	}
+	configBytes, _ := json.Marshal(config)
+
+	rules := []*types.Rule{
+		{ID: "single-rule", Config: configBytes, Mode: types.RuleModeWhitelist},
+	}
+
+	typedData := &TypedDataPayload{
+		PrimaryType: "Permit",
+		Domain:      TypedDataDomain{Name: "Test", Version: "1"},
+		Message:     map[string]interface{}{"value": "500000000000000000"},
+	}
+	evmPayload := EVMSignPayload{TypedData: typedData}
+	payload, _ := json.Marshal(evmPayload)
+
+	req := &types.SignRequest{
+		ChainID:       "1",
+		SignerAddress: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4",
+		SignType:      "typed_data",
+		Payload:       payload,
+	}
+
+	// Single rule should use regular Evaluate path
+	results, err := evaluator.EvaluateBatch(context.Background(), rules, req, nil)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+
+	assert.True(t, results[0].Passed, "single rule should pass")
+	assert.Equal(t, types.RuleID("single-rule"), results[0].RuleID)
+}
+
+// TestIntegration_BatchEvaluate_CacheHit tests that batch results are cached
+func TestIntegration_BatchEvaluate_CacheHit(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	evaluator, err := NewSolidityRuleEvaluator(SolidityEvaluatorConfig{
+		Timeout:  60 * time.Second,
+		CacheTTL: 5 * time.Minute,
+	}, logger)
+	require.NoError(t, err)
+
+	config1 := SolidityExpressionConfig{
+		TypedDataExpression: `require(value <= 1000000000000000000, "limit1");`,
+		SignTypeFilter:      "typed_data",
+	}
+	config2 := SolidityExpressionConfig{
+		TypedDataExpression: `require(value <= 2000000000000000000, "limit2");`,
+		SignTypeFilter:      "typed_data",
+	}
+	configBytes1, _ := json.Marshal(config1)
+	configBytes2, _ := json.Marshal(config2)
+
+	rules := []*types.Rule{
+		{ID: "rule1", Config: configBytes1, Mode: types.RuleModeWhitelist},
+		{ID: "rule2", Config: configBytes2, Mode: types.RuleModeWhitelist},
+	}
+
+	typedData := &TypedDataPayload{
+		PrimaryType: "Permit",
+		Domain:      TypedDataDomain{Name: "Test", Version: "1"},
+		Message:     map[string]interface{}{"value": "500000000000000000"},
+	}
+	evmPayload := EVMSignPayload{TypedData: typedData}
+	payload, _ := json.Marshal(evmPayload)
+
+	req := &types.SignRequest{
+		ChainID:       "1",
+		SignerAddress: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4",
+		SignType:      "typed_data",
+		Payload:       payload,
+	}
+
+	// First call - executes forge
+	start := time.Now()
+	results1, err := evaluator.EvaluateBatch(context.Background(), rules, req, nil)
+	firstDuration := time.Since(start)
+	require.NoError(t, err)
+	require.Len(t, results1, 2)
+
+	// Second call with same input - should hit cache (much faster)
+	start = time.Now()
+	results2, err := evaluator.EvaluateBatch(context.Background(), rules, req, nil)
+	secondDuration := time.Since(start)
+	require.NoError(t, err)
+	require.Len(t, results2, 2)
+
+	// Cache hit should be significantly faster
+	t.Logf("First call: %v, Second call: %v", firstDuration, secondDuration)
+	assert.True(t, secondDuration < firstDuration/2, "cached call should be much faster")
+
+	// Results should be the same
+	assert.Equal(t, results1[0].Passed, results2[0].Passed)
+	assert.Equal(t, results1[1].Passed, results2[1].Passed)
 }
 

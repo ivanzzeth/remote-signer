@@ -1,6 +1,7 @@
 package evm
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -49,7 +50,7 @@ func NewStdinPasswordProvider() (*StdinPasswordProvider, error) {
 // GetPassword reads the password from stdin interactively
 func (p *StdinPasswordProvider) GetPassword(address string, config KeystoreConfig) ([]byte, error) {
 	fmt.Printf("Enter password for keystore %s: ", address)
-	password, err := keystore.ReadSecret()
+	password, err := keystore.ReadSecret(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("failed to read password for %s: %w", address, err)
 	}
