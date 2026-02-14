@@ -131,7 +131,7 @@ func (h *ApprovalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.signService.ProcessApproval(r.Context(), types.SignRequestID(requestID), approvalReq)
 	if err != nil {
 		h.logger.Error("failed to process approval", "error", err, "request_id", requestID)
-		h.writeError(w, fmt.Sprintf("failed to process approval: %v", err), http.StatusInternalServerError)
+		h.writeError(w, "failed to process approval", http.StatusInternalServerError)
 		return
 	}
 
@@ -244,7 +244,7 @@ func (h *PreviewRuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	preview, err := h.signService.PreviewRuleForRequest(r.Context(), types.SignRequestID(requestID), ruleOpts)
 	if err != nil {
 		h.logger.Error("failed to preview rule", "error", err, "request_id", requestID)
-		h.writeError(w, fmt.Sprintf("failed to preview rule: %v", err), http.StatusBadRequest)
+		h.writeError(w, "failed to preview rule", http.StatusBadRequest)
 		return
 	}
 

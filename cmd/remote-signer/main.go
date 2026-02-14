@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/joho/godotenv"
 	"github.com/rs/zerolog"
@@ -295,9 +296,22 @@ func run() error {
 		return fmt.Errorf("failed to create sign service: %w", err)
 	}
 
+	// Initialize nonce store for replay protection
+	nonceStore, err := storage.NewInMemoryNonceStore(time.Minute)
+	if err != nil {
+		return fmt.Errorf("failed to create nonce store: %w", err)
+	}
+	defer nonceStore.Close()
+
+	nonceRequired := true
+	if cfg.Security.NonceRequired != nil {
+		nonceRequired = *cfg.Security.NonceRequired
+	}
+
 	// Initialize auth verifier
-	authVerifier, err := auth.NewVerifier(apiKeyRepo, auth.Config{
+	authVerifier, err := auth.NewVerifierWithNonceStore(apiKeyRepo, nonceStore, auth.Config{
 		MaxRequestAge: cfg.Security.MaxRequestAge,
+		NonceRequired: nonceRequired,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create auth verifier: %w", err)
@@ -327,10 +341,9 @@ func run() error {
 	}
 
 	// Build server config
-	serverConfig := api.ServerConfig{
-		Host: cfg.Server.Host,
-		Port: cfg.Server.Port,
-	}
+	serverConfig := api.DefaultServerConfig()
+	serverConfig.Host = cfg.Server.Host
+	serverConfig.Port = cfg.Server.Port
 
 	// Initialize API server
 	server, err := api.NewServer(router, log, serverConfig)

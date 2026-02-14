@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
@@ -163,7 +164,7 @@ func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generate rule ID
-	ruleID := types.RuleID(fmt.Sprintf("rule_%d", time.Now().UnixNano()))
+	ruleID := types.RuleID(fmt.Sprintf("rule_%s", uuid.New().String()))
 
 	// Marshal config to JSON
 	configJSON, err := json.Marshal(req.Config)
@@ -208,7 +209,8 @@ func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
 	// Validate Solidity expression rules if validator is available
 	if rule.Type == types.RuleTypeEVMSolidityExpression && h.solidityValidator != nil {
 		if err := h.validateSolidityRule(r.Context(), rule); err != nil {
-			h.writeError(w, fmt.Sprintf("rule validation failed: %s", err.Error()), http.StatusBadRequest)
+			h.logger.Error("rule validation failed", "error", err, "rule_type", rule.Type)
+			h.writeError(w, "rule validation failed", http.StatusBadRequest)
 			return
 		}
 	}
@@ -266,7 +268,8 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 	// Validate Solidity expression rules if config was updated and validator is available
 	if req.Config != nil && rule.Type == types.RuleTypeEVMSolidityExpression && h.solidityValidator != nil {
 		if err := h.validateSolidityRule(r.Context(), rule); err != nil {
-			h.writeError(w, fmt.Sprintf("rule validation failed: %s", err.Error()), http.StatusBadRequest)
+			h.logger.Error("rule validation failed", "error", err, "rule_id", ruleID)
+			h.writeError(w, "rule validation failed", http.StatusBadRequest)
 			return
 		}
 	}
@@ -321,6 +324,9 @@ func (h *RuleHandler) listRules(w http.ResponseWriter, r *http.Request) {
 	}
 	if limitStr := query.Get("limit"); limitStr != "" {
 		if limit, err := strconv.Atoi(limitStr); err == nil && limit > 0 {
+			if limit > 1000 {
+				limit = 1000
+			}
 			filter.Limit = limit
 		}
 	}

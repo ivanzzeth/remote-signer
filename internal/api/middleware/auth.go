@@ -49,7 +49,9 @@ func AuthMiddleware(verifier *auth.Verifier, logger *slog.Logger) func(http.Hand
 				return
 			}
 
-			// Read body for verification
+			// Read body for verification (with size limit)
+			const maxBodySize = 10 << 20 // 10 MB
+			r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
 			body, err := io.ReadAll(r.Body)
 			if err != nil {
 				logger.Error("failed to read body", "error", err)

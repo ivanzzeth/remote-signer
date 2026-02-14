@@ -184,7 +184,7 @@ func (h *SignerHandler) createSigner(w http.ResponseWriter, r *http.Request) {
 			slog.String("type", req.Type),
 			slog.String("error", err.Error()),
 		)
-		h.writeError(w, fmt.Sprintf("failed to create signer: %v", err), http.StatusInternalServerError)
+		h.writeError(w, "failed to create signer", http.StatusInternalServerError)
 		return
 	}
 
