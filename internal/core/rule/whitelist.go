@@ -176,6 +176,13 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 	// NOTE: Whitelist rules use Fail-Open behavior - if evaluation fails, skip to next rule.
 	// This ensures that one failing whitelist rule doesn't block other valid whitelist rules.
 	// Fail-Closed only applies to Blocklist rules for security.
+
+	// Try batch evaluation for whitelist rules (optimization)
+	if result := e.evaluateWhitelistBatch(ctx, whitelistRules, req, parsed); result != nil {
+		return result, nil
+	}
+
+	// Fallback to sequential evaluation if batch evaluation didn't match
 	for _, rule := range whitelistRules {
 		evaluator, exists := e.evaluators[rule.Type]
 		if !exists {
@@ -184,6 +191,11 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 				"rule_id", rule.ID,
 			)
 			// Fail-Open for whitelist: skip and continue to next rule
+			continue
+		}
+
+		// Skip rules already evaluated in batch
+		if _, ok := evaluator.(BatchRuleEvaluator); ok {
 			continue
 		}
 
@@ -225,6 +237,92 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 		Blocked: false,
 		Allowed: false,
 	}, nil
+}
+
+// evaluateWhitelistBatch performs batch evaluation for whitelist rules that support it
+// Returns nil if no rule matched, allowing fallback to sequential evaluation
+func (e *WhitelistRuleEngine) evaluateWhitelistBatch(
+	ctx context.Context,
+	rules []*types.Rule,
+	req *types.SignRequest,
+	parsed *types.ParsedPayload,
+) *EvaluationResult {
+	// Group rules by evaluator type for batch evaluation
+	rulesByType := make(map[types.RuleType][]*types.Rule)
+	for _, rule := range rules {
+		rulesByType[rule.Type] = append(rulesByType[rule.Type], rule)
+	}
+
+	// Evaluate each group with batch evaluator if available
+	for ruleType, typeRules := range rulesByType {
+		evaluator, exists := e.evaluators[ruleType]
+		if !exists {
+			continue
+		}
+
+		batchEval, ok := evaluator.(BatchRuleEvaluator)
+		if !ok {
+			// This evaluator doesn't support batch, will be handled in sequential fallback
+			continue
+		}
+
+		if !batchEval.CanBatchEvaluate(typeRules) {
+			// Rules can't be batched together, will be handled sequentially
+			continue
+		}
+
+		e.logger.Debug("batch evaluating whitelist rules",
+			"type", ruleType,
+			"count", len(typeRules),
+			"request_id", req.ID,
+		)
+
+		results, err := batchEval.EvaluateBatch(ctx, typeRules, req, parsed)
+		if err != nil {
+			e.logger.Debug("batch evaluation error, falling back to sequential",
+				"type", ruleType,
+				"error", err,
+			)
+			continue
+		}
+
+		// Check results for any match
+		for i, result := range results {
+			if result.Skipped {
+				continue
+			}
+			if result.Err != nil {
+				e.logger.Debug("whitelist rule batch evaluation error, skipping",
+					"rule_id", result.RuleID,
+					"error", result.Err,
+				)
+				continue
+			}
+			if result.Passed {
+				rule := typeRules[i]
+				e.logger.Info("request allowed by whitelist rule (batch)",
+					"rule_id", rule.ID,
+					"rule_name", rule.Name,
+					"request_id", req.ID,
+					"reason", result.Reason,
+				)
+				// Update match count asynchronously
+				go func(ruleID types.RuleID) {
+					if err := e.repo.IncrementMatchCount(context.Background(), ruleID); err != nil {
+						e.logger.Error("failed to increment match count", "rule_id", ruleID, "error", err)
+					}
+				}(rule.ID)
+
+				return &EvaluationResult{
+					Allowed:     true,
+					AllowedBy:   rule,
+					AllowReason: result.Reason,
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 // Compile-time check that WhitelistRuleEngine implements RuleEngine

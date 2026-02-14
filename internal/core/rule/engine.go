@@ -94,3 +94,27 @@ type RuleEvaluator interface {
 	// For blocklist mode: returns (true, reason, nil) if request VIOLATES the limit (should be blocked)
 	Evaluate(ctx context.Context, rule *types.Rule, req *types.SignRequest, parsed *types.ParsedPayload) (bool, string, error)
 }
+
+// BatchEvaluationResult represents the result of evaluating a single rule in a batch
+type BatchEvaluationResult struct {
+	RuleID  types.RuleID
+	Passed  bool
+	Reason  string
+	Err     error
+	Skipped bool // true if rule was skipped (e.g., primaryType mismatch)
+}
+
+// BatchRuleEvaluator extends RuleEvaluator with batch evaluation capability
+// This is optional - evaluators that don't support batch evaluation will fall back to sequential
+type BatchRuleEvaluator interface {
+	RuleEvaluator
+
+	// EvaluateBatch evaluates multiple rules against the same request in a single execution
+	// Returns results in the same order as the input rules
+	// Rules that don't apply (e.g., primaryType mismatch) will have Skipped=true
+	EvaluateBatch(ctx context.Context, rules []*types.Rule, req *types.SignRequest, parsed *types.ParsedPayload) ([]BatchEvaluationResult, error)
+
+	// CanBatchEvaluate returns true if the given rules can be evaluated together
+	// Rules might not be batchable if they use different validation modes
+	CanBatchEvaluate(rules []*types.Rule) bool
+}
