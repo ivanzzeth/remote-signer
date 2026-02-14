@@ -122,7 +122,7 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.logger.Error("sign request failed", "error", err)
-		h.writeError(w, fmt.Sprintf("sign request failed: %v", err), http.StatusInternalServerError)
+		h.writeError(w, "sign request failed", http.StatusInternalServerError)
 		return
 	}
 

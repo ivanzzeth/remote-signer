@@ -19,7 +19,7 @@ type ServerConfig struct {
 // DefaultServerConfig returns the default server configuration
 func DefaultServerConfig() ServerConfig {
 	return ServerConfig{
-		Host:         "0.0.0.0",
+		Host:         "127.0.0.1",
 		Port:         8080,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,

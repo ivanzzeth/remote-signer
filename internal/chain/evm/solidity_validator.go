@@ -701,7 +701,11 @@ func (v *SolidityRuleValidator) generateBatchTestScript(rules []*types.Rule, mod
 			// Parse struct definition if provided
 			var structDef *StructDefinition
 			if config.TypedDataStruct != "" {
-				structDef, _ = parseStructDefinition(config.TypedDataStruct)
+				var parseErr error
+				structDef, parseErr = parseStructDefinition(config.TypedDataStruct)
+				if parseErr != nil {
+					return "", fmt.Errorf("failed to parse typed data struct: %w", parseErr)
+				}
 			}
 
 			// Generate struct instance or message field declarations
@@ -1306,7 +1310,7 @@ func (v *SolidityRuleValidator) compileSyntaxCheckScript(ctx context.Context, sc
 	}
 
 	// Write script file
-	if err := os.WriteFile(scriptPath, []byte(script), 0644); err != nil {
+	if err := os.WriteFile(scriptPath, []byte(script), 0600); err != nil {
 		return nil, fmt.Errorf("failed to write script: %w", err)
 	}
 	// Don't delete script file - keep it for forge incremental compilation
