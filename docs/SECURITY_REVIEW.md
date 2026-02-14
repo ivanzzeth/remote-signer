@@ -381,8 +381,160 @@ Multi-sig configuration by value:
 
 ---
 
+## Security Automation Plan
+
+### Overview
+
+Since this is a private (non-open-source) project, all security automation runs locally on developer machines and deployment servers — no GitHub Actions or external CI/CD.
+
+**Three-layer defense**:
+1. **Development** — Git hooks catch issues before code enters the repo
+2. **Periodic scanning** — Cron scripts for dependency and configuration audits
+3. **Adversarial testing** — Fuzz tests + attack simulation in E2E suite
+
+---
+
+### Layer 1: Git Hooks (Development Phase)
+
+**`pre-commit`** — blocks commits with known security issues:
+
+| Check | Tool | Purpose |
+|-------|------|---------|
+| Static security analysis | `gosec ./...` | OWASP-class vulnerabilities (injection, hardcoded creds) |
+| Dependency vulnerabilities | `govulncheck ./...` | Known CVEs in Go dependencies |
+| Code correctness | `go vet ./...` | Common Go mistakes |
+| Error suppression | `grep -r "_ =" --include="*.go"` | Enforce project rule: never ignore errors |
+
+**`pre-push`** — runs full test suite before pushing:
+
+| Check | Command |
+|-------|---------|
+| Unit tests | `go test ./...` |
+| E2E tests (if server running) | `go test -tags=e2e ./e2e/...` |
+
+**Installation**: `scripts/install-hooks.sh` (copies hooks to `.git/hooks/`)
+
+---
+
+### Layer 2: Periodic Security Scanning
+
+**`scripts/security-audit.sh`** — intended for cron jobs (daily/weekly):
+
+| Check | Tool | Installation |
+|-------|------|-------------|
+| Go dependency CVEs | `govulncheck ./...` | `go install golang.org/x/vuln/cmd/govulncheck@latest` |
+| File system vulnerabilities | `trivy fs .` | `apt/brew install trivy` |
+| Docker image CVEs | `trivy image remote-signer:latest` | Same as above |
+| Static security analysis | `gosec ./...` | `go install github.com/securego/gosec/v2/cmd/gosec@latest` |
+
+Results are sent via existing Slack/Pushover notification channels when issues are found.
+
+**`scripts/config-check.sh`** — validates deployment configuration:
+
+| Check | What |
+|-------|------|
+| No plaintext secrets | Private key fields must use `${ENV_VAR}` syntax |
+| TLS enabled | `tls.enabled: true` in production config |
+| Nonce required | `nonce_required: true` |
+| Rate limit reasonable | Not 0, not excessively high |
+| Strong DB password | Not default "change_me_in_production" |
+
+---
+
+### Layer 3: Adversarial Testing
+
+#### 3a. Fuzz Testing (Go native `go test -fuzz`)
+
+| Target | Location | Attack Surface |
+|--------|----------|----------------|
+| `FuzzAuthMiddleware` | `internal/api/middleware/auth_fuzz_test.go` | Malformed auth headers, signatures, timestamps, nonces |
+| `FuzzSignRequestParsing` | `internal/api/handler/fuzz_test.go` | Malformed sign request JSON, oversized payloads |
+| `FuzzRuleEvaluation` | `internal/chain/evm/fuzz_test.go` | Edge-case rule configs, boundary values |
+| `FuzzEIP712Decode` | `internal/chain/evm/fuzz_test.go` | Abnormal typed data structures |
+| `FuzzSolidityExpression` | `internal/chain/evm/fuzz_test.go` | Malicious Solidity code injection |
+
+Run: `go test -fuzz=FuzzAuthMiddleware -fuzztime=5m ./internal/api/middleware/`
+
+#### 3b. Adversarial E2E Tests (`e2e/security_test.go`)
+
+**Authentication attacks:**
+- `TestReplayAttack_SameNonce` — replay identical nonce within window
+- `TestReplayAttack_ExpiredTimestamp` — timestamps outside 60s window
+- `TestAuthBypass_MissingHeaders` — systematically remove each auth header
+- `TestAuthBypass_WrongKey` — sign with incorrect Ed25519 key
+- `TestAuthBypass_TamperedBody` — modify request body without re-signing
+
+**Rule engine bypass:**
+- `TestBlocklistBypass_AddressCasing` — address case-sensitivity attacks
+- `TestBlocklistBypass_ChecksumMixed` — EIP-55 mixed-case variants
+- `TestValueLimitBypass_SplitTransactions` — split large tx into small ones
+- `TestValueLimitBypass_Overflow` — uint256 overflow attempts
+- `TestSolidityEscape_DangerousCheatcode` — `vm.ffi()`, `vm.readFile()` injection
+
+**Privilege escalation:**
+- `TestAdminEscalation_NonAdminKey` — non-admin key calls admin endpoints
+- `TestRateLimitBypass_MultipleKeys` — distributed rate limit evasion
+- `TestConcurrentApproval_RaceCondition` — concurrent approve/reject on same request
+
+Run: `go test -tags=e2e -run TestSecurity ./e2e/...`
+
+#### 3c. Runtime Audit Monitoring (`scripts/audit-monitor.sh`)
+
+Periodically queries `GET /api/v1/evm/audit` to detect:
+
+| Pattern | Threshold | Meaning |
+|---------|-----------|---------|
+| Consecutive auth failures | > 5/hour from same source | Possible brute-force |
+| Consecutive blocklist rejects | > 3/hour from same key | Possible rule probing |
+| Off-hours signing activity | Outside configured business hours | Suspicious automation |
+| High-frequency requests | > 80% of rate limit | Possible DoS preparation |
+
+Alerts via Slack/Pushover when thresholds exceeded.
+
+---
+
+### File Structure
+
+```
+scripts/
+  ├── deploy.sh                # Existing
+  ├── generate-api-key.sh      # Existing
+  ├── install-hooks.sh         # NEW: Install git pre-commit/pre-push hooks
+  ├── security-audit.sh        # NEW: Dependency & static analysis scanning
+  ├── config-check.sh          # NEW: Deployment configuration validation
+  └── audit-monitor.sh         # NEW: Runtime audit log anomaly detection
+
+e2e/
+  ├── e2e_test.go              # Existing
+  └── security_test.go         # NEW: Adversarial security E2E tests
+
+internal/api/middleware/
+  └── auth_fuzz_test.go        # NEW: Auth middleware fuzz tests
+
+internal/api/handler/
+  └── fuzz_test.go             # NEW: API handler fuzz tests
+
+internal/chain/evm/
+  └── fuzz_test.go             # NEW: Rule engine fuzz tests
+```
+
+### Implementation Priority
+
+| Priority | Item | Effort | Value |
+|----------|------|--------|-------|
+| P0 | Git pre-commit hook (gosec + govulncheck) | 0.5 day | Block known-vulnerable code from entering repo |
+| P0 | Fuzz tests (auth + sign request parsing) | 1-2 days | Discover unknown edge-case vulnerabilities |
+| P1 | Adversarial E2E tests (auth bypass + rule bypass) | 2-3 days | Verify existing security measures are effective |
+| P1 | `scripts/security-audit.sh` (cron) | 0.5 day | Continuous dependency vulnerability monitoring |
+| P2 | `scripts/config-check.sh` | 0.5 day | Prevent deployment misconfigurations |
+| P2 | `scripts/audit-monitor.sh` | 1 day | Runtime attack detection |
+| P3 | Docker image scanning in deploy.sh | 2 hours | Deployment-phase security |
+
+---
+
 ## Review History
 
 | Date | Reviewer | Changes |
 |------|----------|---------|
 | 2026-02-04 | External Security Expert | Initial review |
+| 2026-02-14 | Security Automation | Added security automation plan (git hooks, fuzz tests, adversarial E2E, scanning scripts) |

@@ -11,6 +11,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/ivanzzeth/remote-signer/internal/audit"
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/notify"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
@@ -23,6 +24,7 @@ type Config struct {
 	Chains        ChainsConfig        `yaml:"chains"`
 	Notify        notify.Config       `yaml:"notify"`
 	NotifyChannel notify.Channel      `yaml:"notify_channels"`
+	AuditMonitor  audit.MonitorConfig `yaml:"audit_monitor"`
 	Security      SecurityConfig      `yaml:"security"`
 	Logger        LoggerConfig        `yaml:"logger"`
 	APIKeys       []APIKeyConfig      `yaml:"api_keys"`
@@ -173,7 +175,7 @@ func Load(path string) (*Config, error) {
 	}
 
 	// Expand environment variables in the config (supports ${VAR:-default} syntax)
-	expandedData := expandEnvWithDefaults(string(data))
+	expandedData := ExpandEnvWithDefaults(string(data))
 
 	cfg := &Config{}
 	if err := yaml.Unmarshal([]byte(expandedData), cfg); err != nil {
@@ -190,9 +192,9 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
-// expandEnvWithDefaults expands environment variables with support for default values
+// ExpandEnvWithDefaults expands environment variables with support for default values.
 // Supports: ${VAR}, ${VAR:-default}, $VAR
-func expandEnvWithDefaults(s string) string {
+func ExpandEnvWithDefaults(s string) string {
 	// Pattern matches ${VAR:-default} or ${VAR}
 	re := regexp.MustCompile(`\$\{([^}:]+)(:-([^}]*))?\}`)
 
