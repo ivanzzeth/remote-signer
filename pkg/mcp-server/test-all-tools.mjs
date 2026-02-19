@@ -242,7 +242,7 @@ async function runTests() {
   console.log("--- 10: evm_preview_rule ---");
   try {
     const r = await callTool("evm_preview_rule", {
-      request_id: "nonexistent-id", rule_type: "evm_address_whitelist", rule_mode: "whitelist",
+      request_id: "nonexistent-id", rule_type: "evm_address_list", rule_mode: "whitelist",
     });
     const text = r.result?.content?.[0]?.text || "";
     logResult("evm_preview_rule", true, `API reachable (${text.substring(0, 60)})`);
@@ -261,7 +261,7 @@ async function runTests() {
   let createdRuleId = null;
   try {
     const r = await callTool("evm_create_rule", {
-      name: "MCP Test Rule", type: "evm_address_whitelist", mode: "whitelist",
+      name: "MCP Test Rule", type: "evm_address_list", mode: "whitelist",
       config: { addresses: ["0x70997970C51812dc3A010C7d01b50e0d17dc79C8"] }, enabled: true,
     });
     const data = parseJSON(r.result?.content?.[0]?.text || "");
