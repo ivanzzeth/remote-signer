@@ -74,10 +74,12 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse request
+	// Parse request — log details internally, return generic error to client
+	// to prevent leaking Go type names and package paths in error messages.
 	var req SignRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeError(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
+		h.logger.Warn("failed to decode sign request", "error", err, "path", r.URL.Path)
+		h.writeError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 

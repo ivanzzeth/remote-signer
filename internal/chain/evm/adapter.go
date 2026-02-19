@@ -51,6 +51,10 @@ func (a *EVMAdapter) ValidatePayload(ctx context.Context, signType string, paylo
 		if !strings.HasPrefix(p.Hash, "0x") || len(p.Hash) != 66 {
 			return fmt.Errorf("hash must be 0x-prefixed 32-byte hex string")
 		}
+		// Validate hex characters after "0x" prefix
+		if _, err := hex.DecodeString(p.Hash[2:]); err != nil {
+			return fmt.Errorf("hash contains invalid hex characters")
+		}
 
 	case SignTypeRawMessage:
 		if len(p.RawMessage) == 0 {

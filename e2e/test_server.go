@@ -333,13 +333,22 @@ func (ts *TestServer) Start() error {
 		return fmt.Errorf("failed to create sign service: %w", err)
 	}
 
-	// Initialize auth verifier - use config if available
+	// Initialize auth verifier with nonce store for replay protection
 	maxRequestAge := 5 * time.Minute
 	if cfg != nil && cfg.Security.MaxRequestAge > 0 {
 		maxRequestAge = cfg.Security.MaxRequestAge
 	}
-	authVerifier, err := auth.NewVerifier(apiKeyRepo, auth.Config{
+	nonceRequired := true
+	if cfg != nil && cfg.Security.NonceRequired != nil {
+		nonceRequired = *cfg.Security.NonceRequired
+	}
+	nonceStore, err := storage.NewInMemoryNonceStore(time.Minute)
+	if err != nil {
+		return fmt.Errorf("failed to create nonce store: %w", err)
+	}
+	authVerifier, err := auth.NewVerifierWithNonceStore(apiKeyRepo, nonceStore, auth.Config{
 		MaxRequestAge: maxRequestAge,
+		NonceRequired: nonceRequired,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create auth verifier: %w", err)

@@ -83,10 +83,11 @@ func (h *ApprovalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	requestID := parts[len(parts)-2] // {id} is second to last
 
-	// Parse request body
+	// Parse request body — log details internally, return generic error to client
 	var req ApprovalAPIRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeError(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
+		h.logger.Warn("failed to decode approval request", "error", err, "path", r.URL.Path)
+		h.writeError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -195,10 +196,11 @@ func (h *PreviewRuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	requestID := parts[len(parts)-2] // {id} is second to last
 
-	// Parse request body
+	// Parse request body — log details internally, return generic error to client
 	var req PreviewRuleAPIRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeError(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
+		h.logger.Warn("failed to decode preview-rule request", "error", err, "path", r.URL.Path)
+		h.writeError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 

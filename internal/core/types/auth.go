@@ -1,6 +1,7 @@
 package types
 
 import (
+	"strings"
 	"time"
 
 	"github.com/lib/pq"
@@ -44,13 +45,15 @@ func (k *APIKey) IsAllowedChain(chainType ChainType) bool {
 	return false
 }
 
-// IsAllowedSigner checks if the API key allows the given signer address
+// IsAllowedSigner checks if the API key allows the given signer address.
+// Comparison is case-insensitive because Ethereum addresses are case-insensitive
+// at the protocol level (EIP-55 checksum is optional display formatting).
 func (k *APIKey) IsAllowedSigner(address string) bool {
 	if len(k.AllowedSigners) == 0 {
 		return true // empty = all allowed
 	}
 	for _, a := range k.AllowedSigners {
-		if a == address {
+		if strings.EqualFold(a, address) {
 			return true
 		}
 	}
