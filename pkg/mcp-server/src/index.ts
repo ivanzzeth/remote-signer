@@ -727,15 +727,6 @@ server.registerTool(
 );
 
 // ===========================================================================
-// Helper: mask sensitive strings for logging
-// ===========================================================================
-
-function maskString(s: string): string {
-  if (s.length <= 8) return "***";
-  return s.slice(0, 4) + "***" + s.slice(-4);
-}
-
-// ===========================================================================
 // Start server
 // ===========================================================================
 
@@ -744,7 +735,9 @@ async function main() {
   await server.connect(transport);
   console.error("Remote Signer MCP Server running on stdio");
   console.error(`  Base URL: ${BASE_URL}`);
-  console.error(`  API Key ID: ${maskString(API_KEY_ID)}`);
+  // NOTE: API Key ID is a public identifier (like a username), NOT a secret.
+  // It is safe to print in plaintext — needed for tracing requests in audit logs.
+  console.error(`  API Key ID: ${API_KEY_ID}`);
 }
 
 main().catch((error) => {

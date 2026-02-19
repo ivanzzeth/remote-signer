@@ -12,6 +12,7 @@
 *.test
 
 # Compiled binaries (project-specific)
+/build/
 /remote-signer
 /remote-signer-tui
 /audit-monitor
