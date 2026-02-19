@@ -25,11 +25,18 @@ type RequestFilter struct {
 	Limit    int
 }
 
+// ErrStateConflict is returned when a compare-and-update fails because the
+// current status does not match the expected status (concurrent modification).
+var ErrStateConflict = fmt.Errorf("state conflict: status was modified by another request")
+
 // RequestRepository defines the interface for sign request persistence
 type RequestRepository interface {
 	Create(ctx context.Context, req *types.SignRequest) error
 	Get(ctx context.Context, id types.SignRequestID) (*types.SignRequest, error)
 	Update(ctx context.Context, req *types.SignRequest) error
+	// CompareAndUpdate atomically updates a request only if its current status
+	// matches expectedStatus. Returns ErrStateConflict if the status has changed.
+	CompareAndUpdate(ctx context.Context, req *types.SignRequest, expectedStatus types.SignRequestStatus) error
 	List(ctx context.Context, filter RequestFilter) ([]*types.SignRequest, error)
 	Count(ctx context.Context, filter RequestFilter) (int, error)
 	UpdateStatus(ctx context.Context, id types.SignRequestID, status types.SignRequestStatus) error
@@ -75,6 +82,38 @@ func (r *GormRequestRepository) Update(ctx context.Context, req *types.SignReque
 		return fmt.Errorf("request cannot be nil")
 	}
 	return r.db.WithContext(ctx).Save(req).Error
+}
+
+// CompareAndUpdate atomically updates a request only if its current status
+// matches expectedStatus. Uses a SQL WHERE clause to ensure atomicity at
+// the database level, preventing TOCTOU race conditions.
+// Returns ErrStateConflict if the status has been modified concurrently.
+func (r *GormRequestRepository) CompareAndUpdate(ctx context.Context, req *types.SignRequest, expectedStatus types.SignRequestStatus) error {
+	if req == nil {
+		return fmt.Errorf("request cannot be nil")
+	}
+	// Use raw UPDATE ... WHERE id = ? AND status = ? for atomic CAS
+	result := r.db.WithContext(ctx).
+		Model(&types.SignRequest{}).
+		Where("id = ? AND status = ?", req.ID, expectedStatus).
+		Updates(map[string]interface{}{
+			"status":         req.Status,
+			"rule_matched_id": req.RuleMatchedID,
+			"approved_by":    req.ApprovedBy,
+			"approved_at":    req.ApprovedAt,
+			"signature":      req.Signature,
+			"signed_data":    req.SignedData,
+			"error_message":  req.ErrorMessage,
+			"completed_at":   req.CompletedAt,
+			"updated_at":     req.UpdatedAt,
+		})
+	if result.Error != nil {
+		return fmt.Errorf("failed to update request: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ErrStateConflict
+	}
+	return nil
 }
 
 // List returns sign requests matching the filter using cursor-based pagination

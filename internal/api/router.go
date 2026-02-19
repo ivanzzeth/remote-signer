@@ -126,9 +126,9 @@ func (r *Router) setupRoutes() error {
 			r.requireAdmin(approvalHandler).ServeHTTP(w, req)
 			return
 		}
-		// Route to preview-rule handler if path ends with /preview-rule
+		// Route to preview-rule handler if path ends with /preview-rule (admin only)
 		if strings.HasSuffix(req.URL.Path, "/preview-rule") {
-			previewRuleHandler.ServeHTTP(w, req)
+			r.requireAdmin(previewRuleHandler).ServeHTTP(w, req)
 			return
 		}
 		// Otherwise, route to request handler

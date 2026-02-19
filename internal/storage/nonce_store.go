@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -44,7 +45,10 @@ func NewInMemoryNonceStore(cleanupInterval time.Duration) (*InMemoryNonceStore, 
 // CheckAndStore checks if a nonce exists and stores it if not.
 // Returns true if the nonce was stored (new), false if it already exists (replay).
 func (s *InMemoryNonceStore) CheckAndStore(ctx context.Context, apiKeyID, nonce string, ttl time.Duration) (bool, error) {
-	key := apiKeyID + ":" + nonce
+	// Use length-prefixed format to prevent key collision when nonce contains ":"
+	// e.g., apiKeyID="a" nonce="b:c" vs apiKeyID="a:b" nonce="c" would both
+	// produce "a:b:c" with simple concatenation. Length prefix makes them distinct.
+	key := fmt.Sprintf("%d:%s:%s", len(apiKeyID), apiKeyID, nonce)
 	expireAt := time.Now().Add(ttl)
 
 	s.mu.Lock()

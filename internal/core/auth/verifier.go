@@ -144,8 +144,14 @@ func (v *Verifier) verifyRequestInternal(
 	// Check timestamp (prevent replay attacks)
 	requestTime := time.UnixMilli(timestamp)
 	age := time.Since(requestTime)
-	if age < 0 {
-		age = -age // Handle future timestamps
+
+	// Reject future timestamps — only allow small clock skew tolerance.
+	// This prevents pre-signing attacks where an attacker signs a request
+	// with a future timestamp and sends it later within the MaxRequestAge window.
+	const maxClockSkew = 5 * time.Second
+	if age < -maxClockSkew {
+		return nil, fmt.Errorf("request timestamp is in the future (skew: %s, max: %s): %w",
+			-age, maxClockSkew, types.ErrUnauthorized)
 	}
 	if age > v.config.MaxRequestAge {
 		return nil, fmt.Errorf("request timestamp too old (age: %s, max: %s): %w", age, v.config.MaxRequestAge, types.ErrUnauthorized)
@@ -185,7 +191,7 @@ func (v *Verifier) verifyRequestInternal(
 
 	// Enforce nonce requirement if configured
 	if v.config.NonceRequired && v.nonceStore != nil && nonce == "" {
-		return nil, fmt.Errorf("%w: nonce header required", ErrNonceRequired)
+		return nil, fmt.Errorf("nonce header required: %w", types.ErrUnauthorized)
 	}
 
 	stdCtx, ok := ctx.(context.Context)
@@ -200,7 +206,7 @@ func (v *Verifier) verifyRequestInternal(
 			return nil, fmt.Errorf("failed to check nonce: %w", err)
 		}
 		if !isNew {
-			return nil, fmt.Errorf("%w: nonce %s already used", ErrNonceReplay, nonce)
+			return nil, fmt.Errorf("nonce %s already used: %w", nonce, types.ErrUnauthorized)
 		}
 	}
 

@@ -79,6 +79,7 @@ func (sm *StateMachine) ApproveForSigning(ctx context.Context, reqID types.SignR
 	}
 
 	now := time.Now()
+	expectedStatus := req.Status
 	req.Status = types.StatusSigning
 	req.RuleMatchedID = nil
 	if ruleID != nil {
@@ -89,7 +90,7 @@ func (sm *StateMachine) ApproveForSigning(ctx context.Context, reqID types.SignR
 	req.ApprovedAt = &now
 	req.UpdatedAt = now
 
-	if err := sm.requestRepo.Update(ctx, req); err != nil {
+	if err := sm.requestRepo.CompareAndUpdate(ctx, req, expectedStatus); err != nil {
 		return nil, fmt.Errorf("failed to update request: %w", err)
 	}
 
@@ -125,12 +126,13 @@ func (sm *StateMachine) RejectOnAuthorization(ctx context.Context, reqID types.S
 	}
 
 	now := time.Now()
+	expectedStatus := req.Status
 	req.Status = types.StatusRejected
 	req.ErrorMessage = reason
 	req.UpdatedAt = now
 	req.CompletedAt = &now
 
-	if err := sm.requestRepo.Update(ctx, req); err != nil {
+	if err := sm.requestRepo.CompareAndUpdate(ctx, req, expectedStatus); err != nil {
 		return nil, fmt.Errorf("failed to update request: %w", err)
 	}
 
@@ -161,13 +163,14 @@ func (sm *StateMachine) CompleteSign(ctx context.Context, reqID types.SignReques
 	}
 
 	now := time.Now()
+	expectedStatus := req.Status
 	req.Status = types.StatusCompleted
 	req.Signature = signature
 	req.SignedData = signedData
 	req.UpdatedAt = now
 	req.CompletedAt = &now
 
-	if err := sm.requestRepo.Update(ctx, req); err != nil {
+	if err := sm.requestRepo.CompareAndUpdate(ctx, req, expectedStatus); err != nil {
 		return nil, fmt.Errorf("failed to update request: %w", err)
 	}
 
@@ -197,12 +200,13 @@ func (sm *StateMachine) FailSign(ctx context.Context, reqID types.SignRequestID,
 	}
 
 	now := time.Now()
+	expectedStatus := req.Status
 	req.Status = types.StatusFailed
 	req.ErrorMessage = errorMsg
 	req.UpdatedAt = now
 	req.CompletedAt = &now
 
-	if err := sm.requestRepo.Update(ctx, req); err != nil {
+	if err := sm.requestRepo.CompareAndUpdate(ctx, req, expectedStatus); err != nil {
 		return nil, fmt.Errorf("failed to update request: %w", err)
 	}
 
@@ -220,7 +224,7 @@ func (sm *StateMachine) FailSign(ctx context.Context, reqID types.SignRequestID,
 	}, nil
 }
 
-// transition performs a generic state transition
+// transition performs a generic state transition with atomic CAS protection
 func (sm *StateMachine) transition(ctx context.Context, reqID types.SignRequestID, fromStatus, toStatus types.SignRequestStatus, reason string) (*TransitionResult, error) {
 	req, err := sm.requestRepo.Get(ctx, reqID)
 	if err != nil {
@@ -241,7 +245,7 @@ func (sm *StateMachine) transition(ctx context.Context, reqID types.SignRequestI
 		req.ErrorMessage = reason
 	}
 
-	if err := sm.requestRepo.Update(ctx, req); err != nil {
+	if err := sm.requestRepo.CompareAndUpdate(ctx, req, fromStatus); err != nil {
 		return nil, fmt.Errorf("failed to update request: %w", err)
 	}
 
