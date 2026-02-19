@@ -13,6 +13,17 @@ import {
   ApproveRequest,
   ApproveResponse,
   RequestStatus,
+  ListSignersResponse,
+  CreateSignerRequest,
+  CreateSignerResponse,
+  Rule,
+  ListRulesResponse,
+  CreateRuleRequest,
+  UpdateRuleRequest,
+  ListAuditFilter,
+  ListAuditResponse,
+  PreviewRuleRequest,
+  PreviewRuleResponse,
 } from "./types";
 import {
   RemoteSignerError,
@@ -168,6 +179,164 @@ export class RemoteSignerClient {
       "POST",
       `/api/v1/evm/requests/${requestID}/approve`,
       approveRequest
+    );
+    return response;
+  }
+
+  // ==========================================================================
+  // Signer management
+  // ==========================================================================
+
+  /**
+   * List all available signers
+   */
+  async listSigners(): Promise<ListSignersResponse> {
+    const response = await this.request<ListSignersResponse>(
+      "GET",
+      "/api/v1/evm/signers",
+      null
+    );
+    return response;
+  }
+
+  /**
+   * Create a new keystore signer
+   */
+  async createSigner(
+    createRequest: CreateSignerRequest
+  ): Promise<CreateSignerResponse> {
+    const response = await this.request<CreateSignerResponse>(
+      "POST",
+      "/api/v1/evm/signers",
+      createRequest
+    );
+    return response;
+  }
+
+  // ==========================================================================
+  // Rule management (requires admin API key)
+  // ==========================================================================
+
+  /**
+   * List all rules
+   */
+  async listRules(): Promise<ListRulesResponse> {
+    const response = await this.request<ListRulesResponse>(
+      "GET",
+      "/api/v1/evm/rules",
+      null
+    );
+    return response;
+  }
+
+  /**
+   * Get a rule by ID
+   */
+  async getRule(ruleID: string): Promise<Rule> {
+    const response = await this.request<Rule>(
+      "GET",
+      `/api/v1/evm/rules/${ruleID}`,
+      null
+    );
+    return response;
+  }
+
+  /**
+   * Create a new rule
+   */
+  async createRule(rule: CreateRuleRequest): Promise<Rule> {
+    const response = await this.request<Rule>(
+      "POST",
+      "/api/v1/evm/rules",
+      rule
+    );
+    return response;
+  }
+
+  /**
+   * Update an existing rule
+   */
+  async updateRule(
+    ruleID: string,
+    update: UpdateRuleRequest
+  ): Promise<Rule> {
+    const response = await this.request<Rule>(
+      "PATCH",
+      `/api/v1/evm/rules/${ruleID}`,
+      update
+    );
+    return response;
+  }
+
+  /**
+   * Delete a rule
+   */
+  async deleteRule(ruleID: string): Promise<void> {
+    await this.request<void>(
+      "DELETE",
+      `/api/v1/evm/rules/${ruleID}`,
+      null
+    );
+  }
+
+  // ==========================================================================
+  // Audit logs
+  // ==========================================================================
+
+  /**
+   * List audit log records
+   */
+  async listAuditLogs(
+    filter?: ListAuditFilter
+  ): Promise<ListAuditResponse> {
+    const params = new URLSearchParams();
+    if (filter?.event_type) {
+      params.append("event_type", filter.event_type);
+    }
+    if (filter?.api_key_id) {
+      params.append("api_key_id", filter.api_key_id);
+    }
+    if (filter?.chain_type) {
+      params.append("chain_type", filter.chain_type);
+    }
+    if (filter?.start_time) {
+      params.append("start_time", filter.start_time);
+    }
+    if (filter?.end_time) {
+      params.append("end_time", filter.end_time);
+    }
+    if (filter?.limit) {
+      params.append("limit", filter.limit.toString());
+    }
+    if (filter?.cursor) {
+      params.append("cursor", filter.cursor);
+    }
+    if (filter?.cursor_id) {
+      params.append("cursor_id", filter.cursor_id);
+    }
+
+    const queryString = params.toString();
+    const path = `/api/v1/audit${queryString ? `?${queryString}` : ""}`;
+
+    const response = await this.request<ListAuditResponse>("GET", path, null);
+    return response;
+  }
+
+  // ==========================================================================
+  // Preview rule
+  // ==========================================================================
+
+  /**
+   * Preview what rule would be generated for a pending request
+   */
+  async previewRule(
+    requestID: string,
+    previewRequest: PreviewRuleRequest
+  ): Promise<PreviewRuleResponse> {
+    const response = await this.request<PreviewRuleResponse>(
+      "POST",
+      `/api/v1/evm/requests/${requestID}/preview-rule`,
+      previewRequest
     );
     return response;
   }
