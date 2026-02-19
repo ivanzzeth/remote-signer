@@ -1,0 +1,91 @@
+# MCP Development Configuration
+# Uses SQLite, test signer key, no keystore password prompt
+
+server:
+  host: "127.0.0.1"
+  port: 8548
+
+database:
+  # SQLite for local development (no PostgreSQL needed)
+  dsn: "file:./data/remote-signer-mcp-dev.db?_journal_mode=WAL&_busy_timeout=5000"
+
+chains:
+  evm:
+    enabled: true
+    signers:
+      private_keys:
+        # Anvil/Hardhat account 0 test key - DO NOT use in production!
+        - address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          key_env: "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+          enabled: true
+      # No keystores - avoid password prompt for dev
+      keystores: []
+
+    keystore_dir: "./data/keystores"
+
+    foundry:
+      enabled: true
+      forge_path: ""
+      cache_dir: "./data/forge-cache"
+      timeout: "30s"
+
+notify:
+  slack:
+    enabled: false
+  pushover:
+    enabled: false
+
+notify_channels:
+  slack: []
+  pushover: []
+
+security:
+  max_request_age: "5m"
+  rate_limit_default: 1000
+  nonce_required: true
+  ip_whitelist:
+    enabled: false
+
+logger:
+  level: "info"
+  pretty: true
+
+api_keys:
+  # Admin key - private key in data/api_admin_private.pem
+  - id: "admin-key"
+    name: "Admin Key (MCP Dev)"
+    public_key: "MCowBQYDK2VwAyEAPMe0qjd4NQGhpiT9rZyw9xD2ifgSSowpVdOskEfRNhs="
+    admin: true
+    enabled: true
+    rate_limit: 1000
+
+  # Non-admin dev key - private key in data/api_dev_private.pem
+  - id: "dev-key-1"
+    name: "Dev Key 1"
+    public_key: "MCowBQYDK2VwAyEAioufmoQX6xPEcLMOWUvLcXs/5RXEgbpmJ/b6e/i8NNo="
+    admin: false
+    enabled: true
+    rate_limit: 100
+
+# Simple rules for testing
+rules:
+  - name: "Allow hot wallet signer"
+    type: "signer_restriction"
+    mode: "whitelist"
+    enabled: true
+    config:
+      allowed_signers:
+        - "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+
+  - name: "Allow common signing methods"
+    type: "sign_type_restriction"
+    mode: "whitelist"
+    enabled: true
+    config:
+      allowed_sign_types:
+        - "personal"
+        - "typed_data"
+        - "transaction"
+        - "hash"
+        - "raw_message"
+        - "eip191"

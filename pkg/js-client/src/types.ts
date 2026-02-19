@@ -182,3 +182,169 @@ export interface ApproveResponse {
     mode: string;
   };
 }
+
+// ============================================================================
+// Signer types
+// ============================================================================
+
+export interface SignerInfo {
+  address: string;
+  chain_type: string;
+  enabled: boolean;
+  source: string; // "config" | "api"
+}
+
+export interface ListSignersResponse {
+  signers: SignerInfo[];
+}
+
+export interface CreateSignerRequest {
+  password: string;
+}
+
+export interface CreateSignerResponse {
+  address: string;
+  message: string;
+}
+
+// ============================================================================
+// Rule types
+// ============================================================================
+
+export type RuleType =
+  | "evm_address_whitelist"
+  | "evm_contract_method"
+  | "evm_value_limit"
+  | "evm_solidity_expression"
+  | "signer_restriction"
+  | "sign_type_restriction"
+  | "message_pattern";
+
+export type RuleMode = "whitelist" | "blocklist";
+
+export interface Rule {
+  id: string;
+  name: string;
+  description?: string;
+  type: RuleType;
+  mode: RuleMode;
+  source: string;
+  chain_type?: string;
+  chain_id?: string;
+  api_key_id?: string;
+  signer_address?: string;
+  config: Record<string, any>;
+  enabled: boolean;
+  expires_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ListRulesResponse {
+  rules: Rule[];
+}
+
+export interface CreateRuleRequest {
+  name: string;
+  description?: string;
+  type: RuleType;
+  mode: RuleMode;
+  chain_type?: string;
+  chain_id?: string;
+  api_key_id?: string;
+  signer_address?: string;
+  config: Record<string, any>;
+  enabled?: boolean;
+  expires_at?: string;
+}
+
+export interface UpdateRuleRequest {
+  name?: string;
+  description?: string;
+  mode?: RuleMode;
+  config?: Record<string, any>;
+  enabled?: boolean;
+  expires_at?: string;
+}
+
+// ============================================================================
+// Audit types
+// ============================================================================
+
+export type AuditEventType =
+  | "auth_success"
+  | "auth_failure"
+  | "sign_request"
+  | "sign_complete"
+  | "sign_failed"
+  | "sign_rejected"
+  | "rule_matched"
+  | "approval_request"
+  | "approval_granted"
+  | "approval_denied"
+  | "rule_created"
+  | "rule_updated"
+  | "rule_deleted"
+  | "rate_limit_hit";
+
+export interface AuditRecord {
+  id: string;
+  event_type: AuditEventType;
+  severity: "info" | "warning" | "critical";
+  timestamp: string;
+  api_key_id: string;
+  actor_address?: string;
+  sign_request_id?: string;
+  signer_address?: string;
+  chain_type?: string;
+  chain_id?: string;
+  rule_id?: string;
+  details?: Record<string, any>;
+  error_message?: string;
+  request_method?: string;
+  request_path?: string;
+}
+
+export interface ListAuditFilter {
+  event_type?: AuditEventType;
+  api_key_id?: string;
+  chain_type?: string;
+  start_time?: string; // RFC3339
+  end_time?: string; // RFC3339
+  limit?: number;
+  cursor?: string;
+  cursor_id?: string;
+}
+
+export interface ListAuditResponse {
+  records: AuditRecord[];
+  total: number;
+  next_cursor?: string;
+  next_cursor_id?: string;
+  has_more: boolean;
+}
+
+// ============================================================================
+// Preview rule types
+// ============================================================================
+
+export interface PreviewRuleRequest {
+  rule_type: string;
+  rule_mode: RuleMode;
+  rule_name?: string;
+  max_value?: string;
+}
+
+export interface PreviewRuleResponse {
+  id: string;
+  name: string;
+  type: string;
+  mode: string;
+  source: string;
+  chain_type?: string;
+  chain_id?: string;
+  api_key_id?: string;
+  signer_address?: string;
+  config: Record<string, any>;
+  enabled: boolean;
+}

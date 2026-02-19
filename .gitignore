@@ -52,6 +52,7 @@ data/foundry/*
 # Configuration files (sensitive)
 config.yaml
 *.pem
+.mcp.json
 
 # Database
 remote-signer.db
@@ -72,6 +73,7 @@ app/metamask-snap/node_modules/
 
 # Build outputs
 pkg/js-client/dist/
+pkg/mcp-server/build/
 app/metamask-snap/dist/
 app/metamask-snap/snap.manifest.json.bak
 
