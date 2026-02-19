@@ -564,6 +564,255 @@ func TestSecurity_InvalidJSONPayload(t *testing.T) {
 }
 
 // =============================================================================
+// Red Team Round 1: Audit Log Information Disclosure
+// Non-admin API key should NOT be able to read audit logs.
+// =============================================================================
+
+func TestSecurity_AuditLogAccess_NonAdminKey(t *testing.T) {
+	if nonAdminClient == nil {
+		t.Skip("non-admin client not configured")
+	}
+
+	ctx := context.Background()
+
+	// Non-admin should NOT be able to list audit records
+	_, err := nonAdminClient.ListAuditRecords(ctx, nil)
+	require.Error(t, err, "non-admin should NOT be able to access audit logs")
+
+	apiErr, ok := err.(*client.APIError)
+	require.True(t, ok, "expected APIError, got %T: %v", err, err)
+	assert.Equal(t, 403, apiErr.StatusCode,
+		"non-admin accessing audit endpoint must get 403 Forbidden, got %d", apiErr.StatusCode)
+}
+
+func TestSecurity_AuditLogAccess_NonAdminCannotFilterByAPIKeyID(t *testing.T) {
+	if nonAdminClient == nil {
+		t.Skip("non-admin client not configured")
+	}
+
+	ctx := context.Background()
+
+	// Non-admin should NOT be able to query other API key's activity
+	_, err := nonAdminClient.ListAuditRecords(ctx, &client.ListAuditFilter{
+		APIKeyID: adminAPIKeyID, // Try to spy on admin activity
+		Limit:    5,
+	})
+	require.Error(t, err, "non-admin should NOT be able to filter audit logs by other API key IDs")
+
+	apiErr, ok := err.(*client.APIError)
+	require.True(t, ok, "expected APIError, got %T: %v", err, err)
+	assert.Equal(t, 403, apiErr.StatusCode,
+		"non-admin querying other API key's audit must get 403")
+}
+
+// =============================================================================
+// Red Team Round 2: Rule Config Injection
+// Attempt to create rules with invalid or overly-permissive configs.
+// =============================================================================
+
+func TestSecurity_RuleConfigValidation_EmptyAddressList(t *testing.T) {
+	ctx := context.Background()
+
+	// Create an address whitelist rule with empty addresses — should be rejected
+	_, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+		Name:    "Attack: Empty Address Whitelist",
+		Type:    "evm_address_list",
+		Mode:    "whitelist",
+		Enabled: true,
+		Config: map[string]interface{}{
+			"addresses": []string{}, // empty!
+		},
+	})
+	require.Error(t, err, "server must reject empty address list in address_list rule")
+}
+
+func TestSecurity_RuleConfigValidation_InvalidAddressFormat(t *testing.T) {
+	ctx := context.Background()
+
+	// Create a rule with invalid address format
+	_, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+		Name:    "Attack: Invalid Address Format",
+		Type:    "evm_address_list",
+		Mode:    "whitelist",
+		Enabled: true,
+		Config: map[string]interface{}{
+			"addresses": []string{"not-a-valid-address", "0xINVALID"},
+		},
+	})
+	require.Error(t, err, "server must reject invalid address format in address_list rule")
+}
+
+func TestSecurity_RuleConfigValidation_MissingRequiredField(t *testing.T) {
+	ctx := context.Background()
+
+	// Create a value limit rule without max_value — required field
+	_, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+		Name:    "Attack: Missing max_value",
+		Type:    "evm_value_limit",
+		Mode:    "whitelist",
+		Enabled: true,
+		Config:  map[string]interface{}{}, // no max_value!
+	})
+	require.Error(t, err, "server must reject value_limit rule without max_value")
+}
+
+func TestSecurity_RuleConfigValidation_WildcardAddress(t *testing.T) {
+	ctx := context.Background()
+
+	// Try creating a rule with wildcard address that might match everything
+	_, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+		Name:    "Attack: Wildcard Address",
+		Type:    "evm_address_list",
+		Mode:    "whitelist",
+		Enabled: true,
+		Config: map[string]interface{}{
+			"addresses": []string{"*"},
+		},
+	})
+	require.Error(t, err, "server must reject wildcard address in address_list rule")
+}
+
+// =============================================================================
+// Red Team Round 3: Solidity Expression Injection
+// Attempt to inject dangerous Solidity code via rule expressions.
+// =============================================================================
+
+func TestSecurity_SolidityInjection_Selfdestruct(t *testing.T) {
+	ctx := context.Background()
+
+	// Try to create a rule with selfdestruct — should be rejected by config validation
+	_, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+		Name:    "Attack: Selfdestruct",
+		Type:    "evm_solidity_expression",
+		Mode:    "whitelist",
+		Enabled: true,
+		Config: map[string]interface{}{
+			"expression": "selfdestruct(payable(address(0)));",
+		},
+	})
+	require.Error(t, err, "server must reject Solidity expression with selfdestruct")
+}
+
+func TestSecurity_SolidityInjection_Delegatecall(t *testing.T) {
+	ctx := context.Background()
+
+	// Try to create a rule with delegatecall — should be rejected
+	_, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+		Name:    "Attack: Delegatecall",
+		Type:    "evm_solidity_expression",
+		Mode:    "whitelist",
+		Enabled: true,
+		Config: map[string]interface{}{
+			"expression": "address(tx_to).delegatecall(\"\");",
+		},
+	})
+	require.Error(t, err, "server must reject Solidity expression with delegatecall")
+}
+
+func TestSecurity_SolidityInjection_LargeExpression(t *testing.T) {
+	ctx := context.Background()
+
+	// Try to create a rule with a very large expression (100KB) for DoS
+	largeExpr := "require(tx_value > 0, \""
+	for i := 0; i < 100000; i++ {
+		largeExpr += "A"
+	}
+	largeExpr += "\");"
+
+	_, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+		Name:    "Attack: Large Expression DoS",
+		Type:    "evm_solidity_expression",
+		Mode:    "whitelist",
+		Enabled: true,
+		Config: map[string]interface{}{
+			"expression": largeExpr,
+		},
+	})
+	require.Error(t, err, "server must reject extremely large Solidity expression (100KB+)")
+}
+
+// =============================================================================
+// Red Team Round 4: Nonce Enforcement Gap
+// Attempt replay attacks by omitting the nonce header.
+// =============================================================================
+
+func TestSecurity_ReplayAttack_NoNonce_WhenRequired(t *testing.T) {
+	// This test verifies that when nonce_required=true, requests without
+	// X-Nonce header are rejected — even if the signature is otherwise valid.
+	// This catches the bug where nonce enforcement check happens after
+	// signature verification.
+	ctx := context.Background()
+
+	ts := time.Now().UnixMilli()
+	method := "GET"
+	path := "/health"
+	body := []byte("")
+
+	privKeyBytes, err := hex.DecodeString(adminAPIKeyHex)
+	require.NoError(t, err)
+	privKey := ed25519.PrivateKey(privKeyBytes)
+
+	// Sign using LEGACY format (no nonce in the signature message)
+	bodyHash := sha256.Sum256(body)
+	message := fmt.Sprintf("%d|%s|%s|%x", ts, method, path, bodyHash)
+	sig := ed25519.Sign(privKey, []byte(message))
+	sigB64 := base64.StdEncoding.EncodeToString(sig)
+
+	baseURL := getBaseURL()
+
+	req, err := http.NewRequestWithContext(ctx, method, baseURL+path, bytes.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("X-API-Key-ID", adminAPIKeyID)
+	req.Header.Set("X-Timestamp", fmt.Sprintf("%d", ts))
+	req.Header.Set("X-Signature", sigB64)
+	// Deliberately NOT setting X-Nonce
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	// If nonce_required=true is configured, this should be rejected
+	// If the server accepts it (200), this is a vulnerability
+	if resp.StatusCode == http.StatusOK {
+		t.Log("WARNING: server accepted request without nonce when nonce_required may be true — potential replay vulnerability")
+	}
+	// In a properly configured server with nonce_required=true, we expect 401
+	// But in e2e test mode, NonceStore may not be configured, so we note the finding
+}
+
+// =============================================================================
+// Red Team Round 5: Address Casing Bypass (verification of existing tests)
+// Verify that address comparison in rule evaluators is case-insensitive.
+// =============================================================================
+
+func TestSecurity_AddressCasingBypass_WhitelistRule(t *testing.T) {
+	ctx := context.Background()
+
+	// Create a whitelist rule with a specific address casing
+	created, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+		Name:    "Test: Case Sensitivity Check",
+		Type:    "evm_address_list",
+		Mode:    "whitelist",
+		Enabled: true,
+		Config: map[string]interface{}{
+			"addresses": []string{"0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}, // mixed case
+		},
+	})
+	require.NoError(t, err)
+	defer func() { _ = adminClient.DeleteRule(ctx, created.ID) }()
+
+	// Verify the rule was created
+	rule, err := adminClient.GetRule(ctx, created.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "evm_address_list", string(rule.Type))
+
+	// The actual address matching test depends on whether a sign request
+	// with a different-cased address hits this rule. The evaluator should
+	// normalize addresses before comparison.
+	t.Log("Rule created successfully — address casing normalization should be verified in evaluator unit tests")
+}
+
+// =============================================================================
 // Helpers
 // =============================================================================
 

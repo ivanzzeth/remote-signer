@@ -426,7 +426,7 @@ server.registerTool(
         .optional()
         .describe(
           "Optional: generate a rule on approval. " +
-          "Type: evm_address_whitelist, evm_contract_method, evm_value_limit, etc."
+          "Type: evm_address_list, evm_contract_method, evm_value_limit, etc."
         ),
       rule_mode: z
         .enum(["whitelist", "blocklist"])
@@ -473,7 +473,7 @@ server.registerTool(
       rule_type: z
         .string()
         .describe(
-          "Rule type: evm_address_whitelist, evm_contract_method, evm_value_limit, etc."
+          "Rule type: evm_address_list, evm_contract_method, evm_value_limit, etc."
         ),
       rule_mode: z
         .enum(["whitelist", "blocklist"])
@@ -556,7 +556,7 @@ server.registerTool(
     title: "Create Rule",
     description:
       "Create a new authorization rule (requires admin API key). " +
-      "Rule types: evm_address_whitelist, evm_contract_method, evm_value_limit, " +
+      "Rule types: evm_address_list, evm_contract_method, evm_value_limit, " +
       "evm_solidity_expression, signer_restriction, sign_type_restriction, message_pattern",
     inputSchema: {
       name: z.string().describe("Rule name"),
@@ -564,7 +564,7 @@ server.registerTool(
       type: z
         .string()
         .describe(
-          "Rule type: evm_address_whitelist, evm_contract_method, evm_value_limit, " +
+          "Rule type: evm_address_list, evm_contract_method, evm_value_limit, " +
           "evm_solidity_expression, signer_restriction, sign_type_restriction, message_pattern"
         ),
       mode: z
@@ -579,7 +579,7 @@ server.registerTool(
         .record(z.any())
         .describe(
           "Rule configuration. Structure depends on type. " +
-          "e.g. {addresses: [...]} for evm_address_whitelist, " +
+          "e.g. {addresses: [...]} for evm_address_list, " +
           "{max_value: '...'} for evm_value_limit, " +
           "{contract: '...', method_sigs: [...]} for evm_contract_method"
         ),
@@ -727,6 +727,15 @@ server.registerTool(
 );
 
 // ===========================================================================
+// Helper: mask sensitive strings for logging
+// ===========================================================================
+
+function maskString(s: string): string {
+  if (s.length <= 8) return "***";
+  return s.slice(0, 4) + "***" + s.slice(-4);
+}
+
+// ===========================================================================
 // Start server
 // ===========================================================================
 
@@ -735,7 +744,7 @@ async function main() {
   await server.connect(transport);
   console.error("Remote Signer MCP Server running on stdio");
   console.error(`  Base URL: ${BASE_URL}`);
-  console.error(`  API Key ID: ${API_KEY_ID}`);
+  console.error(`  API Key ID: ${maskString(API_KEY_ID)}`);
 }
 
 main().catch((error) => {

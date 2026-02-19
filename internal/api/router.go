@@ -142,8 +142,8 @@ func (r *Router) setupRoutes() error {
 	// Signer management routes (GET with auth, POST with auth + admin)
 	r.mux.Handle("/api/v1/evm/signers", r.withAuth(signerHandler))
 
-	// Audit routes (with auth)
-	r.mux.Handle("/api/v1/audit", r.withAuth(auditHandler))
+	// Audit routes (with auth + admin required — audit logs contain sensitive data)
+	r.mux.Handle("/api/v1/audit", r.withAuthAndAdmin(auditHandler))
 
 	return nil
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -160,6 +161,18 @@ func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Mode == "" {
 		h.writeError(w, "mode is required", http.StatusBadRequest)
+		return
+	}
+
+	// Validate mode is a known value
+	if req.Mode != "whitelist" && req.Mode != "blocklist" {
+		h.writeError(w, "mode must be 'whitelist' or 'blocklist'", http.StatusBadRequest)
+		return
+	}
+
+	// Validate rule config based on type
+	if err := h.validateRuleConfig(req.Type, req.Config); err != nil {
+		h.writeError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -446,6 +459,207 @@ func (h *RuleHandler) writeJSON(w http.ResponseWriter, data interface{}, status 
 
 func (h *RuleHandler) writeError(w http.ResponseWriter, message string, status int) {
 	h.writeJSON(w, ErrorResponse{Error: message}, status)
+}
+
+// ethAddressRegex matches a valid Ethereum address (0x followed by 40 hex chars)
+var ethAddressRegex = regexp.MustCompile(`^0x[0-9a-fA-F]{40}$`)
+
+// validSignTypes defines the known sign types
+var validSignTypes = map[string]bool{
+	"personal":    true,
+	"typed_data":  true,
+	"transaction": true,
+	"hash":        true,
+	"raw_message": true,
+	"eip191":      true,
+}
+
+// maxExpressionLength is the maximum allowed length for Solidity expressions (10 KB)
+const maxExpressionLength = 10 * 1024
+
+// dangerousSolidityPatterns are patterns that should be rejected in expression mode
+var dangerousSolidityPatterns = regexp.MustCompile(`(?i)\b(selfdestruct|delegatecall|create2|suicide)\b`)
+
+// validateRuleConfig validates the config for a given rule type.
+// This ensures that the server rejects malformed or dangerous configurations.
+func (h *RuleHandler) validateRuleConfig(ruleType string, config map[string]interface{}) error {
+	switch types.RuleType(ruleType) {
+	case types.RuleTypeEVMAddressList:
+		return h.validateAddressListConfig(config)
+	case types.RuleTypeEVMValueLimit:
+		return h.validateValueLimitConfig(config)
+	case types.RuleTypeSignerRestriction:
+		return h.validateSignerRestrictionConfig(config)
+	case types.RuleTypeSignTypeRestriction:
+		return h.validateSignTypeRestrictionConfig(config)
+	case types.RuleTypeEVMSolidityExpression:
+		return h.validateSolidityExpressionConfig(config)
+	case types.RuleTypeEVMContractMethod:
+		// Contract method rules have their own validation elsewhere
+		return nil
+	case types.RuleTypeChainRestriction, types.RuleTypeMessagePattern:
+		// These rule types have simpler validation
+		return nil
+	default:
+		return fmt.Errorf("unknown rule type: %s", ruleType)
+	}
+}
+
+func (h *RuleHandler) validateAddressListConfig(config map[string]interface{}) error {
+	addressesRaw, ok := config["addresses"]
+	if !ok {
+		return fmt.Errorf("config.addresses is required for evm_address_list rules")
+	}
+
+	addresses, ok := addressesRaw.([]interface{})
+	if !ok {
+		return fmt.Errorf("config.addresses must be an array")
+	}
+
+	if len(addresses) == 0 {
+		return fmt.Errorf("config.addresses must not be empty")
+	}
+
+	for i, addr := range addresses {
+		addrStr, ok := addr.(string)
+		if !ok {
+			return fmt.Errorf("config.addresses[%d] must be a string", i)
+		}
+		if !ethAddressRegex.MatchString(addrStr) {
+			return fmt.Errorf("config.addresses[%d] is not a valid Ethereum address: %s", i, addrStr)
+		}
+	}
+
+	return nil
+}
+
+func (h *RuleHandler) validateValueLimitConfig(config map[string]interface{}) error {
+	maxValueRaw, ok := config["max_value"]
+	if !ok {
+		return fmt.Errorf("config.max_value is required for evm_value_limit rules")
+	}
+
+	maxValueStr, ok := maxValueRaw.(string)
+	if !ok {
+		return fmt.Errorf("config.max_value must be a string (wei value)")
+	}
+
+	if maxValueStr == "" {
+		return fmt.Errorf("config.max_value must not be empty")
+	}
+
+	// Validate it's a valid numeric string (positive integer)
+	if _, err := strconv.ParseUint(maxValueStr, 10, 64); err != nil {
+		// Could be a very large number — try to validate it's all digits
+		for _, c := range maxValueStr {
+			if c < '0' || c > '9' {
+				return fmt.Errorf("config.max_value must be a positive numeric string, got: %s", maxValueStr)
+			}
+		}
+	}
+
+	return nil
+}
+
+func (h *RuleHandler) validateSignerRestrictionConfig(config map[string]interface{}) error {
+	signersRaw, ok := config["allowed_signers"]
+	if !ok {
+		return fmt.Errorf("config.allowed_signers is required for signer_restriction rules")
+	}
+
+	signers, ok := signersRaw.([]interface{})
+	if !ok {
+		return fmt.Errorf("config.allowed_signers must be an array")
+	}
+
+	if len(signers) == 0 {
+		return fmt.Errorf("config.allowed_signers must not be empty")
+	}
+
+	for i, signer := range signers {
+		signerStr, ok := signer.(string)
+		if !ok {
+			return fmt.Errorf("config.allowed_signers[%d] must be a string", i)
+		}
+		if !ethAddressRegex.MatchString(signerStr) {
+			return fmt.Errorf("config.allowed_signers[%d] is not a valid Ethereum address: %s", i, signerStr)
+		}
+	}
+
+	return nil
+}
+
+func (h *RuleHandler) validateSignTypeRestrictionConfig(config map[string]interface{}) error {
+	typesRaw, ok := config["allowed_sign_types"]
+	if !ok {
+		return fmt.Errorf("config.allowed_sign_types is required for sign_type_restriction rules")
+	}
+
+	signTypes, ok := typesRaw.([]interface{})
+	if !ok {
+		return fmt.Errorf("config.allowed_sign_types must be an array")
+	}
+
+	if len(signTypes) == 0 {
+		return fmt.Errorf("config.allowed_sign_types must not be empty")
+	}
+
+	for i, st := range signTypes {
+		stStr, ok := st.(string)
+		if !ok {
+			return fmt.Errorf("config.allowed_sign_types[%d] must be a string", i)
+		}
+		if !validSignTypes[stStr] {
+			return fmt.Errorf("config.allowed_sign_types[%d] is not a valid sign type: %s", i, stStr)
+		}
+	}
+
+	return nil
+}
+
+func (h *RuleHandler) validateSolidityExpressionConfig(config map[string]interface{}) error {
+	// Check expression length
+	if expr, ok := config["expression"].(string); ok {
+		if len(expr) > maxExpressionLength {
+			return fmt.Errorf("expression is too long (%d bytes, max %d)", len(expr), maxExpressionLength)
+		}
+		// Check for dangerous patterns
+		if dangerousSolidityPatterns.MatchString(expr) {
+			return fmt.Errorf("expression contains dangerous patterns (selfdestruct, delegatecall, create2 are not allowed)")
+		}
+	}
+
+	// Check typed_data_expression length
+	if expr, ok := config["typed_data_expression"].(string); ok {
+		if len(expr) > maxExpressionLength {
+			return fmt.Errorf("typed_data_expression is too long (%d bytes, max %d)", len(expr), maxExpressionLength)
+		}
+		if dangerousSolidityPatterns.MatchString(expr) {
+			return fmt.Errorf("typed_data_expression contains dangerous patterns")
+		}
+	}
+
+	// Check functions length
+	if funcs, ok := config["functions"].(string); ok {
+		if len(funcs) > maxExpressionLength {
+			return fmt.Errorf("functions is too long (%d bytes, max %d)", len(funcs), maxExpressionLength)
+		}
+		if dangerousSolidityPatterns.MatchString(funcs) {
+			return fmt.Errorf("functions contains dangerous patterns")
+		}
+	}
+
+	// Check typed_data_functions length
+	if funcs, ok := config["typed_data_functions"].(string); ok {
+		if len(funcs) > maxExpressionLength {
+			return fmt.Errorf("typed_data_functions is too long (%d bytes, max %d)", len(funcs), maxExpressionLength)
+		}
+		if dangerousSolidityPatterns.MatchString(funcs) {
+			return fmt.Errorf("typed_data_functions contains dangerous patterns")
+		}
+	}
+
+	return nil
 }
 
 // validateSolidityRule validates a Solidity expression rule using the validator
