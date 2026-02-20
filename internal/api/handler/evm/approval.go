@@ -13,6 +13,24 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
 
+// validRuleTypes defines the known rule types for approval/preview validation
+var validRuleTypes = map[types.RuleType]bool{
+	types.RuleTypeSignerRestriction:     true,
+	types.RuleTypeChainRestriction:      true,
+	types.RuleTypeSignTypeRestriction:   true,
+	types.RuleTypeMessagePattern:        true,
+	types.RuleTypeEVMAddressList:        true,
+	types.RuleTypeEVMContractMethod:     true,
+	types.RuleTypeEVMValueLimit:         true,
+	types.RuleTypeEVMSolidityExpression: true,
+}
+
+// validRuleModes defines the known rule modes
+var validRuleModes = map[types.RuleMode]bool{
+	types.RuleModeWhitelist: true,
+	types.RuleModeBlocklist: true,
+}
+
 // ApprovalHandler handles manual approval requests
 type ApprovalHandler struct {
 	signService *service.SignService
@@ -112,6 +130,14 @@ func (h *ApprovalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Build rule options if rule generation is requested
 	var ruleOpts *rule.RuleGenerateOptions
 	if req.RuleType != "" {
+		if !validRuleTypes[types.RuleType(req.RuleType)] {
+			h.writeError(w, "invalid rule_type", http.StatusBadRequest)
+			return
+		}
+		if req.RuleMode != "" && !validRuleModes[types.RuleMode(req.RuleMode)] {
+			h.writeError(w, "invalid rule_mode: must be 'whitelist' or 'blocklist'", http.StatusBadRequest)
+			return
+		}
 		ruleOpts = &rule.RuleGenerateOptions{
 			RuleType: types.RuleType(req.RuleType),
 			RuleMode: types.RuleMode(req.RuleMode),
@@ -204,13 +230,21 @@ func (h *PreviewRuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate required fields
+	// Validate required fields and formats
 	if req.RuleType == "" {
 		h.writeError(w, "rule_type is required", http.StatusBadRequest)
 		return
 	}
+	if !validRuleTypes[types.RuleType(req.RuleType)] {
+		h.writeError(w, "invalid rule_type", http.StatusBadRequest)
+		return
+	}
 	if req.RuleMode == "" {
 		h.writeError(w, "rule_mode is required", http.StatusBadRequest)
+		return
+	}
+	if !validRuleModes[types.RuleMode(req.RuleMode)] {
+		h.writeError(w, "invalid rule_mode: must be 'whitelist' or 'blocklist'", http.StatusBadRequest)
 		return
 	}
 

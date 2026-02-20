@@ -37,6 +37,18 @@ func NewWebhookClient(timeout time.Duration, headers map[string]string) (*Webhoo
 
 // SendToURLs posts the message to every URL. It returns an error only when
 // all URLs fail; partial failures are logged but do not block the rest.
+//
+// Security note (SSRF): Webhook URLs are currently sourced from the config file
+// and controlled by the server administrator, so SSRF risk is low.
+// If webhook URLs are ever exposed via API (user-configurable), the following
+// protections MUST be added:
+//   - Validate URL scheme (allow only http/https, reject file://, gopher://, etc.)
+//   - Resolve hostname and block private/reserved IP ranges:
+//     127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 (ip.IsPrivate)
+//     169.254.169.254 (cloud metadata endpoint, ip.IsLinkLocalUnicast)
+//     ::1, fc00::/7 (IPv6 loopback/private)
+//   - Disable HTTP redirects (attacker can redirect to internal IPs)
+//   - Consider DNS rebinding protection (re-resolve after redirect)
 func (w *WebhookClient) SendToURLs(urls []string, message string) error {
 	if len(urls) == 0 {
 		return fmt.Errorf("webhook URLs are required")

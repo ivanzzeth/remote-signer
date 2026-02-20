@@ -67,9 +67,9 @@ func NewRouter(
 }
 
 func (r *Router) setupRoutes() error {
-	// Health check (no auth required)
+	// Health check (no auth required, but with security headers)
 	healthHandler := handler.NewHealthHandler(r.config.Version)
-	r.mux.Handle("/health", healthHandler)
+	r.mux.Handle("/health", middleware.SecurityHeadersMiddleware()(healthHandler))
 
 	// EVM handlers
 	signHandler, err := evmhandler.NewSignHandler(r.signService, r.logger)
@@ -151,6 +151,7 @@ func (r *Router) setupRoutes() error {
 // withAuth wraps a handler with authentication middleware
 func (r *Router) withAuth(h http.Handler) http.Handler {
 	middlewares := []func(http.Handler) http.Handler{
+		middleware.SecurityHeadersMiddleware(),
 		middleware.RecoveryMiddleware(r.logger),
 		middleware.LoggingMiddleware(r.logger),
 		middleware.AuthMiddleware(r.authVerifier, r.logger),
@@ -171,6 +172,7 @@ func (r *Router) requireAdmin(h http.Handler) http.Handler {
 // withAuthAndAdmin wraps a handler with authentication and admin middleware
 func (r *Router) withAuthAndAdmin(h http.Handler) http.Handler {
 	middlewares := []func(http.Handler) http.Handler{
+		middleware.SecurityHeadersMiddleware(),
 		middleware.RecoveryMiddleware(r.logger),
 		middleware.LoggingMiddleware(r.logger),
 		middleware.AuthMiddleware(r.authVerifier, r.logger),
