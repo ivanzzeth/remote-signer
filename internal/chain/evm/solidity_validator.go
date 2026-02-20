@@ -524,18 +524,27 @@ func (v *SolidityRuleValidator) generateBatchTestScript(rules []*types.Rule, mod
 
 			// Generate test function
 			testFunc := fmt.Sprintf(`    function test_%s_%d() public pure returns (bool) {
-        // Transaction context (tx_* prefix)
+        // Transaction context
         address tx_to = %s;
         uint256 tx_value = %s;
         bytes4 tx_selector = %s;
         bytes memory tx_data = %s;
 
-        // Signing context (ctx_* prefix)
+        // Signing context
         uint256 ctx_chainId = %s;
         address ctx_signer = %s;
 
+        // Backward-compatible short aliases
+        address to = tx_to;
+        uint256 value = tx_value;
+        bytes4 selector = tx_selector;
+        bytes memory data = tx_data;
+        uint256 chainId = ctx_chainId;
+        address signer = ctx_signer;
+
         // Suppress unused variable warnings
         tx_to; tx_value; tx_selector; tx_data; ctx_chainId; ctx_signer;
+        to; value; selector; data; chainId; signer;
 
         // User-defined validation logic
         %s

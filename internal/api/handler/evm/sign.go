@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
@@ -83,21 +84,38 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate required fields
+	// Validate required fields and formats
 	if req.ChainID == "" {
 		h.writeError(w, "chain_id is required", http.StatusBadRequest)
+		return
+	}
+	if _, err := strconv.ParseUint(req.ChainID, 10, 64); err != nil {
+		h.writeError(w, "invalid chain_id: must be a positive decimal integer", http.StatusBadRequest)
 		return
 	}
 	if req.SignerAddress == "" {
 		h.writeError(w, "signer_address is required", http.StatusBadRequest)
 		return
 	}
+	if !ethAddressRegex.MatchString(req.SignerAddress) {
+		h.writeError(w, "invalid signer_address: must be 0x followed by 40 hex characters", http.StatusBadRequest)
+		return
+	}
 	if req.SignType == "" {
 		h.writeError(w, "sign_type is required", http.StatusBadRequest)
 		return
 	}
+	if !validSignTypes[req.SignType] {
+		h.writeError(w, "invalid sign_type: must be one of hash, raw_message, eip191, personal, typed_data, transaction", http.StatusBadRequest)
+		return
+	}
 	if len(req.Payload) == 0 {
 		h.writeError(w, "payload is required", http.StatusBadRequest)
+		return
+	}
+	const maxPayloadSize = 2 * 1024 * 1024 // 2 MB
+	if len(req.Payload) > maxPayloadSize {
+		h.writeError(w, "payload exceeds maximum size", http.StatusBadRequest)
 		return
 	}
 

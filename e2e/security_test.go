@@ -1930,6 +1930,342 @@ func TestRedTeam_PayloadSize_LargeTransactionData(t *testing.T) {
 }
 
 // =============================================================================
+// Red Team Round 4: Parameter-Level Validation Attacks
+// =============================================================================
+
+func TestRedTeam_SignHandler_InvalidSignType(t *testing.T) {
+	ctx := context.Background()
+
+	// Attack: use an invalid sign_type to bypass validation
+	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+		ChainID:       chainID,
+		SignerAddress: signerAddress,
+		SignType:      "evil_type",
+		Payload:       json.RawMessage(`{"message":"test"}`),
+	}, false)
+
+	require.Error(t, err, "VULNERABILITY: invalid sign_type should be rejected at handler level")
+	if resp != nil {
+		assert.NotEqual(t, "completed", resp.Status)
+	}
+}
+
+func TestRedTeam_SignHandler_InvalidSignerAddress(t *testing.T) {
+	ctx := context.Background()
+
+	// Attack: signer_address without valid Ethereum format
+	for _, addr := range []string{"0xINVALID", "not_an_address", "0x123", "0x" + strings.Repeat("GG", 20)} {
+		t.Run("addr_"+addr[:min(len(addr), 16)], func(t *testing.T) {
+			resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+				ChainID:       chainID,
+				SignerAddress: addr,
+				SignType:      "personal",
+				Payload:       json.RawMessage(`{"message":"test"}`),
+			}, false)
+
+			require.Error(t, err, "VULNERABILITY: invalid signer_address '%s' should be rejected", addr)
+			if resp != nil {
+				assert.NotEqual(t, "completed", resp.Status)
+			}
+		})
+	}
+}
+
+func TestRedTeam_SignHandler_InvalidChainID(t *testing.T) {
+	ctx := context.Background()
+
+	// Attack: various invalid chain_id values
+	for _, id := range []string{"-1", "abc", "1.5", "0x1", ""} {
+		name := id
+		if name == "" {
+			name = "empty"
+		}
+		t.Run("chainid_"+name, func(t *testing.T) {
+			resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+				ChainID:       id,
+				SignerAddress: signerAddress,
+				SignType:      "personal",
+				Payload:       json.RawMessage(`{"message":"test"}`),
+			}, false)
+
+			require.Error(t, err, "VULNERABILITY: invalid chain_id '%s' should be rejected", id)
+			if resp != nil {
+				assert.NotEqual(t, "completed", resp.Status)
+			}
+		})
+	}
+}
+
+func TestRedTeam_SignHandler_NegativeTransactionValue(t *testing.T) {
+	ctx := context.Background()
+
+	// Attack: negative ETH value — big.Int accepts negative numbers
+	payload := json.RawMessage(`{
+		"transaction": {
+			"to": "0x0000000000000000000000000000000000000001",
+			"value": "-1000000000000000000",
+			"gas": 21000,
+			"gasPrice": "20000000000",
+			"txType": "legacy"
+		}
+	}`)
+
+	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+		ChainID:       chainID,
+		SignerAddress: signerAddress,
+		SignType:      "transaction",
+		Payload:       payload,
+	}, false)
+
+	require.Error(t, err, "VULNERABILITY: negative transaction value should be rejected")
+	if resp != nil {
+		assert.NotEqual(t, "completed", resp.Status,
+			"VULNERABILITY: signing succeeded with negative value")
+	}
+}
+
+func TestRedTeam_SignHandler_NegativeGasPrice(t *testing.T) {
+	ctx := context.Background()
+
+	// Attack: negative gas price
+	payload := json.RawMessage(`{
+		"transaction": {
+			"to": "0x0000000000000000000000000000000000000001",
+			"value": "0",
+			"gas": 21000,
+			"gasPrice": "-1",
+			"txType": "legacy"
+		}
+	}`)
+
+	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+		ChainID:       chainID,
+		SignerAddress: signerAddress,
+		SignType:      "transaction",
+		Payload:       payload,
+	}, false)
+
+	require.Error(t, err, "VULNERABILITY: negative gasPrice should be rejected")
+	if resp != nil {
+		assert.NotEqual(t, "completed", resp.Status,
+			"VULNERABILITY: signing succeeded with negative gasPrice")
+	}
+}
+
+func TestRedTeam_SignHandler_InvalidToAddress(t *testing.T) {
+	ctx := context.Background()
+
+	// Attack: invalid "to" address — common.HexToAddress silently returns zero address
+	payload := json.RawMessage(`{
+		"transaction": {
+			"to": "0xINVALID_ADDRESS_NOT_HEX",
+			"value": "0",
+			"gas": 21000,
+			"gasPrice": "20000000000",
+			"txType": "legacy"
+		}
+	}`)
+
+	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+		ChainID:       chainID,
+		SignerAddress: signerAddress,
+		SignType:      "transaction",
+		Payload:       payload,
+	}, false)
+
+	require.Error(t, err, "VULNERABILITY: invalid 'to' address should be rejected, not silently converted to zero address")
+	if resp != nil {
+		assert.NotEqual(t, "completed", resp.Status,
+			"VULNERABILITY: signing succeeded with invalid 'to' address (silent truncation to zero address)")
+	}
+}
+
+func TestRedTeam_SignHandler_OversizedPayload(t *testing.T) {
+	ctx := context.Background()
+
+	// Attack: 3MB payload to exceed the 2MB payload limit
+	bigValue := strings.Repeat("A", 3*1024*1024)
+	payload := json.RawMessage(fmt.Sprintf(`{"message":"%s"}`, bigValue))
+
+	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+		ChainID:       chainID,
+		SignerAddress: signerAddress,
+		SignType:      "personal",
+		Payload:       payload,
+	}, false)
+
+	require.Error(t, err, "VULNERABILITY: oversized payload (3MB) should be rejected")
+	if resp != nil {
+		assert.NotEqual(t, "completed", resp.Status)
+	}
+}
+
+func TestRedTeam_SignHandler_OversizedMessage(t *testing.T) {
+	ctx := context.Background()
+
+	// Attack: 2MB personal message to exceed the 1MB message limit
+	bigMessage := strings.Repeat("B", 2*1024*1024)
+	payload := json.RawMessage(fmt.Sprintf(`{"message":"%s"}`, bigMessage))
+
+	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+		ChainID:       chainID,
+		SignerAddress: signerAddress,
+		SignType:      "personal",
+		Payload:       payload,
+	}, false)
+
+	require.Error(t, err, "VULNERABILITY: oversized message (2MB) should be rejected")
+	if resp != nil {
+		assert.NotEqual(t, "completed", resp.Status)
+	}
+}
+
+func TestRedTeam_SignHandler_OversizedTxData(t *testing.T) {
+	ctx := context.Background()
+
+	// Attack: 256KB+ transaction data to exceed the 128KB limit
+	// Data is base64 encoded in JSON, so we send hex-encoded bytes
+	bigData := strings.Repeat("AA", 200*1024) // 200KB of hex = 200KB bytes when decoded
+	payload := json.RawMessage(fmt.Sprintf(`{
+		"transaction": {
+			"to": "0x0000000000000000000000000000000000000001",
+			"value": "0",
+			"gas": 21000,
+			"gasPrice": "20000000000",
+			"txType": "legacy",
+			"data": "%s"
+		}
+	}`, bigData))
+
+	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+		ChainID:       chainID,
+		SignerAddress: signerAddress,
+		SignType:      "transaction",
+		Payload:       payload,
+	}, false)
+
+	require.Error(t, err, "VULNERABILITY: oversized transaction data should be rejected")
+	if resp != nil {
+		assert.NotEqual(t, "completed", resp.Status)
+	}
+}
+
+func TestRedTeam_ListRequests_InvalidStatusFilter(t *testing.T) {
+	ctx := context.Background()
+	baseURL := getBaseURL()
+
+	// Attack: inject invalid status filter into query parameter
+	ts := time.Now().UnixMilli()
+	nonce := fmt.Sprintf("status-filter-%d", ts)
+	method := "GET"
+	path := "/api/v1/evm/requests?status=evil_status"
+	body := []byte("")
+
+	privKeyBytes, err := hex.DecodeString(adminAPIKeyHex)
+	require.NoError(t, err)
+	privKey := ed25519.PrivateKey(privKeyBytes)
+
+	bodyHash := sha256.Sum256(body)
+	message := fmt.Sprintf("%d|%s|%s|%s|%x", ts, nonce, method, path, bodyHash)
+	sig := ed25519.Sign(privKey, []byte(message))
+	sigB64 := base64.StdEncoding.EncodeToString(sig)
+
+	req, err := http.NewRequestWithContext(ctx, method, baseURL+path, bytes.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("X-API-Key-ID", adminAPIKeyID)
+	req.Header.Set("X-Timestamp", fmt.Sprintf("%d", ts))
+	req.Header.Set("X-Signature", sigB64)
+	req.Header.Set("X-Nonce", nonce)
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode,
+		"VULNERABILITY: invalid status filter 'evil_status' should return 400")
+
+	respBody, _ := io.ReadAll(resp.Body)
+	assert.Contains(t, string(respBody), "invalid status filter",
+		"error response should mention invalid status filter")
+}
+
+func TestRedTeam_ListRequests_InvalidCursor(t *testing.T) {
+	ctx := context.Background()
+	baseURL := getBaseURL()
+
+	// Attack: send a non-RFC3339 cursor
+	ts := time.Now().UnixMilli()
+	nonce := fmt.Sprintf("cursor-test-%d", ts)
+	method := "GET"
+	path := "/api/v1/evm/requests?cursor=not-a-timestamp"
+	body := []byte("")
+
+	privKeyBytes, err := hex.DecodeString(adminAPIKeyHex)
+	require.NoError(t, err)
+	privKey := ed25519.PrivateKey(privKeyBytes)
+
+	bodyHash := sha256.Sum256(body)
+	message := fmt.Sprintf("%d|%s|%s|%s|%x", ts, nonce, method, path, bodyHash)
+	sig := ed25519.Sign(privKey, []byte(message))
+	sigB64 := base64.StdEncoding.EncodeToString(sig)
+
+	req, err := http.NewRequestWithContext(ctx, method, baseURL+path, bytes.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("X-API-Key-ID", adminAPIKeyID)
+	req.Header.Set("X-Timestamp", fmt.Sprintf("%d", ts))
+	req.Header.Set("X-Signature", sigB64)
+	req.Header.Set("X-Nonce", nonce)
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode,
+		"VULNERABILITY: invalid cursor 'not-a-timestamp' should return 400, not be silently ignored")
+}
+
+func TestRedTeam_SecurityHeaders_Present(t *testing.T) {
+	baseURL := getBaseURL()
+
+	// Check security headers on /health (unauthenticated endpoint)
+	resp, err := http.Get(baseURL + "/health")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, "nosniff", resp.Header.Get("X-Content-Type-Options"),
+		"VULNERABILITY: X-Content-Type-Options header missing")
+	assert.Equal(t, "DENY", resp.Header.Get("X-Frame-Options"),
+		"VULNERABILITY: X-Frame-Options header missing")
+	assert.Equal(t, "no-store", resp.Header.Get("Cache-Control"),
+		"VULNERABILITY: Cache-Control header missing")
+	assert.Equal(t, "default-src 'none'", resp.Header.Get("Content-Security-Policy"),
+		"VULNERABILITY: Content-Security-Policy header missing")
+}
+
+func TestRedTeam_HeaderLength_OversizedAPIKeyID(t *testing.T) {
+	ctx := context.Background()
+	baseURL := getBaseURL()
+
+	// Attack: send a 10KB X-API-Key-ID to cause memory/DB issues
+	hugeKeyID := strings.Repeat("A", 10*1024)
+	ts := time.Now().UnixMilli()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/api/v1/evm/requests", nil)
+	require.NoError(t, err)
+	req.Header.Set("X-API-Key-ID", hugeKeyID)
+	req.Header.Set("X-Timestamp", fmt.Sprintf("%d", ts))
+	req.Header.Set("X-Signature", "dummysig")
+	req.Header.Set("X-Nonce", "test-nonce")
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode,
+		"VULNERABILITY: oversized X-API-Key-ID (10KB) should return 400")
+}
+
+// =============================================================================
 // Helpers
 // =============================================================================
 

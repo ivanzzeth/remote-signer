@@ -15,6 +15,13 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
 
+// Payload size limits for validation
+const (
+	maxTransactionDataSize = 128 * 1024  // 128 KB
+	maxMessageSize         = 1024 * 1024 // 1 MB
+	maxRawMessageSize      = 256 * 1024  // 256 KB
+)
+
 // EVMAdapter implements types.ChainAdapter for EVM chains
 type EVMAdapter struct {
 	signerRegistry *SignerRegistry
@@ -60,10 +67,16 @@ func (a *EVMAdapter) ValidatePayload(ctx context.Context, signType string, paylo
 		if len(p.RawMessage) == 0 {
 			return fmt.Errorf("raw_message is required for sign type 'raw_message'")
 		}
+		if len(p.RawMessage) > maxRawMessageSize {
+			return fmt.Errorf("raw_message exceeds maximum size of %d bytes", maxRawMessageSize)
+		}
 
 	case SignTypeEIP191, SignTypePersonal:
 		if p.Message == "" {
 			return fmt.Errorf("message is required for sign type '%s'", signType)
+		}
+		if len(p.Message) > maxMessageSize {
+			return fmt.Errorf("message exceeds maximum size of %d bytes", maxMessageSize)
 		}
 
 	case SignTypeTypedData:
@@ -81,8 +94,18 @@ func (a *EVMAdapter) ValidatePayload(ctx context.Context, signType string, paylo
 		if p.Transaction == nil {
 			return fmt.Errorf("transaction is required for sign type 'transaction'")
 		}
+		// Validate 'to' address format (if provided) early to prevent
+		// invalid hex from reaching the Solidity evaluator's template
+		if p.Transaction.To != nil && *p.Transaction.To != "" {
+			if !common.IsHexAddress(*p.Transaction.To) {
+				return fmt.Errorf("invalid 'to' address: %s", *p.Transaction.To)
+			}
+		}
 		if p.Transaction.Gas == 0 {
 			return fmt.Errorf("transaction.gas is required")
+		}
+		if len(p.Transaction.Data) > maxTransactionDataSize {
+			return fmt.Errorf("transaction data exceeds maximum size of %d bytes", maxTransactionDataSize)
 		}
 		switch p.Transaction.TxType {
 		case string(TransactionTypeLegacy):
@@ -258,6 +281,9 @@ func parseChainID(chainID string) (*big.Int, error) {
 	if _, ok := id.SetString(chainID, 10); !ok {
 		return nil, fmt.Errorf("invalid chain ID: %s", chainID)
 	}
+	if id.Sign() <= 0 {
+		return nil, fmt.Errorf("chain ID must be a positive integer: %s", chainID)
+	}
 	return id, nil
 }
 
@@ -298,24 +324,25 @@ func convertToEthTransaction(payload *TransactionPayload, chainID *big.Int) (*et
 
 	var to *common.Address
 	if payload.To != nil && *payload.To != "" {
+		if !common.IsHexAddress(*payload.To) {
+			return nil, fmt.Errorf("invalid 'to' address: %s", *payload.To)
+		}
 		addr := common.HexToAddress(*payload.To)
 		to = &addr
 	}
 
-	value := new(big.Int)
-	if payload.Value != "" {
-		if _, ok := value.SetString(payload.Value, 10); !ok {
-			return nil, fmt.Errorf("invalid value: %s", payload.Value)
-		}
+	value, err := parseNonNegativeBigInt(payload.Value, "value")
+	if err != nil {
+		return nil, err
 	}
 
 	var tx *ethtypes.Transaction
 
 	switch payload.TxType {
 	case string(TransactionTypeLegacy):
-		gasPrice := new(big.Int)
-		if _, ok := gasPrice.SetString(payload.GasPrice, 10); !ok {
-			return nil, fmt.Errorf("invalid gasPrice: %s", payload.GasPrice)
+		gasPrice, err := parseNonNegativeBigInt(payload.GasPrice, "gasPrice")
+		if err != nil {
+			return nil, err
 		}
 		var nonce uint64
 		if payload.Nonce != nil {
@@ -331,13 +358,13 @@ func convertToEthTransaction(payload *TransactionPayload, chainID *big.Int) (*et
 		})
 
 	case string(TransactionTypeEIP1559):
-		gasTipCap := new(big.Int)
-		if _, ok := gasTipCap.SetString(payload.GasTipCap, 10); !ok {
-			return nil, fmt.Errorf("invalid gasTipCap: %s", payload.GasTipCap)
+		gasTipCap, err := parseNonNegativeBigInt(payload.GasTipCap, "gasTipCap")
+		if err != nil {
+			return nil, err
 		}
-		gasFeeCap := new(big.Int)
-		if _, ok := gasFeeCap.SetString(payload.GasFeeCap, 10); !ok {
-			return nil, fmt.Errorf("invalid gasFeeCap: %s", payload.GasFeeCap)
+		gasFeeCap, err := parseNonNegativeBigInt(payload.GasFeeCap, "gasFeeCap")
+		if err != nil {
+			return nil, err
 		}
 		var nonce uint64
 		if payload.Nonce != nil {
@@ -355,9 +382,9 @@ func convertToEthTransaction(payload *TransactionPayload, chainID *big.Int) (*et
 		})
 
 	case string(TransactionTypeEIP2930):
-		gasPrice := new(big.Int)
-		if _, ok := gasPrice.SetString(payload.GasPrice, 10); !ok {
-			return nil, fmt.Errorf("invalid gasPrice: %s", payload.GasPrice)
+		gasPrice, err := parseNonNegativeBigInt(payload.GasPrice, "gasPrice")
+		if err != nil {
+			return nil, err
 		}
 		var nonce uint64
 		if payload.Nonce != nil {
@@ -378,6 +405,22 @@ func convertToEthTransaction(payload *TransactionPayload, chainID *big.Int) (*et
 	}
 
 	return tx, nil
+}
+
+// parseNonNegativeBigInt parses a decimal string as a non-negative big.Int.
+// Returns error if the string is not a valid decimal integer or is negative.
+func parseNonNegativeBigInt(s string, fieldName string) (*big.Int, error) {
+	if s == "" {
+		return new(big.Int), nil
+	}
+	v := new(big.Int)
+	if _, ok := v.SetString(s, 10); !ok {
+		return nil, fmt.Errorf("invalid %s: %s", fieldName, s)
+	}
+	if v.Sign() < 0 {
+		return nil, fmt.Errorf("%s must not be negative: %s", fieldName, s)
+	}
+	return v, nil
 }
 
 func encodeSignature(r, s, v *big.Int) []byte {

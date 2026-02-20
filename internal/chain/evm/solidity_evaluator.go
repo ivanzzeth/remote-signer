@@ -17,31 +17,41 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
 
 // solidityExpressionTemplate is for require-based rules (Expression mode)
-// Context variables use prefixes to avoid conflicts with user-defined field names:
-// - tx_* : Transaction context (tx_to, tx_value, tx_selector, tx_data)
-// - ctx_* : Signing context (ctx_chainId, ctx_signer)
+// Context variables are available with both short names and tx_*/ctx_* prefixed names:
+// - Short: to, value, selector, data, chainId, signer (backward-compatible)
+// - Prefixed: tx_to, tx_value, tx_selector, tx_data, ctx_chainId, ctx_signer
 const solidityExpressionTemplate = `// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 contract RuleEvaluator {
     function run() public pure returns (bool) {
-        // Transaction context (tx_* prefix)
+        // Transaction context
         address tx_to = {{.To}};
         uint256 tx_value = {{.Value}};
         bytes4 tx_selector = {{.Selector}};
         bytes memory tx_data = {{.Data}};
 
-        // Signing context (ctx_* prefix)
+        // Signing context
         uint256 ctx_chainId = {{.ChainID}};
         address ctx_signer = {{.Signer}};
 
+        // Backward-compatible short aliases
+        address to = tx_to;
+        uint256 value = tx_value;
+        bytes4 selector = tx_selector;
+        bytes memory data = tx_data;
+        uint256 chainId = ctx_chainId;
+        address signer = ctx_signer;
+
         // Suppress unused variable warnings
         tx_to; tx_value; tx_selector; tx_data; ctx_chainId; ctx_signer;
+        to; value; selector; data; chainId; signer;
 
         // User-defined validation logic
         {{.Expression}}
@@ -721,18 +731,27 @@ pragma solidity ^0.8.20;
 
 contract SyntaxCheck {
     function run() public pure returns (bool) {
-        // Transaction context (tx_* prefix)
+        // Transaction context
         address tx_to = address(0);
         uint256 tx_value = 0;
         bytes4 tx_selector = bytes4(0);
         bytes memory tx_data = "";
 
-        // Signing context (ctx_* prefix)
+        // Signing context
         uint256 ctx_chainId = 1;
         address ctx_signer = address(0);
 
+        // Backward-compatible short aliases
+        address to = tx_to;
+        uint256 value = tx_value;
+        bytes4 selector = tx_selector;
+        bytes memory data = tx_data;
+        uint256 chainId = ctx_chainId;
+        address signer = ctx_signer;
+
         // Suppress unused variable warnings
         tx_to; tx_value; tx_selector; tx_data; ctx_chainId; ctx_signer;
+        to; value; selector; data; chainId; signer;
 
         // User expression
         %s
@@ -828,11 +847,24 @@ func formatAddress(addr *string) string {
 	if addr == nil || *addr == "" {
 		return "address(0)"
 	}
-	return *addr
+	// Defense in depth: validate hex format before embedding in Solidity.
+	// Invalid addresses would cause forge compilation errors and could
+	// poison the shared compilation directory (forge compiles all .sol files).
+	if !common.IsHexAddress(*addr) {
+		return "address(0)"
+	}
+	// Solidity requires EIP-55 checksummed addresses.
+	// common.HexToAddress().Hex() returns the properly checksummed form.
+	return common.HexToAddress(*addr).Hex()
 }
 
 func formatWei(value *string) string {
 	if value == nil || *value == "" {
+		return "0"
+	}
+	// Defense in depth: negative values would cause Solidity compilation errors
+	// (uint256 cannot hold negative values) and poison the shared compilation directory.
+	if strings.HasPrefix(*value, "-") {
 		return "0"
 	}
 	return *value

@@ -15,6 +15,16 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
+// validStatuses defines the known sign request statuses
+var validStatuses = map[types.SignRequestStatus]bool{
+	types.StatusPending:     true,
+	types.StatusAuthorizing: true,
+	types.StatusSigning:     true,
+	types.StatusCompleted:   true,
+	types.StatusRejected:    true,
+	types.StatusFailed:      true,
+}
+
 // RequestHandler handles request status queries
 type RequestHandler struct {
 	signService *service.SignService
@@ -161,7 +171,12 @@ func (h *ListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if statusStr := query.Get("status"); statusStr != "" {
 		statuses := strings.Split(statusStr, ",")
 		for _, s := range statuses {
-			filter.Status = append(filter.Status, types.SignRequestStatus(s))
+			status := types.SignRequestStatus(strings.TrimSpace(s))
+			if !validStatuses[status] {
+				h.writeError(w, fmt.Sprintf("invalid status filter: %s", s), http.StatusBadRequest)
+				return
+			}
+			filter.Status = append(filter.Status, status)
 		}
 	}
 
@@ -175,9 +190,11 @@ func (h *ListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Parse cursor for pagination
 	if cursorStr := query.Get("cursor"); cursorStr != "" {
 		cursor, err := time.Parse(time.RFC3339Nano, cursorStr)
-		if err == nil {
-			filter.Cursor = &cursor
+		if err != nil {
+			h.writeError(w, "invalid cursor: must be RFC3339 timestamp", http.StatusBadRequest)
+			return
 		}
+		filter.Cursor = &cursor
 	}
 	if cursorID := query.Get("cursor_id"); cursorID != "" {
 		id := types.SignRequestID(cursorID)

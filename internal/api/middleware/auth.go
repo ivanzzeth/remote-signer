@@ -32,6 +32,24 @@ func AuthMiddleware(verifier *auth.Verifier, logger *slog.Logger) func(http.Hand
 			signature := r.Header.Get("X-Signature")
 			nonce := r.Header.Get("X-Nonce") // Optional: for replay protection
 
+			// Validate header lengths to prevent memory abuse
+			const (
+				maxAPIKeyIDLen  = 128
+				maxTimestampLen = 24
+				maxSignatureLen = 256
+				maxNonceLen     = 256
+			)
+			if len(apiKeyID) > maxAPIKeyIDLen || len(timestampStr) > maxTimestampLen ||
+				len(signature) > maxSignatureLen || len(nonce) > maxNonceLen {
+				logger.Warn("auth header exceeds maximum length",
+					"path", r.URL.Path,
+					"api_key_id_len", len(apiKeyID),
+					"nonce_len", len(nonce),
+				)
+				http.Error(w, "invalid authentication headers", http.StatusBadRequest)
+				return
+			}
+
 			if apiKeyID == "" || timestampStr == "" || signature == "" {
 				logger.Warn("missing auth headers",
 					"path", r.URL.Path,
