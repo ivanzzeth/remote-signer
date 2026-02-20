@@ -2266,8 +2266,826 @@ func TestRedTeam_HeaderLength_OversizedAPIKeyID(t *testing.T) {
 }
 
 // =============================================================================
+// Red Team Phase 5: Solidity Rule Bypass via API-Created Rules
+// These tests create evm_solidity_expression rules (functions + typed_data)
+// via the admin API, then attempt to bypass them with attack payloads.
+//
+// NOTE on transaction data encoding:
+// The server's TransactionPayload.Data is []byte, so Go's json.Unmarshal
+// expects base64-encoded strings (not hex). The hexToBase64 helper converts
+// 0x-prefixed hex calldata to base64 for use in raw JSON payloads.
+// Rule test_cases use SolidityTestInput.Data (string type) which accepts hex.
+//
+// NOTE on rule mode for typed_data tests:
+// Whitelist rules are OR'd — any matching whitelist rule approves the request.
+// Since config-level signer_restriction and sign_type_restriction whitelist
+// rules auto-approve typed_data, Solidity expression rules that validate
+// typed_data MUST use "blocklist" mode so they are evaluated in Phase 1
+// (before any whitelist rule can approve).
+// =============================================================================
+
+// TestRedTeam_PT5_FakeTokenApprove creates a functions-mode rule that only allows
+// approve() to a known spender on a specific ERC20 contract, then sends
+// approve(validSpender, max) targeting a FAKE ERC20 contract address.
+// The rule's txTo check should block this.
+func TestRedTeam_PT5_FakeTokenApprove(t *testing.T) {
+	if useExternalServer {
+		t.Skip("requires internal server with Foundry support")
+	}
+
+	ctx := context.Background()
+
+	// Known good addresses
+	realUSDC := "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+	validSpender := "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+
+	// Create a functions-mode BLOCKLIST rule that rejects approve() to non-USDC contracts.
+	// Blocklist rules are evaluated first; if the require() reverts the tx is blocked.
+	rule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+		Name:    "RT5: ERC20 approve whitelist",
+		Type:    "evm_solidity_expression",
+		Mode:    "blocklist",
+		Enabled: true,
+		Config: map[string]interface{}{
+			"functions": fmt.Sprintf(`
+				function approve(address spender, uint256 amount) external {
+					require(txTo == %s, "target must be real USDC");
+					require(spender == %s, "spender not whitelisted");
+					require(amount <= 1000000000, "amount exceeds 1000 USDC");
+				}
+			`, realUSDC, validSpender),
+			"description": "Only allow approve on real USDC to known spender",
+			"test_cases": []map[string]interface{}{
+				{
+					"name": "should pass for real USDC approve",
+					"input": map[string]interface{}{
+						"to": realUSDC,
+						// approve(validSpender, 500 USDC = 500e6)
+						// selector 0x095ea7b3
+						"data": "0x095ea7b3" +
+							"0000000000000000000000005B38Da6a701c568545dCfcB03FcB875f56beddC4" +
+							"000000000000000000000000000000000000000000000000000000001DCD6500",
+					},
+					"expect_pass": true,
+				},
+				{
+					"name": "should reject fake token",
+					"input": map[string]interface{}{
+						"to": "0xdEAD000000000000000000000000000000000000", // fake contract
+						"data": "0x095ea7b3" +
+							"0000000000000000000000005B38Da6a701c568545dCfcB03FcB875f56beddC4" +
+							"000000000000000000000000000000000000000000000000000000001DCD6500",
+					},
+					"expect_pass": false,
+					"expect_reason": "target must be real USDC",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Skipf("Foundry not available or rule creation failed: %v", err)
+	}
+	defer func() { _ = adminClient.DeleteRule(ctx, rule.ID) }()
+
+	// ATTACK: Send approve(validSpender, uint256.max) to a FAKE ERC20 contract
+	fakeToken := "0xdEAD000000000000000000000000000000000000"
+	// approve(validSpender, type(uint256).max)
+	approveHex := "095ea7b3" +
+		"0000000000000000000000005B38Da6a701c568545dCfcB03FcB875f56beddC4" +
+		"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+
+	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+		ChainID:       chainID,
+		SignerAddress: signerAddress,
+		SignType:      "transaction",
+		Payload: json.RawMessage(fmt.Sprintf(`{
+			"transaction": {
+				"to": "%s",
+				"value": "0",
+				"data": "%s",
+				"gas": 50000,
+				"gasPrice": "1000000000",
+				"txType": "legacy",
+				"nonce": 0
+			}
+		}`, fakeToken, hexToBase64(approveHex))),
+	}, false)
+
+	// The blocklist rule should reject this because txTo != realUSDC
+	if err == nil && resp != nil && resp.Status == "completed" {
+		t.Errorf("VULNERABILITY: approve() to fake ERC20 contract %s was signed! txTo check bypassed", fakeToken)
+	} else {
+		t.Logf("PASS: approve to fake token correctly blocked (err=%v)", err)
+	}
+}
+
+// TestRedTeam_PT5_FakeTokenTransfer creates a functions-mode rule that only
+// allows transfer() on a specific ERC20 contract, then sends
+// transfer(treasury, amount) targeting a fake ERC20 contract.
+func TestRedTeam_PT5_FakeTokenTransfer(t *testing.T) {
+	if useExternalServer {
+		t.Skip("requires internal server with Foundry support")
+	}
+
+	ctx := context.Background()
+
+	realUSDC := "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+
+	rule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+		Name:    "RT5: ERC20 transfer whitelist",
+		Type:    "evm_solidity_expression",
+		Mode:    "blocklist",
+		Enabled: true,
+		Config: map[string]interface{}{
+			"functions": fmt.Sprintf(`
+				function transfer(address to, uint256 amount) external {
+					require(txTo == %s, "target must be real USDC");
+					require(amount <= 10000000000, "amount exceeds 10k USDC");
+					require(to != address(0), "cannot transfer to zero address");
+				}
+			`, realUSDC),
+			"description": "Only allow transfer on real USDC",
+			"test_cases": []map[string]interface{}{
+				{
+					"name": "should pass for real USDC transfer",
+					"input": map[string]interface{}{
+						"to": realUSDC,
+						// transfer(treasury, 1000 USDC = 1000e6)
+						"data": "0xa9059cbb" +
+							"0000000000000000000000005B38Da6a701c568545dCfcB03FcB875f56beddC4" +
+							"000000000000000000000000000000000000000000000000000000003B9ACA00",
+					},
+					"expect_pass": true,
+				},
+				{
+					"name": "should reject fake token",
+					"input": map[string]interface{}{
+						"to": "0x1111111111111111111111111111111111111111",
+						"data": "0xa9059cbb" +
+							"0000000000000000000000005B38Da6a701c568545dCfcB03FcB875f56beddC4" +
+							"000000000000000000000000000000000000000000000000000000003B9ACA00",
+					},
+					"expect_pass": false,
+					"expect_reason": "target must be real USDC",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Skipf("Foundry not available or rule creation failed: %v", err)
+	}
+	defer func() { _ = adminClient.DeleteRule(ctx, rule.ID) }()
+
+	// ATTACK: Send transfer(treasury, 5000 USDC) to a FAKE token contract
+	fakeToken := "0x1111111111111111111111111111111111111111"
+	// transfer(treasury, 5000e6)
+	transferHex := "a9059cbb" +
+		"0000000000000000000000005B38Da6a701c568545dCfcB03FcB875f56beddC4" +
+		"000000000000000000000000000000000000000000000000000000012A05F200"
+
+	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+		ChainID:       chainID,
+		SignerAddress: signerAddress,
+		SignType:      "transaction",
+		Payload: json.RawMessage(fmt.Sprintf(`{
+			"transaction": {
+				"to": "%s",
+				"value": "0",
+				"data": "%s",
+				"gas": 50000,
+				"gasPrice": "1000000000",
+				"txType": "legacy",
+				"nonce": 1
+			}
+		}`, fakeToken, hexToBase64(transferHex))),
+	}, false)
+
+	if err == nil && resp != nil && resp.Status == "completed" {
+		t.Errorf("VULNERABILITY: transfer() to fake ERC20 contract %s was signed! txTo check bypassed", fakeToken)
+	} else {
+		t.Logf("PASS: transfer to fake token correctly blocked (err=%v)", err)
+	}
+}
+
+// TestRedTeam_PT5_ExecTxDelegatecall creates a functions-mode rule for
+// execTransaction that requires operation==0 (Call), then sends
+// execTransaction with operation=1 (DelegateCall) to attempt code injection.
+// NOTE: The Solidity code avoids the word "delegatecall" which is blocked
+// by the API's dangerous pattern filter. The rule uses "operation must be zero".
+func TestRedTeam_PT5_ExecTxDelegatecall(t *testing.T) {
+	if useExternalServer {
+		t.Skip("requires internal server with Foundry support")
+	}
+
+	ctx := context.Background()
+
+	safeProxy := "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045" // example Safe address
+
+	rule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+		Name:    "RT5: execTransaction - operation must be zero",
+		Type:    "evm_solidity_expression",
+		Mode:    "blocklist",
+		Enabled: true,
+		Config: map[string]interface{}{
+			"functions": fmt.Sprintf(`
+				function execTransaction(
+					address to,
+					uint256 value,
+					bytes calldata data_,
+					uint8 operation,
+					uint256 safeTxGas,
+					uint256 baseGas,
+					uint256 gasPrice_,
+					address gasToken,
+					address payable refundReceiver,
+					bytes calldata signatures
+				) external returns (bool) {
+					require(txTo == %s, "target must be Safe proxy");
+					require(operation == 0, "operation must be zero (Call only)");
+					require(gasPrice_ == 0, "gasPrice must be zero");
+					require(gasToken == address(0), "gasToken must be zero");
+					require(refundReceiver == address(0), "refundReceiver must be zero");
+				}
+			`, safeProxy),
+			"description": "execTransaction: only allow operation=0",
+			"test_cases": []map[string]interface{}{
+				{
+					"name": "should pass for normal call",
+					"input": map[string]interface{}{
+						"to": safeProxy,
+						// execTransaction(to, 0, empty_data, operation=0, ...)
+						// selector: 0x6a761202
+						"data": "0x6a761202" +
+							"0000000000000000000000005B38Da6a701c568545dCfcB03FcB875f56beddC4" + // to
+							"0000000000000000000000000000000000000000000000000000000000000000" + // value
+							"0000000000000000000000000000000000000000000000000000000000000140" + // data offset
+							"0000000000000000000000000000000000000000000000000000000000000000" + // operation=0 (Call)
+							"0000000000000000000000000000000000000000000000000000000000000000" + // safeTxGas
+							"0000000000000000000000000000000000000000000000000000000000000000" + // baseGas
+							"0000000000000000000000000000000000000000000000000000000000000000" + // gasPrice=0
+							"0000000000000000000000000000000000000000000000000000000000000000" + // gasToken=0
+							"0000000000000000000000000000000000000000000000000000000000000000" + // refundReceiver=0
+							"0000000000000000000000000000000000000000000000000000000000000160" + // signatures offset
+							"0000000000000000000000000000000000000000000000000000000000000000" + // data length=0
+							"0000000000000000000000000000000000000000000000000000000000000041" + // signatures length=65
+							"0000000000000000000000000000000000000000000000000000000000000000" + // sig r
+							"0000000000000000000000000000000000000000000000000000000000000000" + // sig s
+							"0000000000000000000000000000000000000000000000000000000000000000", // sig v (padded)
+					},
+					"expect_pass": true,
+				},
+				{
+					"name": "should reject operation=1",
+					"input": map[string]interface{}{
+						"to": safeProxy,
+						"data": "0x6a761202" +
+							"0000000000000000000000005B38Da6a701c568545dCfcB03FcB875f56beddC4" +
+							"0000000000000000000000000000000000000000000000000000000000000000" +
+							"0000000000000000000000000000000000000000000000000000000000000140" +
+							"0000000000000000000000000000000000000000000000000000000000000001" + // operation=1
+							"0000000000000000000000000000000000000000000000000000000000000000" +
+							"0000000000000000000000000000000000000000000000000000000000000000" +
+							"0000000000000000000000000000000000000000000000000000000000000000" +
+							"0000000000000000000000000000000000000000000000000000000000000000" +
+							"0000000000000000000000000000000000000000000000000000000000000000" +
+							"0000000000000000000000000000000000000000000000000000000000000160" +
+							"0000000000000000000000000000000000000000000000000000000000000000" +
+							"0000000000000000000000000000000000000000000000000000000000000041" +
+							"0000000000000000000000000000000000000000000000000000000000000000" +
+							"0000000000000000000000000000000000000000000000000000000000000000" +
+							"0000000000000000000000000000000000000000000000000000000000000000",
+					},
+					"expect_pass": false,
+					"expect_reason": "operation must be zero (Call only)",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Skipf("Foundry not available or rule creation failed: %v", err)
+	}
+	defer func() { _ = adminClient.DeleteRule(ctx, rule.ID) }()
+
+	// ATTACK: Send execTransaction with operation=1 (DelegateCall)
+	attackHex := "6a761202" +
+		"0000000000000000000000005B38Da6a701c568545dCfcB03FcB875f56beddC4" +
+		"0000000000000000000000000000000000000000000000000000000000000000" +
+		"0000000000000000000000000000000000000000000000000000000000000140" +
+		"0000000000000000000000000000000000000000000000000000000000000001" + // operation=1 (DelegateCall!)
+		"0000000000000000000000000000000000000000000000000000000000000000" +
+		"0000000000000000000000000000000000000000000000000000000000000000" +
+		"0000000000000000000000000000000000000000000000000000000000000000" +
+		"0000000000000000000000000000000000000000000000000000000000000000" +
+		"0000000000000000000000000000000000000000000000000000000000000000" +
+		"0000000000000000000000000000000000000000000000000000000000000160" +
+		"0000000000000000000000000000000000000000000000000000000000000000" +
+		"0000000000000000000000000000000000000000000000000000000000000041" +
+		"0000000000000000000000000000000000000000000000000000000000000000" +
+		"0000000000000000000000000000000000000000000000000000000000000000" +
+		"0000000000000000000000000000000000000000000000000000000000000000"
+
+	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+		ChainID:       chainID,
+		SignerAddress: signerAddress,
+		SignType:      "transaction",
+		Payload: json.RawMessage(fmt.Sprintf(`{
+			"transaction": {
+				"to": "%s",
+				"value": "0",
+				"data": "%s",
+				"gas": 500000,
+				"gasPrice": "1000000000",
+				"txType": "legacy",
+				"nonce": 2
+			}
+		}`, safeProxy, hexToBase64(attackHex))),
+	}, false)
+
+	if err == nil && resp != nil && resp.Status == "completed" {
+		t.Errorf("VULNERABILITY: execTransaction with operation=1 (DelegateCall) was signed!")
+	} else {
+		t.Logf("PASS: execTransaction with operation=1 correctly blocked (err=%v)", err)
+	}
+}
+
+// TestRedTeam_PT5_ExecTxGasDrain creates a functions-mode rule for
+// execTransaction, then sends execTransaction with gasPrice>0 and
+// gasToken=USDT to attempt gas-fee draining of the Safe.
+func TestRedTeam_PT5_ExecTxGasDrain(t *testing.T) {
+	if useExternalServer {
+		t.Skip("requires internal server with Foundry support")
+	}
+
+	ctx := context.Background()
+
+	safeProxy := "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
+
+	rule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+		Name:    "RT5: execTransaction - no gas drain",
+		Type:    "evm_solidity_expression",
+		Mode:    "blocklist",
+		Enabled: true,
+		Config: map[string]interface{}{
+			"functions": fmt.Sprintf(`
+				function execTransaction(
+					address to,
+					uint256 value,
+					bytes calldata data_,
+					uint8 operation,
+					uint256 safeTxGas,
+					uint256 baseGas,
+					uint256 gasPrice_,
+					address gasToken,
+					address payable refundReceiver,
+					bytes calldata signatures
+				) external returns (bool) {
+					require(txTo == %s, "target must be Safe proxy");
+					require(operation == 0, "only Call allowed");
+					require(gasPrice_ == 0, "gasPrice must be zero to prevent drain");
+					require(gasToken == address(0), "gasToken must be zero");
+					require(refundReceiver == address(0), "refundReceiver must be zero");
+				}
+			`, safeProxy),
+			"description": "execTransaction: block gas draining attack",
+			"test_cases": []map[string]interface{}{
+				{
+					"name": "should pass for safe exec with zero gas params",
+					"input": map[string]interface{}{
+						"to": safeProxy,
+						"data": "0x6a761202" +
+							"0000000000000000000000005B38Da6a701c568545dCfcB03FcB875f56beddC4" +
+							"0000000000000000000000000000000000000000000000000000000000000000" +
+							"0000000000000000000000000000000000000000000000000000000000000140" +
+							"0000000000000000000000000000000000000000000000000000000000000000" + // operation=0
+							"0000000000000000000000000000000000000000000000000000000000000000" + // safeTxGas=0
+							"0000000000000000000000000000000000000000000000000000000000000000" + // baseGas=0
+							"0000000000000000000000000000000000000000000000000000000000000000" + // gasPrice=0
+							"0000000000000000000000000000000000000000000000000000000000000000" + // gasToken=0
+							"0000000000000000000000000000000000000000000000000000000000000000" + // refundReceiver=0
+							"0000000000000000000000000000000000000000000000000000000000000160" +
+							"0000000000000000000000000000000000000000000000000000000000000000" +
+							"0000000000000000000000000000000000000000000000000000000000000041" +
+							"0000000000000000000000000000000000000000000000000000000000000000" +
+							"0000000000000000000000000000000000000000000000000000000000000000" +
+							"0000000000000000000000000000000000000000000000000000000000000000",
+					},
+					"expect_pass": true,
+				},
+				{
+					"name": "should reject gas drain with non-zero gasPrice and gasToken",
+					"input": map[string]interface{}{
+						"to": safeProxy,
+						"data": "0x6a761202" +
+							"0000000000000000000000005B38Da6a701c568545dCfcB03FcB875f56beddC4" +
+							"0000000000000000000000000000000000000000000000000000000000000000" +
+							"0000000000000000000000000000000000000000000000000000000000000140" +
+							"0000000000000000000000000000000000000000000000000000000000000000" +
+							"0000000000000000000000000000000000000000000000000000000000000000" +
+							"0000000000000000000000000000000000000000000000000000000000000000" +
+							"0000000000000000000000000000000000000000000000000000000005F5E100" + // gasPrice=100M
+							"000000000000000000000000dAC17F958D2ee523a2206206994597C13D831ec7" + // gasToken=USDT
+							"0000000000000000000000000000000000000000000000000000000000000000" +
+							"0000000000000000000000000000000000000000000000000000000000000160" +
+							"0000000000000000000000000000000000000000000000000000000000000000" +
+							"0000000000000000000000000000000000000000000000000000000000000041" +
+							"0000000000000000000000000000000000000000000000000000000000000000" +
+							"0000000000000000000000000000000000000000000000000000000000000000" +
+							"0000000000000000000000000000000000000000000000000000000000000000",
+					},
+					"expect_pass": false,
+					"expect_reason": "gasPrice must be zero to prevent drain",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Skipf("Foundry not available or rule creation failed: %v", err)
+	}
+	defer func() { _ = adminClient.DeleteRule(ctx, rule.ID) }()
+
+	// ATTACK: Send execTransaction with gasPrice=100M and gasToken=USDT
+	gasDrainHex := "6a761202" +
+		"0000000000000000000000005B38Da6a701c568545dCfcB03FcB875f56beddC4" +
+		"0000000000000000000000000000000000000000000000000000000000000000" +
+		"0000000000000000000000000000000000000000000000000000000000000140" +
+		"0000000000000000000000000000000000000000000000000000000000000000" + // operation=0 (ok)
+		"0000000000000000000000000000000000000000000000000000000000000000" +
+		"0000000000000000000000000000000000000000000000000000000000000000" +
+		"0000000000000000000000000000000000000000000000000000000005F5E100" + // gasPrice=100M ← ATTACK
+		"000000000000000000000000dAC17F958D2ee523a2206206994597C13D831ec7" + // gasToken=USDT ← ATTACK
+		"0000000000000000000000000000000000000000000000000000000000000000" +
+		"0000000000000000000000000000000000000000000000000000000000000160" +
+		"0000000000000000000000000000000000000000000000000000000000000000" +
+		"0000000000000000000000000000000000000000000000000000000000000041" +
+		"0000000000000000000000000000000000000000000000000000000000000000" +
+		"0000000000000000000000000000000000000000000000000000000000000000" +
+		"0000000000000000000000000000000000000000000000000000000000000000"
+
+	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+		ChainID:       chainID,
+		SignerAddress: signerAddress,
+		SignType:      "transaction",
+		Payload: json.RawMessage(fmt.Sprintf(`{
+			"transaction": {
+				"to": "%s",
+				"value": "0",
+				"data": "%s",
+				"gas": 500000,
+				"gasPrice": "1000000000",
+				"txType": "legacy",
+				"nonce": 3
+			}
+		}`, safeProxy, hexToBase64(gasDrainHex))),
+	}, false)
+
+	if err == nil && resp != nil && resp.Status == "completed" {
+		t.Errorf("VULNERABILITY: execTransaction with gasPrice>0 and gasToken=USDT was signed! Gas drain attack succeeded")
+	} else {
+		t.Logf("PASS: execTransaction gas drain correctly blocked (err=%v)", err)
+	}
+}
+
+// TestRedTeam_PT5_FakeExchangeOrder creates a typed_data BLOCKLIST rule for
+// an exchange Order struct with verifyingContract check, then sends an
+// EIP-712 Order with a fake verifyingContract to attempt signature on a
+// rogue exchange. Blocklist mode ensures the require() reverts block the tx
+// before other whitelist rules (signer_restriction, sign_type_restriction)
+// can auto-approve it.
+func TestRedTeam_PT5_FakeExchangeOrder(t *testing.T) {
+	if useExternalServer {
+		t.Skip("requires internal server with Foundry support")
+	}
+
+	ctx := context.Background()
+
+	realExchange := "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E" // example exchange
+	// Use a properly checksummed fake address to avoid Solidity compiler errors
+	fakeExchange := "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+
+	rule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+		Name:    "RT5: Exchange Order - verifyingContract check",
+		Type:    "evm_solidity_expression",
+		Mode:    "blocklist",
+		Enabled: true,
+		Config: map[string]interface{}{
+			"typed_data_struct": `struct Order {
+				address maker;
+				address taker;
+				uint256 makerAmount;
+				uint256 takerAmount;
+				uint256 nonce;
+			}`,
+			"typed_data_expression": fmt.Sprintf(`
+				require(
+					eip712_domainContract == %s,
+					"verifyingContract must be the real exchange"
+				);
+				require(
+					order.maker == ctx_signer,
+					"maker must be the signer"
+				);
+				require(
+					order.makerAmount <= 100000000000,
+					"makerAmount exceeds 100k limit"
+				);
+			`, realExchange),
+			"sign_type_filter": "typed_data",
+			"description":      "Only sign Orders on the real exchange",
+			"test_cases": []map[string]interface{}{
+				{
+					"name": "should pass for real exchange order",
+					"input": map[string]interface{}{
+						"typed_data": map[string]interface{}{
+							"primaryType": "Order",
+							"domain": map[string]interface{}{
+								"name":              "TestExchange",
+								"version":           "1",
+								"chainId":           chainID,
+								"verifyingContract": realExchange,
+							},
+							"message": map[string]interface{}{
+								"maker":       signerAddress,
+								"taker":       "0x0000000000000000000000000000000000000000",
+								"makerAmount": "50000000000",
+								"takerAmount": "25000000000",
+								"nonce":       "1",
+							},
+						},
+					},
+					"expect_pass": true,
+				},
+				{
+					"name": "should reject fake exchange",
+					"input": map[string]interface{}{
+						"typed_data": map[string]interface{}{
+							"primaryType": "Order",
+							"domain": map[string]interface{}{
+								"name":              "FakeExchange",
+								"version":           "1",
+								"chainId":           chainID,
+								"verifyingContract": fakeExchange,
+							},
+							"message": map[string]interface{}{
+								"maker":       signerAddress,
+								"taker":       "0x0000000000000000000000000000000000000000",
+								"makerAmount": "50000000000",
+								"takerAmount": "25000000000",
+								"nonce":       "1",
+							},
+						},
+					},
+					"expect_pass": false,
+					"expect_reason": "verifyingContract must be the real exchange",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Skipf("Foundry not available or rule creation failed: %v", err)
+	}
+	defer func() { _ = adminClient.DeleteRule(ctx, rule.ID) }()
+
+	// ATTACK: Send an Order with a FAKE verifyingContract
+	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+		ChainID:       chainID,
+		SignerAddress: signerAddress,
+		SignType:      "typed_data",
+		Payload: json.RawMessage(fmt.Sprintf(`{
+			"typed_data": {
+				"types": {
+					"EIP712Domain": [
+						{"name": "name", "type": "string"},
+						{"name": "version", "type": "string"},
+						{"name": "chainId", "type": "uint256"},
+						{"name": "verifyingContract", "type": "address"}
+					],
+					"Order": [
+						{"name": "maker", "type": "address"},
+						{"name": "taker", "type": "address"},
+						{"name": "makerAmount", "type": "uint256"},
+						{"name": "takerAmount", "type": "uint256"},
+						{"name": "nonce", "type": "uint256"}
+					]
+				},
+				"primaryType": "Order",
+				"domain": {
+					"name": "FakeExchange",
+					"version": "1",
+					"chainId": "%s",
+					"verifyingContract": "%s"
+				},
+				"message": {
+					"maker": "%s",
+					"taker": "0x0000000000000000000000000000000000000000",
+					"makerAmount": "50000000000",
+					"takerAmount": "1",
+					"nonce": "999"
+				}
+			}
+		}`, chainID, fakeExchange, signerAddress)),
+	}, false)
+
+	if err == nil && resp != nil && resp.Status == "completed" {
+		t.Errorf("VULNERABILITY: EIP-712 Order with fake verifyingContract %s was signed!", fakeExchange)
+	} else {
+		t.Logf("PASS: Order with fake verifyingContract correctly blocked (err=%v)", err)
+	}
+}
+
+// TestRedTeam_PT5_SafeTxDelegatecall creates a typed_data BLOCKLIST rule for
+// a SafeTx struct that requires operation==0, then sends a SafeTx with
+// operation=1 (DelegateCall) to attempt arbitrary code execution through
+// the Safe. Blocklist mode ensures the Solidity require() is evaluated
+// before other whitelist rules can auto-approve typed_data.
+// NOTE: The Solidity code avoids the word "delegatecall" which is blocked
+// by the API's dangerous pattern filter. The rule uses "operation must be zero".
+func TestRedTeam_PT5_SafeTxDelegatecall(t *testing.T) {
+	if useExternalServer {
+		t.Skip("requires internal server with Foundry support")
+	}
+
+	ctx := context.Background()
+
+	safeProxy := "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
+
+	rule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+		Name:    "RT5: SafeTx - operation must be zero",
+		Type:    "evm_solidity_expression",
+		Mode:    "blocklist",
+		Enabled: true,
+		Config: map[string]interface{}{
+			"typed_data_struct": `struct SafeTx {
+				address to;
+				uint256 value;
+				bytes data;
+				uint8 operation;
+				uint256 safeTxGas;
+				uint256 baseGas;
+				uint256 gasPrice;
+				address gasToken;
+				address refundReceiver;
+				uint256 nonce;
+			}`,
+			"typed_data_expression": fmt.Sprintf(`
+				require(
+					eip712_domainContract == %s,
+					"verifyingContract must be the Safe proxy"
+				);
+				require(
+					safeTx.operation == 0,
+					"operation must be zero (Call only)"
+				);
+				require(
+					safeTx.gasPrice == 0,
+					"gasPrice must be zero"
+				);
+				require(
+					safeTx.gasToken == address(0),
+					"gasToken must be zero"
+				);
+				require(
+					safeTx.refundReceiver == address(0),
+					"refundReceiver must be zero"
+				);
+			`, safeProxy),
+			"sign_type_filter": "typed_data",
+			"description":      "SafeTx: block non-zero operation and gas drain via EIP-712",
+			"test_cases": []map[string]interface{}{
+				{
+					"name": "should pass for safe Call operation",
+					"input": map[string]interface{}{
+						"typed_data": map[string]interface{}{
+							"primaryType": "SafeTx",
+							"domain": map[string]interface{}{
+								"name":              "GnosisSafe",
+								"version":           "1.3.0",
+								"chainId":           chainID,
+								"verifyingContract": safeProxy,
+							},
+							"message": map[string]interface{}{
+								"to":             "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4",
+								"value":          "0",
+								"data":           "0x",
+								"operation":      "0",
+								"safeTxGas":      "0",
+								"baseGas":        "0",
+								"gasPrice":       "0",
+								"gasToken":       "0x0000000000000000000000000000000000000000",
+								"refundReceiver": "0x0000000000000000000000000000000000000000",
+								"nonce":          "0",
+							},
+						},
+					},
+					"expect_pass": true,
+				},
+				{
+					"name": "should reject operation=1",
+					"input": map[string]interface{}{
+						"typed_data": map[string]interface{}{
+							"primaryType": "SafeTx",
+							"domain": map[string]interface{}{
+								"name":              "GnosisSafe",
+								"version":           "1.3.0",
+								"chainId":           chainID,
+								"verifyingContract": safeProxy,
+							},
+							"message": map[string]interface{}{
+								"to":             "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4",
+								"value":          "0",
+								"data":           "0x",
+								"operation":      "1",
+								"safeTxGas":      "0",
+								"baseGas":        "0",
+								"gasPrice":       "0",
+								"gasToken":       "0x0000000000000000000000000000000000000000",
+								"refundReceiver": "0x0000000000000000000000000000000000000000",
+								"nonce":          "0",
+							},
+						},
+					},
+					"expect_pass": false,
+					"expect_reason": "operation must be zero (Call only)",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Skipf("Foundry not available or rule creation failed: %v", err)
+	}
+	defer func() { _ = adminClient.DeleteRule(ctx, rule.ID) }()
+
+	// ATTACK: Send SafeTx EIP-712 with operation=1 (DelegateCall)
+	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+		ChainID:       chainID,
+		SignerAddress: signerAddress,
+		SignType:      "typed_data",
+		Payload: json.RawMessage(fmt.Sprintf(`{
+			"typed_data": {
+				"types": {
+					"EIP712Domain": [
+						{"name": "name", "type": "string"},
+						{"name": "version", "type": "string"},
+						{"name": "chainId", "type": "uint256"},
+						{"name": "verifyingContract", "type": "address"}
+					],
+					"SafeTx": [
+						{"name": "to", "type": "address"},
+						{"name": "value", "type": "uint256"},
+						{"name": "data", "type": "bytes"},
+						{"name": "operation", "type": "uint8"},
+						{"name": "safeTxGas", "type": "uint256"},
+						{"name": "baseGas", "type": "uint256"},
+						{"name": "gasPrice", "type": "uint256"},
+						{"name": "gasToken", "type": "address"},
+						{"name": "refundReceiver", "type": "address"},
+						{"name": "nonce", "type": "uint256"}
+					]
+				},
+				"primaryType": "SafeTx",
+				"domain": {
+					"name": "GnosisSafe",
+					"version": "1.3.0",
+					"chainId": "%s",
+					"verifyingContract": "%s"
+				},
+				"message": {
+					"to": "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4",
+					"value": "0",
+					"data": "0x",
+					"operation": "1",
+					"safeTxGas": "0",
+					"baseGas": "0",
+					"gasPrice": "0",
+					"gasToken": "0x0000000000000000000000000000000000000000",
+					"refundReceiver": "0x0000000000000000000000000000000000000000",
+					"nonce": "42"
+				}
+			}
+		}`, chainID, safeProxy)),
+	}, false)
+
+	if err == nil && resp != nil && resp.Status == "completed" {
+		t.Errorf("VULNERABILITY: SafeTx with operation=1 (DelegateCall) was signed!")
+	} else {
+		t.Logf("PASS: SafeTx with operation=1 correctly blocked (err=%v)", err)
+	}
+}
+
+// =============================================================================
 // Helpers
 // =============================================================================
+
+// hexToBase64 converts a hex string (without 0x prefix) to base64.
+// This is needed because Go's json.Unmarshal for []byte fields expects
+// base64-encoded strings, while EVM calldata is naturally hex-encoded.
+func hexToBase64(hexStr string) string {
+	hexStr = strings.TrimPrefix(hexStr, "0x")
+	b, err := hex.DecodeString(hexStr)
+	if err != nil {
+		panic(fmt.Sprintf("hexToBase64: invalid hex string: %v", err))
+	}
+	return base64.StdEncoding.EncodeToString(b)
+}
 
 // getBaseURL returns the base URL for the test server.
 // Uses the internal test server's BaseURL or falls back to default.

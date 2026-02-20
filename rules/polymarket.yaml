@@ -71,6 +71,8 @@ rules:
           keccak256(bytes(eip712_domainVersion)) == keccak256(bytes("1")),
           "invalid domain version"
         );
+        // [VULN-07] Chain ID validation — prevent cross-chain replay
+        require(eip712_domainChainId == 137, "must be on Polygon");
 
         // Message validation via struct instance
         require(
@@ -109,6 +111,21 @@ rules:
                 message: "This message attests that I control the given wallet"
           expect_pass: false
           expect_reason: "invalid domain name"
+        - name: "should reject wrong chainId"
+          input:
+            typed_data:
+              primaryType: "ClobAuth"
+              domain:
+                name: "ClobAuthDomain"
+                version: "1"
+                chainId: "56"
+              message:
+                address: "0x1234567890123456789012345678901234567890"
+                timestamp: "1704067200"
+                nonce: "12345"
+                message: "This message attests that I control the given wallet"
+          expect_pass: false
+          expect_reason: "must be on Polygon"
 
   # ===========================================================================
   # EIP-712 ORDER SIGNING RULES (CTF Exchange)
@@ -147,10 +164,18 @@ rules:
           keccak256(bytes(eip712_domainVersion)) == keccak256(bytes("1")),
           "invalid domain version"
         );
+        // [VULN-05] Verify the contract address to prevent fake exchange attacks
+        require(
+          eip712_domainContract == 0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E,
+          "invalid verifying contract"
+        );
 
         // Order validation via struct instance
         // taker must be zero address for public orders (anyone can fill)
         require(order.taker == address(0), "taker must be zero address");
+
+        // [VULN-10] Signer identity validation — order.signer must match the actual signing key
+        require(order.signer == ctx_signer, "order signer must match signing key");
 
         // Fee validation: max 10% (1000 basis points)
         require(order.feeRateBps <= 1000, "fee exceeds 10%");
@@ -179,6 +204,7 @@ rules:
                 feeRateBps: "100"
                 side: "0"
                 signatureType: "0"
+            signer: "0x1234567890123456789012345678901234567890"
           expect_pass: true
         - name: "should reject non-zero taker"
           input:
@@ -202,8 +228,34 @@ rules:
                 feeRateBps: "100"
                 side: "0"
                 signatureType: "0"
+            signer: "0x1234567890123456789012345678901234567890"
           expect_pass: false
           expect_reason: "taker must be zero address"
+        - name: "should reject wrong verifying contract"
+          input:
+            typed_data:
+              primaryType: "Order"
+              domain:
+                name: "Polymarket CTF Exchange"
+                version: "1"
+                chainId: "137"
+                verifyingContract: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+              message:
+                salt: "12345"
+                maker: "0x1234567890123456789012345678901234567890"
+                signer: "0x1234567890123456789012345678901234567890"
+                taker: "0x0000000000000000000000000000000000000000"
+                tokenId: "1"
+                makerAmount: "1000000000000000000"
+                takerAmount: "1000000000000000000"
+                expiration: "1893456000"
+                nonce: "0"
+                feeRateBps: "100"
+                side: "0"
+                signatureType: "0"
+            signer: "0x1234567890123456789012345678901234567890"
+          expect_pass: false
+          expect_reason: "invalid verifying contract"
 
   # ===========================================================================
   # EIP-712 CREATE PROXY RULES (Safe Wallet Creation)
@@ -295,11 +347,20 @@ rules:
       typed_data_expression: |
         // Domain validation for Safe on Polygon
         require(eip712_domainChainId == 137, "SafeTx must be on Polygon");
-        // verifyingContract is the Safe wallet address (validated externally)
+        // [VULN-08] verifyingContract must be non-zero (Safe address varies per user)
+        require(eip712_domainContract != address(0), "verifyingContract required");
 
         // Value must be 0 for token operations (no native token transfer)
         // Access via struct instance
         require(safeTx.value == 0, "ETH value must be zero");
+
+        // [VULN-11] Only CALL operations allowed — block DELEGATECALL
+        require(safeTx.operation == 0, "only CALL operations allowed");
+
+        // [VULN-12] Gas manipulation protection
+        require(safeTx.gasPrice == 0, "gasPrice must be zero");
+        require(safeTx.gasToken == address(0), "gasToken must be zero");
+        require(safeTx.refundReceiver == address(0), "refundReceiver must be zero");
       sign_type_filter: "typed_data"
       description: "Safe transaction signing with value=0 constraint"
       test_cases:
@@ -342,6 +403,66 @@ rules:
                 nonce: "0"
           expect_pass: false
           expect_reason: "ETH value must be zero"
+        - name: "should reject SafeTx with DELEGATECALL"
+          input:
+            typed_data:
+              primaryType: "SafeTx"
+              domain:
+                chainId: "137"
+                verifyingContract: "0x1234567890123456789012345678901234567890"
+              message:
+                to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+                value: "0"
+                data: "0x095ea7b3"
+                operation: "1"
+                safeTxGas: "0"
+                baseGas: "0"
+                gasPrice: "0"
+                gasToken: "0x0000000000000000000000000000000000000000"
+                refundReceiver: "0x0000000000000000000000000000000000000000"
+                nonce: "0"
+          expect_pass: false
+          expect_reason: "only CALL operations allowed"
+        - name: "should reject SafeTx with non-zero gasPrice"
+          input:
+            typed_data:
+              primaryType: "SafeTx"
+              domain:
+                chainId: "137"
+                verifyingContract: "0x1234567890123456789012345678901234567890"
+              message:
+                to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+                value: "0"
+                data: "0x095ea7b3"
+                operation: "0"
+                safeTxGas: "0"
+                baseGas: "0"
+                gasPrice: "1000000000"
+                gasToken: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+                refundReceiver: "0x1234567890123456789012345678901234567890"
+                nonce: "0"
+          expect_pass: false
+          expect_reason: "gasPrice must be zero"
+        - name: "should reject SafeTx with zero verifyingContract"
+          input:
+            typed_data:
+              primaryType: "SafeTx"
+              domain:
+                chainId: "137"
+                verifyingContract: "0x0000000000000000000000000000000000000000"
+              message:
+                to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+                value: "0"
+                data: "0x095ea7b3"
+                operation: "0"
+                safeTxGas: "0"
+                baseGas: "0"
+                gasPrice: "0"
+                gasToken: "0x0000000000000000000000000000000000000000"
+                refundReceiver: "0x0000000000000000000000000000000000000000"
+                nonce: "0"
+          expect_pass: false
+          expect_reason: "verifyingContract required"
 
   # ===========================================================================
   # ETHEREUM TRANSACTION RULES - SAFE WALLET OPERATIONS
@@ -372,6 +493,11 @@ rules:
             address paymentReceiver,
             Signature memory createSig
         ) external {
+            // [VULN-01] Validate target contract is Safe Proxy Factory
+            require(
+                txTo == 0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b,
+                "target must be Safe Factory"
+            );
             // Payment should be zero (free creation)
             require(paymentToken == address(0), "payment token must be zero");
             require(payment == 0, "payment must be zero");
@@ -392,6 +518,13 @@ rules:
             data: "0xa1884d2c0000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa8417400000000000000000000000000000000000000000000000000000000000000010000000000000000000000001234567890123456789012345678901234567890000000000000000000000000000000000000000000000000000000000000001b12345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678"
           expect_pass: false
           expect_reason: "payment token must be zero"
+        - name: "should reject wrong target contract"
+          input:
+            to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+            # createProxy on fake contract
+            data: "0xa1884d2c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          expect_pass: false
+          expect_reason: "target must be Safe Factory"
 
   # Safe execTransaction - Execute through Safe wallet
   - name: "Polymarket Safe Execute Transaction"
@@ -404,6 +537,7 @@ rules:
       functions: |
         // execTransaction is allowed because the SafeTx EIP712 signature
         // has already been validated with strict rules
+        // Note: txTo is not validated here because Safe wallet address varies per user
         function execTransaction(
             address to,
             uint256 value,
@@ -418,7 +552,12 @@ rules:
         ) external {
             // Value must be zero (no native token transfer)
             require(value == 0, "value must be zero");
-            // Parameters match the signed SafeTx, so this is safe
+            // [VULN-11] Only CALL operations allowed — block DELEGATECALL
+            require(operation == 0, "only CALL allowed");
+            // [VULN-12] Gas manipulation protection
+            require(gasPrice == 0, "gasPrice must be zero");
+            require(gasToken == address(0), "gasToken must be zero");
+            require(refundReceiver == address(0), "refundReceiver must be zero");
         }
       description: "Safe execution - signature already validated"
       test_cases:
@@ -436,6 +575,13 @@ rules:
             data: "0x6a7612020000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa841740000000000000000000000000000000000000000000000000de0b6b3a76400000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000016000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
           expect_pass: false
           expect_reason: "value must be zero"
+        - name: "should reject execTransaction with DELEGATECALL"
+          input:
+            to: "0x1234567890123456789012345678901234567890"
+            # execTransaction with operation=1 (DELEGATECALL)
+            data: "0x6a7612020000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa8417400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000016000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          expect_pass: false
+          expect_reason: "only CALL allowed"
 
   # ===========================================================================
   # ETHEREUM TRANSACTION RULES - TOKEN SWAPS & TRANSFERS
@@ -452,6 +598,11 @@ rules:
       functions: |
         // Native USDC on Polygon: 0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359
         function approve(address spender, uint256 amount) external {
+            // [VULN-01] Validate target contract is USDC (native)
+            require(
+                txTo == 0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359,
+                "target must be USDC"
+            );
             // UniswapV3 SwapRouter
             require(
                 spender == 0xE592427A0AEce92De3Edee1F18E0157C05861564,
@@ -473,6 +624,13 @@ rules:
             data: "0x095ea7b30000000000000000000000001234567890123456789012345678901234567890ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
           expect_pass: false
           expect_reason: "spender must be UniswapV3 Router"
+        - name: "should reject approve on wrong target contract"
+          input:
+            to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+            # approve(UniswapV3Router, max) but on fake ERC20
+            data: "0x095ea7b3000000000000000000000000e592427a0aece92de3edee1f18e0157c05861564ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: false
+          expect_reason: "target must be USDC"
 
   # UniswapV3 Swap - USDC to USDC.e
   - name: "Polymarket UniswapV3 USDC Swap"
@@ -499,6 +657,11 @@ rules:
 
         // Function selector: 0x414bf389
         function exactInputSingle(ExactInputSingleParams calldata params) external {
+            // [VULN-01] Validate target contract is UniswapV3 Router
+            require(
+                txTo == 0xE592427A0AEce92De3Edee1F18E0157C05861564,
+                "target must be UniswapV3 Router"
+            );
             // tokenIn must be USDC (native)
             require(
                 params.tokenIn == 0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359,
@@ -526,6 +689,13 @@ rules:
             data: "0x414bf3890000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa841740000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa841740000000000000000000000000000000000000000000000000000000000000064000000000000000000000000123456789012345678901234567890123456789000000000000000000000000000000000000000000000000000000000ffffffff000000000000000000000000000000000000000000000000000000000098968000000000000000000000000000000000000000000000000000000000009896800000000000000000000000000000000000000000000000000000000000000000"
           expect_pass: false
           expect_reason: "tokenIn must be USDC"
+        - name: "should reject swap on wrong target contract"
+          input:
+            to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+            # exactInputSingle on fake router
+            data: "0x414bf3890000000000000000000000003c499c542cef5e3811e1192ce70d8cc03d5c33590000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa841740000000000000000000000000000000000000000000000000000000000000064000000000000000000000000123456789012345678901234567890123456789000000000000000000000000000000000000000000000000000000000ffffffff000000000000000000000000000000000000000000000000000000000098968000000000000000000000000000000000000000000000000000000000009896800000000000000000000000000000000000000000000000000000000000000000"
+          expect_pass: false
+          expect_reason: "target must be UniswapV3 Router"
 
   # Transfer USDC.e to Treasury
   - name: "Polymarket USDC.e to Treasury"
@@ -538,6 +708,11 @@ rules:
       functions: |
         // USDC.e on Polygon: 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174
         function transfer(address recipient, uint256 amount) external {
+            // [VULN-01] Validate target contract is USDC.e
+            require(
+                txTo == 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174,
+                "target must be USDC.e"
+            );
             // Treasury wallet address
             require(
                 recipient == 0x9Ce3316B865e940227EA724AFdeAAA2759f1AA7C,
@@ -559,6 +734,13 @@ rules:
             data: "0xa9059cbb000000000000000000000000123456789012345678901234567890123456789000000000000000000000000000000000000000000000000000000000000f4240"
           expect_pass: false
           expect_reason: "recipient must be Treasury"
+        - name: "should reject transfer on wrong target contract"
+          input:
+            to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+            # transfer(Treasury, amount) on fake token
+            data: "0xa9059cbb0000000000000000000000009ce3316b865e940227ea724afdeaaa2759f1aa7c00000000000000000000000000000000000000000000000000000000000f4240"
+          expect_pass: false
+          expect_reason: "target must be USDC.e"
 
   # Transfer USDC to Treasury
   - name: "Polymarket USDC to Treasury"
@@ -571,6 +753,11 @@ rules:
       functions: |
         // USDC (native) on Polygon: 0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359
         function transfer(address recipient, uint256 amount) external {
+            // [VULN-01] Validate target contract is USDC (native)
+            require(
+                txTo == 0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359,
+                "target must be USDC"
+            );
             // Treasury wallet address
             require(
                 recipient == 0x9Ce3316B865e940227EA724AFdeAAA2759f1AA7C,
@@ -592,6 +779,13 @@ rules:
             data: "0xa9059cbb000000000000000000000000123456789012345678901234567890123456789000000000000000000000000000000000000000000000000000000000000f4240"
           expect_pass: false
           expect_reason: "recipient must be Treasury"
+        - name: "should reject USDC transfer on wrong target contract"
+          input:
+            to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+            # transfer(Treasury, amount) on fake token
+            data: "0xa9059cbb0000000000000000000000009ce3316b865e940227ea724afdeaaa2759f1aa7c00000000000000000000000000000000000000000000000000000000000f4240"
+          expect_pass: false
+          expect_reason: "target must be USDC"
 
   # Transfer USDC.e to Safe wallet
   - name: "Polymarket USDC.e to Safe"
@@ -604,23 +798,42 @@ rules:
       functions: |
         // USDC.e on Polygon: 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174
         function transfer(address recipient, uint256 amount) external {
-            // recipient should be a Safe wallet - validated externally via signer_address scope
-            // This rule should be scoped to specific Safe addresses via rule configuration
+            // [VULN-01] Validate target contract is USDC.e
+            require(
+                txTo == 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174,
+                "target must be USDC.e"
+            );
+            // [VULN-09] Recipient must not be zero address
+            require(recipient != address(0), "recipient must not be zero");
         }
       description: "USDC.e transfer to Safe wallet for trading"
       test_cases:
-        - name: "should pass transfer to any address (Safe wallet)"
+        - name: "should pass transfer to Safe wallet"
           input:
             to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
             # transfer(0xABCD..., 1000000)
             data: "0xa9059cbb000000000000000000000000abcdabcdabcdabcdabcdabcdabcdabcdabcdabcd00000000000000000000000000000000000000000000000000000000000f4240"
           expect_pass: true
+        - name: "should reject transfer to zero address"
+          input:
+            to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+            # transfer(0x0, 1000000)
+            data: "0xa9059cbb000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f4240"
+          expect_pass: false
+          expect_reason: "recipient must not be zero"
         - name: "should reject non-transfer function call"
           input:
             to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
             # approve(...) instead of transfer
             data: "0x095ea7b3000000000000000000000000abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
           expect_pass: false
+        - name: "should reject transfer on wrong target contract"
+          input:
+            to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+            # transfer on fake token
+            data: "0xa9059cbb000000000000000000000000abcdabcdabcdabcdabcdabcdabcdabcdabcdabcd00000000000000000000000000000000000000000000000000000000000f4240"
+          expect_pass: false
+          expect_reason: "target must be USDC.e"
 
   # ===========================================================================
   # SAFE WALLET INTERNAL TRANSACTION RULES - USDC APPROVALS
@@ -637,6 +850,11 @@ rules:
       functions: |
         // USDC.e on Polygon: 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174
         function approve(address spender, uint256 amount) external {
+            // [VULN-01] Validate target contract is USDC.e
+            require(
+                txTo == 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174,
+                "target must be USDC.e"
+            );
             // CTF Exchange
             require(
                 spender == 0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E,
@@ -658,6 +876,13 @@ rules:
             data: "0x095ea7b30000000000000000000000001234567890123456789012345678901234567890ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
           expect_pass: false
           expect_reason: "spender must be CTF Exchange"
+        - name: "should reject approve on wrong target contract"
+          input:
+            to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+            # approve(CTF Exchange, max) on fake token
+            data: "0x095ea7b30000000000000000000000004bfb41d5b3570defd03c39a9a4d8de6bd8b8982effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: false
+          expect_reason: "target must be USDC.e"
 
   # USDC.e Approve to NegRiskAdapter
   - name: "Polymarket USDC Approve NegRiskAdapter"
@@ -670,6 +895,11 @@ rules:
       functions: |
         // USDC.e on Polygon: 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174
         function approve(address spender, uint256 amount) external {
+            // [VULN-01] Validate target contract is USDC.e
+            require(
+                txTo == 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174,
+                "target must be USDC.e"
+            );
             // NegRiskAdapter
             require(
                 spender == 0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296,
@@ -691,6 +921,13 @@ rules:
             data: "0x095ea7b30000000000000000000000001234567890123456789012345678901234567890ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
           expect_pass: false
           expect_reason: "spender must be NegRiskAdapter"
+        - name: "should reject approve on wrong target contract"
+          input:
+            to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+            # approve(NegRiskAdapter, max) on fake token
+            data: "0x095ea7b3000000000000000000000000d91e80cf2e7be2e162c6513ced06f1dd0da35296ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: false
+          expect_reason: "target must be USDC.e"
 
   # USDC.e Approve to NegRiskExchange
   - name: "Polymarket USDC Approve NegRiskExchange"
@@ -703,6 +940,11 @@ rules:
       functions: |
         // USDC.e on Polygon: 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174
         function approve(address spender, uint256 amount) external {
+            // [VULN-01] Validate target contract is USDC.e
+            require(
+                txTo == 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174,
+                "target must be USDC.e"
+            );
             // NegRiskExchange
             require(
                 spender == 0xC5d563A36AE78145C45a50134d48A1215220f80a,
@@ -724,6 +966,13 @@ rules:
             data: "0x095ea7b30000000000000000000000001234567890123456789012345678901234567890ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
           expect_pass: false
           expect_reason: "spender must be NegRiskExchange"
+        - name: "should reject approve on wrong target contract"
+          input:
+            to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+            # approve(NegRiskExchange, max) on fake token
+            data: "0x095ea7b3000000000000000000000000c5d563a36ae78145c45a50134d48a1215220f80affffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: false
+          expect_reason: "target must be USDC.e"
 
   # ===========================================================================
   # SAFE WALLET INTERNAL TRANSACTION RULES - CTF APPROVALS
@@ -740,6 +989,11 @@ rules:
       functions: |
         // ConditionalTokens on Polygon: 0x4D97DCd97eC945f40cF65F87097ACe5EA0476045
         function setApprovalForAll(address operator, bool approved) external {
+            // [VULN-01] Validate target contract is CTF
+            require(
+                txTo == 0x4D97DCd97eC945f40cF65F87097ACe5EA0476045,
+                "target must be CTF"
+            );
             // CTF Exchange
             require(
                 operator == 0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E,
@@ -761,6 +1015,13 @@ rules:
             data: "0xa22cb46500000000000000000000000012345678901234567890123456789012345678900000000000000000000000000000000000000000000000000000000000000001"
           expect_pass: false
           expect_reason: "operator must be CTF Exchange"
+        - name: "should reject setApprovalForAll on wrong target contract"
+          input:
+            to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+            # setApprovalForAll(CTF Exchange, true) on fake contract
+            data: "0xa22cb4650000000000000000000000004bfb41d5b3570defd03c39a9a4d8de6bd8b8982e0000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: false
+          expect_reason: "target must be CTF"
 
   # CTF setApprovalForAll to NegRiskAdapter
   - name: "Polymarket CTF Approve NegRiskAdapter"
@@ -773,6 +1034,11 @@ rules:
       functions: |
         // ConditionalTokens on Polygon: 0x4D97DCd97eC945f40cF65F87097ACe5EA0476045
         function setApprovalForAll(address operator, bool approved) external {
+            // [VULN-01] Validate target contract is CTF
+            require(
+                txTo == 0x4D97DCd97eC945f40cF65F87097ACe5EA0476045,
+                "target must be CTF"
+            );
             // NegRiskAdapter
             require(
                 operator == 0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296,
@@ -794,6 +1060,13 @@ rules:
             data: "0xa22cb46500000000000000000000000012345678901234567890123456789012345678900000000000000000000000000000000000000000000000000000000000000001"
           expect_pass: false
           expect_reason: "operator must be NegRiskAdapter"
+        - name: "should reject setApprovalForAll on wrong target contract"
+          input:
+            to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+            # setApprovalForAll(NegRiskAdapter, true) on fake contract
+            data: "0xa22cb465000000000000000000000000d91e80cf2e7be2e162c6513ced06f1dd0da352960000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: false
+          expect_reason: "target must be CTF"
 
   # CTF setApprovalForAll to NegRiskExchange
   - name: "Polymarket CTF Approve NegRiskExchange"
@@ -806,6 +1079,11 @@ rules:
       functions: |
         // ConditionalTokens on Polygon: 0x4D97DCd97eC945f40cF65F87097ACe5EA0476045
         function setApprovalForAll(address operator, bool approved) external {
+            // [VULN-01] Validate target contract is CTF
+            require(
+                txTo == 0x4D97DCd97eC945f40cF65F87097ACe5EA0476045,
+                "target must be CTF"
+            );
             // NegRiskExchange
             require(
                 operator == 0xC5d563A36AE78145C45a50134d48A1215220f80a,
@@ -827,6 +1105,13 @@ rules:
             data: "0xa22cb46500000000000000000000000012345678901234567890123456789012345678900000000000000000000000000000000000000000000000000000000000000001"
           expect_pass: false
           expect_reason: "operator must be NegRiskExchange"
+        - name: "should reject setApprovalForAll on wrong target contract"
+          input:
+            to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+            # setApprovalForAll(NegRiskExchange, true) on fake contract
+            data: "0xa22cb465000000000000000000000000c5d563a36ae78145c45a50134d48a1215220f80a0000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: false
+          expect_reason: "target must be CTF"
 
   # ===========================================================================
   # SAFE WALLET INTERNAL TRANSACTION RULES - CTF OPERATIONS
@@ -849,6 +1134,11 @@ rules:
             uint256[] calldata partition,
             uint256 amount
         ) external {
+            // [VULN-01] Validate target contract is CTF
+            require(
+                txTo == 0x4D97DCd97eC945f40cF65F87097ACe5EA0476045,
+                "target must be CTF"
+            );
             // Collateral must be USDC.e
             require(
                 collateralToken == 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174,
@@ -876,6 +1166,13 @@ rules:
             data: "0x72ce42750000000000000000000000003c499c542cef5e3811e1192ce70d8cc03d5c33590000000000000000000000000000000000000000000000000000000000000000123456789012345678901234567890123456789012345678901234567890123400000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002"
           expect_pass: false
           expect_reason: "collateral must be USDC.e"
+        - name: "should reject splitPosition on wrong target contract"
+          input:
+            to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+            # splitPosition on fake CTF contract
+            data: "0x72ce42750000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa841740000000000000000000000000000000000000000000000000000000000000000123456789012345678901234567890123456789012345678901234567890123400000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002"
+          expect_pass: false
+          expect_reason: "target must be CTF"
 
   # CTF Merge Positions
   - name: "Polymarket CTF Merge Positions"
@@ -894,6 +1191,11 @@ rules:
             uint256[] calldata partition,
             uint256 amount
         ) external {
+            // [VULN-01] Validate target contract is CTF
+            require(
+                txTo == 0x4D97DCd97eC945f40cF65F87097ACe5EA0476045,
+                "target must be CTF"
+            );
             // Collateral must be USDC.e
             require(
                 collateralToken == 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174,
@@ -921,6 +1223,13 @@ rules:
             data: "0x9e7212ad0000000000000000000000003c499c542cef5e3811e1192ce70d8cc03d5c33590000000000000000000000000000000000000000000000000000000000000000123456789012345678901234567890123456789012345678901234567890123400000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002"
           expect_pass: false
           expect_reason: "collateral must be USDC.e"
+        - name: "should reject mergePositions on wrong target contract"
+          input:
+            to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+            # mergePositions on fake CTF contract
+            data: "0x9e7212ad0000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa841740000000000000000000000000000000000000000000000000000000000000000123456789012345678901234567890123456789012345678901234567890123400000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002"
+          expect_pass: false
+          expect_reason: "target must be CTF"
 
   # CTF Redeem Positions (Standard Market)
   - name: "Polymarket CTF Redeem Positions"
@@ -938,6 +1247,11 @@ rules:
             bytes32 conditionId,
             uint256[] calldata indexSets
         ) external {
+            // [VULN-01] Validate target contract is CTF
+            require(
+                txTo == 0x4D97DCd97eC945f40cF65F87097ACe5EA0476045,
+                "target must be CTF"
+            );
             // Collateral must be USDC.e
             require(
                 collateralToken == 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174,
@@ -965,6 +1279,13 @@ rules:
             data: "0x01b7037c0000000000000000000000003c499c542cef5e3811e1192ce70d8cc03d5c3359000000000000000000000000000000000000000000000000000000000000000012345678901234567890123456789012345678901234567890123456789012340000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002"
           expect_pass: false
           expect_reason: "collateral must be USDC.e"
+        - name: "should reject redeemPositions on wrong target contract"
+          input:
+            to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+            # redeemPositions on fake CTF contract
+            data: "0x01b7037c0000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa84174000000000000000000000000000000000000000000000000000000000000000012345678901234567890123456789012345678901234567890123456789012340000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002"
+          expect_pass: false
+          expect_reason: "target must be CTF"
 
   # NegRiskAdapter Redeem Positions
   - name: "Polymarket NegRiskAdapter Redeem"
@@ -980,6 +1301,11 @@ rules:
             bytes32 conditionId,
             uint256[] calldata amounts
         ) external {
+            // [VULN-01] Validate target contract is NegRiskAdapter
+            require(
+                txTo == 0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296,
+                "target must be NegRiskAdapter"
+            );
             // No additional validation - conditionId is dynamic per market
             // Requires CTF -> NegRiskAdapter approval to be set
         }
@@ -998,3 +1324,10 @@ rules:
             # Different function selector (not redeemPositions)
             data: "0x12345678123456789012345678901234567890123456789012345678901234567890123400000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000002"
           expect_pass: false
+        - name: "should reject redeemPositions on wrong target contract"
+          input:
+            to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+            # redeemPositions on fake contract
+            data: "0xe22c93691234567890123456789012345678901234567890123456789012345678901234000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000989680000000000000000000000000000000000000000000000000000000000098968"
+          expect_pass: false
+          expect_reason: "target must be NegRiskAdapter"
