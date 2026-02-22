@@ -1,0 +1,1248 @@
+# Polymarket Protocol Rules
+# This file contains signing rules for Polymarket protocol
+#
+# Protocol: Polymarket (Prediction Market on Polygon)
+# Chain: Polygon (137)
+#
+# Overview:
+# - EIP-712 ClobAuth: Login authentication for CLOB API key
+# - EIP-712 Order: CTF Exchange order signing
+# - EIP-712 CreateProxy: Safe wallet creation signature
+# - EIP-712 SafeTx: Safe wallet transaction signing
+# - Direct Transactions: Safe wallet creation, execution, token transfers
+#
+# ===========================================================================
+# CONTRACT ADDRESSES (Polygon - Chain ID: 137)
+# ===========================================================================
+#
+# Tokens:
+#   USDC.e (Bridged):        0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174
+#   USDC (Native):           0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359
+#
+# Protocol Contracts:
+#   CTF Exchange:            0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E
+#   NegRiskAdapter:          0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296
+#   NegRiskExchange:         0xC5d563A36AE78145C45a50134d48A1215220f80a
+#   ConditionalTokens (CTF): 0x4D97DCd97eC945f40cF65F87097ACe5EA0476045
+#
+# Safe Contracts:
+#   Safe Proxy Factory:      0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b
+#
+# DEX Contracts:
+#   UniswapV3 Router:        0xE592427A0AEce92De3Edee1F18E0157C05861564
+#
+# External Wallets:
+#   Treasury Wallet:         0x9Ce3316B865e940227EA724AFdeAAA2759f1AA7C  # Fund distribution & collection
+#
+# EIP-712 Domains:
+#   ClobAuth Domain:         "ClobAuthDomain" (version: "1")
+#   CTF Exchange Domain:     "Polymarket CTF Exchange" (version: "1")
+#   Safe Factory Domain:     "Polymarket Contract Proxy Factory" (no version)
+#
+# ===========================================================================
+
+rules:
+  # ===========================================================================
+  # EIP-712 CLOB AUTH RULES (Login for API Key)
+  # ===========================================================================
+
+  # Login signature for Polymarket CLOB API key
+  - name: "Polymarket CLOB Auth Signature"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "137"
+    description: "Validate ClobAuth signatures for Polymarket API key authentication"
+    config:
+      typed_data_struct: |
+        struct ClobAuth {
+            address address_;  // underscore suffix to escape Solidity reserved keyword, maps to message key "address"
+            string timestamp;
+            uint256 nonce;
+            string message;
+        }
+      typed_data_expression: |
+        // Domain validation for ClobAuth
+        require(
+          keccak256(bytes(eip712_domainName)) == keccak256(bytes("ClobAuthDomain")),
+          "invalid domain name"
+        );
+        require(
+          keccak256(bytes(eip712_domainVersion)) == keccak256(bytes("1")),
+          "invalid domain version"
+        );
+        // [VULN-07] Chain ID validation — prevent cross-chain replay
+        require(eip712_domainChainId == 137, "must be on Polygon");
+
+        // Message validation via struct instance
+        require(
+          keccak256(bytes(clobAuth.message)) == keccak256(bytes("This message attests that I control the given wallet")),
+          "invalid attestation message"
+        );
+      sign_type_filter: "typed_data"
+      description: "ClobAuth login signature with domain and message validation"
+      test_cases:
+        - name: "should pass valid ClobAuth"
+          input:
+            typed_data:
+              primaryType: "ClobAuth"
+              domain:
+                name: "ClobAuthDomain"
+                version: "1"
+                chainId: "137"
+              message:
+                address: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+                timestamp: "1704067200"
+                nonce: "12345"
+                message: "This message attests that I control the given wallet"
+          expect_pass: true
+        - name: "should reject invalid domain"
+          input:
+            typed_data:
+              primaryType: "ClobAuth"
+              domain:
+                name: "WrongDomain"
+                version: "1"
+                chainId: "137"
+              message:
+                address: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+                timestamp: "1704067200"
+                nonce: "12345"
+                message: "This message attests that I control the given wallet"
+          expect_pass: false
+          expect_reason: "invalid domain name"
+        - name: "should reject wrong chainId"
+          input:
+            typed_data:
+              primaryType: "ClobAuth"
+              domain:
+                name: "ClobAuthDomain"
+                version: "1"
+                chainId: "56"
+              message:
+                address: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+                timestamp: "1704067200"
+                nonce: "12345"
+                message: "This message attests that I control the given wallet"
+          expect_pass: false
+          expect_reason: "must be on Polygon"
+
+  # ===========================================================================
+  # EIP-712 ORDER SIGNING RULES (CTF Exchange)
+  # ===========================================================================
+
+  # Order signing for Polymarket CTF Exchange
+  - name: "Polymarket Order Signature"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "137"
+    description: "Validate Polymarket CTF Exchange order signatures"
+    config:
+      typed_data_struct: |
+        struct Order {
+            uint256 salt;
+            address maker;
+            address signer;
+            address taker;
+            uint256 tokenId;
+            uint256 makerAmount;
+            uint256 takerAmount;
+            uint256 expiration;
+            uint256 nonce;
+            uint256 feeRateBps;
+            uint8 side;
+            uint8 signatureType;
+        }
+      typed_data_expression: |
+        // Domain validation
+        require(
+          keccak256(bytes(eip712_domainName)) == keccak256(bytes("Polymarket CTF Exchange")),
+          "invalid domain name"
+        );
+        require(
+          keccak256(bytes(eip712_domainVersion)) == keccak256(bytes("1")),
+          "invalid domain version"
+        );
+        // [VULN-05] Verify the contract address to prevent fake exchange attacks
+        require(
+          eip712_domainContract == 0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E,
+          "invalid verifying contract"
+        );
+
+        // Order validation via struct instance
+        // taker must be zero address for public orders (anyone can fill)
+        require(order.taker == address(0), "taker must be zero address");
+
+        // [VULN-10] Signer identity validation — order.signer must match the actual signing key
+        require(order.signer == ctx_signer, "order signer must match signing key");
+
+        // Fee validation: max 10% (1000 basis points)
+        require(order.feeRateBps <= 1000, "fee exceeds 10%");
+      sign_type_filter: "typed_data"
+      description: "CTF Exchange order signing with fee limits and zero taker"
+      test_cases:
+        - name: "should pass valid order with zero taker"
+          input:
+            typed_data:
+              primaryType: "Order"
+              domain:
+                name: "Polymarket CTF Exchange"
+                version: "1"
+                chainId: "137"
+                verifyingContract: "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E"
+              message:
+                salt: "12345"
+                maker: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+                signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+                taker: "0x0000000000000000000000000000000000000000"
+                tokenId: "1"
+                makerAmount: "1000000000000000000"
+                takerAmount: "1000000000000000000"
+                expiration: "1893456000"
+                nonce: "0"
+                feeRateBps: "100"
+                side: "0"
+                signatureType: "0"
+            signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+          expect_pass: true
+        - name: "should reject non-zero taker"
+          input:
+            typed_data:
+              primaryType: "Order"
+              domain:
+                name: "Polymarket CTF Exchange"
+                version: "1"
+                chainId: "137"
+                verifyingContract: "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E"
+              message:
+                salt: "12345"
+                maker: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+                signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+                taker: "0x1111111111111111111111111111111111111111"
+                tokenId: "1"
+                makerAmount: "1000000000000000000"
+                takerAmount: "1000000000000000000"
+                expiration: "1893456000"
+                nonce: "0"
+                feeRateBps: "100"
+                side: "0"
+                signatureType: "0"
+            signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+          expect_pass: false
+          expect_reason: "taker must be zero address"
+        - name: "should reject wrong verifying contract"
+          input:
+            typed_data:
+              primaryType: "Order"
+              domain:
+                name: "Polymarket CTF Exchange"
+                version: "1"
+                chainId: "137"
+                verifyingContract: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+              message:
+                salt: "12345"
+                maker: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+                signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+                taker: "0x0000000000000000000000000000000000000000"
+                tokenId: "1"
+                makerAmount: "1000000000000000000"
+                takerAmount: "1000000000000000000"
+                expiration: "1893456000"
+                nonce: "0"
+                feeRateBps: "100"
+                side: "0"
+                signatureType: "0"
+            signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+          expect_pass: false
+          expect_reason: "invalid verifying contract"
+
+  # ===========================================================================
+  # EIP-712 CREATE PROXY RULES (Safe Wallet Creation)
+  # ===========================================================================
+
+  # Safe wallet creation signature for Polymarket
+  - name: "Polymarket Safe Wallet Creation Signature"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "137"
+    description: "Validate Safe wallet creation signature for Polymarket"
+    config:
+      typed_data_struct: |
+        struct CreateProxy {
+            address paymentToken;
+            uint256 payment;
+            address paymentReceiver;
+        }
+      typed_data_expression: |
+        // Domain validation for Safe Factory
+        require(
+          keccak256(bytes(eip712_domainName)) == keccak256(bytes("Polymarket Contract Proxy Factory")),
+          "invalid domain name"
+        );
+        // Note: No version field in Polymarket Safe Factory domain
+        require(eip712_domainChainId == 137, "must be on Polygon");
+        // [SECURITY] verifyingContract must be Safe Proxy Factory
+        require(
+          eip712_domainContract == 0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b,
+          "verifyingContract must be Safe Factory"
+        );
+
+        // CreateProxy validation via struct instance - should be zero payment (free creation)
+        require(createProxy.paymentToken == address(0), "payment token must be zero");
+        require(createProxy.payment == 0, "payment must be zero");
+        require(createProxy.paymentReceiver == address(0), "payment receiver must be zero");
+      sign_type_filter: "typed_data"
+      description: "Safe wallet creation with zero payment"
+      test_cases:
+        - name: "should pass valid CreateProxy with zero payment"
+          input:
+            typed_data:
+              primaryType: "CreateProxy"
+              domain:
+                name: "Polymarket Contract Proxy Factory"
+                chainId: "137"
+                verifyingContract: "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"
+              message:
+                paymentToken: "0x0000000000000000000000000000000000000000"
+                payment: "0"
+                paymentReceiver: "0x0000000000000000000000000000000000000000"
+          expect_pass: true
+        - name: "should reject non-zero payment"
+          input:
+            typed_data:
+              primaryType: "CreateProxy"
+              domain:
+                name: "Polymarket Contract Proxy Factory"
+                chainId: "137"
+                verifyingContract: "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"
+              message:
+                paymentToken: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+                payment: "1000000"
+                paymentReceiver: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+          expect_pass: false
+          expect_reason: "payment token must be zero"
+
+  # ===========================================================================
+  # EIP-712 SAFE TX SIGNING RULES
+  # ===========================================================================
+
+  # Safe transaction signing for Polymarket
+  - name: "Polymarket SafeTx Signature"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "137"
+    description: "Validate Safe wallet transaction signatures on Polygon"
+    config:
+      typed_data_struct: |
+        struct SafeTx {
+            address to;
+            uint256 value;
+            bytes data;
+            uint8 operation;
+            uint256 safeTxGas;
+            uint256 baseGas;
+            uint256 gasPrice;
+            address gasToken;
+            address refundReceiver;
+            uint256 nonce;
+        }
+      typed_data_expression: |
+        // Domain validation for Safe on Polygon
+        require(eip712_domainChainId == 137, "SafeTx must be on Polygon");
+        // [CRITICAL] verifyingContract must be an allowed Safe wallet address
+        require(
+            eip712_domainContract == 0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837,
+            "verifyingContract must be an allowed Safe wallet"
+        );
+
+        // Value must be 0 for token operations (no native token transfer)
+        // Access via struct instance
+        require(safeTx.value == 0, "ETH value must be zero");
+
+        // [VULN-11] Only CALL operations allowed — block DELEGATECALL
+        require(safeTx.operation == 0, "only CALL operations allowed");
+
+        // [VULN-12] Gas manipulation protection
+        require(safeTx.gasPrice == 0, "gasPrice must be zero");
+        require(safeTx.gasToken == address(0), "gasToken must be zero");
+        require(safeTx.refundReceiver == address(0), "refundReceiver must be zero");
+
+        // [CRITICAL] Validate internal call data - only allow approved operations
+        bytes memory data = safeTx.data;
+
+        // [CRITICAL] Data must not be empty - all Safe transactions must have valid internal operations
+        require(data.length > 0, "data must not be empty");
+
+        // Must have at least 4 bytes for function selector
+        require(data.length >= 4, "data too short for function selector");
+
+            // Define function selectors using function signatures
+            bytes4 APPROVE_SELECTOR = bytes4(keccak256("approve(address,uint256)")); // = 0x095ea7b3
+            bytes4 SET_APPROVAL_FOR_ALL_SELECTOR = bytes4(keccak256("setApprovalForAll(address,bool)")); // = 0xa22cb465
+            bytes4 SPLIT_POSITION_SELECTOR = bytes4(keccak256("splitPosition(address,bytes32,bytes32,uint256[],uint256)")); // = 0x72ce4275
+            bytes4 MERGE_POSITIONS_SELECTOR = bytes4(keccak256("mergePositions(address,bytes32,bytes32,uint256[],uint256)")); // = 0x9e7212ad
+            bytes4 REDEEM_POSITIONS_SELECTOR = bytes4(keccak256("redeemPositions(address,bytes32,bytes32,uint256[])")); // = 0x01b7037c
+            bytes4 NEGRISK_SPLIT_SELECTOR = bytes4(keccak256("splitPosition(bytes32,uint256)")); // = 0xa3d7da1d
+            bytes4 NEGRISK_MERGE_SELECTOR = bytes4(keccak256("mergePositions(bytes32,uint256)")); // = 0xb10c5c17
+            bytes4 NEGRISK_REDEEM_SELECTOR = bytes4(keccak256("redeemPositions(bytes32,uint256[])")); // = 0xdbeccb23
+
+            // Extract function selector (first 4 bytes) - pure Solidity without assembly
+            bytes4 selector = bytes4(data[0]) | (bytes4(data[1]) >> 8) | (bytes4(data[2]) >> 16) | (bytes4(data[3]) >> 24);
+
+            // Validate based on target contract (safeTx.to) and function selector
+            // USDC.e operations (0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174)
+            if (safeTx.to == 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174) {
+                // approve(address,uint256)
+                require(selector == APPROVE_SELECTOR, "unsupported USDC.e operation");
+                // Must have complete function call data (not just selector)
+                require(data.length >= 68, "invalid approve data length");
+                // Skip selector and decode function parameters using abi.decode (pure Solidity, no assembly)
+                bytes memory params = new bytes(data.length - 4);
+                for (uint256 i = 0; i < params.length; i++) {
+                    params[i] = data[i + 4];
+                }
+                (address spender, ) = abi.decode(params, (address, uint256));
+                require(
+                    spender == 0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E || // CTF Exchange
+                    spender == 0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296 || // NegRiskAdapter
+                    spender == 0xC5d563A36AE78145C45a50134d48A1215220f80a,   // NegRiskExchange
+                    "spender must be allowed protocol contract"
+                );
+            }
+            // CTF operations (0x4D97DCd97eC945f40cF65F87097ACe5EA0476045)
+            else if (safeTx.to == 0x4D97DCd97eC945f40cF65F87097ACe5EA0476045) {
+                // Allowed CTF operations
+                require(
+                    selector == SET_APPROVAL_FOR_ALL_SELECTOR ||
+                    selector == SPLIT_POSITION_SELECTOR ||
+                    selector == MERGE_POSITIONS_SELECTOR ||
+                    selector == REDEEM_POSITIONS_SELECTOR,
+                    "unsupported CTF operation"
+                );
+                // Additional validation for specific operations
+                if (selector == SET_APPROVAL_FOR_ALL_SELECTOR) {
+                    // setApprovalForAll(address,bool): validate operator and approved flag
+                    require(data.length >= 68, "invalid setApprovalForAll data length");
+                    // Skip selector and decode function parameters (pure Solidity, no assembly)
+                    bytes memory params = new bytes(data.length - 4);
+                    for (uint256 i = 0; i < params.length; i++) {
+                        params[i] = data[i + 4];
+                    }
+                    (address operator, bool approved) = abi.decode(params, (address, bool));
+                    require(approved, "approval must be true");
+                    require(
+                        operator == 0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E || // CTF Exchange
+                        operator == 0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296 || // NegRiskAdapter
+                        operator == 0xC5d563A36AE78145C45a50134d48A1215220f80a,   // NegRiskExchange
+                        "operator must be allowed protocol contract"
+                    );
+                } else if (selector == SPLIT_POSITION_SELECTOR || selector == MERGE_POSITIONS_SELECTOR) {
+                    // splitPosition(address,bytes32,bytes32,uint256[],uint256) / mergePositions(address,bytes32,bytes32,uint256[],uint256)
+                    require(data.length >= 164, "invalid split/merge data length");
+                    // Skip selector and decode: collateralToken, parentCollectionId, conditionId, partition, amount
+                    bytes memory params = new bytes(data.length - 4);
+                    for (uint256 i = 0; i < params.length; i++) {
+                        params[i] = data[i + 4];
+                    }
+                    (address collateralToken, bytes32 parentCollectionId, , , ) = abi.decode(params, (address, bytes32, bytes32, uint256[], uint256));
+                    require(
+                        collateralToken == 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174,
+                        "collateral must be USDC.e"
+                    );
+                    require(parentCollectionId == bytes32(0), "parent must be zero");
+                } else if (selector == REDEEM_POSITIONS_SELECTOR) {
+                    // redeemPositions(address,bytes32,bytes32,uint256[])
+                    require(data.length >= 132, "invalid redeem data length");
+                    bytes memory params = new bytes(data.length - 4);
+                    for (uint256 i = 0; i < params.length; i++) {
+                        params[i] = data[i + 4];
+                    }
+                    (address collateralToken, bytes32 parentCollectionId, , ) = abi.decode(params, (address, bytes32, bytes32, uint256[]));
+                    require(
+                        collateralToken == 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174,
+                        "collateral must be USDC.e"
+                    );
+                    require(parentCollectionId == bytes32(0), "parent must be zero");
+                }
+            }
+            // NegRiskAdapter operations (0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296)
+            // NegRiskAdapter has both 2-param simplified variants AND 5-param CTF-compatible variants
+            // 2-param: splitPosition(bytes32,uint256), mergePositions(bytes32,uint256), redeemPositions(bytes32,uint256[])
+            // 5-param: splitPosition(address,bytes32,bytes32,uint256[],uint256), mergePositions(address,bytes32,bytes32,uint256[],uint256)
+            // The 5-param variants share the same selectors as CTF functions
+            else if (safeTx.to == 0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296) {
+                // Allowed NegRiskAdapter operations (both 2-param and 5-param variants)
+                if (selector == NEGRISK_SPLIT_SELECTOR || selector == NEGRISK_MERGE_SELECTOR || selector == NEGRISK_REDEEM_SELECTOR) {
+                    // 2-param simplified variants: splitPosition(bytes32,uint256), mergePositions(bytes32,uint256), redeemPositions(bytes32,uint256[])
+                    // No additional validation needed - conditionId is dynamic per market, contract handles collateral internally
+                } else if (selector == SPLIT_POSITION_SELECTOR || selector == MERGE_POSITIONS_SELECTOR) {
+                    // 5-param CTF-compatible variants: splitPosition(address,bytes32,bytes32,uint256[],uint256) / mergePositions(address,bytes32,bytes32,uint256[],uint256)
+                    // Validate collateralToken and parentCollectionId for defense-in-depth
+                    require(data.length >= 164, "invalid NegRisk 5-param data length");
+                    bytes memory nrParams = new bytes(data.length - 4);
+                    for (uint256 i = 0; i < nrParams.length; i++) {
+                        nrParams[i] = data[i + 4];
+                    }
+                    (address nrCollateral, bytes32 nrParent, , , ) = abi.decode(nrParams, (address, bytes32, bytes32, uint256[], uint256));
+                    require(nrCollateral == 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174, "NegRisk collateral must be USDC.e");
+                    require(nrParent == bytes32(0), "NegRisk parent must be zero");
+                } else {
+                    revert("unsupported NegRiskAdapter operation");
+                }
+            }
+            // Reject all other target addresses
+            else {
+                revert("unsupported target contract");
+            }
+      sign_type_filter: "typed_data"
+      description: "Safe transaction signing with value=0 constraint"
+      test_cases:
+        - name: "should pass SafeTx with zero value"
+          input:
+            typed_data:
+              primaryType: "SafeTx"
+              domain:
+                chainId: "137"
+                verifyingContract: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              message:
+                to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+                value: "0"
+                # approve(CTF Exchange, max) - complete function call with full parameters
+                # selector(4) + spender(32) + amount(32) = 68 bytes
+                data: "0x095ea7b30000000000000000000000004bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982Effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                operation: "0"
+                safeTxGas: "0"
+                baseGas: "0"
+                gasPrice: "0"
+                gasToken: "0x0000000000000000000000000000000000000000"
+                refundReceiver: "0x0000000000000000000000000000000000000000"
+                nonce: "0"
+          expect_pass: true
+        - name: "should reject SafeTx with non-zero value"
+          input:
+            typed_data:
+              primaryType: "SafeTx"
+              domain:
+                chainId: "137"
+                verifyingContract: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              message:
+                to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+                value: "1000000000000000000"
+                data: "0x095ea7b3"
+                operation: "0"
+                safeTxGas: "0"
+                baseGas: "0"
+                gasPrice: "0"
+                gasToken: "0x0000000000000000000000000000000000000000"
+                refundReceiver: "0x0000000000000000000000000000000000000000"
+                nonce: "0"
+          expect_pass: false
+          expect_reason: "ETH value must be zero"
+        - name: "should reject SafeTx with DELEGATECALL"
+          input:
+            typed_data:
+              primaryType: "SafeTx"
+              domain:
+                chainId: "137"
+                verifyingContract: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              message:
+                to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+                value: "0"
+                data: "0x095ea7b3"
+                operation: "1"
+                safeTxGas: "0"
+                baseGas: "0"
+                gasPrice: "0"
+                gasToken: "0x0000000000000000000000000000000000000000"
+                refundReceiver: "0x0000000000000000000000000000000000000000"
+                nonce: "0"
+          expect_pass: false
+          expect_reason: "only CALL operations allowed"
+        - name: "should reject SafeTx with non-zero gasPrice"
+          input:
+            typed_data:
+              primaryType: "SafeTx"
+              domain:
+                chainId: "137"
+                verifyingContract: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              message:
+                to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+                value: "0"
+                data: "0x095ea7b3"
+                operation: "0"
+                safeTxGas: "0"
+                baseGas: "0"
+                gasPrice: "1000000000"
+                gasToken: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+                refundReceiver: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+                nonce: "0"
+          expect_pass: false
+          expect_reason: "gasPrice must be zero"
+        - name: "should reject SafeTx with zero verifyingContract"
+          input:
+            typed_data:
+              primaryType: "SafeTx"
+              domain:
+                chainId: "137"
+                verifyingContract: "0x0000000000000000000000000000000000000000"
+              message:
+                to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+                value: "0"
+                data: "0x095ea7b3"
+                operation: "0"
+                safeTxGas: "0"
+                baseGas: "0"
+                gasPrice: "0"
+                gasToken: "0x0000000000000000000000000000000000000000"
+                refundReceiver: "0x0000000000000000000000000000000000000000"
+                nonce: "0"
+          expect_pass: false
+          expect_reason: "verifyingContract must be an allowed Safe wallet"
+        - name: "should reject SafeTx with non-allowed verifyingContract"
+          input:
+            typed_data:
+              primaryType: "SafeTx"
+              domain:
+                chainId: "137"
+                verifyingContract: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+              message:
+                to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+                value: "0"
+                data: "0x095ea7b30000000000000000000000004bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982Effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                operation: "0"
+                safeTxGas: "0"
+                baseGas: "0"
+                gasPrice: "0"
+                gasToken: "0x0000000000000000000000000000000000000000"
+                refundReceiver: "0x0000000000000000000000000000000000000000"
+                nonce: "0"
+          expect_pass: false
+          expect_reason: "verifyingContract must be an allowed Safe wallet"
+        - name: "should reject SafeTx with empty data"
+          input:
+            typed_data:
+              primaryType: "SafeTx"
+              domain:
+                chainId: "137"
+                verifyingContract: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              message:
+                to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+                value: "0"
+                data: "0x"
+                operation: "0"
+                safeTxGas: "0"
+                baseGas: "0"
+                gasPrice: "0"
+                gasToken: "0x0000000000000000000000000000000000000000"
+                refundReceiver: "0x0000000000000000000000000000000000000000"
+                nonce: "0"
+          expect_pass: false
+          expect_reason: "data must not be empty"
+        - name: "should reject SafeTx with unsupported target contract"
+          input:
+            typed_data:
+              primaryType: "SafeTx"
+              domain:
+                chainId: "137"
+                verifyingContract: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              message:
+                to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+                value: "0"
+                # transfer(address,uint256) - not an allowed operation
+                data: "0xa9059cbb0000000000000000000000004bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982Effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                operation: "0"
+                safeTxGas: "0"
+                baseGas: "0"
+                gasPrice: "0"
+                gasToken: "0x0000000000000000000000000000000000000000"
+                refundReceiver: "0x0000000000000000000000000000000000000000"
+                nonce: "0"
+          expect_pass: false
+          expect_reason: "unsupported target contract"
+        - name: "should reject SafeTx with unsupported operation on USDC.e"
+          input:
+            typed_data:
+              primaryType: "SafeTx"
+              domain:
+                chainId: "137"
+                verifyingContract: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              message:
+                to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+                value: "0"
+                # transfer(address,uint256) - not an allowed operation on USDC.e
+                data: "0xa9059cbb0000000000000000000000004bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982Effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                operation: "0"
+                safeTxGas: "0"
+                baseGas: "0"
+                gasPrice: "0"
+                gasToken: "0x0000000000000000000000000000000000000000"
+                refundReceiver: "0x0000000000000000000000000000000000000000"
+                nonce: "0"
+          expect_pass: false
+          expect_reason: "unsupported USDC.e operation"
+        # ---------------------------------------------------------------
+        # Real transaction test case: redeemPositions via CTF
+        # Source: Polygon tx 0x714b3d1f22b043eeeb09b1a65833777c4ac17f4044a04e635c686e8d397d8eb1
+        # This is the SafeTx typed_data that was signed before the execTransaction.
+        # CTF.redeemPositions(USDC.e, 0x0, conditionId, [1,2])
+        # ---------------------------------------------------------------
+        - name: "should pass SafeTx with CTF redeemPositions (real tx 0x714b3d)"
+          input:
+            typed_data:
+              primaryType: "SafeTx"
+              domain:
+                chainId: "137"
+                verifyingContract: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              message:
+                to: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+                value: "0"
+                # redeemPositions(address,bytes32,bytes32,uint256[])
+                # collateralToken=USDC.e, parentCollectionId=0x0, conditionId=0xbd42fb9a..., indexSets=[1,2]
+                data: "0x01b7037c0000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa841740000000000000000000000000000000000000000000000000000000000000000bd42fb9ac3870c35193d69ca1ad5ea00363d8ee6aba80b910a2003c370597cae0000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002"
+                operation: "0"
+                safeTxGas: "217890"
+                baseGas: "0"
+                gasPrice: "0"
+                gasToken: "0x0000000000000000000000000000000000000000"
+                refundReceiver: "0x0000000000000000000000000000000000000000"
+                nonce: "0"
+            signer: "0x88eD75e9eCE373997221E3c0229e74007C1AD718"
+          expect_pass: true
+        # ---------------------------------------------------------------
+        # Real transaction test cases: USDC.e approve to 3 spenders
+        # Source: Polygon txs from 0x7862873f... → Safe 0xbd400c71...
+        # tx1: 0xfc9db476 approve(CTF Exchange, max)
+        # tx2: 0x290cdcc9 approve(NegRiskAdapter, max)
+        # tx3: 0x278f1e71 approve(NegRiskExchange, max)
+        # Note: verifyingContract uses whitelisted Safe for safe.yaml
+        # ---------------------------------------------------------------
+        - name: "should pass SafeTx with USDC.e approve to CTF Exchange (real tx 0xfc9db476)"
+          input:
+            typed_data:
+              primaryType: "SafeTx"
+              domain:
+                chainId: "137"
+                verifyingContract: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              message:
+                to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+                value: "0"
+                data: "0x095ea7b30000000000000000000000004bfb41d5b3570defd03c39a9a4d8de6bd8b8982effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                operation: "0"
+                safeTxGas: "122295"
+                baseGas: "0"
+                gasPrice: "0"
+                gasToken: "0x0000000000000000000000000000000000000000"
+                refundReceiver: "0x0000000000000000000000000000000000000000"
+                nonce: "0"
+          expect_pass: true
+        - name: "should pass SafeTx with USDC.e approve to NegRiskAdapter (real tx 0x290cdcc9)"
+          input:
+            typed_data:
+              primaryType: "SafeTx"
+              domain:
+                chainId: "137"
+                verifyingContract: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              message:
+                to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+                value: "0"
+                data: "0x095ea7b3000000000000000000000000d91e80cf2e7be2e162c6513ced06f1dd0da35296ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                operation: "0"
+                safeTxGas: "122295"
+                baseGas: "0"
+                gasPrice: "0"
+                gasToken: "0x0000000000000000000000000000000000000000"
+                refundReceiver: "0x0000000000000000000000000000000000000000"
+                nonce: "0"
+          expect_pass: true
+        - name: "should pass SafeTx with USDC.e approve to NegRiskExchange (real tx 0x278f1e71)"
+          input:
+            typed_data:
+              primaryType: "SafeTx"
+              domain:
+                chainId: "137"
+                verifyingContract: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              message:
+                to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+                value: "0"
+                data: "0x095ea7b3000000000000000000000000c5d563a36ae78145c45a50134d48a1215220f80affffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                operation: "0"
+                safeTxGas: "122295"
+                baseGas: "0"
+                gasPrice: "0"
+                gasToken: "0x0000000000000000000000000000000000000000"
+                refundReceiver: "0x0000000000000000000000000000000000000000"
+                nonce: "0"
+          expect_pass: true
+        # ---------------------------------------------------------------
+        # Real transaction test cases: CTF setApprovalForAll to 3 operators
+        # Source: Polygon txs from 0x7862873f... → Safe 0xbd400c71...
+        # tx4: 0x4f1356ad setApprovalForAll(CTF Exchange, true)
+        # tx5: 0x80b5400f setApprovalForAll(NegRiskAdapter, true)
+        # tx6: 0xbdbb5a46 setApprovalForAll(NegRiskExchange, true)
+        # ---------------------------------------------------------------
+        - name: "should pass SafeTx with CTF setApprovalForAll to Exchange (real tx 0x4f1356ad)"
+          input:
+            typed_data:
+              primaryType: "SafeTx"
+              domain:
+                chainId: "137"
+                verifyingContract: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              message:
+                to: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+                value: "0"
+                data: "0xa22cb4650000000000000000000000004bfb41d5b3570defd03c39a9a4d8de6bd8b8982e0000000000000000000000000000000000000000000000000000000000000001"
+                operation: "0"
+                safeTxGas: "92067"
+                baseGas: "0"
+                gasPrice: "0"
+                gasToken: "0x0000000000000000000000000000000000000000"
+                refundReceiver: "0x0000000000000000000000000000000000000000"
+                nonce: "0"
+          expect_pass: true
+        - name: "should pass SafeTx with CTF setApprovalForAll to NegRiskAdapter (real tx 0x80b5400f)"
+          input:
+            typed_data:
+              primaryType: "SafeTx"
+              domain:
+                chainId: "137"
+                verifyingContract: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              message:
+                to: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+                value: "0"
+                data: "0xa22cb465000000000000000000000000d91e80cf2e7be2e162c6513ced06f1dd0da352960000000000000000000000000000000000000000000000000000000000000001"
+                operation: "0"
+                safeTxGas: "92067"
+                baseGas: "0"
+                gasPrice: "0"
+                gasToken: "0x0000000000000000000000000000000000000000"
+                refundReceiver: "0x0000000000000000000000000000000000000000"
+                nonce: "0"
+          expect_pass: true
+        - name: "should pass SafeTx with CTF setApprovalForAll to NegRiskExchange (real tx 0xbdbb5a46)"
+          input:
+            typed_data:
+              primaryType: "SafeTx"
+              domain:
+                chainId: "137"
+                verifyingContract: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              message:
+                to: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+                value: "0"
+                data: "0xa22cb465000000000000000000000000c5d563a36ae78145c45a50134d48a1215220f80a0000000000000000000000000000000000000000000000000000000000000001"
+                operation: "0"
+                safeTxGas: "92067"
+                baseGas: "0"
+                gasPrice: "0"
+                gasToken: "0x0000000000000000000000000000000000000000"
+                refundReceiver: "0x0000000000000000000000000000000000000000"
+                nonce: "0"
+          expect_pass: true
+        - name: "should pass SafeTx with CTF mergePositions (real merge data)"
+          input:
+            typed_data:
+              primaryType: "SafeTx"
+              domain:
+                chainId: "137"
+                verifyingContract: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              message:
+                to: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+                value: "0"
+                # mergePositions(address,bytes32,bytes32,uint256[],uint256)
+                # collateralToken=USDC.e, parentCollectionId=0x0, conditionId=0x34895..., partition=[1,2], amount=2000000
+                data: "0x9e7212ad0000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa841740000000000000000000000000000000000000000000000000000000000000000348959679f78cbdfcbca76e83affad0ea89e77ac32d03273552da0cb85d3042a00000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000001e8480000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002"
+                operation: "0"
+                safeTxGas: "270298"
+                baseGas: "0"
+                gasPrice: "0"
+                gasToken: "0x0000000000000000000000000000000000000000"
+                refundReceiver: "0x0000000000000000000000000000000000000000"
+                nonce: "21"
+            signer: "0x88eD75e9eCE373997221E3c0229e74007C1AD718"
+          expect_pass: true
+        # ---------------------------------------------------------------
+        # Real transaction test cases: splitPosition and mergePositions via SafeTx
+        # Source: BSC Opinion txs (identical contract method structure, adapted to Polygon addresses)
+        # split: BSC tx 0xe6aa70ec0c4945a669552e808b7df17bb2707c4e3542490d2550354f6fc4ebcb
+        # merge: BSC tx 0x296617022da1017bd90060ceec4cd84be176ac94cf11a5fbbdc8b39a73b56682
+        # redeem: BSC tx 0xff2494c1a89a0e15b71faaf7e38f82296d3dbe0412adf7c7f922596b59deca5c
+        # Inner data adapted: collateral changed from BSC USDT to Polygon USDC.e
+        # ---------------------------------------------------------------
+        - name: "should pass SafeTx with CTF splitPosition (real split from BSC 0xe6aa70ec)"
+          input:
+            typed_data:
+              primaryType: "SafeTx"
+              domain:
+                chainId: "137"
+                verifyingContract: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              message:
+                to: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+                value: "0"
+                # splitPosition(USDC.e, 0x0, conditionId=0x6e456a..., [1,2], 100000000000000000)
+                data: "0x72ce42750000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa8417400000000000000000000000000000000000000000000000000000000000000006e456ad7eb55d579974441fcfff7ddf3cfbf14688a8ed5fe231b084b2553e13400000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000016345785d8a0000000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002"
+                operation: "0"
+                safeTxGas: "267597"
+                baseGas: "0"
+                gasPrice: "0"
+                gasToken: "0x0000000000000000000000000000000000000000"
+                refundReceiver: "0x0000000000000000000000000000000000000000"
+                nonce: "10"
+            signer: "0x88eD75e9eCE373997221E3c0229e74007C1AD718"
+          expect_pass: true
+        - name: "should pass SafeTx with CTF mergePositions (real merge from BSC 0x29661702)"
+          input:
+            typed_data:
+              primaryType: "SafeTx"
+              domain:
+                chainId: "137"
+                verifyingContract: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              message:
+                to: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+                value: "0"
+                # mergePositions(USDC.e, 0x0, conditionId=0xedee1d..., [1,2], 24892554000000000000)
+                data: "0x9e7212ad0000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa841740000000000000000000000000000000000000000000000000000000000000000edee1dc90bf52ddc3fe5946d4371da8a2eeb1a289ae5374bbc590e1d128ea11900000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000159741dfa023aa000000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002"
+                operation: "0"
+                safeTxGas: "222526"
+                baseGas: "0"
+                gasPrice: "0"
+                gasToken: "0x0000000000000000000000000000000000000000"
+                refundReceiver: "0x0000000000000000000000000000000000000000"
+                nonce: "28"
+            signer: "0x88eD75e9eCE373997221E3c0229e74007C1AD718"
+          expect_pass: true
+        - name: "should pass SafeTx with CTF redeemPositions (real redeem from BSC 0xff2494c1)"
+          input:
+            typed_data:
+              primaryType: "SafeTx"
+              domain:
+                chainId: "137"
+                verifyingContract: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              message:
+                to: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+                value: "0"
+                # redeemPositions(USDC.e, 0x0, conditionId=0xc3b709..., [1,2])
+                data: "0x01b7037c0000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa841740000000000000000000000000000000000000000000000000000000000000000c3b7092df92192741538d37f8edf7fd14bb3e5931dcd290bf66ac88711631db40000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002"
+                operation: "0"
+                safeTxGas: "225141"
+                baseGas: "0"
+                gasPrice: "0"
+                gasToken: "0x0000000000000000000000000000000000000000"
+                refundReceiver: "0x0000000000000000000000000000000000000000"
+                nonce: "179"
+            signer: "0x88eD75e9eCE373997221E3c0229e74007C1AD718"
+          expect_pass: true
+
+  # ===========================================================================
+  # ETHEREUM TRANSACTION RULES - SAFE WALLET OPERATIONS
+  # ===========================================================================
+
+  # Safe Proxy Factory - Create new Safe wallet
+  - name: "Polymarket Safe Wallet Creation"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "137"
+    description: "Allow Safe wallet creation on Polymarket Safe Factory"
+    config:
+      functions: |
+        // Polymarket Safe Proxy Factory on Polygon
+        // Contract: 0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b
+        // Signature struct for EIP-712 signature (v, r, s)
+        struct Signature {
+            uint8 v;
+            bytes32 r;
+            bytes32 s;
+        }
+
+        // Function selector calculated from: createProxy(address,uint256,address,(uint8,bytes32,bytes32))
+        function createProxy(
+            address paymentToken,
+            uint256 payment,
+            address paymentReceiver,
+            Signature memory createSig
+        ) external {
+            // [VULN-01] Validate target contract is Safe Proxy Factory
+            require(
+                txTo == 0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b,
+                "target must be Safe Factory"
+            );
+            // Payment should be zero (free creation)
+            require(paymentToken == address(0), "payment token must be zero");
+            require(payment == 0, "payment must be zero");
+            require(paymentReceiver == address(0), "payment receiver must be zero");
+        }
+      description: "Safe wallet creation with zero payment"
+      test_cases:
+        - name: "should pass with zero payment"
+          input:
+            to: "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"
+            # createProxy(paymentToken=0x0, payment=0, paymentReceiver=0x0, sig=(0,0x0,0x0))
+            data: "0xa1884d2c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          expect_pass: true
+        # ---------------------------------------------------------------
+        # Real transaction test case: createProxy on Polymarket Safe Factory
+        # Source: Polygon tx 0xe0d031b8d03bf8c98e7692ead95f70a422ed3e183dd7fba8db5746b97d34e288
+        # from: 0x7862873f2f2E0d7903a98B78dCd9163975c7053c
+        # to: 0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b (Polymarket Safe Factory)
+        # createProxy(paymentToken=0x0, payment=0, paymentReceiver=0x0, sig=(27,r,s))
+        # ---------------------------------------------------------------
+        - name: "should pass createProxy with zero payment (real tx 0xe0d031b8)"
+          input:
+            to: "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"
+            data: "0xa1884d2c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001beba7e2e3e4973a33b930c890146b91d9493885950b82330d459a1008c53fe03033eeb655e053a75c9e05b9bb80ce767d3bfb22cd2348c6be2c5fb9793c9a2eae"
+          expect_pass: true
+        - name: "should reject with non-zero payment token"
+          input:
+            to: "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"
+            # createProxy(paymentToken=USDC.e, payment=1, paymentReceiver=0x1234..., sig=(27,r,s))
+            data: "0xa1884d2c0000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa8417400000000000000000000000000000000000000000000000000000000000000010000000000000000000000001234567890123456789012345678901234567890000000000000000000000000000000000000000000000000000000000000001b12345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678"
+          expect_pass: false
+          expect_reason: "payment token must be zero"
+        - name: "should reject wrong target contract"
+          input:
+            to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+            # createProxy on fake contract
+            data: "0xa1884d2c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          expect_pass: false
+          expect_reason: "target must be Safe Factory"
+
+  # Safe execTransaction - Execute through Safe wallet
+  # All operations (approve/split/merge/redeem) are executed through Safe's execTransaction
+  # Funds are stored in Safe wallets, so all operations must go through Safe
+  - name: "Polymarket Safe Execute Transaction"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "137"
+    description: "Allow Safe wallet execTransaction with txTo validation and internal call validation"
+    config:
+      functions: |
+        function execTransaction(
+            address to,
+            uint256 value,
+            bytes calldata data,
+            uint8 operation,
+            uint256 safeTxGas,
+            uint256 baseGas,
+            uint256 gasPrice,
+            address gasToken,
+            address refundReceiver,
+            bytes memory signatures
+        ) external {
+            // [CRITICAL] Validate txTo is an allowed Safe wallet address
+            require(
+                txTo == 0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837,
+                "txTo must be an allowed Safe wallet"
+            );
+
+            // Value must be zero (no native token transfer)
+            require(value == 0, "value must be zero");
+
+            // [VULN-11] Only CALL operations allowed — block DELEGATECALL
+            require(operation == 0, "only CALL allowed");
+
+            // [VULN-12] Gas manipulation protection
+            require(gasPrice == 0, "gasPrice must be zero");
+            require(gasToken == address(0), "gasToken must be zero");
+            require(refundReceiver == address(0), "refundReceiver must be zero");
+
+            // Validate internal call based on 'to' address and data
+            // All operations (approve/split/merge/redeem) are validated here
+
+            // Allow empty data (no internal call)
+            if (data.length == 0) {
+                return;
+            }
+
+            // Pure Solidity parameter decoding — no assembly, uses abi.decode on calldata slices
+
+            // USDC.e operations (0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174)
+            if (to == 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174) {
+                require(data.length >= 4, "invalid data length");
+                bytes4 selector = bytes4(data);
+
+                bytes4 APPROVE_SELECTOR = bytes4(keccak256("approve(address,uint256)")); // = 0x095ea7b3
+
+                if (selector == APPROVE_SELECTOR) {
+                    require(data.length >= 68, "invalid approve data length");
+                    (address spender, ) = abi.decode(data[4:], (address, uint256));
+                    require(
+                        spender == 0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E || // CTF Exchange
+                        spender == 0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296 || // NegRiskAdapter
+                        spender == 0xC5d563A36AE78145C45a50134d48A1215220f80a,   // NegRiskExchange
+                        "spender must be allowed protocol contract"
+                    );
+                    return;
+                }
+                revert("unsupported USDC.e operation");
+            }
+
+            // CTF operations (0x4D97DCd97eC945f40cF65F87097ACe5EA0476045)
+            if (to == 0x4D97DCd97eC945f40cF65F87097ACe5EA0476045) {
+                require(data.length >= 4, "invalid data length");
+                bytes4 selector = bytes4(data);
+
+                bytes4 SET_APPROVAL_FOR_ALL_SELECTOR = bytes4(keccak256("setApprovalForAll(address,bool)")); // = 0xa22cb465
+                bytes4 SPLIT_POSITION_SELECTOR = bytes4(keccak256("splitPosition(address,bytes32,bytes32,uint256[],uint256)")); // = 0x72ce4275
+                bytes4 MERGE_POSITIONS_SELECTOR = bytes4(keccak256("mergePositions(address,bytes32,bytes32,uint256[],uint256)")); // = 0x9e7212ad
+                bytes4 REDEEM_POSITIONS_SELECTOR = bytes4(keccak256("redeemPositions(address,bytes32,bytes32,uint256[])")); // = 0x01b7037c
+
+                if (selector == SET_APPROVAL_FOR_ALL_SELECTOR) {
+                    require(data.length >= 68, "invalid setApprovalForAll data length");
+                    (address operator, bool approved) = abi.decode(data[4:], (address, bool));
+                    require(approved, "approval must be true");
+                    require(
+                        operator == 0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E || // CTF Exchange
+                        operator == 0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296 || // NegRiskAdapter
+                        operator == 0xC5d563A36AE78145C45a50134d48A1215220f80a,   // NegRiskExchange
+                        "operator must be allowed protocol contract"
+                    );
+                    return;
+                }
+
+                if (selector == SPLIT_POSITION_SELECTOR || selector == MERGE_POSITIONS_SELECTOR) {
+                    require(data.length >= 164, "invalid split/merge data length");
+                    (address collateralToken, bytes32 parentCollectionId, , , ) = abi.decode(data[4:], (address, bytes32, bytes32, uint256[], uint256));
+                    require(collateralToken == 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174, "collateral must be USDC.e");
+                    require(parentCollectionId == bytes32(0), "parent must be zero");
+                    return;
+                }
+
+                if (selector == REDEEM_POSITIONS_SELECTOR) {
+                    require(data.length >= 132, "invalid redeem data length");
+                    (address collateralToken, bytes32 parentCollectionId, , ) = abi.decode(data[4:], (address, bytes32, bytes32, uint256[]));
+                    require(collateralToken == 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174, "collateral must be USDC.e");
+                    require(parentCollectionId == bytes32(0), "parent must be zero");
+                    return;
+                }
+
+                revert("unsupported CTF operation");
+            }
+
+            // NegRiskAdapter operations (0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296)
+            if (to == 0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296) {
+                require(data.length >= 4, "invalid data length");
+                bytes4 selector = bytes4(data);
+
+                bytes4 NEGRISK_SPLIT_SELECTOR = bytes4(keccak256("splitPosition(bytes32,uint256)")); // = 0xa3d7da1d
+                bytes4 NEGRISK_MERGE_SELECTOR = bytes4(keccak256("mergePositions(bytes32,uint256)")); // = 0xb10c5c17
+                bytes4 NEGRISK_REDEEM_SELECTOR = bytes4(keccak256("redeemPositions(bytes32,uint256[])")); // = 0xdbeccb23
+                bytes4 SPLIT_POSITION_SELECTOR = bytes4(keccak256("splitPosition(address,bytes32,bytes32,uint256[],uint256)")); // = 0x72ce4275
+                bytes4 MERGE_POSITIONS_SELECTOR = bytes4(keccak256("mergePositions(address,bytes32,bytes32,uint256[],uint256)")); // = 0x9e7212ad
+
+                if (selector == NEGRISK_SPLIT_SELECTOR || selector == NEGRISK_MERGE_SELECTOR || selector == NEGRISK_REDEEM_SELECTOR) {
+                    return;
+                }
+
+                if (selector == SPLIT_POSITION_SELECTOR || selector == MERGE_POSITIONS_SELECTOR) {
+                    require(data.length >= 164, "invalid NegRisk 5-param data length");
+                    (address nrCollateral, bytes32 nrParent, , , ) = abi.decode(data[4:], (address, bytes32, bytes32, uint256[], uint256));
+                    require(nrCollateral == 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174, "NegRisk collateral must be USDC.e");
+                    require(nrParent == bytes32(0), "NegRisk parent must be zero");
+                    return;
+                }
+
+                revert("unsupported NegRiskAdapter operation");
+            }
+
+            // Reject all other target addresses
+            revert("unsupported target contract");
+        }
+      description: "Safe execution - signature already validated"
+      test_cases:
+        - name: "should pass execTransaction with zero value"
+          input:
+            to: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            # execTransaction(to=USDC.e, value=0, data=0x, operation=0, safeTxGas=0, baseGas=0, gasPrice=0, gasToken=0x0, refundReceiver=0x0, signatures=0x)
+            # Function selector: 0x6a761202
+            data: "0x6a7612020000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa8417400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000016000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          expect_pass: true
+        # ---------------------------------------------------------------
+        # Real transaction test cases: 6 approve/setApprovalForAll via execTransaction
+        # Source: Polygon txs from 0x7862873f... → Safe 0xbd400c71...
+        # Note: txTo uses whitelisted Safe address for safe.yaml
+        # ---------------------------------------------------------------
+        - name: "should pass execTransaction with USDC.e approve to CTF Exchange (real tx 0xfc9db476)"
+          input:
+            to: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            data: "0x6a7612020000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa84174000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001ddb7000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001c00000000000000000000000000000000000000000000000000000000000000044095ea7b30000000000000000000000004bfb41d5b3570defd03c39a9a4d8de6bd8b8982effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000419fe78feb525c194e1ef621bad0cfab2461a9aa9c40e3e4be16b4f9df71a761372615acd2cb49c207225fab49752093288b50c1f89ff9908f00bf71b97099d75b1c00000000000000000000000000000000000000000000000000000000000000"
+          expect_pass: true
+        - name: "should pass execTransaction with USDC.e approve to NegRiskAdapter (real tx 0x290cdcc9)"
+          input:
+            to: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            data: "0x6a7612020000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa84174000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001ddb7000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001c00000000000000000000000000000000000000000000000000000000000000044095ea7b3000000000000000000000000d91e80cf2e7be2e162c6513ced06f1dd0da35296ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000041fed0a5892640bacb332bcf851ebcab546e1e3393f077f83bf3fdfdfc6e21f68b0a009d575b5ee21983d54490408bc900d06dc1c7e472694d6cf5f0bfeb8a1de11c00000000000000000000000000000000000000000000000000000000000000"
+          expect_pass: true
+        - name: "should pass execTransaction with USDC.e approve to NegRiskExchange (real tx 0x278f1e71)"
+          input:
+            to: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            data: "0x6a7612020000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa84174000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001ddb7000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001c00000000000000000000000000000000000000000000000000000000000000044095ea7b3000000000000000000000000c5d563a36ae78145c45a50134d48a1215220f80affffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000041b917af8d3e8fe595ddfc5f80b58a01936a33fcf61d053aca2b6faa6985ac1c0e2dc061be6b973173107b1c57d7fbb419eef2ea950bed95c3aae5e2661d8e8c8d1b00000000000000000000000000000000000000000000000000000000000000"
+          expect_pass: true
+        - name: "should pass execTransaction with CTF setApprovalForAll to Exchange (real tx 0x4f1356ad)"
+          input:
+            to: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            data: "0x6a7612020000000000000000000000004d97dcd97ec945f40cf65f87097ace5ea047604500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000167a3000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001c00000000000000000000000000000000000000000000000000000000000000044a22cb4650000000000000000000000004bfb41d5b3570defd03c39a9a4d8de6bd8b8982e0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000041f85561a214c567e8cc590ca7c9c01f8237ee4596c9657dccb937cd1ab0d1158c3af27a71255f0eef0875b3a832288711e48f6ad02cc3e972c793a4630e7b82d41b00000000000000000000000000000000000000000000000000000000000000"
+          expect_pass: true
+        - name: "should pass execTransaction with CTF setApprovalForAll to NegRiskAdapter (real tx 0x80b5400f)"
+          input:
+            to: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            data: "0x6a7612020000000000000000000000004d97dcd97ec945f40cf65f87097ace5ea047604500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000167a3000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001c00000000000000000000000000000000000000000000000000000000000000044a22cb465000000000000000000000000d91e80cf2e7be2e162c6513ced06f1dd0da3529600000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000417febc9e1b100b3b0bfefa5b6d09bd1dc90ce46ff6dba30c27b734789af22ae2338c70543731199b582a90178f0506bc05eba013b8df6e2cf013dd43d542ef32d1b00000000000000000000000000000000000000000000000000000000000000"
+          expect_pass: true
+        - name: "should pass execTransaction with CTF setApprovalForAll to NegRiskExchange (real tx 0xbdbb5a46)"
+          input:
+            to: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            data: "0x6a7612020000000000000000000000004d97dcd97ec945f40cf65f87097ace5ea047604500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000167a3000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001c00000000000000000000000000000000000000000000000000000000000000044a22cb465000000000000000000000000c5d563a36ae78145c45a50134d48a1215220f80a00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000414b21650d4aee5b2f17948e36cec58bf937b7bc4b0ac7bd5c8f23a89e0b1be86130943c97ff7ebd8308733e8a240267f2cb6a848aad1ba862640176cfa8cac4c51c00000000000000000000000000000000000000000000000000000000000000"
+          expect_pass: true
+        - name: "should reject execTransaction with non-zero value"
+          input:
+            to: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            # execTransaction(to=USDC.e, value=1e18, data=0x, operation=0, safeTxGas=0, baseGas=0, gasPrice=0, gasToken=0x0, refundReceiver=0x0, signatures=0x)
+            data: "0x6a7612020000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa841740000000000000000000000000000000000000000000000000de0b6b3a76400000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000016000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          expect_pass: false
+          expect_reason: "value must be zero"
+        - name: "should reject execTransaction with DELEGATECALL"
+          input:
+            to: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            # execTransaction with operation=1 (DELEGATECALL)
+            data: "0x6a7612020000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa8417400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000016000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          expect_pass: false
+          expect_reason: "only CALL allowed"
+        # ---------------------------------------------------------------
+        # Real transaction test case: execTransaction with CTF redeemPositions
+        # Source: Polygon tx 0x714b3d1f22b043eeeb09b1a65833777c4ac17f4044a04e635c686e8d397d8eb1
+        # from: 0x88eD75e9eCE373997221E3c0229e74007C1AD718
+        # to: 0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837 (Safe wallet)
+        # execTransaction(CTF, 0, redeemPositions(USDC.e,0x0,conditionId,[1,2]), 0, 217890, 0, 0, 0x0, 0x0, sig)
+        # ---------------------------------------------------------------
+        - name: "should pass execTransaction with real CTF redeemPositions (real tx 0x714b3d)"
+          input:
+            to: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            data: "0x6a7612020000000000000000000000004d97dcd97ec945f40cf65f87097ace5ea047604500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000353220000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000026000000000000000000000000000000000000000000000000000000000000000e401b7037c0000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa841740000000000000000000000000000000000000000000000000000000000000000bd42fb9ac3870c35193d69ca1ad5ea00363d8ee6aba80b910a2003c370597cae0000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000041afaaa7d5183bb28c20af45dc009544b9358e971c25e8335261debdc43b756b3b1cd75457fc9d60ae0b7bd2e45deaf93aa80446f41061424a4d0f46712449e02b1b00000000000000000000000000000000000000000000000000000000000000"
+          expect_pass: true
+        # ---------------------------------------------------------------
+        # Real transaction test cases: splitPosition and mergePositions via execTransaction
+        # Source: BSC Opinion txs (identical contract method structure, adapted to Polygon addresses)
+        # split: BSC tx 0xe6aa70ec0c4945a669552e808b7df17bb2707c4e3542490d2550354f6fc4ebcb
+        # merge: BSC tx 0x296617022da1017bd90060ceec4cd84be176ac94cf11a5fbbdc8b39a73b56682
+        # redeem: BSC tx 0xff2494c1a89a0e15b71faaf7e38f82296d3dbe0412adf7c7f922596b59deca5c
+        # Inner data adapted: collateral changed from BSC USDT to Polygon USDC.e, target changed to Polygon CTF
+        # ---------------------------------------------------------------
+        - name: "should pass execTransaction with CTF splitPosition (real split from BSC 0xe6aa70ec)"
+          input:
+            to: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            data: "0x6a7612020000000000000000000000004d97dcd97ec945f40cf65f87097ace5ea0476045000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004154d00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000280000000000000000000000000000000000000000000000000000000000000010472ce42750000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa8417400000000000000000000000000000000000000000000000000000000000000006e456ad7eb55d579974441fcfff7ddf3cfbf14688a8ed5fe231b084b2553e13400000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000016345785d8a00000000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000419ef2bd672dd25f394750a760407b994439665d948d41597e46c84ab87002a8733b295b95b3b9433aaa3121a05b4e3b345d988992058ffd7e371aeb162955babb1c00000000000000000000000000000000000000000000000000000000000000"
+          expect_pass: true
+        - name: "should pass execTransaction with CTF mergePositions (real merge from BSC 0x29661702)"
+          input:
+            to: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            data: "0x6a7612020000000000000000000000004d97dcd97ec945f40cf65f87097ace5ea0476045000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003653e0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000028000000000000000000000000000000000000000000000000000000000000001049e7212ad0000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa841740000000000000000000000000000000000000000000000000000000000000000edee1dc90bf52ddc3fe5946d4371da8a2eeb1a289ae5374bbc590e1d128ea11900000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000159741dfa023aa000000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000041cbc57f86dc7ee1eb36ff981daf7efc5f624f402a17c26b2b7242d2fecd936de750ec69613661d801e005136cd43596dd3dda5c0fa02471a53a4cdc4ba5096e3a1b00000000000000000000000000000000000000000000000000000000000000"
+          expect_pass: true
+        - name: "should reject execTransaction with wrong Safe address"
+          input:
+            to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+            # execTransaction on non-allowed Safe address
+            # Generated with: cast calldata "execTransaction(address,uint256,bytes,uint8,uint256,uint256,uint256,address,address,bytes)" 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174 0 0x 0 0 0 0 0x0000000000000000000000000000000000000000 0x0000000000000000000000000000000000000000 0x
+            data: "0x6a7612020000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa8417400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000016000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          expect_pass: false
+          expect_reason: "txTo must be an allowed Safe wallet"

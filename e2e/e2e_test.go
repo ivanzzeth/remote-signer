@@ -104,7 +104,6 @@ func TestMain(m *testing.M) {
 		chainID = cid
 	}
 
-	var baseURL string
 	var err error
 
 	if useExternalServer {
@@ -201,9 +200,6 @@ func TestMain(m *testing.M) {
 
 		baseURL = testServer.BaseURL()
 	}
-
-	// Store baseURL in global variable for use in tests
-	baseURL = baseURL
 
 	// Set poll interval based on mode:
 	// - Internal mode: 100ms for fast testing

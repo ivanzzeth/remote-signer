@@ -129,7 +129,7 @@ fi
 
 # 5. Check for plaintext secrets in staged files
 echo -n "Checking for plaintext secrets... "
-SECRETS_FOUND=$(git diff --cached --diff-filter=ACM -U0 | grep -iE '(private_key|password|secret|token)\s*[:=]\s*"[^$\{]' | grep -v '_env' | grep -v 'example' | grep -v '#' || true)
+SECRETS_FOUND=$(git diff --cached --diff-filter=ACM -U0 | grep -iE '(private_key|password|secret|token)\s*[:=]\s*"[^$\{]' | grep -v '_env' | grep -v 'example' | grep -v '#' | grep -viE '(gasToken|paymentToken|refundReceiver|collateralToken|quoteToken)\s*:' || true)
 if [ -n "$SECRETS_FOUND" ]; then
     echo -e "${RED}FAIL${NC}"
     echo "Possible plaintext secrets detected in staged changes:"
@@ -157,6 +157,16 @@ if [ -n "$STAGED_RULES" ]; then
     fi
 else
     echo -e "Validating rule files... ${GREEN}OK (no staged rule files)${NC}"
+fi
+
+# 7. Run e2e tests (using port 18548 to avoid conflict with production on 8548)
+echo -n "Running e2e tests... "
+if E2E_API_PORT=18548 go test -tags e2e ./e2e/... -count=1 -timeout 120s 2>/dev/null; then
+    echo -e "${GREEN}OK${NC}"
+else
+    echo -e "${RED}FAIL${NC}"
+    echo "E2E tests failed. Run 'E2E_API_PORT=18548 go test -tags e2e -v ./e2e/...' for details."
+    FAILED=1
 fi
 
 echo "=== Pre-commit checks complete ==="
@@ -223,7 +233,7 @@ log_info "Git hooks installed successfully!"
 log_info "Hooks location: $HOOKS_DIR"
 echo ""
 echo "Installed hooks:"
-echo "  pre-commit : gosec, govulncheck, go vet, error suppression check, secret detection, rule validation"
+echo "  pre-commit : gosec, govulncheck, go vet, error suppression check, secret detection, rule validation, e2e tests"
 echo "  pre-push   : full unit test suite (includes rule validation via TestRulesDirectoryValidation)"
 echo ""
 echo "To skip hooks (NOT recommended): git commit --no-verify"

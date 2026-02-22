@@ -178,12 +178,20 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 	// Fail-Closed only applies to Blocklist rules for security.
 
 	// Try batch evaluation for whitelist rules (optimization)
-	if result := e.evaluateWhitelistBatch(ctx, whitelistRules, req, parsed); result != nil {
-		return result, nil
+	// Track which rules were evaluated in batch (not skipped) so sequential fallback skips them
+	batchResult, batchEvaluatedRules := e.evaluateWhitelistBatch(ctx, whitelistRules, req, parsed)
+	if batchResult != nil {
+		return batchResult, nil
 	}
 
-	// Fallback to sequential evaluation if batch evaluation didn't match
+	// Fallback to sequential evaluation for rules not evaluated in batch
+	sequentialCount := 0
 	for _, rule := range whitelistRules {
+		// Skip rules already evaluated (not skipped) in batch
+		if batchEvaluatedRules[rule.ID] {
+			continue
+		}
+
 		evaluator, exists := e.evaluators[rule.Type]
 		if !exists {
 			e.logger.Warn("no evaluator for whitelist rule type, skipping",
@@ -194,20 +202,25 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 			continue
 		}
 
-		// Skip rules already evaluated in batch
-		if _, ok := evaluator.(BatchRuleEvaluator); ok {
-			continue
-		}
-
+		sequentialCount++
 		matched, reason, err := evaluator.Evaluate(ctx, rule, req, parsed)
 		if err != nil {
 			e.logger.Debug("whitelist rule evaluation error, skipping",
 				"rule_id", rule.ID,
+				"rule_name", rule.Name,
 				"type", rule.Type,
 				"error", err,
 			)
 			// Fail-Open for whitelist: skip and continue to next rule
 			continue
+		}
+
+		if !matched {
+			e.logger.Debug("whitelist rule did not match",
+				"rule_id", rule.ID,
+				"rule_name", rule.Name,
+				"request_id", req.ID,
+			)
 		}
 
 		if matched {
@@ -232,21 +245,30 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 		}
 	}
 
-	e.logger.Debug("no rule matched, requires manual approval", "request_id", req.ID)
+	e.logger.Debug("no rule matched, requires manual approval",
+		"request_id", req.ID,
+		"batch_evaluated", len(batchEvaluatedRules),
+		"sequential_evaluated", sequentialCount,
+		"total_whitelist", len(whitelistRules),
+	)
 	return &EvaluationResult{
 		Blocked: false,
 		Allowed: false,
 	}, nil
 }
 
-// evaluateWhitelistBatch performs batch evaluation for whitelist rules that support it
-// Returns nil if no rule matched, allowing fallback to sequential evaluation
+// evaluateWhitelistBatch performs batch evaluation for whitelist rules that support it.
+// Returns:
+//   - result: non-nil if a rule matched (allowed)
+//   - evaluated: set of rule IDs that were fully evaluated (not skipped) in batch
 func (e *WhitelistRuleEngine) evaluateWhitelistBatch(
 	ctx context.Context,
 	rules []*types.Rule,
 	req *types.SignRequest,
 	parsed *types.ParsedPayload,
-) *EvaluationResult {
+) (*EvaluationResult, map[types.RuleID]bool) {
+	evaluated := make(map[types.RuleID]bool)
+
 	// Group rules by evaluator type for batch evaluation
 	rulesByType := make(map[types.RuleType][]*types.Rule)
 	for _, rule := range rules {
@@ -268,6 +290,10 @@ func (e *WhitelistRuleEngine) evaluateWhitelistBatch(
 
 		if !batchEval.CanBatchEvaluate(typeRules) {
 			// Rules can't be batched together, will be handled sequentially
+			e.logger.Debug("rules cannot be batched, falling back to sequential",
+				"type", ruleType,
+				"count", len(typeRules),
+			)
 			continue
 		}
 
@@ -291,6 +317,10 @@ func (e *WhitelistRuleEngine) evaluateWhitelistBatch(
 			if result.Skipped {
 				continue
 			}
+
+			// Mark as evaluated in batch (not skipped)
+			evaluated[result.RuleID] = true
+
 			if result.Err != nil {
 				e.logger.Debug("whitelist rule batch evaluation error, skipping",
 					"rule_id", result.RuleID,
@@ -317,12 +347,12 @@ func (e *WhitelistRuleEngine) evaluateWhitelistBatch(
 					Allowed:     true,
 					AllowedBy:   rule,
 					AllowReason: result.Reason,
-				}
+				}, evaluated
 			}
 		}
 	}
 
-	return nil
+	return nil, evaluated
 }
 
 // Compile-time check that WhitelistRuleEngine implements RuleEngine
