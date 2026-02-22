@@ -147,6 +147,18 @@ export interface ErrorResponse {
   message: string;
 }
 
+// TLS configuration (Node.js only, ignored in browser)
+export interface TLSConfig {
+  /** CA certificate (PEM string or Buffer). Required for self-signed server certs. */
+  ca?: string | Uint8Array;
+  /** Client certificate (PEM string or Buffer). Required for mTLS. */
+  cert?: string | Uint8Array;
+  /** Client private key (PEM string or Buffer). Required for mTLS. */
+  key?: string | Uint8Array;
+  /** Skip server certificate verification. WARNING: insecure, testing only. Default: true */
+  rejectUnauthorized?: boolean;
+}
+
 // Client configuration
 export interface ClientConfig {
   baseURL: string;
@@ -154,6 +166,10 @@ export interface ClientConfig {
   privateKey: string | Uint8Array; // hex string or bytes
   httpClient?: {
     timeout?: number;
+    /** Custom fetch function. Overrides default globalThis.fetch and TLS config. */
+    fetch?: typeof fetch;
+    /** TLS configuration for Node.js environments. Ignored in browsers. */
+    tls?: TLSConfig;
   };
   pollInterval?: number; // milliseconds, default: 2000
   pollTimeout?: number; // milliseconds, default: 300000 (5 minutes)

@@ -32,7 +32,7 @@ usage() {
     cat << EOF
 Usage: $0 [COMMAND] [OPTIONS]
 
-Commands:
+Docker Commands:
     init        Initialize deployment environment (create directories, generate keys)
     up          Start all services (background mode)
     run         Start remote-signer interactively (for password input)
@@ -40,19 +40,32 @@ Commands:
     down        Stop all services
     restart     Restart remote-signer interactively (for password input)
     logs        View service logs
-    status      Check service status
     build       Build Docker images
     clean       Remove all containers and volumes
+
+Local Commands (no Docker):
+    local-run     Build & start remote-signer locally (for keystore password input)
+    local-down    Stop locally running remote-signer
+    local-logs    Tail local remote-signer logs
+    local-attach  Reattach to running local screen session
+
+Common Commands:
+    gen-certs   Generate TLS certificates (CA + server + client)
+    status      Check service status (auto-detects TLS and local/docker mode)
 
 Options:
     -h, --help  Show this help message
 
 Examples:
     $0 init                 # Initialize environment
-    $0 up                   # Start services (background)
-    $0 run                  # Start interactively (for keystore password input)
-    $0 logs -f              # Follow logs
-    $0 down                 # Stop services
+    $0 gen-certs            # Generate TLS/mTLS certificates
+    $0 gen-certs 10.0.0.5   # Generate certs with extra SAN IP
+    $0 local-run            # Build & run locally (enter keystore password)
+    $0 local-down           # Stop local instance
+    $0 status               # Check health (auto-detects TLS)
+    $0 run                  # Start in Docker interactively
+    $0 logs -f              # Follow Docker logs
+    $0 down                 # Stop Docker services
 EOF
 }
 
@@ -307,19 +320,268 @@ view_logs() {
 }
 
 # =============================================================================
-# Check status
+# Config helpers — all accept an explicit config file path
+# =============================================================================
+
+# Config file constants
+LOCAL_CONFIG="config.local.yaml"
+DOCKER_CONFIG="config.yaml"
+
+# Read port from a given config file, default 8548
+port_from_config() {
+    local cfg="$1"
+    if [ -n "$cfg" ] && [ -f "$PROJECT_DIR/$cfg" ]; then
+        local port
+        port=$(grep '^\s*port:' "$PROJECT_DIR/$cfg" | head -1 | sed 's/.*port:\s*//' | tr -d ' "')
+        if [ -n "$port" ]; then
+            echo "$port"
+            return
+        fi
+    fi
+    echo "8548"
+}
+
+# Check if TLS is enabled in a given config file
+tls_enabled_in() {
+    local cfg="$1"
+    [ -n "$cfg" ] && [ -f "$PROJECT_DIR/$cfg" ] && \
+        grep -A1 '^\s*tls:' "$PROJECT_DIR/$cfg" | grep -q 'enabled:\s*true'
+}
+
+# Check if mTLS (client_auth) is enabled in a given config file
+mtls_enabled_in() {
+    local cfg="$1"
+    [ -n "$cfg" ] && [ -f "$PROJECT_DIR/$cfg" ] && \
+        grep -A5 '^\s*tls:' "$PROJECT_DIR/$cfg" | grep -q 'client_auth:\s*true'
+}
+
+# Build curl args for health check against a given config file
+health_curl_args_for() {
+    local cfg="$1"
+    local port
+    port=$(port_from_config "$cfg")
+    if tls_enabled_in "$cfg"; then
+        local args="--cacert ${PROJECT_DIR}/certs/ca.crt"
+        if mtls_enabled_in "$cfg"; then
+            args="$args --cert ${PROJECT_DIR}/certs/client.crt --key ${PROJECT_DIR}/certs/client.key"
+        fi
+        echo "$args https://localhost:${port}/health"
+    else
+        echo "http://localhost:${port}/health"
+    fi
+}
+
+# =============================================================================
+# Generate TLS certificates
+# =============================================================================
+generate_certs() {
+    cd "$PROJECT_DIR"
+    "$SCRIPT_DIR/gen-certs.sh" "$@"
+}
+
+# =============================================================================
+# Local deployment (no Docker)
+# =============================================================================
+LOCAL_PID_FILE="$PROJECT_DIR/.local-signer.pid"
+LOCAL_LOG_FILE="$PROJECT_DIR/data/remote-signer.log"
+
+local_run() {
+    log_info "Building remote-signer binary..."
+    cd "$PROJECT_DIR"
+
+    # Local commands always use config.local.yaml
+    local config_file="$LOCAL_CONFIG"
+    if [ ! -f "$config_file" ]; then
+        log_error "config.local.yaml not found!"
+        log_error "Create it: cp config.example.yaml config.local.yaml"
+        log_error "Then set database.dsn to SQLite and adjust settings."
+        exit 1
+    fi
+    log_info "Using config: $config_file"
+
+    # Load .env if exists
+    if [ -f ".env" ]; then
+        set -a
+        source .env
+        set +a
+    fi
+
+    # Check if already running
+    if [ -f "$LOCAL_PID_FILE" ]; then
+        local old_pid
+        old_pid=$(cat "$LOCAL_PID_FILE")
+        if kill -0 "$old_pid" 2>/dev/null; then
+            log_error "Remote-signer is already running (PID: $old_pid)"
+            log_error "Stop it first with: $0 local-down"
+            exit 1
+        else
+            rm -f "$LOCAL_PID_FILE"
+        fi
+    fi
+
+    # Build
+    mkdir -p build data
+    go build -o ./build/remote-signer ./cmd/remote-signer/
+    log_info "Build complete: ./build/remote-signer"
+
+    # TLS status
+    if grep -A1 '^\s*tls:' "$config_file" | grep -q 'enabled:\s*true'; then
+        log_info "TLS is ENABLED"
+        if grep -A5 '^\s*tls:' "$config_file" | grep -q 'client_auth:\s*true'; then
+            log_info "mTLS is ENABLED (client certificates required)"
+        fi
+    else
+        log_info "TLS is DISABLED (plain HTTP)"
+    fi
+
+    log_info ""
+    log_info "Starting remote-signer locally..."
+    log_info ">>> Enter keystore password when prompted                    <<<"
+    log_info ">>> After startup, press Ctrl+A then D to detach screen     <<<"
+    log_info ">>> Use '$0 local-down' to stop                             <<<"
+    log_info ">>> Use '$0 local-logs' to view logs                        <<<"
+    log_info ">>> Use 'screen -r remote-signer-local' to reattach         <<<"
+    log_info ""
+
+    # Kill any existing screen session
+    screen -S remote-signer-local -X quit 2>/dev/null || true
+
+    # Create a launcher script to avoid shell escaping issues
+    local launcher="$PROJECT_DIR/.local-signer-launcher.sh"
+    cat > "$launcher" << 'LAUNCHER_HEADER'
+#!/bin/bash
+LAUNCHER_HEADER
+    cat >> "$launcher" << LAUNCHER_BODY
+cd "$PROJECT_DIR"
+PID_FILE="$LOCAL_PID_FILE"
+CONFIG_FILE="$config_file"
+LAUNCHER_BODY
+    cat >> "$launcher" << 'LAUNCHER_TAIL'
+cleanup() {
+    rm -f "$PID_FILE"
+}
+trap cleanup EXIT
+
+# exec replaces this shell with remote-signer
+# stdin stays connected for interactive keystore password input
+# screen -L handles logging to file automatically
+echo $$ > "$PID_FILE"
+exec ./build/remote-signer -config "$CONFIG_FILE"
+LAUNCHER_TAIL
+    chmod +x "$launcher"
+
+    # Start in screen session (interactive for password input)
+    # -L enables screen logging, -Logfile sets the log path
+    # This keeps stdin connected for keystore password while logging output
+    exec screen -L -Logfile "$LOCAL_LOG_FILE" -S remote-signer-local "$launcher"
+}
+
+local_down() {
+    log_info "Stopping local remote-signer..."
+    cd "$PROJECT_DIR"
+
+    # Kill screen session
+    screen -S remote-signer-local -X quit 2>/dev/null || true
+
+    # Kill by PID file
+    if [ -f "$LOCAL_PID_FILE" ]; then
+        local pid
+        pid=$(cat "$LOCAL_PID_FILE")
+        if kill -0 "$pid" 2>/dev/null; then
+            kill "$pid"
+            log_info "Killed remote-signer (PID: $pid)"
+        fi
+        rm -f "$LOCAL_PID_FILE"
+    fi
+
+    # Fallback: kill by process name
+    pkill -f "build/remote-signer" 2>/dev/null || true
+
+    log_info "Local remote-signer stopped."
+}
+
+local_logs() {
+    cd "$PROJECT_DIR"
+    if [ -f "$LOCAL_LOG_FILE" ]; then
+        tail -f "$LOCAL_LOG_FILE"
+    else
+        log_error "No log file found at $LOCAL_LOG_FILE"
+        log_info "Is remote-signer running? Try: $0 local-run"
+    fi
+}
+
+# =============================================================================
+# Check status (auto-detects TLS and local/docker mode)
 # =============================================================================
 check_status() {
-    log_info "Service status:"
     cd "$PROJECT_DIR"
-    docker compose ps
+
+    # --- Local instance (config.local.yaml) ---
+    echo "=== Local Instance (config: $LOCAL_CONFIG) ==="
+    local local_running=false
+    if [ -f "$LOCAL_PID_FILE" ]; then
+        local pid
+        pid=$(cat "$LOCAL_PID_FILE")
+        if kill -0 "$pid" 2>/dev/null; then
+            local_running=true
+            echo -e "${GREEN}  Process: Running (PID: $pid)${NC}"
+        else
+            echo -e "${YELLOW}  Process: Stale PID file (not running)${NC}"
+            rm -f "$LOCAL_PID_FILE"
+        fi
+    else
+        echo -e "${YELLOW}  Process: Not running${NC}"
+    fi
+
+    if [ -f "$PROJECT_DIR/$LOCAL_CONFIG" ]; then
+        local local_port
+        local_port=$(port_from_config "$LOCAL_CONFIG")
+        echo "  Port: $local_port"
+        _health_check "$LOCAL_CONFIG"
+    else
+        echo "  Config: not found (skipping health check)"
+    fi
 
     echo ""
-    log_info "Health check:"
-    if curl -s http://localhost:${SIGNER_PORT:-8548}/health > /dev/null 2>&1; then
-        echo -e "${GREEN}Remote Signer: Healthy${NC}"
+
+    # --- Docker instance (config.yaml) ---
+    echo "=== Docker Instance (config: $DOCKER_CONFIG) ==="
+    if command -v docker &>/dev/null && docker compose ps --status running 2>/dev/null | grep -q remote-signer; then
+        echo -e "${GREEN}  Container: Running${NC}"
     else
-        echo -e "${RED}Remote Signer: Not responding${NC}"
+        echo -e "${YELLOW}  Container: Not running${NC}"
+    fi
+
+    if [ -f "$PROJECT_DIR/$DOCKER_CONFIG" ]; then
+        local docker_port
+        docker_port=$(port_from_config "$DOCKER_CONFIG")
+        echo "  Port: $docker_port"
+        _health_check "$DOCKER_CONFIG"
+    else
+        echo "  Config: not found (skipping health check)"
+    fi
+}
+
+# Internal: run health check for a given config file
+_health_check() {
+    local cfg="$1"
+    local curl_args
+    curl_args=$(health_curl_args_for "$cfg")
+
+    if tls_enabled_in "$cfg"; then
+        echo "  TLS: enabled$(mtls_enabled_in "$cfg" && echo " (mTLS)" || echo "")"
+    else
+        echo "  TLS: disabled"
+    fi
+
+    if curl -s --max-time 3 $curl_args > /dev/null 2>&1; then
+        echo -e "  ${GREEN}Health: OK${NC}"
+        curl -s $curl_args 2>/dev/null | python3 -m json.tool 2>/dev/null || curl -s $curl_args 2>/dev/null
+    else
+        echo -e "  ${RED}Health: Not responding${NC}"
+        if tls_enabled_in "$cfg"; then
+            log_warn "  Hint: if using mTLS, ensure certs/ directory has valid certificates"
+        fi
     fi
 }
 
@@ -385,6 +647,24 @@ case "${1:-}" in
         ;;
     clean)
         clean_up
+        ;;
+    # --- Local deployment commands ---
+    local-run)
+        local_run
+        ;;
+    local-down)
+        local_down
+        ;;
+    local-logs)
+        local_logs
+        ;;
+    local-attach)
+        screen -r remote-signer-local
+        ;;
+    # --- Common commands ---
+    gen-certs)
+        shift
+        generate_certs "$@"
         ;;
     -h|--help|help|"")
         usage

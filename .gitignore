@@ -52,8 +52,16 @@ data/foundry/*
 
 # Configuration files (sensitive)
 config.yaml
+config.local.yaml
 *.pem
 .mcp.json
+
+# TLS certificates (generated via scripts/gen-certs.sh)
+certs/
+
+# Local deployment temp files
+.local-signer-launcher.sh
+.local-signer.pid
 
 # Database
 remote-signer.db

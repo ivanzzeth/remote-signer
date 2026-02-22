@@ -109,8 +109,23 @@ func isHexPublicKey(key string) bool {
 
 // ServerConfig contains HTTP server configuration
 type ServerConfig struct {
-	Host string `yaml:"host"`
-	Port int    `yaml:"port"`
+	Host string    `yaml:"host"`
+	Port int       `yaml:"port"`
+	TLS  TLSConfig `yaml:"tls"`
+}
+
+// TLSConfig contains TLS/mTLS configuration for the server
+type TLSConfig struct {
+	// Enabled enables TLS (HTTPS) for the server
+	Enabled bool `yaml:"enabled"`
+	// CertFile is the path to the server TLS certificate
+	CertFile string `yaml:"cert_file"`
+	// KeyFile is the path to the server TLS private key
+	KeyFile string `yaml:"key_file"`
+	// CAFile is the path to the CA certificate for verifying client certificates (mTLS)
+	CAFile string `yaml:"ca_file"`
+	// ClientAuth enables mutual TLS (mTLS) — requires clients to present a valid certificate
+	ClientAuth bool `yaml:"client_auth"`
 }
 
 // ChainsConfig contains chain-specific configurations
@@ -241,6 +256,30 @@ func validate(cfg *Config) error {
 	// Validate at least one chain is enabled
 	if cfg.Chains.EVM == nil || !cfg.Chains.EVM.Enabled {
 		return fmt.Errorf("at least one chain must be enabled")
+	}
+
+	// Validate TLS configuration
+	if cfg.Server.TLS.Enabled {
+		if cfg.Server.TLS.CertFile == "" {
+			return fmt.Errorf("TLS is enabled but cert_file is not set")
+		}
+		if cfg.Server.TLS.KeyFile == "" {
+			return fmt.Errorf("TLS is enabled but key_file is not set")
+		}
+		if _, err := os.Stat(cfg.Server.TLS.CertFile); err != nil {
+			return fmt.Errorf("TLS cert_file not found: %s", cfg.Server.TLS.CertFile)
+		}
+		if _, err := os.Stat(cfg.Server.TLS.KeyFile); err != nil {
+			return fmt.Errorf("TLS key_file not found: %s", cfg.Server.TLS.KeyFile)
+		}
+		if cfg.Server.TLS.ClientAuth {
+			if cfg.Server.TLS.CAFile == "" {
+				return fmt.Errorf("TLS client_auth (mTLS) is enabled but ca_file is not set")
+			}
+			if _, err := os.Stat(cfg.Server.TLS.CAFile); err != nil {
+				return fmt.Errorf("TLS ca_file not found: %s", cfg.Server.TLS.CAFile)
+			}
+		}
 	}
 
 	// Validate API keys

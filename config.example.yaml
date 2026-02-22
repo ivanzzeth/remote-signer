@@ -4,6 +4,16 @@
 server:
   host: "0.0.0.0"
   port: 8548
+  # TLS/mTLS configuration
+  # Generate certificates: ./scripts/gen-certs.sh [extra-ip1] [extra-ip2]
+  tls:
+    enabled: false
+    cert_file: "./certs/server.crt"
+    key_file: "./certs/server.key"
+    # CA certificate for mTLS client verification
+    ca_file: "./certs/ca.crt"
+    # Set to true to require client certificates (mTLS)
+    client_auth: false
 
 database:
   # PostgreSQL connection string
