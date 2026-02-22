@@ -453,29 +453,22 @@ func validateSolidityRules(ctx context.Context, ruleRepo storage.RuleRepository,
 		return fmt.Errorf("failed to create rule validator: %w", err)
 	}
 
-	// Validate each rule
+	// Batch validate all rules (automatically groups by mode for optimal performance)
+	batchResult, err := validator.ValidateRulesBatch(ctx, rules)
+	if err != nil {
+		return fmt.Errorf("rule validation failed: %w", err)
+	}
+
+	// Report results
 	var failedRules []string
-	for _, rule := range rules {
-		log.Info("Validating rule", "rule_id", rule.ID, "rule_name", rule.Name)
-
-		result, err := validator.ValidateRule(ctx, rule)
-		if err != nil {
-			log.Error("Rule validation error",
-				"rule_id", rule.ID,
-				"rule_name", rule.Name,
-				"error", err,
-			)
-			failedRules = append(failedRules, fmt.Sprintf("%s (%s): %v", rule.Name, rule.ID, err))
-			continue
-		}
-
+	for i, result := range batchResult.Results {
+		rule := rules[i]
 		if !result.Valid {
 			// Collect failure details
 			var details string
 			if result.SyntaxError != nil {
 				details = fmt.Sprintf("syntax error: %s", result.SyntaxError.Message)
 			} else if result.FailedTestCases > 0 {
-				// Find the first failed test case for details
 				for _, tc := range result.TestCaseResults {
 					if !tc.Passed {
 						details = fmt.Sprintf("test case '%s' failed: expected_pass=%v, actual_pass=%v, error=%s",
