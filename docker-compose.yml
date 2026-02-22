@@ -84,13 +84,14 @@ services:
       # Forge cache for Solidity rules
       - forge_cache:/var/cache/remote-signer/forge
     # No "ports:" needed — host network mode binds directly to host's port 8548
-    # Healthcheck: uses HTTP by default; override to HTTPS if TLS is enabled
-    # For TLS: --no-check-certificate skips self-signed cert validation
+    # Healthcheck: auto-detect TLS by checking if server cert exists
+    # If certs are mounted (TLS enabled): use HTTPS with client cert (mTLS)
+    # Otherwise: use plain HTTP
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "--no-check-certificate", "http://localhost:8548/health"]
+      test: ["CMD-SHELL", "if [ -f /app/certs/server.crt ]; then wget -qO /dev/null --no-check-certificate --certificate=/app/certs/client.crt --private-key=/app/certs/client.key https://localhost:8548/health; else wget -qO /dev/null http://localhost:8548/health; fi"]
       interval: 30s
       timeout: 5s
-      start_period: 10s
+      start_period: 60s
       retries: 3
 
 volumes:
