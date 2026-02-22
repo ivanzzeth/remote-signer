@@ -534,7 +534,7 @@ rules:
         - name: "should pass transfer to Opinion API wallet"
           input:
             to: "0x55d398326f99059fF775485246999027B3197955"
-            data: "0xa9059cbb0000000000000000000000000932a1e172ba891df1f43efad738c3a8dbd9f60e0000000000000000000000000000000000000000000000000016345785d8a0000"
+            data: "0xa9059cbb0000000000000000000000000932a1e172ba891df1f43efad738c3a8dbd9f60e000000000000000000000000000000000000000000000000016345785d8a0000"
           expect_pass: true
         - name: "should reject transfer to wrong wallet"
           input:
@@ -547,7 +547,7 @@ rules:
           input:
             to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
             # transfer on fake token
-            data: "0xa9059cbb0000000000000000000000000932a1e172ba891df1f43efad738c3a8dbd9f60e0000000000000000000000000000000000000000000000000016345785d8a0000"
+            data: "0xa9059cbb0000000000000000000000000932a1e172ba891df1f43efad738c3a8dbd9f60e000000000000000000000000000000000000000000000000016345785d8a0000"
           expect_pass: false
           expect_reason: "target must be USDT"
 

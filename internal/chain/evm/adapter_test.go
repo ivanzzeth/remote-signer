@@ -3,6 +3,7 @@ package evm
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -81,7 +82,7 @@ Issued At: 2026-01-23T08:46:20.000Z`,
 				Transaction: &TransactionPayload{
 					To:    strPtr("0x1234567890123456789012345678901234567890"),
 					Value: "0x100",
-					Data:  []byte{0xa9, 0x05, 0x9c, 0xbb, 0x01, 0x02, 0x03, 0x04},
+					Data:  "0xa9059cbb01020304",
 				},
 			},
 			expectHasMsg:    false,
@@ -170,7 +171,7 @@ func TestEVMAdapter_ParsePayload_Transaction(t *testing.T) {
 				Transaction: &TransactionPayload{
 					To:    strPtr("0x1234567890123456789012345678901234567890"),
 					Value: "0x100",
-					Data:  []byte{0xa9, 0x05, 0x9c, 0xbb, 0x01, 0x02, 0x03, 0x04},
+					Data:  "0xa9059cbb01020304",
 				},
 			},
 			expectRecip:     "0x1234567890123456789012345678901234567890",
@@ -195,7 +196,7 @@ func TestEVMAdapter_ParsePayload_Transaction(t *testing.T) {
 				Transaction: &TransactionPayload{
 					To:    strPtr("0x1234567890123456789012345678901234567890"),
 					Value: "0x0",
-					Data:  []byte{0xa9, 0x05},
+					Data:  "0xa905",
 				},
 			},
 			expectRecip: "0x1234567890123456789012345678901234567890",
@@ -240,8 +241,9 @@ func TestEVMAdapter_ParsePayload_Transaction(t *testing.T) {
 				}
 			} else if tt.expectMethodSig == "" && parsed.MethodSig != nil {
 				// If we don't expect method sig, it should be nil
-				if tt.payload.Transaction != nil && len(tt.payload.Transaction.Data) < 4 {
-					// This is expected behavior
+				dataHex := strings.TrimPrefix(tt.payload.Transaction.Data, "0x")
+				if tt.payload.Transaction != nil && len(dataHex) < 8 {
+					// This is expected behavior — less than 4 bytes of data
 				}
 			}
 

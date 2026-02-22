@@ -2271,10 +2271,8 @@ func TestRedTeam_HeaderLength_OversizedAPIKeyID(t *testing.T) {
 // via the admin API, then attempt to bypass them with attack payloads.
 //
 // NOTE on transaction data encoding:
-// The server's TransactionPayload.Data is []byte, so Go's json.Unmarshal
-// expects base64-encoded strings (not hex). The hexToBase64 helper converts
-// 0x-prefixed hex calldata to base64 for use in raw JSON payloads.
-// Rule test_cases use SolidityTestInput.Data (string type) which accepts hex.
+// The server's TransactionPayload.Data is a string type that accepts
+// 0x-prefixed hex encoding, matching the Ethereum standard and client SDK.
 //
 // NOTE on rule mode for typed_data tests:
 // Whitelist rules are OR'd — any matching whitelist rule approves the request.
@@ -2368,7 +2366,7 @@ func TestRedTeam_PT5_FakeTokenApprove(t *testing.T) {
 				"txType": "legacy",
 				"nonce": 0
 			}
-		}`, fakeToken, hexToBase64(approveHex))),
+		}`, fakeToken, "0x"+approveHex)),
 	}, false)
 
 	// The blocklist rule should reject this because txTo != realUSDC
@@ -2457,7 +2455,7 @@ func TestRedTeam_PT5_FakeTokenTransfer(t *testing.T) {
 				"txType": "legacy",
 				"nonce": 1
 			}
-		}`, fakeToken, hexToBase64(transferHex))),
+		}`, fakeToken, "0x"+transferHex)),
 	}, false)
 
 	if err == nil && resp != nil && resp.Status == "completed" {
@@ -2598,7 +2596,7 @@ func TestRedTeam_PT5_ExecTxDelegatecall(t *testing.T) {
 				"txType": "legacy",
 				"nonce": 2
 			}
-		}`, safeProxy, hexToBase64(attackHex))),
+		}`, safeProxy, "0x"+attackHex)),
 	}, false)
 
 	if err == nil && resp != nil && resp.Status == "completed" {
@@ -2735,7 +2733,7 @@ func TestRedTeam_PT5_ExecTxGasDrain(t *testing.T) {
 				"txType": "legacy",
 				"nonce": 3
 			}
-		}`, safeProxy, hexToBase64(gasDrainHex))),
+		}`, safeProxy, "0x"+gasDrainHex)),
 	}, false)
 
 	if err == nil && resp != nil && resp.Status == "completed" {
@@ -3074,18 +3072,6 @@ func TestRedTeam_PT5_SafeTxDelegatecall(t *testing.T) {
 // =============================================================================
 // Helpers
 // =============================================================================
-
-// hexToBase64 converts a hex string (without 0x prefix) to base64.
-// This is needed because Go's json.Unmarshal for []byte fields expects
-// base64-encoded strings, while EVM calldata is naturally hex-encoded.
-func hexToBase64(hexStr string) string {
-	hexStr = strings.TrimPrefix(hexStr, "0x")
-	b, err := hex.DecodeString(hexStr)
-	if err != nil {
-		panic(fmt.Sprintf("hexToBase64: invalid hex string: %v", err))
-	}
-	return base64.StdEncoding.EncodeToString(b)
-}
 
 // getBaseURL returns the base URL for the test server.
 // Uses the internal test server's BaseURL or falls back to default.

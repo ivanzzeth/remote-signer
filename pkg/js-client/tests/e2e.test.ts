@@ -179,7 +179,7 @@ describe('Remote Signer Client E2E Tests', () => {
         sign_type: 'transaction',
         payload: {
           transaction: {
-            to: '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb',
+            to: '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb2',
             value: '1000000000000000000', // 1 ETH
             gas: 21000,
             gasPrice: '20000000000', // 20 gwei

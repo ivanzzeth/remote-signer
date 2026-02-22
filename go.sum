@@ -130,8 +130,8 @@ github.com/influxdata/influxdb1-client v0.0.0-20220302092344-a9ab5670611c h1:qSH
 github.com/influxdata/influxdb1-client v0.0.0-20220302092344-a9ab5670611c/go.mod h1:qj24IKcXYK6Iy9ceXlo3Tc+vtHo9lIhSX5JddghvEPo=
 github.com/influxdata/line-protocol v0.0.0-20200327222509-2487e7298839 h1:W9WBk7wlPfJLvMCdtV4zPulc4uCPrlywQOmbFOhgQNU=
 github.com/influxdata/line-protocol v0.0.0-20200327222509-2487e7298839/go.mod h1:xaLFMmpvUxqXtVkUJfg9QmT88cDaCJ3ZKgdZ78oO8Qo=
-github.com/ivanzzeth/ethsig v0.2.0 h1:7uV87MEXXN5/L+HC/4bxgSwrRyIX+Tq8FpBjmwivMMs=
-github.com/ivanzzeth/ethsig v0.2.0/go.mod h1:LsCk9JSo/hwfe7yw+AaHvXLGUP0PTT6tnNh1QJs6Rrk=
+github.com/ivanzzeth/ethsig v0.3.1 h1:Dc4K8pI7GeEQf8/UX4KMzhi0bcTq1KKsjBML3uWIniM=
+github.com/ivanzzeth/ethsig v0.3.1/go.mod h1:LsCk9JSo/hwfe7yw+AaHvXLGUP0PTT6tnNh1QJs6Rrk=
 github.com/jackc/pgpassfile v1.0.0 h1:/6Hmqy13Ss2zCq62VdNG8tM1wchn8zjSGOBJ6icpsIM=
 github.com/jackc/pgpassfile v1.0.0/go.mod h1:CEx0iS5ambNFdcRtxPj5JhEz+xB6uRky5eyVu/W2HEg=
 github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 h1:iCEnooe7UlwOQYpKFhBabPMi4aNAfoODPEFNiAnClxo=
