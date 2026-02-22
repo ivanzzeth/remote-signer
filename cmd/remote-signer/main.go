@@ -345,6 +345,20 @@ func run() error {
 	serverConfig.Host = cfg.Server.Host
 	serverConfig.Port = cfg.Server.Port
 
+	// TLS configuration
+	if cfg.Server.TLS.Enabled {
+		serverConfig.TLSEnabled = true
+		serverConfig.TLSCertFile = cfg.Server.TLS.CertFile
+		serverConfig.TLSKeyFile = cfg.Server.TLS.KeyFile
+		serverConfig.TLSCAFile = cfg.Server.TLS.CAFile
+		serverConfig.TLSClientAuth = cfg.Server.TLS.ClientAuth
+		log.Info("TLS enabled",
+			"cert_file", cfg.Server.TLS.CertFile,
+			"key_file", cfg.Server.TLS.KeyFile,
+			"mtls", cfg.Server.TLS.ClientAuth,
+		)
+	}
+
 	// Initialize API server
 	server, err := api.NewServer(router, log, serverConfig)
 	if err != nil {

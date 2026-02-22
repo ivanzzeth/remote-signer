@@ -74,6 +74,8 @@ services:
       - ./config.yaml:/app/configs/config.yaml:ro
       # Rules directory (for file-based rules)
       - ./rules:/app/configs/rules:ro
+      # TLS certificates (generated via ./scripts/gen-certs.sh)
+      - ./certs:/app/certs:ro
       # Keystores - mounted to match project structure
       - ./data/keystores:/app/data/keystores:ro
       # Foundry binaries (downloaded to host via deploy.sh init)
@@ -82,8 +84,10 @@ services:
       # Forge cache for Solidity rules
       - forge_cache:/var/cache/remote-signer/forge
     # No "ports:" needed — host network mode binds directly to host's port 8548
+    # Healthcheck: uses HTTP by default; override to HTTPS if TLS is enabled
+    # For TLS: --no-check-certificate skips self-signed cert validation
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8548/health"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "--no-check-certificate", "http://localhost:8548/health"]
       interval: 30s
       timeout: 5s
       start_period: 10s

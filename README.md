@@ -22,6 +22,7 @@ For detailed configuration and API usage, refer to the following resources:
 
 **Quick Navigation:**
 - **Getting Started**: See [Quick Start](#quick-start) below
+- **Client SDKs**: See [Client SDKs](#client-sdks) for Go and JS/TS client usage with TLS
 - **TLS Configuration**: See [TLS Configuration](#tls-configuration) for HTTPS setup and certificate generation
 - **TUI Management Interface**: See [TUI (Terminal User Interface)](#tui-terminal-user-interface)
 - **API Authentication**: See [docs/API.md#authentication](docs/API.md#authentication)
@@ -397,93 +398,40 @@ In this blocklist rule:
 - Normal address (e.g., `0x1234...`): `require(to != 0xdEaD)` **passes** → No violation → Transaction allowed
 - Burn address (`0xdEaD`): `require(to != 0xdEaD)` **reverts** → Violation found → Transaction blocked with reason "blocked: burn address"
 
-### TLS Configuration
+### TLS / mTLS Configuration
 
-To enable HTTPS for the signing service, you need to configure TLS with certificate and key files.
+Remote-signer supports TLS (HTTPS) and mutual TLS (mTLS) where both server and client verify each other's certificates. mTLS is recommended for internal services.
 
-#### Option 1: Generate Self-Signed Certificate (Development/Testing)
+#### Option 1: Generate Self-Signed CA + mTLS Certificates (Recommended for Internal Services)
+
+The `gen-certs` command creates a complete self-signed CA trust chain with server and client certificates:
 
 ```bash
-# Create directory for TLS files
-mkdir -p data/tls
+# Generate all certificates (auto-detects LAN IP)
+./scripts/deploy.sh gen-certs
 
-# Generate self-signed certificate (valid for 365 days)
-openssl req -x509 -newkey rsa:4096 -keyout data/tls/key.pem -out data/tls/cert.pem -days 365 -nodes \
-  -subj "/C=US/ST=State/L=City/O=Organization/CN=localhost"
+# Or with extra SAN IPs for LAN access
+./scripts/deploy.sh gen-certs 10.0.0.5
 
-# For production with specific domain:
-openssl req -x509 -newkey rsa:4096 -keyout data/tls/key.pem -out data/tls/cert.pem -days 365 -nodes \
-  -subj "/C=US/ST=State/L=City/O=Organization/CN=signer.example.com"
+# Generated files in certs/:
+#   ca.crt / ca.key          - Certificate Authority
+#   server.crt / server.key  - Server certificate (SAN: localhost, 127.0.0.1, ::1, LAN IP)
+#   client.crt / client.key  - Client certificate (for mTLS)
 ```
 
-**Parameters explained:**
-- `-x509`: Generate self-signed certificate (not a certificate request)
-- `-newkey rsa:4096`: Generate new 4096-bit RSA key
-- `-keyout`: Output file for private key
-- `-out`: Output file for certificate
-- `-days 365`: Certificate validity period
-- `-nodes`: Don't encrypt the private key (no password required)
-- `-subj`: Certificate subject (CN should match your domain)
+#### Option 2: Use Let's Encrypt (Public-Facing Production)
 
-#### Option 2: Generate Certificate with Subject Alternative Names (SAN)
-
-For certificates that work with multiple domains/IPs:
+For production environments exposed to the internet:
 
 ```bash
-# Create OpenSSL config file
-cat > data/tls/openssl.cnf << EOF
-[req]
-default_bits = 4096
-prompt = no
-default_md = sha256
-distinguished_name = dn
-x509_extensions = v3_req
-
-[dn]
-C = US
-ST = State
-L = City
-O = Organization
-CN = signer.example.com
-
-[v3_req]
-subjectAltName = @alt_names
-
-[alt_names]
-DNS.1 = signer.example.com
-DNS.2 = localhost
-IP.1 = 127.0.0.1
-IP.2 = 192.168.1.100
-EOF
-
-# Generate certificate with SAN
-openssl req -x509 -newkey rsa:4096 -keyout data/tls/key.pem -out data/tls/cert.pem \
-  -days 365 -nodes -config data/tls/openssl.cnf
-```
-
-#### Option 3: Use Let's Encrypt (Production)
-
-For production environments, use Let's Encrypt for free, trusted certificates:
-
-```bash
-# Install certbot
-# macOS
-brew install certbot
-
-# Ubuntu/Debian
-sudo apt install certbot
-
-# Generate certificate (standalone mode - stops any running server on port 80)
 sudo certbot certonly --standalone -d signer.example.com
 
-# Certificates will be at:
+# Certificates at:
 # /etc/letsencrypt/live/signer.example.com/fullchain.pem
 # /etc/letsencrypt/live/signer.example.com/privkey.pem
 ```
 
-#### Enable TLS in Configuration
-
-Update your `config.yaml`:
+#### Enable TLS/mTLS in Configuration
 
 ```yaml
 server:
@@ -491,43 +439,46 @@ server:
   port: 8548
   tls:
     enabled: true
-    cert_file: "data/tls/cert.pem"    # Path to certificate
-    key_file: "data/tls/key.pem"      # Path to private key
-
-# For Let's Encrypt:
-# tls:
-#   enabled: true
-#   cert_file: "/etc/letsencrypt/live/signer.example.com/fullchain.pem"
-#   key_file: "/etc/letsencrypt/live/signer.example.com/privkey.pem"
+    cert_file: "./certs/server.crt"    # Server certificate
+    key_file: "./certs/server.key"     # Server private key
+    ca_file: "./certs/ca.crt"          # CA certificate (for verifying client certs)
+    client_auth: true                  # Enable mTLS (require client certificate)
 ```
 
-#### Verify Certificate
+Set `client_auth: false` for TLS-only mode (no client certificate required).
+
+#### Verify TLS/mTLS
 
 ```bash
 # View certificate details
-openssl x509 -in data/tls/cert.pem -text -noout
+openssl x509 -in certs/server.crt -text -noout
 
 # Test TLS connection
-openssl s_client -connect localhost:8548 -showcerts
+openssl s_client -connect localhost:8548 -CAfile certs/ca.crt
 
-# Test with curl (use -k for self-signed)
-curl -k https://localhost:8548/health
+# Health check with mTLS
+curl --cacert certs/ca.crt \
+     --cert certs/client.crt \
+     --key certs/client.key \
+     https://localhost:8548/health
+
+# Or use the auto-detecting status command
+./scripts/deploy.sh status
 ```
 
-#### TUI with TLS
+#### TUI with TLS/mTLS
 
 When connecting to a TLS-enabled server:
 
 ```bash
-# Using HTTPS URL
-./remote-signer-tui \
+# With self-signed CA (TLS only, no mTLS)
+SSL_CERT_FILE=certs/ca.crt ./remote-signer-tui \
   -url https://localhost:8548 \
   -api-key-id your-api-key-id \
   -private-key your-ed25519-private-key
 
-# For self-signed certificates, you may need to set:
-export SSL_CERT_FILE=data/tls/cert.pem
-# Or disable verification (not recommended for production)
+# With mTLS, the TUI client needs client certificates
+# (configure via environment or client SDK TLS options)
 ```
 
 ### Environment Variables
@@ -543,11 +494,84 @@ export SLACK_BOT_TOKEN="xoxb-..."
 export PUSHOVER_APP_TOKEN="..."
 ```
 
-## Docker Deployment
+## Deployment
 
-For production deployment, use Docker with the provided scripts.
+The `scripts/deploy.sh` script supports both **local** (no Docker) and **Docker** deployment modes.
 
-### Quick Start with Docker
+### Local Deployment (Recommended for Development)
+
+Local mode runs the binary directly on the host. It uses SQLite by default (no PostgreSQL needed) and supports interactive keystore password input via `screen`.
+
+```bash
+# 1. Initialize environment (creates directories, .env, config files)
+./scripts/deploy.sh init
+
+# 2. Generate TLS/mTLS certificates (CA + server + client)
+./scripts/deploy.sh gen-certs
+# Or with extra SAN IPs:
+./scripts/deploy.sh gen-certs 10.0.0.5
+
+# 3. Create local config with SQLite database
+#    config.local.yaml is auto-preferred over config.yaml by local-run
+#    Key difference: uses SQLite instead of PostgreSQL
+#      dsn: "file:./data/remote-signer.db?_journal_mode=WAL&_busy_timeout=5000"
+cp config.example.yaml config.local.yaml
+# Edit config.local.yaml:
+#   - Set database.dsn to SQLite path (see above)
+#   - Enable TLS/mTLS if certs were generated
+#   - Configure API keys, rules, etc.
+
+# 4. Build & start (opens screen session for keystore password input)
+./scripts/deploy.sh local-run
+# >>> Enter keystore password when prompted
+# >>> Press Ctrl+A then D to detach screen
+
+# 5. Check status (auto-detects TLS and local/docker mode)
+./scripts/deploy.sh status
+
+# 6. View logs / reattach / stop
+./scripts/deploy.sh local-logs
+./scripts/deploy.sh local-attach
+./scripts/deploy.sh local-down
+```
+
+#### Local Deploy Script Commands
+
+| Command | Description |
+|---------|-------------|
+| `local-run` | Build Go binary & start in screen session (interactive for keystore password) |
+| `local-down` | Stop locally running remote-signer |
+| `local-logs` | Tail local log file |
+| `local-attach` | Reattach to the running screen session |
+| `gen-certs` | Generate self-signed CA + server + client TLS certificates |
+| `status` | Auto-detect TLS/mTLS and local/docker mode, run health check |
+
+#### Config Files
+
+| File | Database | Used By |
+|------|----------|---------|
+| `config.local.yaml` | SQLite (local file) | `local-run` (preferred) |
+| `config.yaml` | PostgreSQL | `local-run` (fallback), Docker |
+| `config.example.yaml` | — | Template for both |
+
+#### TLS/mTLS Verification
+
+After starting with TLS enabled:
+
+```bash
+# Health check with mTLS (client certificate required)
+curl --cacert certs/ca.crt \
+     --cert certs/client.crt \
+     --key certs/client.key \
+     https://localhost:8548/health
+
+# Or just use the status command (auto-detects TLS config)
+./scripts/deploy.sh status
+```
+
+### Docker Deployment
+
+For production deployment with PostgreSQL, use Docker with the provided scripts.
 
 ```bash
 # 1. Initialize environment (creates directories, .env, config.yaml)
@@ -555,49 +579,34 @@ For production deployment, use Docker with the provided scripts.
 
 # 2. Edit configuration files
 # - Edit .env with your EVM signer private key
-# - Edit data/config.yaml with your settings
-# - Add the generated API public key to data/config.yaml
+# - Edit config.yaml with your settings
+# - Add the generated API public key to config.yaml
 
-# 3. Start services
+# 3. Generate TLS certificates (optional)
+./scripts/deploy.sh gen-certs
+
+# 4. Start remote-signer interactively (for keystore password)
+./scripts/deploy.sh run
+# Or start all services in background (no keystore password prompt)
 ./scripts/deploy.sh up
 
-# 4. Check status
+# 5. Check status
 ./scripts/deploy.sh status
 ```
 
-### Deployment Scripts
+#### Docker Deploy Script Commands
 
-| Script | Description |
-|--------|-------------|
-| `scripts/deploy.sh` | Main deployment script (init, up, down, logs, status) |
-| `scripts/generate-api-key.sh` | Generate Ed25519 API key pair |
-| `scripts/generate-tls-cert.sh` | Generate self-signed TLS certificate |
-
-### Deploy Script Commands
-
-```bash
-# Initialize environment (first time setup)
-./scripts/deploy.sh init
-
-# Start all services
-./scripts/deploy.sh up
-
-# Stop all services
-./scripts/deploy.sh down
-
-# View logs
-./scripts/deploy.sh logs
-./scripts/deploy.sh logs -f  # Follow logs
-
-# Check service status
-./scripts/deploy.sh status
-
-# Rebuild Docker images
-./scripts/deploy.sh build
-
-# Clean up (remove containers and volumes)
-./scripts/deploy.sh clean
-```
+| Command | Description |
+|---------|-------------|
+| `init` | Initialize deployment environment (create directories, generate keys) |
+| `up` | Start all services (background mode) |
+| `run` | Start remote-signer interactively in screen (for password input) |
+| `attach` | Reattach to running Docker screen session |
+| `down` | Stop all services |
+| `restart` | Restart remote-signer interactively |
+| `logs` | View Docker service logs |
+| `build` | Build Docker images |
+| `clean` | Remove all containers and volumes |
 
 ### Generate Keys
 
@@ -608,37 +617,17 @@ For production deployment, use Docker with the provided scripts.
 # Generate API key with custom name
 ./scripts/generate-api-key.sh -n admin
 
-# Generate TLS certificate
-./scripts/generate-tls-cert.sh
+# Generate TLS certificates (CA + server + client for mTLS)
+./scripts/deploy.sh gen-certs
 
-# Generate TLS certificate for specific domain
-./scripts/generate-tls-cert.sh -d signer.example.com
-
-# Generate TLS certificate with additional IPs
-./scripts/generate-tls-cert.sh -d signer.example.com -i 192.168.1.100
-```
-
-### Docker Configuration Files
-
-After running `./scripts/deploy.sh init`, you'll have:
-
-```
-remote-signer/
-├── .env                    # Environment variables (PostgreSQL, EVM keys)
-├── data/
-│   ├── config.yaml         # Service configuration
-│   ├── tls/                # TLS certificates (optional)
-│   │   ├── cert.pem
-│   │   └── key.pem
-│   ├── api_private.pem     # API private key (for TUI client)
-│   └── api_public.pem      # API public key (add to config.yaml)
-└── docker-compose.yml
+# Generate TLS certificates with extra SAN IPs
+./scripts/deploy.sh gen-certs 10.0.0.5 172.16.0.1
 ```
 
 ### Environment Variables (.env)
 
 ```bash
-# PostgreSQL
+# PostgreSQL (Docker mode only)
 POSTGRES_USER=signer
 POSTGRES_PASSWORD=your_secure_password
 POSTGRES_DB=remote_signer
@@ -729,6 +718,108 @@ export REMOTE_SIGNER_PRIVATE_KEY=your-ed25519-private-key
 | `?` | Show help |
 | `q` | Quit |
 
+## Client SDKs
+
+Remote-signer provides official client SDKs for Go and JavaScript/TypeScript.
+
+### Go Client
+
+```go
+import client "github.com/ivanzzeth/remote-signer/pkg/client"
+
+// Basic (no TLS)
+c, err := client.NewClient(client.Config{
+    BaseURL:       "http://localhost:8548",
+    APIKeyID:      "my-api-key",
+    PrivateKeyHex: "your-ed25519-private-key-hex",
+})
+
+// With TLS + mTLS (self-signed CA)
+c, err := client.NewClient(client.Config{
+    BaseURL:       "https://localhost:8549",
+    APIKeyID:      "my-api-key",
+    PrivateKeyHex: "your-ed25519-private-key-hex",
+    TLSCAFile:     "certs/ca.crt",     // CA to verify server cert
+    TLSCertFile:   "certs/client.crt", // Client certificate (mTLS)
+    TLSKeyFile:    "certs/client.key", // Client private key (mTLS)
+})
+```
+
+### JavaScript/TypeScript Client
+
+```bash
+npm install @remote-signer/client
+```
+
+**Browser (behind reverse proxy, standard HTTPS):**
+
+```typescript
+import { RemoteSignerClient } from '@remote-signer/client';
+
+const client = new RemoteSignerClient({
+  baseURL: 'https://signer.example.com', // Reverse proxy with public TLS cert
+  apiKeyID: 'my-api-key',
+  privateKey: 'your-ed25519-private-key-hex',
+});
+
+const health = await client.health();
+```
+
+**Node.js with TLS/mTLS (self-signed CA):**
+
+```typescript
+import { RemoteSignerClient } from '@remote-signer/client';
+import fs from 'fs';
+
+const client = new RemoteSignerClient({
+  baseURL: 'https://localhost:8549',
+  apiKeyID: 'my-api-key',
+  privateKey: 'your-ed25519-private-key-hex',
+  httpClient: {
+    tls: {
+      ca: fs.readFileSync('certs/ca.crt'),      // CA to verify server cert
+      cert: fs.readFileSync('certs/client.crt'), // Client certificate (mTLS)
+      key: fs.readFileSync('certs/client.key'),  // Client private key (mTLS)
+    },
+  },
+});
+
+const health = await client.health();
+```
+
+**Node.js with custom fetch (advanced):**
+
+```typescript
+const client = new RemoteSignerClient({
+  baseURL: 'http://localhost:8548',
+  apiKeyID: 'my-api-key',
+  privateKey: 'your-ed25519-private-key-hex',
+  httpClient: {
+    fetch: myCustomFetch, // Any fetch-compatible function
+  },
+});
+```
+
+### Mixed Access Architecture
+
+When you need both browser access (public) and internal service access (mTLS):
+
+```
+Browser / JS Client (HTTPS)
+        │
+        ▼
+   Reverse Proxy (Nginx/Caddy)    ← Public TLS cert (Let's Encrypt)
+        │                            Authenticates via API Key signatures
+        ▼
+   remote-signer (mTLS)           ← Internal, requires client certificate
+        ▲
+        │
+   Go Client / Node.js            ← mTLS with client cert + key
+```
+
+- **Browser clients**: Connect to the reverse proxy with standard HTTPS. The reverse proxy handles mTLS to remote-signer using its own client certificate. Authentication is done via Ed25519 API key signatures.
+- **Internal services**: Connect directly to remote-signer with mTLS client certificates + API key signatures.
+
 ## API Authentication
 
 All API requests must be signed using Ed25519 key pairs.
@@ -798,7 +889,8 @@ remote-signer/
 │   ├── notify/             # Notification (Slack, Pushover)
 │   └── storage/            # Database repositories
 ├── pkg/
-│   └── client/             # Go client SDK
+│   ├── client/             # Go client SDK
+│   └── js-client/          # JavaScript/TypeScript client SDK
 ├── tui/                    # Terminal UI components
 │   ├── views/              # UI views (dashboard, requests, rules, audit)
 │   └── styles/             # Styling with lipgloss
@@ -889,6 +981,7 @@ To add support for a new chain (e.g., Solana):
 - [x] **EIP-712 Typed Data Validation**: Parameter-level validation for EIP-712 signed messages (Permit, Seaport orders, Permit2, etc.) using `typed_data_expression` and `typed_data_functions` modes
 - [x] **Terminal UI (TUI)**: Terminal-based management interface for monitoring and managing the signing service
 - [x] **Go Client SDK**: Go SDK for interacting with the remote-signer API
+- [x] **JS/TS Client SDK**: JavaScript/TypeScript SDK with TLS/mTLS support (Node.js + browser)
 - [ ] **Solidity Rule Coverage Enforcement**: Integrate `forge coverage` to enforce minimum branch coverage threshold for `evm_solidity_expression` rules. Rules with insufficient test coverage would be rejected.
 - [ ] **Solana Chain Support**: Add Solana signing adapter
 - [ ] **Cosmos Chain Support**: Add Cosmos/Tendermint signing adapter

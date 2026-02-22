@@ -4,6 +4,7 @@
 
 import {
   ClientConfig,
+  TLSConfig,
   SignRequest,
   SignResponse,
   RequestStatusResponse,
@@ -65,10 +66,127 @@ export class RemoteSignerClient {
     this.useNonce = config.useNonce ?? true;
 
     // Setup HTTP client
-    this.httpClient = {
-      fetch: globalThis.fetch,
-      timeout: config.httpClient?.timeout ?? 30000, // 30 seconds
+    const timeout = config.httpClient?.timeout ?? 30000; // 30 seconds
+
+    if (config.httpClient?.fetch) {
+      // User provided custom fetch function - use directly
+      this.httpClient = { fetch: config.httpClient.fetch, timeout };
+    } else if (config.httpClient?.tls && RemoteSignerClient.isNodeJS()) {
+      // Node.js environment with TLS config - create fetch with https.Agent
+      this.httpClient = {
+        fetch: RemoteSignerClient.createNodeTLSFetch(config.httpClient.tls),
+        timeout,
+      };
+    } else {
+      // Browser or Node.js without TLS - use globalThis.fetch
+      this.httpClient = {
+        fetch: globalThis.fetch.bind(globalThis),
+        timeout,
+      };
+    }
+  }
+
+  /**
+   * Detect if running in Node.js environment.
+   */
+  private static isNodeJS(): boolean {
+    return (
+      typeof process !== "undefined" &&
+      process.versions != null &&
+      process.versions.node != null
+    );
+  }
+
+  /**
+   * Create a fetch function with TLS/mTLS support for Node.js.
+   * Uses Node.js built-in https.Agent for certificate configuration.
+   *
+   * @param tlsConfig - TLS configuration with CA, client cert, and key
+   * @returns A fetch-compatible function with TLS configured
+   */
+  private static createNodeTLSFetch(tlsConfig: TLSConfig): typeof fetch {
+    // Dynamic require to avoid bundling Node.js modules in browser builds
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const https = require("https");
+    const agent = new https.Agent({
+      ca: tlsConfig.ca,
+      cert: tlsConfig.cert,
+      key: tlsConfig.key,
+      rejectUnauthorized: tlsConfig.rejectUnauthorized ?? true,
+    });
+
+    // Return a fetch wrapper that injects the https agent.
+    // Node.js native fetch (undici-based, 18+) does not support 'agent' directly,
+    // so we use the lower-level https/http module to make requests.
+    const fetchWithTLS = (input: string | URL, init?: any): Promise<any> => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = init?.method ?? "GET";
+      const headers = init?.headers as Record<string, string> | undefined;
+      const body = init?.body as string | undefined;
+      const signal = init?.signal as AbortSignal | undefined;
+
+      return new Promise((resolve, reject) => {
+        if (signal?.aborted) {
+          const err = new Error("The operation was aborted.");
+          err.name = "AbortError";
+          reject(err);
+          return;
+        }
+
+        const parsed = new URL(url);
+        const options: any = {
+          hostname: parsed.hostname,
+          port: parsed.port || (parsed.protocol === "https:" ? 443 : 80),
+          path: parsed.pathname + parsed.search,
+          method,
+          headers: headers || {},
+          agent: parsed.protocol === "https:" ? agent : undefined,
+        };
+
+        const proto = parsed.protocol === "https:" ? https : require("http");
+        const req = proto.request(options, (res: any) => {
+          const chunks: any[] = [];
+          res.on("data", (chunk: any) => chunks.push(chunk));
+          res.on("end", () => {
+            const buffer = Buffer.concat(chunks);
+            const bodyText = buffer.toString("utf-8");
+            // Build a Response-like object compatible with our client's usage
+            resolve({
+              ok: res.statusCode >= 200 && res.statusCode < 300,
+              status: res.statusCode,
+              statusText: res.statusMessage || "",
+              headers: {
+                get: (name: string) => res.headers[name.toLowerCase()] || null,
+              },
+              text: () => Promise.resolve(bodyText),
+              json: () => Promise.resolve(JSON.parse(bodyText)),
+            });
+          });
+          res.on("error", reject);
+        });
+
+        req.on("error", reject);
+
+        // Handle abort signal
+        if (signal) {
+          const onAbort = () => {
+            req.destroy();
+            const err = new Error("The operation was aborted.");
+            err.name = "AbortError";
+            reject(err);
+          };
+          signal.addEventListener("abort", onAbort, { once: true });
+          req.on("close", () => signal.removeEventListener("abort", onAbort));
+        }
+
+        if (body) {
+          req.write(body);
+        }
+        req.end();
+      });
     };
+
+    return fetchWithTLS as typeof fetch;
   }
 
   /**

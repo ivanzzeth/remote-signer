@@ -6,6 +6,8 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -13,6 +15,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
@@ -72,6 +75,22 @@ type Config struct {
 	// When enabled, a random nonce is included in each request signature.
 	// Default: true (enabled for security)
 	UseNonce *bool
+
+	// TLS configuration
+
+	// TLSCertFile is the path to the client TLS certificate (for mTLS).
+	TLSCertFile string
+
+	// TLSKeyFile is the path to the client TLS private key (for mTLS).
+	TLSKeyFile string
+
+	// TLSCAFile is the path to the CA certificate to verify the server.
+	// Required when connecting to a server with a self-signed certificate.
+	TLSCAFile string
+
+	// TLSSkipVerify skips server certificate verification.
+	// WARNING: This is insecure and should only be used for testing.
+	TLSSkipVerify bool
 }
 
 // NewClient creates a new Client with the given configuration.
@@ -119,6 +138,50 @@ func NewClient(cfg Config) (*Client, error) {
 	httpClient := cfg.HTTPClient
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 30 * time.Second}
+	}
+
+	// Configure TLS if any TLS option is set
+	if cfg.TLSCAFile != "" || cfg.TLSCertFile != "" || cfg.TLSSkipVerify {
+		tlsConfig := &tls.Config{
+			MinVersion: tls.VersionTLS13,
+		}
+
+		// Load CA certificate to verify server
+		if cfg.TLSCAFile != "" {
+			caCert, err := os.ReadFile(cfg.TLSCAFile)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read TLS CA file: %w", err)
+			}
+			caCertPool := x509.NewCertPool()
+			if !caCertPool.AppendCertsFromPEM(caCert) {
+				return nil, fmt.Errorf("failed to parse TLS CA certificate")
+			}
+			tlsConfig.RootCAs = caCertPool
+		}
+
+		// Load client certificate for mTLS
+		if cfg.TLSCertFile != "" && cfg.TLSKeyFile != "" {
+			clientCert, err := tls.LoadX509KeyPair(cfg.TLSCertFile, cfg.TLSKeyFile)
+			if err != nil {
+				return nil, fmt.Errorf("failed to load TLS client certificate: %w", err)
+			}
+			tlsConfig.Certificates = []tls.Certificate{clientCert}
+		}
+
+		// Skip server verification (insecure, testing only)
+		if cfg.TLSSkipVerify {
+			tlsConfig.InsecureSkipVerify = true //nolint:gosec // Intentionally configurable for testing
+		}
+
+		// Apply TLS config to HTTP client
+		// If user provided a custom HTTPClient, we create a new one with TLS transport
+		// to avoid modifying the original
+		httpClient = &http.Client{
+			Timeout: httpClient.Timeout,
+			Transport: &http.Transport{
+				TLSClientConfig: tlsConfig,
+			},
+		}
 	}
 
 	pollInterval := cfg.PollInterval

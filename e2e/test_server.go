@@ -50,6 +50,7 @@ type TestServer struct {
 	db         *gorm.DB
 	cancelFunc context.CancelFunc
 	baseURL    string
+	tlsCerts   *tlsCerts // set by StartWithTLS for mTLS health-check
 }
 
 // NewTestServer creates a new test server instance

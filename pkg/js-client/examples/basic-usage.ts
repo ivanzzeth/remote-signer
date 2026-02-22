@@ -169,6 +169,90 @@ async function signWithErrorHandling() {
   }
 }
 
+// =============================================================================
+// TLS / mTLS examples (Node.js only)
+// =============================================================================
+
+// Example 9: Node.js with self-signed CA (TLS only, no client cert)
+function createTLSClient() {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const fs = require('fs');
+
+  return new RemoteSignerClient({
+    baseURL: 'https://localhost:8549',
+    apiKeyID: 'my-api-key',
+    privateKey: 'your-ed25519-private-key-hex',
+    httpClient: {
+      tls: {
+        ca: fs.readFileSync('certs/ca.crt'),
+      },
+    },
+  });
+}
+
+// Example 10: Node.js with mTLS (client certificate required by server)
+function createMTLSClient() {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const fs = require('fs');
+
+  return new RemoteSignerClient({
+    baseURL: 'https://localhost:8549',
+    apiKeyID: 'my-api-key',
+    privateKey: 'your-ed25519-private-key-hex',
+    httpClient: {
+      timeout: 30000,
+      tls: {
+        ca: fs.readFileSync('certs/ca.crt'),      // CA to verify server cert
+        cert: fs.readFileSync('certs/client.crt'), // Client certificate
+        key: fs.readFileSync('certs/client.key'),  // Client private key
+      },
+    },
+  });
+}
+
+// Example 11: Skip certificate verification (testing only!)
+function createInsecureClient() {
+  return new RemoteSignerClient({
+    baseURL: 'https://localhost:8549',
+    apiKeyID: 'my-api-key',
+    privateKey: 'your-ed25519-private-key-hex',
+    httpClient: {
+      tls: {
+        rejectUnauthorized: false, // WARNING: insecure, testing only
+      },
+    },
+  });
+}
+
+// Example 12: Browser client (behind reverse proxy, no TLS config needed)
+// In browser environments, TLS is handled by the browser itself.
+// Use a reverse proxy (Nginx/Caddy) with a public TLS certificate.
+function createBrowserClient() {
+  return new RemoteSignerClient({
+    baseURL: 'https://signer.example.com', // Reverse proxy URL
+    apiKeyID: 'my-api-key',
+    privateKey: 'your-ed25519-private-key-hex',
+    // No httpClient.tls needed - browser handles TLS natively
+  });
+}
+
+// Example 13: Custom fetch function (advanced)
+function createCustomFetchClient() {
+  const customFetch: typeof fetch = async (input, init) => {
+    console.log('Custom fetch:', input);
+    return globalThis.fetch(input, init);
+  };
+
+  return new RemoteSignerClient({
+    baseURL: 'http://localhost:8548',
+    apiKeyID: 'my-api-key',
+    privateKey: 'your-ed25519-private-key-hex',
+    httpClient: {
+      fetch: customFetch,
+    },
+  });
+}
+
 // Run examples
 async function main() {
   await checkHealth();

@@ -2,9 +2,12 @@ package api
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"time"
 )
 
@@ -14,6 +17,13 @@ type ServerConfig struct {
 	Port         int           `yaml:"port"`
 	ReadTimeout  time.Duration `yaml:"read_timeout"`
 	WriteTimeout time.Duration `yaml:"write_timeout"`
+
+	// TLS
+	TLSEnabled    bool
+	TLSCertFile   string
+	TLSKeyFile    string
+	TLSCAFile     string // CA cert for mTLS client verification
+	TLSClientAuth bool   // Require client certificates (mTLS)
 }
 
 // DefaultServerConfig returns the default server configuration
@@ -53,6 +63,31 @@ func NewServer(router *Router, logger *slog.Logger, config ServerConfig) (*Serve
 		WriteTimeout: config.WriteTimeout,
 	}
 
+	// Configure TLS if enabled
+	if config.TLSEnabled {
+		tlsConfig := &tls.Config{
+			MinVersion: tls.VersionTLS13,
+		}
+
+		// If mTLS is enabled, load CA cert and require client certificates
+		if config.TLSClientAuth {
+			caCert, err := os.ReadFile(config.TLSCAFile)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read CA certificate: %w", err)
+			}
+
+			caCertPool := x509.NewCertPool()
+			if !caCertPool.AppendCertsFromPEM(caCert) {
+				return nil, fmt.Errorf("failed to parse CA certificate")
+			}
+
+			tlsConfig.ClientCAs = caCertPool
+			tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+		}
+
+		httpServer.TLSConfig = tlsConfig
+	}
+
 	return &Server{
 		httpServer: httpServer,
 		router:     router,
@@ -68,6 +103,12 @@ func (s *Server) Start() error {
 	s.router.StartRateLimitCleanup(s.stopCh)
 
 	addr := fmt.Sprintf("%s:%d", s.config.Host, s.config.Port)
+
+	if s.config.TLSEnabled {
+		s.logger.Info("starting HTTPS server (TLS)", "addr", addr, "mtls", s.config.TLSClientAuth)
+		return s.httpServer.ListenAndServeTLS(s.config.TLSCertFile, s.config.TLSKeyFile)
+	}
+
 	s.logger.Info("starting HTTP server", "addr", addr)
 	return s.httpServer.ListenAndServe()
 }
