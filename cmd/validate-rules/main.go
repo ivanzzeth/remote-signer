@@ -224,59 +224,29 @@ func validateFile(ctx context.Context, filePath string, validator *evm.SolidityR
 		ruleIndices = append(ruleIndices, i)
 	}
 
-	// Batch validate all rules in the file
+	// Batch validate all rules in the file (automatically groups by mode)
 	if len(rulesToValidate) > 0 {
 		batchResults, err := validator.ValidateRulesBatch(ctx, rulesToValidate)
 		if err != nil {
-			// Fallback to individual validation if batch fails
-			log.Warn("batch validation failed, falling back to individual validation", "error", err)
-			for _, rule := range rulesToValidate {
-				validationResult, err := validator.ValidateRule(ctx, rule)
-				if err != nil {
-					result := ValidationFileResult{
-						RuleName: rule.Name,
-						RuleType: string(rule.Type),
-						Valid:    false,
-						Error:    err.Error(),
-					}
-					results = append(results, result)
-					failed++
-					continue
-				}
-				result := ValidationFileResult{
-					RuleName:        rule.Name,
-					RuleType:        string(rule.Type),
-					Valid:           validationResult.Valid,
-					SyntaxError:     validationResult.SyntaxError,
-					TestCaseResults: validationResult.TestCaseResults,
-					FailedTestCases: validationResult.FailedTestCases,
-				}
-				if result.Valid {
-					passed++
-				} else {
-					failed++
-				}
-				results = append(results, result)
-			}
-		} else {
-		// Use batch results
+			return nil, 0, 0, fmt.Errorf("batch validation failed: %w", err)
+		}
+
 		for idx, validationResult := range batchResults.Results {
 			rule := rulesToValidate[idx]
-				result := ValidationFileResult{
-					RuleName:        rule.Name,
-					RuleType:        string(rule.Type),
-					Valid:           validationResult.Valid,
-					SyntaxError:     validationResult.SyntaxError,
-					TestCaseResults: validationResult.TestCaseResults,
-					FailedTestCases: validationResult.FailedTestCases,
-				}
-				if result.Valid {
-					passed++
-				} else {
-					failed++
-				}
-				results = append(results, result)
+			result := ValidationFileResult{
+				RuleName:        rule.Name,
+				RuleType:        string(rule.Type),
+				Valid:           validationResult.Valid,
+				SyntaxError:     validationResult.SyntaxError,
+				TestCaseResults: validationResult.TestCaseResults,
+				FailedTestCases: validationResult.FailedTestCases,
 			}
+			if result.Valid {
+				passed++
+			} else {
+				failed++
+			}
+			results = append(results, result)
 		}
 	}
 

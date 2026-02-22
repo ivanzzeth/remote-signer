@@ -145,187 +145,107 @@ const (
 
 // ValidateRule performs full validation of a Solidity expression rule
 func (v *SolidityRuleValidator) ValidateRule(ctx context.Context, rule *types.Rule) (*ValidationResult, error) {
-	var config SolidityExpressionConfig
-	if err := json.Unmarshal(rule.Config, &config); err != nil {
-		return nil, fmt.Errorf("invalid solidity expression config: %w", err)
-	}
-
-	// Determine validation mode and code
-	mode, code := v.determineValidationMode(&config)
-
-	// Validate that at least one mode is specified
-	if code == "" {
-		return nil, fmt.Errorf("either expression, functions, typed_data_expression, or typed_data_functions must be specified")
-	}
-
-	// Step 0: Security validation - check for dangerous patterns
-	if secErr := ValidateSolidityCodeSecurity(code); secErr != nil {
-		v.logger.Warn("security validation failed",
-			"rule_id", rule.ID,
-			"pattern", secErr.Pattern,
-		)
-		return nil, fmt.Errorf("security validation failed: %s", secErr.Message)
-	}
-
-	// Parse struct definition early if provided (for TypedData modes)
-	// This is needed for both syntax validation and test case execution
-	var structDef *StructDefinition
-	if config.TypedDataStruct != "" {
-		var structErr error
-		structDef, structErr = parseStructDefinition(config.TypedDataStruct)
-		if structErr != nil {
-			return nil, fmt.Errorf("failed to parse typed_data_struct: %w", structErr)
-		}
-	}
-
-	result := &ValidationResult{Valid: true}
-
-	// Step 1: Syntax validation via forge build
-	v.logger.Debug("validating Solidity syntax",
-		"rule_id", rule.ID,
-		"mode", v.modeString(mode),
-	)
-	syntaxErr, err := v.validateSyntaxForModeWithStruct(ctx, code, mode, structDef)
+	// Delegate to batch validation with a single rule.
+	// This ensures there is only ONE validation code path to maintain.
+	batchResult, err := v.ValidateRulesBatch(ctx, []*types.Rule{rule})
 	if err != nil {
-		return nil, fmt.Errorf("syntax validation failed: %w", err)
+		return nil, err
 	}
-	if syntaxErr != nil {
-		v.logger.Warn("syntax validation failed",
-			"rule_id", rule.ID,
-			"error", syntaxErr.Message,
-		)
-		result.Valid = false
-		result.SyntaxError = syntaxErr
-		return result, nil
+	if len(batchResult.Results) != 1 {
+		return nil, fmt.Errorf("unexpected number of results: got %d, want 1", len(batchResult.Results))
 	}
-	v.logger.Debug("syntax validation passed", "rule_id", rule.ID)
-
-	// Step 2: Validate test cases requirement
-	// Rules MUST have at least 2 test cases: one positive (expect_pass: true) and one negative (expect_pass: false)
-	if len(config.TestCases) < 2 {
-		return nil, fmt.Errorf("at least 2 test cases required for Solidity expression rules (got %d): need at least one positive (expect_pass: true) and one negative (expect_pass: false)", len(config.TestCases))
-	}
-
-	// Count positive and negative test cases
-	var positiveCount, negativeCount int
-	for _, tc := range config.TestCases {
-		if tc.ExpectPass {
-			positiveCount++
-		} else {
-			negativeCount++
-		}
-	}
-	if positiveCount == 0 {
-		return nil, fmt.Errorf("at least one positive test case (expect_pass: true) is required")
-	}
-	if negativeCount == 0 {
-		return nil, fmt.Errorf("at least one negative test case (expect_pass: false) is required")
-	}
-
-	result.TestCaseResults = make([]TestCaseResult, len(config.TestCases))
-
-	// Execute test cases in parallel for better performance
-	type testCaseJob struct {
-		index int
-		tc    SolidityTestCase
-	}
-	jobs := make(chan testCaseJob, len(config.TestCases))
-	resultsChan := make(chan struct {
-		index int
-		result TestCaseResult
-	}, len(config.TestCases))
-
-	// Start worker goroutines (limit concurrency to avoid overwhelming the system)
-	maxWorkers := 4
-	if len(config.TestCases) < maxWorkers {
-		maxWorkers = len(config.TestCases)
-	}
-
-	// Start workers
-	for w := 0; w < maxWorkers; w++ {
-		go func() {
-			for job := range jobs {
-				v.logger.Debug("executing test case",
-					"rule_id", rule.ID,
-					"test_case", job.tc.Name,
-					"index", job.index,
-				)
-				tcResult := v.executeTestCaseForMode(ctx, code, job.tc, mode, structDef)
-				resultsChan <- struct {
-					index  int
-					result TestCaseResult
-				}{job.index, tcResult}
-			}
-		}()
-	}
-
-	// Send jobs
-	for i, tc := range config.TestCases {
-		jobs <- testCaseJob{index: i, tc: tc}
-	}
-	close(jobs)
-
-	// Collect results
-	for i := 0; i < len(config.TestCases); i++ {
-		res := <-resultsChan
-		result.TestCaseResults[res.index] = res.result
-
-		if !res.result.Passed {
-			result.FailedTestCases++
-			result.Valid = false
-			v.logger.Warn("test case failed",
-				"rule_id", rule.ID,
-				"test_case", res.result.Name,
-				"error", res.result.Error,
-			)
-		} else {
-			v.logger.Debug("test case passed",
-				"rule_id", rule.ID,
-				"test_case", res.result.Name,
-			)
-		}
-	}
-
-	return result, nil
+	return &batchResult.Results[0], nil
 }
 
 // ValidateRulesBatch validates multiple rules in a single compilation
-// This significantly improves performance by reducing the number of forge compilations
+// This significantly improves performance by reducing the number of forge compilations.
+// Rules are automatically grouped by validation mode and each group is batched separately.
 func (v *SolidityRuleValidator) ValidateRulesBatch(ctx context.Context, rules []*types.Rule) (*BatchValidationResult, error) {
 	if len(rules) == 0 {
 		return &BatchValidationResult{Results: []ValidationResult{}, Valid: true}, nil
 	}
 
-	// Group rules by validation mode (they must use the same mode to be batched)
-	// For now, we'll only batch rules with the same mode
-	// Different modes require different contract structures
-	modeGroups := make(map[ValidationMode][]*types.Rule)
+	// Pre-validate: all rules must have at least 2 test cases (1 positive + 1 negative)
 	for _, rule := range rules {
 		var config SolidityExpressionConfig
 		if err := json.Unmarshal(rule.Config, &config); err != nil {
 			return nil, fmt.Errorf("invalid solidity expression config for rule %s: %w", rule.ID, err)
 		}
+		mode, code := v.determineValidationMode(&config)
+		_ = mode
+		if code == "" {
+			return nil, fmt.Errorf("rule %s: either expression, functions, typed_data_expression, or typed_data_functions must be specified", rule.ID)
+		}
+		if len(config.TestCases) < 2 {
+			return nil, fmt.Errorf("rule %s: at least 2 test cases required (got %d): need at least one positive and one negative", rule.ID, len(config.TestCases))
+		}
+		var positiveCount, negativeCount int
+		for _, tc := range config.TestCases {
+			if tc.ExpectPass {
+				positiveCount++
+			} else {
+				negativeCount++
+			}
+		}
+		if positiveCount == 0 {
+			return nil, fmt.Errorf("rule %s: at least one positive test case (expect_pass: true) is required", rule.ID)
+		}
+		if negativeCount == 0 {
+			return nil, fmt.Errorf("rule %s: at least one negative test case (expect_pass: false) is required", rule.ID)
+		}
+	}
+
+	// Group rules by validation mode — different modes require different contract structures
+	type ruleWithOrigIndex struct {
+		rule      *types.Rule
+		origIndex int // index in the original `rules` slice
+	}
+	modeGroups := make(map[ValidationMode][]ruleWithOrigIndex)
+	for i, rule := range rules {
+		var config SolidityExpressionConfig
+		if err := json.Unmarshal(rule.Config, &config); err != nil {
+			return nil, fmt.Errorf("invalid solidity expression config for rule %s: %w", rule.ID, err)
+		}
 		mode, _ := v.determineValidationMode(&config)
-		modeGroups[mode] = append(modeGroups[mode], rule)
+		modeGroups[mode] = append(modeGroups[mode], ruleWithOrigIndex{rule: rule, origIndex: i})
 	}
 
-	// For simplicity, if rules have different modes, fall back to individual validation
-	// In the future, we could batch each mode separately
-	if len(modeGroups) > 1 {
-		return nil, fmt.Errorf("cannot batch rules with different validation modes")
+	// Initialize results
+	results := make([]ValidationResult, len(rules))
+	allValid := true
+
+	// Batch validate each mode group separately
+	for mode, groupItems := range modeGroups {
+		// Extract rules for this group
+		groupRules := make([]*types.Rule, len(groupItems))
+		for j, item := range groupItems {
+			groupRules[j] = item.rule
+		}
+
+		v.logger.Info("Batch validating rules",
+			"mode", v.modeString(mode),
+			"count", len(groupRules),
+		)
+
+		// Batch validate this mode group
+		groupResult, err := v.validateRulesBatchForMode(ctx, groupRules, mode)
+		if err != nil {
+			return nil, fmt.Errorf("batch validation failed for mode %s: %w", v.modeString(mode), err)
+		}
+
+		// Map group results back to original indices
+		for j, item := range groupItems {
+			results[item.origIndex] = groupResult.Results[j]
+			if !groupResult.Results[j].Valid {
+				allValid = false
+			}
+		}
 	}
 
-	// Get the single mode
-	var mode ValidationMode
-	var modeRules []*types.Rule
-	for m, rs := range modeGroups {
-		mode = m
-		modeRules = rs
-		break
-	}
-
-	// Batch validate all rules with the same mode
-	return v.validateRulesBatchForMode(ctx, modeRules, mode)
+	return &BatchValidationResult{
+		Results: results,
+		Valid:   allValid,
+	}, nil
 }
 
 // validateRulesBatchForMode validates multiple rules with the same validation mode
@@ -403,17 +323,13 @@ func (v *SolidityRuleValidator) validateRulesBatchForMode(ctx context.Context, r
 	// This allows us to compile once and run all tests
 	batchScript, err := v.generateBatchTestScript(rules, mode, allTestCases)
 	if err != nil {
-		// Fall back to individual validation if batch generation fails
-		v.logger.Warn("batch test generation failed, using individual validation", "error", err)
-		return v.validateRulesIndividually(ctx, rules, results, allValid)
+		return nil, fmt.Errorf("failed to generate batch test script: %w", err)
 	}
 
 	// Execute batch test contract (compile once, run all tests)
 	batchResults, err := v.executeBatchTestScript(ctx, batchScript, len(rules), allTestCases)
 	if err != nil {
-		// Fall back to individual validation
-		v.logger.Warn("batch test execution failed, using individual validation", "error", err)
-		return v.validateRulesIndividually(ctx, rules, results, allValid)
+		return nil, fmt.Errorf("failed to execute batch test: %w", err)
 	}
 
 	// Map batch results back to individual rule results
@@ -450,73 +366,6 @@ func (v *SolidityRuleValidator) validateRulesBatchForMode(ctx context.Context, r
 	}, nil
 }
 
-// validateRulesIndividually is a fallback that validates rules individually
-func (v *SolidityRuleValidator) validateRulesIndividually(ctx context.Context, rules []*types.Rule, results []ValidationResult, allValid bool) (*BatchValidationResult, error) {
-	type ruleJob struct {
-		index int
-		rule  *types.Rule
-	}
-	jobs := make(chan ruleJob, len(rules))
-	resultsChan := make(chan struct {
-		index  int
-		result ValidationResult
-	}, len(rules))
-
-	// Start workers
-	maxWorkers := 4
-	if len(rules) < maxWorkers {
-		maxWorkers = len(rules)
-	}
-
-	for w := 0; w < maxWorkers; w++ {
-		go func() {
-			for job := range jobs {
-				validationResult, err := v.ValidateRule(ctx, job.rule)
-				if err != nil {
-					resultsChan <- struct {
-						index  int
-						result ValidationResult
-					}{
-						index: job.index,
-						result: ValidationResult{
-							Valid: false,
-							SyntaxError: &SyntaxError{
-								Message:  err.Error(),
-								Severity: "error",
-							},
-						},
-					}
-				} else {
-					resultsChan <- struct {
-						index  int
-						result ValidationResult
-					}{job.index, *validationResult}
-				}
-			}
-		}()
-	}
-
-	// Send jobs
-	for i, rule := range rules {
-		jobs <- ruleJob{index: i, rule: rule}
-	}
-	close(jobs)
-
-	// Collect results
-	for i := 0; i < len(rules); i++ {
-		res := <-resultsChan
-		results[res.index] = res.result
-		if !res.result.Valid {
-			allValid = false
-		}
-	}
-
-	return &BatchValidationResult{
-		Results: results,
-		Valid:   allValid,
-	}, nil
-}
-
 // testCaseWithRule represents a test case with its associated rule information
 type testCaseWithRule struct {
 	ruleIndex int
@@ -528,7 +377,8 @@ type testCaseWithRule struct {
 // generateBatchTestScript generates a single test contract with all test cases
 // This significantly reduces compilation time by compiling once instead of N times
 func (v *SolidityRuleValidator) generateBatchTestScript(rules []*types.Rule, mode ValidationMode, allTestCases []testCaseWithRule) (string, error) {
-	var testFunctions []string
+	var testFunctions []string      // test functions placed INSIDE BatchRuleEvaluatorTest
+	var topLevelContracts []string  // helper contracts placed OUTSIDE BatchRuleEvaluatorTest
 
 	switch mode {
 	case ValidationModeExpression:
@@ -642,8 +492,8 @@ func (v *SolidityRuleValidator) generateBatchTestScript(rules []*types.Rule, mod
 }`, ruleIdx, funcs)
 			ruleContracts = append(ruleContracts, ruleContractCode)
 		}
-		// Insert all RuleContracts before test functions
-		testFunctions = append(ruleContracts, testFunctions...)
+		// RuleContracts go OUTSIDE BatchRuleEvaluatorTest (top-level)
+		topLevelContracts = append(topLevelContracts, ruleContracts...)
 
 		// Generate test functions for each test case, referencing the correct RuleContract
 		for i, tcwr := range allTestCases {
@@ -911,8 +761,8 @@ func (v *SolidityRuleValidator) generateBatchTestScript(rules []*types.Rule, mod
 }`,
 					config.TypedDataFunctions,
 				)
-				// Insert RuleContract before test functions
-				testFunctions = append([]string{ruleContractCode}, testFunctions...)
+				// RuleContract goes OUTSIDE BatchRuleEvaluatorTest (top-level)
+				topLevelContracts = append(topLevelContracts, ruleContractCode)
 			}
 		}
 
@@ -920,16 +770,22 @@ func (v *SolidityRuleValidator) generateBatchTestScript(rules []*types.Rule, mod
 		return "", fmt.Errorf("unsupported validation mode: %d", mode)
 	}
 
-	// Combine all test functions into a single contract
-	script := fmt.Sprintf(`// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+	// Combine: top-level contracts go BEFORE the test contract, test functions go INSIDE
+	var sb strings.Builder
+	sb.WriteString("// SPDX-License-Identifier: MIT\npragma solidity ^0.8.20;\n\n")
 
-contract BatchRuleEvaluatorTest {
-%s
-}
-`, strings.Join(testFunctions, "\n\n"))
+	// Write top-level helper contracts (e.g., RuleContract_0, RuleContract_1, ...)
+	for _, c := range topLevelContracts {
+		sb.WriteString(c)
+		sb.WriteString("\n\n")
+	}
 
-	return script, nil
+	// Write the main test contract containing all test functions
+	sb.WriteString("contract BatchRuleEvaluatorTest {\n")
+	sb.WriteString(strings.Join(testFunctions, "\n\n"))
+	sb.WriteString("\n}\n")
+
+	return sb.String(), nil
 }
 
 // sanitizeFunctionName sanitizes a rule name to be a valid Solidity function name
@@ -999,9 +855,22 @@ func (v *SolidityRuleValidator) executeBatchTestScript(ctx context.Context, scri
 	}
 
 	if err != nil {
+		// Check if this is a compilation error (no tests ran at all)
+		// Compilation errors contain "Compiler run failed" or "Error (" patterns
+		// but NOT "[FAIL" or "[PASS" patterns (which indicate tests ran)
+		isCompilationError := (strings.Contains(outputStr, "Compiler run failed") ||
+			strings.Contains(outputStr, "Error (")) &&
+			!strings.Contains(outputStr, "[FAIL") &&
+			!strings.Contains(outputStr, "[PASS")
+		if isCompilationError {
+			return nil, fmt.Errorf("batch test compilation failed: %s", outputStr)
+		}
+
 		// Parse individual test failures from forge output
-		// Format: [FAIL. Reason: <reason>] test_<ruleName>_<index>()
-		failPattern := regexp.MustCompile(`\[FAIL\.\s*Reason:\s*([^\]]+)\]\s*test_(\w+)_(\d+)\(\)`)
+		// Forge output formats vary by version:
+		//   [FAIL: <reason>] test_<ruleName>_<index>()           (forge >= 0.2.0)
+		//   [FAIL. Reason: <reason>] test_<ruleName>_<index>()   (older forge)
+		failPattern := regexp.MustCompile(`\[FAIL[.:]\s*(?:Reason:\s*)?([^\]]+)\]\s*test_(\w+)_(\d+)\(\)`)
 		matches := failPattern.FindAllStringSubmatch(outputStr, -1)
 
 		// Track which tests passed (default to true, set to false if found in failures)
@@ -1039,7 +908,11 @@ func (v *SolidityRuleValidator) executeBatchTestScript(ctx context.Context, scri
 
 		// Compare with expectations
 		for i := range results {
-			if !v.compareTestResult(allTestCases[i].tc.ExpectPass, results[i].ActualPass, allTestCases[i].tc.ExpectReason, results[i].ActualReason) {
+			if v.compareTestResult(allTestCases[i].tc.ExpectPass, results[i].ActualPass, allTestCases[i].tc.ExpectReason, results[i].ActualReason) {
+				// Test result matches expectation — this is a validation pass
+				results[i].Passed = true
+				results[i].Error = ""
+			} else {
 				results[i].Passed = false
 				if allTestCases[i].tc.ExpectPass && !results[i].ActualPass {
 					results[i].Error = fmt.Sprintf("expected pass but got revert: %s", results[i].ActualReason)
@@ -1122,75 +995,6 @@ func (v *SolidityRuleValidator) validateSyntaxForModeWithStruct(ctx context.Cont
 		return nil, fmt.Errorf("unknown validation mode: %d", mode)
 	}
 	return v.compileSyntaxCheckScript(ctx, script)
-}
-
-// executeTestCaseForMode runs a single test case based on the validation mode
-func (v *SolidityRuleValidator) executeTestCaseForMode(ctx context.Context, code string, tc SolidityTestCase, mode ValidationMode, structDef *StructDefinition) TestCaseResult {
-	switch mode {
-	case ValidationModeExpression, ValidationModeFunctions:
-		return v.executeTestCaseWithMode(ctx, code, tc, mode == ValidationModeFunctions)
-	case ValidationModeTypedDataExpression, ValidationModeTypedDataFunctions:
-		return v.executeTypedDataTestCase(ctx, code, tc, mode, structDef)
-	default:
-		return TestCaseResult{
-			Name:   tc.Name,
-			Passed: false,
-			Error:  fmt.Sprintf("unknown validation mode: %d", mode),
-		}
-	}
-}
-
-// executeTypedDataTestCase runs a test case for EIP-712 typed data validation
-func (v *SolidityRuleValidator) executeTypedDataTestCase(ctx context.Context, code string, tc SolidityTestCase, mode ValidationMode, structDef *StructDefinition) TestCaseResult {
-	result := TestCaseResult{
-		Name:           tc.Name,
-		ExpectedPass:   tc.ExpectPass,
-		ExpectedReason: tc.ExpectReason,
-	}
-
-	// Build typed data from test input
-	typedData, err := v.buildTypedDataFromInput(tc.Input)
-	if err != nil {
-		result.Passed = false
-		result.Error = fmt.Sprintf("failed to build typed data from input: %v", err)
-		return result
-	}
-
-	// Convert test input to SignRequest with typed data payload
-	req := v.testInputToTypedDataRequest(tc.Input, typedData)
-
-	// Execute the rule based on mode
-	// Pass structDef to ensure field name mappings (e.g., message_ -> message) are applied
-	var passed bool
-	var reason string
-	if mode == ValidationModeTypedDataExpression {
-		passed, reason, err = v.evaluator.evaluateTypedDataExpression(ctx, code, req, typedData, structDef)
-	} else {
-		passed, reason, err = v.evaluator.evaluateTypedDataFunctions(ctx, code, req, typedData)
-	}
-
-	if err != nil {
-		result.Passed = false
-		result.Error = err.Error()
-		return result
-	}
-
-	result.ActualPass = passed
-	result.ActualReason = reason
-
-	// Compare with expectation
-	result.Passed = v.compareTestResult(tc.ExpectPass, passed, tc.ExpectReason, reason)
-	if !result.Passed {
-		if tc.ExpectPass && !passed {
-			result.Error = fmt.Sprintf("expected pass but got revert: %s", reason)
-		} else if !tc.ExpectPass && passed {
-			result.Error = "expected revert but passed"
-		} else if tc.ExpectReason != "" && !strings.Contains(reason, tc.ExpectReason) {
-			result.Error = fmt.Sprintf("expected reason containing '%s' but got '%s'", tc.ExpectReason, reason)
-		}
-	}
-
-	return result
 }
 
 // buildTypedDataFromInput constructs a TypedDataPayload from test input
@@ -1292,23 +1096,6 @@ func inferSolidityType(value interface{}) string {
 	}
 }
 
-// validateSyntaxWithMode compiles the Solidity code to check for syntax errors
-func (v *SolidityRuleValidator) validateSyntaxWithMode(ctx context.Context, code string, isFunctionMode bool) (*SyntaxError, error) {
-	var script string
-	if isFunctionMode {
-		script = v.evaluator.GenerateFunctionSyntaxCheckScript(code)
-	} else {
-		script = v.evaluator.GenerateSyntaxCheckScript(code)
-	}
-	return v.compileSyntaxCheckScript(ctx, script)
-}
-
-// validateSyntax compiles the Solidity expression to check for syntax errors (legacy, expression mode only)
-func (v *SolidityRuleValidator) validateSyntax(ctx context.Context, expression string) (*SyntaxError, error) {
-	script := v.evaluator.GenerateSyntaxCheckScript(expression)
-	return v.compileSyntaxCheckScript(ctx, script)
-}
-
 // compileSyntaxCheckScript compiles a syntax check script and returns any errors
 func (v *SolidityRuleValidator) compileSyntaxCheckScript(ctx context.Context, script string) (*SyntaxError, error) {
 	// Calculate script hash for caching
@@ -1368,6 +1155,9 @@ func (v *SolidityRuleValidator) compileSyntaxCheckScript(ctx context.Context, sc
 	if err != nil {
 		// Parse compilation error
 		syntaxErr := parseSolidityError(string(output))
+		// CRITICAL: Remove the failing syntax check file so it doesn't poison
+		// subsequent forge builds (forge compiles ALL .sol files in the directory)
+		os.Remove(scriptPath)
 		// Cache as invalid
 		v.syntaxCacheMu.Lock()
 		v.syntaxCache[hashStr] = false
@@ -1382,61 +1172,6 @@ func (v *SolidityRuleValidator) compileSyntaxCheckScript(ctx context.Context, sc
 
 	// Don't delete output directory - keep it for forge incremental compilation
 	return nil, nil
-}
-
-// executeTestCaseWithMode runs a single test case with the specified mode
-func (v *SolidityRuleValidator) executeTestCaseWithMode(ctx context.Context, code string, tc SolidityTestCase, isFunctionMode bool) TestCaseResult {
-	result := TestCaseResult{
-		Name:           tc.Name,
-		ExpectedPass:   tc.ExpectPass,
-		ExpectedReason: tc.ExpectReason,
-	}
-
-	// Convert test input to SignRequest and ParsedPayload
-	req, parsed, inputErr := v.testInputToRequest(tc.Input)
-	if inputErr != nil {
-		result.Passed = false
-		result.Error = fmt.Sprintf("invalid test input: %v", inputErr)
-		return result
-	}
-
-	// Execute the rule based on mode
-	var passed bool
-	var reason string
-	var err error
-	if isFunctionMode {
-		passed, reason, err = v.evaluator.evaluateFunctions(ctx, code, req, parsed)
-	} else {
-		passed, reason, err = v.evaluator.evaluateExpression(ctx, code, req, parsed)
-	}
-
-	if err != nil {
-		result.Passed = false
-		result.Error = err.Error()
-		return result
-	}
-
-	result.ActualPass = passed
-	result.ActualReason = reason
-
-	// Compare with expectation
-	result.Passed = v.compareTestResult(tc.ExpectPass, passed, tc.ExpectReason, reason)
-	if !result.Passed {
-		if tc.ExpectPass && !passed {
-			result.Error = fmt.Sprintf("expected pass but got revert: %s", reason)
-		} else if !tc.ExpectPass && passed {
-			result.Error = "expected revert but passed"
-		} else if tc.ExpectReason != "" && !strings.Contains(reason, tc.ExpectReason) {
-			result.Error = fmt.Sprintf("expected reason containing '%s' but got '%s'", tc.ExpectReason, reason)
-		}
-	}
-
-	return result
-}
-
-// executeTestCase runs a single test case and compares result with expectation (legacy, expression mode only)
-func (v *SolidityRuleValidator) executeTestCase(ctx context.Context, expression string, tc SolidityTestCase) TestCaseResult {
-	return v.executeTestCaseWithMode(ctx, expression, tc, false)
 }
 
 // compareTestResult compares expected and actual test results

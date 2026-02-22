@@ -37,6 +37,9 @@ check_tools() {
     if ! command -v govulncheck &> /dev/null; then
         missing+=("govulncheck (install: go install golang.org/x/vuln/cmd/govulncheck@latest)")
     fi
+    if ! command -v forge &> /dev/null; then
+        missing+=("forge (install: curl -L https://foundry.paradigm.xyz | bash && foundryup)")
+    fi
 
     if [ ${#missing[@]} -gt 0 ]; then
         log_warn "Missing tools (hooks will skip unavailable checks):"
@@ -136,6 +139,26 @@ else
     echo -e "${GREEN}OK${NC}"
 fi
 
+# 6. Validate rule YAML files (only when rules are staged)
+STAGED_RULES=$(git diff --cached --name-only --diff-filter=ACM | grep '^rules/.*\.yaml$' || true)
+if [ -n "$STAGED_RULES" ]; then
+    if command -v forge &> /dev/null; then
+        echo -n "Validating rule files... "
+        # shellcheck disable=SC2086
+        if go run ./cmd/validate-rules/ $STAGED_RULES 2>/dev/null; then
+            echo -e "${GREEN}OK${NC}"
+        else
+            echo -e "${RED}FAIL${NC}"
+            echo "Rule validation failed. Run 'go run ./cmd/validate-rules/ -v rules/*.yaml' for details."
+            FAILED=1
+        fi
+    else
+        echo -e "${YELLOW}SKIP rule validation (forge not installed)${NC}"
+    fi
+else
+    echo -e "Validating rule files... ${GREEN}OK (no staged rule files)${NC}"
+fi
+
 echo "=== Pre-commit checks complete ==="
 
 if [ $FAILED -ne 0 ]; then
@@ -200,7 +223,7 @@ log_info "Git hooks installed successfully!"
 log_info "Hooks location: $HOOKS_DIR"
 echo ""
 echo "Installed hooks:"
-echo "  pre-commit : gosec, govulncheck, go vet, error suppression check, secret detection"
-echo "  pre-push   : full unit test suite"
+echo "  pre-commit : gosec, govulncheck, go vet, error suppression check, secret detection, rule validation"
+echo "  pre-push   : full unit test suite (includes rule validation via TestRulesDirectoryValidation)"
 echo ""
 echo "To skip hooks (NOT recommended): git commit --no-verify"
