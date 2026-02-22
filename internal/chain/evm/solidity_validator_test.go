@@ -132,7 +132,8 @@ func TestSolidityRuleValidator_TestInputToRequest(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req, parsed := v.testInputToRequest(tt.input)
+			req, parsed, err := v.testInputToRequest(tt.input)
+			require.NoError(t, err)
 
 			assert.Equal(t, tt.expectedChain, req.ChainID)
 			assert.Equal(t, tt.expectedSigner, req.SignerAddress)
@@ -162,7 +163,8 @@ func TestSolidityRuleValidator_TestInputToRequest_DataParsing(t *testing.T) {
 		Data: "0xa9059cbb0000000000000000000000001234567890123456789012345678901234567890",
 	}
 
-	_, parsed := v.testInputToRequest(input)
+	_, parsed, err := v.testInputToRequest(input)
+	require.NoError(t, err)
 	require.NotNil(t, parsed.RawData)
 	assert.Equal(t, 36, len(parsed.RawData)) // 4 bytes selector + 32 bytes address
 

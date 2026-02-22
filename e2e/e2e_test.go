@@ -1362,10 +1362,11 @@ func TestPagination_TotalCountConsistency(t *testing.T) {
 func TestPagination_EmptyPage(t *testing.T) {
 	ctx := context.Background()
 
-	// Test with a filter that returns no results
+	// Test with a filter that returns no results.
+	// Use a valid signer_address that doesn't match any request.
 	page, err := adminClient.ListRequests(ctx, &client.ListRequestsFilter{
-		Status: "nonexistent_status",
-		Limit:  10,
+		SignerAddress: "0x0000000000000000000000000000000000000000",
+		Limit:         10,
 	})
 	require.NoError(t, err)
 	require.NotNil(t, page)

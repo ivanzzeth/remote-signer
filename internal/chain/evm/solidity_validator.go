@@ -20,20 +20,41 @@ import (
 )
 
 // dangerousPatterns contains regex patterns for dangerous Foundry cheatcodes
-// These patterns are checked before rule execution to prevent code injection attacks
+// These patterns are checked before rule execution to prevent code injection attacks.
+// This is a defense-in-depth layer; FOUNDRY_FFI=false and FOUNDRY_FS_PERMISSIONS=[]
+// are also set at runtime. The blocklist catches issues at rule creation time.
 var dangerousPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)vm\s*\.\s*ffi\s*\(`),           // vm.ffi() - arbitrary command execution
-	regexp.MustCompile(`(?i)vm\s*\.\s*readFile\s*\(`),      // vm.readFile() - file read
-	regexp.MustCompile(`(?i)vm\s*\.\s*writeFile\s*\(`),     // vm.writeFile() - file write
-	regexp.MustCompile(`(?i)vm\s*\.\s*removeFile\s*\(`),    // vm.removeFile() - file delete
-	regexp.MustCompile(`(?i)vm\s*\.\s*readDir\s*\(`),       // vm.readDir() - directory read
-	regexp.MustCompile(`(?i)vm\s*\.\s*fsMetadata\s*\(`),    // vm.fsMetadata() - file metadata
-	regexp.MustCompile(`(?i)vm\s*\.\s*envOr\s*\(`),         // vm.envOr() - environment variable read
-	regexp.MustCompile(`(?i)vm\s*\.\s*setEnv\s*\(`),        // vm.setEnv() - environment variable write
-	regexp.MustCompile(`(?i)vm\s*\.\s*projectRoot\s*\(`),   // vm.projectRoot() - path disclosure
-	regexp.MustCompile(`(?i)vm\s*\.\s*rpc\s*\(`),           // vm.rpc() - external RPC calls
-	regexp.MustCompile(`(?i)vm\s*\.\s*createFork\s*\(`),    // vm.createFork() - network access
-	regexp.MustCompile(`(?i)vm\s*\.\s*selectFork\s*\(`),    // vm.selectFork() - network access
+	// Command execution
+	regexp.MustCompile(`(?i)vm\s*\.\s*ffi\s*\(`), // vm.ffi() - arbitrary command execution
+
+	// File system access
+	regexp.MustCompile(`(?i)vm\s*\.\s*readFile\s*\(`),   // vm.readFile() - file read
+	regexp.MustCompile(`(?i)vm\s*\.\s*writeFile\s*\(`),  // vm.writeFile() - file write
+	regexp.MustCompile(`(?i)vm\s*\.\s*removeFile\s*\(`), // vm.removeFile() - file delete
+	regexp.MustCompile(`(?i)vm\s*\.\s*readDir\s*\(`),    // vm.readDir() - directory read
+	regexp.MustCompile(`(?i)vm\s*\.\s*closeFile\s*\(`),  // vm.closeFile() - file close
+	regexp.MustCompile(`(?i)vm\s*\.\s*writeLine\s*\(`),  // vm.writeLine() - file write
+	regexp.MustCompile(`(?i)vm\s*\.\s*readLine\s*\(`),   // vm.readLine() - file read
+	regexp.MustCompile(`(?i)vm\s*\.\s*fsMetadata\s*\(`), // vm.fsMetadata() - file metadata
+
+	// Environment variable access (all vm.env* variants)
+	regexp.MustCompile(`(?i)vm\s*\.\s*env[A-Za-z]*\s*\(`), // vm.envOr, vm.envString, vm.envUint, vm.envBool, vm.envAddress, vm.envBytes, vm.envBytes32, vm.envInt
+	regexp.MustCompile(`(?i)vm\s*\.\s*setEnv\s*\(`),       // vm.setEnv() - environment variable write
+
+	// Path disclosure
+	regexp.MustCompile(`(?i)vm\s*\.\s*projectRoot\s*\(`), // vm.projectRoot() - path disclosure
+
+	// Network access
+	regexp.MustCompile(`(?i)vm\s*\.\s*rpc\s*\(`),        // vm.rpc() - external RPC calls
+	regexp.MustCompile(`(?i)vm\s*\.\s*createFork\s*\(`),  // vm.createFork() - network access
+	regexp.MustCompile(`(?i)vm\s*\.\s*selectFork\s*\(`),  // vm.selectFork() - network access
+
+	// Transaction broadcasting (could initiate real on-chain transactions)
+	regexp.MustCompile(`(?i)vm\s*\.\s*broadcast\s*\(`),      // vm.broadcast() - broadcast next tx
+	regexp.MustCompile(`(?i)vm\s*\.\s*startBroadcast\s*\(`), // vm.startBroadcast() - broadcast mode
+
+	// Signing (could sign arbitrary data with Foundry test keys)
+	regexp.MustCompile(`(?i)vm\s*\.\s*sign\s*\(`), // vm.sign() - sign with test key
 }
 
 // SecurityError represents a security validation error
@@ -520,7 +541,10 @@ func (v *SolidityRuleValidator) generateBatchTestScript(rules []*types.Rule, mod
 			}
 
 			// Convert test input to SignRequest and ParsedPayload
-			req, parsed := v.testInputToRequest(tcwr.tc.Input)
+			req, parsed, err := v.testInputToRequest(tcwr.tc.Input)
+			if err != nil {
+				return "", fmt.Errorf("failed to convert test input for rule %s test case %d: %w", rule.ID, i, err)
+			}
 
 			// Generate test function
 			testFunc := fmt.Sprintf(`    function test_%s_%d() public pure returns (bool) {
@@ -565,8 +589,12 @@ func (v *SolidityRuleValidator) generateBatchTestScript(rules []*types.Rule, mod
 		}
 
 	case ValidationModeFunctions:
-		// Functions mode: need RuleContract with user functions
-		// Collect all unique function sets (rules may share functions)
+		// Functions mode: each rule needs its OWN RuleContract with its specific functions.
+		// Different rules define different validation functions (e.g., rule A has transfer(),
+		// rule B has redeemPositions()). Using a shared RuleContract would cause test cases
+		// to execute the wrong rule's functions, leading to false passes/failures.
+
+		// Parse each rule's functions
 		ruleFuncMap := make(map[int]string) // rule index -> functions code
 		for i, rule := range rules {
 			var config SolidityExpressionConfig
@@ -576,60 +604,10 @@ func (v *SolidityRuleValidator) generateBatchTestScript(rules []*types.Rule, mod
 			ruleFuncMap[i] = config.Functions
 		}
 
-		// Generate test functions for each test case
-		for i, tcwr := range allTestCases {
-			req, parsed := v.testInputToRequest(tcwr.tc.Input)
-
-			// Generate test function that creates RuleContract and calls it
-			testFunc := fmt.Sprintf(`    function test_%s_%d() public returns (bool) {
-        // Create RuleContract with transaction context
-        RuleContract ruleContract = new RuleContract(
-            %s,
-            %s,
-            %s,
-            %s,
-            %s,
-            %s
-        );
-
-        // Get txData from the rule contract
-        bytes memory txData = ruleContract.txData();
-
-        if (txData.length >= 4) {
-            // Forward calldata to RuleContract - this is an external call
-            (bool success, bytes memory returnData) = address(ruleContract).call(txData);
-            if (!success) {
-                // Propagate revert reason
-                if (returnData.length > 0) {
-                    assembly {
-                        revert(add(returnData, 32), mload(returnData))
-                    }
-                }
-                revert("no matching function or validation failed");
-            }
-        }
-
-        return true;
-    }`,
-				sanitizeFunctionName(tcwr.ruleName),
-				i,
-				formatAddress(parsed.Recipient),
-				formatWei(parsed.Value),
-				formatSelector(parsed.MethodSig),
-				formatBytes(parsed.RawData),
-				formatChainID(req.ChainID),
-				formatAddress(&req.SignerAddress),
-			)
-			testFunctions = append(testFunctions, testFunc)
-		}
-
-		// Add RuleContract with all user functions (deduplicated)
-		// Use the first rule's functions as the contract definition
-		// Note: In batch mode, we assume all rules in the batch use compatible function sets
-		if len(rules) > 0 {
-			var config SolidityExpressionConfig
-			if err := json.Unmarshal(rules[0].Config, &config); err == nil {
-				ruleContractCode := fmt.Sprintf(`contract RuleContract {
+		// Generate a separate RuleContract for each rule
+		var ruleContracts []string
+		for ruleIdx, funcs := range ruleFuncMap {
+			ruleContractCode := fmt.Sprintf(`contract RuleContract_%d {
     // Transaction context available as state variables
     address public immutable txTo;
     uint256 public immutable txValue;
@@ -661,12 +639,62 @@ func (v *SolidityRuleValidator) generateBatchTestScript(rules []*types.Rule, mod
 
     // User-defined functions for automatic selector matching
     %s
-}`,
-					config.Functions,
-				)
-				// Insert RuleContract before test functions
-				testFunctions = append([]string{ruleContractCode}, testFunctions...)
+}`, ruleIdx, funcs)
+			ruleContracts = append(ruleContracts, ruleContractCode)
+		}
+		// Insert all RuleContracts before test functions
+		testFunctions = append(ruleContracts, testFunctions...)
+
+		// Generate test functions for each test case, referencing the correct RuleContract
+		for i, tcwr := range allTestCases {
+			req, parsed, err := v.testInputToRequest(tcwr.tc.Input)
+			if err != nil {
+				return "", fmt.Errorf("failed to convert test input for test case %d: %w", i, err)
 			}
+
+			// Each test case uses the RuleContract for its specific rule
+			testFunc := fmt.Sprintf(`    function test_%s_%d() public returns (bool) {
+        // Create RuleContract for this rule's functions
+        RuleContract_%d ruleContract = new RuleContract_%d(
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s
+        );
+
+        // Get txData from the rule contract
+        bytes memory txData = ruleContract.txData();
+
+        if (txData.length >= 4) {
+            // Forward calldata to RuleContract - this is an external call
+            (bool success, bytes memory returnData) = address(ruleContract).call(txData);
+            if (!success) {
+                // Propagate revert reason
+                if (returnData.length > 0) {
+                    assembly {
+                        revert(add(returnData, 32), mload(returnData))
+                    }
+                }
+                revert("no matching function or validation failed");
+            }
+        }
+
+        return true;
+    }`,
+				sanitizeFunctionName(tcwr.ruleName),
+				i,
+				tcwr.ruleIndex,
+				tcwr.ruleIndex,
+				formatAddress(parsed.Recipient),
+				formatWei(parsed.Value),
+				formatSelector(parsed.MethodSig),
+				formatBytes(parsed.RawData),
+				formatChainID(req.ChainID),
+				formatAddress(&req.SignerAddress),
+			)
+			testFunctions = append(testFunctions, testFunc)
 		}
 
 	case ValidationModeTypedDataExpression:
@@ -952,11 +980,8 @@ func (v *SolidityRuleValidator) executeBatchTestScript(ctx context.Context, scri
 	// Set working directory to temp dir where foundry.toml exists
 	cmd.Dir = v.evaluator.GetTempDir()
 
-	// Security: Disable dangerous Foundry cheatcodes
-	cmd.Env = append(os.Environ(),
-		"FOUNDRY_FFI=false",
-		"FOUNDRY_FS_PERMISSIONS=[]",
-	)
+	// Security: Use minimal environment to prevent leaking secrets to user-controlled Solidity code
+	cmd.Env = safeForgeEnv()
 
 	output, err := cmd.CombinedOutput()
 	outputStr := string(output)
@@ -1336,6 +1361,9 @@ func (v *SolidityRuleValidator) compileSyntaxCheckScript(ctx context.Context, sc
 		"--cache-path", cachePath,
 	)
 
+	// Security: Use minimal environment to prevent leaking secrets to user-controlled Solidity code
+	cmd.Env = safeForgeEnv()
+
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		// Parse compilation error
@@ -1365,7 +1393,12 @@ func (v *SolidityRuleValidator) executeTestCaseWithMode(ctx context.Context, cod
 	}
 
 	// Convert test input to SignRequest and ParsedPayload
-	req, parsed := v.testInputToRequest(tc.Input)
+	req, parsed, inputErr := v.testInputToRequest(tc.Input)
+	if inputErr != nil {
+		result.Passed = false
+		result.Error = fmt.Sprintf("invalid test input: %v", inputErr)
+		return result
+	}
 
 	// Execute the rule based on mode
 	var passed bool
@@ -1430,7 +1463,7 @@ func (v *SolidityRuleValidator) compareTestResult(expectPass, actualPass bool, e
 }
 
 // testInputToRequest converts test input to request structures
-func (v *SolidityRuleValidator) testInputToRequest(input SolidityTestInput) (*types.SignRequest, *types.ParsedPayload) {
+func (v *SolidityRuleValidator) testInputToRequest(input SolidityTestInput) (*types.SignRequest, *types.ParsedPayload, error) {
 	req := &types.SignRequest{
 		ChainID:       input.ChainID,
 		SignerAddress: input.Signer,
@@ -1454,12 +1487,13 @@ func (v *SolidityRuleValidator) testInputToRequest(input SolidityTestInput) (*ty
 	}
 	if input.Data != "" {
 		data, err := hex.DecodeString(strings.TrimPrefix(input.Data, "0x"))
-		if err == nil {
-			parsed.RawData = data
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid hex data in test input: %w (data length %d chars, must be even)", err, len(strings.TrimPrefix(input.Data, "0x")))
 		}
+		parsed.RawData = data
 	}
 
-	return req, parsed
+	return req, parsed, nil
 }
 
 // parseSolidityError extracts error details from forge output

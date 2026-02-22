@@ -1,10 +1,13 @@
 package evm
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/ethereum/go-ethereum/common"
 )
 
 // StructDefinition represents a parsed Solidity struct
@@ -240,8 +243,9 @@ func formatFieldValue(solidityType string, value interface{}) string {
 	switch solidityType {
 	case "address":
 		if str, ok := value.(string); ok {
-			if len(str) == 42 && strings.HasPrefix(str, "0x") {
-				return str
+			// Defense in depth: validate hex address to prevent Solidity template injection.
+			if common.IsHexAddress(str) {
+				return common.HexToAddress(str).Hex()
 			}
 		}
 		return "address(0)"
@@ -258,8 +262,14 @@ func formatFieldValue(solidityType string, value interface{}) string {
 	case "bytes":
 		if str, ok := value.(string); ok {
 			if strings.HasPrefix(str, "0x") {
-				return fmt.Sprintf(`hex"%s"`, str[2:])
+				hexPart := str[2:]
+				// Defense in depth: validate hex to prevent Solidity template injection.
+				if _, err := hex.DecodeString(hexPart); err != nil {
+					return `hex""`
+				}
+				return fmt.Sprintf(`hex"%s"`, hexPart)
 			}
+			// Non-hex string: encode as hex bytes (safe output)
 			return fmt.Sprintf(`hex"%x"`, []byte(str))
 		}
 		if bytes, ok := value.([]byte); ok {
@@ -270,7 +280,10 @@ func formatFieldValue(solidityType string, value interface{}) string {
 	case "bytes32":
 		if str, ok := value.(string); ok {
 			if len(str) == 66 && strings.HasPrefix(str, "0x") {
-				return str
+				// Defense in depth: validate hex to prevent Solidity template injection.
+				if _, err := hex.DecodeString(str[2:]); err == nil {
+					return str
+				}
 			}
 		}
 		return "bytes32(0)"
@@ -289,21 +302,45 @@ func formatFieldValue(solidityType string, value interface{}) string {
 		if strings.HasPrefix(solidityType, "uint") || strings.HasPrefix(solidityType, "int") {
 			switch v := value.(type) {
 			case string:
-				// Numeric string
-				return v
+				// Defense in depth: validate numeric string to prevent Solidity template injection.
+				check := strings.TrimPrefix(v, "-")
+				if check != "" && isDecimalString(check) {
+					// Only allow negative for signed int types
+					if strings.HasPrefix(v, "-") && strings.HasPrefix(solidityType, "uint") {
+						return "0"
+					}
+					return v
+				}
+				return "0"
 			case float64:
 				return fmt.Sprintf("%.0f", v)
 			case int, int64, uint64:
 				return fmt.Sprintf("%d", v)
 			case json.Number:
-				return string(v)
+				// Validate json.Number is actually numeric
+				if _, err := v.Int64(); err == nil {
+					return string(v)
+				}
+				if _, err := v.Float64(); err == nil {
+					return fmt.Sprintf("%.0f", func() float64 { f, _ := v.Float64(); return f }())
+				}
+				return "0"
 			}
 			return "0"
 		}
-		// Fallback
-		if str, ok := value.(string); ok {
-			return str
+		// Fixed bytes types (bytes1..bytes31)
+		if strings.HasPrefix(solidityType, "bytes") {
+			if str, ok := value.(string); ok {
+				if strings.HasPrefix(str, "0x") {
+					hexPart := str[2:]
+					if _, err := hex.DecodeString(hexPart); err == nil {
+						return str
+					}
+				}
+			}
+			return fmt.Sprintf("%s(0)", solidityType)
 		}
+		// Fallback: return safe default instead of raw attacker-controlled string
 		return getDefaultValue(solidityType)
 	}
 }

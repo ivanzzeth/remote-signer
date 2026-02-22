@@ -674,13 +674,8 @@ func (e *SolidityRuleEvaluator) executeScript(ctx context.Context, script string
 	// Set working directory to temp dir where foundry.toml exists
 	cmd.Dir = e.tempDir
 
-	// Security: Disable dangerous Foundry cheatcodes
-	// - FOUNDRY_FFI=false: Prevent arbitrary command execution via vm.ffi()
-	// - FOUNDRY_FS_PERMISSIONS=[]: Prevent file system access via vm.readFile(), vm.writeFile(), etc.
-	cmd.Env = append(os.Environ(),
-		"FOUNDRY_FFI=false",
-		"FOUNDRY_FS_PERMISSIONS=[]",
-	)
+	// Security: Use minimal environment to prevent leaking secrets to user-controlled Solidity code
+	cmd.Env = safeForgeEnv()
 
 	output, err := cmd.CombinedOutput()
 
@@ -862,9 +857,9 @@ func formatWei(value *string) string {
 	if value == nil || *value == "" {
 		return "0"
 	}
-	// Defense in depth: negative values would cause Solidity compilation errors
-	// (uint256 cannot hold negative values) and poison the shared compilation directory.
-	if strings.HasPrefix(*value, "-") {
+	// Defense in depth: validate only decimal digits to prevent Solidity template injection.
+	// Embedded as: uint256 value = {{.Value}};
+	if !isDecimalString(*value) {
 		return "0"
 	}
 	return *value
@@ -874,10 +869,11 @@ func formatSelector(sig *string) string {
 	if sig == nil || *sig == "" {
 		return "bytes4(0)"
 	}
-	// Ensure proper format: bytes4(0xXXXXXXXX)
-	s := *sig
-	if strings.HasPrefix(s, "0x") {
-		return fmt.Sprintf("bytes4(%s)", s)
+	// Defense in depth: validate hex to prevent Solidity template injection.
+	// Embedded as: bytes4 selector = {{.Selector}};
+	s := strings.TrimPrefix(*sig, "0x")
+	if !isHexString(s) || len(s) != 8 {
+		return "bytes4(0)"
 	}
 	return fmt.Sprintf("bytes4(0x%s)", s)
 }
@@ -891,6 +887,11 @@ func formatBytes(data []byte) string {
 
 func formatChainID(chainID string) string {
 	if chainID == "" {
+		return "1"
+	}
+	// Defense in depth: validate only decimal digits to prevent Solidity template injection.
+	// Embedded as: uint256 chainId = {{.ChainID}};
+	if !isDecimalString(chainID) {
 		return "1"
 	}
 	return chainID
@@ -1353,12 +1354,34 @@ func escapeReservedKeyword(name string) string {
 	return name
 }
 
-// generateFieldDeclaration generates a single Solidity variable declaration
+// validSolidityTypePattern matches only valid Solidity primitive types.
+// This prevents Solidity template injection via attacker-controlled type strings.
+var validSolidityTypePattern = regexp.MustCompile(`^(address|bool|string|bytes|bytes([1-9]|[12]\d|3[0-2])|u?int(8|16|24|32|40|48|56|64|72|80|88|96|104|112|120|128|136|144|152|160|168|176|184|192|200|208|216|224|232|240|248|256)?)$`)
+
+// generateFieldDeclaration generates a single Solidity variable declaration.
+// Both name and solidityType may come from attacker-controlled request data
+// (EIP-712 typed data types/message), so they MUST be validated before embedding
+// in Solidity code to prevent template injection attacks.
 func generateFieldDeclaration(name, solidityType string, value interface{}) string {
+	// Security: validate field name as a valid Solidity identifier.
+	// This prevents injection via field names like "x; } function evil() { uint256 y".
+	if !isValidIdentifier(name) {
+		return "// Skipped field with invalid name"
+	}
+
 	// Escape reserved keywords
 	safeName := escapeReservedKeyword(name)
 
-	// Handle common Solidity types
+	// Security: validate type against strict whitelist of Solidity primitives.
+	// This prevents injection via types like "uint256; assembly { invalid() } uint256".
+	// IMPORTANT: Do NOT embed the raw attacker-controlled type string in the output,
+	// not even inside a comment. While comments are not executable, defense-in-depth
+	// means we never reflect untrusted input into generated Solidity code.
+	if !validSolidityTypePattern.MatchString(solidityType) {
+		return fmt.Sprintf("// Skipped field %s: unsupported type", safeName)
+	}
+
+	// Handle validated Solidity types
 	switch {
 	case solidityType == "address":
 		return fmt.Sprintf("address %s = %s;", safeName, formatInterfaceAsAddress(value))
@@ -1375,17 +1398,13 @@ func generateFieldDeclaration(name, solidityType string, value interface{}) stri
 	case solidityType == "string":
 		return fmt.Sprintf("string memory %s = %s;", safeName, formatInterfaceAsString(value))
 	case strings.HasPrefix(solidityType, "uint"):
-		// uint8, uint16, ..., uint248
 		return fmt.Sprintf("%s %s = %s;", solidityType, safeName, formatInterfaceAsUint(value))
 	case strings.HasPrefix(solidityType, "int"):
-		// int8, int16, ..., int248
 		return fmt.Sprintf("%s %s = %s;", solidityType, safeName, formatInterfaceAsInt(value))
-	case strings.HasPrefix(solidityType, "bytes") && len(solidityType) <= 8:
-		// bytes1, bytes2, ..., bytes32
+	case strings.HasPrefix(solidityType, "bytes"):
 		return fmt.Sprintf("%s %s = %s;", solidityType, safeName, formatInterfaceAsFixedBytes(value, solidityType))
 	default:
-		// For custom types or arrays, skip for now (can be extended)
-		return fmt.Sprintf("// Skipped field %s of type %s", name, solidityType)
+		return fmt.Sprintf("// Skipped field %s of type %s", safeName, solidityType)
 	}
 }
 
@@ -1421,6 +1440,11 @@ func formatDomainChainId(chainId string) string {
 	if chainId == "" {
 		return "0"
 	}
+	// Defense in depth: validate numeric to prevent Solidity template injection.
+	// Embedded as: uint256 eip712_domainChainId = {{.DomainChainId}};
+	if !isDecimalString(chainId) {
+		return "0"
+	}
 	return chainId
 }
 
@@ -1428,7 +1452,13 @@ func formatDomainContract(addr string) string {
 	if addr == "" {
 		return "address(0)"
 	}
-	return addr
+	// Defense in depth: validate hex address to prevent Solidity template injection.
+	// Attacker-controlled verifyingContract is embedded in Solidity template as:
+	//   address eip712_domainContract = {{.DomainContract}};
+	if !common.IsHexAddress(addr) {
+		return "address(0)"
+	}
+	return common.HexToAddress(addr).Hex()
 }
 
 func formatInterfaceAsAddress(v interface{}) string {
@@ -1437,7 +1467,11 @@ func formatInterfaceAsAddress(v interface{}) string {
 		if val == "" {
 			return "address(0)"
 		}
-		return val
+		// Defense in depth: validate hex address to prevent Solidity template injection.
+		if !common.IsHexAddress(val) {
+			return "address(0)"
+		}
+		return common.HexToAddress(val).Hex()
 	default:
 		return "address(0)"
 	}
@@ -1447,6 +1481,10 @@ func formatInterfaceAsUint(v interface{}) string {
 	switch val := v.(type) {
 	case string:
 		if val == "" {
+			return "0"
+		}
+		// Defense in depth: validate only decimal digits to prevent Solidity template injection.
+		if !isDecimalString(val) {
 			return "0"
 		}
 		return val
@@ -1467,6 +1505,12 @@ func formatInterfaceAsInt(v interface{}) string {
 	switch val := v.(type) {
 	case string:
 		if val == "" {
+			return "0"
+		}
+		// Defense in depth: validate signed decimal to prevent Solidity template injection.
+		// Allow optional leading '-' for negative int values.
+		check := strings.TrimPrefix(val, "-")
+		if check == "" || !isDecimalString(check) {
 			return "0"
 		}
 		return val
@@ -1505,7 +1549,16 @@ func formatInterfaceAsBytes32(v interface{}) string {
 			return "bytes32(0)"
 		}
 		if strings.HasPrefix(val, "0x") {
+			// Defense in depth: validate hex content to prevent Solidity template injection.
+			hexPart := val[2:]
+			if !isHexString(hexPart) || len(hexPart) != 64 {
+				return "bytes32(0)"
+			}
 			return val
+		}
+		// Validate hex before embedding in template
+		if !isHexString(val) {
+			return "bytes32(0)"
 		}
 		return fmt.Sprintf(`hex"%s"`, val)
 	default:
@@ -1520,8 +1573,14 @@ func formatInterfaceAsBytes(v interface{}) string {
 			return `hex""`
 		}
 		if strings.HasPrefix(val, "0x") {
-			return fmt.Sprintf(`hex"%s"`, strings.TrimPrefix(val, "0x"))
+			hexPart := val[2:]
+			// Defense in depth: validate hex content to prevent Solidity template injection.
+			if !isHexString(hexPart) {
+				return `hex""`
+			}
+			return fmt.Sprintf(`hex"%s"`, hexPart)
 		}
+		// Non-0x string: encode as hex bytes (safe — hex.EncodeToString always produces valid hex)
 		return fmt.Sprintf(`hex"%s"`, hex.EncodeToString([]byte(val)))
 	case []byte:
 		return fmt.Sprintf(`hex"%s"`, hex.EncodeToString(val))
@@ -1548,12 +1607,68 @@ func formatInterfaceAsFixedBytes(v interface{}, solidityType string) string {
 			return fmt.Sprintf("%s(0)", solidityType)
 		}
 		if strings.HasPrefix(val, "0x") {
+			// Defense in depth: validate hex content to prevent Solidity template injection.
+			hexPart := val[2:]
+			if !isHexString(hexPart) {
+				return fmt.Sprintf("%s(0)", solidityType)
+			}
 			return val
+		}
+		// Validate hex before embedding in template
+		if !isHexString(val) {
+			return fmt.Sprintf("%s(0)", solidityType)
 		}
 		return fmt.Sprintf(`hex"%s"`, val)
 	default:
 		return fmt.Sprintf("%s(0)", solidityType)
 	}
+}
+
+// safeForgeEnv returns a minimal environment for Forge subprocesses.
+// Only passes essential system variables (PATH, HOME, TMPDIR) and
+// explicitly disables dangerous Foundry features.
+// This prevents leaking secrets (e.g., SIGNER_PRIVATE_KEY) to user-controlled
+// Solidity code even if the cheatcode blocklist is bypassed.
+func safeForgeEnv() []string {
+	env := []string{
+		"FOUNDRY_FFI=false",
+		"FOUNDRY_FS_PERMISSIONS=[]",
+	}
+	// Only forward essential system variables
+	for _, key := range []string{"PATH", "HOME", "TMPDIR", "TEMP", "TMP", "XDG_CACHE_HOME"} {
+		if val := os.Getenv(key); val != "" {
+			env = append(env, key+"="+val)
+		}
+	}
+	return env
+}
+
+// isDecimalString checks if a string contains only decimal digits (0-9).
+// Used to validate numeric values before embedding in Solidity templates.
+func isDecimalString(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// isHexString checks if a string contains only hex characters (0-9, a-f, A-F).
+// Used to validate hex values before embedding in Solidity templates.
+func isHexString(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 // parseRevertReason extracts the revert reason from forge output
@@ -2059,10 +2174,7 @@ func (e *SolidityRuleEvaluator) executeBatchScript(
 		"-vvv",
 	)
 	cmd.Dir = e.tempDir
-	cmd.Env = append(os.Environ(),
-		"FOUNDRY_FFI=false",
-		"FOUNDRY_FS_PERMISSIONS=[]",
-	)
+	cmd.Env = safeForgeEnv()
 
 	output, err := cmd.CombinedOutput()
 

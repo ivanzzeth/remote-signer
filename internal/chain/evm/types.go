@@ -64,7 +64,7 @@ type TypedDataDomain struct {
 type TransactionPayload struct {
 	To        *string `json:"to,omitempty"` // nil for contract creation
 	Value     string  `json:"value"`        // wei as decimal string
-	Data      []byte  `json:"data,omitempty"`
+	Data      string  `json:"data,omitempty"` // 0x-prefixed hex string
 	Nonce     *uint64 `json:"nonce,omitempty"`
 	Gas       uint64  `json:"gas"`
 	GasPrice  string  `json:"gasPrice,omitempty"`  // for legacy tx

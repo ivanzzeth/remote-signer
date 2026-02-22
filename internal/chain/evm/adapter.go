@@ -104,7 +104,11 @@ func (a *EVMAdapter) ValidatePayload(ctx context.Context, signType string, paylo
 		if p.Transaction.Gas == 0 {
 			return fmt.Errorf("transaction.gas is required")
 		}
-		if len(p.Transaction.Data) > maxTransactionDataSize {
+		dataBytes, err := decodeHexData(p.Transaction.Data)
+		if err != nil {
+			return fmt.Errorf("invalid transaction data hex: %w", err)
+		}
+		if len(dataBytes) > maxTransactionDataSize {
 			return fmt.Errorf("transaction data exceeds maximum size of %d bytes", maxTransactionDataSize)
 		}
 		switch p.Transaction.TxType {
@@ -232,8 +236,9 @@ func (a *EVMAdapter) ParsePayload(ctx context.Context, signType string, payload 
 			result.Recipient = p.Transaction.To
 			result.Value = &p.Transaction.Value
 
-			if len(p.Transaction.Data) >= 4 {
-				sig := fmt.Sprintf("0x%s", hex.EncodeToString(p.Transaction.Data[:4]))
+			dataHex := strings.TrimPrefix(p.Transaction.Data, "0x")
+			if len(dataHex) >= 8 { // 4 bytes = 8 hex chars
+				sig := "0x" + dataHex[:8]
 				result.MethodSig = &sig
 				result.Contract = p.Transaction.To
 			}
@@ -260,6 +265,15 @@ func (a *EVMAdapter) HasSigner(ctx context.Context, address string) bool {
 }
 
 // Helper functions
+
+// decodeHexData decodes a 0x-prefixed hex string into raw bytes.
+// Returns nil for empty or "0x" input.
+func decodeHexData(hexStr string) ([]byte, error) {
+	if hexStr == "" || hexStr == "0x" {
+		return nil, nil
+	}
+	return hex.DecodeString(strings.TrimPrefix(hexStr, "0x"))
+}
 
 func hexToHash(hexStr string) (common.Hash, error) {
 	hexStr = strings.TrimPrefix(hexStr, "0x")
@@ -336,6 +350,11 @@ func convertToEthTransaction(payload *TransactionPayload, chainID *big.Int) (*et
 		return nil, err
 	}
 
+	dataBytes, err := decodeHexData(payload.Data)
+	if err != nil {
+		return nil, fmt.Errorf("invalid transaction data hex: %w", err)
+	}
+
 	var tx *ethtypes.Transaction
 
 	switch payload.TxType {
@@ -354,7 +373,7 @@ func convertToEthTransaction(payload *TransactionPayload, chainID *big.Int) (*et
 			Gas:      payload.Gas,
 			To:       to,
 			Value:    value,
-			Data:     payload.Data,
+			Data:     dataBytes,
 		})
 
 	case string(TransactionTypeEIP1559):
@@ -378,7 +397,7 @@ func convertToEthTransaction(payload *TransactionPayload, chainID *big.Int) (*et
 			Gas:       payload.Gas,
 			To:        to,
 			Value:     value,
-			Data:      payload.Data,
+			Data:      dataBytes,
 		})
 
 	case string(TransactionTypeEIP2930):
@@ -397,7 +416,7 @@ func convertToEthTransaction(payload *TransactionPayload, chainID *big.Int) (*et
 			Gas:      payload.Gas,
 			To:       to,
 			Value:    value,
-			Data:     payload.Data,
+			Data:     dataBytes,
 		})
 
 	default:

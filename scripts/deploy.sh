@@ -184,6 +184,10 @@ start_services() {
         exit 1
     fi
 
+    # Always rebuild to ensure latest code is deployed
+    log_info "Building latest image..."
+    docker compose build remote-signer
+
     docker compose up -d
 
     log_info "Services started!"
@@ -235,6 +239,10 @@ run_interactive() {
     # Kill any existing screen session
     screen -S remote-signer -X quit 2>/dev/null || true
 
+    # Always rebuild to ensure latest code is deployed
+    log_info "Building latest image..."
+    docker compose build remote-signer
+
     # Start in screen session (interactive)
     cd "$PROJECT_DIR"
     exec screen -S remote-signer docker compose run -it --service-ports --name remote-signer-app remote-signer
@@ -280,6 +288,10 @@ restart_services() {
 
     # Kill any existing screen session
     screen -S remote-signer -X quit 2>/dev/null || true
+
+    # Always rebuild to ensure latest code is deployed
+    log_info "Building latest image..."
+    docker compose build remote-signer
 
     # Start in screen session (interactive)
     cd "$PROJECT_DIR"
