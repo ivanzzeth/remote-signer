@@ -137,11 +137,21 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := h.signService.Sign(r.Context(), signReq)
 	if err != nil {
-		if types.IsNotFound(err) {
-			h.writeError(w, "signer not found", http.StatusNotFound)
+		if types.IsNotFound(err) || types.IsSignerNotFound(err) {
+			h.logger.Warn("signer not found",
+				"signer_address", req.SignerAddress,
+				"sign_type", req.SignType,
+				"chain_id", req.ChainID,
+			)
+			h.writeError(w, fmt.Sprintf("signer not found: %s", req.SignerAddress), http.StatusNotFound)
 			return
 		}
-		h.logger.Error("sign request failed", "error", err)
+		h.logger.Error("sign request failed",
+			"error", err,
+			"signer_address", req.SignerAddress,
+			"sign_type", req.SignType,
+			"chain_id", req.ChainID,
+		)
 		h.writeError(w, "sign request failed", http.StatusInternalServerError)
 		return
 	}

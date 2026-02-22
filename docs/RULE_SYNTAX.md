@@ -191,6 +191,269 @@ These are reserved by the Solidity language:
       }
 ```
 
+## Rule Type: `message_pattern`
+
+Validate personal sign / EIP-191 messages against regex patterns.
+
+### Config Schema
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `pattern` | string | Yes (if `patterns` empty) | — | Regex pattern (Go `regexp` syntax) |
+| `patterns` | string[] | No | — | Multiple patterns (any match = rule fires). If both `pattern` and `patterns` set, `pattern` is prepended |
+| `sign_types` | string[] | No | `["personal", "eip191"]` | Which sign types this rule applies to |
+| `description` | string | No | — | Human-readable description |
+| `test_cases` | TestCase[] | Yes (for validation) | — | At least 2: 1 positive + 1 negative |
+
+### TestCase Schema (for `message_pattern`)
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | Yes | Test case description |
+| `input.raw_message` | string | Yes | The message text to test against the pattern |
+| `input.sign_type` | string | No | Sign type (default: "personal") |
+| `expect_pass` | bool | Yes | true = message should match pattern (whitelist) / should be blocked (blocklist) |
+| `expect_reason` | string | No | Expected reason substring (for negative cases) |
+
+### Behavior by Mode
+
+- **whitelist**: returns true (allow) if message matches ANY pattern
+- **blocklist**: returns true (block) if message matches ANY pattern
+
+### Example
+
+```yaml
+- name: "Predict Login PersonalSign"
+  type: "message_pattern"
+  mode: "whitelist"
+  enabled: true
+  config:
+    pattern: "^.{1,1024}$"
+    sign_types: ["personal", "eip191"]
+    description: "Accept any non-empty message up to 1024 chars"
+    test_cases:
+      - name: "should match normal login message"
+        input:
+          raw_message: "Sign in to predict.fun\nTimestamp: 1704067200"
+        expect_pass: true
+      - name: "should reject empty message"
+        input:
+          raw_message: ""
+        expect_pass: false
+```
+
+### SIWE Example (Strict Regex)
+
+```yaml
+- name: "Opinion Login Signature"
+  type: "message_pattern"
+  mode: "whitelist"
+  enabled: true
+  config:
+    pattern: |
+      ^app\.opinion\.trade wants you to sign in with your Ethereum account:\n0x[a-fA-F0-9]{40}\n\nWelcome.*$
+    sign_types: ["personal", "eip191"]
+    test_cases:
+      - name: "should match valid SIWE message"
+        input:
+          raw_message: "app.opinion.trade wants you to sign in with your Ethereum account:\n0x88eD75e9eCE373997221E3c0229e74007C1AD718\n\nWelcome to opinion.trade!..."
+        expect_pass: true
+      - name: "should reject non-SIWE message"
+        input:
+          raw_message: "Please sign this random message"
+        expect_pass: false
+```
+
+---
+
+## Rule Type: `evm_address_list` (alias: `evm_address_whitelist`)
+
+Validate that the transaction recipient (`tx.To`) is in an address list.
+
+### Config Schema
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `addresses` | string[] | Yes | List of 0x-prefixed Ethereum addresses |
+
+### Config Go Struct
+
+File: `internal/chain/evm/types.go`
+```go
+type AddressListConfig struct {
+    Addresses []string `json:"addresses"` // 0x prefixed
+}
+```
+
+### Behavior by Mode
+
+- **whitelist**: allow if `tx.To` is in the list
+- **blocklist**: block if `tx.To` is in the list
+
+### Example
+
+```yaml
+- name: "Allow transfers to treasury"
+  type: "evm_address_list"   # or "evm_address_whitelist" (legacy alias)
+  mode: "whitelist"
+  enabled: true
+  config:
+    addresses:
+      - "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+      - "0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2"
+```
+
+---
+
+## Rule Type: `evm_contract_method`
+
+Validate that the contract address and method selector match allowed combinations.
+
+### Config Schema
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `contract` | string | No | 0x-prefixed contract address (if empty, matches any contract) |
+| `method_sigs` | string[] | Yes | 4-byte hex method selectors, 0x-prefixed |
+
+### Config Go Struct
+
+File: `internal/chain/evm/types.go`
+```go
+type ContractMethodConfig struct {
+    Contract   string   `json:"contract"`    // 0x prefixed
+    MethodSigs []string `json:"method_sigs"` // 4-byte hex, 0x prefixed
+}
+```
+
+### Example
+
+```yaml
+- name: "ERC20 transfer/approve only"
+  type: "evm_contract_method"
+  mode: "whitelist"
+  enabled: true
+  config:
+    method_sigs:
+      - "0xa9059cbb"  # transfer(address,uint256)
+      - "0x095ea7b3"  # approve(address,uint256)
+```
+
+---
+
+## Rule Type: `evm_value_limit`
+
+Check transaction value against a limit.
+
+### Config Schema
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `max_value` | string | Yes | Maximum value in wei (decimal string) |
+
+### Config Go Struct
+
+File: `internal/chain/evm/types.go`
+```go
+type ValueLimitConfig struct {
+    MaxValue string `json:"max_value"` // wei as decimal string
+}
+```
+
+### Behavior by Mode
+
+- **whitelist**: allow if `value <= max_value`
+- **blocklist**: block if `value > max_value`
+
+### Example
+
+```yaml
+- name: "Transfer limit 100 ETH"
+  type: "evm_value_limit"
+  mode: "whitelist"
+  enabled: true
+  config:
+    max_value: "100000000000000000000"  # 100 ETH in wei
+```
+
+---
+
+## Rule Type: `sign_type_restriction`
+
+Restrict which signing types are allowed.
+
+### Config Schema
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `allowed_sign_types` | string[] | Yes | Allowed sign types |
+
+Valid sign types: `hash`, `raw_message`, `eip191`, `personal`, `typed_data`, `transaction`
+
+### Config Go Struct
+
+File: `internal/chain/evm/rule_evaluator.go`
+```go
+type SignTypeRestrictionConfig struct {
+    AllowedSignTypes []string `json:"allowed_sign_types"`
+}
+```
+
+### Example
+
+```yaml
+- name: "Allowed signing methods"
+  type: "sign_type_restriction"
+  mode: "whitelist"
+  enabled: true
+  config:
+    allowed_sign_types:
+      - "personal"
+      - "typed_data"
+      - "transaction"
+```
+
+---
+
+## Rule Type: `signer_restriction`
+
+Restrict which signer addresses are allowed.
+
+### Config Schema
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `allowed_signers` | string[] | Yes | List of 0x-prefixed allowed signer addresses |
+
+### Config Go Struct
+
+File: `internal/chain/evm/rule_evaluator.go`
+```go
+type SignerRestrictionConfig struct {
+    AllowedSigners []string `json:"allowed_signers"`
+}
+```
+
+### Example
+
+```yaml
+- name: "Authorized signers"
+  type: "signer_restriction"
+  mode: "whitelist"
+  enabled: true
+  config:
+    allowed_signers:
+      - "0x53c68c954f85a29d2098e90addaf41baf2ff0a50"
+```
+
+---
+
+## Rule Type: `chain_restriction`
+
+**NOTE:** This type is defined as a constant (`RuleTypeChainRestriction = "chain_restriction"`) but has NO evaluator implementation. Include in rule files for forward compatibility but no config validation is performed beyond basic JSON parsing.
+
+---
+
 ## Migration Guide
 
 If you have existing rules using the old variable names, update them as follows:

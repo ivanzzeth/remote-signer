@@ -79,6 +79,11 @@ func IsRateLimited(err error) bool {
 	return errors.Is(err, ErrRateLimited)
 }
 
+// IsSignerNotFound checks if the error is a signer not found error
+func IsSignerNotFound(err error) bool {
+	return errors.Is(err, ErrSignerNotFound)
+}
+
 // IsPendingApproval checks if the error indicates pending approval
 func IsPendingApproval(err error) bool {
 	return errors.Is(err, ErrPendingApproval)

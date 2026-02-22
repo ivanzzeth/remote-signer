@@ -94,6 +94,12 @@ func (s *SignService) Sign(ctx context.Context, req *SignRequest) (*SignResponse
 
 	// Check if signer exists
 	if !adapter.HasSigner(ctx, req.SignerAddress) {
+		s.logger.Warn("signer not found in registry",
+			"signer_address", req.SignerAddress,
+			"chain_type", req.ChainType,
+			"chain_id", req.ChainID,
+			"sign_type", req.SignType,
+		)
 		return nil, types.ErrSignerNotFound
 	}
 

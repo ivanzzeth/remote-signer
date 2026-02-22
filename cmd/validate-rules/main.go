@@ -120,6 +120,12 @@ func run() error {
 		return fmt.Errorf("failed to create validator: %w", err)
 	}
 
+	// Create message pattern validator
+	msgValidator, err := evm.NewMessagePatternRuleValidator(log)
+	if err != nil {
+		return fmt.Errorf("failed to create message pattern validator: %w", err)
+	}
+
 	// Validate each file
 	ctx := context.Background()
 	allResults := make(map[string][]ValidationFileResult)
@@ -128,7 +134,7 @@ func run() error {
 	failedRules := 0
 
 	for _, filePath := range args {
-		fileResults, passed, failed, err := validateFile(ctx, filePath, validator, log, *verbose)
+		fileResults, passed, failed, err := validateFile(ctx, filePath, validator, msgValidator, log, *verbose)
 		if err != nil {
 			return fmt.Errorf("failed to validate %s: %w", filePath, err)
 		}
@@ -159,7 +165,7 @@ type ValidationFileResult struct {
 	SkipReason      string                 `json:"skip_reason,omitempty"`
 }
 
-func validateFile(ctx context.Context, filePath string, validator *evm.SolidityRuleValidator, log *slog.Logger, _ bool) ([]ValidationFileResult, int, int, error) {
+func validateFile(ctx context.Context, filePath string, validator *evm.SolidityRuleValidator, msgValidator *evm.MessagePatternRuleValidator, log *slog.Logger, _ bool) ([]ValidationFileResult, int, int, error) {
 	// Read file
 	data, err := os.ReadFile(filePath)
 	if err != nil {
@@ -181,23 +187,12 @@ func validateFile(ctx context.Context, filePath string, validator *evm.SolidityR
 	passed := 0
 	failed := 0
 
-	// Collect all rules that need validation
+	// Collect Solidity expression rules for batch validation
 	var rulesToValidate []*types.Rule
-	var ruleIndices []int
 	for i, ruleCfg := range ruleFile.Rules {
 		result := ValidationFileResult{
 			RuleName: ruleCfg.Name,
 			RuleType: ruleCfg.Type,
-		}
-
-		// Skip non-Solidity expression rules
-		if ruleCfg.Type != string(types.RuleTypeEVMSolidityExpression) {
-			result.Skipped = true
-			result.SkipReason = fmt.Sprintf("not a Solidity expression rule (type: %s)", ruleCfg.Type)
-			result.Valid = true
-			results = append(results, result)
-			passed++
-			continue
 		}
 
 		// Skip disabled rules
@@ -210,18 +205,82 @@ func validateFile(ctx context.Context, filePath string, validator *evm.SolidityR
 			continue
 		}
 
-		// Convert to types.Rule
-		rule, err := configToRule(i, ruleCfg)
-		if err != nil {
+		switch ruleCfg.Type {
+		case string(types.RuleTypeEVMSolidityExpression):
+			// Solidity expression rules → collect for batch validation
+			rule, err := configToRule(i, ruleCfg)
+			if err != nil {
+				result.Valid = false
+				result.Error = fmt.Sprintf("failed to convert rule: %v", err)
+				results = append(results, result)
+				failed++
+				continue
+			}
+			rulesToValidate = append(rulesToValidate, rule)
+
+		case string(types.RuleTypeMessagePattern):
+			// Message pattern rules → validate with MessagePatternRuleValidator
+			rule, err := configToRule(i, ruleCfg)
+			if err != nil {
+				result.Valid = false
+				result.Error = fmt.Sprintf("failed to convert rule: %v", err)
+				results = append(results, result)
+				failed++
+				continue
+			}
+			vResult, err := msgValidator.ValidateRule(ctx, rule)
+			if err != nil {
+				result.Valid = false
+				result.Error = fmt.Sprintf("validation error: %v", err)
+				results = append(results, result)
+				failed++
+				continue
+			}
+			result.Valid = vResult.Valid
+			result.SyntaxError = vResult.SyntaxError
+			result.TestCaseResults = vResult.TestCaseResults
+			result.FailedTestCases = vResult.FailedTestCases
+			results = append(results, result)
+			if result.Valid {
+				passed++
+			} else {
+				failed++
+			}
+
+		case string(types.RuleTypeEVMAddressList), "evm_address_whitelist",
+			string(types.RuleTypeEVMContractMethod),
+			string(types.RuleTypeEVMValueLimit),
+			string(types.RuleTypeSignerRestriction),
+			string(types.RuleTypeSignTypeRestriction),
+			string(types.RuleTypeChainRestriction):
+			// Declarative rules → JSON deserialization + basic validation
+			rule, err := configToRule(i, ruleCfg)
+			if err != nil {
+				result.Valid = false
+				result.Error = fmt.Sprintf("failed to convert rule: %v", err)
+				results = append(results, result)
+				failed++
+				continue
+			}
+			validationErr := validateDeclarativeRule(rule)
+			if validationErr != nil {
+				result.Valid = false
+				result.Error = validationErr.Error()
+				results = append(results, result)
+				failed++
+			} else {
+				result.Valid = true
+				results = append(results, result)
+				passed++
+			}
+
+		default:
+			// Unknown rule type → error (not skip!)
 			result.Valid = false
-			result.Error = fmt.Sprintf("failed to convert rule: %v", err)
+			result.Error = fmt.Sprintf("unknown rule type: %s", ruleCfg.Type)
 			results = append(results, result)
 			failed++
-			continue
 		}
-
-		rulesToValidate = append(rulesToValidate, rule)
-		ruleIndices = append(ruleIndices, i)
 	}
 
 	// Batch validate all rules in the file (automatically groups by mode)
@@ -379,5 +438,77 @@ func outputText(results map[string][]ValidationFileResult, total, passed, failed
 	}
 
 	fmt.Printf("\n✅ All rules validated successfully\n")
+	return nil
+}
+
+// validateDeclarativeRule validates declarative rules by attempting to deserialize their config
+func validateDeclarativeRule(rule *types.Rule) error {
+	switch rule.Type {
+	case types.RuleTypeEVMAddressList, "evm_address_whitelist":
+		var config evm.AddressListConfig
+		if err := json.Unmarshal(rule.Config, &config); err != nil {
+			return fmt.Errorf("invalid address list config: %w", err)
+		}
+		if len(config.Addresses) == 0 {
+			return fmt.Errorf("addresses list is empty")
+		}
+		// Validate addresses are valid hex
+		for _, addr := range config.Addresses {
+			if len(addr) != 42 || addr[:2] != "0x" {
+				return fmt.Errorf("invalid address format: %s", addr)
+			}
+		}
+
+	case types.RuleTypeEVMContractMethod:
+		var config evm.ContractMethodConfig
+		if err := json.Unmarshal(rule.Config, &config); err != nil {
+			return fmt.Errorf("invalid contract method config: %w", err)
+		}
+		if len(config.MethodSigs) == 0 {
+			return fmt.Errorf("method_sigs list is empty")
+		}
+		for _, sig := range config.MethodSigs {
+			if len(sig) != 10 || sig[:2] != "0x" {
+				return fmt.Errorf("invalid method selector format: %s (expected 0x + 8 hex chars)", sig)
+			}
+		}
+
+	case types.RuleTypeEVMValueLimit:
+		var config evm.ValueLimitConfig
+		if err := json.Unmarshal(rule.Config, &config); err != nil {
+			return fmt.Errorf("invalid value limit config: %w", err)
+		}
+		if config.MaxValue == "" {
+			return fmt.Errorf("max_value is empty")
+		}
+
+	case types.RuleTypeSignerRestriction:
+		var config evm.SignerRestrictionConfig
+		if err := json.Unmarshal(rule.Config, &config); err != nil {
+			return fmt.Errorf("invalid signer restriction config: %w", err)
+		}
+		if len(config.AllowedSigners) == 0 {
+			return fmt.Errorf("allowed_signers list is empty")
+		}
+
+	case types.RuleTypeSignTypeRestriction:
+		var config evm.SignTypeRestrictionConfig
+		if err := json.Unmarshal(rule.Config, &config); err != nil {
+			return fmt.Errorf("invalid sign type restriction config: %w", err)
+		}
+		if len(config.AllowedSignTypes) == 0 {
+			return fmt.Errorf("allowed_sign_types list is empty")
+		}
+
+	case types.RuleTypeChainRestriction:
+		// chain_restriction has no evaluator implementation — just do basic JSON parse check
+		var raw map[string]interface{}
+		if err := json.Unmarshal(rule.Config, &raw); err != nil {
+			return fmt.Errorf("invalid chain restriction config: %w", err)
+		}
+
+	default:
+		return fmt.Errorf("unknown declarative rule type: %s", rule.Type)
+	}
 	return nil
 }

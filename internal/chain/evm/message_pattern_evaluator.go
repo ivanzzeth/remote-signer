@@ -25,6 +25,23 @@ type MessagePatternConfig struct {
 
 	// Description provides human-readable explanation of what the pattern validates
 	Description string `json:"description,omitempty"`
+
+	// TestCases defines validation cases to verify rule correctness
+	TestCases []MessagePatternTestCase `json:"test_cases,omitempty"`
+}
+
+// MessagePatternTestCase defines a test case for validating a message_pattern rule
+type MessagePatternTestCase struct {
+	Name         string                  `json:"name"`
+	Input        MessagePatternTestInput `json:"input"`
+	ExpectPass   bool                    `json:"expect_pass"`
+	ExpectReason string                  `json:"expect_reason,omitempty"`
+}
+
+// MessagePatternTestInput defines the input for a message pattern test case
+type MessagePatternTestInput struct {
+	RawMessage string `json:"raw_message"`
+	SignType   string `json:"sign_type,omitempty"` // default: "personal"
 }
 
 // MessagePatternEvaluator validates personal sign messages against regex patterns
