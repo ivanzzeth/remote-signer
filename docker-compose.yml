@@ -31,6 +31,10 @@ services:
       dockerfile: Dockerfile
     container_name: remote-signer
     restart: unless-stopped
+    # Host network mode: shares host's network stack directly.
+    # This allows IP whitelist to see real client IPs (Docker bridge NAT
+    # would otherwise rewrite all source IPs to the gateway address).
+    network_mode: host
     # Enable interactive mode for secure password input at startup
     # Use: docker-compose run --rm remote-signer
     stdin_open: true
@@ -56,8 +60,8 @@ services:
     cap_add:
       - NET_BIND_SERVICE
     environment:
-      # Database connection (auto-configured for docker network)
-      DATABASE_DSN: "postgres://${POSTGRES_USER:-signer}:${POSTGRES_PASSWORD:-signer_password}@postgres:5432/${POSTGRES_DB:-remote_signer}?sslmode=disable"
+      # Database connection (host network: connect via localhost, port exposed by postgres container)
+      DATABASE_DSN: "postgres://${POSTGRES_USER:-signer}:${POSTGRES_PASSWORD:-signer_password}@127.0.0.1:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-remote_signer}?sslmode=disable"
       # EVM signer private key (set in .env file)
       EVM_SIGNER_KEY_1: ${EVM_SIGNER_KEY_1}
       # Optional: additional signers
@@ -77,16 +81,13 @@ services:
       - ./data/foundry/cast:/usr/local/bin/cast:ro
       # Forge cache for Solidity rules
       - forge_cache:/var/cache/remote-signer/forge
-    ports:
-      - "${SIGNER_PORT:-8548}:8548"
+    # No "ports:" needed — host network mode binds directly to host's port 8548
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8548/health"]
       interval: 30s
       timeout: 5s
       start_period: 10s
       retries: 3
-    networks:
-      - signer-network
 
 volumes:
   postgres_data:

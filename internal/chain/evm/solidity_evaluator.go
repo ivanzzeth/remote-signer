@@ -301,7 +301,7 @@ func NewSolidityRuleEvaluator(cfg SolidityEvaluatorConfig, logger *slog.Logger) 
 	// Create foundry.toml for forge test to work properly
 	// Note: Don't specify solc version to let forge auto-detect from pragma
 	// Enable via_ir to avoid "Stack too deep" errors with many local variables
-	// Enable incremental compilation for better performance
+	// Enable incremental compilation for better performance (supported in foundry >= 1.5.1)
 	foundryConfig := `[profile.default]
 src = "."
 test = "."

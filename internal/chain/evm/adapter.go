@@ -242,6 +242,12 @@ func (a *EVMAdapter) ParsePayload(ctx context.Context, signType string, payload 
 				result.MethodSig = &sig
 				result.Contract = p.Transaction.To
 			}
+
+			// Set RawData to the decoded transaction calldata (not the full JSON payload)
+			dataBytes, err := decodeHexData(p.Transaction.Data)
+			if err == nil && len(dataBytes) > 0 {
+				result.RawData = dataBytes
+			}
 		}
 
 	case SignTypePersonal, SignTypeEIP191:
