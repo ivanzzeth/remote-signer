@@ -1104,15 +1104,12 @@ func (v *SolidityRuleValidator) compileSyntaxCheckScript(ctx context.Context, sc
 
 	// Check cache first
 	v.syntaxCacheMu.RLock()
-	if cached, found := v.syntaxCache[hashStr]; found {
-		v.syntaxCacheMu.RUnlock()
-		if cached {
-			return nil, nil // Syntax is valid (cached)
-		}
-		// If cached as invalid, we still need to return the error, but we can skip compilation
-		// For now, let's recompile to get the actual error message
-	}
+	cached, found := v.syntaxCache[hashStr]
 	v.syntaxCacheMu.RUnlock()
+	if found && cached {
+		return nil, nil // Syntax is valid (cached)
+	}
+	// If not found, or cached as invalid, we need to (re)compile to get the actual error message
 
 	// Use unique filename based on hash to enable forge incremental compilation
 	scriptPath := filepath.Join(v.evaluator.GetTempDir(), fmt.Sprintf("syntax_check_%s.sol", hashStr[:16]))
