@@ -52,6 +52,27 @@ type ClientInterface interface {
 
 	// CreateSigner creates a new signer (admin only).
 	CreateSigner(ctx context.Context, req *CreateSignerRequest) (*Signer, error)
+
+	// ListTemplates lists rule templates with optional filters.
+	ListTemplates(ctx context.Context, filter *ListTemplatesFilter) (*ListTemplatesResponse, error)
+
+	// GetTemplate retrieves a specific template by ID.
+	GetTemplate(ctx context.Context, templateID string) (*Template, error)
+
+	// CreateTemplate creates a new rule template (admin only).
+	CreateTemplate(ctx context.Context, req *CreateTemplateRequest) (*Template, error)
+
+	// UpdateTemplate updates an existing template (admin only).
+	UpdateTemplate(ctx context.Context, templateID string, req *UpdateTemplateRequest) (*Template, error)
+
+	// DeleteTemplate deletes a template by ID (admin only).
+	DeleteTemplate(ctx context.Context, templateID string) error
+
+	// InstantiateTemplate creates a rule instance from a template (admin only).
+	InstantiateTemplate(ctx context.Context, templateID string, req *InstantiateTemplateRequest) (*InstantiateTemplateResponse, error)
+
+	// RevokeInstance revokes a rule instance created from a template (admin only).
+	RevokeInstance(ctx context.Context, ruleID string) (*RevokeInstanceResponse, error)
 }
 
 // Ensure Client implements ClientInterface

@@ -1,0 +1,16 @@
+# Minimal template for e2e: config-loaded template + instance rule expansion
+variables:
+  - name: allowed_address
+    type: address
+    description: "Address to whitelist"
+    required: true
+test_variables:
+  allowed_address: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+rules:
+  - name: "E2E From Template Instance"
+    type: "evm_address_whitelist"
+    mode: "whitelist"
+    enabled: true
+    config:
+      addresses:
+        - "${allowed_address}"

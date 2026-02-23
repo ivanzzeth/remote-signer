@@ -27,6 +27,15 @@ type MockClient struct {
 	ListSignersFunc      func(ctx context.Context, filter *ListSignersFilter) (*ListSignersResponse, error)
 	CreateSignerFunc     func(ctx context.Context, req *CreateSignerRequest) (*Signer, error)
 
+	// Template methods
+	ListTemplatesFunc        func(ctx context.Context, filter *ListTemplatesFilter) (*ListTemplatesResponse, error)
+	GetTemplateFunc          func(ctx context.Context, templateID string) (*Template, error)
+	CreateTemplateFunc       func(ctx context.Context, req *CreateTemplateRequest) (*Template, error)
+	UpdateTemplateFunc       func(ctx context.Context, templateID string, req *UpdateTemplateRequest) (*Template, error)
+	DeleteTemplateFunc       func(ctx context.Context, templateID string) error
+	InstantiateTemplateFunc  func(ctx context.Context, templateID string, req *InstantiateTemplateRequest) (*InstantiateTemplateResponse, error)
+	RevokeInstanceFunc       func(ctx context.Context, ruleID string) (*RevokeInstanceResponse, error)
+
 	// Call tracking
 	Calls map[string][]any
 }
@@ -201,6 +210,69 @@ func (m *MockClient) CreateSigner(ctx context.Context, req *CreateSignerRequest)
 		return m.CreateSignerFunc(ctx, req)
 	}
 	return &Signer{}, nil
+}
+
+// ListTemplates implements ClientInterface.
+func (m *MockClient) ListTemplates(ctx context.Context, filter *ListTemplatesFilter) (*ListTemplatesResponse, error) {
+	m.recordCall("ListTemplates", filter)
+	if m.ListTemplatesFunc != nil {
+		return m.ListTemplatesFunc(ctx, filter)
+	}
+	return &ListTemplatesResponse{Templates: []Template{}}, nil
+}
+
+// GetTemplate implements ClientInterface.
+func (m *MockClient) GetTemplate(ctx context.Context, templateID string) (*Template, error) {
+	m.recordCall("GetTemplate", templateID)
+	if m.GetTemplateFunc != nil {
+		return m.GetTemplateFunc(ctx, templateID)
+	}
+	return &Template{}, nil
+}
+
+// CreateTemplate implements ClientInterface.
+func (m *MockClient) CreateTemplate(ctx context.Context, req *CreateTemplateRequest) (*Template, error) {
+	m.recordCall("CreateTemplate", req)
+	if m.CreateTemplateFunc != nil {
+		return m.CreateTemplateFunc(ctx, req)
+	}
+	return &Template{}, nil
+}
+
+// UpdateTemplate implements ClientInterface.
+func (m *MockClient) UpdateTemplate(ctx context.Context, templateID string, req *UpdateTemplateRequest) (*Template, error) {
+	m.recordCall("UpdateTemplate", templateID, req)
+	if m.UpdateTemplateFunc != nil {
+		return m.UpdateTemplateFunc(ctx, templateID, req)
+	}
+	return &Template{}, nil
+}
+
+// DeleteTemplate implements ClientInterface.
+func (m *MockClient) DeleteTemplate(ctx context.Context, templateID string) error {
+	m.recordCall("DeleteTemplate", templateID)
+	if m.DeleteTemplateFunc != nil {
+		return m.DeleteTemplateFunc(ctx, templateID)
+	}
+	return nil
+}
+
+// InstantiateTemplate implements ClientInterface.
+func (m *MockClient) InstantiateTemplate(ctx context.Context, templateID string, req *InstantiateTemplateRequest) (*InstantiateTemplateResponse, error) {
+	m.recordCall("InstantiateTemplate", templateID, req)
+	if m.InstantiateTemplateFunc != nil {
+		return m.InstantiateTemplateFunc(ctx, templateID, req)
+	}
+	return &InstantiateTemplateResponse{}, nil
+}
+
+// RevokeInstance implements ClientInterface.
+func (m *MockClient) RevokeInstance(ctx context.Context, ruleID string) (*RevokeInstanceResponse, error) {
+	m.recordCall("RevokeInstance", ruleID)
+	if m.RevokeInstanceFunc != nil {
+		return m.RevokeInstanceFunc(ctx, ruleID)
+	}
+	return &RevokeInstanceResponse{}, nil
 }
 
 // Ensure MockClient implements ClientInterface

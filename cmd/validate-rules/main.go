@@ -14,6 +14,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
+	"github.com/ivanzzeth/remote-signer/internal/config"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
 
@@ -33,9 +34,26 @@ type RuleConfig struct {
 	Enabled       bool                   `yaml:"enabled"`
 }
 
-// RuleFile represents a YAML file containing rules
+// RuleFile represents a YAML file containing rules (plain rule file)
 type RuleFile struct {
 	Rules []RuleConfig `yaml:"rules"`
+}
+
+// TemplateVarConfig defines a template variable (for template file parsing only)
+type TemplateVarConfig struct {
+	Name        string `yaml:"name"`
+	Type        string `yaml:"type"`
+	Description string `yaml:"description,omitempty"`
+	Required    bool   `yaml:"required"`
+	Default     string `yaml:"default,omitempty"`
+}
+
+// TemplateFile represents a YAML template file (variables + test_variables + rules)
+// When present, validate-rules substitutes test_variables into rules before validating.
+type TemplateFile struct {
+	Variables      []TemplateVarConfig `yaml:"variables"`
+	TestVariables  map[string]string  `yaml:"test_variables"`
+	Rules          []RuleConfig       `yaml:"rules"`
 }
 
 func main() {
@@ -47,6 +65,7 @@ func main() {
 
 func run() error {
 	// Parse command line flags
+	configPath := flag.String("config", "", "validate rules from config file (same expansion as server: templates + instance + file rules)")
 	forgePath := flag.String("forge", "", "path to forge binary (default: auto-detect from PATH)")
 	cacheDir := flag.String("cache", "", "cache directory for compiled scripts (default: /tmp/remote-signer-validator)")
 	timeout := flag.Duration("timeout", 30*time.Second, "timeout for rule validation")
@@ -54,12 +73,18 @@ func run() error {
 	jsonOutput := flag.Bool("json", false, "output results as JSON")
 	versionFlag := flag.Bool("version", false, "print version")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %s [options] <rule-file.yaml> [rule-file2.yaml ...]\n\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "Validate remote-signer rule files without starting the server.\n\n")
+		fmt.Fprintf(os.Stderr, "Usage: %s [options] <rule-file.yaml> [rule-file2.yaml ...]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "       %s -config config.yaml\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Validate remote-signer rule files without starting the server.\n")
+		fmt.Fprintf(os.Stderr, "  - Rule/template files: use test_variables (template) or plain rules.\n")
+		fmt.Fprintf(os.Stderr, "  - -config: load config.yaml, expand templates and instance rules (same as server), then validate.\n")
+		fmt.Fprintf(os.Stderr, "    Use this after changing config to catch mismatches before starting the server.\n\n")
 		fmt.Fprintf(os.Stderr, "Options:\n")
 		flag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\nExamples:\n")
-		fmt.Fprintf(os.Stderr, "  %s rules/polymarket.yaml\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s rules/polymarket.safe.yaml\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s rules/templates/polymarket.safe.template.yaml   # template (uses test_variables)\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s -config config.yaml   # validate expanded rules (templates + instance variables)\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  %s -v rules/*.yaml\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  %s -json rules/myapp.yaml > results.json\n", os.Args[0])
 	}
@@ -71,9 +96,12 @@ func run() error {
 	}
 
 	args := flag.Args()
-	if len(args) == 0 {
+	if *configPath == "" && len(args) == 0 {
 		flag.Usage()
-		return fmt.Errorf("at least one rule file is required")
+		return fmt.Errorf("at least one rule file or -config is required")
+	}
+	if *configPath != "" && len(args) > 0 {
+		return fmt.Errorf("use either -config <path> or rule file(s), not both")
 	}
 
 	// Setup logger
@@ -126,22 +154,33 @@ func run() error {
 		return fmt.Errorf("failed to create message pattern validator: %w", err)
 	}
 
-	// Validate each file
+	// Validate each file or config
 	ctx := context.Background()
 	allResults := make(map[string][]ValidationFileResult)
 	totalRules := 0
 	passedRules := 0
 	failedRules := 0
 
-	for _, filePath := range args {
-		fileResults, passed, failed, err := validateFile(ctx, filePath, validator, msgValidator, log, *verbose)
+	if *configPath != "" {
+		fileResults, passed, failed, err := validateConfig(ctx, *configPath, validator, msgValidator, log, *verbose)
 		if err != nil {
-			return fmt.Errorf("failed to validate %s: %w", filePath, err)
+			return fmt.Errorf("failed to validate config: %w", err)
 		}
-		allResults[filePath] = fileResults
+		allResults[*configPath] = fileResults
 		totalRules += len(fileResults)
 		passedRules += passed
 		failedRules += failed
+	} else {
+		for _, filePath := range args {
+			fileResults, passed, failed, err := validateFile(ctx, filePath, validator, msgValidator, log, *verbose)
+			if err != nil {
+				return fmt.Errorf("failed to validate %s: %w", filePath, err)
+			}
+			allResults[filePath] = fileResults
+			totalRules += len(fileResults)
+			passedRules += passed
+			failedRules += failed
+		}
 	}
 
 	// Output results
@@ -165,31 +204,90 @@ type ValidationFileResult struct {
 	SkipReason      string                 `json:"skip_reason,omitempty"`
 }
 
-func validateFile(ctx context.Context, filePath string, validator *evm.SolidityRuleValidator, msgValidator *evm.MessagePatternRuleValidator, log *slog.Logger, _ bool) ([]ValidationFileResult, int, int, error) {
+func validateFile(ctx context.Context, filePath string, validator *evm.SolidityRuleValidator, msgValidator *evm.MessagePatternRuleValidator, log *slog.Logger, verbose bool) ([]ValidationFileResult, int, int, error) {
 	// Read file
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, 0, 0, fmt.Errorf("failed to read file: %w", err)
 	}
 
-	// Parse YAML
-	var ruleFile RuleFile
-	if err := yaml.Unmarshal(data, &ruleFile); err != nil {
+	// Try template format first (has variables + rules)
+	var templateFile TemplateFile
+	if err := yaml.Unmarshal(data, &templateFile); err != nil {
 		return nil, 0, 0, fmt.Errorf("failed to parse YAML: %w", err)
 	}
 
-	if len(ruleFile.Rules) == 0 {
+	var rules []RuleConfig
+	if len(templateFile.Variables) > 0 && len(templateFile.Rules) > 0 {
+		// Template file: substitute test_variables then validate
+		if len(templateFile.TestVariables) == 0 {
+			return nil, 0, 0, fmt.Errorf("template file requires test_variables for validation (file: %s)", filePath)
+		}
+		rulesJSON, err := json.Marshal(templateFile.Rules)
+		if err != nil {
+			return nil, 0, 0, fmt.Errorf("failed to marshal template rules: %w", err)
+		}
+		resolved, err := substituteVarsInString(string(rulesJSON), templateFile.TestVariables)
+		if err != nil {
+			return nil, 0, 0, fmt.Errorf("template variable substitution failed: %w", err)
+		}
+		if err := json.Unmarshal([]byte(resolved), &rules); err != nil {
+			return nil, 0, 0, fmt.Errorf("failed to unmarshal resolved template rules: %w", err)
+		}
+		log.Debug("Validating template file with test_variables", "file", filePath, "rules", len(rules))
+	} else {
+		// Plain rule file
+		rules = templateFile.Rules
+	}
+
+	if len(rules) == 0 {
 		log.Warn("No rules found in file", "file", filePath)
 		return nil, 0, 0, nil
 	}
 
+	return validateRules(ctx, rules, validator, msgValidator, log, verbose)
+}
+
+// validateConfig loads config, expands templates and instance/file rules (same as server), then validates.
+func validateConfig(ctx context.Context, configPath string, validator *evm.SolidityRuleValidator, msgValidator *evm.MessagePatternRuleValidator, log *slog.Logger, verbose bool) ([]ValidationFileResult, int, int, error) {
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("load config: %w", err)
+	}
+	configDir := filepath.Dir(configPath)
+
+	templates, err := config.ExpandTemplatesFromFiles(cfg.Templates, configDir, log)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("expand templates: %w", err)
+	}
+	rules, err := config.ExpandInstanceRules(cfg.Rules, templates)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("expand instance rules: %w", err)
+	}
+	rules, err = config.ExpandFileRules(rules, configDir, log)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("expand file rules: %w", err)
+	}
+
+	localRules := make([]RuleConfig, 0, len(rules))
+	for _, r := range rules {
+		localRules = append(localRules, RuleConfig{
+			Name: r.Name, Description: r.Description, Type: r.Type, Mode: r.Mode,
+			ChainType: r.ChainType, ChainID: r.ChainID, Config: r.Config, Enabled: r.Enabled,
+		})
+	}
+	log.Debug("Validating expanded rules from config", "config", configPath, "rules", len(localRules))
+	return validateRules(ctx, localRules, validator, msgValidator, log, verbose)
+}
+
+func validateRules(ctx context.Context, rules []RuleConfig, validator *evm.SolidityRuleValidator, msgValidator *evm.MessagePatternRuleValidator, log *slog.Logger, verbose bool) ([]ValidationFileResult, int, int, error) {
 	var results []ValidationFileResult
 	passed := 0
 	failed := 0
 
 	// Collect Solidity expression rules for batch validation
 	var rulesToValidate []*types.Rule
-	for i, ruleCfg := range ruleFile.Rules {
+	for i, ruleCfg := range rules {
 		result := ValidationFileResult{
 			RuleName: ruleCfg.Name,
 			RuleType: ruleCfg.Type,
@@ -439,6 +537,24 @@ func outputText(results map[string][]ValidationFileResult, total, passed, failed
 
 	fmt.Printf("\n✅ All rules validated successfully\n")
 	return nil
+}
+
+// substituteVarsInString replaces ${var} placeholders with values from vars.
+// Returns an error if any ${name} (without colon) remains after substitution.
+func substituteVarsInString(s string, vars map[string]string) (string, error) {
+	result := s
+	for k, v := range vars {
+		result = strings.ReplaceAll(result, "${"+k+"}", v)
+	}
+	if idx := strings.Index(result, "${"); idx >= 0 {
+		if end := strings.Index(result[idx:], "}"); end > 0 {
+			varName := result[idx+2 : idx+end]
+			if !strings.Contains(varName, ":") {
+				return "", fmt.Errorf("unresolved template variable: ${%s}", varName)
+			}
+		}
+	}
+	return result, nil
 }
 
 // validateDeclarativeRule validates declarative rules by attempting to deserialize their config

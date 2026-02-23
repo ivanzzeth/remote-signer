@@ -9,6 +9,100 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
 
+func TestProcessInOperatorToMappings(t *testing.T) {
+	tests := []struct {
+		name            string
+		source          string
+		inMappingArrays map[string][]string
+		wantModified    string
+		wantDecl        string
+		wantInit        string
+	}{
+		{
+			name:            "in(expr, varName) with nil arrays still replaces for syntax check",
+			source:          "require(in(txTo, allowed_safe_addresses), \"bad\");",
+			inMappingArrays: nil,
+			wantModified:    "require(allowed_safe_addresses_mapping[txTo], \"bad\");",
+			wantDecl:        "mapping(address => bool) private allowed_safe_addresses_mapping;",
+			wantInit:        "",
+		},
+		{
+			name:            "in(expr, varName) with arrays",
+			source:          "require(in(txTo, allowed_safe_addresses), \"bad\");",
+			inMappingArrays: map[string][]string{"allowed_safe_addresses": {"0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"}},
+			wantModified:    "require(allowed_safe_addresses_mapping[txTo], \"bad\");",
+			wantDecl:        "mapping(address => bool) private allowed_safe_addresses_mapping;",
+			wantInit:        "allowed_safe_addresses_mapping[0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837] = true;",
+		},
+		{
+			name:            "in(expr, varName) no array leaves for preprocessInOperator",
+			source:          "require(in(txTo, 0xa, 0xb), \"bad\");",
+			inMappingArrays: map[string][]string{},
+			wantModified:    "require(in(txTo, 0xa, 0xb), \"bad\");",
+			wantDecl:        "",
+			wantInit:        "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := processInOperatorToMappings(tt.source, tt.inMappingArrays)
+			assert.Equal(t, tt.wantModified, got.Modified)
+			assert.Equal(t, tt.wantDecl, got.Declarations)
+			assert.Equal(t, tt.wantInit, got.ConstructorInit)
+		})
+	}
+}
+
+func TestPreprocessInOperator(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "single value",
+			input:    "in(x, 0xAAA)",
+			expected: "(x == 0xAAA)",
+		},
+		{
+			name:     "multiple values",
+			input:    "in(eip712_domainContract, 0xAAA, 0xBBB, 0xCCC)",
+			expected: "(eip712_domainContract == 0xAAA || eip712_domainContract == 0xBBB || eip712_domainContract == 0xCCC)",
+		},
+		{
+			name:     "with spaces",
+			input:    "in( txTo , 0x1 , 0x2 )",
+			expected: "(txTo == 0x1 || txTo == 0x2)",
+		},
+		{
+			name:     "no match unchanged",
+			input:    "txTo == 0xOnly",
+			expected: "txTo == 0xOnly",
+		},
+		{
+			name:     "empty expression unchanged",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "empty list expands to false",
+			input:    "in(txTo, )",
+			expected: "false",
+		},
+		{
+			name:     "empty list no space expands to false",
+			input:    "in(txTo,)",
+			expected: "false",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := preprocessInOperator(tt.input)
+			assert.Equal(t, tt.expected, got)
+		})
+	}
+}
+
 func TestFormatAddress(t *testing.T) {
 	tests := []struct {
 		name     string

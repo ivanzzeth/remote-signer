@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -36,6 +37,31 @@ type ruleConfig struct {
 // ruleFile represents a YAML file containing rules.
 type ruleFile struct {
 	Rules []ruleConfig `yaml:"rules"`
+}
+
+// templateRuleFile represents a YAML template file (variables + test_variables + rules).
+type templateRuleFile struct {
+	Variables     []map[string]interface{} `yaml:"variables"`
+	TestVariables map[string]string        `yaml:"test_variables"`
+	Rules         []ruleConfig             `yaml:"rules"`
+}
+
+// substituteVarsInString replaces ${var} placeholders with values from vars.
+func substituteVarsInString(s string, vars map[string]string) (string, error) {
+	result := s
+	for k, v := range vars {
+		result = strings.ReplaceAll(result, "${"+k+"}", v)
+	}
+	if idx := strings.Index(result, "${"); idx >= 0 {
+		end := strings.Index(result[idx:], "}")
+		if end > 0 {
+			varName := result[idx+2 : idx+end]
+			if !strings.Contains(varName, ":") {
+				return "", fmt.Errorf("unresolved template variable: ${%s}", varName)
+			}
+		}
+	}
+	return result, nil
 }
 
 // projectRoot returns the project root by walking up from the current test file.
@@ -99,11 +125,20 @@ func TestRulesDirectoryValidation(t *testing.T) {
 		t.Fatalf("rules directory not found at %s", rulesDir)
 	}
 
-	// Find all YAML files in the rules directory
+	// Find all YAML files in the rules directory (plain rule files)
 	yamlFiles, err := filepath.Glob(filepath.Join(rulesDir, "*.yaml"))
 	require.NoError(t, err)
-	if len(yamlFiles) == 0 {
-		t.Fatal("no YAML files found in rules directory")
+
+	// Find all template YAML files
+	templatesDir := filepath.Join(rulesDir, "templates")
+	templateFiles, _ := filepath.Glob(filepath.Join(templatesDir, "*.yaml"))
+	if templateFiles == nil {
+		templateFiles = []string{}
+	}
+
+	allYamlCount := len(yamlFiles) + len(templateFiles)
+	if allYamlCount == 0 {
+		t.Fatal("no YAML files found in rules or rules/templates directory")
 	}
 
 	// Initialize evaluator and validator
@@ -126,6 +161,7 @@ func TestRulesDirectoryValidation(t *testing.T) {
 	}
 	var ruleInfos []ruleFileInfo
 
+	// Process plain rule files
 	for _, filePath := range yamlFiles {
 		data, err := os.ReadFile(filePath)
 		require.NoError(t, err, "failed to read %s", filePath)
@@ -135,11 +171,9 @@ func TestRulesDirectoryValidation(t *testing.T) {
 
 		fileName := filepath.Base(filePath)
 		for i, cfg := range rf.Rules {
-			// Skip non-Solidity rules
 			if cfg.Type != string(types.RuleTypeEVMSolidityExpression) {
 				continue
 			}
-			// Skip disabled rules
 			if !cfg.Enabled {
 				continue
 			}
@@ -155,8 +189,47 @@ func TestRulesDirectoryValidation(t *testing.T) {
 		}
 	}
 
+	// Process template files: substitute test_variables then validate resolved rules
+	for _, filePath := range templateFiles {
+		data, err := os.ReadFile(filePath)
+		require.NoError(t, err, "failed to read %s", filePath)
+
+		var tf templateRuleFile
+		require.NoError(t, yaml.Unmarshal(data, &tf), "failed to parse template %s", filePath)
+		if len(tf.Variables) == 0 || len(tf.Rules) == 0 {
+			continue
+		}
+		require.NotEmpty(t, tf.TestVariables, "template %s must have test_variables for validation", filePath)
+
+		rulesJSON, err := json.Marshal(tf.Rules)
+		require.NoError(t, err, "failed to marshal template rules from %s", filePath)
+		resolved, err := substituteVarsInString(string(rulesJSON), tf.TestVariables)
+		require.NoError(t, err, "template variable substitution failed in %s", filePath)
+		var resolvedRules []ruleConfig
+		require.NoError(t, json.Unmarshal([]byte(resolved), &resolvedRules), "failed to unmarshal resolved rules from %s", filePath)
+
+		fileName := filepath.Base(filePath)
+		for i, cfg := range resolvedRules {
+			if cfg.Type != string(types.RuleTypeEVMSolidityExpression) {
+				continue
+			}
+			if !cfg.Enabled {
+				continue
+			}
+
+			rule, err := configToRule(len(allRules)+i, cfg)
+			require.NoError(t, err, "failed to convert rule %q from template %s", cfg.Name, fileName)
+
+			allRules = append(allRules, rule)
+			ruleInfos = append(ruleInfos, ruleFileInfo{
+				file:     fileName,
+				ruleName: cfg.Name,
+			})
+		}
+	}
+
 	require.NotEmpty(t, allRules, "no Solidity expression rules found across all files")
-	t.Logf("Validating %d Solidity expression rules from %d files", len(allRules), len(yamlFiles))
+	t.Logf("Validating %d Solidity expression rules from %d plain + %d template files", len(allRules), len(yamlFiles), len(templateFiles))
 
 	// Batch validate all rules
 	batchResult, err := validator.ValidateRulesBatch(ctx, allRules)

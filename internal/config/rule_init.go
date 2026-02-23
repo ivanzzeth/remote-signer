@@ -117,84 +117,73 @@ func (i *RuleInitializer) SyncFromConfig(ctx context.Context, rules []RuleConfig
 // expandFileRules expands "file" type rules by loading rules from external YAML files
 // It recursively expands nested file rules up to a maximum depth
 func (i *RuleInitializer) expandFileRules(rules []RuleConfig) ([]RuleConfig, error) {
-	return i.expandFileRulesWithDepth(rules, 0, 10) // max depth of 10 to prevent infinite recursion
+	return ExpandFileRules(rules, i.configDir, i.logger)
 }
 
-func (i *RuleInitializer) expandFileRulesWithDepth(rules []RuleConfig, depth, maxDepth int) ([]RuleConfig, error) {
+// ExpandFileRules expands "file" type rules by loading from external YAML files (no DB).
+// Use for validation (e.g. validate-rules -config). configDir resolves relative paths.
+func ExpandFileRules(rules []RuleConfig, configDir string, logger *slog.Logger) ([]RuleConfig, error) {
+	return expandFileRulesWithDepth(rules, configDir, logger, 0, 10)
+}
+
+func expandFileRulesWithDepth(rules []RuleConfig, configDir string, logger *slog.Logger, depth, maxDepth int) ([]RuleConfig, error) {
 	if depth > maxDepth {
 		return nil, fmt.Errorf("maximum rule file inclusion depth (%d) exceeded", maxDepth)
 	}
-
 	var expanded []RuleConfig
-
 	for _, rule := range rules {
 		if rule.Type == RuleFileType {
-			// Load rules from external file
-			fileRules, err := i.loadRulesFromFile(rule)
+			fileRules, err := loadRulesFromFileStatic(rule, configDir, logger)
 			if err != nil {
 				return nil, fmt.Errorf("failed to load rules from file: %w", err)
 			}
-
-			// Recursively expand any nested file rules
-			nestedExpanded, err := i.expandFileRulesWithDepth(fileRules, depth+1, maxDepth)
+			nestedExpanded, err := expandFileRulesWithDepth(fileRules, configDir, logger, depth+1, maxDepth)
 			if err != nil {
 				return nil, err
 			}
-
 			expanded = append(expanded, nestedExpanded...)
 		} else {
 			expanded = append(expanded, rule)
 		}
 	}
-
 	return expanded, nil
 }
 
-// loadRulesFromFile loads rules from an external YAML file
-func (i *RuleInitializer) loadRulesFromFile(fileCfg RuleConfig) ([]RuleConfig, error) {
-	// Get the file path from config
+func loadRulesFromFileStatic(fileCfg RuleConfig, configDir string, logger *slog.Logger) ([]RuleConfig, error) {
 	pathValue, ok := fileCfg.Config["path"]
 	if !ok {
 		return nil, fmt.Errorf("file rule '%s' missing 'path' in config", fileCfg.Name)
 	}
-
 	path, ok := pathValue.(string)
 	if !ok {
 		return nil, fmt.Errorf("file rule '%s' path must be a string", fileCfg.Name)
 	}
-
-	// Resolve relative paths against config directory
 	if !filepath.IsAbs(path) {
-		path = filepath.Join(i.configDir, path)
+		path = filepath.Join(configDir, path)
 	}
-
-	i.logger.Info("Loading rules from file", "name", fileCfg.Name, "path", path)
-
-	// Read file
+	if logger != nil {
+		logger.Info("Loading rules from file", "name", fileCfg.Name, "path", path)
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read rule file '%s': %w", path, err)
 	}
-
-	// Expand environment variables
 	expandedData := ExpandEnvWithDefaults(string(data))
-
-	// Parse YAML
 	var fileContent struct {
 		Rules []RuleConfig `yaml:"rules"`
 	}
-
 	if err := yaml.Unmarshal([]byte(expandedData), &fileContent); err != nil {
 		return nil, fmt.Errorf("failed to parse rule file '%s': %w", path, err)
 	}
-
-	i.logger.Info("Loaded rules from file",
-		"name", fileCfg.Name,
-		"path", path,
-		"count", len(fileContent.Rules),
-	)
-
+	if logger != nil {
+		logger.Info("Loaded rules from file", "name", fileCfg.Name, "path", path, "count", len(fileContent.Rules))
+	}
 	return fileContent.Rules, nil
+}
+
+// loadRulesFromFile loads rules from an external YAML file (RuleInitializer wrapper)
+func (i *RuleInitializer) loadRulesFromFile(fileCfg RuleConfig) ([]RuleConfig, error) {
+	return loadRulesFromFileStatic(fileCfg, i.configDir, i.logger)
 }
 
 // generateRuleID generates a deterministic rule ID based on config content

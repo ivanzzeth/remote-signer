@@ -30,7 +30,13 @@ const solidityExpressionTemplate = `// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 contract RuleEvaluator {
-    function run() public pure returns (bool) {
+    {{.InMappingDeclarations}}
+
+    constructor() {
+        {{.InMappingConstructorInit}}
+    }
+
+    function run() public view returns (bool) {
         // Transaction context
         address tx_to = {{.To}};
         uint256 tx_value = {{.Value}};
@@ -70,6 +76,8 @@ pragma solidity ^0.8.20;
 
 // RuleContract contains user-defined validation functions
 contract RuleContract {
+    {{.InMappingDeclarations}}
+
     // Transaction context available as state variables
     address public immutable txTo;
     uint256 public immutable txValue;
@@ -92,6 +100,7 @@ contract RuleContract {
         txData = _txData;
         txChainId = _txChainId;
         txSigner = _txSigner;
+        {{.InMappingConstructorInit}}
     }
 
     // Fallback: reject any function call that doesn't match whitelisted selectors
@@ -150,8 +159,13 @@ pragma solidity ^0.8.20;
 
 contract RuleEvaluator {
     {{.StructDefinition}}
+    {{.InMappingDeclarations}}
 
-    function run() public pure returns (bool) {
+    constructor() {
+        {{.InMappingConstructorInit}}
+    }
+
+    function run() public view returns (bool) {
         // EIP-712 Domain context (eip712_* prefix)
         string memory eip712_primaryType = {{.PrimaryType}};
         string memory eip712_domainName = {{.DomainName}};
@@ -200,6 +214,8 @@ const solidityTypedDataFunctionsTemplate = `// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 contract RuleEvaluator {
+    {{.InMappingDeclarations}}
+
     // EIP-712 Domain context (eip712_* prefix)
     string public eip712_primaryType;
     string public eip712_domainName;
@@ -223,6 +239,7 @@ contract RuleEvaluator {
         ctx_signer = {{.Signer}};
         ctx_chainId = {{.ChainID}};
         messageData = {{.MessageData}};
+        {{.InMappingConstructorInit}}
     }
 
     // User-defined structs and validation functions
@@ -413,16 +430,16 @@ func (e *SolidityRuleEvaluator) Evaluate(
 		}
 
 		if config.TypedDataExpression != "" {
-			passed, reason, err = e.evaluateTypedDataExpression(ctx, config.TypedDataExpression, req, typedData, structDef)
+			passed, reason, err = e.evaluateTypedDataExpression(ctx, config.TypedDataExpression, req, typedData, structDef, config.InMappingArrays)
 		} else {
-			passed, reason, err = e.evaluateTypedDataFunctions(ctx, config.TypedDataFunctions, req, typedData)
+			passed, reason, err = e.evaluateTypedDataFunctions(ctx, config.TypedDataFunctions, req, typedData, config.InMappingArrays)
 		}
 	} else if config.Functions != "" {
 		// Transaction validation with function mode
-		passed, reason, err = e.evaluateFunctions(ctx, config.Functions, req, parsed)
+		passed, reason, err = e.evaluateFunctions(ctx, config.Functions, req, parsed, config.InMappingArrays)
 	} else {
 		// Transaction validation with expression mode
-		passed, reason, err = e.evaluateExpression(ctx, config.Expression, req, parsed)
+		passed, reason, err = e.evaluateExpression(ctx, config.Expression, req, parsed, config.InMappingArrays)
 	}
 
 	if err != nil {
@@ -449,9 +466,10 @@ func (e *SolidityRuleEvaluator) evaluateExpression(
 	expression string,
 	req *types.SignRequest,
 	parsed *types.ParsedPayload,
+	inMappingArrays map[string][]string,
 ) (bool, string, error) {
 	// Generate script with transaction context
-	script, err := e.generateExpressionScript(expression, req, parsed)
+	script, err := e.generateExpressionScript(expression, req, parsed, inMappingArrays)
 	if err != nil {
 		return false, "", fmt.Errorf("failed to generate script: %w", err)
 	}
@@ -471,9 +489,10 @@ func (e *SolidityRuleEvaluator) evaluateFunctions(
 	functions string,
 	req *types.SignRequest,
 	parsed *types.ParsedPayload,
+	inMappingArrays map[string][]string,
 ) (bool, string, error) {
 	// Generate script with transaction context and user functions
-	script, err := e.generateFunctionScript(functions, req, parsed)
+	script, err := e.generateFunctionScript(functions, req, parsed, inMappingArrays)
 	if err != nil {
 		return false, "", fmt.Errorf("failed to generate function script: %w", err)
 	}
@@ -487,28 +506,172 @@ func (e *SolidityRuleEvaluator) evaluateFunctions(
 	return passed, reason, nil
 }
 
+// sanitizeEmptyComparisons fixes empty variable substitution in comparisons so that generated Solidity compiles.
+// Uses address(0) for address types and 0 for numeric (e.g. chainId) when LHS name suggests type.
+func sanitizeEmptyComparisons(code string) string {
+	// LHS containing chainId/CainId -> use 0 (uint256); otherwise address(0)
+	emptyRHS := func(lhs string) string {
+		if regexp.MustCompile(`(?i)chainid`).MatchString(lhs) {
+			return "0"
+		}
+		return "address(0)"
+	}
+	// == ) with optional LHS capture: (something) == ) -> (something) == 0) or address(0))
+	code = regexp.MustCompile(`(\w+)\s*==\s*\)`).ReplaceAllStringFunc(code, func(m string) string {
+		sub := regexp.MustCompile(`(\w+)\s*==\s*\)`).FindStringSubmatch(m)
+		if len(sub) != 2 {
+			return m
+		}
+		return sub[1] + " == " + emptyRHS(sub[1]) + ")"
+	})
+	code = regexp.MustCompile(`(\w+)\s*==\s*,\s*`).ReplaceAllStringFunc(code, func(m string) string {
+		sub := regexp.MustCompile(`(\w+)\s*==\s*,\s*`).FindStringSubmatch(m)
+		if len(sub) != 2 {
+			return m
+		}
+		return sub[1] + " == " + emptyRHS(sub[1]) + ", "
+	})
+	code = regexp.MustCompile(`(\w+)\s*==\s+\|\|`).ReplaceAllStringFunc(code, func(m string) string {
+		sub := regexp.MustCompile(`(\w+)\s*==\s+\|\|`).FindStringSubmatch(m)
+		if len(sub) != 2 {
+			return m
+		}
+		return sub[1] + " == " + emptyRHS(sub[1]) + " ||"
+	})
+	code = regexp.MustCompile(`(\w+)\s*==\s+&&`).ReplaceAllStringFunc(code, func(m string) string {
+		sub := regexp.MustCompile(`(\w+)\s*==\s+&&`).FindStringSubmatch(m)
+		if len(sub) != 2 {
+			return m
+		}
+		return sub[1] + " == " + emptyRHS(sub[1]) + " &&"
+	})
+	code = regexp.MustCompile(`(\w+)\s*==\s+;`).ReplaceAllStringFunc(code, func(m string) string {
+		sub := regexp.MustCompile(`(\w+)\s*==\s+;`).FindStringSubmatch(m)
+		if len(sub) != 2 {
+			return m
+		}
+		return sub[1] + " == " + emptyRHS(sub[1]) + ";"
+	})
+	code = regexp.MustCompile(`(\w+)\s*!=\s*\)`).ReplaceAllStringFunc(code, func(m string) string {
+		sub := regexp.MustCompile(`(\w+)\s*!=\s*\)`).FindStringSubmatch(m)
+		if len(sub) != 2 {
+			return m
+		}
+		return sub[1] + " != " + emptyRHS(sub[1]) + ")"
+	})
+	code = regexp.MustCompile(`\s*!=\s*,\s*`).ReplaceAllString(code, " != address(0), ")
+	code = regexp.MustCompile(`\s*!=\s+\|\|`).ReplaceAllString(code, " != address(0) ||")
+	code = regexp.MustCompile(`\s*!=\s+&&`).ReplaceAllString(code, " != address(0) &&")
+	return code
+}
+
+// inMappingResult holds the result of replacing in(expr, varName) with mapping lookups.
+type inMappingResult struct {
+	Modified       string // source with in(expr, varName) replaced by varName_mapping[expr]
+	Declarations   string // e.g. "mapping(address => bool) private allowed_safe_addresses_mapping;"
+	ConstructorInit string // e.g. "allowed_safe_addresses_mapping[0xa]=true;\n        ..."
+}
+
+// processInOperatorToMappings replaces in(expr, varName) with varName_mapping[expr].
+// Only supports second argument as a single identifier (array variable name).
+// When inMappingArrays[varName] is set, the mapping is filled in constructor; otherwise empty (syntax check).
+// Any in() not matched (e.g. literal list in(expr, a, b, c)) is left for preprocessInOperator.
+func processInOperatorToMappings(source string, inMappingArrays map[string][]string) inMappingResult {
+	// Match in(expr, varName) — second arg must be single identifier \w+
+	re := regexp.MustCompile(`in\s*\(\s*([^,]+)\s*,\s*(\w+)\s*\)`)
+	var declarations []string
+	var constructorInits []string
+	seenVar := make(map[string]bool)
+
+	modified := re.ReplaceAllStringFunc(source, func(match string) string {
+		sub := re.FindStringSubmatch(match)
+		if len(sub) != 3 {
+			return match
+		}
+		expr := strings.TrimSpace(sub[1])
+		varName := sub[2]
+		// Only treat as array variable if it looks like an identifier (not a literal like 0x... or 123)
+		if len(varName) == 0 || varName[0] >= '0' && varName[0] <= '9' || strings.HasPrefix(varName, "0x") {
+			return match
+		}
+		mappingName := varName + "_mapping"
+		if !seenVar[varName] {
+			seenVar[varName] = true
+			declarations = append(declarations, "mapping(address => bool) private "+mappingName+";")
+			addrs := inMappingArrays[varName]
+			for _, a := range addrs {
+				addr := strings.TrimSpace(a)
+				if addr != "" {
+					constructorInits = append(constructorInits, mappingName+"["+addr+"] = true;")
+				}
+			}
+		}
+		return mappingName + "[" + expr + "]"
+	})
+
+	return inMappingResult{
+		Modified:          modified,
+		Declarations:      strings.Join(declarations, "\n    "),
+		ConstructorInit:   strings.Join(constructorInits, "\n        "),
+	}
+}
+
+// preprocessInOperator expands in(target, a, b, c) to (target == a || target == b || target == c).
+// Used for backward compat when no InMappingArrays or for literal-list in().
+func preprocessInOperator(expression string) string {
+	// Match in(expr, val1, val2, ...) — first arg is [^,]+, rest may be empty [^)]*
+	re := regexp.MustCompile(`in\s*\(\s*([^,]+)\s*,\s*([^)]*)\s*\)`)
+	return re.ReplaceAllStringFunc(expression, func(match string) string {
+		sub := re.FindStringSubmatch(match)
+		if len(sub) != 3 {
+			return match
+		}
+		target := strings.TrimSpace(sub[1])
+		rest := strings.TrimSpace(sub[2])
+		parts := strings.Split(rest, ",")
+		var clauses []string
+		for _, p := range parts {
+			v := strings.TrimSpace(p)
+			if v != "" {
+				clauses = append(clauses, target+" == "+v)
+			}
+		}
+		if len(clauses) == 0 {
+			return "false"
+		}
+		return "(" + strings.Join(clauses, " || ") + ")"
+	})
+}
+
 // generateExpressionScript generates a Solidity script for Expression mode
 func (e *SolidityRuleEvaluator) generateExpressionScript(
 	expression string,
 	req *types.SignRequest,
 	parsed *types.ParsedPayload,
+	inMappingArrays map[string][]string,
 ) (string, error) {
+	ir := processInOperatorToMappings(expression, inMappingArrays)
+	expression = preprocessInOperator(ir.Modified)
 	data := struct {
-		To         string
-		Value      string
-		Selector   string
-		Data       string
-		ChainID    string
-		Signer     string
-		Expression string
+		To                     string
+		Value                  string
+		Selector               string
+		Data                   string
+		ChainID                string
+		Signer                 string
+		Expression             string
+		InMappingDeclarations  string
+		InMappingConstructorInit string
 	}{
-		To:         formatAddress(parsed.Recipient),
-		Value:      formatWei(parsed.Value),
-		Selector:   formatSelector(parsed.MethodSig),
-		Data:       formatBytes(parsed.RawData),
-		ChainID:    formatChainID(req.ChainID),
-		Signer:     formatAddress(&req.SignerAddress),
-		Expression: expression,
+		To:                     formatAddress(parsed.Recipient),
+		Value:                  formatWei(parsed.Value),
+		Selector:               formatSelector(parsed.MethodSig),
+		Data:                   formatBytes(parsed.RawData),
+		ChainID:                formatChainID(req.ChainID),
+		Signer:                 formatAddress(&req.SignerAddress),
+		Expression:             expression,
+		InMappingDeclarations:  ir.Declarations,
+		InMappingConstructorInit: ir.ConstructorInit,
 	}
 
 	tmpl, err := template.New("expression").Parse(solidityExpressionTemplate)
@@ -529,23 +692,30 @@ func (e *SolidityRuleEvaluator) generateFunctionScript(
 	functions string,
 	req *types.SignRequest,
 	parsed *types.ParsedPayload,
+	inMappingArrays map[string][]string,
 ) (string, error) {
+	ir := processInOperatorToMappings(functions, inMappingArrays)
+	functions = preprocessInOperator(ir.Modified)
 	data := struct {
-		To        string
-		Value     string
-		Selector  string
-		Data      string
-		ChainID   string
-		Signer    string
-		Functions string
+		To                      string
+		Value                   string
+		Selector                string
+		Data                    string
+		ChainID                 string
+		Signer                  string
+		Functions               string
+		InMappingDeclarations   string
+		InMappingConstructorInit string
 	}{
-		To:        formatAddress(parsed.Recipient),
-		Value:     formatWei(parsed.Value),
-		Selector:  formatSelector(parsed.MethodSig),
-		Data:      formatBytes(parsed.RawData),
-		ChainID:   formatChainID(req.ChainID),
-		Signer:    formatAddress(&req.SignerAddress),
-		Functions: functions,
+		To:                      formatAddress(parsed.Recipient),
+		Value:                   formatWei(parsed.Value),
+		Selector:                formatSelector(parsed.MethodSig),
+		Data:                    formatBytes(parsed.RawData),
+		ChainID:                 formatChainID(req.ChainID),
+		Signer:                  formatAddress(&req.SignerAddress),
+		Functions:               functions,
+		InMappingDeclarations:   ir.Declarations,
+		InMappingConstructorInit: ir.ConstructorInit,
 	}
 
 	tmpl, err := template.New("functions").Parse(solidityFunctionTemplate)
@@ -760,11 +930,15 @@ contract SyntaxCheck {
 // GenerateFunctionSyntaxCheckScript generates a script for compilation checking (Functions mode)
 // Uses the same two-contract structure as solidityFunctionTemplate for consistency
 func (e *SolidityRuleEvaluator) GenerateFunctionSyntaxCheckScript(functions string) string {
+	ir := processInOperatorToMappings(functions, nil)
+	functions = preprocessInOperator(ir.Modified)
 	return fmt.Sprintf(`// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 // RuleContract contains user-defined validation functions
 contract RuleContract {
+    %s
+
     // Transaction context available as state variables
     address public immutable txTo;
     uint256 public immutable txValue;
@@ -787,6 +961,7 @@ contract RuleContract {
         txData = _txData;
         txChainId = _txChainId;
         txSigner = _txSigner;
+        %s
     }
 
     // Fallback: reject any function call that doesn't match whitelisted selectors
@@ -818,7 +993,7 @@ contract RuleEvaluatorTest {
         ruleContract;
     }
 }
-`, functions)
+`, ir.Declarations, ir.ConstructorInit, functions)
 }
 
 // GetTempDir returns the temp directory path
@@ -911,9 +1086,10 @@ func (e *SolidityRuleEvaluator) evaluateTypedDataExpression(
 	req *types.SignRequest,
 	typedData *TypedDataPayload,
 	structDef *StructDefinition,
+	inMappingArrays map[string][]string,
 ) (bool, string, error) {
 	// Generate script with typed data context
-	script, err := e.generateTypedDataExpressionScript(expression, req, typedData, structDef)
+	script, err := e.generateTypedDataExpressionScript(expression, req, typedData, structDef, inMappingArrays)
 	if err != nil {
 		return false, "", fmt.Errorf("failed to generate typed data expression script: %w", err)
 	}
@@ -933,9 +1109,10 @@ func (e *SolidityRuleEvaluator) evaluateTypedDataFunctions(
 	functions string,
 	req *types.SignRequest,
 	typedData *TypedDataPayload,
+	inMappingArrays map[string][]string,
 ) (bool, string, error) {
 	// Generate script with typed data context and user functions
-	script, err := e.generateTypedDataFunctionsScript(functions, req, typedData)
+	script, err := e.generateTypedDataFunctionsScript(functions, req, typedData, inMappingArrays)
 	if err != nil {
 		return false, "", fmt.Errorf("failed to generate typed data functions script: %w", err)
 	}
@@ -957,7 +1134,10 @@ func (e *SolidityRuleEvaluator) generateTypedDataExpressionScript(
 	req *types.SignRequest,
 	typedData *TypedDataPayload,
 	structDef *StructDefinition,
+	inMappingArrays map[string][]string,
 ) (string, error) {
+	ir := processInOperatorToMappings(expression, inMappingArrays)
+	expression = preprocessInOperator(ir.Modified)
 	var structDefinition string
 	var structInstance string
 
@@ -973,27 +1153,31 @@ func (e *SolidityRuleEvaluator) generateTypedDataExpressionScript(
 	}
 
 	data := struct {
-		PrimaryType      string
-		DomainName       string
-		DomainVersion    string
-		DomainChainId    string
-		DomainContract   string
-		Signer           string
-		ChainID          string
-		StructDefinition string
-		StructInstance   string
-		Expression       string
+		PrimaryType               string
+		DomainName                string
+		DomainVersion             string
+		DomainChainId             string
+		DomainContract            string
+		Signer                    string
+		ChainID                   string
+		StructDefinition          string
+		StructInstance            string
+		Expression                string
+		InMappingDeclarations     string
+		InMappingConstructorInit string
 	}{
-		PrimaryType:      formatString(typedData.PrimaryType),
-		DomainName:       formatString(typedData.Domain.Name),
-		DomainVersion:    formatString(typedData.Domain.Version),
-		DomainChainId:    formatDomainChainId(typedData.Domain.ChainId),
-		DomainContract:   formatDomainContract(typedData.Domain.VerifyingContract),
-		Signer:           formatAddress(&req.SignerAddress),
-		ChainID:          formatChainID(req.ChainID),
-		StructDefinition: structDefinition,
-		StructInstance:   structInstance,
-		Expression:       expression,
+		PrimaryType:               formatString(typedData.PrimaryType),
+		DomainName:                formatString(typedData.Domain.Name),
+		DomainVersion:             formatString(typedData.Domain.Version),
+		DomainChainId:             formatDomainChainId(typedData.Domain.ChainId),
+		DomainContract:            formatDomainContract(typedData.Domain.VerifyingContract),
+		Signer:                    formatAddress(&req.SignerAddress),
+		ChainID:                   formatChainID(req.ChainID),
+		StructDefinition:          structDefinition,
+		StructInstance:            structInstance,
+		Expression:                expression,
+		InMappingDeclarations:     ir.Declarations,
+		InMappingConstructorInit:  ir.ConstructorInit,
 	}
 
 	tmpl, err := template.New("typedDataExpression").Parse(solidityTypedDataExpressionTemplate)
@@ -1014,30 +1198,37 @@ func (e *SolidityRuleEvaluator) generateTypedDataFunctionsScript(
 	functions string,
 	req *types.SignRequest,
 	typedData *TypedDataPayload,
+	inMappingArrays map[string][]string,
 ) (string, error) {
+	ir := processInOperatorToMappings(functions, inMappingArrays)
+	functions = preprocessInOperator(ir.Modified)
 	// Encode message data as bytes for struct decoding
 	messageData := encodeMessageData(typedData)
 
 	data := struct {
-		PrimaryType    string
-		DomainName     string
-		DomainVersion  string
-		DomainChainId  string
-		DomainContract string
-		Signer         string
-		ChainID        string
-		MessageData    string
-		Functions      string
+		PrimaryType               string
+		DomainName                string
+		DomainVersion             string
+		DomainChainId             string
+		DomainContract            string
+		Signer                    string
+		ChainID                   string
+		MessageData               string
+		Functions                 string
+		InMappingDeclarations     string
+		InMappingConstructorInit  string
 	}{
-		PrimaryType:    formatString(typedData.PrimaryType),
-		DomainName:     formatString(typedData.Domain.Name),
-		DomainVersion:  formatString(typedData.Domain.Version),
-		DomainChainId:  formatDomainChainId(typedData.Domain.ChainId),
-		DomainContract: formatDomainContract(typedData.Domain.VerifyingContract),
-		Signer:         formatAddress(&req.SignerAddress),
-		ChainID:        formatChainID(req.ChainID),
-		MessageData:    messageData,
-		Functions:      functions,
+		PrimaryType:              formatString(typedData.PrimaryType),
+		DomainName:               formatString(typedData.Domain.Name),
+		DomainVersion:            formatString(typedData.Domain.Version),
+		DomainChainId:            formatDomainChainId(typedData.Domain.ChainId),
+		DomainContract:           formatDomainContract(typedData.Domain.VerifyingContract),
+		Signer:                   formatAddress(&req.SignerAddress),
+		ChainID:                  formatChainID(req.ChainID),
+		MessageData:              messageData,
+		Functions:                functions,
+		InMappingDeclarations:    ir.Declarations,
+		InMappingConstructorInit: ir.ConstructorInit,
 	}
 
 	tmpl, err := template.New("typedDataFunctions").Parse(solidityTypedDataFunctionsTemplate)
@@ -1224,10 +1415,14 @@ contract SyntaxCheck {
 
 // GenerateTypedDataFunctionsSyntaxCheckScript generates a syntax check script for TypedDataFunctions mode
 func (e *SolidityRuleEvaluator) GenerateTypedDataFunctionsSyntaxCheckScript(functions string) string {
+	ir := processInOperatorToMappings(functions, nil)
+	functions = preprocessInOperator(ir.Modified)
 	return fmt.Sprintf(`// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 contract SyntaxCheck {
+    %s
+
     // EIP-712 Domain context (eip712_* prefix)
     string public eip712_primaryType;
     string public eip712_domainName;
@@ -1251,6 +1446,7 @@ contract SyntaxCheck {
         ctx_signer = address(0);
         ctx_chainId = 1;
         messageData = "";
+        %s
     }
 
     // User-defined structs and validation functions
@@ -1264,7 +1460,7 @@ contract SyntaxCheck {
         // Override in user functions if needed
     }
 }
-`, functions)
+`, ir.Declarations, ir.ConstructorInit, functions)
 }
 
 // parseTypedDataFromPayload extracts TypedDataPayload from request payload
@@ -2067,7 +2263,7 @@ func (e *SolidityRuleEvaluator) generateBatchEvaluationScript(
 				formatAddress(&req.SignerAddress),
 				formatChainID(req.ChainID),
 				structInstance,
-				ctx.config.TypedDataExpression,
+				preprocessInOperator(ctx.config.TypedDataExpression),
 			)
 			testFunctions = append(testFunctions, testFunc)
 			ruleIndices[testIndex] = i

@@ -199,37 +199,85 @@ api_keys:
 #    openssl pkey -in private.pem -outform DER | tail -c 32 | xxd -p -c 64        # private key hex
 #    openssl pkey -in public.pem -pubin -outform DER | tail -c 32 | xxd -p -c 64  # public key hex
 
+# =============================================================================
+# Templates (rule templates with ${variable} placeholders)
+# =============================================================================
+# Templates define parameterized rules. Instances bind concrete values to create
+# concrete rules. Use type "file" to load a template from a YAML file that
+# contains variables, test_variables, and rules with ${var} placeholders.
+#
+# Template file format:
+#   variables:       # list of { name, type, description, required, default }
+#   test_variables:  # map of var -> value for validate-rules (optional)
+#   rules:           # same as rules below, but with ${var_name} in config
+#
+templates:
+  # Example: Polymarket Safe rules as a template (Polygon addresses as variables)
+  - name: "Polymarket Safe Template"
+    type: "file"
+    description: "Polymarket protocol rules for Safe wallets (parameterized)"
+    enabled: true
+    config:
+      path: "rules/templates/polymarket.safe.template.yaml"
+
+# =============================================================================
 # Rules configuration
-# Rules can be defined here (config source) or via API (api source)
-# Rule evaluation: blocklist rules checked first, then whitelist rules
+# =============================================================================
+# Rules can be defined here (config source) or via API (api source).
+# Rule evaluation: blocklist rules checked first, then whitelist rules.
 # Mode: "whitelist" = any match allows, "blocklist" = any match blocks
 #
-# Special rule type "file" allows including rules from external YAML files:
-#   - name: "Treasury rules"
-#     type: "file"
-#     config:
-#       path: "rules/treasury.example.yaml"  # Relative to config file directory
-#
-# The external file should have this format:
-#   rules:
-#     - name: "Rule 1"
-#       type: "evm_address_whitelist"
-#       ...
+# Rule sources:
+#   1. type "file"   — load rules from a YAML file (path in config.path)
+#   2. type "instance" — expand from a template (config.template + config.variables)
+#   3. inline       — define rules directly below
 #
 rules:
-  # Option 1: Include rules from external files for better organization
-  # Copy xxx.example.yaml to xxx.yaml and customize for your needs
+  # -------------------------------------------------------------------------
+  # Option A: Instance from template (template + variables → concrete rules)
+  # -------------------------------------------------------------------------
+  # References a template by name and supplies variable values. The server
+  # expands this into the same rules as the template, with ${var} replaced.
+  - name: "Polymarket Safe rules (Polygon)"
+    type: "instance"
+    chain_type: "evm"
+    chain_id: "137"
+    enabled: true
+    config:
+      template: "Polymarket Safe Template"
+      variables:
+        chain_id: "137"
+        ctf_exchange_address: "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E"
+        neg_risk_adapter_address: "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296"
+        neg_risk_exchange_address: "0xC5d563A36AE78145C45a50134d48A1215220f80a"
+        conditional_tokens_address: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+        safe_proxy_factory_address: "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"
+        usdc_bridged_address: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+        # Single Safe for test payload (to, maker, signer, verifyingContract)
+        allowed_safe_address_for_testing: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+        # Comma-separated allowed Safes (used in expressions via in()); one or multiple
+        allowed_safe_addresses: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+        clob_auth_domain_name: "ClobAuthDomain"
+        clob_auth_domain_version: "1"
+        ctf_exchange_domain_name: "Polymarket CTF Exchange"
+        ctf_exchange_domain_version: "1"
+        safe_factory_domain_name: "Polymarket Contract Proxy Factory"
+
+  # -------------------------------------------------------------------------
+  # Option B: Include rules from external files (legacy / non-templated)
+  # -------------------------------------------------------------------------
   # - name: "Treasury rules"
   #   type: "file"
   #   config:
   #     path: "rules/treasury.yaml"
-  #
-  # - name: "ERC20 rules"
+  # - name: "Polymarket Safe rules (direct file)"
   #   type: "file"
   #   config:
-  #     path: "rules/erc20.yaml"
+  #     path: "rules/polymarket.safe.yaml"
 
-  # Option 2: Define rules inline (examples below)
+  # -------------------------------------------------------------------------
+  # Option C: Define rules inline (examples below)
+  # -------------------------------------------------------------------------
 
   # Example 1: Simple address whitelist
   - name: "Allow transfers to treasury"
