@@ -167,6 +167,11 @@ type SolidityExpressionConfig struct {
 	// Common values: "transaction", "typed_data", "personal", "eip191"
 	SignTypeFilter string `json:"sign_type_filter,omitempty"`
 
+	// InMappingArrays supplies address lists for in(expr, varName): varName -> []address.
+	// When rule body contains in(txTo, allowed_safe_addresses), generate allowed_safe_addresses_mapping
+	// and set InMappingArrays["allowed_safe_addresses"] to the list. O(1) lookup instead of expanded OR chain.
+	InMappingArrays map[string][]string `json:"in_mapping_arrays,omitempty"`
+
 	// Description explains what the rule validates
 	Description string `json:"description,omitempty"`
 

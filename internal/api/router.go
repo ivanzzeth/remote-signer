@@ -15,11 +15,18 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
+// TemplateConfig contains template-related dependencies for the router
+type TemplateConfig struct {
+	TemplateRepo    storage.TemplateRepository
+	TemplateService *service.TemplateService
+}
+
 // RouterConfig contains configuration for the router
 type RouterConfig struct {
 	Version            string
 	IPWhitelistConfig  *middleware.IPWhitelist
 	SolidityValidator  *evm.SolidityRuleValidator
+	Template           *TemplateConfig
 }
 
 // Router handles HTTP routing
@@ -144,6 +151,29 @@ func (r *Router) setupRoutes() error {
 
 	// Audit routes (with auth + admin required — audit logs contain sensitive data)
 	r.mux.Handle("/api/v1/audit", r.withAuthAndAdmin(auditHandler))
+
+	// Template routes (with auth + admin required)
+	if r.config.Template != nil && r.config.Template.TemplateRepo != nil && r.config.Template.TemplateService != nil {
+		templateHandler, err := handler.NewTemplateHandler(
+			r.config.Template.TemplateRepo,
+			r.config.Template.TemplateService,
+			r.logger,
+		)
+		if err != nil {
+			return err
+		}
+
+		r.mux.Handle("/api/v1/templates", r.withAuthAndAdmin(templateHandler))
+		r.mux.Handle("/api/v1/templates/", r.withAuthAndAdmin(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			// Route to instance handler if path starts with /instances/
+			if strings.HasPrefix(req.URL.Path, "/api/v1/templates/instances/") {
+				templateHandler.ServeInstanceHTTP(w, req)
+				return
+			}
+			// Otherwise, route to template handler
+			templateHandler.ServeHTTP(w, req)
+		})))
+	}
 
 	return nil
 }

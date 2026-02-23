@@ -22,14 +22,25 @@ import (
 // it's skipped and the next whitelist rule is evaluated. This ensures that one
 // failing whitelist rule doesn't prevent other valid whitelist rules from matching.
 type WhitelistRuleEngine struct {
-	repo       storage.RuleRepository
-	evaluators map[types.RuleType]RuleEvaluator
-	mu         sync.RWMutex
-	logger     *slog.Logger
+	repo           storage.RuleRepository
+	evaluators     map[types.RuleType]RuleEvaluator
+	budgetChecker  *BudgetChecker // optional: budget checking for template instances
+	mu             sync.RWMutex
+	logger         *slog.Logger
+}
+
+// RuleEngineOption is a functional option for WhitelistRuleEngine
+type RuleEngineOption func(*WhitelistRuleEngine)
+
+// WithBudgetChecker adds budget checking capability to the rule engine
+func WithBudgetChecker(checker *BudgetChecker) RuleEngineOption {
+	return func(e *WhitelistRuleEngine) {
+		e.budgetChecker = checker
+	}
 }
 
 // NewWhitelistRuleEngine creates a new two-tier rule engine
-func NewWhitelistRuleEngine(repo storage.RuleRepository, logger *slog.Logger) (*WhitelistRuleEngine, error) {
+func NewWhitelistRuleEngine(repo storage.RuleRepository, logger *slog.Logger, opts ...RuleEngineOption) (*WhitelistRuleEngine, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("rule repository is required")
 	}
@@ -41,7 +52,12 @@ func NewWhitelistRuleEngine(repo storage.RuleRepository, logger *slog.Logger) (*
 		evaluators: make(map[types.RuleType]RuleEvaluator),
 		logger:     logger,
 	}
-	logger.Info("rule engine initialized")
+	for _, opt := range opts {
+		opt(engine)
+	}
+	logger.Info("rule engine initialized",
+		"budget_enabled", engine.budgetChecker != nil,
+	)
 	return engine, nil
 }
 
@@ -224,6 +240,26 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 		}
 
 		if matched {
+			// Budget check for instance rules with budget (post-match, pre-approve)
+			if e.budgetChecker != nil && rule.TemplateID != nil {
+				budgetOK, budgetErr := e.budgetChecker.CheckAndDeductBudget(ctx, rule, req, parsed)
+				if budgetErr != nil {
+					e.logger.Warn("budget check error, skipping rule (fail-open)",
+						"rule_id", rule.ID,
+						"rule_name", rule.Name,
+						"error", budgetErr,
+					)
+					continue // Fail-open: try next whitelist rule
+				}
+				if !budgetOK {
+					e.logger.Warn("budget exceeded for rule, skipping to next (fail-open)",
+						"rule_id", rule.ID,
+						"rule_name", rule.Name,
+					)
+					continue // Budget exceeded: try next whitelist rule
+				}
+			}
+
 			e.logger.Info("request allowed by whitelist rule",
 				"rule_id", rule.ID,
 				"rule_name", rule.Name,
@@ -330,6 +366,27 @@ func (e *WhitelistRuleEngine) evaluateWhitelistBatch(
 			}
 			if result.Passed {
 				rule := typeRules[i]
+
+				// Budget check for instance rules with budget (post-match, pre-approve)
+				if e.budgetChecker != nil && rule.TemplateID != nil {
+					budgetOK, budgetErr := e.budgetChecker.CheckAndDeductBudget(ctx, rule, req, parsed)
+					if budgetErr != nil {
+						e.logger.Warn("budget check error in batch, skipping rule (fail-open)",
+							"rule_id", rule.ID,
+							"rule_name", rule.Name,
+							"error", budgetErr,
+						)
+						continue
+					}
+					if !budgetOK {
+						e.logger.Warn("budget exceeded for batch rule, skipping to next (fail-open)",
+							"rule_id", rule.ID,
+							"rule_name", rule.Name,
+						)
+						continue
+					}
+				}
+
 				e.logger.Info("request allowed by whitelist rule (batch)",
 					"rule_id", rule.ID,
 					"rule_name", rule.Name,

@@ -54,6 +54,15 @@ logger:
 # These are placeholders, actual keys are generated at runtime
 api_keys: []
 
+# Templates (file-type): loaded at startup, used to expand instance rules
+# Used by TestTemplate_ConfigLoadedTemplatesAndInstanceRules
+templates:
+  - name: "E2E Minimal Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "e2e/fixtures/minimal_template.yaml"
+
 # Rules for e2e testing
 # Rules can be defined here (config source) or via API (api source)
 # Rule evaluation: blocklist rules checked first, then whitelist rules
@@ -123,3 +132,13 @@ rules:
         - "hash"         # Hash signing
         - "raw_message"  # Raw message signing
         - "eip191"       # EIP-191 signing
+
+  # Example 6: Instance rule — expanded from E2E Minimal Template at startup
+  # Used by TestTemplate_ConfigLoadedTemplatesAndInstanceRules
+  - name: "Instance of E2E Minimal"
+    type: "instance"
+    enabled: true
+    config:
+      template: "E2E Minimal Template"
+      variables:
+        allowed_address: "0x5B38Da6a701c568545dCfcB875f56beddC4"

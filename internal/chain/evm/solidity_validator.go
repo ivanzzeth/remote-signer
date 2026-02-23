@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -171,8 +172,7 @@ func (v *SolidityRuleValidator) ValidateRulesBatch(ctx context.Context, rules []
 		if err := json.Unmarshal(rule.Config, &config); err != nil {
 			return nil, fmt.Errorf("invalid solidity expression config for rule %s: %w", rule.ID, err)
 		}
-		mode, code := v.determineValidationMode(&config)
-		_ = mode
+		_, code := v.determineValidationMode(&config)
 		if code == "" {
 			return nil, fmt.Errorf("rule %s: either expression, functions, typed_data_expression, or typed_data_functions must be specified", rule.ID)
 		}
@@ -433,7 +433,7 @@ func (v *SolidityRuleValidator) generateBatchTestScript(rules []*types.Rule, mod
 				formatBytes(parsed.RawData),
 				formatChainID(req.ChainID),
 				formatAddress(&req.SignerAddress),
-				config.Expression,
+				sanitizeEmptyComparisons(preprocessInOperator(config.Expression)),
 			)
 			testFunctions = append(testFunctions, testFunc)
 		}
@@ -444,19 +444,35 @@ func (v *SolidityRuleValidator) generateBatchTestScript(rules []*types.Rule, mod
 		// rule B has redeemPositions()). Using a shared RuleContract would cause test cases
 		// to execute the wrong rule's functions, leading to false passes/failures.
 
-		// Parse each rule's functions
-		ruleFuncMap := make(map[int]string) // rule index -> functions code
+		// Parse each rule's functions and in()-mapping state (declarations + constructor init)
+		type ruleFuncState struct {
+			funcs           string
+			mappingDecls    string
+			constructorInit string
+		}
+		ruleFuncMap := make(map[int]ruleFuncState)
 		for i, rule := range rules {
 			var config SolidityExpressionConfig
 			if err := json.Unmarshal(rule.Config, &config); err != nil {
 				return "", fmt.Errorf("failed to parse config for rule %s: %w", rule.ID, err)
 			}
-			ruleFuncMap[i] = config.Functions
+			ir := processInOperatorToMappings(config.Functions, config.InMappingArrays)
+			funcs := sanitizeEmptyComparisons(preprocessInOperator(ir.Modified))
+			mappingDecls := strings.TrimSpace(ir.Declarations)
+			if mappingDecls != "" {
+				mappingDecls = "\n    " + strings.ReplaceAll(mappingDecls, "\n", "\n    ")
+			}
+			constructorInit := strings.TrimSpace(ir.ConstructorInit)
+			if constructorInit != "" {
+				constructorInit = "\n        " + strings.ReplaceAll(constructorInit, "\n", "\n        ")
+			}
+			ruleFuncMap[i] = ruleFuncState{funcs: funcs, mappingDecls: mappingDecls, constructorInit: constructorInit}
 		}
 
 		// Generate a separate RuleContract for each rule
 		var ruleContracts []string
-		for ruleIdx, funcs := range ruleFuncMap {
+		for ruleIdx := range rules {
+			state := ruleFuncMap[ruleIdx]
 			ruleContractCode := fmt.Sprintf(`contract RuleContract_%d {
     // Transaction context available as state variables
     address public immutable txTo;
@@ -465,6 +481,7 @@ func (v *SolidityRuleValidator) generateBatchTestScript(rules []*types.Rule, mod
     bytes public txData;
     uint256 public immutable txChainId;
     address public immutable txSigner;
+    %s
 
     constructor(
         address _txTo,
@@ -480,6 +497,7 @@ func (v *SolidityRuleValidator) generateBatchTestScript(rules []*types.Rule, mod
         txData = _txData;
         txChainId = _txChainId;
         txSigner = _txSigner;
+        %s
     }
 
     // Fallback: reject any function call that doesn't match whitelisted selectors
@@ -489,7 +507,7 @@ func (v *SolidityRuleValidator) generateBatchTestScript(rules []*types.Rule, mod
 
     // User-defined functions for automatic selector matching
     %s
-}`, ruleIdx, funcs)
+}`, ruleIdx, state.mappingDecls, state.constructorInit, state.funcs)
 			ruleContracts = append(ruleContracts, ruleContractCode)
 		}
 		// RuleContracts go OUTSIDE BatchRuleEvaluatorTest (top-level)
@@ -569,6 +587,28 @@ func (v *SolidityRuleValidator) generateBatchTestScript(rules []*types.Rule, mod
 			structDefinitions = append(structDefinitions, generateStructDefinition(sd))
 		}
 
+		// Collect all in()-mapping declarations from rules for contract-level declarations
+		allDeclarations := make(map[string]bool)
+		for _, rule := range rules {
+			var config SolidityExpressionConfig
+			if err := json.Unmarshal(rule.Config, &config); err != nil {
+				continue
+			}
+			ir := processInOperatorToMappings(config.TypedDataExpression, config.InMappingArrays)
+			for _, line := range strings.Split(ir.Declarations, "\n") {
+				line = strings.TrimSpace(line)
+				if line != "" {
+					allDeclarations[line] = true
+				}
+			}
+		}
+		var inMappingDecls []string
+		for d := range allDeclarations {
+			inMappingDecls = append(inMappingDecls, "    "+d)
+		}
+		sort.Strings(inMappingDecls)
+		inMappingDeclarationsStr := strings.Join(inMappingDecls, "\n")
+
 		for i, tcwr := range allTestCases {
 			rule := rules[tcwr.ruleIndex]
 			var config SolidityExpressionConfig
@@ -605,8 +645,20 @@ func (v *SolidityRuleValidator) generateBatchTestScript(rules []*types.Rule, mod
 				structInstance = generateMessageFieldDeclarations(typedData)
 			}
 
+			ir := processInOperatorToMappings(config.TypedDataExpression, config.InMappingArrays)
+			expression := sanitizeEmptyComparisons(preprocessInOperator(ir.Modified))
+			mappingInit := strings.TrimSpace(ir.ConstructorInit)
+			if mappingInit != "" {
+				mappingInit = mappingInit + "\n\n        "
+			}
+			// If we have mapping init, function cannot be pure (writes to state)
+			funcModifier := " pure"
+			if mappingInit != "" {
+				funcModifier = ""
+			}
+
 			// Generate test function
-			testFunc := fmt.Sprintf(`    function test_%s_%d() public pure returns (bool) {
+			testFunc := fmt.Sprintf(`    function test_%s_%d() public%s returns (bool) {
         // EIP-712 Domain context
         string memory eip712_primaryType = %s;
         string memory eip712_domainName = %s;
@@ -628,6 +680,8 @@ func (v *SolidityRuleValidator) generateBatchTestScript(rules []*types.Rule, mod
         // EIP-712 Message struct instance
         %s
 
+        // In-mapping init (for in(expr, varName))
+        %s
         // User-defined validation logic
         %s
 
@@ -635,6 +689,7 @@ func (v *SolidityRuleValidator) generateBatchTestScript(rules []*types.Rule, mod
     }`,
 				sanitizeFunctionName(tcwr.ruleName),
 				i,
+				funcModifier,
 				formatString(typedData.PrimaryType),
 				formatString(typedData.Domain.Name),
 				formatString(typedData.Domain.Version),
@@ -643,11 +698,16 @@ func (v *SolidityRuleValidator) generateBatchTestScript(rules []*types.Rule, mod
 				formatAddress(&req.SignerAddress),
 				formatChainID(req.ChainID),
 				structInstance,
-				config.TypedDataExpression,
+				mappingInit,
+				expression,
 			)
 			testFunctions = append(testFunctions, testFunc)
 		}
 
+		// Prepend contract-level in-mapping declarations and struct definitions
+		if inMappingDeclarationsStr != "" {
+			testFunctions = append([]string{inMappingDeclarationsStr}, testFunctions...)
+		}
 		// Add struct definitions at the beginning of the test functions
 		if len(structDefinitions) > 0 {
 			testFunctions = append(structDefinitions, testFunctions...)
@@ -662,7 +722,7 @@ func (v *SolidityRuleValidator) generateBatchTestScript(rules []*types.Rule, mod
 			if err := json.Unmarshal(rule.Config, &config); err != nil {
 				return "", fmt.Errorf("failed to parse config for rule %s: %w", rule.ID, err)
 			}
-			ruleFuncMap[i] = config.TypedDataFunctions
+			ruleFuncMap[i] = sanitizeEmptyComparisons(preprocessInOperator(config.TypedDataFunctions))
 		}
 
 		// Generate test functions for each test case
@@ -759,7 +819,7 @@ func (v *SolidityRuleValidator) generateBatchTestScript(rules []*types.Rule, mod
         // Override in user functions if needed
     }
 }`,
-					config.TypedDataFunctions,
+					sanitizeEmptyComparisons(preprocessInOperator(config.TypedDataFunctions)),
 				)
 				// RuleContract goes OUTSIDE BatchRuleEvaluatorTest (top-level)
 				topLevelContracts = append(topLevelContracts, ruleContractCode)
@@ -810,8 +870,22 @@ func (v *SolidityRuleValidator) executeBatchTestScript(ctx context.Context, scri
 	hash := sha256.Sum256([]byte(script))
 	hashStr := hex.EncodeToString(hash[:8])
 
-	// Create script file
-	scriptPath := filepath.Join(v.evaluator.GetTempDir(), fmt.Sprintf("batch_rule_%s.t.sol", hashStr))
+	tempDir := v.evaluator.GetTempDir()
+	scriptPath := filepath.Join(tempDir, fmt.Sprintf("batch_rule_%s.t.sol", hashStr))
+
+	// Remove other batch_rule_*.t.sol so forge only compiles this script (avoids stale files with different syntax)
+	matches, err := filepath.Glob(filepath.Join(tempDir, "batch_rule_*.t.sol"))
+	if err != nil {
+		return nil, fmt.Errorf("glob batch scripts: %w", err)
+	}
+	for _, p := range matches {
+		if p != scriptPath {
+			if removeErr := os.Remove(p); removeErr != nil {
+				slog.Debug("remove stale batch script", "path", p, "error", removeErr)
+			}
+		}
+	}
+
 	if err := os.WriteFile(scriptPath, []byte(script), 0600); err != nil {
 		return nil, fmt.Errorf("failed to write batch script: %w", err)
 	}

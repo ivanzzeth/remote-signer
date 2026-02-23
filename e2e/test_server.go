@@ -8,9 +8,11 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"gorm.io/driver/sqlite"
@@ -141,6 +143,8 @@ func (ts *TestServer) Start() error {
 		&types.Rule{},
 		&types.APIKey{},
 		&types.AuditRecord{},
+		&types.RuleTemplate{},
+		&types.RuleBudget{},
 	); err != nil {
 		return fmt.Errorf("failed to migrate database: %w", err)
 	}
@@ -166,6 +170,16 @@ func (ts *TestServer) Start() error {
 		return fmt.Errorf("failed to create audit repository: %w", err)
 	}
 
+	templateRepo, err := storage.NewGormTemplateRepository(db)
+	if err != nil {
+		return fmt.Errorf("failed to create template repository: %w", err)
+	}
+
+	budgetRepo, err := storage.NewGormBudgetRepository(db)
+	if err != nil {
+		return fmt.Errorf("failed to create budget repository: %w", err)
+	}
+
 	// Initialize API keys from config if available, otherwise create test keys
 	if cfg != nil && len(cfg.APIKeys) > 0 {
 		apiKeyInit, err := config.NewAPIKeyInitializer(apiKeyRepo, log)
@@ -189,11 +203,36 @@ func (ts *TestServer) Start() error {
 		if err != nil {
 			return fmt.Errorf("failed to create rule initializer: %w", err)
 		}
-		// Set config directory for resolving relative paths in rule files
+		configDir := ""
 		if ts.config.ConfigPath != "" {
-			ruleInit.SetConfigDir(filepath.Dir(ts.config.ConfigPath))
+			configDir = filepath.Dir(ts.config.ConfigPath)
+			ruleInit.SetConfigDir(configDir)
 		}
-		if err := ruleInit.SyncFromConfig(context.Background(), cfg.Rules); err != nil {
+
+		// Match main.go: sync templates (if any), expand instance rules, then sync rules
+		rulesToSync := cfg.Rules
+		if len(cfg.Templates) > 0 {
+			templateInit, err := config.NewTemplateInitializer(templateRepo, log)
+			if err != nil {
+				return fmt.Errorf("failed to create template initializer: %w", err)
+			}
+			if configDir != "" {
+				templateInit.SetConfigDir(configDir)
+			}
+			if err := templateInit.SyncFromConfig(context.Background(), cfg.Templates); err != nil {
+				return fmt.Errorf("failed to sync templates from config: %w", err)
+			}
+			loadedTemplates, err := templateInit.GetLoadedTemplates(cfg.Templates)
+			if err != nil {
+				return fmt.Errorf("failed to get loaded templates: %w", err)
+			}
+			rulesToSync, err = config.ExpandInstanceRules(cfg.Rules, loadedTemplates)
+			if err != nil {
+				return fmt.Errorf("failed to expand instance rules: %w", err)
+			}
+			log.Info("Templates loaded and instance rules expanded from config.e2e.yaml")
+		}
+		if err := ruleInit.SyncFromConfig(context.Background(), rulesToSync); err != nil {
 			return fmt.Errorf("failed to sync rules from config: %w", err)
 		}
 		log.Info("Rules loaded from config.e2e.yaml")
@@ -298,6 +337,12 @@ func (ts *TestServer) Start() error {
 		ruleEngine.RegisterEvaluator(solidityEvaluator)
 	}
 
+	// Initialize template service
+	templateService, err := service.NewTemplateService(templateRepo, ruleRepo, budgetRepo, log)
+	if err != nil {
+		return fmt.Errorf("failed to create template service: %w", err)
+	}
+
 	// Initialize noop notifier for tests
 	notifier, err := service.NewNoopNotifier()
 	if err != nil {
@@ -369,15 +414,35 @@ func (ts *TestServer) Start() error {
 	// Initialize router
 	router, err := api.NewRouter(authVerifier, signService, signerManager, ruleRepo, auditRepo, log, api.RouterConfig{
 		Version: "e2e-test",
+		Template: &api.TemplateConfig{
+			TemplateRepo:    templateRepo,
+			TemplateService: templateService,
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create router: %w", err)
 	}
 
-	// Initialize server
+	// Bind to an available port so e2e does not fail when default port is in use
+	port := ts.config.Port
+	if port <= 0 {
+		port = 8548
+	}
+	listener, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+	if err != nil {
+		// Port in use or unavailable: try port 0 to get any free port
+		listener, err = net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			return fmt.Errorf("failed to bind listener: %w", err)
+		}
+		port = listener.Addr().(*net.TCPAddr).Port
+		ts.baseURL = fmt.Sprintf("http://localhost:%d", port)
+	}
+	listener.Close()
+
 	serverConfig := api.ServerConfig{
 		Host: "127.0.0.1",
-		Port: ts.config.Port,
+		Port: port,
 	}
 
 	server, err := api.NewServer(router, log, serverConfig)

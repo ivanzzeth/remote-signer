@@ -116,15 +116,52 @@ func run() error {
 		return fmt.Errorf("failed to sync API keys from config: %w", err)
 	}
 
-	// Initialize rules from config
+	// Initialize template repository
+	templateRepo, err := storage.NewGormTemplateRepository(db)
+	if err != nil {
+		return fmt.Errorf("failed to create template repository: %w", err)
+	}
+
+	// Initialize budget repository (for template instances)
+	budgetRepo, err := storage.NewGormBudgetRepository(db)
+	if err != nil {
+		return fmt.Errorf("failed to create budget repository: %w", err)
+	}
+
+	// Initialize templates from config
+	templateInit, err := config.NewTemplateInitializer(templateRepo, log)
+	if err != nil {
+		return fmt.Errorf("failed to create template initializer: %w", err)
+	}
+	templateInit.SetConfigDir(filepath.Dir(*configPath))
+	if err := templateInit.SyncFromConfig(context.Background(), cfg.Templates); err != nil {
+		return fmt.Errorf("failed to sync templates from config: %w", err)
+	}
+
+	// Initialize rules from config (with template expansion)
 	ruleInit, err := config.NewRuleInitializer(ruleRepo, log)
 	if err != nil {
 		return fmt.Errorf("failed to create rule initializer: %w", err)
 	}
 	// Set config directory for resolving relative paths in rule files
 	ruleInit.SetConfigDir(filepath.Dir(*configPath))
-	if err := ruleInit.SyncFromConfig(context.Background(), cfg.Rules); err != nil {
+	// Expand template instance rules before syncing (type: "instance" → concrete rules)
+	loadedTemplates, err := templateInit.GetLoadedTemplates(cfg.Templates)
+	if err != nil {
+		return fmt.Errorf("failed to get loaded templates: %w", err)
+	}
+	expandedRules, err := config.ExpandInstanceRules(cfg.Rules, loadedTemplates)
+	if err != nil {
+		return fmt.Errorf("failed to expand instance rules: %w", err)
+	}
+	if err := ruleInit.SyncFromConfig(context.Background(), expandedRules); err != nil {
 		return fmt.Errorf("failed to sync rules from config: %w", err)
+	}
+
+	// Initialize template service
+	templateService, err := service.NewTemplateService(templateRepo, ruleRepo, budgetRepo, log)
+	if err != nil {
+		return fmt.Errorf("failed to create template service: %w", err)
 	}
 
 	// =========================================================================
@@ -204,8 +241,9 @@ func run() error {
 		return fmt.Errorf("failed to create state machine: %w", err)
 	}
 
-	// Initialize rule engine
-	ruleEngine, err := rule.NewWhitelistRuleEngine(ruleRepo, log)
+	// Initialize rule engine (with optional budget checker for template instances)
+	budgetChecker := rule.NewBudgetChecker(budgetRepo, templateRepo, log)
+	ruleEngine, err := rule.NewWhitelistRuleEngine(ruleRepo, log, rule.WithBudgetChecker(budgetChecker))
 	if err != nil {
 		return fmt.Errorf("failed to create rule engine: %w", err)
 	}
@@ -335,6 +373,10 @@ func run() error {
 		Version:           version,
 		IPWhitelistConfig: ipWhitelist,
 		SolidityValidator: solidityValidator,
+		Template: &api.TemplateConfig{
+			TemplateRepo:    templateRepo,
+			TemplateService: templateService,
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create router: %w", err)

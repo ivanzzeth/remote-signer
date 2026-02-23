@@ -28,21 +28,45 @@ type Config struct {
 	Security      SecurityConfig      `yaml:"security"`
 	Logger        LoggerConfig        `yaml:"logger"`
 	APIKeys       []APIKeyConfig      `yaml:"api_keys"`
+	Templates     []TemplateConfig    `yaml:"templates"`
 	Rules         []RuleConfig        `yaml:"rules"`
 }
 
-// RuleConfig defines a rule in configuration
+// TemplateConfig defines a rule template in configuration
+type TemplateConfig struct {
+	Name           string                 `yaml:"name" json:"name"`
+	Description    string                 `yaml:"description,omitempty" json:"description,omitempty"`
+	Type           string                 `yaml:"type" json:"type"` // actual rule type or "file" for external file
+	Mode           string                 `yaml:"mode,omitempty" json:"mode,omitempty"`
+	Variables      []TemplateVarConfig    `yaml:"variables,omitempty" json:"variables,omitempty"`
+	Config         map[string]interface{} `yaml:"config,omitempty" json:"config,omitempty"`
+	BudgetMetering map[string]interface{} `yaml:"budget_metering,omitempty" json:"budget_metering,omitempty"`
+	TestVariables  map[string]string      `yaml:"test_variables,omitempty" json:"test_variables,omitempty"` // default variable values for validation
+	Enabled        bool                   `yaml:"enabled" json:"enabled"`
+}
+
+// TemplateVarConfig defines a template variable in configuration
+type TemplateVarConfig struct {
+	Name        string `yaml:"name"`
+	Type        string `yaml:"type"`
+	Description string `yaml:"description,omitempty"`
+	Required    bool   `yaml:"required"`
+	Default     string `yaml:"default,omitempty"`
+}
+
+// RuleConfig defines a rule in configuration. JSON tags must match YAML/validator expectations
+// so that substituted rules_json unmarshals correctly (e.g. "config" not "Config").
 type RuleConfig struct {
-	Name          string                 `yaml:"name"`
-	Description   string                 `yaml:"description,omitempty"`
-	Type          string                 `yaml:"type"`
-	Mode          string                 `yaml:"mode"`
-	ChainType     string                 `yaml:"chain_type,omitempty"`
-	ChainID       string                 `yaml:"chain_id,omitempty"`
-	APIKeyID      string                 `yaml:"api_key_id,omitempty"`
-	SignerAddress string                 `yaml:"signer_address,omitempty"`
-	Config        map[string]interface{} `yaml:"config"`
-	Enabled       bool                   `yaml:"enabled"`
+	Name          string                 `yaml:"name" json:"name"`
+	Description   string                 `yaml:"description,omitempty" json:"description,omitempty"`
+	Type          string                 `yaml:"type" json:"type"`
+	Mode          string                 `yaml:"mode" json:"mode"`
+	ChainType     string                 `yaml:"chain_type,omitempty" json:"chain_type,omitempty"`
+	ChainID       string                 `yaml:"chain_id,omitempty" json:"chain_id,omitempty"`
+	APIKeyID      string                 `yaml:"api_key_id,omitempty" json:"api_key_id,omitempty"`
+	SignerAddress string                 `yaml:"signer_address,omitempty" json:"signer_address,omitempty"`
+	Config        map[string]interface{} `yaml:"config" json:"config"`
+	Enabled       bool                   `yaml:"enabled" json:"enabled"`
 }
 
 // APIKeyConfig defines an API key in configuration

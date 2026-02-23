@@ -46,11 +46,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2'
-          memory: 2G
+          cpus: '4'
+          memory: 4G
         reservations:
-          cpus: '0.5'
-          memory: 512M
+          cpus: '1'
+          memory: 1G
     # Security: Prevent privilege escalation
     security_opt:
       - no-new-privileges:true
@@ -62,9 +62,8 @@ services:
     environment:
       # Database connection (host network: connect via localhost, port exposed by postgres container)
       DATABASE_DSN: "postgres://${POSTGRES_USER:-signer}:${POSTGRES_PASSWORD:-signer_password}@127.0.0.1:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-remote_signer}?sslmode=disable"
-      # EVM signer private key (set in .env file)
-      EVM_SIGNER_KEY_1: ${EVM_SIGNER_KEY_1}
       # Optional: additional signers
+      # EVM_SIGNER_KEY_1: ${EVM_SIGNER_KEY_1}
       # EVM_SIGNER_KEY_2: ${EVM_SIGNER_KEY_2}
       # Notification tokens (optional)
       SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
