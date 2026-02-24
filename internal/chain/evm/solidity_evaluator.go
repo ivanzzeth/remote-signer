@@ -403,6 +403,20 @@ func (e *SolidityRuleEvaluator) Type() types.RuleType {
 	return types.RuleTypeEVMSolidityExpression
 }
 
+// AppliesToSignType implements rule.SignTypeApplicable: returns false if the rule's sign_type_filter does not match.
+func (e *SolidityRuleEvaluator) AppliesToSignType(rule *types.Rule, signType string) bool {
+	var config SolidityExpressionConfig
+	if err := json.Unmarshal(rule.Config, &config); err != nil {
+		return true // invalid config: keep rule, let Evaluate fail or skip
+	}
+	if config.SignTypeFilter == "" {
+		return true
+	}
+	return config.SignTypeFilter == signType
+}
+
+var _ rule.SignTypeApplicable = (*SolidityRuleEvaluator)(nil)
+
 // Evaluate evaluates the rule against the request
 func (e *SolidityRuleEvaluator) Evaluate(
 	ctx context.Context,

@@ -99,16 +99,25 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 		return nil, fmt.Errorf("request is required")
 	}
 
-	// Get all applicable rules filtered by chain_type, signer, api_key
-	rules, err := e.repo.List(ctx, storage.RuleFilter{
+	// Get all applicable rules filtered by chain_type, chain_id, signer, api_key
+	filter := storage.RuleFilter{
 		ChainType:     &req.ChainType,
 		APIKeyID:      &req.APIKeyID,
 		SignerAddress: &req.SignerAddress,
 		EnabledOnly:   true,
-	})
+	}
+	if req.ChainID != "" {
+		filter.ChainID = &req.ChainID
+	}
+	rules, err := e.repo.List(ctx, filter)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list rules: %w", err)
 	}
+
+	// Filter rules by sign type before evaluation (avoid calling evaluator for non-applicable rules)
+	e.mu.RLock()
+	rules = e.filterRulesBySignType(rules, req.SignType)
+	e.mu.RUnlock()
 
 	// Separate rules by mode
 	var blocklistRules []*types.Rule
@@ -305,6 +314,29 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 		Blocked: false,
 		Allowed: false,
 	}, nil
+}
+
+// filterRulesBySignType returns only rules that apply to the given sign type.
+// Must be called while holding e.mu.RLock(). Evaluators that implement SignTypeApplicable
+// are consulted; others are kept (no sign-type filtering).
+func (e *WhitelistRuleEngine) filterRulesBySignType(rules []*types.Rule, signType string) []*types.Rule {
+	out := make([]*types.Rule, 0, len(rules))
+	for _, r := range rules {
+		ev, exists := e.evaluators[r.Type]
+		if !exists {
+			out = append(out, r)
+			continue
+		}
+		app, ok := ev.(SignTypeApplicable)
+		if !ok {
+			out = append(out, r)
+			continue
+		}
+		if app.AppliesToSignType(r, signType) {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // evaluateWhitelistBatch performs batch evaluation for whitelist rules that support it.
