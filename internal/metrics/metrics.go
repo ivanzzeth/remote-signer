@@ -24,10 +24,18 @@ var (
 		},
 		[]string{"rule_type", "outcome"},
 	)
+	signRequestDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "remote_signer_sign_request_duration_seconds",
+			Help:    "End-to-end sign request handling duration in seconds",
+			Buckets: prometheus.ExponentialBuckets(0.01, 2, 14), // 0.01s to ~82s
+		},
+		[]string{"chain_type", "sign_type", "outcome"},
+	)
 )
 
 func init() {
-	prometheus.MustRegister(ruleEvalDuration, ruleEvalTotal)
+	prometheus.MustRegister(ruleEvalDuration, ruleEvalTotal, signRequestDuration)
 }
 
 // Outcome for rule evaluation metrics
@@ -43,6 +51,20 @@ const (
 func RecordRuleEvaluation(ruleType, outcome string, duration time.Duration) {
 	ruleEvalDuration.WithLabelValues(ruleType).Observe(duration.Seconds())
 	ruleEvalTotal.WithLabelValues(ruleType, outcome).Inc()
+}
+
+// Sign request outcome for request-level metrics
+const (
+	SignOutcomeOK        = "ok"        // 200, signed or pending
+	SignOutcomeNotFound  = "not_found" // 404, signer not found
+	SignOutcomeRejected  = "rejected"  // 403, manual approval disabled or not authorized
+	SignOutcomeError     = "error"     // 500, internal error
+)
+
+// RecordSignRequestDuration records the end-to-end duration of a sign request (from handler start to response).
+// chainType is e.g. "evm"; signType is e.g. "transaction", "personal"; outcome is one of SignOutcome*.
+func RecordSignRequestDuration(chainType, signType, outcome string, duration time.Duration) {
+	signRequestDuration.WithLabelValues(chainType, signType, outcome).Observe(duration.Seconds())
 }
 
 // Handler returns the HTTP handler for the /metrics endpoint (Prometheus exposition format).

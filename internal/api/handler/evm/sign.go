@@ -7,10 +7,12 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/metrics"
 )
 
 // SignHandler handles EVM sign requests
@@ -126,6 +128,7 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	start := time.Now()
 	// Process sign request
 	signReq := &service.SignRequest{
 		APIKeyID:      apiKey.ID,
@@ -137,6 +140,9 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp, err := h.signService.Sign(r.Context(), signReq)
+	duration := time.Since(start)
+	chainType := string(types.ChainTypeEVM)
+
 	if err != nil {
 		if types.IsNotFound(err) || types.IsSignerNotFound(err) {
 			h.logger.Warn("signer not found",
@@ -144,6 +150,7 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"sign_type", req.SignType,
 				"chain_id", req.ChainID,
 			)
+			metrics.RecordSignRequestDuration(chainType, req.SignType, metrics.SignOutcomeNotFound, duration)
 			h.writeError(w, fmt.Sprintf("signer not found: %s", req.SignerAddress), http.StatusNotFound)
 			return
 		}
@@ -153,6 +160,7 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"sign_type", req.SignType,
 				"chain_id", req.ChainID,
 			)
+			metrics.RecordSignRequestDuration(chainType, req.SignType, metrics.SignOutcomeRejected, duration)
 			h.writeError(w, "no matching rule and manual approval is disabled", http.StatusForbidden)
 			return
 		}
@@ -162,10 +170,12 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"sign_type", req.SignType,
 			"chain_id", req.ChainID,
 		)
+		metrics.RecordSignRequestDuration(chainType, req.SignType, metrics.SignOutcomeError, duration)
 		h.writeError(w, "sign request failed", http.StatusInternalServerError)
 		return
 	}
 
+	metrics.RecordSignRequestDuration(chainType, req.SignType, metrics.SignOutcomeOK, duration)
 	// Build response
 	signResp := SignResponse{
 		RequestID: string(resp.RequestID),
