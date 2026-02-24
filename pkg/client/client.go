@@ -236,6 +236,36 @@ func (c *Client) Health(ctx context.Context) (*HealthResponse, error) {
 	return &health, nil
 }
 
+// Metrics fetches the Prometheus exposition format metrics from /metrics.
+// This endpoint does not require auth; we intentionally do not sign this request.
+func (c *Client) Metrics(ctx context.Context) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/metrics", nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		msg := strings.TrimSpace(string(body))
+		if msg == "" {
+			msg = resp.Status
+		}
+		return "", fmt.Errorf("metrics request failed: status=%d message=%s", resp.StatusCode, msg)
+	}
+
+	return string(body), nil
+}
+
 // Sign submits a signing request and returns the result.
 // If the request requires manual approval, this method will poll for the result
 // until it's completed or the timeout is reached.

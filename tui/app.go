@@ -26,6 +26,7 @@ const (
 	ViewRuleDetail
 	ViewAudit
 	ViewSigners
+	ViewMetrics
 )
 
 // keyMap defines the key bindings for the application
@@ -54,6 +55,7 @@ type keyMap struct {
 	Number3   key.Binding
 	Number4   key.Binding
 	Number5   key.Binding
+	Number6   key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
@@ -66,7 +68,7 @@ func (k keyMap) FullHelp() [][]key.Binding {
 		{k.Up, k.Down, k.PageUp, k.PageDown},
 		{k.Approve, k.Reject, k.Generate},
 		{k.Filter, k.Refresh, k.Delete, k.Toggle},
-		{k.Number1, k.Number2, k.Number3, k.Number4, k.Number5},
+		{k.Number1, k.Number2, k.Number3, k.Number4, k.Number5, k.Number6},
 		{k.Help, k.Quit},
 	}
 }
@@ -168,6 +170,10 @@ var keys = keyMap{
 		key.WithKeys("5"),
 		key.WithHelp("5", "signers"),
 	),
+	Number6: key.NewBinding(
+		key.WithKeys("6"),
+		key.WithHelp("6", "metrics"),
+	),
 }
 
 // Model represents the main application state
@@ -192,6 +198,7 @@ type Model struct {
 	ruleDetail    *views.RuleDetailModel
 	audit         *views.AuditModel
 	signers       *views.SignersModel
+	metrics       *views.MetricsModel
 }
 
 // NewModel creates a new application model
@@ -239,6 +246,11 @@ func NewModel(c *client.Client) (*Model, error) {
 		return nil, fmt.Errorf("failed to create signers view: %w", err)
 	}
 
+	metrics, err := views.NewMetricsModel(c, ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create metrics view: %w", err)
+	}
+
 	return &Model{
 		client:        c,
 		ctx:           ctx,
@@ -252,6 +264,7 @@ func NewModel(c *client.Client) (*Model, error) {
 		ruleDetail:    ruleDetail,
 		audit:         audit,
 		signers:       signers,
+		metrics:       metrics,
 	}, nil
 }
 
@@ -263,6 +276,7 @@ func (m Model) Init() tea.Cmd {
 		m.rules.Init(),
 		m.audit.Init(),
 		m.signers.Init(),
+		m.metrics.Init(),
 	)
 }
 
@@ -284,6 +298,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ruleDetail.SetSize(msg.Width, msg.Height-6)
 		m.audit.SetSize(msg.Width, msg.Height-6)
 		m.signers.SetSize(msg.Width, msg.Height-6)
+		m.metrics.SetSize(msg.Width, msg.Height-6)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -292,7 +307,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, keys.Quit):
 			if m.currentView == ViewDashboard || m.currentView == ViewRequests ||
 				m.currentView == ViewRules || m.currentView == ViewAudit ||
-				m.currentView == ViewSigners {
+				m.currentView == ViewSigners || m.currentView == ViewMetrics {
 				return m, tea.Quit
 			}
 			// If in detail view, go back instead of quitting
@@ -328,12 +343,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.currentView = ViewSigners
 			return m, m.signers.Refresh()
 
+		case key.Matches(msg, keys.Number6):
+			m.activeTab = 5
+			m.currentView = ViewMetrics
+			return m, m.metrics.Refresh()
+
 		case key.Matches(msg, keys.Tab):
 			// Only switch tabs in main views
 			if m.currentView == ViewDashboard || m.currentView == ViewRequests ||
 				m.currentView == ViewRules || m.currentView == ViewAudit ||
-				m.currentView == ViewSigners {
-				m.activeTab = (m.activeTab + 1) % 5
+				m.currentView == ViewSigners || m.currentView == ViewMetrics {
+				m.activeTab = (m.activeTab + 1) % 6
 				m.currentView = m.tabToView(m.activeTab)
 				return m, m.refreshCurrentView()
 			}
@@ -342,8 +362,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Only switch tabs in main views
 			if m.currentView == ViewDashboard || m.currentView == ViewRequests ||
 				m.currentView == ViewRules || m.currentView == ViewAudit ||
-				m.currentView == ViewSigners {
-				m.activeTab = (m.activeTab + 4) % 5
+				m.currentView == ViewSigners || m.currentView == ViewMetrics {
+				m.activeTab = (m.activeTab + 5) % 6
 				m.currentView = m.tabToView(m.activeTab)
 				return m, m.refreshCurrentView()
 			}
@@ -424,6 +444,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		newSigners, cmd := m.signers.Update(msg)
 		m.signers = newSigners.(*views.SignersModel)
 		cmds = append(cmds, cmd)
+
+	case ViewMetrics:
+		newMetrics, cmd := m.metrics.Update(msg)
+		m.metrics = newMetrics.(*views.MetricsModel)
+		cmds = append(cmds, cmd)
 	}
 
 	return m, tea.Batch(cmds...)
@@ -463,7 +488,7 @@ func (m Model) View() string {
 }
 
 func (m Model) renderHeader() string {
-	tabs := []string{"Dashboard", "Requests", "Rules", "Audit", "Signers"}
+	tabs := []string{"Dashboard", "Requests", "Rules", "Audit", "Signers", "Metrics"}
 	var renderedTabs []string
 
 	for i, tab := range tabs {
@@ -496,6 +521,8 @@ func (m Model) renderContent(_ int) string {
 		return m.audit.View()
 	case ViewSigners:
 		return m.signers.View()
+	case ViewMetrics:
+		return m.metrics.View()
 	default:
 		return "Unknown view"
 	}
@@ -513,6 +540,8 @@ func (m Model) refreshCurrentView() tea.Cmd {
 		return m.audit.Refresh()
 	case ViewSigners:
 		return m.signers.Refresh()
+	case ViewMetrics:
+		return m.metrics.Refresh()
 	default:
 		return nil
 	}
@@ -531,6 +560,8 @@ func (m Model) tabToView(tab int) ViewType {
 		return ViewAudit
 	case 4:
 		return ViewSigners
+	case 5:
+		return ViewMetrics
 	default:
 		return ViewDashboard
 	}

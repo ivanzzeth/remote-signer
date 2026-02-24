@@ -73,6 +73,10 @@ type ClientInterface interface {
 
 	// RevokeInstance revokes a rule instance created from a template (admin only).
 	RevokeInstance(ctx context.Context, ruleID string) (*RevokeInstanceResponse, error)
+
+	// Metrics fetches the Prometheus metrics exposition text from /metrics.
+	// This endpoint is unauthenticated and intended for internal monitoring.
+	Metrics(ctx context.Context) (string, error)
 }
 
 // Ensure Client implements ClientInterface
