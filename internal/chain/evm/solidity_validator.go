@@ -158,6 +158,29 @@ func (v *SolidityRuleValidator) ValidateRule(ctx context.Context, rule *types.Ru
 	return &batchResult.Results[0], nil
 }
 
+// cleanGeneratedScripts removes validator/evaluator-generated .sol files from tempDir
+// so forge only compiles this run's scripts. Shared workspace (e.g. ./data/forge-workspace)
+// otherwise accumulates thousands of syntax_check_*.sol and batch_rule_*.t.sol and forge hangs.
+func cleanGeneratedScripts(tempDir string, log *slog.Logger) {
+	for _, glob := range []string{
+		"syntax_check_*.sol",
+		"batch_rule_*.t.sol",
+		"batch_*.t.sol",
+		"rule_*.sol",
+		"rule_*.t.sol",
+	} {
+		matches, err := filepath.Glob(filepath.Join(tempDir, glob))
+		if err != nil {
+			continue
+		}
+		for _, p := range matches {
+			if err := os.Remove(p); err != nil {
+				log.Debug("cleanGeneratedScripts: remove failed", "path", p, "error", err)
+			}
+		}
+	}
+}
+
 // ValidateRulesBatch validates multiple rules in a single compilation
 // This significantly improves performance by reducing the number of forge compilations.
 // Rules are automatically grouped by validation mode and each group is batched separately.
@@ -165,6 +188,11 @@ func (v *SolidityRuleValidator) ValidateRulesBatch(ctx context.Context, rules []
 	if len(rules) == 0 {
 		return &BatchValidationResult{Results: []ValidationResult{}, Valid: true}, nil
 	}
+
+	// Clean generated scripts from workspace so forge only compiles this run's files.
+	// Otherwise accumulated syntax_check_*.sol / batch_rule_*.t.sol (e.g. in shared ./data/forge-workspace)
+	// cause forge to compile thousands of files and hang; default /tmp stays fast because it has fewer leftovers.
+	cleanGeneratedScripts(v.evaluator.GetTempDir(), v.logger)
 
 	// Pre-validate: all rules must have at least 2 test cases (1 positive + 1 negative)
 	for _, rule := range rules {
@@ -921,11 +949,15 @@ func (v *SolidityRuleValidator) executeBatchTestScript(ctx context.Context, scri
 		return nil, fmt.Errorf("failed to write batch script: %w", err)
 	}
 
-	// Create timeout context if not already set
+	// Create timeout context if not already set (use evaluator timeout so config applies; cold cache can be slow)
 	execCtx := ctx
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
-		execCtx, cancel = context.WithTimeout(ctx, 60*time.Second) // Longer timeout for batch tests
+		t := v.evaluator.GetTimeout()
+		if t < 60*time.Second {
+			t = 60 * time.Second
+		}
+		execCtx, cancel = context.WithTimeout(ctx, t)
 		defer cancel()
 	}
 
@@ -1241,8 +1273,12 @@ func (v *SolidityRuleValidator) compileSyntaxCheckScript(ctx context.Context, sc
 	}
 	// Don't delete script file - keep it for forge incremental compilation
 
-	// Create timeout context
-	execCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	// Create timeout context (use evaluator timeout: cold cache compile can exceed 30s)
+	t := v.evaluator.GetTimeout()
+	if t < 60*time.Second {
+		t = 60 * time.Second
+	}
+	execCtx, cancel := context.WithTimeout(ctx, t)
 	defer cancel()
 
 	// Run forge build with cache path for incremental compilation

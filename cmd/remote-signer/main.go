@@ -172,14 +172,10 @@ func run() error {
 	var solidityEval *evm.SolidityRuleEvaluator
 	var solidityValidator *evm.SolidityRuleValidator
 	if cfg.Chains.EVM != nil && cfg.Chains.EVM.Foundry.Enabled {
-		forgeTempDir := os.Getenv("REMOTE_SIGNER_FORGE_TEMP_DIR")
-		if forgeTempDir == "" {
-			forgeTempDir = cfg.Chains.EVM.Foundry.TempDir
-		}
 		solidityEval, err = evm.NewSolidityRuleEvaluator(evm.SolidityEvaluatorConfig{
 			ForgePath: cfg.Chains.EVM.Foundry.ForgePath,
 			CacheDir:  cfg.Chains.EVM.Foundry.CacheDir,
-			TempDir:   forgeTempDir,
+			TempDir:   cfg.Chains.EVM.Foundry.TempDir,
 			Timeout:   cfg.Chains.EVM.Foundry.Timeout,
 		}, log)
 		if err != nil {
