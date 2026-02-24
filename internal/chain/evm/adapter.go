@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"strconv"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -17,10 +18,21 @@ import (
 
 // Payload size limits for validation
 const (
-	maxTransactionDataSize = 128 * 1024  // 128 KB
-	maxMessageSize         = 1024 * 1024 // 1 MB
-	maxRawMessageSize      = 256 * 1024  // 256 KB
+	maxTransactionDataSize = 128 * 1024   // 128 KB
+	maxMessageSize         = 1024 * 1024  // 1 MB
+	maxRawMessageSize      = 256 * 1024   // 256 KB
+	maxPayloadSize         = 2 * 1024 * 1024 // 2 MB (basic check: whole payload)
 )
+
+// allowedSignTypes is the set of sign types accepted in basic validation (format only)
+var allowedSignTypes = map[string]bool{
+	SignTypeHash:        true,
+	SignTypeRawMessage:  true,
+	SignTypeEIP191:      true,
+	SignTypePersonal:    true,
+	SignTypeTypedData:   true,
+	SignTypeTransaction: true,
+}
 
 // EVMAdapter implements types.ChainAdapter for EVM chains
 type EVMAdapter struct {
@@ -41,6 +53,64 @@ func NewEVMAdapter(registry *SignerRegistry) (*EVMAdapter, error) {
 // Type returns the chain type this adapter handles
 func (a *EVMAdapter) Type() types.ChainType {
 	return types.ChainTypeEVM
+}
+
+// ValidateBasicRequest validates request format and size only (chain_id, signer_address, sign_type, payload size).
+// Does not check signer existence or payload semantics. Used so that only well-formed requests are persisted for audit.
+func (a *EVMAdapter) ValidateBasicRequest(chainID, signerAddress, signType string, payload []byte) error {
+	if chainID == "" {
+		return fmt.Errorf("chain_id is required")
+	}
+	if _, err := strconv.ParseUint(chainID, 10, 64); err != nil {
+		return fmt.Errorf("invalid chain_id: must be a positive decimal integer")
+	}
+	if signerAddress == "" {
+		return fmt.Errorf("signer_address is required")
+	}
+	if !common.IsHexAddress(signerAddress) {
+		return fmt.Errorf("invalid signer_address: must be 0x followed by 40 hex characters")
+	}
+	if signType == "" {
+		return fmt.Errorf("sign_type is required")
+	}
+	if !allowedSignTypes[signType] {
+		return fmt.Errorf("invalid sign_type: must be one of hash, raw_message, eip191, personal, typed_data, transaction")
+	}
+	if len(payload) == 0 {
+		return fmt.Errorf("payload is required")
+	}
+	if len(payload) > maxPayloadSize {
+		return fmt.Errorf("payload exceeds maximum size of %d bytes", maxPayloadSize)
+	}
+
+	// Payload format: valid JSON and required top-level field present for sign_type
+	var p EVMSignPayload
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return fmt.Errorf("invalid payload: not valid JSON: %w", err)
+	}
+	switch signType {
+	case SignTypeHash:
+		if p.Hash == "" {
+			return fmt.Errorf("invalid payload: hash is required for sign_type %s", signType)
+		}
+	case SignTypeRawMessage:
+		if len(p.RawMessage) == 0 {
+			return fmt.Errorf("invalid payload: raw_message is required for sign_type %s", signType)
+		}
+	case SignTypeEIP191, SignTypePersonal:
+		if p.Message == "" {
+			return fmt.Errorf("invalid payload: message is required for sign_type %s", signType)
+		}
+	case SignTypeTypedData:
+		if p.TypedData == nil {
+			return fmt.Errorf("invalid payload: typed_data is required for sign_type %s", signType)
+		}
+	case SignTypeTransaction:
+		if p.Transaction == nil {
+			return fmt.Errorf("invalid payload: transaction is required for sign_type %s", signType)
+		}
+	}
+	return nil
 }
 
 // ValidatePayload validates the EVM-specific payload

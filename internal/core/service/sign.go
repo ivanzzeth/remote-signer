@@ -101,35 +101,21 @@ type SignResponse struct {
 	Message    string                  `json:"message,omitempty"`
 }
 
-// Sign processes a sign request
-// Returns immediately if auto-approved (rule match), otherwise returns pending status
+// Sign processes a sign request.
+// Requests are persisted only after basic checks pass (chain adapter + ValidateBasicRequest: format and size).
+// Then signer existence, ValidatePayload, and rules run; failures update the same record to rejected for audit.
 func (s *SignService) Sign(ctx context.Context, req *SignRequest) (*SignResponse, error) {
-	if s.approvalGuard != nil && s.approvalGuard.IsPaused() {
-		return nil, fmt.Errorf("sign requests are paused due to approval guard; use admin API to resume")
-	}
-	// Get chain adapter
 	adapter, err := s.chainRegistry.Get(req.ChainType)
 	if err != nil {
 		return nil, fmt.Errorf("unsupported chain type %s: %w", req.ChainType, err)
 	}
 
-	// Check if signer exists
-	if !adapter.HasSigner(ctx, req.SignerAddress) {
-		s.logger.Warn("signer not found in registry",
-			"signer_address", req.SignerAddress,
-			"chain_type", req.ChainType,
-			"chain_id", req.ChainID,
-			"sign_type", req.SignType,
-		)
-		return nil, types.ErrSignerNotFound
+	// Basic check: format and size only (chain_id, signer_address, sign_type, payload). No persist until this passes.
+	if err := adapter.ValidateBasicRequest(req.ChainID, req.SignerAddress, req.SignType, req.Payload); err != nil {
+		return nil, fmt.Errorf("basic request validation failed: %w", err)
 	}
 
-	// Validate payload
-	if err := adapter.ValidatePayload(ctx, req.SignType, req.Payload); err != nil {
-		return nil, fmt.Errorf("invalid payload: %w", err)
-	}
-
-	// Create sign request record
+	// Persist for audit: basic check passed; store before signer/payload/rule validation
 	now := time.Now()
 	signReq := &types.SignRequest{
 		ID:            types.SignRequestID(uuid.New().String()),
@@ -143,19 +129,49 @@ func (s *SignService) Sign(ctx context.Context, req *SignRequest) (*SignResponse
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}
-
 	if err := s.requestRepo.Create(ctx, signReq); err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
-
 	s.logger.Info("sign request created",
 		"request_id", signReq.ID,
-		"chain_type", req.ChainType,
-		"signer", req.SignerAddress,
-		"sign_type", req.SignType,
+		"chain_type", signReq.ChainType,
+		"signer", signReq.SignerAddress,
+		"sign_type", signReq.SignType,
 	)
 
-	// Transition to authorizing
+	// Reject if approval guard is paused (still persisted for audit)
+	if s.approvalGuard != nil && s.approvalGuard.IsPaused() {
+		if _, smErr := s.stateMachine.RejectOnValidation(ctx, signReq.ID, "sign requests are paused due to approval guard; use admin API to resume"); smErr != nil {
+			s.logger.Error("failed to reject request", "error", smErr)
+		}
+		return nil, fmt.Errorf("sign requests are paused due to approval guard; use admin API to resume")
+	}
+
+	// Signer must exist in registry
+	if !adapter.HasSigner(ctx, req.SignerAddress) {
+		s.logger.Warn("signer not found in registry",
+			"request_id", signReq.ID,
+			"signer_address", req.SignerAddress,
+			"chain_type", req.ChainType,
+			"chain_id", req.ChainID,
+			"sign_type", req.SignType,
+		)
+		if _, smErr := s.stateMachine.RejectOnValidation(ctx, signReq.ID, "signer not found in registry"); smErr != nil {
+			s.logger.Error("failed to reject request", "error", smErr)
+		}
+		return nil, types.ErrSignerNotFound
+	}
+
+	// Payload must pass chain-specific validation
+	if err := adapter.ValidatePayload(ctx, req.SignType, req.Payload); err != nil {
+		s.logger.Warn("invalid payload", "request_id", signReq.ID, "error", err)
+		if _, smErr := s.stateMachine.RejectOnValidation(ctx, signReq.ID, "invalid payload: "+err.Error()); smErr != nil {
+			s.logger.Error("failed to reject request", "error", smErr)
+		}
+		return nil, fmt.Errorf("invalid payload: %w", err)
+	}
+
+	// Transition to authorizing (pending → authorizing)
 	if _, err := s.stateMachine.ValidateAndStartAuthorizing(ctx, signReq.ID); err != nil {
 		return nil, fmt.Errorf("failed to start authorization: %w", err)
 	}

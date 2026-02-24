@@ -25,23 +25,25 @@ type SignResponse struct {
 }
 
 // RequestStatus represents the status of a sign request.
+// Payload is included when fetching a single request (GET /api/v1/evm/requests/{id}); list responses omit it.
 type RequestStatus struct {
-	ID              string     `json:"id"`
-	APIKeyID        string     `json:"api_key_id"`
-	ChainType       string     `json:"chain_type"`
-	ChainID         string     `json:"chain_id"`
-	SignerAddress   string     `json:"signer_address"`
-	SignType        string     `json:"sign_type"`
-	Status          string     `json:"status"`
-	Signature       string     `json:"signature,omitempty"`
-	SignedData      string     `json:"signed_data,omitempty"`
-	ErrorMessage    string     `json:"error_message,omitempty"`
-	RuleMatchedID   *string    `json:"rule_matched_id,omitempty"`
-	ApprovedBy      *string    `json:"approved_by,omitempty"`
-	ApprovedAt      *time.Time `json:"approved_at,omitempty"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
-	CompletedAt     *time.Time `json:"completed_at,omitempty"`
+	ID              string          `json:"id"`
+	APIKeyID        string          `json:"api_key_id"`
+	ChainType       string          `json:"chain_type"`
+	ChainID         string          `json:"chain_id"`
+	SignerAddress   string          `json:"signer_address"`
+	SignType        string          `json:"sign_type"`
+	Status          string          `json:"status"`
+	Payload         json.RawMessage `json:"payload,omitempty"`
+	Signature       string          `json:"signature,omitempty"`
+	SignedData      string          `json:"signed_data,omitempty"`
+	ErrorMessage    string          `json:"error_message,omitempty"`
+	RuleMatchedID   *string         `json:"rule_matched_id,omitempty"`
+	ApprovedBy      *string         `json:"approved_by,omitempty"`
+	ApprovedAt      *time.Time      `json:"approved_at,omitempty"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
+	CompletedAt     *time.Time      `json:"completed_at,omitempty"`
 }
 
 // ListRequestsResponse represents the response from listing requests.
