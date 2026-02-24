@@ -28,6 +28,7 @@ type RouterConfig struct {
 	IPWhitelistConfig  *middleware.IPWhitelist
 	SolidityValidator  *evm.SolidityRuleValidator
 	Template           *TemplateConfig
+	ApprovalGuard      *service.ManualApprovalGuard // optional: for admin resume endpoint
 }
 
 // Router handles HTTP routing
@@ -150,6 +151,11 @@ func (r *Router) setupRoutes() error {
 	r.mux.Handle("/api/v1/evm/rules", r.withAuthAndAdmin(ruleHandler))
 	r.mux.Handle("/api/v1/evm/rules/", r.withAuthAndAdmin(ruleHandler))
 
+	// Approval guard resume (admin only)
+	if r.config.ApprovalGuard != nil {
+		r.mux.Handle("/api/v1/evm/guard/resume", r.withAuthAndAdmin(http.HandlerFunc(r.handleGuardResume)))
+	}
+
 	// Signer management routes (GET with auth, POST with auth + admin)
 	r.mux.Handle("/api/v1/evm/signers", r.withAuth(signerHandler))
 
@@ -226,6 +232,23 @@ func (r *Router) chain(h http.Handler, middlewares ...func(http.Handler) http.Ha
 		h = middlewares[i](h)
 	}
 	return h
+}
+
+// handleGuardResume resumes the approval guard (admin only). POST only.
+func (r *Router) handleGuardResume(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if r.config.ApprovalGuard == nil {
+		http.Error(w, "approval guard not configured", http.StatusNotImplemented)
+		return
+	}
+	r.config.ApprovalGuard.Resume()
+	w.Header().Set("Content-Type", "application/json")
+	if _, err := w.Write([]byte(`{"ok":true,"message":"approval guard resumed"}`)); err != nil {
+		r.logger.Error("failed to write guard resume response", "error", err)
+	}
 }
 
 // Handler returns the HTTP handler

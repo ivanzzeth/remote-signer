@@ -20,6 +20,10 @@ chains:
         - address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
           key_env: "E2E_TEST_SIGNER_KEY"  # Will be set by test server
           enabled: true
+        # Second signer (Hardhat account 2) — not in any whitelist; used for approval-guard e2e
+        - address: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+          key_env: "E2E_TEST_SIGNER2_KEY"
+          enabled: true
     keystore_dir: "./data/keystores-e2e"
     foundry:
       enabled: true
@@ -41,6 +45,11 @@ security:
   max_request_age: "60s"
   rate_limit_default: 1000
   nonce_required: true
+  approval_guard:
+    enabled: true
+    window: "2m"
+    threshold: 3
+    resume_after: "15s"
   ip_whitelist:
     enabled: false
     allowed_ips: []

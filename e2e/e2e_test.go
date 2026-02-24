@@ -56,6 +56,10 @@ const (
 	testSignerAddress    = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 	testChainID          = "1"
 
+	// Second signer (Hardhat account 2) — not in any whitelist; used for approval-guard e2e
+	testSigner2PrivateKey = "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+	testSigner2Address    = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+
 	// Default API port for e2e tests
 	defaultAPIPort = 8548
 
@@ -542,6 +546,65 @@ func TestSign_DirectSignAPI(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	require.NotEmpty(t, resp.Signature)
+}
+
+// TestApprovalGuard_PauseAndResume verifies that after N consecutive "rejected" outcomes
+// (rule-blocked or manual approval), the guard pauses sign requests, and admin resume restores service.
+// Triggers via blocklist: 3 transactions to burn address (blocked by config.e2e rule) → guard fires.
+func TestApprovalGuard_PauseAndResume(t *testing.T) {
+	if useExternalServer {
+		t.Skip("approval guard e2e uses internal server with config.e2e.yaml (guard + blocklist rule)")
+	}
+
+	ctx := context.Background()
+
+	// Transaction payload to burn address — blocked by "Block known malicious addresses" rule in config.e2e
+	burnTxPayload := []byte(`{"transaction":{"to":"0x000000000000000000000000000000000000dEaD","value":"0","gas":21000,"gasPrice":"1000000000","txType":"legacy","nonce":0}}`)
+
+	// 1) Submit 3 sign requests that are blocked by rule → each counts as rejection (client may return err when status=rejected)
+	for i := 0; i < 3; i++ {
+		resp, err := adminClient.Sign(ctx, &client.SignRequest{
+			ChainID:       chainID,
+			SignerAddress: signerAddress,
+			SignType:      client.SignTypeTransaction,
+			Payload:       burnTxPayload,
+		})
+		if err != nil {
+			assert.Contains(t, err.Error(), "rejected", "request %d should be blocked by rule", i+1)
+			assert.Contains(t, err.Error(), "blocked", "message should mention blocked")
+		} else {
+			require.NotNil(t, resp)
+			assert.Equal(t, "rejected", resp.Status)
+			assert.Contains(t, resp.Message, "blocked")
+		}
+	}
+
+	// 2) Next sign request must be rejected (guard paused)
+	_, err := adminClient.Sign(ctx, &client.SignRequest{
+		ChainID:       chainID,
+		SignerAddress: signerAddress,
+		SignType:      client.SignTypePersonal,
+		Payload:       []byte(`{"message":"e2e after trigger"}`),
+	})
+	require.Error(t, err)
+	// Client may wrap as "API error 500: ..."; server message contains "paused"
+	assert.True(t, strings.Contains(err.Error(), "paused") || strings.Contains(err.Error(), "500"),
+		"expected error to indicate pause or 500, got: %s", err.Error())
+
+	// 3) Admin resume
+	err = adminClient.ResumeApprovalGuard(ctx)
+	require.NoError(t, err)
+
+	// 4) Next request should succeed again (e.g. personal sign auto-approved by sign_type_restriction)
+	resp, err := adminClient.Sign(ctx, &client.SignRequest{
+		ChainID:       chainID,
+		SignerAddress: signerAddress,
+		SignType:      client.SignTypePersonal,
+		Payload:       []byte(`{"message":"e2e after resume"}`),
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, "completed", resp.Status)
 }
 
 // =============================================================================

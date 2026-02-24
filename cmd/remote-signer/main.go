@@ -339,6 +339,28 @@ func run() error {
 		return fmt.Errorf("failed to create sign service: %w", err)
 	}
 
+	// Optional: approval guard — pauses all sign requests when too many consecutive manual-approval outcomes
+	var approvalGuard *service.ManualApprovalGuard
+	if cfg.Security.ApprovalGuard.Enabled {
+		approvalGuard, err = service.NewManualApprovalGuard(service.ManualApprovalGuardConfig{
+			Window:      cfg.Security.ApprovalGuard.Window,
+			Threshold:   cfg.Security.ApprovalGuard.Threshold,
+			ResumeAfter: cfg.Security.ApprovalGuard.ResumeAfter,
+			NotifySvc:   notifyService,
+			Channel:     &cfg.NotifyChannel,
+			Logger:      log,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create approval guard: %w", err)
+		}
+		signService.SetApprovalGuard(approvalGuard)
+		log.Info("approval guard enabled",
+			"window", cfg.Security.ApprovalGuard.Window,
+			"threshold", cfg.Security.ApprovalGuard.Threshold,
+			"resume_after", cfg.Security.ApprovalGuard.ResumeAfter,
+		)
+	}
+
 	// Initialize nonce store for replay protection
 	nonceStore, err := storage.NewInMemoryNonceStore(time.Minute)
 	if err != nil {
@@ -378,10 +400,11 @@ func run() error {
 		Version:           version,
 		IPWhitelistConfig: ipWhitelist,
 		SolidityValidator: solidityValidator,
-		Template: &api.TemplateConfig{
+		Template:          &api.TemplateConfig{
 			TemplateRepo:    templateRepo,
 			TemplateService: templateService,
 		},
+		ApprovalGuard: approvalGuard,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create router: %w", err)

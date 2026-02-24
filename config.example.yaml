@@ -108,6 +108,14 @@ security:
   # When false, legacy requests without nonce are allowed (less secure)
   nonce_required: true
 
+  # Approval guard: pause when too many consecutive "not auto-approved" outcomes (blocked by rule or manual approval)
+  # Use case: API key leaked — attacker uses valid key to brute-force; guard detects burst and pauses + alerts
+  approval_guard:
+    enabled: false
+    window: "5m"            # time window for counting
+    threshold: 10           # consecutive rejections (blocked or pending approval) that trigger pause
+    resume_after: "2h"      # pause duration; then auto-resume
+
   # NOTE: Blocklist rules use mandatory Fail-Closed behavior.
   # Any blocklist rule evaluation error will immediately reject the request.
   # This prevents attackers from bypassing security checks by causing evaluation failures.
