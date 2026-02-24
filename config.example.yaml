@@ -242,6 +242,14 @@ templates:
     config:
       path: "rules/templates/predict.eoa.template.yaml"
 
+  # Opinion protocol Safe rules (BSC 56)
+  - name: "Opinion Safe Template"
+    type: "file"
+    description: "Opinion protocol rules for Safe wallets on BSC (parameterized)"
+    enabled: true
+    config:
+      path: "rules/templates/opinion.safe.template.yaml"
+
 # =============================================================================
 # Rules configuration
 # =============================================================================
@@ -260,6 +268,10 @@ rules:
   # -------------------------------------------------------------------------
   # References a template by name and supplies variable values. The server
   # expands this into the same rules as the template, with ${var} replaced.
+  #
+  # For templates that use both allowed_safe_address_for_testing and
+  # allowed_safe_addresses: the testing address must be contained in the
+  # allowed list, or startup validation (template test cases) will fail.
   - name: "Polymarket Safe rules (Polygon)"
     type: "instance"
     chain_type: "evm"
@@ -308,6 +320,30 @@ rules:
         neg_risk_exchange_yb: "0x8A289d458f5a134bA40015085A8F50Ffb681B41d"
         neg_risk_adapter_yb: "0x41dCe1A4B8FB5e6327701750aF6231B7CD0B2A40"
         signer_address_for_testing: "0x53c68c954f85a29d2098e90addaf41baf2ff0a50"
+
+  # Opinion: instance from template (BSC 56; disable if not used)
+  # Rule-layer requirement: allowed_safe_address_for_testing must be contained in
+  # allowed_safe_addresses. Startup validation runs template test cases using the
+  # testing address; if it is not in the allowed list, validation fails.
+  - name: "Opinion Safe rules (BSC)"
+    type: "instance"
+    chain_type: "evm"
+    chain_id: "56"
+    enabled: false
+    config:
+      template: "Opinion Safe Template"
+      variables:
+        chain_id: "56"
+        ctf_exchange_address: "0x5F45344126D6488025B0b84A3A8189F2487a7246"
+        conditional_tokens_address: "0xAD1a38cEc043e70E83a3eC30443dB285ED10D774"
+        safe_proxy_factory_address: "0xa6B71E26C5e0845f74c812102Ca7114b6a896AB2"
+        usdc_bridged_address: "0x55d398326f99059fF775485246999027B3197955"
+        # Must be one of the addresses in allowed_safe_addresses (see comment above)
+        allowed_safe_address_for_testing: "0x01721FF1ddAc86BdB54459E8255d523A0778B780"
+        allowed_safe_addresses: "0x01721FF1ddAc86BdB54459E8255d523A0778B780"
+        ctf_exchange_domain_name: "OPINION CTF Exchange"
+        ctf_exchange_domain_version: "1"
+        safe_singleton_address: "0xfb1bffC9d739B8D520DaF37dF666da4C687191EA"
 
   # -------------------------------------------------------------------------
   # Option B: Include rules from external files (legacy / non-templated)
