@@ -361,6 +361,13 @@ func run() error {
 		)
 	}
 
+	signService.SetManualApprovalEnabled(cfg.Security.ManualApprovalEnabled)
+	if cfg.Security.ManualApprovalEnabled {
+		log.Info("manual approval enabled: requests with no whitelist match will go to pending approval")
+	} else {
+		log.Info("manual approval disabled: requests with no whitelist match will be rejected (403)")
+	}
+
 	// Initialize nonce store for replay protection
 	nonceStore, err := storage.NewInMemoryNonceStore(time.Minute)
 	if err != nil {

@@ -51,7 +51,30 @@ Together, timestamp + nonce ensure that each request is fresh and used at most o
 
 ---
 
-## 4. Application Layer — Authorization Rules
+## 4. Signer key custody
+
+Private keys used to sign transactions (EVM and others) are the most sensitive asset. Custody options:
+
+### Current: keystore + password
+
+- **Keystore**: signer private keys can be stored in encrypted keystore files (e.g. Ethereum JSON keystore). Keys are encrypted at rest.
+- **Password**: decryption password is supplied at runtime (e.g. via environment variable or secret manager). The server never logs or persists the password.
+- **Password strength and management**: use a **truly random** passphrase of **25+ characters** (avoid common words and predictable patterns). Store it in an **encrypted password manager** (e.g. 1Password); do not keep keystore passwords in plaintext configs or docs.
+- Recommended for production when HSM is not yet available: keeps keys off disk in plaintext and allows separation of key material from password.
+
+### Test only: plaintext private key
+
+- For **local or test environments only**, a signer can be configured with a raw private key (e.g. in config or env). This is **not for production**.
+- Use only in isolated testnets or CI; never use plaintext keys for mainnet or any environment where compromise would have real impact.
+
+### Future: HSM
+
+- **HSM (Hardware Security Module)** support is planned. Signing would be delegated to an HSM; private keys never leave the device, and the server would only request signatures via PKCS#11 or similar.
+- This will provide higher-assurance custody for production and regulated use cases.
+
+---
+
+## 5. Application Layer — Authorization Rules
 
 Authorization is **parameter-level**: rules evaluate the concrete request (chain, signer, sign type, payload fields such as `to`, `value`, calldata, EIP-712 fields, etc.).
 
@@ -73,7 +96,7 @@ Rules can be scoped by `chain_type`, `chain_id`, `api_key_id`, `signer_address`.
 
 ---
 
-## 5. Application Layer — Budget and Expiry
+## 6. Application Layer — Budget and Expiry
 
 ### Per-rule budgets (template instances)
 
@@ -96,7 +119,7 @@ Rules can be scoped by `chain_type`, `chain_id`, `api_key_id`, `signer_address`.
 
 ---
 
-## 6. Application Layer — Abuse and Guardrails
+## 7. Application Layer — Abuse and Guardrails
 
 ### Approval guard
 
@@ -108,7 +131,7 @@ Rules can be scoped by `chain_type`, `chain_id`, `api_key_id`, `signer_address`.
 
 ---
 
-## 7. Audit and Monitoring
+## 8. Audit and Monitoring
 
 ### Audit log
 
@@ -139,6 +162,8 @@ Rules can be scoped by `chain_type`, `chain_id`, `api_key_id`, `signer_address`.
 | API         | Ed25519 API key        | Authenticate clients                         |
 | API         | Timestamp + nonce      | Replay protection                           |
 | API         | Rate limit (per key)   | Throttle abuse per key                       |
+| Key custody | Keystore + password    | Encrypted signer keys at rest; test-only plaintext |
+| Key custody | HSM (planned)          | Signing in HSM; keys never leave device     |
 | Application | Blocklist rules        | Hard reject by parameter (e.g. address)     |
 | Application | Whitelist rules        | Allow only by parameter; else manual approval|
 | Application | Budget + period/renew  | Time- and amount-bounded quotas             |
@@ -147,3 +172,68 @@ Rules can be scoped by `chain_type`, `chain_id`, `api_key_id`, `signer_address`.
 | Operations  | Audit log + monitor    | Forensics and anomaly alerts                 |
 
 Together, these provide layered protection from the network through to application-level authorization and operational visibility.
+
+---
+
+## Future improvements and roadmap
+
+Planned security upgrades, recorded for prioritisation and roadmap planning.
+
+### Backlog (no fixed order)
+
+1. **Monitoring upgrade**  
+   Use Falco or eBPF rules to detect abnormal process memory read/write (e.g. scraping or injection).
+
+2. **Signing process isolation**  
+   Run keystore decrypt and signing in a dedicated container: read-only filesystem, seccomp, no ptrace, drop root immediately after startup. Significantly raises the bar for memory dump and process inspection.
+
+3. **Backup and key rotation**  
+   Encrypted keystore backups to offsite (encrypted USB + cloud). Quarterly: generate new signer key, migrate funds (batch transfer driven by rules / automation).
+
+4. **HSM**  
+   Consider YubiHSM 2 for signer key custody; keys never leave the device.
+
+5. **Rule engine security (Solidity / Foundry)**  
+   “Solidity expression via Foundry scripts” is powerful but risky: arbitrary script execution can lead to RCE. Enforce strict sandbox: run in isolated container, hard timeout, no network access.
+
+6. **Supply chain and lifecycle**  
+   Binary signing for releases; dependency scanning (e.g. Dependabot, Snyk); periodic penetration testing and code audits, especially for the rule engine.
+
+7. **Infrastructure**  
+   WAF and DDoS protection (e.g. Cloudflare, AWS Shield); zero-trust network design; infrastructure as code with automated vulnerability scanning.
+
+8. **Manual approval flow**  
+   Approval channel must use 2FA/MFA; multi-signer approval where required; tamper-evident approval records; timeout with automatic reject.
+
+---
+
+### ROI-oriented prioritisation
+
+| Item                      | Impact (risk reduction / compliance) | Effort | ROI   | Notes |
+|---------------------------|---------------------------------------|--------|-------|--------|
+| Rule engine sandbox (5)   | **Critical** – prevents RCE           | Medium | **High** | Single point of failure; do first. |
+| Signing isolation (2)     | **High** – limits key extraction      | Medium | **High** | Directly protects private keys. |
+| Approval 2FA/MFA + audit (8) | **High** – approval abuse / repudiation | Medium | **High** | Core to “who approved what”. |
+| Backup & rotation (3)     | **High** – recovery and key hygiene   | Medium | **High** | Enables safe key rotation. |
+| HSM / YubiHSM 2 (4)       | **High** – key never in app memory    | High   | Medium | After isolation/sandbox. |
+| Supply chain (6)          | **Medium** – dependency/artifact trust | Low–Med | **High** | Quick wins: Dependabot, signed binaries. |
+| Infra WAF/DDoS (7)        | **Medium** – availability, abuse      | Low    | **High** | Often config-only. |
+| Monitoring Falco/eBPF (1) | **Medium** – detect runtime abuse     | Medium | Medium | Improves detection, not prevention. |
+
+**Suggested roadmap phases**
+
+- **Phase 1 (highest ROI, foundational)**  
+  - Rule engine sandbox (5): container + timeout + no network for Foundry/Solidity execution.  
+  - Supply chain (6): dependency scanning + signed binaries.  
+  - Approval hardening (8): 2FA/MFA, multi-sig where needed, tamper-evident log, timeout auto-reject.
+
+- **Phase 2 (key and process protection)**  
+  - Signing process isolation (2): dedicated container, read-only fs, seccomp, drop root.  
+  - Backup and rotation (3): encrypted offsite backup, quarterly key rotation + rule-driven migration.
+
+- **Phase 3 (hardening and detection)**  
+  - HSM (4): evaluate and integrate YubiHSM 2.  
+  - Infra (7): WAF, DDoS, zero-trust, IaC + vuln scan.  
+  - Monitoring (1): Falco or eBPF rules for process/memory anomalies.
+
+This order addresses RCE and approval integrity first, then key custody and isolation, then infrastructure and detection.

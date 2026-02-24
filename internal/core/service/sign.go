@@ -16,15 +16,20 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
+// ErrManualApprovalDisabled is returned when no whitelist rule matches and manual approval is disabled.
+// Caller should respond with 403 Forbidden.
+var ErrManualApprovalDisabled = errors.New("no matching whitelist rule and manual approval is disabled")
+
 // SignService orchestrates the signing request lifecycle
 type SignService struct {
-	chainRegistry   *chain.Registry
-	requestRepo     storage.RequestRepository
-	ruleEngine      rule.RuleEngine
-	stateMachine    *statemachine.StateMachine
-	approvalService *ApprovalService
-	approvalGuard   *ManualApprovalGuard // optional: pauses requests when too many consecutive manual-approval outcomes
-	logger          *slog.Logger
+	chainRegistry         *chain.Registry
+	requestRepo           storage.RequestRepository
+	ruleEngine            rule.RuleEngine
+	stateMachine          *statemachine.StateMachine
+	approvalService       *ApprovalService
+	approvalGuard         *ManualApprovalGuard // optional: pauses requests when too many consecutive manual-approval outcomes
+	manualApprovalEnabled bool                // when false, no whitelist match → reject immediately
+	logger                *slog.Logger
 }
 
 // NewSignService creates a new sign service
@@ -69,6 +74,12 @@ func NewSignService(
 // consecutive manual-approval outcomes occur. Call after construction when enabled.
 func (s *SignService) SetApprovalGuard(guard *ManualApprovalGuard) {
 	s.approvalGuard = guard
+}
+
+// SetManualApprovalEnabled sets whether requests with no whitelist match go to manual approval (true)
+// or are rejected immediately (false). Default is false. Call after construction from config.
+func (s *SignService) SetManualApprovalEnabled(enabled bool) {
+	s.manualApprovalEnabled = enabled
 }
 
 // SignRequest represents a request to sign data
@@ -200,7 +211,18 @@ func (s *SignService) Sign(ctx context.Context, req *SignRequest) (*SignResponse
 		return s.processApprovedRequest(ctx, signReq, matchedRuleID, nil, reason, adapter)
 	}
 
-	// No whitelist rule matched - request manual approval
+	// No whitelist rule matched
+	if !s.manualApprovalEnabled {
+		if s.approvalGuard != nil {
+			s.approvalGuard.RecordRuleRejected()
+		}
+		if _, smErr := s.stateMachine.RejectOnAuthorization(ctx, signReq.ID, "system", "no matching whitelist rule and manual approval is disabled"); smErr != nil {
+			s.logger.Error("failed to reject request", "error", smErr)
+		}
+		return nil, ErrManualApprovalDisabled
+	}
+
+	// Request manual approval
 	if s.approvalGuard != nil {
 		s.approvalGuard.RecordManualApproval()
 	}

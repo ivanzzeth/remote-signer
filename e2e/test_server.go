@@ -397,6 +397,9 @@ func (ts *TestServer) Start() error {
 		}
 		signService.SetApprovalGuard(approvalGuard)
 	}
+	if cfg != nil {
+		signService.SetManualApprovalEnabled(cfg.Security.ManualApprovalEnabled)
+	}
 
 	// Initialize auth verifier with nonce store for replay protection
 	maxRequestAge := 5 * time.Minute

@@ -2,6 +2,7 @@ package evm
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -144,6 +145,15 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"chain_id", req.ChainID,
 			)
 			h.writeError(w, fmt.Sprintf("signer not found: %s", req.SignerAddress), http.StatusNotFound)
+			return
+		}
+		if errors.Is(err, service.ErrManualApprovalDisabled) {
+			h.logger.Warn("request rejected: no matching rule and manual approval disabled",
+				"signer_address", req.SignerAddress,
+				"sign_type", req.SignType,
+				"chain_id", req.ChainID,
+			)
+			h.writeError(w, "no matching rule and manual approval is disabled", http.StatusForbidden)
 			return
 		}
 		h.logger.Error("sign request failed",

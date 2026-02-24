@@ -45,6 +45,8 @@ security:
   max_request_age: "60s"
   rate_limit_default: 1000
   nonce_required: true
+  # E2E: enable manual approval so tests that expect "pending" (e.g. approval flow) pass
+  manual_approval_enabled: true
   approval_guard:
     enabled: true
     window: "2m"
