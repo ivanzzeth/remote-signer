@@ -95,6 +95,14 @@ type RuleEvaluator interface {
 	Evaluate(ctx context.Context, rule *types.Rule, req *types.SignRequest, parsed *types.ParsedPayload) (bool, string, error)
 }
 
+// SignTypeApplicable is an optional interface for evaluators that restrict by sign_type.
+// When implemented, the engine filters out rules that don't apply to the request's sign type
+// before calling Evaluate, avoiding unnecessary evaluator calls and config parsing.
+type SignTypeApplicable interface {
+	// AppliesToSignType returns false if the rule does not apply to the given sign type (e.g. sign_type_filter mismatch).
+	AppliesToSignType(rule *types.Rule, signType string) bool
+}
+
 // BatchEvaluationResult represents the result of evaluating a single rule in a batch
 type BatchEvaluationResult struct {
 	RuleID  types.RuleID

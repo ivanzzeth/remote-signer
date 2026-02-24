@@ -60,6 +60,17 @@ func (e *MessagePatternEvaluator) Type() types.RuleType {
 	return types.RuleTypeMessagePattern
 }
 
+// AppliesToSignType implements rule.SignTypeApplicable: returns false if the rule's sign_types do not include signType.
+func (e *MessagePatternEvaluator) AppliesToSignType(rule *types.Rule, signType string) bool {
+	config, err := e.parseConfig(rule.Config)
+	if err != nil {
+		return true // invalid config: keep rule, let Evaluate handle
+	}
+	return e.shouldEvaluateSignType(signType, config)
+}
+
+var _ rule.SignTypeApplicable = (*MessagePatternEvaluator)(nil)
+
 // Evaluate checks if the message matches the configured patterns
 // For whitelist mode: returns true if message matches ANY pattern (allow signing)
 // For blocklist mode: returns true if message matches ANY pattern (block signing)
