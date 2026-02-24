@@ -26,6 +26,7 @@ type MockClient struct {
 	ListAuditRecordsFunc func(ctx context.Context, filter *ListAuditFilter) (*ListAuditResponse, error)
 	ListSignersFunc      func(ctx context.Context, filter *ListSignersFilter) (*ListSignersResponse, error)
 	CreateSignerFunc     func(ctx context.Context, req *CreateSignerRequest) (*Signer, error)
+	MetricsFunc          func(ctx context.Context) (string, error)
 
 	// Template methods
 	ListTemplatesFunc        func(ctx context.Context, filter *ListTemplatesFilter) (*ListTemplatesResponse, error)
@@ -210,6 +211,15 @@ func (m *MockClient) CreateSigner(ctx context.Context, req *CreateSignerRequest)
 		return m.CreateSignerFunc(ctx, req)
 	}
 	return &Signer{}, nil
+}
+
+// Metrics implements ClientInterface.
+func (m *MockClient) Metrics(ctx context.Context) (string, error) {
+	m.recordCall("Metrics")
+	if m.MetricsFunc != nil {
+		return m.MetricsFunc(ctx)
+	}
+	return "", nil
 }
 
 // ListTemplates implements ClientInterface.
