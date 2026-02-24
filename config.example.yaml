@@ -302,7 +302,7 @@ rules:
     type: "instance"
     chain_type: "evm"
     chain_id: "56"
-    enabled: false
+    enabled: true
     config:
       template: "Predict EOA Template"
       variables:
@@ -329,7 +329,7 @@ rules:
     type: "instance"
     chain_type: "evm"
     chain_id: "56"
-    enabled: false
+    enabled: true
     config:
       template: "Opinion Safe Template"
       variables:
@@ -495,6 +495,14 @@ rules:
     mode: "whitelist"
     enabled: true
     config:
+      typed_data_struct: |
+        struct Permit {
+            address owner;
+            address spender;
+            uint256 value;
+            uint256 nonce;
+            uint256 deadline;
+        }
       # TypedDataExpression mode: require() statements with EIP-712 context
       # Available variables:
       #   - primaryType (string)         - EIP-712 primary type name
@@ -506,9 +514,9 @@ rules:
       #   - chainId (uint256)            - Request chain ID
       #   - [message fields]             - Fields from the typed data message
       typed_data_expression: |
-        require(value <= 1000000000000000000000, "permit value exceeds 1000 tokens");
-        require(spender != address(0), "cannot permit zero address spender");
-        require(deadline > block.timestamp, "permit deadline expired");
+        require(permit.value <= 1000000000000000000000, "permit value exceeds 1000 tokens");
+        require(permit.spender != address(0), "cannot permit zero address spender");
+        require(permit.deadline > block.timestamp, "permit deadline expired");
       sign_type_filter: "typed_data"  # Only apply to typed_data sign requests
       description: "Validate EIP-2612 Permit: max 1000 tokens, valid spender, future deadline"
       test_cases:
