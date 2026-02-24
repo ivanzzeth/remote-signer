@@ -1024,6 +1024,11 @@ func (e *SolidityRuleEvaluator) GetCacheDir() string {
 	return e.cacheDir
 }
 
+// GetTimeout returns the configured execution timeout (for validator to align forge build/test timeouts)
+func (e *SolidityRuleEvaluator) GetTimeout() time.Duration {
+	return e.timeout
+}
+
 // Helper functions
 
 func formatAddress(addr *string) string {

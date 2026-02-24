@@ -62,8 +62,6 @@ services:
     environment:
       # Database connection (host network: connect via localhost, port exposed by postgres container)
       DATABASE_DSN: "postgres://${POSTGRES_USER:-signer}:${POSTGRES_PASSWORD:-signer_password}@127.0.0.1:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-remote_signer}?sslmode=disable"
-      # Forge workspace (lib/forge-std): use mounted dir so no install inside container. Run ./scripts/deploy.sh init to install.
-      REMOTE_SIGNER_FORGE_TEMP_DIR: "/app/data/forge-workspace"
       # Optional: additional signers
       # EVM_SIGNER_KEY_1: ${EVM_SIGNER_KEY_1}
       # EVM_SIGNER_KEY_2: ${EVM_SIGNER_KEY_2}
@@ -84,8 +82,8 @@ services:
       - ./data/foundry/cast:/usr/local/bin/cast:ro
       # Forge workspace with lib/forge-std (install on host via deploy.sh init; no download in container)
       - ./data/forge-workspace:/app/data/forge-workspace
-      # Forge cache for Solidity rules
-      - forge_cache:/var/cache/remote-signer/forge
+      # Forge cache: bind mount so local and Docker share the same cache (no cold cache in container)
+      - ./data/forge-cache:/app/data/forge-cache
     # No "ports:" needed — host network mode binds directly to host's port 8548
     # Healthcheck: auto-detect TLS by checking if server cert exists
     # If certs are mounted (TLS enabled): use HTTPS with client cert (mTLS)
@@ -94,13 +92,11 @@ services:
       test: ["CMD-SHELL", "if [ -f /app/certs/server.crt ]; then wget -qO /dev/null --no-check-certificate --certificate=/app/certs/client.crt --private-key=/app/certs/client.key https://localhost:8548/health; else wget -qO /dev/null http://localhost:8548/health; fi"]
       interval: 30s
       timeout: 5s
-      start_period: 60s
+      start_period: 120s
       retries: 3
 
 volumes:
   postgres_data:
-    driver: local
-  forge_cache:
     driver: local
 
 networks:

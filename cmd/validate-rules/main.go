@@ -20,6 +20,17 @@ import (
 
 const version = "1.0.0"
 
+// resolvePath resolves path relative to baseDir if path is not absolute.
+func resolvePath(baseDir, path string) string {
+	if path == "" {
+		return ""
+	}
+	if filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join(baseDir, path)
+}
+
 // RuleConfig defines a rule in configuration (copied from config package to avoid circular imports)
 type RuleConfig struct {
 	Name          string                 `yaml:"name"`
@@ -114,8 +125,32 @@ func run() error {
 	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel})
 	log := slog.New(handler)
 
-	// Setup cache directory
+	// Resolve cache dir, temp dir, timeout: when -config is set, use config's foundry settings
+	// so local validation and Docker (same config) share the same paths and cache.
 	cacheDirectory := *cacheDir
+	var tempDirectory string
+	timeoutDuration := *timeout
+	if *configPath != "" {
+		cfg, loadErr := config.Load(*configPath)
+		if loadErr != nil {
+			return fmt.Errorf("load config for foundry paths: %w", loadErr)
+		}
+		configDir := filepath.Dir(*configPath)
+		if cfg.Chains.EVM != nil && cfg.Chains.EVM.Foundry.Enabled {
+			if cfg.Chains.EVM.Foundry.CacheDir != "" {
+				cacheDirectory = resolvePath(configDir, cfg.Chains.EVM.Foundry.CacheDir)
+			}
+			if cfg.Chains.EVM.Foundry.TempDir != "" {
+				tempDirectory = resolvePath(configDir, cfg.Chains.EVM.Foundry.TempDir)
+			}
+			if cfg.Chains.EVM.Foundry.Timeout > 0 {
+				timeoutDuration = cfg.Chains.EVM.Foundry.Timeout
+			}
+			if cfg.Chains.EVM.Foundry.ForgePath != "" && *forgePath == "" {
+				*forgePath = cfg.Chains.EVM.Foundry.ForgePath
+			}
+		}
+	}
 	if cacheDirectory == "" {
 		cacheDirectory = filepath.Join(os.TempDir(), "remote-signer-validator")
 	}
@@ -123,11 +158,12 @@ func run() error {
 		return fmt.Errorf("failed to create cache directory: %w", err)
 	}
 
-	// Initialize Solidity evaluator
+	// Initialize Solidity evaluator (same cache/temp/timeout as server when -config is used)
 	evaluator, err := evm.NewSolidityRuleEvaluator(evm.SolidityEvaluatorConfig{
 		ForgePath: *forgePath,
 		CacheDir:  cacheDirectory,
-		Timeout:   *timeout,
+		TempDir:   tempDirectory,
+		Timeout:   timeoutDuration,
 	}, log)
 	if err != nil {
 		return fmt.Errorf("failed to create Solidity evaluator: %w", err)
