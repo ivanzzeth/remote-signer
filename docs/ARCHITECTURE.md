@@ -60,7 +60,7 @@ Remote-Signer is a modular, stateless, secure signing service with multi-chain e
 └─────────────────────────┬───────────────────────────────────┘
                           │ SQL
               ┌───────────▼───────────┐
-              │      PostgreSQL       │
+              │  PostgreSQL / SQLite  │  (configurable via database.dsn)
               └───────────────────────┘
 ```
 

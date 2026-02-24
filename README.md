@@ -88,7 +88,7 @@ signing → failed       (on sign error)
 
 | Type | Description |
 |------|-------------|
-| evm_address_whitelist | Whitelist specific recipient addresses |
+| evm_address_list | Allow/block recipient addresses (mode: whitelist or blocklist) |
 | evm_contract_method | Allow specific contract method calls |
 | evm_value_limit | Limit transaction value |
 
@@ -140,6 +140,8 @@ See [docs/API.md](docs/API.md) for detailed documentation.
 - Go 1.24+
 - PostgreSQL 14+ (or SQLite for development)
 - Foundry (optional, for Solidity expression rules)
+
+**Fastest path (SQLite, no PostgreSQL):** Clone, `go build -o remote-signer ./cmd/remote-signer`, copy `config.example.yaml` to `config.yaml`, set `database.dsn` to `file:./data/remote-signer.db?_journal_mode=WAL&_busy_timeout=5000`, then follow [Step 1](#step-1-generate-api-key-ed25519)–[Step 4](#step-4-run). Use `./remote-signer` (default config is `config.yaml`).
 
 ### Installing Foundry (Optional)
 
@@ -285,8 +287,9 @@ api_keys:
 # Set environment variables
 export EVM_SIGNER_KEY_1=$(cat data/evm_signer_key.txt)
 
-# Run the server
-./remote-signer -config config.yaml
+# Run the server (default config: config.yaml)
+./remote-signer
+# Or: ./remote-signer -config config.yaml
 ```
 
 #### API Keys Configuration
@@ -316,9 +319,9 @@ Rules can be defined in config file or via API. See `config.example.yaml` for co
 
 ```yaml
 rules:
-  # Address whitelist
+  # Address list (whitelist mode = allow these addresses)
   - name: "Allow treasury"
-    type: "evm_address_whitelist"
+    type: "evm_address_list"
     mode: "whitelist"
     enabled: true
     config:
@@ -358,7 +361,7 @@ rules:
 |------|-------------|
 | `signer_restriction` | Allow/block specific signer addresses |
 | `sign_type_restriction` | Allow/block specific signing methods |
-| `evm_address_whitelist` | Whitelist recipient addresses |
+| `evm_address_list` | Allow/block recipient addresses (whitelist or blocklist mode) |
 | `evm_contract_method` | Allow specific contract methods |
 | `evm_value_limit` | Limit transaction value |
 | `evm_solidity_expression` | Custom Solidity validation (requires Foundry) |
@@ -496,11 +499,18 @@ export PUSHOVER_APP_TOKEN="..."
 
 ## Deployment
 
-The `scripts/deploy.sh` script supports both **local** (no Docker) and **Docker** deployment modes.
+Two deployment options:
 
-### Local Deployment (Recommended for Development)
+| Mode | Description |
+|------|-------------|
+| **Direct build** | Compile the Go binary and run it on the host (optionally via `scripts/deploy.sh local-run`). Use SQLite or PostgreSQL. |
+| **Docker** | Run with Docker Compose; includes PostgreSQL. Suited for production. |
 
-Local mode runs the binary directly on the host. It uses SQLite by default (no PostgreSQL needed) and supports interactive keystore password input via `screen`.
+The `scripts/deploy.sh` script supports both: **local** (direct build, no Docker) and **Docker**.
+
+### Direct build (Local Deployment, recommended for development)
+
+Run the binary directly on the host. It uses SQLite by default (no PostgreSQL needed) and supports interactive keystore password input via `screen`.
 
 ```bash
 # 1. Initialize environment (creates directories, .env, config files)

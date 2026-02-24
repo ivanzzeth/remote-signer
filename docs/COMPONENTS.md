@@ -125,7 +125,7 @@ type Rule struct {
 | `evm_contract_method` | Contract method restrictions | `contract string`, `methods []string` |
 | `evm_value_limit` | Transaction value limits | `max_value string`, `min_value string` |
 | `evm_solidity_expression` | Solidity validation | `expression string` or `functions []` |
-| `evm_message_pattern` | Message pattern matching | `patterns []string` |
+| `message_pattern` | Message pattern matching (personal/eip191) | `pattern` or `patterns []string`, `sign_types []string` |
 
 **Rule Modes:**
 - `whitelist` - Any match = auto-approve

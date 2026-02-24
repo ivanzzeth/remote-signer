@@ -2,7 +2,14 @@
 
 ## Overview
 
-Remote-Signer is designed to be deployed as a stateless service with PostgreSQL as the backing store. This document covers deployment configurations and considerations.
+Remote-Signer is designed to be deployed as a stateless service with a SQL database as the backing store. Two deployment options are supported:
+
+| Option | Description |
+|--------|-------------|
+| **Direct build** | Compile the Go binary and run on the host (e.g. `./scripts/deploy.sh local-run` or `./remote-signer`). Use SQLite (file DSN) or PostgreSQL. |
+| **Docker** | Run with Docker Compose; includes PostgreSQL. Suited for production. |
+
+See the main [README](../README.md#deployment) for quick commands. This document covers deployment configurations and considerations in detail.
 
 ## Deployment Diagram
 
@@ -43,9 +50,10 @@ Remote-Signer is designed to be deployed as a stateless service with PostgreSQL 
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `CONFIG_PATH` | Path to config.yaml | No (default: `./config.yaml`) |
-| `DATABASE_URL` | PostgreSQL connection string | Yes |
+| `DATABASE_URL` | Database DSN (e.g. PostgreSQL or `file:./data/signer.db` for SQLite) | Yes (or set `database.dsn` in config) |
 | `LOG_LEVEL` | Log level (debug, info, warn, error) | No (default: info) |
+
+Config file path is set by the `-config` flag (default: `config.yaml`), not by environment.
 
 ### Configuration File
 
@@ -56,57 +64,60 @@ server:
   port: 8548
 
 database:
-  dsn: "${DATABASE_URL}"
+  dsn: "${DATABASE_URL}"   # or "file:./data/signer.db" for SQLite
   max_open_conns: 25
   max_idle_conns: 5
   conn_max_lifetime: 5m
 
 security:
-  max_request_age: 5m
+  max_request_age: 60s     # request timestamp must be within this window
+  rate_limit_default: 100  # per-minute default for API keys that omit rate_limit
   ip_whitelist:
-    - "10.0.0.0/8"
-    - "172.16.0.0/12"
-  rate_limit:
     enabled: true
-    default_rps: 10
-    default_burst: 20
+    allowed_ips:
+      - "10.0.0.0/8"
+      - "172.16.0.0/12"
+    # trust_proxy: false   # set true only behind a trusted reverse proxy
 
 chains:
   evm:
+    enabled: true
     signers:
-      - type: keystore
-        path: "/secrets/keystore.json"
-        password_env: "KEYSTORE_PASSWORD"
-      - type: private_key
-        address: "0x..."
-        private_key_env: "SIGNER_PRIVATE_KEY"
+      private_keys:
+        - address: "0x..."
+          key_env: "EVM_SIGNER_KEY_1"   # env var with hex private key (no 0x prefix)
+          enabled: true
+      # keystores:
+      #   - address: "0x..."
+      #     path: "/secrets/keystore.json"
+      #     password_env: "KEYSTORE_PASSWORD"
+      #     enabled: true
     foundry:
       enabled: true
-      forge_path: "/usr/local/bin/forge"
+      forge_path: ""
+      cache_dir: "./data/forge-cache"
+      timeout: "30s"
 
 api_keys:
   - id: "client-1"
     name: "Production Client"
-    public_key: "ed25519_pubkey_hex"
-    is_admin: false
-    allowed_chains: ["evm"]
-    rate_limit:
-      requests_per_second: 5
-      burst_size: 10
+    public_key: "MCowBQYDK2VwAyEA..."   # Ed25519 public key (base64 or hex)
+    enabled: true
+    rate_limit: 100                      # requests per minute
+    # allowed_chain_types: []            # empty = all
+    # allowed_signers: []                 # empty = all
 
 notify:
   slack:
-    enabled: true
-    webhook_url: "${SLACK_WEBHOOK_URL}"
-    channel: "#signer-alerts"
+    enabled: false
+    bot_token: "${SLACK_BOT_TOKEN}"
   pushover:
     enabled: false
-    user_key: "${PUSHOVER_USER_KEY}"
-    api_token: "${PUSHOVER_API_TOKEN}"
+    app_token: "${PUSHOVER_APP_TOKEN}"
 
 logger:
   level: "info"
-  format: "json"
+  pretty: false
 ```
 
 ## Docker Deployment

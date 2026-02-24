@@ -32,8 +32,8 @@ Headers:
 Body:
   {
     "sign_type": "transaction",
-    "signer": "0x...",
-    "chain_id": 1,
+    "signer_address": "0x...",
+    "chain_id": "1",
     "payload": { ... }
   }
 ```
@@ -70,20 +70,30 @@ Request
 
 ### 3. Sign Handler Processing
 
+The sign handler uses the standard library `net/http` interface (`ServeHTTP`):
+
 ```go
-func (h *SignHandler) Sign(c *gin.Context) {
-    // 1. Parse request body
+func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+    // 1. Method and auth (API key from middleware context)
+    if r.Method != http.MethodPost { ... }
+    apiKey := middleware.GetAPIKey(r.Context())
+    if apiKey == nil { ... }
+    if !middleware.CheckChainPermission(apiKey, types.ChainTypeEVM) { ... }
+
+    // 2. Parse and validate request body (SignRequest: chain_id, signer_address, sign_type, payload)
     var req SignRequest
-    c.BindJSON(&req)
+    json.NewDecoder(r.Body).Decode(&req)
+    // validate chain_id, signer_address, sign_type, payload; CheckSignerPermission(apiKey, req.SignerAddress)
 
-    // 2. Add metadata from context
-    req.APIKeyID = c.GetString("api_key_id")
+    // 3. Build service request and call SignService
+    signReq := &service.SignRequest{
+        APIKeyID: apiKey.ID, ChainType: types.ChainTypeEVM,
+        ChainID: req.ChainID, SignerAddress: req.SignerAddress, SignType: req.SignType, Payload: req.Payload,
+    }
+    resp, err := h.signService.Sign(r.Context(), signReq)
 
-    // 3. Call SignService
-    resp, err := h.signService.Sign(c, &req)
-
-    // 4. Return response
-    c.JSON(200, resp)
+    // 4. Return JSON response or error
+    h.writeJSON(w, resp, http.StatusOK)  // or writeError(w, ...)
 }
 ```
 

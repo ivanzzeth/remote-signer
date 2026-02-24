@@ -3,7 +3,7 @@
 ## Base URL
 
 ```
-http://localhost:8080/api/v1
+http://localhost:8548/api/v1
 ```
 
 ## Authentication
@@ -109,7 +109,7 @@ When a sign request matches an existing whitelist rule, it's automatically appro
 
 ```bash
 # Request
-curl -X POST http://localhost:8080/api/v1/evm/sign \
+curl -X POST http://localhost:8548/api/v1/evm/sign \
   -H "X-API-Key-ID: key_123" \
   -H "X-Timestamp: 1705312200000" \
   -H "X-Signature: base64_sig" \
@@ -174,7 +174,7 @@ When no rule matches, the request requires manual approval via notification.
 
 ```bash
 # Step 1: Submit request
-curl -X POST http://localhost:8080/api/v1/evm/sign \
+curl -X POST http://localhost:8548/api/v1/evm/sign \
   -H "X-API-Key-ID: key_123" \
   -H "X-Timestamp: 1705312200000" \
   -H "X-Signature: base64_sig" \
@@ -202,7 +202,7 @@ curl -X POST http://localhost:8080/api/v1/evm/sign \
 }
 
 # Step 2: Admin previews what rule would be generated
-curl -X POST http://localhost:8080/api/v1/evm/requests/req_xyz789/preview-rule \
+curl -X POST http://localhost:8548/api/v1/evm/requests/req_xyz789/preview-rule \
   -H "X-API-Key-ID: admin_key" \
   -H "X-Timestamp: 1705312300000" \
   -H "X-Signature: base64_sig" \
@@ -225,7 +225,7 @@ curl -X POST http://localhost:8080/api/v1/evm/requests/req_xyz789/preview-rule \
 }
 
 # Step 3: Admin approves with rule generation (after reviewing preview)
-curl -X POST http://localhost:8080/api/v1/evm/requests/req_xyz789/approve \
+curl -X POST http://localhost:8548/api/v1/evm/requests/req_xyz789/approve \
   -H "X-API-Key-ID: admin_key" \
   -H "X-Timestamp: 1705312350000" \
   -H "X-Signature: base64_sig" \
@@ -252,7 +252,7 @@ curl -X POST http://localhost:8080/api/v1/evm/requests/req_xyz789/approve \
 }
 
 # Step 4: Client polls for result
-curl http://localhost:8080/api/v1/evm/requests/req_xyz789 \
+curl http://localhost:8548/api/v1/evm/requests/req_xyz789 \
   -H "X-API-Key-ID: key_123" \
   -H "X-Timestamp: 1705312400000" \
   -H "X-Signature: base64_sig"
@@ -274,7 +274,7 @@ Admin can reject a pending request.
 **Example:**
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/evm/requests/req_xyz789/approve \
+curl -X POST http://localhost:8548/api/v1/evm/requests/req_xyz789/approve \
   -H "X-API-Key-ID: admin_key" \
   -H "X-Timestamp: 1705312300000" \
   -H "X-Signature: base64_sig" \
@@ -307,7 +307,7 @@ Request fails validation (invalid payload, signer not found, etc.)
 
 ```bash
 # Invalid signer address
-curl -X POST http://localhost:8080/api/v1/evm/sign \
+curl -X POST http://localhost:8548/api/v1/evm/sign \
   -H "X-API-Key-ID: key_123" \
   -H "X-Timestamp: 1705312200000" \
   -H "X-Signature: base64_sig" \
@@ -351,7 +351,7 @@ When a request violates a blocklist rule, it's immediately rejected without poss
 
 ```bash
 # Request with value exceeding blocklist limit
-curl -X POST http://localhost:8080/api/v1/evm/sign \
+curl -X POST http://localhost:8548/api/v1/evm/sign \
   -H "X-API-Key-ID: key_123" \
   -H "X-Timestamp: 1705312200000" \
   -H "X-Signature: base64_sig" \
