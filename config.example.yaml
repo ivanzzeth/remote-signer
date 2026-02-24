@@ -108,6 +108,10 @@ security:
   # When false, legacy requests without nonce are allowed (less secure)
   nonce_required: true
 
+  # Manual approval: when false (default), requests with no whitelist match are rejected immediately (403).
+  # When true, they go to pending manual approval. Default false for stricter security.
+  manual_approval_enabled: false
+
   # Approval guard: pause when too many consecutive "not auto-approved" outcomes (blocked by rule or manual approval)
   # Use case: API key leaked — attacker uses valid key to brute-force; guard detects burst and pauses + alerts
   approval_guard:

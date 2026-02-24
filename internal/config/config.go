@@ -179,6 +179,9 @@ type SecurityConfig struct {
 	MaxRequestAge    time.Duration     `yaml:"max_request_age"`
 	RateLimitDefault int               `yaml:"rate_limit_default"`
 	IPWhitelist      IPWhitelistConfig `yaml:"ip_whitelist"`
+	// ManualApprovalEnabled: when true, requests with no whitelist match go to manual approval;
+	// when false (default), they are rejected immediately. Default false for stricter security.
+	ManualApprovalEnabled bool `yaml:"manual_approval_enabled"`
 	// ApprovalGuard pauses all sign requests when too many consecutive manual-approval outcomes occur
 	ApprovalGuard ApprovalGuardConfig `yaml:"approval_guard"`
 	// NonceRequired enforces nonce for all requests (recommended for production)
