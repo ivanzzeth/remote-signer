@@ -143,6 +143,27 @@ func (c *Client) ApproveSignRequest(ctx context.Context, requestID string, req *
 	return &approveResp, nil
 }
 
+// ResumeApprovalGuard resumes the approval guard after it has paused sign requests (admin only).
+// Returns an error if the guard is not configured or the request fails.
+func (c *Client) ResumeApprovalGuard(ctx context.Context) error {
+	httpReq, err := c.newSignedRequest(ctx, http.MethodPost, "/api/v1/evm/guard/resume", nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return c.parseErrorResponse(resp)
+	}
+
+	return nil
+}
+
 // PreviewRule previews the rule that would be generated for a pending request.
 func (c *Client) PreviewRule(ctx context.Context, requestID string, req *PreviewRuleRequest) (*PreviewRuleResponse, error) {
 	body, err := json.Marshal(req)

@@ -23,6 +23,7 @@ type SignService struct {
 	ruleEngine      rule.RuleEngine
 	stateMachine    *statemachine.StateMachine
 	approvalService *ApprovalService
+	approvalGuard   *ManualApprovalGuard // optional: pauses requests when too many consecutive manual-approval outcomes
 	logger          *slog.Logger
 }
 
@@ -64,6 +65,12 @@ func NewSignService(
 	}, nil
 }
 
+// SetApprovalGuard sets the optional guard that pauses sign requests when too many
+// consecutive manual-approval outcomes occur. Call after construction when enabled.
+func (s *SignService) SetApprovalGuard(guard *ManualApprovalGuard) {
+	s.approvalGuard = guard
+}
+
 // SignRequest represents a request to sign data
 type SignRequest struct {
 	APIKeyID      string          `json:"api_key_id"`
@@ -86,6 +93,9 @@ type SignResponse struct {
 // Sign processes a sign request
 // Returns immediately if auto-approved (rule match), otherwise returns pending status
 func (s *SignService) Sign(ctx context.Context, req *SignRequest) (*SignResponse, error) {
+	if s.approvalGuard != nil && s.approvalGuard.IsPaused() {
+		return nil, fmt.Errorf("sign requests are paused due to approval guard; use admin API to resume")
+	}
 	// Get chain adapter
 	adapter, err := s.chainRegistry.Get(req.ChainType)
 	if err != nil {
@@ -158,6 +168,9 @@ func (s *SignService) Sign(ctx context.Context, req *SignRequest) (*SignResponse
 		// Check if blocked by a blocklist rule
 		var blockedErr *rule.BlockedError
 		if errors.As(err, &blockedErr) {
+			if s.approvalGuard != nil {
+				s.approvalGuard.RecordRuleRejected()
+			}
 			s.logger.Warn("request blocked by rule",
 				"request_id", signReq.ID,
 				"rule_id", blockedErr.RuleID,
@@ -181,10 +194,16 @@ func (s *SignService) Sign(ctx context.Context, req *SignRequest) (*SignResponse
 
 	if matchedRuleID != nil {
 		// Auto-approved by whitelist rule - proceed to signing
+		if s.approvalGuard != nil {
+			s.approvalGuard.RecordNonManualApproval()
+		}
 		return s.processApprovedRequest(ctx, signReq, matchedRuleID, nil, reason, adapter)
 	}
 
 	// No whitelist rule matched - request manual approval
+	if s.approvalGuard != nil {
+		s.approvalGuard.RecordManualApproval()
+	}
 	if err := s.approvalService.RequestApproval(ctx, signReq); err != nil {
 		s.logger.Error("failed to request approval", "error", err)
 	}

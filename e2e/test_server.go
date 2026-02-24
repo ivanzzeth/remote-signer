@@ -69,8 +69,9 @@ func NewTestServer(cfg TestServerConfig) (*TestServer, error) {
 
 // Start initializes and starts the test server
 func (ts *TestServer) Start() error {
-	// Set environment variable for signer private key
+	// Set environment variables for signer private keys (second signer for approval-guard e2e)
 	os.Setenv("E2E_TEST_SIGNER_KEY", ts.config.SignerPrivateKey)
+	os.Setenv("E2E_TEST_SIGNER2_KEY", testSigner2PrivateKey)
 
 	// Create logger
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
@@ -262,11 +263,12 @@ func (ts *TestServer) Start() error {
 	var evmSignerConfig evm.SignerConfig
 	if cfg != nil && cfg.Chains.EVM != nil && cfg.Chains.EVM.Enabled {
 		evmSignerConfig = cfg.Chains.EVM.Signers
-		// Override signer key env var to use test signer
+		// Override signer key env vars for e2e (E2E_TEST_SIGNER_KEY set in Start; E2E_TEST_SIGNER2_KEY in TestMain)
 		for i := range evmSignerConfig.PrivateKeys {
 			if evmSignerConfig.PrivateKeys[i].Address == ts.config.SignerAddress {
 				evmSignerConfig.PrivateKeys[i].KeyEnvVar = "E2E_TEST_SIGNER_KEY"
 			}
+			// Second signer uses E2E_TEST_SIGNER2_KEY (set in TestMain before Start)
 		}
 	} else {
 		// Fallback to test signer configuration
@@ -380,6 +382,22 @@ func (ts *TestServer) Start() error {
 		return fmt.Errorf("failed to create sign service: %w", err)
 	}
 
+	var approvalGuard *service.ManualApprovalGuard
+	if cfg != nil && cfg.Security.ApprovalGuard.Enabled {
+		approvalGuard, err = service.NewManualApprovalGuard(service.ManualApprovalGuardConfig{
+			Window:      cfg.Security.ApprovalGuard.Window,
+			Threshold:   cfg.Security.ApprovalGuard.Threshold,
+			ResumeAfter: cfg.Security.ApprovalGuard.ResumeAfter,
+			NotifySvc:   nil,
+			Channel:     nil,
+			Logger:      log,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create approval guard: %w", err)
+		}
+		signService.SetApprovalGuard(approvalGuard)
+	}
+
 	// Initialize auth verifier with nonce store for replay protection
 	maxRequestAge := 5 * time.Minute
 	if cfg != nil && cfg.Security.MaxRequestAge > 0 {
@@ -413,13 +431,15 @@ func (ts *TestServer) Start() error {
 	}
 
 	// Initialize router
-	router, err := api.NewRouter(authVerifier, signService, signerManager, ruleRepo, auditRepo, log, api.RouterConfig{
+	routerConfig := api.RouterConfig{
 		Version: "e2e-test",
 		Template: &api.TemplateConfig{
 			TemplateRepo:    templateRepo,
 			TemplateService: templateService,
 		},
-	})
+		ApprovalGuard: approvalGuard,
+	}
+	router, err := api.NewRouter(authVerifier, signService, signerManager, ruleRepo, auditRepo, log, routerConfig)
 	if err != nil {
 		return fmt.Errorf("failed to create router: %w", err)
 	}
@@ -495,6 +515,7 @@ func (ts *TestServer) Stop() {
 
 	// Cleanup environment
 	os.Unsetenv("E2E_TEST_SIGNER_KEY")
+	os.Unsetenv("E2E_TEST_SIGNER2_KEY")
 }
 
 // BaseURL returns the base URL of the test server

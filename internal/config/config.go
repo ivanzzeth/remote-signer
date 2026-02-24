@@ -179,9 +179,23 @@ type SecurityConfig struct {
 	MaxRequestAge    time.Duration     `yaml:"max_request_age"`
 	RateLimitDefault int               `yaml:"rate_limit_default"`
 	IPWhitelist      IPWhitelistConfig `yaml:"ip_whitelist"`
+	// ApprovalGuard pauses all sign requests when too many consecutive manual-approval outcomes occur
+	ApprovalGuard ApprovalGuardConfig `yaml:"approval_guard"`
 	// NonceRequired enforces nonce for all requests (recommended for production)
 	// When true, requests without X-Nonce header will be rejected
 	NonceRequired *bool `yaml:"nonce_required"`
+}
+
+// ApprovalGuardConfig configures the request-rejection burst guard.
+// When within Window there are Threshold consecutive outcomes that are either: (a) blocked by a rule,
+// or (b) require manual approval (no whitelist match), the guard pauses all sign requests and alerts.
+// Use case: detect API key abuse — attacker with valid API key repeatedly hits rule rejections or pending approval.
+// After ResumeAfter the guard auto-resumes so the team has time to respond.
+type ApprovalGuardConfig struct {
+	Enabled     bool          `yaml:"enabled"`
+	Window      time.Duration `yaml:"window"`       // time window for counting (e.g. 5m); 0 = no window check
+	Threshold   int           `yaml:"threshold"`    // consecutive rejections (blocked or manual-approval) that trigger pause (e.g. 10)
+	ResumeAfter time.Duration `yaml:"resume_after"` // pause duration after which to auto-resume (e.g. 2h)
 }
 
 // IPWhitelistConfig contains IP whitelist settings
@@ -353,5 +367,16 @@ func setDefaults(cfg *Config) {
 
 	if cfg.Logger.Level == "" {
 		cfg.Logger.Level = "info"
+	}
+
+	// ApprovalGuard defaults
+	if cfg.Security.ApprovalGuard.Enabled && cfg.Security.ApprovalGuard.Threshold <= 0 {
+		cfg.Security.ApprovalGuard.Threshold = 10
+	}
+	if cfg.Security.ApprovalGuard.Enabled && cfg.Security.ApprovalGuard.Window <= 0 {
+		cfg.Security.ApprovalGuard.Window = 5 * time.Minute
+	}
+	if cfg.Security.ApprovalGuard.Enabled && cfg.Security.ApprovalGuard.ResumeAfter <= 0 {
+		cfg.Security.ApprovalGuard.ResumeAfter = 2 * time.Hour
 	}
 }
