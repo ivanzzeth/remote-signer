@@ -234,6 +234,14 @@ templates:
     config:
       path: "rules/templates/polymarket.safe.template.yaml"
 
+  # Example: Predict.fun EOA rules as a template (BNB Chain addresses as variables)
+  - name: "Predict EOA Template"
+    type: "file"
+    description: "Predict.fun protocol rules for EOA wallets (parameterized)"
+    enabled: true
+    config:
+      path: "rules/templates/predict.eoa.template.yaml"
+
 # =============================================================================
 # Rules configuration
 # =============================================================================
@@ -276,6 +284,30 @@ rules:
         ctf_exchange_domain_name: "Polymarket CTF Exchange"
         ctf_exchange_domain_version: "1"
         safe_factory_domain_name: "Polymarket Contract Proxy Factory"
+
+  # Predict.fun: instance from template (BNB Chain 56; disable if not used)
+  - name: "Predict.fun Protocol rules for EOA wallets"
+    type: "instance"
+    chain_type: "evm"
+    chain_id: "56"
+    enabled: false
+    config:
+      template: "Predict EOA Template"
+      variables:
+        chain_id: "56"
+        order_domain_name: "predict.fun CTF Exchange"
+        order_domain_version: "1"
+        usdt_address: "0x55d398326f99059fF775485246999027B3197955"
+        ct_nyb: "0x22DA1810B194ca018378464a58f6Ac2B10C9d244"
+        ct_yb: "0x9400F8Ad57e9e0F352345935d6D3175975eb1d9F"
+        neg_risk_ctf_yb: "0xF64b0b318AAf83BD9071110af24D24445719A07F"
+        ctf_exchange_nyb: "0x8BC070BEdAB741406F4B1Eb65A72bee27894B689"
+        neg_risk_exchange_nyb: "0x365fb81bd4A24D6303cd2F19c349dE6894D8d58A"
+        neg_risk_adapter_nyb: "0xc3Cf7c252f65E0d8D88537dF96569AE94a7F1A6E"
+        ctf_exchange_yb: "0x6bEb5a40C032AFc305961162d8204CDA16DECFa5"
+        neg_risk_exchange_yb: "0x8A289d458f5a134bA40015085A8F50Ffb681B41d"
+        neg_risk_adapter_yb: "0x41dCe1A4B8FB5e6327701750aF6231B7CD0B2A40"
+        signer_address_for_testing: "0x53c68c954f85a29d2098e90addaf41baf2ff0a50"
 
   # -------------------------------------------------------------------------
   # Option B: Include rules from external files (legacy / non-templated)
