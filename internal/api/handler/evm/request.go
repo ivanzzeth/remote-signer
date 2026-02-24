@@ -45,23 +45,25 @@ func NewRequestHandler(signService *service.SignService, logger *slog.Logger) (*
 	}, nil
 }
 
-// RequestDetailResponse represents a detailed request response
+// RequestDetailResponse represents a detailed request response (GET /api/v1/evm/requests/{id}).
+// Payload is included so operators can inspect full request content for debugging and rule analysis.
 type RequestDetailResponse struct {
-	ID            string  `json:"id"`
-	APIKeyID      string  `json:"api_key_id"`
-	ChainType     string  `json:"chain_type"`
-	ChainID       string  `json:"chain_id"`
-	SignerAddress string  `json:"signer_address"`
-	SignType      string  `json:"sign_type"`
-	Status        string  `json:"status"`
-	Signature     string  `json:"signature,omitempty"`
-	SignedData    string  `json:"signed_data,omitempty"`
-	ErrorMessage  string  `json:"error_message,omitempty"`
-	RuleMatchedID *string `json:"rule_matched_id,omitempty"`
-	ApprovedBy    *string `json:"approved_by,omitempty"`
-	CreatedAt     string  `json:"created_at"`
-	UpdatedAt     string  `json:"updated_at"`
-	CompletedAt   *string `json:"completed_at,omitempty"`
+	ID             string          `json:"id"`
+	APIKeyID       string          `json:"api_key_id"`
+	ChainType      string          `json:"chain_type"`
+	ChainID        string          `json:"chain_id"`
+	SignerAddress  string          `json:"signer_address"`
+	SignType       string          `json:"sign_type"`
+	Status         string          `json:"status"`
+	Payload        json.RawMessage `json:"payload,omitempty"`
+	Signature      string          `json:"signature,omitempty"`
+	SignedData     string          `json:"signed_data,omitempty"`
+	ErrorMessage   string          `json:"error_message,omitempty"`
+	RuleMatchedID  *string         `json:"rule_matched_id,omitempty"`
+	ApprovedBy     *string         `json:"approved_by,omitempty"`
+	CreatedAt      string          `json:"created_at"`
+	UpdatedAt      string          `json:"updated_at"`
+	CompletedAt    *string         `json:"completed_at,omitempty"`
 }
 
 // ListRequestsResponse represents the response for listing requests
@@ -111,13 +113,13 @@ func (h *RequestHandler) getRequest(w http.ResponseWriter, r *http.Request, apiK
 		return
 	}
 
-	// Check if the API key owns this request
-	if req.APIKeyID != apiKey.ID {
+	// Non-admin may only view requests created with their API key; admin may view any
+	if !apiKey.Admin && req.APIKeyID != apiKey.ID {
 		h.writeError(w, "not authorized to view this request", http.StatusForbidden)
 		return
 	}
 
-	h.writeJSON(w, h.toDetailResponse(req), http.StatusOK)
+	h.writeJSON(w, h.toDetailResponse(req, true), http.StatusOK)
 }
 
 // ListHandler handles listing requests
@@ -154,10 +156,12 @@ func (h *ListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build filter
+	// Build filter: non-admin keys only see their own requests; admin sees all
 	filter := storage.RequestFilter{
-		APIKeyID: &apiKey.ID,
-		Limit:    20, // default limit
+		Limit: 20, // default limit
+	}
+	if !apiKey.Admin {
+		filter.APIKeyID = &apiKey.ID
 	}
 
 	// Parse query parameters
@@ -237,7 +241,7 @@ func (h *ListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		HasMore:  hasMore,
 	}
 	for _, req := range requests {
-		resp.Requests = append(resp.Requests, toDetailResponse(req))
+		resp.Requests = append(resp.Requests, toDetailResponse(req, false))
 	}
 
 	// Set next cursor if there are more results
@@ -252,11 +256,11 @@ func (h *ListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, resp, http.StatusOK)
 }
 
-func (h *RequestHandler) toDetailResponse(req *types.SignRequest) RequestDetailResponse {
-	return toDetailResponse(req)
+func (h *RequestHandler) toDetailResponse(req *types.SignRequest, includePayload bool) RequestDetailResponse {
+	return toDetailResponse(req, includePayload)
 }
 
-func toDetailResponse(req *types.SignRequest) RequestDetailResponse {
+func toDetailResponse(req *types.SignRequest, includePayload bool) RequestDetailResponse {
 	resp := RequestDetailResponse{
 		ID:            string(req.ID),
 		APIKeyID:      req.APIKeyID,
@@ -270,6 +274,9 @@ func toDetailResponse(req *types.SignRequest) RequestDetailResponse {
 		ApprovedBy:    req.ApprovedBy,
 		CreatedAt:     req.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt:     req.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+	}
+	if includePayload && len(req.Payload) > 0 {
+		resp.Payload = req.Payload
 	}
 	if len(req.Signature) > 0 {
 		resp.Signature = fmt.Sprintf("0x%x", req.Signature)

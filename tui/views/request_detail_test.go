@@ -276,8 +276,6 @@ func TestRequestDetailModel_View(t *testing.T) {
 		model, err := NewRequestDetailModel(mockClient, context.Background())
 		require.NoError(t, err)
 		model.loading = false
-		model.width = 100
-		model.height = 30
 		model.request = &client.RequestStatus{
 			ID:            "req-123",
 			Status:        "pending",
@@ -287,6 +285,7 @@ func TestRequestDetailModel_View(t *testing.T) {
 			CreatedAt:     time.Now(),
 			UpdatedAt:     time.Now(),
 		}
+		model.SetSize(100, 30)
 
 		view := model.View()
 		assert.Contains(t, view, "Request Details")
@@ -335,14 +334,13 @@ func TestRequestDetailModel_View(t *testing.T) {
 		model, err := NewRequestDetailModel(mockClient, context.Background())
 		require.NoError(t, err)
 		model.loading = false
-		model.width = 100
-		model.height = 30
 		model.request = &client.RequestStatus{
 			ID:        "req-123",
 			Status:    "pending",
 			CreatedAt: time.Now(),
 			UpdatedAt: time.Now(),
 		}
+		model.SetSize(100, 30)
 
 		view := model.View()
 		assert.Contains(t, view, "Approve")

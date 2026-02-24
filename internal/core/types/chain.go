@@ -16,7 +16,12 @@ type ChainAdapter interface {
 	// Type returns the chain type this adapter handles
 	Type() ChainType
 
-	// ValidatePayload validates chain-specific payload
+	// ValidateBasicRequest validates request format and size only (chain_id, signer_address, sign_type, payload size).
+	// It does not check signer existence or payload semantics. Used to decide whether to persist for audit.
+	// Returns an error if format/size is invalid; on success the request is eligible to be persisted.
+	ValidateBasicRequest(chainID, signerAddress, signType string, payload []byte) error
+
+	// ValidatePayload validates chain-specific payload structure and semantics (e.g. required fields per sign_type).
 	ValidatePayload(ctx context.Context, signType string, payload []byte) error
 
 	// Sign performs the actual signing operation

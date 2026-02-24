@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -41,6 +42,8 @@ type RequestDetailModel struct {
 	activeInput   string // "name" or "maxvalue"
 	actionResult  string
 	goBack        bool
+	viewport      viewport.Model
+	ready         bool
 }
 
 // RequestDetailDataMsg is sent when request detail is loaded
@@ -103,6 +106,22 @@ func (m *RequestDetailModel) Init() tea.Cmd {
 func (m *RequestDetailModel) SetSize(width, height int) {
 	m.width = width
 	m.height = height
+
+	headerHeight := 2
+	footerHeight := 2
+	viewportHeight := height - headerHeight - footerHeight
+	if viewportHeight < 1 {
+		viewportHeight = 1
+	}
+
+	if !m.ready {
+		m.viewport = viewport.New(width, viewportHeight)
+		m.viewport.Style = lipgloss.NewStyle()
+		m.ready = true
+	} else {
+		m.viewport.Width = width
+		m.viewport.Height = viewportHeight
+	}
 }
 
 // LoadRequest loads a request by ID
@@ -399,6 +418,24 @@ func (m *RequestDetailModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.LoadRequest(m.request.ID)
 			}
 			return m, nil
+		case "up", "k":
+			m.viewport.LineUp(1)
+			return m, nil
+		case "down", "j":
+			m.viewport.LineDown(1)
+			return m, nil
+		case "pgup", "ctrl+u":
+			m.viewport.HalfViewUp()
+			return m, nil
+		case "pgdown", "ctrl+d":
+			m.viewport.HalfViewDown()
+			return m, nil
+		case "home", "g":
+			m.viewport.GotoTop()
+			return m, nil
+		case "end", "G":
+			m.viewport.GotoBottom()
+			return m, nil
 		}
 	}
 
@@ -457,10 +494,6 @@ func (m *RequestDetailModel) renderDetail() string {
 
 	var content strings.Builder
 
-	// Title
-	content.WriteString(styles.TitleStyle.Render("Request Details"))
-	content.WriteString("\n\n")
-
 	// Action result message
 	if m.actionResult != "" {
 		content.WriteString(m.actionResult)
@@ -508,6 +541,16 @@ func (m *RequestDetailModel) renderDetail() string {
 		content.WriteString(fmt.Sprintf("%s %s\n", keyStr, valueStr))
 	}
 
+	// Payload (full request body for audit/debug)
+	if len(m.request.Payload) > 0 {
+		content.WriteString("\n")
+		content.WriteString(styles.SubtitleStyle.Render("Payload"))
+		content.WriteString("\n")
+		payloadStr := FormatPayloadForDisplay(m.request.Payload)
+		content.WriteString(styles.BoxStyle.Render(payloadStr))
+		content.WriteString("\n")
+	}
+
 	// Signature if completed
 	if m.request.Signature != "" {
 		content.WriteString("\n")
@@ -532,15 +575,25 @@ func (m *RequestDetailModel) renderDetail() string {
 		content.WriteString("\n")
 	}
 
-	// Help
-	content.WriteString("\n")
-	helpText := "Esc: go back | r: refresh"
-	if m.request.Status == "pending" || m.request.Status == "authorizing" {
-		helpText = "a: approve | x: reject | " + helpText
-	}
-	content.WriteString(styles.HelpStyle.Render(helpText))
+	// Set content in viewport
+	m.viewport.SetContent(content.String())
 
-	return content.String()
+	// Build view with title, viewport, and footer
+	var view strings.Builder
+	view.WriteString(styles.TitleStyle.Render("Request Details"))
+	view.WriteString("\n\n")
+	view.WriteString(m.viewport.View())
+	view.WriteString("\n")
+
+	scrollInfo := fmt.Sprintf("(%d%% scrolled)", int(m.viewport.ScrollPercent()*100))
+	helpText := "j/k: scroll | g/G: top/bottom | "
+	if m.request.Status == "pending" || m.request.Status == "authorizing" {
+		helpText += "a: approve | x: reject | "
+	}
+	helpText += "r: refresh | Esc: back"
+	view.WriteString(styles.HelpStyle.Render(fmt.Sprintf("%s  %s", scrollInfo, helpText)))
+
+	return view.String()
 }
 
 func (m *RequestDetailModel) renderApproveDialog() string {

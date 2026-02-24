@@ -533,6 +533,7 @@ func validateSolidityRules(ctx context.Context, ruleRepo storage.RuleRepository,
 	}
 
 	log.Info("Validating Solidity expression rules", "count", len(rules))
+	log.Info("Rule validation may take 1–3 minutes (Forge compiles and runs test cases per batch)")
 
 	// Create validator
 	validator, err := evm.NewSolidityRuleValidator(evaluator, log)

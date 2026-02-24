@@ -18,8 +18,12 @@ import (
 func main() {
 	// Parse flags
 	var (
-		baseURL  = flag.String("url", "http://localhost:8548", "Remote signer service URL")
-		apiKeyID = flag.String("api-key-id", "", "API key ID for authentication")
+		baseURL       = flag.String("url", "https://localhost:8548", "Remote signer service URL")
+		apiKeyID      = flag.String("api-key-id", "", "API key ID for authentication")
+		tlsCA         = flag.String("tls-ca", "", "Path to CA certificate to verify server (for HTTPS)")
+		tlsCert       = flag.String("tls-cert", "", "Path to client certificate (for mTLS)")
+		tlsKey        = flag.String("tls-key", "", "Path to client private key (for mTLS)")
+		tlsSkipVerify = flag.Bool("tls-skip-verify", false, "Skip server certificate verification (insecure, testing only)")
 	)
 	flag.Parse()
 
@@ -47,13 +51,36 @@ func main() {
 		*baseURL = os.Getenv("REMOTE_SIGNER_URL")
 	}
 	if *baseURL == "" {
-		*baseURL = "http://localhost:8548"
+		*baseURL = "https://localhost:8548"
+	}
+
+	// TLS: env then defaults for HTTPS. When URL is https:// and no TLS flags/env set, use certs/ in current directory (same layout as scripts/gen-certs.sh: ca.crt, client.crt, client.key).
+	if *tlsCA == "" {
+		*tlsCA = os.Getenv("REMOTE_SIGNER_TLS_CA_FILE")
+	}
+	if *tlsCert == "" {
+		*tlsCert = os.Getenv("REMOTE_SIGNER_TLS_CERT_FILE")
+	}
+	if *tlsKey == "" {
+		*tlsKey = os.Getenv("REMOTE_SIGNER_TLS_KEY_FILE")
+	}
+	if strings.HasPrefix(*baseURL, "https://") && *tlsCA == "" && *tlsCert == "" && *tlsKey == "" && !*tlsSkipVerify {
+		*tlsCA = "certs/ca.crt"
+		*tlsCert = "certs/client.crt"
+		*tlsKey = "certs/client.key"
+	}
+	if !*tlsSkipVerify && os.Getenv("REMOTE_SIGNER_TLS_SKIP_VERIFY") == "1" {
+		*tlsSkipVerify = true
 	}
 
 	// Detect key format: hex (64+ hex chars) or base64
 	cfg := client.Config{
-		BaseURL:  *baseURL,
-		APIKeyID: *apiKeyID,
+		BaseURL:       *baseURL,
+		APIKeyID:      *apiKeyID,
+		TLSCAFile:     *tlsCA,
+		TLSCertFile:   *tlsCert,
+		TLSKeyFile:    *tlsKey,
+		TLSSkipVerify: *tlsSkipVerify,
 	}
 	if isHexKey(privateKey) {
 		cfg.PrivateKeyHex = privateKey

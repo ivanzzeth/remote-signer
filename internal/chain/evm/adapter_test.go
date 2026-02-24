@@ -282,3 +282,153 @@ func TestEVMAdapter_ParsePayload_NilTransaction(t *testing.T) {
 		t.Error("expected method_sig to be nil")
 	}
 }
+
+func TestEVMAdapter_ValidateBasicRequest(t *testing.T) {
+	adapter := &EVMAdapter{}
+
+	validPayload := []byte(`{"message":"hello"}`)
+
+	tests := []struct {
+		name          string
+		chainID       string
+		signerAddress string
+		signType      string
+		payload       []byte
+		wantErr       bool
+		errContains   string
+	}{
+		{
+			name:          "valid",
+			chainID:       "56",
+			signerAddress: "0x88eD75e9eCE373997221E3c0229e74007C1AD718",
+			signType:      SignTypePersonal,
+			payload:       validPayload,
+			wantErr:       false,
+		},
+		{
+			name:          "chain_id required",
+			chainID:       "",
+			signerAddress: "0x88eD75e9eCE373997221E3c0229e74007C1AD718",
+			signType:      SignTypePersonal,
+			payload:       validPayload,
+			wantErr:       true,
+			errContains:   "chain_id",
+		},
+		{
+			name:          "invalid chain_id",
+			chainID:       "0x56",
+			signerAddress: "0x88eD75e9eCE373997221E3c0229e74007C1AD718",
+			signType:      SignTypePersonal,
+			payload:       validPayload,
+			wantErr:       true,
+			errContains:   "chain_id",
+		},
+		{
+			name:          "signer_address required",
+			chainID:       "56",
+			signerAddress: "",
+			signType:      SignTypePersonal,
+			payload:       validPayload,
+			wantErr:       true,
+			errContains:   "signer_address",
+		},
+		{
+			name:          "invalid signer_address",
+			chainID:       "56",
+			signerAddress: "0x1234",
+			signType:      SignTypePersonal,
+			payload:       validPayload,
+			wantErr:       true,
+			errContains:   "signer_address",
+		},
+		{
+			name:          "sign_type required",
+			chainID:       "56",
+			signerAddress: "0x88eD75e9eCE373997221E3c0229e74007C1AD718",
+			signType:      "",
+			payload:       validPayload,
+			wantErr:       true,
+			errContains:   "sign_type",
+		},
+		{
+			name:          "invalid sign_type",
+			chainID:       "56",
+			signerAddress: "0x88eD75e9eCE373997221E3c0229e74007C1AD718",
+			signType:      "unknown_type",
+			payload:       validPayload,
+			wantErr:       true,
+			errContains:   "sign_type",
+		},
+		{
+			name:          "payload required",
+			chainID:       "56",
+			signerAddress: "0x88eD75e9eCE373997221E3c0229e74007C1AD718",
+			signType:      SignTypePersonal,
+			payload:       nil,
+			wantErr:       true,
+			errContains:   "payload",
+		},
+		{
+			name:          "payload empty",
+			chainID:       "56",
+			signerAddress: "0x88eD75e9eCE373997221E3c0229e74007C1AD718",
+			signType:      SignTypePersonal,
+			payload:       []byte{},
+			wantErr:       true,
+			errContains:   "payload",
+		},
+		{
+			name:          "payload exceeds max size",
+			chainID:       "56",
+			signerAddress: "0x88eD75e9eCE373997221E3c0229e74007C1AD718",
+			signType:      SignTypePersonal,
+			payload:       make([]byte, maxPayloadSize+1),
+			wantErr:       true,
+			errContains:   "payload exceeds",
+		},
+		{
+			name:          "payload invalid JSON",
+			chainID:       "56",
+			signerAddress: "0x88eD75e9eCE373997221E3c0229e74007C1AD718",
+			signType:      SignTypePersonal,
+			payload:       []byte(`{not json`),
+			wantErr:       true,
+			errContains:   "not valid JSON",
+		},
+		{
+			name:          "payload missing required field for sign_type",
+			chainID:       "56",
+			signerAddress: "0x88eD75e9eCE373997221E3c0229e74007C1AD718",
+			signType:      SignTypePersonal,
+			payload:       []byte(`{}`),
+			wantErr:       true,
+			errContains:   "message is required",
+		},
+		{
+			name:          "typed_data requires typed_data field",
+			chainID:       "56",
+			signerAddress: "0x88eD75e9eCE373997221E3c0229e74007C1AD718",
+			signType:      SignTypeTypedData,
+			payload:       []byte(`{"message":"wrong"}`),
+			wantErr:       true,
+			errContains:   "typed_data is required",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := adapter.ValidateBasicRequest(tt.chainID, tt.signerAddress, tt.signType, tt.payload)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("error %q should contain %q", err.Error(), tt.errContains)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}

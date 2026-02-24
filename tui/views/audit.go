@@ -33,8 +33,11 @@ type AuditModel struct {
 	showFilter     bool
 	filterInput    textinput.Model
 	filterType     string // "event" or "severity"
-	showDetail     bool
-	detailScroll   int // scroll offset for detail view
+	showDetail         bool
+	detailScroll       int // scroll offset for detail view
+	detailRequest      *client.RequestStatus
+	detailRequestLoad  bool
+	detailRequestErr   error
 	// Cursor-based pagination
 	cursor        *string
 	cursorID      *string
@@ -58,6 +61,12 @@ type AuditDataMsg struct {
 	NextCursorID *string
 	HasMore      bool
 	Err          error
+}
+
+// AuditDetailRequestMsg is sent when the request for the selected audit record is loaded (detail view).
+type AuditDetailRequestMsg struct {
+	Request *client.RequestStatus
+	Err     error
 }
 
 // NewAuditModel creates a new audit model
@@ -146,6 +155,17 @@ func (m *AuditModel) loadData() tea.Cmd {
 	}
 }
 
+// loadDetailRequest fetches the sign request for the given ID (used in detail view when record has SignRequestID).
+func (m *AuditModel) loadDetailRequest(requestID string) tea.Cmd {
+	return func() tea.Msg {
+		req, err := m.client.GetRequest(m.ctx, requestID)
+		if err != nil {
+			return AuditDetailRequestMsg{Err: err}
+		}
+		return AuditDetailRequestMsg{Request: req, Err: nil}
+	}
+}
+
 // Update handles messages
 func (m *AuditModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -172,6 +192,17 @@ func (m *AuditModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case AuditDetailRequestMsg:
+		m.detailRequestLoad = false
+		if msg.Err != nil {
+			m.detailRequestErr = msg.Err
+			m.detailRequest = nil
+		} else {
+			m.detailRequest = msg.Request
+			m.detailRequestErr = nil
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		// Handle detail view
 		if m.showDetail {
@@ -179,6 +210,9 @@ func (m *AuditModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "esc", "enter", "backspace":
 				m.showDetail = false
 				m.detailScroll = 0
+				m.detailRequest = nil
+				m.detailRequestLoad = false
+				m.detailRequestErr = nil
 				return m, nil
 			case "up", "k":
 				if m.detailScroll > 0 {
@@ -280,6 +314,14 @@ func (m *AuditModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			if len(m.records) > 0 && m.selectedIdx < len(m.records) {
 				m.showDetail = true
+				m.detailScroll = 0
+				m.detailRequest = nil
+				m.detailRequestErr = nil
+				record := m.records[m.selectedIdx]
+				if record.SignRequestID != nil && *record.SignRequestID != "" {
+					m.detailRequestLoad = true
+					return m, m.loadDetailRequest(*record.SignRequestID)
+				}
 			}
 			return m, nil
 		case "n":
@@ -595,6 +637,39 @@ func (m *AuditModel) renderDetail() string {
 			content.WriteString(styles.MutedColor.Render("No additional details"))
 		}
 		content.WriteString("\n")
+	}
+
+	// Request (when this audit record is tied to a sign request)
+	if record.SignRequestID != nil && *record.SignRequestID != "" {
+		content.WriteString("\n")
+		content.WriteString(styles.SubtitleStyle.Render("Request"))
+		content.WriteString("\n")
+		content.WriteString(styles.InfoKeyStyle.Render("Request ID:") + " " + *record.SignRequestID + "\n")
+		if m.detailRequestLoad {
+			content.WriteString(styles.MutedColor.Render("Loading request..."))
+			content.WriteString("\n")
+		} else if m.detailRequestErr != nil {
+			content.WriteString(styles.ErrorStyle.Render("Failed to load request: " + m.detailRequestErr.Error()))
+			content.WriteString("\n")
+		} else if m.detailRequest != nil {
+			content.WriteString(styles.InfoKeyStyle.Render("Status:") + " " + styles.GetStatusStyle(m.detailRequest.Status).Render(m.detailRequest.Status) + "\n")
+			content.WriteString(styles.InfoKeyStyle.Render("Sign Type:") + " " + m.detailRequest.SignType + "\n")
+			content.WriteString(styles.InfoKeyStyle.Render("Signer:") + " " + m.detailRequest.SignerAddress + "\n")
+			content.WriteString(styles.InfoKeyStyle.Render("Chain ID:") + " " + m.detailRequest.ChainID + "\n")
+			if m.detailRequest.ErrorMessage != "" {
+				content.WriteString(styles.InfoKeyStyle.Render("Error:") + " " + m.detailRequest.ErrorMessage + "\n")
+			}
+			content.WriteString("\n")
+			content.WriteString(styles.SubtitleStyle.Render("Payload"))
+			content.WriteString("\n")
+			if len(m.detailRequest.Payload) > 0 {
+				payloadStr := FormatPayloadForDisplay(m.detailRequest.Payload)
+				content.WriteString(styles.BoxStyle.Render(payloadStr))
+			} else {
+				content.WriteString(styles.MutedColor.Render("(empty)"))
+			}
+			content.WriteString("\n")
+		}
 	}
 
 	// Split content into lines for scrolling

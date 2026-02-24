@@ -242,24 +242,43 @@ func (v *SolidityRuleValidator) ValidateRulesBatch(ctx context.Context, rules []
 	results := make([]ValidationResult, len(rules))
 	allValid := true
 
-	// Batch validate each mode group separately
-	for mode, groupItems := range modeGroups {
+	// Deterministic order for progress logging (batch 1/N, 2/N, ...)
+	modes := make([]ValidationMode, 0, len(modeGroups))
+	for m := range modeGroups {
+		modes = append(modes, m)
+	}
+	sort.Slice(modes, func(i, j int) bool { return modes[i] < modes[j] })
+	totalBatches := len(modes)
+
+	for batchIndex, mode := range modes {
+		groupItems := modeGroups[mode]
 		// Extract rules for this group
 		groupRules := make([]*types.Rule, len(groupItems))
 		for j, item := range groupItems {
 			groupRules[j] = item.rule
 		}
 
+		current, total := batchIndex+1, totalBatches
 		v.logger.Info("Batch validating rules",
+			"batch", fmt.Sprintf("%d/%d", current, total),
 			"mode", v.modeString(mode),
 			"count", len(groupRules),
+			"message", "this batch may take 1–2 min (Forge compile + run)",
 		)
+		batchStart := time.Now()
 
 		// Batch validate this mode group
 		groupResult, err := v.validateRulesBatchForMode(ctx, groupRules, mode)
 		if err != nil {
 			return nil, fmt.Errorf("batch validation failed for mode %s: %w", v.modeString(mode), err)
 		}
+
+		v.logger.Info("Batch validation passed",
+			"batch", fmt.Sprintf("%d/%d", current, total),
+			"mode", v.modeString(mode),
+			"count", len(groupRules),
+			"took", time.Since(batchStart).Round(time.Second),
+		)
 
 		// Map group results back to original indices
 		for j, item := range groupItems {
