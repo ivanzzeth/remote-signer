@@ -12,6 +12,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/core/auth"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
+	"github.com/ivanzzeth/remote-signer/internal/metrics"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
@@ -77,6 +78,9 @@ func (r *Router) setupRoutes() error {
 	// Health check (no auth required, but with security headers)
 	healthHandler := handler.NewHealthHandler(r.config.Version)
 	r.mux.Handle("/health", middleware.SecurityHeadersMiddleware()(healthHandler))
+
+	// Prometheus metrics (no auth; same port as API)
+	r.mux.Handle("/metrics", middleware.SecurityHeadersMiddleware()(metrics.Handler()))
 
 	// EVM handlers
 	signHandler, err := evmhandler.NewSignHandler(r.signService, r.logger)

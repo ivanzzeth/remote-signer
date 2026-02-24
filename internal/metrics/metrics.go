@@ -1,0 +1,52 @@
+package metrics
+
+import (
+	"net/http"
+	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+)
+
+var (
+	ruleEvalDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "remote_signer_rule_evaluation_duration_seconds",
+			Help:    "Duration of rule evaluation in seconds",
+			Buckets: prometheus.ExponentialBuckets(0.01, 2, 14), // 0.01s to ~82s
+		},
+		[]string{"rule_type"},
+	)
+	ruleEvalTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "remote_signer_rule_evaluation_total",
+			Help: "Total number of rule evaluations by type and outcome",
+		},
+		[]string{"rule_type", "outcome"},
+	)
+)
+
+func init() {
+	prometheus.MustRegister(ruleEvalDuration, ruleEvalTotal)
+}
+
+// Outcome for rule evaluation metrics
+const (
+	OutcomeNoMatch = "no_match" // evaluated, did not match
+	OutcomeAllow   = "allow"    // whitelist match (allowed)
+	OutcomeBlock   = "block"   // blocklist match (blocked)
+	OutcomeError   = "error"   // evaluation error
+)
+
+// RecordRuleEvaluation records a rule evaluation for metrics (duration and count by outcome).
+// ruleType is the rule type (e.g. evm_solidity_expression); outcome is one of Outcome*.
+func RecordRuleEvaluation(ruleType, outcome string, duration time.Duration) {
+	ruleEvalDuration.WithLabelValues(ruleType).Observe(duration.Seconds())
+	ruleEvalTotal.WithLabelValues(ruleType, outcome).Inc()
+}
+
+// Handler returns the HTTP handler for the /metrics endpoint (Prometheus exposition format).
+// Bind to the same server port as the API; no authentication required.
+func Handler() http.Handler {
+	return promhttp.Handler()
+}

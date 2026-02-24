@@ -50,6 +50,8 @@ chains:
       forge_path: ""
       # Cache directory for compiled scripts (relative paths are allowed)
       cache_dir: "./data/forge-cache"
+      # Workspace for rule scripts and lib/forge-std. Empty = OS temp dir. For Docker: set env REMOTE_SIGNER_FORGE_TEMP_DIR=/app/data/forge-workspace and mount data/forge-workspace (install via ./scripts/deploy.sh init).
+      # temp_dir: "./data/forge-workspace"
       # Max execution time per rule (default: 30s)
       timeout: "30s"
 

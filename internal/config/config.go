@@ -170,6 +170,7 @@ type FoundryConfig struct {
 	Enabled   bool          `yaml:"enabled"`
 	ForgePath string        `yaml:"forge_path"` // path to forge binary, empty = auto-detect from PATH
 	CacheDir  string        `yaml:"cache_dir"`  // cache directory for compiled scripts
+	TempDir   string        `yaml:"temp_dir"`   // workspace dir for rule scripts and lib/forge-std; empty = os.TempDir()/remote-signer-rules. For Docker, set to /app/data/forge-workspace and mount repo data/forge-workspace.
 	Timeout   time.Duration `yaml:"timeout"`    // max execution time per rule (default: 30s)
 }
 

@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/metrics"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
@@ -149,8 +151,11 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 			}
 		}
 
+		start := time.Now()
 		violated, reason, err := evaluator.Evaluate(ctx, rule, req, parsed)
+		duration := time.Since(start)
 		if err != nil {
+			metrics.RecordRuleEvaluation(string(rule.Type), metrics.OutcomeError, duration)
 			e.logger.Error("blocklist rule evaluation error (Fail-Closed)",
 				"rule_id", rule.ID,
 				"type", rule.Type,
@@ -164,8 +169,8 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 				Err:      err,
 			}
 		}
-
 		if violated {
+			metrics.RecordRuleEvaluation(string(rule.Type), metrics.OutcomeBlock, duration)
 			e.logger.Warn("request blocked by rule",
 				"rule_id", rule.ID,
 				"rule_name", rule.Name,
@@ -185,6 +190,7 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 				BlockReason: reason,
 			}, nil
 		}
+		metrics.RecordRuleEvaluation(string(rule.Type), metrics.OutcomeNoMatch, duration)
 	}
 
 	// Phase 2: Check whitelist rules
@@ -219,8 +225,11 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 		}
 
 		sequentialCount++
+		start := time.Now()
 		matched, reason, err := evaluator.Evaluate(ctx, rule, req, parsed)
+		duration := time.Since(start)
 		if err != nil {
+			metrics.RecordRuleEvaluation(string(rule.Type), metrics.OutcomeError, duration)
 			e.logger.Debug("whitelist rule evaluation error, skipping",
 				"rule_id", rule.ID,
 				"rule_name", rule.Name,
@@ -229,6 +238,11 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 			)
 			// Fail-Open for whitelist: skip and continue to next rule
 			continue
+		}
+		if matched {
+			metrics.RecordRuleEvaluation(string(rule.Type), metrics.OutcomeAllow, duration)
+		} else {
+			metrics.RecordRuleEvaluation(string(rule.Type), metrics.OutcomeNoMatch, duration)
 		}
 
 		if !matched {

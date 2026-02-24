@@ -22,14 +22,25 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
 
-// solidityExpressionTemplate is for require-based rules (Expression mode)
-// Context variables are available with both short names and tx_*/ctx_* prefixed names:
-// - Short: to, value, selector, data, chainId, signer (backward-compatible)
-// - Prefixed: tx_to, tx_value, tx_selector, tx_data, ctx_chainId, ctx_signer
+// Env var names for request-as-input (one compile per rule, no recompile when request changes)
+const (
+	envRuleTxTo       = "RULE_TX_TO"
+	envRuleTxValue   = "RULE_TX_VALUE"
+	envRuleTxSelector = "RULE_TX_SELECTOR"
+	envRuleTxData     = "RULE_TX_DATA"
+	envRuleChainID    = "RULE_CHAIN_ID"
+	envRuleSigner     = "RULE_SIGNER"
+)
+
+// solidityExpressionTemplate is for require-based rules (Expression mode).
+// Request data is read from env at runtime so the script is invariant per rule (compile once per rule).
+// Context variables: to, value, selector, data, chainId, signer (and tx_*/ctx_* aliases).
 const solidityExpressionTemplate = `// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-contract RuleEvaluator {
+import "forge-std/Script.sol";
+
+contract RuleEvaluator is Script {
     {{.InMappingDeclarations}}
 
     constructor() {
@@ -37,15 +48,15 @@ contract RuleEvaluator {
     }
 
     function run() public view returns (bool) {
-        // Transaction context
-        address tx_to = {{.To}};
-        uint256 tx_value = {{.Value}};
-        bytes4 tx_selector = {{.Selector}};
-        bytes memory tx_data = {{.Data}};
+        // Transaction context from env (request-as-input: no recompile per request)
+        address tx_to = vm.envAddress("RULE_TX_TO");
+        uint256 tx_value = vm.envUint("RULE_TX_VALUE");
+        bytes4 tx_selector = _envBytes4("RULE_TX_SELECTOR");
+        bytes memory tx_data = vm.envBytes("RULE_TX_DATA");
 
         // Signing context
-        uint256 ctx_chainId = {{.ChainID}};
-        address ctx_signer = {{.Signer}};
+        uint256 ctx_chainId = vm.envUint("RULE_CHAIN_ID");
+        address ctx_signer = vm.envAddress("RULE_SIGNER");
 
         // Backward-compatible short aliases
         address to = tx_to;
@@ -65,20 +76,27 @@ contract RuleEvaluator {
         // If we reach here, all require() passed
         return true;
     }
+
+    function _envBytes4(string memory key) internal view returns (bytes4) {
+        bytes memory b = vm.envBytes(key);
+        if (b.length >= 4) return bytes4(b);
+        return bytes4(0);
+    }
 }
 `
 
-// solidityFunctionTemplate is for function-based rules (Functions mode)
-// Uses two contracts: RuleContract (contains user functions) and RuleEvaluatorTest (forge test)
-// This avoids Foundry's address(this) check by calling an external contract via forge test
+// solidityFunctionTemplate is for function-based rules (Functions mode).
+// Request data is read from env in setUp (request-as-input: compile once per rule).
+// Uses two contracts: RuleContract (user functions) and RuleEvaluatorTest (forge test).
 const solidityFunctionTemplate = `// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
+
+import "forge-std/Test.sol";
 
 // RuleContract contains user-defined validation functions
 contract RuleContract {
     {{.InMappingDeclarations}}
 
-    // Transaction context available as state variables
     address public immutable txTo;
     uint256 public immutable txValue;
     bytes4 public immutable txSelector;
@@ -103,40 +121,39 @@ contract RuleContract {
         {{.InMappingConstructorInit}}
     }
 
-    // Fallback: reject any function call that doesn't match whitelisted selectors
     fallback() external {
         revert("function not whitelisted");
     }
 
-    // User-defined functions for automatic selector matching
     {{.Functions}}
 }
 
-// RuleEvaluatorTest is the forge test entry point
-contract RuleEvaluatorTest {
+contract RuleEvaluatorTest is Test {
     RuleContract public ruleContract;
 
     function setUp() public {
-        // Create RuleContract with transaction context
+        bytes4 sel = _envBytes4("RULE_TX_SELECTOR");
         ruleContract = new RuleContract(
-            {{.To}},
-            {{.Value}},
-            {{.Selector}},
-            {{.Data}},
-            {{.ChainID}},
-            {{.Signer}}
+            vm.envAddress("RULE_TX_TO"),
+            vm.envUint("RULE_TX_VALUE"),
+            sel,
+            vm.envBytes("RULE_TX_DATA"),
+            vm.envUint("RULE_CHAIN_ID"),
+            vm.envAddress("RULE_SIGNER")
         );
     }
 
-    function test_rule() public {
-        // Get txData from the rule contract
-        bytes memory txData = ruleContract.txData();
+    function _envBytes4(string memory key) internal view returns (bytes4) {
+        bytes memory b = vm.envBytes(key);
+        if (b.length >= 4) return bytes4(b);
+        return bytes4(0);
+    }
 
+    function test_rule() public {
+        bytes memory txData = ruleContract.txData();
         if (txData.length >= 4) {
-            // Forward calldata to RuleContract - this is an external call, not address(this)
             (bool success, bytes memory returnData) = address(ruleContract).call(txData);
             if (!success) {
-                // Propagate revert reason
                 if (returnData.length > 0) {
                     assembly {
                         revert(add(returnData, 32), mload(returnData))
@@ -282,6 +299,7 @@ type SolidityRuleEvaluator struct {
 type SolidityEvaluatorConfig struct {
 	ForgePath string        // path to forge binary, empty = auto-detect from PATH
 	CacheDir  string        // cache directory for compiled scripts
+	TempDir   string        // workspace dir (foundry.toml + lib/forge-std + rule scripts); empty = os.TempDir()/remote-signer-rules. When set to a dir with pre-installed lib/forge-std (e.g. Docker mount), ensureForgeStd is skipped.
 	Timeout   time.Duration // max execution time per rule
 	CacheTTL  time.Duration // TTL for execution result cache entries, 0 = no expiration
 }
@@ -309,21 +327,26 @@ func NewSolidityRuleEvaluator(cfg SolidityEvaluatorConfig, logger *slog.Logger) 
 		return nil, fmt.Errorf("forge not executable at %s: %w", foundryPath, err)
 	}
 
-	// Create temp directory with restricted permissions (owner-only)
-	tempDir := filepath.Join(os.TempDir(), "remote-signer-rules")
+	// Workspace directory: use configured TempDir (e.g. mounted data/forge-workspace in Docker) or default
+	tempDir := cfg.TempDir
+	if tempDir == "" {
+		tempDir = filepath.Join(os.TempDir(), "remote-signer-rules")
+	}
 	if err := os.MkdirAll(tempDir, 0700); err != nil {
-		return nil, fmt.Errorf("failed to create temp dir: %w", err)
+		return nil, fmt.Errorf("failed to create temp dir %s: %w", tempDir, err)
 	}
 
 	// Create foundry.toml for forge test to work properly
 	// Note: Don't specify solc version to let forge auto-detect from pragma
 	// Enable via_ir to avoid "Stack too deep" errors with many local variables
 	// Enable incremental compilation for better performance (supported in foundry >= 1.5.1)
+	// forge-std is required for vm env/parse cheatcodes when using request-as-input (no recompile per request)
 	foundryConfig := `[profile.default]
 src = "."
 test = "."
 out = "out"
-libs = []
+libs = ["lib"]
+remappings = ["forge-std/=lib/forge-std/src/"]
 via_ir = true
 optimizer = false
 incremental = true
@@ -331,6 +354,10 @@ incremental = true
 	foundryConfigPath := filepath.Join(tempDir, "foundry.toml")
 	if err := os.WriteFile(foundryConfigPath, []byte(foundryConfig), 0600); err != nil {
 		return nil, fmt.Errorf("failed to create foundry.toml: %w", err)
+	}
+	// Ensure forge-std is available so scripts can use vm.env* / vm.parseBytes (request-as-input mode)
+	if err := ensureForgeStd(tempDir, foundryPath); err != nil {
+		return nil, fmt.Errorf("forge-std setup: %w", err)
 	}
 
 	cacheDir := cfg.CacheDir
@@ -460,7 +487,8 @@ func (e *SolidityRuleEvaluator) Evaluate(
 	return passed, reason, nil
 }
 
-// evaluateExpression evaluates a Solidity expression with the given context (Expression mode)
+// evaluateExpression evaluates a Solidity expression with the given context (Expression mode).
+// Script is generated from rule only (expression + inMapping); request data is passed at runtime via env (compile once per rule).
 func (e *SolidityRuleEvaluator) evaluateExpression(
 	ctx context.Context,
 	expression string,
@@ -468,22 +496,19 @@ func (e *SolidityRuleEvaluator) evaluateExpression(
 	parsed *types.ParsedPayload,
 	inMappingArrays map[string][]string,
 ) (bool, string, error) {
-	// Generate script with transaction context
-	script, err := e.generateExpressionScript(expression, req, parsed, inMappingArrays)
+	script, err := e.generateExpressionScript(expression, inMappingArrays)
 	if err != nil {
 		return false, "", fmt.Errorf("failed to generate script: %w", err)
 	}
-
-	// Execute via forge script
-	passed, reason, err := e.executeScript(ctx, script)
+	passed, reason, err := e.executeScript(ctx, script, buildRequestEnv(req, parsed))
 	if err != nil {
 		return false, "", fmt.Errorf("script execution failed: %w", err)
 	}
-
 	return passed, reason, nil
 }
 
-// evaluateFunctions evaluates user-defined functions with the given context (Functions mode)
+// evaluateFunctions evaluates user-defined functions (Functions mode).
+// Script is generated from rule only; request data is passed at runtime via env (compile once per rule).
 func (e *SolidityRuleEvaluator) evaluateFunctions(
 	ctx context.Context,
 	functions string,
@@ -491,18 +516,14 @@ func (e *SolidityRuleEvaluator) evaluateFunctions(
 	parsed *types.ParsedPayload,
 	inMappingArrays map[string][]string,
 ) (bool, string, error) {
-	// Generate script with transaction context and user functions
-	script, err := e.generateFunctionScript(functions, req, parsed, inMappingArrays)
+	script, err := e.generateFunctionScript(functions, inMappingArrays)
 	if err != nil {
 		return false, "", fmt.Errorf("failed to generate function script: %w", err)
 	}
-
-	// Execute via forge script
-	passed, reason, err := e.executeScript(ctx, script)
+	passed, reason, err := e.executeScript(ctx, script, buildRequestEnv(req, parsed))
 	if err != nil {
 		return false, "", fmt.Errorf("script execution failed: %w", err)
 	}
-
 	return passed, reason, nil
 }
 
@@ -643,34 +664,21 @@ func preprocessInOperator(expression string) string {
 	})
 }
 
-// generateExpressionScript generates a Solidity script for Expression mode
+// generateExpressionScript generates a Solidity script for Expression mode.
+// Script content depends only on the rule (expression + inMapping); request data is passed at runtime via env.
 func (e *SolidityRuleEvaluator) generateExpressionScript(
 	expression string,
-	req *types.SignRequest,
-	parsed *types.ParsedPayload,
 	inMappingArrays map[string][]string,
 ) (string, error) {
 	ir := processInOperatorToMappings(expression, inMappingArrays)
 	expression = preprocessInOperator(ir.Modified)
 	data := struct {
-		To                     string
-		Value                  string
-		Selector               string
-		Data                   string
-		ChainID                string
-		Signer                 string
-		Expression             string
-		InMappingDeclarations  string
-		InMappingConstructorInit string
+		Expression                string
+		InMappingDeclarations     string
+		InMappingConstructorInit  string
 	}{
-		To:                     formatAddress(parsed.Recipient),
-		Value:                  formatWei(parsed.Value),
-		Selector:               formatSelector(parsed.MethodSig),
-		Data:                   formatBytes(parsed.RawData),
-		ChainID:                formatChainID(req.ChainID),
-		Signer:                 formatAddress(&req.SignerAddress),
-		Expression:             expression,
-		InMappingDeclarations:  ir.Declarations,
+		Expression:                expression,
+		InMappingDeclarations:     ir.Declarations,
 		InMappingConstructorInit: ir.ConstructorInit,
 	}
 
@@ -687,34 +695,21 @@ func (e *SolidityRuleEvaluator) generateExpressionScript(
 	return buf.String(), nil
 }
 
-// generateFunctionScript generates a Solidity script for Functions mode
+// generateFunctionScript generates a Solidity script for Functions mode.
+// Script content depends only on the rule (functions + inMapping); request data is passed at runtime via env.
 func (e *SolidityRuleEvaluator) generateFunctionScript(
 	functions string,
-	req *types.SignRequest,
-	parsed *types.ParsedPayload,
 	inMappingArrays map[string][]string,
 ) (string, error) {
 	ir := processInOperatorToMappings(functions, inMappingArrays)
 	functions = preprocessInOperator(ir.Modified)
 	data := struct {
-		To                      string
-		Value                   string
-		Selector                string
-		Data                    string
-		ChainID                 string
-		Signer                  string
-		Functions               string
-		InMappingDeclarations   string
-		InMappingConstructorInit string
+		Functions                string
+		InMappingDeclarations    string
+		InMappingConstructorInit  string
 	}{
-		To:                      formatAddress(parsed.Recipient),
-		Value:                   formatWei(parsed.Value),
-		Selector:                formatSelector(parsed.MethodSig),
-		Data:                    formatBytes(parsed.RawData),
-		ChainID:                 formatChainID(req.ChainID),
-		Signer:                  formatAddress(&req.SignerAddress),
-		Functions:               functions,
-		InMappingDeclarations:   ir.Declarations,
+		Functions:                functions,
+		InMappingDeclarations:    ir.Declarations,
 		InMappingConstructorInit: ir.ConstructorInit,
 	}
 
@@ -731,34 +726,35 @@ func (e *SolidityRuleEvaluator) generateFunctionScript(
 	return buf.String(), nil
 }
 
-// executeScript executes the Solidity script/test and returns pass/fail with reason
-// filePathHint is an optional hint for grouping scripts from the same file (for better caching)
-// This method implements two levels of caching:
-// 1. Script file caching: avoids rewriting the same script content to disk
-// 2. Execution result caching: avoids re-executing forge for identical scripts
-func (e *SolidityRuleEvaluator) executeScript(ctx context.Context, script string, filePathHint ...string) (bool, string, error) {
+// executeScript executes the Solidity script/test and returns pass/fail with reason.
+// When requestEnv is non-nil, those vars are merged into the process env (request-as-input mode:
+// same script is reused, no execution result cache). When requestEnv is nil, behavior is unchanged.
+// filePathHint is an optional hint for grouping scripts from the same file (for better caching).
+func (e *SolidityRuleEvaluator) executeScript(ctx context.Context, script string, requestEnv []string, filePathHint ...string) (bool, string, error) {
 	// Calculate script hash for caching/naming
 	hash := sha256.Sum256([]byte(script))
 	hashStr := hex.EncodeToString(hash[:8]) // Use first 8 bytes for shorter filename
 	fullHashStr := hex.EncodeToString(hash[:]) // Full hash for cache key
 
-	// Check execution result cache first (fastest path)
-	// Since Solidity scripts are deterministic, identical scripts always produce identical results
-	e.mu.RLock()
-	cachedResult, resultFound := e.executionCache[fullHashStr]
-	e.mu.RUnlock()
+	// When request data is passed via env, same script can produce different results → do not use execution cache
+	useExecutionCache := len(requestEnv) == 0
 
-	if resultFound {
-		// Check if cache entry has expired
-		if time.Since(cachedResult.timestamp) < e.cacheTTL {
-			e.logger.Debug("using cached execution result", "script_hash", hashStr)
-			return cachedResult.passed, cachedResult.reason, cachedResult.err
+	if useExecutionCache {
+		// Check execution result cache first (fastest path)
+		e.mu.RLock()
+		cachedResult, resultFound := e.executionCache[fullHashStr]
+		e.mu.RUnlock()
+
+		if resultFound {
+			if time.Since(cachedResult.timestamp) < e.cacheTTL {
+				e.logger.Debug("using cached execution result", "script_hash", hashStr)
+				return cachedResult.passed, cachedResult.reason, cachedResult.err
+			}
+			e.mu.Lock()
+			delete(e.executionCache, fullHashStr)
+			e.mu.Unlock()
+			e.logger.Debug("cached execution result expired", "script_hash", hashStr)
 		}
-		// Cache entry expired, remove it
-		e.mu.Lock()
-		delete(e.executionCache, fullHashStr)
-		e.mu.Unlock()
-		e.logger.Debug("cached execution result expired", "script_hash", hashStr)
 	}
 
 	// If filePathHint is provided, use it to create a file-grouped prefix
@@ -844,8 +840,11 @@ func (e *SolidityRuleEvaluator) executeScript(ctx context.Context, script string
 	// Set working directory to temp dir where foundry.toml exists
 	cmd.Dir = e.tempDir
 
-	// Security: Use minimal environment to prevent leaking secrets to user-controlled Solidity code
+	// Security: Use minimal environment; merge request-as-input vars when provided
 	cmd.Env = safeForgeEnv()
+	if len(requestEnv) > 0 {
+		cmd.Env = append(cmd.Env, requestEnv...)
+	}
 
 	output, err := cmd.CombinedOutput()
 
@@ -879,8 +878,8 @@ func (e *SolidityRuleEvaluator) executeScript(ctx context.Context, script string
 		result = &executionResult{passed: true, reason: "", err: nil, timestamp: time.Now()}
 	}
 
-	// Cache the execution result (only for successful executions or deterministic failures)
-	if result != nil {
+	// Cache the execution result only when script is deterministic (no requestEnv)
+	if result != nil && useExecutionCache {
 		e.mu.Lock()
 		e.executionCache[fullHashStr] = result
 		e.mu.Unlock()
@@ -1060,6 +1059,56 @@ func formatBytes(data []byte) string {
 	return fmt.Sprintf("hex\"%s\"", hex.EncodeToString(data))
 }
 
+// addressForEnv returns a hex address string for env vars (vm.envAddress expects raw hex, not Solidity literals).
+func addressForEnv(addr *string) string {
+	if addr == nil || *addr == "" {
+		return "0x0000000000000000000000000000000000000000"
+	}
+	s := strings.TrimPrefix(*addr, "0x")
+	if !isHexString(s) || len(s) != 40 {
+		return "0x0000000000000000000000000000000000000000"
+	}
+	if !common.IsHexAddress(*addr) {
+		return "0x0000000000000000000000000000000000000000"
+	}
+	return common.HexToAddress(*addr).Hex()
+}
+
+// buildRequestEnv returns environment variables for request-as-input execution.
+// Script reads these via vm.envAddress, vm.envUint, vm.envBytes so the same compiled artifact can be reused.
+func buildRequestEnv(req *types.SignRequest, parsed *types.ParsedPayload) []string {
+	if req == nil || parsed == nil {
+		return nil
+	}
+	dataHex := "0x"
+	if len(parsed.RawData) > 0 {
+		dataHex = "0x" + hex.EncodeToString(parsed.RawData)
+	}
+	selectorHex := "0x00000000"
+	if parsed.MethodSig != nil && strings.TrimPrefix(*parsed.MethodSig, "0x") != "" {
+		s := strings.TrimPrefix(*parsed.MethodSig, "0x")
+		if isHexString(s) && len(s) == 8 {
+			selectorHex = "0x" + s
+		}
+	}
+	chainID := req.ChainID
+	if chainID == "" || !isDecimalString(chainID) {
+		chainID = "1"
+	}
+	value := "0"
+	if parsed.Value != nil && *parsed.Value != "" && isDecimalString(*parsed.Value) {
+		value = *parsed.Value
+	}
+	return []string{
+		envRuleTxTo + "=" + addressForEnv(parsed.Recipient),
+		envRuleTxValue + "=" + value,
+		envRuleTxSelector + "=" + selectorHex,
+		envRuleTxData + "=" + dataHex,
+		envRuleChainID + "=" + chainID,
+		envRuleSigner + "=" + addressForEnv(&req.SignerAddress),
+	}
+}
+
 func formatChainID(chainID string) string {
 	if chainID == "" {
 		return "1"
@@ -1094,12 +1143,10 @@ func (e *SolidityRuleEvaluator) evaluateTypedDataExpression(
 		return false, "", fmt.Errorf("failed to generate typed data expression script: %w", err)
 	}
 
-	// Execute via forge script
-	passed, reason, err := e.executeScript(ctx, script)
+	passed, reason, err := e.executeScript(ctx, script, nil)
 	if err != nil {
 		return false, "", fmt.Errorf("script execution failed: %w", err)
 	}
-
 	return passed, reason, nil
 }
 
@@ -1117,12 +1164,10 @@ func (e *SolidityRuleEvaluator) evaluateTypedDataFunctions(
 		return false, "", fmt.Errorf("failed to generate typed data functions script: %w", err)
 	}
 
-	// Execute via forge script
-	passed, reason, err := e.executeScript(ctx, script)
+	passed, reason, err := e.executeScript(ctx, script, nil)
 	if err != nil {
 		return false, "", fmt.Errorf("script execution failed: %w", err)
 	}
-
 	return passed, reason, nil
 }
 
@@ -1818,6 +1863,26 @@ func formatInterfaceAsFixedBytes(v interface{}, solidityType string) string {
 	default:
 		return fmt.Sprintf("%s(0)", solidityType)
 	}
+}
+
+// ensureForgeStd installs forge-std in the given directory if lib/forge-std does not exist.
+// Required for request-as-input scripts that use vm.env* and vm.parseBytes.
+func ensureForgeStd(dir, foundryPath string) error {
+	libForgeStd := filepath.Join(dir, "lib", "forge-std")
+	if _, err := os.Stat(filepath.Join(libForgeStd, "src")); err == nil {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "lib"), 0700); err != nil {
+		return fmt.Errorf("create lib dir: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, foundryPath, "install", "foundry-rs/forge-std", "--no-git")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("forge install forge-std: %w, output: %s", err, string(out))
+	}
+	return nil
 }
 
 // safeForgeEnv returns a minimal environment for Forge subprocesses.

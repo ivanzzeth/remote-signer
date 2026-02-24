@@ -62,6 +62,8 @@ services:
     environment:
       # Database connection (host network: connect via localhost, port exposed by postgres container)
       DATABASE_DSN: "postgres://${POSTGRES_USER:-signer}:${POSTGRES_PASSWORD:-signer_password}@127.0.0.1:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-remote_signer}?sslmode=disable"
+      # Forge workspace (lib/forge-std): use mounted dir so no install inside container. Run ./scripts/deploy.sh init to install.
+      REMOTE_SIGNER_FORGE_TEMP_DIR: "/app/data/forge-workspace"
       # Optional: additional signers
       # EVM_SIGNER_KEY_1: ${EVM_SIGNER_KEY_1}
       # EVM_SIGNER_KEY_2: ${EVM_SIGNER_KEY_2}
@@ -80,6 +82,8 @@ services:
       # Foundry binaries (downloaded to host via deploy.sh init)
       - ./data/foundry/forge:/usr/local/bin/forge:ro
       - ./data/foundry/cast:/usr/local/bin/cast:ro
+      # Forge workspace with lib/forge-std (install on host via deploy.sh init; no download in container)
+      - ./data/forge-workspace:/app/data/forge-workspace
       # Forge cache for Solidity rules
       - forge_cache:/var/cache/remote-signer/forge
     # No "ports:" needed — host network mode binds directly to host's port 8548

@@ -321,6 +321,7 @@ func (ts *TestServer) Start() error {
 		solidityEvalConfig = evm.SolidityEvaluatorConfig{
 			ForgePath: cfg.Chains.EVM.Foundry.ForgePath,
 			CacheDir:  cfg.Chains.EVM.Foundry.CacheDir,
+			TempDir:   cfg.Chains.EVM.Foundry.TempDir,
 			Timeout:   cfg.Chains.EVM.Foundry.Timeout,
 		}
 	} else {
