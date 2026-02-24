@@ -1303,173 +1303,75 @@ func (e *SolidityRuleEvaluator) generateTypedDataFunctionsScript(
 	return buf.String(), nil
 }
 
-// GenerateTypedDataExpressionSyntaxCheckScript generates a syntax check script for TypedDataExpression mode
-// This version supports struct instance syntax when structDef is provided
+// GenerateTypedDataExpressionSyntaxCheckScript generates a syntax check script for TypedDataExpression mode.
+// Callers must pass the rule's typed_data_struct via GenerateTypedDataExpressionSyntaxCheckScriptWithStruct; rules are the single source of truth.
 func (e *SolidityRuleEvaluator) GenerateTypedDataExpressionSyntaxCheckScript(expression string) string {
-	// For syntax checking without struct definition, use legacy individual field declarations
 	return e.GenerateTypedDataExpressionSyntaxCheckScriptWithStruct(expression, nil)
 }
 
-// GenerateTypedDataExpressionSyntaxCheckScriptWithStruct generates a syntax check script with struct support
+// GenerateTypedDataExpressionSyntaxCheckScriptWithStruct generates a syntax check script from the rule's struct definition only.
+// structDef must come from the rule config (typed_data_struct); no hardcoded structs. When structDef is nil, generates only EIP-712/ctx vars so expressions that reference structs fail at compile (caller should require typed_data_struct for typed_data_expression rules).
 func (e *SolidityRuleEvaluator) GenerateTypedDataExpressionSyntaxCheckScriptWithStruct(expression string, structDef *StructDefinition) string {
-	if structDef != nil {
-		// Generate struct-based syntax check
-		structDefStr := generateStructDefinition(structDef)
-		instanceName := strings.ToLower(structDef.Name[:1]) + structDef.Name[1:]
-
-		// Generate default struct instance
-		var fieldDefaults []string
-		for _, field := range structDef.Fields {
-			fieldDefaults = append(fieldDefaults, fmt.Sprintf("            %s: %s", field.Name, getDefaultValue(field.Type)))
-		}
-
+	if structDef == nil {
+		// No struct: only standard EIP-712 and ctx variables. Expression that references any struct will fail at compile (undefined identifier).
 		return fmt.Sprintf(`// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 contract SyntaxCheck {
-    %s
-
     function run() public pure returns (bool) {
-        // EIP-712 Domain context (eip712_* prefix)
         string memory eip712_primaryType = "";
         string memory eip712_domainName = "";
         string memory eip712_domainVersion = "";
         uint256 eip712_domainChainId = 1;
         address eip712_domainContract = address(0);
-
-        // Signing context (ctx_* prefix)
         address ctx_signer = address(0);
         uint256 ctx_chainId = 1;
-
-        // Suppress unused variable warnings
-        bytes memory _eip712_primaryType = bytes(eip712_primaryType);
-        bytes memory _eip712_domainName = bytes(eip712_domainName);
-        bytes memory _eip712_domainVersion = bytes(eip712_domainVersion);
         eip712_domainChainId; eip712_domainContract; ctx_signer; ctx_chainId;
-        _eip712_primaryType; _eip712_domainName; _eip712_domainVersion;
 
-        // EIP-712 Message struct instance
-        %s memory %s = %s({
-%s
-        });
-
-        // User expression
-        %s
-
-        return true;
-    }
-}
-`, structDefStr, structDef.Name, instanceName, structDef.Name, strings.Join(fieldDefaults, ",\n"), expression)
-	}
-
-	// Legacy: Generate with common predefined fields for backward compatibility
-	return fmt.Sprintf(`// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
-
-contract SyntaxCheck {
-    // Common struct definitions for syntax checking
-    struct Order {
-        uint256 salt;
-        address maker;
-        address signer;
-        address taker;
-        uint256 tokenId;
-        uint256 makerAmount;
-        uint256 takerAmount;
-        uint256 expiration;
-        uint256 nonce;
-        uint256 feeRateBps;
-        uint8 side;
-        uint8 signatureType;
-    }
-
-    struct ClobAuth {
-        address address_;
-        string timestamp;
-        uint256 nonce;
-        string message_;
-    }
-
-    struct CreateProxy {
-        address paymentToken;
-        uint256 payment;
-        address paymentReceiver;
-    }
-
-    struct SafeTx {
-        address to;
-        uint256 value;
-        bytes data;
-        uint8 operation;
-        uint256 safeTxGas;
-        uint256 baseGas;
-        uint256 gasPrice;
-        address gasToken;
-        address refundReceiver;
-        uint256 nonce;
-    }
-
-    struct Permit {
-        address owner;
-        address spender;
-        uint256 value;
-        uint256 nonce;
-        uint256 deadline;
-    }
-
-    function run() public pure returns (bool) {
-        // EIP-712 Domain context (eip712_* prefix)
-        string memory eip712_primaryType = "";
-        string memory eip712_domainName = "";
-        string memory eip712_domainVersion = "";
-        uint256 eip712_domainChainId = 1;
-        address eip712_domainContract = address(0);
-
-        // Signing context (ctx_* prefix)
-        address ctx_signer = address(0);
-        uint256 ctx_chainId = 1;
-
-        // Suppress unused variable warnings
-        bytes memory _eip712_primaryType = bytes(eip712_primaryType);
-        bytes memory _eip712_domainName = bytes(eip712_domainName);
-        bytes memory _eip712_domainVersion = bytes(eip712_domainVersion);
-        eip712_domainChainId; eip712_domainContract; ctx_signer; ctx_chainId;
-        _eip712_primaryType; _eip712_domainName; _eip712_domainVersion;
-
-        // Common struct instances for syntax checking
-        Order memory order = Order({
-            salt: 0, maker: address(0), signer: address(0), taker: address(0),
-            tokenId: 0, makerAmount: 0, takerAmount: 0, expiration: 0,
-            nonce: 0, feeRateBps: 0, side: 0, signatureType: 0
-        });
-
-        ClobAuth memory clobAuth = ClobAuth({
-            address_: address(0), timestamp: "", nonce: 0, message_: ""
-        });
-
-        CreateProxy memory createProxy = CreateProxy({
-            paymentToken: address(0), payment: 0, paymentReceiver: address(0)
-        });
-
-        SafeTx memory safeTx = SafeTx({
-            to: address(0), value: 0, data: "", operation: 0, safeTxGas: 0,
-            baseGas: 0, gasPrice: 0, gasToken: address(0), refundReceiver: address(0), nonce: 0
-        });
-
-        Permit memory permit = Permit({
-            owner: address(0), spender: address(0), value: 0, nonce: 0, deadline: 0
-        });
-
-        // Suppress unused struct warnings
-        order; clobAuth; createProxy; safeTx; permit;
-
-        // User expression
+        // User expression (must not reference structs unless typed_data_struct is set in rule config)
         %s
 
         return true;
     }
 }
 `, expression)
+	}
+
+	// Generate from rule's struct only
+	structDefStr := generateStructDefinition(structDef)
+	instanceName := strings.ToLower(structDef.Name[:1]) + structDef.Name[1:]
+
+	var fieldDefaults []string
+	for _, field := range structDef.Fields {
+		fieldDefaults = append(fieldDefaults, fmt.Sprintf("            %s: %s", field.Name, getDefaultValue(field.Type)))
+	}
+
+	return fmt.Sprintf(`// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+contract SyntaxCheck {
+    %s
+
+    function run() public pure returns (bool) {
+        string memory eip712_primaryType = "";
+        string memory eip712_domainName = "";
+        string memory eip712_domainVersion = "";
+        uint256 eip712_domainChainId = 1;
+        address eip712_domainContract = address(0);
+        address ctx_signer = address(0);
+        uint256 ctx_chainId = 1;
+        eip712_domainChainId; eip712_domainContract; ctx_signer; ctx_chainId;
+
+        %s memory %s = %s({
+%s
+        });
+
+        %s
+
+        return true;
+    }
+}
+`, structDefStr, structDef.Name, instanceName, structDef.Name, strings.Join(fieldDefaults, ",\n"), expression)
 }
 
 // GenerateTypedDataFunctionsSyntaxCheckScript generates a syntax check script for TypedDataFunctions mode

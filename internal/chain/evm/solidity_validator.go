@@ -297,13 +297,50 @@ func (v *SolidityRuleValidator) validateRulesBatchForMode(ctx context.Context, r
 		}
 	}
 
-	// Validate syntax for all rules first (can be cached)
+	// Validate syntax for all rules first (can be cached). Use rule config as single source of truth.
 	for i, rule := range rules {
 		var config SolidityExpressionConfig
-		json.Unmarshal(rule.Config, &config)
+		if err := json.Unmarshal(rule.Config, &config); err != nil {
+			results[i] = ValidationResult{Valid: false}
+			allValid = false
+			continue
+		}
 		_, code := v.determineValidationMode(&config)
 
-		syntaxErr, err := v.validateSyntaxForMode(ctx, code, mode)
+		// TypedData modes require explicit typed_data_struct; no type inference from message values.
+		var structDef *StructDefinition
+		if mode == ValidationModeTypedDataExpression || mode == ValidationModeTypedDataFunctions {
+			if config.TypedDataStruct == "" {
+				msg := "typed_data_expression requires typed_data_struct in rule config (rules are the single source of truth)"
+				if mode == ValidationModeTypedDataFunctions {
+					msg = "typed_data_functions requires typed_data_struct in rule config (rules are the single source of truth)"
+				}
+				results[i] = ValidationResult{
+					Valid: false,
+					SyntaxError: &SyntaxError{
+						Message:  msg,
+						Severity: "error",
+					},
+				}
+				allValid = false
+				continue
+			}
+			var parseErr error
+			structDef, parseErr = parseStructDefinition(config.TypedDataStruct)
+			if parseErr != nil {
+				results[i] = ValidationResult{
+					Valid: false,
+					SyntaxError: &SyntaxError{
+						Message:  fmt.Sprintf("invalid typed_data_struct: %v", parseErr),
+						Severity: "error",
+					},
+				}
+				allValid = false
+				continue
+			}
+		}
+
+		syntaxErr, err := v.validateSyntaxForModeWithStruct(ctx, code, mode, structDef)
 		if err != nil {
 			results[i] = ValidationResult{Valid: false}
 			allValid = false
@@ -625,25 +662,15 @@ func (v *SolidityRuleValidator) generateBatchTestScript(rules []*types.Rule, mod
 			// Convert test input to SignRequest
 			req := v.testInputToTypedDataRequest(tcwr.tc.Input, typedData)
 
-			// Parse struct definition if provided
-			var structDef *StructDefinition
-			if config.TypedDataStruct != "" {
-				var parseErr error
-				structDef, parseErr = parseStructDefinition(config.TypedDataStruct)
-				if parseErr != nil {
-					return "", fmt.Errorf("failed to parse typed data struct: %w", parseErr)
-				}
+			// TypedDataExpression requires typed_data_struct (enforced above); no type inference.
+			structDef, parseErr := parseStructDefinition(config.TypedDataStruct)
+			if parseErr != nil {
+				return "", fmt.Errorf("failed to parse typed data struct: %w", parseErr)
 			}
-
-			// Generate struct instance or message field declarations
-			var structInstance string
-			if structDef != nil {
-				// Use struct instance syntax (e.g., Order memory order = Order({...}))
-				structInstance = generateStructInstance(structDef, typedData.Message)
-			} else {
-				// Fall back to individual field declarations
-				structInstance = generateMessageFieldDeclarations(typedData)
+			if structDef == nil {
+				return "", fmt.Errorf("rule %s: typed_data_expression requires typed_data_struct in config", rule.Name)
 			}
+			structInstance := generateStructInstance(structDef, typedData.Message)
 
 			ir := processInOperatorToMappings(config.TypedDataExpression, config.InMappingArrays)
 			expression := sanitizeEmptyComparisons(preprocessInOperator(ir.Modified))
@@ -652,9 +679,13 @@ func (v *SolidityRuleValidator) generateBatchTestScript(rules []*types.Rule, mod
 				mappingInit = mappingInit + "\n\n        "
 			}
 			// If we have mapping init, function cannot be pure (writes to state)
+			// If expression reads block/msg/tx (e.g. block.timestamp), use view
 			funcModifier := " pure"
 			if mappingInit != "" {
 				funcModifier = ""
+			}
+			if funcModifier == " pure" && (strings.Contains(expression, "block.") || strings.Contains(expression, "msg.") || strings.Contains(expression, " tx.")) {
+				funcModifier = " view"
 			}
 
 			// Generate test function
@@ -1152,9 +1183,12 @@ func inferSolidityType(value interface{}) string {
 		if len(v) == 66 && strings.HasPrefix(v, "0x") {
 			return "bytes32"
 		}
-		// Check if it's a numeric string
-		if _, err := json.Number(v).Int64(); err == nil {
+		// Numeric string (including values > Int64, e.g. "100000000000000000000")
+		if isDecimalString(v) {
 			return "uint256"
+		}
+		if strings.HasPrefix(v, "-") && isDecimalString(strings.TrimPrefix(v, "-")) {
+			return "int256"
 		}
 		return "string"
 	case float64:
