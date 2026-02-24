@@ -27,9 +27,10 @@ RUN CGO_ENABLED=0 go build -ldflags="-w -s" -o /remote-signer-tui ./cmd/tui
 # =============================================================================
 FROM debian:bookworm-slim
 
-# Install runtime dependencies
+# Install runtime dependencies (git required for forge install forge-std at first run)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
+    git \
     tzdata \
     wget \
     && rm -rf /var/lib/apt/lists/*

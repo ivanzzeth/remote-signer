@@ -122,6 +122,11 @@ func ExpandTemplatesFromFiles(templates []TemplateConfig, configDir string, logg
 	var expanded []TemplateConfig
 	for _, tmpl := range templates {
 		if tmpl.Type == TemplateFileType {
+			if !tmpl.Enabled {
+				// Skip loading file for disabled templates (file may not exist)
+				expanded = append(expanded, tmpl)
+				continue
+			}
 			loaded, err := loadTemplateFromFileStatic(tmpl, configDir, logger)
 			if err != nil {
 				return nil, err
@@ -365,9 +370,13 @@ func expandInstanceRule(rule RuleConfig, templates map[string]TemplateConfig) ([
 		}
 	}
 
-	// Get the rules JSON from template config
+	// Get the rules JSON from template config (missing when template is disabled and file was not loaded)
 	rulesJSON, ok := tmpl.Config["rules_json"].(string)
 	if !ok {
+		if !tmpl.Enabled {
+			// Disabled template was not loaded from file; skip this instance rule
+			return nil, nil
+		}
 		return nil, fmt.Errorf("template '%s' has no rules_json in config", templateName)
 	}
 

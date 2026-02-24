@@ -77,8 +77,8 @@ init_environment() {
 
     cd "$PROJECT_DIR"
 
-    # Create data directories
-    mkdir -p data/keystores data/foundry
+    # Create data directories (forge-workspace holds lib/forge-std for Solidity rules; mounted into Docker)
+    mkdir -p data/keystores data/foundry data/forge-workspace
 
     # Download Foundry binaries if not present
     if [ ! -f "data/foundry/forge" ]; then
@@ -108,6 +108,32 @@ init_environment() {
         log_info "Foundry binaries downloaded to data/foundry/"
     else
         log_info "Foundry binaries already exist"
+    fi
+
+    # Install forge-std in workspace (used by Solidity rules; mount data/forge-workspace in Docker to avoid install in container)
+    if [ ! -d "data/forge-workspace/lib/forge-std/src" ]; then
+        log_info "Installing forge-std in data/forge-workspace..."
+        FORGE_BIN="$PROJECT_DIR/data/foundry/forge"
+        if [ ! -x "$FORGE_BIN" ]; then
+            log_error "forge not found at $FORGE_BIN; run init again after Foundry download"
+            exit 1
+        fi
+        # Write foundry.toml so forge install has a project root
+        cat > data/forge-workspace/foundry.toml << 'FOUNDRY_EOF'
+[profile.default]
+src = "."
+test = "."
+out = "out"
+libs = ["lib"]
+remappings = ["forge-std/=lib/forge-std/src/"]
+via_ir = true
+optimizer = false
+incremental = true
+FOUNDRY_EOF
+        (cd data/forge-workspace && "$FORGE_BIN" install foundry-rs/forge-std --no-git)
+        log_info "forge-std installed in data/forge-workspace/"
+    else
+        log_info "forge-std already present in data/forge-workspace"
     fi
 
     # Create .env file if not exists
