@@ -23,9 +23,9 @@ Remote Signer applies defense in depth from the network layer to the application
 
 ### IP whitelist
 
-- Optional: `security.ip_whitelist.enabled` with a list of allowed IPs or CIDR ranges.
+- Optional: `security.ip_whitelist.enabled: true` and `security.ip_whitelist.allowed_ips` (list of IPs or CIDR ranges, e.g. `10.0.0.0/8`).
 - Requests from other IPs are rejected before authentication.
-- When behind a reverse proxy, `trust_proxy` can be enabled so the real client IP is taken from `X-Forwarded-For` / `X-Real-IP` (only enable if the proxy is trusted).
+- When behind a reverse proxy, `security.ip_whitelist.trust_proxy: true` uses the real client IP from `X-Forwarded-For` / `X-Real-IP` (only enable if the proxy is trusted).
 
 ---
 
