@@ -11,26 +11,8 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/validate"
 )
-
-// validRuleTypes defines the known rule types for approval/preview validation
-var validRuleTypes = map[types.RuleType]bool{
-	types.RuleTypeSignerRestriction:     true,
-	types.RuleTypeChainRestriction:      true,
-	types.RuleTypeSignTypeRestriction:   true,
-	types.RuleTypeMessagePattern:        true,
-	types.RuleTypeEVMAddressList:        true,
-	types.RuleTypeEVMContractMethod:     true,
-	types.RuleTypeEVMValueLimit:         true,
-	types.RuleTypeEVMSolidityExpression: true,
-	types.RuleTypeEVMJS:                 true,
-}
-
-// validRuleModes defines the known rule modes
-var validRuleModes = map[types.RuleMode]bool{
-	types.RuleModeWhitelist: true,
-	types.RuleModeBlocklist: true,
-}
 
 // ApprovalHandler handles manual approval requests
 type ApprovalHandler struct {
@@ -131,12 +113,22 @@ func (h *ApprovalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Build rule options if rule generation is requested
 	var ruleOpts *rule.RuleGenerateOptions
 	if req.RuleType != "" {
-		if !validRuleTypes[types.RuleType(req.RuleType)] {
+		if !validate.IsValidRuleType(req.RuleType) {
 			h.writeError(w, "invalid rule_type", http.StatusBadRequest)
 			return
 		}
-		if req.RuleMode != "" && !validRuleModes[types.RuleMode(req.RuleMode)] {
-			h.writeError(w, "invalid rule_mode: must be 'whitelist' or 'blocklist'", http.StatusBadRequest)
+		if req.RuleMode != "" {
+			if err := validate.ValidateRuleMode(req.RuleMode); err != nil {
+				h.writeError(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
+		if len(req.RuleName) > 255 {
+			h.writeError(w, "rule_name must be at most 255 characters", http.StatusBadRequest)
+			return
+		}
+		if req.MaxValue != "" && !validate.IsValidWeiDecimal(req.MaxValue) {
+			h.writeError(w, "max_value must be a non-empty decimal string", http.StatusBadRequest)
 			return
 		}
 		ruleOpts = &rule.RuleGenerateOptions{
@@ -236,7 +228,7 @@ func (h *PreviewRuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, "rule_type is required", http.StatusBadRequest)
 		return
 	}
-	if !validRuleTypes[types.RuleType(req.RuleType)] {
+	if !validate.IsValidRuleType(req.RuleType) {
 		h.writeError(w, "invalid rule_type", http.StatusBadRequest)
 		return
 	}
@@ -244,8 +236,16 @@ func (h *PreviewRuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, "rule_mode is required", http.StatusBadRequest)
 		return
 	}
-	if !validRuleModes[types.RuleMode(req.RuleMode)] {
-		h.writeError(w, "invalid rule_mode: must be 'whitelist' or 'blocklist'", http.StatusBadRequest)
+	if err := validate.ValidateRuleMode(req.RuleMode); err != nil {
+		h.writeError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if len(req.RuleName) > 255 {
+		h.writeError(w, "rule_name must be at most 255 characters", http.StatusBadRequest)
+		return
+	}
+	if req.MaxValue != "" && !validate.IsValidWeiDecimal(req.MaxValue) {
+		h.writeError(w, "max_value must be a non-empty decimal string", http.StatusBadRequest)
 		return
 	}
 

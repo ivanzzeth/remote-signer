@@ -18,6 +18,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/config"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/ruleconfig"
 )
 
 const version = "1.0.0"
@@ -717,83 +718,11 @@ func substituteVarsInString(s string, vars map[string]string) (string, error) {
 	return result, nil
 }
 
-// validateDeclarativeRule validates declarative rules by attempting to deserialize their config
+// validateDeclarativeRule validates declarative rule config format using shared ruleconfig (same as API and config load).
 func validateDeclarativeRule(rule *types.Rule) error {
-	switch rule.Type {
-	case types.RuleTypeEVMAddressList, "evm_address_whitelist":
-		var config evm.AddressListConfig
-		if err := json.Unmarshal(rule.Config, &config); err != nil {
-			return fmt.Errorf("invalid address list config: %w", err)
-		}
-		if len(config.Addresses) == 0 {
-			return fmt.Errorf("addresses list is empty")
-		}
-		// Validate addresses are valid hex
-		for _, addr := range config.Addresses {
-			if len(addr) != 42 || addr[:2] != "0x" {
-				return fmt.Errorf("invalid address format: %s", addr)
-			}
-		}
-
-	case types.RuleTypeEVMContractMethod:
-		var config evm.ContractMethodConfig
-		if err := json.Unmarshal(rule.Config, &config); err != nil {
-			return fmt.Errorf("invalid contract method config: %w", err)
-		}
-		if len(config.MethodSigs) == 0 {
-			return fmt.Errorf("method_sigs list is empty")
-		}
-		for _, sig := range config.MethodSigs {
-			if len(sig) != 10 || sig[:2] != "0x" {
-				return fmt.Errorf("invalid method selector format: %s (expected 0x + 8 hex chars)", sig)
-			}
-		}
-
-	case types.RuleTypeEVMValueLimit:
-		var config evm.ValueLimitConfig
-		if err := json.Unmarshal(rule.Config, &config); err != nil {
-			return fmt.Errorf("invalid value limit config: %w", err)
-		}
-		if config.MaxValue == "" {
-			return fmt.Errorf("max_value is empty")
-		}
-
-	case types.RuleTypeSignerRestriction:
-		var config evm.SignerRestrictionConfig
-		if err := json.Unmarshal(rule.Config, &config); err != nil {
-			return fmt.Errorf("invalid signer restriction config: %w", err)
-		}
-		if len(config.AllowedSigners) == 0 {
-			return fmt.Errorf("allowed_signers list is empty")
-		}
-
-	case types.RuleTypeSignTypeRestriction:
-		var config evm.SignTypeRestrictionConfig
-		if err := json.Unmarshal(rule.Config, &config); err != nil {
-			return fmt.Errorf("invalid sign type restriction config: %w", err)
-		}
-		if len(config.AllowedSignTypes) == 0 {
-			return fmt.Errorf("allowed_sign_types list is empty")
-		}
-
-	case types.RuleTypeChainRestriction:
-		// chain_restriction has no evaluator implementation — just do basic JSON parse check
-		var raw map[string]interface{}
-		if err := json.Unmarshal(rule.Config, &raw); err != nil {
-			return fmt.Errorf("invalid chain restriction config: %w", err)
-		}
-
-	case types.RuleTypeEVMJS:
-		var config evm.JSRuleConfig
-		if err := json.Unmarshal(rule.Config, &config); err != nil {
-			return fmt.Errorf("invalid evm_js config: %w", err)
-		}
-		if strings.TrimSpace(config.Script) == "" {
-			return fmt.Errorf("evm_js config.script is required and must not be empty")
-		}
-
-	default:
-		return fmt.Errorf("unknown declarative rule type: %s", rule.Type)
+	var config map[string]interface{}
+	if err := json.Unmarshal(rule.Config, &config); err != nil {
+		return fmt.Errorf("invalid rule config JSON: %w", err)
 	}
-	return nil
+	return ruleconfig.ValidateRuleConfig(string(rule.Type), config)
 }
