@@ -13,6 +13,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/metrics"
+	"github.com/ivanzzeth/remote-signer/internal/validate"
 )
 
 // SignHandler handles EVM sign requests
@@ -100,7 +101,7 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, "signer_address is required", http.StatusBadRequest)
 		return
 	}
-	if !ethAddressRegex.MatchString(req.SignerAddress) {
+	if !validate.IsValidEthereumAddress(req.SignerAddress) {
 		h.writeError(w, "invalid signer_address: must be 0x followed by 40 hex characters", http.StatusBadRequest)
 		return
 	}
@@ -108,7 +109,7 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, "sign_type is required", http.StatusBadRequest)
 		return
 	}
-	if !validSignTypes[req.SignType] {
+	if !validate.ValidSignTypes[req.SignType] {
 		h.writeError(w, "invalid sign_type: must be one of hash, raw_message, eip191, personal, typed_data, transaction", http.StatusBadRequest)
 		return
 	}

@@ -16,6 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	pkgvalidate "github.com/ivanzzeth/remote-signer/internal/validate"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
@@ -222,6 +223,15 @@ func (i *TemplateInitializer) syncTemplate(ctx context.Context, idx int, tmplCfg
 		i.logger.Debug("Skipping disabled template", "name", tmplCfg.Name)
 		return nil
 	}
+
+	if err := pkgvalidate.ValidateRuleMode(tmplCfg.Mode); err != nil {
+		return fmt.Errorf("template %q: %w", tmplCfg.Name, err)
+	}
+	// template_bundle is set when expanding file-type templates; allow it. Otherwise require known rule type.
+	if tmplCfg.Type != TemplateFileType && tmplCfg.Type != "template_bundle" && !pkgvalidate.IsValidRuleType(tmplCfg.Type) {
+		return fmt.Errorf("template %q: unknown type %q", tmplCfg.Name, tmplCfg.Type)
+	}
+	// Template config may contain variable placeholders; validated when instance is created.
 
 	tmplID := i.generateTemplateID(idx, tmplCfg)
 

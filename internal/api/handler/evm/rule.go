@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +14,8 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/ruleconfig"
+	"github.com/ivanzzeth/remote-signer/internal/validate"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
@@ -170,8 +171,8 @@ func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate rule config based on type
-	if err := h.validateRuleConfig(req.Type, req.Config); err != nil {
+	// Validate rule config format (shared with config load and validate-rules)
+	if err := ruleconfig.ValidateRuleConfig(req.Type, req.Config); err != nil {
 		h.writeError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -266,6 +267,10 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 		rule.Description = req.Description
 	}
 	if req.Config != nil {
+		if err := ruleconfig.ValidateRuleConfig(string(rule.Type), req.Config); err != nil {
+			h.writeError(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		configJSON, err := json.Marshal(req.Config)
 		if err != nil {
 			h.writeError(w, "invalid config", http.StatusBadRequest)
@@ -306,8 +311,12 @@ func (h *RuleHandler) listRules(w http.ResponseWriter, r *http.Request) {
 		Limit: 100,
 	}
 
-	// Parse query parameters
+	// Parse query parameters (strict: unknown enum values return 400)
 	if chainType := query.Get("chain_type"); chainType != "" {
+		if !validate.IsValidChainType(chainType) {
+			h.writeError(w, "invalid chain_type filter", http.StatusBadRequest)
+			return
+		}
 		ct := types.ChainType(chainType)
 		filter.ChainType = &ct
 	} else {
@@ -317,16 +326,28 @@ func (h *RuleHandler) listRules(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if signerAddress := query.Get("signer_address"); signerAddress != "" {
+		if !validate.IsValidEthereumAddress(signerAddress) {
+			h.writeError(w, "invalid signer_address: must be 0x followed by 40 hex characters", http.StatusBadRequest)
+			return
+		}
 		filter.SignerAddress = &signerAddress
 	}
 	if apiKeyID := query.Get("api_key_id"); apiKeyID != "" {
 		filter.APIKeyID = &apiKeyID
 	}
 	if ruleType := query.Get("type"); ruleType != "" {
-		rt := types.RuleType(ruleType)
+		if !validate.IsValidRuleType(ruleType) {
+			h.writeError(w, "invalid type filter", http.StatusBadRequest)
+			return
+		}
+		rt := types.RuleType(validate.NormalizeRuleType(ruleType))
 		filter.Type = &rt
 	}
 	if source := query.Get("source"); source != "" {
+		if !validate.IsValidRuleSource(source) {
+			h.writeError(w, "invalid source filter", http.StatusBadRequest)
+			return
+		}
 		rs := types.RuleSource(source)
 		filter.Source = &rs
 	}
@@ -459,231 +480,6 @@ func (h *RuleHandler) writeJSON(w http.ResponseWriter, data interface{}, status 
 
 func (h *RuleHandler) writeError(w http.ResponseWriter, message string, status int) {
 	h.writeJSON(w, ErrorResponse{Error: message}, status)
-}
-
-// ethAddressRegex matches a valid Ethereum address (0x followed by 40 hex chars)
-var ethAddressRegex = regexp.MustCompile(`^0x[0-9a-fA-F]{40}$`)
-
-// validSignTypes defines the known sign types
-var validSignTypes = map[string]bool{
-	"personal":    true,
-	"typed_data":  true,
-	"transaction": true,
-	"hash":        true,
-	"raw_message": true,
-	"eip191":      true,
-}
-
-// maxExpressionLength is the maximum allowed length for Solidity expressions (10 KB)
-const maxExpressionLength = 10 * 1024
-
-// dangerousSolidityPatterns are patterns that should be rejected in expression mode
-var dangerousSolidityPatterns = regexp.MustCompile(`(?i)\b(selfdestruct|delegatecall|create2|suicide)\b`)
-
-// validateRuleConfig validates the config for a given rule type.
-// This ensures that the server rejects malformed or dangerous configurations.
-func (h *RuleHandler) validateRuleConfig(ruleType string, config map[string]interface{}) error {
-	switch types.RuleType(ruleType) {
-	case types.RuleTypeEVMAddressList:
-		return h.validateAddressListConfig(config)
-	case types.RuleTypeEVMValueLimit:
-		return h.validateValueLimitConfig(config)
-	case types.RuleTypeSignerRestriction:
-		return h.validateSignerRestrictionConfig(config)
-	case types.RuleTypeSignTypeRestriction:
-		return h.validateSignTypeRestrictionConfig(config)
-	case types.RuleTypeEVMSolidityExpression:
-		return h.validateSolidityExpressionConfig(config)
-	case types.RuleTypeEVMContractMethod:
-		// Contract method rules have their own validation elsewhere
-		return nil
-	case types.RuleTypeEVMJS:
-		return h.validateJSRuleConfig(config)
-	case types.RuleTypeChainRestriction, types.RuleTypeMessagePattern:
-		// These rule types have simpler validation
-		return nil
-	default:
-		return fmt.Errorf("unknown rule type: %s", ruleType)
-	}
-}
-
-func (h *RuleHandler) validateAddressListConfig(config map[string]interface{}) error {
-	addressesRaw, ok := config["addresses"]
-	if !ok {
-		return fmt.Errorf("config.addresses is required for evm_address_list rules")
-	}
-
-	addresses, ok := addressesRaw.([]interface{})
-	if !ok {
-		return fmt.Errorf("config.addresses must be an array")
-	}
-
-	if len(addresses) == 0 {
-		return fmt.Errorf("config.addresses must not be empty")
-	}
-
-	for i, addr := range addresses {
-		addrStr, ok := addr.(string)
-		if !ok {
-			return fmt.Errorf("config.addresses[%d] must be a string", i)
-		}
-		if !ethAddressRegex.MatchString(addrStr) {
-			return fmt.Errorf("config.addresses[%d] is not a valid Ethereum address: %s", i, addrStr)
-		}
-	}
-
-	return nil
-}
-
-func (h *RuleHandler) validateValueLimitConfig(config map[string]interface{}) error {
-	maxValueRaw, ok := config["max_value"]
-	if !ok {
-		return fmt.Errorf("config.max_value is required for evm_value_limit rules")
-	}
-
-	maxValueStr, ok := maxValueRaw.(string)
-	if !ok {
-		return fmt.Errorf("config.max_value must be a string (wei value)")
-	}
-
-	if maxValueStr == "" {
-		return fmt.Errorf("config.max_value must not be empty")
-	}
-
-	// Validate it's a valid numeric string (positive integer)
-	if _, err := strconv.ParseUint(maxValueStr, 10, 64); err != nil {
-		// Could be a very large number — try to validate it's all digits
-		for _, c := range maxValueStr {
-			if c < '0' || c > '9' {
-				return fmt.Errorf("config.max_value must be a positive numeric string, got: %s", maxValueStr)
-			}
-		}
-	}
-
-	return nil
-}
-
-func (h *RuleHandler) validateSignerRestrictionConfig(config map[string]interface{}) error {
-	signersRaw, ok := config["allowed_signers"]
-	if !ok {
-		return fmt.Errorf("config.allowed_signers is required for signer_restriction rules")
-	}
-
-	signers, ok := signersRaw.([]interface{})
-	if !ok {
-		return fmt.Errorf("config.allowed_signers must be an array")
-	}
-
-	if len(signers) == 0 {
-		return fmt.Errorf("config.allowed_signers must not be empty")
-	}
-
-	for i, signer := range signers {
-		signerStr, ok := signer.(string)
-		if !ok {
-			return fmt.Errorf("config.allowed_signers[%d] must be a string", i)
-		}
-		if !ethAddressRegex.MatchString(signerStr) {
-			return fmt.Errorf("config.allowed_signers[%d] is not a valid Ethereum address: %s", i, signerStr)
-		}
-	}
-
-	return nil
-}
-
-func (h *RuleHandler) validateJSRuleConfig(config map[string]interface{}) error {
-	scriptRaw, ok := config["script"]
-	if !ok {
-		return fmt.Errorf("config.script is required for evm_js rules")
-	}
-	script, ok := scriptRaw.(string)
-	if !ok {
-		return fmt.Errorf("config.script must be a string")
-	}
-	if strings.TrimSpace(script) == "" {
-		return fmt.Errorf("config.script must not be empty")
-	}
-	if mode, ok := config["delegate_mode"].(string); ok && mode == "per_item" {
-		itemsKey, ok := config["items_key"].(string)
-		if !ok || strings.TrimSpace(itemsKey) == "" {
-			itemsKey = "items"
-		}
-		// items_key is required for per_item; validated at evaluation time
-	}
-	return nil
-}
-
-func (h *RuleHandler) validateSignTypeRestrictionConfig(config map[string]interface{}) error {
-	typesRaw, ok := config["allowed_sign_types"]
-	if !ok {
-		return fmt.Errorf("config.allowed_sign_types is required for sign_type_restriction rules")
-	}
-
-	signTypes, ok := typesRaw.([]interface{})
-	if !ok {
-		return fmt.Errorf("config.allowed_sign_types must be an array")
-	}
-
-	if len(signTypes) == 0 {
-		return fmt.Errorf("config.allowed_sign_types must not be empty")
-	}
-
-	for i, st := range signTypes {
-		stStr, ok := st.(string)
-		if !ok {
-			return fmt.Errorf("config.allowed_sign_types[%d] must be a string", i)
-		}
-		if !validSignTypes[stStr] {
-			return fmt.Errorf("config.allowed_sign_types[%d] is not a valid sign type: %s", i, stStr)
-		}
-	}
-
-	return nil
-}
-
-func (h *RuleHandler) validateSolidityExpressionConfig(config map[string]interface{}) error {
-	// Check expression length
-	if expr, ok := config["expression"].(string); ok {
-		if len(expr) > maxExpressionLength {
-			return fmt.Errorf("expression is too long (%d bytes, max %d)", len(expr), maxExpressionLength)
-		}
-		// Check for dangerous patterns
-		if dangerousSolidityPatterns.MatchString(expr) {
-			return fmt.Errorf("expression contains dangerous patterns (selfdestruct, delegatecall, create2 are not allowed)")
-		}
-	}
-
-	// Check typed_data_expression length
-	if expr, ok := config["typed_data_expression"].(string); ok {
-		if len(expr) > maxExpressionLength {
-			return fmt.Errorf("typed_data_expression is too long (%d bytes, max %d)", len(expr), maxExpressionLength)
-		}
-		if dangerousSolidityPatterns.MatchString(expr) {
-			return fmt.Errorf("typed_data_expression contains dangerous patterns")
-		}
-	}
-
-	// Check functions length
-	if funcs, ok := config["functions"].(string); ok {
-		if len(funcs) > maxExpressionLength {
-			return fmt.Errorf("functions is too long (%d bytes, max %d)", len(funcs), maxExpressionLength)
-		}
-		if dangerousSolidityPatterns.MatchString(funcs) {
-			return fmt.Errorf("functions contains dangerous patterns")
-		}
-	}
-
-	// Check typed_data_functions length
-	if funcs, ok := config["typed_data_functions"].(string); ok {
-		if len(funcs) > maxExpressionLength {
-			return fmt.Errorf("typed_data_functions is too long (%d bytes, max %d)", len(funcs), maxExpressionLength)
-		}
-		if dangerousSolidityPatterns.MatchString(funcs) {
-			return fmt.Errorf("typed_data_functions contains dangerous patterns")
-		}
-	}
-
-	return nil
 }
 
 // validateSolidityRule validates a Solidity expression rule using the validator

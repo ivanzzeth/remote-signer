@@ -15,6 +15,8 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/ruleconfig"
+	pkgvalidate "github.com/ivanzzeth/remote-signer/internal/validate"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
@@ -212,6 +214,18 @@ func (i *RuleInitializer) syncRule(ctx context.Context, ruleID types.RuleID, rul
 	if !ruleCfg.Enabled {
 		i.logger.Debug("Skipping disabled rule", "name", ruleCfg.Name)
 		return nil
+	}
+
+	// Validate mode (whitelist or blocklist only)
+	if err := pkgvalidate.ValidateRuleMode(ruleCfg.Mode); err != nil {
+		return fmt.Errorf("rule %q: %w", ruleCfg.Name, err)
+	}
+
+	// Validate rule config format (same logic as API and validate-rules)
+	if ruleCfg.Type != RuleFileType && ruleCfg.Config != nil {
+		if err := ruleconfig.ValidateRuleConfig(ruleCfg.Type, ruleCfg.Config); err != nil {
+			return fmt.Errorf("rule %q: %w", ruleCfg.Name, err)
+		}
 	}
 
 	// Marshal config to JSON

@@ -10,6 +10,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/validate"
 )
 
 // SignerHandler handles signer management endpoints
@@ -98,8 +99,12 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 		Limit:  20, // Default limit
 	}
 
-	// Parse type filter
+	// Parse type filter (strict: unknown type returns 400)
 	if typeStr := query.Get("type"); typeStr != "" {
+		if !validate.IsValidSignerType(typeStr) {
+			h.writeError(w, "invalid type filter: must be private_key or keystore", http.StatusBadRequest)
+			return
+		}
 		signerType := types.SignerType(typeStr)
 		filter.Type = &signerType
 	}
