@@ -66,13 +66,38 @@ logger:
 api_keys: []
 
 # Templates (file-type): loaded at startup, used to expand instance rules
-# Used by TestTemplate_ConfigLoadedTemplatesAndInstanceRules
+# Used by TestTemplate_ConfigLoadedTemplatesAndInstanceRules and delegation/evm_js e2e
 templates:
   - name: "E2E Minimal Template"
     type: "file"
     enabled: true
     config:
       path: "e2e/fixtures/minimal_template.yaml"
+  - name: "E2E Safe Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/safe.template.js.yaml"
+  - name: "E2E Multisend Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/multisend.template.js.yaml"
+  - name: "E2E ERC20 Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/erc20.template.js.yaml"
+  - name: "E2E ERC721 Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/erc721.template.js.yaml"
+  - name: "E2E Polymarket Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/polymarket.template.js.yaml"
 
 # Rules for e2e testing
 # Rules can be defined here (config source) or via API (api source)
@@ -110,11 +135,13 @@ rules:
           expect_pass: false
           expect_reason: "blocked: burn address"
 
-  # Example 3: Value limit rule - block high-value transactions
+  # Example 3: Value limit rule - block high-value transactions (scoped to first signer so
+  # second signer + tx to non-listed address is rejected; TestRule_AddressWhitelist_RejectsNonListedAddress)
   # Can be tested via API: TestRule_ValueLimitRuleBlocks
   - name: "Max 10 ETH per transaction"
     type: "evm_value_limit"
     mode: "whitelist"
+    signer_address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
     enabled: true
     config:
       max_value: "10000000000000000000"  # 10 ETH in wei
@@ -129,12 +156,14 @@ rules:
       allowed_signers:
         - "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"  # Test signer address
 
-  # Example 5: Sign type restriction - allow specific signing methods
+  # Example 5: Sign type restriction - allow specific signing methods (scoped to first signer only
+  # so that second signer is not allowed by this rule; enables TestRule_SignerRestriction_BlocksSignerNotInAllowList)
   # Used by TestRule_SignTypeRestrictionAllowsTransaction, TestRule_SignTypeRestrictionAllowsPersonalSign
   - name: "Allow common signing methods"
     type: "sign_type_restriction"
     mode: "whitelist"
     enabled: true
+    signer_address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"  # First test signer only
     config:
       allowed_sign_types:
         - "personal"     # Personal message signing
@@ -152,4 +181,141 @@ rules:
     config:
       template: "E2E Minimal Template"
       variables:
-        allowed_address: "0x5B38Da6a701c568545dCfcB875f56beddC4"
+        allowed_address: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+
+  # evm_js template instances (Safe, Multisend, ERC20, ERC721); delegation: Safe => Multisend => (ERC20 | ERC721) per item
+  # id = stable rule ID (optional); use in delegate_to for maintainability. List: validate-rules -config config.e2e.yaml -list-rule-ids
+  - name: "E2E Safe instance"
+    type: "instance"
+    chain_type: "evm"
+    chain_id: "1"
+    enabled: true
+    config:
+      template: "E2E Safe Template"
+      id: "e2e-safe"
+      variables:
+        chain_id: "1"
+        allowed_safe_addresses: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+        allowed_safe_tx_to_addresses: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4,0xA238CBeb142c10Ef7Ad8442C6D1f9E89e07e7761"
+        delegate_to: "e2e-multisend"
+        delegate_mode: "single"
+
+  - name: "E2E Multisend instance"
+    type: "instance"
+    chain_type: "evm"
+    chain_id: "1"
+    enabled: true
+    config:
+      template: "E2E Multisend Template"
+      id: "e2e-multisend"
+      variables:
+        chain_id: "1"
+        multisend_contract_address: "0xA238CBeb142c10Ef7Ad8442C6D1f9E89e07e7761"
+        delegate_to: "e2e-erc20,e2e-erc721"
+        delegate_mode: "per_item"
+
+  - name: "E2E ERC20 instance"
+    type: "instance"
+    chain_type: "evm"
+    chain_id: "1"
+    enabled: true
+    config:
+      template: "E2E ERC20 Template"
+      id: "e2e-erc20"
+      variables:
+        chain_id: "1"
+        token_address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+        max_transfer_amount: "1000000000"
+
+  - name: "E2E ERC721 instance"
+    type: "instance"
+    chain_type: "evm"
+    chain_id: "1"
+    enabled: true
+    config:
+      template: "E2E ERC721 Template"
+      id: "e2e-erc721"
+      variables:
+        chain_id: "1"
+        token_address: "0xBC4ca0EdA7647A8aB7C2061c2E118A18a936f13D"
+        allowed_recipients: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+
+  # Polymarket JS + Safe JS combined: Polymarket instance (ClobAuth, Order, CreateProxy, Safe Wallet Creation, e2e-polymarket-inner)
+  # must be listed before E2E Safe Polymarket so rule id "e2e-polymarket-inner" exists for delegate_to.
+  - name: "E2E Polymarket instance"
+    type: "instance"
+    chain_type: "evm"
+    chain_id: "137"
+    enabled: true
+    config:
+      template: "E2E Polymarket Template"
+      variables:
+        chain_id: "137"
+        ctf_exchange_address: "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E"
+        neg_risk_adapter_address: "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296"
+        neg_risk_exchange_address: "0xC5d563A36AE78145C45a50134d48A1215220f80a"
+        conditional_tokens_address: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+        safe_proxy_factory_address: "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"
+        usdc_bridged_address: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+        allowed_safe_address_for_testing: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+        allowed_safe_addresses: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+        clob_auth_domain_name: "ClobAuthDomain"
+        clob_auth_domain_version: "1"
+        ctf_exchange_domain_name: "Polymarket CTF Exchange"
+        ctf_exchange_domain_version: "1"
+        safe_factory_domain_name: "Polymarket Contract Proxy Factory"
+
+  # Safe template instance for Polymarket: delegates inner calls to e2e-polymarket-inner (same effect as polymarket.safe.template.yaml).
+  - name: "E2E Safe Polymarket instance"
+    type: "instance"
+    chain_type: "evm"
+    chain_id: "137"
+    enabled: true
+    config:
+      template: "E2E Safe Template"
+      id: "e2e-safe-polymarket"
+      variables:
+        chain_id: "137"
+        allowed_safe_addresses: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+        allowed_safe_tx_to_addresses: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174,0x4D97DCd97eC945f40cF65F87097ACe5EA0476045,0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296,0xC5d563A36AE78145C45a50134d48A1215220f80a"
+        delegate_to: "e2e-polymarket-inner"
+        delegate_mode: "single"
+
+  # Delegation: evm_js delegate_to target; TestRule_DelegationSinglePasses.
+  # Scoped to first signer only so second signer is not allowed by this rule (signer_restriction negative e2e).
+  - id: "e2e-delegate-target"
+    name: "E2E Delegate Target"
+    type: "evm_js"
+    mode: "whitelist"
+    chain_type: "evm"
+    chain_id: "1"
+    signer_address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+    enabled: true
+    config:
+      script: |
+        function validate(i){ return { valid: true }; }
+
+  # Scoped to first signer so second signer is not allowed (address whitelist + signer restriction e2e).
+  - id: "e2e-delegate-single"
+    name: "E2E Delegate Single"
+    type: "evm_js"
+    mode: "whitelist"
+    chain_type: "evm"
+    chain_id: "1"
+    signer_address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+    enabled: true
+    config:
+      script: |
+        function validate(i){
+          return {
+            valid: true,
+            payload: {
+              sign_type: "transaction",
+              chain_id: 1,
+              signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+              transaction: { from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266", to: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4", value: "0x0", data: "0x" }
+            }
+          };
+        }
+      delegate_to: "e2e-delegate-target"
+      delegate_mode: "single"

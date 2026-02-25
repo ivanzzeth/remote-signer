@@ -21,6 +21,7 @@ const (
 	RuleTypeEVMContractMethod      RuleType = "evm_contract_method"      // contract method restriction
 	RuleTypeEVMValueLimit          RuleType = "evm_value_limit"          // value limit check
 	RuleTypeEVMSolidityExpression  RuleType = "evm_solidity_expression"  // Solidity expression rules (Foundry-based)
+	RuleTypeEVMJS                  RuleType = "evm_js"                    // JS rules (in-process Sobek); validate(input) → { valid, reason?, payload? }
 )
 
 // RuleSource represents where the rule came from

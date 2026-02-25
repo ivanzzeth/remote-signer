@@ -401,7 +401,7 @@ func expandInstanceRule(rule RuleConfig, templates map[string]TemplateConfig) ([
 		}
 	}
 
-	// Apply scope from the instance rule to all template rules
+	// Apply scope and instance variables to all template rules
 	for idx := range templateRules {
 		if rule.ChainType != "" {
 			templateRules[idx].ChainType = rule.ChainType
@@ -417,6 +417,17 @@ func expandInstanceRule(rule RuleConfig, templates map[string]TemplateConfig) ([
 		}
 		// Inherit enabled state from instance
 		templateRules[idx].Enabled = rule.Enabled
+		// Pass instance variables so evaluators (e.g. evm_js) get config.chain_id, config.allowed_safe_addresses, etc.
+		if len(variables) > 0 {
+			templateRules[idx].Variables = make(map[string]interface{}, len(variables))
+			for k, v := range variables {
+				templateRules[idx].Variables[k] = v
+			}
+		}
+	}
+	// If instance has config.id and expands to a single rule, use it as the rule's stable id
+	if id, ok := rule.Config["id"].(string); ok && strings.TrimSpace(id) != "" && len(templateRules) == 1 {
+		templateRules[0].Id = strings.TrimSpace(id)
 	}
 
 	return templateRules, nil

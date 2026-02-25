@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -41,8 +43,17 @@ type RuleConfig struct {
 	ChainID       string                 `yaml:"chain_id,omitempty"`
 	APIKeyID      string                 `yaml:"api_key_id,omitempty"`
 	SignerAddress string                 `yaml:"signer_address,omitempty"`
-	Config        map[string]any `yaml:"config"`
+	Config        map[string]any         `yaml:"config"`
+	TestCases     []TestCaseConfig       `yaml:"test_cases,omitempty" json:"test_cases,omitempty"`
 	Enabled       bool                   `yaml:"enabled"`
+}
+
+// TestCaseConfig is a single test case for evm_js (from YAML test_cases).
+type TestCaseConfig struct {
+	Name         string                 `yaml:"name" json:"name"`
+	Input        map[string]interface{}  `yaml:"input" json:"input"`
+	ExpectPass   bool                   `yaml:"expect_pass" json:"expect_pass"`
+	ExpectReason string                 `yaml:"expect_reason,omitempty" json:"expect_reason,omitempty"`
 }
 
 // RuleFile represents a YAML file containing rules (plain rule file)
@@ -77,6 +88,7 @@ func main() {
 func run() error {
 	// Parse command line flags
 	configPath := flag.String("config", "", "validate rules from config file (same expansion as server: templates + instance + file rules)")
+	listRuleIDs := flag.Bool("list-rule-ids", false, "with -config: print deterministic rule IDs for each expanded rule (for delegate_to); then exit")
 	forgePath := flag.String("forge", "", "path to forge binary (default: auto-detect from PATH)")
 	cacheDir := flag.String("cache", "", "cache directory for compiled scripts (default: /tmp/remote-signer-validator)")
 	timeout := flag.Duration("timeout", 30*time.Second, "timeout for rule validation")
@@ -96,6 +108,7 @@ func run() error {
 		fmt.Fprintf(os.Stderr, "  %s rules/polymarket.safe.yaml\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  %s rules/templates/polymarket.safe.template.yaml   # template (uses test_variables)\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  %s -config config.yaml   # validate expanded rules (templates + instance variables)\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s -config config.yaml -list-rule-ids   # print rule IDs for delegate_to in evm_js rules\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  %s -v rules/*.yaml\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  %s -json rules/myapp.yaml > results.json\n", os.Args[0])
 	}
@@ -104,6 +117,13 @@ func run() error {
 	if *versionFlag {
 		fmt.Printf("validate-rules %s\n", version)
 		return nil
+	}
+
+	if *listRuleIDs {
+		if *configPath == "" {
+			return fmt.Errorf("-list-rule-ids requires -config <path>")
+		}
+		return listConfigRuleIDs(*configPath)
 	}
 
 	args := flag.Args()
@@ -190,6 +210,16 @@ func run() error {
 		return fmt.Errorf("failed to create message pattern validator: %w", err)
 	}
 
+	// Create JS rule evaluator and validator (for evm_js test_cases)
+	jsEvaluator, err := evm.NewJSRuleEvaluator(log)
+	if err != nil {
+		return fmt.Errorf("failed to create JS evaluator: %w", err)
+	}
+	jsValidator, err := evm.NewJSRuleValidator(jsEvaluator, log)
+	if err != nil {
+		return fmt.Errorf("failed to create JS validator: %w", err)
+	}
+
 	// Validate each file or config
 	ctx := context.Background()
 	allResults := make(map[string][]ValidationFileResult)
@@ -198,7 +228,7 @@ func run() error {
 	failedRules := 0
 
 	if *configPath != "" {
-		fileResults, passed, failed, err := validateConfig(ctx, *configPath, validator, msgValidator, log, *verbose)
+		fileResults, passed, failed, err := validateConfig(ctx, *configPath, validator, msgValidator, jsValidator, log, *verbose)
 		if err != nil {
 			return fmt.Errorf("failed to validate config: %w", err)
 		}
@@ -208,7 +238,7 @@ func run() error {
 		failedRules += failed
 	} else {
 		for _, filePath := range args {
-			fileResults, passed, failed, err := validateFile(ctx, filePath, validator, msgValidator, log, *verbose)
+			fileResults, passed, failed, err := validateFile(ctx, filePath, validator, msgValidator, jsValidator, log, *verbose)
 			if err != nil {
 				return fmt.Errorf("failed to validate %s: %w", filePath, err)
 			}
@@ -240,7 +270,7 @@ type ValidationFileResult struct {
 	SkipReason      string                 `json:"skip_reason,omitempty"`
 }
 
-func validateFile(ctx context.Context, filePath string, validator *evm.SolidityRuleValidator, msgValidator *evm.MessagePatternRuleValidator, log *slog.Logger, verbose bool) ([]ValidationFileResult, int, int, error) {
+func validateFile(ctx context.Context, filePath string, validator *evm.SolidityRuleValidator, msgValidator *evm.MessagePatternRuleValidator, jsValidator *evm.JSRuleValidator, log *slog.Logger, verbose bool) ([]ValidationFileResult, int, int, error) {
 	// Read file
 	data, err := os.ReadFile(filePath)
 	if err != nil {
@@ -281,11 +311,11 @@ func validateFile(ctx context.Context, filePath string, validator *evm.SolidityR
 		return nil, 0, 0, nil
 	}
 
-	return validateRules(ctx, rules, validator, msgValidator, log, verbose)
+	return validateRules(ctx, rules, validator, msgValidator, jsValidator, templateFile.TestVariables, log, verbose)
 }
 
 // validateConfig loads config, expands templates and instance/file rules (same as server), then validates.
-func validateConfig(ctx context.Context, configPath string, validator *evm.SolidityRuleValidator, msgValidator *evm.MessagePatternRuleValidator, log *slog.Logger, verbose bool) ([]ValidationFileResult, int, int, error) {
+func validateConfig(ctx context.Context, configPath string, validator *evm.SolidityRuleValidator, msgValidator *evm.MessagePatternRuleValidator, jsValidator *evm.JSRuleValidator, log *slog.Logger, verbose bool) ([]ValidationFileResult, int, int, error) {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return nil, 0, 0, fmt.Errorf("load config: %w", err)
@@ -313,10 +343,52 @@ func validateConfig(ctx context.Context, configPath string, validator *evm.Solid
 		})
 	}
 	log.Debug("Validating expanded rules from config", "config", configPath, "rules", len(localRules))
-	return validateRules(ctx, localRules, validator, msgValidator, log, verbose)
+	return validateRules(ctx, localRules, validator, msgValidator, jsValidator, nil, log, verbose)
 }
 
-func validateRules(ctx context.Context, rules []RuleConfig, validator *evm.SolidityRuleValidator, msgValidator *evm.MessagePatternRuleValidator, log *slog.Logger, verbose bool) ([]ValidationFileResult, int, int, error) {
+// configRuleID returns the deterministic rule ID for a config rule (same formula as internal/config/rule_init.go).
+func configRuleID(idx int, name, ruleType string) string {
+	data := fmt.Sprintf("config:%d:%s:%s", idx, name, ruleType)
+	hash := sha256.Sum256([]byte(data))
+	return "cfg_" + hex.EncodeToString(hash[:8])
+}
+
+// listConfigRuleIDs loads config, expands rules (templates + instance + file), and prints rule_id and name for each.
+// Use this to fill delegate_to in evm_js rules (delegate_to must be the target rule's rule ID).
+func listConfigRuleIDs(configPath string) error {
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	configDir := filepath.Dir(configPath)
+	log := slog.Default()
+
+	templates, err := config.ExpandTemplatesFromFiles(cfg.Templates, configDir, log)
+	if err != nil {
+		return fmt.Errorf("expand templates: %w", err)
+	}
+	rules, err := config.ExpandInstanceRules(cfg.Rules, templates)
+	if err != nil {
+		return fmt.Errorf("expand instance rules: %w", err)
+	}
+	rules, err = config.ExpandFileRules(rules, configDir, log)
+	if err != nil {
+		return fmt.Errorf("expand file rules: %w", err)
+	}
+
+	fmt.Println("# Rule IDs (use as delegate_to in evm_js rules; same order as server)")
+	fmt.Println("# Format: rule_id  name  (type); id is custom if set in config, else auto-generated")
+	for i, r := range rules {
+		effectiveID := strings.TrimSpace(r.Id)
+		if effectiveID == "" {
+			effectiveID = configRuleID(i, r.Name, r.Type)
+		}
+		fmt.Printf("%s  %s  (%s)\n", effectiveID, r.Name, r.Type)
+	}
+	return nil
+}
+
+func validateRules(ctx context.Context, rules []RuleConfig, validator *evm.SolidityRuleValidator, msgValidator *evm.MessagePatternRuleValidator, jsValidator *evm.JSRuleValidator, templateTestVariables map[string]string, log *slog.Logger, verbose bool) ([]ValidationFileResult, int, int, error) {
 	var results []ValidationFileResult
 	passed := 0
 	failed := 0
@@ -379,6 +451,58 @@ func validateRules(ctx context.Context, rules []RuleConfig, validator *evm.Solid
 				passed++
 			} else {
 				failed++
+			}
+
+		case string(types.RuleTypeEVMJS):
+			rule, err := configToRule(i, ruleCfg)
+			if err != nil {
+				result.Valid = false
+				result.Error = fmt.Sprintf("failed to convert rule: %v", err)
+				results = append(results, result)
+				failed++
+				continue
+			}
+			validationErr := validateDeclarativeRule(rule)
+			if validationErr != nil {
+				result.Valid = false
+				result.Error = validationErr.Error()
+				results = append(results, result)
+				failed++
+				continue
+			}
+			// Run test_cases when present and we have test variables (e.g. from template file)
+			if len(ruleCfg.TestCases) > 0 && jsValidator != nil && templateTestVariables != nil {
+				script, _ := ruleCfg.Config["script"].(string)
+				jsTestCases := make([]evm.JSTestCase, 0, len(ruleCfg.TestCases))
+				for _, tc := range ruleCfg.TestCases {
+					jsTestCases = append(jsTestCases, evm.JSTestCase{
+						Name:         tc.Name,
+						Input:        tc.Input,
+						ExpectPass:   tc.ExpectPass,
+						ExpectReason: tc.ExpectReason,
+					})
+				}
+				vResult, err := jsValidator.ValidateRule(ctx, script, jsTestCases, templateTestVariables)
+				if err != nil {
+					result.Valid = false
+					result.Error = fmt.Sprintf("test run error: %v", err)
+					results = append(results, result)
+					failed++
+					continue
+				}
+				result.Valid = vResult.Valid
+				result.TestCaseResults = vResult.TestCaseResults
+				result.FailedTestCases = vResult.FailedTestCases
+				if result.Valid {
+					passed++
+				} else {
+					failed++
+				}
+				results = append(results, result)
+			} else {
+				result.Valid = true
+				passed++
+				results = append(results, result)
 			}
 
 		case string(types.RuleTypeEVMAddressList), "evm_address_whitelist",
@@ -657,6 +781,15 @@ func validateDeclarativeRule(rule *types.Rule) error {
 		var raw map[string]interface{}
 		if err := json.Unmarshal(rule.Config, &raw); err != nil {
 			return fmt.Errorf("invalid chain restriction config: %w", err)
+		}
+
+	case types.RuleTypeEVMJS:
+		var config evm.JSRuleConfig
+		if err := json.Unmarshal(rule.Config, &config); err != nil {
+			return fmt.Errorf("invalid evm_js config: %w", err)
+		}
+		if strings.TrimSpace(config.Script) == "" {
+			return fmt.Errorf("evm_js config.script is required and must not be empty")
 		}
 
 	default:
