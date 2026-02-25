@@ -57,6 +57,9 @@ type TemplateVarConfig struct {
 // RuleConfig defines a rule in configuration. JSON tags must match YAML/validator expectations
 // so that substituted rules_json unmarshals correctly (e.g. "config" not "Config").
 type RuleConfig struct {
+	// Id is an optional stable rule ID. If set, it is used as the rule's ID (for delegate_to etc.);
+	// must be unique across all rules. If empty, a deterministic ID is generated from config order.
+	Id            string                 `yaml:"id,omitempty" json:"id,omitempty"`
 	Name          string                 `yaml:"name" json:"name"`
 	Description   string                 `yaml:"description,omitempty" json:"description,omitempty"`
 	Type          string                 `yaml:"type" json:"type"`
@@ -66,6 +69,7 @@ type RuleConfig struct {
 	APIKeyID      string                 `yaml:"api_key_id,omitempty" json:"api_key_id,omitempty"`
 	SignerAddress string                 `yaml:"signer_address,omitempty" json:"signer_address,omitempty"`
 	Config        map[string]interface{} `yaml:"config" json:"config"`
+	Variables     map[string]interface{} `yaml:"variables,omitempty" json:"variables,omitempty"` // instance/template variable values (e.g. for evm_js config)
 	Enabled       bool                   `yaml:"enabled" json:"enabled"`
 }
 

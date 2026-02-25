@@ -497,6 +497,8 @@ func (h *RuleHandler) validateRuleConfig(ruleType string, config map[string]inte
 	case types.RuleTypeEVMContractMethod:
 		// Contract method rules have their own validation elsewhere
 		return nil
+	case types.RuleTypeEVMJS:
+		return h.validateJSRuleConfig(config)
 	case types.RuleTypeChainRestriction, types.RuleTypeMessagePattern:
 		// These rule types have simpler validation
 		return nil
@@ -586,6 +588,28 @@ func (h *RuleHandler) validateSignerRestrictionConfig(config map[string]interfac
 		}
 	}
 
+	return nil
+}
+
+func (h *RuleHandler) validateJSRuleConfig(config map[string]interface{}) error {
+	scriptRaw, ok := config["script"]
+	if !ok {
+		return fmt.Errorf("config.script is required for evm_js rules")
+	}
+	script, ok := scriptRaw.(string)
+	if !ok {
+		return fmt.Errorf("config.script must be a string")
+	}
+	if strings.TrimSpace(script) == "" {
+		return fmt.Errorf("config.script must not be empty")
+	}
+	if mode, ok := config["delegate_mode"].(string); ok && mode == "per_item" {
+		itemsKey, ok := config["items_key"].(string)
+		if !ok || strings.TrimSpace(itemsKey) == "" {
+			itemsKey = "items"
+		}
+		// items_key is required for per_item; validated at evaluation time
+	}
 	return nil
 }
 

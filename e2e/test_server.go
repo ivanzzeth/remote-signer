@@ -244,10 +244,13 @@ func (ts *TestServer) Start() error {
 		}
 
 		// Create blocklist rule to block burn address (for testing blocklist functionality)
-		// This requires Solidity evaluator (forge), so skip if not available
+		// Prefer Solidity (requires forge); fallback to evm_js so e2e passes without forge
 		if err := ts.createBlocklistRule(ruleRepo); err != nil {
-			// Blocklist rule is optional - requires forge
-			log.Warn("Blocklist rule creation skipped (forge may not be installed)", "error", err)
+			if jsErr := ts.createJSBlocklistRule(ruleRepo); jsErr != nil {
+				log.Warn("Blocklist rule creation skipped (Solidity and JS fallback failed)", "solidity_error", err, "js_error", jsErr)
+			} else {
+				log.Info("Using evm_js blocklist rule (Solidity blocklist unavailable)")
+			}
 		}
 
 		// Create sign type restriction rule to allow specific sign types
@@ -303,8 +306,8 @@ func (ts *TestServer) Start() error {
 		return fmt.Errorf("failed to create state machine: %w", err)
 	}
 
-	// Initialize rule engine with whitelist
-	ruleEngine, err := rule.NewWhitelistRuleEngine(ruleRepo, log)
+	// Initialize rule engine with whitelist and delegation converter for evm_js
+	ruleEngine, err := rule.NewWhitelistRuleEngine(ruleRepo, log, rule.WithDelegationPayloadConverter(evm.DelegatePayloadToSignRequest))
 	if err != nil {
 		return fmt.Errorf("failed to create rule engine: %w", err)
 	}
@@ -315,6 +318,13 @@ func (ts *TestServer) Start() error {
 	ruleEngine.RegisterEvaluator(&evm.ValueLimitEvaluator{})
 	ruleEngine.RegisterEvaluator(&evm.SignerRestrictionEvaluator{})
 	ruleEngine.RegisterEvaluator(&evm.SignTypeRestrictionEvaluator{})
+	ruleEngine.RegisterEvaluator(&evm.MessagePatternEvaluator{})
+
+	jsEval, err := evm.NewJSRuleEvaluator(log)
+	if err != nil {
+		return fmt.Errorf("failed to create JS rule evaluator: %w", err)
+	}
+	ruleEngine.RegisterEvaluator(jsEval)
 
 	// Register Solidity expression evaluator for blocklist rules (optional - requires forge)
 	// Use config if available, otherwise use defaults
@@ -618,7 +628,7 @@ func (ts *TestServer) createWhitelistRule(repo storage.RuleRepository) error {
 	return repo.Create(ctx, rule)
 }
 
-// createBlocklistRule creates a blocklist rule to block burn address
+// createBlocklistRule creates a blocklist rule to block burn address (Solidity; requires forge).
 func (ts *TestServer) createBlocklistRule(repo storage.RuleRepository) error {
 	ctx := context.Background()
 
@@ -634,6 +644,38 @@ func (ts *TestServer) createBlocklistRule(repo storage.RuleRepository) error {
 		Name:        "E2E Test Block Burn Address",
 		Description: "Block transfers to burn address (0xdEaD) for e2e testing",
 		Type:        types.RuleTypeEVMSolidityExpression,
+		Mode:        types.RuleModeBlocklist,
+		Source:      types.RuleSourceConfig,
+		ChainType:   &chainType,
+		Config:      []byte(config),
+		Enabled:     true,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+
+	return repo.Create(ctx, rule)
+}
+
+// createJSBlocklistRule creates an evm_js blocklist rule that blocks the burn address.
+// No forge dependency; used as fallback when Solidity blocklist creation fails.
+func (ts *TestServer) createJSBlocklistRule(repo storage.RuleRepository) error {
+	ctx := context.Background()
+
+	script := `function validate(input) {
+	  if (input.transaction && input.transaction.to) {
+	    var to = input.transaction.to;
+	    if (to && (to.toLowerCase() === "0x000000000000000000000000000000000000dead" || to === "0x000000000000000000000000000000000000dEaD"))
+	      return fail("blocked: burn address");
+	  }
+	  return ok();
+	}`
+	chainType := types.ChainTypeEVM
+	config := fmt.Sprintf(`{"script": %q}`, script)
+	rule := &types.Rule{
+		ID:          "e2e-js-blocklist-rule",
+		Name:        "E2E Test JS Block Burn Address",
+		Description: "Block transfers to burn address (evm_js) for e2e testing",
+		Type:        types.RuleTypeEVMJS,
 		Mode:        types.RuleModeBlocklist,
 		Source:      types.RuleSourceConfig,
 		ChainType:   &chainType,

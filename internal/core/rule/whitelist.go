@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -11,6 +12,43 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/metrics"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
+
+type delegationCtxKey struct{}
+
+type delegationCtxVal struct {
+	Depth int
+	Path  map[types.RuleID]bool
+}
+
+func getDelegationCtx(ctx context.Context) (depth int, path map[types.RuleID]bool) {
+	v, _ := ctx.Value(delegationCtxKey{}).(delegationCtxVal)
+	if v.Path == nil {
+		return v.Depth, nil
+	}
+	return v.Depth, v.Path
+}
+
+func withDelegationCtx(ctx context.Context, depth int, path map[types.RuleID]bool) context.Context {
+	return context.WithValue(ctx, delegationCtxKey{}, delegationCtxVal{Depth: depth, Path: path})
+}
+
+// ruleScopeMatches returns true if the rule's scope (ChainType, ChainID, APIKeyID, SignerAddress) matches the request.
+// Nil rule scope fields mean "any".
+func ruleScopeMatches(rule *types.Rule, req *types.SignRequest) bool {
+	if rule.ChainType != nil && *rule.ChainType != req.ChainType {
+		return false
+	}
+	if rule.ChainID != nil && *rule.ChainID != req.ChainID {
+		return false
+	}
+	if rule.APIKeyID != nil && *rule.APIKeyID != req.APIKeyID {
+		return false
+	}
+	if rule.SignerAddress != nil && !strings.EqualFold(*rule.SignerAddress, req.SignerAddress) {
+		return false
+	}
+	return true
+}
 
 // WhitelistRuleEngine implements RuleEngine with two-tier evaluation:
 // 1. Blocklist rules (mandatory): ANY violation = blocked immediately
@@ -24,11 +62,12 @@ import (
 // it's skipped and the next whitelist rule is evaluated. This ensures that one
 // failing whitelist rule doesn't prevent other valid whitelist rules from matching.
 type WhitelistRuleEngine struct {
-	repo           storage.RuleRepository
-	evaluators     map[types.RuleType]RuleEvaluator
-	budgetChecker  *BudgetChecker // optional: budget checking for template instances
-	mu             sync.RWMutex
-	logger         *slog.Logger
+	repo                  storage.RuleRepository
+	evaluators            map[types.RuleType]RuleEvaluator
+	budgetChecker         *BudgetChecker // optional: budget checking for template instances
+	delegationConverter   DelegationPayloadConverter
+	mu                    sync.RWMutex
+	logger                *slog.Logger
 }
 
 // RuleEngineOption is a functional option for WhitelistRuleEngine
@@ -38,6 +77,14 @@ type RuleEngineOption func(*WhitelistRuleEngine)
 func WithBudgetChecker(checker *BudgetChecker) RuleEngineOption {
 	return func(e *WhitelistRuleEngine) {
 		e.budgetChecker = checker
+	}
+}
+
+// WithDelegationPayloadConverter sets the converter used to turn delegation payloads into (SignRequest, ParsedPayload).
+// Required for evm_js delegation (e.g. pass evm.DelegatePayloadToSignRequest from the chain adapter).
+func WithDelegationPayloadConverter(c DelegationPayloadConverter) RuleEngineOption {
+	return func(e *WhitelistRuleEngine) {
+		e.delegationConverter = c
 	}
 }
 
@@ -223,7 +270,7 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 			continue
 		}
 
-		evaluator, exists := e.evaluators[rule.Type]
+		_, exists := e.evaluators[rule.Type]
 		if !exists {
 			e.logger.Warn("no evaluator for whitelist rule type, skipping",
 				"type", rule.Type,
@@ -235,7 +282,7 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 
 		sequentialCount++
 		start := time.Now()
-		matched, reason, err := evaluator.Evaluate(ctx, rule, req, parsed)
+		result, err := e.evaluateOneRuleWithDelegation(ctx, rule, req, parsed)
 		duration := time.Since(start)
 		if err != nil {
 			metrics.RecordRuleEvaluation(string(rule.Type), metrics.OutcomeError, duration)
@@ -248,6 +295,7 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 			// Fail-Open for whitelist: skip and continue to next rule
 			continue
 		}
+		matched := result != nil && result.Allowed
 		if matched {
 			metrics.RecordRuleEvaluation(string(rule.Type), metrics.OutcomeAllow, duration)
 		} else {
@@ -284,23 +332,19 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 			}
 
 			e.logger.Info("request allowed by whitelist rule",
-				"rule_id", rule.ID,
-				"rule_name", rule.Name,
+				"rule_id", result.AllowedBy.ID,
+				"rule_name", result.AllowedBy.Name,
 				"request_id", req.ID,
-				"reason", reason,
+				"reason", result.AllowReason,
 			)
 			// Update match count asynchronously
 			go func(ruleID types.RuleID) {
 				if err := e.repo.IncrementMatchCount(context.Background(), ruleID); err != nil {
 					e.logger.Error("failed to increment match count", "rule_id", ruleID, "error", err)
 				}
-			}(rule.ID)
+			}(result.AllowedBy.ID)
 
-			return &EvaluationResult{
-				Allowed:     true,
-				AllowedBy:   rule,
-				AllowReason: reason,
-			}, nil
+			return result, nil
 		}
 	}
 
@@ -337,6 +381,182 @@ func (e *WhitelistRuleEngine) filterRulesBySignType(rules []*types.Rule, signTyp
 		}
 	}
 	return out
+}
+
+// evaluateOneRuleWithDelegation evaluates a single whitelist rule; if the rule matches and returns
+// a delegation, it resolves the delegation (depth/cycle/scope/size checks, convert payload, recurse).
+// Used by the sequential whitelist loop. Caller must hold e.mu at least RLock.
+func (e *WhitelistRuleEngine) evaluateOneRuleWithDelegation(ctx context.Context, rule *types.Rule, req *types.SignRequest, parsed *types.ParsedPayload) (*EvaluationResult, error) {
+	evaluator, exists := e.evaluators[rule.Type]
+	if !exists {
+		return &EvaluationResult{Allowed: false}, nil
+	}
+
+	var matched bool
+	var reason string
+	var delegation *DelegationRequest
+	var err error
+
+	if ev, ok := evaluator.(EvaluatorWithDelegation); ok {
+		matched, reason, delegation, err = ev.EvaluateWithDelegation(ctx, rule, req, parsed)
+	} else {
+		matched, reason, err = evaluator.Evaluate(ctx, rule, req, parsed)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+	if !matched {
+		return &EvaluationResult{Allowed: false}, nil
+	}
+	if matched && delegation != nil {
+		return e.resolveDelegation(ctx, req, rule, delegation)
+	}
+	return &EvaluationResult{
+		Allowed:     true,
+		AllowedBy:   rule,
+		AllowReason: reason,
+	}, nil
+}
+
+// delegationTargetIDs returns the list of rule IDs to try; any one allowing the payload/item is enough.
+func delegationTargetIDs(d *DelegationRequest) []types.RuleID {
+	return d.TargetRuleIDs
+}
+
+// resolveDelegation loads target rule(s), enforces depth/cycle/scope/size, converts payload(s),
+// and recurses via evaluateOneRuleWithDelegation. When multiple targets are set, tries each in order
+// until one allows (single: one payload; per_item: each item must be allowed by at least one target).
+// AllowedBy on success is the fromRule (first matcher).
+func (e *WhitelistRuleEngine) resolveDelegation(ctx context.Context, originalReq *types.SignRequest, fromRule *types.Rule, delegation *DelegationRequest) (*EvaluationResult, error) {
+	depth, path := getDelegationCtx(ctx)
+	targetIDs := delegationTargetIDs(delegation)
+	if len(targetIDs) == 0 {
+		e.logger.Debug("delegation has no target rule id(s)")
+		return nil, nil
+	}
+	if depth >= DelegationMaxDepth {
+		e.logger.Debug("delegation max depth exceeded", "depth", depth, "targets", targetIDs)
+		return nil, nil
+	}
+	if e.delegationConverter == nil {
+		e.logger.Debug("delegation converter not set")
+		return nil, nil
+	}
+
+	if delegation.Mode == "single" {
+		req2, parsed2, err := e.delegationConverter(ctx, delegation.Payload, delegation.Mode)
+		if err != nil {
+			e.logger.Debug("delegation single convert failed", "error", err)
+			return nil, nil
+		}
+		req2.APIKeyID = originalReq.APIKeyID
+		for _, targetID := range targetIDs {
+			targetRule, err := e.repo.Get(ctx, targetID)
+			if err != nil || targetRule == nil {
+				e.logger.Debug("delegation target rule not found", "target", targetID, "error", err)
+				continue
+			}
+			path2 := make(map[types.RuleID]bool)
+			for k, v := range path {
+				path2[k] = v
+			}
+			if path2[targetRule.ID] {
+				e.logger.Debug("delegation cycle detected", "target", targetRule.ID)
+				continue
+			}
+			path2[targetRule.ID] = true
+			childCtx := withDelegationCtx(ctx, depth+1, path2)
+			if !ruleScopeMatches(targetRule, req2) {
+				continue
+			}
+			result, err := e.evaluateOneRuleWithDelegation(childCtx, targetRule, req2, parsed2)
+			if err != nil || result == nil || !result.Allowed {
+				continue
+			}
+			return &EvaluationResult{
+				Allowed:     true,
+				AllowedBy:   fromRule,
+				AllowReason: result.AllowReason,
+			}, nil
+		}
+		return nil, nil
+	}
+
+	if delegation.Mode == "per_item" {
+		items, err := delegationItems(delegation.Payload, delegation.ItemsKey)
+		if err != nil {
+			e.logger.Debug("delegation per_item items invalid", "error", err)
+			return nil, nil
+		}
+		if len(items) > DelegationMaxItems {
+			e.logger.Debug("delegation per_item exceeds max items", "len", len(items), "max", DelegationMaxItems)
+			return nil, nil
+		}
+		for _, item := range items {
+			req2, parsed2, err := e.delegationConverter(ctx, item, delegation.Mode)
+			if err != nil {
+				e.logger.Debug("delegation per_item convert failed", "error", err)
+				return nil, nil
+			}
+			req2.APIKeyID = originalReq.APIKeyID
+			itemAllowed := false
+			for _, targetID := range targetIDs {
+				targetRule, err := e.repo.Get(ctx, targetID)
+				if err != nil || targetRule == nil {
+					continue
+				}
+				path2 := make(map[types.RuleID]bool)
+				for k, v := range path {
+					path2[k] = v
+				}
+				if path2[targetRule.ID] {
+					continue
+				}
+				path2[targetRule.ID] = true
+				childCtx := withDelegationCtx(ctx, depth+1, path2)
+				if !ruleScopeMatches(targetRule, req2) {
+					continue
+				}
+				result, err := e.evaluateOneRuleWithDelegation(childCtx, targetRule, req2, parsed2)
+				if err == nil && result != nil && result.Allowed {
+					itemAllowed = true
+					break
+				}
+			}
+			if !itemAllowed {
+				return nil, nil
+			}
+		}
+		return &EvaluationResult{
+			Allowed:     true,
+			AllowedBy:   fromRule,
+			AllowReason: "delegation per_item",
+		}, nil
+	}
+
+	e.logger.Debug("delegation unknown mode", "mode", delegation.Mode)
+	return nil, nil
+}
+
+// delegationItems extracts the items array from payload for per_item delegation.
+func delegationItems(payload interface{}, itemsKey string) ([]interface{}, error) {
+	if payload == nil || itemsKey == "" {
+		return nil, fmt.Errorf("payload or items_key empty")
+	}
+	m, ok := payload.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("payload is not a map")
+	}
+	raw, ok := m[itemsKey]
+	if !ok {
+		return nil, fmt.Errorf("items_key %q not found", itemsKey)
+	}
+	sl, ok := raw.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("items_key %q is not an array", itemsKey)
+	}
+	return sl, nil
 }
 
 // evaluateWhitelistBatch performs batch evaluation for whitelist rules that support it.
@@ -459,4 +679,6 @@ func (e *WhitelistRuleEngine) evaluateWhitelistBatch(
 }
 
 // Compile-time check that WhitelistRuleEngine implements RuleEngine
+var _ RuleEngine = (*WhitelistRuleEngine)(nil)
+
 var _ RuleEngine = (*WhitelistRuleEngine)(nil)

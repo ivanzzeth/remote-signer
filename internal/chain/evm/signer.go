@@ -3,6 +3,8 @@ package evm
 import (
 	"fmt"
 	"os"
+	"sort"
+	"strings"
 	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -193,6 +195,11 @@ func (r *SignerRegistry) ListSignersWithFilter(filter types.SignerFilter) types.
 		}
 		allSigners = append(allSigners, info)
 	}
+
+	// Stable order for pagination (map iteration is non-deterministic)
+	sort.Slice(allSigners, func(i, j int) bool {
+		return strings.ToLower(allSigners[i].Address) < strings.ToLower(allSigners[j].Address)
+	})
 
 	total := len(allSigners)
 

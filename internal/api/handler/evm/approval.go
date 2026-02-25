@@ -23,6 +23,7 @@ var validRuleTypes = map[types.RuleType]bool{
 	types.RuleTypeEVMContractMethod:     true,
 	types.RuleTypeEVMValueLimit:         true,
 	types.RuleTypeEVMSolidityExpression: true,
+	types.RuleTypeEVMJS:                 true,
 }
 
 // validRuleModes defines the known rule modes

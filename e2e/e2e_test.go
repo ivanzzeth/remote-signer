@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -888,9 +889,12 @@ func TestRule_NonAdminCannotListRules(t *testing.T) {
 // Rule Evaluation Tests (Sign requests with rules)
 // =============================================================================
 
+// Rule type coverage: each rule type must have at least 2 e2e cases (one positive, one negative).
+// See TestRule_* below: evm_address_list, evm_solidity_expression, evm_value_limit, signer_restriction,
+// sign_type_restriction, evm_js, message_pattern, evm_contract_method.
+
 func TestRule_TransactionToTreasuryPasses(t *testing.T) {
-	// Test that transactions to treasury address (whitelisted) pass
-	// This verifies the "Allow transfers to treasury" rule in example config
+	// evm_address_list positive: transactions to treasury address (whitelisted) pass
 	address := common.HexToAddress(signerAddress)
 	signer := adminClient.GetSigner(address, chainID)
 
@@ -915,9 +919,58 @@ func TestRule_TransactionToTreasuryPasses(t *testing.T) {
 	assert.NotNil(t, s)
 }
 
+// TestRule_AddressWhitelist_RejectsNonListedAddress is evm_address_list negative: tx to an address
+// not in the whitelist does not match; use second signer so signer_restriction also does not match → reject.
+func TestRule_AddressWhitelist_RejectsNonListedAddress(t *testing.T) {
+	if useExternalServer {
+		t.Skip("evm_address_list and signer_restriction are from config.e2e.yaml")
+	}
+	// Second signer is in registry but not in config.e2e "Allow hot wallet signer" (only 0xf39Fd...)
+	secondSigner := common.HexToAddress(testSigner2Address)
+	signer := adminClient.GetSigner(secondSigner, chainID)
+	// Tx to address not in "Allow transfers to treasury" (treasury is 0x5B38...)
+	nonListedAddr := "0x742d35Cc6634C0532925a3b844Bc454e4438f44e"
+	to := common.HexToAddress(nonListedAddr)
+	tx := types.NewTx(&types.LegacyTx{
+		Nonce:    105,
+		GasPrice: big.NewInt(20000000000),
+		Gas:      21000,
+		To:       &to,
+		Value:    big.NewInt(0),
+		Data:     nil,
+	})
+	chainIDBig := big.NewInt(1)
+	_, err := signer.SignTransactionWithChainID(tx, chainIDBig)
+	require.Error(t, err, "evm_address_list negative: tx to non-listed address should not be allowed (no whitelist match)")
+}
+
+// TestRule_SolidityBlocklist_PassesForNormalAddress mirrors config.e2e "Block known malicious addresses"
+// test_cases "should pass for normal address": Solidity blocklist runs first, does not revert for to=0x5B38...,
+// then whitelist allows. E2E coverage for the rule's positive test case (different code path than unit test).
+func TestRule_SolidityBlocklist_PassesForNormalAddress(t *testing.T) {
+	if useExternalServer {
+		t.Skip("Solidity blocklist rule is in config.e2e.yaml")
+	}
+	address := common.HexToAddress(signerAddress)
+	signer := adminClient.GetSigner(address, chainID)
+	to := common.HexToAddress(treasuryAddress) // 0x5B38... same as rule test_cases input
+	tx := types.NewTx(&types.LegacyTx{
+		Nonce:    103,
+		GasPrice: big.NewInt(20000000000),
+		Gas:      21000,
+		To:       &to,
+		Value:    big.NewInt(100000000000000000),
+		Data:     nil,
+	})
+	chainIDBig := big.NewInt(1)
+	signedTx, err := signer.SignTransactionWithChainID(tx, chainIDBig)
+	require.NoError(t, err, "Solidity blocklist should pass for normal address (mirror rule test_cases)")
+	require.NotNil(t, signedTx)
+}
+
 func TestRule_TransactionToBurnAddressBlocked(t *testing.T) {
-	// Test that transactions to burn address (0xdead) are blocked
-	// This verifies the "Block known malicious addresses" blocklist rule in example config
+	// Mirrors config.e2e "Block known malicious addresses" test_cases "should block burn address"
+	// (expect_pass: false, expect_reason: "blocked: burn address"). E2E asserts full path + reason.
 	address := common.HexToAddress(signerAddress)
 	signer := adminClient.GetSigner(address, chainID)
 
@@ -933,8 +986,55 @@ func TestRule_TransactionToBurnAddressBlocked(t *testing.T) {
 
 	chainIDBig := big.NewInt(1)
 	_, err := signer.SignTransactionWithChainID(tx, chainIDBig)
-	// Should be blocked by the blocklist rule
 	require.Error(t, err, "Transaction to burn address should be blocked by blocklist rule")
+	var signErr *client.SignError
+	require.True(t, errors.As(err, &signErr), "expected SignError")
+	require.Contains(t, signErr.Message, "blocked: burn address", "rejection reason should match rule test_cases expect_reason")
+}
+
+// TestRule_JSBlocklistBlocksBurnAddress verifies that an evm_js rule with mode blocklist
+// blocks a transaction when the script returns invalid (e2e coverage for JS blocklist).
+func TestRule_JSBlocklistBlocksBurnAddress(t *testing.T) {
+	ctx := context.Background()
+	// Use zero address so we don't rely on the server's default burn-address blocklist
+	blockedAddr := "0x0000000000000000000000000000000000000000"
+	script := `function validate(input) {
+	  if (input.transaction && input.transaction.to) {
+	    var to = (input.transaction.to || "").toLowerCase();
+	    if (to === "0x0000000000000000000000000000000000000000") return fail("blocked: zero address");
+	  }
+	  return ok();
+	}`
+
+	chainType := "evm"
+	rule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+		Name:        "E2E JS Blocklist Zero Address",
+		Description: "evm_js blocklist for e2e",
+		Type:        "evm_js",
+		Mode:        "blocklist",
+		ChainType:   &chainType,
+		Config: map[string]interface{}{
+			"script": script,
+		},
+		Enabled: true,
+	})
+	require.NoError(t, err)
+	defer func() { _ = adminClient.DeleteRule(ctx, rule.ID) }()
+
+	address := common.HexToAddress(signerAddress)
+	signer := adminClient.GetSigner(address, chainID)
+	to := common.HexToAddress(blockedAddr)
+	tx := types.NewTx(&types.LegacyTx{
+		Nonce:    102,
+		GasPrice: big.NewInt(20000000000),
+		Gas:      21000,
+		To:       &to,
+		Value:    big.NewInt(0),
+		Data:     nil,
+	})
+	chainIDBig := big.NewInt(1)
+	_, err = signer.SignTransactionWithChainID(tx, chainIDBig)
+	require.Error(t, err, "Transaction to zero address should be blocked by evm_js blocklist rule")
 }
 
 func TestRule_SignRequestMatchesWhitelistRule(t *testing.T) {
@@ -946,6 +1046,31 @@ func TestRule_SignRequestMatchesWhitelistRule(t *testing.T) {
 	sig, err := signer.PersonalSign("This should match the whitelist rule")
 	require.NoError(t, err)
 	assert.Len(t, sig, 65)
+}
+
+// TestRule_ValueLimitWhitelist_AllowsUnderLimit mirrors config.e2e "Max 10 ETH per transaction"
+// whitelist: a tx with value under the limit should be allowed. E2E covers the rule's allow path.
+func TestRule_ValueLimitWhitelist_AllowsUnderLimit(t *testing.T) {
+	if useExternalServer {
+		t.Skip("Value limit rule is in config.e2e.yaml")
+	}
+	address := common.HexToAddress(signerAddress)
+	signer := adminClient.GetSigner(address, chainID)
+	to := common.HexToAddress(treasuryAddress)
+	// 5 ETH, under config.e2e "Max 10 ETH" whitelist
+	fiveEth := new(big.Int).Mul(big.NewInt(5), big.NewInt(1e18))
+	tx := types.NewTx(&types.LegacyTx{
+		Nonce:    104,
+		GasPrice: big.NewInt(20000000000),
+		Gas:      21000,
+		To:       &to,
+		Value:    fiveEth,
+		Data:     nil,
+	})
+	chainIDBig := big.NewInt(1)
+	signedTx, err := signer.SignTransactionWithChainID(tx, chainIDBig)
+	require.NoError(t, err, "Value limit whitelist should allow tx under 10 ETH")
+	require.NotNil(t, signedTx)
 }
 
 func TestRule_ValueLimitRuleBlocks(t *testing.T) {
@@ -1005,14 +1130,51 @@ func TestRule_SignerRestrictionAllowsTestSigner(t *testing.T) {
 }
 
 func TestRule_SignerRestrictionBlocksUnknownSigner(t *testing.T) {
-	// Test that requests from unknown signer are blocked/need approval
-	// Note: This test uses an unknown signer address that doesn't exist
+	// signer_restriction negative (signer not in registry): request from unknown signer is rejected
 	unknownSigner := common.HexToAddress("0x0000000000000000000000000000000000000001")
 	signer := adminClient.GetSigner(unknownSigner, chainID)
-
-	// This should fail because the signer doesn't exist in the registry
 	_, err := signer.PersonalSign("Test signer restriction blocks unknown signer")
 	require.Error(t, err, "Unknown signer should be rejected")
+}
+
+// TestRule_SignerRestriction_BlocksSignerNotInAllowList is signer_restriction negative: signer exists
+// in registry but is not in allowed_signers → no whitelist match → reject. Config.e2e has
+// "Allow common signing methods" scoped with signer_address to the first signer only, so in
+// isolation the second signer would have no whitelist match. This test is skipped when using
+// the full config.e2e because other rules (e.g. from template expansion) may still allow the
+// second signer for personal sign; run with a minimal config (only signer_restriction +
+// sign_type_restriction with signer_address) to get a real reject.
+func TestRule_SignerRestriction_BlocksSignerNotInAllowList(t *testing.T) {
+	if useExternalServer {
+		t.Skip("signer_restriction config is from config.e2e.yaml")
+	}
+	ctx := context.Background()
+	rulesResp, err := adminClient.ListRules(ctx, nil)
+	require.NoError(t, err)
+	var signTypeRule *client.Rule
+	for i := range rulesResp.Rules {
+		if rulesResp.Rules[i].Name == "Allow common signing methods" && rulesResp.Rules[i].Type == "sign_type_restriction" {
+			signTypeRule = &rulesResp.Rules[i]
+			break
+		}
+	}
+	require.NotNil(t, signTypeRule, "config.e2e must define rule 'Allow common signing methods' (sign_type_restriction)")
+	require.NotNil(t, signTypeRule.SignerAddress, "config.e2e rule 'Allow common signing methods' must have signer_address (first signer only)")
+	require.Equal(t, strings.ToLower(signerAddress), strings.ToLower(*signTypeRule.SignerAddress), "signer_address must be first test signer")
+
+	listFilter := &client.ListRulesFilter{SignerAddress: testSigner2Address}
+	rulesForSecond, err := adminClient.ListRules(ctx, listFilter)
+	require.NoError(t, err)
+	for _, r := range rulesForSecond.Rules {
+		if r.Name == "Allow common signing methods" && r.Type == "sign_type_restriction" {
+			t.Fatalf("rule 'Allow common signing methods' must not apply to second signer (signer_address scope); list with signer_address=%s returned it", testSigner2Address)
+		}
+	}
+
+	secondSigner := common.HexToAddress(testSigner2Address)
+	signer := adminClient.GetSigner(secondSigner, chainID)
+	_, err = signer.PersonalSign("signer_restriction negative: signer not in allow list")
+	require.Error(t, err, "Signer not in allow list must be rejected (no whitelist match)")
 }
 
 func TestRule_SignTypeRestrictionAllowsPersonalSign(t *testing.T) {
@@ -1111,6 +1273,132 @@ func TestRule_CreateSignTypeRestrictionViaAPI(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestRule_MessagePattern_AllowsMatching is message_pattern positive: message matching pattern is allowed.
+func TestRule_MessagePattern_AllowsMatching(t *testing.T) {
+	ctx := context.Background()
+	chainType := "evm"
+	rule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+		Name:        "E2E MessagePattern Allow",
+		Type:        "message_pattern",
+		Mode:        "whitelist",
+		ChainType:   &chainType,
+		Config: map[string]interface{}{
+			"pattern":     "^E2E-msg-ok$",
+			"sign_types": []string{"personal"},
+		},
+		Enabled: true,
+	})
+	require.NoError(t, err)
+	defer func() { _ = adminClient.DeleteRule(ctx, rule.ID) }()
+
+	address := common.HexToAddress(signerAddress)
+	signer := adminClient.GetSigner(address, chainID)
+	sig, err := signer.PersonalSign("E2E-msg-ok")
+	require.NoError(t, err, "message_pattern positive: matching message should be allowed")
+	assert.Len(t, sig, 65)
+}
+
+// TestRule_MessagePattern_RejectsMatchingBlocklist is message_pattern negative: blocklist rule
+// blocks when message matches pattern. First signer sends message matching blocklist → reject.
+func TestRule_MessagePattern_RejectsMatchingBlocklist(t *testing.T) {
+	ctx := context.Background()
+	chainType := "evm"
+	rule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+		Name:        "E2E MessagePattern Blocklist",
+		Type:        "message_pattern",
+		Mode:        "blocklist",
+		ChainType:   &chainType,
+		Config: map[string]interface{}{
+			"pattern":     "^E2E-block-msg$",
+			"sign_types": []string{"personal"},
+		},
+		Enabled: true,
+	})
+	require.NoError(t, err)
+	defer func() { _ = adminClient.DeleteRule(ctx, rule.ID) }()
+
+	address := common.HexToAddress(signerAddress)
+	signer := adminClient.GetSigner(address, chainID)
+	_, err = signer.PersonalSign("E2E-block-msg")
+	require.Error(t, err, "message_pattern negative: message matching blocklist pattern should be rejected")
+}
+
+// TestRule_ContractMethod_AllowsTransfer is evm_contract_method positive: tx with allowed method_sig is allowed.
+func TestRule_ContractMethod_AllowsTransfer(t *testing.T) {
+	ctx := context.Background()
+	chainType := "evm"
+	rule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+		Name:      "E2E ContractMethod Transfer",
+		Type:      "evm_contract_method",
+		Mode:      "whitelist",
+		ChainType: &chainType,
+		Config: map[string]interface{}{
+			"method_sigs": []string{"0xa9059cbb"}, // transfer(address,uint256)
+		},
+		Enabled: true,
+	})
+	require.NoError(t, err)
+	defer func() { _ = adminClient.DeleteRule(ctx, rule.ID) }()
+
+	address := common.HexToAddress(signerAddress)
+	signer := adminClient.GetSigner(address, chainID)
+	to := common.HexToAddress(treasuryAddress)
+	// transfer(to, amount): selector 0xa9059cbb + 32-byte to + 32-byte amount
+	transferCalldata := "0xa9059cbb" +
+		"000000000000000000000000" + treasuryAddress[2:] +
+		"0000000000000000000000000000000000000000000000000de0b6b3a7640000"
+	tx := types.NewTx(&types.LegacyTx{
+		Nonce:    106,
+		GasPrice: big.NewInt(20000000000),
+		Gas:      21000,
+		To:       &to,
+		Value:    big.NewInt(0),
+		Data:     common.FromHex(transferCalldata),
+	})
+	chainIDBig := big.NewInt(1)
+	signedTx, err := signer.SignTransactionWithChainID(tx, chainIDBig)
+	require.NoError(t, err, "evm_contract_method positive: tx with allowed selector should be allowed")
+	require.NotNil(t, signedTx)
+}
+
+// TestRule_ContractMethod_BlocklistBlocksApproval is evm_contract_method negative: blocklist rule
+// blocks tx when method selector is in the list. First signer sends approve tx to treasury → reject.
+func TestRule_ContractMethod_BlocklistBlocksApproval(t *testing.T) {
+	ctx := context.Background()
+	chainType := "evm"
+	rule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+		Name:      "E2E ContractMethod Blocklist",
+		Type:      "evm_contract_method",
+		Mode:      "blocklist",
+		ChainType: &chainType,
+		Config: map[string]interface{}{
+			"contract":    treasuryAddress,
+			"method_sigs": []string{"0x095ea7b3"}, // approve(address,uint256)
+		},
+		Enabled: true,
+	})
+	require.NoError(t, err)
+	defer func() { _ = adminClient.DeleteRule(ctx, rule.ID) }()
+
+	address := common.HexToAddress(signerAddress)
+	signer := adminClient.GetSigner(address, chainID)
+	to := common.HexToAddress(treasuryAddress)
+	approveCalldata := "0x095ea7b3" +
+		"000000000000000000000000" + treasuryAddress[2:] +
+		"0000000000000000000000000000000000000000000000000de0b6b3a7640000"
+	tx := types.NewTx(&types.LegacyTx{
+		Nonce:    107,
+		GasPrice: big.NewInt(20000000000),
+		Gas:      21000,
+		To:       &to,
+		Value:    big.NewInt(0),
+		Data:     common.FromHex(approveCalldata),
+	})
+	chainIDBig := big.NewInt(1)
+	_, err = signer.SignTransactionWithChainID(tx, chainIDBig)
+	require.Error(t, err, "evm_contract_method negative: blocklist rule should block approve tx")
+}
+
 func TestRule_SignTypeRestrictionBlocksDisallowedType(t *testing.T) {
 	ctx := context.Background()
 
@@ -1141,6 +1429,495 @@ func TestRule_SignTypeRestrictionBlocksDisallowedType(t *testing.T) {
 	_, err = signer.PersonalSign("This should be blocked")
 	// Should be blocked by blocklist rule
 	require.Error(t, err, "Personal sign should be blocked by sign_type_restriction blocklist")
+}
+
+// TestRule_DelegationSinglePasses verifies config-file delegation: evm_js rule returns valid+payload,
+// delegate_to in config points to target rule; engine delegates and target allows.
+// config.e2e.yaml defines "E2E Delegate Single" (script returns valid+payload) and "E2E Delegate Target" (always allows).
+func TestRule_DelegationSinglePasses(t *testing.T) {
+	if useExternalServer {
+		t.Skip("delegation e2e uses config.e2e.yaml rules (E2E Delegate Single / E2E Delegate Target)")
+	}
+
+	ctx := context.Background()
+
+	// Optional: assert config has correct delegation target
+	rulesResp, err := adminClient.ListRules(ctx, nil)
+	require.NoError(t, err)
+	var targetID, delegateSingleID string
+	for _, r := range rulesResp.Rules {
+		if r.Name == "E2E Delegate Target" {
+			targetID = r.ID
+		}
+		if r.Name == "E2E Delegate Single" {
+			delegateSingleID = r.ID
+		}
+	}
+	require.NotEmpty(t, targetID, "E2E Delegate Target rule must exist in config")
+	require.NotEmpty(t, delegateSingleID, "E2E Delegate Single rule must exist in config")
+
+	// Submit a transaction sign request: E2E Delegate Single matches, returns valid+payload, delegate_to in config;
+	// engine delegates to E2E Delegate Target which allows.
+	address := common.HexToAddress(signerAddress)
+	signer := adminClient.GetSigner(address, chainID)
+
+	to := common.HexToAddress(treasuryAddress)
+	tx := types.NewTx(&types.LegacyTx{
+		Nonce:    300,
+		GasPrice: big.NewInt(20000000000),
+		Gas:      21000,
+		To:       &to,
+		Value:    big.NewInt(0),
+		Data:     nil,
+	})
+	chainIDBig := big.NewInt(1)
+	signedTx, err := signer.SignTransactionWithChainID(tx, chainIDBig)
+	require.NoError(t, err, "Delegation chain (E2E Delegate Single -> E2E Delegate Target) should allow")
+	require.NotNil(t, signedTx)
+
+	v, r, s := signedTx.RawSignatureValues()
+	assert.NotNil(t, v)
+	assert.NotNil(t, r)
+	assert.NotNil(t, s)
+
+	_ = targetID // used only when asserting config
+}
+
+// TestRule_SafeMultisendERC20Chain verifies the full delegation chain Safe => Multisend => ERC20.
+// Submits a SafeTx (typed_data) where the inner tx is to the multisend contract with one ERC20 transfer;
+// Safe rule delegates to Multisend rule, which decodes the batch and delegates per_item to ERC20 rule.
+func TestRule_SafeMultisendERC20Chain(t *testing.T) {
+	if useExternalServer {
+		t.Skip("Safe=>Multisend=>ERC20 chain uses config.e2e.yaml instance rules")
+	}
+
+	// Addresses from config.e2e.yaml
+	safeAddress := "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+	multisendAddress := "0xA238CBeb142c10Ef7Ad8442C6D1f9E89e07e7761"
+	usdcAddress := "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+	recipient := "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+
+	// Gnosis MultiSend packed: op(1) + to(20) + value(32) + dataLen(32) + data. One tx: CALL to USDC, transfer(recipient, 0)
+	transferCalldata := "a9059cbb" + // transfer(address,uint256)
+		strings.Repeat("0", 24) + strings.ToLower(recipient[2:]) + // address 32 bytes
+		"0000000000000000000000000000000000000000000000000000000000000000"   // amount
+	batch := "00" + // CALL
+		strings.Repeat("0", 24) + strings.ToLower(usdcAddress[2:]) + // to 20 bytes
+		"0000000000000000000000000000000000000000000000000000000000000000" + // value
+		"0000000000000000000000000000000000000000000000000000000000000044" + // dataLen 68
+		transferCalldata
+	batchBytes := len(batch) / 2
+	// ABI-encode multiSend(bytes): selector + offset(32) + length + raw bytes
+	multiSendSelector := "8d80ff0a" // keccak256("multiSend(bytes)")[:4]
+	encodedBytes := "0000000000000000000000000000000000000000000000000000000000000020" +
+		fmt.Sprintf("%064x", batchBytes) + batch
+	safeTxData := "0x" + multiSendSelector + encodedBytes
+
+	typedData := eip712.TypedData{
+		Types: eip712.Types{
+			"EIP712Domain": {
+				{Name: "chainId", Type: "uint256"},
+				{Name: "verifyingContract", Type: "address"},
+			},
+			"SafeTx": {
+				{Name: "to", Type: "address"},
+				{Name: "value", Type: "uint256"},
+				{Name: "data", Type: "bytes"},
+				{Name: "operation", Type: "uint8"},
+				{Name: "safeTxGas", Type: "uint256"},
+				{Name: "baseGas", Type: "uint256"},
+				{Name: "gasPrice", Type: "uint256"},
+				{Name: "gasToken", Type: "address"},
+				{Name: "refundReceiver", Type: "address"},
+				{Name: "nonce", Type: "uint256"},
+			},
+		},
+		PrimaryType: "SafeTx",
+		Domain: eip712.TypedDataDomain{
+			ChainId:           "1",
+			VerifyingContract: safeAddress,
+		},
+		Message: map[string]interface{}{
+			"to":               multisendAddress,
+			"value":            "0",
+			"data":             safeTxData,
+			"operation":        "0",
+			"safeTxGas":        "0",
+			"baseGas":          "0",
+			"gasPrice":         "0",
+			"gasToken":         "0x0000000000000000000000000000000000000000",
+			"refundReceiver":   "0x0000000000000000000000000000000000000000",
+			"nonce":            "0",
+		},
+	}
+
+	address := common.HexToAddress(signerAddress)
+	signer := adminClient.GetSigner(address, chainID)
+	sig, err := signer.SignTypedData(typedData)
+	require.NoError(t, err, "Safe=>Multisend=>ERC20 chain should allow and return signature")
+	require.Len(t, sig, 65)
+}
+
+// TestRule_SafeMultisendMultiDelegate verifies Multisend with multiple delegation targets (ERC20, ERC721).
+// Batch has two items: ERC20 transfer and ERC721 transferFrom; each item is validated by the matching rule (e2e-erc20 or e2e-erc721).
+func TestRule_SafeMultisendMultiDelegate(t *testing.T) {
+	if useExternalServer {
+		t.Skip("Safe=>Multisend=>(ERC20|ERC721) uses config.e2e.yaml instance rules")
+	}
+
+	safeAddress := "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+	multisendAddress := "0xA238CBeb142c10Ef7Ad8442C6D1f9E89e07e7761"
+	usdcAddress := "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+	nftAddress := "0xBC4ca0EdA7647A8aB7C2061c2E118A18a936f13D"
+	recipient := "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+	signerAddr := strings.ToLower(testSignerAddress[2:])
+
+	// Item 1: CALL to USDC, transfer(recipient, 0)
+	erc20Calldata := "a9059cbb" +
+		strings.Repeat("0", 24) + strings.ToLower(recipient[2:]) +
+		"0000000000000000000000000000000000000000000000000000000000000000"
+	item1 := "00" +
+		strings.Repeat("0", 24) + strings.ToLower(usdcAddress[2:]) +
+		"0000000000000000000000000000000000000000000000000000000000000000" +
+		"0000000000000000000000000000000000000000000000000000000000000044" +
+		erc20Calldata
+
+	// Item 2: CALL to NFT, transferFrom(signer, recipient, tokenId=1)
+	erc721Calldata := "23b872dd" +
+		strings.Repeat("0", 24) + signerAddr +
+		strings.Repeat("0", 24) + strings.ToLower(recipient[2:]) +
+		"0000000000000000000000000000000000000000000000000000000000000001"
+	item2 := "00" +
+		strings.Repeat("0", 24) + strings.ToLower(nftAddress[2:]) +
+		"0000000000000000000000000000000000000000000000000000000000000000" +
+		"0000000000000000000000000000000000000000000000000000000000000064" +
+		erc721Calldata
+
+	batch := item1 + item2
+	batchBytes := len(batch) / 2
+	multiSendSelector := "8d80ff0a"
+	encodedBytes := "0000000000000000000000000000000000000000000000000000000000000020" +
+		fmt.Sprintf("%064x", batchBytes) + batch
+	safeTxData := "0x" + multiSendSelector + encodedBytes
+
+	typedData := eip712.TypedData{
+		Types: eip712.Types{
+			"EIP712Domain": {
+				{Name: "chainId", Type: "uint256"},
+				{Name: "verifyingContract", Type: "address"},
+			},
+			"SafeTx": {
+				{Name: "to", Type: "address"},
+				{Name: "value", Type: "uint256"},
+				{Name: "data", Type: "bytes"},
+				{Name: "operation", Type: "uint8"},
+				{Name: "safeTxGas", Type: "uint256"},
+				{Name: "baseGas", Type: "uint256"},
+				{Name: "gasPrice", Type: "uint256"},
+				{Name: "gasToken", Type: "address"},
+				{Name: "refundReceiver", Type: "address"},
+				{Name: "nonce", Type: "uint256"},
+			},
+		},
+		PrimaryType: "SafeTx",
+		Domain: eip712.TypedDataDomain{
+			ChainId:           "1",
+			VerifyingContract: safeAddress,
+		},
+		Message: map[string]interface{}{
+			"to":               multisendAddress,
+			"value":            "0",
+			"data":             safeTxData,
+			"operation":        "0",
+			"safeTxGas":        "0",
+			"baseGas":          "0",
+			"gasPrice":         "0",
+			"gasToken":         "0x0000000000000000000000000000000000000000",
+			"refundReceiver":   "0x0000000000000000000000000000000000000000",
+			"nonce":            "0",
+		},
+	}
+
+	address := common.HexToAddress(signerAddress)
+	signer := adminClient.GetSigner(address, chainID)
+	sig, err := signer.SignTypedData(typedData)
+	require.NoError(t, err, "Safe=>Multisend=>(ERC20|ERC721) multi-delegate should allow and return signature")
+	require.Len(t, sig, 65)
+}
+
+// TestRule_PolymarketSafeChain verifies the combined Polymarket JS + Safe JS template chain (same effect as polymarket.safe.template.yaml).
+// Submits a SafeTx (typed_data) on chain 137 with inner call USDC.e approve(CTF Exchange, max);
+// Safe rule (e2e-safe-polymarket) delegates to e2e-polymarket-inner which validates the inner transaction.
+func TestRule_PolymarketSafeChain(t *testing.T) {
+	if useExternalServer {
+		t.Skip("Polymarket Safe chain uses config.e2e.yaml instance rules (E2E Polymarket + E2E Safe Polymarket)")
+	}
+
+	// Addresses from config.e2e.yaml E2E Polymarket / E2E Safe Polymarket instances (Polygon)
+	const polygonChainID = "137"
+	safeAddress := "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+	usdcAddress := "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+	ctfExchangeAddress := "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E"
+	// approve(spender=CTF Exchange, amount=max uint256)
+	approveCalldata := "095ea7b3" +
+		strings.Repeat("0", 24) + strings.ToLower(ctfExchangeAddress[2:]) +
+		"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+
+	typedData := eip712.TypedData{
+		Types: eip712.Types{
+			"EIP712Domain": {
+				{Name: "chainId", Type: "uint256"},
+				{Name: "verifyingContract", Type: "address"},
+			},
+			"SafeTx": {
+				{Name: "to", Type: "address"},
+				{Name: "value", Type: "uint256"},
+				{Name: "data", Type: "bytes"},
+				{Name: "operation", Type: "uint8"},
+				{Name: "safeTxGas", Type: "uint256"},
+				{Name: "baseGas", Type: "uint256"},
+				{Name: "gasPrice", Type: "uint256"},
+				{Name: "gasToken", Type: "address"},
+				{Name: "refundReceiver", Type: "address"},
+				{Name: "nonce", Type: "uint256"},
+			},
+		},
+		PrimaryType: "SafeTx",
+		Domain: eip712.TypedDataDomain{
+			ChainId:           polygonChainID,
+			VerifyingContract: safeAddress,
+		},
+		Message: map[string]interface{}{
+			"to":               usdcAddress,
+			"value":            "0",
+			"data":             "0x" + approveCalldata,
+			"operation":        "0",
+			"safeTxGas":        "0",
+			"baseGas":          "0",
+			"gasPrice":         "0",
+			"gasToken":         "0x0000000000000000000000000000000000000000",
+			"refundReceiver":   "0x0000000000000000000000000000000000000000",
+			"nonce":            "0",
+		},
+	}
+
+	address := common.HexToAddress(testSignerAddress)
+	signer := adminClient.GetSigner(address, polygonChainID)
+	sig, err := signer.SignTypedData(typedData)
+	require.NoError(t, err, "Polymarket Safe chain (SafeTx => e2e-polymarket-inner) should allow and return signature")
+	require.Len(t, sig, 65)
+}
+
+// TestRule_PolymarketSafeChain_CTFSetApprovalForAll mirrors polymarket.safe.template.yaml test case:
+// "should pass SafeTx with CTF setApprovalForAll to Exchange (real tx 0x4f1356ad)".
+func TestRule_PolymarketSafeChain_CTFSetApprovalForAll(t *testing.T) {
+	if useExternalServer {
+		t.Skip("Polymarket Safe chain uses config.e2e.yaml instance rules")
+	}
+
+	const polygonChainID = "137"
+	safeAddress := "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+	ctfAddress := "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+	ctfExchangeAddress := "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E"
+	setApprovalCalldata := "a22cb465" +
+		strings.Repeat("0", 24) + strings.ToLower(ctfExchangeAddress[2:]) +
+		"0000000000000000000000000000000000000000000000000000000000000001"
+
+	typedData := eip712.TypedData{
+		Types: eip712.Types{
+			"EIP712Domain": {
+				{Name: "chainId", Type: "uint256"},
+				{Name: "verifyingContract", Type: "address"},
+			},
+			"SafeTx": {
+				{Name: "to", Type: "address"},
+				{Name: "value", Type: "uint256"},
+				{Name: "data", Type: "bytes"},
+				{Name: "operation", Type: "uint8"},
+				{Name: "safeTxGas", Type: "uint256"},
+				{Name: "baseGas", Type: "uint256"},
+				{Name: "gasPrice", Type: "uint256"},
+				{Name: "gasToken", Type: "address"},
+				{Name: "refundReceiver", Type: "address"},
+				{Name: "nonce", Type: "uint256"},
+			},
+		},
+		PrimaryType: "SafeTx",
+		Domain: eip712.TypedDataDomain{
+			ChainId:           polygonChainID,
+			VerifyingContract: safeAddress,
+		},
+		Message: map[string]interface{}{
+			"to":               ctfAddress,
+			"value":            "0",
+			"data":             "0x" + setApprovalCalldata,
+			"operation":        "0",
+			"safeTxGas":        "0",
+			"baseGas":          "0",
+			"gasPrice":         "0",
+			"gasToken":         "0x0000000000000000000000000000000000000000",
+			"refundReceiver":   "0x0000000000000000000000000000000000000000",
+			"nonce":            "0",
+		},
+	}
+
+	address := common.HexToAddress(testSignerAddress)
+	signer := adminClient.GetSigner(address, polygonChainID)
+	sig, err := signer.SignTypedData(typedData)
+	require.NoError(t, err, "SafeTx with CTF setApprovalForAll(Exchange, true) should pass")
+	require.Len(t, sig, 65)
+}
+
+// TestRule_PolymarketSafeChain_RejectDelegateCall mirrors polymarket.safe.template.yaml test case:
+// "should reject SafeTx with DELEGATECALL".
+func TestRule_PolymarketSafeChain_RejectDelegateCall(t *testing.T) {
+	if useExternalServer {
+		t.Skip("Polymarket Safe chain uses config.e2e.yaml instance rules")
+	}
+	const polygonChainID = "137"
+	safeAddress := "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+	usdcAddress := "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+	ctfExchangeAddress := "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E"
+	approveCalldata := "095ea7b3" +
+		strings.Repeat("0", 24) + strings.ToLower(ctfExchangeAddress[2:]) +
+		"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+
+	typedData := eip712.TypedData{
+		Types: eip712.Types{
+			"EIP712Domain": {
+				{Name: "chainId", Type: "uint256"},
+				{Name: "verifyingContract", Type: "address"},
+			},
+			"SafeTx": {
+				{Name: "to", Type: "address"},
+				{Name: "value", Type: "uint256"},
+				{Name: "data", Type: "bytes"},
+				{Name: "operation", Type: "uint8"},
+				{Name: "safeTxGas", Type: "uint256"},
+				{Name: "baseGas", Type: "uint256"},
+				{Name: "gasPrice", Type: "uint256"},
+				{Name: "gasToken", Type: "address"},
+				{Name: "refundReceiver", Type: "address"},
+				{Name: "nonce", Type: "uint256"},
+			},
+		},
+		PrimaryType: "SafeTx",
+		Domain: eip712.TypedDataDomain{
+			ChainId:           polygonChainID,
+			VerifyingContract: safeAddress,
+		},
+		Message: map[string]interface{}{
+			"to":               usdcAddress,
+			"value":            "0",
+			"data":             "0x" + approveCalldata,
+			"operation":        "1", // DELEGATECALL: must be rejected
+			"safeTxGas":        "0",
+			"baseGas":          "0",
+			"gasPrice":         "0",
+			"gasToken":         "0x0000000000000000000000000000000000000000",
+			"refundReceiver":   "0x0000000000000000000000000000000000000000",
+			"nonce":            "0",
+		},
+	}
+
+	address := common.HexToAddress(testSignerAddress)
+	signer := adminClient.GetSigner(address, polygonChainID)
+	_, err := signer.SignTypedData(typedData)
+	require.Error(t, err)
+	var signErr *client.SignError
+	require.True(t, errors.As(err, &signErr), "expected SignError")
+	require.Contains(t, signErr.Message, "only CALL", "rejection reason should mention only CALL")
+}
+
+// TestRule_PolymarketSafeChain_CTFRedeemPositions mirrors polymarket.safe.template.yaml complex case:
+// "should pass SafeTx with CTF redeemPositions (real tx 0x714b3d)" — Polygon tx, inner redeemPositions(USDC.e, 0x0, conditionId, [1,2]).
+func TestRule_PolymarketSafeChain_CTFRedeemPositions(t *testing.T) {
+	if useExternalServer {
+		t.Skip("Polymarket Safe chain uses config.e2e.yaml instance rules")
+	}
+
+	const polygonChainID = "137"
+	safeAddress := "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+	ctfAddress := "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+	// redeemPositions(address,bytes32,bytes32,uint256[]) — collateralToken=USDC.e, parentCollectionId=0x0, conditionId=0xbd42fb9a..., indexSets=[1,2]
+	// From polymarket.safe.template.yaml test case "should pass SafeTx with CTF redeemPositions (real tx 0x714b3d)"
+	redeemPositionsData := "0x01b7037c0000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa841740000000000000000000000000000000000000000000000000000000000000000bd42fb9ac3870c35193d69ca1ad5ea00363d8ee6aba80b910a2003c370597cae0000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002"
+
+	typedData := eip712.TypedData{
+		Types: eip712.Types{
+			"EIP712Domain": {
+				{Name: "chainId", Type: "uint256"},
+				{Name: "verifyingContract", Type: "address"},
+			},
+			"SafeTx": {
+				{Name: "to", Type: "address"},
+				{Name: "value", Type: "uint256"},
+				{Name: "data", Type: "bytes"},
+				{Name: "operation", Type: "uint8"},
+				{Name: "safeTxGas", Type: "uint256"},
+				{Name: "baseGas", Type: "uint256"},
+				{Name: "gasPrice", Type: "uint256"},
+				{Name: "gasToken", Type: "address"},
+				{Name: "refundReceiver", Type: "address"},
+				{Name: "nonce", Type: "uint256"},
+			},
+		},
+		PrimaryType: "SafeTx",
+		Domain: eip712.TypedDataDomain{
+			ChainId:           polygonChainID,
+			VerifyingContract: safeAddress,
+		},
+		Message: map[string]interface{}{
+			"to":               ctfAddress,
+			"value":            "0",
+			"data":             redeemPositionsData,
+			"operation":        "0",
+			"safeTxGas":        "217890",
+			"baseGas":          "0",
+			"gasPrice":         "0",
+			"gasToken":         "0x0000000000000000000000000000000000000000",
+			"refundReceiver":   "0x0000000000000000000000000000000000000000",
+			"nonce":            "0",
+		},
+	}
+
+	address := common.HexToAddress(testSignerAddress)
+	signer := adminClient.GetSigner(address, polygonChainID)
+	sig, err := signer.SignTypedData(typedData)
+	require.NoError(t, err, "SafeTx with CTF redeemPositions (real tx 0x714b3d) should pass")
+	require.Len(t, sig, 65)
+}
+
+// TestRule_PolymarketSafeChain_ExecTransactionCTFRedeemPositions mirrors polymarket.safe.template.yaml complex case:
+// "should pass execTransaction with real CTF redeemPositions (real tx 0x714b3d)" — raw tx to Safe with execTransaction(CTF, 0, redeemPositions(...), ...).
+func TestRule_PolymarketSafeChain_ExecTransactionCTFRedeemPositions(t *testing.T) {
+	if useExternalServer {
+		t.Skip("Polymarket Safe chain uses config.e2e.yaml instance rules")
+	}
+
+	const polygonChainID = "137"
+	safeAddress := "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+	// execTransaction(CTF, 0, redeemPositions(USDC.e,0x0,conditionId,[1,2]), 0, 217890, 0, 0, 0x0, 0x0, sig) — from YAML "should pass execTransaction with real CTF redeemPositions (real tx 0x714b3d)"
+	execTxDataHex := "0x6a7612020000000000000000000000004d97dcd97ec945f40cf65f87097ace5ea047604500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000353220000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000026000000000000000000000000000000000000000000000000000000000000000e401b7037c0000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa841740000000000000000000000000000000000000000000000000000000000000000bd42fb9ac3870c35193d69ca1ad5ea00363d8ee6aba80b910a2003c370597cae0000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000041afaaa7d5183bb28c20af45dc009544b9358e971c25e8335261debdc43b756b3b1cd75457fc9d60ae0b7bd2e45deaf93aa80446f41061424a4d0f46712449e02b1b00000000000000000000000000000000000000000000000000000000000000"
+
+	execTxData, err := hex.DecodeString(strings.TrimPrefix(execTxDataHex, "0x"))
+	require.NoError(t, err)
+
+	safe := common.HexToAddress(safeAddress)
+	tx := types.NewTx(&types.LegacyTx{
+		Nonce:    0,
+		GasPrice: big.NewInt(0),
+		Gas:      300000,
+		To:       &safe,
+		Value:    big.NewInt(0),
+		Data:     execTxData,
+	})
+
+	chainIDBig := big.NewInt(137)
+	address := common.HexToAddress(testSignerAddress)
+	signer := adminClient.GetSigner(address, polygonChainID)
+	_, err = signer.SignTransactionWithChainID(tx, chainIDBig)
+	require.NoError(t, err, "execTransaction with real CTF redeemPositions (real tx 0x714b3d) should pass")
 }
 
 // =============================================================================

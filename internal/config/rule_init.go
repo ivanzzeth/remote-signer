@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -64,10 +65,13 @@ func (i *RuleInitializer) SyncFromConfig(ctx context.Context, rules []RuleConfig
 		return fmt.Errorf("failed to expand file rules: %w", err)
 	}
 
-	// Build set of expected rule IDs from config
+	// Build set of expected rule IDs (custom id or generated); enforce uniqueness
 	expectedIDs := make(map[types.RuleID]bool)
 	for idx, ruleCfg := range expandedRules {
-		ruleID := i.generateRuleID(idx, ruleCfg)
+		ruleID := i.effectiveRuleID(idx, ruleCfg)
+		if expectedIDs[ruleID] {
+			return fmt.Errorf("duplicate rule id %q (rule %q); custom id must be unique", ruleID, ruleCfg.Name)
+		}
 		expectedIDs[ruleID] = true
 	}
 
@@ -104,7 +108,8 @@ func (i *RuleInitializer) SyncFromConfig(ctx context.Context, rules []RuleConfig
 	// Sync rules from config
 	synced := 0
 	for idx, ruleCfg := range expandedRules {
-		if err := i.syncRule(ctx, idx, ruleCfg); err != nil {
+		ruleID := i.effectiveRuleID(idx, ruleCfg)
+		if err := i.syncRule(ctx, ruleID, ruleCfg); err != nil {
 			return fmt.Errorf("failed to sync rule %s: %w", ruleCfg.Name, err)
 		}
 		synced++
@@ -187,24 +192,27 @@ func (i *RuleInitializer) loadRulesFromFile(fileCfg RuleConfig) ([]RuleConfig, e
 }
 
 // generateRuleID generates a deterministic rule ID based on config content
-// This ensures the same config always produces the same ID
+// when no custom id is set (format: cfg_<sha256 prefix>).
 func (i *RuleInitializer) generateRuleID(idx int, ruleCfg RuleConfig) types.RuleID {
-	// Create a hash from the rule name and type to generate deterministic ID
-	// This allows the same rule in config to be updated rather than duplicated
 	data := fmt.Sprintf("config:%d:%s:%s", idx, ruleCfg.Name, ruleCfg.Type)
 	hash := sha256.Sum256([]byte(data))
 	return types.RuleID("cfg_" + hex.EncodeToString(hash[:8]))
 }
 
-func (i *RuleInitializer) syncRule(ctx context.Context, idx int, ruleCfg RuleConfig) error {
+// effectiveRuleID returns the rule ID to use: custom RuleConfig.Id if non-empty, else generated.
+func (i *RuleInitializer) effectiveRuleID(idx int, ruleCfg RuleConfig) types.RuleID {
+	if s := strings.TrimSpace(ruleCfg.Id); s != "" {
+		return types.RuleID(s)
+	}
+	return i.generateRuleID(idx, ruleCfg)
+}
+
+func (i *RuleInitializer) syncRule(ctx context.Context, ruleID types.RuleID, ruleCfg RuleConfig) error {
 	// Skip disabled rules
 	if !ruleCfg.Enabled {
 		i.logger.Debug("Skipping disabled rule", "name", ruleCfg.Name)
 		return nil
 	}
-
-	// Generate deterministic rule ID
-	ruleID := i.generateRuleID(idx, ruleCfg)
 
 	// Marshal config to JSON
 	configJSON, err := json.Marshal(ruleCfg.Config)
@@ -228,6 +236,13 @@ func (i *RuleInitializer) syncRule(ctx context.Context, idx int, ruleCfg RuleCon
 		Source:      types.RuleSourceConfig,
 		Config:      configJSON,
 		Enabled:     ruleCfg.Enabled,
+	}
+	if len(ruleCfg.Variables) > 0 {
+		variablesJSON, err := json.Marshal(ruleCfg.Variables)
+		if err != nil {
+			return fmt.Errorf("failed to marshal rule variables: %w", err)
+		}
+		rule.Variables = variablesJSON
 	}
 
 	// Set optional scope fields
@@ -276,6 +291,7 @@ func (i *RuleInitializer) syncRule(ctx context.Context, idx int, ruleCfg RuleCon
 		existing.APIKeyID = rule.APIKeyID
 		existing.SignerAddress = rule.SignerAddress
 		existing.Enabled = rule.Enabled
+		existing.Variables = rule.Variables
 		existing.UpdatedAt = time.Now()
 
 		if err := i.repo.Update(ctx, existing); err != nil {

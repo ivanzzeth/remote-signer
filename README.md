@@ -18,6 +18,7 @@ For detailed configuration and API usage, refer to the following resources:
 | Resource | Description |
 |----------|-------------|
 | [docs/API.md](docs/API.md) | **Complete API reference** - Authentication, endpoints, workflows, rule types, and examples |
+| [docs/architecture/js-rules-v5.md](docs/architecture/js-rules-v5.md) | **JS Rules architecture** - Single source of truth for `evm_js` rules (v5.1) |
 | [config.example.yaml](config.example.yaml) | **Configuration template** - Full example with all options, API keys, and rule definitions |
 
 **Quick Navigation:**
@@ -28,6 +29,7 @@ For detailed configuration and API usage, refer to the following resources:
 - **API Authentication**: See [docs/API.md#authentication](docs/API.md#authentication)
 - **Rule Configuration**: See [docs/API.md#rules-configuration](docs/API.md#rules-configuration)
 - **Solidity Expression Rules**: See [docs/API.md#rule-type-evm_solidity_expression](docs/API.md#rule-type-evm_solidity_expression)
+- **JS Rules (evm_js)**: In-process JS rules via Sobek; see [docs/architecture/js-rules-v5.md](docs/architecture/js-rules-v5.md)
 - **EIP-712 Typed Data Validation**: See [docs/API.md#eip-712-typed-data-signing](docs/API.md#eip-712-typed-data-signing)
 - **ERC-20/721/1155 Examples**: See [docs/API.md#mainstream-eip-standard-examples](docs/API.md#mainstream-eip-standard-examples)
 

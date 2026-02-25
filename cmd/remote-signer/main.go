@@ -244,7 +244,10 @@ func run() error {
 
 	// Initialize rule engine (with optional budget checker for template instances)
 	budgetChecker := rule.NewBudgetChecker(budgetRepo, templateRepo, log)
-	ruleEngine, err := rule.NewWhitelistRuleEngine(ruleRepo, log, rule.WithBudgetChecker(budgetChecker))
+	ruleEngine, err := rule.NewWhitelistRuleEngine(ruleRepo, log,
+		rule.WithBudgetChecker(budgetChecker),
+		rule.WithDelegationPayloadConverter(evm.DelegatePayloadToSignRequest),
+	)
 	if err != nil {
 		return fmt.Errorf("failed to create rule engine: %w", err)
 	}
@@ -256,6 +259,12 @@ func run() error {
 	ruleEngine.RegisterEvaluator(&evm.SignerRestrictionEvaluator{})
 	ruleEngine.RegisterEvaluator(&evm.SignTypeRestrictionEvaluator{})
 	ruleEngine.RegisterEvaluator(&evm.MessagePatternEvaluator{})
+
+	jsEval, err := evm.NewJSRuleEvaluator(log)
+	if err != nil {
+		return fmt.Errorf("failed to create JS rule evaluator: %w", err)
+	}
+	ruleEngine.RegisterEvaluator(jsEval)
 
 	// Register Solidity expression evaluator (already created and validated above)
 	if solidityEval != nil {
