@@ -27,6 +27,7 @@ type RouterConfig struct {
 	Version            string
 	IPWhitelistConfig  *middleware.IPWhitelist
 	SolidityValidator  *evm.SolidityRuleValidator
+	JSEvaluator        *evm.JSRuleEvaluator
 	Template           *TemplateConfig
 	ApprovalGuard      *service.ManualApprovalGuard // optional: for admin resume endpoint
 }
@@ -112,6 +113,9 @@ func (r *Router) setupRoutes() error {
 	var ruleHandlerOpts []evmhandler.RuleHandlerOption
 	if r.config.SolidityValidator != nil {
 		ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithSolidityValidator(r.config.SolidityValidator))
+	}
+	if r.config.JSEvaluator != nil {
+		ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithJSEvaluator(r.config.JSEvaluator))
 	}
 	ruleHandler, err := evmhandler.NewRuleHandler(r.ruleRepo, r.logger, ruleHandlerOpts...)
 	if err != nil {

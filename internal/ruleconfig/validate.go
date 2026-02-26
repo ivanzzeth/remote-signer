@@ -176,9 +176,24 @@ func validateContractMethodConfig(config map[string]interface{}) error {
 	return nil
 }
 
+// ValidateJSRuleTestCasesRequirement enforces the same rule as Solidity: at least one positive
+// and one negative test case. Call when validating evm_js rules that have test_cases.
+// positiveCount and negativeCount are the number of test cases with expect_pass true/false.
+func ValidateJSRuleTestCasesRequirement(positiveCount, negativeCount int) error {
+	if positiveCount < 1 {
+		return fmt.Errorf("evm_js rules require at least one positive test case (expect_pass: true)")
+	}
+	if negativeCount < 1 {
+		return fmt.Errorf("evm_js rules require at least one negative test case (expect_pass: false)")
+	}
+	return nil
+}
+
 // validateJSRuleConfig validates evm_js config. sign_type_filter, if present, must be a
 // comma-separated string of valid sign types (evm_js only supports string form; array would
 // unmarshal as empty and cause rule to apply to all sign types = silent pass).
+const maxJSScriptLength = 64 * 1024 // 64KB
+
 func validateJSRuleConfig(config map[string]interface{}) error {
 	raw, ok := config["script"]
 	if !ok {
@@ -190,6 +205,9 @@ func validateJSRuleConfig(config map[string]interface{}) error {
 	}
 	if strings.TrimSpace(script) == "" {
 		return fmt.Errorf("config.script must not be empty")
+	}
+	if len(script) > maxJSScriptLength {
+		return fmt.Errorf("config.script exceeds maximum size (%d bytes, max %d)", len(script), maxJSScriptLength)
 	}
 	if v, ok := config["sign_type_filter"]; ok && v != nil {
 		s, ok := v.(string)

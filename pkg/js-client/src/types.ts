@@ -228,7 +228,7 @@ export interface CreateSignerResponse {
 // ============================================================================
 
 export type RuleType =
-  | "evm_address_whitelist"
+  | "evm_address_list"
   | "evm_contract_method"
   | "evm_value_limit"
   | "evm_solidity_expression"

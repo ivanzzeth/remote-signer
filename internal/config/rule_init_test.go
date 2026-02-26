@@ -24,7 +24,7 @@ func TestExpandFileRules(t *testing.T) {
 	// Create test rule file
 	ruleFileContent := `rules:
   - name: "Test Rule 1"
-    type: "evm_address_whitelist"
+    type: "evm_address_list"
     mode: "whitelist"
     enabled: true
     config:
@@ -53,7 +53,7 @@ func TestExpandFileRules(t *testing.T) {
 	rules := []RuleConfig{
 		{
 			Name: "Inline Rule",
-			Type: "evm_address_whitelist",
+			Type: "evm_address_list",
 			Mode: "whitelist",
 			Config: map[string]interface{}{
 				"addresses": []string{"0xabcd"},
@@ -118,7 +118,7 @@ func TestExpandFileRules_NestedFiles(t *testing.T) {
 	// Create parent rule file that includes nested file
 	parentRuleContent := `rules:
   - name: "Parent Rule"
-    type: "evm_address_whitelist"
+    type: "evm_address_list"
     mode: "whitelist"
     enabled: true
     config:
@@ -288,7 +288,7 @@ func TestExpandFileRules_EnvVarExpansion(t *testing.T) {
 	// Create rule file with env var
 	ruleFileContent := `rules:
   - name: "Env Var Rule"
-    type: "evm_address_whitelist"
+    type: "evm_address_list"
     mode: "whitelist"
     enabled: true
     config:

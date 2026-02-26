@@ -358,7 +358,7 @@ rules:
 
   # Example 1: Simple address whitelist
   - name: "Allow transfers to treasury"
-    type: "evm_address_whitelist"
+    type: "evm_address_list"
     mode: "whitelist"
     enabled: true
     # Scope filters (optional - limit which requests this rule applies to)

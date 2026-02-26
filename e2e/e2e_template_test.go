@@ -65,7 +65,7 @@ func TestTemplate_ConfigLoadedTemplatesAndInstanceRules(t *testing.T) {
 	for _, r := range resp.Rules {
 		if r.Name == "E2E From Template Instance" {
 			found = true
-			assert.Equal(t, "evm_address_whitelist", string(r.Type))
+			assert.Equal(t, "evm_address_list", string(r.Type))
 			assert.True(t, r.Enabled)
 			break
 		}

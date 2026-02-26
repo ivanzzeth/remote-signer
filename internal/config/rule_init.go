@@ -196,6 +196,16 @@ func (i *RuleInitializer) loadRulesFromFile(fileCfg RuleConfig) ([]RuleConfig, e
 // generateRuleID generates a deterministic rule ID based on config content
 // when no custom id is set (format: cfg_<sha256 prefix>).
 func (i *RuleInitializer) generateRuleID(idx int, ruleCfg RuleConfig) types.RuleID {
+	return EffectiveRuleID(idx, ruleCfg)
+}
+
+// EffectiveRuleID returns the rule ID for a config rule at the given index.
+// Used by rule sync and by evm_js startup validation (same as validate-rules).
+// Exported so cmd/remote-signer can run evm_js test cases at startup.
+func EffectiveRuleID(idx int, ruleCfg RuleConfig) types.RuleID {
+	if s := strings.TrimSpace(ruleCfg.Id); s != "" {
+		return types.RuleID(s)
+	}
 	data := fmt.Sprintf("config:%d:%s:%s", idx, ruleCfg.Name, ruleCfg.Type)
 	hash := sha256.Sum256([]byte(data))
 	return types.RuleID("cfg_" + hex.EncodeToString(hash[:8]))
@@ -203,10 +213,7 @@ func (i *RuleInitializer) generateRuleID(idx int, ruleCfg RuleConfig) types.Rule
 
 // effectiveRuleID returns the rule ID to use: custom RuleConfig.Id if non-empty, else generated.
 func (i *RuleInitializer) effectiveRuleID(idx int, ruleCfg RuleConfig) types.RuleID {
-	if s := strings.TrimSpace(ruleCfg.Id); s != "" {
-		return types.RuleID(s)
-	}
-	return i.generateRuleID(idx, ruleCfg)
+	return EffectiveRuleID(idx, ruleCfg)
 }
 
 func (i *RuleInitializer) syncRule(ctx context.Context, ruleID types.RuleID, ruleCfg RuleConfig) error {
@@ -245,7 +252,7 @@ func (i *RuleInitializer) syncRule(ctx context.Context, ruleID types.RuleID, rul
 		ID:          ruleID,
 		Name:        ruleCfg.Name,
 		Description: ruleCfg.Description,
-		Type:        types.RuleType(ruleCfg.Type),
+		Type:        types.RuleType(pkgvalidate.NormalizeRuleType(ruleCfg.Type)),
 		Mode:        types.RuleMode(ruleCfg.Mode),
 		Source:      types.RuleSourceConfig,
 		Config:      configJSON,
@@ -259,8 +266,11 @@ func (i *RuleInitializer) syncRule(ctx context.Context, ruleID types.RuleID, rul
 		rule.Variables = variablesJSON
 	}
 
-	// Set optional scope fields
+	// Set and validate optional scope fields
 	if ruleCfg.ChainType != "" {
+		if !pkgvalidate.IsValidChainType(ruleCfg.ChainType) {
+			return fmt.Errorf("rule %q: invalid chain_type %q", ruleCfg.Name, ruleCfg.ChainType)
+		}
 		ct := types.ChainType(ruleCfg.ChainType)
 		rule.ChainType = &ct
 	} else {
@@ -275,6 +285,9 @@ func (i *RuleInitializer) syncRule(ctx context.Context, ruleID types.RuleID, rul
 		rule.APIKeyID = &ruleCfg.APIKeyID
 	}
 	if ruleCfg.SignerAddress != "" {
+		if !pkgvalidate.IsValidEthereumAddress(ruleCfg.SignerAddress) {
+			return fmt.Errorf("rule %q: invalid signer_address %q: must be 0x followed by 40 hex characters", ruleCfg.Name, ruleCfg.SignerAddress)
+		}
 		rule.SignerAddress = &ruleCfg.SignerAddress
 	}
 
