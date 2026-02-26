@@ -8,7 +8,7 @@ test_variables:
   allowed_address: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
 rules:
   - name: "E2E From Template Instance"
-    type: "evm_address_whitelist"
+    type: "evm_address_list"
     mode: "whitelist"
     enabled: true
     config:

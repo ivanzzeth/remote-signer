@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -28,6 +29,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/logger"
 	"github.com/ivanzzeth/remote-signer/internal/notify"
+	"github.com/ivanzzeth/remote-signer/internal/ruleconfig"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
@@ -157,6 +159,12 @@ func run() error {
 	if err := ruleInit.SyncFromConfig(context.Background(), expandedRules); err != nil {
 		return fmt.Errorf("failed to sync rules from config: %w", err)
 	}
+	// Expand file-type rules so startup validation covers evm_js rules from external files.
+	// SyncFromConfig already expanded them into the DB, but expandedRules still has "file" stubs.
+	expandedRulesWithFiles, err := config.ExpandFileRules(expandedRules, filepath.Dir(*configPath), log)
+	if err != nil {
+		return fmt.Errorf("failed to expand file rules for validation: %w", err)
+	}
 
 	// Initialize template service
 	templateService, err := service.NewTemplateService(templateRepo, ruleRepo, budgetRepo, log)
@@ -193,6 +201,25 @@ func run() error {
 		if err := validateSolidityRules(context.Background(), ruleRepo, solidityEval, log); err != nil {
 			return fmt.Errorf("rule validation failed: %w", err)
 		}
+	}
+
+	// Fail if config contains Solidity rules but Foundry is disabled (cannot validate them).
+	if solidityEval == nil {
+		for _, r := range expandedRulesWithFiles {
+			if r.Type == string(types.RuleTypeEVMSolidityExpression) && r.Enabled {
+				return fmt.Errorf("config contains enabled evm_solidity_expression rule %q but Foundry is disabled; enable chains.evm.foundry.enabled or remove the rule", r.Name)
+			}
+		}
+	}
+
+	// Validate evm_js rules at startup (same path as validate-rules; see docs/SECURITY_AUDIT_REPORT.md §4)
+	if err := validateEVMJSRulesAtStartup(context.Background(), expandedRulesWithFiles, ruleRepo, solidityEval, log); err != nil {
+		return fmt.Errorf("evm_js rule validation failed: %w", err)
+	}
+
+	// Validate message_pattern rules at startup (same as validate-rules; fail if any invalid or test case fails)
+	if err := validateMessagePatternRulesAtStartup(context.Background(), ruleRepo, log); err != nil {
+		return fmt.Errorf("message_pattern rule validation failed: %w", err)
 	}
 
 	// =========================================================================
@@ -412,6 +439,7 @@ func run() error {
 		Version:           version,
 		IPWhitelistConfig: ipWhitelist,
 		SolidityValidator: solidityValidator,
+		JSEvaluator:       jsEval,
 		Template:          &api.TemplateConfig{
 			TemplateRepo:    templateRepo,
 			TemplateService: templateService,
@@ -597,5 +625,198 @@ func validateSolidityRules(ctx context.Context, ruleRepo storage.RuleRepository,
 	}
 
 	log.Info("All Solidity expression rules validated successfully", "count", len(rules))
+	return nil
+}
+
+// validateEVMJSRulesAtStartup runs evm_js test cases through the same engine path as production
+// (see docs/SECURITY_AUDIT_REPORT.md §4). expandedRules must be the same list passed to SyncFromConfig
+// so rule IDs and test_cases match. If any test case fails, startup fails.
+func validateEVMJSRulesAtStartup(ctx context.Context, expandedRules []config.RuleConfig, ruleRepo storage.RuleRepository, solidityEval *evm.SolidityRuleEvaluator, log *slog.Logger) error {
+	var toValidate []struct {
+		idx  int
+		cfg  config.RuleConfig
+		rule *types.Rule
+	}
+	for i := range expandedRules {
+		cfg := &expandedRules[i]
+		if cfg.Type != string(types.RuleTypeEVMJS) || !cfg.Enabled {
+			continue
+		}
+		// Fail explicitly (same as validate-rules) when test_cases are missing or insufficient.
+		var pos, neg int
+		for _, tc := range cfg.TestCases {
+			if tc.ExpectPass {
+				pos++
+			} else {
+				neg++
+			}
+		}
+		if err := ruleconfig.ValidateJSRuleTestCasesRequirement(pos, neg); err != nil {
+			return fmt.Errorf("rule %q: %w", cfg.Name, err)
+		}
+		ruleID := config.EffectiveRuleID(i, *cfg)
+		rule, err := ruleRepo.Get(ctx, ruleID)
+		if err != nil {
+			if types.IsNotFound(err) {
+				continue
+			}
+			return fmt.Errorf("get rule %s: %w", ruleID, err)
+		}
+		toValidate = append(toValidate, struct {
+			idx  int
+			cfg  config.RuleConfig
+			rule *types.Rule
+		}{i, *cfg, rule})
+	}
+	if len(toValidate) == 0 {
+		log.Info("No evm_js rules with test_cases to validate at startup")
+		return nil
+	}
+
+	// Build full engine with ALL rules (same as production) to validate combined behavior.
+	// Instance rules must use the normal engine: if another whitelist rule allows what this
+	// rule expects to reject, that interaction must surface as a test failure.
+	log.Info("Building full validation engine for evm_js rules (same as production)")
+	fullEngine, err := rule.NewWhitelistRuleEngine(ruleRepo, log, rule.WithDelegationPayloadConverter(evm.DelegatePayloadToSignRequest))
+	if err != nil {
+		return fmt.Errorf("build full validation engine: %w", err)
+	}
+	fullEngine.RegisterEvaluator(&evm.AddressListEvaluator{})
+	fullEngine.RegisterEvaluator(&evm.ContractMethodEvaluator{})
+	fullEngine.RegisterEvaluator(&evm.ValueLimitEvaluator{})
+	fullEngine.RegisterEvaluator(&evm.SignerRestrictionEvaluator{})
+	fullEngine.RegisterEvaluator(&evm.SignTypeRestrictionEvaluator{})
+	fullEngine.RegisterEvaluator(&evm.MessagePatternEvaluator{})
+	if solidityEval != nil {
+		fullEngine.RegisterEvaluator(solidityEval)
+	}
+	jsEval, err := evm.NewJSRuleEvaluator(log)
+	if err != nil {
+		return fmt.Errorf("js evaluator for validation: %w", err)
+	}
+	fullEngine.RegisterEvaluator(jsEval)
+
+	var failed []string
+	for _, item := range toValidate {
+		cfg := item.cfg
+		ruleUnderTest := item.rule
+
+		varsForSubst := make(map[string]string)
+		for k, v := range cfg.Variables {
+			if v == nil {
+				varsForSubst[k] = ""
+			} else {
+				varsForSubst[k] = fmt.Sprintf("%v", v)
+			}
+		}
+		for _, tc := range cfg.TestCases {
+			inputCopy := make(map[string]interface{})
+			for k, v := range tc.Input {
+				inputCopy[k] = v
+			}
+			if len(varsForSubst) > 0 {
+				jsonBytes, _ := json.Marshal(inputCopy)
+				s := string(jsonBytes)
+				for k, v := range varsForSubst {
+					s = strings.ReplaceAll(s, "${"+k+"}", v)
+				}
+				if err := json.Unmarshal([]byte(s), &inputCopy); err != nil {
+					failed = append(failed, fmt.Sprintf("%s test %q: variable substitution: %v", cfg.Name, tc.Name, err))
+					continue
+				}
+			}
+			req, parsed, err := evm.TestCaseInputToSignRequest(inputCopy)
+			if err != nil {
+				failed = append(failed, fmt.Sprintf("%s test %q: build request: %v", cfg.Name, tc.Name, err))
+				continue
+			}
+			evalResult, err := fullEngine.EvaluateWithResult(ctx, req, parsed)
+			if err != nil {
+				failed = append(failed, fmt.Sprintf("%s test %q: %v", cfg.Name, tc.Name, err))
+				continue
+			}
+			// For blocklist rules, "pass" means "not blocked"; for whitelist, "pass" means "allowed".
+			var actualPass bool
+			if ruleUnderTest.Mode == types.RuleModeBlocklist {
+				actualPass = !evalResult.Blocked
+			} else {
+				actualPass = evalResult.Allowed
+			}
+			var actualReason string
+			if evalResult.Allowed {
+				actualReason = evalResult.AllowReason
+			} else if evalResult.Blocked {
+				actualReason = evalResult.BlockReason
+			} else {
+				actualReason = evalResult.NoMatchReason
+			}
+			if actualPass != tc.ExpectPass {
+				if tc.ExpectPass {
+					failed = append(failed, fmt.Sprintf("%s test %q: expected pass but got: %s", cfg.Name, tc.Name, actualReason))
+				} else {
+					failed = append(failed, fmt.Sprintf("%s test %q: expected fail but passed (reason: %s)", cfg.Name, tc.Name, actualReason))
+				}
+				continue
+			}
+			if tc.ExpectReason != "" && !strings.Contains(actualReason, tc.ExpectReason) {
+				failed = append(failed, fmt.Sprintf("%s test %q: expected reason containing %q but got %q", cfg.Name, tc.Name, tc.ExpectReason, actualReason))
+			}
+		}
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("%d evm_js test case(s) failed:\n  - %s", len(failed), strings.Join(failed, "\n  - "))
+	}
+	log.Info("All evm_js rules validated at startup", "rules", len(toValidate))
+	return nil
+}
+
+// validateMessagePatternRulesAtStartup validates all message_pattern rules at startup
+// (same as validate-rules: regex compile + test cases). If any fail, startup fails.
+func validateMessagePatternRulesAtStartup(ctx context.Context, ruleRepo storage.RuleRepository, log *slog.Logger) error {
+	ruleType := types.RuleTypeMessagePattern
+	rules, err := ruleRepo.List(ctx, storage.RuleFilter{
+		Type:        &ruleType,
+		EnabledOnly: true,
+	})
+	if err != nil {
+		return fmt.Errorf("list message_pattern rules: %w", err)
+	}
+	if len(rules) == 0 {
+		log.Info("No message_pattern rules to validate at startup")
+		return nil
+	}
+
+	msgValidator, err := evm.NewMessagePatternRuleValidator(log)
+	if err != nil {
+		return fmt.Errorf("create message_pattern validator: %w", err)
+	}
+
+	var failed []string
+	for _, rule := range rules {
+		result, err := msgValidator.ValidateRule(ctx, rule)
+		if err != nil {
+			failed = append(failed, fmt.Sprintf("%s (%s): %v", rule.Name, rule.ID, err))
+			continue
+		}
+		if !result.Valid {
+			detail := "invalid config or regex"
+			if result.SyntaxError != nil {
+				detail = result.SyntaxError.Message
+			} else if result.FailedTestCases > 0 {
+				for _, tc := range result.TestCaseResults {
+					if !tc.Passed {
+						detail = fmt.Sprintf("test case %q: %s", tc.Name, tc.Error)
+						break
+					}
+				}
+			}
+			failed = append(failed, fmt.Sprintf("%s (%s): %s", rule.Name, rule.ID, detail))
+		}
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("%d message_pattern rule(s) failed validation:\n  - %s",
+			len(failed), strings.Join(failed, "\n  - "))
+	}
+	log.Info("All message_pattern rules validated at startup", "count", len(rules))
 	return nil
 }

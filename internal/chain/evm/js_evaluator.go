@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"runtime"
 	"strings"
 	"time"
 	"unicode"
@@ -16,8 +17,9 @@ import (
 )
 
 const (
-	jsRuleTimeout      = 20 * time.Millisecond
-	jsRuleMaxReasonLen = 120
+	jsRuleTimeout       = 20 * time.Millisecond
+	jsRuleMaxReasonLen  = 120
+	jsRuleMaxAllocBytes = 32 * 1024 * 1024 // 32MB max allocation growth per evaluation
 )
 
 // JSRuleEvaluator evaluates evm_js rules in-process via Sobek.
@@ -105,7 +107,7 @@ func (e *JSRuleEvaluator) Evaluate(ctx context.Context, r *types.Rule, req *type
 	configObj := make(map[string]interface{})
 	if r.Variables != nil {
 		if err := json.Unmarshal(r.Variables, &configObj); err != nil {
-			configObj = nil
+			return false, "", fmt.Errorf("invalid rule variables JSON: %w", err)
 		}
 	}
 
@@ -155,7 +157,7 @@ func (e *JSRuleEvaluator) EvaluateWithDelegation(ctx context.Context, r *types.R
 	configObj := make(map[string]interface{})
 	if r.Variables != nil {
 		if err := json.Unmarshal(r.Variables, &configObj); err != nil {
-			configObj = nil
+			return false, "", nil, fmt.Errorf("invalid rule variables JSON: %w", err)
 		}
 	}
 
@@ -270,15 +272,40 @@ func (e *JSRuleEvaluator) wrappedValidate(script string, input *RuleInput, confi
 		return JSRuleValidateResult{Valid: false, Reason: sanitizeReason("script_error", err.Error(), false)}
 	}
 
-	// Timeout (must be after script run for first run; interrupt only affects next RunString/call)
+	// Timeout and memory guard. The timer interrupts the VM after jsRuleTimeout.
+	// The memory monitor polls allocations and interrupts if growth exceeds jsRuleMaxAllocBytes.
+	var memBefore runtime.MemStats
+	runtime.ReadMemStats(&memBefore)
+	done := make(chan struct{})
+	defer close(done)
 	time.AfterFunc(jsRuleTimeout, func() { vm.Interrupt("timeout") })
+	go func() {
+		ticker := time.NewTicker(5 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				var m runtime.MemStats
+				runtime.ReadMemStats(&m)
+				if m.TotalAlloc-memBefore.TotalAlloc > jsRuleMaxAllocBytes {
+					vm.Interrupt("memory_limit_exceeded")
+					return
+				}
+			}
+		}
+	}()
 	_, err := vm.RunString(script)
 	if err != nil {
 		reason := "script_error"
-		if strings.Contains(err.Error(), "timeout") || strings.Contains(err.Error(), "Interrupt") {
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "memory_limit_exceeded") {
+			reason = "memory_limit_exceeded"
+		} else if strings.Contains(errMsg, "timeout") || strings.Contains(errMsg, "Interrupt") {
 			reason = "timeout"
 		}
-		return JSRuleValidateResult{Valid: false, Reason: sanitizeReason(reason, err.Error(), false)}
+		return JSRuleValidateResult{Valid: false, Reason: sanitizeReason(reason, errMsg, false)}
 	}
 
 	validateVal := vm.Get("validate")
@@ -306,12 +333,16 @@ func (e *JSRuleEvaluator) wrappedValidate(script string, input *RuleInput, confi
 
 	valid, _ := obj["valid"].(bool)
 	reason, _ := obj["reason"].(string)
+	// Script may return reason as non-string (e.g. number/undefined); type assertion then gives "".
+	// Ensure we always have a loggable reason when valid=false so we can locate the issue.
+	if !valid && strings.TrimSpace(reason) == "" {
+		reason = "script returned valid=false with empty reason"
+	}
 	payload := obj["payload"]
 	delegateTo := ""
 	if s, ok := obj["delegate_to"].(string); ok && strings.TrimSpace(s) != "" {
 		delegateTo = strings.TrimSpace(s)
 	}
-
 	return JSRuleValidateResult{
 		Valid:      valid,
 		Reason:     sanitizeReason("", reason, true),
@@ -341,11 +372,10 @@ func trySetUndefined(vm *sobek.Runtime, top, key string) error {
 	return nil
 }
 
-// sanitizeReason: production uses fixed codes; debug truncates 120 chars, strips control chars, escapes \n.
+// sanitizeReason: when code is set (e.g. script_error), include detail so logs can identify the actual error
+// (e.g. "script_error: fail() requires a non-empty reason" vs "script_error: TypeError: ...").
+// Truncates to jsRuleMaxReasonLen, strips control chars, escapes newlines.
 func sanitizeReason(code, detail string, isReason bool) string {
-	if code != "" && !isReason {
-		return code
-	}
 	if detail == "" {
 		if code != "" {
 			return code
@@ -355,7 +385,7 @@ func sanitizeReason(code, detail string, isReason bool) string {
 		}
 		return "script_error"
 	}
-	// Debug-style: truncate, strip control, escape newlines
+	// Sanitize detail for safe logging
 	s := detail
 	var b strings.Builder
 	for _, r := range s {
@@ -371,6 +401,9 @@ func sanitizeReason(code, detail string, isReason bool) string {
 	s = b.String()
 	if len(s) > jsRuleMaxReasonLen {
 		s = s[:jsRuleMaxReasonLen]
+	}
+	if code != "" && !isReason {
+		return code + ": " + s
 	}
 	return s
 }
