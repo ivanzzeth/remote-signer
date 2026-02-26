@@ -50,6 +50,31 @@ func ruleScopeMatches(rule *types.Rule, req *types.SignRequest) bool {
 	return true
 }
 
+// logScopeMismatch logs rule and request scope fields when delegation target scope mismatch occurs, for root cause diagnosis.
+func (e *WhitelistRuleEngine) logScopeMismatch(rule *types.Rule, req *types.SignRequest, targetID types.RuleID) {
+	if e.logger == nil || rule == nil || req == nil {
+		return
+	}
+	var ruleChainType, ruleChainID, ruleAPIKeyID, ruleSigner string
+	if rule.ChainType != nil {
+		ruleChainType = string(*rule.ChainType)
+	}
+	if rule.ChainID != nil {
+		ruleChainID = *rule.ChainID
+	}
+	if rule.APIKeyID != nil {
+		ruleAPIKeyID = *rule.APIKeyID
+	}
+	if rule.SignerAddress != nil {
+		ruleSigner = *rule.SignerAddress
+	}
+	e.logger.Info("delegation target scope mismatch",
+		"target_id", targetID,
+		"rule_chain_type", ruleChainType, "rule_chain_id", ruleChainID, "rule_api_key_id", ruleAPIKeyID, "rule_signer", ruleSigner,
+		"req_chain_type", string(req.ChainType), "req_chain_id", req.ChainID, "req_api_key_id", req.APIKeyID, "req_signer", req.SignerAddress,
+	)
+}
+
 // WhitelistRuleEngine implements RuleEngine with two-tier evaluation:
 // 1. Blocklist rules (mandatory): ANY violation = blocked immediately
 // 2. Whitelist rules (permissive): ANY match = allowed
@@ -264,6 +289,7 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 
 	// Fallback to sequential evaluation for rules not evaluated in batch
 	sequentialCount := 0
+	var firstNoMatchReason, lastNoMatchReason string
 	for _, rule := range whitelistRules {
 		// Skip rules already evaluated (not skipped) in batch
 		if batchEvaluatedRules[rule.ID] {
@@ -303,11 +329,17 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 		}
 
 		if !matched {
-			e.logger.Debug("whitelist rule did not match",
-				"rule_id", rule.ID,
-				"rule_name", rule.Name,
-				"request_id", req.ID,
-			)
+			if result != nil && result.NoMatchReason != "" {
+				if firstNoMatchReason == "" {
+					firstNoMatchReason = result.NoMatchReason
+				}
+				lastNoMatchReason = result.NoMatchReason
+			}
+			attrs := []any{"rule_id", rule.ID, "rule_name", rule.Name, "request_id", req.ID}
+			if result != nil && result.NoMatchReason != "" {
+				attrs = append(attrs, "reason", result.NoMatchReason)
+			}
+			e.logger.Debug("whitelist rule did not match", attrs...)
 		}
 
 		if matched {
@@ -348,12 +380,16 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 		}
 	}
 
-	e.logger.Debug("no rule matched, requires manual approval",
+	infoAttrs := []any{
 		"request_id", req.ID,
 		"batch_evaluated", len(batchEvaluatedRules),
 		"sequential_evaluated", sequentialCount,
 		"total_whitelist", len(whitelistRules),
-	)
+	}
+	if lastNoMatchReason != "" {
+		infoAttrs = append(infoAttrs, "last_no_match_reason", lastNoMatchReason)
+	}
+	e.logger.Info("no rule matched, requires manual approval or will reject", infoAttrs...)
 	return &EvaluationResult{
 		Blocked: false,
 		Allowed: false,
@@ -407,7 +443,7 @@ func (e *WhitelistRuleEngine) evaluateOneRuleWithDelegation(ctx context.Context,
 		return nil, err
 	}
 	if !matched {
-		return &EvaluationResult{Allowed: false}, nil
+		return &EvaluationResult{Allowed: false, NoMatchReason: reason}, nil
 	}
 	if matched && delegation != nil {
 		return e.resolveDelegation(ctx, req, rule, delegation)
@@ -433,28 +469,30 @@ func (e *WhitelistRuleEngine) resolveDelegation(ctx context.Context, originalReq
 	targetIDs := delegationTargetIDs(delegation)
 	if len(targetIDs) == 0 {
 		e.logger.Debug("delegation has no target rule id(s)")
-		return nil, nil
+		return &EvaluationResult{Allowed: false, NoMatchReason: "delegation has no target rule id(s)"}, nil
 	}
 	if depth >= DelegationMaxDepth {
 		e.logger.Debug("delegation max depth exceeded", "depth", depth, "targets", targetIDs)
-		return nil, nil
+		return &EvaluationResult{Allowed: false, NoMatchReason: "delegation max depth exceeded"}, nil
 	}
 	if e.delegationConverter == nil {
 		e.logger.Debug("delegation converter not set")
-		return nil, nil
+		return &EvaluationResult{Allowed: false, NoMatchReason: "delegation converter not set"}, nil
 	}
 
 	if delegation.Mode == "single" {
 		req2, parsed2, err := e.delegationConverter(ctx, delegation.Payload, delegation.Mode)
 		if err != nil {
 			e.logger.Debug("delegation single convert failed", "error", err)
-			return nil, nil
+			return &EvaluationResult{Allowed: false, NoMatchReason: "delegation single convert failed: " + err.Error()}, nil
 		}
 		req2.APIKeyID = originalReq.APIKeyID
+		var lastReason string
 		for _, targetID := range targetIDs {
 			targetRule, err := e.repo.Get(ctx, targetID)
 			if err != nil || targetRule == nil {
 				e.logger.Debug("delegation target rule not found", "target", targetID, "error", err)
+				lastReason = "delegation target rule not found: " + string(targetID)
 				continue
 			}
 			path2 := make(map[types.RuleID]bool)
@@ -463,15 +501,27 @@ func (e *WhitelistRuleEngine) resolveDelegation(ctx context.Context, originalReq
 			}
 			if path2[targetRule.ID] {
 				e.logger.Debug("delegation cycle detected", "target", targetRule.ID)
+				lastReason = "delegation cycle detected"
 				continue
 			}
 			path2[targetRule.ID] = true
 			childCtx := withDelegationCtx(ctx, depth+1, path2)
 			if !ruleScopeMatches(targetRule, req2) {
+				lastReason = "delegation target scope mismatch: " + string(targetID)
+				e.logScopeMismatch(targetRule, req2, targetID)
 				continue
 			}
 			result, err := e.evaluateOneRuleWithDelegation(childCtx, targetRule, req2, parsed2)
-			if err != nil || result == nil || !result.Allowed {
+			if err != nil {
+				lastReason = "delegation target error: " + err.Error()
+				continue
+			}
+			if result == nil || !result.Allowed {
+				if result != nil && result.NoMatchReason != "" {
+					lastReason = "delegation target did not allow: " + result.NoMatchReason
+				} else {
+					lastReason = "delegation target did not allow: " + string(targetID)
+				}
 				continue
 			}
 			return &EvaluationResult{
@@ -480,30 +530,35 @@ func (e *WhitelistRuleEngine) resolveDelegation(ctx context.Context, originalReq
 				AllowReason: result.AllowReason,
 			}, nil
 		}
-		return nil, nil
+		if lastReason == "" {
+			lastReason = "delegation no target allowed"
+		}
+		return &EvaluationResult{Allowed: false, NoMatchReason: lastReason}, nil
 	}
 
 	if delegation.Mode == "per_item" {
 		items, err := delegationItems(delegation.Payload, delegation.ItemsKey)
 		if err != nil {
 			e.logger.Debug("delegation per_item items invalid", "error", err)
-			return nil, nil
+			return &EvaluationResult{Allowed: false, NoMatchReason: "delegation per_item items invalid: " + err.Error()}, nil
 		}
 		if len(items) > DelegationMaxItems {
 			e.logger.Debug("delegation per_item exceeds max items", "len", len(items), "max", DelegationMaxItems)
-			return nil, nil
+			return &EvaluationResult{Allowed: false, NoMatchReason: "delegation per_item exceeds max items"}, nil
 		}
 		for _, item := range items {
 			req2, parsed2, err := e.delegationConverter(ctx, item, delegation.Mode)
 			if err != nil {
 				e.logger.Debug("delegation per_item convert failed", "error", err)
-				return nil, nil
+				return &EvaluationResult{Allowed: false, NoMatchReason: "delegation per_item convert failed: " + err.Error()}, nil
 			}
 			req2.APIKeyID = originalReq.APIKeyID
 			itemAllowed := false
+			var itemReason string
 			for _, targetID := range targetIDs {
 				targetRule, err := e.repo.Get(ctx, targetID)
 				if err != nil || targetRule == nil {
+					itemReason = "delegation target rule not found: " + string(targetID)
 					continue
 				}
 				path2 := make(map[types.RuleID]bool)
@@ -511,11 +566,14 @@ func (e *WhitelistRuleEngine) resolveDelegation(ctx context.Context, originalReq
 					path2[k] = v
 				}
 				if path2[targetRule.ID] {
+					itemReason = "delegation cycle detected"
 					continue
 				}
 				path2[targetRule.ID] = true
 				childCtx := withDelegationCtx(ctx, depth+1, path2)
 				if !ruleScopeMatches(targetRule, req2) {
+					itemReason = "delegation target scope mismatch: " + string(targetID)
+					e.logScopeMismatch(targetRule, req2, targetID)
 					continue
 				}
 				result, err := e.evaluateOneRuleWithDelegation(childCtx, targetRule, req2, parsed2)
@@ -523,9 +581,17 @@ func (e *WhitelistRuleEngine) resolveDelegation(ctx context.Context, originalReq
 					itemAllowed = true
 					break
 				}
+				if result != nil && result.NoMatchReason != "" {
+					itemReason = "delegation target did not allow: " + result.NoMatchReason
+				} else {
+					itemReason = "delegation target did not allow: " + string(targetID)
+				}
 			}
 			if !itemAllowed {
-				return nil, nil
+				if itemReason == "" {
+					itemReason = "delegation per_item no target allowed"
+				}
+				return &EvaluationResult{Allowed: false, NoMatchReason: itemReason}, nil
 			}
 		}
 		return &EvaluationResult{
@@ -536,7 +602,7 @@ func (e *WhitelistRuleEngine) resolveDelegation(ctx context.Context, originalReq
 	}
 
 	e.logger.Debug("delegation unknown mode", "mode", delegation.Mode)
-	return nil, nil
+	return &EvaluationResult{Allowed: false, NoMatchReason: "delegation unknown mode: " + delegation.Mode}, nil
 }
 
 // delegationItems extracts the items array from payload for per_item delegation.
