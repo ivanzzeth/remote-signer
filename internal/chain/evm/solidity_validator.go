@@ -393,7 +393,7 @@ func (v *SolidityRuleValidator) validateRulesBatchForMode(ctx context.Context, r
 			}
 		}
 
-		syntaxErr, err := v.validateSyntaxForModeWithStruct(ctx, code, mode, structDef)
+		syntaxErr, err := v.validateSyntaxForModeWithStruct(ctx, code, mode, structDef, config.InMappingArrays)
 		if err != nil {
 			results[i] = ValidationResult{Valid: false}
 			allValid = false
@@ -1137,22 +1137,23 @@ func (v *SolidityRuleValidator) modeString(mode ValidationMode) string {
 
 // validateSyntaxForMode compiles the Solidity code to check for syntax errors based on mode
 func (v *SolidityRuleValidator) validateSyntaxForMode(ctx context.Context, code string, mode ValidationMode) (*SyntaxError, error) {
-	return v.validateSyntaxForModeWithStruct(ctx, code, mode, nil)
+	return v.validateSyntaxForModeWithStruct(ctx, code, mode, nil, nil)
 }
 
 // validateSyntaxForModeWithStruct compiles the Solidity code to check for syntax errors based on mode
 // If structDef is provided, it will be used for struct-based syntax checking in TypedDataExpression mode
-func (v *SolidityRuleValidator) validateSyntaxForModeWithStruct(ctx context.Context, code string, mode ValidationMode, structDef *StructDefinition) (*SyntaxError, error) {
+// If inMappingArrays is provided, it will be used for in() operator preprocessing with mapping lookups
+func (v *SolidityRuleValidator) validateSyntaxForModeWithStruct(ctx context.Context, code string, mode ValidationMode, structDef *StructDefinition, inMappingArrays map[string][]string) (*SyntaxError, error) {
 	var script string
 	switch mode {
 	case ValidationModeExpression:
-		script = v.evaluator.GenerateSyntaxCheckScript(code)
+		script = v.evaluator.GenerateSyntaxCheckScript(code, inMappingArrays)
 	case ValidationModeFunctions:
-		script = v.evaluator.GenerateFunctionSyntaxCheckScript(code)
+		script = v.evaluator.GenerateFunctionSyntaxCheckScript(code, inMappingArrays)
 	case ValidationModeTypedDataExpression:
-		script = v.evaluator.GenerateTypedDataExpressionSyntaxCheckScriptWithStruct(code, structDef)
+		script = v.evaluator.GenerateTypedDataExpressionSyntaxCheckScriptWithStruct(code, structDef, inMappingArrays)
 	case ValidationModeTypedDataFunctions:
-		script = v.evaluator.GenerateTypedDataFunctionsSyntaxCheckScript(code)
+		script = v.evaluator.GenerateTypedDataFunctionsSyntaxCheckScript(code, inMappingArrays)
 	default:
 		return nil, fmt.Errorf("unknown validation mode: %d", mode)
 	}
