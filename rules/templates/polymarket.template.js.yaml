@@ -1,4 +1,4 @@
-# Polymarket protocol rules (evm_js). Compose with Safe template: Safe handles SafeTx/execTransaction and delegates inner calls to "Polymarket inner transaction" rule from this template.
+# Polymarket protocol rules (evm_js). Compose with Safe template: Safe handles SafeTx/execTransaction and delegates inner calls to "Polymarket transactions" rule from this template.
 
 variables:
   - name: chain_id
@@ -343,13 +343,13 @@ rules:
         expect_pass: false
         expect_reason: "target must be Safe Factory"
 
-  - id: "polymarket-inner"
-    name: "Polymarket inner transaction"
+  - id: "polymarket-transactions"
+    name: "Polymarket transactions"
     type: "evm_js"
     mode: "whitelist"
     enabled: true
     chain_id: "${chain_id}"
-    description: "Validate inner calls delegated from Safe: USDC/CTF/NegRisk with allowed selectors and params. Set this rule ID as Safe template delegate_to for Polymarket inner to addresses."
+    description: "Validate Polymarket contract calls: USDC/CTF/NegRisk with allowed selectors and params. Works for direct EOA calls or as Safe template delegate_to target."
     config:
       sign_type_filter: "transaction"
       script: |

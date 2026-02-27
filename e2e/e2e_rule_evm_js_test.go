@@ -292,7 +292,7 @@ func TestRule_SafeMultisendMultiDelegate(t *testing.T) {
 
 // TestRule_PolymarketSafeChain verifies the combined Polymarket JS + Safe JS template chain (same effect as polymarket.safe.template.yaml).
 // Submits a SafeTx (typed_data) on chain 137 with inner call USDC.e approve(CTF Exchange, max);
-// Safe rule (safe-polymarket) delegates to polymarket-inner which validates the inner transaction.
+// Safe rule (safe-polymarket) delegates to polymarket-transactions which validates the Polymarket calls.
 func TestRule_PolymarketSafeChain(t *testing.T) {
 	if useExternalServer {
 		t.Skip("Polymarket Safe chain uses config.e2e.yaml instance rules (Polymarket + Safe Polymarket)")
@@ -349,7 +349,7 @@ func TestRule_PolymarketSafeChain(t *testing.T) {
 	address := common.HexToAddress(testSignerAddress)
 	signer := adminClient.GetSigner(address, polygonChainID)
 	sig, err := signer.SignTypedData(typedData)
-	require.NoError(t, err, "Polymarket Safe chain (SafeTx => polymarket-inner) should allow and return signature")
+	require.NoError(t, err, "Polymarket Safe chain (SafeTx => polymarket-transactions) should allow and return signature")
 	require.Len(t, sig, 65)
 }
 
