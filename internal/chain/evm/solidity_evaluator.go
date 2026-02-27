@@ -903,9 +903,13 @@ func (e *SolidityRuleEvaluator) executeScript(ctx context.Context, script string
 }
 
 // GenerateSyntaxCheckScript generates a script for compilation checking (Expression mode)
-func (e *SolidityRuleEvaluator) GenerateSyntaxCheckScript(expression string) string {
+func (e *SolidityRuleEvaluator) GenerateSyntaxCheckScript(expression string, inMappingArrays ...map[string][]string) string {
 	// Preprocess custom in() operator before embedding into Solidity source
-	ir := processInOperatorToMappings(expression, nil)
+	var arrays map[string][]string
+	if len(inMappingArrays) > 0 {
+		arrays = inMappingArrays[0]
+	}
+	ir := processInOperatorToMappings(expression, arrays)
 	expression = preprocessInOperator(ir.Modified)
 	return fmt.Sprintf(`// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
@@ -945,8 +949,12 @@ contract SyntaxCheck {
 
 // GenerateFunctionSyntaxCheckScript generates a script for compilation checking (Functions mode)
 // Uses the same two-contract structure as solidityFunctionTemplate for consistency
-func (e *SolidityRuleEvaluator) GenerateFunctionSyntaxCheckScript(functions string) string {
-	ir := processInOperatorToMappings(functions, nil)
+func (e *SolidityRuleEvaluator) GenerateFunctionSyntaxCheckScript(functions string, inMappingArrays ...map[string][]string) string {
+	var arrays map[string][]string
+	if len(inMappingArrays) > 0 {
+		arrays = inMappingArrays[0]
+	}
+	ir := processInOperatorToMappings(functions, arrays)
 	functions = preprocessInOperator(ir.Modified)
 	return fmt.Sprintf(`// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
@@ -1313,17 +1321,21 @@ func (e *SolidityRuleEvaluator) generateTypedDataFunctionsScript(
 
 // GenerateTypedDataExpressionSyntaxCheckScript generates a syntax check script for TypedDataExpression mode.
 // Callers must pass the rule's typed_data_struct via GenerateTypedDataExpressionSyntaxCheckScriptWithStruct; rules are the single source of truth.
-func (e *SolidityRuleEvaluator) GenerateTypedDataExpressionSyntaxCheckScript(expression string) string {
-	return e.GenerateTypedDataExpressionSyntaxCheckScriptWithStruct(expression, nil)
+func (e *SolidityRuleEvaluator) GenerateTypedDataExpressionSyntaxCheckScript(expression string, inMappingArrays ...map[string][]string) string {
+	return e.GenerateTypedDataExpressionSyntaxCheckScriptWithStruct(expression, nil, inMappingArrays...)
 }
 
 // GenerateTypedDataExpressionSyntaxCheckScriptWithStruct generates a syntax check script from the rule's struct definition only.
 // structDef must come from the rule config (typed_data_struct); no hardcoded structs. When structDef is nil, generates only EIP-712/ctx vars so expressions that reference structs fail at compile (caller should require typed_data_struct for typed_data_expression rules).
-func (e *SolidityRuleEvaluator) GenerateTypedDataExpressionSyntaxCheckScriptWithStruct(expression string, structDef *StructDefinition) string {
-	// Preprocess custom in() operator: first try mapping replacement (nil arrays for syntax check),
+func (e *SolidityRuleEvaluator) GenerateTypedDataExpressionSyntaxCheckScriptWithStruct(expression string, structDef *StructDefinition, inMappingArrays ...map[string][]string) string {
+	// Preprocess custom in() operator: first try mapping replacement,
 	// then expand literal in(expr, a, b, c) to OR chains. This must happen before embedding into
 	// Solidity source; otherwise forge will fail on the non-standard in() syntax.
-	ir := processInOperatorToMappings(expression, nil)
+	var arrays map[string][]string
+	if len(inMappingArrays) > 0 {
+		arrays = inMappingArrays[0]
+	}
+	ir := processInOperatorToMappings(expression, arrays)
 	expression = preprocessInOperator(ir.Modified)
 
 	if structDef == nil {
@@ -1400,8 +1412,12 @@ contract SyntaxCheck {
 }
 
 // GenerateTypedDataFunctionsSyntaxCheckScript generates a syntax check script for TypedDataFunctions mode
-func (e *SolidityRuleEvaluator) GenerateTypedDataFunctionsSyntaxCheckScript(functions string) string {
-	ir := processInOperatorToMappings(functions, nil)
+func (e *SolidityRuleEvaluator) GenerateTypedDataFunctionsSyntaxCheckScript(functions string, inMappingArrays ...map[string][]string) string {
+	var arrays map[string][]string
+	if len(inMappingArrays) > 0 {
+		arrays = inMappingArrays[0]
+	}
+	ir := processInOperatorToMappings(functions, arrays)
 	functions = preprocessInOperator(ir.Modified)
 	return fmt.Sprintf(`// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
