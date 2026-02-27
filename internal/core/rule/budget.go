@@ -13,10 +13,18 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
+// BudgetAlertNotifier sends budget alert notifications.
+// Implementations should be non-blocking (async) to avoid delaying sign requests.
+type BudgetAlertNotifier interface {
+	// SendBudgetAlert sends an alert notification when budget usage reaches the threshold.
+	SendBudgetAlert(ctx context.Context, ruleID types.RuleID, unit string, spent string, maxTotal string, pct int64, alertPct int) error
+}
+
 // BudgetChecker checks and deducts budget for rule instances
 type BudgetChecker struct {
 	budgetRepo   storage.BudgetRepository
 	templateRepo storage.TemplateRepository
+	notifier     BudgetAlertNotifier
 	logger       *slog.Logger
 }
 
@@ -31,6 +39,13 @@ func NewBudgetChecker(
 		templateRepo: templateRepo,
 		logger:       logger,
 	}
+}
+
+// SetNotifier sets the budget alert notifier.
+// This is a setter instead of a constructor param because the NotifyService may
+// be created after the BudgetChecker in the application initialization order.
+func (bc *BudgetChecker) SetNotifier(n BudgetAlertNotifier) {
+	bc.notifier = n
 }
 
 // CheckAndDeductBudget checks if the rule has budget and deducts the spending amount.
@@ -176,7 +191,9 @@ func (bc *BudgetChecker) checkPeriodicRenewal(ctx context.Context, rule *types.R
 	return nil
 }
 
-// checkAlertThreshold checks if the budget usage has reached the alert threshold
+// checkAlertThreshold checks if the budget usage has reached the alert threshold.
+// When reached, sends a notification (if notifier is configured) and marks
+// the alert as sent to prevent duplicate notifications within the same period.
 func (bc *BudgetChecker) checkAlertThreshold(ruleID types.RuleID, unit string, budget *types.RuleBudget) {
 	if budget.AlertSent || budget.AlertPct <= 0 || budget.MaxTotal == "" || budget.MaxTotal == "0" {
 		return
@@ -202,9 +219,37 @@ func (bc *BudgetChecker) checkAlertThreshold(ruleID types.RuleID, unit string, b
 			"unit", unit,
 			"spent", budget.Spent,
 			"max_total", budget.MaxTotal,
+			"pct", pct.Int64(),
 			"alert_pct", budget.AlertPct,
 		)
-		// TODO: send notification via notify system
+
+		// Send notification via notify system
+		if bc.notifier != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := bc.notifier.SendBudgetAlert(ctx, ruleID, unit, budget.Spent, budget.MaxTotal, pct.Int64(), budget.AlertPct); err != nil {
+				bc.logger.Error("failed to send budget alert notification",
+					"rule_id", ruleID,
+					"unit", unit,
+					"error", err,
+				)
+				// Don't mark as sent if notification failed — retry next time
+				return
+			}
+		}
+
+		// Mark alert as sent to prevent duplicate notifications
+		if bc.budgetRepo != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := bc.budgetRepo.MarkAlertSent(ctx, ruleID, unit); err != nil {
+				bc.logger.Error("failed to mark budget alert as sent",
+					"rule_id", ruleID,
+					"unit", unit,
+					"error", err,
+				)
+			}
+		}
 	}
 }
 

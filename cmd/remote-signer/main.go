@@ -331,6 +331,13 @@ func run() error {
 		log.Info("Notification service disabled")
 	}
 
+	// Wire budget alert notifications
+	if notifyService != nil {
+		budgetAlertNotifier := notify.NewBudgetAlertNotifier(notifyService, &cfg.NotifyChannel)
+		budgetChecker.SetNotifier(budgetAlertNotifier)
+		log.Info("Budget alert notifications enabled")
+	}
+
 	// Start audit monitor (background anomaly detection)
 	if cfg.AuditMonitor.Enabled && notifyService != nil {
 		auditMonitor, err := audit.NewMonitor(auditRepo, notifyService, &cfg.NotifyChannel, cfg.AuditMonitor, log)

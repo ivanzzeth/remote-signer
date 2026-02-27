@@ -264,6 +264,151 @@ func TestCheckAlertThreshold_AboveThreshold_Logs(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// checkAlertThreshold — with notifier integration
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestCheckAlertThreshold_SendsNotification(t *testing.T) {
+	mn := &mockNotifier{}
+	br := &stubBudgetRepo{}
+	bc := NewBudgetChecker(br, nil, slog.Default())
+	bc.SetNotifier(mn)
+
+	budget := &types.RuleBudget{
+		AlertPct: 80,
+		MaxTotal: "100",
+		Spent:    "90",
+	}
+	bc.checkAlertThreshold("r1", "usdt", budget)
+
+	assert.True(t, mn.called, "notifier should have been called when threshold reached")
+	assert.Equal(t, types.RuleID("r1"), mn.lastRuleID)
+	assert.Equal(t, "usdt", mn.lastUnit)
+	assert.Equal(t, "90", mn.lastSpent)
+	assert.Equal(t, "100", mn.lastMaxTotal)
+	assert.Equal(t, int64(90), mn.lastPct)
+	assert.Equal(t, 80, mn.lastAlertPct)
+}
+
+func TestCheckAlertThreshold_MarksAlertSent(t *testing.T) {
+	mn := &mockNotifier{}
+	br := &stubBudgetRepo{}
+	bc := NewBudgetChecker(br, nil, slog.Default())
+	bc.SetNotifier(mn)
+
+	budget := &types.RuleBudget{
+		AlertPct: 80,
+		MaxTotal: "100",
+		Spent:    "85",
+	}
+	bc.checkAlertThreshold("r1", "count", budget)
+
+	assert.True(t, mn.called, "notifier should have been called")
+	assert.True(t, br.markAlertSentCalled, "MarkAlertSent should have been called after successful notification")
+	assert.Equal(t, types.RuleID("r1"), br.markAlertSentRuleID)
+	assert.Equal(t, "count", br.markAlertSentUnit)
+}
+
+func TestCheckAlertThreshold_SkipsWhenAlertAlreadySent(t *testing.T) {
+	mn := &mockNotifier{}
+	br := &stubBudgetRepo{}
+	bc := NewBudgetChecker(br, nil, slog.Default())
+	bc.SetNotifier(mn)
+
+	budget := &types.RuleBudget{
+		AlertSent: true, // already sent
+		AlertPct:  80,
+		MaxTotal:  "100",
+		Spent:     "90",
+	}
+	bc.checkAlertThreshold("r1", "count", budget)
+
+	assert.False(t, mn.called, "notifier should NOT be called when alert already sent")
+	assert.False(t, br.markAlertSentCalled, "MarkAlertSent should NOT be called")
+}
+
+func TestCheckAlertThreshold_SkipsWhenBelowThreshold(t *testing.T) {
+	mn := &mockNotifier{}
+	br := &stubBudgetRepo{}
+	bc := NewBudgetChecker(br, nil, slog.Default())
+	bc.SetNotifier(mn)
+
+	budget := &types.RuleBudget{
+		AlertPct: 80,
+		MaxTotal: "100",
+		Spent:    "50", // 50% < 80%
+	}
+	bc.checkAlertThreshold("r1", "count", budget)
+
+	assert.False(t, mn.called, "notifier should NOT be called when below threshold")
+	assert.False(t, br.markAlertSentCalled, "MarkAlertSent should NOT be called when below threshold")
+}
+
+func TestCheckAlertThreshold_NoNotifierStillMarksAlert(t *testing.T) {
+	br := &stubBudgetRepo{}
+	bc := NewBudgetChecker(br, nil, slog.Default())
+	// No notifier set — bc.notifier is nil
+
+	budget := &types.RuleBudget{
+		AlertPct: 80,
+		MaxTotal: "100",
+		Spent:    "90",
+	}
+	bc.checkAlertThreshold("r1", "count", budget)
+
+	assert.True(t, br.markAlertSentCalled, "MarkAlertSent should still be called even without a notifier")
+	assert.Equal(t, types.RuleID("r1"), br.markAlertSentRuleID)
+	assert.Equal(t, "count", br.markAlertSentUnit)
+}
+
+func TestCheckAlertThreshold_NotifierError_DoesNotMarkSent(t *testing.T) {
+	mn := &mockNotifier{err: assert.AnError}
+	br := &stubBudgetRepo{}
+	bc := NewBudgetChecker(br, nil, slog.Default())
+	bc.SetNotifier(mn)
+
+	budget := &types.RuleBudget{
+		AlertPct: 80,
+		MaxTotal: "100",
+		Spent:    "90",
+	}
+	bc.checkAlertThreshold("r1", "count", budget)
+
+	assert.True(t, mn.called, "notifier should have been called")
+	assert.False(t, br.markAlertSentCalled, "MarkAlertSent should NOT be called when notification fails")
+}
+
+// mockNotifier is a test double for BudgetAlertNotifier.
+type mockNotifier struct {
+	called       bool
+	err          error
+	lastRuleID   types.RuleID
+	lastUnit     string
+	lastSpent    string
+	lastMaxTotal string
+	lastPct      int64
+	lastAlertPct int
+}
+
+func (m *mockNotifier) SendBudgetAlert(
+	ctx context.Context,
+	ruleID types.RuleID,
+	unit string,
+	spent string,
+	maxTotal string,
+	pct int64,
+	alertPct int,
+) error {
+	m.called = true
+	m.lastRuleID = ruleID
+	m.lastUnit = unit
+	m.lastSpent = spent
+	m.lastMaxTotal = maxTotal
+	m.lastPct = pct
+	m.lastAlertPct = alertPct
+	return m.err
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // checkPeriodicRenewal edge cases
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -626,11 +771,15 @@ func ptrStr(s string) *string { return &s }
 
 // stubBudgetRepo is a minimal BudgetRepository for unit tests.
 type stubBudgetRepo struct {
-	budget           *types.RuleBudget
-	getErr           error
-	atomicErr        error
-	atomicSpendCalled bool
-	lastUnit          string
+	budget             *types.RuleBudget
+	getErr             error
+	atomicErr          error
+	atomicSpendCalled  bool
+	lastUnit           string
+	markAlertSentCalled bool
+	markAlertSentRuleID types.RuleID
+	markAlertSentUnit   string
+	markAlertSentErr    error
 }
 
 func (r *stubBudgetRepo) Create(ctx context.Context, budget *types.RuleBudget) error { return nil }
@@ -661,6 +810,12 @@ func (r *stubBudgetRepo) ResetBudget(ctx context.Context, ruleID types.RuleID, u
 func (r *stubBudgetRepo) AtomicSpend(ctx context.Context, ruleID types.RuleID, unit string, amount string) error {
 	r.atomicSpendCalled = true
 	return r.atomicErr
+}
+func (r *stubBudgetRepo) MarkAlertSent(ctx context.Context, ruleID types.RuleID, unit string) error {
+	r.markAlertSentCalled = true
+	r.markAlertSentRuleID = ruleID
+	r.markAlertSentUnit = unit
+	return r.markAlertSentErr
 }
 
 // stubTemplateRepo is a minimal TemplateRepository for unit tests.

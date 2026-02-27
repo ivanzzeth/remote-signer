@@ -292,3 +292,48 @@ func TestBudgetRepo_Create_SetsTimestamps(t *testing.T) {
 	assert.False(t, got.UpdatedAt.Before(before))
 	assert.False(t, got.UpdatedAt.After(after))
 }
+
+// --- MarkAlertSent ---
+
+func TestBudgetRepo_MarkAlertSent(t *testing.T) {
+	_, repo := setupIsolatedBudgetTestDB(t)
+	ctx := context.Background()
+
+	budget := &types.RuleBudget{
+		ID:        "budget-alert-1",
+		RuleID:    types.RuleID("rule-alert-1"),
+		Unit:      "count",
+		MaxTotal:  "100",
+		Spent:     "85",
+		AlertPct:  80,
+		AlertSent: false,
+	}
+	require.NoError(t, repo.Create(ctx, budget))
+
+	// Verify alert_sent is false initially
+	got, err := repo.GetByRuleID(ctx, types.RuleID("rule-alert-1"), "count")
+	require.NoError(t, err)
+	assert.False(t, got.AlertSent, "alert_sent should be false initially")
+
+	beforeMark := time.Now()
+
+	// Mark alert as sent
+	err = repo.MarkAlertSent(ctx, types.RuleID("rule-alert-1"), "count")
+	require.NoError(t, err)
+
+	// Verify alert_sent is now true and updated_at was refreshed
+	got, err = repo.GetByRuleID(ctx, types.RuleID("rule-alert-1"), "count")
+	require.NoError(t, err)
+	assert.True(t, got.AlertSent, "alert_sent should be true after MarkAlertSent")
+	assert.False(t, got.UpdatedAt.Before(beforeMark), "updated_at should be refreshed")
+}
+
+func TestBudgetRepo_MarkAlertSent_Nonexistent(t *testing.T) {
+	_, repo := setupIsolatedBudgetTestDB(t)
+	ctx := context.Background()
+
+	// Calling MarkAlertSent on a nonexistent record should not error
+	// (UPDATE with 0 rows affected is not treated as an error)
+	err := repo.MarkAlertSent(ctx, types.RuleID("nonexistent-rule"), "count")
+	assert.NoError(t, err, "MarkAlertSent on nonexistent record should not return error")
+}

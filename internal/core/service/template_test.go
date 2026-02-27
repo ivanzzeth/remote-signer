@@ -280,6 +280,10 @@ func (r *mockBudgetRepo) ListByRuleIDs(_ context.Context, ruleIDs []types.RuleID
 	return out, nil
 }
 
+func (r *mockBudgetRepo) MarkAlertSent(_ context.Context, _ types.RuleID, _ string) error {
+	return nil
+}
+
 // helper to count budgets in the mock repo
 func (r *mockBudgetRepo) count() int {
 	r.mu.RLock()

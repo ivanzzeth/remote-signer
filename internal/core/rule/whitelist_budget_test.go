@@ -106,6 +106,10 @@ func (m *budgetExceededBudgetRepo) AtomicSpend(ctx context.Context, ruleID types
 	return nil
 }
 
+func (m *budgetExceededBudgetRepo) MarkAlertSent(ctx context.Context, ruleID types.RuleID, unit string) error {
+	return nil
+}
+
 // budgetExceededTemplateRepo returns a template with count_only metering for any ID.
 type budgetExceededTemplateRepo struct {
 	metering []byte
