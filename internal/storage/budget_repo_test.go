@@ -22,6 +22,15 @@ func setupBudgetTestDB(t *testing.T) (*gorm.DB, *GormBudgetRepository) {
 	return db, repo
 }
 
+func setupIsolatedBudgetTestDB(t *testing.T) (*gorm.DB, *GormBudgetRepository) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&types.RuleBudget{}))
+	repo, err := NewGormBudgetRepository(db)
+	require.NoError(t, err)
+	return db, repo
+}
+
 func TestBudgetRepo_Create(t *testing.T) {
 	_, repo := setupBudgetTestDB(t)
 	ctx := context.Background()
@@ -187,4 +196,99 @@ func TestBudgetRepo_ListByRuleID(t *testing.T) {
 	list, err := repo.ListByRuleID(ctx, types.RuleID("rule-7"))
 	require.NoError(t, err)
 	assert.Len(t, list, 2)
+}
+
+// --- Additional budget repo tests for uncovered functions ---
+
+func TestBudgetRepo_NewGormBudgetRepository_NilDB(t *testing.T) {
+	repo, err := NewGormBudgetRepository(nil)
+	assert.Nil(t, repo)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "database connection is required")
+}
+
+func TestBudgetRepo_Create_Nil(t *testing.T) {
+	_, repo := setupIsolatedBudgetTestDB(t)
+	err := repo.Create(context.Background(), nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "budget cannot be nil")
+}
+
+func TestBudgetRepo_GetByRuleID_NotFound(t *testing.T) {
+	_, repo := setupIsolatedBudgetTestDB(t)
+	_, err := repo.GetByRuleID(context.Background(), "nonexistent", "count")
+	assert.ErrorIs(t, err, types.ErrNotFound)
+}
+
+func TestBudgetRepo_Delete_Success(t *testing.T) {
+	_, repo := setupIsolatedBudgetTestDB(t)
+	ctx := context.Background()
+
+	budget := &types.RuleBudget{
+		ID:       "bd-del-1",
+		RuleID:   types.RuleID("rule-del-1"),
+		Unit:     "count",
+		MaxTotal: "10",
+		Spent:    "0",
+	}
+	require.NoError(t, repo.Create(ctx, budget))
+
+	err := repo.Delete(ctx, "bd-del-1")
+	require.NoError(t, err)
+
+	_, err = repo.GetByRuleID(ctx, types.RuleID("rule-del-1"), "count")
+	assert.ErrorIs(t, err, types.ErrNotFound)
+}
+
+func TestBudgetRepo_Delete_NotFound(t *testing.T) {
+	_, repo := setupIsolatedBudgetTestDB(t)
+	err := repo.Delete(context.Background(), "nonexistent")
+	assert.ErrorIs(t, err, types.ErrNotFound)
+}
+
+func TestBudgetRepo_ListByRuleIDs(t *testing.T) {
+	_, repo := setupIsolatedBudgetTestDB(t)
+	ctx := context.Background()
+
+	require.NoError(t, repo.Create(ctx, &types.RuleBudget{ID: "lbri-1", RuleID: "rule-a", Unit: "count", MaxTotal: "10", Spent: "0"}))
+	require.NoError(t, repo.Create(ctx, &types.RuleBudget{ID: "lbri-2", RuleID: "rule-b", Unit: "eth", MaxTotal: "5", Spent: "0"}))
+	require.NoError(t, repo.Create(ctx, &types.RuleBudget{ID: "lbri-3", RuleID: "rule-c", Unit: "usdt", MaxTotal: "100", Spent: "0"}))
+
+	list, err := repo.ListByRuleIDs(ctx, []types.RuleID{"rule-a", "rule-b"})
+	require.NoError(t, err)
+	assert.Len(t, list, 2)
+}
+
+func TestBudgetRepo_ListByRuleIDs_Empty(t *testing.T) {
+	_, repo := setupIsolatedBudgetTestDB(t)
+	list, err := repo.ListByRuleIDs(context.Background(), nil)
+	require.NoError(t, err)
+	assert.Nil(t, list)
+
+	list, err = repo.ListByRuleIDs(context.Background(), []types.RuleID{})
+	require.NoError(t, err)
+	assert.Nil(t, list)
+}
+
+func TestBudgetRepo_Create_SetsTimestamps(t *testing.T) {
+	_, repo := setupIsolatedBudgetTestDB(t)
+	ctx := context.Background()
+
+	before := time.Now()
+	budget := &types.RuleBudget{
+		ID:       "bd-ts-1",
+		RuleID:   types.RuleID("rule-ts-1"),
+		Unit:     "count",
+		MaxTotal: "10",
+		Spent:    "0",
+	}
+	require.NoError(t, repo.Create(ctx, budget))
+	after := time.Now()
+
+	got, err := repo.GetByRuleID(ctx, types.RuleID("rule-ts-1"), "count")
+	require.NoError(t, err)
+	assert.False(t, got.CreatedAt.Before(before))
+	assert.False(t, got.CreatedAt.After(after))
+	assert.False(t, got.UpdatedAt.Before(before))
+	assert.False(t, got.UpdatedAt.After(after))
 }

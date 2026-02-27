@@ -45,7 +45,7 @@ func DelegatePayloadToSignRequest(ctx context.Context, payload interface{}, _ st
 }
 
 func ruleInputMapToSignRequest(m map[string]interface{}) (*types.SignRequest, *types.ParsedPayload, error) {
-	chainID, _ := m["chain_id"].(float64)
+	chainID := chainIDFromInterface(m["chain_id"])
 	signer, _ := m["signer"].(string)
 	signType, _ := m["sign_type"].(string)
 	if signer == "" {
@@ -154,3 +154,30 @@ func parsedPayloadFromRuleInputMap(m map[string]interface{}) *types.ParsedPayloa
 }
 
 func strPtrDeleg(s string) *string { return &s }
+
+// chainIDFromInterface extracts a chain ID from various types that Sobek or JSON may produce.
+// JavaScript numbers may be exported as int64, float64, or string depending on the runtime.
+func chainIDFromInterface(v interface{}) float64 {
+	if v == nil {
+		return 0
+	}
+	switch val := v.(type) {
+	case float64:
+		return val
+	case int64:
+		return float64(val)
+	case int:
+		return float64(val)
+	case json.Number:
+		f, _ := val.Float64()
+		return f
+	case string:
+		n, err := strconv.ParseFloat(val, 64)
+		if err != nil {
+			return 0
+		}
+		return n
+	default:
+		return 0
+	}
+}

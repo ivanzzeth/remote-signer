@@ -411,6 +411,17 @@ func expandInstanceRule(rule RuleConfig, templates map[string]TemplateConfig) ([
 		}
 	}
 
+	// Apply test_cases_overrides from instance config (if any).
+	// Instance rules can override template test_cases for full-engine validation
+	// (e.g. using a different signer to avoid being auto-allowed by a global signer_restriction rule).
+	if overrides := extractTestCasesOverrides(rule.Config); len(overrides) > 0 {
+		for idx := range templateRules {
+			if tcs, ok := overrides[templateRules[idx].Name]; ok {
+				templateRules[idx].TestCases = tcs
+			}
+		}
+	}
+
 	// Apply scope and instance variables to all template rules
 	for idx := range templateRules {
 		if rule.ChainType != "" {
@@ -518,4 +529,25 @@ func fillInMappingArrays(rule *RuleConfig, variables map[string]string) error {
 		rule.Config["in_mapping_arrays"] = inMappingArrays
 	}
 	return nil
+}
+
+// extractTestCasesOverrides parses the test_cases_overrides field from an instance rule's config.
+// Returns a map of rule_name -> []TestCaseConfig. If the field is absent or invalid, returns nil.
+func extractTestCasesOverrides(instanceConfig map[string]interface{}) map[string][]TestCaseConfig {
+	raw, ok := instanceConfig["test_cases_overrides"]
+	if !ok || raw == nil {
+		return nil
+	}
+
+	// The YAML deserializes this as map[string]interface{} where each value is []interface{}.
+	// We need to marshal/unmarshal through JSON for proper type conversion.
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	var overrides map[string][]TestCaseConfig
+	if err := json.Unmarshal(data, &overrides); err != nil {
+		return nil
+	}
+	return overrides
 }

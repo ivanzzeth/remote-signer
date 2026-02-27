@@ -54,6 +54,14 @@ type TemplateVarConfig struct {
 	Default     string `yaml:"default,omitempty"`
 }
 
+// TestCaseConfig defines a single test case for rule validation (evm_js, solidity, etc.)
+type TestCaseConfig struct {
+	Name         string                 `yaml:"name" json:"name"`
+	Input        map[string]interface{} `yaml:"input" json:"input"`
+	ExpectPass   bool                   `yaml:"expect_pass" json:"expect_pass"`
+	ExpectReason string                 `yaml:"expect_reason,omitempty" json:"expect_reason,omitempty"`
+}
+
 // RuleConfig defines a rule in configuration. JSON tags must match YAML/validator expectations
 // so that substituted rules_json unmarshals correctly (e.g. "config" not "Config").
 type RuleConfig struct {
@@ -69,7 +77,8 @@ type RuleConfig struct {
 	APIKeyID      string                 `yaml:"api_key_id,omitempty" json:"api_key_id,omitempty"`
 	SignerAddress string                 `yaml:"signer_address,omitempty" json:"signer_address,omitempty"`
 	Config        map[string]interface{} `yaml:"config" json:"config"`
-	Variables     map[string]interface{} `yaml:"variables,omitempty" json:"variables,omitempty"` // instance/template variable values (e.g. for evm_js config)
+	Variables     map[string]interface{} `yaml:"variables,omitempty" json:"variables,omitempty"`   // instance/template variable values (e.g. for evm_js config)
+	TestCases     []TestCaseConfig       `yaml:"test_cases,omitempty" json:"test_cases,omitempty"` // test cases for validation (evm_js, solidity, etc.)
 	Enabled       bool                   `yaml:"enabled" json:"enabled"`
 }
 

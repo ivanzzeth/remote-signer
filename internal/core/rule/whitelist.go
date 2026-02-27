@@ -171,12 +171,16 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 		return nil, fmt.Errorf("request is required")
 	}
 
-	// Get all applicable rules filtered by chain_type, chain_id, signer, api_key
+	// Get all applicable rules filtered by chain_type, chain_id, signer, api_key.
+	// SECURITY: Use Limit=-1 to fetch ALL matching rules without pagination.
+	// A default limit (e.g. 100) could silently drop blocklist rules, allowing
+	// malicious transactions through. This is a security-critical path.
 	filter := storage.RuleFilter{
 		ChainType:     &req.ChainType,
 		APIKeyID:      &req.APIKeyID,
 		SignerAddress: &req.SignerAddress,
 		EnabledOnly:   true,
+		Limit:         -1, // No limit: must load ALL rules for security evaluation
 	}
 	if req.ChainID != "" {
 		filter.ChainID = &req.ChainID
@@ -282,7 +286,7 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 
 	// Try batch evaluation for whitelist rules (optimization)
 	// Track which rules were evaluated in batch (not skipped) so sequential fallback skips them
-	batchResult, batchEvaluatedRules := e.evaluateWhitelistBatch(ctx, whitelistRules, req, parsed)
+	batchResult, batchEvaluatedRules, batchNoMatchReason := e.evaluateWhitelistBatch(ctx, whitelistRules, req, parsed)
 	if batchResult != nil {
 		return batchResult, nil
 	}
@@ -290,6 +294,10 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 	// Fallback to sequential evaluation for rules not evaluated in batch
 	sequentialCount := 0
 	var firstNoMatchReason, lastNoMatchReason string
+	if batchNoMatchReason != "" {
+		firstNoMatchReason = batchNoMatchReason
+		lastNoMatchReason = batchNoMatchReason
+	}
 	for _, rule := range whitelistRules {
 		// Skip rules already evaluated (not skipped) in batch
 		if batchEvaluatedRules[rule.ID] {
@@ -391,8 +399,9 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 	}
 	e.logger.Info("no rule matched, requires manual approval or will reject", infoAttrs...)
 	return &EvaluationResult{
-		Blocked: false,
-		Allowed: false,
+		Blocked:       false,
+		Allowed:       false,
+		NoMatchReason: lastNoMatchReason,
 	}, nil
 }
 
@@ -487,6 +496,16 @@ func (e *WhitelistRuleEngine) resolveDelegation(ctx context.Context, originalReq
 			return &EvaluationResult{Allowed: false, NoMatchReason: "delegation single convert failed: " + err.Error()}, nil
 		}
 		req2.APIKeyID = originalReq.APIKeyID
+
+		// SECURITY: Run blocklist rules against the delegated payload.
+		// Without this check, a delegated payload could bypass blocklist rules
+		// (e.g., send funds to a blacklisted address).
+		if blockResult, blockErr := e.evaluateBlocklistForRequest(ctx, req2, parsed2); blockErr != nil {
+			return nil, blockErr
+		} else if blockResult != nil {
+			return blockResult, nil
+		}
+
 		var lastReason string
 		for _, targetID := range targetIDs {
 			targetRule, err := e.repo.Get(ctx, targetID)
@@ -553,6 +572,14 @@ func (e *WhitelistRuleEngine) resolveDelegation(ctx context.Context, originalReq
 				return &EvaluationResult{Allowed: false, NoMatchReason: "delegation per_item convert failed: " + err.Error()}, nil
 			}
 			req2.APIKeyID = originalReq.APIKeyID
+
+			// SECURITY: Run blocklist rules against each delegated item.
+			if blockResult, blockErr := e.evaluateBlocklistForRequest(ctx, req2, parsed2); blockErr != nil {
+				return nil, blockErr
+			} else if blockResult != nil {
+				return blockResult, nil
+			}
+
 			itemAllowed := false
 			var itemReason string
 			for _, targetID := range targetIDs {
@@ -629,13 +656,15 @@ func delegationItems(payload interface{}, itemsKey string) ([]interface{}, error
 // Returns:
 //   - result: non-nil if a rule matched (allowed)
 //   - evaluated: set of rule IDs that were fully evaluated (not skipped) in batch
+//   - lastNoMatchReason: the last non-empty reason from non-matching rules (for diagnostics)
 func (e *WhitelistRuleEngine) evaluateWhitelistBatch(
 	ctx context.Context,
 	rules []*types.Rule,
 	req *types.SignRequest,
 	parsed *types.ParsedPayload,
-) (*EvaluationResult, map[types.RuleID]bool) {
+) (*EvaluationResult, map[types.RuleID]bool, string) {
 	evaluated := make(map[types.RuleID]bool)
+	var lastNoMatchReason string
 
 	// Group rules by evaluator type for batch evaluation
 	rulesByType := make(map[types.RuleType][]*types.Rule)
@@ -736,15 +765,87 @@ func (e *WhitelistRuleEngine) evaluateWhitelistBatch(
 					Allowed:     true,
 					AllowedBy:   rule,
 					AllowReason: result.Reason,
-				}, evaluated
+				}, evaluated, ""
+			} else if result.Reason != "" {
+				lastNoMatchReason = result.Reason
 			}
 		}
 	}
 
-	return nil, evaluated
+	return nil, evaluated, lastNoMatchReason
+}
+
+// evaluateBlocklistForRequest runs all applicable blocklist rules against a request.
+// Used by delegation to ensure delegated payloads are checked against blocklist rules.
+// Returns (nil, nil) if no blocklist rule is violated; otherwise returns the blocking result.
+// Uses Fail-Closed semantics: evaluation errors cause immediate rejection.
+func (e *WhitelistRuleEngine) evaluateBlocklistForRequest(ctx context.Context, req *types.SignRequest, parsed *types.ParsedPayload) (*EvaluationResult, error) {
+	filter := storage.RuleFilter{
+		ChainType:     &req.ChainType,
+		APIKeyID:      &req.APIKeyID,
+		SignerAddress: &req.SignerAddress,
+		EnabledOnly:   true,
+		Limit:         -1, // No limit: must load ALL rules for security evaluation
+	}
+	if req.ChainID != "" {
+		filter.ChainID = &req.ChainID
+	}
+	rules, err := e.repo.List(ctx, filter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list rules for delegation blocklist check: %w", err)
+	}
+
+	e.mu.RLock()
+	rules = e.filterRulesBySignType(rules, req.SignType)
+	e.mu.RUnlock()
+
+	for _, rule := range rules {
+		if rule.Mode != types.RuleModeBlocklist {
+			continue
+		}
+		evaluator, exists := e.evaluators[rule.Type]
+		if !exists {
+			e.logger.Error("no evaluator for blocklist rule type in delegation (Fail-Closed)",
+				"type", rule.Type,
+				"rule_id", rule.ID,
+			)
+			return nil, &RuleEvaluationError{
+				RuleID:   rule.ID,
+				RuleName: rule.Name,
+				RuleType: rule.Type,
+				Err:      fmt.Errorf("no evaluator registered for blocklist rule type %s (delegation check)", rule.Type),
+			}
+		}
+		violated, reason, evalErr := evaluator.Evaluate(ctx, rule, req, parsed)
+		if evalErr != nil {
+			e.logger.Error("blocklist rule evaluation error in delegation (Fail-Closed)",
+				"rule_id", rule.ID,
+				"type", rule.Type,
+				"error", evalErr,
+			)
+			return nil, &RuleEvaluationError{
+				RuleID:   rule.ID,
+				RuleName: rule.Name,
+				RuleType: rule.Type,
+				Err:      evalErr,
+			}
+		}
+		if violated {
+			e.logger.Warn("delegated request blocked by blocklist rule",
+				"rule_id", rule.ID,
+				"rule_name", rule.Name,
+				"request_id", req.ID,
+				"reason", reason,
+			)
+			return &EvaluationResult{
+				Blocked:     true,
+				BlockedBy:   rule,
+				BlockReason: reason,
+			}, nil
+		}
+	}
+	return nil, nil
 }
 
 // Compile-time check that WhitelistRuleEngine implements RuleEngine
-var _ RuleEngine = (*WhitelistRuleEngine)(nil)
-
 var _ RuleEngine = (*WhitelistRuleEngine)(nil)

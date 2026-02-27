@@ -123,9 +123,12 @@ func (r *GormRuleRepository) List(ctx context.Context, filter RuleFilter) ([]*ty
 	}
 	if filter.Limit > 0 {
 		query = query.Limit(filter.Limit)
-	} else {
-		query = query.Limit(100) // default limit
+	} else if filter.Limit != -1 {
+		// Limit == -1 means "no limit" (used by security-critical paths like rule engine evaluation).
+		// Limit == 0 (default) applies a safe default for API pagination.
+		query = query.Limit(100) // default limit for API pagination
 	}
+	// When filter.Limit == -1, no LIMIT clause is applied (fetch all matching rules)
 
 	query = query.Order("created_at DESC")
 
