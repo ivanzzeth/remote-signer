@@ -201,10 +201,10 @@ func TestPagination_TotalCountConsistency(t *testing.T) {
 func TestPagination_EmptyPage(t *testing.T) {
 	ctx := context.Background()
 
-	// Test with a filter that returns no results. Use a signer address that has no requests
-	// (0x0 is used by JS client e2e "invalid signer" test and may have a rejected request).
+	// Test with a filter that returns no results. Use a signer address that no test uses.
+	// NOTE: 0x0 is used by JS client e2e; 0x..0002 by config-driven negative test cases.
 	page, err := adminClient.ListRequests(ctx, &client.ListRequestsFilter{
-		SignerAddress: "0x0000000000000000000000000000000000000002",
+		SignerAddress: "0x000000000000000000000000000000000000fF99",
 		Limit:         10,
 	})
 	require.NoError(t, err)
