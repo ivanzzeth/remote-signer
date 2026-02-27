@@ -387,3 +387,83 @@ func TestGenerate_ScopeFieldsPropagated(t *testing.T) {
 	require.NotNil(t, rule.SignerAddress)
 	assert.Equal(t, "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266", *rule.SignerAddress)
 }
+
+// Additional generator tests to cover uncovered branches
+
+func TestGenerate_AddressList_NilParsed(t *testing.T) {
+	gen, _ := NewDefaultRuleGenerator()
+	req := &types.SignRequest{ID: "req-1", ChainType: types.ChainTypeEVM}
+	opts := &RuleGenerateOptions{
+		RuleType: types.RuleTypeEVMAddressList,
+		RuleMode: types.RuleModeWhitelist,
+	}
+	_, err := gen.Generate(req, nil, opts)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no recipient")
+}
+
+func TestGenerate_AddressList_NilRecipient(t *testing.T) {
+	gen, _ := NewDefaultRuleGenerator()
+	req := &types.SignRequest{ID: "req-1", ChainType: types.ChainTypeEVM}
+	opts := &RuleGenerateOptions{
+		RuleType: types.RuleTypeEVMAddressList,
+		RuleMode: types.RuleModeWhitelist,
+	}
+	_, err := gen.Generate(req, &types.ParsedPayload{}, opts)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no recipient")
+}
+
+func TestGenerate_ContractMethod_NilParsed(t *testing.T) {
+	gen, _ := NewDefaultRuleGenerator()
+	req := &types.SignRequest{ID: "req-1", ChainType: types.ChainTypeEVM}
+	opts := &RuleGenerateOptions{
+		RuleType: types.RuleTypeEVMContractMethod,
+		RuleMode: types.RuleModeWhitelist,
+	}
+	_, err := gen.Generate(req, nil, opts)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no contract")
+}
+
+func TestGenerate_ValueLimit_Blocklist(t *testing.T) {
+	gen, _ := NewDefaultRuleGenerator()
+	req := &types.SignRequest{ID: "req-1", ChainType: types.ChainTypeEVM}
+	maxVal := "5000"
+	opts := &RuleGenerateOptions{
+		RuleType: types.RuleTypeEVMValueLimit,
+		RuleMode: types.RuleModeBlocklist,
+		MaxValue: &maxVal,
+	}
+	rule, err := gen.Generate(req, &types.ParsedPayload{}, opts)
+	require.NoError(t, err)
+	assert.Contains(t, rule.Name, "Block:")
+	assert.Contains(t, rule.Name, "5000")
+}
+
+func TestGenerate_ValueLimit_NilMaxValue(t *testing.T) {
+	gen, _ := NewDefaultRuleGenerator()
+	req := &types.SignRequest{ID: "req-1", ChainType: types.ChainTypeEVM}
+	opts := &RuleGenerateOptions{
+		RuleType: types.RuleTypeEVMValueLimit,
+		RuleMode: types.RuleModeWhitelist,
+		MaxValue: nil,
+	}
+	_, err := gen.Generate(req, &types.ParsedPayload{}, opts)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "max_value is required")
+}
+
+func TestGenerate_ValueLimit_EmptyMaxValue(t *testing.T) {
+	gen, _ := NewDefaultRuleGenerator()
+	req := &types.SignRequest{ID: "req-1", ChainType: types.ChainTypeEVM}
+	empty := ""
+	opts := &RuleGenerateOptions{
+		RuleType: types.RuleTypeEVMValueLimit,
+		RuleMode: types.RuleModeWhitelist,
+		MaxValue: &empty,
+	}
+	_, err := gen.Generate(req, &types.ParsedPayload{}, opts)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "max_value is required")
+}

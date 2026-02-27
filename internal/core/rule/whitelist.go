@@ -350,27 +350,14 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 			e.logger.Debug("whitelist rule did not match", attrs...)
 		}
 
-		if matched {
-			// Budget check for instance rules with budget (post-match, pre-approve)
-			if e.budgetChecker != nil && rule.TemplateID != nil {
-				budgetOK, budgetErr := e.budgetChecker.CheckAndDeductBudget(ctx, rule, req, parsed)
-				if budgetErr != nil {
-					e.logger.Warn("budget check error, skipping rule (fail-open)",
-						"rule_id", rule.ID,
-						"rule_name", rule.Name,
-						"error", budgetErr,
-					)
-					continue // Fail-open: try next whitelist rule
-				}
-				if !budgetOK {
-					e.logger.Warn("budget exceeded for rule, skipping to next (fail-open)",
-						"rule_id", rule.ID,
-						"rule_name", rule.Name,
-					)
-					continue // Budget exceeded: try next whitelist rule
-				}
-			}
+		// SECURITY: budget check is now done inside evaluateOneRuleWithDelegation
+		// (covers both delegation and non-delegation paths). If budget is exhausted,
+		// result.Blocked=true is returned — handle it here with fail-closed.
+		if result != nil && result.Blocked {
+			return result, nil
+		}
 
+		if matched {
 			e.logger.Info("request allowed by whitelist rule",
 				"rule_id", result.AllowedBy.ID,
 				"rule_name", result.AllowedBy.Name,
@@ -454,6 +441,30 @@ func (e *WhitelistRuleEngine) evaluateOneRuleWithDelegation(ctx context.Context,
 	if !matched {
 		return &EvaluationResult{Allowed: false, NoMatchReason: reason}, nil
 	}
+	// SECURITY: check parent rule's budget BEFORE delegation or allowing.
+	// Without this, a delegating rule's budget is never deducted, enabling budget bypass.
+	if matched && e.budgetChecker != nil && rule.TemplateID != nil {
+		budgetOK, budgetErr := e.budgetChecker.CheckAndDeductBudget(ctx, rule, req, parsed)
+		if budgetErr != nil {
+			e.logger.Error("budget check error in delegation path, denying request (fail-closed)",
+				"rule_id", rule.ID, "rule_name", rule.Name, "error", budgetErr)
+			return &EvaluationResult{
+				Blocked:     true,
+				BlockedBy:   rule,
+				BlockReason: fmt.Sprintf("budget check error: %v", budgetErr),
+			}, nil
+		}
+		if !budgetOK {
+			e.logger.Warn("budget exceeded for rule, denying request (fail-closed)",
+				"rule_id", rule.ID, "rule_name", rule.Name)
+			return &EvaluationResult{
+				Blocked:     true,
+				BlockedBy:   rule,
+				BlockReason: "budget exceeded",
+			}, nil
+		}
+	}
+
 	if matched && delegation != nil {
 		return e.resolveDelegation(ctx, req, rule, delegation)
 	}
@@ -729,22 +740,32 @@ func (e *WhitelistRuleEngine) evaluateWhitelistBatch(
 				rule := typeRules[i]
 
 				// Budget check for instance rules with budget (post-match, pre-approve)
+				// SECURITY: fail-closed — budget exhaustion or error terminates evaluation
+				// to prevent bypass via other matching rules without budget constraints.
 				if e.budgetChecker != nil && rule.TemplateID != nil {
 					budgetOK, budgetErr := e.budgetChecker.CheckAndDeductBudget(ctx, rule, req, parsed)
 					if budgetErr != nil {
-						e.logger.Warn("budget check error in batch, skipping rule (fail-open)",
+						e.logger.Error("budget check error in batch, denying request (fail-closed)",
 							"rule_id", rule.ID,
 							"rule_name", rule.Name,
 							"error", budgetErr,
 						)
-						continue
+						return &EvaluationResult{
+							Blocked:     true,
+							BlockedBy:   rule,
+							BlockReason: fmt.Sprintf("budget check error: %v", budgetErr),
+						}, evaluated, ""
 					}
 					if !budgetOK {
-						e.logger.Warn("budget exceeded for batch rule, skipping to next (fail-open)",
+						e.logger.Warn("budget exceeded for batch rule, denying request (fail-closed)",
 							"rule_id", rule.ID,
 							"rule_name", rule.Name,
 						)
-						continue
+						return &EvaluationResult{
+							Blocked:     true,
+							BlockedBy:   rule,
+							BlockReason: "budget exceeded",
+						}, evaluated, ""
 					}
 				}
 

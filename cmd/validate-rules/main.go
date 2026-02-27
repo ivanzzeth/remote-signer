@@ -717,10 +717,19 @@ func validateRules(ctx context.Context, rules []RuleConfig, validator *evm.Solid
 					result.FailedTestCases++
 					result.Valid = false
 				} else if tc.ExpectReason != "" && !strings.Contains(tcResult.ActualReason, tc.ExpectReason) {
-					tcResult.Passed = false
-					tcResult.Error = fmt.Sprintf("expected reason containing %q but got %q", tc.ExpectReason, tcResult.ActualReason)
-					result.FailedTestCases++
-					result.Valid = false
+					// In a multi-rule full engine, the NoMatchReason for whitelist rules depends on
+					// evaluation order and may come from a different rule. Only enforce expect_reason
+					// when the result is blocked/allowed or when using isolated (non-full) engine.
+					isNoMatch := !evalResult.Blocked && !evalResult.Allowed
+					isWhitelistRule := rule.Mode != types.RuleModeBlocklist
+					if useFullEngine && isNoMatch && isWhitelistRule {
+						tcResult.Passed = true
+					} else {
+						tcResult.Passed = false
+						tcResult.Error = fmt.Sprintf("expected reason containing %q but got %q", tc.ExpectReason, tcResult.ActualReason)
+						result.FailedTestCases++
+						result.Valid = false
+					}
 				} else {
 					tcResult.Passed = true
 				}

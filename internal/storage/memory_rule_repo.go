@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
@@ -105,7 +106,7 @@ func (r *MemoryRuleRepository) List(ctx context.Context, filter RuleFilter) ([]*
 		if filter.APIKeyID != nil && rule.APIKeyID != nil && *rule.APIKeyID != *filter.APIKeyID {
 			continue
 		}
-		if filter.SignerAddress != nil && rule.SignerAddress != nil && *rule.SignerAddress != *filter.SignerAddress {
+		if filter.SignerAddress != nil && rule.SignerAddress != nil && !strings.EqualFold(*rule.SignerAddress, *filter.SignerAddress) {
 			continue
 		}
 		if filter.Type != nil && rule.Type != *filter.Type {

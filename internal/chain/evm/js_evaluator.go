@@ -352,7 +352,17 @@ func (e *JSRuleEvaluator) wrappedValidate(script string, input *RuleInput, confi
 }
 
 func removeGlobals(vm *sobek.Runtime) error {
-	for _, name := range []string{"eval", "Function", "Date", "console", "require", "global", "globalThis"} {
+	// SECURITY: Remove dangerous globals to prevent code execution, data exfiltration,
+	// and DoS attacks within the JS sandbox. Per spec §11.7: allow-list only.
+	for _, name := range []string{
+		"eval", "Function", "Date", "console", "require", "global", "globalThis",
+		// Network APIs — prevent data exfiltration of rule logic / signing inputs
+		"fetch", "XMLHttpRequest", "WebSocket",
+		// Timer APIs — prevent queued callback abuse
+		"setTimeout", "setInterval", "clearTimeout", "clearInterval",
+		// Reflection/proxy — prevent introspection of VM internals
+		"Reflect", "Proxy",
+	} {
 		if err := vm.Set(name, sobek.Undefined()); err != nil {
 			return err
 		}
