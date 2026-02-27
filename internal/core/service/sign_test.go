@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -469,6 +470,9 @@ func TestSign(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "invalid payload") {
 			t.Errorf("unexpected error: %v", err)
+		}
+		if !errors.Is(err, types.ErrInvalidPayload) {
+			t.Errorf("expected error to wrap ErrInvalidPayload, got: %v", err)
 		}
 	})
 

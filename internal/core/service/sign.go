@@ -168,7 +168,7 @@ func (s *SignService) Sign(ctx context.Context, req *SignRequest) (*SignResponse
 		if _, smErr := s.stateMachine.RejectOnValidation(ctx, signReq.ID, "invalid payload: "+err.Error()); smErr != nil {
 			s.logger.Error("failed to reject request", "error", smErr)
 		}
-		return nil, fmt.Errorf("invalid payload: %w", err)
+		return nil, fmt.Errorf("%w: %w", types.ErrInvalidPayload, err)
 	}
 
 	// Transition to authorizing (pending → authorizing)

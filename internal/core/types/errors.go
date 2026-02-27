@@ -84,6 +84,11 @@ func IsSignerNotFound(err error) bool {
 	return errors.Is(err, ErrSignerNotFound)
 }
 
+// IsInvalidPayload checks if the error is an invalid payload error
+func IsInvalidPayload(err error) bool {
+	return errors.Is(err, ErrInvalidPayload)
+}
+
 // IsPendingApproval checks if the error indicates pending approval
 func IsPendingApproval(err error) bool {
 	return errors.Is(err, ErrPendingApproval)

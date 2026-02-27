@@ -155,6 +155,17 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.writeError(w, fmt.Sprintf("signer not found: %s", req.SignerAddress), http.StatusNotFound)
 			return
 		}
+		if errors.Is(err, types.ErrInvalidPayload) {
+			h.logger.Warn("invalid payload",
+				"error", err,
+				"signer_address", req.SignerAddress,
+				"sign_type", req.SignType,
+				"chain_id", req.ChainID,
+			)
+			metrics.RecordSignRequestDuration(chainType, req.SignType, metrics.SignOutcomeError, duration)
+			h.writeError(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		if errors.Is(err, service.ErrManualApprovalDisabled) {
 			h.logger.Warn("request rejected: no matching rule and manual approval disabled",
 				"signer_address", req.SignerAddress,
