@@ -68,8 +68,9 @@ func (bc *BudgetChecker) CheckAndDeductBudget(
 	tmpl, err := bc.templateRepo.Get(ctx, *rule.TemplateID)
 	if err != nil {
 		if types.IsNotFound(err) {
-			// Template deleted but instance still active — no budget constraint
-			return true, nil
+			// SECURITY: template deleted but instance still active — fail-closed.
+			// The budget constraint cannot be verified without the template.
+			return false, fmt.Errorf("template %s deleted but instance rule %s still active", *rule.TemplateID, rule.ID)
 		}
 		return false, fmt.Errorf("failed to load template: %w", err)
 	}
@@ -97,16 +98,19 @@ func (bc *BudgetChecker) CheckAndDeductBudget(
 	budget, err := bc.budgetRepo.GetByRuleID(ctx, rule.ID, unit)
 	if err != nil {
 		if types.IsNotFound(err) {
-			// No budget record = no budget constraint
-			return true, nil
+			// SECURITY: no budget record for a rule with metering — fail-closed.
+			// Budget record should be created at rule initialization. Missing record
+			// means incomplete setup; allowing would bypass budget constraints.
+			return false, fmt.Errorf("no budget record for rule %s (unit=%s) with metering method %q", rule.ID, unit, metering.Method)
 		}
 		return false, fmt.Errorf("failed to get budget: %w", err)
 	}
 
 	// Check periodic renewal
+	// SECURITY: fail-closed on renewal error — stale budget data could allow
+	// spending beyond the intended period limit.
 	if err := bc.checkPeriodicRenewal(ctx, rule, budget, unit); err != nil {
-		bc.logger.Error("failed to check periodic renewal", "rule_id", rule.ID, "error", err)
-		// Continue with current budget state
+		return false, fmt.Errorf("failed to check periodic renewal for rule %s: %w", rule.ID, err)
 	}
 
 	// Extract spending amount
@@ -116,17 +120,20 @@ func (bc *BudgetChecker) CheckAndDeductBudget(
 	}
 
 	// Check per-tx limit
+	// SECURITY: fail-closed on parse error — unparseable limit could allow
+	// arbitrarily large transactions.
 	if budget.MaxPerTx != "" && budget.MaxPerTx != "0" {
 		maxPerTx := new(big.Int)
-		if _, ok := maxPerTx.SetString(budget.MaxPerTx, 10); ok {
-			if amount.Cmp(maxPerTx) > 0 {
-				bc.logger.Warn("per-tx budget exceeded",
-					"rule_id", rule.ID,
-					"amount", amount.String(),
-					"max_per_tx", budget.MaxPerTx,
-				)
-				return false, nil
-			}
+		if _, ok := maxPerTx.SetString(budget.MaxPerTx, 10); !ok {
+			return false, fmt.Errorf("invalid max_per_tx value %q for rule %s", budget.MaxPerTx, rule.ID)
+		}
+		if amount.Cmp(maxPerTx) > 0 {
+			bc.logger.Warn("per-tx budget exceeded",
+				"rule_id", rule.ID,
+				"amount", amount.String(),
+				"max_per_tx", budget.MaxPerTx,
+			)
+			return false, nil
 		}
 	}
 

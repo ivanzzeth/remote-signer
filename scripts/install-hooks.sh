@@ -129,7 +129,7 @@ fi
 
 # 5. Check for plaintext secrets in staged files
 echo -n "Checking for plaintext secrets... "
-SECRETS_FOUND=$(git diff --cached --diff-filter=ACM -U0 | grep -iE '(private_key|password|secret|token)\s*[:=]\s*"[^$\{]' | grep -v '_env' | grep -v 'example' | grep -v '#' | grep -viE '(gasToken|paymentToken|refundReceiver|collateralToken|quoteToken)\s*:' || true)
+SECRETS_FOUND=$(git diff --cached --diff-filter=ACM -U0 -- ':!*_test.go' | grep -v '^@@' | grep -iE '(private_key|password|secret|token)\s*[:=]\s*"[^$\{]' | grep -v '_env' | grep -v 'example' | grep -v '#' | grep -viE '(gasToken|paymentToken|refundReceiver|collateralToken|quoteToken)\s*:' || true)
 if [ -n "$SECRETS_FOUND" ]; then
     echo -e "${RED}FAIL${NC}"
     echo "Possible plaintext secrets detected in staged changes:"

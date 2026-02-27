@@ -30,6 +30,10 @@ variables:
     type: string
     description: "Delegation mode: single (default) or per_item"
     required: false
+  - name: test_inner_to
+    type: address
+    description: "Single allowed inner 'to' address for test cases (first of allowed_safe_tx_to_addresses)"
+    required: false
 
 test_variables:
   chain_id: "1"
@@ -37,6 +41,7 @@ test_variables:
   allowed_safe_tx_to_addresses: "0xdAC17F958D2ee523a2206206994597C13D831ec7,0x4B20993Bc481177ec7E8f571ceCaE8A9e22C02db"
   delegate_to: ""
   delegate_mode: "single"
+  test_inner_to: "0xdAC17F958D2ee523a2206206994597C13D831ec7"
 
 rules:
   # Blocklist: block SafeTx with DELEGATECALL (operation !== 0) so rejection reason reaches the client.
@@ -83,15 +88,15 @@ rules:
       - name: "CALL operation should pass (not blocked)"
         input:
           sign_type: "typed_data"
-          chain_id: 1
+          chain_id: "${chain_id}"
           signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
           typed_data:
             primaryType: "SafeTx"
             domain:
-              chainId: "1"
-              verifyingContract: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+              chainId: "${chain_id}"
+              verifyingContract: "${allowed_safe_addresses}"
             message:
-              to: "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+              to: "${test_inner_to}"
               value: "0"
               data: "0x"
               operation: "0"
@@ -103,15 +108,15 @@ rules:
       - name: "DELEGATECALL operation should be blocked"
         input:
           sign_type: "typed_data"
-          chain_id: 1
+          chain_id: "${chain_id}"
           signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
           typed_data:
             primaryType: "SafeTx"
             domain:
-              chainId: "1"
-              verifyingContract: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+              chainId: "${chain_id}"
+              verifyingContract: "${allowed_safe_addresses}"
             message:
-              to: "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+              to: "${test_inner_to}"
               value: "0"
               data: "0x"
               operation: "1"
@@ -261,17 +266,17 @@ rules:
       - name: "SafeTx pass: verifyingContract and inner to in allowlists"
         input:
           sign_type: "typed_data"
-          chain_id: 1
+          chain_id: "${chain_id}"
           signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
           typed_data:
             primaryType: "SafeTx"
             domain:
-              chainId: "1"
-              verifyingContract: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+              chainId: "${chain_id}"
+              verifyingContract: "${allowed_safe_addresses}"
             message:
-              to: "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+              to: "${test_inner_to}"
               value: "0"
-              data: "0x095ea7b30000000000000000000000004b20993bc481177ec7e8f571cecae8a9e22c02dbffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+              data: "0x"
               operation: "0"
               safeTxGas: "0"
               baseGas: "0"
@@ -283,15 +288,15 @@ rules:
       - name: "SafeTx reject: wrong verifyingContract"
         input:
           sign_type: "typed_data"
-          chain_id: 1
+          chain_id: "${chain_id}"
           signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
           typed_data:
             primaryType: "SafeTx"
             domain:
-              chainId: "1"
+              chainId: "${chain_id}"
               verifyingContract: "0x000000000000000000000000000000000000dEaD"
             message:
-              to: "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+              to: "${test_inner_to}"
               value: "0"
               data: "0x"
               operation: "0"
@@ -304,13 +309,13 @@ rules:
       - name: "SafeTx reject: inner to not in allowed_safe_tx_to_addresses"
         input:
           sign_type: "typed_data"
-          chain_id: 1
+          chain_id: "${chain_id}"
           signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
           typed_data:
             primaryType: "SafeTx"
             domain:
-              chainId: "1"
-              verifyingContract: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+              chainId: "${chain_id}"
+              verifyingContract: "${allowed_safe_addresses}"
             message:
               to: "0x000000000000000000000000000000000000dEaD"
               value: "0"
@@ -325,15 +330,15 @@ rules:
       - name: "SafeTx reject: value non-zero"
         input:
           sign_type: "typed_data"
-          chain_id: 1
+          chain_id: "${chain_id}"
           signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
           typed_data:
             primaryType: "SafeTx"
             domain:
-              chainId: "1"
-              verifyingContract: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+              chainId: "${chain_id}"
+              verifyingContract: "${allowed_safe_addresses}"
             message:
-              to: "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+              to: "${test_inner_to}"
               value: "1"
               data: "0x"
               operation: "0"
@@ -346,18 +351,18 @@ rules:
       - name: "transaction pass: to allowed Safe, no data"
         input:
           sign_type: "transaction"
-          chain_id: 1
+          chain_id: "${chain_id}"
           signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
           transaction:
             from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
-            to: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+            to: "${allowed_safe_addresses}"
             value: "0x0"
             data: "0x"
         expect_pass: true
       - name: "transaction reject: to not allowed Safe"
         input:
           sign_type: "transaction"
-          chain_id: 1
+          chain_id: "${chain_id}"
           signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
           transaction:
             from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"

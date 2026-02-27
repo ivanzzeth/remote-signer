@@ -104,7 +104,7 @@ func (r *GormRuleRepository) List(ctx context.Context, filter RuleFilter) ([]*ty
 		query = query.Where("api_key_id = ? OR api_key_id IS NULL", *filter.APIKeyID)
 	}
 	if filter.SignerAddress != nil {
-		query = query.Where("signer_address = ? OR signer_address IS NULL", *filter.SignerAddress)
+		query = query.Where("LOWER(signer_address) = LOWER(?) OR signer_address IS NULL", *filter.SignerAddress)
 	}
 	if filter.Type != nil {
 		query = query.Where("type = ?", *filter.Type)
@@ -154,7 +154,7 @@ func (r *GormRuleRepository) Count(ctx context.Context, filter RuleFilter) (int,
 		query = query.Where("api_key_id = ? OR api_key_id IS NULL", *filter.APIKeyID)
 	}
 	if filter.SignerAddress != nil {
-		query = query.Where("signer_address = ? OR signer_address IS NULL", *filter.SignerAddress)
+		query = query.Where("LOWER(signer_address) = LOWER(?) OR signer_address IS NULL", *filter.SignerAddress)
 	}
 	if filter.Type != nil {
 		query = query.Where("type = ?", *filter.Type)

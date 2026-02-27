@@ -436,6 +436,22 @@ func TestEvaluate_WhitelistNoMatch(t *testing.T) {
 	assert.False(t, result.Blocked)
 }
 
+// TestEvaluate_WhitelistNoMatch_ViaEvaluate tests Evaluate() wrapper on no-match path
+func TestEvaluate_WhitelistNoMatch_ViaEvaluate(t *testing.T) {
+	repo := &mockRuleRepository{rules: []*types.Rule{}}
+	engine, _ := NewWhitelistRuleEngine(repo, slog.New(slog.NewTextHandler(os.Stderr, nil)))
+
+	req := &types.SignRequest{
+		ID:        "req-1",
+		ChainType: types.ChainTypeEVM,
+		SignType:  "transaction",
+	}
+	ruleID, reason, err := engine.Evaluate(context.Background(), req, nil)
+	assert.NoError(t, err, "no match should not return error")
+	assert.Nil(t, ruleID, "no match should return nil rule ID")
+	assert.Empty(t, reason, "no match should return empty reason")
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ruleScopeMatches
 // ─────────────────────────────────────────────────────────────────────────────

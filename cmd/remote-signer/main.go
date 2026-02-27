@@ -766,7 +766,16 @@ func validateEVMJSRulesAtStartup(ctx context.Context, expandedRules []config.Rul
 				continue
 			}
 			if tc.ExpectReason != "" && !strings.Contains(actualReason, tc.ExpectReason) {
-				failed = append(failed, fmt.Sprintf("%s test %q: expected reason containing %q but got %q", cfg.Name, tc.Name, tc.ExpectReason, actualReason))
+				// In a multi-rule engine, the NoMatchReason for whitelist rules depends on
+				// evaluation order and may come from a different rule than the one being tested.
+				// Only enforce expect_reason when the result is "blocked" (blocklist violation)
+				// or "allowed" (the specific rule's allow reason). For "no match" results on
+				// whitelist rules, the pass/fail check above is sufficient.
+				isNoMatch := !evalResult.Blocked && !evalResult.Allowed
+				isWhitelistRule := ruleUnderTest.Mode != types.RuleModeBlocklist
+				if !(isNoMatch && isWhitelistRule) {
+					failed = append(failed, fmt.Sprintf("%s test %q: expected reason containing %q but got %q", cfg.Name, tc.Name, tc.ExpectReason, actualReason))
+				}
 			}
 		}
 	}

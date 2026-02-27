@@ -34,12 +34,15 @@ func TestBudgetChecker_NilTemplateID(t *testing.T) {
 }
 
 func TestBudgetChecker_TemplateNotFound(t *testing.T) {
+	// SECURITY: template deleted but instance still active → fail-closed.
+	// Budget constraint cannot be verified without the template.
 	tr := &stubTemplateRepo{err: types.ErrNotFound}
 	bc := NewBudgetChecker(&stubBudgetRepo{}, tr, slog.Default())
 	rule := &types.Rule{TemplateID: ptrStr("missing")}
 	ok, err := bc.CheckAndDeductBudget(context.Background(), rule, &types.SignRequest{}, nil)
-	require.NoError(t, err)
-	assert.True(t, ok, "template not found = no budget constraint")
+	require.Error(t, err, "template not found must fail-closed")
+	assert.False(t, ok)
+	assert.Contains(t, err.Error(), "deleted but instance rule")
 }
 
 func TestBudgetChecker_TemplateRepoError(t *testing.T) {
@@ -90,14 +93,17 @@ func TestBudgetChecker_InvalidMeteringJSON(t *testing.T) {
 }
 
 func TestBudgetChecker_BudgetNotFound(t *testing.T) {
+	// SECURITY: no budget record for a rule with metering → fail-closed.
+	// Budget record should be created at rule initialization; missing = incomplete setup.
 	metering, _ := json.Marshal(types.BudgetMetering{Method: "count_only"})
 	tr := &stubTemplateRepo{tmpl: &types.RuleTemplate{ID: "t1", BudgetMetering: metering}}
 	br := &stubBudgetRepo{getErr: types.ErrNotFound}
 	bc := NewBudgetChecker(br, tr, slog.Default())
 	rule := &types.Rule{ID: "r1", TemplateID: ptrStr("t1")}
 	ok, err := bc.CheckAndDeductBudget(context.Background(), rule, &types.SignRequest{}, nil)
-	require.NoError(t, err)
-	assert.True(t, ok, "no budget record = no constraint")
+	require.Error(t, err, "no budget record must fail-closed")
+	assert.False(t, ok)
+	assert.Contains(t, err.Error(), "no budget record")
 }
 
 func TestBudgetChecker_BudgetRepoGetError(t *testing.T) {
