@@ -78,10 +78,10 @@ func TestRule_SignRequestMatchesWhitelistRule(t *testing.T) {
 
 // TestRule_DelegationSinglePasses verifies config-file delegation: evm_js rule returns valid+payload,
 // delegate_to in config points to target rule; engine delegates and target allows.
-// config.e2e.yaml defines "E2E Delegate Single" (script returns valid+payload) and "E2E Delegate Target" (always allows).
+// config.e2e.yaml defines "Delegate Single" (script returns valid+payload) and "Delegate Target" (always allows).
 func TestRule_DelegationSinglePasses(t *testing.T) {
 	if useExternalServer {
-		t.Skip("delegation e2e uses config.e2e.yaml rules (E2E Delegate Single / E2E Delegate Target)")
+		t.Skip("delegation e2e uses config.e2e.yaml rules (Delegate Single / Delegate Target)")
 	}
 
 	ctx := context.Background()
@@ -91,18 +91,18 @@ func TestRule_DelegationSinglePasses(t *testing.T) {
 	require.NoError(t, err)
 	var targetID, delegateSingleID string
 	for _, r := range rulesResp.Rules {
-		if r.Name == "E2E Delegate Target" {
+		if r.Name == "Delegate Target" {
 			targetID = r.ID
 		}
-		if r.Name == "E2E Delegate Single" {
+		if r.Name == "Delegate Single" {
 			delegateSingleID = r.ID
 		}
 	}
-	require.NotEmpty(t, targetID, "E2E Delegate Target rule must exist in config")
-	require.NotEmpty(t, delegateSingleID, "E2E Delegate Single rule must exist in config")
+	require.NotEmpty(t, targetID, "Delegate Target rule must exist in config")
+	require.NotEmpty(t, delegateSingleID, "Delegate Single rule must exist in config")
 
-	// Submit a transaction sign request: E2E Delegate Single matches, returns valid+payload, delegate_to in config;
-	// engine delegates to E2E Delegate Target which allows.
+	// Submit a transaction sign request: Delegate Single matches, returns valid+payload, delegate_to in config;
+	// engine delegates to Delegate Target which allows.
 	address := common.HexToAddress(signerAddress)
 	signer := adminClient.GetSigner(address, chainID)
 
@@ -117,7 +117,7 @@ func TestRule_DelegationSinglePasses(t *testing.T) {
 	})
 	chainIDBig := big.NewInt(1)
 	signedTx, err := signer.SignTransactionWithChainID(tx, chainIDBig)
-	require.NoError(t, err, "Delegation chain (E2E Delegate Single -> E2E Delegate Target) should allow")
+	require.NoError(t, err, "Delegation chain (Delegate Single -> Delegate Target) should allow")
 	require.NotNil(t, signedTx)
 
 	v, r, s := signedTx.RawSignatureValues()
@@ -204,7 +204,7 @@ func TestRule_SafeMultisendERC20Chain(t *testing.T) {
 }
 
 // TestRule_SafeMultisendMultiDelegate verifies Multisend with multiple delegation targets (ERC20, ERC721).
-// Batch has two items: ERC20 transfer and ERC721 transferFrom; each item is validated by the matching rule (e2e-erc20 or e2e-erc721).
+// Batch has two items: ERC20 transfer and ERC721 transferFrom; each item is validated by the matching rule (erc20 or erc721).
 func TestRule_SafeMultisendMultiDelegate(t *testing.T) {
 	if useExternalServer {
 		t.Skip("Safe=>Multisend=>(ERC20|ERC721) uses config.e2e.yaml instance rules")
@@ -292,13 +292,13 @@ func TestRule_SafeMultisendMultiDelegate(t *testing.T) {
 
 // TestRule_PolymarketSafeChain verifies the combined Polymarket JS + Safe JS template chain (same effect as polymarket.safe.template.yaml).
 // Submits a SafeTx (typed_data) on chain 137 with inner call USDC.e approve(CTF Exchange, max);
-// Safe rule (e2e-safe-polymarket) delegates to e2e-polymarket-inner which validates the inner transaction.
+// Safe rule (safe-polymarket) delegates to polymarket-inner which validates the inner transaction.
 func TestRule_PolymarketSafeChain(t *testing.T) {
 	if useExternalServer {
-		t.Skip("Polymarket Safe chain uses config.e2e.yaml instance rules (E2E Polymarket + E2E Safe Polymarket)")
+		t.Skip("Polymarket Safe chain uses config.e2e.yaml instance rules (Polymarket + Safe Polymarket)")
 	}
 
-	// Addresses from config.e2e.yaml E2E Polymarket / E2E Safe Polymarket instances (Polygon)
+	// Addresses from config.e2e.yaml Polymarket / Safe Polymarket instances (Polygon)
 	const polygonChainID = "137"
 	safeAddress := "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
 	usdcAddress := "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
@@ -349,7 +349,7 @@ func TestRule_PolymarketSafeChain(t *testing.T) {
 	address := common.HexToAddress(testSignerAddress)
 	signer := adminClient.GetSigner(address, polygonChainID)
 	sig, err := signer.SignTypedData(typedData)
-	require.NoError(t, err, "Polymarket Safe chain (SafeTx => e2e-polymarket-inner) should allow and return signature")
+	require.NoError(t, err, "Polymarket Safe chain (SafeTx => polymarket-inner) should allow and return signature")
 	require.Len(t, sig, 65)
 }
 

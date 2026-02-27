@@ -521,9 +521,10 @@ func (e *WhitelistRuleEngine) resolveDelegation(ctx context.Context, originalReq
 		for _, targetID := range targetIDs {
 			targetRule, err := e.repo.Get(ctx, targetID)
 			if err != nil || targetRule == nil {
-				e.logger.Debug("delegation target rule not found", "target", targetID, "error", err)
-				lastReason = "delegation target rule not found: " + string(targetID)
-				continue
+				return &EvaluationResult{
+					Allowed:       false,
+					NoMatchReason: "delegation target rule not found: " + string(targetID),
+				}, nil
 			}
 			path2 := make(map[types.RuleID]bool)
 			for k, v := range path {
@@ -596,8 +597,10 @@ func (e *WhitelistRuleEngine) resolveDelegation(ctx context.Context, originalReq
 			for _, targetID := range targetIDs {
 				targetRule, err := e.repo.Get(ctx, targetID)
 				if err != nil || targetRule == nil {
-					itemReason = "delegation target rule not found: " + string(targetID)
-					continue
+					return &EvaluationResult{
+						Allowed:       false,
+						NoMatchReason: "delegation target rule not found: " + string(targetID),
+					}, nil
 				}
 				path2 := make(map[types.RuleID]bool)
 				for k, v := range path {

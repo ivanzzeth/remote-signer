@@ -2145,3 +2145,63 @@ func TestExpandEnvWithDefaults_EmptyDefault(t *testing.T) {
 	result := ExpandEnvWithDefaults("${TEST_EMPTY_DEF:-}")
 	assert.Equal(t, "", result)
 }
+
+// ===========================================================================
+// ValidateDelegationTargets
+// ===========================================================================
+
+func TestValidateDelegationTargets_Valid(t *testing.T) {
+	rules := []RuleConfig{
+		{Id: "parent-rule", Name: "Parent", Type: "evm_js", Config: map[string]interface{}{"delegate_to": "child-rule"}},
+		{Id: "child-rule", Name: "Child", Type: "evm_js"},
+	}
+	err := ValidateDelegationTargets(rules)
+	assert.NoError(t, err)
+}
+
+func TestValidateDelegationTargets_MissingTarget(t *testing.T) {
+	rules := []RuleConfig{
+		{Id: "parent-rule", Name: "Parent", Type: "evm_js", Config: map[string]interface{}{"delegate_to": "nonexistent"}},
+	}
+	err := ValidateDelegationTargets(rules)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "nonexistent")
+	assert.Contains(t, err.Error(), "non-existent target")
+}
+
+func TestValidateDelegationTargets_NoDelegateTo(t *testing.T) {
+	rules := []RuleConfig{
+		{Id: "rule-a", Name: "A", Type: "evm_address_list"},
+		{Id: "rule-b", Name: "B", Type: "evm_js"},
+	}
+	err := ValidateDelegationTargets(rules)
+	assert.NoError(t, err)
+}
+
+func TestValidateDelegationTargets_UnresolvedVariable(t *testing.T) {
+	rules := []RuleConfig{
+		{Id: "parent-rule", Name: "Parent", Type: "evm_js", Config: map[string]interface{}{"delegate_to": "${some_var}"}},
+	}
+	err := ValidateDelegationTargets(rules)
+	assert.NoError(t, err, "unresolved variables in delegate_to should be skipped, not treated as missing targets")
+}
+
+func TestValidateDelegationTargets_MultipleTargets(t *testing.T) {
+	rules := []RuleConfig{
+		{Id: "parent", Name: "Parent", Type: "evm_js", Config: map[string]interface{}{"delegate_to": "child-a,child-b"}},
+		{Id: "child-a", Name: "Child A", Type: "evm_js"},
+		{Id: "child-b", Name: "Child B", Type: "evm_js"},
+	}
+	err := ValidateDelegationTargets(rules)
+	assert.NoError(t, err)
+}
+
+func TestValidateDelegationTargets_MultipleTargets_OneMissing(t *testing.T) {
+	rules := []RuleConfig{
+		{Id: "parent", Name: "Parent", Type: "evm_js", Config: map[string]interface{}{"delegate_to": "child-a,missing-child"}},
+		{Id: "child-a", Name: "Child A", Type: "evm_js"},
+	}
+	err := ValidateDelegationTargets(rules)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "missing-child")
+}

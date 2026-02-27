@@ -211,6 +211,41 @@ func EffectiveRuleID(idx int, ruleCfg RuleConfig) types.RuleID {
 	return types.RuleID("cfg_" + hex.EncodeToString(hash[:8]))
 }
 
+// ValidateDelegationTargets checks that all delegate_to references in rules
+// resolve to existing rule IDs. Returns error if any target is missing.
+func ValidateDelegationTargets(rules []RuleConfig) error {
+	// Build set of all known rule IDs
+	knownIDs := make(map[types.RuleID]bool, len(rules))
+	for idx, r := range rules {
+		knownIDs[EffectiveRuleID(idx, r)] = true
+	}
+	// Check each rule's delegate_to
+	var errs []string
+	for idx, r := range rules {
+		delegateTo, _ := r.Config["delegate_to"].(string)
+		if delegateTo == "" {
+			continue
+		}
+		ruleID := EffectiveRuleID(idx, r)
+		for _, part := range strings.Split(delegateTo, ",") {
+			targetID := types.RuleID(strings.TrimSpace(part))
+			if targetID == "" {
+				continue
+			}
+			if strings.Contains(string(targetID), "${") {
+				continue // unresolved variable — skip
+			}
+			if !knownIDs[targetID] {
+				errs = append(errs, fmt.Sprintf("rule %q (%s) delegate_to references non-existent target %q", r.Name, ruleID, targetID))
+			}
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("delegation target validation failed:\n  %s", strings.Join(errs, "\n  "))
+	}
+	return nil
+}
+
 // effectiveRuleID returns the rule ID to use: custom RuleConfig.Id if non-empty, else generated.
 func (i *RuleInitializer) effectiveRuleID(idx int, ruleCfg RuleConfig) types.RuleID {
 	return EffectiveRuleID(idx, ruleCfg)
