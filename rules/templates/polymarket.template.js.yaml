@@ -343,7 +343,7 @@ rules:
         expect_pass: false
         expect_reason: "target must be Safe Factory"
 
-  - id: "e2e-polymarket-inner"
+  - id: "polymarket-inner"
     name: "Polymarket inner transaction"
     type: "evm_js"
     mode: "whitelist"

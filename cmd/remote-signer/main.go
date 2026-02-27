@@ -166,6 +166,11 @@ func run() error {
 		return fmt.Errorf("failed to expand file rules for validation: %w", err)
 	}
 
+	// Validate that all delegate_to references point to existing rule IDs.
+	if err := config.ValidateDelegationTargets(expandedRulesWithFiles); err != nil {
+		return fmt.Errorf("delegation target validation failed: %w", err)
+	}
+
 	// Initialize template service
 	templateService, err := service.NewTemplateService(templateRepo, ruleRepo, budgetRepo, log)
 	if err != nil {

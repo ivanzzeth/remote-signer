@@ -52,8 +52,8 @@ func TestTemplate_AdminCanCreateTemplate(t *testing.T) {
 
 // TestTemplate_ConfigLoadedTemplatesAndInstanceRules verifies that the server loads
 // templates from config and expands instance rules at startup (same flow as main.go).
-// config.e2e.yaml defines one file template (E2E Minimal Template) and one instance
-// rule; the expanded rule "E2E From Template Instance" must appear in the rules list.
+// config.e2e.yaml defines one file template (Minimal Template) and one instance
+// rule; the expanded rule "From Template Instance" must appear in the rules list.
 func TestTemplate_ConfigLoadedTemplatesAndInstanceRules(t *testing.T) {
 	ctx := context.Background()
 
@@ -63,14 +63,14 @@ func TestTemplate_ConfigLoadedTemplatesAndInstanceRules(t *testing.T) {
 
 	var found bool
 	for _, r := range resp.Rules {
-		if r.Name == "E2E From Template Instance" {
+		if r.Name == "From Template Instance" {
 			found = true
 			assert.Equal(t, "evm_address_list", string(r.Type))
 			assert.True(t, r.Enabled)
 			break
 		}
 	}
-	assert.True(t, found, "rule 'E2E From Template Instance' (from config template instance) should be loaded at startup")
+	assert.True(t, found, "rule 'From Template Instance' (from config template instance) should be loaded at startup")
 }
 
 func TestTemplate_AdminCanListTemplates(t *testing.T) {

@@ -878,6 +878,111 @@ func TestDelegation_UnknownMode(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Delegation: missing target fails immediately (no fallback)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestDelegation_MissingTargetFailsImmediately verifies that when a delegation target
+// rule is not found, the engine returns Allowed: false immediately with no fallback
+// to the next target. This tests that "missing-id,real-id" fails on missing-id without
+// ever reaching real-id.
+func TestDelegation_MissingTargetFailsImmediately(t *testing.T) {
+	realTargetRule := &types.Rule{
+		ID:      "real-target",
+		Name:    "real target",
+		Type:    "mock_target",
+		Mode:    types.RuleModeWhitelist,
+		Enabled: true,
+	}
+	parentRule := &types.Rule{
+		ID:      "parent-1",
+		Name:    "parent",
+		Type:    "mock_parent",
+		Mode:    types.RuleModeWhitelist,
+		Enabled: true,
+	}
+
+	repo := &mockRuleRepository{rules: []*types.Rule{parentRule, realTargetRule}}
+
+	engine, _ := NewWhitelistRuleEngine(
+		repo,
+		slog.New(slog.NewTextHandler(os.Stderr, nil)),
+		WithDelegationPayloadConverter(func(ctx context.Context, payload interface{}, mode string) (*types.SignRequest, *types.ParsedPayload, error) {
+			return &types.SignRequest{
+				ChainType:     types.ChainTypeEVM,
+				ChainID:       "1",
+				SignerAddress: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+				SignType:      "transaction",
+			}, &types.ParsedPayload{}, nil
+		}),
+	)
+
+	// resolveDelegation directly: "missing-id" first, then "real-target"
+	result, err := engine.resolveDelegation(context.Background(), &types.SignRequest{
+		ChainType:     types.ChainTypeEVM,
+		ChainID:       "1",
+		SignerAddress: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+		SignType:      "transaction",
+	}, parentRule, &DelegationRequest{
+		TargetRuleIDs: []types.RuleID{"missing-id", "real-target"},
+		Mode:          "single",
+		Payload:       map[string]interface{}{"test": true},
+	})
+	require.NoError(t, err)
+	assert.False(t, result.Allowed, "should be denied when delegation target is missing")
+	assert.Contains(t, result.NoMatchReason, "delegation target rule not found")
+	assert.Contains(t, result.NoMatchReason, "missing-id")
+}
+
+// TestDelegation_MissingTargetFailsImmediately_PerItem verifies the same no-fallback
+// behavior in per_item delegation mode.
+func TestDelegation_MissingTargetFailsImmediately_PerItem(t *testing.T) {
+	realTargetRule := &types.Rule{
+		ID:      "real-target",
+		Name:    "real target",
+		Type:    "mock_target",
+		Mode:    types.RuleModeWhitelist,
+		Enabled: true,
+	}
+	parentRule := &types.Rule{
+		ID:      "parent-1",
+		Name:    "parent",
+		Type:    "mock_parent",
+		Mode:    types.RuleModeWhitelist,
+		Enabled: true,
+	}
+
+	repo := &mockRuleRepository{rules: []*types.Rule{parentRule, realTargetRule}}
+
+	engine, _ := NewWhitelistRuleEngine(
+		repo,
+		slog.New(slog.NewTextHandler(os.Stderr, nil)),
+		WithDelegationPayloadConverter(func(ctx context.Context, payload interface{}, mode string) (*types.SignRequest, *types.ParsedPayload, error) {
+			return &types.SignRequest{
+				ChainType:     types.ChainTypeEVM,
+				ChainID:       "1",
+				SignerAddress: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+				SignType:      "transaction",
+			}, &types.ParsedPayload{}, nil
+		}),
+	)
+
+	result, err := engine.resolveDelegation(context.Background(), &types.SignRequest{
+		ChainType:     types.ChainTypeEVM,
+		ChainID:       "1",
+		SignerAddress: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+		SignType:      "transaction",
+	}, parentRule, &DelegationRequest{
+		TargetRuleIDs: []types.RuleID{"missing-id", "real-target"},
+		Mode:          "per_item",
+		Payload:       map[string]interface{}{"items": []interface{}{map[string]interface{}{"val": 1}}},
+		ItemsKey:      "items",
+	})
+	require.NoError(t, err)
+	assert.False(t, result.Allowed, "should be denied when delegation target is missing in per_item mode")
+	assert.Contains(t, result.NoMatchReason, "delegation target rule not found")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 

@@ -340,6 +340,9 @@ func validateConfig(ctx context.Context, configPath string, validator *evm.Solid
 	if err != nil {
 		return nil, 0, 0, fmt.Errorf("expand file rules: %w", err)
 	}
+	if err := config.ValidateDelegationTargets(rules); err != nil {
+		return nil, 0, 0, fmt.Errorf("delegation target validation: %w", err)
+	}
 
 	localRules := make([]RuleConfig, 0, len(rules))
 	for _, r := range rules {
@@ -835,7 +838,9 @@ func buildEngineForRuleTest(ctx context.Context, fullRepo *storage.MemoryRuleRep
 		}
 	}
 	// Recursively add delegation target rules so delegate_to resolution works.
-	addDelegationTargets(ctx, ruleUnderTest, allRulesMap, minimalRepo, make(map[types.RuleID]bool), log)
+	if err := addDelegationTargets(ctx, ruleUnderTest, allRulesMap, minimalRepo, make(map[types.RuleID]bool), log); err != nil {
+		return nil, err
+	}
 	eng, err := rule.NewWhitelistRuleEngine(minimalRepo, log, rule.WithDelegationPayloadConverter(evm.DelegatePayloadToSignRequest))
 	if err != nil {
 		return nil, err
@@ -862,16 +867,16 @@ func buildEngineForRuleTest(ctx context.Context, fullRepo *storage.MemoryRuleRep
 // addDelegationTargets recursively adds delegation target rules to the minimal repo
 // with Enabled=false so they are reachable via Get() (for delegation resolution)
 // but NOT included in top-level List(EnabledOnly=true) evaluation.
-func addDelegationTargets(ctx context.Context, r *types.Rule, allRulesMap map[types.RuleID]*types.Rule, minimalRepo *storage.MemoryRuleRepository, visited map[types.RuleID]bool, log *slog.Logger) {
+func addDelegationTargets(ctx context.Context, r *types.Rule, allRulesMap map[types.RuleID]*types.Rule, minimalRepo *storage.MemoryRuleRepository, visited map[types.RuleID]bool, log *slog.Logger) error {
 	if visited[r.ID] {
-		return
+		return nil
 	}
 	visited[r.ID] = true
 	var cfg struct {
 		DelegateTo string `json:"delegate_to"`
 	}
 	if err := json.Unmarshal(r.Config, &cfg); err != nil || cfg.DelegateTo == "" {
-		return
+		return nil
 	}
 	for _, part := range strings.Split(cfg.DelegateTo, ",") {
 		targetID := types.RuleID(strings.TrimSpace(part))
@@ -880,16 +885,18 @@ func addDelegationTargets(ctx context.Context, r *types.Rule, allRulesMap map[ty
 		}
 		target, ok := allRulesMap[targetID]
 		if !ok {
-			log.Debug("delegation target not in repo", "target", targetID, "from", r.ID)
-			continue
+			return fmt.Errorf("rule %q delegate_to references non-existent target %q", r.ID, targetID)
 		}
 		clone := *target
 		clone.Enabled = false
 		if err := minimalRepo.Create(ctx, &clone); err != nil {
 			log.Debug("delegation target already in minimal repo", "target", targetID)
 		}
-		addDelegationTargets(ctx, target, allRulesMap, minimalRepo, visited, log)
+		if err := addDelegationTargets(ctx, target, allRulesMap, minimalRepo, visited, log); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func configToRule(idx int, cfg RuleConfig) (*types.Rule, error) {

@@ -68,32 +68,32 @@ api_keys: []
 # Templates (file-type): loaded at startup, used to expand instance rules
 # Used by TestTemplate_ConfigLoadedTemplatesAndInstanceRules and delegation/evm_js e2e
 templates:
-  - name: "E2E Minimal Template"
+  - name: "Minimal Template"
     type: "file"
     enabled: true
     config:
       path: "e2e/fixtures/minimal_template.yaml"
-  - name: "E2E Safe Template"
+  - name: "Safe Template"
     type: "file"
     enabled: true
     config:
       path: "rules/templates/safe.template.js.yaml"
-  - name: "E2E Multisend Template"
+  - name: "Multisend Template"
     type: "file"
     enabled: true
     config:
       path: "rules/templates/multisend.template.js.yaml"
-  - name: "E2E ERC20 Template"
+  - name: "ERC20 Template"
     type: "file"
     enabled: true
     config:
       path: "rules/templates/erc20.template.js.yaml"
-  - name: "E2E ERC721 Template"
+  - name: "ERC721 Template"
     type: "file"
     enabled: true
     config:
       path: "rules/templates/erc721.template.js.yaml"
-  - name: "E2E Polymarket Template"
+  - name: "Polymarket Template"
     type: "file"
     enabled: true
     config:
@@ -173,32 +173,32 @@ rules:
         - "raw_message"  # Raw message signing
         - "eip191"       # EIP-191 signing
 
-  # Example 6: Instance rule — expanded from E2E Minimal Template at startup
+  # Example 6: Instance rule — expanded from Minimal Template at startup
   # Used by TestTemplate_ConfigLoadedTemplatesAndInstanceRules
-  - name: "Instance of E2E Minimal"
+  - name: "Instance of Minimal"
     type: "instance"
     enabled: true
     config:
-      template: "E2E Minimal Template"
+      template: "Minimal Template"
       variables:
         allowed_address: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
 
   # evm_js template instances (Safe, Multisend, ERC20, ERC721); delegation: Safe => Multisend => (ERC20 | ERC721) per item
   # id = stable rule ID (optional); use in delegate_to for maintainability. List: validate-rules -config config.e2e.yaml -list-rule-ids
-  - name: "E2E Safe instance"
+  - name: "Safe instance"
     type: "instance"
     chain_type: "evm"
     chain_id: "1"
     enabled: true
     config:
-      template: "E2E Safe Template"
-      id: "e2e-safe"
+      template: "Safe Template"
+      id: "safe"
       variables:
         chain_id: "1"
         allowed_safe_addresses: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
         # Include template test addresses so validate-rules -config positive test cases pass
         allowed_safe_tx_to_addresses: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4,0xA238CBeb142c10Ef7Ad8442C6D1f9E89e07e7761,0xdAC17F958D2ee523a2206206994597C13D831ec7,0x4B20993Bc481177ec7E8f571ceCaE8A9e22C02db"
-        delegate_to: "e2e-multisend"
+        delegate_to: "multisend"
         delegate_mode: "single"
         test_inner_to: "0xdAC17F958D2ee523a2206206994597C13D831ec7"
       # Instance test cases for full-engine validation (combined rules).
@@ -248,18 +248,18 @@ rules:
                   nonce: "0"
             expect_pass: false
 
-  - name: "E2E Multisend instance"
+  - name: "Multisend instance"
     type: "instance"
     chain_type: "evm"
     chain_id: "1"
     enabled: true
     config:
-      template: "E2E Multisend Template"
-      id: "e2e-multisend"
+      template: "Multisend Template"
+      id: "multisend"
       variables:
         chain_id: "1"
         multisend_contract_address: "0xA238CBeb142c10Ef7Ad8442C6D1f9E89e07e7761"
-        delegate_to: "e2e-erc20,e2e-erc721"
+        delegate_to: "erc20,erc721"
         delegate_mode: "per_item"
       test_cases_overrides:
         "Multisend allowlist and per_item delegation":
@@ -286,14 +286,14 @@ rules:
                 data: "0x"
             expect_pass: false
 
-  - name: "E2E ERC20 instance"
+  - name: "ERC20 instance"
     type: "instance"
     chain_type: "evm"
     chain_id: "1"
     enabled: true
     config:
-      template: "E2E ERC20 Template"
-      id: "e2e-erc20"
+      template: "ERC20 Template"
+      id: "erc20"
       variables:
         chain_id: "1"
         token_address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
@@ -325,14 +325,14 @@ rules:
                 data: "0xa9059cbb0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc40000000000000000000000000000000000000000000000000000000000000000"
             expect_pass: false
 
-  - name: "E2E ERC721 instance"
+  - name: "ERC721 instance"
     type: "instance"
     chain_type: "evm"
     chain_id: "1"
     enabled: true
     config:
-      template: "E2E ERC721 Template"
-      id: "e2e-erc721"
+      template: "ERC721 Template"
+      id: "erc721"
       variables:
         chain_id: "1"
         token_address: "0xBC4ca0EdA7647A8aB7C2061c2E118A18a936f13D"
@@ -363,15 +363,15 @@ rules:
             expect_pass: false
 
   # Polymarket JS + Safe JS combined: Polymarket instance (ClobAuth, Order, CreateProxy, Safe Wallet Creation, inner rule)
-  # must be listed before E2E Safe Polymarket so inner rule id exists for delegate_to.
-  - name: "E2E Polymarket instance"
+  # must be listed before Safe Polymarket so inner rule id exists for delegate_to.
+  - name: "Polymarket instance"
     type: "instance"
     chain_type: "evm"
     chain_id: "137"
     enabled: true
     config:
-      template: "E2E Polymarket Template"
-      id: "e2e-polymarket"
+      template: "Polymarket Template"
+      id: "polymarket"
       variables:
         chain_id: "137"
         ctf_exchange_address: "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E"
@@ -558,20 +558,20 @@ rules:
                 data: "0x095ea7b3000000000000000000000000DEADDEADDEADDEADDEADDEADDEADDEADDEADDEADffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
             expect_pass: false
 
-  # Safe template instance for Polymarket: delegates nested calls to e2e-polymarket-transactions.
-  - name: "E2E Safe Polymarket instance"
+  # Safe template instance for Polymarket: delegates nested calls to polymarket-inner.
+  - name: "Safe Polymarket instance"
     type: "instance"
     chain_type: "evm"
     chain_id: "137"
     enabled: true
     config:
-      template: "E2E Safe Template"
-      id: "e2e-safe-polymarket"
+      template: "Safe Template"
+      id: "safe-polymarket"
       variables:
         chain_id: "137"
         allowed_safe_addresses: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
         allowed_safe_tx_to_addresses: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174,0x4D97DCd97eC945f40cF65F87097ACe5EA0476045,0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296,0xC5d563A36AE78145C45a50134d48A1215220f80a"
-        delegate_to: "e2e-polymarket-inner"
+        delegate_to: "polymarket-inner"
         delegate_mode: "single"
         test_inner_to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
       # Instance overrides with real Polygon mainnet transaction data from polymarket.safe.template.yaml.
@@ -716,8 +716,8 @@ rules:
   # Delegation: evm_js delegate_to target; TestRule_DelegationSinglePasses.
   # Scoped to first signer only so second signer is not allowed by this rule (signer_restriction negative e2e).
   # test_cases required for validate-rules and startup validation (at least 1 positive + 1 negative).
-  - id: "e2e-delegate-target"
-    name: "E2E Delegate Target"
+  - id: "delegate-target"
+    name: "Delegate Target"
     type: "evm_js"
     mode: "whitelist"
     chain_type: "evm"
@@ -731,7 +731,7 @@ rules:
         function validate(i) {
           if (i.sign_type === 'personal_sign') return { valid: true };
           if (i.sign_type === 'transaction' && i.transaction && i.transaction.to === '0x5B38Da6a701c568545dCfcB03FcB875f56beddC4' && (i.transaction.data || '0x') === '0x') return { valid: true };
-          return { valid: false, reason: 'e2e delegate target only allows personal_sign or delegated tx to treasury' };
+          return { valid: false, reason: 'delegate target only allows personal_sign or delegated tx to treasury' };
         }
     test_cases:
       - name: "allow when in scope (positive)"
@@ -753,8 +753,8 @@ rules:
 
   # Scoped to first signer so second signer is not allowed (address whitelist + signer restriction e2e).
   # test_cases required for validate-rules and startup validation (at least 1 positive + 1 negative).
-  - id: "e2e-delegate-single"
-    name: "E2E Delegate Single"
+  - id: "delegate-single"
+    name: "Delegate Single"
     type: "evm_js"
     mode: "whitelist"
     chain_type: "evm"
@@ -768,8 +768,8 @@ rules:
           if (i.sign_type !== 'transaction' || !i.transaction) return { valid: false, reason: 'transaction only' };
           var tx = i.transaction;
           var to = (tx.to || '').toLowerCase();
-          if (to !== '0x5b38da6a701c568545dcfcb03fcb875f56beddc4') return { valid: false, reason: 'e2e delegate single only allows tx to treasury' };
-          if ((tx.data || '0x').toLowerCase() !== '0x') return { valid: false, reason: 'e2e delegate single only allows empty data' };
+          if (to !== '0x5b38da6a701c568545dcfcb03fcb875f56beddc4') return { valid: false, reason: 'delegate single only allows tx to treasury' };
+          if ((tx.data || '0x').toLowerCase() !== '0x') return { valid: false, reason: 'delegate single only allows empty data' };
           return {
             valid: true,
             payload: {
@@ -780,7 +780,7 @@ rules:
             }
           };
         }
-      delegate_to: "e2e-delegate-target"
+      delegate_to: "delegate-target"
       delegate_mode: "single"
     test_cases:
       - name: "delegate single allows transaction and delegates (positive)"
