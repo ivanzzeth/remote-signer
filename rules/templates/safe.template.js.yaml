@@ -227,10 +227,12 @@ rules:
           var opHex = raw.slice(262, 264);
           var operationCALL = opHex === '00';
           var dataOffset = parseInt(raw.slice(136, 200), 16);
-          if (dataOffset * 2 + 64 > raw.length) return { err: 'invalid data offset', valueZero: valueZero, operationCALL: operationCALL };
-          var lenHex = raw.slice(dataOffset * 2, dataOffset * 2 + 64);
+          // +8 accounts for the 4-byte function selector in hex (raw includes selector)
+          var base = dataOffset * 2 + 8;
+          if (base + 64 > raw.length) return { err: 'invalid data offset', valueZero: valueZero, operationCALL: operationCALL };
+          var lenHex = raw.slice(base, base + 64);
           var innerLen = parseInt(lenHex, 16);
-          var innerStart = dataOffset * 2 + 64;
+          var innerStart = base + 64;
           if (innerStart + innerLen * 2 > raw.length) return { err: 'invalid inner data length', valueZero: valueZero, operationCALL: operationCALL };
           var innerHex = '0x' + raw.slice(innerStart, innerStart + innerLen * 2);
           var toHex = '0x' + raw.slice(8 + 24, 8 + 64);
