@@ -48,8 +48,8 @@ const (
 	testSigner2PrivateKey = "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
 	testSigner2Address    = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
 
-	// Default API port for e2e tests
-	defaultAPIPort = 8548
+	// Default API port for e2e tests (use 18548 to avoid conflicts with production on 8548)
+	defaultAPIPort = 18548
 
 	// Treasury address from example config (whitelisted in "Allow transfers to treasury" rule)
 	treasuryAddress = "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
