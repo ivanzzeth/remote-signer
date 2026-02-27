@@ -220,14 +220,17 @@ func ExtractAmount(metering types.BudgetMetering, req *types.SignRequest, parsed
 	case "typed_data_field":
 		return extractTypedDataField(metering, parsed)
 	default:
-		return big.NewInt(0), nil
+		// SECURITY: Unknown metering method should return an error, not zero.
+		// Returning zero would effectively bypass budget enforcement.
+		return nil, fmt.Errorf("unknown metering method: %s", metering.Method)
 	}
 }
 
-// extractTxValue extracts the transaction value from parsed payload
+// extractTxValue extracts the transaction value from parsed payload.
+// SECURITY: Returns an error when value is missing to prevent zero-cost budget bypass.
 func extractTxValue(parsed *types.ParsedPayload) (*big.Int, error) {
 	if parsed == nil || parsed.Value == nil {
-		return big.NewInt(0), nil
+		return nil, fmt.Errorf("tx_value metering requires a transaction value but parsed payload is nil or has no value")
 	}
 	n := new(big.Int)
 	if _, ok := n.SetString(*parsed.Value, 10); !ok {
@@ -241,15 +244,16 @@ func extractTxValue(parsed *types.ParsedPayload) (*big.Int, error) {
 
 // extractCalldataParam extracts a parameter from calldata using ABI decoding.
 // Uses RawData from ParsedPayload which contains the raw transaction data.
+// SECURITY: Returns an error when data is missing to prevent zero-cost budget bypass.
 func extractCalldataParam(metering types.BudgetMetering, parsed *types.ParsedPayload) (*big.Int, error) {
 	if parsed == nil || len(parsed.RawData) == 0 {
-		return big.NewInt(0), nil
+		return nil, fmt.Errorf("calldata_param metering requires raw transaction data but parsed payload is nil or has no data")
 	}
 
 	// Calldata format: 4-byte selector + 32-byte parameters
 	data := parsed.RawData
 	if len(data) < 4 {
-		return big.NewInt(0), nil
+		return nil, fmt.Errorf("calldata_param metering requires at least 4 bytes of calldata, got %d", len(data))
 	}
 
 	params := data[4:]
@@ -269,14 +273,15 @@ func extractCalldataParam(metering types.BudgetMetering, parsed *types.ParsedPay
 
 // extractTypedDataField extracts a field from EIP-712 typed data message.
 // Uses RawData which may contain the typed data JSON, then navigates by field path.
+// SECURITY: Returns an error when data is missing to prevent zero-cost budget bypass.
 func extractTypedDataField(metering types.BudgetMetering, parsed *types.ParsedPayload) (*big.Int, error) {
 	if parsed == nil || len(parsed.RawData) == 0 {
-		return big.NewInt(0), nil
+		return nil, fmt.Errorf("typed_data_field metering requires raw data but parsed payload is nil or has no data")
 	}
 
 	fieldPath := metering.FieldPath
 	if fieldPath == "" {
-		return big.NewInt(0), nil
+		return nil, fmt.Errorf("typed_data_field metering requires field_path but it is empty")
 	}
 
 	// Try to parse RawData as JSON (typed data payload)
@@ -319,7 +324,15 @@ func valueToBigInt(v interface{}) (*big.Int, error) {
 		}
 		return n, nil
 	case float64:
-		return big.NewInt(int64(val)), nil
+		// SECURITY: Use big.Float to avoid precision loss for large values.
+		// big.NewInt(int64(val)) loses precision for values > 2^53.
+		bf := new(big.Float).SetFloat64(val)
+		n, accuracy := bf.Int(nil)
+		if accuracy != big.Exact {
+			// Not an exact integer — could indicate precision issues
+			return nil, fmt.Errorf("float64 value %v is not an exact integer (precision loss risk)", val)
+		}
+		return n, nil
 	case int64:
 		return big.NewInt(val), nil
 	case json.Number:

@@ -92,6 +92,12 @@ type BatchValidationResult struct {
 	Valid   bool
 }
 
+// Evaluator returns the underlying SolidityRuleEvaluator, or nil if not set.
+// Used by validate-rules to register the evaluator with the rule engine.
+func (v *SolidityRuleValidator) Evaluator() *SolidityRuleEvaluator {
+	return v.evaluator
+}
+
 // NewSolidityRuleValidator creates a new validator
 func NewSolidityRuleValidator(evaluator *SolidityRuleEvaluator, logger *slog.Logger) (*SolidityRuleValidator, error) {
 	if evaluator == nil {

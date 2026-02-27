@@ -1,0 +1,878 @@
+# Opinion Protocol Rules
+# This file contains signing rules for Opinion.trade protocol
+#
+# Protocol: Opinion.trade (Prediction Market on BSC)
+# Chain: BNB Smart Chain (56)
+#
+# Overview:
+# - EIP-191 Personal Sign: Login authentication
+# - EIP-712 Order: CTF Exchange order signing
+# - EIP-712 SafeTx: Gnosis Safe transaction signing
+# - Direct Transactions: Safe wallet creation and operations
+#
+# ===========================================================================
+# CONTRACT ADDRESSES (BSC - Chain ID: 56)
+# ===========================================================================
+#
+# Tokens:
+#   USDT:                    0x55d398326f99059fF775485246999027B3197955
+#
+# Protocol Contracts:
+#   CTF Exchange:            0x5F45344126D6488025B0b84A3A8189F2487a7246
+#   ConditionalTokens (CTF): 0xAD1a38cEc043e70E83a3eC30443dB285ED10D774
+#
+# Safe Contracts:
+#   Safe Proxy Factory:      0xa6B71E26C5e0845f74c812102Ca7114b6a896AB2
+#   Safe Singleton:          0xfb1bffC9d739B8D520DaF37dF666da4C687191EA
+#
+# External Wallets:
+#   Opinion API Wallet:      0x0932a1e172ba891Df1F43EfaD738c3A8dbD9F60e
+#   Bitget Wallet:           <REPLACE_WITH_BITGET_ADDRESS>
+#
+# EIP-712 Domains:
+#   CTF Exchange Domain:     "OPINION CTF Exchange" (version: "1")
+#
+# ===========================================================================
+
+rules:
+  # ===========================================================================
+  # EIP-191 PERSONAL SIGN RULES
+  # ===========================================================================
+
+  # Login signature for opinion.trade - validates message format with regex
+  # Expected message format:
+  # ```
+  # app.opinion.trade wants you to sign in with your Ethereum account:
+  # 0x88eD75e9eCE373997221E3c0229e74007C1AD718
+  #
+  # Welcome to opinion.trade! By proceeding, you agree to our Privacy Policy and Terms of Use.
+  #
+  # URI: https://app.opinion.trade
+  # Version: 1
+  # Chain ID: 56
+  # Nonce: 4821202891733693881
+  # Issued At: 2026-01-23T08:46:20.000Z
+  # ```
+  - name: "Opinion Login Signature"
+    type: "message_pattern"
+    mode: "whitelist"
+    enabled: true
+    description: "Allow EIP-191 login signatures for opinion.trade with strict format validation"
+    config:
+      # Regex pattern to validate the opinion.trade login message format
+      # This pattern validates:
+      # 1. Domain: app.opinion.trade
+      # 2. Ethereum address format (0x followed by 40 hex chars)
+      # 3. Welcome message
+      # 4. URI: https://app.opinion.trade
+      # 5. Version: 1
+      # 6. Chain ID: 56 (BSC)
+      # 7. Nonce: numeric value
+      # 8. Issued At: ISO 8601 timestamp
+      pattern: |-
+        ^app\.opinion\.trade wants you to sign in with your Ethereum account:\n0x[a-fA-F0-9]{40}\n\nWelcome to opinion\.trade! By proceeding, you agree to our Privacy Policy and Terms of Use\.\n\nURI: https://app\.opinion\.trade\nVersion: 1\nChain ID: 56\nNonce: \d+\nIssued At: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$
+      sign_types:
+        - "personal"
+        - "eip191"
+      description: "Validates opinion.trade SIWE (Sign-In With Ethereum) message format"
+      test_cases:
+        # ---------------------------------------------------------------
+        # Real request test case: Opinion.trade SIWE PersonalSign
+        # Source: Real SIWE request from opinion.trade API
+        #   Signer: 0x88eD75e9eCE373997221E3c0229e74007C1AD718
+        #   Chain: BSC (Chain ID: 56)
+        #   Nonce: 4821202891733693881
+        #   Timestamp: 2026-01-23T08:46:20.000Z
+        # Note: PersonalSign is off-chain (no txHash) — this is a signing
+        #   request, not an on-chain transaction.
+        # ---------------------------------------------------------------
+        - name: "should match valid SIWE login message (real request, signer=0x88eD75e9, nonce=4821202891733693881)"
+          input:
+            raw_message: "app.opinion.trade wants you to sign in with your Ethereum account:\n0x88eD75e9eCE373997221E3c0229e74007C1AD718\n\nWelcome to opinion.trade! By proceeding, you agree to our Privacy Policy and Terms of Use.\n\nURI: https://app.opinion.trade\nVersion: 1\nChain ID: 56\nNonce: 4821202891733693881\nIssued At: 2026-01-23T08:46:20.000Z"
+          expect_pass: true
+        - name: "should reject random message"
+          input:
+            raw_message: "Please sign this random message"
+          expect_pass: false
+        - name: "should reject different domain"
+          input:
+            raw_message: "evil.site wants you to sign in with your Ethereum account:\n0x88eD75e9eCE373997221E3c0229e74007C1AD718\n\nWelcome..."
+          expect_pass: false
+
+  # Alternative: Block non-opinion.trade personal sign messages
+  # Uncomment this rule to reject any personal sign that doesn't match opinion.trade format
+  # - name: "Block non-Opinion personal sign"
+  #   type: "message_pattern"
+  #   mode: "blocklist"
+  #   enabled: false
+  #   description: "Block personal sign messages that are not from opinion.trade"
+  #   config:
+  #     # Match any message that does NOT contain opinion.trade domain
+  #     pattern: "^(?!.*opinion\\.trade).*$"
+  #     sign_types:
+  #       - "personal"
+  #       - "eip191"
+
+  # ===========================================================================
+  # EIP-712 ORDER SIGNING RULES (CTF Exchange)
+  # ===========================================================================
+
+  # Order signing for CTF Exchange
+  - name: "Opinion Order Signature"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    description: "Validate Opinion CTF Exchange order signatures"
+    config:
+      typed_data_struct: |
+        struct Order {
+            uint256 salt;
+            address maker;
+            address signer;
+            address taker;
+            uint256 tokenId;
+            uint256 makerAmount;
+            uint256 takerAmount;
+            uint256 expiration;
+            uint256 nonce;
+            uint256 feeRateBps;
+            uint8 side;
+            uint8 signatureType;
+        }
+      typed_data_expression: |
+        // Domain validation
+        require(
+          keccak256(bytes(eip712_domainName)) == keccak256(bytes("OPINION CTF Exchange")),
+          "invalid domain name"
+        );
+        require(
+          keccak256(bytes(eip712_domainVersion)) == keccak256(bytes("1")),
+          "invalid domain version"
+        );
+        // [VULN-06] Verify the contract address to prevent fake exchange attacks
+        require(
+          eip712_domainContract == 0x5F45344126D6488025B0b84A3A8189F2487a7246,
+          "invalid verifying contract"
+        );
+
+        // Order validation via struct instance
+        // maker must be Safe wallet address (validated externally)
+        // taker must be zero address for public orders
+        require(order.taker == address(0), "taker must be zero address");
+
+        // [VULN-10] Signer identity validation — order.signer must match the actual signing key
+        require(order.signer == ctx_signer, "order signer must match signing key");
+
+        // Fee validation: max 10% (1000 basis points)
+        require(order.feeRateBps <= 1000, "fee exceeds 10%");
+      sign_type_filter: "typed_data"
+      description: "CTF Exchange order signing with fee limits"
+      test_cases:
+        - name: "should pass valid order with zero taker"
+          input:
+            typed_data:
+              primaryType: "Order"
+              domain:
+                name: "OPINION CTF Exchange"
+                version: "1"
+                chainId: "56"
+                verifyingContract: "0x5F45344126D6488025B0b84A3A8189F2487a7246"
+              message:
+                salt: "12345"
+                maker: "0x1234567890123456789012345678901234567890"
+                signer: "0x1234567890123456789012345678901234567890"
+                taker: "0x0000000000000000000000000000000000000000"
+                tokenId: "1"
+                makerAmount: "1000000000000000000"
+                takerAmount: "1000000000000000000"
+                expiration: "1893456000"
+                nonce: "0"
+                feeRateBps: "100"
+                side: "0"
+                signatureType: "0"
+            signer: "0x1234567890123456789012345678901234567890"
+          expect_pass: true
+        - name: "should reject non-zero taker"
+          input:
+            typed_data:
+              primaryType: "Order"
+              domain:
+                name: "OPINION CTF Exchange"
+                version: "1"
+                chainId: "56"
+                verifyingContract: "0x5F45344126D6488025B0b84A3A8189F2487a7246"
+              message:
+                salt: "12345"
+                maker: "0x1234567890123456789012345678901234567890"
+                signer: "0x1234567890123456789012345678901234567890"
+                taker: "0x1111111111111111111111111111111111111111"
+                tokenId: "1"
+                makerAmount: "1000000000000000000"
+                takerAmount: "1000000000000000000"
+                expiration: "1893456000"
+                nonce: "0"
+                feeRateBps: "100"
+                side: "0"
+                signatureType: "0"
+            signer: "0x1234567890123456789012345678901234567890"
+          expect_pass: false
+          expect_reason: "taker must be zero address"
+        - name: "should reject wrong verifying contract"
+          input:
+            typed_data:
+              primaryType: "Order"
+              domain:
+                name: "OPINION CTF Exchange"
+                version: "1"
+                chainId: "56"
+                verifyingContract: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+              message:
+                salt: "12345"
+                maker: "0x1234567890123456789012345678901234567890"
+                signer: "0x1234567890123456789012345678901234567890"
+                taker: "0x0000000000000000000000000000000000000000"
+                tokenId: "1"
+                makerAmount: "1000000000000000000"
+                takerAmount: "1000000000000000000"
+                expiration: "1893456000"
+                nonce: "0"
+                feeRateBps: "100"
+                side: "0"
+                signatureType: "0"
+            signer: "0x1234567890123456789012345678901234567890"
+          expect_pass: false
+          expect_reason: "invalid verifying contract"
+
+  # ===========================================================================
+  # EIP-712 SAFE TX SIGNING RULES
+  # ===========================================================================
+
+  # Safe transaction signing
+  - name: "Opinion SafeTx Signature"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    description: "Validate Safe wallet transaction signatures on BSC"
+    config:
+      typed_data_struct: |
+        struct SafeTx {
+            address to;
+            uint256 value;
+            bytes data;
+            uint8 operation;
+            uint256 safeTxGas;
+            uint256 baseGas;
+            uint256 gasPrice;
+            address gasToken;
+            address refundReceiver;
+            uint256 nonce;
+        }
+      typed_data_expression: |
+        // Domain validation for Safe on BSC
+        require(eip712_domainChainId == 56, "SafeTx must be on BSC");
+        // [VULN-08] verifyingContract must be non-zero (Safe address varies per user)
+        require(eip712_domainContract != address(0), "verifyingContract required");
+
+        // Value must be 0 for token operations
+        // Access via struct instance
+        require(safeTx.value == 0, "ETH value must be zero");
+
+        // [VULN-11] Only CALL operations allowed — block DELEGATECALL
+        require(safeTx.operation == 0, "only CALL operations allowed");
+
+        // [VULN-12] Gas manipulation protection
+        require(safeTx.gasPrice == 0, "gasPrice must be zero");
+        require(safeTx.gasToken == address(0), "gasToken must be zero");
+        require(safeTx.refundReceiver == address(0), "refundReceiver must be zero");
+      sign_type_filter: "typed_data"
+      description: "Safe transaction signing with value=0 constraint"
+      test_cases:
+        - name: "should pass SafeTx with zero value"
+          input:
+            typed_data:
+              primaryType: "SafeTx"
+              domain:
+                chainId: "56"
+                verifyingContract: "0x1234567890123456789012345678901234567890"
+              message:
+                to: "0x55d398326f99059fF775485246999027B3197955"
+                value: "0"
+                data: "0xa9059cbb"
+                operation: "0"
+                safeTxGas: "0"
+                baseGas: "0"
+                gasPrice: "0"
+                gasToken: "0x0000000000000000000000000000000000000000"
+                refundReceiver: "0x0000000000000000000000000000000000000000"
+                nonce: "0"
+          expect_pass: true
+        - name: "should reject SafeTx with non-zero value"
+          input:
+            typed_data:
+              primaryType: "SafeTx"
+              domain:
+                chainId: "56"
+                verifyingContract: "0x1234567890123456789012345678901234567890"
+              message:
+                to: "0x55d398326f99059fF775485246999027B3197955"
+                value: "1000000000000000000"
+                data: "0xa9059cbb"
+                operation: "0"
+                safeTxGas: "0"
+                baseGas: "0"
+                gasPrice: "0"
+                gasToken: "0x0000000000000000000000000000000000000000"
+                refundReceiver: "0x0000000000000000000000000000000000000000"
+                nonce: "0"
+          expect_pass: false
+          expect_reason: "ETH value must be zero"
+        - name: "should reject SafeTx with DELEGATECALL"
+          input:
+            typed_data:
+              primaryType: "SafeTx"
+              domain:
+                chainId: "56"
+                verifyingContract: "0x1234567890123456789012345678901234567890"
+              message:
+                to: "0x55d398326f99059fF775485246999027B3197955"
+                value: "0"
+                data: "0xa9059cbb"
+                operation: "1"
+                safeTxGas: "0"
+                baseGas: "0"
+                gasPrice: "0"
+                gasToken: "0x0000000000000000000000000000000000000000"
+                refundReceiver: "0x0000000000000000000000000000000000000000"
+                nonce: "0"
+          expect_pass: false
+          expect_reason: "only CALL operations allowed"
+        - name: "should reject SafeTx with non-zero gasPrice"
+          input:
+            typed_data:
+              primaryType: "SafeTx"
+              domain:
+                chainId: "56"
+                verifyingContract: "0x1234567890123456789012345678901234567890"
+              message:
+                to: "0x55d398326f99059fF775485246999027B3197955"
+                value: "0"
+                data: "0xa9059cbb"
+                operation: "0"
+                safeTxGas: "0"
+                baseGas: "0"
+                gasPrice: "1000000000"
+                gasToken: "0x55d398326f99059fF775485246999027B3197955"
+                refundReceiver: "0x1234567890123456789012345678901234567890"
+                nonce: "0"
+          expect_pass: false
+          expect_reason: "gasPrice must be zero"
+        - name: "should reject SafeTx with zero verifyingContract"
+          input:
+            typed_data:
+              primaryType: "SafeTx"
+              domain:
+                chainId: "56"
+                verifyingContract: "0x0000000000000000000000000000000000000000"
+              message:
+                to: "0x55d398326f99059fF775485246999027B3197955"
+                value: "0"
+                data: "0xa9059cbb"
+                operation: "0"
+                safeTxGas: "0"
+                baseGas: "0"
+                gasPrice: "0"
+                gasToken: "0x0000000000000000000000000000000000000000"
+                refundReceiver: "0x0000000000000000000000000000000000000000"
+                nonce: "0"
+          expect_pass: false
+          expect_reason: "verifyingContract required"
+
+  # ===========================================================================
+  # ETHEREUM TRANSACTION RULES
+  # ===========================================================================
+
+  # Safe Proxy Factory - Create new Safe wallet
+  - name: "Opinion Safe Wallet Creation"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    description: "Validate Safe wallet creation with strict parameters"
+    config:
+      functions: |
+        // Safe Proxy Factory on BSC
+        // Contract: 0xa6B71E26C5e0845f74c812102Ca7114b6a896AB2
+        function createProxyWithNonce(
+            address _singleton,
+            bytes memory initializer,
+            uint256 saltNonce
+        ) external {
+            // [VULN-02] Validate target contract is Safe Proxy Factory
+            require(
+                txTo == 0xa6B71E26C5e0845f74c812102Ca7114b6a896AB2,
+                "target must be Safe Factory"
+            );
+            // _singleton must be the official Safe implementation
+            require(
+                _singleton == 0xfb1bffC9d739B8D520DaF37dF666da4C687191EA,
+                "invalid singleton"
+            );
+            // initializer is validated separately (setup function)
+        }
+      description: "Safe wallet creation with correct singleton address"
+      test_cases:
+        - name: "should pass with correct singleton"
+          input:
+            to: "0xa6B71E26C5e0845f74c812102Ca7114b6a896AB2"
+            # createProxyWithNonce(singleton=0xfb1bffC9d739B8D520DaF37dF666da4C687191EA, initializer=0x, saltNonce=0)
+            data: "0x1688f0b9000000000000000000000000fb1bffc9d739b8d520daf37df666da4c687191ea000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          expect_pass: true
+        - name: "should reject with wrong singleton"
+          input:
+            to: "0xa6B71E26C5e0845f74c812102Ca7114b6a896AB2"
+            # createProxyWithNonce(singleton=wrong, initializer=0x, saltNonce=0)
+            data: "0x1688f0b90000000000000000000000001234567890123456789012345678901234567890000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          expect_pass: false
+          expect_reason: "invalid singleton"
+        - name: "should reject wrong target contract"
+          input:
+            to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+            # createProxyWithNonce on fake factory
+            data: "0x1688f0b9000000000000000000000000fb1bffc9d739b8d520daf37df666da4c687191ea000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          expect_pass: false
+          expect_reason: "target must be Safe Factory"
+
+  # Safe execTransaction - Execute through Safe wallet
+  - name: "Opinion Safe Execute Transaction"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    description: "Allow Safe wallet execTransaction (already validated via EIP712 signature)"
+    config:
+      functions: |
+        // execTransaction is allowed because the SafeTx EIP712 signature
+        // has already been validated with strict rules
+        // Note: txTo is not validated here because Safe wallet address varies per user
+        function execTransaction(
+            address to,
+            uint256 value,
+            bytes calldata data,
+            uint8 operation,
+            uint256 safeTxGas,
+            uint256 baseGas,
+            uint256 gasPrice,
+            address gasToken,
+            address refundReceiver,
+            bytes memory signatures
+        ) external {
+            // [VULN-04] Value must be zero (no native token transfer)
+            require(value == 0, "value must be zero");
+            // [VULN-11] Only CALL operations allowed — block DELEGATECALL
+            require(operation == 0, "only CALL allowed");
+            // [VULN-12] Gas manipulation protection
+            require(gasPrice == 0, "gasPrice must be zero");
+            require(gasToken == address(0), "gasToken must be zero");
+            require(refundReceiver == address(0), "refundReceiver must be zero");
+        }
+      description: "Safe execution - signature already validated"
+      test_cases:
+        - name: "should pass execTransaction with valid params"
+          input:
+            to: "0x1234567890123456789012345678901234567890"
+            # execTransaction(to=USDT, value=0, data=0x, operation=0, safeTxGas=0, baseGas=0, gasPrice=0, gasToken=0x0, refundReceiver=0x0, signatures=0x)
+            # Function selector: 0x6a761202
+            data: "0x6a76120200000000000000000000000055d398326f99059ff775485246999027b319795500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000016000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          expect_pass: true
+        - name: "should reject non-execTransaction function"
+          input:
+            to: "0x1234567890123456789012345678901234567890"
+            # Different function selector
+            data: "0x12345678"
+          expect_pass: false
+        - name: "should reject execTransaction with non-zero value"
+          input:
+            to: "0x1234567890123456789012345678901234567890"
+            # execTransaction with value=1e18
+            data: "0x6a76120200000000000000000000000055d398326f99059ff775485246999027b31979550000000000000000000000000000000000000000000000000de0b6b3a76400000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000016000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          expect_pass: false
+          expect_reason: "value must be zero"
+        - name: "should reject execTransaction with DELEGATECALL"
+          input:
+            to: "0x1234567890123456789012345678901234567890"
+            # execTransaction with operation=1 (DELEGATECALL)
+            data: "0x6a76120200000000000000000000000055d398326f99059ff775485246999027b319795500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000016000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          expect_pass: false
+          expect_reason: "only CALL allowed"
+
+  # ===========================================================================
+  # USDT TRANSFER RULES (BSC)
+  # ===========================================================================
+
+  # USDT Contract on BSC: 0x55d398326f99059fF775485246999027B3197955
+
+  # [VULN-03] DISABLED: Transfer USDT to Bitget — Bitget wallet address not yet configured
+  # This rule is commented out because the recipient address validation was missing (CRITICAL).
+  # Uncomment and replace <REPLACE_WITH_BITGET_ADDRESS> when the actual Bitget wallet is known.
+  #
+  # - name: "Opinion USDT to Bitget"
+  #   type: "evm_solidity_expression"
+  #   mode: "whitelist"
+  #   enabled: true
+  #   description: "Allow USDT transfers to Bitget wallet"
+  #   config:
+  #     functions: |
+  #       // USDT on BSC: 0x55d398326f99059fF775485246999027B3197955
+  #       function transfer(address recipient, uint256 amount) external {
+  #           // Validate target contract is USDT
+  #           require(txTo == 0x55d398326f99059fF775485246999027B3197955, "target must be USDT");
+  #           // TODO: Replace with actual Bitget wallet address
+  #           require(recipient == <REPLACE_WITH_BITGET_ADDRESS>, "recipient must be Bitget");
+  #       }
+  #     description: "USDT transfer to Bitget for withdrawal"
+
+  # Transfer small USDT for API Key application
+  - name: "Opinion USDT for API Key"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    description: "Allow small USDT transfers to Opinion wallet for API key application"
+    config:
+      functions: |
+        // USDT on BSC: 0x55d398326f99059fF775485246999027B3197955
+        function transfer(address recipient, uint256 amount) external {
+            // [VULN-02] Validate target contract is USDT
+            require(
+                txTo == 0x55d398326f99059fF775485246999027B3197955,
+                "target must be USDT"
+            );
+            // Opinion API Key application wallet
+            require(
+                recipient == 0x0932A1e172bA891dF1f43EFad738c3A8DBD9f60E,
+                "recipient must be Opinion API wallet"
+            );
+            // Max 0.1 USDT (with 18 decimals)
+            require(amount <= 100000000000000000, "amount exceeds 0.1 USDT");
+        }
+      description: "Small USDT transfer for API key application"
+      test_cases:
+        - name: "should pass transfer to Opinion API wallet"
+          input:
+            to: "0x55d398326f99059fF775485246999027B3197955"
+            data: "0xa9059cbb0000000000000000000000000932a1e172ba891df1f43efad738c3a8dbd9f60e000000000000000000000000000000000000000000000000016345785d8a0000"
+          expect_pass: true
+        - name: "should reject transfer to wrong wallet"
+          input:
+            to: "0x55d398326f99059fF775485246999027B3197955"
+            # transfer to wrong address
+            data: "0xa9059cbb0000000000000000000000001234567890123456789012345678901234567890000000000000000000000000000000000000000000000000000000000000000a"
+          expect_pass: false
+          expect_reason: "recipient must be Opinion API wallet"
+        - name: "should reject transfer on wrong target contract"
+          input:
+            to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+            # transfer on fake token
+            data: "0xa9059cbb0000000000000000000000000932a1e172ba891df1f43efad738c3a8dbd9f60e000000000000000000000000000000000000000000000000016345785d8a0000"
+          expect_pass: false
+          expect_reason: "target must be USDT"
+
+  # ===========================================================================
+  # SAFE WALLET INTERNAL TRANSACTION RULES
+  # ===========================================================================
+
+  # USDT Approve to CTF Exchange
+  - name: "Opinion USDT Approve Exchange"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    description: "Allow USDT approval to CTF Exchange"
+    config:
+      functions: |
+        // USDT on BSC: 0x55d398326f99059fF775485246999027B3197955
+        function approve(address spender, uint256 amount) external {
+            // [VULN-02] Validate target contract is USDT
+            require(
+                txTo == 0x55d398326f99059fF775485246999027B3197955,
+                "target must be USDT"
+            );
+            // CTF Exchange
+            require(
+                spender == 0x5F45344126D6488025B0b84A3A8189F2487a7246,
+                "spender must be CTF Exchange"
+            );
+        }
+      description: "USDT approval for CTF Exchange"
+      test_cases:
+        - name: "should pass approve to CTF Exchange"
+          input:
+            to: "0x55d398326f99059fF775485246999027B3197955"
+            # approve(0x5F45344126D6488025B0b84A3A8189F2487a7246, max)
+            data: "0x095ea7b30000000000000000000000005f45344126d6488025b0b84a3a8189f2487a7246ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: true
+        - name: "should reject approve to wrong spender"
+          input:
+            to: "0x55d398326f99059fF775485246999027B3197955"
+            # approve(0x1234..., max) - wrong spender
+            data: "0x095ea7b30000000000000000000000001234567890123456789012345678901234567890ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: false
+          expect_reason: "spender must be CTF Exchange"
+        - name: "should reject approve on wrong target contract"
+          input:
+            to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+            # approve(CTF Exchange, max) on fake token
+            data: "0x095ea7b30000000000000000000000005f45344126d6488025b0b84a3a8189f2487a7246ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: false
+          expect_reason: "target must be USDT"
+
+  # USDT Approve to CTF Contract
+  - name: "Opinion USDT Approve CTF"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    description: "Allow USDT approval to CTF (ConditionalTokens)"
+    config:
+      functions: |
+        // USDT on BSC: 0x55d398326f99059fF775485246999027B3197955
+        function approve(address spender, uint256 amount) external {
+            // [VULN-02] Validate target contract is USDT
+            require(
+                txTo == 0x55d398326f99059fF775485246999027B3197955,
+                "target must be USDT"
+            );
+            // ConditionalTokens (CTF)
+            require(
+                spender == 0xAD1a38cEc043e70E83a3eC30443dB285ED10D774,
+                "spender must be CTF"
+            );
+        }
+      description: "USDT approval for CTF contract"
+      test_cases:
+        - name: "should pass approve to CTF"
+          input:
+            to: "0x55d398326f99059fF775485246999027B3197955"
+            # approve(0xAD1a38cEc043e70E83a3eC30443dB285ED10D774, max)
+            data: "0x095ea7b3000000000000000000000000ad1a38cec043e70e83a3ec30443db285ed10d774ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: true
+        - name: "should reject approve to wrong spender"
+          input:
+            to: "0x55d398326f99059fF775485246999027B3197955"
+            # approve(0x1234..., max) - wrong spender
+            data: "0x095ea7b30000000000000000000000001234567890123456789012345678901234567890ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: false
+          expect_reason: "spender must be CTF"
+        - name: "should reject approve on wrong target contract"
+          input:
+            to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+            # approve(CTF, max) on fake token
+            data: "0x095ea7b3000000000000000000000000ad1a38cec043e70e83a3ec30443db285ed10d774ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: false
+          expect_reason: "target must be USDT"
+
+  # CTF setApprovalForAll to Exchange
+  - name: "Opinion CTF Approve Exchange"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    description: "Allow CTF (ERC1155) approval to Exchange"
+    config:
+      functions: |
+        // CTF (ConditionalTokens) on BSC: 0xAD1a38cEc043e70E83a3eC30443dB285ED10D774
+        function setApprovalForAll(address operator, bool approved) external {
+            // [VULN-02] Validate target contract is CTF
+            require(
+                txTo == 0xAD1a38cEc043e70E83a3eC30443dB285ED10D774,
+                "target must be CTF"
+            );
+            // CTF Exchange
+            require(
+                operator == 0x5F45344126D6488025B0b84A3A8189F2487a7246,
+                "operator must be CTF Exchange"
+            );
+        }
+      description: "CTF ERC1155 approval for Exchange"
+      test_cases:
+        - name: "should pass setApprovalForAll to CTF Exchange"
+          input:
+            to: "0xAD1a38cEc043e70E83a3eC30443dB285ED10D774"
+            # setApprovalForAll(0x5F45344126D6488025B0b84A3A8189F2487a7246, true)
+            data: "0xa22cb4650000000000000000000000005f45344126d6488025b0b84a3a8189f2487a72460000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: true
+        - name: "should reject setApprovalForAll to wrong operator"
+          input:
+            to: "0xAD1a38cEc043e70E83a3eC30443dB285ED10D774"
+            # setApprovalForAll(0x1234..., true) - wrong operator
+            data: "0xa22cb46500000000000000000000000012345678901234567890123456789012345678900000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: false
+          expect_reason: "operator must be CTF Exchange"
+        - name: "should reject setApprovalForAll on wrong target contract"
+          input:
+            to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+            # setApprovalForAll(CTF Exchange, true) on fake contract
+            data: "0xa22cb4650000000000000000000000005f45344126d6488025b0b84a3a8189f2487a72460000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: false
+          expect_reason: "target must be CTF"
+
+  # CTF Split Position
+  - name: "Opinion CTF Split Position"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    description: "Allow CTF position splitting"
+    config:
+      functions: |
+        // CTF (ConditionalTokens) on BSC: 0xAD1a38cEc043e70E83a3eC30443dB285ED10D774
+        function splitPosition(
+            address collateralToken,
+            bytes32 parentCollectionId,
+            bytes32 conditionId,
+            uint256[] calldata partition,
+            uint256 amount
+        ) external {
+            // [VULN-02] Validate target contract is CTF
+            require(
+                txTo == 0xAD1a38cEc043e70E83a3eC30443dB285ED10D774,
+                "target must be CTF"
+            );
+            // Collateral must be USDT
+            require(
+                collateralToken == 0x55d398326f99059fF775485246999027B3197955,
+                "collateral must be USDT"
+            );
+            // parentCollectionId must be zero for root positions
+            require(
+                parentCollectionId == bytes32(0),
+                "parent must be zero"
+            );
+        }
+      description: "Split USDT into conditional tokens"
+      test_cases:
+        - name: "should pass splitPosition with USDT collateral"
+          input:
+            to: "0xAD1a38cEc043e70E83a3eC30443dB285ED10D774"
+            # splitPosition(collateral=USDT, parentCollectionId=0, conditionId, partition=[1,2], amount=1000000)
+            # Function selector: 0x72ce4275
+            data: "0x72ce427500000000000000000000000055d398326f99059ff775485246999027b31979550000000000000000000000000000000000000000000000000000000000000000123456789012345678901234567890123456789012345678901234567890123400000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002"
+          expect_pass: true
+        - name: "should reject splitPosition with wrong collateral"
+          input:
+            to: "0xAD1a38cEc043e70E83a3eC30443dB285ED10D774"
+            # splitPosition(collateral=wrong, parentCollectionId=0, conditionId, partition=[1,2], amount=1000000)
+            data: "0x72ce427500000000000000000000000012345678901234567890123456789012345678900000000000000000000000000000000000000000000000000000000000000000123456789012345678901234567890123456789012345678901234567890123400000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002"
+          expect_pass: false
+          expect_reason: "collateral must be USDT"
+        - name: "should reject splitPosition on wrong target contract"
+          input:
+            to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+            # splitPosition on fake CTF contract
+            data: "0x72ce427500000000000000000000000055d398326f99059ff775485246999027b31979550000000000000000000000000000000000000000000000000000000000000000123456789012345678901234567890123456789012345678901234567890123400000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002"
+          expect_pass: false
+          expect_reason: "target must be CTF"
+
+  # CTF Merge Positions
+  - name: "Opinion CTF Merge Positions"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    description: "Allow CTF position merging"
+    config:
+      functions: |
+        // CTF (ConditionalTokens) on BSC: 0xAD1a38cEc043e70E83a3eC30443dB285ED10D774
+        function mergePositions(
+            address collateralToken,
+            bytes32 parentCollectionId,
+            bytes32 conditionId,
+            uint256[] calldata partition,
+            uint256 amount
+        ) external {
+            // [VULN-02] Validate target contract is CTF
+            require(
+                txTo == 0xAD1a38cEc043e70E83a3eC30443dB285ED10D774,
+                "target must be CTF"
+            );
+            // Collateral must be USDT
+            require(
+                collateralToken == 0x55d398326f99059fF775485246999027B3197955,
+                "collateral must be USDT"
+            );
+            // parentCollectionId must be zero for root positions
+            require(
+                parentCollectionId == bytes32(0),
+                "parent must be zero"
+            );
+        }
+      description: "Merge conditional tokens back to USDT"
+      test_cases:
+        - name: "should pass mergePositions with USDT collateral"
+          input:
+            to: "0xAD1a38cEc043e70E83a3eC30443dB285ED10D774"
+            # mergePositions(collateral=USDT, parentCollectionId=0, conditionId, partition=[1,2], amount=1000000)
+            # Function selector: 0x9e7212ad
+            data: "0x9e7212ad00000000000000000000000055d398326f99059ff775485246999027b31979550000000000000000000000000000000000000000000000000000000000000000123456789012345678901234567890123456789012345678901234567890123400000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002"
+          expect_pass: true
+        - name: "should reject mergePositions with wrong collateral"
+          input:
+            to: "0xAD1a38cEc043e70E83a3eC30443dB285ED10D774"
+            # mergePositions(collateral=wrong, parentCollectionId=0, conditionId, partition=[1,2], amount=1000000)
+            data: "0x9e7212ad00000000000000000000000012345678901234567890123456789012345678900000000000000000000000000000000000000000000000000000000000000000123456789012345678901234567890123456789012345678901234567890123400000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002"
+          expect_pass: false
+          expect_reason: "collateral must be USDT"
+        - name: "should reject mergePositions on wrong target contract"
+          input:
+            to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+            # mergePositions on fake CTF contract
+            data: "0x9e7212ad00000000000000000000000055d398326f99059ff775485246999027b31979550000000000000000000000000000000000000000000000000000000000000000123456789012345678901234567890123456789012345678901234567890123400000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002"
+          expect_pass: false
+          expect_reason: "target must be CTF"
+
+  # CTF Redeem Positions
+  - name: "Opinion CTF Redeem Positions"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    description: "Allow CTF position redemption"
+    config:
+      functions: |
+        // CTF (ConditionalTokens) on BSC: 0xAD1a38cEc043e70E83a3eC30443dB285ED10D774
+        function redeemPositions(
+            address collateralToken,
+            bytes32 parentCollectionId,
+            bytes32 conditionId,
+            uint256[] calldata indexSets
+        ) external {
+            // [VULN-02] Validate target contract is CTF
+            require(
+                txTo == 0xAD1a38cEc043e70E83a3eC30443dB285ED10D774,
+                "target must be CTF"
+            );
+            // Collateral must be USDT
+            require(
+                collateralToken == 0x55d398326f99059fF775485246999027B3197955,
+                "collateral must be USDT"
+            );
+            // parentCollectionId must be zero for standard market redemption
+            require(
+                parentCollectionId == bytes32(0),
+                "parent must be zero"
+            );
+        }
+      description: "Redeem resolved conditional tokens for USDT"
+      test_cases:
+        - name: "should pass redeemPositions with USDT collateral"
+          input:
+            to: "0xAD1a38cEc043e70E83a3eC30443dB285ED10D774"
+            # redeemPositions(collateral=USDT, parentCollectionId=0, conditionId, indexSets=[1,2])
+            # Function selector: 0x01b7037c
+            data: "0x01b7037c00000000000000000000000055d398326f99059ff775485246999027b3197955000000000000000000000000000000000000000000000000000000000000000012345678901234567890123456789012345678901234567890123456789012340000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002"
+          expect_pass: true
+        - name: "should reject redeemPositions with wrong collateral"
+          input:
+            to: "0xAD1a38cEc043e70E83a3eC30443dB285ED10D774"
+            # redeemPositions(collateral=wrong, parentCollectionId=0, conditionId, indexSets=[1,2])
+            data: "0x01b7037c0000000000000000000000001234567890123456789012345678901234567890000000000000000000000000000000000000000000000000000000000000000012345678901234567890123456789012345678901234567890123456789012340000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002"
+          expect_pass: false
+          expect_reason: "collateral must be USDT"
+        - name: "should reject redeemPositions on wrong target contract"
+          input:
+            to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+            # redeemPositions on fake CTF contract
+            data: "0x01b7037c00000000000000000000000055d398326f99059ff775485246999027b3197955000000000000000000000000000000000000000000000000000000000000000012345678901234567890123456789012345678901234567890123456789012340000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002"
+          expect_pass: false
+          expect_reason: "target must be CTF"

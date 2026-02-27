@@ -64,6 +64,9 @@ type EvaluationResult struct {
 
 	// AllowReason explains why the request was allowed
 	AllowReason string
+
+	// NoMatchReason explains why a whitelist rule didn't match (used internally for delegation and diagnostics)
+	NoMatchReason string
 }
 
 // RuleEngine evaluates rules for sign requests

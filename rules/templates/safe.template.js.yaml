@@ -79,6 +79,48 @@ rules:
           for (var i = 0; i < set.length; i++) { if (eq(c, set[i])) return true; }
           return false;
         }
+    test_cases:
+      - name: "CALL operation should pass (not blocked)"
+        input:
+          sign_type: "typed_data"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          typed_data:
+            primaryType: "SafeTx"
+            domain:
+              chainId: "1"
+              verifyingContract: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+            message:
+              to: "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+              value: "0"
+              data: "0x"
+              operation: "0"
+              gasPrice: "0"
+              gasToken: "0x0000000000000000000000000000000000000000"
+              refundReceiver: "0x0000000000000000000000000000000000000000"
+              nonce: "0"
+        expect_pass: true
+      - name: "DELEGATECALL operation should be blocked"
+        input:
+          sign_type: "typed_data"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          typed_data:
+            primaryType: "SafeTx"
+            domain:
+              chainId: "1"
+              verifyingContract: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+            message:
+              to: "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+              value: "0"
+              data: "0x"
+              operation: "1"
+              gasPrice: "0"
+              gasToken: "0x0000000000000000000000000000000000000000"
+              refundReceiver: "0x0000000000000000000000000000000000000000"
+              nonce: "0"
+        expect_pass: false
+        expect_reason: "only CALL allowed"
 
   - name: "Safe SafeTx and execTransaction"
     type: "evm_js"
