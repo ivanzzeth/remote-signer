@@ -11,7 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/audit"
+	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 )
 
 func TestPagination_RequestsCursorBased(t *testing.T) {
@@ -19,7 +20,7 @@ func TestPagination_RequestsCursorBased(t *testing.T) {
 
 	// Create multiple sign requests to test pagination
 	address := common.HexToAddress(signerAddress)
-	signer := adminClient.GetSigner(address, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 
 	// Create at least 5 requests for pagination testing
 	for i := 0; i < 5; i++ {
@@ -34,7 +35,7 @@ func TestPagination_RequestsCursorBased(t *testing.T) {
 	limit := 2
 
 	// Fetch first page
-	page1, err := adminClient.ListRequests(ctx, &client.ListRequestsFilter{
+	page1, err := adminClient.EVM.Requests.List(ctx, &evm.ListRequestsFilter{
 		Limit: limit,
 	})
 	require.NoError(t, err)
@@ -47,7 +48,7 @@ func TestPagination_RequestsCursorBased(t *testing.T) {
 		assert.NotNil(t, page1.NextCursorID, "NextCursorID should be set when HasMore is true")
 
 		// Fetch second page using cursor
-		page2, err := adminClient.ListRequests(ctx, &client.ListRequestsFilter{
+		page2, err := adminClient.EVM.Requests.List(ctx, &evm.ListRequestsFilter{
 			Limit:    limit,
 			Cursor:   page1.NextCursor,
 			CursorID: page1.NextCursorID,
@@ -63,7 +64,7 @@ func TestPagination_RequestsCursorBased(t *testing.T) {
 
 		// If there's a third page, verify continued pagination
 		if page2.HasMore && page2.NextCursor != nil {
-			page3, err := adminClient.ListRequests(ctx, &client.ListRequestsFilter{
+			page3, err := adminClient.EVM.Requests.List(ctx, &evm.ListRequestsFilter{
 				Limit:    limit,
 				Cursor:   page2.NextCursor,
 				CursorID: page2.NextCursorID,
@@ -85,7 +86,7 @@ func TestPagination_RequestsWithStatusFilter(t *testing.T) {
 
 	// Test pagination with status filter
 	limit := 5
-	page1, err := adminClient.ListRequests(ctx, &client.ListRequestsFilter{
+	page1, err := adminClient.EVM.Requests.List(ctx, &evm.ListRequestsFilter{
 		Status: "completed",
 		Limit:  limit,
 	})
@@ -99,7 +100,7 @@ func TestPagination_RequestsWithStatusFilter(t *testing.T) {
 
 	// If there are more pages, verify filter is maintained
 	if page1.HasMore && page1.NextCursor != nil {
-		page2, err := adminClient.ListRequests(ctx, &client.ListRequestsFilter{
+		page2, err := adminClient.EVM.Requests.List(ctx, &evm.ListRequestsFilter{
 			Status:   "completed",
 			Limit:    limit,
 			Cursor:   page1.NextCursor,
@@ -119,7 +120,7 @@ func TestPagination_AuditCursorBased(t *testing.T) {
 
 	// Create some sign requests to generate audit records
 	address := common.HexToAddress(signerAddress)
-	signer := adminClient.GetSigner(address, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 
 	for i := 0; i < 3; i++ {
 		msg := fmt.Sprintf("Audit pagination test %d", i)
@@ -131,7 +132,7 @@ func TestPagination_AuditCursorBased(t *testing.T) {
 	limit := 2
 
 	// Fetch first page
-	page1, err := adminClient.ListAuditRecords(ctx, &client.ListAuditFilter{
+	page1, err := adminClient.Audit.List(ctx, &audit.ListFilter{
 		Limit: limit,
 	})
 	require.NoError(t, err)
@@ -144,7 +145,7 @@ func TestPagination_AuditCursorBased(t *testing.T) {
 		assert.NotNil(t, page1.NextCursorID, "NextCursorID should be set when HasMore is true")
 
 		// Fetch second page using cursor
-		page2, err := adminClient.ListAuditRecords(ctx, &client.ListAuditFilter{
+		page2, err := adminClient.Audit.List(ctx, &audit.ListFilter{
 			Limit:    limit,
 			Cursor:   page1.NextCursor,
 			CursorID: page1.NextCursorID,
@@ -165,7 +166,7 @@ func TestPagination_AuditWithEventTypeFilter(t *testing.T) {
 
 	// Test pagination with event type filter
 	limit := 5
-	page1, err := adminClient.ListAuditRecords(ctx, &client.ListAuditFilter{
+	page1, err := adminClient.Audit.List(ctx, &audit.ListFilter{
 		EventType: "sign_complete",
 		Limit:     limit,
 	})
@@ -182,13 +183,13 @@ func TestPagination_TotalCountConsistency(t *testing.T) {
 	ctx := context.Background()
 
 	// Get all requests in one large page
-	largePage, err := adminClient.ListRequests(ctx, &client.ListRequestsFilter{
+	largePage, err := adminClient.EVM.Requests.List(ctx, &evm.ListRequestsFilter{
 		Limit: 100,
 	})
 	require.NoError(t, err)
 
 	// Get total from small page
-	smallPage, err := adminClient.ListRequests(ctx, &client.ListRequestsFilter{
+	smallPage, err := adminClient.EVM.Requests.List(ctx, &evm.ListRequestsFilter{
 		Limit: 2,
 	})
 	require.NoError(t, err)
@@ -203,7 +204,7 @@ func TestPagination_EmptyPage(t *testing.T) {
 
 	// Test with a filter that returns no results. Use a signer address that no test uses.
 	// NOTE: 0x0 is used by JS client e2e; 0x..0002 by config-driven negative test cases.
-	page, err := adminClient.ListRequests(ctx, &client.ListRequestsFilter{
+	page, err := adminClient.EVM.Requests.List(ctx, &evm.ListRequestsFilter{
 		SignerAddress: "0x000000000000000000000000000000000000fF99",
 		Limit:         10,
 	})
@@ -222,7 +223,7 @@ func TestPagination_CursorURLEncoding(t *testing.T) {
 
 	// Create requests to ensure we have data
 	address := common.HexToAddress(signerAddress)
-	signer := adminClient.GetSigner(address, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 
 	for i := 0; i < 3; i++ {
 		msg := fmt.Sprintf("URL encoding test %d", i)
@@ -231,7 +232,7 @@ func TestPagination_CursorURLEncoding(t *testing.T) {
 	}
 
 	// Get first page
-	page1, err := adminClient.ListRequests(ctx, &client.ListRequestsFilter{
+	page1, err := adminClient.EVM.Requests.List(ctx, &evm.ListRequestsFilter{
 		Limit: 1,
 	})
 	require.NoError(t, err)
@@ -243,7 +244,7 @@ func TestPagination_CursorURLEncoding(t *testing.T) {
 		t.Logf("Cursor value: %s", cursor)
 
 		// Using the cursor should work (URL encoding is handled by client)
-		page2, err := adminClient.ListRequests(ctx, &client.ListRequestsFilter{
+		page2, err := adminClient.EVM.Requests.List(ctx, &evm.ListRequestsFilter{
 			Limit:    1,
 			Cursor:   page1.NextCursor,
 			CursorID: page1.NextCursorID,

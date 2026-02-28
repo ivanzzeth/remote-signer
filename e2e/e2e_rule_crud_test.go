@@ -10,11 +10,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 )
 
 func TestRule_AdminCanCreateRule(t *testing.T) {
 	ctx := context.Background()
-	rule := &client.CreateRuleRequest{
+	rule := &evm.CreateRuleRequest{
 		Name:    "Test Rule - Address Whitelist",
 		Type:    "evm_address_list",
 		Mode:    "whitelist",
@@ -26,19 +27,19 @@ func TestRule_AdminCanCreateRule(t *testing.T) {
 			},
 		},
 	}
-	created, err := adminClient.CreateRule(ctx, rule)
+	created, err := adminClient.EVM.Rules.Create(ctx, rule)
 	require.NoError(t, err)
 	require.NotNil(t, created)
 	assert.Equal(t, rule.Name, created.Name)
 	assert.Equal(t, rule.Type, created.Type)
 	assert.True(t, created.Enabled)
-	err = adminClient.DeleteRule(ctx, created.ID)
+	err = adminClient.EVM.Rules.Delete(ctx, created.ID)
 	require.NoError(t, err)
 }
 
 func TestRule_AdminCanListRules(t *testing.T) {
 	ctx := context.Background()
-	resp, err := adminClient.ListRules(ctx, nil)
+	resp, err := adminClient.EVM.Rules.List(ctx, nil)
 	require.NoError(t, err)
 	assert.NotNil(t, resp)
 	assert.GreaterOrEqual(t, len(resp.Rules), 1)
@@ -46,78 +47,78 @@ func TestRule_AdminCanListRules(t *testing.T) {
 
 func TestRule_AdminCanGetRule(t *testing.T) {
 	ctx := context.Background()
-	createReq := &client.CreateRuleRequest{
+	createReq := &evm.CreateRuleRequest{
 		Name:    "Test Rule - Get",
 		Type:    "evm_value_limit",
 		Mode:    "whitelist",
 		Enabled: true,
 		Config:  map[string]interface{}{"max_value": "1000000000000000000"},
 	}
-	created, err := adminClient.CreateRule(ctx, createReq)
+	created, err := adminClient.EVM.Rules.Create(ctx, createReq)
 	require.NoError(t, err)
-	rule, err := adminClient.GetRule(ctx, created.ID)
+	rule, err := adminClient.EVM.Rules.Get(ctx, created.ID)
 	require.NoError(t, err)
 	assert.Equal(t, created.ID, rule.ID)
 	assert.Equal(t, created.Name, rule.Name)
-	require.NoError(t, adminClient.DeleteRule(ctx, created.ID))
+	require.NoError(t, adminClient.EVM.Rules.Delete(ctx, created.ID))
 }
 
 func TestRule_AdminCanUpdateRule(t *testing.T) {
 	ctx := context.Background()
-	createReq := &client.CreateRuleRequest{
+	createReq := &evm.CreateRuleRequest{
 		Name:    "Test Rule - Update Original",
 		Type:    "evm_value_limit",
 		Mode:    "whitelist",
 		Enabled: true,
 		Config:  map[string]interface{}{"max_value": "1000000000000000000"},
 	}
-	created, err := adminClient.CreateRule(ctx, createReq)
+	created, err := adminClient.EVM.Rules.Create(ctx, createReq)
 	require.NoError(t, err)
-	updated, err := adminClient.UpdateRule(ctx, created.ID, &client.UpdateRuleRequest{
+	updated, err := adminClient.EVM.Rules.Update(ctx, created.ID, &evm.UpdateRuleRequest{
 		Name:    "Test Rule - Update Modified",
 		Enabled: false,
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "Test Rule - Update Modified", updated.Name)
 	assert.False(t, updated.Enabled)
-	require.NoError(t, adminClient.DeleteRule(ctx, created.ID))
+	require.NoError(t, adminClient.EVM.Rules.Delete(ctx, created.ID))
 }
 
 func TestRule_AdminCanDeleteRule(t *testing.T) {
 	ctx := context.Background()
-	createReq := &client.CreateRuleRequest{
+	createReq := &evm.CreateRuleRequest{
 		Name:    "Test Rule - Delete",
 		Type:    "evm_value_limit",
 		Mode:    "whitelist",
 		Enabled: true,
 		Config:  map[string]interface{}{"max_value": "1000000000000000000"},
 	}
-	created, err := adminClient.CreateRule(ctx, createReq)
+	created, err := adminClient.EVM.Rules.Create(ctx, createReq)
 	require.NoError(t, err)
-	require.NoError(t, adminClient.DeleteRule(ctx, created.ID))
-	_, err = adminClient.GetRule(ctx, created.ID)
+	require.NoError(t, adminClient.EVM.Rules.Delete(ctx, created.ID))
+	_, err = adminClient.EVM.Rules.Get(ctx, created.ID)
 	require.Error(t, err)
 }
 
 func TestRule_AdminCanDisableRule(t *testing.T) {
 	ctx := context.Background()
-	createReq := &client.CreateRuleRequest{
+	createReq := &evm.CreateRuleRequest{
 		Name:    "Test Rule - Disable",
 		Type:    "evm_value_limit",
 		Mode:    "whitelist",
 		Enabled: true,
 		Config:  map[string]interface{}{"max_value": "1000000000000000000"},
 	}
-	created, err := adminClient.CreateRule(ctx, createReq)
+	created, err := adminClient.EVM.Rules.Create(ctx, createReq)
 	require.NoError(t, err)
 	assert.True(t, created.Enabled)
-	updated, err := adminClient.UpdateRule(ctx, created.ID, &client.UpdateRuleRequest{Enabled: false})
+	updated, err := adminClient.EVM.Rules.Update(ctx, created.ID, &evm.UpdateRuleRequest{Enabled: false})
 	require.NoError(t, err)
 	assert.False(t, updated.Enabled)
-	updated, err = adminClient.UpdateRule(ctx, created.ID, &client.UpdateRuleRequest{Enabled: true})
+	updated, err = adminClient.EVM.Rules.Update(ctx, created.ID, &evm.UpdateRuleRequest{Enabled: true})
 	require.NoError(t, err)
 	assert.True(t, updated.Enabled)
-	require.NoError(t, adminClient.DeleteRule(ctx, created.ID))
+	require.NoError(t, adminClient.EVM.Rules.Delete(ctx, created.ID))
 }
 
 func TestRule_NonAdminCannotCreateRule(t *testing.T) {
@@ -125,14 +126,14 @@ func TestRule_NonAdminCannotCreateRule(t *testing.T) {
 		t.Skip("Skipping: non-admin client not configured")
 	}
 	ctx := context.Background()
-	rule := &client.CreateRuleRequest{
+	rule := &evm.CreateRuleRequest{
 		Name:    "Test Rule - Non-Admin Create",
 		Type:    "evm_value_limit",
 		Mode:    "whitelist",
 		Enabled: true,
 		Config:  map[string]interface{}{"max_value": "1000000000000000000"},
 	}
-	_, err := nonAdminClient.CreateRule(ctx, rule)
+	_, err := nonAdminClient.EVM.Rules.Create(ctx, rule)
 	require.Error(t, err)
 	apiErr, ok := err.(*client.APIError)
 	require.True(t, ok)
@@ -144,7 +145,7 @@ func TestRule_NonAdminCannotUpdateRule(t *testing.T) {
 		t.Skip("Skipping: non-admin client not configured")
 	}
 	ctx := context.Background()
-	created, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	created, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:    "Test Rule - Non-Admin Update",
 		Type:    "evm_value_limit",
 		Mode:    "whitelist",
@@ -152,12 +153,12 @@ func TestRule_NonAdminCannotUpdateRule(t *testing.T) {
 		Config:  map[string]interface{}{"max_value": "1000000000000000000"},
 	})
 	require.NoError(t, err)
-	_, err = nonAdminClient.UpdateRule(ctx, created.ID, &client.UpdateRuleRequest{Name: "Modified by non-admin"})
+	_, err = nonAdminClient.EVM.Rules.Update(ctx, created.ID, &evm.UpdateRuleRequest{Name: "Modified by non-admin"})
 	require.Error(t, err)
 	apiErr, ok := err.(*client.APIError)
 	require.True(t, ok)
 	assert.Equal(t, 403, apiErr.StatusCode)
-	require.NoError(t, adminClient.DeleteRule(ctx, created.ID))
+	require.NoError(t, adminClient.EVM.Rules.Delete(ctx, created.ID))
 }
 
 func TestRule_NonAdminCannotDeleteRule(t *testing.T) {
@@ -165,7 +166,7 @@ func TestRule_NonAdminCannotDeleteRule(t *testing.T) {
 		t.Skip("Skipping: non-admin client not configured")
 	}
 	ctx := context.Background()
-	created, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	created, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:    "Test Rule - Non-Admin Delete",
 		Type:    "evm_value_limit",
 		Mode:    "whitelist",
@@ -173,12 +174,12 @@ func TestRule_NonAdminCannotDeleteRule(t *testing.T) {
 		Config:  map[string]interface{}{"max_value": "1000000000000000000"},
 	})
 	require.NoError(t, err)
-	err = nonAdminClient.DeleteRule(ctx, created.ID)
+	err = nonAdminClient.EVM.Rules.Delete(ctx, created.ID)
 	require.Error(t, err)
 	apiErr, ok := err.(*client.APIError)
 	require.True(t, ok)
 	assert.Equal(t, 403, apiErr.StatusCode)
-	require.NoError(t, adminClient.DeleteRule(ctx, created.ID))
+	require.NoError(t, adminClient.EVM.Rules.Delete(ctx, created.ID))
 }
 
 func TestRule_NonAdminCannotListRules(t *testing.T) {
@@ -186,7 +187,7 @@ func TestRule_NonAdminCannotListRules(t *testing.T) {
 		t.Skip("Skipping: non-admin client not configured")
 	}
 	ctx := context.Background()
-	_, err := nonAdminClient.ListRules(ctx, nil)
+	_, err := nonAdminClient.EVM.Rules.List(ctx, nil)
 	require.Error(t, err)
 	apiErr, ok := err.(*client.APIError)
 	require.True(t, ok)

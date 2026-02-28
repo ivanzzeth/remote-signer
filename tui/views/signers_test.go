@@ -10,8 +10,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
+	"github.com/ivanzzeth/remote-signer/pkg/client/mock"
 )
+
+func newTestSignersModel(t *testing.T) (*SignersModel, *mock.SignerService) {
+	t.Helper()
+	svc := mock.NewSignerService()
+	model, err := newSignersModelFromService(svc, context.Background())
+	require.NoError(t, err)
+	return model, svc
+}
 
 func TestNewSignersModel(t *testing.T) {
 	t.Run("returns error when client is nil", func(t *testing.T) {
@@ -21,16 +30,14 @@ func TestNewSignersModel(t *testing.T) {
 	})
 
 	t.Run("returns error when context is nil", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		_, err := NewSignersModel(mockClient, nil)
+		svc := mock.NewSignerService()
+		_, err := newSignersModelFromService(svc, nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "context is required")
 	})
 
 	t.Run("creates model successfully", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestSignersModel(t)
 		require.NotNil(t, model)
 		assert.True(t, model.loading)
 		assert.Equal(t, 20, model.limit)
@@ -39,11 +46,9 @@ func TestNewSignersModel(t *testing.T) {
 
 func TestSignersModel_Update(t *testing.T) {
 	t.Run("handles signers data message", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestSignersModel(t)
 
-		signers := []client.Signer{
+		signers := []evm.Signer{
 			{Address: "0x1234567890123456789012345678901234567890", Type: "keystore", Enabled: true},
 			{Address: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd", Type: "private_key", Enabled: true},
 		}
@@ -66,9 +71,7 @@ func TestSignersModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles signers data error", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestSignersModel(t)
 
 		msg := SignersDataMsg{
 			Err: errors.New("connection failed"),
@@ -83,17 +86,15 @@ func TestSignersModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles signer create success", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		mockClient.ListSignersFunc = func(ctx context.Context, filter *client.ListSignersFilter) (*client.ListSignersResponse, error) {
-			return &client.ListSignersResponse{Signers: []client.Signer{}, Total: 0}, nil
+		model, svc := newTestSignersModel(t)
+		svc.ListFunc = func(ctx context.Context, filter *evm.ListSignersFilter) (*evm.ListSignersResponse, error) {
+			return &evm.ListSignersResponse{Signers: []evm.Signer{}, Total: 0}, nil
 		}
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
 		model.showCreate = true
 		model.createStep = 2
 
 		msg := SignerCreateMsg{
-			Signer:  &client.Signer{Address: "0x1234567890123456789012345678901234567890"},
+			Signer:  &evm.Signer{Address: "0x1234567890123456789012345678901234567890"},
 			Success: true,
 			Message: "Signer created: 0x1234567890123456789012345678901234567890",
 			Err:     nil,
@@ -111,9 +112,7 @@ func TestSignersModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles signer create error", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestSignersModel(t)
 		model.showCreate = true
 
 		msg := SignerCreateMsg{
@@ -129,11 +128,9 @@ func TestSignersModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles navigation keys", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestSignersModel(t)
 		model.loading = false
-		model.signers = []client.Signer{
+		model.signers = []evm.Signer{
 			{Address: "0x1111"},
 			{Address: "0x2222"},
 			{Address: "0x3333"},
@@ -169,9 +166,7 @@ func TestSignersModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles filter mode", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestSignersModel(t)
 		model.loading = false
 
 		// Press 'f' to enter filter mode
@@ -186,9 +181,7 @@ func TestSignersModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles create mode", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestSignersModel(t)
 		model.loading = false
 
 		// Press '+' to enter create mode
@@ -204,9 +197,7 @@ func TestSignersModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles create flow - select type", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestSignersModel(t)
 		model.loading = false
 		model.showCreate = true
 		model.createStep = 0
@@ -219,13 +210,11 @@ func TestSignersModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles clear filter", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		mockClient.ListSignersFunc = func(ctx context.Context, filter *client.ListSignersFilter) (*client.ListSignersResponse, error) {
-			return &client.ListSignersResponse{Signers: []client.Signer{}, Total: 0}, nil
+		model, svc := newTestSignersModel(t)
+		svc.ListFunc = func(ctx context.Context, filter *evm.ListSignersFilter) (*evm.ListSignersResponse, error) {
+			return &evm.ListSignersResponse{Signers: []evm.Signer{}, Total: 0}, nil
 		}
 
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
 		model.loading = false
 		model.typeFilter = "keystore"
 		model.offset = 10
@@ -240,9 +229,7 @@ func TestSignersModel_Update(t *testing.T) {
 
 func TestSignersModel_View(t *testing.T) {
 	t.Run("renders loading state", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestSignersModel(t)
 		model.loading = true
 		model.width = 100
 		model.height = 30
@@ -252,9 +239,7 @@ func TestSignersModel_View(t *testing.T) {
 	})
 
 	t.Run("renders error state", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestSignersModel(t)
 		model.loading = false
 		model.err = errors.New("test error")
 		model.width = 100
@@ -265,13 +250,11 @@ func TestSignersModel_View(t *testing.T) {
 	})
 
 	t.Run("renders signers list", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestSignersModel(t)
 		model.loading = false
 		model.width = 150
 		model.height = 30
-		model.signers = []client.Signer{
+		model.signers = []evm.Signer{
 			{Address: "0x1234567890123456789012345678901234567890", Type: "keystore", Enabled: true},
 		}
 		model.total = 1
@@ -283,13 +266,11 @@ func TestSignersModel_View(t *testing.T) {
 	})
 
 	t.Run("renders empty signers list", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestSignersModel(t)
 		model.loading = false
 		model.width = 150
 		model.height = 30
-		model.signers = []client.Signer{}
+		model.signers = []evm.Signer{}
 		model.total = 0
 
 		view := model.View()
@@ -297,9 +278,7 @@ func TestSignersModel_View(t *testing.T) {
 	})
 
 	t.Run("renders filter input", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestSignersModel(t)
 		model.loading = false
 		model.showFilter = true
 		model.width = 100
@@ -310,9 +289,7 @@ func TestSignersModel_View(t *testing.T) {
 	})
 
 	t.Run("renders create form", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestSignersModel(t)
 		model.loading = false
 		model.showCreate = true
 		model.createStep = 0
@@ -324,13 +301,11 @@ func TestSignersModel_View(t *testing.T) {
 	})
 
 	t.Run("renders pagination info", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestSignersModel(t)
 		model.loading = false
 		model.width = 150
 		model.height = 30
-		model.signers = []client.Signer{
+		model.signers = []evm.Signer{
 			{Address: "0x1111", Type: "keystore", Enabled: true},
 			{Address: "0x2222", Type: "keystore", Enabled: true},
 		}
@@ -345,18 +320,16 @@ func TestSignersModel_View(t *testing.T) {
 
 func TestSignersModel_LoadData(t *testing.T) {
 	t.Run("calls client ListSigners with correct filter", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		var capturedFilter *client.ListSignersFilter
-		mockClient.ListSignersFunc = func(ctx context.Context, filter *client.ListSignersFilter) (*client.ListSignersResponse, error) {
+		model, svc := newTestSignersModel(t)
+		var capturedFilter *evm.ListSignersFilter
+		svc.ListFunc = func(ctx context.Context, filter *evm.ListSignersFilter) (*evm.ListSignersResponse, error) {
 			capturedFilter = filter
-			return &client.ListSignersResponse{
-				Signers: []client.Signer{},
+			return &evm.ListSignersResponse{
+				Signers: []evm.Signer{},
 				Total:   0,
 			}, nil
 		}
 
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
 		model.typeFilter = "keystore"
 		model.offset = 10
 		model.limit = 20
@@ -376,13 +349,10 @@ func TestSignersModel_LoadData(t *testing.T) {
 	})
 
 	t.Run("returns error on client failure", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		mockClient.ListSignersFunc = func(ctx context.Context, filter *client.ListSignersFilter) (*client.ListSignersResponse, error) {
+		model, svc := newTestSignersModel(t)
+		svc.ListFunc = func(ctx context.Context, filter *evm.ListSignersFilter) (*evm.ListSignersResponse, error) {
 			return nil, errors.New("network error")
 		}
-
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
 
 		cmd := model.loadData()
 		msg := cmd()
@@ -396,19 +366,16 @@ func TestSignersModel_LoadData(t *testing.T) {
 
 func TestSignersModel_CreateSigner(t *testing.T) {
 	t.Run("calls client CreateSigner with keystore params", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		var capturedReq *client.CreateSignerRequest
-		mockClient.CreateSignerFunc = func(ctx context.Context, req *client.CreateSignerRequest) (*client.Signer, error) {
+		model, svc := newTestSignersModel(t)
+		var capturedReq *evm.CreateSignerRequest
+		svc.CreateFunc = func(ctx context.Context, req *evm.CreateSignerRequest) (*evm.Signer, error) {
 			capturedReq = req
-			return &client.Signer{
+			return &evm.Signer{
 				Address: "0x1234567890123456789012345678901234567890",
 				Type:    "keystore",
 				Enabled: true,
 			}, nil
 		}
-
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
 
 		cmd := model.createSigner("keystore", "testpassword123")
 		msg := cmd()
@@ -425,13 +392,10 @@ func TestSignersModel_CreateSigner(t *testing.T) {
 	})
 
 	t.Run("returns error on client failure", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		mockClient.CreateSignerFunc = func(ctx context.Context, req *client.CreateSignerRequest) (*client.Signer, error) {
+		model, svc := newTestSignersModel(t)
+		svc.CreateFunc = func(ctx context.Context, req *evm.CreateSignerRequest) (*evm.Signer, error) {
 			return nil, errors.New("permission denied")
 		}
-
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
 
 		cmd := model.createSigner("keystore", "password")
 		msg := cmd()
@@ -446,13 +410,11 @@ func TestSignersModel_CreateSigner(t *testing.T) {
 
 func TestSignersModel_Refresh(t *testing.T) {
 	t.Run("sets loading and returns commands", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		mockClient.ListSignersFunc = func(ctx context.Context, filter *client.ListSignersFilter) (*client.ListSignersResponse, error) {
-			return &client.ListSignersResponse{Signers: []client.Signer{}, Total: 0}, nil
+		model, svc := newTestSignersModel(t)
+		svc.ListFunc = func(ctx context.Context, filter *evm.ListSignersFilter) (*evm.ListSignersResponse, error) {
+			return &evm.ListSignersResponse{Signers: []evm.Signer{}, Total: 0}, nil
 		}
 
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
 		model.loading = false
 
 		cmd := model.Refresh()
@@ -463,9 +425,7 @@ func TestSignersModel_Refresh(t *testing.T) {
 
 func TestSignersModel_SetSize(t *testing.T) {
 	t.Run("sets width and height", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestSignersModel(t)
 
 		model.SetSize(100, 50)
 		assert.Equal(t, 100, model.width)
@@ -475,14 +435,11 @@ func TestSignersModel_SetSize(t *testing.T) {
 
 func TestSignersModel_Init(t *testing.T) {
 	t.Run("returns batch command", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		mockClient.ListSignersFunc = func(ctx context.Context, filter *client.ListSignersFilter) (*client.ListSignersResponse, error) {
+		model, svc := newTestSignersModel(t)
+		svc.ListFunc = func(ctx context.Context, filter *evm.ListSignersFilter) (*evm.ListSignersResponse, error) {
 			time.Sleep(10 * time.Millisecond) // Simulate async operation
-			return &client.ListSignersResponse{Signers: []client.Signer{}, Total: 0}, nil
+			return &evm.ListSignersResponse{Signers: []evm.Signer{}, Total: 0}, nil
 		}
-
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
 
 		cmd := model.Init()
 		assert.NotNil(t, cmd)

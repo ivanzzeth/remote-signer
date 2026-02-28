@@ -11,17 +11,19 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
+	"github.com/ivanzzeth/remote-signer/pkg/client/templates"
 )
 
 func TestTemplate_AdminCanCreateTemplate(t *testing.T) {
 	ctx := context.Background()
 
-	req := &client.CreateTemplateRequest{
+	req := &templates.CreateRequest{
 		Name:        "Test Template - Address Whitelist",
 		Description: "Template for whitelisting addresses with variables",
 		Type:        "evm_address_list",
 		Mode:        "whitelist",
-		Variables: []client.TemplateVariable{
+		Variables: []templates.TemplateVariable{
 			{
 				Name:        "allowed_address",
 				Type:        "address",
@@ -35,7 +37,7 @@ func TestTemplate_AdminCanCreateTemplate(t *testing.T) {
 		Enabled: true,
 	}
 
-	created, err := adminClient.CreateTemplate(ctx, req)
+	created, err := adminClient.Templates.Create(ctx, req)
 	require.NoError(t, err)
 	require.NotNil(t, created)
 	assert.NotEmpty(t, created.ID)
@@ -46,7 +48,7 @@ func TestTemplate_AdminCanCreateTemplate(t *testing.T) {
 	assert.True(t, created.Enabled)
 
 	// Cleanup
-	err = adminClient.DeleteTemplate(ctx, created.ID)
+	err = adminClient.Templates.Delete(ctx, created.ID)
 	require.NoError(t, err)
 }
 
@@ -57,7 +59,7 @@ func TestTemplate_AdminCanCreateTemplate(t *testing.T) {
 func TestTemplate_ConfigLoadedTemplatesAndInstanceRules(t *testing.T) {
 	ctx := context.Background()
 
-	resp, err := adminClient.ListRules(ctx, nil)
+	resp, err := adminClient.EVM.Rules.List(ctx, nil)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
@@ -77,12 +79,12 @@ func TestTemplate_AdminCanListTemplates(t *testing.T) {
 	ctx := context.Background()
 
 	// Get initial count
-	initialResp, err := adminClient.ListTemplates(ctx, nil)
+	initialResp, err := adminClient.Templates.List(ctx, nil)
 	require.NoError(t, err)
 	initialCount := initialResp.Total
 
 	// Create a template
-	req := &client.CreateTemplateRequest{
+	req := &templates.CreateRequest{
 		Name:    "Test Template - List",
 		Type:    "evm_value_limit",
 		Mode:    "whitelist",
@@ -90,16 +92,16 @@ func TestTemplate_AdminCanListTemplates(t *testing.T) {
 		Enabled: true,
 	}
 
-	created, err := adminClient.CreateTemplate(ctx, req)
+	created, err := adminClient.Templates.Create(ctx, req)
 	require.NoError(t, err)
 
 	// List again and verify count increased
-	resp, err := adminClient.ListTemplates(ctx, nil)
+	resp, err := adminClient.Templates.List(ctx, nil)
 	require.NoError(t, err)
 	assert.Equal(t, initialCount+1, resp.Total)
 
 	// Cleanup
-	err = adminClient.DeleteTemplate(ctx, created.ID)
+	err = adminClient.Templates.Delete(ctx, created.ID)
 	require.NoError(t, err)
 }
 
@@ -107,7 +109,7 @@ func TestTemplate_AdminCanGetTemplate(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a template
-	req := &client.CreateTemplateRequest{
+	req := &templates.CreateRequest{
 		Name:        "Test Template - Get",
 		Description: "A template for get testing",
 		Type:        "evm_value_limit",
@@ -116,11 +118,11 @@ func TestTemplate_AdminCanGetTemplate(t *testing.T) {
 		Enabled:     true,
 	}
 
-	created, err := adminClient.CreateTemplate(ctx, req)
+	created, err := adminClient.Templates.Create(ctx, req)
 	require.NoError(t, err)
 
 	// Get the template by ID
-	tmpl, err := adminClient.GetTemplate(ctx, created.ID)
+	tmpl, err := adminClient.Templates.Get(ctx, created.ID)
 	require.NoError(t, err)
 	assert.Equal(t, created.ID, tmpl.ID)
 	assert.Equal(t, created.Name, tmpl.Name)
@@ -130,7 +132,7 @@ func TestTemplate_AdminCanGetTemplate(t *testing.T) {
 	assert.Equal(t, created.Enabled, tmpl.Enabled)
 
 	// Cleanup
-	err = adminClient.DeleteTemplate(ctx, created.ID)
+	err = adminClient.Templates.Delete(ctx, created.ID)
 	require.NoError(t, err)
 }
 
@@ -138,7 +140,7 @@ func TestTemplate_AdminCanUpdateTemplate(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a template
-	req := &client.CreateTemplateRequest{
+	req := &templates.CreateRequest{
 		Name:        "Test Template - Update Original",
 		Description: "Original description",
 		Type:        "evm_value_limit",
@@ -147,22 +149,22 @@ func TestTemplate_AdminCanUpdateTemplate(t *testing.T) {
 		Enabled:     true,
 	}
 
-	created, err := adminClient.CreateTemplate(ctx, req)
+	created, err := adminClient.Templates.Create(ctx, req)
 	require.NoError(t, err)
 
 	// Update the template
-	updateReq := &client.UpdateTemplateRequest{
+	updateReq := &templates.UpdateRequest{
 		Name:        "Test Template - Update Modified",
 		Description: "Modified description",
 	}
 
-	updated, err := adminClient.UpdateTemplate(ctx, created.ID, updateReq)
+	updated, err := adminClient.Templates.Update(ctx, created.ID, updateReq)
 	require.NoError(t, err)
 	assert.Equal(t, "Test Template - Update Modified", updated.Name)
 	assert.Equal(t, "Modified description", updated.Description)
 
 	// Cleanup
-	err = adminClient.DeleteTemplate(ctx, created.ID)
+	err = adminClient.Templates.Delete(ctx, created.ID)
 	require.NoError(t, err)
 }
 
@@ -170,7 +172,7 @@ func TestTemplate_AdminCanDeleteTemplate(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a template
-	req := &client.CreateTemplateRequest{
+	req := &templates.CreateRequest{
 		Name:    "Test Template - Delete",
 		Type:    "evm_value_limit",
 		Mode:    "whitelist",
@@ -178,15 +180,15 @@ func TestTemplate_AdminCanDeleteTemplate(t *testing.T) {
 		Enabled: true,
 	}
 
-	created, err := adminClient.CreateTemplate(ctx, req)
+	created, err := adminClient.Templates.Create(ctx, req)
 	require.NoError(t, err)
 
 	// Delete the template
-	err = adminClient.DeleteTemplate(ctx, created.ID)
+	err = adminClient.Templates.Delete(ctx, created.ID)
 	require.NoError(t, err)
 
 	// Verify it's deleted
-	_, err = adminClient.GetTemplate(ctx, created.ID)
+	_, err = adminClient.Templates.Get(ctx, created.ID)
 	require.Error(t, err)
 }
 
@@ -194,12 +196,12 @@ func TestTemplate_AdminCanInstantiateTemplate(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a template with a variable
-	createReq := &client.CreateTemplateRequest{
+	createReq := &templates.CreateRequest{
 		Name:        "Test Template - Instantiate",
 		Description: "Address whitelist template for instantiation",
 		Type:        "evm_address_list",
 		Mode:        "whitelist",
-		Variables: []client.TemplateVariable{
+		Variables: []templates.TemplateVariable{
 			{
 				Name:        "allowed_address",
 				Type:        "address",
@@ -213,23 +215,23 @@ func TestTemplate_AdminCanInstantiateTemplate(t *testing.T) {
 		Enabled: true,
 	}
 
-	created, err := adminClient.CreateTemplate(ctx, createReq)
+	created, err := adminClient.Templates.Create(ctx, createReq)
 	require.NoError(t, err)
 
 	// Instantiate the template with concrete variable values
-	instReq := &client.InstantiateTemplateRequest{
+	instReq := &templates.InstantiateRequest{
 		Variables: map[string]string{
 			"allowed_address": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
 		},
 	}
 
-	instResp, err := adminClient.InstantiateTemplate(ctx, created.ID, instReq)
+	instResp, err := adminClient.Templates.Instantiate(ctx, created.ID, instReq)
 	require.NoError(t, err)
 	require.NotNil(t, instResp)
 	assert.NotNil(t, instResp.Rule, "Instantiate response should contain a rule")
 
 	// Cleanup: delete template
-	err = adminClient.DeleteTemplate(ctx, created.ID)
+	err = adminClient.Templates.Delete(ctx, created.ID)
 	require.NoError(t, err)
 }
 
@@ -239,12 +241,12 @@ func TestTemplate_AdminCanInstantiateTemplate(t *testing.T) {
 func TestTemplate_InstanceWithBudget_CreateAndSign(t *testing.T) {
 	ctx := context.Background()
 
-	createReq := &client.CreateTemplateRequest{
+	createReq := &templates.CreateRequest{
 		Name:        "E2E Budget Template",
 		Description: "Template with budget metering for e2e",
 		Type:        "signer_restriction",
 		Mode:        "whitelist",
-		Variables: []client.TemplateVariable{
+		Variables: []templates.TemplateVariable{
 			{Name: "allowed_signer", Type: "address", Description: "Allowed signer", Required: true},
 		},
 		Config: map[string]interface{}{
@@ -257,16 +259,16 @@ func TestTemplate_InstanceWithBudget_CreateAndSign(t *testing.T) {
 		Enabled: true,
 	}
 
-	created, err := adminClient.CreateTemplate(ctx, createReq)
+	created, err := adminClient.Templates.Create(ctx, createReq)
 	require.NoError(t, err)
 	require.NotNil(t, created)
-	defer func() { _ = adminClient.DeleteTemplate(ctx, created.ID) }()
+	defer func() { _ = adminClient.Templates.Delete(ctx, created.ID) }()
 
-	instReq := &client.InstantiateTemplateRequest{
+	instReq := &templates.InstantiateRequest{
 		Variables: map[string]string{
 			"allowed_signer": signerAddress,
 		},
-		Budget: &client.BudgetConfig{
+		Budget: &templates.BudgetConfig{
 			MaxTotal:   "10",
 			MaxPerTx:   "1",
 			MaxTxCount: 5,
@@ -274,7 +276,7 @@ func TestTemplate_InstanceWithBudget_CreateAndSign(t *testing.T) {
 		},
 	}
 
-	instResp, err := adminClient.InstantiateTemplate(ctx, created.ID, instReq)
+	instResp, err := adminClient.Templates.Instantiate(ctx, created.ID, instReq)
 	require.NoError(t, err)
 	require.NotNil(t, instResp)
 	require.NotNil(t, instResp.Rule, "instantiate response should contain rule")
@@ -282,7 +284,7 @@ func TestTemplate_InstanceWithBudget_CreateAndSign(t *testing.T) {
 
 	// One matching sign request should succeed (budget deducted)
 	address := common.HexToAddress(signerAddress)
-	signer := adminClient.GetSigner(address, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	_, err = signer.PersonalSign("E2E budget instance sign")
 	require.NoError(t, err, "first sign with budget instance should succeed")
 
@@ -291,7 +293,7 @@ func TestTemplate_InstanceWithBudget_CreateAndSign(t *testing.T) {
 		ID string `json:"id"`
 	}
 	require.NoError(t, json.Unmarshal(instResp.Rule, &ruleData))
-	revokeResp, err := adminClient.RevokeInstance(ctx, ruleData.ID)
+	revokeResp, err := adminClient.Templates.RevokeInstance(ctx, ruleData.ID)
 	require.NoError(t, err)
 	require.Equal(t, "revoked", revokeResp.Status)
 }
@@ -300,12 +302,12 @@ func TestTemplate_AdminCanRevokeInstance(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a template with a variable
-	createReq := &client.CreateTemplateRequest{
+	createReq := &templates.CreateRequest{
 		Name:        "Test Template - Revoke Instance",
 		Description: "Template for revoke testing",
 		Type:        "evm_address_list",
 		Mode:        "whitelist",
-		Variables: []client.TemplateVariable{
+		Variables: []templates.TemplateVariable{
 			{
 				Name:        "allowed_address",
 				Type:        "address",
@@ -319,17 +321,17 @@ func TestTemplate_AdminCanRevokeInstance(t *testing.T) {
 		Enabled: true,
 	}
 
-	created, err := adminClient.CreateTemplate(ctx, createReq)
+	created, err := adminClient.Templates.Create(ctx, createReq)
 	require.NoError(t, err)
 
 	// Instantiate the template
-	instReq := &client.InstantiateTemplateRequest{
+	instReq := &templates.InstantiateRequest{
 		Variables: map[string]string{
 			"allowed_address": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
 		},
 	}
 
-	instResp, err := adminClient.InstantiateTemplate(ctx, created.ID, instReq)
+	instResp, err := adminClient.Templates.Instantiate(ctx, created.ID, instReq)
 	require.NoError(t, err)
 	require.NotNil(t, instResp)
 
@@ -342,14 +344,14 @@ func TestTemplate_AdminCanRevokeInstance(t *testing.T) {
 	require.NotEmpty(t, ruleData.ID)
 
 	// Revoke the instance
-	revokeResp, err := adminClient.RevokeInstance(ctx, ruleData.ID)
+	revokeResp, err := adminClient.Templates.RevokeInstance(ctx, ruleData.ID)
 	require.NoError(t, err)
 	require.NotNil(t, revokeResp)
 	assert.Equal(t, "revoked", revokeResp.Status)
 	assert.Equal(t, ruleData.ID, revokeResp.RuleID)
 
 	// Cleanup: delete template
-	err = adminClient.DeleteTemplate(ctx, created.ID)
+	err = adminClient.Templates.Delete(ctx, created.ID)
 	require.NoError(t, err)
 }
 
@@ -360,7 +362,7 @@ func TestTemplate_NonAdminCannotCreateTemplate(t *testing.T) {
 
 	ctx := context.Background()
 
-	req := &client.CreateTemplateRequest{
+	req := &templates.CreateRequest{
 		Name:    "Test Template - Non-Admin Create",
 		Type:    "evm_value_limit",
 		Mode:    "whitelist",
@@ -368,7 +370,7 @@ func TestTemplate_NonAdminCannotCreateTemplate(t *testing.T) {
 		Enabled: true,
 	}
 
-	_, err := nonAdminClient.CreateTemplate(ctx, req)
+	_, err := nonAdminClient.Templates.Create(ctx, req)
 	require.Error(t, err)
 
 	apiErr, ok := err.(*client.APIError)
@@ -383,7 +385,7 @@ func TestTemplate_NonAdminCannotListTemplates(t *testing.T) {
 
 	ctx := context.Background()
 
-	_, err := nonAdminClient.ListTemplates(ctx, nil)
+	_, err := nonAdminClient.Templates.List(ctx, nil)
 	require.Error(t, err)
 
 	apiErr, ok := err.(*client.APIError)

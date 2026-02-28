@@ -11,13 +11,13 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 )
 
 func TestRule_ContractMethod_AllowsTransfer(t *testing.T) {
 	ctx := context.Background()
 	chainType := "evm"
-	rule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	rule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:      "E2E ContractMethod Transfer",
 		Type:      "evm_contract_method",
 		Mode:      "whitelist",
@@ -26,9 +26,9 @@ func TestRule_ContractMethod_AllowsTransfer(t *testing.T) {
 		Enabled:   true,
 	})
 	require.NoError(t, err)
-	defer func() { _ = adminClient.DeleteRule(ctx, rule.ID) }()
+	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, rule.ID) }()
 	address := common.HexToAddress(signerAddress)
-	signer := adminClient.GetSigner(address, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	to := common.HexToAddress(treasuryAddress)
 	transferCalldata := "0xa9059cbb" +
 		"000000000000000000000000" + treasuryAddress[2:] +
@@ -50,7 +50,7 @@ func TestRule_ContractMethod_AllowsTransfer(t *testing.T) {
 func TestRule_ContractMethod_BlocklistBlocksApproval(t *testing.T) {
 	ctx := context.Background()
 	chainType := "evm"
-	rule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	rule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:      "E2E ContractMethod Blocklist",
 		Type:      "evm_contract_method",
 		Mode:      "blocklist",
@@ -62,9 +62,9 @@ func TestRule_ContractMethod_BlocklistBlocksApproval(t *testing.T) {
 		Enabled: true,
 	})
 	require.NoError(t, err)
-	defer func() { _ = adminClient.DeleteRule(ctx, rule.ID) }()
+	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, rule.ID) }()
 	address := common.HexToAddress(signerAddress)
-	signer := adminClient.GetSigner(address, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	to := common.HexToAddress(treasuryAddress)
 	approveCalldata := "0x095ea7b3" +
 		"000000000000000000000000" + treasuryAddress[2:] +

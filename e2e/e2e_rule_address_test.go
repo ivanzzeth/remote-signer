@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 )
 
 // Addresses from rules/treasury.example.yaml for equivalent e2e coverage
@@ -20,7 +20,7 @@ const treasuryExampleBackup = "0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2"
 
 func TestRule_TransactionToTreasuryPasses(t *testing.T) {
 	address := common.HexToAddress(signerAddress)
-	signer := adminClient.GetSigner(address, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	to := common.HexToAddress(treasuryAddress)
 	tx := types.NewTx(&types.LegacyTx{
 		Nonce:    100,
@@ -45,7 +45,7 @@ func TestRule_AddressWhitelist_RejectsNonListedAddress(t *testing.T) {
 		t.Skip("evm_address_list and signer_restriction are from config.e2e.yaml")
 	}
 	secondSigner := common.HexToAddress(testSigner2Address)
-	signer := adminClient.GetSigner(secondSigner, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, secondSigner, chainID)
 	nonListedAddr := "0x742d35Cc6634C0532925a3b844Bc454e4438f44e"
 	to := common.HexToAddress(nonListedAddr)
 	tx := types.NewTx(&types.LegacyTx{
@@ -66,7 +66,7 @@ func TestRule_AddressWhitelist_RejectsNonListedAddress(t *testing.T) {
 func TestTreasuryExample_AddressWhitelistAllowsListedAddresses(t *testing.T) {
 	ctx := context.Background()
 	chainType := "evm"
-	rule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	rule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:      "E2E Treasury Example - Allow transfers to treasury",
 		Type:      "evm_address_list",
 		Mode:      "whitelist",
@@ -77,10 +77,10 @@ func TestTreasuryExample_AddressWhitelistAllowsListedAddresses(t *testing.T) {
 		Enabled: true,
 	})
 	require.NoError(t, err)
-	defer func() { _ = adminClient.DeleteRule(ctx, rule.ID) }()
+	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, rule.ID) }()
 
 	addr := common.HexToAddress(signerAddress)
-	signer := adminClient.GetSigner(addr, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, addr, chainID)
 	chainIDBig := big.NewInt(1)
 
 	// Main treasury: should pass

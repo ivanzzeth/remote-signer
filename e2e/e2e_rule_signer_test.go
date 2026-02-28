@@ -11,12 +11,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 )
 
 func TestRule_SignerRestrictionAllowsTestSigner(t *testing.T) {
 	address := common.HexToAddress(signerAddress)
-	signer := adminClient.GetSigner(address, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	sig, err := signer.PersonalSign("Test signer restriction allows test signer")
 	require.NoError(t, err, "Signer restriction should allow test signer")
 	assert.Len(t, sig, 65)
@@ -24,7 +24,7 @@ func TestRule_SignerRestrictionAllowsTestSigner(t *testing.T) {
 
 func TestRule_SignerRestrictionBlocksUnknownSigner(t *testing.T) {
 	unknownSigner := common.HexToAddress("0x0000000000000000000000000000000000000001")
-	signer := adminClient.GetSigner(unknownSigner, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, unknownSigner, chainID)
 	_, err := signer.PersonalSign("Test signer restriction blocks unknown signer")
 	require.Error(t, err, "Unknown signer should be rejected")
 }
@@ -34,9 +34,9 @@ func TestRule_SignerRestriction_BlocksSignerNotInAllowList(t *testing.T) {
 		t.Skip("signer_restriction config is from config.e2e.yaml")
 	}
 	ctx := context.Background()
-	rulesResp, err := adminClient.ListRules(ctx, nil)
+	rulesResp, err := adminClient.EVM.Rules.List(ctx, nil)
 	require.NoError(t, err)
-	var signTypeRule *client.Rule
+	var signTypeRule *evm.Rule
 	for i := range rulesResp.Rules {
 		if rulesResp.Rules[i].Name == "Allow common signing methods" && rulesResp.Rules[i].Type == "sign_type_restriction" {
 			signTypeRule = &rulesResp.Rules[i]
@@ -46,8 +46,8 @@ func TestRule_SignerRestriction_BlocksSignerNotInAllowList(t *testing.T) {
 	require.NotNil(t, signTypeRule, "config.e2e must define rule 'Allow common signing methods' (sign_type_restriction)")
 	require.NotNil(t, signTypeRule.SignerAddress, "config.e2e rule 'Allow common signing methods' must have signer_address (first signer only)")
 	require.Equal(t, strings.ToLower(signerAddress), strings.ToLower(*signTypeRule.SignerAddress), "signer_address must be first test signer")
-	listFilter := &client.ListRulesFilter{SignerAddress: testSigner2Address}
-	rulesForSecond, err := adminClient.ListRules(ctx, listFilter)
+	listFilter := &evm.ListRulesFilter{SignerAddress: testSigner2Address}
+	rulesForSecond, err := adminClient.EVM.Rules.List(ctx, listFilter)
 	require.NoError(t, err)
 	for _, r := range rulesForSecond.Rules {
 		if r.Name == "Allow common signing methods" && r.Type == "sign_type_restriction" {
@@ -55,23 +55,23 @@ func TestRule_SignerRestriction_BlocksSignerNotInAllowList(t *testing.T) {
 		}
 	}
 	secondSigner := common.HexToAddress(testSigner2Address)
-	signer := adminClient.GetSigner(secondSigner, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, secondSigner, chainID)
 	_, err = signer.PersonalSign("signer_restriction negative: signer not in allow list")
 	require.Error(t, err, "Signer not in allow list must be rejected (no whitelist match)")
 }
 
 func TestRule_CreateSignerRestrictionViaAPI(t *testing.T) {
 	ctx := context.Background()
-	createReq := &client.CreateRuleRequest{
+	createReq := &evm.CreateRuleRequest{
 		Name:    "Test Signer Restriction via API",
 		Type:    "signer_restriction",
 		Mode:    "whitelist",
 		Enabled: true,
 		Config:  map[string]interface{}{"allowed_signers": []string{signerAddress}},
 	}
-	created, err := adminClient.CreateRule(ctx, createReq)
+	created, err := adminClient.EVM.Rules.Create(ctx, createReq)
 	require.NoError(t, err)
 	assert.Equal(t, "signer_restriction", string(created.Type))
 	assert.Equal(t, "whitelist", string(created.Mode))
-	require.NoError(t, adminClient.DeleteRule(ctx, created.ID))
+	require.NoError(t, adminClient.EVM.Rules.Delete(ctx, created.ID))
 }

@@ -90,7 +90,7 @@ server.registerTool(
   },
   async () => {
     try {
-      const signers = await client.listSigners();
+      const signers = await client.evm.signers.list();
       return ok(signers);
     } catch (error) {
       return err(error);
@@ -117,7 +117,7 @@ server.registerTool(
   },
   async ({ password }) => {
     try {
-      const response = await client.createSigner({ password });
+      const response = await client.evm.signers.create({ password });
       return ok(response);
     } catch (error) {
       return err(error);
@@ -172,10 +172,10 @@ server.registerTool(
   },
   async ({ chain_id, signer_address, message, sign_type, wait_for_approval }) => {
     try {
-      const response = await client.sign(
-        { chain_id, signer_address, sign_type, payload: { message } },
-        wait_for_approval
-      );
+      const req = { chain_id, signer_address, sign_type, payload: { message } };
+      const response = wait_for_approval
+        ? await client.evm.sign.execute(req)
+        : await client.evm.sign.executeAsync(req);
       return ok(response);
     } catch (error: any) {
       return handleSignResult(error);
@@ -206,10 +206,10 @@ server.registerTool(
   },
   async ({ chain_id, signer_address, hash, wait_for_approval }) => {
     try {
-      const response = await client.sign(
-        { chain_id, signer_address, sign_type: "hash", payload: { hash } },
-        wait_for_approval
-      );
+      const req = { chain_id, signer_address, sign_type: "hash" as const, payload: { hash } };
+      const response = wait_for_approval
+        ? await client.evm.sign.execute(req)
+        : await client.evm.sign.executeAsync(req);
       return ok(response);
     } catch (error: any) {
       return handleSignResult(error);
@@ -258,10 +258,10 @@ server.registerTool(
   },
   async ({ chain_id, signer_address, typed_data, wait_for_approval }) => {
     try {
-      const response = await client.sign(
-        { chain_id, signer_address, sign_type: "typed_data", payload: { typed_data } },
-        wait_for_approval
-      );
+      const req = { chain_id, signer_address, sign_type: "typed_data" as const, payload: { typed_data } };
+      const response = wait_for_approval
+        ? await client.evm.sign.execute(req)
+        : await client.evm.sign.executeAsync(req);
       return ok(response);
     } catch (error: any) {
       return handleSignResult(error);
@@ -320,23 +320,23 @@ server.registerTool(
     tx_type, gas_price, gas_tip_cap, gas_fee_cap, wait_for_approval,
   }) => {
     try {
-      const response = await client.sign(
-        {
-          chain_id,
-          signer_address,
-          sign_type: "transaction",
-          payload: {
-            transaction: {
-              to, value, data, gas, nonce,
-              txType: tx_type,
-              gasPrice: gas_price,
-              gasTipCap: gas_tip_cap,
-              gasFeeCap: gas_fee_cap,
-            },
+      const req = {
+        chain_id,
+        signer_address,
+        sign_type: "transaction" as const,
+        payload: {
+          transaction: {
+            to, value, data, gas, nonce,
+            txType: tx_type,
+            gasPrice: gas_price,
+            gasTipCap: gas_tip_cap,
+            gasFeeCap: gas_fee_cap,
           },
         },
-        wait_for_approval
-      );
+      };
+      const response = wait_for_approval
+        ? await client.evm.sign.execute(req)
+        : await client.evm.sign.executeAsync(req);
       return ok(response);
     } catch (error: any) {
       return handleSignResult(error);
@@ -360,7 +360,7 @@ server.registerTool(
   },
   async ({ request_id }) => {
     try {
-      const response = await client.getRequest(request_id);
+      const response = await client.evm.requests.get(request_id);
       return ok(response);
     } catch (error) {
       return err(error);
@@ -393,7 +393,7 @@ server.registerTool(
   },
   async ({ status, signer_address, chain_id, limit }) => {
     try {
-      const response = await client.listRequests({
+      const response = await client.evm.requests.list({
         status,
         signer_address,
         chain_id,
@@ -443,7 +443,7 @@ server.registerTool(
   },
   async ({ request_id, approved, rule_type, rule_mode, rule_name, max_value }) => {
     try {
-      const response = await client.approveRequest(request_id, {
+      const response = await client.evm.requests.approve(request_id, {
         approved,
         rule_type,
         rule_mode,
@@ -486,7 +486,7 @@ server.registerTool(
   },
   async ({ request_id, rule_type, rule_mode, rule_name, max_value }) => {
     try {
-      const response = await client.previewRule(request_id, {
+      const response = await client.evm.requests.previewRule(request_id, {
         rule_type,
         rule_mode,
         rule_name,
@@ -514,7 +514,7 @@ server.registerTool(
   },
   async () => {
     try {
-      const response = await client.listRules();
+      const response = await client.evm.rules.list();
       return ok(response);
     } catch (error) {
       return err(error);
@@ -537,7 +537,7 @@ server.registerTool(
   },
   async ({ rule_id }) => {
     try {
-      const response = await client.getRule(rule_id);
+      const response = await client.evm.rules.get(rule_id);
       return ok(response);
     } catch (error) {
       return err(error);
@@ -587,7 +587,7 @@ server.registerTool(
   },
   async ({ name, description, type, mode, chain_id, signer_address, config, enabled }) => {
     try {
-      const response = await client.createRule({
+      const response = await client.evm.rules.create({
         name,
         description,
         type: type as any,
@@ -630,7 +630,7 @@ server.registerTool(
   },
   async ({ rule_id, name, description, mode, config, enabled }) => {
     try {
-      const response = await client.updateRule(rule_id, {
+      const response = await client.evm.rules.update(rule_id, {
         name,
         description,
         mode,
@@ -659,7 +659,7 @@ server.registerTool(
   },
   async ({ rule_id }) => {
     try {
-      await client.deleteRule(rule_id);
+      await client.evm.rules.delete(rule_id);
       return ok({ success: true, message: `Rule ${rule_id} deleted` });
     } catch (error) {
       return err(error);
@@ -710,7 +710,7 @@ server.registerTool(
   },
   async ({ event_type, api_key_id, chain_type, start_time, end_time, limit }) => {
     try {
-      const response = await client.listAuditLogs({
+      const response = await client.audit.list({
         event_type: event_type as any,
         api_key_id,
         chain_type,

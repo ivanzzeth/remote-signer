@@ -17,7 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 )
 
 // TestRule_JSBlocklistBlocksBurnAddress verifies that an evm_js rule with mode blocklist
@@ -35,7 +35,7 @@ func TestRule_JSBlocklistBlocksBurnAddress(t *testing.T) {
 	}`
 
 	chainType := "evm"
-	rule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	rule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:        "E2E JS Blocklist Zero Address",
 		Description: "evm_js blocklist for e2e",
 		Type:        "evm_js",
@@ -47,10 +47,10 @@ func TestRule_JSBlocklistBlocksBurnAddress(t *testing.T) {
 		Enabled: true,
 	})
 	require.NoError(t, err)
-	defer func() { _ = adminClient.DeleteRule(ctx, rule.ID) }()
+	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, rule.ID) }()
 
 	address := common.HexToAddress(signerAddress)
-	signer := adminClient.GetSigner(address, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	to := common.HexToAddress(blockedAddr)
 	tx := types.NewTx(&types.LegacyTx{
 		Nonce:    102,
@@ -69,7 +69,7 @@ func TestRule_SignRequestMatchesWhitelistRule(t *testing.T) {
 	// With Example 8 (signer_restriction) and Example 9 (sign_type_restriction),
 	// personal_sign is auto-approved for the test signer
 	address := common.HexToAddress(signerAddress)
-	signer := adminClient.GetSigner(address, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 
 	sig, err := signer.PersonalSign("This should match the whitelist rule")
 	require.NoError(t, err)
@@ -87,7 +87,7 @@ func TestRule_DelegationSinglePasses(t *testing.T) {
 	ctx := context.Background()
 
 	// Optional: assert config has correct delegation target
-	rulesResp, err := adminClient.ListRules(ctx, nil)
+	rulesResp, err := adminClient.EVM.Rules.List(ctx, nil)
 	require.NoError(t, err)
 	var targetID, delegateSingleID string
 	for _, r := range rulesResp.Rules {
@@ -104,7 +104,7 @@ func TestRule_DelegationSinglePasses(t *testing.T) {
 	// Submit a transaction sign request: Delegate Single matches, returns valid+payload, delegate_to in config;
 	// engine delegates to Delegate Target which allows.
 	address := common.HexToAddress(signerAddress)
-	signer := adminClient.GetSigner(address, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 
 	to := common.HexToAddress(treasuryAddress)
 	tx := types.NewTx(&types.LegacyTx{
@@ -197,7 +197,7 @@ func TestRule_SafeMultisendERC20Chain(t *testing.T) {
 	}
 
 	address := common.HexToAddress(signerAddress)
-	signer := adminClient.GetSigner(address, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	sig, err := signer.SignTypedData(typedData)
 	require.NoError(t, err, "Safe=>Multisend=>ERC20 chain should allow and return signature")
 	require.Len(t, sig, 65)
@@ -284,7 +284,7 @@ func TestRule_SafeMultisendMultiDelegate(t *testing.T) {
 	}
 
 	address := common.HexToAddress(signerAddress)
-	signer := adminClient.GetSigner(address, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	sig, err := signer.SignTypedData(typedData)
 	require.NoError(t, err, "Safe=>Multisend=>(ERC20|ERC721) multi-delegate should allow and return signature")
 	require.Len(t, sig, 65)
@@ -347,7 +347,7 @@ func TestRule_PolymarketSafeChain(t *testing.T) {
 	}
 
 	address := common.HexToAddress(testSignerAddress)
-	signer := adminClient.GetSigner(address, polygonChainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, polygonChainID)
 	sig, err := signer.SignTypedData(typedData)
 	require.NoError(t, err, "Polymarket Safe chain (SafeTx => polymarket-transactions) should allow and return signature")
 	require.Len(t, sig, 65)
@@ -407,7 +407,7 @@ func TestRule_PolymarketSafeChain_CTFSetApprovalForAll(t *testing.T) {
 	}
 
 	address := common.HexToAddress(testSignerAddress)
-	signer := adminClient.GetSigner(address, polygonChainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, polygonChainID)
 	sig, err := signer.SignTypedData(typedData)
 	require.NoError(t, err, "SafeTx with CTF setApprovalForAll(Exchange, true) should pass")
 	require.Len(t, sig, 65)
@@ -466,10 +466,10 @@ func TestRule_PolymarketSafeChain_RejectDelegateCall(t *testing.T) {
 	}
 
 	address := common.HexToAddress(testSignerAddress)
-	signer := adminClient.GetSigner(address, polygonChainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, polygonChainID)
 	_, err := signer.SignTypedData(typedData)
 	require.Error(t, err)
-	var signErr *client.SignError
+	var signErr *evm.SignError
 	require.True(t, errors.As(err, &signErr), "expected SignError")
 	require.Contains(t, signErr.Message, "only CALL", "rejection reason should mention only CALL")
 }
@@ -527,7 +527,7 @@ func TestRule_PolymarketSafeChain_CTFRedeemPositions(t *testing.T) {
 	}
 
 	address := common.HexToAddress(testSignerAddress)
-	signer := adminClient.GetSigner(address, polygonChainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, polygonChainID)
 	sig, err := signer.SignTypedData(typedData)
 	require.NoError(t, err, "SafeTx with CTF redeemPositions (real tx 0x714b3d) should pass")
 	require.Len(t, sig, 65)
@@ -560,8 +560,7 @@ func TestRule_PolymarketSafeChain_ExecTransactionCTFRedeemPositions(t *testing.T
 
 	chainIDBig := big.NewInt(137)
 	address := common.HexToAddress(testSignerAddress)
-	signer := adminClient.GetSigner(address, polygonChainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, polygonChainID)
 	_, err = signer.SignTransactionWithChainID(tx, chainIDBig)
 	require.NoError(t, err, "execTransaction with real CTF redeemPositions (real tx 0x714b3d) should pass")
 }
-

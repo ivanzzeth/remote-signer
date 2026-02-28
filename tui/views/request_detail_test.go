@@ -10,8 +10,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
+	"github.com/ivanzzeth/remote-signer/pkg/client/mock"
 )
+
+func newTestRequestDetailModel(t *testing.T) (*RequestDetailModel, *mock.RequestService) {
+	t.Helper()
+	svc := mock.NewRequestService()
+	model, err := newRequestDetailModelFromService(svc, context.Background())
+	require.NoError(t, err)
+	return model, svc
+}
 
 func TestNewRequestDetailModel(t *testing.T) {
 	t.Run("returns error when client is nil", func(t *testing.T) {
@@ -21,27 +30,23 @@ func TestNewRequestDetailModel(t *testing.T) {
 	})
 
 	t.Run("returns error when context is nil", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		_, err := NewRequestDetailModel(mockClient, nil)
+		svc := mock.NewRequestService()
+		_, err := newRequestDetailModelFromService(svc, nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "context is required")
 	})
 
 	t.Run("creates model successfully", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRequestDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRequestDetailModel(t)
 		require.NotNil(t, model)
 	})
 }
 
 func TestRequestDetailModel_Update(t *testing.T) {
 	t.Run("handles request detail data message", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRequestDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRequestDetailModel(t)
 
-		request := &client.RequestStatus{
+		request := &evm.RequestStatus{
 			ID:            "req-123",
 			Status:        "pending",
 			SignerAddress: "0x1234",
@@ -60,9 +65,7 @@ func TestRequestDetailModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles request detail data error", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRequestDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRequestDetailModel(t)
 
 		msg := RequestDetailDataMsg{Err: errors.New("request not found")}
 		newModel, _ := model.Update(msg)
@@ -73,14 +76,12 @@ func TestRequestDetailModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles approval result success", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		mockClient.GetRequestFunc = func(ctx context.Context, requestID string) (*client.RequestStatus, error) {
-			return &client.RequestStatus{ID: requestID, Status: "completed"}, nil
+		model, svc := newTestRequestDetailModel(t)
+		svc.GetFunc = func(ctx context.Context, requestID string) (*evm.RequestStatus, error) {
+			return &evm.RequestStatus{ID: requestID, Status: "completed"}, nil
 		}
 
-		model, err := NewRequestDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
-		model.request = &client.RequestStatus{ID: "req-123", Status: "pending"}
+		model.request = &evm.RequestStatus{ID: "req-123", Status: "pending"}
 
 		msg := ApprovalResultMsg{Success: true, Message: "Request approved", Err: nil}
 		newModel, cmd := model.Update(msg)
@@ -92,9 +93,7 @@ func TestRequestDetailModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles approval result error", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRequestDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRequestDetailModel(t)
 
 		msg := ApprovalResultMsg{Success: false, Err: errors.New("permission denied")}
 		newModel, _ := model.Update(msg)
@@ -104,11 +103,9 @@ func TestRequestDetailModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles preview rule message", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRequestDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRequestDetailModel(t)
 
-		rule := &client.Rule{
+		rule := &evm.Rule{
 			ID:   "rule-preview",
 			Name: "Auto-generated Rule",
 			Type: "evm_address_list",
@@ -125,9 +122,7 @@ func TestRequestDetailModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles preview rule error", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRequestDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRequestDetailModel(t)
 
 		msg := PreviewRuleMsg{Rule: nil, Err: errors.New("cannot generate rule")}
 		newModel, _ := model.Update(msg)
@@ -138,14 +133,12 @@ func TestRequestDetailModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles approve key for pending request", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		mockClient.PreviewRuleFunc = func(ctx context.Context, requestID string, req *client.PreviewRuleRequest) (*client.PreviewRuleResponse, error) {
-			return &client.PreviewRuleResponse{}, nil
+		model, svc := newTestRequestDetailModel(t)
+		svc.PreviewRuleFunc = func(ctx context.Context, requestID string, req *evm.PreviewRuleRequest) (*evm.PreviewRuleResponse, error) {
+			return &evm.PreviewRuleResponse{}, nil
 		}
 
-		model, err := NewRequestDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
-		model.request = &client.RequestStatus{ID: "req-123", Status: "pending"}
+		model.request = &evm.RequestStatus{ID: "req-123", Status: "pending"}
 
 		newModel, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
 		m := newModel.(*RequestDetailModel)
@@ -155,10 +148,8 @@ func TestRequestDetailModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles reject key for pending request", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRequestDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
-		model.request = &client.RequestStatus{ID: "req-123", Status: "authorizing"}
+		model, _ := newTestRequestDetailModel(t)
+		model.request = &evm.RequestStatus{ID: "req-123", Status: "authorizing"}
 
 		newModel, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
 		m := newModel.(*RequestDetailModel)
@@ -167,9 +158,7 @@ func TestRequestDetailModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles back navigation", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRequestDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRequestDetailModel(t)
 
 		newModel, _ := model.Update(tea.KeyMsg{Type: tea.KeyEscape})
 		m := newModel.(*RequestDetailModel)
@@ -178,15 +167,13 @@ func TestRequestDetailModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles approve dialog - confirm", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		mockClient.ApproveSignRequestFunc = func(ctx context.Context, requestID string, req *client.ApproveRequest) (*client.ApproveResponse, error) {
-			return &client.ApproveResponse{Status: "completed"}, nil
+		model, svc := newTestRequestDetailModel(t)
+		svc.ApproveFunc = func(ctx context.Context, requestID string, req *evm.ApproveRequest) (*evm.ApproveResponse, error) {
+			return &evm.ApproveResponse{Status: "completed"}, nil
 		}
 
-		model, err := NewRequestDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
 		model.showApprove = true
-		model.request = &client.RequestStatus{ID: "req-123"}
+		model.request = &evm.RequestStatus{ID: "req-123"}
 
 		newModel, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
 		m := newModel.(*RequestDetailModel)
@@ -196,9 +183,7 @@ func TestRequestDetailModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles approve dialog - cancel", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRequestDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRequestDetailModel(t)
 		model.showApprove = true
 
 		newModel, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
@@ -208,15 +193,13 @@ func TestRequestDetailModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles reject dialog - confirm", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		mockClient.ApproveSignRequestFunc = func(ctx context.Context, requestID string, req *client.ApproveRequest) (*client.ApproveResponse, error) {
-			return &client.ApproveResponse{Status: "rejected"}, nil
+		model, svc := newTestRequestDetailModel(t)
+		svc.ApproveFunc = func(ctx context.Context, requestID string, req *evm.ApproveRequest) (*evm.ApproveResponse, error) {
+			return &evm.ApproveResponse{Status: "rejected"}, nil
 		}
 
-		model, err := NewRequestDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
 		model.showReject = true
-		model.request = &client.RequestStatus{ID: "req-123"}
+		model.request = &evm.RequestStatus{ID: "req-123"}
 
 		newModel, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
 		m := newModel.(*RequestDetailModel)
@@ -226,9 +209,7 @@ func TestRequestDetailModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles generate rule toggle", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRequestDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRequestDetailModel(t)
 		model.showApprove = true
 		model.generateRule = false
 
@@ -247,9 +228,7 @@ func TestRequestDetailModel_Update(t *testing.T) {
 
 func TestRequestDetailModel_View(t *testing.T) {
 	t.Run("renders loading state", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRequestDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRequestDetailModel(t)
 		model.loading = true
 		model.width = 100
 		model.height = 30
@@ -259,9 +238,7 @@ func TestRequestDetailModel_View(t *testing.T) {
 	})
 
 	t.Run("renders error state", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRequestDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRequestDetailModel(t)
 		model.loading = false
 		model.err = errors.New("test error")
 		model.width = 100
@@ -272,11 +249,9 @@ func TestRequestDetailModel_View(t *testing.T) {
 	})
 
 	t.Run("renders request details", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRequestDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRequestDetailModel(t)
 		model.loading = false
-		model.request = &client.RequestStatus{
+		model.request = &evm.RequestStatus{
 			ID:            "req-123",
 			Status:        "pending",
 			ChainType:     "evm",
@@ -294,14 +269,12 @@ func TestRequestDetailModel_View(t *testing.T) {
 	})
 
 	t.Run("renders approve dialog", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRequestDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRequestDetailModel(t)
 		model.loading = false
 		model.showApprove = true
 		model.width = 100
 		model.height = 30
-		model.request = &client.RequestStatus{
+		model.request = &evm.RequestStatus{
 			ID:            "req-123",
 			SignerAddress: "0x1234",
 			SignType:      "personal",
@@ -312,14 +285,12 @@ func TestRequestDetailModel_View(t *testing.T) {
 	})
 
 	t.Run("renders reject dialog", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRequestDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRequestDetailModel(t)
 		model.loading = false
 		model.showReject = true
 		model.width = 100
 		model.height = 30
-		model.request = &client.RequestStatus{
+		model.request = &evm.RequestStatus{
 			ID:            "req-123",
 			SignerAddress: "0x1234",
 			SignType:      "personal",
@@ -330,11 +301,9 @@ func TestRequestDetailModel_View(t *testing.T) {
 	})
 
 	t.Run("renders action buttons for pending status", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRequestDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRequestDetailModel(t)
 		model.loading = false
-		model.request = &client.RequestStatus{
+		model.request = &evm.RequestStatus{
 			ID:        "req-123",
 			Status:    "pending",
 			CreatedAt: time.Now(),
@@ -350,13 +319,11 @@ func TestRequestDetailModel_View(t *testing.T) {
 
 func TestRequestDetailModel_LoadRequest(t *testing.T) {
 	t.Run("sets loading state and resets fields", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		mockClient.GetRequestFunc = func(ctx context.Context, requestID string) (*client.RequestStatus, error) {
-			return &client.RequestStatus{ID: requestID}, nil
+		model, svc := newTestRequestDetailModel(t)
+		svc.GetFunc = func(ctx context.Context, requestID string) (*evm.RequestStatus, error) {
+			return &evm.RequestStatus{ID: requestID}, nil
 		}
 
-		model, err := NewRequestDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
 		model.showApprove = true
 		model.actionResult = "some result"
 
@@ -370,9 +337,7 @@ func TestRequestDetailModel_LoadRequest(t *testing.T) {
 
 func TestRequestDetailModel_ShouldGoBack(t *testing.T) {
 	t.Run("returns goBack flag", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRequestDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRequestDetailModel(t)
 
 		assert.False(t, model.ShouldGoBack())
 
@@ -383,9 +348,7 @@ func TestRequestDetailModel_ShouldGoBack(t *testing.T) {
 
 func TestRequestDetailModel_ResetGoBack(t *testing.T) {
 	t.Run("resets goBack flag", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRequestDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRequestDetailModel(t)
 
 		model.goBack = true
 		model.ResetGoBack()
