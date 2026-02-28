@@ -91,6 +91,8 @@ services:
       - ./certs:/app/certs:ro
       # Keystores - mounted to match project structure
       - ./data/keystores:/app/data/keystores:ro
+      # HD wallets - read-write for API-created wallets
+      - ./data/hd-wallets:/app/data/hd-wallets
       # Foundry binaries (downloaded to host via deploy.sh init)
       - ./data/foundry/forge:/usr/local/bin/forge:ro
       - ./data/foundry/cast:/usr/local/bin/cast:ro

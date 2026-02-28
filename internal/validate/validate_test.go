@@ -366,5 +366,6 @@ func TestValidAuditEventTypes_Count(t *testing.T) {
 func TestValidSignerTypes_Map(t *testing.T) {
 	assert.True(t, ValidSignerTypes["private_key"])
 	assert.True(t, ValidSignerTypes["keystore"])
-	assert.Equal(t, 2, len(ValidSignerTypes))
+	assert.True(t, ValidSignerTypes["hd_wallet"])
+	assert.Equal(t, 3, len(ValidSignerTypes))
 }

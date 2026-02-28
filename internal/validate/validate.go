@@ -119,6 +119,7 @@ var ValidAuditEventTypes = map[types.AuditEventType]bool{
 var ValidSignerTypes = map[types.SignerType]bool{
 	types.SignerTypePrivateKey: true,
 	types.SignerTypeKeystore:   true,
+	types.SignerTypeHDWallet:   true,
 }
 
 // IsValidChainType returns true if s is a known chain type.

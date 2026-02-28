@@ -173,7 +173,6 @@ export interface ClientConfig {
   };
   pollInterval?: number; // milliseconds, default: 2000
   pollTimeout?: number; // milliseconds, default: 300000 (5 minutes)
-  useNonce?: boolean; // default: true
 }
 
 // Approve request
@@ -221,6 +220,42 @@ export interface CreateSignerRequest {
 export interface CreateSignerResponse {
   address: string;
   message: string;
+}
+
+// ============================================================================
+// HD Wallet types
+// ============================================================================
+
+export interface CreateHDWalletRequest {
+  action?: "create" | "import"; // default: "create"
+  password: string;
+  mnemonic?: string; // required for import
+  entropy_bits?: number; // for create, default 256
+}
+
+export interface HDWalletResponse {
+  primary_address: string;
+  base_path: string;
+  derived_count: number;
+  derived?: SignerInfo[];
+}
+
+export interface ListHDWalletsResponse {
+  wallets: HDWalletResponse[];
+}
+
+export interface DeriveAddressRequest {
+  index?: number;
+  start?: number;
+  count?: number;
+}
+
+export interface DeriveAddressResponse {
+  derived: SignerInfo[];
+}
+
+export interface ListDerivedAddressesResponse {
+  derived: SignerInfo[];
 }
 
 // ============================================================================

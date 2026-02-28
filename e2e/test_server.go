@@ -286,9 +286,45 @@ func (ts *TestServer) Start() error {
 		}
 	}
 
-	evmRegistry, err := evm.NewSignerRegistry(evmSignerConfig)
+	// Provider-based signer initialization (matches main.go)
+	evmRegistry := evm.NewEmptySignerRegistry()
+
+	pwProvider, err := evm.NewCompositePasswordProvider(false)
 	if err != nil {
-		return fmt.Errorf("failed to create EVM signer registry: %w", err)
+		return fmt.Errorf("failed to create password provider: %w", err)
+	}
+
+	// Load private keys
+	pkProvider, err := evm.NewPrivateKeyProvider(evmRegistry, evmSignerConfig.PrivateKeys)
+	if err != nil {
+		return fmt.Errorf("failed to create private key provider: %w", err)
+	}
+	evmRegistry.RegisterProvider(pkProvider)
+
+	// Load keystores
+	keystoreDir := os.TempDir()
+	if cfg != nil && cfg.Chains.EVM != nil && cfg.Chains.EVM.KeystoreDir != "" {
+		keystoreDir = cfg.Chains.EVM.KeystoreDir
+	}
+	ksProvider, err := evm.NewKeystoreProvider(evmRegistry, evmSignerConfig.Keystores, keystoreDir, pwProvider, log)
+	if err != nil {
+		return fmt.Errorf("failed to create keystore provider: %w", err)
+	}
+	evmRegistry.RegisterProvider(ksProvider)
+
+	// Load HD wallets
+	hdWalletDir, cleanupErr := os.MkdirTemp("", "e2e-hd-wallets-*")
+	if cleanupErr != nil {
+		return fmt.Errorf("failed to create temp HD wallet dir: %w", cleanupErr)
+	}
+	hdProvider, err := evm.NewHDWalletProvider(evmRegistry, evmSignerConfig.HDWallets, hdWalletDir, pwProvider, log)
+	if err != nil {
+		return fmt.Errorf("failed to create HD wallet provider: %w", err)
+	}
+	evmRegistry.RegisterProvider(hdProvider)
+
+	if evmRegistry.SignerCount() == 0 {
+		return fmt.Errorf("no signers configured")
 	}
 
 	evmAdapter, err := evm.NewEVMAdapter(evmRegistry)
@@ -433,12 +469,7 @@ func (ts *TestServer) Start() error {
 	}
 
 	// Initialize signer manager for dynamic signer creation
-	// Create temp directory for e2e tests (always use temp dir for isolation)
-	tempKeystoreDir, err := os.MkdirTemp("", "e2e-keystores-*")
-	if err != nil {
-		return fmt.Errorf("failed to create temp keystore directory: %w", err)
-	}
-	signerManager, err := evm.NewSignerManager(evmRegistry, tempKeystoreDir, log)
+	signerManager, err := evm.NewSignerManager(evmRegistry, log)
 	if err != nil {
 		return fmt.Errorf("failed to create signer manager: %w", err)
 	}

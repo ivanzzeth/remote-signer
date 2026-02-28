@@ -26,8 +26,10 @@ var (
 	ErrMissingSignerType              = errors.New("signer type is required")
 	ErrUnsupportedSignerType          = errors.New("unsupported signer type")
 	ErrMissingKeystoreParams          = errors.New("keystore parameters are required")
+	ErrMissingHDWalletParams          = errors.New("hd_wallet parameters are required")
 	ErrEmptyPassword                  = errors.New("password cannot be empty")
 	ErrPrivateKeyCreationNotSupported = errors.New("private key creation via API is not supported")
+	ErrHDWalletNotConfigured          = errors.New("HD wallet provider is not configured")
 )
 
 // TypedError provides structured error information

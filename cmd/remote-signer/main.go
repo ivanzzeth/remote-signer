@@ -246,10 +246,60 @@ func run() error {
 	// Initialize EVM adapter and signer manager if enabled
 	var evmSignerManager evm.SignerManager
 	if cfg.Chains.EVM != nil && cfg.Chains.EVM.Enabled {
-		evmRegistry, err := evm.NewSignerRegistry(cfg.Chains.EVM.Signers)
-		if err != nil {
-			return fmt.Errorf("failed to create EVM signer registry: %w", err)
+		// Provider-based signer initialization
+		evmRegistry := evm.NewEmptySignerRegistry()
+
+		// Check if any keystore or HD wallet requires stdin password
+		hasStdinKeystores := false
+		for _, ks := range cfg.Chains.EVM.Signers.Keystores {
+			if ks.Enabled && ks.PasswordStdin {
+				hasStdinKeystores = true
+				break
+			}
 		}
+		if !hasStdinKeystores {
+			for _, hw := range cfg.Chains.EVM.Signers.HDWallets {
+				if hw.Enabled && hw.PasswordStdin {
+					hasStdinKeystores = true
+					break
+				}
+			}
+		}
+
+		pwProvider, err := evm.NewCompositePasswordProvider(hasStdinKeystores)
+		if err != nil {
+			return fmt.Errorf("failed to create password provider: %w", err)
+		}
+
+		// 1. Load private keys
+		pkProvider, err := evm.NewPrivateKeyProvider(evmRegistry, cfg.Chains.EVM.Signers.PrivateKeys)
+		if err != nil {
+			return fmt.Errorf("failed to create private key provider: %w", err)
+		}
+		evmRegistry.RegisterProvider(pkProvider)
+
+		// 2. Load keystores
+		ksProvider, err := evm.NewKeystoreProvider(evmRegistry, cfg.Chains.EVM.Signers.Keystores, cfg.Chains.EVM.KeystoreDir, pwProvider, log)
+		if err != nil {
+			return fmt.Errorf("failed to create keystore provider: %w", err)
+		}
+		evmRegistry.RegisterProvider(ksProvider)
+
+		// 3. Load HD wallets
+		hdProvider, err := evm.NewHDWalletProvider(evmRegistry, cfg.Chains.EVM.Signers.HDWallets, cfg.Chains.EVM.HDWalletDir, pwProvider, log)
+		if err != nil {
+			return fmt.Errorf("failed to create HD wallet provider: %w", err)
+		}
+		evmRegistry.RegisterProvider(hdProvider)
+
+		if evmRegistry.SignerCount() == 0 {
+			return fmt.Errorf("no signers configured")
+		}
+		defer func() {
+			if err := evmRegistry.Close(); err != nil {
+				log.Error("failed to close signer registry", "error", err)
+			}
+		}()
 
 		evmAdapter, err := evm.NewEVMAdapter(evmRegistry)
 		if err != nil {
@@ -259,18 +309,16 @@ func run() error {
 		if err := chainRegistry.Register(evmAdapter); err != nil {
 			return fmt.Errorf("failed to register EVM adapter: %w", err)
 		}
-		log.Info("EVM adapter registered")
+		log.Info("EVM adapter registered",
+			"signers", evmRegistry.SignerCount(),
+		)
 
 		// Initialize signer manager for dynamic signer creation
-		keystoreDir := cfg.Chains.EVM.KeystoreDir
-		if keystoreDir == "" {
-			keystoreDir = "./data/keystores" // Default
-		}
-		evmSignerManager, err = evm.NewSignerManager(evmRegistry, keystoreDir, log)
+		evmSignerManager, err = evm.NewSignerManager(evmRegistry, log)
 		if err != nil {
 			return fmt.Errorf("failed to create EVM signer manager: %w", err)
 		}
-		log.Info("EVM signer manager initialized", "keystore_dir", keystoreDir)
+		log.Info("EVM signer manager initialized")
 	}
 
 	// Initialize state machine

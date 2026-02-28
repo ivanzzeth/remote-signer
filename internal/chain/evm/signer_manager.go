@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/ivanzzeth/ethsig/keystore"
-
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
 
@@ -17,87 +15,67 @@ type SignerManager interface {
 
 	// ListSigners returns signers matching the filter with pagination
 	ListSigners(ctx context.Context, filter types.SignerFilter) (types.SignerListResult, error)
+
+	// HDWalletManager returns the HD wallet provider, or error if not configured.
+	HDWalletManager() (HDWalletManager, error)
 }
 
 // SignerManagerImpl implements SignerManager
 type SignerManagerImpl struct {
-	registry    *SignerRegistry
-	keystoreDir string
-	logger      *slog.Logger
+	registry *SignerRegistry
+	logger   *slog.Logger
 }
 
 // NewSignerManager creates a new SignerManager
-func NewSignerManager(registry *SignerRegistry, keystoreDir string, logger *slog.Logger) (*SignerManagerImpl, error) {
+func NewSignerManager(registry *SignerRegistry, logger *slog.Logger) (*SignerManagerImpl, error) {
 	if registry == nil {
 		return nil, fmt.Errorf("registry is required")
-	}
-	if keystoreDir == "" {
-		return nil, fmt.Errorf("keystore directory is required")
 	}
 	if logger == nil {
 		return nil, fmt.Errorf("logger is required")
 	}
 
 	return &SignerManagerImpl{
-		registry:    registry,
-		keystoreDir: keystoreDir,
-		logger:      logger,
+		registry: registry,
+		logger:   logger,
 	}, nil
 }
 
-// CreateSigner creates a new signer based on the request type
+// CreateSigner dispatches to the appropriate provider via type assertion.
 func (m *SignerManagerImpl) CreateSigner(ctx context.Context, req types.CreateSignerRequest) (*types.SignerInfo, error) {
-	// Validate request
 	if err := req.Validate(); err != nil {
 		return nil, err
 	}
 
-	switch req.Type {
-	case types.SignerTypeKeystore:
-		return m.createKeystoreSigner(ctx, req.Keystore)
-	default:
+	p, ok := m.registry.Provider(req.Type)
+	if !ok {
 		return nil, types.ErrUnsupportedSignerType
 	}
-}
 
-// createKeystoreSigner creates a new keystore signer
-func (m *SignerManagerImpl) createKeystoreSigner(ctx context.Context, params *types.CreateKeystoreParams) (*types.SignerInfo, error) {
-	if params == nil {
-		return nil, types.ErrMissingKeystoreParams
+	creator, ok := p.(SignerCreator)
+	if !ok {
+		return nil, fmt.Errorf("signer type %q does not support dynamic creation", req.Type)
 	}
 
-	password := []byte(params.Password)
-	defer keystore.SecureZeroize(password)
-
-	// Create keystore using ethsig
-	address, keystorePath, err := keystore.CreateKeystore(m.keystoreDir, password)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create keystore: %w", err)
-	}
-
-	m.logger.Info("keystore created",
-		slog.String("address", address),
-		slog.String("path", keystorePath),
-	)
-
-	// Register the new signer to make it immediately available
-	if err := m.registry.RegisterKeystore(address, keystorePath, password); err != nil {
-		return nil, fmt.Errorf("failed to register keystore: %w", err)
-	}
-
-	m.logger.Info("signer registered",
-		slog.String("address", address),
-		slog.String("type", string(types.SignerTypeKeystore)),
-	)
-
-	return &types.SignerInfo{
-		Address: address,
-		Type:    string(types.SignerTypeKeystore),
-		Enabled: true,
-	}, nil
+	return creator.CreateSigner(ctx, req.TypedParams())
 }
 
 // ListSigners returns signers matching the filter with pagination
 func (m *SignerManagerImpl) ListSigners(ctx context.Context, filter types.SignerFilter) (types.SignerListResult, error) {
 	return m.registry.ListSignersWithFilter(filter), nil
+}
+
+// HDWalletManager returns the HD wallet provider if configured.
+func (m *SignerManagerImpl) HDWalletManager() (HDWalletManager, error) {
+	p, ok := m.registry.Provider(types.SignerTypeHDWallet)
+	if !ok {
+		return nil, types.ErrHDWalletNotConfigured
+	}
+
+	mgr, ok := p.(HDWalletManager)
+	if !ok {
+		return nil, fmt.Errorf("HD wallet provider does not implement HDWalletManager")
+	}
+
+	return mgr, nil
 }

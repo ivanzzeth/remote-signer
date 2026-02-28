@@ -11,7 +11,6 @@ const client = new RemoteSignerClient({
   privateKey: 'your-ed25519-private-key-hex', // 64 hex characters
   pollInterval: 2000, // 2 seconds
   pollTimeout: 300000, // 5 minutes
-  useNonce: true // Enable nonce for replay protection
 });
 
 // Example 1: Health check

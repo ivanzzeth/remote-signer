@@ -47,7 +47,7 @@ COPY --from=builder /remote-signer-tui /app/remote-signer-tui
 # from host ./data/foundry/ to container /usr/local/bin/
 
 # Create directories
-RUN mkdir -p /app/data /app/configs /var/cache/remote-signer/forge && \
+RUN mkdir -p /app/data /app/data/keystores /app/data/hd-wallets /app/configs /var/cache/remote-signer/forge && \
     chown -R signer:signer /app /var/cache/remote-signer
 
 # Copy example config
