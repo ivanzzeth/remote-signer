@@ -26,6 +26,7 @@ type TemplateConfig struct {
 type RouterConfig struct {
 	Version            string
 	IPWhitelistConfig  *middleware.IPWhitelist
+	IPRateLimit        int // requests per minute per IP (pre-auth); 0 = use default (200)
 	SolidityValidator  *evm.SolidityRuleValidator
 	JSEvaluator        *evm.JSRuleEvaluator
 	Template           *TemplateConfig
@@ -198,6 +199,7 @@ func (r *Router) withAuth(h http.Handler) http.Handler {
 		middleware.SecurityHeadersMiddleware(),
 		middleware.RecoveryMiddleware(r.logger),
 		middleware.LoggingMiddleware(r.logger),
+		middleware.IPRateLimitMiddleware(r.rateLimiter, r.ipWhitelist, r.config.IPRateLimit),
 		middleware.AuthMiddleware(r.authVerifier, r.logger),
 		middleware.RateLimitMiddleware(r.rateLimiter),
 	}
@@ -219,6 +221,7 @@ func (r *Router) withAuthAndAdmin(h http.Handler) http.Handler {
 		middleware.SecurityHeadersMiddleware(),
 		middleware.RecoveryMiddleware(r.logger),
 		middleware.LoggingMiddleware(r.logger),
+		middleware.IPRateLimitMiddleware(r.rateLimiter, r.ipWhitelist, r.config.IPRateLimit),
 		middleware.AuthMiddleware(r.authVerifier, r.logger),
 		middleware.AdminMiddleware(r.logger),
 		middleware.RateLimitMiddleware(r.rateLimiter),

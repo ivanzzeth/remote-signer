@@ -95,8 +95,11 @@ security:
   # 60s is recommended - enough for network latency, but limits replay attacks
   max_request_age: "60s"
 
-  # Default rate limit (requests per minute)
+  # Default rate limit per API key (requests per minute)
   rate_limit_default: 100
+
+  # Per-IP rate limit (requests per minute, pre-auth). Protects against unauthenticated flood attacks.
+  ip_rate_limit: 200
 
   # Nonce requirement for replay protection
   # When true (default), requests MUST include X-Nonce header
@@ -140,6 +143,11 @@ security:
     # WARNING: Only enable this if running behind a trusted reverse proxy
     # If enabled, the first IP in X-Forwarded-For will be used as client IP
     trust_proxy: false
+    # Trusted proxy IPs/CIDRs - only these sources can set X-Forwarded-For/X-Real-IP
+    # Required when trust_proxy is true; if empty, proxy headers are ignored (fail-closed)
+    # trusted_proxies:
+    #   - "10.0.0.1"        # nginx internal IP
+    #   - "172.16.0.0/12"   # Docker network range
 
 logger:
   # Log level: debug, info, warn, error
