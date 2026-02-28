@@ -50,6 +50,9 @@ data/keystores/*
 !data/foundry/
 data/foundry/*
 !data/foundry/.gitkeep
+!data/hd-wallets/
+data/hd-wallets/*
+!data/hd-wallets/.gitkeep
 
 # Configuration files (sensitive)
 config.yaml

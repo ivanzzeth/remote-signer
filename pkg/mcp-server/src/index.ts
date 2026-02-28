@@ -48,7 +48,6 @@ const client = new RemoteSignerClient({
   baseURL: BASE_URL,
   apiKeyID: API_KEY_ID,
   privateKey: PRIVATE_KEY,
-  useNonce: true,
   pollInterval: 2000,
   pollTimeout: 300000,
 });

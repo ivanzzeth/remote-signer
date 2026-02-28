@@ -32,10 +32,6 @@ type Client struct {
 
 	// PollTimeout is the maximum time to wait for approval.
 	PollTimeout time.Duration
-
-	// UseNonce enables nonce-based replay protection (recommended for production).
-	// When enabled, a random nonce is included in each request signature.
-	UseNonce bool
 }
 
 // Config holds configuration for creating a new Client.
@@ -70,11 +66,6 @@ type Config struct {
 	// PollTimeout is the maximum time to wait for approval.
 	// Default: 5 minutes.
 	PollTimeout time.Duration
-
-	// UseNonce enables nonce-based replay protection (recommended for production).
-	// When enabled, a random nonce is included in each request signature.
-	// Default: true (enabled for security)
-	UseNonce *bool
 
 	// TLS configuration
 
@@ -194,12 +185,6 @@ func NewClient(cfg Config) (*Client, error) {
 		pollTimeout = 5 * time.Minute
 	}
 
-	// Default to using nonce for security
-	useNonce := true
-	if cfg.UseNonce != nil {
-		useNonce = *cfg.UseNonce
-	}
-
 	return &Client{
 		baseURL:      strings.TrimSuffix(cfg.BaseURL, "/"),
 		apiKeyID:     cfg.APIKeyID,
@@ -207,7 +192,6 @@ func NewClient(cfg Config) (*Client, error) {
 		httpClient:   httpClient,
 		PollInterval: pollInterval,
 		PollTimeout:  pollTimeout,
-		UseNonce:     useNonce,
 	}, nil
 }
 
@@ -449,10 +433,7 @@ func (c *Client) pollForResult(ctx context.Context, requestID string) (*SignResp
 }
 
 // newSignedRequest creates a new HTTP request with Ed25519 signature.
-// Supports three modes:
-// - Legacy: timestamp|method|path|sha256(body)
-// - Nonce: timestamp|nonce|method|path|sha256(body)
-// - Full (nonce+sequence): timestamp|nonce|sequence|method|path|sha256(body)
+// Format: {timestamp}|{nonce}|{method}|{path}|{sha256(body)}
 func (c *Client) newSignedRequest(ctx context.Context, method, path string, body []byte) (*http.Request, error) {
 	url := c.baseURL + path
 
@@ -470,35 +451,17 @@ func (c *Client) newSignedRequest(ctx context.Context, method, path string, body
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	// Sign the request
+	// Sign the request with nonce for replay protection
 	timestamp := time.Now().UnixMilli()
-
-	var signature string
-
-	if c.UseNonce {
-		// Nonce mode for replay protection
-		nonce := generateNonce()
-		signature = c.signRequestWithNonce(timestamp, nonce, method, path, body)
-		req.Header.Set("X-Nonce", nonce)
-	} else {
-		// Legacy mode
-		signature = c.signRequest(timestamp, method, path, body)
-	}
+	nonce := generateNonce()
+	signature := c.signRequestWithNonce(timestamp, nonce, method, path, body)
 
 	req.Header.Set("X-API-Key-ID", c.apiKeyID)
 	req.Header.Set("X-Timestamp", fmt.Sprintf("%d", timestamp))
+	req.Header.Set("X-Nonce", nonce)
 	req.Header.Set("X-Signature", signature)
 
 	return req, nil
-}
-
-// signRequest creates the Ed25519 signature for a request (legacy format).
-// Format: {timestamp}|{method}|{path}|{sha256(body)}
-func (c *Client) signRequest(timestamp int64, method, path string, body []byte) string {
-	bodyHash := sha256.Sum256(body)
-	message := fmt.Sprintf("%d|%s|%s|%x", timestamp, method, path, bodyHash)
-	signature := ed25519.Sign(c.privateKey, []byte(message))
-	return base64.StdEncoding.EncodeToString(signature)
 }
 
 // signRequestWithNonce creates the Ed25519 signature for a request with nonce.
@@ -519,6 +482,128 @@ func generateNonce() string {
 		return fmt.Sprintf("%x", time.Now().UnixNano())
 	}
 	return hex.EncodeToString(b)
+}
+
+// ==========================================================================
+// HD Wallet management (admin only)
+// ==========================================================================
+
+// CreateHDWallet creates a new HD wallet.
+func (c *Client) CreateHDWallet(ctx context.Context, req *CreateHDWalletRequest) (*HDWalletResponse, error) {
+	if req.Action == "" {
+		req.Action = "create"
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	httpReq, err := c.newSignedRequest(ctx, http.MethodPost, "/api/v1/evm/hd-wallets", body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		return nil, c.parseErrorResponse(resp)
+	}
+
+	var result HDWalletResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+	return &result, nil
+}
+
+// ImportHDWallet imports an HD wallet from a mnemonic.
+func (c *Client) ImportHDWallet(ctx context.Context, req *CreateHDWalletRequest) (*HDWalletResponse, error) {
+	req.Action = "import"
+	return c.CreateHDWallet(ctx, req)
+}
+
+// ListHDWallets lists all HD wallets.
+func (c *Client) ListHDWallets(ctx context.Context) (*ListHDWalletsResponse, error) {
+	httpReq, err := c.newSignedRequest(ctx, http.MethodGet, "/api/v1/evm/hd-wallets", nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, c.parseErrorResponse(resp)
+	}
+
+	var result ListHDWalletsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+	return &result, nil
+}
+
+// DeriveAddress derives a single address from an HD wallet.
+func (c *Client) DeriveAddress(ctx context.Context, primaryAddr string, req *DeriveAddressRequest) (*DeriveAddressResponse, error) {
+	path := fmt.Sprintf("/api/v1/evm/hd-wallets/%s/derive", primaryAddr)
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	httpReq, err := c.newSignedRequest(ctx, http.MethodPost, path, body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, c.parseErrorResponse(resp)
+	}
+
+	var result DeriveAddressResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+	return &result, nil
+}
+
+// ListDerivedAddresses lists all derived addresses for an HD wallet.
+func (c *Client) ListDerivedAddresses(ctx context.Context, primaryAddr string) (*ListDerivedAddressesResponse, error) {
+	path := fmt.Sprintf("/api/v1/evm/hd-wallets/%s/derived", primaryAddr)
+
+	httpReq, err := c.newSignedRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, c.parseErrorResponse(resp)
+	}
+
+	var result ListDerivedAddressesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+	return &result, nil
 }
 
 // parseErrorResponse parses an error response from the API.

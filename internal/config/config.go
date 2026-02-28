@@ -172,10 +172,11 @@ type ChainsConfig struct {
 
 // EVMConfig contains EVM chain configuration
 type EVMConfig struct {
-	Enabled     bool             `yaml:"enabled"`
-	Signers     evm.SignerConfig `yaml:"signers"`
-	KeystoreDir string           `yaml:"keystore_dir"` // Directory for storing dynamically created keystores
-	Foundry     FoundryConfig    `yaml:"foundry"`
+	Enabled      bool             `yaml:"enabled"`
+	Signers      evm.SignerConfig `yaml:"signers"`
+	KeystoreDir  string           `yaml:"keystore_dir"`   // Directory for storing dynamically created keystores
+	HDWalletDir  string           `yaml:"hd_wallet_dir"`  // Directory for storing HD wallets
+	Foundry      FoundryConfig    `yaml:"foundry"`
 }
 
 // FoundryConfig contains Foundry (forge) configuration for Solidity rules

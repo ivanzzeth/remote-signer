@@ -27,14 +27,12 @@ func main() {
 	}
 	privKey := key.(ed25519.PrivateKey)
 
-	useNonce := true
 	pollInterval := 2 * time.Second
 	pollTimeout := 5 * time.Second
 	c, err := client.NewClient(client.Config{
 		BaseURL:      "https://localhost:8548",
 		APIKeyID:     "dev",
 		PrivateKey:   privKey,
-		UseNonce:     &useNonce,
 		TLSCertFile:  "certs/client.crt",
 		TLSKeyFile:   "certs/client.key",
 		TLSCAFile:    "certs/ca.crt",

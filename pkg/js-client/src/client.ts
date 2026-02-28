@@ -25,6 +25,12 @@ import {
   ListAuditResponse,
   PreviewRuleRequest,
   PreviewRuleResponse,
+  CreateHDWalletRequest,
+  HDWalletResponse,
+  ListHDWalletsResponse,
+  DeriveAddressRequest,
+  DeriveAddressResponse,
+  ListDerivedAddressesResponse,
 } from "./types";
 import {
   RemoteSignerError,
@@ -33,7 +39,7 @@ import {
   TimeoutError,
   ErrorCodes,
 } from "./errors";
-import { parsePrivateKey, generateNonce, signRequest, signRequestWithNonce } from "./crypto";
+import { parsePrivateKey, generateNonce, signRequestWithNonce } from "./crypto";
 
 export class RemoteSignerClient {
   private baseURL: string;
@@ -41,7 +47,6 @@ export class RemoteSignerClient {
   private privateKey: Uint8Array;
   private pollInterval: number;
   private pollTimeout: number;
-  private useNonce: boolean;
   private httpClient: {
     fetch: typeof fetch;
     timeout?: number;
@@ -63,7 +68,6 @@ export class RemoteSignerClient {
     this.privateKey = parsePrivateKey(config.privateKey);
     this.pollInterval = config.pollInterval ?? 2000; // 2 seconds
     this.pollTimeout = config.pollTimeout ?? 300000; // 5 minutes
-    this.useNonce = config.useNonce ?? true;
 
     // Setup HTTP client
     const timeout = config.httpClient?.timeout ?? 30000; // 30 seconds
@@ -459,6 +463,79 @@ export class RemoteSignerClient {
     return response;
   }
 
+  // ==========================================================================
+  // HD Wallet management (requires admin API key)
+  // ==========================================================================
+
+  /**
+   * Create a new HD wallet
+   */
+  async createHDWallet(
+    req: CreateHDWalletRequest
+  ): Promise<HDWalletResponse> {
+    const response = await this.request<HDWalletResponse>(
+      "POST",
+      "/api/v1/evm/hd-wallets",
+      { action: "create", ...req }
+    );
+    return response;
+  }
+
+  /**
+   * Import an HD wallet from a mnemonic
+   */
+  async importHDWallet(
+    req: CreateHDWalletRequest
+  ): Promise<HDWalletResponse> {
+    const response = await this.request<HDWalletResponse>(
+      "POST",
+      "/api/v1/evm/hd-wallets",
+      { action: "import", ...req }
+    );
+    return response;
+  }
+
+  /**
+   * List all HD wallets
+   */
+  async listHDWallets(): Promise<ListHDWalletsResponse> {
+    const response = await this.request<ListHDWalletsResponse>(
+      "GET",
+      "/api/v1/evm/hd-wallets",
+      null
+    );
+    return response;
+  }
+
+  /**
+   * Derive address(es) from an HD wallet
+   */
+  async deriveAddress(
+    primaryAddr: string,
+    req: DeriveAddressRequest
+  ): Promise<DeriveAddressResponse> {
+    const response = await this.request<DeriveAddressResponse>(
+      "POST",
+      `/api/v1/evm/hd-wallets/${primaryAddr}/derive`,
+      req
+    );
+    return response;
+  }
+
+  /**
+   * List derived addresses for an HD wallet
+   */
+  async listDerivedAddresses(
+    primaryAddr: string
+  ): Promise<ListDerivedAddressesResponse> {
+    const response = await this.request<ListDerivedAddressesResponse>(
+      "GET",
+      `/api/v1/evm/hd-wallets/${primaryAddr}/derived`,
+      null
+    );
+    return response;
+  }
+
   /**
    * Poll for the result of a pending request
    */
@@ -509,40 +586,24 @@ export class RemoteSignerClient {
     const bodyBytes = body ? new TextEncoder().encode(JSON.stringify(body)) : new Uint8Array(0);
     const timestamp = Date.now();
 
-    // Sign the request
-    let signature: string;
-    let nonce: string | undefined;
-
-    if (this.useNonce) {
-      nonce = generateNonce();
-      signature = signRequestWithNonce(
-        this.privateKey,
-        timestamp,
-        nonce,
-        method,
-        path,
-        bodyBytes
-      );
-    } else {
-      signature = signRequest(
-        this.privateKey,
-        timestamp,
-        method,
-        path,
-        bodyBytes
-      );
-    }
+    // Sign the request with nonce for replay protection
+    const nonce = generateNonce();
+    const signature = signRequestWithNonce(
+      this.privateKey,
+      timestamp,
+      nonce,
+      method,
+      path,
+      bodyBytes
+    );
 
     // Build headers
     const headers: Record<string, string> = {
       "X-API-Key-ID": this.apiKeyID,
       "X-Timestamp": timestamp.toString(),
+      "X-Nonce": nonce,
       "X-Signature": signature,
     };
-
-    if (nonce) {
-      headers["X-Nonce"] = nonce;
-    }
 
     if (body) {
       headers["Content-Type"] = "application/json";

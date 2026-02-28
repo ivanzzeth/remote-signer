@@ -189,11 +189,7 @@ func initTestServices(
 	}
 
 	// Signer manager
-	tempKeystoreDir, err := os.MkdirTemp("", "e2e-tls-keystores-*")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create temp keystore directory: %w", err)
-	}
-	signerManager, err := evm.NewSignerManager(evmRegistry, tempKeystoreDir, log)
+	signerManager, err := evm.NewSignerManager(evmRegistry, log)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create signer manager: %w", err)
 	}

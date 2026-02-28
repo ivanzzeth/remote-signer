@@ -39,8 +39,19 @@ chains:
       #     password_env: "EVM_KEYSTORE_PASSWORD_1"
       #     enabled: true
 
+      # HD Wallets - derive multiple addresses from a single mnemonic
+      # hd_wallets:
+      #   - path: "./data/hd-wallets/wallet1.json"
+      #     password_env: "HD_WALLET_PASSWORD_1"
+      #     # password_stdin: false    # Set true to read password from stdin
+      #     derive_indices: [0, 1, 2]  # Indices to derive at startup
+      #     enabled: true
+
     # Directory for storing dynamically created keystores via API
     keystore_dir: "./data/keystores"
+
+    # Directory for storing HD wallets created via API
+    hd_wallet_dir: "./data/hd-wallets"
 
     # Foundry configuration for Solidity expression rules
     foundry:

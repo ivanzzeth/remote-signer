@@ -18,6 +18,16 @@ import (
 type SignerConfig struct {
 	PrivateKeys []PrivateKeyConfig `yaml:"private_keys"`
 	Keystores   []KeystoreConfig   `yaml:"keystores"`
+	HDWallets   []HDWalletConfig   `yaml:"hd_wallets"`
+}
+
+// HDWalletConfig defines an HD wallet signer configuration
+type HDWalletConfig struct {
+	Path          string   `yaml:"path"`           // Path to encrypted HD wallet file
+	PasswordEnv   string   `yaml:"password_env"`   // Environment variable containing password
+	PasswordStdin bool     `yaml:"password_stdin"` // If true, read password from stdin
+	DeriveIndices []uint32 `yaml:"derive_indices"` // Indices to derive at startup
+	Enabled       bool     `yaml:"enabled"`        // Whether this HD wallet is enabled
 }
 
 // PrivateKeyConfig defines a private key signer configuration
@@ -38,9 +48,73 @@ type KeystoreConfig struct {
 
 // SignerRegistry manages EVM signers
 type SignerRegistry struct {
-	mu      sync.RWMutex
-	signers map[string]*ethsig.Signer // lowercase address -> signer
-	info    map[string]types.SignerInfo
+	mu        sync.RWMutex
+	signers   map[string]*ethsig.Signer           // address -> signer (flat, O(1) lookup)
+	info      map[string]types.SignerInfo           // address -> metadata
+	providers map[types.SignerType]SignerProvider    // type -> provider
+}
+
+// NewEmptySignerRegistry creates an empty registry for provider-based initialization.
+func NewEmptySignerRegistry() *SignerRegistry {
+	return &SignerRegistry{
+		signers:   make(map[string]*ethsig.Signer),
+		info:      make(map[string]types.SignerInfo),
+		providers: make(map[types.SignerType]SignerProvider),
+	}
+}
+
+// RegisterSigner adds a signer to the registry. Called by providers during init/derive.
+func (r *SignerRegistry) RegisterSigner(address string, signer *ethsig.Signer, info types.SignerInfo) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	addrKey := normalizeAddress(address)
+	if _, exists := r.signers[addrKey]; exists {
+		return types.ErrAlreadyExists
+	}
+
+	r.signers[addrKey] = signer
+	r.info[addrKey] = info
+	return nil
+}
+
+// RegisterProvider registers a provider for a given signer type.
+func (r *SignerRegistry) RegisterProvider(p SignerProvider) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.providers[p.Type()] = p
+}
+
+// Provider returns the provider for a given signer type.
+func (r *SignerRegistry) Provider(t types.SignerType) (SignerProvider, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	p, ok := r.providers[t]
+	return p, ok
+}
+
+// SignerCount returns the number of registered signers.
+func (r *SignerRegistry) SignerCount() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	return len(r.signers)
+}
+
+// Close closes all registered providers (zeroize keys, cleanup).
+func (r *SignerRegistry) Close() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	var firstErr error
+	for _, p := range r.providers {
+		if err := p.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 // NewSignerRegistry creates a new signer registry from configuration
@@ -71,8 +145,9 @@ func NewSignerRegistryWithProvider(cfg SignerConfig, provider PasswordProvider) 
 	}
 
 	registry := &SignerRegistry{
-		signers: make(map[string]*ethsig.Signer),
-		info:    make(map[string]types.SignerInfo),
+		signers:   make(map[string]*ethsig.Signer),
+		info:      make(map[string]types.SignerInfo),
+		providers: make(map[types.SignerType]SignerProvider),
 	}
 
 	// Load private key signers
