@@ -12,21 +12,25 @@ import (
 
 // IPWhitelist holds the parsed IP whitelist configuration
 type IPWhitelist struct {
-	enabled    bool
-	allowedIPs map[string]struct{} // exact IP matches
-	allowedCIDRs []*net.IPNet       // CIDR ranges
-	trustProxy bool
-	logger     *slog.Logger
+	enabled        bool
+	allowedIPs     map[string]struct{} // exact IP matches
+	allowedCIDRs   []*net.IPNet        // CIDR ranges
+	trustProxy     bool
+	trustedProxies map[string]struct{} // exact trusted proxy IP matches
+	trustedProxyCIDRs []*net.IPNet     // trusted proxy CIDR ranges
+	logger         *slog.Logger
 }
 
 // NewIPWhitelist creates a new IP whitelist from configuration
 func NewIPWhitelist(cfg config.IPWhitelistConfig, logger *slog.Logger) (*IPWhitelist, error) {
 	w := &IPWhitelist{
-		enabled:      cfg.Enabled,
-		allowedIPs:   make(map[string]struct{}),
-		allowedCIDRs: make([]*net.IPNet, 0),
-		trustProxy:   cfg.TrustProxy,
-		logger:       logger,
+		enabled:           cfg.Enabled,
+		allowedIPs:        make(map[string]struct{}),
+		allowedCIDRs:      make([]*net.IPNet, 0),
+		trustProxy:        cfg.TrustProxy,
+		trustedProxies:    make(map[string]struct{}),
+		trustedProxyCIDRs: make([]*net.IPNet, 0),
+		logger:            logger,
 	}
 
 	if !cfg.Enabled {
@@ -63,11 +67,40 @@ func NewIPWhitelist(cfg config.IPWhitelistConfig, logger *slog.Logger) (*IPWhite
 		}
 	}
 
+	// Parse trusted proxy IPs/CIDRs
+	if cfg.TrustProxy {
+		if len(cfg.TrustedProxies) == 0 {
+			logger.Warn("trust_proxy is enabled but no trusted_proxies configured; proxy headers will be ignored (fail-closed)")
+		}
+		for _, entry := range cfg.TrustedProxies {
+			entry = strings.TrimSpace(entry)
+			if entry == "" {
+				continue
+			}
+			if strings.Contains(entry, "/") {
+				_, ipNet, err := net.ParseCIDR(entry)
+				if err != nil {
+					return nil, fmt.Errorf("invalid trusted_proxies CIDR range '%s': %w", entry, err)
+				}
+				w.trustedProxyCIDRs = append(w.trustedProxyCIDRs, ipNet)
+				logger.Info("IP whitelist: added trusted proxy CIDR", "cidr", entry)
+			} else {
+				ip := net.ParseIP(entry)
+				if ip == nil {
+					return nil, fmt.Errorf("invalid trusted_proxies IP address '%s'", entry)
+				}
+				w.trustedProxies[ip.String()] = struct{}{}
+				logger.Info("IP whitelist: added trusted proxy IP", "ip", ip.String())
+			}
+		}
+	}
+
 	logger.Info("IP whitelist initialized",
 		"enabled", cfg.Enabled,
 		"allowed_ips_count", len(w.allowedIPs),
 		"allowed_cidrs_count", len(w.allowedCIDRs),
 		"trust_proxy", cfg.TrustProxy,
+		"trusted_proxies_count", len(w.trustedProxies)+len(w.trustedProxyCIDRs),
 	)
 
 	return w, nil
@@ -103,10 +136,47 @@ func (w *IPWhitelist) IsAllowed(ipStr string) bool {
 	return false
 }
 
-// GetClientIP extracts the client IP from the request
-// If trustProxy is enabled, it checks X-Forwarded-For and X-Real-IP headers
+// isTrustedProxy checks if an IP is in the trusted proxy list
+func (w *IPWhitelist) isTrustedProxy(ipStr string) bool {
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false
+	}
+	normalized := ip.String()
+	if _, ok := w.trustedProxies[normalized]; ok {
+		return true
+	}
+	for _, cidr := range w.trustedProxyCIDRs {
+		if cidr.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// extractRemoteIP extracts the direct remote IP from r.RemoteAddr (without port)
+func (w *IPWhitelist) extractRemoteIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		if ip := net.ParseIP(r.RemoteAddr); ip != nil {
+			return ip.String()
+		}
+		return r.RemoteAddr
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.String()
+	}
+	return host
+}
+
+// GetClientIP extracts the client IP from the request.
+// If trustProxy is enabled AND the direct connection comes from a trusted proxy,
+// it checks X-Forwarded-For and X-Real-IP headers.
+// Otherwise, it uses RemoteAddr directly (fail-closed).
 func (w *IPWhitelist) GetClientIP(r *http.Request) string {
-	if w.trustProxy {
+	remoteIP := w.extractRemoteIP(r)
+
+	if w.trustProxy && w.isTrustedProxy(remoteIP) {
 		// Check X-Forwarded-For header (can contain multiple IPs)
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 			// Take the first IP (original client)
@@ -127,20 +197,7 @@ func (w *IPWhitelist) GetClientIP(r *http.Request) string {
 		}
 	}
 
-	// Fall back to RemoteAddr
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		// RemoteAddr might not have a port
-		if ip := net.ParseIP(r.RemoteAddr); ip != nil {
-			return ip.String()
-		}
-		return r.RemoteAddr
-	}
-
-	if ip := net.ParseIP(host); ip != nil {
-		return ip.String()
-	}
-	return host
+	return remoteIP
 }
 
 // IPWhitelistMiddleware creates an IP whitelist middleware

@@ -86,6 +86,11 @@ func run() error {
 
 	log.Info("Starting remote-signer service")
 
+	// Security: warn if swap is enabled (private keys could be swapped to disk)
+	checkSwapEnabled(log)
+	// Security: disable core dumps, lock memory pages to prevent key leakage
+	hardenProcessMemory(log)
+
 	// Initialize database
 	db, err := storage.NewDB(cfg.Database)
 	if err != nil {
@@ -450,6 +455,7 @@ func run() error {
 	router, err := api.NewRouter(authVerifier, signService, evmSignerManager, ruleRepo, auditRepo, log, api.RouterConfig{
 		Version:           version,
 		IPWhitelistConfig: ipWhitelist,
+		IPRateLimit:       cfg.Security.IPRateLimit,
 		SolidityValidator: solidityValidator,
 		JSEvaluator:       jsEval,
 		Template:          &api.TemplateConfig{

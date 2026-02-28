@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"log/slog"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -112,6 +113,42 @@ func (r *RateLimiter) StartCleanupRoutine(interval time.Duration, stop <-chan st
 			}
 		}
 	}()
+}
+
+// IPRateLimitMiddleware creates a pre-auth rate limiting middleware based on client IP.
+// Protects against unauthenticated flood attacks (e.g. brute-force with invalid API keys).
+// If limit <= 0, IP rate limiting is disabled (pass-through).
+func IPRateLimitMiddleware(limiter *RateLimiter, ipWhitelist *IPWhitelist, limit int) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		if limit <= 0 {
+			return next // disabled
+		}
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var clientIP string
+			if ipWhitelist != nil {
+				clientIP = ipWhitelist.GetClientIP(r)
+			} else {
+				host, _, err := net.SplitHostPort(r.RemoteAddr)
+				if err != nil {
+					host = r.RemoteAddr
+				}
+				clientIP = host
+			}
+
+			key := "ip:" + clientIP
+			if !limiter.Allow(key, limit) {
+				limiter.logger.Warn("IP rate limit exceeded",
+					"client_ip", clientIP,
+					"limit", limit,
+					"path", r.URL.Path,
+				)
+				http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // PermissionMiddleware checks if the API key has permission for the request

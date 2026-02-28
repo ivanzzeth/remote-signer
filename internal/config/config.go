@@ -191,6 +191,9 @@ type FoundryConfig struct {
 type SecurityConfig struct {
 	MaxRequestAge    time.Duration     `yaml:"max_request_age"`
 	RateLimitDefault int               `yaml:"rate_limit_default"`
+	// IPRateLimit is the maximum requests per minute from a single IP address (pre-auth).
+	// Protects against unauthenticated flood attacks. Default: 200.
+	IPRateLimit int `yaml:"ip_rate_limit"`
 	IPWhitelist      IPWhitelistConfig `yaml:"ip_whitelist"`
 	// ManualApprovalEnabled: when true, requests with no whitelist match go to manual approval;
 	// when false (default), they are rejected immediately. Default false for stricter security.
@@ -221,10 +224,15 @@ type IPWhitelistConfig struct {
 	// AllowedIPs is a list of allowed IP addresses or CIDR ranges
 	// Examples: "192.168.1.1", "10.0.0.0/8", "::1"
 	AllowedIPs []string `yaml:"allowed_ips"`
-	// AllowedCIDRs is parsed from AllowedIPs during validation (internal use)
 	// TrustProxy enables parsing X-Forwarded-For and X-Real-IP headers
 	// WARNING: Only enable this if running behind a trusted reverse proxy
 	TrustProxy bool `yaml:"trust_proxy"`
+	// TrustedProxies is a list of IP addresses or CIDR ranges of trusted reverse proxies
+	// When TrustProxy is true, X-Forwarded-For/X-Real-IP headers are only honored
+	// if the request's direct RemoteAddr matches one of these entries.
+	// If TrustProxy is true but TrustedProxies is empty, proxy headers are ignored
+	// (fail-closed: no trusted proxies means no header trust).
+	TrustedProxies []string `yaml:"trusted_proxies"`
 }
 
 // LoggerConfig contains logging configuration
@@ -373,6 +381,10 @@ func setDefaults(cfg *Config) {
 
 	if cfg.Security.RateLimitDefault <= 0 {
 		cfg.Security.RateLimitDefault = 100
+	}
+
+	if cfg.Security.IPRateLimit <= 0 {
+		cfg.Security.IPRateLimit = 200
 	}
 
 	// Default to requiring nonce for security

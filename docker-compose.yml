@@ -51,6 +51,11 @@ services:
         reservations:
           cpus: '1'
           memory: 1G
+    # Security: Disable swap to prevent private keys from being written to disk.
+    # memswap_limit = memory limit means total (RAM + swap) = RAM, so swap quota = 0.
+    # Even if the host has swap enabled, this container cannot use it.
+    memswap_limit: 4G
+    mem_swappiness: 0
     # Security: Prevent privilege escalation
     security_opt:
       - no-new-privileges:true
@@ -59,6 +64,15 @@ services:
       - ALL
     cap_add:
       - NET_BIND_SERVICE
+      # IPC_LOCK: allows mlockall() to lock all memory pages in RAM,
+      # preventing private keys from being paged to disk under any circumstance.
+      - IPC_LOCK
+    # Raise memlock ulimit so mlockall() can lock the full memory allocation.
+    # Docker defaults to 64KB which is far too small; -1 means unlimited.
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
     environment:
       # Database connection (host network: connect via localhost, port exposed by postgres container)
       DATABASE_DSN: "postgres://${POSTGRES_USER:-signer}:${POSTGRES_PASSWORD:-signer_password}@127.0.0.1:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-remote_signer}?sslmode=disable"
