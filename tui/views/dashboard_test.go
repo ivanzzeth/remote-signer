@@ -10,7 +10,31 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
+	"github.com/ivanzzeth/remote-signer/pkg/client/mock"
 )
+
+// mockHealthChecker implements the healthChecker interface for testing.
+type mockHealthChecker struct {
+	HealthFunc func(ctx context.Context) (*client.HealthResponse, error)
+}
+
+func (m *mockHealthChecker) Health(ctx context.Context) (*client.HealthResponse, error) {
+	if m.HealthFunc != nil {
+		return m.HealthFunc(ctx)
+	}
+	return &client.HealthResponse{}, nil
+}
+
+func newTestDashboardModel(t *testing.T) (*DashboardModel, *mockHealthChecker, *mock.RequestService, *mock.RuleService) {
+	t.Helper()
+	health := &mockHealthChecker{}
+	requests := mock.NewRequestService()
+	rules := mock.NewRuleService()
+	model, err := newDashboardModelFromServices(health, requests, rules, context.Background())
+	require.NoError(t, err)
+	return model, health, requests, rules
+}
 
 func TestNewDashboardModel(t *testing.T) {
 	t.Run("returns error when client is nil", func(t *testing.T) {
@@ -20,16 +44,16 @@ func TestNewDashboardModel(t *testing.T) {
 	})
 
 	t.Run("returns error when context is nil", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		_, err := NewDashboardModel(mockClient, nil)
+		health := &mockHealthChecker{}
+		requests := mock.NewRequestService()
+		rules := mock.NewRuleService()
+		_, err := newDashboardModelFromServices(health, requests, rules, nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "context is required")
 	})
 
 	t.Run("creates model successfully", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewDashboardModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _, _, _ := newTestDashboardModel(t)
 		require.NotNil(t, model)
 		assert.True(t, model.loading)
 	})
@@ -37,9 +61,7 @@ func TestNewDashboardModel(t *testing.T) {
 
 func TestDashboardModel_Update(t *testing.T) {
 	t.Run("handles dashboard data message success", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewDashboardModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _, _, _ := newTestDashboardModel(t)
 
 		data := &DashboardData{
 			Health: &client.HealthResponse{
@@ -67,9 +89,7 @@ func TestDashboardModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles dashboard data message error", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewDashboardModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _, _, _ := newTestDashboardModel(t)
 
 		msg := DashboardDataMsg{Data: nil, Err: errors.New("connection failed")}
 		newModel, _ := model.Update(msg)
@@ -81,19 +101,17 @@ func TestDashboardModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles refresh key", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		mockClient.HealthFunc = func(ctx context.Context) (*client.HealthResponse, error) {
+		model, health, requests, rules := newTestDashboardModel(t)
+		health.HealthFunc = func(ctx context.Context) (*client.HealthResponse, error) {
 			return &client.HealthResponse{Status: "healthy"}, nil
 		}
-		mockClient.ListRequestsFunc = func(ctx context.Context, filter *client.ListRequestsFilter) (*client.ListRequestsResponse, error) {
-			return &client.ListRequestsResponse{}, nil
+		requests.ListFunc = func(ctx context.Context, filter *evm.ListRequestsFilter) (*evm.ListRequestsResponse, error) {
+			return &evm.ListRequestsResponse{}, nil
 		}
-		mockClient.ListRulesFunc = func(ctx context.Context, filter *client.ListRulesFilter) (*client.ListRulesResponse, error) {
-			return &client.ListRulesResponse{}, nil
+		rules.ListFunc = func(ctx context.Context, filter *evm.ListRulesFilter) (*evm.ListRulesResponse, error) {
+			return &evm.ListRulesResponse{}, nil
 		}
 
-		model, err := NewDashboardModel(mockClient, context.Background())
-		require.NoError(t, err)
 		model.loading = false
 
 		newModel, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
@@ -106,9 +124,7 @@ func TestDashboardModel_Update(t *testing.T) {
 
 func TestDashboardModel_View(t *testing.T) {
 	t.Run("renders loading state", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewDashboardModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _, _, _ := newTestDashboardModel(t)
 		model.loading = true
 		model.width = 100
 		model.height = 30
@@ -118,9 +134,7 @@ func TestDashboardModel_View(t *testing.T) {
 	})
 
 	t.Run("renders error state", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewDashboardModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _, _, _ := newTestDashboardModel(t)
 		model.loading = false
 		model.err = errors.New("test error")
 		model.width = 100
@@ -131,9 +145,7 @@ func TestDashboardModel_View(t *testing.T) {
 	})
 
 	t.Run("renders dashboard with data", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewDashboardModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _, _, _ := newTestDashboardModel(t)
 		model.loading = false
 		model.connected = true
 		model.width = 100
@@ -159,19 +171,16 @@ func TestDashboardModel_View(t *testing.T) {
 
 func TestDashboardModel_LoadData(t *testing.T) {
 	t.Run("loads health and counts", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		mockClient.HealthFunc = func(ctx context.Context) (*client.HealthResponse, error) {
+		model, health, requests, rules := newTestDashboardModel(t)
+		health.HealthFunc = func(ctx context.Context) (*client.HealthResponse, error) {
 			return &client.HealthResponse{Status: "healthy", Version: "1.0.0"}, nil
 		}
-		mockClient.ListRequestsFunc = func(ctx context.Context, filter *client.ListRequestsFilter) (*client.ListRequestsResponse, error) {
-			return &client.ListRequestsResponse{Total: 5}, nil
+		requests.ListFunc = func(ctx context.Context, filter *evm.ListRequestsFilter) (*evm.ListRequestsResponse, error) {
+			return &evm.ListRequestsResponse{Total: 5}, nil
 		}
-		mockClient.ListRulesFunc = func(ctx context.Context, filter *client.ListRulesFilter) (*client.ListRulesResponse, error) {
-			return &client.ListRulesResponse{Total: 3}, nil
+		rules.ListFunc = func(ctx context.Context, filter *evm.ListRulesFilter) (*evm.ListRulesResponse, error) {
+			return &evm.ListRulesResponse{Total: 3}, nil
 		}
-
-		model, err := NewDashboardModel(mockClient, context.Background())
-		require.NoError(t, err)
 
 		cmd := model.loadData()
 		msg := cmd()
@@ -184,13 +193,10 @@ func TestDashboardModel_LoadData(t *testing.T) {
 	})
 
 	t.Run("returns error on health check failure", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		mockClient.HealthFunc = func(ctx context.Context) (*client.HealthResponse, error) {
+		model, health, _, _ := newTestDashboardModel(t)
+		health.HealthFunc = func(ctx context.Context) (*client.HealthResponse, error) {
 			return nil, errors.New("connection refused")
 		}
-
-		model, err := NewDashboardModel(mockClient, context.Background())
-		require.NoError(t, err)
 
 		cmd := model.loadData()
 		msg := cmd()
@@ -204,9 +210,7 @@ func TestDashboardModel_LoadData(t *testing.T) {
 
 func TestDashboardModel_SetSize(t *testing.T) {
 	t.Run("sets width and height", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewDashboardModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _, _, _ := newTestDashboardModel(t)
 
 		model.SetSize(120, 40)
 		assert.Equal(t, 120, model.width)
@@ -216,19 +220,17 @@ func TestDashboardModel_SetSize(t *testing.T) {
 
 func TestDashboardModel_Refresh(t *testing.T) {
 	t.Run("sets loading and returns command", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		mockClient.HealthFunc = func(ctx context.Context) (*client.HealthResponse, error) {
+		model, health, requests, rules := newTestDashboardModel(t)
+		health.HealthFunc = func(ctx context.Context) (*client.HealthResponse, error) {
 			return &client.HealthResponse{}, nil
 		}
-		mockClient.ListRequestsFunc = func(ctx context.Context, filter *client.ListRequestsFilter) (*client.ListRequestsResponse, error) {
-			return &client.ListRequestsResponse{}, nil
+		requests.ListFunc = func(ctx context.Context, filter *evm.ListRequestsFilter) (*evm.ListRequestsResponse, error) {
+			return &evm.ListRequestsResponse{}, nil
 		}
-		mockClient.ListRulesFunc = func(ctx context.Context, filter *client.ListRulesFilter) (*client.ListRulesResponse, error) {
-			return &client.ListRulesResponse{}, nil
+		rules.ListFunc = func(ctx context.Context, filter *evm.ListRulesFilter) (*evm.ListRulesResponse, error) {
+			return &evm.ListRulesResponse{}, nil
 		}
 
-		model, err := NewDashboardModel(mockClient, context.Background())
-		require.NoError(t, err)
 		model.loading = false
 
 		cmd := model.Refresh()

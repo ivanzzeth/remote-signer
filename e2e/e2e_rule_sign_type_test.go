@@ -12,12 +12,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 )
 
 func TestRule_SignTypeRestrictionAllowsPersonalSign(t *testing.T) {
 	address := common.HexToAddress(signerAddress)
-	signer := adminClient.GetSigner(address, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	sig, err := signer.PersonalSign("Test sign type restriction allows personal_sign")
 	require.NoError(t, err, "Sign type restriction should allow personal_sign")
 	assert.Len(t, sig, 65)
@@ -25,7 +25,7 @@ func TestRule_SignTypeRestrictionAllowsPersonalSign(t *testing.T) {
 
 func TestRule_SignTypeRestrictionAllowsTransaction(t *testing.T) {
 	address := common.HexToAddress(signerAddress)
-	signer := adminClient.GetSigner(address, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	to := common.HexToAddress(treasuryAddress)
 	tx := types.NewTx(&types.LegacyTx{
 		Nonce:    102,
@@ -43,7 +43,7 @@ func TestRule_SignTypeRestrictionAllowsTransaction(t *testing.T) {
 
 func TestRule_SignTypeRestrictionAllowsHashSign(t *testing.T) {
 	address := common.HexToAddress(signerAddress)
-	signer := adminClient.GetSigner(address, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	hash := common.HexToHash("0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890")
 	sig, err := signer.SignHash(hash)
 	require.NoError(t, err, "Sign type restriction should allow hash signing")
@@ -52,18 +52,18 @@ func TestRule_SignTypeRestrictionAllowsHashSign(t *testing.T) {
 
 func TestRule_CreateSignTypeRestrictionViaAPI(t *testing.T) {
 	ctx := context.Background()
-	createReq := &client.CreateRuleRequest{
+	createReq := &evm.CreateRuleRequest{
 		Name:    "Test Sign Type Restriction via API",
 		Type:    "sign_type_restriction",
 		Mode:    "whitelist",
 		Enabled: true,
 		Config:  map[string]interface{}{"allowed_sign_types": []string{"personal", "transaction"}},
 	}
-	created, err := adminClient.CreateRule(ctx, createReq)
+	created, err := adminClient.EVM.Rules.Create(ctx, createReq)
 	require.NoError(t, err)
 	assert.Equal(t, "sign_type_restriction", string(created.Type))
 	assert.Equal(t, "whitelist", string(created.Mode))
-	require.NoError(t, adminClient.DeleteRule(ctx, created.ID))
+	require.NoError(t, adminClient.EVM.Rules.Delete(ctx, created.ID))
 }
 
 // TestSecurityExample_SignTypeAllowsPersonalTypedDataTransaction mirrors rules/security.example.yaml
@@ -71,19 +71,19 @@ func TestRule_CreateSignTypeRestrictionViaAPI(t *testing.T) {
 // transaction pass; hash is not in the example whitelist but config.e2e may allow it, so we do not assert hash rejected.
 func TestSecurityExample_SignTypeAllowsPersonalTypedDataTransaction(t *testing.T) {
 	ctx := context.Background()
-	createReq := &client.CreateRuleRequest{
+	createReq := &evm.CreateRuleRequest{
 		Name:    "E2E Security Example - Allowed signing methods",
 		Type:    "sign_type_restriction",
 		Mode:    "whitelist",
 		Enabled: true,
 		Config:  map[string]interface{}{"allowed_sign_types": []string{"personal", "typed_data", "transaction"}},
 	}
-	created, err := adminClient.CreateRule(ctx, createReq)
+	created, err := adminClient.EVM.Rules.Create(ctx, createReq)
 	require.NoError(t, err)
-	defer func() { _ = adminClient.DeleteRule(ctx, created.ID) }()
+	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, created.ID) }()
 
 	addr := common.HexToAddress(signerAddress)
-	signer := adminClient.GetSigner(addr, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, addr, chainID)
 
 	// personal: allowed by security.example
 	_, err = signer.PersonalSign("security.example equivalent")
@@ -100,18 +100,18 @@ func TestSecurityExample_SignTypeAllowsPersonalTypedDataTransaction(t *testing.T
 
 func TestRule_SignTypeRestrictionBlocksDisallowedType(t *testing.T) {
 	ctx := context.Background()
-	createReq := &client.CreateRuleRequest{
+	createReq := &evm.CreateRuleRequest{
 		Name:    "Test Sign Type Blocklist - Only Transaction",
 		Type:    "sign_type_restriction",
 		Mode:    "blocklist",
 		Enabled: true,
 		Config:  map[string]interface{}{"allowed_sign_types": []string{"personal"}},
 	}
-	created, err := adminClient.CreateRule(ctx, createReq)
+	created, err := adminClient.EVM.Rules.Create(ctx, createReq)
 	require.NoError(t, err)
-	defer func() { _ = adminClient.DeleteRule(ctx, created.ID) }()
+	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, created.ID) }()
 	address := common.HexToAddress(signerAddress)
-	signer := adminClient.GetSigner(address, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	_, err = signer.PersonalSign("This should be blocked")
 	require.Error(t, err, "Personal sign should be blocked by sign_type_restriction blocklist")
 }

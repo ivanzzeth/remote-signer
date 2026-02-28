@@ -20,7 +20,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/config"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
-	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 )
 
 // TestConfigDrivenRuleValidation loads test cases from config.e2e.yaml and submits them
@@ -51,10 +51,10 @@ func TestConfigDrivenRuleValidation(t *testing.T) {
 			tc := tc // capture loop variable
 			ruleName := rule.Name
 			t.Run(ruleName+"/"+tc.Name, func(t *testing.T) {
-				req, err := testCaseInputToClientSignRequest(tc.Input)
+				req, err := testCaseInputToSignRequest(tc.Input)
 				require.NoError(t, err, "failed to convert test case input to sign request")
 
-				resp, signErr := adminClient.Sign(ctx, req)
+				resp, signErr := adminClient.EVM.Sign.Execute(ctx, req)
 				if tc.ExpectPass {
 					require.NoError(t, signErr, "expected pass but got error for %s/%s", ruleName, tc.Name)
 					require.NotNil(t, resp, "expected non-nil response for %s/%s", ruleName, tc.Name)
@@ -120,9 +120,9 @@ func expandRulesFromConfig(cfg *config.Config, configPath string) ([]config.Rule
 	return config.ExpandInstanceRules(cfg.Rules, loadedTemplates)
 }
 
-// testCaseInputToClientSignRequest converts a YAML test case input map to a client.SignRequest.
+// testCaseInputToSignRequest converts a YAML test case input map to an evm.SignRequest.
 // It fills in required HTTP API fields (types, gas, txType) that rule-engine-level test cases omit.
-func testCaseInputToClientSignRequest(input map[string]interface{}) (*client.SignRequest, error) {
+func testCaseInputToSignRequest(input map[string]interface{}) (*evm.SignRequest, error) {
 	signType := stringFromMap(input, "sign_type")
 	chainID := stringFromMap(input, "chain_id")
 	signer := stringFromMap(input, "signer")
@@ -134,7 +134,7 @@ func testCaseInputToClientSignRequest(input map[string]interface{}) (*client.Sig
 		chainID = "1"
 	}
 
-	req := &client.SignRequest{
+	req := &evm.SignRequest{
 		ChainID:      chainID,
 		SignerAddress: signer,
 		SignType:      signType,

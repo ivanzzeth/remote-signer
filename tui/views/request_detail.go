@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 	"github.com/ivanzzeth/remote-signer/tui/styles"
 )
 
@@ -22,15 +23,15 @@ var ruleModes = []string{"whitelist", "blocklist"}
 
 // RequestDetailModel represents the request detail view
 type RequestDetailModel struct {
-	client        client.ClientInterface
+	requests_svc  evm.RequestAPI
 	ctx           context.Context
 	width         int
 	height        int
 	spinner       spinner.Model
 	loading       bool
 	err           error
-	request       *client.RequestStatus
-	previewRule   *client.Rule
+	request       *evm.RequestStatus
+	previewRule   *evm.Rule
 	previewError  string
 	showApprove   bool
 	showReject    bool
@@ -48,13 +49,13 @@ type RequestDetailModel struct {
 
 // RequestDetailDataMsg is sent when request detail is loaded
 type RequestDetailDataMsg struct {
-	Request *client.RequestStatus
+	Request *evm.RequestStatus
 	Err     error
 }
 
 // PreviewRuleMsg is sent when rule preview is loaded
 type PreviewRuleMsg struct {
-	Rule *client.Rule
+	Rule *evm.Rule
 	Err  error
 }
 
@@ -66,8 +67,16 @@ type ApprovalResultMsg struct {
 }
 
 // NewRequestDetailModel creates a new request detail model
-func NewRequestDetailModel(c client.ClientInterface, ctx context.Context) (*RequestDetailModel, error) {
+func NewRequestDetailModel(c *client.Client, ctx context.Context) (*RequestDetailModel, error) {
 	if c == nil {
+		return nil, fmt.Errorf("client is required")
+	}
+	return newRequestDetailModelFromService(c.EVM.Requests, ctx)
+}
+
+// newRequestDetailModelFromService creates a request detail model from a RequestAPI (for testing).
+func newRequestDetailModelFromService(svc evm.RequestAPI, ctx context.Context) (*RequestDetailModel, error) {
+	if svc == nil {
 		return nil, fmt.Errorf("client is required")
 	}
 	if ctx == nil {
@@ -87,7 +96,7 @@ func NewRequestDetailModel(c client.ClientInterface, ctx context.Context) (*Requ
 	maxValueInput.Width = 50
 
 	return &RequestDetailModel{
-		client:        c,
+		requests_svc:  svc,
 		ctx:           ctx,
 		spinner:       s,
 		ruleNameInput: nameInput,
@@ -159,7 +168,7 @@ func (m *RequestDetailModel) ResetGoBack() {
 
 func (m *RequestDetailModel) loadRequestData(requestID string) tea.Cmd {
 	return func() tea.Msg {
-		req, err := m.client.GetRequest(m.ctx, requestID)
+		req, err := m.requests_svc.Get(m.ctx, requestID)
 		if err != nil {
 			return RequestDetailDataMsg{Err: err}
 		}
@@ -175,7 +184,7 @@ func (m *RequestDetailModel) loadPreviewRule(requestID string) tea.Cmd {
 			return PreviewRuleMsg{Rule: nil, Err: nil}
 		}
 
-		req := &client.PreviewRuleRequest{
+		req := &evm.PreviewRuleRequest{
 			RuleType: ruleType,
 			RuleMode: ruleModes[m.ruleModeIdx],
 			RuleName: m.ruleNameInput.Value(),
@@ -184,7 +193,7 @@ func (m *RequestDetailModel) loadPreviewRule(requestID string) tea.Cmd {
 			req.MaxValue = m.maxValueInput.Value()
 		}
 
-		preview, err := m.client.PreviewRule(m.ctx, requestID, req)
+		preview, err := m.requests_svc.PreviewRule(m.ctx, requestID, req)
 		if err != nil {
 			return PreviewRuleMsg{Err: err}
 		}
@@ -194,7 +203,7 @@ func (m *RequestDetailModel) loadPreviewRule(requestID string) tea.Cmd {
 
 func (m *RequestDetailModel) approveRequest() tea.Cmd {
 	return func() tea.Msg {
-		req := &client.ApproveRequest{
+		req := &evm.ApproveRequest{
 			Approved: true,
 		}
 
@@ -208,7 +217,7 @@ func (m *RequestDetailModel) approveRequest() tea.Cmd {
 			}
 		}
 
-		resp, err := m.client.ApproveSignRequest(m.ctx, m.request.ID, req)
+		resp, err := m.requests_svc.Approve(m.ctx, m.request.ID, req)
 		if err != nil {
 			return ApprovalResultMsg{Success: false, Err: err}
 		}
@@ -223,11 +232,11 @@ func (m *RequestDetailModel) approveRequest() tea.Cmd {
 
 func (m *RequestDetailModel) rejectRequest() tea.Cmd {
 	return func() tea.Msg {
-		req := &client.ApproveRequest{
+		req := &evm.ApproveRequest{
 			Approved: false,
 		}
 
-		resp, err := m.client.ApproveSignRequest(m.ctx, m.request.ID, req)
+		resp, err := m.requests_svc.Approve(m.ctx, m.request.ID, req)
 		if err != nil {
 			return ApprovalResultMsg{Success: false, Err: err}
 		}
@@ -613,7 +622,7 @@ func (m *RequestDetailModel) renderApproveDialog() string {
 	// Generate rule option
 	checkbox := "[ ]"
 	if m.generateRule {
-		checkbox = "[✓]"
+		checkbox = "[x]"
 	}
 	content.WriteString(fmt.Sprintf("%s Generate rule from this approval (press 'g' to toggle)\n", checkbox))
 

@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 )
 
 // =============================================================================
@@ -391,10 +392,10 @@ func TestTLS_SigningOverMTLS(t *testing.T) {
 
 	// Test: Sign a message over mTLS
 	ctx := context.Background()
-	resp, err := c.Sign(ctx, &client.SignRequest{
+	resp, err := c.EVM.Sign.Execute(ctx, &evm.SignRequest{
 		ChainID:       testChainID,
 		SignerAddress: testSignerAddress,
-		SignType:      client.SignTypePersonal,
+		SignType:      evm.SignTypePersonal,
 		Payload:       []byte(`{"message":"Hello over mTLS!"}`),
 	})
 	require.NoError(t, err)

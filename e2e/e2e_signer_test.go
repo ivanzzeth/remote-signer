@@ -9,13 +9,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 )
 
 func TestSigner_ListSigners(t *testing.T) {
 	ctx := context.Background()
 
 	// List signers (should include the test signer)
-	resp, err := adminClient.ListSigners(ctx, &client.ListSignersFilter{
+	resp, err := adminClient.EVM.Signers.List(ctx, &evm.ListSignersFilter{
 		Limit: 10,
 	})
 	require.NoError(t, err)
@@ -39,7 +40,7 @@ func TestSigner_ListSignersWithTypeFilter(t *testing.T) {
 	ctx := context.Background()
 
 	// Filter by private_key type
-	resp, err := adminClient.ListSigners(ctx, &client.ListSignersFilter{
+	resp, err := adminClient.EVM.Signers.List(ctx, &evm.ListSignersFilter{
 		Type:  "private_key",
 		Limit: 10,
 	})
@@ -52,7 +53,7 @@ func TestSigner_ListSignersWithTypeFilter(t *testing.T) {
 	}
 
 	// Filter by keystore type (should be empty initially)
-	resp, err = adminClient.ListSigners(ctx, &client.ListSignersFilter{
+	resp, err = adminClient.EVM.Signers.List(ctx, &evm.ListSignersFilter{
 		Type:  "keystore",
 		Limit: 10,
 	})
@@ -65,7 +66,7 @@ func TestSigner_ListSignersPagination(t *testing.T) {
 	ctx := context.Background()
 
 	// Test pagination with small limit
-	resp, err := adminClient.ListSigners(ctx, &client.ListSignersFilter{
+	resp, err := adminClient.EVM.Signers.List(ctx, &evm.ListSignersFilter{
 		Limit: 1,
 	})
 	require.NoError(t, err)
@@ -77,7 +78,7 @@ func TestSigner_ListSignersPagination(t *testing.T) {
 		assert.True(t, resp.HasMore, "HasMore should be true when more signers exist")
 
 		// Get next page
-		resp2, err := adminClient.ListSigners(ctx, &client.ListSignersFilter{
+		resp2, err := adminClient.EVM.Signers.List(ctx, &evm.ListSignersFilter{
 			Offset: 1,
 			Limit:  1,
 		})
@@ -100,14 +101,14 @@ func TestSigner_CreateKeystoreSigner(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a new keystore signer
-	req := &client.CreateSignerRequest{
+	req := &evm.CreateSignerRequest{
 		Type: "keystore",
-		Keystore: &client.CreateKeystoreParams{
+		Keystore: &evm.CreateKeystoreParams{
 			Password: "test-password-e2e-123",
 		},
 	}
 
-	signer, err := adminClient.CreateSigner(ctx, req)
+	signer, err := adminClient.EVM.Signers.Create(ctx, req)
 	require.NoError(t, err)
 	require.NotNil(t, signer)
 
@@ -116,7 +117,7 @@ func TestSigner_CreateKeystoreSigner(t *testing.T) {
 	assert.True(t, signer.Enabled, "Created signer should be enabled")
 
 	// Verify the new signer appears in the list
-	resp, err := adminClient.ListSigners(ctx, &client.ListSignersFilter{
+	resp, err := adminClient.EVM.Signers.List(ctx, &evm.ListSignersFilter{
 		Limit: 100,
 	})
 	require.NoError(t, err)
@@ -137,26 +138,26 @@ func TestSigner_CreateSignerValidationErrors(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		req         *client.CreateSignerRequest
+		req         *evm.CreateSignerRequest
 		expectError bool
 	}{
 		{
 			name:        "missing type",
-			req:         &client.CreateSignerRequest{},
+			req:         &evm.CreateSignerRequest{},
 			expectError: true,
 		},
 		{
 			name: "missing keystore params",
-			req: &client.CreateSignerRequest{
+			req: &evm.CreateSignerRequest{
 				Type: "keystore",
 			},
 			expectError: true,
 		},
 		{
 			name: "empty password",
-			req: &client.CreateSignerRequest{
+			req: &evm.CreateSignerRequest{
 				Type: "keystore",
-				Keystore: &client.CreateKeystoreParams{
+				Keystore: &evm.CreateKeystoreParams{
 					Password: "",
 				},
 			},
@@ -164,7 +165,7 @@ func TestSigner_CreateSignerValidationErrors(t *testing.T) {
 		},
 		{
 			name: "unsupported type",
-			req: &client.CreateSignerRequest{
+			req: &evm.CreateSignerRequest{
 				Type: "aws_kms",
 			},
 			expectError: true,
@@ -173,7 +174,7 @@ func TestSigner_CreateSignerValidationErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := adminClient.CreateSigner(ctx, tt.req)
+			_, err := adminClient.EVM.Signers.Create(ctx, tt.req)
 			if tt.expectError {
 				require.Error(t, err, "Expected error for %s", tt.name)
 			} else {
@@ -191,7 +192,7 @@ func TestSigner_NonAdminCanListSigners(t *testing.T) {
 	ctx := context.Background()
 
 	// Non-admin should be able to list signers (GET is public)
-	resp, err := nonAdminClient.ListSigners(ctx, &client.ListSignersFilter{
+	resp, err := nonAdminClient.EVM.Signers.List(ctx, &evm.ListSignersFilter{
 		Limit: 10,
 	})
 	require.NoError(t, err)
@@ -207,14 +208,14 @@ func TestSigner_NonAdminCannotCreateSigner(t *testing.T) {
 	ctx := context.Background()
 
 	// Non-admin should NOT be able to create signers
-	req := &client.CreateSignerRequest{
+	req := &evm.CreateSignerRequest{
 		Type: "keystore",
-		Keystore: &client.CreateKeystoreParams{
+		Keystore: &evm.CreateKeystoreParams{
 			Password: "test-password",
 		},
 	}
 
-	_, err := nonAdminClient.CreateSigner(ctx, req)
+	_, err := nonAdminClient.EVM.Signers.Create(ctx, req)
 	require.Error(t, err)
 
 	apiErr, ok := err.(*client.APIError)

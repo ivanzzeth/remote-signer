@@ -13,6 +13,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 
 	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 )
 
 func main() {
@@ -48,29 +49,29 @@ func main() {
 	chainID := "137"
 
 	signTx := func(to, value, data string) error {
-		tx := client.Transaction{To: &to, Value: value, Data: data, Gas: 100000, TxType: "legacy", GasPrice: "30000000000"}
-		payload, _ := json.Marshal(client.TransactionPayload{Transaction: &tx})
-		_, err := c.Sign(ctx, &client.SignRequest{
+		tx := evm.Transaction{To: &to, Value: value, Data: data, Gas: 100000, TxType: "legacy", GasPrice: "30000000000"}
+		payload, _ := json.Marshal(evm.TransactionPayload{Transaction: &tx})
+		_, err := c.EVM.Sign.Execute(ctx, &evm.SignRequest{
 			ChainID: chainID, SignerAddress: signerAddr.Hex(),
-			SignType: "transaction", Payload: payload,
+			SignType: evm.SignTypeTransaction, Payload: payload,
 		})
 		return err
 	}
 
 	signPersonal := func(msg string) error {
-		payload, _ := json.Marshal(client.MessagePayload{Message: msg})
-		_, err := c.Sign(ctx, &client.SignRequest{
+		payload, _ := json.Marshal(evm.MessagePayload{Message: msg})
+		_, err := c.EVM.Sign.Execute(ctx, &evm.SignRequest{
 			ChainID: chainID, SignerAddress: signerAddr.Hex(),
-			SignType: "personal", Payload: payload,
+			SignType: evm.SignTypePersonal, Payload: payload,
 		})
 		return err
 	}
 
-	signTypedData := func(td *client.TypedData) error {
-		payload, _ := json.Marshal(client.TypedDataPayload{TypedData: td})
-		_, err := c.Sign(ctx, &client.SignRequest{
+	signTypedData := func(td *evm.TypedData) error {
+		payload, _ := json.Marshal(evm.TypedDataPayload{TypedData: td})
+		_, err := c.EVM.Sign.Execute(ctx, &evm.SignRequest{
 			ChainID: chainID, SignerAddress: signerAddr.Hex(),
-			SignType: "typed_data", Payload: payload,
+			SignType: evm.SignTypeTypedData, Payload: payload,
 		})
 		return err
 	}
@@ -129,13 +130,13 @@ func main() {
 		{
 			name: "8. Phishing Permit typed_data", expect: "reject",
 			fn: func() error {
-				return signTypedData(&client.TypedData{
-					Types: map[string][]client.TypedDataField{
+				return signTypedData(&evm.TypedData{
+					Types: map[string][]evm.TypedDataField{
 						"EIP712Domain": {{Name: "name", Type: "string"}},
 						"Permit":       {{Name: "spender", Type: "address"}, {Name: "value", Type: "uint256"}},
 					},
 					PrimaryType: "Permit",
-					Domain:      client.TypedDataDomain{Name: "FakeToken"},
+					Domain:      evm.TypedDataDomain{Name: "FakeToken"},
 					Message:     map[string]any{"spender": "0xdead000000000000000000000000000000000001", "value": "999999999999"},
 				})
 			},

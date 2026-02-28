@@ -11,19 +11,20 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 	"github.com/ivanzzeth/remote-signer/tui/styles"
 )
 
 // SignersModel represents the signers list view
 type SignersModel struct {
-	client      client.ClientInterface
+	signers_svc evm.SignerAPI
 	ctx         context.Context
 	width       int
 	height      int
 	spinner     spinner.Model
 	loading     bool
 	err         error
-	signers     []client.Signer
+	signers     []evm.Signer
 	total       int
 	hasMore     bool
 	selectedIdx int
@@ -45,7 +46,7 @@ type SignersModel struct {
 
 // SignersDataMsg is sent when signers data is loaded
 type SignersDataMsg struct {
-	Signers []client.Signer
+	Signers []evm.Signer
 	Total   int
 	HasMore bool
 	Err     error
@@ -53,15 +54,23 @@ type SignersDataMsg struct {
 
 // SignerCreateMsg is sent when a signer is created
 type SignerCreateMsg struct {
-	Signer  *client.Signer
+	Signer  *evm.Signer
 	Success bool
 	Message string
 	Err     error
 }
 
 // NewSignersModel creates a new signers model
-func NewSignersModel(c client.ClientInterface, ctx context.Context) (*SignersModel, error) {
+func NewSignersModel(c *client.Client, ctx context.Context) (*SignersModel, error) {
 	if c == nil {
+		return nil, fmt.Errorf("client is required")
+	}
+	return newSignersModelFromService(c.EVM.Signers, ctx)
+}
+
+// newSignersModelFromService creates a signers model from a SignerAPI (for testing).
+func newSignersModelFromService(svc evm.SignerAPI, ctx context.Context) (*SignersModel, error) {
+	if svc == nil {
 		return nil, fmt.Errorf("client is required")
 	}
 	if ctx == nil {
@@ -87,7 +96,7 @@ func NewSignersModel(c client.ClientInterface, ctx context.Context) (*SignersMod
 	confirmInput.EchoMode = textinput.EchoPassword
 
 	return &SignersModel{
-		client:        c,
+		signers_svc:   svc,
 		ctx:           ctx,
 		spinner:       s,
 		loading:       true,
@@ -123,13 +132,13 @@ func (m *SignersModel) Refresh() tea.Cmd {
 
 func (m *SignersModel) loadData() tea.Cmd {
 	return func() tea.Msg {
-		filter := &client.ListSignersFilter{
+		filter := &evm.ListSignersFilter{
 			Type:   m.typeFilter,
 			Limit:  m.limit,
 			Offset: m.offset,
 		}
 
-		resp, err := m.client.ListSigners(m.ctx, filter)
+		resp, err := m.signers_svc.List(m.ctx, filter)
 		if err != nil {
 			return SignersDataMsg{Err: err}
 		}
@@ -139,16 +148,16 @@ func (m *SignersModel) loadData() tea.Cmd {
 
 func (m *SignersModel) createSigner(signerType string, password string) tea.Cmd {
 	return func() tea.Msg {
-		req := &client.CreateSignerRequest{
+		req := &evm.CreateSignerRequest{
 			Type: signerType,
 		}
 		if signerType == "keystore" {
-			req.Keystore = &client.CreateKeystoreParams{
+			req.Keystore = &evm.CreateKeystoreParams{
 				Password: password,
 			}
 		}
 
-		signer, err := m.client.CreateSigner(m.ctx, req)
+		signer, err := m.signers_svc.Create(m.ctx, req)
 		if err != nil {
 			return SignerCreateMsg{Success: false, Err: err}
 		}
@@ -556,13 +565,13 @@ func (m *SignersModel) renderSigners() string {
 
 	// Help
 	content.WriteString("\n\n")
-	helpText := "↑/↓: navigate | +/a: create signer | f: filter | c: clear | n/p: next/prev | r: refresh"
+	helpText := "up/down: navigate | +/a: create signer | f: filter | c: clear | n/p: next/prev | r: refresh"
 	content.WriteString(styles.HelpStyle.Render(helpText))
 
 	return content.String()
 }
 
-func (m *SignersModel) renderSignerRow(signer client.Signer, selected bool) string {
+func (m *SignersModel) renderSignerRow(signer evm.Signer, selected bool) string {
 	// Format address
 	address := signer.Address
 	if len(address) > 44 {

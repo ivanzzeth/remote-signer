@@ -11,7 +11,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 )
 
 func TestRule_ValueLimitWhitelist_AllowsUnderLimit(t *testing.T) {
@@ -19,7 +19,7 @@ func TestRule_ValueLimitWhitelist_AllowsUnderLimit(t *testing.T) {
 		t.Skip("Value limit rule is in config.e2e.yaml")
 	}
 	address := common.HexToAddress(signerAddress)
-	signer := adminClient.GetSigner(address, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	to := common.HexToAddress(treasuryAddress)
 	fiveEth := new(big.Int).Mul(big.NewInt(5), big.NewInt(1e18))
 	tx := types.NewTx(&types.LegacyTx{
@@ -38,17 +38,17 @@ func TestRule_ValueLimitWhitelist_AllowsUnderLimit(t *testing.T) {
 
 func TestRule_ValueLimitRuleBlocks(t *testing.T) {
 	ctx := context.Background()
-	createReq := &client.CreateRuleRequest{
+	createReq := &evm.CreateRuleRequest{
 		Name:    "Test Value Limit - Block High Value",
 		Type:    "evm_value_limit",
 		Mode:    "blocklist",
 		Enabled: true,
 		Config:  map[string]interface{}{"max_value": "100000000000000000"},
 	}
-	created, err := adminClient.CreateRule(ctx, createReq)
+	created, err := adminClient.EVM.Rules.Create(ctx, createReq)
 	require.NoError(t, err)
 	address := common.HexToAddress(signerAddress)
-	signer := adminClient.GetSigner(address, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	to := common.HexToAddress(treasuryAddress)
 	tx := types.NewTx(&types.LegacyTx{
 		Nonce:    10,
@@ -61,7 +61,7 @@ func TestRule_ValueLimitRuleBlocks(t *testing.T) {
 	chainIDBig := big.NewInt(1)
 	_, err = signer.SignTransactionWithChainID(tx, chainIDBig)
 	require.Error(t, err, "Transaction exceeding value limit should be blocked")
-	require.NoError(t, adminClient.DeleteRule(ctx, created.ID))
+	require.NoError(t, adminClient.EVM.Rules.Delete(ctx, created.ID))
 }
 
 // 100 ETH in wei, from rules/treasury.example.yaml "Treasury transfer limit"
@@ -72,7 +72,7 @@ const treasuryExampleMaxValueWei = "100000000000000000000"
 func TestTreasuryExample_ValueLimitAllowsUnder100ETH(t *testing.T) {
 	ctx := context.Background()
 	chainType := "evm"
-	rule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	rule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:      "E2E Treasury Example - Treasury transfer limit",
 		Type:      "evm_value_limit",
 		Mode:      "whitelist",
@@ -81,10 +81,10 @@ func TestTreasuryExample_ValueLimitAllowsUnder100ETH(t *testing.T) {
 		Enabled:   true,
 	})
 	require.NoError(t, err)
-	defer func() { _ = adminClient.DeleteRule(ctx, rule.ID) }()
+	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, rule.ID) }()
 
 	addr := common.HexToAddress(signerAddress)
-	signer := adminClient.GetSigner(addr, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, addr, chainID)
 	to := common.HexToAddress(treasuryAddress)
 	// 50 ETH, under 100 ETH limit
 	fiftyEth := new(big.Int).Mul(big.NewInt(50), big.NewInt(1e18))
@@ -102,7 +102,7 @@ func TestTreasuryExample_ValueLimitAllowsUnder100ETH(t *testing.T) {
 func TestTreasuryExample_ValueLimitBlocksOver100ETH(t *testing.T) {
 	ctx := context.Background()
 	chainType := "evm"
-	rule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	rule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:      "E2E Treasury Example - Block value over 100 ETH",
 		Type:      "evm_value_limit",
 		Mode:      "blocklist",
@@ -111,10 +111,10 @@ func TestTreasuryExample_ValueLimitBlocksOver100ETH(t *testing.T) {
 		Enabled:   true,
 	})
 	require.NoError(t, err)
-	defer func() { _ = adminClient.DeleteRule(ctx, rule.ID) }()
+	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, rule.ID) }()
 
 	addr := common.HexToAddress(signerAddress)
-	signer := adminClient.GetSigner(addr, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, addr, chainID)
 	to := common.HexToAddress(treasuryAddress)
 	// 101 ETH, over 100 ETH -> blocklist should block
 	overLimit := new(big.Int).Mul(big.NewInt(101), big.NewInt(1e18))

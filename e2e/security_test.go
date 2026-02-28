@@ -22,6 +22,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/audit"
+	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 )
 
 // =============================================================================
@@ -287,14 +289,14 @@ func TestSecurity_AdminEscalation_NonAdminKey(t *testing.T) {
 	ctx := context.Background()
 
 	// Non-admin should NOT be able to list rules
-	_, err := nonAdminClient.ListRules(ctx, nil)
+	_, err := nonAdminClient.EVM.Rules.List(ctx, nil)
 	require.Error(t, err)
 	apiErr, ok := err.(*client.APIError)
 	require.True(t, ok, "expected APIError, got %T: %v", err, err)
 	assert.Equal(t, 403, apiErr.StatusCode, "non-admin accessing admin endpoint must get 403")
 
 	// Non-admin should NOT be able to approve requests
-	_, err = nonAdminClient.ApproveSignRequest(ctx, "fake-request-id", &client.ApproveRequest{
+	_, err = nonAdminClient.EVM.Requests.Approve(ctx, "fake-request-id", &evm.ApproveRequest{
 		Approved: true,
 	})
 	require.Error(t, err)
@@ -303,7 +305,7 @@ func TestSecurity_AdminEscalation_NonAdminKey(t *testing.T) {
 	assert.Equal(t, 403, apiErr.StatusCode, "non-admin approving requests must get 403")
 
 	// Non-admin should NOT be able to list audit records
-	_, err = nonAdminClient.ListAuditRecords(ctx, nil)
+	_, err = nonAdminClient.Audit.List(ctx, nil)
 	require.Error(t, err)
 	apiErr, ok = err.(*client.APIError)
 	require.True(t, ok, "expected APIError, got %T: %v", err, err)
@@ -332,7 +334,7 @@ func TestSecurity_BlocklistBypass_AddressCasing(t *testing.T) {
 
 	for _, addr := range casings {
 		t.Run("casing_"+addr[38:], func(t *testing.T) {
-			resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+			resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 				ChainID:       chainID,
 				SignerAddress: signerAddress,
 				SignType:      "transaction",
@@ -344,7 +346,7 @@ func TestSecurity_BlocklistBypass_AddressCasing(t *testing.T) {
 					"gasPrice": "0x3b9aca00",
 					"nonce": "0x0"
 				}`, addr)),
-			}, false)
+			})
 
 			// All casing variants should be blocked
 			if err == nil && resp != nil && resp.Status == "completed" {
@@ -374,7 +376,7 @@ func TestSecurity_ValueLimitBypass_Overflow(t *testing.T) {
 			name = name[:10]
 		}
 		t.Run("value_"+name, func(t *testing.T) {
-			resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+			resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 				ChainID:       chainID,
 				SignerAddress: signerAddress,
 				SignType:      "transaction",
@@ -386,7 +388,7 @@ func TestSecurity_ValueLimitBypass_Overflow(t *testing.T) {
 					"gasPrice": "0x3b9aca00",
 					"nonce": "0x0"
 				}`, treasuryAddress, val)),
-			}, false)
+			})
 
 			// Overflow values should never result in a completed signing
 			if err == nil && resp != nil && resp.Status == "completed" {
@@ -409,12 +411,12 @@ func TestSecurity_ConcurrentApproval_RaceCondition(t *testing.T) {
 
 	// Submit a sign request that requires manual approval
 	// Use 'personal' sign type to avoid Solidity rule Fail-Closed issues with 'transaction'
-	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "personal",
 		Payload:       json.RawMessage(`{"message":"concurrent-approval-race-test"}`),
-	}, false)
+	})
 	// SignWithOptions returns both resp and err when status=authorizing
 	// (resp contains the request ID, err is a SignError with pending status)
 	if resp != nil && resp.RequestID != "" {
@@ -435,13 +437,13 @@ func TestSecurity_ConcurrentApproval_RaceCondition(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		_, results[0] = adminClient.ApproveSignRequest(ctx, requestID, &client.ApproveRequest{
+		_, results[0] = adminClient.EVM.Requests.Approve(ctx, requestID, &evm.ApproveRequest{
 			Approved: true,
 		})
 	}()
 	go func() {
 		defer wg.Done()
-		_, results[1] = adminClient.ApproveSignRequest(ctx, requestID, &client.ApproveRequest{
+		_, results[1] = adminClient.EVM.Requests.Approve(ctx, requestID, &evm.ApproveRequest{
 			Approved: false,
 		})
 	}()
@@ -459,7 +461,7 @@ func TestSecurity_ConcurrentApproval_RaceCondition(t *testing.T) {
 		"concurrent approve and reject should not both succeed (race condition detected)")
 
 	// Verify final state is consistent
-	status, err := adminClient.GetRequest(ctx, requestID)
+	status, err := adminClient.EVM.Requests.Get(ctx, requestID)
 	require.NoError(t, err)
 
 	// Status must be a terminal state, not corrupted
@@ -578,7 +580,7 @@ func TestSecurity_AuditLogAccess_NonAdminKey(t *testing.T) {
 	ctx := context.Background()
 
 	// Non-admin should NOT be able to list audit records
-	_, err := nonAdminClient.ListAuditRecords(ctx, nil)
+	_, err := nonAdminClient.Audit.List(ctx, nil)
 	require.Error(t, err, "non-admin should NOT be able to access audit logs")
 
 	apiErr, ok := err.(*client.APIError)
@@ -595,7 +597,7 @@ func TestSecurity_AuditLogAccess_NonAdminCannotFilterByAPIKeyID(t *testing.T) {
 	ctx := context.Background()
 
 	// Non-admin should NOT be able to query other API key's activity
-	_, err := nonAdminClient.ListAuditRecords(ctx, &client.ListAuditFilter{
+	_, err := nonAdminClient.Audit.List(ctx, &audit.ListFilter{
 		APIKeyID: adminAPIKeyID, // Try to spy on admin activity
 		Limit:    5,
 	})
@@ -616,7 +618,7 @@ func TestSecurity_RuleConfigValidation_EmptyAddressList(t *testing.T) {
 	ctx := context.Background()
 
 	// Create an address whitelist rule with empty addresses — should be rejected
-	_, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	_, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:    "Attack: Empty Address Whitelist",
 		Type:    "evm_address_list",
 		Mode:    "whitelist",
@@ -632,7 +634,7 @@ func TestSecurity_RuleConfigValidation_InvalidAddressFormat(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a rule with invalid address format
-	_, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	_, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:    "Attack: Invalid Address Format",
 		Type:    "evm_address_list",
 		Mode:    "whitelist",
@@ -648,7 +650,7 @@ func TestSecurity_RuleConfigValidation_MissingRequiredField(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a value limit rule without max_value — required field
-	_, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	_, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:    "Attack: Missing max_value",
 		Type:    "evm_value_limit",
 		Mode:    "whitelist",
@@ -662,7 +664,7 @@ func TestSecurity_RuleConfigValidation_WildcardAddress(t *testing.T) {
 	ctx := context.Background()
 
 	// Try creating a rule with wildcard address that might match everything
-	_, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	_, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:    "Attack: Wildcard Address",
 		Type:    "evm_address_list",
 		Mode:    "whitelist",
@@ -683,7 +685,7 @@ func TestSecurity_SolidityInjection_Selfdestruct(t *testing.T) {
 	ctx := context.Background()
 
 	// Try to create a rule with selfdestruct — should be rejected by config validation
-	_, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	_, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:    "Attack: Selfdestruct",
 		Type:    "evm_solidity_expression",
 		Mode:    "whitelist",
@@ -699,7 +701,7 @@ func TestSecurity_SolidityInjection_Delegatecall(t *testing.T) {
 	ctx := context.Background()
 
 	// Try to create a rule with delegatecall — should be rejected
-	_, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	_, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:    "Attack: Delegatecall",
 		Type:    "evm_solidity_expression",
 		Mode:    "whitelist",
@@ -721,7 +723,7 @@ func TestSecurity_SolidityInjection_LargeExpression(t *testing.T) {
 	}
 	largeExpr += "\");"
 
-	_, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	_, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:    "Attack: Large Expression DoS",
 		Type:    "evm_solidity_expression",
 		Mode:    "whitelist",
@@ -791,7 +793,7 @@ func TestSecurity_AddressCasingBypass_WhitelistRule(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a whitelist rule with a specific address casing
-	created, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	created, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:    "Test: Case Sensitivity Check",
 		Type:    "evm_address_list",
 		Mode:    "whitelist",
@@ -801,10 +803,10 @@ func TestSecurity_AddressCasingBypass_WhitelistRule(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	defer func() { _ = adminClient.DeleteRule(ctx, created.ID) }()
+	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, created.ID) }()
 
 	// Verify the rule was created
-	rule, err := adminClient.GetRule(ctx, created.ID)
+	rule, err := adminClient.EVM.Rules.Get(ctx, created.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "evm_address_list", string(rule.Type))
 
@@ -830,7 +832,7 @@ func TestRedTeam_AddressBlocklist_BypassViaPersonalSign(t *testing.T) {
 	ctx := context.Background()
 
 	// Create an address_list blocklist that blocks the burn address
-	rule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	rule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:    "RedTeam: Address Blocklist",
 		Type:    "evm_address_list",
 		Mode:    "blocklist",
@@ -840,17 +842,17 @@ func TestRedTeam_AddressBlocklist_BypassViaPersonalSign(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	defer func() { _ = adminClient.DeleteRule(ctx, rule.ID) }()
+	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, rule.ID) }()
 
 	// Attack: personal_sign has no tx.To → parsed.Recipient is nil
 	// The AddressListEvaluator returns (false, "", nil) → "no violation"
 	// So the blocklist is silently bypassed.
-	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "personal",
 		Payload:       json.RawMessage(`{"message":"bypass address blocklist via personal_sign"}`),
-	}, false)
+	})
 
 	// The address blocklist CANNOT block personal_sign (no recipient to check).
 	// This is a known architectural limitation. The request should either complete
@@ -878,7 +880,7 @@ func TestRedTeam_ValueLimitBlocklist_BypassViaNilValue(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a value_limit blocklist with max_value=0 (should block everything with value)
-	rule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	rule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:    "RedTeam: Value Limit Blocklist max=0",
 		Type:    "evm_value_limit",
 		Mode:    "blocklist",
@@ -888,16 +890,16 @@ func TestRedTeam_ValueLimitBlocklist_BypassViaNilValue(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	defer func() { _ = adminClient.DeleteRule(ctx, rule.ID) }()
+	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, rule.ID) }()
 
 	// Attack: personal_sign has no value → parsed.Value is nil
 	// ValueLimitEvaluator returns (false, "", nil) → "no violation"
-	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "personal",
 		Payload:       json.RawMessage(`{"message":"bypass value limit blocklist"}`),
-	}, false)
+	})
 
 	if err != nil {
 		return // Other errors are acceptable
@@ -915,7 +917,7 @@ func TestRedTeam_ContractMethodBlocklist_BypassViaPlainTransfer(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a contract_method blocklist that blocks ERC20 transfer on treasuryAddress
-	rule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	rule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:    "RedTeam: Contract Method Blocklist",
 		Type:    "evm_contract_method",
 		Mode:    "blocklist",
@@ -926,16 +928,16 @@ func TestRedTeam_ContractMethodBlocklist_BypassViaPlainTransfer(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	defer func() { _ = adminClient.DeleteRule(ctx, rule.ID) }()
+	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, rule.ID) }()
 
 	// Attack: plain ETH transfer (no data) → parsed.MethodSig is nil
 	// ContractMethodEvaluator returns (false, "", nil) → "no violation"
-	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "transaction",
 		Payload:       json.RawMessage(fmt.Sprintf(`{"transaction":{"to":"%s","value":"1000000000000000000","gas":21000,"gasPrice":"20000000000","txType":"legacy"}}`, treasuryAddress)),
-	}, false)
+	})
 
 	if err != nil {
 		return // May be blocked by other rules
@@ -959,7 +961,7 @@ func TestRedTeam_BlocklistPrecedence_OverridesWhitelist(t *testing.T) {
 	ctx := context.Background()
 
 	// Setup: whitelist allows treasuryAddress, blocklist limits value to 0.1 ETH
-	whitelistRule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	whitelistRule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:    "RedTeam: Whitelist Treasury",
 		Type:    "evm_address_list",
 		Mode:    "whitelist",
@@ -969,9 +971,9 @@ func TestRedTeam_BlocklistPrecedence_OverridesWhitelist(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	defer func() { _ = adminClient.DeleteRule(ctx, whitelistRule.ID) }()
+	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, whitelistRule.ID) }()
 
-	blocklistRule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	blocklistRule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:    "RedTeam: Blocklist Value Limit 0.1 ETH",
 		Type:    "evm_value_limit",
 		Mode:    "blocklist",
@@ -981,15 +983,15 @@ func TestRedTeam_BlocklistPrecedence_OverridesWhitelist(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	defer func() { _ = adminClient.DeleteRule(ctx, blocklistRule.ID) }()
+	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, blocklistRule.ID) }()
 
 	// Attack: send 1 ETH to treasury — whitelisted address but exceeds blocklist value limit
-	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "transaction",
 		Payload:       json.RawMessage(fmt.Sprintf(`{"transaction":{"to":"%s","value":"1000000000000000000","gas":21000,"gasPrice":"20000000000","txType":"legacy"}}`, treasuryAddress)),
-	}, false)
+	})
 
 	// MUST be blocked — blocklist fires in Phase 1 before whitelist Phase 2
 	if err == nil && resp != nil && resp.Status == "completed" {
@@ -1007,7 +1009,7 @@ func TestRedTeam_SignTypeBlocklist_OverridesWhitelist(t *testing.T) {
 	ctx := context.Background()
 
 	// Setup: blocklist blocks "personal" sign type
-	blocklistRule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	blocklistRule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:    "RedTeam: Block Personal Sign",
 		Type:    "sign_type_restriction",
 		Mode:    "blocklist",
@@ -1017,10 +1019,10 @@ func TestRedTeam_SignTypeBlocklist_OverridesWhitelist(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	defer func() { _ = adminClient.DeleteRule(ctx, blocklistRule.ID) }()
+	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, blocklistRule.ID) }()
 
 	// Also create a conflicting whitelist that allows personal
-	whitelistRule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	whitelistRule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:    "RedTeam: Allow Personal Sign (conflict)",
 		Type:    "sign_type_restriction",
 		Mode:    "whitelist",
@@ -1030,15 +1032,15 @@ func TestRedTeam_SignTypeBlocklist_OverridesWhitelist(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	defer func() { _ = adminClient.DeleteRule(ctx, whitelistRule.ID) }()
+	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, whitelistRule.ID) }()
 
 	// Attack: send personal_sign — both blocklist and whitelist match "personal"
-	_, err = adminClient.SignWithOptions(ctx, &client.SignRequest{
+	_, err = adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "personal",
 		Payload:       json.RawMessage(`{"message":"test blocklist vs whitelist precedence"}`),
-	}, false)
+	})
 
 	// MUST be blocked — blocklist evaluated in Phase 1 before whitelist Phase 2
 	require.Error(t, err, "VULNERABILITY: personal_sign should be blocked by sign_type blocklist even with conflicting whitelist")
@@ -1053,7 +1055,7 @@ func TestRedTeam_MultiRule_WhitelistAddress_BlocklistValue(t *testing.T) {
 	ctx := context.Background()
 
 	// Setup: whitelist allows treasuryAddress, blocklist limits value
-	whitelistRule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	whitelistRule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:    "RedTeam: Allow Treasury Address",
 		Type:    "evm_address_list",
 		Mode:    "whitelist",
@@ -1063,9 +1065,9 @@ func TestRedTeam_MultiRule_WhitelistAddress_BlocklistValue(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	defer func() { _ = adminClient.DeleteRule(ctx, whitelistRule.ID) }()
+	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, whitelistRule.ID) }()
 
-	blocklistRule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	blocklistRule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:    "RedTeam: Block Value > 0.1 ETH",
 		Type:    "evm_value_limit",
 		Mode:    "blocklist",
@@ -1075,16 +1077,16 @@ func TestRedTeam_MultiRule_WhitelistAddress_BlocklistValue(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	defer func() { _ = adminClient.DeleteRule(ctx, blocklistRule.ID) }()
+	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, blocklistRule.ID) }()
 
 	// Sub-test A: 1 ETH to treasury → MUST be blocked by value limit blocklist
 	t.Run("high_value_blocked", func(t *testing.T) {
-		resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+		resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 			ChainID:       chainID,
 			SignerAddress: signerAddress,
 			SignType:      "transaction",
 			Payload:       json.RawMessage(fmt.Sprintf(`{"transaction":{"to":"%s","value":"1000000000000000000","gas":21000,"gasPrice":"20000000000","txType":"legacy"}}`, treasuryAddress)),
-		}, false)
+		})
 
 		if err == nil && resp != nil && resp.Status == "completed" {
 			t.Errorf("VULNERABILITY: 1 ETH to whitelisted treasury was not blocked by value limit")
@@ -1096,12 +1098,12 @@ func TestRedTeam_MultiRule_WhitelistAddress_BlocklistValue(t *testing.T) {
 	// ALL transaction requests will be rejected. This is expected behavior — we verify
 	// that the value limit blocklist itself does not block low-value transactions.
 	t.Run("low_value_allowed", func(t *testing.T) {
-		resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+		resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 			ChainID:       chainID,
 			SignerAddress: signerAddress,
 			SignType:      "transaction",
 			Payload:       json.RawMessage(fmt.Sprintf(`{"transaction":{"to":"%s","value":"50000000000000000","gas":21000,"gasPrice":"20000000000","txType":"legacy"}}`, treasuryAddress)),
-		}, false)
+		})
 
 		if err != nil {
 			// If blocked by Solidity rule compilation failure (Fail-Closed), that's
@@ -1133,7 +1135,7 @@ func TestRedTeam_ValueLimit_ExactBoundary(t *testing.T) {
 	ctx := context.Background()
 
 	// Blocklist: block if value > 100000000000000000 (0.1 ETH)
-	rule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	rule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:    "RedTeam: Value Limit Exact Boundary",
 		Type:    "evm_value_limit",
 		Mode:    "blocklist",
@@ -1143,16 +1145,16 @@ func TestRedTeam_ValueLimit_ExactBoundary(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	defer func() { _ = adminClient.DeleteRule(ctx, rule.ID) }()
+	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, rule.ID) }()
 
 	// Sub-test A: value == limit exactly → NOT blocked (Cmp returns 0, not > 0)
 	t.Run("at_boundary_passes", func(t *testing.T) {
-		resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+		resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 			ChainID:       chainID,
 			SignerAddress: signerAddress,
 			SignType:      "transaction",
 			Payload:       json.RawMessage(fmt.Sprintf(`{"transaction":{"to":"%s","value":"100000000000000000","gas":21000,"gasPrice":"20000000000","txType":"legacy"}}`, treasuryAddress)),
-		}, false)
+		})
 
 		// 100000000000000000 = exactly 0.1 ETH
 		// Cmp(100000000000000000, 100000000000000000) = 0, NOT > 0 → not blocked
@@ -1164,12 +1166,12 @@ func TestRedTeam_ValueLimit_ExactBoundary(t *testing.T) {
 
 	// Sub-test B: value == limit + 1 wei → BLOCKED
 	t.Run("above_boundary_blocked", func(t *testing.T) {
-		resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+		resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 			ChainID:       chainID,
 			SignerAddress: signerAddress,
 			SignType:      "transaction",
 			Payload:       json.RawMessage(fmt.Sprintf(`{"transaction":{"to":"%s","value":"100000000000000001","gas":21000,"gasPrice":"20000000000","txType":"legacy"}}`, treasuryAddress)),
-		}, false)
+		})
 
 		// 100000000000000001 = 0.1 ETH + 1 wei → exceeds limit → blocked
 		if err == nil && resp != nil && resp.Status == "completed" {
@@ -1186,7 +1188,7 @@ func TestRedTeam_ValueLimit_ZeroValue(t *testing.T) {
 	ctx := context.Background()
 
 	// Blocklist with max_value=0 → block if value > 0
-	rule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	rule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:    "RedTeam: Value Limit Zero",
 		Type:    "evm_value_limit",
 		Mode:    "blocklist",
@@ -1196,16 +1198,16 @@ func TestRedTeam_ValueLimit_ZeroValue(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	defer func() { _ = adminClient.DeleteRule(ctx, rule.ID) }()
+	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, rule.ID) }()
 
 	// Sub-test A: value=0 → NOT blocked (0 > 0 is false)
 	t.Run("zero_value_passes", func(t *testing.T) {
-		resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+		resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 			ChainID:       chainID,
 			SignerAddress: signerAddress,
 			SignType:      "transaction",
 			Payload:       json.RawMessage(fmt.Sprintf(`{"transaction":{"to":"%s","value":"0","gas":21000,"gasPrice":"20000000000","txType":"legacy"}}`, treasuryAddress)),
-		}, false)
+		})
 
 		if err == nil {
 			assert.NotEqual(t, "rejected", resp.Status,
@@ -1215,12 +1217,12 @@ func TestRedTeam_ValueLimit_ZeroValue(t *testing.T) {
 
 	// Sub-test B: value=1 wei → BLOCKED (1 > 0 is true)
 	t.Run("one_wei_blocked", func(t *testing.T) {
-		resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+		resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 			ChainID:       chainID,
 			SignerAddress: signerAddress,
 			SignType:      "transaction",
 			Payload:       json.RawMessage(fmt.Sprintf(`{"transaction":{"to":"%s","value":"1","gas":21000,"gasPrice":"20000000000","txType":"legacy"}}`, treasuryAddress)),
-		}, false)
+		})
 
 		if err == nil && resp != nil && resp.Status == "completed" {
 			t.Errorf("VULNERABILITY: 1 wei tx was not blocked by max_value=0 blocklist")
@@ -1236,7 +1238,7 @@ func TestRedTeam_AddressBlocklist_ZeroAddress(t *testing.T) {
 	ctx := context.Background()
 
 	// Blocklist the zero address
-	rule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	rule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:    "RedTeam: Block Zero Address",
 		Type:    "evm_address_list",
 		Mode:    "blocklist",
@@ -1246,15 +1248,15 @@ func TestRedTeam_AddressBlocklist_ZeroAddress(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	defer func() { _ = adminClient.DeleteRule(ctx, rule.ID) }()
+	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, rule.ID) }()
 
 	// Attack: send tx to zero address
-	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "transaction",
 		Payload:       json.RawMessage(`{"transaction":{"to":"0x0000000000000000000000000000000000000000","value":"0","gas":21000,"gasPrice":"20000000000","txType":"legacy"}}`),
-	}, false)
+	})
 
 	if err == nil && resp != nil && resp.Status == "completed" {
 		t.Errorf("VULNERABILITY: tx to zero address was not blocked by address blocklist")
@@ -1272,7 +1274,7 @@ func TestRedTeam_DisabledBlocklistRule_AttackWindow(t *testing.T) {
 
 	// Create an address blocklist that blocks a specific test address
 	testBlockedAddr := "0x1111111111111111111111111111111111111111"
-	rule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	rule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:    "RedTeam: Disableable Blocklist",
 		Type:    "evm_address_list",
 		Mode:    "blocklist",
@@ -1282,15 +1284,15 @@ func TestRedTeam_DisabledBlocklistRule_AttackWindow(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	defer func() { _ = adminClient.DeleteRule(ctx, rule.ID) }()
+	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, rule.ID) }()
 
 	// Step 1: Verify the rule blocks when enabled
-	resp1, err1 := adminClient.SignWithOptions(ctx, &client.SignRequest{
+	resp1, err1 := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "transaction",
 		Payload:       json.RawMessage(fmt.Sprintf(`{"transaction":{"to":"%s","value":"0","gas":21000,"gasPrice":"20000000000","txType":"legacy"}}`, testBlockedAddr)),
-	}, false)
+	})
 
 	if err1 == nil && resp1 != nil && resp1.Status == "completed" {
 		t.Fatal("Setup failed: blocklist rule did not block when enabled")
@@ -1298,16 +1300,16 @@ func TestRedTeam_DisabledBlocklistRule_AttackWindow(t *testing.T) {
 	t.Log("Step 1: Rule blocks when enabled — OK")
 
 	// Step 2: Disable the rule
-	_, err = adminClient.ToggleRule(ctx, rule.ID, false)
+	_, err = adminClient.EVM.Rules.Toggle(ctx, rule.ID, false)
 	require.NoError(t, err)
 
 	// Step 3: Attack during disabled window — should NOT be blocked
-	resp2, err2 := adminClient.SignWithOptions(ctx, &client.SignRequest{
+	resp2, err2 := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "transaction",
 		Payload:       json.RawMessage(fmt.Sprintf(`{"transaction":{"to":"%s","value":"0","gas":21000,"gasPrice":"20000000000","txType":"legacy"}}`, testBlockedAddr)),
-	}, false)
+	})
 
 	// When disabled, the rule should be skipped → request may go to pending or be approved by other rules
 	if err2 == nil && resp2 != nil {
@@ -1317,16 +1319,16 @@ func TestRedTeam_DisabledBlocklistRule_AttackWindow(t *testing.T) {
 	}
 
 	// Step 4: Re-enable the rule
-	_, err = adminClient.ToggleRule(ctx, rule.ID, true)
+	_, err = adminClient.EVM.Rules.Toggle(ctx, rule.ID, true)
 	require.NoError(t, err)
 
 	// Step 5: Verify the rule blocks again
-	resp3, err3 := adminClient.SignWithOptions(ctx, &client.SignRequest{
+	resp3, err3 := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "transaction",
 		Payload:       json.RawMessage(fmt.Sprintf(`{"transaction":{"to":"%s","value":"0","gas":21000,"gasPrice":"20000000000","txType":"legacy"}}`, testBlockedAddr)),
-	}, false)
+	})
 
 	if err3 == nil && resp3 != nil && resp3.Status == "completed" {
 		t.Errorf("VULNERABILITY: re-enabled blocklist rule still not blocking")
@@ -1344,7 +1346,7 @@ func TestRedTeam_SignerRestriction_BlocklistMode(t *testing.T) {
 
 	// Create a signer_restriction BLOCKLIST that blocks our test signer
 	// In blocklist mode: evaluator returns true if signer is in list → violation → block
-	rule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	rule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:    "RedTeam: Block Test Signer",
 		Type:    "signer_restriction",
 		Mode:    "blocklist",
@@ -1354,15 +1356,15 @@ func TestRedTeam_SignerRestriction_BlocklistMode(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	defer func() { _ = adminClient.DeleteRule(ctx, rule.ID) }()
+	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, rule.ID) }()
 
 	// Attack: use the blocked signer to sign
-	_, err = adminClient.SignWithOptions(ctx, &client.SignRequest{
+	_, err = adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "personal",
 		Payload:       json.RawMessage(`{"message":"signer restriction blocklist test"}`),
-	}, false)
+	})
 
 	require.Error(t, err, "VULNERABILITY: signer_restriction blocklist should block the listed signer")
 	t.Log("PASS: Signer restriction blocklist correctly blocks the listed signer")
@@ -1381,7 +1383,7 @@ func TestRedTeam_WhitelistDoesNotOverApprove_PersonalSign(t *testing.T) {
 
 	// Create ONLY an address whitelist for an unrelated address (not the signer)
 	// This should NOT auto-approve personal_sign (personal_sign has nil recipient)
-	rule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	rule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:    "RedTeam: Address Whitelist Unrelated",
 		Type:    "evm_address_list",
 		Mode:    "whitelist",
@@ -1391,16 +1393,16 @@ func TestRedTeam_WhitelistDoesNotOverApprove_PersonalSign(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	defer func() { _ = adminClient.DeleteRule(ctx, rule.ID) }()
+	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, rule.ID) }()
 
 	// Send personal_sign — the address whitelist cannot match (nil recipient)
 	// NOTE: Other whitelist rules (signer_restriction, sign_type) may still auto-approve
-	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "personal",
 		Payload:       json.RawMessage(`{"message":"whitelist over-approval test"}`),
-	}, false)
+	})
 
 	if err == nil && resp != nil && resp.Status == "completed" {
 		// Check if the matched rule is our address whitelist rule — it should NOT be
@@ -1423,7 +1425,7 @@ func TestRedTeam_NullScopeRule_AppliesToAllSigners(t *testing.T) {
 
 	// Create a value_limit blocklist with NO scope restrictions (applies globally)
 	// The CreateRuleRequest does not set ChainID, APIKeyID, SignerAddress → NULL in DB
-	rule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	rule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:    "RedTeam: Global Value Limit Blocklist",
 		Type:    "evm_value_limit",
 		Mode:    "blocklist",
@@ -1433,15 +1435,15 @@ func TestRedTeam_NullScopeRule_AppliesToAllSigners(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	defer func() { _ = adminClient.DeleteRule(ctx, rule.ID) }()
+	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, rule.ID) }()
 
 	// Attack: send 1 ETH — the global (NULL scope) rule should still block
-	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "transaction",
 		Payload:       json.RawMessage(fmt.Sprintf(`{"transaction":{"to":"%s","value":"1000000000000000000","gas":21000,"gasPrice":"20000000000","txType":"legacy"}}`, treasuryAddress)),
-	}, false)
+	})
 
 	if err == nil && resp != nil && resp.Status == "completed" {
 		t.Errorf("VULNERABILITY: NULL-scoped blocklist did not block — global rules may be ignored")
@@ -1459,7 +1461,7 @@ func TestRedTeam_AddressBlocklist_CasingNormalization(t *testing.T) {
 
 	// Create blocklist with ALL UPPERCASE address
 	upperCaseAddr := "0x1111111111111111111111111111111111111111"
-	rule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	rule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:    "RedTeam: Uppercase Address Blocklist",
 		Type:    "evm_address_list",
 		Mode:    "blocklist",
@@ -1469,7 +1471,7 @@ func TestRedTeam_AddressBlocklist_CasingNormalization(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	defer func() { _ = adminClient.DeleteRule(ctx, rule.ID) }()
+	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, rule.ID) }()
 
 	// Attack: send tx with different casing variants of the same address
 	casings := []string{
@@ -1480,12 +1482,12 @@ func TestRedTeam_AddressBlocklist_CasingNormalization(t *testing.T) {
 
 	for _, addr := range casings {
 		t.Run("casing_"+addr[:6], func(t *testing.T) {
-			resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+			resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 				ChainID:       chainID,
 				SignerAddress: signerAddress,
 				SignType:      "transaction",
 				Payload:       json.RawMessage(fmt.Sprintf(`{"transaction":{"to":"%s","value":"0","gas":21000,"gasPrice":"20000000000","txType":"legacy"}}`, addr)),
-			}, false)
+			})
 
 			if err == nil && resp != nil && resp.Status == "completed" {
 				t.Errorf("VULNERABILITY: blocklist bypassed via address casing variant %s", addr)
@@ -1663,12 +1665,12 @@ func TestRedTeam_SignerPermission_CaseSensitiveBypass(t *testing.T) {
 	// After fix: strings.EqualFold makes comparison case-insensitive
 	upperAddress := "0xF39FD6E51AAD88F6F4CE6AB8827279CFFFB92266"
 
-	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: upperAddress,
 		SignType:      "personal",
 		Payload:       json.RawMessage(`{"message":"case bypass test"}`),
-	}, false)
+	})
 
 	// After fix, this should succeed (personal_sign auto-approved by existing rules)
 	// We check it does NOT return 403 "not authorized for this signer"
@@ -1698,12 +1700,12 @@ func TestRedTeam_PreviewRule_NonAdminAccess(t *testing.T) {
 	// Submit a personal_sign request as ADMIN first (to get a request ID).
 	// Use personal sign to avoid Solidity rule Fail-Closed in test env.
 	// The request may be auto-approved or fail with "authorizing" status.
-	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "personal",
 		Payload:       json.RawMessage(`{"message":"preview-rule acl test"}`),
-	}, false)
+	})
 
 	var requestID string
 	if resp != nil {
@@ -1726,7 +1728,7 @@ func TestRedTeam_PreviewRule_NonAdminAccess(t *testing.T) {
 	// Non-admin attempts to access preview-rule endpoint
 	// Before fix: no admin check on preview-rule, may return 200 or 403 (ownership check only)
 	// After fix: admin middleware enforced, returns 403 before ownership check
-	_, prevErr := nonAdminClient.PreviewRule(ctx, requestID, &client.PreviewRuleRequest{
+	_, prevErr := nonAdminClient.EVM.Requests.PreviewRule(ctx, requestID, &evm.PreviewRuleRequest{
 		RuleType: "evm_address_list",
 		RuleMode: "whitelist",
 	})
@@ -1795,12 +1797,12 @@ func TestRedTeam_HashPayload_InvalidHex(t *testing.T) {
 	invalidHash := "0x" + strings.Repeat("GG", 32)
 	assert.Equal(t, 66, len(invalidHash), "test setup: invalid hash should be 66 chars")
 
-	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "hash",
 		Payload:       json.RawMessage(fmt.Sprintf(`{"hash":"%s"}`, invalidHash)),
-	}, false)
+	})
 
 	require.Error(t, err,
 		"VULNERABILITY: hash with invalid hex characters should be rejected at validation")
@@ -1910,12 +1912,12 @@ func TestRedTeam_PayloadSize_LargeTransactionData(t *testing.T) {
 	payload := fmt.Sprintf(`{"transaction":{"to":"%s","value":"0","gas":21000,"gasPrice":"20000000000","txType":"legacy","data":"%s"}}`,
 		treasuryAddress, hexData)
 
-	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "transaction",
 		Payload:       json.RawMessage(payload),
-	}, false)
+	})
 
 	// Large data should either be rejected or handled gracefully (no crash/hang)
 	if err != nil {
@@ -1937,12 +1939,12 @@ func TestRedTeam_SignHandler_InvalidSignType(t *testing.T) {
 	ctx := context.Background()
 
 	// Attack: use an invalid sign_type to bypass validation
-	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "evil_type",
 		Payload:       json.RawMessage(`{"message":"test"}`),
-	}, false)
+	})
 
 	require.Error(t, err, "VULNERABILITY: invalid sign_type should be rejected at handler level")
 	if resp != nil {
@@ -1956,12 +1958,12 @@ func TestRedTeam_SignHandler_InvalidSignerAddress(t *testing.T) {
 	// Attack: signer_address without valid Ethereum format
 	for _, addr := range []string{"0xINVALID", "not_an_address", "0x123", "0x" + strings.Repeat("GG", 20)} {
 		t.Run("addr_"+addr[:min(len(addr), 16)], func(t *testing.T) {
-			resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+			resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 				ChainID:       chainID,
 				SignerAddress: addr,
 				SignType:      "personal",
 				Payload:       json.RawMessage(`{"message":"test"}`),
-			}, false)
+			})
 
 			require.Error(t, err, "VULNERABILITY: invalid signer_address '%s' should be rejected", addr)
 			if resp != nil {
@@ -1981,12 +1983,12 @@ func TestRedTeam_SignHandler_InvalidChainID(t *testing.T) {
 			name = "empty"
 		}
 		t.Run("chainid_"+name, func(t *testing.T) {
-			resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+			resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 				ChainID:       id,
 				SignerAddress: signerAddress,
 				SignType:      "personal",
 				Payload:       json.RawMessage(`{"message":"test"}`),
-			}, false)
+			})
 
 			require.Error(t, err, "VULNERABILITY: invalid chain_id '%s' should be rejected", id)
 			if resp != nil {
@@ -2010,12 +2012,12 @@ func TestRedTeam_SignHandler_NegativeTransactionValue(t *testing.T) {
 		}
 	}`)
 
-	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "transaction",
 		Payload:       payload,
-	}, false)
+	})
 
 	require.Error(t, err, "VULNERABILITY: negative transaction value should be rejected")
 	if resp != nil {
@@ -2038,12 +2040,12 @@ func TestRedTeam_SignHandler_NegativeGasPrice(t *testing.T) {
 		}
 	}`)
 
-	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "transaction",
 		Payload:       payload,
-	}, false)
+	})
 
 	require.Error(t, err, "VULNERABILITY: negative gasPrice should be rejected")
 	if resp != nil {
@@ -2066,12 +2068,12 @@ func TestRedTeam_SignHandler_InvalidToAddress(t *testing.T) {
 		}
 	}`)
 
-	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "transaction",
 		Payload:       payload,
-	}, false)
+	})
 
 	require.Error(t, err, "VULNERABILITY: invalid 'to' address should be rejected, not silently converted to zero address")
 	if resp != nil {
@@ -2087,12 +2089,12 @@ func TestRedTeam_SignHandler_OversizedPayload(t *testing.T) {
 	bigValue := strings.Repeat("A", 3*1024*1024)
 	payload := json.RawMessage(fmt.Sprintf(`{"message":"%s"}`, bigValue))
 
-	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "personal",
 		Payload:       payload,
-	}, false)
+	})
 
 	require.Error(t, err, "VULNERABILITY: oversized payload (3MB) should be rejected")
 	if resp != nil {
@@ -2107,12 +2109,12 @@ func TestRedTeam_SignHandler_OversizedMessage(t *testing.T) {
 	bigMessage := strings.Repeat("B", 2*1024*1024)
 	payload := json.RawMessage(fmt.Sprintf(`{"message":"%s"}`, bigMessage))
 
-	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "personal",
 		Payload:       payload,
-	}, false)
+	})
 
 	require.Error(t, err, "VULNERABILITY: oversized message (2MB) should be rejected")
 	if resp != nil {
@@ -2137,12 +2139,12 @@ func TestRedTeam_SignHandler_OversizedTxData(t *testing.T) {
 		}
 	}`, bigData))
 
-	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "transaction",
 		Payload:       payload,
-	}, false)
+	})
 
 	require.Error(t, err, "VULNERABILITY: oversized transaction data should be rejected")
 	if resp != nil {
@@ -2299,7 +2301,7 @@ func TestRedTeam_PT5_FakeTokenApprove(t *testing.T) {
 
 	// Create a functions-mode BLOCKLIST rule that rejects approve() to non-USDC contracts.
 	// Blocklist rules are evaluated first; if the require() reverts the tx is blocked.
-	rule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	rule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:    "RT5: ERC20 approve whitelist",
 		Type:    "evm_solidity_expression",
 		Mode:    "blocklist",
@@ -2343,7 +2345,7 @@ func TestRedTeam_PT5_FakeTokenApprove(t *testing.T) {
 	if err != nil {
 		t.Skipf("Foundry not available or rule creation failed: %v", err)
 	}
-	defer func() { _ = adminClient.DeleteRule(ctx, rule.ID) }()
+	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, rule.ID) }()
 
 	// ATTACK: Send approve(validSpender, uint256.max) to a FAKE ERC20 contract
 	fakeToken := "0xdEAD000000000000000000000000000000000000"
@@ -2352,7 +2354,7 @@ func TestRedTeam_PT5_FakeTokenApprove(t *testing.T) {
 		"0000000000000000000000005B38Da6a701c568545dCfcB03FcB875f56beddC4" +
 		"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
 
-	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "transaction",
@@ -2367,7 +2369,7 @@ func TestRedTeam_PT5_FakeTokenApprove(t *testing.T) {
 				"nonce": 0
 			}
 		}`, fakeToken, "0x"+approveHex)),
-	}, false)
+	})
 
 	// The blocklist rule should reject this because txTo != realUSDC
 	if err == nil && resp != nil && resp.Status == "completed" {
@@ -2389,7 +2391,7 @@ func TestRedTeam_PT5_FakeTokenTransfer(t *testing.T) {
 
 	realUSDC := "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
 
-	rule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	rule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:    "RT5: ERC20 transfer whitelist",
 		Type:    "evm_solidity_expression",
 		Mode:    "blocklist",
@@ -2432,7 +2434,7 @@ func TestRedTeam_PT5_FakeTokenTransfer(t *testing.T) {
 	if err != nil {
 		t.Skipf("Foundry not available or rule creation failed: %v", err)
 	}
-	defer func() { _ = adminClient.DeleteRule(ctx, rule.ID) }()
+	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, rule.ID) }()
 
 	// ATTACK: Send transfer(treasury, 5000 USDC) to a FAKE token contract
 	fakeToken := "0x1111111111111111111111111111111111111111"
@@ -2441,7 +2443,7 @@ func TestRedTeam_PT5_FakeTokenTransfer(t *testing.T) {
 		"0000000000000000000000005B38Da6a701c568545dCfcB03FcB875f56beddC4" +
 		"000000000000000000000000000000000000000000000000000000012A05F200"
 
-	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "transaction",
@@ -2456,7 +2458,7 @@ func TestRedTeam_PT5_FakeTokenTransfer(t *testing.T) {
 				"nonce": 1
 			}
 		}`, fakeToken, "0x"+transferHex)),
-	}, false)
+	})
 
 	if err == nil && resp != nil && resp.Status == "completed" {
 		t.Errorf("VULNERABILITY: transfer() to fake ERC20 contract %s was signed! txTo check bypassed", fakeToken)
@@ -2479,7 +2481,7 @@ func TestRedTeam_PT5_ExecTxDelegatecall(t *testing.T) {
 
 	safeProxy := "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045" // example Safe address
 
-	rule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	rule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:    "RT5: execTransaction - operation must be zero",
 		Type:    "evm_solidity_expression",
 		Mode:    "blocklist",
@@ -2562,7 +2564,7 @@ func TestRedTeam_PT5_ExecTxDelegatecall(t *testing.T) {
 	if err != nil {
 		t.Skipf("Foundry not available or rule creation failed: %v", err)
 	}
-	defer func() { _ = adminClient.DeleteRule(ctx, rule.ID) }()
+	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, rule.ID) }()
 
 	// ATTACK: Send execTransaction with operation=1 (DelegateCall)
 	attackHex := "6a761202" +
@@ -2582,7 +2584,7 @@ func TestRedTeam_PT5_ExecTxDelegatecall(t *testing.T) {
 		"0000000000000000000000000000000000000000000000000000000000000000" +
 		"0000000000000000000000000000000000000000000000000000000000000000"
 
-	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "transaction",
@@ -2597,7 +2599,7 @@ func TestRedTeam_PT5_ExecTxDelegatecall(t *testing.T) {
 				"nonce": 2
 			}
 		}`, safeProxy, "0x"+attackHex)),
-	}, false)
+	})
 
 	if err == nil && resp != nil && resp.Status == "completed" {
 		t.Errorf("VULNERABILITY: execTransaction with operation=1 (DelegateCall) was signed!")
@@ -2618,7 +2620,7 @@ func TestRedTeam_PT5_ExecTxGasDrain(t *testing.T) {
 
 	safeProxy := "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
 
-	rule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	rule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:    "RT5: execTransaction - no gas drain",
 		Type:    "evm_solidity_expression",
 		Mode:    "blocklist",
@@ -2699,7 +2701,7 @@ func TestRedTeam_PT5_ExecTxGasDrain(t *testing.T) {
 	if err != nil {
 		t.Skipf("Foundry not available or rule creation failed: %v", err)
 	}
-	defer func() { _ = adminClient.DeleteRule(ctx, rule.ID) }()
+	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, rule.ID) }()
 
 	// ATTACK: Send execTransaction with gasPrice=100M and gasToken=USDT
 	gasDrainHex := "6a761202" +
@@ -2719,7 +2721,7 @@ func TestRedTeam_PT5_ExecTxGasDrain(t *testing.T) {
 		"0000000000000000000000000000000000000000000000000000000000000000" +
 		"0000000000000000000000000000000000000000000000000000000000000000"
 
-	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "transaction",
@@ -2734,7 +2736,7 @@ func TestRedTeam_PT5_ExecTxGasDrain(t *testing.T) {
 				"nonce": 3
 			}
 		}`, safeProxy, "0x"+gasDrainHex)),
-	}, false)
+	})
 
 	if err == nil && resp != nil && resp.Status == "completed" {
 		t.Errorf("VULNERABILITY: execTransaction with gasPrice>0 and gasToken=USDT was signed! Gas drain attack succeeded")
@@ -2760,7 +2762,7 @@ func TestRedTeam_PT5_FakeExchangeOrder(t *testing.T) {
 	// Use a properly checksummed fake address to avoid Solidity compiler errors
 	fakeExchange := "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
 
-	rule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	rule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:    "RT5: Exchange Order - verifyingContract check",
 		Type:    "evm_solidity_expression",
 		Mode:    "blocklist",
@@ -2841,10 +2843,10 @@ func TestRedTeam_PT5_FakeExchangeOrder(t *testing.T) {
 	if err != nil {
 		t.Skipf("Foundry not available or rule creation failed: %v", err)
 	}
-	defer func() { _ = adminClient.DeleteRule(ctx, rule.ID) }()
+	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, rule.ID) }()
 
 	// ATTACK: Send an Order with a FAKE verifyingContract
-	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "typed_data",
@@ -2881,7 +2883,7 @@ func TestRedTeam_PT5_FakeExchangeOrder(t *testing.T) {
 				}
 			}
 		}`, chainID, fakeExchange, signerAddress)),
-	}, false)
+	})
 
 	if err == nil && resp != nil && resp.Status == "completed" {
 		t.Errorf("VULNERABILITY: EIP-712 Order with fake verifyingContract %s was signed!", fakeExchange)
@@ -2906,7 +2908,7 @@ func TestRedTeam_PT5_SafeTxDelegatecall(t *testing.T) {
 
 	safeProxy := "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
 
-	rule, err := adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	rule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:    "RT5: SafeTx - operation must be zero",
 		Type:    "evm_solidity_expression",
 		Mode:    "blocklist",
@@ -3010,10 +3012,10 @@ func TestRedTeam_PT5_SafeTxDelegatecall(t *testing.T) {
 	if err != nil {
 		t.Skipf("Foundry not available or rule creation failed: %v", err)
 	}
-	defer func() { _ = adminClient.DeleteRule(ctx, rule.ID) }()
+	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, rule.ID) }()
 
 	// ATTACK: Send SafeTx EIP-712 with operation=1 (DelegateCall)
-	resp, err := adminClient.SignWithOptions(ctx, &client.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "typed_data",
@@ -3060,7 +3062,7 @@ func TestRedTeam_PT5_SafeTxDelegatecall(t *testing.T) {
 				}
 			}
 		}`, chainID, safeProxy)),
-	}, false)
+	})
 
 	if err == nil && resp != nil && resp.Status == "completed" {
 		t.Errorf("VULNERABILITY: SafeTx with operation=1 (DelegateCall) was signed!")

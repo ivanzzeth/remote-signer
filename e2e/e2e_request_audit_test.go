@@ -11,7 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/audit"
+	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 )
 
 func TestRequest_ListRequests(t *testing.T) {
@@ -19,7 +20,7 @@ func TestRequest_ListRequests(t *testing.T) {
 
 	// First make a sign request (transaction to treasury to match whitelist)
 	address := common.HexToAddress(signerAddress)
-	signer := adminClient.GetSigner(address, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 
 	to := common.HexToAddress(treasuryAddress)
 	tx := types.NewTx(&types.LegacyTx{
@@ -36,7 +37,7 @@ func TestRequest_ListRequests(t *testing.T) {
 	require.NoError(t, err)
 
 	// List requests
-	requests, err := adminClient.ListRequests(ctx, &client.ListRequestsFilter{
+	requests, err := adminClient.EVM.Requests.List(ctx, &evm.ListRequestsFilter{
 		Limit: 10,
 	})
 	require.NoError(t, err)
@@ -50,17 +51,17 @@ func TestRequest_GetRequest(t *testing.T) {
 	ctx := context.Background()
 
 	// Submit a sign request and get its ID
-	resp, err := adminClient.Sign(ctx, &client.SignRequest{
+	resp, err := adminClient.EVM.Sign.Execute(ctx, &evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
-		SignType:      client.SignTypePersonal,
+		SignType:      evm.SignTypePersonal,
 		Payload:       []byte(`{"message":"Get request test"}`),
 	})
 	require.NoError(t, err)
 	require.NotEmpty(t, resp.RequestID)
 
 	// Get the request status
-	status, err := adminClient.GetRequest(ctx, resp.RequestID)
+	status, err := adminClient.EVM.Requests.Get(ctx, resp.RequestID)
 	require.NoError(t, err)
 	assert.Equal(t, resp.RequestID, status.ID)
 	assert.Equal(t, "completed", status.Status)
@@ -75,7 +76,7 @@ func TestAudit_ListAuditRecords(t *testing.T) {
 
 	// Make some requests first (transaction to treasury to match whitelist)
 	address := common.HexToAddress(signerAddress)
-	signer := adminClient.GetSigner(address, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 
 	to := common.HexToAddress(treasuryAddress)
 	tx := types.NewTx(&types.LegacyTx{
@@ -91,7 +92,7 @@ func TestAudit_ListAuditRecords(t *testing.T) {
 	_, _ = signer.SignTransactionWithChainID(tx, chainIDBig)
 
 	// List audit records
-	resp, err := adminClient.ListAuditRecords(ctx, &client.ListAuditFilter{
+	resp, err := adminClient.Audit.List(ctx, &audit.ListFilter{
 		Limit: 10,
 	})
 	require.NoError(t, err)

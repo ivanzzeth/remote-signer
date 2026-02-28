@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 )
 
 // TestApprovalGuard_PauseAndResume verifies that after N consecutive "rejected" outcomes
@@ -23,10 +23,10 @@ func TestApprovalGuard_PauseAndResume(t *testing.T) {
 	burnTxPayload := []byte(`{"transaction":{"to":"0x000000000000000000000000000000000000dEaD","value":"0","gas":21000,"gasPrice":"1000000000","txType":"legacy","nonce":0}}`)
 
 	for i := 0; i < 3; i++ {
-		resp, err := adminClient.Sign(ctx, &client.SignRequest{
+		resp, err := adminClient.EVM.Sign.Execute(ctx, &evm.SignRequest{
 			ChainID:       chainID,
 			SignerAddress: signerAddress,
-			SignType:      client.SignTypeTransaction,
+			SignType:      evm.SignTypeTransaction,
 			Payload:       burnTxPayload,
 		})
 		if err != nil {
@@ -39,23 +39,23 @@ func TestApprovalGuard_PauseAndResume(t *testing.T) {
 		}
 	}
 
-	_, err := adminClient.Sign(ctx, &client.SignRequest{
+	_, err := adminClient.EVM.Sign.Execute(ctx, &evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
-		SignType:      client.SignTypePersonal,
+		SignType:      evm.SignTypePersonal,
 		Payload:       []byte(`{"message":"e2e after trigger"}`),
 	})
 	require.Error(t, err)
 	assert.True(t, strings.Contains(err.Error(), "paused") || strings.Contains(err.Error(), "500"),
 		"expected error to indicate pause or 500, got: %s", err.Error())
 
-	err = adminClient.ResumeApprovalGuard(ctx)
+	err = adminClient.EVM.Guard.Resume(ctx)
 	require.NoError(t, err)
 
-	resp, err := adminClient.Sign(ctx, &client.SignRequest{
+	resp, err := adminClient.EVM.Sign.Execute(ctx, &evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
-		SignType:      client.SignTypePersonal,
+		SignType:      evm.SignTypePersonal,
 		Payload:       []byte(`{"message":"e2e after resume"}`),
 	})
 	require.NoError(t, err)

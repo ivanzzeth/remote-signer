@@ -11,11 +11,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 )
 
 func TestAuth_AdminCanAccessAdminEndpoints(t *testing.T) {
 	ctx := context.Background()
-	rules, err := adminClient.ListRules(ctx, nil)
+	rules, err := adminClient.EVM.Rules.List(ctx, nil)
 	require.NoError(t, err)
 	assert.NotNil(t, rules)
 }
@@ -25,7 +26,7 @@ func TestAuth_NonAdminCannotAccessAdminEndpoints(t *testing.T) {
 		t.Skip("Skipping: non-admin client not configured")
 	}
 	ctx := context.Background()
-	_, err := nonAdminClient.ListRules(ctx, nil)
+	_, err := nonAdminClient.EVM.Rules.List(ctx, nil)
 	require.Error(t, err)
 	apiErr, ok := err.(*client.APIError)
 	require.True(t, ok, "expected APIError, got %T", err)
@@ -37,7 +38,7 @@ func TestAuth_NonAdminCanSubmitSignRequest(t *testing.T) {
 		t.Skip("Skipping: non-admin client not configured")
 	}
 	address := common.HexToAddress(signerAddress)
-	signer := nonAdminClient.GetSigner(address, chainID)
+	signer := evm.NewRemoteSigner(nonAdminClient.EVM.Sign, address, chainID)
 	sig, err := signer.PersonalSign("Hello from non-admin!")
 	require.NoError(t, err)
 	assert.Len(t, sig, 65)
@@ -45,7 +46,7 @@ func TestAuth_NonAdminCanSubmitSignRequest(t *testing.T) {
 
 func TestAuth_AdminCanSubmitSignRequest(t *testing.T) {
 	address := common.HexToAddress(signerAddress)
-	signer := adminClient.GetSigner(address, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	sig, err := signer.PersonalSign("Hello from admin!")
 	require.NoError(t, err)
 	assert.Len(t, sig, 65)

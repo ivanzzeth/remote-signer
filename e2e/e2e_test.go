@@ -246,4 +246,3 @@ func TestMain(m *testing.M) {
 
 	os.Exit(code)
 }
-

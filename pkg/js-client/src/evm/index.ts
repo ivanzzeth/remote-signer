@@ -1,0 +1,42 @@
+/**
+ * EVM service: groups all EVM sub-services and re-exports types.
+ */
+
+import { HttpTransport } from "../transport";
+import { EvmSignService } from "./sign";
+import { EvmRequestService } from "./requests";
+import { EvmRuleService } from "./rules";
+import { EvmSignerService } from "./signers";
+import { EvmHDWalletService } from "./hdwallets";
+import { EvmGuardService } from "./guard";
+
+// ---------------------------------------------------------------------------
+// Composite EVM service
+// ---------------------------------------------------------------------------
+
+export class EvmService {
+  public readonly sign: EvmSignService;
+  public readonly requests: EvmRequestService;
+  public readonly rules: EvmRuleService;
+  public readonly signers: EvmSignerService;
+  public readonly hdWallets: EvmHDWalletService;
+  public readonly guard: EvmGuardService;
+
+  constructor(transport: HttpTransport, pollInterval: number, pollTimeout: number) {
+    this.sign = new EvmSignService(transport, pollInterval, pollTimeout);
+    this.requests = new EvmRequestService(transport);
+    this.rules = new EvmRuleService(transport);
+    this.signers = new EvmSignerService(transport);
+    this.hdWallets = new EvmHDWalletService(transport);
+    this.guard = new EvmGuardService(transport);
+  }
+}
+
+// Re-export all types and services
+export * from "./types";
+export * from "./sign";
+export * from "./requests";
+export * from "./rules";
+export * from "./signers";
+export * from "./hdwallets";
+export * from "./guard";

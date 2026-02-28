@@ -10,8 +10,18 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/audit"
+	"github.com/ivanzzeth/remote-signer/pkg/client/mock"
 )
+
+func newTestAuditModel(t *testing.T) (*AuditModel, *mock.AuditService, *mock.RequestService) {
+	t.Helper()
+	auditSvc := mock.NewAuditService()
+	requestsSvc := mock.NewRequestService()
+	model, err := newAuditModelFromServices(auditSvc, requestsSvc, context.Background())
+	require.NoError(t, err)
+	return model, auditSvc, requestsSvc
+}
 
 func TestNewAuditModel(t *testing.T) {
 	t.Run("returns error when client is nil", func(t *testing.T) {
@@ -21,16 +31,15 @@ func TestNewAuditModel(t *testing.T) {
 	})
 
 	t.Run("returns error when context is nil", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		_, err := NewAuditModel(mockClient, nil)
+		auditSvc := mock.NewAuditService()
+		requestsSvc := mock.NewRequestService()
+		_, err := newAuditModelFromServices(auditSvc, requestsSvc, nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "context is required")
 	})
 
 	t.Run("creates model successfully", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewAuditModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _, _ := newTestAuditModel(t)
 		require.NotNil(t, model)
 		assert.True(t, model.loading)
 		assert.Equal(t, 30, model.limit)
@@ -39,11 +48,9 @@ func TestNewAuditModel(t *testing.T) {
 
 func TestAuditModel_Update(t *testing.T) {
 	t.Run("handles audit data message", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewAuditModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _, _ := newTestAuditModel(t)
 
-		records := []client.AuditRecord{
+		records := []audit.Record{
 			{ID: "audit-1", EventType: "sign_request", Severity: "info", Timestamp: time.Now()},
 			{ID: "audit-2", EventType: "sign_complete", Severity: "info", Timestamp: time.Now()},
 		}
@@ -65,9 +72,7 @@ func TestAuditModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles audit data error", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewAuditModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _, _ := newTestAuditModel(t)
 
 		msg := AuditDataMsg{Err: errors.New("fetch failed")}
 		newModel, _ := model.Update(msg)
@@ -78,11 +83,9 @@ func TestAuditModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles navigation keys", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewAuditModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _, _ := newTestAuditModel(t)
 		model.loading = false
-		model.records = []client.AuditRecord{
+		model.records = []audit.Record{
 			{ID: "audit-1"},
 			{ID: "audit-2"},
 			{ID: "audit-3"},
@@ -101,9 +104,7 @@ func TestAuditModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles filter by event type", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewAuditModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _, _ := newTestAuditModel(t)
 		model.loading = false
 
 		// Press 'e' to filter by event type
@@ -114,9 +115,7 @@ func TestAuditModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles filter by severity", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewAuditModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _, _ := newTestAuditModel(t)
 		model.loading = false
 
 		// Press 's' to filter by severity
@@ -127,11 +126,9 @@ func TestAuditModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles view detail", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewAuditModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _, _ := newTestAuditModel(t)
 		model.loading = false
-		model.records = []client.AuditRecord{
+		model.records = []audit.Record{
 			{ID: "audit-1", EventType: "sign_request"},
 		}
 		model.selectedIdx = 0
@@ -148,13 +145,11 @@ func TestAuditModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles pagination - next page", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		mockClient.ListAuditRecordsFunc = func(ctx context.Context, filter *client.ListAuditFilter) (*client.ListAuditResponse, error) {
-			return &client.ListAuditResponse{}, nil
+		model, auditSvc, _ := newTestAuditModel(t)
+		auditSvc.ListFunc = func(ctx context.Context, filter *audit.ListFilter) (*audit.ListResponse, error) {
+			return &audit.ListResponse{}, nil
 		}
 
-		model, err := NewAuditModel(mockClient, context.Background())
-		require.NoError(t, err)
 		model.loading = false
 		model.hasMore = true
 		nextCursor := "next-cursor"
@@ -169,13 +164,11 @@ func TestAuditModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles pagination - previous page", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		mockClient.ListAuditRecordsFunc = func(ctx context.Context, filter *client.ListAuditFilter) (*client.ListAuditResponse, error) {
-			return &client.ListAuditResponse{}, nil
+		model, auditSvc, _ := newTestAuditModel(t)
+		auditSvc.ListFunc = func(ctx context.Context, filter *audit.ListFilter) (*audit.ListResponse, error) {
+			return &audit.ListResponse{}, nil
 		}
 
-		model, err := NewAuditModel(mockClient, context.Background())
-		require.NoError(t, err)
 		model.loading = false
 		prevCursor := "prev-cursor"
 		model.cursorHistory = []auditCursorState{
@@ -190,13 +183,11 @@ func TestAuditModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles clear filters", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		mockClient.ListAuditRecordsFunc = func(ctx context.Context, filter *client.ListAuditFilter) (*client.ListAuditResponse, error) {
-			return &client.ListAuditResponse{}, nil
+		model, auditSvc, _ := newTestAuditModel(t)
+		auditSvc.ListFunc = func(ctx context.Context, filter *audit.ListFilter) (*audit.ListResponse, error) {
+			return &audit.ListResponse{}, nil
 		}
 
-		model, err := NewAuditModel(mockClient, context.Background())
-		require.NoError(t, err)
 		model.loading = false
 		model.eventFilter = "sign_request"
 		model.severityFilter = "critical"
@@ -211,9 +202,7 @@ func TestAuditModel_Update(t *testing.T) {
 
 func TestAuditModel_View(t *testing.T) {
 	t.Run("renders loading state", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewAuditModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _, _ := newTestAuditModel(t)
 		model.loading = true
 		model.width = 150
 		model.height = 30
@@ -223,9 +212,7 @@ func TestAuditModel_View(t *testing.T) {
 	})
 
 	t.Run("renders error state", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewAuditModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _, _ := newTestAuditModel(t)
 		model.loading = false
 		model.err = errors.New("test error")
 		model.width = 150
@@ -236,13 +223,11 @@ func TestAuditModel_View(t *testing.T) {
 	})
 
 	t.Run("renders audit list", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewAuditModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _, _ := newTestAuditModel(t)
 		model.loading = false
 		model.width = 150
 		model.height = 30
-		model.records = []client.AuditRecord{
+		model.records = []audit.Record{
 			{ID: "audit-1", EventType: "sign_request", Severity: "info", Timestamp: time.Now()},
 		}
 		model.total = 1
@@ -253,27 +238,23 @@ func TestAuditModel_View(t *testing.T) {
 	})
 
 	t.Run("renders empty list", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewAuditModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _, _ := newTestAuditModel(t)
 		model.loading = false
 		model.width = 150
 		model.height = 30
-		model.records = []client.AuditRecord{}
+		model.records = []audit.Record{}
 
 		view := model.View()
 		assert.Contains(t, view, "No audit records found")
 	})
 
 	t.Run("renders detail view", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewAuditModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _, _ := newTestAuditModel(t)
 		model.loading = false
 		model.showDetail = true
 		model.width = 150
 		model.height = 30
-		model.records = []client.AuditRecord{
+		model.records = []audit.Record{
 			{ID: "audit-1", EventType: "sign_request", Severity: "info", Timestamp: time.Now(), APIKeyID: "key-1"},
 		}
 		model.selectedIdx = 0
@@ -283,15 +264,13 @@ func TestAuditModel_View(t *testing.T) {
 	})
 
 	t.Run("renders with filters", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewAuditModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _, _ := newTestAuditModel(t)
 		model.loading = false
 		model.width = 150
 		model.height = 30
 		model.eventFilter = "sign_request"
 		model.severityFilter = "critical"
-		model.records = []client.AuditRecord{}
+		model.records = []audit.Record{}
 
 		view := model.View()
 		assert.Contains(t, view, "filtered")
@@ -300,15 +279,13 @@ func TestAuditModel_View(t *testing.T) {
 
 func TestAuditModel_LoadData(t *testing.T) {
 	t.Run("calls client with correct filter", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		var capturedFilter *client.ListAuditFilter
-		mockClient.ListAuditRecordsFunc = func(ctx context.Context, filter *client.ListAuditFilter) (*client.ListAuditResponse, error) {
+		model, auditSvc, _ := newTestAuditModel(t)
+		var capturedFilter *audit.ListFilter
+		auditSvc.ListFunc = func(ctx context.Context, filter *audit.ListFilter) (*audit.ListResponse, error) {
 			capturedFilter = filter
-			return &client.ListAuditResponse{Records: []client.AuditRecord{}, Total: 0}, nil
+			return &audit.ListResponse{Records: []audit.Record{}, Total: 0}, nil
 		}
 
-		model, err := NewAuditModel(mockClient, context.Background())
-		require.NoError(t, err)
 		model.eventFilter = "sign_request"
 		model.severityFilter = "info"
 		model.limit = 30
@@ -329,9 +306,7 @@ func TestAuditModel_LoadData(t *testing.T) {
 
 func TestAuditModel_ResetPagination(t *testing.T) {
 	t.Run("resets all pagination state", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewAuditModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _, _ := newTestAuditModel(t)
 
 		cursor := "test-cursor"
 		model.cursor = &cursor

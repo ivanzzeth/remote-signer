@@ -12,12 +12,13 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 	"github.com/ivanzzeth/remote-signer/tui/styles"
 )
 
 // RuleDetailModel represents the rule detail view
 type RuleDetailModel struct {
-	client       client.ClientInterface
+	rules_svc    evm.RuleAPI
 	ctx          context.Context
 	width        int
 	height       int
@@ -25,7 +26,7 @@ type RuleDetailModel struct {
 	viewport     viewport.Model
 	loading      bool
 	err          error
-	rule         *client.Rule
+	rule         *evm.Rule
 	showDelete   bool
 	showToggle   bool
 	actionResult string
@@ -35,7 +36,7 @@ type RuleDetailModel struct {
 
 // RuleDetailDataMsg is sent when rule detail is loaded
 type RuleDetailDataMsg struct {
-	Rule *client.Rule
+	Rule *evm.Rule
 	Err  error
 }
 
@@ -48,8 +49,16 @@ type RuleDetailActionMsg struct {
 }
 
 // NewRuleDetailModel creates a new rule detail model
-func NewRuleDetailModel(c client.ClientInterface, ctx context.Context) (*RuleDetailModel, error) {
+func NewRuleDetailModel(c *client.Client, ctx context.Context) (*RuleDetailModel, error) {
 	if c == nil {
+		return nil, fmt.Errorf("client is required")
+	}
+	return newRuleDetailModelFromService(c.EVM.Rules, ctx)
+}
+
+// newRuleDetailModelFromService creates a rule detail model from a RuleAPI (for testing).
+func newRuleDetailModelFromService(svc evm.RuleAPI, ctx context.Context) (*RuleDetailModel, error) {
+	if svc == nil {
 		return nil, fmt.Errorf("client is required")
 	}
 	if ctx == nil {
@@ -61,9 +70,9 @@ func NewRuleDetailModel(c client.ClientInterface, ctx context.Context) (*RuleDet
 	s.Style = styles.SpinnerStyle
 
 	return &RuleDetailModel{
-		client:  c,
-		ctx:     ctx,
-		spinner: s,
+		rules_svc: svc,
+		ctx:       ctx,
+		spinner:   s,
 	}, nil
 }
 
@@ -122,7 +131,7 @@ func (m *RuleDetailModel) ResetGoBack() {
 
 func (m *RuleDetailModel) loadRuleData(ruleID string) tea.Cmd {
 	return func() tea.Msg {
-		rule, err := m.client.GetRule(m.ctx, ruleID)
+		rule, err := m.rules_svc.Get(m.ctx, ruleID)
 		if err != nil {
 			return RuleDetailDataMsg{Err: err}
 		}
@@ -132,7 +141,7 @@ func (m *RuleDetailModel) loadRuleData(ruleID string) tea.Cmd {
 
 func (m *RuleDetailModel) toggleRule() tea.Cmd {
 	return func() tea.Msg {
-		rule, err := m.client.ToggleRule(m.ctx, string(m.rule.ID), !m.rule.Enabled)
+		rule, err := m.rules_svc.Toggle(m.ctx, m.rule.ID, !m.rule.Enabled)
 		if err != nil {
 			return RuleDetailActionMsg{Action: "toggle", Success: false, Err: err}
 		}
@@ -151,7 +160,7 @@ func (m *RuleDetailModel) toggleRule() tea.Cmd {
 
 func (m *RuleDetailModel) deleteRule() tea.Cmd {
 	return func() tea.Msg {
-		err := m.client.DeleteRule(m.ctx, string(m.rule.ID))
+		err := m.rules_svc.Delete(m.ctx, m.rule.ID)
 		if err != nil {
 			return RuleDetailActionMsg{Action: "delete", Success: false, Err: err}
 		}
@@ -190,7 +199,7 @@ func (m *RuleDetailModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				// Reload rule to show updated status
 				if m.rule != nil {
-					return m, m.loadRuleData(string(m.rule.ID))
+					return m, m.loadRuleData(m.rule.ID)
 				}
 			}
 		}
@@ -250,7 +259,7 @@ func (m *RuleDetailModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "r":
 			if m.rule != nil {
-				return m, m.LoadRule(string(m.rule.ID))
+				return m, m.LoadRule(m.rule.ID)
 			}
 			return m, nil
 		case "up", "k":
@@ -340,12 +349,12 @@ func (m *RuleDetailModel) renderDetail() string {
 		key   string
 		value string
 	}{
-		{"ID", string(m.rule.ID)},
+		{"ID", m.rule.ID},
 		{"Name", m.rule.Name},
 		{"Description", m.rule.Description},
-		{"Type", string(m.rule.Type)},
-		{"Mode", string(m.rule.Mode)},
-		{"Source", string(m.rule.Source)},
+		{"Type", m.rule.Type},
+		{"Mode", m.rule.Mode},
+		{"Source", m.rule.Source},
 		{"Enabled", fmt.Sprintf("%t", m.rule.Enabled)},
 		{"Match Count", fmt.Sprintf("%d", m.rule.MatchCount)},
 		{"Created At", m.rule.CreatedAt.Format("2006-01-02 15:04:05")},
