@@ -14,12 +14,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 )
 
 func TestSign_PersonalSign(t *testing.T) {
 	address := common.HexToAddress(signerAddress)
-	signer := adminClient.GetSigner(address, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	sig, err := signer.PersonalSign("Hello, Remote Signer!")
 	require.NoError(t, err)
 	require.NotEmpty(t, sig)
@@ -29,7 +29,7 @@ func TestSign_PersonalSign(t *testing.T) {
 
 func TestSign_Hash(t *testing.T) {
 	address := common.HexToAddress(signerAddress)
-	signer := adminClient.GetSigner(address, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	hash := common.HexToHash("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
 	sig, err := signer.SignHash(hash)
 	require.NoError(t, err)
@@ -39,7 +39,7 @@ func TestSign_Hash(t *testing.T) {
 
 func TestSign_RawMessage(t *testing.T) {
 	address := common.HexToAddress(signerAddress)
-	signer := adminClient.GetSigner(address, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	sig, err := signer.SignRawMessage([]byte("raw message bytes"))
 	require.NoError(t, err)
 	require.NotEmpty(t, sig)
@@ -48,7 +48,7 @@ func TestSign_RawMessage(t *testing.T) {
 
 func TestSign_EIP191Message(t *testing.T) {
 	address := common.HexToAddress(signerAddress)
-	signer := adminClient.GetSigner(address, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	rawMessage := "Hello, EIP-191!"
 	eip191Message := fmt.Sprintf("\x19Ethereum Signed Message:\n%d%s", len(rawMessage), rawMessage)
 	sig, err := signer.SignEIP191Message(eip191Message)
@@ -59,7 +59,7 @@ func TestSign_EIP191Message(t *testing.T) {
 
 func TestSign_TypedData(t *testing.T) {
 	address := common.HexToAddress(signerAddress)
-	signer := adminClient.GetSigner(address, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	typedData := eip712.TypedData{
 		Types: eip712.Types{
 			"EIP712Domain": {
@@ -95,7 +95,7 @@ func TestSign_TypedData(t *testing.T) {
 
 func TestSign_LegacyTransaction(t *testing.T) {
 	address := common.HexToAddress(signerAddress)
-	signer := adminClient.GetSigner(address, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	to := common.HexToAddress(treasuryAddress)
 	tx := types.NewTx(&types.LegacyTx{
 		Nonce:    0,
@@ -117,7 +117,7 @@ func TestSign_LegacyTransaction(t *testing.T) {
 
 func TestSign_EIP1559Transaction(t *testing.T) {
 	address := common.HexToAddress(signerAddress)
-	signer := adminClient.GetSigner(address, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	to := common.HexToAddress(treasuryAddress)
 	chainIDBig := big.NewInt(1)
 	tx := types.NewTx(&types.DynamicFeeTx{
@@ -141,14 +141,14 @@ func TestSign_EIP1559Transaction(t *testing.T) {
 
 func TestSign_SignerNotFound(t *testing.T) {
 	unknownAddress := common.HexToAddress("0x0000000000000000000000000000000000000001")
-	signer := adminClient.GetSigner(unknownAddress, testChainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, unknownAddress, testChainID)
 	_, err := signer.PersonalSign("test message")
 	require.Error(t, err)
 }
 
 func TestSign_ContextCancellation(t *testing.T) {
 	address := common.HexToAddress(signerAddress)
-	signer := adminClient.GetSigner(address, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err := signer.PersonalSignWithContext(ctx, "test message")
@@ -157,7 +157,7 @@ func TestSign_ContextCancellation(t *testing.T) {
 
 func TestSign_MultipleRequests(t *testing.T) {
 	address := common.HexToAddress(signerAddress)
-	signer := adminClient.GetSigner(address, chainID)
+	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	for _, msg := range []string{"Message 1", "Message 2", "Message 3"} {
 		sig, err := signer.PersonalSign(msg)
 		require.NoError(t, err)
@@ -167,10 +167,10 @@ func TestSign_MultipleRequests(t *testing.T) {
 
 func TestSign_DirectSignAPI(t *testing.T) {
 	ctx := context.Background()
-	resp, err := adminClient.Sign(ctx, &client.SignRequest{
+	resp, err := adminClient.EVM.Sign.Execute(ctx, &evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
-		SignType:      client.SignTypePersonal,
+		SignType:      evm.SignTypePersonal,
 		Payload:       []byte(`{"message":"Direct API test"}`),
 	})
 	require.NoError(t, err)

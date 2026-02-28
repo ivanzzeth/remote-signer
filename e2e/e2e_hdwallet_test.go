@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 )
 
 // =============================================================================
@@ -25,7 +26,7 @@ func TestHDWallet_CreateAndList(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a new HD wallet
-	resp, err := adminClient.CreateHDWallet(ctx, &client.CreateHDWalletRequest{
+	resp, err := adminClient.EVM.HDWallets.Create(ctx, &evm.CreateHDWalletRequest{
 		Password:    "test-hd-wallet-password-e2e",
 		EntropyBits: 128,
 	})
@@ -37,7 +38,7 @@ func TestHDWallet_CreateAndList(t *testing.T) {
 	assert.GreaterOrEqual(t, resp.DerivedCount, 1, "Should have at least the primary address derived")
 
 	// List HD wallets
-	listResp, err := adminClient.ListHDWallets(ctx)
+	listResp, err := adminClient.EVM.HDWallets.List(ctx)
 	require.NoError(t, err)
 	require.NotNil(t, listResp)
 	assert.GreaterOrEqual(t, len(listResp.Wallets), 1, "Should have at least one HD wallet")
@@ -54,7 +55,7 @@ func TestHDWallet_CreateAndList(t *testing.T) {
 	assert.True(t, found, "Newly created HD wallet should appear in the list")
 
 	// Verify the primary address appears in signers list
-	signersResp, err := adminClient.ListSigners(ctx, &client.ListSignersFilter{
+	signersResp, err := adminClient.EVM.Signers.List(ctx, &evm.ListSignersFilter{
 		Type:  "hd_wallet",
 		Limit: 100,
 	})
@@ -80,7 +81,7 @@ func TestHDWallet_DeriveAddresses(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a new HD wallet for this test
-	createResp, err := adminClient.CreateHDWallet(ctx, &client.CreateHDWalletRequest{
+	createResp, err := adminClient.EVM.HDWallets.Create(ctx, &evm.CreateHDWalletRequest{
 		Password:    "test-derive-password-e2e",
 		EntropyBits: 128,
 	})
@@ -89,7 +90,7 @@ func TestHDWallet_DeriveAddresses(t *testing.T) {
 
 	// Derive a single address at index 1
 	idx := uint32(1)
-	deriveResp, err := adminClient.DeriveAddress(ctx, primaryAddr, &client.DeriveAddressRequest{
+	deriveResp, err := adminClient.EVM.HDWallets.DeriveAddress(ctx, primaryAddr, &evm.DeriveAddressRequest{
 		Index: &idx,
 	})
 	require.NoError(t, err)
@@ -101,7 +102,7 @@ func TestHDWallet_DeriveAddresses(t *testing.T) {
 	// Derive a batch of addresses (indices 2-4)
 	start := uint32(2)
 	count := uint32(3)
-	batchResp, err := adminClient.DeriveAddress(ctx, primaryAddr, &client.DeriveAddressRequest{
+	batchResp, err := adminClient.EVM.HDWallets.DeriveAddress(ctx, primaryAddr, &evm.DeriveAddressRequest{
 		Start: &start,
 		Count: &count,
 	})
@@ -117,7 +118,7 @@ func TestHDWallet_DeriveAddresses(t *testing.T) {
 	}
 
 	// List derived addresses
-	listResp, err := adminClient.ListDerivedAddresses(ctx, primaryAddr)
+	listResp, err := adminClient.EVM.HDWallets.ListDerived(ctx, primaryAddr)
 	require.NoError(t, err)
 	require.NotNil(t, listResp)
 	assert.GreaterOrEqual(t, len(listResp.Derived), 5, "Should have at least 5 derived addresses (0-4)")
@@ -131,7 +132,7 @@ func TestHDWallet_DerivedAddressCanSign(t *testing.T) {
 	ctx := context.Background()
 
 	// Create HD wallet
-	createResp, err := adminClient.CreateHDWallet(ctx, &client.CreateHDWalletRequest{
+	createResp, err := adminClient.EVM.HDWallets.Create(ctx, &evm.CreateHDWalletRequest{
 		Password:    "test-sign-password-e2e",
 		EntropyBits: 128,
 	})
@@ -139,7 +140,7 @@ func TestHDWallet_DerivedAddressCanSign(t *testing.T) {
 	primaryAddr := createResp.PrimaryAddress
 
 	// First, create a signer restriction whitelist rule for this address
-	_, err = adminClient.CreateRule(ctx, &client.CreateRuleRequest{
+	_, err = adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name: "E2E HD wallet signer allow",
 		Type: "signer_restriction",
 		Mode: "whitelist",
@@ -154,7 +155,7 @@ func TestHDWallet_DerivedAddressCanSign(t *testing.T) {
 	payload, err := json.Marshal(map[string]interface{}{"message": "Hello from HD wallet"})
 	require.NoError(t, err)
 
-	signResp, err := adminClient.Sign(ctx, &client.SignRequest{
+	signResp, err := adminClient.EVM.Sign.Execute(ctx, &evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress:  primaryAddr,
 		SignType:       "personal",
@@ -174,7 +175,7 @@ func TestHDWallet_NonAdminCannotCreate(t *testing.T) {
 	ctx := context.Background()
 
 	// Non-admin should NOT be able to create HD wallets
-	_, err := nonAdminClient.CreateHDWallet(ctx, &client.CreateHDWalletRequest{
+	_, err := nonAdminClient.EVM.HDWallets.Create(ctx, &evm.CreateHDWalletRequest{
 		Password: "should-fail",
 	})
 	require.Error(t, err)
@@ -192,7 +193,7 @@ func TestHDWallet_NonAdminCannotList(t *testing.T) {
 	ctx := context.Background()
 
 	// Non-admin should NOT be able to list HD wallets (admin-only route)
-	_, err := nonAdminClient.ListHDWallets(ctx)
+	_, err := nonAdminClient.EVM.HDWallets.List(ctx)
 	require.Error(t, err)
 
 	apiErr, ok := err.(*client.APIError)
@@ -208,14 +209,14 @@ func TestHDWallet_ValidationErrors(t *testing.T) {
 	ctx := context.Background()
 
 	// Missing password
-	_, err := adminClient.CreateHDWallet(ctx, &client.CreateHDWalletRequest{
+	_, err := adminClient.EVM.HDWallets.Create(ctx, &evm.CreateHDWalletRequest{
 		Password: "",
 	})
 	require.Error(t, err)
 
 	// Derive from non-existent wallet
 	idx := uint32(0)
-	_, err = adminClient.DeriveAddress(ctx, "0x0000000000000000000000000000000000000000", &client.DeriveAddressRequest{
+	_, err = adminClient.EVM.HDWallets.DeriveAddress(ctx, "0x0000000000000000000000000000000000000000", &evm.DeriveAddressRequest{
 		Index: &idx,
 	})
 	require.Error(t, err)

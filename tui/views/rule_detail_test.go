@@ -10,8 +10,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
+	"github.com/ivanzzeth/remote-signer/pkg/client/mock"
 )
+
+func newTestRuleDetailModel(t *testing.T) (*RuleDetailModel, *mock.RuleService) {
+	t.Helper()
+	svc := mock.NewRuleService()
+	model, err := newRuleDetailModelFromService(svc, context.Background())
+	require.NoError(t, err)
+	return model, svc
+}
 
 func TestNewRuleDetailModel(t *testing.T) {
 	t.Run("returns error when client is nil", func(t *testing.T) {
@@ -21,27 +30,23 @@ func TestNewRuleDetailModel(t *testing.T) {
 	})
 
 	t.Run("returns error when context is nil", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		_, err := NewRuleDetailModel(mockClient, nil)
+		svc := mock.NewRuleService()
+		_, err := newRuleDetailModelFromService(svc, nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "context is required")
 	})
 
 	t.Run("creates model successfully", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRuleDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRuleDetailModel(t)
 		require.NotNil(t, model)
 	})
 }
 
 func TestRuleDetailModel_Update(t *testing.T) {
 	t.Run("handles rule detail data message", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRuleDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRuleDetailModel(t)
 
-		rule := &client.Rule{
+		rule := &evm.Rule{
 			ID:        "rule-123",
 			Name:      "Test Rule",
 			Type:      "evm_address_list",
@@ -62,9 +67,7 @@ func TestRuleDetailModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles rule detail data error", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRuleDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRuleDetailModel(t)
 
 		msg := RuleDetailDataMsg{Err: errors.New("rule not found")}
 		newModel, _ := model.Update(msg)
@@ -75,14 +78,12 @@ func TestRuleDetailModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles rule action success - toggle", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		mockClient.GetRuleFunc = func(ctx context.Context, ruleID string) (*client.Rule, error) {
-			return &client.Rule{ID: ruleID, Enabled: true}, nil
+		model, svc := newTestRuleDetailModel(t)
+		svc.GetFunc = func(ctx context.Context, ruleID string) (*evm.Rule, error) {
+			return &evm.Rule{ID: ruleID, Enabled: true}, nil
 		}
 
-		model, err := NewRuleDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
-		model.rule = &client.Rule{ID: "rule-123", Enabled: false}
+		model.rule = &evm.Rule{ID: "rule-123", Enabled: false}
 
 		msg := RuleDetailActionMsg{Action: "toggle", Success: true, Message: "Rule enabled", Err: nil}
 		newModel, cmd := model.Update(msg)
@@ -94,10 +95,8 @@ func TestRuleDetailModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles rule action success - delete", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRuleDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
-		model.rule = &client.Rule{ID: "rule-123"}
+		model, _ := newTestRuleDetailModel(t)
+		model.rule = &evm.Rule{ID: "rule-123"}
 
 		msg := RuleDetailActionMsg{Action: "delete", Success: true, Message: "Rule deleted", Err: nil}
 		newModel, _ := model.Update(msg)
@@ -109,9 +108,7 @@ func TestRuleDetailModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles rule action error", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRuleDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRuleDetailModel(t)
 
 		msg := RuleDetailActionMsg{Action: "toggle", Success: false, Err: errors.New("permission denied")}
 		newModel, _ := model.Update(msg)
@@ -121,10 +118,8 @@ func TestRuleDetailModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles toggle key", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRuleDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
-		model.rule = &client.Rule{ID: "rule-123", Enabled: true}
+		model, _ := newTestRuleDetailModel(t)
+		model.rule = &evm.Rule{ID: "rule-123", Enabled: true}
 
 		newModel, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
 		m := newModel.(*RuleDetailModel)
@@ -133,10 +128,8 @@ func TestRuleDetailModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles delete key", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRuleDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
-		model.rule = &client.Rule{ID: "rule-123"}
+		model, _ := newTestRuleDetailModel(t)
+		model.rule = &evm.Rule{ID: "rule-123"}
 
 		newModel, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 		m := newModel.(*RuleDetailModel)
@@ -145,9 +138,7 @@ func TestRuleDetailModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles back navigation", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRuleDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRuleDetailModel(t)
 
 		newModel, _ := model.Update(tea.KeyMsg{Type: tea.KeyEscape})
 		m := newModel.(*RuleDetailModel)
@@ -156,15 +147,13 @@ func TestRuleDetailModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles toggle dialog - confirm", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		mockClient.ToggleRuleFunc = func(ctx context.Context, ruleID string, enabled bool) (*client.Rule, error) {
-			return &client.Rule{ID: ruleID, Enabled: enabled}, nil
+		model, svc := newTestRuleDetailModel(t)
+		svc.ToggleFunc = func(ctx context.Context, ruleID string, enabled bool) (*evm.Rule, error) {
+			return &evm.Rule{ID: ruleID, Enabled: enabled}, nil
 		}
 
-		model, err := NewRuleDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
 		model.showToggle = true
-		model.rule = &client.Rule{ID: "rule-123", Enabled: false}
+		model.rule = &evm.Rule{ID: "rule-123", Enabled: false}
 
 		newModel, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
 		m := newModel.(*RuleDetailModel)
@@ -175,9 +164,7 @@ func TestRuleDetailModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles toggle dialog - cancel", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRuleDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRuleDetailModel(t)
 		model.showToggle = true
 
 		newModel, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
@@ -187,15 +174,13 @@ func TestRuleDetailModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles delete dialog - confirm", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		mockClient.DeleteRuleFunc = func(ctx context.Context, ruleID string) error {
+		model, svc := newTestRuleDetailModel(t)
+		svc.DeleteFunc = func(ctx context.Context, ruleID string) error {
 			return nil
 		}
 
-		model, err := NewRuleDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
 		model.showDelete = true
-		model.rule = &client.Rule{ID: "rule-123"}
+		model.rule = &evm.Rule{ID: "rule-123"}
 
 		newModel, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
 		m := newModel.(*RuleDetailModel)
@@ -206,9 +191,7 @@ func TestRuleDetailModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles delete dialog - cancel", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRuleDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRuleDetailModel(t)
 		model.showDelete = true
 
 		newModel, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
@@ -218,14 +201,12 @@ func TestRuleDetailModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles refresh key", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		mockClient.GetRuleFunc = func(ctx context.Context, ruleID string) (*client.Rule, error) {
-			return &client.Rule{ID: ruleID}, nil
+		model, svc := newTestRuleDetailModel(t)
+		svc.GetFunc = func(ctx context.Context, ruleID string) (*evm.Rule, error) {
+			return &evm.Rule{ID: ruleID}, nil
 		}
 
-		model, err := NewRuleDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
-		model.rule = &client.Rule{ID: "rule-123"}
+		model.rule = &evm.Rule{ID: "rule-123"}
 
 		newModel, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
 		m := newModel.(*RuleDetailModel)
@@ -237,9 +218,7 @@ func TestRuleDetailModel_Update(t *testing.T) {
 
 func TestRuleDetailModel_View(t *testing.T) {
 	t.Run("renders loading state", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRuleDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRuleDetailModel(t)
 		model.loading = true
 		model.width = 100
 		model.height = 30
@@ -249,9 +228,7 @@ func TestRuleDetailModel_View(t *testing.T) {
 	})
 
 	t.Run("renders error state", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRuleDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRuleDetailModel(t)
 		model.loading = false
 		model.err = errors.New("test error")
 		model.width = 100
@@ -262,14 +239,12 @@ func TestRuleDetailModel_View(t *testing.T) {
 	})
 
 	t.Run("renders rule details", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRuleDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRuleDetailModel(t)
 		model.loading = false
 		model.width = 100
 		model.height = 30
 		model.SetSize(100, 30)
-		model.rule = &client.Rule{
+		model.rule = &evm.Rule{
 			ID:        "rule-123",
 			Name:      "Test Rule",
 			Type:      "evm_address_list",
@@ -286,14 +261,12 @@ func TestRuleDetailModel_View(t *testing.T) {
 	})
 
 	t.Run("renders delete confirmation", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRuleDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRuleDetailModel(t)
 		model.loading = false
 		model.showDelete = true
 		model.width = 100
 		model.height = 30
-		model.rule = &client.Rule{
+		model.rule = &evm.Rule{
 			ID:   "rule-123",
 			Name: "Test Rule",
 			Type: "evm_address_list",
@@ -305,14 +278,12 @@ func TestRuleDetailModel_View(t *testing.T) {
 	})
 
 	t.Run("renders toggle confirmation", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRuleDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRuleDetailModel(t)
 		model.loading = false
 		model.showToggle = true
 		model.width = 100
 		model.height = 30
-		model.rule = &client.Rule{
+		model.rule = &evm.Rule{
 			ID:      "rule-123",
 			Name:    "Test Rule",
 			Enabled: true,
@@ -323,14 +294,12 @@ func TestRuleDetailModel_View(t *testing.T) {
 	})
 
 	t.Run("renders enable confirmation for disabled rule", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRuleDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRuleDetailModel(t)
 		model.loading = false
 		model.showToggle = true
 		model.width = 100
 		model.height = 30
-		model.rule = &client.Rule{
+		model.rule = &evm.Rule{
 			ID:      "rule-123",
 			Name:    "Test Rule",
 			Enabled: false,
@@ -341,9 +310,7 @@ func TestRuleDetailModel_View(t *testing.T) {
 	})
 
 	t.Run("renders no rule loaded", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRuleDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRuleDetailModel(t)
 		model.loading = false
 		model.rule = nil
 		model.width = 100
@@ -357,13 +324,11 @@ func TestRuleDetailModel_View(t *testing.T) {
 
 func TestRuleDetailModel_LoadRule(t *testing.T) {
 	t.Run("sets loading state and resets fields", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		mockClient.GetRuleFunc = func(ctx context.Context, ruleID string) (*client.Rule, error) {
-			return &client.Rule{ID: ruleID}, nil
+		model, svc := newTestRuleDetailModel(t)
+		svc.GetFunc = func(ctx context.Context, ruleID string) (*evm.Rule, error) {
+			return &evm.Rule{ID: ruleID}, nil
 		}
 
-		model, err := NewRuleDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
 		model.showDelete = true
 		model.showToggle = true
 		model.actionResult = "some result"
@@ -379,9 +344,7 @@ func TestRuleDetailModel_LoadRule(t *testing.T) {
 
 func TestRuleDetailModel_ShouldGoBack(t *testing.T) {
 	t.Run("returns goBack flag", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRuleDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRuleDetailModel(t)
 
 		assert.False(t, model.ShouldGoBack())
 
@@ -392,9 +355,7 @@ func TestRuleDetailModel_ShouldGoBack(t *testing.T) {
 
 func TestRuleDetailModel_ResetGoBack(t *testing.T) {
 	t.Run("resets goBack flag", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRuleDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRuleDetailModel(t)
 
 		model.goBack = true
 		model.ResetGoBack()
@@ -404,9 +365,7 @@ func TestRuleDetailModel_ResetGoBack(t *testing.T) {
 
 func TestRuleDetailModel_SetSize(t *testing.T) {
 	t.Run("sets width and height", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRuleDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRuleDetailModel(t)
 
 		model.SetSize(120, 40)
 		assert.Equal(t, 120, model.width)
@@ -415,9 +374,7 @@ func TestRuleDetailModel_SetSize(t *testing.T) {
 	})
 
 	t.Run("updates viewport on resize", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRuleDetailModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRuleDetailModel(t)
 
 		model.SetSize(100, 30)
 		assert.True(t, model.ready)
