@@ -17,9 +17,19 @@ import (
 func newTestSignersModel(t *testing.T) (*SignersModel, *mock.SignerService) {
 	t.Helper()
 	svc := mock.NewSignerService()
-	model, err := newSignersModelFromService(svc, context.Background())
+	hdSvc := mock.NewHDWalletService()
+	model, err := newSignersModelFromService(svc, hdSvc, context.Background())
 	require.NoError(t, err)
 	return model, svc
+}
+
+func newTestSignersModelWithHD(t *testing.T) (*SignersModel, *mock.SignerService, *mock.HDWalletService) {
+	t.Helper()
+	svc := mock.NewSignerService()
+	hdSvc := mock.NewHDWalletService()
+	model, err := newSignersModelFromService(svc, hdSvc, context.Background())
+	require.NoError(t, err)
+	return model, svc, hdSvc
 }
 
 func TestNewSignersModel(t *testing.T) {
@@ -31,7 +41,8 @@ func TestNewSignersModel(t *testing.T) {
 
 	t.Run("returns error when context is nil", func(t *testing.T) {
 		svc := mock.NewSignerService()
-		_, err := newSignersModelFromService(svc, nil)
+		hdSvc := mock.NewHDWalletService()
+		_, err := newSignersModelFromService(svc, hdSvc, nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "context is required")
 	})
@@ -201,9 +212,10 @@ func TestSignersModel_Update(t *testing.T) {
 		model.loading = false
 		model.showCreate = true
 		model.createStep = 0
+		model.typeIdx = 0 // keystore
 
-		// Press '1' to select keystore type
-		newModel, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("1")})
+		// Press Enter to select keystore type
+		newModel, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		m := newModel.(*SignersModel)
 		assert.Equal(t, 1, m.createStep)
 		assert.Equal(t, "keystore", m.selectedType)
@@ -443,5 +455,159 @@ func TestSignersModel_Init(t *testing.T) {
 
 		cmd := model.Init()
 		assert.NotNil(t, cmd)
+	})
+}
+
+func TestSignersModel_CreateHDWalletDerive(t *testing.T) {
+	t.Run("select HD wallet type loads wallet list", func(t *testing.T) {
+		model, _, hdSvc := newTestSignersModelWithHD(t)
+		hdSvc.ListFunc = func(ctx context.Context) (*evm.ListHDWalletsResponse, error) {
+			return &evm.ListHDWalletsResponse{
+				Wallets: []evm.HDWalletResponse{
+					{PrimaryAddress: "0xabc123", BasePath: "m/44'/60'/0'/0", DerivedCount: 3},
+				},
+			}, nil
+		}
+		model.loading = false
+		model.showCreate = true
+		model.createStep = 0
+		model.typeIdx = 0
+
+		// Navigate down to HD wallet option and press Enter
+		newModel, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+		m := newModel.(*SignersModel)
+		assert.Equal(t, 1, m.typeIdx)
+
+		newModel, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		m = newModel.(*SignersModel)
+		assert.Equal(t, "hd_wallet", m.selectedType)
+		assert.True(t, m.loading)
+		assert.NotNil(t, cmd)
+	})
+
+	t.Run("HD wallet list loaded shows picker", func(t *testing.T) {
+		model, _, _ := newTestSignersModelWithHD(t)
+		model.showCreate = true
+		model.selectedType = "hd_wallet"
+		model.createStep = 1
+
+		msg := SignerHDWalletListMsg{
+			Wallets: []evm.HDWalletResponse{
+				{PrimaryAddress: "0xabc123", BasePath: "m/44'/60'/0'/0", DerivedCount: 3},
+				{PrimaryAddress: "0xdef456", BasePath: "m/44'/60'/0'/0", DerivedCount: 1},
+			},
+		}
+
+		newModel, _ := model.Update(msg)
+		m := newModel.(*SignersModel)
+		assert.Equal(t, 2, m.createStep)
+		assert.Len(t, m.hdWallets, 2)
+		assert.Equal(t, 0, m.hdWalletIdx)
+	})
+
+	t.Run("HD wallet list empty shows error", func(t *testing.T) {
+		model, _, _ := newTestSignersModelWithHD(t)
+		model.showCreate = true
+		model.selectedType = "hd_wallet"
+		model.createStep = 1
+
+		msg := SignerHDWalletListMsg{
+			Wallets: []evm.HDWalletResponse{},
+		}
+
+		newModel, _ := model.Update(msg)
+		m := newModel.(*SignersModel)
+		assert.Equal(t, 0, m.createStep) // Goes back to type selection
+		assert.Contains(t, m.actionResult, "No HD wallets found")
+	})
+
+	t.Run("HD wallet picker navigation and selection", func(t *testing.T) {
+		model, _, _ := newTestSignersModelWithHD(t)
+		model.showCreate = true
+		model.selectedType = "hd_wallet"
+		model.createStep = 2
+		model.hdWallets = []evm.HDWalletResponse{
+			{PrimaryAddress: "0xabc123", DerivedCount: 3},
+			{PrimaryAddress: "0xdef456", DerivedCount: 1},
+		}
+		model.hdWalletIdx = 0
+
+		// Navigate down
+		newModel, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+		m := newModel.(*SignersModel)
+		assert.Equal(t, 1, m.hdWalletIdx)
+
+		// Navigate up
+		newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
+		m = newModel.(*SignersModel)
+		assert.Equal(t, 0, m.hdWalletIdx)
+
+		// Select wallet
+		newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		m = newModel.(*SignersModel)
+		assert.Equal(t, 3, m.createStep) // Moved to derive index step
+	})
+
+	t.Run("HD derive index submits and refreshes", func(t *testing.T) {
+		model, svc, hdSvc := newTestSignersModelWithHD(t)
+		svc.ListFunc = func(ctx context.Context, filter *evm.ListSignersFilter) (*evm.ListSignersResponse, error) {
+			return &evm.ListSignersResponse{Signers: []evm.Signer{}, Total: 0}, nil
+		}
+		hdSvc.DeriveAddressFunc = func(ctx context.Context, primaryAddr string, req *evm.DeriveAddressRequest) (*evm.DeriveAddressResponse, error) {
+			return &evm.DeriveAddressResponse{
+				Derived: []evm.SignerInfo{{Address: "0xnewaddr", Type: "hd_wallet", Enabled: true}},
+			}, nil
+		}
+
+		model.showCreate = true
+		model.selectedType = "hd_wallet"
+		model.createStep = 3
+		model.hdWallets = []evm.HDWalletResponse{
+			{PrimaryAddress: "0xabc123", DerivedCount: 3},
+		}
+		model.hdWalletIdx = 0
+		model.indexInput.SetValue("5")
+
+		// Press enter to derive
+		newModel, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		m := newModel.(*SignersModel)
+		assert.True(t, m.loading)
+		assert.NotNil(t, cmd)
+	})
+
+	t.Run("HD derive success resets create and refreshes", func(t *testing.T) {
+		model, svc, _ := newTestSignersModelWithHD(t)
+		svc.ListFunc = func(ctx context.Context, filter *evm.ListSignersFilter) (*evm.ListSignersResponse, error) {
+			return &evm.ListSignersResponse{Signers: []evm.Signer{}, Total: 0}, nil
+		}
+
+		model.showCreate = true
+		model.selectedType = "hd_wallet"
+		model.createStep = 3
+
+		msg := SignerHDDeriveMsg{
+			Success: true,
+			Message: "Derived signer: 0xnewaddr",
+			Derived: []evm.SignerInfo{{Address: "0xnewaddr", Type: "hd_wallet", Enabled: true}},
+		}
+
+		newModel, cmd := model.Update(msg)
+		m := newModel.(*SignersModel)
+		assert.False(t, m.showCreate)
+		assert.Contains(t, m.actionResult, "Derived signer")
+		assert.NotNil(t, cmd) // Refresh command
+	})
+
+	t.Run("render create form shows HD wallet option", func(t *testing.T) {
+		model, _, _ := newTestSignersModelWithHD(t)
+		model.loading = false
+		model.showCreate = true
+		model.createStep = 0
+		model.width = 100
+		model.height = 30
+
+		view := model.View()
+		assert.Contains(t, view, "Keystore")
+		assert.Contains(t, view, "Derive from HD Wallet")
 	})
 }

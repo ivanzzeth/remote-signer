@@ -271,6 +271,14 @@ func run() error {
 			return fmt.Errorf("failed to create password provider: %w", err)
 		}
 
+		// Ensure keystore and HD wallet directories exist
+		if err := os.MkdirAll(cfg.Chains.EVM.KeystoreDir, 0700); err != nil {
+			return fmt.Errorf("failed to create keystore directory %s: %w", cfg.Chains.EVM.KeystoreDir, err)
+		}
+		if err := os.MkdirAll(cfg.Chains.EVM.HDWalletDir, 0700); err != nil {
+			return fmt.Errorf("failed to create HD wallet directory %s: %w", cfg.Chains.EVM.HDWalletDir, err)
+		}
+
 		// 1. Load private keys
 		pkProvider, err := evm.NewPrivateKeyProvider(evmRegistry, cfg.Chains.EVM.Signers.PrivateKeys)
 		if err != nil {

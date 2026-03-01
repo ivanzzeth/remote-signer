@@ -366,6 +366,11 @@ func (m *RulesModel) View() string {
 	return m.renderRules()
 }
 
+// IsCapturingInput returns true when this view is capturing keyboard input (filter active).
+func (m *RulesModel) IsCapturingInput() bool {
+	return m.showFilter
+}
+
 func (m *RulesModel) renderLoading() string {
 	return lipgloss.Place(
 		m.width,
