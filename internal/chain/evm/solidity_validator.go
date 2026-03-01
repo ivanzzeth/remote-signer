@@ -56,6 +56,11 @@ var dangerousPatterns = []*regexp.Regexp{
 
 	// Signing (could sign arbitrary data with Foundry test keys)
 	regexp.MustCompile(`(?i)vm\s*\.\s*sign\s*\(`), // vm.sign() - sign with test key
+
+	// Solidity language-level dangerous constructs (defense-in-depth; also checked in ruleconfig/validate.go)
+	regexp.MustCompile(`(?i)selfdestruct\s*\(`), // selfdestruct() - contract destruction
+	regexp.MustCompile(`(?i)delegatecall\s*\(`), // delegatecall() - arbitrary code execution in caller context
+	regexp.MustCompile(`(?i)staticcall\s*\(`),   // staticcall() - low-level call; rules should not use raw calls
 }
 
 // SecurityError represents a security validation error

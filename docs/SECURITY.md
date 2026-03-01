@@ -170,12 +170,71 @@ Rules can be scoped by `chain_type`, `chain_id`, `api_key_id`, `signer_address`.
 | Application | Rule/instance expiry   | Time-limited authorization                   |
 | Application | Approval guard         | Pause + alert on abuse burst, then resume    |
 | Operations  | Audit log + monitor    | Forensics and anomaly alerts                 |
+| Rule engine | Solidity static check  | Block dangerous cheatcodes and language constructs |
+| Rule engine | JS static check        | Block prototype pollution, sandbox escape, dynamic exec |
+| Container   | read_only + seccomp    | Immutable filesystem + syscall restrictions  |
+| Container   | tmpfs + named volumes  | Controlled writable paths only               |
 | Dev pipeline | gosec + govulncheck   | Go SAST and dependency vulnerability checks |
 | Dev pipeline | gitleaks + detect-secrets | Multi-layer secret detection in commits   |
 | Dev pipeline | semgrep + eslint-security | JS/TS SAST and security linting          |
 | Dev pipeline | npm audit              | JS dependency vulnerability scanning        |
 
 Together, these provide layered protection from the network through to application-level authorization, operational visibility, and development-time security enforcement.
+
+---
+
+## 9. Rule Engine Static Analysis
+
+Both Solidity and JavaScript rule engines perform static security checks before any code is executed.
+
+### Solidity Rules
+
+`ValidateSolidityCodeSecurity()` scans Solidity rule code against a regex blocklist of dangerous patterns:
+
+- **Foundry cheatcodes** (21 patterns): `vm.ffi`, `vm.readFile`, `vm.writeFile`, `vm.removeFile`, `vm.readDir`, `vm.closeFile`, `vm.writeLine`, `vm.readLine`, `vm.fsMetadata`, `vm.env*`, `vm.setEnv`, `vm.projectRoot`, `vm.rpc`, `vm.createFork`, `vm.selectFork`, `vm.broadcast`, `vm.startBroadcast`, `vm.sign`
+- **Solidity language constructs** (3 patterns): `selfdestruct()`, `delegatecall()`, `staticcall()` (defense-in-depth; also checked in `ruleconfig/validate.go`)
+
+This is a defense-in-depth layer; runtime protections (`FOUNDRY_FFI=false`, `FOUNDRY_FS_PERMISSIONS=[]`) are also enforced.
+
+### JavaScript Rules
+
+`ValidateJSCodeSecurity()` scans JS rule code against a regex blocklist before execution:
+
+- **Prototype pollution / sandbox escape** (5 patterns): `__proto__`, `constructor.constructor`, `Object.getPrototypeOf`, `Object.setPrototypeOf`, `Object.defineProperty`
+- **Dynamic code execution** (2 patterns): `Function()`, dynamic `import()`
+- **Node.js dangerous modules** (1 pattern): `child_process`
+
+This is a defense-in-depth layer alongside the runtime sandbox (`removeGlobals()`).
+
+---
+
+## 10. Container Hardening (Docker)
+
+Production Docker deployment includes multiple hardening layers:
+
+| Control | Purpose |
+|---------|---------|
+| `read_only: true` | Immutable root filesystem; writes only via explicit volumes/tmpfs |
+| `tmpfs: /tmp, /run` | Ephemeral writable areas with `noexec,nosuid` |
+| `no-new-privileges` | Prevent privilege escalation via setuid/setgid |
+| `seccomp=deploy/seccomp.json` | Block dangerous syscalls (ptrace, mount, kexec, kernel modules, etc.) |
+| `cap_drop: ALL` + minimal `cap_add` | Only NET_BIND_SERVICE and IPC_LOCK capabilities |
+| Resource limits | CPU/memory limits to prevent DoS |
+| `mem_swappiness: 0` | Prevent private keys from being swapped to disk |
+| Named volumes | `svm_data` for solc compiler cache persistence |
+
+### Seccomp Profile
+
+The seccomp profile (`deploy/seccomp.json`) uses a default-allow policy with explicit denials for:
+- Process debugging (`ptrace`, `process_vm_readv/writev`)
+- Filesystem manipulation (`mount`, `umount2`, `pivot_root`, `chroot`)
+- Kernel operations (`kexec_load`, `init_module`, `reboot`)
+- Namespace escape (`unshare`, `setns`)
+- Kernel keyring (`keyctl`, `add_key`, `request_key`)
+
+### Image Scanning
+
+Use `scripts/scan-image.sh` to scan the Docker image for HIGH/CRITICAL vulnerabilities with Trivy.
 
 ---
 
