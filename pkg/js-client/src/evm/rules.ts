@@ -37,8 +37,20 @@ export interface Rule {
   updated_at: string;
 }
 
+export interface ListRulesFilter {
+  chain_type?: string;
+  signer_address?: string;
+  api_key_id?: string;
+  type?: string;
+  mode?: string;
+  enabled?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
 export interface ListRulesResponse {
   rules: Rule[];
+  total: number;
 }
 
 export interface CreateRuleRequest {
@@ -72,12 +84,22 @@ export class EvmRuleService {
   constructor(private readonly transport: HttpTransport) {}
 
   /**
-   * List all rules.
+   * List rules with optional filters.
    */
-  async list(): Promise<ListRulesResponse> {
+  async list(filter?: ListRulesFilter): Promise<ListRulesResponse> {
+    const params = new URLSearchParams();
+    if (filter?.chain_type) params.append("chain_type", filter.chain_type);
+    if (filter?.signer_address) params.append("signer_address", filter.signer_address);
+    if (filter?.api_key_id) params.append("api_key_id", filter.api_key_id);
+    if (filter?.type) params.append("type", filter.type);
+    if (filter?.mode) params.append("mode", filter.mode);
+    if (filter?.enabled !== undefined) params.append("enabled", String(filter.enabled));
+    if (filter?.limit) params.append("limit", filter.limit.toString());
+    if (filter?.offset) params.append("offset", filter.offset.toString());
+    const qs = params.toString();
     return this.transport.request<ListRulesResponse>(
       "GET",
-      "/api/v1/evm/rules",
+      `/api/v1/evm/rules${qs ? `?${qs}` : ""}`,
       null,
     );
   }
@@ -124,5 +146,12 @@ export class EvmRuleService {
       `/api/v1/evm/rules/${ruleID}`,
       null,
     );
+  }
+
+  /**
+   * Toggle a rule's enabled state.
+   */
+  async toggle(ruleID: string, enabled: boolean): Promise<Rule> {
+    return this.update(ruleID, { enabled });
   }
 }

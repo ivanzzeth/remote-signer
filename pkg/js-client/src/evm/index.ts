@@ -27,7 +27,7 @@ export class EvmService {
     this.requests = new EvmRequestService(transport);
     this.rules = new EvmRuleService(transport);
     this.signers = new EvmSignerService(transport);
-    this.hdWallets = new EvmHDWalletService(transport);
+    this.hdWallets = new EvmHDWalletService(transport, this.sign);
     this.guard = new EvmGuardService(transport);
   }
 }
@@ -39,4 +39,6 @@ export * from "./requests";
 export * from "./rules";
 export * from "./signers";
 export * from "./hdwallets";
+export * from "./remote_signer";
 export * from "./guard";
+export * from "./ethsig";

@@ -15,6 +15,12 @@ export interface SignerInfo {
   source: string; // "config" | "api"
 }
 
+export interface ListSignersFilter {
+  type?: string;
+  offset?: number;
+  limit?: number;
+}
+
 export interface ListSignersResponse {
   signers: SignerInfo[];
 }
@@ -36,12 +42,17 @@ export class EvmSignerService {
   constructor(private readonly transport: HttpTransport) {}
 
   /**
-   * List all available signers.
+   * List signers with optional filters.
    */
-  async list(): Promise<ListSignersResponse> {
+  async list(filter?: ListSignersFilter): Promise<ListSignersResponse> {
+    const params = new URLSearchParams();
+    if (filter?.type) params.append("type", filter.type);
+    if (filter?.offset) params.append("offset", filter.offset.toString());
+    if (filter?.limit) params.append("limit", filter.limit.toString());
+    const qs = params.toString();
     return this.transport.request<ListSignersResponse>(
       "GET",
-      "/api/v1/evm/signers",
+      `/api/v1/evm/signers${qs ? `?${qs}` : ""}`,
       null,
     );
   }

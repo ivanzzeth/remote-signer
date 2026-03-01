@@ -44,6 +44,7 @@ export {
   EvmSignerService,
   EvmHDWalletService,
   EvmGuardService,
+  RemoteSigner,
 } from "./evm";
 export type {
   // Shared EVM types
@@ -73,11 +74,13 @@ export type {
   RuleType,
   RuleMode,
   Rule,
+  ListRulesFilter,
   ListRulesResponse,
   CreateRuleRequest,
   UpdateRuleRequest,
   // Signer types
   SignerInfo,
+  ListSignersFilter,
   ListSignersResponse,
   CreateSignerRequest,
   CreateSignerResponse,
@@ -88,6 +91,15 @@ export type {
   DeriveAddressRequest,
   DeriveAddressResponse,
   ListDerivedAddressesResponse,
+  // Ethsig interfaces
+  Signer,
+  AddressGetter,
+  HashSigner,
+  RawMessageSigner,
+  EIP191Signer,
+  PersonalSigner,
+  TypedDataSigner,
+  TransactionSigner,
 } from "./evm";
 
 // Audit
@@ -101,6 +113,19 @@ export type {
 
 // Templates
 export { TemplateService } from "./templates";
+export type {
+  TemplateVariable,
+  Template,
+  ListTemplatesFilter,
+  ListTemplatesResponse,
+  CreateTemplateRequest,
+  UpdateTemplateRequest,
+  BudgetConfig,
+  ScheduleConfig,
+  InstantiateRequest,
+  InstantiateResponse,
+  RevokeInstanceResponse,
+} from "./templates";
 
 // Errors
 export * from "./errors";
