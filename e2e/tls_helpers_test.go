@@ -196,7 +196,8 @@ func initTestServices(
 
 	// Router
 	router, err := api.NewRouter(authVerifier, signService, signerManager, ruleRepo, auditRepo, log, api.RouterConfig{
-		Version: "e2e-tls-test",
+		Version:    "e2e-tls-test",
+		APIKeyRepo: apiKeyRepo,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create router: %w", err)

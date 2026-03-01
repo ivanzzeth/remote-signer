@@ -77,7 +77,9 @@ func NewHDWalletProvider(
 		// Derive the primary address (index 0) for identification
 		primaryAddr, err := wallet.DeriveAddress(0)
 		if err != nil {
-			wallet.Close()
+			if closeErr := wallet.Close(); closeErr != nil {
+				logger.Warn("failed to close wallet on error", slog.String("path", cfg.Path), slog.Any("error", closeErr))
+			}
 			return nil, fmt.Errorf("failed to derive primary address from %s: %w", cfg.Path, err)
 		}
 
@@ -89,7 +91,9 @@ func NewHDWalletProvider(
 
 		// Register primary address signer
 		if err := p.registerDerivedSigner(primaryAddr, wallet, 0, state); err != nil {
-			wallet.Close()
+			if closeErr := wallet.Close(); closeErr != nil {
+				logger.Warn("failed to close wallet on error", slog.String("path", cfg.Path), slog.Any("error", closeErr))
+			}
 			return nil, fmt.Errorf("failed to register primary signer from %s: %w", cfg.Path, err)
 		}
 
@@ -100,11 +104,15 @@ func NewHDWalletProvider(
 			}
 			addr, err := wallet.DeriveAddress(idx)
 			if err != nil {
-				wallet.Close()
+				if closeErr := wallet.Close(); closeErr != nil {
+					logger.Warn("failed to close wallet on error", slog.String("path", cfg.Path), slog.Any("error", closeErr))
+				}
 				return nil, fmt.Errorf("failed to derive index %d from %s: %w", idx, cfg.Path, err)
 			}
 			if err := p.registerDerivedSigner(addr, wallet, idx, state); err != nil {
-				wallet.Close()
+				if closeErr := wallet.Close(); closeErr != nil {
+					logger.Warn("failed to close wallet on error", slog.String("path", cfg.Path), slog.Any("error", closeErr))
+				}
 				return nil, fmt.Errorf("failed to register derived signer index %d from %s: %w", idx, cfg.Path, err)
 			}
 		}
@@ -192,7 +200,9 @@ func (p *HDWalletProvider) CreateHDWallet(ctx context.Context, params types.Crea
 
 	primaryAddr := common.HexToAddress(address)
 	if err := p.registerDerivedSigner(primaryAddr, wallet, 0, state); err != nil {
-		wallet.Close()
+		if closeErr := wallet.Close(); closeErr != nil {
+			p.logger.Warn("failed to close wallet on error", slog.Any("error", closeErr))
+		}
 		return nil, fmt.Errorf("failed to register primary signer: %w", err)
 	}
 
@@ -250,7 +260,9 @@ func (p *HDWalletProvider) ImportHDWallet(ctx context.Context, params types.Impo
 	_, exists := p.wallets[addrKey]
 	p.mu.RUnlock()
 	if exists {
-		wallet.Close()
+		if closeErr := wallet.Close(); closeErr != nil {
+			p.logger.Warn("failed to close wallet on error", slog.Any("error", closeErr))
+		}
 		return nil, types.ErrAlreadyExists
 	}
 
@@ -261,7 +273,9 @@ func (p *HDWalletProvider) ImportHDWallet(ctx context.Context, params types.Impo
 
 	primaryAddr := common.HexToAddress(address)
 	if err := p.registerDerivedSigner(primaryAddr, wallet, 0, state); err != nil {
-		wallet.Close()
+		if closeErr := wallet.Close(); closeErr != nil {
+			p.logger.Warn("failed to close wallet on error", slog.Any("error", closeErr))
+		}
 		return nil, fmt.Errorf("failed to register primary signer: %w", err)
 	}
 

@@ -159,7 +159,7 @@ func (bc *BudgetChecker) CheckAndDeductBudget(
 		"tx_count_after", budget.TxCount+1,
 	)
 
-	// Async: check alert threshold
+	// #nosec G118 -- intentional: async alert check must outlive request context
 	go bc.checkAlertThreshold(rule.ID, unit, budget)
 
 	return true, nil

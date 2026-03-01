@@ -262,7 +262,7 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 				"request_id", req.ID,
 				"reason", reason,
 			)
-			// Update match count asynchronously
+			// #nosec G118 -- intentional: audit logging must outlive request context
 			go func(ruleID types.RuleID) {
 				if err := e.repo.IncrementMatchCount(context.Background(), ruleID); err != nil {
 					e.logger.Error("failed to increment match count", "rule_id", ruleID, "error", err)
@@ -364,7 +364,7 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 				"request_id", req.ID,
 				"reason", result.AllowReason,
 			)
-			// Update match count asynchronously
+			// #nosec G118 -- intentional: audit logging must outlive request context
 			go func(ruleID types.RuleID) {
 				if err := e.repo.IncrementMatchCount(context.Background(), ruleID); err != nil {
 					e.logger.Error("failed to increment match count", "rule_id", ruleID, "error", err)
@@ -778,7 +778,7 @@ func (e *WhitelistRuleEngine) evaluateWhitelistBatch(
 					"request_id", req.ID,
 					"reason", result.Reason,
 				)
-				// Update match count asynchronously
+				// #nosec G118 -- intentional: audit logging must outlive request context
 				go func(ruleID types.RuleID) {
 					if err := e.repo.IncrementMatchCount(context.Background(), ruleID); err != nil {
 						e.logger.Error("failed to increment match count", "rule_id", ruleID, "error", err)

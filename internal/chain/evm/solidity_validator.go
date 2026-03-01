@@ -426,7 +426,13 @@ func (v *SolidityRuleValidator) validateRulesBatchForMode(ctx context.Context, r
 	// batchResults are ordered the same as allTestCases
 	for i, rule := range rules {
 		var config SolidityExpressionConfig
-		json.Unmarshal(rule.Config, &config)
+		if err := json.Unmarshal(rule.Config, &config); err != nil {
+			results[i] = ValidationResult{
+				Valid:       false,
+				SyntaxError: &SyntaxError{Message: fmt.Sprintf("failed to unmarshal rule config: %v", err)},
+			}
+			continue
+		}
 
 		result := ValidationResult{Valid: true}
 		result.TestCaseResults = make([]TestCaseResult, len(config.TestCases))
@@ -987,7 +993,7 @@ func (v *SolidityRuleValidator) executeBatchTestScript(ctx context.Context, scri
 	}
 
 	// Execute forge test
-	cmd := exec.CommandContext(execCtx,
+	cmd := exec.CommandContext(execCtx, // #nosec G204 -- forge path is admin-configured, env hardened via safeForgeEnv()
 		v.evaluator.GetFoundryPath(), "test",
 		"--match-path", scriptPath,
 		"--match-contract", "BatchRuleEvaluatorTest",
@@ -1309,7 +1315,7 @@ func (v *SolidityRuleValidator) compileSyntaxCheckScript(ctx context.Context, sc
 
 	// Run forge build with cache path for incremental compilation
 	cachePath := filepath.Join(v.evaluator.GetCacheDir(), "forge-cache")
-	cmd := exec.CommandContext(execCtx,
+	cmd := exec.CommandContext(execCtx, // #nosec G204 -- forge path is admin-configured, env hardened via safeForgeEnv()
 		v.evaluator.GetFoundryPath(), "build",
 		"--root", v.evaluator.GetTempDir(),
 		"--cache-path", cachePath,
@@ -1324,7 +1330,9 @@ func (v *SolidityRuleValidator) compileSyntaxCheckScript(ctx context.Context, sc
 		syntaxErr := parseSolidityError(string(output))
 		// CRITICAL: Remove the failing syntax check file so it doesn't poison
 		// subsequent forge builds (forge compiles ALL .sol files in the directory)
-		os.Remove(scriptPath)
+		if rmErr := os.Remove(scriptPath); rmErr != nil {
+			v.logger.Warn("failed to remove failing script", "path", scriptPath, "error", rmErr)
+		}
 		// Cache as invalid
 		v.syntaxCacheMu.Lock()
 		v.syntaxCache[hashStr] = false
