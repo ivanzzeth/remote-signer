@@ -170,8 +170,81 @@ Rules can be scoped by `chain_type`, `chain_id`, `api_key_id`, `signer_address`.
 | Application | Rule/instance expiry   | Time-limited authorization                   |
 | Application | Approval guard         | Pause + alert on abuse burst, then resume    |
 | Operations  | Audit log + monitor    | Forensics and anomaly alerts                 |
+| Dev pipeline | gosec + govulncheck   | Go SAST and dependency vulnerability checks |
+| Dev pipeline | gitleaks + detect-secrets | Multi-layer secret detection in commits   |
+| Dev pipeline | semgrep + eslint-security | JS/TS SAST and security linting          |
+| Dev pipeline | npm audit              | JS dependency vulnerability scanning        |
 
-Together, these provide layered protection from the network through to application-level authorization and operational visibility.
+Together, these provide layered protection from the network through to application-level authorization, operational visibility, and development-time security enforcement.
+
+---
+
+## Development Security Pipeline
+
+Pre-commit hooks enforce security checks before any code reaches the repository. Install with `bash scripts/install-hooks.sh`.
+
+### Go Security
+
+| Tool | Purpose | Install |
+|------|---------|---------|
+| **gosec** | Static analysis for Go security issues (OWASP, CWE) | `go install github.com/securego/gosec/v2/cmd/gosec@latest` |
+| **govulncheck** | Checks Go dependencies against the Go vulnerability database | `go install golang.org/x/vuln/cmd/govulncheck@latest` |
+| **go vet** | Built-in Go static analysis | Included with Go |
+
+- `gosec` scans all Go source (excluding `vendor/`, `pkg/js-client/`). Use `// #nosec GXXX -- reason` to suppress false positives.
+- `govulncheck` reports only vulnerabilities that are actually reachable from the call graph.
+
+### Secret Detection (multi-layer)
+
+| Tool | Purpose | Install |
+|------|---------|---------|
+| **gitleaks** | Fast regex-based secret scanner, scans staged git diffs | `go install github.com/zricethezav/gitleaks/v8@latest` |
+| **detect-secrets** | Entropy + pattern-based detector (complements gitleaks) | `pip install detect-secrets` |
+| **Plaintext grep** | Heuristic grep for `private_key`, `password`, `secret`, `token` patterns | Built-in |
+
+- **gitleaks** uses `.gitleaks.toml` for configuration and allowlists.
+- **detect-secrets** uses `.secrets.baseline` to track known false positives. Regenerate baseline: `detect-secrets scan --exclude-files 'vendor/.*' --exclude-files 'node_modules/.*' --exclude-files 'go\.sum' > .secrets.baseline`.
+- Three layers ensure different secret patterns are caught (regex rules, entropy analysis, heuristic grep).
+
+### JS/TS Security
+
+| Tool | Purpose | Install |
+|------|---------|---------|
+| **semgrep** | SAST for JS/TS — XSS, prototype pollution, command injection, etc. | `pip install semgrep` |
+| **eslint-plugin-security** | ESLint rules for common JS security antipatterns (eval, innerHTML, etc.) | `cd pkg/js-client && npm install` |
+| **npm audit** | Dependency vulnerability scanner for npm packages | Included with npm |
+
+- **semgrep** runs with `--config=auto` (community security rules) on any staged `.js`/`.ts` files.
+- **eslint-plugin-security** is configured in `pkg/js-client/.eslintrc.json` and runs only when `pkg/js-client/src/` files are staged.
+- **npm audit** runs at `--audit-level=high` only when `package.json` or `package-lock.json` changes.
+
+### Pre-commit Check Order
+
+1. Error suppression check (`_ = xxx` forbidden)
+2. gosec (Go SAST)
+3. govulncheck (Go dependency vulnerabilities)
+4. go vet (Go static analysis)
+5. Plaintext secret grep
+6. gitleaks (staged diff secret scan)
+7. detect-secrets (entropy-based secret scan)
+8. semgrep (JS/TS SAST, only when JS/TS files staged)
+9. eslint-plugin-security (JS/TS lint, only when js-client files staged)
+10. npm audit (JS deps, only when package files staged)
+11. Rule YAML validation (only when rule files staged)
+12. E2E tests
+
+### `#nosec` / Suppression Policy
+
+Suppressions require a justification comment:
+```go
+// #nosec G115 -- bounds checked above
+// #nosec G118 -- intentional: audit logging must outlive request context
+// #nosec G204 -- foundryPath is admin-configured
+// #nosec G304 -- path is admin-configured via config file
+// #nosec G104 -- HTTP response write error cannot be meaningfully handled
+```
+
+Suppressions without justification are not accepted. Review all `#nosec` annotations during code review.
 
 ---
 
