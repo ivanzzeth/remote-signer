@@ -119,3 +119,6 @@ coverage/
 *~
 .DS_Store
 bin/
+
+# E2E test data (generated keystores, etc.)
+e2e/data/

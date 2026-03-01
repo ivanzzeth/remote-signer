@@ -3,6 +3,7 @@ package views
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -36,12 +37,19 @@ type SignersModel struct {
 
 	// Create signer state
 	showCreate       bool
-	createStep       int // 0: select type, 1: enter password
+	createStep       int // 0: select type, 1: enter password (keystore) or loading wallets (hd), 2: confirm (keystore) or pick wallet (hd), 3: enter index (hd)
+	typeIdx          int // 0=keystore, 1=hd_wallet
 	selectedType     string
 	passwordInput    textinput.Model
 	confirmInput     textinput.Model
 	showPassword     bool
 	actionResult     string
+
+	// HD wallet derive state (in create flow)
+	hdwallets_svc evm.HDWalletAPI
+	hdWallets     []evm.HDWalletResponse
+	hdWalletIdx   int
+	indexInput    textinput.Model
 }
 
 // SignersDataMsg is sent when signers data is loaded
@@ -60,16 +68,30 @@ type SignerCreateMsg struct {
 	Err     error
 }
 
+// SignerHDWalletListMsg is sent when HD wallet list is loaded for the derive picker.
+type SignerHDWalletListMsg struct {
+	Wallets []evm.HDWalletResponse
+	Err     error
+}
+
+// SignerHDDeriveMsg is sent when an HD wallet derive completes in the signers flow.
+type SignerHDDeriveMsg struct {
+	Derived []evm.SignerInfo
+	Success bool
+	Message string
+	Err     error
+}
+
 // NewSignersModel creates a new signers model
 func NewSignersModel(c *client.Client, ctx context.Context) (*SignersModel, error) {
 	if c == nil {
 		return nil, fmt.Errorf("client is required")
 	}
-	return newSignersModelFromService(c.EVM.Signers, ctx)
+	return newSignersModelFromService(c.EVM.Signers, c.EVM.HDWallets, ctx)
 }
 
 // newSignersModelFromService creates a signers model from a SignerAPI (for testing).
-func newSignersModelFromService(svc evm.SignerAPI, ctx context.Context) (*SignersModel, error) {
+func newSignersModelFromService(svc evm.SignerAPI, hdSvc evm.HDWalletAPI, ctx context.Context) (*SignersModel, error) {
 	if svc == nil {
 		return nil, fmt.Errorf("client is required")
 	}
@@ -95,8 +117,13 @@ func newSignersModelFromService(svc evm.SignerAPI, ctx context.Context) (*Signer
 	confirmInput.Width = 40
 	confirmInput.EchoMode = textinput.EchoPassword
 
+	idxInput := textinput.New()
+	idxInput.Placeholder = "Derivation index"
+	idxInput.Width = 20
+
 	return &SignersModel{
 		signers_svc:   svc,
+		hdwallets_svc: hdSvc,
 		ctx:           ctx,
 		spinner:       s,
 		loading:       true,
@@ -104,6 +131,7 @@ func newSignersModelFromService(svc evm.SignerAPI, ctx context.Context) (*Signer
 		filterInput:   ti,
 		passwordInput: pwInput,
 		confirmInput:  confirmInput,
+		indexInput:    idxInput,
 	}, nil
 }
 
@@ -170,6 +198,38 @@ func (m *SignersModel) createSigner(signerType string, password string) tea.Cmd 
 	}
 }
 
+func (m *SignersModel) loadHDWallets() tea.Cmd {
+	return func() tea.Msg {
+		if m.hdwallets_svc == nil {
+			return SignerHDWalletListMsg{Err: fmt.Errorf("HD wallet service not available")}
+		}
+		resp, err := m.hdwallets_svc.List(m.ctx)
+		if err != nil {
+			return SignerHDWalletListMsg{Err: err}
+		}
+		return SignerHDWalletListMsg{Wallets: resp.Wallets}
+	}
+}
+
+func (m *SignersModel) deriveFromHDWallet(primaryAddr string, index uint32) tea.Cmd {
+	return func() tea.Msg {
+		req := &evm.DeriveAddressRequest{Index: &index}
+		resp, err := m.hdwallets_svc.DeriveAddress(m.ctx, primaryAddr, req)
+		if err != nil {
+			return SignerHDDeriveMsg{Success: false, Err: err}
+		}
+		msg := "Derived address"
+		if len(resp.Derived) > 0 {
+			msg = fmt.Sprintf("Derived signer: %s", resp.Derived[0].Address)
+		}
+		return SignerHDDeriveMsg{
+			Derived: resp.Derived,
+			Success: true,
+			Message: msg,
+		}
+	}
+}
+
 // Update handles messages
 func (m *SignersModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -191,12 +251,35 @@ func (m *SignersModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.actionResult = styles.ErrorStyle.Render(fmt.Sprintf("Error: %v", msg.Err))
 		} else {
 			m.actionResult = styles.SuccessStyle.Render(msg.Message)
-			m.showCreate = false
-			m.createStep = 0
-			m.selectedType = ""
-			m.passwordInput.SetValue("")
-			m.confirmInput.SetValue("")
-			// Refresh the list
+			m.resetCreateState()
+			return m, m.Refresh()
+		}
+		return m, nil
+
+	case SignerHDWalletListMsg:
+		m.loading = false
+		if msg.Err != nil {
+			m.actionResult = styles.ErrorStyle.Render(fmt.Sprintf("Error: %v", msg.Err))
+			m.createStep = 0 // Go back to type selection
+		} else {
+			m.hdWallets = msg.Wallets
+			if len(msg.Wallets) == 0 {
+				m.actionResult = styles.ErrorStyle.Render("No HD wallets found. Create one first in the HD Wallets tab.")
+				m.createStep = 0
+			} else {
+				m.createStep = 2 // Show wallet picker
+				m.hdWalletIdx = 0
+			}
+		}
+		return m, nil
+
+	case SignerHDDeriveMsg:
+		m.loading = false
+		if msg.Err != nil {
+			m.actionResult = styles.ErrorStyle.Render(fmt.Sprintf("Error: %v", msg.Err))
+		} else {
+			m.actionResult = styles.SuccessStyle.Render(msg.Message)
+			m.resetCreateState()
 			return m, m.Refresh()
 		}
 		return m, nil
@@ -317,83 +400,165 @@ func (m *SignersModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *SignersModel) resetCreateState() {
+	m.showCreate = false
+	m.createStep = 0
+	m.typeIdx = 0
+	m.selectedType = ""
+	m.showPassword = false
+	m.passwordInput.SetValue("")
+	m.passwordInput.Blur()
+	m.passwordInput.EchoMode = textinput.EchoPassword
+	m.confirmInput.SetValue("")
+	m.confirmInput.Blur()
+	m.confirmInput.EchoMode = textinput.EchoPassword
+	m.indexInput.SetValue("")
+	m.indexInput.Blur()
+	m.hdWallets = nil
+	m.hdWalletIdx = 0
+}
+
 func (m *SignersModel) handleCreateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.createStep {
 	case 0: // Select type
 		switch msg.String() {
-		case "1":
-			m.selectedType = "keystore"
-			m.createStep = 1
-			m.passwordInput.Focus()
-			return m, textinput.Blink
-		case "esc":
-			m.showCreate = false
-			m.createStep = 0
+		case "up", "k":
+			if m.typeIdx > 0 {
+				m.typeIdx--
+			}
 			return m, nil
-		}
-	case 1: // Enter password
-		switch msg.String() {
+		case "down", "j":
+			if m.typeIdx < 1 {
+				m.typeIdx++
+			}
+			return m, nil
 		case "enter":
-			if m.passwordInput.Value() != "" {
-				m.createStep = 2
-				m.confirmInput.Focus()
-				m.passwordInput.Blur()
+			if m.typeIdx == 0 {
+				m.selectedType = "keystore"
+				m.createStep = 1
+				m.passwordInput.Focus()
 				return m, textinput.Blink
 			}
-			return m, nil
+			m.selectedType = "hd_wallet"
+			m.createStep = 1
+			m.loading = true
+			m.actionResult = ""
+			return m, tea.Batch(m.spinner.Tick, m.loadHDWallets())
 		case "esc":
-			m.showCreate = false
-			m.createStep = 0
-			m.passwordInput.SetValue("")
-			m.passwordInput.Blur()
+			m.resetCreateState()
 			return m, nil
-		case "tab":
-			m.showPassword = !m.showPassword
-			if m.showPassword {
-				m.passwordInput.EchoMode = textinput.EchoNormal
-			} else {
-				m.passwordInput.EchoMode = textinput.EchoPassword
-			}
-			return m, nil
-		default:
-			var cmd tea.Cmd
-			m.passwordInput, cmd = m.passwordInput.Update(msg)
-			return m, cmd
 		}
-	case 2: // Confirm password
-		switch msg.String() {
-		case "enter":
-			if m.confirmInput.Value() == m.passwordInput.Value() {
-				// Passwords match, create signer
-				m.loading = true
-				m.confirmInput.Blur()
-				return m, tea.Batch(m.spinner.Tick, m.createSigner(m.selectedType, m.passwordInput.Value()))
+	case 1: // Enter password (keystore) — HD wallet loading is handled by message
+		if m.selectedType == "keystore" {
+			switch msg.String() {
+			case "enter":
+				if m.passwordInput.Value() != "" {
+					m.createStep = 2
+					m.confirmInput.Focus()
+					m.passwordInput.Blur()
+					return m, textinput.Blink
+				}
+				return m, nil
+			case "esc":
+				m.resetCreateState()
+				return m, nil
+			case "tab":
+				m.showPassword = !m.showPassword
+				if m.showPassword {
+					m.passwordInput.EchoMode = textinput.EchoNormal
+				} else {
+					m.passwordInput.EchoMode = textinput.EchoPassword
+				}
+				return m, nil
+			default:
+				var cmd tea.Cmd
+				m.passwordInput, cmd = m.passwordInput.Update(msg)
+				return m, cmd
 			}
-			m.actionResult = styles.ErrorStyle.Render("Passwords do not match")
-			return m, nil
-		case "esc":
-			m.showCreate = false
-			m.createStep = 0
-			m.passwordInput.SetValue("")
-			m.confirmInput.SetValue("")
-			m.passwordInput.Blur()
-			m.confirmInput.Blur()
-			return m, nil
-		case "tab":
-			m.showPassword = !m.showPassword
-			if m.showPassword {
-				m.confirmInput.EchoMode = textinput.EchoNormal
-			} else {
-				m.confirmInput.EchoMode = textinput.EchoPassword
-			}
-			return m, nil
-		default:
-			var cmd tea.Cmd
-			m.confirmInput, cmd = m.confirmInput.Update(msg)
-			return m, cmd
 		}
+	case 2:
+		if m.selectedType == "keystore" {
+			// Confirm password
+			switch msg.String() {
+			case "enter":
+				if m.confirmInput.Value() == m.passwordInput.Value() {
+					m.loading = true
+					m.confirmInput.Blur()
+					return m, tea.Batch(m.spinner.Tick, m.createSigner(m.selectedType, m.passwordInput.Value()))
+				}
+				m.actionResult = styles.ErrorStyle.Render("Passwords do not match")
+				return m, nil
+			case "esc":
+				m.resetCreateState()
+				return m, nil
+			case "tab":
+				m.showPassword = !m.showPassword
+				if m.showPassword {
+					m.confirmInput.EchoMode = textinput.EchoNormal
+				} else {
+					m.confirmInput.EchoMode = textinput.EchoPassword
+				}
+				return m, nil
+			default:
+				var cmd tea.Cmd
+				m.confirmInput, cmd = m.confirmInput.Update(msg)
+				return m, cmd
+			}
+		}
+		// HD wallet picker
+		return m.handleHDWalletPicker(msg)
+	case 3: // HD wallet derive index
+		return m.handleHDDeriveIndex(msg)
 	}
 	return m, nil
+}
+
+func (m *SignersModel) handleHDWalletPicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up", "k":
+		if m.hdWalletIdx > 0 {
+			m.hdWalletIdx--
+		}
+		return m, nil
+	case "down", "j":
+		if m.hdWalletIdx < len(m.hdWallets)-1 {
+			m.hdWalletIdx++
+		}
+		return m, nil
+	case "enter":
+		if len(m.hdWallets) > 0 {
+			m.createStep = 3
+			m.indexInput.Focus()
+			return m, textinput.Blink
+		}
+		return m, nil
+	case "esc":
+		m.resetCreateState()
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m *SignersModel) handleHDDeriveIndex(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		idx, err := strconv.ParseUint(m.indexInput.Value(), 10, 32)
+		if err != nil {
+			m.actionResult = styles.ErrorStyle.Render("Invalid index: must be a number")
+			return m, nil
+		}
+		wallet := m.hdWallets[m.hdWalletIdx]
+		m.loading = true
+		m.indexInput.Blur()
+		return m, tea.Batch(m.spinner.Tick, m.deriveFromHDWallet(wallet.PrimaryAddress, uint32(idx)))
+	case "esc":
+		m.resetCreateState()
+		return m, nil
+	default:
+		var cmd tea.Cmd
+		m.indexInput, cmd = m.indexInput.Update(msg)
+		return m, cmd
+	}
 }
 
 // View renders the signers view
@@ -469,37 +634,61 @@ func (m *SignersModel) renderCreateForm() string {
 	case 0:
 		content.WriteString(styles.SubtitleStyle.Render("Select Signer Type:"))
 		content.WriteString("\n\n")
-		content.WriteString(styles.ButtonStyle.Render(" [1] Keystore "))
-		content.WriteString("\n\n")
-		content.WriteString(styles.MutedColor.Render("Press number to select, Esc to cancel"))
-
-	case 1:
-		content.WriteString(fmt.Sprintf("Type: %s\n\n", styles.HighlightStyle.Render(m.selectedType)))
-		content.WriteString(styles.SubtitleStyle.Render("Enter Password:"))
-		content.WriteString("\n\n")
-		content.WriteString(m.passwordInput.View())
-		content.WriteString("\n\n")
-		if m.showPassword {
-			content.WriteString(styles.MutedColor.Render("Tab: hide password | Enter: continue | Esc: cancel"))
-		} else {
-			content.WriteString(styles.MutedColor.Render("Tab: show password | Enter: continue | Esc: cancel"))
+		typeOptions := []string{"Keystore", "Derive from HD Wallet"}
+		for i, opt := range typeOptions {
+			if i == m.typeIdx {
+				content.WriteString(styles.TableSelectedRowStyle.Render("> " + opt))
+			} else {
+				content.WriteString(styles.TableRowStyle.Render("  " + opt))
+			}
+			content.WriteString("\n")
 		}
-
-	case 2:
-		content.WriteString(fmt.Sprintf("Type: %s\n\n", styles.HighlightStyle.Render(m.selectedType)))
-		content.WriteString(styles.SubtitleStyle.Render("Confirm Password:"))
-		content.WriteString("\n\n")
-		content.WriteString(m.confirmInput.View())
-		content.WriteString("\n\n")
+		content.WriteString("\n")
 		if m.actionResult != "" {
 			content.WriteString(m.actionResult)
 			content.WriteString("\n\n")
 		}
-		if m.showPassword {
-			content.WriteString(styles.MutedColor.Render("Tab: hide password | Enter: create | Esc: cancel"))
-		} else {
-			content.WriteString(styles.MutedColor.Render("Tab: show password | Enter: create | Esc: cancel"))
+		content.WriteString(styles.MutedColor.Render("up/down: select | Enter: confirm | Esc: cancel"))
+
+	case 1:
+		if m.selectedType == "keystore" {
+			fmt.Fprintf(&content, "Type: %s\n\n", styles.HighlightStyle.Render(m.selectedType))
+			content.WriteString(styles.SubtitleStyle.Render("Enter Password:"))
+			content.WriteString("\n\n")
+			content.WriteString(m.passwordInput.View())
+			content.WriteString("\n\n")
+			if m.showPassword {
+				content.WriteString(styles.MutedColor.Render("Tab: hide password | Enter: continue | Esc: cancel"))
+			} else {
+				content.WriteString(styles.MutedColor.Render("Tab: show password | Enter: continue | Esc: cancel"))
+			}
 		}
+		// HD wallet: step 1 is loading state, handled by spinner
+
+	case 2:
+		if m.selectedType == "keystore" {
+			fmt.Fprintf(&content, "Type: %s\n\n", styles.HighlightStyle.Render(m.selectedType))
+			content.WriteString(styles.SubtitleStyle.Render("Confirm Password:"))
+			content.WriteString("\n\n")
+			content.WriteString(m.confirmInput.View())
+			content.WriteString("\n\n")
+			if m.actionResult != "" {
+				content.WriteString(m.actionResult)
+				content.WriteString("\n\n")
+			}
+			if m.showPassword {
+				content.WriteString(styles.MutedColor.Render("Tab: hide password | Enter: create | Esc: cancel"))
+			} else {
+				content.WriteString(styles.MutedColor.Render("Tab: show password | Enter: create | Esc: cancel"))
+			}
+		} else {
+			// HD wallet picker
+			m.renderHDWalletPicker(&content)
+		}
+
+	case 3:
+		// HD wallet derive index
+		m.renderHDDeriveIndex(&content)
 	}
 
 	return lipgloss.Place(
@@ -509,6 +698,48 @@ func (m *SignersModel) renderCreateForm() string {
 		lipgloss.Center,
 		styles.BoxStyle.Render(content.String()),
 	)
+}
+
+func (m *SignersModel) renderHDWalletPicker(content *strings.Builder) {
+	content.WriteString(styles.SubtitleStyle.Render("Select Source Wallet:"))
+	content.WriteString("\n\n")
+
+	for i, w := range m.hdWallets {
+		addr := w.PrimaryAddress
+		if len(addr) > 20 {
+			addr = addr[:10] + "..." + addr[len(addr)-6:]
+		}
+		label := fmt.Sprintf("%s  (%s, %d derived)", addr, w.BasePath, w.DerivedCount)
+		if i == m.hdWalletIdx {
+			content.WriteString(styles.TableSelectedRowStyle.Render("> " + label))
+		} else {
+			content.WriteString(styles.TableRowStyle.Render("  " + label))
+		}
+		content.WriteString("\n")
+	}
+
+	content.WriteString("\n")
+	content.WriteString(styles.MutedColor.Render("up/down: navigate | Enter: select | Esc: back"))
+}
+
+func (m *SignersModel) renderHDDeriveIndex(content *strings.Builder) {
+	wallet := m.hdWallets[m.hdWalletIdx]
+	addr := wallet.PrimaryAddress
+	if len(addr) > 20 {
+		addr = addr[:10] + "..." + addr[len(addr)-6:]
+	}
+
+	fmt.Fprintf(content, "Wallet: %s\n", styles.HighlightStyle.Render(addr))
+	fmt.Fprintf(content, "Current derived count: %d\n\n", wallet.DerivedCount)
+	content.WriteString(styles.SubtitleStyle.Render("Enter derivation index:"))
+	content.WriteString("\n\n")
+	content.WriteString(m.indexInput.View())
+	content.WriteString("\n\n")
+	if m.actionResult != "" {
+		content.WriteString(m.actionResult)
+		content.WriteString("\n\n")
+	}
+	content.WriteString(styles.MutedColor.Render("Enter: derive | Esc: cancel"))
 }
 
 func (m *SignersModel) renderSigners() string {
@@ -569,6 +800,11 @@ func (m *SignersModel) renderSigners() string {
 	content.WriteString(styles.HelpStyle.Render(helpText))
 
 	return content.String()
+}
+
+// IsCapturingInput returns true when this view is capturing keyboard input (form/filter active).
+func (m *SignersModel) IsCapturingInput() bool {
+	return m.showCreate || m.showFilter
 }
 
 func (m *SignersModel) renderSignerRow(signer evm.Signer, selected bool) string {

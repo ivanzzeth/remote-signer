@@ -398,6 +398,16 @@ func setDefaults(cfg *Config) {
 		cfg.Logger.Level = "info"
 	}
 
+	// EVM directory defaults
+	if cfg.Chains.EVM != nil && cfg.Chains.EVM.Enabled {
+		if cfg.Chains.EVM.KeystoreDir == "" {
+			cfg.Chains.EVM.KeystoreDir = "./data/keystores"
+		}
+		if cfg.Chains.EVM.HDWalletDir == "" {
+			cfg.Chains.EVM.HDWalletDir = "./data/hd-wallets"
+		}
+	}
+
 	// ApprovalGuard defaults
 	if cfg.Security.ApprovalGuard.Enabled && cfg.Security.ApprovalGuard.Threshold <= 0 {
 		cfg.Security.ApprovalGuard.Threshold = 10
