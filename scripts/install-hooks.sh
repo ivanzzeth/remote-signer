@@ -40,6 +40,15 @@ check_tools() {
     if ! command -v forge &> /dev/null; then
         missing+=("forge (install: curl -L https://foundry.paradigm.xyz | bash && foundryup)")
     fi
+    if ! command -v gitleaks &> /dev/null; then
+        missing+=("gitleaks (install: go install github.com/zricethezav/gitleaks/v8@latest)")
+    fi
+    if ! command -v detect-secrets &> /dev/null; then
+        missing+=("detect-secrets (install: pip install detect-secrets)")
+    fi
+    if ! command -v semgrep &> /dev/null; then
+        missing+=("semgrep (install: pip install semgrep)")
+    fi
 
     if [ ${#missing[@]} -gt 0 ]; then
         log_warn "Missing tools (hooks will skip unavailable checks):"
@@ -139,6 +148,129 @@ else
     echo -e "${GREEN}OK${NC}"
 fi
 
+# 5a. Gitleaks: scan staged changes for secrets
+if command -v gitleaks &> /dev/null; then
+    echo -n "Running gitleaks... "
+    if gitleaks protect --staged --no-banner --exit-code 1 2>/dev/null; then
+        echo -e "${GREEN}OK${NC}"
+    else
+        echo -e "${RED}FAIL${NC}"
+        echo "gitleaks found secrets in staged changes. Run 'gitleaks protect --staged -v' for details."
+        FAILED=1
+    fi
+else
+    echo -e "${YELLOW}SKIP (gitleaks not installed)${NC}"
+fi
+
+# 5b. detect-secrets: complement gitleaks with additional detectors
+if command -v detect-secrets &> /dev/null; then
+    echo -n "Running detect-secrets... "
+    STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -v 'vendor/' | grep -v 'node_modules/' | grep -v 'go\.sum' | grep -v '\.secrets\.baseline' || true)
+    if [ -n "$STAGED_FILES" ]; then
+        if [ -f .secrets.baseline ]; then
+            # Scan staged files, update baseline in-place, then audit for unaudited secrets
+            # shellcheck disable=SC2086
+            detect-secrets scan --baseline .secrets.baseline $STAGED_FILES 2>/dev/null || true
+            if ! detect-secrets audit --report --baseline .secrets.baseline 2>/dev/null | grep -q '"results":.*\[\]'; then
+                # Simpler: just check if scan found new secrets by comparing result counts
+                NEW_SECRETS=$(python3 -c "
+import json, sys
+try:
+    b = json.load(open('.secrets.baseline'))
+    total = sum(len(v) for v in b.get('results', {}).values())
+    unaudited = sum(1 for v in b.get('results', {}).values() for s in v if not s.get('is_verified') and not s.get('is_secret') == False)
+    if unaudited > 0:
+        print(f'{unaudited} unaudited potential secrets')
+        sys.exit(1)
+except Exception:
+    pass
+" 2>/dev/null) || true
+                if [ -n "$NEW_SECRETS" ]; then
+                    echo -e "${YELLOW}WARN${NC}"
+                    echo "detect-secrets: $NEW_SECRETS (run 'detect-secrets audit .secrets.baseline' to review)"
+                else
+                    echo -e "${GREEN}OK${NC}"
+                fi
+            else
+                echo -e "${GREEN}OK${NC}"
+            fi
+        else
+            # No baseline; scan staged files for any secrets
+            # shellcheck disable=SC2086
+            DS_OUTPUT=$(detect-secrets scan $STAGED_FILES 2>/dev/null | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+findings = [(f, s) for f, secrets in data.get('results', {}).items() for s in secrets]
+for f, s in findings:
+    print(f\"  {f}:{s['line_number']} ({s['type']})\")
+" 2>/dev/null || true)
+            if [ -n "$DS_OUTPUT" ]; then
+                echo -e "${RED}FAIL${NC}"
+                echo "detect-secrets found potential secrets:"
+                echo "$DS_OUTPUT"
+                FAILED=1
+            else
+                echo -e "${GREEN}OK${NC}"
+            fi
+        fi
+    else
+        echo -e "${GREEN}OK (no staged files to scan)${NC}"
+    fi
+else
+    echo -e "${YELLOW}SKIP (detect-secrets not installed)${NC}"
+fi
+
+# 5c. Semgrep: SAST for JS/TS security issues (only when JS/TS files are staged)
+STAGED_JS_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(js|ts|jsx|tsx)$' | grep -v 'node_modules/' | grep -v 'dist/' || true)
+if [ -n "$STAGED_JS_FILES" ]; then
+    if command -v semgrep &> /dev/null; then
+        echo -n "Running semgrep (JS/TS)... "
+        # shellcheck disable=SC2086
+        if semgrep scan --config=auto --quiet --error $STAGED_JS_FILES 2>/dev/null; then
+            echo -e "${GREEN}OK${NC}"
+        else
+            echo -e "${RED}FAIL${NC}"
+            echo "semgrep found security issues. Run 'semgrep scan --config=auto <files>' for details."
+            FAILED=1
+        fi
+    else
+        echo -e "${YELLOW}SKIP semgrep (not installed)${NC}"
+    fi
+fi
+
+# 5d. ESLint security plugin (only when JS/TS files in pkg/js-client are staged)
+STAGED_JSCLIENT_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '^pkg/js-client/src/.*\.\(ts\|js\)$' || true)
+if [ -n "$STAGED_JSCLIENT_FILES" ]; then
+    if [ -f pkg/js-client/node_modules/.bin/eslint ]; then
+        echo -n "Running eslint-plugin-security... "
+        # shellcheck disable=SC2086
+        if (cd pkg/js-client && npx eslint --no-error-on-unmatched-pattern $STAGED_JSCLIENT_FILES 2>/dev/null); then
+            echo -e "${GREEN}OK${NC}"
+        else
+            echo -e "${RED}FAIL${NC}"
+            echo "ESLint security checks failed. Run 'cd pkg/js-client && npx eslint src' for details."
+            FAILED=1
+        fi
+    else
+        echo -e "${YELLOW}SKIP eslint (run 'cd pkg/js-client && npm install' first)${NC}"
+    fi
+fi
+
+# 5e. npm audit: check JS dependency vulnerabilities (only when package files change)
+STAGED_PKG_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '(package\.json|package-lock\.json)$' | grep -v 'node_modules/' || true)
+if [ -n "$STAGED_PKG_FILES" ]; then
+    if command -v npm &> /dev/null; then
+        echo -n "Running npm audit... "
+        if (cd pkg/js-client && npm audit --audit-level=high 2>/dev/null); then
+            echo -e "${GREEN}OK${NC}"
+        else
+            echo -e "${RED}FAIL${NC}"
+            echo "npm audit found high/critical vulnerabilities. Run 'cd pkg/js-client && npm audit' for details."
+            FAILED=1
+        fi
+    fi
+fi
+
 # 6. Validate rule YAML files (only when rules are staged)
 STAGED_RULES=$(git diff --cached --name-only --diff-filter=ACM | grep '^rules/.*\.yaml$' || true)
 if [ -n "$STAGED_RULES" ]; then
@@ -233,7 +365,7 @@ log_info "Git hooks installed successfully!"
 log_info "Hooks location: $HOOKS_DIR"
 echo ""
 echo "Installed hooks:"
-echo "  pre-commit : gosec, govulncheck, go vet, error suppression check, secret detection, rule validation, e2e tests"
+echo "  pre-commit : gosec, govulncheck, go vet, error suppression, gitleaks, detect-secrets, semgrep, eslint-security, npm audit, rule validation, e2e tests"
 echo "  pre-push   : full unit test suite (includes rule validation via TestRulesDirectoryValidation)"
 echo ""
 echo "To skip hooks (NOT recommended): git commit --no-verify"
