@@ -482,6 +482,7 @@ func (ts *TestServer) Start() error {
 			TemplateService: templateService,
 		},
 		ApprovalGuard: approvalGuard,
+		APIKeyRepo:    apiKeyRepo,
 	}
 	router, err := api.NewRouter(authVerifier, signService, signerManager, ruleRepo, auditRepo, log, routerConfig)
 	if err != nil {

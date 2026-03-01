@@ -323,7 +323,7 @@ func NewSolidityRuleEvaluator(cfg SolidityEvaluatorConfig, logger *slog.Logger) 
 	// Verify forge is executable
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if _, err := exec.CommandContext(ctx, foundryPath, "--version").Output(); err != nil {
+	if _, err := exec.CommandContext(ctx, foundryPath, "--version").Output(); err != nil { // #nosec G204 -- foundryPath is admin-configured
 		return nil, fmt.Errorf("forge not executable at %s: %w", foundryPath, err)
 	}
 
@@ -832,7 +832,7 @@ func (e *SolidityRuleEvaluator) executeScript(ctx context.Context, script string
 	if isTest {
 		// Use forge test for RuleEvaluatorTest contracts
 		// Use cache path to speed up compilation
-		cmd = exec.CommandContext(execCtx,
+		cmd = exec.CommandContext(execCtx, // #nosec G204 -- foundryPath is admin-configured
 			e.foundryPath, "test",
 			"--match-path", scriptPath,
 			"--match-contract", "RuleEvaluatorTest",
@@ -842,7 +842,7 @@ func (e *SolidityRuleEvaluator) executeScript(ctx context.Context, script string
 	} else {
 		// Use forge script for RuleEvaluator contracts
 		// Use cache path to speed up compilation
-		cmd = exec.CommandContext(execCtx,
+		cmd = exec.CommandContext(execCtx, // #nosec G204 -- foundryPath is admin-configured
 			e.foundryPath, "script",
 			scriptPath,
 			"--json",
@@ -2384,7 +2384,7 @@ func (e *SolidityRuleEvaluator) executeBatchScript(
 	// Execute forge test with verbose output for parsing individual test results
 	// Note: We use human-readable output (not --json) because parseBatchTestOutput
 	// uses regex to match [PASS] and [FAIL: reason] patterns
-	cmd := exec.CommandContext(execCtx,
+	cmd := exec.CommandContext(execCtx, // #nosec G204 -- foundryPath is admin-configured
 		e.foundryPath, "test",
 		"--match-path", scriptPath,
 		"--match-contract", "BatchRuleEvaluatorTest",

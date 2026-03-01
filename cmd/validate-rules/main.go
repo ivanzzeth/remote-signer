@@ -179,7 +179,7 @@ func run() error {
 	if cacheDirectory == "" {
 		cacheDirectory = filepath.Join(os.TempDir(), "remote-signer-validator")
 	}
-	if err := os.MkdirAll(cacheDirectory, 0755); err != nil {
+	if err := os.MkdirAll(cacheDirectory, 0750); err != nil {
 		return fmt.Errorf("failed to create cache directory: %w", err)
 	}
 
@@ -277,7 +277,7 @@ type ValidationFileResult struct {
 
 func validateFile(ctx context.Context, filePath string, validator *evm.SolidityRuleValidator, msgValidator *evm.MessagePatternRuleValidator, jsValidator *evm.JSRuleValidator, log *slog.Logger, verbose bool) ([]ValidationFileResult, int, int, error) {
 	// Read file
-	data, err := os.ReadFile(filePath)
+	data, err := os.ReadFile(filePath) // #nosec G304 -- filePath is CLI argument
 	if err != nil {
 		return nil, 0, 0, fmt.Errorf("failed to read file: %w", err)
 	}

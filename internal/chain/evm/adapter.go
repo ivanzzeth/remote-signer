@@ -519,9 +519,9 @@ func encodeSignature(r, s, v *big.Int) []byte {
 
 	// v is typically 27 or 28, or 0/1 for EIP-155
 	if v.Cmp(big.NewInt(27)) >= 0 {
-		sig[64] = byte(v.Uint64() - 27)
+		sig[64] = byte(v.Uint64() - 27) // #nosec G115 -- v >= 27 checked above
 	} else {
-		sig[64] = byte(v.Uint64())
+		sig[64] = byte(v.Uint64()) // #nosec G115 -- v is ECDSA recovery ID (0-3)
 	}
 
 	return sig
