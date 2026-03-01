@@ -300,6 +300,11 @@ func (m *RequestsModel) View() string {
 	return m.renderRequests()
 }
 
+// IsCapturingInput returns true when this view is capturing keyboard input (filter active).
+func (m *RequestsModel) IsCapturingInput() bool {
+	return m.showFilter
+}
+
 func (m *RequestsModel) renderLoading() string {
 	return lipgloss.Place(
 		m.width,

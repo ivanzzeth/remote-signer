@@ -400,6 +400,11 @@ func (m *AuditModel) View() string {
 	return m.renderAuditLogs()
 }
 
+// IsCapturingInput returns true when this view is capturing keyboard input (filter active).
+func (m *AuditModel) IsCapturingInput() bool {
+	return m.showFilter
+}
+
 func (m *AuditModel) renderLoading() string {
 	return lipgloss.Place(
 		m.width,
