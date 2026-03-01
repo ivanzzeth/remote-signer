@@ -26,6 +26,7 @@ const (
 	ViewRuleDetail
 	ViewAudit
 	ViewSigners
+	ViewSignerDetail
 	ViewMetrics
 	ViewHDWallets
 	ViewHDWalletDetail
@@ -205,6 +206,7 @@ type Model struct {
 	ruleDetail     *views.RuleDetailModel
 	audit          *views.AuditModel
 	signers        *views.SignersModel
+	signerDetail   *views.SignerDetailModel
 	metrics        *views.MetricsModel
 	hdwallets      *views.HDWalletsModel
 	hdwalletDetail *views.HDWalletDetailModel
@@ -255,6 +257,11 @@ func NewModel(c *client.Client) (*Model, error) {
 		return nil, fmt.Errorf("failed to create signers view: %w", err)
 	}
 
+	signerDetail, err := views.NewSignerDetailModel(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create signer detail view: %w", err)
+	}
+
 	metrics, err := views.NewMetricsModel(c, ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create metrics view: %w", err)
@@ -283,6 +290,7 @@ func NewModel(c *client.Client) (*Model, error) {
 		ruleDetail:    ruleDetail,
 		audit:         audit,
 		signers:        signers,
+		signerDetail:   signerDetail,
 		metrics:        metrics,
 		hdwallets:      hdwallets,
 		hdwalletDetail: hdwalletDetail,
@@ -320,6 +328,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ruleDetail.SetSize(msg.Width, msg.Height-6)
 		m.audit.SetSize(msg.Width, msg.Height-6)
 		m.signers.SetSize(msg.Width, msg.Height-6)
+		m.signerDetail.SetSize(msg.Width, msg.Height-6)
 		m.metrics.SetSize(msg.Width, msg.Height-6)
 		m.hdwallets.SetSize(msg.Width, msg.Height-6)
 		m.hdwalletDetail.SetSize(msg.Width, msg.Height-6)
@@ -409,7 +418,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 			case key.Matches(msg, keys.Back):
-				if m.currentView == ViewRequestDetail || m.currentView == ViewRuleDetail || m.currentView == ViewHDWalletDetail {
+				if m.currentView == ViewRequestDetail || m.currentView == ViewRuleDetail || m.currentView == ViewSignerDetail || m.currentView == ViewHDWalletDetail {
 					m.currentView = m.previousView
 					return m, m.refreshCurrentView()
 				}
@@ -485,6 +494,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		newSigners, cmd := m.signers.Update(msg)
 		m.signers = newSigners.(*views.SignersModel)
 		cmds = append(cmds, cmd)
+
+		// Check if user pressed Enter on a selected signer
+		if selected := m.signers.GetSelectedSigner(); selected != nil {
+			if keyMsg, ok := msg.(tea.KeyMsg); ok && key.Matches(keyMsg, keys.Enter) && !m.signers.IsCapturingInput() {
+				m.previousView = m.currentView
+				m.currentView = ViewSignerDetail
+				m.signerDetail.LoadSigner(*selected)
+			}
+		}
+
+	case ViewSignerDetail:
+		newDetail, cmd := m.signerDetail.Update(msg)
+		m.signerDetail = newDetail.(*views.SignerDetailModel)
+		cmds = append(cmds, cmd)
+
+		if m.signerDetail.ShouldGoBack() {
+			m.currentView = ViewSigners
+			m.signerDetail.ResetGoBack()
+			cmds = append(cmds, m.signers.Refresh())
+		}
 
 	case ViewMetrics:
 		newMetrics, cmd := m.metrics.Update(msg)
@@ -587,6 +616,8 @@ func (m Model) renderContent(_ int) string {
 		return m.audit.View()
 	case ViewSigners:
 		return m.signers.View()
+	case ViewSignerDetail:
+		return m.signerDetail.View()
 	case ViewMetrics:
 		return m.metrics.View()
 	case ViewHDWallets:
@@ -631,6 +662,8 @@ func (m Model) isCurrentViewCapturingInput() bool {
 		return m.audit.IsCapturingInput()
 	case ViewSigners:
 		return m.signers.IsCapturingInput()
+	case ViewSignerDetail:
+		return m.signerDetail.IsCapturingInput()
 	case ViewHDWallets:
 		return m.hdwallets.IsCapturingInput()
 	case ViewHDWalletDetail:

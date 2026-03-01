@@ -742,6 +742,36 @@ func (m *SignersModel) renderHDDeriveIndex(content *strings.Builder) {
 	content.WriteString(styles.MutedColor.Render("Enter: derive | Esc: cancel"))
 }
 
+// hasAccessColumn returns true if any signer has AllowedKeys (admin view).
+func (m *SignersModel) hasAccessColumn() bool {
+	for _, s := range m.signers {
+		if len(s.AllowedKeys) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// formatAccessColumn formats the AllowedKeys list into a short display string.
+func formatAccessColumn(keys []evm.AllowedKeyInfo) string {
+	if len(keys) == 0 {
+		return "-"
+	}
+	const maxShow = 2
+	names := make([]string, 0, maxShow)
+	for i, k := range keys {
+		if i >= maxShow {
+			break
+		}
+		names = append(names, k.Name)
+	}
+	result := strings.Join(names, ", ")
+	if len(keys) > maxShow {
+		result += fmt.Sprintf(" (+%d)", len(keys)-maxShow)
+	}
+	return result
+}
+
 func (m *SignersModel) renderSigners() string {
 	var content strings.Builder
 
@@ -760,9 +790,16 @@ func (m *SignersModel) renderSigners() string {
 	}
 
 	// Table header
-	headerRow := fmt.Sprintf("%-44s  %-14s  %-8s",
-		"Address", "Type", "Enabled")
-	content.WriteString(styles.TableHeaderStyle.Render(headerRow))
+	showAccess := m.hasAccessColumn()
+	if showAccess {
+		headerRow := fmt.Sprintf("%-44s  %-14s  %-8s  %-30s",
+			"Address", "Type", "Enabled", "Access")
+		content.WriteString(styles.TableHeaderStyle.Render(headerRow))
+	} else {
+		headerRow := fmt.Sprintf("%-44s  %-14s  %-8s",
+			"Address", "Type", "Enabled")
+		content.WriteString(styles.TableHeaderStyle.Render(headerRow))
+	}
 	content.WriteString("\n")
 
 	// Rows
@@ -771,7 +808,7 @@ func (m *SignersModel) renderSigners() string {
 		content.WriteString(styles.MutedColor.Render("  No signers found"))
 	} else {
 		for i, signer := range m.signers {
-			row := m.renderSignerRow(signer, i == m.selectedIdx)
+			row := m.renderSignerRow(signer, i == m.selectedIdx, showAccess)
 			content.WriteString(row)
 			content.WriteString("\n")
 		}
@@ -796,10 +833,18 @@ func (m *SignersModel) renderSigners() string {
 
 	// Help
 	content.WriteString("\n\n")
-	helpText := "up/down: navigate | +/a: create signer | f: filter | c: clear | n/p: next/prev | r: refresh"
+	helpText := "Enter: view detail | up/down: navigate | +/a: create signer | f: filter | c: clear | n/p: next/prev | r: refresh"
 	content.WriteString(styles.HelpStyle.Render(helpText))
 
 	return content.String()
+}
+
+// GetSelectedSigner returns the currently selected signer, or nil if none selected.
+func (m *SignersModel) GetSelectedSigner() *evm.Signer {
+	if m.selectedIdx < 0 || m.selectedIdx >= len(m.signers) {
+		return nil
+	}
+	return &m.signers[m.selectedIdx]
 }
 
 // IsCapturingInput returns true when this view is capturing keyboard input (form/filter active).
@@ -807,7 +852,7 @@ func (m *SignersModel) IsCapturingInput() bool {
 	return m.showCreate || m.showFilter
 }
 
-func (m *SignersModel) renderSignerRow(signer evm.Signer, selected bool) string {
+func (m *SignersModel) renderSignerRow(signer evm.Signer, selected bool, showAccess bool) string {
 	// Format address
 	address := signer.Address
 	if len(address) > 44 {
@@ -819,14 +864,30 @@ func (m *SignersModel) renderSignerRow(signer evm.Signer, selected bool) string 
 		enabled = "No"
 	}
 
-	row := fmt.Sprintf("%-44s  %-14s  %-8s",
-		address,
-		signer.Type,
-		enabled,
-	)
+	accessStr := ""
+	if showAccess {
+		accessStr = formatAccessColumn(signer.AllowedKeys)
+	}
 
-	if selected {
-		return styles.TableSelectedRowStyle.Render(row)
+	if showAccess {
+		row := fmt.Sprintf("%-44s  %-14s  %-8s  %-30s",
+			address,
+			signer.Type,
+			enabled,
+			accessStr,
+		)
+		if selected {
+			return styles.TableSelectedRowStyle.Render(row)
+		}
+	} else {
+		row := fmt.Sprintf("%-44s  %-14s  %-8s",
+			address,
+			signer.Type,
+			enabled,
+		)
+		if selected {
+			return styles.TableSelectedRowStyle.Render(row)
+		}
 	}
 
 	// Color type
@@ -845,11 +906,20 @@ func (m *SignersModel) renderSignerRow(signer evm.Signer, selected bool) string 
 	}
 	enabledPart := enabledStyle.Render(fmt.Sprintf("%-8s", enabled))
 
-	row = fmt.Sprintf("%-44s  %s  %s",
+	if showAccess {
+		row := fmt.Sprintf("%-44s  %s  %s  %-30s",
+			address,
+			typePart,
+			enabledPart,
+			accessStr,
+		)
+		return styles.TableRowStyle.Render(row)
+	}
+
+	row := fmt.Sprintf("%-44s  %s  %s",
 		address,
 		typePart,
 		enabledPart,
 	)
-
 	return styles.TableRowStyle.Render(row)
 }

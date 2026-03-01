@@ -1,10 +1,18 @@
 package evm
 
+// AllowedKeyInfo represents an API key that has access to a signer (admin view only).
+type AllowedKeyInfo struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	AccessType string `json:"access_type"` // "unrestricted" or "explicit"
+}
+
 // Signer represents a signer configuration.
 type Signer struct {
-	Address string `json:"address"`
-	Type    string `json:"type"`
-	Enabled bool   `json:"enabled"`
+	Address     string           `json:"address"`
+	Type        string           `json:"type"`
+	Enabled     bool             `json:"enabled"`
+	AllowedKeys []AllowedKeyInfo `json:"allowed_keys,omitempty"`
 }
 
 // SignerInfo represents a signer in API responses (used by HD wallets).

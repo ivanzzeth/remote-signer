@@ -611,3 +611,111 @@ func TestSignersModel_CreateHDWalletDerive(t *testing.T) {
 		assert.Contains(t, view, "Derive from HD Wallet")
 	})
 }
+
+func TestSignersModel_AccessColumn(t *testing.T) {
+	t.Run("renders Access column when AllowedKeys present", func(t *testing.T) {
+		model, _ := newTestSignersModel(t)
+		model.loading = false
+		model.width = 150
+		model.height = 30
+		model.signers = []evm.Signer{
+			{
+				Address: "0x1234567890123456789012345678901234567890",
+				Type:    "keystore",
+				Enabled: true,
+				AllowedKeys: []evm.AllowedKeyInfo{
+					{ID: "admin-key", Name: "admin"},
+					{ID: "dev-key", Name: "dev-key"},
+				},
+			},
+			{
+				Address: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+				Type:    "private_key",
+				Enabled: true,
+				AllowedKeys: []evm.AllowedKeyInfo{
+					{ID: "admin-key", Name: "admin"},
+				},
+			},
+		}
+		model.total = 2
+
+		view := model.View()
+		assert.Contains(t, view, "Access")
+		assert.Contains(t, view, "admin")
+		assert.Contains(t, view, "dev-key")
+	})
+
+	t.Run("no Access column when AllowedKeys absent", func(t *testing.T) {
+		model, _ := newTestSignersModel(t)
+		model.loading = false
+		model.width = 150
+		model.height = 30
+		model.signers = []evm.Signer{
+			{
+				Address: "0x1234567890123456789012345678901234567890",
+				Type:    "keystore",
+				Enabled: true,
+			},
+		}
+		model.total = 1
+
+		view := model.View()
+		assert.NotContains(t, view, "Access")
+	})
+
+	t.Run("Access column truncates when more than 2 keys", func(t *testing.T) {
+		model, _ := newTestSignersModel(t)
+		model.loading = false
+		model.width = 150
+		model.height = 30
+		model.signers = []evm.Signer{
+			{
+				Address: "0x1234567890123456789012345678901234567890",
+				Type:    "keystore",
+				Enabled: true,
+				AllowedKeys: []evm.AllowedKeyInfo{
+					{ID: "k1", Name: "admin"},
+					{ID: "k2", Name: "dev-key"},
+					{ID: "k3", Name: "readonly"},
+					{ID: "k4", Name: "extra"},
+				},
+			},
+		}
+		model.total = 1
+
+		view := model.View()
+		assert.Contains(t, view, "Access")
+		assert.Contains(t, view, "admin")
+		assert.Contains(t, view, "dev-key")
+		assert.Contains(t, view, "(+2)")
+	})
+}
+
+func TestFormatAccessColumn(t *testing.T) {
+	t.Run("empty keys returns dash", func(t *testing.T) {
+		result := formatAccessColumn(nil)
+		assert.Equal(t, "-", result)
+	})
+
+	t.Run("single key shows name", func(t *testing.T) {
+		result := formatAccessColumn([]evm.AllowedKeyInfo{{ID: "k1", Name: "admin"}})
+		assert.Equal(t, "admin", result)
+	})
+
+	t.Run("two keys shows both names", func(t *testing.T) {
+		result := formatAccessColumn([]evm.AllowedKeyInfo{
+			{ID: "k1", Name: "admin"},
+			{ID: "k2", Name: "dev"},
+		})
+		assert.Equal(t, "admin, dev", result)
+	})
+
+	t.Run("three or more keys truncates", func(t *testing.T) {
+		result := formatAccessColumn([]evm.AllowedKeyInfo{
+			{ID: "k1", Name: "admin"},
+			{ID: "k2", Name: "dev"},
+			{ID: "k3", Name: "readonly"},
+		})
+		assert.Equal(t, "admin, dev (+1)", result)
+	})
+}
