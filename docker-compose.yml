@@ -56,9 +56,15 @@ services:
     # Even if the host has swap enabled, this container cannot use it.
     memswap_limit: 4G
     mem_swappiness: 0
+    # Security: Read-only root filesystem (volumes/tmpfs override where writes are needed)
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,size=256m
+      - /run:noexec,nosuid,size=64m
     # Security: Prevent privilege escalation
     security_opt:
       - no-new-privileges:true
+      - seccomp=deploy/seccomp.json
     # Security: Drop all capabilities except what's needed
     cap_drop:
       - ALL
@@ -100,12 +106,14 @@ services:
       - ./data/forge-workspace:/app/data/forge-workspace
       # Forge cache: bind mount so local and Docker share the same cache (no cold cache in container)
       - ./data/forge-cache:/app/data/forge-cache
+      # Solc compiler cache: forge auto-downloads solc by pragma version
+      - svm_data:/home/signer/.svm
     # No "ports:" needed — host network mode binds directly to host's port 8548
     # Healthcheck: auto-detect TLS by checking if server cert exists
     # If certs are mounted (TLS enabled): use HTTPS with client cert (mTLS)
     # Otherwise: use plain HTTP
     healthcheck:
-      test: ["CMD-SHELL", "if [ -f /app/certs/server.crt ]; then wget -qO /dev/null --no-check-certificate --certificate=/app/certs/client.crt --private-key=/app/certs/client.key https://localhost:8548/health; else wget -qO /dev/null http://localhost:8548/health; fi"]
+      test: ["CMD-SHELL", "if [ -f /app/certs/server.crt ]; then wget --no-hsts -qO /dev/null --no-check-certificate --certificate=/app/certs/client.crt --private-key=/app/certs/client.key https://localhost:8548/health; else wget --no-hsts -qO /dev/null http://localhost:8548/health; fi"]
       interval: 30s
       timeout: 5s
       start_period: 120s
@@ -113,6 +121,8 @@ services:
 
 volumes:
   postgres_data:
+    driver: local
+  svm_data:
     driver: local
 
 networks:
