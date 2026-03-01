@@ -1,0 +1,15 @@
+[extend]
+# Use the default gitleaks config as base
+useDefault = true
+
+[allowlist]
+# Paths that should be excluded from secret scanning
+paths = [
+    '''vendor/.*''',
+    '''node_modules/.*''',
+    '''\.git/.*''',
+    '''go\.sum''',
+    '''.*_test\.go''',
+    '''pkg/js-client/dist/.*''',
+    '''\.secrets\.baseline''',
+]
