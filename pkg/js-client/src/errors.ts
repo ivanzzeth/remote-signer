@@ -49,4 +49,5 @@ export const ErrorCodes = {
   INTERNAL_ERROR: "internal_error",
   REJECTED: "rejected",
   BLOCKED: "blocked",
+  PENDING_APPROVAL: "pending_approval",
 } as const;
