@@ -261,3 +261,131 @@ func TestMapToRuleInput_WithTransaction(t *testing.T) {
 	require.NotNil(t, result.Transaction)
 	assert.Equal(t, "0x742d35cc6634c0532925a3b844bc454e4438f44e", result.Transaction.To)
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ValidateJSCodeSecurity
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestValidateJSCodeSecurity(t *testing.T) {
+	tests := []struct {
+		name        string
+		code        string
+		expectError bool
+	}{
+		// Safe code - should pass
+		{
+			name:        "safe validate function",
+			code:        `function validate(i){ if (i.signer === "0xABC") return ok(); return fail("wrong signer"); }`,
+			expectError: false,
+		},
+		{
+			name:        "safe config usage",
+			code:        `function validate(i){ if (config.threshold === "100") return ok(); return fail("wrong config"); }`,
+			expectError: false,
+		},
+		{
+			name:        "safe string containing process word",
+			code:        `function validate(i){ return fail("processing data"); }`,
+			expectError: false,
+		},
+		{
+			name:        "safe arrow function",
+			code:        `const check = (x) => x > 0;`,
+			expectError: false,
+		},
+		{
+			name:        "safe object property access",
+			code:        `function validate(i){ return i.transaction.to === config.allowed_address ? ok() : fail("bad to"); }`,
+			expectError: false,
+		},
+
+		// Dangerous patterns - should fail
+		{
+			name:        "__proto__ - prototype pollution",
+			code:        `obj.__proto__.isAdmin = true;`,
+			expectError: true,
+		},
+		{
+			name:        "constructor.constructor - sandbox escape",
+			code:        `"".constructor.constructor("return this")();`,
+			expectError: true,
+		},
+		{
+			name:        "constructor . constructor with spaces",
+			code:        `"".constructor . constructor("return this")();`,
+			expectError: true,
+		},
+		{
+			name:        "child_process - command execution",
+			code:        `require('child_process').exec('rm -rf /');`,
+			expectError: true,
+		},
+		{
+			name:        "dynamic import()",
+			code:        `const m = await import('fs');`,
+			expectError: true,
+		},
+		{
+			name:        "Object.getPrototypeOf",
+			code:        `Object.getPrototypeOf(obj);`,
+			expectError: true,
+		},
+		{
+			name:        "Object.setPrototypeOf",
+			code:        `Object.setPrototypeOf(obj, null);`,
+			expectError: true,
+		},
+		{
+			name:        "Object.defineProperty",
+			code:        `Object.defineProperty(obj, 'key', {get: ()=> globalThis});`,
+			expectError: true,
+		},
+		{
+			name:        "new Function() - dynamic code execution",
+			code:        `const evil = new Function("return this")();`,
+			expectError: true,
+		},
+		{
+			name:        "Function( without new",
+			code:        `const evil = Function("return this")();`,
+			expectError: true,
+		},
+
+		// Edge cases
+		{
+			name:        "__proto__ in string literal still detected",
+			code:        `var s = "__proto__";`,
+			expectError: true,
+		},
+		{
+			name:        "child_process in comment still detected",
+			code:        `// require('child_process')`,
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateJSCodeSecurity(tt.code)
+
+			if tt.expectError {
+				require.NotNil(t, err, "expected security error but got nil")
+				assert.Contains(t, err.Message, "dangerous pattern detected",
+					"error message should indicate dangerous pattern")
+			} else {
+				assert.Nil(t, err, "expected no security error but got: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateRule_SecurityCheckBlocks(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	v, _ := NewJSRuleValidator(e, testLogger())
+
+	script := `function validate(i){ "".constructor.constructor("return this")(); return ok(); }`
+	result, err := v.ValidateRule(context.Background(), script, nil, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "security check failed")
+	assert.False(t, result.Valid)
+}
