@@ -293,17 +293,17 @@ func toBigIntOrUint(val interface{}, typ string) (interface{}, error) {
 	switch typ {
 	case "uint8":
 		if b.IsUint64() && b.Uint64() <= 0xff {
-			return byte(b.Uint64()), nil
+			return byte(b.Uint64()), nil // #nosec G115 -- bounds checked above
 		}
 		return big.NewInt(0), nil
 	case "uint16":
 		if b.IsUint64() && b.Uint64() <= 0xffff {
-			return uint16(b.Uint64()), nil
+			return uint16(b.Uint64()), nil // #nosec G115 -- bounds checked above
 		}
 		return big.NewInt(0), nil
 	case "uint32":
 		if b.IsUint64() && b.Uint64() <= 0xffffffff {
-			return uint32(b.Uint64()), nil
+			return uint32(b.Uint64()), nil // #nosec G115 -- bounds checked above
 		}
 		return big.NewInt(0), nil
 	case "uint64":

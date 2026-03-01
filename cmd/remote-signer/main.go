@@ -519,6 +519,7 @@ func run() error {
 			TemplateService: templateService,
 		},
 		ApprovalGuard: approvalGuard,
+		APIKeyRepo:    apiKeyRepo,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create router: %w", err)

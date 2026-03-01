@@ -155,7 +155,7 @@ func loadTemplateFromFileStatic(fileCfg TemplateConfig, configDir string, logger
 	if logger != nil {
 		logger.Info("Loading template from file", "name", fileCfg.Name, "path", path)
 	}
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path is admin-configured via config file
 	if err != nil {
 		return nil, fmt.Errorf("failed to read template file '%s': %w", path, err)
 	}

@@ -89,7 +89,9 @@ func (w *WebhookClient) SendToURLs(urls []string, message string) error {
 			log.Warn().Err(lastErr).Str("url", url).Msg("Webhook request failed")
 			continue
 		}
-		resp.Body.Close()
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			log.Warn().Err(closeErr).Msg("failed to close response body")
+		}
 
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			lastErr = fmt.Errorf("webhook %s returned status %d", url, resp.StatusCode)

@@ -31,6 +31,7 @@ type RouterConfig struct {
 	JSEvaluator        *evm.JSRuleEvaluator
 	Template           *TemplateConfig
 	ApprovalGuard      *service.ManualApprovalGuard // optional: for admin resume endpoint
+	APIKeyRepo         storage.APIKeyRepository     // optional: for signer access visibility
 }
 
 // Router handles HTTP routing
@@ -123,7 +124,7 @@ func (r *Router) setupRoutes() error {
 		return err
 	}
 
-	signerHandler, err := evmhandler.NewSignerHandler(r.signerManager, r.logger)
+	signerHandler, err := evmhandler.NewSignerHandler(r.signerManager, r.config.APIKeyRepo, r.logger)
 	if err != nil {
 		return err
 	}
