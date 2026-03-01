@@ -44,8 +44,11 @@ export interface AuditRecord {
 
 export interface ListAuditFilter {
   event_type?: AuditEventType;
+  severity?: "info" | "warning" | "critical";
   api_key_id?: string;
+  signer_address?: string;
   chain_type?: string;
+  chain_id?: string;
   start_time?: string; // RFC3339
   end_time?: string; // RFC3339
   limit?: number;
@@ -76,11 +79,20 @@ export class AuditService {
     if (filter?.event_type) {
       params.append("event_type", filter.event_type);
     }
+    if (filter?.severity) {
+      params.append("severity", filter.severity);
+    }
     if (filter?.api_key_id) {
       params.append("api_key_id", filter.api_key_id);
     }
+    if (filter?.signer_address) {
+      params.append("signer_address", filter.signer_address);
+    }
     if (filter?.chain_type) {
       params.append("chain_type", filter.chain_type);
+    }
+    if (filter?.chain_id) {
+      params.append("chain_id", filter.chain_id);
     }
     if (filter?.start_time) {
       params.append("start_time", filter.start_time);
