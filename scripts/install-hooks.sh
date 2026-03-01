@@ -72,6 +72,10 @@ install_pre_commit() {
 # =============================================================================
 set -e
 
+# Ensure goenv and GOPATH/bin are on PATH (hooks run in minimal shell)
+export PATH="$HOME/.goenv/shims:$HOME/.goenv/bin:$(go env GOPATH 2>/dev/null)/bin:$PATH"
+export GOTOOLCHAIN=local
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -327,6 +331,10 @@ install_pre_push() {
 # Installed by: scripts/install-hooks.sh
 # =============================================================================
 set -e
+
+# Ensure goenv and GOPATH/bin are on PATH (hooks run in minimal shell)
+export PATH="$HOME/.goenv/shims:$HOME/.goenv/bin:$(go env GOPATH 2>/dev/null)/bin:$PATH"
+export GOTOOLCHAIN=local
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
