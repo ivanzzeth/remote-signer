@@ -90,6 +90,7 @@ type APIKeyConfig struct {
 	PublicKeyEnv      string   `yaml:"public_key_env"`       // Environment variable containing public key
 	AllowedChainTypes []string `yaml:"allowed_chain_types"`  // Empty = all chains allowed
 	AllowedSigners    []string `yaml:"allowed_signers"`      // Empty = all signers allowed
+	AllowedHDWallets  []string `yaml:"allowed_hd_wallets"`   // HD wallet primary addresses (empty = none)
 	RateLimit         int      `yaml:"rate_limit"`           // Requests per minute (default: 100)
 	Enabled           bool     `yaml:"enabled"`              // Whether the key is active
 	Admin             bool     `yaml:"admin"`                // Admin keys can approve requests and manage rules

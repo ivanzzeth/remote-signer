@@ -11,5 +11,6 @@ paths = [
     '''go\.sum''',
     '''.*_test\.go''',
     '''pkg/js-client/dist/.*''',
+    '''pkg/js-client/tests/.*''',
     '''\.secrets\.baseline''',
 ]

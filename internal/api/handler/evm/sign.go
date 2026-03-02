@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
+	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/metrics"
@@ -18,12 +19,13 @@ import (
 
 // SignHandler handles EVM sign requests
 type SignHandler struct {
-	signService *service.SignService
-	logger      *slog.Logger
+	signService   *service.SignService
+	signerManager evm.SignerManager
+	logger        *slog.Logger
 }
 
 // NewSignHandler creates a new sign handler
-func NewSignHandler(signService *service.SignService, logger *slog.Logger) (*SignHandler, error) {
+func NewSignHandler(signService *service.SignService, signerManager evm.SignerManager, logger *slog.Logger) (*SignHandler, error) {
 	if signService == nil {
 		return nil, fmt.Errorf("sign service is required")
 	}
@@ -31,8 +33,9 @@ func NewSignHandler(signService *service.SignService, logger *slog.Logger) (*Sig
 		return nil, fmt.Errorf("logger is required")
 	}
 	return &SignHandler{
-		signService: signService,
-		logger:      logger,
+		signService:   signService,
+		signerManager: signerManager,
+		logger:        logger,
 	}, nil
 }
 
@@ -123,8 +126,16 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check signer permission
-	if !middleware.CheckSignerPermission(apiKey, req.SignerAddress) {
+	// Check signer permission (includes HD wallet derived address check)
+	var hdMgr middleware.HDWalletDerivedLister
+	if h.signerManager != nil {
+		var hdErr error
+		hdMgr, hdErr = h.signerManager.HDWalletManager()
+		if hdErr != nil {
+			h.logger.Warn("failed to get HD wallet manager for permission check", "error", hdErr)
+		}
+	}
+	if !middleware.CheckSignerPermissionWithHDWallets(apiKey, req.SignerAddress, hdMgr) {
 		h.writeError(w, "not authorized for this signer", http.StatusForbidden)
 		return
 	}

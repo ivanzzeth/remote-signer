@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ivanzzeth/remote-signer/pkg/client/internal/transport"
 )
 
 // HDWalletService handles HD wallet management operations.
 type HDWalletService struct {
 	transport *transport.Transport
+	sign      *SignService
 }
 
 // Create creates a new HD wallet.
@@ -64,4 +66,30 @@ func (s *HDWalletService) ListDerived(ctx context.Context, primaryAddr string) (
 		return nil, err
 	}
 	return &result, nil
+}
+
+// GetSigner derives (if needed) the address at the given index and returns a *RemoteSigner.
+func (s *HDWalletService) GetSigner(ctx context.Context, primaryAddr string, chainID string, index uint32) (*RemoteSigner, error) {
+	resp, err := s.DeriveAddress(ctx, primaryAddr, &DeriveAddressRequest{Index: &index})
+	if err != nil {
+		return nil, fmt.Errorf("failed to derive address at index %d: %w", index, err)
+	}
+	if len(resp.Derived) == 0 {
+		return nil, fmt.Errorf("no address derived at index %d", index)
+	}
+	addr := common.HexToAddress(resp.Derived[0].Address)
+	return NewRemoteSigner(s.sign, addr, chainID), nil
+}
+
+// GetSigners derives a batch of addresses and returns []*RemoteSigner.
+func (s *HDWalletService) GetSigners(ctx context.Context, primaryAddr string, chainID string, start, count uint32) ([]*RemoteSigner, error) {
+	resp, err := s.DeriveAddress(ctx, primaryAddr, &DeriveAddressRequest{Start: &start, Count: &count})
+	if err != nil {
+		return nil, fmt.Errorf("failed to derive addresses [%d, %d): %w", start, start+count, err)
+	}
+	signers := make([]*RemoteSigner, len(resp.Derived))
+	for i, d := range resp.Derived {
+		signers[i] = NewRemoteSigner(s.sign, common.HexToAddress(d.Address), chainID)
+	}
+	return signers, nil
 }

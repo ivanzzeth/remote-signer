@@ -165,7 +165,8 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Determine if non-admin filtering is needed
-	needsFiltering := apiKey != nil && !apiKey.Admin && len(apiKey.AllowedSigners) > 0
+	needsFiltering := apiKey != nil && !apiKey.Admin &&
+		(len(apiKey.AllowedSigners) > 0 || len(apiKey.AllowedHDWallets) > 0)
 
 	filter := types.SignerFilter{
 		Type: signerType,
@@ -187,11 +188,19 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Apply non-admin filtering
+	// Apply non-admin filtering (includes HD wallet derived addresses)
 	var filteredSigners []types.SignerInfo
 	if needsFiltering {
+		var hdMgr middleware.HDWalletDerivedLister
+		if h.signerManager != nil {
+			var hdErr error
+			hdMgr, hdErr = h.signerManager.HDWalletManager()
+			if hdErr != nil {
+				h.logger.Warn("failed to get HD wallet manager for permission check", "error", hdErr)
+			}
+		}
 		for _, s := range result.Signers {
-			if apiKey.IsAllowedSigner(s.Address) {
+			if middleware.CheckSignerPermissionWithHDWallets(apiKey, s.Address, hdMgr) {
 				filteredSigners = append(filteredSigners, s)
 			}
 		}
@@ -269,14 +278,43 @@ func (h *SignerHandler) buildAllowedKeysData(r *http.Request) (*allowedKeysData,
 			ID:   key.ID,
 			Name: key.Name,
 		}
-		if len(key.AllowedSigners) == 0 {
+		if len(key.AllowedSigners) == 0 && len(key.AllowedHDWallets) == 0 {
 			info.AccessType = "unrestricted"
 			data.unrestricted = append(data.unrestricted, info)
 		} else {
-			info.AccessType = "explicit"
-			for _, addr := range key.AllowedSigners {
-				lower := strings.ToLower(addr)
-				data.explicitAccess[lower] = append(data.explicitAccess[lower], info)
+			// Explicit signer access
+			if len(key.AllowedSigners) > 0 {
+				explicitInfo := info
+				explicitInfo.AccessType = "explicit"
+				for _, addr := range key.AllowedSigners {
+					lower := strings.ToLower(addr)
+					data.explicitAccess[lower] = append(data.explicitAccess[lower], explicitInfo)
+				}
+			}
+			// HD wallet derived address access
+			if len(key.AllowedHDWallets) > 0 {
+				hdInfo := info
+				hdInfo.AccessType = "hd_wallet"
+				var hdMgr evm.HDWalletManager
+				if h.signerManager != nil {
+					var hdErr error
+					hdMgr, hdErr = h.signerManager.HDWalletManager()
+					if hdErr != nil {
+						h.logger.Warn("failed to get HD wallet manager", "error", hdErr)
+					}
+				}
+				if hdMgr != nil {
+					for _, primaryAddr := range key.AllowedHDWallets {
+						derived, err := hdMgr.ListDerivedAddresses(primaryAddr)
+						if err != nil {
+							continue
+						}
+						for _, d := range derived {
+							lower := strings.ToLower(d.Address)
+							data.explicitAccess[lower] = append(data.explicitAccess[lower], hdInfo)
+						}
+					}
+				}
 			}
 		}
 	}
