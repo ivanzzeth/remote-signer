@@ -214,10 +214,6 @@ func NewSignerRegistryWithProvider(cfg SignerConfig, provider PasswordProvider) 
 		}
 	}
 
-	if len(registry.signers) == 0 {
-		return nil, fmt.Errorf("no signers configured")
-	}
-
 	return registry, nil
 }
 

@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -185,4 +186,38 @@ func CheckSignerPermission(apiKey *types.APIKey, signerAddress string) bool {
 		return false
 	}
 	return apiKey.IsAllowedSigner(signerAddress)
+}
+
+// HDWalletDerivedLister can list derived addresses for an HD wallet.
+// Extracted to avoid importing the full evm package in middleware.
+type HDWalletDerivedLister interface {
+	ListDerivedAddresses(primaryAddr string) ([]types.SignerInfo, error)
+}
+
+// CheckSignerPermissionWithHDWallets checks AllowedSigners first, then AllowedHDWallets.
+// hdMgr may be nil (treated as no HD wallet check).
+func CheckSignerPermissionWithHDWallets(apiKey *types.APIKey, signerAddress string, hdMgr HDWalletDerivedLister) bool {
+	if apiKey == nil {
+		return false
+	}
+	// 1. Direct signer check (existing behavior)
+	if apiKey.IsAllowedSigner(signerAddress) {
+		return true
+	}
+	// 2. HD wallet check
+	if hdMgr == nil || len(apiKey.AllowedHDWallets) == 0 {
+		return false
+	}
+	for _, primaryAddr := range apiKey.AllowedHDWallets {
+		derived, err := hdMgr.ListDerivedAddresses(primaryAddr)
+		if err != nil {
+			continue
+		}
+		for _, d := range derived {
+			if strings.EqualFold(d.Address, signerAddress) {
+				return true
+			}
+		}
+	}
+	return false
 }

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	evmchain "github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/stretchr/testify/assert"
@@ -142,7 +143,20 @@ func newDefaultMockSignerManager() *mockSignerManager {
 	}
 }
 
+// adminAPIKey returns a test admin API key for injection into request context.
+func adminAPIKey() *types.APIKey {
+	return &types.APIKey{
+		ID:    "test-admin",
+		Name:  "Test Admin",
+		Admin: true,
+	}
+}
+
 func doRequest(handler http.Handler, method, path string, body interface{}) *httptest.ResponseRecorder {
+	return doRequestWithAPIKey(handler, method, path, body, adminAPIKey())
+}
+
+func doRequestWithAPIKey(handler http.Handler, method, path string, body interface{}, apiKey *types.APIKey) *httptest.ResponseRecorder {
 	var reqBody *bytes.Buffer
 	if body != nil {
 		data, _ := json.Marshal(body)
@@ -153,6 +167,10 @@ func doRequest(handler http.Handler, method, path string, body interface{}) *htt
 
 	req := httptest.NewRequest(method, path, reqBody)
 	req.Header.Set("Content-Type", "application/json")
+	if apiKey != nil {
+		ctx := context.WithValue(req.Context(), middleware.APIKeyContextKey, apiKey)
+		req = req.WithContext(ctx)
+	}
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	return rec
@@ -635,6 +653,8 @@ func TestHDWalletHandler_ValidationErrors(t *testing.T) {
 
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/evm/hd-wallets", bytes.NewBufferString("{invalid json"))
 		req.Header.Set("Content-Type", "application/json")
+		ctx := context.WithValue(req.Context(), middleware.APIKeyContextKey, adminAPIKey())
+		req = req.WithContext(ctx)
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
 
@@ -732,6 +752,8 @@ func TestHDWalletHandler_ValidationErrors(t *testing.T) {
 
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/evm/hd-wallets/0x1111111111111111111111111111111111111111/derive", bytes.NewBufferString("{bad"))
 		req.Header.Set("Content-Type", "application/json")
+		ctx := context.WithValue(req.Context(), middleware.APIKeyContextKey, adminAPIKey())
+		req = req.WithContext(ctx)
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
 

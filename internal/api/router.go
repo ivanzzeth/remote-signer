@@ -87,7 +87,7 @@ func (r *Router) setupRoutes() error {
 	r.mux.Handle("/metrics", middleware.SecurityHeadersMiddleware()(metrics.Handler()))
 
 	// EVM handlers
-	signHandler, err := evmhandler.NewSignHandler(r.signService, r.logger)
+	signHandler, err := evmhandler.NewSignHandler(r.signService, r.signerManager, r.logger)
 	if err != nil {
 		return err
 	}
@@ -170,9 +170,9 @@ func (r *Router) setupRoutes() error {
 	// Signer management routes (GET with auth, POST with auth + admin)
 	r.mux.Handle("/api/v1/evm/signers", r.withAuth(signerHandler))
 
-	// HD wallet management routes (admin only)
-	r.mux.Handle("/api/v1/evm/hd-wallets", r.withAuthAndAdmin(hdWalletHandler))
-	r.mux.Handle("/api/v1/evm/hd-wallets/", r.withAuthAndAdmin(hdWalletHandler))
+	// HD wallet management routes (auth required; admin/HD wallet permission checked in handler)
+	r.mux.Handle("/api/v1/evm/hd-wallets", r.withAuth(hdWalletHandler))
+	r.mux.Handle("/api/v1/evm/hd-wallets/", r.withAuth(hdWalletHandler))
 
 	// Audit routes (with auth + admin required — audit logs contain sensitive data)
 	r.mux.Handle("/api/v1/audit", r.withAuthAndAdmin(auditHandler))

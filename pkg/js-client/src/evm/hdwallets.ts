@@ -3,6 +3,8 @@
  */
 
 import { HttpTransport } from "../transport";
+import type { EvmSignService } from "./sign";
+import { RemoteSigner } from "./remote_signer";
 import type { SignerInfo } from "./signers";
 
 // ---------------------------------------------------------------------------
@@ -46,7 +48,10 @@ export interface ListDerivedAddressesResponse {
 // ---------------------------------------------------------------------------
 
 export class EvmHDWalletService {
-  constructor(private readonly transport: HttpTransport) {}
+  constructor(
+    private readonly transport: HttpTransport,
+    private readonly signService: EvmSignService,
+  ) {}
 
   /**
    * Create a new HD wallet.
@@ -105,6 +110,38 @@ export class EvmHDWalletService {
       "GET",
       `/api/v1/evm/hd-wallets/${primaryAddr}/derived`,
       null,
+    );
+  }
+
+  /**
+   * Derive (if needed) the address at the given index and return a RemoteSigner.
+   * The RemoteSigner provides convenience methods (signHash, personalSign, etc.)
+   * mirroring the Go client's RemoteSigner.
+   */
+  async getSigner(
+    primaryAddr: string,
+    chainId: string,
+    index: number,
+  ): Promise<RemoteSigner> {
+    const resp = await this.deriveAddress(primaryAddr, { index });
+    if (!resp.derived.length) {
+      throw new Error(`no address derived at index ${index}`);
+    }
+    return new RemoteSigner(this.signService, resp.derived[0].address, chainId);
+  }
+
+  /**
+   * Derive a batch of addresses and return RemoteSigner instances.
+   */
+  async getSigners(
+    primaryAddr: string,
+    chainId: string,
+    start: number,
+    count: number,
+  ): Promise<RemoteSigner[]> {
+    const resp = await this.deriveAddress(primaryAddr, { start, count });
+    return resp.derived.map(
+      (d) => new RemoteSigner(this.signService, d.address, chainId),
     );
   }
 }

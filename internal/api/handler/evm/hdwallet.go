@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	evmchain "github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/validate"
@@ -80,12 +81,23 @@ type deriveResponse struct {
 
 // ServeHTTP handles /api/v1/evm/hd-wallets
 func (h *HDWalletHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	apiKey := middleware.GetAPIKey(r.Context())
+	if apiKey == nil {
+		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	// Strip prefix to get the rest of the path
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1/evm/hd-wallets")
 	path = strings.TrimSuffix(path, "/")
 
 	switch {
 	case path == "" || path == "/":
+		// Create/import and list-all require admin
+		if !apiKey.Admin {
+			h.writeError(w, "admin access required", http.StatusForbidden)
+			return
+		}
 		switch r.Method {
 		case http.MethodPost:
 			h.createOrImport(w, r)
@@ -102,6 +114,13 @@ func (h *HDWalletHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		address := parts[0]
+
+		// Per-wallet actions: admin OR AllowedHDWallets permission
+		if !apiKey.Admin && !apiKey.IsAllowedHDWallet(address) {
+			h.writeError(w, "not authorized for this HD wallet", http.StatusForbidden)
+			return
+		}
+
 		action := ""
 		if len(parts) == 2 {
 			action = parts[1]

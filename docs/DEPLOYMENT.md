@@ -106,6 +106,7 @@ api_keys:
     rate_limit: 100                      # requests per minute
     # allowed_chain_types: []            # empty = all
     # allowed_signers: []                 # empty = all
+    # allowed_hd_wallets: []             # HD wallet primary addresses (empty = none)
 
 notify:
   slack:

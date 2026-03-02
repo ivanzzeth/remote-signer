@@ -200,6 +200,8 @@ api_keys:
     # allowed_chain_types: ["evm"]       # Empty = all chains allowed
     # allowed_signers:                   # Empty = all signers allowed
     #   - "0x1234567890abcdef1234567890abcdef12345678"
+    # allowed_hd_wallets:               # HD wallet primary addresses (empty = none)
+    #   - "0xABCD..."                   # Grants access to all derived addresses + derive permission
 
   # Example 3: Direct public key in base64 format (for development/testing only)
   # - id: "dev-key"
@@ -214,6 +216,15 @@ api_keys:
   #   public_key: "d75a980182b10ab7..."  # Ed25519 public key (64 hex chars = 32 bytes, auto-detected)
   #   admin: false
   #   enabled: true
+
+  # Example 5: HD wallet-scoped key (can derive and sign with all derived addresses)
+  # - id: "hd-app-key"
+  #   name: "HD Wallet App"
+  #   public_key_env: "HD_APP_PUBLIC_KEY"
+  #   admin: false
+  #   enabled: true
+  #   allowed_hd_wallets:
+  #     - "0xHDWalletPrimaryAddress"   # Can derive + sign with all derived addresses
 
 # To generate an Ed25519 key pair:
 # 1. Using openssl (recommended):

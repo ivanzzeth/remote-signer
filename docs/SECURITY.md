@@ -44,6 +44,13 @@ Remote Signer applies defense in depth from the network layer to the application
 
 Together, timestamp + nonce ensure that each request is fresh and used at most once.
 
+### Authorization scopes
+
+- **`allowed_signers`** (empty = all): restricts which signer addresses the key can use for signing. Empty means unrestricted access to all signers.
+- **`allowed_hd_wallets`** (empty = none): grants access to all derived addresses of specified HD wallet primary addresses. Empty means no HD wallet access. This is intentionally different from `allowed_signers` — HD wallet authorization must be explicit.
+- Permission hierarchy: admin > `allowed_hd_wallets` (derived addresses) > `allowed_signers` (individual addresses).
+- Defense-in-depth: sign requests check both `allowed_signers` and `allowed_hd_wallets` derived addresses.
+
 ### Rate limit
 
 - Per-API-key rate limit (requests per minute), configurable per key and with a default (`security.rate_limit_default`).

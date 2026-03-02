@@ -1212,9 +1212,9 @@ func TestNewSignerRegistryWithProvider_NilProvider_CB(t *testing.T) {
 
 func TestNewSignerRegistryWithProvider_NoSigners_CB(t *testing.T) {
 	provider, _ := NewEnvPasswordProvider()
-	_, err := NewSignerRegistryWithProvider(SignerConfig{}, provider)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "no signers configured")
+	registry, err := NewSignerRegistryWithProvider(SignerConfig{}, provider)
+	assert.NoError(t, err)
+	assert.Equal(t, 0, registry.SignerCount())
 }
 
 func TestNewSignerRegistryWithProvider_DisabledSignersOnly_CB(t *testing.T) {
@@ -1228,9 +1228,9 @@ func TestNewSignerRegistryWithProvider_DisabledSignersOnly_CB(t *testing.T) {
 			},
 		},
 	}
-	_, err := NewSignerRegistryWithProvider(cfg, provider)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "no signers configured")
+	registry, err := NewSignerRegistryWithProvider(cfg, provider)
+	assert.NoError(t, err)
+	assert.Equal(t, 0, registry.SignerCount())
 }
 
 func TestNewSignerRegistryWithProvider_EmptyPrivateKey_CB(t *testing.T) {

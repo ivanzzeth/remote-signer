@@ -144,6 +144,7 @@ type APIKey struct {
     RateLimit     *RateLimitConfig
     AllowedChains []ChainType
     AllowedSigners []string
+    AllowedHDWallets []string   // HD wallet primary addresses (empty = none)
     CreatedAt     time.Time
     UpdatedAt     time.Time
 }

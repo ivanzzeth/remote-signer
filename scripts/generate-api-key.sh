@@ -126,8 +126,15 @@ PUBLIC_KEY_BASE64=$(openssl pkey -in "$PUBLIC_KEY_FILE" -pubin -outform DER 2>/d
 echo "$PUBLIC_KEY_BASE64"
 echo ""
 
-# Generate a random API key ID
-API_KEY_ID="api-key-$(openssl rand -hex 4)"
+# Generate API key ID: use name directly if custom, random suffix if default
+if [ "$KEY_NAME" = "api" ]; then
+    API_KEY_ID="api-key-$(openssl rand -hex 4)"
+    API_KEY_DISPLAY_NAME="Generated API Key"
+else
+    API_KEY_ID="$KEY_NAME"
+    # Capitalize first letter for display name
+    API_KEY_DISPLAY_NAME="$(echo "${KEY_NAME:0:1}" | tr '[:lower:]' '[:upper:]')${KEY_NAME:1}"
+fi
 
 echo -e "${CYAN}=== Configuration Example ===${NC}"
 echo ""
@@ -135,7 +142,7 @@ echo "Add this to your config.yaml under 'api_keys':"
 echo ""
 echo -e "${GREEN}api_keys:"
 echo "  - id: \"$API_KEY_ID\""
-echo "    name: \"Generated API Key\""
+echo "    name: \"$API_KEY_DISPLAY_NAME\""
 echo "    public_key: \"$PUBLIC_KEY_BASE64\""
 echo "    enabled: true"
 echo -e "    rate_limit: 100${NC}"

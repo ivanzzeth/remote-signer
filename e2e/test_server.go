@@ -323,10 +323,6 @@ func (ts *TestServer) Start() error {
 	}
 	evmRegistry.RegisterProvider(hdProvider)
 
-	if evmRegistry.SignerCount() == 0 {
-		return fmt.Errorf("no signers configured")
-	}
-
 	evmAdapter, err := evm.NewEVMAdapter(evmRegistry)
 	if err != nil {
 		return fmt.Errorf("failed to create EVM adapter: %w", err)

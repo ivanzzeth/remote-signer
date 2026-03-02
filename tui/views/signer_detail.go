@@ -169,8 +169,11 @@ func (m *SignerDetailModel) renderDetail() string {
 		// Table rows
 		for _, k := range m.signer.AllowedKeys {
 			accessStr := k.AccessType
-			if accessStr == "unrestricted" {
+			switch accessStr {
+			case "unrestricted":
 				accessStr = "all signers"
+			case "hd_wallet":
+				accessStr = "via HD wallet"
 			}
 
 			name := k.Name

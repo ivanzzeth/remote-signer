@@ -23,7 +23,7 @@ func NewService(t *transport.Transport) *Service {
 		Requests:  &RequestService{transport: t},
 		Rules:     &RuleService{transport: t},
 		Signers:   &SignerService{transport: t},
-		HDWallets: &HDWalletService{transport: t},
+		HDWallets: &HDWalletService{transport: t, sign: sign},
 		Guard:     &GuardService{transport: t},
 	}
 }
