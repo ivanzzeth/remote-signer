@@ -301,7 +301,7 @@ func run() error {
 		evmRegistry.RegisterProvider(hdProvider)
 
 		if evmRegistry.SignerCount() == 0 {
-			return fmt.Errorf("no signers configured")
+			log.Warn("No signers configured. Add signers via TUI or API after startup.")
 		}
 		defer func() {
 			if err := evmRegistry.Close(); err != nil {

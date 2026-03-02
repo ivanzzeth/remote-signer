@@ -43,6 +43,8 @@ type HDWalletAPI interface {
 	List(ctx context.Context) (*ListHDWalletsResponse, error)
 	DeriveAddress(ctx context.Context, primaryAddr string, req *DeriveAddressRequest) (*DeriveAddressResponse, error)
 	ListDerived(ctx context.Context, primaryAddr string) (*ListDerivedAddressesResponse, error)
+	GetSigner(ctx context.Context, primaryAddr string, chainID string, index uint32) (*RemoteSigner, error)
+	GetSigners(ctx context.Context, primaryAddr string, chainID string, start, count uint32) ([]*RemoteSigner, error)
 }
 
 // GuardAPI defines the approval guard interface.

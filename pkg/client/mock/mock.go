@@ -216,6 +216,8 @@ type HDWalletService struct {
 	ListFunc          func(ctx context.Context) (*evm.ListHDWalletsResponse, error)
 	DeriveAddressFunc func(ctx context.Context, primaryAddr string, req *evm.DeriveAddressRequest) (*evm.DeriveAddressResponse, error)
 	ListDerivedFunc   func(ctx context.Context, primaryAddr string) (*evm.ListDerivedAddressesResponse, error)
+	GetSignerFunc     func(ctx context.Context, primaryAddr string, chainID string, index uint32) (*evm.RemoteSigner, error)
+	GetSignersFunc    func(ctx context.Context, primaryAddr string, chainID string, start, count uint32) ([]*evm.RemoteSigner, error)
 	Calls             map[string][]any
 }
 
@@ -267,6 +269,22 @@ func (m *HDWalletService) ListDerived(ctx context.Context, primaryAddr string) (
 		return m.ListDerivedFunc(ctx, primaryAddr)
 	}
 	return &evm.ListDerivedAddressesResponse{}, nil
+}
+
+func (m *HDWalletService) GetSigner(ctx context.Context, primaryAddr string, chainID string, index uint32) (*evm.RemoteSigner, error) {
+	m.recordCall("GetSigner", primaryAddr, chainID, index)
+	if m.GetSignerFunc != nil {
+		return m.GetSignerFunc(ctx, primaryAddr, chainID, index)
+	}
+	return nil, nil
+}
+
+func (m *HDWalletService) GetSigners(ctx context.Context, primaryAddr string, chainID string, start, count uint32) ([]*evm.RemoteSigner, error) {
+	m.recordCall("GetSigners", primaryAddr, chainID, start, count)
+	if m.GetSignersFunc != nil {
+		return m.GetSignersFunc(ctx, primaryAddr, chainID, start, count)
+	}
+	return nil, nil
 }
 
 var _ evm.HDWalletAPI = (*HDWalletService)(nil)
