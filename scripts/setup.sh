@@ -119,6 +119,49 @@ download_release_binaries_and_set_path() {
     return 0
 }
 
+# Build remote-signer-tui, remote-signer-validate-rules, remote-signer-cli from source into BIN_DIR.
+# Requires Go and go.mod in PROJECT_DIR. Exports PATH and adds BIN_DIR to shell rc on success.
+build_from_source_binaries() {
+    mkdir -p "$BIN_DIR"
+    export PATH="$BIN_DIR:$PATH"
+
+    if ! command -v go &>/dev/null; then
+        log_warn "Go not found; install from https://go.dev/dl/"
+        return 1
+    fi
+    if [ ! -f "$PROJECT_DIR/go.mod" ]; then
+        log_warn "Not a Go module (no go.mod); cannot build from source."
+        return 1
+    fi
+
+    log_info "Building CLI tools from source (this may take a minute)..."
+    local ok=0
+    if (cd "$PROJECT_DIR" && go build -o "$BIN_DIR/remote-signer-tui" ./cmd/tui 2>/dev/null); then
+        log_info "Built remote-signer-tui"
+        ok=1
+    else
+        log_warn "Failed to build remote-signer-tui"
+    fi
+    if (cd "$PROJECT_DIR" && go build -o "$BIN_DIR/remote-signer-validate-rules" ./cmd/validate-rules 2>/dev/null); then
+        log_info "Built remote-signer-validate-rules"
+        ok=1
+    else
+        log_warn "Failed to build remote-signer-validate-rules"
+    fi
+    if (cd "$PROJECT_DIR" && go build -o "$BIN_DIR/remote-signer-cli" ./cmd/remote-signer-cli 2>/dev/null); then
+        log_info "Built remote-signer-cli"
+        ok=1
+    else
+        log_warn "Failed to build remote-signer-cli"
+    fi
+
+    if [ "$ok" -eq 0 ]; then
+        return 1
+    fi
+    add_bin_dir_to_path
+    return 0
+}
+
 # Add BIN_DIR to PATH in the user's shell rc so new terminals have remote-signer-cli, remote-signer-tui, remote-signer-validate-rules on PATH.
 add_bin_dir_to_path() {
     local rc line
@@ -749,7 +792,8 @@ step_preset_rules() {
         if [ -n "$vars_out" ]; then
             echo ""
             echo "Enter values for the following variables (descriptions from template):"
-            while IFS= read -r line; do
+            # Read vars from fd 3 so that 'read -rp' below still reads from terminal (stdin), not from vars_out
+            while IFS= read -r line <&3; do
                 [[ -z "$line" ]] && continue
                 name="${line%%$'\t'*}"
                 desc="${line#*$'\t'}"
@@ -761,7 +805,7 @@ step_preset_rules() {
                     fi
                     set_args+=(--set "$name=$val")
                 fi
-            done <<< "$vars_out"
+            done 3<<< "$vars_out"
         fi
 
         log_info "Adding rule from preset: $PRESET_NAME"
@@ -811,13 +855,23 @@ step_done() {
     echo ""
 
     # --- Add signer ---
-    # Download release binaries (remote-signer-tui, remote-signer-validate-rules, remote-signer-cli) into BIN_DIR and add to PATH
+    # Get CLI tools: user chooses download from release or build from source
+    echo -e "${CYAN}CLI tools (remote-signer-tui, remote-signer-validate-rules, remote-signer-cli):${NC}"
+    echo "  1) Download from release (latest; no Go required)"
+    echo "  2) Build from source (quick verify without waiting for release; requires Go)"
+    echo ""
+    BINARIES_CHOICE=$(ask "Choose [1/2]" 1 1 2)
+
     TUI_BIN="$BIN_DIR/remote-signer-tui"
-    if ! download_release_binaries_and_set_path; then
-        # Fallback: try building TUI locally if download failed
-        TUI_BIN="$PROJECT_DIR/remote-signer-tui"
-        if command -v go &>/dev/null && [ -f "$PROJECT_DIR/go.mod" ]; then
-            (cd "$PROJECT_DIR" && go build -o remote-signer-tui ./cmd/tui 2>/dev/null) || true
+    if [ "$BINARIES_CHOICE" = "2" ]; then
+        if ! build_from_source_binaries; then
+            log_warn "Build from source failed; trying download from release..."
+            download_release_binaries_and_set_path || true
+        fi
+    else
+        if ! download_release_binaries_and_set_path; then
+            log_warn "Download failed; trying build from source..."
+            build_from_source_binaries || true
         fi
     fi
     # If TUI still not in BIN_DIR, prefer PROJECT_DIR binary for backward compat
