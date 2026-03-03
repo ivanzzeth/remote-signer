@@ -199,16 +199,29 @@ func TestHDWalletsModel_CreateFlow(t *testing.T) {
 		assert.Equal(t, 1, m.createStep)
 	})
 
-	t.Run("password step advances to confirm", func(t *testing.T) {
+	t.Run("password step advances to confirm when strong", func(t *testing.T) {
 		model, _ := newTestHDWalletsModel(t)
 		model.showCreate = true
 		model.createMode = "create"
 		model.createStep = 1
-		model.passwordInput.SetValue("testpass")
+		model.passwordInput.SetValue("Abcdef1!ghijklmn") // meets strength rules
 
 		newModel, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		m := newModel.(*HDWalletsModel)
 		assert.Equal(t, 2, m.createStep) // Moved to confirm
+	})
+
+	t.Run("password step rejects weak password", func(t *testing.T) {
+		model, _ := newTestHDWalletsModel(t)
+		model.showCreate = true
+		model.createMode = "create"
+		model.createStep = 1
+		model.passwordInput.SetValue("short")
+
+		newModel, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		m := newModel.(*HDWalletsModel)
+		assert.Equal(t, 1, m.createStep)
+		assert.Contains(t, m.actionResult, "at least 16")
 	})
 
 	t.Run("empty password does not advance", func(t *testing.T) {
@@ -228,8 +241,8 @@ func TestHDWalletsModel_CreateFlow(t *testing.T) {
 		model.showCreate = true
 		model.createMode = "create"
 		model.createStep = 2
-		model.passwordInput.SetValue("pass1")
-		model.confirmInput.SetValue("pass2")
+		model.passwordInput.SetValue("Abcdef1!ghijklmn")
+		model.confirmInput.SetValue("Abcdef1!ghijklmX")
 
 		newModel, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		m := newModel.(*HDWalletsModel)
@@ -246,8 +259,8 @@ func TestHDWalletsModel_CreateFlow(t *testing.T) {
 		model.createMode = "create"
 		model.createStep = 2
 		model.entropyBits = 256
-		model.passwordInput.SetValue("mypassword")
-		model.confirmInput.SetValue("mypassword")
+		model.passwordInput.SetValue("Abcdef1!ghijklmn")
+		model.confirmInput.SetValue("Abcdef1!ghijklmn")
 
 		newModel, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		m := newModel.(*HDWalletsModel)
@@ -366,8 +379,8 @@ func TestHDWalletsModel_ImportFlow(t *testing.T) {
 		model.createMode = "import"
 		model.createStep = 2
 		model.mnemonicInput.SetValue("abandon abandon abandon about")
-		model.passwordInput.SetValue("mypassword")
-		model.confirmInput.SetValue("mypassword")
+		model.passwordInput.SetValue("Abcdef1!ghijklmn")
+		model.confirmInput.SetValue("Abcdef1!ghijklmn")
 
 		newModel, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		m := newModel.(*HDWalletsModel)

@@ -133,6 +133,11 @@ security:
   # and approval auto-rule creation. Rules can only be managed through config files + restart/SIGHUP.
   # Config-sourced rules are always immutable via API regardless of this setting.
   rules_api_readonly: true
+
+  # Config reload (SIGHUP): when true, sending SIGHUP to the process will reload rules from config
+  # and sync them to the DB. Default false (recommended) — prevents unexpected runtime changes.
+  # Example: kill -HUP <pid>
+  allow_sighup_rules_reload: false
   # signers_api_readonly (default: false) — blocks signer creation, HD wallet create/import/derive.
   # Unlock/lock remain allowed. Low risk: API never exposes private keys or passwords.
   signers_api_readonly: false

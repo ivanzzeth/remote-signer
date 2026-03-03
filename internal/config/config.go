@@ -217,6 +217,10 @@ type SecurityConfig struct {
 	// Default (nil) = false. Covers: signer creation, HD wallet create/import/derive.
 	// Unlock/lock remain allowed. Signers managed through config or TUI.
 	SignersAPIReadonly *bool `yaml:"signers_api_readonly"`
+
+	// AllowSIGHUPRulesReload enables reloading rules from config when receiving SIGHUP.
+	// Default (nil) = false (secure by default). When disabled, SIGHUP is ignored (process stays alive).
+	AllowSIGHUPRulesReload *bool `yaml:"allow_sighup_rules_reload"`
 }
 
 // IsRulesAPIReadonly returns whether rule/template mutations via API are disabled.
@@ -235,6 +239,15 @@ func (s SecurityConfig) IsSignersAPIReadonly() bool {
 		return false
 	}
 	return *s.SignersAPIReadonly
+}
+
+// IsSIGHUPRulesReloadEnabled returns whether SIGHUP-triggered rules reload is enabled.
+// Defaults to false (secure by default) when not explicitly configured.
+func (s SecurityConfig) IsSIGHUPRulesReloadEnabled() bool {
+	if s.AllowSIGHUPRulesReload == nil {
+		return false
+	}
+	return *s.AllowSIGHUPRulesReload
 }
 
 // ApprovalGuardConfig configures the request-rejection burst guard.

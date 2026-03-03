@@ -12,7 +12,7 @@
 - **多链可扩展** — 当前支持 EVM，架构上可扩展至 Solana / Cosmos / Bitcoin
 - **人工审批流程** — 通过 Slack、Pushover、Webhook 接收待审批通知
 - **Ed25519 API 认证** — 请求签名 + nonce/时间戳防重放
-- **动态签名者管理** — 通过 API 或 TUI 在运行时创建 keystore 与 HD 钱包
+- **动态签名者管理** — 通过 API 或 TUI 在运行时创建 keystore 与 HD 钱包（助记词钱包）
 - **终端界面 (TUI)** — 在终端中管理规则、审批请求、创建签名者
 
 ## 架构
@@ -87,7 +87,7 @@ curl http://localhost:8548/health
 curl --cacert certs/ca.crt --cert certs/client.crt --key certs/client.key https://localhost:8548/health
 ```
 
-服务启动时没有签名者。要添加第一个签名者（导入私钥或 HD 钱包），请使用 TUI：先构建 TUI，用 `admin` 密钥连接（密钥路径在安装向导最后会给出），在 **签名者** 标签页中可创建 keystore（导入私钥）或创建/导入 HD 钱包。详见下方 [添加签名者](#添加签名者)。
+服务启动时没有签名者。要添加第一个签名者（导入私钥或 HD 钱包/助记词钱包），请使用 TUI：先构建 TUI，用 `admin` 密钥连接（密钥路径在安装向导最后会给出），在 **签名者** 标签页中可创建 keystore（导入私钥）或创建/导入 HD 钱包。详见下方 [添加签名者](#添加签名者)。
 
 ### 手动配置
 
@@ -97,7 +97,7 @@ curl --cacert certs/ca.crt --cert certs/client.crt --key certs/client.key https:
 
 服务启动时没有签名者，需在启动后添加：
 
-- **TUI**（推荐）：使用 `-api-key-file data/admin_private.pem` 无需粘贴密钥。示例（明文 HTTP）：`./remote-signer-tui -api-key-id admin -api-key-file data/admin_private.pem -url http://localhost:8548`。**若安装时启用了 TLS**，需使用 `https://` 并指定 CA（mTLS 时还需客户端证书与私钥），例如 `-url https://localhost:8548 -tls-ca ./certs/ca.crt`，或 mTLS：`-tls-ca ./certs/ca.crt -tls-cert ./certs/client.crt -tls-key ./certs/client.key`。详见 [docs/TUI.md](docs/TUI.md#tls--mtls)。安装完成后（Docker 模式）可选择「Open TUI to add signers now?」直接启动 TUI。在 **签名者** 标签页可创建 keystore（导入私钥）或创建/导入 HD 钱包。
+- **TUI**（推荐）：使用 `-api-key-file data/admin_private.pem` 无需粘贴密钥。示例（明文 HTTP）：`./remote-signer-tui -api-key-id admin -api-key-file data/admin_private.pem -url http://localhost:8548`。**若安装时启用了 TLS**，需使用 `https://` 并指定 CA（mTLS 时还需客户端证书与私钥），例如 `-url https://localhost:8548 -tls-ca ./certs/ca.crt`，或 mTLS：`-tls-ca ./certs/ca.crt -tls-cert ./certs/client.crt -tls-key ./certs/client.key`。详见 [docs/TUI.md](docs/TUI.md#tls--mtls)。安装完成后（Docker 模式）可选择「Open TUI to add signers now?」直接启动 TUI。在 **签名者** 标签页可创建 keystore（导入私钥）或创建/导入 HD 钱包。**密码强度要求（强制校验）**：至少 16 位，且必须包含大写 + 小写 + 数字 + 符号；建议 24 位以上。
 - **API**：`POST /api/v1/evm/signers`（仅 admin）。见 [docs/API.md](docs/API.md)
 - **配置文件**：编辑配置中的 `chains.evm.signers.private_keys`。见 [docs/CONFIGURATION.md](docs/CONFIGURATION.md#chains-evm)
 

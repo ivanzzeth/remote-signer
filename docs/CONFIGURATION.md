@@ -193,6 +193,7 @@ security:
   ip_rate_limit: 200              # Pre-auth per-IP rate limit (req/min)
   nonce_required: true            # Require X-Nonce header for replay protection
   manual_approval_enabled: false  # true = unmatched requests go to pending approval
+  allow_sighup_rules_reload: false # Reload rules from config on SIGHUP (default: false)
 
   # Approval guard: detect API key abuse
   approval_guard:

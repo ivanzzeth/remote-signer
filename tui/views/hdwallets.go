@@ -345,6 +345,12 @@ func (m *HDWalletsModel) handlePasswordStep(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 	switch msg.String() {
 	case "enter":
 		if m.passwordInput.Value() != "" {
+			// Enforce same password strength as keystore create
+			if errMsg, _ := validatePassword(m.passwordInput.Value()); errMsg != "" {
+				m.actionResult = styles.ErrorStyle.Render(errMsg)
+				return m, nil
+			}
+			m.actionResult = ""
 			m.createStep = 2
 			m.confirmInput.Focus()
 			m.passwordInput.Blur()
@@ -376,9 +382,13 @@ func (m *HDWalletsModel) handleConfirmStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 			m.actionResult = styles.ErrorStyle.Render("Passwords do not match")
 			return m, nil
 		}
+		password := m.passwordInput.Value()
+		if errMsg, _ := validatePassword(password); errMsg != "" {
+			m.actionResult = styles.ErrorStyle.Render(errMsg)
+			return m, nil
+		}
 		m.loading = true
 		m.confirmInput.Blur()
-		password := m.passwordInput.Value()
 		if m.createMode == "create" {
 			return m, tea.Batch(m.spinner.Tick, m.createWallet(password, m.entropyBits))
 		}
@@ -513,6 +523,10 @@ func (m *HDWalletsModel) renderCreateWalletForm(content *strings.Builder) {
 		content.WriteString("\n\n")
 		content.WriteString(m.confirmInput.View())
 		content.WriteString("\n\n")
+		if _, warnMsg := validatePassword(m.passwordInput.Value()); warnMsg != "" {
+			content.WriteString(styles.WarningStyle.Render(warnMsg))
+			content.WriteString("\n\n")
+		}
 		if m.actionResult != "" {
 			content.WriteString(m.actionResult)
 			content.WriteString("\n\n")
@@ -540,6 +554,10 @@ func (m *HDWalletsModel) renderImportWalletForm(content *strings.Builder) {
 		content.WriteString("\n\n")
 		content.WriteString(m.confirmInput.View())
 		content.WriteString("\n\n")
+		if _, warnMsg := validatePassword(m.passwordInput.Value()); warnMsg != "" {
+			content.WriteString(styles.WarningStyle.Render(warnMsg))
+			content.WriteString("\n\n")
+		}
 		if m.actionResult != "" {
 			content.WriteString(m.actionResult)
 			content.WriteString("\n\n")
