@@ -64,7 +64,7 @@
 
 **Preset file format**
 
-- **Single-rule preset** (one rule per file, e.g. `rules/presets/polymarket_safe_polygon.preset.yaml`):
+- **Single-rule preset** (one rule per file, e.g. `rules/presets/polymarket_safe_polygon.preset.js.yaml`):
 
 ```yaml
 # Preset: Polymarket Safe (Polygon). Override allowed_safe_addresses / allowed_safe_address_for_testing.
@@ -178,7 +178,7 @@ Single binary: **remote-signer-cli** (or **rscli** as shorthand in docs).
   - `validate_cmd.go` — `validate` subcommand: **exec** **`remote-signer-validate-rules`** binary with forwarded flags.
   - `tui_cmd.go` — `tui` subcommand: **exec** `remote-signer-tui` binary with forwarded args.
 - **`rules/presets/`**
-  - Preset YAML files (data only). Example: `polymarket_safe_polygon.preset.yaml` — same structure as one `rules` entry in config (name, type instance, config.template, config.variables). Extracted from current config.example; no new format.
+  - Preset YAML files (data only). Example: `polymarket_safe_polygon.preset.js.yaml` — same structure as one `rules` entry in config (name, type instance, config.template, config.variables). Extracted from current config.example; no new format.
   - Optional: `predict-eoa-bnb.yaml`, `opinion-safe-bsc.yaml`.
 
 ### 4.2 Reuse only (no new validation/TUI logic)

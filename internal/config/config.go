@@ -311,6 +311,11 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
 
+	// Prefer DATABASE_DSN env over config (required for Docker host network: config may have "postgres" hostname)
+	if dsn := os.Getenv("DATABASE_DSN"); dsn != "" {
+		cfg.Database.DSN = dsn
+	}
+
 	// Set defaults
 	setDefaults(cfg)
 

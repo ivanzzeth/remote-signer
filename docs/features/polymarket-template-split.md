@@ -37,8 +37,8 @@
 | 预设文件 | 组合的模板 | 说明 |
 |----------|------------|------|
 | `polymarket_eoa_polygon.preset.yaml` | **auth** + **enable_trading** + **trading** | EOA 用：鉴权 + 开通交易 + 交易；无 create_safe |
-| `polymarket_safe_init_polygon.preset.yaml` | **auth** + **create_safe** + **enable_trading** | Safe 初始化：鉴权 + 创建 Safe + 开通交易；不含 trading（可后续单独加） |
-| `polymarket_safe_polygon.preset.yaml` | **auth** + **create_safe** + **enable_trading** + **trading** | Safe 全量：鉴权 + 创建 Safe + 开通交易 + 交易 |
+| `polymarket_safe_init_polygon.preset.js.yaml` | **auth** + **create_safe** + **enable_trading** | Safe 初始化：鉴权 + 创建 Safe + 开通交易；不含 trading（可后续单独加） |
+| `polymarket_safe_polygon.preset.js.yaml` | **auth** + **create_safe** + **enable_trading** + **trading** | Safe 全量：鉴权 + 创建 Safe + 开通交易 + 交易 |
 
 - **polymarket_eoa_polygon**：EOA 用户，不创建 Safe，只需 auth + enable_trading + trading；实例化时对 enable_trading/trading 绑定 EOA 或对应地址。
 - **polymarket_safe_init_polygon**：先起服务 → createProxy（create_safe）→ 拿到 Safe 地址 → 实例化时对 enable_trading 绑定该 Safe；不含 trading，需要时再加 trading 实例。

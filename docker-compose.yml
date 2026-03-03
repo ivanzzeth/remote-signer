@@ -13,7 +13,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${POSTGRES_PORT:-25432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-signer} -d ${POSTGRES_DB:-remote_signer}"]
       interval: 10s
@@ -81,7 +81,7 @@ services:
         hard: -1
     environment:
       # Database connection (host network: connect via localhost, port exposed by postgres container)
-      DATABASE_DSN: "postgres://${POSTGRES_USER:-signer}:${POSTGRES_PASSWORD:-signer_password}@127.0.0.1:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-remote_signer}?sslmode=disable"
+      DATABASE_DSN: "postgres://${POSTGRES_USER:-signer}:${POSTGRES_PASSWORD:-signer_password}@127.0.0.1:${POSTGRES_PORT:-25432}/${POSTGRES_DB:-remote_signer}?sslmode=disable"
       # Optional: additional signers
       # EVM_SIGNER_KEY_1: ${EVM_SIGNER_KEY_1}
       # EVM_SIGNER_KEY_2: ${EVM_SIGNER_KEY_2}
