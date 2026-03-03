@@ -301,10 +301,10 @@ func (ts *TestServer) Start() error {
 	}
 	evmRegistry.RegisterProvider(pkProvider)
 
-	// Load keystores
-	keystoreDir := os.TempDir()
-	if cfg != nil && cfg.Chains.EVM != nil && cfg.Chains.EVM.KeystoreDir != "" {
-		keystoreDir = cfg.Chains.EVM.KeystoreDir
+	// Load keystores — use a fresh temp dir to avoid stale files from previous runs
+	keystoreDir, cleanupKsErr := os.MkdirTemp("", "e2e-keystores-*")
+	if cleanupKsErr != nil {
+		return fmt.Errorf("failed to create temp keystore dir: %w", cleanupKsErr)
 	}
 	ksProvider, err := evm.NewKeystoreProvider(evmRegistry, evmSignerConfig.Keystores, keystoreDir, pwProvider, log)
 	if err != nil {
@@ -468,6 +468,11 @@ func (ts *TestServer) Start() error {
 	signerManager, err := evm.NewSignerManager(evmRegistry, log)
 	if err != nil {
 		return fmt.Errorf("failed to create signer manager: %w", err)
+	}
+
+	// Discover locked signers from disk (keystores/HD wallets not in config)
+	if err := signerManager.DiscoverLockedSigners(context.Background()); err != nil {
+		return fmt.Errorf("failed to discover locked signers: %w", err)
 	}
 
 	// Initialize router

@@ -691,6 +691,131 @@ func TestSignersModel_AccessColumn(t *testing.T) {
 	})
 }
 
+func TestValidatePassword(t *testing.T) {
+	t.Run("rejects short password", func(t *testing.T) {
+		errMsg, warnMsg := validatePassword("Abc1!xyz")
+		assert.Contains(t, errMsg, "at least 16 characters")
+		assert.Empty(t, warnMsg)
+	})
+
+	t.Run("rejects exactly 15 characters", func(t *testing.T) {
+		errMsg, _ := validatePassword("Abcdef1!ghijklm") // 15 chars
+		assert.Contains(t, errMsg, "at least 16 characters")
+	})
+
+	t.Run("rejects missing uppercase", func(t *testing.T) {
+		errMsg, _ := validatePassword("abcdefgh1234!@#$")
+		assert.Contains(t, errMsg, "uppercase letter")
+	})
+
+	t.Run("rejects missing lowercase", func(t *testing.T) {
+		errMsg, _ := validatePassword("ABCDEFGH1234!@#$")
+		assert.Contains(t, errMsg, "lowercase letter")
+	})
+
+	t.Run("rejects missing digit", func(t *testing.T) {
+		errMsg, _ := validatePassword("AbcDefGhIjKl!@#$")
+		assert.Contains(t, errMsg, "digit")
+	})
+
+	t.Run("rejects missing symbol", func(t *testing.T) {
+		errMsg, _ := validatePassword("AbcDefGh12345678")
+		assert.Contains(t, errMsg, "symbol")
+	})
+
+	t.Run("rejects multiple missing classes", func(t *testing.T) {
+		errMsg, _ := validatePassword("abcdefghijklmnop") // no upper, digit, symbol
+		assert.Contains(t, errMsg, "uppercase letter")
+		assert.Contains(t, errMsg, "digit")
+		assert.Contains(t, errMsg, "symbol")
+	})
+
+	t.Run("accepts 16-char valid password with warning", func(t *testing.T) {
+		errMsg, warnMsg := validatePassword("Abcdef1!ghijklmn") // 16 chars
+		assert.Empty(t, errMsg)
+		assert.Contains(t, warnMsg, "24+")
+	})
+
+	t.Run("accepts 24-char valid password without warning", func(t *testing.T) {
+		errMsg, warnMsg := validatePassword("Abcdef1!ghijklmnopqrstuv") // 24 chars
+		assert.Empty(t, errMsg)
+		assert.Empty(t, warnMsg)
+	})
+
+	t.Run("accepts long password without warning", func(t *testing.T) {
+		errMsg, warnMsg := validatePassword("MyV3ry$ecureP@ssword!WithExtra1234")
+		assert.Empty(t, errMsg)
+		assert.Empty(t, warnMsg)
+	})
+}
+
+func TestSignersModel_UnlockRateLimiting(t *testing.T) {
+	t.Run("blocks after max failed attempts", func(t *testing.T) {
+		model, svc := newTestSignersModel(t)
+		model.loading = false
+		model.signers = []evm.Signer{
+			{Address: "0x1111", Type: "keystore", Enabled: false, Locked: true},
+		}
+		model.selectedIdx = 0
+
+		svc.UnlockFunc = func(ctx context.Context, address string, req *evm.UnlockSignerRequest) (*evm.Signer, error) {
+			return nil, errors.New("wrong password")
+		}
+
+		addr := model.signers[0].Address
+
+		// Simulate maxUnlockAttempts failures
+		for i := 0; i < maxUnlockAttempts; i++ {
+			msg := SignerUnlockMsg{Address: addr, Success: false, Err: errors.New("wrong password")}
+			model.Update(msg)
+		}
+
+		// Now try to open unlock form — should be blocked by cooldown
+		model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")})
+		assert.False(t, model.showUnlock)
+		assert.Contains(t, model.actionResult, "Too many failed attempts")
+	})
+
+	t.Run("success clears rate limit state", func(t *testing.T) {
+		model, _ := newTestSignersModel(t)
+		model.loading = false
+		addr := "0x1111"
+		model.signers = []evm.Signer{
+			{Address: addr, Type: "keystore", Enabled: false, Locked: true},
+		}
+		model.selectedIdx = 0
+
+		// Add some failed attempts
+		model.unlockAttempts[addr] = 3
+
+		// Success message
+		msg := SignerUnlockMsg{Address: addr, Success: true, Message: "Signer unlocked"}
+		model.Update(msg)
+
+		// Attempts should be cleared
+		assert.Equal(t, 0, model.unlockAttempts[addr])
+		_, hasCooldown := model.unlockCooldownUtil[addr]
+		assert.False(t, hasCooldown)
+	})
+
+	t.Run("cooldown expires after duration", func(t *testing.T) {
+		model, _ := newTestSignersModel(t)
+		model.loading = false
+		addr := "0x1111"
+		model.signers = []evm.Signer{
+			{Address: addr, Type: "keystore", Enabled: false, Locked: true},
+		}
+		model.selectedIdx = 0
+
+		// Set cooldown in the past (already expired)
+		model.unlockCooldownUtil[addr] = time.Now().Add(-1 * time.Second)
+
+		// Should be able to open unlock form
+		model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")})
+		assert.True(t, model.showUnlock)
+	})
+}
+
 func TestFormatAccessColumn(t *testing.T) {
 	t.Run("empty keys returns dash", func(t *testing.T) {
 		result := formatAccessColumn(nil)
