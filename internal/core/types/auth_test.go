@@ -50,14 +50,20 @@ func TestIsAllowedChain_MultipleChains(t *testing.T) {
 // APIKey.IsAllowedSigner()
 // ---------------------------------------------------------------------------
 
-func TestIsAllowedSigner_EmptyList_AllowsAll(t *testing.T) {
+func TestIsAllowedSigner_EmptyList_NoAccess(t *testing.T) {
 	k := &APIKey{AllowedSigners: []string{}}
-	assert.True(t, k.IsAllowedSigner("0xABC123"))
+	assert.False(t, k.IsAllowedSigner("0xABC123"))
 }
 
-func TestIsAllowedSigner_NilList_AllowsAll(t *testing.T) {
+func TestIsAllowedSigner_NilList_NoAccess(t *testing.T) {
 	k := &APIKey{AllowedSigners: nil}
+	assert.False(t, k.IsAllowedSigner("0xABC123"))
+}
+
+func TestIsAllowedSigner_AllowAllSigners_AllowsAny(t *testing.T) {
+	k := &APIKey{AllowAllSigners: true, AllowedSigners: []string{}}
 	assert.True(t, k.IsAllowedSigner("0xABC123"))
+	assert.True(t, k.IsAllowedSigner("0xdef456"))
 }
 
 func TestIsAllowedSigner_MatchingAddress(t *testing.T) {

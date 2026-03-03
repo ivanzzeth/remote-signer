@@ -83,6 +83,8 @@ func (i *APIKeyInitializer) syncKey(ctx context.Context, keyCfg APIKeyConfig) er
 			ID:                keyCfg.ID,
 			Name:              keyCfg.Name,
 			PublicKeyHex:      publicKey,
+			AllowAllSigners:   keyCfg.AllowAllSigners,
+			AllowAllHDWallets: keyCfg.AllowAllHDWallets,
 			AllowedChainTypes: pq.StringArray(keyCfg.AllowedChainTypes),
 			AllowedSigners:    pq.StringArray(keyCfg.AllowedSigners),
 			AllowedHDWallets:  pq.StringArray(keyCfg.AllowedHDWallets),
@@ -107,6 +109,8 @@ func (i *APIKeyInitializer) syncKey(ctx context.Context, keyCfg APIKeyConfig) er
 		// Update existing key with config values
 		existing.Name = keyCfg.Name
 		existing.PublicKeyHex = publicKey
+		existing.AllowAllSigners = keyCfg.AllowAllSigners
+		existing.AllowAllHDWallets = keyCfg.AllowAllHDWallets
 		existing.AllowedChainTypes = pq.StringArray(keyCfg.AllowedChainTypes)
 		existing.AllowedSigners = pq.StringArray(keyCfg.AllowedSigners)
 		existing.AllowedHDWallets = pq.StringArray(keyCfg.AllowedHDWallets)

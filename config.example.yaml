@@ -217,12 +217,15 @@ api_keys:
     admin: false                          # Non-admin: cannot approve, view or manage rules
     enabled: true
     rate_limit: 100
+    # Normal deployment: default false (explicit below). setup.sh uses true for local dev.
+    # allow_all_signers: false           # false = restrict to allowed_signers list; true = any signer
+    # allow_all_hd_wallets: false       # false = restrict to allowed_hd_wallets; true = any HD wallet
     # Optional: restrict to specific chains or signers
     # allowed_chain_types: ["evm"]       # Empty = all chains allowed
-    # allowed_signers:                   # Empty = all signers allowed
+    # allowed_signers: []                # Empty = no signer access (unless allow_all_signers: true)
     #   - "0x1111111111111111111111111111111111111111"
-    # allowed_hd_wallets:               # HD wallet primary addresses (empty = none)
-    #   - "0xABCD..."                   # Grants access to all derived addresses + derive permission
+    # allowed_hd_wallets: []             # Empty = no HD wallet access (unless allow_all_hd_wallets: true)
+    #   - "0xABCD..."                    # Grants access to all derived addresses + derive permission
 
   # Example 3: Direct public key in base64 format (for development/testing only)
   # - id: "dev-key"

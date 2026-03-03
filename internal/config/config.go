@@ -88,9 +88,11 @@ type APIKeyConfig struct {
 	Name              string   `yaml:"name"`                 // Human-readable name
 	PublicKey         string   `yaml:"public_key"`           // Ed25519 public key (hex or base64, auto-detected)
 	PublicKeyEnv      string   `yaml:"public_key_env"`       // Environment variable containing public key
+	AllowAllSigners   bool     `yaml:"allow_all_signers"`    // When true: key can use any signer (private_key, keystore)
+	AllowAllHDWallets bool     `yaml:"allow_all_hd_wallets"` // When true: key can use any HD wallet (derive, sign derived)
 	AllowedChainTypes []string `yaml:"allowed_chain_types"`  // Empty = all chains allowed
-	AllowedSigners    []string `yaml:"allowed_signers"`      // Empty = all signers allowed
-	AllowedHDWallets  []string `yaml:"allowed_hd_wallets"`   // HD wallet primary addresses (empty = none)
+	AllowedSigners    []string `yaml:"allowed_signers"`      // Signer addresses; empty = none (unless allow_all_signers)
+	AllowedHDWallets  []string `yaml:"allowed_hd_wallets"`  // HD wallet primary addresses; empty = none (unless allow_all_hd_wallets)
 	RateLimit         int      `yaml:"rate_limit"`           // Requests per minute (default: 100)
 	Enabled           bool     `yaml:"enabled"`              // Whether the key is active
 	Admin             bool     `yaml:"admin"`                // Admin keys can approve requests and manage rules
