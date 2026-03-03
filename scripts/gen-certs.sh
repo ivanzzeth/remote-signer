@@ -8,6 +8,7 @@
 # Defaults:
 #   - SAN includes 127.0.0.1, ::1, localhost
 #   - Auto-detects LAN IP and adds it to SAN
+#   - Auto-detects public IP (for VPS deployment) and adds it to SAN
 #   - Extra IPs can be passed as arguments
 #
 # Output directory: ./certs/
@@ -61,10 +62,29 @@ detect_lan_ip() {
     echo "$ip"
 }
 
+# Auto-detect public IP (for VPS deployment; requires outbound HTTPS)
+detect_public_ip() {
+    local ip=""
+    for url in "https://api.ipify.org" "https://ifconfig.me/ip" "https://icanhazip.com"; do
+        ip=$(curl -sSf --max-time 5 "$url" 2>/dev/null | tr -d '\r\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' || true)
+        [ -n "$ip" ] && break
+    done
+    echo "$ip"
+}
+
 LAN_IP=$(detect_lan_ip)
 if [ -n "$LAN_IP" ]; then
     SAN_IPS+=("$LAN_IP")
     info "Detected LAN IP: $LAN_IP"
+fi
+
+PUBLIC_IP=$(detect_public_ip)
+if [ -n "$PUBLIC_IP" ]; then
+    # Avoid duplicate if same as LAN
+    if [[ " ${SAN_IPS[*]} " != *" $PUBLIC_IP "* ]]; then
+        SAN_IPS+=("$PUBLIC_IP")
+        info "Detected public IP: $PUBLIC_IP (for VPS/remote access)"
+    fi
 fi
 
 # Add user-specified extra IPs

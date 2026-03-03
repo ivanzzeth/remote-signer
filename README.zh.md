@@ -87,6 +87,8 @@ curl http://localhost:8548/health
 curl --cacert certs/ca.crt --cert certs/client.crt --key certs/client.key https://localhost:8548/health
 ```
 
+服务启动时没有签名者。要添加第一个签名者（导入私钥或 HD 钱包），请使用 TUI：先构建 TUI，用 `admin` 密钥连接（密钥路径在安装向导最后会给出），在 **签名者** 标签页中可创建 keystore（导入私钥）或创建/导入 HD 钱包。详见下方 [添加签名者](#添加签名者)。
+
 ### 手动配置
 
 若需完全手动配置，请参阅 [docs/CONFIGURATION.md](docs/CONFIGURATION.md) 的完整配置说明，并以 `config.example.yaml` 为起点。
@@ -95,7 +97,7 @@ curl --cacert certs/ca.crt --cert certs/client.crt --key certs/client.key https:
 
 服务启动时没有签名者，需在启动后添加：
 
-- **TUI**：`go build -o remote-signer-tui ./cmd/tui`，使用 `admin` 密钥连接，在「签名者」标签页创建 keystore 或 HD 钱包
+- **TUI**（推荐）：使用 `-api-key-file data/admin_private.pem` 无需粘贴密钥。示例（明文 HTTP）：`./remote-signer-tui -api-key-id admin -api-key-file data/admin_private.pem -url http://localhost:8548`。**若安装时启用了 TLS**，需使用 `https://` 并指定 CA（mTLS 时还需客户端证书与私钥），例如 `-url https://localhost:8548 -tls-ca ./certs/ca.crt`，或 mTLS：`-tls-ca ./certs/ca.crt -tls-cert ./certs/client.crt -tls-key ./certs/client.key`。详见 [docs/TUI.md](docs/TUI.md#tls--mtls)。安装完成后（Docker 模式）可选择「Open TUI to add signers now?」直接启动 TUI。在 **签名者** 标签页可创建 keystore（导入私钥）或创建/导入 HD 钱包。
 - **API**：`POST /api/v1/evm/signers`（仅 admin）。见 [docs/API.md](docs/API.md)
 - **配置文件**：编辑配置中的 `chains.evm.signers.private_keys`。见 [docs/CONFIGURATION.md](docs/CONFIGURATION.md#chains-evm)
 

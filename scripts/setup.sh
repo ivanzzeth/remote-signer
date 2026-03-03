@@ -82,7 +82,8 @@ download_tui_from_release() {
     suffix="$(tui_release_asset_suffix)" || return 1
     url="https://github.com/${REMOTE_SIGNER_REPO}/releases/latest/download/remote-signer-tui-${suffix}"
     dest="$PROJECT_DIR/remote-signer-tui"
-    if curl -sSLf -o "$dest" "$url" 2>/dev/null && [ -s "$dest" ]; then
+    log_info "Downloading TUI binary (${suffix})..."
+    if curl -SLf -# -o "$dest" "$url" && [ -s "$dest" ]; then
         chmod +x "$dest"
         return 0
     fi
@@ -618,7 +619,7 @@ step_done() {
     # --- Add signer ---
     # Prefer downloading TUI from GitHub Release (public repo); fall back to local go build
     TUI_BIN="$PROJECT_DIR/remote-signer-tui"
-    if ! download_tui_from_release 2>/dev/null; then
+    if ! download_tui_from_release; then
         if command -v go &>/dev/null && [ -f "$PROJECT_DIR/go.mod" ]; then
             (cd "$PROJECT_DIR" && go build -o remote-signer-tui ./cmd/tui 2>/dev/null) || true
         fi
@@ -626,24 +627,26 @@ step_done() {
 
     echo -e "${CYAN}Add a signer (after server is running):${NC}"
     echo ""
-    echo "  Via TUI:"
+    echo "  Via TUI (recommended: use -api-key-file to avoid paste):"
     if [ -x "$TUI_BIN" ]; then
-        echo "    REMOTE_SIGNER_PRIVATE_KEY=$ADMIN_PRIVATE_KEY ./remote-signer-tui \\"
+        echo "    ./remote-signer-tui -api-key-id admin -api-key-file data/admin_private.pem \\"
     else
         echo "    go build -o remote-signer-tui ./cmd/tui   # requires Go 1.24+ (https://go.dev/dl/)"
-        echo "    REMOTE_SIGNER_PRIVATE_KEY=$ADMIN_PRIVATE_KEY ./remote-signer-tui \\"
+        echo "    ./remote-signer-tui -api-key-id admin -api-key-file data/admin_private.pem \\"
     fi
-    echo "      -url ${SCHEME}://localhost:${PORT} \\"
-    echo "      -api-key-id admin"
     if [ "$TLS_CHOICE" = "3" ]; then
+        echo "      -url ${SCHEME}://localhost:${PORT} \\"
         echo "      -tls-ca ./certs/ca.crt \\"
         echo "      -tls-cert ./certs/client.crt \\"
         echo "      -tls-key ./certs/client.key"
     elif [ "$TLS_CHOICE" = "2" ]; then
+        echo "      -url ${SCHEME}://localhost:${PORT} \\"
         echo "      -tls-ca ./certs/ca.crt"
+    else
+        echo "      -url ${SCHEME}://localhost:${PORT}"
     fi
     echo ""
-    echo "    Then use the Signers tab to create a keystore or HD wallet."
+    echo "    Or set REMOTE_SIGNER_PRIVATE_KEY and omit -api-key-file. Then use Signers tab to add keystore or HD wallet."
     echo ""
     if [ ! -x "$TUI_BIN" ]; then
         echo "  (No Go? Add signers via API instead — see docs/API.md)"
@@ -673,7 +676,7 @@ step_done() {
     echo ""
 }
 
-# Ask to start the server now and exec deploy.sh (one-click deploy)
+# Ask to start the server, then optionally launch TUI to add signers (one-click deploy + import flow)
 start_server_now() {
     echo ""
     read -rp "Start the server now? (Y/n): " START_NOW
@@ -682,12 +685,69 @@ start_server_now() {
         log_info "Starting server..."
         cd "$PROJECT_DIR"
         if [ "$DEPLOY_MODE" = "docker" ]; then
-            exec "$SCRIPT_DIR/deploy.sh" run --no-screen
+            "$SCRIPT_DIR/deploy.sh" run --no-screen
         else
-            exec "$SCRIPT_DIR/deploy.sh" local-run
+            "$SCRIPT_DIR/deploy.sh" local-run
+        fi
+        # Offer to open TUI so user can add signers without pasting key
+        echo ""
+        read -rp "Open TUI to add signers now? (Y/n): " OPEN_TUI
+        OPEN_TUI="${OPEN_TUI:-Y}"
+        if [ "$OPEN_TUI" = "y" ] || [ "$OPEN_TUI" = "Y" ]; then
+            if [ -x "$TUI_BIN" ] && [ -f "$PROJECT_DIR/data/admin_private.pem" ]; then
+                log_info "Launching TUI (use Signers tab to create keystore or HD wallet)..."
+                run_tui_for_setup
+            elif [ ! -x "$TUI_BIN" ]; then
+                log_warn "TUI binary not found. Build with: go build -o remote-signer-tui ./cmd/tui"
+                log_info "When ready, run: ./scripts/deploy.sh $([ "$DEPLOY_MODE" = "docker" ] && echo 'run --no-screen' || echo local-run)"
+            else
+                log_warn "data/admin_private.pem not found; run setup again or use TUI with REMOTE_SIGNER_PRIVATE_KEY."
+                log_info "When ready, run: ./scripts/deploy.sh $([ "$DEPLOY_MODE" = "docker" ] && echo 'run --no-screen' || echo local-run)"
+            fi
+        else
+            log_info "When ready, run: ./scripts/deploy.sh $([ "$DEPLOY_MODE" = "docker" ] && echo 'run --no-screen' || echo local-run)"
+        fi
+    else
+        log_info "When ready, run: ./scripts/deploy.sh $([ "$DEPLOY_MODE" = "docker" ] && echo 'run --no-screen' || echo local-run)"
+    fi
+}
+
+# Read port from config file (server.port); default 8548
+tui_port_from_config() {
+    local cfg="${1:-$CONFIG_FILE}"
+    local p
+    if [ -n "$cfg" ] && [ -f "$PROJECT_DIR/$cfg" ]; then
+        p=$(grep '^\s*port:' "$PROJECT_DIR/$cfg" 2>/dev/null | head -1 | sed 's/.*port:\s*//' | tr -d ' "')
+    fi
+    echo "${p:-8548}"
+}
+
+# Run TUI with -api-key-file; URL and TLS flags are built from the same config the server uses
+run_tui_for_setup() {
+    cd "$PROJECT_DIR"
+    # Use port and TLS from the config we wrote (so TUI matches server)
+    local tui_port
+    tui_port=$(tui_port_from_config "$CONFIG_FILE")
+    local tui_scheme="http"
+    local tui_tls_ca="" tui_tls_cert="" tui_tls_key=""
+    if [ -f "$PROJECT_DIR/$CONFIG_FILE" ] && grep -A1 '^\s*tls:' "$PROJECT_DIR/$CONFIG_FILE" 2>/dev/null | grep -q 'enabled:\s*true'; then
+        tui_scheme="https"
+        tui_tls_ca="-tls-ca ./certs/ca.crt"
+        if grep -A5 '^\s*tls:' "$PROJECT_DIR/$CONFIG_FILE" 2>/dev/null | grep -q 'client_auth:\s*true'; then
+            tui_tls_cert="-tls-cert ./certs/client.crt"
+            tui_tls_key="-tls-key ./certs/client.key"
         fi
     fi
-    log_info "When ready, run: ./scripts/deploy.sh $([ "$DEPLOY_MODE" = "docker" ] && echo 'run --no-screen' || echo local-run)"
+    local tui_url="${tui_scheme}://localhost:${tui_port}"
+    # Build and run the exact command that matches server config
+    if [ -n "$tui_tls_key" ]; then
+        exec "$TUI_BIN" -api-key-id admin -api-key-file data/admin_private.pem -url "$tui_url" \
+            $tui_tls_ca $tui_tls_cert $tui_tls_key
+    elif [ -n "$tui_tls_ca" ]; then
+        exec "$TUI_BIN" -api-key-id admin -api-key-file data/admin_private.pem -url "$tui_url" $tui_tls_ca
+    else
+        exec "$TUI_BIN" -api-key-id admin -api-key-file data/admin_private.pem -url "$tui_url"
+    fi
 }
 
 # === Main Flow ================================================================
