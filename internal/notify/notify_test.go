@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ivanzzeth/remote-signer/internal/logger"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -221,6 +222,7 @@ func TestSend_Success(t *testing.T) {
 func TestSend_ChannelFull(t *testing.T) {
 	// Create a service with a zero-capacity channel to force the "full" path
 	svc := &NotifyService{
+		logger:  logger.GetGlobal(),
 		msgChan: make(chan notifyMessage), // unbuffered, no consumer => full
 	}
 	ch := &Channel{Slack: []string{"C1"}}
@@ -265,6 +267,7 @@ func TestSendWithPriority_Success(t *testing.T) {
 
 func TestSendWithPriority_ChannelFull(t *testing.T) {
 	svc := &NotifyService{
+		logger:  logger.GetGlobal(),
 		msgChan: make(chan notifyMessage),
 	}
 	ch := &Channel{Slack: []string{"C1"}}
