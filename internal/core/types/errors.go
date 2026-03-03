@@ -22,6 +22,10 @@ var (
 	ErrPendingApproval    = errors.New("pending manual approval")
 	ErrRequestExpired     = errors.New("request expired")
 
+	// Signer state errors
+	ErrSignerLocked    = errors.New("signer is locked")
+	ErrSignerNotLocked = errors.New("signer is not locked")
+
 	// Signer creation errors
 	ErrMissingSignerType              = errors.New("signer type is required")
 	ErrUnsupportedSignerType          = errors.New("unsupported signer type")
@@ -94,4 +98,9 @@ func IsInvalidPayload(err error) bool {
 // IsPendingApproval checks if the error indicates pending approval
 func IsPendingApproval(err error) bool {
 	return errors.Is(err, ErrPendingApproval)
+}
+
+// IsSignerLocked checks if the error is a signer locked error
+func IsSignerLocked(err error) bool {
+	return errors.Is(err, ErrSignerLocked)
 }

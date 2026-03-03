@@ -49,7 +49,13 @@ type SignerResponse struct {
 	Address     string           `json:"address"`
 	Type        string           `json:"type"`
 	Enabled     bool             `json:"enabled"`
+	Locked      bool             `json:"locked"`
 	AllowedKeys []AllowedKeyInfo `json:"allowed_keys,omitempty"`
+}
+
+// UnlockSignerRequest represents the request to unlock a locked signer
+type UnlockSignerRequest struct {
+	Password string `json:"password"`
 }
 
 // ListSignersResponse represents the response for listing signers
@@ -243,6 +249,7 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 			Address: s.Address,
 			Type:    s.Type,
 			Enabled: s.Enabled,
+			Locked:  s.Locked,
 		}
 		if accessData != nil {
 			signers[i].AllowedKeys = accessData.keysForSigner(s.Address)
@@ -369,6 +376,122 @@ func (h *SignerHandler) createSigner(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.writeJSON(w, resp, http.StatusCreated)
+}
+
+// HandleSignerAction handles /api/v1/evm/signers/{address}/{action}
+func (h *SignerHandler) HandleSignerAction(w http.ResponseWriter, r *http.Request) {
+	apiKey := middleware.GetAPIKey(r.Context())
+	if apiKey == nil {
+		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if !apiKey.Admin {
+		h.writeError(w, "admin access required", http.StatusForbidden)
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse path: /api/v1/evm/signers/{address}/{action}
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/evm/signers/")
+	parts := strings.SplitN(path, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		h.writeError(w, "invalid path: expected /api/v1/evm/signers/{address}/{action}", http.StatusBadRequest)
+		return
+	}
+
+	address := parts[0]
+	action := parts[1]
+
+	switch action {
+	case "unlock":
+		h.handleUnlock(w, r, address)
+	case "lock":
+		h.handleLock(w, r, address)
+	default:
+		h.writeError(w, "unknown action: "+action, http.StatusBadRequest)
+	}
+}
+
+// handleUnlock handles POST /api/v1/evm/signers/{address}/unlock
+func (h *SignerHandler) handleUnlock(w http.ResponseWriter, r *http.Request, address string) {
+	var req UnlockSignerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Password == "" {
+		h.writeError(w, "password is required", http.StatusBadRequest)
+		return
+	}
+
+	info, err := h.signerManager.UnlockSigner(r.Context(), address, req.Password)
+	if err != nil {
+		if types.IsSignerNotFound(err) {
+			h.writeError(w, "signer not found", http.StatusNotFound)
+			return
+		}
+		if err == types.ErrSignerNotLocked {
+			h.writeError(w, "signer is already unlocked", http.StatusConflict)
+			return
+		}
+		h.logger.Error("failed to unlock signer",
+			slog.String("address", address),
+			slog.String("error", err.Error()),
+		)
+		h.writeError(w, "failed to unlock signer: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	h.logger.Info("signer unlocked via API",
+		slog.String("address", address),
+		slog.String("type", info.Type),
+	)
+
+	h.writeJSON(w, SignerResponse{
+		Address: info.Address,
+		Type:    info.Type,
+		Enabled: info.Enabled,
+		Locked:  info.Locked,
+	}, http.StatusOK)
+}
+
+// handleLock handles POST /api/v1/evm/signers/{address}/lock
+func (h *SignerHandler) handleLock(w http.ResponseWriter, r *http.Request, address string) {
+	info, err := h.signerManager.LockSigner(r.Context(), address)
+	if err != nil {
+		if types.IsSignerNotFound(err) {
+			h.writeError(w, "signer not found", http.StatusNotFound)
+			return
+		}
+		if types.IsSignerLocked(err) {
+			h.writeError(w, "signer is already locked", http.StatusConflict)
+			return
+		}
+		h.logger.Error("failed to lock signer",
+			slog.String("address", address),
+			slog.String("error", err.Error()),
+		)
+		h.writeError(w, "failed to lock signer: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	h.logger.Info("signer locked via API",
+		slog.String("address", address),
+		slog.String("type", info.Type),
+	)
+
+	h.writeJSON(w, SignerResponse{
+		Address: info.Address,
+		Type:    info.Type,
+		Enabled: info.Enabled,
+		Locked:  info.Locked,
+	}, http.StatusOK)
 }
 
 // writeJSON writes a JSON response

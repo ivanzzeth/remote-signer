@@ -127,6 +127,18 @@ func (m *mockSignerManager) HDWalletManager() (evmchain.HDWalletManager, error) 
 	return m.hdWalletMgr, nil
 }
 
+func (m *mockSignerManager) DiscoverLockedSigners(_ context.Context) error {
+	return nil
+}
+
+func (m *mockSignerManager) UnlockSigner(_ context.Context, _ string, _ string) (*types.SignerInfo, error) {
+	return nil, fmt.Errorf("not implemented in mock")
+}
+
+func (m *mockSignerManager) LockSigner(_ context.Context, _ string) (*types.SignerInfo, error) {
+	return nil, fmt.Errorf("not implemented in mock")
+}
+
 // --- Test helpers ---
 
 func newTestHDWalletHandler(t *testing.T, sm evmchain.SignerManager) *HDWalletHandler {

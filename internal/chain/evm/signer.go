@@ -95,12 +95,18 @@ func (r *SignerRegistry) Provider(t types.SignerType) (SignerProvider, bool) {
 	return p, ok
 }
 
-// SignerCount returns the number of registered signers.
+// SignerCount returns the number of unlocked (usable) signers.
 func (r *SignerRegistry) SignerCount() int {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	return len(r.signers)
+	count := 0
+	for _, s := range r.signers {
+		if s != nil {
+			count++
+		}
+	}
+	return count
 }
 
 // Close closes all registered providers (zeroize keys, cleanup).
@@ -217,6 +223,96 @@ func NewSignerRegistryWithProvider(cfg SignerConfig, provider PasswordProvider) 
 	return registry, nil
 }
 
+// RegisterLockedSigner registers a signer as locked (nil signer pointer).
+func (r *SignerRegistry) RegisterLockedSigner(address string, info types.SignerInfo) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	addrKey := normalizeAddress(address)
+	if _, exists := r.info[addrKey]; exists {
+		return types.ErrAlreadyExists
+	}
+
+	info.Locked = true
+	info.Enabled = false
+	r.signers[addrKey] = nil
+	r.info[addrKey] = info
+	return nil
+}
+
+// UnlockSigner replaces nil signer with real signer, sets Locked=false, Enabled=true.
+func (r *SignerRegistry) UnlockSigner(address string, signer *ethsig.Signer) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	addrKey := normalizeAddress(address)
+	info, exists := r.info[addrKey]
+	if !exists {
+		return types.ErrSignerNotFound
+	}
+	if !info.Locked {
+		return types.ErrSignerNotLocked
+	}
+
+	r.signers[addrKey] = signer
+	info.Locked = false
+	info.Enabled = true
+	r.info[addrKey] = info
+	return nil
+}
+
+// LockSigner sets an unlocked signer to locked state (nil signer, Locked=true, Enabled=false).
+func (r *SignerRegistry) LockSigner(address string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	addrKey := normalizeAddress(address)
+	info, exists := r.info[addrKey]
+	if !exists {
+		return types.ErrSignerNotFound
+	}
+	if info.Locked {
+		return types.ErrSignerLocked
+	}
+
+	r.signers[addrKey] = nil
+	info.Locked = true
+	info.Enabled = false
+	r.info[addrKey] = info
+	return nil
+}
+
+// IsLocked returns true if signer exists but is locked.
+func (r *SignerRegistry) IsLocked(address string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	addrKey := normalizeAddress(address)
+	info, exists := r.info[addrKey]
+	if !exists {
+		return false
+	}
+	return info.Locked
+}
+
+// GetSignerInfo returns the SignerInfo for a given address.
+func (r *SignerRegistry) GetSignerInfo(address string) (types.SignerInfo, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	addrKey := normalizeAddress(address)
+	info, exists := r.info[addrKey]
+	return info, exists
+}
+
+// TotalCount returns total signer count (locked + unlocked).
+func (r *SignerRegistry) TotalCount() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	return len(r.info)
+}
+
 // GetSigner returns the signer for the given address
 func (r *SignerRegistry) GetSigner(address string) (*ethsig.Signer, error) {
 	r.mu.RLock()
@@ -227,16 +323,19 @@ func (r *SignerRegistry) GetSigner(address string) (*ethsig.Signer, error) {
 	if !exists {
 		return nil, types.ErrSignerNotFound
 	}
+	if signer == nil {
+		return nil, types.ErrSignerLocked
+	}
 	return signer, nil
 }
 
-// HasSigner checks if a signer exists for the given address
+// HasSigner checks if a signer exists for the given address (including locked signers).
 func (r *SignerRegistry) HasSigner(address string) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	addrKey := normalizeAddress(address)
-	_, exists := r.signers[addrKey]
+	_, exists := r.info[addrKey]
 	return exists
 }
 

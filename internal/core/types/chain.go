@@ -61,6 +61,7 @@ type ParsedPayload struct {
 // SignerInfo describes a signer
 type SignerInfo struct {
 	Address string `json:"address"`
-	Type    string `json:"type"` // "private_key", "keystore"
+	Type    string `json:"type"`   // "private_key", "keystore", "hd_wallet"
 	Enabled bool   `json:"enabled"`
+	Locked  bool   `json:"locked"` // true = exists but not usable until unlocked
 }

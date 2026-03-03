@@ -10,9 +10,9 @@ import { HttpTransport } from "../transport";
 
 export interface SignerInfo {
   address: string;
-  chain_type: string;
+  type: string;
   enabled: boolean;
-  source: string; // "config" | "api"
+  locked: boolean;
 }
 
 export interface ListSignersFilter {
@@ -32,6 +32,24 @@ export interface CreateSignerRequest {
 export interface CreateSignerResponse {
   address: string;
   message: string;
+}
+
+export interface UnlockSignerRequest {
+  password: string;
+}
+
+export interface UnlockSignerResponse {
+  address: string;
+  type: string;
+  enabled: boolean;
+  locked: boolean;
+}
+
+export interface LockSignerResponse {
+  address: string;
+  type: string;
+  enabled: boolean;
+  locked: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -65,6 +83,31 @@ export class EvmSignerService {
       "POST",
       "/api/v1/evm/signers",
       req,
+    );
+  }
+
+  /**
+   * Unlock a locked signer (admin only).
+   */
+  async unlock(
+    address: string,
+    req: UnlockSignerRequest,
+  ): Promise<UnlockSignerResponse> {
+    return this.transport.request<UnlockSignerResponse>(
+      "POST",
+      `/api/v1/evm/signers/${address}/unlock`,
+      req,
+    );
+  }
+
+  /**
+   * Lock an unlocked signer (admin only).
+   */
+  async lock(address: string): Promise<LockSignerResponse> {
+    return this.transport.request<LockSignerResponse>(
+      "POST",
+      `/api/v1/evm/signers/${address}/lock`,
+      null,
     );
   }
 }

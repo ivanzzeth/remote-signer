@@ -177,6 +177,8 @@ type SignerService struct {
 	mu         sync.RWMutex
 	ListFunc   func(ctx context.Context, filter *evm.ListSignersFilter) (*evm.ListSignersResponse, error)
 	CreateFunc func(ctx context.Context, req *evm.CreateSignerRequest) (*evm.Signer, error)
+	UnlockFunc func(ctx context.Context, address string, req *evm.UnlockSignerRequest) (*evm.UnlockSignerResponse, error)
+	LockFunc   func(ctx context.Context, address string) (*evm.LockSignerResponse, error)
 	Calls      map[string][]any
 }
 
@@ -204,6 +206,22 @@ func (m *SignerService) Create(ctx context.Context, req *evm.CreateSignerRequest
 		return m.CreateFunc(ctx, req)
 	}
 	return &evm.Signer{}, nil
+}
+
+func (m *SignerService) Unlock(ctx context.Context, address string, req *evm.UnlockSignerRequest) (*evm.UnlockSignerResponse, error) {
+	m.recordCall("Unlock", address, req)
+	if m.UnlockFunc != nil {
+		return m.UnlockFunc(ctx, address, req)
+	}
+	return &evm.UnlockSignerResponse{}, nil
+}
+
+func (m *SignerService) Lock(ctx context.Context, address string) (*evm.LockSignerResponse, error) {
+	m.recordCall("Lock", address)
+	if m.LockFunc != nil {
+		return m.LockFunc(ctx, address)
+	}
+	return &evm.LockSignerResponse{}, nil
 }
 
 var _ evm.SignerAPI = (*SignerService)(nil)

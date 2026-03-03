@@ -44,6 +44,18 @@ func (m *signerMockSignerManager) HDWalletManager() (evmchain.HDWalletManager, e
 	return nil, fmt.Errorf("not implemented")
 }
 
+func (m *signerMockSignerManager) DiscoverLockedSigners(ctx context.Context) error {
+	return nil
+}
+
+func (m *signerMockSignerManager) UnlockSigner(ctx context.Context, address string, password string) (*types.SignerInfo, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (m *signerMockSignerManager) LockSigner(ctx context.Context, address string) (*types.SignerInfo, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
 // --- Mock APIKeyRepository ---
 
 type mockAPIKeyRepo struct {

@@ -156,6 +156,16 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	chainType := string(types.ChainTypeEVM)
 
 	if err != nil {
+		if types.IsSignerLocked(err) {
+			h.logger.Warn("signer is locked",
+				"signer_address", req.SignerAddress,
+				"sign_type", req.SignType,
+				"chain_id", req.ChainID,
+			)
+			metrics.RecordSignRequestDuration(chainType, req.SignType, metrics.SignOutcomeError, duration)
+			h.writeError(w, fmt.Sprintf("signer is locked: %s — unlock via POST /api/v1/evm/signers/%s/unlock", req.SignerAddress, req.SignerAddress), http.StatusForbidden)
+			return
+		}
 		if types.IsNotFound(err) || types.IsSignerNotFound(err) {
 			h.logger.Warn("signer not found",
 				"signer_address", req.SignerAddress,

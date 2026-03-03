@@ -300,14 +300,26 @@ func run() error {
 		}
 		evmRegistry.RegisterProvider(hdProvider)
 
-		if evmRegistry.SignerCount() == 0 {
-			log.Warn("No signers configured. Add signers via TUI or API after startup.")
-		}
 		defer func() {
 			if err := evmRegistry.Close(); err != nil {
 				log.Error("failed to close signer registry", "error", err)
 			}
 		}()
+
+		// Initialize signer manager for dynamic signer creation
+		evmSignerManager, err = evm.NewSignerManager(evmRegistry, log)
+		if err != nil {
+			return fmt.Errorf("failed to create EVM signer manager: %w", err)
+		}
+
+		// Discover locked signers from disk (keystores and HD wallets not in config)
+		if err := evmSignerManager.DiscoverLockedSigners(context.Background()); err != nil {
+			return fmt.Errorf("failed to discover locked signers: %w", err)
+		}
+
+		if evmRegistry.SignerCount() == 0 && evmRegistry.TotalCount() == 0 {
+			log.Warn("No signers configured. Add signers via TUI or API after startup.")
+		}
 
 		evmAdapter, err := evm.NewEVMAdapter(evmRegistry)
 		if err != nil {
@@ -317,15 +329,12 @@ func run() error {
 		if err := chainRegistry.Register(evmAdapter); err != nil {
 			return fmt.Errorf("failed to register EVM adapter: %w", err)
 		}
-		log.Info("EVM adapter registered",
-			"signers", evmRegistry.SignerCount(),
-		)
 
-		// Initialize signer manager for dynamic signer creation
-		evmSignerManager, err = evm.NewSignerManager(evmRegistry, log)
-		if err != nil {
-			return fmt.Errorf("failed to create EVM signer manager: %w", err)
-		}
+		lockedCount := evmRegistry.TotalCount() - evmRegistry.SignerCount()
+		log.Info("EVM adapter registered",
+			"unlocked", evmRegistry.SignerCount(),
+			"locked", lockedCount,
+		)
 		log.Info("EVM signer manager initialized")
 	}
 

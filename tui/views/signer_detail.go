@@ -135,6 +135,13 @@ func (m *SignerDetailModel) renderDetail() string {
 		enabledStyle = styles.MutedColor
 	}
 
+	lockedStr := "Ready"
+	lockedStyle := styles.SuccessStyle
+	if m.signer.Locked {
+		lockedStr = "Locked"
+		lockedStyle = styles.WarningStyle
+	}
+
 	info := []struct {
 		key   string
 		value string
@@ -142,7 +149,8 @@ func (m *SignerDetailModel) renderDetail() string {
 	}{
 		{"Address", m.signer.Address, lipgloss.NewStyle()},
 		{"Type", m.signer.Type, lipgloss.NewStyle()},
-		{"Status", enabledStr, enabledStyle},
+		{"Lock State", lockedStr, lockedStyle},
+		{"Enabled", enabledStr, enabledStyle},
 	}
 
 	for _, item := range info {
