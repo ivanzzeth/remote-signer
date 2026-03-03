@@ -35,8 +35,9 @@ Usage: $0 [COMMAND] [OPTIONS]
 Docker Commands:
     init        Initialize deployment environment (create directories, generate keys)
     up          Start all services (background mode)
-    run         Start remote-signer interactively (for password input)
-    attach      Reattach to running remote-signer session
+    run         Start remote-signer (use --no-screen for background, no password/screen)
+    run --no-screen   Start in background (no screen; use when no keystore password needed)
+    attach      Reattach to running remote-signer session (only when started with 'run' without --no-screen)
     down        Stop all services
     restart     Restart remote-signer interactively (for password input)
     logs        View service logs
@@ -63,7 +64,8 @@ Examples:
     $0 local-run            # Build & run locally (enter keystore password)
     $0 local-down           # Stop local instance
     $0 status               # Check health (auto-detects TLS)
-    $0 run                  # Start in Docker interactively
+    $0 run                  # Start in Docker with screen (for password input)
+    $0 run --no-screen      # Start in Docker in background (no screen, recommended after setup)
     $0 logs -f              # Follow Docker logs
     $0 down                 # Stop Docker services
 EOF
@@ -233,6 +235,34 @@ start_services() {
     log_info "Checking service status..."
     sleep 3
     docker compose ps
+}
+
+# =============================================================================
+# Start remote-signer in background (no screen, no TTY — for setup when no keystore password)
+# =============================================================================
+run_no_screen() {
+    log_info "Starting remote-signer in background (no screen)..."
+    cd "$PROJECT_DIR"
+
+    if [ ! -f ".env" ]; then
+        log_error ".env file not found! Run '$0 init' first."
+        exit 1
+    fi
+
+    if [ ! -f "config.yaml" ]; then
+        log_error "config.yaml not found! Run '$0 init' first."
+        exit 1
+    fi
+
+    log_info "Building image..."
+    docker compose build remote-signer
+
+    log_info "Starting postgres and remote-signer..."
+    docker compose up -d
+
+    log_info "Server is running in background."
+    log_info "View logs: $0 logs -f"
+    log_info "Status:   $0 status"
 }
 
 # =============================================================================
@@ -649,7 +679,12 @@ case "${1:-}" in
         start_services
         ;;
     run)
-        run_interactive
+        shift
+        if [ "${1:-}" = "--no-screen" ] || [ "${1:-}" = "-n" ]; then
+            run_no_screen
+        else
+            run_interactive
+        fi
         ;;
     attach)
         screen -r remote-signer
