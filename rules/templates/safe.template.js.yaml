@@ -1,0 +1,375 @@
+# Safe template (evm_js) — generic, composable.
+# Filename *.template.js.yaml = template fully driven by evm_js rules (no evm_solidity_expression).
+# Validates SafeTx (typed_data) and execTransaction (transaction): allowed Safe(s), value=0, CALL only,
+# inner "to" in allowed_safe_tx_to_addresses. Does NOT validate inner calldata; delegate to other rules
+# (e.g. ERC20, multisend) via delegate_to or script-returned delegate_to (e.g. from delegate_to_by_target).
+# Uses engine-injected: eq, toChecksum, isAddress, selector, fail, ok.
+
+variables:
+  - name: chain_id
+    type: string
+    description: "Chain ID (e.g. 1 for mainnet)"
+    required: true
+  - name: allowed_safe_addresses
+    type: address_list
+    description: "Comma-separated allowed Safe addresses (verifyingContract / tx to)"
+    required: true
+  - name: allowed_safe_tx_to_addresses
+    type: address_list
+    description: "Comma-separated allowed inner 'to' addresses (each can be routed to a different rule)"
+    required: true
+  - name: delegate_to
+    type: string
+    description: "Default target rule ID when delegating (optional)"
+    required: false
+  - name: delegate_to_by_target
+    type: string
+    description: "Optional 'addr:rule_id,addr:rule_id' to route by inner to (overrides delegate_to per address)"
+    required: false
+  - name: delegate_mode
+    type: string
+    description: "Delegation mode: single (default) or per_item"
+    required: false
+  - name: test_inner_to
+    type: address
+    description: "Single allowed inner 'to' address for test cases (first of allowed_safe_tx_to_addresses)"
+    required: false
+
+test_variables:
+  chain_id: "1"
+  allowed_safe_addresses: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+  allowed_safe_tx_to_addresses: "0xdAC17F958D2ee523a2206206994597C13D831ec7,0x4B20993Bc481177ec7E8f571ceCaE8A9e22C02db"
+  delegate_to: ""
+  delegate_mode: "single"
+  test_inner_to: "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+
+rules:
+  # Blocklist: block SafeTx with DELEGATECALL (operation !== 0) so rejection reason reaches the client.
+  - name: "Safe block DELEGATECALL"
+    type: "evm_js"
+    mode: "blocklist"
+    enabled: true
+    chain_id: "${chain_id}"
+    description: "Block SafeTx with DELEGATECALL (operation must be CALL)"
+    config:
+      sign_type_filter: "typed_data,transaction"
+      script: |
+        function validate(input) {
+          if (input.sign_type === 'typed_data') {
+            var td = input.typed_data;
+            if (!td || td.primaryType !== 'SafeTx') return ok();
+            var safeSet = parseList(config.allowed_safe_addresses);
+            if (!safeSet.length) return ok();
+            var chainId = parseInt(config.chain_id, 10) || 0;
+            var domain = td.domain || {};
+            var msg = td.message || {};
+            var vc = (domain.verifyingContract || '').trim();
+            if (!isAddress(vc)) return ok();
+            var vcChecksum = toChecksum(vc);
+            if (!inSet(vcChecksum, safeSet)) return ok();
+            if (Number(domain.chainId) !== chainId) return ok();
+            if (String(msg.operation !== undefined ? msg.operation : '') !== '0') return fail('only CALL allowed');
+            return ok();
+          }
+          return ok();
+        }
+        function parseList(s) {
+          if (!s || typeof s !== 'string') return [];
+          var list = [];
+          s.split(',').forEach(function(a) { var t = a.trim(); if (t && isAddress(t)) list.push(toChecksum(t)); });
+          return list;
+        }
+        function inSet(addr, set) {
+          var c = toChecksum((addr || '').trim());
+          for (var i = 0; i < set.length; i++) { if (eq(c, set[i])) return true; }
+          return false;
+        }
+    test_cases:
+      - name: "CALL operation should pass (not blocked)"
+        input:
+          sign_type: "typed_data"
+          chain_id: "${chain_id}"
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          typed_data:
+            primaryType: "SafeTx"
+            domain:
+              chainId: "${chain_id}"
+              verifyingContract: "${allowed_safe_addresses}"
+            message:
+              to: "${test_inner_to}"
+              value: "0"
+              data: "0x"
+              operation: "0"
+              gasPrice: "0"
+              gasToken: "0x0000000000000000000000000000000000000000"
+              refundReceiver: "0x0000000000000000000000000000000000000000"
+              nonce: "0"
+        expect_pass: true
+      - name: "DELEGATECALL operation should be blocked"
+        input:
+          sign_type: "typed_data"
+          chain_id: "${chain_id}"
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          typed_data:
+            primaryType: "SafeTx"
+            domain:
+              chainId: "${chain_id}"
+              verifyingContract: "${allowed_safe_addresses}"
+            message:
+              to: "${test_inner_to}"
+              value: "0"
+              data: "0x"
+              operation: "1"
+              gasPrice: "0"
+              gasToken: "0x0000000000000000000000000000000000000000"
+              refundReceiver: "0x0000000000000000000000000000000000000000"
+              nonce: "0"
+        expect_pass: false
+        expect_reason: "only CALL allowed"
+
+  - name: "Safe SafeTx and execTransaction"
+    type: "evm_js"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "${chain_id}"
+    description: "Validate SafeTx/execTransaction; inner to in allowlist; return payload for delegation to target rules"
+    config:
+      delegate_to: "${delegate_to}"
+      delegate_mode: "${delegate_mode}"
+      script: |
+        function validate(input) {
+          var safeSet = parseList(config.allowed_safe_addresses);
+          var toSet = parseList(config.allowed_safe_tx_to_addresses);
+          if (!safeSet.length) return fail('missing or invalid allowed_safe_addresses');
+          if (!toSet.length) return fail('missing or invalid allowed_safe_tx_to_addresses');
+          var chainId = parseInt(config.chain_id, 10) || 0;
+
+          if (input.sign_type === 'typed_data') {
+            return validateSafeTx(input, safeSet, toSet, chainId);
+          }
+          if (input.sign_type === 'transaction') {
+            return validateExecTransaction(input, safeSet, toSet, chainId);
+          }
+          return fail('sign_type must be typed_data or transaction');
+        }
+
+        function parseList(s) {
+          if (!s || typeof s !== 'string') return [];
+          var list = [];
+          s.split(',').forEach(function(a) { var t = a.trim(); if (t && isAddress(t)) list.push(toChecksum(t)); });
+          return list;
+        }
+
+        function inSet(addr, set) {
+          var c = toChecksum((addr || '').trim());
+          for (var i = 0; i < set.length; i++) { if (eq(c, set[i])) return true; }
+          return false;
+        }
+
+        function resolveDelegateTo(innerToChecksum) {
+          var byTarget = (config.delegate_to_by_target || '').trim();
+          if (!byTarget) return (config.delegate_to || '').trim();
+          var map = {};
+          byTarget.split(',').forEach(function(pair) {
+            var idx = pair.indexOf(':');
+            if (idx > 0) {
+              var addr = pair.slice(0, idx).trim();
+              var ruleId = pair.slice(idx + 1).trim();
+              if (isAddress(addr) && ruleId) map[toChecksum(addr)] = ruleId;
+            }
+          });
+          return map[innerToChecksum] || (config.delegate_to || '').trim();
+        }
+
+        function buildPayload(signer, chainId, innerTo, innerData) {
+          innerData = innerData || '0x';
+          return {
+            sign_type: 'transaction',
+            chain_id: chainId,
+            signer: signer,
+            transaction: { from: signer, to: innerTo, value: '0x0', data: innerData }
+          };
+        }
+
+        function validateSafeTx(input, safeSet, toSet, chainId) {
+          var td = input.typed_data;
+          if (!td || td.primaryType !== 'SafeTx') return fail('not SafeTx');
+          var domain = td.domain || {};
+          var msg = td.message || {};
+          var vc = (domain.verifyingContract || '').trim();
+          if (!isAddress(vc)) return fail('invalid verifyingContract');
+          var vcChecksum = toChecksum(vc);
+          if (!inSet(vcChecksum, safeSet)) return fail('verifyingContract must be allowed Safe');
+          if (Number(domain.chainId) !== chainId) return fail('chainId mismatch');
+          if (String(msg.value !== undefined ? msg.value : '') !== '0') return fail('value must be zero');
+          if (String(msg.operation !== undefined ? msg.operation : '') !== '0') return fail('only CALL allowed');
+          var gasPrice = String(msg.gasPrice !== undefined ? msg.gasPrice : '');
+          if (gasPrice !== '0') return fail('gasPrice must be zero');
+          var gasToken = (msg.gasToken || '').toString().toLowerCase();
+          if (gasToken !== '0' && gasToken !== '0x0000000000000000000000000000000000000000') return fail('gasToken must be zero');
+          var refundReceiver = (msg.refundReceiver || '').toString().toLowerCase();
+          if (refundReceiver !== '0' && refundReceiver !== '0x0000000000000000000000000000000000000000') return fail('refundReceiver must be zero');
+          var innerTo = (msg.to || '').trim();
+          if (!isAddress(innerTo)) return fail('invalid inner to');
+          if (!inSet(toChecksum(innerTo), toSet)) return fail('inner to must be in allowed_safe_tx_to_addresses');
+          var data = msg.data || '0x';
+          var payload = buildPayload(vcChecksum, chainId, toChecksum(innerTo), data);
+          var delegateTo = resolveDelegateTo(toChecksum(innerTo));
+          if (delegateTo) return { valid: true, payload: payload, delegate_to: delegateTo };
+          return ok();
+        }
+
+        function parseExecTxData(dataHex) {
+          var raw = (dataHex || '').replace(/^0x/, '');
+          if (raw.length < 136) return { err: 'data too short' };
+          var valueHex = raw.slice(72, 136);
+          var valueZero = valueHex === '0000000000000000000000000000000000000000000000000000000000000000';
+          var opHex = raw.slice(262, 264);
+          var operationCALL = opHex === '00';
+          var dataOffset = parseInt(raw.slice(136, 200), 16);
+          // +8 accounts for the 4-byte function selector in hex (raw includes selector)
+          var base = dataOffset * 2 + 8;
+          if (base + 64 > raw.length) return { err: 'invalid data offset', valueZero: valueZero, operationCALL: operationCALL };
+          var lenHex = raw.slice(base, base + 64);
+          var innerLen = parseInt(lenHex, 16);
+          var innerStart = base + 64;
+          if (innerStart + innerLen * 2 > raw.length) return { err: 'invalid inner data length', valueZero: valueZero, operationCALL: operationCALL };
+          var innerHex = '0x' + raw.slice(innerStart, innerStart + innerLen * 2);
+          var toHex = '0x' + raw.slice(8 + 24, 8 + 64);
+          return { valueZero: valueZero, operationCALL: operationCALL, innerHex: innerHex, innerTo: toHex };
+        }
+
+        function validateExecTransaction(input, safeSet, toSet, chainId) {
+          var tx = input.transaction;
+          if (!tx || !tx.to) return fail('missing transaction or to');
+          if (!isAddress(tx.to)) return fail('invalid to');
+          var txToChecksum = toChecksum(tx.to);
+          if (!inSet(txToChecksum, safeSet)) return fail('txTo must be allowed Safe');
+          if (input.chain_id !== chainId) return fail('chainId mismatch');
+          var data = (tx.data || '0x').replace(/^0x/, '');
+          if (data.length < 8) return ok();
+          var sel = '0x' + data.slice(0, 8);
+          var execSel = selector('execTransaction(address,uint256,bytes,uint8,uint256,uint256,uint256,address,address,bytes)');
+          if (!eq(sel, execSel)) return fail('not execTransaction');
+          var parsed = parseExecTxData('0x' + data);
+          if (parsed.err) return fail(parsed.err);
+          if (!parsed.valueZero) return fail('value must be zero');
+          if (!parsed.operationCALL) return fail('only CALL allowed');
+          if (!parsed.innerHex || parsed.innerHex === '0x') return ok();
+          var innerToChecksum = toChecksum(parsed.innerTo);
+          if (!inSet(innerToChecksum, toSet)) return fail('inner to must be in allowed_safe_tx_to_addresses');
+          var payload = buildPayload(txToChecksum, chainId, innerToChecksum, parsed.innerHex);
+          var delegateTo = resolveDelegateTo(innerToChecksum);
+          if (delegateTo) return { valid: true, payload: payload, delegate_to: delegateTo };
+          return ok();
+        }
+      sign_type_filter: "typed_data,transaction"
+    test_cases:
+      - name: "SafeTx pass: verifyingContract and inner to in allowlists"
+        input:
+          sign_type: "typed_data"
+          chain_id: "${chain_id}"
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          typed_data:
+            primaryType: "SafeTx"
+            domain:
+              chainId: "${chain_id}"
+              verifyingContract: "${allowed_safe_addresses}"
+            message:
+              to: "${test_inner_to}"
+              value: "0"
+              data: "0x"
+              operation: "0"
+              safeTxGas: "0"
+              baseGas: "0"
+              gasPrice: "0"
+              gasToken: "0x0000000000000000000000000000000000000000"
+              refundReceiver: "0x0000000000000000000000000000000000000000"
+              nonce: "0"
+        expect_pass: true
+      - name: "SafeTx reject: wrong verifyingContract"
+        input:
+          sign_type: "typed_data"
+          chain_id: "${chain_id}"
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          typed_data:
+            primaryType: "SafeTx"
+            domain:
+              chainId: "${chain_id}"
+              verifyingContract: "0x000000000000000000000000000000000000dEaD"
+            message:
+              to: "${test_inner_to}"
+              value: "0"
+              data: "0x"
+              operation: "0"
+              gasPrice: "0"
+              gasToken: "0x0000000000000000000000000000000000000000"
+              refundReceiver: "0x0000000000000000000000000000000000000000"
+              nonce: "0"
+        expect_pass: false
+        expect_reason: "verifyingContract must be allowed Safe"
+      - name: "SafeTx reject: inner to not in allowed_safe_tx_to_addresses"
+        input:
+          sign_type: "typed_data"
+          chain_id: "${chain_id}"
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          typed_data:
+            primaryType: "SafeTx"
+            domain:
+              chainId: "${chain_id}"
+              verifyingContract: "${allowed_safe_addresses}"
+            message:
+              to: "0x000000000000000000000000000000000000dEaD"
+              value: "0"
+              data: "0x"
+              operation: "0"
+              gasPrice: "0"
+              gasToken: "0x0000000000000000000000000000000000000000"
+              refundReceiver: "0x0000000000000000000000000000000000000000"
+              nonce: "0"
+        expect_pass: false
+        expect_reason: "inner to must be in allowed_safe_tx_to_addresses"
+      - name: "SafeTx reject: value non-zero"
+        input:
+          sign_type: "typed_data"
+          chain_id: "${chain_id}"
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          typed_data:
+            primaryType: "SafeTx"
+            domain:
+              chainId: "${chain_id}"
+              verifyingContract: "${allowed_safe_addresses}"
+            message:
+              to: "${test_inner_to}"
+              value: "1"
+              data: "0x"
+              operation: "0"
+              gasPrice: "0"
+              gasToken: "0x0000000000000000000000000000000000000000"
+              refundReceiver: "0x0000000000000000000000000000000000000000"
+              nonce: "0"
+        expect_pass: false
+        expect_reason: "value must be zero"
+      - name: "transaction pass: to allowed Safe, no data"
+        input:
+          sign_type: "transaction"
+          chain_id: "${chain_id}"
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "${allowed_safe_addresses}"
+            value: "0x0"
+            data: "0x"
+        expect_pass: true
+      - name: "transaction reject: to not allowed Safe"
+        input:
+          sign_type: "transaction"
+          chain_id: "${chain_id}"
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0x000000000000000000000000000000000000dEaD"
+            value: "0x0"
+            data: "0x"
+        expect_pass: false
+        expect_reason: "txTo must be allowed Safe"

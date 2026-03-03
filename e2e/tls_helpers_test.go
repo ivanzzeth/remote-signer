@@ -189,18 +189,15 @@ func initTestServices(
 	}
 
 	// Signer manager
-	tempKeystoreDir, err := os.MkdirTemp("", "e2e-tls-keystores-*")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create temp keystore directory: %w", err)
-	}
-	signerManager, err := evm.NewSignerManager(evmRegistry, tempKeystoreDir, log)
+	signerManager, err := evm.NewSignerManager(evmRegistry, log)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create signer manager: %w", err)
 	}
 
 	// Router
 	router, err := api.NewRouter(authVerifier, signService, signerManager, ruleRepo, auditRepo, log, api.RouterConfig{
-		Version: "e2e-tls-test",
+		Version:    "e2e-tls-test",
+		APIKeyRepo: apiKeyRepo,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create router: %w", err)

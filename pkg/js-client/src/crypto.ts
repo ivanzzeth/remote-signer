@@ -70,26 +70,6 @@ export function generateNonce(): string {
 }
 
 /**
- * Signs a request using Ed25519 (legacy format without nonce)
- * Format: {timestamp}|{method}|{path}|{sha256(body)}
- */
-export function signRequest(
-  privateKey: Uint8Array,
-  timestamp: number,
-  method: string,
-  path: string,
-  body: Uint8Array
-): string {
-  const bodyHash = sha256(body);
-  const message = `${timestamp}|${method}|${path}|${Array.from(bodyHash)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("")}`;
-  const messageBytes = new TextEncoder().encode(message);
-  const signature = ed25519.sign(messageBytes, privateKey);
-  return btoa(String.fromCharCode(...Array.from(signature)));
-}
-
-/**
  * Signs a request using Ed25519 with nonce
  * Format: {timestamp}|{nonce}|{method}|{path}|{sha256(body)}
  */

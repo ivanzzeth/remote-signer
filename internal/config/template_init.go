@@ -16,6 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	pkgvalidate "github.com/ivanzzeth/remote-signer/internal/validate"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
@@ -154,7 +155,7 @@ func loadTemplateFromFileStatic(fileCfg TemplateConfig, configDir string, logger
 	if logger != nil {
 		logger.Info("Loading template from file", "name", fileCfg.Name, "path", path)
 	}
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path is admin-configured via config file
 	if err != nil {
 		return nil, fmt.Errorf("failed to read template file '%s': %w", path, err)
 	}
@@ -222,6 +223,15 @@ func (i *TemplateInitializer) syncTemplate(ctx context.Context, idx int, tmplCfg
 		i.logger.Debug("Skipping disabled template", "name", tmplCfg.Name)
 		return nil
 	}
+
+	if err := pkgvalidate.ValidateRuleMode(tmplCfg.Mode); err != nil {
+		return fmt.Errorf("template %q: %w", tmplCfg.Name, err)
+	}
+	// template_bundle is set when expanding file-type templates; allow it. Otherwise require known rule type.
+	if tmplCfg.Type != TemplateFileType && tmplCfg.Type != "template_bundle" && !pkgvalidate.IsValidRuleType(tmplCfg.Type) {
+		return fmt.Errorf("template %q: unknown type %q", tmplCfg.Name, tmplCfg.Type)
+	}
+	// Template config may contain variable placeholders; validated when instance is created.
 
 	tmplID := i.generateTemplateID(idx, tmplCfg)
 
@@ -401,7 +411,18 @@ func expandInstanceRule(rule RuleConfig, templates map[string]TemplateConfig) ([
 		}
 	}
 
-	// Apply scope from the instance rule to all template rules
+	// Apply test_cases_overrides from instance config (if any).
+	// Instance rules can override template test_cases for full-engine validation
+	// (e.g. using a different signer to avoid being auto-allowed by a global signer_restriction rule).
+	if overrides := extractTestCasesOverrides(rule.Config); len(overrides) > 0 {
+		for idx := range templateRules {
+			if tcs, ok := overrides[templateRules[idx].Name]; ok {
+				templateRules[idx].TestCases = tcs
+			}
+		}
+	}
+
+	// Apply scope and instance variables to all template rules
 	for idx := range templateRules {
 		if rule.ChainType != "" {
 			templateRules[idx].ChainType = rule.ChainType
@@ -417,6 +438,17 @@ func expandInstanceRule(rule RuleConfig, templates map[string]TemplateConfig) ([
 		}
 		// Inherit enabled state from instance
 		templateRules[idx].Enabled = rule.Enabled
+		// Pass instance variables so evaluators (e.g. evm_js) get config.chain_id, config.allowed_safe_addresses, etc.
+		if len(variables) > 0 {
+			templateRules[idx].Variables = make(map[string]interface{}, len(variables))
+			for k, v := range variables {
+				templateRules[idx].Variables[k] = v
+			}
+		}
+	}
+	// If instance has config.id and expands to a single rule, use it as the rule's stable id
+	if id, ok := rule.Config["id"].(string); ok && strings.TrimSpace(id) != "" && len(templateRules) == 1 {
+		templateRules[0].Id = strings.TrimSpace(id)
 	}
 
 	return templateRules, nil
@@ -497,4 +529,25 @@ func fillInMappingArrays(rule *RuleConfig, variables map[string]string) error {
 		rule.Config["in_mapping_arrays"] = inMappingArrays
 	}
 	return nil
+}
+
+// extractTestCasesOverrides parses the test_cases_overrides field from an instance rule's config.
+// Returns a map of rule_name -> []TestCaseConfig. If the field is absent or invalid, returns nil.
+func extractTestCasesOverrides(instanceConfig map[string]interface{}) map[string][]TestCaseConfig {
+	raw, ok := instanceConfig["test_cases_overrides"]
+	if !ok || raw == nil {
+		return nil
+	}
+
+	// The YAML deserializes this as map[string]interface{} where each value is []interface{}.
+	// We need to marshal/unmarshal through JSON for proper type conversion.
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	var overrides map[string][]TestCaseConfig
+	if err := json.Unmarshal(data, &overrides); err != nil {
+		return nil
+	}
+	return overrides
 }

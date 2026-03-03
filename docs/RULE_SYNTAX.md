@@ -2,6 +2,8 @@
 
 This document describes the Solidity expression syntax for writing rules in the remote-signer.
 
+**Sign type filter (`sign_type_filter`)**: Only **evm_js** rules support a comma-separated value (e.g. `"typed_data,transaction"`). All other rule types (evm_solidity_expression, message_pattern, etc.) accept a **single** sign type only.
+
 ## Overview
 
 Rules use Solidity expressions to validate signing requests. The evaluator generates Solidity code from your rules and executes them using Forge to validate conditions.

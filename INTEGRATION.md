@@ -28,7 +28,6 @@ const client = new RemoteSignerClient({
   baseURL: 'http://localhost:8548',
   apiKeyID: 'my-api-key',
   privateKey: 'your-ed25519-private-key-hex', // 64 hex characters
-  useNonce: true // Recommended for production
 });
 ```
 
@@ -238,7 +237,7 @@ try {
 ### 1. Security
 
 - **Never commit private keys**: Store them in environment variables or secure storage
-- **Use nonce**: Enable `useNonce: true` for replay protection
+- **Nonce protection**: Nonce-based replay protection is always enabled
 - **Validate responses**: Always check response status before using signatures
 - **Use HTTPS**: Always use HTTPS in production
 

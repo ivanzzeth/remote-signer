@@ -12,6 +12,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/validate"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
@@ -164,12 +165,20 @@ func (h *ListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		filter.APIKeyID = &apiKey.ID
 	}
 
-	// Parse query parameters
+	// Parse query parameters (strict format so invalid values return 400)
 	query := r.URL.Query()
 	if signerAddress := query.Get("signer_address"); signerAddress != "" {
+		if !validate.IsValidEthereumAddress(signerAddress) {
+			h.writeError(w, "invalid signer_address: must be 0x followed by 40 hex characters", http.StatusBadRequest)
+			return
+		}
 		filter.SignerAddress = &signerAddress
 	}
 	if chainID := query.Get("chain_id"); chainID != "" {
+		if _, err := strconv.ParseUint(chainID, 10, 64); err != nil {
+			h.writeError(w, "invalid chain_id: must be a positive decimal integer", http.StatusBadRequest)
+			return
+		}
 		filter.ChainID = &chainID
 	}
 	if statusStr := query.Get("status"); statusStr != "" {

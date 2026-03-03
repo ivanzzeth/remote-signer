@@ -14,6 +14,7 @@ import (
 	"github.com/ivanzzeth/ethsig/eip712"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/validate"
 )
 
 // Payload size limits for validation
@@ -23,16 +24,6 @@ const (
 	maxRawMessageSize      = 256 * 1024   // 256 KB
 	maxPayloadSize         = 2 * 1024 * 1024 // 2 MB (basic check: whole payload)
 )
-
-// allowedSignTypes is the set of sign types accepted in basic validation (format only)
-var allowedSignTypes = map[string]bool{
-	SignTypeHash:        true,
-	SignTypeRawMessage:  true,
-	SignTypeEIP191:      true,
-	SignTypePersonal:    true,
-	SignTypeTypedData:   true,
-	SignTypeTransaction: true,
-}
 
 // EVMAdapter implements types.ChainAdapter for EVM chains
 type EVMAdapter struct {
@@ -67,13 +58,13 @@ func (a *EVMAdapter) ValidateBasicRequest(chainID, signerAddress, signType strin
 	if signerAddress == "" {
 		return fmt.Errorf("signer_address is required")
 	}
-	if !common.IsHexAddress(signerAddress) {
+	if !validate.IsValidEthereumAddress(signerAddress) {
 		return fmt.Errorf("invalid signer_address: must be 0x followed by 40 hex characters")
 	}
 	if signType == "" {
 		return fmt.Errorf("sign_type is required")
 	}
-	if !allowedSignTypes[signType] {
+	if !validate.ValidSignTypes[signType] {
 		return fmt.Errorf("invalid sign_type: must be one of hash, raw_message, eip191, personal, typed_data, transaction")
 	}
 	if len(payload) == 0 {
@@ -528,9 +519,9 @@ func encodeSignature(r, s, v *big.Int) []byte {
 
 	// v is typically 27 or 28, or 0/1 for EIP-155
 	if v.Cmp(big.NewInt(27)) >= 0 {
-		sig[64] = byte(v.Uint64() - 27)
+		sig[64] = byte(v.Uint64() - 27) // #nosec G115 -- v >= 27 checked above
 	} else {
-		sig[64] = byte(v.Uint64())
+		sig[64] = byte(v.Uint64()) // #nosec G115 -- v is ECDSA recovery ID (0-3)
 	}
 
 	return sig

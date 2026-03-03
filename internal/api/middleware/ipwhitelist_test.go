@@ -174,12 +174,13 @@ func TestIPWhitelist_GetClientIP(t *testing.T) {
 	logger := newTestLogger()
 
 	tests := []struct {
-		name        string
-		trustProxy  bool
-		remoteAddr  string
-		xForwarded  string
-		xRealIP     string
-		expectedIP  string
+		name           string
+		trustProxy     bool
+		trustedProxies []string
+		remoteAddr     string
+		xForwarded     string
+		xRealIP        string
+		expectedIP     string
 	}{
 		{
 			name:       "direct connection without proxy",
@@ -195,33 +196,53 @@ func TestIPWhitelist_GetClientIP(t *testing.T) {
 			expectedIP:  "192.168.1.1", // Should ignore X-Forwarded-For
 		},
 		{
-			name:        "with X-Forwarded-For and trust_proxy enabled",
-			trustProxy:  true,
-			remoteAddr:  "192.168.1.1:12345",
-			xForwarded:  "203.0.113.50",
-			expectedIP:  "203.0.113.50",
+			name:           "with X-Forwarded-For from trusted proxy",
+			trustProxy:     true,
+			trustedProxies: []string{"192.168.1.1"},
+			remoteAddr:     "192.168.1.1:12345",
+			xForwarded:     "203.0.113.50",
+			expectedIP:     "203.0.113.50",
 		},
 		{
-			name:        "multiple IPs in X-Forwarded-For",
-			trustProxy:  true,
-			remoteAddr:  "192.168.1.1:12345",
-			xForwarded:  "203.0.113.50, 192.168.1.254, 10.0.0.1",
-			expectedIP:  "203.0.113.50", // Should take first IP
+			name:           "with X-Forwarded-For from untrusted proxy",
+			trustProxy:     true,
+			trustedProxies: []string{"10.0.0.1"},
+			remoteAddr:     "192.168.1.1:12345",
+			xForwarded:     "203.0.113.50",
+			expectedIP:     "192.168.1.1", // Should ignore, not a trusted proxy
 		},
 		{
-			name:       "with X-Real-IP and trust_proxy enabled",
-			trustProxy: true,
-			remoteAddr: "192.168.1.1:12345",
-			xRealIP:    "203.0.113.100",
-			expectedIP: "203.0.113.100",
+			name:           "trust_proxy enabled but no trusted_proxies configured",
+			trustProxy:     true,
+			trustedProxies: nil,
+			remoteAddr:     "192.168.1.1:12345",
+			xForwarded:     "203.0.113.50",
+			expectedIP:     "192.168.1.1", // Fail-closed: no trusted proxies
 		},
 		{
-			name:        "X-Forwarded-For takes precedence over X-Real-IP",
-			trustProxy:  true,
-			remoteAddr:  "192.168.1.1:12345",
-			xForwarded:  "203.0.113.50",
-			xRealIP:     "203.0.113.100",
-			expectedIP:  "203.0.113.50",
+			name:           "multiple IPs in X-Forwarded-For from trusted proxy",
+			trustProxy:     true,
+			trustedProxies: []string{"192.168.1.1"},
+			remoteAddr:     "192.168.1.1:12345",
+			xForwarded:     "203.0.113.50, 192.168.1.254, 10.0.0.1",
+			expectedIP:     "203.0.113.50", // Should take first IP
+		},
+		{
+			name:           "with X-Real-IP from trusted proxy",
+			trustProxy:     true,
+			trustedProxies: []string{"192.168.1.1"},
+			remoteAddr:     "192.168.1.1:12345",
+			xRealIP:        "203.0.113.100",
+			expectedIP:     "203.0.113.100",
+		},
+		{
+			name:           "X-Forwarded-For takes precedence over X-Real-IP",
+			trustProxy:     true,
+			trustedProxies: []string{"192.168.1.1"},
+			remoteAddr:     "192.168.1.1:12345",
+			xForwarded:     "203.0.113.50",
+			xRealIP:        "203.0.113.100",
+			expectedIP:     "203.0.113.50",
 		},
 		{
 			name:       "IPv6 address",
@@ -230,20 +251,38 @@ func TestIPWhitelist_GetClientIP(t *testing.T) {
 			expectedIP: "2001:db8::1",
 		},
 		{
-			name:        "IPv6 in X-Forwarded-For",
-			trustProxy:  true,
-			remoteAddr:  "192.168.1.1:12345",
-			xForwarded:  "2001:db8::1",
-			expectedIP:  "2001:db8::1",
+			name:           "IPv6 in X-Forwarded-For from trusted proxy",
+			trustProxy:     true,
+			trustedProxies: []string{"192.168.1.1"},
+			remoteAddr:     "192.168.1.1:12345",
+			xForwarded:     "2001:db8::1",
+			expectedIP:     "2001:db8::1",
+		},
+		{
+			name:           "trusted proxy via CIDR range",
+			trustProxy:     true,
+			trustedProxies: []string{"10.0.0.0/8"},
+			remoteAddr:     "10.1.2.3:12345",
+			xForwarded:     "203.0.113.50",
+			expectedIP:     "203.0.113.50",
+		},
+		{
+			name:           "outside trusted proxy CIDR range",
+			trustProxy:     true,
+			trustedProxies: []string{"10.0.0.0/8"},
+			remoteAddr:     "11.0.0.1:12345",
+			xForwarded:     "203.0.113.50",
+			expectedIP:     "11.0.0.1", // Not in trusted CIDR
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := config.IPWhitelistConfig{
-				Enabled:    true,
-				AllowedIPs: []string{"0.0.0.0/0"}, // Allow all for this test
-				TrustProxy: tt.trustProxy,
+				Enabled:        true,
+				AllowedIPs:     []string{"0.0.0.0/0"}, // Allow all for this test
+				TrustProxy:     tt.trustProxy,
+				TrustedProxies: tt.trustedProxies,
 			}
 
 			whitelist, err := NewIPWhitelist(cfg, logger)

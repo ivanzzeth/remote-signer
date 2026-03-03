@@ -1,23 +1,22 @@
-# Treasury Rules
-# This file contains rules for treasury-related transactions
+# Treasury rules
+# Whitelist rules: a request is allowed only if it matches one of these rules (after any blocklist checks).
+# Order: address whitelist (who may receive) then value limit (max amount per tx).
 
 rules:
-  # Whitelist treasury addresses
   - name: "Allow transfers to treasury"
-    type: "evm_address_whitelist"
+    type: "evm_address_list"
     mode: "whitelist"
     enabled: true
-    description: "Allow transfers to known treasury addresses"
+    description: "Only allow transfers to known treasury addresses"
     config:
       addresses:
-        - "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"  # Main treasury
-        - "0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2"  # Backup treasury
+        - "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+        - "0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2"
 
-  # Limit treasury transfer amounts
   - name: "Treasury transfer limit"
     type: "evm_value_limit"
     mode: "whitelist"
     enabled: true
-    description: "Limit single treasury transfers to 100 ETH"
+    description: "Allow only when tx value is at most 100 ETH"
     config:
       max_value: "100000000000000000000"  # 100 ETH in wei

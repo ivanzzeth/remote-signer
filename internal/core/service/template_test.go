@@ -280,6 +280,10 @@ func (r *mockBudgetRepo) ListByRuleIDs(_ context.Context, ruleIDs []types.RuleID
 	return out, nil
 }
 
+func (r *mockBudgetRepo) MarkAlertSent(_ context.Context, _ types.RuleID, _ string) error {
+	return nil
+}
+
 // helper to count budgets in the mock repo
 func (r *mockBudgetRepo) count() int {
 	r.mu.RLock()
@@ -1458,6 +1462,371 @@ func TestRevokeInstance(t *testing.T) {
 		}
 		if len(budgets) != 0 {
 			t.Errorf("expected 0 budgets after revoke, got %d", len(budgets))
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// TestValidateVariableType_Extended
+// ---------------------------------------------------------------------------
+
+func TestValidateVariableType_Extended(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("address_list_valid", func(t *testing.T) {
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		vars := []types.TemplateVariable{
+			{Name: "addrs", Type: "address_list", Required: true},
+		}
+		config := []byte(`{"addresses":"${addrs}"}`)
+		tmpl := makeTemplate("tmpl-addrlist", "Address List", vars, config)
+		seedTemplate(t, tmplRepo, tmpl)
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		result, err := svc.CreateInstance(ctx, &CreateInstanceRequest{
+			TemplateID: "tmpl-addrlist",
+			Variables: map[string]string{
+				"addrs": "0x1111111111111111111111111111111111111111,0x2222222222222222222222222222222222222222",
+			},
+		})
+		if err != nil {
+			t.Fatalf("CreateInstance failed: %v", err)
+		}
+		if result.Rule == nil {
+			t.Fatal("expected non-nil rule")
+		}
+	})
+
+	t.Run("address_list_invalid", func(t *testing.T) {
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		vars := []types.TemplateVariable{
+			{Name: "addrs", Type: "address_list", Required: true},
+		}
+		config := []byte(`{"addresses":"${addrs}"}`)
+		tmpl := makeTemplate("tmpl-addrlist-inv", "Invalid Address List", vars, config)
+		seedTemplate(t, tmplRepo, tmpl)
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		_, err = svc.CreateInstance(ctx, &CreateInstanceRequest{
+			TemplateID: "tmpl-addrlist-inv",
+			Variables: map[string]string{
+				"addrs": "0x1111111111111111111111111111111111111111,not-an-address",
+			},
+		})
+		if err == nil {
+			t.Fatal("expected error for invalid address in list")
+		}
+		if !strings.Contains(err.Error(), "invalid address in list") {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("uint256_list_valid", func(t *testing.T) {
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		vars := []types.TemplateVariable{
+			{Name: "amounts", Type: "uint256_list", Required: true},
+		}
+		config := []byte(`{"amounts":"${amounts}"}`)
+		tmpl := makeTemplate("tmpl-uintlist", "Uint256 List", vars, config)
+		seedTemplate(t, tmplRepo, tmpl)
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		result, err := svc.CreateInstance(ctx, &CreateInstanceRequest{
+			TemplateID: "tmpl-uintlist",
+			Variables: map[string]string{
+				"amounts": "100,200,300",
+			},
+		})
+		if err != nil {
+			t.Fatalf("CreateInstance failed: %v", err)
+		}
+		if result.Rule == nil {
+			t.Fatal("expected non-nil rule")
+		}
+	})
+
+	t.Run("uint256_list_invalid", func(t *testing.T) {
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		vars := []types.TemplateVariable{
+			{Name: "amounts", Type: "uint256_list", Required: true},
+		}
+		config := []byte(`{"amounts":"${amounts}"}`)
+		tmpl := makeTemplate("tmpl-uintlist-inv", "Invalid Uint256 List", vars, config)
+		seedTemplate(t, tmplRepo, tmpl)
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		_, err = svc.CreateInstance(ctx, &CreateInstanceRequest{
+			TemplateID: "tmpl-uintlist-inv",
+			Variables: map[string]string{
+				"amounts": "100,not-a-number,300",
+			},
+		})
+		if err == nil {
+			t.Fatal("expected error for invalid uint256 in list")
+		}
+		if !strings.Contains(err.Error(), "invalid uint256 in list") {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("string_type_accepts_anything", func(t *testing.T) {
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		vars := []types.TemplateVariable{
+			{Name: "label", Type: "string", Required: true},
+		}
+		config := []byte(`{"label":"${label}"}`)
+		tmpl := makeTemplate("tmpl-string", "String Var", vars, config)
+		seedTemplate(t, tmplRepo, tmpl)
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		result, err := svc.CreateInstance(ctx, &CreateInstanceRequest{
+			TemplateID: "tmpl-string",
+			Variables: map[string]string{
+				"label": "any arbitrary string !@#$%",
+			},
+		})
+		if err != nil {
+			t.Fatalf("CreateInstance failed: %v", err)
+		}
+		if result.Rule == nil {
+			t.Fatal("expected non-nil rule")
+		}
+	})
+
+	t.Run("unknown_type_skips_validation", func(t *testing.T) {
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		vars := []types.TemplateVariable{
+			{Name: "custom", Type: "unknown_custom_type", Required: true},
+		}
+		config := []byte(`{"custom":"${custom}"}`)
+		tmpl := makeTemplate("tmpl-unknown", "Unknown Type", vars, config)
+		seedTemplate(t, tmplRepo, tmpl)
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		result, err := svc.CreateInstance(ctx, &CreateInstanceRequest{
+			TemplateID: "tmpl-unknown",
+			Variables: map[string]string{
+				"custom": "whatever value",
+			},
+		})
+		if err != nil {
+			t.Fatalf("CreateInstance failed: %v", err)
+		}
+		if result.Rule == nil {
+			t.Fatal("expected non-nil rule")
+		}
+	})
+
+	t.Run("uppercase_0X_prefix_address", func(t *testing.T) {
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		vars := []types.TemplateVariable{
+			{Name: "addr", Type: "address", Required: true},
+		}
+		config := []byte(`{"address":"${addr}"}`)
+		tmpl := makeTemplate("tmpl-0X", "Uppercase 0X", vars, config)
+		seedTemplate(t, tmplRepo, tmpl)
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		result, err := svc.CreateInstance(ctx, &CreateInstanceRequest{
+			TemplateID: "tmpl-0X",
+			Variables: map[string]string{
+				"addr": "0XAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+			},
+		})
+		if err != nil {
+			t.Fatalf("CreateInstance failed: %v", err)
+		}
+		if result.Rule == nil {
+			t.Fatal("expected non-nil rule")
+		}
+	})
+
+	t.Run("address_wrong_length", func(t *testing.T) {
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		vars := []types.TemplateVariable{
+			{Name: "addr", Type: "address", Required: true},
+		}
+		config := []byte(`{"address":"${addr}"}`)
+		tmpl := makeTemplate("tmpl-short", "Short Address", vars, config)
+		seedTemplate(t, tmplRepo, tmpl)
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		_, err = svc.CreateInstance(ctx, &CreateInstanceRequest{
+			TemplateID: "tmpl-short",
+			Variables: map[string]string{
+				"addr": "0x1234", // too short
+			},
+		})
+		if err == nil {
+			t.Fatal("expected error for short address")
+		}
+	})
+
+	t.Run("address_invalid_hex_chars", func(t *testing.T) {
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		vars := []types.TemplateVariable{
+			{Name: "addr", Type: "address", Required: true},
+		}
+		config := []byte(`{"address":"${addr}"}`)
+		tmpl := makeTemplate("tmpl-badhex", "Bad Hex", vars, config)
+		seedTemplate(t, tmplRepo, tmpl)
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		_, err = svc.CreateInstance(ctx, &CreateInstanceRequest{
+			TemplateID: "tmpl-badhex",
+			Variables: map[string]string{
+				"addr": "0xGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG", // 40 chars but invalid hex
+			},
+		})
+		if err == nil {
+			t.Fatal("expected error for invalid hex characters")
+		}
+	})
+
+	t.Run("uint256_negative_value", func(t *testing.T) {
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		vars := []types.TemplateVariable{
+			{Name: "amount", Type: "uint256", Required: true},
+		}
+		config := []byte(`{"amount":"${amount}"}`)
+		tmpl := makeTemplate("tmpl-neg", "Negative Uint", vars, config)
+		seedTemplate(t, tmplRepo, tmpl)
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		_, err = svc.CreateInstance(ctx, &CreateInstanceRequest{
+			TemplateID: "tmpl-neg",
+			Variables: map[string]string{
+				"amount": "-1",
+			},
+		})
+		if err == nil {
+			t.Fatal("expected error for negative uint256")
+		}
+	})
+
+	t.Run("uint256_empty_string", func(t *testing.T) {
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		vars := []types.TemplateVariable{
+			{Name: "amount", Type: "uint256", Required: true},
+		}
+		config := []byte(`{"amount":"${amount}"}`)
+		tmpl := makeTemplate("tmpl-empty-uint", "Empty Uint", vars, config)
+		seedTemplate(t, tmplRepo, tmpl)
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		_, err = svc.CreateInstance(ctx, &CreateInstanceRequest{
+			TemplateID: "tmpl-empty-uint",
+			Variables: map[string]string{
+				"amount": "",
+			},
+		})
+		if err == nil {
+			t.Fatal("expected error for empty uint256")
+		}
+	})
+
+	t.Run("address_no_0x_prefix", func(t *testing.T) {
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		vars := []types.TemplateVariable{
+			{Name: "addr", Type: "address", Required: true},
+		}
+		config := []byte(`{"address":"${addr}"}`)
+		tmpl := makeTemplate("tmpl-noprefix", "No Prefix", vars, config)
+		seedTemplate(t, tmplRepo, tmpl)
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		_, err = svc.CreateInstance(ctx, &CreateInstanceRequest{
+			TemplateID: "tmpl-noprefix",
+			Variables: map[string]string{
+				"addr": "1111111111111111111111111111111111111111", // missing 0x prefix
+			},
+		})
+		if err == nil {
+			t.Fatal("expected error for address without 0x prefix")
 		}
 	})
 }

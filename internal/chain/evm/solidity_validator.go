@@ -56,6 +56,11 @@ var dangerousPatterns = []*regexp.Regexp{
 
 	// Signing (could sign arbitrary data with Foundry test keys)
 	regexp.MustCompile(`(?i)vm\s*\.\s*sign\s*\(`), // vm.sign() - sign with test key
+
+	// Solidity language-level dangerous constructs (defense-in-depth; also checked in ruleconfig/validate.go)
+	regexp.MustCompile(`(?i)selfdestruct\s*\(`), // selfdestruct() - contract destruction
+	regexp.MustCompile(`(?i)delegatecall\s*\(`), // delegatecall() - arbitrary code execution in caller context
+	regexp.MustCompile(`(?i)staticcall\s*\(`),   // staticcall() - low-level call; rules should not use raw calls
 }
 
 // SecurityError represents a security validation error
@@ -90,6 +95,12 @@ type SolidityRuleValidator struct {
 type BatchValidationResult struct {
 	Results []ValidationResult
 	Valid   bool
+}
+
+// Evaluator returns the underlying SolidityRuleEvaluator, or nil if not set.
+// Used by validate-rules to register the evaluator with the rule engine.
+func (v *SolidityRuleValidator) Evaluator() *SolidityRuleEvaluator {
+	return v.evaluator
 }
 
 // NewSolidityRuleValidator creates a new validator
@@ -387,7 +398,7 @@ func (v *SolidityRuleValidator) validateRulesBatchForMode(ctx context.Context, r
 			}
 		}
 
-		syntaxErr, err := v.validateSyntaxForModeWithStruct(ctx, code, mode, structDef)
+		syntaxErr, err := v.validateSyntaxForModeWithStruct(ctx, code, mode, structDef, config.InMappingArrays)
 		if err != nil {
 			results[i] = ValidationResult{Valid: false}
 			allValid = false
@@ -420,7 +431,13 @@ func (v *SolidityRuleValidator) validateRulesBatchForMode(ctx context.Context, r
 	// batchResults are ordered the same as allTestCases
 	for i, rule := range rules {
 		var config SolidityExpressionConfig
-		json.Unmarshal(rule.Config, &config)
+		if err := json.Unmarshal(rule.Config, &config); err != nil {
+			results[i] = ValidationResult{
+				Valid:       false,
+				SyntaxError: &SyntaxError{Message: fmt.Sprintf("failed to unmarshal rule config: %v", err)},
+			}
+			continue
+		}
 
 		result := ValidationResult{Valid: true}
 		result.TestCaseResults = make([]TestCaseResult, len(config.TestCases))
@@ -981,7 +998,7 @@ func (v *SolidityRuleValidator) executeBatchTestScript(ctx context.Context, scri
 	}
 
 	// Execute forge test
-	cmd := exec.CommandContext(execCtx,
+	cmd := exec.CommandContext(execCtx, // #nosec G204 -- forge path is admin-configured, env hardened via safeForgeEnv()
 		v.evaluator.GetFoundryPath(), "test",
 		"--match-path", scriptPath,
 		"--match-contract", "BatchRuleEvaluatorTest",
@@ -1131,22 +1148,23 @@ func (v *SolidityRuleValidator) modeString(mode ValidationMode) string {
 
 // validateSyntaxForMode compiles the Solidity code to check for syntax errors based on mode
 func (v *SolidityRuleValidator) validateSyntaxForMode(ctx context.Context, code string, mode ValidationMode) (*SyntaxError, error) {
-	return v.validateSyntaxForModeWithStruct(ctx, code, mode, nil)
+	return v.validateSyntaxForModeWithStruct(ctx, code, mode, nil, nil)
 }
 
 // validateSyntaxForModeWithStruct compiles the Solidity code to check for syntax errors based on mode
 // If structDef is provided, it will be used for struct-based syntax checking in TypedDataExpression mode
-func (v *SolidityRuleValidator) validateSyntaxForModeWithStruct(ctx context.Context, code string, mode ValidationMode, structDef *StructDefinition) (*SyntaxError, error) {
+// If inMappingArrays is provided, it will be used for in() operator preprocessing with mapping lookups
+func (v *SolidityRuleValidator) validateSyntaxForModeWithStruct(ctx context.Context, code string, mode ValidationMode, structDef *StructDefinition, inMappingArrays map[string][]string) (*SyntaxError, error) {
 	var script string
 	switch mode {
 	case ValidationModeExpression:
-		script = v.evaluator.GenerateSyntaxCheckScript(code)
+		script = v.evaluator.GenerateSyntaxCheckScript(code, inMappingArrays)
 	case ValidationModeFunctions:
-		script = v.evaluator.GenerateFunctionSyntaxCheckScript(code)
+		script = v.evaluator.GenerateFunctionSyntaxCheckScript(code, inMappingArrays)
 	case ValidationModeTypedDataExpression:
-		script = v.evaluator.GenerateTypedDataExpressionSyntaxCheckScriptWithStruct(code, structDef)
+		script = v.evaluator.GenerateTypedDataExpressionSyntaxCheckScriptWithStruct(code, structDef, inMappingArrays)
 	case ValidationModeTypedDataFunctions:
-		script = v.evaluator.GenerateTypedDataFunctionsSyntaxCheckScript(code)
+		script = v.evaluator.GenerateTypedDataFunctionsSyntaxCheckScript(code, inMappingArrays)
 	default:
 		return nil, fmt.Errorf("unknown validation mode: %d", mode)
 	}
@@ -1302,7 +1320,7 @@ func (v *SolidityRuleValidator) compileSyntaxCheckScript(ctx context.Context, sc
 
 	// Run forge build with cache path for incremental compilation
 	cachePath := filepath.Join(v.evaluator.GetCacheDir(), "forge-cache")
-	cmd := exec.CommandContext(execCtx,
+	cmd := exec.CommandContext(execCtx, // #nosec G204 -- forge path is admin-configured, env hardened via safeForgeEnv()
 		v.evaluator.GetFoundryPath(), "build",
 		"--root", v.evaluator.GetTempDir(),
 		"--cache-path", cachePath,
@@ -1317,7 +1335,9 @@ func (v *SolidityRuleValidator) compileSyntaxCheckScript(ctx context.Context, sc
 		syntaxErr := parseSolidityError(string(output))
 		// CRITICAL: Remove the failing syntax check file so it doesn't poison
 		// subsequent forge builds (forge compiles ALL .sol files in the directory)
-		os.Remove(scriptPath)
+		if rmErr := os.Remove(scriptPath); rmErr != nil {
+			v.logger.Warn("failed to remove failing script", "path", scriptPath, "error", rmErr)
+		}
 		// Cache as invalid
 		v.syntaxCacheMu.Lock()
 		v.syntaxCache[hashStr] = false

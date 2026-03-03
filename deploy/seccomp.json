@@ -1,0 +1,90 @@
+{
+  "defaultAction": "SCMP_ACT_ALLOW",
+  "architectures": [
+    "SCMP_ARCH_X86_64",
+    "SCMP_ARCH_AARCH64"
+  ],
+  "syscalls": [
+    {
+      "names": [
+        "ptrace",
+        "process_vm_readv",
+        "process_vm_writev"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "comment": "Prevent debugging and cross-process memory access"
+    },
+    {
+      "names": [
+        "mount",
+        "umount2"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "comment": "Prevent filesystem mount attacks"
+    },
+    {
+      "names": [
+        "keyctl",
+        "add_key",
+        "request_key"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "comment": "Prevent kernel keyring access"
+    },
+    {
+      "names": [
+        "kexec_load",
+        "kexec_file_load"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "comment": "Prevent kernel replacement"
+    },
+    {
+      "names": [
+        "reboot"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "comment": "Prevent system reboot"
+    },
+    {
+      "names": [
+        "pivot_root",
+        "chroot"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "comment": "Prevent filesystem escape"
+    },
+    {
+      "names": [
+        "unshare",
+        "setns"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "comment": "Prevent namespace manipulation"
+    },
+    {
+      "names": [
+        "init_module",
+        "finit_module",
+        "delete_module"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "comment": "Prevent kernel module loading"
+    },
+    {
+      "names": [
+        "acct",
+        "syslog"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "comment": "Prevent system audit and kernel log access"
+    },
+    {
+      "names": [
+        "personality"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "comment": "Prevent execution domain changes"
+    }
+  ]
+}

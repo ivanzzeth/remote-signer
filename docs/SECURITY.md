@@ -44,6 +44,13 @@ Remote Signer applies defense in depth from the network layer to the application
 
 Together, timestamp + nonce ensure that each request is fresh and used at most once.
 
+### Authorization scopes
+
+- **`allowed_signers`** (empty = all): restricts which signer addresses the key can use for signing. Empty means unrestricted access to all signers.
+- **`allowed_hd_wallets`** (empty = none): grants access to all derived addresses of specified HD wallet primary addresses. Empty means no HD wallet access. This is intentionally different from `allowed_signers` — HD wallet authorization must be explicit.
+- Permission hierarchy: admin > `allowed_hd_wallets` (derived addresses) > `allowed_signers` (individual addresses).
+- Defense-in-depth: sign requests check both `allowed_signers` and `allowed_hd_wallets` derived addresses.
+
 ### Rate limit
 
 - Per-API-key rate limit (requests per minute), configurable per key and with a default (`security.rate_limit_default`).
@@ -170,8 +177,140 @@ Rules can be scoped by `chain_type`, `chain_id`, `api_key_id`, `signer_address`.
 | Application | Rule/instance expiry   | Time-limited authorization                   |
 | Application | Approval guard         | Pause + alert on abuse burst, then resume    |
 | Operations  | Audit log + monitor    | Forensics and anomaly alerts                 |
+| Rule engine | Solidity static check  | Block dangerous cheatcodes and language constructs |
+| Rule engine | JS static check        | Block prototype pollution, sandbox escape, dynamic exec |
+| Container   | read_only + seccomp    | Immutable filesystem + syscall restrictions  |
+| Container   | tmpfs + named volumes  | Controlled writable paths only               |
+| Dev pipeline | gosec + govulncheck   | Go SAST and dependency vulnerability checks |
+| Dev pipeline | gitleaks + detect-secrets | Multi-layer secret detection in commits   |
+| Dev pipeline | semgrep + eslint-security | JS/TS SAST and security linting          |
+| Dev pipeline | npm audit              | JS dependency vulnerability scanning        |
 
-Together, these provide layered protection from the network through to application-level authorization and operational visibility.
+Together, these provide layered protection from the network through to application-level authorization, operational visibility, and development-time security enforcement.
+
+---
+
+## 9. Rule Engine Static Analysis
+
+Both Solidity and JavaScript rule engines perform static security checks before any code is executed.
+
+### Solidity Rules
+
+`ValidateSolidityCodeSecurity()` scans Solidity rule code against a regex blocklist of dangerous patterns:
+
+- **Foundry cheatcodes** (21 patterns): `vm.ffi`, `vm.readFile`, `vm.writeFile`, `vm.removeFile`, `vm.readDir`, `vm.closeFile`, `vm.writeLine`, `vm.readLine`, `vm.fsMetadata`, `vm.env*`, `vm.setEnv`, `vm.projectRoot`, `vm.rpc`, `vm.createFork`, `vm.selectFork`, `vm.broadcast`, `vm.startBroadcast`, `vm.sign`
+- **Solidity language constructs** (3 patterns): `selfdestruct()`, `delegatecall()`, `staticcall()` (defense-in-depth; also checked in `ruleconfig/validate.go`)
+
+This is a defense-in-depth layer; runtime protections (`FOUNDRY_FFI=false`, `FOUNDRY_FS_PERMISSIONS=[]`) are also enforced.
+
+### JavaScript Rules
+
+`ValidateJSCodeSecurity()` scans JS rule code against a regex blocklist before execution:
+
+- **Prototype pollution / sandbox escape** (5 patterns): `__proto__`, `constructor.constructor`, `Object.getPrototypeOf`, `Object.setPrototypeOf`, `Object.defineProperty`
+- **Dynamic code execution** (2 patterns): `Function()`, dynamic `import()`
+- **Node.js dangerous modules** (1 pattern): `child_process`
+
+This is a defense-in-depth layer alongside the runtime sandbox (`removeGlobals()`).
+
+---
+
+## 10. Container Hardening (Docker)
+
+Production Docker deployment includes multiple hardening layers:
+
+| Control | Purpose |
+|---------|---------|
+| `read_only: true` | Immutable root filesystem; writes only via explicit volumes/tmpfs |
+| `tmpfs: /tmp, /run` | Ephemeral writable areas with `noexec,nosuid` |
+| `no-new-privileges` | Prevent privilege escalation via setuid/setgid |
+| `seccomp=deploy/seccomp.json` | Block dangerous syscalls (ptrace, mount, kexec, kernel modules, etc.) |
+| `cap_drop: ALL` + minimal `cap_add` | Only NET_BIND_SERVICE and IPC_LOCK capabilities |
+| Resource limits | CPU/memory limits to prevent DoS |
+| `mem_swappiness: 0` | Prevent private keys from being swapped to disk |
+| Named volumes | `svm_data` for solc compiler cache persistence |
+
+### Seccomp Profile
+
+The seccomp profile (`deploy/seccomp.json`) uses a default-allow policy with explicit denials for:
+- Process debugging (`ptrace`, `process_vm_readv/writev`)
+- Filesystem manipulation (`mount`, `umount2`, `pivot_root`, `chroot`)
+- Kernel operations (`kexec_load`, `init_module`, `reboot`)
+- Namespace escape (`unshare`, `setns`)
+- Kernel keyring (`keyctl`, `add_key`, `request_key`)
+
+### Image Scanning
+
+Use `scripts/scan-image.sh` to scan the Docker image for HIGH/CRITICAL vulnerabilities with Trivy.
+
+---
+
+## Development Security Pipeline
+
+Pre-commit hooks enforce security checks before any code reaches the repository. Install with `bash scripts/install-hooks.sh`.
+
+### Go Security
+
+| Tool | Purpose | Install |
+|------|---------|---------|
+| **gosec** | Static analysis for Go security issues (OWASP, CWE) | `go install github.com/securego/gosec/v2/cmd/gosec@latest` |
+| **govulncheck** | Checks Go dependencies against the Go vulnerability database | `go install golang.org/x/vuln/cmd/govulncheck@latest` |
+| **go vet** | Built-in Go static analysis | Included with Go |
+
+- `gosec` scans all Go source (excluding `vendor/`, `pkg/js-client/`). Use `// #nosec GXXX -- reason` to suppress false positives.
+- `govulncheck` reports only vulnerabilities that are actually reachable from the call graph.
+
+### Secret Detection (multi-layer)
+
+| Tool | Purpose | Install |
+|------|---------|---------|
+| **gitleaks** | Fast regex-based secret scanner, scans staged git diffs | `go install github.com/zricethezav/gitleaks/v8@latest` |
+| **detect-secrets** | Entropy + pattern-based detector (complements gitleaks) | `pip install detect-secrets` |
+| **Plaintext grep** | Heuristic grep for `private_key`, `password`, `secret`, `token` patterns | Built-in |
+
+- **gitleaks** uses `.gitleaks.toml` for configuration and allowlists.
+- **detect-secrets** uses `.secrets.baseline` to track known false positives. Regenerate baseline: `detect-secrets scan --exclude-files 'vendor/.*' --exclude-files 'node_modules/.*' --exclude-files 'go\.sum' > .secrets.baseline`.
+- Three layers ensure different secret patterns are caught (regex rules, entropy analysis, heuristic grep).
+
+### JS/TS Security
+
+| Tool | Purpose | Install |
+|------|---------|---------|
+| **semgrep** | SAST for JS/TS — XSS, prototype pollution, command injection, etc. | `pip install semgrep` |
+| **eslint-plugin-security** | ESLint rules for common JS security antipatterns (eval, innerHTML, etc.) | `cd pkg/js-client && npm install` |
+| **npm audit** | Dependency vulnerability scanner for npm packages | Included with npm |
+
+- **semgrep** runs with `--config=auto` (community security rules) on any staged `.js`/`.ts` files.
+- **eslint-plugin-security** is configured in `pkg/js-client/.eslintrc.json` and runs only when `pkg/js-client/src/` files are staged.
+- **npm audit** runs at `--audit-level=high` only when `package.json` or `package-lock.json` changes.
+
+### Pre-commit Check Order
+
+1. Error suppression check (`_ = xxx` forbidden)
+2. gosec (Go SAST)
+3. govulncheck (Go dependency vulnerabilities)
+4. go vet (Go static analysis)
+5. Plaintext secret grep
+6. gitleaks (staged diff secret scan)
+7. detect-secrets (entropy-based secret scan)
+8. semgrep (JS/TS SAST, only when JS/TS files staged)
+9. eslint-plugin-security (JS/TS lint, only when js-client files staged)
+10. npm audit (JS deps, only when package files staged)
+11. Rule YAML validation (only when rule files staged)
+12. E2E tests
+
+### `#nosec` / Suppression Policy
+
+Suppressions require a justification comment:
+```go
+// #nosec G115 -- bounds checked above
+// #nosec G118 -- intentional: audit logging must outlive request context
+// #nosec G204 -- foundryPath is admin-configured
+// #nosec G304 -- path is admin-configured via config file
+// #nosec G104 -- HTTP response write error cannot be meaningfully handled
+```
+
+Suppressions without justification are not accepted. Review all `#nosec` annotations during code review.
 
 ---
 

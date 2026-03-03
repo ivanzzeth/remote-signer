@@ -10,8 +10,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
+	"github.com/ivanzzeth/remote-signer/pkg/client/mock"
 )
+
+func newTestRequestsModel(t *testing.T) (*RequestsModel, *mock.RequestService) {
+	t.Helper()
+	svc := mock.NewRequestService()
+	model, err := newRequestsModelFromService(svc, context.Background())
+	require.NoError(t, err)
+	return model, svc
+}
 
 func TestNewRequestsModel(t *testing.T) {
 	t.Run("returns error when client is nil", func(t *testing.T) {
@@ -21,16 +30,14 @@ func TestNewRequestsModel(t *testing.T) {
 	})
 
 	t.Run("returns error when context is nil", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		_, err := NewRequestsModel(mockClient, nil)
+		svc := mock.NewRequestService()
+		_, err := newRequestsModelFromService(svc, nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "context is required")
 	})
 
 	t.Run("creates model successfully", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRequestsModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRequestsModel(t)
 		require.NotNil(t, model)
 		assert.True(t, model.loading)
 		assert.Equal(t, 20, model.limit)
@@ -39,11 +46,9 @@ func TestNewRequestsModel(t *testing.T) {
 
 func TestRequestsModel_Update(t *testing.T) {
 	t.Run("handles requests data message", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRequestsModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRequestsModel(t)
 
-		requests := []client.RequestStatus{
+		requests := []evm.RequestStatus{
 			{ID: "req-1", Status: "pending", SignerAddress: "0x1234", CreatedAt: time.Now()},
 			{ID: "req-2", Status: "completed", SignerAddress: "0x5678", CreatedAt: time.Now()},
 		}
@@ -65,9 +70,7 @@ func TestRequestsModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles requests data error", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRequestsModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRequestsModel(t)
 
 		msg := RequestsDataMsg{Err: errors.New("fetch failed")}
 		newModel, _ := model.Update(msg)
@@ -78,11 +81,9 @@ func TestRequestsModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles navigation keys", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRequestsModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRequestsModel(t)
 		model.loading = false
-		model.requests = []client.RequestStatus{
+		model.requests = []evm.RequestStatus{
 			{ID: "req-1"},
 			{ID: "req-2"},
 			{ID: "req-3"},
@@ -101,9 +102,7 @@ func TestRequestsModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles filter mode", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRequestsModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRequestsModel(t)
 		model.loading = false
 
 		// Enter filter mode
@@ -118,13 +117,11 @@ func TestRequestsModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles clear filter", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		mockClient.ListRequestsFunc = func(ctx context.Context, filter *client.ListRequestsFilter) (*client.ListRequestsResponse, error) {
-			return &client.ListRequestsResponse{}, nil
+		model, svc := newTestRequestsModel(t)
+		svc.ListFunc = func(ctx context.Context, filter *evm.ListRequestsFilter) (*evm.ListRequestsResponse, error) {
+			return &evm.ListRequestsResponse{}, nil
 		}
 
-		model, err := NewRequestsModel(mockClient, context.Background())
-		require.NoError(t, err)
 		model.loading = false
 		model.statusFilter = "pending"
 
@@ -134,13 +131,11 @@ func TestRequestsModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles pagination - next page", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		mockClient.ListRequestsFunc = func(ctx context.Context, filter *client.ListRequestsFilter) (*client.ListRequestsResponse, error) {
-			return &client.ListRequestsResponse{}, nil
+		model, svc := newTestRequestsModel(t)
+		svc.ListFunc = func(ctx context.Context, filter *evm.ListRequestsFilter) (*evm.ListRequestsResponse, error) {
+			return &evm.ListRequestsResponse{}, nil
 		}
 
-		model, err := NewRequestsModel(mockClient, context.Background())
-		require.NoError(t, err)
 		model.loading = false
 		model.hasMore = true
 		nextCursor := "next-cursor"
@@ -157,9 +152,7 @@ func TestRequestsModel_Update(t *testing.T) {
 
 func TestRequestsModel_View(t *testing.T) {
 	t.Run("renders loading state", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRequestsModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRequestsModel(t)
 		model.loading = true
 		model.width = 150
 		model.height = 30
@@ -169,9 +162,7 @@ func TestRequestsModel_View(t *testing.T) {
 	})
 
 	t.Run("renders error state", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRequestsModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRequestsModel(t)
 		model.loading = false
 		model.err = errors.New("test error")
 		model.width = 150
@@ -182,13 +173,11 @@ func TestRequestsModel_View(t *testing.T) {
 	})
 
 	t.Run("renders requests list", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRequestsModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRequestsModel(t)
 		model.loading = false
 		model.width = 150
 		model.height = 30
-		model.requests = []client.RequestStatus{
+		model.requests = []evm.RequestStatus{
 			{ID: "req-123", Status: "pending", SignerAddress: "0x1234", SignType: "personal", CreatedAt: time.Now()},
 		}
 		model.total = 1
@@ -199,22 +188,18 @@ func TestRequestsModel_View(t *testing.T) {
 	})
 
 	t.Run("renders empty list", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRequestsModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRequestsModel(t)
 		model.loading = false
 		model.width = 150
 		model.height = 30
-		model.requests = []client.RequestStatus{}
+		model.requests = []evm.RequestStatus{}
 
 		view := model.View()
 		assert.Contains(t, view, "No requests found")
 	})
 
 	t.Run("renders filter input", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRequestsModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRequestsModel(t)
 		model.loading = false
 		model.showFilter = true
 		model.width = 150
@@ -227,20 +212,16 @@ func TestRequestsModel_View(t *testing.T) {
 
 func TestRequestsModel_GetSelectedRequestID(t *testing.T) {
 	t.Run("returns empty when no requests", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRequestsModel(mockClient, context.Background())
-		require.NoError(t, err)
-		model.requests = []client.RequestStatus{}
+		model, _ := newTestRequestsModel(t)
+		model.requests = []evm.RequestStatus{}
 
 		id := model.GetSelectedRequestID()
 		assert.Equal(t, "", id)
 	})
 
 	t.Run("returns selected request ID", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRequestsModel(mockClient, context.Background())
-		require.NoError(t, err)
-		model.requests = []client.RequestStatus{
+		model, _ := newTestRequestsModel(t)
+		model.requests = []evm.RequestStatus{
 			{ID: "req-1"},
 			{ID: "req-2"},
 		}
@@ -253,18 +234,16 @@ func TestRequestsModel_GetSelectedRequestID(t *testing.T) {
 
 func TestRequestsModel_LoadData(t *testing.T) {
 	t.Run("calls client with correct filter", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		var capturedFilter *client.ListRequestsFilter
-		mockClient.ListRequestsFunc = func(ctx context.Context, filter *client.ListRequestsFilter) (*client.ListRequestsResponse, error) {
+		model, svc := newTestRequestsModel(t)
+		var capturedFilter *evm.ListRequestsFilter
+		svc.ListFunc = func(ctx context.Context, filter *evm.ListRequestsFilter) (*evm.ListRequestsResponse, error) {
 			capturedFilter = filter
-			return &client.ListRequestsResponse{
-				Requests: []client.RequestStatus{},
+			return &evm.ListRequestsResponse{
+				Requests: []evm.RequestStatus{},
 				Total:    0,
 			}, nil
 		}
 
-		model, err := NewRequestsModel(mockClient, context.Background())
-		require.NoError(t, err)
 		model.statusFilter = "pending"
 		model.limit = 20
 

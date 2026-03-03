@@ -1,10 +1,17 @@
 package config
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
 func newTestLogger() *slog.Logger {
@@ -24,7 +31,7 @@ func TestExpandFileRules(t *testing.T) {
 	// Create test rule file
 	ruleFileContent := `rules:
   - name: "Test Rule 1"
-    type: "evm_address_whitelist"
+    type: "evm_address_list"
     mode: "whitelist"
     enabled: true
     config:
@@ -53,7 +60,7 @@ func TestExpandFileRules(t *testing.T) {
 	rules := []RuleConfig{
 		{
 			Name: "Inline Rule",
-			Type: "evm_address_whitelist",
+			Type: "evm_address_list",
 			Mode: "whitelist",
 			Config: map[string]interface{}{
 				"addresses": []string{"0xabcd"},
@@ -118,7 +125,7 @@ func TestExpandFileRules_NestedFiles(t *testing.T) {
 	// Create parent rule file that includes nested file
 	parentRuleContent := `rules:
   - name: "Parent Rule"
-    type: "evm_address_whitelist"
+    type: "evm_address_list"
     mode: "whitelist"
     enabled: true
     config:
@@ -288,7 +295,7 @@ func TestExpandFileRules_EnvVarExpansion(t *testing.T) {
 	// Create rule file with env var
 	ruleFileContent := `rules:
   - name: "Env Var Rule"
-    type: "evm_address_whitelist"
+    type: "evm_address_list"
     mode: "whitelist"
     enabled: true
     config:
@@ -336,4 +343,199 @@ func TestExpandFileRules_EnvVarExpansion(t *testing.T) {
 	if addresses[0] != "0xenv123456789abcdef" {
 		t.Errorf("expected env var to be expanded, got '%v'", addresses[0])
 	}
+}
+
+// ===========================================================================
+// SyncFromConfig tests (Fixes 1-4)
+// ===========================================================================
+
+// helper: create RuleInitializer with a MemoryRuleRepository
+func newTestRuleInit(t *testing.T) (*RuleInitializer, *storage.MemoryRuleRepository) {
+	t.Helper()
+	repo := storage.NewMemoryRuleRepository()
+	init, err := NewRuleInitializer(repo, newTestLogger())
+	require.NoError(t, err)
+	return init, repo
+}
+
+// helper: simple enabled rule config
+func enabledRule(name, mode string) RuleConfig {
+	return RuleConfig{
+		Name:    name,
+		Type:    "evm_address_list",
+		Mode:    mode,
+		Enabled: true,
+		Config: map[string]interface{}{
+			"addresses": []interface{}{"0x1234567890abcdef1234567890abcdef12345678"},
+		},
+	}
+}
+
+// Fix 2: Limit -1 ensures all config rules are fetched (no 1000 cap)
+func TestSyncFromConfig_NoLimitCap(t *testing.T) {
+	init, repo := newTestRuleInit(t)
+	ctx := context.Background()
+
+	// Sync 3 rules
+	rules := []RuleConfig{
+		enabledRule("Rule 1", "whitelist"),
+		enabledRule("Rule 2", "whitelist"),
+		enabledRule("Rule 3", "whitelist"),
+	}
+	require.NoError(t, init.SyncFromConfig(ctx, rules))
+
+	// All 3 should exist
+	configSource := types.RuleSourceConfig
+	all, err := repo.List(ctx, storage.RuleFilter{Source: &configSource, Limit: -1})
+	require.NoError(t, err)
+	assert.Len(t, all, 3)
+}
+
+// Fix 1: Disabled rule that previously existed in DB gets disabled
+func TestSyncFromConfig_DisabledRuleUpdatedInDB(t *testing.T) {
+	init, repo := newTestRuleInit(t)
+	ctx := context.Background()
+
+	// First sync: enabled rule
+	rules := []RuleConfig{enabledRule("My Rule", "whitelist")}
+	require.NoError(t, init.SyncFromConfig(ctx, rules))
+
+	// Get the rule ID
+	ruleID := EffectiveRuleID(0, rules[0])
+	rule, err := repo.Get(ctx, ruleID)
+	require.NoError(t, err)
+	assert.True(t, rule.Enabled)
+
+	// Second sync: same rule now disabled
+	rules[0].Enabled = false
+	require.NoError(t, init.SyncFromConfig(ctx, rules))
+
+	// Rule should still exist but be disabled
+	rule, err = repo.Get(ctx, ruleID)
+	require.NoError(t, err)
+	assert.False(t, rule.Enabled, "rule should be disabled in DB")
+}
+
+// Fix 1: Disabled rule that never existed is not created
+func TestSyncFromConfig_DisabledRuleNotCreated(t *testing.T) {
+	init, repo := newTestRuleInit(t)
+	ctx := context.Background()
+
+	rules := []RuleConfig{
+		{
+			Name:    "Never Active",
+			Type:    "evm_address_list",
+			Mode:    "whitelist",
+			Enabled: false,
+			Config: map[string]interface{}{
+				"addresses": []interface{}{"0x1234567890abcdef1234567890abcdef12345678"},
+			},
+		},
+	}
+	require.NoError(t, init.SyncFromConfig(ctx, rules))
+
+	ruleID := EffectiveRuleID(0, rules[0])
+	_, err := repo.Get(ctx, ruleID)
+	assert.ErrorIs(t, err, types.ErrNotFound, "disabled rule that never existed should not be created")
+}
+
+// Fix 3: Transaction wrapping (verifies MemoryRuleRepository implements Transactional)
+func TestSyncFromConfig_UsesTransaction(t *testing.T) {
+	repo := storage.NewMemoryRuleRepository()
+
+	// Verify MemoryRuleRepository implements Transactional
+	_, ok := storage.RuleRepository(repo).(storage.Transactional)
+	assert.True(t, ok, "MemoryRuleRepository should implement Transactional")
+
+	init, err := NewRuleInitializer(repo, newTestLogger())
+	require.NoError(t, err)
+
+	rules := []RuleConfig{enabledRule("Tx Rule", "whitelist")}
+	require.NoError(t, init.SyncFromConfig(context.Background(), rules))
+
+	ruleID := EffectiveRuleID(0, rules[0])
+	rule, err := repo.Get(context.Background(), ruleID)
+	require.NoError(t, err)
+	assert.Equal(t, "Tx Rule", rule.Name)
+}
+
+// Fix 4: Post-sync verification catches stale rules
+func TestSyncFromConfig_VerificationDetectsStaleRules(t *testing.T) {
+	init, repo := newTestRuleInit(t)
+	ctx := context.Background()
+
+	// Sync 2 rules
+	rules := []RuleConfig{
+		enabledRule("Rule A", "whitelist"),
+		enabledRule("Rule B", "whitelist"),
+	}
+	require.NoError(t, init.SyncFromConfig(ctx, rules))
+
+	// Remove Rule B from config — stale cleanup should delete it
+	rules = rules[:1]
+	require.NoError(t, init.SyncFromConfig(ctx, rules))
+
+	// Only Rule A should remain
+	configSource := types.RuleSourceConfig
+	all, err := repo.List(ctx, storage.RuleFilter{Source: &configSource, Limit: -1})
+	require.NoError(t, err)
+	assert.Len(t, all, 1)
+	assert.Equal(t, "Rule A", all[0].Name)
+}
+
+// SyncFromConfig creates new and updates existing rules
+func TestSyncFromConfig_CreateAndUpdate(t *testing.T) {
+	init, repo := newTestRuleInit(t)
+	ctx := context.Background()
+
+	rules := []RuleConfig{enabledRule("Original", "whitelist")}
+	rules[0].Id = "stable-id" // use custom ID so it stays stable across name changes
+	require.NoError(t, init.SyncFromConfig(ctx, rules))
+
+	ruleID := types.RuleID("stable-id")
+	rule, err := repo.Get(ctx, ruleID)
+	require.NoError(t, err)
+	assert.Equal(t, "Original", rule.Name)
+
+	// Update rule name
+	rules[0].Name = "Updated"
+	require.NoError(t, init.SyncFromConfig(ctx, rules))
+
+	rule, err = repo.Get(ctx, ruleID)
+	require.NoError(t, err)
+	assert.Equal(t, "Updated", rule.Name)
+}
+
+// SyncFromConfig with empty rules deletes all stale config rules
+func TestSyncFromConfig_EmptyRulesDeletesAll(t *testing.T) {
+	init, repo := newTestRuleInit(t)
+	ctx := context.Background()
+
+	rules := []RuleConfig{enabledRule("To Delete", "whitelist")}
+	require.NoError(t, init.SyncFromConfig(ctx, rules))
+
+	// Now sync with empty rules
+	require.NoError(t, init.SyncFromConfig(ctx, nil))
+
+	configSource := types.RuleSourceConfig
+	all, err := repo.List(ctx, storage.RuleFilter{Source: &configSource, Limit: -1})
+	require.NoError(t, err)
+	assert.Len(t, all, 0)
+}
+
+// SyncFromConfig rejects duplicate rule IDs
+func TestSyncFromConfig_DuplicateRuleIDs(t *testing.T) {
+	init, _ := newTestRuleInit(t)
+	ctx := context.Background()
+
+	rules := []RuleConfig{
+		{Id: "dup", Name: "Rule 1", Type: "evm_address_list", Mode: "whitelist", Enabled: true,
+			Config: map[string]interface{}{"addresses": []interface{}{"0x1234567890abcdef1234567890abcdef12345678"}}},
+		{Id: "dup", Name: "Rule 2", Type: "evm_address_list", Mode: "whitelist", Enabled: true,
+			Config: map[string]interface{}{"addresses": []interface{}{"0x1234567890abcdef1234567890abcdef12345678"}}},
+	}
+
+	err := init.SyncFromConfig(ctx, rules)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "duplicate rule id")
 }

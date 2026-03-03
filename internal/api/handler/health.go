@@ -32,6 +32,7 @@ func (h *HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+	// #nosec G104 -- HTTP response write error cannot be meaningfully handled
 	json.NewEncoder(w).Encode(HealthResponse{
 		Status:  "ok",
 		Version: h.version,

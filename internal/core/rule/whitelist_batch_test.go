@@ -227,7 +227,7 @@ func TestWhitelistRuleEngine_evaluateWhitelistBatch_NoBatchEvaluator(t *testing.
 	req := &types.SignRequest{ID: "test-req"}
 
 	// Should return nil because evaluator doesn't support batch
-	result, _ := engine.evaluateWhitelistBatch(context.Background(), repo.rules, req, nil)
+	result, _, _ := engine.evaluateWhitelistBatch(context.Background(), repo.rules, req, nil)
 	assert.Nil(t, result)
 }
 
@@ -253,7 +253,7 @@ func TestWhitelistRuleEngine_evaluateWhitelistBatch_CannotBatch(t *testing.T) {
 	req := &types.SignRequest{ID: "test-req"}
 
 	// Should return nil because evaluator says cannot batch
-	result, _ := engine.evaluateWhitelistBatch(context.Background(), repo.rules, req, nil)
+	result, _, _ := engine.evaluateWhitelistBatch(context.Background(), repo.rules, req, nil)
 	assert.Nil(t, result)
 }
 
@@ -282,7 +282,7 @@ func TestWhitelistRuleEngine_evaluateWhitelistBatch_BatchEvaluationError(t *test
 	req := &types.SignRequest{ID: "test-req"}
 
 	// Should return nil because batch evaluation failed
-	result, _ := engine.evaluateWhitelistBatch(context.Background(), repo.rules, req, nil)
+	result, _, _ := engine.evaluateWhitelistBatch(context.Background(), repo.rules, req, nil)
 	assert.Nil(t, result)
 }
 
@@ -315,7 +315,7 @@ func TestWhitelistRuleEngine_evaluateWhitelistBatch_AllSkipped(t *testing.T) {
 	req := &types.SignRequest{ID: "test-req"}
 
 	// Should return nil because all rules were skipped
-	result, _ := engine.evaluateWhitelistBatch(context.Background(), repo.rules, req, nil)
+	result, _, _ := engine.evaluateWhitelistBatch(context.Background(), repo.rules, req, nil)
 	assert.Nil(t, result)
 }
 
@@ -348,7 +348,7 @@ func TestWhitelistRuleEngine_evaluateWhitelistBatch_AllFailed(t *testing.T) {
 	req := &types.SignRequest{ID: "test-req"}
 
 	// Should return nil because no rule passed
-	result, _ := engine.evaluateWhitelistBatch(context.Background(), repo.rules, req, nil)
+	result, _, _ := engine.evaluateWhitelistBatch(context.Background(), repo.rules, req, nil)
 	assert.Nil(t, result)
 }
 
@@ -380,7 +380,7 @@ func TestWhitelistRuleEngine_evaluateWhitelistBatch_FirstPasses(t *testing.T) {
 
 	req := &types.SignRequest{ID: "test-req"}
 
-	result, _ := engine.evaluateWhitelistBatch(context.Background(), repo.rules, req, nil)
+	result, _, _ := engine.evaluateWhitelistBatch(context.Background(), repo.rules, req, nil)
 	require.NotNil(t, result)
 	assert.True(t, result.Allowed)
 	assert.Equal(t, types.RuleID("rule1"), result.AllowedBy.ID)
@@ -415,7 +415,7 @@ func TestWhitelistRuleEngine_evaluateWhitelistBatch_SecondPasses(t *testing.T) {
 
 	req := &types.SignRequest{ID: "test-req"}
 
-	result, _ := engine.evaluateWhitelistBatch(context.Background(), repo.rules, req, nil)
+	result, _, _ := engine.evaluateWhitelistBatch(context.Background(), repo.rules, req, nil)
 	require.NotNil(t, result)
 	assert.True(t, result.Allowed)
 	assert.Equal(t, types.RuleID("rule2"), result.AllowedBy.ID)
@@ -450,7 +450,7 @@ func TestWhitelistRuleEngine_evaluateWhitelistBatch_SkipAndPass(t *testing.T) {
 
 	req := &types.SignRequest{ID: "test-req"}
 
-	result, _ := engine.evaluateWhitelistBatch(context.Background(), repo.rules, req, nil)
+	result, _, _ := engine.evaluateWhitelistBatch(context.Background(), repo.rules, req, nil)
 	require.NotNil(t, result)
 	assert.True(t, result.Allowed)
 	assert.Equal(t, types.RuleID("rule2"), result.AllowedBy.ID)
@@ -484,7 +484,7 @@ func TestWhitelistRuleEngine_evaluateWhitelistBatch_ResultWithError(t *testing.T
 
 	req := &types.SignRequest{ID: "test-req"}
 
-	result, _ := engine.evaluateWhitelistBatch(context.Background(), repo.rules, req, nil)
+	result, _, _ := engine.evaluateWhitelistBatch(context.Background(), repo.rules, req, nil)
 	require.NotNil(t, result)
 	assert.True(t, result.Allowed)
 	assert.Equal(t, types.RuleID("rule2"), result.AllowedBy.ID)
@@ -533,7 +533,7 @@ func TestWhitelistRuleEngine_evaluateWhitelistBatch_MultipleTypes(t *testing.T) 
 
 	req := &types.SignRequest{ID: "test-req"}
 
-	result, _ := engine.evaluateWhitelistBatch(context.Background(), repo.rules, req, nil)
+	result, _, _ := engine.evaluateWhitelistBatch(context.Background(), repo.rules, req, nil)
 	require.NotNil(t, result)
 	assert.True(t, result.Allowed)
 }
@@ -548,7 +548,7 @@ func TestWhitelistRuleEngine_evaluateWhitelistBatch_EmptyRules(t *testing.T) {
 
 	req := &types.SignRequest{ID: "test-req"}
 
-	result, _ := engine.evaluateWhitelistBatch(context.Background(), repo.rules, req, nil)
+	result, _, _ := engine.evaluateWhitelistBatch(context.Background(), repo.rules, req, nil)
 	assert.Nil(t, result)
 }
 
@@ -568,7 +568,7 @@ func TestWhitelistRuleEngine_evaluateWhitelistBatch_NoEvaluator(t *testing.T) {
 
 	req := &types.SignRequest{ID: "test-req"}
 
-	result, _ := engine.evaluateWhitelistBatch(context.Background(), repo.rules, req, nil)
+	result, _, _ := engine.evaluateWhitelistBatch(context.Background(), repo.rules, req, nil)
 	assert.Nil(t, result)
 }
 

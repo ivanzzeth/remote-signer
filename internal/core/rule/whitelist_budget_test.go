@@ -106,6 +106,10 @@ func (m *budgetExceededBudgetRepo) AtomicSpend(ctx context.Context, ruleID types
 	return nil
 }
 
+func (m *budgetExceededBudgetRepo) MarkAlertSent(ctx context.Context, ruleID types.RuleID, unit string) error {
+	return nil
+}
+
 // budgetExceededTemplateRepo returns a template with count_only metering for any ID.
 type budgetExceededTemplateRepo struct {
 	metering []byte
@@ -132,9 +136,9 @@ func (r *budgetExceededTemplateRepo) Count(ctx context.Context, filter storage.T
 	return 0, nil
 }
 
-// TestWhitelistRuleEngine_BudgetExceeded_SkipsToNextRule ensures that when the first
-// matching whitelist rule has budget exceeded, the engine skips it (fail-open) and
-// allows via the next rule that has budget available.
+// TestWhitelistRuleEngine_BudgetExceeded_DeniesRequest ensures that when the first
+// matching whitelist rule has budget exceeded, the engine blocks the request (fail-closed)
+// instead of falling through to the next rule, preventing budget bypass attacks.
 func TestWhitelistRuleEngine_BudgetExceeded_SkipsToNextRule(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
@@ -167,9 +171,188 @@ func TestWhitelistRuleEngine_BudgetExceeded_SkipsToNextRule(t *testing.T) {
 	req := &types.SignRequest{ID: "req-1", ChainType: types.ChainTypeEVM}
 	parsed := &types.ParsedPayload{}
 
-	ruleID, reason, err := engine.Evaluate(context.Background(), req, parsed)
+	// SECURITY: budget exhaustion must block the request (fail-closed), not fall through
+	_, _, err = engine.Evaluate(context.Background(), req, parsed)
+	require.Error(t, err, "budget-exhausted rule must block the request")
+	assert.Contains(t, err.Error(), "budget exceeded", "error must indicate budget exhaustion")
+}
+
+// mockDelegationEvaluator implements EvaluatorWithDelegation for testing delegation+budget paths.
+type mockDelegationEvaluator struct {
+	ruleType   types.RuleType
+	delegation *DelegationRequest
+	matched    bool
+	reason     string
+}
+
+func (e *mockDelegationEvaluator) Type() types.RuleType { return e.ruleType }
+func (e *mockDelegationEvaluator) Evaluate(ctx context.Context, r *types.Rule, req *types.SignRequest, parsed *types.ParsedPayload) (bool, string, error) {
+	return e.matched, e.reason, nil
+}
+func (e *mockDelegationEvaluator) EvaluateWithDelegation(ctx context.Context, r *types.Rule, req *types.SignRequest, parsed *types.ParsedPayload) (bool, string, *DelegationRequest, error) {
+	return e.matched, e.reason, e.delegation, nil
+}
+
+// mockRuleAwareDelegationEvaluator returns per-rule delegations (or nil for non-delegating rules).
+type mockRuleAwareDelegationEvaluator struct {
+	ruleType    types.RuleType
+	delegations map[types.RuleID]*DelegationRequest
+}
+
+func (e *mockRuleAwareDelegationEvaluator) Type() types.RuleType { return e.ruleType }
+func (e *mockRuleAwareDelegationEvaluator) Evaluate(ctx context.Context, r *types.Rule, req *types.SignRequest, parsed *types.ParsedPayload) (bool, string, error) {
+	return true, "match", nil
+}
+func (e *mockRuleAwareDelegationEvaluator) EvaluateWithDelegation(ctx context.Context, r *types.Rule, req *types.SignRequest, parsed *types.ParsedPayload) (bool, string, *DelegationRequest, error) {
+	return true, "match", e.delegations[r.ID], nil
+}
+
+// TestWhitelistRuleEngine_DelegationBudgetExceeded ensures that when a delegating rule
+// has budget exhausted, the request is blocked (fail-closed) BEFORE delegation resolves.
+func TestWhitelistRuleEngine_DelegationBudgetExceeded(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	tmpl1 := "tmpl-1"
+	parentRule := &types.Rule{
+		ID: "parent-1", Name: "Parent", Type: "deleg_type",
+		Mode: types.RuleModeWhitelist, TemplateID: &tmpl1, Enabled: true,
+	}
+	targetRule := &types.Rule{
+		ID: "target-1", Name: "Target", Type: "deleg_type",
+		Mode: types.RuleModeWhitelist, Enabled: true,
+	}
+
+	ruleRepo := &budgetExceededRuleRepo{rules: []*types.Rule{parentRule, targetRule}}
+	budgetRepo := &budgetExceededBudgetRepo{
+		state: map[string]*types.RuleBudget{
+			"parent-1:count": {
+				ID: "b1", RuleID: "parent-1", Unit: "count",
+				MaxTotal: "5", Spent: "5", TxCount: 5, MaxTxCount: 5,
+				UpdatedAt: time.Now(),
+			},
+		},
+	}
+	templateRepo := newBudgetExceededTemplateRepo()
+	bc := NewBudgetChecker(budgetRepo, templateRepo, logger)
+
+	engine, err := NewWhitelistRuleEngine(ruleRepo, logger, WithBudgetChecker(bc))
 	require.NoError(t, err)
-	require.NotNil(t, ruleID)
-	assert.Equal(t, types.RuleID("rule-budget-2"), *ruleID, "must allow via second rule when first rule budget exceeded")
-	assert.Equal(t, "match2", reason)
+
+	// Register evaluator that matches and returns a delegation
+	engine.RegisterEvaluator(&mockDelegationEvaluator{
+		ruleType: "deleg_type",
+		matched:  true,
+		reason:   "match",
+		delegation: &DelegationRequest{
+			TargetRuleIDs: []types.RuleID{"target-1"},
+			Mode:          "single",
+			Payload:       map[string]interface{}{"signer": "0x1"},
+		},
+	})
+	engine.delegationConverter = func(ctx context.Context, payload interface{}, mode string) (*types.SignRequest, *types.ParsedPayload, error) {
+		return &types.SignRequest{SignerAddress: "0x1"}, &types.ParsedPayload{}, nil
+	}
+
+	req := &types.SignRequest{ID: "req-1", ChainType: types.ChainTypeEVM}
+	parsed := &types.ParsedPayload{}
+
+	// SECURITY: parent's budget exhaustion must block BEFORE delegation resolves
+	_, _, err = engine.Evaluate(context.Background(), req, parsed)
+	require.Error(t, err, "delegating rule with exhausted budget must block")
+	assert.Contains(t, err.Error(), "budget exceeded")
+}
+
+// TestWhitelistRuleEngine_DelegationBudgetOK ensures that when a delegating rule
+// has sufficient budget, the delegation proceeds normally.
+func TestWhitelistRuleEngine_DelegationBudgetOK(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	tmpl1 := "tmpl-1"
+	parentRule := &types.Rule{
+		ID: "parent-1", Name: "Parent", Type: "deleg_type",
+		Mode: types.RuleModeWhitelist, TemplateID: &tmpl1, Enabled: true,
+	}
+	targetRule := &types.Rule{
+		ID: "target-1", Name: "Target", Type: "deleg_type",
+		Mode: types.RuleModeWhitelist, Enabled: true,
+	}
+
+	ruleRepo := &budgetExceededRuleRepo{rules: []*types.Rule{parentRule, targetRule}}
+	budgetRepo := &budgetExceededBudgetRepo{
+		state: map[string]*types.RuleBudget{
+			"parent-1:count": {
+				ID: "b1", RuleID: "parent-1", Unit: "count",
+				MaxTotal: "100", Spent: "5", TxCount: 5,
+				UpdatedAt: time.Now(),
+			},
+		},
+	}
+	templateRepo := newBudgetExceededTemplateRepo()
+	bc := NewBudgetChecker(budgetRepo, templateRepo, logger)
+
+	engine, err := NewWhitelistRuleEngine(ruleRepo, logger, WithBudgetChecker(bc))
+	require.NoError(t, err)
+
+	// Parent matches and delegates; target matches with no delegation
+	engine.RegisterEvaluator(&mockRuleAwareDelegationEvaluator{
+		ruleType: "deleg_type",
+		delegations: map[types.RuleID]*DelegationRequest{
+			"parent-1": {
+				TargetRuleIDs: []types.RuleID{"target-1"},
+				Mode:          "single",
+				Payload:       map[string]interface{}{"signer": "0x1"},
+			},
+			// target-1: nil delegation (just matches)
+		},
+	})
+	engine.delegationConverter = func(ctx context.Context, payload interface{}, mode string) (*types.SignRequest, *types.ParsedPayload, error) {
+		return &types.SignRequest{SignerAddress: "0x1"}, &types.ParsedPayload{}, nil
+	}
+
+	req := &types.SignRequest{ID: "req-1", ChainType: types.ChainTypeEVM}
+	parsed := &types.ParsedPayload{}
+
+	// Budget is OK → delegation proceeds → target rule matches → allowed
+	ruleID, _, err := engine.Evaluate(context.Background(), req, parsed)
+	require.NoError(t, err, "delegation with sufficient budget should succeed")
+	require.NotNil(t, ruleID, "should return the allowing rule")
+}
+
+// TestWhitelistRuleEngine_SequentialBudgetBlocked verifies that budget exhaustion
+// via the sequential (non-batch) path returns Blocked result properly.
+func TestWhitelistRuleEngine_SequentialBudgetBlocked(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	tmpl1 := "tmpl-seq"
+	ruleRepo := &budgetExceededRuleRepo{
+		rules: []*types.Rule{
+			{ID: "rule-seq-1", Name: "SeqRule", Type: "seq_type",
+				Mode: types.RuleModeWhitelist, TemplateID: &tmpl1, Enabled: true},
+		},
+	}
+	budgetRepo := &budgetExceededBudgetRepo{
+		state: map[string]*types.RuleBudget{
+			"rule-seq-1:count": {
+				ID: "b1", RuleID: "rule-seq-1", Unit: "count",
+				MaxTotal: "10", Spent: "10", TxCount: 10, MaxTxCount: 10,
+				UpdatedAt: time.Now(),
+			},
+		},
+	}
+	templateRepo := newBudgetExceededTemplateRepo()
+	bc := NewBudgetChecker(budgetRepo, templateRepo, logger)
+
+	engine, err := NewWhitelistRuleEngine(ruleRepo, logger, WithBudgetChecker(bc))
+	require.NoError(t, err)
+
+	// Non-batch evaluator forces sequential path
+	engine.RegisterEvaluator(&simpleEvaluator{ruleType: "seq_type", matchResult: true, reason: "match"})
+
+	req := &types.SignRequest{ID: "req-1", ChainType: types.ChainTypeEVM}
+	parsed := &types.ParsedPayload{}
+
+	// Budget exceeded via sequential path → blocked
+	_, _, err = engine.Evaluate(context.Background(), req, parsed)
+	require.Error(t, err, "sequential budget exceeded must block")
+	assert.Contains(t, err.Error(), "budget exceeded")
 }

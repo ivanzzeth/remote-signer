@@ -123,7 +123,9 @@ func (p *PushoverClient) SendNotification(userKey, message string, priority int,
 
 		var result PushoverResponse
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			resp.Body.Close()
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				log.Warn().Err(closeErr).Msg("failed to close response body")
+			}
 			lastErr = fmt.Errorf("failed to decode response: %w", err)
 			log.Warn().
 				Err(err).
@@ -132,7 +134,9 @@ func (p *PushoverClient) SendNotification(userKey, message string, priority int,
 				Msg("Attempt failed to decode response")
 			continue
 		}
-		resp.Body.Close()
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			log.Warn().Err(closeErr).Msg("failed to close response body")
+		}
 
 		if result.Status != 1 {
 			errMsg := "unknown error"

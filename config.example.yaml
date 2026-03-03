@@ -39,8 +39,19 @@ chains:
       #     password_env: "EVM_KEYSTORE_PASSWORD_1"
       #     enabled: true
 
+      # HD Wallets - derive multiple addresses from a single mnemonic
+      # hd_wallets:
+      #   - path: "./data/hd-wallets/wallet1.json"
+      #     password_env: "HD_WALLET_PASSWORD_1"
+      #     # password_stdin: false    # Set true to read password from stdin
+      #     derive_indices: [0, 1, 2]  # Indices to derive at startup
+      #     enabled: true
+
     # Directory for storing dynamically created keystores via API
     keystore_dir: "./data/keystores"
+
+    # Directory for storing HD wallets created via API
+    hd_wallet_dir: "./data/hd-wallets"
 
     # Foundry configuration for Solidity expression rules
     foundry:
@@ -95,8 +106,11 @@ security:
   # 60s is recommended - enough for network latency, but limits replay attacks
   max_request_age: "60s"
 
-  # Default rate limit (requests per minute)
+  # Default rate limit per API key (requests per minute)
   rate_limit_default: 100
+
+  # Per-IP rate limit (requests per minute, pre-auth). Protects against unauthenticated flood attacks.
+  ip_rate_limit: 200
 
   # Nonce requirement for replay protection
   # When true (default), requests MUST include X-Nonce header
@@ -140,6 +154,11 @@ security:
     # WARNING: Only enable this if running behind a trusted reverse proxy
     # If enabled, the first IP in X-Forwarded-For will be used as client IP
     trust_proxy: false
+    # Trusted proxy IPs/CIDRs - only these sources can set X-Forwarded-For/X-Real-IP
+    # Required when trust_proxy is true; if empty, proxy headers are ignored (fail-closed)
+    # trusted_proxies:
+    #   - "10.0.0.1"        # nginx internal IP
+    #   - "172.16.0.0/12"   # Docker network range
 
 logger:
   # Log level: debug, info, warn, error
@@ -181,6 +200,8 @@ api_keys:
     # allowed_chain_types: ["evm"]       # Empty = all chains allowed
     # allowed_signers:                   # Empty = all signers allowed
     #   - "0x1234567890abcdef1234567890abcdef12345678"
+    # allowed_hd_wallets:               # HD wallet primary addresses (empty = none)
+    #   - "0xABCD..."                   # Grants access to all derived addresses + derive permission
 
   # Example 3: Direct public key in base64 format (for development/testing only)
   # - id: "dev-key"
@@ -195,6 +216,15 @@ api_keys:
   #   public_key: "d75a980182b10ab7..."  # Ed25519 public key (64 hex chars = 32 bytes, auto-detected)
   #   admin: false
   #   enabled: true
+
+  # Example 5: HD wallet-scoped key (can derive and sign with all derived addresses)
+  # - id: "hd-app-key"
+  #   name: "HD Wallet App"
+  #   public_key_env: "HD_APP_PUBLIC_KEY"
+  #   admin: false
+  #   enabled: true
+  #   allowed_hd_wallets:
+  #     - "0xHDWalletPrimaryAddress"   # Can derive + sign with all derived addresses
 
 # To generate an Ed25519 key pair:
 # 1. Using openssl (recommended):
@@ -358,7 +388,7 @@ rules:
 
   # Example 1: Simple address whitelist
   - name: "Allow transfers to treasury"
-    type: "evm_address_whitelist"
+    type: "evm_address_list"
     mode: "whitelist"
     enabled: true
     # Scope filters (optional - limit which requests this rule applies to)

@@ -10,19 +10,22 @@ import (
 	"time"
 
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
+	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/metrics"
+	"github.com/ivanzzeth/remote-signer/internal/validate"
 )
 
 // SignHandler handles EVM sign requests
 type SignHandler struct {
-	signService *service.SignService
-	logger      *slog.Logger
+	signService   *service.SignService
+	signerManager evm.SignerManager
+	logger        *slog.Logger
 }
 
 // NewSignHandler creates a new sign handler
-func NewSignHandler(signService *service.SignService, logger *slog.Logger) (*SignHandler, error) {
+func NewSignHandler(signService *service.SignService, signerManager evm.SignerManager, logger *slog.Logger) (*SignHandler, error) {
 	if signService == nil {
 		return nil, fmt.Errorf("sign service is required")
 	}
@@ -30,8 +33,9 @@ func NewSignHandler(signService *service.SignService, logger *slog.Logger) (*Sig
 		return nil, fmt.Errorf("logger is required")
 	}
 	return &SignHandler{
-		signService: signService,
-		logger:      logger,
+		signService:   signService,
+		signerManager: signerManager,
+		logger:        logger,
 	}, nil
 }
 
@@ -100,7 +104,7 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, "signer_address is required", http.StatusBadRequest)
 		return
 	}
-	if !ethAddressRegex.MatchString(req.SignerAddress) {
+	if !validate.IsValidEthereumAddress(req.SignerAddress) {
 		h.writeError(w, "invalid signer_address: must be 0x followed by 40 hex characters", http.StatusBadRequest)
 		return
 	}
@@ -108,7 +112,7 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, "sign_type is required", http.StatusBadRequest)
 		return
 	}
-	if !validSignTypes[req.SignType] {
+	if !validate.ValidSignTypes[req.SignType] {
 		h.writeError(w, "invalid sign_type: must be one of hash, raw_message, eip191, personal, typed_data, transaction", http.StatusBadRequest)
 		return
 	}
@@ -122,8 +126,16 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check signer permission
-	if !middleware.CheckSignerPermission(apiKey, req.SignerAddress) {
+	// Check signer permission (includes HD wallet derived address check)
+	var hdMgr middleware.HDWalletDerivedLister
+	if h.signerManager != nil {
+		var hdErr error
+		hdMgr, hdErr = h.signerManager.HDWalletManager()
+		if hdErr != nil {
+			h.logger.Warn("failed to get HD wallet manager for permission check", "error", hdErr)
+		}
+	}
+	if !middleware.CheckSignerPermissionWithHDWallets(apiKey, req.SignerAddress, hdMgr) {
 		h.writeError(w, "not authorized for this signer", http.StatusForbidden)
 		return
 	}
@@ -144,6 +156,16 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	chainType := string(types.ChainTypeEVM)
 
 	if err != nil {
+		if types.IsSignerLocked(err) {
+			h.logger.Warn("signer is locked",
+				"signer_address", req.SignerAddress,
+				"sign_type", req.SignType,
+				"chain_id", req.ChainID,
+			)
+			metrics.RecordSignRequestDuration(chainType, req.SignType, metrics.SignOutcomeError, duration)
+			h.writeError(w, fmt.Sprintf("signer is locked: %s — unlock via POST /api/v1/evm/signers/%s/unlock", req.SignerAddress, req.SignerAddress), http.StatusForbidden)
+			return
+		}
 		if types.IsNotFound(err) || types.IsSignerNotFound(err) {
 			h.logger.Warn("signer not found",
 				"signer_address", req.SignerAddress,
@@ -152,6 +174,17 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			)
 			metrics.RecordSignRequestDuration(chainType, req.SignType, metrics.SignOutcomeNotFound, duration)
 			h.writeError(w, fmt.Sprintf("signer not found: %s", req.SignerAddress), http.StatusNotFound)
+			return
+		}
+		if errors.Is(err, types.ErrInvalidPayload) {
+			h.logger.Warn("invalid payload",
+				"error", err,
+				"signer_address", req.SignerAddress,
+				"sign_type", req.SignType,
+				"chain_id", req.ChainID,
+			)
+			metrics.RecordSignRequestDuration(chainType, req.SignType, metrics.SignOutcomeError, duration)
+			h.writeError(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		if errors.Is(err, service.ErrManualApprovalDisabled) {

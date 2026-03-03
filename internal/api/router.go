@@ -26,9 +26,12 @@ type TemplateConfig struct {
 type RouterConfig struct {
 	Version            string
 	IPWhitelistConfig  *middleware.IPWhitelist
+	IPRateLimit        int // requests per minute per IP (pre-auth); 0 = use default (200)
 	SolidityValidator  *evm.SolidityRuleValidator
+	JSEvaluator        *evm.JSRuleEvaluator
 	Template           *TemplateConfig
 	ApprovalGuard      *service.ManualApprovalGuard // optional: for admin resume endpoint
+	APIKeyRepo         storage.APIKeyRepository     // optional: for signer access visibility
 }
 
 // Router handles HTTP routing
@@ -84,7 +87,7 @@ func (r *Router) setupRoutes() error {
 	r.mux.Handle("/metrics", middleware.SecurityHeadersMiddleware()(metrics.Handler()))
 
 	// EVM handlers
-	signHandler, err := evmhandler.NewSignHandler(r.signService, r.logger)
+	signHandler, err := evmhandler.NewSignHandler(r.signService, r.signerManager, r.logger)
 	if err != nil {
 		return err
 	}
@@ -113,12 +116,20 @@ func (r *Router) setupRoutes() error {
 	if r.config.SolidityValidator != nil {
 		ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithSolidityValidator(r.config.SolidityValidator))
 	}
+	if r.config.JSEvaluator != nil {
+		ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithJSEvaluator(r.config.JSEvaluator))
+	}
 	ruleHandler, err := evmhandler.NewRuleHandler(r.ruleRepo, r.logger, ruleHandlerOpts...)
 	if err != nil {
 		return err
 	}
 
-	signerHandler, err := evmhandler.NewSignerHandler(r.signerManager, r.logger)
+	signerHandler, err := evmhandler.NewSignerHandler(r.signerManager, r.config.APIKeyRepo, r.logger)
+	if err != nil {
+		return err
+	}
+
+	hdWalletHandler, err := evmhandler.NewHDWalletHandler(r.signerManager, r.logger)
 	if err != nil {
 		return err
 	}
@@ -158,6 +169,12 @@ func (r *Router) setupRoutes() error {
 
 	// Signer management routes (GET with auth, POST with auth + admin)
 	r.mux.Handle("/api/v1/evm/signers", r.withAuth(signerHandler))
+	// Signer action routes: /api/v1/evm/signers/{address}/unlock, /lock
+	r.mux.Handle("/api/v1/evm/signers/", r.withAuth(http.HandlerFunc(signerHandler.HandleSignerAction)))
+
+	// HD wallet management routes (auth required; admin/HD wallet permission checked in handler)
+	r.mux.Handle("/api/v1/evm/hd-wallets", r.withAuth(hdWalletHandler))
+	r.mux.Handle("/api/v1/evm/hd-wallets/", r.withAuth(hdWalletHandler))
 
 	// Audit routes (with auth + admin required — audit logs contain sensitive data)
 	r.mux.Handle("/api/v1/audit", r.withAuthAndAdmin(auditHandler))
@@ -194,6 +211,7 @@ func (r *Router) withAuth(h http.Handler) http.Handler {
 		middleware.SecurityHeadersMiddleware(),
 		middleware.RecoveryMiddleware(r.logger),
 		middleware.LoggingMiddleware(r.logger),
+		middleware.IPRateLimitMiddleware(r.rateLimiter, r.ipWhitelist, r.config.IPRateLimit),
 		middleware.AuthMiddleware(r.authVerifier, r.logger),
 		middleware.RateLimitMiddleware(r.rateLimiter),
 	}
@@ -215,6 +233,7 @@ func (r *Router) withAuthAndAdmin(h http.Handler) http.Handler {
 		middleware.SecurityHeadersMiddleware(),
 		middleware.RecoveryMiddleware(r.logger),
 		middleware.LoggingMiddleware(r.logger),
+		middleware.IPRateLimitMiddleware(r.rateLimiter, r.ipWhitelist, r.config.IPRateLimit),
 		middleware.AuthMiddleware(r.authVerifier, r.logger),
 		middleware.AdminMiddleware(r.logger),
 		middleware.RateLimitMiddleware(r.rateLimiter),

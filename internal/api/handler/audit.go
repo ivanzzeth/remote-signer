@@ -10,6 +10,7 @@ import (
 
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/validate"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
@@ -91,8 +92,12 @@ func (h *AuditHandler) listAuditRecords(w http.ResponseWriter, r *http.Request) 
 		Limit: 30, // default limit
 	}
 
-	// Parse query parameters
+	// Parse query parameters (strict: invalid values return 400)
 	if eventType := query.Get("event_type"); eventType != "" {
+		if !validate.IsValidAuditEventType(eventType) {
+			h.writeError(w, "invalid event_type filter", http.StatusBadRequest)
+			return
+		}
 		et := types.AuditEventType(eventType)
 		filter.EventType = &et
 	}
@@ -100,18 +105,28 @@ func (h *AuditHandler) listAuditRecords(w http.ResponseWriter, r *http.Request) 
 		filter.APIKeyID = &apiKeyID
 	}
 	if chainType := query.Get("chain_type"); chainType != "" {
+		if !validate.IsValidChainType(chainType) {
+			h.writeError(w, "invalid chain_type filter", http.StatusBadRequest)
+			return
+		}
 		ct := types.ChainType(chainType)
 		filter.ChainType = &ct
 	}
 	if startTimeStr := query.Get("start_time"); startTimeStr != "" {
-		if startTime, err := time.Parse(time.RFC3339, startTimeStr); err == nil {
-			filter.StartTime = &startTime
+		startTime, err := time.Parse(time.RFC3339, startTimeStr)
+		if err != nil {
+			h.writeError(w, "invalid start_time: must be RFC3339", http.StatusBadRequest)
+			return
 		}
+		filter.StartTime = &startTime
 	}
 	if endTimeStr := query.Get("end_time"); endTimeStr != "" {
-		if endTime, err := time.Parse(time.RFC3339, endTimeStr); err == nil {
-			filter.EndTime = &endTime
+		endTime, err := time.Parse(time.RFC3339, endTimeStr)
+		if err != nil {
+			h.writeError(w, "invalid end_time: must be RFC3339", http.StatusBadRequest)
+			return
 		}
+		filter.EndTime = &endTime
 	}
 	if limitStr := query.Get("limit"); limitStr != "" {
 		if limit, err := strconv.Atoi(limitStr); err == nil && limit > 0 && limit <= 100 {
@@ -122,9 +137,11 @@ func (h *AuditHandler) listAuditRecords(w http.ResponseWriter, r *http.Request) 
 	// Parse cursor for pagination
 	if cursorStr := query.Get("cursor"); cursorStr != "" {
 		cursor, err := time.Parse(time.RFC3339Nano, cursorStr)
-		if err == nil {
-			filter.Cursor = &cursor
+		if err != nil {
+			h.writeError(w, "invalid cursor: must be RFC3339Nano timestamp", http.StatusBadRequest)
+			return
 		}
+		filter.Cursor = &cursor
 	}
 	if cursorID := query.Get("cursor_id"); cursorID != "" {
 		id := types.AuditID(cursorID)

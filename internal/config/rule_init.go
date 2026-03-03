@@ -9,11 +9,14 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/ruleconfig"
+	pkgvalidate "github.com/ivanzzeth/remote-signer/internal/validate"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
@@ -57,6 +60,7 @@ func (i *RuleInitializer) SetConfigDir(dir string) {
 // - Updates existing rules with new values from config
 // - Deletes config-sourced rules that are no longer in config (preserves API-created rules)
 // - Expands "file" type rules by loading rules from external YAML files
+// - Wraps all operations in a transaction if the repository supports it
 func (i *RuleInitializer) SyncFromConfig(ctx context.Context, rules []RuleConfig) error {
 	// Expand file-type rules
 	expandedRules, err := i.expandFileRules(rules)
@@ -64,18 +68,35 @@ func (i *RuleInitializer) SyncFromConfig(ctx context.Context, rules []RuleConfig
 		return fmt.Errorf("failed to expand file rules: %w", err)
 	}
 
-	// Build set of expected rule IDs from config
+	// Build set of expected rule IDs (custom id or generated); enforce uniqueness
 	expectedIDs := make(map[types.RuleID]bool)
 	for idx, ruleCfg := range expandedRules {
-		ruleID := i.generateRuleID(idx, ruleCfg)
+		ruleID := i.effectiveRuleID(idx, ruleCfg)
+		if expectedIDs[ruleID] {
+			return fmt.Errorf("duplicate rule id %q (rule %q); custom id must be unique", ruleID, ruleCfg.Name)
+		}
 		expectedIDs[ruleID] = true
 	}
 
+	syncBody := func(repo storage.RuleRepository) error {
+		return i.executeSyncBody(ctx, repo, expandedRules, expectedIDs)
+	}
+
+	// Use transaction if repository supports it
+	if txRepo, ok := i.repo.(storage.Transactional); ok {
+		return txRepo.RunInTransaction(ctx, syncBody)
+	}
+	return syncBody(i.repo)
+}
+
+// executeSyncBody performs the actual sync: delete stale rules, upsert current rules, verify consistency.
+// repo is the (possibly transactional) repository to use for all operations.
+func (i *RuleInitializer) executeSyncBody(ctx context.Context, repo storage.RuleRepository, expandedRules []RuleConfig, expectedIDs map[types.RuleID]bool) error {
 	// Get all existing config-sourced rules from database
 	configSource := types.RuleSourceConfig
-	existingRules, err := i.repo.List(ctx, storage.RuleFilter{
+	existingRules, err := repo.List(ctx, storage.RuleFilter{
 		Source: &configSource,
-		Limit:  1000, // Get all config rules
+		Limit:  -1, // No limit — fetch all config rules
 	})
 	if err != nil {
 		return fmt.Errorf("failed to list config rules: %w", err)
@@ -85,7 +106,7 @@ func (i *RuleInitializer) SyncFromConfig(ctx context.Context, rules []RuleConfig
 	deleted := 0
 	for _, rule := range existingRules {
 		if !expectedIDs[rule.ID] {
-			if err := i.repo.Delete(ctx, rule.ID); err != nil {
+			if err := repo.Delete(ctx, rule.ID); err != nil {
 				return fmt.Errorf("failed to delete stale config rule %s: %w", rule.ID, err)
 			}
 			i.logger.Info("Deleted stale config rule",
@@ -104,13 +125,54 @@ func (i *RuleInitializer) SyncFromConfig(ctx context.Context, rules []RuleConfig
 	// Sync rules from config
 	synced := 0
 	for idx, ruleCfg := range expandedRules {
-		if err := i.syncRule(ctx, idx, ruleCfg); err != nil {
+		ruleID := i.effectiveRuleID(idx, ruleCfg)
+		if err := i.syncRule(ctx, repo, ruleID, ruleCfg); err != nil {
 			return fmt.Errorf("failed to sync rule %s: %w", ruleCfg.Name, err)
 		}
 		synced++
 	}
 
+	// Verify post-sync consistency
+	if err := i.verifySyncConsistency(ctx, repo, expectedIDs); err != nil {
+		return fmt.Errorf("post-sync verification failed: %w", err)
+	}
+
 	i.logger.Info("Rules synced from config", "synced", synced, "deleted", deleted)
+	return nil
+}
+
+// verifySyncConsistency checks that DB state matches expected rule IDs after sync.
+// Returns error if extra config-sourced rules are found (stale leak detection).
+func (i *RuleInitializer) verifySyncConsistency(ctx context.Context, repo storage.RuleRepository, expectedIDs map[types.RuleID]bool) error {
+	configSource := types.RuleSourceConfig
+	dbRules, err := repo.List(ctx, storage.RuleFilter{
+		Source: &configSource,
+		Limit:  -1,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to list rules for verification: %w", err)
+	}
+
+	var extraIDs []string
+	for _, rule := range dbRules {
+		if !expectedIDs[rule.ID] {
+			extraIDs = append(extraIDs, string(rule.ID))
+		}
+	}
+	if len(extraIDs) > 0 {
+		return fmt.Errorf("stale config rules detected in DB after sync: %v", extraIDs)
+	}
+
+	// Audit summary
+	syncedIDs := make([]string, 0, len(expectedIDs))
+	for id := range expectedIDs {
+		syncedIDs = append(syncedIDs, string(id))
+	}
+	i.logger.Info("Post-sync verification passed",
+		"db_rule_count", len(dbRules),
+		"expected_count", len(expectedIDs),
+		"synced_ids", syncedIDs,
+	)
 	return nil
 }
 
@@ -164,7 +226,7 @@ func loadRulesFromFileStatic(fileCfg RuleConfig, configDir string, logger *slog.
 	if logger != nil {
 		logger.Info("Loading rules from file", "name", fileCfg.Name, "path", path)
 	}
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path is admin-configured via config file
 	if err != nil {
 		return nil, fmt.Errorf("failed to read rule file '%s': %w", path, err)
 	}
@@ -187,24 +249,99 @@ func (i *RuleInitializer) loadRulesFromFile(fileCfg RuleConfig) ([]RuleConfig, e
 }
 
 // generateRuleID generates a deterministic rule ID based on config content
-// This ensures the same config always produces the same ID
+// when no custom id is set (format: cfg_<sha256 prefix>).
 func (i *RuleInitializer) generateRuleID(idx int, ruleCfg RuleConfig) types.RuleID {
-	// Create a hash from the rule name and type to generate deterministic ID
-	// This allows the same rule in config to be updated rather than duplicated
+	return EffectiveRuleID(idx, ruleCfg)
+}
+
+// EffectiveRuleID returns the rule ID for a config rule at the given index.
+// Used by rule sync and by evm_js startup validation (same as validate-rules).
+// Exported so cmd/remote-signer can run evm_js test cases at startup.
+func EffectiveRuleID(idx int, ruleCfg RuleConfig) types.RuleID {
+	if s := strings.TrimSpace(ruleCfg.Id); s != "" {
+		return types.RuleID(s)
+	}
 	data := fmt.Sprintf("config:%d:%s:%s", idx, ruleCfg.Name, ruleCfg.Type)
 	hash := sha256.Sum256([]byte(data))
 	return types.RuleID("cfg_" + hex.EncodeToString(hash[:8]))
 }
 
-func (i *RuleInitializer) syncRule(ctx context.Context, idx int, ruleCfg RuleConfig) error {
-	// Skip disabled rules
+// ValidateDelegationTargets checks that all delegate_to references in rules
+// resolve to existing rule IDs. Returns error if any target is missing.
+func ValidateDelegationTargets(rules []RuleConfig) error {
+	// Build set of all known rule IDs
+	knownIDs := make(map[types.RuleID]bool, len(rules))
+	for idx, r := range rules {
+		knownIDs[EffectiveRuleID(idx, r)] = true
+	}
+	// Check each rule's delegate_to
+	var errs []string
+	for idx, r := range rules {
+		delegateTo, _ := r.Config["delegate_to"].(string)
+		if delegateTo == "" {
+			continue
+		}
+		ruleID := EffectiveRuleID(idx, r)
+		for _, part := range strings.Split(delegateTo, ",") {
+			targetID := types.RuleID(strings.TrimSpace(part))
+			if targetID == "" {
+				continue
+			}
+			if strings.Contains(string(targetID), "${") {
+				continue // unresolved variable — skip
+			}
+			if !knownIDs[targetID] {
+				errs = append(errs, fmt.Sprintf("rule %q (%s) delegate_to references non-existent target %q", r.Name, ruleID, targetID))
+			}
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("delegation target validation failed:\n  %s", strings.Join(errs, "\n  "))
+	}
+	return nil
+}
+
+// effectiveRuleID returns the rule ID to use: custom RuleConfig.Id if non-empty, else generated.
+func (i *RuleInitializer) effectiveRuleID(idx int, ruleCfg RuleConfig) types.RuleID {
+	return EffectiveRuleID(idx, ruleCfg)
+}
+
+func (i *RuleInitializer) syncRule(ctx context.Context, repo storage.RuleRepository, ruleID types.RuleID, ruleCfg RuleConfig) error {
+	// Check if rule already exists in DB (needed for both enabled and disabled paths)
+	existing, err := repo.Get(ctx, ruleID)
+	if err != nil && !types.IsNotFound(err) {
+		return fmt.Errorf("failed to check existing rule: %w", err)
+	}
+
+	// Handle disabled rules: update existing DB rule to disabled, skip creation of new ones
 	if !ruleCfg.Enabled {
-		i.logger.Debug("Skipping disabled rule", "name", ruleCfg.Name)
+		if existing != nil {
+			existing.Enabled = false
+			existing.UpdatedAt = time.Now()
+			if err := repo.Update(ctx, existing); err != nil {
+				return fmt.Errorf("failed to disable rule: %w", err)
+			}
+			i.logger.Info("Disabled rule from config",
+				"id", ruleID,
+				"name", ruleCfg.Name,
+			)
+		} else {
+			i.logger.Debug("Skipping disabled rule (not in DB)", "name", ruleCfg.Name)
+		}
 		return nil
 	}
 
-	// Generate deterministic rule ID
-	ruleID := i.generateRuleID(idx, ruleCfg)
+	// Validate mode (whitelist or blocklist only)
+	if err := pkgvalidate.ValidateRuleMode(ruleCfg.Mode); err != nil {
+		return fmt.Errorf("rule %q: %w", ruleCfg.Name, err)
+	}
+
+	// Validate rule config format (same logic as API and validate-rules)
+	if ruleCfg.Type != RuleFileType && ruleCfg.Config != nil {
+		if err := ruleconfig.ValidateRuleConfig(ruleCfg.Type, ruleCfg.Config); err != nil {
+			return fmt.Errorf("rule %q: %w", ruleCfg.Name, err)
+		}
+	}
 
 	// Marshal config to JSON
 	configJSON, err := json.Marshal(ruleCfg.Config)
@@ -212,26 +349,30 @@ func (i *RuleInitializer) syncRule(ctx context.Context, idx int, ruleCfg RuleCon
 		return fmt.Errorf("failed to marshal rule config: %w", err)
 	}
 
-	// Check if rule exists
-	existing, err := i.repo.Get(ctx, ruleID)
-	if err != nil && !types.IsNotFound(err) {
-		return fmt.Errorf("failed to check existing rule: %w", err)
-	}
-
 	// Build rule
 	rule := &types.Rule{
 		ID:          ruleID,
 		Name:        ruleCfg.Name,
 		Description: ruleCfg.Description,
-		Type:        types.RuleType(ruleCfg.Type),
+		Type:        types.RuleType(pkgvalidate.NormalizeRuleType(ruleCfg.Type)),
 		Mode:        types.RuleMode(ruleCfg.Mode),
 		Source:      types.RuleSourceConfig,
 		Config:      configJSON,
 		Enabled:     ruleCfg.Enabled,
 	}
+	if len(ruleCfg.Variables) > 0 {
+		variablesJSON, err := json.Marshal(ruleCfg.Variables)
+		if err != nil {
+			return fmt.Errorf("failed to marshal rule variables: %w", err)
+		}
+		rule.Variables = variablesJSON
+	}
 
-	// Set optional scope fields
+	// Set and validate optional scope fields
 	if ruleCfg.ChainType != "" {
+		if !pkgvalidate.IsValidChainType(ruleCfg.ChainType) {
+			return fmt.Errorf("rule %q: invalid chain_type %q", ruleCfg.Name, ruleCfg.ChainType)
+		}
 		ct := types.ChainType(ruleCfg.ChainType)
 		rule.ChainType = &ct
 	} else {
@@ -246,6 +387,9 @@ func (i *RuleInitializer) syncRule(ctx context.Context, idx int, ruleCfg RuleCon
 		rule.APIKeyID = &ruleCfg.APIKeyID
 	}
 	if ruleCfg.SignerAddress != "" {
+		if !pkgvalidate.IsValidEthereumAddress(ruleCfg.SignerAddress) {
+			return fmt.Errorf("rule %q: invalid signer_address %q: must be 0x followed by 40 hex characters", ruleCfg.Name, ruleCfg.SignerAddress)
+		}
 		rule.SignerAddress = &ruleCfg.SignerAddress
 	}
 
@@ -254,7 +398,7 @@ func (i *RuleInitializer) syncRule(ctx context.Context, idx int, ruleCfg RuleCon
 		rule.CreatedAt = time.Now()
 		rule.UpdatedAt = time.Now()
 
-		if err := i.repo.Create(ctx, rule); err != nil {
+		if err := repo.Create(ctx, rule); err != nil {
 			return fmt.Errorf("failed to create rule: %w", err)
 		}
 
@@ -276,9 +420,10 @@ func (i *RuleInitializer) syncRule(ctx context.Context, idx int, ruleCfg RuleCon
 		existing.APIKeyID = rule.APIKeyID
 		existing.SignerAddress = rule.SignerAddress
 		existing.Enabled = rule.Enabled
+		existing.Variables = rule.Variables
 		existing.UpdatedAt = time.Now()
 
-		if err := i.repo.Update(ctx, existing); err != nil {
+		if err := repo.Update(ctx, existing); err != nil {
 			return fmt.Errorf("failed to update rule: %w", err)
 		}
 

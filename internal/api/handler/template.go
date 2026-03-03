@@ -12,6 +12,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/validate"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
@@ -313,14 +314,19 @@ func (h *TemplateHandler) createTemplate(w http.ResponseWriter, r *http.Request)
 		h.writeError(w, "type is required", http.StatusBadRequest)
 		return
 	}
+	if !validate.IsValidRuleType(req.Type) {
+		h.writeError(w, "invalid rule type", http.StatusBadRequest)
+		return
+	}
 	if req.Mode == "" {
 		h.writeError(w, "mode is required", http.StatusBadRequest)
 		return
 	}
-	if req.Mode != "whitelist" && req.Mode != "blocklist" {
-		h.writeError(w, "mode must be 'whitelist' or 'blocklist'", http.StatusBadRequest)
+	if err := validate.ValidateRuleMode(req.Mode); err != nil {
+		h.writeError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	// Template config may contain variable placeholders (e.g. ${target}); validated at instantiation time.
 
 	// Marshal config
 	configJSON, err := json.Marshal(req.Config)
@@ -431,6 +437,7 @@ func (h *TemplateHandler) updateTemplate(w http.ResponseWriter, r *http.Request,
 		tmpl.Description = req.Description
 	}
 	if req.Config != nil {
+		// Template config may contain placeholders; structure validated at instantiation.
 		configJSON, err := json.Marshal(req.Config)
 		if err != nil {
 			h.writeError(w, "invalid config", http.StatusBadRequest)

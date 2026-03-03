@@ -215,6 +215,18 @@ rejected   rejected      failed
 - P1: Foundry sandbox isolation
 - P1: Multi-party approval for high-value operations
 
+## Adding New Chain Support
+
+To add support for a new chain (e.g., Solana):
+
+1. Create chain package: `internal/chain/solana/`
+2. Define types: `internal/chain/solana/types.go`
+3. Implement `ChainAdapter` interface: `internal/chain/solana/adapter.go`
+4. Implement signer registry: `internal/chain/solana/signer.go`
+5. Implement rule evaluators: `internal/chain/solana/rule_evaluator.go`
+6. Add API handlers: `internal/api/handler/solana/`
+7. Register adapter in `main.go`
+
 ## Related Documentation
 
 - [COMPONENTS.md](./COMPONENTS.md) - Detailed component documentation

@@ -2225,6 +2225,16 @@ POST /api/v1/evm/requests/{request_id}/approve
 }
 ```
 
+### HD Wallet Endpoints
+
+HD wallet management endpoints. Permission model:
+- **Create/Import** (`POST /api/v1/evm/hd-wallets`): Admin only
+- **List all** (`GET /api/v1/evm/hd-wallets`): Admin only
+- **Derive** (`POST /api/v1/evm/hd-wallets/{addr}/derive`): Admin OR API key with `allowed_hd_wallets` containing `{addr}`
+- **List derived** (`GET /api/v1/evm/hd-wallets/{addr}/derived`): Admin OR API key with `allowed_hd_wallets` containing `{addr}`
+
+Non-admin keys with `allowed_hd_wallets` permission can also sign with any derived address of the authorized HD wallet.
+
 ---
 
 ## Error Responses

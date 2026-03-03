@@ -58,7 +58,6 @@ new RemoteSignerClient(config: ClientConfig)
 - `privateKey` (string | Uint8Array, required): Ed25519 private key (hex string or bytes)
 - `pollInterval` (number, optional): Polling interval in milliseconds (default: 2000)
 - `pollTimeout` (number, optional): Polling timeout in milliseconds (default: 300000)
-- `useNonce` (boolean, optional): Use nonce for replay protection (default: true)
 
 ### Methods
 

@@ -20,9 +20,8 @@ const (
 )
 
 // AuthMiddleware creates an authentication middleware
-// Supports multiple authentication formats:
-// - Legacy: timestamp|method|path|sha256(body)
-// - Nonce: timestamp|nonce|method|path|sha256(body)
+// Authentication format: timestamp|nonce|method|path|sha256(body)
+// Nonce is required when NonceRequired is configured (recommended for production)
 func AuthMiddleware(verifier *auth.Verifier, logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -30,7 +29,7 @@ func AuthMiddleware(verifier *auth.Verifier, logger *slog.Logger) func(http.Hand
 			apiKeyID := r.Header.Get("X-API-Key-ID")
 			timestampStr := r.Header.Get("X-Timestamp")
 			signature := r.Header.Get("X-Signature")
-			nonce := r.Header.Get("X-Nonce") // Optional: for replay protection
+			nonce := r.Header.Get("X-Nonce")
 
 			// Validate header lengths to prevent memory abuse
 			const (
@@ -85,32 +84,17 @@ func AuthMiddleware(verifier *auth.Verifier, logger *slog.Logger) func(http.Hand
 				path = path + "?" + r.URL.RawQuery
 			}
 
-			// Verify request based on provided headers
-			var apiKey *types.APIKey
-			if nonce != "" {
-				// Verification with nonce
-				apiKey, err = verifier.VerifyRequestWithNonce(
-					r.Context(),
-					apiKeyID,
-					timestamp,
-					nonce,
-					signature,
-					r.Method,
-					path,
-					body,
-				)
-			} else {
-				// Legacy verification (no nonce)
-				apiKey, err = verifier.VerifyRequest(
-					r.Context(),
-					apiKeyID,
-					timestamp,
-					signature,
-					r.Method,
-					path,
-					body,
-				)
-			}
+			// Verify request (nonce may be empty; verifier enforces NonceRequired)
+			apiKey, err := verifier.VerifyRequestWithNonce(
+				r.Context(),
+				apiKeyID,
+				timestamp,
+				nonce,
+				signature,
+				r.Method,
+				path,
+				body,
+			)
 
 			if err != nil {
 				if types.IsUnauthorized(err) {

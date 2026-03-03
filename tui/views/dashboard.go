@@ -11,8 +11,14 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 	"github.com/ivanzzeth/remote-signer/tui/styles"
 )
+
+// healthChecker is the interface needed for health checks.
+type healthChecker interface {
+	Health(ctx context.Context) (*client.HealthResponse, error)
+}
 
 // DashboardData holds the data for the dashboard
 type DashboardData struct {
@@ -25,7 +31,9 @@ type DashboardData struct {
 
 // DashboardModel represents the dashboard view
 type DashboardModel struct {
-	client    client.ClientInterface
+	health    healthChecker
+	requests  evm.RequestAPI
+	rules     evm.RuleAPI
 	ctx       context.Context
 	width     int
 	height    int
@@ -43,7 +51,7 @@ type DashboardDataMsg struct {
 }
 
 // NewDashboardModel creates a new dashboard model
-func NewDashboardModel(c client.ClientInterface, ctx context.Context) (*DashboardModel, error) {
+func NewDashboardModel(c *client.Client, ctx context.Context) (*DashboardModel, error) {
 	if c == nil {
 		return nil, fmt.Errorf("client is required")
 	}
@@ -56,10 +64,35 @@ func NewDashboardModel(c client.ClientInterface, ctx context.Context) (*Dashboar
 	s.Style = styles.SpinnerStyle
 
 	return &DashboardModel{
-		client:  c,
-		ctx:     ctx,
-		spinner: s,
-		loading: true,
+		health:   c,
+		requests: c.EVM.Requests,
+		rules:    c.EVM.Rules,
+		ctx:      ctx,
+		spinner:  s,
+		loading:  true,
+	}, nil
+}
+
+// newDashboardModelFromServices creates a dashboard model from individual services (for testing).
+func newDashboardModelFromServices(health healthChecker, requests evm.RequestAPI, rules evm.RuleAPI, ctx context.Context) (*DashboardModel, error) {
+	if health == nil || requests == nil || rules == nil {
+		return nil, fmt.Errorf("client is required")
+	}
+	if ctx == nil {
+		return nil, fmt.Errorf("context is required")
+	}
+
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	s.Style = styles.SpinnerStyle
+
+	return &DashboardModel{
+		health:   health,
+		requests: requests,
+		rules:    rules,
+		ctx:      ctx,
+		spinner:  s,
+		loading:  true,
 	}, nil
 }
 
@@ -94,7 +127,7 @@ func (m *DashboardModel) loadData() tea.Cmd {
 		}
 
 		// Get health
-		health, err := m.client.Health(m.ctx)
+		health, err := m.health.Health(m.ctx)
 		if err != nil {
 			return DashboardDataMsg{Data: nil, Err: fmt.Errorf("health check failed: %w", err)}
 		}
@@ -103,7 +136,7 @@ func (m *DashboardModel) loadData() tea.Cmd {
 		// Get request counts by status
 		statuses := []string{"pending", "authorizing", "signing", "completed", "rejected", "failed"}
 		for _, status := range statuses {
-			resp, err := m.client.ListRequests(m.ctx, &client.ListRequestsFilter{
+			resp, err := m.requests.List(m.ctx, &evm.ListRequestsFilter{
 				Status: status,
 				Limit:  1,
 			})
@@ -116,7 +149,7 @@ func (m *DashboardModel) loadData() tea.Cmd {
 		}
 
 		// Get total rules
-		rulesResp, err := m.client.ListRules(m.ctx, &client.ListRulesFilter{Limit: 1})
+		rulesResp, err := m.rules.List(m.ctx, &evm.ListRulesFilter{Limit: 1})
 		if err == nil {
 			data.TotalRules = rulesResp.Total
 		}

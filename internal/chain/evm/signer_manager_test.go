@@ -13,28 +13,32 @@ import (
 )
 
 func TestSignerManager_CreateSigner_Keystore(t *testing.T) {
-	// Create a temp directory for keystores
 	tempDir, err := os.MkdirTemp("", "signer-manager-test-*")
 	require.NoError(t, err)
 	defer os.RemoveAll(tempDir)
 
-	// Create a registry with a test signer
-	cfg := SignerConfig{
-		PrivateKeys: []PrivateKeyConfig{
-			{
-				Address:   "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
-				KeyEnvVar: "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
-				Enabled:   true,
-			},
-		},
-	}
-
-	registry, err := NewSignerRegistry(cfg)
-	require.NoError(t, err)
-
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	manager, err := NewSignerManager(registry, tempDir, logger)
+	registry := NewEmptySignerRegistry()
+
+	// Register a private key provider with a test key
+	_, err = NewPrivateKeyProvider(registry, []PrivateKeyConfig{
+		{
+			Address:   "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+			KeyEnvVar: "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+			Enabled:   true,
+		},
+	})
+	require.NoError(t, err)
+
+	// Register a keystore provider (needed for dynamic creation)
+	pwProvider, err := NewEnvPasswordProvider()
+	require.NoError(t, err)
+	ksProvider, err := NewKeystoreProvider(registry, nil, tempDir, pwProvider, logger)
+	require.NoError(t, err)
+	registry.RegisterProvider(ksProvider)
+
+	manager, err := NewSignerManager(registry, logger)
 	require.NoError(t, err)
 
 	// Create a new keystore signer
@@ -65,22 +69,26 @@ func TestSignerManager_CreateSigner_ValidationErrors(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(tempDir)
 
-	cfg := SignerConfig{
-		PrivateKeys: []PrivateKeyConfig{
-			{
-				Address:   "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
-				KeyEnvVar: "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
-				Enabled:   true,
-			},
-		},
-	}
-
-	registry, err := NewSignerRegistry(cfg)
-	require.NoError(t, err)
-
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	manager, err := NewSignerManager(registry, tempDir, logger)
+	registry := NewEmptySignerRegistry()
+
+	_, err = NewPrivateKeyProvider(registry, []PrivateKeyConfig{
+		{
+			Address:   "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+			KeyEnvVar: "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+			Enabled:   true,
+		},
+	})
+	require.NoError(t, err)
+
+	pwProvider, err := NewEnvPasswordProvider()
+	require.NoError(t, err)
+	ksProvider, err := NewKeystoreProvider(registry, nil, tempDir, pwProvider, logger)
+	require.NoError(t, err)
+	registry.RegisterProvider(ksProvider)
+
+	manager, err := NewSignerManager(registry, logger)
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -111,11 +119,11 @@ func TestSignerManager_CreateSigner_ValidationErrors(t *testing.T) {
 			expectError: types.ErrEmptyPassword,
 		},
 		{
-			name: "unsupported type",
+			name: "private key creation not supported",
 			req: types.CreateSignerRequest{
-				Type: types.SignerType("aws_kms"),
+				Type: types.SignerTypePrivateKey,
 			},
-			expectError: types.ErrUnsupportedSignerType,
+			expectError: types.ErrPrivateKeyCreationNotSupported,
 		},
 	}
 
@@ -128,26 +136,20 @@ func TestSignerManager_CreateSigner_ValidationErrors(t *testing.T) {
 }
 
 func TestSignerManager_ListSigners(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "signer-manager-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tempDir)
-
-	cfg := SignerConfig{
-		PrivateKeys: []PrivateKeyConfig{
-			{
-				Address:   "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
-				KeyEnvVar: "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
-				Enabled:   true,
-			},
-		},
-	}
-
-	registry, err := NewSignerRegistry(cfg)
-	require.NoError(t, err)
-
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	manager, err := NewSignerManager(registry, tempDir, logger)
+	registry := NewEmptySignerRegistry()
+
+	_, err := NewPrivateKeyProvider(registry, []PrivateKeyConfig{
+		{
+			Address:   "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+			KeyEnvVar: "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+			Enabled:   true,
+		},
+	})
+	require.NoError(t, err)
+
+	manager, err := NewSignerManager(registry, logger)
 	require.NoError(t, err)
 
 	result, err := manager.ListSigners(context.Background(), types.SignerFilter{Limit: 10})
@@ -161,31 +163,45 @@ func TestSignerManager_ListSigners(t *testing.T) {
 func TestNewSignerManager_Validation(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
-	cfg := SignerConfig{
-		PrivateKeys: []PrivateKeyConfig{
-			{
-				Address:   "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
-				KeyEnvVar: "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
-				Enabled:   true,
-			},
-		},
-	}
-
-	registry, err := NewSignerRegistry(cfg)
-	require.NoError(t, err)
+	registry := NewEmptySignerRegistry()
 
 	t.Run("nil registry", func(t *testing.T) {
-		_, err := NewSignerManager(nil, "/tmp", logger)
-		assert.Error(t, err)
-	})
-
-	t.Run("empty keystore dir", func(t *testing.T) {
-		_, err := NewSignerManager(registry, "", logger)
+		_, err := NewSignerManager(nil, logger)
 		assert.Error(t, err)
 	})
 
 	t.Run("nil logger", func(t *testing.T) {
-		_, err := NewSignerManager(registry, "/tmp", nil)
+		_, err := NewSignerManager(registry, nil)
 		assert.Error(t, err)
 	})
+}
+
+func TestSignerManager_HDWalletManager_NotConfigured(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	registry := NewEmptySignerRegistry()
+
+	manager, err := NewSignerManager(registry, logger)
+	require.NoError(t, err)
+
+	_, err = manager.HDWalletManager()
+	assert.ErrorIs(t, err, types.ErrHDWalletNotConfigured)
+}
+
+func TestSignerManager_HDWalletManager_Configured(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	registry := NewEmptySignerRegistry()
+
+	pwProvider, err := NewEnvPasswordProvider()
+	require.NoError(t, err)
+
+	hdProvider, err := NewHDWalletProvider(registry, nil, t.TempDir(), pwProvider, logger)
+	require.NoError(t, err)
+	registry.RegisterProvider(hdProvider)
+
+	manager, err := NewSignerManager(registry, logger)
+	require.NoError(t, err)
+
+	mgr, err := manager.HDWalletManager()
+	require.NoError(t, err)
+	assert.NotNil(t, mgr)
 }

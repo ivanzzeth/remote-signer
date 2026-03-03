@@ -9,8 +9,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
+	"github.com/ivanzzeth/remote-signer/pkg/client/mock"
 )
+
+func newTestRulesModel(t *testing.T) (*RulesModel, *mock.RuleService) {
+	t.Helper()
+	svc := mock.NewRuleService()
+	model, err := newRulesModelFromService(svc, context.Background())
+	require.NoError(t, err)
+	return model, svc
+}
 
 func TestNewRulesModel(t *testing.T) {
 	t.Run("returns error when client is nil", func(t *testing.T) {
@@ -20,16 +29,14 @@ func TestNewRulesModel(t *testing.T) {
 	})
 
 	t.Run("returns error when context is nil", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		_, err := NewRulesModel(mockClient, nil)
+		svc := mock.NewRuleService()
+		_, err := newRulesModelFromService(svc, nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "context is required")
 	})
 
 	t.Run("creates model successfully", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRulesModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRulesModel(t)
 		require.NotNil(t, model)
 		assert.True(t, model.loading)
 		assert.Equal(t, 20, model.limit)
@@ -38,11 +45,9 @@ func TestNewRulesModel(t *testing.T) {
 
 func TestRulesModel_Update(t *testing.T) {
 	t.Run("handles rules data message", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRulesModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRulesModel(t)
 
-		rules := []client.Rule{
+		rules := []evm.Rule{
 			{ID: "rule-1", Name: "Test Rule 1", Type: "evm_address_list", Mode: "whitelist", Enabled: true},
 			{ID: "rule-2", Name: "Test Rule 2", Type: "evm_value_limit", Mode: "blocklist", Enabled: false},
 		}
@@ -58,9 +63,7 @@ func TestRulesModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles rules data error", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRulesModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRulesModel(t)
 
 		msg := RulesDataMsg{Err: errors.New("fetch failed")}
 		newModel, _ := model.Update(msg)
@@ -71,13 +74,10 @@ func TestRulesModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles rule action message success", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		mockClient.ListRulesFunc = func(ctx context.Context, filter *client.ListRulesFilter) (*client.ListRulesResponse, error) {
-			return &client.ListRulesResponse{}, nil
+		model, svc := newTestRulesModel(t)
+		svc.ListFunc = func(ctx context.Context, filter *evm.ListRulesFilter) (*evm.ListRulesResponse, error) {
+			return &evm.ListRulesResponse{}, nil
 		}
-
-		model, err := NewRulesModel(mockClient, context.Background())
-		require.NoError(t, err)
 
 		msg := RuleActionMsg{Action: "toggle", Success: true, Message: "Rule enabled"}
 		newModel, cmd := model.Update(msg)
@@ -90,9 +90,7 @@ func TestRulesModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles rule action message error", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRulesModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRulesModel(t)
 
 		msg := RuleActionMsg{Action: "delete", Success: false, Err: errors.New("permission denied")}
 		newModel, _ := model.Update(msg)
@@ -102,11 +100,9 @@ func TestRulesModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles navigation keys", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRulesModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRulesModel(t)
 		model.loading = false
-		model.rules = []client.Rule{
+		model.rules = []evm.Rule{
 			{ID: "rule-1"},
 			{ID: "rule-2"},
 			{ID: "rule-3"},
@@ -125,15 +121,13 @@ func TestRulesModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles toggle rule", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		mockClient.ToggleRuleFunc = func(ctx context.Context, ruleID string, enabled bool) (*client.Rule, error) {
-			return &client.Rule{ID: ruleID, Enabled: enabled}, nil
+		model, svc := newTestRulesModel(t)
+		svc.ToggleFunc = func(ctx context.Context, ruleID string, enabled bool) (*evm.Rule, error) {
+			return &evm.Rule{ID: ruleID, Enabled: enabled}, nil
 		}
 
-		model, err := NewRulesModel(mockClient, context.Background())
-		require.NoError(t, err)
 		model.loading = false
-		model.rules = []client.Rule{
+		model.rules = []evm.Rule{
 			{ID: "rule-1", Enabled: false},
 		}
 		model.selectedIdx = 0
@@ -146,11 +140,9 @@ func TestRulesModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles delete confirmation", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRulesModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRulesModel(t)
 		model.loading = false
-		model.rules = []client.Rule{
+		model.rules = []evm.Rule{
 			{ID: "rule-1"},
 		}
 		model.selectedIdx = 0
@@ -167,9 +159,7 @@ func TestRulesModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles filter by type", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRulesModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRulesModel(t)
 		model.loading = false
 
 		// Press 'f' to filter by type
@@ -180,9 +170,7 @@ func TestRulesModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles filter by mode", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRulesModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRulesModel(t)
 		model.loading = false
 
 		// Press 'm' to filter by mode
@@ -195,9 +183,7 @@ func TestRulesModel_Update(t *testing.T) {
 
 func TestRulesModel_View(t *testing.T) {
 	t.Run("renders loading state", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRulesModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRulesModel(t)
 		model.loading = true
 		model.width = 150
 		model.height = 30
@@ -207,9 +193,7 @@ func TestRulesModel_View(t *testing.T) {
 	})
 
 	t.Run("renders error state", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRulesModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRulesModel(t)
 		model.loading = false
 		model.err = errors.New("test error")
 		model.width = 150
@@ -220,13 +204,11 @@ func TestRulesModel_View(t *testing.T) {
 	})
 
 	t.Run("renders rules list", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRulesModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRulesModel(t)
 		model.loading = false
 		model.width = 150
 		model.height = 30
-		model.rules = []client.Rule{
+		model.rules = []evm.Rule{
 			{ID: "rule-123", Name: "Test Rule", Type: "evm_address_list", Mode: "whitelist", Enabled: true},
 		}
 		model.total = 1
@@ -237,27 +219,23 @@ func TestRulesModel_View(t *testing.T) {
 	})
 
 	t.Run("renders empty list", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRulesModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRulesModel(t)
 		model.loading = false
 		model.width = 150
 		model.height = 30
-		model.rules = []client.Rule{}
+		model.rules = []evm.Rule{}
 
 		view := model.View()
 		assert.Contains(t, view, "No rules found")
 	})
 
 	t.Run("renders delete confirmation", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRulesModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestRulesModel(t)
 		model.loading = false
 		model.showDelete = true
 		model.width = 150
 		model.height = 30
-		model.rules = []client.Rule{
+		model.rules = []evm.Rule{
 			{ID: "rule-1", Name: "Test Rule"},
 		}
 
@@ -269,20 +247,16 @@ func TestRulesModel_View(t *testing.T) {
 
 func TestRulesModel_GetSelectedRuleID(t *testing.T) {
 	t.Run("returns empty when no rules", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRulesModel(mockClient, context.Background())
-		require.NoError(t, err)
-		model.rules = []client.Rule{}
+		model, _ := newTestRulesModel(t)
+		model.rules = []evm.Rule{}
 
 		id := model.GetSelectedRuleID()
 		assert.Equal(t, "", id)
 	})
 
 	t.Run("returns selected rule ID", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewRulesModel(mockClient, context.Background())
-		require.NoError(t, err)
-		model.rules = []client.Rule{
+		model, _ := newTestRulesModel(t)
+		model.rules = []evm.Rule{
 			{ID: "rule-1"},
 			{ID: "rule-2"},
 		}
@@ -295,15 +269,13 @@ func TestRulesModel_GetSelectedRuleID(t *testing.T) {
 
 func TestRulesModel_LoadData(t *testing.T) {
 	t.Run("calls client with correct filter", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		var capturedFilter *client.ListRulesFilter
-		mockClient.ListRulesFunc = func(ctx context.Context, filter *client.ListRulesFilter) (*client.ListRulesResponse, error) {
+		model, svc := newTestRulesModel(t)
+		var capturedFilter *evm.ListRulesFilter
+		svc.ListFunc = func(ctx context.Context, filter *evm.ListRulesFilter) (*evm.ListRulesResponse, error) {
 			capturedFilter = filter
-			return &client.ListRulesResponse{Rules: []client.Rule{}, Total: 0}, nil
+			return &evm.ListRulesResponse{Rules: []evm.Rule{}, Total: 0}, nil
 		}
 
-		model, err := NewRulesModel(mockClient, context.Background())
-		require.NoError(t, err)
 		model.typeFilter = "evm_address_list"
 		model.modeFilter = "whitelist"
 		model.offset = 10

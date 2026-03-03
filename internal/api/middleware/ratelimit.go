@@ -2,7 +2,9 @@ package middleware
 
 import (
 	"log/slog"
+	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -114,6 +116,42 @@ func (r *RateLimiter) StartCleanupRoutine(interval time.Duration, stop <-chan st
 	}()
 }
 
+// IPRateLimitMiddleware creates a pre-auth rate limiting middleware based on client IP.
+// Protects against unauthenticated flood attacks (e.g. brute-force with invalid API keys).
+// If limit <= 0, IP rate limiting is disabled (pass-through).
+func IPRateLimitMiddleware(limiter *RateLimiter, ipWhitelist *IPWhitelist, limit int) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		if limit <= 0 {
+			return next // disabled
+		}
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var clientIP string
+			if ipWhitelist != nil {
+				clientIP = ipWhitelist.GetClientIP(r)
+			} else {
+				host, _, err := net.SplitHostPort(r.RemoteAddr)
+				if err != nil {
+					host = r.RemoteAddr
+				}
+				clientIP = host
+			}
+
+			key := "ip:" + clientIP
+			if !limiter.Allow(key, limit) {
+				limiter.logger.Warn("IP rate limit exceeded",
+					"client_ip", clientIP,
+					"limit", limit,
+					"path", r.URL.Path,
+				)
+				http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // PermissionMiddleware checks if the API key has permission for the request
 func PermissionMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -148,4 +186,38 @@ func CheckSignerPermission(apiKey *types.APIKey, signerAddress string) bool {
 		return false
 	}
 	return apiKey.IsAllowedSigner(signerAddress)
+}
+
+// HDWalletDerivedLister can list derived addresses for an HD wallet.
+// Extracted to avoid importing the full evm package in middleware.
+type HDWalletDerivedLister interface {
+	ListDerivedAddresses(primaryAddr string) ([]types.SignerInfo, error)
+}
+
+// CheckSignerPermissionWithHDWallets checks AllowedSigners first, then AllowedHDWallets.
+// hdMgr may be nil (treated as no HD wallet check).
+func CheckSignerPermissionWithHDWallets(apiKey *types.APIKey, signerAddress string, hdMgr HDWalletDerivedLister) bool {
+	if apiKey == nil {
+		return false
+	}
+	// 1. Direct signer check (existing behavior)
+	if apiKey.IsAllowedSigner(signerAddress) {
+		return true
+	}
+	// 2. HD wallet check
+	if hdMgr == nil || len(apiKey.AllowedHDWallets) == 0 {
+		return false
+	}
+	for _, primaryAddr := range apiKey.AllowedHDWallets {
+		derived, err := hdMgr.ListDerivedAddresses(primaryAddr)
+		if err != nil {
+			continue
+		}
+		for _, d := range derived {
+			if strings.EqualFold(d.Address, signerAddress) {
+				return true
+			}
+		}
+	}
+	return false
 }

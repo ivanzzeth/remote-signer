@@ -35,6 +35,12 @@ type RuleRepository interface {
 	IncrementMatchCount(ctx context.Context, id types.RuleID) error
 }
 
+// Transactional is implemented by repositories that support atomic operations.
+// This is optional — callers should type-assert before use.
+type Transactional interface {
+	RunInTransaction(ctx context.Context, fn func(txRepo RuleRepository) error) error
+}
+
 // GormRuleRepository implements RuleRepository using GORM
 type GormRuleRepository struct {
 	db *gorm.DB
@@ -46,6 +52,15 @@ func NewGormRuleRepository(db *gorm.DB) (*GormRuleRepository, error) {
 		return nil, fmt.Errorf("database connection is required")
 	}
 	return &GormRuleRepository{db: db}, nil
+}
+
+// RunInTransaction runs fn inside a database transaction.
+// A new GormRuleRepository backed by the transaction is passed to fn.
+func (r *GormRuleRepository) RunInTransaction(ctx context.Context, fn func(txRepo RuleRepository) error) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		txRepo := &GormRuleRepository{db: tx}
+		return fn(txRepo)
+	})
 }
 
 // Create creates a new rule
@@ -104,7 +119,7 @@ func (r *GormRuleRepository) List(ctx context.Context, filter RuleFilter) ([]*ty
 		query = query.Where("api_key_id = ? OR api_key_id IS NULL", *filter.APIKeyID)
 	}
 	if filter.SignerAddress != nil {
-		query = query.Where("signer_address = ? OR signer_address IS NULL", *filter.SignerAddress)
+		query = query.Where("LOWER(signer_address) = LOWER(?) OR signer_address IS NULL", *filter.SignerAddress)
 	}
 	if filter.Type != nil {
 		query = query.Where("type = ?", *filter.Type)
@@ -123,9 +138,12 @@ func (r *GormRuleRepository) List(ctx context.Context, filter RuleFilter) ([]*ty
 	}
 	if filter.Limit > 0 {
 		query = query.Limit(filter.Limit)
-	} else {
-		query = query.Limit(100) // default limit
+	} else if filter.Limit != -1 {
+		// Limit == -1 means "no limit" (used by security-critical paths like rule engine evaluation).
+		// Limit == 0 (default) applies a safe default for API pagination.
+		query = query.Limit(100) // default limit for API pagination
 	}
+	// When filter.Limit == -1, no LIMIT clause is applied (fetch all matching rules)
 
 	query = query.Order("created_at DESC")
 
@@ -151,7 +169,7 @@ func (r *GormRuleRepository) Count(ctx context.Context, filter RuleFilter) (int,
 		query = query.Where("api_key_id = ? OR api_key_id IS NULL", *filter.APIKeyID)
 	}
 	if filter.SignerAddress != nil {
-		query = query.Where("signer_address = ? OR signer_address IS NULL", *filter.SignerAddress)
+		query = query.Where("LOWER(signer_address) = LOWER(?) OR signer_address IS NULL", *filter.SignerAddress)
 	}
 	if filter.Type != nil {
 		query = query.Where("type = ?", *filter.Type)

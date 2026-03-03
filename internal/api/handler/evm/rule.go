@@ -13,15 +13,21 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
-	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
+	evmchain "github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/ruleconfig"
+	"github.com/ivanzzeth/remote-signer/internal/validate"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
+
+// ruleIDPattern validates rule ID format: "rule_" prefix followed by UUID or "cfg_" prefix followed by index.
+var ruleIDPattern = regexp.MustCompile(`^(rule_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|cfg_\d+)$`)
 
 // RuleHandler handles rule management endpoints
 type RuleHandler struct {
 	ruleRepo          storage.RuleRepository
-	solidityValidator *evm.SolidityRuleValidator
+	solidityValidator *evmchain.SolidityRuleValidator
+	jsEvaluator       *evmchain.JSRuleEvaluator
 	logger            *slog.Logger
 }
 
@@ -29,9 +35,16 @@ type RuleHandler struct {
 type RuleHandlerOption func(*RuleHandler)
 
 // WithSolidityValidator sets the Solidity rule validator for the handler
-func WithSolidityValidator(validator *evm.SolidityRuleValidator) RuleHandlerOption {
+func WithSolidityValidator(validator *evmchain.SolidityRuleValidator) RuleHandlerOption {
 	return func(h *RuleHandler) {
 		h.solidityValidator = validator
+	}
+}
+
+// WithJSEvaluator sets the JS rule evaluator for test-case validation on API-created evm_js rules.
+func WithJSEvaluator(eval *evmchain.JSRuleEvaluator) RuleHandlerOption {
+	return func(h *RuleHandler) {
+		h.jsEvaluator = eval
 	}
 }
 
@@ -109,6 +122,10 @@ func (h *RuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Specific rule operations: /api/v1/evm/rules/{id}
 	ruleID := path
+	if !ruleIDPattern.MatchString(ruleID) {
+		h.writeError(w, "invalid rule_id format", http.StatusBadRequest)
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
 		h.getRule(w, r, ruleID)
@@ -119,6 +136,14 @@ func (h *RuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// JSRuleTestCase is a test case for evm_js rules submitted via API.
+type JSRuleTestCase struct {
+	Name         string                 `json:"name"`
+	Input        map[string]interface{} `json:"input"`
+	ExpectPass   bool                   `json:"expect_pass"`
+	ExpectReason string                 `json:"expect_reason,omitempty"`
 }
 
 // CreateRuleRequest represents a request to create a new rule
@@ -133,14 +158,20 @@ type CreateRuleRequest struct {
 	SignerAddress *string                `json:"signer_address,omitempty"`
 	Config        map[string]interface{} `json:"config"`
 	Enabled       bool                   `json:"enabled"`
+	TestCases     []JSRuleTestCase       `json:"test_cases,omitempty"` // required for evm_js rules
 }
 
 // UpdateRuleRequest represents a request to update an existing rule
 type UpdateRuleRequest struct {
-	Name        string                 `json:"name,omitempty"`
-	Description string                 `json:"description,omitempty"`
-	Config      map[string]interface{} `json:"config,omitempty"`
-	Enabled     *bool                  `json:"enabled,omitempty"`
+	Name          string                 `json:"name,omitempty"`
+	Description   string                 `json:"description,omitempty"`
+	Config        map[string]interface{} `json:"config,omitempty"`
+	ChainType     *string                `json:"chain_type,omitempty"`
+	ChainID       *string                `json:"chain_id,omitempty"`
+	APIKeyID      *string                `json:"api_key_id,omitempty"`
+	SignerAddress *string                `json:"signer_address,omitempty"`
+	Enabled       *bool                  `json:"enabled,omitempty"`
+	TestCases     []JSRuleTestCase       `json:"test_cases,omitempty"` // required for evm_js when updating config
 }
 
 func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
@@ -170,10 +201,24 @@ func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate rule config based on type
-	if err := h.validateRuleConfig(req.Type, req.Config); err != nil {
+	// Validate rule config format (shared with config load and validate-rules)
+	if err := ruleconfig.ValidateRuleConfig(req.Type, req.Config); err != nil {
 		h.writeError(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+
+	// Validate optional scope fields to prevent storing invalid data
+	if req.ChainType != nil {
+		if !validate.IsValidChainType(*req.ChainType) {
+			h.writeError(w, "invalid chain_type: must be one of evm, solana, cosmos", http.StatusBadRequest)
+			return
+		}
+	}
+	if req.SignerAddress != nil {
+		if !validate.IsValidEthereumAddress(*req.SignerAddress) {
+			h.writeError(w, "invalid signer_address: must be 0x followed by 40 hex characters", http.StatusBadRequest)
+			return
+		}
 	}
 
 	// Generate rule ID
@@ -228,6 +273,15 @@ func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Validate evm_js rules: require test_cases with 1+ positive and 1+ negative, then run them
+	if rule.Type == types.RuleTypeEVMJS {
+		if err := h.validateJSRule(rule, req.TestCases); err != nil {
+			h.logger.Error("evm_js rule validation failed", "error", err, "rule_name", rule.Name)
+			h.writeError(w, fmt.Sprintf("evm_js rule validation failed: %v", err), http.StatusBadRequest)
+			return
+		}
+	}
+
 	// Create rule
 	if err := h.ruleRepo.Create(r.Context(), rule); err != nil {
 		h.logger.Error("failed to create rule", "error", err)
@@ -266,6 +320,10 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 		rule.Description = req.Description
 	}
 	if req.Config != nil {
+		if err := ruleconfig.ValidateRuleConfig(string(rule.Type), req.Config); err != nil {
+			h.writeError(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		configJSON, err := json.Marshal(req.Config)
 		if err != nil {
 			h.writeError(w, "invalid config", http.StatusBadRequest)
@@ -276,6 +334,27 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 	if req.Enabled != nil {
 		rule.Enabled = *req.Enabled
 	}
+	if req.ChainType != nil {
+		if !validate.IsValidChainType(*req.ChainType) {
+			h.writeError(w, "invalid chain_type: must be one of evm, solana, cosmos", http.StatusBadRequest)
+			return
+		}
+		ct := types.ChainType(*req.ChainType)
+		rule.ChainType = &ct
+	}
+	if req.ChainID != nil {
+		rule.ChainID = req.ChainID
+	}
+	if req.APIKeyID != nil {
+		rule.APIKeyID = req.APIKeyID
+	}
+	if req.SignerAddress != nil {
+		if !validate.IsValidEthereumAddress(*req.SignerAddress) {
+			h.writeError(w, "invalid signer_address: must be 0x followed by 40 hex characters", http.StatusBadRequest)
+			return
+		}
+		rule.SignerAddress = req.SignerAddress
+	}
 	rule.UpdatedAt = time.Now()
 
 	// Validate Solidity expression rules if config was updated and validator is available
@@ -283,6 +362,15 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 		if err := h.validateSolidityRule(r.Context(), rule); err != nil {
 			h.logger.Error("rule validation failed", "error", err, "rule_id", ruleID)
 			h.writeError(w, "rule validation failed", http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Validate evm_js rules when config is updated
+	if req.Config != nil && rule.Type == types.RuleTypeEVMJS {
+		if err := h.validateJSRule(rule, req.TestCases); err != nil {
+			h.logger.Error("evm_js rule validation failed", "error", err, "rule_id", ruleID)
+			h.writeError(w, fmt.Sprintf("evm_js rule validation failed: %v", err), http.StatusBadRequest)
 			return
 		}
 	}
@@ -306,8 +394,12 @@ func (h *RuleHandler) listRules(w http.ResponseWriter, r *http.Request) {
 		Limit: 100,
 	}
 
-	// Parse query parameters
+	// Parse query parameters (strict: unknown enum values return 400)
 	if chainType := query.Get("chain_type"); chainType != "" {
+		if !validate.IsValidChainType(chainType) {
+			h.writeError(w, "invalid chain_type filter", http.StatusBadRequest)
+			return
+		}
 		ct := types.ChainType(chainType)
 		filter.ChainType = &ct
 	} else {
@@ -317,16 +409,28 @@ func (h *RuleHandler) listRules(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if signerAddress := query.Get("signer_address"); signerAddress != "" {
+		if !validate.IsValidEthereumAddress(signerAddress) {
+			h.writeError(w, "invalid signer_address: must be 0x followed by 40 hex characters", http.StatusBadRequest)
+			return
+		}
 		filter.SignerAddress = &signerAddress
 	}
 	if apiKeyID := query.Get("api_key_id"); apiKeyID != "" {
 		filter.APIKeyID = &apiKeyID
 	}
 	if ruleType := query.Get("type"); ruleType != "" {
-		rt := types.RuleType(ruleType)
+		if !validate.IsValidRuleType(ruleType) {
+			h.writeError(w, "invalid type filter", http.StatusBadRequest)
+			return
+		}
+		rt := types.RuleType(validate.NormalizeRuleType(ruleType))
 		filter.Type = &rt
 	}
 	if source := query.Get("source"); source != "" {
+		if !validate.IsValidRuleSource(source) {
+			h.writeError(w, "invalid source filter", http.StatusBadRequest)
+			return
+		}
 		rs := types.RuleSource(source)
 		filter.Source = &rs
 	}
@@ -461,207 +565,6 @@ func (h *RuleHandler) writeError(w http.ResponseWriter, message string, status i
 	h.writeJSON(w, ErrorResponse{Error: message}, status)
 }
 
-// ethAddressRegex matches a valid Ethereum address (0x followed by 40 hex chars)
-var ethAddressRegex = regexp.MustCompile(`^0x[0-9a-fA-F]{40}$`)
-
-// validSignTypes defines the known sign types
-var validSignTypes = map[string]bool{
-	"personal":    true,
-	"typed_data":  true,
-	"transaction": true,
-	"hash":        true,
-	"raw_message": true,
-	"eip191":      true,
-}
-
-// maxExpressionLength is the maximum allowed length for Solidity expressions (10 KB)
-const maxExpressionLength = 10 * 1024
-
-// dangerousSolidityPatterns are patterns that should be rejected in expression mode
-var dangerousSolidityPatterns = regexp.MustCompile(`(?i)\b(selfdestruct|delegatecall|create2|suicide)\b`)
-
-// validateRuleConfig validates the config for a given rule type.
-// This ensures that the server rejects malformed or dangerous configurations.
-func (h *RuleHandler) validateRuleConfig(ruleType string, config map[string]interface{}) error {
-	switch types.RuleType(ruleType) {
-	case types.RuleTypeEVMAddressList:
-		return h.validateAddressListConfig(config)
-	case types.RuleTypeEVMValueLimit:
-		return h.validateValueLimitConfig(config)
-	case types.RuleTypeSignerRestriction:
-		return h.validateSignerRestrictionConfig(config)
-	case types.RuleTypeSignTypeRestriction:
-		return h.validateSignTypeRestrictionConfig(config)
-	case types.RuleTypeEVMSolidityExpression:
-		return h.validateSolidityExpressionConfig(config)
-	case types.RuleTypeEVMContractMethod:
-		// Contract method rules have their own validation elsewhere
-		return nil
-	case types.RuleTypeChainRestriction, types.RuleTypeMessagePattern:
-		// These rule types have simpler validation
-		return nil
-	default:
-		return fmt.Errorf("unknown rule type: %s", ruleType)
-	}
-}
-
-func (h *RuleHandler) validateAddressListConfig(config map[string]interface{}) error {
-	addressesRaw, ok := config["addresses"]
-	if !ok {
-		return fmt.Errorf("config.addresses is required for evm_address_list rules")
-	}
-
-	addresses, ok := addressesRaw.([]interface{})
-	if !ok {
-		return fmt.Errorf("config.addresses must be an array")
-	}
-
-	if len(addresses) == 0 {
-		return fmt.Errorf("config.addresses must not be empty")
-	}
-
-	for i, addr := range addresses {
-		addrStr, ok := addr.(string)
-		if !ok {
-			return fmt.Errorf("config.addresses[%d] must be a string", i)
-		}
-		if !ethAddressRegex.MatchString(addrStr) {
-			return fmt.Errorf("config.addresses[%d] is not a valid Ethereum address: %s", i, addrStr)
-		}
-	}
-
-	return nil
-}
-
-func (h *RuleHandler) validateValueLimitConfig(config map[string]interface{}) error {
-	maxValueRaw, ok := config["max_value"]
-	if !ok {
-		return fmt.Errorf("config.max_value is required for evm_value_limit rules")
-	}
-
-	maxValueStr, ok := maxValueRaw.(string)
-	if !ok {
-		return fmt.Errorf("config.max_value must be a string (wei value)")
-	}
-
-	if maxValueStr == "" {
-		return fmt.Errorf("config.max_value must not be empty")
-	}
-
-	// Validate it's a valid numeric string (positive integer)
-	if _, err := strconv.ParseUint(maxValueStr, 10, 64); err != nil {
-		// Could be a very large number — try to validate it's all digits
-		for _, c := range maxValueStr {
-			if c < '0' || c > '9' {
-				return fmt.Errorf("config.max_value must be a positive numeric string, got: %s", maxValueStr)
-			}
-		}
-	}
-
-	return nil
-}
-
-func (h *RuleHandler) validateSignerRestrictionConfig(config map[string]interface{}) error {
-	signersRaw, ok := config["allowed_signers"]
-	if !ok {
-		return fmt.Errorf("config.allowed_signers is required for signer_restriction rules")
-	}
-
-	signers, ok := signersRaw.([]interface{})
-	if !ok {
-		return fmt.Errorf("config.allowed_signers must be an array")
-	}
-
-	if len(signers) == 0 {
-		return fmt.Errorf("config.allowed_signers must not be empty")
-	}
-
-	for i, signer := range signers {
-		signerStr, ok := signer.(string)
-		if !ok {
-			return fmt.Errorf("config.allowed_signers[%d] must be a string", i)
-		}
-		if !ethAddressRegex.MatchString(signerStr) {
-			return fmt.Errorf("config.allowed_signers[%d] is not a valid Ethereum address: %s", i, signerStr)
-		}
-	}
-
-	return nil
-}
-
-func (h *RuleHandler) validateSignTypeRestrictionConfig(config map[string]interface{}) error {
-	typesRaw, ok := config["allowed_sign_types"]
-	if !ok {
-		return fmt.Errorf("config.allowed_sign_types is required for sign_type_restriction rules")
-	}
-
-	signTypes, ok := typesRaw.([]interface{})
-	if !ok {
-		return fmt.Errorf("config.allowed_sign_types must be an array")
-	}
-
-	if len(signTypes) == 0 {
-		return fmt.Errorf("config.allowed_sign_types must not be empty")
-	}
-
-	for i, st := range signTypes {
-		stStr, ok := st.(string)
-		if !ok {
-			return fmt.Errorf("config.allowed_sign_types[%d] must be a string", i)
-		}
-		if !validSignTypes[stStr] {
-			return fmt.Errorf("config.allowed_sign_types[%d] is not a valid sign type: %s", i, stStr)
-		}
-	}
-
-	return nil
-}
-
-func (h *RuleHandler) validateSolidityExpressionConfig(config map[string]interface{}) error {
-	// Check expression length
-	if expr, ok := config["expression"].(string); ok {
-		if len(expr) > maxExpressionLength {
-			return fmt.Errorf("expression is too long (%d bytes, max %d)", len(expr), maxExpressionLength)
-		}
-		// Check for dangerous patterns
-		if dangerousSolidityPatterns.MatchString(expr) {
-			return fmt.Errorf("expression contains dangerous patterns (selfdestruct, delegatecall, create2 are not allowed)")
-		}
-	}
-
-	// Check typed_data_expression length
-	if expr, ok := config["typed_data_expression"].(string); ok {
-		if len(expr) > maxExpressionLength {
-			return fmt.Errorf("typed_data_expression is too long (%d bytes, max %d)", len(expr), maxExpressionLength)
-		}
-		if dangerousSolidityPatterns.MatchString(expr) {
-			return fmt.Errorf("typed_data_expression contains dangerous patterns")
-		}
-	}
-
-	// Check functions length
-	if funcs, ok := config["functions"].(string); ok {
-		if len(funcs) > maxExpressionLength {
-			return fmt.Errorf("functions is too long (%d bytes, max %d)", len(funcs), maxExpressionLength)
-		}
-		if dangerousSolidityPatterns.MatchString(funcs) {
-			return fmt.Errorf("functions contains dangerous patterns")
-		}
-	}
-
-	// Check typed_data_functions length
-	if funcs, ok := config["typed_data_functions"].(string); ok {
-		if len(funcs) > maxExpressionLength {
-			return fmt.Errorf("typed_data_functions is too long (%d bytes, max %d)", len(funcs), maxExpressionLength)
-		}
-		if dangerousSolidityPatterns.MatchString(funcs) {
-			return fmt.Errorf("typed_data_functions contains dangerous patterns")
-		}
-	}
-
-	return nil
-}
-
 // validateSolidityRule validates a Solidity expression rule using the validator
 func (h *RuleHandler) validateSolidityRule(ctx context.Context, rule *types.Rule) error {
 	result, err := h.solidityValidator.ValidateRule(ctx, rule)
@@ -676,6 +579,82 @@ func (h *RuleHandler) validateSolidityRule(ctx context.Context, rule *types.Rule
 			return fmt.Errorf("%d test case(s) failed", result.FailedTestCases)
 		}
 		return fmt.Errorf("validation failed")
+	}
+	return nil
+}
+
+// validateJSRule validates an evm_js rule by running its test cases through the JS evaluator.
+// Requires at least 1 positive and 1 negative test case. Runs each test case in isolated mode.
+func (h *RuleHandler) validateJSRule(rule *types.Rule, testCases []JSRuleTestCase) error {
+	if h.jsEvaluator == nil {
+		return fmt.Errorf("JS evaluator not available")
+	}
+
+	// Enforce test case requirement
+	var pos, neg int
+	for _, tc := range testCases {
+		if tc.ExpectPass {
+			pos++
+		} else {
+			neg++
+		}
+	}
+	if err := ruleconfig.ValidateJSRuleTestCasesRequirement(pos, neg); err != nil {
+		return err
+	}
+
+	// Parse the rule config
+	var cfg evmchain.JSRuleConfig
+	if err := json.Unmarshal(rule.Config, &cfg); err != nil {
+		return fmt.Errorf("invalid evm_js config: %w", err)
+	}
+
+	// Run each test case
+	var failed []string
+	for _, tc := range testCases {
+		if tc.Name == "" {
+			return fmt.Errorf("test case name is required")
+		}
+		req, parsed, err := evmchain.TestCaseInputToSignRequest(tc.Input)
+		if err != nil {
+			failed = append(failed, fmt.Sprintf("test %q: invalid input: %v", tc.Name, err))
+			continue
+		}
+		ruleInput, err := evmchain.BuildRuleInput(req, parsed)
+		if err != nil {
+			failed = append(failed, fmt.Sprintf("test %q: build input: %v", tc.Name, err))
+			continue
+		}
+		result := h.jsEvaluator.ValidateWithInput(cfg.Script, ruleInput, nil)
+
+		// For isolated validation: valid=true means pass, valid=false means fail
+		actualPass := result.Valid
+		if rule.Mode == types.RuleModeBlocklist {
+			// Blocklist: script returns valid=false when "violation detected" (should block).
+			// A blocklist test case with expect_pass=true means "should NOT be blocked" → valid=true.
+			// expect_pass=false means "should be blocked" → valid=false.
+			// So actualPass matches result.Valid directly.
+		}
+
+		if actualPass != tc.ExpectPass {
+			if tc.ExpectPass {
+				failed = append(failed, fmt.Sprintf("test %q: expected pass but got: %s", tc.Name, result.Reason))
+			} else {
+				failed = append(failed, fmt.Sprintf("test %q: expected fail but passed", tc.Name))
+			}
+			continue
+		}
+
+		// Optionally check expect_reason
+		if tc.ExpectReason != "" && !tc.ExpectPass {
+			if !strings.Contains(result.Reason, tc.ExpectReason) {
+				failed = append(failed, fmt.Sprintf("test %q: expected reason containing %q but got %q", tc.Name, tc.ExpectReason, result.Reason))
+			}
+		}
+	}
+
+	if len(failed) > 0 {
+		return fmt.Errorf("%d test case(s) failed:\n  - %s", len(failed), strings.Join(failed, "\n  - "))
 	}
 	return nil
 }

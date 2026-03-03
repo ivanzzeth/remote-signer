@@ -121,6 +121,16 @@ func (m *mockBudgetRepoForRenewal) AtomicSpend(ctx context.Context, ruleID types
 	return nil
 }
 
+func (m *mockBudgetRepoForRenewal) MarkAlertSent(ctx context.Context, ruleID types.RuleID, unit string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := string(ruleID) + ":" + unit
+	if b, ok := m.state[key]; ok {
+		b.AlertSent = true
+	}
+	return nil
+}
+
 // mockTemplateRepoForBudget returns a template with count_only BudgetMetering.
 type mockTemplateRepoForBudget struct {
 	tmpl *types.RuleTemplate
