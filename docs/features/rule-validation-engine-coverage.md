@@ -6,7 +6,7 @@
 
 - **validate-rules** 只做「单条规则的脚本级校验」，不跑引擎、不跑委托、不跑 scope 匹配。
 - **-config 展开后的规则** 在 validate-rules 里**根本不会用 test_cases 做任何断言**（见下）。
-- 模板里（如 polymarket.safe.template.yaml / safe.template.js.yaml）定义的「完整闭环」test_cases，在 JS 规则这条线上**没有**被「用引擎跑一遍实例化规则」的流程用到，相当于闭环测试在 JS 规则里**丢失**了。
+- 模板里（如 polymarket_safe.template.yaml / polymarket_safe.template.js.yaml）定义的「完整闭环」test_cases，在 JS 规则这条线上**没有**被「用引擎跑一遍实例化规则」的流程用到，相当于闭环测试在 JS 规则里**丢失**了。
 
 结果是：新写规则或改 delegate_to/scope 时，验证工具无法提前发现「委托目标 scope 不匹配」这类问题，只能靠上线后出错再修。
 
@@ -14,7 +14,7 @@
 
 ## 2. 当前规则测试是怎么加的
 
-### 2.1 validate-rules 单文件（如 `rules/templates/safe.template.js.yaml`）
+### 2.1 validate-rules 单文件（如 `rules/templates/polymarket_safe.template.js.yaml`）
 
 - 读 YAML → 用 `test_variables` 做变量替换 → 得到若干条 `RuleConfig`。
 - 对每条 **evm_js** 规则：若有 `test_cases` 且 `templateTestVariables != nil`，则调用  
@@ -39,10 +39,10 @@
 - 所以 e2e **确实**走了「完整引擎 + 委托 + scope 匹配」。
 - 但存在缺口：
   - e2e 用的是 **config.e2e.yaml** 的规则（如 `e2e-safe-polymarket` → `e2e-polymarket#transactions`），与生产 config 的 rule ID/名称可能不同。
-  - 模板里定义的 test_cases（如 polymarket.safe.template.yaml 里那一整套 pass/reject）**没有**被「展开成规则 → 用引擎跑这些 test_cases」的流程复用；e2e 是手写请求、手写断言，和模板里的 test_cases 不是同一套数据。
+  - 模板里定义的 test_cases（如 polymarket_safe.template.yaml 里那一整套 pass/reject）**没有**被「展开成规则 → 用引擎跑这些 test_cases」的流程复用；e2e 是手写请求、手写断言，和模板里的 test_cases 不是同一套数据。
   - 若某条真实请求（例如 split）没有对应的 e2e 用例，就不会在 e2e 里暴露 scope mismatch。
 
-结论：**规则实例化后的「用同一套 test_cases 走完整引擎」的验证路径目前不存在**；polymarket.safe.template.yaml 那种「完整闭环」测试在 JS 规则链路上相当于丢了。
+结论：**规则实例化后的「用同一套 test_cases 走完整引擎」的验证路径目前不存在**；polymarket_safe.template.yaml 那种「完整闭环」测试在 JS 规则链路上相当于丢了。
 
 ---
 
