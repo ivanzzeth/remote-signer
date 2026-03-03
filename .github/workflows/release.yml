@@ -22,7 +22,7 @@ jobs:
         with:
           go-version-file: 'go.mod'
 
-      - name: Build TUI binaries (multi-arch)
+      - name: Build binaries (multi-arch)
         run: |
           for goos in linux darwin; do
             for goarch in amd64 arm64; do
@@ -30,13 +30,24 @@ jobs:
                 -ldflags="-s -w" \
                 -o "remote-signer-tui-${goos}-${goarch}" \
                 ./cmd/tui
+              GOOS=$goos GOARCH=$goarch CGO_ENABLED=0 go build \
+                -ldflags="-s -w" \
+                -o "remote-signer-validate-rules-${goos}-${goarch}" \
+                ./cmd/validate-rules
+              GOOS=$goos GOARCH=$goarch CGO_ENABLED=0 go build \
+                -ldflags="-s -w" \
+                -o "remote-signer-cli-${goos}-${goarch}" \
+                ./cmd/remote-signer-cli
             done
           done
 
       - name: Create Release and upload assets
         uses: softprops/action-gh-release@v2
         with:
-          files: remote-signer-tui-*
+          files: |
+            remote-signer-tui-*
+            remote-signer-validate-rules-*
+            remote-signer-cli-*
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

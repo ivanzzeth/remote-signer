@@ -126,6 +126,7 @@ curl --cacert certs/ca.crt --cert certs/client.crt --key certs/client.key https:
 | 文档 | 说明 |
 |------|------|
 | [配置参考](docs/CONFIGURATION.md) | 完整 `config.yaml` 说明 |
+| [规则、模板与预设](docs/RULES_TEMPLATES_AND_PRESETS.md) | 概念：规则模板、实例、预设及示例 |
 | [规则语法参考](docs/RULE_SYNTAX.md) | 规则类型：地址列表、金额限制、Solidity、JS、消息模式 |
 | [JS 规则 (evm_js)](docs/architecture/js-rules-v5.md) | 基于 Sobek 的进程内 JavaScript 规则 |
 | [config.example.yaml](config.example.yaml) | 带注释的配置模板 |

@@ -20,6 +20,8 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 DATA_DIR="${PROJECT_DIR}/data"
+# Binaries from release go here; added to PATH so remote-signer-cli, remote-signer-tui, remote-signer-validate-rules are available
+BIN_DIR="${REMOTE_SIGNER_BIN_DIR:-$PROJECT_DIR/bin}"
 
 # GitHub repo for release downloads (public repo required for unauthenticated download)
 REMOTE_SIGNER_REPO="${REMOTE_SIGNER_RELEASE_REPO:-ivanzzeth/remote-signer}"
@@ -60,7 +62,7 @@ ask() {
 }
 
 # Map current OS/arch to release asset suffix (e.g. linux-amd64, darwin-arm64)
-tui_release_asset_suffix() {
+release_asset_suffix() {
     local goos goarch
     case "$(uname -s)" in
         Linux)  goos=linux ;;
@@ -75,20 +77,65 @@ tui_release_asset_suffix() {
     echo "${goos}-${goarch}"
 }
 
-# Download TUI binary from GitHub Releases (latest). Works only when repo is public.
+# Download a single binary from GitHub Releases (latest). Asset name: ${name}-${suffix}, installed as ${BIN_DIR}/${name}.
 # Returns 0 on success, 1 on failure (no release, 404, or private repo).
-download_tui_from_release() {
+download_release_binary() {
+    local name="$1"
     local suffix url dest
-    suffix="$(tui_release_asset_suffix)" || return 1
-    url="https://github.com/${REMOTE_SIGNER_REPO}/releases/latest/download/remote-signer-tui-${suffix}"
-    dest="$PROJECT_DIR/remote-signer-tui"
-    log_info "Downloading TUI binary (${suffix})..."
-    if curl -SLf -# -o "$dest" "$url" && [ -s "$dest" ]; then
+    suffix="$(release_asset_suffix)" || return 1
+    url="https://github.com/${REMOTE_SIGNER_REPO}/releases/latest/download/${name}-${suffix}"
+    dest="$BIN_DIR/$name"
+    log_info "Downloading $name (${suffix})..."
+    if curl -SLf -# -o "$dest" "$url" 2>/dev/null && [ -s "$dest" ]; then
         chmod +x "$dest"
         return 0
     fi
     rm -f "$dest"
     return 1
+}
+
+# Download all release binaries (remote-signer-tui, remote-signer-validate-rules, remote-signer-cli) into BIN_DIR and add BIN_DIR to PATH.
+# Exports PATH for current process; optionally appends to user's shell rc so new terminals have it.
+download_release_binaries_and_set_path() {
+    mkdir -p "$BIN_DIR"
+    export PATH="$BIN_DIR:$PATH"
+
+    local suffix
+    suffix="$(release_asset_suffix)" 2>/dev/null || true
+    if [ -z "$suffix" ]; then
+        log_warn "Unsupported OS/arch for release binaries; skipping download."
+        return 1
+    fi
+
+    local got_any=0
+    if download_release_binary "remote-signer-tui"; then got_any=1; fi
+    if download_release_binary "remote-signer-validate-rules"; then got_any=1; fi
+    if download_release_binary "remote-signer-cli"; then got_any=1; fi
+
+    if [ "$got_any" -eq 0 ]; then
+        return 1
+    fi
+    add_bin_dir_to_path
+    return 0
+}
+
+# Add BIN_DIR to PATH in the user's shell rc so new terminals have remote-signer-cli, remote-signer-tui, remote-signer-validate-rules on PATH.
+add_bin_dir_to_path() {
+    local rc line
+    if [ -n "${ZSH_VERSION:-}" ]; then
+        rc="${ZDOTDIR:-$HOME}/.zshrc"
+    else
+        rc="$HOME/.bashrc"
+    fi
+    # Prefer existing line that adds our bin dir
+    line="export PATH=\"$BIN_DIR:\$PATH\""
+    if [ -f "$rc" ] && grep -qF "$BIN_DIR" "$rc" 2>/dev/null; then
+        return 0
+    fi
+    echo "" >> "$rc"
+    echo "# Remote Signer CLI/TUI/remote-signer-validate-rules (added by setup.sh)" >> "$rc"
+    echo "$line" >> "$rc"
+    log_info "Added $BIN_DIR to PATH in $rc. Run \`source $rc\` or open a new terminal to use remote-signer-cli, remote-signer-tui, remote-signer-validate-rules from anywhere."
 }
 
 detect_os() {
@@ -652,22 +699,29 @@ step_done() {
     echo ""
 
     # --- Add signer ---
-    # Prefer downloading TUI from GitHub Release (public repo); fall back to local go build
-    TUI_BIN="$PROJECT_DIR/remote-signer-tui"
-    if ! download_tui_from_release; then
+    # Download release binaries (remote-signer-tui, remote-signer-validate-rules, remote-signer-cli) into BIN_DIR and add to PATH
+    TUI_BIN="$BIN_DIR/remote-signer-tui"
+    if ! download_release_binaries_and_set_path; then
+        # Fallback: try building TUI locally if download failed
+        TUI_BIN="$PROJECT_DIR/remote-signer-tui"
         if command -v go &>/dev/null && [ -f "$PROJECT_DIR/go.mod" ]; then
             (cd "$PROJECT_DIR" && go build -o remote-signer-tui ./cmd/tui 2>/dev/null) || true
         fi
+    fi
+    # If TUI still not in BIN_DIR, prefer PROJECT_DIR binary for backward compat
+    if [ ! -x "$TUI_BIN" ] && [ -x "$PROJECT_DIR/remote-signer-tui" ]; then
+        TUI_BIN="$PROJECT_DIR/remote-signer-tui"
     fi
 
     echo -e "${CYAN}Add a signer (after server is running):${NC}"
     echo ""
     echo "  Via TUI (recommended: use -api-key-file to avoid paste):"
     if [ -x "$TUI_BIN" ]; then
-        echo "    ./remote-signer-tui -api-key-id admin -api-key-file data/admin_private.pem \\"
+        echo "    remote-signer-tui -api-key-id admin -api-key-file data/admin_private.pem \\"
+        echo "      # or: $TUI_BIN -api-key-id admin -api-key-file data/admin_private.pem \\"
     else
         echo "    go build -o remote-signer-tui ./cmd/tui   # requires Go 1.24+ (https://go.dev/dl/)"
-        echo "    ./remote-signer-tui -api-key-id admin -api-key-file data/admin_private.pem \\"
+        echo "    remote-signer-tui -api-key-id admin -api-key-file data/admin_private.pem \\"
     fi
     if [ "$TLS_CHOICE" = "3" ]; then
         echo "      -url ${SCHEME}://localhost:${PORT} \\"
@@ -685,6 +739,10 @@ step_done() {
     echo ""
     if [ ! -x "$TUI_BIN" ]; then
         echo "  (No Go? Add signers via API instead — see docs/API.md)"
+        echo ""
+    fi
+    if [ -d "$BIN_DIR" ] && [ -x "$BIN_DIR/remote-signer-tui" ]; then
+        echo -e "  ${DIM}CLI tools on PATH:${NC} remote-signer-tui, remote-signer-validate-rules, remote-signer-cli (from $BIN_DIR)"
         echo ""
     fi
     echo "  Via API (create keystore):"
