@@ -105,6 +105,17 @@ func (m *mockHDWalletManager) ListDerivedAddresses(primaryAddr string) ([]types.
 	}, nil
 }
 
+func (m *mockHDWalletManager) ListPrimaryAddresses() []string {
+	wallets := m.ListHDWallets()
+	out := make([]string, 0, len(wallets))
+	for _, w := range wallets {
+		if w.PrimaryAddress != "" {
+			out = append(out, w.PrimaryAddress)
+		}
+	}
+	return out
+}
+
 // --- Mock SignerManager ---
 
 type mockSignerManager struct {

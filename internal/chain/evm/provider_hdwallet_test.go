@@ -2,8 +2,6 @@ package evm
 
 import (
 	"context"
-	"log/slog"
-	"os"
 	"testing"
 
 	"github.com/ivanzzeth/ethsig/keystore"
@@ -12,10 +10,6 @@ import (
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
-
-func newTestLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-}
 
 // copyMockPasswordProvider returns a fresh copy of password each time, safe against SecureZeroize.
 type copyMockPasswordProvider struct {
@@ -37,21 +31,14 @@ func (m *copyMockPasswordProvider) GetPassword(_ string, _ KeystoreConfig) ([]by
 // =============================================================================
 
 func TestNewHDWalletProvider_NilRegistry(t *testing.T) {
-	_, err := NewHDWalletProvider(nil, nil, t.TempDir(), &mockPasswordProvider{}, newTestLogger())
+	_, err := NewHDWalletProvider(nil, nil, t.TempDir(), &mockPasswordProvider{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "registry is required")
 }
 
-func TestNewHDWalletProvider_NilLogger(t *testing.T) {
-	registry := NewEmptySignerRegistry()
-	_, err := NewHDWalletProvider(registry, nil, t.TempDir(), &mockPasswordProvider{}, nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "logger is required")
-}
-
 func TestNewHDWalletProvider_EmptyConfigs(t *testing.T) {
 	registry := NewEmptySignerRegistry()
-	provider, err := NewHDWalletProvider(registry, nil, t.TempDir(), &mockPasswordProvider{}, newTestLogger())
+	provider, err := NewHDWalletProvider(registry, nil, t.TempDir(), &mockPasswordProvider{})
 	require.NoError(t, err)
 	assert.NotNil(t, provider)
 	assert.Equal(t, 0, registry.SignerCount())
@@ -65,7 +52,7 @@ func TestNewHDWalletProvider_DisabledConfigSkipped(t *testing.T) {
 			Enabled: false,
 		},
 	}
-	provider, err := NewHDWalletProvider(registry, configs, t.TempDir(), &mockPasswordProvider{}, newTestLogger())
+	provider, err := NewHDWalletProvider(registry, configs, t.TempDir(), &mockPasswordProvider{})
 	require.NoError(t, err)
 	assert.Equal(t, 0, registry.SignerCount())
 	assert.Len(t, provider.ListHDWallets(), 0)
@@ -90,7 +77,7 @@ func TestNewHDWalletProvider_LoadFromConfig(t *testing.T) {
 	}
 
 	pwProvider := &mockPasswordProvider{password: password}
-	provider, err := NewHDWalletProvider(registry, configs, walletDir, pwProvider, newTestLogger())
+	provider, err := NewHDWalletProvider(registry, configs, walletDir, pwProvider)
 	require.NoError(t, err)
 	defer provider.Close()
 
@@ -121,7 +108,7 @@ func TestNewHDWalletProvider_LoadWithDeriveIndices(t *testing.T) {
 	}
 
 	pwProvider := &mockPasswordProvider{password: password}
-	provider, err := NewHDWalletProvider(registry, configs, walletDir, pwProvider, newTestLogger())
+	provider, err := NewHDWalletProvider(registry, configs, walletDir, pwProvider)
 	require.NoError(t, err)
 	defer provider.Close()
 
@@ -151,7 +138,7 @@ func TestNewHDWalletProvider_PasswordError(t *testing.T) {
 	}
 
 	pwProvider := &mockPasswordProvider{err: assert.AnError}
-	_, err = NewHDWalletProvider(registry, configs, walletDir, pwProvider, newTestLogger())
+	_, err = NewHDWalletProvider(registry, configs, walletDir, pwProvider)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to get password")
 }
@@ -173,7 +160,7 @@ func TestNewHDWalletProvider_WrongPassword(t *testing.T) {
 	}
 
 	pwProvider := &mockPasswordProvider{password: []byte("wrong-password")}
-	_, err = NewHDWalletProvider(registry, configs, walletDir, pwProvider, newTestLogger())
+	_, err = NewHDWalletProvider(registry, configs, walletDir, pwProvider)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to open HD wallet")
 }
@@ -191,7 +178,7 @@ func TestNewHDWalletProvider_NonExistentFile(t *testing.T) {
 	}
 
 	pwProvider := &mockPasswordProvider{password: []byte("some-password")}
-	_, err := NewHDWalletProvider(registry, configs, walletDir, pwProvider, newTestLogger())
+	_, err := NewHDWalletProvider(registry, configs, walletDir, pwProvider)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to open HD wallet")
 }
@@ -202,13 +189,12 @@ func TestNewHDWalletProvider_NonExistentFile(t *testing.T) {
 
 func TestHDWalletProvider_CreateAndDerive(t *testing.T) {
 	tempDir := t.TempDir()
-	logger := newTestLogger()
 	registry := NewEmptySignerRegistry()
 
 	pwProvider, err := NewEnvPasswordProvider()
 	require.NoError(t, err)
 
-	provider, err := NewHDWalletProvider(registry, nil, tempDir, pwProvider, logger)
+	provider, err := NewHDWalletProvider(registry, nil, tempDir, pwProvider)
 	require.NoError(t, err)
 	registry.RegisterProvider(provider)
 	defer provider.Close()
@@ -263,7 +249,7 @@ func TestHDWalletProvider_CreateEmptyPassword(t *testing.T) {
 	tempDir := t.TempDir()
 	registry := NewEmptySignerRegistry()
 
-	provider, err := NewHDWalletProvider(registry, nil, tempDir, &mockPasswordProvider{}, newTestLogger())
+	provider, err := NewHDWalletProvider(registry, nil, tempDir, &mockPasswordProvider{})
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -279,7 +265,7 @@ func TestHDWalletProvider_CreateDefaultEntropy(t *testing.T) {
 	tempDir := t.TempDir()
 	registry := NewEmptySignerRegistry()
 
-	provider, err := NewHDWalletProvider(registry, nil, tempDir, &mockPasswordProvider{}, newTestLogger())
+	provider, err := NewHDWalletProvider(registry, nil, tempDir, &mockPasswordProvider{})
 	require.NoError(t, err)
 	defer provider.Close()
 
@@ -299,13 +285,12 @@ func TestHDWalletProvider_CreateDefaultEntropy(t *testing.T) {
 
 func TestHDWalletProvider_ImportAndDerive(t *testing.T) {
 	tempDir := t.TempDir()
-	logger := newTestLogger()
 	registry := NewEmptySignerRegistry()
 
 	pwProvider, err := NewEnvPasswordProvider()
 	require.NoError(t, err)
 
-	provider, err := NewHDWalletProvider(registry, nil, tempDir, pwProvider, logger)
+	provider, err := NewHDWalletProvider(registry, nil, tempDir, pwProvider)
 	require.NoError(t, err)
 	registry.RegisterProvider(provider)
 	defer provider.Close()
@@ -339,7 +324,7 @@ func TestHDWalletProvider_ImportEmptyMnemonic(t *testing.T) {
 	tempDir := t.TempDir()
 	registry := NewEmptySignerRegistry()
 
-	provider, err := NewHDWalletProvider(registry, nil, tempDir, &mockPasswordProvider{}, newTestLogger())
+	provider, err := NewHDWalletProvider(registry, nil, tempDir, &mockPasswordProvider{})
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -356,7 +341,7 @@ func TestHDWalletProvider_ImportEmptyPassword(t *testing.T) {
 	tempDir := t.TempDir()
 	registry := NewEmptySignerRegistry()
 
-	provider, err := NewHDWalletProvider(registry, nil, tempDir, &mockPasswordProvider{}, newTestLogger())
+	provider, err := NewHDWalletProvider(registry, nil, tempDir, &mockPasswordProvider{})
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -375,13 +360,12 @@ func TestHDWalletProvider_ImportEmptyPassword(t *testing.T) {
 
 func TestHDWalletProvider_CreateSigner(t *testing.T) {
 	tempDir := t.TempDir()
-	logger := newTestLogger()
 	registry := NewEmptySignerRegistry()
 
 	pwProvider, err := NewEnvPasswordProvider()
 	require.NoError(t, err)
 
-	provider, err := NewHDWalletProvider(registry, nil, tempDir, pwProvider, logger)
+	provider, err := NewHDWalletProvider(registry, nil, tempDir, pwProvider)
 	require.NoError(t, err)
 	registry.RegisterProvider(provider)
 	defer provider.Close()
@@ -402,7 +386,7 @@ func TestHDWalletProvider_CreateSignerInvalidParams(t *testing.T) {
 	tempDir := t.TempDir()
 	registry := NewEmptySignerRegistry()
 
-	provider, err := NewHDWalletProvider(registry, nil, tempDir, &mockPasswordProvider{}, newTestLogger())
+	provider, err := NewHDWalletProvider(registry, nil, tempDir, &mockPasswordProvider{})
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -426,7 +410,7 @@ func TestHDWalletProvider_DeriveNonExistentWallet(t *testing.T) {
 	tempDir := t.TempDir()
 	registry := NewEmptySignerRegistry()
 
-	provider, err := NewHDWalletProvider(registry, nil, tempDir, &mockPasswordProvider{}, newTestLogger())
+	provider, err := NewHDWalletProvider(registry, nil, tempDir, &mockPasswordProvider{})
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -440,7 +424,7 @@ func TestHDWalletProvider_DeriveAddressesNonExistentWallet(t *testing.T) {
 	tempDir := t.TempDir()
 	registry := NewEmptySignerRegistry()
 
-	provider, err := NewHDWalletProvider(registry, nil, tempDir, &mockPasswordProvider{}, newTestLogger())
+	provider, err := NewHDWalletProvider(registry, nil, tempDir, &mockPasswordProvider{})
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -454,7 +438,7 @@ func TestHDWalletProvider_ListDerivedNonExistentWallet(t *testing.T) {
 	tempDir := t.TempDir()
 	registry := NewEmptySignerRegistry()
 
-	provider, err := NewHDWalletProvider(registry, nil, tempDir, &mockPasswordProvider{}, newTestLogger())
+	provider, err := NewHDWalletProvider(registry, nil, tempDir, &mockPasswordProvider{})
 	require.NoError(t, err)
 
 	_, err = provider.ListDerivedAddresses("0x0000000000000000000000000000000000000000")
@@ -466,7 +450,7 @@ func TestHDWalletProvider_ReDeriveSameIndex(t *testing.T) {
 	tempDir := t.TempDir()
 	registry := NewEmptySignerRegistry()
 
-	provider, err := NewHDWalletProvider(registry, nil, tempDir, &mockPasswordProvider{}, newTestLogger())
+	provider, err := NewHDWalletProvider(registry, nil, tempDir, &mockPasswordProvider{})
 	require.NoError(t, err)
 	defer provider.Close()
 
@@ -499,7 +483,7 @@ func TestHDWalletProvider_ReDeriveSameIndex(t *testing.T) {
 
 func TestHDWalletProvider_Type(t *testing.T) {
 	registry := NewEmptySignerRegistry()
-	provider, err := NewHDWalletProvider(registry, nil, t.TempDir(), &mockPasswordProvider{}, newTestLogger())
+	provider, err := NewHDWalletProvider(registry, nil, t.TempDir(), &mockPasswordProvider{})
 	require.NoError(t, err)
 
 	assert.Equal(t, types.SignerTypeHDWallet, provider.Type())
@@ -509,7 +493,7 @@ func TestHDWalletProvider_Close(t *testing.T) {
 	tempDir := t.TempDir()
 	registry := NewEmptySignerRegistry()
 
-	provider, err := NewHDWalletProvider(registry, nil, tempDir, &mockPasswordProvider{}, newTestLogger())
+	provider, err := NewHDWalletProvider(registry, nil, tempDir, &mockPasswordProvider{})
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -536,13 +520,12 @@ func TestHDWalletProvider_Close(t *testing.T) {
 
 func TestHDWalletProvider_Signing(t *testing.T) {
 	tempDir := t.TempDir()
-	logger := newTestLogger()
 	registry := NewEmptySignerRegistry()
 
 	pwProvider, err := NewEnvPasswordProvider()
 	require.NoError(t, err)
 
-	provider, err := NewHDWalletProvider(registry, nil, tempDir, pwProvider, logger)
+	provider, err := NewHDWalletProvider(registry, nil, tempDir, pwProvider)
 	require.NoError(t, err)
 	defer provider.Close()
 
@@ -568,7 +551,7 @@ func TestHDWalletProvider_ListHDWalletsMultiple(t *testing.T) {
 	tempDir := t.TempDir()
 	registry := NewEmptySignerRegistry()
 
-	provider, err := NewHDWalletProvider(registry, nil, tempDir, &mockPasswordProvider{}, newTestLogger())
+	provider, err := NewHDWalletProvider(registry, nil, tempDir, &mockPasswordProvider{})
 	require.NoError(t, err)
 	defer provider.Close()
 
@@ -607,7 +590,7 @@ func TestHDWalletProvider_ListHDWalletsIncludesDiscoveredLocked(t *testing.T) {
 	require.NoError(t, err)
 
 	registry := NewEmptySignerRegistry()
-	provider, err := NewHDWalletProvider(registry, nil, walletDir, &mockPasswordProvider{}, newTestLogger())
+	provider, err := NewHDWalletProvider(registry, nil, walletDir, &mockPasswordProvider{})
 	require.NoError(t, err)
 	defer provider.Close()
 

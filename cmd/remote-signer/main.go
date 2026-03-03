@@ -33,7 +33,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
-const version = "0.1.6"
+const version = "0.1.7"
 
 func main() {
 	if err := run(); err != nil {
@@ -287,14 +287,14 @@ func run() error {
 		evmRegistry.RegisterProvider(pkProvider)
 
 		// 2. Load keystores
-		ksProvider, err := evm.NewKeystoreProvider(evmRegistry, cfg.Chains.EVM.Signers.Keystores, cfg.Chains.EVM.KeystoreDir, pwProvider, log)
+		ksProvider, err := evm.NewKeystoreProvider(evmRegistry, cfg.Chains.EVM.Signers.Keystores, cfg.Chains.EVM.KeystoreDir, pwProvider)
 		if err != nil {
 			return fmt.Errorf("failed to create keystore provider: %w", err)
 		}
 		evmRegistry.RegisterProvider(ksProvider)
 
 		// 3. Load HD wallets
-		hdProvider, err := evm.NewHDWalletProvider(evmRegistry, cfg.Chains.EVM.Signers.HDWallets, cfg.Chains.EVM.HDWalletDir, pwProvider, log)
+		hdProvider, err := evm.NewHDWalletProvider(evmRegistry, cfg.Chains.EVM.Signers.HDWallets, cfg.Chains.EVM.HDWalletDir, pwProvider)
 		if err != nil {
 			return fmt.Errorf("failed to create HD wallet provider: %w", err)
 		}
@@ -307,7 +307,7 @@ func run() error {
 		}()
 
 		// Initialize signer manager for dynamic signer creation
-		evmSignerManager, err = evm.NewSignerManager(evmRegistry, log)
+		evmSignerManager, err = evm.NewSignerManager(evmRegistry)
 		if err != nil {
 			return fmt.Errorf("failed to create EVM signer manager: %w", err)
 		}
@@ -331,11 +331,11 @@ func run() error {
 		}
 
 		lockedCount := evmRegistry.TotalCount() - evmRegistry.SignerCount()
-		log.Info("EVM adapter registered",
-			"unlocked", evmRegistry.SignerCount(),
-			"locked", lockedCount,
-		)
-		log.Info("EVM signer manager initialized")
+		logger.EVM().Info().Int("unlocked", evmRegistry.SignerCount()).Int("locked", lockedCount).Int("total", evmRegistry.TotalCount()).Msg("EVM adapter registered")
+		if evmRegistry.SignerCount() > 0 {
+			logger.EVM().Warn().Int("unlocked_count", evmRegistry.SignerCount()).Msg("signer state after startup: some signers unlocked; with empty config expect all locked")
+		}
+		logger.EVM().Info().Msg("EVM signer manager initialized")
 	}
 
 	// Initialize state machine

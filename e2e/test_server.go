@@ -306,7 +306,7 @@ func (ts *TestServer) Start() error {
 	if cleanupKsErr != nil {
 		return fmt.Errorf("failed to create temp keystore dir: %w", cleanupKsErr)
 	}
-	ksProvider, err := evm.NewKeystoreProvider(evmRegistry, evmSignerConfig.Keystores, keystoreDir, pwProvider, log)
+	ksProvider, err := evm.NewKeystoreProvider(evmRegistry, evmSignerConfig.Keystores, keystoreDir, pwProvider)
 	if err != nil {
 		return fmt.Errorf("failed to create keystore provider: %w", err)
 	}
@@ -317,7 +317,7 @@ func (ts *TestServer) Start() error {
 	if cleanupErr != nil {
 		return fmt.Errorf("failed to create temp HD wallet dir: %w", cleanupErr)
 	}
-	hdProvider, err := evm.NewHDWalletProvider(evmRegistry, evmSignerConfig.HDWallets, hdWalletDir, pwProvider, log)
+	hdProvider, err := evm.NewHDWalletProvider(evmRegistry, evmSignerConfig.HDWallets, hdWalletDir, pwProvider)
 	if err != nil {
 		return fmt.Errorf("failed to create HD wallet provider: %w", err)
 	}
@@ -465,7 +465,7 @@ func (ts *TestServer) Start() error {
 	}
 
 	// Initialize signer manager for dynamic signer creation
-	signerManager, err := evm.NewSignerManager(evmRegistry, log)
+	signerManager, err := evm.NewSignerManager(evmRegistry)
 	if err != nil {
 		return fmt.Errorf("failed to create signer manager: %w", err)
 	}
