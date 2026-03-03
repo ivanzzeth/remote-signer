@@ -599,16 +599,17 @@ func (ts *TestServer) waitForReady(ctx context.Context) error {
 func (ts *TestServer) createAPIKey(repo storage.APIKeyRepository) error {
 	ctx := context.Background()
 
-	// Create admin API key
+	// Create admin API key (AllowAllSigners so e2e can sign with test signers)
 	adminKey := &types.APIKey{
-		ID:           ts.config.APIKeyID,
-		Name:         "E2E Test Admin API Key",
-		PublicKeyHex: hex.EncodeToString(ts.config.APIKeyPublicKey),
-		RateLimit:    1000,
-		Admin:        true, // Admin key
-		Enabled:      true,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
+		ID:               ts.config.APIKeyID,
+		Name:             "E2E Test Admin API Key",
+		PublicKeyHex:     hex.EncodeToString(ts.config.APIKeyPublicKey),
+		RateLimit:        1000,
+		Admin:            true,
+		AllowAllSigners:  true,
+		Enabled:          true,
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
 	}
 
 	if err := repo.Create(ctx, adminKey); err != nil {
@@ -618,14 +619,15 @@ func (ts *TestServer) createAPIKey(repo storage.APIKeyRepository) error {
 	// Create non-admin API key if configured
 	if ts.config.NonAdminAPIKeyID != "" && ts.config.NonAdminAPIKeyPublicKey != nil {
 		nonAdminKey := &types.APIKey{
-			ID:           ts.config.NonAdminAPIKeyID,
-			Name:         "E2E Test Non-Admin API Key",
-			PublicKeyHex: hex.EncodeToString(ts.config.NonAdminAPIKeyPublicKey),
-			RateLimit:    1000,
-			Admin:        false, // Non-admin key
-			Enabled:      true,
-			CreatedAt:    time.Now(),
-			UpdatedAt:    time.Now(),
+			ID:               ts.config.NonAdminAPIKeyID,
+			Name:             "E2E Test Non-Admin API Key",
+			PublicKeyHex:     hex.EncodeToString(ts.config.NonAdminAPIKeyPublicKey),
+			RateLimit:        1000,
+			Admin:            false,
+			AllowAllSigners:  true,
+			Enabled:          true,
+			CreatedAt:        time.Now(),
+			UpdatedAt:        time.Now(),
 		}
 
 		if err := repo.Create(ctx, nonAdminKey); err != nil {

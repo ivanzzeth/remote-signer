@@ -18,17 +18,12 @@ variables:
     type: address
     description: "USDC.e token (for test_cases only)"
     required: false
-  - name: allowed_safe_address_for_testing
-    type: address
-    description: "Address for test payload"
-    required: false
 
 test_variables:
   chain_id: "137"
   safe_proxy_factory_address: "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"
   safe_factory_domain_name: "Polymarket Contract Proxy Factory"
   usdc_bridged_address: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
-  allowed_safe_address_for_testing: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
 
 rules:
   - name: "Polymarket Safe Wallet Creation Signature"
@@ -84,7 +79,7 @@ rules:
               message:
                 paymentToken: "${usdc_bridged_address}"
                 payment: "1000000"
-                paymentReceiver: "${allowed_safe_address_for_testing}"
+                paymentReceiver: "0x0000000000000000000000000000000000000001"
           expect_pass: false
           expect_reason: "payment token must be zero"
 

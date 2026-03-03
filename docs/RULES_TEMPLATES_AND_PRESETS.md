@@ -28,7 +28,7 @@ File and artifact names use a single pattern so that **type** (template vs insta
 | `xxx_yyy.template.yaml` | Rule **template**: parameterized rules, `xxx` = protocol, `yyy` = capability | `polymarket_auth.template.yaml`, `polymarket_create_safe.template.yaml` |
 | `xxx_yyy.template.js.yaml` | Rule template implemented in **JavaScript** (same idea, JS engine) | `polymarket_some_capability.template.js.yaml` |
 | `xxx_yyy.yaml` (no `template`/`preset`) | **Instance**: concrete rule config (references a template and supplies variables) | `polymarket_safe.yaml`, `polymarket_eoa.yaml` |
-| `xxx_yyy.preset.yaml` | **Preset**: pre-filled instance(s) for quick add (replace `template` with `preset`) | `polymarket_eoa_polygon.preset.yaml`, `polymarket_safe_init_polygon.preset.yaml` |
+| `xxx_yyy.preset.yaml` | **Preset**: pre-filled instance(s) for quick add (replace `template` with `preset`) | `polymarket_eoa_polygon.preset.yaml`, `polymarket_safe_init_polygon.preset.js.yaml` |
 
 - **Segments**: use **underscores** (`_`) for readability (e.g. `create_safe`, `eoa_polygon`). No mixing of kebab-case and underscores in the same naming scheme.
 - **Protocol** (`xxx`): e.g. `polymarket`, `predict`.
@@ -170,14 +170,14 @@ A **preset** is a YAML file that stores one or more **instance-style rule(s)** w
 - Avoid copying long variable blocks from `config.example.yaml`.
 - Override only a few values (e.g. your Safe address) and optionally merge the result into your `config.yaml` via **remote-signer-cli** or **setup.sh**.
 
-Presets live under `rules/presets/` (e.g. `polymarket_safe_polygon.preset.yaml`). They are used only by the CLI (and optionally by setup); the server does not read preset files.
+Presets live under `rules/presets/` (e.g. `polymarket_safe_polygon.preset.js.yaml`). They are used only by the CLI (and optionally by setup); the server does not read preset files.
 
 ### 5.2 Single-rule preset format
 
 One rule per file, flat structure:
 
 ```yaml
-# rules/presets/polymarket_safe_polygon.preset.yaml
+# rules/presets/polymarket_safe_polygon.preset.js.yaml
 name: "Polymarket Safe rules (Polygon)"
 template: "Polymarket Safe Template"
 chain_type: "evm"
@@ -265,7 +265,7 @@ Template files define variables with a **description** field; that description i
   If the preset has `template_path` and the config does not yet define that template, the CLI adds the template entry from the preset.
 
 - **Composite presets (multiple templates)**  
-  Use `template_paths` and `template_names` in the preset. The CLI generates one rule per template; each rule gets a **copy** of the preset’s `variables` (see below). Example: `polymarket_safe_polygon.preset.yaml` with four templates produces four instance rules, all sharing the same variable values.
+  Use `template_paths` and `template_names` in the preset. The CLI generates one rule per template; each rule gets a **copy** of the preset’s `variables` (see below). Example: `polymarket_safe_polygon.preset.js.yaml` with four templates produces four instance rules, all sharing the same variable values.
 
 ### 5.7 How variables work: one fill, no interference
 

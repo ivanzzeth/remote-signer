@@ -20,7 +20,7 @@ if command -v remote-signer-cli &>/dev/null; then
 else
   CLI="go run ./cmd/remote-signer-cli/"
 fi
-$CLI preset create-from polymarket_safe_polygon.preset.yaml \
+$CLI preset create-from polymarket_safe_polygon.preset.js.yaml \
   --config "$CONFIG" --write \
   --presets-dir rules/presets \
   --set "allowed_safe_addresses=$SIGNER" \
