@@ -53,3 +53,25 @@ func (s *SignerService) Create(ctx context.Context, req *CreateSignerRequest) (*
 	}
 	return &signer, nil
 }
+
+// Unlock unlocks a locked signer (admin only).
+func (s *SignerService) Unlock(ctx context.Context, address string, req *UnlockSignerRequest) (*UnlockSignerResponse, error) {
+	var resp UnlockSignerResponse
+	path := fmt.Sprintf("/api/v1/evm/signers/%s/unlock", address)
+	err := s.transport.Request(ctx, http.MethodPost, path, req, &resp, http.StatusOK)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// Lock locks an unlocked signer (admin only).
+func (s *SignerService) Lock(ctx context.Context, address string) (*LockSignerResponse, error) {
+	var resp LockSignerResponse
+	path := fmt.Sprintf("/api/v1/evm/signers/%s/lock", address)
+	err := s.transport.Request(ctx, http.MethodPost, path, nil, &resp, http.StatusOK)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}

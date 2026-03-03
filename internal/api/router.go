@@ -169,6 +169,8 @@ func (r *Router) setupRoutes() error {
 
 	// Signer management routes (GET with auth, POST with auth + admin)
 	r.mux.Handle("/api/v1/evm/signers", r.withAuth(signerHandler))
+	// Signer action routes: /api/v1/evm/signers/{address}/unlock, /lock
+	r.mux.Handle("/api/v1/evm/signers/", r.withAuth(http.HandlerFunc(signerHandler.HandleSignerAction)))
 
 	// HD wallet management routes (auth required; admin/HD wallet permission checked in handler)
 	r.mux.Handle("/api/v1/evm/hd-wallets", r.withAuth(hdWalletHandler))

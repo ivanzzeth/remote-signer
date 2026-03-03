@@ -35,6 +35,10 @@ type SignersModel struct {
 	showFilter  bool
 	filterInput textinput.Model
 
+	// Unlock/lock signer state
+	showUnlock      bool
+	unlockInput     textinput.Model
+
 	// Create signer state
 	showCreate       bool
 	createStep       int // 0: select type, 1: enter password (keystore) or loading wallets (hd), 2: confirm (keystore) or pick wallet (hd), 3: enter index (hd)
@@ -71,6 +75,22 @@ type SignerCreateMsg struct {
 // SignerHDWalletListMsg is sent when HD wallet list is loaded for the derive picker.
 type SignerHDWalletListMsg struct {
 	Wallets []evm.HDWalletResponse
+	Err     error
+}
+
+// SignerUnlockMsg is sent when a signer unlock completes.
+type SignerUnlockMsg struct {
+	Signer  *evm.Signer
+	Success bool
+	Message string
+	Err     error
+}
+
+// SignerLockMsg is sent when a signer lock completes.
+type SignerLockMsg struct {
+	Signer  *evm.Signer
+	Success bool
+	Message string
 	Err     error
 }
 
@@ -121,6 +141,11 @@ func newSignersModelFromService(svc evm.SignerAPI, hdSvc evm.HDWalletAPI, ctx co
 	idxInput.Placeholder = "Derivation index"
 	idxInput.Width = 20
 
+	unlockInput := textinput.New()
+	unlockInput.Placeholder = "Enter password to unlock"
+	unlockInput.Width = 40
+	unlockInput.EchoMode = textinput.EchoPassword
+
 	return &SignersModel{
 		signers_svc:   svc,
 		hdwallets_svc: hdSvc,
@@ -132,6 +157,7 @@ func newSignersModelFromService(svc evm.SignerAPI, hdSvc evm.HDWalletAPI, ctx co
 		passwordInput: pwInput,
 		confirmInput:  confirmInput,
 		indexInput:    idxInput,
+		unlockInput:  unlockInput,
 	}, nil
 }
 
@@ -194,6 +220,35 @@ func (m *SignersModel) createSigner(signerType string, password string) tea.Cmd 
 			Success: true,
 			Message: fmt.Sprintf("Signer created: %s", signer.Address),
 			Err:     nil,
+		}
+	}
+}
+
+func (m *SignersModel) unlockSigner(address string, password string) tea.Cmd {
+	return func() tea.Msg {
+		req := &evm.UnlockSignerRequest{Password: password}
+		resp, err := m.signers_svc.Unlock(m.ctx, address, req)
+		if err != nil {
+			return SignerUnlockMsg{Success: false, Err: err}
+		}
+		return SignerUnlockMsg{
+			Signer:  resp,
+			Success: true,
+			Message: fmt.Sprintf("Signer unlocked: %s", resp.Address),
+		}
+	}
+}
+
+func (m *SignersModel) lockSigner(address string) tea.Cmd {
+	return func() tea.Msg {
+		resp, err := m.signers_svc.Lock(m.ctx, address)
+		if err != nil {
+			return SignerLockMsg{Success: false, Err: err}
+		}
+		return SignerLockMsg{
+			Signer:  resp,
+			Success: true,
+			Message: fmt.Sprintf("Signer locked: %s", resp.Address),
 		}
 	}
 }
@@ -273,6 +328,29 @@ func (m *SignersModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case SignerUnlockMsg:
+		m.loading = false
+		if msg.Err != nil {
+			m.actionResult = styles.ErrorStyle.Render(fmt.Sprintf("Error: %v", msg.Err))
+		} else {
+			m.actionResult = styles.SuccessStyle.Render(msg.Message)
+			m.showUnlock = false
+			m.unlockInput.SetValue("")
+			m.unlockInput.Blur()
+			return m, m.Refresh()
+		}
+		return m, nil
+
+	case SignerLockMsg:
+		m.loading = false
+		if msg.Err != nil {
+			m.actionResult = styles.ErrorStyle.Render(fmt.Sprintf("Error: %v", msg.Err))
+		} else {
+			m.actionResult = styles.SuccessStyle.Render(msg.Message)
+			return m, m.Refresh()
+		}
+		return m, nil
+
 	case SignerHDDeriveMsg:
 		m.loading = false
 		if msg.Err != nil {
@@ -293,6 +371,31 @@ func (m *SignersModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// Handle unlock password input
+		if m.showUnlock {
+			switch msg.String() {
+			case "enter":
+				if m.unlockInput.Value() != "" {
+					signer := m.GetSelectedSigner()
+					if signer != nil {
+						m.loading = true
+						m.unlockInput.Blur()
+						return m, tea.Batch(m.spinner.Tick, m.unlockSigner(signer.Address, m.unlockInput.Value()))
+					}
+				}
+				return m, nil
+			case "esc":
+				m.showUnlock = false
+				m.unlockInput.SetValue("")
+				m.unlockInput.Blur()
+				return m, nil
+			default:
+				var cmd tea.Cmd
+				m.unlockInput, cmd = m.unlockInput.Update(msg)
+				return m, cmd
+			}
+		}
+
 		// Handle create signer flow
 		if m.showCreate {
 			return m.handleCreateInput(msg)
@@ -387,6 +490,26 @@ func (m *SignersModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.offset = 0
 			m.selectedIdx = 0
 			return m, m.Refresh()
+		case "u":
+			// Unlock selected signer
+			signer := m.GetSelectedSigner()
+			if signer != nil && signer.Locked {
+				m.showUnlock = true
+				m.unlockInput.SetValue("")
+				m.unlockInput.Focus()
+				m.actionResult = ""
+				return m, textinput.Blink
+			}
+			return m, nil
+		case "l":
+			// Lock selected signer
+			signer := m.GetSelectedSigner()
+			if signer != nil && !signer.Locked && signer.Enabled {
+				m.loading = true
+				m.actionResult = ""
+				return m, tea.Batch(m.spinner.Tick, m.lockSigner(signer.Address))
+			}
+			return m, nil
 		case "+", "a":
 			// Create new signer
 			m.showCreate = true
@@ -563,6 +686,10 @@ func (m *SignersModel) handleHDDeriveIndex(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 
 // View renders the signers view
 func (m *SignersModel) View() string {
+	if m.showUnlock {
+		return m.renderUnlockForm()
+	}
+
 	if m.showCreate {
 		return m.renderCreateForm()
 	}
@@ -603,6 +730,36 @@ func (m *SignersModel) renderError() string {
 		lipgloss.Center,
 		lipgloss.Center,
 		errBox,
+	)
+}
+
+func (m *SignersModel) renderUnlockForm() string {
+	var content strings.Builder
+	signer := m.GetSelectedSigner()
+	addr := ""
+	if signer != nil {
+		addr = signer.Address
+	}
+
+	content.WriteString(styles.TitleStyle.Render("Unlock Signer"))
+	content.WriteString("\n\n")
+	content.WriteString(fmt.Sprintf("Address: %s\n\n", styles.HighlightStyle.Render(addr)))
+	content.WriteString(styles.SubtitleStyle.Render("Enter Password:"))
+	content.WriteString("\n\n")
+	content.WriteString(m.unlockInput.View())
+	content.WriteString("\n\n")
+	if m.actionResult != "" {
+		content.WriteString(m.actionResult)
+		content.WriteString("\n\n")
+	}
+	content.WriteString(styles.MutedColor.Render("Enter: unlock | Esc: cancel"))
+
+	return lipgloss.Place(
+		m.width,
+		m.height,
+		lipgloss.Center,
+		lipgloss.Center,
+		styles.BoxStyle.Render(content.String()),
 	)
 }
 
@@ -792,12 +949,12 @@ func (m *SignersModel) renderSigners() string {
 	// Table header
 	showAccess := m.hasAccessColumn()
 	if showAccess {
-		headerRow := fmt.Sprintf("%-44s  %-14s  %-8s  %-30s",
-			"Address", "Type", "Enabled", "Access")
+		headerRow := fmt.Sprintf("%-44s  %-14s  %-8s  %-8s  %-30s",
+			"Address", "Type", "Status", "Enabled", "Access")
 		content.WriteString(styles.TableHeaderStyle.Render(headerRow))
 	} else {
-		headerRow := fmt.Sprintf("%-44s  %-14s  %-8s",
-			"Address", "Type", "Enabled")
+		headerRow := fmt.Sprintf("%-44s  %-14s  %-8s  %-8s",
+			"Address", "Type", "Status", "Enabled")
 		content.WriteString(styles.TableHeaderStyle.Render(headerRow))
 	}
 	content.WriteString("\n")
@@ -833,7 +990,7 @@ func (m *SignersModel) renderSigners() string {
 
 	// Help
 	content.WriteString("\n\n")
-	helpText := "Enter: view detail | up/down: navigate | +/a: create signer | f: filter | c: clear | n/p: next/prev | r: refresh"
+	helpText := "Enter: view detail | up/down: navigate | u: unlock | l: lock | +/a: create signer | f: filter | c: clear | n/p: next/prev | r: refresh"
 	content.WriteString(styles.HelpStyle.Render(helpText))
 
 	return content.String()
@@ -849,7 +1006,7 @@ func (m *SignersModel) GetSelectedSigner() *evm.Signer {
 
 // IsCapturingInput returns true when this view is capturing keyboard input (form/filter active).
 func (m *SignersModel) IsCapturingInput() bool {
-	return m.showCreate || m.showFilter
+	return m.showCreate || m.showFilter || m.showUnlock
 }
 
 func (m *SignersModel) renderSignerRow(signer evm.Signer, selected bool, showAccess bool) string {
@@ -864,15 +1021,21 @@ func (m *SignersModel) renderSignerRow(signer evm.Signer, selected bool, showAcc
 		enabled = "No"
 	}
 
+	status := "Ready"
+	if signer.Locked {
+		status = "Locked"
+	}
+
 	accessStr := ""
 	if showAccess {
 		accessStr = formatAccessColumn(signer.AllowedKeys)
 	}
 
 	if showAccess {
-		row := fmt.Sprintf("%-44s  %-14s  %-8s  %-30s",
+		row := fmt.Sprintf("%-44s  %-14s  %-8s  %-8s  %-30s",
 			address,
 			signer.Type,
+			status,
 			enabled,
 			accessStr,
 		)
@@ -880,9 +1043,10 @@ func (m *SignersModel) renderSignerRow(signer evm.Signer, selected bool, showAcc
 			return styles.TableSelectedRowStyle.Render(row)
 		}
 	} else {
-		row := fmt.Sprintf("%-44s  %-14s  %-8s",
+		row := fmt.Sprintf("%-44s  %-14s  %-8s  %-8s",
 			address,
 			signer.Type,
+			status,
 			enabled,
 		)
 		if selected {
@@ -892,12 +1056,20 @@ func (m *SignersModel) renderSignerRow(signer evm.Signer, selected bool, showAcc
 
 	// Color type
 	typeStyle := styles.MutedColor
-	if signer.Type == "private_key" {
+	switch signer.Type {
+	case "private_key":
 		typeStyle = styles.WarningStyle
-	} else if signer.Type == "keystore" {
+	case "keystore":
 		typeStyle = styles.SuccessStyle
 	}
 	typePart := typeStyle.Render(fmt.Sprintf("%-14s", signer.Type))
+
+	// Color status
+	statusStyle := styles.SuccessStyle
+	if signer.Locked {
+		statusStyle = styles.WarningStyle
+	}
+	statusPart := statusStyle.Render(fmt.Sprintf("%-8s", status))
 
 	// Color enabled
 	enabledStyle := styles.SuccessStyle
@@ -907,18 +1079,20 @@ func (m *SignersModel) renderSignerRow(signer evm.Signer, selected bool, showAcc
 	enabledPart := enabledStyle.Render(fmt.Sprintf("%-8s", enabled))
 
 	if showAccess {
-		row := fmt.Sprintf("%-44s  %s  %s  %-30s",
+		row := fmt.Sprintf("%-44s  %s  %s  %s  %-30s",
 			address,
 			typePart,
+			statusPart,
 			enabledPart,
 			accessStr,
 		)
 		return styles.TableRowStyle.Render(row)
 	}
 
-	row := fmt.Sprintf("%-44s  %s  %s",
+	row := fmt.Sprintf("%-44s  %s  %s  %s",
 		address,
 		typePart,
+		statusPart,
 		enabledPart,
 	)
 	return styles.TableRowStyle.Render(row)

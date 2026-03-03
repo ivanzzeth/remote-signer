@@ -23,11 +23,12 @@ type hdWalletState struct {
 
 // HDWalletProvider manages HD wallet signers.
 type HDWalletProvider struct {
-	registry  *SignerRegistry
-	walletDir string
-	mu        sync.RWMutex
-	wallets   map[string]*hdWalletState // primaryAddr (checksummed) -> state
-	logger    *slog.Logger
+	registry    *SignerRegistry
+	walletDir   string
+	mu          sync.RWMutex
+	wallets     map[string]*hdWalletState // primaryAddr (checksummed) -> state
+	lockedPaths map[string]string         // primaryAddr (checksummed) -> filePath
+	logger      *slog.Logger
 }
 
 // NewHDWalletProvider creates an HDWalletProvider and loads all configured HD wallets.
@@ -46,10 +47,11 @@ func NewHDWalletProvider(
 	}
 
 	p := &HDWalletProvider{
-		registry:  registry,
-		walletDir: walletDir,
-		wallets:   make(map[string]*hdWalletState),
-		logger:    logger,
+		registry:    registry,
+		walletDir:   walletDir,
+		wallets:     make(map[string]*hdWalletState),
+		lockedPaths: make(map[string]string),
+		logger:      logger,
 	}
 
 	for _, cfg := range configs {
@@ -468,3 +470,156 @@ func (p *HDWalletProvider) registerDerivedSigner(addr common.Address, wallet *ke
 	state.derived = append(state.derived, info)
 	return nil
 }
+
+// DiscoverLockedSigners scans walletDir for HD wallet files not already loaded.
+func (p *HDWalletProvider) DiscoverLockedSigners() ([]types.SignerInfo, error) {
+	if p.walletDir == "" {
+		return nil, nil
+	}
+
+	wallets, err := keystore.ListHDWallets(p.walletDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list HD wallets in %s: %w", p.walletDir, err)
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	var discovered []types.SignerInfo
+	for _, w := range wallets {
+		addrKey := normalizeAddress(w.PrimaryAddress)
+		if _, exists := p.wallets[addrKey]; exists {
+			continue
+		}
+		if p.registry.HasSigner(addrKey) {
+			continue
+		}
+
+		p.lockedPaths[addrKey] = w.Path
+		info := types.SignerInfo{
+			Address: common.HexToAddress(w.PrimaryAddress).Hex(),
+			Type:    string(types.SignerTypeHDWallet),
+			Enabled: false,
+			Locked:  true,
+		}
+		discovered = append(discovered, info)
+
+		p.logger.Info("discovered locked HD wallet",
+			slog.String("primary_address", info.Address),
+			slog.String("path", w.Path),
+		)
+	}
+
+	return discovered, nil
+}
+
+// UnlockSigner unlocks a locked HD wallet signer with the given password.
+func (p *HDWalletProvider) UnlockSigner(ctx context.Context, address string, password string) (*ethsig.Signer, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	addrKey := normalizeAddress(address)
+	filePath, ok := p.lockedPaths[addrKey]
+	if !ok {
+		return nil, fmt.Errorf("no locked HD wallet found for address %s", address)
+	}
+
+	passwordBytes := []byte(password)
+	wallet, err := keystore.OpenHDWallet(filePath, passwordBytes)
+	keystore.SecureZeroize(passwordBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unlock HD wallet for %s: %w", address, err)
+	}
+
+	// Derive the primary address (index 0)
+	primaryAddr, err := wallet.DeriveAddress(0)
+	if err != nil {
+		if closeErr := wallet.Close(); closeErr != nil {
+			p.logger.Warn("failed to close wallet on error", slog.Any("error", closeErr))
+		}
+		return nil, fmt.Errorf("failed to derive primary address: %w", err)
+	}
+
+	state := &hdWalletState{
+		wallet:     wallet,
+		walletPath: filePath,
+	}
+
+	// Derive key for primary address
+	privKey, err := wallet.DeriveKey(0)
+	if err != nil {
+		if closeErr := wallet.Close(); closeErr != nil {
+			p.logger.Warn("failed to close wallet on error", slog.Any("error", closeErr))
+		}
+		return nil, fmt.Errorf("failed to derive key at index 0: %w", err)
+	}
+
+	keySigner := ethsig.NewEthPrivateKeySigner(privKey)
+	signer := ethsig.NewSigner(keySigner)
+
+	state.derived = append(state.derived, types.SignerInfo{
+		Address: primaryAddr.Hex(),
+		Type:    string(types.SignerTypeHDWallet),
+		Enabled: true,
+	})
+
+	p.wallets[addrKey] = state
+	delete(p.lockedPaths, addrKey)
+
+	p.logger.Info("HD wallet signer unlocked",
+		slog.String("primary_address", primaryAddr.Hex()),
+	)
+
+	return signer, nil
+}
+
+// LockSigner locks an unlocked HD wallet signer (closes wallet, stores path for later unlock).
+func (p *HDWalletProvider) LockSigner(ctx context.Context, address string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	addrKey := normalizeAddress(address)
+	state, ok := p.wallets[addrKey]
+	if !ok {
+		return fmt.Errorf("HD wallet not found for address %s", address)
+	}
+
+	// Close the wallet to zeroize keys
+	if err := state.wallet.Close(); err != nil {
+		p.logger.Warn("failed to close wallet during lock", slog.Any("error", err))
+	}
+
+	// Store path for later unlock
+	p.lockedPaths[addrKey] = state.walletPath
+
+	// Lock all derived signers in the registry
+	for _, d := range state.derived {
+		derivedKey := normalizeAddress(d.Address)
+		if derivedKey == addrKey {
+			continue // primary will be locked by the manager
+		}
+		// Remove derived signers from registry (they need the wallet to be usable)
+		// The registry doesn't have a Remove method, so we lock them too
+		if err := p.registry.LockSigner(d.Address); err != nil {
+			p.logger.Warn("failed to lock derived signer",
+				slog.String("address", d.Address),
+				slog.Any("error", err),
+			)
+		}
+	}
+
+	delete(p.wallets, addrKey)
+
+	p.logger.Info("HD wallet signer locked",
+		slog.String("primary_address", address),
+	)
+
+	return nil
+}
+
+// Compile-time interface checks.
+var (
+	_ SignerDiscoverer = (*HDWalletProvider)(nil)
+	_ SignerUnlocker   = (*HDWalletProvider)(nil)
+	_ SignerLocker     = (*HDWalletProvider)(nil)
+)

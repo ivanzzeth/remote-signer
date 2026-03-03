@@ -3,6 +3,8 @@ package evm
 import (
 	"context"
 
+	"github.com/ivanzzeth/ethsig"
+
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
 
@@ -20,6 +22,24 @@ type SignerProvider interface {
 type SignerCreator interface {
 	SignerProvider
 	CreateSigner(ctx context.Context, params interface{}) (*types.SignerInfo, error)
+}
+
+// SignerDiscoverer can discover locked signers on startup (scan disk, probe HSM, etc.).
+type SignerDiscoverer interface {
+	SignerProvider
+	DiscoverLockedSigners() ([]types.SignerInfo, error)
+}
+
+// SignerUnlocker can unlock a locked signer at runtime.
+type SignerUnlocker interface {
+	SignerProvider
+	UnlockSigner(ctx context.Context, address string, password string) (*ethsig.Signer, error)
+}
+
+// SignerLocker can lock an unlocked signer at runtime (zeroize key, remove from memory).
+type SignerLocker interface {
+	SignerProvider
+	LockSigner(ctx context.Context, address string) error
 }
 
 // HDWalletManager defines HD wallet-specific operations.
