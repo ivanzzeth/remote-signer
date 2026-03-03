@@ -30,6 +30,7 @@ func TestNewNotifyService_EmptyConfig(t *testing.T) {
 	assert.Nil(t, svc.slackClient, "slack client should be nil when not configured")
 	assert.Nil(t, svc.pushoverClient, "pushover client should be nil when not configured")
 	assert.Nil(t, svc.webhookClient, "webhook client should be nil when not configured")
+	assert.Nil(t, svc.telegramClient, "telegram client should be nil when not configured")
 	assert.NotNil(t, svc.msgChan, "internal message channel should be initialized")
 }
 
@@ -143,16 +144,42 @@ func TestNewNotifyService_WebhookEnabled_CustomTimeout(t *testing.T) {
 	assert.NotNil(t, svc.webhookClient)
 }
 
+func TestNewNotifyService_TelegramDisabled(t *testing.T) {
+	svc, err := NewNotifyService(&Config{
+		Telegram: &TelegramConfig{Enabled: false, BotToken: ""},
+	})
+	require.NoError(t, err)
+	assert.Nil(t, svc.telegramClient, "telegram client should be nil when disabled")
+}
+
+func TestNewNotifyService_TelegramEnabled_MissingToken(t *testing.T) {
+	_, err := NewNotifyService(&Config{
+		Telegram: &TelegramConfig{Enabled: true, BotToken: ""},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "telegram bot token is required when enabled")
+}
+
+func TestNewNotifyService_TelegramEnabled_Valid(t *testing.T) {
+	svc, err := NewNotifyService(&Config{
+		Telegram: &TelegramConfig{Enabled: true, BotToken: "123:ABC"},
+	})
+	require.NoError(t, err)
+	assert.NotNil(t, svc.telegramClient)
+}
+
 func TestNewNotifyService_AllEnabled(t *testing.T) {
 	svc, err := NewNotifyService(&Config{
 		Slack:    &SlackConfig{Enabled: true, BotToken: "xoxb-test"},
 		Pushover: &PushoverConfig{Enabled: true, AppToken: "app-tok"},
 		Webhook:  &WebhookConfig{Enabled: true},
+		Telegram: &TelegramConfig{Enabled: true, BotToken: "123:ABC"},
 	})
 	require.NoError(t, err)
 	assert.NotNil(t, svc.slackClient)
 	assert.NotNil(t, svc.pushoverClient)
 	assert.NotNil(t, svc.webhookClient)
+	assert.NotNil(t, svc.telegramClient)
 }
 
 // ============================================================
