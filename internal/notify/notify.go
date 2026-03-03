@@ -70,7 +70,7 @@ type NotifyService struct {
 	pushoverClient *PushoverClient
 	webhookClient  *WebhookClient
 	telegramClient *TelegramClient
-	logger         zerolog.Logger
+	logger         *zerolog.Logger
 
 	// Async delivery: queue and consumer
 	msgChan chan notifyMessage

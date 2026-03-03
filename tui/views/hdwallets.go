@@ -82,6 +82,8 @@ func newHDWalletsModelFromService(svc evm.HDWalletAPI, ctx context.Context) (*HD
 	mnInput := textinput.New()
 	mnInput.Placeholder = "Enter mnemonic phrase"
 	mnInput.Width = 60
+	// Mask mnemonic like password: TUI must never show plaintext mnemonic or private key.
+	mnInput.EchoMode = textinput.EchoPassword
 
 	pwInput := textinput.New()
 	pwInput.Placeholder = "Enter password"

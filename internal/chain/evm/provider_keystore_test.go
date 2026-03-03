@@ -20,7 +20,7 @@ func TestNewKeystoreProvider_NilRegistry(t *testing.T) {
 	pwProvider, err := NewCompositePasswordProvider(false)
 	require.NoError(t, err)
 
-	_, err = NewKeystoreProvider(nil, nil, t.TempDir(), pwProvider, newTestLogger())
+	_, err = NewKeystoreProvider(nil, nil, t.TempDir(), pwProvider)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "registry is required")
 }
@@ -28,19 +28,9 @@ func TestNewKeystoreProvider_NilRegistry(t *testing.T) {
 func TestNewKeystoreProvider_NilPasswordProvider(t *testing.T) {
 	registry := NewEmptySignerRegistry()
 
-	_, err := NewKeystoreProvider(registry, nil, t.TempDir(), nil, newTestLogger())
+	_, err := NewKeystoreProvider(registry, nil, t.TempDir(), nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "password provider is required")
-}
-
-func TestNewKeystoreProvider_NilLogger(t *testing.T) {
-	registry := NewEmptySignerRegistry()
-	pwProvider, err := NewCompositePasswordProvider(false)
-	require.NoError(t, err)
-
-	_, err = NewKeystoreProvider(registry, nil, t.TempDir(), pwProvider, nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "logger is required")
 }
 
 func TestNewKeystoreProvider_EmptyConfigs(t *testing.T) {
@@ -48,7 +38,7 @@ func TestNewKeystoreProvider_EmptyConfigs(t *testing.T) {
 	pwProvider, err := NewCompositePasswordProvider(false)
 	require.NoError(t, err)
 
-	provider, err := NewKeystoreProvider(registry, nil, t.TempDir(), pwProvider, newTestLogger())
+	provider, err := NewKeystoreProvider(registry, nil, t.TempDir(), pwProvider)
 	require.NoError(t, err)
 	assert.NotNil(t, provider)
 	assert.Equal(t, 0, registry.SignerCount())
@@ -68,7 +58,7 @@ func TestNewKeystoreProvider_DisabledConfigSkipped(t *testing.T) {
 		},
 	}
 
-	provider, err := NewKeystoreProvider(registry, configs, t.TempDir(), pwProvider, newTestLogger())
+	provider, err := NewKeystoreProvider(registry, configs, t.TempDir(), pwProvider)
 	require.NoError(t, err)
 	assert.Equal(t, 0, registry.SignerCount())
 	assert.NotNil(t, provider)
@@ -94,7 +84,7 @@ func TestNewKeystoreProvider_LoadFromConfig(t *testing.T) {
 	}
 
 	pwProvider := &mockPasswordProvider{password: password}
-	provider, err := NewKeystoreProvider(registry, configs, ksDir, pwProvider, newTestLogger())
+	provider, err := NewKeystoreProvider(registry, configs, ksDir, pwProvider)
 	require.NoError(t, err)
 	defer provider.Close()
 
@@ -128,7 +118,7 @@ func TestNewKeystoreProvider_PasswordError(t *testing.T) {
 	}
 
 	pwProvider := &mockPasswordProvider{err: assert.AnError}
-	_, err = NewKeystoreProvider(registry, configs, ksDir, pwProvider, newTestLogger())
+	_, err = NewKeystoreProvider(registry, configs, ksDir, pwProvider)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to get password")
 }
@@ -151,7 +141,7 @@ func TestNewKeystoreProvider_WrongPassword(t *testing.T) {
 	}
 
 	pwProvider := &mockPasswordProvider{password: []byte("wrong-password")}
-	_, err = NewKeystoreProvider(registry, configs, ksDir, pwProvider, newTestLogger())
+	_, err = NewKeystoreProvider(registry, configs, ksDir, pwProvider)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to load keystore")
 }
@@ -175,7 +165,7 @@ func TestNewKeystoreProvider_MultipleKeystores(t *testing.T) {
 	// Use copyMockPasswordProvider because SecureZeroize zeroes the returned slice;
 	// the non-copy mock would return a zeroed password on the second call.
 	pwProvider := &copyMockPasswordProvider{password: password}
-	provider, err := NewKeystoreProvider(registry, configs, ksDir, pwProvider, newTestLogger())
+	provider, err := NewKeystoreProvider(registry, configs, ksDir, pwProvider)
 	require.NoError(t, err)
 	defer provider.Close()
 
@@ -190,13 +180,12 @@ func TestNewKeystoreProvider_MultipleKeystores(t *testing.T) {
 
 func TestKeystoreProvider_CreateSigner(t *testing.T) {
 	tempDir := t.TempDir()
-	logger := newTestLogger()
 	registry := NewEmptySignerRegistry()
 
 	pwProvider, err := NewCompositePasswordProvider(false)
 	require.NoError(t, err)
 
-	provider, err := NewKeystoreProvider(registry, nil, tempDir, pwProvider, logger)
+	provider, err := NewKeystoreProvider(registry, nil, tempDir, pwProvider)
 	require.NoError(t, err)
 	defer provider.Close()
 
@@ -230,7 +219,7 @@ func TestKeystoreProvider_CreateSignerInvalidParams(t *testing.T) {
 	pwProvider, err := NewCompositePasswordProvider(false)
 	require.NoError(t, err)
 
-	provider, err := NewKeystoreProvider(registry, nil, tempDir, pwProvider, newTestLogger())
+	provider, err := NewKeystoreProvider(registry, nil, tempDir, pwProvider)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -252,7 +241,7 @@ func TestKeystoreProvider_CreateSignerEmptyPassword(t *testing.T) {
 	pwProvider, err := NewCompositePasswordProvider(false)
 	require.NoError(t, err)
 
-	provider, err := NewKeystoreProvider(registry, nil, tempDir, pwProvider, newTestLogger())
+	provider, err := NewKeystoreProvider(registry, nil, tempDir, pwProvider)
 	require.NoError(t, err)
 	defer provider.Close()
 
@@ -274,7 +263,7 @@ func TestKeystoreProvider_Type(t *testing.T) {
 	pwProvider, err := NewCompositePasswordProvider(false)
 	require.NoError(t, err)
 
-	provider, err := NewKeystoreProvider(registry, nil, t.TempDir(), pwProvider, newTestLogger())
+	provider, err := NewKeystoreProvider(registry, nil, t.TempDir(), pwProvider)
 	require.NoError(t, err)
 
 	assert.Equal(t, types.SignerTypeKeystore, provider.Type())
@@ -285,7 +274,7 @@ func TestKeystoreProvider_Close(t *testing.T) {
 	pwProvider, err := NewCompositePasswordProvider(false)
 	require.NoError(t, err)
 
-	provider, err := NewKeystoreProvider(registry, nil, t.TempDir(), pwProvider, newTestLogger())
+	provider, err := NewKeystoreProvider(registry, nil, t.TempDir(), pwProvider)
 	require.NoError(t, err)
 
 	err = provider.Close()

@@ -12,6 +12,7 @@ import (
 	"github.com/ivanzzeth/ethsig/keystore"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/logger"
 )
 
 // SignerConfig defines configuration for EVM signers
@@ -75,6 +76,7 @@ func (r *SignerRegistry) RegisterSigner(address string, signer *ethsig.Signer, i
 
 	r.signers[addrKey] = signer
 	r.info[addrKey] = info
+	logger.EVM().Info().Str("address", address).Str("type", info.Type).Msg("registry: RegisterSigner (unlocked)")
 	return nil
 }
 
@@ -237,6 +239,7 @@ func (r *SignerRegistry) RegisterLockedSigner(address string, info types.SignerI
 	info.Enabled = false
 	r.signers[addrKey] = nil
 	r.info[addrKey] = info
+	logger.EVM().Info().Str("address", address).Str("type", info.Type).Msg("registry: RegisterLockedSigner")
 	return nil
 }
 
