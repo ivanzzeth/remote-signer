@@ -131,13 +131,13 @@ func (m *SignerManagerImpl) DiscoverLockedSigners(ctx context.Context) error {
 
 // UnlockSigner unlocks a locked signer with the given password.
 func (m *SignerManagerImpl) UnlockSigner(ctx context.Context, address string, password string) (*types.SignerInfo, error) {
-	if !m.registry.IsLocked(address) {
-		return nil, types.ErrSignerNotLocked
-	}
-
 	info, ok := m.registry.GetSignerInfo(address)
 	if !ok {
 		return nil, types.ErrSignerNotFound
+	}
+
+	if !m.registry.IsLocked(address) {
+		return nil, types.ErrSignerNotLocked
 	}
 
 	p, ok := m.registry.Provider(types.SignerType(info.Type))

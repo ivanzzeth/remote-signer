@@ -175,6 +175,8 @@ if command -v detect-secrets &> /dev/null; then
             # Scan staged files, update baseline in-place, then audit for unaudited secrets
             # shellcheck disable=SC2086
             detect-secrets scan --baseline .secrets.baseline $STAGED_FILES 2>/dev/null || true
+            # Re-stage the baseline so the updated scan results are included in this commit
+            git add .secrets.baseline 2>/dev/null || true
             if ! detect-secrets audit --report --baseline .secrets.baseline 2>/dev/null | grep -q '"results":.*\[\]'; then
                 # Simpler: just check if scan found new secrets by comparing result counts
                 NEW_SECRETS=$(python3 -c "
