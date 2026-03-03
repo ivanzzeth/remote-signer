@@ -20,6 +20,7 @@ import (
 type TemplateHandler struct {
 	templateRepo    storage.TemplateRepository
 	templateService *service.TemplateService
+	readOnly        bool // when true, block all template mutations via API
 	logger          *slog.Logger
 }
 
@@ -28,6 +29,7 @@ func NewTemplateHandler(
 	templateRepo storage.TemplateRepository,
 	templateService *service.TemplateService,
 	logger *slog.Logger,
+	readOnly bool,
 ) (*TemplateHandler, error) {
 	if templateRepo == nil {
 		return nil, fmt.Errorf("template repository is required")
@@ -41,6 +43,7 @@ func NewTemplateHandler(
 	return &TemplateHandler{
 		templateRepo:    templateRepo,
 		templateService: templateService,
+		readOnly:        readOnly,
 		logger:          logger,
 	}, nil
 }
@@ -299,6 +302,11 @@ func (h *TemplateHandler) getTemplate(w http.ResponseWriter, r *http.Request, te
 }
 
 func (h *TemplateHandler) createTemplate(w http.ResponseWriter, r *http.Request) {
+	if h.readOnly {
+		h.writeError(w, "template creation via API is disabled (security.rules_api_readonly)", http.StatusForbidden)
+		return
+	}
+
 	var req CreateTemplateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.writeError(w, "invalid request body", http.StatusBadRequest)
@@ -423,6 +431,11 @@ func (h *TemplateHandler) updateTemplate(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
+	if h.readOnly {
+		h.writeError(w, "template updates via API are disabled (security.rules_api_readonly)", http.StatusForbidden)
+		return
+	}
+
 	// Protect config-sourced templates from API updates
 	if tmpl.Source == types.RuleSourceConfig {
 		h.writeError(w, "cannot update config-sourced templates via API", http.StatusForbidden)
@@ -473,6 +486,11 @@ func (h *TemplateHandler) deleteTemplate(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
+	if h.readOnly {
+		h.writeError(w, "template deletion via API is disabled (security.rules_api_readonly)", http.StatusForbidden)
+		return
+	}
+
 	// Protect config-sourced templates
 	if tmpl.Source == types.RuleSourceConfig {
 		h.writeError(w, "cannot delete config-sourced templates via API", http.StatusForbidden)
@@ -494,6 +512,11 @@ func (h *TemplateHandler) deleteTemplate(w http.ResponseWriter, r *http.Request,
 }
 
 func (h *TemplateHandler) instantiateTemplate(w http.ResponseWriter, r *http.Request, templateID string) {
+	if h.readOnly {
+		h.writeError(w, "template instantiation via API is disabled (security.rules_api_readonly)", http.StatusForbidden)
+		return
+	}
+
 	var req InstantiateTemplateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.writeError(w, "invalid request body", http.StatusBadRequest)
@@ -582,6 +605,11 @@ func (h *TemplateHandler) instantiateTemplate(w http.ResponseWriter, r *http.Req
 }
 
 func (h *TemplateHandler) revokeInstance(w http.ResponseWriter, r *http.Request, ruleID string) {
+	if h.readOnly {
+		h.writeError(w, "instance revocation via API is disabled (security.rules_api_readonly)", http.StatusForbidden)
+		return
+	}
+
 	if err := h.templateService.RevokeInstance(r.Context(), types.RuleID(ruleID)); err != nil {
 		if types.IsNotFound(err) {
 			h.writeError(w, "instance not found", http.StatusNotFound)

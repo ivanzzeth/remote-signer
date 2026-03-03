@@ -28,6 +28,7 @@ type RuleHandler struct {
 	ruleRepo          storage.RuleRepository
 	solidityValidator *evmchain.SolidityRuleValidator
 	jsEvaluator       *evmchain.JSRuleEvaluator
+	readOnly          bool // when true, block all rule mutations via API
 	logger            *slog.Logger
 }
 
@@ -45,6 +46,13 @@ func WithSolidityValidator(validator *evmchain.SolidityRuleValidator) RuleHandle
 func WithJSEvaluator(eval *evmchain.JSRuleEvaluator) RuleHandlerOption {
 	return func(h *RuleHandler) {
 		h.jsEvaluator = eval
+	}
+}
+
+// WithReadOnly disables all rule mutation endpoints (create/update/delete).
+func WithReadOnly() RuleHandlerOption {
+	return func(h *RuleHandler) {
+		h.readOnly = true
 	}
 }
 
@@ -175,6 +183,11 @@ type UpdateRuleRequest struct {
 }
 
 func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
+	if h.readOnly {
+		h.writeError(w, "rule creation via API is disabled (security.rules_api_readonly)", http.StatusForbidden)
+		return
+	}
+
 	var req CreateRuleRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.writeError(w, "invalid request body", http.StatusBadRequest)
@@ -309,6 +322,15 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 		}
 		h.logger.Error("failed to get rule", "error", err, "rule_id", ruleID)
 		h.writeError(w, "failed to get rule", http.StatusInternalServerError)
+		return
+	}
+
+	if h.readOnly {
+		h.writeError(w, "rule updates via API are disabled (security.rules_api_readonly)", http.StatusForbidden)
+		return
+	}
+	if rule.Source == types.RuleSourceConfig {
+		h.writeError(w, "cannot update config-sourced rules via API", http.StatusForbidden)
 		return
 	}
 
@@ -498,8 +520,28 @@ func (h *RuleHandler) getRule(w http.ResponseWriter, r *http.Request, ruleID str
 }
 
 func (h *RuleHandler) deleteRule(w http.ResponseWriter, r *http.Request, ruleID string) {
-	err := h.ruleRepo.Delete(r.Context(), types.RuleID(ruleID))
+	// Fetch rule first for readOnly and source guards
+	rule, err := h.ruleRepo.Get(r.Context(), types.RuleID(ruleID))
 	if err != nil {
+		if types.IsNotFound(err) {
+			h.writeError(w, "rule not found", http.StatusNotFound)
+			return
+		}
+		h.logger.Error("failed to get rule", "error", err, "rule_id", ruleID)
+		h.writeError(w, "failed to get rule", http.StatusInternalServerError)
+		return
+	}
+
+	if h.readOnly {
+		h.writeError(w, "rule deletion via API is disabled (security.rules_api_readonly)", http.StatusForbidden)
+		return
+	}
+	if rule.Source == types.RuleSourceConfig {
+		h.writeError(w, "cannot delete config-sourced rules via API", http.StatusForbidden)
+		return
+	}
+
+	if err := h.ruleRepo.Delete(r.Context(), rule.ID); err != nil {
 		if types.IsNotFound(err) {
 			h.writeError(w, "rule not found", http.StatusNotFound)
 			return

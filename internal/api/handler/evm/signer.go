@@ -19,11 +19,12 @@ import (
 type SignerHandler struct {
 	signerManager evm.SignerManager
 	apiKeyRepo    storage.APIKeyRepository // nil = no filtering/enrichment
+	readOnly      bool                     // when true, block signer creation via API
 	logger        *slog.Logger
 }
 
 // NewSignerHandler creates a new signer handler
-func NewSignerHandler(signerManager evm.SignerManager, apiKeyRepo storage.APIKeyRepository, logger *slog.Logger) (*SignerHandler, error) {
+func NewSignerHandler(signerManager evm.SignerManager, apiKeyRepo storage.APIKeyRepository, logger *slog.Logger, readOnly bool) (*SignerHandler, error) {
 	if signerManager == nil {
 		return nil, fmt.Errorf("signer manager is required")
 	}
@@ -33,6 +34,7 @@ func NewSignerHandler(signerManager evm.SignerManager, apiKeyRepo storage.APIKey
 	return &SignerHandler{
 		signerManager: signerManager,
 		apiKeyRepo:    apiKeyRepo,
+		readOnly:      readOnly,
 		logger:        logger,
 	}, nil
 }
@@ -331,6 +333,11 @@ func (h *SignerHandler) buildAllowedKeysData(r *http.Request) (*allowedKeysData,
 
 // createSigner handles POST /api/v1/evm/signers
 func (h *SignerHandler) createSigner(w http.ResponseWriter, r *http.Request) {
+	if h.readOnly {
+		h.writeError(w, "signer creation via API is disabled (security.signers_api_readonly)", http.StatusForbidden)
+		return
+	}
+
 	var req CreateSignerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.writeError(w, "invalid request body", http.StatusBadRequest)

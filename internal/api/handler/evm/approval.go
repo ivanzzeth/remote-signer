@@ -16,12 +16,13 @@ import (
 
 // ApprovalHandler handles manual approval requests
 type ApprovalHandler struct {
-	signService *service.SignService
-	logger      *slog.Logger
+	signService    *service.SignService
+	rulesReadOnly  bool // when true, block auto-rule creation during approval
+	logger         *slog.Logger
 }
 
 // NewApprovalHandler creates a new approval handler
-func NewApprovalHandler(signService *service.SignService, logger *slog.Logger) (*ApprovalHandler, error) {
+func NewApprovalHandler(signService *service.SignService, logger *slog.Logger, rulesReadOnly bool) (*ApprovalHandler, error) {
 	if signService == nil {
 		return nil, fmt.Errorf("sign service is required")
 	}
@@ -29,8 +30,9 @@ func NewApprovalHandler(signService *service.SignService, logger *slog.Logger) (
 		return nil, fmt.Errorf("logger is required")
 	}
 	return &ApprovalHandler{
-		signService: signService,
-		logger:      logger,
+		signService:   signService,
+		rulesReadOnly: rulesReadOnly,
+		logger:        logger,
 	}, nil
 }
 
@@ -107,6 +109,12 @@ func (h *ApprovalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Check if the API key owns this request
 	if signReq.APIKeyID != apiKey.ID {
 		h.writeError(w, "not authorized to approve this request", http.StatusForbidden)
+		return
+	}
+
+	// Block auto-rule creation when rules API is readonly
+	if req.RuleType != "" && h.rulesReadOnly {
+		h.writeError(w, "auto-rule creation during approval is disabled (security.rules_api_readonly)", http.StatusForbidden)
 		return
 	}
 
