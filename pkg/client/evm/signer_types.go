@@ -12,6 +12,7 @@ type Signer struct {
 	Address     string           `json:"address"`
 	Type        string           `json:"type"`
 	Enabled     bool             `json:"enabled"`
+	Locked      bool             `json:"locked"`
 	AllowedKeys []AllowedKeyInfo `json:"allowed_keys,omitempty"`
 }
 
@@ -20,7 +21,19 @@ type SignerInfo struct {
 	Address string `json:"address"`
 	Type    string `json:"type"`
 	Enabled bool   `json:"enabled"`
+	Locked  bool   `json:"locked"`
 }
+
+// UnlockSignerRequest represents a request to unlock a locked signer.
+type UnlockSignerRequest struct {
+	Password string `json:"password"`
+}
+
+// UnlockSignerResponse represents the response after unlocking a signer.
+type UnlockSignerResponse = Signer
+
+// LockSignerResponse represents the response after locking a signer.
+type LockSignerResponse = Signer
 
 // ListSignersResponse represents the response from listing signers.
 type ListSignersResponse struct {

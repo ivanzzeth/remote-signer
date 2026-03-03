@@ -18,6 +18,7 @@ type KeystoreProvider struct {
 	keystoreDir string
 	pwProvider  PasswordProvider
 	logger      *slog.Logger
+	lockedPaths map[string]string // address (checksummed) -> filePath
 }
 
 // NewKeystoreProvider creates a KeystoreProvider and loads all configured keystores into the registry.
@@ -43,6 +44,7 @@ func NewKeystoreProvider(
 		keystoreDir: keystoreDir,
 		pwProvider:  pwProvider,
 		logger:      logger,
+		lockedPaths: make(map[string]string),
 	}
 
 	for _, ks := range configs {
@@ -133,3 +135,95 @@ func (p *KeystoreProvider) CreateSigner(ctx context.Context, params interface{})
 		Enabled: true,
 	}, nil
 }
+
+// DiscoverLockedSigners scans keystoreDir for keystore files not already loaded.
+func (p *KeystoreProvider) DiscoverLockedSigners() ([]types.SignerInfo, error) {
+	if p.keystoreDir == "" {
+		return nil, nil
+	}
+
+	keystores, err := keystore.ListKeystores(p.keystoreDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list keystores in %s: %w", p.keystoreDir, err)
+	}
+
+	var discovered []types.SignerInfo
+	for _, ks := range keystores {
+		addrKey := normalizeAddress(ks.Address)
+		if p.registry.HasSigner(addrKey) {
+			continue
+		}
+
+		p.lockedPaths[addrKey] = ks.Path
+		info := types.SignerInfo{
+			Address: common.HexToAddress(ks.Address).Hex(),
+			Type:    string(types.SignerTypeKeystore),
+			Enabled: false,
+			Locked:  true,
+		}
+		discovered = append(discovered, info)
+
+		p.logger.Info("discovered locked keystore",
+			slog.String("address", info.Address),
+			slog.String("path", ks.Path),
+		)
+	}
+
+	return discovered, nil
+}
+
+// UnlockSigner unlocks a locked keystore signer with the given password.
+func (p *KeystoreProvider) UnlockSigner(ctx context.Context, address string, password string) (*ethsig.Signer, error) {
+	addrKey := normalizeAddress(address)
+	filePath, ok := p.lockedPaths[addrKey]
+	if !ok {
+		return nil, fmt.Errorf("no locked keystore found for address %s", address)
+	}
+
+	expectedAddr := common.HexToAddress(address)
+	passwordBytes := []byte(password)
+	keystoreSigner, err := ethsig.NewKeystoreSignerFromPath(filePath, expectedAddr, string(passwordBytes), nil)
+	keystore.SecureZeroize(passwordBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unlock keystore for %s: %w", address, err)
+	}
+
+	signer := ethsig.NewSigner(keystoreSigner)
+	delete(p.lockedPaths, addrKey)
+
+	p.logger.Info("keystore signer unlocked",
+		slog.String("address", address),
+	)
+
+	return signer, nil
+}
+
+// LockSigner locks an unlocked keystore signer (stores path for later unlock).
+func (p *KeystoreProvider) LockSigner(ctx context.Context, address string) error {
+	addrKey := normalizeAddress(address)
+
+	// Find the keystore file path by scanning the directory
+	keystores, err := keystore.ListKeystores(p.keystoreDir)
+	if err != nil {
+		return fmt.Errorf("failed to list keystores: %w", err)
+	}
+
+	for _, ks := range keystores {
+		if normalizeAddress(ks.Address) == addrKey {
+			p.lockedPaths[addrKey] = ks.Path
+			p.logger.Info("keystore signer locked",
+				slog.String("address", address),
+			)
+			return nil
+		}
+	}
+
+	return fmt.Errorf("keystore file not found for address %s", address)
+}
+
+// Compile-time interface checks.
+var (
+	_ SignerDiscoverer = (*KeystoreProvider)(nil)
+	_ SignerUnlocker   = (*KeystoreProvider)(nil)
+	_ SignerLocker     = (*KeystoreProvider)(nil)
+)
