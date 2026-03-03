@@ -1,0 +1,235 @@
+# Polymarket Safe init (evm_js). Auth + CreateProxy only. No Safe address required.
+# After createProxy, add polymarket_safe_polygon preset with --set allowed_safe_addresses=<your_safe>.
+
+variables:
+  - name: chain_id
+    type: string
+    description: "Chain ID (e.g. 137 for Polygon)"
+    required: true
+  - name: safe_proxy_factory_address
+    type: address
+    description: "Safe Proxy Factory contract address"
+    required: true
+  - name: safe_factory_domain_name
+    type: string
+    description: "Safe Factory EIP-712 domain name"
+    required: true
+  - name: usdc_bridged_address
+    type: address
+    description: "USDC.e token (for test_cases only)"
+    required: false
+  - name: clob_auth_domain_name
+    type: string
+    description: "ClobAuth EIP-712 domain name"
+    required: true
+  - name: clob_auth_domain_version
+    type: string
+    description: "ClobAuth EIP-712 domain version"
+    required: true
+
+test_variables:
+  chain_id: "137"
+  safe_proxy_factory_address: "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"
+  safe_factory_domain_name: "Polymarket Contract Proxy Factory"
+  usdc_bridged_address: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+  clob_auth_domain_name: "ClobAuthDomain"
+  clob_auth_domain_version: "1"
+
+rules:
+  - name: "Polymarket CLOB Auth Signature"
+    type: "evm_js"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "${chain_id}"
+    description: "Validate ClobAuth signatures for Polymarket API key"
+    config:
+      sign_type_filter: "typed_data"
+      script: |
+        function validate(input) {
+          if (input.sign_type !== 'typed_data') return fail('sign_type must be typed_data');
+          var td = input.typed_data;
+          if (!td || td.primaryType !== 'ClobAuth') return fail('not ClobAuth');
+          var domain = td.domain || {};
+          var msg = td.message || {};
+          var wantDomainName = (config.clob_auth_domain_name || '').trim();
+          var wantDomainVersion = (config.clob_auth_domain_version || '').trim();
+          var wantChainId = parseInt(config.chain_id, 10);
+          if (String(domain.name || '').trim() !== wantDomainName) return fail('invalid domain name');
+          if (String(domain.version || '').trim() !== wantDomainVersion) return fail('invalid domain version');
+          if (Number(domain.chainId) !== wantChainId) return fail('must be on Polygon');
+          var wantMsg = 'This message attests that I control the given wallet';
+          if (String(msg.message || '').trim() !== wantMsg) return fail('invalid attestation message');
+          return ok();
+        }
+    test_cases:
+      - name: "should pass valid ClobAuth"
+        input:
+          sign_type: "typed_data"
+          chain_id: 137
+          signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+          typed_data:
+            primaryType: "ClobAuth"
+            domain:
+              name: "ClobAuthDomain"
+              version: "1"
+              chainId: "137"
+            message:
+              address: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              timestamp: "1704067200"
+              nonce: "12345"
+              message: "This message attests that I control the given wallet"
+        expect_pass: true
+      - name: "should reject invalid domain"
+        input:
+          sign_type: "typed_data"
+          chain_id: 137
+          signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+          typed_data:
+            primaryType: "ClobAuth"
+            domain:
+              name: "WrongDomain"
+              version: "1"
+              chainId: "137"
+            message:
+              address: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              timestamp: "1704067200"
+              nonce: "12345"
+              message: "This message attests that I control the given wallet"
+        expect_pass: false
+        expect_reason: "invalid domain name"
+      - name: "should reject wrong chainId"
+        input:
+          sign_type: "typed_data"
+          chain_id: 137
+          signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+          typed_data:
+            primaryType: "ClobAuth"
+            domain:
+              name: "ClobAuthDomain"
+              version: "1"
+              chainId: "56"
+            message:
+              address: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              timestamp: "1704067200"
+              nonce: "12345"
+              message: "This message attests that I control the given wallet"
+        expect_pass: false
+        expect_reason: "must be on Polygon"
+
+  - name: "Polymarket Safe Wallet Creation Signature"
+    type: "evm_js"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "${chain_id}"
+    description: "Validate Safe wallet creation signature (CreateProxy EIP-712)"
+    config:
+      sign_type_filter: "typed_data"
+      script: |
+        function validate(input) {
+          if (input.sign_type !== 'typed_data') return fail('sign_type must be typed_data');
+          var td = input.typed_data;
+          if (!td || td.primaryType !== 'CreateProxy') return fail('not CreateProxy');
+          var domain = td.domain || {};
+          var msg = td.message || {};
+          var wantName = (config.safe_factory_domain_name || '').trim();
+          var wantFactory = toChecksum((config.safe_proxy_factory_address || '').trim());
+          var chainId = parseInt(config.chain_id, 10);
+          if (String(domain.name || '').trim() !== wantName) return fail('invalid domain name');
+          if (Number(domain.chainId) !== chainId) return fail('must be on Polygon');
+          if (!isAddress(domain.verifyingContract) || !eq(toChecksum(domain.verifyingContract), wantFactory)) return fail('verifyingContract must be Safe Factory');
+          var zeroAddr = '0x0000000000000000000000000000000000000000';
+          if (!eq(toChecksum((msg.paymentToken || '').trim()), zeroAddr)) return fail('payment token must be zero');
+          if (String(msg.payment !== undefined ? msg.payment : '').trim() !== '0') return fail('payment must be zero');
+          if (!eq(toChecksum((msg.paymentReceiver || '').trim()), zeroAddr)) return fail('payment receiver must be zero');
+          return ok();
+        }
+    test_cases:
+      - name: "should pass valid CreateProxy with zero payment"
+        input:
+          sign_type: "typed_data"
+          chain_id: 137
+          signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+          typed_data:
+            primaryType: "CreateProxy"
+            domain:
+              name: "Polymarket Contract Proxy Factory"
+              chainId: "137"
+              verifyingContract: "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"
+            message:
+              paymentToken: "0x0000000000000000000000000000000000000000"
+              payment: "0"
+              paymentReceiver: "0x0000000000000000000000000000000000000000"
+        expect_pass: true
+      - name: "should reject non-zero payment"
+        input:
+          sign_type: "typed_data"
+          chain_id: 137
+          signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+          typed_data:
+            primaryType: "CreateProxy"
+            domain:
+              name: "Polymarket Contract Proxy Factory"
+              chainId: "137"
+              verifyingContract: "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"
+            message:
+              paymentToken: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+              payment: "1000000"
+              paymentReceiver: "0x0000000000000000000000000000000000000001"
+        expect_pass: false
+        expect_reason: "payment token must be zero"
+
+  - name: "Polymarket Safe Wallet Creation"
+    type: "evm_js"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "${chain_id}"
+    description: "Allow createProxy transaction to Safe Factory with zero payment"
+    config:
+      sign_type_filter: "transaction"
+      script: |
+        function validate(input) {
+          if (input.sign_type !== 'transaction') return fail('sign_type must be transaction');
+          var tx = input.transaction;
+          if (!tx || !tx.to) return fail('missing transaction or to');
+          var toChecksumAddr = toChecksum((tx.to || '').trim());
+          var wantFactory = toChecksum((config.safe_proxy_factory_address || '').trim());
+          if (!eq(toChecksumAddr, wantFactory)) return fail('target must be Safe Factory');
+          var data = (tx.data || '0x').replace(/^0x/, '');
+          if (data.length < 8) return fail('data too short');
+          var sel = '0x' + data.slice(0, 8);
+          var createProxySel = '0xa1884d2c';
+          if (sel.toLowerCase() !== createProxySel) return fail('not createProxy');
+          if (data.length < 8 + 64 * 3) return fail('createProxy data too short');
+          var zero32 = '0000000000000000000000000000000000000000000000000000000000000000';
+          var paymentTokenHex = data.slice(8, 72);
+          var paymentHex = data.slice(72, 136);
+          var receiverHex = data.slice(136, 200);
+          if (paymentTokenHex !== zero32) return fail('payment token must be zero');
+          if (paymentHex !== zero32) return fail('payment must be zero');
+          if (receiverHex !== zero32) return fail('payment receiver must be zero');
+          return ok();
+        }
+    test_cases:
+      - name: "should pass createProxy with zero payment"
+        input:
+          sign_type: "transaction"
+          chain_id: 137
+          signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+          transaction:
+            from: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            to: "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"
+            value: "0x0"
+            data: "0xa1884d2c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+        expect_pass: true
+      - name: "should reject wrong target"
+        input:
+          sign_type: "transaction"
+          chain_id: 137
+          signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+          transaction:
+            from: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+            value: "0x0"
+            data: "0xa1884d2c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+        expect_pass: false
+        expect_reason: "target must be Safe Factory"

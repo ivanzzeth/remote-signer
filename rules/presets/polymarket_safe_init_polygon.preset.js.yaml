@@ -1,0 +1,19 @@
+# Preset: Polymarket Safe init (Polygon). Auth + create_safe only. No Safe address required.
+# After createProxy, add polymarket_safe_polygon preset with --set allowed_safe_addresses=<your_safe>.
+# Uses evm_js template (no Foundry/Forge required).
+# Use: remote-signer-cli preset create-from polymarket_safe_init_polygon.preset.js.yaml [--config config.yaml --write]
+name: "Polymarket Safe init (Polygon)"
+template_paths:
+  - "rules/templates/polymarket_safe_init.template.js.yaml"
+template_names:
+  - "Polymarket Safe init Template"
+chain_type: "evm"
+chain_id: "137"
+enabled: true
+variables:
+  chain_id: "137"
+  safe_proxy_factory_address: "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"
+  safe_factory_domain_name: "Polymarket Contract Proxy Factory"
+  usdc_bridged_address: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+  clob_auth_domain_name: "ClobAuthDomain"
+  clob_auth_domain_version: "1"

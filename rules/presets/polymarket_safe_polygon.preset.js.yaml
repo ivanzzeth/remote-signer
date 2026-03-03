@@ -1,13 +1,11 @@
-# Preset: Polymarket Safe init (Polygon). Auth + create_safe only. No Safe address required.
-# After createProxy, add polymarket_safe_polygon preset with --set allowed_safe_addresses=<your_safe>.
-# Use: remote-signer-cli preset create-from polymarket_safe_init_polygon.preset.yaml [--config config.yaml --write]
-name: "Polymarket Safe init (Polygon)"
+# Preset: Polymarket Safe full (Polygon). Auth + create_safe + enable_trading + trading.
+# Use: remote-signer-cli preset create-from polymarket_safe_polygon.preset.js.yaml [--config config.yaml --write] [--set allowed_safe_addresses=0xYourSafe]
+# Uses evm_js template (no Foundry/Forge required).
+name: "Polymarket Safe rules (Polygon)"
 template_paths:
-  - "rules/templates/polymarket_auth.template.yaml"
-  - "rules/templates/polymarket_create_safe.template.yaml"
+  - "rules/templates/polymarket_safe.template.js.yaml"
 template_names:
-  - "Polymarket Auth Template"
-  - "Polymarket Create Safe Template"
+  - "Polymarket Safe Template"
 chain_type: "evm"
 chain_id: "137"
 enabled: true
@@ -19,8 +17,13 @@ variables:
   conditional_tokens_address: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
   safe_proxy_factory_address: "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"
   usdc_bridged_address: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+  allowed_safe_address_for_testing: "0x1111111111111111111111111111111111111111"
+  allowed_safe_addresses: "0x1111111111111111111111111111111111111111"
   clob_auth_domain_name: "ClobAuthDomain"
   clob_auth_domain_version: "1"
   ctf_exchange_domain_name: "Polymarket CTF Exchange"
   ctf_exchange_domain_version: "1"
   safe_factory_domain_name: "Polymarket Contract Proxy Factory"
+override_hints:
+  - allowed_safe_addresses
+  - allowed_safe_address_for_testing

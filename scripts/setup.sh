@@ -396,7 +396,8 @@ step_deployment_mode() {
         DEPLOY_MODE="docker"
         CONFIG_FILE="config.yaml"
         POSTGRES_PASSWORD=$(openssl rand -base64 18 | tr -d '/+=' | head -c 24)
-        DSN="\${DATABASE_DSN:-postgres://signer:${POSTGRES_PASSWORD}@postgres:5432/remote_signer?sslmode=disable}"
+        # Use 127.0.0.1: remote-signer uses network_mode: host, cannot resolve Docker hostname "postgres"
+        DSN="\${DATABASE_DSN:-postgres://signer:${POSTGRES_PASSWORD}@127.0.0.1:25432/remote_signer?sslmode=disable}"
         PORT=8548
         log_info "Selected: Docker deployment (PostgreSQL)"
     fi
@@ -619,10 +620,15 @@ security:
   max_request_age: "60s"
   rate_limit_default: 100
   nonce_required: true
-  manual_approval_enabled: true
-  rules_api_readonly: true      # blocks rule/template CRUD via API (default: true)
-  signers_api_readonly: false   # blocks signer/HD-wallet creation via API (default: false)
-  allow_sighup_rules_reload: false # reload config-sourced rules on SIGHUP (default: false)
+  manual_approval_enabled: false  # default: no manual approval; no-match => reject
+  rules_api_readonly: true
+  signers_api_readonly: false
+  allow_sighup_rules_reload: false
+  approval_guard:
+    enabled: false
+  ip_whitelist:
+    enabled: false
+    trust_proxy: false
 
 logger:
   level: "info"
@@ -665,7 +671,7 @@ CONFIGEOF
 POSTGRES_USER=signer
 POSTGRES_PASSWORD=$POSTGRES_PASSWORD
 POSTGRES_DB=remote_signer
-POSTGRES_PORT=5432
+POSTGRES_PORT=25432
 
 # EVM Signer (hex private key, without 0x prefix)
 # Add after creating a signer, or leave empty for API/TUI-managed signers
@@ -778,9 +784,9 @@ step_preset_rules() {
             break
         fi
         PRESET_NAME="${presets[$((choice-1))]}"
-        # Pass full filename to CLI so it finds .preset.yaml even when PATH has an older binary (step 5 "build from source" runs later)
+        # Pass full filename to CLI (preset list strips .yaml/.yml; add back for .preset and .preset.js.yaml)
         PRESET_FILE="$PRESET_NAME"
-        [[ "$PRESET_FILE" == *.preset ]] && PRESET_FILE="${PRESET_FILE}.yaml"
+        [[ "$PRESET_FILE" != *.yaml ]] && [[ "$PRESET_FILE" != *.yml ]] && PRESET_FILE="${PRESET_FILE}.yaml"
 
         # Get variables to prompt (name + description from template)
         set_args=()
@@ -981,7 +987,7 @@ check_server_running_and_maybe_stop() {
     fi
     if [ "$running_as" = "Docker" ]; then
         log_info "Stopping Docker services..."
-        "$SCRIPT_DIR/deploy.sh" down
+        "$SCRIPT_DIR/deploy.sh" stop
     else
         log_info "Stopping local server..."
         "$SCRIPT_DIR/deploy.sh" local-down
