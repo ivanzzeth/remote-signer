@@ -40,7 +40,7 @@ func TestSignerDetailModel_LoadSigner(t *testing.T) {
 		model := newTestSignerDetailModel(t)
 
 		signer := evm.Signer{
-			Address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+			Address: "0x1111111111111111111111111111111111111111",
 			Type:    "private_key",
 			Enabled: true,
 			AllowedKeys: []evm.AllowedKeyInfo{
@@ -50,7 +50,7 @@ func TestSignerDetailModel_LoadSigner(t *testing.T) {
 
 		model.LoadSigner(signer)
 		require.NotNil(t, model.signer)
-		assert.Equal(t, "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266", model.signer.Address)
+		assert.Equal(t, "0x1111111111111111111111111111111111111111", model.signer.Address)
 		assert.Equal(t, "private_key", model.signer.Type)
 		assert.True(t, model.signer.Enabled)
 		assert.Len(t, model.signer.AllowedKeys, 1)
@@ -70,14 +70,14 @@ func TestSignerDetailModel_View_BasicInfo(t *testing.T) {
 	t.Run("renders address, type, status for enabled signer", func(t *testing.T) {
 		model := newTestSignerDetailModel(t)
 		model.LoadSigner(evm.Signer{
-			Address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+			Address: "0x1111111111111111111111111111111111111111",
 			Type:    "private_key",
 			Enabled: true,
 		})
 
 		view := model.View()
 		assert.Contains(t, view, "Signer Detail")
-		assert.Contains(t, view, "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266")
+		assert.Contains(t, view, "0x1111111111111111111111111111111111111111")
 		assert.Contains(t, view, "private_key")
 		assert.Contains(t, view, "Enabled")
 	})
@@ -105,7 +105,7 @@ func TestSignerDetailModel_View_AccessControl(t *testing.T) {
 	t.Run("renders access table when AllowedKeys present", func(t *testing.T) {
 		model := newTestSignerDetailModel(t)
 		model.LoadSigner(evm.Signer{
-			Address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+			Address: "0x1111111111111111111111111111111111111111",
 			Type:    "private_key",
 			Enabled: true,
 			AllowedKeys: []evm.AllowedKeyInfo{
@@ -130,7 +130,7 @@ func TestSignerDetailModel_View_NoAccessControl(t *testing.T) {
 	t.Run("no access section for non-admin view", func(t *testing.T) {
 		model := newTestSignerDetailModel(t)
 		model.LoadSigner(evm.Signer{
-			Address: "0x53c68c954F85a29D2098E90AdDAf41bAF2fF0a50",
+			Address: "0x2222222222222222222222222222222222222222",
 			Type:    "keystore",
 			Enabled: true,
 		})
