@@ -597,3 +597,32 @@ func TestHDWalletProvider_ListHDWalletsMultiple(t *testing.T) {
 		assert.True(t, addrSet[addr], "wallet %s should be in list", addr)
 	}
 }
+
+// TestHDWalletProvider_ListHDWalletsIncludesDiscoveredLocked verifies that wallets
+// discovered on disk (locked) are returned by ListHDWallets so the TUI/API can show them.
+func TestHDWalletProvider_ListHDWalletsIncludesDiscoveredLocked(t *testing.T) {
+	walletDir := t.TempDir()
+	password := []byte("Abcdef1!ghijklmn")
+	_, _, err := keystore.CreateHDWallet(walletDir, password, 128)
+	require.NoError(t, err)
+
+	registry := NewEmptySignerRegistry()
+	provider, err := NewHDWalletProvider(registry, nil, walletDir, &mockPasswordProvider{}, newTestLogger())
+	require.NoError(t, err)
+	defer provider.Close()
+
+	// Before discover: no wallets loaded from config
+	listBefore := provider.ListHDWallets()
+	assert.Len(t, listBefore, 0)
+
+	// Discover locked wallets on disk
+	discovered, err := provider.DiscoverLockedSigners()
+	require.NoError(t, err)
+	require.Len(t, discovered, 1)
+
+	// ListHDWallets must now include the discovered (locked) wallet
+	listAfter := provider.ListHDWallets()
+	require.Len(t, listAfter, 1)
+	assert.Equal(t, discovered[0].Address, listAfter[0].PrimaryAddress)
+	assert.Equal(t, 0, listAfter[0].DerivedCount)
+}
