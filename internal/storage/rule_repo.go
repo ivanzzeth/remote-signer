@@ -35,6 +35,12 @@ type RuleRepository interface {
 	IncrementMatchCount(ctx context.Context, id types.RuleID) error
 }
 
+// Transactional is implemented by repositories that support atomic operations.
+// This is optional — callers should type-assert before use.
+type Transactional interface {
+	RunInTransaction(ctx context.Context, fn func(txRepo RuleRepository) error) error
+}
+
 // GormRuleRepository implements RuleRepository using GORM
 type GormRuleRepository struct {
 	db *gorm.DB
@@ -46,6 +52,15 @@ func NewGormRuleRepository(db *gorm.DB) (*GormRuleRepository, error) {
 		return nil, fmt.Errorf("database connection is required")
 	}
 	return &GormRuleRepository{db: db}, nil
+}
+
+// RunInTransaction runs fn inside a database transaction.
+// A new GormRuleRepository backed by the transaction is passed to fn.
+func (r *GormRuleRepository) RunInTransaction(ctx context.Context, fn func(txRepo RuleRepository) error) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		txRepo := &GormRuleRepository{db: tx}
+		return fn(txRepo)
+	})
 }
 
 // Create creates a new rule
