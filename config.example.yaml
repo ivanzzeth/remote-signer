@@ -28,13 +28,13 @@ chains:
     signers:
       # Private keys - can use direct hex value or environment variable
       private_keys:
-        # This is anvil account 0 test key. DO NOT use it in production!
-        - address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
-          key_env: "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+        # Placeholder: set your signer address and key via env (DO NOT commit real keys)
+        - address: "0x1111111111111111111111111111111111111111"
+          key_env: "EVM_PRIVATE_KEY_1"  # Hex key from env only; never paste real key here
           enabled: true
       # Keystores with password from environment
       # keystores:
-      #   - address: "0xabcdef1234567890abcdef1234567890abcdef12"
+      #   - address: "0x2222222222222222222222222222222222222222"
       #     path: "/etc/signer/keystores/"
       #     password_env: "EVM_KEYSTORE_PASSWORD_1"
       #     enabled: true
@@ -208,7 +208,7 @@ api_keys:
     # Optional: restrict to specific chains or signers
     # allowed_chain_types: ["evm"]       # Empty = all chains allowed
     # allowed_signers:                   # Empty = all signers allowed
-    #   - "0x1234567890abcdef1234567890abcdef12345678"
+    #   - "0x1111111111111111111111111111111111111111"
     # allowed_hd_wallets:               # HD wallet primary addresses (empty = none)
     #   - "0xABCD..."                   # Grants access to all derived addresses + derive permission
 
@@ -321,10 +321,10 @@ rules:
         conditional_tokens_address: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
         safe_proxy_factory_address: "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"
         usdc_bridged_address: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
-        # Single Safe for test payload (to, maker, signer, verifyingContract)
-        allowed_safe_address_for_testing: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+        # Single Safe for test payload (to, maker, signer, verifyingContract) — set your Safe address
+        allowed_safe_address_for_testing: "0x1111111111111111111111111111111111111111"
         # Comma-separated allowed Safes (used in expressions via in()); one or multiple
-        allowed_safe_addresses: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+        allowed_safe_addresses: "0x1111111111111111111111111111111111111111"
         clob_auth_domain_name: "ClobAuthDomain"
         clob_auth_domain_version: "1"
         ctf_exchange_domain_name: "Polymarket CTF Exchange"
@@ -353,7 +353,7 @@ rules:
         ctf_exchange_yb: "0x6bEb5a40C032AFc305961162d8204CDA16DECFa5"
         neg_risk_exchange_yb: "0x8A289d458f5a134bA40015085A8F50Ffb681B41d"
         neg_risk_adapter_yb: "0x41dCe1A4B8FB5e6327701750aF6231B7CD0B2A40"
-        signer_address_for_testing: "0x53c68c954f85a29d2098e90addaf41baf2ff0a50"
+        signer_address_for_testing: "0x1111111111111111111111111111111111111111"  # Your EOA; set in real config
 
   # Opinion: instance from template (BSC 56; disable if not used)
   # Rule-layer requirement: allowed_safe_address_for_testing must be contained in
@@ -373,8 +373,8 @@ rules:
         safe_proxy_factory_address: "0xa6B71E26C5e0845f74c812102Ca7114b6a896AB2"
         usdc_bridged_address: "0x55d398326f99059fF775485246999027B3197955"
         # Must be one of the addresses in allowed_safe_addresses (see comment above)
-        allowed_safe_address_for_testing: "0x01721FF1ddAc86BdB54459E8255d523A0778B780"
-        allowed_safe_addresses: "0x01721FF1ddAc86BdB54459E8255d523A0778B780"
+        allowed_safe_address_for_testing: "0x1111111111111111111111111111111111111111"  # Your Safe; set in real config
+        allowed_safe_addresses: "0x1111111111111111111111111111111111111111"
         ctf_exchange_domain_name: "OPINION CTF Exchange"
         ctf_exchange_domain_version: "1"
         safe_singleton_address: "0xfb1bffC9d739B8D520DaF37dF666da4C687191EA"
@@ -406,8 +406,8 @@ rules:
     # api_key_id: "key_..."      # Only specific API key
     config:
       addresses:
-        - "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"  # Treasury address
-        - "0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2"  # Another allowed address
+        - "0x1111111111111111111111111111111111111111"  # Treasury / allowed address; set in real config
+        - "0x2222222222222222222222222222222222222222"
 
   # Example 2: Contract method restriction
   - name: "Only allow ERC20 transfer and approve"
@@ -445,12 +445,12 @@ rules:
         - name: "should pass for 0.5 ETH to valid address"
           input:
             value: "500000000000000000"  # 0.5 ETH in wei
-            to: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+            to: "0x1111111111111111111111111111111111111111"
           expect_pass: true
         - name: "should reject for 2 ETH"
           input:
             value: "2000000000000000000"  # 2 ETH in wei
-            to: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+            to: "0x1111111111111111111111111111111111111111"
           expect_pass: false
           expect_reason: "exceeds 1 ETH limit"
         - name: "should reject zero address"
@@ -472,7 +472,7 @@ rules:
       test_cases:
         - name: "should pass for normal address"
           input:
-            to: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+            to: "0x1111111111111111111111111111111111111111"
           expect_pass: true
         - name: "should block burn address"
           input:
@@ -501,19 +501,19 @@ rules:
       test_cases:
         - name: "should pass transfer 5k"
           input:
-            # transfer(0x5B38Da6a701c568545dCfcB03FcB875f56beddC4, 5000000000)
-            data: "0xa9059cbb0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc400000000000000000000000000000000000000000000000000000001dcd65000"
+            # transfer(recipient, 5000000000) — recipient is user address placeholder
+            data: "0xa9059cbb000000000000000000000000111111111111111111111111111111111111111100000000000000000000000000000000000000000000000000000001dcd65000"
           expect_pass: true
         - name: "should reject transfer 20k"
           input:
-            # transfer(0x5B38Da6a701c568545dCfcB03FcB875f56beddC4, 20000000000)
-            data: "0xa9059cbb0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc40000000000000000000000000000000000000000000000000000000ba43b7400"
+            # transfer(recipient, 20000000000)
+            data: "0xa9059cbb00000000000000000000000011111111111111111111111111111111111111110000000000000000000000000000000000000000000000000000000ba43b7400"
           expect_pass: false
           expect_reason: "exceeds 10k limit"
         - name: "should pass approve valid spender"
           input:
-            # approve(0x5B38Da6a701c568545dCfcB03FcB875f56beddC4, 1000000000000000000)
-            data: "0x095ea7b30000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc40000000000000000000000000000000000000000000000000de0b6b3a7640000"
+            # approve(spender_contract, amount) — spender is contract address, left unchanged
+            data: "0x095ea7b30000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc40000000000000000000000000000000000000000000000000000000de0b6b3a7640000"
           expect_pass: true
         - name: "should reject approve zero address"
           input:
@@ -564,8 +564,8 @@ rules:
                 chainId: "1"
                 verifyingContract: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
               message:
-                owner: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
-                spender: "0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2"
+                owner: "0x1111111111111111111111111111111111111111"   # signer; set in real config
+                spender: "0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2"  # contract spender, unchanged
                 value: "100000000000000000000"
                 nonce: "0"
                 deadline: "1893456000"  # Year 2030
@@ -580,7 +580,7 @@ rules:
                 chainId: "1"
                 verifyingContract: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
               message:
-                owner: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+                owner: "0x1111111111111111111111111111111111111111"
                 spender: "0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2"
                 value: "2000000000000000000000"
                 nonce: "0"
@@ -597,7 +597,7 @@ rules:
                 chainId: "1"
                 verifyingContract: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
               message:
-                owner: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+                owner: "0x1111111111111111111111111111111111111111"
                 spender: "0x0000000000000000000000000000000000000000"
                 value: "100000000000000000000"
                 nonce: "0"
@@ -613,8 +613,8 @@ rules:
     enabled: true
     config:
       allowed_signers:
-        - "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"  # Hot wallet address
-        - "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"  # Another allowed signer
+        - "0x1111111111111111111111111111111111111111"  # Your hot wallet; set in real config
+        - "0x2222222222222222222222222222222222222222"
 
   # Example 9: Sign type restriction - allow only specific signing methods
   # Useful to limit what types of signing operations are permitted
@@ -651,7 +651,7 @@ rules:
     mode: "whitelist"
     enabled: true
     # Scope filters narrow down when this rule applies
-    signer_address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+    signer_address: "0x1111111111111111111111111111111111111111"
     config:
       allowed_signers:
-        - "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+        - "0x1111111111111111111111111111111111111111"

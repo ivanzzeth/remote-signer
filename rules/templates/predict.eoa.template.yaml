@@ -497,49 +497,49 @@ rules:
         # Source: BSC txs from ${signer_address_for_testing} EOA
         # ---------------------------------------------------------------
         - name: "should pass USDT approve to CTFExchange (real tx nonce=0, 0x8303b028)"
-          # BSC txHash: 0x8303b0286df4a18bca55f1c99b8792d0c5f5db62c6769aea0056c179a43ac8bd
+          # BSC txHash: (redacted)
           input:
             to: "${usdt_address}"
             data: "0x095ea7b30000000000000000000000008bc070bedab741406f4b1eb65a72bee27894b689ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
           expect_pass: true
         - name: "should pass USDT approve to NegRiskAdapter (real tx nonce=1, 0x18b0a9fc)"
-          # BSC txHash: 0x18b0a9fc6378c1ae1c6ac168c56f1d139bb65ed3b70480d654350a1581f6646d
+          # BSC txHash: (redacted)
           input:
             to: "${usdt_address}"
             data: "0x095ea7b3000000000000000000000000c3cf7c252f65e0d8d88537df96569ae94a7f1a6effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
           expect_pass: true
         - name: "should pass USDT approve to NegRiskExchange (real tx nonce=2, 0xb39c3c6b)"
-          # BSC txHash: 0xb39c3c6b8edbb0d863fe5c02f97d91e0eb57bfb668067d473d913743fe8b48f6
+          # BSC txHash: (redacted)
           input:
             to: "${usdt_address}"
             data: "0x095ea7b3000000000000000000000000365fb81bd4a24d6303cd2f19c349de6894d8d58affffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
           expect_pass: true
         - name: "should pass USDT approve to CT NYB (real tx nonce=3, 0xec3a2e9f)"
-          # BSC txHash: 0xec3a2e9f3bf6f9451bbdc5e8a5c638f96d7ca49e988a753c5c16e912f01224fa
+          # BSC txHash: (redacted)
           input:
             to: "${usdt_address}"
             data: "0x095ea7b300000000000000000000000022da1810b194ca018378464a58f6ac2b10c9d244ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
           expect_pass: true
         - name: "should pass USDT approve to YB CTFExchange (real tx nonce=7, 0x0c25ff29)"
-          # BSC txHash: 0x0c25ff29a0cf37c19218d825f50ae21a389a91b5407b4404c2d51060772e6c80
+          # BSC txHash: (redacted)
           input:
             to: "${usdt_address}"
             data: "0x095ea7b30000000000000000000000006beb5a40c032afc305961162d8204cda16decfa5ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
           expect_pass: true
         - name: "should pass USDT approve to YB NegRiskAdapter (real tx nonce=8, 0xe91b1872)"
-          # BSC txHash: 0xe91b18729031f71bdcf64a9732c4faaffc9e31f322f151bd8e181ff79f766dd9
+          # BSC txHash: (redacted)
           input:
             to: "${usdt_address}"
             data: "0x095ea7b300000000000000000000000041dce1a4b8fb5e6327701750af6231b7cd0b2a40ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
           expect_pass: true
         - name: "should pass USDT approve to YB NegRiskExchange (real tx nonce=9, 0x2e7d9d99)"
-          # BSC txHash: 0x2e7d9d991ebe79af3158f4ca2a488cb5acdf2f1d6fb74dfe2a65ebeae224ad70
+          # BSC txHash: (redacted)
           input:
             to: "${usdt_address}"
             data: "0x095ea7b30000000000000000000000008a289d458f5a134ba40015085a8f50ffb681b41dffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
           expect_pass: true
         - name: "should pass USDT approve to YB CT (real tx nonce=10, 0x120f4ff3)"
-          # BSC txHash: 0x120f4ff3f32d1ac415e8f83f6991979288d7d4b626b6cd15773a2a0cae96b414
+          # BSC txHash: (redacted)
           input:
             to: "${usdt_address}"
             data: "0x095ea7b30000000000000000000000009400f8ad57e9e0f352345935d6d3175975eb1d9fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
@@ -597,37 +597,37 @@ rules:
         # Source: BSC txs from ${signer_address_for_testing} EOA
         # ---------------------------------------------------------------
         - name: "should pass CT(NYB) setApprovalForAll to CTFExchange (real tx nonce=4, 0x429a603c)"
-          # BSC txHash: 0x429a603cef364f37ab459b1d64e0c7e35b39a18a4b1151b8221d1f893eebac0a
+          # BSC txHash: (redacted)
           input:
             to: "${ct_nyb}"
             data: "0xa22cb4650000000000000000000000008bc070bedab741406f4b1eb65a72bee27894b6890000000000000000000000000000000000000000000000000000000000000001"
           expect_pass: true
         - name: "should pass CT(NYB) setApprovalForAll to NegRiskAdapter (real tx nonce=5, 0xfa045098)"
-          # BSC txHash: 0xfa0450983182112df53cd5b3f53e0549e8d811e32cca47984c846cb4e10f81d7
+          # BSC txHash: (redacted)
           input:
             to: "${ct_nyb}"
             data: "0xa22cb465000000000000000000000000c3cf7c252f65e0d8d88537df96569ae94a7f1a6e0000000000000000000000000000000000000000000000000000000000000001"
           expect_pass: true
         - name: "should pass CT(NYB) setApprovalForAll to NegRiskExchange (real tx nonce=6, 0xff489444)"
-          # BSC txHash: 0xff489444961b1fd13d3d591ba6c0116b3dbcb5ea28faae6ef5eaa3159c6f8228
+          # BSC txHash: (redacted)
           input:
             to: "${ct_nyb}"
             data: "0xa22cb465000000000000000000000000365fb81bd4a24d6303cd2f19c349de6894d8d58a0000000000000000000000000000000000000000000000000000000000000001"
           expect_pass: true
         - name: "should pass YB CT setApprovalForAll to YB CTFExchange (real tx nonce=11, 0xe38351e8)"
-          # BSC txHash: 0xe38351e81d1cd602ff62c0329198b66e55113b73bf4db51a67c52ef135d0d5fa
+          # BSC txHash: (redacted)
           input:
             to: "${ct_yb}"
             data: "0xa22cb4650000000000000000000000006beb5a40c032afc305961162d8204cda16decfa50000000000000000000000000000000000000000000000000000000000000001"
           expect_pass: true
         - name: "should pass YB CT setApprovalForAll to YB NegRiskAdapter (real tx nonce=12, 0xf1fcfa57)"
-          # BSC txHash: 0xf1fcfa5717c9ad2f4fbbb63b1e6fd2a2c772ed1d719a3f0748a1df05f6f6264c
+          # BSC txHash: (redacted)
           input:
             to: "${ct_yb}"
             data: "0xa22cb46500000000000000000000000041dce1a4b8fb5e6327701750af6231b7cd0b2a400000000000000000000000000000000000000000000000000000000000000001"
           expect_pass: true
         - name: "should pass YB CT setApprovalForAll to YB NegRiskExchange (real tx nonce=13, 0xa498c776)"
-          # BSC txHash: 0xa498c776d49a65d58b1d977a5f2ddc876a8b4b713f53724cdd4938f3ad4a9368
+          # BSC txHash: (redacted)
           input:
             to: "${ct_yb}"
             data: "0xa22cb4650000000000000000000000008a289d458f5a134ba40015085a8f50ffb681b41d0000000000000000000000000000000000000000000000000000000000000001"
@@ -719,19 +719,19 @@ rules:
         # Source: BSC txs from ${signer_address_for_testing} EOA
         # ---------------------------------------------------------------
         - name: "should pass YB CT mergePositions (real tx nonce=14, 0xec080930)"
-          # BSC txHash: 0xec080930de7a9f90259a7bbe613512a0516f9f11d1de4f23b815235b5b287c49
+          # BSC txHash: (redacted)
           input:
             to: "${ct_yb}"
             data: "0x9e7212ad00000000000000000000000055d398326f99059ff775485246999027b3197955000000000000000000000000000000000000000000000000000000000000000001f023b3b6a1f1e2a4ca958131d7094933e5f38781a12db9935404f59278278d00000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000007481080579678000000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002"
           expect_pass: true
         - name: "should pass YB CT mergePositions (real tx nonce=15, 0x550f3d81)"
-          # BSC txHash: 0x550f3d8145a1c659a4a2cdecaf896c7fc5e1662e64242ee68b911f60d2013793
+          # BSC txHash: (redacted)
           input:
             to: "${ct_yb}"
             data: "0x9e7212ad00000000000000000000000055d398326f99059ff775485246999027b3197955000000000000000000000000000000000000000000000000000000000000000001f023b3b6a1f1e2a4ca958131d7094933e5f38781a12db9935404f59278278d00000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000004ea4eabf7c5624304000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002"
           expect_pass: true
         - name: "should pass YB CT mergePositions (real tx nonce=16, 0xcbc9e8a1)"
-          # BSC txHash: 0xcbc9e8a19e0c758c9d69c9f1a49d5110761c134466438a7955fa318a08c685cc
+          # BSC txHash: (redacted)
           input:
             to: "${ct_yb}"
             data: "0x9e7212ad00000000000000000000000055d398326f99059ff775485246999027b3197955000000000000000000000000000000000000000000000000000000000000000001f023b3b6a1f1e2a4ca958131d7094933e5f38781a12db9935404f59278278d00000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000002c41305ea8d6eff08000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002"
@@ -740,7 +740,7 @@ rules:
         # Real transaction test case: YB CT redeemPositions (nonce 20)
         # ---------------------------------------------------------------
         - name: "should pass YB CT redeemPositions (real tx nonce=20, 0x77c60894)"
-          # BSC txHash: 0x77c60894c48f7c86b59e26b5883624eac60dffa1fb9a8a4455f733cd7bb93270
+          # BSC txHash: (redacted)
           input:
             to: "${ct_yb}"
             data: "0x01b7037c00000000000000000000000055d398326f99059ff775485246999027b3197955000000000000000000000000000000000000000000000000000000000000000001f023b3b6a1f1e2a4ca958131d7094933e5f38781a12db9935404f59278278d0000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002"
