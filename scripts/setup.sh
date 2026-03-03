@@ -21,6 +21,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 DATA_DIR="${PROJECT_DIR}/data"
 
+# GitHub repo for release downloads (public repo required for unauthenticated download)
+REMOTE_SIGNER_REPO="${REMOTE_SIGNER_RELEASE_REPO:-ivanzzeth/remote-signer}"
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -54,6 +57,37 @@ ask() {
         done
         echo -e "${RED}Invalid choice. Please enter one of: ${choices[*]}${NC}" >&2
     done
+}
+
+# Map current OS/arch to release asset suffix (e.g. linux-amd64, darwin-arm64)
+tui_release_asset_suffix() {
+    local goos goarch
+    case "$(uname -s)" in
+        Linux)  goos=linux ;;
+        Darwin) goos=darwin ;;
+        *) echo "unknown"; return 1 ;;
+    esac
+    case "$(uname -m)" in
+        x86_64)  goarch=amd64 ;;
+        aarch64|arm64) goarch=arm64 ;;
+        *) echo "unknown"; return 1 ;;
+    esac
+    echo "${goos}-${goarch}"
+}
+
+# Download TUI binary from GitHub Releases (latest). Works only when repo is public.
+# Returns 0 on success, 1 on failure (no release, 404, or private repo).
+download_tui_from_release() {
+    local suffix url dest
+    suffix="$(tui_release_asset_suffix)" || return 1
+    url="https://github.com/${REMOTE_SIGNER_REPO}/releases/latest/download/remote-signer-tui-${suffix}"
+    dest="$PROJECT_DIR/remote-signer-tui"
+    if curl -sSLf -o "$dest" "$url" 2>/dev/null && [ -s "$dest" ]; then
+        chmod +x "$dest"
+        return 0
+    fi
+    rm -f "$dest"
+    return 1
 }
 
 detect_os() {
@@ -562,7 +596,11 @@ step_done() {
     if [ "$DEPLOY_MODE" = "local" ]; then
         echo "  ./scripts/deploy.sh local-run"
     else
-        echo "  ./scripts/deploy.sh run"
+        echo "  ./scripts/deploy.sh run --no-screen   # background, no screen (recommended after setup)"
+        echo "  ./scripts/deploy.sh run              # with screen (only if you need to enter keystore password)"
+        echo ""
+        echo -e "${CYAN}Docker (optional):${NC} If you use 'run' without --no-screen, detach with  ${BOLD}Ctrl+A${NC} then  ${BOLD}D${NC}; reattach: ./scripts/deploy.sh attach"
+        echo ""
     fi
     echo ""
 
@@ -578,11 +616,23 @@ step_done() {
     echo ""
 
     # --- Add signer ---
+    # Prefer downloading TUI from GitHub Release (public repo); fall back to local go build
+    TUI_BIN="$PROJECT_DIR/remote-signer-tui"
+    if ! download_tui_from_release 2>/dev/null; then
+        if command -v go &>/dev/null && [ -f "$PROJECT_DIR/go.mod" ]; then
+            (cd "$PROJECT_DIR" && go build -o remote-signer-tui ./cmd/tui 2>/dev/null) || true
+        fi
+    fi
+
     echo -e "${CYAN}Add a signer (after server is running):${NC}"
     echo ""
     echo "  Via TUI:"
-    echo "    go build -o remote-signer-tui ./cmd/tui"
-    echo "    REMOTE_SIGNER_PRIVATE_KEY=$ADMIN_PRIVATE_KEY ./remote-signer-tui \\"
+    if [ -x "$TUI_BIN" ]; then
+        echo "    REMOTE_SIGNER_PRIVATE_KEY=$ADMIN_PRIVATE_KEY ./remote-signer-tui \\"
+    else
+        echo "    go build -o remote-signer-tui ./cmd/tui   # requires Go 1.24+ (https://go.dev/dl/)"
+        echo "    REMOTE_SIGNER_PRIVATE_KEY=$ADMIN_PRIVATE_KEY ./remote-signer-tui \\"
+    fi
     echo "      -url ${SCHEME}://localhost:${PORT} \\"
     echo "      -api-key-id admin"
     if [ "$TLS_CHOICE" = "3" ]; then
@@ -595,6 +645,10 @@ step_done() {
     echo ""
     echo "    Then use the Signers tab to create a keystore or HD wallet."
     echo ""
+    if [ ! -x "$TUI_BIN" ]; then
+        echo "  (No Go? Add signers via API instead — see docs/API.md)"
+        echo ""
+    fi
     echo "  Via API (create keystore):"
     echo "    See docs/API.md for authenticated request examples."
     echo ""
@@ -615,8 +669,25 @@ step_done() {
     echo "  docs/TLS.md             TLS/mTLS setup"
     echo ""
 
-    log_info "Setup complete! Run the start command above to begin."
+    log_info "Setup complete!"
     echo ""
+}
+
+# Ask to start the server now and exec deploy.sh (one-click deploy)
+start_server_now() {
+    echo ""
+    read -rp "Start the server now? (Y/n): " START_NOW
+    START_NOW="${START_NOW:-Y}"
+    if [ "$START_NOW" = "y" ] || [ "$START_NOW" = "Y" ]; then
+        log_info "Starting server..."
+        cd "$PROJECT_DIR"
+        if [ "$DEPLOY_MODE" = "docker" ]; then
+            exec "$SCRIPT_DIR/deploy.sh" run --no-screen
+        else
+            exec "$SCRIPT_DIR/deploy.sh" local-run
+        fi
+    fi
+    log_info "When ready, run: ./scripts/deploy.sh $([ "$DEPLOY_MODE" = "docker" ] && echo 'run --no-screen' || echo local-run)"
 }
 
 # === Main Flow ================================================================
@@ -639,8 +710,10 @@ main() {
         ensure_docker
     fi
 
-    # screen is needed by deploy.sh for both modes
-    check_screen
+    # screen is needed only for local-run; Docker one-click uses run --no-screen
+    if [ "$DEPLOY_MODE" = "local" ]; then
+        check_screen
+    fi
 
     # Step 2/5: API Keys
     step_api_keys
@@ -656,6 +729,9 @@ main() {
 
     # Step 5/5: Done
     step_done
+
+    # One-click: offer to start the server (exec deploy.sh)
+    start_server_now
 }
 
 main
