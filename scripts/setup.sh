@@ -476,6 +476,8 @@ security:
   rate_limit_default: 100
   nonce_required: true
   manual_approval_enabled: true
+  rules_api_readonly: true      # blocks rule/template CRUD via API (default: true)
+  signers_api_readonly: false   # blocks signer/HD-wallet creation via API (default: false)
 
 logger:
   level: "info"

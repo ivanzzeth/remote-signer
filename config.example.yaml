@@ -121,6 +121,15 @@ security:
   # When true, they go to pending manual approval. Default false for stricter security.
   manual_approval_enabled: false
 
+  # API lockdown: disable runtime mutation of rules/templates and signers via API.
+  # rules_api_readonly (default: true) — blocks rule/template CRUD, template instantiate/revoke,
+  # and approval auto-rule creation. Rules can only be managed through config files + restart/SIGHUP.
+  # Config-sourced rules are always immutable via API regardless of this setting.
+  rules_api_readonly: true
+  # signers_api_readonly (default: false) — blocks signer creation, HD wallet create/import/derive.
+  # Unlock/lock remain allowed. Low risk: API never exposes private keys or passwords.
+  signers_api_readonly: false
+
   # Approval guard: pause when too many consecutive "not auto-approved" outcomes (blocked by rule or manual approval)
   # Use case: API key leaked — attacker uses valid key to brute-force; guard detects burst and pauses + alerts
   approval_guard:

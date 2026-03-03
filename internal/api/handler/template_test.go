@@ -364,7 +364,7 @@ func newTemplateService(t *testing.T, tmplRepo *mockTemplateRepo, ruleRepo *mock
 func newHandler(t *testing.T, tmplRepo *mockTemplateRepo, ruleRepo *mockRuleRepo, budgetRepo *mockBudgetRepo) *TemplateHandler {
 	t.Helper()
 	svc := newTemplateService(t, tmplRepo, ruleRepo, budgetRepo)
-	h, err := NewTemplateHandler(tmplRepo, svc, newTestLogger())
+	h, err := NewTemplateHandler(tmplRepo, svc, newTestLogger(), false)
 	if err != nil {
 		t.Fatalf("failed to create TemplateHandler: %v", err)
 	}
@@ -509,7 +509,7 @@ func TestNewTemplateHandler(t *testing.T) {
 	svc := newTemplateService(t, tmplRepo, ruleRepo, budgetRepo)
 
 	t.Run("all_valid_args", func(t *testing.T) {
-		h, err := NewTemplateHandler(tmplRepo, svc, logger)
+		h, err := NewTemplateHandler(tmplRepo, svc, logger, false)
 		if err != nil {
 			t.Fatalf("expected no error, got: %v", err)
 		}
@@ -519,7 +519,7 @@ func TestNewTemplateHandler(t *testing.T) {
 	})
 
 	t.Run("nil_template_repo", func(t *testing.T) {
-		_, err := NewTemplateHandler(nil, svc, logger)
+		_, err := NewTemplateHandler(nil, svc, logger, false)
 		if err == nil {
 			t.Fatal("expected error for nil template repository")
 		}
@@ -529,7 +529,7 @@ func TestNewTemplateHandler(t *testing.T) {
 	})
 
 	t.Run("nil_template_service", func(t *testing.T) {
-		_, err := NewTemplateHandler(tmplRepo, nil, logger)
+		_, err := NewTemplateHandler(tmplRepo, nil, logger, false)
 		if err == nil {
 			t.Fatal("expected error for nil template service")
 		}
@@ -539,7 +539,7 @@ func TestNewTemplateHandler(t *testing.T) {
 	})
 
 	t.Run("nil_logger", func(t *testing.T) {
-		_, err := NewTemplateHandler(tmplRepo, svc, nil)
+		_, err := NewTemplateHandler(tmplRepo, svc, nil, false)
 		if err == nil {
 			t.Fatal("expected error for nil logger")
 		}

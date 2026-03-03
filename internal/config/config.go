@@ -205,6 +205,34 @@ type SecurityConfig struct {
 	// NonceRequired enforces nonce for all requests (recommended for production)
 	// When true, requests without X-Nonce header will be rejected
 	NonceRequired *bool `yaml:"nonce_required"`
+
+	// RulesAPIReadonly disables rule/template mutations via API.
+	// Default (nil) = true. Covers: rule CRUD, template CRUD/instantiate/revoke,
+	// approval auto-rule creation. Rules managed through config files only.
+	RulesAPIReadonly *bool `yaml:"rules_api_readonly"`
+
+	// SignersAPIReadonly disables signer/HD-wallet creation via API.
+	// Default (nil) = false. Covers: signer creation, HD wallet create/import/derive.
+	// Unlock/lock remain allowed. Signers managed through config or TUI.
+	SignersAPIReadonly *bool `yaml:"signers_api_readonly"`
+}
+
+// IsRulesAPIReadonly returns whether rule/template mutations via API are disabled.
+// Defaults to true (secure by default) when not explicitly configured.
+func (s SecurityConfig) IsRulesAPIReadonly() bool {
+	if s.RulesAPIReadonly == nil {
+		return true
+	}
+	return *s.RulesAPIReadonly
+}
+
+// IsSignersAPIReadonly returns whether signer/HD-wallet creation via API is disabled.
+// Defaults to false when not explicitly configured (low risk: API never exposes private keys).
+func (s SecurityConfig) IsSignersAPIReadonly() bool {
+	if s.SignersAPIReadonly == nil {
+		return false
+	}
+	return *s.SignersAPIReadonly
 }
 
 // ApprovalGuardConfig configures the request-rejection burst guard.

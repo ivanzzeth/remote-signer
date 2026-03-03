@@ -516,6 +516,12 @@ func run() error {
 		)
 	}
 
+	// Log API lockdown settings
+	log.Info("API lockdown settings",
+		"rules_api_readonly", cfg.Security.IsRulesAPIReadonly(),
+		"signers_api_readonly", cfg.Security.IsSignersAPIReadonly(),
+	)
+
 	// Initialize router
 	router, err := api.NewRouter(authVerifier, signService, evmSignerManager, ruleRepo, auditRepo, log, api.RouterConfig{
 		Version:           version,
@@ -527,8 +533,10 @@ func run() error {
 			TemplateRepo:    templateRepo,
 			TemplateService: templateService,
 		},
-		ApprovalGuard: approvalGuard,
-		APIKeyRepo:    apiKeyRepo,
+		ApprovalGuard:     approvalGuard,
+		APIKeyRepo:        apiKeyRepo,
+		RulesAPIReadonly:   cfg.Security.IsRulesAPIReadonly(),
+		SignersAPIReadonly:  cfg.Security.IsSignersAPIReadonly(),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create router: %w", err)

@@ -144,7 +144,7 @@ func (m *mockSignerManager) LockSigner(_ context.Context, _ string) (*types.Sign
 func newTestHDWalletHandler(t *testing.T, sm evmchain.SignerManager) *HDWalletHandler {
 	t.Helper()
 	logger := slog.Default()
-	h, err := NewHDWalletHandler(sm, logger)
+	h, err := NewHDWalletHandler(sm, logger, false)
 	require.NoError(t, err)
 	return h
 }
@@ -197,14 +197,14 @@ func decodeJSON(t *testing.T, rec *httptest.ResponseRecorder, v interface{}) {
 // --- Constructor tests ---
 
 func TestNewHDWalletHandler_NilSignerManager(t *testing.T) {
-	_, err := NewHDWalletHandler(nil, slog.Default())
+	_, err := NewHDWalletHandler(nil, slog.Default(), false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "signer manager is required")
 }
 
 func TestNewHDWalletHandler_NilLogger(t *testing.T) {
 	sm := newDefaultMockSignerManager()
-	_, err := NewHDWalletHandler(sm, nil)
+	_, err := NewHDWalletHandler(sm, nil, false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "logger is required")
 }
