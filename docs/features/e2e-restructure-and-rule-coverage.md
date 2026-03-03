@@ -15,14 +15,14 @@
 
 | 文件 | 说明 |
 |------|------|
-| `rules/polymarket.safe.yaml` | 大型 Polymarket Safe 规则，已由 `rules/templates/polymarket.template.js.yaml` + 实例替代 |
-| `rules/polymarket.eoa.yaml` | 旧 EOA 规则，协议用模板即可 |
-| `rules/predict.eoa.yaml` | 旧 Predict 规则，有 `rules/templates/predict.eoa.template.yaml` |
-| `rules/opinion.yaml` | 旧 Opinion 规则，有 `rules/templates/opinion.safe.template.yaml` |
+| `rules/polymarket_safe.yaml` | 大型 Polymarket Safe 规则，已由 `rules/templates/polymarket_safe.template.js.yaml` + 实例替代 |
+| `rules/polymarket_eoa.yaml` | 旧 EOA 规则，协议用模板即可 |
+| `rules/predict_eoa.yaml` | 旧 Predict 规则，有 `rules/templates/predict_eoa.template.yaml` |
+| `rules/opinion.yaml` | 旧 Opinion 规则，有 `rules/templates/opinion_safe.template.yaml` |
 
 **需同步修改**：
 
-- `cmd/validate-rules/main.go`：若示例/帮助中引用 `rules/polymarket.safe.yaml`，改为引用 `rules/treasury.example.yaml` 或 `config.e2e.yaml`。
+- `cmd/validate-rules/main.go`：若示例/帮助中引用 `rules/polymarket_safe.yaml`，改为引用 `rules/treasury.example.yaml` 或 `config.e2e.yaml`。
 
 ### 2.2 保留（简单规则示例，并在 e2e 中覆盖）
 
@@ -37,8 +37,8 @@
 - `rules/templates/multisend.template.js.yaml`
 - `rules/templates/erc20.template.js.yaml`
 - `rules/templates/erc721.template.js.yaml`
-- `rules/templates/polymarket.template.js.yaml`
-- `rules/templates/opinion.safe.template.yaml`、`predict.eoa.template.yaml`、`polymarket.safe.template.yaml` 等：不纳入 e2e config，仅作非 e2e 环境使用或后续按需加入。
+- `rules/templates/polymarket_safe.template.js.yaml`
+- `rules/templates/opinion_safe.template.yaml`、`predict_eoa.template.yaml`、`polymarket_safe.template.yaml` 等：不纳入 e2e config，仅作非 e2e 环境使用或后续按需加入。
 
 e2e 使用的模板以 `config.e2e.yaml` 中声明的为准（E2E Minimal, E2E Safe, E2E Multisend, E2E ERC20, E2E ERC721, E2E Polymarket）。
 
@@ -71,7 +71,7 @@ e2e 使用的模板以 `config.e2e.yaml` 中声明的为准（E2E Minimal, E2E S
 | `e2e_rule_message_pattern_test.go` | 消息模式：`TestRule_MessagePattern_AllowsMatching`、`TestRule_MessagePattern_RejectsMatchingBlocklist` | message_pattern |
 | `e2e_rule_contract_method_test.go` | 合约方法：`TestRule_ContractMethod_AllowsTransfer`、`TestRule_ContractMethod_BlocklistBlocksApproval` | evm_contract_method |
 | `e2e_rule_evm_js_test.go` | evm_js：`TestRule_SignRequestMatchesWhitelistRule`、`TestRule_JSBlocklistBlocksBurnAddress`、`TestRule_DelegationSinglePasses`、`TestRule_SafeMultisendERC20Chain`、`TestRule_SafeMultisendMultiDelegate`、Safe/Polymarket 链上用例（见下节） | evm_js |
-| `e2e_rule_polymarket_test.go`（可选） | 仅 Polymarket 模板相关 e2e：`TestRule_PolymarketSafeChain`、`TestRule_PolymarketSafeChain_CTFSetApprovalForAll`、`TestRule_PolymarketSafeChain_RejectDelegateCall`、`TestRule_PolymarketSafeChain_CTFRedeemPositions`、`TestRule_PolymarketSafeChain_ExecTransactionCTFRedeemPositions` 等 | polymarket.template.js.yaml |
+| `e2e_rule_polymarket_test.go`（可选） | 仅 Polymarket 模板相关 e2e：`TestRule_PolymarketSafeChain`、`TestRule_PolymarketSafeChain_CTFSetApprovalForAll`、`TestRule_PolymarketSafeChain_RejectDelegateCall`、`TestRule_PolymarketSafeChain_CTFRedeemPositions`、`TestRule_PolymarketSafeChain_ExecTransactionCTFRedeemPositions` 等 | polymarket_safe.template.js.yaml |
 | `e2e_request_audit_test.go` | `TestRequest_ListRequests`、`TestRequest_GetRequest`、`TestAudit_ListAuditRecords` | - |
 | `e2e_pagination_test.go` | 所有 `TestPagination_*` | - |
 | `e2e_signer_test.go` | 所有 `TestSigner_*`（List, ListWithTypeFilter, ListSignersPagination, CreateKeystoreSigner, CreateSignerValidationErrors, NonAdmin*） | - |
@@ -100,7 +100,7 @@ e2e 使用的模板以 `config.e2e.yaml` 中声明的为准（E2E Minimal, E2E S
 | **multisend.template.js.yaml** | 2（to=multisend 通过，to≠multisend 拒绝） | 已有 `TestRule_SafeMultisendERC20Chain` 等；补 1 个“tx to 非 multisend 被拒”的 e2e。 |
 | **erc20.template.js.yaml** | 6（transfer/approve/transferFrom 通过，错误 contract/recipient/method 拒绝） | 在现有 Safe→Multisend→ERC20 链上，补：允许的 transfer、允许的 approve、错误 token 或错误 method 拒绝。 |
 | **erc721.template.js.yaml** | 6（transferFrom/approve/setApprovalForAll 通过，错误 contract/recipient/method 拒绝） | 同上，补 ERC721 的允许/拒绝代表性用例。 |
-| **polymarket.template.js.yaml** | 多规则（ClobAuth, Order, CreateProxy, Safe Wallet Creation, inner tx） | 已有 `TestRule_PolymarketSafeChain*`。e2e 覆盖：ClobAuth 通过/无效 domain 拒绝、Order 通过/非零 taker 拒绝、CreateProxy 通过/错误 target 拒绝、inner USDC approve 通过/错误 spender 拒绝。 |
+| **polymarket_safe.template.js.yaml** | 多规则（ClobAuth, Order, CreateProxy, Safe Wallet Creation, inner tx） | 已有 `TestRule_PolymarketSafeChain*`。e2e 覆盖：ClobAuth 通过/无效 domain 拒绝、Order 通过/非零 taker 拒绝、CreateProxy 通过/错误 target 拒绝、inner USDC approve 通过/错误 spender 拒绝。 |
 
 ### 4.3 规则类型与 E2E 对应关系（汇总）
 
@@ -120,7 +120,7 @@ e2e 使用的模板以 `config.e2e.yaml` 中声明的为准（E2E Minimal, E2E S
 ## 5. 实施顺序建议
 
 1. **规则文件清理**  
-   - 删除 `rules/polymarket.safe.yaml`、`rules/polymarket.eoa.yaml`、`rules/predict.eoa.yaml`、`rules/opinion.yaml`。  
+   - 删除 `rules/polymarket_safe.yaml`、`rules/polymarket_eoa.yaml`、`rules/predict_eoa.yaml`、`rules/opinion.yaml`。  
    - 更新 `cmd/validate-rules/main.go` 中的示例路径/帮助文案。
 
 2. **E2E 拆分**  
@@ -145,9 +145,9 @@ e2e 使用的模板以 `config.e2e.yaml` 中声明的为准（E2E Minimal, E2E S
 
 ### 6.1 将删除的规则文件（4 个）
 
-- `rules/polymarket.safe.yaml`
-- `rules/polymarket.eoa.yaml`
-- `rules/predict.eoa.yaml`
+- `rules/polymarket_safe.yaml`
+- `rules/polymarket_eoa.yaml`
+- `rules/predict_eoa.yaml`
 - `rules/opinion.yaml`
 
 ### 6.2 保留并需 e2e 覆盖的示例文件（2 个）

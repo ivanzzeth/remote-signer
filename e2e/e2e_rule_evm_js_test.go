@@ -290,7 +290,7 @@ func TestRule_SafeMultisendMultiDelegate(t *testing.T) {
 	require.Len(t, sig, 65)
 }
 
-// TestRule_PolymarketSafeChain verifies the combined Polymarket JS + Safe JS template chain (same effect as polymarket.safe.template.yaml).
+// TestRule_PolymarketSafeChain verifies the combined Polymarket JS + Safe JS template chain (same effect as polymarket_safe.template.yaml).
 // Submits a SafeTx (typed_data) on chain 137 with inner call USDC.e approve(CTF Exchange, max);
 // Safe rule (safe-polymarket) delegates to polymarket-transactions which validates the Polymarket calls.
 func TestRule_PolymarketSafeChain(t *testing.T) {
@@ -353,7 +353,7 @@ func TestRule_PolymarketSafeChain(t *testing.T) {
 	require.Len(t, sig, 65)
 }
 
-// TestRule_PolymarketSafeChain_CTFSetApprovalForAll mirrors polymarket.safe.template.yaml test case:
+// TestRule_PolymarketSafeChain_CTFSetApprovalForAll mirrors polymarket_safe.template.yaml test case:
 // "should pass SafeTx with CTF setApprovalForAll to Exchange (real tx 0x4f1356ad)".
 func TestRule_PolymarketSafeChain_CTFSetApprovalForAll(t *testing.T) {
 	if useExternalServer {
@@ -413,7 +413,7 @@ func TestRule_PolymarketSafeChain_CTFSetApprovalForAll(t *testing.T) {
 	require.Len(t, sig, 65)
 }
 
-// TestRule_PolymarketSafeChain_RejectDelegateCall mirrors polymarket.safe.template.yaml test case:
+// TestRule_PolymarketSafeChain_RejectDelegateCall mirrors polymarket_safe.template.yaml test case:
 // "should reject SafeTx with DELEGATECALL".
 func TestRule_PolymarketSafeChain_RejectDelegateCall(t *testing.T) {
 	if useExternalServer {
@@ -474,7 +474,7 @@ func TestRule_PolymarketSafeChain_RejectDelegateCall(t *testing.T) {
 	require.Contains(t, signErr.Message, "only CALL", "rejection reason should mention only CALL")
 }
 
-// TestRule_PolymarketSafeChain_CTFRedeemPositions mirrors polymarket.safe.template.yaml complex case:
+// TestRule_PolymarketSafeChain_CTFRedeemPositions mirrors polymarket_safe.template.yaml complex case:
 // "should pass SafeTx with CTF redeemPositions (real tx 0x714b3d)" — Polygon tx, inner redeemPositions(USDC.e, 0x0, conditionId, [1,2]).
 func TestRule_PolymarketSafeChain_CTFRedeemPositions(t *testing.T) {
 	if useExternalServer {
@@ -485,7 +485,7 @@ func TestRule_PolymarketSafeChain_CTFRedeemPositions(t *testing.T) {
 	safeAddress := "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
 	ctfAddress := "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
 	// redeemPositions(address,bytes32,bytes32,uint256[]) — collateralToken=USDC.e, parentCollectionId=0x0, conditionId=0xbd42fb9a..., indexSets=[1,2]
-	// From polymarket.safe.template.yaml test case "should pass SafeTx with CTF redeemPositions (real tx 0x714b3d)"
+	// From polymarket_safe.template.yaml test case "should pass SafeTx with CTF redeemPositions (real tx 0x714b3d)"
 	redeemPositionsData := "0x01b7037c0000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa841740000000000000000000000000000000000000000000000000000000000000000bd42fb9ac3870c35193d69ca1ad5ea00363d8ee6aba80b910a2003c370597cae0000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002"
 
 	typedData := eip712.TypedData{
@@ -533,7 +533,7 @@ func TestRule_PolymarketSafeChain_CTFRedeemPositions(t *testing.T) {
 	require.Len(t, sig, 65)
 }
 
-// TestRule_PolymarketSafeChain_ExecTransactionCTFRedeemPositions mirrors polymarket.safe.template.yaml complex case:
+// TestRule_PolymarketSafeChain_ExecTransactionCTFRedeemPositions mirrors polymarket_safe.template.yaml complex case:
 // "should pass execTransaction with real CTF redeemPositions (real tx 0x714b3d)" — raw tx to Safe with execTransaction(CTF, 0, redeemPositions(...), ...).
 func TestRule_PolymarketSafeChain_ExecTransactionCTFRedeemPositions(t *testing.T) {
 	if useExternalServer {

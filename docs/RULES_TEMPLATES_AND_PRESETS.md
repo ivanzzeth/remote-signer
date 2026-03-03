@@ -19,19 +19,37 @@ Flow in short: **Template file** (variables + rules with `${var}`) → loaded in
 
 ---
 
-## 2. Rule templates
+## 2. Naming convention
 
-### 2.1 What a template is
+File and artifact names use a single pattern so that **type** (template vs instance vs preset) and **protocol + capability** are clear at a glance.
+
+| Pattern | Meaning | Example |
+|--------|---------|--------|
+| `xxx_yyy.template.yaml` | Rule **template**: parameterized rules, `xxx` = protocol, `yyy` = capability | `polymarket_auth.template.yaml`, `polymarket_create_safe.template.yaml` |
+| `xxx_yyy.template.js.yaml` | Rule template implemented in **JavaScript** (same idea, JS engine) | `polymarket_some_capability.template.js.yaml` |
+| `xxx_yyy.yaml` (no `template`/`preset`) | **Instance**: concrete rule config (references a template and supplies variables) | `polymarket_safe.yaml`, `polymarket_eoa.yaml` |
+| `xxx_yyy.preset.yaml` | **Preset**: pre-filled instance(s) for quick add (replace `template` with `preset`) | `polymarket_eoa_polygon.preset.yaml`, `polymarket_safe_init_polygon.preset.yaml` |
+
+- **Segments**: use **underscores** (`_`) for readability (e.g. `create_safe`, `eoa_polygon`). No mixing of kebab-case and underscores in the same naming scheme.
+- **Protocol** (`xxx`): e.g. `polymarket`, `predict`.
+- **Capability / scenario** (`yyy`): e.g. `auth`, `create_safe`, `enable_trading`, `trading`, `eoa_polygon`, `safe_init_polygon`, `safe_polygon`.
+- **Suffix**: `.template.yaml` or `.template.js.yaml` = template; `.preset.yaml` = preset; no suffix (only `.yaml`) = instance. So the **presence or replacement of the word `template`** (or `preset`) in the filename identifies the kind of file.
+
+---
+
+## 3. Rule templates
+
+### 3.1 What a template is
 
 A **template** is a YAML file that defines:
 
 - **variables**: list of `{ name, type, description, required }` (e.g. `chain_id`, `ctf_exchange_address`, `allowed_safe_addresses`).
-- **test_variables**: (optional) default values used when validating the template in isolation (e.g. `remote-signer-validate-rules rules/templates/polymarket.safe.template.yaml` or `remote-signer-cli validate rules/...`).
+- **test_variables**: (optional) default values used when validating the template in isolation (e.g. `remote-signer-validate-rules rules/templates/polymarket_safe.template.yaml` or `remote-signer-cli validate rules/...`).
 - **rules**: the same structure as config rules, but with **placeholders** like `${chain_id}` or `${allowed_safe_addresses}` in expressions and config.
 
 The server does not evaluate the template file directly. It loads templates listed in `config.templates` (type `file` with a `path`). When a **rule** of type `instance` references that template and supplies `config.variables`, the server substitutes those values into the template’s rules and expands them into concrete rules.
 
-### 2.2 Where templates are defined
+### 3.2 Where templates are defined
 
 In `config.yaml`:
 
@@ -41,19 +59,19 @@ templates:
     type: "file"
     enabled: true
     config:
-      path: "rules/templates/polymarket.safe.template.yaml"
+      path: "rules/templates/polymarket_safe.template.yaml"
 ```
 
 - **name**: used by instance rules in `config.rules` via `config.template`.
 - **type: "file"**: load from the given path (relative to config file or project root).
 - **path**: path to the template YAML.
 
-Template files live under `rules/templates/` (e.g. `polymarket.safe.template.yaml`, `predict.eoa.template.yaml`). Each file contains `variables`, optional `test_variables`, and `rules` with `${var}` placeholders.
+Template files live under `rules/templates/` (e.g. `polymarket_safe.template.yaml`, `predict_eoa.template.yaml`). Each file contains `variables`, optional `test_variables`, and `rules` with `${var}` placeholders.
 
-### 2.3 Template file format (example)
+### 3.3 Template file format (example)
 
 ```yaml
-# rules/templates/polymarket.safe.template.yaml
+# rules/templates/polymarket_safe.template.yaml
 variables:
   - name: chain_id
     type: string
@@ -81,11 +99,11 @@ Variables can be scalars (string, number) or, in config/instance, represented as
 
 ---
 
-## 3. Rule examples in config
+## 4. Rule examples in config
 
 Rules in `config.rules` can be defined in three ways.
 
-### 3.1 Inline rules
+### 4.1 Inline rules
 
 The rule is fully defined under `rules` in config:
 
@@ -101,7 +119,7 @@ rules:
 
 No template or file reference; good for small, static policies.
 
-### 3.2 File rules
+### 4.2 File rules
 
 Load a list of rules from an external YAML file:
 
@@ -115,7 +133,7 @@ rules:
 
 The file must contain a top-level `rules:` list (same shape as config rules). No variable substitution; the file is used as-is.
 
-### 3.3 Instance rules (from template)
+### 4.3 Instance rules (from template)
 
 Reference a template by name and supply variables. The server expands this into concrete rules by substituting the variables into the template:
 
@@ -143,23 +161,23 @@ Instance rules are the main way to use shared templates (Polymarket, Predict, Op
 
 ---
 
-## 4. Presets
+## 5. Presets
 
-### 4.1 What a preset is
+### 5.1 What a preset is
 
 A **preset** is a YAML file that stores one or more **instance-style rule(s)** with default variables already filled in. It does not add a new rule type: it is a convenience format so you can:
 
 - Avoid copying long variable blocks from `config.example.yaml`.
 - Override only a few values (e.g. your Safe address) and optionally merge the result into your `config.yaml` via **remote-signer-cli** or **setup.sh**.
 
-Presets live under `rules/presets/` (e.g. `polymarket-safe-polygon.yaml`). They are used only by the CLI (and optionally by setup); the server does not read preset files.
+Presets live under `rules/presets/` (e.g. `polymarket_safe_polygon.preset.yaml`). They are used only by the CLI (and optionally by setup); the server does not read preset files.
 
-### 4.2 Single-rule preset format
+### 5.2 Single-rule preset format
 
 One rule per file, flat structure:
 
 ```yaml
-# rules/presets/polymarket-safe-polygon.yaml
+# rules/presets/polymarket_safe_polygon.preset.yaml
 name: "Polymarket Safe rules (Polygon)"
 template: "Polymarket Safe Template"
 chain_type: "evm"
@@ -180,7 +198,7 @@ override_hints:
 
 This is equivalent to one entry in `config.rules` with `type: "instance"` and the same `name`, `config.template`, and `config.variables`.
 
-### 4.3 Multi-rule preset format
+### 5.3 Multi-rule preset format
 
 One file can define multiple rules with a top-level `rules:` list:
 
@@ -207,7 +225,7 @@ rules:
 
 The CLI can apply overrides to all entries or target one by index.
 
-### 4.4 Variables in presets: scalars and arrays
+### 5.4 Variables in presets: scalars and arrays
 
 - **Scalars**: string or number, same as in config (e.g. `chain_id: "137"`, `clob_auth_domain_name: "ClobAuthDomain"`).
 - **Lists / arrays**: template variables that represent multiple values (e.g. allowed Safe addresses) can be:
@@ -219,14 +237,14 @@ When using the CLI to override variables, array-like values can be passed as:
 - `--set key=val1,val2` (stored as a single string), or
 - `--set key='["val1","val2"]'` (parsed as JSON array and normalized when writing config).
 
-### 4.5 Preset format: template_path and override_hints
+### 5.5 Preset format: template_path and override_hints
 
-- **template_path** (optional): Path to the template file (e.g. `rules/templates/polymarket.safe.template.yaml`). When you run `preset create-from ... --write`, the CLI injects this template into `config.templates` if it is not already present, so the preset is self-contained and config does not need to define the template beforehand.
+- **template_path** (optional): Path to the template file (e.g. `rules/templates/polymarket_safe.template.yaml`). When you run `preset create-from ... --write`, the CLI injects this template into `config.templates` if it is not already present, so the preset is self-contained and config does not need to define the template beforehand.
 - **override_hints** (optional): List of variable names to prompt for in setup (e.g. `allowed_safe_addresses`, `allowed_safe_address_for_testing`). The **preset vars** subcommand reads the template file (via `template_path`) and outputs each variable with its **description** from the template, so setup can show “variable (description)” when prompting.
 
 Template files define variables with a **description** field; that description is shown during interactive setup when the user is asked to fill in override values.
 
-### 4.6 Using presets with the CLI
+### 5.6 Using presets with the CLI
 
 (When **remote-signer-cli** is available.)
 
@@ -239,19 +257,52 @@ Template files define variables with a **description** field; that description i
   Outputs one line per override variable: `name<TAB>description`. Used by setup to show descriptions when prompting.
 
 - **Generate a rule from a preset (no config change)**:  
-  `remote-signer-cli preset create-from polymarket-safe-polygon --set allowed_safe_addresses=0xYourSafe`  
+  `remote-signer-cli preset create-from polymarket_safe_polygon --set allowed_safe_addresses=0xYourSafe`  
   Outputs the rule YAML so you can paste it into `config.yaml`.
 
 - **Append the rule to config (and inject template if missing)**:  
-  `remote-signer-cli preset create-from polymarket-safe-polygon --config config.yaml --write --set allowed_safe_addresses=0xYourSafe`  
+  `remote-signer-cli preset create-from polymarket_safe_polygon --config config.yaml --write --set allowed_safe_addresses=0xYourSafe`  
   If the preset has `template_path` and the config does not yet define that template, the CLI adds the template entry from the preset.
+
+- **Composite presets (multiple templates)**  
+  Use `template_paths` and `template_names` in the preset. The CLI generates one rule per template; each rule gets a **copy** of the preset’s `variables` (see below). Example: `polymarket_safe_polygon.preset.yaml` with four templates produces four instance rules, all sharing the same variable values.
+
+### 5.7 How variables work: one fill, no interference
+
+- **Preset = one variable set**  
+  A preset has a single `variables` block (and optional `--set` overrides). You fill variables **once** for the whole preset.
+
+- **Composite preset → one set copied to every rule**  
+  When a preset uses `template_paths` / `template_names`, the CLI generates one config rule per template. Each of those rules gets a **copy** of the same preset variables. So you do **not** fill each template separately; the same values are used for every instance.
+
+- **Repeated variable names across templates**  
+  Templates (e.g. auth, create_safe, trading) often declare the same names (`chain_id`, `allowed_safe_addresses`, etc.). In the preset you still define each name only once. That single value is copied into every generated rule.
+
+- **No interference between rule instances**  
+  In the final config, each rule is a separate entry with its own `config.variables` map. When the server expands an instance rule, it uses **only that rule’s** `config.variables` to substitute into that rule’s template. So multiple rules with the same variable names do not affect each other; each instance is evaluated in isolation.
+
+- **Templates use a subset of the preset variables**  
+  A preset usually contains the **union** of variables needed by all its templates (e.g. auth needs `chain_id`, trading needs `allowed_safe_addresses`). When a template is expanded, only the placeholders it actually uses (e.g. `${chain_id}`) are replaced; extra keys in the variable map are simply unused for that template and cause no problem.
+
+### 5.8 Loading multiple presets (e.g. Polymarket + Opinion)
+
+You can load several presets into the same config (e.g. Polymarket and Opinion). Rules and variables are isolated per rule, so they do not interfere. **One thing can go wrong: template name collision.**
+
+- **Template names are global in config**  
+  The server resolves instance rules by **template name** (e.g. `"Polymarket Auth Template"`). Config has a single list of templates; each name must refer to exactly one template (one path).
+
+- **What happens if two presets use the same template name**  
+  Suppose you load the Polymarket preset first (it injects `"Polymarket Auth Template"` → `polymarket_auth.template.yaml`). Then you load an Opinion preset that also uses the name `"Polymarket Auth Template"` but points to `opinion_safe.template.yaml`. On the second run, the CLI sees that a template named `"Polymarket Auth Template"` already exists, so it **does not inject again**. The Opinion rules are appended, but they reference `"Polymarket Auth Template"` and therefore expand using the **Polymarket** template, not the Opinion one. That is wrong and can cause mis-evaluation (e.g. wrong chain or contract logic).
+
+- **Best practice**  
+  Use a **protocol/ecosystem prefix** in every template name so that names never clash across presets: e.g. `"Polymarket Auth Template"`, `"Opinion Safe Template"`, `"Predict EOA Template"`. Then loading both Polymarket and Opinion presets is safe: each injects its own templates under distinct names, and each preset’s rules reference only those names.
 
 - **Multiple overrides**:  
   `--set key1=val1 --set key2=val2`
 
 For multi-rule presets, the CLI may support something like `--rule-index 0` to target the first rule. See the CLI help and [remote-signer-cli design](features/remote-signer-cli-design.md) for details.
 
-### 4.7 Using presets in setup
+### 5.9 Using presets in setup
 
 **setup.sh** runs an optional step (Step 4b) after generating config: “Add rules from preset?”. If the user agrees, it:
 
@@ -267,7 +318,7 @@ New users get a working rule set by picking a preset and filling in a few values
 
 ---
 
-## 5. Summary
+## 6. Summary
 
 | Concept | Where it lives | Purpose |
 |--------|----------------|--------|

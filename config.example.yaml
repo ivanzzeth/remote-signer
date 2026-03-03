@@ -278,7 +278,7 @@ templates:
     description: "Polymarket protocol rules for Safe wallets (parameterized)"
     enabled: true
     config:
-      path: "rules/templates/polymarket.safe.template.yaml"
+      path: "rules/templates/polymarket_safe.template.yaml"
 
   # Example: Predict.fun EOA rules as a template (BNB Chain addresses as variables)
   - name: "Predict EOA Template"
@@ -286,7 +286,7 @@ templates:
     description: "Predict.fun protocol rules for EOA wallets (parameterized)"
     enabled: true
     config:
-      path: "rules/templates/predict.eoa.template.yaml"
+      path: "rules/templates/predict_eoa.template.yaml"
 
   # Opinion protocol Safe rules (BSC 56)
   - name: "Opinion Safe Template"
@@ -294,7 +294,7 @@ templates:
     description: "Opinion protocol rules for Safe wallets on BSC (parameterized)"
     enabled: true
     config:
-      path: "rules/templates/opinion.safe.template.yaml"
+      path: "rules/templates/opinion_safe.template.yaml"
 
 # =============================================================================
 # Rules configuration
@@ -401,7 +401,7 @@ rules:
   # - name: "Polymarket Safe rules (direct file)"
   #   type: "file"
   #   config:
-  #     path: "rules/polymarket.safe.yaml"
+  #     path: "rules/polymarket_safe.yaml"
 
   # -------------------------------------------------------------------------
   # Option C: Define rules inline (examples below)

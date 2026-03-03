@@ -1,0 +1,103 @@
+# Polymarket Auth (CLOB login) — capability template only.
+# Split from polymarket_safe.template.yaml. Use with polymarket_eoa_polygon or composite Safe presets.
+
+variables:
+  - name: chain_id
+    type: string
+    description: "Chain ID (e.g. 137 for Polygon)"
+    required: true
+  - name: clob_auth_domain_name
+    type: string
+    description: "ClobAuth EIP-712 domain name"
+    required: true
+  - name: clob_auth_domain_version
+    type: string
+    description: "ClobAuth EIP-712 domain version"
+    required: true
+  - name: allowed_safe_address_for_testing
+    type: address
+    description: "Address for test payload (message.address in test_cases)"
+    required: false
+
+test_variables:
+  chain_id: "137"
+  clob_auth_domain_name: "ClobAuthDomain"
+  clob_auth_domain_version: "1"
+  allowed_safe_address_for_testing: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+
+rules:
+  - name: "Polymarket CLOB Auth Signature"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "${chain_id}"
+    description: "Validate ClobAuth signatures for Polymarket API key authentication"
+    config:
+      typed_data_struct: |
+        struct ClobAuth {
+            address address_;
+            string timestamp;
+            uint256 nonce;
+            string message;
+        }
+      typed_data_expression: |
+        require(
+          keccak256(bytes(eip712_domainName)) == keccak256(bytes("${clob_auth_domain_name}")),
+          "invalid domain name"
+        );
+        require(
+          keccak256(bytes(eip712_domainVersion)) == keccak256(bytes("${clob_auth_domain_version}")),
+          "invalid domain version"
+        );
+        require(eip712_domainChainId == ${chain_id}, "must be on Polygon");
+        require(
+          keccak256(bytes(clobAuth.message)) == keccak256(bytes("This message attests that I control the given wallet")),
+          "invalid attestation message"
+        );
+      sign_type_filter: "typed_data"
+      description: "ClobAuth login signature with domain and message validation"
+      test_cases:
+        - name: "should pass valid ClobAuth"
+          input:
+            typed_data:
+              primaryType: "ClobAuth"
+              domain:
+                name: "${clob_auth_domain_name}"
+                version: "${clob_auth_domain_version}"
+                chainId: "${chain_id}"
+              message:
+                address: "${allowed_safe_address_for_testing}"
+                timestamp: "1704067200"
+                nonce: "12345"
+                message: "This message attests that I control the given wallet"
+          expect_pass: true
+        - name: "should reject invalid domain"
+          input:
+            typed_data:
+              primaryType: "ClobAuth"
+              domain:
+                name: "WrongDomain"
+                version: "${clob_auth_domain_version}"
+                chainId: "${chain_id}"
+              message:
+                address: "${allowed_safe_address_for_testing}"
+                timestamp: "1704067200"
+                nonce: "12345"
+                message: "This message attests that I control the given wallet"
+          expect_pass: false
+          expect_reason: "invalid domain name"
+        - name: "should reject wrong chainId"
+          input:
+            typed_data:
+              primaryType: "ClobAuth"
+              domain:
+                name: "${clob_auth_domain_name}"
+                version: "${clob_auth_domain_version}"
+                chainId: "56"
+              message:
+                address: "${allowed_safe_address_for_testing}"
+                timestamp: "1704067200"
+                nonce: "12345"
+                message: "This message attests that I control the given wallet"
+          expect_pass: false
+          expect_reason: "must be on Polygon"

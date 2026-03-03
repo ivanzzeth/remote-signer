@@ -16,7 +16,7 @@ import (
 // If this fails, the root cause is YAML->struct or struct->JSON losing nested domain fields.
 func TestTemplateRulesJSON_ContainsPlaceholders(t *testing.T) {
 	configDir := findProjectRoot(t)
-	templatePath := filepath.Join(configDir, "rules", "templates", "polymarket.safe.template.yaml")
+	templatePath := filepath.Join(configDir, "rules", "templates", "polymarket_safe.template.yaml")
 	data, err := os.ReadFile(templatePath)
 	if err != nil {
 		t.Skipf("template file not found: %v", err)
@@ -55,7 +55,7 @@ func TestTemplateRulesJSON_ContainsPlaceholders(t *testing.T) {
 // Does not depend on config.Load (no TLS etc).
 func TestSubstituteThenUnmarshal_DomainFilled(t *testing.T) {
 	configDir := findProjectRoot(t)
-	templatePath := filepath.Join(configDir, "rules", "templates", "polymarket.safe.template.yaml")
+	templatePath := filepath.Join(configDir, "rules", "templates", "polymarket_safe.template.yaml")
 	data, err := os.ReadFile(templatePath)
 	if err != nil {
 		t.Skipf("template file not found: %v", err)
@@ -210,7 +210,7 @@ config:
 // without loading config.yaml (so no TLS validation). Verifies SafeTx rule gets domain.verifyingContract set.
 func TestE2E_ExpandInstanceRule_DomainFilled(t *testing.T) {
 	configDir := findProjectRoot(t)
-	templatePath := filepath.Join(configDir, "rules", "templates", "polymarket.safe.template.yaml")
+	templatePath := filepath.Join(configDir, "rules", "templates", "polymarket_safe.template.yaml")
 	if _, err := os.Stat(templatePath); err != nil {
 		t.Skipf("template file not found: %v", err)
 		return
@@ -222,7 +222,7 @@ func TestE2E_ExpandInstanceRule_DomainFilled(t *testing.T) {
 			Name: "Polymarket Safe Template",
 			Type: TemplateFileType,
 			Config: map[string]interface{}{
-				"path": "rules/templates/polymarket.safe.template.yaml",
+				"path": "rules/templates/polymarket_safe.template.yaml",
 			},
 			Enabled: true,
 		},

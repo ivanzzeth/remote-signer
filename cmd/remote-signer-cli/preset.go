@@ -97,7 +97,22 @@ func runPresetCreateFrom(cmd *cobra.Command, args []string) error {
 	if filepath.Ext(path) == "" {
 		path += ".yaml"
 	}
-	data, err := os.ReadFile(path) // #nosec G304 -- path from trusted presets-dir + user preset name
+	tryPaths := []string{path}
+	if filepath.Ext(path) == ".preset" {
+		tryPaths = append(tryPaths, path+".yaml")
+	}
+	if filepath.Ext(path) == ".yaml" && !strings.HasSuffix(path, ".preset.yaml") {
+		tryPaths = append(tryPaths, strings.TrimSuffix(path, ".yaml")+".preset.yaml")
+	}
+	var data []byte
+	var err error
+	for _, p := range tryPaths {
+		data, err = os.ReadFile(p) // #nosec G304 -- path from trusted presets-dir + user preset name
+		if err == nil {
+			path = p
+			break
+		}
+	}
 	if err != nil {
 		return fmt.Errorf("read preset %s: %w", path, err)
 	}
@@ -115,6 +130,9 @@ func runPresetCreateFrom(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("--write requires --config")
 		}
 		meta := getPresetMeta(data)
+		if len(meta.templatePaths) > 0 && len(meta.templateNames) > 0 {
+			return mergeCompositePresetIntoConfig(presetCreateConfig, rules, meta.templatePaths, meta.templateNames)
+		}
 		return mergeRulesAndTemplateIntoConfig(presetCreateConfig, rules, meta.template, meta.templatePath)
 	}
 
@@ -126,19 +144,24 @@ func runPresetCreateFrom(cmd *cobra.Command, args []string) error {
 	return enc.Encode(out)
 }
 
-// presetMeta holds template name, path, and override hints from a preset file.
+// presetMeta holds template name(s), path(s), and override hints from a preset file.
 type presetMeta struct {
-	template     string
-	templatePath string
-	overrideHints []string
+	template       string
+	templatePath   string
+	templatePaths  []string
+	templateNames  []string
+	overrideHints  []string
 }
 
-// getPresetMeta parses preset YAML and returns template name, template_path, and override_hints (single-rule presets only).
+// getPresetMeta parses preset YAML and returns template name(s), template_path(s), and override_hints.
+// Supports single-rule (template + template_path) and composite (template_paths + template_names) presets.
 func getPresetMeta(data []byte) presetMeta {
 	var out presetMeta
 	var single struct {
-		Template     string   `yaml:"template"`
-		TemplatePath string   `yaml:"template_path"`
+		Template      string   `yaml:"template"`
+		TemplatePath  string   `yaml:"template_path"`
+		TemplatePaths []string `yaml:"template_paths"`
+		TemplateNames []string `yaml:"template_names"`
 		OverrideHints []string `yaml:"override_hints"`
 	}
 	if err := yaml.Unmarshal(data, &single); err != nil {
@@ -146,6 +169,8 @@ func getPresetMeta(data []byte) presetMeta {
 	}
 	out.template = single.Template
 	out.templatePath = single.TemplatePath
+	out.templatePaths = single.TemplatePaths
+	out.templateNames = single.TemplateNames
 	out.overrideHints = single.OverrideHints
 	if out.overrideHints == nil {
 		out.overrideHints = []string{}
@@ -156,26 +181,39 @@ func getPresetMeta(data []byte) presetMeta {
 // mergeRulesAndTemplateIntoConfig appends rules to config; if templateName and templatePath are set and config
 // does not already define that template, appends a template entry from the preset (so preset is self-contained).
 func mergeRulesAndTemplateIntoConfig(configPath string, rules []config.RuleConfig, templateName, templatePath string) error {
+	return mergeCompositePresetIntoConfig(configPath, rules, []string{templatePath}, []string{templateName})
+}
+
+// mergeCompositePresetIntoConfig appends rules and injects each (templatePath, templateName) into config if missing.
+func mergeCompositePresetIntoConfig(configPath string, rules []config.RuleConfig, templatePaths, templateNames []string) error {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
-	if templateName != "" && templatePath != "" {
+	n := len(templatePaths)
+	if len(templateNames) < n {
+		n = len(templateNames)
+	}
+	for i := 0; i < n; i++ {
+		name, path := templateNames[i], templatePaths[i]
+		if name == "" || path == "" {
+			continue
+		}
 		hasTemplate := false
-		for i := range cfg.Templates {
-			if cfg.Templates[i].Name == templateName {
+		for j := range cfg.Templates {
+			if cfg.Templates[j].Name == name {
 				hasTemplate = true
 				break
 			}
 		}
 		if !hasTemplate {
 			cfg.Templates = append(cfg.Templates, config.TemplateConfig{
-				Name:    templateName,
+				Name:    name,
 				Type:    "file",
 				Enabled: true,
-				Config:  map[string]interface{}{"path": templatePath},
+				Config:  map[string]interface{}{"path": path},
 			})
-			fmt.Fprintf(os.Stderr, "Injected template %q (path: %s) into config\n", templateName, templatePath)
+			fmt.Fprintf(os.Stderr, "Injected template %q (path: %s) into config\n", name, path)
 		}
 	}
 	cfg.Rules = append(cfg.Rules, rules...)
@@ -197,7 +235,8 @@ func presetTemplateNames(path string) (string, error) {
 		return "", err
 	}
 	var single struct {
-		Template string `yaml:"template"`
+		Template     string   `yaml:"template"`
+		TemplateNames []string `yaml:"template_names"`
 	}
 	var multi struct {
 		Rules []struct {
@@ -212,6 +251,9 @@ func presetTemplateNames(path string) (string, error) {
 	if single.Template != "" {
 		return single.Template, nil
 	}
+	if len(single.TemplateNames) > 0 {
+		return strings.Join(single.TemplateNames, ", "), nil
+	}
 	if err := yaml.Unmarshal(data, &multi); err != nil {
 		return "", err
 	}
@@ -225,20 +267,65 @@ func presetTemplateNames(path string) (string, error) {
 	return names, nil
 }
 
-// parsePresetFile parses preset YAML (single-rule or multi-rule) and returns RuleConfig slice.
+// parsePresetFile parses preset YAML (single-rule, composite template_paths, or multi-rule) and returns RuleConfig slice.
 // Applies overrides to variables. Variables in preset can be scalar or array; we normalize
 // arrays to comma-separated strings for config so server's fillInMappingArrays works.
 func parsePresetFile(data []byte, overrides map[string]string) ([]config.RuleConfig, error) {
 	var single struct {
-		Name      string                 `yaml:"name"`
-		Template  string                 `yaml:"template"`
-		ChainType string                 `yaml:"chain_type"`
-		ChainID   string                 `yaml:"chain_id"`
-		Enabled   bool                   `yaml:"enabled"`
-		Variables map[string]interface{} `yaml:"variables"`
+		Name          string                 `yaml:"name"`
+		Template      string                 `yaml:"template"`
+		TemplatePath  string                 `yaml:"template_path"`
+		TemplatePaths []string               `yaml:"template_paths"`
+		TemplateNames []string               `yaml:"template_names"`
+		ChainType     string                 `yaml:"chain_type"`
+		ChainID       string                 `yaml:"chain_id"`
+		Enabled       bool                   `yaml:"enabled"`
+		Variables     map[string]interface{} `yaml:"variables"`
 	}
 	if err := yaml.Unmarshal(data, &single); err != nil {
 		return nil, err
+	}
+	// Composite preset: one rule per (template_paths[i], template_names[i])
+	if len(single.TemplatePaths) > 0 && len(single.TemplateNames) > 0 {
+		n := len(single.TemplatePaths)
+		if len(single.TemplateNames) < n {
+			n = len(single.TemplateNames)
+		}
+		variables := normalizeVariables(single.Variables)
+		if variables == nil {
+			variables = make(map[string]interface{})
+		}
+		for k, v := range overrides {
+			variables[k] = v
+		}
+		rules := make([]config.RuleConfig, 0, n)
+		baseName := single.Name
+		if baseName == "" {
+			baseName = "Polymarket"
+		}
+		for i := 0; i < n; i++ {
+			templateName := single.TemplateNames[i]
+			if templateName == "" {
+				continue
+			}
+			ruleName := baseName
+			if n > 1 {
+				ruleName = baseName + " (" + templateName + ")"
+			}
+			rules = append(rules, config.RuleConfig{
+				Name:      ruleName,
+				Type:      "instance",
+				Mode:      "whitelist",
+				ChainType: single.ChainType,
+				ChainID:   single.ChainID,
+				Enabled:   single.Enabled,
+				Config:    map[string]interface{}{"template": templateName, "variables": copyMapInterface(variables)},
+			})
+		}
+		if len(rules) == 0 {
+			return nil, fmt.Errorf("composite preset produced no rules (template_paths/template_names)")
+		}
+		return rules, nil
 	}
 	if single.Template != "" {
 		variables := normalizeVariables(single.Variables)
@@ -278,6 +365,17 @@ func parsePresetFile(data []byte, overrides map[string]string) ([]config.RuleCon
 		multi.Rules[i].Config["variables"] = vars
 	}
 	return multi.Rules, nil
+}
+
+func copyMapInterface(m map[string]interface{}) map[string]interface{} {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]interface{}, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
 }
 
 func toMapStringInterface(v interface{}) map[string]interface{} {
@@ -348,7 +446,7 @@ type presetVarDesc struct {
 }
 
 // getPresetVarsWithDescriptions reads the preset at presetPath and returns override_hints with
-// descriptions from the template file (projectDir + preset's template_path). Used by runPresetVars and tests.
+// descriptions from template file(s) (projectDir + preset's template_path or template_paths). Used by runPresetVars and tests.
 func getPresetVarsWithDescriptions(presetPath, projectDir string) ([]presetVarDesc, error) {
 	data, err := os.ReadFile(presetPath) // #nosec G304 -- path from caller (tests or trusted presets-dir)
 	if err != nil {
@@ -359,15 +457,26 @@ func getPresetVarsWithDescriptions(presetPath, projectDir string) ([]presetVarDe
 		return nil, nil
 	}
 	descriptions := make(map[string]string)
-	if meta.templatePath != "" {
-		templatePath := filepath.Join(projectDir, meta.templatePath)
+	pathsToRead := []string{meta.templatePath}
+	if meta.templatePath == "" && len(meta.templatePaths) > 0 {
+		pathsToRead = meta.templatePaths
+	}
+	for _, p := range pathsToRead {
+		if p == "" {
+			continue
+		}
+		templatePath := filepath.Join(projectDir, p)
 		templateData, err := os.ReadFile(templatePath) // #nosec G304 -- path from preset + trusted project-dir
-		if err == nil {
-			var tv templateFileVars
-			if err := yaml.Unmarshal(templateData, &tv); err == nil {
-				for _, v := range tv.Variables {
-					descriptions[v.Name] = v.Description
-				}
+		if err != nil {
+			continue
+		}
+		var tv templateFileVars
+		if err := yaml.Unmarshal(templateData, &tv); err != nil {
+			continue
+		}
+		for _, v := range tv.Variables {
+			if _, ok := descriptions[v.Name]; !ok {
+				descriptions[v.Name] = v.Description
 			}
 		}
 	}
@@ -384,7 +493,21 @@ func runPresetVars(cmd *cobra.Command, args []string) error {
 	if filepath.Ext(path) == "" {
 		path += ".yaml"
 	}
-	vars, err := getPresetVarsWithDescriptions(path, presetVarsProject)
+	tryPaths := []string{path}
+	if filepath.Ext(path) == ".preset" {
+		tryPaths = append(tryPaths, path+".yaml")
+	}
+	if filepath.Ext(path) == ".yaml" && !strings.HasSuffix(path, ".preset.yaml") {
+		tryPaths = append(tryPaths, strings.TrimSuffix(path, ".yaml")+".preset.yaml")
+	}
+	var vars []presetVarDesc
+	var err error
+	for _, p := range tryPaths {
+		vars, err = getPresetVarsWithDescriptions(p, presetVarsProject)
+		if err == nil {
+			break
+		}
+	}
 	if err != nil {
 		return fmt.Errorf("read preset %s: %w", path, err)
 	}

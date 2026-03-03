@@ -39,12 +39,12 @@
 
 ---
 
-### BUG-4 (NEW): polymarket.safe.template.yaml fails standalone validate-rules — ✅ FIXED
+### BUG-4 (NEW): polymarket_safe.template.yaml fails standalone validate-rules — ✅ FIXED
 
 **Requirement:** "使用 validate-rules 工具验证 rules 目录下的所有模板和规则"
 
 **Observed:**
-- `go run ./cmd/validate-rules/ rules/templates/polymarket.safe.template.yaml` → Solidity compilation error:
+- `go run ./cmd/validate-rules/ rules/templates/polymarket_safe.template.yaml` → Solidity compilation error:
   ```
   Error (6933): Expected primary expression.
     --> syntax_check_*.sol:45:5:
@@ -52,7 +52,7 @@
   45 |     in(eip712_domainContract, 0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837),
      |     ^^
   ```
-- Same issue affects `opinion.safe.template.yaml` (also uses `in()` in `typed_data_expression`).
+- Same issue affects `opinion_safe.template.yaml` (also uses `in()` in `typed_data_expression`).
 
 **Root cause:** `GenerateTypedDataExpressionSyntaxCheckScriptWithStruct()` in `internal/chain/evm/solidity_evaluator.go` did not preprocess the custom `in()` operator before embedding expressions into Solidity code. Other modes (Functions, TypedDataFunctions) and the execution path all properly called `processInOperatorToMappings()` + `preprocessInOperator()`.
 
@@ -64,7 +64,7 @@
 - All unit tests pass ✅
 - All e2e tests pass ✅
 
-**Impact:** Without this fix, `polymarket.safe.template.yaml` and `opinion.safe.template.yaml` cannot be validated standalone, breaking the CI gate requirement. The `-config` path was unaffected because it uses the execution code path which already preprocesses `in()`.
+**Impact:** Without this fix, `polymarket_safe.template.yaml` and `opinion_safe.template.yaml` cannot be validated standalone, breaking the CI gate requirement. The `-config` path was unaffected because it uses the execution code path which already preprocesses `in()`.
 
 ---
 
@@ -168,19 +168,19 @@ No critical gaps at sign entry; validation is layered (handler → service → a
 | `rules/templates/erc20.template.js.yaml` | Yes (template) | ✅ Loaded |
 | `rules/templates/erc721.template.js.yaml` | Yes (template) | ✅ Loaded |
 | `rules/templates/multisend.template.js.yaml` | Yes (template) | ✅ Loaded |
-| `rules/templates/opinion.safe.template.yaml` | No | ❌ Not loaded in e2e |
-| `rules/templates/polymarket.safe.template.yaml` | No | ❌ Not loaded in e2e |
-| `rules/templates/polymarket.template.js.yaml` | Yes (template) | ✅ Loaded |
-| `rules/templates/predict.eoa.template.yaml` | No | ❌ Not loaded in e2e |
+| `rules/templates/opinion_safe.template.yaml` | No | ❌ Not loaded in e2e |
+| `rules/templates/polymarket_safe.template.yaml` | No | ❌ Not loaded in e2e |
+| `rules/templates/polymarket_safe.template.js.yaml` | Yes (template) | ✅ Loaded |
+| `rules/templates/predict_eoa.template.yaml` | No | ❌ Not loaded in e2e |
 | `rules/templates/safe.template.js.yaml` | Yes (template) | ✅ Loaded |
 
-E2E uses **config.e2e.yaml**, which references only **5 templates** (safe, multisend, erc20, erc721, polymarket.template.js) plus `e2e/fixtures/minimal_template.yaml`. It does **not** load:
+E2E uses **config.e2e.yaml**, which references only **5 templates** (safe, multisend, erc20, erc721, polymarket_safe.template.js) plus `e2e/fixtures/minimal_template.yaml`. It does **not** load:
 
 - `rules/security.example.yaml`
 - `rules/treasury.example.yaml`
-- `rules/templates/opinion.safe.template.yaml`
-- `rules/templates/polymarket.safe.template.yaml`
-- `rules/templates/predict.eoa.template.yaml`
+- `rules/templates/opinion_safe.template.yaml`
+- `rules/templates/polymarket_safe.template.yaml`
+- `rules/templates/predict_eoa.template.yaml`
 
 There is **no** e2e test that runs **validate-rules** (or equivalent) over **all** files under `rules/` and `rules/templates/`.
 
@@ -294,7 +294,7 @@ This report can be updated as items are implemented and re-measured.
 | BUG-1 | `validate-rules -config config.e2e.yaml` fails | ✅ Fixed (round 1) | All 20 expanded rules pass. |
 | BUG-2 | Program does not reach password/listening with config.e2e.yaml | ✅ Fixed (round 1+2) | Startup now passes all validation (Solidity, evm_js, message_pattern) and reaches listening state. Verified: process runs until externally killed (exit code 124 from timeout, not internal error). |
 | BUG-3 | TestRulesDirectoryValidation flake under coverage | ✅ No longer observed | All unit tests pass reliably (0 failures in full `go test ./...`). |
-| BUG-4 | **NEW** — `polymarket.safe.template.yaml` fails `validate-rules` standalone | ✅ Fixed | `GenerateTypedDataExpressionSyntaxCheckScriptWithStruct` did not preprocess `in()` operators. Added `processInOperatorToMappings` + `preprocessInOperator` calls at the start of the function. Now all 31 rule/template files pass `validate-rules`. |
+| BUG-4 | **NEW** — `polymarket_safe.template.yaml` fails `validate-rules` standalone | ✅ Fixed | `GenerateTypedDataExpressionSyntaxCheckScriptWithStruct` did not preprocess `in()` operators. Added `processInOperatorToMappings` + `preprocessInOperator` calls at the start of the function. Now all 31 rule/template files pass `validate-rules`. |
 | - | validate-rules on all rules/*.yaml + templates/*.yaml | ✅ Passing | `go run ./cmd/validate-rules/ rules/*.yaml rules/templates/*.yaml` → 31 passed, 0 failed. |
 | - | validate-rules -config config.e2e.yaml | ✅ Passing | 20 passed, 0 failed. |
 | - | Program startup with config.e2e.yaml | ✅ Passing | Server starts successfully, reaches listening state. |
@@ -310,7 +310,7 @@ This report can be updated as items are implemented and re-measured.
 **Severity:** HIGH (blocks template validation; broken CI gate)
 **File:** `internal/chain/evm/solidity_evaluator.go` — `GenerateTypedDataExpressionSyntaxCheckScriptWithStruct()`
 **Root cause:** The function embeds raw typed_data_expression code into a Solidity contract for syntax checking, but did not run `processInOperatorToMappings()` or `preprocessInOperator()` first. When templates use `in(eip712_domainContract, ${allowed_safe_addresses})`, after variable substitution the expression contains `in(expr, 0xAddr)` which is not valid Solidity.
-**Impact:** `polymarket.safe.template.yaml` and `opinion.safe.template.yaml` failed standalone validation. Config-path validation was unaffected because it uses the execution path (which already preprocesses `in()`).
+**Impact:** `polymarket_safe.template.yaml` and `opinion_safe.template.yaml` failed standalone validation. Config-path validation was unaffected because it uses the execution path (which already preprocesses `in()`).
 **Fix:** Added `processInOperatorToMappings(expression, nil)` + `preprocessInOperator(ir.Modified)` at the top of the function, and added `ir.Declarations` to the generated contract (mapping declarations for variable-based `in()`).
 
 ### 10.2 Confirmed Security Properties (Positive Findings)
