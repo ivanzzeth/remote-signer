@@ -29,11 +29,9 @@ func LoggingMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 				statusCode:     http.StatusOK,
 			}
 
-			// Get API key ID if available
-			var apiKeyID string
-			if apiKey := GetAPIKey(r.Context()); apiKey != nil {
-				apiKeyID = apiKey.ID
-			}
+			// Read API key ID from request header (not context, which is
+			// populated by AuthMiddleware later in the chain).
+			apiKeyID := r.Header.Get("X-API-Key-ID")
 
 			// Process request
 			next.ServeHTTP(rw, r)
