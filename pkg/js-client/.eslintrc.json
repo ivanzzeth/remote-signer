@@ -1,0 +1,20 @@
+{
+  "parser": "@typescript-eslint/parser",
+  "plugins": ["@typescript-eslint", "security"],
+  "extends": [
+    "eslint:recommended",
+    "plugin:@typescript-eslint/recommended",
+    "plugin:security/recommended-legacy"
+  ],
+  "env": {
+    "node": true,
+    "es2021": true
+  },
+  "rules": {
+    "@typescript-eslint/no-explicit-any": "warn",
+    "security/detect-eval-with-expression": "error",
+    "security/detect-non-literal-fs-filename": "warn",
+    "security/detect-non-literal-require": "warn",
+    "security/detect-possible-timing-attacks": "warn"
+  }
+}

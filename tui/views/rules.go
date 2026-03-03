@@ -11,19 +11,20 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 	"github.com/ivanzzeth/remote-signer/tui/styles"
 )
 
 // RulesModel represents the rules list view
 type RulesModel struct {
-	client       client.ClientInterface
+	rules_svc    evm.RuleAPI
 	ctx          context.Context
 	width        int
 	height       int
 	spinner      spinner.Model
 	loading      bool
 	err          error
-	rules        []client.Rule
+	rules        []evm.Rule
 	total        int
 	selectedIdx  int
 	offset       int
@@ -39,7 +40,7 @@ type RulesModel struct {
 
 // RulesDataMsg is sent when rules data is loaded
 type RulesDataMsg struct {
-	Rules []client.Rule
+	Rules []evm.Rule
 	Total int
 	Err   error
 }
@@ -53,8 +54,16 @@ type RuleActionMsg struct {
 }
 
 // NewRulesModel creates a new rules model
-func NewRulesModel(c client.ClientInterface, ctx context.Context) (*RulesModel, error) {
+func NewRulesModel(c *client.Client, ctx context.Context) (*RulesModel, error) {
 	if c == nil {
+		return nil, fmt.Errorf("client is required")
+	}
+	return newRulesModelFromService(c.EVM.Rules, ctx)
+}
+
+// newRulesModelFromService creates a rules model from a RuleAPI (for testing).
+func newRulesModelFromService(svc evm.RuleAPI, ctx context.Context) (*RulesModel, error) {
+	if svc == nil {
 		return nil, fmt.Errorf("client is required")
 	}
 	if ctx == nil {
@@ -70,7 +79,7 @@ func NewRulesModel(c client.ClientInterface, ctx context.Context) (*RulesModel, 
 	ti.Width = 40
 
 	return &RulesModel{
-		client:      c,
+		rules_svc:   svc,
 		ctx:         ctx,
 		spinner:     s,
 		loading:     true,
@@ -107,19 +116,19 @@ func (m *RulesModel) GetSelectedRuleID() string {
 	if len(m.rules) == 0 || m.selectedIdx >= len(m.rules) {
 		return ""
 	}
-	return string(m.rules[m.selectedIdx].ID)
+	return m.rules[m.selectedIdx].ID
 }
 
 func (m *RulesModel) loadData() tea.Cmd {
 	return func() tea.Msg {
-		filter := &client.ListRulesFilter{
+		filter := &evm.ListRulesFilter{
 			Type:   m.typeFilter,
 			Mode:   m.modeFilter,
 			Limit:  m.limit,
 			Offset: m.offset,
 		}
 
-		resp, err := m.client.ListRules(m.ctx, filter)
+		resp, err := m.rules_svc.List(m.ctx, filter)
 		if err != nil {
 			return RulesDataMsg{Err: err}
 		}
@@ -129,7 +138,7 @@ func (m *RulesModel) loadData() tea.Cmd {
 
 func (m *RulesModel) toggleRule(ruleID string, enabled bool) tea.Cmd {
 	return func() tea.Msg {
-		rule, err := m.client.ToggleRule(m.ctx, ruleID, enabled)
+		rule, err := m.rules_svc.Toggle(m.ctx, ruleID, enabled)
 		if err != nil {
 			return RuleActionMsg{Action: "toggle", Success: false, Err: err}
 		}
@@ -148,7 +157,7 @@ func (m *RulesModel) toggleRule(ruleID string, enabled bool) tea.Cmd {
 
 func (m *RulesModel) deleteRule(ruleID string) tea.Cmd {
 	return func() tea.Msg {
-		err := m.client.DeleteRule(m.ctx, ruleID)
+		err := m.rules_svc.Delete(m.ctx, ruleID)
 		if err != nil {
 			return RuleActionMsg{Action: "delete", Success: false, Err: err}
 		}
@@ -201,7 +210,7 @@ func (m *RulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "y":
 				if len(m.rules) > 0 && m.selectedIdx < len(m.rules) {
-					ruleID := string(m.rules[m.selectedIdx].ID)
+					ruleID := m.rules[m.selectedIdx].ID
 					m.loading = true
 					m.showDelete = false
 					return m, tea.Batch(m.spinner.Tick, m.deleteRule(ruleID))
@@ -294,7 +303,7 @@ func (m *RulesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.rules) > 0 && m.selectedIdx < len(m.rules) {
 				rule := m.rules[m.selectedIdx]
 				m.loading = true
-				return m, tea.Batch(m.spinner.Tick, m.toggleRule(string(rule.ID), !rule.Enabled))
+				return m, tea.Batch(m.spinner.Tick, m.toggleRule(rule.ID, !rule.Enabled))
 			}
 			return m, nil
 		case "d":
@@ -355,6 +364,11 @@ func (m *RulesModel) View() string {
 	}
 
 	return m.renderRules()
+}
+
+// IsCapturingInput returns true when this view is capturing keyboard input (filter active).
+func (m *RulesModel) IsCapturingInput() bool {
+	return m.showFilter
 }
 
 func (m *RulesModel) renderLoading() string {
@@ -497,9 +511,9 @@ func (m *RulesModel) renderRules() string {
 	return content.String()
 }
 
-func (m *RulesModel) renderRuleRow(rule client.Rule, selected bool) string {
+func (m *RulesModel) renderRuleRow(rule evm.Rule, selected bool) string {
 	// Truncate values for display
-	id := string(rule.ID)
+	id := rule.ID
 	if len(id) > 36 {
 		id = id[:33] + "..."
 	}
@@ -509,7 +523,7 @@ func (m *RulesModel) renderRuleRow(rule client.Rule, selected bool) string {
 		name = name[:27] + "..."
 	}
 
-	ruleType := string(rule.Type)
+	ruleType := rule.Type
 	if len(ruleType) > 24 {
 		ruleType = ruleType[:21] + "..."
 	}

@@ -85,6 +85,7 @@ func (i *APIKeyInitializer) syncKey(ctx context.Context, keyCfg APIKeyConfig) er
 			PublicKeyHex:      publicKey,
 			AllowedChainTypes: pq.StringArray(keyCfg.AllowedChainTypes),
 			AllowedSigners:    pq.StringArray(keyCfg.AllowedSigners),
+			AllowedHDWallets:  pq.StringArray(keyCfg.AllowedHDWallets),
 			RateLimit:         rateLimit,
 			Admin:             keyCfg.Admin,
 			Enabled:           keyCfg.Enabled,
@@ -108,6 +109,7 @@ func (i *APIKeyInitializer) syncKey(ctx context.Context, keyCfg APIKeyConfig) er
 		existing.PublicKeyHex = publicKey
 		existing.AllowedChainTypes = pq.StringArray(keyCfg.AllowedChainTypes)
 		existing.AllowedSigners = pq.StringArray(keyCfg.AllowedSigners)
+		existing.AllowedHDWallets = pq.StringArray(keyCfg.AllowedHDWallets)
 		existing.RateLimit = rateLimit
 		existing.Admin = keyCfg.Admin
 		existing.Enabled = keyCfg.Enabled

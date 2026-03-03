@@ -26,7 +26,10 @@ const (
 	ViewRuleDetail
 	ViewAudit
 	ViewSigners
+	ViewSignerDetail
 	ViewMetrics
+	ViewHDWallets
+	ViewHDWalletDetail
 )
 
 // keyMap defines the key bindings for the application
@@ -56,6 +59,7 @@ type keyMap struct {
 	Number4   key.Binding
 	Number5   key.Binding
 	Number6   key.Binding
+	Number7   key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
@@ -68,7 +72,7 @@ func (k keyMap) FullHelp() [][]key.Binding {
 		{k.Up, k.Down, k.PageUp, k.PageDown},
 		{k.Approve, k.Reject, k.Generate},
 		{k.Filter, k.Refresh, k.Delete, k.Toggle},
-		{k.Number1, k.Number2, k.Number3, k.Number4, k.Number5, k.Number6},
+		{k.Number1, k.Number2, k.Number3, k.Number4, k.Number5, k.Number6, k.Number7},
 		{k.Help, k.Quit},
 	}
 }
@@ -174,6 +178,10 @@ var keys = keyMap{
 		key.WithKeys("6"),
 		key.WithHelp("6", "metrics"),
 	),
+	Number7: key.NewBinding(
+		key.WithKeys("7"),
+		key.WithHelp("7", "hd wallets"),
+	),
 }
 
 // Model represents the main application state
@@ -191,14 +199,17 @@ type Model struct {
 	statusMsg    string
 
 	// Views
-	dashboard     *views.DashboardModel
-	requests      *views.RequestsModel
-	requestDetail *views.RequestDetailModel
-	rules         *views.RulesModel
-	ruleDetail    *views.RuleDetailModel
-	audit         *views.AuditModel
-	signers       *views.SignersModel
-	metrics       *views.MetricsModel
+	dashboard      *views.DashboardModel
+	requests       *views.RequestsModel
+	requestDetail  *views.RequestDetailModel
+	rules          *views.RulesModel
+	ruleDetail     *views.RuleDetailModel
+	audit          *views.AuditModel
+	signers        *views.SignersModel
+	signerDetail   *views.SignerDetailModel
+	metrics        *views.MetricsModel
+	hdwallets      *views.HDWalletsModel
+	hdwalletDetail *views.HDWalletDetailModel
 }
 
 // NewModel creates a new application model
@@ -246,9 +257,24 @@ func NewModel(c *client.Client) (*Model, error) {
 		return nil, fmt.Errorf("failed to create signers view: %w", err)
 	}
 
+	signerDetail, err := views.NewSignerDetailModel(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create signer detail view: %w", err)
+	}
+
 	metrics, err := views.NewMetricsModel(c, ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create metrics view: %w", err)
+	}
+
+	hdwallets, err := views.NewHDWalletsModel(c, ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create hdwallets view: %w", err)
+	}
+
+	hdwalletDetail, err := views.NewHDWalletDetailModel(c, ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create hdwallet detail view: %w", err)
 	}
 
 	return &Model{
@@ -263,8 +289,11 @@ func NewModel(c *client.Client) (*Model, error) {
 		rules:         rules,
 		ruleDetail:    ruleDetail,
 		audit:         audit,
-		signers:       signers,
-		metrics:       metrics,
+		signers:        signers,
+		signerDetail:   signerDetail,
+		metrics:        metrics,
+		hdwallets:      hdwallets,
+		hdwalletDetail: hdwalletDetail,
 	}, nil
 }
 
@@ -277,6 +306,7 @@ func (m Model) Init() tea.Cmd {
 		m.audit.Init(),
 		m.signers.Init(),
 		m.metrics.Init(),
+		m.hdwallets.Init(),
 	)
 }
 
@@ -298,80 +328,100 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ruleDetail.SetSize(msg.Width, msg.Height-6)
 		m.audit.SetSize(msg.Width, msg.Height-6)
 		m.signers.SetSize(msg.Width, msg.Height-6)
+		m.signerDetail.SetSize(msg.Width, msg.Height-6)
 		m.metrics.SetSize(msg.Width, msg.Height-6)
+		m.hdwallets.SetSize(msg.Width, msg.Height-6)
+		m.hdwalletDetail.SetSize(msg.Width, msg.Height-6)
 		return m, nil
 
 	case tea.KeyMsg:
-		// Global key handling
-		switch {
-		case key.Matches(msg, keys.Quit):
-			if m.currentView == ViewDashboard || m.currentView == ViewRequests ||
-				m.currentView == ViewRules || m.currentView == ViewAudit ||
-				m.currentView == ViewSigners || m.currentView == ViewMetrics {
-				return m, tea.Quit
-			}
-			// If in detail view, go back instead of quitting
-			m.currentView = m.previousView
-			return m, nil
+		// ctrl+c always quits regardless of input state
+		if msg.String() == "ctrl+c" {
+			return m, tea.Quit
+		}
 
-		case key.Matches(msg, keys.Help):
-			m.showHelp = !m.showHelp
-			return m, nil
-
-		case key.Matches(msg, keys.Number1):
-			m.activeTab = 0
-			m.currentView = ViewDashboard
-			return m, m.dashboard.Refresh()
-
-		case key.Matches(msg, keys.Number2):
-			m.activeTab = 1
-			m.currentView = ViewRequests
-			return m, m.requests.Refresh()
-
-		case key.Matches(msg, keys.Number3):
-			m.activeTab = 2
-			m.currentView = ViewRules
-			return m, m.rules.Refresh()
-
-		case key.Matches(msg, keys.Number4):
-			m.activeTab = 3
-			m.currentView = ViewAudit
-			return m, m.audit.Refresh()
-
-		case key.Matches(msg, keys.Number5):
-			m.activeTab = 4
-			m.currentView = ViewSigners
-			return m, m.signers.Refresh()
-
-		case key.Matches(msg, keys.Number6):
-			m.activeTab = 5
-			m.currentView = ViewMetrics
-			return m, m.metrics.Refresh()
-
-		case key.Matches(msg, keys.Tab):
-			// Only switch tabs in main views
-			if m.currentView == ViewDashboard || m.currentView == ViewRequests ||
-				m.currentView == ViewRules || m.currentView == ViewAudit ||
-				m.currentView == ViewSigners || m.currentView == ViewMetrics {
-				m.activeTab = (m.activeTab + 1) % 6
-				m.currentView = m.tabToView(m.activeTab)
-				return m, m.refreshCurrentView()
-			}
-
-		case key.Matches(msg, keys.ShiftTab):
-			// Only switch tabs in main views
-			if m.currentView == ViewDashboard || m.currentView == ViewRequests ||
-				m.currentView == ViewRules || m.currentView == ViewAudit ||
-				m.currentView == ViewSigners || m.currentView == ViewMetrics {
-				m.activeTab = (m.activeTab + 5) % 6
-				m.currentView = m.tabToView(m.activeTab)
-				return m, m.refreshCurrentView()
-			}
-
-		case key.Matches(msg, keys.Back):
-			if m.currentView == ViewRequestDetail || m.currentView == ViewRuleDetail {
+		// Skip global key handling when the current view is capturing input
+		// (e.g., form fields, text inputs, filters). Route directly to the view instead.
+		if !m.isCurrentViewCapturingInput() {
+			// Global key handling
+			switch {
+			case key.Matches(msg, keys.Quit):
+				if m.currentView == ViewDashboard || m.currentView == ViewRequests ||
+					m.currentView == ViewRules || m.currentView == ViewAudit ||
+					m.currentView == ViewSigners || m.currentView == ViewMetrics ||
+					m.currentView == ViewHDWallets {
+					return m, tea.Quit
+				}
+				// If in detail view, go back instead of quitting
 				m.currentView = m.previousView
-				return m, m.refreshCurrentView()
+				return m, nil
+
+			case key.Matches(msg, keys.Help):
+				m.showHelp = !m.showHelp
+				return m, nil
+
+			case key.Matches(msg, keys.Number1):
+				m.activeTab = 0
+				m.currentView = ViewDashboard
+				return m, m.dashboard.Refresh()
+
+			case key.Matches(msg, keys.Number2):
+				m.activeTab = 1
+				m.currentView = ViewRequests
+				return m, m.requests.Refresh()
+
+			case key.Matches(msg, keys.Number3):
+				m.activeTab = 2
+				m.currentView = ViewRules
+				return m, m.rules.Refresh()
+
+			case key.Matches(msg, keys.Number4):
+				m.activeTab = 3
+				m.currentView = ViewAudit
+				return m, m.audit.Refresh()
+
+			case key.Matches(msg, keys.Number5):
+				m.activeTab = 4
+				m.currentView = ViewSigners
+				return m, m.signers.Refresh()
+
+			case key.Matches(msg, keys.Number6):
+				m.activeTab = 5
+				m.currentView = ViewMetrics
+				return m, m.metrics.Refresh()
+
+			case key.Matches(msg, keys.Number7):
+				m.activeTab = 6
+				m.currentView = ViewHDWallets
+				return m, m.hdwallets.Refresh()
+
+			case key.Matches(msg, keys.Tab):
+				// Only switch tabs in main views
+				if m.currentView == ViewDashboard || m.currentView == ViewRequests ||
+					m.currentView == ViewRules || m.currentView == ViewAudit ||
+					m.currentView == ViewSigners || m.currentView == ViewMetrics ||
+					m.currentView == ViewHDWallets {
+					m.activeTab = (m.activeTab + 1) % 7
+					m.currentView = m.tabToView(m.activeTab)
+					return m, m.refreshCurrentView()
+				}
+
+			case key.Matches(msg, keys.ShiftTab):
+				// Only switch tabs in main views
+				if m.currentView == ViewDashboard || m.currentView == ViewRequests ||
+					m.currentView == ViewRules || m.currentView == ViewAudit ||
+					m.currentView == ViewSigners || m.currentView == ViewMetrics ||
+					m.currentView == ViewHDWallets {
+					m.activeTab = (m.activeTab + 6) % 7
+					m.currentView = m.tabToView(m.activeTab)
+					return m, m.refreshCurrentView()
+				}
+
+			case key.Matches(msg, keys.Back):
+				if m.currentView == ViewRequestDetail || m.currentView == ViewRuleDetail || m.currentView == ViewSignerDetail || m.currentView == ViewHDWalletDetail {
+					m.currentView = m.previousView
+					return m, m.refreshCurrentView()
+				}
 			}
 		}
 	}
@@ -445,10 +495,55 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.signers = newSigners.(*views.SignersModel)
 		cmds = append(cmds, cmd)
 
+		// Check if user pressed Enter on a selected signer
+		if selected := m.signers.GetSelectedSigner(); selected != nil {
+			if keyMsg, ok := msg.(tea.KeyMsg); ok && key.Matches(keyMsg, keys.Enter) && !m.signers.IsCapturingInput() {
+				m.previousView = m.currentView
+				m.currentView = ViewSignerDetail
+				m.signerDetail.LoadSigner(*selected)
+			}
+		}
+
+	case ViewSignerDetail:
+		newDetail, cmd := m.signerDetail.Update(msg)
+		m.signerDetail = newDetail.(*views.SignerDetailModel)
+		cmds = append(cmds, cmd)
+
+		if m.signerDetail.ShouldGoBack() {
+			m.currentView = ViewSigners
+			m.signerDetail.ResetGoBack()
+			cmds = append(cmds, m.signers.Refresh())
+		}
+
 	case ViewMetrics:
 		newMetrics, cmd := m.metrics.Update(msg)
 		m.metrics = newMetrics.(*views.MetricsModel)
 		cmds = append(cmds, cmd)
+
+	case ViewHDWallets:
+		newHDWallets, cmd := m.hdwallets.Update(msg)
+		m.hdwallets = newHDWallets.(*views.HDWalletsModel)
+		cmds = append(cmds, cmd)
+
+		// Check if user selected a wallet for detail view
+		if m.hdwallets.ShouldOpenDetail() {
+			addr := m.hdwallets.GetSelectedPrimaryAddr()
+			m.hdwallets.ResetOpenDetail()
+			m.previousView = m.currentView
+			m.currentView = ViewHDWalletDetail
+			cmds = append(cmds, m.hdwalletDetail.LoadWallet(addr))
+		}
+
+	case ViewHDWalletDetail:
+		newDetail, cmd := m.hdwalletDetail.Update(msg)
+		m.hdwalletDetail = newDetail.(*views.HDWalletDetailModel)
+		cmds = append(cmds, cmd)
+
+		if m.hdwalletDetail.ShouldGoBack() {
+			m.currentView = ViewHDWallets
+			m.hdwalletDetail.ResetGoBack()
+			cmds = append(cmds, m.hdwallets.Refresh())
+		}
 	}
 
 	return m, tea.Batch(cmds...)
@@ -488,7 +583,7 @@ func (m Model) View() string {
 }
 
 func (m Model) renderHeader() string {
-	tabs := []string{"Dashboard", "Requests", "Rules", "Audit", "Signers", "Metrics"}
+	tabs := []string{"Dashboard", "Requests", "Rules", "Audit", "Signers", "Metrics", "HD Wallets"}
 	var renderedTabs []string
 
 	for i, tab := range tabs {
@@ -521,8 +616,14 @@ func (m Model) renderContent(_ int) string {
 		return m.audit.View()
 	case ViewSigners:
 		return m.signers.View()
+	case ViewSignerDetail:
+		return m.signerDetail.View()
 	case ViewMetrics:
 		return m.metrics.View()
+	case ViewHDWallets:
+		return m.hdwallets.View()
+	case ViewHDWalletDetail:
+		return m.hdwalletDetail.View()
 	default:
 		return "Unknown view"
 	}
@@ -542,8 +643,33 @@ func (m Model) refreshCurrentView() tea.Cmd {
 		return m.signers.Refresh()
 	case ViewMetrics:
 		return m.metrics.Refresh()
+	case ViewHDWallets:
+		return m.hdwallets.Refresh()
 	default:
 		return nil
+	}
+}
+
+// isCurrentViewCapturingInput returns true if the current view is in an input-capturing state
+// (e.g., text input, form, filter). When true, global key bindings should be suppressed.
+func (m Model) isCurrentViewCapturingInput() bool {
+	switch m.currentView {
+	case ViewRequests:
+		return m.requests.IsCapturingInput()
+	case ViewRules:
+		return m.rules.IsCapturingInput()
+	case ViewAudit:
+		return m.audit.IsCapturingInput()
+	case ViewSigners:
+		return m.signers.IsCapturingInput()
+	case ViewSignerDetail:
+		return m.signerDetail.IsCapturingInput()
+	case ViewHDWallets:
+		return m.hdwallets.IsCapturingInput()
+	case ViewHDWalletDetail:
+		return m.hdwalletDetail.IsCapturingInput()
+	default:
+		return false
 	}
 }
 
@@ -562,6 +688,8 @@ func (m Model) tabToView(tab int) ViewType {
 		return ViewSigners
 	case 5:
 		return ViewMetrics
+	case 6:
+		return ViewHDWallets
 	default:
 		return ViewDashboard
 	}

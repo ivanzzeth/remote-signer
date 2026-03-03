@@ -29,7 +29,8 @@ import (
 	"os"
 	"time"
 
-	client "github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 )
 
 func main() {
@@ -95,7 +96,7 @@ func main() {
 
 	// 2. List signers
 	fmt.Println("=== List Signers ===")
-	signers, err := c.ListSigners(ctx, nil)
+	signers, err := c.EVM.Signers.List(ctx, nil)
 	if err != nil {
 		log.Fatalf("List signers failed: %v", err)
 	}
@@ -106,7 +107,7 @@ func main() {
 
 	// 3. List requests
 	fmt.Println("=== List Requests ===")
-	requests, err := c.ListRequests(ctx, &client.ListRequestsFilter{
+	requests, err := c.EVM.Requests.List(ctx, &evm.ListRequestsFilter{
 		Limit: 5,
 	})
 	if err != nil {
@@ -124,15 +125,15 @@ func main() {
 		signer := signers.Signers[0]
 		fmt.Printf("Using signer: %s\n", signer.Address)
 
-		payload, _ := json.Marshal(client.MessagePayload{
+		payload, _ := json.Marshal(evm.MessagePayload{
 			Message: "Hello from Go client example!",
 		})
-		resp, err := c.SignWithOptions(ctx, &client.SignRequest{
+		resp, err := c.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 			ChainID:      "1",
 			SignerAddress: signer.Address,
-			SignType:      client.SignTypePersonal,
+			SignType:      evm.SignTypePersonal,
 			Payload:       payload,
-		}, false) // false = don't wait for approval
+		})
 		if err != nil {
 			fmt.Printf("Sign result: %v\n", err)
 		} else {

@@ -1,0 +1,468 @@
+# Polymarket protocol rules (evm_js). Compose with Safe template: Safe handles SafeTx/execTransaction and delegates inner calls to "Polymarket transactions" rule from this template.
+
+variables:
+  - name: chain_id
+    type: string
+    description: "Chain ID (e.g. 137 for Polygon)"
+    required: true
+  - name: ctf_exchange_address
+    type: address
+    description: "CTF Exchange contract address"
+    required: true
+  - name: neg_risk_adapter_address
+    type: address
+    description: "NegRiskAdapter contract address"
+    required: true
+  - name: neg_risk_exchange_address
+    type: address
+    description: "NegRiskExchange contract address"
+    required: true
+  - name: conditional_tokens_address
+    type: address
+    description: "ConditionalTokens (CTF) contract address"
+    required: true
+  - name: safe_proxy_factory_address
+    type: address
+    description: "Safe Proxy Factory contract address"
+    required: true
+  - name: usdc_bridged_address
+    type: address
+    description: "USDC.e (Bridged) token address"
+    required: true
+  - name: allowed_safe_address_for_testing
+    type: address
+    description: "Single Safe address for test payload"
+    required: true
+  - name: allowed_safe_addresses
+    type: string
+    description: "Comma-separated allowed Safe addresses"
+    required: true
+  - name: clob_auth_domain_name
+    type: string
+    description: "ClobAuth EIP-712 domain name"
+    required: true
+  - name: clob_auth_domain_version
+    type: string
+    description: "ClobAuth EIP-712 domain version"
+    required: true
+  - name: ctf_exchange_domain_name
+    type: string
+    description: "CTF Exchange EIP-712 domain name"
+    required: true
+  - name: ctf_exchange_domain_version
+    type: string
+    description: "CTF Exchange EIP-712 domain version"
+    required: true
+  - name: safe_factory_domain_name
+    type: string
+    description: "Safe Factory EIP-712 domain name"
+    required: true
+
+test_variables:
+  chain_id: "137"
+  ctf_exchange_address: "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E"
+  neg_risk_adapter_address: "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296"
+  neg_risk_exchange_address: "0xC5d563A36AE78145C45a50134d48A1215220f80a"
+  conditional_tokens_address: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+  safe_proxy_factory_address: "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"
+  usdc_bridged_address: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+  allowed_safe_address_for_testing: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+  allowed_safe_addresses: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+  clob_auth_domain_name: "ClobAuthDomain"
+  clob_auth_domain_version: "1"
+  ctf_exchange_domain_name: "Polymarket CTF Exchange"
+  ctf_exchange_domain_version: "1"
+  safe_factory_domain_name: "Polymarket Contract Proxy Factory"
+
+rules:
+  - name: "Polymarket CLOB Auth Signature"
+    type: "evm_js"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "${chain_id}"
+    description: "Validate ClobAuth signatures for Polymarket API key"
+    config:
+      sign_type_filter: "typed_data"
+      script: |
+        function validate(input) {
+          if (input.sign_type !== 'typed_data') return fail('sign_type must be typed_data');
+          var td = input.typed_data;
+          if (!td || td.primaryType !== 'ClobAuth') return fail('not ClobAuth');
+          var domain = td.domain || {};
+          var msg = td.message || {};
+          var wantDomainName = (config.clob_auth_domain_name || '').trim();
+          var wantDomainVersion = (config.clob_auth_domain_version || '').trim();
+          var wantChainId = parseInt(config.chain_id, 10);
+          if (String(domain.name || '').trim() !== wantDomainName) return fail('invalid domain name');
+          if (String(domain.version || '').trim() !== wantDomainVersion) return fail('invalid domain version');
+          if (Number(domain.chainId) !== wantChainId) return fail('must be on Polygon');
+          var wantMsg = 'This message attests that I control the given wallet';
+          if (String(msg.message || '').trim() !== wantMsg) return fail('invalid attestation message');
+          return ok();
+        }
+    test_cases:
+      - name: "should pass valid ClobAuth"
+        input:
+          sign_type: "typed_data"
+          chain_id: 137
+          signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+          typed_data:
+            primaryType: "ClobAuth"
+            domain:
+              name: "ClobAuthDomain"
+              version: "1"
+              chainId: "137"
+            message:
+              address: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              timestamp: "1704067200"
+              nonce: "12345"
+              message: "This message attests that I control the given wallet"
+        expect_pass: true
+      - name: "should reject invalid domain"
+        input:
+          sign_type: "typed_data"
+          chain_id: 137
+          signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+          typed_data:
+            primaryType: "ClobAuth"
+            domain:
+              name: "WrongDomain"
+              version: "1"
+              chainId: "137"
+            message:
+              address: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              timestamp: "1704067200"
+              nonce: "12345"
+              message: "This message attests that I control the given wallet"
+        expect_pass: false
+        expect_reason: "invalid domain name"
+
+  - name: "Polymarket Order Signature"
+    type: "evm_js"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "${chain_id}"
+    description: "Validate Polymarket CTF Exchange order signatures"
+    config:
+      sign_type_filter: "typed_data"
+      script: |
+        function validate(input) {
+          if (input.sign_type !== 'typed_data') return fail('sign_type must be typed_data');
+          var td = input.typed_data;
+          if (!td || td.primaryType !== 'Order') return fail('not Order');
+          var domain = td.domain || {};
+          var msg = td.message || {};
+          var wantName = (config.ctf_exchange_domain_name || '').trim();
+          var wantVersion = (config.ctf_exchange_domain_version || '').trim();
+          var wantContract = toChecksum((config.ctf_exchange_address || '').trim());
+          var chainId = parseInt(config.chain_id, 10);
+          if (String(domain.name || '').trim() !== wantName) return fail('invalid domain name');
+          if (String(domain.version || '').trim() !== wantVersion) return fail('invalid domain version');
+          if (!isAddress(domain.verifyingContract)) return fail('invalid verifying contract');
+          if (!eq(toChecksum(domain.verifyingContract), wantContract)) return fail('invalid verifying contract');
+          if (Number(domain.chainId) !== chainId) return fail('chainId mismatch');
+          var zeroAddr = '0x0000000000000000000000000000000000000000';
+          if (!eq(toChecksum((msg.taker || '').trim()), zeroAddr)) return fail('taker must be zero address');
+          var signerAddr = toChecksum((input.signer || '').trim());
+          if (!isAddress(signerAddr)) return fail('invalid signer');
+          if (!eq(toChecksum((msg.signer || '').trim()), signerAddr)) return fail('order signer must match signing key');
+          var feeBps = parseInt(msg.feeRateBps, 10) || 0;
+          if (feeBps > 1000) return fail('fee exceeds 10%');
+          return ok();
+        }
+    test_cases:
+      - name: "should pass valid order with zero taker"
+        input:
+          sign_type: "typed_data"
+          chain_id: 137
+          signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+          typed_data:
+            primaryType: "Order"
+            domain:
+              name: "Polymarket CTF Exchange"
+              version: "1"
+              chainId: "137"
+              verifyingContract: "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E"
+            message:
+              salt: "12345"
+              maker: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              taker: "0x0000000000000000000000000000000000000000"
+              tokenId: "1"
+              makerAmount: "1000000000000000000"
+              takerAmount: "1000000000000000000"
+              expiration: "1893456000"
+              nonce: "0"
+              feeRateBps: "100"
+              side: "0"
+              signatureType: "0"
+        expect_pass: true
+      - name: "should reject non-zero taker"
+        input:
+          sign_type: "typed_data"
+          chain_id: 137
+          signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+          typed_data:
+            primaryType: "Order"
+            domain:
+              name: "Polymarket CTF Exchange"
+              version: "1"
+              chainId: "137"
+              verifyingContract: "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E"
+            message:
+              salt: "12345"
+              maker: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              taker: "0x1111111111111111111111111111111111111111"
+              tokenId: "1"
+              makerAmount: "1000000000000000000"
+              takerAmount: "1000000000000000000"
+              expiration: "1893456000"
+              nonce: "0"
+              feeRateBps: "100"
+              side: "0"
+              signatureType: "0"
+        expect_pass: false
+        expect_reason: "taker must be zero address"
+
+  - name: "Polymarket Safe Wallet Creation Signature"
+    type: "evm_js"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "${chain_id}"
+    description: "Validate Safe wallet creation signature (CreateProxy EIP-712)"
+    config:
+      sign_type_filter: "typed_data"
+      script: |
+        function validate(input) {
+          if (input.sign_type !== 'typed_data') return fail('sign_type must be typed_data');
+          var td = input.typed_data;
+          if (!td || td.primaryType !== 'CreateProxy') return fail('not CreateProxy');
+          var domain = td.domain || {};
+          var msg = td.message || {};
+          var wantName = (config.safe_factory_domain_name || '').trim();
+          var wantFactory = toChecksum((config.safe_proxy_factory_address || '').trim());
+          var chainId = parseInt(config.chain_id, 10);
+          if (String(domain.name || '').trim() !== wantName) return fail('invalid domain name');
+          if (Number(domain.chainId) !== chainId) return fail('must be on Polygon');
+          if (!isAddress(domain.verifyingContract) || !eq(toChecksum(domain.verifyingContract), wantFactory)) return fail('verifyingContract must be Safe Factory');
+          var zeroAddr = '0x0000000000000000000000000000000000000000';
+          if (!eq(toChecksum((msg.paymentToken || '').trim()), zeroAddr)) return fail('payment token must be zero');
+          if (String(msg.payment !== undefined ? msg.payment : '').trim() !== '0') return fail('payment must be zero');
+          if (!eq(toChecksum((msg.paymentReceiver || '').trim()), zeroAddr)) return fail('payment receiver must be zero');
+          return ok();
+        }
+    test_cases:
+      - name: "should pass valid CreateProxy with zero payment"
+        input:
+          sign_type: "typed_data"
+          chain_id: 137
+          signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+          typed_data:
+            primaryType: "CreateProxy"
+            domain:
+              name: "Polymarket Contract Proxy Factory"
+              chainId: "137"
+              verifyingContract: "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"
+            message:
+              paymentToken: "0x0000000000000000000000000000000000000000"
+              payment: "0"
+              paymentReceiver: "0x0000000000000000000000000000000000000000"
+        expect_pass: true
+      - name: "should reject non-zero payment"
+        input:
+          sign_type: "typed_data"
+          chain_id: 137
+          signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+          typed_data:
+            primaryType: "CreateProxy"
+            domain:
+              name: "Polymarket Contract Proxy Factory"
+              chainId: "137"
+              verifyingContract: "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"
+            message:
+              paymentToken: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+              payment: "1000000"
+              paymentReceiver: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+        expect_pass: false
+        expect_reason: "payment token must be zero"
+
+  - name: "Polymarket Safe Wallet Creation"
+    type: "evm_js"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "${chain_id}"
+    description: "Allow createProxy transaction to Safe Factory with zero payment"
+    config:
+      sign_type_filter: "transaction"
+      script: |
+        function validate(input) {
+          if (input.sign_type !== 'transaction') return fail('sign_type must be transaction');
+          var tx = input.transaction;
+          if (!tx || !tx.to) return fail('missing transaction or to');
+          var toChecksumAddr = toChecksum((tx.to || '').trim());
+          var wantFactory = toChecksum((config.safe_proxy_factory_address || '').trim());
+          if (!eq(toChecksumAddr, wantFactory)) return fail('target must be Safe Factory');
+          var data = (tx.data || '0x').replace(/^0x/, '');
+          if (data.length < 8) return fail('data too short');
+          var sel = '0x' + data.slice(0, 8);
+          var createProxySel = '0xa1884d2c';
+          if (sel.toLowerCase() !== createProxySel) return fail('not createProxy');
+          if (data.length < 8 + 64 * 3) return fail('createProxy data too short');
+          var zero32 = '0000000000000000000000000000000000000000000000000000000000000000';
+          var paymentTokenHex = data.slice(8, 72);
+          var paymentHex = data.slice(72, 136);
+          var receiverHex = data.slice(136, 200);
+          if (paymentTokenHex !== zero32) return fail('payment token must be zero');
+          if (paymentHex !== zero32) return fail('payment must be zero');
+          if (receiverHex !== zero32) return fail('payment receiver must be zero');
+          return ok();
+        }
+    test_cases:
+      - name: "should pass createProxy with zero payment"
+        input:
+          sign_type: "transaction"
+          chain_id: 137
+          signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+          transaction:
+            from: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            to: "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"
+            value: "0x0"
+            data: "0xa1884d2c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+        expect_pass: true
+      - name: "should reject wrong target"
+        input:
+          sign_type: "transaction"
+          chain_id: 137
+          signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+          transaction:
+            from: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+            value: "0x0"
+            data: "0xa1884d2c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+        expect_pass: false
+        expect_reason: "target must be Safe Factory"
+
+  - id: "polymarket-transactions"
+    name: "Polymarket transactions"
+    type: "evm_js"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "${chain_id}"
+    description: "Validate Polymarket contract calls: USDC/CTF/NegRisk with allowed selectors and params. Works for direct EOA calls or as Safe template delegate_to target."
+    config:
+      sign_type_filter: "transaction"
+      script: |
+        function parseList(s) {
+          if (!s || typeof s !== 'string') return [];
+          var list = [];
+          s.split(',').forEach(function(a) { var t = a.trim(); if (t && isAddress(t)) list.push(toChecksum(t)); });
+          return list;
+        }
+        function inSet(addr, set) {
+          var c = toChecksum((addr || '').trim());
+          for (var i = 0; i < set.length; i++) { if (eq(c, set[i])) return true; }
+          return false;
+        }
+        function validate(input) {
+          if (input.sign_type !== 'transaction') return fail('sign_type must be transaction');
+          var tx = input.transaction;
+          if (!tx || !tx.to || !tx.data) return fail('missing transaction or to or data');
+          var toAddr = toChecksum((tx.to || '').trim());
+          var data = (tx.data || '0x').replace(/^0x/, '');
+          if (data.length < 8) return fail('data too short');
+          var sel = '0x' + data.slice(0, 8).toLowerCase();
+          var usdc = toChecksum((config.usdc_bridged_address || '').trim());
+          var ctf = toChecksum((config.conditional_tokens_address || '').trim());
+          var negAdapter = toChecksum((config.neg_risk_adapter_address || '').trim());
+          var negExchange = toChecksum((config.neg_risk_exchange_address || '').trim());
+          var ctfExchange = toChecksum((config.ctf_exchange_address || '').trim());
+          var allowedSpenders = [ctfExchange, negAdapter, negExchange];
+          if (eq(toAddr, usdc)) {
+            if (sel !== '0x095ea7b3') return fail('unsupported USDC.e operation');
+            if (data.length < 8 + 64 + 64) return fail('invalid approve data length');
+            var payload = '0x' + data.slice(8);
+            var dec = abi.decode(payload, ['address', 'uint256']);
+            if (!dec || dec.length < 1) return fail('approve decode failed');
+            var spender = toChecksum(dec[0]);
+            var okSpend = false;
+            for (var i = 0; i < allowedSpenders.length; i++) { if (eq(spender, allowedSpenders[i])) { okSpend = true; break; } }
+            if (!okSpend) return fail('spender must be allowed protocol contract');
+            return ok();
+          }
+          if (eq(toAddr, ctf)) {
+            var setApproval = '0xa22cb465';
+            var splitPos = '0x72ce4275';
+            var mergePos = '0x9e7212ad';
+            var redeemPos = '0x01b7037c';
+            if (sel !== setApproval && sel !== splitPos && sel !== mergePos && sel !== redeemPos) return fail('unsupported CTF operation');
+            if (sel === setApproval) {
+              if (data.length < 8 + 64 + 64) return fail('invalid setApprovalForAll data length');
+              var p = '0x' + data.slice(8);
+              var d = abi.decode(p, ['address', 'bool']);
+              if (!d || d.length < 2 || !d[1]) return fail('approval must be true');
+              var op = toChecksum(d[0]);
+              var okOp = false;
+              for (var j = 0; j < allowedSpenders.length; j++) { if (eq(op, allowedSpenders[j])) { okOp = true; break; } }
+              if (!okOp) return fail('operator must be allowed protocol contract');
+              return ok();
+            }
+            if (sel === splitPos || sel === mergePos) {
+              if (data.length < 8 + 164 * 2) return fail('invalid split/merge data length');
+              var rest = '0x' + data.slice(8);
+              var dec2 = abi.decode(rest, ['address', 'bytes32', 'bytes32', 'uint256[]', 'uint256']);
+              if (!dec2 || dec2.length < 2) return fail('split/merge decode failed');
+              var coll = toChecksum(dec2[0]);
+              if (!eq(coll, usdc)) return fail('collateral must be USDC.e');
+              return ok();
+            }
+            if (sel === redeemPos) {
+              if (data.length < 8 + 132 * 2) return fail('invalid redeem data length');
+              var r = '0x' + data.slice(8);
+              var dec3 = abi.decode(r, ['address', 'bytes32', 'bytes32', 'uint256[]']);
+              if (!dec3 || dec3.length < 1) return fail('redeem decode failed');
+              if (!eq(toChecksum(dec3[0]), usdc)) return fail('collateral must be USDC.e');
+              return ok();
+            }
+          }
+          if (eq(toAddr, negAdapter)) {
+            var nrSplit = '0xa3d7da1d';
+            var nrMerge = '0xb10c5c17';
+            var nrRedeem = '0xdbeccb23';
+            if (sel === nrSplit || sel === nrMerge || sel === nrRedeem) return ok();
+            if (sel === '0x72ce4275' || sel === '0x9e7212ad') {
+              if (data.length < 8 + 164 * 2) return fail('invalid NegRisk 5-param data length');
+              var nrRest = '0x' + data.slice(8);
+              var nrDec = abi.decode(nrRest, ['address', 'bytes32', 'bytes32', 'uint256[]', 'uint256']);
+              if (!nrDec || nrDec.length < 2) return fail('NegRisk decode failed');
+              if (!eq(toChecksum(nrDec[0]), usdc)) return fail('NegRisk collateral must be USDC.e');
+              return ok();
+            }
+            return fail('unsupported NegRiskAdapter operation');
+          }
+          return fail('unsupported target contract');
+        }
+    test_cases:
+      - name: "should pass USDC approve to CTF Exchange"
+        input:
+          sign_type: "transaction"
+          chain_id: 137
+          signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+          transaction:
+            from: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+            value: "0x0"
+            data: "0x095ea7b30000000000000000000000004bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982Effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        expect_pass: true
+      - name: "should reject USDC approve to disallowed spender"
+        input:
+          sign_type: "transaction"
+          chain_id: 137
+          signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+          transaction:
+            from: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+            value: "0x0"
+            data: "0x095ea7b3000000000000000000000000DEADDEADDEADDEADDEADDEADDEADDEADDEADDEADffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        expect_pass: false
+        expect_reason: "spender must be allowed protocol contract"

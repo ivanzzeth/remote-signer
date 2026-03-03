@@ -25,6 +25,9 @@ type BudgetRepository interface {
 	ResetBudget(ctx context.Context, ruleID types.RuleID, unit string, currentPeriodStart time.Time) error
 	ListByRuleID(ctx context.Context, ruleID types.RuleID) ([]*types.RuleBudget, error)
 	ListByRuleIDs(ctx context.Context, ruleIDs []types.RuleID) ([]*types.RuleBudget, error)
+	// MarkAlertSent sets alert_sent=true for the given rule+unit budget.
+	// This prevents duplicate alert notifications within the same period.
+	MarkAlertSent(ctx context.Context, ruleID types.RuleID, unit string) error
 }
 
 // ErrBudgetExceeded indicates the budget limit has been reached
@@ -145,6 +148,20 @@ func (r *GormBudgetRepository) ListByRuleID(ctx context.Context, ruleID types.Ru
 		return nil, fmt.Errorf("failed to list budgets: %w", err)
 	}
 	return budgets, nil
+}
+
+// MarkAlertSent sets alert_sent=true for the given rule+unit budget.
+func (r *GormBudgetRepository) MarkAlertSent(ctx context.Context, ruleID types.RuleID, unit string) error {
+	result := r.db.WithContext(ctx).Exec(`
+		UPDATE rule_budgets
+		SET alert_sent = true,
+		    updated_at = ?
+		WHERE rule_id = ? AND unit = ?
+	`, time.Now(), ruleID, unit)
+	if result.Error != nil {
+		return fmt.Errorf("failed to mark alert sent: %w", result.Error)
+	}
+	return nil
 }
 
 // ListByRuleIDs returns all budgets for the given rule IDs

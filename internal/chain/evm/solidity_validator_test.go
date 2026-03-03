@@ -416,6 +416,38 @@ func TestValidateSolidityCodeSecurity(t *testing.T) {
 			code:        `string memory s = "vm.ffi(inputs)";`,
 			expectError: true,
 		},
+
+		// Solidity language-level dangerous constructs
+		{
+			name:        "selfdestruct - contract destruction",
+			code:        `selfdestruct(payable(msg.sender));`,
+			expectError: true,
+		},
+		{
+			name:        "selfdestruct case insensitive",
+			code:        `SelfDestruct(payable(owner));`,
+			expectError: true,
+		},
+		{
+			name:        "delegatecall - arbitrary code execution",
+			code:        `(bool success, ) = target.delegatecall(data);`,
+			expectError: true,
+		},
+		{
+			name:        "staticcall - low-level call",
+			code:        `(bool ok, bytes memory ret) = addr.staticcall(payload);`,
+			expectError: true,
+		},
+		{
+			name:        "safe .call usage not blocked",
+			code:        `(bool success, ) = target.call(txData);`,
+			expectError: false,
+		},
+		{
+			name:        "safe assembly not blocked",
+			code:        `assembly { revert(add(result, 32), mload(result)) }`,
+			expectError: false,
+		},
 	}
 
 	for _, tt := range tests {

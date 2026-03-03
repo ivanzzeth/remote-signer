@@ -10,8 +10,27 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
+	"github.com/ivanzzeth/remote-signer/pkg/client/mock"
 )
+
+func newTestSignersModel(t *testing.T) (*SignersModel, *mock.SignerService) {
+	t.Helper()
+	svc := mock.NewSignerService()
+	hdSvc := mock.NewHDWalletService()
+	model, err := newSignersModelFromService(svc, hdSvc, context.Background())
+	require.NoError(t, err)
+	return model, svc
+}
+
+func newTestSignersModelWithHD(t *testing.T) (*SignersModel, *mock.SignerService, *mock.HDWalletService) {
+	t.Helper()
+	svc := mock.NewSignerService()
+	hdSvc := mock.NewHDWalletService()
+	model, err := newSignersModelFromService(svc, hdSvc, context.Background())
+	require.NoError(t, err)
+	return model, svc, hdSvc
+}
 
 func TestNewSignersModel(t *testing.T) {
 	t.Run("returns error when client is nil", func(t *testing.T) {
@@ -21,16 +40,15 @@ func TestNewSignersModel(t *testing.T) {
 	})
 
 	t.Run("returns error when context is nil", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		_, err := NewSignersModel(mockClient, nil)
+		svc := mock.NewSignerService()
+		hdSvc := mock.NewHDWalletService()
+		_, err := newSignersModelFromService(svc, hdSvc, nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "context is required")
 	})
 
 	t.Run("creates model successfully", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestSignersModel(t)
 		require.NotNil(t, model)
 		assert.True(t, model.loading)
 		assert.Equal(t, 20, model.limit)
@@ -39,11 +57,9 @@ func TestNewSignersModel(t *testing.T) {
 
 func TestSignersModel_Update(t *testing.T) {
 	t.Run("handles signers data message", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestSignersModel(t)
 
-		signers := []client.Signer{
+		signers := []evm.Signer{
 			{Address: "0x1234567890123456789012345678901234567890", Type: "keystore", Enabled: true},
 			{Address: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd", Type: "private_key", Enabled: true},
 		}
@@ -66,9 +82,7 @@ func TestSignersModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles signers data error", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestSignersModel(t)
 
 		msg := SignersDataMsg{
 			Err: errors.New("connection failed"),
@@ -83,17 +97,15 @@ func TestSignersModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles signer create success", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		mockClient.ListSignersFunc = func(ctx context.Context, filter *client.ListSignersFilter) (*client.ListSignersResponse, error) {
-			return &client.ListSignersResponse{Signers: []client.Signer{}, Total: 0}, nil
+		model, svc := newTestSignersModel(t)
+		svc.ListFunc = func(ctx context.Context, filter *evm.ListSignersFilter) (*evm.ListSignersResponse, error) {
+			return &evm.ListSignersResponse{Signers: []evm.Signer{}, Total: 0}, nil
 		}
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
 		model.showCreate = true
 		model.createStep = 2
 
 		msg := SignerCreateMsg{
-			Signer:  &client.Signer{Address: "0x1234567890123456789012345678901234567890"},
+			Signer:  &evm.Signer{Address: "0x1234567890123456789012345678901234567890"},
 			Success: true,
 			Message: "Signer created: 0x1234567890123456789012345678901234567890",
 			Err:     nil,
@@ -111,9 +123,7 @@ func TestSignersModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles signer create error", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestSignersModel(t)
 		model.showCreate = true
 
 		msg := SignerCreateMsg{
@@ -129,11 +139,9 @@ func TestSignersModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles navigation keys", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestSignersModel(t)
 		model.loading = false
-		model.signers = []client.Signer{
+		model.signers = []evm.Signer{
 			{Address: "0x1111"},
 			{Address: "0x2222"},
 			{Address: "0x3333"},
@@ -169,9 +177,7 @@ func TestSignersModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles filter mode", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestSignersModel(t)
 		model.loading = false
 
 		// Press 'f' to enter filter mode
@@ -186,9 +192,7 @@ func TestSignersModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles create mode", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestSignersModel(t)
 		model.loading = false
 
 		// Press '+' to enter create mode
@@ -204,28 +208,25 @@ func TestSignersModel_Update(t *testing.T) {
 	})
 
 	t.Run("handles create flow - select type", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestSignersModel(t)
 		model.loading = false
 		model.showCreate = true
 		model.createStep = 0
+		model.typeIdx = 0 // keystore
 
-		// Press '1' to select keystore type
-		newModel, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("1")})
+		// Press Enter to select keystore type
+		newModel, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		m := newModel.(*SignersModel)
 		assert.Equal(t, 1, m.createStep)
 		assert.Equal(t, "keystore", m.selectedType)
 	})
 
 	t.Run("handles clear filter", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		mockClient.ListSignersFunc = func(ctx context.Context, filter *client.ListSignersFilter) (*client.ListSignersResponse, error) {
-			return &client.ListSignersResponse{Signers: []client.Signer{}, Total: 0}, nil
+		model, svc := newTestSignersModel(t)
+		svc.ListFunc = func(ctx context.Context, filter *evm.ListSignersFilter) (*evm.ListSignersResponse, error) {
+			return &evm.ListSignersResponse{Signers: []evm.Signer{}, Total: 0}, nil
 		}
 
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
 		model.loading = false
 		model.typeFilter = "keystore"
 		model.offset = 10
@@ -240,9 +241,7 @@ func TestSignersModel_Update(t *testing.T) {
 
 func TestSignersModel_View(t *testing.T) {
 	t.Run("renders loading state", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestSignersModel(t)
 		model.loading = true
 		model.width = 100
 		model.height = 30
@@ -252,9 +251,7 @@ func TestSignersModel_View(t *testing.T) {
 	})
 
 	t.Run("renders error state", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestSignersModel(t)
 		model.loading = false
 		model.err = errors.New("test error")
 		model.width = 100
@@ -265,13 +262,11 @@ func TestSignersModel_View(t *testing.T) {
 	})
 
 	t.Run("renders signers list", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestSignersModel(t)
 		model.loading = false
 		model.width = 150
 		model.height = 30
-		model.signers = []client.Signer{
+		model.signers = []evm.Signer{
 			{Address: "0x1234567890123456789012345678901234567890", Type: "keystore", Enabled: true},
 		}
 		model.total = 1
@@ -283,13 +278,11 @@ func TestSignersModel_View(t *testing.T) {
 	})
 
 	t.Run("renders empty signers list", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestSignersModel(t)
 		model.loading = false
 		model.width = 150
 		model.height = 30
-		model.signers = []client.Signer{}
+		model.signers = []evm.Signer{}
 		model.total = 0
 
 		view := model.View()
@@ -297,9 +290,7 @@ func TestSignersModel_View(t *testing.T) {
 	})
 
 	t.Run("renders filter input", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestSignersModel(t)
 		model.loading = false
 		model.showFilter = true
 		model.width = 100
@@ -310,9 +301,7 @@ func TestSignersModel_View(t *testing.T) {
 	})
 
 	t.Run("renders create form", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestSignersModel(t)
 		model.loading = false
 		model.showCreate = true
 		model.createStep = 0
@@ -324,13 +313,11 @@ func TestSignersModel_View(t *testing.T) {
 	})
 
 	t.Run("renders pagination info", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestSignersModel(t)
 		model.loading = false
 		model.width = 150
 		model.height = 30
-		model.signers = []client.Signer{
+		model.signers = []evm.Signer{
 			{Address: "0x1111", Type: "keystore", Enabled: true},
 			{Address: "0x2222", Type: "keystore", Enabled: true},
 		}
@@ -345,18 +332,16 @@ func TestSignersModel_View(t *testing.T) {
 
 func TestSignersModel_LoadData(t *testing.T) {
 	t.Run("calls client ListSigners with correct filter", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		var capturedFilter *client.ListSignersFilter
-		mockClient.ListSignersFunc = func(ctx context.Context, filter *client.ListSignersFilter) (*client.ListSignersResponse, error) {
+		model, svc := newTestSignersModel(t)
+		var capturedFilter *evm.ListSignersFilter
+		svc.ListFunc = func(ctx context.Context, filter *evm.ListSignersFilter) (*evm.ListSignersResponse, error) {
 			capturedFilter = filter
-			return &client.ListSignersResponse{
-				Signers: []client.Signer{},
+			return &evm.ListSignersResponse{
+				Signers: []evm.Signer{},
 				Total:   0,
 			}, nil
 		}
 
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
 		model.typeFilter = "keystore"
 		model.offset = 10
 		model.limit = 20
@@ -376,13 +361,10 @@ func TestSignersModel_LoadData(t *testing.T) {
 	})
 
 	t.Run("returns error on client failure", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		mockClient.ListSignersFunc = func(ctx context.Context, filter *client.ListSignersFilter) (*client.ListSignersResponse, error) {
+		model, svc := newTestSignersModel(t)
+		svc.ListFunc = func(ctx context.Context, filter *evm.ListSignersFilter) (*evm.ListSignersResponse, error) {
 			return nil, errors.New("network error")
 		}
-
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
 
 		cmd := model.loadData()
 		msg := cmd()
@@ -396,19 +378,16 @@ func TestSignersModel_LoadData(t *testing.T) {
 
 func TestSignersModel_CreateSigner(t *testing.T) {
 	t.Run("calls client CreateSigner with keystore params", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		var capturedReq *client.CreateSignerRequest
-		mockClient.CreateSignerFunc = func(ctx context.Context, req *client.CreateSignerRequest) (*client.Signer, error) {
+		model, svc := newTestSignersModel(t)
+		var capturedReq *evm.CreateSignerRequest
+		svc.CreateFunc = func(ctx context.Context, req *evm.CreateSignerRequest) (*evm.Signer, error) {
 			capturedReq = req
-			return &client.Signer{
+			return &evm.Signer{
 				Address: "0x1234567890123456789012345678901234567890",
 				Type:    "keystore",
 				Enabled: true,
 			}, nil
 		}
-
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
 
 		cmd := model.createSigner("keystore", "testpassword123")
 		msg := cmd()
@@ -425,13 +404,10 @@ func TestSignersModel_CreateSigner(t *testing.T) {
 	})
 
 	t.Run("returns error on client failure", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		mockClient.CreateSignerFunc = func(ctx context.Context, req *client.CreateSignerRequest) (*client.Signer, error) {
+		model, svc := newTestSignersModel(t)
+		svc.CreateFunc = func(ctx context.Context, req *evm.CreateSignerRequest) (*evm.Signer, error) {
 			return nil, errors.New("permission denied")
 		}
-
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
 
 		cmd := model.createSigner("keystore", "password")
 		msg := cmd()
@@ -446,13 +422,11 @@ func TestSignersModel_CreateSigner(t *testing.T) {
 
 func TestSignersModel_Refresh(t *testing.T) {
 	t.Run("sets loading and returns commands", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		mockClient.ListSignersFunc = func(ctx context.Context, filter *client.ListSignersFilter) (*client.ListSignersResponse, error) {
-			return &client.ListSignersResponse{Signers: []client.Signer{}, Total: 0}, nil
+		model, svc := newTestSignersModel(t)
+		svc.ListFunc = func(ctx context.Context, filter *evm.ListSignersFilter) (*evm.ListSignersResponse, error) {
+			return &evm.ListSignersResponse{Signers: []evm.Signer{}, Total: 0}, nil
 		}
 
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
 		model.loading = false
 
 		cmd := model.Refresh()
@@ -463,9 +437,7 @@ func TestSignersModel_Refresh(t *testing.T) {
 
 func TestSignersModel_SetSize(t *testing.T) {
 	t.Run("sets width and height", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
+		model, _ := newTestSignersModel(t)
 
 		model.SetSize(100, 50)
 		assert.Equal(t, 100, model.width)
@@ -475,16 +447,400 @@ func TestSignersModel_SetSize(t *testing.T) {
 
 func TestSignersModel_Init(t *testing.T) {
 	t.Run("returns batch command", func(t *testing.T) {
-		mockClient := client.NewMockClient()
-		mockClient.ListSignersFunc = func(ctx context.Context, filter *client.ListSignersFilter) (*client.ListSignersResponse, error) {
+		model, svc := newTestSignersModel(t)
+		svc.ListFunc = func(ctx context.Context, filter *evm.ListSignersFilter) (*evm.ListSignersResponse, error) {
 			time.Sleep(10 * time.Millisecond) // Simulate async operation
-			return &client.ListSignersResponse{Signers: []client.Signer{}, Total: 0}, nil
+			return &evm.ListSignersResponse{Signers: []evm.Signer{}, Total: 0}, nil
 		}
-
-		model, err := NewSignersModel(mockClient, context.Background())
-		require.NoError(t, err)
 
 		cmd := model.Init()
 		assert.NotNil(t, cmd)
+	})
+}
+
+func TestSignersModel_CreateHDWalletDerive(t *testing.T) {
+	t.Run("select HD wallet type loads wallet list", func(t *testing.T) {
+		model, _, hdSvc := newTestSignersModelWithHD(t)
+		hdSvc.ListFunc = func(ctx context.Context) (*evm.ListHDWalletsResponse, error) {
+			return &evm.ListHDWalletsResponse{
+				Wallets: []evm.HDWalletResponse{
+					{PrimaryAddress: "0xabc123", BasePath: "m/44'/60'/0'/0", DerivedCount: 3},
+				},
+			}, nil
+		}
+		model.loading = false
+		model.showCreate = true
+		model.createStep = 0
+		model.typeIdx = 0
+
+		// Navigate down to HD wallet option and press Enter
+		newModel, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+		m := newModel.(*SignersModel)
+		assert.Equal(t, 1, m.typeIdx)
+
+		newModel, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		m = newModel.(*SignersModel)
+		assert.Equal(t, "hd_wallet", m.selectedType)
+		assert.True(t, m.loading)
+		assert.NotNil(t, cmd)
+	})
+
+	t.Run("HD wallet list loaded shows picker", func(t *testing.T) {
+		model, _, _ := newTestSignersModelWithHD(t)
+		model.showCreate = true
+		model.selectedType = "hd_wallet"
+		model.createStep = 1
+
+		msg := SignerHDWalletListMsg{
+			Wallets: []evm.HDWalletResponse{
+				{PrimaryAddress: "0xabc123", BasePath: "m/44'/60'/0'/0", DerivedCount: 3},
+				{PrimaryAddress: "0xdef456", BasePath: "m/44'/60'/0'/0", DerivedCount: 1},
+			},
+		}
+
+		newModel, _ := model.Update(msg)
+		m := newModel.(*SignersModel)
+		assert.Equal(t, 2, m.createStep)
+		assert.Len(t, m.hdWallets, 2)
+		assert.Equal(t, 0, m.hdWalletIdx)
+	})
+
+	t.Run("HD wallet list empty shows error", func(t *testing.T) {
+		model, _, _ := newTestSignersModelWithHD(t)
+		model.showCreate = true
+		model.selectedType = "hd_wallet"
+		model.createStep = 1
+
+		msg := SignerHDWalletListMsg{
+			Wallets: []evm.HDWalletResponse{},
+		}
+
+		newModel, _ := model.Update(msg)
+		m := newModel.(*SignersModel)
+		assert.Equal(t, 0, m.createStep) // Goes back to type selection
+		assert.Contains(t, m.actionResult, "No HD wallets found")
+	})
+
+	t.Run("HD wallet picker navigation and selection", func(t *testing.T) {
+		model, _, _ := newTestSignersModelWithHD(t)
+		model.showCreate = true
+		model.selectedType = "hd_wallet"
+		model.createStep = 2
+		model.hdWallets = []evm.HDWalletResponse{
+			{PrimaryAddress: "0xabc123", DerivedCount: 3},
+			{PrimaryAddress: "0xdef456", DerivedCount: 1},
+		}
+		model.hdWalletIdx = 0
+
+		// Navigate down
+		newModel, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+		m := newModel.(*SignersModel)
+		assert.Equal(t, 1, m.hdWalletIdx)
+
+		// Navigate up
+		newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
+		m = newModel.(*SignersModel)
+		assert.Equal(t, 0, m.hdWalletIdx)
+
+		// Select wallet
+		newModel, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		m = newModel.(*SignersModel)
+		assert.Equal(t, 3, m.createStep) // Moved to derive index step
+	})
+
+	t.Run("HD derive index submits and refreshes", func(t *testing.T) {
+		model, svc, hdSvc := newTestSignersModelWithHD(t)
+		svc.ListFunc = func(ctx context.Context, filter *evm.ListSignersFilter) (*evm.ListSignersResponse, error) {
+			return &evm.ListSignersResponse{Signers: []evm.Signer{}, Total: 0}, nil
+		}
+		hdSvc.DeriveAddressFunc = func(ctx context.Context, primaryAddr string, req *evm.DeriveAddressRequest) (*evm.DeriveAddressResponse, error) {
+			return &evm.DeriveAddressResponse{
+				Derived: []evm.SignerInfo{{Address: "0xnewaddr", Type: "hd_wallet", Enabled: true}},
+			}, nil
+		}
+
+		model.showCreate = true
+		model.selectedType = "hd_wallet"
+		model.createStep = 3
+		model.hdWallets = []evm.HDWalletResponse{
+			{PrimaryAddress: "0xabc123", DerivedCount: 3},
+		}
+		model.hdWalletIdx = 0
+		model.indexInput.SetValue("5")
+
+		// Press enter to derive
+		newModel, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		m := newModel.(*SignersModel)
+		assert.True(t, m.loading)
+		assert.NotNil(t, cmd)
+	})
+
+	t.Run("HD derive success resets create and refreshes", func(t *testing.T) {
+		model, svc, _ := newTestSignersModelWithHD(t)
+		svc.ListFunc = func(ctx context.Context, filter *evm.ListSignersFilter) (*evm.ListSignersResponse, error) {
+			return &evm.ListSignersResponse{Signers: []evm.Signer{}, Total: 0}, nil
+		}
+
+		model.showCreate = true
+		model.selectedType = "hd_wallet"
+		model.createStep = 3
+
+		msg := SignerHDDeriveMsg{
+			Success: true,
+			Message: "Derived signer: 0xnewaddr",
+			Derived: []evm.SignerInfo{{Address: "0xnewaddr", Type: "hd_wallet", Enabled: true}},
+		}
+
+		newModel, cmd := model.Update(msg)
+		m := newModel.(*SignersModel)
+		assert.False(t, m.showCreate)
+		assert.Contains(t, m.actionResult, "Derived signer")
+		assert.NotNil(t, cmd) // Refresh command
+	})
+
+	t.Run("render create form shows HD wallet option", func(t *testing.T) {
+		model, _, _ := newTestSignersModelWithHD(t)
+		model.loading = false
+		model.showCreate = true
+		model.createStep = 0
+		model.width = 100
+		model.height = 30
+
+		view := model.View()
+		assert.Contains(t, view, "Keystore")
+		assert.Contains(t, view, "Derive from HD Wallet")
+	})
+}
+
+func TestSignersModel_AccessColumn(t *testing.T) {
+	t.Run("renders Access column when AllowedKeys present", func(t *testing.T) {
+		model, _ := newTestSignersModel(t)
+		model.loading = false
+		model.width = 150
+		model.height = 30
+		model.signers = []evm.Signer{
+			{
+				Address: "0x1234567890123456789012345678901234567890",
+				Type:    "keystore",
+				Enabled: true,
+				AllowedKeys: []evm.AllowedKeyInfo{
+					{ID: "admin-key", Name: "admin"},
+					{ID: "dev-key", Name: "dev-key"},
+				},
+			},
+			{
+				Address: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+				Type:    "private_key",
+				Enabled: true,
+				AllowedKeys: []evm.AllowedKeyInfo{
+					{ID: "admin-key", Name: "admin"},
+				},
+			},
+		}
+		model.total = 2
+
+		view := model.View()
+		assert.Contains(t, view, "Access")
+		assert.Contains(t, view, "admin")
+		assert.Contains(t, view, "dev-key")
+	})
+
+	t.Run("no Access column when AllowedKeys absent", func(t *testing.T) {
+		model, _ := newTestSignersModel(t)
+		model.loading = false
+		model.width = 150
+		model.height = 30
+		model.signers = []evm.Signer{
+			{
+				Address: "0x1234567890123456789012345678901234567890",
+				Type:    "keystore",
+				Enabled: true,
+			},
+		}
+		model.total = 1
+
+		view := model.View()
+		assert.NotContains(t, view, "Access")
+	})
+
+	t.Run("Access column truncates when more than 2 keys", func(t *testing.T) {
+		model, _ := newTestSignersModel(t)
+		model.loading = false
+		model.width = 150
+		model.height = 30
+		model.signers = []evm.Signer{
+			{
+				Address: "0x1234567890123456789012345678901234567890",
+				Type:    "keystore",
+				Enabled: true,
+				AllowedKeys: []evm.AllowedKeyInfo{
+					{ID: "k1", Name: "admin"},
+					{ID: "k2", Name: "dev-key"},
+					{ID: "k3", Name: "readonly"},
+					{ID: "k4", Name: "extra"},
+				},
+			},
+		}
+		model.total = 1
+
+		view := model.View()
+		assert.Contains(t, view, "Access")
+		assert.Contains(t, view, "admin")
+		assert.Contains(t, view, "dev-key")
+		assert.Contains(t, view, "(+2)")
+	})
+}
+
+func TestValidatePassword(t *testing.T) {
+	t.Run("rejects short password", func(t *testing.T) {
+		errMsg, warnMsg := validatePassword("Abc1!xyz")
+		assert.Contains(t, errMsg, "at least 16 characters")
+		assert.Empty(t, warnMsg)
+	})
+
+	t.Run("rejects exactly 15 characters", func(t *testing.T) {
+		errMsg, _ := validatePassword("Abcdef1!ghijklm") // 15 chars
+		assert.Contains(t, errMsg, "at least 16 characters")
+	})
+
+	t.Run("rejects missing uppercase", func(t *testing.T) {
+		errMsg, _ := validatePassword("abcdefgh1234!@#$")
+		assert.Contains(t, errMsg, "uppercase letter")
+	})
+
+	t.Run("rejects missing lowercase", func(t *testing.T) {
+		errMsg, _ := validatePassword("ABCDEFGH1234!@#$")
+		assert.Contains(t, errMsg, "lowercase letter")
+	})
+
+	t.Run("rejects missing digit", func(t *testing.T) {
+		errMsg, _ := validatePassword("AbcDefGhIjKl!@#$")
+		assert.Contains(t, errMsg, "digit")
+	})
+
+	t.Run("rejects missing symbol", func(t *testing.T) {
+		errMsg, _ := validatePassword("AbcDefGh12345678")
+		assert.Contains(t, errMsg, "symbol")
+	})
+
+	t.Run("rejects multiple missing classes", func(t *testing.T) {
+		errMsg, _ := validatePassword("abcdefghijklmnop") // no upper, digit, symbol
+		assert.Contains(t, errMsg, "uppercase letter")
+		assert.Contains(t, errMsg, "digit")
+		assert.Contains(t, errMsg, "symbol")
+	})
+
+	t.Run("accepts 16-char valid password with warning", func(t *testing.T) {
+		errMsg, warnMsg := validatePassword("Abcdef1!ghijklmn") // 16 chars
+		assert.Empty(t, errMsg)
+		assert.Contains(t, warnMsg, "24+")
+	})
+
+	t.Run("accepts 24-char valid password without warning", func(t *testing.T) {
+		errMsg, warnMsg := validatePassword("Abcdef1!ghijklmnopqrstuv") // 24 chars
+		assert.Empty(t, errMsg)
+		assert.Empty(t, warnMsg)
+	})
+
+	t.Run("accepts long password without warning", func(t *testing.T) {
+		errMsg, warnMsg := validatePassword("MyV3ry$ecureP@ssword!WithExtra1234")
+		assert.Empty(t, errMsg)
+		assert.Empty(t, warnMsg)
+	})
+}
+
+func TestSignersModel_UnlockRateLimiting(t *testing.T) {
+	t.Run("blocks after max failed attempts", func(t *testing.T) {
+		model, svc := newTestSignersModel(t)
+		model.loading = false
+		model.signers = []evm.Signer{
+			{Address: "0x1111", Type: "keystore", Enabled: false, Locked: true},
+		}
+		model.selectedIdx = 0
+
+		svc.UnlockFunc = func(ctx context.Context, address string, req *evm.UnlockSignerRequest) (*evm.Signer, error) {
+			return nil, errors.New("wrong password")
+		}
+
+		addr := model.signers[0].Address
+
+		// Simulate maxUnlockAttempts failures
+		for i := 0; i < maxUnlockAttempts; i++ {
+			msg := SignerUnlockMsg{Address: addr, Success: false, Err: errors.New("wrong password")}
+			model.Update(msg)
+		}
+
+		// Now try to open unlock form — should be blocked by cooldown
+		model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")})
+		assert.False(t, model.showUnlock)
+		assert.Contains(t, model.actionResult, "Too many failed attempts")
+	})
+
+	t.Run("success clears rate limit state", func(t *testing.T) {
+		model, _ := newTestSignersModel(t)
+		model.loading = false
+		addr := "0x1111"
+		model.signers = []evm.Signer{
+			{Address: addr, Type: "keystore", Enabled: false, Locked: true},
+		}
+		model.selectedIdx = 0
+
+		// Add some failed attempts
+		model.unlockAttempts[addr] = 3
+
+		// Success message
+		msg := SignerUnlockMsg{Address: addr, Success: true, Message: "Signer unlocked"}
+		model.Update(msg)
+
+		// Attempts should be cleared
+		assert.Equal(t, 0, model.unlockAttempts[addr])
+		_, hasCooldown := model.unlockCooldownUtil[addr]
+		assert.False(t, hasCooldown)
+	})
+
+	t.Run("cooldown expires after duration", func(t *testing.T) {
+		model, _ := newTestSignersModel(t)
+		model.loading = false
+		addr := "0x1111"
+		model.signers = []evm.Signer{
+			{Address: addr, Type: "keystore", Enabled: false, Locked: true},
+		}
+		model.selectedIdx = 0
+
+		// Set cooldown in the past (already expired)
+		model.unlockCooldownUtil[addr] = time.Now().Add(-1 * time.Second)
+
+		// Should be able to open unlock form
+		model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")})
+		assert.True(t, model.showUnlock)
+	})
+}
+
+func TestFormatAccessColumn(t *testing.T) {
+	t.Run("empty keys returns dash", func(t *testing.T) {
+		result := formatAccessColumn(nil)
+		assert.Equal(t, "-", result)
+	})
+
+	t.Run("single key shows name", func(t *testing.T) {
+		result := formatAccessColumn([]evm.AllowedKeyInfo{{ID: "k1", Name: "admin"}})
+		assert.Equal(t, "admin", result)
+	})
+
+	t.Run("two keys shows both names", func(t *testing.T) {
+		result := formatAccessColumn([]evm.AllowedKeyInfo{
+			{ID: "k1", Name: "admin"},
+			{ID: "k2", Name: "dev"},
+		})
+		assert.Equal(t, "admin, dev", result)
+	})
+
+	t.Run("three or more keys truncates", func(t *testing.T) {
+		result := formatAccessColumn([]evm.AllowedKeyInfo{
+			{ID: "k1", Name: "admin"},
+			{ID: "k2", Name: "dev"},
+			{ID: "k3", Name: "readonly"},
+		})
+		assert.Equal(t, "admin, dev (+1)", result)
 	})
 }

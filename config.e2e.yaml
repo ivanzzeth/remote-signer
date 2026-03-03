@@ -66,13 +66,38 @@ logger:
 api_keys: []
 
 # Templates (file-type): loaded at startup, used to expand instance rules
-# Used by TestTemplate_ConfigLoadedTemplatesAndInstanceRules
+# Used by TestTemplate_ConfigLoadedTemplatesAndInstanceRules and delegation/evm_js e2e
 templates:
-  - name: "E2E Minimal Template"
+  - name: "Minimal Template"
     type: "file"
     enabled: true
     config:
       path: "e2e/fixtures/minimal_template.yaml"
+  - name: "Safe Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/safe.template.js.yaml"
+  - name: "Multisend Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/multisend.template.js.yaml"
+  - name: "ERC20 Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/erc20.template.js.yaml"
+  - name: "ERC721 Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/erc721.template.js.yaml"
+  - name: "Polymarket Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/polymarket.template.js.yaml"
 
 # Rules for e2e testing
 # Rules can be defined here (config source) or via API (api source)
@@ -82,7 +107,7 @@ rules:
   # Example 1: Address whitelist - allow transactions to treasury address
   # Used by TestRule_TransactionToTreasuryPasses
   - name: "Allow transfers to treasury"
-    type: "evm_address_whitelist"
+    type: "evm_address_list"
     mode: "whitelist"
     enabled: true
     config:
@@ -110,11 +135,13 @@ rules:
           expect_pass: false
           expect_reason: "blocked: burn address"
 
-  # Example 3: Value limit rule - block high-value transactions
+  # Example 3: Value limit rule - block high-value transactions (scoped to first signer so
+  # second signer + tx to non-listed address is rejected; TestRule_AddressWhitelist_RejectsNonListedAddress)
   # Can be tested via API: TestRule_ValueLimitRuleBlocks
   - name: "Max 10 ETH per transaction"
     type: "evm_value_limit"
     mode: "whitelist"
+    signer_address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
     enabled: true
     config:
       max_value: "10000000000000000000"  # 10 ETH in wei
@@ -129,12 +156,14 @@ rules:
       allowed_signers:
         - "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"  # Test signer address
 
-  # Example 5: Sign type restriction - allow specific signing methods
+  # Example 5: Sign type restriction - allow specific signing methods (scoped to first signer only
+  # so that second signer is not allowed by this rule; enables TestRule_SignerRestriction_BlocksSignerNotInAllowList)
   # Used by TestRule_SignTypeRestrictionAllowsTransaction, TestRule_SignTypeRestrictionAllowsPersonalSign
   - name: "Allow common signing methods"
     type: "sign_type_restriction"
     mode: "whitelist"
     enabled: true
+    signer_address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"  # First test signer only
     config:
       allowed_sign_types:
         - "personal"     # Personal message signing
@@ -144,12 +173,632 @@ rules:
         - "raw_message"  # Raw message signing
         - "eip191"       # EIP-191 signing
 
-  # Example 6: Instance rule — expanded from E2E Minimal Template at startup
+  # Example 6: Instance rule — expanded from Minimal Template at startup
   # Used by TestTemplate_ConfigLoadedTemplatesAndInstanceRules
-  - name: "Instance of E2E Minimal"
+  - name: "Instance of Minimal"
     type: "instance"
     enabled: true
     config:
-      template: "E2E Minimal Template"
+      template: "Minimal Template"
       variables:
-        allowed_address: "0x5B38Da6a701c568545dCfcB875f56beddC4"
+        allowed_address: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+
+  # evm_js template instances (Safe, Multisend, ERC20, ERC721); delegation: Safe => Multisend => (ERC20 | ERC721) per item
+  # id = stable rule ID (optional); use in delegate_to for maintainability. List: validate-rules -config config.e2e.yaml -list-rule-ids
+  - name: "Safe instance"
+    type: "instance"
+    chain_type: "evm"
+    chain_id: "1"
+    enabled: true
+    config:
+      template: "Safe Template"
+      id: "safe"
+      variables:
+        chain_id: "1"
+        allowed_safe_addresses: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+        # Include template test addresses so validate-rules -config positive test cases pass
+        allowed_safe_tx_to_addresses: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4,0xA238CBeb142c10Ef7Ad8442C6D1f9E89e07e7761,0xdAC17F958D2ee523a2206206994597C13D831ec7,0x4B20993Bc481177ec7E8f571ceCaE8A9e22C02db"
+        delegate_to: "multisend"
+        delegate_mode: "single"
+        test_inner_to: "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+      # Instance test cases for full-engine validation (combined rules).
+      # Negative tests use signer not in signer_restriction to avoid being auto-allowed.
+      test_cases_overrides:
+        "Safe SafeTx and execTransaction":
+          - name: "SafeTx pass: valid verifyingContract and inner to"
+            input:
+              sign_type: "typed_data"
+              chain_id: "1"
+              signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+              typed_data:
+                primaryType: "SafeTx"
+                domain:
+                  chainId: "1"
+                  verifyingContract: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+                message:
+                  to: "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+                  value: "0"
+                  data: "0x"
+                  operation: "0"
+                  safeTxGas: "0"
+                  baseGas: "0"
+                  gasPrice: "0"
+                  gasToken: "0x0000000000000000000000000000000000000000"
+                  refundReceiver: "0x0000000000000000000000000000000000000000"
+                  nonce: "0"
+            expect_pass: true
+          - name: "SafeTx reject: wrong verifyingContract (full engine)"
+            input:
+              sign_type: "typed_data"
+              chain_id: "1"
+              signer: "0x0000000000000000000000000000000000000002"
+              typed_data:
+                primaryType: "SafeTx"
+                domain:
+                  chainId: "1"
+                  verifyingContract: "0x0000000000000000000000000000000000000001"
+                message:
+                  to: "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+                  value: "0"
+                  data: "0x"
+                  operation: "0"
+                  gasPrice: "0"
+                  gasToken: "0x0000000000000000000000000000000000000000"
+                  refundReceiver: "0x0000000000000000000000000000000000000000"
+                  nonce: "0"
+            expect_pass: false
+
+  - name: "Multisend instance"
+    type: "instance"
+    chain_type: "evm"
+    chain_id: "1"
+    enabled: true
+    config:
+      template: "Multisend Template"
+      id: "multisend"
+      variables:
+        chain_id: "1"
+        multisend_contract_address: "0xA238CBeb142c10Ef7Ad8442C6D1f9E89e07e7761"
+        delegate_to: "erc20,erc721"
+        delegate_mode: "per_item"
+      test_cases_overrides:
+        "Multisend allowlist and per_item delegation":
+          - name: "should pass when to equals multisend contract"
+            input:
+              sign_type: "transaction"
+              chain_id: 1
+              signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+              transaction:
+                from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+                to: "0xA238CBeb142c10Ef7Ad8442C6D1f9E89e07e7761"
+                value: "0x0"
+                data: "0x"
+            expect_pass: true
+          - name: "should reject when to differs (full engine)"
+            input:
+              sign_type: "transaction"
+              chain_id: 1
+              signer: "0x0000000000000000000000000000000000000002"
+              transaction:
+                from: "0x0000000000000000000000000000000000000002"
+                to: "0x0000000000000000000000000000000000000001"
+                value: "0x0"
+                data: "0x"
+            expect_pass: false
+
+  - name: "ERC20 instance"
+    type: "instance"
+    chain_type: "evm"
+    chain_id: "1"
+    enabled: true
+    config:
+      template: "ERC20 Template"
+      id: "erc20"
+      variables:
+        chain_id: "1"
+        token_address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+        max_transfer_amount: "1000000000"
+        allowed_recipients: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+        allowed_spenders: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+      test_cases_overrides:
+        "ERC20 transfer/approve with limit":
+          - name: "transfer: pass when to allowed and amount under cap"
+            input:
+              sign_type: "transaction"
+              chain_id: 1
+              signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+              transaction:
+                from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+                to: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+                value: "0x0"
+                data: "0xa9059cbb0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc40000000000000000000000000000000000000000000000000000000000000000"
+            expect_pass: true
+          - name: "reject wrong contract (full engine)"
+            input:
+              sign_type: "transaction"
+              chain_id: 1
+              signer: "0x0000000000000000000000000000000000000002"
+              transaction:
+                from: "0x0000000000000000000000000000000000000002"
+                to: "0x0000000000000000000000000000000000000001"
+                value: "0x0"
+                data: "0xa9059cbb0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc40000000000000000000000000000000000000000000000000000000000000000"
+            expect_pass: false
+
+  - name: "ERC721 instance"
+    type: "instance"
+    chain_type: "evm"
+    chain_id: "1"
+    enabled: true
+    config:
+      template: "ERC721 Template"
+      id: "erc721"
+      variables:
+        chain_id: "1"
+        token_address: "0xBC4ca0EdA7647A8aB7C2061c2E118A18a936f13D"
+        allowed_recipients: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+      test_cases_overrides:
+        "ERC721 transfer/approve with allowlists":
+          - name: "transferFrom: pass when from/to allowed"
+            input:
+              sign_type: "transaction"
+              chain_id: 1
+              signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+              transaction:
+                from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+                to: "0xBC4ca0EdA7647A8aB7C2061c2E118A18a936f13D"
+                value: "0x0"
+                data: "0x23b872dd000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb922660000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc40000000000000000000000000000000000000000000000000000000000000001"
+            expect_pass: true
+          - name: "reject wrong contract (full engine)"
+            input:
+              sign_type: "transaction"
+              chain_id: 1
+              signer: "0x0000000000000000000000000000000000000002"
+              transaction:
+                from: "0x0000000000000000000000000000000000000002"
+                to: "0x0000000000000000000000000000000000000001"
+                value: "0x0"
+                data: "0x23b872dd000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb922660000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc40000000000000000000000000000000000000000000000000000000000000001"
+            expect_pass: false
+
+  # Polymarket JS + Safe JS combined: Polymarket instance (ClobAuth, Order, CreateProxy, Safe Wallet Creation, inner rule)
+  # must be listed before Safe Polymarket so inner rule id exists for delegate_to.
+  - name: "Polymarket instance"
+    type: "instance"
+    chain_type: "evm"
+    chain_id: "137"
+    enabled: true
+    config:
+      template: "Polymarket Template"
+      id: "polymarket"
+      variables:
+        chain_id: "137"
+        ctf_exchange_address: "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E"
+        neg_risk_adapter_address: "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296"
+        neg_risk_exchange_address: "0xC5d563A36AE78145C45a50134d48A1215220f80a"
+        conditional_tokens_address: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+        safe_proxy_factory_address: "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"
+        usdc_bridged_address: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+        allowed_safe_address_for_testing: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+        allowed_safe_addresses: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+        clob_auth_domain_name: "ClobAuthDomain"
+        clob_auth_domain_version: "1"
+        ctf_exchange_domain_name: "Polymarket CTF Exchange"
+        ctf_exchange_domain_version: "1"
+        safe_factory_domain_name: "Polymarket Contract Proxy Factory"
+      # Instance overrides: in full engine, lastNoMatchReason comes from other rules (e.g. Safe),
+      # so negative tests must not assert expect_reason.
+      test_cases_overrides:
+        "Polymarket CLOB Auth Signature":
+          - name: "should pass valid ClobAuth"
+            input:
+              sign_type: "typed_data"
+              chain_id: "137"
+              signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+              typed_data:
+                primaryType: "ClobAuth"
+                domain:
+                  name: "ClobAuthDomain"
+                  version: "1"
+                  chainId: "137"
+                message:
+                  address: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+                  timestamp: "1704067200"
+                  nonce: "12345"
+                  message: "This message attests that I control the given wallet"
+            expect_pass: true
+          - name: "should reject invalid domain (full engine)"
+            input:
+              sign_type: "typed_data"
+              chain_id: "137"
+              signer: "0x0000000000000000000000000000000000000002"
+              typed_data:
+                primaryType: "ClobAuth"
+                domain:
+                  name: "WrongDomain"
+                  version: "1"
+                  chainId: "137"
+                message:
+                  address: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+                  timestamp: "1704067200"
+                  nonce: "12345"
+                  message: "This message attests that I control the given wallet"
+            expect_pass: false
+        "Polymarket Order Signature":
+          - name: "should pass valid order with zero taker"
+            input:
+              sign_type: "typed_data"
+              chain_id: "137"
+              signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+              typed_data:
+                primaryType: "Order"
+                domain:
+                  name: "Polymarket CTF Exchange"
+                  version: "1"
+                  chainId: "137"
+                  verifyingContract: "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E"
+                message:
+                  salt: "12345"
+                  maker: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+                  signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+                  taker: "0x0000000000000000000000000000000000000000"
+                  tokenId: "1"
+                  makerAmount: "1000000000000000000"
+                  takerAmount: "1000000000000000000"
+                  expiration: "1893456000"
+                  nonce: "0"
+                  feeRateBps: "100"
+                  side: "0"
+                  signatureType: "0"
+            expect_pass: true
+          - name: "should reject non-zero taker (full engine)"
+            input:
+              sign_type: "typed_data"
+              chain_id: "137"
+              signer: "0x0000000000000000000000000000000000000002"
+              typed_data:
+                primaryType: "Order"
+                domain:
+                  name: "Polymarket CTF Exchange"
+                  version: "1"
+                  chainId: "137"
+                  verifyingContract: "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E"
+                message:
+                  salt: "12345"
+                  maker: "0x0000000000000000000000000000000000000002"
+                  signer: "0x0000000000000000000000000000000000000002"
+                  taker: "0x1111111111111111111111111111111111111111"
+                  tokenId: "1"
+                  makerAmount: "1000000000000000000"
+                  takerAmount: "1000000000000000000"
+                  expiration: "1893456000"
+                  nonce: "0"
+                  feeRateBps: "100"
+                  side: "0"
+                  signatureType: "0"
+            expect_pass: false
+        "Polymarket Safe Wallet Creation Signature":
+          - name: "should pass valid CreateProxy with zero payment"
+            input:
+              sign_type: "typed_data"
+              chain_id: "137"
+              signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+              typed_data:
+                primaryType: "CreateProxy"
+                domain:
+                  name: "Polymarket Contract Proxy Factory"
+                  chainId: "137"
+                  verifyingContract: "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"
+                message:
+                  paymentToken: "0x0000000000000000000000000000000000000000"
+                  payment: "0"
+                  paymentReceiver: "0x0000000000000000000000000000000000000000"
+            expect_pass: true
+          - name: "should reject non-zero payment (full engine)"
+            input:
+              sign_type: "typed_data"
+              chain_id: "137"
+              signer: "0x0000000000000000000000000000000000000002"
+              typed_data:
+                primaryType: "CreateProxy"
+                domain:
+                  name: "Polymarket Contract Proxy Factory"
+                  chainId: "137"
+                  verifyingContract: "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"
+                message:
+                  paymentToken: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+                  payment: "1000000"
+                  paymentReceiver: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            expect_pass: false
+        "Polymarket Safe Wallet Creation":
+          - name: "should pass createProxy with zero payment"
+            input:
+              sign_type: "transaction"
+              chain_id: "137"
+              signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+              transaction:
+                from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+                to: "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"
+                value: "0x0"
+                data: "0xa1884d2c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+            expect_pass: true
+          - name: "should reject wrong target (full engine)"
+            input:
+              sign_type: "transaction"
+              chain_id: "137"
+              signer: "0x0000000000000000000000000000000000000002"
+              transaction:
+                from: "0x0000000000000000000000000000000000000002"
+                to: "0x0000000000000000000000000000000000000001"
+                value: "0x0"
+                data: "0xa1884d2c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+            expect_pass: false
+        "Polymarket transactions":
+          - name: "should pass USDC approve to CTF Exchange"
+            input:
+              sign_type: "transaction"
+              chain_id: "137"
+              signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+              transaction:
+                from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+                to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+                value: "0x0"
+                data: "0x095ea7b30000000000000000000000004bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982Effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+            expect_pass: true
+          - name: "should reject USDC approve to disallowed spender (full engine)"
+            input:
+              sign_type: "transaction"
+              chain_id: "137"
+              signer: "0x0000000000000000000000000000000000000002"
+              transaction:
+                from: "0x0000000000000000000000000000000000000002"
+                to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+                value: "0x0"
+                data: "0x095ea7b3000000000000000000000000DEADDEADDEADDEADDEADDEADDEADDEADDEADDEADffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+            expect_pass: false
+
+  # Safe template instance for Polymarket: delegates nested calls to polymarket-transactions.
+  - name: "Safe Polymarket instance"
+    type: "instance"
+    chain_type: "evm"
+    chain_id: "137"
+    enabled: true
+    config:
+      template: "Safe Template"
+      id: "safe-polymarket"
+      variables:
+        chain_id: "137"
+        allowed_safe_addresses: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+        allowed_safe_tx_to_addresses: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174,0x4D97DCd97eC945f40cF65F87097ACe5EA0476045,0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296,0xC5d563A36AE78145C45a50134d48A1215220f80a"
+        delegate_to: "polymarket-transactions"
+        delegate_mode: "single"
+        test_inner_to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+      # Instance overrides with real Polygon mainnet transaction data from polymarket.safe.template.yaml.
+      # SafeTx pass cases use delegation-compatible calldata (inner tx validated by Polymarket transactions rule).
+      # Negative tests use signer NOT in signer_restriction to avoid auto-allow.
+      test_cases_overrides:
+        "Safe SafeTx and execTransaction":
+          # ---------------------------------------------------------------
+          # Real SafeTx: USDC.e approve to CTF Exchange
+          # Source: Polygon tx 0xfc9db476
+          # ---------------------------------------------------------------
+          - name: "SafeTx pass: USDC.e approve to CTF Exchange (real tx 0xfc9db476)"
+            input:
+              sign_type: "typed_data"
+              chain_id: "137"
+              signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+              typed_data:
+                primaryType: "SafeTx"
+                domain:
+                  chainId: "137"
+                  verifyingContract: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+                message:
+                  to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+                  value: "0"
+                  data: "0x095ea7b30000000000000000000000004bfb41d5b3570defd03c39a9a4d8de6bd8b8982effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                  operation: "0"
+                  safeTxGas: "122295"
+                  baseGas: "0"
+                  gasPrice: "0"
+                  gasToken: "0x0000000000000000000000000000000000000000"
+                  refundReceiver: "0x0000000000000000000000000000000000000000"
+                  nonce: "0"
+            expect_pass: true
+          # ---------------------------------------------------------------
+          # Real SafeTx: CTF redeemPositions
+          # Source: Polygon tx 0x714b3d1f
+          # CTF.redeemPositions(USDC.e, 0x0, conditionId, [1,2])
+          # ---------------------------------------------------------------
+          - name: "SafeTx pass: CTF redeemPositions (real tx 0x714b3d)"
+            input:
+              sign_type: "typed_data"
+              chain_id: "137"
+              signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+              typed_data:
+                primaryType: "SafeTx"
+                domain:
+                  chainId: "137"
+                  verifyingContract: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+                message:
+                  to: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+                  value: "0"
+                  data: "0x01b7037c0000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa841740000000000000000000000000000000000000000000000000000000000000000bd42fb9ac3870c35193d69ca1ad5ea00363d8ee6aba80b910a2003c370597cae0000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002"
+                  operation: "0"
+                  safeTxGas: "217890"
+                  baseGas: "0"
+                  gasPrice: "0"
+                  gasToken: "0x0000000000000000000000000000000000000000"
+                  refundReceiver: "0x0000000000000000000000000000000000000000"
+                  nonce: "0"
+            expect_pass: true
+          # ---------------------------------------------------------------
+          # Reject: wrong verifyingContract (not allowed Safe)
+          # ---------------------------------------------------------------
+          - name: "SafeTx reject: wrong verifyingContract (full engine)"
+            input:
+              sign_type: "typed_data"
+              chain_id: "137"
+              signer: "0x0000000000000000000000000000000000000002"
+              typed_data:
+                primaryType: "SafeTx"
+                domain:
+                  chainId: "137"
+                  verifyingContract: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+                message:
+                  to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+                  value: "0"
+                  data: "0x095ea7b30000000000000000000000004bfb41d5b3570defd03c39a9a4d8de6bd8b8982effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                  operation: "0"
+                  safeTxGas: "0"
+                  baseGas: "0"
+                  gasPrice: "0"
+                  gasToken: "0x0000000000000000000000000000000000000000"
+                  refundReceiver: "0x0000000000000000000000000000000000000000"
+                  nonce: "0"
+            expect_pass: false
+          # ---------------------------------------------------------------
+          # Reject: DELEGATECALL (operation=1) blocked
+          # ---------------------------------------------------------------
+          - name: "SafeTx reject: DELEGATECALL blocked (full engine)"
+            input:
+              sign_type: "typed_data"
+              chain_id: "137"
+              signer: "0x0000000000000000000000000000000000000002"
+              typed_data:
+                primaryType: "SafeTx"
+                domain:
+                  chainId: "137"
+                  verifyingContract: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+                message:
+                  to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+                  value: "0"
+                  data: "0x095ea7b30000000000000000000000004bfb41d5b3570defd03c39a9a4d8de6bd8b8982effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                  operation: "1"
+                  safeTxGas: "0"
+                  baseGas: "0"
+                  gasPrice: "0"
+                  gasToken: "0x0000000000000000000000000000000000000000"
+                  refundReceiver: "0x0000000000000000000000000000000000000000"
+                  nonce: "0"
+            expect_pass: false
+          # ---------------------------------------------------------------
+          # Real execTransaction: USDC.e approve to CTF Exchange
+          # Source: Polygon tx 0xfc9db476
+          # ---------------------------------------------------------------
+          - name: "execTransaction pass: USDC.e approve (real tx 0xfc9db476)"
+            input:
+              sign_type: "transaction"
+              chain_id: "137"
+              signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+              transaction:
+                from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+                to: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+                value: "0x0"
+                data: "0x6a7612020000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa84174000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001ddb7000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001c00000000000000000000000000000000000000000000000000000000000000044095ea7b30000000000000000000000004bfb41d5b3570defd03c39a9a4d8de6bd8b8982effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000419fe78feb525c194e1ef621bad0cfab2461a9aa9c40e3e4be16b4f9df71a761372615acd2cb49c207225fab49752093288b50c1f89ff9908f00bf71b97099d75b1c00000000000000000000000000000000000000000000000000000000000000"
+            expect_pass: true
+          # ---------------------------------------------------------------
+          # Real execTransaction: CTF redeemPositions
+          # Source: Polygon tx 0x714b3d1f
+          # ---------------------------------------------------------------
+          - name: "execTransaction pass: CTF redeemPositions (real tx 0x714b3d)"
+            input:
+              sign_type: "transaction"
+              chain_id: "137"
+              signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+              transaction:
+                from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+                to: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+                value: "0x0"
+                data: "0x6a7612020000000000000000000000004d97dcd97ec945f40cf65f87097ace5ea047604500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000353220000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000026000000000000000000000000000000000000000000000000000000000000000e401b7037c0000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa841740000000000000000000000000000000000000000000000000000000000000000bd42fb9ac3870c35193d69ca1ad5ea00363d8ee6aba80b910a2003c370597cae0000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000041afaaa7d5183bb28c20af45dc009544b9358e971c25e8335261debdc43b756b3b1cd75457fc9d60ae0b7bd2e45deaf93aa80446f41061424a4d0f46712449e02b1b00000000000000000000000000000000000000000000000000000000000000"
+            expect_pass: true
+
+  # Delegation: evm_js delegate_to target; TestRule_DelegationSinglePasses.
+  # Scoped to first signer only so second signer is not allowed by this rule (signer_restriction negative e2e).
+  # test_cases required for validate-rules and startup validation (at least 1 positive + 1 negative).
+  - id: "delegate-target"
+    name: "Delegate Target"
+    type: "evm_js"
+    mode: "whitelist"
+    chain_type: "evm"
+    chain_id: "1"
+    signer_address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+    enabled: true
+    config:
+      # Only match personal_sign and the exact delegation payload (transaction to treasury with data 0x). Avoid matching other typed_data/transaction so other rules' negative cases are not allowed by this rule.
+      sign_type_filter: "personal_sign,transaction"
+      script: |
+        function validate(i) {
+          if (i.sign_type === 'personal_sign') return { valid: true };
+          if (i.sign_type === 'transaction' && i.transaction && i.transaction.to === '0x5B38Da6a701c568545dCfcB03FcB875f56beddC4' && (i.transaction.data || '0x') === '0x') return { valid: true };
+          return { valid: false, reason: 'delegate target only allows personal_sign or delegated tx to treasury' };
+        }
+    test_cases:
+      - name: "allow when in scope (positive)"
+        input:
+          sign_type: "personal_sign"
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          chain_id: 1
+          personal_sign:
+            message: "0x68656c6c6f"
+        expect_pass: true
+      - name: "reject when signer not in scope (negative)"
+        input:
+          sign_type: "personal_sign"
+          signer: "0x0000000000000000000000000000000000000001"
+          chain_id: 1
+          personal_sign:
+            message: "0x00"
+        expect_pass: false
+
+  # Scoped to first signer so second signer is not allowed (address whitelist + signer restriction e2e).
+  # test_cases required for validate-rules and startup validation (at least 1 positive + 1 negative).
+  - id: "delegate-single"
+    name: "Delegate Single"
+    type: "evm_js"
+    mode: "whitelist"
+    chain_type: "evm"
+    chain_id: "1"
+    signer_address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+    enabled: true
+    config:
+      sign_type_filter: "transaction,personal_sign"
+      script: |
+        function validate(i){
+          if (i.sign_type !== 'transaction' || !i.transaction) return { valid: false, reason: 'transaction only' };
+          var tx = i.transaction;
+          var to = (tx.to || '').toLowerCase();
+          if (to !== '0x5b38da6a701c568545dcfcb03fcb875f56beddc4') return { valid: false, reason: 'delegate single only allows tx to treasury' };
+          if ((tx.data || '0x').toLowerCase() !== '0x') return { valid: false, reason: 'delegate single only allows empty data' };
+          return {
+            valid: true,
+            payload: {
+              sign_type: "transaction",
+              chain_id: 1,
+              signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+              transaction: { from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266", to: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4", value: "0x0", data: "0x" }
+            }
+          };
+        }
+      delegate_to: "delegate-target"
+      delegate_mode: "single"
+    test_cases:
+      - name: "delegate single allows transaction and delegates (positive)"
+        input:
+          sign_type: "transaction"
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          chain_id: 1
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+            value: "0x0"
+            data: "0x"
+        expect_pass: true
+      - name: "reject when signer not in scope (negative)"
+        input:
+          sign_type: "personal_sign"
+          signer: "0x0000000000000000000000000000000000000001"
+          chain_id: 1
+          personal_sign:
+            message: "0x00"
+        expect_pass: false

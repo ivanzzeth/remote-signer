@@ -323,7 +323,7 @@ func NewSolidityRuleEvaluator(cfg SolidityEvaluatorConfig, logger *slog.Logger) 
 	// Verify forge is executable
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if _, err := exec.CommandContext(ctx, foundryPath, "--version").Output(); err != nil {
+	if _, err := exec.CommandContext(ctx, foundryPath, "--version").Output(); err != nil { // #nosec G204 -- foundryPath is admin-configured
 		return nil, fmt.Errorf("forge not executable at %s: %w", foundryPath, err)
 	}
 
@@ -832,7 +832,7 @@ func (e *SolidityRuleEvaluator) executeScript(ctx context.Context, script string
 	if isTest {
 		// Use forge test for RuleEvaluatorTest contracts
 		// Use cache path to speed up compilation
-		cmd = exec.CommandContext(execCtx,
+		cmd = exec.CommandContext(execCtx, // #nosec G204 -- foundryPath is admin-configured
 			e.foundryPath, "test",
 			"--match-path", scriptPath,
 			"--match-contract", "RuleEvaluatorTest",
@@ -842,7 +842,7 @@ func (e *SolidityRuleEvaluator) executeScript(ctx context.Context, script string
 	} else {
 		// Use forge script for RuleEvaluator contracts
 		// Use cache path to speed up compilation
-		cmd = exec.CommandContext(execCtx,
+		cmd = exec.CommandContext(execCtx, // #nosec G204 -- foundryPath is admin-configured
 			e.foundryPath, "script",
 			scriptPath,
 			"--json",
@@ -903,7 +903,14 @@ func (e *SolidityRuleEvaluator) executeScript(ctx context.Context, script string
 }
 
 // GenerateSyntaxCheckScript generates a script for compilation checking (Expression mode)
-func (e *SolidityRuleEvaluator) GenerateSyntaxCheckScript(expression string) string {
+func (e *SolidityRuleEvaluator) GenerateSyntaxCheckScript(expression string, inMappingArrays ...map[string][]string) string {
+	// Preprocess custom in() operator before embedding into Solidity source
+	var arrays map[string][]string
+	if len(inMappingArrays) > 0 {
+		arrays = inMappingArrays[0]
+	}
+	ir := processInOperatorToMappings(expression, arrays)
+	expression = preprocessInOperator(ir.Modified)
 	return fmt.Sprintf(`// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -942,8 +949,12 @@ contract SyntaxCheck {
 
 // GenerateFunctionSyntaxCheckScript generates a script for compilation checking (Functions mode)
 // Uses the same two-contract structure as solidityFunctionTemplate for consistency
-func (e *SolidityRuleEvaluator) GenerateFunctionSyntaxCheckScript(functions string) string {
-	ir := processInOperatorToMappings(functions, nil)
+func (e *SolidityRuleEvaluator) GenerateFunctionSyntaxCheckScript(functions string, inMappingArrays ...map[string][]string) string {
+	var arrays map[string][]string
+	if len(inMappingArrays) > 0 {
+		arrays = inMappingArrays[0]
+	}
+	ir := processInOperatorToMappings(functions, arrays)
 	functions = preprocessInOperator(ir.Modified)
 	return fmt.Sprintf(`// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
@@ -1310,20 +1321,36 @@ func (e *SolidityRuleEvaluator) generateTypedDataFunctionsScript(
 
 // GenerateTypedDataExpressionSyntaxCheckScript generates a syntax check script for TypedDataExpression mode.
 // Callers must pass the rule's typed_data_struct via GenerateTypedDataExpressionSyntaxCheckScriptWithStruct; rules are the single source of truth.
-func (e *SolidityRuleEvaluator) GenerateTypedDataExpressionSyntaxCheckScript(expression string) string {
-	return e.GenerateTypedDataExpressionSyntaxCheckScriptWithStruct(expression, nil)
+func (e *SolidityRuleEvaluator) GenerateTypedDataExpressionSyntaxCheckScript(expression string, inMappingArrays ...map[string][]string) string {
+	return e.GenerateTypedDataExpressionSyntaxCheckScriptWithStruct(expression, nil, inMappingArrays...)
 }
 
 // GenerateTypedDataExpressionSyntaxCheckScriptWithStruct generates a syntax check script from the rule's struct definition only.
 // structDef must come from the rule config (typed_data_struct); no hardcoded structs. When structDef is nil, generates only EIP-712/ctx vars so expressions that reference structs fail at compile (caller should require typed_data_struct for typed_data_expression rules).
-func (e *SolidityRuleEvaluator) GenerateTypedDataExpressionSyntaxCheckScriptWithStruct(expression string, structDef *StructDefinition) string {
+func (e *SolidityRuleEvaluator) GenerateTypedDataExpressionSyntaxCheckScriptWithStruct(expression string, structDef *StructDefinition, inMappingArrays ...map[string][]string) string {
+	// Preprocess custom in() operator: first try mapping replacement,
+	// then expand literal in(expr, a, b, c) to OR chains. This must happen before embedding into
+	// Solidity source; otherwise forge will fail on the non-standard in() syntax.
+	var arrays map[string][]string
+	if len(inMappingArrays) > 0 {
+		arrays = inMappingArrays[0]
+	}
+	ir := processInOperatorToMappings(expression, arrays)
+	expression = preprocessInOperator(ir.Modified)
+
 	if structDef == nil {
 		// No struct: only standard EIP-712 and ctx variables. Expression that references any struct will fail at compile (undefined identifier).
 		return fmt.Sprintf(`// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 contract SyntaxCheck {
-    function run() public pure returns (bool) {
+    %s
+
+    constructor() {
+        %s
+    }
+
+    function run() public view returns (bool) {
         string memory eip712_primaryType = "";
         string memory eip712_domainName = "";
         string memory eip712_domainVersion = "";
@@ -1339,7 +1366,7 @@ contract SyntaxCheck {
         return true;
     }
 }
-`, expression)
+`, ir.Declarations, ir.ConstructorInit, expression)
 	}
 
 	// Generate from rule's struct only
@@ -1356,8 +1383,13 @@ pragma solidity ^0.8.20;
 
 contract SyntaxCheck {
     %s
+    %s
 
-    function run() public pure returns (bool) {
+    constructor() {
+        %s
+    }
+
+    function run() public view returns (bool) {
         string memory eip712_primaryType = "";
         string memory eip712_domainName = "";
         string memory eip712_domainVersion = "";
@@ -1376,12 +1408,16 @@ contract SyntaxCheck {
         return true;
     }
 }
-`, structDefStr, structDef.Name, instanceName, structDef.Name, strings.Join(fieldDefaults, ",\n"), expression)
+`, structDefStr, ir.Declarations, ir.ConstructorInit, structDef.Name, instanceName, structDef.Name, strings.Join(fieldDefaults, ",\n"), expression)
 }
 
 // GenerateTypedDataFunctionsSyntaxCheckScript generates a syntax check script for TypedDataFunctions mode
-func (e *SolidityRuleEvaluator) GenerateTypedDataFunctionsSyntaxCheckScript(functions string) string {
-	ir := processInOperatorToMappings(functions, nil)
+func (e *SolidityRuleEvaluator) GenerateTypedDataFunctionsSyntaxCheckScript(functions string, inMappingArrays ...map[string][]string) string {
+	var arrays map[string][]string
+	if len(inMappingArrays) > 0 {
+		arrays = inMappingArrays[0]
+	}
+	ir := processInOperatorToMappings(functions, arrays)
 	functions = preprocessInOperator(ir.Modified)
 	return fmt.Sprintf(`// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
@@ -2348,7 +2384,7 @@ func (e *SolidityRuleEvaluator) executeBatchScript(
 	// Execute forge test with verbose output for parsing individual test results
 	// Note: We use human-readable output (not --json) because parseBatchTestOutput
 	// uses regex to match [PASS] and [FAIL: reason] patterns
-	cmd := exec.CommandContext(execCtx,
+	cmd := exec.CommandContext(execCtx, // #nosec G204 -- foundryPath is admin-configured
 		e.foundryPath, "test",
 		"--match-path", scriptPath,
 		"--match-contract", "BatchRuleEvaluatorTest",
