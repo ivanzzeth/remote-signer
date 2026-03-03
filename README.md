@@ -1,3 +1,7 @@
+**[中文](README.zh.md)** | English
+
+---
+
 # Remote Signer
 
 A secure, policy-driven signing service for EVM chains. Controls **what** gets signed through a rule engine, not just **who** can sign.

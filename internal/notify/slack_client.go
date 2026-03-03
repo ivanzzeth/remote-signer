@@ -11,13 +11,13 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/logger"
 )
 
-// SlackClient Slack API客户端
+// SlackClient is the Slack API client for sending notifications.
 type SlackClient struct {
 	botToken   string
 	httpClient *http.Client
 }
 
-// NewSlackClient 创建Slack客户端
+// NewSlackClient creates a Slack client.
 func NewSlackClient(botToken string) (*SlackClient, error) {
 	if botToken == "" {
 		return nil, fmt.Errorf("bot token is required")
@@ -31,7 +31,7 @@ func NewSlackClient(botToken string) (*SlackClient, error) {
 	}, nil
 }
 
-// GetChannelMembers 获取频道成员列表（排除bot）
+// GetChannelMembers returns channel member IDs, excluding bots.
 func (s *SlackClient) GetChannelMembers(channelID string) ([]string, error) {
 	url := fmt.Sprintf("https://slack.com/api/conversations.members?channel=%s", channelID)
 
@@ -69,13 +69,12 @@ func (s *SlackClient) GetChannelMembers(channelID string) ([]string, error) {
 		Str("channel_id", channelID).
 		Msg("Retrieved members from channel")
 
-	// 过滤掉bot用户
 	humanMembers, err := s.filterBots(result.Members)
 	if err != nil {
 		log.Warn().
 			Err(err).
 			Msg("Failed to filter bots, returning all members")
-		return result.Members, nil // 如果过滤失败，返回所有成员
+		return result.Members, nil
 	}
 
 	log.Debug().
@@ -86,7 +85,7 @@ func (s *SlackClient) GetChannelMembers(channelID string) ([]string, error) {
 	return humanMembers, nil
 }
 
-// GetUserInfo 获取用户信息
+// GetUserInfo returns Slack user info for the given user ID.
 func (s *SlackClient) GetUserInfo(userID string) (*UserInfo, error) {
 	url := fmt.Sprintf("https://slack.com/api/users.info?user=%s", userID)
 
@@ -129,7 +128,7 @@ func (s *SlackClient) GetUserInfo(userID string) (*UserInfo, error) {
 	}, nil
 }
 
-// PostMessage 发送消息到指定频道
+// PostMessage sends a message to the given Slack channel.
 func (s *SlackClient) PostMessage(channelID, message string) error {
 	url := "https://slack.com/api/chat.postMessage"
 
@@ -198,11 +197,11 @@ func (s *SlackClient) PostMessage(channelID, message string) error {
 	return nil
 }
 
-// ReplyToChannel 回复消息到频道
+// ReplyToChannel posts a reply to the channel (response_url from interaction payload).
 func (s *SlackClient) ReplyToChannel(responseURL, message, responseType string) error {
 	payload := map[string]interface{}{
 		"text":          message,
-		"response_type": responseType, // in_channel 或 ephemeral
+		"response_type": responseType, // "in_channel" or "ephemeral"
 	}
 
 	body, err := json.Marshal(payload)
@@ -225,16 +224,15 @@ func (s *SlackClient) ReplyToChannel(responseURL, message, responseType string) 
 	return nil
 }
 
-// UserInfo Slack用户信息
+// UserInfo holds Slack user details.
 type UserInfo struct {
 	ID       string
 	Name     string
 	RealName string
 }
 
-// FindUserByName 通过用户名查找用户ID
+// FindUserByName looks up a user ID by display name.
 func (s *SlackClient) FindUserByName(username string) (string, error) {
-	// 获取所有用户列表
 	url := "https://slack.com/api/users.list"
 
 	req, err := http.NewRequest("GET", url, nil)
@@ -270,7 +268,6 @@ func (s *SlackClient) FindUserByName(username string) (string, error) {
 		return "", fmt.Errorf("Slack API error: %s", result.Error)
 	}
 
-	// 查找匹配的用户名（不区分大小写）
 	usernameLower := strings.ToLower(username)
 	for _, member := range result.Members {
 		if member.Deleted {
@@ -289,9 +286,8 @@ func (s *SlackClient) FindUserByName(username string) (string, error) {
 	return "", fmt.Errorf("user not found: @%s", username)
 }
 
-// filterBots 过滤掉bot用户，只返回真实用户
+// filterBots returns only non-bot user IDs from the given list.
 func (s *SlackClient) filterBots(userIDs []string) ([]string, error) {
-	// 获取所有用户信息
 	url := "https://slack.com/api/users.list"
 
 	req, err := http.NewRequest("GET", url, nil)
@@ -326,7 +322,6 @@ func (s *SlackClient) filterBots(userIDs []string) ([]string, error) {
 		return nil, fmt.Errorf("Slack API error: %s", result.Error)
 	}
 
-	// 创建bot用户ID的映射
 	botMap := make(map[string]bool)
 	for _, member := range result.Members {
 		if member.IsBot || member.Deleted {
@@ -334,7 +329,6 @@ func (s *SlackClient) filterBots(userIDs []string) ([]string, error) {
 		}
 	}
 
-	// 过滤掉bot和已删除用户
 	humanMembers := make([]string, 0, len(userIDs))
 	for _, userID := range userIDs {
 		if !botMap[userID] {
@@ -345,7 +339,7 @@ func (s *SlackClient) filterBots(userIDs []string) ([]string, error) {
 	return humanMembers, nil
 }
 
-// SendToChannels 向多个Slack频道发送消息
+// SendToChannels sends the message to multiple Slack channels.
 func (s *SlackClient) SendToChannels(channelIDs []string, message string) error {
 	if len(channelIDs) == 0 {
 		return fmt.Errorf("channel IDs are required")

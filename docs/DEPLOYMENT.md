@@ -371,9 +371,7 @@ Primary Instance          Secondary Instances
 
 | Endpoint | Description |
 |----------|-------------|
-| `GET /health` | Basic health check |
-| `GET /health/ready` | Readiness probe (DB connected) |
-| `GET /health/live` | Liveness probe |
+| `GET /health` | Health check (use for both liveness and readiness probes) |
 
 ### Metrics (Prometheus format)
 

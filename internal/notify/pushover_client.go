@@ -10,7 +10,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/logger"
 )
 
-// PushoverClient Pushover API客户端
+// PushoverClient is the Pushover API client for sending notifications.
 type PushoverClient struct {
 	appToken   string
 	retry      int
@@ -20,7 +20,7 @@ type PushoverClient struct {
 	httpClient *http.Client
 }
 
-// NewPushoverClient 创建Pushover客户端
+// NewPushoverClient creates a Pushover client.
 func NewPushoverClient(appToken string, retry, expire, maxRetries, retryDelay int) (*PushoverClient, error) {
 	if appToken == "" {
 		return nil, fmt.Errorf("app token is required")
@@ -44,7 +44,7 @@ func NewPushoverClient(appToken string, retry, expire, maxRetries, retryDelay in
 	}, nil
 }
 
-// PushoverRequest Pushover API请求
+// PushoverRequest is the request body for the Pushover API.
 type PushoverRequest struct {
 	Token    string `json:"token"`
 	User     string `json:"user"`
@@ -55,14 +55,14 @@ type PushoverRequest struct {
 	Expire   int    `json:"expire"`
 }
 
-// PushoverResponse Pushover API响应
+// PushoverResponse is the response from the Pushover API.
 type PushoverResponse struct {
 	Status  int      `json:"status"`
 	Request string   `json:"request"`
 	Errors  []string `json:"errors,omitempty"`
 }
 
-// SendNotification 发送通知（支持自定义优先级和声音），带指数退避重试
+// SendNotification sends a notification with optional priority and sound; uses exponential backoff retry.
 func (p *PushoverClient) SendNotification(userKey, message string, priority int, sound string) error {
 	payload := PushoverRequest{
 		Token:    p.appToken,
@@ -72,7 +72,7 @@ func (p *PushoverClient) SendNotification(userKey, message string, priority int,
 		Sound:    sound,
 	}
 
-	// 只有 priority=2 (emergency) 才需要 retry 和 expire
+	// Only priority=2 (emergency) uses retry and expire
 	if priority == 2 {
 		payload.Retry = p.retry
 		payload.Expire = p.expire
@@ -87,7 +87,7 @@ func (p *PushoverClient) SendNotification(userKey, message string, priority int,
 	var lastErr error
 	for attempt := 1; attempt <= p.maxRetries; attempt++ {
 		if attempt > 1 {
-			// 指数退避: retryDelay * 2^(attempt-2)
+			// Exponential backoff: retryDelay * 2^(attempt-2)
 			delay := p.retryDelay * time.Duration(1<<uint(attempt-2))
 			log.Debug().
 				Int("attempt", attempt).
@@ -152,7 +152,6 @@ func (p *PushoverClient) SendNotification(userKey, message string, priority int,
 			continue
 		}
 
-		// 成功
 		log.Debug().
 			Str("request_id", result.Request).
 			Int("attempt", attempt).
@@ -160,16 +159,15 @@ func (p *PushoverClient) SendNotification(userKey, message string, priority int,
 		return nil
 	}
 
-	// 所有重试都失败
 	return fmt.Errorf("failed after %d attempts: %w", p.maxRetries, lastErr)
 }
 
-// SendEmergencyNotification 发送紧急通知（保持向后兼容）
+// SendEmergencyNotification sends an emergency notification (backward compatible).
 func (p *PushoverClient) SendEmergencyNotification(userKey, message string) error {
 	return p.SendNotification(userKey, message, 2, "persistent")
 }
 
-// maskUserKey 遮蔽用户key的部分内容（用于日志）
+// maskUserKey masks part of the user key for logging.
 func maskUserKey(key string) string {
 	if len(key) <= 8 {
 		return "***"
@@ -177,7 +175,7 @@ func maskUserKey(key string) string {
 	return key[:4] + "***" + key[len(key)-4:]
 }
 
-// SendToUsers 向多个Pushover用户发送通知
+// SendToUsers sends the notification to multiple Pushover users.
 func (p *PushoverClient) SendToUsers(userKeys []string, message string, priority int, sound string) error {
 	if len(userKeys) == 0 {
 		return fmt.Errorf("user keys are required")
