@@ -447,6 +447,11 @@ func TestSetDefaults_PreservesExistingValues(t *testing.T) {
 	assert.Equal(t, "debug", cfg.Logger.Level)
 }
 
+func TestSecurityConfig_IsSIGHUPRulesReloadEnabled_DefaultFalse(t *testing.T) {
+	var s SecurityConfig
+	assert.False(t, s.IsSIGHUPRulesReloadEnabled())
+}
+
 // ---------------------------------------------------------------------------
 // Load
 // ---------------------------------------------------------------------------

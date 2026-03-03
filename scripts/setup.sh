@@ -318,7 +318,7 @@ step_api_keys() {
     echo -e "${BOLD}  Step 2/5: API Keys${NC}"
     echo -e "${BOLD}=============================================================${NC}"
     echo ""
-    echo "Generating two API key pairs:"
+    echo "Two API key pairs (admin + dev):"
     echo ""
     echo -e "  ${CYAN}admin${NC}  Full access: manage signers, approve requests, manage rules"
     echo -e "  ${CYAN}dev${NC}    Limited: submit sign requests only"
@@ -326,21 +326,46 @@ step_api_keys() {
 
     mkdir -p "$DATA_DIR"
 
-    # Generate admin key
-    log_info "Generating admin API key..."
-    "$SCRIPT_DIR/generate-api-key.sh" -n admin -o "$DATA_DIR" -f > /dev/null 2>&1
+    REGENERATE_KEYS=true
+    if [ -f "$DATA_DIR/admin_private.pem" ] || [ -f "$DATA_DIR/admin_public.pem" ]; then
+        echo -e "  ${YELLOW}Existing API keys found in $DATA_DIR/${NC}"
+        read -rp "  Regenerate keys? (y/N): " REGEN
+        if [[ ! "$REGEN" =~ ^[Yy]$ ]]; then
+            REGENERATE_KEYS=false
+            log_info "Using existing API keys (config will use these so TUI can connect)."
+        fi
+        echo ""
+    fi
+
+    if [ "$REGENERATE_KEYS" = true ]; then
+        log_info "Generating admin API key..."
+        "$SCRIPT_DIR/generate-api-key.sh" -n admin -o "$DATA_DIR" -f > /dev/null 2>&1
+        log_info "Generating dev API key..."
+        "$SCRIPT_DIR/generate-api-key.sh" -n dev -o "$DATA_DIR" -f > /dev/null 2>&1
+    fi
+
+    # Load public/private key values (from newly generated or existing files)
     ADMIN_PUBLIC_KEY=$(openssl pkey -in "$DATA_DIR/admin_public.pem" -pubin -outform DER 2>/dev/null | base64 | tr -d '\n')
     ADMIN_PRIVATE_KEY=$(openssl pkey -in "$DATA_DIR/admin_private.pem" -outform DER 2>/dev/null | base64 | tr -d '\n')
+    if [ -z "$ADMIN_PUBLIC_KEY" ] || [ -z "$ADMIN_PRIVATE_KEY" ]; then
+        log_error "Failed to read admin key from $DATA_DIR/admin_*.pem"
+        exit 1
+    fi
     echo -e "  Key ID:      ${GREEN}admin${NC}"
     echo -e "  Private key: ${DIM}$DATA_DIR/admin_private.pem${NC}  (keep secret!)"
     echo -e "  Public key:  ${DIM}$DATA_DIR/admin_public.pem${NC}"
     echo ""
 
-    # Generate dev key
-    log_info "Generating dev API key..."
-    "$SCRIPT_DIR/generate-api-key.sh" -n dev -o "$DATA_DIR" -f > /dev/null 2>&1
+    if [ ! -f "$DATA_DIR/dev_private.pem" ] || [ ! -f "$DATA_DIR/dev_public.pem" ]; then
+        log_info "Generating dev API key..."
+        "$SCRIPT_DIR/generate-api-key.sh" -n dev -o "$DATA_DIR" -f > /dev/null 2>&1
+    fi
     DEV_PUBLIC_KEY=$(openssl pkey -in "$DATA_DIR/dev_public.pem" -pubin -outform DER 2>/dev/null | base64 | tr -d '\n')
     DEV_PRIVATE_KEY=$(openssl pkey -in "$DATA_DIR/dev_private.pem" -outform DER 2>/dev/null | base64 | tr -d '\n')
+    if [ -z "$DEV_PUBLIC_KEY" ] || [ -z "$DEV_PRIVATE_KEY" ]; then
+        log_error "Failed to read dev key from $DATA_DIR/dev_*.pem"
+        exit 1
+    fi
     echo -e "  Key ID:      ${GREEN}dev${NC}"
     echo -e "  Private key: ${DIM}$DATA_DIR/dev_private.pem${NC}  (keep secret!)"
     echo -e "  Public key:  ${DIM}$DATA_DIR/dev_public.pem${NC}"
@@ -513,6 +538,7 @@ security:
   manual_approval_enabled: true
   rules_api_readonly: true      # blocks rule/template CRUD via API (default: true)
   signers_api_readonly: false   # blocks signer/HD-wallet creation via API (default: false)
+  allow_sighup_rules_reload: false # reload config-sourced rules on SIGHUP (default: false)
 
 logger:
   level: "info"
@@ -535,6 +561,15 @@ api_keys:
 CONFIGEOF
 
         log_info "Configuration written to $CONFIG_FILE"
+    fi
+
+    # Ensure admin public_key in config matches current data/admin_public.pem (fixes 401 when "keep config" or stale config)
+    if [ -f "$PROJECT_DIR/$CONFIG_FILE" ] && [ -n "${ADMIN_PUBLIC_KEY:-}" ]; then
+        awk -v key="$ADMIN_PUBLIC_KEY" '
+            /^[[:space:]]*- id: "admin"/ { in_admin=1 }
+            in_admin && /^[[:space:]]*public_key:/ { sub(/"([^"]*)"/, "\"" key "\""); in_admin=0 }
+            { print }
+        ' "$PROJECT_DIR/$CONFIG_FILE" > "$PROJECT_DIR/$CONFIG_FILE.tmp" && mv "$PROJECT_DIR/$CONFIG_FILE.tmp" "$PROJECT_DIR/$CONFIG_FILE"
     fi
 
     # Create .env for Docker mode with random password
