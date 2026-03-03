@@ -490,12 +490,21 @@ func TestCheckSignerPermission_CaseInsensitive(t *testing.T) {
 	assert.True(t, CheckSignerPermission(apiKey, "0xabc123"))
 }
 
-func TestCheckSignerPermission_EmptyAllowedSigners(t *testing.T) {
+func TestCheckSignerPermission_EmptyAllowedSigners_NoAccess(t *testing.T) {
 	apiKey := &types.APIKey{
-		ID:             "key-signer-all",
+		ID:             "key-signer-empty",
 		AllowedSigners: []string{},
 	}
-	// Empty means all signers allowed
+	// Empty AllowedSigners = no access (unless AllowAllSigners is true)
+	assert.False(t, CheckSignerPermission(apiKey, "0xANYTHING"))
+}
+
+func TestCheckSignerPermission_AllowAllSigners(t *testing.T) {
+	apiKey := &types.APIKey{
+		ID:               "key-signer-all",
+		AllowAllSigners:  true,
+		AllowedSigners:   []string{},
+	}
 	assert.True(t, CheckSignerPermission(apiKey, "0xANYTHING"))
 }
 
