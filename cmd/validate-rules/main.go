@@ -120,7 +120,11 @@ func run() error {
 	flag.Parse()
 
 	if *versionFlag {
-		fmt.Printf("validate-rules %s\n", version)
+		name := "remote-signer-validate-rules"
+		if len(os.Args) > 0 {
+			name = filepath.Base(os.Args[0])
+		}
+		fmt.Printf("%s %s\n", name, version)
 		return nil
 	}
 

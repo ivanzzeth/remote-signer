@@ -234,7 +234,15 @@ logger:
 
 ## Rules
 
-Rules define the policy engine. They can be defined inline, loaded from files, or expanded from templates. For rule type syntax and examples, see [RULE_SYNTAX.md](RULE_SYNTAX.md).
+Rules define the policy engine. They can be defined **inline**, loaded from **files**, or expanded from **templates** (via **instance** rules). For concepts (templates, instances, presets) and examples, see [RULES_TEMPLATES_AND_PRESETS.md](RULES_TEMPLATES_AND_PRESETS.md). For rule type syntax (Solidity, evm_js, etc.), see [RULE_SYNTAX.md](RULE_SYNTAX.md).
+
+**Rule sources in config:**
+
+| Type | Meaning |
+|------|--------|
+| **inline** | Rule fully defined under `rules` (no `type: "file"` or `type: "instance"`). |
+| **file** | Load rules from an external YAML file (`config.path`). |
+| **instance** | Expand from a **template**: reference by name and supply `config.template` + `config.variables`; server substitutes variables into the template to produce concrete rules. |
 
 ```yaml
 rules:
@@ -243,11 +251,6 @@ rules:
     type: "evm_address_list"
     mode: "whitelist"            # whitelist | blocklist
     enabled: true
-    # Optional scope filters:
-    # chain_id: "1"
-    # chain_type: "evm"
-    # signer_address: "0x..."
-    # api_key_id: "dev"
     config:
       addresses: ["0x5B38Da..."]
 
@@ -257,7 +260,7 @@ rules:
     config:
       path: "rules/treasury.yaml"
 
-  # From template instance
+  # From template instance (template name + variables)
   - name: "Polymarket Safe rules"
     type: "instance"
     config:
@@ -265,7 +268,10 @@ rules:
       variables:
         chain_id: "137"
         ctf_exchange_address: "0x..."
+        allowed_safe_addresses: "0xYourSafe"
 ```
+
+**Presets** (optional): Pre-filled instance data in `rules/presets/*.yaml`; use **remote-signer-cli** or **setup.sh** to generate or merge rules from a preset with minimal overrides. See [RULES_TEMPLATES_AND_PRESETS.md](RULES_TEMPLATES_AND_PRESETS.md#4-presets).
 
 ### Rule evaluation order
 
@@ -274,6 +280,8 @@ rules:
 3. No match = reject (or pending manual approval if `manual_approval_enabled: true`)
 
 ## Templates
+
+**Templates** are parameterized rule files (variables + rules with `${var}` placeholders). They are loaded from paths listed under `templates` and expanded only when a **rule** of type **instance** references them and supplies variables. See [RULES_TEMPLATES_AND_PRESETS.md](RULES_TEMPLATES_AND_PRESETS.md#2-rule-templates).
 
 ```yaml
 templates:
