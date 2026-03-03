@@ -18,6 +18,8 @@ This document covers the full `config.yaml` structure. For a quick, annotated te
 server:
   host: "0.0.0.0"         # Bind address
   port: 8548               # Listening port
+  read_timeout: 30s       # Optional; HTTP read timeout (default 30s)
+  write_timeout: 30s       # Optional; HTTP write timeout (default 30s)
   tls:
     enabled: false
     cert_file: "./certs/server.crt"
