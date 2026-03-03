@@ -27,8 +27,8 @@ var (
 	// Global logger instance
 	globalLogger zerolog.Logger
 
-	// Module loggers with context
-	moduleLoggers = make(map[Module]zerolog.Logger)
+	// Module loggers with context (pointers for zerolog chain API)
+	moduleLoggers = make(map[Module]*zerolog.Logger)
 )
 
 // Init initializes the global logger and module loggers
@@ -49,37 +49,46 @@ func Init(level zerolog.Level, pretty bool) {
 	// Set global log level
 	zerolog.SetGlobalLevel(level)
 
-	// Initialize module loggers with context
-	moduleLoggers[ModuleAPI] = globalLogger.With().Str("module", string(ModuleAPI)).Logger()
-	moduleLoggers[ModuleAuth] = globalLogger.With().Str("module", string(ModuleAuth)).Logger()
-	moduleLoggers[ModuleChain] = globalLogger.With().Str("module", string(ModuleChain)).Logger()
-	moduleLoggers[ModuleEVM] = globalLogger.With().Str("module", string(ModuleEVM)).Logger()
-	moduleLoggers[ModuleNotify] = globalLogger.With().Str("module", string(ModuleNotify)).Logger()
-	moduleLoggers[ModuleRule] = globalLogger.With().Str("module", string(ModuleRule)).Logger()
-	moduleLoggers[ModuleService] = globalLogger.With().Str("module", string(ModuleService)).Logger()
-	moduleLoggers[ModuleStateMachine] = globalLogger.With().Str("module", string(ModuleStateMachine)).Logger()
-	moduleLoggers[ModuleStorage] = globalLogger.With().Str("module", string(ModuleStorage)).Logger()
-	moduleLoggers[ModuleSystem] = globalLogger.With().Str("module", string(ModuleSystem)).Logger()
+	// Initialize module loggers with context (each needs its own variable so pointer is stable)
+	lAPI := globalLogger.With().Str("module", string(ModuleAPI)).Logger()
+	moduleLoggers[ModuleAPI] = &lAPI
+	lAuth := globalLogger.With().Str("module", string(ModuleAuth)).Logger()
+	moduleLoggers[ModuleAuth] = &lAuth
+	lChain := globalLogger.With().Str("module", string(ModuleChain)).Logger()
+	moduleLoggers[ModuleChain] = &lChain
+	lEVM := globalLogger.With().Str("module", string(ModuleEVM)).Logger()
+	moduleLoggers[ModuleEVM] = &lEVM
+	lNotify := globalLogger.With().Str("module", string(ModuleNotify)).Logger()
+	moduleLoggers[ModuleNotify] = &lNotify
+	lRule := globalLogger.With().Str("module", string(ModuleRule)).Logger()
+	moduleLoggers[ModuleRule] = &lRule
+	lService := globalLogger.With().Str("module", string(ModuleService)).Logger()
+	moduleLoggers[ModuleService] = &lService
+	lSM := globalLogger.With().Str("module", string(ModuleStateMachine)).Logger()
+	moduleLoggers[ModuleStateMachine] = &lSM
+	lStorage := globalLogger.With().Str("module", string(ModuleStorage)).Logger()
+	moduleLoggers[ModuleStorage] = &lStorage
+	lSystem := globalLogger.With().Str("module", string(ModuleSystem)).Logger()
+	moduleLoggers[ModuleSystem] = &lSystem
 }
 
-// Get returns the logger for a specific module
-func Get(module Module) zerolog.Logger {
-	if logger, ok := moduleLoggers[module]; ok {
-		return logger
+// Get returns the logger for a specific module (pointer for zerolog chain API)
+func Get(module Module) *zerolog.Logger {
+	if l, ok := moduleLoggers[module]; ok {
+		return l
 	}
-	// Fallback to global logger if module not found
-	return globalLogger
+	return &globalLogger
 }
 
 // GetGlobal returns the global logger
-func GetGlobal() zerolog.Logger {
-	return globalLogger
+func GetGlobal() *zerolog.Logger {
+	return &globalLogger
 }
 
 // WithContext adds additional context fields to a module logger
 func WithContext(module Module, fields map[string]interface{}) zerolog.Logger {
-	logger := Get(module)
-	ctx := logger.With()
+	log := Get(module)
+	ctx := log.With()
 	for k, v := range fields {
 		ctx = ctx.Interface(k, v)
 	}
@@ -87,51 +96,51 @@ func WithContext(module Module, fields map[string]interface{}) zerolog.Logger {
 }
 
 // API returns the API module logger
-func API() zerolog.Logger {
+func API() *zerolog.Logger {
 	return Get(ModuleAPI)
 }
 
 // Auth returns the auth module logger
-func Auth() zerolog.Logger {
+func Auth() *zerolog.Logger {
 	return Get(ModuleAuth)
 }
 
 // Chain returns the chain module logger
-func Chain() zerolog.Logger {
+func Chain() *zerolog.Logger {
 	return Get(ModuleChain)
 }
 
 // EVM returns the EVM module logger
-func EVM() zerolog.Logger {
+func EVM() *zerolog.Logger {
 	return Get(ModuleEVM)
 }
 
 // Notify returns the notify module logger
-func Notify() zerolog.Logger {
+func Notify() *zerolog.Logger {
 	return Get(ModuleNotify)
 }
 
 // Rule returns the rule module logger
-func Rule() zerolog.Logger {
+func Rule() *zerolog.Logger {
 	return Get(ModuleRule)
 }
 
 // Service returns the service module logger
-func Service() zerolog.Logger {
+func Service() *zerolog.Logger {
 	return Get(ModuleService)
 }
 
 // StateMachine returns the state machine module logger
-func StateMachine() zerolog.Logger {
+func StateMachine() *zerolog.Logger {
 	return Get(ModuleStateMachine)
 }
 
 // Storage returns the storage module logger
-func Storage() zerolog.Logger {
+func Storage() *zerolog.Logger {
 	return Get(ModuleStorage)
 }
 
 // System returns the system module logger
-func System() zerolog.Logger {
+func System() *zerolog.Logger {
 	return Get(ModuleSystem)
 }

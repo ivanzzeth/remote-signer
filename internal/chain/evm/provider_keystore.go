@@ -3,13 +3,13 @@ package evm
 import (
 	"context"
 	"fmt"
-	"log/slog"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ivanzzeth/ethsig"
 	"github.com/ivanzzeth/ethsig/keystore"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/logger"
 )
 
 // KeystoreProvider loads signers from encrypted keystore files and supports dynamic creation.
@@ -17,7 +17,6 @@ type KeystoreProvider struct {
 	registry    *SignerRegistry
 	keystoreDir string
 	pwProvider  PasswordProvider
-	logger      *slog.Logger
 	lockedPaths map[string]string // address (checksummed) -> filePath
 }
 
@@ -27,7 +26,6 @@ func NewKeystoreProvider(
 	configs []KeystoreConfig,
 	keystoreDir string,
 	pwProvider PasswordProvider,
-	logger *slog.Logger,
 ) (*KeystoreProvider, error) {
 	if registry == nil {
 		return nil, fmt.Errorf("registry is required")
@@ -35,15 +33,11 @@ func NewKeystoreProvider(
 	if pwProvider == nil {
 		return nil, fmt.Errorf("password provider is required")
 	}
-	if logger == nil {
-		return nil, fmt.Errorf("logger is required")
-	}
 
 	p := &KeystoreProvider{
 		registry:    registry,
 		keystoreDir: keystoreDir,
 		pwProvider:  pwProvider,
-		logger:      logger,
 		lockedPaths: make(map[string]string),
 	}
 
@@ -103,10 +97,7 @@ func (p *KeystoreProvider) CreateSigner(ctx context.Context, params interface{})
 		return nil, fmt.Errorf("failed to create keystore: %w", err)
 	}
 
-	p.logger.Info("keystore created",
-		slog.String("address", address),
-		slog.String("path", keystorePath),
-	)
+	logger.EVM().Info().Str("address", address).Str("path", keystorePath).Msg("keystore created")
 
 	// Register the new signer in the shared registry
 	expectedAddr := common.HexToAddress(address)
@@ -124,10 +115,7 @@ func (p *KeystoreProvider) CreateSigner(ctx context.Context, params interface{})
 		return nil, fmt.Errorf("failed to register keystore: %w", err)
 	}
 
-	p.logger.Info("signer registered",
-		slog.String("address", address),
-		slog.String("type", string(types.SignerTypeKeystore)),
-	)
+	logger.EVM().Info().Str("address", address).Str("type", string(types.SignerTypeKeystore)).Msg("signer registered")
 
 	return &types.SignerInfo{
 		Address: address,
@@ -163,10 +151,7 @@ func (p *KeystoreProvider) DiscoverLockedSigners() ([]types.SignerInfo, error) {
 		}
 		discovered = append(discovered, info)
 
-		p.logger.Info("discovered locked keystore",
-			slog.String("address", info.Address),
-			slog.String("path", ks.Path),
-		)
+		logger.EVM().Info().Str("address", info.Address).Str("path", ks.Path).Msg("discovered locked keystore")
 	}
 
 	return discovered, nil
@@ -191,9 +176,7 @@ func (p *KeystoreProvider) UnlockSigner(ctx context.Context, address string, pas
 	signer := ethsig.NewSigner(keystoreSigner)
 	delete(p.lockedPaths, addrKey)
 
-	p.logger.Info("keystore signer unlocked",
-		slog.String("address", address),
-	)
+	logger.EVM().Info().Str("address", address).Msg("keystore signer unlocked")
 
 	return signer, nil
 }
@@ -211,9 +194,7 @@ func (p *KeystoreProvider) LockSigner(ctx context.Context, address string) error
 	for _, ks := range keystores {
 		if normalizeAddress(ks.Address) == addrKey {
 			p.lockedPaths[addrKey] = ks.Path
-			p.logger.Info("keystore signer locked",
-				slog.String("address", address),
-			)
+			logger.EVM().Info().Str("address", address).Msg("keystore signer locked")
 			return nil
 		}
 	}

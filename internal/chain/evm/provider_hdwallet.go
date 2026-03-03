@@ -3,7 +3,6 @@ package evm
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 	"sync"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/ivanzzeth/ethsig/keystore"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/logger"
 )
 
 // hdWalletState tracks a loaded HD wallet and its derived signers.
@@ -28,7 +28,6 @@ type HDWalletProvider struct {
 	mu          sync.RWMutex
 	wallets     map[string]*hdWalletState // primaryAddr (checksummed) -> state
 	lockedPaths map[string]string         // primaryAddr (checksummed) -> filePath
-	logger      *slog.Logger
 }
 
 // NewHDWalletProvider creates an HDWalletProvider and loads all configured HD wallets.
@@ -37,13 +36,9 @@ func NewHDWalletProvider(
 	configs []HDWalletConfig,
 	walletDir string,
 	pwProvider PasswordProvider,
-	logger *slog.Logger,
 ) (*HDWalletProvider, error) {
 	if registry == nil {
 		return nil, fmt.Errorf("registry is required")
-	}
-	if logger == nil {
-		return nil, fmt.Errorf("logger is required")
 	}
 
 	p := &HDWalletProvider{
@@ -51,7 +46,6 @@ func NewHDWalletProvider(
 		walletDir:   walletDir,
 		wallets:     make(map[string]*hdWalletState),
 		lockedPaths: make(map[string]string),
-		logger:      logger,
 	}
 
 	for _, cfg := range configs {
@@ -80,7 +74,7 @@ func NewHDWalletProvider(
 		primaryAddr, err := wallet.DeriveAddress(0)
 		if err != nil {
 			if closeErr := wallet.Close(); closeErr != nil {
-				logger.Warn("failed to close wallet on error", slog.String("path", cfg.Path), slog.Any("error", closeErr))
+				logger.EVM().Warn().Str("path", cfg.Path).Err(closeErr).Msg("failed to close wallet on error")
 			}
 			return nil, fmt.Errorf("failed to derive primary address from %s: %w", cfg.Path, err)
 		}
@@ -94,7 +88,7 @@ func NewHDWalletProvider(
 		// Register primary address signer
 		if err := p.registerDerivedSigner(primaryAddr, wallet, 0, state); err != nil {
 			if closeErr := wallet.Close(); closeErr != nil {
-				logger.Warn("failed to close wallet on error", slog.String("path", cfg.Path), slog.Any("error", closeErr))
+				logger.EVM().Warn().Str("path", cfg.Path).Err(closeErr).Msg("failed to close wallet on error")
 			}
 			return nil, fmt.Errorf("failed to register primary signer from %s: %w", cfg.Path, err)
 		}
@@ -107,13 +101,13 @@ func NewHDWalletProvider(
 			addr, err := wallet.DeriveAddress(idx)
 			if err != nil {
 				if closeErr := wallet.Close(); closeErr != nil {
-					logger.Warn("failed to close wallet on error", slog.String("path", cfg.Path), slog.Any("error", closeErr))
+					logger.EVM().Warn().Str("path", cfg.Path).Err(closeErr).Msg("failed to close wallet on error")
 				}
 				return nil, fmt.Errorf("failed to derive index %d from %s: %w", idx, cfg.Path, err)
 			}
 			if err := p.registerDerivedSigner(addr, wallet, idx, state); err != nil {
 				if closeErr := wallet.Close(); closeErr != nil {
-					logger.Warn("failed to close wallet on error", slog.String("path", cfg.Path), slog.Any("error", closeErr))
+					logger.EVM().Warn().Str("path", cfg.Path).Err(closeErr).Msg("failed to close wallet on error")
 				}
 				return nil, fmt.Errorf("failed to register derived signer index %d from %s: %w", idx, cfg.Path, err)
 			}
@@ -121,11 +115,7 @@ func NewHDWalletProvider(
 
 		p.wallets[addrKey] = state
 
-		logger.Info("HD wallet loaded",
-			slog.String("primary_address", primaryAddr.Hex()),
-			slog.String("path", cfg.Path),
-			slog.Int("derived_count", len(state.derived)),
-		)
+		logger.EVM().Info().Str("primary_address", primaryAddr.Hex()).Str("path", cfg.Path).Int("derived_count", len(state.derived)).Msg("HD wallet loaded")
 	}
 
 	return p, nil
@@ -203,7 +193,7 @@ func (p *HDWalletProvider) CreateHDWallet(ctx context.Context, params types.Crea
 	primaryAddr := common.HexToAddress(address)
 	if err := p.registerDerivedSigner(primaryAddr, wallet, 0, state); err != nil {
 		if closeErr := wallet.Close(); closeErr != nil {
-			p.logger.Warn("failed to close wallet on error", slog.Any("error", closeErr))
+			logger.EVM().Warn().Err(closeErr).Msg("failed to close wallet on error")
 		}
 		return nil, fmt.Errorf("failed to register primary signer: %w", err)
 	}
@@ -212,10 +202,7 @@ func (p *HDWalletProvider) CreateHDWallet(ctx context.Context, params types.Crea
 	p.wallets[addrKey] = state
 	p.mu.Unlock()
 
-	p.logger.Info("HD wallet created",
-		slog.String("primary_address", address),
-		slog.String("path", walletPath),
-	)
+	logger.EVM().Info().Str("primary_address", address).Str("path", walletPath).Msg("HD wallet created")
 
 	// Get base path from wallet info
 	walletInfo, _ := keystore.GetHDWalletInfo(walletPath)
@@ -263,7 +250,7 @@ func (p *HDWalletProvider) ImportHDWallet(ctx context.Context, params types.Impo
 	p.mu.RUnlock()
 	if exists {
 		if closeErr := wallet.Close(); closeErr != nil {
-			p.logger.Warn("failed to close wallet on error", slog.Any("error", closeErr))
+			logger.EVM().Warn().Err(closeErr).Msg("failed to close wallet on error")
 		}
 		return nil, types.ErrAlreadyExists
 	}
@@ -276,7 +263,7 @@ func (p *HDWalletProvider) ImportHDWallet(ctx context.Context, params types.Impo
 	primaryAddr := common.HexToAddress(address)
 	if err := p.registerDerivedSigner(primaryAddr, wallet, 0, state); err != nil {
 		if closeErr := wallet.Close(); closeErr != nil {
-			p.logger.Warn("failed to close wallet on error", slog.Any("error", closeErr))
+			logger.EVM().Warn().Err(closeErr).Msg("failed to close wallet on error")
 		}
 		return nil, fmt.Errorf("failed to register primary signer: %w", err)
 	}
@@ -285,10 +272,7 @@ func (p *HDWalletProvider) ImportHDWallet(ctx context.Context, params types.Impo
 	p.wallets[addrKey] = state
 	p.mu.Unlock()
 
-	p.logger.Info("HD wallet imported",
-		slog.String("primary_address", address),
-		slog.String("path", walletPath),
-	)
+	logger.EVM().Info().Str("primary_address", address).Str("path", walletPath).Msg("HD wallet imported")
 
 	walletInfo, _ := keystore.GetHDWalletInfo(walletPath)
 	basePath := ""
@@ -330,11 +314,7 @@ func (p *HDWalletProvider) DeriveAddress(ctx context.Context, primaryAddr string
 		Enabled: true,
 	}
 
-	p.logger.Info("address derived",
-		slog.String("primary_address", primaryAddr),
-		slog.Uint64("index", uint64(index)),
-		slog.String("derived_address", addr.Hex()),
-	)
+	logger.EVM().Info().Str("primary_address", primaryAddr).Uint64("index", uint64(index)).Str("derived_address", addr.Hex()).Msg("address derived")
 
 	return &info, nil
 }
@@ -378,12 +358,7 @@ func (p *HDWalletProvider) DeriveAddresses(ctx context.Context, primaryAddr stri
 		})
 	}
 
-	p.logger.Info("addresses derived",
-		slog.String("primary_address", primaryAddr),
-		slog.Uint64("start", uint64(start)),
-		slog.Uint64("count", uint64(count)),
-		slog.Int("derived", len(result)),
-	)
+	logger.EVM().Info().Str("primary_address", primaryAddr).Uint64("start", uint64(start)).Uint64("count", uint64(count)).Int("derived", len(result)).Msg("addresses derived")
 
 	return result, nil
 }
@@ -533,10 +508,7 @@ func (p *HDWalletProvider) DiscoverLockedSigners() ([]types.SignerInfo, error) {
 		}
 		discovered = append(discovered, info)
 
-		p.logger.Info("discovered locked HD wallet",
-			slog.String("primary_address", info.Address),
-			slog.String("path", w.Path),
-		)
+		logger.EVM().Info().Str("primary_address", info.Address).Str("path", w.Path).Msg("discovered locked HD wallet")
 	}
 
 	return discovered, nil
@@ -564,7 +536,7 @@ func (p *HDWalletProvider) UnlockSigner(ctx context.Context, address string, pas
 	primaryAddr, err := wallet.DeriveAddress(0)
 	if err != nil {
 		if closeErr := wallet.Close(); closeErr != nil {
-			p.logger.Warn("failed to close wallet on error", slog.Any("error", closeErr))
+			logger.EVM().Warn().Err(closeErr).Msg("failed to close wallet on error")
 		}
 		return nil, fmt.Errorf("failed to derive primary address: %w", err)
 	}
@@ -578,7 +550,7 @@ func (p *HDWalletProvider) UnlockSigner(ctx context.Context, address string, pas
 	privKey, err := wallet.DeriveKey(0)
 	if err != nil {
 		if closeErr := wallet.Close(); closeErr != nil {
-			p.logger.Warn("failed to close wallet on error", slog.Any("error", closeErr))
+			logger.EVM().Warn().Err(closeErr).Msg("failed to close wallet on error")
 		}
 		return nil, fmt.Errorf("failed to derive key at index 0: %w", err)
 	}
@@ -595,9 +567,7 @@ func (p *HDWalletProvider) UnlockSigner(ctx context.Context, address string, pas
 	p.wallets[addrKey] = state
 	delete(p.lockedPaths, addrKey)
 
-	p.logger.Info("HD wallet signer unlocked",
-		slog.String("primary_address", primaryAddr.Hex()),
-	)
+	logger.EVM().Info().Str("primary_address", primaryAddr.Hex()).Msg("HD wallet signer unlocked")
 
 	return signer, nil
 }
@@ -615,7 +585,7 @@ func (p *HDWalletProvider) LockSigner(ctx context.Context, address string) error
 
 	// Close the wallet to zeroize keys
 	if err := state.wallet.Close(); err != nil {
-		p.logger.Warn("failed to close wallet during lock", slog.Any("error", err))
+		logger.EVM().Warn().Err(err).Msg("failed to close wallet during lock")
 	}
 
 	// Store path for later unlock
@@ -630,18 +600,13 @@ func (p *HDWalletProvider) LockSigner(ctx context.Context, address string) error
 		// Remove derived signers from registry (they need the wallet to be usable)
 		// The registry doesn't have a Remove method, so we lock them too
 		if err := p.registry.LockSigner(d.Address); err != nil {
-			p.logger.Warn("failed to lock derived signer",
-				slog.String("address", d.Address),
-				slog.Any("error", err),
-			)
+			logger.EVM().Warn().Str("address", d.Address).Err(err).Msg("failed to lock derived signer")
 		}
 	}
 
 	delete(p.wallets, addrKey)
 
-	p.logger.Info("HD wallet signer locked",
-		slog.String("primary_address", address),
-	)
+	logger.EVM().Info().Str("primary_address", address).Msg("HD wallet signer locked")
 
 	return nil
 }

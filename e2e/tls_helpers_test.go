@@ -189,7 +189,7 @@ func initTestServices(
 	}
 
 	// Signer manager
-	signerManager, err := evm.NewSignerManager(evmRegistry, log)
+	signerManager, err := evm.NewSignerManager(evmRegistry)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create signer manager: %w", err)
 	}

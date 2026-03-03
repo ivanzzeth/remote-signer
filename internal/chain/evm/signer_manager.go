@@ -2,10 +2,11 @@ package evm
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"log/slog"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/logger"
 )
 
 // Compile-time check that SignerManagerImpl implements SignerManager.
@@ -35,22 +36,14 @@ type SignerManager interface {
 // SignerManagerImpl implements SignerManager
 type SignerManagerImpl struct {
 	registry *SignerRegistry
-	logger   *slog.Logger
 }
 
 // NewSignerManager creates a new SignerManager
-func NewSignerManager(registry *SignerRegistry, logger *slog.Logger) (*SignerManagerImpl, error) {
+func NewSignerManager(registry *SignerRegistry) (*SignerManagerImpl, error) {
 	if registry == nil {
 		return nil, fmt.Errorf("registry is required")
 	}
-	if logger == nil {
-		return nil, fmt.Errorf("logger is required")
-	}
-
-	return &SignerManagerImpl{
-		registry: registry,
-		logger:   logger,
-	}, nil
+	return &SignerManagerImpl{registry: registry}, nil
 }
 
 // CreateSigner dispatches to the appropriate provider via type assertion.
@@ -109,21 +102,25 @@ func (m *SignerManagerImpl) DiscoverLockedSigners(ctx context.Context) error {
 
 		infos, err := discoverer.DiscoverLockedSigners()
 		if err != nil {
-			m.logger.Error("failed to discover locked signers",
-				slog.String("provider", string(p.Type())),
-				slog.String("error", err.Error()),
-			)
+			logger.EVM().Error().Str("provider", string(p.Type())).Err(err).Msg("failed to discover locked signers")
 			continue
 		}
 
+		registered, skipped := 0, 0
 		for _, info := range infos {
 			if err := m.registry.RegisterLockedSigner(info.Address, info); err != nil {
-				m.logger.Warn("failed to register locked signer",
-					slog.String("address", info.Address),
-					slog.String("error", err.Error()),
-				)
+				if errors.Is(err, types.ErrAlreadyExists) {
+					skipped++
+					logger.EVM().Debug().Str("address", info.Address).Str("provider", string(p.Type())).Msg("discover locked: address already in registry, skip")
+				} else {
+					logger.EVM().Warn().Str("address", info.Address).Err(err).Msg("failed to register locked signer")
+				}
+			} else {
+				registered++
+				logger.EVM().Info().Str("address", info.Address).Str("type", info.Type).Str("provider", string(p.Type())).Msg("discover locked: registered")
 			}
 		}
+		logger.EVM().Info().Str("provider", string(p.Type())).Int("discovered", len(infos)).Int("registered", registered).Int("skipped_already_exists", skipped).Msg("discover locked: provider done")
 	}
 
 	return nil
@@ -161,10 +158,7 @@ func (m *SignerManagerImpl) UnlockSigner(ctx context.Context, address string, pa
 
 	updatedInfo, _ := m.registry.GetSignerInfo(address)
 
-	m.logger.Info("signer unlocked",
-		slog.String("address", address),
-		slog.String("type", info.Type),
-	)
+	logger.EVM().Info().Str("address", address).Str("type", info.Type).Msg("signer unlocked")
 
 	return &updatedInfo, nil
 }
@@ -200,10 +194,7 @@ func (m *SignerManagerImpl) LockSigner(ctx context.Context, address string) (*ty
 
 	updatedInfo, _ := m.registry.GetSignerInfo(address)
 
-	m.logger.Info("signer locked",
-		slog.String("address", address),
-		slog.String("type", info.Type),
-	)
+	logger.EVM().Info().Str("address", address).Str("type", info.Type).Msg("signer locked")
 
 	return &updatedInfo, nil
 }
