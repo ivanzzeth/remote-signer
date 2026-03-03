@@ -289,7 +289,7 @@ templates:
     type: "file"
     enabled: true
     config:
-      path: "rules/templates/polymarket.safe.template.yaml"
+      path: "rules/templates/polymarket_safe.template.yaml"
 ```
 
 ## Environment Variables

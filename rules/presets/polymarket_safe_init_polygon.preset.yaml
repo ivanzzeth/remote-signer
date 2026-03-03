@@ -1,9 +1,14 @@
-# Preset: Polymarket Safe (Polygon). Override allowed_safe_addresses and allowed_safe_address_for_testing.
-# Use: remote-signer-cli preset create-from polymarket-safe-polygon --set allowed_safe_addresses=0xYourSafe [--config config.yaml --write]
-# template_path is used by CLI to inject the template into config when using --write, and by preset vars to show variable descriptions.
-name: "Polymarket Safe rules (Polygon)"
-template: "Polymarket Safe Template"
-template_path: "rules/templates/polymarket.safe.template.yaml"
+# Preset: Polymarket Safe init (Polygon). Auth + create_safe + enable_trading. No trading (add later or use polymarket_safe_polygon).
+# Use: remote-signer-cli preset create-from polymarket_safe_init_polygon [--config config.yaml --write] [--set allowed_safe_addresses=0x...]
+name: "Polymarket Safe init (Polygon)"
+template_paths:
+  - "rules/templates/polymarket_auth.template.yaml"
+  - "rules/templates/polymarket_create_safe.template.yaml"
+  - "rules/templates/polymarket_enable_trading.template.yaml"
+template_names:
+  - "Polymarket Auth Template"
+  - "Polymarket Create Safe Template"
+  - "Polymarket Enable Trading Template"
 chain_type: "evm"
 chain_id: "137"
 enabled: true

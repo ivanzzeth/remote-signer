@@ -785,10 +785,13 @@ step_preset_rules() {
             break
         fi
         PRESET_NAME="${presets[$((choice-1))]}"
+        # Pass full filename to CLI so it finds .preset.yaml even when PATH has an older binary (step 5 "build from source" runs later)
+        PRESET_FILE="$PRESET_NAME"
+        [[ "$PRESET_FILE" == *.preset ]] && PRESET_FILE="${PRESET_FILE}.yaml"
 
         # Get variables to prompt (name + description from template)
         set_args=()
-        vars_out=$(remote-signer-cli preset vars "$PRESET_NAME" --presets-dir "$PRESETS_DIR" --project-dir "$PROJECT_DIR" 2>/dev/null) || true
+        vars_out=$(remote-signer-cli preset vars "$PRESET_FILE" --presets-dir "$PRESETS_DIR" --project-dir "$PROJECT_DIR" 2>/dev/null) || true
         if [ -n "$vars_out" ]; then
             echo ""
             echo "Enter values for the following variables (descriptions from template):"
@@ -810,9 +813,9 @@ step_preset_rules() {
 
         log_info "Adding rule from preset: $PRESET_NAME"
         if [ ${#set_args[@]} -gt 0 ]; then
-            remote-signer-cli preset create-from "$PRESET_NAME" --config "$PROJECT_DIR/$CONFIG_FILE" --write --presets-dir "$PRESETS_DIR" "${set_args[@]}" || log_warn "Failed to add preset rule"
+            remote-signer-cli preset create-from "$PRESET_FILE" --config "$PROJECT_DIR/$CONFIG_FILE" --write --presets-dir "$PRESETS_DIR" "${set_args[@]}" || log_warn "Failed to add preset rule"
         else
-            remote-signer-cli preset create-from "$PRESET_NAME" --config "$PROJECT_DIR/$CONFIG_FILE" --write --presets-dir "$PRESETS_DIR" || log_warn "Failed to add preset rule"
+            remote-signer-cli preset create-from "$PRESET_FILE" --config "$PROJECT_DIR/$CONFIG_FILE" --write --presets-dir "$PRESETS_DIR" || log_warn "Failed to add preset rule"
         fi
 
         echo ""
@@ -935,8 +938,73 @@ step_done() {
     echo ""
 }
 
+# Check if server is already running on the configured port; if so, offer to stop and restart (default: yes).
+# Detects Docker (container remote-signer-app or compose service) vs local (PID file or process on port).
+# Sets SKIP_START=1 if user declines to stop (caller should skip starting).
+check_server_running_and_maybe_stop() {
+    SKIP_START=0
+    local port
+    port=$(tui_port_from_config "$CONFIG_FILE")
+    # Portable port-in-use check: try /dev/tcp (bash), then ss, then lsof
+    local port_in_use=0
+    if (echo >/dev/tcp/127.0.0.1/"$port") 2>/dev/null; then
+        port_in_use=1
+    elif command -v ss &>/dev/null && ss -tlnp 2>/dev/null | grep -q ":${port} "; then
+        port_in_use=1
+    elif command -v lsof &>/dev/null && lsof -i ":$port" -sTCP:LISTEN 2>/dev/null | grep -q .; then
+        port_in_use=1
+    fi
+    [ "$port_in_use" -eq 0 ] && return 0
+
+    # Detect Docker vs local
+    local running_as=""
+    cd "$PROJECT_DIR"
+    if command -v docker &>/dev/null; then
+        if docker ps --format '{{.Names}}' 2>/dev/null | grep -qE 'remote-signer-app|remote-signer'; then
+            running_as="Docker"
+        elif (cd "$PROJECT_DIR" && docker compose ps --status running 2>/dev/null) | grep -q .; then
+            running_as="Docker"
+        fi
+    fi
+    if [ -z "$running_as" ] && [ -f "$PROJECT_DIR/.local-signer.pid" ]; then
+        local pid
+        pid=$(cat "$PROJECT_DIR/.local-signer.pid" 2>/dev/null)
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+            running_as="local process"
+        fi
+    fi
+    if [ -z "$running_as" ]; then
+        running_as="process on port $port"
+    fi
+
+    echo ""
+    log_warn "Server is already running ($running_as)."
+    read -rp "Stop and restart the service? (Y/n): " STOP_RESTART
+    STOP_RESTART="${STOP_RESTART:-Y}"
+    if [ "$STOP_RESTART" != "y" ] && [ "$STOP_RESTART" != "Y" ]; then
+        log_info "Skipping stop. Server remains running; restart later with: ./scripts/deploy.sh $([ "$DEPLOY_MODE" = "docker" ] && echo 'run --no-screen' || echo 'local-run')"
+        SKIP_START=1
+        return 0
+    fi
+    if [ "$running_as" = "Docker" ]; then
+        log_info "Stopping Docker services..."
+        "$SCRIPT_DIR/deploy.sh" down
+    else
+        log_info "Stopping local server..."
+        "$SCRIPT_DIR/deploy.sh" local-down
+    fi
+    # Brief pause so port is released
+    sleep 2
+}
+
 # Ask to start the server, then optionally launch TUI to add signers (one-click deploy + import flow)
 start_server_now() {
+    # If server is already running, offer to stop and restart (default: yes)
+    check_server_running_and_maybe_stop
+    if [ "${SKIP_START:-0}" -eq 1 ]; then
+        return 0
+    fi
+
     echo ""
     read -rp "Start the server now? (Y/n): " START_NOW
     START_NOW="${START_NOW:-Y}"

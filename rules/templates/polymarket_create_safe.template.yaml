@@ -1,0 +1,123 @@
+# Polymarket Create Safe (createProxy) — capability template only.
+# Split from polymarket_safe.template.yaml. No Safe address required.
+
+variables:
+  - name: chain_id
+    type: string
+    description: "Chain ID (e.g. 137 for Polygon)"
+    required: true
+  - name: safe_proxy_factory_address
+    type: address
+    description: "Safe Proxy Factory contract address"
+    required: true
+  - name: safe_factory_domain_name
+    type: string
+    description: "Safe Factory EIP-712 domain name"
+    required: true
+  - name: usdc_bridged_address
+    type: address
+    description: "USDC.e token (for test_cases only)"
+    required: false
+  - name: allowed_safe_address_for_testing
+    type: address
+    description: "Address for test payload"
+    required: false
+
+test_variables:
+  chain_id: "137"
+  safe_proxy_factory_address: "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"
+  safe_factory_domain_name: "Polymarket Contract Proxy Factory"
+  usdc_bridged_address: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+  allowed_safe_address_for_testing: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+
+rules:
+  - name: "Polymarket Safe Wallet Creation Signature"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "${chain_id}"
+    description: "Validate Safe wallet creation signature for Polymarket"
+    config:
+      typed_data_struct: |
+        struct CreateProxy {
+            address paymentToken;
+            uint256 payment;
+            address paymentReceiver;
+        }
+      typed_data_expression: |
+        require(
+          keccak256(bytes(eip712_domainName)) == keccak256(bytes("${safe_factory_domain_name}")),
+          "invalid domain name"
+        );
+        require(eip712_domainChainId == ${chain_id}, "must be on Polygon");
+        require(
+          eip712_domainContract == ${safe_proxy_factory_address},
+          "verifyingContract must be Safe Factory"
+        );
+        require(createProxy.paymentToken == address(0), "payment token must be zero");
+        require(createProxy.payment == 0, "payment must be zero");
+        require(createProxy.paymentReceiver == address(0), "payment receiver must be zero");
+      sign_type_filter: "typed_data"
+      description: "Safe wallet creation with zero payment"
+      test_cases:
+        - name: "should pass valid CreateProxy with zero payment"
+          input:
+            typed_data:
+              primaryType: "CreateProxy"
+              domain:
+                name: "${safe_factory_domain_name}"
+                chainId: "${chain_id}"
+                verifyingContract: "${safe_proxy_factory_address}"
+              message:
+                paymentToken: "0x0000000000000000000000000000000000000000"
+                payment: "0"
+                paymentReceiver: "0x0000000000000000000000000000000000000000"
+          expect_pass: true
+        - name: "should reject non-zero payment"
+          input:
+            typed_data:
+              primaryType: "CreateProxy"
+              domain:
+                name: "${safe_factory_domain_name}"
+                chainId: "${chain_id}"
+                verifyingContract: "${safe_proxy_factory_address}"
+              message:
+                paymentToken: "${usdc_bridged_address}"
+                payment: "1000000"
+                paymentReceiver: "${allowed_safe_address_for_testing}"
+          expect_pass: false
+          expect_reason: "payment token must be zero"
+
+  - name: "Polymarket Safe Wallet Creation"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "${chain_id}"
+    description: "Allow Safe wallet creation on Polymarket Safe Factory"
+    config:
+      functions: |
+        struct Signature { uint8 v; bytes32 r; bytes32 s; }
+        function createProxy(
+            address paymentToken,
+            uint256 payment,
+            address paymentReceiver,
+            Signature memory createSig
+        ) external {
+            require(txTo == ${safe_proxy_factory_address}, "target must be Safe Factory");
+            require(paymentToken == address(0), "payment token must be zero");
+            require(payment == 0, "payment must be zero");
+            require(paymentReceiver == address(0), "payment receiver must be zero");
+        }
+      description: "Safe wallet creation with zero payment"
+      test_cases:
+        - name: "should pass with zero payment"
+          input:
+            to: "${safe_proxy_factory_address}"
+            data: "0xa1884d2c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          expect_pass: true
+        - name: "should reject wrong target contract"
+          input:
+            to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+            data: "0xa1884d2c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          expect_pass: false
+          expect_reason: "target must be Safe Factory"

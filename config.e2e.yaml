@@ -97,7 +97,7 @@ templates:
     type: "file"
     enabled: true
     config:
-      path: "rules/templates/polymarket.template.js.yaml"
+      path: "rules/templates/polymarket_safe.template.js.yaml"
 
 # Rules for e2e testing
 # Rules can be defined here (config source) or via API (api source)
@@ -574,7 +574,7 @@ rules:
         delegate_to: "polymarket-transactions"
         delegate_mode: "single"
         test_inner_to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
-      # Instance overrides with real Polygon mainnet transaction data from polymarket.safe.template.yaml.
+      # Instance overrides with real Polygon mainnet transaction data from polymarket_safe.template.yaml.
       # SafeTx pass cases use delegation-compatible calldata (inner tx validated by Polymarket transactions rule).
       # Negative tests use signer NOT in signer_restriction to avoid auto-allow.
       test_cases_overrides:
