@@ -219,36 +219,51 @@ When using the CLI to override variables, array-like values can be passed as:
 - `--set key=val1,val2` (stored as a single string), or
 - `--set key='["val1","val2"]'` (parsed as JSON array and normalized when writing config).
 
-### 4.5 Using presets with the CLI
+### 4.5 Preset format: template_path and override_hints
+
+- **template_path** (optional): Path to the template file (e.g. `rules/templates/polymarket.safe.template.yaml`). When you run `preset create-from ... --write`, the CLI injects this template into `config.templates` if it is not already present, so the preset is self-contained and config does not need to define the template beforehand.
+- **override_hints** (optional): List of variable names to prompt for in setup (e.g. `allowed_safe_addresses`, `allowed_safe_address_for_testing`). The **preset vars** subcommand reads the template file (via `template_path`) and outputs each variable with its **description** from the template, so setup can show “variable (description)” when prompting.
+
+Template files define variables with a **description** field; that description is shown during interactive setup when the user is asked to fill in override values.
+
+### 4.6 Using presets with the CLI
 
 (When **remote-signer-cli** is available.)
 
 - **List presets**:  
-  `remote-signer-cli rule list-presets`  
+  `remote-signer-cli preset list`  
   Scans `rules/presets/` and shows preset name(s) and template name(s).
 
+- **Variables to prompt (for scripts)**:  
+  `remote-signer-cli preset vars <preset-name> --presets-dir rules/presets --project-dir .`  
+  Outputs one line per override variable: `name<TAB>description`. Used by setup to show descriptions when prompting.
+
 - **Generate a rule from a preset (no config change)**:  
-  `remote-signer-cli rule create-from-preset polymarket-safe-polygon --set allowed_safe_addresses=0xYourSafe`  
+  `remote-signer-cli preset create-from polymarket-safe-polygon --set allowed_safe_addresses=0xYourSafe`  
   Outputs the rule YAML so you can paste it into `config.yaml`.
 
-- **Append the rule to config**:  
-  `remote-signer-cli rule create-from-preset polymarket-safe-polygon --config config.yaml --write --set allowed_safe_addresses=0xYourSafe`
+- **Append the rule to config (and inject template if missing)**:  
+  `remote-signer-cli preset create-from polymarket-safe-polygon --config config.yaml --write --set allowed_safe_addresses=0xYourSafe`  
+  If the preset has `template_path` and the config does not yet define that template, the CLI adds the template entry from the preset.
 
 - **Multiple overrides**:  
   `--set key1=val1 --set key2=val2`
 
 For multi-rule presets, the CLI may support something like `--rule-index 0` to target the first rule. See the CLI help and [remote-signer-cli design](features/remote-signer-cli-design.md) for details.
 
-### 4.6 Using presets in setup
+### 4.7 Using presets in setup
 
-**setup.sh** can offer an optional step after generating config: “Add rules from preset?”. If the user agrees, it can:
+**setup.sh** runs an optional step (Step 4b) after generating config: “Add rules from preset?”. If the user agrees, it:
 
-1. List presets (e.g. via `remote-signer-cli rule list-presets` or by reading `rules/presets/`).
-2. Let the user choose a preset (by name or index).
-3. Prompt for override variables (e.g. from `override_hints`: Safe address(es), comma-separated if needed).
-4. Run `remote-signer-cli rule create-from-preset <name> --config config.yaml --write --set ...`.
+1. Ensures **remote-signer-cli** is available (download from release or build from repo).
+2. Lists presets via `remote-signer-cli preset list`.
+3. Lets the user choose a preset by number.
+4. Runs `remote-signer-cli preset vars <name>` to get variables and their **descriptions** from the template (using the preset’s `template_path`).
+5. Prompts for each variable, showing the description (e.g. “allowed_safe_addresses (Comma-separated list of allowed Safe addresses…):”).
+6. Runs `remote-signer-cli preset create-from <name> --config config.yaml --write --set ...`, which injects the template into config if needed and appends the rule.
+7. Optionally repeats for another preset.
 
-So new users get a working rule set by picking a preset and filling in a few values, without editing long YAML by hand.
+New users get a working rule set by picking a preset and filling in a few values with clear descriptions, without editing long YAML by hand.
 
 ---
 

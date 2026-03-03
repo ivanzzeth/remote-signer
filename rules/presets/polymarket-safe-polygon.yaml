@@ -1,7 +1,9 @@
 # Preset: Polymarket Safe (Polygon). Override allowed_safe_addresses and allowed_safe_address_for_testing.
-# Use: remote-signer-cli rule create-from-preset polymarket-safe-polygon --set allowed_safe_addresses=0xYourSafe [--config config.yaml --write]
+# Use: remote-signer-cli preset create-from polymarket-safe-polygon --set allowed_safe_addresses=0xYourSafe [--config config.yaml --write]
+# template_path is used by CLI to inject the template into config when using --write, and by preset vars to show variable descriptions.
 name: "Polymarket Safe rules (Polygon)"
 template: "Polymarket Safe Template"
+template_path: "rules/templates/polymarket.safe.template.yaml"
 chain_type: "evm"
 chain_id: "137"
 enabled: true

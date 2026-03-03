@@ -22,7 +22,8 @@ go test -tags=e2e ./e2e/...
 
 For testing against your own running server:
 
-1. Start your server with the signer and API keys configured
+1. **If Docker was previously used:** stop it first to free port 8548: `./scripts/deploy.sh down`
+2. Start your server with the signer and API keys configured
 2. Set environment variables and run:
 
 ```bash
