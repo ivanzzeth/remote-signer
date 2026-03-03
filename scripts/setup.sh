@@ -668,6 +668,118 @@ ENVEOF
     echo ""
 }
 
+# Interactive step: optionally add rule(s) from preset(s). Prompts for preset choice and variable overrides (with descriptions from template).
+step_preset_rules() {
+    [ "${SKIP_CONFIG:-}" = "true" ] && return 0
+
+    echo -e "${BOLD}=============================================================${NC}"
+    echo -e "${BOLD}  Step 4b: Add rules from preset (optional)${NC}"
+    echo -e "${BOLD}=============================================================${NC}"
+    echo ""
+    echo "You can add a rule from a preset (e.g. Polymarket Safe). Variables will be prompted with descriptions from the template."
+    echo ""
+    read -rp "Add a rule from a preset? (Y/n): " ADD_PRESET
+    ADD_PRESET="${ADD_PRESET:-Y}"
+    if [[ "$ADD_PRESET" =~ ^[Nn]$ ]]; then
+        return 0
+    fi
+
+    # Ensure CLI is available (same dir as TUI; download or PATH)
+    export PATH="$BIN_DIR:$PATH"
+    if ! command -v remote-signer-cli &>/dev/null; then
+        if ! download_release_binaries_and_set_path 2>/dev/null; then
+            if command -v go &>/dev/null && [ -f "$PROJECT_DIR/go.mod" ]; then
+                export PATH="$PROJECT_DIR:$PATH"
+                if (cd "$PROJECT_DIR" && go build -o remote-signer-cli ./cmd/remote-signer-cli 2>/dev/null); then
+                    mv "$PROJECT_DIR/remote-signer-cli" "$BIN_DIR/remote-signer-cli" 2>/dev/null || true
+                    export PATH="$BIN_DIR:$PATH"
+                fi
+            fi
+        else
+            export PATH="$BIN_DIR:$PATH"
+        fi
+    fi
+    if ! command -v remote-signer-cli &>/dev/null; then
+        log_warn "remote-signer-cli not found; skipping preset step. Install from release or build with: go build -o remote-signer-cli ./cmd/remote-signer-cli"
+        return 0
+    fi
+
+    PRESETS_DIR="${PROJECT_DIR}/rules/presets"
+    if [ ! -d "$PRESETS_DIR" ]; then
+        log_warn "Presets directory not found: $PRESETS_DIR"
+        return 0
+    fi
+
+    while true; do
+        # List presets: output is "# Preset file | template(s)" then "file.yaml | Template Name"
+        list_out=$(remote-signer-cli preset list --presets-dir "$PRESETS_DIR" 2>/dev/null) || break
+        presets=()
+        while IFS= read -r line; do
+            [[ "$line" =~ ^# ]] && continue
+            [[ -z "$line" ]] && continue
+            # First column (before " | ")
+            name="${line%% | *}"
+            name="${name%.yaml}"
+            name="${name%.yml}"
+            [[ -n "$name" ]] && presets+=("$name")
+        done <<< "$list_out"
+
+        if [ ${#presets[@]} -eq 0 ]; then
+            log_warn "No presets found in $PRESETS_DIR"
+            break
+        fi
+
+        echo ""
+        echo "Available presets:"
+        for i in "${!presets[@]}"; do
+            echo -e "  ${CYAN}$((i+1)))${NC} ${presets[$i]}"
+        done
+        echo ""
+        read -rp "Select preset [1]: " choice
+        choice="${choice:-1}"
+        if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#presets[@]} ]; then
+            log_warn "Invalid choice; skipping preset."
+            break
+        fi
+        PRESET_NAME="${presets[$((choice-1))]}"
+
+        # Get variables to prompt (name + description from template)
+        set_args=()
+        vars_out=$(remote-signer-cli preset vars "$PRESET_NAME" --presets-dir "$PRESETS_DIR" --project-dir "$PROJECT_DIR" 2>/dev/null) || true
+        if [ -n "$vars_out" ]; then
+            echo ""
+            echo "Enter values for the following variables (descriptions from template):"
+            while IFS= read -r line; do
+                [[ -z "$line" ]] && continue
+                name="${line%%$'\t'*}"
+                desc="${line#*$'\t'}"
+                if [ -n "$name" ]; then
+                    if [ -n "$desc" ]; then
+                        read -rp "  $name ($desc): " val
+                    else
+                        read -rp "  $name: " val
+                    fi
+                    set_args+=(--set "$name=$val")
+                fi
+            done <<< "$vars_out"
+        fi
+
+        log_info "Adding rule from preset: $PRESET_NAME"
+        if [ ${#set_args[@]} -gt 0 ]; then
+            remote-signer-cli preset create-from "$PRESET_NAME" --config "$PROJECT_DIR/$CONFIG_FILE" --write --presets-dir "$PRESETS_DIR" "${set_args[@]}" || log_warn "Failed to add preset rule"
+        else
+            remote-signer-cli preset create-from "$PRESET_NAME" --config "$PROJECT_DIR/$CONFIG_FILE" --write --presets-dir "$PRESETS_DIR" || log_warn "Failed to add preset rule"
+        fi
+
+        echo ""
+        read -rp "Add another preset? (y/N): " ANOTHER
+        if [[ ! "$ANOTHER" =~ ^[Yy]$ ]]; then
+            break
+        fi
+    done
+    echo ""
+}
+
 step_done() {
     echo -e "${BOLD}=============================================================${NC}"
     echo -e "${BOLD}  Step 5/5: Done!${NC}"
@@ -879,6 +991,9 @@ main() {
 
     # Step 4/5: Generate configuration
     step_generate_config
+
+    # Step 4b: Optionally add rules from presets (interactive)
+    step_preset_rules
 
     # Step 5/5: Done
     step_done

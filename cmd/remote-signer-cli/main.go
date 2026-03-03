@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const version = "0.1.4"
+const version = "0.1.6"
 
 func main() {
 	// Pass-through subcommands: forward all args to the child binary so flags like -config work.
@@ -43,6 +43,7 @@ rule validation (via remote-signer-validate-rules), and launching the TUI (remot
 
 func init() {
 	rootCmd.AddCommand(ruleCmd)
+	rootCmd.AddCommand(presetCmd)
 	rootCmd.AddCommand(validateCmd)
 	rootCmd.AddCommand(tuiCmd)
 	rootCmd.AddCommand(versionCmd)
