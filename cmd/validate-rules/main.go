@@ -23,7 +23,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
-const version = "0.1.2"
+const version = "0.1.3"
 
 // resolvePath resolves path relative to baseDir if path is not absolute.
 func resolvePath(baseDir, path string) string {
