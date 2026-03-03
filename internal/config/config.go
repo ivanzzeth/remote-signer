@@ -147,9 +147,11 @@ func isHexPublicKey(key string) bool {
 
 // ServerConfig contains HTTP server configuration
 type ServerConfig struct {
-	Host string    `yaml:"host"`
-	Port int       `yaml:"port"`
-	TLS  TLSConfig `yaml:"tls"`
+	Host         string        `yaml:"host"`
+	Port         int           `yaml:"port"`
+	ReadTimeout  time.Duration `yaml:"read_timeout"`
+	WriteTimeout time.Duration `yaml:"write_timeout"`
+	TLS          TLSConfig     `yaml:"tls"`
 }
 
 // TLSConfig contains TLS/mTLS configuration for the server

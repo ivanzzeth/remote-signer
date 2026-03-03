@@ -546,6 +546,12 @@ func run() error {
 	serverConfig := api.DefaultServerConfig()
 	serverConfig.Host = cfg.Server.Host
 	serverConfig.Port = cfg.Server.Port
+	if cfg.Server.ReadTimeout > 0 {
+		serverConfig.ReadTimeout = cfg.Server.ReadTimeout
+	}
+	if cfg.Server.WriteTimeout > 0 {
+		serverConfig.WriteTimeout = cfg.Server.WriteTimeout
+	}
 
 	// TLS configuration
 	if cfg.Server.TLS.Enabled {
@@ -589,7 +595,9 @@ func run() error {
 				continue
 			}
 			log.Info("Received shutdown signal", "signal", sig.String())
-			if err := server.Shutdown(ctx); err != nil {
+			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer shutdownCancel()
+			if err := server.Shutdown(shutdownCtx); err != nil {
 				log.Error("Server shutdown error", "error", err)
 			}
 			log.Info("Service stopped")

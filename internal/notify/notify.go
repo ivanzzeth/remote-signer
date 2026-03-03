@@ -18,13 +18,13 @@ type Channel struct {
 	Telegram []string `yaml:"telegram,omitempty"` // Telegram chat IDs or @channel
 }
 
-// SlackConfig Slack配置
+// SlackConfig holds Slack notification channel configuration.
 type SlackConfig struct {
 	Enabled  bool   `yaml:"enabled"`
 	BotToken string `yaml:"bot_token"`
 }
 
-// PushoverConfig Pushover配置
+// PushoverConfig holds Pushover notification channel configuration.
 type PushoverConfig struct {
 	Enabled    bool `yaml:"enabled"`
 	AppToken   string `yaml:"app_token"`
@@ -55,7 +55,7 @@ type Config struct {
 	Telegram *TelegramConfig `yaml:"telegram,omitempty"`
 }
 
-// notifyMessage 内部消息结构
+// notifyMessage is the internal message structure for the async queue.
 type notifyMessage struct {
 	channel  *Channel
 	message  string
@@ -63,8 +63,8 @@ type notifyMessage struct {
 	sound    string
 }
 
-// NotifyService 统一通知服务
-// 使用异步发送模式，Send方法将消息放入channel，由消费goroutine实际发送
+// NotifyService is the unified notification service. It uses async delivery:
+// Send enqueues messages; a consumer goroutine performs the actual send.
 type NotifyService struct {
 	slackClient    *SlackClient
 	pushoverClient *PushoverClient
@@ -72,15 +72,14 @@ type NotifyService struct {
 	telegramClient *TelegramClient
 	logger         zerolog.Logger
 
-	// 异步发送相关
+	// Async delivery: queue and consumer
 	msgChan chan notifyMessage
 	ctx     context.Context
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup
 }
 
-// NewNotifyService 创建通知服务
-// 创建后需要调用Start()启动消费goroutine
+// NewNotifyService creates the notification service. Call Start() to run the consumer goroutine.
 func NewNotifyService(cfg *Config) (*NotifyService, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
@@ -89,10 +88,10 @@ func NewNotifyService(cfg *Config) (*NotifyService, error) {
 	log := logger.GetGlobal()
 	service := &NotifyService{
 		logger:  log,
-		msgChan: make(chan notifyMessage, 1000), // 缓冲1000条消息
+		msgChan: make(chan notifyMessage, 1000),
 	}
 
-	// 初始化 Slack 客户端
+	// Initialize Slack client
 	if cfg.Slack != nil && cfg.Slack.Enabled {
 		if cfg.Slack.BotToken == "" {
 			return nil, fmt.Errorf("slack bot token is required when enabled")
@@ -105,27 +104,26 @@ func NewNotifyService(cfg *Config) (*NotifyService, error) {
 		log.Debug().Msg("Slack client initialized")
 	}
 
-	// 初始化 Pushover 客户端
+	// Initialize Pushover client
 	if cfg.Pushover != nil && cfg.Pushover.Enabled {
 		if cfg.Pushover.AppToken == "" {
 			return nil, fmt.Errorf("pushover app token is required when enabled")
 		}
-		// 设置默认值
 		retry := cfg.Pushover.Retry
 		if retry == 0 {
-			retry = 30 // 默认30秒
+			retry = 30
 		}
 		expire := cfg.Pushover.Expire
 		if expire == 0 {
-			expire = 300 // 默认300秒
+			expire = 300
 		}
 		maxRetries := cfg.Pushover.MaxRetries
 		if maxRetries == 0 {
-			maxRetries = 3 // 默认3次
+			maxRetries = 3
 		}
 		retryDelay := cfg.Pushover.RetryDelay
 		if retryDelay == 0 {
-			retryDelay = 1 // 默认1秒
+			retryDelay = 1
 		}
 
 		pushoverClient, err := NewPushoverClient(cfg.Pushover.AppToken, retry, expire, maxRetries, retryDelay)
@@ -166,7 +164,7 @@ func NewNotifyService(cfg *Config) (*NotifyService, error) {
 	return service, nil
 }
 
-// Start 启动消费goroutine
+// Start starts the consumer goroutine.
 func (n *NotifyService) Start(ctx context.Context) {
 	n.ctx, n.cancel = context.WithCancel(ctx)
 	n.wg.Add(1)
@@ -174,7 +172,7 @@ func (n *NotifyService) Start(ctx context.Context) {
 	n.logger.Info().Msg("NotifyService started")
 }
 
-// Stop 停止服务，等待所有消息发送完成
+// Stop stops the service and waits for all queued messages to be sent.
 func (n *NotifyService) Stop() {
 	if n.cancel != nil {
 		n.cancel()
@@ -183,13 +181,13 @@ func (n *NotifyService) Stop() {
 	n.logger.Info().Msg("NotifyService stopped")
 }
 
-// consumeLoop 消费goroutine，持续从channel读取消息并发送
+// consumeLoop is the consumer goroutine; it reads from the channel and sends.
 func (n *NotifyService) consumeLoop() {
 	defer n.wg.Done()
 	for {
 		select {
 		case <-n.ctx.Done():
-			// 消费完剩余消息后退出
+			// Drain remaining messages before exit
 			for {
 				select {
 				case msg := <-n.msgChan:
@@ -204,8 +202,7 @@ func (n *NotifyService) consumeLoop() {
 	}
 }
 
-// Send 异步发送消息到指定渠道
-// 将消息放入channel，由消费goroutine实际发送，不阻塞调用方
+// Send enqueues a message for delivery to the given channels (non-blocking).
 func (n *NotifyService) Send(channel *Channel, message string) error {
 	if channel == nil {
 		return fmt.Errorf("channel is required")
@@ -214,7 +211,6 @@ func (n *NotifyService) Send(channel *Channel, message string) error {
 		return fmt.Errorf("message is required")
 	}
 
-	// 非阻塞放入channel
 	select {
 	case n.msgChan <- notifyMessage{channel: channel, message: message}:
 		return nil
@@ -224,13 +220,13 @@ func (n *NotifyService) Send(channel *Channel, message string) error {
 	}
 }
 
-// sendSync 同步发送消息（内部方法，由消费goroutine调用）
+// sendSync sends the message to all configured channels (called by the consumer).
 func (n *NotifyService) sendSync(channel *Channel, message string, priority int, sound string) {
 	if channel == nil || message == "" {
 		return
 	}
 
-	// 发送到 Slack channels
+	// Send to Slack channels
 	if len(channel.Slack) > 0 {
 		if n.slackClient == nil {
 			n.logger.Warn().Msg("Slack client not initialized, skipping Slack channels")
@@ -252,7 +248,7 @@ func (n *NotifyService) sendSync(channel *Channel, message string, priority int,
 		}
 	}
 
-	// 发送到 Pushover users
+	// Send to Pushover users
 	if len(channel.Pushover) > 0 {
 		if n.pushoverClient == nil {
 			n.logger.Warn().Msg("Pushover client not initialized, skipping Pushover users")
@@ -302,7 +298,7 @@ func (n *NotifyService) sendSync(channel *Channel, message string, priority int,
 	}
 }
 
-// SendWithPriority 异步发送消息到指定渠道，支持 Pushover 的优先级和声音配置
+// SendWithPriority enqueues a message with Pushover priority and sound (non-blocking).
 func (n *NotifyService) SendWithPriority(channel *Channel, message string, priority int, sound string) error {
 	if channel == nil {
 		return fmt.Errorf("channel is required")
@@ -311,7 +307,6 @@ func (n *NotifyService) SendWithPriority(channel *Channel, message string, prior
 		return fmt.Errorf("message is required")
 	}
 
-	// 非阻塞放入channel
 	select {
 	case n.msgChan <- notifyMessage{channel: channel, message: message, priority: priority, sound: sound}:
 		return nil
