@@ -1,0 +1,42 @@
+# Build and publish TUI (and optional server) binaries on tag push.
+# Requires repo to be public for setup.sh to download without auth.
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Build TUI binaries (multi-arch)
+        run: |
+          for goos in linux darwin; do
+            for goarch in amd64 arm64; do
+              GOOS=$goos GOARCH=$goarch CGO_ENABLED=0 go build \
+                -ldflags="-s -w" \
+                -o "remote-signer-tui-${goos}-${goarch}" \
+                ./cmd/tui
+            done
+          done
+
+      - name: Create Release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: remote-signer-tui-*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
