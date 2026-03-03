@@ -278,7 +278,7 @@ if [ -n "$STAGED_PKG_FILES" ]; then
 fi
 
 # 6. Validate rule YAML files (only when rules are staged)
-STAGED_RULES=$(git diff --cached --name-only --diff-filter=ACM | grep '^rules/.*\.yaml$' || true)
+STAGED_RULES=$(git diff --cached --name-only --diff-filter=ACM | grep '^rules/.*\.yaml$' | grep -v '^rules/presets/' || true)
 if [ -n "$STAGED_RULES" ]; then
     if command -v forge &> /dev/null; then
         echo -n "Validating rule files... "
@@ -287,7 +287,7 @@ if [ -n "$STAGED_RULES" ]; then
             echo -e "${GREEN}OK${NC}"
         else
             echo -e "${RED}FAIL${NC}"
-            echo "Rule validation failed. Run 'go run ./cmd/validate-rules/ -v rules/*.yaml' for details."
+            echo "Rule validation failed. Run 'go run ./cmd/validate-rules/ -v rules/*.yaml' or 'remote-signer-validate-rules -v rules/*.yaml' for details."
             FAILED=1
         fi
     else

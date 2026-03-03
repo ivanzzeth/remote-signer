@@ -46,7 +46,7 @@ Invalid return / throw / timeout → wrapper converts to `{ valid: false, reason
 
 **Config per rule** (Rule.Config):
 
-- `delegate_to`: string — **rule ID(s)** of the target rule(s). Single ID, or **comma-separated** list (e.g. `"e2e-erc20,e2e-erc721"`). The engine tries each target in order until **one** allows: for `single` mode the payload is evaluated by each target until one allows; for `per_item` each item must be allowed by at least one target. Use when batch content can match different rule types (e.g. Multisend items may be ERC20 or ERC721). List IDs: `validate-rules -config <path> -list-rule-ids`.
+- `delegate_to`: string — **rule ID(s)** of the target rule(s). Single ID, or **comma-separated** list (e.g. `"e2e-erc20,e2e-erc721"`). The engine tries each target in order until **one** allows: for `single` mode the payload is evaluated by each target until one allows; for `per_item` each item must be allowed by at least one target. Use when batch content can match different rule types (e.g. Multisend items may be ERC20 or ERC721). List IDs: `remote-signer-validate-rules -config <path> -list-rule-ids` or `remote-signer-cli validate -config <path> -list-rule-ids`.
 - `delegate_mode`: `"single"` | `"per_item"` (default `"single"`)
 
 **Config-file delegation**: For rules defined in YAML (or expanded from templates), set `delegate_to` and optional `delegate_mode` under the rule’s `config`. For template instances (e.g. Safe), the template may expose variables `delegate_to` and `delegate_mode`; instance variables are substituted into the rule config so the engine sees them. Unsubstituted placeholders (e.g. `${delegate_to}`) are treated as empty (no delegation).

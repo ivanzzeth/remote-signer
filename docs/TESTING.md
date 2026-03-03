@@ -63,7 +63,7 @@ When using external server mode, ensure your server has:
 Validate rules without starting the server:
 
 ```bash
-go run ./cmd/remote-signer validate-rules -config config.yaml
+remote-signer-cli validate -config config.yaml
 ```
 
 ## Coverage Targets

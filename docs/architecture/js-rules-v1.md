@@ -51,7 +51,7 @@ Delegation lets one rule allow a request only if another rule allows a **derived
 - **Single-rule instance**: If an instance expands to **one** rule and has `config.id`, that rule's ID is exactly `config.id` (e.g. `id: "erc20"` → rule ID `"erc20"`). Use it in `delegate_to` as-is.
 - **Multi-rule instance**: If an instance expands to **multiple** rules and has `config.id`, each template rule that defines an `id` in the template gets a **namespaced** rule ID: `<instance_id>#<template_rule_id>`. The separator `#` is fixed (see `InstanceIDRuleIDSeparator` in code). Example: instance `id: "polymarket"`, template rule `id: "transactions"` → engine rule ID `"polymarket#transactions"`. So `delegate_to` must be that full string (e.g. `delegate_to: "polymarket#transactions"`). Do not use `#` inside instance or template ids.
 - **No instance id**: If the instance has no `config.id`, single-rule expansion keeps an auto-generated id (e.g. `cfg_...`); multi-rule expansion keeps each template rule's id as-is. To avoid ID collisions when using the same template in multiple instances, give each instance a unique `config.id`.
-- **Listing IDs**: Run `validate-rules -config <path> -list-rule-ids` to see the exact rule IDs after expansion; use those strings in `delegate_to`.
+- **Listing IDs**: Run `remote-signer-validate-rules -config <path> -list-rule-ids` (or `remote-signer-cli validate -config <path> -list-rule-ids`) to see the exact rule IDs after expansion; use those strings in `delegate_to`.
 
 ### 4.2 Config: delegate_to and delegate_mode
 
@@ -66,7 +66,7 @@ Delegation lets one rule allow a request only if another rule allows a **derived
 
 ### 4.3 How to write a JS rule that delegates
 
-1. **Target rule ID**: Use a single-rule instance id (e.g. `"erc20"`) or a namespaced id (e.g. `"polymarket#transactions"`). Confirm with `validate-rules -config <path> -list-rule-ids`.
+1. **Target rule ID**: Use a single-rule instance id (e.g. `"erc20"`) or a namespaced id (e.g. `"polymarket#transactions"`). Confirm with `remote-signer-validate-rules -config <path> -list-rule-ids` or `remote-signer-cli validate -config <path> -list-rule-ids`.
 2. **In config**: Set the rule `config.delegate_to` to that ID (and optionally `config.delegate_mode`). For instances, set via template variables (e.g. Safe template variables `delegate_to`, `delegate_mode`).
 3. **In script**: When the request is allowed and you have a derived payload, return `{ valid: true, payload: <RuleInput-like object>, delegate_to: "<target_rule_id>" }`. If you return `delegate_to`, it **overrides** `config.delegate_to` for this request (e.g. to route by inner `to` address). The payload must match what the target rule expects (e.g. `sign_type`, `chain_id`, `signer`, `transaction` or `typed_data`).
 4. **Single vs per_item**: **single** — one payload; target runs once (e.g. Safe → one inner call). **per_item** — `payload[items_key]` must be an array; the engine runs the target for each item (e.g. Multisend → each batch item).

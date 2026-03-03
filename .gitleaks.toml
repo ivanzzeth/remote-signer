@@ -13,4 +13,5 @@ paths = [
     '''pkg/js-client/dist/.*''',
     '''pkg/js-client/tests/.*''',
     '''\.secrets\.baseline''',
+    '''rules/presets/.*''',  # preset YAML: template vars and contract addresses, not secrets
 ]
