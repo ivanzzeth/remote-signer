@@ -25,6 +25,11 @@ func NewMemoryRuleRepository() *MemoryRuleRepository {
 	}
 }
 
+// RunInTransaction runs fn directly (in-memory repo is single-process, already atomic).
+func (r *MemoryRuleRepository) RunInTransaction(_ context.Context, fn func(txRepo RuleRepository) error) error {
+	return fn(r)
+}
+
 // Create stores a new rule. Fails if ID already exists.
 func (r *MemoryRuleRepository) Create(ctx context.Context, rule *types.Rule) error {
 	if rule == nil {

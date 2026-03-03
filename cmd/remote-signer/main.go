@@ -559,9 +559,9 @@ func run() error {
 		return fmt.Errorf("failed to create API server: %w", err)
 	}
 
-	// Handle graceful shutdown
+	// Handle graceful shutdown and SIGHUP for config reload
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -572,20 +572,57 @@ func run() error {
 		errCh <- server.Start()
 	}()
 
-	select {
-	case sig := <-sigCh:
-		log.Info("Received shutdown signal", "signal", sig.String())
-		if err := server.Shutdown(ctx); err != nil {
-			log.Error("Server shutdown error", "error", err)
-		}
-	case err := <-errCh:
-		if err != nil {
-			return fmt.Errorf("server error: %w", err)
+	for {
+		select {
+		case sig := <-sigCh:
+			if sig == syscall.SIGHUP {
+				log.Info("Received SIGHUP, reloading rules from config")
+				reloadRules(*configPath, ruleInit, templateInit, log)
+				continue
+			}
+			log.Info("Received shutdown signal", "signal", sig.String())
+			if err := server.Shutdown(ctx); err != nil {
+				log.Error("Server shutdown error", "error", err)
+			}
+			log.Info("Service stopped")
+			return nil
+		case err := <-errCh:
+			if err != nil {
+				return fmt.Errorf("server error: %w", err)
+			}
+			log.Info("Service stopped")
+			return nil
 		}
 	}
+}
 
-	log.Info("Service stopped")
-	return nil
+// reloadRules re-reads config and syncs rules to DB (triggered by SIGHUP).
+// Rule engine reads from DB per-request, so no engine restart is needed.
+func reloadRules(configPath string, ruleInit *config.RuleInitializer, templateInit *config.TemplateInitializer, log *slog.Logger) {
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		log.Error("SIGHUP: failed to reload config", "error", err)
+		return
+	}
+
+	// Re-expand template instance rules
+	loadedTemplates, err := templateInit.GetLoadedTemplates(cfg.Templates)
+	if err != nil {
+		log.Error("SIGHUP: failed to get loaded templates", "error", err)
+		return
+	}
+	expandedRules, err := config.ExpandInstanceRules(cfg.Rules, loadedTemplates)
+	if err != nil {
+		log.Error("SIGHUP: failed to expand instance rules", "error", err)
+		return
+	}
+
+	if err := ruleInit.SyncFromConfig(context.Background(), expandedRules); err != nil {
+		log.Error("SIGHUP: failed to sync rules from config", "error", err)
+		return
+	}
+
+	log.Info("SIGHUP: rules reloaded successfully")
 }
 
 func parseZerologLevel(level string) (zerolog.Level, error) {

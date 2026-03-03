@@ -60,6 +60,7 @@ func (i *RuleInitializer) SetConfigDir(dir string) {
 // - Updates existing rules with new values from config
 // - Deletes config-sourced rules that are no longer in config (preserves API-created rules)
 // - Expands "file" type rules by loading rules from external YAML files
+// - Wraps all operations in a transaction if the repository supports it
 func (i *RuleInitializer) SyncFromConfig(ctx context.Context, rules []RuleConfig) error {
 	// Expand file-type rules
 	expandedRules, err := i.expandFileRules(rules)
@@ -77,11 +78,25 @@ func (i *RuleInitializer) SyncFromConfig(ctx context.Context, rules []RuleConfig
 		expectedIDs[ruleID] = true
 	}
 
+	syncBody := func(repo storage.RuleRepository) error {
+		return i.executeSyncBody(ctx, repo, expandedRules, expectedIDs)
+	}
+
+	// Use transaction if repository supports it
+	if txRepo, ok := i.repo.(storage.Transactional); ok {
+		return txRepo.RunInTransaction(ctx, syncBody)
+	}
+	return syncBody(i.repo)
+}
+
+// executeSyncBody performs the actual sync: delete stale rules, upsert current rules, verify consistency.
+// repo is the (possibly transactional) repository to use for all operations.
+func (i *RuleInitializer) executeSyncBody(ctx context.Context, repo storage.RuleRepository, expandedRules []RuleConfig, expectedIDs map[types.RuleID]bool) error {
 	// Get all existing config-sourced rules from database
 	configSource := types.RuleSourceConfig
-	existingRules, err := i.repo.List(ctx, storage.RuleFilter{
+	existingRules, err := repo.List(ctx, storage.RuleFilter{
 		Source: &configSource,
-		Limit:  1000, // Get all config rules
+		Limit:  -1, // No limit — fetch all config rules
 	})
 	if err != nil {
 		return fmt.Errorf("failed to list config rules: %w", err)
@@ -91,7 +106,7 @@ func (i *RuleInitializer) SyncFromConfig(ctx context.Context, rules []RuleConfig
 	deleted := 0
 	for _, rule := range existingRules {
 		if !expectedIDs[rule.ID] {
-			if err := i.repo.Delete(ctx, rule.ID); err != nil {
+			if err := repo.Delete(ctx, rule.ID); err != nil {
 				return fmt.Errorf("failed to delete stale config rule %s: %w", rule.ID, err)
 			}
 			i.logger.Info("Deleted stale config rule",
@@ -111,13 +126,53 @@ func (i *RuleInitializer) SyncFromConfig(ctx context.Context, rules []RuleConfig
 	synced := 0
 	for idx, ruleCfg := range expandedRules {
 		ruleID := i.effectiveRuleID(idx, ruleCfg)
-		if err := i.syncRule(ctx, ruleID, ruleCfg); err != nil {
+		if err := i.syncRule(ctx, repo, ruleID, ruleCfg); err != nil {
 			return fmt.Errorf("failed to sync rule %s: %w", ruleCfg.Name, err)
 		}
 		synced++
 	}
 
+	// Verify post-sync consistency
+	if err := i.verifySyncConsistency(ctx, repo, expectedIDs); err != nil {
+		return fmt.Errorf("post-sync verification failed: %w", err)
+	}
+
 	i.logger.Info("Rules synced from config", "synced", synced, "deleted", deleted)
+	return nil
+}
+
+// verifySyncConsistency checks that DB state matches expected rule IDs after sync.
+// Returns error if extra config-sourced rules are found (stale leak detection).
+func (i *RuleInitializer) verifySyncConsistency(ctx context.Context, repo storage.RuleRepository, expectedIDs map[types.RuleID]bool) error {
+	configSource := types.RuleSourceConfig
+	dbRules, err := repo.List(ctx, storage.RuleFilter{
+		Source: &configSource,
+		Limit:  -1,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to list rules for verification: %w", err)
+	}
+
+	var extraIDs []string
+	for _, rule := range dbRules {
+		if !expectedIDs[rule.ID] {
+			extraIDs = append(extraIDs, string(rule.ID))
+		}
+	}
+	if len(extraIDs) > 0 {
+		return fmt.Errorf("stale config rules detected in DB after sync: %v", extraIDs)
+	}
+
+	// Audit summary
+	syncedIDs := make([]string, 0, len(expectedIDs))
+	for id := range expectedIDs {
+		syncedIDs = append(syncedIDs, string(id))
+	}
+	i.logger.Info("Post-sync verification passed",
+		"db_rule_count", len(dbRules),
+		"expected_count", len(expectedIDs),
+		"synced_ids", syncedIDs,
+	)
 	return nil
 }
 
@@ -251,10 +306,28 @@ func (i *RuleInitializer) effectiveRuleID(idx int, ruleCfg RuleConfig) types.Rul
 	return EffectiveRuleID(idx, ruleCfg)
 }
 
-func (i *RuleInitializer) syncRule(ctx context.Context, ruleID types.RuleID, ruleCfg RuleConfig) error {
-	// Skip disabled rules
+func (i *RuleInitializer) syncRule(ctx context.Context, repo storage.RuleRepository, ruleID types.RuleID, ruleCfg RuleConfig) error {
+	// Check if rule already exists in DB (needed for both enabled and disabled paths)
+	existing, err := repo.Get(ctx, ruleID)
+	if err != nil && !types.IsNotFound(err) {
+		return fmt.Errorf("failed to check existing rule: %w", err)
+	}
+
+	// Handle disabled rules: update existing DB rule to disabled, skip creation of new ones
 	if !ruleCfg.Enabled {
-		i.logger.Debug("Skipping disabled rule", "name", ruleCfg.Name)
+		if existing != nil {
+			existing.Enabled = false
+			existing.UpdatedAt = time.Now()
+			if err := repo.Update(ctx, existing); err != nil {
+				return fmt.Errorf("failed to disable rule: %w", err)
+			}
+			i.logger.Info("Disabled rule from config",
+				"id", ruleID,
+				"name", ruleCfg.Name,
+			)
+		} else {
+			i.logger.Debug("Skipping disabled rule (not in DB)", "name", ruleCfg.Name)
+		}
 		return nil
 	}
 
@@ -274,12 +347,6 @@ func (i *RuleInitializer) syncRule(ctx context.Context, ruleID types.RuleID, rul
 	configJSON, err := json.Marshal(ruleCfg.Config)
 	if err != nil {
 		return fmt.Errorf("failed to marshal rule config: %w", err)
-	}
-
-	// Check if rule exists
-	existing, err := i.repo.Get(ctx, ruleID)
-	if err != nil && !types.IsNotFound(err) {
-		return fmt.Errorf("failed to check existing rule: %w", err)
 	}
 
 	// Build rule
@@ -331,7 +398,7 @@ func (i *RuleInitializer) syncRule(ctx context.Context, ruleID types.RuleID, rul
 		rule.CreatedAt = time.Now()
 		rule.UpdatedAt = time.Now()
 
-		if err := i.repo.Create(ctx, rule); err != nil {
+		if err := repo.Create(ctx, rule); err != nil {
 			return fmt.Errorf("failed to create rule: %w", err)
 		}
 
@@ -356,7 +423,7 @@ func (i *RuleInitializer) syncRule(ctx context.Context, ruleID types.RuleID, rul
 		existing.Variables = rule.Variables
 		existing.UpdatedAt = time.Now()
 
-		if err := i.repo.Update(ctx, existing); err != nil {
+		if err := repo.Update(ctx, existing); err != nil {
 			return fmt.Errorf("failed to update rule: %w", err)
 		}
 
