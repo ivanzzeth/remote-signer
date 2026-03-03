@@ -1,9 +1,10 @@
-import { parsePrivateKey, signRequest } from '../src/crypto';
+import { parsePrivateKey, signRequestWithNonce, generateNonce } from '../src/crypto';
 
 describe('crypto', () => {
-  it('signRequest should work without external noble sha512Sync setup', () => {
+  it('signRequestWithNonce should work without external noble sha512Sync setup', () => {
     const priv = parsePrivateKey('0x' + '11'.repeat(32)); // 32 bytes seed
-    const sig = signRequest(priv, 1700000000, 'GET', '/health', new Uint8Array());
+    const nonce = generateNonce();
+    const sig = signRequestWithNonce(priv, 1700000000, nonce, 'GET', '/health', new Uint8Array());
     expect(typeof sig).toBe('string');
     expect(sig.length).toBeGreaterThan(0);
   });

@@ -13,10 +13,18 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
+// BudgetAlertNotifier sends budget alert notifications.
+// Implementations should be non-blocking (async) to avoid delaying sign requests.
+type BudgetAlertNotifier interface {
+	// SendBudgetAlert sends an alert notification when budget usage reaches the threshold.
+	SendBudgetAlert(ctx context.Context, ruleID types.RuleID, unit string, spent string, maxTotal string, pct int64, alertPct int) error
+}
+
 // BudgetChecker checks and deducts budget for rule instances
 type BudgetChecker struct {
 	budgetRepo   storage.BudgetRepository
 	templateRepo storage.TemplateRepository
+	notifier     BudgetAlertNotifier
 	logger       *slog.Logger
 }
 
@@ -31,6 +39,13 @@ func NewBudgetChecker(
 		templateRepo: templateRepo,
 		logger:       logger,
 	}
+}
+
+// SetNotifier sets the budget alert notifier.
+// This is a setter instead of a constructor param because the NotifyService may
+// be created after the BudgetChecker in the application initialization order.
+func (bc *BudgetChecker) SetNotifier(n BudgetAlertNotifier) {
+	bc.notifier = n
 }
 
 // CheckAndDeductBudget checks if the rule has budget and deducts the spending amount.
@@ -53,8 +68,9 @@ func (bc *BudgetChecker) CheckAndDeductBudget(
 	tmpl, err := bc.templateRepo.Get(ctx, *rule.TemplateID)
 	if err != nil {
 		if types.IsNotFound(err) {
-			// Template deleted but instance still active — no budget constraint
-			return true, nil
+			// SECURITY: template deleted but instance still active — fail-closed.
+			// The budget constraint cannot be verified without the template.
+			return false, fmt.Errorf("template %s deleted but instance rule %s still active", *rule.TemplateID, rule.ID)
 		}
 		return false, fmt.Errorf("failed to load template: %w", err)
 	}
@@ -82,16 +98,19 @@ func (bc *BudgetChecker) CheckAndDeductBudget(
 	budget, err := bc.budgetRepo.GetByRuleID(ctx, rule.ID, unit)
 	if err != nil {
 		if types.IsNotFound(err) {
-			// No budget record = no budget constraint
-			return true, nil
+			// SECURITY: no budget record for a rule with metering — fail-closed.
+			// Budget record should be created at rule initialization. Missing record
+			// means incomplete setup; allowing would bypass budget constraints.
+			return false, fmt.Errorf("no budget record for rule %s (unit=%s) with metering method %q", rule.ID, unit, metering.Method)
 		}
 		return false, fmt.Errorf("failed to get budget: %w", err)
 	}
 
 	// Check periodic renewal
+	// SECURITY: fail-closed on renewal error — stale budget data could allow
+	// spending beyond the intended period limit.
 	if err := bc.checkPeriodicRenewal(ctx, rule, budget, unit); err != nil {
-		bc.logger.Error("failed to check periodic renewal", "rule_id", rule.ID, "error", err)
-		// Continue with current budget state
+		return false, fmt.Errorf("failed to check periodic renewal for rule %s: %w", rule.ID, err)
 	}
 
 	// Extract spending amount
@@ -101,17 +120,20 @@ func (bc *BudgetChecker) CheckAndDeductBudget(
 	}
 
 	// Check per-tx limit
+	// SECURITY: fail-closed on parse error — unparseable limit could allow
+	// arbitrarily large transactions.
 	if budget.MaxPerTx != "" && budget.MaxPerTx != "0" {
 		maxPerTx := new(big.Int)
-		if _, ok := maxPerTx.SetString(budget.MaxPerTx, 10); ok {
-			if amount.Cmp(maxPerTx) > 0 {
-				bc.logger.Warn("per-tx budget exceeded",
-					"rule_id", rule.ID,
-					"amount", amount.String(),
-					"max_per_tx", budget.MaxPerTx,
-				)
-				return false, nil
-			}
+		if _, ok := maxPerTx.SetString(budget.MaxPerTx, 10); !ok {
+			return false, fmt.Errorf("invalid max_per_tx value %q for rule %s", budget.MaxPerTx, rule.ID)
+		}
+		if amount.Cmp(maxPerTx) > 0 {
+			bc.logger.Warn("per-tx budget exceeded",
+				"rule_id", rule.ID,
+				"amount", amount.String(),
+				"max_per_tx", budget.MaxPerTx,
+			)
+			return false, nil
 		}
 	}
 
@@ -137,7 +159,7 @@ func (bc *BudgetChecker) CheckAndDeductBudget(
 		"tx_count_after", budget.TxCount+1,
 	)
 
-	// Async: check alert threshold
+	// #nosec G118 -- intentional: async alert check must outlive request context
 	go bc.checkAlertThreshold(rule.ID, unit, budget)
 
 	return true, nil
@@ -176,7 +198,9 @@ func (bc *BudgetChecker) checkPeriodicRenewal(ctx context.Context, rule *types.R
 	return nil
 }
 
-// checkAlertThreshold checks if the budget usage has reached the alert threshold
+// checkAlertThreshold checks if the budget usage has reached the alert threshold.
+// When reached, sends a notification (if notifier is configured) and marks
+// the alert as sent to prevent duplicate notifications within the same period.
 func (bc *BudgetChecker) checkAlertThreshold(ruleID types.RuleID, unit string, budget *types.RuleBudget) {
 	if budget.AlertSent || budget.AlertPct <= 0 || budget.MaxTotal == "" || budget.MaxTotal == "0" {
 		return
@@ -202,9 +226,37 @@ func (bc *BudgetChecker) checkAlertThreshold(ruleID types.RuleID, unit string, b
 			"unit", unit,
 			"spent", budget.Spent,
 			"max_total", budget.MaxTotal,
+			"pct", pct.Int64(),
 			"alert_pct", budget.AlertPct,
 		)
-		// TODO: send notification via notify system
+
+		// Send notification via notify system
+		if bc.notifier != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := bc.notifier.SendBudgetAlert(ctx, ruleID, unit, budget.Spent, budget.MaxTotal, pct.Int64(), budget.AlertPct); err != nil {
+				bc.logger.Error("failed to send budget alert notification",
+					"rule_id", ruleID,
+					"unit", unit,
+					"error", err,
+				)
+				// Don't mark as sent if notification failed — retry next time
+				return
+			}
+		}
+
+		// Mark alert as sent to prevent duplicate notifications
+		if bc.budgetRepo != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := bc.budgetRepo.MarkAlertSent(ctx, ruleID, unit); err != nil {
+				bc.logger.Error("failed to mark budget alert as sent",
+					"rule_id", ruleID,
+					"unit", unit,
+					"error", err,
+				)
+			}
+		}
 	}
 }
 
@@ -220,14 +272,17 @@ func ExtractAmount(metering types.BudgetMetering, req *types.SignRequest, parsed
 	case "typed_data_field":
 		return extractTypedDataField(metering, parsed)
 	default:
-		return big.NewInt(0), nil
+		// SECURITY: Unknown metering method should return an error, not zero.
+		// Returning zero would effectively bypass budget enforcement.
+		return nil, fmt.Errorf("unknown metering method: %s", metering.Method)
 	}
 }
 
-// extractTxValue extracts the transaction value from parsed payload
+// extractTxValue extracts the transaction value from parsed payload.
+// SECURITY: Returns an error when value is missing to prevent zero-cost budget bypass.
 func extractTxValue(parsed *types.ParsedPayload) (*big.Int, error) {
 	if parsed == nil || parsed.Value == nil {
-		return big.NewInt(0), nil
+		return nil, fmt.Errorf("tx_value metering requires a transaction value but parsed payload is nil or has no value")
 	}
 	n := new(big.Int)
 	if _, ok := n.SetString(*parsed.Value, 10); !ok {
@@ -241,15 +296,16 @@ func extractTxValue(parsed *types.ParsedPayload) (*big.Int, error) {
 
 // extractCalldataParam extracts a parameter from calldata using ABI decoding.
 // Uses RawData from ParsedPayload which contains the raw transaction data.
+// SECURITY: Returns an error when data is missing to prevent zero-cost budget bypass.
 func extractCalldataParam(metering types.BudgetMetering, parsed *types.ParsedPayload) (*big.Int, error) {
 	if parsed == nil || len(parsed.RawData) == 0 {
-		return big.NewInt(0), nil
+		return nil, fmt.Errorf("calldata_param metering requires raw transaction data but parsed payload is nil or has no data")
 	}
 
 	// Calldata format: 4-byte selector + 32-byte parameters
 	data := parsed.RawData
 	if len(data) < 4 {
-		return big.NewInt(0), nil
+		return nil, fmt.Errorf("calldata_param metering requires at least 4 bytes of calldata, got %d", len(data))
 	}
 
 	params := data[4:]
@@ -269,14 +325,15 @@ func extractCalldataParam(metering types.BudgetMetering, parsed *types.ParsedPay
 
 // extractTypedDataField extracts a field from EIP-712 typed data message.
 // Uses RawData which may contain the typed data JSON, then navigates by field path.
+// SECURITY: Returns an error when data is missing to prevent zero-cost budget bypass.
 func extractTypedDataField(metering types.BudgetMetering, parsed *types.ParsedPayload) (*big.Int, error) {
 	if parsed == nil || len(parsed.RawData) == 0 {
-		return big.NewInt(0), nil
+		return nil, fmt.Errorf("typed_data_field metering requires raw data but parsed payload is nil or has no data")
 	}
 
 	fieldPath := metering.FieldPath
 	if fieldPath == "" {
-		return big.NewInt(0), nil
+		return nil, fmt.Errorf("typed_data_field metering requires field_path but it is empty")
 	}
 
 	// Try to parse RawData as JSON (typed data payload)
@@ -319,7 +376,15 @@ func valueToBigInt(v interface{}) (*big.Int, error) {
 		}
 		return n, nil
 	case float64:
-		return big.NewInt(int64(val)), nil
+		// SECURITY: Use big.Float to avoid precision loss for large values.
+		// big.NewInt(int64(val)) loses precision for values > 2^53.
+		bf := new(big.Float).SetFloat64(val)
+		n, accuracy := bf.Int(nil)
+		if accuracy != big.Exact {
+			// Not an exact integer — could indicate precision issues
+			return nil, fmt.Errorf("float64 value %v is not an exact integer (precision loss risk)", val)
+		}
+		return n, nil
 	case int64:
 		return big.NewInt(val), nil
 	case json.Number:

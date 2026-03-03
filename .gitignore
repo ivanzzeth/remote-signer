@@ -18,6 +18,7 @@
 /audit-monitor
 /cmd/remote-signer/remote-signer
 /cmd/tui/tui
+/validate-rules
 
 # Code coverage profiles and other test artifacts
 *.out
@@ -49,6 +50,9 @@ data/keystores/*
 !data/foundry/
 data/foundry/*
 !data/foundry/.gitkeep
+!data/hd-wallets/
+data/hd-wallets/*
+!data/hd-wallets/.gitkeep
 
 # Configuration files (sensitive)
 config.yaml
@@ -115,3 +119,6 @@ coverage/
 *~
 .DS_Store
 bin/
+
+# E2E test data (generated keystores, etc.)
+e2e/data/

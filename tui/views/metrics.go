@@ -18,6 +18,11 @@ import (
 	"github.com/ivanzzeth/remote-signer/tui/styles"
 )
 
+// metricsProvider is the interface for fetching metrics.
+type metricsProvider interface {
+	Metrics(ctx context.Context) (string, error)
+}
+
 // latencyRow holds p50/p95 in seconds for display.
 type latencyRow struct {
 	label string
@@ -31,7 +36,7 @@ type bucketPoint struct {
 }
 
 type MetricsModel struct {
-	client   client.ClientInterface
+	metrics  metricsProvider
 	ctx      context.Context
 	width    int
 	height   int
@@ -57,8 +62,16 @@ type MetricsDataMsg struct {
 	Err error
 }
 
-func NewMetricsModel(c client.ClientInterface, ctx context.Context) (*MetricsModel, error) {
+func NewMetricsModel(c *client.Client, ctx context.Context) (*MetricsModel, error) {
 	if c == nil {
+		return nil, fmt.Errorf("client is required")
+	}
+	return newMetricsModelFromProvider(c, ctx)
+}
+
+// newMetricsModelFromProvider creates a metrics model from a metricsProvider (for testing).
+func newMetricsModelFromProvider(mp metricsProvider, ctx context.Context) (*MetricsModel, error) {
+	if mp == nil {
 		return nil, fmt.Errorf("client is required")
 	}
 	if ctx == nil {
@@ -70,7 +83,7 @@ func NewMetricsModel(c client.ClientInterface, ctx context.Context) (*MetricsMod
 	s.Style = styles.SpinnerStyle
 
 	return &MetricsModel{
-		client:     c,
+		metrics:    mp,
 		ctx:        ctx,
 		spinner:    s,
 		loading:    true,
@@ -117,7 +130,7 @@ func (m *MetricsModel) Refresh() tea.Cmd {
 
 func (m *MetricsModel) loadMetrics() tea.Cmd {
 	return func() tea.Msg {
-		raw, err := m.client.Metrics(m.ctx)
+		raw, err := m.metrics.Metrics(m.ctx)
 		if err != nil {
 			return MetricsDataMsg{Err: err}
 		}
@@ -511,7 +524,7 @@ func parseMetricAndLabels(s string) (name string, labels map[string]string) {
 
 func splitLabels(s string) []string {
 	// Prometheus label values are quoted strings; for our use cases labels do not contain unescaped commas.
-	// Keep implementation intentionally small and robust for this project’s known metrics.
+	// Keep implementation intentionally small and robust for this project's known metrics.
 	var out []string
 	for _, part := range strings.Split(s, ",") {
 		part = strings.TrimSpace(part)
@@ -563,7 +576,7 @@ func renderBarTable(counts map[string]float64, width int) string {
 		if barLen > barMax {
 			barLen = barMax
 		}
-		bar := strings.Repeat("█", barLen)
+		bar := strings.Repeat("#", barLen)
 		if bar == "" {
 			bar = " "
 		}
@@ -571,4 +584,3 @@ func renderBarTable(counts map[string]float64, width int) string {
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
-

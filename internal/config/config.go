@@ -54,9 +54,20 @@ type TemplateVarConfig struct {
 	Default     string `yaml:"default,omitempty"`
 }
 
+// TestCaseConfig defines a single test case for rule validation (evm_js, solidity, etc.)
+type TestCaseConfig struct {
+	Name         string                 `yaml:"name" json:"name"`
+	Input        map[string]interface{} `yaml:"input" json:"input"`
+	ExpectPass   bool                   `yaml:"expect_pass" json:"expect_pass"`
+	ExpectReason string                 `yaml:"expect_reason,omitempty" json:"expect_reason,omitempty"`
+}
+
 // RuleConfig defines a rule in configuration. JSON tags must match YAML/validator expectations
 // so that substituted rules_json unmarshals correctly (e.g. "config" not "Config").
 type RuleConfig struct {
+	// Id is an optional stable rule ID. If set, it is used as the rule's ID (for delegate_to etc.);
+	// must be unique across all rules. If empty, a deterministic ID is generated from config order.
+	Id            string                 `yaml:"id,omitempty" json:"id,omitempty"`
 	Name          string                 `yaml:"name" json:"name"`
 	Description   string                 `yaml:"description,omitempty" json:"description,omitempty"`
 	Type          string                 `yaml:"type" json:"type"`
@@ -66,6 +77,8 @@ type RuleConfig struct {
 	APIKeyID      string                 `yaml:"api_key_id,omitempty" json:"api_key_id,omitempty"`
 	SignerAddress string                 `yaml:"signer_address,omitempty" json:"signer_address,omitempty"`
 	Config        map[string]interface{} `yaml:"config" json:"config"`
+	Variables     map[string]interface{} `yaml:"variables,omitempty" json:"variables,omitempty"`   // instance/template variable values (e.g. for evm_js config)
+	TestCases     []TestCaseConfig       `yaml:"test_cases,omitempty" json:"test_cases,omitempty"` // test cases for validation (evm_js, solidity, etc.)
 	Enabled       bool                   `yaml:"enabled" json:"enabled"`
 }
 
@@ -77,6 +90,7 @@ type APIKeyConfig struct {
 	PublicKeyEnv      string   `yaml:"public_key_env"`       // Environment variable containing public key
 	AllowedChainTypes []string `yaml:"allowed_chain_types"`  // Empty = all chains allowed
 	AllowedSigners    []string `yaml:"allowed_signers"`      // Empty = all signers allowed
+	AllowedHDWallets  []string `yaml:"allowed_hd_wallets"`   // HD wallet primary addresses (empty = none)
 	RateLimit         int      `yaml:"rate_limit"`           // Requests per minute (default: 100)
 	Enabled           bool     `yaml:"enabled"`              // Whether the key is active
 	Admin             bool     `yaml:"admin"`                // Admin keys can approve requests and manage rules
@@ -159,10 +173,11 @@ type ChainsConfig struct {
 
 // EVMConfig contains EVM chain configuration
 type EVMConfig struct {
-	Enabled     bool             `yaml:"enabled"`
-	Signers     evm.SignerConfig `yaml:"signers"`
-	KeystoreDir string           `yaml:"keystore_dir"` // Directory for storing dynamically created keystores
-	Foundry     FoundryConfig    `yaml:"foundry"`
+	Enabled      bool             `yaml:"enabled"`
+	Signers      evm.SignerConfig `yaml:"signers"`
+	KeystoreDir  string           `yaml:"keystore_dir"`   // Directory for storing dynamically created keystores
+	HDWalletDir  string           `yaml:"hd_wallet_dir"`  // Directory for storing HD wallets
+	Foundry      FoundryConfig    `yaml:"foundry"`
 }
 
 // FoundryConfig contains Foundry (forge) configuration for Solidity rules
@@ -178,6 +193,9 @@ type FoundryConfig struct {
 type SecurityConfig struct {
 	MaxRequestAge    time.Duration     `yaml:"max_request_age"`
 	RateLimitDefault int               `yaml:"rate_limit_default"`
+	// IPRateLimit is the maximum requests per minute from a single IP address (pre-auth).
+	// Protects against unauthenticated flood attacks. Default: 200.
+	IPRateLimit int `yaml:"ip_rate_limit"`
 	IPWhitelist      IPWhitelistConfig `yaml:"ip_whitelist"`
 	// ManualApprovalEnabled: when true, requests with no whitelist match go to manual approval;
 	// when false (default), they are rejected immediately. Default false for stricter security.
@@ -208,10 +226,15 @@ type IPWhitelistConfig struct {
 	// AllowedIPs is a list of allowed IP addresses or CIDR ranges
 	// Examples: "192.168.1.1", "10.0.0.0/8", "::1"
 	AllowedIPs []string `yaml:"allowed_ips"`
-	// AllowedCIDRs is parsed from AllowedIPs during validation (internal use)
 	// TrustProxy enables parsing X-Forwarded-For and X-Real-IP headers
 	// WARNING: Only enable this if running behind a trusted reverse proxy
 	TrustProxy bool `yaml:"trust_proxy"`
+	// TrustedProxies is a list of IP addresses or CIDR ranges of trusted reverse proxies
+	// When TrustProxy is true, X-Forwarded-For/X-Real-IP headers are only honored
+	// if the request's direct RemoteAddr matches one of these entries.
+	// If TrustProxy is true but TrustedProxies is empty, proxy headers are ignored
+	// (fail-closed: no trusted proxies means no header trust).
+	TrustedProxies []string `yaml:"trusted_proxies"`
 }
 
 // LoggerConfig contains logging configuration
@@ -226,7 +249,7 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("config path is required")
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path is admin-provided config file
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
@@ -362,6 +385,10 @@ func setDefaults(cfg *Config) {
 		cfg.Security.RateLimitDefault = 100
 	}
 
+	if cfg.Security.IPRateLimit <= 0 {
+		cfg.Security.IPRateLimit = 200
+	}
+
 	// Default to requiring nonce for security
 	if cfg.Security.NonceRequired == nil {
 		nonceRequired := true
@@ -370,6 +397,16 @@ func setDefaults(cfg *Config) {
 
 	if cfg.Logger.Level == "" {
 		cfg.Logger.Level = "info"
+	}
+
+	// EVM directory defaults
+	if cfg.Chains.EVM != nil && cfg.Chains.EVM.Enabled {
+		if cfg.Chains.EVM.KeystoreDir == "" {
+			cfg.Chains.EVM.KeystoreDir = "./data/keystores"
+		}
+		if cfg.Chains.EVM.HDWalletDir == "" {
+			cfg.Chains.EVM.HDWalletDir = "./data/hd-wallets"
+		}
 	}
 
 	// ApprovalGuard defaults

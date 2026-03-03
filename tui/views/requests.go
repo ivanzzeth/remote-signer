@@ -11,19 +11,20 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 	"github.com/ivanzzeth/remote-signer/tui/styles"
 )
 
 // RequestsModel represents the requests list view
 type RequestsModel struct {
-	client       client.ClientInterface
+	requests_svc evm.RequestAPI
 	ctx          context.Context
 	width        int
 	height       int
 	spinner      spinner.Model
 	loading      bool
 	err          error
-	requests     []client.RequestStatus
+	requests     []evm.RequestStatus
 	total        int
 	selectedIdx  int
 	limit        int
@@ -47,7 +48,7 @@ type cursorState struct {
 
 // RequestsDataMsg is sent when requests data is loaded
 type RequestsDataMsg struct {
-	Requests     []client.RequestStatus
+	Requests     []evm.RequestStatus
 	Total        int
 	NextCursor   *string
 	NextCursorID *string
@@ -56,8 +57,16 @@ type RequestsDataMsg struct {
 }
 
 // NewRequestsModel creates a new requests model
-func NewRequestsModel(c client.ClientInterface, ctx context.Context) (*RequestsModel, error) {
+func NewRequestsModel(c *client.Client, ctx context.Context) (*RequestsModel, error) {
 	if c == nil {
+		return nil, fmt.Errorf("client is required")
+	}
+	return newRequestsModelFromService(c.EVM.Requests, ctx)
+}
+
+// newRequestsModelFromService creates a requests model from a RequestAPI (for testing).
+func newRequestsModelFromService(svc evm.RequestAPI, ctx context.Context) (*RequestsModel, error) {
+	if svc == nil {
 		return nil, fmt.Errorf("client is required")
 	}
 	if ctx == nil {
@@ -73,12 +82,12 @@ func NewRequestsModel(c client.ClientInterface, ctx context.Context) (*RequestsM
 	ti.Width = 60
 
 	return &RequestsModel{
-		client:      c,
-		ctx:         ctx,
-		spinner:     s,
-		loading:     true,
-		limit:       20,
-		filterInput: ti,
+		requests_svc: svc,
+		ctx:          ctx,
+		spinner:      s,
+		loading:      true,
+		limit:        20,
+		filterInput:  ti,
 	}, nil
 }
 
@@ -126,13 +135,13 @@ func (m *RequestsModel) resetPagination() {
 
 func (m *RequestsModel) loadData() tea.Cmd {
 	return func() tea.Msg {
-		filter := &client.ListRequestsFilter{
+		filter := &evm.ListRequestsFilter{
 			Status:   m.statusFilter,
 			Limit:    m.limit,
 			Cursor:   m.cursor,
 			CursorID: m.cursorID,
 		}
-		resp, err := m.client.ListRequests(m.ctx, filter)
+		resp, err := m.requests_svc.List(m.ctx, filter)
 		if err != nil {
 			return RequestsDataMsg{Err: err}
 		}
@@ -291,6 +300,11 @@ func (m *RequestsModel) View() string {
 	return m.renderRequests()
 }
 
+// IsCapturingInput returns true when this view is capturing keyboard input (filter active).
+func (m *RequestsModel) IsCapturingInput() bool {
+	return m.showFilter
+}
+
 func (m *RequestsModel) renderLoading() string {
 	return lipgloss.Place(
 		m.width,
@@ -395,7 +409,7 @@ func (m *RequestsModel) renderRequests() string {
 	return content.String()
 }
 
-func (m *RequestsModel) renderRequestRow(req client.RequestStatus, selected bool) string {
+func (m *RequestsModel) renderRequestRow(req evm.RequestStatus, selected bool) string {
 	// Truncate ID for display
 	id := req.ID
 	if len(id) > 36 {

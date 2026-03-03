@@ -12,19 +12,22 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/audit"
+	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 	"github.com/ivanzzeth/remote-signer/tui/styles"
 )
 
 // AuditModel represents the audit logs view
 type AuditModel struct {
-	client         client.ClientInterface
+	audit_svc      audit.API
+	requests_svc   evm.RequestAPI
 	ctx            context.Context
 	width          int
 	height         int
 	spinner        spinner.Model
 	loading        bool
 	err            error
-	records        []client.AuditRecord
+	records        []audit.Record
 	total          int
 	selectedIdx    int
 	limit          int
@@ -35,7 +38,7 @@ type AuditModel struct {
 	filterType     string // "event" or "severity"
 	showDetail         bool
 	detailScroll       int // scroll offset for detail view
-	detailRequest      *client.RequestStatus
+	detailRequest      *evm.RequestStatus
 	detailRequestLoad  bool
 	detailRequestErr   error
 	// Cursor-based pagination
@@ -55,7 +58,7 @@ type auditCursorState struct {
 
 // AuditDataMsg is sent when audit data is loaded
 type AuditDataMsg struct {
-	Records      []client.AuditRecord
+	Records      []audit.Record
 	Total        int
 	NextCursor   *string
 	NextCursorID *string
@@ -65,13 +68,24 @@ type AuditDataMsg struct {
 
 // AuditDetailRequestMsg is sent when the request for the selected audit record is loaded (detail view).
 type AuditDetailRequestMsg struct {
-	Request *client.RequestStatus
+	Request *evm.RequestStatus
 	Err     error
 }
 
 // NewAuditModel creates a new audit model
-func NewAuditModel(c client.ClientInterface, ctx context.Context) (*AuditModel, error) {
+func NewAuditModel(c *client.Client, ctx context.Context) (*AuditModel, error) {
 	if c == nil {
+		return nil, fmt.Errorf("client is required")
+	}
+	return newAuditModelFromServices(c.Audit, c.EVM.Requests, ctx)
+}
+
+// newAuditModelFromServices creates an audit model from service interfaces (for testing).
+func newAuditModelFromServices(auditSvc audit.API, requestsSvc evm.RequestAPI, ctx context.Context) (*AuditModel, error) {
+	if auditSvc == nil {
+		return nil, fmt.Errorf("client is required")
+	}
+	if requestsSvc == nil {
 		return nil, fmt.Errorf("client is required")
 	}
 	if ctx == nil {
@@ -87,12 +101,13 @@ func NewAuditModel(c client.ClientInterface, ctx context.Context) (*AuditModel, 
 	ti.Width = 50
 
 	return &AuditModel{
-		client:      c,
-		ctx:         ctx,
-		spinner:     s,
-		loading:     true,
-		limit:       30,
-		filterInput: ti,
+		audit_svc:    auditSvc,
+		requests_svc: requestsSvc,
+		ctx:          ctx,
+		spinner:      s,
+		loading:      true,
+		limit:        30,
+		filterInput:  ti,
 	}, nil
 }
 
@@ -132,7 +147,7 @@ func (m *AuditModel) resetPagination() {
 
 func (m *AuditModel) loadData() tea.Cmd {
 	return func() tea.Msg {
-		filter := &client.ListAuditFilter{
+		filter := &audit.ListFilter{
 			EventType: m.eventFilter,
 			Severity:  m.severityFilter,
 			Limit:     m.limit,
@@ -140,7 +155,7 @@ func (m *AuditModel) loadData() tea.Cmd {
 			CursorID:  m.cursorID,
 		}
 
-		resp, err := m.client.ListAuditRecords(m.ctx, filter)
+		resp, err := m.audit_svc.List(m.ctx, filter)
 		if err != nil {
 			return AuditDataMsg{Err: err}
 		}
@@ -158,7 +173,7 @@ func (m *AuditModel) loadData() tea.Cmd {
 // loadDetailRequest fetches the sign request for the given ID (used in detail view when record has SignRequestID).
 func (m *AuditModel) loadDetailRequest(requestID string) tea.Cmd {
 	return func() tea.Msg {
-		req, err := m.client.GetRequest(m.ctx, requestID)
+		req, err := m.requests_svc.Get(m.ctx, requestID)
 		if err != nil {
 			return AuditDetailRequestMsg{Err: err}
 		}
@@ -385,6 +400,11 @@ func (m *AuditModel) View() string {
 	return m.renderAuditLogs()
 }
 
+// IsCapturingInput returns true when this view is capturing keyboard input (filter active).
+func (m *AuditModel) IsCapturingInput() bool {
+	return m.showFilter
+}
+
 func (m *AuditModel) renderLoading() string {
 	return lipgloss.Place(
 		m.width,
@@ -495,13 +515,13 @@ func (m *AuditModel) renderAuditLogs() string {
 
 	// Help
 	content.WriteString("\n\n")
-	helpText := "↑/↓: navigate | Enter: view details | e: filter event | s: filter severity | c: clear | n/p: next/prev | r: refresh"
+	helpText := "up/down: navigate | Enter: view details | e: filter event | s: filter severity | c: clear | n/p: next/prev | r: refresh"
 	content.WriteString(styles.HelpStyle.Render(helpText))
 
 	return content.String()
 }
 
-func (m *AuditModel) renderAuditRow(record client.AuditRecord, selected bool) string {
+func (m *AuditModel) renderAuditRow(record audit.Record, selected bool) string {
 	timestamp := record.Timestamp.Format("2006-01-02 15:04:05")
 
 	eventType := record.EventType
@@ -578,7 +598,7 @@ func (m *AuditModel) renderDetail() string {
 		key   string
 		value string
 	}{
-		{"ID", string(record.ID)},
+		{"ID", record.ID},
 		{"Event Type", record.EventType},
 		{"Severity", record.Severity},
 		{"Timestamp", record.Timestamp.Format("2006-01-02 15:04:05")},

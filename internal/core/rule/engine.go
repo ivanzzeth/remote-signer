@@ -64,6 +64,9 @@ type EvaluationResult struct {
 
 	// AllowReason explains why the request was allowed
 	AllowReason string
+
+	// NoMatchReason explains why a whitelist rule didn't match (used internally for delegation and diagnostics)
+	NoMatchReason string
 }
 
 // RuleEngine evaluates rules for sign requests
@@ -126,3 +129,31 @@ type BatchRuleEvaluator interface {
 	// Rules might not be batchable if they use different validation modes
 	CanBatchEvaluate(rules []*types.Rule) bool
 }
+
+// Delegation limits per §11.8
+const (
+	DelegationMaxDepth = 6
+	DelegationMaxItems = 256
+)
+
+// DelegationRequest is returned by evaluators that support delegation (e.g. evm_js).
+// TargetRuleIDs: engine tries each target in order until one allows (single: one payload;
+// per_item: each item must be allowed by at least one target).
+type DelegationRequest struct {
+	TargetRuleIDs []types.RuleID // target rule IDs; any one passing is OK per payload/item
+	Mode          string         // "single" | "per_item"
+	Payload       interface{}
+	ItemsKey      string
+	PayloadKey    string
+}
+
+// EvaluatorWithDelegation is an optional interface for evaluators that can return a delegation.
+// When implemented, the engine calls EvaluateWithDelegation and may recurse to the target rule.
+type EvaluatorWithDelegation interface {
+	RuleEvaluator
+	EvaluateWithDelegation(ctx context.Context, rule *types.Rule, req *types.SignRequest, parsed *types.ParsedPayload) (matched bool, reason string, delegation *DelegationRequest, err error)
+}
+
+// DelegationPayloadConverter converts a delegation payload to (SignRequest, ParsedPayload) for the target rule.
+// Set via WithDelegationPayloadConverter when the engine is created (e.g. evm.DelegatePayloadToSignRequest).
+type DelegationPayloadConverter func(ctx context.Context, payload interface{}, mode string) (*types.SignRequest, *types.ParsedPayload, error)

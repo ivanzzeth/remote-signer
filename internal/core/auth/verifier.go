@@ -50,13 +50,17 @@ type Verifier struct {
 	config     Config
 }
 
-// NewVerifier creates a new auth verifier
+// NewVerifier creates a new auth verifier without nonce store.
+// If NonceRequired is true, use NewVerifierWithNonceStore instead.
 func NewVerifier(apiKeyRepo storage.APIKeyRepository, config Config) (*Verifier, error) {
 	if apiKeyRepo == nil {
 		return nil, fmt.Errorf("API key repository is required")
 	}
 	if config.MaxRequestAge <= 0 {
 		return nil, fmt.Errorf("max request age must be positive")
+	}
+	if config.NonceRequired {
+		return nil, fmt.Errorf("NonceRequired is true but no nonce store provided; use NewVerifierWithNonceStore")
 	}
 	return &Verifier{
 		apiKeyRepo: apiKeyRepo,
@@ -66,12 +70,20 @@ func NewVerifier(apiKeyRepo storage.APIKeyRepository, config Config) (*Verifier,
 
 // NewVerifierWithNonceStore creates a new auth verifier with nonce store for replay protection
 func NewVerifierWithNonceStore(apiKeyRepo storage.APIKeyRepository, nonceStore storage.NonceStore, config Config) (*Verifier, error) {
-	v, err := NewVerifier(apiKeyRepo, config)
-	if err != nil {
-		return nil, err
+	if apiKeyRepo == nil {
+		return nil, fmt.Errorf("API key repository is required")
 	}
-	v.nonceStore = nonceStore
-	return v, nil
+	if config.MaxRequestAge <= 0 {
+		return nil, fmt.Errorf("max request age must be positive")
+	}
+	if nonceStore == nil {
+		return nil, fmt.Errorf("nonce store is required when using NewVerifierWithNonceStore")
+	}
+	return &Verifier{
+		apiKeyRepo: apiKeyRepo,
+		nonceStore: nonceStore,
+		config:     config,
+	}, nil
 }
 
 
@@ -157,6 +169,11 @@ func (v *Verifier) verifyRequestInternal(
 		return nil, fmt.Errorf("request timestamp too old (age: %s, max: %s): %w", age, v.config.MaxRequestAge, types.ErrUnauthorized)
 	}
 
+	// Enforce nonce requirement before expensive crypto operations
+	if v.config.NonceRequired && nonce == "" {
+		return nil, fmt.Errorf("nonce header required for replay protection: %w", types.ErrUnauthorized)
+	}
+
 	// Decode public key
 	publicKeyBytes, err := hex.DecodeString(apiKey.PublicKeyHex)
 	if err != nil {
@@ -189,17 +206,12 @@ func (v *Verifier) verifyRequestInternal(
 		return nil, fmt.Errorf("signature verification failed (public key mismatch or message tampered): %w", types.ErrUnauthorized)
 	}
 
-	// Enforce nonce requirement if configured
-	if v.config.NonceRequired && v.nonceStore != nil && nonce == "" {
-		return nil, fmt.Errorf("nonce header required: %w", types.ErrUnauthorized)
-	}
-
 	stdCtx, ok := ctx.(context.Context)
 	if !ok {
 		stdCtx = context.Background()
 	}
 
-	// Check nonce for replay protection (if nonce provided and store configured)
+	// Check nonce for replay protection
 	if nonce != "" && v.nonceStore != nil {
 		isNew, err := v.nonceStore.CheckAndStore(stdCtx, apiKeyID, nonce, v.config.MaxRequestAge)
 		if err != nil {
