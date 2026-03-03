@@ -14,7 +14,8 @@ import (
 type Channel struct {
 	Slack    []string `yaml:"slack,omitempty"`    // Slack channel IDs
 	Pushover []string `yaml:"pushover,omitempty"` // Pushover user keys
-	Webhook  []string `yaml:"webhook,omitempty"`  // Webhook URLs
+	Webhook  []string `yaml:"webhook,omitempty"`   // Webhook URLs
+	Telegram []string `yaml:"telegram,omitempty"` // Telegram chat IDs or @channel
 }
 
 // SlackConfig Slack配置
@@ -40,11 +41,18 @@ type WebhookConfig struct {
 	Timeout time.Duration     `yaml:"timeout,omitempty"` // HTTP client timeout
 }
 
+// TelegramConfig configures the Telegram Bot notification channel.
+type TelegramConfig struct {
+	Enabled  bool   `yaml:"enabled"`
+	BotToken string `yaml:"bot_token"` // Bot token from @BotFather
+}
+
 // Config is the root notification service configuration.
 type Config struct {
 	Slack    *SlackConfig    `yaml:"slack,omitempty"`
 	Pushover *PushoverConfig `yaml:"pushover,omitempty"`
 	Webhook  *WebhookConfig  `yaml:"webhook,omitempty"`
+	Telegram *TelegramConfig `yaml:"telegram,omitempty"`
 }
 
 // notifyMessage 内部消息结构
@@ -61,6 +69,7 @@ type NotifyService struct {
 	slackClient    *SlackClient
 	pushoverClient *PushoverClient
 	webhookClient  *WebhookClient
+	telegramClient *TelegramClient
 	logger         zerolog.Logger
 
 	// 异步发送相关
@@ -139,6 +148,19 @@ func NewNotifyService(cfg *Config) (*NotifyService, error) {
 		}
 		service.webhookClient = webhookClient
 		log.Debug().Msg("Webhook client initialized")
+	}
+
+	// Initialize Telegram client
+	if cfg.Telegram != nil && cfg.Telegram.Enabled {
+		if cfg.Telegram.BotToken == "" {
+			return nil, fmt.Errorf("telegram bot token is required when enabled")
+		}
+		telegramClient, err := NewTelegramClient(cfg.Telegram.BotToken)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create telegram client: %w", err)
+		}
+		service.telegramClient = telegramClient
+		log.Debug().Msg("Telegram client initialized")
 	}
 
 	return service, nil
@@ -257,6 +279,24 @@ func (n *NotifyService) sendSync(channel *Channel, message string, priority int,
 				n.logger.Info().
 					Int("url_count", len(channel.Webhook)).
 					Msg("Successfully sent notification to webhook URLs")
+			}
+		}
+	}
+
+	// Send to Telegram chats
+	if len(channel.Telegram) > 0 {
+		if n.telegramClient == nil {
+			n.logger.Warn().Msg("Telegram client not initialized, skipping Telegram chats")
+		} else {
+			n.logger.Debug().
+				Int("chat_count", len(channel.Telegram)).
+				Strs("chats", channel.Telegram).
+				Msg("Sending notification to Telegram chats")
+			if err := n.telegramClient.SendToChats(channel.Telegram, message); err != nil {
+				n.logger.Warn().
+					Err(err).
+					Int("chat_count", len(channel.Telegram)).
+					Msg("Failed to send to Telegram chats")
 			}
 		}
 	}

@@ -79,6 +79,9 @@ notify:
       Authorization: "Bearer ${WEBHOOK_AUTH_TOKEN}"
     # HTTP client timeout (default: 10s)
     timeout: "10s"
+  telegram:
+    enabled: false
+    bot_token: "${TELEGRAM_BOT_TOKEN}"  # From @BotFather
 
 # Notification channels for approval requests
 notify_channels:
@@ -88,6 +91,8 @@ notify_channels:
     - "user_key_here"  # Pushover user key
   webhook:
     - "https://example.com/webhook"  # Webhook URL
+  telegram:
+    - "-1001234567890"  # Chat ID (group/channel) or @channel_username
 
 # Background audit monitor — scans audit records for anomaly patterns
 # and sends notifications when thresholds are exceeded.

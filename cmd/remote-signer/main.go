@@ -676,6 +676,9 @@ func notifyEnabled(cfg *notify.Config) bool {
 	if cfg.Webhook != nil && cfg.Webhook.Enabled {
 		return true
 	}
+	if cfg.Telegram != nil && cfg.Telegram.Enabled {
+		return true
+	}
 	return false
 }
 
