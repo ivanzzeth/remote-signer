@@ -32,6 +32,8 @@ type RouterConfig struct {
 	Template           *TemplateConfig
 	ApprovalGuard      *service.ManualApprovalGuard // optional: for admin resume endpoint
 	APIKeyRepo         storage.APIKeyRepository     // optional: for signer access visibility
+	RulesAPIReadonly   bool                         // block rule/template mutations via API
+	SignersAPIReadonly  bool                         // block signer/HD-wallet creation via API
 }
 
 // Router handles HTTP routing
@@ -102,7 +104,7 @@ func (r *Router) setupRoutes() error {
 		return err
 	}
 
-	approvalHandler, err := evmhandler.NewApprovalHandler(r.signService, r.logger)
+	approvalHandler, err := evmhandler.NewApprovalHandler(r.signService, r.logger, r.config.RulesAPIReadonly)
 	if err != nil {
 		return err
 	}
@@ -119,17 +121,20 @@ func (r *Router) setupRoutes() error {
 	if r.config.JSEvaluator != nil {
 		ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithJSEvaluator(r.config.JSEvaluator))
 	}
+	if r.config.RulesAPIReadonly {
+		ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithReadOnly())
+	}
 	ruleHandler, err := evmhandler.NewRuleHandler(r.ruleRepo, r.logger, ruleHandlerOpts...)
 	if err != nil {
 		return err
 	}
 
-	signerHandler, err := evmhandler.NewSignerHandler(r.signerManager, r.config.APIKeyRepo, r.logger)
+	signerHandler, err := evmhandler.NewSignerHandler(r.signerManager, r.config.APIKeyRepo, r.logger, r.config.SignersAPIReadonly)
 	if err != nil {
 		return err
 	}
 
-	hdWalletHandler, err := evmhandler.NewHDWalletHandler(r.signerManager, r.logger)
+	hdWalletHandler, err := evmhandler.NewHDWalletHandler(r.signerManager, r.logger, r.config.SignersAPIReadonly)
 	if err != nil {
 		return err
 	}
@@ -185,6 +190,7 @@ func (r *Router) setupRoutes() error {
 			r.config.Template.TemplateRepo,
 			r.config.Template.TemplateService,
 			r.logger,
+			r.config.RulesAPIReadonly,
 		)
 		if err != nil {
 			return err

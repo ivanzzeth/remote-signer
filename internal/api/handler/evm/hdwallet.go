@@ -16,11 +16,12 @@ import (
 // HDWalletHandler handles HD wallet management endpoints.
 type HDWalletHandler struct {
 	signerManager evmchain.SignerManager
+	readOnly      bool // when true, block HD wallet creation/derive via API
 	logger        *slog.Logger
 }
 
 // NewHDWalletHandler creates a new HD wallet handler.
-func NewHDWalletHandler(signerManager evmchain.SignerManager, logger *slog.Logger) (*HDWalletHandler, error) {
+func NewHDWalletHandler(signerManager evmchain.SignerManager, logger *slog.Logger, readOnly bool) (*HDWalletHandler, error) {
 	if signerManager == nil {
 		return nil, fmt.Errorf("signer manager is required")
 	}
@@ -29,6 +30,7 @@ func NewHDWalletHandler(signerManager evmchain.SignerManager, logger *slog.Logge
 	}
 	return &HDWalletHandler{
 		signerManager: signerManager,
+		readOnly:      readOnly,
 		logger:        logger,
 	}, nil
 }
@@ -146,6 +148,11 @@ func (h *HDWalletHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *HDWalletHandler) createOrImport(w http.ResponseWriter, r *http.Request) {
+	if h.readOnly {
+		h.writeError(w, "HD wallet creation via API is disabled (security.signers_api_readonly)", http.StatusForbidden)
+		return
+	}
+
 	mgr, err := h.signerManager.HDWalletManager()
 	if err != nil {
 		h.writeError(w, err.Error(), http.StatusNotImplemented)
@@ -221,6 +228,11 @@ func (h *HDWalletHandler) listWallets(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *HDWalletHandler) deriveAddresses(w http.ResponseWriter, r *http.Request, primaryAddr string) {
+	if h.readOnly {
+		h.writeError(w, "HD wallet derive via API is disabled (security.signers_api_readonly)", http.StatusForbidden)
+		return
+	}
+
 	mgr, err := h.signerManager.HDWalletManager()
 	if err != nil {
 		h.writeError(w, err.Error(), http.StatusNotImplemented)

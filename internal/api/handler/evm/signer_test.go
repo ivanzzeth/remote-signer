@@ -132,26 +132,26 @@ func newSignerManagerWithAll() *signerMockSignerManager {
 
 func TestNewSignerHandler(t *testing.T) {
 	t.Run("nil signer manager returns error", func(t *testing.T) {
-		_, err := NewSignerHandler(nil, nil, slog.Default())
+		_, err := NewSignerHandler(nil, nil, slog.Default(), false)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "signer manager is required")
 	})
 
 	t.Run("nil logger returns error", func(t *testing.T) {
-		_, err := NewSignerHandler(&signerMockSignerManager{}, nil, nil)
+		_, err := NewSignerHandler(&signerMockSignerManager{}, nil, nil, false)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "logger is required")
 	})
 
 	t.Run("nil apiKeyRepo is allowed", func(t *testing.T) {
-		h, err := NewSignerHandler(&signerMockSignerManager{}, nil, slog.Default())
+		h, err := NewSignerHandler(&signerMockSignerManager{}, nil, slog.Default(), false)
 		require.NoError(t, err)
 		require.NotNil(t, h)
 		assert.Nil(t, h.apiKeyRepo)
 	})
 
 	t.Run("all deps provided", func(t *testing.T) {
-		h, err := NewSignerHandler(&signerMockSignerManager{}, &mockAPIKeyRepo{}, slog.Default())
+		h, err := NewSignerHandler(&signerMockSignerManager{}, &mockAPIKeyRepo{}, slog.Default(), false)
 		require.NoError(t, err)
 		require.NotNil(t, h)
 	})
@@ -162,7 +162,7 @@ func TestNewSignerHandler(t *testing.T) {
 func TestListSigners_NonAdmin_FilteredByAllowedSigners(t *testing.T) {
 	sm := newSignerManagerWithAll()
 
-	h, err := NewSignerHandler(sm, nil, slog.Default())
+	h, err := NewSignerHandler(sm, nil, slog.Default(), false)
 	require.NoError(t, err)
 
 	// Non-admin key that can only access signer 0x1111...
@@ -186,7 +186,7 @@ func TestListSigners_NonAdmin_FilteredByAllowedSigners(t *testing.T) {
 func TestListSigners_NonAdmin_EmptyAllowed_SeesAll(t *testing.T) {
 	sm := newSignerManagerWithAll()
 
-	h, err := NewSignerHandler(sm, nil, slog.Default())
+	h, err := NewSignerHandler(sm, nil, slog.Default(), false)
 	require.NoError(t, err)
 
 	// Non-admin key with empty AllowedSigners -> sees all
@@ -209,7 +209,7 @@ func TestListSigners_NonAdmin_EmptyAllowed_SeesAll(t *testing.T) {
 func TestListSigners_NonAdmin_CaseInsensitiveFilter(t *testing.T) {
 	sm := newSignerManagerWithAll()
 
-	h, err := NewSignerHandler(sm, nil, slog.Default())
+	h, err := NewSignerHandler(sm, nil, slog.Default(), false)
 	require.NoError(t, err)
 
 	// AllowedSigners has uppercase address, signers have lowercase
@@ -249,7 +249,7 @@ func TestListSigners_NonAdmin_PaginationOnFiltered(t *testing.T) {
 		},
 	}
 
-	h, err := NewSignerHandler(sm, nil, slog.Default())
+	h, err := NewSignerHandler(sm, nil, slog.Default(), false)
 	require.NoError(t, err)
 
 	apiKey := &types.APIKey{
@@ -313,7 +313,7 @@ func TestListSigners_Admin_EnrichedWithAllowedKeys(t *testing.T) {
 		},
 	}
 
-	h, err := NewSignerHandler(sm, apiKeyRepo, slog.Default())
+	h, err := NewSignerHandler(sm, apiKeyRepo, slog.Default(), false)
 	require.NoError(t, err)
 
 	adminAPIKey := &types.APIKey{
@@ -350,7 +350,7 @@ func TestListSigners_Admin_NoApiKeyRepo_NoEnrichment(t *testing.T) {
 	sm := newSignerManagerWithAll()
 
 	// apiKeyRepo is nil -> no enrichment
-	h, err := NewSignerHandler(sm, nil, slog.Default())
+	h, err := NewSignerHandler(sm, nil, slog.Default(), false)
 	require.NoError(t, err)
 
 	adminAPIKey := &types.APIKey{
@@ -373,7 +373,7 @@ func TestListSigners_Admin_NoApiKeyRepo_NoEnrichment(t *testing.T) {
 
 func TestListSigners_Unauthorized(t *testing.T) {
 	sm := newSignerManagerWithAll()
-	h, err := NewSignerHandler(sm, nil, slog.Default())
+	h, err := NewSignerHandler(sm, nil, slog.Default(), false)
 	require.NoError(t, err)
 
 	// No API key in context
