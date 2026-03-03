@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -126,9 +127,36 @@ func main() {
 }
 
 // loadPrivateKeyFromFile reads an Ed25519 private key from a PEM file (e.g. data/admin_private.pem).
+// Path must be under the current working directory to prevent path traversal.
 // Returns the key as hex for use with client config.
 func loadPrivateKeyFromFile(path string) (string, error) {
-	data, err := os.ReadFile(path)
+	cleanPath := filepath.Clean(path)
+	var absPath string
+	if filepath.IsAbs(cleanPath) {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "", fmt.Errorf("getwd: %w", err)
+		}
+		rel, err := filepath.Rel(cwd, cleanPath)
+		if err != nil || strings.HasPrefix(rel, "..") || rel == ".." {
+			return "", fmt.Errorf("api-key-file path must be under current directory")
+		}
+		absPath = cleanPath
+	} else {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "", fmt.Errorf("getwd: %w", err)
+		}
+		absPath, err = filepath.Abs(cleanPath)
+		if err != nil {
+			return "", fmt.Errorf("resolve path: %w", err)
+		}
+		rel, err := filepath.Rel(cwd, absPath)
+		if err != nil || strings.HasPrefix(rel, "..") || rel == ".." {
+			return "", fmt.Errorf("api-key-file path must be under current directory")
+		}
+	}
+	data, err := os.ReadFile(absPath) // #nosec G304 -- path validated to be under cwd
 	if err != nil {
 		return "", fmt.Errorf("read file: %w", err)
 	}
