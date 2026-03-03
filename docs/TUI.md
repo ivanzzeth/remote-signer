@@ -11,18 +11,19 @@ go build -o remote-signer-tui ./cmd/tui
 ## Run
 
 ```bash
-# Using command-line flags (hex or base64, auto-detected)
-./remote-signer-tui \
-  -url http://localhost:8548 \
-  -api-key-id admin \
-  -private-key your-ed25519-private-key
-
-# Or using environment variables
+# Using environment variables (recommended)
 export REMOTE_SIGNER_URL=http://localhost:8548
 export REMOTE_SIGNER_API_KEY_ID=admin
 export REMOTE_SIGNER_PRIVATE_KEY=your-ed25519-private-key
 ./remote-signer-tui
+
+# Or inline env vars
+REMOTE_SIGNER_PRIVATE_KEY=your-ed25519-private-key ./remote-signer-tui \
+  -url http://localhost:8548 \
+  -api-key-id admin
 ```
+
+If `REMOTE_SIGNER_PRIVATE_KEY` is not set, the TUI will prompt interactively.
 
 ### Parameters
 
@@ -30,7 +31,7 @@ export REMOTE_SIGNER_PRIVATE_KEY=your-ed25519-private-key
 |------|--------------|---------|-------------|
 | `-url` | `REMOTE_SIGNER_URL` | `http://localhost:8548` | Server URL |
 | `-api-key-id` | `REMOTE_SIGNER_API_KEY_ID` | (required) | API key ID registered on the server |
-| `-private-key` | `REMOTE_SIGNER_PRIVATE_KEY` | (required) | Ed25519 private key (hex or base64) |
+| — | `REMOTE_SIGNER_PRIVATE_KEY` | (interactive prompt) | Ed25519 private key (hex or base64) |
 
 ### TLS / mTLS
 

@@ -17,7 +17,7 @@ func TestSigner_ListSigners(t *testing.T) {
 
 	// List signers (should include the test signer)
 	resp, err := adminClient.EVM.Signers.List(ctx, &evm.ListSignersFilter{
-		Limit: 10,
+		Limit: 100,
 	})
 	require.NoError(t, err)
 	require.NotNil(t, resp)

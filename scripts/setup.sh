@@ -580,10 +580,9 @@ step_done() {
     echo ""
     echo "  Via TUI:"
     echo "    go build -o remote-signer-tui ./cmd/tui"
-    echo "    ./remote-signer-tui \\"
+    echo "    REMOTE_SIGNER_PRIVATE_KEY=$ADMIN_PRIVATE_KEY ./remote-signer-tui \\"
     echo "      -url ${SCHEME}://localhost:${PORT} \\"
-    echo "      -api-key-id admin \\"
-    echo "      -private-key $ADMIN_PRIVATE_KEY"
+    echo "      -api-key-id admin"
     if [ "$TLS_CHOICE" = "3" ]; then
         echo "      -tls-ca ./certs/ca.crt \\"
         echo "      -tls-cert ./certs/client.crt \\"
