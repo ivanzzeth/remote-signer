@@ -12,7 +12,7 @@ A secure, policy-driven signing service for EVM chains. Controls **what** gets s
 - **Multi-Chain Extensible** -- EVM today, Solana/Cosmos/Bitcoin ready architecture
 - **Manual Approval Workflow** -- Slack, Pushover, and webhook notifications for pending approvals
 - **Ed25519 API Authentication** -- Secure request signing with nonce + timestamp replay protection
-- **Dynamic Signer Management** -- Create keystores and HD wallets at runtime via API or TUI
+- **Dynamic Signer Management** -- Create keystores and HD wallets (mnemonic wallets) at runtime via API or TUI
 - **Terminal UI (TUI)** -- Manage rules, approve requests, create signers from the terminal
 
 ## Architecture
@@ -87,7 +87,7 @@ curl http://localhost:8548/health
 curl --cacert certs/ca.crt --cert certs/client.crt --key certs/client.key https://localhost:8548/health
 ```
 
-The server starts with no signers. To add your first signer (import a private key or HD wallet), use the TUI: build it, connect with the `admin` key, then open the **Signers** tab to create a keystore or HD wallet. See [Adding Signers](#adding-signers) below.
+The server starts with no signers. To add your first signer (import a private key or HD wallet / mnemonic wallet), use the TUI: build it, connect with the `admin` key, then open the **Signers** tab to create a keystore or HD wallet. See [Adding Signers](#adding-signers) below.
 
 ### Manual Setup
 
@@ -97,7 +97,7 @@ If you prefer manual control, see [docs/CONFIGURATION.md](docs/CONFIGURATION.md)
 
 The server starts without signers. Add them after startup:
 
-- **TUI** (recommended): Use `-api-key-file data/admin_private.pem` so you don't need to paste the key. Example (plain HTTP): `./remote-signer-tui -api-key-id admin -api-key-file data/admin_private.pem -url http://localhost:8548`. **If you enabled TLS** during setup, use `https://` and pass CA (and for mTLS, client cert/key), e.g. `-url https://localhost:8548 -tls-ca ./certs/ca.crt` or with mTLS: `-tls-ca ./certs/ca.crt -tls-cert ./certs/client.crt -tls-key ./certs/client.key`. See [docs/TUI.md](docs/TUI.md#tls--mtls). After setup (Docker), you can choose "Open TUI to add signers now?" to launch it. In the **Signers** tab create a keystore (import private key) or create/import an HD wallet.
+- **TUI** (recommended): Use `-api-key-file data/admin_private.pem` so you don't need to paste the key. Example (plain HTTP): `./remote-signer-tui -api-key-id admin -api-key-file data/admin_private.pem -url http://localhost:8548`. **If you enabled TLS** during setup, use `https://` and pass CA (and for mTLS, client cert/key), e.g. `-url https://localhost:8548 -tls-ca ./certs/ca.crt` or with mTLS: `-tls-ca ./certs/ca.crt -tls-cert ./certs/client.crt -tls-key ./certs/client.key`. See [docs/TUI.md](docs/TUI.md#tls--mtls). After setup (Docker), you can choose "Open TUI to add signers now?" to launch it. In the **Signers** tab create a keystore (import private key) or create/import an HD wallet. **Password requirements (enforced)**: at least 16 characters, and must include uppercase + lowercase + digit + symbol. 24+ characters recommended.
 - **API**: `POST /api/v1/evm/signers` (admin only). See [docs/API.md](docs/API.md).
 - **Config**: Edit `chains.evm.signers.private_keys` in your config file. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md#chains-evm).
 
@@ -159,6 +159,8 @@ The server starts without signers. Add them after startup:
 | [Components](docs/COMPONENTS.md) | Core interfaces, data types, services |
 | [Request Flow](docs/FLOW.md) | 8-step signing flow with state machine |
 | [Testing Guide](docs/TESTING.md) | Unit tests, E2E, rule validation, coverage |
+
+**Versioning** — The version shown in the TUI and `/health` follows the repository tag (e.g. tag `v0.1.1` → version `0.1.1`). When you change code under `tui/`, bump the version in `cmd/remote-signer/main.go`; the pre-commit hook enforces this.
 
 ## Roadmap
 

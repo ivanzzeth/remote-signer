@@ -43,6 +43,34 @@ mkdir -p "$CERT_DIR"
 info "Certificate output directory: $CERT_DIR"
 
 # =============================================================================
+# Overwrite guard (default: do not overwrite)
+# =============================================================================
+
+existing_certs=false
+for f in ca.crt ca.key server.crt server.key client.crt client.key; do
+    if [ -f "$CERT_DIR/$f" ]; then
+        existing_certs=true
+        break
+    fi
+done
+
+if [ "$existing_certs" = true ] && [ "${CERTS_FORCE:-0}" != "1" ]; then
+    warn "Certificates already exist in $CERT_DIR"
+    read -rp "Overwrite existing certificates? (y/N): " OVERWRITE_CERTS
+    if [[ ! "$OVERWRITE_CERTS" =~ ^[Yy]$ ]]; then
+        info "Keeping existing certificates (no overwrite)."
+        info "Tip: to regenerate (e.g. to add SAN IPs), run: CERTS_FORCE=1 $0 [extra-ip...]"
+        exit 0
+    fi
+    rm -f "$CERT_DIR/ca.crt" "$CERT_DIR/ca.key" \
+        "$CERT_DIR/server.crt" "$CERT_DIR/server.key" \
+        "$CERT_DIR/client.crt" "$CERT_DIR/client.key" \
+        "$CERT_DIR/server.csr" "$CERT_DIR/client.csr" \
+        "$CERT_DIR/server_ext.cnf" "$CERT_DIR/client_ext.cnf" \
+        "$CERT_DIR/ca.srl"
+fi
+
+# =============================================================================
 # Collect SAN IPs
 # =============================================================================
 

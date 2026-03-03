@@ -33,7 +33,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
-const version = "1.0.0"
+const version = "0.1.2"
 
 func main() {
 	if err := run(); err != nil {
@@ -590,6 +590,10 @@ func run() error {
 		select {
 		case sig := <-sigCh:
 			if sig == syscall.SIGHUP {
+				if !cfg.Security.IsSIGHUPRulesReloadEnabled() {
+					log.Warn("Received SIGHUP, ignoring (rules reload disabled by security.allow_sighup_rules_reload)")
+					continue
+				}
 				log.Info("Received SIGHUP, reloading rules from config")
 				reloadRules(*configPath, ruleInit, templateInit, log)
 				continue

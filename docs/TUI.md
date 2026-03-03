@@ -45,7 +45,7 @@ When connecting to a TLS-enabled server, see [TLS.md](TLS.md#client-usage) for t
 - **Dashboard** — Service health, request counts by status, rules summary
 - **Requests** — View all sign requests, filter by status, approve/reject pending requests
 - **Rules** — View/edit authorization rules, toggle enable/disable, delete rules
-- **Signers** — Create keystores, import/create HD wallets, derive addresses
+- **Signers** — Create keystores, import/create HD wallets (mnemonic wallets), derive addresses
 - **Audit Logs** — View all audit events, filter by event type or severity
 
 ## Key Bindings

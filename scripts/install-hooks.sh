@@ -297,6 +297,32 @@ else
     echo -e "Validating rule files... ${GREEN}OK (no staged rule files)${NC}"
 fi
 
+# 6a. TUI changed => version must change (single source: cmd/remote-signer/main.go or internal/buildinfo)
+STAGED_TUI=$(git diff --cached --name-only --diff-filter=ACM | grep '^tui/' || true)
+if [ -n "$STAGED_TUI" ]; then
+    echo -n "TUI changed; checking version bump... "
+    VERSION_FILES="cmd/remote-signer/main.go internal/buildinfo/buildinfo.go"
+    VERSION_CHANGED=""
+    for f in $VERSION_FILES; do
+        if [ -f "$f" ]; then
+            if git diff --cached -- "$f" | grep -qE '^[+-].*[Vv]ersion\s*=\s*"[^"]*"'; then
+                VERSION_CHANGED=1
+                break
+            fi
+        fi
+    done
+    if [ -z "$VERSION_CHANGED" ]; then
+        echo -e "${RED}FAIL${NC}"
+        echo "You changed files under tui/ but did not update the version."
+        echo "Update the version in cmd/remote-signer/main.go (const version = \"x.y.z\") or internal/buildinfo/buildinfo.go (Version = \"x.y.z\") and stage it."
+        FAILED=1
+    else
+        echo -e "${GREEN}OK${NC}"
+    fi
+else
+    echo -e "TUI version check... ${GREEN}OK (no staged tui/ changes)${NC}"
+fi
+
 # 7. Run e2e tests (using port 18548 to avoid conflict with production on 8548)
 echo -n "Running e2e tests... "
 if E2E_API_PORT=18548 go test -tags e2e ./e2e/... -count=1 -timeout 120s 2>/dev/null; then
@@ -375,7 +401,7 @@ log_info "Git hooks installed successfully!"
 log_info "Hooks location: $HOOKS_DIR"
 echo ""
 echo "Installed hooks:"
-echo "  pre-commit : gosec, govulncheck, go vet, error suppression, gitleaks, detect-secrets, semgrep, eslint-security, npm audit, rule validation, e2e tests"
+echo "  pre-commit : gosec, govulncheck, go vet, error suppression, gitleaks, detect-secrets, semgrep, eslint-security, npm audit, rule validation, tui-version-bump (if tui/ changed), e2e tests"
 echo "  pre-push   : full unit test suite (includes rule validation via TestRulesDirectoryValidation)"
 echo ""
 echo "To skip hooks (NOT recommended): git commit --no-verify"
