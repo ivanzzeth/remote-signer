@@ -1,7 +1,11 @@
 package main
 
 import (
+	"crypto/ed25519"
+	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
+	"encoding/pem"
 	"flag"
 	"fmt"
 	"os"
@@ -20,6 +24,7 @@ func main() {
 	var (
 		baseURL       = flag.String("url", "https://localhost:8548", "Remote signer service URL")
 		apiKeyID      = flag.String("api-key-id", "", "API key ID for authentication")
+		apiKeyFile    = flag.String("api-key-file", "", "Path to API key PEM file (e.g. data/admin_private.pem); avoids paste")
 		tlsCA         = flag.String("tls-ca", "", "Path to CA certificate to verify server (for HTTPS)")
 		tlsCert       = flag.String("tls-cert", "", "Path to client certificate (for mTLS)")
 		tlsKey        = flag.String("tls-key", "", "Path to client private key (for mTLS)")
@@ -36,15 +41,25 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Resolve private key: env var first, then interactive prompt
-	privateKey := os.Getenv("REMOTE_SIGNER_PRIVATE_KEY")
-	if privateKey == "" {
-		key, err := readPrivateKeyFromPrompt()
+	// Resolve private key: api-key-file > env var > interactive prompt
+	var privateKey string
+	if *apiKeyFile != "" {
+		key, err := loadPrivateKeyFromFile(*apiKeyFile)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error reading private key: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Error loading API key from file: %v\n", err)
 			os.Exit(1)
 		}
 		privateKey = key
+	} else {
+		privateKey = os.Getenv("REMOTE_SIGNER_PRIVATE_KEY")
+		if privateKey == "" {
+			key, err := readPrivateKeyFromPrompt()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error reading private key: %v\n", err)
+				os.Exit(1)
+			}
+			privateKey = key
+		}
 	}
 
 	if *baseURL == "" {
@@ -110,8 +125,37 @@ func main() {
 	}
 }
 
+// loadPrivateKeyFromFile reads an Ed25519 private key from a PEM file (e.g. data/admin_private.pem).
+// Returns the key as hex for use with client config.
+func loadPrivateKeyFromFile(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read file: %w", err)
+	}
+	block, _ := pem.Decode(data)
+	if block == nil {
+		return "", fmt.Errorf("no PEM block found in %s", path)
+	}
+	pk, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		return "", fmt.Errorf("parse PEM: %w", err)
+	}
+	ed, ok := pk.(ed25519.PrivateKey)
+	if !ok {
+		return "", fmt.Errorf("key in %s is not Ed25519", path)
+	}
+	return hex.EncodeToString(ed), nil
+}
+
+// bracketedPasteStart and End are the ANSI sequences terminals use for "bracketed paste mode".
+// Pasting in a no-echo prompt can send: Start + pasted text + End. We strip them so the key is not corrupted.
+const (
+	bracketedPasteStart = "\x1b[200~"
+	bracketedPasteEnd   = "\x1b[201~"
+)
+
 // readPrivateKeyFromPrompt securely reads the private key from the terminal
-// without echoing characters.
+// without echoing characters. Strips bracketed-paste sequences so pasted keys work.
 func readPrivateKeyFromPrompt() (string, error) {
 	fmt.Fprint(os.Stderr, "Enter Ed25519 private key (hex or base64): ")
 	keyBytes, err := term.ReadPassword(int(syscall.Stdin))
@@ -119,7 +163,13 @@ func readPrivateKeyFromPrompt() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to read from terminal: %w", err)
 	}
-	key := strings.TrimSpace(string(keyBytes))
+	key := string(keyBytes)
+	// Strip bracketed paste wrapper so pasted key is used as-is
+	if strings.HasPrefix(key, bracketedPasteStart) {
+		key = strings.TrimPrefix(key, bracketedPasteStart)
+		key = strings.TrimSuffix(key, bracketedPasteEnd)
+	}
+	key = strings.TrimSpace(key)
 	if key == "" {
 		return "", fmt.Errorf("private key cannot be empty")
 	}
