@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -15,6 +16,62 @@ import (
 	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 	"github.com/ivanzzeth/remote-signer/tui/styles"
 )
+
+const (
+	// maxUnlockAttempts is the maximum failed unlock attempts before cooldown.
+	maxUnlockAttempts = 5
+	// unlockCooldownDuration is how long to wait after max failed attempts.
+	unlockCooldownDuration = 30 * time.Second
+	// minPasswordLength is the minimum password length for keystore creation.
+	minPasswordLength = 16
+	// recommendedPasswordLength is the recommended password length.
+	recommendedPasswordLength = 24
+)
+
+// validatePassword checks password complexity requirements.
+// Returns an error message if invalid, or a warning message if valid but could be stronger.
+// Returns ("", "") if fully compliant.
+func validatePassword(pw string) (errMsg string, warnMsg string) {
+	if len(pw) < minPasswordLength {
+		return fmt.Sprintf("Password must be at least %d characters (currently %d)", minPasswordLength, len(pw)), ""
+	}
+
+	var hasUpper, hasLower, hasDigit, hasSymbol bool
+	for _, c := range pw {
+		switch {
+		case c >= 'A' && c <= 'Z':
+			hasUpper = true
+		case c >= 'a' && c <= 'z':
+			hasLower = true
+		case c >= '0' && c <= '9':
+			hasDigit = true
+		default:
+			hasSymbol = true
+		}
+	}
+
+	var missing []string
+	if !hasUpper {
+		missing = append(missing, "uppercase letter")
+	}
+	if !hasLower {
+		missing = append(missing, "lowercase letter")
+	}
+	if !hasDigit {
+		missing = append(missing, "digit")
+	}
+	if !hasSymbol {
+		missing = append(missing, "symbol")
+	}
+	if len(missing) > 0 {
+		return fmt.Sprintf("Password must include: %s", strings.Join(missing, ", ")), ""
+	}
+
+	if len(pw) < recommendedPasswordLength {
+		return "", fmt.Sprintf("Tip: %d+ characters recommended for stronger security", recommendedPasswordLength)
+	}
+	return "", ""
+}
 
 // SignersModel represents the signers list view
 type SignersModel struct {
@@ -36,8 +93,10 @@ type SignersModel struct {
 	filterInput textinput.Model
 
 	// Unlock/lock signer state
-	showUnlock      bool
-	unlockInput     textinput.Model
+	showUnlock         bool
+	unlockInput        textinput.Model
+	unlockAttempts     map[string]int       // address → failed attempt count
+	unlockCooldownUtil map[string]time.Time // address → cooldown expiry
 
 	// Create signer state
 	showCreate       bool
@@ -80,6 +139,7 @@ type SignerHDWalletListMsg struct {
 
 // SignerUnlockMsg is sent when a signer unlock completes.
 type SignerUnlockMsg struct {
+	Address string // address attempted (for rate limiting)
 	Signer  *evm.Signer
 	Success bool
 	Message string
@@ -147,17 +207,19 @@ func newSignersModelFromService(svc evm.SignerAPI, hdSvc evm.HDWalletAPI, ctx co
 	unlockInput.EchoMode = textinput.EchoPassword
 
 	return &SignersModel{
-		signers_svc:   svc,
-		hdwallets_svc: hdSvc,
-		ctx:           ctx,
-		spinner:       s,
-		loading:       true,
-		limit:         20,
-		filterInput:   ti,
-		passwordInput: pwInput,
-		confirmInput:  confirmInput,
-		indexInput:    idxInput,
-		unlockInput:  unlockInput,
+		signers_svc:        svc,
+		hdwallets_svc:      hdSvc,
+		ctx:                ctx,
+		spinner:            s,
+		loading:            true,
+		limit:              20,
+		filterInput:        ti,
+		passwordInput:      pwInput,
+		confirmInput:       confirmInput,
+		indexInput:         idxInput,
+		unlockInput:        unlockInput,
+		unlockAttempts:     make(map[string]int),
+		unlockCooldownUtil: make(map[string]time.Time),
 	}, nil
 }
 
@@ -229,9 +291,10 @@ func (m *SignersModel) unlockSigner(address string, password string) tea.Cmd {
 		req := &evm.UnlockSignerRequest{Password: password}
 		resp, err := m.signers_svc.Unlock(m.ctx, address, req)
 		if err != nil {
-			return SignerUnlockMsg{Success: false, Err: err}
+			return SignerUnlockMsg{Address: address, Success: false, Err: err}
 		}
 		return SignerUnlockMsg{
+			Address: address,
 			Signer:  resp,
 			Success: true,
 			Message: fmt.Sprintf("Signer unlocked: %s", resp.Address),
@@ -305,8 +368,8 @@ func (m *SignersModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			m.actionResult = styles.ErrorStyle.Render(fmt.Sprintf("Error: %v", msg.Err))
 		} else {
-			m.actionResult = styles.SuccessStyle.Render(msg.Message)
 			m.resetCreateState()
+			m.actionResult = styles.SuccessStyle.Render(msg.Message)
 			return m, m.Refresh()
 		}
 		return m, nil
@@ -331,12 +394,28 @@ func (m *SignersModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SignerUnlockMsg:
 		m.loading = false
 		if msg.Err != nil {
-			m.actionResult = styles.ErrorStyle.Render(fmt.Sprintf("Error: %v", msg.Err))
+			// Security: track failed attempts for rate limiting
+			m.unlockAttempts[msg.Address]++
+			if m.unlockAttempts[msg.Address] >= maxUnlockAttempts {
+				m.unlockCooldownUtil[msg.Address] = time.Now().Add(unlockCooldownDuration)
+				m.unlockAttempts[msg.Address] = 0
+				m.showUnlock = false
+				m.actionResult = styles.ErrorStyle.Render(
+					fmt.Sprintf("Too many failed attempts for %s. Locked for %s",
+						msg.Address, unlockCooldownDuration),
+				)
+			} else {
+				remaining := maxUnlockAttempts - m.unlockAttempts[msg.Address]
+				m.actionResult = styles.ErrorStyle.Render(
+					fmt.Sprintf("Error: %v (%d attempts remaining)", msg.Err, remaining),
+				)
+			}
 		} else {
+			// Success: clear rate limit state
+			delete(m.unlockAttempts, msg.Address)
+			delete(m.unlockCooldownUtil, msg.Address)
 			m.actionResult = styles.SuccessStyle.Render(msg.Message)
 			m.showUnlock = false
-			m.unlockInput.SetValue("")
-			m.unlockInput.Blur()
 			return m, m.Refresh()
 		}
 		return m, nil
@@ -356,8 +435,8 @@ func (m *SignersModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			m.actionResult = styles.ErrorStyle.Render(fmt.Sprintf("Error: %v", msg.Err))
 		} else {
-			m.actionResult = styles.SuccessStyle.Render(msg.Message)
 			m.resetCreateState()
+			m.actionResult = styles.SuccessStyle.Render(msg.Message)
 			return m, m.Refresh()
 		}
 		return m, nil
@@ -375,17 +454,29 @@ func (m *SignersModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.showUnlock {
 			switch msg.String() {
 			case "enter":
-				if m.unlockInput.Value() != "" {
+				password := m.unlockInput.Value()
+				// Security: clear password from input immediately after extraction
+				m.unlockInput.SetValue("")
+				m.unlockInput.Blur()
+				if password != "" {
 					signer := m.GetSelectedSigner()
 					if signer != nil {
+						// Security: check rate limit before attempting unlock
+						if cooldown, ok := m.unlockCooldownUtil[signer.Address]; ok && time.Now().Before(cooldown) {
+							remaining := time.Until(cooldown).Truncate(time.Second)
+							m.actionResult = styles.ErrorStyle.Render(
+								fmt.Sprintf("Too many failed attempts. Try again in %s", remaining),
+							)
+							return m, nil
+						}
 						m.loading = true
-						m.unlockInput.Blur()
-						return m, tea.Batch(m.spinner.Tick, m.unlockSigner(signer.Address, m.unlockInput.Value()))
+						return m, tea.Batch(m.spinner.Tick, m.unlockSigner(signer.Address, password))
 					}
 				}
 				return m, nil
 			case "esc":
 				m.showUnlock = false
+				// Security: clear password on cancel
 				m.unlockInput.SetValue("")
 				m.unlockInput.Blur()
 				return m, nil
@@ -494,6 +585,14 @@ func (m *SignersModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Unlock selected signer
 			signer := m.GetSelectedSigner()
 			if signer != nil && signer.Locked {
+				// Security: check cooldown before showing form
+				if cooldown, ok := m.unlockCooldownUtil[signer.Address]; ok && time.Now().Before(cooldown) {
+					remaining := time.Until(cooldown).Truncate(time.Second)
+					m.actionResult = styles.ErrorStyle.Render(
+						fmt.Sprintf("Too many failed attempts. Try again in %s", remaining),
+					)
+					return m, nil
+				}
 				m.showUnlock = true
 				m.unlockInput.SetValue("")
 				m.unlockInput.Focus()
@@ -528,6 +627,7 @@ func (m *SignersModel) resetCreateState() {
 	m.createStep = 0
 	m.typeIdx = 0
 	m.selectedType = ""
+	m.actionResult = ""
 	m.showPassword = false
 	m.passwordInput.SetValue("")
 	m.passwordInput.Blur()
@@ -576,6 +676,12 @@ func (m *SignersModel) handleCreateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "enter":
 				if m.passwordInput.Value() != "" {
+					// Security: enforce password complexity
+					if errMsg, _ := validatePassword(m.passwordInput.Value()); errMsg != "" {
+						m.actionResult = styles.ErrorStyle.Render(errMsg)
+						return m, nil
+					}
+					m.actionResult = ""
 					m.createStep = 2
 					m.confirmInput.Focus()
 					m.passwordInput.Blur()
@@ -604,10 +710,15 @@ func (m *SignersModel) handleCreateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// Confirm password
 			switch msg.String() {
 			case "enter":
-				if m.confirmInput.Value() == m.passwordInput.Value() {
-					m.loading = true
+				password := m.passwordInput.Value()
+				confirm := m.confirmInput.Value()
+				if confirm == password {
+					// Security: clear passwords from inputs immediately
+					m.passwordInput.SetValue("")
+					m.confirmInput.SetValue("")
 					m.confirmInput.Blur()
-					return m, tea.Batch(m.spinner.Tick, m.createSigner(m.selectedType, m.passwordInput.Value()))
+					m.loading = true
+					return m, tea.Batch(m.spinner.Tick, m.createSigner(m.selectedType, password))
 				}
 				m.actionResult = styles.ErrorStyle.Render("Passwords do not match")
 				return m, nil
@@ -811,9 +922,18 @@ func (m *SignersModel) renderCreateForm() string {
 		if m.selectedType == "keystore" {
 			fmt.Fprintf(&content, "Type: %s\n\n", styles.HighlightStyle.Render(m.selectedType))
 			content.WriteString(styles.SubtitleStyle.Render("Enter Password:"))
+			content.WriteString("\n")
+			content.WriteString(styles.MutedColor.Render(
+				fmt.Sprintf("(min %d chars: upper+lower+digit+symbol, %d+ recommended)",
+					minPasswordLength, recommendedPasswordLength),
+			))
 			content.WriteString("\n\n")
 			content.WriteString(m.passwordInput.View())
 			content.WriteString("\n\n")
+			if m.actionResult != "" {
+				content.WriteString(m.actionResult)
+				content.WriteString("\n\n")
+			}
 			if m.showPassword {
 				content.WriteString(styles.MutedColor.Render("Tab: hide password | Enter: continue | Esc: cancel"))
 			} else {
@@ -829,6 +949,11 @@ func (m *SignersModel) renderCreateForm() string {
 			content.WriteString("\n\n")
 			content.WriteString(m.confirmInput.View())
 			content.WriteString("\n\n")
+			// Show recommendation warning if password is valid but short
+			if _, warnMsg := validatePassword(m.passwordInput.Value()); warnMsg != "" {
+				content.WriteString(styles.WarningStyle.Render(warnMsg))
+				content.WriteString("\n\n")
+			}
 			if m.actionResult != "" {
 				content.WriteString(m.actionResult)
 				content.WriteString("\n\n")
