@@ -476,6 +476,7 @@ func (m *SignersModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case "esc":
 				m.showUnlock = false
+				m.actionResult = "" // clear unlock error when closing modal
 				// Security: clear password on cancel
 				m.unlockInput.SetValue("")
 				m.unlockInput.Blur()

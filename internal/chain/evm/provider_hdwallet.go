@@ -388,7 +388,7 @@ func (p *HDWalletProvider) DeriveAddresses(ctx context.Context, primaryAddr stri
 	return result, nil
 }
 
-// ListHDWallets returns information about all loaded HD wallets.
+// ListHDWallets returns information about all HD wallets: loaded (unlocked) and discovered (locked) on disk.
 func (p *HDWalletProvider) ListHDWallets() []HDWalletInfo {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -409,7 +409,24 @@ func (p *HDWalletProvider) ListHDWallets() []HDWalletInfo {
 			Derived:        state.derived,
 		})
 	}
-
+	for addrKey, walletPath := range p.lockedPaths {
+		if _, loaded := p.wallets[addrKey]; loaded {
+			continue
+		}
+		info, _ := keystore.GetHDWalletInfo(walletPath)
+		basePath := ""
+		primaryAddress := addrKey
+		if info != nil {
+			basePath = info.BasePath
+			primaryAddress = info.PrimaryAddress
+		}
+		wallets = append(wallets, HDWalletInfo{
+			PrimaryAddress: primaryAddress,
+			BasePath:       basePath,
+			DerivedCount:   0,
+			Derived:        nil,
+		})
+	}
 	return wallets
 }
 
