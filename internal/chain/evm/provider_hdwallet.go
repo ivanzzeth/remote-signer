@@ -430,6 +430,18 @@ func (p *HDWalletProvider) ListHDWallets() []HDWalletInfo {
 	return wallets
 }
 
+// ListPrimaryAddresses returns primary addresses of all HD wallets (for permission checks).
+func (p *HDWalletProvider) ListPrimaryAddresses() []string {
+	wallets := p.ListHDWallets()
+	out := make([]string, 0, len(wallets))
+	for _, w := range wallets {
+		if w.PrimaryAddress != "" {
+			out = append(out, w.PrimaryAddress)
+		}
+	}
+	return out
+}
+
 // ListDerivedAddresses returns all derived addresses for an HD wallet.
 func (p *HDWalletProvider) ListDerivedAddresses(primaryAddr string) ([]types.SignerInfo, error) {
 	p.mu.RLock()

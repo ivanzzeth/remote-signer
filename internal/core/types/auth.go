@@ -13,10 +13,12 @@ type APIKey struct {
 	Name         string `json:"name" gorm:"type:varchar(255)"`
 	PublicKeyHex string `json:"public_key" gorm:"type:varchar(128)"` // Ed25519 public key, hex encoded
 
-	// Permissions
-	AllowedChainTypes pq.StringArray `json:"allowed_chain_types,omitempty" gorm:"type:text[]"` // empty = all
-	AllowedSigners    pq.StringArray `json:"allowed_signers,omitempty" gorm:"type:text[]"`     // empty = all
-	AllowedHDWallets  pq.StringArray `json:"allowed_hd_wallets,omitempty" gorm:"type:text[]"` // HD wallet primary addresses; empty = none
+	// Permissions (empty list = no access; use allow_all_signers / allow_all_hd_wallets to grant all)
+	AllowAllSigners   bool            `json:"allow_all_signers" gorm:"default:false"`         // when true: any signer (private_key, keystore)
+	AllowAllHDWallets bool            `json:"allow_all_hd_wallets" gorm:"default:false"`      // when true: any HD wallet (derive, sign derived)
+	AllowedChainTypes pq.StringArray  `json:"allowed_chain_types,omitempty" gorm:"type:text[]"` // empty = all chains
+	AllowedSigners    pq.StringArray  `json:"allowed_signers,omitempty" gorm:"type:text[]"`    // signer addresses; empty = none
+	AllowedHDWallets  pq.StringArray  `json:"allowed_hd_wallets,omitempty" gorm:"type:text[]"`  // HD wallet primary addresses; empty = none
 
 	RateLimit int  `json:"rate_limit" gorm:"default:100"` // requests per minute
 	Admin     bool `json:"admin" gorm:"default:false"`    // admin keys can approve requests and manage rules
@@ -47,11 +49,13 @@ func (k *APIKey) IsAllowedChain(chainType ChainType) bool {
 }
 
 // IsAllowedSigner checks if the API key allows the given signer address.
-// Comparison is case-insensitive because Ethereum addresses are case-insensitive
-// at the protocol level (EIP-55 checksum is optional display formatting).
+// Empty AllowedSigners = no access unless AllowAllSigners is true.
 func (k *APIKey) IsAllowedSigner(address string) bool {
+	if k.AllowAllSigners {
+		return true
+	}
 	if len(k.AllowedSigners) == 0 {
-		return true // empty = all allowed
+		return false
 	}
 	for _, a := range k.AllowedSigners {
 		if strings.EqualFold(a, address) {
@@ -62,8 +66,14 @@ func (k *APIKey) IsAllowedSigner(address string) bool {
 }
 
 // IsAllowedHDWallet checks if the API key grants access to the given HD wallet primary address.
-// Unlike IsAllowedSigner, empty AllowedHDWallets means NO HD wallet access (explicit authorization required).
+// Empty AllowedHDWallets = no access unless AllowAllHDWallets is true.
 func (k *APIKey) IsAllowedHDWallet(primaryAddress string) bool {
+	if k.AllowAllHDWallets {
+		return true
+	}
+	if len(k.AllowedHDWallets) == 0 {
+		return false
+	}
 	for _, a := range k.AllowedHDWallets {
 		if strings.EqualFold(a, primaryAddress) {
 			return true

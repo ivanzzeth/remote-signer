@@ -50,6 +50,7 @@ type HDWalletManager interface {
 	DeriveAddress(ctx context.Context, primaryAddr string, index uint32) (*types.SignerInfo, error)
 	DeriveAddresses(ctx context.Context, primaryAddr string, start, count uint32) ([]types.SignerInfo, error)
 	ListHDWallets() []HDWalletInfo
+	ListPrimaryAddresses() []string
 	ListDerivedAddresses(primaryAddr string) ([]types.SignerInfo, error)
 }
 
