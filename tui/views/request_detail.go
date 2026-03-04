@@ -526,7 +526,11 @@ func (m *RequestDetailModel) renderDetail() string {
 	}
 
 	if m.request.RuleMatchedID != nil {
-		info = append(info, struct{ key, value string }{"Rule Matched", *m.request.RuleMatchedID})
+		ruleMatched := *m.request.RuleMatchedID
+		if m.request.RuleMatchedName != nil && *m.request.RuleMatchedName != "" {
+			ruleMatched = fmt.Sprintf("%s (%s)", *m.request.RuleMatchedID, *m.request.RuleMatchedName)
+		}
+		info = append(info, struct{ key, value string }{"Rule Matched", ruleMatched})
 	}
 	if m.request.ApprovedBy != nil {
 		info = append(info, struct{ key, value string }{"Approved By", *m.request.ApprovedBy})

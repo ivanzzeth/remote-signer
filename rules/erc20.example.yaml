@@ -3,7 +3,8 @@
 
 rules:
   # Allow only transfer and approve methods
-  - name: "ERC20 transfer/approve only"
+  - id: "erc20-transfer-approve-only"
+    name: "ERC20 transfer/approve only"
     type: "evm_contract_method"
     mode: "whitelist"
     enabled: true
@@ -17,7 +18,8 @@ rules:
         - "0x095ea7b3"  # approve(address,uint256)
 
   # ERC20 transfer limits using Solidity expression
-  - name: "ERC20 transfer amount validation"
+  - id: "erc20-transfer-amount-validation"
+    name: "ERC20 transfer amount validation"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true

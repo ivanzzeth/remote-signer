@@ -88,7 +88,8 @@ rules:
   # Uses message_pattern rule type (regex matching for personal sign messages)
   # Messages come from Predict.fun API (GET /v1/auth/message), content is dynamic
   # Pattern validates that the message is non-empty and within reasonable length
-  - name: "Predict Login PersonalSign"
+  - id: "predict-login-personal-sign"
+    name: "Predict Login PersonalSign"
     type: "message_pattern"
     mode: "whitelist"
     enabled: true
@@ -131,7 +132,8 @@ rules:
   # ===========================================================================
 
   # Order signing for Predict.fun CTF Exchange (4 Exchange contracts)
-  - name: "Predict Order Signature"
+  - id: "predict-order-signature"
+    name: "Predict Order Signature"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -466,7 +468,8 @@ rules:
   # ===========================================================================
 
   # USDT approve — allow approving 8 protocol contracts
-  - name: "Predict USDT Approve"
+  - id: "predict-usdt-approve"
+    name: "Predict USDT Approve"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -558,7 +561,8 @@ rules:
           expect_reason: "target must be USDT"
 
   # CT setApprovalForAll — allow approving 6 operator contracts on 2 CT contracts
-  - name: "Predict CT SetApprovalForAll"
+  - id: "predict-ct-setapprovalforall"
+    name: "Predict CT SetApprovalForAll"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -666,7 +670,8 @@ rules:
           expect_reason: "target must be ConditionalTokens"
 
   # CT splitPosition / mergePositions / redeemPositions — direct calls to ConditionalTokens
-  - name: "Predict CT Split Merge Redeem"
+  - id: "predict-ct-split-merge-redeem"
+    name: "Predict CT Split Merge Redeem"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -768,7 +773,8 @@ rules:
 
   # NegRiskAdapter operations — splitPosition / mergePositions / redeemPositions / convertPositions
   # Supports both 2-param simplified variants (NegRisk-specific) and 5-param CTF-compatible variants
-  - name: "Predict NegRiskAdapter Operations"
+  - id: "predict-negrisk-adapter-operations"
+    name: "Predict NegRiskAdapter Operations"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true

@@ -45,7 +45,8 @@ test_variables:
 
 rules:
   # Blocklist: block SafeTx with DELEGATECALL (operation !== 0) so rejection reason reaches the client.
-  - name: "Safe block DELEGATECALL"
+  - id: "safe-block-delegatecall"
+    name: "Safe block DELEGATECALL"
     type: "evm_js"
     mode: "blocklist"
     enabled: true
@@ -127,7 +128,8 @@ rules:
         expect_pass: false
         expect_reason: "only CALL allowed"
 
-  - name: "Safe SafeTx and execTransaction"
+  - id: "safe-safetx-exec-transaction"
+    name: "Safe SafeTx and execTransaction"
     type: "evm_js"
     mode: "whitelist"
     enabled: true

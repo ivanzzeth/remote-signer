@@ -45,7 +45,8 @@ test_variables:
   allowed_transfer_from: ""
 
 rules:
-  - name: "ERC20 transfer/approve with limit"
+  - id: "erc20-transfer-approve-limit"
+    name: "ERC20 transfer/approve with limit"
     type: "evm_js"
     mode: "whitelist"
     enabled: true

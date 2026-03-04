@@ -3,7 +3,8 @@
 # Whitelist rules then determine allowed sign types.
 
 rules:
-  - name: "Block malicious addresses"
+  - id: "block-malicious-addresses"
+    name: "Block malicious addresses"
     type: "evm_solidity_expression"
     mode: "blocklist"
     enabled: true
@@ -28,7 +29,8 @@ rules:
           expect_pass: false
           expect_reason: "blocked: zero address"
 
-  - name: "Allowed signing methods"
+  - id: "allowed-signing-methods"
+    name: "Allowed signing methods"
     type: "sign_type_restriction"
     mode: "whitelist"
     enabled: true
