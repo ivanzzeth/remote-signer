@@ -359,8 +359,8 @@ func (m *RequestsModel) renderRequests() string {
 	content.WriteString("\n\n")
 
 	// Table header
-	headerRow := fmt.Sprintf("%-36s  %-12s  %-12s  %-42s  %-20s",
-		"ID", "Status", "Sign Type", "Signer", "Created At")
+	headerRow := fmt.Sprintf("%-36s  %-12s  %-12s  %-42s  %-16s  %-20s",
+		"ID", "Status", "Sign Type", "Signer", "Client IP", "Created At")
 	content.WriteString(styles.TableHeaderStyle.Render(headerRow))
 	content.WriteString("\n")
 
@@ -425,11 +425,20 @@ func (m *RequestsModel) renderRequestRow(req evm.RequestStatus, selected bool) s
 		signer = signer[:39] + "..."
 	}
 
-	row := fmt.Sprintf("%-36s  %-12s  %-12s  %-42s  %-20s",
+	clientIP := req.ClientIP
+	if len(clientIP) > 16 {
+		clientIP = clientIP[:13] + "..."
+	}
+	if clientIP == "" {
+		clientIP = "—"
+	}
+
+	row := fmt.Sprintf("%-36s  %-12s  %-12s  %-42s  %-16s  %-20s",
 		id,
 		req.Status,
 		req.SignType,
 		signer,
+		clientIP,
 		createdAt,
 	)
 
@@ -441,11 +450,12 @@ func (m *RequestsModel) renderRequestRow(req evm.RequestStatus, selected bool) s
 	statusStyle := styles.GetStatusStyle(req.Status)
 	statusPart := statusStyle.Render(fmt.Sprintf("%-12s", req.Status))
 
-	row = fmt.Sprintf("%-36s  %s  %-12s  %-42s  %-20s",
+	row = fmt.Sprintf("%-36s  %s  %-12s  %-42s  %-16s  %-20s",
 		id,
 		statusPart,
 		req.SignType,
 		signer,
+		clientIP,
 		createdAt,
 	)
 

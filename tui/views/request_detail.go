@@ -524,9 +524,11 @@ func (m *RequestDetailModel) renderDetail() string {
 		{"Created At", m.request.CreatedAt.Format("2006-01-02 15:04:05")},
 		{"Updated At", m.request.UpdatedAt.Format("2006-01-02 15:04:05")},
 	}
-	if m.request.ClientIP != "" {
-		info = append(info, struct{ key, value string }{"Client IP", m.request.ClientIP})
+	clientIP := m.request.ClientIP
+	if clientIP == "" {
+		clientIP = "—"
 	}
+	info = append(info, struct{ key, value string }{"Client IP", clientIP})
 	if m.request.RuleMatchedID != nil {
 		ruleMatched := *m.request.RuleMatchedID
 		if m.request.RuleMatchedName != nil && *m.request.RuleMatchedName != "" {
