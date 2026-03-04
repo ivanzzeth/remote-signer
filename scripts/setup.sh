@@ -679,6 +679,17 @@ step_ip_whitelist() {
         done
     done
 
+    # Always include localhost IPs when whitelist is enabled (avoid duplicates)
+    has_127() { for x in "${IP_WHITELIST_ALLOWED_IPS[@]}"; do [[ "$x" == "127.0.0.1" ]] && return 0; done; return 1; }
+    has_::1() { for x in "${IP_WHITELIST_ALLOWED_IPS[@]}"; do [[ "$x" == "::1" ]] && return 0; done; return 1; }
+    LOCALHOST_IPS=()
+    has_127 || LOCALHOST_IPS+=("127.0.0.1")
+    has_::1 || LOCALHOST_IPS+=("::1")
+    if [ ${#LOCALHOST_IPS[@]} -gt 0 ]; then
+        IP_WHITELIST_ALLOWED_IPS=("${LOCALHOST_IPS[@]}" "${IP_WHITELIST_ALLOWED_IPS[@]}")
+        log_info "Included localhost in whitelist: ${LOCALHOST_IPS[*]}"
+    fi
+
     if [ ${#IP_WHITELIST_ALLOWED_IPS[@]} -eq 0 ]; then
         log_warn "No IPs entered; IP whitelist will remain disabled."
         return 0
