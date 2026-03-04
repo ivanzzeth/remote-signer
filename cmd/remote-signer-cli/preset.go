@@ -316,10 +316,10 @@ func parsePresetFile(data []byte, overrides map[string]string) ([]config.RuleCon
 			variables[k] = v
 		}
 		rules := make([]config.RuleConfig, 0, n)
-		baseName := single.Name
-		if baseName == "" {
-			baseName = "Polymarket"
+		if single.Name == "" {
+			return nil, fmt.Errorf("composite preset requires non-empty name")
 		}
+		baseName := single.Name
 		for i := 0; i < n; i++ {
 			templateName := single.TemplateNames[i]
 			if templateName == "" {

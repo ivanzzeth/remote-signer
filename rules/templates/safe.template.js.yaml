@@ -14,6 +14,10 @@ variables:
     type: address_list
     description: "Comma-separated allowed Safe addresses (verifyingContract / tx to)"
     required: true
+  - name: allowed_safe_address_for_testing
+    type: address
+    description: "Single Safe address for test cases (verifyingContract, transaction.to). Must be one of allowed_safe_addresses."
+    required: false
   - name: allowed_safe_tx_to_addresses
     type: address_list
     description: "Comma-separated allowed inner 'to' addresses (each can be routed to a different rule)"
@@ -38,6 +42,7 @@ variables:
 test_variables:
   chain_id: "1"
   allowed_safe_addresses: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+  allowed_safe_address_for_testing: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
   allowed_safe_tx_to_addresses: "0xdAC17F958D2ee523a2206206994597C13D831ec7,0x4B20993Bc481177ec7E8f571ceCaE8A9e22C02db"
   delegate_to: ""
   delegate_mode: "single"
@@ -95,7 +100,7 @@ rules:
             primaryType: "SafeTx"
             domain:
               chainId: "${chain_id}"
-              verifyingContract: "${allowed_safe_addresses}"
+              verifyingContract: "${allowed_safe_address_for_testing}"
             message:
               to: "${test_inner_to}"
               value: "0"
@@ -115,7 +120,7 @@ rules:
             primaryType: "SafeTx"
             domain:
               chainId: "${chain_id}"
-              verifyingContract: "${allowed_safe_addresses}"
+              verifyingContract: "${allowed_safe_address_for_testing}"
             message:
               to: "${test_inner_to}"
               value: "0"
@@ -276,7 +281,7 @@ rules:
             primaryType: "SafeTx"
             domain:
               chainId: "${chain_id}"
-              verifyingContract: "${allowed_safe_addresses}"
+              verifyingContract: "${allowed_safe_address_for_testing}"
             message:
               to: "${test_inner_to}"
               value: "0"
@@ -319,7 +324,7 @@ rules:
             primaryType: "SafeTx"
             domain:
               chainId: "${chain_id}"
-              verifyingContract: "${allowed_safe_addresses}"
+              verifyingContract: "${allowed_safe_address_for_testing}"
             message:
               to: "0x000000000000000000000000000000000000dEaD"
               value: "0"
@@ -340,7 +345,7 @@ rules:
             primaryType: "SafeTx"
             domain:
               chainId: "${chain_id}"
-              verifyingContract: "${allowed_safe_addresses}"
+              verifyingContract: "${allowed_safe_address_for_testing}"
             message:
               to: "${test_inner_to}"
               value: "1"
@@ -359,7 +364,7 @@ rules:
           signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
           transaction:
             from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
-            to: "${allowed_safe_addresses}"
+            to: "${allowed_safe_address_for_testing}"
             value: "0x0"
             data: "0x"
         expect_pass: true

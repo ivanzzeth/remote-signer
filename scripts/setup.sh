@@ -793,18 +793,31 @@ step_preset_rules() {
         vars_out=$(remote-signer-cli preset vars "$PRESET_FILE" --presets-dir "$PRESETS_DIR" --project-dir "$PROJECT_DIR" 2>/dev/null) || true
         if [ -n "$vars_out" ]; then
             echo ""
-            echo "Enter values for the following variables (descriptions from template):"
+            echo "Enter values for the following variables (descriptions from template)."
+            echo "  Use comma-separated (a,b,c) or newline-separated (one per line; empty line to finish)."
             # Read vars from fd 3 so that 'read -rp' below still reads from terminal (stdin), not from vars_out
             while IFS= read -r line <&3; do
                 [[ -z "$line" ]] && continue
                 name="${line%%$'\t'*}"
                 desc="${line#*$'\t'}"
                 if [ -n "$name" ]; then
-                    if [ -n "$desc" ]; then
-                        read -rp "  $name ($desc): " val
-                    else
-                        read -rp "  $name: " val
-                    fi
+                    val=""
+                    first=1
+                    while true; do
+                        if [ "$first" -eq 1 ]; then
+                            if [ -n "$desc" ]; then
+                                read -rp "  $name ($desc): " ln
+                            else
+                                read -rp "  $name: " ln
+                            fi
+                            first=0
+                        else
+                            read -rp "    " ln
+                        fi
+                        ln=$(printf '%s' "$ln" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+                        [[ -z "$ln" ]] && break
+                        val="${val:+$val,}$ln"
+                    done
                     set_args+=(--set "$name=$val")
                 fi
             done 3<<< "$vars_out"
