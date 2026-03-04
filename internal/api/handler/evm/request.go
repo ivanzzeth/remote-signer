@@ -62,6 +62,7 @@ type RequestDetailResponse struct {
 	SignerAddress    string          `json:"signer_address"`
 	SignType         string          `json:"sign_type"`
 	Status           string          `json:"status"`
+	ClientIP         string          `json:"client_ip,omitempty"`
 	Payload          json.RawMessage `json:"payload,omitempty"`
 	Signature        string          `json:"signature,omitempty"`
 	SignedData       string          `json:"signed_data,omitempty"`
@@ -294,6 +295,7 @@ func toDetailResponse(ctx context.Context, ruleRepo storage.RuleRepository, req 
 		SignerAddress: req.SignerAddress,
 		SignType:      req.SignType,
 		Status:        string(req.Status),
+		ClientIP:      req.ClientIP,
 		ErrorMessage:  req.ErrorMessage,
 		RuleMatchedID: req.RuleMatchedID,
 		ApprovedBy:    req.ApprovedBy,

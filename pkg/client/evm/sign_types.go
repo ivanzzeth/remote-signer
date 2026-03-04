@@ -52,6 +52,7 @@ type RequestStatus struct {
 	SignerAddress   string          `json:"signer_address"`
 	SignType        string          `json:"sign_type"`
 	Status          string          `json:"status"`
+	ClientIP        string          `json:"client_ip,omitempty"`
 	Payload         json.RawMessage `json:"payload,omitempty"`
 	Signature       string          `json:"signature,omitempty"`
 	SignedData      string          `json:"signed_data,omitempty"`

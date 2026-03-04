@@ -36,7 +36,8 @@ func LoggingMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 			// Process request
 			next.ServeHTTP(rw, r)
 
-			// Log request
+			// Log request (client_ip from context set by ClientIPMiddleware; remote_addr for debugging)
+			clientIP, _ := r.Context().Value(ClientIPContextKey).(string)
 			duration := time.Since(start)
 			logger.Info("request",
 				"method", r.Method,
@@ -44,6 +45,7 @@ func LoggingMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 				"status", rw.statusCode,
 				"duration_ms", duration.Milliseconds(),
 				"api_key_id", apiKeyID,
+				"client_ip", clientIP,
 				"remote_addr", r.RemoteAddr,
 			)
 		})

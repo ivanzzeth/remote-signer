@@ -17,6 +17,8 @@ type ContextKey string
 const (
 	// APIKeyContextKey is the context key for the authenticated API key
 	APIKeyContextKey ContextKey = "api_key"
+	// ClientIPContextKey is the context key for the resolved client IP (set by ClientIPMiddleware)
+	ClientIPContextKey ContextKey = "client_ip"
 )
 
 // AuthMiddleware creates an authentication middleware
