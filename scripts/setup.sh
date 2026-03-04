@@ -272,7 +272,8 @@ goto_clone() {
     # Clone
     local CLONE_DIR="${HOME}/remote-signer"
     read -rp "  Clone to directory (default: $CLONE_DIR): " CUSTOM_DIR
-    CLONE_DIR="${CUSTOM_DIR:-$CLONE_DIR}"
+    CLONE_DIR="$(printf '%s' "${CUSTOM_DIR:-$CLONE_DIR}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+    [ -z "$CLONE_DIR" ] && CLONE_DIR="${HOME}/remote-signer"
 
     if [ -d "$CLONE_DIR" ]; then
         if [ -f "$CLONE_DIR/go.mod" ] && grep -q "remote-signer" "$CLONE_DIR/go.mod" 2>/dev/null; then
@@ -285,7 +286,13 @@ goto_clone() {
     fi
 
     log_info "Cloning remote-signer to $CLONE_DIR..."
-    git clone https://github.com/ivanzzeth/remote-signer.git "$CLONE_DIR"
+    if ! git clone https://github.com/ivanzzeth/remote-signer.git "$CLONE_DIR" 2>/dev/null; then
+        if [ -d "$CLONE_DIR" ] && [ -f "$CLONE_DIR/go.mod" ] && grep -q "remote-signer" "$CLONE_DIR/go.mod" 2>/dev/null; then
+            log_info "Directory already exists and appears to be remote-signer. Continuing setup from there."
+            exec "$CLONE_DIR/scripts/setup.sh"
+        fi
+        git clone https://github.com/ivanzzeth/remote-signer.git "$CLONE_DIR"
+    fi
 
     # Re-execute setup from the cloned directory
     log_info "Continuing setup from $CLONE_DIR..."
