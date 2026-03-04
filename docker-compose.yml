@@ -42,19 +42,19 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    # Security: Resource limits to prevent DoS attacks from Solidity rule execution
+    # Security: Resource limits to prevent DoS attacks from Solidity rule execution.
+    # CPU limit must not exceed host CPU count (e.g. 2.00 on a 2-CPU machine). Override with COMPOSE_CPUS_LIMIT if needed.
     deploy:
       resources:
         limits:
-          cpus: '4'
-          memory: 4G
+          cpus: '${COMPOSE_CPUS_LIMIT:-2}'
+          memory: ${COMPOSE_MEMORY_LIMIT:-4G}
         reservations:
-          cpus: '1'
-          memory: 1G
+          cpus: '${COMPOSE_CPUS_RESERVE:-0.5}'
+          memory: ${COMPOSE_MEMORY_RESERVE:-512M}
     # Security: Disable swap to prevent private keys from being written to disk.
     # memswap_limit = memory limit means total (RAM + swap) = RAM, so swap quota = 0.
-    # Even if the host has swap enabled, this container cannot use it.
-    memswap_limit: 4G
+    memswap_limit: ${COMPOSE_MEMORY_LIMIT:-4G}
     mem_swappiness: 0
     # Security: Read-only root filesystem (volumes/tmpfs override where writes are needed)
     read_only: true
