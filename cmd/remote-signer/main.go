@@ -33,7 +33,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
-const version = "0.1.11"
+const version = "0.1.12"
 
 func main() {
 	if err := run(); err != nil {

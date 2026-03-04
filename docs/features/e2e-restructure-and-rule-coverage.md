@@ -61,7 +61,7 @@ e2e 使用的模板以 `config.e2e.yaml` 中声明的为准（E2E Minimal, E2E S
 | `e2e_health_test.go` | `TestHealthCheck` | - |
 | `e2e_auth_test.go` | `TestAuth_AdminCanAccessAdminEndpoints`、`TestAuth_NonAdminCannotAccessAdminEndpoints`、`TestAuth_NonAdminCanSubmitSignRequest`、`TestAuth_AdminCanSubmitSignRequest` | - |
 | `e2e_sign_test.go` | 所有 `TestSign_*`（PersonalSign, Hash, RawMessage, EIP191, TypedData, LegacyTransaction, EIP1559Transaction, SignerNotFound, ContextCancellation, MultipleRequests, DirectSignAPI） | - |
-| `e2e_approval_guard_test.go` | `TestApprovalGuard_PauseAndResume` | - |
+| `e2e_approval_guard_test.go` | `TestZ_ApprovalGuard_PauseAndResume` (runs last by name) | - |
 | `e2e_rule_crud_test.go` | 规则 CRUD 与权限：`TestRule_AdminCanCreateRule`、`TestRule_AdminCanListRules`、`TestRule_AdminCanGetRule`、`TestRule_AdminCanUpdateRule`、`TestRule_AdminCanDeleteRule`、`TestRule_AdminCanDisableRule`、`TestRule_NonAdminCannot*` | - |
 | `e2e_rule_address_test.go` | 地址名单：`TestRule_TransactionToTreasuryPasses`、`TestRule_AddressWhitelist_RejectsNonListedAddress`、与 treasury.example 的 e2e 等价用例 | evm_address_list / evm_address_whitelist |
 | `e2e_rule_solidity_test.go` | Solidity 表达式块：`TestRule_SolidityBlocklist_PassesForNormalAddress`、`TestRule_TransactionToBurnAddressBlocked`、与 security.example 中 blocklist 的 e2e 等价 | evm_solidity_expression |

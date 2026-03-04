@@ -13,9 +13,11 @@ import (
 	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 )
 
-// TestApprovalGuard_PauseAndResume verifies that after N consecutive "rejected" outcomes
+// TestZ_ApprovalGuard_PauseAndResume verifies that after N consecutive "rejected" outcomes
 // (rule-blocked or manual approval), the guard pauses sign requests, and admin resume restores service.
-func TestApprovalGuard_PauseAndResume(t *testing.T) {
+// Named with Z_ prefix so it runs last (Go runs tests alphabetically); this test pauses the guard
+// and would leave it paused if it failed before Resume(), breaking all later sign-request tests.
+func TestZ_ApprovalGuard_PauseAndResume(t *testing.T) {
 	if useExternalServer {
 		t.Skip("approval guard e2e uses internal server with config.e2e.yaml (guard + blocklist rule)")
 	}
