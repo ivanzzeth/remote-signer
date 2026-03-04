@@ -48,6 +48,8 @@ type AuditModel struct {
 	nextCursorID  *string
 	cursorHistory []auditCursorState
 	hasMore       bool
+	// List window: only render rows [listStartIdx, listStartIdx+visible) so header/footer stay on screen
+	listStartIdx int
 }
 
 // auditCursorState stores cursor position for pagination history
@@ -142,7 +144,18 @@ func (m *AuditModel) resetPagination() {
 	m.nextCursorID = nil
 	m.cursorHistory = nil
 	m.selectedIdx = 0
+	m.listStartIdx = 0
 	m.hasMore = false
+}
+
+// visibleListRows returns how many table rows fit in the current height (header + table header + pagination + help reserved).
+func (m *AuditModel) visibleListRows() int {
+	const reservedLines = 8 // title, blank, table header, blank, pagination, cursor, blank, help
+	n := m.height - reservedLines
+	if n < 1 {
+		return 1
+	}
+	return n
 }
 
 func (m *AuditModel) loadData() tea.Cmd {
@@ -192,10 +205,10 @@ func (m *AuditModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.records = msg.Records
 			m.total = msg.Total
 			m.hasMore = msg.HasMore
-			// Store next page cursor (don't overwrite current cursor)
 			m.nextCursor = msg.NextCursor
 			m.nextCursorID = msg.NextCursorID
 			m.err = nil
+			m.listStartIdx = 0
 		}
 		return m, nil
 
@@ -296,11 +309,18 @@ func (m *AuditModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "up", "k":
 			if m.selectedIdx > 0 {
 				m.selectedIdx--
+				if m.selectedIdx < m.listStartIdx {
+					m.listStartIdx = m.selectedIdx
+				}
 			}
 			return m, nil
 		case "down", "j":
 			if m.selectedIdx < len(m.records)-1 {
 				m.selectedIdx++
+				visibleRows := m.visibleListRows()
+				if m.selectedIdx >= m.listStartIdx+visibleRows {
+					m.listStartIdx = m.selectedIdx - visibleRows + 1
+				}
 			}
 			return m, nil
 		case "pgup", "ctrl+u":
@@ -308,11 +328,18 @@ func (m *AuditModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.selectedIdx < 0 {
 				m.selectedIdx = 0
 			}
+			if m.selectedIdx < m.listStartIdx {
+				m.listStartIdx = m.selectedIdx
+			}
 			return m, nil
 		case "pgdown", "ctrl+d":
+			visibleRows := m.visibleListRows()
 			m.selectedIdx += 10
 			if m.selectedIdx >= len(m.records) {
 				m.selectedIdx = len(m.records) - 1
+			}
+			if m.selectedIdx >= m.listStartIdx+visibleRows {
+				m.listStartIdx = m.selectedIdx - visibleRows + 1
 			}
 			if m.selectedIdx < 0 {
 				m.selectedIdx = 0
@@ -320,10 +347,15 @@ func (m *AuditModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "home", "g":
 			m.selectedIdx = 0
+			m.listStartIdx = 0
 			return m, nil
 		case "end", "G":
 			if len(m.records) > 0 {
 				m.selectedIdx = len(m.records) - 1
+				visibleRows := m.visibleListRows()
+				if m.selectedIdx >= visibleRows {
+					m.listStartIdx = m.selectedIdx - visibleRows + 1
+				}
 			}
 			return m, nil
 		case "enter":
@@ -342,27 +374,26 @@ func (m *AuditModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "n":
 			// Next page
 			if m.hasMore && m.nextCursor != nil {
-				// Save current cursor to history for going back
 				m.cursorHistory = append(m.cursorHistory, auditCursorState{
 					cursor:   m.cursor,
 					cursorID: m.cursorID,
 				})
-				// Use next cursor
 				m.cursor = m.nextCursor
 				m.cursorID = m.nextCursorID
 				m.selectedIdx = 0
+				m.listStartIdx = 0
 				return m, m.Refresh()
 			}
 			return m, nil
 		case "p":
 			// Previous page
 			if len(m.cursorHistory) > 0 {
-				// Pop from history
 				prev := m.cursorHistory[len(m.cursorHistory)-1]
 				m.cursorHistory = m.cursorHistory[:len(m.cursorHistory)-1]
 				m.cursor = prev.cursor
 				m.cursorID = prev.cursorID
 				m.selectedIdx = 0
+				m.listStartIdx = 0
 				return m, m.Refresh()
 			}
 			return m, nil
@@ -471,17 +502,23 @@ func (m *AuditModel) renderAuditLogs() string {
 	content.WriteString("\n\n")
 
 	// Table header
-	headerRow := fmt.Sprintf("%-20s  %-10s  %-20s  %-42s  %-24s",
-		"Timestamp", "Severity", "Event Type", "Signer/Request", "Details")
+	headerRow := fmt.Sprintf("%-20s  %-10s  %-20s  %-16s  %-42s  %-24s",
+		"Timestamp", "Severity", "Event Type", "Client IP", "Signer/Request", "Details")
 	content.WriteString(styles.TableHeaderStyle.Render(headerRow))
 	content.WriteString("\n")
 
-	// Rows
+	// Rows: only render visible window so header/footer stay on screen
 	if len(m.records) == 0 {
 		content.WriteString("\n")
 		content.WriteString(styles.MutedColor.Render("  No audit records found"))
 	} else {
-		for i, record := range m.records {
+		visibleRows := m.visibleListRows()
+		endIdx := m.listStartIdx + visibleRows
+		if endIdx > len(m.records) {
+			endIdx = len(m.records)
+		}
+		for i := m.listStartIdx; i < endIdx; i++ {
+			record := m.records[i]
 			row := m.renderAuditRow(record, i == m.selectedIdx)
 			content.WriteString(row)
 			content.WriteString("\n")
@@ -529,6 +566,14 @@ func (m *AuditModel) renderAuditRow(record audit.Record, selected bool) string {
 		eventType = eventType[:17] + "..."
 	}
 
+	clientIP := record.ActorAddress
+	if len(clientIP) > 16 {
+		clientIP = clientIP[:13] + "..."
+	}
+	if clientIP == "" {
+		clientIP = "—"
+	}
+
 	// Get signer or request info
 	signerInfo := ""
 	if record.SignerAddress != nil {
@@ -554,10 +599,11 @@ func (m *AuditModel) renderAuditRow(record audit.Record, selected bool) string {
 		details = details[:21] + "..."
 	}
 
-	row := fmt.Sprintf("%-20s  %-10s  %-20s  %-42s  %-24s",
+	row := fmt.Sprintf("%-20s  %-10s  %-20s  %-16s  %-42s  %-24s",
 		timestamp,
 		record.Severity,
 		eventType,
+		clientIP,
 		signerInfo,
 		details,
 	)
@@ -570,10 +616,11 @@ func (m *AuditModel) renderAuditRow(record audit.Record, selected bool) string {
 	severityStyle := styles.GetSeverityStyle(record.Severity)
 	severityPart := severityStyle.Render(fmt.Sprintf("%-10s", record.Severity))
 
-	row = fmt.Sprintf("%-20s  %s  %-20s  %-42s  %-24s",
+	row = fmt.Sprintf("%-20s  %s  %-20s  %-16s  %-42s  %-24s",
 		timestamp,
 		severityPart,
 		eventType,
+		clientIP,
 		signerInfo,
 		details,
 	)
@@ -593,6 +640,10 @@ func (m *AuditModel) renderDetail() string {
 	content.WriteString(styles.TitleStyle.Render("Audit Record Details"))
 	content.WriteString("\n\n")
 
+	actorAddr := record.ActorAddress
+	if actorAddr == "" {
+		actorAddr = "—"
+	}
 	// Basic info
 	info := []struct {
 		key   string
@@ -603,7 +654,7 @@ func (m *AuditModel) renderDetail() string {
 		{"Severity", record.Severity},
 		{"Timestamp", record.Timestamp.Format("2006-01-02 15:04:05")},
 		{"API Key ID", record.APIKeyID},
-		{"Actor Address", record.ActorAddress},
+		{"Client IP", actorAddr},
 		{"Request Method", record.RequestMethod},
 		{"Request Path", record.RequestPath},
 	}
@@ -625,9 +676,6 @@ func (m *AuditModel) renderDetail() string {
 	}
 
 	for _, item := range info {
-		if item.value == "" {
-			continue
-		}
 		keyStr := styles.InfoKeyStyle.Render(item.key + ":")
 		valueStr := item.value
 		if item.key == "Severity" {
