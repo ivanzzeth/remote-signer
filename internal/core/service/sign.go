@@ -90,6 +90,7 @@ type SignRequest struct {
 	SignerAddress string          `json:"signer_address"`
 	SignType      string          `json:"sign_type"`
 	Payload       []byte          `json:"payload"`
+	ClientIP      string          `json:"client_ip"` // source IP (set by handler from request context)
 }
 
 // SignResponse represents the response to a sign request
@@ -125,6 +126,7 @@ func (s *SignService) Sign(ctx context.Context, req *SignRequest) (*SignResponse
 		SignerAddress: req.SignerAddress,
 		SignType:      req.SignType,
 		Payload:       req.Payload,
+		ClientIP:      req.ClientIP,
 		Status:        types.StatusPending,
 		CreatedAt:     now,
 		UpdatedAt:     now,

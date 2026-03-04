@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"log/slog"
-	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -125,17 +124,10 @@ func IPRateLimitMiddleware(limiter *RateLimiter, ipWhitelist *IPWhitelist, limit
 			return next // disabled
 		}
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			var clientIP string
-			if ipWhitelist != nil {
-				clientIP = ipWhitelist.GetClientIP(r)
-			} else {
-				host, _, err := net.SplitHostPort(r.RemoteAddr)
-				if err != nil {
-					host = r.RemoteAddr
-				}
-				clientIP = host
+			clientIP, ok := r.Context().Value(ClientIPContextKey).(string)
+			if !ok || clientIP == "" {
+				clientIP = ResolveClientIP(r, ipWhitelist)
 			}
-
 			key := "ip:" + clientIP
 			if !limiter.Allow(key, limit) {
 				limiter.logger.Warn("IP rate limit exceeded",
