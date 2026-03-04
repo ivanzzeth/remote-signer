@@ -18,6 +18,7 @@ import (
 // HDWalletsModel represents the HD wallets list view.
 type HDWalletsModel struct {
 	hdwallets_svc evm.HDWalletAPI
+	signers_svc   evm.SignerAPI // for unlock (uses signer API with primary address)
 	ctx           context.Context
 	width         int
 	height        int
@@ -42,6 +43,10 @@ type HDWalletsModel struct {
 	passwordInput textinput.Model
 	confirmInput  textinput.Model
 	showPassword  bool
+
+	// Unlock form state (for locked HD wallets)
+	showUnlock  bool
+	unlockInput textinput.Model
 }
 
 // HDWalletsDataMsg is sent when HD wallets data is loaded.
@@ -58,18 +63,26 @@ type HDWalletCreateMsg struct {
 	Err     error
 }
 
+// HDWalletUnlockMsg is sent when an HD wallet unlock completes.
+type HDWalletUnlockMsg struct {
+	PrimaryAddr string
+	Success    bool
+	Message    string
+	Err        error
+}
+
 // NewHDWalletsModel creates a new HD wallets model.
 func NewHDWalletsModel(c *client.Client, ctx context.Context) (*HDWalletsModel, error) {
 	if c == nil {
 		return nil, fmt.Errorf("client is required")
 	}
-	return newHDWalletsModelFromService(c.EVM.HDWallets, ctx)
+	return newHDWalletsModelFromService(c.EVM.HDWallets, c.EVM.Signers, ctx)
 }
 
-// newHDWalletsModelFromService creates an HD wallets model from an HDWalletAPI (for testing).
-func newHDWalletsModelFromService(svc evm.HDWalletAPI, ctx context.Context) (*HDWalletsModel, error) {
-	if svc == nil {
-		return nil, fmt.Errorf("client is required")
+// newHDWalletsModelFromService creates an HD wallets model from services (for testing, signers_svc may be nil).
+func newHDWalletsModelFromService(hdSvc evm.HDWalletAPI, signersSvc evm.SignerAPI, ctx context.Context) (*HDWalletsModel, error) {
+	if hdSvc == nil {
+		return nil, fmt.Errorf("HD wallet service is required")
 	}
 	if ctx == nil {
 		return nil, fmt.Errorf("context is required")
@@ -95,8 +108,14 @@ func newHDWalletsModelFromService(svc evm.HDWalletAPI, ctx context.Context) (*HD
 	confirmInput.Width = 40
 	confirmInput.EchoMode = textinput.EchoPassword
 
+	unlockInput := textinput.New()
+	unlockInput.Placeholder = "Enter password to unlock"
+	unlockInput.Width = 40
+	unlockInput.EchoMode = textinput.EchoPassword
+
 	return &HDWalletsModel{
-		hdwallets_svc: svc,
+		hdwallets_svc: hdSvc,
+		signers_svc:   signersSvc,
 		ctx:           ctx,
 		spinner:       s,
 		loading:       true,
@@ -104,6 +123,7 @@ func newHDWalletsModelFromService(svc evm.HDWalletAPI, ctx context.Context) (*HD
 		mnemonicInput: mnInput,
 		passwordInput: pwInput,
 		confirmInput:  confirmInput,
+		unlockInput:   unlockInput,
 	}, nil
 }
 
@@ -196,6 +216,24 @@ func (m *HDWalletsModel) importWallet(mnemonic, password string) tea.Cmd {
 	}
 }
 
+func (m *HDWalletsModel) unlockWallet(primaryAddr, password string) tea.Cmd {
+	return func() tea.Msg {
+		if m.signers_svc == nil {
+			return HDWalletUnlockMsg{PrimaryAddr: primaryAddr, Success: false, Err: fmt.Errorf("unlock not available")}
+		}
+		req := &evm.UnlockSignerRequest{Password: password}
+		resp, err := m.signers_svc.Unlock(m.ctx, primaryAddr, req)
+		if err != nil {
+			return HDWalletUnlockMsg{PrimaryAddr: primaryAddr, Success: false, Err: err}
+		}
+		return HDWalletUnlockMsg{
+			PrimaryAddr: primaryAddr,
+			Success:     true,
+			Message:     fmt.Sprintf("HD wallet unlocked: %s", resp.Address),
+		}
+	}
+}
+
 // Update handles messages.
 func (m *HDWalletsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -220,6 +258,19 @@ func (m *HDWalletsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case HDWalletUnlockMsg:
+		m.loading = false
+		m.showUnlock = false
+		m.unlockInput.SetValue("")
+		m.unlockInput.Blur()
+		if msg.Err != nil {
+			m.actionResult = styles.ErrorStyle.Render(fmt.Sprintf("Unlock failed: %v", msg.Err))
+		} else {
+			m.actionResult = styles.SuccessStyle.Render(msg.Message)
+			return m, m.Refresh()
+		}
+		return m, nil
+
 	case spinner.TickMsg:
 		if m.loading {
 			var cmd tea.Cmd
@@ -229,6 +280,9 @@ func (m *HDWalletsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.showUnlock {
+			return m.handleUnlockInput(msg)
+		}
 		if m.showCreate {
 			return m.handleCreateInput(msg)
 		}
@@ -252,6 +306,18 @@ func (m *HDWalletsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selectedPrimAddr = m.wallets[m.selectedIdx].PrimaryAddress
 			}
 			return m, nil
+		case "u":
+			// Unlock selected locked HD wallet
+			if m.signers_svc != nil && len(m.wallets) > 0 && m.selectedIdx < len(m.wallets) {
+				wallet := m.wallets[m.selectedIdx]
+				if wallet.Locked {
+					m.showUnlock = true
+					m.unlockInput.SetValue("")
+					m.unlockInput.Focus()
+					return m, textinput.Blink
+				}
+			}
+			return m, nil
 		case "c":
 			m.showCreate = true
 			m.createMode = "create"
@@ -271,6 +337,31 @@ func (m *HDWalletsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func (m *HDWalletsModel) handleUnlockInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		if m.unlockInput.Value() != "" && len(m.wallets) > 0 && m.selectedIdx < len(m.wallets) {
+			wallet := m.wallets[m.selectedIdx]
+			if wallet.Locked {
+				password := m.unlockInput.Value()
+				m.loading = true
+				m.unlockInput.Blur()
+				return m, tea.Batch(m.spinner.Tick, m.unlockWallet(wallet.PrimaryAddress, password))
+			}
+		}
+		return m, nil
+	case "esc":
+		m.showUnlock = false
+		m.unlockInput.SetValue("")
+		m.unlockInput.Blur()
+		return m, nil
+	default:
+		var cmd tea.Cmd
+		m.unlockInput, cmd = m.unlockInput.Update(msg)
+		return m, cmd
+	}
 }
 
 func (m *HDWalletsModel) handleCreateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -432,6 +523,9 @@ func (m *HDWalletsModel) resetCreateForm() {
 
 // View renders the HD wallets view.
 func (m *HDWalletsModel) View() string {
+	if m.showUnlock {
+		return m.renderUnlockForm()
+	}
 	if m.showCreate {
 		return m.renderCreateForm()
 	}
@@ -588,8 +682,8 @@ func (m *HDWalletsModel) renderWallets() string {
 	}
 
 	// Table header
-	headerRow := fmt.Sprintf("%-44s  %-18s  %-8s",
-		"Primary Address", "Path", "Derived")
+	headerRow := fmt.Sprintf("%-44s  %-18s  %-8s  %-8s",
+		"Primary Address", "Path", "Derived", "Status")
 	content.WriteString(styles.TableHeaderStyle.Render(headerRow))
 	content.WriteString("\n")
 
@@ -615,15 +709,38 @@ func (m *HDWalletsModel) renderWallets() string {
 
 	// Help
 	content.WriteString("\n\n")
-	helpText := "up/down: navigate | Enter: details | c: create | i: import | r: refresh"
+	helpText := "up/down: navigate | Enter: details | u: unlock (locked) | c: create | i: import | r: refresh"
 	content.WriteString(styles.HelpStyle.Render(helpText))
 
 	return content.String()
 }
 
+func (m *HDWalletsModel) renderUnlockForm() string {
+	var content strings.Builder
+	content.WriteString(styles.TitleStyle.Render("Unlock HD Wallet"))
+	content.WriteString("\n\n")
+	if len(m.wallets) > 0 && m.selectedIdx < len(m.wallets) {
+		content.WriteString(styles.SubtitleStyle.Render("Primary address: " + m.wallets[m.selectedIdx].PrimaryAddress))
+		content.WriteString("\n\n")
+	}
+	content.WriteString(styles.SubtitleStyle.Render("Enter password:"))
+	content.WriteString("\n\n")
+	content.WriteString(m.unlockInput.View())
+	content.WriteString("\n\n")
+	content.WriteString(styles.MutedColor.Render("Enter: unlock | Esc: cancel"))
+
+	return lipgloss.Place(
+		m.width,
+		m.height,
+		lipgloss.Center,
+		lipgloss.Center,
+		styles.BoxStyle.Render(content.String()),
+	)
+}
+
 // IsCapturingInput returns true when this view is capturing keyboard input (form active).
 func (m *HDWalletsModel) IsCapturingInput() bool {
-	return m.showCreate
+	return m.showCreate || m.showUnlock
 }
 
 func (m *HDWalletsModel) renderWalletRow(wallet evm.HDWalletResponse, selected bool) string {
@@ -632,10 +749,16 @@ func (m *HDWalletsModel) renderWalletRow(wallet evm.HDWalletResponse, selected b
 		address = address[:41] + "..."
 	}
 
-	row := fmt.Sprintf("%-44s  %-18s  %-8d",
+	status := "Unlocked"
+	if wallet.Locked {
+		status = "Locked"
+	}
+
+	row := fmt.Sprintf("%-44s  %-18s  %-8d  %-8s",
 		address,
 		wallet.BasePath,
 		wallet.DerivedCount,
+		status,
 	)
 
 	if selected {

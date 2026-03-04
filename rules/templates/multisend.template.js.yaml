@@ -27,7 +27,8 @@ test_variables:
   delegate_mode: "per_item"
 
 rules:
-  - name: "Multisend allowlist and per_item delegation"
+  - id: "multisend-allowlist-delegation"
+    name: "Multisend allowlist and per_item delegation"
     type: "evm_js"
     mode: "whitelist"
     enabled: true

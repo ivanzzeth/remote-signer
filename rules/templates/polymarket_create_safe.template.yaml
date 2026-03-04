@@ -26,7 +26,8 @@ test_variables:
   usdc_bridged_address: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
 
 rules:
-  - name: "Polymarket Safe Wallet Creation Signature"
+  - id: "polymarket-safe-wallet-creation-sig"
+    name: "Polymarket Safe Wallet Creation Signature"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -83,7 +84,8 @@ rules:
           expect_pass: false
           expect_reason: "payment token must be zero"
 
-  - name: "Polymarket Safe Wallet Creation"
+  - id: "polymarket-safe-wallet-creation"
+    name: "Polymarket Safe Wallet Creation"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true

@@ -55,8 +55,23 @@ func (i *RuleInitializer) SetConfigDir(dir string) {
 	i.configDir = dir
 }
 
+// ValidateExplicitRuleIDs ensures every rule has an explicit id. Returns error if any rule lacks id.
+// Required to keep rule IDs stable across preset/config changes (avoids index-based ID drift).
+func ValidateExplicitRuleIDs(rules []RuleConfig) error {
+	var missing []string
+	for idx, r := range rules {
+		if strings.TrimSpace(r.Id) == "" {
+			missing = append(missing, fmt.Sprintf("rule %q (index %d)", r.Name, idx))
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("rules must have explicit id; missing id for: %s", strings.Join(missing, ", "))
+	}
+	return nil
+}
+
 // SyncFromConfig syncs rules from config to database
-// - Creates new rules that don't exist (identified by generated ID from config)
+// - Creates new rules that don't exist (identified by explicit id from config)
 // - Updates existing rules with new values from config
 // - Deletes config-sourced rules that are no longer in config (preserves API-created rules)
 // - Expands "file" type rules by loading rules from external YAML files
@@ -68,7 +83,12 @@ func (i *RuleInitializer) SyncFromConfig(ctx context.Context, rules []RuleConfig
 		return fmt.Errorf("failed to expand file rules: %w", err)
 	}
 
-	// Build set of expected rule IDs (custom id or generated); enforce uniqueness
+	// Require explicit id for all rules (stable IDs across preset/config changes)
+	if err := ValidateExplicitRuleIDs(expandedRules); err != nil {
+		return fmt.Errorf("rule config validation: %w", err)
+	}
+
+	// Build set of expected rule IDs (explicit id); enforce uniqueness
 	expectedIDs := make(map[types.RuleID]bool)
 	for idx, ruleCfg := range expandedRules {
 		ruleID := i.effectiveRuleID(idx, ruleCfg)

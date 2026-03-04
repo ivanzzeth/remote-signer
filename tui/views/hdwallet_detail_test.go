@@ -16,7 +16,7 @@ import (
 func newTestHDWalletDetailModel(t *testing.T) (*HDWalletDetailModel, *mock.HDWalletService) {
 	t.Helper()
 	svc := mock.NewHDWalletService()
-	model, err := newHDWalletDetailModelFromService(svc, context.Background())
+	model, err := newHDWalletDetailModelFromService(svc, nil, context.Background())
 	require.NoError(t, err)
 	return model, svc
 }
@@ -28,15 +28,15 @@ func TestNewHDWalletDetailModel(t *testing.T) {
 		assert.Contains(t, err.Error(), "client is required")
 	})
 
-	t.Run("returns error when service is nil", func(t *testing.T) {
-		_, err := newHDWalletDetailModelFromService(nil, context.Background())
+	t.Run("returns error when HD wallet service is nil", func(t *testing.T) {
+		_, err := newHDWalletDetailModelFromService(nil, nil, context.Background())
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "client is required")
+		assert.Contains(t, err.Error(), "HD wallet service is required")
 	})
 
 	t.Run("returns error when context is nil", func(t *testing.T) {
 		svc := mock.NewHDWalletService()
-		_, err := newHDWalletDetailModelFromService(svc, nil)
+		_, err := newHDWalletDetailModelFromService(svc, nil, nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "context is required")
 	})

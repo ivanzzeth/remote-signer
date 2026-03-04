@@ -19,6 +19,7 @@ import (
 // HDWalletDetailModel represents the HD wallet detail view.
 type HDWalletDetailModel struct {
 	hdwallets_svc evm.HDWalletAPI
+	signers_svc   evm.SignerAPI // for unlock
 	ctx           context.Context
 	width         int
 	height        int
@@ -28,6 +29,7 @@ type HDWalletDetailModel struct {
 	primaryAddr   string
 	wallet        *evm.HDWalletResponse
 	derived       []evm.SignerInfo
+	locked        bool // true when wallet is locked (ListDerived failed)
 	selectedIdx   int
 	goBack        bool
 	actionResult  string
@@ -39,6 +41,10 @@ type HDWalletDetailModel struct {
 	startInput  textinput.Model
 	countInput  textinput.Model
 	activeField string // "start" or "count" for batch mode
+
+	// Unlock form state (when wallet is locked)
+	showUnlock  bool
+	unlockInput textinput.Model
 }
 
 // HDWalletDetailDataMsg is sent when HD wallet detail data is loaded.
@@ -46,6 +52,7 @@ type HDWalletDetailDataMsg struct {
 	Wallet  *evm.HDWalletResponse
 	Derived []evm.SignerInfo
 	Err     error
+	Locked  bool // true when wallet is locked (ListDerived failed)
 }
 
 // HDWalletDeriveMsg is sent when addresses are derived.
@@ -56,18 +63,25 @@ type HDWalletDeriveMsg struct {
 	Err     error
 }
 
+// HDWalletDetailUnlockMsg is sent when an HD wallet unlock completes in detail view.
+type HDWalletDetailUnlockMsg struct {
+	Success bool
+	Message string
+	Err     error
+}
+
 // NewHDWalletDetailModel creates a new HD wallet detail model.
 func NewHDWalletDetailModel(c *client.Client, ctx context.Context) (*HDWalletDetailModel, error) {
 	if c == nil {
 		return nil, fmt.Errorf("client is required")
 	}
-	return newHDWalletDetailModelFromService(c.EVM.HDWallets, ctx)
+	return newHDWalletDetailModelFromService(c.EVM.HDWallets, c.EVM.Signers, ctx)
 }
 
-// newHDWalletDetailModelFromService creates an HD wallet detail model from an HDWalletAPI (for testing).
-func newHDWalletDetailModelFromService(svc evm.HDWalletAPI, ctx context.Context) (*HDWalletDetailModel, error) {
-	if svc == nil {
-		return nil, fmt.Errorf("client is required")
+// newHDWalletDetailModelFromService creates an HD wallet detail model from services (for testing, signers_svc may be nil).
+func newHDWalletDetailModelFromService(hdSvc evm.HDWalletAPI, signersSvc evm.SignerAPI, ctx context.Context) (*HDWalletDetailModel, error) {
+	if hdSvc == nil {
+		return nil, fmt.Errorf("HD wallet service is required")
 	}
 	if ctx == nil {
 		return nil, fmt.Errorf("context is required")
@@ -89,13 +103,20 @@ func newHDWalletDetailModelFromService(svc evm.HDWalletAPI, ctx context.Context)
 	countInput.Placeholder = "Count (1-100)"
 	countInput.Width = 20
 
+	unlockInput := textinput.New()
+	unlockInput.Placeholder = "Enter password to unlock"
+	unlockInput.Width = 40
+	unlockInput.EchoMode = textinput.EchoPassword
+
 	return &HDWalletDetailModel{
-		hdwallets_svc: svc,
+		hdwallets_svc: hdSvc,
+		signers_svc:   signersSvc,
 		ctx:           ctx,
 		spinner:       s,
 		indexInput:    indexInput,
 		startInput:    startInput,
 		countInput:    countInput,
+		unlockInput:   unlockInput,
 	}, nil
 }
 
@@ -116,9 +137,11 @@ func (m *HDWalletDetailModel) LoadWallet(primaryAddr string) tea.Cmd {
 	m.primaryAddr = primaryAddr
 	m.wallet = nil
 	m.derived = nil
+	m.locked = false
 	m.goBack = false
 	m.actionResult = ""
 	m.showDerive = false
+	m.showUnlock = false
 
 	return tea.Batch(
 		m.spinner.Tick,
@@ -140,12 +163,19 @@ func (m *HDWalletDetailModel) loadWalletData(primaryAddr string) tea.Cmd {
 	return func() tea.Msg {
 		resp, err := m.hdwallets_svc.ListDerived(m.ctx, primaryAddr)
 		if err != nil {
-			return HDWalletDetailDataMsg{Err: err}
+			// Likely locked (HD wallet not loaded) - show unlock option
+			return HDWalletDetailDataMsg{
+				Wallet:  &evm.HDWalletResponse{PrimaryAddress: primaryAddr, Locked: true},
+				Derived: nil,
+				Err:     err,
+				Locked:  true,
+			}
 		}
 
 		wallet := &evm.HDWalletResponse{
 			PrimaryAddress: primaryAddr,
 			DerivedCount:   len(resp.Derived),
+			Locked:         false,
 		}
 
 		return HDWalletDetailDataMsg{
@@ -185,16 +215,34 @@ func (m *HDWalletDetailModel) deriveBatch(start, count uint32) tea.Cmd {
 	}
 }
 
+func (m *HDWalletDetailModel) unlockWallet(password string) tea.Cmd {
+	return func() tea.Msg {
+		if m.signers_svc == nil {
+			return HDWalletDetailUnlockMsg{Success: false, Err: fmt.Errorf("unlock not available")}
+		}
+		req := &evm.UnlockSignerRequest{Password: password}
+		resp, err := m.signers_svc.Unlock(m.ctx, m.primaryAddr, req)
+		if err != nil {
+			return HDWalletDetailUnlockMsg{Success: false, Err: err}
+		}
+		return HDWalletDetailUnlockMsg{
+			Success: true,
+			Message: fmt.Sprintf("HD wallet unlocked: %s", resp.Address),
+		}
+	}
+}
+
 // Update handles messages.
 func (m *HDWalletDetailModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case HDWalletDetailDataMsg:
 		m.loading = false
-		if msg.Err != nil {
+		m.wallet = msg.Wallet
+		m.derived = msg.Derived
+		m.locked = msg.Locked
+		if msg.Err != nil && !msg.Locked {
 			m.err = msg.Err
 		} else {
-			m.wallet = msg.Wallet
-			m.derived = msg.Derived
 			m.err = nil
 		}
 		return m, nil
@@ -210,6 +258,19 @@ func (m *HDWalletDetailModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case HDWalletDetailUnlockMsg:
+		m.loading = false
+		m.showUnlock = false
+		m.unlockInput.SetValue("")
+		m.unlockInput.Blur()
+		if msg.Err != nil {
+			m.actionResult = styles.ErrorStyle.Render(fmt.Sprintf("Unlock failed: %v", msg.Err))
+		} else {
+			m.actionResult = styles.SuccessStyle.Render(msg.Message)
+			return m, m.LoadWallet(m.primaryAddr)
+		}
+		return m, nil
+
 	case spinner.TickMsg:
 		if m.loading {
 			var cmd tea.Cmd
@@ -219,6 +280,9 @@ func (m *HDWalletDetailModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.showUnlock {
+			return m.handleUnlockInput(msg)
+		}
 		if m.showDerive {
 			return m.handleDeriveInput(msg)
 		}
@@ -227,19 +291,34 @@ func (m *HDWalletDetailModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "esc", "backspace":
 			m.goBack = true
 			return m, nil
+		case "u":
+			// Unlock when wallet is locked
+			if m.locked && m.signers_svc != nil {
+				m.showUnlock = true
+				m.unlockInput.SetValue("")
+				m.unlockInput.Focus()
+				return m, textinput.Blink
+			}
+			return m, nil
 		case "d":
-			m.showDerive = true
-			m.deriveMode = "single"
-			m.actionResult = ""
-			m.indexInput.Focus()
-			return m, textinput.Blink
+			if !m.locked {
+				m.showDerive = true
+				m.deriveMode = "single"
+				m.actionResult = ""
+				m.indexInput.Focus()
+				return m, textinput.Blink
+			}
+			return m, nil
 		case "b":
-			m.showDerive = true
-			m.deriveMode = "batch"
-			m.activeField = "start"
-			m.actionResult = ""
-			m.startInput.Focus()
-			return m, textinput.Blink
+			if !m.locked {
+				m.showDerive = true
+				m.deriveMode = "batch"
+				m.activeField = "start"
+				m.actionResult = ""
+				m.startInput.Focus()
+				return m, textinput.Blink
+			}
+			return m, nil
 		case "r":
 			if m.primaryAddr != "" {
 				return m, m.LoadWallet(m.primaryAddr)
@@ -343,8 +422,33 @@ func (m *HDWalletDetailModel) resetDeriveForm() {
 	m.countInput.Blur()
 }
 
+func (m *HDWalletDetailModel) handleUnlockInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		if m.unlockInput.Value() != "" {
+			password := m.unlockInput.Value()
+			m.loading = true
+			m.unlockInput.Blur()
+			return m, tea.Batch(m.spinner.Tick, m.unlockWallet(password))
+		}
+		return m, nil
+	case "esc":
+		m.showUnlock = false
+		m.unlockInput.SetValue("")
+		m.unlockInput.Blur()
+		return m, nil
+	default:
+		var cmd tea.Cmd
+		m.unlockInput, cmd = m.unlockInput.Update(msg)
+		return m, cmd
+	}
+}
+
 // View renders the HD wallet detail view.
 func (m *HDWalletDetailModel) View() string {
+	if m.showUnlock {
+		return m.renderUnlockForm()
+	}
 	if m.showDerive {
 		return m.renderDeriveForm()
 	}
@@ -403,6 +507,15 @@ func (m *HDWalletDetailModel) renderDetail() string {
 	fmt.Fprintf(&content, "%s %s\n",
 		styles.InfoKeyStyle.Render("Primary Address:"),
 		m.primaryAddr)
+	if m.locked {
+		content.WriteString(styles.WarningStyle.Render("Status: Locked"))
+		content.WriteString("\n\n")
+		content.WriteString(styles.MutedColor.Render("This wallet is locked. Press 'u' to unlock with password."))
+		content.WriteString("\n\n")
+		helpText := "u: unlock | Esc: back | r: refresh"
+		content.WriteString(styles.HelpStyle.Render(helpText))
+		return content.String()
+	}
 	fmt.Fprintf(&content, "%s %d\n",
 		styles.InfoKeyStyle.Render("Total Derived:"),
 		len(m.derived))
@@ -436,9 +549,30 @@ func (m *HDWalletDetailModel) renderDetail() string {
 	return content.String()
 }
 
-// IsCapturingInput returns true when this view is capturing keyboard input (derive form active).
+func (m *HDWalletDetailModel) renderUnlockForm() string {
+	var content strings.Builder
+	content.WriteString(styles.TitleStyle.Render("Unlock HD Wallet"))
+	content.WriteString("\n\n")
+	content.WriteString(styles.SubtitleStyle.Render("Primary address: " + m.primaryAddr))
+	content.WriteString("\n\n")
+	content.WriteString(styles.SubtitleStyle.Render("Enter password:"))
+	content.WriteString("\n\n")
+	content.WriteString(m.unlockInput.View())
+	content.WriteString("\n\n")
+	content.WriteString(styles.MutedColor.Render("Enter: unlock | Esc: cancel"))
+
+	return lipgloss.Place(
+		m.width,
+		m.height,
+		lipgloss.Center,
+		lipgloss.Center,
+		styles.BoxStyle.Render(content.String()),
+	)
+}
+
+// IsCapturingInput returns true when this view is capturing keyboard input (derive form or unlock form active).
 func (m *HDWalletDetailModel) IsCapturingInput() bool {
-	return m.showDerive
+	return m.showDerive || m.showUnlock
 }
 
 func (m *HDWalletDetailModel) renderDerivedRow(index int, signer evm.SignerInfo, selected bool) string {

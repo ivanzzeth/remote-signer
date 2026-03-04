@@ -72,7 +72,8 @@ test_variables:
   ctf_exchange_domain_version: '1'
   safe_factory_domain_name: Polymarket Contract Proxy Factory
 rules:
-- name: Polymarket Order Signature
+- id: polymarket-order-signature
+  name: Polymarket Order Signature
   type: evm_solidity_expression
   mode: whitelist
   enabled: true
@@ -167,7 +168,8 @@ rules:
         signer: ${allowed_safe_address_for_testing}
       expect_pass: false
       expect_reason: invalid verifying contract
-- name: Polymarket SafeTx Signature
+- id: polymarket-safetx-signature
+  name: Polymarket SafeTx Signature
   type: evm_solidity_expression
   mode: whitelist
   enabled: true
@@ -647,7 +649,8 @@ rules:
             nonce: '179'
         signer: '0x88eD75e9eCE373997221E3c0229e74007C1AD718'
       expect_pass: true
-- name: Polymarket Safe Execute Transaction
+- id: polymarket-safe-execute-transaction
+  name: Polymarket Safe Execute Transaction
   type: evm_solidity_expression
   mode: whitelist
   enabled: true

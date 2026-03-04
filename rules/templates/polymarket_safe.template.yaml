@@ -85,7 +85,8 @@ rules:
   # ===========================================================================
 
   # Login signature for Polymarket CLOB API key
-  - name: "Polymarket CLOB Auth Signature"
+  - id: "polymarket-clob-auth"
+    name: "Polymarket CLOB Auth Signature"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -170,7 +171,8 @@ rules:
   # ===========================================================================
 
   # Order signing for Polymarket CTF Exchange
-  - name: "Polymarket Order Signature"
+  - id: "polymarket-order-signature"
+    name: "Polymarket Order Signature"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -300,7 +302,8 @@ rules:
   # ===========================================================================
 
   # Safe wallet creation signature for Polymarket
-  - name: "Polymarket Safe Wallet Creation Signature"
+  - id: "polymarket-safe-wallet-creation-sig"
+    name: "Polymarket Safe Wallet Creation Signature"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -367,7 +370,8 @@ rules:
   # ===========================================================================
 
   # Safe transaction signing for Polymarket
-  - name: "Polymarket SafeTx Signature"
+  - id: "polymarket-safetx-signature"
+    name: "Polymarket SafeTx Signature"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -977,7 +981,8 @@ rules:
   # ===========================================================================
 
   # Safe Proxy Factory - Create new Safe wallet
-  - name: "Polymarket Safe Wallet Creation"
+  - id: "polymarket-safe-wallet-creation"
+    name: "Polymarket Safe Wallet Creation"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -1049,7 +1054,8 @@ rules:
   # Safe execTransaction - Execute through Safe wallet
   # All operations (approve/split/merge/redeem) are executed through Safe's execTransaction
   # Funds are stored in Safe wallets, so all operations must go through Safe
-  - name: "Polymarket Safe Execute Transaction"
+  - id: "polymarket-safe-execute-transaction"
+    name: "Polymarket Safe Execute Transaction"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
