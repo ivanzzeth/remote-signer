@@ -184,7 +184,8 @@ func mergeRulesAndTemplateIntoConfig(configPath string, rules []config.RuleConfi
 	return mergeCompositePresetIntoConfig(configPath, rules, []string{templatePath}, []string{templateName})
 }
 
-// mergeCompositePresetIntoConfig appends rules and injects each (templatePath, templateName) into config if missing.
+// mergeCompositePresetIntoConfig replaces rules matching the preset's base name, then appends the new rules.
+// Injects each (templatePath, templateName) into config if missing.
 func mergeCompositePresetIntoConfig(configPath string, rules []config.RuleConfig, templatePaths, templateNames []string) error {
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -216,7 +217,23 @@ func mergeCompositePresetIntoConfig(configPath string, rules []config.RuleConfig
 			fmt.Fprintf(os.Stderr, "Injected template %q (path: %s) into config\n", name, path)
 		}
 	}
-	cfg.Rules = append(cfg.Rules, rules...)
+	// Replace rules that match the preset's rule names (same base name), then append new rules
+	if len(rules) > 0 {
+		baseName := rules[0].Name
+		if idx := strings.LastIndex(baseName, " ("); idx > 0 {
+			baseName = baseName[:idx]
+		}
+		filtered := cfg.Rules[:0]
+		for _, r := range cfg.Rules {
+			if r.Name == baseName || strings.HasPrefix(r.Name, baseName+" (") {
+				continue
+			}
+			filtered = append(filtered, r)
+		}
+		cfg.Rules = append(filtered, rules...)
+	} else {
+		cfg.Rules = append(cfg.Rules, rules...)
+	}
 	out, err := yaml.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
@@ -224,7 +241,7 @@ func mergeCompositePresetIntoConfig(configPath string, rules []config.RuleConfig
 	if err := os.WriteFile(configPath, out, 0600); err != nil {
 		return fmt.Errorf("write config: %w", err)
 	}
-	fmt.Fprintf(os.Stderr, "Appended %d rule(s) to %s\n", len(rules), configPath)
+		fmt.Fprintf(os.Stderr, "Updated rules in %s (%d rule(s) from preset)\n", configPath, len(rules))
 	return nil
 }
 

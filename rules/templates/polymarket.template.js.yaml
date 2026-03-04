@@ -371,17 +371,24 @@ rules:
         function validate(input) {
           if (input.sign_type !== 'transaction') return fail('sign_type must be transaction');
           var tx = input.transaction;
-          if (!tx || !tx.to || !tx.data) return fail('missing transaction or to or data');
+          if (!tx || !tx.to) return fail('missing transaction or to');
           var toAddr = toChecksum((tx.to || '').trim());
           var data = (tx.data || '0x').replace(/^0x/, '');
-          if (data.length < 8) return fail('data too short');
+          if (data.length < 8) {
+            var usdc = toChecksum((config.usdc_bridged_address || '').trim());
+            var ctf = toChecksum((config.conditional_tokens_address || '').trim());
+            var negAdapter = toChecksum((config.neg_risk_adapter_address || '').trim());
+            var negExchange = toChecksum((config.neg_risk_exchange_address || '').trim());
+            if (eq(toAddr, usdc) || eq(toAddr, ctf) || eq(toAddr, negAdapter) || eq(toAddr, negExchange)) return ok();
+            return fail('unsupported target contract');
+          }
           var sel = '0x' + data.slice(0, 8).toLowerCase();
           var usdc = toChecksum((config.usdc_bridged_address || '').trim());
           var ctf = toChecksum((config.conditional_tokens_address || '').trim());
           var negAdapter = toChecksum((config.neg_risk_adapter_address || '').trim());
           var negExchange = toChecksum((config.neg_risk_exchange_address || '').trim());
           var ctfExchange = toChecksum((config.ctf_exchange_address || '').trim());
-          var allowedSpenders = [ctfExchange, negAdapter, negExchange];
+          var allowedSpenders = [ctfExchange, negAdapter, negExchange, ctf];
           if (eq(toAddr, usdc)) {
             if (sel !== '0x095ea7b3') return fail('unsupported USDC.e operation');
             if (data.length < 8 + 64 + 64) return fail('invalid approve data length');
@@ -457,6 +464,17 @@ rules:
             to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
             value: "0x0"
             data: "0x095ea7b30000000000000000000000004bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982Effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        expect_pass: true
+      - name: "should pass USDC approve to ConditionalTokens"
+        input:
+          sign_type: "transaction"
+          chain_id: 137
+          signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+          transaction:
+            from: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+            value: "0x0"
+            data: "0x095ea7b30000000000000000000000004D97DCd97eC945f40cF65F87097ACe5EA0476045ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
         expect_pass: true
       - name: "should reject USDC approve to disallowed spender"
         input:
