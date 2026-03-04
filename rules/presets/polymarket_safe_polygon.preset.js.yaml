@@ -1,11 +1,14 @@
 # Preset: Polymarket Safe full (Polygon). Auth + create_safe + enable_trading + trading.
 # Use: remote-signer-cli preset create-from polymarket_safe_polygon.preset.js.yaml [--config config.yaml --write] [--set allowed_safe_addresses=0xYourSafe]
 # Uses evm_js template (no Foundry/Forge required).
+# Composes Polymarket Safe Template + Safe Template (delegate_to polymarket-transactions for execTransaction).
 name: "Polymarket Safe rules (Polygon)"
 template_paths:
-  - "rules/templates/polymarket_safe.template.js.yaml"
+  - "rules/templates/polymarket.template.js.yaml"
+  - "rules/templates/safe.template.js.yaml"
 template_names:
-  - "Polymarket Safe Template"
+  - "Polymarket Template"
+  - "Safe Template"
 chain_type: "evm"
 chain_id: "137"
 enabled: true
@@ -19,6 +22,10 @@ variables:
   usdc_bridged_address: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
   allowed_safe_address_for_testing: "0x1111111111111111111111111111111111111111"
   allowed_safe_addresses: "0x1111111111111111111111111111111111111111"
+  allowed_safe_tx_to_addresses: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174,0x4D97DCd97eC945f40cF65F87097ACe5EA0476045,0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296,0xC5d563A36AE78145C45a50134d48A1215220f80a"
+  delegate_to: "polymarket-transactions"
+  delegate_mode: "single"
+  test_inner_to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
   clob_auth_domain_name: "ClobAuthDomain"
   clob_auth_domain_version: "1"
   ctf_exchange_domain_name: "Polymarket CTF Exchange"

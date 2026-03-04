@@ -97,7 +97,7 @@ templates:
     type: "file"
     enabled: true
     config:
-      path: "rules/templates/polymarket_safe.template.js.yaml"
+      path: "rules/templates/polymarket.template.js.yaml"
 
 # Rules for e2e testing
 # Rules can be defined here (config source) or via API (api source)
