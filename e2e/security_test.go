@@ -409,6 +409,10 @@ func TestSecurity_ConcurrentApproval_RaceCondition(t *testing.T) {
 
 	ctx := context.Background()
 
+	// Ensure approval guard is not paused (e2e server may use config.e2e.yaml with guard;
+	// a prior test e.g. TestApprovalGuard_PauseAndResume can leave it paused).
+	_ = adminClient.EVM.Guard.Resume(ctx)
+
 	// Submit a sign request that requires manual approval
 	// Use 'personal' sign type to avoid Solidity rule Fail-Closed issues with 'transaction'
 	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
