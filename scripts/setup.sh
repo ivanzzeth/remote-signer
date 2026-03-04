@@ -295,13 +295,30 @@ install_docker_macos() {
 }
 
 ensure_docker() {
-    # Check docker + docker compose
-    if command -v docker &>/dev/null && docker compose version &>/dev/null; then
-        log_info "Docker detected: $(docker --version)"
-        return 0
+    # Docker binary must exist
+    if ! command -v docker &>/dev/null; then
+        log_warn "Docker is not installed."
+    else
+        # Docker binary exists; check if we can run it (direct or via sudo)
+        if docker compose version &>/dev/null; then
+            log_info "Docker detected: $(docker --version)"
+            return 0
+        fi
+        if sudo docker compose version &>/dev/null; then
+            if ! groups "$USER" | grep -q docker; then
+                log_info "Adding $USER to docker group (sudo may prompt for your password)..."
+                sudo usermod -aG docker "$USER"
+                log_warn "Added $USER to docker group. Run 'newgrp docker' in this terminal (or log out and back in) for it to take effect, then continue."
+            else
+                log_warn "Docker is installed but this shell does not have the docker group yet. Run 'newgrp docker' or open a new login."
+            fi
+            log_info "Docker detected: $(sudo docker --version)"
+            return 0
+        fi
+        log_warn "Docker is installed but the daemon may not be running or current user has no permission to access it."
     fi
 
-    log_warn "Docker is not installed."
+    # Not available: offer install or exit
     local os
     os=$(detect_os)
 
