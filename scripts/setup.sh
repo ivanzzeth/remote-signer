@@ -236,7 +236,11 @@ ensure_project_dir() {
                     git pull origin "$branch"
                     log_info "Updated to latest."
                 fi
+            else
+                log_info "Repository is up to date with remote."
             fi
+        else
+            log_warn "Could not check for updates (git fetch failed). Run 'git pull' manually if needed."
         fi
     fi
     return 0
@@ -347,16 +351,23 @@ install_docker_macos() {
 }
 
 ensure_docker() {
-    # Docker binary must exist
-    if ! command -v docker &>/dev/null; then
+    # Resolve docker binary (PATH may be minimal when run via curl one-liner)
+    local docker_cmd=""
+    if command -v docker &>/dev/null; then
+        docker_cmd="docker"
+    elif [ -x /usr/bin/docker ]; then
+        docker_cmd="/usr/bin/docker"
+    fi
+
+    if [ -z "$docker_cmd" ]; then
         log_warn "Docker is not installed."
     else
         # Docker binary exists; check if we can run it (direct or via sudo)
-        if docker compose version &>/dev/null; then
-            log_info "Docker detected: $(docker --version)"
+        if $docker_cmd compose version &>/dev/null; then
+            log_info "Docker detected: $($docker_cmd --version)"
             return 0
         fi
-        if sudo docker compose version &>/dev/null; then
+        if sudo $docker_cmd compose version &>/dev/null; then
             if ! groups "$USER" | grep -q docker; then
                 log_info "Adding $USER to docker group (sudo may prompt for your password)..."
                 sudo usermod -aG docker "$USER"
@@ -364,7 +375,7 @@ ensure_docker() {
             else
                 log_warn "Docker is installed but this shell does not have the docker group yet. Run 'newgrp docker' or open a new login."
             fi
-            log_info "Docker detected: $(sudo docker --version)"
+            log_info "Docker detected: $(sudo $docker_cmd --version)"
             return 0
         fi
         log_warn "Docker is installed but the daemon may not be running or current user has no permission to access it."
