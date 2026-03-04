@@ -452,13 +452,11 @@ func expandInstanceRule(rule RuleConfig, templates map[string]TemplateConfig) ([
 		if len(templateRules) == 1 {
 			templateRules[0].Id = instanceID
 		} else {
-			// Prefix each expanded rule id with instance id so multiple instances of the same template get unique ids
+			// Prefix only rules that already have an id, so multiple instances of the same template get unique ids; leave empty id as-is
 			for idx := range templateRules {
 				tid := strings.TrimSpace(templateRules[idx].Id)
 				if tid != "" {
 					templateRules[idx].Id = instanceID + "_" + tid
-				} else {
-					templateRules[idx].Id = fmt.Sprintf("%s_%d", instanceID, idx)
 				}
 			}
 		}
