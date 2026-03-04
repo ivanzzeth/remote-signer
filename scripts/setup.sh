@@ -274,6 +274,16 @@ goto_clone() {
     read -rp "  Clone to directory (default: $CLONE_DIR): " CUSTOM_DIR
     CLONE_DIR="${CUSTOM_DIR:-$CLONE_DIR}"
 
+    if [ -d "$CLONE_DIR" ]; then
+        if [ -f "$CLONE_DIR/go.mod" ] && grep -q "remote-signer" "$CLONE_DIR/go.mod" 2>/dev/null; then
+            log_info "Directory already exists and appears to be remote-signer. Continuing setup from there."
+            exec "$CLONE_DIR/scripts/setup.sh"
+        fi
+        log_error "Destination already exists and is not empty: $CLONE_DIR"
+        log_error "Choose a different directory, or remove it and re-run setup."
+        exit 1
+    fi
+
     log_info "Cloning remote-signer to $CLONE_DIR..."
     git clone https://github.com/ivanzzeth/remote-signer.git "$CLONE_DIR"
 
