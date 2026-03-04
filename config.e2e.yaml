@@ -107,6 +107,7 @@ rules:
   # Example 1: Address whitelist - allow transactions to treasury address
   # Used by TestRule_TransactionToTreasuryPasses
   - name: "Allow transfers to treasury"
+    id: "e2e-treasury"
     type: "evm_address_list"
     mode: "whitelist"
     enabled: true
@@ -117,6 +118,7 @@ rules:
   # Example 2: Blocklist rule - block transactions to burn address
   # Used by TestRule_TransactionToBurnAddressBlocked
   - name: "Block known malicious addresses"
+    id: "e2e-block-burn"
     type: "evm_solidity_expression"
     mode: "blocklist"
     enabled: true
@@ -139,6 +141,7 @@ rules:
   # second signer + tx to non-listed address is rejected; TestRule_AddressWhitelist_RejectsNonListedAddress)
   # Can be tested via API: TestRule_ValueLimitRuleBlocks
   - name: "Max 10 ETH per transaction"
+    id: "e2e-max-10-eth"
     type: "evm_value_limit"
     mode: "whitelist"
     signer_address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
@@ -149,6 +152,7 @@ rules:
   # Example 4: Signer restriction - auto-approve requests from test signer
   # Used by TestRule_SignerRestrictionAllowsTestSigner
   - name: "Allow hot wallet signer"
+    id: "e2e-signer-restriction"
     type: "signer_restriction"
     mode: "whitelist"
     enabled: true
@@ -160,6 +164,7 @@ rules:
   # so that second signer is not allowed by this rule; enables TestRule_SignerRestriction_BlocksSignerNotInAllowList)
   # Used by TestRule_SignTypeRestrictionAllowsTransaction, TestRule_SignTypeRestrictionAllowsPersonalSign
   - name: "Allow common signing methods"
+    id: "e2e-sign-type-restriction"
     type: "sign_type_restriction"
     mode: "whitelist"
     enabled: true
@@ -176,9 +181,11 @@ rules:
   # Example 6: Instance rule — expanded from Minimal Template at startup
   # Used by TestTemplate_ConfigLoadedTemplatesAndInstanceRules
   - name: "Instance of Minimal"
+    id: "e2e-minimal-instance"
     type: "instance"
     enabled: true
     config:
+      id: "e2e-minimal-instance"
       template: "Minimal Template"
       variables:
         allowed_address: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
@@ -196,6 +203,7 @@ rules:
       variables:
         chain_id: "1"
         allowed_safe_addresses: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+        allowed_safe_address_for_testing: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
         # Include template test addresses so validate-rules -config positive test cases pass
         allowed_safe_tx_to_addresses: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4,0xA238CBeb142c10Ef7Ad8442C6D1f9E89e07e7761,0xdAC17F958D2ee523a2206206994597C13D831ec7,0x4B20993Bc481177ec7E8f571ceCaE8A9e22C02db"
         delegate_to: "multisend"
@@ -570,6 +578,7 @@ rules:
       variables:
         chain_id: "137"
         allowed_safe_addresses: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+        allowed_safe_address_for_testing: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
         allowed_safe_tx_to_addresses: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174,0x4D97DCd97eC945f40cF65F87097ACe5EA0476045,0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296,0xC5d563A36AE78145C45a50134d48A1215220f80a"
         delegate_to: "polymarket-transactions"
         delegate_mode: "single"

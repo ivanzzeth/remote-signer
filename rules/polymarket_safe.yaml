@@ -48,6 +48,7 @@ rules:
 
   # Login signature for Polymarket CLOB API key
   - name: "Polymarket CLOB Auth Signature"
+    id: "polymarket-clob-auth-signature"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -133,6 +134,7 @@ rules:
 
   # Order signing for Polymarket CTF Exchange
   - name: "Polymarket Order Signature"
+    id: "polymarket-order-signature"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -263,6 +265,7 @@ rules:
 
   # Safe wallet creation signature for Polymarket
   - name: "Polymarket Safe Wallet Creation Signature"
+    id: "polymarket-safe-wallet-creation-signature"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -330,6 +333,7 @@ rules:
 
   # Safe transaction signing for Polymarket
   - name: "Polymarket SafeTx Signature"
+    id: "polymarket-safetx-signature"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -940,6 +944,7 @@ rules:
 
   # Safe Proxy Factory - Create new Safe wallet
   - name: "Polymarket Safe Wallet Creation"
+    id: "polymarket-safe-wallet-creation"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -1012,6 +1017,7 @@ rules:
   # All operations (approve/split/merge/redeem) are executed through Safe's execTransaction
   # Funds are stored in Safe wallets, so all operations must go through Safe
   - name: "Polymarket Safe Execute Transaction"
+    id: "polymarket-safe-execute-transaction"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true

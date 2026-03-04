@@ -331,6 +331,65 @@ func (m *RuleDetailModel) renderError() string {
 	)
 }
 
+// formatRuleConfigForDisplay formats rule config for TUI display. Long string fields
+// (e.g. "script", "expression") are rendered with newlines so the full content
+// is visible when scrolling the viewport.
+func formatRuleConfigForDisplay(cfg map[string]interface{}) string {
+	if cfg == nil {
+		return "{}"
+	}
+	const indent = "  "
+	var b strings.Builder
+	b.WriteString("{\n")
+	// Output non-script keys first, then script/expression last for readability
+	scriptKeys := []string{"script", "expression"}
+	for k, v := range cfg {
+		isScriptKey := (k == "script" || k == "expression")
+		if isScriptKey {
+			continue
+		}
+		writeConfigEntry(&b, indent, k, v)
+	}
+	for _, k := range scriptKeys {
+		if v, ok := cfg[k]; ok {
+			writeConfigEntry(&b, indent, k, v)
+		}
+	}
+	b.WriteString("}")
+	return b.String()
+}
+
+func writeConfigEntry(b *strings.Builder, indent, k string, v interface{}) {
+	switch val := v.(type) {
+	case string:
+		if (k == "script" || k == "expression") && len(val) > 0 {
+			b.WriteString(indent)
+			b.WriteString(fmt.Sprintf("%q:\n", k))
+			lines := strings.Split(val, "\n")
+			for _, line := range lines {
+				b.WriteString(indent)
+				b.WriteString(indent)
+				b.WriteString(line)
+				b.WriteString("\n")
+			}
+		} else {
+			b.WriteString(indent)
+			b.WriteString(fmt.Sprintf("%q: %q\n", k, val))
+		}
+	default:
+		sub, err := json.MarshalIndent(v, indent, indent)
+		if err != nil {
+			b.WriteString(indent)
+			b.WriteString(fmt.Sprintf("%q: %v\n", k, v))
+		} else {
+			b.WriteString(indent)
+			b.WriteString(fmt.Sprintf("%q: ", k))
+			b.WriteString(strings.TrimPrefix(string(sub), indent))
+			b.WriteString("\n")
+		}
+	}
+}
+
 func (m *RuleDetailModel) renderDetail() string {
 	if m.rule == nil {
 		return "No rule loaded"
@@ -404,15 +463,16 @@ func (m *RuleDetailModel) renderDetail() string {
 	}
 
 	// Config
-	if m.rule.Config != nil {
+	if len(m.rule.Config) > 0 {
 		content.WriteString("\n")
 		content.WriteString(styles.SubtitleStyle.Render("Configuration"))
 		content.WriteString("\n")
-		configJSON, err := json.MarshalIndent(m.rule.Config, "", "  ")
-		if err == nil {
-			content.WriteString(styles.MutedColor.Render(string(configJSON)))
+		var cfg map[string]interface{}
+		if err := json.Unmarshal(m.rule.Config, &cfg); err == nil {
+			configStr := formatRuleConfigForDisplay(cfg)
+			content.WriteString(styles.MutedColor.Render(configStr))
 		} else {
-			content.WriteString(styles.MutedColor.Render(fmt.Sprintf("%v", m.rule.Config)))
+			content.WriteString(styles.MutedColor.Render(string(m.rule.Config)))
 		}
 		content.WriteString("\n")
 	}
