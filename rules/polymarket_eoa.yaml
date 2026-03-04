@@ -48,6 +48,7 @@ rules:
 
   # Login signature for Polymarket CLOB API key
   - name: "Polymarket CLOB Auth Signature"
+    id: "polymarket-clob-auth-signature"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -133,6 +134,7 @@ rules:
 
   # Order signing for Polymarket CTF Exchange
   - name: "Polymarket Order Signature"
+    id: "polymarket-order-signature"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -263,6 +265,7 @@ rules:
 
   # Safe wallet creation signature for Polymarket
   - name: "Polymarket Safe Wallet Creation Signature"
+    id: "polymarket-safe-wallet-creation-signature"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -330,6 +333,7 @@ rules:
 
   # Safe transaction signing for Polymarket
   - name: "Polymarket SafeTx Signature"
+    id: "polymarket-safetx-signature"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -789,6 +793,7 @@ rules:
 
   # Safe Proxy Factory - Create new Safe wallet
   - name: "Polymarket Safe Wallet Creation"
+    id: "polymarket-safe-wallet-creation"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -860,6 +865,7 @@ rules:
   # Safe execTransaction - Execute through Safe wallet
   # [SECURITY] Validates both Safe-level params AND internal call target/method/params
   - name: "Polymarket Safe Execute Transaction"
+    id: "polymarket-safe-execute-transaction"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -1168,6 +1174,7 @@ rules:
 
   # Transfer USDC.e to Treasury
   - name: "Polymarket USDC.e to Treasury"
+    id: "polymarket-usdc-e-to-treasury"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -1213,6 +1220,7 @@ rules:
 
   # Transfer USDC to Treasury
   - name: "Polymarket USDC to Treasury"
+    id: "polymarket-usdc-to-treasury"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -1261,6 +1269,7 @@ rules:
   # is dynamic per user and cannot be hardcoded. Allowing transfer to any non-zero address
   # is a fund safety risk. Enable only after adding recipient whitelist.
   - name: "Polymarket USDC.e to Safe"
+    id: "polymarket-usdc-e-to-safe"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: false
@@ -1314,6 +1323,7 @@ rules:
 
   # USDC.e Approve to CTF Exchange
   - name: "Polymarket USDC Approve Exchange"
+    id: "polymarket-usdc-approve-exchange"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -1359,6 +1369,7 @@ rules:
 
   # USDC.e Approve to NegRiskAdapter
   - name: "Polymarket USDC Approve NegRiskAdapter"
+    id: "polymarket-usdc-approve-negrisk-adapter"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -1404,6 +1415,7 @@ rules:
 
   # USDC.e Approve to NegRiskExchange
   - name: "Polymarket USDC Approve NegRiskExchange"
+    id: "polymarket-usdc-approve-negrisk-exchange"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -1453,6 +1465,7 @@ rules:
 
   # CTF setApprovalForAll to Exchange
   - name: "Polymarket CTF Approve Exchange"
+    id: "polymarket-ctf-approve-exchange"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -1500,6 +1513,7 @@ rules:
 
   # CTF setApprovalForAll to NegRiskAdapter
   - name: "Polymarket CTF Approve NegRiskAdapter"
+    id: "polymarket-ctf-approve-negrisk-adapter"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -1547,6 +1561,7 @@ rules:
 
   # CTF setApprovalForAll to NegRiskExchange
   - name: "Polymarket CTF Approve NegRiskExchange"
+    id: "polymarket-ctf-approve-negrisk-exchange"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -1598,6 +1613,7 @@ rules:
 
   # CTF Split Position
   - name: "Polymarket CTF Split Position"
+    id: "polymarket-ctf-split-position"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -1655,6 +1671,7 @@ rules:
 
   # NegRiskAdapter Split Position (simplified - for NegRisk markets)
   - name: "Polymarket NegRiskAdapter Split"
+    id: "polymarket-negrisk-adapter-split"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -1696,6 +1713,7 @@ rules:
 
   # NegRiskAdapter Merge Positions (simplified - for NegRisk markets)
   - name: "Polymarket NegRiskAdapter Merge"
+    id: "polymarket-negrisk-adapter-merge"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -1737,6 +1755,7 @@ rules:
 
   # CTF Merge Positions
   - name: "Polymarket CTF Merge Positions"
+    id: "polymarket-ctf-merge-positions"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -1794,6 +1813,7 @@ rules:
 
   # CTF Redeem Positions (Standard Market)
   - name: "Polymarket CTF Redeem Positions"
+    id: "polymarket-ctf-redeem-positions"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -1850,6 +1870,7 @@ rules:
 
   # NegRiskAdapter Redeem Positions
   - name: "Polymarket NegRiskAdapter Redeem"
+    id: "polymarket-negrisk-adapter-redeem"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
