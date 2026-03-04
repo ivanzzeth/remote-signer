@@ -362,12 +362,18 @@ ensure_docker() {
     if [ -z "$docker_cmd" ]; then
         log_warn "Docker is not installed."
     else
-        # Docker binary exists; check if we can run it (direct or via sudo)
-        if $docker_cmd compose version &>/dev/null; then
+        # Docker binary exists; check compose: "docker compose" (V2 plugin) or "docker-compose" (standalone)
+        _docker_compose_ok() {
+            $docker_cmd compose version &>/dev/null || docker-compose version &>/dev/null
+        }
+        _docker_compose_ok_sudo() {
+            sudo $docker_cmd compose version &>/dev/null || sudo docker-compose version &>/dev/null
+        }
+        if _docker_compose_ok; then
             log_info "Docker detected: $($docker_cmd --version)"
             return 0
         fi
-        if sudo $docker_cmd compose version &>/dev/null; then
+        if _docker_compose_ok_sudo; then
             if ! groups "$USER" | grep -q docker; then
                 log_info "Adding $USER to docker group (sudo may prompt for your password)..."
                 sudo usermod -aG docker "$USER"

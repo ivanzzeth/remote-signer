@@ -25,6 +25,18 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# Use "docker compose" (V2 plugin) or "docker-compose" (standalone) depending on what is available
+docker_compose() {
+    if docker compose version &>/dev/null 2>&1; then
+        docker compose "$@"
+    elif command -v docker-compose &>/dev/null && docker-compose version &>/dev/null 2>&1; then
+        docker-compose "$@"
+    else
+        log_error "Docker Compose not found. Install the 'docker compose' plugin or standalone 'docker-compose'."
+        exit 1
+    fi
+}
+
 # =============================================================================
 # Usage
 # =============================================================================
@@ -227,14 +239,14 @@ start_services() {
 
     # Always rebuild to ensure latest code is deployed
     log_info "Building latest image..."
-    docker compose build remote-signer
+    docker_compose build remote-signer
 
-    docker compose up -d
+    docker_compose up -d
 
     log_info "Services started!"
     log_info "Checking service status..."
     sleep 3
-    docker compose ps
+    docker_compose ps
 }
 
 # =============================================================================
@@ -255,10 +267,10 @@ run_no_screen() {
     fi
 
     log_info "Building image..."
-    docker compose build remote-signer
+    docker_compose build remote-signer
 
     log_info "Starting postgres and remote-signer..."
-    docker compose up -d
+    docker_compose up -d
 
     log_info "Server is running in background."
     log_info "View logs: $0 logs -f"
@@ -288,11 +300,11 @@ run_interactive() {
 
     # Start postgres first (in background)
     log_info "Starting postgres..."
-    docker compose up -d postgres
+    docker_compose up -d postgres
 
     # Wait for postgres to be healthy
     log_info "Waiting for postgres to be healthy..."
-    until docker compose exec -T postgres pg_isready -U ${POSTGRES_USER:-signer} -d ${POSTGRES_DB:-remote_signer} > /dev/null 2>&1; do
+    until docker_compose exec -T postgres pg_isready -U ${POSTGRES_USER:-signer} -d ${POSTGRES_DB:-remote_signer} > /dev/null 2>&1; do
         sleep 1
     done
     log_info "Postgres is ready!"
@@ -310,11 +322,11 @@ run_interactive() {
 
     # Always rebuild to ensure latest code is deployed
     log_info "Building latest image..."
-    docker compose build remote-signer
+    docker_compose build remote-signer
 
     # Start in screen session (interactive)
     cd "$PROJECT_DIR"
-    exec screen -S remote-signer docker compose run -it --service-ports --name remote-signer-app remote-signer
+    exec screen -S remote-signer docker_compose run -it --service-ports --name remote-signer-app remote-signer
 }
 
 # =============================================================================
@@ -327,12 +339,12 @@ stop_services() {
     # Kill any screen session
     screen -S remote-signer -X quit 2>/dev/null || true
 
-    # Stop and remove the interactive container (created by docker compose run)
+    # Stop and remove the interactive container (created by docker_compose run)
     docker stop remote-signer-app 2>/dev/null || true
     docker rm -f remote-signer-app 2>/dev/null || true
 
     # Stop all compose services
-    docker compose down
+    docker_compose down
     log_info "Services stopped!"
 }
 
@@ -344,7 +356,7 @@ restart_services() {
     cd "$PROJECT_DIR"
 
     # Stop remote-signer first
-    docker compose stop remote-signer 2>/dev/null || true
+    docker_compose stop remote-signer 2>/dev/null || true
     docker rm -f remote-signer-app 2>/dev/null || true
 
     # Run remote-signer interactively using screen
@@ -360,11 +372,11 @@ restart_services() {
 
     # Always rebuild to ensure latest code is deployed
     log_info "Building latest image..."
-    docker compose build remote-signer
+    docker_compose build remote-signer
 
     # Start in screen session (interactive)
     cd "$PROJECT_DIR"
-    exec screen -S remote-signer docker compose run -it --service-ports --name remote-signer-app remote-signer
+    exec screen -S remote-signer docker_compose run -it --service-ports --name remote-signer-app remote-signer
 }
 
 # =============================================================================
@@ -372,7 +384,7 @@ restart_services() {
 # =============================================================================
 view_logs() {
     cd "$PROJECT_DIR"
-    docker compose logs "$@"
+    docker_compose logs "$@"
 }
 
 # =============================================================================
@@ -602,7 +614,7 @@ check_status() {
 
     # --- Docker instance (config.yaml) ---
     echo "=== Docker Instance (config: $DOCKER_CONFIG) ==="
-    if command -v docker &>/dev/null && docker compose ps --status running 2>/dev/null | grep -q remote-signer; then
+    if command -v docker &>/dev/null && docker_compose ps --status running 2>/dev/null | grep -q remote-signer; then
         echo -e "${GREEN}  Container: Running${NC}"
     else
         echo -e "${YELLOW}  Container: Not running${NC}"
@@ -647,7 +659,7 @@ _health_check() {
 build_images() {
     log_info "Building Docker images..."
     cd "$PROJECT_DIR"
-    docker compose build "$@"
+    docker_compose build "$@"
     log_info "Build complete!"
 }
 
@@ -661,7 +673,7 @@ clean_up() {
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         log_info "Cleaning up..."
         cd "$PROJECT_DIR"
-        docker compose down -v
+        docker_compose down -v
         log_info "Cleanup complete!"
     else
         log_info "Cleanup cancelled."
