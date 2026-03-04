@@ -216,6 +216,7 @@ func (r *Router) withAuth(h http.Handler) http.Handler {
 	middlewares := []func(http.Handler) http.Handler{
 		middleware.SecurityHeadersMiddleware(),
 		middleware.RecoveryMiddleware(r.logger),
+		middleware.ClientIPMiddleware(r.ipWhitelist),
 		middleware.LoggingMiddleware(r.logger),
 		middleware.IPRateLimitMiddleware(r.rateLimiter, r.ipWhitelist, r.config.IPRateLimit),
 		middleware.AuthMiddleware(r.authVerifier, r.logger),
@@ -238,6 +239,7 @@ func (r *Router) withAuthAndAdmin(h http.Handler) http.Handler {
 	middlewares := []func(http.Handler) http.Handler{
 		middleware.SecurityHeadersMiddleware(),
 		middleware.RecoveryMiddleware(r.logger),
+		middleware.ClientIPMiddleware(r.ipWhitelist),
 		middleware.LoggingMiddleware(r.logger),
 		middleware.IPRateLimitMiddleware(r.rateLimiter, r.ipWhitelist, r.config.IPRateLimit),
 		middleware.AuthMiddleware(r.authVerifier, r.logger),

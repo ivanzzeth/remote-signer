@@ -30,6 +30,8 @@ type SignRequest struct {
 	SignType      string `json:"sign_type" gorm:"type:varchar(32)"`  // chain-specific sign type
 	Payload       []byte `json:"payload" gorm:"type:jsonb"`          // chain-specific payload
 
+	ClientIP string `json:"client_ip" gorm:"type:varchar(64)"` // source IP of the sign request (set from context)
+
 	Status SignRequestStatus `json:"status" gorm:"index;type:varchar(16)"`
 
 	// Authorization

@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net"
@@ -229,6 +230,38 @@ func IPWhitelistMiddleware(whitelist *IPWhitelist) func(http.Handler) http.Handl
 			)
 
 			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// ResolveClientIP returns the client IP for the request. If whitelist is non-nil, uses
+// whitelist.GetClientIP (trust_proxy + X-Forwarded-For aware); otherwise uses host from RemoteAddr.
+// Use this (or context from ClientIPMiddleware) so logging, rate limit, audit and request detail all use the same value.
+func ResolveClientIP(r *http.Request, whitelist *IPWhitelist) string {
+	if whitelist != nil {
+		return whitelist.GetClientIP(r)
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		if ip := net.ParseIP(r.RemoteAddr); ip != nil {
+			return ip.String()
+		}
+		return r.RemoteAddr
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.String()
+	}
+	return host
+}
+
+// ClientIPMiddleware sets the resolved client IP in request context (key ClientIPContextKey).
+// Place before Logging and IPRateLimit so they can read from context.
+func ClientIPMiddleware(whitelist *IPWhitelist) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			clientIP := ResolveClientIP(r, whitelist)
+			ctx := context.WithValue(r.Context(), ClientIPContextKey, clientIP)
+			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }

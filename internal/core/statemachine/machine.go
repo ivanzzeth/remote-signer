@@ -271,6 +271,7 @@ func (sm *StateMachine) logAudit(ctx context.Context, req *types.SignRequest, ev
 		Severity:      types.AuditSeverityInfo,
 		Timestamp:     time.Now(),
 		APIKeyID:      req.APIKeyID,
+		ActorAddress:  req.ClientIP,
 		SignRequestID: &req.ID,
 		SignerAddress: &req.SignerAddress,
 		ChainType:     &req.ChainType,

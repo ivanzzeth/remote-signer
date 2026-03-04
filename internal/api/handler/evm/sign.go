@@ -141,6 +141,7 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	start := time.Now()
+	clientIP, _ := r.Context().Value(middleware.ClientIPContextKey).(string)
 	// Process sign request
 	signReq := &service.SignRequest{
 		APIKeyID:      apiKey.ID,
@@ -149,6 +150,7 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		SignerAddress: req.SignerAddress,
 		SignType:      req.SignType,
 		Payload:       req.Payload,
+		ClientIP:      clientIP,
 	}
 
 	resp, err := h.signService.Sign(r.Context(), signReq)
