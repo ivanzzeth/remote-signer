@@ -842,7 +842,40 @@ ENVEOF
     echo ""
 }
 
+# Step: ask user to download or build CLI tools (tui, validate-rules, cli). Runs before preset so preset can use remote-signer-cli.
+step_ensure_cli_tools() {
+    echo -e "${BOLD}=============================================================${NC}"
+    echo -e "${BOLD}  CLI tools (required for preset step and TUI)${NC}"
+    echo -e "${BOLD}=============================================================${NC}"
+    echo ""
+    echo -e "${CYAN}remote-signer-tui, remote-signer-validate-rules, remote-signer-cli:${NC}"
+    echo "  1) Download from release (latest; no Go required)"
+    echo "  2) Build from source (requires Go)"
+    echo ""
+    BINARIES_CHOICE=$(ask "Choose [1/2]" 1 1 2)
+
+    TUI_BIN="$BIN_DIR/remote-signer-tui"
+    mkdir -p "$BIN_DIR"
+    export PATH="$BIN_DIR:$PATH"
+    if [ "$BINARIES_CHOICE" = "2" ]; then
+        if ! build_from_source_binaries; then
+            log_warn "Build from source failed; trying download from release..."
+            download_release_binaries_and_set_path || true
+        fi
+    else
+        if ! download_release_binaries_and_set_path; then
+            log_warn "Download failed; trying build from source..."
+            build_from_source_binaries || true
+        fi
+    fi
+    if [ ! -x "$TUI_BIN" ] && [ -x "$PROJECT_DIR/remote-signer-tui" ]; then
+        TUI_BIN="$PROJECT_DIR/remote-signer-tui"
+    fi
+    echo ""
+}
+
 # Interactive step: optionally add rule(s) from preset(s). Prompts for preset choice and variable overrides (with descriptions from template).
+# Requires remote-signer-cli from step_ensure_cli_tools (no download/build here).
 step_preset_rules() {
     echo -e "${BOLD}=============================================================${NC}"
     echo -e "${BOLD}  Step 4b: Add rules from preset (optional)${NC}"
@@ -856,23 +889,9 @@ step_preset_rules() {
         return 0
     fi
 
-    # Ensure CLI is available (same dir as TUI; download or PATH)
     export PATH="$BIN_DIR:$PATH"
     if ! command -v remote-signer-cli &>/dev/null; then
-        if ! download_release_binaries_and_set_path 2>/dev/null; then
-            if command -v go &>/dev/null && [ -f "$PROJECT_DIR/go.mod" ]; then
-                export PATH="$PROJECT_DIR:$PATH"
-                if (cd "$PROJECT_DIR" && go build -o remote-signer-cli ./cmd/remote-signer-cli 2>/dev/null); then
-                    mv "$PROJECT_DIR/remote-signer-cli" "$BIN_DIR/remote-signer-cli" 2>/dev/null || true
-                    export PATH="$BIN_DIR:$PATH"
-                fi
-            fi
-        else
-            export PATH="$BIN_DIR:$PATH"
-        fi
-    fi
-    if ! command -v remote-signer-cli &>/dev/null; then
-        log_warn "remote-signer-cli not found; skipping preset step. Install from release or build with: go build -o remote-signer-cli ./cmd/remote-signer-cli"
+        log_warn "remote-signer-cli not found; skipping preset step. Re-run setup and choose to download or build CLI tools first."
         return 0
     fi
 
@@ -1000,30 +1019,6 @@ step_done() {
     echo ""
 
     # --- Add signer ---
-    # Get CLI tools: user chooses download from release or build from source
-    echo -e "${CYAN}CLI tools (remote-signer-tui, remote-signer-validate-rules, remote-signer-cli):${NC}"
-    echo "  1) Download from release (latest; no Go required)"
-    echo "  2) Build from source (quick verify without waiting for release; requires Go)"
-    echo ""
-    BINARIES_CHOICE=$(ask "Choose [1/2]" 1 1 2)
-
-    TUI_BIN="$BIN_DIR/remote-signer-tui"
-    if [ "$BINARIES_CHOICE" = "2" ]; then
-        if ! build_from_source_binaries; then
-            log_warn "Build from source failed; trying download from release..."
-            download_release_binaries_and_set_path || true
-        fi
-    else
-        if ! download_release_binaries_and_set_path; then
-            log_warn "Download failed; trying build from source..."
-            build_from_source_binaries || true
-        fi
-    fi
-    # If TUI still not in BIN_DIR, prefer PROJECT_DIR binary for backward compat
-    if [ ! -x "$TUI_BIN" ] && [ -x "$PROJECT_DIR/remote-signer-tui" ]; then
-        TUI_BIN="$PROJECT_DIR/remote-signer-tui"
-    fi
-
     echo -e "${CYAN}Add a signer (after server is running):${NC}"
     echo ""
     echo "  Via TUI (recommended: use -api-key-file to avoid paste):"
@@ -1258,6 +1253,9 @@ main() {
 
     # Step 4/5: Generate configuration
     step_generate_config
+
+    # CLI tools (download or build) — before preset so remote-signer-cli is available
+    step_ensure_cli_tools
 
     # Step 4b: Optionally add rules from presets (interactive)
     step_preset_rules
