@@ -410,7 +410,7 @@ func TestSecurity_ConcurrentApproval_RaceCondition(t *testing.T) {
 	ctx := context.Background()
 
 	// Ensure approval guard is not paused (e2e server may use config.e2e.yaml with guard;
-	// a prior test e.g. TestApprovalGuard_PauseAndResume can leave it paused).
+	// TestZ_ApprovalGuard_PauseAndResume runs last by name, but guard could be paused if that test failed before Resume).
 	_ = adminClient.EVM.Guard.Resume(ctx)
 
 	// Submit a sign request that requires manual approval
