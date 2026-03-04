@@ -16,18 +16,20 @@ import (
 
 // hdWalletState tracks a loaded HD wallet and its derived signers.
 type hdWalletState struct {
-	wallet     *keystore.HDWallet
-	walletPath string
-	derived    []types.SignerInfo // all derived signer infos
+	wallet         *keystore.HDWallet
+	walletPath     string
+	derived        []types.SignerInfo // all derived signer infos
+	derivedIndices []uint32           // indices that have been derived (for persistence)
 }
 
 // HDWalletProvider manages HD wallet signers.
 type HDWalletProvider struct {
-	registry    *SignerRegistry
-	walletDir   string
-	mu          sync.RWMutex
-	wallets     map[string]*hdWalletState // primaryAddr (checksummed) -> state
-	lockedPaths map[string]string         // primaryAddr (checksummed) -> filePath
+	registry       *SignerRegistry
+	walletDir      string
+	derivStore     *DerivationStateStore
+	mu             sync.RWMutex
+	wallets        map[string]*hdWalletState // primaryAddr (checksummed) -> state
+	lockedPaths    map[string]string          // primaryAddr (checksummed) -> filePath
 }
 
 // NewHDWalletProvider creates an HDWalletProvider and loads all configured HD wallets.
@@ -41,9 +43,15 @@ func NewHDWalletProvider(
 		return nil, fmt.Errorf("registry is required")
 	}
 
+	derivStore, err := NewDerivationStateStore(walletDir)
+	if err != nil {
+		return nil, fmt.Errorf("derivation state store: %w", err)
+	}
+
 	p := &HDWalletProvider{
 		registry:    registry,
 		walletDir:   walletDir,
+		derivStore:  derivStore,
 		wallets:     make(map[string]*hdWalletState),
 		lockedPaths: make(map[string]string),
 	}
@@ -81,8 +89,9 @@ func NewHDWalletProvider(
 
 		addrKey := normalizeAddress(primaryAddr.Hex())
 		state := &hdWalletState{
-			wallet:     wallet,
-			walletPath: cfg.Path,
+			wallet:         wallet,
+			walletPath:     cfg.Path,
+			derivedIndices: []uint32{0},
 		}
 
 		// Register primary address signer
@@ -111,6 +120,12 @@ func NewHDWalletProvider(
 				}
 				return nil, fmt.Errorf("failed to register derived signer index %d from %s: %w", idx, cfg.Path, err)
 			}
+			state.derivedIndices = appendUniqueUint32(state.derivedIndices, idx)
+		}
+
+		// Persist config-derived indices so they survive restart and API derives merge correctly
+		if err := p.derivStore.Save(addrKey, state.derivedIndices); err != nil {
+			logger.EVM().Warn().Str("primary_address", primaryAddr.Hex()).Err(err).Msg("failed to persist derivation state")
 		}
 
 		p.wallets[addrKey] = state
@@ -186,8 +201,9 @@ func (p *HDWalletProvider) CreateHDWallet(ctx context.Context, params types.Crea
 
 	addrKey := normalizeAddress(address)
 	state := &hdWalletState{
-		wallet:     wallet,
-		walletPath: walletPath,
+		wallet:         wallet,
+		walletPath:     walletPath,
+		derivedIndices: []uint32{0},
 	}
 
 	primaryAddr := common.HexToAddress(address)
@@ -196,6 +212,10 @@ func (p *HDWalletProvider) CreateHDWallet(ctx context.Context, params types.Crea
 			logger.EVM().Warn().Err(closeErr).Msg("failed to close wallet on error")
 		}
 		return nil, fmt.Errorf("failed to register primary signer: %w", err)
+	}
+
+	if err := p.derivStore.Save(addrKey, state.derivedIndices); err != nil {
+		logger.EVM().Warn().Str("primary_address", address).Err(err).Msg("failed to persist derivation state")
 	}
 
 	p.mu.Lock()
@@ -256,8 +276,9 @@ func (p *HDWalletProvider) ImportHDWallet(ctx context.Context, params types.Impo
 	}
 
 	state := &hdWalletState{
-		wallet:     wallet,
-		walletPath: walletPath,
+		wallet:         wallet,
+		walletPath:     walletPath,
+		derivedIndices: []uint32{0},
 	}
 
 	primaryAddr := common.HexToAddress(address)
@@ -266,6 +287,10 @@ func (p *HDWalletProvider) ImportHDWallet(ctx context.Context, params types.Impo
 			logger.EVM().Warn().Err(closeErr).Msg("failed to close wallet on error")
 		}
 		return nil, fmt.Errorf("failed to register primary signer: %w", err)
+	}
+
+	if err := p.derivStore.Save(addrKey, state.derivedIndices); err != nil {
+		logger.EVM().Warn().Str("primary_address", address).Err(err).Msg("failed to persist derivation state")
 	}
 
 	p.mu.Lock()
@@ -296,6 +321,9 @@ func (p *HDWalletProvider) DeriveAddress(ctx context.Context, primaryAddr string
 	addrKey := normalizeAddress(primaryAddr)
 	state, ok := p.wallets[addrKey]
 	if !ok {
+		if _, locked := p.lockedPaths[addrKey]; locked {
+			return nil, fmt.Errorf("HD wallet is locked for primary address %s (unlock first)", primaryAddr)
+		}
 		return nil, fmt.Errorf("HD wallet not found for primary address %s", primaryAddr)
 	}
 
@@ -306,6 +334,11 @@ func (p *HDWalletProvider) DeriveAddress(ctx context.Context, primaryAddr string
 
 	if err := p.registerDerivedSigner(addr, state.wallet, index, state); err != nil {
 		return nil, err
+	}
+
+	state.derivedIndices = appendUniqueUint32(state.derivedIndices, index)
+	if err := p.derivStore.Save(addrKey, state.derivedIndices); err != nil {
+		logger.EVM().Warn().Str("primary_address", primaryAddr).Err(err).Msg("failed to persist derivation state")
 	}
 
 	info := types.SignerInfo{
@@ -327,6 +360,9 @@ func (p *HDWalletProvider) DeriveAddresses(ctx context.Context, primaryAddr stri
 	addrKey := normalizeAddress(primaryAddr)
 	state, ok := p.wallets[addrKey]
 	if !ok {
+		if _, locked := p.lockedPaths[addrKey]; locked {
+			return nil, fmt.Errorf("HD wallet is locked for primary address %s (unlock first)", primaryAddr)
+		}
 		return nil, fmt.Errorf("HD wallet not found for primary address %s", primaryAddr)
 	}
 
@@ -342,6 +378,7 @@ func (p *HDWalletProvider) DeriveAddresses(ctx context.Context, primaryAddr stri
 		if err := p.registerDerivedSigner(addr, state.wallet, idx, state); err != nil {
 			// Already exists is not an error — it was previously derived
 			if err == types.ErrAlreadyExists {
+				state.derivedIndices = appendUniqueUint32(state.derivedIndices, idx)
 				result = append(result, types.SignerInfo{
 					Address: addr.Hex(),
 					Type:    string(types.SignerTypeHDWallet),
@@ -351,11 +388,16 @@ func (p *HDWalletProvider) DeriveAddresses(ctx context.Context, primaryAddr stri
 			}
 			return nil, err
 		}
+		state.derivedIndices = appendUniqueUint32(state.derivedIndices, idx)
 		result = append(result, types.SignerInfo{
 			Address: addr.Hex(),
 			Type:    string(types.SignerTypeHDWallet),
 			Enabled: true,
 		})
+	}
+
+	if err := p.derivStore.Save(addrKey, state.derivedIndices); err != nil {
+		logger.EVM().Warn().Str("primary_address", primaryAddr).Err(err).Msg("failed to persist derivation state")
 	}
 
 	logger.EVM().Info().Str("primary_address", primaryAddr).Uint64("start", uint64(start)).Uint64("count", uint64(count)).Int("derived", len(result)).Msg("addresses derived")
@@ -382,6 +424,7 @@ func (p *HDWalletProvider) ListHDWallets() []HDWalletInfo {
 			BasePath:       basePath,
 			DerivedCount:   len(state.derived),
 			Derived:        state.derived,
+			Locked:         false,
 		})
 	}
 	for addrKey, walletPath := range p.lockedPaths {
@@ -400,6 +443,7 @@ func (p *HDWalletProvider) ListHDWallets() []HDWalletInfo {
 			BasePath:       basePath,
 			DerivedCount:   0,
 			Derived:        nil,
+			Locked:         true,
 		})
 	}
 	return wallets
@@ -425,6 +469,9 @@ func (p *HDWalletProvider) ListDerivedAddresses(primaryAddr string) ([]types.Sig
 	addrKey := normalizeAddress(primaryAddr)
 	state, ok := p.wallets[addrKey]
 	if !ok {
+		if _, locked := p.lockedPaths[addrKey]; locked {
+			return nil, fmt.Errorf("HD wallet is locked for primary address %s (unlock first)", primaryAddr)
+		}
 		return nil, fmt.Errorf("HD wallet not found for primary address %s", primaryAddr)
 	}
 
@@ -515,6 +562,7 @@ func (p *HDWalletProvider) DiscoverLockedSigners() ([]types.SignerInfo, error) {
 }
 
 // UnlockSigner unlocks a locked HD wallet signer with the given password.
+// Derives all persisted indices (or [0] if none) so derivation state survives restart.
 func (p *HDWalletProvider) UnlockSigner(ctx context.Context, address string, password string) (*ethsig.Signer, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -532,44 +580,71 @@ func (p *HDWalletProvider) UnlockSigner(ctx context.Context, address string, pas
 		return nil, fmt.Errorf("failed to unlock HD wallet for %s: %w", address, err)
 	}
 
-	// Derive the primary address (index 0)
-	primaryAddr, err := wallet.DeriveAddress(0)
-	if err != nil {
-		if closeErr := wallet.Close(); closeErr != nil {
-			logger.EVM().Warn().Err(closeErr).Msg("failed to close wallet on error")
-		}
-		return nil, fmt.Errorf("failed to derive primary address: %w", err)
+	// Load persisted derivation indices; default to [0] if none
+	indices := p.derivStore.Load(addrKey)
+	if len(indices) == 0 {
+		indices = []uint32{0}
 	}
 
 	state := &hdWalletState{
-		wallet:     wallet,
-		walletPath: filePath,
+		wallet:         wallet,
+		walletPath:     filePath,
+		derivedIndices: indices,
 	}
 
-	// Derive key for primary address
-	privKey, err := wallet.DeriveKey(0)
-	if err != nil {
+	var primarySigner *ethsig.Signer
+
+	// Derive and register all indices
+	for _, idx := range indices {
+		addr, err := wallet.DeriveAddress(idx)
+		if err != nil {
+			if closeErr := wallet.Close(); closeErr != nil {
+				logger.EVM().Warn().Err(closeErr).Msg("failed to close wallet on error")
+			}
+			return nil, fmt.Errorf("failed to derive address at index %d: %w", idx, err)
+		}
+		if idx == 0 {
+			// Primary address is already in registry as locked (from DiscoverLockedSigners).
+			// Create signer for return; SignerManager will call registry.UnlockSigner to replace it.
+			privKey, err := wallet.DeriveKey(0)
+			if err != nil {
+				if closeErr := wallet.Close(); closeErr != nil {
+					logger.EVM().Warn().Err(closeErr).Msg("failed to close wallet on error")
+				}
+				return nil, fmt.Errorf("failed to derive key at index 0: %w", err)
+			}
+			keySigner := ethsig.NewEthPrivateKeySigner(privKey)
+			primarySigner = ethsig.NewSigner(keySigner)
+			state.derived = append(state.derived, types.SignerInfo{
+				Address: addr.Hex(),
+				Type:    string(types.SignerTypeHDWallet),
+				Enabled: true,
+			})
+			continue
+		}
+		if err := p.registerDerivedSigner(addr, wallet, idx, state); err != nil {
+			if err != types.ErrAlreadyExists {
+				if closeErr := wallet.Close(); closeErr != nil {
+					logger.EVM().Warn().Err(closeErr).Msg("failed to close wallet on error")
+				}
+				return nil, err
+			}
+		}
+	}
+
+	if primarySigner == nil {
 		if closeErr := wallet.Close(); closeErr != nil {
 			logger.EVM().Warn().Err(closeErr).Msg("failed to close wallet on error")
 		}
-		return nil, fmt.Errorf("failed to derive key at index 0: %w", err)
+		return nil, fmt.Errorf("primary signer not created (indices missing 0?)")
 	}
-
-	keySigner := ethsig.NewEthPrivateKeySigner(privKey)
-	signer := ethsig.NewSigner(keySigner)
-
-	state.derived = append(state.derived, types.SignerInfo{
-		Address: primaryAddr.Hex(),
-		Type:    string(types.SignerTypeHDWallet),
-		Enabled: true,
-	})
 
 	p.wallets[addrKey] = state
 	delete(p.lockedPaths, addrKey)
 
-	logger.EVM().Info().Str("primary_address", primaryAddr.Hex()).Msg("HD wallet signer unlocked")
+	logger.EVM().Info().Str("primary_address", address).Int("derived_count", len(state.derived)).Msg("HD wallet signer unlocked")
 
-	return signer, nil
+	return primarySigner, nil
 }
 
 // LockSigner locks an unlocked HD wallet signer (closes wallet, stores path for later unlock).
@@ -609,6 +684,16 @@ func (p *HDWalletProvider) LockSigner(ctx context.Context, address string) error
 	logger.EVM().Info().Str("primary_address", address).Msg("HD wallet signer locked")
 
 	return nil
+}
+
+// appendUniqueUint32 appends v to s if not already present.
+func appendUniqueUint32(s []uint32, v uint32) []uint32 {
+	for _, x := range s {
+		if x == v {
+			return s
+		}
+	}
+	return append(s, v)
 }
 
 // Compile-time interface checks.

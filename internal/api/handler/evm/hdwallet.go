@@ -53,6 +53,7 @@ type hdWalletResponse struct {
 	BasePath       string               `json:"base_path"`
 	DerivedCount   int                  `json:"derived_count"`
 	Derived        []signerInfoResponse `json:"derived,omitempty"`
+	Locked         bool                 `json:"locked"`
 }
 
 type signerInfoResponse struct {
@@ -316,6 +317,7 @@ func toHDWalletResponse(info *evmchain.HDWalletInfo) hdWalletResponse {
 		BasePath:       info.BasePath,
 		DerivedCount:   info.DerivedCount,
 		Derived:        toSignerInfoResponseList(info.Derived),
+		Locked:         info.Locked,
 	}
 }
 

@@ -358,9 +358,10 @@ func newTestRuleInit(t *testing.T) (*RuleInitializer, *storage.MemoryRuleReposit
 	return init, repo
 }
 
-// helper: simple enabled rule config
-func enabledRule(name, mode string) RuleConfig {
+// helper: simple enabled rule config (id required)
+func enabledRule(id, name, mode string) RuleConfig {
 	return RuleConfig{
+		Id:      id,
 		Name:    name,
 		Type:    "evm_address_list",
 		Mode:    mode,
@@ -378,9 +379,9 @@ func TestSyncFromConfig_NoLimitCap(t *testing.T) {
 
 	// Sync 3 rules
 	rules := []RuleConfig{
-		enabledRule("Rule 1", "whitelist"),
-		enabledRule("Rule 2", "whitelist"),
-		enabledRule("Rule 3", "whitelist"),
+		enabledRule("rule-1", "Rule 1", "whitelist"),
+		enabledRule("rule-2", "Rule 2", "whitelist"),
+		enabledRule("rule-3", "Rule 3", "whitelist"),
 	}
 	require.NoError(t, init.SyncFromConfig(ctx, rules))
 
@@ -397,7 +398,7 @@ func TestSyncFromConfig_DisabledRuleUpdatedInDB(t *testing.T) {
 	ctx := context.Background()
 
 	// First sync: enabled rule
-	rules := []RuleConfig{enabledRule("My Rule", "whitelist")}
+	rules := []RuleConfig{enabledRule("my-rule", "My Rule", "whitelist")}
 	require.NoError(t, init.SyncFromConfig(ctx, rules))
 
 	// Get the rule ID
@@ -423,6 +424,7 @@ func TestSyncFromConfig_DisabledRuleNotCreated(t *testing.T) {
 
 	rules := []RuleConfig{
 		{
+			Id:      "never-active",
 			Name:    "Never Active",
 			Type:    "evm_address_list",
 			Mode:    "whitelist",
@@ -450,7 +452,7 @@ func TestSyncFromConfig_UsesTransaction(t *testing.T) {
 	init, err := NewRuleInitializer(repo, newTestLogger())
 	require.NoError(t, err)
 
-	rules := []RuleConfig{enabledRule("Tx Rule", "whitelist")}
+	rules := []RuleConfig{enabledRule("tx-rule", "Tx Rule", "whitelist")}
 	require.NoError(t, init.SyncFromConfig(context.Background(), rules))
 
 	ruleID := EffectiveRuleID(0, rules[0])
@@ -466,8 +468,8 @@ func TestSyncFromConfig_VerificationDetectsStaleRules(t *testing.T) {
 
 	// Sync 2 rules
 	rules := []RuleConfig{
-		enabledRule("Rule A", "whitelist"),
-		enabledRule("Rule B", "whitelist"),
+		enabledRule("rule-a", "Rule A", "whitelist"),
+		enabledRule("rule-b", "Rule B", "whitelist"),
 	}
 	require.NoError(t, init.SyncFromConfig(ctx, rules))
 
@@ -488,7 +490,7 @@ func TestSyncFromConfig_CreateAndUpdate(t *testing.T) {
 	init, repo := newTestRuleInit(t)
 	ctx := context.Background()
 
-	rules := []RuleConfig{enabledRule("Original", "whitelist")}
+	rules := []RuleConfig{enabledRule("original", "Original", "whitelist")}
 	rules[0].Id = "stable-id" // use custom ID so it stays stable across name changes
 	require.NoError(t, init.SyncFromConfig(ctx, rules))
 
@@ -511,7 +513,7 @@ func TestSyncFromConfig_EmptyRulesDeletesAll(t *testing.T) {
 	init, repo := newTestRuleInit(t)
 	ctx := context.Background()
 
-	rules := []RuleConfig{enabledRule("To Delete", "whitelist")}
+	rules := []RuleConfig{enabledRule("to-delete", "To Delete", "whitelist")}
 	require.NoError(t, init.SyncFromConfig(ctx, rules))
 
 	// Now sync with empty rules
@@ -521,6 +523,22 @@ func TestSyncFromConfig_EmptyRulesDeletesAll(t *testing.T) {
 	all, err := repo.List(ctx, storage.RuleFilter{Source: &configSource, Limit: -1})
 	require.NoError(t, err)
 	assert.Len(t, all, 0)
+}
+
+// SyncFromConfig rejects rules without explicit id
+func TestSyncFromConfig_RequiresExplicitRuleID(t *testing.T) {
+	init, _ := newTestRuleInit(t)
+	ctx := context.Background()
+
+	rules := []RuleConfig{
+		{Name: "No ID", Type: "evm_address_list", Mode: "whitelist", Enabled: true,
+			Config: map[string]interface{}{"addresses": []interface{}{"0x1234567890abcdef1234567890abcdef12345678"}}},
+	}
+
+	err := init.SyncFromConfig(ctx, rules)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "rules must have explicit id")
+	assert.Contains(t, err.Error(), "No ID")
 }
 
 // SyncFromConfig rejects duplicate rule IDs

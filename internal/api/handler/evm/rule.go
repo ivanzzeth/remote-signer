@@ -20,8 +20,11 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
-// ruleIDPattern validates rule ID format: "rule_" prefix followed by UUID or "cfg_" prefix followed by index.
-var ruleIDPattern = regexp.MustCompile(`^(rule_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|cfg_\d+)$`)
+// ruleIDPattern validates rule ID format. Accepts:
+// - rule_<uuid>: API-created rules
+// - cfg_<16hex> or cfg_<digits>: config rules (auto-generated or legacy)
+// - <custom>: config custom IDs (alphanumeric, hyphen, underscore, 1-64 chars)
+var ruleIDPattern = regexp.MustCompile(`^(rule_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|cfg_[0-9a-f]{16}|cfg_\d+|[a-zA-Z0-9][a-zA-Z0-9_-]{0,63})$`)
 
 // RuleHandler handles rule management endpoints
 type RuleHandler struct {

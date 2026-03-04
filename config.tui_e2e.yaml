@@ -1,0 +1,29 @@
+server:
+  host: "127.0.0.1"
+  port: 28548
+database:
+  dsn: "file::memory:?cache=shared&_journal_mode=WAL&_busy_timeout=5000"
+chains:
+  evm:
+    enabled: true
+    signers:
+      private_keys: []
+    keystore_dir: "/home/ivan/Develop/github/ivanzzeth/agents/projects/personal/ivanzzeth/remote-signer/data/keystores-e2e"
+    hd_wallet_dir: "/home/ivan/Develop/github/ivanzzeth/agents/projects/personal/ivanzzeth/remote-signer/data/hd-wallets"
+    foundry:
+      enabled: false
+api_keys:
+  - id: admin
+    admin: true
+    enabled: true
+    public_key: "8dc2cc5e1cf4108e577d9cfc03984255f6b6a5411e23c1f355c3289d0376f2ac"
+security:
+  max_request_age: "60s"
+  rate_limit_default: 1000
+  nonce_required: true
+  manual_approval_enabled: false
+logger:
+  level: "warn"
+  pretty: false
+rules: []
+templates: []

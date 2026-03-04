@@ -94,12 +94,12 @@ func (r *Router) setupRoutes() error {
 		return err
 	}
 
-	requestHandler, err := evmhandler.NewRequestHandler(r.signService, r.logger)
+	requestHandler, err := evmhandler.NewRequestHandler(r.signService, r.ruleRepo, r.logger)
 	if err != nil {
 		return err
 	}
 
-	listHandler, err := evmhandler.NewListHandler(r.signService, r.logger)
+	listHandler, err := evmhandler.NewListHandler(r.signService, r.ruleRepo, r.logger)
 	if err != nil {
 		return err
 	}

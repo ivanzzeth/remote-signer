@@ -1,0 +1,63 @@
+server:
+  host: 0.0.0.0
+  port: 8548
+  tls:
+    enabled: false
+    cert_file: ./certs/server.crt
+    key_file: ./certs/server.key
+    ca_file: ./certs/ca.crt
+    client_auth: false
+database:
+  dsn: ${DATABASE_DSN:-postgres://signer:signer_password@localhost:5432/remote_signer?sslmode=disable}
+chains:
+  evm:
+    enabled: true
+    signers:
+      private_keys:
+      - address: '0x1111111111111111111111111111111111111111'
+        key_env: EVM_PRIVATE_KEY_1
+        enabled: true
+    keystore_dir: ./data/keystores
+    hd_wallet_dir: ./data/hd-wallets
+    foundry:
+      enabled: true
+      forge_path: ''
+      cache_dir: ./data/forge-cache
+      temp_dir: ./data/forge-workspace
+      timeout: 30s
+security:
+  max_request_age: 60s
+  rate_limit_default: 100
+  ip_rate_limit: 200
+  nonce_required: true
+  manual_approval_enabled: false
+  rules_api_readonly: true
+  allow_sighup_rules_reload: false
+  signers_api_readonly: false
+  approval_guard:
+    enabled: false
+    window: 5m
+    threshold: 10
+    resume_after: 2h
+  ip_whitelist:
+    enabled: false
+    allowed_ips:
+    - 127.0.0.1
+    - ::1
+    trust_proxy: false
+logger:
+  level: info
+  pretty: true
+api_keys:
+- id: admin-key
+  name: Admin Key
+  public_key_env: ADMIN_PUBLIC_KEY
+  admin: true
+  enabled: true
+  rate_limit: 1000
+- id: my-app-key
+  name: My Application
+  public_key_env: MY_APP_PUBLIC_KEY
+  admin: false
+  enabled: true
+  rate_limit: 100

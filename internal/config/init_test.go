@@ -839,7 +839,7 @@ func TestRuleSyncFromConfig_CreateNewRule(t *testing.T) {
 
 	rules := []RuleConfig{
 		{
-			Name: "Allow Addr", Type: "evm_address_list", Mode: "whitelist", Enabled: true,
+			Id: "allow-addr", Name: "Allow Addr", Type: "evm_address_list", Mode: "whitelist", Enabled: true,
 			Config: map[string]interface{}{"addresses": []interface{}{"0x1234567890abcdef1234567890abcdef12345678"}},
 		},
 	}
@@ -863,7 +863,7 @@ func TestRuleSyncFromConfig_UpdateExistingRule(t *testing.T) {
 
 	rules := []RuleConfig{
 		{
-			Name: "Rule 1", Type: "evm_address_list", Mode: "whitelist", Enabled: true,
+			Id: "rule-1", Name: "Rule 1", Type: "evm_address_list", Mode: "whitelist", Enabled: true,
 			Config: map[string]interface{}{"addresses": []interface{}{"0x1234567890abcdef1234567890abcdef12345678"}},
 		},
 	}
@@ -888,11 +888,11 @@ func TestRuleSyncFromConfig_DeleteStaleRules(t *testing.T) {
 
 	rules := []RuleConfig{
 		{
-			Name: "A", Type: "evm_address_list", Mode: "whitelist", Enabled: true,
+			Id: "a", Name: "A", Type: "evm_address_list", Mode: "whitelist", Enabled: true,
 			Config: map[string]interface{}{"addresses": []interface{}{"0x1234567890abcdef1234567890abcdef12345678"}},
 		},
 		{
-			Name: "B", Type: "evm_address_list", Mode: "whitelist", Enabled: true,
+			Id: "b", Name: "B", Type: "evm_address_list", Mode: "whitelist", Enabled: true,
 			Config: map[string]interface{}{"addresses": []interface{}{"0x1234567890abcdef1234567890abcdef12345678"}},
 		},
 	}
@@ -920,7 +920,7 @@ func TestRuleSyncFromConfig_SkipDisabledRule(t *testing.T) {
 
 	rules := []RuleConfig{
 		{
-			Name: "Disabled", Type: "evm_address_list", Mode: "whitelist", Enabled: false,
+			Id: "disabled", Name: "Disabled", Type: "evm_address_list", Mode: "whitelist", Enabled: false,
 			Config: map[string]interface{}{"addresses": []interface{}{"0x1234567890abcdef1234567890abcdef12345678"}},
 		},
 	}
@@ -940,7 +940,7 @@ func TestRuleSyncFromConfig_InvalidMode(t *testing.T) {
 
 	rules := []RuleConfig{
 		{
-			Name: "Bad Mode", Type: "evm_address_list", Mode: "invalid_mode", Enabled: true,
+			Id: "bad-mode", Name: "Bad Mode", Type: "evm_address_list", Mode: "invalid_mode", Enabled: true,
 			Config: map[string]interface{}{"addresses": []interface{}{"0x1234567890abcdef1234567890abcdef12345678"}},
 		},
 	}
@@ -994,7 +994,7 @@ func TestRuleSyncFromConfig_WithScopeFields(t *testing.T) {
 
 	rules := []RuleConfig{
 		{
-			Name: "Scoped", Type: "evm_address_list", Mode: "whitelist", Enabled: true,
+			Id: "scoped", Name: "Scoped", Type: "evm_address_list", Mode: "whitelist", Enabled: true,
 			ChainType: "evm", ChainID: "1", APIKeyID: "api-key-1",
 			SignerAddress: "0x1234567890abcdef1234567890abcdef12345678",
 			Config:        map[string]interface{}{"addresses": []interface{}{"0x1234567890abcdef1234567890abcdef12345678"}},
@@ -1023,7 +1023,7 @@ func TestRuleSyncFromConfig_DefaultChainTypeEVM(t *testing.T) {
 
 	rules := []RuleConfig{
 		{
-			Name: "No Chain", Type: "evm_address_list", Mode: "whitelist", Enabled: true,
+			Id: "no-chain", Name: "No Chain", Type: "evm_address_list", Mode: "whitelist", Enabled: true,
 			Config: map[string]interface{}{"addresses": []interface{}{"0x1234567890abcdef1234567890abcdef12345678"}},
 		},
 	}
@@ -1045,7 +1045,7 @@ func TestRuleSyncFromConfig_InvalidChainType(t *testing.T) {
 
 	rules := []RuleConfig{
 		{
-			Name: "Bad Chain", Type: "evm_address_list", Mode: "whitelist", ChainType: "not_a_chain", Enabled: true,
+			Id: "bad-chain", Name: "Bad Chain", Type: "evm_address_list", Mode: "whitelist", ChainType: "not_a_chain", Enabled: true,
 			Config: map[string]interface{}{"addresses": []interface{}{"0x1234567890abcdef1234567890abcdef12345678"}},
 		},
 	}
@@ -1062,7 +1062,7 @@ func TestRuleSyncFromConfig_InvalidSignerAddress(t *testing.T) {
 
 	rules := []RuleConfig{
 		{
-			Name: "Bad Signer", Type: "evm_address_list", Mode: "whitelist", SignerAddress: "not-an-address", Enabled: true,
+			Id: "bad-signer", Name: "Bad Signer", Type: "evm_address_list", Mode: "whitelist", SignerAddress: "not-an-address", Enabled: true,
 			Config: map[string]interface{}{"addresses": []interface{}{"0x1234567890abcdef1234567890abcdef12345678"}},
 		},
 	}
@@ -1079,7 +1079,7 @@ func TestRuleSyncFromConfig_WithVariables(t *testing.T) {
 
 	rules := []RuleConfig{
 		{
-			Name: "With Vars", Type: "evm_address_list", Mode: "whitelist", Enabled: true,
+			Id: "with-vars", Name: "With Vars", Type: "evm_address_list", Mode: "whitelist", Enabled: true,
 			Config:    map[string]interface{}{"addresses": []interface{}{"0x1234567890abcdef1234567890abcdef12345678"}},
 			Variables: map[string]interface{}{"chain_id": "1", "label": "mainnet"},
 		},
@@ -1104,7 +1104,7 @@ func TestRuleSyncFromConfig_ListError(t *testing.T) {
 	require.NoError(t, err)
 
 	rules := []RuleConfig{
-		{Name: "Test", Type: "evm_address_list", Mode: "whitelist", Enabled: true,
+		{Id: "test", Name: "Test", Type: "evm_address_list", Mode: "whitelist", Enabled: true,
 			Config: map[string]interface{}{"addresses": []interface{}{"0x1234567890abcdef1234567890abcdef12345678"}}},
 	}
 
@@ -1118,7 +1118,8 @@ func TestRuleSyncFromConfig_FileRulesFromFile(t *testing.T) {
 	ruleFile := filepath.Join(dir, "rules.yaml")
 	ruleYAML := `
 rules:
-  - name: "File Rule"
+  - id: "file-rule"
+    name: "File Rule"
     type: "evm_address_list"
     mode: "whitelist"
     enabled: true
@@ -1148,7 +1149,7 @@ func TestRuleSyncFromConfig_CreateError(t *testing.T) {
 	require.NoError(t, err)
 
 	rules := []RuleConfig{
-		{Name: "Test", Type: "evm_address_list", Mode: "whitelist", Enabled: true,
+		{Id: "test", Name: "Test", Type: "evm_address_list", Mode: "whitelist", Enabled: true,
 			Config: map[string]interface{}{"addresses": []interface{}{"0x1234567890abcdef1234567890abcdef12345678"}}},
 	}
 
@@ -1163,7 +1164,7 @@ func TestRuleSyncFromConfig_GetNonNotFoundError(t *testing.T) {
 	require.NoError(t, err)
 
 	rules := []RuleConfig{
-		{Name: "Test", Type: "evm_address_list", Mode: "whitelist", Enabled: true,
+		{Id: "test", Name: "Test", Type: "evm_address_list", Mode: "whitelist", Enabled: true,
 			Config: map[string]interface{}{"addresses": []interface{}{"0x1234567890abcdef1234567890abcdef12345678"}}},
 	}
 
@@ -1178,7 +1179,7 @@ func TestRuleSyncFromConfig_UpdateError(t *testing.T) {
 	require.NoError(t, err)
 
 	rules := []RuleConfig{
-		{Name: "Test", Type: "evm_address_list", Mode: "whitelist", Enabled: true,
+		{Id: "test", Name: "Test", Type: "evm_address_list", Mode: "whitelist", Enabled: true,
 			Config: map[string]interface{}{"addresses": []interface{}{"0x1234567890abcdef1234567890abcdef12345678"}}},
 	}
 
@@ -1202,7 +1203,7 @@ func TestRuleSyncFromConfig_DeleteError(t *testing.T) {
 	require.NoError(t, err)
 
 	rules := []RuleConfig{
-		{Name: "To Delete", Type: "evm_address_list", Mode: "whitelist", Enabled: true,
+		{Id: "to-delete", Name: "To Delete", Type: "evm_address_list", Mode: "whitelist", Enabled: true,
 			Config: map[string]interface{}{"addresses": []interface{}{"0x1234567890abcdef1234567890abcdef12345678"}}},
 	}
 

@@ -21,7 +21,8 @@ test_variables:
   clob_auth_domain_version: "1"
 
 rules:
-  - name: "Polymarket CLOB Auth Signature"
+  - id: "polymarket-clob-auth"
+    name: "Polymarket CLOB Auth Signature"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true

@@ -65,7 +65,8 @@ rules:
   # auth.go: domain=app.opinion.trade, uri=https://app.opinion.trade, statement=Welcome...,
   # version=1, chain_id from config (BSC 56), nonce, issued_at ISO 8601.
   # Signed with personal_sign (EIP-191); used for JWT token exchange (newUser / token API).
-  - name: "Opinion SIWE Login Signature"
+  - id: "opinion-siwe-login-signature"
+    name: "Opinion SIWE Login Signature"
     type: "message_pattern"
     mode: "whitelist"
     enabled: true
@@ -98,7 +99,8 @@ rules:
   # ===========================================================================
 
   # Order signing for Opinion CTF Exchange
-  - name: "Opinion Order Signature"
+  - id: "opinion-order-signature"
+    name: "Opinion Order Signature"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -230,7 +232,8 @@ rules:
   # ===========================================================================
 
   # Safe transaction signing for Opinion
-  - name: "Opinion SafeTx Signature"
+  - id: "opinion-safetx-signature"
+    name: "Opinion SafeTx Signature"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -767,7 +770,8 @@ rules:
   # ===========================================================================
 
   # Safe Proxy Factory - Create new Safe wallet (BSC uses standard Gnosis createProxyWithNonce)
-  - name: "Opinion Safe Wallet Creation"
+  - id: "opinion-safe-wallet-creation"
+    name: "Opinion Safe Wallet Creation"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -814,7 +818,8 @@ rules:
   # Safe execTransaction - Execute through Safe wallet
   # All operations (approve/split/merge/redeem) are executed through Safe's execTransaction
   # Funds are stored in Safe wallets, so all operations must go through Safe
-  - name: "Opinion Safe Execute Transaction"
+  - id: "opinion-safe-execute-transaction"
+    name: "Opinion Safe Execute Transaction"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true

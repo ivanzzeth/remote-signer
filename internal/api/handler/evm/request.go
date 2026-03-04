@@ -1,6 +1,7 @@
 package evm
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -12,8 +13,8 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
-	"github.com/ivanzzeth/remote-signer/internal/validate"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
+	"github.com/ivanzzeth/remote-signer/internal/validate"
 )
 
 // validStatuses defines the known sign request statuses
@@ -29,19 +30,24 @@ var validStatuses = map[types.SignRequestStatus]bool{
 // RequestHandler handles request status queries
 type RequestHandler struct {
 	signService *service.SignService
+	ruleRepo    storage.RuleRepository
 	logger      *slog.Logger
 }
 
 // NewRequestHandler creates a new request handler
-func NewRequestHandler(signService *service.SignService, logger *slog.Logger) (*RequestHandler, error) {
+func NewRequestHandler(signService *service.SignService, ruleRepo storage.RuleRepository, logger *slog.Logger) (*RequestHandler, error) {
 	if signService == nil {
 		return nil, fmt.Errorf("sign service is required")
+	}
+	if ruleRepo == nil {
+		return nil, fmt.Errorf("rule repository is required")
 	}
 	if logger == nil {
 		return nil, fmt.Errorf("logger is required")
 	}
 	return &RequestHandler{
 		signService: signService,
+		ruleRepo:    ruleRepo,
 		logger:      logger,
 	}, nil
 }
@@ -49,22 +55,23 @@ func NewRequestHandler(signService *service.SignService, logger *slog.Logger) (*
 // RequestDetailResponse represents a detailed request response (GET /api/v1/evm/requests/{id}).
 // Payload is included so operators can inspect full request content for debugging and rule analysis.
 type RequestDetailResponse struct {
-	ID             string          `json:"id"`
-	APIKeyID       string          `json:"api_key_id"`
-	ChainType      string          `json:"chain_type"`
-	ChainID        string          `json:"chain_id"`
-	SignerAddress  string          `json:"signer_address"`
-	SignType       string          `json:"sign_type"`
-	Status         string          `json:"status"`
-	Payload        json.RawMessage `json:"payload,omitempty"`
-	Signature      string          `json:"signature,omitempty"`
-	SignedData     string          `json:"signed_data,omitempty"`
-	ErrorMessage   string          `json:"error_message,omitempty"`
-	RuleMatchedID  *string         `json:"rule_matched_id,omitempty"`
-	ApprovedBy     *string         `json:"approved_by,omitempty"`
-	CreatedAt      string          `json:"created_at"`
-	UpdatedAt      string          `json:"updated_at"`
-	CompletedAt    *string         `json:"completed_at,omitempty"`
+	ID               string          `json:"id"`
+	APIKeyID         string          `json:"api_key_id"`
+	ChainType        string          `json:"chain_type"`
+	ChainID          string          `json:"chain_id"`
+	SignerAddress    string          `json:"signer_address"`
+	SignType         string          `json:"sign_type"`
+	Status           string          `json:"status"`
+	Payload          json.RawMessage `json:"payload,omitempty"`
+	Signature        string          `json:"signature,omitempty"`
+	SignedData       string          `json:"signed_data,omitempty"`
+	ErrorMessage     string          `json:"error_message,omitempty"`
+	RuleMatchedID    *string         `json:"rule_matched_id,omitempty"`
+	RuleMatchedName  *string         `json:"rule_matched_name,omitempty"`
+	ApprovedBy       *string         `json:"approved_by,omitempty"`
+	CreatedAt        string          `json:"created_at"`
+	UpdatedAt        string          `json:"updated_at"`
+	CompletedAt      *string         `json:"completed_at,omitempty"`
 }
 
 // ListRequestsResponse represents the response for listing requests
@@ -120,25 +127,30 @@ func (h *RequestHandler) getRequest(w http.ResponseWriter, r *http.Request, apiK
 		return
 	}
 
-	h.writeJSON(w, h.toDetailResponse(req, true), http.StatusOK)
+	h.writeJSON(w, h.toDetailResponse(r.Context(), req, true), http.StatusOK)
 }
 
 // ListHandler handles listing requests
 type ListHandler struct {
 	signService *service.SignService
+	ruleRepo    storage.RuleRepository
 	logger      *slog.Logger
 }
 
 // NewListHandler creates a new list handler
-func NewListHandler(signService *service.SignService, logger *slog.Logger) (*ListHandler, error) {
+func NewListHandler(signService *service.SignService, ruleRepo storage.RuleRepository, logger *slog.Logger) (*ListHandler, error) {
 	if signService == nil {
 		return nil, fmt.Errorf("sign service is required")
+	}
+	if ruleRepo == nil {
+		return nil, fmt.Errorf("rule repository is required")
 	}
 	if logger == nil {
 		return nil, fmt.Errorf("logger is required")
 	}
 	return &ListHandler{
 		signService: signService,
+		ruleRepo:    ruleRepo,
 		logger:      logger,
 	}, nil
 }
@@ -250,7 +262,7 @@ func (h *ListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		HasMore:  hasMore,
 	}
 	for _, req := range requests {
-		resp.Requests = append(resp.Requests, toDetailResponse(req, false))
+		resp.Requests = append(resp.Requests, h.toDetailResponse(r.Context(), req, false))
 	}
 
 	// Set next cursor if there are more results
@@ -265,11 +277,15 @@ func (h *ListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, resp, http.StatusOK)
 }
 
-func (h *RequestHandler) toDetailResponse(req *types.SignRequest, includePayload bool) RequestDetailResponse {
-	return toDetailResponse(req, includePayload)
+func (h *RequestHandler) toDetailResponse(ctx context.Context, req *types.SignRequest, includePayload bool) RequestDetailResponse {
+	return toDetailResponse(ctx, h.ruleRepo, req, includePayload)
 }
 
-func toDetailResponse(req *types.SignRequest, includePayload bool) RequestDetailResponse {
+func (h *ListHandler) toDetailResponse(ctx context.Context, req *types.SignRequest, includePayload bool) RequestDetailResponse {
+	return toDetailResponse(ctx, h.ruleRepo, req, includePayload)
+}
+
+func toDetailResponse(ctx context.Context, ruleRepo storage.RuleRepository, req *types.SignRequest, includePayload bool) RequestDetailResponse {
 	resp := RequestDetailResponse{
 		ID:            string(req.ID),
 		APIKeyID:      req.APIKeyID,
@@ -283,6 +299,12 @@ func toDetailResponse(req *types.SignRequest, includePayload bool) RequestDetail
 		ApprovedBy:    req.ApprovedBy,
 		CreatedAt:     req.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt:     req.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+	}
+	if req.RuleMatchedID != nil && ruleRepo != nil {
+		rule, err := ruleRepo.Get(ctx, types.RuleID(*req.RuleMatchedID))
+		if err == nil && rule != nil {
+			resp.RuleMatchedName = &rule.Name
+		}
 	}
 	if includePayload && len(req.Payload) > 0 {
 		resp.Payload = req.Payload

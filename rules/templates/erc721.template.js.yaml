@@ -38,7 +38,8 @@ test_variables:
   allowed_transfer_from: ""
 
 rules:
-  - name: "ERC721 transfer/approve with allowlists"
+  - id: "erc721-transfer-approve-allowlists"
+    name: "ERC721 transfer/approve with allowlists"
     type: "evm_js"
     mode: "whitelist"
     enabled: true

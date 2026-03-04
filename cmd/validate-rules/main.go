@@ -319,9 +319,26 @@ func validateFile(ctx context.Context, filePath string, validator *evm.SolidityR
 		log.Warn("No rules found in file", "file", filePath)
 		return nil, 0, 0, nil
 	}
+	if err := validateExplicitRuleIDsLocal(rules); err != nil {
+		return nil, 0, 0, fmt.Errorf("rule id validation: %w", err)
+	}
 
 	// Template files use isolated engines (per-rule) so other rules don't interfere with template test cases.
 	return validateRules(ctx, rules, validator, msgValidator, jsValidator, templateFile.TestVariables, log, verbose, false)
+}
+
+// validateExplicitRuleIDsLocal ensures every rule has an explicit id (for validate-rules local RuleConfig).
+func validateExplicitRuleIDsLocal(rules []RuleConfig) error {
+	var missing []string
+	for idx, r := range rules {
+		if strings.TrimSpace(r.Id) == "" {
+			missing = append(missing, fmt.Sprintf("rule %q (index %d)", r.Name, idx))
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("rules must have explicit id; missing id for: %s", strings.Join(missing, ", "))
+	}
+	return nil
 }
 
 // validateConfig loads config, expands templates and instance/file rules (same as server), then validates.
@@ -343,6 +360,9 @@ func validateConfig(ctx context.Context, configPath string, validator *evm.Solid
 	rules, err = config.ExpandFileRules(rules, configDir, log)
 	if err != nil {
 		return nil, 0, 0, fmt.Errorf("expand file rules: %w", err)
+	}
+	if err := config.ValidateExplicitRuleIDs(rules); err != nil {
+		return nil, 0, 0, fmt.Errorf("rule id validation: %w", err)
 	}
 	if err := config.ValidateDelegationTargets(rules); err != nil {
 		return nil, 0, 0, fmt.Errorf("delegation target validation: %w", err)

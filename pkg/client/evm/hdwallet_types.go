@@ -14,6 +14,7 @@ type HDWalletResponse struct {
 	BasePath       string       `json:"base_path"`
 	DerivedCount   int          `json:"derived_count"`
 	Derived        []SignerInfo `json:"derived,omitempty"`
+	Locked         bool        `json:"locked"` // true when wallet exists on disk but is not unlocked
 }
 
 // ListHDWalletsResponse represents the response from listing HD wallets.

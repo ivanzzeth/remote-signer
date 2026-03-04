@@ -56,8 +56,9 @@ type HDWalletManager interface {
 
 // HDWalletInfo contains information about an HD wallet.
 type HDWalletInfo struct {
-	PrimaryAddress string            `json:"primary_address"`
-	BasePath       string            `json:"base_path"`
-	DerivedCount   int               `json:"derived_count"`
+	PrimaryAddress string             `json:"primary_address"`
+	BasePath       string             `json:"base_path"`
+	DerivedCount   int                `json:"derived_count"`
 	Derived        []types.SignerInfo `json:"derived,omitempty"`
+	Locked         bool               `json:"locked"` // true when wallet exists on disk but is not unlocked
 }

@@ -121,4 +121,4 @@ coverage/
 bin/
 
 # E2E test data (generated keystores, etc.)
-e2e/data/
+e2e/data/verify-setup-polymarket

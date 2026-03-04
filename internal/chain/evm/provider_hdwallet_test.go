@@ -608,4 +608,10 @@ func TestHDWalletProvider_ListHDWalletsIncludesDiscoveredLocked(t *testing.T) {
 	require.Len(t, listAfter, 1)
 	assert.Equal(t, discovered[0].Address, listAfter[0].PrimaryAddress)
 	assert.Equal(t, 0, listAfter[0].DerivedCount)
+
+	// ListDerivedAddresses on locked wallet returns "locked" error, not "not found"
+	_, err = provider.ListDerivedAddresses(discovered[0].Address)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "HD wallet is locked")
+	assert.Contains(t, err.Error(), "unlock first")
 }
