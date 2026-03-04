@@ -54,6 +54,7 @@ rules:
   # Issued At: 2026-01-23T08:46:20.000Z
   # ```
   - name: "Opinion Login Signature"
+    id: "opinion-login-signature"
     type: "message_pattern"
     mode: "whitelist"
     enabled: true
@@ -119,6 +120,7 @@ rules:
 
   # Order signing for CTF Exchange
   - name: "Opinion Order Signature"
+    id: "opinion-order-signature"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -249,6 +251,7 @@ rules:
 
   # Safe transaction signing
   - name: "Opinion SafeTx Signature"
+    id: "opinion-safetx-signature"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -393,6 +396,7 @@ rules:
 
   # Safe Proxy Factory - Create new Safe wallet
   - name: "Opinion Safe Wallet Creation"
+    id: "opinion-safe-wallet-creation"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -443,6 +447,7 @@ rules:
 
   # Safe execTransaction - Execute through Safe wallet
   - name: "Opinion Safe Execute Transaction"
+    id: "opinion-safe-execute-transaction"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -531,6 +536,7 @@ rules:
 
   # Transfer small USDT for API Key application
   - name: "Opinion USDT for API Key"
+    id: "opinion-usdt-for-api-key"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -580,6 +586,7 @@ rules:
 
   # USDT Approve to CTF Exchange
   - name: "Opinion USDT Approve Exchange"
+    id: "opinion-usdt-approve-exchange"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -624,6 +631,7 @@ rules:
 
   # USDT Approve to CTF Contract
   - name: "Opinion USDT Approve CTF"
+    id: "opinion-usdt-approve-ctf"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -668,6 +676,7 @@ rules:
 
   # CTF setApprovalForAll to Exchange
   - name: "Opinion CTF Approve Exchange"
+    id: "opinion-ctf-approve-exchange"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -712,6 +721,7 @@ rules:
 
   # CTF Split Position
   - name: "Opinion CTF Split Position"
+    id: "opinion-ctf-split-position"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -768,6 +778,7 @@ rules:
 
   # CTF Merge Positions
   - name: "Opinion CTF Merge Positions"
+    id: "opinion-ctf-merge-positions"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -824,6 +835,7 @@ rules:
 
   # CTF Redeem Positions
   - name: "Opinion CTF Redeem Positions"
+    id: "opinion-ctf-redeem-positions"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true

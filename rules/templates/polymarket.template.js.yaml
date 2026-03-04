@@ -144,7 +144,7 @@ rules:
     mode: "whitelist"
     enabled: true
     chain_id: "${chain_id}"
-    description: "Validate Polymarket CTF Exchange order signatures"
+    description: "Validate Polymarket order signatures (CTF Exchange and NegRisk Exchange)"
     config:
       sign_type_filter: "typed_data"
       script: |
@@ -156,12 +156,13 @@ rules:
           var msg = td.message || {};
           var wantName = (config.ctf_exchange_domain_name || '').trim();
           var wantVersion = (config.ctf_exchange_domain_version || '').trim();
-          var wantContract = toChecksum((config.ctf_exchange_address || '').trim());
+          var allowedContracts = [toChecksum((config.ctf_exchange_address || '').trim()), toChecksum((config.neg_risk_exchange_address || '').trim())];
           var chainId = parseInt(config.chain_id, 10);
           if (String(domain.name || '').trim() !== wantName) return fail('invalid domain name');
           if (String(domain.version || '').trim() !== wantVersion) return fail('invalid domain version');
           if (!isAddress(domain.verifyingContract)) return fail('invalid verifying contract');
-          if (!eq(toChecksum(domain.verifyingContract), wantContract)) return fail('invalid verifying contract');
+          var vc = toChecksum(domain.verifyingContract);
+          if (!inSet(vc, allowedContracts)) return fail('invalid verifying contract');
           if (Number(domain.chainId) !== chainId) return fail('chainId mismatch');
           var zeroAddr = '0x0000000000000000000000000000000000000000';
           if (!eq(toChecksum((msg.taker || '').trim()), zeroAddr)) return fail('taker must be zero address');
@@ -171,6 +172,11 @@ rules:
           var feeBps = parseInt(msg.feeRateBps, 10) || 0;
           if (feeBps > 1000) return fail('fee exceeds 10%');
           return ok();
+        }
+        function inSet(addr, set) {
+          var c = toChecksum((addr || '').trim());
+          for (var i = 0; i < set.length; i++) { if (eq(c, set[i])) return true; }
+          return false;
         }
     test_cases:
       - name: "should pass valid order with zero taker"
@@ -226,6 +232,32 @@ rules:
               signatureType: "0"
         expect_pass: false
         expect_reason: "taker must be zero address"
+      - name: "should pass valid order with NegRisk Exchange verifyingContract"
+        input:
+          sign_type: "typed_data"
+          chain_id: 137
+          signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+          typed_data:
+            primaryType: "Order"
+            domain:
+              name: "Polymarket CTF Exchange"
+              version: "1"
+              chainId: "137"
+              verifyingContract: "0xC5d563A36AE78145C45a50134d48A1215220f80a"
+            message:
+              salt: "12345"
+              maker: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              taker: "0x0000000000000000000000000000000000000000"
+              tokenId: "1"
+              makerAmount: "1000000000000000000"
+              takerAmount: "1000000000000000000"
+              expiration: "1893456000"
+              nonce: "0"
+              feeRateBps: "100"
+              side: "0"
+              signatureType: "0"
+        expect_pass: true
 
   - id: "polymarket-safe-wallet-creation-sig"
     name: "Polymarket Safe Wallet Creation Signature"

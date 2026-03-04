@@ -446,9 +446,22 @@ func expandInstanceRule(rule RuleConfig, templates map[string]TemplateConfig) ([
 			}
 		}
 	}
-	// If instance has config.id and expands to a single rule, use it as the rule's stable id
-	if id, ok := rule.Config["id"].(string); ok && strings.TrimSpace(id) != "" && len(templateRules) == 1 {
-		templateRules[0].Id = strings.TrimSpace(id)
+	instanceID, hasInstanceID := rule.Config["id"].(string)
+	instanceID = strings.TrimSpace(instanceID)
+	if hasInstanceID && instanceID != "" {
+		if len(templateRules) == 1 {
+			templateRules[0].Id = instanceID
+		} else {
+			// Prefix each expanded rule id with instance id so multiple instances of the same template get unique ids
+			for idx := range templateRules {
+				tid := strings.TrimSpace(templateRules[idx].Id)
+				if tid != "" {
+					templateRules[idx].Id = instanceID + "_" + tid
+				} else {
+					templateRules[idx].Id = fmt.Sprintf("%s_%d", instanceID, idx)
+				}
+			}
+		}
 	}
 
 	return templateRules, nil
