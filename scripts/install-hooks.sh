@@ -325,7 +325,7 @@ fi
 
 # 7. Run e2e tests (using port 18548 to avoid conflict with production on 8548)
 echo -n "Running e2e tests... "
-if E2E_API_PORT=18548 go test -tags e2e ./e2e/... -count=1 -timeout 120s 2>/dev/null; then
+if E2E_API_PORT=18548 go test -tags e2e ./e2e/... -count=1 -timeout 2m 2>/dev/null; then
     echo -e "${GREEN}OK${NC}"
 else
     echo -e "${RED}FAIL${NC}"
