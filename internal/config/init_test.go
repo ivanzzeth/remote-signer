@@ -89,6 +89,42 @@ func (m *mockAPIKeyRepository) UpdateLastUsed(_ context.Context, _ string) error
 	return nil
 }
 
+func (m *mockAPIKeyRepository) Count(_ context.Context, _ storage.APIKeyFilter) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.keys), nil
+}
+
+func (m *mockAPIKeyRepository) DeleteBySourceExcluding(_ context.Context, source string, excludeIDs []string) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	excludeSet := make(map[string]bool, len(excludeIDs))
+	for _, id := range excludeIDs {
+		excludeSet[id] = true
+	}
+	var deleted int64
+	for id, k := range m.keys {
+		if k.Source == source && !excludeSet[id] {
+			delete(m.keys, id)
+			deleted++
+		}
+	}
+	return deleted, nil
+}
+
+func (m *mockAPIKeyRepository) BackfillSource(_ context.Context, defaultSource string) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var count int64
+	for _, k := range m.keys {
+		if k.Source == "" {
+			k.Source = defaultSource
+			count++
+		}
+	}
+	return count, nil
+}
+
 // --- mockRuleRepository ---
 
 type mockRuleRepository struct {
@@ -327,9 +363,11 @@ func (e *errorTemplateRepository) Count(_ context.Context, _ storage.TemplateFil
 }
 
 type errorAPIKeyRepository struct {
-	getErr    error
-	createErr error
-	updateErr error
+	getErr                  error
+	createErr               error
+	updateErr               error
+	backfillSourceErr       error
+	deleteBySourceExclErr   error
 }
 
 func (e *errorAPIKeyRepository) Create(_ context.Context, _ *types.APIKey) error { return e.createErr }
@@ -345,6 +383,15 @@ func (e *errorAPIKeyRepository) List(_ context.Context, _ storage.APIKeyFilter) 
 	return nil, nil
 }
 func (e *errorAPIKeyRepository) UpdateLastUsed(_ context.Context, _ string) error { return nil }
+func (e *errorAPIKeyRepository) Count(_ context.Context, _ storage.APIKeyFilter) (int, error) {
+	return 0, nil
+}
+func (e *errorAPIKeyRepository) DeleteBySourceExcluding(_ context.Context, _ string, _ []string) (int64, error) {
+	return 0, e.deleteBySourceExclErr
+}
+func (e *errorAPIKeyRepository) BackfillSource(_ context.Context, _ string) (int64, error) {
+	return 0, e.backfillSourceErr
+}
 
 // --- wrapper repos for targeted failures ---
 
@@ -368,6 +415,15 @@ func (f *failUpdateAPIKeyRepo) List(ctx context.Context, filter storage.APIKeyFi
 }
 func (f *failUpdateAPIKeyRepo) UpdateLastUsed(ctx context.Context, id string) error {
 	return f.base.UpdateLastUsed(ctx, id)
+}
+func (f *failUpdateAPIKeyRepo) Count(ctx context.Context, filter storage.APIKeyFilter) (int, error) {
+	return f.base.Count(ctx, filter)
+}
+func (f *failUpdateAPIKeyRepo) DeleteBySourceExcluding(ctx context.Context, source string, excludeIDs []string) (int64, error) {
+	return f.base.DeleteBySourceExcluding(ctx, source, excludeIDs)
+}
+func (f *failUpdateAPIKeyRepo) BackfillSource(ctx context.Context, defaultSource string) (int64, error) {
+	return f.base.BackfillSource(ctx, defaultSource)
 }
 
 type failUpdateRuleRepo struct {
@@ -729,6 +785,185 @@ func TestAPIKeySyncFromConfig_WithAllowedChainTypesAndSigners(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"evm"}, []string(saved.AllowedChainTypes))
 	assert.Equal(t, []string{"0x1234567890abcdef1234567890abcdef12345678"}, []string(saved.AllowedSigners))
+}
+
+// ===========================================================================
+// APIKeyInitializer.SyncFromConfig - Source management tests
+// ===========================================================================
+
+func TestAPIKeyInitializer_SyncFromConfig_BackfillSource(t *testing.T) {
+	// Existing keys with empty source should get backfilled to "config"
+	repo := newMockAPIKeyRepo()
+	ctx := context.Background()
+
+	// Pre-populate with keys that have empty source (simulating legacy data)
+	_ = repo.Create(ctx, &types.APIKey{
+		ID: "legacy-key-1", Name: "Legacy 1", PublicKeyHex: hexPubKey, Enabled: true, Source: "",
+	})
+	_ = repo.Create(ctx, &types.APIKey{
+		ID: "legacy-key-2", Name: "Legacy 2", PublicKeyHex: hexPubKey, Enabled: true, Source: "",
+	})
+
+	init, err := NewAPIKeyInitializer(repo, testLogger())
+	require.NoError(t, err)
+
+	// Sync with config that includes one of the legacy keys
+	keys := []APIKeyConfig{
+		{ID: "legacy-key-1", Name: "Legacy 1 Updated", PublicKey: hexPubKey, Enabled: true},
+	}
+	err = init.SyncFromConfig(ctx, keys)
+	require.NoError(t, err)
+
+	// Both legacy keys should now have source="config" (backfill runs first)
+	k1, err := repo.Get(ctx, "legacy-key-1")
+	require.NoError(t, err)
+	assert.Equal(t, types.APIKeySourceConfig, k1.Source)
+
+	// legacy-key-2 was backfilled to "config" then deleted as stale
+	_, err = repo.Get(ctx, "legacy-key-2")
+	assert.ErrorIs(t, err, types.ErrNotFound)
+}
+
+func TestAPIKeyInitializer_SyncFromConfig_DeletesStaleConfigKeys(t *testing.T) {
+	// Config has [A, B], DB has [A, B, C] (source=config) -> C gets deleted
+	repo := newMockAPIKeyRepo()
+	ctx := context.Background()
+
+	_ = repo.Create(ctx, &types.APIKey{
+		ID: "key-a", Name: "A", PublicKeyHex: hexPubKey, Enabled: true, Source: types.APIKeySourceConfig,
+	})
+	_ = repo.Create(ctx, &types.APIKey{
+		ID: "key-b", Name: "B", PublicKeyHex: hexPubKey, Enabled: true, Source: types.APIKeySourceConfig,
+	})
+	_ = repo.Create(ctx, &types.APIKey{
+		ID: "key-c", Name: "C", PublicKeyHex: hexPubKey, Enabled: true, Source: types.APIKeySourceConfig,
+	})
+
+	init, err := NewAPIKeyInitializer(repo, testLogger())
+	require.NoError(t, err)
+
+	keys := []APIKeyConfig{
+		{ID: "key-a", Name: "A", PublicKey: hexPubKey, Enabled: true},
+		{ID: "key-b", Name: "B", PublicKey: hexPubKey, Enabled: true},
+	}
+	err = init.SyncFromConfig(ctx, keys)
+	require.NoError(t, err)
+
+	// A and B should still exist
+	_, err = repo.Get(ctx, "key-a")
+	assert.NoError(t, err)
+	_, err = repo.Get(ctx, "key-b")
+	assert.NoError(t, err)
+
+	// C should be deleted (stale config key)
+	_, err = repo.Get(ctx, "key-c")
+	assert.ErrorIs(t, err, types.ErrNotFound)
+}
+
+func TestAPIKeyInitializer_SyncFromConfig_PreservesAPIKeys(t *testing.T) {
+	// Config has [A], DB has [A(config), B(api)] -> B preserved
+	repo := newMockAPIKeyRepo()
+	ctx := context.Background()
+
+	_ = repo.Create(ctx, &types.APIKey{
+		ID: "key-a", Name: "A", PublicKeyHex: hexPubKey, Enabled: true, Source: types.APIKeySourceConfig,
+	})
+	_ = repo.Create(ctx, &types.APIKey{
+		ID: "key-b", Name: "B API", PublicKeyHex: hexPubKey, Enabled: true, Source: types.APIKeySourceAPI,
+	})
+
+	init, err := NewAPIKeyInitializer(repo, testLogger())
+	require.NoError(t, err)
+
+	keys := []APIKeyConfig{
+		{ID: "key-a", Name: "A Updated", PublicKey: hexPubKey, Enabled: true},
+	}
+	err = init.SyncFromConfig(ctx, keys)
+	require.NoError(t, err)
+
+	// A should be updated
+	a, err := repo.Get(ctx, "key-a")
+	require.NoError(t, err)
+	assert.Equal(t, "A Updated", a.Name)
+
+	// B (source=api) should be preserved
+	b, err := repo.Get(ctx, "key-b")
+	require.NoError(t, err)
+	assert.Equal(t, "B API", b.Name)
+	assert.Equal(t, types.APIKeySourceAPI, b.Source)
+}
+
+func TestAPIKeyInitializer_SyncFromConfig_SetsSourceOnCreate(t *testing.T) {
+	// New key from config gets source="config"
+	repo := newMockAPIKeyRepo()
+	ctx := context.Background()
+
+	init, err := NewAPIKeyInitializer(repo, testLogger())
+	require.NoError(t, err)
+
+	keys := []APIKeyConfig{
+		{ID: "new-key", Name: "New", PublicKey: hexPubKey, Enabled: true},
+	}
+	err = init.SyncFromConfig(ctx, keys)
+	require.NoError(t, err)
+
+	saved, err := repo.Get(ctx, "new-key")
+	require.NoError(t, err)
+	assert.Equal(t, types.APIKeySourceConfig, saved.Source)
+}
+
+func TestAPIKeyInitializer_SyncFromConfig_SetsSourceOnUpdate(t *testing.T) {
+	// Updated key retains source="config"
+	repo := newMockAPIKeyRepo()
+	ctx := context.Background()
+
+	_ = repo.Create(ctx, &types.APIKey{
+		ID: "existing-key", Name: "Old", PublicKeyHex: hexPubKey, Enabled: true, Source: types.APIKeySourceConfig,
+	})
+
+	init, err := NewAPIKeyInitializer(repo, testLogger())
+	require.NoError(t, err)
+
+	keys := []APIKeyConfig{
+		{ID: "existing-key", Name: "Updated", PublicKey: hexPubKey, Enabled: true},
+	}
+	err = init.SyncFromConfig(ctx, keys)
+	require.NoError(t, err)
+
+	saved, err := repo.Get(ctx, "existing-key")
+	require.NoError(t, err)
+	assert.Equal(t, "Updated", saved.Name)
+	assert.Equal(t, types.APIKeySourceConfig, saved.Source)
+}
+
+func TestAPIKeyInitializer_SyncFromConfig_BackfillError(t *testing.T) {
+	// BackfillSource returns error -> SyncFromConfig fails
+	repo := &errorAPIKeyRepository{backfillSourceErr: fmt.Errorf("backfill db error")}
+	init, err := NewAPIKeyInitializer(repo, testLogger())
+	require.NoError(t, err)
+
+	keys := []APIKeyConfig{
+		{ID: "test-key", Name: "Test", PublicKey: hexPubKey, Enabled: true},
+	}
+	err = init.SyncFromConfig(context.Background(), keys)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to backfill source")
+	assert.Contains(t, err.Error(), "backfill db error")
+}
+
+func TestAPIKeyInitializer_SyncFromConfig_DeleteStaleError(t *testing.T) {
+	// DeleteBySourceExcluding returns error -> SyncFromConfig fails
+	repo := &errorAPIKeyRepository{deleteBySourceExclErr: fmt.Errorf("delete stale db error")}
+	init, err := NewAPIKeyInitializer(repo, testLogger())
+	require.NoError(t, err)
+
+	keys := []APIKeyConfig{
+		{ID: "test-key", Name: "Test", PublicKey: hexPubKey, Enabled: true},
+	}
+	err = init.SyncFromConfig(context.Background(), keys)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to clean stale config keys")
+	assert.Contains(t, err.Error(), "delete stale db error")
 }
 
 // ===========================================================================

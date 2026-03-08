@@ -7,6 +7,11 @@ import (
 	"github.com/lib/pq"
 )
 
+const (
+	APIKeySourceConfig = "config"
+	APIKeySourceAPI    = "api"
+)
+
 // APIKey represents an API key for authentication
 type APIKey struct {
 	ID           string `json:"id" gorm:"primaryKey;type:varchar(64)"`
@@ -24,6 +29,9 @@ type APIKey struct {
 	Admin     bool `json:"admin" gorm:"default:false"`    // admin keys can approve requests and manage rules
 
 	Enabled    bool       `json:"enabled" gorm:"index;default:true"`
+	// Source indicates where the API key was created: "config" (from config file) or "api" (created via API).
+	// Default "config" for backward compatibility with existing keys.
+	Source     string     `json:"source" gorm:"type:varchar(10);default:'config';not null"`
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`

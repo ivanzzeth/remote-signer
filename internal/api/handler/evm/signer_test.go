@@ -89,6 +89,18 @@ func (m *mockAPIKeyRepo) UpdateLastUsed(_ context.Context, _ string) error {
 	return fmt.Errorf("not implemented")
 }
 
+func (m *mockAPIKeyRepo) Count(_ context.Context, _ storage.APIKeyFilter) (int, error) {
+	return 0, fmt.Errorf("not implemented")
+}
+
+func (m *mockAPIKeyRepo) DeleteBySourceExcluding(_ context.Context, _ string, _ []string) (int64, error) {
+	return 0, fmt.Errorf("not implemented")
+}
+
+func (m *mockAPIKeyRepo) BackfillSource(_ context.Context, _ string) (int64, error) {
+	return 0, fmt.Errorf("not implemented")
+}
+
 // --- Test helpers ---
 
 func doSignerRequest(t *testing.T, handler http.Handler, method, path string, apiKey *types.APIKey) *httptest.ResponseRecorder {

@@ -42,20 +42,49 @@ func (i *APIKeyInitializer) SetAuditLogger(al *audit.AuditLogger) {
 // SyncFromConfig syncs API keys from config to database
 // - Creates new keys that don't exist
 // - Updates existing keys with new values from config
-// - Does NOT delete keys that are in database but not in config (preserves API-created keys)
+// - Deletes config-sourced keys that are no longer in config (preserves API-created keys)
 func (i *APIKeyInitializer) SyncFromConfig(ctx context.Context, keys []APIKeyConfig) error {
-	if len(keys) == 0 {
-		i.logger.Info("No API keys configured in config file")
-		return nil
+	// Backward compatibility: set source='config' for any keys with empty source
+	if err := i.backfillSource(ctx); err != nil {
+		return fmt.Errorf("failed to backfill source: %w", err)
 	}
 
+	configIDs := make([]string, 0, len(keys))
 	for _, keyCfg := range keys {
+		if !keyCfg.Enabled {
+			i.logger.Debug("Skipping disabled API key", "id", keyCfg.ID)
+			continue
+		}
+		configIDs = append(configIDs, keyCfg.ID)
 		if err := i.syncKey(ctx, keyCfg); err != nil {
 			return fmt.Errorf("failed to sync API key %s: %w", keyCfg.ID, err)
 		}
 	}
 
-	i.logger.Info("API keys synced from config", "count", len(keys))
+	// Remove config-sourced keys that are no longer in config
+	deleted, err := i.repo.DeleteBySourceExcluding(ctx, types.APIKeySourceConfig, configIDs)
+	if err != nil {
+		return fmt.Errorf("failed to clean stale config keys: %w", err)
+	}
+	if deleted > 0 {
+		i.logger.Info("Removed stale config-sourced API keys", "count", deleted)
+		if i.auditLogger != nil {
+			i.auditLogger.LogAPIKeySynced(ctx, "cleanup", fmt.Sprintf("%d stale keys", deleted), "")
+		}
+	}
+
+	i.logger.Info("API keys synced from config", "count", len(configIDs))
+	return nil
+}
+
+func (i *APIKeyInitializer) backfillSource(ctx context.Context) error {
+	count, err := i.repo.BackfillSource(ctx, types.APIKeySourceConfig)
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		i.logger.Info("Backfilled source for existing API keys", "count", count)
+	}
 	return nil
 }
 
@@ -98,6 +127,7 @@ func (i *APIKeyInitializer) syncKey(ctx context.Context, keyCfg APIKeyConfig) er
 			RateLimit:         rateLimit,
 			Admin:             keyCfg.Admin,
 			Enabled:           keyCfg.Enabled,
+			Source:            types.APIKeySourceConfig,
 			CreatedAt:         time.Now(),
 			UpdatedAt:         time.Now(),
 		}
@@ -127,6 +157,7 @@ func (i *APIKeyInitializer) syncKey(ctx context.Context, keyCfg APIKeyConfig) er
 		existing.RateLimit = rateLimit
 		existing.Admin = keyCfg.Admin
 		existing.Enabled = keyCfg.Enabled
+		existing.Source = types.APIKeySourceConfig
 		existing.UpdatedAt = time.Now()
 
 		if err := i.repo.Update(ctx, existing); err != nil {

@@ -59,6 +59,18 @@ func (m *mockAPIKeyRepo) UpdateLastUsed(_ context.Context, _ string) error {
 	return nil
 }
 
+func (m *mockAPIKeyRepo) Count(_ context.Context, _ storage.APIKeyFilter) (int, error) {
+	return len(m.keys), nil
+}
+
+func (m *mockAPIKeyRepo) DeleteBySourceExcluding(_ context.Context, _ string, _ []string) (int64, error) {
+	return 0, nil
+}
+
+func (m *mockAPIKeyRepo) BackfillSource(_ context.Context, _ string) (int64, error) {
+	return 0, nil
+}
+
 // mockNonceStore implements storage.NonceStore for fuzz tests.
 type mockNonceStore struct {
 	seen map[string]bool

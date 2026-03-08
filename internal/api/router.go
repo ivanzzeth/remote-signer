@@ -32,9 +32,10 @@ type RouterConfig struct {
 	JSEvaluator        *evm.JSRuleEvaluator
 	Template           *TemplateConfig
 	ApprovalGuard      *service.ManualApprovalGuard // optional: for admin resume endpoint
-	APIKeyRepo         storage.APIKeyRepository     // optional: for signer access visibility
+	APIKeyRepo         storage.APIKeyRepository     // optional: for signer access visibility and API key management
 	RulesAPIReadonly   bool                         // block rule/template mutations via API
 	SignersAPIReadonly  bool                         // block signer/HD-wallet creation via API
+	APIKeysAPIReadonly bool                         // block API key management via API
 	AlertService       *middleware.SecurityAlertService // optional: real-time security alerts
 	AuditLogger        *audit.AuditLogger              // optional: persistent audit logging
 	SignTimeout        time.Duration                   // context timeout for sign operations (default: 30s)
@@ -206,6 +207,19 @@ func (r *Router) setupRoutes() error {
 	// Audit routes (with auth + admin required — audit logs contain sensitive data)
 	r.mux.Handle("/api/v1/audit", r.withAuthAndAdmin(auditHandler))
 	r.mux.Handle("/api/v1/audit/requests/", r.withAuthAndAdmin(http.HandlerFunc(auditHandler.ServeRequestHTTP)))
+
+	// API key management routes (admin only)
+	if r.config.APIKeyRepo != nil {
+		apiKeyHandler, err := handler.NewAPIKeyHandler(r.config.APIKeyRepo, r.logger, r.config.APIKeysAPIReadonly)
+		if err != nil {
+			return err
+		}
+		if r.config.AuditLogger != nil {
+			apiKeyHandler.SetAuditLogger(r.config.AuditLogger)
+		}
+		r.mux.Handle("/api/v1/api-keys", r.withAuthAndAdmin(apiKeyHandler))
+		r.mux.Handle("/api/v1/api-keys/", r.withAuthAndAdmin(http.HandlerFunc(apiKeyHandler.ServeKeyHTTP)))
+	}
 
 	// Template routes (with auth + admin required)
 	if r.config.Template != nil && r.config.Template.TemplateRepo != nil && r.config.Template.TemplateService != nil {
