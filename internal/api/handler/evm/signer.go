@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
+	"github.com/ivanzzeth/remote-signer/internal/audit"
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
@@ -21,6 +22,7 @@ type SignerHandler struct {
 	apiKeyRepo    storage.APIKeyRepository // nil = no filtering/enrichment
 	readOnly      bool                     // when true, block signer creation via API
 	logger        *slog.Logger
+	auditLogger   *audit.AuditLogger       // optional: audit logging
 }
 
 // NewSignerHandler creates a new signer handler
@@ -37,6 +39,11 @@ func NewSignerHandler(signerManager evm.SignerManager, apiKeyRepo storage.APIKey
 		readOnly:      readOnly,
 		logger:        logger,
 	}, nil
+}
+
+// SetAuditLogger sets the audit logger for signer management operations.
+func (h *SignerHandler) SetAuditLogger(al *audit.AuditLogger) {
+	h.auditLogger = al
 }
 
 // AllowedKeyInfo represents an API key that has access to a signer
@@ -376,6 +383,15 @@ func (h *SignerHandler) createSigner(w http.ResponseWriter, r *http.Request) {
 		slog.String("type", signerInfo.Type),
 	)
 
+	if h.auditLogger != nil {
+		apiKey := middleware.GetAPIKey(r.Context())
+		keyID := ""
+		if apiKey != nil {
+			keyID = apiKey.ID
+		}
+		h.auditLogger.LogSignerCreated(r.Context(), keyID, r.RemoteAddr, signerInfo.Address, signerInfo.Type)
+	}
+
 	resp := CreateSignerResponse{
 		Address: signerInfo.Address,
 		Type:    signerInfo.Type,
@@ -460,6 +476,15 @@ func (h *SignerHandler) handleUnlock(w http.ResponseWriter, r *http.Request, add
 		slog.String("type", info.Type),
 	)
 
+	if h.auditLogger != nil {
+		apiKey := middleware.GetAPIKey(r.Context())
+		keyID := ""
+		if apiKey != nil {
+			keyID = apiKey.ID
+		}
+		h.auditLogger.LogSignerUnlocked(r.Context(), keyID, r.RemoteAddr, address)
+	}
+
 	h.writeJSON(w, SignerResponse{
 		Address: info.Address,
 		Type:    info.Type,
@@ -492,6 +517,15 @@ func (h *SignerHandler) handleLock(w http.ResponseWriter, r *http.Request, addre
 		slog.String("address", address),
 		slog.String("type", info.Type),
 	)
+
+	if h.auditLogger != nil {
+		apiKey := middleware.GetAPIKey(r.Context())
+		keyID := ""
+		if apiKey != nil {
+			keyID = apiKey.ID
+		}
+		h.auditLogger.LogSignerLocked(r.Context(), keyID, r.RemoteAddr, address)
+	}
 
 	h.writeJSON(w, SignerResponse{
 		Address: info.Address,

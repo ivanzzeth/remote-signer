@@ -15,6 +15,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/ivanzzeth/remote-signer/internal/audit"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	pkgvalidate "github.com/ivanzzeth/remote-signer/internal/validate"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
@@ -25,9 +26,10 @@ const TemplateFileType = "file"
 
 // TemplateInitializer handles syncing templates from config to database
 type TemplateInitializer struct {
-	repo      storage.TemplateRepository
-	logger    *slog.Logger
-	configDir string // Base directory for resolving relative file paths
+	repo        storage.TemplateRepository
+	logger      *slog.Logger
+	configDir   string // Base directory for resolving relative file paths
+	auditLogger *audit.AuditLogger
 }
 
 // NewTemplateInitializer creates a new template initializer
@@ -48,6 +50,11 @@ func NewTemplateInitializer(repo storage.TemplateRepository, logger *slog.Logger
 // SetConfigDir sets the base directory for resolving relative file paths
 func (i *TemplateInitializer) SetConfigDir(dir string) {
 	i.configDir = dir
+}
+
+// SetAuditLogger sets the audit logger for recording config template sync events.
+func (i *TemplateInitializer) SetAuditLogger(al *audit.AuditLogger) {
+	i.auditLogger = al
 }
 
 // SyncFromConfig syncs templates from config to database.
@@ -90,6 +97,9 @@ func (i *TemplateInitializer) SyncFromConfig(ctx context.Context, templates []Te
 				"id", tmpl.ID,
 				"name", tmpl.Name,
 			)
+			if i.auditLogger != nil {
+				i.auditLogger.LogTemplateSynced(ctx, "deleted", tmpl.ID, tmpl.Name)
+			}
 			deleted++
 		}
 	}
@@ -298,6 +308,9 @@ func (i *TemplateInitializer) syncTemplate(ctx context.Context, idx int, tmplCfg
 			"name", tmplCfg.Name,
 			"type", tmplCfg.Type,
 		)
+		if i.auditLogger != nil {
+			i.auditLogger.LogTemplateSynced(ctx, "created", tmplID, tmplCfg.Name)
+		}
 	} else {
 		existing.Name = tmpl.Name
 		existing.Description = tmpl.Description
@@ -319,6 +332,9 @@ func (i *TemplateInitializer) syncTemplate(ctx context.Context, idx int, tmplCfg
 			"name", tmplCfg.Name,
 			"type", tmplCfg.Type,
 		)
+		if i.auditLogger != nil {
+			i.auditLogger.LogTemplateSynced(ctx, "updated", tmplID, tmplCfg.Name)
+		}
 	}
 
 	return nil

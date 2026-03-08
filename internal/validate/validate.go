@@ -114,6 +114,14 @@ var ValidAuditEventTypes = map[types.AuditEventType]bool{
 	types.AuditEventTypeRuleDeleted:     true,
 	types.AuditEventTypeRateLimitHit:    true,
 	types.AuditEventTypeAPIRequest:      true,
+	types.AuditEventTypeConfigReloaded:  true,
+	types.AuditEventTypeTemplateSynced:  true,
+	types.AuditEventTypeAPIKeySynced:    true,
+	types.AuditEventTypeSignerCreated:   true,
+	types.AuditEventTypeSignerLocked:    true,
+	types.AuditEventTypeSignerUnlocked:  true,
+	types.AuditEventTypeHDWalletCreated: true,
+	types.AuditEventTypeHDWalletDerived: true,
 }
 
 // ValidAuditSeverities is the set of allowed audit severity values.

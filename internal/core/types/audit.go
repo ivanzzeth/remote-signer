@@ -35,6 +35,20 @@ const (
 
 	// Request lifecycle
 	AuditEventTypeAPIRequest AuditEventType = "api_request"
+
+	// Config sync events
+	AuditEventTypeConfigReloaded  AuditEventType = "config_reloaded"
+	AuditEventTypeTemplateSynced  AuditEventType = "template_synced"
+	AuditEventTypeAPIKeySynced    AuditEventType = "apikey_synced" // #nosec G101 -- not a credential, audit event type name
+
+	// Signer management events
+	AuditEventTypeSignerCreated  AuditEventType = "signer_created"
+	AuditEventTypeSignerLocked   AuditEventType = "signer_locked"
+	AuditEventTypeSignerUnlocked AuditEventType = "signer_unlocked"
+
+	// HD wallet management events
+	AuditEventTypeHDWalletCreated AuditEventType = "hdwallet_created"
+	AuditEventTypeHDWalletDerived AuditEventType = "hdwallet_derived"
 )
 
 // AuditSeverity represents the severity level of an audit event
