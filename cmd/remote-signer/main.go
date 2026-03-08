@@ -130,6 +130,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("failed to create API key initializer: %w", err)
 	}
+	apiKeyInit.SetAuditLogger(auditLogger)
 	if err := apiKeyInit.SyncFromConfig(context.Background(), cfg.APIKeys); err != nil {
 		return fmt.Errorf("failed to sync API keys from config: %w", err)
 	}
@@ -152,6 +153,7 @@ func run() error {
 		return fmt.Errorf("failed to create template initializer: %w", err)
 	}
 	templateInit.SetConfigDir(filepath.Dir(*configPath))
+	templateInit.SetAuditLogger(auditLogger)
 	if err := templateInit.SyncFromConfig(context.Background(), cfg.Templates); err != nil {
 		return fmt.Errorf("failed to sync templates from config: %w", err)
 	}
@@ -627,7 +629,7 @@ func run() error {
 					continue
 				}
 				log.Info("Received SIGHUP, reloading rules from config")
-				reloadRules(*configPath, ruleInit, templateInit, log)
+				reloadRules(*configPath, ruleInit, templateInit, auditLogger, log)
 				continue
 			}
 			log.Info("Received shutdown signal", "signal", sig.String())
@@ -650,10 +652,15 @@ func run() error {
 
 // reloadRules re-reads config and syncs rules to DB (triggered by SIGHUP).
 // Rule engine reads from DB per-request, so no engine restart is needed.
-func reloadRules(configPath string, ruleInit *config.RuleInitializer, templateInit *config.TemplateInitializer, log *slog.Logger) {
+func reloadRules(configPath string, ruleInit *config.RuleInitializer, templateInit *config.TemplateInitializer, auditLogger *audit.AuditLogger, log *slog.Logger) {
+	ctx := context.Background()
+
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		log.Error("SIGHUP: failed to reload config", "error", err)
+		if auditLogger != nil {
+			auditLogger.LogConfigReloaded(ctx, false, err.Error())
+		}
 		return
 	}
 
@@ -661,19 +668,31 @@ func reloadRules(configPath string, ruleInit *config.RuleInitializer, templateIn
 	loadedTemplates, err := templateInit.GetLoadedTemplates(cfg.Templates)
 	if err != nil {
 		log.Error("SIGHUP: failed to get loaded templates", "error", err)
+		if auditLogger != nil {
+			auditLogger.LogConfigReloaded(ctx, false, err.Error())
+		}
 		return
 	}
 	expandedRules, err := config.ExpandInstanceRules(cfg.Rules, loadedTemplates)
 	if err != nil {
 		log.Error("SIGHUP: failed to expand instance rules", "error", err)
+		if auditLogger != nil {
+			auditLogger.LogConfigReloaded(ctx, false, err.Error())
+		}
 		return
 	}
 
-	if err := ruleInit.SyncFromConfig(context.Background(), expandedRules); err != nil {
+	if err := ruleInit.SyncFromConfig(ctx, expandedRules); err != nil {
 		log.Error("SIGHUP: failed to sync rules from config", "error", err)
+		if auditLogger != nil {
+			auditLogger.LogConfigReloaded(ctx, false, err.Error())
+		}
 		return
 	}
 
+	if auditLogger != nil {
+		auditLogger.LogConfigReloaded(ctx, true, "")
+	}
 	log.Info("SIGHUP: rules reloaded successfully")
 }
 

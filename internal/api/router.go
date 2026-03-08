@@ -142,10 +142,16 @@ func (r *Router) setupRoutes() error {
 	if err != nil {
 		return err
 	}
+	if r.config.AuditLogger != nil {
+		signerHandler.SetAuditLogger(r.config.AuditLogger)
+	}
 
 	hdWalletHandler, err := evmhandler.NewHDWalletHandler(r.signerManager, r.logger, r.config.SignersAPIReadonly)
 	if err != nil {
 		return err
+	}
+	if r.config.AuditLogger != nil {
+		hdWalletHandler.SetAuditLogger(r.config.AuditLogger)
 	}
 
 	// Audit handler

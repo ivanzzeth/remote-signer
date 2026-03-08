@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
+	"github.com/ivanzzeth/remote-signer/internal/audit"
 	evmchain "github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/validate"
@@ -18,6 +19,12 @@ type HDWalletHandler struct {
 	signerManager evmchain.SignerManager
 	readOnly      bool // when true, block HD wallet creation/derive via API
 	logger        *slog.Logger
+	auditLogger   *audit.AuditLogger // optional: audit logging
+}
+
+// SetAuditLogger sets the audit logger for HD wallet operations.
+func (h *HDWalletHandler) SetAuditLogger(al *audit.AuditLogger) {
+	h.auditLogger = al
 }
 
 // NewHDWalletHandler creates a new HD wallet handler.
@@ -206,6 +213,19 @@ func (h *HDWalletHandler) createOrImport(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	if h.auditLogger != nil {
+		apiKey := middleware.GetAPIKey(r.Context())
+		keyID := ""
+		if apiKey != nil {
+			keyID = apiKey.ID
+		}
+		action := req.Action
+		if action == "" {
+			action = "create"
+		}
+		h.auditLogger.LogHDWalletCreated(r.Context(), keyID, r.RemoteAddr, info.PrimaryAddress, action)
+	}
+
 	h.writeJSON(w, toHDWalletResponse(info), http.StatusCreated)
 }
 
@@ -278,6 +298,15 @@ func (h *HDWalletHandler) deriveAddresses(w http.ResponseWriter, r *http.Request
 	} else {
 		h.writeError(w, "either 'index' or 'start'+'count' is required", http.StatusBadRequest)
 		return
+	}
+
+	if h.auditLogger != nil {
+		apiKey := middleware.GetAPIKey(r.Context())
+		keyID := ""
+		if apiKey != nil {
+			keyID = apiKey.ID
+		}
+		h.auditLogger.LogHDWalletDerived(r.Context(), keyID, r.RemoteAddr, primaryAddr, len(derived))
 	}
 
 	resp := deriveResponse{

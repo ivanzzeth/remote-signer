@@ -8,14 +8,16 @@ import (
 
 	"github.com/lib/pq"
 
+	"github.com/ivanzzeth/remote-signer/internal/audit"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
 // APIKeyInitializer handles syncing API keys from config to database
 type APIKeyInitializer struct {
-	repo   storage.APIKeyRepository
-	logger *slog.Logger
+	repo        storage.APIKeyRepository
+	logger      *slog.Logger
+	auditLogger *audit.AuditLogger
 }
 
 // NewAPIKeyInitializer creates a new API key initializer
@@ -30,6 +32,11 @@ func NewAPIKeyInitializer(repo storage.APIKeyRepository, logger *slog.Logger) (*
 		repo:   repo,
 		logger: logger,
 	}, nil
+}
+
+// SetAuditLogger sets the audit logger for recording config API key sync events.
+func (i *APIKeyInitializer) SetAuditLogger(al *audit.AuditLogger) {
+	i.auditLogger = al
 }
 
 // SyncFromConfig syncs API keys from config to database
@@ -105,6 +112,9 @@ func (i *APIKeyInitializer) syncKey(ctx context.Context, keyCfg APIKeyConfig) er
 			"admin", keyCfg.Admin,
 			"enabled", keyCfg.Enabled,
 		)
+		if i.auditLogger != nil {
+			i.auditLogger.LogAPIKeySynced(ctx, "created", keyCfg.ID, keyCfg.Name)
+		}
 	} else {
 		// Update existing key with config values
 		existing.Name = keyCfg.Name
@@ -129,6 +139,9 @@ func (i *APIKeyInitializer) syncKey(ctx context.Context, keyCfg APIKeyConfig) er
 			"admin", keyCfg.Admin,
 			"enabled", keyCfg.Enabled,
 		)
+		if i.auditLogger != nil {
+			i.auditLogger.LogAPIKeySynced(ctx, "updated", keyCfg.ID, keyCfg.Name)
+		}
 	}
 
 	return nil

@@ -39,6 +39,8 @@ func SeverityForEvent(eventType types.AuditEventType) types.AuditSeverity {
 		return types.AuditSeverityCritical
 	case types.AuditEventTypeApprovalDenied, types.AuditEventTypeRateLimitHit:
 		return types.AuditSeverityWarning
+	case types.AuditEventTypeSignerCreated, types.AuditEventTypeSignerUnlocked, types.AuditEventTypeHDWalletCreated:
+		return types.AuditSeverityWarning
 	default:
 		return types.AuditSeverityInfo
 	}
@@ -183,6 +185,96 @@ func (a *AuditLogger) LogRateLimitHit(ctx context.Context, apiKeyID, clientIP, m
 		ActorAddress:  clientIP,
 		RequestMethod: method,
 		RequestPath:   path,
+	})
+}
+
+// LogConfigReloaded logs a SIGHUP config reload event.
+func (a *AuditLogger) LogConfigReloaded(ctx context.Context, success bool, errMsg string) {
+	record := &types.AuditRecord{
+		EventType:    types.AuditEventTypeConfigReloaded,
+		ActorAddress: "system",
+		ErrorMessage: errMsg,
+	}
+	if !success {
+		record.ErrorMessage = fmt.Sprintf("config reload failed: %s", errMsg)
+	}
+	a.log(ctx, record)
+}
+
+// LogTemplateSynced logs a template sync event (create/update/delete from config).
+func (a *AuditLogger) LogTemplateSynced(ctx context.Context, action, templateID, templateName string) {
+	a.log(ctx, &types.AuditRecord{
+		EventType:    types.AuditEventTypeTemplateSynced,
+		ActorAddress: "config-sync",
+		ErrorMessage: fmt.Sprintf("template %s: %s (%s)", action, templateName, templateID),
+	})
+}
+
+// LogAPIKeySynced logs an API key sync event (create/update from config).
+func (a *AuditLogger) LogAPIKeySynced(ctx context.Context, action, keyID, keyName string) {
+	a.log(ctx, &types.AuditRecord{
+		EventType:    types.AuditEventTypeAPIKeySynced,
+		APIKeyID:     keyID,
+		ActorAddress: "config-sync",
+		ErrorMessage: fmt.Sprintf("apikey %s: %s", action, keyName),
+	})
+}
+
+// LogSignerCreated logs a signer creation event.
+func (a *AuditLogger) LogSignerCreated(ctx context.Context, apiKeyID, clientIP, address, signerType string) {
+	addr := address
+	a.log(ctx, &types.AuditRecord{
+		EventType:    types.AuditEventTypeSignerCreated,
+		APIKeyID:     apiKeyID,
+		ActorAddress: clientIP,
+		SignerAddress: &addr,
+		ErrorMessage: fmt.Sprintf("signer created: type=%s", signerType),
+	})
+}
+
+// LogSignerLocked logs a signer lock event.
+func (a *AuditLogger) LogSignerLocked(ctx context.Context, apiKeyID, clientIP, address string) {
+	addr := address
+	a.log(ctx, &types.AuditRecord{
+		EventType:    types.AuditEventTypeSignerLocked,
+		APIKeyID:     apiKeyID,
+		ActorAddress: clientIP,
+		SignerAddress: &addr,
+	})
+}
+
+// LogSignerUnlocked logs a signer unlock event.
+func (a *AuditLogger) LogSignerUnlocked(ctx context.Context, apiKeyID, clientIP, address string) {
+	addr := address
+	a.log(ctx, &types.AuditRecord{
+		EventType:    types.AuditEventTypeSignerUnlocked,
+		APIKeyID:     apiKeyID,
+		ActorAddress: clientIP,
+		SignerAddress: &addr,
+	})
+}
+
+// LogHDWalletCreated logs an HD wallet create/import event.
+func (a *AuditLogger) LogHDWalletCreated(ctx context.Context, apiKeyID, clientIP, primaryAddress, action string) {
+	addr := primaryAddress
+	a.log(ctx, &types.AuditRecord{
+		EventType:    types.AuditEventTypeHDWalletCreated,
+		APIKeyID:     apiKeyID,
+		ActorAddress: clientIP,
+		SignerAddress: &addr,
+		ErrorMessage: fmt.Sprintf("hdwallet %s", action),
+	})
+}
+
+// LogHDWalletDerived logs an HD wallet derive event.
+func (a *AuditLogger) LogHDWalletDerived(ctx context.Context, apiKeyID, clientIP, primaryAddress string, count int) {
+	addr := primaryAddress
+	a.log(ctx, &types.AuditRecord{
+		EventType:    types.AuditEventTypeHDWalletDerived,
+		APIKeyID:     apiKeyID,
+		ActorAddress: clientIP,
+		SignerAddress: &addr,
+		ErrorMessage: fmt.Sprintf("derived %d addresses", count),
 	})
 }
 
