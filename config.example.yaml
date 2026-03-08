@@ -106,6 +106,9 @@ audit_monitor:
   auth_failure_threshold: 5       # auth failures per hour
   blocklist_reject_threshold: 3   # sign rejections per hour
   high_freq_threshold: 100        # requests per hour
+  # Audit log retention: automatically delete records older than this (default: 90 days, 0 = disable)
+  retention_days: 90
+  cleanup_interval: "24h"         # how often to run cleanup
 
 security:
   # Maximum age of signed requests (prevents replay attacks)
@@ -141,6 +144,13 @@ security:
   # signers_api_readonly (default: false) — blocks signer creation, HD wallet create/import/derive.
   # Unlock/lock remain allowed. Low risk: API never exposes private keys or passwords.
   signers_api_readonly: false
+
+  # Auto-lock: automatically lock signers after this duration since unlock.
+  # Default: 0 (disabled). Sends alert to notify channel when auto-locked.
+  # auto_lock_timeout: "1h"
+
+  # Sign timeout: context timeout for sign operations. Default: 30s.
+  # sign_timeout: "30s"
 
   # Approval guard: pause when too many consecutive "not auto-approved" outcomes (blocked by rule or manual approval)
   # Use case: API key leaked — attacker uses valid key to brute-force; guard detects burst and pauses + alerts

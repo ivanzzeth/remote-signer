@@ -204,6 +204,10 @@ func (r *mockAuditRepo) GetByRequestID(_ context.Context, _ types.SignRequestID)
 	return nil, nil
 }
 
+func (r *mockAuditRepo) DeleteOlderThan(_ context.Context, _ time.Time) (int64, error) {
+	return 0, nil
+}
+
 var _ storage.AuditRepository = (*mockAuditRepo)(nil)
 
 // ---------------------------------------------------------------------------

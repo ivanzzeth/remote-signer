@@ -1,6 +1,7 @@
 package evm
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,15 +20,21 @@ import (
 
 // SignHandler handles EVM sign requests
 type SignHandler struct {
-	signService   *service.SignService
-	signerManager evm.SignerManager
-	logger        *slog.Logger
-	alertService  *middleware.SecurityAlertService
+	signService    *service.SignService
+	signerManager  evm.SignerManager
+	logger         *slog.Logger
+	alertService   *middleware.SecurityAlertService
+	signTimeout    time.Duration // context timeout for sign operations (default: 30s)
 }
 
 // SetAlertService sets the security alert service for real-time notifications.
 func (h *SignHandler) SetAlertService(alertService *middleware.SecurityAlertService) {
 	h.alertService = alertService
+}
+
+// SetSignTimeout sets the context timeout for sign operations.
+func (h *SignHandler) SetSignTimeout(d time.Duration) {
+	h.signTimeout = d
 }
 
 // NewSignHandler creates a new sign handler
@@ -181,7 +188,14 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ClientIP:      clientIP,
 	}
 
-	resp, err := h.signService.Sign(r.Context(), signReq)
+	signTimeout := h.signTimeout
+	if signTimeout == 0 {
+		signTimeout = 30 * time.Second
+	}
+	signCtx, signCancel := context.WithTimeout(r.Context(), signTimeout)
+	defer signCancel()
+
+	resp, err := h.signService.Sign(signCtx, signReq)
 	duration := time.Since(start)
 	chainType := string(types.ChainTypeEVM)
 

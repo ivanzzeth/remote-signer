@@ -34,6 +34,9 @@ type AuditRepository interface {
 	Query(ctx context.Context, filter AuditFilter) ([]*types.AuditRecord, error)
 	Count(ctx context.Context, filter AuditFilter) (int, error)
 	GetByRequestID(ctx context.Context, requestID types.SignRequestID) ([]*types.AuditRecord, error)
+	// DeleteOlderThan removes audit records with timestamp before the given time.
+	// Returns the number of records deleted.
+	DeleteOlderThan(ctx context.Context, before time.Time) (int64, error)
 }
 
 // GormAuditRepository implements AuditRepository using GORM
@@ -141,4 +144,13 @@ func (r *GormAuditRepository) GetByRequestID(ctx context.Context, requestID type
 		RequestID: &requestID,
 		Limit:     1000, // Allow more records for a specific request
 	})
+}
+
+// DeleteOlderThan removes audit records with timestamp before the given time.
+func (r *GormAuditRepository) DeleteOlderThan(ctx context.Context, before time.Time) (int64, error) {
+	result := r.db.WithContext(ctx).Where("timestamp < ?", before).Delete(&types.AuditRecord{})
+	if result.Error != nil {
+		return 0, fmt.Errorf("failed to delete old audit records: %w", result.Error)
+	}
+	return result.RowsAffected, nil
 }
