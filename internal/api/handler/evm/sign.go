@@ -22,6 +22,12 @@ type SignHandler struct {
 	signService   *service.SignService
 	signerManager evm.SignerManager
 	logger        *slog.Logger
+	alertService  *middleware.SecurityAlertService
+}
+
+// SetAlertService sets the security alert service for real-time notifications.
+func (h *SignHandler) SetAlertService(alertService *middleware.SecurityAlertService) {
+	h.alertService = alertService
 }
 
 // NewSignHandler creates a new sign handler
@@ -78,6 +84,17 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Check chain permission
 	if !middleware.CheckChainPermission(apiKey, types.ChainTypeEVM) {
+		h.logger.Warn("chain permission denied",
+			"api_key_id", apiKey.ID,
+			"chain_type", "evm",
+		)
+		if h.alertService != nil {
+			clientIP, _ := r.Context().Value(middleware.ClientIPContextKey).(string)
+			h.alertService.Alert(middleware.AlertChainDenied, apiKey.ID,
+				fmt.Sprintf("[Remote Signer] CHAIN ACCESS DENIED\n\nAPI Key: %s (%s)\nIP: %s\nChain: EVM\nTime: %s",
+					apiKey.ID, apiKey.Name, clientIP,
+					time.Now().UTC().Format(time.RFC3339)))
+		}
 		h.writeError(w, "not authorized for EVM chain", http.StatusForbidden)
 		return
 	}
@@ -136,6 +153,17 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if !middleware.CheckSignerPermissionWithHDWallets(apiKey, req.SignerAddress, hdMgr) {
+		h.logger.Warn("signer permission denied",
+			"api_key_id", apiKey.ID,
+			"signer_address", req.SignerAddress,
+		)
+		if h.alertService != nil {
+			clientIP, _ := r.Context().Value(middleware.ClientIPContextKey).(string)
+			h.alertService.Alert(middleware.AlertSignerDenied, apiKey.ID,
+				fmt.Sprintf("[Remote Signer] SIGNER ACCESS DENIED\n\nAPI Key: %s (%s)\nIP: %s\nSigner: %s\nTime: %s",
+					apiKey.ID, apiKey.Name, clientIP, req.SignerAddress,
+					time.Now().UTC().Format(time.RFC3339)))
+		}
 		h.writeError(w, "not authorized for this signer", http.StatusForbidden)
 		return
 	}

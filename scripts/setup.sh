@@ -463,7 +463,7 @@ print_banner() {
 
 step_deployment_mode() {
     echo -e "${BOLD}=============================================================${NC}"
-    echo -e "${BOLD}  Step 1/5: Deployment Mode${NC}"
+    echo -e "${BOLD}  Step 1/6: Deployment Mode${NC}"
     echo -e "${BOLD}=============================================================${NC}"
     echo ""
     echo "How do you want to run remote-signer?"
@@ -492,7 +492,7 @@ step_deployment_mode() {
 
 step_api_keys() {
     echo -e "${BOLD}=============================================================${NC}"
-    echo -e "${BOLD}  Step 2/5: API Keys${NC}"
+    echo -e "${BOLD}  Step 2/6: API Keys${NC}"
     echo -e "${BOLD}=============================================================${NC}"
     echo ""
     echo "Two API key pairs (admin + dev):"
@@ -551,7 +551,7 @@ step_api_keys() {
 
 step_tls() {
     echo -e "${BOLD}=============================================================${NC}"
-    echo -e "${BOLD}  Step 3/5: TLS Certificates${NC}"
+    echo -e "${BOLD}  Step 3/6: TLS Certificates${NC}"
     echo -e "${BOLD}=============================================================${NC}"
     echo ""
     echo "Transport security mode:"
@@ -698,9 +698,74 @@ step_ip_whitelist() {
     log_info "IP whitelist enabled with ${#IP_WHITELIST_ALLOWED_IPS[@]} entry/entries."
 }
 
+step_notifications() {
+    echo -e "${BOLD}=============================================================${NC}"
+    echo -e "${BOLD}  Step 4/6: Security Alerts${NC}"
+    echo -e "${BOLD}=============================================================${NC}"
+    echo ""
+    echo -e "${YELLOW}Without notifications, unauthorized access is only logged — NOT alerted.${NC}"
+    echo "Configure at least one channel to receive real-time security alerts"
+    echo "(IP blocks, auth failures, replay attacks, rate limits, etc.)."
+    echo ""
+    echo "Channels:"
+    echo -e "  ${CYAN}1)${NC} Telegram   ${DIM}bot sends to chat/channel${NC}"
+    echo -e "  ${CYAN}2)${NC} Webhook    ${DIM}HTTP POST to any URL (Slack incoming webhook, Discord, etc.)${NC}"
+    echo -e "  ${CYAN}3)${NC} Skip       ${DIM}configure later in config file${NC}"
+    echo ""
+    NOTIFY_CHOICE=$(ask "Select [1/2/3]" 1 1 2 3)
+
+    # Defaults
+    NOTIFY_TELEGRAM_ENABLED=false
+    NOTIFY_TELEGRAM_BOT_TOKEN=
+    NOTIFY_TELEGRAM_CHAT_IDS=
+    NOTIFY_WEBHOOK_ENABLED=false
+    NOTIFY_WEBHOOK_URLS=
+
+    case "$NOTIFY_CHOICE" in
+        1)
+            echo ""
+            echo -e "${CYAN}Telegram Setup:${NC}"
+            echo -e "  1. Message ${DIM}@BotFather${NC} on Telegram → /newbot → copy the bot token"
+            echo -e "  2. Add bot to your group/channel → get chat ID (e.g. ${DIM}-123456789${NC} or ${DIM}@channel_name${NC})"
+            echo ""
+            read -rp "  Paste bot token> " NOTIFY_TELEGRAM_BOT_TOKEN
+            if [ -n "$NOTIFY_TELEGRAM_BOT_TOKEN" ]; then
+                read -rp "  Chat ID(s) (comma-separated, e.g. -123456789,@mychannel): " NOTIFY_TELEGRAM_CHAT_IDS
+                if [ -n "$NOTIFY_TELEGRAM_CHAT_IDS" ]; then
+                    NOTIFY_TELEGRAM_ENABLED=true
+                    log_info "Telegram notifications enabled"
+                else
+                    log_warn "No chat IDs entered; Telegram skipped."
+                fi
+            else
+                log_warn "No bot token entered; Telegram skipped."
+            fi
+            ;;
+        2)
+            echo ""
+            echo -e "${CYAN}Webhook Setup:${NC}"
+            echo "  Enter one or more webhook URLs (comma-separated)."
+            echo -e "  ${DIM}e.g. https://hooks.slack.com/services/T.../B.../xxx${NC}"
+            echo ""
+            read -rp "  Webhook URL(s): " NOTIFY_WEBHOOK_URLS
+            if [ -n "$NOTIFY_WEBHOOK_URLS" ]; then
+                NOTIFY_WEBHOOK_ENABLED=true
+                log_info "Webhook notifications enabled"
+            else
+                log_warn "No URLs entered; webhook skipped."
+            fi
+            ;;
+        *)
+            log_warn "No notification channel configured. Security alerts will only appear in logs."
+            log_warn "To enable later, edit config → notify section. See docs/CONFIGURATION.md"
+            ;;
+    esac
+    echo ""
+}
+
 step_generate_config() {
     echo -e "${BOLD}=============================================================${NC}"
-    echo -e "${BOLD}  Step 4/5: Generate Configuration${NC}"
+    echo -e "${BOLD}  Step 5/6: Generate Configuration${NC}"
     echo -e "${BOLD}=============================================================${NC}"
     echo ""
 
@@ -716,6 +781,38 @@ step_generate_config() {
         done
     else
         IP_WHITELIST_ALLOWED_IPS_YAML="allowed_ips: []"
+    fi
+
+    # Build notify YAML from step_notifications choices
+    NOTIFY_YAML="# --- Notifications (security alerts) ---"
+    NOTIFY_CHANNELS_YAML="notify_channels:"
+    if [ "${NOTIFY_TELEGRAM_ENABLED:-false}" = "true" ] || [ "${NOTIFY_WEBHOOK_ENABLED:-false}" = "true" ]; then
+        NOTIFY_YAML="${NOTIFY_YAML}${NEWLINE}notify:"
+        if [ "${NOTIFY_TELEGRAM_ENABLED:-false}" = "true" ]; then
+            NOTIFY_YAML="${NOTIFY_YAML}${NEWLINE}  telegram:${NEWLINE}    enabled: true${NEWLINE}    bot_token: \"${NOTIFY_TELEGRAM_BOT_TOKEN}\""
+            # Build telegram chat ID list
+            TELEGRAM_CHAT_LIST=""
+            IFS=',' read -ra CHAT_PARTS <<< "$NOTIFY_TELEGRAM_CHAT_IDS"
+            for cid in "${CHAT_PARTS[@]}"; do
+                cid=$(printf '%s' "$cid" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+                [ -n "$cid" ] && TELEGRAM_CHAT_LIST="${TELEGRAM_CHAT_LIST:+$TELEGRAM_CHAT_LIST, }\"${cid}\""
+            done
+            NOTIFY_CHANNELS_YAML="${NOTIFY_CHANNELS_YAML}${NEWLINE}  telegram: [${TELEGRAM_CHAT_LIST}]"
+        fi
+        if [ "${NOTIFY_WEBHOOK_ENABLED:-false}" = "true" ]; then
+            NOTIFY_YAML="${NOTIFY_YAML}${NEWLINE}  webhook:${NEWLINE}    enabled: true${NEWLINE}    timeout: \"10s\""
+            # Build webhook URL list
+            WEBHOOK_URL_LIST=""
+            IFS=',' read -ra URL_PARTS <<< "$NOTIFY_WEBHOOK_URLS"
+            for url in "${URL_PARTS[@]}"; do
+                url=$(printf '%s' "$url" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+                [ -n "$url" ] && WEBHOOK_URL_LIST="${WEBHOOK_URL_LIST:+$WEBHOOK_URL_LIST, }\"${url}\""
+            done
+            NOTIFY_CHANNELS_YAML="${NOTIFY_CHANNELS_YAML}${NEWLINE}  webhook: [${WEBHOOK_URL_LIST}]"
+        fi
+    else
+        NOTIFY_YAML="${NOTIFY_YAML}${NEWLINE}# No notification channel configured. Edit this section to enable alerts.${NEWLINE}# See docs/CONFIGURATION.md for Telegram, Webhook, Slack, Pushover options.${NEWLINE}# notify:${NEWLINE}#   telegram:${NEWLINE}#     enabled: true${NEWLINE}#     bot_token: \"your-bot-token\"${NEWLINE}#   webhook:${NEWLINE}#     enabled: true${NEWLINE}#     timeout: \"10s\""
+        NOTIFY_CHANNELS_YAML="${NOTIFY_CHANNELS_YAML}${NEWLINE}  # telegram: [\"-123456789\"]${NEWLINE}  # webhook: [\"https://hooks.example.com/alerts\"]"
     fi
 
     # Always overwrite config so TLS, port, and keys stay in sync with setup choices
@@ -759,17 +856,34 @@ chains:
 security:
   max_request_age: "60s"
   rate_limit_default: 100
+  ip_rate_limit: 200              # pre-auth per-IP limit (req/min); protects against brute-force
   nonce_required: true
   manual_approval_enabled: false  # default: no manual approval; no-match => reject
   rules_api_readonly: true
   signers_api_readonly: false
   allow_sighup_rules_reload: false
   approval_guard:
-    enabled: false
+    enabled: true                 # pause signing when too many rejections (detect key abuse)
+    window: "5m"
+    threshold: 10
+    resume_after: "2h"
   ip_whitelist:
     enabled: ${IP_WHITELIST_ENABLED:-false}
     $IP_WHITELIST_ALLOWED_IPS_YAML
     trust_proxy: false
+
+$NOTIFY_YAML
+
+$NOTIFY_CHANNELS_YAML
+
+# --- Audit Monitor (background anomaly detection) ---
+audit_monitor:
+  enabled: true                   # periodic anomaly scanning
+  interval: "1h"
+  lookback_hours: 1
+  auth_failure_threshold: 5       # alert if 5+ auth failures/hour from same source
+  blocklist_reject_threshold: 3   # alert if 3+ sign rejections/hour
+  high_freq_threshold: 100        # alert if 100+ requests/hour from one source
 
 logger:
   level: "info"
@@ -1001,7 +1115,7 @@ step_preset_rules() {
 
 step_done() {
     echo -e "${BOLD}=============================================================${NC}"
-    echo -e "${BOLD}  Step 5/5: Done!${NC}"
+    echo -e "${BOLD}  Step 6/6: Done!${NC}"
     echo -e "${BOLD}=============================================================${NC}"
     echo ""
 
@@ -1237,7 +1351,7 @@ main() {
     check_openssl
     check_go
 
-    # Step 1/5: Deployment mode
+    # Step 1/6: Deployment mode
     step_deployment_mode
 
     # Docker mode: ensure Docker is installed
@@ -1250,10 +1364,10 @@ main() {
         check_screen
     fi
 
-    # Step 2/5: API Keys
+    # Step 2/6: API Keys
     step_api_keys
 
-    # Step 3/5: TLS
+    # Step 3/6: TLS
     step_tls
 
     # Foundry installation (non-interactive, both modes need it)
@@ -1262,16 +1376,19 @@ main() {
     # Optional: IP whitelist (allowed_ips only)
     step_ip_whitelist
 
-    # Step 4/5: Generate configuration
+    # Step 4/6: Security alerts (notification channels)
+    step_notifications
+
+    # Step 5/6: Generate configuration
     step_generate_config
 
     # CLI tools (download or build) — before preset so remote-signer-cli is available
     step_ensure_cli_tools
 
-    # Step 4b: Optionally add rules from presets (interactive)
+    # Step 5b: Optionally add rules from presets (interactive)
     step_preset_rules
 
-    # Step 5/5: Done
+    # Step 6/6: Done
     step_done
 
     # One-click: offer to start the server (exec deploy.sh)
