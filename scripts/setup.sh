@@ -698,6 +698,53 @@ step_ip_whitelist() {
     log_info "IP whitelist enabled with ${#IP_WHITELIST_ALLOWED_IPS[@]} entry/entries."
 }
 
+step_security_settings() {
+    echo -e "${BOLD}  Security settings (optional)${NC}"
+    echo "Configure signer auto-lock, sign timeout, and audit retention."
+    echo ""
+
+    # Auto-lock timeout
+    AUTO_LOCK_TIMEOUT=""
+    echo -e "  ${CYAN}Auto-lock timeout${NC}: automatically lock signers after a period since unlock."
+    echo -e "  Prevents forgotten unlocked signers. Examples: ${DIM}30m, 1h, 2h${NC}. Empty = disabled."
+    read -rp "  Auto-lock timeout [disabled]: " AUTO_LOCK_TIMEOUT
+    AUTO_LOCK_TIMEOUT=$(printf '%s' "$AUTO_LOCK_TIMEOUT" | tr -d '[:space:]')
+    if [ -n "$AUTO_LOCK_TIMEOUT" ]; then
+        log_info "Signer auto-lock: $AUTO_LOCK_TIMEOUT"
+    else
+        log_info "Signer auto-lock: disabled"
+    fi
+
+    # Sign timeout
+    SIGN_TIMEOUT=""
+    echo ""
+    echo -e "  ${CYAN}Sign timeout${NC}: max time for a single sign operation (includes rule evaluation)."
+    echo -e "  Prevents hung requests. Examples: ${DIM}15s, 30s, 1m${NC}."
+    read -rp "  Sign timeout [30s]: " SIGN_TIMEOUT
+    SIGN_TIMEOUT=$(printf '%s' "$SIGN_TIMEOUT" | tr -d '[:space:]')
+    if [ -z "$SIGN_TIMEOUT" ]; then
+        SIGN_TIMEOUT="30s"
+    fi
+    log_info "Sign timeout: $SIGN_TIMEOUT"
+
+    # Audit retention
+    AUDIT_RETENTION_DAYS=""
+    echo ""
+    echo -e "  ${CYAN}Audit retention${NC}: auto-delete audit records older than N days."
+    echo -e "  Keeps database size under control. Examples: ${DIM}30, 90, 365${NC}. 0 or empty = keep forever."
+    read -rp "  Retention days [90]: " AUDIT_RETENTION_DAYS
+    AUDIT_RETENTION_DAYS=$(printf '%s' "$AUDIT_RETENTION_DAYS" | tr -d '[:space:]')
+    if [ -z "$AUDIT_RETENTION_DAYS" ]; then
+        AUDIT_RETENTION_DAYS="90"
+    fi
+    if [ "$AUDIT_RETENTION_DAYS" = "0" ]; then
+        log_info "Audit retention: disabled (keep forever)"
+    else
+        log_info "Audit retention: $AUDIT_RETENTION_DAYS days"
+    fi
+    echo ""
+}
+
 step_notifications() {
     echo -e "${BOLD}=============================================================${NC}"
     echo -e "${BOLD}  Step 4/6: Security Alerts${NC}"
@@ -862,6 +909,8 @@ security:
   rules_api_readonly: true
   signers_api_readonly: false
   allow_sighup_rules_reload: false
+  auto_lock_timeout: "${AUTO_LOCK_TIMEOUT}"   # auto-lock signers after unlock; empty/0 = disabled
+  sign_timeout: "${SIGN_TIMEOUT:-30s}"        # context timeout for sign operations
   approval_guard:
     enabled: true                 # pause signing when too many rejections (detect key abuse)
     window: "5m"
@@ -884,6 +933,8 @@ audit_monitor:
   auth_failure_threshold: 5       # alert if 5+ auth failures/hour from same source
   blocklist_reject_threshold: 3   # alert if 3+ sign rejections/hour
   high_freq_threshold: 100        # alert if 100+ requests/hour from one source
+  retention_days: ${AUDIT_RETENTION_DAYS:-90}  # auto-delete audit records older than N days; 0 = keep forever
+  cleanup_interval: "24h"         # how often to run cleanup
 
 logger:
   level: "info"
@@ -1375,6 +1426,9 @@ main() {
 
     # Optional: IP whitelist (allowed_ips only)
     step_ip_whitelist
+
+    # Optional: Security settings (auto-lock, sign timeout, audit retention)
+    step_security_settings
 
     # Step 4/6: Security alerts (notification channels)
     step_notifications

@@ -267,6 +267,8 @@ func TestHDWalletHandler_CreateWallet_WithEntropyBits(t *testing.T) {
 	var capturedParams types.CreateHDWalletParams
 	sm := newDefaultMockSignerManager()
 	sm.hdWalletMgr.createWalletFn = func(_ context.Context, params types.CreateHDWalletParams) (*evmchain.HDWalletInfo, error) {
+		// Copy strings defensively: secure.ZeroString will zero the backing array after handler returns.
+		params.Password = string([]byte(params.Password))
 		capturedParams = params
 		return &evmchain.HDWalletInfo{
 			PrimaryAddress: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -330,6 +332,9 @@ func TestHDWalletHandler_ImportWallet(t *testing.T) {
 	var capturedParams types.ImportHDWalletParams
 	sm := newDefaultMockSignerManager()
 	sm.hdWalletMgr.importWalletFn = func(_ context.Context, params types.ImportHDWalletParams) (*evmchain.HDWalletInfo, error) {
+		// Copy strings defensively: secure.ZeroString will zero the backing array after handler returns.
+		params.Password = string([]byte(params.Password))
+		params.Mnemonic = string([]byte(params.Mnemonic))
 		capturedParams = params
 		return &evmchain.HDWalletInfo{
 			PrimaryAddress: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",

@@ -99,9 +99,9 @@ services:
       - ./rules:/app/configs/rules:ro
       # TLS certificates (generated via ./scripts/gen-certs.sh)
       - ./certs:/app/certs:ro
-      # Keystores - mounted to match project structure
-      - ./data/keystores:/app/data/keystores:ro
-      # HD wallets - read-write for API-created wallets
+      # Keystores - read-write: API/TUI needs to create and import keystore files
+      - ./data/keystores:/app/data/keystores
+      # HD wallets - read-write: API/TUI needs to create and derive HD wallet files
       - ./data/hd-wallets:/app/data/hd-wallets
       # Foundry binaries (downloaded to host via deploy.sh init)
       - ./data/foundry/forge:/usr/local/bin/forge:ro

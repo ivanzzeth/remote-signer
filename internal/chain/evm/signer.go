@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ivanzzeth/ethsig"
@@ -260,6 +261,8 @@ func (r *SignerRegistry) UnlockSigner(address string, signer *ethsig.Signer) err
 	r.signers[addrKey] = signer
 	info.Locked = false
 	info.Enabled = true
+	now := time.Now().UTC()
+	info.UnlockedAt = &now
 	r.info[addrKey] = info
 	return nil
 }
@@ -281,6 +284,7 @@ func (r *SignerRegistry) LockSigner(address string) error {
 	r.signers[addrKey] = nil
 	info.Locked = true
 	info.Enabled = false
+	info.UnlockedAt = nil
 	r.info[addrKey] = info
 	return nil
 }

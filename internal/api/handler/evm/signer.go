@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/audit"
@@ -60,6 +61,7 @@ type SignerResponse struct {
 	Type        string           `json:"type"`
 	Enabled     bool             `json:"enabled"`
 	Locked      bool             `json:"locked"`
+	UnlockedAt  *time.Time       `json:"unlocked_at,omitempty"`
 	AllowedKeys []AllowedKeyInfo `json:"allowed_keys,omitempty"`
 }
 
@@ -256,10 +258,11 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 	signers := make([]SignerResponse, len(filteredSigners))
 	for i, s := range filteredSigners {
 		signers[i] = SignerResponse{
-			Address: s.Address,
-			Type:    s.Type,
-			Enabled: s.Enabled,
-			Locked:  s.Locked,
+			Address:    s.Address,
+			Type:       s.Type,
+			Enabled:    s.Enabled,
+			Locked:     s.Locked,
+			UnlockedAt: s.UnlockedAt,
 		}
 		if accessData != nil {
 			signers[i].AllowedKeys = accessData.keysForSigner(s.Address)
@@ -493,10 +496,11 @@ func (h *SignerHandler) handleUnlock(w http.ResponseWriter, r *http.Request, add
 	}
 
 	h.writeJSON(w, SignerResponse{
-		Address: info.Address,
-		Type:    info.Type,
-		Enabled: info.Enabled,
-		Locked:  info.Locked,
+		Address:    info.Address,
+		Type:       info.Type,
+		Enabled:    info.Enabled,
+		Locked:     info.Locked,
+		UnlockedAt: info.UnlockedAt,
 	}, http.StatusOK)
 }
 
@@ -535,10 +539,11 @@ func (h *SignerHandler) handleLock(w http.ResponseWriter, r *http.Request, addre
 	}
 
 	h.writeJSON(w, SignerResponse{
-		Address: info.Address,
-		Type:    info.Type,
-		Enabled: info.Enabled,
-		Locked:  info.Locked,
+		Address:    info.Address,
+		Type:       info.Type,
+		Enabled:    info.Enabled,
+		Locked:     info.Locked,
+		UnlockedAt: info.UnlockedAt,
 	}, http.StatusOK)
 }
 

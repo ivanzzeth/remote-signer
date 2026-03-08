@@ -600,7 +600,9 @@ func run() error {
 		SignersAPIReadonly:  cfg.Security.IsSignersAPIReadonly(),
 		AlertService:       securityAlertService,
 		AuditLogger:        auditLogger,
-		SignTimeout:        cfg.Security.SignTimeout,
+		SignTimeout:         cfg.Security.SignTimeout,
+		AutoLockTimeout:    cfg.Security.AutoLockTimeout,
+		AuditRetentionDays: cfg.AuditMonitor.RetentionDays,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create router: %w", err)
