@@ -138,20 +138,75 @@ Rules can be scoped by `chain_type`, `chain_id`, `api_key_id`, `signer_address`.
 
 ---
 
-## 8. Audit and Monitoring
+## 8. Real-Time Security Alerts
+
+The `SecurityAlertService` sends instant notifications (Telegram, webhook, Slack, Pushover) when unauthorized access is detected. Alerts are rate-limited per (type, source) with a 5-minute cooldown to prevent notification flooding.
+
+### Alert Types
+
+| Alert Type | Trigger | Severity |
+|------------|---------|----------|
+| `ip_blocked` | Request from non-whitelisted IP | Critical |
+| `auth_failure` | Invalid API key, bad signature | Critical |
+| `nonce_replay` | Duplicate nonce (replay attack) | Critical |
+| `disabled_key` | Request with disabled API key | Critical |
+| `expired_key` | Request with expired API key | Warning |
+| `admin_denied` | Non-admin key accessing admin endpoint | Warning |
+| `rate_limit_ip` | IP-level rate limit exceeded | Warning |
+| `rate_limit_key` | API key rate limit exceeded | Warning |
+| `chain_denied` | API key lacks chain permission | Warning |
+| `signer_denied` | API key lacks signer permission | Warning |
+
+### Alert Points in Request Pipeline
+
+```
+Request → IP Whitelist (ip_blocked)
+        → IP Rate Limit (rate_limit_ip)
+        → Auth Verification (auth_failure / nonce_replay / disabled_key / expired_key)
+        → Admin Check (admin_denied)
+        → API Key Rate Limit (rate_limit_key)
+        → Handler: Chain Permission (chain_denied)
+        → Handler: Signer Permission (signer_denied)
+```
+
+### Configuration
+
+Alerts are delivered through the `notify` channels configured in `config.yaml`. Setup via `scripts/setup.sh` step 5 (interactive Telegram/webhook wizard).
+
+```yaml
+notify:
+  telegram:
+    enabled: true
+    bot_token: "${TELEGRAM_BOT_TOKEN}"  # from setup.sh
+notify_channels:
+  telegram: ["-123456789"]
+```
+
+### Docker Proxy
+
+When running in Docker, outbound HTTPS (e.g. Telegram API) may require a proxy. The `docker-compose.yml` passes `HTTP_PROXY` / `HTTPS_PROXY` from the host environment. If unset, no proxy is used.
+
+---
+
+## 9. Audit and Monitoring
 
 ### Audit log
 
-- Sign requests, approvals, rejections, rule matches, and other security-relevant events are written to the audit store.
+- Sign requests, approvals, rejections, rule matches, and other security-relevant events are written to the audit store (PostgreSQL).
+- 12 event types defined: `auth_success`, `auth_failure`, `sign_request`, `sign_complete`, `sign_failed`, `sign_rejected`, `rule_matched`, `approval_request`, `approval_granted`, `approval_denied`, `rule_created/updated/deleted`, `rate_limit_hit`.
+- Queryable via API (`GET /api/v1/audit`) with filters: event_type, api_key_id, chain_type, start_time, end_time, cursor-based pagination.
+- TUI provides interactive audit log viewer with filtering, detail view, and navigation.
 - Supports forensics and compliance.
 
-### Anomaly monitor (optional)
+### Anomaly monitor (background)
 
-- Background job scans audit records for patterns such as:
-  - Auth failures per source
-  - Blocklist rejections per key
-  - High request frequency per key
-- When thresholds are exceeded, notifications are sent via the same notify channels (Slack, Pushover, webhook).
+- Background job scans audit records periodically for anomaly patterns:
+  - **AUTH_FAILURE_BURST**: auth failures per source exceeding threshold
+  - **SIGN_REJECTION_BURST**: sign rejections per key exceeding threshold
+  - **RATE_LIMIT_HIT**: any rate limit events
+  - **HIGH_FREQUENCY_REQUESTS**: request rate per source exceeding threshold
+- When thresholds are exceeded, notifications are sent via configured notify channels (Telegram, Slack, Pushover, webhook).
+- Configurable via `audit_monitor` section: interval, lookback window, per-category thresholds.
 
 ### Metrics
 
@@ -168,7 +223,7 @@ Rules can be scoped by `chain_type`, `chain_id`, `api_key_id`, `signer_address`.
 | Network     | IP whitelist           | Restrict which hosts can reach the API      |
 | API         | Ed25519 API key        | Authenticate clients                         |
 | API         | Timestamp + nonce      | Replay protection                           |
-| API         | Rate limit (per key)   | Throttle abuse per key                       |
+| API         | Rate limit (per key + per IP) | Throttle abuse per key and per source  |
 | Key custody | Keystore + password    | Encrypted signer keys at rest; test-only plaintext |
 | Key custody | HSM (planned)          | Signing in HSM; keys never leave device     |
 | Application | Blocklist rules        | Hard reject by parameter (e.g. address)     |
@@ -176,6 +231,7 @@ Rules can be scoped by `chain_type`, `chain_id`, `api_key_id`, `signer_address`.
 | Application | Budget + period/renew  | Time- and amount-bounded quotas             |
 | Application | Rule/instance expiry   | Time-limited authorization                   |
 | Application | Approval guard         | Pause + alert on abuse burst, then resume    |
+| Alerting    | Real-time security alerts | Instant notifications on 10 attack vectors |
 | Operations  | Audit log + monitor    | Forensics and anomaly alerts                 |
 | Rule engine | Solidity static check  | Block dangerous cheatcodes and language constructs |
 | Rule engine | JS static check        | Block prototype pollution, sandbox escape, dynamic exec |
@@ -190,7 +246,7 @@ Together, these provide layered protection from the network through to applicati
 
 ---
 
-## 9. Rule Engine Static Analysis
+## 10. Rule Engine Static Analysis
 
 Both Solidity and JavaScript rule engines perform static security checks before any code is executed.
 
@@ -215,7 +271,7 @@ This is a defense-in-depth layer alongside the runtime sandbox (`removeGlobals()
 
 ---
 
-## 10. Container Hardening (Docker)
+## 11. Container Hardening (Docker)
 
 Production Docker deployment includes multiple hardening layers:
 
