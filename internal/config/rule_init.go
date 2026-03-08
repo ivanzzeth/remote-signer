@@ -14,10 +14,11 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/ivanzzeth/remote-signer/internal/audit"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/ruleconfig"
-	pkgvalidate "github.com/ivanzzeth/remote-signer/internal/validate"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
+	pkgvalidate "github.com/ivanzzeth/remote-signer/internal/validate"
 )
 
 // RuleFileType is the special rule type for including rules from external files
@@ -30,9 +31,10 @@ type RuleFileConfig struct {
 
 // RuleInitializer handles syncing rules from config to database
 type RuleInitializer struct {
-	repo      storage.RuleRepository
-	logger    *slog.Logger
-	configDir string // Base directory for resolving relative file paths
+	repo        storage.RuleRepository
+	logger      *slog.Logger
+	configDir   string // Base directory for resolving relative file paths
+	auditLogger *audit.AuditLogger
 }
 
 // NewRuleInitializer creates a new rule initializer
@@ -53,6 +55,11 @@ func NewRuleInitializer(repo storage.RuleRepository, logger *slog.Logger) (*Rule
 // SetConfigDir sets the base directory for resolving relative file paths in rule files
 func (i *RuleInitializer) SetConfigDir(dir string) {
 	i.configDir = dir
+}
+
+// SetAuditLogger sets the audit logger for recording config rule sync events.
+func (i *RuleInitializer) SetAuditLogger(al *audit.AuditLogger) {
+	i.auditLogger = al
 }
 
 // ValidateExplicitRuleIDs ensures every rule has an explicit id. Returns error if any rule lacks id.
@@ -133,6 +140,9 @@ func (i *RuleInitializer) executeSyncBody(ctx context.Context, repo storage.Rule
 				"id", rule.ID,
 				"name", rule.Name,
 			)
+			if i.auditLogger != nil {
+				i.auditLogger.LogRuleDeleted(ctx, "config", "config-sync", rule.ID)
+			}
 			deleted++
 		}
 	}
@@ -428,6 +438,9 @@ func (i *RuleInitializer) syncRule(ctx context.Context, repo storage.RuleReposit
 			"type", ruleCfg.Type,
 			"mode", ruleCfg.Mode,
 		)
+		if i.auditLogger != nil {
+			i.auditLogger.LogRuleCreated(ctx, "config", "config-sync", ruleID, ruleCfg.Name)
+		}
 	} else {
 		// Update existing rule with config values
 		existing.Name = rule.Name
@@ -453,6 +466,9 @@ func (i *RuleInitializer) syncRule(ctx context.Context, repo storage.RuleReposit
 			"type", ruleCfg.Type,
 			"mode", ruleCfg.Mode,
 		)
+		if i.auditLogger != nil {
+			i.auditLogger.LogRuleUpdated(ctx, "config", "config-sync", ruleID, ruleCfg.Name)
+		}
 	}
 
 	return nil
