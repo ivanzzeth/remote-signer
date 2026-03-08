@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/apikeys"
 	"github.com/ivanzzeth/remote-signer/pkg/client/audit"
 	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 	"github.com/ivanzzeth/remote-signer/tui/styles"
@@ -21,6 +22,7 @@ type SecurityData struct {
 	Health       *client.HealthResponse
 	Rules        *evm.ListRulesResponse
 	Signers      *evm.ListSignersResponse
+	APIKeys      *apikeys.ListResponse
 	RecentAlerts []audit.Record
 	LastRefresh  time.Time
 }
@@ -44,12 +46,18 @@ const (
 	sectionCount // sentinel
 )
 
+// apiKeyLister is the interface for listing API keys.
+type apiKeyLister interface {
+	List(ctx context.Context, filter *apikeys.ListFilter) (*apikeys.ListResponse, error)
+}
+
 // SecurityModel represents the security overview view.
 type SecurityModel struct {
 	health   healthChecker
 	rules    evm.RuleAPI
 	signers  evm.SignerAPI
 	audit    auditLister
+	apikeys  apiKeyLister
 	ctx      context.Context
 	width    int
 	height   int
@@ -85,6 +93,7 @@ func NewSecurityModel(c *client.Client, ctx context.Context) (*SecurityModel, er
 		rules:    c.EVM.Rules,
 		signers:  c.EVM.Signers,
 		audit:    c.Audit,
+		apikeys:  c.APIKeys,
 		ctx:      ctx,
 		spinner:  s,
 		loading:  true,
@@ -144,6 +153,12 @@ func (m *SecurityModel) loadData() tea.Cmd {
 		signersResp, err := m.signers.List(m.ctx, &evm.ListSignersFilter{})
 		if err == nil {
 			data.Signers = signersResp
+		}
+
+		// API keys
+		apiKeysResp, err := m.apikeys.List(m.ctx, &apikeys.ListFilter{Limit: 100})
+		if err == nil {
+			data.APIKeys = apiKeysResp
 		}
 
 		// Recent security alerts (auth failures, blocklist rejects, auto-locks, IP blocks)
@@ -362,16 +377,11 @@ func (m *SecurityModel) renderAuthSection() string {
 	b.WriteString(styles.SubtitleStyle.Render("Authentication"))
 	b.WriteString("\n\n")
 
-	// API keys — count unique keys from signer access lists
-	apiKeySet := make(map[string]bool)
-	if m.data.Signers != nil {
-		for _, s := range m.data.Signers.Signers {
-			for _, k := range s.AllowedKeys {
-				apiKeySet[k.ID] = true
-			}
-		}
+	// API keys — use real count from API key list
+	keyCount := 0
+	if m.data.APIKeys != nil {
+		keyCount = m.data.APIKeys.Total
 	}
-	keyCount := len(apiKeySet)
 	if keyCount == 0 {
 		keyCount = 1 // at least the current key
 	}
@@ -467,16 +477,6 @@ func (m *SecurityModel) renderApprovalSection() string {
 	b.WriteString(styles.SubtitleStyle.Render("Approval & Alerts"))
 	b.WriteString("\n\n")
 
-	// Approval mode — if no pending requests, assume auto-reject mode
-	pendingCount := 0
-	authorizingCount := 0
-	if m.data.Rules != nil {
-		// Check for authorizing requests would require requests API
-		// For now show the config-based info
-	}
-	_ = pendingCount
-	_ = authorizingCount
-
 	b.WriteString(fmt.Sprintf("  %-16s %s\n", "Approval Guard:", statusOn("Enabled")))
 	b.WriteString(fmt.Sprintf("  %-16s %s\n", "Fail-Closed:", statusOn("No match = reject (403)")))
 
@@ -538,16 +538,18 @@ func (m *SecurityModel) renderExpandedDetail() string {
 		b.WriteString("  Nonce protection prevents replay attacks — each request must\n")
 		b.WriteString("  include a unique nonce. Server rejects duplicates within 5 min.\n\n")
 		b.WriteString("  Max request age: 60s (rejects stale requests).\n\n")
-		if m.data.Signers != nil {
-			apiKeys := make(map[string]string)
-			for _, s := range m.data.Signers.Signers {
-				for _, k := range s.AllowedKeys {
-					apiKeys[k.ID] = k.Name
-				}
-			}
+		if m.data.APIKeys != nil && len(m.data.APIKeys.Keys) > 0 {
 			b.WriteString("  Active API keys:\n")
-			for id, name := range apiKeys {
-				b.WriteString(fmt.Sprintf("    %s (%s)\n", accentStyle.Render(id), name))
+			for _, k := range m.data.APIKeys.Keys {
+				sourceTag := ""
+				if k.Source == "config" {
+					sourceTag = " [config]"
+				}
+				adminTag := ""
+				if k.Admin {
+					adminTag = " (admin)"
+				}
+				b.WriteString(fmt.Sprintf("    %s (%s)%s%s\n", accentStyle.Render(k.ID), k.Name, adminTag, sourceTag))
 			}
 		}
 
