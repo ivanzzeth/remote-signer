@@ -114,6 +114,17 @@ func run() error {
 		return fmt.Errorf("failed to create apikey repository: %w", err)
 	}
 
+	auditRepo, err := storage.NewGormAuditRepository(db)
+	if err != nil {
+		return fmt.Errorf("failed to create audit repository: %w", err)
+	}
+
+	// Initialize audit logger early so config sync can record rule changes
+	auditLogger, err := audit.NewAuditLogger(auditRepo, log)
+	if err != nil {
+		return fmt.Errorf("failed to create audit logger: %w", err)
+	}
+
 	// Initialize API keys from config
 	apiKeyInit, err := config.NewAPIKeyInitializer(apiKeyRepo, log)
 	if err != nil {
@@ -152,6 +163,7 @@ func run() error {
 	}
 	// Set config directory for resolving relative paths in rule files
 	ruleInit.SetConfigDir(filepath.Dir(*configPath))
+	ruleInit.SetAuditLogger(auditLogger)
 	// Expand template instance rules before syncing (type: "instance" → concrete rules)
 	loadedTemplates, err := templateInit.GetLoadedTemplates(cfg.Templates)
 	if err != nil {
@@ -235,10 +247,6 @@ func run() error {
 	// =========================================================================
 	// SIGNER INITIALIZATION (after rule validation)
 	// =========================================================================
-	auditRepo, err := storage.NewGormAuditRepository(db)
-	if err != nil {
-		return fmt.Errorf("failed to create audit repository: %w", err)
-	}
 
 	// Initialize chain registry
 	chainRegistry := chain.NewRegistry()
@@ -542,11 +550,6 @@ func run() error {
 		ipWhitelist.SetAlertService(securityAlertService)
 	}
 
-	// Initialize audit logger for persistent event logging
-	auditLogger, err := audit.NewAuditLogger(auditRepo, log)
-	if err != nil {
-		return fmt.Errorf("failed to create audit logger: %w", err)
-	}
 	signService.SetAuditLogger(auditLogger)
 
 	// Initialize router

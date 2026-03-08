@@ -226,14 +226,13 @@ start_services() {
     log_info "Starting services..."
     cd "$PROJECT_DIR"
 
-    # Check required files
+    # Check config (required); .env is optional (env vars can be set in shell)
     if [ ! -f ".env" ]; then
-        log_error ".env file not found! Run '$0 init' first."
-        exit 1
+        log_warn ".env file not found. Continuing without it (env vars from shell will be used)."
     fi
 
     if [ ! -f "config.yaml" ]; then
-        log_error "config.yaml not found! Run '$0 init' first."
+        log_error "config.yaml not found! Run '$0 init' or copy from config.example.yaml."
         exit 1
     fi
 
@@ -257,12 +256,11 @@ run_no_screen() {
     cd "$PROJECT_DIR"
 
     if [ ! -f ".env" ]; then
-        log_error ".env file not found! Run '$0 init' first."
-        exit 1
+        log_warn ".env file not found. Continuing without it (env vars from shell will be used)."
     fi
 
     if [ ! -f "config.yaml" ]; then
-        log_error "config.yaml not found! Run '$0 init' first."
+        log_error "config.yaml not found! Run '$0 init' or copy from config.example.yaml."
         exit 1
     fi
 
@@ -286,12 +284,11 @@ run_interactive() {
 
     # Check required files
     if [ ! -f ".env" ]; then
-        log_error ".env file not found! Run '$0 init' first."
-        exit 1
+        log_warn ".env file not found. Continuing without it (env vars from shell will be used)."
     fi
 
     if [ ! -f "config.yaml" ]; then
-        log_error "config.yaml not found! Run '$0 init' first."
+        log_error "config.yaml not found! Run '$0 init' or copy from config.example.yaml."
         exit 1
     fi
 
