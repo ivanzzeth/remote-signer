@@ -220,6 +220,10 @@ type SecurityConfig struct {
 	// Unlock/lock remain allowed. Signers managed through config or TUI.
 	SignersAPIReadonly *bool `yaml:"signers_api_readonly"`
 
+	// APIKeysAPIReadonly disables API key management via API.
+	// Default (nil) = true (secure by default). API keys managed through config files only.
+	APIKeysAPIReadonly *bool `yaml:"api_keys_api_readonly"`
+
 	// AllowSIGHUPRulesReload enables reloading rules from config when receiving SIGHUP.
 	// Default (nil) = false (secure by default). When disabled, SIGHUP is ignored (process stays alive).
 	AllowSIGHUPRulesReload *bool `yaml:"allow_sighup_rules_reload"`
@@ -248,6 +252,15 @@ func (s SecurityConfig) IsSignersAPIReadonly() bool {
 		return false
 	}
 	return *s.SignersAPIReadonly
+}
+
+// IsAPIKeysAPIReadonly returns whether API key management via API is disabled.
+// Defaults to true (secure by default) when not explicitly configured.
+func (s SecurityConfig) IsAPIKeysAPIReadonly() bool {
+	if s.APIKeysAPIReadonly == nil {
+		return true
+	}
+	return *s.APIKeysAPIReadonly
 }
 
 // IsSIGHUPRulesReloadEnabled returns whether SIGHUP-triggered rules reload is enabled.

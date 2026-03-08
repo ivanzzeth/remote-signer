@@ -5,6 +5,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/ivanzzeth/remote-signer/pkg/client/apikeys"
 	"github.com/ivanzzeth/remote-signer/pkg/client/audit"
 	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 	"github.com/ivanzzeth/remote-signer/pkg/client/templates"
@@ -441,3 +442,66 @@ func (m *TemplateService) RevokeInstance(ctx context.Context, ruleID string) (*t
 }
 
 var _ templates.API = (*TemplateService)(nil)
+
+// APIKeyService is a mock implementation of apikeys.API.
+type APIKeyService struct {
+	mu         sync.RWMutex
+	ListFunc   func(ctx context.Context, filter *apikeys.ListFilter) (*apikeys.ListResponse, error)
+	GetFunc    func(ctx context.Context, id string) (*apikeys.APIKey, error)
+	CreateFunc func(ctx context.Context, req *apikeys.CreateRequest) (*apikeys.APIKey, error)
+	UpdateFunc func(ctx context.Context, id string, req *apikeys.UpdateRequest) (*apikeys.APIKey, error)
+	DeleteFunc func(ctx context.Context, id string) error
+	Calls      map[string][]any
+}
+
+func NewAPIKeyService() *APIKeyService {
+	return &APIKeyService{Calls: make(map[string][]any)}
+}
+
+func (m *APIKeyService) recordCall(method string, args ...any) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.Calls[method] = append(m.Calls[method], args)
+}
+
+func (m *APIKeyService) List(ctx context.Context, filter *apikeys.ListFilter) (*apikeys.ListResponse, error) {
+	m.recordCall("List", filter)
+	if m.ListFunc != nil {
+		return m.ListFunc(ctx, filter)
+	}
+	return &apikeys.ListResponse{}, nil
+}
+
+func (m *APIKeyService) Get(ctx context.Context, id string) (*apikeys.APIKey, error) {
+	m.recordCall("Get", id)
+	if m.GetFunc != nil {
+		return m.GetFunc(ctx, id)
+	}
+	return &apikeys.APIKey{}, nil
+}
+
+func (m *APIKeyService) Create(ctx context.Context, req *apikeys.CreateRequest) (*apikeys.APIKey, error) {
+	m.recordCall("Create", req)
+	if m.CreateFunc != nil {
+		return m.CreateFunc(ctx, req)
+	}
+	return &apikeys.APIKey{}, nil
+}
+
+func (m *APIKeyService) Update(ctx context.Context, id string, req *apikeys.UpdateRequest) (*apikeys.APIKey, error) {
+	m.recordCall("Update", id, req)
+	if m.UpdateFunc != nil {
+		return m.UpdateFunc(ctx, id, req)
+	}
+	return &apikeys.APIKey{}, nil
+}
+
+func (m *APIKeyService) Delete(ctx context.Context, id string) error {
+	m.recordCall("Delete", id)
+	if m.DeleteFunc != nil {
+		return m.DeleteFunc(ctx, id)
+	}
+	return nil
+}
+
+var _ apikeys.API = (*APIKeyService)(nil)

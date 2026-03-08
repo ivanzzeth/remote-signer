@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ivanzzeth/remote-signer/pkg/client/apikeys"
 	"github.com/ivanzzeth/remote-signer/pkg/client/audit"
 	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 	"github.com/ivanzzeth/remote-signer/pkg/client/internal/transport"
@@ -34,6 +35,9 @@ type Client struct {
 
 	// Templates provides rule template operations.
 	Templates *templates.Service
+
+	// APIKeys provides API key management operations.
+	APIKeys *apikeys.Service
 
 	transport *transport.Transport
 }
@@ -127,6 +131,7 @@ func NewClient(cfg Config) (*Client, error) {
 		EVM:       evmSvc,
 		Audit:     audit.NewService(t),
 		Templates: templates.NewService(t),
+		APIKeys:   apikeys.NewService(t),
 		transport: t,
 	}, nil
 }

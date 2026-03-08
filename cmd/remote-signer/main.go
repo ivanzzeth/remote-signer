@@ -536,6 +536,7 @@ func run() error {
 	log.Info("API lockdown settings",
 		"rules_api_readonly", cfg.Security.IsRulesAPIReadonly(),
 		"signers_api_readonly", cfg.Security.IsSignersAPIReadonly(),
+		"api_keys_api_readonly", cfg.Security.IsAPIKeysAPIReadonly(),
 	)
 
 	// Initialize security alert service for real-time notifications
@@ -598,6 +599,7 @@ func run() error {
 		APIKeyRepo:        apiKeyRepo,
 		RulesAPIReadonly:   cfg.Security.IsRulesAPIReadonly(),
 		SignersAPIReadonly:  cfg.Security.IsSignersAPIReadonly(),
+		APIKeysAPIReadonly: cfg.Security.IsAPIKeysAPIReadonly(),
 		AlertService:       securityAlertService,
 		AuditLogger:        auditLogger,
 		SignTimeout:         cfg.Security.SignTimeout,
