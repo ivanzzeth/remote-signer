@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/ivanzzeth/remote-signer/internal/audit"
 	"github.com/ivanzzeth/remote-signer/internal/chain"
 	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/statemachine"
@@ -27,6 +28,7 @@ type SignService struct {
 	ruleEngine            rule.RuleEngine
 	stateMachine          *statemachine.StateMachine
 	approvalService       *ApprovalService
+	auditLogger           *audit.AuditLogger   // optional: persistent audit logging
 	approvalGuard         *ManualApprovalGuard // optional: pauses requests when too many consecutive manual-approval outcomes
 	manualApprovalEnabled bool                // when false, no whitelist match → reject immediately
 	logger                *slog.Logger
@@ -68,6 +70,11 @@ func NewSignService(
 		approvalService: approvalService,
 		logger:          logger,
 	}, nil
+}
+
+// SetAuditLogger sets the audit logger for persistent event logging.
+func (s *SignService) SetAuditLogger(al *audit.AuditLogger) {
+	s.auditLogger = al
 }
 
 // SetApprovalGuard sets the optional guard that pauses sign requests when too many
@@ -140,6 +147,9 @@ func (s *SignService) Sign(ctx context.Context, req *SignRequest) (*SignResponse
 		"signer", signReq.SignerAddress,
 		"sign_type", signReq.SignType,
 	)
+	if s.auditLogger != nil {
+		s.auditLogger.LogSignRequest(ctx, signReq)
+	}
 
 	// Reject if approval guard is paused (still persisted for audit)
 	if s.approvalGuard != nil && s.approvalGuard.IsPaused() {
@@ -243,6 +253,9 @@ func (s *SignService) Sign(ctx context.Context, req *SignRequest) (*SignResponse
 	// Request manual approval
 	if s.approvalGuard != nil {
 		s.approvalGuard.RecordManualApproval()
+	}
+	if s.auditLogger != nil {
+		s.auditLogger.LogApprovalRequest(ctx, signReq)
 	}
 	if err := s.approvalService.RequestApproval(ctx, signReq); err != nil {
 		s.logger.Error("failed to request approval", "error", err)

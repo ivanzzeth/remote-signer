@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ivanzzeth/remote-signer/internal/audit"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
 
@@ -32,7 +33,7 @@ func NewRateLimiter(logger *slog.Logger) *RateLimiter {
 }
 
 // RateLimitMiddleware creates a rate limiting middleware
-func RateLimitMiddleware(limiter *RateLimiter, alertServices ...*SecurityAlertService) func(http.Handler) http.Handler {
+func RateLimitMiddleware(limiter *RateLimiter, auditLogger *audit.AuditLogger, alertServices ...*SecurityAlertService) func(http.Handler) http.Handler {
 	var alertService *SecurityAlertService
 	if len(alertServices) > 0 {
 		alertService = alertServices[0]
@@ -52,12 +53,15 @@ func RateLimitMiddleware(limiter *RateLimiter, alertServices ...*SecurityAlertSe
 					"api_key_id", apiKey.ID,
 					"rate_limit", apiKey.RateLimit,
 				)
+				clientIP, _ := r.Context().Value(ClientIPContextKey).(string)
 				if alertService != nil {
-					clientIP, _ := r.Context().Value(ClientIPContextKey).(string)
 					alertService.Alert(AlertRateLimitKey, apiKey.ID,
 						fmt.Sprintf("[Remote Signer] API KEY RATE LIMIT\n\nAPI Key: %s\nIP: %s\nLimit: %d req/min\nPath: %s %s\nTime: %s",
 							apiKey.ID, clientIP, apiKey.RateLimit, r.Method, r.URL.Path,
 							time.Now().UTC().Format(time.RFC3339)))
+				}
+				if auditLogger != nil {
+					auditLogger.LogRateLimitHit(r.Context(), apiKey.ID, clientIP, r.Method, r.URL.Path)
 				}
 				http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 				return

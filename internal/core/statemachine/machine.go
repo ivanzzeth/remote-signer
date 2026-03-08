@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/ivanzzeth/remote-signer/internal/audit"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
@@ -268,7 +269,7 @@ func (sm *StateMachine) logAudit(ctx context.Context, req *types.SignRequest, ev
 	record := &types.AuditRecord{
 		ID:            types.AuditID(uuid.New().String()),
 		EventType:     eventType,
-		Severity:      types.AuditSeverityInfo,
+		Severity:      audit.SeverityForEvent(eventType),
 		Timestamp:     time.Now(),
 		APIKeyID:      req.APIKeyID,
 		ActorAddress:  req.ClientIP,

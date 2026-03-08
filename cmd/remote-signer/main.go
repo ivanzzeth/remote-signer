@@ -542,6 +542,13 @@ func run() error {
 		ipWhitelist.SetAlertService(securityAlertService)
 	}
 
+	// Initialize audit logger for persistent event logging
+	auditLogger, err := audit.NewAuditLogger(auditRepo, log)
+	if err != nil {
+		return fmt.Errorf("failed to create audit logger: %w", err)
+	}
+	signService.SetAuditLogger(auditLogger)
+
 	// Initialize router
 	router, err := api.NewRouter(authVerifier, signService, evmSignerManager, ruleRepo, auditRepo, log, api.RouterConfig{
 		Version:           version,
@@ -558,6 +565,7 @@ func run() error {
 		RulesAPIReadonly:   cfg.Security.IsRulesAPIReadonly(),
 		SignersAPIReadonly:  cfg.Security.IsSignersAPIReadonly(),
 		AlertService:       securityAlertService,
+		AuditLogger:        auditLogger,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create router: %w", err)
