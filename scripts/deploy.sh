@@ -25,16 +25,24 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# Use "docker compose" (V2 plugin) or "docker-compose" (standalone) depending on what is available
+# Resolve the docker compose command once at startup.
+# DOCKER_COMPOSE is an array so "docker compose" (two words) works correctly with "$@".
+if docker compose version &>/dev/null 2>&1; then
+    DOCKER_COMPOSE=(docker compose)
+elif command -v docker-compose &>/dev/null && docker-compose version &>/dev/null 2>&1; then
+    DOCKER_COMPOSE=(docker-compose)
+else
+    # Allow commands that don't need docker (e.g. gen-certs, local-run) to proceed
+    DOCKER_COMPOSE=()
+fi
+
+# Wrapper function for convenience within the script
 docker_compose() {
-    if docker compose version &>/dev/null 2>&1; then
-        docker compose "$@"
-    elif command -v docker-compose &>/dev/null && docker-compose version &>/dev/null 2>&1; then
-        docker-compose "$@"
-    else
+    if [ ${#DOCKER_COMPOSE[@]} -eq 0 ]; then
         log_error "Docker Compose not found. Install the 'docker compose' plugin or standalone 'docker-compose'."
         exit 1
     fi
+    "${DOCKER_COMPOSE[@]}" "$@"
 }
 
 # =============================================================================
@@ -323,7 +331,7 @@ run_interactive() {
 
     # Start in screen session (interactive)
     cd "$PROJECT_DIR"
-    exec screen -S remote-signer docker_compose run -it --service-ports --name remote-signer-app remote-signer
+    exec screen -S remote-signer "${DOCKER_COMPOSE[@]}" run -it --service-ports --name remote-signer-app remote-signer
 }
 
 # =============================================================================
@@ -373,7 +381,7 @@ restart_services() {
 
     # Start in screen session (interactive)
     cd "$PROJECT_DIR"
-    exec screen -S remote-signer docker_compose run -it --service-ports --name remote-signer-app remote-signer
+    exec screen -S remote-signer "${DOCKER_COMPOSE[@]}" run -it --service-ports --name remote-signer-app remote-signer
 }
 
 # =============================================================================
