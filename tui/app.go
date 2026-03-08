@@ -31,6 +31,7 @@ const (
 	ViewHDWallets
 	ViewHDWalletDetail
 	ViewSecurity
+	ViewAPIKeys
 )
 
 // keyMap defines the key bindings for the application
@@ -62,6 +63,7 @@ type keyMap struct {
 	Number6   key.Binding
 	Number7   key.Binding
 	Number8   key.Binding
+	Number9   key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
@@ -74,7 +76,7 @@ func (k keyMap) FullHelp() [][]key.Binding {
 		{k.Up, k.Down, k.PageUp, k.PageDown},
 		{k.Approve, k.Reject, k.Generate},
 		{k.Filter, k.Refresh, k.Delete, k.Toggle},
-		{k.Number1, k.Number2, k.Number3, k.Number4, k.Number5, k.Number6, k.Number7, k.Number8},
+		{k.Number1, k.Number2, k.Number3, k.Number4, k.Number5, k.Number6, k.Number7, k.Number8, k.Number9},
 		{k.Help, k.Quit},
 	}
 }
@@ -188,6 +190,10 @@ var keys = keyMap{
 		key.WithKeys("8"),
 		key.WithHelp("8", "security"),
 	),
+	Number9: key.NewBinding(
+		key.WithKeys("9"),
+		key.WithHelp("9", "api keys"),
+	),
 }
 
 // Model represents the main application state
@@ -217,6 +223,7 @@ type Model struct {
 	hdwallets      *views.HDWalletsModel
 	hdwalletDetail *views.HDWalletDetailModel
 	security       *views.SecurityModel
+	apikeysView    *views.APIKeysModel
 }
 
 // NewModel creates a new application model
@@ -289,6 +296,11 @@ func NewModel(c *client.Client) (*Model, error) {
 		return nil, fmt.Errorf("failed to create security view: %w", err)
 	}
 
+	apikeysView, err := views.NewAPIKeysModel(c, ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create api keys view: %w", err)
+	}
+
 	return &Model{
 		client:        c,
 		ctx:           ctx,
@@ -307,6 +319,7 @@ func NewModel(c *client.Client) (*Model, error) {
 		hdwallets:      hdwallets,
 		hdwalletDetail: hdwalletDetail,
 		security:       security,
+		apikeysView:    apikeysView,
 	}, nil
 }
 
@@ -321,6 +334,7 @@ func (m Model) Init() tea.Cmd {
 		m.metrics.Init(),
 		m.hdwallets.Init(),
 		m.security.Init(),
+		m.apikeysView.Init(),
 	)
 }
 
@@ -347,6 +361,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.hdwallets.SetSize(msg.Width, msg.Height-6)
 		m.hdwalletDetail.SetSize(msg.Width, msg.Height-6)
 		m.security.SetSize(msg.Width, msg.Height-6)
+		m.apikeysView.SetSize(msg.Width, msg.Height-6)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -364,7 +379,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.currentView == ViewDashboard || m.currentView == ViewRequests ||
 					m.currentView == ViewRules || m.currentView == ViewAudit ||
 					m.currentView == ViewSigners || m.currentView == ViewMetrics ||
-					m.currentView == ViewHDWallets || m.currentView == ViewSecurity {
+					m.currentView == ViewHDWallets || m.currentView == ViewSecurity ||
+					m.currentView == ViewAPIKeys {
 					return m, tea.Quit
 				}
 				// If in detail view, go back instead of quitting
@@ -415,13 +431,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.currentView = ViewSecurity
 				return m, m.security.Refresh()
 
+			case key.Matches(msg, keys.Number9):
+				m.activeTab = 8
+				m.currentView = ViewAPIKeys
+				return m, m.apikeysView.Refresh()
+
 			case key.Matches(msg, keys.Tab):
 				// Only switch tabs in main views
 				if m.currentView == ViewDashboard || m.currentView == ViewRequests ||
 					m.currentView == ViewRules || m.currentView == ViewAudit ||
 					m.currentView == ViewSigners || m.currentView == ViewMetrics ||
-					m.currentView == ViewHDWallets || m.currentView == ViewSecurity {
-					m.activeTab = (m.activeTab + 1) % 8
+					m.currentView == ViewHDWallets || m.currentView == ViewSecurity ||
+					m.currentView == ViewAPIKeys {
+					m.activeTab = (m.activeTab + 1) % 9
 					m.currentView = m.tabToView(m.activeTab)
 					return m, m.refreshCurrentView()
 				}
@@ -431,8 +453,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.currentView == ViewDashboard || m.currentView == ViewRequests ||
 					m.currentView == ViewRules || m.currentView == ViewAudit ||
 					m.currentView == ViewSigners || m.currentView == ViewMetrics ||
-					m.currentView == ViewHDWallets || m.currentView == ViewSecurity {
-					m.activeTab = (m.activeTab + 7) % 8
+					m.currentView == ViewHDWallets || m.currentView == ViewSecurity ||
+					m.currentView == ViewAPIKeys {
+					m.activeTab = (m.activeTab + 8) % 9
 					m.currentView = m.tabToView(m.activeTab)
 					return m, m.refreshCurrentView()
 				}
@@ -569,6 +592,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		newSecurity, cmd := m.security.Update(msg)
 		m.security = newSecurity.(*views.SecurityModel)
 		cmds = append(cmds, cmd)
+
+	case ViewAPIKeys:
+		newAPIKeys, cmd := m.apikeysView.Update(msg)
+		m.apikeysView = newAPIKeys.(*views.APIKeysModel)
+		cmds = append(cmds, cmd)
 	}
 
 	return m, tea.Batch(cmds...)
@@ -608,7 +636,7 @@ func (m Model) View() string {
 }
 
 func (m Model) renderHeader() string {
-	tabs := []string{"Dashboard", "Requests", "Rules", "Audit", "Signers", "Metrics", "HD Wallets", "Security"}
+	tabs := []string{"Dashboard", "Requests", "Rules", "Audit", "Signers", "Metrics", "HD Wallets", "Security", "API Keys"}
 	var renderedTabs []string
 
 	for i, tab := range tabs {
@@ -651,6 +679,8 @@ func (m Model) renderContent(_ int) string {
 		return m.hdwalletDetail.View()
 	case ViewSecurity:
 		return m.security.View()
+	case ViewAPIKeys:
+		return m.apikeysView.View()
 	default:
 		return "Unknown view"
 	}
@@ -674,6 +704,8 @@ func (m Model) refreshCurrentView() tea.Cmd {
 		return m.hdwallets.Refresh()
 	case ViewSecurity:
 		return m.security.Refresh()
+	case ViewAPIKeys:
+		return m.apikeysView.Refresh()
 	default:
 		return nil
 	}
@@ -699,6 +731,8 @@ func (m Model) isCurrentViewCapturingInput() bool {
 		return m.hdwalletDetail.IsCapturingInput()
 	case ViewSecurity:
 		return m.security.IsCapturingInput()
+	case ViewAPIKeys:
+		return m.apikeysView.IsCapturingInput()
 	default:
 		return false
 	}
@@ -723,6 +757,8 @@ func (m Model) tabToView(tab int) ViewType {
 		return ViewHDWallets
 	case 7:
 		return ViewSecurity
+	case 8:
+		return ViewAPIKeys
 	default:
 		return ViewDashboard
 	}
