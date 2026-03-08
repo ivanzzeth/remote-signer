@@ -121,7 +121,7 @@ func FuzzAuthMiddleware_Headers(f *testing.F) {
 
 	verifier, _, _ := setupFuzzVerifier(f)
 	logger := newTestLogger()
-	middleware := AuthMiddleware(verifier, logger)
+	middleware := AuthMiddleware(verifier, logger, nil)
 
 	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -173,7 +173,7 @@ func FuzzAuthMiddleware_Body(f *testing.F) {
 
 	verifier, _, priv := setupFuzzVerifier(f)
 	logger := newTestLogger()
-	middleware := AuthMiddleware(verifier, logger)
+	middleware := AuthMiddleware(verifier, logger, nil)
 
 	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)

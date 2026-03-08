@@ -113,6 +113,14 @@ var ValidAuditEventTypes = map[types.AuditEventType]bool{
 	types.AuditEventTypeRuleUpdated:     true,
 	types.AuditEventTypeRuleDeleted:     true,
 	types.AuditEventTypeRateLimitHit:    true,
+	types.AuditEventTypeAPIRequest:      true,
+}
+
+// ValidAuditSeverities is the set of allowed audit severity values.
+var ValidAuditSeverities = map[types.AuditSeverity]bool{
+	types.AuditSeverityInfo:     true,
+	types.AuditSeverityWarning:  true,
+	types.AuditSeverityCritical: true,
 }
 
 // ValidSignerTypes is the set of allowed signer type values.
@@ -140,6 +148,11 @@ func IsValidRuleSource(s string) bool {
 // IsValidAuditEventType returns true if s is a known audit event type.
 func IsValidAuditEventType(s string) bool {
 	return ValidAuditEventTypes[types.AuditEventType(s)]
+}
+
+// IsValidAuditSeverity returns true if s is a known audit severity.
+func IsValidAuditSeverity(s string) bool {
+	return ValidAuditSeverities[types.AuditSeverity(s)]
 }
 
 // IsValidSignerType returns true if s is a known signer type.

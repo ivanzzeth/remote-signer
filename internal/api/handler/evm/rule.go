@@ -13,11 +13,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
+	"github.com/ivanzzeth/remote-signer/internal/audit"
 	evmchain "github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/ruleconfig"
-	"github.com/ivanzzeth/remote-signer/internal/validate"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
+	"github.com/ivanzzeth/remote-signer/internal/validate"
 )
 
 // ruleIDPattern validates rule ID format. Accepts:
@@ -31,6 +32,7 @@ type RuleHandler struct {
 	ruleRepo          storage.RuleRepository
 	solidityValidator *evmchain.SolidityRuleValidator
 	jsEvaluator       *evmchain.JSRuleEvaluator
+	auditLogger       *audit.AuditLogger
 	readOnly          bool // when true, block all rule mutations via API
 	logger            *slog.Logger
 }
@@ -49,6 +51,13 @@ func WithSolidityValidator(validator *evmchain.SolidityRuleValidator) RuleHandle
 func WithJSEvaluator(eval *evmchain.JSRuleEvaluator) RuleHandlerOption {
 	return func(h *RuleHandler) {
 		h.jsEvaluator = eval
+	}
+}
+
+// WithAuditLogger sets the audit logger for rule CRUD audit events.
+func WithAuditLogger(al *audit.AuditLogger) RuleHandlerOption {
+	return func(h *RuleHandler) {
+		h.auditLogger = al
 	}
 }
 
@@ -306,6 +315,15 @@ func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.logger.Info("rule created", "rule_id", rule.ID, "name", rule.Name)
+	if h.auditLogger != nil {
+		apiKey := middleware.GetAPIKey(r.Context())
+		apiKeyID := ""
+		if apiKey != nil {
+			apiKeyID = apiKey.ID
+		}
+		clientIP, _ := r.Context().Value(middleware.ClientIPContextKey).(string)
+		h.auditLogger.LogRuleCreated(r.Context(), apiKeyID, clientIP, rule.ID, rule.Name)
+	}
 	h.writeJSON(w, h.toRuleResponse(rule), http.StatusCreated)
 }
 
@@ -408,6 +426,15 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 	}
 
 	h.logger.Info("rule updated", "rule_id", ruleID)
+	if h.auditLogger != nil {
+		apiKey := middleware.GetAPIKey(r.Context())
+		apiKeyID := ""
+		if apiKey != nil {
+			apiKeyID = apiKey.ID
+		}
+		clientIP, _ := r.Context().Value(middleware.ClientIPContextKey).(string)
+		h.auditLogger.LogRuleUpdated(r.Context(), apiKeyID, clientIP, rule.ID, rule.Name)
+	}
 	h.writeJSON(w, h.toRuleResponse(rule), http.StatusOK)
 }
 
@@ -555,6 +582,15 @@ func (h *RuleHandler) deleteRule(w http.ResponseWriter, r *http.Request, ruleID 
 	}
 
 	h.logger.Info("rule deleted", "rule_id", ruleID)
+	if h.auditLogger != nil {
+		apiKey := middleware.GetAPIKey(r.Context())
+		apiKeyID := ""
+		if apiKey != nil {
+			apiKeyID = apiKey.ID
+		}
+		clientIP, _ := r.Context().Value(middleware.ClientIPContextKey).(string)
+		h.auditLogger.LogRuleDeleted(r.Context(), apiKeyID, clientIP, rule.ID)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

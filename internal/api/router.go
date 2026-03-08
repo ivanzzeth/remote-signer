@@ -9,6 +9,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/api/handler"
 	evmhandler "github.com/ivanzzeth/remote-signer/internal/api/handler/evm"
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
+	"github.com/ivanzzeth/remote-signer/internal/audit"
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/core/auth"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
@@ -35,6 +36,7 @@ type RouterConfig struct {
 	RulesAPIReadonly   bool                         // block rule/template mutations via API
 	SignersAPIReadonly  bool                         // block signer/HD-wallet creation via API
 	AlertService       *middleware.SecurityAlertService // optional: real-time security alerts
+	AuditLogger        *audit.AuditLogger              // optional: persistent audit logging
 }
 
 // Router handles HTTP routing
@@ -125,6 +127,9 @@ func (r *Router) setupRoutes() error {
 	if r.config.JSEvaluator != nil {
 		ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithJSEvaluator(r.config.JSEvaluator))
 	}
+	if r.config.AuditLogger != nil {
+		ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithAuditLogger(r.config.AuditLogger))
+	}
 	if r.config.RulesAPIReadonly {
 		ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithReadOnly())
 	}
@@ -187,6 +192,7 @@ func (r *Router) setupRoutes() error {
 
 	// Audit routes (with auth + admin required — audit logs contain sensitive data)
 	r.mux.Handle("/api/v1/audit", r.withAuthAndAdmin(auditHandler))
+	r.mux.Handle("/api/v1/audit/requests/", r.withAuthAndAdmin(http.HandlerFunc(auditHandler.ServeRequestHTTP)))
 
 	// Template routes (with auth + admin required)
 	if r.config.Template != nil && r.config.Template.TemplateRepo != nil && r.config.Template.TemplateService != nil {
@@ -221,10 +227,10 @@ func (r *Router) withAuth(h http.Handler) http.Handler {
 		middleware.SecurityHeadersMiddleware(),
 		middleware.RecoveryMiddleware(r.logger),
 		middleware.ClientIPMiddleware(r.ipWhitelist),
-		middleware.LoggingMiddleware(r.logger),
+		middleware.LoggingMiddleware(r.logger, r.config.AuditLogger),
 		middleware.IPRateLimitMiddleware(r.rateLimiter, r.ipWhitelist, r.config.IPRateLimit, r.config.AlertService),
-		middleware.AuthMiddleware(r.authVerifier, r.logger, r.config.AlertService),
-		middleware.RateLimitMiddleware(r.rateLimiter, r.config.AlertService),
+		middleware.AuthMiddleware(r.authVerifier, r.logger, r.config.AuditLogger, r.config.AlertService),
+		middleware.RateLimitMiddleware(r.rateLimiter, r.config.AuditLogger, r.config.AlertService),
 	}
 	// Add IP whitelist as outermost middleware (checked first)
 	if r.ipWhitelist != nil {
@@ -244,11 +250,11 @@ func (r *Router) withAuthAndAdmin(h http.Handler) http.Handler {
 		middleware.SecurityHeadersMiddleware(),
 		middleware.RecoveryMiddleware(r.logger),
 		middleware.ClientIPMiddleware(r.ipWhitelist),
-		middleware.LoggingMiddleware(r.logger),
+		middleware.LoggingMiddleware(r.logger, r.config.AuditLogger),
 		middleware.IPRateLimitMiddleware(r.rateLimiter, r.ipWhitelist, r.config.IPRateLimit, r.config.AlertService),
-		middleware.AuthMiddleware(r.authVerifier, r.logger, r.config.AlertService),
+		middleware.AuthMiddleware(r.authVerifier, r.logger, r.config.AuditLogger, r.config.AlertService),
 		middleware.AdminMiddleware(r.logger, r.config.AlertService),
-		middleware.RateLimitMiddleware(r.rateLimiter, r.config.AlertService),
+		middleware.RateLimitMiddleware(r.rateLimiter, r.config.AuditLogger, r.config.AlertService),
 	}
 	// Add IP whitelist as outermost middleware (checked first)
 	if r.ipWhitelist != nil {

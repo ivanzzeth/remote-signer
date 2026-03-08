@@ -12,12 +12,14 @@ import (
 
 // AuditFilter for querying audit records
 type AuditFilter struct {
-	RequestID *types.SignRequestID
-	APIKeyID  *string
-	EventType *types.AuditEventType
-	ChainType *types.ChainType
-	StartTime *time.Time
-	EndTime   *time.Time
+	RequestID     *types.SignRequestID
+	APIKeyID      *string
+	EventType     *types.AuditEventType
+	Severity      *types.AuditSeverity
+	ChainType     *types.ChainType
+	SignerAddress *string
+	StartTime     *time.Time
+	EndTime       *time.Time
 	// Cursor-based pagination (preferred over Offset)
 	// Cursor is the timestamp of the last item from previous page
 	Cursor *time.Time
@@ -114,8 +116,14 @@ func (r *GormAuditRepository) buildFilterQuery(ctx context.Context, filter Audit
 	if filter.EventType != nil {
 		query = query.Where("event_type = ?", *filter.EventType)
 	}
+	if filter.Severity != nil {
+		query = query.Where("severity = ?", *filter.Severity)
+	}
 	if filter.ChainType != nil {
 		query = query.Where("chain_type = ?", *filter.ChainType)
+	}
+	if filter.SignerAddress != nil {
+		query = query.Where("signer_address = ?", *filter.SignerAddress)
 	}
 	if filter.StartTime != nil {
 		query = query.Where("timestamp >= ?", *filter.StartTime)

@@ -4,6 +4,8 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/ivanzzeth/remote-signer/internal/audit"
 )
 
 // responseWriter wraps http.ResponseWriter to capture status code
@@ -17,8 +19,13 @@ func (rw *responseWriter) WriteHeader(code int) {
 	rw.ResponseWriter.WriteHeader(code)
 }
 
-// LoggingMiddleware creates a request logging middleware
-func LoggingMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
+// LoggingMiddleware creates a request logging middleware that also writes
+// every request to the audit log for full attack timeline reconstruction.
+func LoggingMiddleware(logger *slog.Logger, auditLoggers ...*audit.AuditLogger) func(http.Handler) http.Handler {
+	var auditLogger *audit.AuditLogger
+	if len(auditLoggers) > 0 {
+		auditLogger = auditLoggers[0]
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
@@ -48,6 +55,11 @@ func LoggingMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 				"client_ip", clientIP,
 				"remote_addr", r.RemoteAddr,
 			)
+
+			// Write every request to audit log for attack timeline reconstruction
+			if auditLogger != nil {
+				auditLogger.LogAPIRequest(r.Context(), apiKeyID, clientIP, r.Method, r.URL.Path, rw.statusCode, duration.Milliseconds(), r.UserAgent())
+			}
 		})
 	}
 }

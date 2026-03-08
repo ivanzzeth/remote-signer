@@ -32,6 +32,9 @@ const (
 
 	// Security events
 	AuditEventTypeRateLimitHit AuditEventType = "rate_limit_hit"
+
+	// Request lifecycle
+	AuditEventTypeAPIRequest AuditEventType = "api_request"
 )
 
 // AuditSeverity represents the severity level of an audit event

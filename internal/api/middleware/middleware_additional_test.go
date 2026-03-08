@@ -260,7 +260,7 @@ func TestRateLimiter_Allow_WindowExpiry(t *testing.T) {
 func TestRateLimitMiddleware_NoAPIKey(t *testing.T) {
 	logger := newTestLogger()
 	rl := NewRateLimiter(logger)
-	mw := RateLimitMiddleware(rl)
+	mw := RateLimitMiddleware(rl, nil)
 
 	called := false
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -279,7 +279,7 @@ func TestRateLimitMiddleware_NoAPIKey(t *testing.T) {
 func TestRateLimitMiddleware_UnderLimit(t *testing.T) {
 	logger := newTestLogger()
 	rl := NewRateLimiter(logger)
-	mw := RateLimitMiddleware(rl)
+	mw := RateLimitMiddleware(rl, nil)
 
 	apiKey := &types.APIKey{
 		ID:        "key-under",
@@ -307,7 +307,7 @@ func TestRateLimitMiddleware_UnderLimit(t *testing.T) {
 func TestRateLimitMiddleware_OverLimit(t *testing.T) {
 	logger := newTestLogger()
 	rl := NewRateLimiter(logger)
-	mw := RateLimitMiddleware(rl)
+	mw := RateLimitMiddleware(rl, nil)
 
 	apiKey := &types.APIKey{
 		ID:        "key-over",

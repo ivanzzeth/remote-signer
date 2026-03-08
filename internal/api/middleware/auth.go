@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ivanzzeth/remote-signer/internal/audit"
 	"github.com/ivanzzeth/remote-signer/internal/core/auth"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
@@ -27,7 +28,7 @@ const (
 // AuthMiddleware creates an authentication middleware
 // Authentication format: timestamp|nonce|method|path|sha256(body)
 // Nonce is required when NonceRequired is configured (recommended for production)
-func AuthMiddleware(verifier *auth.Verifier, logger *slog.Logger, alertServices ...*SecurityAlertService) func(http.Handler) http.Handler {
+func AuthMiddleware(verifier *auth.Verifier, logger *slog.Logger, auditLogger *audit.AuditLogger, alertServices ...*SecurityAlertService) func(http.Handler) http.Handler {
 	var alertService *SecurityAlertService
 	if len(alertServices) > 0 {
 		alertService = alertServices[0]
@@ -113,9 +114,9 @@ func AuthMiddleware(verifier *auth.Verifier, logger *slog.Logger, alertServices 
 						"has_nonce", nonce != "",
 						"error", err,
 					)
+					errMsg := err.Error()
+					clientIP, _ := r.Context().Value(ClientIPContextKey).(string)
 					if alertService != nil {
-						errMsg := err.Error()
-						clientIP, _ := r.Context().Value(ClientIPContextKey).(string)
 						alertType := AlertAuthFailure
 						source := apiKeyID
 						if source == "" {
@@ -135,6 +136,9 @@ func AuthMiddleware(verifier *auth.Verifier, logger *slog.Logger, alertServices 
 								apiKeyID, clientIP, r.Method, r.URL.Path, errMsg,
 								time.Now().UTC().Format(time.RFC3339)))
 					}
+					if auditLogger != nil {
+						auditLogger.LogAuthFailure(r.Context(), apiKeyID, clientIP, r.Method, r.URL.Path, errMsg)
+					}
 					http.Error(w, "unauthorized", http.StatusUnauthorized)
 					return
 				}
@@ -145,6 +149,12 @@ func AuthMiddleware(verifier *auth.Verifier, logger *slog.Logger, alertServices 
 				)
 				http.Error(w, "authentication error", http.StatusInternalServerError)
 				return
+			}
+
+			// Log auth success
+			if auditLogger != nil {
+				clientIP, _ := r.Context().Value(ClientIPContextKey).(string)
+				auditLogger.LogAuthSuccess(r.Context(), apiKey.ID, clientIP, r.Method, r.URL.Path)
 			}
 
 			// Add API key to context
