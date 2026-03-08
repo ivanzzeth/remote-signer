@@ -1,13 +1,19 @@
 package middleware
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 )
 
 // AdminMiddleware creates a middleware that requires admin permissions.
 // Must be used after AuthMiddleware as it depends on the API key in context.
-func AdminMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
+func AdminMiddleware(logger *slog.Logger, alertServices ...*SecurityAlertService) func(http.Handler) http.Handler {
+	var alertService *SecurityAlertService
+	if len(alertServices) > 0 {
+		alertService = alertServices[0]
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			apiKey := GetAPIKey(r.Context())
@@ -26,6 +32,13 @@ func AdminMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 					"api_key_id", apiKey.ID,
 					"api_key_name", apiKey.Name,
 				)
+				if alertService != nil {
+					clientIP, _ := r.Context().Value(ClientIPContextKey).(string)
+					alertService.Alert(AlertAdminDenied, apiKey.ID,
+						fmt.Sprintf("[Remote Signer] ADMIN ACCESS DENIED\n\nAPI Key: %s (%s)\nIP: %s\nPath: %s %s\nTime: %s",
+							apiKey.ID, apiKey.Name, clientIP, r.Method, r.URL.Path,
+							time.Now().UTC().Format(time.RFC3339)))
+				}
 				http.Error(w, "admin permission required", http.StatusForbidden)
 				return
 			}

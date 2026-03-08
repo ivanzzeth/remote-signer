@@ -34,6 +34,7 @@ type RouterConfig struct {
 	APIKeyRepo         storage.APIKeyRepository     // optional: for signer access visibility
 	RulesAPIReadonly   bool                         // block rule/template mutations via API
 	SignersAPIReadonly  bool                         // block signer/HD-wallet creation via API
+	AlertService       *middleware.SecurityAlertService // optional: real-time security alerts
 }
 
 // Router handles HTTP routing
@@ -92,6 +93,9 @@ func (r *Router) setupRoutes() error {
 	signHandler, err := evmhandler.NewSignHandler(r.signService, r.signerManager, r.logger)
 	if err != nil {
 		return err
+	}
+	if r.config.AlertService != nil {
+		signHandler.SetAlertService(r.config.AlertService)
 	}
 
 	requestHandler, err := evmhandler.NewRequestHandler(r.signService, r.ruleRepo, r.logger)
@@ -218,9 +222,9 @@ func (r *Router) withAuth(h http.Handler) http.Handler {
 		middleware.RecoveryMiddleware(r.logger),
 		middleware.ClientIPMiddleware(r.ipWhitelist),
 		middleware.LoggingMiddleware(r.logger),
-		middleware.IPRateLimitMiddleware(r.rateLimiter, r.ipWhitelist, r.config.IPRateLimit),
-		middleware.AuthMiddleware(r.authVerifier, r.logger),
-		middleware.RateLimitMiddleware(r.rateLimiter),
+		middleware.IPRateLimitMiddleware(r.rateLimiter, r.ipWhitelist, r.config.IPRateLimit, r.config.AlertService),
+		middleware.AuthMiddleware(r.authVerifier, r.logger, r.config.AlertService),
+		middleware.RateLimitMiddleware(r.rateLimiter, r.config.AlertService),
 	}
 	// Add IP whitelist as outermost middleware (checked first)
 	if r.ipWhitelist != nil {
@@ -241,10 +245,10 @@ func (r *Router) withAuthAndAdmin(h http.Handler) http.Handler {
 		middleware.RecoveryMiddleware(r.logger),
 		middleware.ClientIPMiddleware(r.ipWhitelist),
 		middleware.LoggingMiddleware(r.logger),
-		middleware.IPRateLimitMiddleware(r.rateLimiter, r.ipWhitelist, r.config.IPRateLimit),
-		middleware.AuthMiddleware(r.authVerifier, r.logger),
-		middleware.AdminMiddleware(r.logger),
-		middleware.RateLimitMiddleware(r.rateLimiter),
+		middleware.IPRateLimitMiddleware(r.rateLimiter, r.ipWhitelist, r.config.IPRateLimit, r.config.AlertService),
+		middleware.AuthMiddleware(r.authVerifier, r.logger, r.config.AlertService),
+		middleware.AdminMiddleware(r.logger, r.config.AlertService),
+		middleware.RateLimitMiddleware(r.rateLimiter, r.config.AlertService),
 	}
 	// Add IP whitelist as outermost middleware (checked first)
 	if r.ipWhitelist != nil {

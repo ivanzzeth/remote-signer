@@ -522,6 +522,26 @@ func run() error {
 		"signers_api_readonly", cfg.Security.IsSignersAPIReadonly(),
 	)
 
+	// Initialize security alert service for real-time notifications
+	var securityAlertService *middleware.SecurityAlertService
+	if notifyService != nil {
+		securityAlertService, err = middleware.NewSecurityAlertService(
+			notifyService, &cfg.NotifyChannel, log, 5*time.Minute,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to create security alert service: %w", err)
+		}
+		stopAlertCleanup := make(chan struct{})
+		securityAlertService.StartCleanupRoutine(5*time.Minute, stopAlertCleanup)
+		defer close(stopAlertCleanup)
+		log.Info("Security alert service enabled (real-time alerts for unauthorized access)")
+	}
+
+	// Wire alert service to IP whitelist
+	if ipWhitelist != nil && securityAlertService != nil {
+		ipWhitelist.SetAlertService(securityAlertService)
+	}
+
 	// Initialize router
 	router, err := api.NewRouter(authVerifier, signService, evmSignerManager, ruleRepo, auditRepo, log, api.RouterConfig{
 		Version:           version,
@@ -537,6 +557,7 @@ func run() error {
 		APIKeyRepo:        apiKeyRepo,
 		RulesAPIReadonly:   cfg.Security.IsRulesAPIReadonly(),
 		SignersAPIReadonly:  cfg.Security.IsSignersAPIReadonly(),
+		AlertService:       securityAlertService,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create router: %w", err)

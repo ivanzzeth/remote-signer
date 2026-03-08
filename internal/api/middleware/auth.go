@@ -3,9 +3,12 @@ package middleware
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/auth"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
@@ -24,7 +27,11 @@ const (
 // AuthMiddleware creates an authentication middleware
 // Authentication format: timestamp|nonce|method|path|sha256(body)
 // Nonce is required when NonceRequired is configured (recommended for production)
-func AuthMiddleware(verifier *auth.Verifier, logger *slog.Logger) func(http.Handler) http.Handler {
+func AuthMiddleware(verifier *auth.Verifier, logger *slog.Logger, alertServices ...*SecurityAlertService) func(http.Handler) http.Handler {
+	var alertService *SecurityAlertService
+	if len(alertServices) > 0 {
+		alertService = alertServices[0]
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Extract auth headers
@@ -106,6 +113,28 @@ func AuthMiddleware(verifier *auth.Verifier, logger *slog.Logger) func(http.Hand
 						"has_nonce", nonce != "",
 						"error", err,
 					)
+					if alertService != nil {
+						errMsg := err.Error()
+						clientIP, _ := r.Context().Value(ClientIPContextKey).(string)
+						alertType := AlertAuthFailure
+						source := apiKeyID
+						if source == "" {
+							source = clientIP
+						}
+						// Escalate specific attack patterns to their own alert types
+						if strings.Contains(errMsg, "nonce") && strings.Contains(errMsg, "already used") {
+							alertType = AlertNonceReplay
+						} else if strings.Contains(errMsg, "disabled") {
+							alertType = AlertDisabledKey
+						} else if strings.Contains(errMsg, "expired") {
+							alertType = AlertExpiredKey
+						}
+						alertService.Alert(alertType, source,
+							fmt.Sprintf("[Remote Signer] %s\n\nAPI Key: %s\nIP: %s\nPath: %s %s\nError: %s\nTime: %s",
+								strings.ToUpper(string(alertType)),
+								apiKeyID, clientIP, r.Method, r.URL.Path, errMsg,
+								time.Now().UTC().Format(time.RFC3339)))
+					}
 					http.Error(w, "unauthorized", http.StatusUnauthorized)
 					return
 				}

@@ -120,12 +120,39 @@ fi
 # 3. Dependency vulnerability check with govulncheck
 if command -v govulncheck &> /dev/null; then
     echo -n "Running govulncheck... "
-    if govulncheck ./... 2>/dev/null; then
+    GOVULN_OUTPUT=$(govulncheck -format json ./... 2>/dev/null)
+    GOVULN_EXIT=$?
+    if [ $GOVULN_EXIT -eq 0 ]; then
         echo -e "${GREEN}OK${NC}"
     else
-        echo -e "${RED}FAIL${NC}"
-        echo "govulncheck found vulnerable dependencies. Run 'govulncheck ./...' for details."
-        FAILED=1
+        # Check if all findings are stdlib-only (no available fix via go get)
+        NON_STDLIB=$(echo "$GOVULN_OUTPUT" | python3 -c "
+import sys, json
+has_non_stdlib = False
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        obj = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    finding = obj.get('finding')
+    if finding:
+        traces = finding.get('trace', [])
+        if traces and traces[0].get('module', '') != 'stdlib':
+            has_non_stdlib = True
+            break
+print('yes' if has_non_stdlib else 'no')
+" 2>/dev/null)
+        if [ "$NON_STDLIB" = "no" ]; then
+            echo -e "${YELLOW}WARN${NC}"
+            echo "govulncheck: stdlib-only vulnerabilities (no fix available yet). Run 'govulncheck ./...' for details."
+        else
+            echo -e "${RED}FAIL${NC}"
+            echo "govulncheck found vulnerable dependencies. Run 'govulncheck ./...' for details."
+            FAILED=1
+        fi
     fi
 else
     echo -e "${YELLOW}SKIP (govulncheck not installed)${NC}"

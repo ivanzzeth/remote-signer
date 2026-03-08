@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -31,7 +32,11 @@ func NewRateLimiter(logger *slog.Logger) *RateLimiter {
 }
 
 // RateLimitMiddleware creates a rate limiting middleware
-func RateLimitMiddleware(limiter *RateLimiter) func(http.Handler) http.Handler {
+func RateLimitMiddleware(limiter *RateLimiter, alertServices ...*SecurityAlertService) func(http.Handler) http.Handler {
+	var alertService *SecurityAlertService
+	if len(alertServices) > 0 {
+		alertService = alertServices[0]
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			apiKey := GetAPIKey(r.Context())
@@ -47,6 +52,13 @@ func RateLimitMiddleware(limiter *RateLimiter) func(http.Handler) http.Handler {
 					"api_key_id", apiKey.ID,
 					"rate_limit", apiKey.RateLimit,
 				)
+				if alertService != nil {
+					clientIP, _ := r.Context().Value(ClientIPContextKey).(string)
+					alertService.Alert(AlertRateLimitKey, apiKey.ID,
+						fmt.Sprintf("[Remote Signer] API KEY RATE LIMIT\n\nAPI Key: %s\nIP: %s\nLimit: %d req/min\nPath: %s %s\nTime: %s",
+							apiKey.ID, clientIP, apiKey.RateLimit, r.Method, r.URL.Path,
+							time.Now().UTC().Format(time.RFC3339)))
+				}
 				http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 				return
 			}
@@ -118,7 +130,11 @@ func (r *RateLimiter) StartCleanupRoutine(interval time.Duration, stop <-chan st
 // IPRateLimitMiddleware creates a pre-auth rate limiting middleware based on client IP.
 // Protects against unauthenticated flood attacks (e.g. brute-force with invalid API keys).
 // If limit <= 0, IP rate limiting is disabled (pass-through).
-func IPRateLimitMiddleware(limiter *RateLimiter, ipWhitelist *IPWhitelist, limit int) func(http.Handler) http.Handler {
+func IPRateLimitMiddleware(limiter *RateLimiter, ipWhitelist *IPWhitelist, limit int, alertServices ...*SecurityAlertService) func(http.Handler) http.Handler {
+	var alertService *SecurityAlertService
+	if len(alertServices) > 0 {
+		alertService = alertServices[0]
+	}
 	return func(next http.Handler) http.Handler {
 		if limit <= 0 {
 			return next // disabled
@@ -135,6 +151,12 @@ func IPRateLimitMiddleware(limiter *RateLimiter, ipWhitelist *IPWhitelist, limit
 					"limit", limit,
 					"path", r.URL.Path,
 				)
+				if alertService != nil {
+					alertService.Alert(AlertRateLimitIP, clientIP,
+						fmt.Sprintf("[Remote Signer] IP RATE LIMIT\n\nIP: %s\nLimit: %d req/min\nPath: %s %s\nTime: %s",
+							clientIP, limit, r.Method, r.URL.Path,
+							time.Now().UTC().Format(time.RFC3339)))
+				}
 				http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 				return
 			}
