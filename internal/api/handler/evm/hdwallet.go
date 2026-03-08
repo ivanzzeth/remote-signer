@@ -11,6 +11,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/audit"
 	evmchain "github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/secure"
 	"github.com/ivanzzeth/remote-signer/internal/validate"
 )
 
@@ -172,6 +173,10 @@ func (h *HDWalletHandler) createOrImport(w http.ResponseWriter, r *http.Request)
 		h.writeError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
+	defer func() {
+		secure.ZeroString(&req.Password)
+		secure.ZeroString(&req.Mnemonic)
+	}()
 
 	if req.Password == "" {
 		h.writeError(w, "password is required", http.StatusBadRequest)

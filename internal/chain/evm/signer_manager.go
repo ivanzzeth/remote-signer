@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
+	"time"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/logger"
@@ -33,9 +35,16 @@ type SignerManager interface {
 	LockSigner(ctx context.Context, address string) (*types.SignerInfo, error)
 }
 
+// AutoLockCallback is called when a signer is automatically locked due to timeout.
+type AutoLockCallback func(address string)
+
 // SignerManagerImpl implements SignerManager
 type SignerManagerImpl struct {
-	registry *SignerRegistry
+	registry        *SignerRegistry
+	autoLockTimeout time.Duration           // 0 means disabled
+	autoLockTimers  map[string]*time.Timer
+	timerMu         sync.Mutex
+	onAutoLock      AutoLockCallback // optional callback for auto-lock notifications
 }
 
 // NewSignerManager creates a new SignerManager
@@ -43,7 +52,70 @@ func NewSignerManager(registry *SignerRegistry) (*SignerManagerImpl, error) {
 	if registry == nil {
 		return nil, fmt.Errorf("registry is required")
 	}
-	return &SignerManagerImpl{registry: registry}, nil
+	return &SignerManagerImpl{
+		registry:       registry,
+		autoLockTimers: make(map[string]*time.Timer),
+	}, nil
+}
+
+// SetAutoLockTimeout configures automatic locking of signers after the given
+// duration since unlock. Set to 0 to disable.
+func (m *SignerManagerImpl) SetAutoLockTimeout(d time.Duration) {
+	m.autoLockTimeout = d
+}
+
+// SetOnAutoLock sets a callback that fires when a signer is automatically locked.
+func (m *SignerManagerImpl) SetOnAutoLock(fn AutoLockCallback) {
+	m.onAutoLock = fn
+}
+
+// StopAutoLockTimers cancels all pending auto-lock timers. Call on shutdown.
+func (m *SignerManagerImpl) StopAutoLockTimers() {
+	m.timerMu.Lock()
+	defer m.timerMu.Unlock()
+	for addr, t := range m.autoLockTimers {
+		t.Stop()
+		delete(m.autoLockTimers, addr)
+	}
+}
+
+// startAutoLockTimer starts (or resets) the auto-lock timer for the given address.
+func (m *SignerManagerImpl) startAutoLockTimer(address string) {
+	if m.autoLockTimeout <= 0 {
+		return
+	}
+	m.timerMu.Lock()
+	defer m.timerMu.Unlock()
+
+	if existing, ok := m.autoLockTimers[address]; ok {
+		existing.Stop()
+	}
+
+	m.autoLockTimers[address] = time.AfterFunc(m.autoLockTimeout, func() {
+		m.timerMu.Lock()
+		delete(m.autoLockTimers, address)
+		m.timerMu.Unlock()
+
+		if _, err := m.LockSigner(context.Background(), address); err != nil {
+			logger.EVM().Warn().Str("address", address).Err(err).Msg("auto-lock failed")
+			return
+		}
+		logger.EVM().Info().Str("address", address).Dur("timeout", m.autoLockTimeout).Msg("signer auto-locked")
+
+		if m.onAutoLock != nil {
+			m.onAutoLock(address)
+		}
+	})
+}
+
+// cancelAutoLockTimer cancels the auto-lock timer for the given address.
+func (m *SignerManagerImpl) cancelAutoLockTimer(address string) {
+	m.timerMu.Lock()
+	defer m.timerMu.Unlock()
+	if t, ok := m.autoLockTimers[address]; ok {
+		t.Stop()
+		delete(m.autoLockTimers, address)
+	}
 }
 
 // CreateSigner dispatches to the appropriate provider via type assertion.
@@ -160,6 +232,8 @@ func (m *SignerManagerImpl) UnlockSigner(ctx context.Context, address string, pa
 
 	logger.EVM().Info().Str("address", address).Str("type", info.Type).Msg("signer unlocked")
 
+	m.startAutoLockTimer(address)
+
 	return &updatedInfo, nil
 }
 
@@ -191,6 +265,8 @@ func (m *SignerManagerImpl) LockSigner(ctx context.Context, address string) (*ty
 	if err := m.registry.LockSigner(address); err != nil {
 		return nil, fmt.Errorf("failed to lock signer in registry: %w", err)
 	}
+
+	m.cancelAutoLockTimer(address)
 
 	updatedInfo, _ := m.registry.GetSignerInfo(address)
 

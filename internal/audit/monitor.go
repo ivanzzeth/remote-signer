@@ -34,6 +34,10 @@ type MonitorConfig struct {
 	AuthFailureThreshold     int `yaml:"auth_failure_threshold"`     // per source per hour (default: 5)
 	BlocklistRejectThreshold int `yaml:"blocklist_reject_threshold"` // per key per hour (default: 3)
 	HighFreqThreshold        int `yaml:"high_freq_threshold"`        // requests per hour (default: 100)
+	// Retention: automatically delete audit records older than RetentionDays.
+	// Default: 90 days. Set to 0 to disable cleanup.
+	RetentionDays    int           `yaml:"retention_days"`
+	CleanupInterval  time.Duration `yaml:"cleanup_interval"` // how often to run cleanup (default: 24h)
 }
 
 func (c *MonitorConfig) setDefaults() {
@@ -51,6 +55,12 @@ func (c *MonitorConfig) setDefaults() {
 	}
 	if c.HighFreqThreshold == 0 {
 		c.HighFreqThreshold = 100
+	}
+	if c.RetentionDays == 0 {
+		c.RetentionDays = 90
+	}
+	if c.CleanupInterval == 0 {
+		c.CleanupInterval = 24 * time.Hour
 	}
 }
 
@@ -125,15 +135,28 @@ func (m *Monitor) loop(ctx context.Context) {
 	// Run an immediate scan on startup, then on each tick.
 	m.scan(ctx)
 
-	ticker := time.NewTicker(m.cfg.Interval)
-	defer ticker.Stop()
+	scanTicker := time.NewTicker(m.cfg.Interval)
+	defer scanTicker.Stop()
+
+	cleanupTicker := time.NewTicker(m.cfg.CleanupInterval)
+	defer cleanupTicker.Stop()
+	// Run initial cleanup after a short delay (don't block startup scan)
+	go func() {
+		select {
+		case <-ctx.Done():
+		case <-time.After(10 * time.Second):
+			m.cleanup(ctx)
+		}
+	}()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-scanTicker.C:
 			m.scan(ctx)
+		case <-cleanupTicker.C:
+			m.cleanup(ctx)
 		}
 	}
 }
@@ -287,6 +310,24 @@ func AnalyzeRecords(cfg MonitorConfig, records []*types.AuditRecord) []Anomaly {
 	}
 
 	return anomalies
+}
+
+func (m *Monitor) cleanup(ctx context.Context) {
+	if m.cfg.RetentionDays <= 0 {
+		return
+	}
+	cutoff := time.Now().UTC().AddDate(0, 0, -m.cfg.RetentionDays)
+	deleted, err := m.auditRepo.DeleteOlderThan(ctx, cutoff)
+	if err != nil {
+		m.log.Error("Audit cleanup failed", "error", err)
+		return
+	}
+	if deleted > 0 {
+		m.log.Info("Audit cleanup completed",
+			"deleted", deleted,
+			"retention_days", m.cfg.RetentionDays,
+		)
+	}
 }
 
 // FormatAnomalyAlert builds a human-readable notification message.

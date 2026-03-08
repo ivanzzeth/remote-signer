@@ -37,6 +37,7 @@ type RouterConfig struct {
 	SignersAPIReadonly  bool                         // block signer/HD-wallet creation via API
 	AlertService       *middleware.SecurityAlertService // optional: real-time security alerts
 	AuditLogger        *audit.AuditLogger              // optional: persistent audit logging
+	SignTimeout        time.Duration                   // context timeout for sign operations (default: 30s)
 }
 
 // Router handles HTTP routing
@@ -98,6 +99,9 @@ func (r *Router) setupRoutes() error {
 	}
 	if r.config.AlertService != nil {
 		signHandler.SetAlertService(r.config.AlertService)
+	}
+	if r.config.SignTimeout > 0 {
+		signHandler.SetSignTimeout(r.config.SignTimeout)
 	}
 
 	requestHandler, err := evmhandler.NewRequestHandler(r.signService, r.ruleRepo, r.logger)
@@ -237,6 +241,7 @@ func (r *Router) withAuth(h http.Handler) http.Handler {
 		middleware.IPRateLimitMiddleware(r.rateLimiter, r.ipWhitelist, r.config.IPRateLimit, r.config.AlertService),
 		middleware.AuthMiddleware(r.authVerifier, r.logger, r.config.AuditLogger, r.config.AlertService),
 		middleware.RateLimitMiddleware(r.rateLimiter, r.config.AuditLogger, r.config.AlertService),
+		middleware.ContentTypeMiddleware(),
 	}
 	// Add IP whitelist as outermost middleware (checked first)
 	if r.ipWhitelist != nil {
@@ -261,6 +266,7 @@ func (r *Router) withAuthAndAdmin(h http.Handler) http.Handler {
 		middleware.AuthMiddleware(r.authVerifier, r.logger, r.config.AuditLogger, r.config.AlertService),
 		middleware.AdminMiddleware(r.logger, r.config.AlertService),
 		middleware.RateLimitMiddleware(r.rateLimiter, r.config.AuditLogger, r.config.AlertService),
+		middleware.ContentTypeMiddleware(),
 	}
 	// Add IP whitelist as outermost middleware (checked first)
 	if r.ipWhitelist != nil {

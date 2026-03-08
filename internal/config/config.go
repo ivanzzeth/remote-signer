@@ -223,6 +223,13 @@ type SecurityConfig struct {
 	// AllowSIGHUPRulesReload enables reloading rules from config when receiving SIGHUP.
 	// Default (nil) = false (secure by default). When disabled, SIGHUP is ignored (process stays alive).
 	AllowSIGHUPRulesReload *bool `yaml:"allow_sighup_rules_reload"`
+
+	// AutoLockTimeout: automatically lock signers after this duration since unlock.
+	// Default: 0 (disabled). Example: "1h", "30m".
+	AutoLockTimeout time.Duration `yaml:"auto_lock_timeout"`
+
+	// SignTimeout: context timeout for sign operations. Default: 30s.
+	SignTimeout time.Duration `yaml:"sign_timeout"`
 }
 
 // IsRulesAPIReadonly returns whether rule/template mutations via API are disabled.

@@ -317,10 +317,16 @@ func run() error {
 		}()
 
 		// Initialize signer manager for dynamic signer creation
-		evmSignerManager, err = evm.NewSignerManager(evmRegistry)
-		if err != nil {
-			return fmt.Errorf("failed to create EVM signer manager: %w", err)
+		signerMgrImpl, smErr := evm.NewSignerManager(evmRegistry)
+		if smErr != nil {
+			return fmt.Errorf("failed to create EVM signer manager: %w", smErr)
 		}
+		if cfg.Security.AutoLockTimeout > 0 {
+			signerMgrImpl.SetAutoLockTimeout(cfg.Security.AutoLockTimeout)
+			log.Info("Signer auto-lock enabled", "timeout", cfg.Security.AutoLockTimeout)
+		}
+		defer signerMgrImpl.StopAutoLockTimers()
+		evmSignerManager = signerMgrImpl
 
 		// Discover locked signers from disk (keystores and HD wallets not in config)
 		if err := evmSignerManager.DiscoverLockedSigners(context.Background()); err != nil {
@@ -552,6 +558,29 @@ func run() error {
 		ipWhitelist.SetAlertService(securityAlertService)
 	}
 
+	// Wire auto-lock notification to signer manager
+	if notifyService != nil && evmSignerManager != nil {
+		if impl, ok := evmSignerManager.(*evm.SignerManagerImpl); ok {
+			impl.SetOnAutoLock(func(address string) {
+				auditLogger.LogSignerAutoLocked(context.Background(), address)
+				if securityAlertService != nil {
+					securityAlertService.Alert(middleware.AlertSignerAutoLocked, address,
+						fmt.Sprintf("[Remote Signer] SIGNER AUTO-LOCKED\n\nAddress: %s\nReason: unlock timeout (%s)\nTime: %s\n\nUnlock again via POST /api/v1/evm/signers/%s/unlock",
+							address, cfg.Security.AutoLockTimeout, time.Now().UTC().Format(time.RFC3339), address))
+				}
+			})
+		}
+	}
+
+	// Wire audit DB failure alerting
+	if securityAlertService != nil {
+		auditLogger.SetOnLogFailure(func(eventType types.AuditEventType, logErr error) {
+			securityAlertService.Alert(middleware.AlertAuditDBFailure, "audit_db",
+				fmt.Sprintf("[Remote Signer] AUDIT DB FAILURE\n\nEvent: %s\nError: %s\nTime: %s\n\nAudit records may be lost. Check database connectivity.",
+					eventType, logErr.Error(), time.Now().UTC().Format(time.RFC3339)))
+		})
+	}
+
 	signService.SetAuditLogger(auditLogger)
 
 	// Initialize router
@@ -571,6 +600,7 @@ func run() error {
 		SignersAPIReadonly:  cfg.Security.IsSignersAPIReadonly(),
 		AlertService:       securityAlertService,
 		AuditLogger:        auditLogger,
+		SignTimeout:        cfg.Security.SignTimeout,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create router: %w", err)

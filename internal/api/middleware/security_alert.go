@@ -21,8 +21,10 @@ const (
 	AlertAdminDenied   SecurityAlertType = "admin_denied"
 	AlertRateLimitIP   SecurityAlertType = "rate_limit_ip"
 	AlertRateLimitKey  SecurityAlertType = "rate_limit_key"
-	AlertChainDenied   SecurityAlertType = "chain_denied"
-	AlertSignerDenied  SecurityAlertType = "signer_denied"
+	AlertChainDenied      SecurityAlertType = "chain_denied"
+	AlertSignerDenied     SecurityAlertType = "signer_denied"
+	AlertSignerAutoLocked SecurityAlertType = "signer_auto_locked"
+	AlertAuditDBFailure   SecurityAlertType = "audit_db_failure"
 )
 
 // SecurityAlertService sends real-time security alerts with per-source

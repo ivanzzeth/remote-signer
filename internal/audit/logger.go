@@ -13,12 +13,17 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
+// AuditLogFailureFunc is called when audit log persistence fails.
+// Implementations should send a high-priority alert.
+type AuditLogFailureFunc func(eventType types.AuditEventType, err error)
+
 // AuditLogger wraps AuditRepository with typed convenience methods
 // that enforce correct severity levels. Logging errors are non-fatal
 // (logged via slog but never propagate to callers).
 type AuditLogger struct {
-	repo   storage.AuditRepository
-	logger *slog.Logger
+	repo          storage.AuditRepository
+	logger        *slog.Logger
+	onLogFailure  AuditLogFailureFunc // optional: alert on persistence failure
 }
 
 // NewAuditLogger creates a new AuditLogger.
@@ -32,6 +37,11 @@ func NewAuditLogger(repo storage.AuditRepository, logger *slog.Logger) (*AuditLo
 	return &AuditLogger{repo: repo, logger: logger}, nil
 }
 
+// SetOnLogFailure sets a callback that fires when audit log persistence fails.
+func (a *AuditLogger) SetOnLogFailure(fn AuditLogFailureFunc) {
+	a.onLogFailure = fn
+}
+
 // SeverityForEvent returns the appropriate severity for each event type.
 func SeverityForEvent(eventType types.AuditEventType) types.AuditSeverity {
 	switch eventType {
@@ -39,6 +49,8 @@ func SeverityForEvent(eventType types.AuditEventType) types.AuditSeverity {
 		return types.AuditSeverityCritical
 	case types.AuditEventTypeApprovalDenied, types.AuditEventTypeRateLimitHit:
 		return types.AuditSeverityWarning
+	case types.AuditEventTypeSignerAutoLocked:
+		return types.AuditSeverityCritical
 	case types.AuditEventTypeSignerCreated, types.AuditEventTypeSignerUnlocked, types.AuditEventTypeHDWalletCreated:
 		return types.AuditSeverityWarning
 	default:
@@ -174,6 +186,9 @@ func (a *AuditLogger) LogAPIRequest(ctx context.Context, apiKeyID, clientIP, met
 			"method", method,
 			"path", path,
 		)
+		if a.onLogFailure != nil {
+			a.onLogFailure(record.EventType, logErr)
+		}
 	}
 }
 
@@ -278,6 +293,17 @@ func (a *AuditLogger) LogHDWalletDerived(ctx context.Context, apiKeyID, clientIP
 	})
 }
 
+// LogSignerAutoLocked logs an automatic signer lock event (timeout-based).
+func (a *AuditLogger) LogSignerAutoLocked(ctx context.Context, address string) {
+	addr := address
+	a.log(ctx, &types.AuditRecord{
+		EventType:    types.AuditEventTypeSignerAutoLocked,
+		ActorAddress: "system",
+		SignerAddress: &addr,
+		ErrorMessage: "signer auto-locked due to timeout",
+	})
+}
+
 // log persists an audit record with auto-generated ID, timestamp, and severity.
 func (a *AuditLogger) log(ctx context.Context, record *types.AuditRecord) {
 	record.ID = types.AuditID(uuid.New().String())
@@ -290,5 +316,8 @@ func (a *AuditLogger) log(ctx context.Context, record *types.AuditRecord) {
 			"event_type", record.EventType,
 			"api_key_id", record.APIKeyID,
 		)
+		if a.onLogFailure != nil {
+			a.onLogFailure(record.EventType, err)
+		}
 	}
 }

@@ -42,9 +42,10 @@ const (
 	AuditEventTypeAPIKeySynced    AuditEventType = "apikey_synced" // #nosec G101 -- not a credential, audit event type name
 
 	// Signer management events
-	AuditEventTypeSignerCreated  AuditEventType = "signer_created"
-	AuditEventTypeSignerLocked   AuditEventType = "signer_locked"
-	AuditEventTypeSignerUnlocked AuditEventType = "signer_unlocked"
+	AuditEventTypeSignerCreated    AuditEventType = "signer_created"
+	AuditEventTypeSignerLocked     AuditEventType = "signer_locked"
+	AuditEventTypeSignerUnlocked   AuditEventType = "signer_unlocked"
+	AuditEventTypeSignerAutoLocked AuditEventType = "signer_auto_locked"
 
 	// HD wallet management events
 	AuditEventTypeHDWalletCreated AuditEventType = "hdwallet_created"

@@ -12,6 +12,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/audit"
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/secure"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 	"github.com/ivanzzeth/remote-signer/internal/validate"
 )
@@ -350,6 +351,11 @@ func (h *SignerHandler) createSigner(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
+	defer func() {
+		if req.Keystore != nil {
+			secure.ZeroString(&req.Keystore.Password)
+		}
+	}()
 
 	// Convert to types.CreateSignerRequest
 	createReq := types.CreateSignerRequest{
@@ -447,6 +453,7 @@ func (h *SignerHandler) handleUnlock(w http.ResponseWriter, r *http.Request, add
 		h.writeError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
+	defer secure.ZeroString(&req.Password)
 
 	if req.Password == "" {
 		h.writeError(w, "password is required", http.StatusBadRequest)
@@ -467,7 +474,7 @@ func (h *SignerHandler) handleUnlock(w http.ResponseWriter, r *http.Request, add
 			slog.String("address", address),
 			slog.String("error", err.Error()),
 		)
-		h.writeError(w, "failed to unlock signer: "+err.Error(), http.StatusInternalServerError)
+		h.writeError(w, "failed to unlock signer", http.StatusInternalServerError)
 		return
 	}
 
@@ -509,7 +516,7 @@ func (h *SignerHandler) handleLock(w http.ResponseWriter, r *http.Request, addre
 			slog.String("address", address),
 			slog.String("error", err.Error()),
 		)
-		h.writeError(w, "failed to lock signer: "+err.Error(), http.StatusInternalServerError)
+		h.writeError(w, "failed to lock signer", http.StatusInternalServerError)
 		return
 	}
 
