@@ -1075,11 +1075,11 @@ func (m *SignersModel) renderSigners() string {
 	// Table header
 	showAccess := m.hasAccessColumn()
 	if showAccess {
-		headerRow := fmt.Sprintf("%-44s  %-14s  %-8s  %-8s  %-30s",
+		headerRow := fmt.Sprintf("%-44s  %-14s  %-14s  %-8s  %-30s",
 			"Address", "Type", "Status", "Enabled", "Access")
 		content.WriteString(styles.TableHeaderStyle.Render(headerRow))
 	} else {
-		headerRow := fmt.Sprintf("%-44s  %-14s  %-8s  %-8s",
+		headerRow := fmt.Sprintf("%-44s  %-14s  %-14s  %-8s",
 			"Address", "Type", "Status", "Enabled")
 		content.WriteString(styles.TableHeaderStyle.Render(headerRow))
 	}
@@ -1150,6 +1150,15 @@ func (m *SignersModel) renderSignerRow(signer evm.Signer, selected bool, showAcc
 	status := "Ready"
 	if signer.Locked {
 		status = "Locked"
+	} else if signer.UnlockedAt != nil {
+		// Show auto-lock countdown if available
+		// We don't know the exact timeout from TUI, but we show unlock age
+		elapsed := time.Since(*signer.UnlockedAt)
+		if elapsed < time.Hour {
+			status = fmt.Sprintf("Unlocked %dm", int(elapsed.Minutes()))
+		} else {
+			status = fmt.Sprintf("Unlocked %dh", int(elapsed.Hours()))
+		}
 	}
 
 	accessStr := ""
@@ -1158,7 +1167,7 @@ func (m *SignersModel) renderSignerRow(signer evm.Signer, selected bool, showAcc
 	}
 
 	if showAccess {
-		row := fmt.Sprintf("%-44s  %-14s  %-8s  %-8s  %-30s",
+		row := fmt.Sprintf("%-44s  %-14s  %-14s  %-8s  %-30s",
 			address,
 			signer.Type,
 			status,
@@ -1169,7 +1178,7 @@ func (m *SignersModel) renderSignerRow(signer evm.Signer, selected bool, showAcc
 			return styles.TableSelectedRowStyle.Render(row)
 		}
 	} else {
-		row := fmt.Sprintf("%-44s  %-14s  %-8s  %-8s",
+		row := fmt.Sprintf("%-44s  %-14s  %-14s  %-8s",
 			address,
 			signer.Type,
 			status,
@@ -1194,8 +1203,10 @@ func (m *SignersModel) renderSignerRow(signer evm.Signer, selected bool, showAcc
 	statusStyle := styles.SuccessStyle
 	if signer.Locked {
 		statusStyle = styles.WarningStyle
+	} else if signer.UnlockedAt != nil {
+		statusStyle = lipgloss.NewStyle().Foreground(styles.SecondaryColor)
 	}
-	statusPart := statusStyle.Render(fmt.Sprintf("%-8s", status))
+	statusPart := statusStyle.Render(fmt.Sprintf("%-14s", status))
 
 	// Color enabled
 	enabledStyle := styles.SuccessStyle

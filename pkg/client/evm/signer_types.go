@@ -1,5 +1,7 @@
 package evm
 
+import "time"
+
 // AllowedKeyInfo represents an API key that has access to a signer (admin view only).
 type AllowedKeyInfo struct {
 	ID         string `json:"id"`
@@ -13,6 +15,7 @@ type Signer struct {
 	Type        string           `json:"type"`
 	Enabled     bool             `json:"enabled"`
 	Locked      bool             `json:"locked"`
+	UnlockedAt  *time.Time       `json:"unlocked_at,omitempty"`
 	AllowedKeys []AllowedKeyInfo `json:"allowed_keys,omitempty"`
 }
 

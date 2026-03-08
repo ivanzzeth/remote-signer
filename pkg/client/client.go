@@ -131,10 +131,19 @@ func NewClient(cfg Config) (*Client, error) {
 	}, nil
 }
 
+// SecurityConfigInfo represents security configuration summary.
+type SecurityConfigInfo struct {
+	AutoLockTimeout       string `json:"auto_lock_timeout"`
+	SignTimeout           string `json:"sign_timeout"`
+	AuditRetentionDays    int    `json:"audit_retention_days"`
+	ContentTypeValidation bool   `json:"content_type_validation"`
+}
+
 // HealthResponse represents the health check response.
 type HealthResponse struct {
-	Status  string `json:"status"`
-	Version string `json:"version"`
+	Status   string              `json:"status"`
+	Version  string              `json:"version"`
+	Security *SecurityConfigInfo `json:"security,omitempty"`
 }
 
 // Health checks the health of the remote-signer service.

@@ -38,6 +38,8 @@ type RouterConfig struct {
 	AlertService       *middleware.SecurityAlertService // optional: real-time security alerts
 	AuditLogger        *audit.AuditLogger              // optional: persistent audit logging
 	SignTimeout        time.Duration                   // context timeout for sign operations (default: 30s)
+	AutoLockTimeout    time.Duration                   // signer auto-lock timeout (for health endpoint)
+	AuditRetentionDays int                             // audit log retention days (for health endpoint)
 }
 
 // Router handles HTTP routing
@@ -87,6 +89,7 @@ func NewRouter(
 func (r *Router) setupRoutes() error {
 	// Health check (no auth required, but with security headers)
 	healthHandler := handler.NewHealthHandler(r.config.Version)
+	healthHandler.SetSecurityConfig(r.config.AutoLockTimeout, r.config.SignTimeout, r.config.AuditRetentionDays)
 	r.mux.Handle("/health", middleware.SecurityHeadersMiddleware()(healthHandler))
 
 	// Prometheus metrics (no auth; same port as API)
