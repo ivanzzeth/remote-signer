@@ -66,7 +66,7 @@ templates:
 - **type: "file"**: load from the given path (relative to config file or project root).
 - **path**: path to the template YAML.
 
-Template files live under `rules/templates/` (e.g. `polymarket_safe.template.yaml`, `predict_eoa.template.yaml`). Each file contains `variables`, optional `test_variables`, and `rules` with `${var}` placeholders.
+Template files live under `rules/templates/` (e.g. `polymarket_safe.template.yaml`, `predict_auth.template.yaml`, `predict_enable_trading.template.yaml`, `predict_trading.template.yaml`). Each file contains `variables`, optional `test_variables`, and `rules` with `${var}` placeholders.
 
 ### 3.3 Template file format (example)
 
@@ -213,11 +213,27 @@ rules:
     chain_type: "evm"
     chain_id: "137"
     enabled: true
-  - name: "Predict EOA (BNB)"
+  - name: "Predict.fun EOA (BNB) (Predict Auth Template)"
     type: "instance"
     config:
-      template: "Predict EOA Template"
-      variables: { chain_id: "56", ... }
+      template: "Predict Auth Template"
+      variables: {}
+    chain_type: "evm"
+    chain_id: "56"
+    enabled: true
+  - name: "Predict.fun EOA (BNB) (Predict Enable Trading Template)"
+    type: "instance"
+    config:
+      template: "Predict Enable Trading Template"
+      variables: { chain_id: "56", usdt_address: "0x55d3...", ... }
+    chain_type: "evm"
+    chain_id: "56"
+    enabled: true
+  - name: "Predict.fun EOA (BNB) (Predict Trading Template)"
+    type: "instance"
+    config:
+      template: "Predict Trading Template"
+      variables: { chain_id: "56", order_domain_name: "predict.fun CTF Exchange", ... }
     chain_type: "evm"
     chain_id: "56"
     enabled: true
@@ -295,7 +311,7 @@ You can load several presets into the same config (e.g. Polymarket and Opinion).
   Suppose you load the Polymarket preset first (it injects `"Polymarket Auth Template"` → `polymarket_auth.template.yaml`). Then you load an Opinion preset that also uses the name `"Polymarket Auth Template"` but points to `opinion_safe.template.yaml`. On the second run, the CLI sees that a template named `"Polymarket Auth Template"` already exists, so it **does not inject again**. The Opinion rules are appended, but they reference `"Polymarket Auth Template"` and therefore expand using the **Polymarket** template, not the Opinion one. That is wrong and can cause mis-evaluation (e.g. wrong chain or contract logic).
 
 - **Best practice**  
-  Use a **protocol/ecosystem prefix** in every template name so that names never clash across presets: e.g. `"Polymarket Auth Template"`, `"Opinion Safe Template"`, `"Predict EOA Template"`. Then loading both Polymarket and Opinion presets is safe: each injects its own templates under distinct names, and each preset’s rules reference only those names.
+  Use a **protocol/ecosystem prefix** in every template name so that names never clash across presets: e.g. `"Polymarket Auth Template"`, `"Opinion Safe Template"`, `"Predict Auth Template"`, `"Predict Enable Trading Template"`, `"Predict Trading Template"`. Then loading both Polymarket and Opinion presets is safe: each injects its own templates under distinct names, and each preset’s rules reference only those names.
 
 - **Multiple overrides**:  
   `--set key1=val1 --set key2=val2`
