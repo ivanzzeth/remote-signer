@@ -80,6 +80,8 @@ services:
         soft: -1
         hard: -1
     environment:
+      # PATH: /app/data/foundry first so forge/cast match repo layout (./data/foundry/)
+      PATH: "/app/data/foundry:/usr/local/bin:/usr/bin:/bin"
       # Database connection (host network: connect via localhost, port exposed by postgres container)
       DATABASE_DSN: "postgres://${POSTGRES_USER:-signer}:${POSTGRES_PASSWORD:-signer_password}@127.0.0.1:${POSTGRES_PORT:-25432}/${POSTGRES_DB:-remote_signer}?sslmode=disable"
       # Optional: additional signers
@@ -92,26 +94,19 @@ services:
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,::1}
+    command: ["/app/remote-signer", "-config", "/app/config.yaml"]
     volumes:
-      # Configuration file
-      - ./config.yaml:/app/configs/config.yaml:ro
-      # Rules directory (for file-based rules)
-      - ./rules:/app/configs/rules:ro
-      # TLS certificates (generated via ./scripts/gen-certs.sh)
+      # Mirror repo layout: /app = project root, paths identical to repo
+      - ./config.yaml:/app/config.yaml:ro
+      - ./rules:/app/rules:ro
       - ./certs:/app/certs:ro
-      # Keystores - read-write: API/TUI needs to create and import keystore files
       - ./data/keystores:/app/data/keystores
-      # HD wallets - read-write: API/TUI needs to create and derive HD wallet files
       - ./data/hd-wallets:/app/data/hd-wallets
-      # Foundry binaries (downloaded to host via deploy.sh init)
-      - ./data/foundry/forge:/usr/local/bin/forge:ro
-      - ./data/foundry/cast:/usr/local/bin/cast:ro
-      # Forge workspace with lib/forge-std (install on host via deploy.sh init; no download in container)
+      - ./data/foundry:/app/data/foundry:ro
       - ./data/forge-workspace:/app/data/forge-workspace
-      # Forge cache: bind mount so local and Docker share the same cache (no cold cache in container)
       - ./data/forge-cache:/app/data/forge-cache
-      # Solc compiler cache: forge auto-downloads solc by pragma version
-      - svm_data:/home/signer/.svm
+      # Solc compiler cache: forge auto-downloads solc by pragma version (bind mount so signer can write)
+      - ./data/svm:/home/signer/.svm
     # No "ports:" needed — host network mode binds directly to host's port 8548
     # Healthcheck: auto-detect TLS by checking if server cert exists
     # If certs are mounted (TLS enabled): use HTTPS with client cert (mTLS)
@@ -125,8 +120,6 @@ services:
 
 volumes:
   postgres_data:
-    driver: local
-  svm_data:
     driver: local
 
 networks:
