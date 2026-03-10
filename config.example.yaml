@@ -313,6 +313,20 @@ templates:
     config:
       path: "rules/templates/predict_trading.template.yaml"
 
+  # Predict.fun JS templates (evm_js, no Forge required)
+  - name: "Predict Enable Trading Template (JS)"
+    type: "file"
+    description: "Predict.fun approve + setApprovalForAll (evm_js)"
+    enabled: true
+    config:
+      path: "rules/templates/predict_enable_trading.template.js.yaml"
+  - name: "Predict Trading Template (JS)"
+    type: "file"
+    description: "Predict.fun Order + split/merge/redeem + NegRiskAdapter (evm_js)"
+    enabled: true
+    config:
+      path: "rules/templates/predict_trading.template.js.yaml"
+
   # Opinion protocol Safe rules (BSC 56)
   - name: "Opinion Safe Template"
     type: "file"
@@ -368,7 +382,9 @@ rules:
         ctf_exchange_domain_version: "1"
         safe_factory_domain_name: "Polymarket Contract Proxy Factory"
 
-  # Predict.fun: 3 instances from split templates (BNB Chain 56). Or use: remote-signer-cli preset create-from predict_eoa_bnb --config config.yaml --write
+  # Predict.fun: 3 instances from split templates (BNB Chain 56).
+  # Solidity version (requires Forge): preset predict_eoa_bnb
+  # JS version (no Forge): preset predict_eoa_bnb.preset.js.yaml
   - name: "Predict.fun EOA (BNB) (Predict Auth Template)"
     type: "instance"
     chain_type: "evm"
@@ -460,7 +476,8 @@ rules:
   # -------------------------------------------------------------------------
 
   # Example 1: Simple address whitelist
-  - name: "Allow transfers to treasury"
+  - id: "allow-transfers-to-treasury"
+    name: "Allow transfers to treasury"
     type: "evm_address_list"
     mode: "whitelist"
     enabled: true
@@ -474,7 +491,8 @@ rules:
         - "0x2222222222222222222222222222222222222222"
 
   # Example 2: Contract method restriction
-  - name: "Only allow ERC20 transfer and approve"
+  - id: "only-allow-erc20-transfer-and-approve"
+    name: "Only allow ERC20 transfer and approve"
     type: "evm_contract_method"
     mode: "whitelist"
     enabled: true
@@ -485,7 +503,8 @@ rules:
         - "0x095ea7b3"  # approve(address,uint256)
 
   # Example 3: Value limit
-  - name: "Max 10 ETH per transaction"
+  - id: "max-10-eth-per-transaction"
+    name: "Max 10 ETH per transaction"
     type: "evm_value_limit"
     mode: "whitelist"
     enabled: true
@@ -494,7 +513,8 @@ rules:
 
   # Example 4: Solidity expression rule (requires Foundry)
   # Complex validation using native Solidity require() statements
-  - name: "Max 1 ETH transfer with address check"
+  - id: "max-1-eth-transfer-with-address-check"
+    name: "Max 1 ETH transfer with address check"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -525,7 +545,8 @@ rules:
           expect_reason: "cannot send to zero address"
 
   # Example 5: Blocklist rule - checked before whitelist rules
-  - name: "Block known malicious addresses"
+  - id: "block-known-malicious-addresses"
+    name: "Block known malicious addresses"
     type: "evm_solidity_expression"
     mode: "blocklist"  # Blocklist rules block even if whitelist matches
     enabled: true
@@ -546,7 +567,8 @@ rules:
 
   # Example 6: Function Mode - ERC20 transfer/approve validation
   # Uses function definitions for automatic selector matching and parameter decoding
-  - name: "ERC20 transfer and approve limits"
+  - id: "erc20-transfer-and-approve-limits"
+    name: "ERC20 transfer and approve limits"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -588,7 +610,8 @@ rules:
 
   # Example 7: EIP-712 Typed Data Validation - Permit (EIP-2612)
   # Validates EIP-712 signed messages like Permit, Permit2, Seaport orders
-  - name: "EIP-712 Permit validation"
+  - id: "eip-712-permit-validation"
+    name: "EIP-712 Permit validation"
     type: "evm_solidity_expression"
     mode: "whitelist"
     enabled: true
@@ -671,7 +694,8 @@ rules:
 
   # Example 8: Signer restriction - auto-approve requests from specific signers
   # This rule allows any sign type from the specified signers
-  - name: "Allow hot wallet signer"
+  - id: "allow-hot-wallet-signer"
+    name: "Allow hot wallet signer"
     type: "signer_restriction"
     mode: "whitelist"
     enabled: true
@@ -682,7 +706,8 @@ rules:
 
   # Example 9: Sign type restriction - allow only specific signing methods
   # Useful to limit what types of signing operations are permitted
-  - name: "Allow common signing methods"
+  - id: "allow-common-signing-methods"
+    name: "Allow common signing methods"
     type: "sign_type_restriction"
     mode: "whitelist"
     enabled: true
@@ -698,7 +723,8 @@ rules:
 
   # Example 10: Restrict to transaction signing only
   # Block personal_sign and other non-transaction signing to prevent phishing
-  - name: "Transaction signing only"
+  - id: "transaction-signing-only"
+    name: "Transaction signing only"
     type: "sign_type_restriction"
     mode: "whitelist"
     enabled: true
@@ -710,7 +736,8 @@ rules:
 
   # Example 11: Combined rule - Signer + Sign Type for personal signing
   # Auto-approve personal_sign from specific signer
-  - name: "Allow personal sign from hot wallet"
+  - id: "allow-personal-sign-from-hot-wallet"
+    name: "Allow personal sign from hot wallet"
     type: "signer_restriction"
     mode: "whitelist"
     enabled: true
