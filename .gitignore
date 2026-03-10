@@ -53,6 +53,9 @@ data/foundry/*
 !data/hd-wallets/
 data/hd-wallets/*
 !data/hd-wallets/.gitkeep
+!data/svm/
+data/svm/*
+!data/svm/.gitkeep
 
 # Configuration files (sensitive)
 config.yaml
