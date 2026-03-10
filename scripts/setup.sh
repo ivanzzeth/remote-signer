@@ -909,7 +909,7 @@ security:
   rules_api_readonly: true
   signers_api_readonly: false
   allow_sighup_rules_reload: false
-  auto_lock_timeout: "${AUTO_LOCK_TIMEOUT}"   # auto-lock signers after unlock; empty/0 = disabled
+  auto_lock_timeout: "${AUTO_LOCK_TIMEOUT:-0}"   # auto-lock signers after unlock; empty/0 = disabled
   sign_timeout: "${SIGN_TIMEOUT:-30s}"        # context timeout for sign operations
   approval_guard:
     enabled: true                 # pause signing when too many rejections (detect key abuse)
@@ -1046,6 +1046,15 @@ step_ensure_cli_tools() {
     fi
     if [ ! -x "$TUI_BIN" ] && [ -x "$PROJECT_DIR/remote-signer-tui" ]; then
         TUI_BIN="$PROJECT_DIR/remote-signer-tui"
+    fi
+
+    # Validate config immediately so we fail fast before preset step (avoids wasting time on preset selection if config is invalid)
+    if [ -f "$PROJECT_DIR/$CONFIG_FILE" ] && command -v remote-signer-validate-rules &>/dev/null; then
+        log_info "Validating config..."
+        if ! remote-signer-validate-rules -config "$PROJECT_DIR/$CONFIG_FILE" 2>&1; then
+            log_error "Config validation failed. Fix $CONFIG_FILE before adding presets (e.g. invalid duration: auto_lock_timeout: \"\" — use \"0\" for disabled)."
+            exit 1
+        fi
     fi
     echo ""
 }
@@ -1310,6 +1319,36 @@ check_server_running_and_maybe_stop() {
     sleep 2
 }
 
+# Run health check against server (uses CONFIG_FILE, PORT from setup context)
+# Returns 0 if healthy, 1 if not responding
+check_server_health() {
+    local cfg="$PROJECT_DIR/$CONFIG_FILE"
+    local port="${PORT:-8548}"
+    local curl_args
+    if [ -f "$cfg" ] && grep -A1 '^\s*tls:' "$cfg" 2>/dev/null | grep -q 'enabled:\s*true'; then
+        curl_args="--cacert $PROJECT_DIR/certs/ca.crt"
+        if grep -A5 '^\s*tls:' "$cfg" 2>/dev/null | grep -q 'client_auth:\s*true'; then
+            curl_args="$curl_args --cert $PROJECT_DIR/certs/client.crt --key $PROJECT_DIR/certs/client.key"
+        fi
+        curl -s --max-time 5 $curl_args "https://localhost:${port}/health" >/dev/null 2>&1
+    else
+        curl -s --max-time 5 "http://localhost:${port}/health" >/dev/null 2>&1
+    fi
+}
+
+# Output last 100 lines of server logs (Docker or local)
+show_recent_logs() {
+    echo ""
+    log_error "Last 100 lines of server logs:"
+    echo "----------------------------------------"
+    if [ "$DEPLOY_MODE" = "docker" ]; then
+        (cd "$PROJECT_DIR" && docker compose logs --tail 100 remote-signer 2>/dev/null) || true
+    else
+        [ -f "$PROJECT_DIR/data/remote-signer.log" ] && tail -100 "$PROJECT_DIR/data/remote-signer.log" || echo "(no log file)"
+    fi
+    echo "----------------------------------------"
+}
+
 # Ask to start the server, then optionally launch TUI to add signers (one-click deploy + import flow)
 start_server_now() {
     # If server is already running, offer to stop and restart (default: yes)
@@ -1329,6 +1368,26 @@ start_server_now() {
         else
             "$SCRIPT_DIR/deploy.sh" local-run
         fi
+
+        # Wait for server to become healthy; fail fast with logs if it does not
+        log_info "Waiting for server to become healthy..."
+        local max_attempts=24
+        local attempt=1
+        while [ $attempt -le $max_attempts ]; do
+            if check_server_health; then
+                log_info "Server is healthy."
+                break
+            fi
+            if [ $attempt -eq $max_attempts ]; then
+                log_error "Server failed to start (health check did not pass after ${max_attempts} attempts)."
+                show_recent_logs
+                log_error "Fix the errors above and restart with: ./scripts/deploy.sh $([ "$DEPLOY_MODE" = "docker" ] && echo 'run --no-screen' || echo 'local-run')"
+                exit 1
+            fi
+            sleep 5
+            attempt=$((attempt + 1))
+        done
+
         # Offer to open TUI so user can add signers without pasting key
         echo ""
         read -rp "Open TUI to add signers now? (Y/n): " OPEN_TUI

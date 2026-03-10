@@ -1,4 +1,8 @@
-# Predict.fun Protocol Rules (EOA Mode)
+# Predict.fun Protocol Rules (EOA Mode) — LEGACY FILE RULES
+# DEPRECATED: Prefer preset predict_eoa_bnb (auth + enable_trading + trading templates).
+# Use: remote-signer-cli preset create-from predict_eoa_bnb --config config.yaml --write
+# This file remains for backward compatibility with type: file rules.
+#
 # This file contains signing rules for Predict.fun protocol on BNB Chain
 #
 # Protocol: Predict.fun (Prediction Market on BNB Chain)

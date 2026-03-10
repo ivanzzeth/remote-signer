@@ -1,0 +1,34 @@
+# Predict.fun Auth (PersonalSign login) — capability template only.
+# Split from predict_eoa.template.yaml. Use with predict_eoa_bnb or composite presets.
+# Template does not care about EOA vs Safe; auth is off-chain message signing only.
+
+variables: []
+
+test_variables: {}
+
+rules:
+  - id: "predict-login-personal-sign"
+    name: "Predict Login PersonalSign"
+    type: "message_pattern"
+    mode: "whitelist"
+    enabled: true
+    description: "Allow PersonalSign login signatures for predict.fun. Messages are dynamic from API, so pattern accepts any non-empty message up to reasonable length."
+    config:
+      pattern: "(?s)^.{1,1000}$"
+      sign_types:
+        - "personal"
+        - "eip191"
+      description: "Validates predict.fun login message (dynamic content, length-constrained)"
+      test_cases:
+        - name: "should match normal login message (simulated predict.fun API response)"
+          input:
+            raw_message: "Sign in to predict.fun\nTimestamp: 1704067200\nNonce: abc123"
+          expect_pass: true
+        - name: "should match short message"
+          input:
+            raw_message: "OK"
+          expect_pass: true
+        - name: "should reject empty message"
+          input:
+            raw_message: ""
+          expect_pass: false

@@ -1,0 +1,248 @@
+# Predict.fun Enable Trading (approve + setApprovalForAll only). Split from predict_eoa.template.yaml.
+# Opens trading by approving USDT and CT to protocol contracts. No split/merge/redeem/order.
+# Template does not care about EOA vs Safe; enable_trading is the same capability.
+
+variables:
+  - name: chain_id
+    type: string
+    description: "Chain ID (e.g. 56 for BNB Chain)"
+    required: true
+  - name: usdt_address
+    type: address
+    description: "USDT token address"
+    required: true
+  - name: ct_nyb
+    type: address
+    description: "ConditionalTokens (NYB) contract address"
+    required: true
+  - name: ct_yb
+    type: address
+    description: "YieldBearing ConditionalTokens contract address"
+    required: true
+  - name: neg_risk_ctf_yb
+    type: address
+    description: "YB NegRisk ConditionalTokens contract address"
+    required: true
+  - name: ctf_exchange_nyb
+    type: address
+    description: "CTFExchange (NYB) contract address"
+    required: true
+  - name: neg_risk_exchange_nyb
+    type: address
+    description: "NegRiskExchange (NYB) contract address"
+    required: true
+  - name: neg_risk_adapter_nyb
+    type: address
+    description: "NegRiskAdapter (NYB) contract address"
+    required: true
+  - name: ctf_exchange_yb
+    type: address
+    description: "CTFExchange (YB) contract address"
+    required: true
+  - name: neg_risk_exchange_yb
+    type: address
+    description: "NegRiskExchange (YB) contract address"
+    required: true
+  - name: neg_risk_adapter_yb
+    type: address
+    description: "NegRiskAdapter (YB) contract address"
+    required: true
+  - name: signer_address_for_testing
+    type: address
+    description: "EOA signer address for test payloads"
+    required: true
+
+test_variables:
+  chain_id: "56"
+  usdt_address: "0x55d398326f99059fF775485246999027B3197955"
+  ct_nyb: "0x22DA1810B194ca018378464a58f6Ac2B10C9d244"
+  ct_yb: "0x9400F8Ad57e9e0F352345935d6D3175975eb1d9F"
+  neg_risk_ctf_yb: "0xF64b0b318AAf83BD9071110af24D24445719A07F"
+  ctf_exchange_nyb: "0x8BC070BEdAB741406F4B1Eb65A72bee27894B689"
+  neg_risk_exchange_nyb: "0x365fb81bd4A24D6303cd2F19c349dE6894D8d58A"
+  neg_risk_adapter_nyb: "0xc3Cf7c252f65E0d8D88537dF96569AE94a7F1A6E"
+  ctf_exchange_yb: "0x6bEb5a40C032AFc305961162d8204CDA16DECFa5"
+  neg_risk_exchange_yb: "0x8A289d458f5a134bA40015085A8F50Ffb681B41d"
+  neg_risk_adapter_yb: "0x41dCe1A4B8FB5e6327701750aF6231B7CD0B2A40"
+  signer_address_for_testing: "0x53c68c954f85a29d2098e90addaf41baf2ff0a50"
+
+rules:
+  - id: "predict-usdt-approve"
+    name: "Predict USDT Approve"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "${chain_id}"
+    description: "Allow USDT approve to 8 whitelisted protocol contracts (4 NYB + 4 YB)"
+    config:
+      functions: |
+        function approve(address spender, uint256 amount) external {
+            require(txTo == ${usdt_address}, "target must be USDT");
+            require(
+                spender == ${ct_nyb} || spender == ${ctf_exchange_nyb} || spender == ${neg_risk_exchange_nyb} || spender == ${neg_risk_adapter_nyb} ||
+                spender == ${ct_yb} || spender == ${ctf_exchange_yb} || spender == ${neg_risk_exchange_yb} || spender == ${neg_risk_adapter_yb},
+                "spender must be allowed protocol contract"
+            );
+        }
+      description: "USDT approve with spender whitelist (8 protocol contracts)"
+      test_cases:
+        # ---------------------------------------------------------------
+        # Real transaction test cases: USDT approve (nonce 0-3, 7-10)
+        # Source: BSC txs from ${signer_address_for_testing} EOA
+        # ---------------------------------------------------------------
+        - name: "should pass USDT approve to CTFExchange (real tx nonce=0, 0x8303b028)"
+          # BSC txHash: (redacted)
+          input:
+            to: "${usdt_address}"
+            data: "0x095ea7b30000000000000000000000008bc070bedab741406f4b1eb65a72bee27894b689ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: true
+        - name: "should pass USDT approve to NegRiskAdapter (real tx nonce=1, 0x18b0a9fc)"
+          # BSC txHash: (redacted)
+          input:
+            to: "${usdt_address}"
+            data: "0x095ea7b3000000000000000000000000c3cf7c252f65e0d8d88537df96569ae94a7f1a6effffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: true
+        - name: "should pass USDT approve to NegRiskExchange (real tx nonce=2, 0xb39c3c6b)"
+          # BSC txHash: (redacted)
+          input:
+            to: "${usdt_address}"
+            data: "0x095ea7b3000000000000000000000000365fb81bd4a24d6303cd2f19c349de6894d8d58affffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: true
+        - name: "should pass USDT approve to CT NYB (real tx nonce=3, 0xec3a2e9f)"
+          # BSC txHash: (redacted)
+          input:
+            to: "${usdt_address}"
+            data: "0x095ea7b300000000000000000000000022da1810b194ca018378464a58f6ac2b10c9d244ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: true
+        - name: "should pass USDT approve to YB CTFExchange (real tx nonce=7, 0x0c25ff29)"
+          # BSC txHash: (redacted)
+          input:
+            to: "${usdt_address}"
+            data: "0x095ea7b30000000000000000000000006beb5a40c032afc305961162d8204cda16decfa5ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: true
+        - name: "should pass USDT approve to YB NegRiskAdapter (real tx nonce=8, 0xe91b1872)"
+          # BSC txHash: (redacted)
+          input:
+            to: "${usdt_address}"
+            data: "0x095ea7b300000000000000000000000041dce1a4b8fb5e6327701750af6231b7cd0b2a40ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: true
+        - name: "should pass USDT approve to YB NegRiskExchange (real tx nonce=9, 0x2e7d9d99)"
+          # BSC txHash: (redacted)
+          input:
+            to: "${usdt_address}"
+            data: "0x095ea7b30000000000000000000000008a289d458f5a134ba40015085a8f50ffb681b41dffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: true
+        - name: "should pass USDT approve to YB CT (real tx nonce=10, 0x120f4ff3)"
+          # BSC txHash: (redacted)
+          input:
+            to: "${usdt_address}"
+            data: "0x095ea7b30000000000000000000000009400f8ad57e9e0f352345935d6d3175975eb1d9fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: true
+        - name: "should reject USDT approve to non-whitelisted spender"
+          input:
+            to: "${usdt_address}"
+            data: "0x095ea7b3000000000000000000000000deaddeaddeaddeaddeaddeaddeaddeaddeaddeadffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: false
+          expect_reason: "spender must be allowed protocol contract"
+        - name: "should reject approve on wrong target (not USDT)"
+          input:
+            to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+            data: "0x095ea7b30000000000000000000000008bc070bedab741406f4b1eb65a72bee27894b689ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: false
+          expect_reason: "target must be USDT"
+
+  - id: "predict-ct-setapprovalforall"
+    name: "Predict CT SetApprovalForAll"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "${chain_id}"
+    description: "Allow setApprovalForAll on ConditionalTokens (NYB + YB) to 6 whitelisted operator contracts"
+    config:
+      functions: |
+        function setApprovalForAll(address operator, bool approved) external {
+            require(
+                txTo == ${ct_nyb} || txTo == ${ct_yb} || txTo == ${neg_risk_ctf_yb},
+                "target must be ConditionalTokens"
+            );
+            require(
+                operator == ${ctf_exchange_nyb} || operator == ${neg_risk_exchange_nyb} || operator == ${neg_risk_adapter_nyb} ||
+                operator == ${ctf_exchange_yb} || operator == ${neg_risk_exchange_yb} || operator == ${neg_risk_adapter_yb},
+                "operator must be allowed protocol contract"
+            );
+            require(approved, "approval must be true");
+        }
+      description: "CT setApprovalForAll with operator whitelist and approved=true"
+      test_cases:
+        # ---------------------------------------------------------------
+        # Real transaction test cases: CT setApprovalForAll (nonce 4-6, 11-13)
+        # Source: BSC txs from ${signer_address_for_testing} EOA
+        # ---------------------------------------------------------------
+        - name: "should pass CT(NYB) setApprovalForAll to CTFExchange (real tx nonce=4, 0x429a603c)"
+          # BSC txHash: (redacted)
+          input:
+            to: "${ct_nyb}"
+            data: "0xa22cb4650000000000000000000000008bc070bedab741406f4b1eb65a72bee27894b6890000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: true
+        - name: "should pass CT(NYB) setApprovalForAll to NegRiskAdapter (real tx nonce=5, 0xfa045098)"
+          # BSC txHash: (redacted)
+          input:
+            to: "${ct_nyb}"
+            data: "0xa22cb465000000000000000000000000c3cf7c252f65e0d8d88537df96569ae94a7f1a6e0000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: true
+        - name: "should pass CT(NYB) setApprovalForAll to NegRiskExchange (real tx nonce=6, 0xff489444)"
+          # BSC txHash: (redacted)
+          input:
+            to: "${ct_nyb}"
+            data: "0xa22cb465000000000000000000000000365fb81bd4a24d6303cd2f19c349de6894d8d58a0000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: true
+        - name: "should pass YB CT setApprovalForAll to YB CTFExchange (real tx nonce=11, 0xe38351e8)"
+          # BSC txHash: (redacted)
+          input:
+            to: "${ct_yb}"
+            data: "0xa22cb4650000000000000000000000006beb5a40c032afc305961162d8204cda16decfa50000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: true
+        - name: "should pass YB CT setApprovalForAll to YB NegRiskAdapter (real tx nonce=12, 0xf1fcfa57)"
+          # BSC txHash: (redacted)
+          input:
+            to: "${ct_yb}"
+            data: "0xa22cb46500000000000000000000000041dce1a4b8fb5e6327701750af6231b7cd0b2a400000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: true
+        - name: "should pass YB CT setApprovalForAll to YB NegRiskExchange (real tx nonce=13, 0xa498c776)"
+          # BSC txHash: (redacted)
+          input:
+            to: "${ct_yb}"
+            data: "0xa22cb4650000000000000000000000008a289d458f5a134ba40015085a8f50ffb681b41d0000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: true
+        - name: "should pass YB NegRiskCTF setApprovalForAll to YB NegRiskAdapter"
+          # New: YB NegRiskConditionalTokens (0xF64b0b31...) → YB NegRiskAdapter
+          # Required for NegRisk merge/redeem operations
+          input:
+            to: "${neg_risk_ctf_yb}"
+            data: "0xa22cb46500000000000000000000000041dce1a4b8fb5e6327701750af6231b7cd0b2a400000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: true
+        - name: "should pass YB NegRiskCTF setApprovalForAll to YB NegRiskExchange"
+          # New: YB NegRiskConditionalTokens (0xF64b0b31...) → YB NegRiskExchange
+          # Required for NegRisk order operations
+          input:
+            to: "${neg_risk_ctf_yb}"
+            data: "0xa22cb4650000000000000000000000008a289d458f5a134ba40015085a8f50ffb681b41d0000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: true
+        - name: "should reject setApprovalForAll to non-whitelisted operator"
+          input:
+            to: "${ct_nyb}"
+            data: "0xa22cb465000000000000000000000000deaddeaddeaddeaddeaddeaddeaddeaddeaddead0000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: false
+          expect_reason: "operator must be allowed protocol contract"
+        - name: "should reject setApprovalForAll with approved=false"
+          input:
+            to: "${ct_nyb}"
+            data: "0xa22cb4650000000000000000000000008bc070bedab741406f4b1eb65a72bee27894b6890000000000000000000000000000000000000000000000000000000000000000"
+          expect_pass: false
+          expect_reason: "approval must be true"
+        - name: "should reject setApprovalForAll on wrong target (not CT)"
+          input:
+            to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+            data: "0xa22cb4650000000000000000000000008bc070bedab741406f4b1eb65a72bee27894b6890000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: false
+          expect_reason: "target must be ConditionalTokens"

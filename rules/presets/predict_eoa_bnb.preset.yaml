@@ -1,0 +1,33 @@
+# Preset: Predict.fun EOA (BNB Chain). Auth + enable_trading + trading.
+# Use: remote-signer-cli preset create-from predict_eoa_bnb [--config config.yaml --write] [--set signer_address_for_testing=0x...]
+# Composes auth (PersonalSign) + enable_trading (approve/setApprovalForAll) + trading (Order + split/merge/redeem + NegRiskAdapter).
+
+name: "Predict.fun EOA (BNB)"
+template_paths:
+  - "rules/templates/predict_auth.template.yaml"
+  - "rules/templates/predict_enable_trading.template.yaml"
+  - "rules/templates/predict_trading.template.yaml"
+template_names:
+  - "Predict Auth Template"
+  - "Predict Enable Trading Template"
+  - "Predict Trading Template"
+chain_type: "evm"
+chain_id: "56"
+enabled: true
+variables:
+  chain_id: "56"
+  order_domain_name: "predict.fun CTF Exchange"
+  order_domain_version: "1"
+  usdt_address: "0x55d398326f99059fF775485246999027B3197955"
+  ct_nyb: "0x22DA1810B194ca018378464a58f6Ac2B10C9d244"
+  ct_yb: "0x9400F8Ad57e9e0F352345935d6D3175975eb1d9F"
+  neg_risk_ctf_yb: "0xF64b0b318AAf83BD9071110af24D24445719A07F"
+  ctf_exchange_nyb: "0x8BC070BEdAB741406F4B1Eb65A72bee27894B689"
+  neg_risk_exchange_nyb: "0x365fb81bd4A24D6303cd2F19c349dE6894D8d58A"
+  neg_risk_adapter_nyb: "0xc3Cf7c252f65E0d8D88537dF96569AE94a7F1A6E"
+  ctf_exchange_yb: "0x6bEb5a40C032AFc305961162d8204CDA16DECFa5"
+  neg_risk_exchange_yb: "0x8A289d458f5a134bA40015085A8F50Ffb681B41d"
+  neg_risk_adapter_yb: "0x41dCe1A4B8FB5e6327701750aF6231B7CD0B2A40"
+  signer_address_for_testing: "0x1111111111111111111111111111111111111111"
+override_hints:
+  - signer_address_for_testing

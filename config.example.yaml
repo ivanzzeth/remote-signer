@@ -293,13 +293,25 @@ templates:
     config:
       path: "rules/templates/polymarket_safe.template.yaml"
 
-  # Example: Predict.fun EOA rules as a template (BNB Chain addresses as variables)
-  - name: "Predict EOA Template"
+  # Predict.fun: split templates (auth + enable_trading + trading). Use preset predict_eoa_bnb for quick setup.
+  - name: "Predict Auth Template"
     type: "file"
-    description: "Predict.fun protocol rules for EOA wallets (parameterized)"
+    description: "Predict.fun login (PersonalSign)"
     enabled: true
     config:
-      path: "rules/templates/predict_eoa.template.yaml"
+      path: "rules/templates/predict_auth.template.yaml"
+  - name: "Predict Enable Trading Template"
+    type: "file"
+    description: "Predict.fun approve + setApprovalForAll"
+    enabled: true
+    config:
+      path: "rules/templates/predict_enable_trading.template.yaml"
+  - name: "Predict Trading Template"
+    type: "file"
+    description: "Predict.fun Order + split/merge/redeem + NegRiskAdapter"
+    enabled: true
+    config:
+      path: "rules/templates/predict_trading.template.yaml"
 
   # Opinion protocol Safe rules (BSC 56)
   - name: "Opinion Safe Template"
@@ -356,18 +368,24 @@ rules:
         ctf_exchange_domain_version: "1"
         safe_factory_domain_name: "Polymarket Contract Proxy Factory"
 
-  # Predict.fun: instance from template (BNB Chain 56; disable if not used)
-  - name: "Predict.fun Protocol rules for EOA wallets"
+  # Predict.fun: 3 instances from split templates (BNB Chain 56). Or use: remote-signer-cli preset create-from predict_eoa_bnb --config config.yaml --write
+  - name: "Predict.fun EOA (BNB) (Predict Auth Template)"
     type: "instance"
     chain_type: "evm"
     chain_id: "56"
     enabled: true
     config:
-      template: "Predict EOA Template"
+      template: "Predict Auth Template"
+      variables: {}
+  - name: "Predict.fun EOA (BNB) (Predict Enable Trading Template)"
+    type: "instance"
+    chain_type: "evm"
+    chain_id: "56"
+    enabled: true
+    config:
+      template: "Predict Enable Trading Template"
       variables:
         chain_id: "56"
-        order_domain_name: "predict.fun CTF Exchange"
-        order_domain_version: "1"
         usdt_address: "0x55d398326f99059fF775485246999027B3197955"
         ct_nyb: "0x22DA1810B194ca018378464a58f6Ac2B10C9d244"
         ct_yb: "0x9400F8Ad57e9e0F352345935d6D3175975eb1d9F"
@@ -378,7 +396,28 @@ rules:
         ctf_exchange_yb: "0x6bEb5a40C032AFc305961162d8204CDA16DECFa5"
         neg_risk_exchange_yb: "0x8A289d458f5a134bA40015085A8F50Ffb681B41d"
         neg_risk_adapter_yb: "0x41dCe1A4B8FB5e6327701750aF6231B7CD0B2A40"
-        signer_address_for_testing: "0x1111111111111111111111111111111111111111"  # Your EOA; set in real config
+        signer_address_for_testing: "0x1111111111111111111111111111111111111111"
+  - name: "Predict.fun EOA (BNB) (Predict Trading Template)"
+    type: "instance"
+    chain_type: "evm"
+    chain_id: "56"
+    enabled: true
+    config:
+      template: "Predict Trading Template"
+      variables:
+        chain_id: "56"
+        order_domain_name: "predict.fun CTF Exchange"
+        order_domain_version: "1"
+        usdt_address: "0x55d398326f99059fF775485246999027B3197955"
+        ct_nyb: "0x22DA1810B194ca018378464a58f6Ac2B10C9d244"
+        ct_yb: "0x9400F8Ad57e9e0F352345935d6D3175975eb1d9F"
+        neg_risk_adapter_nyb: "0xc3Cf7c252f65E0d8D88537dF96569AE94a7F1A6E"
+        neg_risk_adapter_yb: "0x41dCe1A4B8FB5e6327701750aF6231B7CD0B2A40"
+        ctf_exchange_nyb: "0x8BC070BEdAB741406F4B1Eb65A72bee27894B689"
+        neg_risk_exchange_nyb: "0x365fb81bd4A24D6303cd2F19c349dE6894D8d58A"
+        ctf_exchange_yb: "0x6bEb5a40C032AFc305961162d8204CDA16DECFa5"
+        neg_risk_exchange_yb: "0x8A289d458f5a134bA40015085A8F50Ffb681B41d"
+        signer_address_for_testing: "0x1111111111111111111111111111111111111111"
 
   # Opinion: instance from template (BSC 56; disable if not used)
   # Rule-layer requirement: allowed_safe_address_for_testing must be contained in
