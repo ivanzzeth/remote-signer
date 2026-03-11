@@ -22,6 +22,35 @@ const (
 	jsRuleMaxAllocBytes = 32 * 1024 * 1024 // 32MB max allocation growth per evaluation
 )
 
+// trimConfigStrings returns a copy of config with all string values trimmed so rules can use config.xxx directly.
+func trimConfigStrings(config map[string]interface{}) map[string]interface{} {
+	if config == nil {
+		return nil
+	}
+	out := make(map[string]interface{}, len(config))
+	for k, v := range config {
+		out[k] = trimConfigValue(v)
+	}
+	return out
+}
+
+func trimConfigValue(v interface{}) interface{} {
+	switch x := v.(type) {
+	case string:
+		return strings.TrimSpace(x)
+	case map[string]interface{}:
+		return trimConfigStrings(x)
+	case []interface{}:
+		a := make([]interface{}, len(x))
+		for i, e := range x {
+			a[i] = trimConfigValue(e)
+		}
+		return a
+	default:
+		return v
+	}
+}
+
 // JSRuleEvaluator evaluates evm_js rules in-process via Sobek.
 type JSRuleEvaluator struct {
 	logger *slog.Logger
@@ -259,7 +288,7 @@ func (e *JSRuleEvaluator) wrappedValidate(script string, input *RuleInput, confi
 	if err := vm.Set("input", inputVal); err != nil {
 		return JSRuleValidateResult{Valid: false, Reason: sanitizeReason("script_error", err.Error(), false)}
 	}
-	configVal := vm.ToValue(config)
+	configVal := vm.ToValue(trimConfigStrings(config))
 	if err := vm.Set("config", configVal); err != nil {
 		return JSRuleValidateResult{Valid: false, Reason: sanitizeReason("script_error", err.Error(), false)}
 	}
@@ -317,9 +346,22 @@ func (e *JSRuleEvaluator) wrappedValidate(script string, input *RuleInput, confi
 		return JSRuleValidateResult{Valid: false, Reason: sanitizeReason("script_error", "validate is not a function", false)}
 	}
 
-	res, err := fn(sobek.Undefined(), inputVal)
-	if err != nil {
-		return JSRuleValidateResult{Valid: false, Reason: sanitizeReason("script_error", err.Error(), false)}
+	var res sobek.Value
+	var callErr error
+	var panicErr error
+	func() {
+		defer func() {
+			if v := recover(); v != nil {
+				panicErr = fmt.Errorf("%v", v)
+			}
+		}()
+		res, callErr = fn(sobek.Undefined(), inputVal)
+	}()
+	if err := panicErr; err != nil {
+		return JSRuleValidateResult{Valid: false, Reason: sanitizeReason("", extractJSExceptionMessage(err.Error()), true)}
+	}
+	if err := callErr; err != nil {
+		return JSRuleValidateResult{Valid: false, Reason: sanitizeReason("", extractJSExceptionMessage(err.Error()), true)}
 	}
 
 	if res == nil || isUndefined(res) {
@@ -351,11 +393,26 @@ func (e *JSRuleEvaluator) wrappedValidate(script string, input *RuleInput, confi
 	}
 }
 
+// extractJSExceptionMessage extracts the message from a Sobek/Goja error string like "Error: message at revert (...)".
+// Returns the original string if it doesn't match that pattern.
+func extractJSExceptionMessage(s string) string {
+	const prefix = "Error: "
+	if !strings.HasPrefix(s, prefix) {
+		return s
+	}
+	rest := s[len(prefix):]
+	if idx := strings.Index(rest, " at "); idx >= 0 {
+		return strings.TrimSpace(rest[:idx])
+	}
+	return rest
+}
+
 func removeGlobals(vm *sobek.Runtime) error {
 	// SECURITY: Remove dangerous globals to prevent code execution, data exfiltration,
 	// and DoS attacks within the JS sandbox. Per spec §11.7: allow-list only.
 	for _, name := range []string{
-		"eval", "Function", "Date", "console", "require", "global", "globalThis",
+		"eval", "Function", "Date", "console", "global", "globalThis",
+		// require: our rule primitive require(cond, reason), do not remove
 		// Network APIs — prevent data exfiltration of rule logic / signing inputs
 		"fetch", "XMLHttpRequest", "WebSocket",
 		// Timer APIs — prevent queued callback abuse
@@ -367,6 +424,25 @@ func removeGlobals(vm *sobek.Runtime) error {
 			return err
 		}
 	}
+
+	// SECURITY: Poison Function.prototype.constructor to prevent sandbox escape via
+	// (function(){}).constructor("return malicious_code")() — merely setting Function
+	// to undefined is NOT enough since the constructor is still on the prototype chain.
+	// Also freeze GeneratorFunction constructor via the same pattern.
+	if _, err := vm.RunString(`
+		(function(){
+			var noop = function(){throw new Error("Function constructor is disabled");};
+			var FP = (function(){}).constructor.prototype;
+			Object.defineProperty(FP, "constructor", {value: noop, writable: false, configurable: false});
+			try {
+				var GP = (function*(){}).constructor.prototype;
+				Object.defineProperty(GP, "constructor", {value: noop, writable: false, configurable: false});
+			} catch(e) {}
+		})();
+	`); err != nil {
+		return err
+	}
+
 	// Sobek doesn't expose Delete on runtime; Set(name, Undefined()) effectively hides
 	return trySetUndefined(vm, "Math", "random")
 }
