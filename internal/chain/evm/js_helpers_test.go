@@ -739,6 +739,75 @@ func TestRs_TxRequire_ShortCalldata(t *testing.T) {
 	assert.Contains(t, res.Reason, "calldata too short")
 }
 
+func TestRs_BigIntParse_SuccessAndType(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		var r = rs.bigint.parse("42");
+		if (!r.valid) return r;
+		if (typeof r.n !== "bigint") return fail("expected bigint");
+		if (r.n + 1n !== 43n) return fail("math failed");
+		var h = rs.bigint.parse("0x2a");
+		if (!h.valid) return h;
+		if (h.n !== 42n) return fail("hex parse failed");
+		return ok();
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.True(t, res.Valid, "rs.bigint.parse: %s", res.Reason)
+}
+
+func TestRs_BigIntParse_Invalid(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		var r = rs.bigint.parse("not_a_number");
+		if (r.valid) return fail("should fail");
+		return ok();
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.True(t, res.Valid, "rs.bigint.parse invalid: %s", res.Reason)
+}
+
+func TestRs_BigIntUint256_Range(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		// 2^256 - 1
+		var max = "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+		var r = rs.bigint.uint256(max);
+		if (!r.valid) return r;
+		if (typeof r.n !== "bigint") return fail("expected bigint");
+
+		// 2^256 (should fail)
+		var tooBig = "0x10000000000000000000000000000000000000000000000000000000000000000";
+		r = rs.bigint.uint256(tooBig);
+		if (r.valid) return fail("should fail");
+
+		// negative should fail
+		r = rs.bigint.uint256("-1");
+		if (r.valid) return fail("should fail");
+		return ok();
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.True(t, res.Valid, "rs.bigint.uint256 range: %s", res.Reason)
+}
+
+func TestRs_IntRequire_Success(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		var r = rs.int.requireLte("1000", 1000, "fee exceeds 10%");
+		if (!r.valid) return r;
+		r = rs.int.requireEq("0", 0, "signatureType must be EOA");
+		if (!r.valid) return r;
+		return ok();
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.True(t, res.Valid, "rs.int require: %s", res.Reason)
+}
+
+// NOTE: Addresses must be strict hex address strings. "0" is invalid (not a zero address).
+
 func TestRs_AddrInList_Array(t *testing.T) {
 	e, _ := NewJSRuleEvaluator(testLogger())
 	script := `function validate(i){
@@ -762,6 +831,43 @@ func TestRs_AddrInList_String(t *testing.T) {
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
 	res := e.wrappedValidate(script, input, nil)
 	assert.True(t, res.Valid, "rs.addr.inList string: %s", res.Reason)
+}
+
+func TestRs_AddrNotInList(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		var usdt = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
+		if (!rs.addr.notInList("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead", [usdt])) return fail("should be not in list");
+		if (rs.addr.notInList(usdt, [usdt])) return fail("should be in list");
+		return ok();
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.True(t, res.Valid, "rs.addr.notInList: %s", res.Reason)
+}
+
+func TestRs_AddrRequireNotInList(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	// Test 1: address NOT in list → ok
+	script1 := `function validate(i){
+		var usdt = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
+		var r = rs.addr.requireNotInList("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead", [usdt], "must not be usdt");
+		if (!r.valid) return r;
+		return ok();
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script1, input, nil)
+	assert.True(t, res.Valid, "rs.addr.requireNotInList (not in list): %s", res.Reason)
+
+	// Test 2: address IN list → panic (caught by engine as fail)
+	script2 := `function validate(i){
+		var usdt = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
+		rs.addr.requireNotInList(usdt, [usdt], "must not be usdt");
+		return ok();
+	}`
+	res = e.wrappedValidate(script2, input, nil)
+	assert.False(t, res.Valid, "rs.addr.requireNotInList (in list) should fail")
+	assert.Contains(t, res.Reason, "must not be usdt")
 }
 
 func TestRs_AddrRequireInList(t *testing.T) {
@@ -813,62 +919,85 @@ func TestRs_AddrRequireZero(t *testing.T) {
 	assert.True(t, res.Valid, "rs.addr.requireZero: %s", res.Reason)
 }
 
-func TestRs_Uint256Cmp(t *testing.T) {
+func TestRs_BigIntRequireLte_NoLimit(t *testing.T) {
 	e, _ := NewJSRuleEvaluator(testLogger())
 	script := `function validate(i){
-		if (rs.uint256.cmp("100", "200") !== -1) return fail("100 < 200");
-		if (rs.uint256.cmp("200", "200") !== 0) return fail("200 == 200");
-		if (rs.uint256.cmp("300", "200") !== 1) return fail("300 > 200");
-		if (rs.uint256.cmp("99999999999999999999", "100") !== 1) return fail("big > small");
-		return ok();
-	}`
-	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
-	assert.True(t, res.Valid, "rs.uint256.cmp: %s", res.Reason)
-}
-
-func TestRs_Uint256Gte(t *testing.T) {
-	e, _ := NewJSRuleEvaluator(testLogger())
-	script := `function validate(i){
-		if (!rs.uint256.gte("100", "50")) return fail("100 >= 50");
-		if (!rs.uint256.gte("100", "100")) return fail("100 >= 100");
-		if (rs.uint256.gte("50", "100")) return fail("50 >= 100 false");
-		return ok();
-	}`
-	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
-	assert.True(t, res.Valid, "rs.uint256.gte: %s", res.Reason)
-}
-
-func TestRs_Uint256RequireLte(t *testing.T) {
-	e, _ := NewJSRuleEvaluator(testLogger())
-	script := `function validate(i){
-		var r = rs.uint256.requireLte("50", "100", "transfer");
+		var r = rs.bigint.requireLte("50", "100", "cap");
 		if (!r.valid) return r;
-		r = rs.uint256.requireLte("100", "100", "transfer");
+		r = rs.bigint.requireLte("100", "100", "cap");
 		if (!r.valid) return r;
-		r = rs.uint256.requireLte("50", "", "transfer");
+		r = rs.bigint.requireLte("50", "", "cap");
 		if (!r.valid) return r;
-		r = rs.uint256.requireLte("50", "0", "transfer");
+		r = rs.bigint.requireLte("50", "0", "cap");
 		if (!r.valid) return r;
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
 	res := e.wrappedValidate(script, input, nil)
-	assert.True(t, res.Valid, "rs.uint256.requireLte: %s", res.Reason)
+	assert.True(t, res.Valid, "rs.bigint.requireLte: %s", res.Reason)
 }
 
-func TestRs_Uint256RequireLte_ExceedsCap(t *testing.T) {
+func TestRs_BigIntRequireLte_ExceedsCap(t *testing.T) {
 	e, _ := NewJSRuleEvaluator(testLogger())
 	script := `function validate(i){
-		var r = rs.uint256.requireLte("200", "100", "transfer");
+		var r = rs.bigint.requireLte("200", "100", "transfer exceeds cap");
 		if (r.valid) return fail("should fail");
 		return r;
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
 	res := e.wrappedValidate(script, input, nil)
 	assert.False(t, res.Valid)
-	assert.Contains(t, res.Reason, "exceeds cap")
+	assert.Contains(t, res.Reason, "transfer exceeds cap")
+}
+
+func TestRs_BigIntRequireZero(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		var r = rs.bigint.requireZero("0", "must be zero");
+		if (!r.valid) return r;
+		r = rs.bigint.requireZero("1", "must be zero");
+		if (r.valid) return fail("should fail");
+		return r;
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.False(t, res.Valid)
+	assert.Contains(t, res.Reason, "must be zero")
+}
+
+func TestRs_Revert_BecomesFail(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){ revert("exceeds cap"); return ok(); }`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.False(t, res.Valid)
+	assert.Equal(t, "exceeds cap", res.Reason)
+}
+
+func TestRs_Require_BecomesFailWhenFalsy(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){ require(false, "not allowed"); return ok(); }`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.False(t, res.Valid)
+	assert.Equal(t, "not allowed", res.Reason)
+}
+
+func TestRs_Require_PassesWhenTruthy(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){ require(true, "ignored"); return ok(); }`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.True(t, res.Valid)
+}
+
+func TestRs_AnyThrow_BecomesFail(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){ throw new Error("custom error"); }`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.False(t, res.Valid)
+	assert.Contains(t, res.Reason, "custom error")
 }
 
 func TestRs_AddrRequireInListIfNonEmpty(t *testing.T) {
@@ -916,6 +1045,28 @@ func TestRs_TypedDataRequire_Success(t *testing.T) {
 	}
 	res := e.wrappedValidate(script, input, nil)
 	assert.True(t, res.Valid, "rs.typedData.require: %s", res.Reason)
+}
+
+func TestRs_TypedDataMatch(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		var m = rs.typedData.match(i, "Order");
+		if (!m.matched) return fail("should match");
+		if (!m.domain || !m.message) return fail("missing domain/message");
+		var m2 = rs.typedData.match(i, "Other");
+		if (m2.matched) return fail("should not match");
+		return ok();
+	}`
+	input := &RuleInput{
+		SignType: "typed_data", ChainID: 56, Signer: "0x53c68c954f85a29d2098e90addaf41baf2ff0a50",
+		TypedData: &RuleInputTypedData{
+			PrimaryType: "Order",
+			Domain:      TypedDataDomain{ChainId: "56"},
+			Message:     map[string]interface{}{"maker": "0x53c68c954f85a29d2098e90addaf41baf2ff0a50"},
+		},
+	}
+	res := e.wrappedValidate(script, input, nil)
+	assert.True(t, res.Valid, "rs.typedData.match: %s", res.Reason)
 }
 
 func TestRs_TypedDataRequire_WrongSignType(t *testing.T) {
@@ -1002,4 +1153,280 @@ func TestAbiEncodeDecode_Bool(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, decoded, 1)
 	assert.Equal(t, true, decoded[0])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// rs.gnosis.safe.parseExecTransactionData
+// ─────────────────────────────────────────────────────────────────────────────
+
+func buildExecTransactionCalldata(to common.Address, value *big.Int, data []byte, operation uint8) string {
+	// execTransaction(address,uint256,bytes,uint8,uint256,uint256,uint256,address,address,bytes)
+	// selector = 0x6a761202
+	sel := "6a761202"
+
+	// Encode head: to(32) + value(32) + dataOffset(32) + operation(32) + safeTxGas(32) + baseGas(32) + gasPrice(32) + gasToken(32) + refundReceiver(32) + signaturesOffset(32)
+	toSlot := hex.EncodeToString(common.LeftPadBytes(to.Bytes(), 32))
+	valueSlot := hex.EncodeToString(common.LeftPadBytes(value.Bytes(), 32))
+	// data offset = 10 * 32 = 320 = 0x140
+	dataOffsetSlot := hex.EncodeToString(common.LeftPadBytes(big.NewInt(320).Bytes(), 32))
+	opSlot := hex.EncodeToString(common.LeftPadBytes([]byte{operation}, 32))
+	zeroSlot := hex.EncodeToString(common.LeftPadBytes([]byte{}, 32))
+
+	// data length + data (padded to 32)
+	dataLenSlot := hex.EncodeToString(common.LeftPadBytes(big.NewInt(int64(len(data))).Bytes(), 32))
+	dataHex := hex.EncodeToString(data)
+	padLen := (32 - len(data)%32) % 32
+	dataPadded := dataHex + hex.EncodeToString(make([]byte, padLen))
+
+	// signatures offset = data offset + 32 + padded data length
+	sigOffset := 320 + 32 + len(data) + padLen
+	sigOffsetSlot := hex.EncodeToString(common.LeftPadBytes(big.NewInt(int64(sigOffset)).Bytes(), 32))
+
+	// empty signatures
+	sigLenSlot := hex.EncodeToString(common.LeftPadBytes([]byte{}, 32))
+
+	return "0x" + sel + toSlot + valueSlot + dataOffsetSlot + opSlot +
+		zeroSlot + zeroSlot + zeroSlot + zeroSlot + zeroSlot + sigOffsetSlot +
+		dataLenSlot + dataPadded + sigLenSlot
+}
+
+func TestRs_SafeParseExecTransactionData_Valid(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	innerTo := common.HexToAddress("0x742d35cc6634c0532925a3b844bc454e4438f44e")
+	innerData := common.Hex2Bytes("a9059cbb000000000000000000000000dead000000000000000000000000000000000000")
+	calldata := buildExecTransactionCalldata(innerTo, big.NewInt(0), innerData, 0)
+
+	script := `function validate(i){
+		var r = rs.gnosis.safe.parseExecTransactionData("` + calldata + `");
+		if (!r.valid) return fail("parse failed: " + r.reason);
+		if (!r.valueZero) return fail("value should be zero");
+		if (!r.operationCALL) return fail("operation should be CALL");
+		if (r.innerTo.toLowerCase() !== "0x742d35cc6634c0532925a3b844bc454e4438f44e") return fail("wrong innerTo: " + r.innerTo);
+		if (!r.innerHex || r.innerHex.length < 10) return fail("innerHex too short");
+		return ok();
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.True(t, res.Valid, "safe.parseExecTransactionData valid: %s", res.Reason)
+}
+
+func TestRs_SafeParseExecTransactionData_NonZeroValue(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	innerTo := common.HexToAddress("0x742d35cc6634c0532925a3b844bc454e4438f44e")
+	calldata := buildExecTransactionCalldata(innerTo, big.NewInt(1000), []byte{0xab, 0xcd, 0xef, 0x12}, 0)
+
+	script := `function validate(i){
+		var r = rs.gnosis.safe.parseExecTransactionData("` + calldata + `");
+		if (!r.valid) return fail("parse failed: " + r.reason);
+		if (r.valueZero) return fail("value should NOT be zero");
+		return ok();
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.True(t, res.Valid, "safe nonzero value: %s", res.Reason)
+}
+
+func TestRs_SafeParseExecTransactionData_DelegateCall(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	innerTo := common.HexToAddress("0x742d35cc6634c0532925a3b844bc454e4438f44e")
+	calldata := buildExecTransactionCalldata(innerTo, big.NewInt(0), []byte{0xab, 0xcd, 0xef, 0x12}, 1)
+
+	script := `function validate(i){
+		var r = rs.gnosis.safe.parseExecTransactionData("` + calldata + `");
+		if (!r.valid) return fail("parse failed: " + r.reason);
+		if (r.operationCALL) return fail("should be DELEGATECALL");
+		return ok();
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.True(t, res.Valid, "safe delegatecall: %s", res.Reason)
+}
+
+func TestRs_SafeParseExecTransactionData_TooShort(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		var r = rs.gnosis.safe.parseExecTransactionData("0x6a761202abcd");
+		if (r.valid) return fail("should fail");
+		return ok();
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.True(t, res.Valid, "safe too short: %s", res.Reason)
+}
+
+func TestRs_SafeParseExecTransactionData_Empty(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		var r = rs.gnosis.safe.parseExecTransactionData("");
+		if (r.valid) return fail("should fail");
+		return ok();
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.True(t, res.Valid, "safe empty: %s", res.Reason)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// rs.config.requireNonEmpty
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestRs_ConfigRequireNonEmpty_Valid(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		rs.config.requireNonEmpty("token", "missing token");
+		return ok();
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	config := map[string]interface{}{"token": "0xdead"}
+	res := e.wrappedValidate(script, input, config)
+	assert.True(t, res.Valid, "config requireNonEmpty valid: %s", res.Reason)
+}
+
+func TestRs_ConfigRequireNonEmpty_Missing(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		rs.config.requireNonEmpty("token", "missing token");
+		return ok();
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, map[string]interface{}{})
+	assert.False(t, res.Valid)
+	assert.Contains(t, res.Reason, "missing token")
+}
+
+func TestRs_ConfigRequireNonEmpty_WhitespaceOnly(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		rs.config.requireNonEmpty("token", "missing token");
+		return ok();
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	config := map[string]interface{}{"token": "   "}
+	res := e.wrappedValidate(script, input, config)
+	assert.False(t, res.Valid)
+	assert.Contains(t, res.Reason, "missing token")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// trimConfigStrings
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestTrimConfigStrings(t *testing.T) {
+	input := map[string]interface{}{
+		"name":   "  hello  ",
+		"count":  42,
+		"nested": map[string]interface{}{"key": " value "},
+		"list":   []interface{}{" a ", " b "},
+	}
+	out := trimConfigStrings(input)
+	assert.Equal(t, "hello", out["name"])
+	assert.Equal(t, 42, out["count"])
+	nested := out["nested"].(map[string]interface{})
+	assert.Equal(t, "value", nested["key"])
+	list := out["list"].([]interface{})
+	assert.Equal(t, "a", list[0])
+	assert.Equal(t, "b", list[1])
+}
+
+func TestTrimConfigStrings_Nil(t *testing.T) {
+	assert.Nil(t, trimConfigStrings(nil))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// rs.bigint.int256
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestRs_BigIntInt256_Range(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		// Negative value
+		var r = rs.bigint.int256("-1");
+		if (!r.valid) return fail("int256 -1 should be valid");
+		if (typeof r.n !== "bigint") return fail("expected bigint");
+		if (r.n !== -1n) return fail("value should be -1");
+
+		// Max int256: 2^255 - 1
+		r = rs.bigint.int256("57896044618658097711785492504343953926634992332820282019728792003956564819967");
+		if (!r.valid) return fail("max int256 should be valid");
+
+		// Min int256: -2^255
+		r = rs.bigint.int256("-57896044618658097711785492504343953926634992332820282019728792003956564819968");
+		if (!r.valid) return fail("min int256 should be valid");
+
+		// Out of range (2^255)
+		r = rs.bigint.int256("57896044618658097711785492504343953926634992332820282019728792003956564819968");
+		if (r.valid) return fail("2^255 should fail");
+
+		return ok();
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.True(t, res.Valid, "rs.bigint.int256 range: %s", res.Reason)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// rs.bigint.requireEq
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestRs_BigIntRequireEq_Success(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		var r = rs.bigint.requireEq("42", "42", "not equal");
+		if (!r.valid) return r;
+		r = rs.bigint.requireEq("0xff", "255", "hex vs dec");
+		if (!r.valid) return r;
+		return ok();
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.True(t, res.Valid, "rs.bigint.requireEq: %s", res.Reason)
+}
+
+func TestRs_BigIntRequireEq_Failure(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		rs.bigint.requireEq("42", "43", "values differ");
+		return ok();
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.False(t, res.Valid)
+	assert.Contains(t, res.Reason, "values differ")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// extractJSExceptionMessage
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestExtractJSExceptionMessage(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"Error: exceeds cap at revert (native)", "exceeds cap"},
+		{"Error: simple message", "simple message"},
+		{"not an error prefix", "not an error prefix"},
+		{"Error: ", ""},
+		{"Error: multi word reason at someFunc (file:1:2)", "multi word reason"},
+	}
+	for _, tt := range tests {
+		got := extractJSExceptionMessage(tt.input)
+		assert.Equal(t, tt.want, got, "input: %q", tt.input)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// rs.addr.requireNotInList — invalid address must fail (not bypass)
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestRs_AddrRequireNotInList_InvalidAddr(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		rs.addr.requireNotInList("not_an_address", ["0x742d35cc6634c0532925a3b844bc454e4438f44e"], "blocked");
+		return ok();
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.False(t, res.Valid, "invalid address should fail requireNotInList")
+	assert.Contains(t, res.Reason, "blocked")
 }
