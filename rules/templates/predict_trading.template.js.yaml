@@ -82,36 +82,28 @@ rules:
       sign_type_filter: "typed_data"
       script: |
         function validate(input) {
-          if (input.sign_type !== 'typed_data') return fail('sign_type must be typed_data');
-          var td = input.typed_data;
-          if (!td || td.primaryType !== 'Order') return fail('not Order');
-          var domain = td.domain || {};
-          var msg = td.message || {};
-          var wantName = (config.order_domain_name || '').trim();
-          var wantVersion = (config.order_domain_version || '').trim();
+          var ctx = rs.typedData.require(input, 'Order');
+          if (!ctx.valid) return ctx;
+          var domain = ctx.domain || {};
+          var msg = ctx.message || {};
           var allowedContracts = [config.ctf_exchange_nyb, config.neg_risk_exchange_nyb, config.ctf_exchange_yb, config.neg_risk_exchange_yb];
-          var chainId = parseInt(config.chain_id, 10);
-          if (String(domain.name || '').trim() !== wantName) return fail('invalid domain name');
-          if (String(domain.version || '').trim() !== wantVersion) return fail('invalid domain version');
-          if (Number(domain.chainId) !== chainId) return fail('must be on configured chain');
-          if (!isAddress(domain.verifyingContract)) return fail('invalid verifying contract');
-          var vc = toChecksum(domain.verifyingContract);
-          if (!inSet(vc, allowedContracts)) return fail('invalid verifying contract');
-          var zeroAddr = '0x0000000000000000000000000000000000000000';
-          if (!eq(toChecksum((msg.taker || '').trim()), zeroAddr)) return fail('taker must be zero address');
-          var signerAddr = toChecksum((input.signer || '').trim());
-          if (!isAddress(signerAddr)) return fail('invalid signer');
-          if (!eq(toChecksum((msg.signer || '').trim()), signerAddr)) return fail('order signer must match signing key');
+          var r = rs.typedData.requireDomain(domain, {
+            name: (config.order_domain_name || '').trim(),
+            version: (config.order_domain_version || '').trim(),
+            chainId: parseInt(config.chain_id, 10),
+            allowedContracts: allowedContracts
+          });
+          if (!r.valid) return r;
+          r = rs.addr.requireZero((msg.taker || '').trim(), 'taker must be zero address');
+          if (!r.valid) return r;
+          if (!isAddress((input.signer || '').trim())) return fail('invalid signer');
+          r = rs.typedData.requireSignerMatch((msg.signer || '').trim(), (input.signer || '').trim(), 'order signer must match signing key');
+          if (!r.valid) return r;
           var feeBps = parseInt(msg.feeRateBps, 10) || 0;
           if (feeBps > 1000) return fail('fee exceeds 10%');
           var sigType = parseInt(msg.signatureType, 10);
           if (sigType !== 0) return fail('signatureType must be EOA');
           return ok();
-        }
-        function inSet(addr, set) {
-          var c = toChecksum((addr || '').trim());
-          for (var i = 0; i < set.length; i++) { if (eq(c, toChecksum((set[i] || '').trim()))) return true; }
-          return false;
         }
     test_cases:
       - name: "should pass valid order on CTFExchange (NYB)"
@@ -419,27 +411,17 @@ rules:
       sign_type_filter: "transaction"
       script: |
         function validate(input) {
-          if (input.sign_type !== 'transaction') return fail('transaction only');
-          var tx = input.transaction;
-          if (!tx || !tx.to || tx.data === undefined) return fail('missing tx fields');
-          var txTo = toChecksum((tx.to || '').trim());
+          var ctx = rs.tx.require(input);
+          if (!ctx.valid) return ctx;
           var ctTargets = [config.ct_nyb, config.ct_yb];
-          var targetOk = false;
-          for (var i = 0; i < ctTargets.length; i++) {
-            if (eq(txTo, toChecksum((ctTargets[i] || '').trim()))) { targetOk = true; break; }
-          }
-          if (!targetOk) return fail('target must be ConditionalTokens');
-          var dataHex = (tx.data || '0x').replace(/^0x/, '');
-          if (dataHex.length < 8) return fail('calldata too short');
-          var sel = '0x' + dataHex.slice(0, 8);
+          if (!rs.addr.inList(ctx.tx.to, ctTargets)) return fail('target must be ConditionalTokens');
           var splitSel = selector('splitPosition(address,bytes32,bytes32,uint256[],uint256)');
           var mergeSel = selector('mergePositions(address,bytes32,bytes32,uint256[],uint256)');
           var redeemSel = selector('redeemPositions(address,bytes32,bytes32,uint256[])');
           var usdt = toChecksum((config.usdt_address || '').trim());
-          var payload = '0x' + dataHex.slice(8);
-          if (eq(sel, splitSel)) return validate5Param(payload, usdt);
-          if (eq(sel, mergeSel)) return validate5Param(payload, usdt);
-          if (eq(sel, redeemSel)) return validateRedeem(payload, usdt);
+          if (eq(ctx.selector, splitSel)) return validate5Param(ctx.payloadHex, usdt);
+          if (eq(ctx.selector, mergeSel)) return validate5Param(ctx.payloadHex, usdt);
+          if (eq(ctx.selector, redeemSel)) return validateRedeem(ctx.payloadHex, usdt);
           return fail('only splitPosition, mergePositions, redeemPositions allowed');
         }
         function validate5Param(payloadHex, usdt) {
@@ -526,29 +508,19 @@ rules:
       sign_type_filter: "transaction"
       script: |
         function validate(input) {
-          if (input.sign_type !== 'transaction') return fail('transaction only');
-          var tx = input.transaction;
-          if (!tx || !tx.to || tx.data === undefined) return fail('missing tx fields');
-          var txTo = toChecksum((tx.to || '').trim());
+          var ctx = rs.tx.require(input);
+          if (!ctx.valid) return ctx;
           var adapterTargets = [config.neg_risk_adapter_nyb, config.neg_risk_adapter_yb];
-          var targetOk = false;
-          for (var i = 0; i < adapterTargets.length; i++) {
-            if (eq(txTo, toChecksum((adapterTargets[i] || '').trim()))) { targetOk = true; break; }
-          }
-          if (!targetOk) return fail('target must be NegRiskAdapter');
-          var dataHex = (tx.data || '0x').replace(/^0x/, '');
-          if (dataHex.length < 8) return fail('calldata too short');
-          var sel = '0x' + dataHex.slice(0, 8);
-          var payloadHex = '0x' + dataHex.slice(8);
+          if (!rs.addr.inList(ctx.tx.to, adapterTargets)) return fail('target must be NegRiskAdapter');
           var split2 = selector('splitPosition(bytes32,uint256)');
           var merge2 = selector('mergePositions(bytes32,uint256)');
           var redeem2 = selector('redeemPositions(bytes32,uint256[])');
           var split5 = selector('splitPosition(address,bytes32,bytes32,uint256[],uint256)');
           var merge5 = selector('mergePositions(address,bytes32,bytes32,uint256[],uint256)');
           var convert = selector('convertPositions(bytes32,uint256,uint256)');
-          if (eq(sel, split2) || eq(sel, merge2) || eq(sel, redeem2)) return ok();
-          if (eq(sel, convert)) return ok();
-          if (eq(sel, split5) || eq(sel, merge5)) return validate5Param(payloadHex);
+          if (eq(ctx.selector, split2) || eq(ctx.selector, merge2) || eq(ctx.selector, redeem2)) return ok();
+          if (eq(ctx.selector, convert)) return ok();
+          if (eq(ctx.selector, split5) || eq(ctx.selector, merge5)) return validate5Param(ctx.payloadHex);
           return fail('unknown NegRiskAdapter method');
         }
         function validate5Param(payloadHex) {

@@ -18,6 +18,7 @@ variables:
     type: address
     description: "Single Safe address for test cases (verifyingContract, transaction.to). Must be one of allowed_safe_addresses."
     required: false
+    default: ""
   - name: allowed_safe_tx_to_addresses
     type: address_list
     description: "Comma-separated allowed inner 'to' addresses (each can be routed to a different rule)"
@@ -26,18 +27,22 @@ variables:
     type: string
     description: "Default target rule ID when delegating (optional)"
     required: false
+    default: ""
   - name: delegate_to_by_target
     type: string
     description: "Optional 'addr:rule_id,addr:rule_id' to route by inner to (overrides delegate_to per address)"
     required: false
+    default: ""
   - name: delegate_mode
     type: string
     description: "Delegation mode: single (default) or per_item"
     required: false
+    default: "single"
   - name: test_inner_to
     type: address
     description: "Single allowed inner 'to' address for test cases (first of allowed_safe_tx_to_addresses)"
     required: false
+    default: ""
 
 test_variables:
   chain_id: "1"
@@ -64,31 +69,18 @@ rules:
           if (input.sign_type === 'typed_data') {
             var td = input.typed_data;
             if (!td || td.primaryType !== 'SafeTx') return ok();
-            var safeSet = parseList(config.allowed_safe_addresses);
-            if (!safeSet.length) return ok();
+            if ((config.allowed_safe_addresses || '').trim() === '') return ok();
             var chainId = parseInt(config.chain_id, 10) || 0;
             var domain = td.domain || {};
             var msg = td.message || {};
             var vc = (domain.verifyingContract || '').trim();
             if (!isAddress(vc)) return ok();
-            var vcChecksum = toChecksum(vc);
-            if (!inSet(vcChecksum, safeSet)) return ok();
+            if (!rs.addr.inList(vc, config.allowed_safe_addresses)) return ok();
             if (Number(domain.chainId) !== chainId) return ok();
             if (String(msg.operation !== undefined ? msg.operation : '') !== '0') return fail('only CALL allowed');
             return ok();
           }
           return ok();
-        }
-        function parseList(s) {
-          if (!s || typeof s !== 'string') return [];
-          var list = [];
-          s.split(',').forEach(function(a) { var t = a.trim(); if (t && isAddress(t)) list.push(toChecksum(t)); });
-          return list;
-        }
-        function inSet(addr, set) {
-          var c = toChecksum((addr || '').trim());
-          for (var i = 0; i < set.length; i++) { if (eq(c, set[i])) return true; }
-          return false;
         }
     test_cases:
       - name: "CALL operation should pass (not blocked)"
@@ -145,32 +137,17 @@ rules:
       delegate_mode: "${delegate_mode}"
       script: |
         function validate(input) {
-          var safeSet = parseList(config.allowed_safe_addresses);
-          var toSet = parseList(config.allowed_safe_tx_to_addresses);
-          if (!safeSet.length) return fail('missing or invalid allowed_safe_addresses');
-          if (!toSet.length) return fail('missing or invalid allowed_safe_tx_to_addresses');
+          if ((config.allowed_safe_addresses || '').trim() === '') return fail('missing or invalid allowed_safe_addresses');
+          if ((config.allowed_safe_tx_to_addresses || '').trim() === '') return fail('missing or invalid allowed_safe_tx_to_addresses');
           var chainId = parseInt(config.chain_id, 10) || 0;
 
           if (input.sign_type === 'typed_data') {
-            return validateSafeTx(input, safeSet, toSet, chainId);
+            return validateSafeTx(input, chainId);
           }
           if (input.sign_type === 'transaction') {
-            return validateExecTransaction(input, safeSet, toSet, chainId);
+            return validateExecTransaction(input, chainId);
           }
           return fail('sign_type must be typed_data or transaction');
-        }
-
-        function parseList(s) {
-          if (!s || typeof s !== 'string') return [];
-          var list = [];
-          s.split(',').forEach(function(a) { var t = a.trim(); if (t && isAddress(t)) list.push(toChecksum(t)); });
-          return list;
-        }
-
-        function inSet(addr, set) {
-          var c = toChecksum((addr || '').trim());
-          for (var i = 0; i < set.length; i++) { if (eq(c, set[i])) return true; }
-          return false;
         }
 
         function resolveDelegateTo(innerToChecksum) {
@@ -198,15 +175,14 @@ rules:
           };
         }
 
-        function validateSafeTx(input, safeSet, toSet, chainId) {
-          var td = input.typed_data;
-          if (!td || td.primaryType !== 'SafeTx') return fail('not SafeTx');
-          var domain = td.domain || {};
-          var msg = td.message || {};
+        function validateSafeTx(input, chainId) {
+          var ctx = rs.typedData.require(input, 'SafeTx');
+          if (!ctx.valid) return ctx;
+          var domain = ctx.domain || {};
+          var msg = ctx.message || {};
           var vc = (domain.verifyingContract || '').trim();
           if (!isAddress(vc)) return fail('invalid verifyingContract');
-          var vcChecksum = toChecksum(vc);
-          if (!inSet(vcChecksum, safeSet)) return fail('verifyingContract must be allowed Safe');
+          if (!rs.addr.inList(vc, config.allowed_safe_addresses)) return fail('verifyingContract must be allowed Safe');
           if (Number(domain.chainId) !== chainId) return fail('chainId mismatch');
           if (String(msg.value !== undefined ? msg.value : '') !== '0') return fail('value must be zero');
           if (String(msg.operation !== undefined ? msg.operation : '') !== '0') return fail('only CALL allowed');
@@ -218,9 +194,9 @@ rules:
           if (refundReceiver !== '0' && refundReceiver !== '0x0000000000000000000000000000000000000000') return fail('refundReceiver must be zero');
           var innerTo = (msg.to || '').trim();
           if (!isAddress(innerTo)) return fail('invalid inner to');
-          if (!inSet(toChecksum(innerTo), toSet)) return fail('inner to must be in allowed_safe_tx_to_addresses');
+          if (!rs.addr.inList(innerTo, config.allowed_safe_tx_to_addresses)) return fail('inner to must be in allowed_safe_tx_to_addresses');
           var data = msg.data || '0x';
-          var payload = buildPayload(vcChecksum, chainId, toChecksum(innerTo), data);
+          var payload = buildPayload(toChecksum(vc), chainId, toChecksum(innerTo), data);
           var delegateTo = resolveDelegateTo(toChecksum(innerTo));
           if (delegateTo) return { valid: true, payload: payload, delegate_to: delegateTo };
           return ok();
@@ -246,12 +222,11 @@ rules:
           return { valueZero: valueZero, operationCALL: operationCALL, innerHex: innerHex, innerTo: toHex };
         }
 
-        function validateExecTransaction(input, safeSet, toSet, chainId) {
+        function validateExecTransaction(input, chainId) {
           var tx = input.transaction;
           if (!tx || !tx.to) return fail('missing transaction or to');
           if (!isAddress(tx.to)) return fail('invalid to');
-          var txToChecksum = toChecksum(tx.to);
-          if (!inSet(txToChecksum, safeSet)) return fail('txTo must be allowed Safe');
+          if (!rs.addr.inList(tx.to, config.allowed_safe_addresses)) return fail('txTo must be allowed Safe');
           if (input.chain_id !== chainId) return fail('chainId mismatch');
           var data = (tx.data || '0x').replace(/^0x/, '');
           if (data.length < 8) return ok();
@@ -264,8 +239,8 @@ rules:
           if (!parsed.operationCALL) return fail('only CALL allowed');
           if (!parsed.innerHex || parsed.innerHex === '0x') return ok();
           var innerToChecksum = toChecksum(parsed.innerTo);
-          if (!inSet(innerToChecksum, toSet)) return fail('inner to must be in allowed_safe_tx_to_addresses');
-          var payload = buildPayload(txToChecksum, chainId, innerToChecksum, parsed.innerHex);
+          if (!rs.addr.inList(parsed.innerTo, config.allowed_safe_tx_to_addresses)) return fail('inner to must be in allowed_safe_tx_to_addresses');
+          var payload = buildPayload(toChecksum(tx.to), chainId, innerToChecksum, parsed.innerHex);
           var delegateTo = resolveDelegateTo(innerToChecksum);
           if (delegateTo) return { valid: true, payload: payload, delegate_to: delegateTo };
           return ok();

@@ -396,6 +396,14 @@ func expandInstanceRule(rule RuleConfig, templates map[string]TemplateConfig) ([
 		}
 	}
 
+	// Fill optional template variables with defaults so substitution never leaves ${var} in config.
+	// Rules must never receive unresolved placeholders — that is a design defect.
+	var errFill error
+	variables, errFill = fillOptionalTemplateVariables(tmpl.Variables, variables)
+	if errFill != nil {
+		return nil, fmt.Errorf("template variable defaults: %w", errFill)
+	}
+
 	// Get the rules JSON from template config (missing when template is disabled and file was not loaded)
 	rulesJSON, ok := tmpl.Config["rules_json"].(string)
 	if !ok {
@@ -479,6 +487,28 @@ func expandInstanceRule(rule RuleConfig, templates map[string]TemplateConfig) ([
 	}
 
 	return templateRules, nil
+}
+
+// fillOptionalTemplateVariables fills missing optional variables from template defaults.
+// Optional variables (Required: false) must declare Default; returns error if not.
+func fillOptionalTemplateVariables(defs []TemplateVarConfig, vars map[string]string) (map[string]string, error) {
+	result := make(map[string]string, len(vars)+len(defs))
+	for k, v := range vars {
+		result[k] = v
+	}
+	for _, def := range defs {
+		if _, provided := result[def.Name]; provided {
+			continue
+		}
+		if def.Required {
+			continue // required vars without value: substituteVarsInString will error
+		}
+		if def.Default == nil {
+			return nil, fmt.Errorf("optional variable %q must declare default", def.Name)
+		}
+		result[def.Name] = *def.Default
+	}
+	return result, nil
 }
 
 // substituteVarsInString replaces ${var} placeholders with values

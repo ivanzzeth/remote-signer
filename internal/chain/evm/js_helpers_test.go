@@ -670,6 +670,306 @@ func TestRemovedGlobals_MathRandom(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// rs module (injectRsHelpers)
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestRs_TxRequire_Success(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		var ctx = rs.tx.require(i);
+		if (!ctx.valid) return ctx;
+		if (ctx.selector !== "0xa9059cbb") return fail("selector mismatch: " + ctx.selector);
+		return ok();
+	}`
+	input := &RuleInput{
+		SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+		Transaction: &RuleInputTransaction{
+			From: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+			To:   "0x742d35Cc6634C0532925a3b844Bc454e4438f44e",
+			Data: "0xa9059cbb00000000000000000000000011111111111111111111111111111111111111110000000000000000000000000000000000000000000000000000000000000001",
+		},
+	}
+	res := e.wrappedValidate(script, input, nil)
+	assert.True(t, res.Valid, "rs.tx.require success: %s", res.Reason)
+}
+
+func TestRs_TxRequire_WrongSignType(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		var ctx = rs.tx.require(i);
+		if (!ctx.valid) return ctx;
+		return fail("should fail");
+	}`
+	input := &RuleInput{SignType: "typed_data", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.False(t, res.Valid)
+	assert.Contains(t, res.Reason, "transaction only")
+}
+
+func TestRs_TxRequire_MissingTx(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		var ctx = rs.tx.require(i);
+		if (!ctx.valid) return ctx;
+		return fail("should fail");
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.False(t, res.Valid)
+	assert.Contains(t, res.Reason, "missing tx")
+}
+
+func TestRs_TxRequire_ShortCalldata(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		var ctx = rs.tx.require(i);
+		if (!ctx.valid) return ctx;
+		return fail("should fail");
+	}`
+	input := &RuleInput{
+		SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+		Transaction: &RuleInputTransaction{
+			From: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+			To:   "0x742d35Cc6634C0532925a3b844Bc454e4438f44e",
+			Data: "0xa905",
+		},
+	}
+	res := e.wrappedValidate(script, input, nil)
+	assert.False(t, res.Valid)
+	assert.Contains(t, res.Reason, "calldata too short")
+}
+
+func TestRs_AddrInList_Array(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		var list = ["0x742d35Cc6634C0532925a3b844Bc454e4438f44e", "0x1111111111111111111111111111111111111111"];
+		if (!rs.addr.inList("0x742d35cc6634c0532925a3b844bc454e4438f44e", list)) return fail("should be in list");
+		if (rs.addr.inList("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead", list)) return fail("should not be in list");
+		return ok();
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.True(t, res.Valid, "rs.addr.inList array: %s", res.Reason)
+}
+
+func TestRs_AddrInList_String(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		var list = "0x742d35Cc6634C0532925a3b844Bc454e4438f44e,0x1111111111111111111111111111111111111111";
+		if (!rs.addr.inList("0x742d35cc6634c0532925a3b844bc454e4438f44e", list)) return fail("should be in list");
+		return ok();
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.True(t, res.Valid, "rs.addr.inList string: %s", res.Reason)
+}
+
+func TestRs_AddrRequireInList(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		var r = rs.addr.requireInList("0x742d35cc6634c0532925a3b844bc454e4438f44e", ["0x742d35Cc6634C0532925a3b844Bc454e4438f44e"], "not allowed");
+		if (!r.valid) return r;
+		return ok();
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.True(t, res.Valid, "rs.addr.requireInList: %s", res.Reason)
+}
+
+func TestRs_AddrRequireInList_Fail(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		var r = rs.addr.requireInList("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead", ["0x742d35Cc6634C0532925a3b844Bc454e4438f44e"], "spender not allowed");
+		if (!r.valid) return r;
+		return fail("should fail");
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.False(t, res.Valid)
+	assert.Contains(t, res.Reason, "spender not allowed")
+}
+
+func TestRs_AddrIsZero(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		if (!rs.addr.isZero("0x0000000000000000000000000000000000000000")) return fail("zero should be true");
+		if (rs.addr.isZero("0x742d35cc6634c0532925a3b844bc454e4438f44e")) return fail("non-zero should be false");
+		return ok();
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.True(t, res.Valid, "rs.addr.isZero: %s", res.Reason)
+}
+
+func TestRs_AddrRequireZero(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		var r = rs.addr.requireZero("0x0000000000000000000000000000000000000000", "taker must be zero");
+		if (!r.valid) return r;
+		return ok();
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.True(t, res.Valid, "rs.addr.requireZero: %s", res.Reason)
+}
+
+func TestRs_Uint256Cmp(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		if (rs.uint256.cmp("100", "200") !== -1) return fail("100 < 200");
+		if (rs.uint256.cmp("200", "200") !== 0) return fail("200 == 200");
+		if (rs.uint256.cmp("300", "200") !== 1) return fail("300 > 200");
+		if (rs.uint256.cmp("99999999999999999999", "100") !== 1) return fail("big > small");
+		return ok();
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.True(t, res.Valid, "rs.uint256.cmp: %s", res.Reason)
+}
+
+func TestRs_Uint256Gte(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		if (!rs.uint256.gte("100", "50")) return fail("100 >= 50");
+		if (!rs.uint256.gte("100", "100")) return fail("100 >= 100");
+		if (rs.uint256.gte("50", "100")) return fail("50 >= 100 false");
+		return ok();
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.True(t, res.Valid, "rs.uint256.gte: %s", res.Reason)
+}
+
+func TestRs_Uint256RequireLte(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		var r = rs.uint256.requireLte("50", "100", "transfer");
+		if (!r.valid) return r;
+		r = rs.uint256.requireLte("100", "100", "transfer");
+		if (!r.valid) return r;
+		r = rs.uint256.requireLte("50", "", "transfer");
+		if (!r.valid) return r;
+		r = rs.uint256.requireLte("50", "0", "transfer");
+		if (!r.valid) return r;
+		return ok();
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.True(t, res.Valid, "rs.uint256.requireLte: %s", res.Reason)
+}
+
+func TestRs_Uint256RequireLte_ExceedsCap(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		var r = rs.uint256.requireLte("200", "100", "transfer");
+		if (r.valid) return fail("should fail");
+		return r;
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.False(t, res.Valid)
+	assert.Contains(t, res.Reason, "exceeds cap")
+}
+
+func TestRs_AddrRequireInListIfNonEmpty(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		var r = rs.addr.requireInListIfNonEmpty("0x742d35cc6634c0532925a3b844bc454e4438f44e", "", "not allowed");
+		if (!r.valid) return r;
+		r = rs.addr.requireInListIfNonEmpty("0x742d35cc6634c0532925a3b844bc454e4438f44e", ["0x742d35Cc6634C0532925a3b844Bc454e4438f44e"], "not allowed");
+		if (!r.valid) return r;
+		return ok();
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.True(t, res.Valid, "rs.addr.requireInListIfNonEmpty: %s", res.Reason)
+}
+
+func TestRs_AddrRequireInListIfNonEmpty_Fail(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		var r = rs.addr.requireInListIfNonEmpty("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead", ["0x742d35Cc6634C0532925a3b844Bc454e4438f44e"], "spender not allowed");
+		if (r.valid) return fail("should fail");
+		return r;
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.False(t, res.Valid)
+	assert.Contains(t, res.Reason, "spender not allowed")
+}
+
+func TestRs_TypedDataRequire_Success(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		var ctx = rs.typedData.require(i, "Order");
+		if (!ctx.valid) return ctx;
+		if (!ctx.domain || !ctx.message) return fail("domain and message required");
+		return ok();
+	}`
+	input := &RuleInput{
+		SignType: "typed_data", ChainID: 56, Signer: "0x53c68c954f85a29d2098e90addaf41baf2ff0a50",
+		TypedData: &RuleInputTypedData{
+			PrimaryType: "Order",
+			Domain:      TypedDataDomain{Name: "Test", Version: "1", ChainId: "56"},
+			Message:     map[string]interface{}{"maker": "0x53c68c954f85a29d2098e90addaf41baf2ff0a50"},
+		},
+	}
+	res := e.wrappedValidate(script, input, nil)
+	assert.True(t, res.Valid, "rs.typedData.require: %s", res.Reason)
+}
+
+func TestRs_TypedDataRequire_WrongSignType(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		var ctx = rs.typedData.require(i, "Order");
+		if (!ctx.valid) return ctx;
+		return fail("should fail");
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.False(t, res.Valid)
+	assert.Contains(t, res.Reason, "typed_data")
+}
+
+func TestRs_TypedDataRequireDomain(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		var ctx = rs.typedData.require(i, "Order");
+		if (!ctx.valid) return ctx;
+		var r = rs.typedData.requireDomain(ctx.domain, { name: "Test", version: "1", chainId: "56", allowedContracts: ["0x8BC070BEdAB741406F4B1Eb65A72bee27894B689"] });
+		if (!r.valid) return r;
+		return ok();
+	}`
+	input := &RuleInput{
+		SignType: "typed_data", ChainID: 56, Signer: "0x53c68c954f85a29d2098e90addaf41baf2ff0a50",
+		TypedData: &RuleInputTypedData{
+			PrimaryType: "Order",
+			Domain: TypedDataDomain{
+				Name:              "Test",
+				Version:           "1",
+				ChainId:           "56",
+				VerifyingContract: "0x8BC070BEdAB741406F4B1Eb65A72bee27894B689",
+			},
+			Message: map[string]interface{}{},
+		},
+	}
+	res := e.wrappedValidate(script, input, nil)
+	assert.True(t, res.Valid, "rs.typedData.requireDomain: %s", res.Reason)
+}
+
+func TestRs_TypedDataRequireSignerMatch(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		var r = rs.typedData.requireSignerMatch("0x53c68c954f85a29d2098e90addaf41baf2ff0a50", "0x53c68c954f85a29d2098e90addaf41baf2ff0a50", "signer mismatch");
+		if (!r.valid) return r;
+		return ok();
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.True(t, res.Valid, "rs.typedData.requireSignerMatch: %s", res.Reason)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // ABI encode/decode roundtrip for bytes and string types
 // ─────────────────────────────────────────────────────────────────────────────
 

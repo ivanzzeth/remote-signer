@@ -18,6 +18,7 @@ variables:
     type: address
     description: "USDC.e token (for test_cases only)"
     required: false
+    default: ""
   - name: clob_auth_domain_name
     type: string
     description: "ClobAuth EIP-712 domain name"
@@ -128,21 +129,22 @@ rules:
       sign_type_filter: "typed_data"
       script: |
         function validate(input) {
-          if (input.sign_type !== 'typed_data') return fail('sign_type must be typed_data');
-          var td = input.typed_data;
-          if (!td || td.primaryType !== 'CreateProxy') return fail('not CreateProxy');
-          var domain = td.domain || {};
-          var msg = td.message || {};
-          var wantName = (config.safe_factory_domain_name || '').trim();
-          var wantFactory = toChecksum((config.safe_proxy_factory_address || '').trim());
-          var chainId = parseInt(config.chain_id, 10);
-          if (String(domain.name || '').trim() !== wantName) return fail('invalid domain name');
-          if (Number(domain.chainId) !== chainId) return fail('must be on Polygon');
-          if (!isAddress(domain.verifyingContract) || !eq(toChecksum(domain.verifyingContract), wantFactory)) return fail('verifyingContract must be Safe Factory');
-          var zeroAddr = '0x0000000000000000000000000000000000000000';
-          if (!eq(toChecksum((msg.paymentToken || '').trim()), zeroAddr)) return fail('payment token must be zero');
+          var ctx = rs.typedData.require(input, 'CreateProxy');
+          if (!ctx.valid) return ctx;
+          var domain = ctx.domain || {};
+          var msg = ctx.message || {};
+          var r = rs.typedData.requireDomain(domain, {
+            name: (config.safe_factory_domain_name || '').trim(),
+            version: '',
+            chainId: parseInt(config.chain_id, 10),
+            allowedContracts: [config.safe_proxy_factory_address]
+          });
+          if (!r.valid) return r;
+          r = rs.addr.requireZero((msg.paymentToken || '').trim(), 'payment token must be zero');
+          if (!r.valid) return r;
           if (String(msg.payment !== undefined ? msg.payment : '').trim() !== '0') return fail('payment must be zero');
-          if (!eq(toChecksum((msg.paymentReceiver || '').trim()), zeroAddr)) return fail('payment receiver must be zero');
+          r = rs.addr.requireZero((msg.paymentReceiver || '').trim(), 'payment receiver must be zero');
+          if (!r.valid) return r;
           return ok();
         }
     test_cases:
@@ -191,17 +193,12 @@ rules:
       sign_type_filter: "transaction"
       script: |
         function validate(input) {
-          if (input.sign_type !== 'transaction') return fail('sign_type must be transaction');
-          var tx = input.transaction;
-          if (!tx || !tx.to) return fail('missing transaction or to');
-          var toChecksumAddr = toChecksum((tx.to || '').trim());
-          var wantFactory = toChecksum((config.safe_proxy_factory_address || '').trim());
-          if (!eq(toChecksumAddr, wantFactory)) return fail('target must be Safe Factory');
-          var data = (tx.data || '0x').replace(/^0x/, '');
-          if (data.length < 8) return fail('data too short');
-          var sel = '0x' + data.slice(0, 8);
+          var ctx = rs.tx.require(input);
+          if (!ctx.valid) return ctx;
+          if (!rs.addr.inList(ctx.tx.to, [config.safe_proxy_factory_address])) return fail('target must be Safe Factory');
           var createProxySel = '0xa1884d2c';
-          if (sel.toLowerCase() !== createProxySel) return fail('not createProxy');
+          if (ctx.selector.toLowerCase() !== createProxySel) return fail('not createProxy');
+          var data = (ctx.tx.data || '0x').replace(/^0x/, '');
           if (data.length < 8 + 64 * 3) return fail('createProxy data too short');
           var zero32 = '0000000000000000000000000000000000000000000000000000000000000000';
           var paymentTokenHex = data.slice(8, 72);

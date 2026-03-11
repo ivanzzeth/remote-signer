@@ -66,13 +66,14 @@ type RuleFile struct {
 	Rules []RuleConfig `yaml:"rules"`
 }
 
-// TemplateVarConfig defines a template variable (for template file parsing only)
+// TemplateVarConfig defines a template variable (for template file parsing only).
+// Optional variables (Required: false) must declare Default.
 type TemplateVarConfig struct {
-	Name        string `yaml:"name"`
-	Type        string `yaml:"type"`
-	Description string `yaml:"description,omitempty"`
-	Required    bool   `yaml:"required"`
-	Default     string `yaml:"default,omitempty"`
+	Name        string  `yaml:"name"`
+	Type        string  `yaml:"type"`
+	Description string  `yaml:"description,omitempty"`
+	Required    bool    `yaml:"required"`
+	Default     *string `yaml:"default,omitempty"` // nil = not declared; optional vars must declare default
 }
 
 // TemplateFile represents a YAML template file (variables + test_variables + rules)
@@ -279,6 +280,19 @@ type ValidationFileResult struct {
 	SkipReason      string                 `json:"skip_reason,omitempty"`
 }
 
+// validateTemplateOptionalVarsHaveDefault ensures optional variables declare default.
+func validateTemplateOptionalVarsHaveDefault(vars []TemplateVarConfig, filePath string) error {
+	for _, v := range vars {
+		if v.Required {
+			continue
+		}
+		if v.Default == nil {
+			return fmt.Errorf("optional variable %q must declare default (file: %s)", v.Name, filePath)
+		}
+	}
+	return nil
+}
+
 func validateFile(ctx context.Context, filePath string, validator *evm.SolidityRuleValidator, msgValidator *evm.MessagePatternRuleValidator, jsValidator *evm.JSRuleValidator, log *slog.Logger, verbose bool) ([]ValidationFileResult, int, int, error) {
 	// Read file
 	data, err := os.ReadFile(filePath) // #nosec G304 -- filePath is CLI argument
@@ -294,7 +308,10 @@ func validateFile(ctx context.Context, filePath string, validator *evm.SolidityR
 
 	var rules []RuleConfig
 	if len(templateFile.Variables) > 0 && len(templateFile.Rules) > 0 {
-		// Template file: substitute test_variables then validate
+		// Template file: validate optional vars have default, substitute test_variables, then validate
+		if err := validateTemplateOptionalVarsHaveDefault(templateFile.Variables, filePath); err != nil {
+			return nil, 0, 0, err
+		}
 		if len(templateFile.TestVariables) == 0 {
 			return nil, 0, 0, fmt.Errorf("template file requires test_variables for validation (file: %s)", filePath)
 		}

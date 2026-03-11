@@ -700,7 +700,7 @@ step_ip_whitelist() {
 
 step_security_settings() {
     echo -e "${BOLD}  Security settings (optional)${NC}"
-    echo "Configure signer auto-lock, sign timeout, and audit retention."
+    echo "Configure signer auto-lock, sign timeout, audit retention, alert thresholds, and rate limits."
     echo ""
 
     # Auto-lock timeout
@@ -742,6 +742,55 @@ step_security_settings() {
     else
         log_info "Audit retention: $AUDIT_RETENTION_DAYS days"
     fi
+
+    # --- Audit anomaly thresholds (alert when exceeded per hour) ---
+    echo ""
+    echo -e "  ${CYAN}Audit alert thresholds${NC}: background monitor alerts when rates exceed these (per source per hour)."
+    echo ""
+    read -rp "  High frequency requests threshold (requests/hour) [100]: " AUDIT_HIGH_FREQ_THRESHOLD
+    AUDIT_HIGH_FREQ_THRESHOLD=$(printf '%s' "${AUDIT_HIGH_FREQ_THRESHOLD}" | tr -d '[:space:]')
+    [ -z "$AUDIT_HIGH_FREQ_THRESHOLD" ] && AUDIT_HIGH_FREQ_THRESHOLD=100
+    log_info "Audit high_freq_threshold: $AUDIT_HIGH_FREQ_THRESHOLD"
+
+    read -rp "  Auth failure threshold (same source/hour) [5]: " AUDIT_AUTH_FAILURE_THRESHOLD
+    AUDIT_AUTH_FAILURE_THRESHOLD=$(printf '%s' "${AUDIT_AUTH_FAILURE_THRESHOLD}" | tr -d '[:space:]')
+    [ -z "$AUDIT_AUTH_FAILURE_THRESHOLD" ] && AUDIT_AUTH_FAILURE_THRESHOLD=5
+    log_info "Audit auth_failure_threshold: $AUDIT_AUTH_FAILURE_THRESHOLD"
+
+    read -rp "  Sign rejection threshold (same key/hour) [3]: " AUDIT_BLOCKLIST_REJECT_THRESHOLD
+    AUDIT_BLOCKLIST_REJECT_THRESHOLD=$(printf '%s' "${AUDIT_BLOCKLIST_REJECT_THRESHOLD}" | tr -d '[:space:]')
+    [ -z "$AUDIT_BLOCKLIST_REJECT_THRESHOLD" ] && AUDIT_BLOCKLIST_REJECT_THRESHOLD=3
+    log_info "Audit blocklist_reject_threshold: $AUDIT_BLOCKLIST_REJECT_THRESHOLD"
+
+    # --- API key rate limits (requests per minute) ---
+    echo ""
+    echo -e "  ${CYAN}API key rate limits${NC}: max requests per minute per key."
+    echo ""
+    read -rp "  Admin key rate limit (req/min) [1000]: " ADMIN_RATE_LIMIT
+    ADMIN_RATE_LIMIT=$(printf '%s' "${ADMIN_RATE_LIMIT}" | tr -d '[:space:]')
+    [ -z "$ADMIN_RATE_LIMIT" ] && ADMIN_RATE_LIMIT=1000
+    log_info "Admin rate_limit: $ADMIN_RATE_LIMIT"
+
+    read -rp "  Dev key rate limit (req/min) [100]: " DEV_RATE_LIMIT
+    DEV_RATE_LIMIT=$(printf '%s' "${DEV_RATE_LIMIT}" | tr -d '[:space:]')
+    [ -z "$DEV_RATE_LIMIT" ] && DEV_RATE_LIMIT=100
+    log_info "Dev rate_limit: $DEV_RATE_LIMIT"
+
+    read -rp "  Default rate limit for other keys (req/min) [100]: " RATE_LIMIT_DEFAULT
+    RATE_LIMIT_DEFAULT=$(printf '%s' "${RATE_LIMIT_DEFAULT}" | tr -d '[:space:]')
+    [ -z "$RATE_LIMIT_DEFAULT" ] && RATE_LIMIT_DEFAULT=100
+    log_info "rate_limit_default: $RATE_LIMIT_DEFAULT"
+
+    read -rp "  Pre-auth IP rate limit (req/min) [200]: " IP_RATE_LIMIT
+    IP_RATE_LIMIT=$(printf '%s' "${IP_RATE_LIMIT}" | tr -d '[:space:]')
+    [ -z "$IP_RATE_LIMIT" ] && IP_RATE_LIMIT=200
+    log_info "ip_rate_limit: $IP_RATE_LIMIT"
+
+    read -rp "  Approval guard threshold (consecutive rejections before pause) [10]: " APPROVAL_GUARD_THRESHOLD
+    APPROVAL_GUARD_THRESHOLD=$(printf '%s' "${APPROVAL_GUARD_THRESHOLD}" | tr -d '[:space:]')
+    [ -z "$APPROVAL_GUARD_THRESHOLD" ] && APPROVAL_GUARD_THRESHOLD=10
+    log_info "approval_guard.threshold: $APPROVAL_GUARD_THRESHOLD"
+
     echo ""
 }
 
@@ -902,8 +951,8 @@ chains:
 
 security:
   max_request_age: "60s"
-  rate_limit_default: 100
-  ip_rate_limit: 200              # pre-auth per-IP limit (req/min); protects against brute-force
+  rate_limit_default: ${RATE_LIMIT_DEFAULT:-100}
+  ip_rate_limit: ${IP_RATE_LIMIT:-200}              # pre-auth per-IP limit (req/min); protects against brute-force
   nonce_required: true
   manual_approval_enabled: false  # default: no manual approval; no-match => reject
   rules_api_readonly: true
@@ -914,7 +963,7 @@ security:
   approval_guard:
     enabled: true                 # pause signing when too many rejections (detect key abuse)
     window: "5m"
-    threshold: 10
+    threshold: ${APPROVAL_GUARD_THRESHOLD:-10}
     resume_after: "2h"
   ip_whitelist:
     enabled: ${IP_WHITELIST_ENABLED:-false}
@@ -930,9 +979,9 @@ audit_monitor:
   enabled: true                   # periodic anomaly scanning
   interval: "1h"
   lookback_hours: 1
-  auth_failure_threshold: 5       # alert if 5+ auth failures/hour from same source
-  blocklist_reject_threshold: 3   # alert if 3+ sign rejections/hour
-  high_freq_threshold: 100        # alert if 100+ requests/hour from one source
+  auth_failure_threshold: ${AUDIT_AUTH_FAILURE_THRESHOLD:-5}       # alert if N+ auth failures/hour from same source
+  blocklist_reject_threshold: ${AUDIT_BLOCKLIST_REJECT_THRESHOLD:-3}   # alert if N+ sign rejections/hour
+  high_freq_threshold: ${AUDIT_HIGH_FREQ_THRESHOLD:-100}        # alert if N+ requests/hour from one source (e.g. 1500 for dev)
   retention_days: ${AUDIT_RETENTION_DAYS:-90}  # auto-delete audit records older than N days; 0 = keep forever
   cleanup_interval: "24h"         # how often to run cleanup
 
@@ -946,14 +995,14 @@ api_keys:
     public_key: "$ADMIN_PUBLIC_KEY"
     admin: true
     enabled: true
-    rate_limit: 1000
+    rate_limit: ${ADMIN_RATE_LIMIT:-1000}
 
   - id: "dev"
     name: "Dev"
     public_key: "$DEV_PUBLIC_KEY"
     admin: false
     enabled: true
-    rate_limit: 100
+    rate_limit: ${DEV_RATE_LIMIT:-100}
     allow_all_signers: true      # setup: allow any signer for local dev
     allow_all_hd_wallets: true   # setup: allow any HD wallet for local dev
 CONFIGEOF

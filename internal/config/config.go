@@ -45,13 +45,14 @@ type TemplateConfig struct {
 	Enabled        bool                   `yaml:"enabled" json:"enabled"`
 }
 
-// TemplateVarConfig defines a template variable in configuration
+// TemplateVarConfig defines a template variable in configuration.
+// Optional variables (Required: false) must declare Default; validate-rules enforces this.
 type TemplateVarConfig struct {
-	Name        string `yaml:"name"`
-	Type        string `yaml:"type"`
-	Description string `yaml:"description,omitempty"`
-	Required    bool   `yaml:"required"`
-	Default     string `yaml:"default,omitempty"`
+	Name        string  `yaml:"name"`
+	Type        string  `yaml:"type"`
+	Description string  `yaml:"description,omitempty"`
+	Required    bool    `yaml:"required"`
+	Default     *string `yaml:"default,omitempty"` // nil = not declared; optional vars must declare default
 }
 
 // TestCaseConfig defines a single test case for rule validation (evm_js, solidity, etc.)

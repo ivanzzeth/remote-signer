@@ -182,6 +182,52 @@ func TestExpandInstanceRules_ErrorPaths(t *testing.T) {
 	})
 }
 
+// TestExpandInstanceRules_OptionalVarsFilled verifies optional vars get defaults when not provided.
+func TestExpandInstanceRules_OptionalVarsFilled(t *testing.T) {
+	defaultEmpty := ""
+	templates := []TemplateConfig{
+		{
+			Name: "T",
+			Type: "template_bundle",
+			Variables: []TemplateVarConfig{
+				{Name: "chain_id", Type: "string", Required: true},
+				{Name: "delegate_to", Type: "string", Required: false, Default: &defaultEmpty},
+			},
+			Config: map[string]interface{}{
+				"rules_json": `[{"name":"R","type":"evm_solidity_expression","mode":"whitelist","config":{"x":"${chain_id}","y":"${delegate_to}"},"enabled":true}]`,
+			},
+			Enabled: true,
+		},
+	}
+	rules := []RuleConfig{
+		{
+			Name: "Instance",
+			Type: "instance",
+			Mode: "whitelist",
+			Config: map[string]interface{}{
+				"template":  "T",
+				"variables": map[string]interface{}{"chain_id": "137"},
+			},
+			Enabled: true,
+		},
+	}
+	got, err := ExpandInstanceRules(rules, templates)
+	if err != nil {
+		t.Fatalf("ExpandInstanceRules: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 rule, got %d", len(got))
+	}
+	cfg, _ := got[0].Config["x"].(string)
+	if cfg != "137" {
+		t.Errorf("config.x = %q, want 137", cfg)
+	}
+	cfgY, _ := got[0].Config["y"].(string)
+	if cfgY != "" {
+		t.Errorf("config.y = %q, want empty (from default)", cfgY)
+	}
+}
+
 // TestExpandInstanceRules_NonInstancePassthrough verifies non-instance rules are passed through unchanged.
 func TestExpandInstanceRules_NonInstancePassthrough(t *testing.T) {
 	rules := []RuleConfig{
@@ -304,6 +350,55 @@ func TestLoadTemplateFromFileStatic_InvalidPathType(t *testing.T) {
 	if !strings.Contains(err.Error(), "path") {
 		t.Errorf("error should mention path: %v", err)
 	}
+}
+
+func TestFillOptionalTemplateVariables(t *testing.T) {
+	defaultEmpty := ""
+	defaultPerItem := "per_item"
+
+	t.Run("fills missing optional from default", func(t *testing.T) {
+		defs := []TemplateVarConfig{
+			{Name: "chain_id", Type: "string", Required: true},
+			{Name: "delegate_to", Type: "string", Required: false, Default: &defaultEmpty},
+			{Name: "delegate_mode", Type: "string", Required: false, Default: &defaultPerItem},
+		}
+		vars := map[string]string{"chain_id": "1"}
+		got, err := fillOptionalTemplateVariables(defs, vars)
+		if err != nil {
+			t.Fatalf("fillOptionalTemplateVariables: %v", err)
+		}
+		if got["chain_id"] != "1" || got["delegate_to"] != "" || got["delegate_mode"] != "per_item" {
+			t.Errorf("got %v", got)
+		}
+	})
+
+	t.Run("optional without default returns error", func(t *testing.T) {
+		defs := []TemplateVarConfig{
+			{Name: "opt_var", Type: "string", Required: false, Default: nil},
+		}
+		vars := map[string]string{}
+		_, err := fillOptionalTemplateVariables(defs, vars)
+		if err == nil {
+			t.Fatal("expected error when optional var has no default")
+		}
+		if !strings.Contains(err.Error(), "must declare default") {
+			t.Errorf("error should mention default: %v", err)
+		}
+	})
+
+	t.Run("provided vars unchanged", func(t *testing.T) {
+		defs := []TemplateVarConfig{
+			{Name: "delegate_to", Type: "string", Required: false, Default: &defaultEmpty},
+		}
+		vars := map[string]string{"delegate_to": "my-rule"}
+		got, err := fillOptionalTemplateVariables(defs, vars)
+		if err != nil {
+			t.Fatalf("fillOptionalTemplateVariables: %v", err)
+		}
+		if got["delegate_to"] != "my-rule" {
+			t.Errorf("got %v, want delegate_to=my-rule", got)
+		}
+	})
 }
 
 func TestSubstituteInMappingVarsToIdentifiers(t *testing.T) {

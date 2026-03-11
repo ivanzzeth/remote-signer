@@ -97,6 +97,33 @@ rules:
 
 Variables can be scalars (string, number) or, in config/instance, represented as comma-separated strings or arrays for list-like values (e.g. multiple addresses). The engine uses comma-separated values for constructs like `in(expr, varName)`.
 
+### 3.4 rs helpers (evm_js templates)
+
+evm_js templates can use the **rs** module for composable validation. See [evm_js_rs_api.md](evm_js_rs_api.md) for the full API.
+
+**Transaction validation:**
+```javascript
+var ctx = rs.tx.require(input);
+if (!ctx.valid) return ctx;
+if (!rs.addr.inList(ctx.tx.to, [config.token_address])) return fail('wrong contract');
+```
+
+**Typed-data validation:**
+```javascript
+var ctx = rs.typedData.require(input, 'Order');
+if (!ctx.valid) return ctx;
+var r = rs.typedData.requireDomain(ctx.domain, { name: config.domain_name, version: config.domain_version, chainId: parseInt(config.chain_id, 10), allowedContracts: [config.exchange_address] });
+if (!r.valid) return r;
+```
+
+**Address and amount checks:**
+```javascript
+rs.addr.requireInList(spender, config.allowed_spenders, 'spender not allowed');
+rs.addr.requireInListIfNonEmpty(to, config.allowed_recipients, 'to not allowed');  // empty list = any
+rs.addr.requireZero(msg.taker, 'taker must be zero');
+rs.uint256.requireLte(amount, config.max_amount, 'transfer');  // empty/0 max = no limit
+```
+
 ---
 
 ## 4. Rule examples in config
