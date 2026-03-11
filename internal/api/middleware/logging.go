@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"time"
@@ -56,9 +57,12 @@ func LoggingMiddleware(logger *slog.Logger, auditLoggers ...*audit.AuditLogger) 
 				"remote_addr", r.RemoteAddr,
 			)
 
-			// Write every request to audit log for attack timeline reconstruction
+			// Write every request to audit log for attack timeline reconstruction.
+			// Use a detached context so the write is not aborted when the request
+			// context is canceled (e.g. client disconnect, LB timeout). Otherwise
+			// we get "context canceled" and false AUDIT DB FAILURE alerts.
 			if auditLogger != nil {
-				auditLogger.LogAPIRequest(r.Context(), apiKeyID, clientIP, r.Method, r.URL.Path, rw.statusCode, duration.Milliseconds(), r.UserAgent())
+				auditLogger.LogAPIRequest(context.Background(), apiKeyID, clientIP, r.Method, r.URL.Path, rw.statusCode, duration.Milliseconds(), r.UserAgent())
 			}
 		})
 	}
