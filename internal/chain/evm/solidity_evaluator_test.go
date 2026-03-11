@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -54,6 +55,24 @@ func TestProcessInOperatorToMappings(t *testing.T) {
 			assert.Equal(t, tt.wantInit, got.ConstructorInit)
 		})
 	}
+}
+
+func TestProcessInOperatorToMappings_InvalidAddressFiltered(t *testing.T) {
+	source := "require(in(txTo, addrs), \"bad\");"
+	arrays := map[string][]string{
+		"addrs": {
+			"0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837", // valid
+			"not_an_address",                               // invalid — must be skipped
+			"0xZZZZ",                                       // invalid — must be skipped
+			"",                                             // empty — must be skipped
+		},
+	}
+	got := processInOperatorToMappings(source, arrays)
+	assert.Contains(t, got.ConstructorInit, "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837")
+	assert.NotContains(t, got.ConstructorInit, "not_an_address")
+	assert.NotContains(t, got.ConstructorInit, "0xZZZZ")
+	// Only one init line (the valid address)
+	assert.Equal(t, 1, strings.Count(got.ConstructorInit, "= true;"))
 }
 
 func TestPreprocessInOperator(t *testing.T) {
