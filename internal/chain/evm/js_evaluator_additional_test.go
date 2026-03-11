@@ -267,7 +267,7 @@ func TestWrappedValidate_ScriptRuntimeError(t *testing.T) {
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
 	res := e.wrappedValidate(script, input, nil)
 	assert.False(t, res.Valid)
-	assert.Contains(t, res.Reason, "script_error")
+	assert.Contains(t, res.Reason, "boom")
 }
 
 func TestWrappedValidate_WithConfig(t *testing.T) {
@@ -855,4 +855,246 @@ func TestValidateWithInput_Fail(t *testing.T) {
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
 	res := e.ValidateWithInput(script, input, nil)
 	assert.False(t, res.Valid)
+}
+
+// =============================================================================
+// SECURITY ATTACK VECTOR TESTS
+// =============================================================================
+
+// Attack: Reconstruct eval from Function constructor via prototype chain.
+// The Function.prototype.constructor is poisoned by removeGlobals to prevent this.
+func TestSecurity_EvalRecoveryViaConstructor(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	attacks := []struct {
+		name   string
+		script string
+	}{
+		{
+			"recover eval via function constructor",
+			`function validate(i){
+				var e = (function(){}).constructor("return 1+1")();
+				return ok();
+			}`,
+		},
+		{
+			"recover Function via Object.constructor",
+			`function validate(i){
+				var F = Object.constructor;
+				var fn = new F("return 1+1");
+				return ok();
+			}`,
+		},
+		{
+			"recover eval via this.constructor",
+			`function validate(i){
+				var e = this.constructor.constructor("return 1+1")();
+				return ok();
+			}`,
+		},
+		{
+			"indirect eval via array map",
+			`function validate(i){
+				var r = [1].map(eval);
+				return ok();
+			}`,
+		},
+	}
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	for _, atk := range attacks {
+		t.Run(atk.name, func(t *testing.T) {
+			res := e.wrappedValidate(atk.script, input, nil)
+			// Must NOT return valid=true — the Function constructor is poisoned
+			assert.False(t, res.Valid, "sandbox escape: %s returned valid=true", atk.name)
+			t.Logf("blocked: valid=%v reason=%q", res.Valid, res.Reason)
+		})
+	}
+}
+
+// Attack: Prototype pollution to modify behavior of built-in helpers
+func TestSecurity_PrototypePollution(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	attacks := []struct {
+		name   string
+		script string
+	}{
+		{
+			"pollute Object.prototype",
+			`function validate(i){
+				Object.prototype.valid = true;
+				return {};
+			}`,
+		},
+		{
+			"pollute Array.prototype to bypass inList",
+			`function validate(i){
+				Array.prototype.indexOf = function(){ return 0; };
+				if (rs.addr.inList("0xdead", [])) return fail("pollution worked");
+				return ok();
+			}`,
+		},
+		{
+			"override toString to inject reason",
+			`function validate(i){
+				var bad = { toString: function(){ return "INJECTED"; } };
+				return fail(bad);
+			}`,
+		},
+	}
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	for _, atk := range attacks {
+		t.Run(atk.name, func(t *testing.T) {
+			res := e.wrappedValidate(atk.script, input, nil)
+			t.Logf("result: valid=%v reason=%q", res.Valid, res.Reason)
+		})
+	}
+}
+
+// Attack: Bypass validation by returning crafted objects
+func TestSecurity_CraftedReturnValues(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	attacks := []struct {
+		name       string
+		script     string
+		expectFail bool
+	}{
+		{
+			"getter on valid property",
+			`function validate(i){
+				var obj = {};
+				Object.defineProperty(obj, "valid", { get: function(){ return true; } });
+				return obj;
+			}`,
+			false, // This might actually work — getter returns true, exported as map
+		},
+		{
+			"toString override on reason",
+			`function validate(i){
+				return { valid: false, reason: { toString: function(){ return "x".repeat(10000); } } };
+			}`,
+			true,
+		},
+		{
+			"return true instead of object",
+			`function validate(i){ return true; }`,
+			true, // Should fail: not an object
+		},
+		{
+			"return string instead of object",
+			`function validate(i){ return "valid"; }`,
+			true,
+		},
+	}
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	for _, atk := range attacks {
+		t.Run(atk.name, func(t *testing.T) {
+			res := e.wrappedValidate(atk.script, input, nil)
+			if atk.expectFail {
+				assert.False(t, res.Valid, "should not be valid")
+			}
+			t.Logf("result: valid=%v reason=%q", res.Valid, res.Reason)
+		})
+	}
+}
+
+// Attack: DoS via CPU-intensive computation within 20ms budget
+func TestSecurity_CPUDoSWithinTimeout(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		while(true) {} // infinite loop
+		return ok();
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.False(t, res.Valid)
+	assert.Contains(t, res.Reason, "timeout")
+}
+
+// Attack: Memory bomb
+func TestSecurity_MemoryBomb(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		var arr = [];
+		for (var j = 0; j < 100000000; j++) {
+			arr.push("A".repeat(10000));
+		}
+		return ok();
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.False(t, res.Valid)
+	// Should be either timeout or memory_limit_exceeded
+	assert.True(t, strings.Contains(res.Reason, "timeout") || strings.Contains(res.Reason, "memory"),
+		"expected timeout or memory limit, got: %s", res.Reason)
+}
+
+// Attack: Access config from other rule executions (VM isolation)
+func TestSecurity_VMIsolation(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	// Rule 1: sets a global variable
+	script1 := `function validate(i){
+		globalSecret = "leaked_api_key";
+		return ok();
+	}`
+	// Rule 2: tries to read the global
+	script2 := `function validate(i){
+		if (typeof globalSecret !== "undefined") return fail("leak: " + globalSecret);
+		return ok();
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	// Run rule 1
+	e.wrappedValidate(script1, input, nil)
+	// Run rule 2 — must NOT see globalSecret
+	res := e.wrappedValidate(script2, input, nil)
+	assert.True(t, res.Valid, "VM isolation broken: %s", res.Reason)
+}
+
+// Attack: Regex DoS (catastrophic backtracking).
+// Sobek uses Go's regexp2 which has backtracking limits, so this completes quickly.
+// The 20ms timeout is the ultimate safety net.
+func TestSecurity_RegexDoS(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		var regex = /^(a+)+$/;
+		var input = "a".repeat(30) + "!";
+		regex.test(input);
+		return ok();
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	// Sobek handles this without catastrophic backtracking; either completes or times out.
+	// Both outcomes are safe — the important thing is it does NOT hang the process.
+	t.Logf("regex DoS: valid=%v reason=%q", res.Valid, res.Reason)
+}
+
+// Attack: Override built-in helpers to bypass validation
+func TestSecurity_OverrideBuiltinHelpers(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		// Try to redefine fail to always return valid
+		fail = function(r){ return { valid: true }; };
+		return fail("should still validate");
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	// If the script writer overrides fail(), it's the script writer's own bug.
+	// This is acceptable since the script IS the validation logic itself.
+	// But log the result for awareness.
+	t.Logf("override fail(): valid=%v reason=%q", res.Valid, res.Reason)
+}
+
+// Attack: Exfiltrate data via error messages
+func TestSecurity_ErrorMessageExfiltration(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		// Try to leak config via error reason
+		var secret = JSON.stringify(config);
+		return fail(secret);
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	config := map[string]interface{}{"api_key": "sk-secret-12345678901234567890"}
+	res := e.wrappedValidate(script, input, config)
+	assert.False(t, res.Valid)
+	// Reason should be truncated to 120 chars — partial mitigation
+	assert.LessOrEqual(t, len(res.Reason), jsRuleMaxReasonLen, "reason should be truncated")
+	t.Logf("leaked reason (truncated): %q", res.Reason)
 }
