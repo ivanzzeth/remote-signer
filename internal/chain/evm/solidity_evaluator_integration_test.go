@@ -454,6 +454,18 @@ func TestIntegration_FunctionMode_ERC20Transfer(t *testing.T) {
 			expectPass:  false,
 			expectMatch: "invalid recipient",
 		},
+		{
+			name:        "reject when calldata too short (no selector)",
+			data:        []byte{0x12, 0x34},
+			expectPass:  false,
+			expectMatch: "calldata too short",
+		},
+		{
+			name:        "reject when calldata empty",
+			data:        []byte{},
+			expectPass:  false,
+			expectMatch: "calldata too short",
+		},
 	}
 
 	for _, tt := range tests {

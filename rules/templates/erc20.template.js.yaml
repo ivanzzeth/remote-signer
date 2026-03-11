@@ -59,52 +59,44 @@ rules:
       script: |
         function validate(input) {
           var ctx = rs.tx.require(input);
-          if (!ctx.valid) return ctx;
           var token = config.token_address;
-          if (!token || !isAddress(token)) return fail('invalid token config');
-          if (!rs.addr.inList(ctx.tx.to, [token])) return fail('wrong contract');
+          require(token && isAddress(token), 'invalid token config');
+          require(rs.addr.inList(ctx.tx.to, [token]), 'wrong contract');
           var transferSel = selector('transfer(address,uint256)');
           var transferFromSel = selector('transferFrom(address,address,uint256)');
           var approveSel = selector('approve(address,uint256)');
           if (eq(ctx.selector, transferSel)) return validateTransfer(ctx.payloadHex);
           if (eq(ctx.selector, transferFromSel)) return validateTransferFrom(ctx.payloadHex);
           if (eq(ctx.selector, approveSel)) return validateApprove(ctx.payloadHex);
-          return fail('only transfer, transferFrom, approve allowed');
+          revert('only transfer, transferFrom, approve allowed');
         }
         function validateTransfer(payloadHex) {
           var dec = abi.decode(payloadHex, ['address', 'uint256']);
-          if (!dec || dec.length !== 2) return fail('transfer decode failed');
+          require(dec && dec.length === 2, 'transfer decode failed');
           var to = dec[0]; var amount = dec[1];
-          if (!isAddress(to)) return fail('transfer to invalid');
-          var r = rs.addr.requireInListIfNonEmpty(to, config.allowed_recipients, 'transfer to not allowed');
-          if (!r.valid) return r;
-          r = rs.uint256.requireLte(amount, config.max_transfer_amount, 'transfer');
-          if (!r.valid) return r;
+          require(isAddress(to), 'transfer to invalid');
+          rs.addr.requireInListIfNonEmpty(to, config.allowed_recipients, 'transfer to not allowed');
+          rs.bigint.requireLte(amount, config.max_transfer_amount, 'transfer exceeds cap');
           return ok();
         }
         function validateTransferFrom(payloadHex) {
           var dec = abi.decode(payloadHex, ['address', 'address', 'uint256']);
-          if (!dec || dec.length !== 3) return fail('transferFrom decode failed');
+          require(dec && dec.length === 3, 'transferFrom decode failed');
           var from = dec[0]; var to = dec[1]; var amount = dec[2];
-          if (!isAddress(from)) return fail('transferFrom from invalid');
-          if (!isAddress(to)) return fail('transferFrom to invalid');
-          var r = rs.addr.requireInListIfNonEmpty(from, config.allowed_transfer_from, 'transferFrom from not allowed');
-          if (!r.valid) return r;
-          r = rs.addr.requireInListIfNonEmpty(to, config.allowed_recipients, 'transferFrom to not allowed');
-          if (!r.valid) return r;
-          r = rs.uint256.requireLte(amount, config.max_transfer_amount, 'transferFrom');
-          if (!r.valid) return r;
+          require(isAddress(from), 'transferFrom from invalid');
+          require(isAddress(to), 'transferFrom to invalid');
+          rs.addr.requireInListIfNonEmpty(from, config.allowed_transfer_from, 'transferFrom from not allowed');
+          rs.addr.requireInListIfNonEmpty(to, config.allowed_recipients, 'transferFrom to not allowed');
+          rs.bigint.requireLte(amount, config.max_transfer_amount, 'transferFrom exceeds cap');
           return ok();
         }
         function validateApprove(payloadHex) {
           var dec = abi.decode(payloadHex, ['address', 'uint256']);
-          if (!dec || dec.length !== 2) return fail('approve decode failed');
+          require(dec && dec.length === 2, 'approve decode failed');
           var spender = dec[0]; var amount = dec[1];
-          if (!isAddress(spender)) return fail('approve spender invalid');
-          var r = rs.addr.requireInListIfNonEmpty(spender, config.allowed_spenders, 'approve spender not allowed');
-          if (!r.valid) return r;
-          r = rs.uint256.requireLte(amount, config.max_approve_amount, 'approve');
-          if (!r.valid) return r;
+          require(isAddress(spender), 'approve spender invalid');
+          rs.addr.requireInListIfNonEmpty(spender, config.allowed_spenders, 'approve spender not allowed');
+          rs.bigint.requireLte(amount, config.max_approve_amount, 'approve exceeds cap');
           return ok();
         }
     test_cases:

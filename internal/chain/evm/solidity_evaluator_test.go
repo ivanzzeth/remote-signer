@@ -1,6 +1,9 @@
 package evm
 
 import (
+	"context"
+	"encoding/json"
+	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -368,4 +371,40 @@ func TestSolidityTestInput_Defaults(t *testing.T) {
 // Helper function
 func strPtr(s string) *string {
 	return &s
+}
+
+// TestEvaluate_WhitelistTransaction_CalldataMissingOrTooShort ensures that in whitelist mode,
+// transaction rules (Functions or Expression) fail when parsed is nil or RawData has fewer than 4 bytes (no selector).
+func TestEvaluate_WhitelistTransaction_CalldataMissingOrTooShort(t *testing.T) {
+	evaluator, err := NewSolidityRuleEvaluator(SolidityEvaluatorConfig{}, slog.Default())
+	require.NoError(t, err)
+
+	whitelistRule := &types.Rule{
+		ID:   "wl-tx",
+		Mode: types.RuleModeWhitelist,
+		Config: mustJSONMarshal(t, SolidityExpressionConfig{
+			Functions: `function transfer(address to, uint256 amount) external { require(to != address(0), "bad"); }`,
+		}),
+	}
+	req := &types.SignRequest{ChainID: "1", SignerAddress: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"}
+
+	// parsed nil → must fail with reason about calldata
+	passed, reason, err := evaluator.Evaluate(context.Background(), whitelistRule, req, nil)
+	require.NoError(t, err)
+	assert.False(t, passed, "whitelist tx rule must not allow when parsed is nil")
+	assert.Contains(t, reason, "calldata", "reason should mention calldata")
+
+	// parsed with RawData length < 4 → must fail
+	parsedShort := &types.ParsedPayload{RawData: []byte{0x12, 0x34}}
+	passed, reason, err = evaluator.Evaluate(context.Background(), whitelistRule, req, parsedShort)
+	require.NoError(t, err)
+	assert.False(t, passed, "whitelist tx rule must not allow when calldata has no selector")
+	assert.Contains(t, reason, "calldata", "reason should mention calldata")
+}
+
+func mustJSONMarshal(t *testing.T, v interface{}) []byte {
+	t.Helper()
+	b, err := json.Marshal(v)
+	require.NoError(t, err)
+	return b
 }

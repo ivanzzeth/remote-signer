@@ -40,17 +40,15 @@ rules:
       delegate_mode: "${delegate_mode}"
       script: |
         function validate(input) {
-          if (!input || !input.transaction || !input.transaction.to) return fail('missing input');
+          require(input && input.transaction && input.transaction.to, 'missing input');
           var allowed = config.multisend_contract_address;
-          if (!allowed || !isAddress(allowed)) return fail('invalid multisend config');
-          if (!rs.addr.inList(input.transaction.to, [allowed])) return fail('to must be multisend contract');
-          var delegateTo = (config.delegate_to || '').trim();
+          require(allowed && isAddress(allowed), 'invalid multisend config');
+          require(rs.addr.inList(input.transaction.to, [allowed]), 'to must be multisend contract');
+          var delegateTo = config.delegate_to;
           if (delegateTo === '') return ok();
           var ctx = rs.tx.require(input);
-          if (!ctx.valid) return ctx;
           var multiSendSel = selector('multiSend(bytes)');
           if (!eq(ctx.selector, multiSendSel)) return ok();
-          var raw = (ctx.tx.data || '0x').replace(/^0x/, '');
           var raw = (ctx.tx.data || '0x').replace(/^0x/, '');
           var batch = rs.multisend.parseBatch(raw, input.chain_id, input.signer);
           if (batch.err) return { valid: false, reason: batch.err };

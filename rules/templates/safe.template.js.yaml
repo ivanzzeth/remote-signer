@@ -66,20 +66,19 @@ rules:
       sign_type_filter: "typed_data,transaction"
       script: |
         function validate(input) {
-          if (input.sign_type === 'typed_data') {
-            var td = input.typed_data;
-            if (!td || td.primaryType !== 'SafeTx') return ok();
-            if ((config.allowed_safe_addresses || '').trim() === '') return ok();
-            var chainId = parseInt(config.chain_id, 10) || 0;
-            var domain = td.domain || {};
-            var msg = td.message || {};
-            var vc = (domain.verifyingContract || '').trim();
-            if (!isAddress(vc)) return ok();
-            if (!rs.addr.inList(vc, config.allowed_safe_addresses)) return ok();
-            if (Number(domain.chainId) !== chainId) return ok();
-            if (String(msg.operation !== undefined ? msg.operation : '') !== '0') return fail('only CALL allowed');
-            return ok();
-          }
+          var m = rs.typedData.match(input, 'SafeTx');
+          if (!m.matched) return ok();
+          if (config.allowed_safe_addresses === '') return ok();
+          var chainId = parseInt(config.chain_id, 10) || 0;
+          var domain = m.domain || {};
+          var msg = m.message || {};
+          try {
+            rs.typedData.requireDomain(domain, {
+              chainId: chainId,
+              allowedContracts: config.allowed_safe_addresses
+            });
+          } catch (e) { return ok(); }
+          rs.int.requireEq(msg.operation, 0, 'only CALL allowed');
           return ok();
         }
     test_cases:
@@ -137,8 +136,8 @@ rules:
       delegate_mode: "${delegate_mode}"
       script: |
         function validate(input) {
-          if ((config.allowed_safe_addresses || '').trim() === '') return fail('missing or invalid allowed_safe_addresses');
-          if ((config.allowed_safe_tx_to_addresses || '').trim() === '') return fail('missing or invalid allowed_safe_tx_to_addresses');
+          rs.config.requireNonEmpty('allowed_safe_addresses', 'missing or invalid allowed_safe_addresses');
+          rs.config.requireNonEmpty('allowed_safe_tx_to_addresses', 'missing or invalid allowed_safe_tx_to_addresses');
           var chainId = parseInt(config.chain_id, 10) || 0;
 
           if (input.sign_type === 'typed_data') {
@@ -147,22 +146,11 @@ rules:
           if (input.sign_type === 'transaction') {
             return validateExecTransaction(input, chainId);
           }
-          return fail('sign_type must be typed_data or transaction');
+          revert('sign_type must be typed_data or transaction');
         }
 
         function resolveDelegateTo(innerToChecksum) {
-          var byTarget = (config.delegate_to_by_target || '').trim();
-          if (!byTarget) return (config.delegate_to || '').trim();
-          var map = {};
-          byTarget.split(',').forEach(function(pair) {
-            var idx = pair.indexOf(':');
-            if (idx > 0) {
-              var addr = pair.slice(0, idx).trim();
-              var ruleId = pair.slice(idx + 1).trim();
-              if (isAddress(addr) && ruleId) map[toChecksum(addr)] = ruleId;
-            }
-          });
-          return map[innerToChecksum] || (config.delegate_to || '').trim();
+          return rs.delegate.resolveByTarget(innerToChecksum, config.delegate_to_by_target, config.delegate_to);
         }
 
         function buildPayload(signer, chainId, innerTo, innerData) {
@@ -177,24 +165,20 @@ rules:
 
         function validateSafeTx(input, chainId) {
           var ctx = rs.typedData.require(input, 'SafeTx');
-          if (!ctx.valid) return ctx;
           var domain = ctx.domain || {};
           var msg = ctx.message || {};
           var vc = (domain.verifyingContract || '').trim();
-          if (!isAddress(vc)) return fail('invalid verifyingContract');
-          if (!rs.addr.inList(vc, config.allowed_safe_addresses)) return fail('verifyingContract must be allowed Safe');
-          if (Number(domain.chainId) !== chainId) return fail('chainId mismatch');
-          if (String(msg.value !== undefined ? msg.value : '') !== '0') return fail('value must be zero');
-          if (String(msg.operation !== undefined ? msg.operation : '') !== '0') return fail('only CALL allowed');
-          var gasPrice = String(msg.gasPrice !== undefined ? msg.gasPrice : '');
-          if (gasPrice !== '0') return fail('gasPrice must be zero');
-          var gasToken = (msg.gasToken || '').toString().toLowerCase();
-          if (gasToken !== '0' && gasToken !== '0x0000000000000000000000000000000000000000') return fail('gasToken must be zero');
-          var refundReceiver = (msg.refundReceiver || '').toString().toLowerCase();
-          if (refundReceiver !== '0' && refundReceiver !== '0x0000000000000000000000000000000000000000') return fail('refundReceiver must be zero');
+          require(isAddress(vc), 'invalid verifyingContract');
+          require(rs.addr.inList(vc, config.allowed_safe_addresses), 'verifyingContract must be allowed Safe');
+          rs.typedData.requireDomain(domain, { chainId: chainId, requireVerifyingContract: false });
+          rs.bigint.requireEq(msg.value, '0', 'value must be zero');
+          rs.int.requireEq(msg.operation, 0, 'only CALL allowed');
+          rs.bigint.requireEq(msg.gasPrice, '0', 'gasPrice must be zero');
+          rs.addr.requireZero((msg.gasToken || '').trim(), 'gasToken must be zero');
+          rs.addr.requireZero((msg.refundReceiver || '').trim(), 'refundReceiver must be zero');
           var innerTo = (msg.to || '').trim();
-          if (!isAddress(innerTo)) return fail('invalid inner to');
-          if (!rs.addr.inList(innerTo, config.allowed_safe_tx_to_addresses)) return fail('inner to must be in allowed_safe_tx_to_addresses');
+          require(isAddress(innerTo), 'invalid inner to');
+          require(rs.addr.inList(innerTo, config.allowed_safe_tx_to_addresses), 'inner to must be in allowed_safe_tx_to_addresses');
           var data = msg.data || '0x';
           var payload = buildPayload(toChecksum(vc), chainId, toChecksum(innerTo), data);
           var delegateTo = resolveDelegateTo(toChecksum(innerTo));
@@ -202,44 +186,24 @@ rules:
           return ok();
         }
 
-        function parseExecTxData(dataHex) {
-          var raw = (dataHex || '').replace(/^0x/, '');
-          if (raw.length < 136) return { err: 'data too short' };
-          var valueHex = raw.slice(72, 136);
-          var valueZero = valueHex === '0000000000000000000000000000000000000000000000000000000000000000';
-          var opHex = raw.slice(262, 264);
-          var operationCALL = opHex === '00';
-          var dataOffset = parseInt(raw.slice(136, 200), 16);
-          // +8 accounts for the 4-byte function selector in hex (raw includes selector)
-          var base = dataOffset * 2 + 8;
-          if (base + 64 > raw.length) return { err: 'invalid data offset', valueZero: valueZero, operationCALL: operationCALL };
-          var lenHex = raw.slice(base, base + 64);
-          var innerLen = parseInt(lenHex, 16);
-          var innerStart = base + 64;
-          if (innerStart + innerLen * 2 > raw.length) return { err: 'invalid inner data length', valueZero: valueZero, operationCALL: operationCALL };
-          var innerHex = '0x' + raw.slice(innerStart, innerStart + innerLen * 2);
-          var toHex = '0x' + raw.slice(8 + 24, 8 + 64);
-          return { valueZero: valueZero, operationCALL: operationCALL, innerHex: innerHex, innerTo: toHex };
-        }
-
         function validateExecTransaction(input, chainId) {
           var tx = input.transaction;
-          if (!tx || !tx.to) return fail('missing transaction or to');
-          if (!isAddress(tx.to)) return fail('invalid to');
-          if (!rs.addr.inList(tx.to, config.allowed_safe_addresses)) return fail('txTo must be allowed Safe');
-          if (input.chain_id !== chainId) return fail('chainId mismatch');
+          require(tx && tx.to, 'missing transaction or to');
+          require(isAddress(tx.to), 'invalid to');
+          require(rs.addr.inList(tx.to, config.allowed_safe_addresses), 'txTo must be allowed Safe');
+          require(input.chain_id === chainId, 'chainId mismatch');
           var data = (tx.data || '0x').replace(/^0x/, '');
           if (data.length < 8) return ok();
           var sel = '0x' + data.slice(0, 8);
           var execSel = selector('execTransaction(address,uint256,bytes,uint8,uint256,uint256,uint256,address,address,bytes)');
-          if (!eq(sel, execSel)) return fail('not execTransaction');
-          var parsed = parseExecTxData('0x' + data);
-          if (parsed.err) return fail(parsed.err);
-          if (!parsed.valueZero) return fail('value must be zero');
-          if (!parsed.operationCALL) return fail('only CALL allowed');
+          require(eq(sel, execSel), 'not execTransaction');
+          var parsed = rs.gnosis.safe.parseExecTransactionData('0x' + data);
+          require(parsed.valid, String(parsed.reason || 'parse failed'));
+          require(parsed.valueZero, 'value must be zero');
+          require(parsed.operationCALL, 'only CALL allowed');
           if (!parsed.innerHex || parsed.innerHex === '0x') return ok();
           var innerToChecksum = toChecksum(parsed.innerTo);
-          if (!rs.addr.inList(parsed.innerTo, config.allowed_safe_tx_to_addresses)) return fail('inner to must be in allowed_safe_tx_to_addresses');
+          require(rs.addr.inList(parsed.innerTo, config.allowed_safe_tx_to_addresses), 'inner to must be in allowed_safe_tx_to_addresses');
           var payload = buildPayload(toChecksum(tx.to), chainId, innerToChecksum, parsed.innerHex);
           var delegateTo = resolveDelegateTo(innerToChecksum);
           if (delegateTo) return { valid: true, payload: payload, delegate_to: delegateTo };
@@ -289,7 +253,7 @@ rules:
               refundReceiver: "0x0000000000000000000000000000000000000000"
               nonce: "0"
         expect_pass: false
-        expect_reason: "verifyingContract must be allowed Safe"
+        expect_reason: "invalid verifying contract"
       - name: "SafeTx reject: inner to not in allowed_safe_tx_to_addresses"
         input:
           sign_type: "typed_data"

@@ -83,26 +83,20 @@ rules:
       script: |
         function validate(input) {
           var ctx = rs.typedData.require(input, 'Order');
-          if (!ctx.valid) return ctx;
           var domain = ctx.domain || {};
           var msg = ctx.message || {};
           var allowedContracts = [config.ctf_exchange_nyb, config.neg_risk_exchange_nyb, config.ctf_exchange_yb, config.neg_risk_exchange_yb];
-          var r = rs.typedData.requireDomain(domain, {
-            name: (config.order_domain_name || '').trim(),
-            version: (config.order_domain_version || '').trim(),
+          rs.typedData.requireDomain(domain, {
+            name: config.order_domain_name,
+            version: config.order_domain_version,
             chainId: parseInt(config.chain_id, 10),
             allowedContracts: allowedContracts
           });
-          if (!r.valid) return r;
-          r = rs.addr.requireZero((msg.taker || '').trim(), 'taker must be zero address');
-          if (!r.valid) return r;
-          if (!isAddress((input.signer || '').trim())) return fail('invalid signer');
-          r = rs.typedData.requireSignerMatch((msg.signer || '').trim(), (input.signer || '').trim(), 'order signer must match signing key');
-          if (!r.valid) return r;
-          var feeBps = parseInt(msg.feeRateBps, 10) || 0;
-          if (feeBps > 1000) return fail('fee exceeds 10%');
-          var sigType = parseInt(msg.signatureType, 10);
-          if (sigType !== 0) return fail('signatureType must be EOA');
+          rs.addr.requireZero((msg.taker || '').trim(), 'taker must be zero address');
+          require(isAddress((input.signer || '').trim()), 'invalid signer');
+          rs.typedData.requireSignerMatch((msg.signer || '').trim(), (input.signer || '').trim(), 'order signer must match signing key');
+          rs.int.requireLte(msg.feeRateBps, 1000, 'fee exceeds 10%');
+          rs.int.requireEq(msg.signatureType, 0, 'signatureType must be EOA');
           return ok();
         }
     test_cases:
@@ -412,30 +406,29 @@ rules:
       script: |
         function validate(input) {
           var ctx = rs.tx.require(input);
-          if (!ctx.valid) return ctx;
           var ctTargets = [config.ct_nyb, config.ct_yb];
-          if (!rs.addr.inList(ctx.tx.to, ctTargets)) return fail('target must be ConditionalTokens');
+          require(rs.addr.inList(ctx.tx.to, ctTargets), 'target must be ConditionalTokens');
           var splitSel = selector('splitPosition(address,bytes32,bytes32,uint256[],uint256)');
           var mergeSel = selector('mergePositions(address,bytes32,bytes32,uint256[],uint256)');
           var redeemSel = selector('redeemPositions(address,bytes32,bytes32,uint256[])');
-          var usdt = toChecksum((config.usdt_address || '').trim());
+          var usdt = toChecksum(config.usdt_address);
           if (eq(ctx.selector, splitSel)) return validate5Param(ctx.payloadHex, usdt);
           if (eq(ctx.selector, mergeSel)) return validate5Param(ctx.payloadHex, usdt);
           if (eq(ctx.selector, redeemSel)) return validateRedeem(ctx.payloadHex, usdt);
-          return fail('only splitPosition, mergePositions, redeemPositions allowed');
+          revert('only splitPosition, mergePositions, redeemPositions allowed');
         }
         function validate5Param(payloadHex, usdt) {
           var dec = abi.decode(payloadHex, ['address', 'bytes32', 'bytes32', 'uint256[]', 'uint256']);
-          if (!dec || dec.length !== 5) return fail('decode failed');
-          var collateral = toChecksum((dec[0] || '').trim());
-          if (!eq(collateral, usdt)) return fail('collateral must be USDT');
+          require(dec && dec.length === 5, 'decode failed');
+          var collateral = (dec[0] || '').toString().trim();
+          require(rs.addr.inList(collateral, [usdt]), 'collateral must be USDT');
           return ok();
         }
         function validateRedeem(payloadHex, usdt) {
           var dec = abi.decode(payloadHex, ['address', 'bytes32', 'bytes32', 'uint256[]']);
-          if (!dec || dec.length !== 4) return fail('decode failed');
-          var collateral = toChecksum((dec[0] || '').trim());
-          if (!eq(collateral, usdt)) return fail('collateral must be USDT');
+          require(dec && dec.length === 4, 'decode failed');
+          var collateral = (dec[0] || '').toString().trim();
+          require(rs.addr.inList(collateral, [usdt]), 'collateral must be USDT');
           return ok();
         }
     test_cases:
@@ -509,9 +502,8 @@ rules:
       script: |
         function validate(input) {
           var ctx = rs.tx.require(input);
-          if (!ctx.valid) return ctx;
           var adapterTargets = [config.neg_risk_adapter_nyb, config.neg_risk_adapter_yb];
-          if (!rs.addr.inList(ctx.tx.to, adapterTargets)) return fail('target must be NegRiskAdapter');
+          require(rs.addr.inList(ctx.tx.to, adapterTargets), 'target must be NegRiskAdapter');
           var split2 = selector('splitPosition(bytes32,uint256)');
           var merge2 = selector('mergePositions(bytes32,uint256)');
           var redeem2 = selector('redeemPositions(bytes32,uint256[])');
@@ -521,14 +513,14 @@ rules:
           if (eq(ctx.selector, split2) || eq(ctx.selector, merge2) || eq(ctx.selector, redeem2)) return ok();
           if (eq(ctx.selector, convert)) return ok();
           if (eq(ctx.selector, split5) || eq(ctx.selector, merge5)) return validate5Param(ctx.payloadHex);
-          return fail('unknown NegRiskAdapter method');
+          revert('unknown NegRiskAdapter method');
         }
         function validate5Param(payloadHex) {
           var dec = abi.decode(payloadHex, ['address', 'bytes32', 'bytes32', 'uint256[]', 'uint256']);
-          if (!dec || dec.length !== 5) return fail('decode failed');
-          var usdt = toChecksum((config.usdt_address || '').trim());
-          var collateral = toChecksum((dec[0] || '').trim());
-          if (!eq(collateral, usdt)) return fail('collateral must be USDT');
+          require(dec && dec.length === 5, 'decode failed');
+          var usdt = toChecksum(config.usdt_address);
+          var collateral = (dec[0] || '').toString().trim();
+          require(rs.addr.inList(collateral, [usdt]), 'collateral must be USDT');
           return ok();
         }
     test_cases:

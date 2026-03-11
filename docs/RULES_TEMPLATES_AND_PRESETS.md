@@ -121,7 +121,7 @@ if (!r.valid) return r;
 rs.addr.requireInList(spender, config.allowed_spenders, 'spender not allowed');
 rs.addr.requireInListIfNonEmpty(to, config.allowed_recipients, 'to not allowed');  // empty list = any
 rs.addr.requireZero(msg.taker, 'taker must be zero');
-rs.uint256.requireLte(amount, config.max_amount, 'transfer');  // empty/0 max = no limit
+rs.bigint.requireLte(amount, config.max_amount, 'transfer');  // empty/0 max = no limit
 ```
 
 ---

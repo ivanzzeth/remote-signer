@@ -48,19 +48,15 @@ rules:
       sign_type_filter: "typed_data"
       script: |
         function validate(input) {
-          if (input.sign_type !== 'typed_data') return fail('sign_type must be typed_data');
-          var td = input.typed_data;
-          if (!td || td.primaryType !== 'ClobAuth') return fail('not ClobAuth');
-          var domain = td.domain || {};
-          var msg = td.message || {};
-          var wantDomainName = (config.clob_auth_domain_name || '').trim();
-          var wantDomainVersion = (config.clob_auth_domain_version || '').trim();
+          var ctx = rs.typedData.require(input, 'ClobAuth');
+          var domain = ctx.domain || {};
+          var msg = ctx.message || {};
+          var wantDomainName = config.clob_auth_domain_name;
+          var wantDomainVersion = config.clob_auth_domain_version;
           var wantChainId = parseInt(config.chain_id, 10);
-          if (String(domain.name || '').trim() !== wantDomainName) return fail('invalid domain name');
-          if (String(domain.version || '').trim() !== wantDomainVersion) return fail('invalid domain version');
-          if (Number(domain.chainId) !== wantChainId) return fail('must be on Polygon');
+          rs.typedData.requireDomain(domain, { name: wantDomainName, version: wantDomainVersion, chainId: wantChainId, requireVerifyingContract: false }, 'must be on Polygon');
           var wantMsg = 'This message attests that I control the given wallet';
-          if (String(msg.message || '').trim() !== wantMsg) return fail('invalid attestation message');
+          require(String(msg.message || '').trim() === wantMsg, 'invalid attestation message');
           return ok();
         }
     test_cases:
@@ -130,21 +126,17 @@ rules:
       script: |
         function validate(input) {
           var ctx = rs.typedData.require(input, 'CreateProxy');
-          if (!ctx.valid) return ctx;
           var domain = ctx.domain || {};
           var msg = ctx.message || {};
-          var r = rs.typedData.requireDomain(domain, {
-            name: (config.safe_factory_domain_name || '').trim(),
+          rs.typedData.requireDomain(domain, {
+            name: config.safe_factory_domain_name,
             version: '',
             chainId: parseInt(config.chain_id, 10),
             allowedContracts: [config.safe_proxy_factory_address]
           });
-          if (!r.valid) return r;
-          r = rs.addr.requireZero((msg.paymentToken || '').trim(), 'payment token must be zero');
-          if (!r.valid) return r;
-          if (String(msg.payment !== undefined ? msg.payment : '').trim() !== '0') return fail('payment must be zero');
-          r = rs.addr.requireZero((msg.paymentReceiver || '').trim(), 'payment receiver must be zero');
-          if (!r.valid) return r;
+          rs.addr.requireZero((msg.paymentToken || '').trim(), 'payment token must be zero');
+          rs.bigint.requireZero(msg.payment, 'payment must be zero');
+          rs.addr.requireZero((msg.paymentReceiver || '').trim(), 'payment receiver must be zero');
           return ok();
         }
     test_cases:
@@ -194,19 +186,15 @@ rules:
       script: |
         function validate(input) {
           var ctx = rs.tx.require(input);
-          if (!ctx.valid) return ctx;
-          if (!rs.addr.inList(ctx.tx.to, [config.safe_proxy_factory_address])) return fail('target must be Safe Factory');
+          require(rs.addr.inList(ctx.tx.to, [config.safe_proxy_factory_address]), 'target must be Safe Factory');
           var createProxySel = '0xa1884d2c';
-          if (ctx.selector.toLowerCase() !== createProxySel) return fail('not createProxy');
+          require(ctx.selector.toLowerCase() === createProxySel, 'not createProxy');
           var data = (ctx.tx.data || '0x').replace(/^0x/, '');
-          if (data.length < 8 + 64 * 3) return fail('createProxy data too short');
+          require(data.length >= 8 + 64 * 3, 'createProxy data too short');
           var zero32 = '0000000000000000000000000000000000000000000000000000000000000000';
-          var paymentTokenHex = data.slice(8, 72);
-          var paymentHex = data.slice(72, 136);
-          var receiverHex = data.slice(136, 200);
-          if (paymentTokenHex !== zero32) return fail('payment token must be zero');
-          if (paymentHex !== zero32) return fail('payment must be zero');
-          if (receiverHex !== zero32) return fail('payment receiver must be zero');
+          require(data.slice(8, 72) === zero32, 'payment token must be zero');
+          require(data.slice(72, 136) === zero32, 'payment must be zero');
+          require(data.slice(136, 200) === zero32, 'payment receiver must be zero');
           return ok();
         }
     test_cases:
