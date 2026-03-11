@@ -53,10 +53,9 @@ rules:
       script: |
         function validate(input) {
           var ctx = rs.tx.require(input);
-          if (!ctx.valid) return ctx;
           var token = config.token_address;
-          if (!token || !isAddress(token)) return fail('invalid token config');
-          if (!rs.addr.inList(ctx.tx.to, [token])) return fail('wrong contract');
+          require(token && isAddress(token), 'invalid token config');
+          require(rs.addr.inList(ctx.tx.to, [token]), 'wrong contract');
           var transferFromSel = selector('transferFrom(address,address,uint256)');
           var safeTransferFromSel = selector('safeTransferFrom(address,address,uint256)');
           var safeTransferFromBytesSel = selector('safeTransferFrom(address,address,uint256,bytes)');
@@ -67,48 +66,42 @@ rules:
           if (eq(ctx.selector, safeTransferFromBytesSel)) return validateSafeTransferFromBytes(ctx.payloadHex);
           if (eq(ctx.selector, approveSel)) return validateApprove(ctx.payloadHex);
           if (eq(ctx.selector, setApprovalForAllSel)) return validateSetApprovalForAll(ctx.payloadHex);
-          return fail('only transferFrom, safeTransferFrom, approve, setApprovalForAll allowed');
+          revert('only transferFrom, safeTransferFrom, approve, setApprovalForAll allowed');
         }
         function validateTransferFrom(payloadHex) {
           var dec = abi.decode(payloadHex, ['address', 'address', 'uint256']);
-          if (!dec || dec.length !== 3) return fail('transferFrom decode failed');
+          require(dec && dec.length === 3, 'transferFrom decode failed');
           var from = dec[0]; var to = dec[1];
-          if (!isAddress(from)) return fail('transferFrom from invalid');
-          if (!isAddress(to)) return fail('transferFrom to invalid');
-          var r = rs.addr.requireInListIfNonEmpty(from, config.allowed_transfer_from, 'transferFrom from not allowed');
-          if (!r.valid) return r;
-          r = rs.addr.requireInListIfNonEmpty(to, config.allowed_recipients, 'transferFrom to not allowed');
-          if (!r.valid) return r;
+          require(isAddress(from), 'transferFrom from invalid');
+          require(isAddress(to), 'transferFrom to invalid');
+          rs.addr.requireInListIfNonEmpty(from, config.allowed_transfer_from, 'transferFrom from not allowed');
+          rs.addr.requireInListIfNonEmpty(to, config.allowed_recipients, 'transferFrom to not allowed');
           return ok();
         }
         function validateSafeTransferFromBytes(payloadHex) {
           var dec = abi.decode(payloadHex, ['address', 'address', 'uint256', 'bytes']);
-          if (!dec || dec.length !== 4) return fail('safeTransferFrom(bytes) decode failed');
+          require(dec && dec.length === 4, 'safeTransferFrom(bytes) decode failed');
           var from = dec[0]; var to = dec[1];
-          if (!isAddress(from)) return fail('safeTransferFrom from invalid');
-          if (!isAddress(to)) return fail('safeTransferFrom to invalid');
-          var r = rs.addr.requireInListIfNonEmpty(from, config.allowed_transfer_from, 'safeTransferFrom from not allowed');
-          if (!r.valid) return r;
-          r = rs.addr.requireInListIfNonEmpty(to, config.allowed_recipients, 'safeTransferFrom to not allowed');
-          if (!r.valid) return r;
+          require(isAddress(from), 'safeTransferFrom from invalid');
+          require(isAddress(to), 'safeTransferFrom to invalid');
+          rs.addr.requireInListIfNonEmpty(from, config.allowed_transfer_from, 'safeTransferFrom from not allowed');
+          rs.addr.requireInListIfNonEmpty(to, config.allowed_recipients, 'safeTransferFrom to not allowed');
           return ok();
         }
         function validateApprove(payloadHex) {
           var dec = abi.decode(payloadHex, ['address', 'uint256']);
-          if (!dec || dec.length !== 2) return fail('approve decode failed');
+          require(dec && dec.length === 2, 'approve decode failed');
           var to = dec[0];
-          if (!isAddress(to)) return fail('approve to invalid');
-          var r = rs.addr.requireInListIfNonEmpty(to, config.allowed_approve_to, 'approve to not allowed');
-          if (!r.valid) return r;
+          require(isAddress(to), 'approve to invalid');
+          rs.addr.requireInListIfNonEmpty(to, config.allowed_approve_to, 'approve to not allowed');
           return ok();
         }
         function validateSetApprovalForAll(payloadHex) {
           var dec = abi.decode(payloadHex, ['address', 'bool']);
-          if (!dec || dec.length !== 2) return fail('setApprovalForAll decode failed');
+          require(dec && dec.length === 2, 'setApprovalForAll decode failed');
           var operator = dec[0];
-          if (!isAddress(operator)) return fail('setApprovalForAll operator invalid');
-          var r = rs.addr.requireInListIfNonEmpty(operator, config.allowed_operators, 'setApprovalForAll operator not allowed');
-          if (!r.valid) return r;
+          require(isAddress(operator), 'setApprovalForAll operator invalid');
+          rs.addr.requireInListIfNonEmpty(operator, config.allowed_operators, 'setApprovalForAll operator not allowed');
           return ok();
         }
     test_cases:

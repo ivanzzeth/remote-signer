@@ -86,19 +86,15 @@ rules:
       sign_type_filter: "typed_data"
       script: |
         function validate(input) {
-          if (input.sign_type !== 'typed_data') return fail('sign_type must be typed_data');
-          var td = input.typed_data;
-          if (!td || td.primaryType !== 'ClobAuth') return fail('not ClobAuth');
-          var domain = td.domain || {};
-          var msg = td.message || {};
-          var wantDomainName = (config.clob_auth_domain_name || '').trim();
-          var wantDomainVersion = (config.clob_auth_domain_version || '').trim();
+          var ctx = rs.typedData.require(input, 'ClobAuth');
+          var domain = ctx.domain || {};
+          var msg = ctx.message || {};
+          var wantDomainName = config.clob_auth_domain_name;
+          var wantDomainVersion = config.clob_auth_domain_version;
           var wantChainId = parseInt(config.chain_id, 10);
-          if (String(domain.name || '').trim() !== wantDomainName) return fail('invalid domain name');
-          if (String(domain.version || '').trim() !== wantDomainVersion) return fail('invalid domain version');
-          if (Number(domain.chainId) !== wantChainId) return fail('must be on Polygon');
+          rs.typedData.requireDomain(domain, { name: wantDomainName, version: wantDomainVersion, chainId: wantChainId, requireVerifyingContract: false }, 'must be on Polygon');
           var wantMsg = 'This message attests that I control the given wallet';
-          if (String(msg.message || '').trim() !== wantMsg) return fail('invalid attestation message');
+          require(String(msg.message || '').trim() === wantMsg, 'invalid attestation message');
           return ok();
         }
     test_cases:
@@ -150,24 +146,19 @@ rules:
       script: |
         function validate(input) {
           var ctx = rs.typedData.require(input, 'Order');
-          if (!ctx.valid) return ctx;
           var domain = ctx.domain || {};
           var msg = ctx.message || {};
           var allowedContracts = [config.ctf_exchange_address, config.neg_risk_exchange_address];
-          var r = rs.typedData.requireDomain(domain, {
-            name: (config.ctf_exchange_domain_name || '').trim(),
-            version: (config.ctf_exchange_domain_version || '').trim(),
+          rs.typedData.requireDomain(domain, {
+            name: config.ctf_exchange_domain_name,
+            version: config.ctf_exchange_domain_version,
             chainId: parseInt(config.chain_id, 10),
             allowedContracts: allowedContracts
           });
-          if (!r.valid) return r;
-          r = rs.addr.requireZero((msg.taker || '').trim(), 'taker must be zero address');
-          if (!r.valid) return r;
-          if (!isAddress((input.signer || '').trim())) return fail('invalid signer');
-          r = rs.typedData.requireSignerMatch((msg.signer || '').trim(), (input.signer || '').trim(), 'order signer must match signing key');
-          if (!r.valid) return r;
-          var feeBps = parseInt(msg.feeRateBps, 10) || 0;
-          if (feeBps > 1000) return fail('fee exceeds 10%');
+          rs.addr.requireZero((msg.taker || '').trim(), 'taker must be zero address');
+          require(isAddress((input.signer || '').trim()), 'invalid signer');
+          rs.typedData.requireSignerMatch((msg.signer || '').trim(), (input.signer || '').trim(), 'order signer must match signing key');
+          rs.int.requireLte(msg.feeRateBps, 1000, 'fee exceeds 10%');
           return ok();
         }
     test_cases:
@@ -263,21 +254,17 @@ rules:
       script: |
         function validate(input) {
           var ctx = rs.typedData.require(input, 'CreateProxy');
-          if (!ctx.valid) return ctx;
           var domain = ctx.domain || {};
           var msg = ctx.message || {};
-          var r = rs.typedData.requireDomain(domain, {
-            name: (config.safe_factory_domain_name || '').trim(),
+          rs.typedData.requireDomain(domain, {
+            name: config.safe_factory_domain_name,
             version: '',
             chainId: parseInt(config.chain_id, 10),
             allowedContracts: [config.safe_proxy_factory_address]
           });
-          if (!r.valid) return r;
-          r = rs.addr.requireZero((msg.paymentToken || '').trim(), 'payment token must be zero');
-          if (!r.valid) return r;
-          if (String(msg.payment !== undefined ? msg.payment : '').trim() !== '0') return fail('payment must be zero');
-          r = rs.addr.requireZero((msg.paymentReceiver || '').trim(), 'payment receiver must be zero');
-          if (!r.valid) return r;
+          rs.addr.requireZero((msg.paymentToken || '').trim(), 'payment token must be zero');
+          rs.bigint.requireZero(msg.payment, 'payment must be zero');
+          rs.addr.requireZero((msg.paymentReceiver || '').trim(), 'payment receiver must be zero');
           return ok();
         }
     test_cases:
@@ -327,19 +314,15 @@ rules:
       script: |
         function validate(input) {
           var ctx = rs.tx.require(input);
-          if (!ctx.valid) return ctx;
-          if (!rs.addr.inList(ctx.tx.to, [config.safe_proxy_factory_address])) return fail('target must be Safe Factory');
+          require(rs.addr.inList(ctx.tx.to, [config.safe_proxy_factory_address]), 'target must be Safe Factory');
           var createProxySel = '0xa1884d2c';
-          if (ctx.selector.toLowerCase() !== createProxySel) return fail('not createProxy');
+          require(ctx.selector.toLowerCase() === createProxySel, 'not createProxy');
           var data = (ctx.tx.data || '0x').replace(/^0x/, '');
-          if (data.length < 8 + 64 * 3) return fail('createProxy data too short');
+          require(data.length >= 8 + 64 * 3, 'createProxy data too short');
           var zero32 = '0000000000000000000000000000000000000000000000000000000000000000';
-          var paymentTokenHex = data.slice(8, 72);
-          var paymentHex = data.slice(72, 136);
-          var receiverHex = data.slice(136, 200);
-          if (paymentTokenHex !== zero32) return fail('payment token must be zero');
-          if (paymentHex !== zero32) return fail('payment must be zero');
-          if (receiverHex !== zero32) return fail('payment receiver must be zero');
+          require(data.slice(8, 72) === zero32, 'payment token must be zero');
+          require(data.slice(72, 136) === zero32, 'payment must be zero');
+          require(data.slice(136, 200) === zero32, 'payment receiver must be zero');
           return ok();
         }
     test_cases:
@@ -378,61 +361,58 @@ rules:
       sign_type_filter: "transaction"
       script: |
         function validate(input) {
-          if (input.sign_type !== 'transaction') return fail('sign_type must be transaction');
+          require(input.sign_type === 'transaction', 'sign_type must be transaction');
           var tx = input.transaction;
-          if (!tx || !tx.to) return fail('missing transaction or to');
+          require(tx && tx.to, 'missing transaction or to');
           var toAddr = (tx.to || '').trim();
           var data = (tx.data || '0x').replace(/^0x/, '');
           var shortDataTargets = [config.usdc_bridged_address, config.conditional_tokens_address, config.neg_risk_adapter_address, config.neg_risk_exchange_address];
           if (data.length < 8) {
-            if (rs.addr.inList(toAddr, shortDataTargets)) return ok();
-            return fail('unsupported target contract');
-          }
-          var calldata = rs.tx.getCalldata(tx);
-          if (!calldata.valid) return fail('calldata too short');
-          var sel = calldata.selector.toLowerCase();
-          var usdc = toChecksum((config.usdc_bridged_address || '').trim());
-          var ctf = toChecksum((config.conditional_tokens_address || '').trim());
-          var negAdapter = toChecksum((config.neg_risk_adapter_address || '').trim());
-          var negExchange = toChecksum((config.neg_risk_exchange_address || '').trim());
-          var ctfExchange = toChecksum((config.ctf_exchange_address || '').trim());
-          var allowedSpenders = [ctfExchange, negAdapter, negExchange, ctf];
-          if (eq(toChecksum(toAddr), usdc)) {
-            if (sel !== '0x095ea7b3') return fail('unsupported USDC.e operation');
-            if (data.length < 8 + 64 + 64) return fail('invalid approve data length');
-            var dec = abi.decode(calldata.payloadHex, ['address', 'uint256']);
-            if (!dec || dec.length < 1) return fail('approve decode failed');
-            var r = rs.addr.requireInList(dec[0], allowedSpenders, 'spender must be allowed protocol contract');
-            if (!r.valid) return r;
+            require(rs.addr.inList(toAddr, shortDataTargets), 'unsupported target contract');
             return ok();
           }
-          if (eq(toChecksum(toAddr), ctf)) {
+          var calldata = rs.tx.getCalldata(tx);
+          require(calldata.valid, 'calldata too short');
+          var sel = calldata.selector.toLowerCase();
+          var usdc = toChecksum(config.usdc_bridged_address);
+          var ctf = toChecksum(config.conditional_tokens_address);
+          var negAdapter = toChecksum(config.neg_risk_adapter_address);
+          var negExchange = toChecksum(config.neg_risk_exchange_address);
+          var ctfExchange = toChecksum(config.ctf_exchange_address);
+          var allowedSpenders = [ctfExchange, negAdapter, negExchange, ctf];
+          if (rs.addr.inList(toAddr, [usdc])) {
+            require(sel === '0x095ea7b3', 'unsupported USDC.e operation');
+            require(data.length >= 8 + 64 + 64, 'invalid approve data length');
+            var dec = abi.decode(calldata.payloadHex, ['address', 'uint256']);
+            require(dec && dec.length >= 1, 'approve decode failed');
+            rs.addr.requireInList(dec[0], allowedSpenders, 'spender must be allowed protocol contract');
+            return ok();
+          }
+          if (rs.addr.inList(toAddr, [ctf])) {
             var setApproval = '0xa22cb465';
             var splitPos = '0x72ce4275';
             var mergePos = '0x9e7212ad';
             var redeemPos = '0x01b7037c';
-            if (sel !== setApproval && sel !== splitPos && sel !== mergePos && sel !== redeemPos) return fail('unsupported CTF operation');
+            require(sel === setApproval || sel === splitPos || sel === mergePos || sel === redeemPos, 'unsupported CTF operation');
             if (sel === setApproval) {
-              if (data.length < 8 + 64 + 64) return fail('invalid setApprovalForAll data length');
+              require(data.length >= 8 + 64 + 64, 'invalid setApprovalForAll data length');
               var d = abi.decode(calldata.payloadHex, ['address', 'bool']);
-              if (!d || d.length < 2 || !d[1]) return fail('approval must be true');
-              var r = rs.addr.requireInList(d[0], allowedSpenders, 'operator must be allowed protocol contract');
-              if (!r.valid) return r;
+              require(d && d.length >= 2 && d[1], 'approval must be true');
+              rs.addr.requireInList(d[0], allowedSpenders, 'operator must be allowed protocol contract');
               return ok();
             }
             if (sel === splitPos || sel === mergePos) {
-              if (data.length < 8 + 164 * 2) return fail('invalid split/merge data length');
+              require(data.length >= 8 + 164 * 2, 'invalid split/merge data length');
               var dec2 = abi.decode(calldata.payloadHex, ['address', 'bytes32', 'bytes32', 'uint256[]', 'uint256']);
-              if (!dec2 || dec2.length < 2) return fail('split/merge decode failed');
-              var coll = toChecksum(dec2[0]);
-              if (!eq(coll, usdc)) return fail('collateral must be USDC.e');
+              require(dec2 && dec2.length >= 2, 'split/merge decode failed');
+              require(rs.addr.inList(toChecksum(dec2[0]), [usdc]), 'collateral must be USDC.e');
               return ok();
             }
             if (sel === redeemPos) {
-              if (data.length < 8 + 132 * 2) return fail('invalid redeem data length');
+              require(data.length >= 8 + 132 * 2, 'invalid redeem data length');
               var dec3 = abi.decode(calldata.payloadHex, ['address', 'bytes32', 'bytes32', 'uint256[]']);
-              if (!dec3 || dec3.length < 1) return fail('redeem decode failed');
-              if (!eq(toChecksum(dec3[0]), usdc)) return fail('collateral must be USDC.e');
+              require(dec3 && dec3.length >= 1, 'redeem decode failed');
+              require(rs.addr.inList(toChecksum(dec3[0]), [usdc]), 'collateral must be USDC.e');
               return ok();
             }
           }
@@ -442,15 +422,15 @@ rules:
             var nrRedeem = '0xdbeccb23';
             if (sel === nrSplit || sel === nrMerge || sel === nrRedeem) return ok();
             if (sel === '0x72ce4275' || sel === '0x9e7212ad') {
-              if (data.length < 8 + 164 * 2) return fail('invalid NegRisk 5-param data length');
+              require(data.length >= 8 + 164 * 2, 'invalid NegRisk 5-param data length');
               var nrDec = abi.decode(calldata.payloadHex, ['address', 'bytes32', 'bytes32', 'uint256[]', 'uint256']);
-              if (!nrDec || nrDec.length < 2) return fail('NegRisk decode failed');
-              if (!eq(toChecksum(nrDec[0]), usdc)) return fail('NegRisk collateral must be USDC.e');
+              require(nrDec && nrDec.length >= 2, 'NegRisk decode failed');
+              require(rs.addr.inList(toChecksum(nrDec[0]), [usdc]), 'NegRisk collateral must be USDC.e');
               return ok();
             }
-            return fail('unsupported NegRiskAdapter operation');
+            revert('unsupported NegRiskAdapter operation');
           }
-          return fail('unsupported target contract');
+          revert('unsupported target contract');
         }
     test_cases:
       - name: "should pass USDC approve to CTF Exchange"

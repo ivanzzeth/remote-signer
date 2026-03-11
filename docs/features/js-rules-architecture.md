@@ -201,7 +201,7 @@ Config object only. No substitution.
 
 **eq** (strict), **keccak256**, **selector**, **toChecksum**, **isAddress**, **toWei**, **fromWei**, **encodeAbi** (basic types only; full in v2).
 
-**rs** module: Composable API for transaction, address, uint256, and typed-data validation. Example:
+**rs** module: Composable API for transaction, address, bigint, and typed-data validation. Example:
 
 ```javascript
 function validate(input) {
@@ -212,7 +212,8 @@ function validate(input) {
   var dec = abi.decode(ctx.payloadHex, ['address', 'uint256']);
   var r = rs.addr.requireInList(dec[0], config.allowed_recipients, 'to not allowed');
   if (!r.valid) return r;
-  if (rs.uint256.gt(dec[1], config.max_amount)) return fail('exceeds cap');
+  r = rs.bigint.requireLte(dec[1], config.max_amount, 'exceeds cap');
+  if (!r.valid) return r;
   return ok();
 }
 ```

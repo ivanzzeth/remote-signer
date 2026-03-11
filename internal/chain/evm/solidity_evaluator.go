@@ -151,16 +151,15 @@ contract RuleEvaluatorTest is Test {
 
     function test_rule() public {
         bytes memory txData = ruleContract.txData();
-        if (txData.length >= 4) {
-            (bool success, bytes memory returnData) = address(ruleContract).call(txData);
-            if (!success) {
-                if (returnData.length > 0) {
-                    assembly {
-                        revert(add(returnData, 32), mload(returnData))
-                    }
+        require(txData.length >= 4, "calldata too short: no selector");
+        (bool success, bytes memory returnData) = address(ruleContract).call(txData);
+        if (!success) {
+            if (returnData.length > 0) {
+                assembly {
+                    revert(add(returnData, 32), mload(returnData))
                 }
-                revert("no matching function or validation failed");
             }
+            revert("no matching function or validation failed");
         }
     }
 }
@@ -433,6 +432,15 @@ func (e *SolidityRuleEvaluator) Evaluate(
 	if config.SignTypeFilter != "" && config.SignTypeFilter != req.SignType {
 		// Rule doesn't apply to this sign type, skip evaluation (pass through)
 		return false, "", nil
+	}
+
+	// Whitelist transaction rules: selector or decode must be valid; missing/short calldata = fail (do not allow)
+	if rule.Mode == types.RuleModeWhitelist && (config.Functions != "" || config.Expression != "") {
+		if config.TypedDataExpression == "" && config.TypedDataFunctions == "" {
+			if parsed == nil || len(parsed.RawData) < 4 {
+				return false, "transaction calldata missing or too short: no selector", nil
+			}
+		}
 	}
 
 	var passed bool
