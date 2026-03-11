@@ -644,9 +644,17 @@ func processInOperatorToMappings(source string, inMappingArrays map[string][]str
 			addrs := inMappingArrays[varName]
 			for _, a := range addrs {
 				addr := strings.TrimSpace(a)
-				if addr != "" {
-					constructorInits = append(constructorInits, mappingName+"["+addr+"] = true;")
+				if addr == "" {
+					continue
 				}
+				// Defense-in-depth: validate address before embedding in generated Solidity code.
+				// Invalid addresses would cause compilation failure anyway, but explicit validation
+				// catches the issue earlier with a clear error message.
+				if !common.IsHexAddress(addr) {
+					continue
+				}
+				checksumAddr := common.HexToAddress(addr).Hex()
+				constructorInits = append(constructorInits, mappingName+"["+checksumAddr+"] = true;")
 			}
 		}
 		return mappingName + "[" + expr + "]"
