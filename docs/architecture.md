@@ -133,7 +133,7 @@ Request → Blocklist Rules → Whitelist Rules → Decision
 ### 2. Failure Handling Strategy
 
 > **Security Review Note**: Current Fail-Open design identified as CRITICAL risk.
-> See [SECURITY_REVIEW.md](./SECURITY_REVIEW.md) for details and remediation plan.
+> See [security-review.md](./security-review.md) for details and remediation plan.
 
 **Current** (Fail-Open - TO BE CHANGED):
 - Rule evaluation errors don't block requests
@@ -204,7 +204,7 @@ rejected   rejected      failed
 
 ## Security Considerations
 
-> **Important**: This architecture has undergone security review. See [SECURITY_REVIEW.md](./SECURITY_REVIEW.md) for:
+> **Important**: This architecture has undergone security review. See [security-review.md](./security-review.md) for:
 > - Identified vulnerabilities and risk ratings
 > - Remediation action plan (P0-P3 priorities)
 > - Deployment recommendations by asset value
@@ -229,8 +229,8 @@ To add support for a new chain (e.g., Solana):
 
 ## Related Documentation
 
-- [COMPONENTS.md](./COMPONENTS.md) - Detailed component documentation
-- [FLOW.md](./FLOW.md) - Request signing flow
-- [DEPLOYMENT.md](./DEPLOYMENT.md) - Deployment architecture
-- [SECURITY_REVIEW.md](./SECURITY_REVIEW.md) - Security review and action plan
-- [API.md](./API.md) - API reference
+- [components.md](./components.md) - Detailed component documentation
+- [flow.md](./flow.md) - Request signing flow
+- [deployment.md](./deployment.md) - Deployment architecture
+- [security-review.md](./security-review.md) - Security review and action plan
+- [api.md](./api.md) - API reference

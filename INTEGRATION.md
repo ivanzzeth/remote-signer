@@ -281,7 +281,6 @@ try {
 
 ## Additional Resources
 
-- [API Documentation](../docs/API.md)
-- [Architecture Overview](../docs/ARCHITECTURE.md)
+- [API Documentation](docs/api.md)
+- [Architecture Overview](docs/architecture.md)
 - [JavaScript Client README](./pkg/js-client/README.md)
-- [MetaMask Snap README](./app/metamask-snap/README.md)

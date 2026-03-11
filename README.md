@@ -91,15 +91,15 @@ The server starts with no signers. To add your first signer (import a private ke
 
 ### Manual Setup
 
-If you prefer manual control, see [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full config reference and use `config.example.yaml` as a starting point.
+If you prefer manual control, see [docs/configuration.md](docs/configuration.md) for the full config reference and use `config.example.yaml` as a starting point.
 
 ### Adding Signers
 
 The server starts without signers. Add them after startup:
 
-- **TUI** (recommended): Use `-api-key-file data/admin_private.pem` so you don't need to paste the key. Example (plain HTTP): `./remote-signer-tui -api-key-id admin -api-key-file data/admin_private.pem -url http://localhost:8548`. **If you enabled TLS** during setup, use `https://` and pass CA (and for mTLS, client cert/key), e.g. `-url https://localhost:8548 -tls-ca ./certs/ca.crt` or with mTLS: `-tls-ca ./certs/ca.crt -tls-cert ./certs/client.crt -tls-key ./certs/client.key`. See [docs/TUI.md](docs/TUI.md#tls--mtls). After setup (Docker), you can choose "Open TUI to add signers now?" to launch it. In the **Signers** tab create a keystore (import private key) or create/import an HD wallet. **Password requirements (enforced)**: at least 16 characters, and must include uppercase + lowercase + digit + symbol. 24+ characters recommended.
-- **API**: `POST /api/v1/evm/signers` (admin only). See [docs/API.md](docs/API.md).
-- **Config**: Edit `chains.evm.signers.private_keys` in your config file. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md#chains-evm).
+- **TUI** (recommended): Use `-api-key-file data/admin_private.pem` so you don't need to paste the key. Example (plain HTTP): `./remote-signer-tui -api-key-id admin -api-key-file data/admin_private.pem -url http://localhost:8548`. **If you enabled TLS** during setup, use `https://` and pass CA (and for mTLS, client cert/key), e.g. `-url https://localhost:8548 -tls-ca ./certs/ca.crt` or with mTLS: `-tls-ca ./certs/ca.crt -tls-cert ./certs/client.crt -tls-key ./certs/client.key`. See [docs/tui.md](docs/tui.md#tls--mtls). After setup (Docker), you can choose "Open TUI to add signers now?" to launch it. In the **Signers** tab create a keystore (import private key) or create/import an HD wallet. **Password requirements (enforced)**: at least 16 characters, and must include uppercase + lowercase + digit + symbol. 24+ characters recommended.
+- **API**: `POST /api/v1/evm/signers` (admin only). See [docs/api.md](docs/api.md).
+- **Config**: Edit `chains.evm.signers.private_keys` in your config file. See [docs/configuration.md](docs/configuration.md#chains-evm).
 
 ## Supported Sign Types
 
@@ -118,16 +118,16 @@ The server starts without signers. Add them after startup:
 
 | Document | Description |
 |----------|-------------|
-| [Use Cases](docs/USE_CASES.md) | Treasury, bot, DeFi scenarios |
-| [Architecture](docs/ARCHITECTURE.md) | System design, layers, adapters |
+| [Use Cases](docs/use-cases.md) | Treasury, bot, DeFi scenarios |
+| [Architecture](docs/architecture.md) | System design, layers, adapters |
 
 ### Configure
 
 | Document | Description |
 |----------|-------------|
-| [Configuration Reference](docs/CONFIGURATION.md) | Full `config.yaml` reference |
-| [Rules, Templates & Presets](docs/RULES_TEMPLATES_AND_PRESETS.md) | Concepts: rule templates, instances, presets, and examples |
-| [Rule Syntax Reference](docs/RULE_SYNTAX.md) | All rule types: address list, value limit, Solidity, JS, message pattern |
+| [Configuration Reference](docs/configuration.md) | Full `config.yaml` reference |
+| [Rules, Templates & Presets](docs/rules-templates-and-presets.md) | Concepts: rule templates, instances, presets, and examples |
+| [Rule Syntax Reference](docs/rule-syntax.md) | All rule types: address list, value limit, Solidity, JS, message pattern |
 | [JS Rules (evm_js)](docs/architecture/js-rules-v5.md) | In-process JavaScript rules via Sobek |
 | [config.example.yaml](config.example.yaml) | Annotated configuration template |
 
@@ -135,31 +135,31 @@ The server starts without signers. Add them after startup:
 
 | Document | Description |
 |----------|-------------|
-| [API Reference](docs/API.md) | Complete endpoint docs: authentication, signing, rules, audit |
+| [API Reference](docs/api.md) | Complete endpoint docs: authentication, signing, rules, audit |
 | [Integration Guide](INTEGRATION.md) | JS/TS client library, MetaMask Snap |
 
 ### Deploy & Operate
 
 | Document | Description |
 |----------|-------------|
-| [Deployment Guide](docs/DEPLOYMENT.md) | Docker, Kubernetes, HA, monitoring, backup |
-| [TLS / mTLS Guide](docs/TLS.md) | Certificate trust model, generation, production best practices |
-| [TUI Guide](docs/TUI.md) | Terminal UI: build, run, key bindings |
+| [Deployment Guide](docs/deployment.md) | Docker, Kubernetes, HA, monitoring, backup |
+| [TLS / mTLS Guide](docs/tls.md) | Certificate trust model, generation, production best practices |
+| [TUI Guide](docs/tui.md) | Terminal UI: build, run, key bindings |
 
 ### Security
 
 | Document | Description |
 |----------|-------------|
-| [Security Overview](docs/SECURITY.md) | Defense-in-depth: 8 layers from network to application |
-| [Security Review](docs/SECURITY_REVIEW.md) | Findings, priorities, implementation status |
+| [Security Overview](docs/security.md) | Defense-in-depth: 8 layers from network to application |
+| [Security Review](docs/security-review.md) | Findings, priorities, implementation status |
 
 ### Development
 
 | Document | Description |
 |----------|-------------|
-| [Components](docs/COMPONENTS.md) | Core interfaces, data types, services |
-| [Request Flow](docs/FLOW.md) | 8-step signing flow with state machine |
-| [Testing Guide](docs/TESTING.md) | Unit tests, E2E, rule validation, coverage |
+| [Components](docs/components.md) | Core interfaces, data types, services |
+| [Request Flow](docs/flow.md) | 8-step signing flow with state machine |
+| [Testing Guide](docs/testing.md) | Unit tests, E2E, rule validation, coverage |
 
 **Versioning** — The version shown in the TUI and `/health` follows the repository tag (e.g. tag `v0.1.1` → version `0.1.1`). When you change code under `tui/`, bump the version in `cmd/remote-signer/main.go`; the pre-commit hook enforces this.
 

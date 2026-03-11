@@ -104,7 +104,7 @@ struct CreateProxy {
 
 | 规则 | 合约 | 方法 | 参数 | 备注 |
 | --- | --- | --- | --- | --- |
-| Safe 钱包创建 | SAFE_PROXY_FACTORY_ADDRESS | createProxy(address,uint256,address,Signature) - 0xa1884d2c | paymentToken=0<br>payment=0<br>paymentReceiver=0 | 通过 Safe Factory 创建钱包 |
+| Safe 钱包创建 | SAFE_PROXY_FACTORY_ADDRESS | createProxy(address,uint256,address,(uint8,bytes32,bytes32)) - 0xa1884d2c | paymentToken=0<br>payment=0<br>paymentReceiver=0 | 通过 Safe Factory 创建钱包 |
 
 ---
 
@@ -167,5 +167,5 @@ trading 模板在 enable_trading 基础上增加 CTF split/merge/redeem 与 NegR
 | splitPosition(bytes32,uint256) | 0xa3d7da1d |
 | mergePositions(bytes32,uint256) | 0xb10c5c17 |
 | redeemPositions(bytes32,uint256[]) | 0xdbeccb23 |
-| createProxy(address,uint256,address,Signature) | 0xa1884d2c |
+| createProxy(address,uint256,address,(uint8,bytes32,bytes32)) | 0xa1884d2c |
 | execTransaction(...) | 0x6a761202 |

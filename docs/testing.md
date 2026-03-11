@@ -76,4 +76,4 @@ remote-signer-cli validate -config config.yaml
 | Rule evaluation (JS) | < 10ms |
 | Rule evaluation (Solidity) | 100ms -- 2s |
 
-See [PERFORMANCE.md](PERFORMANCE.md) for benchmark details.
+See [performance.md](performance.md) for benchmark details.

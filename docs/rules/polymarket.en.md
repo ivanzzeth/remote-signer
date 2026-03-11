@@ -104,7 +104,7 @@ struct CreateProxy {
 
 | Rule | Contract | Method | Params | Notes |
 | --- | --- | --- | --- | --- |
-| Safe wallet creation | SAFE_PROXY_FACTORY_ADDRESS | createProxy(address,uint256,address,Signature) - 0xa1884d2c | paymentToken=0<br>payment=0<br>paymentReceiver=0 | Create wallet via Safe Factory |
+| Safe wallet creation | SAFE_PROXY_FACTORY_ADDRESS | createProxy(address,uint256,address,(uint8,bytes32,bytes32)) - 0xa1884d2c | paymentToken=0<br>payment=0<br>paymentReceiver=0 | Create wallet via Safe Factory |
 
 ---
 
@@ -167,5 +167,5 @@ Selector = first 4 bytes of keccak256(function_signature). Verify with `cast sig
 | splitPosition(bytes32,uint256) | 0xa3d7da1d |
 | mergePositions(bytes32,uint256) | 0xb10c5c17 |
 | redeemPositions(bytes32,uint256[]) | 0xdbeccb23 |
-| createProxy(address,uint256,address,Signature) | 0xa1884d2c |
+| createProxy(address,uint256,address,(uint8,bytes32,bytes32)) | 0xa1884d2c |
 | execTransaction(...) | 0x6a761202 |

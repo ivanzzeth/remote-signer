@@ -2,6 +2,20 @@
 
 Remote Signer applies defense in depth from the network layer to the application layer. All security controls are explicit and configurable; there are no silent fallbacks.
 
+## Configuration reference (source of truth)
+
+- **Full config schema**: see [`configuration.md`](configuration.md) and [`config.example.yaml`](../config.example.yaml).
+- This document focuses on **threat model, guardrails, and recommended baselines**. For exact defaults and all keys, prefer `configuration.md` (kept in sync with code).
+
+## Recommended production baseline (minimum)
+
+- **Transport**: enable TLS (`server.tls.enabled: true`); consider mTLS for internal-only deployments (`server.tls.client_auth: true`).
+- **Replay protection**: keep `security.nonce_required: true` (default) and `security.max_request_age` short (e.g. 30–60s).
+- **Rate limiting**: keep `security.ip_rate_limit` enabled; set per-key `api_keys[].rate_limit` as needed (falls back to `security.rate_limit_default`).
+- **API lockdown** (recommended): `security.rules_api_readonly: true` (default), `security.api_keys_api_readonly: true` (default); set `security.signers_api_readonly` based on whether you allow runtime signer/HD-wallet creation.
+- **Access control**: enable `security.ip_whitelist` for admin/internal deployments; if behind proxy, set `trust_proxy: true` and populate `trusted_proxies` (otherwise proxy headers are ignored, fail-closed).
+- **Operational guardrails**: configure `security.approval_guard` for leaked-key detection; consider `security.auto_lock_timeout` for hot signers.
+
 ---
 
 ## 1. Network / Transport

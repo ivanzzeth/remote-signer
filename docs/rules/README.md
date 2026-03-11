@@ -20,4 +20,4 @@ Human-readable documentation for remote-signer rules, organized by protocol. Eac
 
 ---
 
-For template/preset concepts and configuration, see [RULES_TEMPLATES_AND_PRESETS.md](../RULES_TEMPLATES_AND_PRESETS.md).
+For template/preset concepts and configuration, see [rules-templates-and-presets.md](../rules-templates-and-presets.md).
