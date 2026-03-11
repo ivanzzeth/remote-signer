@@ -15,6 +15,10 @@ import (
 	"github.com/grafana/sobek"
 )
 
+// SAFETY: All rs.* require/assert functions panic on failure. The caller (wrappedValidate)
+// MUST have defer/recover to catch panics and convert them into fail results. Never call
+// rs.* helper functions outside wrappedValidate without proper panic recovery.
+
 // injectHelpers injects rule-engine globals: fail(reason), ok(), eq, keccak256, selector, toChecksum,
 // isAddress, toWei, fromWei, and abi.encode / abi.decode (via go-ethereum/accounts/abi, Solidity-aligned).
 // Rules must not check for presence; the engine guarantees they exist.
@@ -31,6 +35,10 @@ func injectHelpers(vm *sobek.Runtime) error {
 	if err := vm.Set("ok", vm.ToValue(func(call sobek.FunctionCall) sobek.Value {
 		return vm.ToValue(map[string]interface{}{"valid": true})
 	})); err != nil {
+		return err
+	}
+	// revert(reason) and require(cond, reason) — global primitives; throw so engine turns exception into fail.
+	if _, err := vm.RunString(`function revert(r){ throw new Error(typeof r === "string" ? r : (r != null ? String(r) : "reverted")); } function require(cond, r){ if (!cond) revert(r); }`); err != nil {
 		return err
 	}
 
@@ -205,7 +213,13 @@ func injectRsHelpers(vm *sobek.Runtime) error {
 	if err := addrObj.Set("inList", vm.ToValue(rsAddrInList(vm))); err != nil {
 		return err
 	}
+	if err := addrObj.Set("notInList", vm.ToValue(rsAddrNotInList(vm))); err != nil {
+		return err
+	}
 	if err := addrObj.Set("requireInList", vm.ToValue(rsAddrRequireInList(vm))); err != nil {
+		return err
+	}
+	if err := addrObj.Set("requireNotInList", vm.ToValue(rsAddrRequireNotInList(vm))); err != nil {
 		return err
 	}
 	if err := addrObj.Set("requireInListIfNonEmpty", vm.ToValue(rsAddrRequireInListIfNonEmpty(vm))); err != nil {
@@ -221,32 +235,50 @@ func injectRsHelpers(vm *sobek.Runtime) error {
 		return err
 	}
 
-	// rs.uint256
-	uint256Obj := vm.NewObject()
-	if err := uint256Obj.Set("cmp", vm.ToValue(rsUint256Cmp(vm))); err != nil {
+	// rs.int — strict integer parsing
+	intObj := vm.NewObject()
+	if err := intObj.Set("parseUint", vm.ToValue(rsIntParseUint(vm))); err != nil {
 		return err
 	}
-	if err := uint256Obj.Set("lt", vm.ToValue(rsUint256Lt(vm))); err != nil {
+	if err := intObj.Set("requireLte", vm.ToValue(rsIntRequireLte(vm))); err != nil {
 		return err
 	}
-	if err := uint256Obj.Set("lte", vm.ToValue(rsUint256Lte(vm))); err != nil {
+	if err := intObj.Set("requireEq", vm.ToValue(rsIntRequireEq(vm))); err != nil {
 		return err
 	}
-	if err := uint256Obj.Set("gt", vm.ToValue(rsUint256Gt(vm))); err != nil {
+	if err := rs.Set("int", intObj); err != nil {
 		return err
 	}
-	if err := uint256Obj.Set("gte", vm.ToValue(rsUint256Gte(vm))); err != nil {
+
+	// rs.bigint — convert inputs into JavaScript BigInt (replaces rs.uint256)
+	bigintObj := vm.NewObject()
+	if err := bigintObj.Set("parse", vm.ToValue(rsBigIntParse(vm))); err != nil {
 		return err
 	}
-	if err := uint256Obj.Set("requireLte", vm.ToValue(rsUint256RequireLte(vm))); err != nil {
+	if err := bigintObj.Set("uint256", vm.ToValue(rsBigIntUint256(vm))); err != nil {
 		return err
 	}
-	if err := rs.Set("uint256", uint256Obj); err != nil {
+	if err := bigintObj.Set("int256", vm.ToValue(rsBigIntInt256(vm))); err != nil {
+		return err
+	}
+	if err := bigintObj.Set("requireLte", vm.ToValue(rsBigIntRequireLte(vm))); err != nil {
+		return err
+	}
+	if err := bigintObj.Set("requireEq", vm.ToValue(rsBigIntRequireEq(vm))); err != nil {
+		return err
+	}
+	if err := bigintObj.Set("requireZero", vm.ToValue(rsBigIntRequireZero(vm))); err != nil {
+		return err
+	}
+	if err := rs.Set("bigint", bigintObj); err != nil {
 		return err
 	}
 
 	// rs.typedData
 	typedDataObj := vm.NewObject()
+	if err := typedDataObj.Set("match", vm.ToValue(rsTypedDataMatch(vm))); err != nil {
+		return err
+	}
 	if err := typedDataObj.Set("require", vm.ToValue(rsTypedDataRequire(vm))); err != nil {
 		return err
 	}
@@ -278,6 +310,28 @@ func injectRsHelpers(vm *sobek.Runtime) error {
 		return err
 	}
 
+	// rs.config — requireNonEmpty(key, reason). Config string values are trimmed when injected (see js_evaluator).
+	configObj := vm.NewObject()
+	if err := configObj.Set("requireNonEmpty", vm.ToValue(rsConfigRequireNonEmpty(vm))); err != nil {
+		return err
+	}
+	if err := rs.Set("config", configObj); err != nil {
+		return err
+	}
+
+	// rs.gnosis.safe — Gnosis Safe helpers (namespaced to avoid global pollution)
+	gnosisObj := vm.NewObject()
+	safeObj := vm.NewObject()
+	if err := safeObj.Set("parseExecTransactionData", vm.ToValue(rsSafeParseExecTransactionData(vm))); err != nil {
+		return err
+	}
+	if err := gnosisObj.Set("safe", safeObj); err != nil {
+		return err
+	}
+	if err := rs.Set("gnosis", gnosisObj); err != nil {
+		return err
+	}
+
 	// rs.hex — hex value checks
 	hexObj := vm.NewObject()
 	if err := hexObj.Set("requireZero32", vm.ToValue(rsHexRequireZero32(vm))); err != nil {
@@ -298,34 +352,511 @@ func rsOk(vm *sobek.Runtime) sobek.Value {
 	return vm.ToValue(map[string]interface{}{"valid": true})
 }
 
+// rsConfigRequireNonEmpty panics with reason if config[key] is missing or trimmed empty.
+// Config is injected with strings already trimmed (see trimConfigStrings in js_evaluator).
+func rsConfigRequireNonEmpty(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
+	return func(call sobek.FunctionCall) sobek.Value {
+		if len(call.Arguments) < 2 {
+			panic("requireNonEmpty needs key, reason")
+		}
+		key := strings.TrimSpace(call.Argument(0).String())
+		reason := ""
+		if r := call.Argument(1); r != nil && !r.Equals(sobek.Undefined()) {
+			reason = r.String()
+		}
+		configVal := vm.Get("config")
+		if configVal == nil || configVal.Equals(sobek.Undefined()) {
+			panic(reason)
+		}
+		configMap, _ := configVal.Export().(map[string]interface{})
+		if configMap == nil {
+			panic(reason)
+		}
+		v, exists := configMap[key]
+		if !exists || v == nil {
+			panic(reason)
+		}
+		s := strings.TrimSpace(fmt.Sprintf("%v", v))
+		if s == "" {
+			panic(reason)
+		}
+		return rsOk(vm)
+	}
+}
+
+const (
+	// Enough for typical Safe execTransaction calldata; prevents huge-string DoS.
+	rsMaxSafeExecTxCalldataHexLen = 256_000 // hex chars (without 0x)
+	rsMaxBigIntInputLen           = 128     // characters (input string before parsing)
+	rsMaxIntInputLen              = 32      // characters (input string before parsing)
+)
+
+var (
+	rsUint256Max = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1)) // 2^256 - 1
+	rsInt256Min  = new(big.Int).Neg(new(big.Int).Lsh(big.NewInt(1), 255))                // -2^255
+	rsInt256Max  = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 255), big.NewInt(1)) // 2^255 - 1
+)
+
+func parseUint256HexToUint64Strict(hex256 string) (uint64, bool) {
+	hex256 = strings.TrimSpace(hex256)
+	if hex256 == "" {
+		return 0, false
+	}
+	// Allow 0x prefix (defensive).
+	hex256 = strings.TrimPrefix(strings.TrimPrefix(hex256, "0x"), "0X")
+	if len(hex256) > 64 {
+		return 0, false
+	}
+	// Left pad to 64 (the caller often slices exact 64 already, but keep robust).
+	if len(hex256) < 64 {
+		hex256 = strings.Repeat("0", 64-len(hex256)) + hex256
+	}
+	// Must fit into uint64.
+	prefix := hex256[:48]
+	for i := 0; i < len(prefix); i++ {
+		if prefix[i] != '0' {
+			return 0, false
+		}
+	}
+	v, err := strconv.ParseUint(hex256[48:], 16, 64)
+	if err != nil {
+		return 0, false
+	}
+	return v, true
+}
+
+func parseBigIntStrict(v interface{}) (*big.Int, bool) {
+	// Normalize input into a bounded string representation first (prevents DoS).
+	var s string
+	switch x := v.(type) {
+	case string:
+		s = strings.TrimSpace(x)
+	case int:
+		s = strconv.Itoa(x)
+	case int64:
+		s = strconv.FormatInt(x, 10)
+	case uint64:
+		s = strconv.FormatUint(x, 10)
+	case float64:
+		if math.IsNaN(x) || math.IsInf(x, 0) {
+			return nil, false
+		}
+		if x != math.Trunc(x) {
+			return nil, false
+		}
+		if x > float64(math.MaxInt64) || x < float64(math.MinInt64) {
+			return nil, false
+		}
+		s = strconv.FormatInt(int64(x), 10)
+	default:
+		return nil, false
+	}
+
+	if s == "" || len(s) > rsMaxBigIntInputLen {
+		return nil, false
+	}
+
+	n := new(big.Int)
+	// Support 0x... hex and decimal.
+	if strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X") {
+		hexStr := strings.TrimPrefix(strings.TrimPrefix(s, "0x"), "0X")
+		if hexStr == "" || len(hexStr) > 64 || !isHexString(hexStr) {
+			return nil, false
+		}
+		if _, ok := n.SetString(hexStr, 16); !ok {
+			return nil, false
+		}
+		return n, true
+	}
+
+	dec := s
+	if strings.HasPrefix(dec, "+") {
+		dec = dec[1:]
+	}
+	if dec == "" || len(dec) > rsMaxBigIntInputLen {
+		return nil, false
+	}
+	start := 0
+	if dec[0] == '-' {
+		start = 1
+	}
+	if start >= len(dec) {
+		return nil, false
+	}
+	for i := start; i < len(dec); i++ {
+		if dec[i] < '0' || dec[i] > '9' {
+			return nil, false
+		}
+	}
+	if _, ok := n.SetString(dec, 10); !ok {
+		return nil, false
+	}
+	return n, true
+}
+
+func toJSBigInt(vm *sobek.Runtime, n *big.Int) (sobek.Value, bool) {
+	bigIntCtor := vm.Get("BigInt")
+	fn, ok := sobek.AssertFunction(bigIntCtor)
+	if !ok {
+		return nil, false
+	}
+	vBig, err := fn(sobek.Undefined(), vm.ToValue(n.String()))
+	if err != nil {
+		return nil, false
+	}
+	return vBig, true
+}
+
+func rsBigIntParse(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
+	return func(call sobek.FunctionCall) sobek.Value {
+		if len(call.Arguments) < 1 || call.Argument(0) == nil || call.Argument(0).Equals(sobek.Undefined()) {
+			return rsFail(vm, "missing value")
+		}
+		n, ok := parseBigIntStrict(call.Argument(0).Export())
+		if !ok {
+			return rsFail(vm, "invalid value")
+		}
+		vBig, ok := toJSBigInt(vm, n)
+		if !ok {
+			return rsFail(vm, "BigInt not supported")
+		}
+		return vm.ToValue(map[string]interface{}{
+			"valid": true,
+			"n":     vBig,
+		})
+	}
+}
+
+func rsBigIntUint256(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
+	return func(call sobek.FunctionCall) sobek.Value {
+		if len(call.Arguments) < 1 || call.Argument(0) == nil || call.Argument(0).Equals(sobek.Undefined()) {
+			return rsFail(vm, "missing value")
+		}
+		n, ok := parseBigIntStrict(call.Argument(0).Export())
+		if !ok {
+			return rsFail(vm, "invalid uint256")
+		}
+		if n.Sign() < 0 || n.Cmp(rsUint256Max) > 0 {
+			return rsFail(vm, "invalid uint256")
+		}
+		vBig, ok := toJSBigInt(vm, n)
+		if !ok {
+			return rsFail(vm, "BigInt not supported")
+		}
+		return vm.ToValue(map[string]interface{}{"valid": true, "n": vBig})
+	}
+}
+
+func rsBigIntInt256(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
+	return func(call sobek.FunctionCall) sobek.Value {
+		if len(call.Arguments) < 1 || call.Argument(0) == nil || call.Argument(0).Equals(sobek.Undefined()) {
+			return rsFail(vm, "missing value")
+		}
+		n, ok := parseBigIntStrict(call.Argument(0).Export())
+		if !ok {
+			return rsFail(vm, "invalid int256")
+		}
+		if n.Cmp(rsInt256Min) < 0 || n.Cmp(rsInt256Max) > 0 {
+			return rsFail(vm, "invalid int256")
+		}
+		vBig, ok := toJSBigInt(vm, n)
+		if !ok {
+			return rsFail(vm, "BigInt not supported")
+		}
+		return vm.ToValue(map[string]interface{}{"valid": true, "n": vBig})
+	}
+}
+
+func rsBigIntRequireLte(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
+	return func(call sobek.FunctionCall) sobek.Value {
+		if len(call.Arguments) < 3 {
+			panic("requireLte needs a, b, reason")
+		}
+		reason := ""
+		if r := call.Argument(2); r != nil && !r.Equals(sobek.Undefined()) {
+			reason = r.String()
+		}
+		maxRaw := call.Argument(1).Export()
+		if s, ok := maxRaw.(string); ok {
+			s = strings.TrimSpace(s)
+			if s == "" || s == "0" {
+				return rsOk(vm)
+			}
+		}
+		a, ok := parseBigIntStrict(call.Argument(0).Export())
+		if !ok {
+			panic(reason)
+		}
+		b, ok := parseBigIntStrict(maxRaw)
+		if !ok {
+			panic(reason)
+		}
+		if a.Cmp(b) > 0 {
+			panic(reason)
+		}
+		return rsOk(vm)
+	}
+}
+
+func rsBigIntRequireZero(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
+	return func(call sobek.FunctionCall) sobek.Value {
+		if len(call.Arguments) < 2 {
+			panic("requireZero needs amount, reason")
+		}
+		reason := ""
+		if r := call.Argument(1); r != nil && !r.Equals(sobek.Undefined()) {
+			reason = r.String()
+		}
+		n, ok := parseBigIntStrict(call.Argument(0).Export())
+		if !ok {
+			panic(reason)
+		}
+		if n.Sign() != 0 {
+			panic(reason)
+		}
+		return rsOk(vm)
+	}
+}
+
+func rsBigIntRequireEq(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
+	return func(call sobek.FunctionCall) sobek.Value {
+		if len(call.Arguments) < 3 {
+			panic("requireEq needs a, b, reason")
+		}
+		reason := ""
+		if r := call.Argument(2); r != nil && !r.Equals(sobek.Undefined()) {
+			reason = r.String()
+		}
+		a, ok := parseBigIntStrict(call.Argument(0).Export())
+		if !ok {
+			panic(reason)
+		}
+		b, ok := parseBigIntStrict(call.Argument(1).Export())
+		if !ok {
+			panic(reason)
+		}
+		if a.Cmp(b) != 0 {
+			panic(reason)
+		}
+		return rsOk(vm)
+	}
+}
+
+func parseUintStrict(v interface{}) (uint64, bool) {
+	switch x := v.(type) {
+	case string:
+		s := strings.TrimSpace(x)
+		if s == "" || len(s) > rsMaxIntInputLen {
+			return 0, false
+		}
+		for i := 0; i < len(s); i++ {
+			if s[i] < '0' || s[i] > '9' {
+				return 0, false
+			}
+		}
+		u, err := strconv.ParseUint(s, 10, 64)
+		if err != nil {
+			return 0, false
+		}
+		return u, true
+	case int:
+		if x < 0 {
+			return 0, false
+		}
+		return uint64(x), true
+	case int64:
+		if x < 0 {
+			return 0, false
+		}
+		return uint64(x), true
+	case uint64:
+		return x, true
+	case float64:
+		if math.IsNaN(x) || math.IsInf(x, 0) {
+			return 0, false
+		}
+		// float64 can only represent integers exactly up to 2^53; reject larger values to avoid precision loss.
+		if x != math.Trunc(x) || x < 0 || x > float64(1<<53) {
+			return 0, false
+		}
+		return uint64(x), true
+	default:
+		return 0, false
+	}
+}
+
+func rsIntParseUint(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
+	return func(call sobek.FunctionCall) sobek.Value {
+		if len(call.Arguments) < 1 || call.Argument(0) == nil || call.Argument(0).Equals(sobek.Undefined()) {
+			return rsFail(vm, "missing value")
+		}
+		u, ok := parseUintStrict(call.Argument(0).Export())
+		if !ok {
+			return rsFail(vm, "invalid value")
+		}
+		return vm.ToValue(map[string]interface{}{"valid": true, "n": u})
+	}
+}
+
+func rsIntRequireLte(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
+	return func(call sobek.FunctionCall) sobek.Value {
+		if len(call.Arguments) < 3 {
+			panic("requireLte needs value, max, reason")
+		}
+		reason := ""
+		if r := call.Argument(2); r != nil && !r.Equals(sobek.Undefined()) {
+			reason = r.String()
+		}
+		u, ok := parseUintStrict(call.Argument(0).Export())
+		if !ok {
+			panic(reason)
+		}
+		max, ok := parseUintStrict(call.Argument(1).Export())
+		if !ok {
+			panic(reason)
+		}
+		if u > max {
+			panic(reason)
+		}
+		return rsOk(vm)
+	}
+}
+
+func rsIntRequireEq(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
+	return func(call sobek.FunctionCall) sobek.Value {
+		if len(call.Arguments) < 3 {
+			panic("requireEq needs value, want, reason")
+		}
+		reason := ""
+		if r := call.Argument(2); r != nil && !r.Equals(sobek.Undefined()) {
+			reason = r.String()
+		}
+		u, ok := parseUintStrict(call.Argument(0).Export())
+		if !ok {
+			panic(reason)
+		}
+		want, ok := parseUintStrict(call.Argument(1).Export())
+		if !ok {
+			panic(reason)
+		}
+		if u != want {
+			panic(reason)
+		}
+		return rsOk(vm)
+	}
+}
+
+func rsSafeParseExecTransactionData(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
+	return func(call sobek.FunctionCall) sobek.Value {
+		if len(call.Arguments) < 1 || call.Argument(0) == nil || call.Argument(0).Equals(sobek.Undefined()) {
+			return rsFail(vm, "missing calldata")
+		}
+		dataRaw, ok := call.Argument(0).Export().(string)
+		if !ok {
+			return rsFail(vm, "invalid calldata")
+		}
+		raw := strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(dataRaw), "0x"), "0X")
+		if raw == "" {
+			return rsFail(vm, "data too short")
+		}
+		if len(raw) > rsMaxSafeExecTxCalldataHexLen {
+			return rsFail(vm, "calldata too large")
+		}
+		if len(raw)%2 != 0 || !isHexString(raw) {
+			return rsFail(vm, "invalid calldata")
+		}
+		// Need selector(4 bytes) + first 4 head slots to parse:
+		// to, value, dataOffset, operation.
+		// selector=8 hex chars, slots=64 hex chars each → 8 + 64*4 = 264.
+		if len(raw) < 8+64*4 {
+			return rsFail(vm, "data too short")
+		}
+
+		// to: first arg is 32 bytes, address is last 20 bytes.
+		toHex := "0x" + raw[8+24:8+64]
+
+		// value: second arg slot must be all zeros.
+		valueHex := raw[8+64 : 8+64*2]
+		valueZero := true
+		for i := 0; i < len(valueHex); i++ {
+			if valueHex[i] != '0' {
+				valueZero = false
+				break
+			}
+		}
+
+		// operation: 4th arg is uint8 encoded in a 32-byte slot; last byte indicates operation.
+		opLastByteHex := raw[8+64*3+62 : 8+64*4]
+		operationCALL := strings.EqualFold(opLastByteHex, "00")
+
+		// data offset: third arg.
+		dataOffsetHex := raw[8+64*2 : 8+64*3]
+		dataOffset, ok := parseUint256HexToUint64Strict(dataOffsetHex)
+		if !ok {
+			return rsFail(vm, "invalid data offset")
+		}
+		rawLen := uint64(len(raw))
+		// Overflow guard: dataOffset*2 and subsequent additions must not wrap around.
+		if dataOffset > rawLen/2 {
+			return rsFail(vm, "invalid data offset")
+		}
+		base := uint64(8) + dataOffset*2
+		if base+64 > rawLen {
+			return rsFail(vm, "invalid data offset")
+		}
+		innerLenHex := raw[base : base+64]
+		innerLen, ok := parseUint256HexToUint64Strict(innerLenHex)
+		if !ok {
+			return rsFail(vm, "invalid inner data length")
+		}
+		innerStart := base + 64
+		// Overflow guard: innerLen*2 must not wrap around.
+		if innerLen > rawLen/2 {
+			return rsFail(vm, "invalid inner data length")
+		}
+		innerEnd := innerStart + innerLen*2
+		if innerEnd > rawLen {
+			return rsFail(vm, "invalid inner data length")
+		}
+		innerHex := "0x" + raw[innerStart:innerEnd]
+		return vm.ToValue(map[string]interface{}{
+			"valid":         true,
+			"valueZero":     valueZero,
+			"operationCALL": operationCALL,
+			"innerTo":       toHex,
+			"innerHex":      innerHex,
+		})
+	}
+}
+
 func rsTxRequire(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 	return func(call sobek.FunctionCall) sobek.Value {
 		if len(call.Arguments) < 1 || call.Argument(0) == nil || call.Argument(0).Equals(sobek.Undefined()) {
-			return rsFail(vm, "missing input")
+			panic("missing input")
 		}
 		inputEx := call.Argument(0).Export()
 		inputMap, ok := inputEx.(map[string]interface{})
 		if !ok {
-			return rsFail(vm, "invalid input")
+			panic("invalid input")
 		}
 		signType, _ := inputMap["sign_type"].(string)
 		if signType != "transaction" {
-			return rsFail(vm, "transaction only")
+			panic("transaction only")
 		}
 		txRaw := inputMap["transaction"]
 		if txRaw == nil {
-			return rsFail(vm, "missing tx fields")
+			panic("missing tx fields")
 		}
 		txMap, ok := txRaw.(map[string]interface{})
 		if !ok {
-			return rsFail(vm, "missing tx fields")
+			panic("missing tx fields")
 		}
 		if _, hasTo := txMap["to"]; !hasTo {
-			return rsFail(vm, "missing tx fields")
+			panic("missing tx fields")
 		}
 		dataRaw := txMap["data"]
 		if dataRaw == nil {
-			return rsFail(vm, "missing tx fields")
+			panic("missing tx fields")
 		}
 		dataStr := ""
 		if s, ok := dataRaw.(string); ok {
@@ -333,7 +864,7 @@ func rsTxRequire(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 		}
 		dataHex := strings.TrimPrefix(strings.TrimPrefix(dataStr, "0x"), "0X")
 		if len(dataHex) < 8 {
-			return rsFail(vm, "calldata too short")
+			panic("calldata too short")
 		}
 		sel := "0x" + dataHex[:8]
 		payloadHex := "0x" + dataHex[8:]
@@ -375,6 +906,48 @@ func rsTxGetCalldata(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 	}
 }
 
+func rsAddrNormalize(addrStr string) (string, bool) {
+	addrStr = strings.TrimSpace(addrStr)
+	if !common.IsHexAddress(addrStr) {
+		return "", false
+	}
+	return common.HexToAddress(addrStr).Hex(), true
+}
+
+func rsAddrListFromExport(listRaw interface{}) []string {
+	var addrs []string
+	switch v := listRaw.(type) {
+	case []interface{}:
+		for _, e := range v {
+			if s, ok := e.(string); ok {
+				if checksum, ok := rsAddrNormalize(s); ok {
+					addrs = append(addrs, checksum)
+				}
+			}
+		}
+	case string:
+		for _, part := range strings.Split(v, ",") {
+			if checksum, ok := rsAddrNormalize(part); ok {
+				addrs = append(addrs, checksum)
+			}
+		}
+	}
+	return addrs
+}
+
+func rsAddrInListCore(addrStr string, listRaw interface{}) bool {
+	addrChecksum, ok := rsAddrNormalize(addrStr)
+	if !ok {
+		return false
+	}
+	for _, a := range rsAddrListFromExport(listRaw) {
+		if addrChecksum == a {
+			return true
+		}
+	}
+	return false
+}
+
 func rsAddrInList(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 	return func(call sobek.FunctionCall) sobek.Value {
 		if len(call.Arguments) < 2 {
@@ -384,43 +957,29 @@ func rsAddrInList(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 		if a := call.Argument(0); a != nil && !a.Equals(sobek.Undefined()) {
 			addrStr = strings.TrimSpace(a.String())
 		}
-		if !common.IsHexAddress(addrStr) {
-			return vm.ToValue(false)
-		}
-		addrChecksum := common.HexToAddress(addrStr).Hex()
 		listRaw := call.Argument(1).Export()
-		var addrs []string
-		switch v := listRaw.(type) {
-		case []interface{}:
-			for _, e := range v {
-				if s, ok := e.(string); ok {
-					s = strings.TrimSpace(s)
-					if common.IsHexAddress(s) {
-						addrs = append(addrs, common.HexToAddress(s).Hex())
-					}
-				}
-			}
-		case string:
-			for _, part := range strings.Split(v, ",") {
-				s := strings.TrimSpace(part)
-				if s != "" && common.IsHexAddress(s) {
-					addrs = append(addrs, common.HexToAddress(s).Hex())
-				}
-			}
+		return vm.ToValue(rsAddrInListCore(addrStr, listRaw))
+	}
+}
+
+func rsAddrNotInList(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
+	return func(call sobek.FunctionCall) sobek.Value {
+		if len(call.Arguments) < 2 {
+			return vm.ToValue(true)
 		}
-		for _, a := range addrs {
-			if addrChecksum == a {
-				return vm.ToValue(true)
-			}
+		addrStr := ""
+		if a := call.Argument(0); a != nil && !a.Equals(sobek.Undefined()) {
+			addrStr = strings.TrimSpace(a.String())
 		}
-		return vm.ToValue(false)
+		listRaw := call.Argument(1).Export()
+		return vm.ToValue(!rsAddrInListCore(addrStr, listRaw))
 	}
 }
 
 func rsAddrRequireInList(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 	return func(call sobek.FunctionCall) sobek.Value {
 		if len(call.Arguments) < 3 {
-			return rsFail(vm, "requireInList needs addr, list, reason")
+			panic("requireInList needs addr, list, reason")
 		}
 		reason := ""
 		if r := call.Argument(2); r != nil && !r.Equals(sobek.Undefined()) {
@@ -430,70 +989,52 @@ func rsAddrRequireInList(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value
 		if a := call.Argument(0); a != nil && !a.Equals(sobek.Undefined()) {
 			addrStr = strings.TrimSpace(a.String())
 		}
-		if !common.IsHexAddress(addrStr) {
-			return rsFail(vm, reason)
-		}
-		addrChecksum := common.HexToAddress(addrStr).Hex()
 		listRaw := call.Argument(1).Export()
-		var addrs []string
-		switch v := listRaw.(type) {
-		case []interface{}:
-			for _, e := range v {
-				if s, ok := e.(string); ok {
-					s = strings.TrimSpace(s)
-					if common.IsHexAddress(s) {
-						addrs = append(addrs, common.HexToAddress(s).Hex())
-					}
-				}
-			}
-		case string:
-			for _, part := range strings.Split(v, ",") {
-				s := strings.TrimSpace(part)
-				if s != "" && common.IsHexAddress(s) {
-					addrs = append(addrs, common.HexToAddress(s).Hex())
-				}
-			}
+		if rsAddrInListCore(addrStr, listRaw) {
+			return rsOk(vm)
 		}
-		for _, a := range addrs {
-			if addrChecksum == a {
-				return rsOk(vm)
-			}
+		panic(reason)
+	}
+}
+
+func rsAddrRequireNotInList(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
+	return func(call sobek.FunctionCall) sobek.Value {
+		if len(call.Arguments) < 3 {
+			panic("requireNotInList needs addr, list, reason")
 		}
-		return rsFail(vm, reason)
+		reason := ""
+		if r := call.Argument(2); r != nil && !r.Equals(sobek.Undefined()) {
+			reason = r.String()
+		}
+		addrStr := ""
+		if a := call.Argument(0); a != nil && !a.Equals(sobek.Undefined()) {
+			addrStr = strings.TrimSpace(a.String())
+		}
+		// Validate address first to prevent malformed addresses from bypassing blocklist.
+		if _, ok := rsAddrNormalize(addrStr); !ok {
+			panic(reason)
+		}
+		listRaw := call.Argument(1).Export()
+		if !rsAddrInListCore(addrStr, listRaw) {
+			return rsOk(vm)
+		}
+		panic(reason)
 	}
 }
 
 // rsAddrRequireInListIfNonEmpty: when list is empty (array length 0 or string trim empty), returns ok().
-// Otherwise same as requireInList.
+// Otherwise same as requireInList. On failure panics so engine turns it into fail (one-line usage).
 func rsAddrRequireInListIfNonEmpty(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 	return func(call sobek.FunctionCall) sobek.Value {
 		if len(call.Arguments) < 3 {
-			return rsFail(vm, "requireInListIfNonEmpty needs addr, list, reason")
+			panic("requireInListIfNonEmpty needs addr, list, reason")
 		}
 		reason := ""
 		if r := call.Argument(2); r != nil && !r.Equals(sobek.Undefined()) {
 			reason = r.String()
 		}
 		listRaw := call.Argument(1).Export()
-		var addrs []string
-		switch v := listRaw.(type) {
-		case []interface{}:
-			for _, e := range v {
-				if s, ok := e.(string); ok {
-					s = strings.TrimSpace(s)
-					if s != "" && common.IsHexAddress(s) {
-						addrs = append(addrs, common.HexToAddress(s).Hex())
-					}
-				}
-			}
-		case string:
-			for _, part := range strings.Split(v, ",") {
-				s := strings.TrimSpace(part)
-				if s != "" && common.IsHexAddress(s) {
-					addrs = append(addrs, common.HexToAddress(s).Hex())
-				}
-			}
-		}
+		addrs := rsAddrListFromExport(listRaw)
 		if len(addrs) == 0 {
 			return rsOk(vm)
 		}
@@ -501,16 +1042,16 @@ func rsAddrRequireInListIfNonEmpty(vm *sobek.Runtime) func(sobek.FunctionCall) s
 		if a := call.Argument(0); a != nil && !a.Equals(sobek.Undefined()) {
 			addrStr = strings.TrimSpace(a.String())
 		}
-		if !common.IsHexAddress(addrStr) {
-			return rsFail(vm, reason)
+		addrChecksum, ok := rsAddrNormalize(addrStr)
+		if !ok {
+			panic(reason)
 		}
-		addrChecksum := common.HexToAddress(addrStr).Hex()
 		for _, a := range addrs {
 			if addrChecksum == a {
 				return rsOk(vm)
 			}
 		}
-		return rsFail(vm, reason)
+		panic(reason)
 	}
 }
 
@@ -531,7 +1072,7 @@ func rsAddrIsZero(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 func rsAddrRequireZero(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 	return func(call sobek.FunctionCall) sobek.Value {
 		if len(call.Arguments) < 2 {
-			return rsFail(vm, "requireZero needs addr, reason")
+			panic("requireZero needs addr, reason")
 		}
 		reason := ""
 		if r := call.Argument(1); r != nil && !r.Equals(sobek.Undefined()) {
@@ -543,159 +1084,7 @@ func rsAddrRequireZero(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 		}
 		zeroAddr := common.Address{}
 		if !common.IsHexAddress(addrStr) || common.HexToAddress(addrStr) != zeroAddr {
-			return rsFail(vm, reason)
-		}
-		return rsOk(vm)
-	}
-}
-
-func rsUint256CmpInternal(a, b string) *int {
-	sa := strings.TrimSpace(a)
-	sb := strings.TrimSpace(b)
-	if sa == "" || sb == "" {
-		return nil
-	}
-	// SECURITY: Cap length to prevent CPU DoS from huge decimal strings (2^256 has 78 digits).
-	if len(sa) > rsMaxUint256StrLen || len(sb) > rsMaxUint256StrLen {
-		return nil
-	}
-	for _, r := range sa {
-		if r < '0' || r > '9' {
-			return nil
-		}
-	}
-	for _, r := range sb {
-		if r < '0' || r > '9' {
-			return nil
-		}
-	}
-	if len(sa) < len(sb) {
-		v := -1
-		return &v
-	}
-	if len(sa) > len(sb) {
-		v := 1
-		return &v
-	}
-	if sa < sb {
-		v := -1
-		return &v
-	}
-	if sa > sb {
-		v := 1
-		return &v
-	}
-	v := 0
-	return &v
-}
-
-func rsUint256Cmp(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
-	return func(call sobek.FunctionCall) sobek.Value {
-		if len(call.Arguments) < 2 {
-			return vm.ToValue(nil)
-		}
-		aStr := ""
-		if v := call.Argument(0); v != nil && !v.Equals(sobek.Undefined()) {
-			aStr = fmt.Sprintf("%v", v.Export())
-		}
-		bStr := ""
-		if v := call.Argument(1); v != nil && !v.Equals(sobek.Undefined()) {
-			bStr = fmt.Sprintf("%v", v.Export())
-		}
-		c := rsUint256CmpInternal(aStr, bStr)
-		if c == nil {
-			return vm.ToValue(nil)
-		}
-		return vm.ToValue(*c)
-	}
-}
-
-func rsUint256Lt(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
-	return func(call sobek.FunctionCall) sobek.Value {
-		c := rsUint256CmpInternal("", "")
-		if len(call.Arguments) >= 2 {
-			aStr := fmt.Sprintf("%v", call.Argument(0).Export())
-			bStr := fmt.Sprintf("%v", call.Argument(1).Export())
-			c = rsUint256CmpInternal(aStr, bStr)
-		}
-		return vm.ToValue(c != nil && *c < 0)
-	}
-}
-
-func rsUint256Lte(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
-	return func(call sobek.FunctionCall) sobek.Value {
-		c := rsUint256CmpInternal("", "")
-		if len(call.Arguments) >= 2 {
-			aStr := fmt.Sprintf("%v", call.Argument(0).Export())
-			bStr := fmt.Sprintf("%v", call.Argument(1).Export())
-			c = rsUint256CmpInternal(aStr, bStr)
-		}
-		return vm.ToValue(c != nil && *c <= 0)
-	}
-}
-
-func rsUint256Gt(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
-	return func(call sobek.FunctionCall) sobek.Value {
-		c := rsUint256CmpInternal("", "")
-		if len(call.Arguments) >= 2 {
-			aStr := fmt.Sprintf("%v", call.Argument(0).Export())
-			bStr := fmt.Sprintf("%v", call.Argument(1).Export())
-			c = rsUint256CmpInternal(aStr, bStr)
-		}
-		return vm.ToValue(c != nil && *c > 0)
-	}
-}
-
-func rsUint256Gte(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
-	return func(call sobek.FunctionCall) sobek.Value {
-		c := rsUint256CmpInternal("", "")
-		if len(call.Arguments) >= 2 {
-			aStr := fmt.Sprintf("%v", call.Argument(0).Export())
-			bStr := fmt.Sprintf("%v", call.Argument(1).Export())
-			c = rsUint256CmpInternal(aStr, bStr)
-		}
-		return vm.ToValue(c != nil && *c >= 0)
-	}
-}
-
-// rsUint256RequireLte checks amount <= max. When max is empty or "0", no limit (returns ok).
-// When max is invalid: fail(label + " cap invalid"). When amount is invalid: fail(label + " amount invalid").
-// When amount > max: fail(label + " exceeds cap").
-func rsUint256RequireLte(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
-	return func(call sobek.FunctionCall) sobek.Value {
-		if len(call.Arguments) < 3 {
-			return rsFail(vm, "requireLte needs amount, max, label")
-		}
-		label := ""
-		if l := call.Argument(2); l != nil && !l.Equals(sobek.Undefined()) {
-			label = strings.TrimSpace(l.String())
-		}
-		maxStr := strings.TrimSpace(fmt.Sprintf("%v", call.Argument(1).Export()))
-		if maxStr == "" || maxStr == "0" {
-			return rsOk(vm)
-		}
-		if len(maxStr) > rsMaxUint256StrLen {
-			return rsFail(vm, label+" cap invalid")
-		}
-		if !isDecimalString(maxStr) {
-			return rsFail(vm, label+" cap invalid")
-		}
-		amStr := ""
-		if a := call.Argument(0); a != nil && !a.Equals(sobek.Undefined()) {
-			amStr = strings.TrimSpace(fmt.Sprintf("%v", a.Export()))
-		}
-		if len(amStr) > rsMaxUint256StrLen {
-			return rsFail(vm, label+" amount invalid")
-		}
-		if amStr == "" || !isDecimalString(amStr) {
-			return rsFail(vm, label+" amount invalid")
-		}
-		c := rsUint256CmpInternal(amStr, maxStr)
-		if c == nil {
-			return rsFail(vm, label+" amount invalid")
-		}
-		if *c > 0 {
-			return rsFail(vm, label+" exceeds cap")
+			panic(reason)
 		}
 		return rsOk(vm)
 	}
@@ -704,35 +1093,35 @@ func rsUint256RequireLte(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value
 func rsTypedDataRequire(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 	return func(call sobek.FunctionCall) sobek.Value {
 		if len(call.Arguments) < 2 {
-			return rsFail(vm, "require needs input, primaryType")
+			panic("require needs input, primaryType")
 		}
 		primaryType := ""
 		if p := call.Argument(1); p != nil && !p.Equals(sobek.Undefined()) {
 			primaryType = strings.TrimSpace(p.String())
 		}
 		if primaryType == "" {
-			return rsFail(vm, "primaryType required")
+			panic("primaryType required")
 		}
 		inputEx := call.Argument(0).Export()
 		inputMap, ok := inputEx.(map[string]interface{})
 		if !ok {
-			return rsFail(vm, "invalid input")
+			panic("invalid input")
 		}
 		signType, _ := inputMap["sign_type"].(string)
 		if signType != "typed_data" {
-			return rsFail(vm, "sign_type must be typed_data")
+			panic("sign_type must be typed_data")
 		}
 		tdRaw := inputMap["typed_data"]
 		if tdRaw == nil {
-			return rsFail(vm, "not "+primaryType)
+			panic("not " + primaryType)
 		}
 		tdMap, ok := tdRaw.(map[string]interface{})
 		if !ok {
-			return rsFail(vm, "not "+primaryType)
+			panic("not " + primaryType)
 		}
 		pt, _ := tdMap["primaryType"].(string)
 		if strings.TrimSpace(pt) != primaryType {
-			return rsFail(vm, "not " + primaryType)
+			panic("not " + primaryType)
 		}
 		domain := map[string]interface{}{}
 		if d, ok := tdMap["domain"].(map[string]interface{}); ok {
@@ -743,8 +1132,60 @@ func rsTypedDataRequire(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value 
 			message = m
 		}
 		return vm.ToValue(map[string]interface{}{
-			"valid":  true,
-			"domain": domain,
+			"valid":   true,
+			"domain":  domain,
+			"message": message,
+		})
+	}
+}
+
+// rsTypedDataMatch checks whether input is typed_data with matching primaryType.
+// It is intended for "soft match" in rules (e.g. blocklist: not matched -> ok()).
+// Returns { matched: true, domain, message } or { matched: false }.
+func rsTypedDataMatch(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
+	return func(call sobek.FunctionCall) sobek.Value {
+		if len(call.Arguments) < 2 {
+			return vm.ToValue(map[string]interface{}{"matched": false})
+		}
+		primaryType := ""
+		if p := call.Argument(1); p != nil && !p.Equals(sobek.Undefined()) {
+			primaryType = strings.TrimSpace(p.String())
+		}
+		if primaryType == "" {
+			return vm.ToValue(map[string]interface{}{"matched": false})
+		}
+		inputEx := call.Argument(0).Export()
+		inputMap, ok := inputEx.(map[string]interface{})
+		if !ok {
+			return vm.ToValue(map[string]interface{}{"matched": false})
+		}
+		signType, _ := inputMap["sign_type"].(string)
+		if signType != "typed_data" {
+			return vm.ToValue(map[string]interface{}{"matched": false})
+		}
+		tdRaw := inputMap["typed_data"]
+		if tdRaw == nil {
+			return vm.ToValue(map[string]interface{}{"matched": false})
+		}
+		tdMap, ok := tdRaw.(map[string]interface{})
+		if !ok {
+			return vm.ToValue(map[string]interface{}{"matched": false})
+		}
+		pt, _ := tdMap["primaryType"].(string)
+		if strings.TrimSpace(pt) != primaryType {
+			return vm.ToValue(map[string]interface{}{"matched": false})
+		}
+		domain := map[string]interface{}{}
+		if d, ok := tdMap["domain"].(map[string]interface{}); ok {
+			domain = d
+		}
+		message := map[string]interface{}{}
+		if m, ok := tdMap["message"].(map[string]interface{}); ok {
+			message = m
+		}
+		return vm.ToValue(map[string]interface{}{
+			"matched": true,
+			"domain":  domain,
 			"message": message,
 		})
 	}
@@ -753,7 +1194,7 @@ func rsTypedDataRequire(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value 
 func rsTypedDataRequireDomain(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 	return func(call sobek.FunctionCall) sobek.Value {
 		if len(call.Arguments) < 2 {
-			return rsFail(vm, "requireDomain needs domain, opts")
+			panic("requireDomain needs domain, opts")
 		}
 		domainEx := call.Argument(0).Export()
 		domainMap, ok := domainEx.(map[string]interface{})
@@ -763,38 +1204,61 @@ func rsTypedDataRequireDomain(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.
 		optsEx := call.Argument(1).Export()
 		optsMap, ok := optsEx.(map[string]interface{})
 		if !ok {
-			return rsFail(vm, "invalid opts")
+			panic("invalid opts")
 		}
-		wantName, _ := optsMap["name"].(string)
-		wantName = strings.TrimSpace(wantName)
-		wantVersion, _ := optsMap["version"].(string)
-		wantVersion = strings.TrimSpace(wantVersion)
+		wantName, hasName := optsMap["name"].(string)
+		if hasName {
+			wantName = strings.TrimSpace(wantName)
+		}
+		wantVersion, hasVersion := optsMap["version"].(string)
+		if hasVersion {
+			wantVersion = strings.TrimSpace(wantVersion)
+		}
 		wantChainId := extractChainId(optsMap["chainId"])
-		gotName := strings.TrimSpace(fmt.Sprintf("%v", domainMap["name"]))
-		if gotName != wantName {
-			return rsFail(vm, "invalid domain name")
+		if hasName {
+			gotName := strings.TrimSpace(fmt.Sprintf("%v", domainMap["name"]))
+			if gotName != wantName {
+				panic("invalid domain name")
+			}
 		}
-		gotVersion := ""
-		if v, ok := domainMap["version"]; ok && v != nil {
-			gotVersion = strings.TrimSpace(fmt.Sprintf("%v", v))
-		}
-		if gotVersion != wantVersion {
-			return rsFail(vm, "invalid domain version")
+		if hasVersion {
+			gotVersion := ""
+			if v, ok := domainMap["version"]; ok && v != nil {
+				gotVersion = strings.TrimSpace(fmt.Sprintf("%v", v))
+			}
+			if gotVersion != wantVersion {
+				panic("invalid domain version")
+			}
 		}
 		gotChainId := extractChainId(domainMap["chainId"])
 		if gotChainId != wantChainId {
-			return rsFail(vm, "must be on configured chain")
+			chainReason := "must be on configured chain"
+			if len(call.Arguments) >= 3 {
+				if r := call.Argument(2); r != nil && !r.Equals(sobek.Undefined()) {
+					if s := strings.TrimSpace(r.String()); s != "" {
+						chainReason = s
+					}
+				}
+			}
+			panic(chainReason)
+		}
+		requireVC := true
+		if b, ok := optsMap["requireVerifyingContract"].(bool); ok {
+			requireVC = b
+		}
+		allowedRaw, hasAllowed := optsMap["allowedContracts"]
+		if !requireVC && !hasAllowed {
+			return rsOk(vm)
 		}
 		vcRaw := domainMap["verifyingContract"]
 		if vcRaw == nil {
-			return rsFail(vm, "invalid verifying contract")
+			panic("invalid verifying contract")
 		}
 		vcStr := strings.TrimSpace(fmt.Sprintf("%v", vcRaw))
 		if !common.IsHexAddress(vcStr) {
-			return rsFail(vm, "invalid verifying contract")
+			panic("invalid verifying contract")
 		}
 		vcChecksum := common.HexToAddress(vcStr).Hex()
-		allowedRaw, hasAllowed := optsMap["allowedContracts"]
 		if hasAllowed {
 			var allowed []string
 			switch v := allowedRaw.(type) {
@@ -823,7 +1287,7 @@ func rsTypedDataRequireDomain(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.
 				}
 			}
 			if !found {
-				return rsFail(vm, "invalid verifying contract")
+				panic("invalid verifying contract")
 			}
 		}
 		return rsOk(vm)
@@ -870,7 +1334,7 @@ func extractChainId(v interface{}) int {
 func rsTypedDataRequireSignerMatch(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 	return func(call sobek.FunctionCall) sobek.Value {
 		if len(call.Arguments) < 3 {
-			return rsFail(vm, "requireSignerMatch needs msgSigner, inputSigner, reason")
+			panic("requireSignerMatch needs msgSigner, inputSigner, reason")
 		}
 		reason := ""
 		if r := call.Argument(2); r != nil && !r.Equals(sobek.Undefined()) {
@@ -885,10 +1349,10 @@ func rsTypedDataRequireSignerMatch(vm *sobek.Runtime) func(sobek.FunctionCall) s
 			inputStr = strings.TrimSpace(a.String())
 		}
 		if !common.IsHexAddress(msgStr) || !common.IsHexAddress(inputStr) {
-			return rsFail(vm, reason)
+			panic(reason)
 		}
 		if common.HexToAddress(msgStr).Hex() != common.HexToAddress(inputStr).Hex() {
-			return rsFail(vm, reason)
+			panic(reason)
 		}
 		return rsOk(vm)
 	}
@@ -901,7 +1365,6 @@ const (
 	rsMaxMultisendItemData = 32 * 1024  // max per-item data 32 KB
 	rsMaxMultisendItems    = 256        // max items in batch
 	rsMaxDelegatePairs     = 64         // max addr:rule_id pairs in resolveByTarget
-	rsMaxUint256StrLen     = 78         // max decimal digits (2^256 has 78 digits)
 )
 
 // rsMultisendParseBatch parses Gnosis MultiSend(bytes) calldata. raw = hex without 0x.
