@@ -149,34 +149,26 @@ rules:
       sign_type_filter: "typed_data"
       script: |
         function validate(input) {
-          if (input.sign_type !== 'typed_data') return fail('sign_type must be typed_data');
-          var td = input.typed_data;
-          if (!td || td.primaryType !== 'Order') return fail('not Order');
-          var domain = td.domain || {};
-          var msg = td.message || {};
-          var wantName = (config.ctf_exchange_domain_name || '').trim();
-          var wantVersion = (config.ctf_exchange_domain_version || '').trim();
-          var allowedContracts = [toChecksum((config.ctf_exchange_address || '').trim()), toChecksum((config.neg_risk_exchange_address || '').trim())];
-          var chainId = parseInt(config.chain_id, 10);
-          if (String(domain.name || '').trim() !== wantName) return fail('invalid domain name');
-          if (String(domain.version || '').trim() !== wantVersion) return fail('invalid domain version');
-          if (!isAddress(domain.verifyingContract)) return fail('invalid verifying contract');
-          var vc = toChecksum(domain.verifyingContract);
-          if (!inSet(vc, allowedContracts)) return fail('invalid verifying contract');
-          if (Number(domain.chainId) !== chainId) return fail('chainId mismatch');
-          var zeroAddr = '0x0000000000000000000000000000000000000000';
-          if (!eq(toChecksum((msg.taker || '').trim()), zeroAddr)) return fail('taker must be zero address');
-          var signerAddr = toChecksum((input.signer || '').trim());
-          if (!isAddress(signerAddr)) return fail('invalid signer');
-          if (!eq(toChecksum((msg.signer || '').trim()), signerAddr)) return fail('order signer must match signing key');
+          var ctx = rs.typedData.require(input, 'Order');
+          if (!ctx.valid) return ctx;
+          var domain = ctx.domain || {};
+          var msg = ctx.message || {};
+          var allowedContracts = [config.ctf_exchange_address, config.neg_risk_exchange_address];
+          var r = rs.typedData.requireDomain(domain, {
+            name: (config.ctf_exchange_domain_name || '').trim(),
+            version: (config.ctf_exchange_domain_version || '').trim(),
+            chainId: parseInt(config.chain_id, 10),
+            allowedContracts: allowedContracts
+          });
+          if (!r.valid) return r;
+          r = rs.addr.requireZero((msg.taker || '').trim(), 'taker must be zero address');
+          if (!r.valid) return r;
+          if (!isAddress((input.signer || '').trim())) return fail('invalid signer');
+          r = rs.typedData.requireSignerMatch((msg.signer || '').trim(), (input.signer || '').trim(), 'order signer must match signing key');
+          if (!r.valid) return r;
           var feeBps = parseInt(msg.feeRateBps, 10) || 0;
           if (feeBps > 1000) return fail('fee exceeds 10%');
           return ok();
-        }
-        function inSet(addr, set) {
-          var c = toChecksum((addr || '').trim());
-          for (var i = 0; i < set.length; i++) { if (eq(c, set[i])) return true; }
-          return false;
         }
     test_cases:
       - name: "should pass valid order with zero taker"
@@ -270,21 +262,22 @@ rules:
       sign_type_filter: "typed_data"
       script: |
         function validate(input) {
-          if (input.sign_type !== 'typed_data') return fail('sign_type must be typed_data');
-          var td = input.typed_data;
-          if (!td || td.primaryType !== 'CreateProxy') return fail('not CreateProxy');
-          var domain = td.domain || {};
-          var msg = td.message || {};
-          var wantName = (config.safe_factory_domain_name || '').trim();
-          var wantFactory = toChecksum((config.safe_proxy_factory_address || '').trim());
-          var chainId = parseInt(config.chain_id, 10);
-          if (String(domain.name || '').trim() !== wantName) return fail('invalid domain name');
-          if (Number(domain.chainId) !== chainId) return fail('must be on Polygon');
-          if (!isAddress(domain.verifyingContract) || !eq(toChecksum(domain.verifyingContract), wantFactory)) return fail('verifyingContract must be Safe Factory');
-          var zeroAddr = '0x0000000000000000000000000000000000000000';
-          if (!eq(toChecksum((msg.paymentToken || '').trim()), zeroAddr)) return fail('payment token must be zero');
+          var ctx = rs.typedData.require(input, 'CreateProxy');
+          if (!ctx.valid) return ctx;
+          var domain = ctx.domain || {};
+          var msg = ctx.message || {};
+          var r = rs.typedData.requireDomain(domain, {
+            name: (config.safe_factory_domain_name || '').trim(),
+            version: '',
+            chainId: parseInt(config.chain_id, 10),
+            allowedContracts: [config.safe_proxy_factory_address]
+          });
+          if (!r.valid) return r;
+          r = rs.addr.requireZero((msg.paymentToken || '').trim(), 'payment token must be zero');
+          if (!r.valid) return r;
           if (String(msg.payment !== undefined ? msg.payment : '').trim() !== '0') return fail('payment must be zero');
-          if (!eq(toChecksum((msg.paymentReceiver || '').trim()), zeroAddr)) return fail('payment receiver must be zero');
+          r = rs.addr.requireZero((msg.paymentReceiver || '').trim(), 'payment receiver must be zero');
+          if (!r.valid) return r;
           return ok();
         }
     test_cases:
@@ -333,17 +326,12 @@ rules:
       sign_type_filter: "transaction"
       script: |
         function validate(input) {
-          if (input.sign_type !== 'transaction') return fail('sign_type must be transaction');
-          var tx = input.transaction;
-          if (!tx || !tx.to) return fail('missing transaction or to');
-          var toChecksumAddr = toChecksum((tx.to || '').trim());
-          var wantFactory = toChecksum((config.safe_proxy_factory_address || '').trim());
-          if (!eq(toChecksumAddr, wantFactory)) return fail('target must be Safe Factory');
-          var data = (tx.data || '0x').replace(/^0x/, '');
-          if (data.length < 8) return fail('data too short');
-          var sel = '0x' + data.slice(0, 8);
+          var ctx = rs.tx.require(input);
+          if (!ctx.valid) return ctx;
+          if (!rs.addr.inList(ctx.tx.to, [config.safe_proxy_factory_address])) return fail('target must be Safe Factory');
           var createProxySel = '0xa1884d2c';
-          if (sel.toLowerCase() !== createProxySel) return fail('not createProxy');
+          if (ctx.selector.toLowerCase() !== createProxySel) return fail('not createProxy');
+          var data = (ctx.tx.data || '0x').replace(/^0x/, '');
           if (data.length < 8 + 64 * 3) return fail('createProxy data too short');
           var zero32 = '0000000000000000000000000000000000000000000000000000000000000000';
           var paymentTokenHex = data.slice(8, 72);
@@ -389,51 +377,36 @@ rules:
     config:
       sign_type_filter: "transaction"
       script: |
-        function parseList(s) {
-          if (!s || typeof s !== 'string') return [];
-          var list = [];
-          s.split(',').forEach(function(a) { var t = a.trim(); if (t && isAddress(t)) list.push(toChecksum(t)); });
-          return list;
-        }
-        function inSet(addr, set) {
-          var c = toChecksum((addr || '').trim());
-          for (var i = 0; i < set.length; i++) { if (eq(c, set[i])) return true; }
-          return false;
-        }
         function validate(input) {
           if (input.sign_type !== 'transaction') return fail('sign_type must be transaction');
           var tx = input.transaction;
           if (!tx || !tx.to) return fail('missing transaction or to');
-          var toAddr = toChecksum((tx.to || '').trim());
+          var toAddr = (tx.to || '').trim();
           var data = (tx.data || '0x').replace(/^0x/, '');
+          var shortDataTargets = [config.usdc_bridged_address, config.conditional_tokens_address, config.neg_risk_adapter_address, config.neg_risk_exchange_address];
           if (data.length < 8) {
-            var usdc = toChecksum((config.usdc_bridged_address || '').trim());
-            var ctf = toChecksum((config.conditional_tokens_address || '').trim());
-            var negAdapter = toChecksum((config.neg_risk_adapter_address || '').trim());
-            var negExchange = toChecksum((config.neg_risk_exchange_address || '').trim());
-            if (eq(toAddr, usdc) || eq(toAddr, ctf) || eq(toAddr, negAdapter) || eq(toAddr, negExchange)) return ok();
+            if (rs.addr.inList(toAddr, shortDataTargets)) return ok();
             return fail('unsupported target contract');
           }
-          var sel = '0x' + data.slice(0, 8).toLowerCase();
+          var calldata = rs.tx.getCalldata(tx);
+          if (!calldata.valid) return fail('calldata too short');
+          var sel = calldata.selector.toLowerCase();
           var usdc = toChecksum((config.usdc_bridged_address || '').trim());
           var ctf = toChecksum((config.conditional_tokens_address || '').trim());
           var negAdapter = toChecksum((config.neg_risk_adapter_address || '').trim());
           var negExchange = toChecksum((config.neg_risk_exchange_address || '').trim());
           var ctfExchange = toChecksum((config.ctf_exchange_address || '').trim());
           var allowedSpenders = [ctfExchange, negAdapter, negExchange, ctf];
-          if (eq(toAddr, usdc)) {
+          if (eq(toChecksum(toAddr), usdc)) {
             if (sel !== '0x095ea7b3') return fail('unsupported USDC.e operation');
             if (data.length < 8 + 64 + 64) return fail('invalid approve data length');
-            var payload = '0x' + data.slice(8);
-            var dec = abi.decode(payload, ['address', 'uint256']);
+            var dec = abi.decode(calldata.payloadHex, ['address', 'uint256']);
             if (!dec || dec.length < 1) return fail('approve decode failed');
-            var spender = toChecksum(dec[0]);
-            var okSpend = false;
-            for (var i = 0; i < allowedSpenders.length; i++) { if (eq(spender, allowedSpenders[i])) { okSpend = true; break; } }
-            if (!okSpend) return fail('spender must be allowed protocol contract');
+            var r = rs.addr.requireInList(dec[0], allowedSpenders, 'spender must be allowed protocol contract');
+            if (!r.valid) return r;
             return ok();
           }
-          if (eq(toAddr, ctf)) {
+          if (eq(toChecksum(toAddr), ctf)) {
             var setApproval = '0xa22cb465';
             var splitPos = '0x72ce4275';
             var mergePos = '0x9e7212ad';
@@ -441,19 +414,15 @@ rules:
             if (sel !== setApproval && sel !== splitPos && sel !== mergePos && sel !== redeemPos) return fail('unsupported CTF operation');
             if (sel === setApproval) {
               if (data.length < 8 + 64 + 64) return fail('invalid setApprovalForAll data length');
-              var p = '0x' + data.slice(8);
-              var d = abi.decode(p, ['address', 'bool']);
+              var d = abi.decode(calldata.payloadHex, ['address', 'bool']);
               if (!d || d.length < 2 || !d[1]) return fail('approval must be true');
-              var op = toChecksum(d[0]);
-              var okOp = false;
-              for (var j = 0; j < allowedSpenders.length; j++) { if (eq(op, allowedSpenders[j])) { okOp = true; break; } }
-              if (!okOp) return fail('operator must be allowed protocol contract');
+              var r = rs.addr.requireInList(d[0], allowedSpenders, 'operator must be allowed protocol contract');
+              if (!r.valid) return r;
               return ok();
             }
             if (sel === splitPos || sel === mergePos) {
               if (data.length < 8 + 164 * 2) return fail('invalid split/merge data length');
-              var rest = '0x' + data.slice(8);
-              var dec2 = abi.decode(rest, ['address', 'bytes32', 'bytes32', 'uint256[]', 'uint256']);
+              var dec2 = abi.decode(calldata.payloadHex, ['address', 'bytes32', 'bytes32', 'uint256[]', 'uint256']);
               if (!dec2 || dec2.length < 2) return fail('split/merge decode failed');
               var coll = toChecksum(dec2[0]);
               if (!eq(coll, usdc)) return fail('collateral must be USDC.e');
@@ -461,8 +430,7 @@ rules:
             }
             if (sel === redeemPos) {
               if (data.length < 8 + 132 * 2) return fail('invalid redeem data length');
-              var r = '0x' + data.slice(8);
-              var dec3 = abi.decode(r, ['address', 'bytes32', 'bytes32', 'uint256[]']);
+              var dec3 = abi.decode(calldata.payloadHex, ['address', 'bytes32', 'bytes32', 'uint256[]']);
               if (!dec3 || dec3.length < 1) return fail('redeem decode failed');
               if (!eq(toChecksum(dec3[0]), usdc)) return fail('collateral must be USDC.e');
               return ok();
@@ -475,8 +443,7 @@ rules:
             if (sel === nrSplit || sel === nrMerge || sel === nrRedeem) return ok();
             if (sel === '0x72ce4275' || sel === '0x9e7212ad') {
               if (data.length < 8 + 164 * 2) return fail('invalid NegRisk 5-param data length');
-              var nrRest = '0x' + data.slice(8);
-              var nrDec = abi.decode(nrRest, ['address', 'bytes32', 'bytes32', 'uint256[]', 'uint256']);
+              var nrDec = abi.decode(calldata.payloadHex, ['address', 'bytes32', 'bytes32', 'uint256[]', 'uint256']);
               if (!nrDec || nrDec.length < 2) return fail('NegRisk decode failed');
               if (!eq(toChecksum(nrDec[0]), usdc)) return fail('NegRisk collateral must be USDC.e');
               return ok();

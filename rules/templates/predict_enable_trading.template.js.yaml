@@ -77,26 +77,20 @@ rules:
       sign_type_filter: "transaction"
       script: |
         function validate(input) {
-          if (input.sign_type !== 'transaction') return fail('transaction only');
-          var tx = input.transaction;
-          if (!tx || !tx.to || tx.data === undefined) return fail('missing tx fields');
+          var ctx = rs.tx.require(input);
+          if (!ctx.valid) return ctx;
           var usdt = toChecksum((config.usdt_address || '').trim());
-          if (!eq(toChecksum((tx.to || '').trim()), usdt)) return fail('target must be USDT');
-          var dataHex = (tx.data || '0x').replace(/^0x/, '');
-          if (dataHex.length < 8) return fail('calldata too short');
-          var sel = '0x' + dataHex.slice(0, 8);
+          if (!eq(toChecksum((ctx.tx.to || '').trim()), usdt)) return fail('target must be USDT');
           var approveSel = selector('approve(address,uint256)');
-          if (!eq(sel, approveSel)) return fail('not approve');
-          var payloadHex = '0x' + dataHex.slice(8);
-          var dec = abi.decode(payloadHex, ['address', 'uint256']);
+          if (!eq(ctx.selector, approveSel)) return fail('not approve');
+          var dec = abi.decode(ctx.payloadHex, ['address', 'uint256']);
           if (!dec || dec.length !== 2) return fail('approve decode failed');
           var spender = toChecksum((dec[0] || '').trim());
           var allowed = [config.ct_nyb, config.ctf_exchange_nyb, config.neg_risk_exchange_nyb, config.neg_risk_adapter_nyb,
             config.ct_yb, config.ctf_exchange_yb, config.neg_risk_exchange_yb, config.neg_risk_adapter_yb];
-          for (var i = 0; i < allowed.length; i++) {
-            if (eq(spender, toChecksum((allowed[i] || '').trim()))) return ok();
-          }
-          return fail('spender must be allowed protocol contract');
+          var r = rs.addr.requireInList(spender, allowed, 'spender must be allowed protocol contract');
+          if (!r.valid) return r;
+          return ok();
         }
     test_cases:
       - name: "should pass USDT approve to CTFExchange (real tx nonce=0, 0x8303b028)"
@@ -223,33 +217,20 @@ rules:
       sign_type_filter: "transaction"
       script: |
         function validate(input) {
-          if (input.sign_type !== 'transaction') return fail('transaction only');
-          var tx = input.transaction;
-          if (!tx || !tx.to || tx.data === undefined) return fail('missing tx fields');
-          var txTo = toChecksum((tx.to || '').trim());
+          var ctx = rs.tx.require(input);
+          if (!ctx.valid) return ctx;
           var ctTargets = [config.ct_nyb, config.ct_yb, config.neg_risk_ctf_yb];
-          var targetOk = false;
-          for (var i = 0; i < ctTargets.length; i++) {
-            if (eq(txTo, toChecksum((ctTargets[i] || '').trim()))) { targetOk = true; break; }
-          }
-          if (!targetOk) return fail('target must be ConditionalTokens');
-          var dataHex = (tx.data || '0x').replace(/^0x/, '');
-          if (dataHex.length < 8) return fail('calldata too short');
-          var sel = '0x' + dataHex.slice(0, 8);
+          if (!rs.addr.inList(ctx.tx.to, ctTargets)) return fail('target must be ConditionalTokens');
           var setApprovalSel = selector('setApprovalForAll(address,bool)');
-          if (!eq(sel, setApprovalSel)) return fail('not setApprovalForAll');
-          var payloadHex = '0x' + dataHex.slice(8);
-          var dec = abi.decode(payloadHex, ['address', 'bool']);
+          if (!eq(ctx.selector, setApprovalSel)) return fail('not setApprovalForAll');
+          var dec = abi.decode(ctx.payloadHex, ['address', 'bool']);
           if (!dec || dec.length !== 2) return fail('setApprovalForAll decode failed');
           var operator = toChecksum((dec[0] || '').trim());
           var approved = dec[1];
           var allowed = [config.ctf_exchange_nyb, config.neg_risk_exchange_nyb, config.neg_risk_adapter_nyb,
             config.ctf_exchange_yb, config.neg_risk_exchange_yb, config.neg_risk_adapter_yb];
-          var opOk = false;
-          for (var j = 0; j < allowed.length; j++) {
-            if (eq(operator, toChecksum((allowed[j] || '').trim()))) { opOk = true; break; }
-          }
-          if (!opOk) return fail('operator must be allowed protocol contract');
+          var r = rs.addr.requireInList(operator, allowed, 'operator must be allowed protocol contract');
+          if (!r.valid) return r;
           if (!approved) return fail('approval must be true');
           return ok();
         }

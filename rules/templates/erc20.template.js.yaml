@@ -26,14 +26,17 @@ variables:
     type: address_list
     description: "Comma-separated addresses allowed as transfer(to) or transferFrom(..., to). Empty = any."
     required: false
+    default: ""
   - name: allowed_spenders
     type: address_list
     description: "Comma-separated addresses allowed as approve(spender). Empty = any."
     required: false
+    default: ""
   - name: allowed_transfer_from
     type: address_list
     description: "Comma-separated addresses allowed as transferFrom(from, ...). Empty = any."
     required: false
+    default: ""
 
 test_variables:
   chain_id: "1"
@@ -55,65 +58,28 @@ rules:
       sign_type_filter: "transaction"
       script: |
         function validate(input) {
-          if (input.sign_type !== 'transaction') return { valid: false, reason: 'transaction only' };
-          if (!input.transaction || !input.transaction.to || input.transaction.data === undefined) return { valid: false, reason: 'missing tx fields' };
+          var ctx = rs.tx.require(input);
+          if (!ctx.valid) return ctx;
           var token = config.token_address;
-          if (!token || !isAddress(token)) return { valid: false, reason: 'invalid token config' };
-          if (!eq(toChecksum(input.transaction.to), toChecksum(token))) return { valid: false, reason: 'wrong contract' };
-          var dataHex = (input.transaction.data || '0x').replace(/^0x/, '');
-          if (dataHex.length < 8) return { valid: false, reason: 'calldata too short' };
-          var sel = '0x' + dataHex.slice(0, 8);
-          var payloadHex = '0x' + dataHex.slice(8);
+          if (!token || !isAddress(token)) return fail('invalid token config');
+          if (!rs.addr.inList(ctx.tx.to, [token])) return fail('wrong contract');
           var transferSel = selector('transfer(address,uint256)');
           var transferFromSel = selector('transferFrom(address,address,uint256)');
           var approveSel = selector('approve(address,uint256)');
-          if (eq(sel, transferSel)) return validateTransfer(payloadHex);
-          if (eq(sel, transferFromSel)) return validateTransferFrom(payloadHex);
-          if (eq(sel, approveSel)) return validateApprove(payloadHex);
+          if (eq(ctx.selector, transferSel)) return validateTransfer(ctx.payloadHex);
+          if (eq(ctx.selector, transferFromSel)) return validateTransferFrom(ctx.payloadHex);
+          if (eq(ctx.selector, approveSel)) return validateApprove(ctx.payloadHex);
           return fail('only transfer, transferFrom, approve allowed');
-        }
-        function parseList(s) {
-          if (!s || typeof s !== 'string') return [];
-          var list = [];
-          s.split(',').forEach(function(a) { var t = a.trim(); if (t && isAddress(t)) list.push(toChecksum(t)); });
-          return list;
-        }
-        function inAllowlist(addr, list) {
-          if (!list || list.length === 0) return true;
-          var c = toChecksum((addr || '').trim());
-          for (var i = 0; i < list.length; i++) { if (eq(c, list[i])) return true; }
-          return false;
-        }
-        function amountStr(val) {
-          if (val === undefined || val === null) return '';
-          return String(val).trim();
-        }
-        function cmpUint256(a, b) {
-          var sa = amountStr(a), sb = amountStr(b);
-          if (!/^\d+$/.test(sa) || !/^\d+$/.test(sb)) return null;
-          if (sa.length !== sb.length) return sa.length < sb.length ? -1 : 1;
-          return sa < sb ? -1 : sa > sb ? 1 : 0;
-        }
-        function checkAmountCap(amountVal, maxStr, label) {
-          if (!maxStr || String(maxStr).trim() === '0') return null;
-          var max = String(maxStr).trim();
-          if (!/^\d+$/.test(max)) return label + ' cap invalid';
-          var am = amountStr(amountVal);
-          if (!am || !/^\d+$/.test(am)) return label + ' amount invalid';
-          var c = cmpUint256(am, max);
-          if (c === null) return label + ' amount invalid';
-          if (c > 0) return label + ' exceeds cap';
-          return null;
         }
         function validateTransfer(payloadHex) {
           var dec = abi.decode(payloadHex, ['address', 'uint256']);
           if (!dec || dec.length !== 2) return fail('transfer decode failed');
           var to = dec[0]; var amount = dec[1];
           if (!isAddress(to)) return fail('transfer to invalid');
-          var recipients = parseList(config.allowed_recipients);
-          if (recipients.length && !inAllowlist(to, recipients)) return fail('transfer to not allowed');
-          var err = checkAmountCap(amount, config.max_transfer_amount, 'transfer');
-          if (err) return fail(err);
+          var r = rs.addr.requireInListIfNonEmpty(to, config.allowed_recipients, 'transfer to not allowed');
+          if (!r.valid) return r;
+          r = rs.uint256.requireLte(amount, config.max_transfer_amount, 'transfer');
+          if (!r.valid) return r;
           return ok();
         }
         function validateTransferFrom(payloadHex) {
@@ -122,12 +88,12 @@ rules:
           var from = dec[0]; var to = dec[1]; var amount = dec[2];
           if (!isAddress(from)) return fail('transferFrom from invalid');
           if (!isAddress(to)) return fail('transferFrom to invalid');
-          var fromList = parseList(config.allowed_transfer_from);
-          if (fromList.length && !inAllowlist(from, fromList)) return fail('transferFrom from not allowed');
-          var toList = parseList(config.allowed_recipients);
-          if (toList.length && !inAllowlist(to, toList)) return fail('transferFrom to not allowed');
-          var err = checkAmountCap(amount, config.max_transfer_amount, 'transferFrom');
-          if (err) return fail(err);
+          var r = rs.addr.requireInListIfNonEmpty(from, config.allowed_transfer_from, 'transferFrom from not allowed');
+          if (!r.valid) return r;
+          r = rs.addr.requireInListIfNonEmpty(to, config.allowed_recipients, 'transferFrom to not allowed');
+          if (!r.valid) return r;
+          r = rs.uint256.requireLte(amount, config.max_transfer_amount, 'transferFrom');
+          if (!r.valid) return r;
           return ok();
         }
         function validateApprove(payloadHex) {
@@ -135,10 +101,10 @@ rules:
           if (!dec || dec.length !== 2) return fail('approve decode failed');
           var spender = dec[0]; var amount = dec[1];
           if (!isAddress(spender)) return fail('approve spender invalid');
-          var spenders = parseList(config.allowed_spenders);
-          if (spenders.length && !inAllowlist(spender, spenders)) return fail('approve spender not allowed');
-          var err = checkAmountCap(amount, config.max_approve_amount, 'approve');
-          if (err) return fail(err);
+          var r = rs.addr.requireInListIfNonEmpty(spender, config.allowed_spenders, 'approve spender not allowed');
+          if (!r.valid) return r;
+          r = rs.uint256.requireLte(amount, config.max_approve_amount, 'approve');
+          if (!r.valid) return r;
           return ok();
         }
     test_cases:

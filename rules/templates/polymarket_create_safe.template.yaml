@@ -18,6 +18,7 @@ variables:
     type: address
     description: "USDC.e token (for test_cases only)"
     required: false
+    default: ""
 
 test_variables:
   chain_id: "137"

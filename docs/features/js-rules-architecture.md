@@ -201,6 +201,22 @@ Config object only. No substitution.
 
 **eq** (strict), **keccak256**, **selector**, **toChecksum**, **isAddress**, **toWei**, **fromWei**, **encodeAbi** (basic types only; full in v2).
 
+**rs** module: Composable API for transaction, address, uint256, and typed-data validation. Example:
+
+```javascript
+function validate(input) {
+  var ctx = rs.tx.require(input);
+  if (!ctx.valid) return ctx;
+  if (!rs.addr.inList(ctx.tx.to, [config.token_address])) return fail('wrong contract');
+  if (!eq(ctx.selector, selector('transfer(address,uint256)'))) return fail('not transfer');
+  var dec = abi.decode(ctx.payloadHex, ['address', 'uint256']);
+  var r = rs.addr.requireInList(dec[0], config.allowed_recipients, 'to not allowed');
+  if (!r.valid) return r;
+  if (rs.uint256.gt(dec[1], config.max_amount)) return fail('exceeds cap');
+  return ok();
+}
+```
+
 ---
 
 ## 13. Implementation Checklist

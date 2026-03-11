@@ -214,6 +214,8 @@ Config object only. No substitution.
 
 **eq**, **keccak256**, **selector**, **toChecksum**, **isAddress**, **toWei**, **fromWei**. **abi** (Solidity-aligned, via go-ethereum/abi): **abi.encode(types[], values[])** and **abi.decode(dataHex, types[])**; types can be strings (`"address"`, `"uint256"`, `"bool"`, `"bytes32"`, `"bytes"`, `"string"`) or **tuple** spec: `{ type: "tuple", components: [ { name: "x", type: "uint256" }, { name: "y", type: "uint256" } ] }`. Decoded tuple is an object with field names as keys.
 
+**rs** (reserved namespace): Composable module for evm_js rules. See [evm_js_rs_api.md](../evm_js_rs_api.md) for full API. Sandbox allow-list includes **rs**.
+
 ---
 
 ## 13. Implementation Checklist

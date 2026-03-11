@@ -15,10 +15,12 @@ variables:
     type: string
     description: "Target rule ID(s) for per_item delegation. Comma-separated to allow multiple (e.g. ERC20,ERC721); engine tries each until one allows per item."
     required: false
+    default: ""
   - name: delegate_mode
     type: string
     description: "Delegation mode: single or per_item (default per_item when delegate_to set)"
     required: false
+    default: "per_item"
 
 test_variables:
   chain_id: "1"
@@ -38,55 +40,23 @@ rules:
       delegate_mode: "${delegate_mode}"
       script: |
         function validate(input) {
-          if (input.sign_type !== 'transaction') return { valid: false, reason: 'transaction only' };
-          if (!input.transaction || !input.transaction.to || input.transaction.data === undefined) return { valid: false, reason: 'missing tx fields' };
+          if (!input || !input.transaction || !input.transaction.to) return fail('missing input');
           var allowed = config.multisend_contract_address;
-          if (!allowed || !isAddress(allowed)) return { valid: false, reason: 'invalid multisend config' };
-          if (!eq(toChecksum(input.transaction.to), toChecksum(allowed))) return { valid: false, reason: 'to must be multisend contract' };
+          if (!allowed || !isAddress(allowed)) return fail('invalid multisend config');
+          if (!rs.addr.inList(input.transaction.to, [allowed])) return fail('to must be multisend contract');
           var delegateTo = (config.delegate_to || '').trim();
-          if (delegateTo === '' || delegateTo.indexOf('${') === 0) return { valid: true };
-          var raw = (input.transaction.data || '0x').replace(/^0x/, '');
-          if (raw.length < 8) return { valid: true };
+          if (delegateTo === '') return ok();
+          var ctx = rs.tx.require(input);
+          if (!ctx.valid) return ctx;
           var multiSendSel = selector('multiSend(bytes)');
-          if (!eq('0x' + raw.slice(0, 8), multiSendSel)) return { valid: true };
-          var batch = parseMultiSendBatch(raw, input.chain_id, input.signer);
+          if (!eq(ctx.selector, multiSendSel)) return ok();
+          var raw = (ctx.tx.data || '0x').replace(/^0x/, '');
+          var raw = (ctx.tx.data || '0x').replace(/^0x/, '');
+          var batch = rs.multisend.parseBatch(raw, input.chain_id, input.signer);
           if (batch.err) return { valid: false, reason: batch.err };
           if (batch.items.length === 0) return { valid: true };
           var mode = (config.delegate_mode || 'per_item').trim();
-          if (mode.indexOf('${') === 0) mode = 'per_item';
           return { valid: true, payload: { items: batch.items }, delegate_to: delegateTo, delegate_mode: mode };
-        }
-        function parseMultiSendBatch(raw, chainId, signer) {
-          if (raw.length < 136) return { err: 'calldata too short', items: [] };
-          var lenBytes = parseInt(raw.slice(72, 136), 16);
-          var batchStart = 136;
-          var batchHex = raw.slice(batchStart, batchStart + lenBytes * 2);
-          if (batchHex.length !== lenBytes * 2) return { err: 'batch length mismatch', items: [] };
-          var items = [];
-          var pos = 0;
-          while (pos + 170 <= batchHex.length) {
-            var op = batchHex.slice(pos, pos + 2);
-            pos += 2;
-            var toHex = batchHex.slice(pos, pos + 40);
-            pos += 40;
-            var valueHex = '0x' + batchHex.slice(pos, pos + 64);
-            pos += 64;
-            var dataLen = parseInt(batchHex.slice(pos, pos + 64), 16);
-            pos += 64;
-            if (pos + dataLen * 2 > batchHex.length) return { err: 'invalid data length', items: items };
-            var dataHex = '0x' + batchHex.slice(pos, pos + dataLen * 2);
-            pos += dataLen * 2;
-            if (op !== '00') return { err: 'only CALL (0) allowed', items: items };
-            var toAddr = '0x' + toHex.slice(24);
-            if (!isAddress(toAddr)) return { err: 'invalid to address', items: items };
-            items.push({
-              sign_type: 'transaction',
-              chain_id: chainId,
-              signer: signer,
-              transaction: { from: signer, to: toAddr, value: valueHex, data: dataHex }
-            });
-          }
-          return { items: items };
         }
     test_cases:
       - name: "should pass when to equals multisend contract"
