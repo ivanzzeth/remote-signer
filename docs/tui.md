@@ -38,7 +38,7 @@ If neither `-api-key-file` nor `REMOTE_SIGNER_PRIVATE_KEY` is set, the TUI will 
 
 ### TLS / mTLS
 
-When connecting to a TLS-enabled server, see [TLS.md](TLS.md#client-usage) for the TUI TLS flags (`-tls-ca`, `-tls-cert`, `-tls-key`).
+When connecting to a TLS-enabled server, see [tls.md](tls.md#client-usage) for the TUI TLS flags (`-tls-ca`, `-tls-cert`, `-tls-key`).
 
 ## Views
 

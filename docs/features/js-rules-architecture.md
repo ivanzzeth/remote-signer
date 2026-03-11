@@ -206,14 +206,11 @@ Config object only. No substitution.
 ```javascript
 function validate(input) {
   var ctx = rs.tx.require(input);
-  if (!ctx.valid) return ctx;
   if (!rs.addr.inList(ctx.tx.to, [config.token_address])) return fail('wrong contract');
   if (!eq(ctx.selector, selector('transfer(address,uint256)'))) return fail('not transfer');
   var dec = abi.decode(ctx.payloadHex, ['address', 'uint256']);
-  var r = rs.addr.requireInList(dec[0], config.allowed_recipients, 'to not allowed');
-  if (!r.valid) return r;
-  r = rs.bigint.requireLte(dec[1], config.max_amount, 'exceeds cap');
-  if (!r.valid) return r;
+  rs.addr.requireInList(dec[0], config.allowed_recipients, 'to not allowed');
+  rs.bigint.requireLte(dec[1], config.max_amount, 'exceeds cap');
   return ok();
 }
 ```

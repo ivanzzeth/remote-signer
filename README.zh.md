@@ -91,15 +91,15 @@ curl --cacert certs/ca.crt --cert certs/client.crt --key certs/client.key https:
 
 ### 手动配置
 
-若需完全手动配置，请参阅 [docs/CONFIGURATION.md](docs/CONFIGURATION.md) 的完整配置说明，并以 `config.example.yaml` 为起点。
+若需完全手动配置，请参阅 [docs/configuration.md](docs/configuration.md) 的完整配置说明，并以 `config.example.yaml` 为起点。
 
 ### 添加签名者
 
 服务启动时没有签名者，需在启动后添加：
 
-- **TUI**（推荐）：使用 `-api-key-file data/admin_private.pem` 无需粘贴密钥。示例（明文 HTTP）：`./remote-signer-tui -api-key-id admin -api-key-file data/admin_private.pem -url http://localhost:8548`。**若安装时启用了 TLS**，需使用 `https://` 并指定 CA（mTLS 时还需客户端证书与私钥），例如 `-url https://localhost:8548 -tls-ca ./certs/ca.crt`，或 mTLS：`-tls-ca ./certs/ca.crt -tls-cert ./certs/client.crt -tls-key ./certs/client.key`。详见 [docs/TUI.md](docs/TUI.md#tls--mtls)。安装完成后（Docker 模式）可选择「Open TUI to add signers now?」直接启动 TUI。在 **签名者** 标签页可创建 keystore（导入私钥）或创建/导入 HD 钱包。**密码强度要求（强制校验）**：至少 16 位，且必须包含大写 + 小写 + 数字 + 符号；建议 24 位以上。
-- **API**：`POST /api/v1/evm/signers`（仅 admin）。见 [docs/API.md](docs/API.md)
-- **配置文件**：编辑配置中的 `chains.evm.signers.private_keys`。见 [docs/CONFIGURATION.md](docs/CONFIGURATION.md#chains-evm)
+- **TUI**（推荐）：使用 `-api-key-file data/admin_private.pem` 无需粘贴密钥。示例（明文 HTTP）：`./remote-signer-tui -api-key-id admin -api-key-file data/admin_private.pem -url http://localhost:8548`。**若安装时启用了 TLS**，需使用 `https://` 并指定 CA（mTLS 时还需客户端证书与私钥），例如 `-url https://localhost:8548 -tls-ca ./certs/ca.crt`，或 mTLS：`-tls-ca ./certs/ca.crt -tls-cert ./certs/client.crt -tls-key ./certs/client.key`。详见 [docs/tui.md](docs/tui.md#tls--mtls)。安装完成后（Docker 模式）可选择「Open TUI to add signers now?」直接启动 TUI。在 **签名者** 标签页可创建 keystore（导入私钥）或创建/导入 HD 钱包。**密码强度要求（强制校验）**：至少 16 位，且必须包含大写 + 小写 + 数字 + 符号；建议 24 位以上。
+- **API**：`POST /api/v1/evm/signers`（仅 admin）。见 [docs/api.md](docs/api.md)
+- **配置文件**：编辑配置中的 `chains.evm.signers.private_keys`。见 [docs/configuration.md](docs/configuration.md#chains-evm)
 
 ## 支持的签名类型
 
@@ -118,16 +118,16 @@ curl --cacert certs/ca.crt --cert certs/client.crt --key certs/client.key https:
 
 | 文档 | 说明 |
 |------|------|
-| [使用场景](docs/USE_CASES.md) | 资金库、机器人、DeFi 等场景 |
-| [架构](docs/ARCHITECTURE.md) | 系统设计、分层、适配器 |
+| [使用场景](docs/use-cases.md) | 资金库、机器人、DeFi 等场景 |
+| [架构](docs/architecture.md) | 系统设计、分层、适配器 |
 
 ### 配置
 
 | 文档 | 说明 |
 |------|------|
-| [配置参考](docs/CONFIGURATION.md) | 完整 `config.yaml` 说明 |
-| [规则、模板与预设](docs/RULES_TEMPLATES_AND_PRESETS.md) | 概念：规则模板、实例、预设及示例 |
-| [规则语法参考](docs/RULE_SYNTAX.md) | 规则类型：地址列表、金额限制、Solidity、JS、消息模式 |
+| [配置参考](docs/configuration.md) | 完整 `config.yaml` 说明 |
+| [规则、模板与预设](docs/rules-templates-and-presets.md) | 概念：规则模板、实例、预设及示例 |
+| [规则语法参考](docs/rule-syntax.md) | 规则类型：地址列表、金额限制、Solidity、JS、消息模式 |
 | [JS 规则 (evm_js)](docs/architecture/js-rules-v5.md) | 基于 Sobek 的进程内 JavaScript 规则 |
 | [config.example.yaml](config.example.yaml) | 带注释的配置模板 |
 
@@ -135,31 +135,31 @@ curl --cacert certs/ca.crt --cert certs/client.crt --key certs/client.key https:
 
 | 文档 | 说明 |
 |------|------|
-| [API 参考](docs/API.md) | 认证、签名、规则、审计等接口说明 |
+| [API 参考](docs/api.md) | 认证、签名、规则、审计等接口说明 |
 | [集成指南](INTEGRATION.md) | JS/TS 客户端库、MetaMask Snap |
 
 ### 部署与运维
 
 | 文档 | 说明 |
 |------|------|
-| [部署指南](docs/DEPLOYMENT.md) | Docker、Kubernetes、高可用、监控、备份 |
-| [TLS / mTLS 指南](docs/TLS.md) | 证书信任模型、生成、生产实践 |
-| [TUI 指南](docs/TUI.md) | 终端界面：构建、运行、快捷键 |
+| [部署指南](docs/deployment.md) | Docker、Kubernetes、高可用、监控、备份 |
+| [TLS / mTLS 指南](docs/tls.md) | 证书信任模型、生成、生产实践 |
+| [TUI 指南](docs/tui.md) | 终端界面：构建、运行、快捷键 |
 
 ### 安全
 
 | 文档 | 说明 |
 |------|------|
-| [安全概览](docs/SECURITY.md) | 从网络到应用的 8 层防护 |
-| [安全审查](docs/SECURITY_REVIEW.md) | 发现项、优先级与实施状态 |
+| [安全概览](docs/security.md) | 从网络到应用的 8 层防护 |
+| [安全审查](docs/security-review.md) | 发现项、优先级与实施状态 |
 
 ### 开发
 
 | 文档 | 说明 |
 |------|------|
-| [组件](docs/COMPONENTS.md) | 核心接口、数据类型、服务 |
-| [请求流程](docs/FLOW.md) | 带状态机的 8 步签名流程 |
-| [测试指南](docs/TESTING.md) | 单元测试、E2E、规则校验、覆盖率 |
+| [组件](docs/components.md) | 核心接口、数据类型、服务 |
+| [请求流程](docs/flow.md) | 带状态机的 8 步签名流程 |
+| [测试指南](docs/testing.md) | 单元测试、E2E、规则校验、覆盖率 |
 
 ## 路线图
 

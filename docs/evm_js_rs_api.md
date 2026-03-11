@@ -16,8 +16,8 @@ The **rs** (remote-signer) module provides a composable, safe API for evm_js rul
 | **rs.config** | Config requireNonEmpty(key, reason); config strings are trimmed when injected |
 | **rs.hex**  | Hex value checks (e.g. zero32)                |
 
-All methods guard against null/undefined; invalid input returns `fail` or `false` instead of throwing.  
-Exceptions thrown (e.g. `revert()`, `require()` failure, or `throw`) are caught by the engine and turned into **fail** with that message, so rules cannot be bypassed by triggering errors.
+Most `rs.*.require*` helpers are **fail-fast**: on failure they **throw** (panic) with the provided `reason`, and the engine converts it into `{ valid: false, reason }`.  
+Soft-check helpers (like `rs.addr.inList`) return `boolean` instead of throwing.
 
 ---
 
@@ -37,7 +37,6 @@ If `cond` is falsy, calls `revert(reason)`. Shorthand for one-line guards: `requ
 ```javascript
 function validate(i) {
   var ctx = rs.tx.require(i);
-  if (!ctx.valid) return ctx;
   require(rs.addr.inList(ctx.tx.to, config.allowed), "contract not allowed");
   require(amount <= config.max, "exceeds cap");
   return ok();
@@ -53,13 +52,12 @@ function validate(i) {
 Validates `sign_type === 'transaction'`, presence of `transaction`, `to`, `data`, and calldata length ≥ 8.
 
 **Returns:**
-- Success: `{ valid: true, tx, selector, payloadHex }`
-- Failure: `{ valid: false, reason }`
+- Success: `{ tx, selector, payloadHex }`
+- Failure: throws with `reason`
 
 **Example:**
 ```javascript
 var ctx = rs.tx.require(input);
-if (!ctx.valid) return ctx;
 // ctx.tx = transaction object, ctx.selector = '0x...', ctx.payloadHex = '0x...'
 ```
 
@@ -68,8 +66,8 @@ if (!ctx.valid) return ctx;
 Extracts selector and payload from `tx.data`.
 
 **Returns:**
-- Success: `{ valid: true, selector, payloadHex }`
-- Failure: `{ valid: false, reason }` (e.g. calldata too short)
+- Success: `{ selector, payloadHex }`
+- Failure: throws with `reason` (e.g. calldata too short)
 
 ---
 
@@ -89,11 +87,11 @@ Returns `true` if `addr` is **not** in `list` (or addr is invalid). Empty list �
 
 ### rs.addr.requireInList(addr, list, reason)
 
-Returns `ok()` if addr in list, else `fail(reason)`.
+Returns `ok()` if addr in list; otherwise throws with `reason`.
 
 ### rs.addr.requireNotInList(addr, list, reason)
 
-Returns `ok()` if addr is **not** in list (or addr is invalid), else `fail(reason)`.
+Returns `ok()` if addr is **not** in list (or addr is invalid); otherwise throws with `reason`.
 
 ### rs.addr.requireInListIfNonEmpty(addr, list, reason)
 
@@ -106,7 +104,7 @@ Returns `true` if addr is the zero address.
 
 ### rs.addr.requireZero(addr, reason)
 
-Returns `ok()` if addr is zero, else `fail(reason)`.
+Returns `ok()` if addr is zero; otherwise throws with `reason`.
 
 ---
 
@@ -118,15 +116,15 @@ Strict integer parsing helpers. Invalid input never silently becomes 0.
 
 Parses an unsigned integer from a decimal string/number.
 
-**Returns:** `{ valid: true, n }` or `fail("invalid value")`.
+**Returns:** `{ n }` or throws `"invalid value"`.
 
 ### rs.int.requireLte(value, max, reason)
 
-Fails with `reason` when value/max are invalid or value > max.
+Throws with `reason` when value/max are invalid or value > max.
 
 ### rs.int.requireEq(value, want, reason)
 
-Fails with `reason` when value/want are invalid or value != want.
+Throws with `reason` when value/want are invalid or value != want.
 
 ---
 
@@ -137,19 +135,19 @@ Fails with `reason` when value/want are invalid or value != want.
 Parses `value` into a real JavaScript `BigInt` using `BigInt(...)`.
 
 - **Input**: decimal string (`"42"`), hex string (`"0x2a"`), or integer-like number.
-- **Returns**: `{ valid: true, n: <BigInt> }` or `{ valid: false, reason }`.
+- **Returns**: `{ n: <BigInt> }` or throws with `reason`.
 
 ### rs.bigint.uint256(value)
 
 Parses `value` as a **uint256** (range \(0 \le x \le 2^{256}-1\)) and returns a JavaScript `BigInt`.
 
-**Returns**: `{ valid: true, n: <BigInt> }` or `fail("invalid uint256")`.
+**Returns**: `{ n: <BigInt> }` or throws `"invalid uint256"`.
 
 ### rs.bigint.int256(value)
 
 Parses `value` as an **int256** (range \(-2^{255} \le x \le 2^{255}-1\)) and returns a JavaScript `BigInt`.
 
-**Returns**: `{ valid: true, n: <BigInt> }` or `fail("invalid int256")`.
+**Returns**: `{ n: <BigInt> }` or throws `"invalid int256"`.
 
 ### rs.bigint.requireLte(a, b, reason)
 
@@ -157,11 +155,11 @@ Strict BigInt compare. When `b` is empty or `"0"`, no limit → returns `ok()`. 
 
 ### rs.bigint.requireEq(a, b, reason)
 
-Strict BigInt compare. Fails with `reason` when inputs are invalid or \(a \ne b\).
+Strict BigInt compare. Throws with `reason` when inputs are invalid or \(a \ne b\).
 
 ### rs.bigint.requireZero(amount, reason)
 
-Fails with `reason` when amount is invalid or not zero. Use for "value must be zero" checks.
+Throws with `reason` when amount is invalid or not zero. Use for "value must be zero" checks.
 
 ---
 
@@ -182,8 +180,8 @@ This function does **not** validate domain fields (name/version/chainId/verifyin
 Validates `sign_type === 'typed_data'`, presence of `typed_data`, and `primaryType` match.
 
 **Returns:**
-- Success: `{ valid: true, domain, message }`
-- Failure: `{ valid: false, reason }`
+- Success: `{ domain, message }`
+- Failure: throws with `reason`
 
 ### rs.typedData.requireDomain(domain, opts)
 
@@ -198,7 +196,7 @@ Validates domain. `opts`:
 
 ### rs.typedData.requireSignerMatch(msgSigner, inputSigner, reason)
 
-Returns `ok()` if both signers (checksummed) match, else `fail(reason)`.
+Returns `ok()` if both signers (checksummed) match; otherwise throws with `reason`.
 
 ---
 
@@ -237,7 +235,7 @@ Reads `config[key]` and **panics** with `reason` if missing or empty (after trim
 
 ### rs.hex.requireZero32(hexValue, reason)
 
-Checks 32-byte hex value equals zero. Returns `ok()` or `fail(reason)`.
+Checks 32-byte hex value equals zero. Returns `ok()` or throws with `reason`.
 
 ---
 
@@ -261,13 +259,11 @@ Parses Safe `execTransaction(...)` calldata (hex string with or without `0x`) an
 ```javascript
 function validate(input) {
   var ctx = rs.tx.require(input);
-  if (!ctx.valid) return ctx;
   if (!rs.addr.inList(ctx.tx.to, [config.token_address])) return fail('wrong contract');
   if (!eq(ctx.selector, selector('transfer(address,uint256)'))) return fail('not transfer');
   var dec = abi.decode(ctx.payloadHex, ['address', 'uint256']);
-  var r = rs.addr.requireInList(dec[0], config.allowed_recipients, 'to not allowed');
-  if (!r.valid) return r;
-  if (config.max_amount) { var r = rs.bigint.requireLte(dec[1], config.max_amount, 'exceeds cap'); if (!r.valid) return r; }
+  rs.addr.requireInList(dec[0], config.allowed_recipients, 'to not allowed');
+  if (config.max_amount) rs.bigint.requireLte(dec[1], config.max_amount, 'exceeds cap');
   return ok();
 }
 ```
@@ -276,18 +272,14 @@ function validate(input) {
 ```javascript
 function validate(input) {
   var ctx = rs.typedData.require(input, 'Order');
-  if (!ctx.valid) return ctx;
-  var r = rs.typedData.requireDomain(ctx.domain, {
+  rs.typedData.requireDomain(ctx.domain, {
     name: config.domain_name,
     version: config.domain_version,
     chainId: parseInt(config.chain_id, 10),
     allowedContracts: [config.exchange_address]
   });
-  if (!r.valid) return r;
-  r = rs.addr.requireZero(ctx.message.taker, 'taker must be zero');
-  if (!r.valid) return r;
-  r = rs.typedData.requireSignerMatch(ctx.message.signer, input.signer, 'signer mismatch');
-  if (!r.valid) return r;
+  rs.addr.requireZero(ctx.message.taker, 'taker must be zero');
+  rs.typedData.requireSignerMatch(ctx.message.signer, input.signer, 'signer mismatch');
   return ok();
 }
 ```

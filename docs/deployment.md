@@ -50,8 +50,7 @@ See the main [README](../README.md#deployment) for quick commands. This document
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `DATABASE_URL` | Database DSN (e.g. PostgreSQL or `file:./data/signer.db` for SQLite) | Yes (or set `database.dsn` in config) |
-| `LOG_LEVEL` | Log level (debug, info, warn, error) | No (default: info) |
+| `DATABASE_DSN` | Database DSN (PostgreSQL or SQLite file DSN). When set, it overrides `database.dsn` in config (useful for Docker). | No (but recommended for Docker) |
 
 Config file path is set by the `-config` flag (default: `config.yaml`), not by environment.
 
@@ -64,7 +63,7 @@ server:
   port: 8548
 
 database:
-  dsn: "${DATABASE_URL}"   # or "file:./data/signer.db" for SQLite
+  dsn: "${DATABASE_DSN}"   # or "file:./data/signer.db" for SQLite
   max_open_conns: 25
   max_idle_conns: 5
   conn_max_lifetime: 5m
@@ -157,7 +156,7 @@ services:
     ports:
       - "8548:8548"
     environment:
-      - DATABASE_URL=postgres://user:pass@db:5432/signer?sslmode=disable
+      - DATABASE_DSN=postgres://user:pass@db:5432/signer?sslmode=disable
       - KEYSTORE_PASSWORD=${KEYSTORE_PASSWORD}
       - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
     volumes:

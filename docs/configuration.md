@@ -28,7 +28,7 @@ server:
     client_auth: false               # true = require client certs (mTLS)
 ```
 
-For TLS certificate generation and trust model details, see [TLS.md](TLS.md).
+For TLS certificate generation and trust model details, see [tls.md](tls.md).
 
 ## Database
 
@@ -75,7 +75,7 @@ chains:
     hd_wallet_dir: "./data/hd-wallets"
 ```
 
-Keystores and HD wallets can also be created dynamically after server startup via the admin API or TUI. See [API.md](API.md) for endpoints.
+Keystores and HD wallets can also be created dynamically after server startup via the admin API or TUI. See [api.md](api.md) for endpoints.
 
 ## Foundry
 
@@ -195,6 +195,18 @@ security:
   manual_approval_enabled: false  # true = unmatched requests go to pending approval
   allow_sighup_rules_reload: false # Reload rules from config on SIGHUP (default: false)
 
+  # API lockdown (security hardening). Recommended for production:
+  # - rules_api_readonly: true (default)  — block rule/template mutations via API
+  # - api_keys_api_readonly: true (default) — block API key CRUD via API
+  # - signers_api_readonly: true/false depending on whether you want runtime signer creation
+  rules_api_readonly: true         # Default: true (secure by default)
+  api_keys_api_readonly: true      # Default: true (secure by default)
+  signers_api_readonly: false      # Default: false (low risk; API never returns private keys)
+
+  # Timeouts
+  auto_lock_timeout: "0s"          # Default: 0s (disabled). Auto-lock signers after unlock.
+  sign_timeout: "30s"              # Default: 30s. Context timeout for signing operations.
+
   # Approval guard: detect API key abuse
   approval_guard:
     enabled: false
@@ -209,8 +221,13 @@ security:
       - "127.0.0.1"
       - "::1"
     trust_proxy: false            # Trust X-Forwarded-For (only behind trusted proxy!)
-    # trusted_proxies: ["10.0.0.1"]
+    # trusted_proxies: ["10.0.0.1"] # Required when trust_proxy=true; empty => ignore proxy headers (fail-closed)
 ```
+
+Notes:
+- For security design rationale and recommended production baseline, see [security.md](security.md).
+- `security.ip_rate_limit <= 0` disables pre-auth IP rate limiting.
+- `security.nonce_required` defaults to **true** when omitted (recommended).
 
 ## Audit Monitor
 
@@ -234,7 +251,7 @@ logger:
 
 ## Rules
 
-Rules define the policy engine. They can be defined **inline**, loaded from **files**, or expanded from **templates** (via **instance** rules). For concepts (templates, instances, presets) and examples, see [RULES_TEMPLATES_AND_PRESETS.md](RULES_TEMPLATES_AND_PRESETS.md). For rule type syntax (Solidity, evm_js, etc.), see [RULE_SYNTAX.md](RULE_SYNTAX.md).
+Rules define the policy engine. They can be defined **inline**, loaded from **files**, or expanded from **templates** (via **instance** rules). For concepts (templates, instances, presets) and examples, see [rules-templates-and-presets.md](rules-templates-and-presets.md). For rule type syntax (Solidity, evm_js, etc.), see [rule-syntax.md](rule-syntax.md).
 
 **Rule sources in config:**
 
@@ -271,7 +288,7 @@ rules:
         allowed_safe_addresses: "0xYourSafe"
 ```
 
-**Presets** (optional): Pre-filled instance data in `rules/presets/*.yaml`; use **remote-signer-cli** or **setup.sh** to generate or merge rules from a preset with minimal overrides. See [RULES_TEMPLATES_AND_PRESETS.md](RULES_TEMPLATES_AND_PRESETS.md#4-presets).
+**Presets** (optional): Pre-filled instance data in `rules/presets/*.yaml`; use **remote-signer-cli** or **setup.sh** to generate or merge rules from a preset with minimal overrides. See [rules-templates-and-presets.md](rules-templates-and-presets.md#5-presets).
 
 ### Rule evaluation order
 
@@ -281,7 +298,7 @@ rules:
 
 ## Templates
 
-**Templates** are parameterized rule files (variables + rules with `${var}` placeholders). They are loaded from paths listed under `templates` and expanded only when a **rule** of type **instance** references them and supplies variables. See [RULES_TEMPLATES_AND_PRESETS.md](RULES_TEMPLATES_AND_PRESETS.md#2-rule-templates).
+**Templates** are parameterized rule files (variables + rules with `${var}` placeholders). They are loaded from paths listed under `templates` and expanded only when a **rule** of type **instance** references them and supplies variables. See [rules-templates-and-presets.md](rules-templates-and-presets.md#3-rule-templates).
 
 ```yaml
 templates:

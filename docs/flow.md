@@ -28,6 +28,7 @@ POST /api/v1/evm/sign
 Headers:
   X-API-Key-ID: {key_id}
   X-Timestamp: {timestamp_ms}
+  X-Nonce: {nonce}                 # required when security.nonce_required is true (default)
   X-Signature: {ed25519_signature}
 Body:
   {
@@ -40,11 +41,26 @@ Body:
 
 **Signature Generation:**
 ```
-message = "{timestamp_ms}|POST|/api/v1/evm/sign|{sha256(body)}"
+path = "/api/v1/evm/sign"  # include query string if present: "/api/v1/evm/sign?foo=bar"
+message = "{timestamp_ms}|{nonce}|POST|{path}|{sha256(body)}"
 signature = ed25519.Sign(private_key, message)
 ```
 
+**Limits (DoS protection):**
+- Auth headers have max lengths: `X-API-Key-ID` ≤ 128, `X-Timestamp` ≤ 24, `X-Signature` ≤ 256, `X-Nonce` ≤ 256.
+- Request body is capped at **10 MB** during auth verification.
+
 ### 2. Middleware Pipeline
+
+The actual middleware order is (outer → inner):
+
+1. Security headers
+2. Panic recovery
+3. Client IP resolution (supports `trust_proxy` only when the direct remote IP is in `trusted_proxies`)
+4. Logging (optional audit logger)
+5. **Pre-auth IP rate limit** (`security.ip_rate_limit`, default 200 req/min; 0 disables)
+6. Authentication (Ed25519; nonce enforced when enabled)
+7. **Post-auth API key rate limit** (per key; default `security.rate_limit_default` unless overridden by `api_keys[].rate_limit`)
 
 ```
 Request
@@ -56,12 +72,18 @@ Request
          │
          ▼
 ┌─────────────────┐
+│ IP Rate Limit   │──▶ 429 Too Many Requests (if exceeded)
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
 │ Authentication  │──▶ 401 Unauthorized (if signature invalid)
 └────────┬────────┘
          │
          ▼
 ┌─────────────────┐
-│   Rate Limit    │──▶ 429 Too Many Requests (if exceeded)
+│ API Key Rate    │──▶ 429 Too Many Requests (if exceeded)
+│ Limit           │
 └────────┬────────┘
          │
          ▼
@@ -173,7 +195,7 @@ RuleEngine.Evaluate()
        ▼
 ┌──────────────────────────────────────────┐
 │          Load Enabled Rules               │
-│  (ordered by priority, descending)        │
+│  (all matching rules; no pagination)      │
 └────────────────┬─────────────────────────┘
                  │
                  ▼
@@ -186,6 +208,8 @@ RuleEngine.Evaluate()
 │      → No manual approval allowed        │
 │                                          │
 │  (any blocklist violation = hard reject) │
+│  (any blocklist evaluation error = reject│
+│   immediately, Fail-Closed)              │
 └────────────────┬─────────────────────────┘
                  │ No violations
                  ▼
@@ -199,6 +223,8 @@ RuleEngine.Evaluate()
 │      → Return immediately                │
 │                                          │
 │  (first whitelist match = approve)       │
+│  (whitelist evaluation error = skip rule │
+│   and continue, Fail-Open)               │
 └────────────────┬─────────────────────────┘
                  │ No matches
                  ▼

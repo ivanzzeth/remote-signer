@@ -2,7 +2,7 @@
 
 This document explains how rules are defined, how **templates** parameterize them, and how **presets** simplify adding ready-made rule configurations (e.g. Polymarket, Predict) with minimal variable overrides.
 
-For rule *syntax* (Solidity expressions, EIP-712, evm_js), see [RULE_SYNTAX.md](RULE_SYNTAX.md). For config structure reference, see [CONFIGURATION.md](CONFIGURATION.md).
+For rule *syntax* (Solidity expressions, EIP-712, evm_js), see [rule-syntax.md](rule-syntax.md). For config structure reference, see [configuration.md](configuration.md).
 
 ---
 
@@ -104,16 +104,13 @@ evm_js templates can use the **rs** module for composable validation. See [evm_j
 **Transaction validation:**
 ```javascript
 var ctx = rs.tx.require(input);
-if (!ctx.valid) return ctx;
 if (!rs.addr.inList(ctx.tx.to, [config.token_address])) return fail('wrong contract');
 ```
 
 **Typed-data validation:**
 ```javascript
 var ctx = rs.typedData.require(input, 'Order');
-if (!ctx.valid) return ctx;
-var r = rs.typedData.requireDomain(ctx.domain, { name: config.domain_name, version: config.domain_version, chainId: parseInt(config.chain_id, 10), allowedContracts: [config.exchange_address] });
-if (!r.valid) return r;
+rs.typedData.requireDomain(ctx.domain, { name: config.domain_name, version: config.domain_version, chainId: parseInt(config.chain_id, 10), allowedContracts: [config.exchange_address] });
 ```
 
 **Address and amount checks:**
@@ -370,4 +367,4 @@ New users get a working rule set by picking a preset and filling in a few values
 | **Preset** | `rules/presets/*.yaml` | Pre-filled instance(s); used by CLI/setup to generate or merge rule(s) with minimal overrides. |
 | **Inline / file rules** | `config.rules` (type other than `instance` / `file`) or external YAML | Static or file-loaded rules without template expansion. |
 
-For validation of template files (with `test_variables`) or full config (with templates + instance + file rules), use **remote-signer-validate-rules** or `remote-signer-cli validate`. See [TESTING.md](TESTING.md) and [CONFIGURATION.md](CONFIGURATION.md).
+For validation of template files (with `test_variables`) or full config (with templates + instance + file rules), use **remote-signer-validate-rules** or `remote-signer-cli validate`. See [testing.md](testing.md) and [configuration.md](configuration.md).
