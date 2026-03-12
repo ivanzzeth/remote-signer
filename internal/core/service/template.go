@@ -265,12 +265,20 @@ func (s *TemplateService) generateInstanceRuleID(templateID string, vars map[str
 
 // createBudget creates a budget record for the instance
 func (s *TemplateService) createBudget(ctx context.Context, rule *types.Rule, tmpl *types.RuleTemplate, budgetCfg *BudgetConfig) (*types.RuleBudget, error) {
-	// Determine unit from template's BudgetMetering
+	// Determine unit from template's BudgetMetering; substitute ${var} with instance variables
 	unit := "count" // default
 	if len(tmpl.BudgetMetering) > 0 {
 		var metering types.BudgetMetering
 		if err := json.Unmarshal(tmpl.BudgetMetering, &metering); err == nil && metering.Unit != "" {
 			unit = metering.Unit
+			if strings.Contains(unit, "${") && len(rule.Variables) > 0 {
+				var vars map[string]string
+				if err := json.Unmarshal(rule.Variables, &vars); err == nil {
+					for k, v := range vars {
+						unit = strings.ReplaceAll(unit, "${"+k+"}", v)
+					}
+				}
+			}
 		}
 	}
 
