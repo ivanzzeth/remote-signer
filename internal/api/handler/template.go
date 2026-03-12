@@ -87,6 +87,15 @@ type CreateTemplateRequest struct {
 	Mode           string                 `json:"mode"`
 	Variables      []TemplateVarRequest   `json:"variables,omitempty"`
 	Config         map[string]interface{} `json:"config"`
+	// BudgetMetering (optional) configures how a template instance measures "spend amount"
+	// for budget enforcement.
+	//
+	// Expected keys:
+	// - method: "none" | "count_only" | "tx_value" | "calldata_param" | "typed_data_field" | "js"
+	// - unit:   budget identity string (recommended: include chain+asset identity, e.g. "${chain_id}:${token_address}")
+	//
+	// Notes:
+	// - For method "js" (evm_js rules), the script may implement validateBudget(input) and return bigint/decimal-string.
 	BudgetMetering map[string]interface{} `json:"budget_metering,omitempty"`
 	TestVariables  map[string]string      `json:"test_variables,omitempty"`
 	Enabled        bool                   `json:"enabled"`

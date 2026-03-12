@@ -8,6 +8,41 @@ This document describes the Solidity expression syntax for writing rules in the 
 
 Rules use Solidity expressions to validate signing requests. The evaluator generates Solidity code from your rules and executes them using Forge to validate conditions.
 
+## Budget metering (templates)
+
+When you create **rule instances from templates**, you can optionally enable **budget enforcement**.
+
+- A **template** may define `budget_metering` to describe **how to measure spend amount** for each matched request.
+- A **rule instance** stores the **limits and usage** (e.g. `max_total`, `max_per_tx`, `spent`, `tx_count`) keyed by `(rule_id, unit)`.
+
+### `budget_metering` schema
+
+`budget_metering` is an object with:
+
+- `method`: how to extract the spend amount
+- `unit`: budget identity string (recommended to include chain + asset identity, e.g. `${chain_id}:${token_address}`)
+
+Supported `method` values:
+
+- `none`: disable budgeting
+- `count_only`: spend amount is always `1` per matched request (counts requests/txs)
+- `tx_value`: use EVM transaction `value` as amount
+- `calldata_param`: extract a `uint` amount from calldata by parameter index (ABI word index after selector)
+- `typed_data_field`: extract amount from an EIP-712 typed data field path (e.g. `message.amount`)
+- `js`: for `evm_js` rules only, compute amount via `validateBudget(input)` in the rule script
+
+### `method: js` contract (`evm_js`)
+
+If `budget_metering.method` is `js`, the `evm_js` rule script may implement:
+
+- `validateBudget(input) -> bigint | decimal-string`
+
+Contract:
+
+- Return `0n` to indicate "no spend" (e.g. method not applicable / no match).
+- Return a non-negative integer amount.
+- Any error, negative amount, or unsupported return type is treated as **budget evaluation failure** (fail-closed).
+
 ## Rule Types
 
 ### 1. Transaction Rules (`functions`)

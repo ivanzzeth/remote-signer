@@ -890,6 +890,86 @@ func TestCreateInstance(t *testing.T) {
 		}
 	})
 
+	t.Run("budget_metering_empty_unit_defaults_to_count", func(t *testing.T) {
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		metering := types.BudgetMetering{Method: "count_only", Unit: ""}
+		tmpl := makeTemplate("tmpl-empty-unit", "Empty Unit", requiredAddrVar, configWithVar)
+		tmpl.BudgetMetering = mustJSON(metering)
+		seedTemplate(t, tmplRepo, tmpl)
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		result, err := svc.CreateInstance(ctx, &CreateInstanceRequest{
+			TemplateID: "tmpl-empty-unit",
+			Variables:  map[string]string{"target_address": "0xffffffffffffffffffffffffffffffffffffffff"},
+			Budget:     &BudgetConfig{MaxTotal: "10", MaxPerTx: "1"},
+		})
+		if err != nil {
+			t.Fatalf("CreateInstance failed: %v", err)
+		}
+		if result.Budget == nil {
+			t.Fatal("expected non-nil budget")
+		}
+		if result.Budget.Unit != "count" {
+			t.Errorf("expected unit 'count' when BudgetMetering.Unit is empty, got %q", result.Budget.Unit)
+		}
+	})
+
+	t.Run("budget_unit_variable_substitution", func(t *testing.T) {
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		vars := []types.TemplateVariable{
+			{Name: "chain_id", Type: "string", Required: true},
+			{Name: "token_address", Type: "address", Required: true},
+		}
+		metering := types.BudgetMetering{
+			Method: "js",
+			Unit:   "${chain_id}:${token_address}",
+		}
+		configUnitSubst := []byte(`{"chain_id":"${chain_id}","token":"${token_address}"}`)
+		tmpl := makeTemplate("tmpl-unit-subst", "Unit Substitution", vars, configUnitSubst)
+		tmpl.BudgetMetering = mustJSON(metering)
+		seedTemplate(t, tmplRepo, tmpl)
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		result, err := svc.CreateInstance(ctx, &CreateInstanceRequest{
+			TemplateID: "tmpl-unit-subst",
+			Variables: map[string]string{
+				"chain_id":       "137",
+				"token_address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+			},
+			Budget: &BudgetConfig{
+				MaxTotal: "1000",
+				MaxPerTx: "100",
+			},
+		})
+		if err != nil {
+			t.Fatalf("CreateInstance failed: %v", err)
+		}
+		if result.Budget == nil {
+			t.Fatal("expected non-nil budget")
+		}
+		expectedUnit := "137:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+		if result.Budget.Unit != expectedUnit {
+			t.Errorf("expected budget unit %q (substituted from ${chain_id}:${token_address}), got %q", expectedUnit, result.Budget.Unit)
+		}
+		if budgetRepo.count() != 1 {
+			t.Errorf("expected 1 budget in repo, got %d", budgetRepo.count())
+		}
+	})
+
 	t.Run("with_expires_at", func(t *testing.T) {
 		tmplRepo := newMockTemplateRepo()
 		ruleRepo := newMockRuleRepo()
