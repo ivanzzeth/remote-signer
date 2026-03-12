@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"math/big"
 	"os"
 	"testing"
 
@@ -242,5 +243,66 @@ func TestJSRuleEvaluator_AbiTupleMixed(t *testing.T) {
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
 	res := e.wrappedValidate(script, input, nil)
 	assert.True(t, res.Valid, "abi mixed tuple roundtrip should pass: %s", res.Reason)
+}
+
+func TestJSRuleEvaluator_EvaluateBudgetWithInput_ReturnsAmount(t *testing.T) {
+	e, err := NewJSRuleEvaluator(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})))
+	require.NoError(t, err)
+
+	script := `function validate(i){ return ok(); }
+function validateBudget(i){ return 42n; }`
+	cfg := JSRuleConfig{Script: script}
+	rule := &types.Rule{
+		ID:     "test-budget",
+		Type:   types.RuleTypeEVMJS,
+		Config: mustMarshalJSON(cfg),
+	}
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+
+	amount, err := e.EvaluateBudgetWithInput(context.Background(), rule, input)
+	require.NoError(t, err)
+	require.NotNil(t, amount)
+	assert.Equal(t, int64(42), amount.Int64())
+}
+
+func TestJSRuleEvaluator_EvaluateBudgetWithInput_NoValidateBudget_ReturnsZero(t *testing.T) {
+	e, err := NewJSRuleEvaluator(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})))
+	require.NoError(t, err)
+
+	script := `function validate(i){ return ok(); }`
+	cfg := JSRuleConfig{Script: script}
+	rule := &types.Rule{ID: "test", Type: types.RuleTypeEVMJS, Config: mustMarshalJSON(cfg)}
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+
+	amount, err := e.EvaluateBudgetWithInput(context.Background(), rule, input)
+	require.NoError(t, err)
+	require.NotNil(t, amount)
+	assert.True(t, amount.Sign() == 0, "expected 0 when validateBudget is missing, got %s", amount.String())
+}
+
+func TestJSRuleEvaluator_EvaluateBudget_FromRequest(t *testing.T) {
+	e, err := NewJSRuleEvaluator(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})))
+	require.NoError(t, err)
+
+	script := `function validate(i){ return ok(); }
+function validateBudget(i){ return 100n; }`
+	cfg := JSRuleConfig{Script: script}
+	rule := &types.Rule{
+		ID:     "test-eval-budget",
+		Type:   types.RuleTypeEVMJS,
+		Config: mustMarshalJSON(cfg),
+	}
+	req := &types.SignRequest{
+		ChainID:       "1",
+		SignerAddress: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+		SignType:      SignTypeTransaction,
+		Payload:       []byte(`{"transaction":{"to":"0x742d35cc6634c0532925a3b844bc454e4438f44e","value":"0","data":"0x","gas":21000,"gasPrice":"0","txType":"legacy"}}`),
+	}
+	parsed := &types.ParsedPayload{}
+
+	amount, err := e.EvaluateBudget(context.Background(), rule, req, parsed)
+	require.NoError(t, err)
+	require.NotNil(t, amount)
+	assert.Equal(t, 0, amount.Cmp(big.NewInt(100)))
 }
 

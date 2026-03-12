@@ -77,6 +77,36 @@ func (m *mockRuleRepo) IncrementMatchCount(_ context.Context, _ types.RuleID) er
 	return nil
 }
 
+// mockBudgetRepo implements storage.BudgetRepository for listBudgets tests.
+type mockBudgetRepo struct {
+	listByRuleID func(context.Context, types.RuleID) ([]*types.RuleBudget, error)
+}
+
+func (m *mockBudgetRepo) Create(_ context.Context, _ *types.RuleBudget) error   { return nil }
+func (m *mockBudgetRepo) GetByRuleID(_ context.Context, _ types.RuleID, _ string) (*types.RuleBudget, error) {
+	return nil, nil
+}
+func (m *mockBudgetRepo) Delete(_ context.Context, _ string) error              { return nil }
+func (m *mockBudgetRepo) DeleteByRuleID(_ context.Context, _ types.RuleID) error { return nil }
+func (m *mockBudgetRepo) AtomicSpend(_ context.Context, _ types.RuleID, _, _ string) error {
+	return nil
+}
+func (m *mockBudgetRepo) ResetBudget(_ context.Context, _ types.RuleID, _ string, _ time.Time) error {
+	return nil
+}
+func (m *mockBudgetRepo) ListByRuleID(ctx context.Context, ruleID types.RuleID) ([]*types.RuleBudget, error) {
+	if m.listByRuleID != nil {
+		return m.listByRuleID(ctx, ruleID)
+	}
+	return []*types.RuleBudget{}, nil
+}
+func (m *mockBudgetRepo) ListByRuleIDs(_ context.Context, _ []types.RuleID) ([]*types.RuleBudget, error) {
+	return nil, nil
+}
+func (m *mockBudgetRepo) MarkAlertSent(_ context.Context, _ types.RuleID, _ string) error {
+	return nil
+}
+
 // addRule adds a rule to the mock repo directly.
 func (m *mockRuleRepo) addRule(rule *types.Rule) {
 	m.rules[rule.ID] = rule
@@ -248,4 +278,43 @@ func TestRuleHandler_ConfigSourced_DeleteBlocked(t *testing.T) {
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.Contains(t, w.Body.String(), "config-sourced")
+}
+
+func TestRuleHandler_ListBudgets(t *testing.T) {
+	repo := newMockRuleRepo()
+	rule := newAPIRule()
+	repo.addRule(rule)
+
+	budgetRepo := &mockBudgetRepo{
+		listByRuleID: func(_ context.Context, ruleID types.RuleID) ([]*types.RuleBudget, error) {
+			return []*types.RuleBudget{
+				{
+					ID:       "bdg_1",
+					RuleID:   ruleID,
+					Unit:     "1:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+					MaxTotal: "1000",
+					Spent:    "100",
+					TxCount:  5,
+				},
+			}, nil
+		},
+	}
+
+	h, err := NewRuleHandler(repo, slog.Default(), WithBudgetRepo(budgetRepo))
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/evm/rules/"+string(rule.ID)+"/budgets", nil)
+	req = req.WithContext(adminCtx())
+	w := httptest.NewRecorder()
+
+	h.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var budgets []*types.RuleBudget
+	err = json.NewDecoder(w.Body).Decode(&budgets)
+	require.NoError(t, err)
+	require.Len(t, budgets, 1)
+	assert.Equal(t, "bdg_1", budgets[0].ID)
+	assert.Equal(t, "1:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", budgets[0].Unit)
+	assert.Equal(t, "100", budgets[0].Spent)
 }
