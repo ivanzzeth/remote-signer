@@ -1,0 +1,28 @@
+# Preset: ERC20 transfer/approve limits (evm_js). One template, two rules: erc20-transfer-limit, erc20-approve-limit.
+# Use: remote-signer-cli preset create-from erc20.preset.js.yaml [--config config.yaml --write] [--set chain_id=1 --set token_address=0x...]
+# When instantiating via API you can attach budget limits (max_total, max_per_tx, etc.) per rule; unit is ${chain_id}:${token_address}.
+
+name: "ERC20 (JS)"
+template_paths:
+  - "rules/templates/erc20.template.js.yaml"
+template_names:
+  - "ERC20 Template"
+chain_type: "evm"
+chain_id: "1"
+enabled: true
+variables:
+  chain_id: "1"
+  token_address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+  max_transfer_amount: "0"
+  max_approve_amount: "0"
+  allowed_recipients: ""
+  allowed_spenders: ""
+  allowed_transfer_from: ""
+override_hints:
+  - chain_id
+  - token_address
+  - max_transfer_amount
+  - max_approve_amount
+  - allowed_recipients
+  - allowed_spenders
+  - allowed_transfer_from

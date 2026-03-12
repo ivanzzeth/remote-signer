@@ -13,6 +13,7 @@ Human-readable documentation for remote-signer rules, organized by protocol. Eac
 
 | Preset | 模板组合 / Templates | 说明 / Notes |
 |--------|---------------------|--------------|
+| erc20 | erc20 (transfer-limit + approve-limit) | ERC20 单币种额度与审批限制（evm_js，支持 budget） |
 | predict_eoa_bnb | auth + enable_trading + trading | Predict EOA，BNB Chain |
 | polymarket_eoa_polygon | auth + enable_trading + trading | Polymarket EOA，Polygon |
 | polymarket_safe_init_polygon | auth + create_safe + enable_trading | Safe 初始化（创建钱包 + 开通交易） |
