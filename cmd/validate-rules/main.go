@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
@@ -55,10 +56,11 @@ type RuleConfig struct {
 
 // TestCaseConfig is a single test case for evm_js (from YAML test_cases).
 type TestCaseConfig struct {
-	Name         string                 `yaml:"name" json:"name"`
-	Input        map[string]interface{}  `yaml:"input" json:"input"`
-	ExpectPass   bool                   `yaml:"expect_pass" json:"expect_pass"`
-	ExpectReason string                 `yaml:"expect_reason,omitempty" json:"expect_reason,omitempty"`
+	Name               string                 `yaml:"name" json:"name"`
+	Input              map[string]interface{} `yaml:"input" json:"input"`
+	ExpectPass         bool                   `yaml:"expect_pass" json:"expect_pass"`
+	ExpectReason       string                 `yaml:"expect_reason,omitempty" json:"expect_reason,omitempty"`
+	ExpectBudgetAmount string                 `yaml:"expect_budget_amount,omitempty" json:"expect_budget_amount,omitempty"`
 }
 
 // RuleFile represents a YAML file containing rules (plain rule file)
@@ -391,10 +393,11 @@ func validateConfig(ctx context.Context, configPath string, validator *evm.Solid
 		testCases := make([]TestCaseConfig, 0, len(r.TestCases))
 		for _, tc := range r.TestCases {
 			testCases = append(testCases, TestCaseConfig{
-				Name:         tc.Name,
-				Input:        tc.Input,
-				ExpectPass:   tc.ExpectPass,
-				ExpectReason: tc.ExpectReason,
+				Name:               tc.Name,
+				Input:              tc.Input,
+				ExpectPass:         tc.ExpectPass,
+				ExpectReason:       tc.ExpectReason,
+				ExpectBudgetAmount: tc.ExpectBudgetAmount,
 			})
 		}
 		localRules = append(localRules, RuleConfig{
@@ -482,6 +485,7 @@ func validateRules(ctx context.Context, rules []RuleConfig, validator *evm.Solid
 		}
 	}
 	var fullRepo *storage.MemoryRuleRepository
+	var jsEval *evm.JSRuleEvaluator
 	if hasEVMJS {
 		fullRepo = storage.NewMemoryRuleRepository()
 		for i, ruleCfg := range rules {
@@ -530,7 +534,7 @@ func validateRules(ctx context.Context, rules []RuleConfig, validator *evm.Solid
 				ruleEngine.RegisterEvaluator(solidityEval)
 			}
 		}
-		jsEval, err := evm.NewJSRuleEvaluator(log)
+		jsEval, err = evm.NewJSRuleEvaluator(log)
 		if err != nil {
 			return nil, 0, 0, fmt.Errorf("evm_js evaluator: %w", err)
 		}
@@ -776,6 +780,37 @@ func validateRules(ctx context.Context, rules []RuleConfig, validator *evm.Solid
 					}
 				} else {
 					tcResult.Passed = true
+				}
+				// If expect_budget_amount is set, assert validateBudget(input) return value
+				if tcResult.Passed && tc.ExpectBudgetAmount != "" && jsEval != nil {
+					ruleInput, err := evm.MapToRuleInput(inputCopy)
+					if err != nil {
+						tcResult.Passed = false
+						tcResult.Error = fmt.Sprintf("budget input: %v", err)
+						result.FailedTestCases++
+						result.Valid = false
+					} else {
+						amount, err := jsEval.EvaluateBudgetWithInput(ctx, rule, ruleInput)
+						if err != nil {
+							tcResult.Passed = false
+							tcResult.Error = fmt.Sprintf("validateBudget: %v", err)
+							result.FailedTestCases++
+							result.Valid = false
+						} else {
+							expected := new(big.Int)
+							if _, ok := expected.SetString(strings.TrimSpace(tc.ExpectBudgetAmount), 10); !ok {
+								tcResult.Passed = false
+								tcResult.Error = fmt.Sprintf("invalid expect_budget_amount %q", tc.ExpectBudgetAmount)
+								result.FailedTestCases++
+								result.Valid = false
+							} else if amount.Cmp(expected) != 0 {
+								tcResult.Passed = false
+								tcResult.Error = fmt.Sprintf("expect_budget_amount %s but got %s", tc.ExpectBudgetAmount, amount.String())
+								result.FailedTestCases++
+								result.Valid = false
+							}
+						}
+					}
 				}
 				result.TestCaseResults = append(result.TestCaseResults, tcResult)
 			}

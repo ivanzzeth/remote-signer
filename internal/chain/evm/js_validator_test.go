@@ -195,6 +195,48 @@ func TestValidateRule_MultipleTestCases(t *testing.T) {
 	assert.Len(t, result.TestCaseResults, 2)
 }
 
+func TestValidateRule_ExpectBudgetAmount_Pass(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	v, _ := NewJSRuleValidator(e, testLogger())
+
+	script := `function validate(i){ return ok(); }
+function validateBudget(i){ return 7n; }`
+	testCases := []JSTestCase{
+		{
+			Name:               "budget amount",
+			Input:              map[string]interface{}{"sign_type": "transaction", "chain_id": float64(1), "signer": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"},
+			ExpectPass:         true,
+			ExpectBudgetAmount: "7",
+		},
+	}
+	result, err := v.ValidateRule(context.Background(), script, testCases, nil)
+	require.NoError(t, err)
+	assert.True(t, result.Valid)
+	assert.Len(t, result.TestCaseResults, 1)
+	assert.True(t, result.TestCaseResults[0].Passed)
+}
+
+func TestValidateRule_ExpectBudgetAmount_Mismatch(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	v, _ := NewJSRuleValidator(e, testLogger())
+
+	script := `function validate(i){ return ok(); }
+function validateBudget(i){ return 7n; }`
+	testCases := []JSTestCase{
+		{
+			Name:               "wrong expected amount",
+			Input:              map[string]interface{}{"sign_type": "transaction", "chain_id": float64(1), "signer": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"},
+			ExpectPass:         true,
+			ExpectBudgetAmount: "99",
+		},
+	}
+	result, err := v.ValidateRule(context.Background(), script, testCases, nil)
+	require.NoError(t, err)
+	assert.False(t, result.Valid)
+	assert.Equal(t, 1, result.FailedTestCases)
+	assert.Contains(t, result.TestCaseResults[0].Error, "expect_budget_amount 99 but got 7")
+}
+
 func TestValidateRule_NilInput(t *testing.T) {
 	e, _ := NewJSRuleEvaluator(testLogger())
 	v, _ := NewJSRuleValidator(e, testLogger())
@@ -203,7 +245,7 @@ func TestValidateRule_NilInput(t *testing.T) {
 	testCases := []JSTestCase{
 		{
 			Name:       "nil input",
-			Input:      nil, // mapToRuleInput returns error for nil
+			Input:      nil, // MapToRuleInput returns error for nil
 			ExpectPass: true,
 		},
 	}
@@ -215,11 +257,11 @@ func TestValidateRule_NilInput(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// mapToRuleInput
+// MapToRuleInput
 // ─────────────────────────────────────────────────────────────────────────────
 
 func TestMapToRuleInput_Nil(t *testing.T) {
-	_, err := mapToRuleInput(nil)
+	_, err := MapToRuleInput(nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "input is nil")
 }
@@ -230,7 +272,7 @@ func TestMapToRuleInput_Valid(t *testing.T) {
 		"chain_id":  float64(1),
 		"signer":    "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
 	}
-	result, err := mapToRuleInput(input)
+	result, err := MapToRuleInput(input)
 	require.NoError(t, err)
 	assert.Equal(t, "transaction", result.SignType)
 	assert.Equal(t, int64(1), result.ChainID)
@@ -239,7 +281,7 @@ func TestMapToRuleInput_Valid(t *testing.T) {
 
 func TestMapToRuleInput_Empty(t *testing.T) {
 	input := map[string]interface{}{}
-	result, err := mapToRuleInput(input)
+	result, err := MapToRuleInput(input)
 	require.NoError(t, err)
 	assert.Equal(t, "", result.SignType)
 }
@@ -256,7 +298,7 @@ func TestMapToRuleInput_WithTransaction(t *testing.T) {
 			"data":  "0x",
 		},
 	}
-	result, err := mapToRuleInput(input)
+	result, err := MapToRuleInput(input)
 	require.NoError(t, err)
 	require.NotNil(t, result.Transaction)
 	assert.Equal(t, "0x742d35cc6634c0532925a3b844bc454e4438f44e", result.Transaction.To)
