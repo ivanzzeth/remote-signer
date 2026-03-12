@@ -20,11 +20,18 @@ type BudgetAlertNotifier interface {
 	SendBudgetAlert(ctx context.Context, ruleID types.RuleID, unit string, spent string, maxTotal string, pct int64, alertPct int) error
 }
 
+// BudgetJSEvaluator evaluates the spend amount for evm_js rules when budget_metering.method is "js".
+// The script's validateBudget(input) is called and must return a bigint or decimal string.
+type BudgetJSEvaluator interface {
+	EvaluateBudget(ctx context.Context, rule *types.Rule, req *types.SignRequest, parsed *types.ParsedPayload) (*big.Int, error)
+}
+
 // BudgetChecker checks and deducts budget for rule instances
 type BudgetChecker struct {
 	budgetRepo   storage.BudgetRepository
 	templateRepo storage.TemplateRepository
 	notifier     BudgetAlertNotifier
+	jsEvaluator  BudgetJSEvaluator // optional: for method "js" budget metering
 	logger       *slog.Logger
 }
 
@@ -46,6 +53,12 @@ func NewBudgetChecker(
 // be created after the BudgetChecker in the application initialization order.
 func (bc *BudgetChecker) SetNotifier(n BudgetAlertNotifier) {
 	bc.notifier = n
+}
+
+// SetJSEvaluator sets the JS evaluator for budget_metering method "js".
+// Required when any template uses method "js"; otherwise CheckAndDeductBudget fails closed for those rules.
+func (bc *BudgetChecker) SetJSEvaluator(eval BudgetJSEvaluator) {
+	bc.jsEvaluator = eval
 }
 
 // CheckAndDeductBudget checks if the rule has budget and deducts the spending amount.
@@ -113,10 +126,21 @@ func (bc *BudgetChecker) CheckAndDeductBudget(
 		return false, fmt.Errorf("failed to check periodic renewal for rule %s: %w", rule.ID, err)
 	}
 
-	// Extract spending amount
-	amount, err := ExtractAmount(metering, req, parsed)
-	if err != nil {
-		return false, fmt.Errorf("failed to extract amount: %w", err)
+	// Extract spending amount (method "js" uses JS evaluator; others use ExtractAmount)
+	var amount *big.Int
+	if metering.Method == "js" {
+		if bc.jsEvaluator == nil {
+			return false, fmt.Errorf("budget metering method %q requires SetJSEvaluator to be set", metering.Method)
+		}
+		amount, err = bc.jsEvaluator.EvaluateBudget(ctx, rule, req, parsed)
+		if err != nil {
+			return false, fmt.Errorf("js budget evaluation: %w", err)
+		}
+	} else {
+		amount, err = ExtractAmount(metering, req, parsed)
+		if err != nil {
+			return false, fmt.Errorf("failed to extract amount: %w", err)
+		}
 	}
 
 	// Check per-tx limit

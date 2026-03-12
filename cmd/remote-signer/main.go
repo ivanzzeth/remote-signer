@@ -383,6 +383,7 @@ func run() error {
 		return fmt.Errorf("failed to create JS rule evaluator: %w", err)
 	}
 	ruleEngine.RegisterEvaluator(jsEval)
+	budgetChecker.SetJSEvaluator(jsEval)
 
 	// Register Solidity expression evaluator (already created and validated above)
 	if solidityEval != nil {
