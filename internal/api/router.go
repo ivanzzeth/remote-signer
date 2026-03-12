@@ -41,6 +41,7 @@ type RouterConfig struct {
 	SignTimeout        time.Duration                   // context timeout for sign operations (default: 30s)
 	AutoLockTimeout    time.Duration                   // signer auto-lock timeout (for health endpoint)
 	AuditRetentionDays int                             // audit log retention days (for health endpoint)
+	BudgetRepo         storage.BudgetRepository        // optional: for GET /api/v1/evm/rules/{id}/budgets
 }
 
 // Router handles HTTP routing
@@ -137,6 +138,9 @@ func (r *Router) setupRoutes() error {
 	}
 	if r.config.AuditLogger != nil {
 		ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithAuditLogger(r.config.AuditLogger))
+	}
+	if r.config.BudgetRepo != nil {
+		ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithBudgetRepo(r.config.BudgetRepo))
 	}
 	if r.config.RulesAPIReadonly {
 		ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithReadOnly())
