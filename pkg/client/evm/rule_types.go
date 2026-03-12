@@ -79,3 +79,19 @@ type UpdateRuleRequest struct {
 	Config      map[string]interface{} `json:"config,omitempty"`
 	Enabled     bool                   `json:"enabled"`
 }
+
+// RuleBudget represents a budget record for a rule instance (GET /api/v1/evm/rules/{id}/budgets).
+type RuleBudget struct {
+	ID         string    `json:"id"`
+	RuleID     string    `json:"rule_id"`
+	Unit       string    `json:"unit"`
+	MaxTotal   string    `json:"max_total"`
+	MaxPerTx   string    `json:"max_per_tx"`
+	Spent      string    `json:"spent"`
+	AlertPct   int       `json:"alert_pct"`
+	AlertSent  bool      `json:"alert_sent"`
+	TxCount    int       `json:"tx_count"`
+	MaxTxCount int       `json:"max_tx_count"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}

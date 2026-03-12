@@ -119,3 +119,17 @@ func (s *RuleService) Toggle(ctx context.Context, ruleID string, enabled bool) (
 	}
 	return &rule, nil
 }
+
+// ListBudgets returns budgets for a rule (GET /api/v1/evm/rules/{ruleID}/budgets).
+func (s *RuleService) ListBudgets(ctx context.Context, ruleID string) ([]RuleBudget, error) {
+	path := fmt.Sprintf("/api/v1/evm/rules/%s/budgets", ruleID)
+	var budgets []RuleBudget
+	err := s.transport.Request(ctx, http.MethodGet, path, nil, &budgets, http.StatusOK)
+	if err != nil {
+		return nil, err
+	}
+	if budgets == nil {
+		budgets = []RuleBudget{}
+	}
+	return budgets, nil
+}

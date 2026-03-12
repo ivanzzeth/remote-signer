@@ -28,6 +28,7 @@ type RuleAPI interface {
 	Update(ctx context.Context, ruleID string, req *UpdateRuleRequest) (*Rule, error)
 	Delete(ctx context.Context, ruleID string) error
 	Toggle(ctx context.Context, ruleID string, enabled bool) (*Rule, error)
+	ListBudgets(ctx context.Context, ruleID string) ([]RuleBudget, error)
 }
 
 // SignerAPI defines the signer management operations interface.
