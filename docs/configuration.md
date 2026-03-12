@@ -309,6 +309,10 @@ templates:
       path: "rules/templates/polymarket_safe.template.yaml"
 ```
 
+### Budget metering (optional)
+
+Templates can define `budget_metering` so that **instance** rules get per-request spend amounts for budget enforcement. When instantiating via API you can attach limits (e.g. `max_total`, `max_per_tx`). Supported `method` values include `count_only`, `tx_value`, `calldata_param`, `typed_data_field`, and **`js`** (for `evm_js` rules: the script implements `validateBudget(input)` and returns the amount). For multi-chain assets, use a unit that identifies chain and asset, e.g. **`"${chain_id}:${token_address}"`** so the same token on different chains has separate budgets.
+
 ## Environment Variables
 
 | Variable | Used By | Description |

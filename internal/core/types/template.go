@@ -34,10 +34,13 @@ type TemplateVariable struct {
 	Default     string `json:"default,omitempty" yaml:"default,omitempty"` // default value if not required
 }
 
-// BudgetMetering defines how to extract spending amounts from transactions.
-// Templates define the metering method; instances provide budget limits.
+// BudgetMetering defines how to extract "spend amount" from each request for budget enforcement.
+//
+// Design: budget limits and usage are stored per rule instance (rule_id + unit). Metering lives
+// on the template so extraction semantics stay fixed—operators tune limits per instance without
+// accidentally changing how amounts are measured.
 type BudgetMetering struct {
-	Method     string `json:"method" yaml:"method"`                          // "none", "count_only", "calldata_param", "typed_data_field", "tx_value"
+	Method     string `json:"method" yaml:"method"`                          // "none", "count_only", "calldata_param", "typed_data_field", "tx_value", "js"
 	Unit       string `json:"unit" yaml:"unit"`                              // custom unit: "usdt", "auth", "eth"
 	ParamIndex int    `json:"param_index,omitempty" yaml:"param_index,omitempty"` // for calldata_param
 	ParamType  string `json:"param_type,omitempty" yaml:"param_type,omitempty"`   // for calldata_param: "uint256", etc.
