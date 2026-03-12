@@ -30,6 +30,7 @@ var ruleIDPattern = regexp.MustCompile(`^(rule_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{
 // RuleHandler handles rule management endpoints
 type RuleHandler struct {
 	ruleRepo          storage.RuleRepository
+	budgetRepo        storage.BudgetRepository
 	solidityValidator *evmchain.SolidityRuleValidator
 	jsEvaluator       *evmchain.JSRuleEvaluator
 	auditLogger       *audit.AuditLogger
@@ -58,6 +59,13 @@ func WithJSEvaluator(eval *evmchain.JSRuleEvaluator) RuleHandlerOption {
 func WithAuditLogger(al *audit.AuditLogger) RuleHandlerOption {
 	return func(h *RuleHandler) {
 		h.auditLogger = al
+	}
+}
+
+// WithBudgetRepo sets the budget repository for GET /api/v1/evm/rules/{id}/budgets.
+func WithBudgetRepo(repo storage.BudgetRepository) RuleHandlerOption {
+	return func(h *RuleHandler) {
+		h.budgetRepo = repo
 	}
 }
 
@@ -138,6 +146,16 @@ func (h *RuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
 		return
+	}
+
+	// Sub-resource: /api/v1/evm/rules/{id}/budgets
+	if strings.HasSuffix(path, "/budgets") {
+		ruleID := strings.TrimSuffix(path, "/budgets")
+		ruleID = strings.TrimSuffix(ruleID, "/")
+		if ruleID != "" && ruleIDPattern.MatchString(ruleID) && r.Method == http.MethodGet && h.budgetRepo != nil {
+			h.listBudgets(w, r, ruleID)
+			return
+		}
 	}
 
 	// Specific rule operations: /api/v1/evm/rules/{id}
@@ -547,6 +565,19 @@ func (h *RuleHandler) getRule(w http.ResponseWriter, r *http.Request, ruleID str
 	}
 
 	h.writeJSON(w, h.toRuleResponse(rule), http.StatusOK)
+}
+
+func (h *RuleHandler) listBudgets(w http.ResponseWriter, r *http.Request, ruleID string) {
+	budgets, err := h.budgetRepo.ListByRuleID(r.Context(), types.RuleID(ruleID))
+	if err != nil {
+		h.logger.Error("failed to list budgets", "error", err, "rule_id", ruleID)
+		h.writeError(w, "failed to list budgets", http.StatusInternalServerError)
+		return
+	}
+	if budgets == nil {
+		budgets = []*types.RuleBudget{}
+	}
+	h.writeJSON(w, budgets, http.StatusOK)
 }
 
 func (h *RuleHandler) deleteRule(w http.ResponseWriter, r *http.Request, ruleID string) {
