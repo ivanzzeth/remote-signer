@@ -57,10 +57,11 @@ type TemplateVarConfig struct {
 
 // TestCaseConfig defines a single test case for rule validation (evm_js, solidity, etc.)
 type TestCaseConfig struct {
-	Name         string                 `yaml:"name" json:"name"`
-	Input        map[string]interface{} `yaml:"input" json:"input"`
-	ExpectPass   bool                   `yaml:"expect_pass" json:"expect_pass"`
-	ExpectReason string                 `yaml:"expect_reason,omitempty" json:"expect_reason,omitempty"`
+	Name               string                 `yaml:"name" json:"name"`
+	Input              map[string]interface{} `yaml:"input" json:"input"`
+	ExpectPass         bool                   `yaml:"expect_pass" json:"expect_pass"`
+	ExpectReason       string                 `yaml:"expect_reason,omitempty" json:"expect_reason,omitempty"`
+	ExpectBudgetAmount string                 `yaml:"expect_budget_amount,omitempty" json:"expect_budget_amount,omitempty"`
 }
 
 // RuleConfig defines a rule in configuration. JSON tags must match YAML/validator expectations
