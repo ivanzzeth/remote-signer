@@ -103,14 +103,15 @@ var _ evm.RequestAPI = (*RequestService)(nil)
 
 // RuleService is a mock implementation of evm.RuleAPI.
 type RuleService struct {
-	mu         sync.RWMutex
-	ListFunc   func(ctx context.Context, filter *evm.ListRulesFilter) (*evm.ListRulesResponse, error)
-	GetFunc    func(ctx context.Context, ruleID string) (*evm.Rule, error)
-	CreateFunc func(ctx context.Context, req *evm.CreateRuleRequest) (*evm.Rule, error)
-	UpdateFunc func(ctx context.Context, ruleID string, req *evm.UpdateRuleRequest) (*evm.Rule, error)
-	DeleteFunc func(ctx context.Context, ruleID string) error
-	ToggleFunc func(ctx context.Context, ruleID string, enabled bool) (*evm.Rule, error)
-	Calls      map[string][]any
+	mu              sync.RWMutex
+	ListFunc        func(ctx context.Context, filter *evm.ListRulesFilter) (*evm.ListRulesResponse, error)
+	GetFunc         func(ctx context.Context, ruleID string) (*evm.Rule, error)
+	CreateFunc      func(ctx context.Context, req *evm.CreateRuleRequest) (*evm.Rule, error)
+	UpdateFunc      func(ctx context.Context, ruleID string, req *evm.UpdateRuleRequest) (*evm.Rule, error)
+	DeleteFunc      func(ctx context.Context, ruleID string) error
+	ToggleFunc      func(ctx context.Context, ruleID string, enabled bool) (*evm.Rule, error)
+	ListBudgetsFunc func(ctx context.Context, ruleID string) ([]evm.RuleBudget, error)
+	Calls           map[string][]any
 }
 
 func NewRuleService() *RuleService {
@@ -169,6 +170,14 @@ func (m *RuleService) Toggle(ctx context.Context, ruleID string, enabled bool) (
 		return m.ToggleFunc(ctx, ruleID, enabled)
 	}
 	return &evm.Rule{}, nil
+}
+
+func (m *RuleService) ListBudgets(ctx context.Context, ruleID string) ([]evm.RuleBudget, error) {
+	m.recordCall("ListBudgets", ruleID)
+	if m.ListBudgetsFunc != nil {
+		return m.ListBudgetsFunc(ctx, ruleID)
+	}
+	return nil, nil
 }
 
 var _ evm.RuleAPI = (*RuleService)(nil)
