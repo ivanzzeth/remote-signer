@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math/big"
 	"runtime"
 	"strings"
 	"time"
@@ -272,6 +273,162 @@ func parseDelegateToIDs(delegateTo string) []types.RuleID {
 // Used by JSRuleValidator to run test cases.
 func (e *JSRuleEvaluator) ValidateWithInput(script string, input *RuleInput, config map[string]interface{}) JSRuleValidateResult {
 	return e.wrappedValidate(script, input, config)
+}
+
+// EvaluateBudget runs the rule script's validateBudget(input) and returns the spend amount for budget metering.
+// Used when template budget_metering.method is "js". Returns (nil, error) on any failure (fail-closed).
+func (e *JSRuleEvaluator) EvaluateBudget(ctx context.Context, r *types.Rule, req *types.SignRequest, parsed *types.ParsedPayload) (*big.Int, error) {
+	ruleInput, err := BuildRuleInput(req, parsed)
+	if err != nil {
+		return nil, fmt.Errorf("build rule input: %w", err)
+	}
+	var cfg JSRuleConfig
+	if err := json.Unmarshal(r.Config, &cfg); err != nil {
+		return nil, fmt.Errorf("invalid evm_js config: %w", err)
+	}
+	if cfg.Script == "" {
+		return nil, fmt.Errorf("evm_js rule script is empty")
+	}
+	configObj := make(map[string]interface{})
+	if r.Variables != nil {
+		if err := json.Unmarshal(r.Variables, &configObj); err != nil {
+			return nil, fmt.Errorf("invalid rule variables JSON: %w", err)
+		}
+	}
+	return e.wrappedValidateBudget(cfg.Script, ruleInput, configObj)
+}
+
+// EvaluateBudgetWithInput runs validateBudget(input) with the given input and rule config.
+// Used by JSRuleValidator to assert expect_budget_amount in test cases.
+func (e *JSRuleEvaluator) EvaluateBudgetWithInput(ctx context.Context, r *types.Rule, input *RuleInput) (*big.Int, error) {
+	var cfg JSRuleConfig
+	if err := json.Unmarshal(r.Config, &cfg); err != nil {
+		return nil, fmt.Errorf("invalid evm_js config: %w", err)
+	}
+	if cfg.Script == "" {
+		return nil, fmt.Errorf("evm_js rule script is empty")
+	}
+	configObj := make(map[string]interface{})
+	if r.Variables != nil {
+		if err := json.Unmarshal(r.Variables, &configObj); err != nil {
+			return nil, fmt.Errorf("invalid rule variables JSON: %w", err)
+		}
+	}
+	return e.wrappedValidateBudget(cfg.Script, input, configObj)
+}
+
+// wrappedValidateBudget runs script in a sandbox, calls validateBudget(input), and returns the amount as *big.Int.
+// Missing validateBudget or return 0n → 0. Error or invalid return type → fail-closed (error).
+func (e *JSRuleEvaluator) wrappedValidateBudget(script string, input *RuleInput, config map[string]interface{}) (*big.Int, error) {
+	vm := sobek.New()
+	defer vm.ClearInterrupt()
+
+	inputMap, mapErr := ruleInputToMap(input)
+	if mapErr != nil {
+		return nil, fmt.Errorf("rule input: %w", mapErr)
+	}
+	inputVal := vm.ToValue(inputMap)
+	if err := vm.Set("input", inputVal); err != nil {
+		return nil, fmt.Errorf("set input: %w", err)
+	}
+	configVal := vm.ToValue(trimConfigStrings(config))
+	if err := vm.Set("config", configVal); err != nil {
+		return nil, fmt.Errorf("set config: %w", err)
+	}
+	if err := injectHelpers(vm); err != nil {
+		return nil, fmt.Errorf("inject helpers: %w", err)
+	}
+	if err := removeGlobals(vm); err != nil {
+		return nil, fmt.Errorf("remove globals: %w", err)
+	}
+
+	var memBefore runtime.MemStats
+	runtime.ReadMemStats(&memBefore)
+	done := make(chan struct{})
+	defer close(done)
+	time.AfterFunc(jsRuleTimeout, func() { vm.Interrupt("timeout") })
+	go func() {
+		ticker := time.NewTicker(5 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				var m runtime.MemStats
+				runtime.ReadMemStats(&m)
+				if m.TotalAlloc-memBefore.TotalAlloc > jsRuleMaxAllocBytes {
+					vm.Interrupt("memory_limit_exceeded")
+					return
+				}
+			}
+		}
+	}()
+
+	if _, err := vm.RunString(script); err != nil {
+		return nil, fmt.Errorf("script run: %w", err)
+	}
+
+	validateBudgetVal := vm.Get("validateBudget")
+	if validateBudgetVal == nil || isUndefined(validateBudgetVal) {
+		return big.NewInt(0), nil
+	}
+	fn, ok := sobek.AssertFunction(validateBudgetVal)
+	if !ok {
+		return nil, fmt.Errorf("validateBudget is not a function")
+	}
+
+	var res sobek.Value
+	var callErr error
+	func() {
+		defer func() {
+			if v := recover(); v != nil {
+				callErr = fmt.Errorf("%v", v)
+			}
+		}()
+		res, callErr = fn(sobek.Undefined(), inputVal)
+	}()
+	if callErr != nil {
+		return nil, fmt.Errorf("validateBudget: %w", callErr)
+	}
+	if res == nil || isUndefined(res) {
+		return big.NewInt(0), nil
+	}
+
+	// Accept bigint (exported as int64 when small) or decimal string
+	exported := res.Export()
+	switch v := exported.(type) {
+	case int64:
+		if v < 0 {
+			return nil, fmt.Errorf("validateBudget returned negative amount: %d", v)
+		}
+		return big.NewInt(v), nil
+	case int:
+		if v < 0 {
+			return nil, fmt.Errorf("validateBudget returned negative amount: %d", v)
+		}
+		return big.NewInt(int64(v)), nil
+	case uint64:
+		return new(big.Int).SetUint64(v), nil
+	case string:
+		z := new(big.Int)
+		if _, ok := z.SetString(strings.TrimSpace(v), 10); !ok {
+			return nil, fmt.Errorf("validateBudget returned invalid decimal string: %q", v)
+		}
+		if z.Sign() < 0 {
+			return nil, fmt.Errorf("validateBudget returned negative amount")
+		}
+		return z, nil
+	default:
+		// Sobek may export BigInt as *big.Int in some versions
+		if bi, ok := exported.(*big.Int); ok {
+			if bi.Sign() < 0 {
+				return nil, fmt.Errorf("validateBudget returned negative amount")
+			}
+			return new(big.Int).Set(bi), nil
+		}
+		return nil, fmt.Errorf("validateBudget return type unsupported: %T (use bigint or decimal string)", exported)
+	}
 }
 
 // wrappedValidate runs script in a sandbox, calls validate(input), and returns sanitized result.
