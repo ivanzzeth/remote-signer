@@ -72,18 +72,25 @@ export class HttpTransport {
 
     // Setup HTTP client
     const timeout = config.httpClient?.timeout ?? 30000; // 30 seconds
+    const base = config.baseURL.replace(/\/$/, "");
+    const isHttps = base.toLowerCase().startsWith("https://");
 
     if (config.httpClient?.fetch) {
       // User provided custom fetch function - use directly
       this.httpClient = { fetch: config.httpClient.fetch, timeout };
-    } else if (config.httpClient?.tls && HttpTransport.isNodeJS()) {
-      // Node.js environment with TLS config - create fetch with https.Agent
+    } else if (
+      HttpTransport.isNodeJS() &&
+      (isHttps || config.httpClient?.tls)
+    ) {
+      // Node.js: use https module for https URLs or when TLS config is provided.
+      // This avoids "Client sent an HTTP request to an HTTPS server" when
+      // globalThis.fetch behaves inconsistently (e.g. in MCP subprocess).
       this.httpClient = {
-        fetch: HttpTransport.createNodeTLSFetch(config.httpClient.tls),
+        fetch: HttpTransport.createNodeTLSFetch(config.httpClient?.tls ?? {}),
         timeout,
       };
     } else {
-      // Browser or Node.js without TLS - use globalThis.fetch
+      // Browser or Node.js with http URL and no TLS - use globalThis.fetch
       this.httpClient = {
         fetch: globalThis.fetch.bind(globalThis),
         timeout,
