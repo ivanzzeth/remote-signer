@@ -106,6 +106,10 @@ func (bc *BudgetChecker) CheckAndDeductBudget(
 	if unit == "" {
 		unit = "count"
 	}
+	// Substitute rule instance variables so unit matches the budget record created at sync (e.g. "${chain_id}:${token_address}" -> "1:0xA0b8...").
+	unit = substituteUnitVariables(unit, rule.Variables)
+	// Normalize so lookup matches stored unit regardless of address casing (0xA0b8 vs 0xa0b8).
+	unit = NormalizeBudgetUnit(unit)
 
 	// Get budget for this rule+unit
 	budget, err := bc.budgetRepo.GetByRuleID(ctx, rule.ID, unit)
@@ -143,10 +147,10 @@ func (bc *BudgetChecker) CheckAndDeductBudget(
 		}
 	}
 
-	// Check per-tx limit
+	// Check per-tx limit. Only -1 means no cap; 0 means cap of 0.
 	// SECURITY: fail-closed on parse error — unparseable limit could allow
 	// arbitrarily large transactions.
-	if budget.MaxPerTx != "" && budget.MaxPerTx != "0" {
+	if budget.MaxPerTx != "" && budget.MaxPerTx != "-1" {
 		maxPerTx := new(big.Int)
 		if _, ok := maxPerTx.SetString(budget.MaxPerTx, 10); !ok {
 			return false, fmt.Errorf("invalid max_per_tx value %q for rule %s", budget.MaxPerTx, rule.ID)
@@ -226,7 +230,8 @@ func (bc *BudgetChecker) checkPeriodicRenewal(ctx context.Context, rule *types.R
 // When reached, sends a notification (if notifier is configured) and marks
 // the alert as sent to prevent duplicate notifications within the same period.
 func (bc *BudgetChecker) checkAlertThreshold(ruleID types.RuleID, unit string, budget *types.RuleBudget) {
-	if budget.AlertSent || budget.AlertPct <= 0 || budget.MaxTotal == "" || budget.MaxTotal == "0" {
+	// Skip when no cap (-1), not set (""), or cap is 0 (no meaningful percentage)
+	if budget.AlertSent || budget.AlertPct <= 0 || budget.MaxTotal == "" || budget.MaxTotal == "-1" || budget.MaxTotal == "0" {
 		return
 	}
 
@@ -420,4 +425,30 @@ func valueToBigInt(v interface{}) (*big.Int, error) {
 	default:
 		return nil, fmt.Errorf("unsupported type %T for budget amount", v)
 	}
+}
+
+// NormalizeBudgetUnit normalizes a budget unit string for consistent storage and lookup.
+// Lowercases the string so address casing (0xA0b8 vs 0xa0b8) does not cause mismatches.
+func NormalizeBudgetUnit(unit string) string {
+	return strings.ToLower(unit)
+}
+
+// substituteUnitVariables replaces ${var} in unit using rule.Variables so the unit matches
+// the budget record created at sync (e.g. "${chain_id}:${token_address}" -> "1:0xA0b8...").
+// Uses interface{} unmarshal so number values (e.g. chain_id: 1 from YAML) are converted to string.
+func substituteUnitVariables(unit string, variablesJSON []byte) string {
+	if unit == "" || len(variablesJSON) == 0 {
+		return unit
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(variablesJSON, &raw); err != nil || len(raw) == 0 {
+		return unit
+	}
+	for k, v := range raw {
+		if v == nil {
+			continue
+		}
+		unit = strings.ReplaceAll(unit, "${"+k+"}", fmt.Sprintf("%v", v))
+	}
+	return unit
 }

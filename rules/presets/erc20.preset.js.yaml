@@ -1,6 +1,10 @@
 # Preset: ERC20 transfer/approve limits (evm_js). One template, two rules: erc20-transfer-limit, erc20-approve-limit.
 # Use: remote-signer-cli preset create-from erc20.preset.js.yaml [--config config.yaml --write] [--set chain_id=1 --set token_address=0x...]
-# When instantiating via API you can attach budget limits (max_total, max_per_tx, etc.) per rule; unit is ${chain_id}:${token_address}.
+# Budget and schedule ensure limits are enforced (卡上限) and reset per period (session).
+#
+# Budget amount convention: all budget and cap amounts are big integers in the token's smallest unit
+# (same as calldata uint256). Example: USDC has 6 decimals → 1 USDC = 1000000, 1000 USDC = 1000000000.
+# validateBudget() returns the transfer/approve amount in that same unit; max_total / max_per_tx must match.
 
 name: "ERC20 (JS)"
 template_paths:
@@ -13,16 +17,30 @@ enabled: true
 variables:
   chain_id: "1"
   token_address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
-  max_transfer_amount: "0"
-  max_approve_amount: "0"
+  # Amounts in token smallest unit (e.g. USDC 6 decimals: 1000000 = 1 USDC, 1000000000 = 1000 USDC).
+  max_transfer_amount: "-1"   # -1 = no cap; 0 = cap of 0 (block all)
+  max_approve_amount: "-1"
+  budget_period: "24h"   # used by schedule.period; e.g. 24h daily, 168h weekly
   allowed_recipients: ""
   allowed_spenders: ""
   allowed_transfer_from: ""
+# Budget: amounts in token smallest unit (same as validateBudget return). All fields support ${var}. -1 = no cap, 0 = cap zero.
+budget:
+  unit: "${chain_id}:${token_address}"   # required — e.g. chain:token so budgets don't mix
+  max_total: "${max_transfer_amount}"    # -1 = no cap; 0 = cap zero; empty → -1 (no cap)
+  max_per_tx: "${max_transfer_amount}"   # -1 = no per-tx cap; 0 = cap zero; empty → -1
+  max_tx_count: 0                        # optional; empty/0 accepted
+  alert_pct: 80                          # optional; empty → 80
+# Schedule: period reset (session). Values support template variables.
+schedule:
+  period: "${budget_period}"   # e.g. 24h, 168h; overridable via --set budget_period=168h
+  # start_at: optional RFC3339
 override_hints:
   - chain_id
   - token_address
   - max_transfer_amount
   - max_approve_amount
+  - budget_period
   - allowed_recipients
   - allowed_spenders
   - allowed_transfer_from

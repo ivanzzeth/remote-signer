@@ -280,6 +280,20 @@ func TestRuleHandler_ConfigSourced_DeleteBlocked(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "config-sourced")
 }
 
+func TestRuleIDPattern_AcceptsExpandedInstanceIDs(t *testing.T) {
+	ids := []string{
+		"erc20-schedule_erc20-transfer-limit",
+		"erc20-schedule_erc20-approve-limit",
+		"erc20_erc20-transfer-limit",
+		"erc20_erc20-approve-limit",
+		"e2e-treasury",
+	}
+	for _, id := range ids {
+		ok := ruleIDPattern.MatchString(id)
+		assert.True(t, ok, "rule_id %q should match pattern", id)
+	}
+}
+
 func TestRuleHandler_ListBudgets(t *testing.T) {
 	repo := newMockRuleRepo()
 	rule := newAPIRule()

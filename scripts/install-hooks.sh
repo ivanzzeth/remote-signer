@@ -350,13 +350,13 @@ else
     echo -e "TUI version check... ${GREEN}OK (no staged tui/ changes)${NC}"
 fi
 
-# 7. Run e2e tests (using port 18548 to avoid conflict with production on 8548)
+# 7. Run e2e tests (using port 18548 to avoid conflict with production on 8548). No skip; long timeout for budget/schedule e2e.
 echo -n "Running e2e tests... "
-if E2E_API_PORT=18548 go test -tags e2e ./e2e/... -count=1 -timeout 2m 2>/dev/null; then
+if E2E_API_PORT=18548 go test -tags e2e ./e2e/... -count=1 -timeout 10m 2>/dev/null; then
     echo -e "${GREEN}OK${NC}"
 else
     echo -e "${RED}FAIL${NC}"
-    echo "E2E tests failed. Run 'E2E_API_PORT=18548 go test -tags e2e -v ./e2e/...' for details."
+    echo "E2E tests failed. Run 'E2E_API_PORT=18548 go test -tags e2e -v -timeout 10m ./e2e/...' for details."
     FAILED=1
 fi
 

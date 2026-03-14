@@ -446,6 +446,16 @@ func expandInstanceRule(rule RuleConfig, templates map[string]TemplateConfig) ([
 		}
 	}
 
+	// Capture instance-level budget and schedule for rule sync (budget enforcement + period reset).
+	var instanceBudget map[string]interface{}
+	if b, ok := rule.Config["budget"].(map[string]interface{}); ok && len(b) > 0 {
+		instanceBudget = b
+	}
+	var instanceSchedule map[string]interface{}
+	if s, ok := rule.Config["schedule"].(map[string]interface{}); ok && len(s) > 0 {
+		instanceSchedule = s
+	}
+
 	// Apply scope and instance variables to all template rules
 	for idx := range templateRules {
 		if rule.ChainType != "" {
@@ -468,6 +478,18 @@ func expandInstanceRule(rule RuleConfig, templates map[string]TemplateConfig) ([
 			for k, v := range variables {
 				templateRules[idx].Variables[k] = v
 			}
+		}
+		// For rule sync: attach template name and instance budget/schedule so sync can set TemplateID and create budget.
+		if templateRules[idx].Config == nil {
+			templateRules[idx].Config = make(map[string]interface{})
+		}
+		cfg := templateRules[idx].Config
+		cfg["__template_name"] = templateName
+		if len(instanceBudget) > 0 {
+			cfg["__budget"] = instanceBudget
+		}
+		if len(instanceSchedule) > 0 {
+			cfg["__schedule"] = instanceSchedule
 		}
 	}
 	instanceID, hasInstanceID := rule.Config["id"].(string)

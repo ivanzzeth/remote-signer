@@ -1171,7 +1171,7 @@ step_preset_rules() {
         PRESET_FILE="$PRESET_NAME"
         [[ "$PRESET_FILE" != *.yaml ]] && [[ "$PRESET_FILE" != *.yml ]] && PRESET_FILE="${PRESET_FILE}.yaml"
 
-        # Get variables to prompt (name + description from template)
+        # Get variables to prompt (override_hints from preset; descriptions from template, including budget/schedule vars if preset has them)
         set_args=()
         vars_out=$(remote-signer-cli preset vars "$PRESET_FILE" --presets-dir "$PRESETS_DIR" --project-dir "$PROJECT_DIR" 2>/dev/null) || true
         if [ -n "$vars_out" ]; then

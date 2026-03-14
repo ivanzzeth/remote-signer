@@ -103,7 +103,7 @@ func (r *GormBudgetRepository) AtomicSpend(ctx context.Context, ruleID types.Rul
 		    tx_count = tx_count + 1,
 		    updated_at = ?
 		WHERE rule_id = ? AND unit = ?
-		  AND (max_total = '0' OR CAST(spent AS NUMERIC) + CAST(? AS NUMERIC) <= CAST(max_total AS NUMERIC))
+		  AND (max_total = '-1' OR CAST(spent AS NUMERIC) + CAST(? AS NUMERIC) <= CAST(max_total AS NUMERIC))
 		  AND (max_tx_count = 0 OR tx_count < max_tx_count)
 	`, amount, time.Now(), ruleID, unit, amount)
 

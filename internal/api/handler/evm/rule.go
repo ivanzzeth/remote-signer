@@ -24,8 +24,8 @@ import (
 // ruleIDPattern validates rule ID format. Accepts:
 // - rule_<uuid>: API-created rules
 // - cfg_<16hex> or cfg_<digits>: config rules (auto-generated or legacy)
-// - <custom>: config custom IDs (alphanumeric, hyphen, underscore, 1-64 chars)
-var ruleIDPattern = regexp.MustCompile(`^(rule_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|cfg_[0-9a-f]{16}|cfg_\d+|[a-zA-Z0-9][a-zA-Z0-9_-]{0,63})$`)
+// - <custom>: config custom IDs (alphanumeric, hyphen, underscore, 1-64 chars).
+var ruleIDPattern = regexp.MustCompile(`^(rule_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|cfg_[0-9a-f]{16}|cfg_\d+|[a-zA-Z0-9][0-9A-Za-z_\-]{0,63})$`)
 
 // RuleHandler handles rule management endpoints
 type RuleHandler struct {
@@ -96,23 +96,25 @@ func NewRuleHandler(ruleRepo storage.RuleRepository, logger *slog.Logger, opts .
 
 // RuleResponse represents a rule in API responses
 type RuleResponse struct {
-	ID            string          `json:"id"`
-	Name          string          `json:"name"`
-	Description   string          `json:"description,omitempty"`
-	Type          string          `json:"type"`
-	Mode          string          `json:"mode"`
-	Source        string          `json:"source"`
-	ChainType     *string         `json:"chain_type,omitempty"`
-	ChainID       *string         `json:"chain_id,omitempty"`
-	APIKeyID      *string         `json:"api_key_id,omitempty"`
-	SignerAddress *string         `json:"signer_address,omitempty"`
-	Config        json.RawMessage `json:"config,omitempty"`
-	Enabled       bool            `json:"enabled"`
-	CreatedAt     string          `json:"created_at"`
-	UpdatedAt     string          `json:"updated_at"`
-	ExpiresAt     *string         `json:"expires_at,omitempty"`
-	MatchCount    uint64          `json:"match_count"`
-	LastMatchedAt *string         `json:"last_matched_at,omitempty"`
+	ID                 string          `json:"id"`
+	Name               string          `json:"name"`
+	Description        string          `json:"description,omitempty"`
+	Type               string          `json:"type"`
+	Mode               string          `json:"mode"`
+	Source             string          `json:"source"`
+	ChainType          *string         `json:"chain_type,omitempty"`
+	ChainID            *string         `json:"chain_id,omitempty"`
+	APIKeyID           *string         `json:"api_key_id,omitempty"`
+	SignerAddress      *string         `json:"signer_address,omitempty"`
+	Config             json.RawMessage `json:"config,omitempty"`
+	Enabled            bool            `json:"enabled"`
+	CreatedAt          string          `json:"created_at"`
+	UpdatedAt          string          `json:"updated_at"`
+	ExpiresAt          *string         `json:"expires_at,omitempty"`
+	MatchCount         uint64          `json:"match_count"`
+	LastMatchedAt      *string         `json:"last_matched_at,omitempty"`
+	BudgetPeriod       string          `json:"budget_period,omitempty"`        // e.g. "24h0m0s"; set when schedule.period is configured
+	BudgetPeriodStart  *string         `json:"budget_period_start,omitempty"`  // RFC3339; when first period began
 }
 
 // ListRulesResponse represents the response for listing rules
@@ -149,17 +151,18 @@ func (h *RuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Sub-resource: /api/v1/evm/rules/{id}/budgets
+	// Accept any rule ID that is a single path segment (config-expanded IDs like erc20-schedule_erc20-transfer-limit).
 	if strings.HasSuffix(path, "/budgets") {
 		ruleID := strings.TrimSuffix(path, "/budgets")
-		ruleID = strings.TrimSuffix(ruleID, "/")
-		if ruleID != "" && ruleIDPattern.MatchString(ruleID) && r.Method == http.MethodGet && h.budgetRepo != nil {
+		ruleID = strings.Trim(ruleID, "/")
+		if ruleID != "" && !strings.Contains(ruleID, "/") && len(ruleID) <= 128 && r.Method == http.MethodGet && h.budgetRepo != nil {
 			h.listBudgets(w, r, ruleID)
 			return
 		}
 	}
 
 	// Specific rule operations: /api/v1/evm/rules/{id}
-	ruleID := path
+	ruleID := strings.Trim(path, "/")
 	if !ruleIDPattern.MatchString(ruleID) {
 		h.writeError(w, "invalid rule_id format", http.StatusBadRequest)
 		return
@@ -660,6 +663,13 @@ func (h *RuleHandler) toRuleResponse(rule *types.Rule) RuleResponse {
 	if rule.LastMatchedAt != nil {
 		lastMatchedAt := rule.LastMatchedAt.Format(time.RFC3339)
 		resp.LastMatchedAt = &lastMatchedAt
+	}
+	if rule.BudgetPeriod != nil && *rule.BudgetPeriod > 0 {
+		resp.BudgetPeriod = rule.BudgetPeriod.String()
+	}
+	if rule.BudgetPeriodStart != nil {
+		s := rule.BudgetPeriodStart.Format(time.RFC3339)
+		resp.BudgetPeriodStart = &s
 	}
 
 	return resp

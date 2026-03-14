@@ -153,15 +153,13 @@ func TestBudgetChecker_PerTxLimitExceeded(t *testing.T) {
 	tr := &stubTemplateRepo{tmpl: &types.RuleTemplate{ID: "t1", BudgetMetering: metering}}
 	br := &stubBudgetRepo{budget: &types.RuleBudget{
 		MaxTotal: "1000",
-		MaxPerTx: "0", // 0 means no per-tx limit actually... let's use something small
+		MaxPerTx: "-1", // -1 = no per-tx cap
 		Spent:    "0",
 	}}
-	// Override: MaxPerTx = "0" doesn't trigger limit. Check with non-zero.
-	br.budget.MaxPerTx = "0" // "0" is treated as no limit
 	bc := NewBudgetChecker(br, tr, slog.Default())
 	rule := &types.Rule{ID: "r1", TemplateID: ptrStr("t1")}
 
-	// count_only returns 1, maxPerTx "0" is skipped so it should pass
+	// count_only returns 1, maxPerTx "-1" = no cap so it should pass
 	ok, err := bc.CheckAndDeductBudget(context.Background(), rule, &types.SignRequest{}, nil)
 	require.NoError(t, err)
 	assert.True(t, ok)

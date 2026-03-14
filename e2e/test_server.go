@@ -128,7 +128,8 @@ func (ts *TestServer) Start() error {
 		return fmt.Errorf("failed to create database: %w", err)
 	}
 
-	// Ensure single connection to avoid locking issues with in-memory SQLite
+	// Single connection to avoid SQLite table lock (transaction and template reads must use same conn).
+	// Rule sync pre-loads templates before the transaction so no second conn is needed.
 	sqlDB, err := db.DB()
 	if err != nil {
 		return fmt.Errorf("failed to get sql.DB: %w", err)
@@ -209,6 +210,8 @@ func (ts *TestServer) Start() error {
 			configDir = filepath.Dir(ts.config.ConfigPath)
 			ruleInit.SetConfigDir(configDir)
 		}
+		ruleInit.SetTemplateRepo(templateRepo)
+		ruleInit.SetBudgetRepo(budgetRepo)
 
 		// Match main.go: sync templates (if any), expand instance rules, then sync rules
 		rulesToSync := cfg.Rules
@@ -338,8 +341,12 @@ func (ts *TestServer) Start() error {
 		return fmt.Errorf("failed to create state machine: %w", err)
 	}
 
-	// Initialize rule engine with whitelist and delegation converter for evm_js
-	ruleEngine, err := rule.NewWhitelistRuleEngine(ruleRepo, log, rule.WithDelegationPayloadConverter(evm.DelegatePayloadToSignRequest))
+	// Initialize rule engine with whitelist, budget checker (for template instances), and delegation converter for evm_js
+	budgetChecker := rule.NewBudgetChecker(budgetRepo, templateRepo, log)
+	ruleEngine, err := rule.NewWhitelistRuleEngine(ruleRepo, log,
+		rule.WithBudgetChecker(budgetChecker),
+		rule.WithDelegationPayloadConverter(evm.DelegatePayloadToSignRequest),
+	)
 	if err != nil {
 		return fmt.Errorf("failed to create rule engine: %w", err)
 	}
@@ -357,6 +364,7 @@ func (ts *TestServer) Start() error {
 		return fmt.Errorf("failed to create JS rule evaluator: %w", err)
 	}
 	ruleEngine.RegisterEvaluator(jsEval)
+	budgetChecker.SetJSEvaluator(jsEval)
 
 	// Register Solidity expression evaluator for blocklist rules (optional - requires forge)
 	// Use config if available, otherwise use defaults
@@ -475,7 +483,7 @@ func (ts *TestServer) Start() error {
 		return fmt.Errorf("failed to discover locked signers: %w", err)
 	}
 
-	// Initialize router
+	// Initialize router (include BudgetRepo so GET /api/v1/evm/rules/{id}/budgets works for budget e2e tests)
 	routerConfig := api.RouterConfig{
 		Version: "e2e-test",
 		Template: &api.TemplateConfig{
@@ -484,6 +492,7 @@ func (ts *TestServer) Start() error {
 		},
 		ApprovalGuard: approvalGuard,
 		APIKeyRepo:    apiKeyRepo,
+		BudgetRepo:    budgetRepo,
 	}
 	router, err := api.NewRouter(authVerifier, signService, signerManager, ruleRepo, auditRepo, log, routerConfig)
 	if err != nil {
