@@ -1,18 +1,22 @@
 {
-  "name": "@remote-signer/mcp-server",
-  "version": "1.0.0",
-  "description": "MCP server for remote-signer service",
+  "name": "remote-signer-mcp",
+  "version": "0.0.1",
+  "description": "MCP server for remote-signer service. Run with: npx remote-signer-mcp",
   "type": "module",
   "main": "build/index.js",
   "bin": {
-    "remote-signer-mcp": "./build/index.js"
+    "remote-signer-mcp": "build/index.js"
   },
   "scripts": {
     "build": "tsc",
     "start": "node build/index.js",
     "dev": "tsc --watch",
-    "install-global": "cd ../js-client && npm run build && npm link && cd ../mcp-server && npm run build && npm link"
+    "prepublishOnly": "npm run build"
   },
+  "files": [
+    "build",
+    "README.md"
+  ],
   "keywords": [
     "remote-signer",
     "mcp",
@@ -23,7 +27,7 @@
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
-    "@remote-signer/client": "file:../js-client",
+    "remote-signer-client": "^0.0.1",
     "zod": "^3.25.0"
   },
   "devDependencies": {
