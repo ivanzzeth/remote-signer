@@ -324,7 +324,16 @@ Template files define variables with a **description** field; that description i
 - **Templates use a subset of the preset variables**  
   A preset usually contains the **union** of variables needed by all its templates (e.g. auth needs `chain_id`, trading needs `allowed_safe_addresses`). When a template is expanded, only the placeholders it actually uses (e.g. `${chain_id}`) are replaced; extra keys in the variable map are simply unused for that template and cause no problem.
 
-### 5.8 Loading multiple presets (e.g. Polymarket + Opinion)
+### 5.8 Budget and schedule in presets (templates with budget_metering)
+
+Presets can include **`budget`** and **`schedule`** so that instance rules get budget enforcement and period reset when config is synced (or when instantiating via API with the same structure).
+
+- **`budget`** (optional block): when present, **`unit`** is **required**. It identifies what is being consumed (e.g. per chain+token) so budgets do not get mixed up. Also: `max_total`, `max_per_tx`, `max_tx_count`, `alert_pct`. **All** of these fields support template variables (`${var}`).
+- **`schedule`** (optional): `period` (e.g. `"24h"`, `"168h"`), optional `start_at` (RFC3339).
+
+**Template variables** are supported in **every** budget and schedule field: any string value can use `${var}` (e.g. `unit: "${chain_id}:${token_address}"`, `max_total: "${max_transfer_amount}"`, `period: "${budget_period}"`). The CLI substitutes them from the preset’s `variables` (and `--set` overrides) when generating the rule config; the server also substitutes at sync time so config-sourced rules get the same behaviour. **Optional fields** (`max_total`, `max_per_tx`, `max_tx_count`, `alert_pct`): if a variable is instantiated to **empty**, that is accepted and treated as no limit or default (empty → `-1` for `max_total`/`max_per_tx`, 0 for `max_tx_count`, 80 for `alert_pct`). **Cap semantics**: **`-1` = no cap** (unlimited); **`0` = cap of zero** (block all). So you can temporarily disable the budget by setting `max_total`/`max_per_tx` to `-1` without confusing with a real zero limit. Only `unit` must resolve to a non-empty value.
+
+### 5.9 Loading multiple presets (e.g. Polymarket + Opinion)
 
 You can load several presets into the same config (e.g. Polymarket and Opinion). Rules and variables are isolated per rule, so they do not interfere. **One thing can go wrong: template name collision.**
 
@@ -342,7 +351,7 @@ You can load several presets into the same config (e.g. Polymarket and Opinion).
 
 For multi-rule presets, the CLI may support something like `--rule-index 0` to target the first rule. See the CLI help and [remote-signer-cli design](features/remote-signer-cli-design.md) for details.
 
-### 5.9 Using presets in setup
+### 5.10 Using presets in setup
 
 **setup.sh** runs an optional step (Step 4b) after generating config: “Add rules from preset?”. If the user agrees, it:
 

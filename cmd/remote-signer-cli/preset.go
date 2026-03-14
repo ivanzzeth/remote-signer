@@ -298,6 +298,8 @@ func parsePresetFile(data []byte, overrides map[string]string) ([]config.RuleCon
 		ChainID       string                 `yaml:"chain_id"`
 		Enabled       bool                   `yaml:"enabled"`
 		Variables     map[string]interface{} `yaml:"variables"`
+		Budget        map[string]interface{} `yaml:"budget"`   // optional: max_total, max_per_tx, max_tx_count, alert_pct — enables budget enforcement
+		Schedule      map[string]interface{} `yaml:"schedule"`  // optional: period (e.g. "24h"), start_at — enables period reset (session)
 	}
 	if err := yaml.Unmarshal(data, &single); err != nil {
 		return nil, err
@@ -329,6 +331,13 @@ func parsePresetFile(data []byte, overrides map[string]string) ([]config.RuleCon
 			if n > 1 {
 				ruleName = baseName + " (" + templateName + ")"
 			}
+			cfg := map[string]interface{}{"template": templateName, "variables": copyMapInterface(variables)}
+			if len(single.Budget) > 0 {
+				cfg["budget"] = substituteMapVars(copyMapInterface(single.Budget), variables)
+			}
+			if len(single.Schedule) > 0 {
+				cfg["schedule"] = substituteMapVars(copyMapInterface(single.Schedule), variables)
+			}
 			rules = append(rules, config.RuleConfig{
 				Name:      ruleName,
 				Type:      "instance",
@@ -336,7 +345,7 @@ func parsePresetFile(data []byte, overrides map[string]string) ([]config.RuleCon
 				ChainType: single.ChainType,
 				ChainID:   single.ChainID,
 				Enabled:   single.Enabled,
-				Config:    map[string]interface{}{"template": templateName, "variables": copyMapInterface(variables)},
+				Config:    cfg,
 			})
 		}
 		if len(rules) == 0 {
@@ -349,6 +358,13 @@ func parsePresetFile(data []byte, overrides map[string]string) ([]config.RuleCon
 		for k, v := range overrides {
 			variables[k] = v
 		}
+		cfg := map[string]interface{}{"template": single.Template, "variables": variables}
+		if len(single.Budget) > 0 {
+			cfg["budget"] = substituteMapVars(copyMapInterface(single.Budget), variables)
+		}
+		if len(single.Schedule) > 0 {
+			cfg["schedule"] = substituteMapVars(copyMapInterface(single.Schedule), variables)
+		}
 		r := config.RuleConfig{
 			Name:      single.Name,
 			Type:      "instance",
@@ -356,7 +372,7 @@ func parsePresetFile(data []byte, overrides map[string]string) ([]config.RuleCon
 			ChainType: single.ChainType,
 			ChainID:   single.ChainID,
 			Enabled:   single.Enabled,
-			Config:    map[string]interface{}{"template": single.Template, "variables": variables},
+			Config:    cfg,
 		}
 		return []config.RuleConfig{r}, nil
 	}
@@ -393,6 +409,42 @@ func copyMapInterface(m map[string]interface{}) map[string]interface{} {
 		out[k] = v
 	}
 	return out
+}
+
+// substituteMapVars replaces ${var} in string values of m with variables[var].
+// Supports the same template variable experience as template config (e.g. unit: "${chain_id}:${token_address}").
+func substituteMapVars(m map[string]interface{}, variables map[string]interface{}) map[string]interface{} {
+	if m == nil || len(variables) == 0 {
+		return m
+	}
+	out := make(map[string]interface{}, len(m))
+	for k, v := range m {
+		out[k] = substituteVarInValue(v, variables)
+	}
+	return out
+}
+
+func substituteVarInValue(v interface{}, variables map[string]interface{}) interface{} {
+	switch val := v.(type) {
+	case string:
+		s := val
+		for k, vv := range variables {
+			s = strings.ReplaceAll(s, "${"+k+"}", fmt.Sprintf("%v", vv))
+		}
+		return s
+	case map[string]interface{}:
+		return substituteMapVars(val, variables)
+	case map[interface{}]interface{}:
+		out := make(map[string]interface{}, len(val))
+		for kk, vv := range val {
+			if sk, ok := kk.(string); ok {
+				out[sk] = substituteVarInValue(vv, variables)
+			}
+		}
+		return out
+	default:
+		return v
+	}
 }
 
 func toMapStringInterface(v interface{}) map[string]interface{} {

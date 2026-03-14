@@ -15,6 +15,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/ivanzzeth/remote-signer/internal/audit"
+	rulepkg "github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/ruleconfig"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
@@ -31,10 +32,12 @@ type RuleFileConfig struct {
 
 // RuleInitializer handles syncing rules from config to database
 type RuleInitializer struct {
-	repo        storage.RuleRepository
-	logger      *slog.Logger
-	configDir   string // Base directory for resolving relative file paths
-	auditLogger *audit.AuditLogger
+	repo         storage.RuleRepository
+	templateRepo storage.TemplateRepository // optional: for instance rules — set TemplateID and create budget
+	budgetRepo   storage.BudgetRepository  // optional: for instance rules with budget
+	logger       *slog.Logger
+	configDir    string // Base directory for resolving relative file paths
+	auditLogger  *audit.AuditLogger
 }
 
 // NewRuleInitializer creates a new rule initializer
@@ -50,6 +53,16 @@ func NewRuleInitializer(repo storage.RuleRepository, logger *slog.Logger) (*Rule
 		logger:    logger,
 		configDir: ".", // Default to current directory
 	}, nil
+}
+
+// SetTemplateRepo sets the template repository for instance-rule sync (TemplateID + budget).
+func (i *RuleInitializer) SetTemplateRepo(repo storage.TemplateRepository) {
+	i.templateRepo = repo
+}
+
+// SetBudgetRepo sets the budget repository for instance-rule sync (create budget records).
+func (i *RuleInitializer) SetBudgetRepo(repo storage.BudgetRepository) {
+	i.budgetRepo = repo
 }
 
 // SetConfigDir sets the base directory for resolving relative file paths in rule files
@@ -105,20 +118,74 @@ func (i *RuleInitializer) SyncFromConfig(ctx context.Context, rules []RuleConfig
 		expectedIDs[ruleID] = true
 	}
 
+	// Pre-load templates needed by instance rules so we do not call templateRepo inside the
+	// transaction (avoids deadlock when DB has a single connection).
+	templatesByName := i.preloadTemplatesForSync(ctx, expandedRules)
+
+	var pendingBudgets []pendingBudgetCreate
 	syncBody := func(repo storage.RuleRepository) error {
-		return i.executeSyncBody(ctx, repo, expandedRules, expectedIDs)
+		return i.executeSyncBody(ctx, repo, expandedRules, expectedIDs, templatesByName, &pendingBudgets)
 	}
 
-	// Use transaction if repository supports it
 	if txRepo, ok := i.repo.(storage.Transactional); ok {
-		return txRepo.RunInTransaction(ctx, syncBody)
+		if err = txRepo.RunInTransaction(ctx, syncBody); err != nil {
+			return err
+		}
+	} else {
+		if err = syncBody(i.repo); err != nil {
+			return err
+		}
 	}
-	return syncBody(i.repo)
+
+	// Create budget records after the transaction so we do not use a second DB connection inside the tx.
+	for _, p := range pendingBudgets {
+		if createErr := createBudgetFromInstanceConfig(ctx, p.Rule, p.Tmpl, p.InstanceBudget, i.budgetRepo); createErr != nil {
+			return fmt.Errorf("create budget for rule %s: %w", p.Rule.ID, createErr)
+		}
+	}
+	return nil
+}
+
+// pendingBudgetCreate holds data to create a budget after the rule-sync transaction commits.
+type pendingBudgetCreate struct {
+	Rule           *types.Rule
+	Tmpl           *types.RuleTemplate
+	InstanceBudget map[string]interface{}
+}
+
+// preloadTemplatesForSync returns a map of template name -> template for all instance rules
+// that reference a template. Loaded outside any transaction to avoid deadlock with single-conn DB.
+func (i *RuleInitializer) preloadTemplatesForSync(ctx context.Context, expandedRules []RuleConfig) map[string]*types.RuleTemplate {
+	if i.templateRepo == nil {
+		return nil
+	}
+	names := make(map[string]struct{})
+	for _, ruleCfg := range expandedRules {
+		if ruleCfg.Config == nil {
+			continue
+		}
+		if n, ok := ruleCfg.Config["__template_name"].(string); ok && n != "" {
+			names[n] = struct{}{}
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	out := make(map[string]*types.RuleTemplate, len(names))
+	for name := range names {
+		t, err := i.templateRepo.GetByName(ctx, name)
+		if err == nil && t != nil {
+			out[name] = t
+		}
+	}
+	return out
 }
 
 // executeSyncBody performs the actual sync: delete stale rules, upsert current rules, verify consistency.
 // repo is the (possibly transactional) repository to use for all operations.
-func (i *RuleInitializer) executeSyncBody(ctx context.Context, repo storage.RuleRepository, expandedRules []RuleConfig, expectedIDs map[types.RuleID]bool) error {
+// templatesByName is optional; when set, instance-rule template lookup uses it instead of templateRepo (avoids DB calls inside tx).
+// pendingBudgets is filled with new rules that need a budget record; caller creates them after the transaction.
+func (i *RuleInitializer) executeSyncBody(ctx context.Context, repo storage.RuleRepository, expandedRules []RuleConfig, expectedIDs map[types.RuleID]bool, templatesByName map[string]*types.RuleTemplate, pendingBudgets *[]pendingBudgetCreate) error {
 	// Get all existing config-sourced rules from database
 	configSource := types.RuleSourceConfig
 	existingRules, err := repo.List(ctx, storage.RuleFilter{
@@ -156,7 +223,7 @@ func (i *RuleInitializer) executeSyncBody(ctx context.Context, repo storage.Rule
 	synced := 0
 	for idx, ruleCfg := range expandedRules {
 		ruleID := i.effectiveRuleID(idx, ruleCfg)
-		if err := i.syncRule(ctx, repo, ruleID, ruleCfg); err != nil {
+		if err := i.syncRule(ctx, repo, ruleID, ruleCfg, templatesByName, pendingBudgets); err != nil {
 			return fmt.Errorf("failed to sync rule %s: %w", ruleCfg.Name, err)
 		}
 		synced++
@@ -336,7 +403,7 @@ func (i *RuleInitializer) effectiveRuleID(idx int, ruleCfg RuleConfig) types.Rul
 	return EffectiveRuleID(idx, ruleCfg)
 }
 
-func (i *RuleInitializer) syncRule(ctx context.Context, repo storage.RuleRepository, ruleID types.RuleID, ruleCfg RuleConfig) error {
+func (i *RuleInitializer) syncRule(ctx context.Context, repo storage.RuleRepository, ruleID types.RuleID, ruleCfg RuleConfig, templatesByName map[string]*types.RuleTemplate, pendingBudgets *[]pendingBudgetCreate) error {
 	// Check if rule already exists in DB (needed for both enabled and disabled paths)
 	existing, err := repo.Get(ctx, ruleID)
 	if err != nil && !types.IsNotFound(err) {
@@ -364,6 +431,30 @@ func (i *RuleInitializer) syncRule(ctx context.Context, repo storage.RuleReposit
 	// Validate mode (whitelist or blocklist only)
 	if err := pkgvalidate.ValidateRuleMode(ruleCfg.Mode); err != nil {
 		return fmt.Errorf("rule %q: %w", ruleCfg.Name, err)
+	}
+
+	// Extract instance-only fields for TemplateID + budget + schedule (stripped before persist)
+	var templateName string
+	var instanceBudget map[string]interface{}
+	var instanceSchedule map[string]interface{}
+	if ruleCfg.Config != nil {
+		if n, ok := ruleCfg.Config["__template_name"].(string); ok && n != "" {
+			templateName = n
+		}
+		if b, ok := ruleCfg.Config["__budget"].(map[string]interface{}); ok {
+			instanceBudget = b
+		}
+		if s, ok := ruleCfg.Config["__schedule"].(map[string]interface{}); ok {
+			instanceSchedule = s
+		}
+		// Strip so they are not stored in rule config
+		configCopy := make(map[string]interface{}, len(ruleCfg.Config))
+		for k, v := range ruleCfg.Config {
+			if k != "__template_name" && k != "__budget" && k != "__schedule" {
+				configCopy[k] = v
+			}
+		}
+		ruleCfg.Config = configCopy
 	}
 
 	// Validate rule config format (same logic as API and validate-rules)
@@ -423,6 +514,36 @@ func (i *RuleInitializer) syncRule(ctx context.Context, repo storage.RuleReposit
 		rule.SignerAddress = &ruleCfg.SignerAddress
 	}
 
+	// Instance-rule: set TemplateID and schedule so budget enforcement and period reset apply
+	var tmpl *types.RuleTemplate
+	if templateName != "" {
+		if templatesByName != nil {
+			tmpl = templatesByName[templateName]
+		} else if i.templateRepo != nil {
+			t, err := i.templateRepo.GetByName(ctx, templateName)
+			if err == nil && t != nil {
+				tmpl = t
+			}
+		}
+		if tmpl != nil {
+			rule.TemplateID = &tmpl.ID
+		}
+	}
+	if len(instanceSchedule) > 0 {
+		if p, ok := instanceSchedule["period"].(string); ok && p != "" {
+			if d, err := time.ParseDuration(p); err == nil && d > 0 {
+				rule.BudgetPeriod = &d
+				rule.BudgetPeriodStart = &time.Time{}
+				*rule.BudgetPeriodStart = time.Now()
+				if s, ok := instanceSchedule["start_at"].(string); ok && s != "" {
+					if t, err := time.Parse(time.RFC3339, s); err == nil {
+						rule.BudgetPeriodStart = &t
+					}
+				}
+			}
+		}
+	}
+
 	if existing == nil {
 		// Create new rule
 		rule.CreatedAt = time.Now()
@@ -430,6 +551,20 @@ func (i *RuleInitializer) syncRule(ctx context.Context, repo storage.RuleReposit
 
 		if err := repo.Create(ctx, rule); err != nil {
 			return fmt.Errorf("failed to create rule: %w", err)
+		}
+
+		// Defer budget creation until after the transaction to avoid using a second DB connection inside tx.
+		// Copy rule (heap) so Variables are not overwritten when the next syncRule reuses the same rule struct.
+		if i.budgetRepo != nil && len(instanceBudget) > 0 && tmpl != nil && len(tmpl.BudgetMetering) > 0 && pendingBudgets != nil {
+			ruleCopy := new(types.Rule)
+			*ruleCopy = *rule
+			ruleCopy.Variables = make([]byte, len(rule.Variables))
+			copy(ruleCopy.Variables, rule.Variables)
+			*pendingBudgets = append(*pendingBudgets, pendingBudgetCreate{
+				Rule:           ruleCopy,
+				Tmpl:           tmpl,
+				InstanceBudget: instanceBudget,
+			})
 		}
 
 		i.logger.Info("Created rule from config",
@@ -454,6 +589,15 @@ func (i *RuleInitializer) syncRule(ctx context.Context, repo storage.RuleReposit
 		existing.SignerAddress = rule.SignerAddress
 		existing.Enabled = rule.Enabled
 		existing.Variables = rule.Variables
+		if rule.TemplateID != nil {
+			existing.TemplateID = rule.TemplateID
+		}
+		if rule.BudgetPeriod != nil {
+			existing.BudgetPeriod = rule.BudgetPeriod
+		}
+		if rule.BudgetPeriodStart != nil {
+			existing.BudgetPeriodStart = rule.BudgetPeriodStart
+		}
 		existing.UpdatedAt = time.Now()
 
 		if err := repo.Update(ctx, existing); err != nil {
@@ -472,4 +616,183 @@ func (i *RuleInitializer) syncRule(ctx context.Context, repo storage.RuleReposit
 	}
 
 	return nil
+}
+
+// ruleVariablesToStringMap unmarshals rule.Variables (JSON may have number or string values from YAML)
+// into a map with string values so substitution never drops keys (e.g. chain_id: 1 -> "1").
+func ruleVariablesToStringMap(variablesJSON []byte) map[string]string {
+	if len(variablesJSON) == 0 {
+		return nil
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(variablesJSON, &raw); err != nil || len(raw) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(raw))
+	for k, v := range raw {
+		if v == nil {
+			continue
+		}
+		s := strings.TrimSpace(fmt.Sprintf("%v", v))
+		// Skip empty so we never substitute with "" (which would produce ":" for unit "${chain_id}:${token_address}")
+		if s != "" {
+			out[k] = s
+		}
+	}
+	return out
+}
+
+// substituteBudgetMapVars replaces ${var} in all string values of m using vars (e.g. rule.Variables).
+// So every budget field (unit, max_total, max_per_tx, max_tx_count, alert_pct) supports template variables at sync time.
+func substituteBudgetMapVars(m map[string]interface{}, vars map[string]string) map[string]interface{} {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]interface{}, len(m))
+	for k, v := range m {
+		out[k] = substituteBudgetValue(v, vars)
+	}
+	return out
+}
+
+func substituteBudgetValue(v interface{}, vars map[string]string) interface{} {
+	if len(vars) == 0 {
+		return v
+	}
+	switch val := v.(type) {
+	case string:
+		s := val
+		for k, vv := range vars {
+			s = strings.ReplaceAll(s, "${"+k+"}", vv)
+		}
+		return s
+	case map[string]interface{}:
+		return substituteBudgetMapVars(val, vars)
+	case map[interface{}]interface{}:
+		out := make(map[string]interface{}, len(val))
+		for kk, vv := range val {
+			if sk, ok := kk.(string); ok {
+				out[sk] = substituteBudgetValue(vv, vars)
+			}
+		}
+		return out
+	default:
+		return v
+	}
+}
+
+// createBudgetFromInstanceConfig creates a budget record for a config-synced instance rule
+// so that budget enforcement (max_total, max_per_tx) and period reset apply.
+// All budget fields support template variables (${var}); unit is required and must resolve to non-empty.
+// Optional fields (max_total, max_per_tx, max_tx_count, alert_pct): empty after substitution is accepted (defaults: 0 or 80).
+func createBudgetFromInstanceConfig(ctx context.Context, rule *types.Rule, tmpl *types.RuleTemplate, budgetMap map[string]interface{}, budgetRepo storage.BudgetRepository) error {
+	vars := ruleVariablesToStringMap(rule.Variables)
+	// Resolve unit from budget map: support both "unit" and "Unit" and substitute with rule variables.
+	unitRaw, _ := budgetMap["unit"].(string)
+	if unitRaw == "" {
+		if u, ok := budgetMap["Unit"].(string); ok {
+			unitRaw = u
+		}
+	}
+	for k, v := range vars {
+		unitRaw = strings.ReplaceAll(unitRaw, "${"+k+"}", v)
+	}
+	unit := strings.TrimSpace(unitRaw)
+	// Substitute remaining budget fields for max_total, max_per_tx, etc.
+	substituted := substituteBudgetMapVars(budgetMap, vars)
+	if substituted == nil {
+		substituted = budgetMap
+	}
+	if unit == "" {
+		if v, ok := substituted["unit"]; ok && v != nil {
+			unit = strings.TrimSpace(fmt.Sprintf("%v", v))
+		}
+	}
+	if unit == "" {
+		return fmt.Errorf("budget.unit is required when budget is set (e.g. \"${chain_id}:${token_address}\") to identify what is being consumed")
+	}
+	if strings.Contains(unit, "${") {
+		return fmt.Errorf("budget.unit is required and must resolve to a non-empty value after variable substitution (rule %s had unit %q, variables=%s)", rule.ID, unit, string(rule.Variables))
+	}
+	if unit == ":" || len(unit) < 3 {
+		// Fallback: resolve unit from template budget_metering.unit (e.g. "${chain_id}:${token_address}") with rule variables.
+		if len(tmpl.BudgetMetering) > 0 && len(vars) > 0 {
+			var metering types.BudgetMetering
+			if err := json.Unmarshal(tmpl.BudgetMetering, &metering); err == nil && metering.Unit != "" {
+				unitFallback := metering.Unit
+				for k, v := range vars {
+					unitFallback = strings.ReplaceAll(unitFallback, "${"+k+"}", v)
+				}
+				unitFallback = strings.TrimSpace(unitFallback)
+				if unitFallback != "" && !strings.Contains(unitFallback, "${") {
+					unit = unitFallback
+				}
+			}
+		}
+	}
+	if unit == ":" || len(unit) < 3 {
+		return fmt.Errorf("budget.unit resolved to invalid value %q for rule %s (variables=%s)", unit, rule.ID, string(rule.Variables))
+	}
+	unit = rulepkg.NormalizeBudgetUnit(unit)
+	// Optional: alert_pct; empty or 0 → default 80
+	alertPct := 80
+	if v, ok := substituted["alert_pct"]; ok && v != nil {
+		s := strings.TrimSpace(fmt.Sprintf("%v", v))
+		if s != "" {
+			var n int
+			if _, err := fmt.Sscanf(s, "%d", &n); err == nil && n > 0 {
+				alertPct = n
+			}
+		}
+	}
+	if alertPct <= 0 {
+		alertPct = 80
+	}
+	// Optional: max_total; empty → "-1" (no cap). Only -1 means no cap; 0 means cap of 0 (so you can temporarily disable by setting -1).
+	maxTotal := "-1"
+	if v, ok := substituted["max_total"]; ok && v != nil {
+		s := strings.TrimSpace(fmt.Sprintf("%v", v))
+		if s != "" {
+			maxTotal = s
+		}
+	}
+	// Optional: max_per_tx; empty → "-1" (no per-tx cap). Only -1 means no cap; 0 = cap of 0.
+	maxPerTx := "-1"
+	if v, ok := substituted["max_per_tx"]; ok && v != nil {
+		s := strings.TrimSpace(fmt.Sprintf("%v", v))
+		if s != "" {
+			maxPerTx = s
+		}
+	}
+	// Optional: max_tx_count; empty → 0
+	maxTxCount := 0
+	if v, ok := substituted["max_tx_count"]; ok && v != nil {
+		s := strings.TrimSpace(fmt.Sprintf("%v", v))
+		if s != "" {
+			var n int
+			if _, err := fmt.Sscanf(s, "%d", &n); err == nil {
+				maxTxCount = n
+			}
+		} else {
+			switch n := v.(type) {
+			case int:
+				maxTxCount = n
+			case float64:
+				maxTxCount = int(n)
+			}
+		}
+	}
+	budgetID := fmt.Sprintf("bdg_%s_%s", rule.ID, unit)
+	budget := &types.RuleBudget{
+		ID:         budgetID,
+		RuleID:     rule.ID,
+		Unit:       unit,
+		MaxTotal:   maxTotal,
+		MaxPerTx:   maxPerTx,
+		Spent:      "0",
+		AlertPct:   alertPct,
+		TxCount:    0,
+		MaxTxCount: maxTxCount,
+	}
+	return budgetRepo.Create(ctx, budget)
 }

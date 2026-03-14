@@ -166,6 +166,8 @@ func run() error {
 	// Set config directory for resolving relative paths in rule files
 	ruleInit.SetConfigDir(filepath.Dir(*configPath))
 	ruleInit.SetAuditLogger(auditLogger)
+	ruleInit.SetTemplateRepo(templateRepo)
+	ruleInit.SetBudgetRepo(budgetRepo)
 	// Expand template instance rules before syncing (type: "instance" → concrete rules)
 	loadedTemplates, err := templateInit.GetLoadedTemplates(cfg.Templates)
 	if err != nil {

@@ -7,23 +7,25 @@ import (
 
 // Rule represents an authorization rule.
 type Rule struct {
-	ID            string     `json:"id"`
-	Name          string     `json:"name"`
-	Description   string     `json:"description,omitempty"`
-	Type          string     `json:"type"`
-	Mode          string     `json:"mode"`
-	Source        string     `json:"source"`
-	ChainType     *string    `json:"chain_type,omitempty"`
-	ChainID       *string    `json:"chain_id,omitempty"`
-	APIKeyID      *string    `json:"api_key_id,omitempty"`
-	SignerAddress *string    `json:"signer_address,omitempty"`
-	Config        RuleConfig `json:"config,omitempty"`
-	Enabled       bool       `json:"enabled"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
-	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
-	MatchCount    uint64     `json:"match_count"`
-	LastMatchedAt *time.Time `json:"last_matched_at,omitempty"`
+	ID                string     `json:"id"`
+	Name              string     `json:"name"`
+	Description       string     `json:"description,omitempty"`
+	Type              string     `json:"type"`
+	Mode              string     `json:"mode"`
+	Source            string     `json:"source"`
+	ChainType         *string    `json:"chain_type,omitempty"`
+	ChainID           *string    `json:"chain_id,omitempty"`
+	APIKeyID          *string    `json:"api_key_id,omitempty"`
+	SignerAddress     *string    `json:"signer_address,omitempty"`
+	Config            RuleConfig `json:"config,omitempty"`
+	Enabled           bool       `json:"enabled"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
+	ExpiresAt         *time.Time `json:"expires_at,omitempty"`
+	MatchCount        uint64     `json:"match_count"`
+	LastMatchedAt     *time.Time `json:"last_matched_at,omitempty"`
+	BudgetPeriod      string     `json:"budget_period,omitempty"`      // e.g. "24h0m0s" when schedule.period is set
+	BudgetPeriodStart *string    `json:"budget_period_start,omitempty"` // RFC3339
 }
 
 // RuleConfig represents the configuration for a rule.

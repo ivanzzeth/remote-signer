@@ -309,9 +309,19 @@ templates:
       path: "rules/templates/polymarket_safe.template.yaml"
 ```
 
-### Budget metering (optional)
+### Budget metering and enforcement (optional)
 
-Templates can define `budget_metering` so that **instance** rules get per-request spend amounts for budget enforcement. When instantiating via API you can attach limits (e.g. `max_total`, `max_per_tx`). Supported `method` values include `count_only`, `tx_value`, `calldata_param`, `typed_data_field`, and **`js`** (for `evm_js` rules: the script implements `validateBudget(input)` and returns the amount). For multi-chain assets, use a unit that identifies chain and asset, e.g. **`"${chain_id}:${token_address}"`** so the same token on different chains has separate budgets.
+Templates can define `budget_metering` so that **instance** rules get per-request spend amounts for budget enforcement. **Enforcement (卡上限)** only runs when the rule has a **template ID** and a **budget record**:
+
+- **API-created instances**: When you call the instantiate API with `budget` (e.g. `max_total`, `max_per_tx`) and optionally `schedule` (e.g. `period: "24h"`), the server creates a budget record and sets the rule’s template ID. Every matching request then goes through `CheckAndDeductBudget`: single-tx cap (`max_per_tx`) and total cap (`max_total`) are enforced; over limit → request blocked. Use **`-1` for no cap** (temporarily disable limit); **`0` = cap of zero** (block all).
+- **Config-sourced instance rules**: If your config is produced from a **preset** that includes `budget` and `schedule`, the rule sync creates budget records and sets the rule’s template ID so the same enforcement applies. Presets that use templates with `budget_metering` should set `budget` and optionally `schedule` so limits and period reset are applied.
+
+**Session / period (周期重置)**:
+
+- `schedule.period` (e.g. `24h`, `168h`) plus optional `schedule.start_at` enable **periodic budget renewal**: spent/tx_count reset at the start of each period so limits are “per period” (e.g. daily cap).
+- Without `schedule`, the budget is lifetime (no automatic reset).
+
+Supported `method` values: `count_only`, `tx_value`, `calldata_param`, `typed_data_field`, and **`js`** (for `evm_js` rules: the script implements `validateBudget(input)` and returns the amount). For multi-chain assets, use a unit that identifies chain and asset, e.g. **`"${chain_id}:${token_address}"`** so the same token on different chains has separate budgets.
 
 ## Environment Variables
 

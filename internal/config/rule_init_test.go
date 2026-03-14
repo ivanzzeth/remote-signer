@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -556,4 +557,60 @@ func TestSyncFromConfig_DuplicateRuleIDs(t *testing.T) {
 	err := init.SyncFromConfig(ctx, rules)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "duplicate rule id")
+}
+
+// createBudgetFromInstanceConfig requires budget.unit when budget block is present
+func TestCreateBudgetFromInstanceConfig_RequiresUnit(t *testing.T) {
+	ctx := context.Background()
+	rule := &types.Rule{ID: "r1", Variables: []byte("{}")}
+	tmpl := &types.RuleTemplate{ID: "t1", BudgetMetering: []byte(`{"method":"count_only","unit":"fallback"}`)}
+
+	// Budget map with max_total but no unit must fail
+	noUnit := map[string]interface{}{"max_total": "1000"}
+	err := createBudgetFromInstanceConfig(ctx, rule, tmpl, noUnit, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "budget.unit is required")
+}
+
+// mockBudgetRepoForCreate implements only Create for tests that need a non-nil BudgetRepository
+type mockBudgetRepoForCreate struct{}
+
+func (m *mockBudgetRepoForCreate) Create(ctx context.Context, budget *types.RuleBudget) error { return nil }
+func (m *mockBudgetRepoForCreate) GetByRuleID(ctx context.Context, ruleID types.RuleID, unit string) (*types.RuleBudget, error) {
+	return nil, nil
+}
+func (m *mockBudgetRepoForCreate) Delete(ctx context.Context, id string) error   { return nil }
+func (m *mockBudgetRepoForCreate) DeleteByRuleID(ctx context.Context, ruleID types.RuleID) error { return nil }
+func (m *mockBudgetRepoForCreate) AtomicSpend(ctx context.Context, ruleID types.RuleID, unit, amount string) error {
+	return nil
+}
+func (m *mockBudgetRepoForCreate) ResetBudget(ctx context.Context, ruleID types.RuleID, unit string, currentPeriodStart time.Time) error {
+	return nil
+}
+func (m *mockBudgetRepoForCreate) ListByRuleID(ctx context.Context, ruleID types.RuleID) ([]*types.RuleBudget, error) {
+	return nil, nil
+}
+func (m *mockBudgetRepoForCreate) ListByRuleIDs(ctx context.Context, ruleIDs []types.RuleID) ([]*types.RuleBudget, error) {
+	return nil, nil
+}
+func (m *mockBudgetRepoForCreate) MarkAlertSent(ctx context.Context, ruleID types.RuleID, unit string) error {
+	return nil
+}
+
+// createBudgetFromInstanceConfig accepts empty for optional fields (template variable instantiated to empty)
+func TestCreateBudgetFromInstanceConfig_AcceptsEmptyOptionalFields(t *testing.T) {
+	ctx := context.Background()
+	rule := &types.Rule{ID: "r1", Variables: []byte(`{"max_transfer_amount":"","alert_pct":""}`)}
+	tmpl := &types.RuleTemplate{ID: "t1", BudgetMetering: []byte(`{"method":"count_only","unit":"x"}`)}
+	repo := &mockBudgetRepoForCreate{}
+
+	// unit required; optional fields can be empty (e.g. ${max_transfer_amount} → "")
+	budgetMap := map[string]interface{}{
+		"unit":        "1:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+		"max_total":  "${max_transfer_amount}", // resolves to ""
+		"max_per_tx": "",
+		"alert_pct":  "",
+	}
+	err := createBudgetFromInstanceConfig(ctx, rule, tmpl, budgetMap, repo)
+	require.NoError(t, err)
 }
