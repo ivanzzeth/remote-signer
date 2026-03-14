@@ -4,9 +4,12 @@
       "command": "npx",
       "args": ["-y", "remote-signer-mcp"],
       "env": {
-        "REMOTE_SIGNER_URL": "http://localhost:8548",
-        "REMOTE_SIGNER_API_KEY_ID": "admin-key",
-        "REMOTE_SIGNER_PRIVATE_KEY": "<your-ed25519-private-key-hex>"
+        "REMOTE_SIGNER_URL": "https://your-remote-signer.example.com",
+        "REMOTE_SIGNER_API_KEY_ID": "admin",
+        "REMOTE_SIGNER_PRIVATE_KEY_FILE": "/path/to/data/admin_private.pem",
+        "REMOTE_SIGNER_CA_FILE": "/path/to/ca.pem",
+        "REMOTE_SIGNER_CLIENT_CERT_FILE": "/path/to/client.pem",
+        "REMOTE_SIGNER_CLIENT_KEY_FILE": "/path/to/client-key.pem"
       }
     }
   }

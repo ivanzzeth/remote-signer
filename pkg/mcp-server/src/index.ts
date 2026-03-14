@@ -6,20 +6,98 @@
  * Provides MCP tools for interacting with the remote-signer service.
  * Uses the remote-signer-client npm package for authentication and API calls.
  *
- * Each tool has explicit, well-typed parameters so that LLMs can call them
- * without ambiguity.  EVM tools are prefixed with "evm_" for namespace clarity
- * and future multi-chain extensibility (e.g. solana_sign_message).
- *
  * Configuration via environment variables:
- *   REMOTE_SIGNER_URL        - Base URL of the remote-signer service (default: http://localhost:8548)
- *   REMOTE_SIGNER_API_KEY_ID - API key ID for authentication
- *   REMOTE_SIGNER_PRIVATE_KEY - Ed25519 private key (hex) for request signing
+ *   REMOTE_SIGNER_URL             - Base URL (default: http://localhost:8548)
+ *   REMOTE_SIGNER_API_KEY_ID      - API key ID for authentication
+ *   REMOTE_SIGNER_PRIVATE_KEY     - Ed25519 private key (hex); use this OR _FILE
+ *   REMOTE_SIGNER_PRIVATE_KEY_FILE - Path to PEM file (e.g. data/admin_private.pem); use this OR hex above
+ *   TLS / mTLS (optional):
+ *   REMOTE_SIGNER_CA_FILE         - Path to CA cert (PEM) for server cert verification
+ *   REMOTE_SIGNER_CLIENT_CERT_FILE - Path to client cert (PEM) for mTLS
+ *   REMOTE_SIGNER_CLIENT_KEY_FILE  - Path to client private key (PEM) for mTLS
+ *   REMOTE_SIGNER_TLS_INSECURE_SKIP_VERIFY - Set to "1" or "true" to skip server cert verify (insecure)
  */
 
+import * as fs from "fs";
+import * as path from "path";
+import * as crypto from "crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { RemoteSignerClient } from "remote-signer-client";
+
+// ---------------------------------------------------------------------------
+// Resolve private key: from hex env or from PEM file path
+// ---------------------------------------------------------------------------
+
+function readPrivateKeyHex(): string {
+  const hex = process.env.REMOTE_SIGNER_PRIVATE_KEY?.trim();
+  if (hex) return hex;
+  const filePath = process.env.REMOTE_SIGNER_PRIVATE_KEY_FILE?.trim();
+  if (!filePath) return "";
+  const resolved = path.resolve(filePath);
+  if (!fs.existsSync(resolved)) {
+    console.error(`Error: REMOTE_SIGNER_PRIVATE_KEY_FILE not found: ${resolved}`);
+    process.exit(1);
+  }
+  const pem = fs.readFileSync(resolved, "utf8");
+  try {
+    const key = crypto.createPrivateKey(pem);
+    const jwk = key.export({ format: "jwk" }) as { d?: string };
+    if (!jwk.d) {
+      console.error("Error: PEM file does not contain an Ed25519 private key (no 'd' in JWK)");
+      process.exit(1);
+    }
+    const bytes = Buffer.from(jwk.d, "base64url");
+    return bytes.toString("hex");
+  } catch (e) {
+    console.error("Error: failed to read private key from PEM file:", e);
+    process.exit(1);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Resolve TLS config from path env vars (optional)
+// ---------------------------------------------------------------------------
+
+function readTLSConfig(): { ca?: string; cert?: string; key?: string; rejectUnauthorized?: boolean } | undefined {
+  const caPath = process.env.REMOTE_SIGNER_CA_FILE?.trim();
+  const certPath = process.env.REMOTE_SIGNER_CLIENT_CERT_FILE?.trim();
+  const keyPath = process.env.REMOTE_SIGNER_CLIENT_KEY_FILE?.trim();
+  const skipVerify = process.env.REMOTE_SIGNER_TLS_INSECURE_SKIP_VERIFY;
+  const rejectUnauthorized = !(skipVerify === "1" || skipVerify === "true");
+
+  if (!caPath && !certPath && !keyPath && rejectUnauthorized) return undefined;
+
+  const tls: { ca?: string; cert?: string; key?: string; rejectUnauthorized?: boolean } = {
+    rejectUnauthorized,
+  };
+  if (caPath) {
+    const p = path.resolve(caPath);
+    if (!fs.existsSync(p)) {
+      console.error(`Error: REMOTE_SIGNER_CA_FILE not found: ${p}`);
+      process.exit(1);
+    }
+    tls.ca = fs.readFileSync(p, "utf8");
+  }
+  if (certPath) {
+    const p = path.resolve(certPath);
+    if (!fs.existsSync(p)) {
+      console.error(`Error: REMOTE_SIGNER_CLIENT_CERT_FILE not found: ${p}`);
+      process.exit(1);
+    }
+    tls.cert = fs.readFileSync(p, "utf8");
+  }
+  if (keyPath) {
+    const p = path.resolve(keyPath);
+    if (!fs.existsSync(p)) {
+      console.error(`Error: REMOTE_SIGNER_CLIENT_KEY_FILE not found: ${p}`);
+      process.exit(1);
+    }
+    tls.key = fs.readFileSync(p, "utf8");
+  }
+  return tls;
+}
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -27,18 +105,19 @@ import { RemoteSignerClient } from "remote-signer-client";
 
 const BASE_URL = process.env.REMOTE_SIGNER_URL || "http://localhost:8548";
 const API_KEY_ID = process.env.REMOTE_SIGNER_API_KEY_ID || "";
-const PRIVATE_KEY = process.env.REMOTE_SIGNER_PRIVATE_KEY || "";
+const PRIVATE_KEY = readPrivateKeyHex();
 
 if (!API_KEY_ID || !PRIVATE_KEY) {
   console.error(
-    "Error: REMOTE_SIGNER_API_KEY_ID and REMOTE_SIGNER_PRIVATE_KEY environment variables are required."
+    "Error: API key and private key are required. Set either:"
   );
-  console.error("Set the following environment variables:");
-  console.error("  REMOTE_SIGNER_API_KEY_ID   – your API key ID");
-  console.error("  REMOTE_SIGNER_PRIVATE_KEY  – Ed25519 private key (hex)");
+  console.error("  REMOTE_SIGNER_API_KEY_ID + REMOTE_SIGNER_PRIVATE_KEY (hex), or");
+  console.error("  REMOTE_SIGNER_API_KEY_ID + REMOTE_SIGNER_PRIVATE_KEY_FILE (path to PEM)");
   console.error("See .mcp.json.example for a configuration template.");
   process.exit(1);
 }
+
+const tlsConfig = readTLSConfig();
 
 // ---------------------------------------------------------------------------
 // Client & Server instances
@@ -50,6 +129,7 @@ const client = new RemoteSignerClient({
   privateKey: PRIVATE_KEY,
   pollInterval: 2000,
   pollTimeout: 300000,
+  ...(tlsConfig && { httpClient: { tls: tlsConfig } }),
 });
 
 const server = new McpServer({
@@ -661,6 +741,492 @@ server.registerTool(
     try {
       await client.evm.rules.delete(rule_id);
       return ok({ success: true, message: `Rule ${rule_id} deleted` });
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_list_rule_budgets  –  GET /api/v1/evm/rules/{id}/budgets
+// ===========================================================================
+
+server.registerTool(
+  "evm_list_rule_budgets",
+  {
+    title: "List Rule Budgets",
+    description:
+      "List budget records for a rule (spent, limits, alerts). " +
+      "Requires admin API key.",
+    inputSchema: {
+      rule_id: z.string().describe("The rule ID"),
+    },
+  },
+  async ({ rule_id }) => {
+    try {
+      const budgets = await client.evm.rules.listBudgets(rule_id);
+      return ok({ rule_id, budgets });
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_toggle_rule  –  PATCH /api/v1/evm/rules/{id} (enabled)
+// ===========================================================================
+
+server.registerTool(
+  "evm_toggle_rule",
+  {
+    title: "Toggle Rule",
+    description: "Enable or disable a rule by ID (requires admin API key)",
+    inputSchema: {
+      rule_id: z.string().describe("The rule ID to toggle"),
+      enabled: z.boolean().describe("true to enable, false to disable"),
+    },
+  },
+  async ({ rule_id, enabled }) => {
+    try {
+      const response = await client.evm.rules.toggle(rule_id, enabled);
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_list_hd_wallets  –  GET /api/v1/evm/hd-wallets
+// ===========================================================================
+
+server.registerTool(
+  "evm_list_hd_wallets",
+  {
+    title: "List HD Wallets",
+    description: "List all HD wallets (primary addresses and derived counts)",
+    inputSchema: {},
+  },
+  async () => {
+    try {
+      const response = await client.evm.hdWallets.list();
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_create_hd_wallet  –  POST /api/v1/evm/hd-wallets (action=create)
+// ===========================================================================
+
+server.registerTool(
+  "evm_create_hd_wallet",
+  {
+    title: "Create HD Wallet",
+    description:
+      "Create a new HD wallet. Returns primary address and base path. " +
+      "WARNING: Using this tool through an LLM is very dangerous and may lead to private key or mnemonic leakage. Prefer creating HD wallets via CLI or trusted tools only.",
+    inputSchema: {
+      password: z.string().describe("Password to encrypt the wallet"),
+      entropy_bits: z
+        .number()
+        .optional()
+        .default(256)
+        .describe("Entropy bits for mnemonic (default 256)"),
+    },
+  },
+  async ({ password, entropy_bits }) => {
+    try {
+      const response = await client.evm.hdWallets.create({
+        password,
+        entropy_bits,
+      });
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_import_hd_wallet  –  POST /api/v1/evm/hd-wallets (action=import)
+// ===========================================================================
+
+server.registerTool(
+  "evm_import_hd_wallet",
+  {
+    title: "Import HD Wallet",
+    description:
+      "Import an HD wallet from a mnemonic phrase. " +
+      "WARNING: Using this tool through an LLM is very dangerous and may lead to private key or mnemonic leakage. Never paste mnemonics into LLM conversations. Prefer importing via CLI or trusted tools only.",
+    inputSchema: {
+      password: z.string().describe("Password to encrypt the wallet"),
+      mnemonic: z.string().describe("BIP-39 mnemonic phrase"),
+    },
+  },
+  async ({ password, mnemonic }) => {
+    try {
+      const response = await client.evm.hdWallets.import({
+        password,
+        mnemonic,
+      });
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_derive_address  –  POST /api/v1/evm/hd-wallets/{primary}/derive
+// ===========================================================================
+
+server.registerTool(
+  "evm_derive_address",
+  {
+    title: "Derive Address",
+    description:
+      "Derive one or more addresses from an HD wallet. " +
+      "Use index for a single address, or start+count for a range.",
+    inputSchema: {
+      primary_address: z
+        .string()
+        .describe("Primary (recovery) address of the HD wallet"),
+      index: z
+        .number()
+        .optional()
+        .describe("Derive a single address at this index"),
+      start: z.number().optional().describe("Start index (for range)"),
+      count: z.number().optional().describe("Number of addresses (for range)"),
+    },
+  },
+  async ({ primary_address, index, start, count }) => {
+    try {
+      const response = await client.evm.hdWallets.deriveAddress(primary_address, {
+        index,
+        start,
+        count,
+      });
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_list_derived_addresses  –  GET /api/v1/evm/hd-wallets/{primary}/derived
+// ===========================================================================
+
+server.registerTool(
+  "evm_list_derived_addresses",
+  {
+    title: "List Derived Addresses",
+    description: "List derived addresses for an HD wallet",
+    inputSchema: {
+      primary_address: z
+        .string()
+        .describe("Primary (recovery) address of the HD wallet"),
+    },
+  },
+  async ({ primary_address }) => {
+    try {
+      const response = await client.evm.hdWallets.listDerived(primary_address);
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: list_templates  –  GET /api/v1/templates
+// ===========================================================================
+
+server.registerTool(
+  "list_templates",
+  {
+    title: "List Templates",
+    description: "List rule templates with optional filters",
+    inputSchema: {
+      type: z.string().optional().describe("Filter by type"),
+      source: z.string().optional().describe("Filter by source"),
+      enabled: z.boolean().optional().describe("Filter by enabled"),
+      limit: z.number().optional().describe("Max results"),
+      offset: z.number().optional().describe("Offset for pagination"),
+    },
+  },
+  async ({ type, source, enabled, limit, offset }) => {
+    try {
+      const response = await client.templates.list({
+        type,
+        source,
+        enabled,
+        limit,
+        offset,
+      });
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: get_template  –  GET /api/v1/templates/{id}
+// ===========================================================================
+
+server.registerTool(
+  "get_template",
+  {
+    title: "Get Template",
+    description: "Get a template by ID",
+    inputSchema: {
+      template_id: z.string().describe("The template ID"),
+    },
+  },
+  async ({ template_id }) => {
+    try {
+      const response = await client.templates.get(template_id);
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: create_template  –  POST /api/v1/templates
+// ===========================================================================
+
+server.registerTool(
+  "create_template",
+  {
+    title: "Create Template",
+    description: "Create a new rule template (requires admin API key)",
+    inputSchema: {
+      name: z.string().describe("Template name"),
+      description: z.string().optional().describe("Template description"),
+      type: z.string().describe("Template type"),
+      mode: z.string().describe("Template mode (e.g. whitelist, blocklist)"),
+      config: z.record(z.any()).describe("Template config object"),
+      enabled: z.boolean().describe("Whether the template is enabled"),
+      variables: z
+        .array(
+          z.object({
+            name: z.string(),
+            type: z.string(),
+            description: z.string().optional(),
+            required: z.boolean(),
+            default: z.string().optional(),
+          })
+        )
+        .optional()
+        .describe("Template variables"),
+      budget_metering: z.record(z.any()).optional().describe("Budget metering config"),
+      test_variables: z.record(z.string()).optional().describe("Test variable values"),
+    },
+  },
+  async ({
+    name,
+    description,
+    type,
+    mode,
+    config,
+    enabled,
+    variables,
+    budget_metering,
+    test_variables,
+  }) => {
+    try {
+      const response = await client.templates.create({
+        name,
+        description,
+        type,
+        mode,
+        config,
+        enabled,
+        variables,
+        budget_metering,
+        test_variables,
+      } as any);
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: update_template  –  PATCH /api/v1/templates/{id}
+// ===========================================================================
+
+server.registerTool(
+  "update_template",
+  {
+    title: "Update Template",
+    description: "Update an existing template",
+    inputSchema: {
+      template_id: z.string().describe("The template ID to update"),
+      name: z.string().optional().describe("New name"),
+      description: z.string().optional().describe("New description"),
+      config: z.record(z.any()).optional().describe("New config"),
+      enabled: z.boolean().optional().describe("Enable/disable"),
+    },
+  },
+  async ({ template_id, name, description, config, enabled }) => {
+    try {
+      const response = await client.templates.update(template_id, {
+        name,
+        description,
+        config,
+        enabled,
+      });
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: delete_template  –  DELETE /api/v1/templates/{id}
+// ===========================================================================
+
+server.registerTool(
+  "delete_template",
+  {
+    title: "Delete Template",
+    description: "Delete a template by ID",
+    inputSchema: {
+      template_id: z.string().describe("The template ID to delete"),
+    },
+  },
+  async ({ template_id }) => {
+    try {
+      await client.templates.delete(template_id);
+      return ok({ success: true, message: `Template ${template_id} deleted` });
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: instantiate_template  –  POST /api/v1/templates/{id}/instantiate
+// ===========================================================================
+
+server.registerTool(
+  "instantiate_template",
+  {
+    title: "Instantiate Template",
+    description:
+      "Instantiate a template into a concrete rule (with variables and optional budget/schedule)",
+    inputSchema: {
+      template_id: z.string().describe("The template ID"),
+      variables: z.record(z.string()).describe("Variable values keyed by name"),
+      template_name: z.string().optional().describe("Override template name"),
+      name: z.string().optional().describe("Rule name"),
+      chain_type: z.string().optional().describe("Chain type (e.g. evm)"),
+      chain_id: z.string().optional().describe("Chain ID"),
+      api_key_id: z.string().optional().describe("Scope to API key"),
+      signer_address: z.string().optional().describe("Scope to signer"),
+      expires_at: z.string().optional().describe("Expiry (RFC3339)"),
+      expires_in: z.string().optional().describe("Expiry duration (e.g. 24h)"),
+      budget: z
+        .object({
+          max_total: z.string(),
+          max_per_tx: z.string(),
+          max_tx_count: z.number().optional(),
+          alert_pct: z.number().optional(),
+        })
+        .optional()
+        .describe("Budget config for the instance"),
+      schedule: z
+        .object({
+          period: z.string(),
+          start_at: z.string().optional(),
+        })
+        .optional()
+        .describe("Schedule config"),
+    },
+  },
+  async (args) => {
+    try {
+      const {
+        template_id,
+        variables,
+        template_name,
+        name,
+        chain_type,
+        chain_id,
+        api_key_id,
+        signer_address,
+        expires_at,
+        expires_in,
+        budget,
+        schedule,
+      } = args;
+      const response = await client.templates.instantiate(template_id, {
+        variables,
+        template_name,
+        name,
+        chain_type,
+        chain_id,
+        api_key_id,
+        signer_address,
+        expires_at,
+        expires_in,
+        budget,
+        schedule,
+      });
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: revoke_template_instance  –  DELETE /api/v1/templates/instances/{rule_id}
+// ===========================================================================
+
+server.registerTool(
+  "revoke_template_instance",
+  {
+    title: "Revoke Template Instance",
+    description: "Revoke (delete) a rule that was created from a template",
+    inputSchema: {
+      rule_id: z.string().describe("The rule ID (instance) to revoke"),
+    },
+  },
+  async ({ rule_id }) => {
+    try {
+      const response = await client.templates.revokeInstance(rule_id);
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: get_metrics  –  GET /metrics (no auth)
+// ===========================================================================
+
+server.registerTool(
+  "get_metrics",
+  {
+    title: "Get Metrics",
+    description: "Prometheus metrics from the remote-signer service (no auth)",
+    inputSchema: {},
+  },
+  async () => {
+    try {
+      const metrics = await client.metrics();
+      return ok({ metrics });
     } catch (error) {
       return err(error);
     }
