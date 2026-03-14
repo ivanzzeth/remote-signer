@@ -1,5 +1,6 @@
 /**
  * Remote Signer JavaScript Client - thin facade over resource-based services.
+ * Usable in browser and Node.js; see transport.ts for HTTP/TLS behaviour per environment.
  */
 
 import { HttpTransport, ClientConfig } from "./transport";

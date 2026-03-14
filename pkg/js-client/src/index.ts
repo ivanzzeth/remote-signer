@@ -1,6 +1,10 @@
 /**
  * Remote Signer JavaScript Client Library
  *
+ * Supports both browser and Node.js:
+ * - Browser: use the ESM build (globalThis.fetch, Web Crypto API). TLS/mTLS (custom CA, client cert) is not available; use standard HTTPS.
+ * - Node.js: same ESM/CJS build; TLS/mTLS is supported via httpClient.tls (custom CA, client certificates).
+ *
  * @example
  * ```typescript
  * import { RemoteSignerClient } from '@remote-signer/client';
@@ -74,6 +78,7 @@ export type {
   RuleType,
   RuleMode,
   Rule,
+  RuleBudget,
   ListRulesFilter,
   ListRulesResponse,
   CreateRuleRequest,

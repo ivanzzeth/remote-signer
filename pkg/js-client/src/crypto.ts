@@ -1,5 +1,8 @@
 /**
- * Cryptographic utilities for Ed25519 signing
+ * Cryptographic utilities for Ed25519 signing.
+ *
+ * Works in both browser and Node.js: uses crypto.getRandomValues (Web Crypto API, available in both)
+ * and @noble/ed25519 / @noble/hashes (pure JavaScript, no Node-specific APIs).
  */
 
 import * as ed25519 from "@noble/ed25519";

@@ -1,6 +1,10 @@
 /**
  * HTTP transport layer for remote-signer client.
  * Handles authenticated requests, TLS configuration, and error parsing.
+ *
+ * Environment support:
+ * - Browser: uses globalThis.fetch. httpClient.tls is ignored (no custom CA or mTLS in browser).
+ * - Node.js: uses globalThis.fetch by default; if httpClient.tls is set, uses Node https module for custom CA / mTLS.
  */
 
 import { parsePrivateKey, generateNonce, signRequestWithNonce } from "./crypto";
