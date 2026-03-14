@@ -1,10 +1,11 @@
 {
   "name": "@remote-signer/client",
   "version": "1.0.0",
-  "description": "JavaScript client library for remote-signer service",
+  "description": "JavaScript client for remote-signer service. Supports both browser and Node.js.",
   "main": "dist/index.js",
-  "module": "dist/index.esm.js",
+  "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
+  "browser": "dist/index.mjs",
   "files": [
     "dist"
   ],
@@ -20,7 +21,9 @@
     "remote-signer",
     "ethereum",
     "signing",
-    "ed25519"
+    "ed25519",
+    "browser",
+    "node"
   ],
   "author": "",
   "license": "MIT",

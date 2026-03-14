@@ -76,6 +76,22 @@ export interface UpdateRuleRequest {
   expires_at?: string;
 }
 
+/** Budget record for a rule (GET /api/v1/evm/rules/{id}/budgets). */
+export interface RuleBudget {
+  id: string;
+  rule_id: string;
+  unit: string;
+  max_total: string;
+  max_per_tx: string;
+  spent: string;
+  alert_pct: number;
+  alert_sent: boolean;
+  tx_count: number;
+  max_tx_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
 // ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
@@ -153,5 +169,17 @@ export class EvmRuleService {
    */
   async toggle(ruleID: string, enabled: boolean): Promise<Rule> {
     return this.update(ruleID, { enabled });
+  }
+
+  /**
+   * List budgets for a rule (GET /api/v1/evm/rules/{ruleID}/budgets).
+   */
+  async listBudgets(ruleID: string): Promise<RuleBudget[]> {
+    const list = await this.transport.request<RuleBudget[]>(
+      "GET",
+      `/api/v1/evm/rules/${encodeURIComponent(ruleID)}/budgets`,
+      null,
+    );
+    return list ?? [];
   }
 }
