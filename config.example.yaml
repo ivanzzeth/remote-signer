@@ -110,6 +110,11 @@ audit_monitor:
   retention_days: 90
   cleanup_interval: "24h"         # how often to run cleanup
 
+# Preset API (admin-only). When set, GET/POST /api/v1/presets list/vars/apply are enabled.
+# Dir is resolved relative to the config file directory. Apply creates template instances in one transaction.
+# presets:
+#   dir: "./rules/presets"
+
 security:
   # Maximum age of signed requests (prevents replay attacks)
   # SECURITY: Keep this short (30-60s) to minimize replay window

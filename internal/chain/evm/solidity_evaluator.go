@@ -856,11 +856,12 @@ func (e *SolidityRuleEvaluator) executeScript(ctx context.Context, script string
 			"-vvv", // verbose for revert reasons
 		)
 	} else {
-		// Use forge script for RuleEvaluator contracts
-		// Use cache path to speed up compilation
+		// Use forge script for RuleEvaluator contracts.
+		// Foundry expects "path:ContractName" or "ContractName"; pass path:RuleEvaluator.
+		scriptTarget := scriptPath + ":RuleEvaluator"
 		cmd = exec.CommandContext(execCtx, // #nosec G204 -- foundryPath is admin-configured
 			e.foundryPath, "script",
-			scriptPath,
+			scriptTarget,
 			"--json",
 			"--cache-path", filepath.Join(e.cacheDir, "forge-cache"),
 			"-vvv", // verbose for revert reasons

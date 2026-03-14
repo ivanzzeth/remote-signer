@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"gorm.io/gorm"
+
 	"github.com/ivanzzeth/remote-signer/internal/api/handler"
 	evmhandler "github.com/ivanzzeth/remote-signer/internal/api/handler/evm"
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
@@ -42,6 +44,9 @@ type RouterConfig struct {
 	AutoLockTimeout    time.Duration                   // signer auto-lock timeout (for health endpoint)
 	AuditRetentionDays int                             // audit log retention days (for health endpoint)
 	BudgetRepo         storage.BudgetRepository        // optional: for GET /api/v1/evm/rules/{id}/budgets
+	// Preset API (admin-only). When PresetsDir is non-empty, GET/POST /api/v1/presets are registered.
+	PresetsDir string     // directory containing preset YAML files (resolved absolute path)
+	PresetsDB  *gorm.DB   // optional: for preset apply transaction; required when PresetsDir is set and template service is used
 }
 
 // Router handles HTTP routing
@@ -247,6 +252,26 @@ func (r *Router) setupRoutes() error {
 			// Otherwise, route to template handler
 			templateHandler.ServeHTTP(w, req)
 		})))
+	}
+
+	// Preset API (admin-only). Requires PresetsDir; apply also requires PresetsDB and template service.
+	if r.config.PresetsDir != "" {
+		var templateSvc *service.TemplateService
+		if r.config.Template != nil {
+			templateSvc = r.config.Template.TemplateService
+		}
+		presetHandler, err := handler.NewPresetHandler(
+			r.config.PresetsDir,
+			r.config.PresetsDB,
+			templateSvc,
+			r.config.RulesAPIReadonly,
+			r.logger,
+		)
+		if err != nil {
+			return err
+		}
+		r.mux.Handle("/api/v1/presets", r.withAuthAndAdmin(presetHandler))
+		r.mux.Handle("/api/v1/presets/", r.withAuthAndAdmin(http.HandlerFunc(presetHandler.ServeHTTP)))
 	}
 
 	return nil

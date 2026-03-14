@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ivanzzeth/remote-signer/internal/config"
+	"github.com/ivanzzeth/remote-signer/internal/preset"
 )
 
 func TestSetStringsToMap(t *testing.T) {
@@ -29,7 +30,7 @@ func TestSetStringsToMap(t *testing.T) {
 	assert.Empty(t, out)
 }
 
-func TestGetPresetMeta(t *testing.T) {
+func TestGetPresetMeta_CLIUsage(t *testing.T) {
 	data := []byte(`
 template: "My Template"
 template_path: "rules/templates/foo.yaml"
@@ -37,22 +38,11 @@ override_hints:
   - var1
   - var2
 `)
-	meta := getPresetMeta(data)
-	assert.Equal(t, "My Template", meta.template)
-	assert.Equal(t, "rules/templates/foo.yaml", meta.templatePath)
-	assert.Equal(t, []string{"var1", "var2"}, meta.overrideHints)
-
-	// No override_hints
-	data2 := []byte(`template: "T"`)
-	meta2 := getPresetMeta(data2)
-	assert.Equal(t, "T", meta2.template)
-	assert.Empty(t, meta2.templatePath)
-	assert.NotNil(t, meta2.overrideHints)
-	assert.Empty(t, meta2.overrideHints)
-
-	// Invalid YAML
-	meta3 := getPresetMeta([]byte("not yaml"))
-	assert.Empty(t, meta3.template)
+	meta, err := preset.GetPresetMeta(data)
+	require.NoError(t, err)
+	assert.Equal(t, "My Template", meta.Template)
+	assert.Equal(t, "rules/templates/foo.yaml", meta.TemplatePath)
+	assert.Equal(t, []string{"var1", "var2"}, meta.OverrideHints)
 }
 
 func TestParsePresetFile_SingleRule(t *testing.T) {
@@ -66,9 +56,13 @@ variables:
   chain_id: "137"
   allowed_safe_addresses: "0xaaa"
 `)
-	rules, err := parsePresetFile(data, nil)
+	presetRules, err := preset.ParsePresetFile(data, nil)
 	require.NoError(t, err)
-	require.Len(t, rules, 1)
+	require.Len(t, presetRules, 1)
+	rules := make([]config.RuleConfig, len(presetRules))
+	for i, pr := range presetRules {
+		rules[i] = presetRuleToRuleConfig(pr)
+	}
 	assert.Equal(t, "Test Rule", rules[0].Name)
 	assert.Equal(t, "instance", rules[0].Type)
 	assert.Equal(t, "evm", rules[0].ChainType)
@@ -91,9 +85,13 @@ variables:
   allowed_safe_addresses: "0xold"
 `)
 	overrides := map[string]string{"allowed_safe_addresses": "0xnew"}
-	rules, err := parsePresetFile(data, overrides)
+	presetRules, err := preset.ParsePresetFile(data, overrides)
 	require.NoError(t, err)
-	require.Len(t, rules, 1)
+	require.Len(t, presetRules, 1)
+	rules := make([]config.RuleConfig, len(presetRules))
+	for i, pr := range presetRules {
+		rules[i] = presetRuleToRuleConfig(pr)
+	}
 	vars, _ := rules[0].Config["variables"].(map[string]interface{})
 	require.NotNil(t, vars)
 	assert.Equal(t, "0xnew", vars["allowed_safe_addresses"])
@@ -111,12 +109,15 @@ variables:
     - "0xa"
     - "0xb"
 `)
-	rules, err := parsePresetFile(data, nil)
+	presetRules, err := preset.ParsePresetFile(data, nil)
 	require.NoError(t, err)
-	require.Len(t, rules, 1)
+	require.Len(t, presetRules, 1)
+	rules := make([]config.RuleConfig, len(presetRules))
+	for i, pr := range presetRules {
+		rules[i] = presetRuleToRuleConfig(pr)
+	}
 	vars, _ := rules[0].Config["variables"].(map[string]interface{})
 	require.NotNil(t, vars)
-	// Should be normalized to comma-separated string
 	assert.Equal(t, "0xa,0xb", vars["allowed_safe_addresses"])
 }
 
@@ -125,35 +126,30 @@ func TestParsePresetFile_NoTemplate(t *testing.T) {
 name: "X"
 variables: {}
 `)
-	_, err := parsePresetFile(data, nil)
+	_, err := preset.ParsePresetFile(data, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no rules")
 }
 
-func TestPresetTemplateNames_Single(t *testing.T) {
+func TestListPresets_Integration(t *testing.T) {
 	dir := t.TempDir()
-	f := filepath.Join(dir, "p.yaml")
-	err := os.WriteFile(f, []byte("template: \"Foo Template\"\n"), 0644)
-	require.NoError(t, err)
-	name, err := presetTemplateNames(f)
-	require.NoError(t, err)
-	assert.Equal(t, "Foo Template", name)
-}
-
-func TestPresetTemplateNames_Multi(t *testing.T) {
-	dir := t.TempDir()
-	f := filepath.Join(dir, "m.yaml")
-	err := os.WriteFile(f, []byte(`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "p.yaml"), []byte("template: \"Foo Template\"\n"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "m.yaml"), []byte(`
 rules:
   - config:
       template: "A"
   - config:
       template: "B"
-`), 0644)
+`), 0644))
+	entries, err := preset.ListPresets(dir)
 	require.NoError(t, err)
-	name, err := presetTemplateNames(f)
-	require.NoError(t, err)
-	assert.Equal(t, "A, B", name)
+	require.Len(t, entries, 2)
+	ids := map[string][]string{}
+	for _, e := range entries {
+		ids[e.ID] = e.TemplateNames
+	}
+	assert.Equal(t, []string{"Foo Template"}, ids["p.yaml"])
+	assert.Equal(t, []string{"A", "B"}, ids["m.yaml"])
 }
 
 func TestMergeRulesAndTemplateIntoConfig_InjectsTemplateAndAppendsRule(t *testing.T) {
@@ -253,25 +249,6 @@ api_keys:
 	require.Len(t, cfg.Templates, 1)
 	assert.Equal(t, "Existing", cfg.Templates[0].Name)
 	require.Len(t, cfg.Rules, 1)
-}
-
-func TestNormalizeVariables(t *testing.T) {
-	assert.Nil(t, normalizeVariables(nil))
-	out := normalizeVariables(map[string]interface{}{
-		"a": "scalar",
-		"b": []interface{}{"x", "y"},
-	})
-	assert.Equal(t, "scalar", out["a"])
-	assert.Equal(t, "x,y", out["b"])
-}
-
-func TestToMapStringInterface(t *testing.T) {
-	assert.Nil(t, toMapStringInterface(nil))
-	out := toMapStringInterface(map[string]interface{}{"k": "v"})
-	assert.Equal(t, map[string]interface{}{"k": "v"}, out)
-	// map[interface{}]interface{} (YAML unmarshal)
-	out2 := toMapStringInterface(map[interface{}]interface{}{"k": "v"})
-	assert.Equal(t, map[string]interface{}{"k": "v"}, out2)
 }
 
 func TestGetPresetVarsWithDescriptions(t *testing.T) {

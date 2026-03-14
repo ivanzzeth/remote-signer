@@ -2237,6 +2237,18 @@ Non-admin keys with `allowed_hd_wallets` permission can also sign with any deriv
 
 ---
 
+## Presets
+
+Preset endpoints are available only when `presets.dir` is set in server config. **All require admin API key.** Apply is disabled when `security.rules_api_readonly` is true (403).
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `GET /api/v1/presets` | GET | List presets. Response: `{ "presets": [ { "id": "<filename>", "template_names": ["..."] }, ... ] }`. |
+| `GET /api/v1/presets/:id/vars` | GET | Get variable override hints for preset `:id` (filename, e.g. `polymarket_safe_polygon.preset.yaml`). Response: `{ "override_hints": ["var1", "var2", ... ] }`. |
+| `POST /api/v1/presets/:id/apply` | POST | Apply preset with optional body `{ "variables": { "key": "value", ... } }`. Creates one template instance per preset rule in one transaction. Response (201): `{ "results": [ { "rule": { ... }, "budget": { ... }? }, ... ] }`. Templates must exist in the template library. |
+
+---
+
 ## Error Responses
 
 All errors follow this format:

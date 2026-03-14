@@ -43,6 +43,8 @@ type TestServerConfig struct {
 	NonAdminAPIKeyPublicKey ed25519.PublicKey // Ed25519 public key for non-admin API auth
 	// Optional: config file path (if set, will load from config.e2e.yaml)
 	ConfigPath string // Path to config.e2e.yaml (default: "config.e2e.yaml")
+	// Optional: presets directory (when set, GET/POST /api/v1/presets are registered)
+	PresetsDir string // Absolute path to dir containing preset YAML files
 }
 
 // TestServer manages a test instance of the remote-signer service
@@ -130,6 +132,7 @@ func (ts *TestServer) Start() error {
 
 	// Single connection to avoid SQLite table lock (transaction and template reads must use same conn).
 	// Rule sync pre-loads templates before the transaction so no second conn is needed.
+	// Preset apply resolves templates before the transaction so it does not need a second conn.
 	sqlDB, err := db.DB()
 	if err != nil {
 		return fmt.Errorf("failed to get sql.DB: %w", err)
@@ -493,6 +496,10 @@ func (ts *TestServer) Start() error {
 		ApprovalGuard: approvalGuard,
 		APIKeyRepo:    apiKeyRepo,
 		BudgetRepo:    budgetRepo,
+	}
+	if ts.config.PresetsDir != "" {
+		routerConfig.PresetsDir = ts.config.PresetsDir
+		routerConfig.PresetsDB = db
 	}
 	router, err := api.NewRouter(authVerifier, signService, signerManager, ruleRepo, auditRepo, log, routerConfig)
 	if err != nil {

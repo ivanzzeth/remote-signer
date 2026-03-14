@@ -579,7 +579,8 @@ func rsBigIntRequireLte(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value 
 		maxRaw := call.Argument(1).Export()
 		if s, ok := maxRaw.(string); ok {
 			s = strings.TrimSpace(s)
-			if s == "" || s == "0" {
+			// Only "-1" = no cap (convention). Empty string is invalid and will fail below.
+			if s == "-1" {
 				return rsOk(vm)
 			}
 		}

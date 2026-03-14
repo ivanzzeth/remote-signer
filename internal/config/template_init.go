@@ -396,6 +396,17 @@ func expandInstanceRule(rule RuleConfig, templates map[string]TemplateConfig) ([
 		}
 	}
 
+	// Required variables must be set; no default, no fallback.
+	for _, def := range tmpl.Variables {
+		if !def.Required {
+			continue
+		}
+		val := strings.TrimSpace(variables[def.Name])
+		if val == "" {
+			return nil, fmt.Errorf("required variable %q is not set (set it in config or via preset --set %s=value)", def.Name, def.Name)
+		}
+	}
+
 	// Fill optional template variables with defaults so substitution never leaves ${var} in config.
 	// Rules must never receive unresolved placeholders — that is a design defect.
 	var errFill error
@@ -477,6 +488,13 @@ func expandInstanceRule(rule RuleConfig, templates map[string]TemplateConfig) ([
 			templateRules[idx].Variables = make(map[string]interface{}, len(variables))
 			for k, v := range variables {
 				templateRules[idx].Variables[k] = v
+			}
+		}
+		// Attach template test_variables so startup validation runs test cases with expected pass/fail.
+		if len(tmpl.TestVariables) > 0 {
+			templateRules[idx].TestVariables = make(map[string]string, len(tmpl.TestVariables))
+			for k, v := range tmpl.TestVariables {
+				templateRules[idx].TestVariables[k] = v
 			}
 		}
 		// For rule sync: attach template name and instance budget/schedule so sync can set TemplateID and create budget.

@@ -30,6 +30,12 @@ type Config struct {
 	APIKeys       []APIKeyConfig      `yaml:"api_keys"`
 	Templates     []TemplateConfig    `yaml:"templates"`
 	Rules         []RuleConfig        `yaml:"rules"`
+	Presets       *PresetsConfig      `yaml:"presets,omitempty"`
+}
+
+// PresetsConfig configures the server preset API. When Dir is set, preset list/vars/apply endpoints are registered (admin-only).
+type PresetsConfig struct {
+	Dir string `yaml:"dir"` // required: directory containing preset YAML files (e.g. rules/presets)
 }
 
 // TemplateConfig defines a rule template in configuration
@@ -80,7 +86,8 @@ type RuleConfig struct {
 	SignerAddress string                 `yaml:"signer_address,omitempty" json:"signer_address,omitempty"`
 	Config        map[string]interface{} `yaml:"config" json:"config"`
 	Variables     map[string]interface{} `yaml:"variables,omitempty" json:"variables,omitempty"`   // instance/template variable values (e.g. for evm_js config)
-	TestCases     []TestCaseConfig       `yaml:"test_cases,omitempty" json:"test_cases,omitempty"` // test cases for validation (evm_js, solidity, etc.)
+	TestVariables map[string]string      `yaml:"test_variables,omitempty" json:"test_variables,omitempty"` // from template; used for running test cases at startup so expectations match
+	TestCases     []TestCaseConfig       `yaml:"test_cases,omitempty" json:"test_cases,omitempty"`         // test cases for validation (evm_js, solidity, etc.)
 	Enabled       bool                   `yaml:"enabled" json:"enabled"`
 }
 

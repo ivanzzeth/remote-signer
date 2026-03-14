@@ -61,6 +61,9 @@ const (
 var (
 	testServer *TestServer
 
+	// e2ePresetsDir is the temp presets dir used when starting internal server (cleaned up in TestMain).
+	e2ePresetsDir string
+
 	// Admin client (can manage rules, approve requests)
 	adminClient    *client.Client
 	adminAPIKeyID  string
@@ -172,7 +175,32 @@ func TestMain(m *testing.M) {
 			}
 		}
 
-		// Start test server with config.e2e.yaml
+		// Create presets dir for preset API e2e (one preset referencing "E2E Preset Template")
+		presetsDir, err := os.MkdirTemp("", "e2e-presets-*")
+		if err != nil {
+			panic("failed to create presets temp dir: " + err.Error())
+		}
+		presetContent := []byte(`name: "E2E From Preset"
+template: "E2E Preset Template"
+chain_type: "evm"
+chain_id: "1"
+enabled: true
+variables:
+  chain_id: "1"
+  allowed_address: "0x0000000000000000000000000000000000000001"
+override_hints:
+  - allowed_address
+`)
+		if err := os.WriteFile(filepath.Join(presetsDir, "e2e_minimal.preset.yaml"), presetContent, 0644); err != nil {
+			panic("failed to write e2e preset file: " + err.Error())
+		}
+		e2ePresetsDir = presetsDir
+		presetsDirAbs, err := filepath.Abs(presetsDir)
+		if err != nil {
+			panic("failed to abs presets dir: " + err.Error())
+		}
+
+		// Start test server with config.e2e.yaml and presets dir
 		testServer, err = NewTestServer(TestServerConfig{
 			Port:                    port,
 			SignerPrivateKey:        testSignerPrivateKey,
@@ -182,6 +210,7 @@ func TestMain(m *testing.M) {
 			NonAdminAPIKeyID:        nonAdminAPIKeyID,
 			NonAdminAPIKeyPublicKey: nonAdminPubKey,
 			ConfigPath:              configPath,
+			PresetsDir:              presetsDirAbs,
 		})
 		if err != nil {
 			panic("failed to create test server: " + err.Error())
@@ -242,6 +271,11 @@ func TestMain(m *testing.M) {
 	// Cleanup (only if we started the server)
 	if testServer != nil {
 		testServer.Stop()
+	}
+	if e2ePresetsDir != "" {
+		if err := os.RemoveAll(e2ePresetsDir); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to remove e2e presets dir %s: %v\n", e2ePresetsDir, err)
+		}
 	}
 
 	os.Exit(code)

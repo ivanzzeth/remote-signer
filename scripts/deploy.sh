@@ -101,6 +101,8 @@ init_environment() {
 
     # Create data directories (forge-workspace holds lib/forge-std for Solidity rules; mounted into Docker)
     mkdir -p data/keystores data/foundry data/forge-workspace
+    # Preset API: directory for preset YAML files (Docker mounts ./rules:/app/rules)
+    mkdir -p rules/presets
 
     # Download Foundry binaries if not present
     if [ ! -f "data/foundry/forge" ]; then
@@ -246,7 +248,7 @@ start_services() {
 
     # Always rebuild to ensure latest code is deployed
     log_info "Building latest image..."
-    docker_compose build remote-signer
+    docker_build_with_retry remote-signer
 
     docker_compose up -d
 
@@ -273,7 +275,7 @@ run_no_screen() {
     fi
 
     log_info "Building image..."
-    docker_compose build remote-signer
+    docker_build_with_retry remote-signer
 
     log_info "Starting postgres and remote-signer..."
     docker_compose up -d
@@ -327,7 +329,7 @@ run_interactive() {
 
     # Always rebuild to ensure latest code is deployed
     log_info "Building latest image..."
-    docker_compose build remote-signer
+    docker_build_with_retry remote-signer
 
     # Start in screen session (interactive)
     cd "$PROJECT_DIR"
@@ -377,7 +379,7 @@ restart_services() {
 
     # Always rebuild to ensure latest code is deployed
     log_info "Building latest image..."
-    docker_compose build remote-signer
+    docker_build_with_retry remote-signer
 
     # Start in screen session (interactive)
     cd "$PROJECT_DIR"
@@ -659,12 +661,38 @@ _health_check() {
 }
 
 # =============================================================================
+# Docker build with retry on network/timeout (e.g. TLS handshake timeout)
+# =============================================================================
+docker_build_with_retry() {
+    local max_attempts=5
+    local attempt=1
+    while [ $attempt -le $max_attempts ]; do
+        local out
+        out=$("${DOCKER_COMPOSE[@]}" build "$@" 2>&1)
+        local ret=$?
+        printf '%s\n' "$out"
+        if [ $ret -eq 0 ]; then
+            return 0
+        fi
+        if echo "$out" | grep -qE 'TLS handshake timeout|failed to resolve source metadata|failed to do request|net/http:.*timeout'; then
+            log_warn "Docker build failed due to network/timeout (attempt $attempt/$max_attempts), retrying in 10s..."
+            [ $attempt -lt $max_attempts ] && sleep 10
+            attempt=$((attempt + 1))
+        else
+            return $ret
+        fi
+    done
+    log_error "Docker build failed after $max_attempts attempts."
+    return 1
+}
+
+# =============================================================================
 # Build images
 # =============================================================================
 build_images() {
     log_info "Building Docker images..."
     cd "$PROJECT_DIR"
-    docker_compose build "$@"
+    docker_build_with_retry "$@"
     log_info "Build complete!"
 }
 

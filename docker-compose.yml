@@ -98,6 +98,7 @@ services:
     volumes:
       # Mirror repo layout: /app = project root, paths identical to repo
       - ./config.yaml:/app/config.yaml:ro
+      # rules (and optional rules/presets for preset API when presets.dir is set in config)
       - ./rules:/app/rules:ro
       - ./certs:/app/certs:ro
       - ./data/keystores:/app/data/keystores

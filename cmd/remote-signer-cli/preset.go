@@ -10,6 +10,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/ivanzzeth/remote-signer/internal/config"
+	"github.com/ivanzzeth/remote-signer/internal/preset"
 )
 
 var presetCmd = &cobra.Command{
@@ -64,27 +65,18 @@ var presetVarsCmd = &cobra.Command{
 }
 
 func runPresetList(cmd *cobra.Command, args []string) error {
-	entries, err := os.ReadDir(presetListDir)
+	entries, err := preset.ListPresets(presetListDir)
 	if err != nil {
-		if os.IsNotExist(err) {
-			fmt.Println("# No presets directory found at", presetListDir)
-			return nil
-		}
-		return fmt.Errorf("read presets dir: %w", err)
+		return fmt.Errorf("list presets: %w", err)
 	}
-
+	if entries == nil {
+		fmt.Println("# No presets directory found at", presetListDir)
+		return nil
+	}
 	fmt.Println("# Preset file | template(s)")
 	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".yaml" && filepath.Ext(e.Name()) != ".yml" {
-			continue
-		}
-		path := filepath.Join(presetListDir, e.Name())
-		templates, err := presetTemplateNames(path)
-		if err != nil {
-			fmt.Printf("%s | (error: %v)\n", e.Name(), err)
-			continue
-		}
-		fmt.Printf("%s | %s\n", e.Name(), templates)
+		templates := strings.Join(e.TemplateNames, ", ")
+		fmt.Printf("%s | %s\n", e.ID, templates)
 	}
 	return nil
 }
@@ -117,23 +109,30 @@ func runPresetCreateFrom(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("read preset %s: %w", path, err)
 	}
 
-	rules, err := parsePresetFile(data, overrides)
+	presetRules, err := preset.ParsePresetFile(data, overrides)
 	if err != nil {
 		return fmt.Errorf("parse preset: %w", err)
 	}
-	if len(rules) == 0 {
+	if len(presetRules) == 0 {
 		return fmt.Errorf("preset produced no rules")
+	}
+	rules := make([]config.RuleConfig, 0, len(presetRules))
+	for _, pr := range presetRules {
+		rules = append(rules, presetRuleToRuleConfig(pr))
 	}
 
 	if presetCreateWrite {
 		if presetCreateConfig == "" {
 			return fmt.Errorf("--write requires --config")
 		}
-		meta := getPresetMeta(data)
-		if len(meta.templatePaths) > 0 && len(meta.templateNames) > 0 {
-			return mergeCompositePresetIntoConfig(presetCreateConfig, rules, meta.templatePaths, meta.templateNames)
+		meta, err := preset.GetPresetMeta(data)
+		if err != nil {
+			return fmt.Errorf("parse preset meta: %w", err)
 		}
-		return mergeRulesAndTemplateIntoConfig(presetCreateConfig, rules, meta.template, meta.templatePath)
+		if len(meta.TemplatePaths) > 0 && len(meta.TemplateNames) > 0 {
+			return mergeCompositePresetIntoConfig(presetCreateConfig, rules, meta.TemplatePaths, meta.TemplateNames)
+		}
+		return mergeRulesAndTemplateIntoConfig(presetCreateConfig, rules, meta.Template, meta.TemplatePath)
 	}
 
 	out := struct {
@@ -144,38 +143,32 @@ func runPresetCreateFrom(cmd *cobra.Command, args []string) error {
 	return enc.Encode(out)
 }
 
-// presetMeta holds template name(s), path(s), and override hints from a preset file.
-type presetMeta struct {
-	template       string
-	templatePath   string
-	templatePaths  []string
-	templateNames  []string
-	overrideHints  []string
-}
-
-// getPresetMeta parses preset YAML and returns template name(s), template_path(s), and override_hints.
-// Supports single-rule (template + template_path) and composite (template_paths + template_names) presets.
-func getPresetMeta(data []byte) presetMeta {
-	var out presetMeta
-	var single struct {
-		Template      string   `yaml:"template"`
-		TemplatePath  string   `yaml:"template_path"`
-		TemplatePaths []string `yaml:"template_paths"`
-		TemplateNames []string `yaml:"template_names"`
-		OverrideHints []string `yaml:"override_hints"`
+// presetRuleToRuleConfig converts a preset.PresetRule to config.RuleConfig for merge or YAML output.
+func presetRuleToRuleConfig(pr preset.PresetRule) config.RuleConfig {
+	variables := make(map[string]interface{})
+	for k, v := range pr.Variables {
+		variables[k] = v
 	}
-	if err := yaml.Unmarshal(data, &single); err != nil {
-		return out
+	cfg := map[string]interface{}{"template": pr.TemplateName, "variables": variables}
+	if len(pr.Budget) > 0 {
+		cfg["budget"] = pr.Budget
 	}
-	out.template = single.Template
-	out.templatePath = single.TemplatePath
-	out.templatePaths = single.TemplatePaths
-	out.templateNames = single.TemplateNames
-	out.overrideHints = single.OverrideHints
-	if out.overrideHints == nil {
-		out.overrideHints = []string{}
+	if len(pr.Schedule) > 0 {
+		cfg["schedule"] = pr.Schedule
 	}
-	return out
+	mode := pr.Mode
+	if mode == "" {
+		mode = "whitelist"
+	}
+	return config.RuleConfig{
+		Name:      pr.Name,
+		Type:      "instance",
+		Mode:      mode,
+		ChainType: pr.ChainType,
+		ChainID:   pr.ChainID,
+		Enabled:   pr.Enabled,
+		Config:    cfg,
+	}
 }
 
 // mergeRulesAndTemplateIntoConfig appends rules to config; if templateName and templatePath are set and config
@@ -245,247 +238,6 @@ func mergeCompositePresetIntoConfig(configPath string, rules []config.RuleConfig
 	return nil
 }
 
-// presetTemplateNames reads a preset file and returns a comma-separated list of template names (for listing).
-func presetTemplateNames(path string) (string, error) {
-	data, err := os.ReadFile(path) // #nosec G304 -- path from trusted presets-dir
-	if err != nil {
-		return "", err
-	}
-	var single struct {
-		Template     string   `yaml:"template"`
-		TemplateNames []string `yaml:"template_names"`
-	}
-	var multi struct {
-		Rules []struct {
-			Config struct {
-				Template string `yaml:"template"`
-			} `yaml:"config"`
-		} `yaml:"rules"`
-	}
-	if err := yaml.Unmarshal(data, &single); err != nil {
-		return "", err
-	}
-	if single.Template != "" {
-		return single.Template, nil
-	}
-	if len(single.TemplateNames) > 0 {
-		return strings.Join(single.TemplateNames, ", "), nil
-	}
-	if err := yaml.Unmarshal(data, &multi); err != nil {
-		return "", err
-	}
-	var names string
-	for i, r := range multi.Rules {
-		if i > 0 {
-			names += ", "
-		}
-		names += r.Config.Template
-	}
-	return names, nil
-}
-
-// parsePresetFile parses preset YAML (single-rule, composite template_paths, or multi-rule) and returns RuleConfig slice.
-// Applies overrides to variables. Variables in preset can be scalar or array; we normalize
-// arrays to comma-separated strings for config so server's fillInMappingArrays works.
-func parsePresetFile(data []byte, overrides map[string]string) ([]config.RuleConfig, error) {
-	var single struct {
-		Name          string                 `yaml:"name"`
-		Template      string                 `yaml:"template"`
-		TemplatePath  string                 `yaml:"template_path"`
-		TemplatePaths []string               `yaml:"template_paths"`
-		TemplateNames []string               `yaml:"template_names"`
-		ChainType     string                 `yaml:"chain_type"`
-		ChainID       string                 `yaml:"chain_id"`
-		Enabled       bool                   `yaml:"enabled"`
-		Variables     map[string]interface{} `yaml:"variables"`
-		Budget        map[string]interface{} `yaml:"budget"`   // optional: max_total, max_per_tx, max_tx_count, alert_pct — enables budget enforcement
-		Schedule      map[string]interface{} `yaml:"schedule"`  // optional: period (e.g. "24h"), start_at — enables period reset (session)
-	}
-	if err := yaml.Unmarshal(data, &single); err != nil {
-		return nil, err
-	}
-	// Composite preset: one rule per (template_paths[i], template_names[i])
-	if len(single.TemplatePaths) > 0 && len(single.TemplateNames) > 0 {
-		n := len(single.TemplatePaths)
-		if len(single.TemplateNames) < n {
-			n = len(single.TemplateNames)
-		}
-		variables := normalizeVariables(single.Variables)
-		if variables == nil {
-			variables = make(map[string]interface{})
-		}
-		for k, v := range overrides {
-			variables[k] = v
-		}
-		rules := make([]config.RuleConfig, 0, n)
-		if single.Name == "" {
-			return nil, fmt.Errorf("composite preset requires non-empty name")
-		}
-		baseName := single.Name
-		for i := 0; i < n; i++ {
-			templateName := single.TemplateNames[i]
-			if templateName == "" {
-				continue
-			}
-			ruleName := baseName
-			if n > 1 {
-				ruleName = baseName + " (" + templateName + ")"
-			}
-			cfg := map[string]interface{}{"template": templateName, "variables": copyMapInterface(variables)}
-			if len(single.Budget) > 0 {
-				cfg["budget"] = substituteMapVars(copyMapInterface(single.Budget), variables)
-			}
-			if len(single.Schedule) > 0 {
-				cfg["schedule"] = substituteMapVars(copyMapInterface(single.Schedule), variables)
-			}
-			rules = append(rules, config.RuleConfig{
-				Name:      ruleName,
-				Type:      "instance",
-				Mode:      "whitelist",
-				ChainType: single.ChainType,
-				ChainID:   single.ChainID,
-				Enabled:   single.Enabled,
-				Config:    cfg,
-			})
-		}
-		if len(rules) == 0 {
-			return nil, fmt.Errorf("composite preset produced no rules (template_paths/template_names)")
-		}
-		return rules, nil
-	}
-	if single.Template != "" {
-		variables := normalizeVariables(single.Variables)
-		for k, v := range overrides {
-			variables[k] = v
-		}
-		cfg := map[string]interface{}{"template": single.Template, "variables": variables}
-		if len(single.Budget) > 0 {
-			cfg["budget"] = substituteMapVars(copyMapInterface(single.Budget), variables)
-		}
-		if len(single.Schedule) > 0 {
-			cfg["schedule"] = substituteMapVars(copyMapInterface(single.Schedule), variables)
-		}
-		r := config.RuleConfig{
-			Name:      single.Name,
-			Type:      "instance",
-			Mode:      "whitelist",
-			ChainType: single.ChainType,
-			ChainID:   single.ChainID,
-			Enabled:   single.Enabled,
-			Config:    cfg,
-		}
-		return []config.RuleConfig{r}, nil
-	}
-
-	var multi struct {
-		Rules []config.RuleConfig `yaml:"rules"`
-	}
-	if err := yaml.Unmarshal(data, &multi); err != nil {
-		return nil, err
-	}
-	if len(multi.Rules) == 0 {
-		return nil, fmt.Errorf("preset has no rules and no single-rule fields")
-	}
-	for i := range multi.Rules {
-		vars := toMapStringInterface(multi.Rules[i].Config["variables"])
-		if vars == nil {
-			vars = make(map[string]interface{})
-		}
-		vars = normalizeVariables(vars)
-		for k, v := range overrides {
-			vars[k] = v
-		}
-		multi.Rules[i].Config["variables"] = vars
-	}
-	return multi.Rules, nil
-}
-
-func copyMapInterface(m map[string]interface{}) map[string]interface{} {
-	if m == nil {
-		return nil
-	}
-	out := make(map[string]interface{}, len(m))
-	for k, v := range m {
-		out[k] = v
-	}
-	return out
-}
-
-// substituteMapVars replaces ${var} in string values of m with variables[var].
-// Supports the same template variable experience as template config (e.g. unit: "${chain_id}:${token_address}").
-func substituteMapVars(m map[string]interface{}, variables map[string]interface{}) map[string]interface{} {
-	if m == nil || len(variables) == 0 {
-		return m
-	}
-	out := make(map[string]interface{}, len(m))
-	for k, v := range m {
-		out[k] = substituteVarInValue(v, variables)
-	}
-	return out
-}
-
-func substituteVarInValue(v interface{}, variables map[string]interface{}) interface{} {
-	switch val := v.(type) {
-	case string:
-		s := val
-		for k, vv := range variables {
-			s = strings.ReplaceAll(s, "${"+k+"}", fmt.Sprintf("%v", vv))
-		}
-		return s
-	case map[string]interface{}:
-		return substituteMapVars(val, variables)
-	case map[interface{}]interface{}:
-		out := make(map[string]interface{}, len(val))
-		for kk, vv := range val {
-			if sk, ok := kk.(string); ok {
-				out[sk] = substituteVarInValue(vv, variables)
-			}
-		}
-		return out
-	default:
-		return v
-	}
-}
-
-func toMapStringInterface(v interface{}) map[string]interface{} {
-	if v == nil {
-		return nil
-	}
-	if m, ok := v.(map[string]interface{}); ok {
-		return m
-	}
-	if m, ok := v.(map[interface{}]interface{}); ok {
-		out := make(map[string]interface{}, len(m))
-		for k, val := range m {
-			if s, ok := k.(string); ok {
-				out[s] = val
-			}
-		}
-		return out
-	}
-	return nil
-}
-
-func normalizeVariables(v map[string]interface{}) map[string]interface{} {
-	if v == nil {
-		return nil
-	}
-	out := make(map[string]interface{}, len(v))
-	for k, val := range v {
-		switch t := val.(type) {
-		case []interface{}:
-			var parts []string
-			for _, p := range t {
-				parts = append(parts, fmt.Sprintf("%v", p))
-			}
-			out[k] = strings.Join(parts, ",")
-		default:
-			out[k] = val
-		}
-	}
-	return out
-}
-
 // setStringsToMap converts key=value strings (e.g. from --set) to a map.
 func setStringsToMap(s []string) map[string]string {
 	out := make(map[string]string)
@@ -521,14 +273,17 @@ func getPresetVarsWithDescriptions(presetPath, projectDir string) ([]presetVarDe
 	if err != nil {
 		return nil, err
 	}
-	meta := getPresetMeta(data)
-	if len(meta.overrideHints) == 0 {
+	meta, err := preset.GetPresetMeta(data)
+	if err != nil {
+		return nil, fmt.Errorf("parse preset meta: %w", err)
+	}
+	if len(meta.OverrideHints) == 0 {
 		return nil, nil
 	}
 	descriptions := make(map[string]string)
-	pathsToRead := []string{meta.templatePath}
-	if meta.templatePath == "" && len(meta.templatePaths) > 0 {
-		pathsToRead = meta.templatePaths
+	pathsToRead := []string{meta.TemplatePath}
+	if meta.TemplatePath == "" && len(meta.TemplatePaths) > 0 {
+		pathsToRead = meta.TemplatePaths
 	}
 	for _, p := range pathsToRead {
 		if p == "" {
@@ -549,8 +304,8 @@ func getPresetVarsWithDescriptions(presetPath, projectDir string) ([]presetVarDe
 			}
 		}
 	}
-	out := make([]presetVarDesc, 0, len(meta.overrideHints))
-	for _, name := range meta.overrideHints {
+	out := make([]presetVarDesc, 0, len(meta.OverrideHints))
+	for _, name := range meta.OverrideHints {
 		out = append(out, presetVarDesc{Name: name, Desc: descriptions[name]})
 	}
 	return out, nil

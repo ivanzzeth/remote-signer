@@ -211,6 +211,130 @@ func (s *TemplateService) CreateInstance(ctx context.Context, req *CreateInstanc
 	return result, nil
 }
 
+// CreateInstanceWithTx creates a rule instance from a template using the given repos (e.g. tx-scoped).
+// Resolves template via DB; for preset apply use ResolveTemplate outside tx then CreateInstanceFromResolvedWithTx inside tx to avoid deadlock with single DB connection.
+func (s *TemplateService) CreateInstanceWithTx(
+	ctx context.Context,
+	ruleRepo storage.RuleRepository,
+	budgetRepo storage.BudgetRepository,
+	req *CreateInstanceRequest,
+) (*CreateInstanceResult, error) {
+	if req == nil {
+		return nil, fmt.Errorf("request is required")
+	}
+	if ruleRepo == nil || budgetRepo == nil {
+		return nil, fmt.Errorf("rule and budget repositories are required")
+	}
+	tmpl, err := s.resolveTemplate(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve template: %w", err)
+	}
+	return s.createInstanceFromResolved(ctx, ruleRepo, budgetRepo, tmpl, req)
+}
+
+// CreateInstanceFromResolvedWithTx creates a rule instance using an already-resolved template and tx-scoped repos.
+// Use after ResolveTemplate outside the transaction so preset apply does not need a second DB connection.
+func (s *TemplateService) CreateInstanceFromResolvedWithTx(
+	ctx context.Context,
+	ruleRepo storage.RuleRepository,
+	budgetRepo storage.BudgetRepository,
+	tmpl *types.RuleTemplate,
+	req *CreateInstanceRequest,
+) (*CreateInstanceResult, error) {
+	if tmpl == nil || req == nil {
+		return nil, fmt.Errorf("template and request are required")
+	}
+	if ruleRepo == nil || budgetRepo == nil {
+		return nil, fmt.Errorf("rule and budget repositories are required")
+	}
+	return s.createInstanceFromResolved(ctx, ruleRepo, budgetRepo, tmpl, req)
+}
+
+func (s *TemplateService) createInstanceFromResolved(
+	ctx context.Context,
+	ruleRepo storage.RuleRepository,
+	budgetRepo storage.BudgetRepository,
+	tmpl *types.RuleTemplate,
+	req *CreateInstanceRequest,
+) (*CreateInstanceResult, error) {
+	var varDefs []types.TemplateVariable
+	if len(tmpl.Variables) > 0 {
+		if err := json.Unmarshal(tmpl.Variables, &varDefs); err != nil {
+			return nil, fmt.Errorf("failed to parse template variables: %w", err)
+		}
+	}
+	if err := validateVariables(varDefs, req.Variables); err != nil {
+		return nil, fmt.Errorf("variable validation failed: %w", err)
+	}
+	resolvedVars := resolveDefaults(varDefs, req.Variables)
+	resolvedConfig, err := SubstituteVariables(tmpl.Config, resolvedVars)
+	if err != nil {
+		return nil, fmt.Errorf("variable substitution failed: %w", err)
+	}
+	ruleID := s.generateInstanceRuleID(tmpl.ID, resolvedVars)
+	variablesJSON, err := json.Marshal(resolvedVars)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal resolved variables: %w", err)
+	}
+	rule := &types.Rule{
+		ID:          ruleID,
+		Name:        s.resolveInstanceName(req, tmpl),
+		Description: tmpl.Description,
+		Type:        tmpl.Type,
+		Mode:        tmpl.Mode,
+		Source:      types.RuleSourceInstance,
+		Config:      resolvedConfig,
+		TemplateID:  &tmpl.ID,
+		Variables:   variablesJSON,
+		Enabled:     true,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+	if req.ChainType != nil {
+		ct := types.ChainType(*req.ChainType)
+		rule.ChainType = &ct
+	}
+	if req.ChainID != nil {
+		rule.ChainID = req.ChainID
+	}
+	if req.APIKeyID != nil {
+		rule.APIKeyID = req.APIKeyID
+	}
+	if req.SignerAddress != nil {
+		rule.SignerAddress = req.SignerAddress
+	}
+	if req.ExpiresAt != nil {
+		rule.ExpiresAt = req.ExpiresAt
+	} else if req.ExpiresIn != nil {
+		expiresAt := time.Now().Add(*req.ExpiresIn)
+		rule.ExpiresAt = &expiresAt
+	}
+	if req.Schedule != nil {
+		rule.BudgetPeriod = &req.Schedule.Period
+		if req.Schedule.StartAt != nil {
+			rule.BudgetPeriodStart = req.Schedule.StartAt
+		} else {
+			now := time.Now()
+			rule.BudgetPeriodStart = &now
+		}
+	}
+	if err := ruleRepo.Create(ctx, rule); err != nil {
+		return nil, fmt.Errorf("failed to create rule: %w", err)
+	}
+	result := &CreateInstanceResult{Rule: rule}
+	if req.Budget != nil {
+		budget, err := s.createBudgetWithRepo(ctx, budgetRepo, rule, tmpl, req.Budget)
+		if err != nil {
+			if delErr := ruleRepo.Delete(ctx, rule.ID); delErr != nil {
+				s.logger.Error("failed to rollback rule creation in tx", "error", delErr)
+			}
+			return nil, fmt.Errorf("failed to create budget: %w", err)
+		}
+		result.Budget = budget
+	}
+	return result, nil
+}
+
 // RevokeInstance disables a rule instance and deletes its budgets
 func (s *TemplateService) RevokeInstance(ctx context.Context, ruleID types.RuleID) error {
 	rule, err := s.ruleRepo.Get(ctx, ruleID)
@@ -235,6 +359,11 @@ func (s *TemplateService) RevokeInstance(ctx context.Context, ruleID types.RuleI
 
 	s.logger.Info("Revoked rule instance", "rule_id", ruleID)
 	return nil
+}
+
+// ResolveTemplate finds the template by ID or name (for use outside a DB transaction, e.g. preset apply).
+func (s *TemplateService) ResolveTemplate(ctx context.Context, req *CreateInstanceRequest) (*types.RuleTemplate, error) {
+	return s.resolveTemplate(ctx, req)
 }
 
 // resolveTemplate finds the template by ID or name
@@ -265,8 +394,12 @@ func (s *TemplateService) generateInstanceRuleID(templateID string, vars map[str
 
 // createBudget creates a budget record for the instance
 func (s *TemplateService) createBudget(ctx context.Context, rule *types.Rule, tmpl *types.RuleTemplate, budgetCfg *BudgetConfig) (*types.RuleBudget, error) {
-	// Determine unit from template's BudgetMetering; substitute ${var} with instance variables
-	unit := "count" // default
+	return s.createBudgetWithRepo(ctx, s.budgetRepo, rule, tmpl, budgetCfg)
+}
+
+// createBudgetWithRepo creates a budget using the given repo (for use with tx-scoped repo).
+func (s *TemplateService) createBudgetWithRepo(ctx context.Context, budgetRepo storage.BudgetRepository, rule *types.Rule, tmpl *types.RuleTemplate, budgetCfg *BudgetConfig) (*types.RuleBudget, error) {
+	unit := "count"
 	if len(tmpl.BudgetMetering) > 0 {
 		var metering types.BudgetMetering
 		if err := json.Unmarshal(tmpl.BudgetMetering, &metering); err == nil && metering.Unit != "" {
@@ -281,12 +414,10 @@ func (s *TemplateService) createBudget(ctx context.Context, rule *types.Rule, tm
 			}
 		}
 	}
-
 	alertPct := budgetCfg.AlertPct
 	if alertPct <= 0 {
 		alertPct = 80
 	}
-
 	budgetID := fmt.Sprintf("bdg_%s_%s", rule.ID, unit)
 	budget := &types.RuleBudget{
 		ID:         budgetID,
@@ -299,17 +430,10 @@ func (s *TemplateService) createBudget(ctx context.Context, rule *types.Rule, tm
 		TxCount:    0,
 		MaxTxCount: budgetCfg.MaxTxCount,
 	}
-
-	if err := s.budgetRepo.Create(ctx, budget); err != nil {
+	if err := budgetRepo.Create(ctx, budget); err != nil {
 		return nil, err
 	}
-
-	attrs := []any{
-		"rule_id", rule.ID,
-		"budget_id", budget.ID,
-		"unit", unit,
-		"max_total", budgetCfg.MaxTotal,
-	}
+	attrs := []any{"rule_id", rule.ID, "budget_id", budget.ID, "unit", unit, "max_total", budgetCfg.MaxTotal}
 	if rule.BudgetPeriod != nil {
 		attrs = append(attrs, "budget_period", rule.BudgetPeriod.String(), "period_renewal", true)
 		if rule.BudgetPeriodStart != nil {
@@ -317,7 +441,6 @@ func (s *TemplateService) createBudget(ctx context.Context, rule *types.Rule, tm
 		}
 	}
 	s.logger.Info("Created budget for instance", attrs...)
-
 	return budget, nil
 }
 
