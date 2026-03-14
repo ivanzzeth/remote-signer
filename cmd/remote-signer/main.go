@@ -33,7 +33,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
-const version = "0.1.14"
+const version = "0.1.15"
 
 func main() {
 	if err := run(); err != nil {
@@ -587,8 +587,22 @@ func run() error {
 
 	signService.SetAuditLogger(auditLogger)
 
+	// Presets dir (for preset API): resolve relative to config file directory
+	var presetsDir string
+	if cfg.Presets != nil && cfg.Presets.Dir != "" {
+		presetsDir = cfg.Presets.Dir
+		if !filepath.IsAbs(presetsDir) {
+			presetsDir = filepath.Join(filepath.Dir(*configPath), presetsDir)
+		}
+		var errAbs error
+		presetsDir, errAbs = filepath.Abs(presetsDir)
+		if errAbs != nil {
+			return fmt.Errorf("presets dir: %w", errAbs)
+		}
+	}
+
 	// Initialize router
-	router, err := api.NewRouter(authVerifier, signService, evmSignerManager, ruleRepo, auditRepo, log, api.RouterConfig{
+	routerConfig := api.RouterConfig{
 		Version:           version,
 		IPWhitelistConfig: ipWhitelist,
 		IPRateLimit:       cfg.Security.IPRateLimit,
@@ -609,7 +623,12 @@ func run() error {
 		SignTimeout:        cfg.Security.SignTimeout,
 		AutoLockTimeout:    cfg.Security.AutoLockTimeout,
 		AuditRetentionDays: cfg.AuditMonitor.RetentionDays,
-	})
+	}
+	if presetsDir != "" {
+		routerConfig.PresetsDir = presetsDir
+		routerConfig.PresetsDB = db
+	}
+	router, err := api.NewRouter(authVerifier, signService, evmSignerManager, ruleRepo, auditRepo, log, routerConfig)
 	if err != nil {
 		return fmt.Errorf("failed to create router: %w", err)
 	}
@@ -906,40 +925,68 @@ func validateEVMJSRulesAtStartup(ctx context.Context, expandedRules []config.Rul
 		return nil
 	}
 
-	// Build full engine with ALL rules (same as production) to validate combined behavior.
-	// Instance rules must use the normal engine: if another whitelist rule allows what this
-	// rule expects to reject, that interaction must surface as a test failure.
-	log.Info("Building full validation engine for evm_js rules (same as production)")
-	fullEngine, err := rule.NewWhitelistRuleEngine(ruleRepo, log, rule.WithDelegationPayloadConverter(evm.DelegatePayloadToSignRequest))
+	// List all rules once for building isolated engines (blocklist + delegation targets).
+	const listLimit = 10000
+	allRules, err := ruleRepo.List(ctx, storage.RuleFilter{EnabledOnly: false, Limit: listLimit})
 	if err != nil {
-		return fmt.Errorf("build full validation engine: %w", err)
+		return fmt.Errorf("list rules for validation: %w", err)
 	}
-	fullEngine.RegisterEvaluator(&evm.AddressListEvaluator{})
-	fullEngine.RegisterEvaluator(&evm.ContractMethodEvaluator{})
-	fullEngine.RegisterEvaluator(&evm.ValueLimitEvaluator{})
-	fullEngine.RegisterEvaluator(&evm.SignerRestrictionEvaluator{})
-	fullEngine.RegisterEvaluator(&evm.SignTypeRestrictionEvaluator{})
-	fullEngine.RegisterEvaluator(&evm.MessagePatternEvaluator{})
-	if solidityEval != nil {
-		fullEngine.RegisterEvaluator(solidityEval)
+	allRulesMap := make(map[types.RuleID]*types.Rule, len(allRules))
+	for _, r := range allRules {
+		allRulesMap[r.ID] = r
 	}
+
 	jsEval, err := evm.NewJSRuleEvaluator(log)
 	if err != nil {
 		return fmt.Errorf("js evaluator for validation: %w", err)
 	}
-	fullEngine.RegisterEvaluator(jsEval)
 
 	var failed []string
 	for _, item := range toValidate {
 		cfg := item.cfg
-		ruleUnderTest := item.rule
+		ruleFromDB := item.rule
+
+		// Use template test_variables for validation so expected-fail cases (e.g. allowed_recipients set) run correctly.
+		var varsToSeed map[string]interface{}
+		if len(cfg.TestVariables) > 0 {
+			varsToSeed = make(map[string]interface{}, len(cfg.TestVariables))
+			for k, v := range cfg.TestVariables {
+				varsToSeed[k] = v
+			}
+		} else if len(cfg.Variables) > 0 {
+			varsToSeed = cfg.Variables
+		}
+		ruleForTest := *ruleFromDB
+		ruleForTest.Variables = nil
+		if len(varsToSeed) > 0 {
+			variablesJSON, err := json.Marshal(varsToSeed)
+			if err != nil {
+				failed = append(failed, fmt.Sprintf("%s: marshal test variables: %v", cfg.Name, err))
+				continue
+			}
+			ruleForTest.Variables = variablesJSON
+		}
+
+		// Build isolated engine (blocklist + this rule only) so expected-fail cases are not allowed by another whitelist rule.
+		testEngine, err := buildIsolatedEngineForRule(ctx, allRulesMap, &ruleForTest, solidityEval, log)
+		if err != nil {
+			failed = append(failed, fmt.Sprintf("%s: build isolated engine: %v", cfg.Name, err))
+			continue
+		}
+		testEngine.RegisterEvaluator(jsEval)
 
 		varsForSubst := make(map[string]string)
-		for k, v := range cfg.Variables {
-			if v == nil {
-				varsForSubst[k] = ""
-			} else {
-				varsForSubst[k] = fmt.Sprintf("%v", v)
+		if len(cfg.TestVariables) > 0 {
+			for k, v := range cfg.TestVariables {
+				varsForSubst[k] = v
+			}
+		} else {
+			for k, v := range cfg.Variables {
+				if v == nil {
+					varsForSubst[k] = ""
+				} else {
+					varsForSubst[k] = fmt.Sprintf("%v", v)
+				}
 			}
 		}
 		for _, tc := range cfg.TestCases {
@@ -963,14 +1010,14 @@ func validateEVMJSRulesAtStartup(ctx context.Context, expandedRules []config.Rul
 				failed = append(failed, fmt.Sprintf("%s test %q: build request: %v", cfg.Name, tc.Name, err))
 				continue
 			}
-			evalResult, err := fullEngine.EvaluateWithResult(ctx, req, parsed)
+			evalResult, err := testEngine.EvaluateWithResult(ctx, req, parsed)
 			if err != nil {
 				failed = append(failed, fmt.Sprintf("%s test %q: %v", cfg.Name, tc.Name, err))
 				continue
 			}
 			// For blocklist rules, "pass" means "not blocked"; for whitelist, "pass" means "allowed".
 			var actualPass bool
-			if ruleUnderTest.Mode == types.RuleModeBlocklist {
+			if ruleFromDB.Mode == types.RuleModeBlocklist {
 				actualPass = !evalResult.Blocked
 			} else {
 				actualPass = evalResult.Allowed
@@ -992,13 +1039,9 @@ func validateEVMJSRulesAtStartup(ctx context.Context, expandedRules []config.Rul
 				continue
 			}
 			if tc.ExpectReason != "" && !strings.Contains(actualReason, tc.ExpectReason) {
-				// In a multi-rule engine, the NoMatchReason for whitelist rules depends on
-				// evaluation order and may come from a different rule than the one being tested.
-				// Only enforce expect_reason when the result is "blocked" (blocklist violation)
-				// or "allowed" (the specific rule's allow reason). For "no match" results on
-				// whitelist rules, the pass/fail check above is sufficient.
+				// In isolated engine we only have this rule (+ blocklist), so reason comes from this rule.
 				isNoMatch := !evalResult.Blocked && !evalResult.Allowed
-				isWhitelistRule := ruleUnderTest.Mode != types.RuleModeBlocklist
+				isWhitelistRule := ruleFromDB.Mode != types.RuleModeBlocklist
 				if !(isNoMatch && isWhitelistRule) {
 					failed = append(failed, fmt.Sprintf("%s test %q: expected reason containing %q but got %q", cfg.Name, tc.Name, tc.ExpectReason, actualReason))
 				}
@@ -1009,6 +1052,78 @@ func validateEVMJSRulesAtStartup(ctx context.Context, expandedRules []config.Rul
 		return fmt.Errorf("%d evm_js test case(s) failed:\n  - %s", len(failed), strings.Join(failed, "\n  - "))
 	}
 	log.Info("All evm_js rules validated at startup", "rules", len(toValidate))
+	return nil
+}
+
+// buildIsolatedEngineForRule builds an engine containing only blocklist rules plus the given rule
+// (and its delegation targets). Used so evm_js expected-fail test cases are not allowed by another whitelist rule.
+func buildIsolatedEngineForRule(ctx context.Context, allRulesMap map[types.RuleID]*types.Rule, ruleUnderTest *types.Rule, solidityEval *evm.SolidityRuleEvaluator, log *slog.Logger) (*rule.WhitelistRuleEngine, error) {
+	minimalRepo := storage.NewMemoryRuleRepository()
+	for _, r := range allRulesMap {
+		if r.Mode == types.RuleModeBlocklist {
+			if err := minimalRepo.Create(ctx, r); err != nil {
+				return nil, fmt.Errorf("add blocklist rule %s: %w", r.ID, err)
+			}
+		}
+	}
+	if ruleUnderTest.Mode != types.RuleModeBlocklist {
+		if err := minimalRepo.Create(ctx, ruleUnderTest); err != nil {
+			return nil, fmt.Errorf("add rule under test %s: %w", ruleUnderTest.ID, err)
+		}
+	}
+	if err := addDelegationTargetsForValidation(ctx, ruleUnderTest, allRulesMap, minimalRepo, make(map[types.RuleID]bool), log); err != nil {
+		return nil, err
+	}
+	eng, err := rule.NewWhitelistRuleEngine(minimalRepo, log, rule.WithDelegationPayloadConverter(evm.DelegatePayloadToSignRequest))
+	if err != nil {
+		return nil, err
+	}
+	eng.RegisterEvaluator(&evm.AddressListEvaluator{})
+	eng.RegisterEvaluator(&evm.ContractMethodEvaluator{})
+	eng.RegisterEvaluator(&evm.ValueLimitEvaluator{})
+	eng.RegisterEvaluator(&evm.SignerRestrictionEvaluator{})
+	eng.RegisterEvaluator(&evm.SignTypeRestrictionEvaluator{})
+	eng.RegisterEvaluator(&evm.MessagePatternEvaluator{})
+	if solidityEval != nil {
+		eng.RegisterEvaluator(solidityEval)
+	}
+	return eng, nil
+}
+
+// addDelegationTargetsForValidation recursively adds delegation target rules to the minimal repo
+// with Enabled=false so they are reachable via Get() but not included in List(EnabledOnly=true).
+func addDelegationTargetsForValidation(ctx context.Context, r *types.Rule, allRulesMap map[types.RuleID]*types.Rule, minimalRepo *storage.MemoryRuleRepository, visited map[types.RuleID]bool, log *slog.Logger) error {
+	if visited[r.ID] {
+		return nil
+	}
+	visited[r.ID] = true
+	var cfg struct {
+		DelegateTo string `json:"delegate_to"`
+	}
+	if err := json.Unmarshal(r.Config, &cfg); err != nil {
+		return fmt.Errorf("unmarshal config for rule %q: %w", r.ID, err)
+	}
+	if cfg.DelegateTo == "" {
+		return nil
+	}
+	for _, part := range strings.Split(cfg.DelegateTo, ",") {
+		targetID := types.RuleID(strings.TrimSpace(part))
+		if targetID == "" {
+			continue
+		}
+		target, ok := allRulesMap[targetID]
+		if !ok {
+			return fmt.Errorf("rule %q delegate_to references non-existent target %q", r.ID, targetID)
+		}
+		clone := *target
+		clone.Enabled = false
+		if err := minimalRepo.Create(ctx, &clone); err != nil {
+			log.Debug("delegation target already in minimal repo", "target", targetID)
+		}
+		if err := addDelegationTargetsForValidation(ctx, target, allRulesMap, minimalRepo, visited, log); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

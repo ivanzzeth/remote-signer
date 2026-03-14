@@ -54,6 +54,8 @@ See the main [README](../README.md#deployment) for quick commands. This document
 
 Config file path is set by the `-config` flag (default: `config.yaml`), not by environment.
 
+**Presets (optional):** To enable the preset API (admin-only), set `presets.dir` in config to a directory containing preset YAML files. The path is resolved relative to the config file. With Docker, mount a volume that includes the preset dir (e.g. `./rules` with `presets.dir: "./rules/presets"` and ensure `./rules/presets` exists).
+
 ### Configuration File
 
 ```yaml

@@ -22,6 +22,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/pkg/client/audit"
 	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 	"github.com/ivanzzeth/remote-signer/pkg/client/internal/transport"
+	"github.com/ivanzzeth/remote-signer/pkg/client/presets"
 	"github.com/ivanzzeth/remote-signer/pkg/client/templates"
 )
 
@@ -38,6 +39,9 @@ type Client struct {
 
 	// APIKeys provides API key management operations.
 	APIKeys *apikeys.Service
+
+	// Presets provides preset list/vars/apply (admin only; requires server presets.dir).
+	Presets *presets.Service
 
 	transport *transport.Transport
 }
@@ -132,6 +136,7 @@ func NewClient(cfg Config) (*Client, error) {
 		Audit:     audit.NewService(t),
 		Templates: templates.NewService(t),
 		APIKeys:   apikeys.NewService(t),
+		Presets:   presets.NewService(t),
 		transport: t,
 	}, nil
 }

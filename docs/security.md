@@ -65,7 +65,7 @@ Together, timestamp + nonce ensure that each request is fresh and used at most o
 - **`allowed_signers`** (empty = all): restricts which signer addresses the key can use for signing. Empty means unrestricted access to all signers.
 - **`allowed_hd_wallets`** (empty = none): grants access to all derived addresses of specified HD wallet primary addresses. Empty means no HD wallet access. This is intentionally different from `allowed_signers` — HD wallet authorization must be explicit.
 - **`allowed_chain_types`** (empty = all): restricts which chain types (e.g. `evm`, `solana`, `cosmos`) the key can use.
-- **Admin vs Non-Admin**: Admin keys can approve requests, create/modify rules, manage signers. Non-admin keys can only submit sign requests and view status.
+- **Admin vs Non-Admin**: Admin keys can approve requests, create/modify rules, manage signers, and use the preset API (when `presets.dir` is set). Non-admin keys can only submit sign requests and view status. Preset apply is also disabled when `security.rules_api_readonly` is true.
 - **Key enable/disable**: Keys can be disabled (`enabled: false`) without deletion — disabled keys are rejected with a security alert.
 - Permission hierarchy: admin > `allowed_hd_wallets` (derived addresses) > `allowed_signers` (individual addresses).
 - Defense-in-depth: sign requests check both `allowed_signers` and `allowed_hd_wallets` derived addresses.

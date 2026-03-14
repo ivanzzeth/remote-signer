@@ -126,3 +126,4 @@ bin/
 # E2E test data (generated keystores, forge cache, binaries, etc.)
 e2e/data/
 verify-setup-polymarket
+remote-signer-cli

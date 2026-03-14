@@ -50,6 +50,7 @@ type RuleConfig struct {
 	SignerAddress string                 `yaml:"signer_address,omitempty"`
 	Config        map[string]any         `yaml:"config"`
 	Variables     map[string]interface{} `yaml:"variables,omitempty" json:"variables,omitempty"` // instance vars (from -config); used for rule.Variables and input substitution
+	TestVariables map[string]string      `yaml:"test_variables,omitempty" json:"test_variables,omitempty"` // from template; use for validation so expected-fail cases get template test_variables
 	TestCases     []TestCaseConfig       `yaml:"test_cases,omitempty" json:"test_cases,omitempty"`
 	Enabled       bool                   `yaml:"enabled"`
 }
@@ -389,7 +390,7 @@ func validateConfig(ctx context.Context, configPath string, validator *evm.Solid
 
 	localRules := make([]RuleConfig, 0, len(rules))
 	for _, r := range rules {
-		// Copy test_cases (from template rules_json) and instance variables so evm_js validation uses production shape.
+		// Copy test_cases (from template rules_json), instance variables, and template test_variables for evm_js validation.
 		testCases := make([]TestCaseConfig, 0, len(r.TestCases))
 		for _, tc := range r.TestCases {
 			testCases = append(testCases, TestCaseConfig{
@@ -400,15 +401,22 @@ func validateConfig(ctx context.Context, configPath string, validator *evm.Solid
 				ExpectBudgetAmount: tc.ExpectBudgetAmount,
 			})
 		}
+		var testVars map[string]string
+		if len(r.TestVariables) > 0 {
+			testVars = make(map[string]string, len(r.TestVariables))
+			for k, v := range r.TestVariables {
+				testVars[k] = v
+			}
+		}
 		localRules = append(localRules, RuleConfig{
 			Id: r.Id, Name: r.Name, Description: r.Description, Type: r.Type, Mode: r.Mode,
 			ChainType: r.ChainType, ChainID: r.ChainID, APIKeyID: r.APIKeyID, SignerAddress: r.SignerAddress,
-			Config: r.Config, Variables: r.Variables, TestCases: testCases, Enabled: r.Enabled,
+			Config: r.Config, Variables: r.Variables, TestVariables: testVars, TestCases: testCases, Enabled: r.Enabled,
 		})
 	}
 	log.Debug("Validating expanded rules from config", "config", configPath, "rules", len(localRules))
-	// Config instances use the full engine (all rules together) to validate combined behavior.
-	return validateRules(ctx, localRules, validator, msgValidator, jsValidator, nil, log, verbose, true)
+	// Validate each rule in isolation (blocklist + rule under test) so template expected-fail cases apply per-rule.
+	return validateRules(ctx, localRules, validator, msgValidator, jsValidator, nil, log, verbose, false)
 }
 
 // configRuleID returns the deterministic rule ID for a config rule (same formula as internal/config/rule_init.go).
@@ -496,10 +504,15 @@ func validateRules(ctx context.Context, rules []RuleConfig, validator *evm.Solid
 			if err != nil {
 				continue
 			}
-			// So JS script sees config.* (allowed_safe_addresses, chain_id, etc.) same as production.
-			// Prefer per-rule Variables (from -config expanded instance) over template test_variables.
+			// So JS script sees config.* (allowed_safe_addresses, etc.) same as production.
+			// Prefer template test_variables (from expanded rule) so expected-fail cases validate correctly.
 			var varsToSeed map[string]interface{}
-			if len(ruleCfg.Variables) > 0 {
+			if len(ruleCfg.TestVariables) > 0 {
+				varsToSeed = make(map[string]interface{}, len(ruleCfg.TestVariables))
+				for k, v := range ruleCfg.TestVariables {
+					varsToSeed[k] = v
+				}
+			} else if len(ruleCfg.Variables) > 0 {
 				varsToSeed = ruleCfg.Variables
 			} else if len(templateTestVariables) > 0 {
 				varsToSeed = make(map[string]interface{}, len(templateTestVariables))
@@ -648,9 +661,14 @@ func validateRules(ctx context.Context, rules []RuleConfig, validator *evm.Solid
 				failed++
 				continue
 			}
-			// Set Variables on rule so JS script sees config.* (same as in full repo).
+			// Set Variables on rule so JS script sees config.* (same as in full repo). Prefer TestVariables for validation.
 			var varsToSeed map[string]interface{}
-			if len(ruleCfg.Variables) > 0 {
+			if len(ruleCfg.TestVariables) > 0 {
+				varsToSeed = make(map[string]interface{}, len(ruleCfg.TestVariables))
+				for k, v := range ruleCfg.TestVariables {
+					varsToSeed[k] = v
+				}
+			} else if len(ruleCfg.Variables) > 0 {
 				varsToSeed = ruleCfg.Variables
 			} else if len(templateTestVariables) > 0 {
 				varsToSeed = make(map[string]interface{}, len(templateTestVariables))
@@ -699,10 +717,14 @@ func validateRules(ctx context.Context, rules []RuleConfig, validator *evm.Solid
 				for k, v := range tc.Input {
 					inputCopy[k] = v
 				}
-				// Substitute ${var} in test input: use per-rule Variables (-config) or template test_variables.
-				varsForSubst := templateTestVariables
-				if len(ruleCfg.Variables) > 0 {
+				// Substitute ${var} in test input: prefer per-rule TestVariables (template test_variables) for validation.
+				var varsForSubst map[string]string
+				if len(ruleCfg.TestVariables) > 0 {
+					varsForSubst = ruleCfg.TestVariables
+				} else if len(ruleCfg.Variables) > 0 {
 					varsForSubst = interfaceMapToStringMap(ruleCfg.Variables)
+				} else {
+					varsForSubst = templateTestVariables
 				}
 				if len(varsForSubst) > 0 {
 					jsonBytes, _ := json.Marshal(inputCopy)

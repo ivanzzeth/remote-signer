@@ -75,7 +75,7 @@ type Rule struct {
 	// When BudgetPeriod is set, the instance automatically renews its budget
 	// at each period boundary. ExpiresAt still controls the overall lifetime.
 	BudgetPeriod      *time.Duration `json:"budget_period,omitempty" gorm:"type:bigint"`         // e.g. 24h, 7*24h
-	BudgetPeriodStart *time.Time     `json:"budget_period_start,omitempty" gorm:"type:datetime"` // when the first period begins (datetime for SQLite compat)
+	BudgetPeriodStart *time.Time     `json:"budget_period_start,omitempty"` // when the first period begins (SQLite: datetime, PostgreSQL: timestamptz)
 
 	Enabled   bool       `json:"enabled" gorm:"index"`
 	CreatedAt time.Time  `json:"created_at"`

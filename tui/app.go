@@ -32,6 +32,9 @@ const (
 	ViewHDWalletDetail
 	ViewSecurity
 	ViewAPIKeys
+	ViewTemplates
+	ViewPresets
+	ViewPresetDetail
 )
 
 // keyMap defines the key bindings for the application
@@ -64,6 +67,7 @@ type keyMap struct {
 	Number7   key.Binding
 	Number8   key.Binding
 	Number9   key.Binding
+	Number0   key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
@@ -76,7 +80,7 @@ func (k keyMap) FullHelp() [][]key.Binding {
 		{k.Up, k.Down, k.PageUp, k.PageDown},
 		{k.Approve, k.Reject, k.Generate},
 		{k.Filter, k.Refresh, k.Delete, k.Toggle},
-		{k.Number1, k.Number2, k.Number3, k.Number4, k.Number5, k.Number6, k.Number7, k.Number8, k.Number9},
+		{k.Number1, k.Number2, k.Number3, k.Number4, k.Number5, k.Number6, k.Number7, k.Number8, k.Number9, k.Number0},
 		{k.Help, k.Quit},
 	}
 }
@@ -194,6 +198,10 @@ var keys = keyMap{
 		key.WithKeys("9"),
 		key.WithHelp("9", "api keys"),
 	),
+	Number0: key.NewBinding(
+		key.WithKeys("0"),
+		key.WithHelp("0", "templates"),
+	),
 }
 
 // Model represents the main application state
@@ -224,6 +232,9 @@ type Model struct {
 	hdwalletDetail *views.HDWalletDetailModel
 	security       *views.SecurityModel
 	apikeysView    *views.APIKeysModel
+	templates      *views.TemplatesModel
+	presets        *views.PresetsModel
+	presetDetail   *views.PresetDetailModel
 }
 
 // NewModel creates a new application model
@@ -301,6 +312,21 @@ func NewModel(c *client.Client) (*Model, error) {
 		return nil, fmt.Errorf("failed to create api keys view: %w", err)
 	}
 
+	templates, err := views.NewTemplatesModel(c, ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create templates view: %w", err)
+	}
+
+	presets, err := views.NewPresetsModel(c, ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create presets view: %w", err)
+	}
+
+	presetDetail, err := views.NewPresetDetailModel(c, ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create preset detail view: %w", err)
+	}
+
 	return &Model{
 		client:        c,
 		ctx:           ctx,
@@ -320,6 +346,9 @@ func NewModel(c *client.Client) (*Model, error) {
 		hdwalletDetail: hdwalletDetail,
 		security:       security,
 		apikeysView:    apikeysView,
+		templates:      templates,
+		presets:        presets,
+		presetDetail:   presetDetail,
 	}, nil
 }
 
@@ -335,6 +364,8 @@ func (m Model) Init() tea.Cmd {
 		m.hdwallets.Init(),
 		m.security.Init(),
 		m.apikeysView.Init(),
+		m.templates.Init(),
+		m.presets.Init(),
 	)
 }
 
@@ -362,6 +393,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.hdwalletDetail.SetSize(msg.Width, msg.Height-6)
 		m.security.SetSize(msg.Width, msg.Height-6)
 		m.apikeysView.SetSize(msg.Width, msg.Height-6)
+		m.templates.SetSize(msg.Width, msg.Height-6)
+		m.presets.SetSize(msg.Width, msg.Height-6)
+		m.presetDetail.SetSize(msg.Width, msg.Height-6)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -380,7 +414,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.currentView == ViewRules || m.currentView == ViewAudit ||
 					m.currentView == ViewSigners || m.currentView == ViewMetrics ||
 					m.currentView == ViewHDWallets || m.currentView == ViewSecurity ||
-					m.currentView == ViewAPIKeys {
+					m.currentView == ViewAPIKeys || m.currentView == ViewTemplates ||
+					m.currentView == ViewPresets {
 					return m, tea.Quit
 				}
 				// If in detail view, go back instead of quitting
@@ -436,32 +471,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.currentView = ViewAPIKeys
 				return m, m.apikeysView.Refresh()
 
+			case key.Matches(msg, keys.Number0):
+				m.activeTab = 9
+				m.currentView = ViewTemplates
+				return m, m.templates.Refresh()
+
 			case key.Matches(msg, keys.Tab):
-				// Only switch tabs in main views
+				// Only switch tabs in main views (11 tabs)
 				if m.currentView == ViewDashboard || m.currentView == ViewRequests ||
 					m.currentView == ViewRules || m.currentView == ViewAudit ||
 					m.currentView == ViewSigners || m.currentView == ViewMetrics ||
 					m.currentView == ViewHDWallets || m.currentView == ViewSecurity ||
-					m.currentView == ViewAPIKeys {
-					m.activeTab = (m.activeTab + 1) % 9
+					m.currentView == ViewAPIKeys || m.currentView == ViewTemplates ||
+					m.currentView == ViewPresets {
+					m.activeTab = (m.activeTab + 1) % 11
 					m.currentView = m.tabToView(m.activeTab)
 					return m, m.refreshCurrentView()
 				}
 
 			case key.Matches(msg, keys.ShiftTab):
-				// Only switch tabs in main views
+				// Only switch tabs in main views (11 tabs)
 				if m.currentView == ViewDashboard || m.currentView == ViewRequests ||
 					m.currentView == ViewRules || m.currentView == ViewAudit ||
 					m.currentView == ViewSigners || m.currentView == ViewMetrics ||
 					m.currentView == ViewHDWallets || m.currentView == ViewSecurity ||
-					m.currentView == ViewAPIKeys {
-					m.activeTab = (m.activeTab + 8) % 9
+					m.currentView == ViewAPIKeys || m.currentView == ViewTemplates ||
+					m.currentView == ViewPresets {
+					m.activeTab = (m.activeTab + 10) % 11
 					m.currentView = m.tabToView(m.activeTab)
 					return m, m.refreshCurrentView()
 				}
 
 			case key.Matches(msg, keys.Back):
-				if m.currentView == ViewRequestDetail || m.currentView == ViewRuleDetail || m.currentView == ViewSignerDetail || m.currentView == ViewHDWalletDetail {
+				if m.currentView == ViewRequestDetail || m.currentView == ViewRuleDetail || m.currentView == ViewSignerDetail || m.currentView == ViewHDWalletDetail || m.currentView == ViewPresetDetail {
 					m.currentView = m.previousView
 					return m, m.refreshCurrentView()
 				}
@@ -597,6 +639,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		newAPIKeys, cmd := m.apikeysView.Update(msg)
 		m.apikeysView = newAPIKeys.(*views.APIKeysModel)
 		cmds = append(cmds, cmd)
+
+	case ViewTemplates:
+		newTemplates, cmd := m.templates.Update(msg)
+		m.templates = newTemplates.(*views.TemplatesModel)
+		cmds = append(cmds, cmd)
+
+	case ViewPresets:
+		newPresets, cmd := m.presets.Update(msg)
+		m.presets = newPresets.(*views.PresetsModel)
+		cmds = append(cmds, cmd)
+
+		if m.presets.ShouldOpenDetail() {
+			m.presets.ResetOpenDetail()
+			id := m.presets.GetSelectedPresetID()
+			if id != "" {
+				m.previousView = m.currentView
+				m.currentView = ViewPresetDetail
+				cmds = append(cmds, m.presetDetail.LoadPreset(id))
+			}
+		}
+
+	case ViewPresetDetail:
+		newDetail, cmd := m.presetDetail.Update(msg)
+		m.presetDetail = newDetail.(*views.PresetDetailModel)
+		cmds = append(cmds, cmd)
+
+		if m.presetDetail.ShouldGoBack() {
+			m.currentView = ViewPresets
+			m.presetDetail.ResetGoBack()
+			cmds = append(cmds, m.presets.Refresh())
+		}
 	}
 
 	return m, tea.Batch(cmds...)
@@ -636,7 +709,7 @@ func (m Model) View() string {
 }
 
 func (m Model) renderHeader() string {
-	tabs := []string{"Dashboard", "Requests", "Rules", "Audit", "Signers", "Metrics", "HD Wallets", "Security", "API Keys"}
+	tabs := []string{"Dashboard", "Requests", "Rules", "Audit", "Signers", "Metrics", "HD Wallets", "Security", "API Keys", "Templates", "Presets"}
 	var renderedTabs []string
 
 	for i, tab := range tabs {
@@ -681,6 +754,12 @@ func (m Model) renderContent(_ int) string {
 		return m.security.View()
 	case ViewAPIKeys:
 		return m.apikeysView.View()
+	case ViewTemplates:
+		return m.templates.View()
+	case ViewPresets:
+		return m.presets.View()
+	case ViewPresetDetail:
+		return m.presetDetail.View()
 	default:
 		return "Unknown view"
 	}
@@ -706,6 +785,10 @@ func (m Model) refreshCurrentView() tea.Cmd {
 		return m.security.Refresh()
 	case ViewAPIKeys:
 		return m.apikeysView.Refresh()
+	case ViewTemplates:
+		return m.templates.Refresh()
+	case ViewPresets:
+		return m.presets.Refresh()
 	default:
 		return nil
 	}
@@ -733,6 +816,12 @@ func (m Model) isCurrentViewCapturingInput() bool {
 		return m.security.IsCapturingInput()
 	case ViewAPIKeys:
 		return m.apikeysView.IsCapturingInput()
+	case ViewTemplates:
+		return m.templates.IsCapturingInput()
+	case ViewPresets:
+		return m.presets.IsCapturingInput()
+	case ViewPresetDetail:
+		return m.presetDetail.IsCapturingInput()
 	default:
 		return false
 	}
@@ -759,6 +848,10 @@ func (m Model) tabToView(tab int) ViewType {
 		return ViewSecurity
 	case 8:
 		return ViewAPIKeys
+	case 9:
+		return ViewTemplates
+	case 10:
+		return ViewPresets
 	default:
 		return ViewDashboard
 	}

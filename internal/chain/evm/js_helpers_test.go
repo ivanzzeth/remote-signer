@@ -926,9 +926,7 @@ func TestRs_BigIntRequireLte_NoLimit(t *testing.T) {
 		if (!r.valid) return r;
 		r = rs.bigint.requireLte("100", "100", "cap");
 		if (!r.valid) return r;
-		r = rs.bigint.requireLte("50", "", "cap");
-		if (!r.valid) return r;
-		r = rs.bigint.requireLte("50", "0", "cap");
+		r = rs.bigint.requireLte("50", "-1", "cap");
 		if (!r.valid) return r;
 		return ok();
 	}`
@@ -948,6 +946,18 @@ func TestRs_BigIntRequireLte_ExceedsCap(t *testing.T) {
 	res := e.wrappedValidate(script, input, nil)
 	assert.False(t, res.Valid)
 	assert.Contains(t, res.Reason, "transfer exceeds cap")
+}
+
+func TestRs_BigIntRequireLte_EmptyMaxFails(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	script := `function validate(i){
+		var r = rs.bigint.requireLte("50", "", "max required");
+		return r;
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil)
+	assert.False(t, res.Valid, "empty max must fail")
+	assert.Contains(t, res.Reason, "max required")
 }
 
 func TestRs_BigIntRequireZero(t *testing.T) {

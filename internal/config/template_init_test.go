@@ -149,6 +149,42 @@ func TestExpandInstanceRules_ErrorPaths(t *testing.T) {
 		}
 	})
 
+	t.Run("required variable not set", func(t *testing.T) {
+		tmplWithRequired := []TemplateConfig{
+			{
+				Name: "TReq",
+				Type: "template_bundle",
+				Variables: []TemplateVarConfig{
+					{Name: "chain_id", Type: "string", Required: true},
+					{Name: "token_address", Type: "address", Required: true},
+				},
+				Config: map[string]interface{}{
+					"rules_json": `[{"name":"R","type":"evm_js","mode":"whitelist","config":{},"enabled":true}]`,
+				},
+				Enabled: true,
+			},
+		}
+		rules := []RuleConfig{
+			{
+				Name: "Instance",
+				Type: "instance",
+				Mode: "whitelist",
+				Config: map[string]interface{}{
+					"template":  "TReq",
+					"variables": map[string]interface{}{"chain_id": "", "token_address": ""},
+				},
+				Enabled: true,
+			},
+		}
+		_, err := ExpandInstanceRules(rules, tmplWithRequired)
+		if err == nil {
+			t.Fatal("expected error when required variable not set")
+		}
+		if !strings.Contains(err.Error(), "required variable") || !strings.Contains(err.Error(), "chain_id") {
+			t.Errorf("error should mention required variable and chain_id: %v", err)
+		}
+	})
+
 	t.Run("unresolved variable in rules_json", func(t *testing.T) {
 		tmplWithPlaceholder := []TemplateConfig{
 			{

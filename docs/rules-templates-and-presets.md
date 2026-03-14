@@ -194,7 +194,7 @@ A **preset** is a YAML file that stores one or more **instance-style rule(s)** w
 - Avoid copying long variable blocks from `config.example.yaml`.
 - Override only a few values (e.g. your Safe address) and optionally merge the result into your `config.yaml` via **remote-signer-cli** or **setup.sh**.
 
-Presets live under `rules/presets/` (e.g. `polymarket_safe_polygon.preset.js.yaml`). They are used only by the CLI (and optionally by setup); the server does not read preset files.
+Presets live under `rules/presets/` (e.g. `polymarket_safe_polygon.preset.js.yaml`). The **CLI** uses them for list/vars/create-from and setup; when `presets.dir` is set in config, the **server** can also read the same directory and expose a preset API (list, vars, apply) for admin keys.
 
 ### 5.2 Single-rule preset format
 
@@ -351,7 +351,19 @@ You can load several presets into the same config (e.g. Polymarket and Opinion).
 
 For multi-rule presets, the CLI may support something like `--rule-index 0` to target the first rule. See the CLI help and [remote-signer-cli design](features/remote-signer-cli-design.md) for details.
 
-### 5.10 Using presets in setup
+### 5.10 Server preset API (admin-only)
+
+When `presets.dir` is set in the server config, the following endpoints are registered under `/api/v1/presets`. All require **admin** API key authentication. Apply is also disabled when `security.rules_api_readonly` is true (403).
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/presets` | GET | List preset IDs and template names (from files in `presets.dir`). |
+| `/api/v1/presets/:id/vars` | GET | Return override hints (and variable metadata) for preset `:id`. `:id` is the preset filename (e.g. `polymarket_safe_polygon.preset.yaml`). |
+| `/api/v1/presets/:id/apply` | POST | Parse the preset with optional body `{ "variables": { "key": "value", ... } }`, create one template instance per rule in **one transaction** (all success or all rollback), and return `{ "results": [ { "rule", "budget?" }, ... ] }` (201). Templates must exist in the template library (DB); config-only templates must be added via API or config first. |
+
+Apply uses the same preset format and variable substitution as the CLI; the server resolves templates by **name** from the database. See [api.md](api.md#presets) for request/response details and [security.md](security.md) for access control.
+
+### 5.11 Using presets in setup (CLI)
 
 **setup.sh** runs an optional step (Step 4b) after generating config: “Add rules from preset?”. If the user agrees, it:
 
