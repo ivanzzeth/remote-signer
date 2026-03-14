@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "remote-signer": {
-      "command": "remote-signer-mcp",
-      "args": [],
+      "command": "npx",
+      "args": ["-y", "remote-signer-mcp"],
       "env": {
         "REMOTE_SIGNER_URL": "http://localhost:8548",
         "REMOTE_SIGNER_API_KEY_ID": "admin-key",

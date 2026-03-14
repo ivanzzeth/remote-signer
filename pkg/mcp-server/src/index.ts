@@ -4,7 +4,7 @@
  * Remote Signer MCP Server
  *
  * Provides MCP tools for interacting with the remote-signer service.
- * Uses the @remote-signer/client TypeScript SDK for authentication and API calls.
+ * Uses the remote-signer-client npm package for authentication and API calls.
  *
  * Each tool has explicit, well-typed parameters so that LLMs can call them
  * without ambiguity.  EVM tools are prefixed with "evm_" for namespace clarity
@@ -19,7 +19,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { RemoteSignerClient } from "@remote-signer/client";
+import { RemoteSignerClient } from "remote-signer-client";
 
 // ---------------------------------------------------------------------------
 // Configuration
