@@ -5,13 +5,13 @@ JavaScript/TypeScript client library for the remote-signer service. This library
 ## Installation
 
 ```bash
-npm install @remote-signer/client
+npm install remote-signer-client
 ```
 
 ## Quick Start
 
 ```typescript
-import { RemoteSignerClient } from '@remote-signer/client';
+import { RemoteSignerClient } from 'remote-signer-client';
 
 const client = new RemoteSignerClient({
   baseURL: 'http://localhost:8548',
@@ -133,7 +133,7 @@ The client throws specific error types:
 - `RemoteSignerError`: General client errors
 
 ```typescript
-import { APIError, SignError, TimeoutError } from '@remote-signer/client';
+import { APIError, SignError, TimeoutError } from 'remote-signer-client';
 
 try {
   await client.sign(request, true);
@@ -195,6 +195,27 @@ npm run test:e2e
 ```bash
 npm run lint
 ```
+
+## Publishing to npm
+
+The package is **unscoped** (`remote-signer-client`), same style as [eip155-chains](https://www.npmjs.com/package/eip155-chains): no org needed, always public.
+
+1. **Auth** (one-time per machine): set a token in `~/.npmrc`:
+   ```bash
+   echo "//registry.npmjs.org/:_authToken=YOUR_NPM_TOKEN" >> ~/.npmrc
+   chmod 600 ~/.npmrc
+   ```
+   Create a token at [npmjs.com](https://www.npmjs.com) → Account → Access Tokens (Automation or Publish).
+
+2. **Build and publish** from this directory:
+   ```bash
+   cd pkg/js-client
+   npm run build
+   npm publish
+   ```
+   Unscoped packages are public by default; no `--access public` needed.
+
+3. **Subsequent releases**: bump `version` in `package.json` (or `npm version patch`), then `npm publish` again.
 
 ## License
 

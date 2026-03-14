@@ -7,7 +7,7 @@
  *
  * @example
  * ```typescript
- * import { RemoteSignerClient } from '@remote-signer/client';
+ * import { RemoteSignerClient } from 'remote-signer-client';
  *
  * const client = new RemoteSignerClient({
  *   baseURL: 'http://localhost:8548',
