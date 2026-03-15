@@ -202,7 +202,6 @@ The server starts without signers. Add them after startup:
 |----------|-------------|
 | [Security Overview](docs/security.md) | Defense-in-depth: 8 layers from network to application |
 | [Security Review](docs/security-review.md) | Findings, priorities, implementation status |
-| [Admin Operation Alerting](docs/security/admin-operation-alerting.md) | Real-time alerts on all privileged operations |
 
 ### Development
 

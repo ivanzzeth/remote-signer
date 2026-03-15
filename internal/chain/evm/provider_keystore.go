@@ -3,6 +3,7 @@ package evm
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ivanzzeth/ethsig"
@@ -17,6 +18,7 @@ type KeystoreProvider struct {
 	registry    *SignerRegistry
 	keystoreDir string
 	pwProvider  PasswordProvider
+	mu          sync.RWMutex
 	lockedPaths map[string]string // address (checksummed) -> filePath
 }
 
@@ -136,6 +138,8 @@ func (p *KeystoreProvider) DiscoverLockedSigners() ([]types.SignerInfo, error) {
 	}
 
 	var discovered []types.SignerInfo
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	for _, ks := range keystores {
 		addrKey := normalizeAddress(ks.Address)
 		if p.registry.HasSigner(addrKey) {
@@ -160,7 +164,10 @@ func (p *KeystoreProvider) DiscoverLockedSigners() ([]types.SignerInfo, error) {
 // UnlockSigner unlocks a locked keystore signer with the given password.
 func (p *KeystoreProvider) UnlockSigner(ctx context.Context, address string, password string) (*ethsig.Signer, error) {
 	addrKey := normalizeAddress(address)
+
+	p.mu.RLock()
 	filePath, ok := p.lockedPaths[addrKey]
+	p.mu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("no locked keystore found for address %s", address)
 	}
@@ -174,7 +181,10 @@ func (p *KeystoreProvider) UnlockSigner(ctx context.Context, address string, pas
 	}
 
 	signer := ethsig.NewSigner(keystoreSigner)
+
+	p.mu.Lock()
 	delete(p.lockedPaths, addrKey)
+	p.mu.Unlock()
 
 	logger.EVM().Info().Str("address", address).Msg("keystore signer unlocked")
 
@@ -193,7 +203,9 @@ func (p *KeystoreProvider) LockSigner(ctx context.Context, address string) error
 
 	for _, ks := range keystores {
 		if normalizeAddress(ks.Address) == addrKey {
+			p.mu.Lock()
 			p.lockedPaths[addrKey] = ks.Path
+			p.mu.Unlock()
 			logger.EVM().Info().Str("address", address).Msg("keystore signer locked")
 			return nil
 		}

@@ -7,6 +7,7 @@ import (
 	"github.com/ivanzzeth/ethsig"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/secure"
 )
 
 // PrivateKeyProvider loads signers from hex private keys (env vars or direct values).
@@ -27,12 +28,13 @@ func NewPrivateKeyProvider(registry *SignerRegistry, configs []PrivateKeyConfig)
 			continue
 		}
 
-		keyHex := resolvePrivateKey(pk.KeyEnvVar)
-		if keyHex == "" {
+		keyHexResolved := resolvePrivateKey(pk.KeyEnvVar)
+		if keyHexResolved == "" {
 			return nil, fmt.Errorf("private key is empty for signer %s (check key_env value or environment variable)", pk.Address)
 		}
-
+		keyHex := string([]byte(keyHexResolved))
 		privKeySigner, err := ethsig.NewEthPrivateKeySignerFromPrivateKeyHex(keyHex)
+		secure.ZeroString(&keyHex)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create private key signer for %s: %w", pk.Address, err)
 		}

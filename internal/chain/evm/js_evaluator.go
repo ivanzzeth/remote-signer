@@ -342,6 +342,9 @@ func (e *JSRuleEvaluator) wrappedValidateBudget(script string, input *RuleInput,
 		return nil, fmt.Errorf("remove globals: %w", err)
 	}
 
+	// Note: Memory monitoring uses process-wide runtime.ReadMemStats, not per-VM tracking.
+	// Under concurrent JS evaluations, allocation growth may be attributed to the wrong VM.
+	// This provides defense-in-depth rather than precise per-evaluation enforcement.
 	var memBefore runtime.MemStats
 	runtime.ReadMemStats(&memBefore)
 	done := make(chan struct{})
@@ -460,6 +463,9 @@ func (e *JSRuleEvaluator) wrappedValidate(script string, input *RuleInput, confi
 
 	// Timeout and memory guard. The timer interrupts the VM after jsRuleTimeout.
 	// The memory monitor polls allocations and interrupts if growth exceeds jsRuleMaxAllocBytes.
+	// Note: Memory monitoring uses process-wide runtime.ReadMemStats, not per-VM tracking.
+	// Under concurrent JS evaluations, allocation growth may be attributed to the wrong VM.
+	// This provides defense-in-depth rather than precise per-evaluation enforcement.
 	var memBefore runtime.MemStats
 	runtime.ReadMemStats(&memBefore)
 	done := make(chan struct{})

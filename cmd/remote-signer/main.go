@@ -435,6 +435,9 @@ func run() error {
 		log.Info("Dynamic blocklist registered", "sources", len(blCfg.Sources), "sync_interval", syncInterval, "fail_mode", blCfg.FailMode)
 	}
 
+	// Seal the rule engine: no more evaluator registrations allowed after this point.
+	ruleEngine.Seal()
+
 	// Initialize notification service
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 
 	"github.com/ivanzzeth/remote-signer/internal/config"
@@ -52,7 +53,7 @@ func (h *ACLHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		// Already wrote 200; log if needed
-		_ = err
+		// Headers already sent (200 OK); cannot change status code, so log the error.
+		slog.Error("failed to encode IP whitelist response", "error", err)
 	}
 }

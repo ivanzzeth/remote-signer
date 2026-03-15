@@ -92,6 +92,7 @@ type WhitelistRuleEngine struct {
 	budgetChecker         *BudgetChecker // optional: budget checking for template instances
 	delegationConverter   DelegationPayloadConverter
 	mu                    sync.RWMutex
+	sealed                bool // once true, RegisterEvaluator is forbidden (server is accepting requests)
 	logger                *slog.Logger
 }
 
@@ -135,12 +136,28 @@ func NewWhitelistRuleEngine(repo storage.RuleRepository, logger *slog.Logger, op
 	return engine, nil
 }
 
-// RegisterEvaluator registers a rule evaluator for a specific rule type
+// RegisterEvaluator registers a rule evaluator for a specific rule type.
+// Must be called during initialization only, before Seal() is called.
+// Panics if the engine has been sealed (i.e., after server startup).
 func (e *WhitelistRuleEngine) RegisterEvaluator(evaluator RuleEvaluator) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.sealed {
+		panic(fmt.Sprintf("RegisterEvaluator called after engine sealed: type=%s", evaluator.Type()))
+	}
 	e.evaluators[evaluator.Type()] = evaluator
 	e.logger.Info("registered rule evaluator", "type", evaluator.Type())
+}
+
+// Seal marks the engine as fully initialized. After this call, RegisterEvaluator
+// will panic. This ensures the evaluators map is effectively immutable once the
+// server starts accepting requests, eliminating the race window between RLock
+// release and re-acquire in EvaluateWithResult.
+func (e *WhitelistRuleEngine) Seal() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.sealed = true
+	e.logger.Info("rule engine sealed", "evaluator_count", len(e.evaluators))
 }
 
 // Evaluate performs two-tier rule evaluation
@@ -190,9 +207,16 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 		return nil, fmt.Errorf("failed to list rules: %w", err)
 	}
 
-	// Filter rules by sign type before evaluation (avoid calling evaluator for non-applicable rules)
+	// SECURITY: Take a single RLock to filter rules and snapshot evaluators atomically.
+	// This eliminates the window where evaluators could change between filterRulesBySignType
+	// and the main evaluation loop. After Seal() is called at startup, the evaluators map
+	// is effectively immutable, so the snapshot is a defense-in-depth measure.
 	e.mu.RLock()
 	rules = e.filterRulesBySignType(rules, req.SignType)
+	evaluators := make(map[types.RuleType]RuleEvaluator, len(e.evaluators))
+	for k, v := range e.evaluators {
+		evaluators[k] = v
+	}
 	e.mu.RUnlock()
 
 	// Separate rules by mode
@@ -214,14 +238,11 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 		"whitelist_count", len(whitelistRules),
 	)
 
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-
 	// Phase 1: Check blocklist rules first (mandatory Fail-Closed)
 	// ANY violation = blocked immediately (no manual approval possible)
 	// ANY evaluation error = immediate rejection (Fail-Closed is mandatory for blocklist)
 	for _, rule := range blocklistRules {
-		evaluator, exists := e.evaluators[rule.Type]
+		evaluator, exists := evaluators[rule.Type]
 		if !exists {
 			e.logger.Error("no evaluator for blocklist rule type (Fail-Closed)",
 				"type", rule.Type,
@@ -304,7 +325,7 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 			continue
 		}
 
-		_, exists := e.evaluators[rule.Type]
+		_, exists := evaluators[rule.Type]
 		if !exists {
 			e.logger.Warn("no evaluator for whitelist rule type, skipping",
 				"type", rule.Type,

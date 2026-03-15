@@ -14,6 +14,7 @@ import (
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/logger"
+	"github.com/ivanzzeth/remote-signer/internal/secure"
 )
 
 // SignerConfig defines configuration for EVM signers
@@ -166,12 +167,15 @@ func NewSignerRegistryWithProvider(cfg SignerConfig, provider PasswordProvider) 
 		}
 
 		// Support both direct hex value and environment variable name
-		keyHex := resolvePrivateKey(pk.KeyEnvVar)
-		if keyHex == "" {
+		keyHexResolved := resolvePrivateKey(pk.KeyEnvVar)
+		if keyHexResolved == "" {
 			return nil, fmt.Errorf("private key is empty for signer %s (check key_env value or environment variable)", pk.Address)
 		}
-
+		// Copy to a mutable heap string so ZeroString can safely overwrite the backing array.
+		// resolvePrivateKey may return a substring or string literal whose backing memory is read-only.
+		keyHex := string([]byte(keyHexResolved))
 		privKeySigner, err := ethsig.NewEthPrivateKeySignerFromPrivateKeyHex(keyHex)
+		secure.ZeroString(&keyHex)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create private key signer for %s: %w", pk.Address, err)
 		}

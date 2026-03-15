@@ -206,9 +206,14 @@ func (r *Router) setupRoutes() error {
 		r.mux.Handle("/api/v1/evm/guard/resume", r.withAuthAndAdmin(http.HandlerFunc(r.handleGuardResume)))
 	}
 
-	// Signer management routes (GET with auth, POST with auth + admin)
+	// Signer management routes: withAuth (not withAuthAndAdmin) is intentional here.
+	// The same endpoint handles both GET (list signers — non-admin can list their allowed
+	// signers) and POST (create signer — admin only). The handler enforces admin checks
+	// for mutating operations (POST/PUT/DELETE) at the handler level, because Go's
+	// http.ServeMux does not support per-method middleware.
 	r.mux.Handle("/api/v1/evm/signers", r.withAuth(signerHandler))
 	// Signer action routes: /api/v1/evm/signers/{address}/unlock, /lock
+	// Handler-level admin check applies for lock/unlock actions.
 	r.mux.Handle("/api/v1/evm/signers/", r.withAuth(http.HandlerFunc(signerHandler.HandleSignerAction)))
 
 	// HD wallet management routes (auth required; admin/HD wallet permission checked in handler)

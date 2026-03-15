@@ -2374,12 +2374,11 @@ func (e *SolidityRuleEvaluator) executeBatchScript(
 		// For cached results, we assume all tests passed or all failed together
 		// This is a simplification - in practice, batch results need per-test caching
 		results := make(map[int]*batchTestResult)
-		for testIdx, ctxIdx := range ruleIndices {
+		for _, ctxIdx := range ruleIndices {
 			results[ctxIdx] = &batchTestResult{
 				passed: cachedResult.passed,
 				reason: cachedResult.reason,
 			}
-			_ = testIdx // suppress unused warning
 		}
 		return results, nil
 	}

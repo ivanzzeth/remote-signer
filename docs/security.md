@@ -231,6 +231,52 @@ notify_channels:
   telegram: ["-123456789"]
 ```
 
+### Admin Operation Alerts (High-Risk Write Operations)
+
+Every privileged write operation triggers an immediate notification. This enables a simple security model: **if you didn't initiate the operation, it may be a breach — investigate immediately.**
+
+| Alert Type | Trigger | Category |
+|------------|---------|----------|
+| `signer_created` | Signer created via API | Signer Mgmt |
+| `signer_unlocked` | Signer unlocked via API | Signer Mgmt |
+| `signer_locked` | Signer locked via API | Signer Mgmt |
+| `signer_auto_locked` | Signer auto-locked by timeout | Signer Mgmt |
+| `hdwallet_created` | HD wallet created/imported | Signer Mgmt |
+| `hdwallet_derived` | HD wallet addresses derived | Signer Mgmt |
+| `rule_created` | Rule created via API | Rule Mgmt |
+| `rule_updated` | Rule updated via API | Rule Mgmt |
+| `rule_deleted` | Rule deleted via API | Rule Mgmt |
+| `preset_applied` | Preset applied via API | Rule Mgmt |
+| `config_reloaded` | Config reloaded via SIGHUP | Config Sync |
+| `template_synced` | Template created/updated/deleted from config | Config Sync |
+| `apikey_synced` | API key created/updated from config | Config Sync |
+
+Config sync alerts (template_synced, apikey_synced) only fire on **actual changes**, not on every startup.
+
+Alert format includes: operation type, API key ID, source IP, detail, and timestamp.
+
+### OFAC Dynamic Blocklist
+
+Runtime address blocklist synced periodically from external sources (default: OFAC SDN list). Blocks signing requests to sanctioned/malicious addresses.
+
+- **Startup**: loads from local cache file (instant, no network dependency)
+- **Background sync**: fetches from configured URLs every hour (configurable)
+- **Persistence**: writes to local cache file after each successful sync
+- **Fail mode**: "open" (use stale cache on failure) or "close" (reject all)
+- **Security**: URL scheme validation (http/https only), 10MB body limit, minimum 1-minute sync interval
+
+```yaml
+dynamic_blocklist:
+  enabled: true
+  sync_interval: "1h"
+  fail_mode: "open"
+  cache_file: "data/blocklist_cache.json"
+  sources:
+    - name: "OFAC SDN ETH"
+      type: "url_text"
+      url: "https://raw.githubusercontent.com/0xB10C/ofac-sanctioned-digital-currency-addresses/main/sanctioned_addresses_ETH.txt"
+```
+
 ### Docker Proxy
 
 When running in Docker, outbound HTTPS (e.g. Telegram API) may require a proxy. The `docker-compose.yml` passes `HTTP_PROXY` / `HTTPS_PROXY` from the host environment. If unset, no proxy is used.
