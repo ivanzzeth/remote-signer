@@ -99,7 +99,9 @@ func TestPreset_Apply_Success(t *testing.T) {
 	createdTmpl, err := adminClient.Templates.Create(ctx, tmplReq)
 	require.NoError(t, err)
 	defer func() {
-		_ = adminClient.Templates.Delete(ctx, createdTmpl.ID)
+		if err := adminClient.Templates.Delete(ctx, createdTmpl.ID); err != nil {
+			t.Logf("warning: failed to delete e2e preset template: %v", err)
+		}
 	}()
 
 	// Apply preset (uses variables from preset file; can override via body)

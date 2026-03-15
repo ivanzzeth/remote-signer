@@ -350,6 +350,26 @@ else
     echo -e "TUI version check... ${GREEN}OK (no staged tui/ changes)${NC}"
 fi
 
+# 6b. Any cmd/<name> with staged changes: if that command's main.go defines version, it must be bumped in this commit
+STAGED_CMD_DIRS=$(git diff --cached --name-only --diff-filter=ACM | grep '^cmd/' | cut -d'/' -f2 | sort -u)
+CMD_VERSION_FAILED=""
+for dir in $STAGED_CMD_DIRS; do
+    main_go="cmd/$dir/main.go"
+    if [ -f "$main_go" ] && grep -qE 'const version\s*=' "$main_go" 2>/dev/null; then
+        if ! git diff --cached -- "$main_go" | grep -qE '^[+-].*version\s*=\s*"[^"]*"'; then
+            CMD_VERSION_FAILED="${CMD_VERSION_FAILED}  - cmd/$dir: update const version in $main_go and stage it\n"
+        fi
+    fi
+done
+if [ -n "$CMD_VERSION_FAILED" ]; then
+    echo -e "Cmd version bump... ${RED}FAIL${NC}"
+    echo "You changed files under cmd/<name>/ but did not bump the version in that command's main.go:"
+    echo -e "$CMD_VERSION_FAILED"
+    FAILED=1
+elif [ -n "$STAGED_CMD_DIRS" ]; then
+    echo -e "Cmd version check... ${GREEN}OK${NC}"
+fi
+
 # 7. Run e2e tests (using port 18548 to avoid conflict with production on 8548). No skip; long timeout for budget/schedule e2e.
 echo -n "Running e2e tests... "
 if E2E_API_PORT=18548 go test -tags e2e ./e2e/... -count=1 -timeout 10m 2>/dev/null; then
@@ -428,7 +448,7 @@ log_info "Git hooks installed successfully!"
 log_info "Hooks location: $HOOKS_DIR"
 echo ""
 echo "Installed hooks:"
-echo "  pre-commit : gosec, govulncheck, go vet, error suppression, gitleaks, detect-secrets, semgrep, eslint-security, npm audit, rule validation, tui-version-bump (if tui/ changed), e2e tests"
+echo "  pre-commit : gosec, govulncheck, go vet, error suppression, gitleaks, detect-secrets, semgrep, eslint-security, npm audit, rule validation, tui-version-bump (if tui/ changed), cmd-version-bump (if cmd/<name>/ changed and main.go has version), e2e tests"
 echo "  pre-push   : full unit test suite (includes rule validation via TestRulesDirectoryValidation)"
 echo ""
 echo "To skip hooks (NOT recommended): git commit --no-verify"

@@ -15,8 +15,11 @@ type Service struct {
 	transport *transport.Transport
 }
 
-// NewService creates a new presets service.
+// NewService creates a new presets service. Panics if transport is nil (programming error).
 func NewService(t *transport.Transport) *Service {
+	if t == nil {
+		panic("presets.NewService: transport is required")
+	}
 	return &Service{transport: t}
 }
 

@@ -51,6 +51,8 @@ type keyMap struct {
 	Quit      key.Binding
 	Up        key.Binding
 	Down      key.Binding
+	Left      key.Binding
+	Right     key.Binding
 	PageUp    key.Binding
 	PageDown  key.Binding
 	Home      key.Binding
@@ -67,7 +69,6 @@ type keyMap struct {
 	Number7   key.Binding
 	Number8   key.Binding
 	Number9   key.Binding
-	Number0   key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
@@ -77,10 +78,10 @@ func (k keyMap) ShortHelp() []key.Binding {
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Tab, k.ShiftTab, k.Enter, k.Back},
-		{k.Up, k.Down, k.PageUp, k.PageDown},
+		{k.Up, k.Down, k.Left, k.Right, k.PageUp, k.PageDown},
 		{k.Approve, k.Reject, k.Generate},
 		{k.Filter, k.Refresh, k.Delete, k.Toggle},
-		{k.Number1, k.Number2, k.Number3, k.Number4, k.Number5, k.Number6, k.Number7, k.Number8, k.Number9, k.Number0},
+		{k.Number1, k.Number2, k.Number3, k.Number4, k.Number5, k.Number6, k.Number7, k.Number8, k.Number9},
 		{k.Help, k.Quit},
 	}
 }
@@ -133,6 +134,14 @@ var keys = keyMap{
 	Down: key.NewBinding(
 		key.WithKeys("down", "j"),
 		key.WithHelp("↓/j", "down"),
+	),
+	Left: key.NewBinding(
+		key.WithKeys("left", "h"),
+		key.WithHelp("←/h", "prev sub-tab (Rules)"),
+	),
+	Right: key.NewBinding(
+		key.WithKeys("right", "l"),
+		key.WithHelp("→/l", "next sub-tab (Rules)"),
 	),
 	PageUp: key.NewBinding(
 		key.WithKeys("pgup", "ctrl+u"),
@@ -198,10 +207,6 @@ var keys = keyMap{
 		key.WithKeys("9"),
 		key.WithHelp("9", "api keys"),
 	),
-	Number0: key.NewBinding(
-		key.WithKeys("0"),
-		key.WithHelp("0", "templates"),
-	),
 }
 
 // Model represents the main application state
@@ -211,6 +216,7 @@ type Model struct {
 	width        int
 	height       int
 	activeTab    int
+	rulesSubTab  int // 0=Rules, 1=Templates, 2=Presets; only when activeTab==2 (Rules)
 	currentView  ViewType
 	previousView ViewType
 	help         help.Model
@@ -410,12 +416,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Global key handling
 			switch {
 			case key.Matches(msg, keys.Quit):
-				if m.currentView == ViewDashboard || m.currentView == ViewRequests ||
-					m.currentView == ViewRules || m.currentView == ViewAudit ||
-					m.currentView == ViewSigners || m.currentView == ViewMetrics ||
-					m.currentView == ViewHDWallets || m.currentView == ViewSecurity ||
-					m.currentView == ViewAPIKeys || m.currentView == ViewTemplates ||
-					m.currentView == ViewPresets {
+				if m.isTopLevelView() {
 					return m, tea.Quit
 				}
 				// If in detail view, go back instead of quitting
@@ -438,6 +439,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			case key.Matches(msg, keys.Number3):
 				m.activeTab = 2
+				m.rulesSubTab = 0
 				m.currentView = ViewRules
 				return m, m.rules.Refresh()
 
@@ -471,34 +473,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.currentView = ViewAPIKeys
 				return m, m.apikeysView.Refresh()
 
-			case key.Matches(msg, keys.Number0):
-				m.activeTab = 9
-				m.currentView = ViewTemplates
-				return m, m.templates.Refresh()
-
 			case key.Matches(msg, keys.Tab):
-				// Only switch tabs in main views (11 tabs)
-				if m.currentView == ViewDashboard || m.currentView == ViewRequests ||
-					m.currentView == ViewRules || m.currentView == ViewAudit ||
-					m.currentView == ViewSigners || m.currentView == ViewMetrics ||
-					m.currentView == ViewHDWallets || m.currentView == ViewSecurity ||
-					m.currentView == ViewAPIKeys || m.currentView == ViewTemplates ||
-					m.currentView == ViewPresets {
-					m.activeTab = (m.activeTab + 1) % 11
+				// Only switch top-level tabs (9 tabs)
+				if m.isTopLevelView() {
+					m.activeTab = (m.activeTab + 1) % 9
 					m.currentView = m.tabToView(m.activeTab)
+					if m.activeTab == 2 {
+						m.rulesSubTab = 0
+					}
 					return m, m.refreshCurrentView()
 				}
 
 			case key.Matches(msg, keys.ShiftTab):
-				// Only switch tabs in main views (11 tabs)
-				if m.currentView == ViewDashboard || m.currentView == ViewRequests ||
-					m.currentView == ViewRules || m.currentView == ViewAudit ||
-					m.currentView == ViewSigners || m.currentView == ViewMetrics ||
-					m.currentView == ViewHDWallets || m.currentView == ViewSecurity ||
-					m.currentView == ViewAPIKeys || m.currentView == ViewTemplates ||
-					m.currentView == ViewPresets {
-					m.activeTab = (m.activeTab + 10) % 11
+				if m.isTopLevelView() {
+					m.activeTab = (m.activeTab + 8) % 9
 					m.currentView = m.tabToView(m.activeTab)
+					if m.activeTab == 2 {
+						m.rulesSubTab = 0
+					}
+					return m, m.refreshCurrentView()
+				}
+
+			case key.Matches(msg, keys.Left):
+				if m.currentView == ViewRules || m.currentView == ViewTemplates || m.currentView == ViewPresets {
+					m.rulesSubTab = (m.rulesSubTab + 2) % 3 // prev: 0->2, 1->0, 2->1
+					m.currentView = m.rulesSubTabToView(m.rulesSubTab)
+					return m, m.refreshCurrentView()
+				}
+
+			case key.Matches(msg, keys.Right):
+				if m.currentView == ViewRules || m.currentView == ViewTemplates || m.currentView == ViewPresets {
+					m.rulesSubTab = (m.rulesSubTab + 1) % 3 // next: 0->1, 1->2, 2->0
+					m.currentView = m.rulesSubTabToView(m.rulesSubTab)
 					return m, m.refreshCurrentView()
 				}
 
@@ -709,7 +715,7 @@ func (m Model) View() string {
 }
 
 func (m Model) renderHeader() string {
-	tabs := []string{"Dashboard", "Requests", "Rules", "Audit", "Signers", "Metrics", "HD Wallets", "Security", "API Keys", "Templates", "Presets"}
+	tabs := []string{"Dashboard", "Requests", "Rules", "Audit", "Signers", "Metrics", "HD Wallets", "Security", "API Keys"}
 	var renderedTabs []string
 
 	for i, tab := range tabs {
@@ -723,7 +729,24 @@ func (m Model) renderHeader() string {
 	title := styles.TitleStyle.Render("Remote Signer TUI")
 	tabLine := lipgloss.JoinHorizontal(lipgloss.Center, renderedTabs...)
 
-	return lipgloss.JoinVertical(lipgloss.Left, title, tabLine)
+	out := lipgloss.JoinVertical(lipgloss.Left, title, tabLine)
+
+	// Rules sub-tabs when Rules is the active top-level tab
+	if m.activeTab == 2 {
+		subNames := []string{"Rules", "Templates", "Presets"}
+		var subRendered []string
+		for i, name := range subNames {
+			if i == m.rulesSubTab {
+				subRendered = append(subRendered, styles.ActiveTabStyle.Render(name))
+			} else {
+				subRendered = append(subRendered, styles.TabStyle.Render(name))
+			}
+		}
+		subLine := lipgloss.JoinHorizontal(lipgloss.Left, subRendered...)
+		out = lipgloss.JoinVertical(lipgloss.Left, out, subLine)
+	}
+
+	return out
 }
 
 func (m Model) renderContent(_ int) string {
@@ -827,7 +850,7 @@ func (m Model) isCurrentViewCapturingInput() bool {
 	}
 }
 
-// tabToView converts tab index to ViewType
+// tabToView converts top-level tab index (0-8) to ViewType. Tab 2 is Rules and shows Rules list (sub-tab 0).
 func (m Model) tabToView(tab int) ViewType {
 	switch tab {
 	case 0:
@@ -848,11 +871,33 @@ func (m Model) tabToView(tab int) ViewType {
 		return ViewSecurity
 	case 8:
 		return ViewAPIKeys
-	case 9:
-		return ViewTemplates
-	case 10:
-		return ViewPresets
 	default:
 		return ViewDashboard
+	}
+}
+
+// isTopLevelView returns true when the current view is one of the nine top-level tab views
+// (including Rules, Templates, Presets as the single "Rules" tab).
+func (m Model) isTopLevelView() bool {
+	switch m.currentView {
+	case ViewDashboard, ViewRequests, ViewRules, ViewAudit, ViewSigners, ViewMetrics,
+		ViewHDWallets, ViewSecurity, ViewAPIKeys, ViewTemplates, ViewPresets:
+		return true
+	default:
+		return false
+	}
+}
+
+// rulesSubTabToView returns the ViewType for the given Rules sub-tab index (0=Rules, 1=Templates, 2=Presets).
+func (m Model) rulesSubTabToView(sub int) ViewType {
+	switch sub {
+	case 0:
+		return ViewRules
+	case 1:
+		return ViewTemplates
+	case 2:
+		return ViewPresets
+	default:
+		return ViewRules
 	}
 }
