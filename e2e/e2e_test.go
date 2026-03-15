@@ -194,6 +194,25 @@ override_hints:
 		if err := os.WriteFile(filepath.Join(presetsDir, "e2e_minimal.preset.yaml"), presetContent, 0644); err != nil {
 			panic("failed to write e2e preset file: " + err.Error())
 		}
+
+		// Matrix preset: same template, 3 chains with different addresses
+		matrixContent := []byte(`name: "E2E Matrix Preset"
+template: "E2E Preset Template"
+chain_type: "evm"
+enabled: true
+matrix:
+  - chain_id: "1"
+    allowed_address: "0x0000000000000000000000000000000000000001"
+  - chain_id: "137"
+    allowed_address: "0x0000000000000000000000000000000000000002"
+  - chain_id: "42161"
+    allowed_address: "0x0000000000000000000000000000000000000003"
+defaults: {}
+`)
+		if err := os.WriteFile(filepath.Join(presetsDir, "e2e_matrix.preset.yaml"), matrixContent, 0644); err != nil {
+			panic("failed to write e2e matrix preset file: " + err.Error())
+		}
+
 		e2ePresetsDir = presetsDir
 		presetsDirAbs, err := filepath.Abs(presetsDir)
 		if err != nil {
