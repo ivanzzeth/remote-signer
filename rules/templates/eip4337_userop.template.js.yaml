@@ -1,0 +1,360 @@
+# EIP-4337 UserOperation template (evm_js) — typed_data validation for Account Abstraction.
+# Validates EIP-712 typed data representing a UserOperation before signing.
+#
+# Composable: parses callData inner calls (execute/executeBatch) and DELEGATES to other rules
+# (e.g. ERC20, native_transfer, dex_swap) via delegate_to / delegate_to_by_target, just like
+# the Safe template. This enables recursive validation of the actual operations inside the UserOp.
+#
+# Common smart account callData patterns:
+#   - execute(address dest, uint256 value, bytes func)           sel: 0xb61d27f6
+#   - executeBatch(address[] dest, uint256[] values, bytes[] func) sel: 0x47e1da2a
+#   - executeBatch(address[] dest, bytes[] func)                   sel: 0x18dfb3c7
+#
+# Note: EIP-6900 modular accounts use the same UserOp signing flow; this template applies to both.
+
+variables:
+  - name: entrypoint_address
+    type: address
+    description: "EntryPoint contract address (verifyingContract). v0.6: 0x5FF137D4b0FDCD49DcA30c7CF57E578a026338cc, v0.7: 0x0000000071727De22E5E9d8BAf0edAc6f37da032"
+    required: true
+  - name: allowed_senders
+    type: address_list
+    description: "Comma-separated smart account addresses allowed as sender. Empty = any."
+    required: false
+    default: ""
+  - name: allowed_paymasters
+    type: address_list
+    description: "Comma-separated paymaster addresses allowed. Empty = any (including no paymaster)."
+    required: false
+    default: ""
+  - name: allow_initcode
+    type: string
+    description: "Whether to allow initCode (account creation). 'true' = allow, 'false' = block."
+    required: false
+    default: "false"
+  - name: max_call_gas_limit
+    type: string
+    description: "Max callGasLimit per UserOp. -1 = no cap."
+    required: false
+    default: "-1"
+  - name: allowed_targets
+    type: address_list
+    description: "Comma-separated addresses allowed as execute() target. Empty = any."
+    required: false
+    default: ""
+  - name: delegate_to
+    type: string
+    description: "Default target rule ID for inner call delegation (optional)"
+    required: false
+    default: ""
+  - name: delegate_to_by_target
+    type: string
+    description: "Optional 'addr:rule_id,addr:rule_id' to route by inner target address"
+    required: false
+    default: ""
+
+test_variables:
+  chain_id: "1"
+  entrypoint_address: "0x5FF137D4b0FDCD49DcA30c7CF57E578a026338cc"
+  allowed_senders: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+  allowed_paymasters: "0xAb5801a7D398351b8bE11C439e05C5B3259aeC9B"
+  allow_initcode: "false"
+  max_call_gas_limit: "1000000"
+  allowed_targets: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+  delegate_to: ""
+  delegate_to_by_target: ""
+
+rules:
+  - id: "eip4337-userop-validate"
+    name: "EIP-4337 UserOperation validation"
+    type: "evm_js"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "${chain_id}"
+    description: "Validate EIP-4337 UserOperation; parse callData inner calls and delegate to target rules"
+    config:
+      sign_type_filter: "typed_data"
+      delegate_to: "${delegate_to}"
+      delegate_mode: "per_item"
+      script: |
+        function validate(input) {
+          var td = rs.typedData.require(input, 'UserOperation');
+          rs.typedData.requireDomain(td.domain, {
+            chainId: config.chain_id,
+            requireVerifyingContract: true,
+            allowedContracts: config.entrypoint_address
+          });
+          var msg = td.message;
+          require(msg, 'missing UserOperation');
+          require(msg.sender && isAddress(msg.sender), 'invalid sender');
+          rs.addr.requireInListIfNonEmpty(msg.sender, config.allowed_senders, 'sender not allowed');
+          var initCode = (msg.initCode || '').replace(/^0[xX]/, '');
+          var allowInit = (config.allow_initcode || '').trim().toLowerCase();
+          if (allowInit !== 'true') {
+            require(initCode.length === 0, 'initCode not allowed');
+          }
+          var paymasterData = (msg.paymasterAndData || '').replace(/^0[xX]/, '');
+          if (paymasterData.length >= 40) {
+            var paymasterAddr = '0x' + paymasterData.substring(0, 40);
+            require(isAddress(paymasterAddr), 'invalid paymaster address');
+            rs.addr.requireInListIfNonEmpty(paymasterAddr, config.allowed_paymasters, 'paymaster not allowed');
+          }
+          if (msg.callGasLimit !== undefined && msg.callGasLimit !== null) {
+            rs.bigint.requireLte(msg.callGasLimit, config.max_call_gas_limit, 'callGasLimit exceeds cap');
+          }
+          return parseCallData(input.signer, msg.sender, msg.callData || '0x');
+        }
+        function parseCallData(signer, sender, callData) {
+          var hex = (callData || '').replace(/^0[xX]/, '');
+          if (hex.length < 8) return ok();
+          var sel = '0x' + hex.substring(0, 8);
+          var payload = '0x' + hex.substring(8);
+          var executeSel = selector('execute(address,uint256,bytes)');
+          var executeBatchSel = selector('executeBatch(address[],uint256[],bytes[])');
+          var executeBatchNoValSel = selector('executeBatch(address[],bytes[])');
+          if (eq(sel, executeSel)) return parseExecute(signer, sender, payload);
+          if (eq(sel, executeBatchSel)) return parseExecuteBatch(signer, sender, payload);
+          if (eq(sel, executeBatchNoValSel)) return parseExecuteBatchNoVal(signer, sender, payload);
+          return ok();
+        }
+        function resolveDelegateTo(targetChecksum) {
+          return rs.delegate.resolveByTarget(targetChecksum, config.delegate_to_by_target, config.delegate_to);
+        }
+        function buildPayload(signer, chainId, dest, value, funcData) {
+          return {
+            sign_type: 'transaction',
+            chain_id: parseInt(chainId, 10) || 0,
+            signer: signer,
+            transaction: { from: signer, to: dest, value: value || '0x0', data: funcData || '0x' }
+          };
+        }
+        function parseExecute(signer, sender, payload) {
+          var dec = abi.decode(payload, ['address', 'uint256', 'bytes']);
+          require(dec && dec.length === 3, 'execute decode failed');
+          var dest = dec[0];
+          require(isAddress(dest), 'invalid dest');
+          rs.addr.requireInListIfNonEmpty(dest, config.allowed_targets, 'target not allowed');
+          var destChecksum = toChecksum(dest);
+          var delegateTo = resolveDelegateTo(destChecksum);
+          var chainId = config.chain_id;
+          var funcData = dec[2] || '0x';
+          var p = buildPayload(signer, chainId, destChecksum, '0x0', funcData);
+          if (delegateTo) return { valid: true, payload: p, delegate_to: delegateTo };
+          return ok();
+        }
+        function parseExecuteBatch(signer, sender, payload) {
+          var dec = abi.decode(payload, ['address[]', 'uint256[]', 'bytes[]']);
+          require(dec && dec.length === 3, 'executeBatch decode failed');
+          var dests = dec[0]; var values = dec[1]; var funcs = dec[2];
+          require(dests.length === values.length && dests.length === funcs.length, 'batch length mismatch');
+          var items = [];
+          var chainId = config.chain_id;
+          for (var i = 0; i < dests.length; i++) {
+            require(isAddress(dests[i]), 'invalid dest in batch');
+            rs.addr.requireInListIfNonEmpty(dests[i], config.allowed_targets, 'target not allowed in batch');
+            var destChecksum = toChecksum(dests[i]);
+            var delegateTo = resolveDelegateTo(destChecksum);
+            items.push({
+              payload: buildPayload(signer, chainId, destChecksum, '0x0', funcs[i] || '0x'),
+              delegate_to: delegateTo || ''
+            });
+          }
+          if (items.length > 0) return { valid: true, items: items };
+          return ok();
+        }
+        function parseExecuteBatchNoVal(signer, sender, payload) {
+          var dec = abi.decode(payload, ['address[]', 'bytes[]']);
+          require(dec && dec.length === 2, 'executeBatch decode failed');
+          var dests = dec[0]; var funcs = dec[1];
+          require(dests.length === funcs.length, 'batch length mismatch');
+          var items = [];
+          var chainId = config.chain_id;
+          for (var i = 0; i < dests.length; i++) {
+            require(isAddress(dests[i]), 'invalid dest in batch');
+            rs.addr.requireInListIfNonEmpty(dests[i], config.allowed_targets, 'target not allowed in batch');
+            var destChecksum = toChecksum(dests[i]);
+            var delegateTo = resolveDelegateTo(destChecksum);
+            items.push({
+              payload: buildPayload(signer, chainId, destChecksum, '0x0', funcs[i] || '0x'),
+              delegate_to: delegateTo || ''
+            });
+          }
+          if (items.length > 0) return { valid: true, items: items };
+          return ok();
+        }
+    test_cases:
+      - name: "pass: valid UserOp with allowed sender and paymaster"
+        input:
+          sign_type: "typed_data"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          typed_data:
+            types:
+              EIP712Domain:
+                - { name: "name", type: "string" }
+                - { name: "version", type: "string" }
+                - { name: "chainId", type: "uint256" }
+                - { name: "verifyingContract", type: "address" }
+              UserOperation:
+                - { name: "sender", type: "address" }
+                - { name: "nonce", type: "uint256" }
+                - { name: "initCode", type: "bytes" }
+                - { name: "callData", type: "bytes" }
+                - { name: "callGasLimit", type: "uint256" }
+                - { name: "verificationGasLimit", type: "uint256" }
+                - { name: "preVerificationGas", type: "uint256" }
+                - { name: "maxFeePerGas", type: "uint256" }
+                - { name: "maxPriorityFeePerGas", type: "uint256" }
+                - { name: "paymasterAndData", type: "bytes" }
+                - { name: "signature", type: "bytes" }
+            primaryType: "UserOperation"
+            domain:
+              name: "EntryPoint"
+              version: "0.6.0"
+              chainId: "1"
+              verifyingContract: "0x5FF137D4b0FDCD49DcA30c7CF57E578a026338cc"
+            message:
+              sender: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+              nonce: "0"
+              initCode: "0x"
+              callData: "0x"
+              callGasLimit: "500000"
+              verificationGasLimit: "100000"
+              preVerificationGas: "50000"
+              maxFeePerGas: "30000000000"
+              maxPriorityFeePerGas: "1500000000"
+              paymasterAndData: "0xAb5801a7D398351b8bE11C439e05C5B3259aeC9B"
+              signature: "0x"
+        expect_pass: true
+      - name: "reject: sender not in allowlist"
+        input:
+          sign_type: "typed_data"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          typed_data:
+            types:
+              EIP712Domain:
+                - { name: "name", type: "string" }
+                - { name: "version", type: "string" }
+                - { name: "chainId", type: "uint256" }
+                - { name: "verifyingContract", type: "address" }
+              UserOperation:
+                - { name: "sender", type: "address" }
+                - { name: "nonce", type: "uint256" }
+                - { name: "initCode", type: "bytes" }
+                - { name: "callData", type: "bytes" }
+                - { name: "callGasLimit", type: "uint256" }
+                - { name: "verificationGasLimit", type: "uint256" }
+                - { name: "preVerificationGas", type: "uint256" }
+                - { name: "maxFeePerGas", type: "uint256" }
+                - { name: "maxPriorityFeePerGas", type: "uint256" }
+                - { name: "paymasterAndData", type: "bytes" }
+                - { name: "signature", type: "bytes" }
+            primaryType: "UserOperation"
+            domain:
+              name: "EntryPoint"
+              version: "0.6.0"
+              chainId: "1"
+              verifyingContract: "0x5FF137D4b0FDCD49DcA30c7CF57E578a026338cc"
+            message:
+              sender: "0x000000000000000000000000000000000000dEaD"
+              nonce: "0"
+              initCode: "0x"
+              callData: "0x"
+              callGasLimit: "500000"
+              verificationGasLimit: "100000"
+              preVerificationGas: "50000"
+              maxFeePerGas: "30000000000"
+              maxPriorityFeePerGas: "1500000000"
+              paymasterAndData: "0x"
+              signature: "0x"
+        expect_pass: false
+        expect_reason: "sender not allowed"
+      - name: "reject: initCode not allowed"
+        input:
+          sign_type: "typed_data"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          typed_data:
+            types:
+              EIP712Domain:
+                - { name: "name", type: "string" }
+                - { name: "version", type: "string" }
+                - { name: "chainId", type: "uint256" }
+                - { name: "verifyingContract", type: "address" }
+              UserOperation:
+                - { name: "sender", type: "address" }
+                - { name: "nonce", type: "uint256" }
+                - { name: "initCode", type: "bytes" }
+                - { name: "callData", type: "bytes" }
+                - { name: "callGasLimit", type: "uint256" }
+                - { name: "verificationGasLimit", type: "uint256" }
+                - { name: "preVerificationGas", type: "uint256" }
+                - { name: "maxFeePerGas", type: "uint256" }
+                - { name: "maxPriorityFeePerGas", type: "uint256" }
+                - { name: "paymasterAndData", type: "bytes" }
+                - { name: "signature", type: "bytes" }
+            primaryType: "UserOperation"
+            domain:
+              name: "EntryPoint"
+              version: "0.6.0"
+              chainId: "1"
+              verifyingContract: "0x5FF137D4b0FDCD49DcA30c7CF57E578a026338cc"
+            message:
+              sender: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+              nonce: "0"
+              initCode: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4aabbccdd"
+              callData: "0x"
+              callGasLimit: "500000"
+              verificationGasLimit: "100000"
+              preVerificationGas: "50000"
+              maxFeePerGas: "30000000000"
+              maxPriorityFeePerGas: "1500000000"
+              paymasterAndData: "0x"
+              signature: "0x"
+        expect_pass: false
+        expect_reason: "initCode not allowed"
+      - name: "reject: paymaster not in allowlist"
+        input:
+          sign_type: "typed_data"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          typed_data:
+            types:
+              EIP712Domain:
+                - { name: "name", type: "string" }
+                - { name: "version", type: "string" }
+                - { name: "chainId", type: "uint256" }
+                - { name: "verifyingContract", type: "address" }
+              UserOperation:
+                - { name: "sender", type: "address" }
+                - { name: "nonce", type: "uint256" }
+                - { name: "initCode", type: "bytes" }
+                - { name: "callData", type: "bytes" }
+                - { name: "callGasLimit", type: "uint256" }
+                - { name: "verificationGasLimit", type: "uint256" }
+                - { name: "preVerificationGas", type: "uint256" }
+                - { name: "maxFeePerGas", type: "uint256" }
+                - { name: "maxPriorityFeePerGas", type: "uint256" }
+                - { name: "paymasterAndData", type: "bytes" }
+                - { name: "signature", type: "bytes" }
+            primaryType: "UserOperation"
+            domain:
+              name: "EntryPoint"
+              version: "0.6.0"
+              chainId: "1"
+              verifyingContract: "0x5FF137D4b0FDCD49DcA30c7CF57E578a026338cc"
+            message:
+              sender: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+              nonce: "0"
+              initCode: "0x"
+              callData: "0x"
+              callGasLimit: "500000"
+              verificationGasLimit: "100000"
+              preVerificationGas: "50000"
+              maxFeePerGas: "30000000000"
+              maxPriorityFeePerGas: "1500000000"
+              paymasterAndData: "0x000000000000000000000000000000000000dEaDaabbccdd"
+              signature: "0x"
+        expect_pass: false
+        expect_reason: "paymaster not allowed"

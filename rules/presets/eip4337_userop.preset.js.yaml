@@ -1,0 +1,32 @@
+# Preset: EIP-4337 UserOperation typed_data validation (evm_js).
+# Use: remote-signer-cli preset create-from eip4337_userop.preset.js.yaml [--config config.yaml --write] [--set chain_id=1 --set entrypoint_address=0x...]
+#
+# Composable: set delegate_to_by_target to route inner callData to other rules.
+# Example: --set delegate_to_by_target="0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48:erc20-transfer-limit"
+# This delegates USDC transfers inside UserOp.callData.execute() to the ERC20 rule.
+
+name: "EIP-4337 UserOp (JS)"
+template_paths:
+  - "rules/templates/eip4337_userop.template.js.yaml"
+template_names:
+  - "EIP-4337 UserOp Template"
+chain_type: "evm"
+chain_id: "1"
+enabled: true
+variables:
+  chain_id: "1"
+  entrypoint_address: "0x5FF137D4b0FDCD49DcA30c7CF57E578a026338cc"
+  allowed_senders: ""
+  allowed_paymasters: ""
+  allow_initcode: "false"
+  max_call_gas_limit: "-1"
+  allowed_targets: ""
+  delegate_to: ""
+  delegate_to_by_target: ""
+override_hints:
+  - chain_id
+  - entrypoint_address
+  - allowed_senders
+  - allowed_paymasters
+  - allowed_targets
+  - delegate_to_by_target

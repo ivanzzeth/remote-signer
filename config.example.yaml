@@ -412,6 +412,14 @@ templates:
     config:
       path: "rules/templates/max_gas_cap.template.js.yaml"
 
+  # EIP-4337 Account Abstraction UserOperation (composable, delegates callData to other rules)
+  - name: "EIP-4337 UserOp Template"
+    type: "file"
+    description: "EIP-4337 UserOperation with callData delegation (execute/executeBatch → target rules)"
+    enabled: true
+    config:
+      path: "rules/templates/eip4337_userop.template.js.yaml"
+
   # ERC721 Permit (EIP-4494) typed_data NFT approval signature
   - name: "ERC721 Permit Template"
     type: "file"

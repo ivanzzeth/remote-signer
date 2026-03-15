@@ -148,6 +148,11 @@ templates:
     enabled: true
     config:
       path: "rules/templates/meta_transaction.template.js.yaml"
+  - name: "EIP-4337 UserOp Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/eip4337_userop.template.js.yaml"
   - name: "Polymarket Template"
     type: "file"
     enabled: true
