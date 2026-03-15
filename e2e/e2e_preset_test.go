@@ -4,6 +4,7 @@ package e2e
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -114,6 +115,70 @@ func TestPreset_Apply_Success(t *testing.T) {
 	// Cleanup: revoke the created instance (rule ID is inside Rule JSON)
 	// We could parse applyResp.Results[0].Rule to get rule ID; for e2e we just leave the instance or delete by listing rules from template.
 	// Optional: list rules, find inst_* from this template, revoke. Skip for brevity.
+}
+
+func TestPreset_Matrix_Apply_MultiChain(t *testing.T) {
+	ctx := context.Background()
+	skipIfPresetAPIDisabled(t)
+
+	// Create the template that the matrix preset references
+	tmplReq := &templates.CreateRequest{
+		Name:        "E2E Preset Template",
+		Description: "Template for e2e matrix preset",
+		Type:        "evm_address_list",
+		Mode:        "whitelist",
+		Variables: []templates.TemplateVariable{
+			{Name: "allowed_address", Type: "address", Description: "Allowed address", Required: true},
+		},
+		Config:  map[string]interface{}{"addresses": []string{"${allowed_address}"}},
+		Enabled: true,
+	}
+	createdTmpl, err := adminClient.Templates.Create(ctx, tmplReq)
+	require.NoError(t, err)
+	defer func() {
+		if err := adminClient.Templates.Delete(ctx, createdTmpl.ID); err != nil {
+			t.Logf("warning: failed to delete e2e preset template: %v", err)
+		}
+	}()
+
+	// Apply matrix preset — should produce 3 rules (one per chain)
+	applyResp, err := adminClient.Presets.ApplyWithVariables(ctx, "e2e_matrix.preset.yaml", nil)
+	require.NoError(t, err)
+	require.NotNil(t, applyResp)
+	require.Len(t, applyResp.Results, 3, "matrix preset should produce 3 rules (one per chain)")
+
+	// Verify each rule has correct chain_id scope
+	chainIDs := make(map[string]bool)
+	for _, result := range applyResp.Results {
+		assert.NotEmpty(t, result.Rule)
+		var ruleMap map[string]interface{}
+		if err := json.Unmarshal(result.Rule, &ruleMap); err == nil {
+			if cid, ok := ruleMap["chain_id"].(string); ok {
+				chainIDs[cid] = true
+			}
+		}
+	}
+	assert.True(t, chainIDs["1"], "should have rule for chain 1")
+	assert.True(t, chainIDs["137"], "should have rule for chain 137")
+	assert.True(t, chainIDs["42161"], "should have rule for chain 42161")
+}
+
+func TestPreset_Matrix_List_Shows_Template(t *testing.T) {
+	ctx := context.Background()
+	skipIfPresetAPIDisabled(t)
+
+	resp, err := adminClient.Presets.List(ctx)
+	require.NoError(t, err)
+
+	var found bool
+	for _, p := range resp.Presets {
+		if p.ID == "e2e_matrix.preset.yaml" {
+			found = true
+			assert.Contains(t, p.TemplateNames, "E2E Preset Template")
+			break
+		}
+	}
+	assert.True(t, found, "e2e_matrix.preset.yaml should appear in preset list")
 }
 
 func TestPreset_Apply_Forbidden_NonAdmin(t *testing.T) {
