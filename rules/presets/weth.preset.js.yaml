@@ -1,0 +1,37 @@
+# Preset: WETH deposit/withdraw limits (evm_js). One template, one rule: weth-deposit-withdraw.
+# Use: remote-signer-cli preset create-from weth.preset.js.yaml [--config config.yaml --write] [--set chain_id=1 --set max_amount=1000000000000000000]
+# Budget and schedule ensure limits are enforced and reset per period (session).
+#
+# Budget amount convention: all budget and cap amounts are big integers in the native token's
+# smallest unit (wei). Example: 1 ETH = 1000000000000000000 wei.
+
+name: "WETH (JS)"
+template_paths:
+  - "rules/templates/weth.template.js.yaml"
+template_names:
+  - "WETH Template"
+chain_type: "evm"
+chain_id: "1"
+enabled: true
+variables:
+  chain_id: "1"
+  weth_address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+  # Amounts in wei (e.g. 1 ETH = 1000000000000000000 wei).
+  max_amount: "-1"   # -1 = no cap; 0 = cap of 0 (block all)
+  budget_period: "24h"   # used by schedule.period; e.g. 24h daily, 168h weekly
+# Budget: amounts in wei (same as tx.value). All fields support ${var}. -1 = no cap, 0 = cap zero.
+budget:
+  unit: "${chain_id}:native"   # required — per-chain native token budget
+  max_total: "${max_amount}"    # -1 = no cap; 0 = cap zero; empty → -1 (no cap)
+  max_per_tx: "${max_amount}"   # -1 = no per-tx cap; 0 = cap zero; empty → -1
+  max_tx_count: 0                        # optional; empty/0 accepted
+  alert_pct: 80                          # optional; empty → 80
+# Schedule: period reset (session). Values support template variables.
+schedule:
+  period: "${budget_period}"   # e.g. 24h, 168h; overridable via --set budget_period=168h
+  # start_at: optional RFC3339
+override_hints:
+  - chain_id
+  - weth_address
+  - max_amount
+  - budget_period

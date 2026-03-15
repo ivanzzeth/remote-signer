@@ -1,0 +1,62 @@
+# Max gas cap template (evm_js) — blocklist mode, limits gas per transaction.
+# Filename *.template.js.yaml = template fully driven by evm_js rules (no evm_solidity_expression).
+# Blocks transactions where gas limit exceeds the configured cap.
+# Blocklist mode: fail()/panic = blocked (rule violated), ok() = not blocked (pass through).
+
+variables:
+  - name: max_gas
+    type: string
+    description: "Max gas limit per transaction (decimal string). -1 = no cap."
+    required: false
+    default: "-1"
+
+test_variables:
+  chain_id: "1"
+  max_gas: "500000"
+
+rules:
+  - id: "max-gas-cap"
+    name: "Max gas cap"
+    type: "evm_js"
+    mode: "blocklist"
+    enabled: true
+    description: "Block transactions where gas limit exceeds the configured cap. Blocklist mode: ok() = not blocked, fail/panic = blocked."
+    config:
+      sign_type_filter: "transaction"
+      script: |
+        function validate(input) {
+          require(input && input.sign_type === 'transaction', 'transaction only');
+          var tx = input.transaction;
+          if (!tx || !tx.gas || tx.gas === '0' || tx.gas === '') return ok();
+          var maxGas = (config.max_gas || '-1').trim();
+          if (maxGas === '-1') return ok();
+          rs.bigint.requireLte(tx.gas, maxGas, 'gas limit exceeds cap: ' + tx.gas + ' > ' + maxGas);
+          return ok();
+        }
+    test_cases:
+      - name: "pass: gas under cap (not blocked)"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            value: "0"
+            gas: 21000
+            data: "0xa9059cbb0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc40000000000000000000000000000000000000000000000000000000000000000"
+        expect_pass: true
+      # Negative cases use signer 0x000...0002 so e2e full-engine does not match "Allow hot wallet signer"
+      - name: "reject: gas over cap (blocked)"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
+            to: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            value: "0"
+            gas: 1000000
+            data: "0xa9059cbb0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc40000000000000000000000000000000000000000000000000000000000000000"
+        expect_pass: false
+        expect_reason: "gas limit exceeds cap"

@@ -98,6 +98,46 @@ templates:
     enabled: true
     config:
       path: "rules/templates/erc721.template.js.yaml"
+  - name: "WETH Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/weth.template.js.yaml"
+  - name: "ERC1155 Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/erc1155.template.js.yaml"
+  - name: "ERC20 Permit Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/erc20_permit.template.js.yaml"
+  - name: "DEX Swap Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/dex_swap.template.js.yaml"
+  - name: "Staking Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/staking.template.js.yaml"
+  - name: "Global Blocklist Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/global_blocklist.template.js.yaml"
+  - name: "Contract Call Guard Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/contract_call_guard.template.js.yaml"
+  - name: "Max Gas Cap Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/max_gas_cap.template.js.yaml"
   - name: "Polymarket Template"
     type: "file"
     enabled: true

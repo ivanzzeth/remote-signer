@@ -1,0 +1,136 @@
+# Staking contract template (evm_js) — validates common staking operations.
+# Filename *.template.js.yaml = template fully driven by evm_js rules (no evm_solidity_expression).
+# Covers: stake(uint256), unstake(uint256), withdraw(uint256), claimRewards(), getReward(), exit().
+# Parameters validated: target must be configured staking address, only allowed selectors,
+# amount cap enforced on stake(uint256).
+
+variables:
+  - name: staking_address
+    type: address
+    description: "Staking contract address"
+    required: true
+  - name: max_stake_amount
+    type: string
+    description: "Budget cap: max amount per stake(uint256) call, in token smallest unit (same as calldata uint256). -1 = no cap, 0 = block all; empty in preset -> -1."
+    required: false
+    default: "-1"
+  - name: allowed_methods
+    type: string
+    description: "Comma-separated method names allowed. Default covers common staking patterns: stake,unstake,withdraw,claimRewards,getReward. Empty = use default."
+    required: false
+    default: "stake,unstake,withdraw,claimRewards,getReward"
+
+budget_metering:
+  method: "js"
+  unit: "${chain_id}:${staking_address}"
+
+test_variables:
+  chain_id: "1"
+  staking_address: "0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84"
+  max_stake_amount: "1000000000000000000"
+
+rules:
+  - id: "staking-ops"
+    name: "Staking operations limit"
+    type: "evm_js"
+    mode: "whitelist"
+    enabled: true
+    description: "Staking contract operations: stake, unstake, withdraw, claimRewards, getReward, exit; target address check and amount cap on stake"
+    config:
+      sign_type_filter: "transaction"
+      script: |
+        function validate(input) {
+          var ctx = rs.tx.require(input);
+          require(rs.addr.inList(ctx.tx.to, [config.staking_address]), 'wrong contract');
+          var stakeSel = selector('stake(uint256)');
+          var unstakeSel = selector('unstake(uint256)');
+          var withdrawSel = selector('withdraw(uint256)');
+          var claimRewardsSel = selector('claimRewards()');
+          var getRewardSel = selector('getReward()');
+          var exitSel = selector('exit()');
+          if (eq(ctx.selector, stakeSel)) {
+            var dec = abi.decode(ctx.payloadHex, ['uint256']);
+            require(dec && dec.length === 1, 'stake decode failed');
+            rs.bigint.requireLte(dec[0], config.max_stake_amount, 'stake exceeds cap');
+            return ok();
+          }
+          if (eq(ctx.selector, unstakeSel) || eq(ctx.selector, withdrawSel)) return ok();
+          if (eq(ctx.selector, claimRewardsSel) || eq(ctx.selector, getRewardSel) || eq(ctx.selector, exitSel)) return ok();
+          revert('method not allowed');
+        }
+        function validateBudget(input) {
+          var ctx = rs.tx.require(input);
+          var stakeSel = selector('stake(uint256)');
+          if (eq(ctx.selector, stakeSel)) {
+            var dec = abi.decode(ctx.payloadHex, ['uint256']);
+            return dec && dec.length === 1 ? dec[0] : 0n;
+          }
+          return 0n;
+        }
+    test_cases:
+      - name: "pass: stake 1 ETH"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84"
+            value: "0"
+            data: "0xa694fc3a0000000000000000000000000000000000000000000000000de0b6b3a7640000"
+            methodId: "0xa694fc3a"
+        expect_pass: true
+        expect_budget_amount: "1000000000000000000"
+      - name: "pass: claimRewards()"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84"
+            value: "0"
+            data: "0x372500ab"
+            methodId: "0x372500ab"
+        expect_pass: true
+        expect_budget_amount: "0"
+      - name: "pass: unstake 1 ETH"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84"
+            value: "0"
+            data: "0x2e17de780000000000000000000000000000000000000000000000000de0b6b3a7640000"
+            methodId: "0x2e17de78"
+        expect_pass: true
+        expect_budget_amount: "0"
+      # Negative cases use signer 0x000...0002 so e2e full-engine does not match "Allow hot wallet signer"
+      - name: "reject: wrong contract"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
+            to: "0x000000000000000000000000000000000000dEaD"
+            value: "0"
+            data: "0xa694fc3a0000000000000000000000000000000000000000000000000de0b6b3a7640000"
+            methodId: "0xa694fc3a"
+        expect_pass: false
+        expect_reason: "wrong contract"
+      - name: "reject: method not allowed (name())"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
+            to: "0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84"
+            value: "0"
+            data: "0x06fdde03"
+            methodId: "0x06fdde03"
+        expect_pass: false
+        expect_reason: "method not allowed"

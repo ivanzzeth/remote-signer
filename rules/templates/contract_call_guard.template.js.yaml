@@ -1,0 +1,84 @@
+# Contract interaction guard template (evm_js) — whitelist specific contracts + method selectors.
+# Filename *.template.js.yaml = template fully driven by evm_js rules (no evm_solidity_expression).
+# Covers: any contract call where target address and (optionally) 4-byte selector must be in allowlist.
+
+variables:
+  - name: allowed_contracts
+    type: address_list
+    description: "Comma-separated allowed target contract addresses"
+    required: true
+  - name: allowed_selectors
+    type: string
+    description: "Comma-separated 4-byte hex selectors (e.g. '0xa9059cbb,0x095ea7b3'). Empty = any method on allowed contracts."
+    required: false
+    default: ""
+
+test_variables:
+  chain_id: "1"
+  allowed_contracts: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+  allowed_selectors: "0xa9059cbb,0x095ea7b3"
+
+rules:
+  - id: "contract-call-guard"
+    name: "Contract call guard"
+    type: "evm_js"
+    mode: "whitelist"
+    enabled: true
+    description: "Whitelist specific contract addresses and optionally restrict to allowed method selectors"
+    config:
+      sign_type_filter: "transaction"
+      script: |
+        function validate(input) {
+          var ctx = rs.tx.require(input);
+          rs.addr.requireInList(ctx.tx.to, config.allowed_contracts, 'contract not allowed');
+          var selectors = (config.allowed_selectors || '').trim();
+          if (selectors.length > 0) {
+            var list = selectors.split(',');
+            var found = false;
+            for (var i = 0; i < list.length; i++) {
+              if (eq(ctx.selector, list[i].trim())) { found = true; break; }
+            }
+            require(found, 'method not allowed');
+          }
+          return ok();
+        }
+    test_cases:
+      - name: "pass: transfer on allowed contract with allowed selector"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            value: "0"
+            data: "0xa9059cbb0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc40000000000000000000000000000000000000000000000000000000000000000"
+            methodId: "0xa9059cbb"
+        expect_pass: true
+      # Negative cases use signer 0x000...0002 so e2e full-engine does not match "Allow hot wallet signer"
+      - name: "reject: wrong contract"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
+            to: "0x000000000000000000000000000000000000dEaD"
+            value: "0"
+            data: "0xa9059cbb0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc40000000000000000000000000000000000000000000000000000000000000000"
+            methodId: "0xa9059cbb"
+        expect_pass: false
+        expect_reason: "contract not allowed"
+      - name: "reject: wrong method on allowed contract"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
+            to: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            value: "0"
+            data: "0x06fdde03"
+            methodId: "0x06fdde03"
+        expect_pass: false
+        expect_reason: "method not allowed"

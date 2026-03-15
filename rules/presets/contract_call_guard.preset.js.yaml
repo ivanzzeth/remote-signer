@@ -1,0 +1,19 @@
+# Preset: Contract call guard (evm_js). Whitelist specific contracts and method selectors.
+# Use: remote-signer-cli preset create-from contract_call_guard.preset.js.yaml [--config config.yaml --write] [--set allowed_contracts=0x... --set allowed_selectors=0xa9059cbb]
+
+name: "Contract Call Guard (JS)"
+template_paths:
+  - "rules/templates/contract_call_guard.template.js.yaml"
+template_names:
+  - "Contract Call Guard Template"
+chain_type: "evm"
+chain_id: "1"
+enabled: true
+variables:
+  chain_id: "1"
+  allowed_contracts: ""
+  allowed_selectors: ""
+override_hints:
+  - chain_id
+  - allowed_contracts
+  - allowed_selectors

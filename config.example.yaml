@@ -348,6 +348,70 @@ templates:
     config:
       path: "rules/templates/native_transfer.template.js.yaml"
 
+  # WETH deposit/withdraw with amount cap
+  - name: "WETH Template"
+    type: "file"
+    description: "WETH wrap/unwrap (deposit + withdraw) with amount cap"
+    enabled: true
+    config:
+      path: "rules/templates/weth.template.js.yaml"
+
+  # ERC1155 multi-token with address allowlists
+  - name: "ERC1155 Template"
+    type: "file"
+    description: "ERC1155 safeTransferFrom/safeBatchTransferFrom/setApprovalForAll with allowlists"
+    enabled: true
+    config:
+      path: "rules/templates/erc1155.template.js.yaml"
+
+  # ERC20 Permit (EIP-2612) typed_data signature validation
+  - name: "ERC20 Permit Template"
+    type: "file"
+    description: "ERC20 permit typed data (EIP-2612) with spender allowlist and value cap"
+    enabled: true
+    config:
+      path: "rules/templates/erc20_permit.template.js.yaml"
+
+  # DEX swap method whitelist (Uniswap V2 Router)
+  - name: "DEX Swap Template"
+    type: "file"
+    description: "DEX swap router method whitelist (Uniswap V2)"
+    enabled: true
+    config:
+      path: "rules/templates/dex_swap.template.js.yaml"
+
+  # Generic staking contract operations
+  - name: "Staking Template"
+    type: "file"
+    description: "Generic staking ops (stake/unstake/withdraw/claimRewards) with amount cap"
+    enabled: true
+    config:
+      path: "rules/templates/staking.template.js.yaml"
+
+  # Global address blocklist (blocklist mode)
+  - name: "Global Blocklist Template"
+    type: "file"
+    description: "Block transactions to known malicious/sanctioned addresses"
+    enabled: true
+    config:
+      path: "rules/templates/global_blocklist.template.js.yaml"
+
+  # Contract + method selector whitelist
+  - name: "Contract Call Guard Template"
+    type: "file"
+    description: "Whitelist specific contracts and method selectors"
+    enabled: true
+    config:
+      path: "rules/templates/contract_call_guard.template.js.yaml"
+
+  # Max gas limit cap (blocklist mode)
+  - name: "Max Gas Cap Template"
+    type: "file"
+    description: "Block transactions with gas limit exceeding cap"
+    enabled: true
+    config:
+      path: "rules/templates/max_gas_cap.template.js.yaml"
+
 # =============================================================================
 # Rules configuration
 # =============================================================================

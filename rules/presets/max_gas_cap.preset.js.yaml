@@ -1,0 +1,17 @@
+# Preset: Max gas cap (evm_js). Blocklist mode — blocks transactions exceeding gas limit cap.
+# Use: remote-signer-cli preset create-from max_gas_cap.preset.js.yaml [--config config.yaml --write] [--set max_gas=500000]
+
+name: "Max Gas Cap (JS)"
+template_paths:
+  - "rules/templates/max_gas_cap.template.js.yaml"
+template_names:
+  - "Max Gas Cap Template"
+chain_type: "evm"
+chain_id: "1"
+enabled: true
+variables:
+  chain_id: "1"
+  max_gas: "500000"
+override_hints:
+  - chain_id
+  - max_gas

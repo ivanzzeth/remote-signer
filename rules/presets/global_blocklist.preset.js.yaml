@@ -1,0 +1,17 @@
+# Preset: Global address blocklist (evm_js). Blocklist mode — blocks transactions to known-bad addresses.
+# Use: remote-signer-cli preset create-from global_blocklist.preset.js.yaml [--config config.yaml --write] [--set blocked_addresses=0x...]
+
+name: "Global Blocklist (JS)"
+template_paths:
+  - "rules/templates/global_blocklist.template.js.yaml"
+template_names:
+  - "Global Blocklist Template"
+chain_type: "evm"
+chain_id: "1"
+enabled: true
+variables:
+  chain_id: "1"
+  blocked_addresses: "0x0000000000000000000000000000000000000000,0x000000000000000000000000000000000000dEaD"
+override_hints:
+  - chain_id
+  - blocked_addresses

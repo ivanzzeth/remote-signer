@@ -1,0 +1,30 @@
+# Preset: Staking operations (evm_js). One template, one rule: staking-ops.
+# Use: remote-signer-cli preset create-from staking.preset.js.yaml [--config config.yaml --write] [--set chain_id=1 --set staking_address=0x...]
+# Budget and schedule ensure stake amount limits are enforced and reset per period.
+#
+# Budget amount convention: all budget and cap amounts are big integers in the token's smallest unit
+# (same as calldata uint256). validateBudget() returns the stake amount; max_total / max_per_tx must match.
+
+name: "Staking (JS)"
+template_paths:
+  - "rules/templates/staking.template.js.yaml"
+template_names:
+  - "Staking Template"
+chain_type: "evm"
+chain_id: "1"
+enabled: true
+variables:
+  chain_id: "1"
+  staking_address: "0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84"
+  max_stake_amount: "-1"
+  allowed_methods: "stake,unstake,withdraw,claimRewards,getReward"
+budget:
+  unit: "${chain_id}:${staking_address}"
+  max_total: "${max_stake_amount}"
+  max_per_tx: "${max_stake_amount}"
+  max_tx_count: 0
+  alert_pct: 80
+override_hints:
+  - chain_id
+  - staking_address
+  - max_stake_amount

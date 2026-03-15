@@ -1,0 +1,165 @@
+# WETH deposit/withdraw template (evm_js) — validates WETH deposit() and withdraw(uint256).
+# Filename *.template.js.yaml = template fully driven by evm_js rules (no evm_solidity_expression).
+# Covers: deposit() (wrapping native ETH → WETH), withdraw(uint256) (unwrapping WETH → native ETH).
+# Parameters validated: target must be configured WETH address, only deposit/withdraw selectors allowed,
+# amount caps enforced (deposit via tx.value, withdraw via calldata uint256).
+
+variables:
+  - name: weth_address
+    type: address
+    description: "WETH contract address (e.g. 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2 on Ethereum mainnet)"
+    required: true
+  - name: max_amount
+    type: string
+    description: "Budget cap: max amount per deposit/withdraw, in native token smallest unit (wei). -1 = no cap, 0 = block all; empty in preset → -1."
+    required: false
+    default: "-1"
+  - name: budget_period
+    type: string
+    description: "Budget reset period (e.g. 24h, 168h). Used by preset schedule; empty = no periodic reset."
+    required: false
+    default: "24h"
+
+budget_metering:
+  method: "js"
+  unit: "${chain_id}:native"
+
+test_variables:
+  chain_id: "1"
+  weth_address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+  max_amount: "1000000000000000000"
+
+rules:
+  - id: "weth-deposit-withdraw"
+    name: "WETH deposit/withdraw limit"
+    type: "evm_js"
+    mode: "whitelist"
+    enabled: true
+    description: "WETH deposit() and withdraw(uint256); target address check and amount cap"
+    config:
+      sign_type_filter: "transaction"
+      script: |
+        function isZeroValue(v) {
+          var hex = (v || '').replace(/^0[xX]/, '').replace(/^0+/, '');
+          return hex === '' || hex === '0';
+        }
+        function validate(input) {
+          require(input && input.sign_type === 'transaction', 'transaction only');
+          var tx = input.transaction;
+          require(tx && tx.to, 'missing tx fields');
+          var weth = config.weth_address;
+          require(weth && isAddress(weth), 'invalid weth config');
+          require(rs.addr.inList(tx.to, [weth]), 'wrong contract');
+          var data = (tx.data || '').replace(/^0[xX]/, '');
+          require(data.length >= 8, 'calldata too short');
+          var sel = '0x' + data.substring(0, 8);
+          var depositSel = '0xd0e30db0';
+          var withdrawSel = '0x2e1a7d4d';
+          if (eq(sel, depositSel)) return validateDeposit(tx);
+          if (eq(sel, withdrawSel)) return validateWithdraw(data);
+          revert('only deposit, withdraw allowed');
+        }
+        function validateBudget(input) {
+          require(input && input.sign_type === 'transaction', 'transaction only');
+          var tx = input.transaction;
+          require(tx, 'missing tx');
+          var data = (tx.data || '').replace(/^0[xX]/, '');
+          if (data.length < 8) return 0n;
+          var sel = '0x' + data.substring(0, 8);
+          var depositSel = '0xd0e30db0';
+          var withdrawSel = '0x2e1a7d4d';
+          if (eq(sel, depositSel)) {
+            return tx.value || '0x0';
+          }
+          if (eq(sel, withdrawSel)) {
+            var payloadHex = data.substring(8);
+            var dec = abi.decode(payloadHex, ['uint256']);
+            return dec && dec.length === 1 ? dec[0] : 0n;
+          }
+          return 0n;
+        }
+        function validateDeposit(tx) {
+          var value = tx.value || '0x0';
+          require(!isZeroValue(value), 'deposit value must be positive');
+          rs.bigint.requireLte(value, config.max_amount, 'deposit exceeds cap');
+          return ok();
+        }
+        function validateWithdraw(data) {
+          var payloadHex = data.substring(8);
+          var dec = abi.decode(payloadHex, ['uint256']);
+          require(dec && dec.length === 1, 'withdraw decode failed');
+          var amount = dec[0];
+          rs.bigint.requireLte(amount, config.max_amount, 'withdraw exceeds cap');
+          return ok();
+        }
+    test_cases:
+      - name: "pass: deposit 1 ETH"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+            value: "1000000000000000000"
+            data: "0xd0e30db0"
+        expect_pass: true
+      - name: "pass: withdraw 1 ETH"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+            value: "0"
+            data: "0x2e1a7d4d0000000000000000000000000000000000000000000000000de0b6b3a7640000"
+        expect_pass: true
+      # Negative cases use signer 0x000...0002 so e2e full-engine does not match "Allow hot wallet signer"
+      - name: "reject: withdraw 0 amount"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
+            to: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+            value: "0"
+            data: "0x2e1a7d4d0000000000000000000000000000000000000000000000000000000000000000"
+        expect_pass: true
+      - name: "reject: unsupported method (name())"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
+            to: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+            value: "0"
+            data: "0x06fdde03"
+        expect_pass: false
+        expect_reason: "only deposit, withdraw allowed"
+      - name: "reject: wrong contract"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
+            to: "0x000000000000000000000000000000000000dEaD"
+            value: "1000000000000000000"
+            data: "0xd0e30db0"
+        expect_pass: false
+        expect_reason: "wrong contract"
+      - name: "reject: deposit with zero value"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
+            to: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+            value: "0"
+            data: "0xd0e30db0"
+        expect_pass: false
+        expect_reason: "deposit value must be positive"

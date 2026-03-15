@@ -1,0 +1,21 @@
+# Preset: ERC20 Permit (EIP-2612) typed_data validation (evm_js).
+# Use: remote-signer-cli preset create-from erc20_permit.preset.js.yaml [--config config.yaml --write] [--set chain_id=1 --set token_address=0x...]
+
+name: "ERC20 Permit (JS)"
+template_paths:
+  - "rules/templates/erc20_permit.template.js.yaml"
+template_names:
+  - "ERC20 Permit Template"
+chain_type: "evm"
+chain_id: "1"
+enabled: true
+variables:
+  chain_id: "1"
+  token_address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+  max_permit_value: "-1"
+  allowed_spenders: ""
+override_hints:
+  - chain_id
+  - token_address
+  - max_permit_value
+  - allowed_spenders

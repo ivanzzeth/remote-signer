@@ -1,0 +1,78 @@
+# Global address blocklist template (evm_js) — blocklist mode.
+# Filename *.template.js.yaml = template fully driven by evm_js rules (no evm_solidity_expression).
+# Blocks transactions to known-bad addresses (scam, sanctioned, zero address, etc.).
+# Works for ALL sign types: transaction (tx.to), typed_data (verifyingContract).
+# Blocklist mode: fail() = blocked (rule violated), ok() = not blocked (pass through).
+
+variables:
+  - name: blocked_addresses
+    type: address_list
+    description: "Comma-separated blocked addresses (e.g. known scam, sanctioned, zero address)"
+    required: true
+
+test_variables:
+  chain_id: "1"
+  blocked_addresses: "0x000000000000000000000000000000000000dEaD,0x0000000000000000000000000000000000000000"
+
+rules:
+  - id: "global-blocklist"
+    name: "Global address blocklist"
+    type: "evm_js"
+    mode: "blocklist"
+    enabled: true
+    description: "Block transactions to known-bad addresses (scam, sanctioned, zero address). Applies to all sign types."
+    config:
+      script: |
+        function validate(input) {
+          require(input, 'missing input');
+          if (input.sign_type === 'transaction' && input.transaction) {
+            var to = input.transaction.to || '';
+            if (to && rs.addr.inList(to, config.blocked_addresses)) {
+              return fail('blocked address: ' + to);
+            }
+          }
+          if (input.sign_type === 'typed_data' && input.typed_data) {
+            var domain = input.typed_data.domain || {};
+            var vc = domain.verifyingContract || '';
+            if (vc && rs.addr.inList(vc, config.blocked_addresses)) {
+              return fail('blocked contract: ' + vc);
+            }
+          }
+          return ok();
+        }
+    test_cases:
+      - name: "pass: transaction to normal address (not blocked)"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+            value: "0"
+            data: "0xa9059cbb0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc40000000000000000000000000000000000000000000000000000000000000000"
+        expect_pass: true
+      - name: "reject: transaction to dead address"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
+            to: "0x000000000000000000000000000000000000dEaD"
+            value: "0"
+            data: "0xa9059cbb0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+        expect_pass: false
+        expect_reason: "blocked address"
+      - name: "reject: transaction to zero address"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
+            to: "0x0000000000000000000000000000000000000000"
+            value: "0"
+            data: "0xa9059cbb0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+        expect_pass: false
+        expect_reason: "blocked address"

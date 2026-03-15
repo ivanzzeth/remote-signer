@@ -1,0 +1,178 @@
+# ERC20 Permit (EIP-2612) template (evm_js) — typed_data validation for permit signatures.
+# Validates EIP-712 typed data with primaryType "Permit" for gasless token approvals.
+# Covers: domain verification, owner/spender allowlists, value caps.
+
+variables:
+  - name: token_address
+    type: address
+    description: "ERC20 token contract address (verifyingContract in EIP-712 domain)"
+    required: true
+  - name: allowed_spenders
+    type: address_list
+    description: "Comma-separated addresses allowed as permit spender. Empty = any."
+    required: false
+    default: ""
+  - name: max_permit_value
+    type: string
+    description: "Max permit value in token smallest unit. -1 = no cap, 0 = block all."
+    required: false
+    default: "-1"
+
+test_variables:
+  chain_id: "1"
+  token_address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+  allowed_spenders: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+  max_permit_value: "1000000000"
+
+rules:
+  - id: "erc20-permit"
+    name: "ERC20 Permit (EIP-2612)"
+    type: "evm_js"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "${chain_id}"
+    description: "Validate ERC20 permit typed data signatures; domain, owner/spender allowlists, value caps"
+    config:
+      sign_type_filter: "typed_data"
+      script: |
+        function validate(input) {
+          var td = rs.typedData.require(input, 'Permit');
+          rs.typedData.requireDomain(td.domain, {
+            chainId: config.chain_id,
+            requireVerifyingContract: true,
+            allowedContracts: config.token_address
+          });
+          var msg = td.message;
+          require(msg && msg.owner, 'missing owner');
+          require(msg && msg.spender, 'missing spender');
+          require(isAddress(msg.owner), 'invalid owner');
+          require(isAddress(msg.spender), 'invalid spender');
+          rs.typedData.requireSignerMatch(msg.owner, input.signer, 'owner must be signer');
+          rs.addr.requireInListIfNonEmpty(msg.spender, config.allowed_spenders, 'spender not allowed');
+          rs.bigint.requireLte(msg.value || '0', config.max_permit_value, 'permit value exceeds cap');
+          return ok();
+        }
+    test_cases:
+      - name: "pass: valid permit with allowed spender and value under cap"
+        input:
+          sign_type: "typed_data"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          typed_data:
+            types:
+              EIP712Domain:
+                - { name: "name", type: "string" }
+                - { name: "version", type: "string" }
+                - { name: "chainId", type: "uint256" }
+                - { name: "verifyingContract", type: "address" }
+              Permit:
+                - { name: "owner", type: "address" }
+                - { name: "spender", type: "address" }
+                - { name: "value", type: "uint256" }
+                - { name: "nonce", type: "uint256" }
+                - { name: "deadline", type: "uint256" }
+            primaryType: "Permit"
+            domain:
+              name: "USD Coin"
+              version: "2"
+              chainId: "1"
+              verifyingContract: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            message:
+              owner: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+              spender: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+              value: "1000000"
+              nonce: "0"
+              deadline: "1999999999"
+        expect_pass: true
+      - name: "reject: spender not in allowlist"
+        input:
+          sign_type: "typed_data"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          typed_data:
+            types:
+              EIP712Domain:
+                - { name: "name", type: "string" }
+                - { name: "version", type: "string" }
+                - { name: "chainId", type: "uint256" }
+                - { name: "verifyingContract", type: "address" }
+              Permit:
+                - { name: "owner", type: "address" }
+                - { name: "spender", type: "address" }
+                - { name: "value", type: "uint256" }
+                - { name: "nonce", type: "uint256" }
+                - { name: "deadline", type: "uint256" }
+            primaryType: "Permit"
+            domain:
+              name: "USD Coin"
+              version: "2"
+              chainId: "1"
+              verifyingContract: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            message:
+              owner: "0x0000000000000000000000000000000000000002"
+              spender: "0x000000000000000000000000000000000000dEaD"
+              value: "1000000"
+              nonce: "0"
+              deadline: "1999999999"
+        expect_pass: false
+        expect_reason: "spender not allowed"
+      - name: "reject: wrong primaryType"
+        input:
+          sign_type: "typed_data"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          typed_data:
+            types:
+              EIP712Domain:
+                - { name: "name", type: "string" }
+                - { name: "version", type: "string" }
+                - { name: "chainId", type: "uint256" }
+                - { name: "verifyingContract", type: "address" }
+              Transfer:
+                - { name: "owner", type: "address" }
+                - { name: "spender", type: "address" }
+                - { name: "value", type: "uint256" }
+            primaryType: "Transfer"
+            domain:
+              name: "USD Coin"
+              version: "2"
+              chainId: "1"
+              verifyingContract: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            message:
+              owner: "0x0000000000000000000000000000000000000002"
+              spender: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+              value: "1000000"
+        expect_pass: false
+        expect_reason: "not Permit"
+      - name: "reject: owner does not match signer"
+        input:
+          sign_type: "typed_data"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          typed_data:
+            types:
+              EIP712Domain:
+                - { name: "name", type: "string" }
+                - { name: "version", type: "string" }
+                - { name: "chainId", type: "uint256" }
+                - { name: "verifyingContract", type: "address" }
+              Permit:
+                - { name: "owner", type: "address" }
+                - { name: "spender", type: "address" }
+                - { name: "value", type: "uint256" }
+                - { name: "nonce", type: "uint256" }
+                - { name: "deadline", type: "uint256" }
+            primaryType: "Permit"
+            domain:
+              name: "USD Coin"
+              version: "2"
+              chainId: "1"
+              verifyingContract: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            message:
+              owner: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+              spender: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+              value: "1000000"
+              nonce: "0"
+              deadline: "1999999999"
+        expect_pass: false
+        expect_reason: "owner must be signer"
