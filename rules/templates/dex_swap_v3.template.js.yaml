@@ -138,7 +138,19 @@ rules:
             methodId: "0x414bf389"
         expect_pass: false
         expect_reason: "wrong router"
-      # TODO(TC-2): Add negative test case for recipient != signer (requires re-encoding ABI calldata with a different recipient address in the tuple)
+      - name: "reject: recipient is not signer (output theft attempt)"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
+            to: "0xE592427A0AEce92De3Edee1F18E0157C05861564"
+            value: "0"
+            data: "0x414bf389000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb480000000000000000000000000000000000000000000000000000000000000bb8000000000000000000000000000000000000000000000000000000000000dead000000000000000000000000000000000000000000000000000000174876e7ff0000000000000000000000000000000000000000000000000de0b6b3a76400000000000000000000000000000000000000000000000000000000000035a4e9000000000000000000000000000000000000000000000000000000000000000000"
+            methodId: "0x414bf389"
+        expect_pass: false
+        expect_reason: "recipient must be signer"
       - name: "reject: disallowed method (name())"
         input:
           sign_type: "transaction"
