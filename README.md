@@ -178,7 +178,7 @@ The server starts without signers. Add them after startup:
 | [Configuration Reference](docs/configuration.md) | Full `config.yaml` reference |
 | [Rules, Templates & Presets](docs/rules-templates-and-presets.md) | Concepts: rule templates, instances, presets, and examples |
 | [Rule Syntax Reference](docs/rule-syntax.md) | All rule types: address list, value limit, Solidity, JS, message pattern |
-| [JS Rules (evm_js)](docs/architecture/js-rules-v5.md) | In-process JavaScript rules via Sobek |
+| [JS Rules (evm_js)](docs/architecture/js-rules-v1.md) | In-process JavaScript rules via Sobek |
 | [config.example.yaml](config.example.yaml) | Annotated configuration template |
 
 ### Integrate

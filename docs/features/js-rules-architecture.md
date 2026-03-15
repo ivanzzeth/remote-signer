@@ -1,6 +1,6 @@
 # JS Rules Architecture Plan (v5.1 — Final Production Ready)
 
-**Canonical doc:** [docs/architecture/js-rules-v5.md](../architecture/js-rules-v5.md) — implement from there.
+**Canonical doc:** [docs/architecture/js-rules-v1.md](../architecture/js-rules-v1.md) — implement from there.
 
 **Low-latency rule evaluation via in-process JS (Sobek/Goja).**  
 **Unified contract**: Every JS rule exposes a single `validate(input)` function. The engine performs basic validation then passes a normalized `RuleInput` through; the rule decides validity. No declarative layer — only template variables + pure JS. Optional `payload` return enables **delegation** for composition (e.g. multisend → erc20).
