@@ -68,7 +68,6 @@ type keyMap struct {
 	Number5   key.Binding
 	Number6   key.Binding
 	Number7   key.Binding
-	Number8   key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
@@ -81,7 +80,7 @@ func (k keyMap) FullHelp() [][]key.Binding {
 		{k.Up, k.Down, k.Left, k.Right, k.PageUp, k.PageDown},
 		{k.Approve, k.Reject, k.Generate},
 		{k.Filter, k.Refresh, k.Delete, k.Toggle},
-		{k.Number1, k.Number2, k.Number3, k.Number4, k.Number5, k.Number6, k.Number7, k.Number8},
+		{k.Number1, k.Number2, k.Number3, k.Number4, k.Number5, k.Number6, k.Number7},
 		{k.Help, k.Quit},
 	}
 }
@@ -197,11 +196,7 @@ var keys = keyMap{
 	),
 	Number7: key.NewBinding(
 		key.WithKeys("7"),
-		key.WithHelp("7", "hd wallets"),
-	),
-	Number8: key.NewBinding(
-		key.WithKeys("8"),
-		key.WithHelp("8", "security"),
+		key.WithHelp("7", "security"),
 	),
 }
 
@@ -211,9 +206,10 @@ type Model struct {
 	ctx          context.Context
 	width        int
 	height       int
-	activeTab   int
-	rulesSubTab int // 0=Rules, 1=Templates, 2=Presets, 3=API Keys, 4=IP Whitelist; only when activeTab==2 (ACLs)
-	currentView ViewType
+	activeTab    int
+	rulesSubTab  int // 0=Rules, 1=Templates, 2=Presets, 3=API Keys, 4=IP Whitelist; only when activeTab==2 (ACLs)
+	signersSubTab int // 0=List, 1=HD Wallets; only when activeTab==4 (Signers)
+	currentView  ViewType
 	previousView ViewType
 	help         help.Model
 	showHelp     bool
@@ -336,10 +332,11 @@ func NewModel(c *client.Client) (*Model, error) {
 	}
 
 	return &Model{
-		client:       c,
-		ctx:          ctx,
-		activeTab:    0,
-		currentView:  ViewDashboard,
+		client:        c,
+		ctx:           ctx,
+		activeTab:     0,
+		signersSubTab: 0,
+		currentView:   ViewDashboard,
 		help:           h,
 		dashboard:      dashboard,
 		requests:       requests,
@@ -454,6 +451,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			case key.Matches(msg, keys.Number5):
 				m.activeTab = 4
+				m.signersSubTab = 0
 				m.currentView = ViewSigners
 				return m, m.signers.Refresh()
 
@@ -464,31 +462,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			case key.Matches(msg, keys.Number7):
 				m.activeTab = 6
-				m.currentView = ViewHDWallets
-				return m, m.hdwallets.Refresh()
-
-			case key.Matches(msg, keys.Number8):
-				m.activeTab = 7
 				m.currentView = ViewSecurity
 				return m, m.security.Refresh()
 
 			case key.Matches(msg, keys.Tab):
-				// Only switch top-level tabs (8 tabs)
+				// Only switch top-level tabs (7 tabs)
 				if m.isTopLevelView() {
-					m.activeTab = (m.activeTab + 1) % 8
+					m.activeTab = (m.activeTab + 1) % 7
 					m.currentView = m.tabToView(m.activeTab)
 					if m.activeTab == 2 {
 						m.rulesSubTab = 0
+					}
+					if m.activeTab == 4 {
+						m.signersSubTab = 0
 					}
 					return m, m.refreshCurrentView()
 				}
 
 			case key.Matches(msg, keys.ShiftTab):
 				if m.isTopLevelView() {
-					m.activeTab = (m.activeTab + 7) % 8
+					m.activeTab = (m.activeTab + 6) % 7
 					m.currentView = m.tabToView(m.activeTab)
 					if m.activeTab == 2 {
 						m.rulesSubTab = 0
+					}
+					if m.activeTab == 4 {
+						m.signersSubTab = 0
 					}
 					return m, m.refreshCurrentView()
 				}
@@ -497,6 +496,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.currentView == ViewRules || m.currentView == ViewTemplates || m.currentView == ViewPresets || m.currentView == ViewAPIKeys || m.currentView == ViewIPWhitelist {
 					m.rulesSubTab = (m.rulesSubTab + 4) % 5 // prev sub-tab (0->4, 1->0, ..., 4->3)
 					m.currentView = m.rulesSubTabToView(m.rulesSubTab)
+					return m, m.refreshCurrentView()
+				}
+				if m.currentView == ViewSigners || m.currentView == ViewHDWallets {
+					m.signersSubTab = (m.signersSubTab + 1) % 2 // List <-> HD Wallets
+					m.currentView = m.signersSubTabToView(m.signersSubTab)
 					return m, m.refreshCurrentView()
 				}
 				if m.currentView == ViewSecurity {
@@ -508,6 +512,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.currentView == ViewRules || m.currentView == ViewTemplates || m.currentView == ViewPresets || m.currentView == ViewAPIKeys || m.currentView == ViewIPWhitelist {
 					m.rulesSubTab = (m.rulesSubTab + 1) % 5 // next sub-tab (0->1, ..., 4->0)
 					m.currentView = m.rulesSubTabToView(m.rulesSubTab)
+					return m, m.refreshCurrentView()
+				}
+				if m.currentView == ViewSigners || m.currentView == ViewHDWallets {
+					m.signersSubTab = (m.signersSubTab + 1) % 2 // List <-> HD Wallets
+					m.currentView = m.signersSubTabToView(m.signersSubTab)
 					return m, m.refreshCurrentView()
 				}
 				if m.currentView == ViewSecurity {
@@ -727,7 +736,7 @@ func (m Model) View() string {
 }
 
 func (m Model) renderHeader() string {
-	tabs := []string{"Dashboard", "Requests", "ACLs", "Audit", "Signers", "Metrics", "HD Wallets", "Security"}
+	tabs := []string{"Dashboard", "Requests", "ACLs", "Audit", "Signers", "Metrics", "Security"}
 	var renderedTabs []string
 
 	for i, tab := range tabs {
@@ -758,8 +767,23 @@ func (m Model) renderHeader() string {
 		out = lipgloss.JoinVertical(lipgloss.Left, out, subLine)
 	}
 
+	// Signers sub-tabs when Signers is the active top-level tab (List | HD Wallets)
+	if m.activeTab == 4 {
+		subNames := []string{"List", "HD Wallets"}
+		var subRendered []string
+		for i, name := range subNames {
+			if i == m.signersSubTab {
+				subRendered = append(subRendered, styles.ActiveTabStyle.Render(name))
+			} else {
+				subRendered = append(subRendered, styles.TabStyle.Render(name))
+			}
+		}
+		subLine := lipgloss.JoinHorizontal(lipgloss.Left, subRendered...)
+		out = lipgloss.JoinVertical(lipgloss.Left, out, subLine)
+	}
+
 	// Security sub-tabs when Security is the active top-level tab
-	if m.activeTab == 7 {
+	if m.activeTab == 6 {
 		subNames := []string{"Overview", "Events"}
 		subTab := m.security.GetSubTab()
 		var subRendered []string
@@ -884,7 +908,7 @@ func (m Model) isCurrentViewCapturingInput() bool {
 	}
 }
 
-// tabToView converts top-level tab index (0-8) to ViewType. Tab 2 is Rules and shows Rules list (sub-tab 0).
+// tabToView converts top-level tab index (0-6) to ViewType. Tab 2 is ACLs, tab 4 is Signers (sub-tabs List/HD Wallets).
 func (m Model) tabToView(tab int) ViewType {
 	switch tab {
 	case 0:
@@ -896,20 +920,28 @@ func (m Model) tabToView(tab int) ViewType {
 	case 3:
 		return ViewAudit
 	case 4:
-		return ViewSigners
+		return m.signersSubTabToView(m.signersSubTab)
 	case 5:
 		return ViewMetrics
 	case 6:
-		return ViewHDWallets
-	case 7:
 		return ViewSecurity
 	default:
 		return ViewDashboard
 	}
 }
 
-// isTopLevelView returns true when the current view is one of the eight top-level tab views
-// (including ACLs sub-views: Rules, Templates, Presets, API Keys, IP Whitelist).
+// signersSubTabToView returns the ViewType for the given Signers sub-tab (0=List, 1=HD Wallets).
+func (m Model) signersSubTabToView(sub int) ViewType {
+	switch sub {
+	case 1:
+		return ViewHDWallets
+	default:
+		return ViewSigners
+	}
+}
+
+// isTopLevelView returns true when the current view is one of the seven top-level tab views
+// (including ACLs sub-views and Signers sub-views: List, HD Wallets).
 func (m Model) isTopLevelView() bool {
 	switch m.currentView {
 	case ViewDashboard, ViewRequests, ViewRules, ViewAudit, ViewSigners, ViewMetrics,
