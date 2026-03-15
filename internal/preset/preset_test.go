@@ -589,6 +589,229 @@ variables:
 	assert.Equal(t, "1", rules[0].ChainID)
 }
 
+// ---------------------------------------------------------------------------
+// Matrix preset tests
+// ---------------------------------------------------------------------------
+
+func TestParsePresetFile_Matrix_SingleTemplate(t *testing.T) {
+	yaml := `
+name: "USDC Transfer"
+template: "ERC20 Template"
+chain_type: evm
+mode: whitelist
+enabled: true
+
+matrix:
+  - chain_id: "1"
+    token_address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+  - chain_id: "137"
+    token_address: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
+  - chain_id: "42161"
+    token_address: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"
+
+defaults:
+  max_transfer_amount: "10000"
+  budget_period: "24h"
+
+budget:
+  unit: "${chain_id}:${token_address}"
+  max_total: "${max_transfer_amount}"
+schedule:
+  period: "${budget_period}"
+`
+	rules, err := ParsePresetFile([]byte(yaml), nil)
+	require.NoError(t, err)
+	require.Len(t, rules, 3)
+
+	// Each rule should have correct chain_id and token_address
+	assert.Equal(t, "1", rules[0].ChainID)
+	assert.Equal(t, "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", rules[0].Variables["token_address"])
+	assert.Equal(t, "10000", rules[0].Variables["max_transfer_amount"]) // from defaults
+
+	assert.Equal(t, "137", rules[1].ChainID)
+	assert.Equal(t, "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359", rules[1].Variables["token_address"])
+
+	assert.Equal(t, "42161", rules[2].ChainID)
+	assert.Equal(t, "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", rules[2].Variables["token_address"])
+
+	// Rule names should include chain id
+	assert.Contains(t, rules[0].Name, "chain 1")
+	assert.Contains(t, rules[1].Name, "chain 137")
+	assert.Contains(t, rules[2].Name, "chain 42161")
+
+	// Budget unit should NOT be substituted (kept as template for runtime)
+	assert.Equal(t, "${chain_id}:${token_address}", rules[0].Budget["unit"])
+	// But other budget fields should be substituted from defaults
+	assert.Equal(t, "10000", rules[0].Budget["max_total"])
+}
+
+func TestParsePresetFile_Matrix_WithSetOverride(t *testing.T) {
+	yaml := `
+name: "USDC Transfer"
+template: "ERC20 Template"
+chain_type: evm
+mode: whitelist
+enabled: true
+
+matrix:
+  - chain_id: "1"
+    token_address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+  - chain_id: "137"
+    token_address: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
+
+defaults:
+  max_transfer_amount: "10000"
+`
+	// User overrides max_transfer_amount via --set
+	rules, err := ParsePresetFile([]byte(yaml), map[string]string{
+		"max_transfer_amount": "50000",
+	})
+	require.NoError(t, err)
+	require.Len(t, rules, 2)
+
+	// Both rules should have overridden value
+	assert.Equal(t, "50000", rules[0].Variables["max_transfer_amount"])
+	assert.Equal(t, "50000", rules[1].Variables["max_transfer_amount"])
+}
+
+func TestParsePresetFile_Matrix_CompositeTemplate(t *testing.T) {
+	yaml := `
+name: "Predict"
+template_paths:
+  - "rules/templates/predict_auth.template.yaml"
+  - "rules/templates/predict_trading.template.yaml"
+template_names:
+  - "Predict Auth"
+  - "Predict Trading"
+chain_type: evm
+mode: whitelist
+enabled: true
+
+matrix:
+  - chain_id: "56"
+    ctf_exchange: "0xAAA"
+  - chain_id: "97"
+    ctf_exchange: "0xBBB"
+
+defaults:
+  order_domain_name: "predict.fun CTF Exchange"
+`
+	rules, err := ParsePresetFile([]byte(yaml), nil)
+	require.NoError(t, err)
+	// 2 chains × 2 templates = 4 rules
+	require.Len(t, rules, 4)
+
+	// Chain 56 rules
+	assert.Equal(t, "56", rules[0].ChainID)
+	assert.Equal(t, "Predict Auth", rules[0].TemplateName)
+	assert.Contains(t, rules[0].Name, "chain 56")
+	assert.Equal(t, "0xAAA", rules[0].Variables["ctf_exchange"])
+
+	assert.Equal(t, "56", rules[1].ChainID)
+	assert.Equal(t, "Predict Trading", rules[1].TemplateName)
+
+	// Chain 97 rules
+	assert.Equal(t, "97", rules[2].ChainID)
+	assert.Equal(t, "0xBBB", rules[2].Variables["ctf_exchange"])
+
+	assert.Equal(t, "97", rules[3].ChainID)
+}
+
+func TestParsePresetFile_Matrix_MissingChainID(t *testing.T) {
+	yaml := `
+name: "Bad Preset"
+template: "ERC20 Template"
+chain_type: evm
+mode: whitelist
+enabled: true
+matrix:
+  - token_address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+`
+	_, err := ParsePresetFile([]byte(yaml), nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "chain_id")
+}
+
+func TestParsePresetFile_Matrix_MissingName(t *testing.T) {
+	yaml := `
+template: "ERC20 Template"
+chain_type: evm
+mode: whitelist
+enabled: true
+matrix:
+  - chain_id: "1"
+`
+	_, err := ParsePresetFile([]byte(yaml), nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "name")
+}
+
+func TestParsePresetFile_Matrix_MissingTemplate(t *testing.T) {
+	yaml := `
+name: "Bad"
+chain_type: evm
+mode: whitelist
+enabled: true
+matrix:
+  - chain_id: "1"
+`
+	_, err := ParsePresetFile([]byte(yaml), nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "template")
+}
+
+func TestParsePresetFile_Matrix_DefaultsAndVariablesMerge(t *testing.T) {
+	yaml := `
+name: "Merge Test"
+template: "Template"
+chain_type: evm
+mode: whitelist
+enabled: true
+
+matrix:
+  - chain_id: "1"
+    token_address: "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+
+# variables acts as defaults when defaults is not set
+variables:
+  max_transfer_amount: "5000"
+  budget_period: "24h"
+`
+	rules, err := ParsePresetFile([]byte(yaml), nil)
+	require.NoError(t, err)
+	require.Len(t, rules, 1)
+
+	assert.Equal(t, "5000", rules[0].Variables["max_transfer_amount"])
+	assert.Equal(t, "24h", rules[0].Variables["budget_period"])
+	assert.Equal(t, "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", rules[0].Variables["token_address"])
+}
+
+func TestParsePresetFile_Matrix_EntryOverridesDefaults(t *testing.T) {
+	yaml := `
+name: "Override Test"
+template: "Template"
+chain_type: evm
+mode: whitelist
+enabled: true
+
+matrix:
+  - chain_id: "1"
+    max_transfer_amount: "99999"
+  - chain_id: "137"
+
+defaults:
+  max_transfer_amount: "5000"
+`
+	rules, err := ParsePresetFile([]byte(yaml), nil)
+	require.NoError(t, err)
+	require.Len(t, rules, 2)
+
+	// Chain 1 entry overrides the default
+	assert.Equal(t, "99999", rules[0].Variables["max_transfer_amount"])
+	// Chain 137 uses the default
+	assert.Equal(t, "5000", rules[1].Variables["max_transfer_amount"])
+}
+
 func TestApplyChainIDOverride(t *testing.T) {
 	t.Run("overrides_when_present", func(t *testing.T) {
 		r := PresetRule{ChainID: "1"}

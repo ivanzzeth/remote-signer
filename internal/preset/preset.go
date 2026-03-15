@@ -129,21 +129,32 @@ func GetPresetMeta(data []byte) (PresetMeta, error) {
 // a slice of PresetRule. Overrides are merged into variables (e.g. from --set or API body).
 func ParsePresetFile(data []byte, overrides map[string]string) ([]PresetRule, error) {
 	var single struct {
-		Name          string                 `yaml:"name"`
-		Template      string                 `yaml:"template"`
-		TemplatePath  string                 `yaml:"template_path"`
-		TemplatePaths []string               `yaml:"template_paths"`
-		TemplateNames []string               `yaml:"template_names"`
-		Mode          string                 `yaml:"mode"`
-		ChainType     string                 `yaml:"chain_type"`
-		ChainID       string                 `yaml:"chain_id"`
-		Enabled       bool                   `yaml:"enabled"`
-		Variables     map[string]interface{} `yaml:"variables"`
-		Budget        map[string]interface{} `yaml:"budget"`
-		Schedule      map[string]interface{} `yaml:"schedule"`
+		Name          string                   `yaml:"name"`
+		Template      string                   `yaml:"template"`
+		TemplatePath  string                   `yaml:"template_path"`
+		TemplatePaths []string                 `yaml:"template_paths"`
+		TemplateNames []string                 `yaml:"template_names"`
+		Mode          string                   `yaml:"mode"`
+		ChainType     string                   `yaml:"chain_type"`
+		ChainID       string                   `yaml:"chain_id"`
+		Enabled       bool                     `yaml:"enabled"`
+		Variables     map[string]interface{}   `yaml:"variables"`
+		Budget        map[string]interface{}   `yaml:"budget"`
+		Schedule      map[string]interface{}   `yaml:"schedule"`
+		Matrix        []map[string]interface{} `yaml:"matrix"`
+		Defaults      map[string]interface{}   `yaml:"defaults"`
 	}
 	if err := yaml.Unmarshal(data, &single); err != nil {
 		return nil, err
+	}
+
+	// Matrix preset: one rule per matrix entry, each with chain-specific variables
+	if len(single.Matrix) > 0 {
+		return parseMatrixPreset(single.Name, single.Template, single.TemplatePath,
+			single.TemplatePaths, single.TemplateNames,
+			single.Mode, single.ChainType, single.Enabled,
+			single.Matrix, single.Defaults, single.Variables,
+			single.Budget, single.Schedule, overrides)
 	}
 
 	// Composite preset: one rule per (template_paths[i], template_names[i])
@@ -274,6 +285,134 @@ func ParsePresetFile(data []byte, overrides map[string]string) ([]PresetRule, er
 		}
 		applyChainIDOverride(&pr, overrides)
 		rules = append(rules, pr)
+	}
+	return rules, nil
+}
+
+// parseMatrixPreset expands a matrix preset into one PresetRule per matrix entry.
+// Each matrix entry must contain chain_id and may contain chain-specific variable overrides.
+// Variables are resolved as: defaults ← matrix[i] ← --set overrides.
+func parseMatrixPreset(
+	name, template, templatePath string,
+	templatePaths, templateNames []string,
+	mode, chainType string, enabled bool,
+	matrix []map[string]interface{},
+	defaults, variables map[string]interface{},
+	budget, schedule map[string]interface{},
+	overrides map[string]string,
+) ([]PresetRule, error) {
+	if name == "" {
+		return nil, fmt.Errorf("matrix preset requires non-empty name")
+	}
+
+	// Determine template name(s)
+	isComposite := len(templatePaths) > 0 && len(templateNames) > 0
+	if template == "" && !isComposite {
+		return nil, fmt.Errorf("matrix preset requires 'template' or 'template_paths'+'template_names'")
+	}
+
+	// Top-level chain_id conflicts with matrix
+	// (matrix entries each define their own chain_id)
+
+	// Merge defaults and top-level variables (variables acts as defaults if defaults is empty)
+	baseVars := make(map[string]interface{})
+	if defaults != nil {
+		for k, v := range normalizeVariables(defaults) {
+			baseVars[k] = v
+		}
+	}
+	if variables != nil {
+		for k, v := range normalizeVariables(variables) {
+			if _, exists := baseVars[k]; !exists {
+				baseVars[k] = v
+			}
+		}
+	}
+
+	var rules []PresetRule
+	for i, entry := range matrix {
+		// Each matrix entry must have chain_id
+		chainIDRaw, ok := entry["chain_id"]
+		if !ok {
+			return nil, fmt.Errorf("matrix entry %d: missing required 'chain_id'", i)
+		}
+		entryChainID := strings.TrimSpace(fmt.Sprintf("%v", chainIDRaw))
+		if entryChainID == "" {
+			return nil, fmt.Errorf("matrix entry %d: empty chain_id", i)
+		}
+
+		// Build variables: base ← matrix entry ← --set overrides
+		merged := make(map[string]interface{}, len(baseVars)+len(entry))
+		for k, v := range baseVars {
+			merged[k] = v
+		}
+		for k, v := range entry {
+			merged[k] = v
+		}
+		for k, v := range overrides {
+			merged[k] = v
+		}
+
+		varsStr := mapInterfaceToStringMap(merged)
+
+		// Determine effective chain_id (overrides > matrix entry)
+		effectiveChainID := entryChainID
+		if v, ok := overrides["chain_id"]; ok && v != "" {
+			effectiveChainID = v
+		}
+
+		if isComposite {
+			// Composite: one rule per template per matrix entry
+			n := len(templatePaths)
+			if len(templateNames) < n {
+				n = len(templateNames)
+			}
+			for j := 0; j < n; j++ {
+				tmplName := templateNames[j]
+				if tmplName == "" {
+					continue
+				}
+				ruleName := fmt.Sprintf("%s (chain %s, %s)", name, effectiveChainID, tmplName)
+				r := PresetRule{
+					TemplateName: tmplName,
+					Name:         ruleName,
+					Mode:         mode,
+					Variables:    copyStringMap(varsStr),
+					ChainType:    chainType,
+					ChainID:      effectiveChainID,
+					Enabled:      enabled,
+				}
+				if len(budget) > 0 {
+					r.Budget = substituteBudgetMapVars(copyMapInterface(budget), merged)
+				}
+				if len(schedule) > 0 {
+					r.Schedule = substituteMapVars(copyMapInterface(schedule), merged)
+				}
+				rules = append(rules, r)
+			}
+		} else {
+			// Single template: one rule per matrix entry
+			ruleName := fmt.Sprintf("%s (chain %s)", name, effectiveChainID)
+			r := PresetRule{
+				TemplateName: template,
+				Name:         ruleName,
+				Mode:         mode,
+				Variables:    varsStr,
+				ChainType:    chainType,
+				ChainID:      effectiveChainID,
+				Enabled:      enabled,
+			}
+			if len(budget) > 0 {
+				r.Budget = substituteBudgetMapVars(copyMapInterface(budget), merged)
+			}
+			if len(schedule) > 0 {
+				r.Schedule = substituteMapVars(copyMapInterface(schedule), merged)
+			}
+			rules = append(rules, r)
+		}
+	}
+	if len(rules) == 0 {
+		return nil, fmt.Errorf("matrix preset produced no rules")
 	}
 	return rules, nil
 }
