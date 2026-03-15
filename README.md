@@ -39,6 +39,55 @@ A secure, policy-driven signing service for EVM chains. Controls **what** gets s
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+## Why Remote Signer
+
+The most capable open-source signing service for EVM chains. Fireblocks-level policy control, self-hosted and free.
+
+### Policy Engine
+
+| Capability | remote-signer | Fireblocks | web3signer | Vault |
+|-----------|:---:|:---:|:---:|:---:|
+| Address whitelist/blocklist | Y | Y | Basic | - |
+| Value limits + budgets | Y | Y | - | - |
+| **JS scripting rules** | **Y** | - | - | - |
+| **Solidity expression rules** | **Y** | - | - | - |
+| **Composable delegation chains** | **Y** | - | - | - |
+| **23 protocol templates** | **Y** | N/A | - | - |
+| Multi-chain matrix presets | Y | N/A | - | - |
+
+**23 rule templates** covering: ERC-20/721/1155, Permits (EIP-2612/4494), DEX (Uniswap V2/V3/V4), Staking, Safe + MultiSend, EIP-4337 Account Abstraction, EIP-2771 Meta-TX, Gas Cap, and more.
+
+**Composable rules**: Safe -> MultiSend -> ERC20 transfer validation, all in a single recursive delegation chain.
+
+### Security
+
+| Capability | remote-signer | Fireblocks | web3signer | Vault |
+|-----------|:---:|:---:|:---:|:---:|
+| **OFAC dynamic blocklist** | **Y** | Paid | - | - |
+| **Real-time admin alerts** | **Y** | Y | - | - |
+| Ed25519 API authentication | Y | API key | API key | Token |
+| IP whitelist | Y | Y | - | Y |
+| TLS / mTLS | Y | Y | Y | Y |
+| Per-key rate limiting | Y | Y | - | Y |
+| Full audit trail | Y | Y | - | Y |
+| Memory hardening (mlockall) | Y | N/A (SaaS) | - | Y |
+| Spending budgets with reset | Y | Y | - | - |
+| Manual approval workflow | Y | Y | - | - |
+
+### Platform
+
+| Capability | remote-signer | Fireblocks | web3signer | Vault |
+|-----------|:---:|:---:|:---:|:---:|
+| Open source | Y | - | Y | Y |
+| Self-hosted | Y | - | Y | Y |
+| SDKs (Go/TS/Rust/MCP) | 4 | 5+ | 1 | 3 |
+| Terminal UI (TUI) | Y | Web UI | - | Web UI |
+| One-line setup | Y | N/A | - | - |
+
+**92,000+ lines of code** -- 48K production Go, 61K test code, 2,173 unit + 214 E2E tests.
+
+See [Competitive Analysis](docs/competitive-analysis.md) for the full breakdown.
+
 ## Quick Start
 
 ### One-Line Install (recommended)
@@ -92,31 +141,6 @@ The server starts with no signers. To add your first signer (import a private ke
 ### Manual Setup
 
 If you prefer manual control, see [docs/configuration.md](docs/configuration.md) for the full config reference and use `config.example.yaml` as a starting point.
-
-## Why Remote Signer
-
-The most capable open-source signing service for EVM chains. Fireblocks-level policy control, self-hosted and free.
-
-| Capability | remote-signer | Fireblocks | web3signer | Vault |
-|-----------|:---:|:---:|:---:|:---:|
-| Address whitelist/blocklist | Y | Y | Basic | - |
-| Value limits + budgets | Y | Y | - | - |
-| **JS scripting rules** | **Y** | - | - | - |
-| **Solidity expression rules** | **Y** | - | - | - |
-| **Composable delegation chains** | **Y** | - | - | - |
-| **23 protocol templates** | **Y** | N/A | - | - |
-| **OFAC dynamic blocklist** | **Y** | Paid | - | - |
-| Multi-chain matrix presets | Y | N/A | - | - |
-| Open source | Y | - | Y | Y |
-| Self-hosted | Y | - | Y | Y |
-
-**92,000+ lines of code** -- 48K production Go, 61K test code, 2,173 unit + 214 E2E tests.
-
-**23 rule templates** covering: ERC-20/721/1155, Permits (EIP-2612/4494), DEX (Uniswap V2/V3/V4), Staking, Safe + MultiSend, EIP-4337 Account Abstraction, EIP-2771 Meta-TX, OFAC Blocklist, Gas Cap, and more.
-
-**Composable rules**: Safe -> MultiSend -> ERC20 transfer validation, all in a single recursive delegation chain.
-
-See [Competitive Analysis](docs/competitive-analysis.md) for the full breakdown.
 
 ### Adding Signers
 
