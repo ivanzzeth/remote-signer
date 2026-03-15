@@ -1,0 +1,117 @@
+# Native token transfer template (evm_js) — validates plain ETH/BNB/MATIC etc. transfers.
+# Filename *.template.js.yaml = template fully driven by evm_js rules (no evm_solidity_expression).
+# Covers: native value transfers (tx.data is "0x" or empty, tx.value > 0).
+# Parameters validated: allowlists for recipients, caps for amounts.
+
+variables:
+  - name: max_transfer_amount
+    type: string
+    description: "Budget cap: max amount per transfer, in native token smallest unit (wei). -1 = no cap, 0 = block all; empty in preset → -1."
+    required: false
+    default: "-1"
+  - name: budget_period
+    type: string
+    description: "Budget reset period (e.g. 24h, 168h). Used by preset schedule; empty = no periodic reset."
+    required: false
+    default: "24h"
+  - name: allowed_recipients
+    type: address_list
+    description: "Comma-separated addresses allowed as transfer recipient (tx.to). Empty = any."
+    required: false
+    default: ""
+
+budget_metering:
+  method: "tx_value"
+  unit: "${chain_id}:native"
+
+test_variables:
+  chain_id: "1"
+  max_transfer_amount: "1000000000000000000"
+  allowed_recipients: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+
+rules:
+  - id: "native-transfer-limit"
+    name: "Native token transfer limit"
+    type: "evm_js"
+    mode: "whitelist"
+    enabled: true
+    description: "Native token (ETH/BNB/MATIC etc.) value transfer; recipient allowlist and amount cap"
+    config:
+      sign_type_filter: "transaction"
+      script: |
+        function isZeroValue(v) {
+          var hex = (v || '').replace(/^0[xX]/, '').replace(/^0+/, '');
+          return hex === '' || hex === '0';
+        }
+        function validate(input) {
+          require(input && input.sign_type === 'transaction', 'transaction only');
+          var tx = input.transaction;
+          require(tx && tx.to, 'missing tx fields');
+          var data = (tx.data || '').replace(/^0[xX]/, '');
+          require(data.length === 0, 'native transfer must have empty calldata');
+          var value = tx.value || '0x0';
+          require(!isZeroValue(value), 'value must be positive');
+          rs.addr.requireInListIfNonEmpty(tx.to, config.allowed_recipients, 'recipient not allowed');
+          rs.bigint.requireLte(value, config.max_transfer_amount, 'transfer exceeds cap');
+          return ok();
+        }
+    test_cases:
+      - name: "pass: transfer to allowed recipient under cap"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+            value: "1000000000000000000"
+            data: "0x"
+        expect_pass: true
+      - name: "pass: transfer with empty data field"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+            value: "1"
+            data: ""
+        expect_pass: true
+      # Negative cases use signer 0x000...0002 so e2e full-engine does not match "Allow hot wallet signer"
+      - name: "reject: recipient not in allowlist"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
+            to: "0x000000000000000000000000000000000000dEaD"
+            value: "1"
+            data: "0x"
+        expect_pass: false
+        expect_reason: "recipient not allowed"
+      - name: "reject: has calldata (not a native transfer)"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
+            to: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+            value: "1"
+            data: "0xa9059cbb0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc40000000000000000000000000000000000000000000000000000000000000001"
+        expect_pass: false
+        expect_reason: "native transfer must have empty calldata"
+      - name: "reject: zero value"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
+            to: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+            value: "0"
+            data: "0x"
+        expect_pass: false
+        expect_reason: "value must be positive"

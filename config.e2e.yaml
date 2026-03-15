@@ -88,6 +88,11 @@ templates:
     enabled: true
     config:
       path: "rules/templates/erc20.template.js.yaml"
+  - name: "Native Transfer Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/native_transfer.template.js.yaml"
   - name: "ERC721 Template"
     type: "file"
     enabled: true

@@ -340,6 +340,14 @@ templates:
     config:
       path: "rules/templates/opinion_safe.template.yaml"
 
+  # Native token (ETH/BNB/MATIC) transfer with amount cap and recipient allowlist
+  - name: "Native Transfer Template"
+    type: "file"
+    description: "Native token transfer limit (amount cap + recipient allowlist)"
+    enabled: true
+    config:
+      path: "rules/templates/native_transfer.template.js.yaml"
+
 # =============================================================================
 # Rules configuration
 # =============================================================================
