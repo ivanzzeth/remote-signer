@@ -1,0 +1,146 @@
+# DEX Swap V3/V4 template (evm_js) — Uniswap V3 SwapRouter + V4 Universal Router.
+# Filename *.template.js.yaml = template fully driven by evm_js rules (no evm_solidity_expression).
+# Covers V3 SwapRouter methods: exactInputSingle, exactInput, exactOutputSingle, exactOutput.
+# Covers V4 Universal Router: execute(bytes,bytes[],uint256).
+# Covers multicall wrappers: multicall(uint256,bytes[]) and multicall(bytes[]).
+# Validation: router address + method selector whitelist + tuple-decoded token/amount checks
+#   for exactInputSingle and exactOutputSingle.
+
+variables:
+  - name: router_address
+    type: address
+    description: "DEX router contract address (e.g. Uniswap V3 SwapRouter 0xE592427A0AEce92De3Edee1F18E0157C05861564)"
+    required: true
+  - name: allowed_token_in
+    type: address_list
+    description: "Comma-separated allowed input token addresses. Empty = any token."
+    required: false
+    default: ""
+  - name: allowed_token_out
+    type: address_list
+    description: "Comma-separated allowed output token addresses. Empty = any token."
+    required: false
+    default: ""
+  - name: max_amount_in
+    type: string
+    description: "Max input amount per swap, in token smallest unit. -1 = no cap."
+    required: false
+    default: "-1"
+
+test_variables:
+  chain_id: "1"
+  router_address: "0xE592427A0AEce92De3Edee1F18E0157C05861564"
+  allowed_token_in: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+  allowed_token_out: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+  max_amount_in: "1000000000000000000"
+
+rules:
+  - id: "dex-swap-v3-v4"
+    name: "DEX Swap V3/V4 method whitelist"
+    type: "evm_js"
+    mode: "whitelist"
+    enabled: true
+    description: "Uniswap V3 SwapRouter + V4 Universal Router; validates router address, method selector, and token/amount for single-hop swaps"
+    config:
+      sign_type_filter: "transaction"
+      script: |
+        function validate(input) {
+          var ctx = rs.tx.require(input);
+          require(rs.addr.inList(ctx.tx.to, [config.router_address]), 'wrong router');
+
+          var exactInputSingleSel = selector('exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))');
+          var exactOutputSingleSel = selector('exactOutputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))');
+          var exactInputSel = selector('exactInput((bytes,address,uint256,uint256,uint256))');
+          var exactOutputSel = selector('exactOutput((bytes,address,uint256,uint256,uint256))');
+          var multicallSel = selector('multicall(uint256,bytes[])');
+          var multicallNoDeadlineSel = selector('multicall(bytes[])');
+          var executeUniversalSel = selector('execute(bytes,bytes[],uint256)');
+
+          if (eq(ctx.selector, exactInputSingleSel)) return validateExactInputSingle(ctx.payloadHex);
+          if (eq(ctx.selector, exactOutputSingleSel)) return validateExactOutputSingle(ctx.payloadHex);
+          if (eq(ctx.selector, exactInputSel) || eq(ctx.selector, exactOutputSel)) return ok();
+          if (eq(ctx.selector, multicallSel) || eq(ctx.selector, multicallNoDeadlineSel)) return ok();
+          if (eq(ctx.selector, executeUniversalSel)) return ok();
+          revert('method not allowed');
+        }
+
+        function validateExactInputSingle(payloadHex) {
+          var dec = abi.decode(payloadHex, [
+            { type: 'tuple', components: [
+              { name: 'tokenIn', type: 'address' },
+              { name: 'tokenOut', type: 'address' },
+              { name: 'fee', type: 'uint24' },
+              { name: 'recipient', type: 'address' },
+              { name: 'deadline', type: 'uint256' },
+              { name: 'amountIn', type: 'uint256' },
+              { name: 'amountOutMinimum', type: 'uint256' },
+              { name: 'sqrtPriceLimitX96', type: 'uint160' }
+            ]}
+          ]);
+          require(dec && dec.length === 1, 'exactInputSingle decode failed');
+          var params = dec[0];
+          rs.addr.requireInListIfNonEmpty(params.tokenIn, config.allowed_token_in, 'tokenIn not allowed');
+          rs.addr.requireInListIfNonEmpty(params.tokenOut, config.allowed_token_out, 'tokenOut not allowed');
+          rs.bigint.requireLte(params.amountIn, config.max_amount_in, 'amountIn exceeds cap');
+          return ok();
+        }
+
+        function validateExactOutputSingle(payloadHex) {
+          var dec = abi.decode(payloadHex, [
+            { type: 'tuple', components: [
+              { name: 'tokenIn', type: 'address' },
+              { name: 'tokenOut', type: 'address' },
+              { name: 'fee', type: 'uint24' },
+              { name: 'recipient', type: 'address' },
+              { name: 'deadline', type: 'uint256' },
+              { name: 'amountOut', type: 'uint256' },
+              { name: 'amountInMaximum', type: 'uint256' },
+              { name: 'sqrtPriceLimitX96', type: 'uint160' }
+            ]}
+          ]);
+          require(dec && dec.length === 1, 'exactOutputSingle decode failed');
+          var params = dec[0];
+          rs.addr.requireInListIfNonEmpty(params.tokenIn, config.allowed_token_in, 'tokenIn not allowed');
+          rs.addr.requireInListIfNonEmpty(params.tokenOut, config.allowed_token_out, 'tokenOut not allowed');
+          rs.bigint.requireLte(params.amountInMaximum, config.max_amount_in, 'amountInMaximum exceeds cap');
+          return ok();
+        }
+    test_cases:
+      - name: "pass: exactInputSingle WETH->USDC 1ETH"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0xE592427A0AEce92De3Edee1F18E0157C05861564"
+            value: "0"
+            data: "0x414bf389000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb480000000000000000000000000000000000000000000000000000000000000bb8000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266000000000000000000000000000000000000000000000000000000174876e7ff0000000000000000000000000000000000000000000000000de0b6b3a76400000000000000000000000000000000000000000000000000000000000035a4e9000000000000000000000000000000000000000000000000000000000000000000"
+            methodId: "0x414bf389"
+        expect_pass: true
+      - name: "reject: wrong router address"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
+            to: "0x000000000000000000000000000000000000dEaD"
+            value: "0"
+            data: "0x414bf389000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb480000000000000000000000000000000000000000000000000000000000000bb8000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266000000000000000000000000000000000000000000000000000000174876e7ff0000000000000000000000000000000000000000000000000de0b6b3a76400000000000000000000000000000000000000000000000000000000000035a4e9000000000000000000000000000000000000000000000000000000000000000000"
+            methodId: "0x414bf389"
+        expect_pass: false
+        expect_reason: "wrong router"
+      - name: "reject: disallowed method (name())"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
+            to: "0xE592427A0AEce92De3Edee1F18E0157C05861564"
+            value: "0"
+            data: "0x06fdde03"
+            methodId: "0x06fdde03"
+        expect_pass: false
+        expect_reason: "method not allowed"

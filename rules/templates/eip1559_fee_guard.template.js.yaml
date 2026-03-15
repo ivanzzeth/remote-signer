@@ -1,0 +1,90 @@
+# EIP-1559 Fee Guard template (evm_js) — blocklist that caps gas limit and transaction value.
+# Note: maxFeePerGas and maxPriorityFeePerGas are not currently exposed to JS rules
+# (they exist in TransactionPayload but not in RuleInputTransaction). This template caps
+# gas limit and value; adding maxFeePerGas support requires extending BuildRuleInput.
+#
+# Mode: blocklist — blocks transactions that exceed configured caps.
+
+variables:
+  - name: max_gas
+    type: string
+    description: "Max gas limit per transaction (decimal string). -1 = no cap."
+    required: false
+    default: "500000"
+  - name: max_value
+    type: string
+    description: "Max transaction value in wei (decimal string). -1 = no cap, 0 = block all value transfers."
+    required: false
+    default: "-1"
+
+test_variables:
+  chain_id: "1"
+  max_gas: "500000"
+  max_value: "1000000000000000000"
+
+rules:
+  - id: "eip1559-fee-guard"
+    name: "EIP-1559 fee guard"
+    type: "evm_js"
+    mode: "blocklist"
+    enabled: true
+    description: "Block transactions exceeding gas limit or value cap. Blocklist mode: ok() = not blocked, fail/panic = blocked."
+    config:
+      sign_type_filter: "transaction"
+      script: |
+        function validate(input) {
+          require(input && input.sign_type === 'transaction', 'transaction only');
+          var tx = input.transaction;
+          if (!tx) return ok();
+          var gas = tx.gas || '0';
+          var maxGas = (config.max_gas || '-1').trim();
+          if (maxGas !== '-1' && gas !== '0' && gas !== '') {
+            rs.bigint.requireLte(gas, maxGas, 'gas limit exceeds cap: ' + gas + ' > ' + maxGas);
+          }
+          var value = tx.value || '0';
+          var maxVal = (config.max_value || '-1').trim();
+          if (maxVal !== '-1') {
+            rs.bigint.requireLte(value, maxVal, 'value exceeds cap: ' + value + ' > ' + maxVal);
+          }
+          return ok();
+        }
+    test_cases:
+      - name: "pass: gas and value under cap (not blocked)"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            value: "0"
+            gas: 21000
+            data: "0xa9059cbb0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc40000000000000000000000000000000000000000000000000000000000000000"
+        expect_pass: true
+      # Negative cases use signer 0x000...0002 so e2e full-engine does not match "Allow hot wallet signer"
+      - name: "reject: gas over cap (blocked)"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
+            to: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            value: "0"
+            gas: 1000000
+            data: "0xa9059cbb0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc40000000000000000000000000000000000000000000000000000000000000000"
+        expect_pass: false
+        expect_reason: "gas limit exceeds cap"
+      - name: "reject: value over cap (blocked)"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
+            to: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            value: "2000000000000000000"
+            gas: 21000
+            data: "0xa9059cbb0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc40000000000000000000000000000000000000000000000000000000000000000"
+        expect_pass: false
+        expect_reason: "value exceeds cap"

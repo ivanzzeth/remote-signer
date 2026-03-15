@@ -153,6 +153,21 @@ templates:
     enabled: true
     config:
       path: "rules/templates/eip4337_userop.template.js.yaml"
+  - name: "EIP-3009 Transfer Auth Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/eip3009_transfer_auth.template.js.yaml"
+  - name: "EIP-1559 Fee Guard Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/eip1559_fee_guard.template.js.yaml"
+  - name: "DEX Swap V3/V4 Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/dex_swap_v3.template.js.yaml"
   - name: "Polymarket Template"
     type: "file"
     enabled: true

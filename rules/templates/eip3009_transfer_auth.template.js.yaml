@@ -1,0 +1,161 @@
+# EIP-3009 TransferWithAuthorization / ReceiveWithAuthorization template (evm_js) — typed_data validation.
+# Validates EIP-712 typed data for gasless transfers (USDC, EURC, etc.).
+# Covers: domain verification, recipient allowlists, value caps.
+
+variables:
+  - name: token_address
+    type: address
+    description: "ERC20 token contract address (verifyingContract in EIP-712 domain)"
+    required: true
+  - name: allowed_recipients
+    type: address_list
+    description: "Comma-separated addresses allowed as transfer recipient (to). Empty = any."
+    required: false
+    default: ""
+  - name: max_transfer_value
+    type: string
+    description: "Max transfer value in token smallest unit. -1 = no cap, 0 = block all."
+    required: false
+    default: "-1"
+
+test_variables:
+  chain_id: "1"
+  token_address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+  allowed_recipients: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+  max_transfer_value: "1000000000"
+
+rules:
+  - id: "eip3009-transfer-auth"
+    name: "EIP-3009 Transfer Auth"
+    type: "evm_js"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "${chain_id}"
+    description: "Validate EIP-3009 TransferWithAuthorization / ReceiveWithAuthorization typed data signatures; domain, recipient allowlists, value caps"
+    config:
+      sign_type_filter: "typed_data"
+      script: |
+        function validate(input) {
+          var td = rs.typedData.match(input, 'TransferWithAuthorization');
+          if (!td.matched) {
+            td = rs.typedData.match(input, 'ReceiveWithAuthorization');
+          }
+          require(td.matched, 'not TransferWithAuthorization or ReceiveWithAuthorization');
+          var domain = td.domain;
+          rs.typedData.requireDomain(domain, {
+            chainId: config.chain_id,
+            requireVerifyingContract: true,
+            allowedContracts: config.token_address
+          });
+          var msg = td.message;
+          require(msg && msg.from, 'missing from');
+          require(msg && msg.to, 'missing to');
+          require(isAddress(msg.from), 'invalid from');
+          require(isAddress(msg.to), 'invalid to');
+          rs.typedData.requireSignerMatch(msg.from, input.signer, 'from must be signer');
+          rs.addr.requireInListIfNonEmpty(msg.to, config.allowed_recipients, 'recipient not allowed');
+          rs.bigint.requireLte(msg.value || '0', config.max_transfer_value, 'transfer value exceeds cap');
+          return ok();
+        }
+    test_cases:
+      - name: "pass: valid TransferWithAuthorization with allowed recipient and value under cap"
+        input:
+          sign_type: "typed_data"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          typed_data:
+            types:
+              EIP712Domain:
+                - { name: "name", type: "string" }
+                - { name: "version", type: "string" }
+                - { name: "chainId", type: "uint256" }
+                - { name: "verifyingContract", type: "address" }
+              TransferWithAuthorization:
+                - { name: "from", type: "address" }
+                - { name: "to", type: "address" }
+                - { name: "value", type: "uint256" }
+                - { name: "validAfter", type: "uint256" }
+                - { name: "validBefore", type: "uint256" }
+                - { name: "nonce", type: "bytes32" }
+            primaryType: "TransferWithAuthorization"
+            domain:
+              name: "USD Coin"
+              version: "2"
+              chainId: "1"
+              verifyingContract: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            message:
+              from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+              to: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+              value: "1000000"
+              validAfter: "0"
+              validBefore: "1999999999"
+              nonce: "0x0000000000000000000000000000000000000000000000000000000000000001"
+        expect_pass: true
+      - name: "reject: recipient not in allowlist"
+        input:
+          sign_type: "typed_data"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          typed_data:
+            types:
+              EIP712Domain:
+                - { name: "name", type: "string" }
+                - { name: "version", type: "string" }
+                - { name: "chainId", type: "uint256" }
+                - { name: "verifyingContract", type: "address" }
+              TransferWithAuthorization:
+                - { name: "from", type: "address" }
+                - { name: "to", type: "address" }
+                - { name: "value", type: "uint256" }
+                - { name: "validAfter", type: "uint256" }
+                - { name: "validBefore", type: "uint256" }
+                - { name: "nonce", type: "bytes32" }
+            primaryType: "TransferWithAuthorization"
+            domain:
+              name: "USD Coin"
+              version: "2"
+              chainId: "1"
+              verifyingContract: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            message:
+              from: "0x0000000000000000000000000000000000000002"
+              to: "0x000000000000000000000000000000000000dEaD"
+              value: "1000000"
+              validAfter: "0"
+              validBefore: "1999999999"
+              nonce: "0x0000000000000000000000000000000000000000000000000000000000000002"
+        expect_pass: false
+        expect_reason: "recipient not allowed"
+      - name: "reject: from does not match signer"
+        input:
+          sign_type: "typed_data"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          typed_data:
+            types:
+              EIP712Domain:
+                - { name: "name", type: "string" }
+                - { name: "version", type: "string" }
+                - { name: "chainId", type: "uint256" }
+                - { name: "verifyingContract", type: "address" }
+              TransferWithAuthorization:
+                - { name: "from", type: "address" }
+                - { name: "to", type: "address" }
+                - { name: "value", type: "uint256" }
+                - { name: "validAfter", type: "uint256" }
+                - { name: "validBefore", type: "uint256" }
+                - { name: "nonce", type: "bytes32" }
+            primaryType: "TransferWithAuthorization"
+            domain:
+              name: "USD Coin"
+              version: "2"
+              chainId: "1"
+              verifyingContract: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            message:
+              from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+              to: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+              value: "1000000"
+              validAfter: "0"
+              validBefore: "1999999999"
+              nonce: "0x0000000000000000000000000000000000000000000000000000000000000003"
+        expect_pass: false
+        expect_reason: "from must be signer"

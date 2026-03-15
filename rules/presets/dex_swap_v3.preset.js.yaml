@@ -1,0 +1,23 @@
+# Preset: DEX Swap V3/V4 method whitelist (evm_js). Validates Uniswap V3 SwapRouter + V4 Universal Router.
+# Use: remote-signer-cli preset create-from dex_swap_v3.preset.js.yaml [--config config.yaml --write] [--set chain_id=1 --set router_address=0x...]
+
+name: "DEX Swap V3/V4 (JS)"
+template_paths:
+  - "rules/templates/dex_swap_v3.template.js.yaml"
+template_names:
+  - "DEX Swap V3/V4 Template"
+chain_type: "evm"
+chain_id: "1"
+enabled: true
+variables:
+  chain_id: "1"
+  router_address: "0xE592427A0AEce92De3Edee1F18E0157C05861564"
+  allowed_token_in: ""
+  allowed_token_out: ""
+  max_amount_in: "-1"
+override_hints:
+  - chain_id
+  - router_address
+  - allowed_token_in
+  - allowed_token_out
+  - max_amount_in
