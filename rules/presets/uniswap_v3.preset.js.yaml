@@ -1,0 +1,52 @@
+# Preset: Uniswap V3 SwapRouter across major EVM chains (matrix).
+# Creates one swap rule per chain with official V3 SwapRouter addresses.
+# Supports exactInputSingle/exactOutputSingle with tuple decoding + token validation.
+#
+# Usage:
+#   # Deploy all chains at once:
+#   remote-signer-cli preset create-from uniswap_v3.preset.js.yaml --config config.yaml --write
+#
+#   # With token restrictions:
+#   remote-signer-cli preset create-from uniswap_v3.preset.js.yaml \
+#     --set allowed_token_in=0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2 \
+#     --set max_amount_in=10000000000000000000 \
+#     --config config.yaml --write
+#
+# Router addresses sourced from Uniswap official deployments:
+#   https://docs.uniswap.org/contracts/v3/reference/deployments
+
+name: "Uniswap V3 (JS)"
+template_paths:
+  - "rules/templates/dex_swap_v3.template.js.yaml"
+template_names:
+  - "DEX Swap V3/V4 Template"
+chain_type: "evm"
+enabled: true
+
+matrix:
+  # Uniswap V3 SwapRouter (0xE592...) — original deployment
+  - chain_id: "1"       # Ethereum
+    router_address: "0xE592427A0AEce92De3Edee1F18E0157C05861564"
+  - chain_id: "137"     # Polygon PoS
+    router_address: "0xE592427A0AEce92De3Edee1F18E0157C05861564"
+  - chain_id: "42161"   # Arbitrum One
+    router_address: "0xE592427A0AEce92De3Edee1F18E0157C05861564"
+  - chain_id: "10"      # Optimism
+    router_address: "0xE592427A0AEce92De3Edee1F18E0157C05861564"
+  - chain_id: "8453"    # Base
+    router_address: "0x2626664c2603336E57B271c5C0b26F421741e481"
+  - chain_id: "56"      # BNB Chain
+    router_address: "0xB971eF87ede563556b2ED4b1C0b0019111Dd85d2"
+  - chain_id: "43114"   # Avalanche C-Chain
+    router_address: "0xbb00FF08d01D300023C629E8fFfFcb65A5a578cE"
+
+defaults:
+  allowed_token_in: ""
+  allowed_token_out: ""
+  max_amount_in: "-1"
+
+override_hints:
+  - router_address
+  - allowed_token_in
+  - allowed_token_out
+  - max_amount_in

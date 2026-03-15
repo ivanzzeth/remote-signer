@@ -1,0 +1,36 @@
+# Preset: Uniswap V2 Router across major EVM chains (matrix).
+# Creates one swap rule per chain with official V2 Router addresses.
+#
+# Usage:
+#   # Deploy all chains at once:
+#   remote-signer-cli preset create-from uniswap_v2.preset.js.yaml --config config.yaml --write
+#
+# Router addresses sourced from Uniswap official deployments:
+#   https://docs.uniswap.org/contracts/v2/reference/smart-contracts/router-02
+
+name: "Uniswap V2 (JS)"
+template_paths:
+  - "rules/templates/dex_swap.template.js.yaml"
+template_names:
+  - "DEX Swap Template"
+chain_type: "evm"
+enabled: true
+
+matrix:
+  - chain_id: "1"       # Ethereum
+    router_address: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
+  - chain_id: "137"     # Polygon PoS (QuickSwap uses same interface)
+    router_address: "0xa5E0829CaCEd8fFDD4De3c43696c57F7D7A678ff"
+  - chain_id: "56"      # BNB Chain (PancakeSwap V2)
+    router_address: "0x10ED43C718714eb63d5aA57B78B54704E256024E"
+  - chain_id: "42161"   # Arbitrum One (SushiSwap V2)
+    router_address: "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506"
+  - chain_id: "43114"   # Avalanche (TraderJoe V2)
+    router_address: "0x60aE616a2155Ee3d9A68541Ba4544862310933d4"
+  - chain_id: "10"      # Optimism (Velodrome uses different interface, use Uniswap)
+    router_address: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
+
+defaults: {}
+
+override_hints:
+  - router_address

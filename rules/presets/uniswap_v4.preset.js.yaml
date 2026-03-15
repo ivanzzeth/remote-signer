@@ -1,0 +1,47 @@
+# Preset: Uniswap V4 Universal Router across major EVM chains (matrix).
+# The Universal Router combines V2, V3 and V4 swaps into a single contract.
+# Uses the same V3/V4 template (method whitelist + optional token validation).
+#
+# Usage:
+#   # Deploy all chains at once:
+#   remote-signer-cli preset create-from uniswap_v4.preset.js.yaml --config config.yaml --write
+#
+# Router addresses sourced from Uniswap official deployments:
+#   https://docs.uniswap.org/contracts/v4/deployments
+#   UniversalRouter is the combined entry point for V2+V3+V4 swaps.
+
+name: "Uniswap V4 Universal Router (JS)"
+template_paths:
+  - "rules/templates/dex_swap_v3.template.js.yaml"
+template_names:
+  - "DEX Swap V3/V4 Template"
+chain_type: "evm"
+enabled: true
+
+matrix:
+  # Uniswap UniversalRouter (V4) — 2024 deployment
+  - chain_id: "1"       # Ethereum
+    router_address: "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD"
+  - chain_id: "137"     # Polygon PoS
+    router_address: "0xec7BE89e9d109e7e3Fec59c222CF297125FEFda2"
+  - chain_id: "42161"   # Arbitrum One
+    router_address: "0x5E325eDA8064b456f4781070C0738d849c824258"
+  - chain_id: "10"      # Optimism
+    router_address: "0xCb1355ff08Ab38bBCE60111F1bb2B784bE25D7e8"
+  - chain_id: "8453"    # Base
+    router_address: "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD"
+  - chain_id: "56"      # BNB Chain
+    router_address: "0x4Dae2f939ACf50408e13d58534Ff8c2776d45265"
+  - chain_id: "43114"   # Avalanche C-Chain
+    router_address: "0x4Dae2f939ACf50408e13d58534Ff8c2776d45265"
+
+defaults:
+  allowed_token_in: ""
+  allowed_token_out: ""
+  max_amount_in: "-1"
+
+override_hints:
+  - router_address
+  - allowed_token_in
+  - allowed_token_out
+  - max_amount_in
