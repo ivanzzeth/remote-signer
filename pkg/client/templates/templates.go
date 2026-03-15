@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/ivanzzeth/remote-signer/pkg/client/internal/transport"
@@ -57,7 +58,7 @@ func (s *Service) List(ctx context.Context, filter *ListFilter) (*ListResponse, 
 
 // Get retrieves a specific template by ID.
 func (s *Service) Get(ctx context.Context, templateID string) (*Template, error) {
-	path := fmt.Sprintf("/api/v1/templates/%s", templateID)
+	path := fmt.Sprintf("/api/v1/templates/%s", url.PathEscape(templateID))
 	var tmpl Template
 	err := s.transport.Request(ctx, http.MethodGet, path, nil, &tmpl, http.StatusOK)
 	if err != nil {
@@ -79,7 +80,7 @@ func (s *Service) Create(ctx context.Context, req *CreateRequest) (*Template, er
 
 // Update updates an existing template (admin only).
 func (s *Service) Update(ctx context.Context, templateID string, req *UpdateRequest) (*Template, error) {
-	path := fmt.Sprintf("/api/v1/templates/%s", templateID)
+	path := fmt.Sprintf("/api/v1/templates/%s", url.PathEscape(templateID))
 	var tmpl Template
 	err := s.transport.Request(ctx, http.MethodPatch, path, req, &tmpl, http.StatusOK)
 	if err != nil {
@@ -90,14 +91,14 @@ func (s *Service) Update(ctx context.Context, templateID string, req *UpdateRequ
 
 // Delete deletes a template by ID (admin only).
 func (s *Service) Delete(ctx context.Context, templateID string) error {
-	path := fmt.Sprintf("/api/v1/templates/%s", templateID)
+	path := fmt.Sprintf("/api/v1/templates/%s", url.PathEscape(templateID))
 	return s.transport.Request(ctx, http.MethodDelete, path, nil, nil,
 		http.StatusOK, http.StatusNoContent)
 }
 
 // Instantiate creates a rule instance from a template (admin only).
 func (s *Service) Instantiate(ctx context.Context, templateID string, req *InstantiateRequest) (*InstantiateResponse, error) {
-	path := fmt.Sprintf("/api/v1/templates/%s/instantiate", templateID)
+	path := fmt.Sprintf("/api/v1/templates/%s/instantiate", url.PathEscape(templateID))
 	var resp InstantiateResponse
 	err := s.transport.Request(ctx, http.MethodPost, path, req, &resp,
 		http.StatusOK, http.StatusCreated)
@@ -109,7 +110,7 @@ func (s *Service) Instantiate(ctx context.Context, templateID string, req *Insta
 
 // RevokeInstance revokes (disables) a rule instance created from a template (admin only).
 func (s *Service) RevokeInstance(ctx context.Context, ruleID string) (*RevokeInstanceResponse, error) {
-	path := fmt.Sprintf("/api/v1/templates/instances/%s/revoke", ruleID)
+	path := fmt.Sprintf("/api/v1/templates/instances/%s/revoke", url.PathEscape(ruleID))
 	var resp RevokeInstanceResponse
 	err := s.transport.Request(ctx, http.MethodPost, path, nil, &resp, http.StatusOK)
 	if err != nil {

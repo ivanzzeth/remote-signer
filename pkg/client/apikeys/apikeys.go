@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/ivanzzeth/remote-signer/pkg/client/internal/transport"
@@ -54,7 +55,7 @@ func (s *Service) List(ctx context.Context, filter *ListFilter) (*ListResponse, 
 // Get retrieves an API key by ID.
 func (s *Service) Get(ctx context.Context, id string) (*APIKey, error) {
 	var key APIKey
-	path := fmt.Sprintf("/api/v1/api-keys/%s", id)
+	path := fmt.Sprintf("/api/v1/api-keys/%s", url.PathEscape(id))
 	err := s.transport.Request(ctx, http.MethodGet, path, nil, &key, http.StatusOK)
 	if err != nil {
 		return nil, err
@@ -76,7 +77,7 @@ func (s *Service) Create(ctx context.Context, req *CreateRequest) (*APIKey, erro
 // Update updates an existing API key (admin only, API-sourced keys only).
 func (s *Service) Update(ctx context.Context, id string, req *UpdateRequest) (*APIKey, error) {
 	var key APIKey
-	path := fmt.Sprintf("/api/v1/api-keys/%s", id)
+	path := fmt.Sprintf("/api/v1/api-keys/%s", url.PathEscape(id))
 	err := s.transport.Request(ctx, http.MethodPut, path, req, &key, http.StatusOK)
 	if err != nil {
 		return nil, err
@@ -86,7 +87,7 @@ func (s *Service) Update(ctx context.Context, id string, req *UpdateRequest) (*A
 
 // Delete deletes an API key (admin only, API-sourced keys only).
 func (s *Service) Delete(ctx context.Context, id string) error {
-	path := fmt.Sprintf("/api/v1/api-keys/%s", id)
+	path := fmt.Sprintf("/api/v1/api-keys/%s", url.PathEscape(id))
 	return s.transport.Request(ctx, http.MethodDelete, path, nil, nil, http.StatusNoContent, http.StatusOK)
 }
 

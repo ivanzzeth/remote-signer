@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -53,21 +54,22 @@ type apiKeyLister interface {
 
 // SecurityModel represents the security overview view.
 type SecurityModel struct {
-	health   healthChecker
-	rules    evm.RuleAPI
-	signers  evm.SignerAPI
-	audit    auditLister
-	apikeys  apiKeyLister
-	ctx      context.Context
-	width    int
-	height   int
-	spinner  spinner.Model
-	loading  bool
-	err      error
-	data     *SecurityData
-	expanded sectionIndex // currently expanded section (-1 = none)
-	cursor   sectionIndex // keyboard cursor
-	scrollY  int          // vertical scroll offset
+	health    healthChecker
+	rules     evm.RuleAPI
+	signers   evm.SignerAPI
+	audit     auditLister
+	apikeys   apiKeyLister
+	ctx       context.Context
+	width     int
+	height    int
+	spinner   spinner.Model
+	loading   bool
+	err       error
+	data      *SecurityData
+	expanded  sectionIndex // currently expanded section (-1 = none)
+	cursor    sectionIndex // keyboard cursor
+	viewport  viewport.Model
+	vpReady   bool
 }
 
 // auditLister is the interface for listing audit records.
@@ -110,10 +112,24 @@ func (m *SecurityModel) Init() tea.Cmd {
 	)
 }
 
-// SetSize sets the view size.
+// SetSize sets the view size and initializes or resizes the viewport.
 func (m *SecurityModel) SetSize(width, height int) {
 	m.width = width
 	m.height = height
+
+	footerHeight := 1
+	vpHeight := height - footerHeight
+	if vpHeight < 1 {
+		vpHeight = 1
+	}
+	if !m.vpReady {
+		m.viewport = viewport.New(width, vpHeight)
+		m.viewport.Style = lipgloss.NewStyle()
+		m.vpReady = true
+	} else {
+		m.viewport.Width = width
+		m.viewport.Height = vpHeight
+	}
 }
 
 // Refresh refreshes the security data.
@@ -234,6 +250,18 @@ func (m *SecurityModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.expanded = m.cursor // expand
 			}
+		case "pgup", "ctrl+u":
+			m.viewport.HalfViewUp()
+			return m, nil
+		case "pgdown", "ctrl+d":
+			m.viewport.HalfViewDown()
+			return m, nil
+		case "home", "g":
+			m.viewport.GotoTop()
+			return m, nil
+		case "end", "G":
+			m.viewport.GotoBottom()
+			return m, nil
 		}
 	}
 
@@ -257,7 +285,19 @@ func (m *SecurityModel) View() string {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, errBox)
 	}
 
-	return m.renderSecurity()
+	// Render full content and show it in a viewport so the nav bar is never pushed off screen.
+	fullContent := m.renderSecurity()
+	m.viewport.SetContent(fullContent)
+
+	var b strings.Builder
+	b.WriteString(m.viewport.View())
+	b.WriteString("\n")
+	footer := styles.MutedColor.Render(fmt.Sprintf(
+		"Last refreshed: %s | r: refresh | ↑/↓: sections | Enter: expand | pgup/pgdown: scroll",
+		m.data.LastRefresh.Format("15:04:05"),
+	))
+	b.WriteString(footer)
+	return b.String()
 }
 
 func (m *SecurityModel) renderSecurity() string {
@@ -295,14 +335,6 @@ func (m *SecurityModel) renderSecurity() string {
 		sections = append(sections, "")
 		sections = append(sections, m.renderRecentAlerts())
 	}
-
-	// Footer
-	sections = append(sections, "")
-	footer := styles.MutedColor.Render(fmt.Sprintf(
-		"Last refreshed: %s | r: refresh | up/down: navigate | Enter: expand/collapse section",
-		m.data.LastRefresh.Format("15:04:05"),
-	))
-	sections = append(sections, footer)
 
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
 }

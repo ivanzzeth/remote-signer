@@ -115,7 +115,8 @@ func (h *PresetHandler) vars(w http.ResponseWriter, _ *http.Request, id string) 
 			h.writeError(w, "preset not found", http.StatusNotFound)
 			return
 		}
-		h.writeError(w, err.Error(), http.StatusBadRequest)
+		h.logger.Error("read preset file failed", "error", err, "preset_id", id)
+		h.writeError(w, "invalid preset id", http.StatusBadRequest)
 		return
 	}
 	meta, err := preset.GetPresetMeta(data)
@@ -152,7 +153,8 @@ func (h *PresetHandler) apply(w http.ResponseWriter, r *http.Request, id string)
 			h.writeError(w, "preset not found", http.StatusNotFound)
 			return
 		}
-		h.writeError(w, err.Error(), http.StatusBadRequest)
+		h.logger.Error("read preset file failed", "error", err, "preset_id", id)
+		h.writeError(w, "invalid preset id", http.StatusBadRequest)
 		return
 	}
 	var body ApplyPresetRequest
@@ -181,7 +183,11 @@ func (h *PresetHandler) apply(w http.ResponseWriter, r *http.Request, id string)
 	}
 	var resolved []resolvedItem
 	for _, pr := range presetRules {
-		req := presetRuleToCreateInstanceRequest(pr)
+		req, err := presetRuleToCreateInstanceRequest(pr)
+		if err != nil {
+			h.writeError(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		tmpl, err := h.templateSvc.ResolveTemplate(r.Context(), req)
 		if err != nil {
 			h.writeError(w, fmt.Sprintf("template %q: %s", pr.TemplateName, err.Error()), http.StatusBadRequest)
@@ -215,7 +221,7 @@ func (h *PresetHandler) apply(w http.ResponseWriter, r *http.Request, id string)
 	})
 	if err != nil {
 		h.logger.Error("preset apply failed", "error", err, "preset_id", id)
-		h.writeError(w, err.Error(), http.StatusBadRequest)
+		h.writeError(w, fmt.Sprintf("preset apply failed: %s", err.Error()), http.StatusBadRequest)
 		return
 	}
 	h.writeJSON(w, map[string]interface{}{"results": results}, http.StatusCreated)
@@ -251,7 +257,15 @@ func (h *PresetHandler) readPresetFile(id string) ([]byte, error) {
 		if !strings.HasPrefix(absPath, absDir+string(filepath.Separator)) && absPath != absDir {
 			continue
 		}
-		data, err := os.ReadFile(p) // #nosec G304 -- path validated under presetsDir
+		// Resolve symlinks and re-check that the real path is still under presetsDir.
+		realPath, err := filepath.EvalSymlinks(absPath)
+		if err != nil {
+			continue
+		}
+		if !strings.HasPrefix(realPath, absDir+string(filepath.Separator)) && realPath != absDir {
+			continue
+		}
+		data, err := os.ReadFile(realPath) // #nosec G304 -- path validated under presetsDir after symlink resolution
 		if err == nil {
 			return data, nil
 		}
@@ -259,7 +273,10 @@ func (h *PresetHandler) readPresetFile(id string) ([]byte, error) {
 	return nil, os.ErrNotExist
 }
 
-func presetRuleToCreateInstanceRequest(pr preset.PresetRule) *service.CreateInstanceRequest {
+func presetRuleToCreateInstanceRequest(pr preset.PresetRule) (*service.CreateInstanceRequest, error) {
+	if pr.TemplateName == "" {
+		return nil, fmt.Errorf("preset rule %q has empty template name", pr.Name)
+	}
 	req := &service.CreateInstanceRequest{
 		TemplateName: pr.TemplateName,
 		Name:         pr.Name,
@@ -278,12 +295,14 @@ func presetRuleToCreateInstanceRequest(pr preset.PresetRule) *service.CreateInst
 	if len(pr.Schedule) > 0 {
 		periodStr := strFromMap(pr.Schedule, "period")
 		if periodStr != "" {
-			if d, err := time.ParseDuration(periodStr); err == nil {
-				req.Schedule = &service.ScheduleConfig{Period: d}
+			d, err := time.ParseDuration(periodStr)
+			if err != nil {
+				return nil, fmt.Errorf("preset rule %q: invalid schedule period %q: %w", pr.Name, periodStr, err)
 			}
+			req.Schedule = &service.ScheduleConfig{Period: d}
 		}
 	}
-	return req
+	return req, nil
 }
 
 func strPtr(s string) *string {
