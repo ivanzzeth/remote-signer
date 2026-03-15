@@ -998,6 +998,28 @@ logger:
   level: "info"
   pretty: true
 
+# --- Dynamic Blocklist (runtime address sanctions screening) ---
+dynamic_blocklist:
+  enabled: true
+  sync_interval: "1h"
+  fail_mode: "open"
+  cache_file: "data/blocklist_cache.json"
+  sources:
+    - name: "OFAC SDN ETH"
+      type: "url_text"
+      url: "https://raw.githubusercontent.com/0xB10C/ofac-sanctioned-digital-currency-addresses/main/sanctioned_addresses_ETH.txt"
+
+# --- Default security rules (auto-enabled) ---
+rules:
+  - name: "Dynamic Address Blocklist"
+    type: "evm_dynamic_blocklist"
+    mode: "blocklist"
+    chain_type: "evm"
+    enabled: true
+    config:
+      check_recipient: true
+      check_verifying_contract: true
+
 api_keys:
   - id: "admin"
     name: "Admin"

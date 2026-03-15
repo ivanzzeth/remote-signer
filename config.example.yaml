@@ -278,6 +278,30 @@ api_keys:
 #    openssl pkey -in public.pem -pubin -outform DER | tail -c 32 | xxd -p -c 64  # public key hex
 
 # =============================================================================
+# Dynamic Blocklist (runtime address blocklist synced from external sources)
+# =============================================================================
+# Periodically fetches sanctioned/malicious addresses from external URLs.
+# Addresses are cached locally for instant startup (no network required on boot).
+# Default sources: OFAC SDN (US Treasury sanctions) + MyEtherWallet darklist.
+dynamic_blocklist:
+  enabled: true
+  sync_interval: "1h"       # How often to refresh from remote sources
+  fail_mode: "open"          # "open" = use stale cache on failure, "close" = reject all
+  cache_file: "data/blocklist_cache.json"
+  sources:
+    - name: "OFAC SDN ETH"
+      type: "url_text"
+      url: "https://raw.githubusercontent.com/0xB10C/ofac-sanctioned-digital-currency-addresses/main/sanctioned_addresses_ETH.txt"
+    # Add your own sources as needed:
+    # - name: "Custom Internal"
+    #   type: "url_text"
+    #   url: "https://your-company.com/blocklist.txt"
+    # - name: "JSON Source"
+    #   type: "url_json"
+    #   url: "https://example.com/api/blocked-addresses"
+    #   json_path: "data.addresses"
+
+# =============================================================================
 # Templates (rule templates with ${variable} placeholders)
 # =============================================================================
 # Templates define parameterized rules. Instances bind concrete values to create
@@ -473,6 +497,20 @@ templates:
 #   3. inline       — define rules directly below
 #
 rules:
+  # -------------------------------------------------------------------------
+  # Dynamic Blocklist rule (enabled by default for security)
+  # Blocks signing to sanctioned/malicious addresses synced at runtime.
+  # Requires dynamic_blocklist section above to be enabled.
+  # -------------------------------------------------------------------------
+  - name: "Dynamic Address Blocklist"
+    type: "evm_dynamic_blocklist"
+    mode: "blocklist"
+    chain_type: "evm"
+    enabled: true
+    config:
+      check_recipient: true
+      check_verifying_contract: true
+
   # -------------------------------------------------------------------------
   # Option A: Instance from template (template + variables → concrete rules)
   # -------------------------------------------------------------------------

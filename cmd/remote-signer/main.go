@@ -19,6 +19,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/api"
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/audit"
+	"github.com/ivanzzeth/remote-signer/internal/blocklist"
 	"github.com/ivanzzeth/remote-signer/internal/chain"
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/config"
@@ -391,6 +392,43 @@ func run() error {
 	if solidityEval != nil {
 		ruleEngine.RegisterEvaluator(solidityEval)
 		log.Info("Solidity expression evaluator registered")
+	}
+
+	// Initialize dynamic blocklist (runtime-synced from OFAC, scam DBs, etc.)
+	if cfg.DynamicBlocklist != nil && cfg.DynamicBlocklist.Enabled {
+		blCfg := blocklist.Config{
+			Enabled:      cfg.DynamicBlocklist.Enabled,
+			SyncInterval: cfg.DynamicBlocklist.SyncInterval,
+			FailMode:     cfg.DynamicBlocklist.FailMode,
+			CacheFile:    cfg.DynamicBlocklist.CacheFile,
+		}
+		for _, src := range cfg.DynamicBlocklist.Sources {
+			blCfg.Sources = append(blCfg.Sources, blocklist.SourceConfig{
+				Name: src.Name, Type: src.Type, URL: src.URL, JSONPath: src.JSONPath,
+			})
+		}
+		dynBlocklist, err := blocklist.NewDynamicBlocklist(blCfg, log)
+		if err != nil {
+			return fmt.Errorf("failed to create dynamic blocklist: %w", err)
+		}
+		syncInterval := 1 * time.Hour
+		if blCfg.SyncInterval != "" {
+			parsed, err := time.ParseDuration(blCfg.SyncInterval)
+			if err != nil {
+				return fmt.Errorf("invalid dynamic_blocklist.sync_interval: %w", err)
+			}
+			syncInterval = parsed
+		}
+		if err := dynBlocklist.Start(context.Background(), syncInterval); err != nil {
+			return fmt.Errorf("failed to start dynamic blocklist: %w", err)
+		}
+		defer dynBlocklist.Stop()
+		blEval, err := blocklist.NewEvaluator(dynBlocklist)
+		if err != nil {
+			return fmt.Errorf("failed to create dynamic blocklist evaluator: %w", err)
+		}
+		ruleEngine.RegisterEvaluator(blEval)
+		log.Info("Dynamic blocklist registered", "sources", len(blCfg.Sources), "sync_interval", syncInterval, "fail_mode", blCfg.FailMode)
 	}
 
 	// Initialize notification service

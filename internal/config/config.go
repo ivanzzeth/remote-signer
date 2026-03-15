@@ -19,18 +19,36 @@ import (
 
 // Config is the root configuration structure
 type Config struct {
-	Server        ServerConfig        `yaml:"server"`
-	Database      storage.Config      `yaml:"database"`
-	Chains        ChainsConfig        `yaml:"chains"`
-	Notify        notify.Config       `yaml:"notify"`
-	NotifyChannel notify.Channel      `yaml:"notify_channels"`
-	AuditMonitor  audit.MonitorConfig `yaml:"audit_monitor"`
-	Security      SecurityConfig      `yaml:"security"`
-	Logger        LoggerConfig        `yaml:"logger"`
-	APIKeys       []APIKeyConfig      `yaml:"api_keys"`
-	Templates     []TemplateConfig    `yaml:"templates"`
-	Rules         []RuleConfig        `yaml:"rules"`
-	Presets       *PresetsConfig      `yaml:"presets,omitempty"`
+	Server           ServerConfig               `yaml:"server"`
+	Database         storage.Config             `yaml:"database"`
+	Chains           ChainsConfig               `yaml:"chains"`
+	Notify           notify.Config              `yaml:"notify"`
+	NotifyChannel    notify.Channel             `yaml:"notify_channels"`
+	AuditMonitor     audit.MonitorConfig        `yaml:"audit_monitor"`
+	Security         SecurityConfig             `yaml:"security"`
+	Logger           LoggerConfig               `yaml:"logger"`
+	APIKeys          []APIKeyConfig             `yaml:"api_keys"`
+	Templates        []TemplateConfig           `yaml:"templates"`
+	Rules            []RuleConfig               `yaml:"rules"`
+	Presets          *PresetsConfig             `yaml:"presets,omitempty"`
+	DynamicBlocklist *DynamicBlocklistConfig    `yaml:"dynamic_blocklist,omitempty"`
+}
+
+// DynamicBlocklistConfig configures the runtime address blocklist synced from external URLs.
+type DynamicBlocklistConfig struct {
+	Enabled      bool                       `yaml:"enabled"`
+	SyncInterval string                     `yaml:"sync_interval"` // e.g. "1h", "30m"
+	FailMode     string                     `yaml:"fail_mode"`     // "open" (default) or "close"
+	CacheFile    string                     `yaml:"cache_file"`    // local file for persisting fetched addresses
+	Sources      []DynamicBlocklistSource   `yaml:"sources"`
+}
+
+// DynamicBlocklistSource defines an address list source.
+type DynamicBlocklistSource struct {
+	Name     string `yaml:"name"`
+	Type     string `yaml:"type"`      // "url_text" or "url_json"
+	URL      string `yaml:"url"`
+	JSONPath string `yaml:"json_path"` // for url_json: dot-path to address array
 }
 
 // PresetsConfig configures the server preset API. When Dir is set, preset list/vars/apply endpoints are registered (admin-only).
