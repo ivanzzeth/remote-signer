@@ -13,6 +13,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/audit"
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
+	"github.com/ivanzzeth/remote-signer/internal/config"
 	"github.com/ivanzzeth/remote-signer/internal/core/auth"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/metrics"
@@ -27,9 +28,10 @@ type TemplateConfig struct {
 
 // RouterConfig contains configuration for the router
 type RouterConfig struct {
-	Version            string
-	IPWhitelistConfig  *middleware.IPWhitelist
-	IPRateLimit        int // requests per minute per IP (pre-auth); 0 = use default (200)
+	Version                  string
+	IPWhitelistConfig        *middleware.IPWhitelist
+	IPWhitelistConfigForRead *config.IPWhitelistConfig // optional: for GET /api/v1/acls/ip-whitelist (admin, read-only)
+	IPRateLimit              int // requests per minute per IP (pre-auth); 0 = use default (200)
 	SolidityValidator  *evm.SolidityRuleValidator
 	JSEvaluator        *evm.JSRuleEvaluator
 	Template           *TemplateConfig
@@ -228,6 +230,12 @@ func (r *Router) setupRoutes() error {
 		}
 		r.mux.Handle("/api/v1/api-keys", r.withAuthAndAdmin(apiKeyHandler))
 		r.mux.Handle("/api/v1/api-keys/", r.withAuthAndAdmin(http.HandlerFunc(apiKeyHandler.ServeKeyHTTP)))
+	}
+
+	// ACLs read-only routes (admin only): IP whitelist config
+	if r.config.IPWhitelistConfigForRead != nil {
+		aclHandler := handler.NewACLHandler(r.config.IPWhitelistConfigForRead)
+		r.mux.Handle("/api/v1/acls/ip-whitelist", r.withAuthAndAdmin(aclHandler))
 	}
 
 	// Template routes (with auth + admin required)

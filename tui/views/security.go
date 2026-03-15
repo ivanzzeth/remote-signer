@@ -52,6 +52,13 @@ type apiKeyLister interface {
 	List(ctx context.Context, filter *apikeys.ListFilter) (*apikeys.ListResponse, error)
 }
 
+// Security sub-tab: 0=Overview, 1=Events
+const (
+	SecuritySubTabOverview = 0
+	SecuritySubTabEvents   = 1
+	SecuritySubTabCount    = 2
+)
+
 // SecurityModel represents the security overview view.
 type SecurityModel struct {
 	health    healthChecker
@@ -68,8 +75,24 @@ type SecurityModel struct {
 	data      *SecurityData
 	expanded  sectionIndex // currently expanded section (-1 = none)
 	cursor    sectionIndex // keyboard cursor
+	subTab    int          // 0=Overview, 1=Events
 	viewport  viewport.Model
 	vpReady   bool
+}
+
+// GetSubTab returns the current Security sub-tab (0=Overview, 1=Events).
+func (m *SecurityModel) GetSubTab() int {
+	if m.subTab < 0 || m.subTab >= SecuritySubTabCount {
+		return SecuritySubTabOverview
+	}
+	return m.subTab
+}
+
+// SetSubTab sets the Security sub-tab (0=Overview, 1=Events).
+func (m *SecurityModel) SetSubTab(sub int) {
+	if sub >= 0 && sub < SecuritySubTabCount {
+		m.subTab = sub
+	}
 }
 
 // auditLister is the interface for listing audit records.
@@ -285,58 +308,68 @@ func (m *SecurityModel) View() string {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, errBox)
 	}
 
-	// Render full content and show it in a viewport so the nav bar is never pushed off screen.
-	fullContent := m.renderSecurity()
+	// Render content based on sub-tab (Overview vs Events) and show in viewport.
+	var fullContent string
+	var footer string
+	switch m.GetSubTab() {
+	case SecuritySubTabEvents:
+		fullContent = m.renderEvents()
+		footer = styles.MutedColor.Render(fmt.Sprintf(
+			"Last refreshed: %s | r: refresh | ←/→: Overview/Events | pgup/pgdown: scroll",
+			m.data.LastRefresh.Format("15:04:05"),
+		))
+	default:
+		fullContent = m.renderOverview()
+		footer = styles.MutedColor.Render(fmt.Sprintf(
+			"Last refreshed: %s | r: refresh | ←/→: Overview/Events | ↑/↓: sections | Enter: expand | pgup/pgdown: scroll",
+			m.data.LastRefresh.Format("15:04:05"),
+		))
+	}
 	m.viewport.SetContent(fullContent)
 
 	var b strings.Builder
 	b.WriteString(m.viewport.View())
 	b.WriteString("\n")
-	footer := styles.MutedColor.Render(fmt.Sprintf(
-		"Last refreshed: %s | r: refresh | ↑/↓: sections | Enter: expand | pgup/pgdown: scroll",
-		m.data.LastRefresh.Format("15:04:05"),
-	))
 	b.WriteString(footer)
 	return b.String()
 }
 
-func (m *SecurityModel) renderSecurity() string {
+// renderOverview renders the Overview sub-tab (sections only, no events table).
+func (m *SecurityModel) renderOverview() string {
 	var sections []string
 
-	// Title
 	sections = append(sections, styles.SubtitleStyle.Render("Security Overview"))
 	sections = append(sections, "")
 
-	// Row 1: Network & Transport | Authentication
 	networkBox := m.renderNetworkSection()
 	authBox := m.renderAuthSection()
 	sections = append(sections, lipgloss.JoinHorizontal(lipgloss.Top, networkBox, "  ", authBox))
 	sections = append(sections, "")
 
-	// Row 2: Rule Engine | Key Management
 	ruleBox := m.renderRuleEngineSection()
 	keyBox := m.renderKeyMgmtSection()
 	sections = append(sections, lipgloss.JoinHorizontal(lipgloss.Top, ruleBox, "  ", keyBox))
 	sections = append(sections, "")
 
-	// Row 3: Approval & Alerts | Audit & Monitoring
 	approvalBox := m.renderApprovalSection()
 	auditBox := m.renderAuditMonitorSection()
 	sections = append(sections, lipgloss.JoinHorizontal(lipgloss.Top, approvalBox, "  ", auditBox))
 
-	// Expanded section detail (if any)
 	if m.expanded >= 0 && m.expanded < sectionCount {
 		sections = append(sections, "")
 		sections = append(sections, m.renderExpandedDetail())
 	}
 
-	// Recent security alerts
-	if len(m.data.RecentAlerts) > 0 {
-		sections = append(sections, "")
-		sections = append(sections, m.renderRecentAlerts())
-	}
-
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
+}
+
+// renderEvents renders the Events sub-tab (only the recent security events table).
+func (m *SecurityModel) renderEvents() string {
+	if len(m.data.RecentAlerts) == 0 {
+		return styles.SubtitleStyle.Render("Recent Security Events") + "\n\n" +
+			styles.MutedColor.Render("No security events in the current window. Use the Audit tab for full history.")
+	}
+	return m.renderRecentAlerts()
 }
 
 // accentStyle is used for cursor highlights and section labels.
