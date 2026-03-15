@@ -14,19 +14,20 @@ variables:
     required: true
   - name: allowed_transfer_from
     type: address_list
+    # SECURITY: When empty, any 'from' address is allowed in transferFrom/safeTransferFrom. This is
+    # acceptable for the signer's own NFTs but means the rule won't restrict which addresses can be
+    # pulled from. Configure explicitly in production if the signer manages multiple source addresses.
     description: "Comma-separated addresses allowed as 'from' in transferFrom/safeTransferFrom. Empty = any."
     required: false
     default: ""
   - name: allowed_approve_to
     type: address_list
-    description: "Comma-separated addresses allowed as approve(to). Empty = any."
-    required: false
-    default: ""
+    description: "Comma-separated addresses allowed as approve(to). REQUIRED: must explicitly list allowed approval target addresses."
+    required: true
   - name: allowed_operators
     type: address_list
-    description: "Comma-separated addresses allowed as setApprovalForAll(operator). Empty = any."
-    required: false
-    default: ""
+    description: "Comma-separated addresses allowed as setApprovalForAll(operator). REQUIRED: must explicitly list allowed operator addresses."
+    required: true
 
 test_variables:
   chain_id: "1"

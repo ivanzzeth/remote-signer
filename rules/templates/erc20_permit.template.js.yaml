@@ -2,9 +2,6 @@
 # Validates EIP-712 typed data with primaryType "Permit" for gasless token approvals.
 # Covers: domain verification, owner/spender allowlists, value caps.
 
-#
-# SECURITY: Address list variables with "Empty = any" provide NO restriction when left empty.
-# Always configure allowed_* lists for production deployments.
 variables:
   - name: token_address
     type: address
@@ -12,9 +9,8 @@ variables:
     required: true
   - name: allowed_spenders
     type: address_list
-    description: "Comma-separated addresses allowed as permit spender. Empty = any."
-    required: false
-    default: ""
+    description: "Comma-separated addresses allowed as permit spender. REQUIRED: must explicitly list allowed spender addresses."
+    required: true
   - name: max_permit_value
     type: string
     description: "Max permit value in token smallest unit. -1 = no cap, 0 = block all."

@@ -532,6 +532,8 @@ rules:
         chain_id: "1"
         token_address: "0xBC4ca0EdA7647A8aB7C2061c2E118A18a936f13D"
         allowed_recipients: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+        allowed_approve_to: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+        allowed_operators: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
       test_cases_overrides:
         "ERC721 transfer/approve with allowlists":
           - name: "transferFrom: pass when from/to allowed"

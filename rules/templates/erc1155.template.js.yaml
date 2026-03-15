@@ -14,14 +14,16 @@ variables:
     required: true
   - name: allowed_transfer_from
     type: address_list
+    # SECURITY: When empty, any 'from' address is allowed in safeTransferFrom/safeBatchTransferFrom.
+    # This is acceptable for the signer's own tokens but means the rule won't restrict which addresses
+    # can be pulled from. Configure explicitly in production if the signer manages multiple source addresses.
     description: "Comma-separated addresses allowed as 'from' in safeTransferFrom/safeBatchTransferFrom. Empty = any."
     required: false
     default: ""
   - name: allowed_operators
     type: address_list
-    description: "Comma-separated addresses allowed as setApprovalForAll(operator). Empty = any."
-    required: false
-    default: ""
+    description: "Comma-separated addresses allowed as setApprovalForAll(operator). REQUIRED: must explicitly list allowed operator addresses."
+    required: true
 
 test_variables:
   chain_id: "1"

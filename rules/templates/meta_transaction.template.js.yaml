@@ -78,11 +78,15 @@ rules:
                 sign_type: 'transaction',
                 chain_id: parseInt(config.chain_id, 10) || 0,
                 signer: input.signer,
-                transaction: { from: input.signer, to: targetChecksum, value: '0', data: innerData }
+                transaction: { from: input.signer, to: targetChecksum, value: String(msg.value || '0'), data: innerData }
               };
               return { valid: true, payload: payload, delegate_to: delegateTo };
             }
           }
+          // NOTE: When no delegate_to matches for inner calldata, the call passes with only the
+          // target allowlist check. Inner calldata is NOT validated in this path. Operators should
+          // configure delegate_to / delegate_to_by_target for any fund-moving target contracts to
+          // ensure inner calldata is validated by the appropriate template (e.g. ERC20, ERC721).
           return ok();
         }
     test_cases:

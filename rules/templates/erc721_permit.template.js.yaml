@@ -3,9 +3,6 @@
 # EIP-4494 allows NFT owners to sign a permit granting a spender approval for a specific tokenId.
 # Covers: domain verification, spender allowlist, nonce/deadline validation.
 
-#
-# SECURITY: Address list variables with "Empty = any" provide NO restriction when left empty.
-# Always configure allowed_* lists for production deployments.
 variables:
   - name: token_address
     type: address
@@ -13,14 +10,19 @@ variables:
     required: true
   - name: allowed_spenders
     type: address_list
-    description: "Comma-separated addresses allowed as permit spender. Empty = any."
+    description: "Comma-separated addresses allowed as permit spender. REQUIRED: must explicitly list allowed spender addresses."
+    required: true
+  - name: max_deadline
+    type: string
+    description: "Max deadline timestamp. -1 = no limit."
     required: false
-    default: ""
+    default: "-1"
 
 test_variables:
   chain_id: "1"
   token_address: "0xBC4ca0EdA7647A8aB7C2061c2E118A18a936f13D"
   allowed_spenders: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+  max_deadline: "-1"
 
 rules:
   - id: "erc721-permit"
@@ -45,6 +47,9 @@ rules:
           require(msg.spender && isAddress(msg.spender), 'invalid spender');
           require(msg.tokenId !== undefined && msg.tokenId !== null, 'missing tokenId');
           rs.addr.requireInListIfNonEmpty(msg.spender, config.allowed_spenders, 'spender not allowed');
+          if (msg.deadline !== undefined && msg.deadline !== null) {
+            rs.bigint.requireLte(msg.deadline, config.max_deadline, 'permit deadline too far');
+          }
           return ok();
         }
     test_cases:

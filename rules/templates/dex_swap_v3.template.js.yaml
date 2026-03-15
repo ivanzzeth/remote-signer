@@ -138,6 +138,7 @@ rules:
             methodId: "0x414bf389"
         expect_pass: false
         expect_reason: "wrong router"
+      # TODO(TC-2): Add negative test case for recipient != signer (requires re-encoding ABI calldata with a different recipient address in the tuple)
       - name: "reject: disallowed method (name())"
         input:
           sign_type: "transaction"
