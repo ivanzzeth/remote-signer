@@ -475,9 +475,6 @@ func expandInstanceRule(rule RuleConfig, templates map[string]TemplateConfig) ([
 		}
 		if rule.ChainID != "" {
 			templateRules[idx].ChainID = rule.ChainID
-			// Inject chain_id into test_cases inputs so the rule engine's scope
-			// filter matches during validation (test_cases default to chain_id=1).
-			injectChainIDIntoTestCases(templateRules[idx].TestCases, rule.ChainID)
 		}
 		if rule.APIKeyID != "" {
 			templateRules[idx].APIKeyID = rule.APIKeyID

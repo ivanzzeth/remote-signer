@@ -687,6 +687,16 @@ func validateRules(ctx context.Context, rules []RuleConfig, validator *evm.Solid
 				}
 				rule.Variables = varsJSON
 			}
+			// When using template test_variables, override rule scope (ChainID)
+			// so the rule matches the test case's chain_id (test_cases use
+			// test_variables values, not the instance's actual chain_id).
+			// This mirrors the same logic in cmd/remote-signer/main.go startup validation.
+			if len(ruleCfg.TestVariables) > 0 {
+				if v, ok := ruleCfg.TestVariables["chain_id"]; ok && v != "" {
+					chainIDVal := v
+					rule.ChainID = &chainIDVal
+				}
+			}
 			// Template files: isolated engine (blocklist + rule under test only) so other rules don't interfere.
 			// Config instances: full engine (all rules) to validate combined behavior in production context.
 			// When using the full engine, if another whitelist rule allows a request that this rule's
