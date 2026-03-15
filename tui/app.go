@@ -32,6 +32,7 @@ const (
 	ViewHDWalletDetail
 	ViewSecurity
 	ViewAPIKeys
+	ViewIPWhitelist
 	ViewTemplates
 	ViewPresets
 	ViewPresetDetail
@@ -137,11 +138,11 @@ var keys = keyMap{
 	),
 	Left: key.NewBinding(
 		key.WithKeys("left", "h"),
-		key.WithHelp("←/h", "prev sub-tab (Rules)"),
+		key.WithHelp("←/h", "prev sub-tab"),
 	),
 	Right: key.NewBinding(
 		key.WithKeys("right", "l"),
-		key.WithHelp("→/l", "next sub-tab (Rules)"),
+		key.WithHelp("→/l", "next sub-tab"),
 	),
 	PageUp: key.NewBinding(
 		key.WithKeys("pgup", "ctrl+u"),
@@ -205,7 +206,7 @@ var keys = keyMap{
 	),
 	Number9: key.NewBinding(
 		key.WithKeys("9"),
-		key.WithHelp("9", "api keys"),
+		key.WithHelp("9", "ACLs"),
 	),
 }
 
@@ -217,6 +218,7 @@ type Model struct {
 	height       int
 	activeTab    int
 	rulesSubTab  int // 0=Rules, 1=Templates, 2=Presets; only when activeTab==2 (Rules)
+	aclSubTab    int // 0=API Keys, 1=IP Whitelist; only when activeTab==8 (ACLs)
 	currentView  ViewType
 	previousView ViewType
 	help         help.Model
@@ -236,9 +238,10 @@ type Model struct {
 	metrics        *views.MetricsModel
 	hdwallets      *views.HDWalletsModel
 	hdwalletDetail *views.HDWalletDetailModel
-	security       *views.SecurityModel
-	apikeysView    *views.APIKeysModel
-	templates      *views.TemplatesModel
+	security         *views.SecurityModel
+	apikeysView      *views.APIKeysModel
+	ipWhitelistView  *views.IPWhitelistModel
+	templates        *views.TemplatesModel
 	presets        *views.PresetsModel
 	presetDetail   *views.PresetDetailModel
 }
@@ -318,6 +321,11 @@ func NewModel(c *client.Client) (*Model, error) {
 		return nil, fmt.Errorf("failed to create api keys view: %w", err)
 	}
 
+	ipWhitelistView, err := views.NewIPWhitelistModel(c, ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create IP whitelist view: %w", err)
+	}
+
 	templates, err := views.NewTemplatesModel(c, ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create templates view: %w", err)
@@ -334,17 +342,18 @@ func NewModel(c *client.Client) (*Model, error) {
 	}
 
 	return &Model{
-		client:        c,
-		ctx:           ctx,
-		activeTab:     0,
-		currentView:   ViewDashboard,
-		help:          h,
-		dashboard:     dashboard,
-		requests:      requests,
-		requestDetail: requestDetail,
-		rules:         rules,
-		ruleDetail:    ruleDetail,
-		audit:         audit,
+		client:         c,
+		ctx:            ctx,
+		activeTab:      0,
+		aclSubTab:      0,
+		currentView:    ViewDashboard,
+		help:           h,
+		dashboard:      dashboard,
+		requests:       requests,
+		requestDetail:  requestDetail,
+		rules:          rules,
+		ruleDetail:     ruleDetail,
+		audit:          audit,
 		signers:        signers,
 		signerDetail:   signerDetail,
 		metrics:        metrics,
@@ -352,6 +361,7 @@ func NewModel(c *client.Client) (*Model, error) {
 		hdwalletDetail: hdwalletDetail,
 		security:       security,
 		apikeysView:    apikeysView,
+		ipWhitelistView: ipWhitelistView,
 		templates:      templates,
 		presets:        presets,
 		presetDetail:   presetDetail,
@@ -399,6 +409,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.hdwalletDetail.SetSize(msg.Width, msg.Height-6)
 		m.security.SetSize(msg.Width, msg.Height-6)
 		m.apikeysView.SetSize(msg.Width, msg.Height-6)
+		m.ipWhitelistView.SetSize(msg.Width, msg.Height-6)
 		m.templates.SetSize(msg.Width, msg.Height-6)
 		m.presets.SetSize(msg.Width, msg.Height-6)
 		m.presetDetail.SetSize(msg.Width, msg.Height-6)
@@ -470,8 +481,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			case key.Matches(msg, keys.Number9):
 				m.activeTab = 8
-				m.currentView = ViewAPIKeys
-				return m, m.apikeysView.Refresh()
+				m.currentView = m.aclSubTabToView(m.aclSubTab)
+				return m, m.refreshCurrentView()
 
 			case key.Matches(msg, keys.Tab):
 				// Only switch top-level tabs (9 tabs)
@@ -480,6 +491,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.currentView = m.tabToView(m.activeTab)
 					if m.activeTab == 2 {
 						m.rulesSubTab = 0
+					}
+					if m.activeTab == 8 {
+						m.aclSubTab = 0
 					}
 					return m, m.refreshCurrentView()
 				}
@@ -491,6 +505,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if m.activeTab == 2 {
 						m.rulesSubTab = 0
 					}
+					if m.activeTab == 8 {
+						m.aclSubTab = 0
+					}
 					return m, m.refreshCurrentView()
 				}
 
@@ -500,11 +517,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.currentView = m.rulesSubTabToView(m.rulesSubTab)
 					return m, m.refreshCurrentView()
 				}
+				if m.currentView == ViewSecurity {
+					m.security.SetSubTab((m.security.GetSubTab() + 1) % 2) // Overview <-> Events
+					return m, nil
+				}
+				if m.currentView == ViewAPIKeys || m.currentView == ViewIPWhitelist {
+					m.aclSubTab = (m.aclSubTab + 1) % 2 // 0->1, 1->0
+					m.currentView = m.aclSubTabToView(m.aclSubTab)
+					return m, m.refreshCurrentView()
+				}
 
 			case key.Matches(msg, keys.Right):
 				if m.currentView == ViewRules || m.currentView == ViewTemplates || m.currentView == ViewPresets {
 					m.rulesSubTab = (m.rulesSubTab + 1) % 3 // next: 0->1, 1->2, 2->0
 					m.currentView = m.rulesSubTabToView(m.rulesSubTab)
+					return m, m.refreshCurrentView()
+				}
+				if m.currentView == ViewSecurity {
+					m.security.SetSubTab((m.security.GetSubTab() + 1) % 2) // Overview <-> Events
+					return m, nil
+				}
+				if m.currentView == ViewAPIKeys || m.currentView == ViewIPWhitelist {
+					m.aclSubTab = (m.aclSubTab + 1) % 2
+					m.currentView = m.aclSubTabToView(m.aclSubTab)
 					return m, m.refreshCurrentView()
 				}
 
@@ -646,6 +681,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.apikeysView = newAPIKeys.(*views.APIKeysModel)
 		cmds = append(cmds, cmd)
 
+	case ViewIPWhitelist:
+		newIPW, cmd := m.ipWhitelistView.Update(msg)
+		m.ipWhitelistView = newIPW.(*views.IPWhitelistModel)
+		cmds = append(cmds, cmd)
+
 	case ViewTemplates:
 		newTemplates, cmd := m.templates.Update(msg)
 		m.templates = newTemplates.(*views.TemplatesModel)
@@ -715,7 +755,7 @@ func (m Model) View() string {
 }
 
 func (m Model) renderHeader() string {
-	tabs := []string{"Dashboard", "Requests", "Rules", "Audit", "Signers", "Metrics", "HD Wallets", "Security", "API Keys"}
+	tabs := []string{"Dashboard", "Requests", "Rules", "Audit", "Signers", "Metrics", "HD Wallets", "Security", "ACLs"}
 	var renderedTabs []string
 
 	for i, tab := range tabs {
@@ -737,6 +777,37 @@ func (m Model) renderHeader() string {
 		var subRendered []string
 		for i, name := range subNames {
 			if i == m.rulesSubTab {
+				subRendered = append(subRendered, styles.ActiveTabStyle.Render(name))
+			} else {
+				subRendered = append(subRendered, styles.TabStyle.Render(name))
+			}
+		}
+		subLine := lipgloss.JoinHorizontal(lipgloss.Left, subRendered...)
+		out = lipgloss.JoinVertical(lipgloss.Left, out, subLine)
+	}
+
+	// Security sub-tabs when Security is the active top-level tab
+	if m.activeTab == 7 {
+		subNames := []string{"Overview", "Events"}
+		subTab := m.security.GetSubTab()
+		var subRendered []string
+		for i, name := range subNames {
+			if i == subTab {
+				subRendered = append(subRendered, styles.ActiveTabStyle.Render(name))
+			} else {
+				subRendered = append(subRendered, styles.TabStyle.Render(name))
+			}
+		}
+		subLine := lipgloss.JoinHorizontal(lipgloss.Left, subRendered...)
+		out = lipgloss.JoinVertical(lipgloss.Left, out, subLine)
+	}
+
+	// ACLs sub-tabs when ACLs is the active top-level tab
+	if m.activeTab == 8 {
+		subNames := []string{"API Keys", "IP Whitelist"}
+		var subRendered []string
+		for i, name := range subNames {
+			if i == m.aclSubTab {
 				subRendered = append(subRendered, styles.ActiveTabStyle.Render(name))
 			} else {
 				subRendered = append(subRendered, styles.TabStyle.Render(name))
@@ -777,6 +848,8 @@ func (m Model) renderContent(_ int) string {
 		return m.security.View()
 	case ViewAPIKeys:
 		return m.apikeysView.View()
+	case ViewIPWhitelist:
+		return m.ipWhitelistView.View()
 	case ViewTemplates:
 		return m.templates.View()
 	case ViewPresets:
@@ -808,6 +881,8 @@ func (m Model) refreshCurrentView() tea.Cmd {
 		return m.security.Refresh()
 	case ViewAPIKeys:
 		return m.apikeysView.Refresh()
+	case ViewIPWhitelist:
+		return m.ipWhitelistView.Refresh()
 	case ViewTemplates:
 		return m.templates.Refresh()
 	case ViewPresets:
@@ -839,6 +914,8 @@ func (m Model) isCurrentViewCapturingInput() bool {
 		return m.security.IsCapturingInput()
 	case ViewAPIKeys:
 		return m.apikeysView.IsCapturingInput()
+	case ViewIPWhitelist:
+		return m.ipWhitelistView.IsCapturingInput()
 	case ViewTemplates:
 		return m.templates.IsCapturingInput()
 	case ViewPresets:
@@ -870,9 +947,19 @@ func (m Model) tabToView(tab int) ViewType {
 	case 7:
 		return ViewSecurity
 	case 8:
-		return ViewAPIKeys
+		return m.aclSubTabToView(m.aclSubTab)
 	default:
 		return ViewDashboard
+	}
+}
+
+// aclSubTabToView returns the ViewType for the given ACLs sub-tab (0=API Keys, 1=IP Whitelist).
+func (m Model) aclSubTabToView(sub int) ViewType {
+	switch sub {
+	case 1:
+		return ViewIPWhitelist
+	default:
+		return ViewAPIKeys
 	}
 }
 
@@ -881,7 +968,7 @@ func (m Model) tabToView(tab int) ViewType {
 func (m Model) isTopLevelView() bool {
 	switch m.currentView {
 	case ViewDashboard, ViewRequests, ViewRules, ViewAudit, ViewSigners, ViewMetrics,
-		ViewHDWallets, ViewSecurity, ViewAPIKeys, ViewTemplates, ViewPresets:
+		ViewHDWallets, ViewSecurity, ViewAPIKeys, ViewIPWhitelist, ViewTemplates, ViewPresets:
 		return true
 	default:
 		return false

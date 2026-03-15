@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ivanzzeth/remote-signer/pkg/client/acls"
 	"github.com/ivanzzeth/remote-signer/pkg/client/apikeys"
 	"github.com/ivanzzeth/remote-signer/pkg/client/audit"
 	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
@@ -39,6 +40,9 @@ type Client struct {
 
 	// APIKeys provides API key management operations.
 	APIKeys *apikeys.Service
+
+	// ACLs provides read-only ACL operations (admin only), e.g. IP whitelist config.
+	ACLs *acls.Service
 
 	// Presets provides preset list/vars/apply (admin only; requires server presets.dir).
 	Presets *presets.Service
@@ -136,6 +140,7 @@ func NewClient(cfg Config) (*Client, error) {
 		Audit:     audit.NewService(t),
 		Templates: templates.NewService(t),
 		APIKeys:   apikeys.NewService(t),
+		ACLs:      acls.NewService(t),
 		Presets:   presets.NewService(t),
 		transport: t,
 	}, nil

@@ -603,9 +603,10 @@ func run() error {
 
 	// Initialize router
 	routerConfig := api.RouterConfig{
-		Version:           version,
-		IPWhitelistConfig: ipWhitelist,
-		IPRateLimit:       cfg.Security.IPRateLimit,
+		Version:                  version,
+		IPWhitelistConfig:        ipWhitelist,
+		IPWhitelistConfigForRead: &cfg.Security.IPWhitelist,
+		IPRateLimit:              cfg.Security.IPRateLimit,
 		SolidityValidator: solidityValidator,
 		JSEvaluator:       jsEval,
 		Template:          &api.TemplateConfig{
