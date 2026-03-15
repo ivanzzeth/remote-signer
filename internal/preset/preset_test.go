@@ -481,3 +481,136 @@ func TestListPresets_DirNotExistReturnsNil(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, entries)
 }
+
+// ---------------------------------------------------------------------------
+// chain_id override tests — --set chain_id=X must update PresetRule.ChainID
+// ---------------------------------------------------------------------------
+
+func TestParsePresetFile_ChainIDOverride_SingleRule(t *testing.T) {
+	yaml := `
+name: "ERC20 Test"
+template: "ERC20 Template"
+chain_type: evm
+chain_id: "1"
+mode: whitelist
+enabled: true
+variables:
+  token_address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+`
+	// Override chain_id via --set
+	rules, err := ParsePresetFile([]byte(yaml), map[string]string{"chain_id": "137"})
+	require.NoError(t, err)
+	require.Len(t, rules, 1)
+
+	// ChainID scope must be updated
+	assert.Equal(t, "137", rules[0].ChainID)
+	// Variable should also have the override (from the overrides merge)
+	assert.Equal(t, "137", rules[0].Variables["chain_id"])
+}
+
+func TestParsePresetFile_ChainIDOverride_Composite(t *testing.T) {
+	yaml := `
+name: "Predict"
+template_paths:
+  - "rules/templates/predict_auth.template.yaml"
+  - "rules/templates/predict_trading.template.yaml"
+template_names:
+  - "Predict Auth Template"
+  - "Predict Trading Template"
+chain_type: evm
+chain_id: "56"
+mode: whitelist
+enabled: true
+variables:
+  order_domain_name: "predict.fun CTF Exchange"
+`
+	rules, err := ParsePresetFile([]byte(yaml), map[string]string{"chain_id": "97"})
+	require.NoError(t, err)
+	require.Len(t, rules, 2)
+
+	// Both rules must have updated scope
+	for i, r := range rules {
+		assert.Equal(t, "97", r.ChainID, "rule %d ChainID", i)
+		assert.Equal(t, "97", r.Variables["chain_id"], "rule %d variable chain_id", i)
+	}
+}
+
+func TestParsePresetFile_ChainIDOverride_MultiRule(t *testing.T) {
+	yaml := `
+rules:
+  - name: "Rule A"
+    type: instance
+    mode: whitelist
+    chain_type: evm
+    chain_id: "1"
+    enabled: true
+    config:
+      template: "Template A"
+      variables:
+        token_address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+  - name: "Rule B"
+    type: instance
+    mode: whitelist
+    chain_type: evm
+    chain_id: "1"
+    enabled: true
+    config:
+      template: "Template B"
+      variables:
+        token_address: "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+`
+	rules, err := ParsePresetFile([]byte(yaml), map[string]string{"chain_id": "10"})
+	require.NoError(t, err)
+	require.Len(t, rules, 2)
+
+	for i, r := range rules {
+		assert.Equal(t, "10", r.ChainID, "rule %d ChainID", i)
+		assert.Equal(t, "10", r.Variables["chain_id"], "rule %d variable chain_id", i)
+	}
+}
+
+func TestParsePresetFile_NoChainIDOverride_PreservesOriginal(t *testing.T) {
+	yaml := `
+name: "ERC20 Test"
+template: "ERC20 Template"
+chain_type: evm
+chain_id: "1"
+mode: whitelist
+enabled: true
+variables:
+  token_address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+`
+	// No chain_id in overrides
+	rules, err := ParsePresetFile([]byte(yaml), map[string]string{"token_address": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"})
+	require.NoError(t, err)
+	require.Len(t, rules, 1)
+
+	// ChainID scope stays as original
+	assert.Equal(t, "1", rules[0].ChainID)
+}
+
+func TestApplyChainIDOverride(t *testing.T) {
+	t.Run("overrides_when_present", func(t *testing.T) {
+		r := PresetRule{ChainID: "1"}
+		applyChainIDOverride(&r, map[string]string{"chain_id": "137"})
+		assert.Equal(t, "137", r.ChainID)
+	})
+
+	t.Run("no_op_when_absent", func(t *testing.T) {
+		r := PresetRule{ChainID: "1"}
+		applyChainIDOverride(&r, map[string]string{"other": "val"})
+		assert.Equal(t, "1", r.ChainID)
+	})
+
+	t.Run("no_op_when_empty", func(t *testing.T) {
+		r := PresetRule{ChainID: "1"}
+		applyChainIDOverride(&r, map[string]string{"chain_id": ""})
+		assert.Equal(t, "1", r.ChainID)
+	})
+
+	t.Run("no_op_when_nil_overrides", func(t *testing.T) {
+		r := PresetRule{ChainID: "1"}
+		applyChainIDOverride(&r, nil)
+		assert.Equal(t, "1", r.ChainID)
+	})
+}

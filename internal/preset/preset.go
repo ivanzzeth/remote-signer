@@ -189,6 +189,7 @@ func ParsePresetFile(data []byte, overrides map[string]string) ([]PresetRule, er
 			if len(single.Schedule) > 0 {
 				r.Schedule = substituteMapVars(copyMapInterface(single.Schedule), variables)
 			}
+			applyChainIDOverride(&r, overrides)
 			rules = append(rules, r)
 		}
 		if len(rules) == 0 {
@@ -220,6 +221,7 @@ func ParsePresetFile(data []byte, overrides map[string]string) ([]PresetRule, er
 		if len(single.Schedule) > 0 {
 			r.Schedule = substituteMapVars(copyMapInterface(single.Schedule), variables)
 		}
+		applyChainIDOverride(&r, overrides)
 		return []PresetRule{r}, nil
 	}
 
@@ -270,9 +272,20 @@ func ParsePresetFile(data []byte, overrides map[string]string) ([]PresetRule, er
 		if s, ok := r.Config["schedule"].(map[string]interface{}); ok && len(s) > 0 {
 			pr.Schedule = substituteMapVars(copyMapInterface(s), vars)
 		}
+		applyChainIDOverride(&pr, overrides)
 		rules = append(rules, pr)
 	}
 	return rules, nil
+}
+
+// applyChainIDOverride syncs the chain_id override into PresetRule.ChainID (scope).
+// chain_id is a reserved variable: if the user passes --set chain_id=X, it must
+// update the rule-level scope so that injectReservedVariables in the service layer
+// uses the correct value.
+func applyChainIDOverride(r *PresetRule, overrides map[string]string) {
+	if v, ok := overrides["chain_id"]; ok && v != "" {
+		r.ChainID = v
+	}
 }
 
 func normalizeVariables(v map[string]interface{}) map[string]interface{} {
