@@ -20,6 +20,7 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 
 	"github.com/ivanzzeth/remote-signer/internal/api"
+	"github.com/ivanzzeth/remote-signer/internal/blocklist"
 	"github.com/ivanzzeth/remote-signer/internal/chain"
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/config"
@@ -55,6 +56,7 @@ type TestServer struct {
 	cancelFunc context.CancelFunc
 	baseURL    string
 	tlsCerts   *tlsCerts // set by StartWithTLS for mTLS health-check
+	ruleEngine *rule.WhitelistRuleEngine // exposed for dynamic evaluator registration in e2e tests
 }
 
 // NewTestServer creates a new test server instance
@@ -392,6 +394,9 @@ func (ts *TestServer) Start() error {
 	} else {
 		ruleEngine.RegisterEvaluator(solidityEvaluator)
 	}
+
+	// Store rule engine for dynamic evaluator registration in e2e tests.
+	ts.ruleEngine = ruleEngine
 
 	// Initialize template service
 	templateService, err := service.NewTemplateService(templateRepo, ruleRepo, budgetRepo, log)
@@ -761,4 +766,12 @@ func (ts *TestServer) createSignTypeRestrictionRule(repo storage.RuleRepository)
 	}
 
 	return repo.Create(ctx, rule)
+}
+
+// RegisterDynamicBlocklistEvaluator registers a dynamic blocklist evaluator with the rule engine.
+// Used by e2e tests to inject a mock blocklist at runtime.
+func (ts *TestServer) RegisterDynamicBlocklistEvaluator(eval *blocklist.Evaluator) {
+	if ts.ruleEngine != nil {
+		ts.ruleEngine.RegisterEvaluator(eval)
+	}
 }

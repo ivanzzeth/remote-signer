@@ -37,6 +37,8 @@ func ValidateRuleConfig(ruleType string, config map[string]interface{}) error {
 		return validateContractMethodConfig(config)
 	case types.RuleTypeEVMJS:
 		return validateJSRuleConfig(config)
+	case types.RuleTypeEVMDynamicBlocklist:
+		return validateDynamicBlocklistConfig(config)
 	case types.RuleTypeChainRestriction, types.RuleTypeMessagePattern:
 		return nil
 	default:
@@ -226,6 +228,16 @@ func validateJSRuleConfig(config map[string]interface{}) error {
 				return fmt.Errorf("config.sign_type_filter contains invalid sign type: %q (allowed: personal, typed_data, transaction, hash, raw_message, eip191)", token)
 			}
 		}
+	}
+	return nil
+}
+
+func validateDynamicBlocklistConfig(config map[string]interface{}) error {
+	// At minimum, one of check_recipient or check_verifying_contract must be true.
+	cr, _ := config["check_recipient"].(bool)
+	cv, _ := config["check_verifying_contract"].(bool)
+	if !cr && !cv {
+		return fmt.Errorf("config must have check_recipient and/or check_verifying_contract set to true")
 	}
 	return nil
 }
