@@ -50,6 +50,9 @@ const (
 	// HD wallet management events
 	AuditEventTypeHDWalletCreated AuditEventType = "hdwallet_created"
 	AuditEventTypeHDWalletDerived AuditEventType = "hdwallet_derived"
+
+	// Preset events
+	AuditEventTypePresetApplied AuditEventType = "preset_applied"
 )
 
 // AuditSeverity represents the severity level of an audit event

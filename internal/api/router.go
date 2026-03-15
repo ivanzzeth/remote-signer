@@ -278,6 +278,9 @@ func (r *Router) setupRoutes() error {
 		if err != nil {
 			return err
 		}
+		if r.config.AuditLogger != nil {
+			presetHandler.SetAuditLogger(r.config.AuditLogger)
+		}
 		r.mux.Handle("/api/v1/presets", r.withAuthAndAdmin(presetHandler))
 		r.mux.Handle("/api/v1/presets/", r.withAuthAndAdmin(http.HandlerFunc(presetHandler.ServeHTTP)))
 	}

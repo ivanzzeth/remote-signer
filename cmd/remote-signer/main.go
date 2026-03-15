@@ -625,6 +625,20 @@ func run() error {
 				fmt.Sprintf("[Remote Signer] AUDIT DB FAILURE\n\nEvent: %s\nError: %s\nTime: %s\n\nAudit records may be lost. Check database connectivity.",
 					eventType, logErr.Error(), time.Now().UTC().Format(time.RFC3339)))
 		})
+
+		// Wire high-risk admin operation alerting.
+		// Every privileged change (signer create/unlock, rule CRUD, config reload, etc.)
+		// triggers a real-time notification. If you didn't initiate it, investigate immediately.
+		auditLogger.SetOnHighRiskOperation(func(eventType types.AuditEventType, apiKeyID, source, detail string) {
+			alertType := auditEventToAlertType(eventType)
+			who := apiKeyID
+			if who == "" {
+				who = "system"
+			}
+			securityAlertService.Alert(alertType, source,
+				fmt.Sprintf("[Remote Signer] ADMIN OPERATION\n\nOperation: %s\nAPI Key: %s\nSource IP: %s\nDetail: %s\nTime: %s\n\nIf you did not initiate this, investigate immediately.",
+					eventType, who, source, detail, time.Now().UTC().Format(time.RFC3339)))
+		})
 	}
 
 	signService.SetAuditLogger(auditLogger)
@@ -1227,4 +1241,38 @@ func validateMessagePatternRulesAtStartup(ctx context.Context, ruleRepo storage.
 	}
 	log.Info("All message_pattern rules validated at startup", "count", len(rules))
 	return nil
+}
+
+// auditEventToAlertType maps audit event types to security alert types for admin operation alerts.
+func auditEventToAlertType(eventType types.AuditEventType) middleware.SecurityAlertType {
+	switch eventType {
+	case types.AuditEventTypeSignerCreated:
+		return middleware.AlertSignerCreated
+	case types.AuditEventTypeSignerUnlocked:
+		return middleware.AlertSignerUnlocked
+	case types.AuditEventTypeSignerLocked:
+		return middleware.AlertSignerLocked
+	case types.AuditEventTypeSignerAutoLocked:
+		return middleware.AlertSignerAutoLocked
+	case types.AuditEventTypeHDWalletCreated:
+		return middleware.AlertHDWalletCreated
+	case types.AuditEventTypeHDWalletDerived:
+		return middleware.AlertHDWalletDerived
+	case types.AuditEventTypeRuleCreated:
+		return middleware.AlertRuleCreated
+	case types.AuditEventTypeRuleUpdated:
+		return middleware.AlertRuleUpdated
+	case types.AuditEventTypeRuleDeleted:
+		return middleware.AlertRuleDeleted
+	case types.AuditEventTypeConfigReloaded:
+		return middleware.AlertConfigReloaded
+	case types.AuditEventTypeTemplateSynced:
+		return middleware.AlertTemplateSynced
+	case types.AuditEventTypeAPIKeySynced:
+		return middleware.AlertAPIKeySynced
+	case types.AuditEventTypePresetApplied:
+		return middleware.AlertPresetApplied
+	default:
+		return middleware.SecurityAlertType("admin_operation")
+	}
 }

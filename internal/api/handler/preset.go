@@ -12,6 +12,8 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
+	"github.com/ivanzzeth/remote-signer/internal/audit"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/preset"
@@ -25,6 +27,7 @@ type PresetHandler struct {
 	templateSvc  *service.TemplateService
 	readOnly     bool
 	logger       *slog.Logger
+	auditLogger  *audit.AuditLogger
 }
 
 // NewPresetHandler creates a preset handler. presetsDir must be absolute. db is required for apply (transaction).
@@ -48,6 +51,11 @@ func NewPresetHandler(
 		readOnly:    readOnly,
 		logger:      logger,
 	}, nil
+}
+
+// SetAuditLogger sets the audit logger for recording preset apply events.
+func (h *PresetHandler) SetAuditLogger(al *audit.AuditLogger) {
+	h.auditLogger = al
 }
 
 // ServeHTTP routes /api/v1/presets and /api/v1/presets/{id}/...
@@ -224,6 +232,17 @@ func (h *PresetHandler) apply(w http.ResponseWriter, r *http.Request, id string)
 		h.writeError(w, fmt.Sprintf("preset apply failed: %s", err.Error()), http.StatusBadRequest)
 		return
 	}
+	// Audit log: preset applied.
+	if h.auditLogger != nil {
+		apiKey := middleware.GetAPIKey(r.Context())
+		apiKeyID := ""
+		if apiKey != nil {
+			apiKeyID = apiKey.ID
+		}
+		clientIP, _ := r.Context().Value(middleware.ClientIPContextKey).(string)
+		h.auditLogger.LogPresetApplied(r.Context(), apiKeyID, clientIP, id, len(results))
+	}
+
 	h.writeJSON(w, map[string]interface{}{"results": results}, http.StatusCreated)
 }
 

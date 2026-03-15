@@ -17,13 +17,19 @@ import (
 // Implementations should send a high-priority alert.
 type AuditLogFailureFunc func(eventType types.AuditEventType, err error)
 
+// HighRiskOperationFunc is called when a high-risk admin operation is logged.
+// Implementations should send a real-time notification so operators are immediately
+// aware of privileged changes. If no operation was expected, this signals a breach.
+type HighRiskOperationFunc func(eventType types.AuditEventType, apiKeyID, source, detail string)
+
 // AuditLogger wraps AuditRepository with typed convenience methods
 // that enforce correct severity levels. Logging errors are non-fatal
 // (logged via slog but never propagate to callers).
 type AuditLogger struct {
-	repo          storage.AuditRepository
-	logger        *slog.Logger
-	onLogFailure  AuditLogFailureFunc // optional: alert on persistence failure
+	repo                storage.AuditRepository
+	logger              *slog.Logger
+	onLogFailure        AuditLogFailureFunc    // optional: alert on persistence failure
+	onHighRiskOperation HighRiskOperationFunc  // optional: alert on privileged admin operations
 }
 
 // NewAuditLogger creates a new AuditLogger.
@@ -42,6 +48,12 @@ func (a *AuditLogger) SetOnLogFailure(fn AuditLogFailureFunc) {
 	a.onLogFailure = fn
 }
 
+// SetOnHighRiskOperation sets a callback that fires on high-risk admin operations.
+// This enables real-time alerts for privileged changes (signer create/unlock, rule CRUD, etc.).
+func (a *AuditLogger) SetOnHighRiskOperation(fn HighRiskOperationFunc) {
+	a.onHighRiskOperation = fn
+}
+
 // SeverityForEvent returns the appropriate severity for each event type.
 func SeverityForEvent(eventType types.AuditEventType) types.AuditSeverity {
 	switch eventType {
@@ -51,7 +63,7 @@ func SeverityForEvent(eventType types.AuditEventType) types.AuditSeverity {
 		return types.AuditSeverityWarning
 	case types.AuditEventTypeSignerAutoLocked:
 		return types.AuditSeverityCritical
-	case types.AuditEventTypeSignerCreated, types.AuditEventTypeSignerUnlocked, types.AuditEventTypeHDWalletCreated:
+	case types.AuditEventTypeSignerCreated, types.AuditEventTypeSignerUnlocked, types.AuditEventTypeHDWalletCreated, types.AuditEventTypePresetApplied:
 		return types.AuditSeverityWarning
 	default:
 		return types.AuditSeverityInfo
@@ -304,6 +316,42 @@ func (a *AuditLogger) LogSignerAutoLocked(ctx context.Context, address string) {
 	})
 }
 
+// highRiskEvents defines which audit events trigger real-time admin alerts.
+var highRiskEvents = map[types.AuditEventType]bool{
+	// Signer management
+	types.AuditEventTypeSignerCreated:    true,
+	types.AuditEventTypeSignerUnlocked:   true,
+	types.AuditEventTypeSignerLocked:     true,
+	types.AuditEventTypeSignerAutoLocked: true,
+	types.AuditEventTypeHDWalletCreated:  true,
+	types.AuditEventTypeHDWalletDerived:  true,
+	// Rule management
+	types.AuditEventTypeRuleCreated:      true,
+	types.AuditEventTypeRuleUpdated:      true,
+	types.AuditEventTypeRuleDeleted:      true,
+	// Config sync (startup + SIGHUP reload) — only fires on actual changes
+	types.AuditEventTypeConfigReloaded:   true,
+	types.AuditEventTypeTemplateSynced:   true,
+	types.AuditEventTypeAPIKeySynced:     true,
+	// Preset apply
+	types.AuditEventTypePresetApplied:    true,
+}
+
+// IsHighRiskEvent returns true if the event type should trigger a real-time alert.
+func IsHighRiskEvent(eventType types.AuditEventType) bool {
+	return highRiskEvents[eventType]
+}
+
+// LogPresetApplied logs a preset apply event.
+func (a *AuditLogger) LogPresetApplied(ctx context.Context, apiKeyID, clientIP, presetID string, ruleCount int) {
+	a.log(ctx, &types.AuditRecord{
+		EventType:    types.AuditEventTypePresetApplied,
+		APIKeyID:     apiKeyID,
+		ActorAddress: clientIP,
+		ErrorMessage: fmt.Sprintf("preset applied: %s (%d rules created)", presetID, ruleCount),
+	})
+}
+
 // log persists an audit record with auto-generated ID, timestamp, and severity.
 func (a *AuditLogger) log(ctx context.Context, record *types.AuditRecord) {
 	record.ID = types.AuditID(uuid.New().String())
@@ -319,5 +367,10 @@ func (a *AuditLogger) log(ctx context.Context, record *types.AuditRecord) {
 		if a.onLogFailure != nil {
 			a.onLogFailure(record.EventType, err)
 		}
+	}
+
+	// Fire high-risk operation alert (non-blocking).
+	if a.onHighRiskOperation != nil && IsHighRiskEvent(record.EventType) {
+		a.onHighRiskOperation(record.EventType, record.APIKeyID, record.ActorAddress, record.ErrorMessage)
 	}
 }
