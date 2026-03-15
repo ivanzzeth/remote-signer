@@ -3,9 +3,6 @@
 # Covers: safeTransferFrom, safeBatchTransferFrom, setApprovalForAll.
 # All parameters validated: allowlists for addresses (empty = any).
 
-#
-# SECURITY: Address list variables with "Empty = any" provide NO restriction when left empty.
-# Always configure allowed_* lists for production deployments.
 variables:
   - name: token_address
     type: address
@@ -13,9 +10,8 @@ variables:
     required: true
   - name: allowed_recipients
     type: address_list
-    description: "Comma-separated addresses allowed as transfer 'to'. Empty = any."
-    required: false
-    default: ""
+    description: "Comma-separated addresses allowed as transfer 'to'. REQUIRED: must explicitly list allowed recipient addresses."
+    required: true
   - name: allowed_transfer_from
     type: address_list
     description: "Comma-separated addresses allowed as 'from' in safeTransferFrom/safeBatchTransferFrom. Empty = any."

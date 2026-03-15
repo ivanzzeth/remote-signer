@@ -25,9 +25,8 @@ variables:
     default: "24h"
   - name: allowed_recipients
     type: address_list
-    description: "Comma-separated addresses allowed as transfer(to) or transferFrom(..., to). Empty = any."
-    required: false
-    default: ""
+    description: "Comma-separated addresses allowed as transfer(to) or transferFrom(..., to). REQUIRED: must explicitly list allowed recipient addresses."
+    required: true
   - name: allowed_spenders
     type: address_list
     description: "Comma-separated addresses allowed as approve(spender). Empty = any."

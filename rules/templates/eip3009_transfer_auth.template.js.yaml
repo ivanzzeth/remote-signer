@@ -2,9 +2,6 @@
 # Validates EIP-712 typed data for gasless transfers (USDC, EURC, etc.).
 # Covers: domain verification, recipient allowlists, value caps.
 
-#
-# SECURITY: Address list variables with "Empty = any" provide NO restriction when left empty.
-# Always configure allowed_* lists for production deployments.
 variables:
   - name: token_address
     type: address
@@ -12,9 +9,8 @@ variables:
     required: true
   - name: allowed_recipients
     type: address_list
-    description: "Comma-separated addresses allowed as transfer recipient (to). Empty = any."
-    required: false
-    default: ""
+    description: "Comma-separated addresses allowed as transfer recipient (to). REQUIRED: must explicitly list allowed recipient addresses."
+    required: true
   - name: max_transfer_value
     type: string
     description: "Max transfer value in token smallest unit. -1 = no cap, 0 = block all."

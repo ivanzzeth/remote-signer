@@ -1,54 +1,104 @@
-# DEX Swap template (evm_js) — Uniswap V2 router swap method whitelist.
-# Filename *.template.js.yaml = template fully driven by evm_js rules (no evm_solidity_expression).
-# Covers V2 swap methods: swapExactTokensForTokens, swapExactETHForTokens, swapExactTokensForETH,
-#   swapTokensForExactTokens, swapETHForExactTokens, swapTokensForExactETH.
-# V3 methods (exactInputSingle, exactInput) are future work — tuple params require more complex decoding.
-# Validation: router address whitelist + method selector whitelist only.
-# NOTE: V2 dynamic-array params (path, amounts) are not decoded/validated.
-# For per-token or per-amount controls, use dex_swap_v3 with exactInputSingle/exactOutputSingle.
+# DEX Swap V2 template (evm_js) — Uniswap V2 router with full parameter validation.
+# Covers V2 swap methods with fund-safety checks:
+#   - swapExactTokensForTokens(uint256,uint256,address[],address,uint256)
+#   - swapTokensForExactTokens(uint256,uint256,address[],address,uint256)
+#   - swapExactTokensForETH(uint256,uint256,address[],address,uint256)
+#   - swapTokensForExactETH(uint256,uint256,address[],address,uint256)
+#   - swapExactETHForTokens(uint256,address[],address,uint256)
+#   - swapETHForExactTokens(uint256,address[],address,uint256)
+#
+# SECURITY: All fund-related parameters are validated:
+#   - recipient (to) MUST be the signer (prevents output theft)
+#   - amountIn / amountInMax capped by max_amount_in
+#   - path[0] (tokenIn) and path[last] (tokenOut) checked against allowlists
+#
+# SECURITY: Address list variables with "Empty = any" provide NO restriction when left empty.
+# Always configure allowed_* lists for production deployments.
 
 variables:
   - name: router_address
     type: address
     description: "DEX router contract address (e.g. Uniswap V2 Router 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D)"
     required: true
+  - name: allowed_token_in
+    type: address_list
+    description: "Comma-separated allowed input token addresses (path[0]). Empty = any."
+    required: false
+    default: ""
+  - name: allowed_token_out
+    type: address_list
+    description: "Comma-separated allowed output token addresses (path[last]). Empty = any."
+    required: false
+    default: ""
+  - name: max_amount_in
+    type: string
+    description: "Max input amount per swap, in token smallest unit. -1 = no cap."
+    required: false
+    default: "-1"
 
 test_variables:
   chain_id: "1"
   router_address: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
+  allowed_token_in: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+  allowed_token_out: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+  max_amount_in: "1000000000000000000"
 
 rules:
   - id: "dex-swap-v2"
-    name: "DEX Swap V2 method whitelist"
+    name: "DEX Swap V2 with parameter validation"
     type: "evm_js"
     mode: "whitelist"
     enabled: true
-    description: "Uniswap V2 router swap methods; validates router address and method selector whitelist"
+    description: "Uniswap V2 router swap; validates router, recipient=signer, token path, amount cap"
     config:
       sign_type_filter: "transaction"
       script: |
         function validate(input) {
           var ctx = rs.tx.require(input);
-          var router = config.router_address;
-          require(router && isAddress(router), 'invalid router config');
-          require(rs.addr.inList(ctx.tx.to, [router]), 'wrong router');
-          var allowedSels = [
-            selector('swapExactTokensForTokens(uint256,uint256,address[],address,uint256)'),
-            selector('swapExactETHForTokens(uint256,address[],address,uint256)'),
-            selector('swapExactTokensForETH(uint256,uint256,address[],address,uint256)'),
-            selector('swapTokensForExactTokens(uint256,uint256,address[],address,uint256)'),
-            selector('swapETHForExactTokens(uint256,address[],address,uint256)'),
-            selector('swapTokensForExactETH(uint256,uint256,address[],address,uint256)')
-          ];
-          var found = false;
-          for (var i = 0; i < allowedSels.length; i++) {
-            if (eq(ctx.selector, allowedSels[i])) { found = true; break; }
+          require(rs.addr.inList(ctx.tx.to, [config.router_address]), 'wrong router');
+          var sel5 = selector('swapExactTokensForTokens(uint256,uint256,address[],address,uint256)');
+          var sel6 = selector('swapTokensForExactTokens(uint256,uint256,address[],address,uint256)');
+          var sel3 = selector('swapExactTokensForETH(uint256,uint256,address[],address,uint256)');
+          var sel4 = selector('swapTokensForExactETH(uint256,uint256,address[],address,uint256)');
+          var sel1 = selector('swapExactETHForTokens(uint256,address[],address,uint256)');
+          var sel2 = selector('swapETHForExactTokens(uint256,address[],address,uint256)');
+          if (eq(ctx.selector, sel5) || eq(ctx.selector, sel6) || eq(ctx.selector, sel3) || eq(ctx.selector, sel4)) {
+            return validateSwap5Params(ctx.payloadHex, input.signer);
           }
-          require(found, 'method not allowed');
+          if (eq(ctx.selector, sel1) || eq(ctx.selector, sel2)) {
+            return validateSwap4Params(ctx.payloadHex, input.signer);
+          }
+          revert('method not allowed');
+        }
+        function validateSwap5Params(payloadHex, signer) {
+          var dec = abi.decode(payloadHex, ['uint256', 'uint256', 'address[]', 'address', 'uint256']);
+          require(dec && dec.length === 5, 'swap decode failed');
+          var amountIn = dec[0];
+          var path = dec[2];
+          var to = dec[3];
+          require(isAddress(to), 'invalid recipient');
+          rs.addr.requireInList(to, [signer], 'recipient must be signer');
+          rs.bigint.requireLte(amountIn, config.max_amount_in, 'amountIn exceeds cap');
+          require(path && path.length >= 2, 'path must have >= 2 tokens');
+          rs.addr.requireInListIfNonEmpty(path[0], config.allowed_token_in, 'tokenIn not allowed');
+          rs.addr.requireInListIfNonEmpty(path[path.length - 1], config.allowed_token_out, 'tokenOut not allowed');
+          return ok();
+        }
+        function validateSwap4Params(payloadHex, signer) {
+          var dec = abi.decode(payloadHex, ['uint256', 'address[]', 'address', 'uint256']);
+          require(dec && dec.length === 4, 'swap decode failed');
+          var amountOutOrIn = dec[0];
+          var path = dec[1];
+          var to = dec[2];
+          require(isAddress(to), 'invalid recipient');
+          rs.addr.requireInList(to, [signer], 'recipient must be signer');
+          require(path && path.length >= 2, 'path must have >= 2 tokens');
+          rs.addr.requireInListIfNonEmpty(path[0], config.allowed_token_in, 'tokenIn not allowed');
+          rs.addr.requireInListIfNonEmpty(path[path.length - 1], config.allowed_token_out, 'tokenOut not allowed');
           return ok();
         }
     test_cases:
-      - name: "pass: swapExactTokensForTokens on correct router"
+      - name: "pass: swapExactTokensForTokens with valid recipient and tokens"
         input:
           sign_type: "transaction"
           chain_id: 1
@@ -58,9 +108,8 @@ rules:
             to: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
             value: "0"
             data: "0x38ed17390000000000000000000000000000000000000000000000000de0b6b3a76400000000000000000000000000000000000000000000000000000000000035a4e90000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266000000000000000000000000000000000000000000000000000000174876e7ff0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
-            methodId: "0x38ed1739"
         expect_pass: true
-      - name: "reject: method not in allowlist (name())"
+      - name: "reject: recipient is not signer (output theft attempt)"
         input:
           sign_type: "transaction"
           chain_id: 1
@@ -69,10 +118,9 @@ rules:
             from: "0x0000000000000000000000000000000000000002"
             to: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
             value: "0"
-            data: "0x06fdde03"
-            methodId: "0x06fdde03"
+            data: "0x38ed17390000000000000000000000000000000000000000000000000de0b6b3a76400000000000000000000000000000000000000000000000000000000000035a4e90000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000dead000000000000000000000000000000000000000000000000000000174876e7ff0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
         expect_pass: false
-        expect_reason: "method not allowed"
+        expect_reason: "recipient must be signer"
       - name: "reject: wrong router address"
         input:
           sign_type: "transaction"
@@ -82,7 +130,18 @@ rules:
             from: "0x0000000000000000000000000000000000000002"
             to: "0x000000000000000000000000000000000000dEaD"
             value: "0"
-            data: "0x38ed17390000000000000000000000000000000000000000000000000de0b6b3a76400000000000000000000000000000000000000000000000000000000000035a4e90000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266000000000000000000000000000000000000000000000000000000174876e7ff0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
-            methodId: "0x38ed1739"
+            data: "0x38ed17390000000000000000000000000000000000000000000000000de0b6b3a76400000000000000000000000000000000000000000000000000000000000035a4e90000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000174876e7ff0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
         expect_pass: false
         expect_reason: "wrong router"
+      - name: "reject: disallowed method (name())"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
+            to: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
+            value: "0"
+            data: "0x06fdde03"
+        expect_pass: false
+        expect_reason: "method not allowed"

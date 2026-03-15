@@ -10,9 +10,8 @@ variables:
     required: true
   - name: allowed_recipients
     type: address_list
-    description: "Comma-separated addresses allowed as transfer/safeTransfer 'to'. Empty = any."
-    required: false
-    default: ""
+    description: "Comma-separated addresses allowed as transfer/safeTransfer 'to'. REQUIRED: must explicitly list allowed recipient addresses."
+    required: true
   - name: allowed_transfer_from
     type: address_list
     description: "Comma-separated addresses allowed as 'from' in transferFrom/safeTransferFrom. Empty = any."

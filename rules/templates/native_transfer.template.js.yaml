@@ -3,9 +3,6 @@
 # Covers: native value transfers (tx.data is "0x" or empty, tx.value > 0).
 # Parameters validated: allowlists for recipients, caps for amounts.
 
-#
-# SECURITY: Address list variables with "Empty = any" provide NO restriction when left empty.
-# Always configure allowed_* lists for production deployments.
 variables:
   - name: max_transfer_amount
     type: string
@@ -19,9 +16,8 @@ variables:
     default: "24h"
   - name: allowed_recipients
     type: address_list
-    description: "Comma-separated addresses allowed as transfer recipient (tx.to). Empty = any."
-    required: false
-    default: ""
+    description: "Comma-separated addresses allowed as transfer recipient (tx.to). REQUIRED: must explicitly list allowed recipient addresses."
+    required: true
 
 budget_metering:
   method: "tx_value"

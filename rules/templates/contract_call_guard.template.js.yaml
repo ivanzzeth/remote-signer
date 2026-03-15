@@ -1,6 +1,11 @@
 # Contract interaction guard template (evm_js) — whitelist specific contracts + method selectors.
 # Filename *.template.js.yaml = template fully driven by evm_js rules (no evm_solidity_expression).
 # Covers: any contract call where target address and (optionally) 4-byte selector must be in allowlist.
+#
+# WARNING: This template validates contract address and method selector only.
+# It does NOT validate calldata parameters (e.g., transfer recipients, amounts).
+# For fund-moving contracts (ERC20/721/1155), use the specific token templates instead,
+# or configure delegate_to for inner call validation.
 
 variables:
   - name: allowed_contracts

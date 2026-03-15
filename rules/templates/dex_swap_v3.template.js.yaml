@@ -59,15 +59,15 @@ rules:
           var multicallNoDeadlineSel = selector('multicall(bytes[])');
           var executeUniversalSel = selector('execute(bytes,bytes[],uint256)');
 
-          if (eq(ctx.selector, exactInputSingleSel)) return validateExactInputSingle(ctx.payloadHex);
-          if (eq(ctx.selector, exactOutputSingleSel)) return validateExactOutputSingle(ctx.payloadHex);
+          if (eq(ctx.selector, exactInputSingleSel)) return validateExactInputSingle(ctx.payloadHex, input.signer);
+          if (eq(ctx.selector, exactOutputSingleSel)) return validateExactOutputSingle(ctx.payloadHex, input.signer);
           if (eq(ctx.selector, exactInputSel) || eq(ctx.selector, exactOutputSel)) revert('method not fully validated — use exactInputSingle or exactOutputSingle');
           if (eq(ctx.selector, multicallSel) || eq(ctx.selector, multicallNoDeadlineSel)) revert('method not fully validated — use exactInputSingle or exactOutputSingle');
           if (eq(ctx.selector, executeUniversalSel)) revert('method not fully validated — use exactInputSingle or exactOutputSingle');
           revert('method not allowed');
         }
 
-        function validateExactInputSingle(payloadHex) {
+        function validateExactInputSingle(payloadHex, signer) {
           var dec = abi.decode(payloadHex, [
             { type: 'tuple', components: [
               { name: 'tokenIn', type: 'address' },
@@ -82,13 +82,15 @@ rules:
           ]);
           require(dec && dec.length === 1, 'exactInputSingle decode failed');
           var params = dec[0];
+          require(isAddress(params.recipient), 'invalid recipient');
+          rs.addr.requireInList(params.recipient, [signer], 'recipient must be signer');
           rs.addr.requireInListIfNonEmpty(params.tokenIn, config.allowed_token_in, 'tokenIn not allowed');
           rs.addr.requireInListIfNonEmpty(params.tokenOut, config.allowed_token_out, 'tokenOut not allowed');
           rs.bigint.requireLte(params.amountIn, config.max_amount_in, 'amountIn exceeds cap');
           return ok();
         }
 
-        function validateExactOutputSingle(payloadHex) {
+        function validateExactOutputSingle(payloadHex, signer) {
           var dec = abi.decode(payloadHex, [
             { type: 'tuple', components: [
               { name: 'tokenIn', type: 'address' },
@@ -103,6 +105,8 @@ rules:
           ]);
           require(dec && dec.length === 1, 'exactOutputSingle decode failed');
           var params = dec[0];
+          require(isAddress(params.recipient), 'invalid recipient');
+          rs.addr.requireInList(params.recipient, [signer], 'recipient must be signer');
           rs.addr.requireInListIfNonEmpty(params.tokenIn, config.allowed_token_in, 'tokenIn not allowed');
           rs.addr.requireInListIfNonEmpty(params.tokenOut, config.allowed_token_out, 'tokenOut not allowed');
           rs.bigint.requireLte(params.amountInMaximum, config.max_amount_in, 'amountInMaximum exceeds cap');

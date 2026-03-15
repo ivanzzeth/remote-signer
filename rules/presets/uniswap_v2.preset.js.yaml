@@ -30,7 +30,13 @@ matrix:
   - chain_id: "10"      # Optimism (Velodrome uses different interface, use Uniswap)
     router_address: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
 
-defaults: {}
+defaults:
+  allowed_token_in: ""
+  allowed_token_out: ""
+  max_amount_in: "-1"
 
 override_hints:
   - router_address
+  - allowed_token_in
+  - allowed_token_out
+  - max_amount_in
