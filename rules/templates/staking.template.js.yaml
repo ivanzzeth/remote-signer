@@ -19,12 +19,6 @@ variables:
     description: "Max amount per unstake/withdraw call, in token smallest unit. -1 = no cap."
     required: false
     default: "-1"
-  - name: allowed_methods
-    type: string
-    description: "Comma-separated method names allowed. Default covers common staking patterns: stake,unstake,withdraw,claimRewards,getReward. Empty = use default."
-    required: false
-    default: "stake,unstake,withdraw,claimRewards,getReward"
-
 budget_metering:
   method: "js"
   unit: "${chain_id}:${staking_address}"

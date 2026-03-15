@@ -18,7 +18,6 @@ variables:
   staking_address: "0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84"
   max_stake_amount: "-1"
   max_unstake_amount: "-1"
-  allowed_methods: "stake,unstake,withdraw,claimRewards,getReward"
 budget:
   unit: "${chain_id}:${staking_address}"
   max_total: "${max_stake_amount}"
@@ -29,3 +28,4 @@ override_hints:
   - chain_id
   - staking_address
   - max_stake_amount
+  - max_unstake_amount

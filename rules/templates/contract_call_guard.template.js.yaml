@@ -31,12 +31,13 @@ rules:
         function validate(input) {
           var ctx = rs.tx.require(input);
           rs.addr.requireInList(ctx.tx.to, config.allowed_contracts, 'contract not allowed');
-          var selectors = (config.allowed_selectors || '').trim();
+          var selectors = (config.allowed_selectors || '').trim().toLowerCase();
           if (selectors.length > 0) {
             var list = selectors.split(',');
+            var sel = (ctx.selector || '').toLowerCase();
             var found = false;
             for (var i = 0; i < list.length; i++) {
-              if (eq(ctx.selector, list[i].trim())) { found = true; break; }
+              if (sel === list[i].trim()) { found = true; break; }
             }
             require(found, 'method not allowed');
           }

@@ -19,4 +19,5 @@ override_hints:
   - chain_id
   - token_address
   - max_permit_value
+  - max_deadline
   - allowed_spenders
