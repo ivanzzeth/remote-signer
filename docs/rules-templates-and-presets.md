@@ -379,13 +379,156 @@ New users get a working rule set by picking a preset and filling in a few values
 
 ---
 
-## 6. Summary
+## 6. Template and Preset Reference
+
+### 6.1 Templates by category
+
+All templates live under `rules/templates/`.
+
+#### Token Standards
+
+| File | Engine | Description |
+|------|--------|-------------|
+| `erc20.template.js.yaml` | evm_js | ERC-20 transfer, transferFrom, approve with parameter-level validation |
+| `erc721.template.js.yaml` | evm_js | ERC-721 transferFrom, safeTransferFrom, approve, setApprovalForAll |
+| `erc1155.template.js.yaml` | evm_js | ERC-1155 safeTransferFrom, safeBatchTransferFrom, setApprovalForAll |
+| `native_transfer.template.js.yaml` | evm_js | Plain native token transfers (ETH/BNB/MATIC etc.) |
+| `weth.template.js.yaml` | evm_js | WETH deposit() and withdraw(uint256) |
+
+#### Gasless / Meta-TX
+
+| File | Engine | Description |
+|------|--------|-------------|
+| `erc20_permit.template.js.yaml` | evm_js | EIP-2612 Permit typed_data validation for gasless token approvals |
+| `erc721_permit.template.js.yaml` | evm_js | EIP-4494 Permit typed_data validation for gasless NFT approvals |
+| `eip3009_transfer_auth.template.js.yaml` | evm_js | EIP-3009 TransferWithAuthorization / ReceiveWithAuthorization (USDC, EURC) |
+| `meta_transaction.template.js.yaml` | evm_js | EIP-2771 ForwardRequest typed_data validation for gasless meta-transactions |
+
+#### DeFi
+
+| File | Engine | Description |
+|------|--------|-------------|
+| `dex_swap.template.js.yaml` | evm_js | Uniswap V2 router swap method whitelist |
+| `dex_swap_v3.template.js.yaml` | evm_js | Uniswap V3 SwapRouter + V4 Universal Router |
+| `staking.template.js.yaml` | evm_js | Common staking operations (stake, unstake, withdraw, claimRewards, exit) |
+
+#### Account Abstraction
+
+| File | Engine | Description |
+|------|--------|-------------|
+| `eip4337_userop.template.js.yaml` | evm_js | EIP-4337 UserOperation typed_data validation |
+
+#### Smart Wallets (Safe / Gnosis)
+
+| File | Engine | Description |
+|------|--------|-------------|
+| `safe.template.js.yaml` | evm_js | Generic composable Safe template (SafeTx typed_data + execTransaction) |
+| `multisend.template.js.yaml` | evm_js | Gnosis MultiSend packed format batch transaction validation |
+
+#### Polymarket
+
+| File | Engine | Description |
+|------|--------|-------------|
+| `polymarket_auth.template.yaml` | solidity | CLOB login (auth only) |
+| `polymarket_create_safe.template.yaml` | solidity | createProxy (Safe creation) |
+| `polymarket_enable_trading.template.yaml` | solidity | SafeTx + execTransaction for approve/setApprovalForAll |
+| `polymarket_trading.template.yaml` | solidity | Order signing + SafeTx + execTransaction |
+| `polymarket_safe.template.yaml` | solidity | Combined Polymarket Safe rules (all capabilities) |
+| `polymarket_safe_init.template.js.yaml` | evm_js | Auth + CreateProxy only (no Safe address required) |
+| `polymarket.template.js.yaml` | evm_js | Polymarket protocol rules for composing with Safe template |
+
+#### Opinion Protocol
+
+| File | Engine | Description |
+|------|--------|-------------|
+| `opinion_safe.template.yaml` | solidity | Opinion Protocol Safe operations on BSC (based on Polymarket Safe) |
+
+#### Predict.fun
+
+| File | Engine | Description |
+|------|--------|-------------|
+| `predict_auth.template.yaml` | solidity | PersonalSign login (auth only) |
+| `predict_enable_trading.template.yaml` | solidity | Approve + setApprovalForAll for trading setup |
+| `predict_enable_trading.template.js.yaml` | evm_js | Same as above, evm_js engine (no Forge required) |
+| `predict_trading.template.yaml` | solidity | Order + split/merge/redeem + NegRiskAdapter |
+| `predict_trading.template.js.yaml` | evm_js | Same as above, evm_js engine (no Forge required) |
+| `predict_eoa.template.yaml` | solidity | Combined Predict.fun EOA rules (all capabilities) |
+
+#### Security
+
+| File | Engine | Description |
+|------|--------|-------------|
+| `global_blocklist.template.js.yaml` | evm_js | Blocklist mode: blocks transactions to known-bad addresses |
+| `contract_call_guard.template.js.yaml` | evm_js | Whitelist specific contracts + method selectors |
+| `max_gas_cap.template.js.yaml` | evm_js | Blocklist mode: caps gas limit per transaction |
+| `eip1559_fee_guard.template.js.yaml` | evm_js | Blocklist mode: caps gas limit and transaction value |
+
+### 6.2 Presets
+
+All presets live under `rules/presets/`.
+
+#### Protocol-Specific Presets
+
+| File | Description |
+|------|-------------|
+| `polymarket_eoa_polygon.preset.yaml` | Polymarket EOA rules on Polygon |
+| `polymarket_safe_init_polygon.preset.js.yaml` | Polymarket Safe initialization on Polygon (auth + createProxy) |
+| `polymarket_safe_polygon.preset.js.yaml` | Polymarket Safe full rules on Polygon |
+| `predict_eoa_bnb.preset.yaml` | Predict.fun EOA rules on BNB Chain (solidity engine) |
+| `predict_eoa_bnb.preset.js.yaml` | Predict.fun EOA rules on BNB Chain (evm_js engine) |
+
+#### Token Presets
+
+| File | Description |
+|------|-------------|
+| `erc20.preset.js.yaml` | ERC-20 transfer/approve limits |
+| `erc721.preset.js.yaml` | ERC-721 NFT transfer rules |
+| `erc721_permit.preset.js.yaml` | ERC-721 gasless permit rules |
+| `erc1155.preset.js.yaml` | ERC-1155 multi-token rules |
+| `erc20_permit.preset.js.yaml` | ERC-20 gasless permit rules |
+| `native_transfer.preset.js.yaml` | Native token transfer limits |
+| `weth.preset.js.yaml` | WETH deposit/withdraw rules |
+| `usdc.preset.js.yaml` | USDC transfer/approve limits across major EVM chains (**matrix format**) |
+
+#### DeFi Presets
+
+| File | Description |
+|------|-------------|
+| `dex_swap.preset.js.yaml` | DEX swap V2 rules |
+| `dex_swap_v3.preset.js.yaml` | DEX swap V3/V4 rules |
+| `staking.preset.js.yaml` | Staking contract rules |
+| `uniswap_v2.preset.js.yaml` | Uniswap V2 Router across major EVM chains (**matrix format**) |
+| `uniswap_v3.preset.js.yaml` | Uniswap V3 SwapRouter across major EVM chains (**matrix format**) |
+| `uniswap_v4.preset.js.yaml` | Uniswap V4 Universal Router across major EVM chains (**matrix format**) |
+
+#### Gasless / Meta-TX Presets
+
+| File | Description |
+|------|-------------|
+| `eip3009_transfer_auth.preset.js.yaml` | EIP-3009 transfer authorization rules |
+| `eip4337_userop.preset.js.yaml` | EIP-4337 UserOperation rules |
+| `meta_transaction.preset.js.yaml` | EIP-2771 meta-transaction rules |
+
+#### Security Presets
+
+| File | Description |
+|------|-------------|
+| `global_blocklist.preset.js.yaml` | Global address blocklist |
+| `contract_call_guard.preset.js.yaml` | Contract call guard (address + selector whitelist) |
+| `max_gas_cap.preset.js.yaml` | Max gas cap per transaction |
+| `eip1559_fee_guard.preset.js.yaml` | EIP-1559 fee guard (gas + value cap) |
+
+**Matrix format presets** (`uniswap_v2`, `uniswap_v3`, `uniswap_v4`, `usdc`) create one rule per chain with chain-specific contract addresses. They deploy across multiple EVM chains in a single apply.
+
+---
+
+## 7. Summary
 
 | Concept | Where it lives | Purpose |
 |--------|----------------|--------|
-| **Template** | `config.templates` (type `file`) + `rules/templates/*.template.yaml` | Parameterized rules with `${var}`; loaded once, expanded per instance. |
+| **Template** | `config.templates` (type `file`) + `rules/templates/*.template.yaml` | Parameterized rules with `${var}`; loaded once, expanded per instance. See section 6.1 for the full list. |
 | **Instance** | `config.rules` (type `instance`) | Binds a template name + variables; server expands to concrete rules. |
-| **Preset** | `rules/presets/*.yaml` | Pre-filled instance(s); used by CLI/setup to generate or merge rule(s) with minimal overrides. |
+| **Preset** | `rules/presets/*.yaml` | Pre-filled instance(s); used by CLI/setup to generate or merge rule(s) with minimal overrides. See section 6.2 for the full list. |
 | **Inline / file rules** | `config.rules` (type other than `instance` / `file`) or external YAML | Static or file-loaded rules without template expansion. |
 
 For validation of template files (with `test_variables`) or full config (with templates + instance + file rules), use **remote-signer-validate-rules** or `remote-signer-cli validate`. See [testing.md](testing.md) and [configuration.md](configuration.md).

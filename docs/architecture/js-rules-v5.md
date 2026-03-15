@@ -216,6 +216,58 @@ Config object only. No substitution.
 
 **rs** (reserved namespace): Composable module for evm_js rules. See [evm_js_rs_api.md](../evm_js_rs_api.md) for full API. Sandbox allow-list includes **rs**.
 
+**rs.* modules:**
+
+| Module | Methods | Purpose |
+|--------|---------|---------|
+| **rs.tx** | `require(input)`, `getCalldata(tx)` | Transaction validation; extracts selector + payload, enforces sign_type and calldata presence |
+| **rs.addr** | `inList(addr, list)`, `notInList(addr, list)`, `requireInList(addr, list, reason)`, `requireNotInList(addr, list, reason)`, `requireInListIfNonEmpty(addr, list, reason)`, `isZero(addr)`, `requireZero(addr, reason)` | Address checks: allowlist/blocklist matching, zero-address guards |
+| **rs.int** | `parseUint(value)`, `requireLte(value, max, reason)`, `requireEq(value, want, reason)` | Strict small-integer parsing and comparison (never silently coerces invalid input to 0) |
+| **rs.bigint** | `parse(value)`, `uint256(value)`, `int256(value)`, `requireLte(a, b, reason)`, `requireEq(a, b, reason)`, `requireZero(amount, reason)` | BigInt parsing (decimal, hex, number), range-checked uint256/int256, comparison/zero checks |
+| **rs.typedData** | `match(input, primaryType)`, `require(input, primaryType)`, `requireDomain(domain, opts)`, `requireSignerMatch(msgSigner, inputSigner, reason)` | EIP-712 typed data validation: primaryType matching, domain field checks, signer equality |
+| **rs.multisend** | `parseBatch(raw, chainId, signer)` | Gnosis MultiSend batch parsing; returns `{ items }` array of per-item RuleInput payloads |
+| **rs.delegate** | `resolveByTarget(innerTo, byTarget, defaultRule)` | Resolve delegation rule ID by inner target address; `byTarget` = `"addr:rule_id,..."` map |
+| **rs.config** | `requireNonEmpty(key, reason)` | Guard that a config variable is present and non-empty (strings are pre-trimmed on injection) |
+| **rs.gnosis.safe** | `parseExecTransactionData(calldataHex)` | Parse Safe `execTransaction(...)` calldata; extracts `innerTo`, `innerHex`, `valueZero`, `operationCALL` |
+| **rs.hex** | `requireZero32(hexValue, reason)` | Check 32-byte hex value equals zero; throws with `reason` on non-zero |
+
+**Usage examples:**
+
+```javascript
+// rs.tx + rs.addr: validate a transaction to an allowed contract
+var ctx = rs.tx.require(input);
+rs.addr.requireInList(ctx.tx.to, config.allowed_contracts, 'contract not allowed');
+
+// rs.bigint: cap ERC20 transfer amount
+var dec = abi.decode(ctx.payloadHex, ['address', 'uint256']);
+rs.bigint.requireLte(dec[1], config.max_amount, 'exceeds cap');
+
+// rs.typedData: validate EIP-712 order
+var td = rs.typedData.require(input, 'Order');
+rs.typedData.requireDomain(td.domain, { chainId: 1, allowedContracts: [config.exchange] });
+rs.typedData.requireSignerMatch(td.message.signer, input.signer, 'signer mismatch');
+
+// rs.gnosis.safe: parse Safe execTransaction and delegate inner call
+var safe = rs.gnosis.safe.parseExecTransactionData(ctx.tx.data);
+require(safe.valid, safe.reason);
+require(safe.operationCALL, 'only CALL allowed');
+return { valid: true, payload: { sign_type: 'transaction', transaction: { to: safe.innerTo, data: safe.innerHex } }, delegate_to: config.delegate_to };
+
+// rs.multisend: parse batch and delegate each item
+var batch = rs.multisend.parseBatch(payloadHex, input.chain_id, input.signer);
+require(!batch.err, batch.err);
+return { valid: true, items: batch.items };
+
+// rs.delegate: route by target address
+var ruleId = rs.delegate.resolveByTarget(innerTo, 'addr1:erc20,addr2:dex_swap', 'fallback_rule');
+
+// rs.config: require a config variable at rule startup
+rs.config.requireNonEmpty('token_address', 'token_address is required');
+
+// rs.hex: verify value field is zero
+rs.hex.requireZero32(valueSlot, 'value must be zero');
+```
+
 ---
 
 ## 13. Implementation Checklist

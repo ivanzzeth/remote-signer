@@ -420,6 +420,87 @@ archive_command = 'cp %p /backup/wal/%f'
 - Recovery procedure: Restore keystore + password to new instance
 - Test recovery process regularly
 
+## Dynamic Blocklist (OFAC SDN)
+
+Remote Signer includes a dynamic address blocklist that periodically fetches sanctioned addresses from external sources (e.g. OFAC SDN list) and blocks signing requests involving those addresses. The blocklist is maintained in-memory and persisted to a local cache file for offline resilience.
+
+### Configuration
+
+Add a `dynamic_blocklist` section to your `config.yaml`:
+
+```yaml
+dynamic_blocklist:
+  enabled: true
+  sync_interval: "1h"        # how often to re-fetch from sources
+  fail_mode: "open"           # "open" = allow if sync fails; "close" = block all if sync fails
+  cache_file: "data/blocklist_cache.json"   # local persistence
+  sources:
+    - name: "OFAC SDN"
+      type: "url_text"       # one address per line
+      url: "https://raw.githubusercontent.com/ivanzzeth/remote-signer/main/data/ofac_sdn_addresses.txt"
+```
+
+**Source types:**
+
+| Type | Format | Extra Config |
+|------|--------|-------------|
+| `url_text` | One checksummed Ethereum address per line | None |
+| `url_json` | JSON document with address array | `json_path`: dot-separated path to array (e.g. `"data.addresses"`) |
+
+### Default Setup (OFAC SDN)
+
+By default, enabling the dynamic blocklist with the OFAC SDN source blocks all addresses on the US Treasury OFAC Specially Designated Nationals list. This is a common compliance requirement for services interacting with public blockchains.
+
+### Cache File Persistence
+
+- **Location**: Configured via `cache_file` (default: `data/blocklist_cache.json`).
+- **Purpose**: On startup, the cached addresses are loaded immediately so the service does not depend on network access for initial protection.
+- **Updates**: After each successful sync, the cache file is atomically rewritten.
+- **Docker**: Mount a persistent volume for the `data/` directory to preserve the cache across container restarts.
+
+```yaml
+# docker-compose.yaml
+services:
+  remote-signer:
+    volumes:
+      - blocklist-data:/app/data
+volumes:
+  blocklist-data:
+```
+
+### Network Requirements
+
+- **Outbound HTTPS**: The service must be able to reach the configured source URLs (e.g. `raw.githubusercontent.com`) over HTTPS.
+- **Proxy**: If behind a corporate proxy, set `HTTPS_PROXY` / `HTTP_PROXY` environment variables.
+- **Air-gapped**: If no outbound access is available, pre-populate the `cache_file` manually and set `fail_mode: "open"` (or `"close"` for maximum security).
+
+### Fail Mode
+
+| Mode | Behavior when sync fails |
+|------|-------------------------|
+| `open` | Allow signing (use last-known addresses from cache). This is the default. |
+| `close` | Block all signing requests until a successful sync completes. Use for maximum compliance. |
+
+### Monitoring
+
+The blocklist exposes metrics via the `/metrics` API endpoint:
+
+| Metric | Description |
+|--------|-------------|
+| `address_count` | Number of addresses currently in the blocklist |
+| `source_count` | Number of configured sources |
+| `last_sync_at` | Timestamp of last successful sync |
+| `last_sync_error` | Error message from last failed sync (empty if healthy) |
+| `sync_errors` | Cumulative count of sync failures |
+
+**Health checks:**
+
+- Monitor `last_sync_at` to ensure syncs are happening at the configured interval.
+- Alert on `last_sync_error` being non-empty for longer than 2x `sync_interval`.
+- Watch `address_count` for unexpected drops to zero (could indicate a source issue).
+
+---
+
 ## Capacity Planning
 
 ### Resource Estimates

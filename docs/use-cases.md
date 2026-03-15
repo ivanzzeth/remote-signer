@@ -62,6 +62,64 @@ You get **parameter-level intent verification** (not just â€œthis key can signâ€
 
 ---
 
+## 4. Account Abstraction (EIP-4337)
+
+**Scenario:** An EIP-4337 smart account (or bundler service) needs to sign UserOperations before submitting them to the EntryPoint. You want policy control over which UserOps are signed: only certain smart account senders, approved paymasters, gas caps, and -- critically -- validation of the *inner calls* encoded in `callData` (e.g. only allow `USDC.transfer` to whitelisted recipients, not arbitrary calls).
+
+**Problem:** A UserOperation is signed as EIP-712 typed data, but the actual intent (e.g. "transfer 100 USDC to Alice") is buried inside the `callData` field as an ABI-encoded `execute(address,uint256,bytes)` or `executeBatch(...)` call. Generic typed-data signing has no visibility into these inner operations, so without deep inspection any callData would be signed.
+
+**How Remote Signer helps:**
+
+- **UserOp template** (`eip4337_userop`): A built-in JS rule template that validates the EIP-712 UserOperation structure -- EntryPoint address, sender allowlist, paymaster allowlist, initCode policy, gas limits -- then **parses `callData`** to extract inner `execute` / `executeBatch` calls.
+- **Delegation to inner call rules**: The template uses delegation (`delegate_to` / `delegate_to_by_target`) to forward each inner call to an appropriate rule. For example, a `USDC.transfer(...)` call inside `execute(USDC_address, 0, transferCalldata)` is delegated to an ERC20 rule that validates the recipient and amount cap. This is the same composition model used by the Safe template.
+- **Batch support**: `executeBatch` UserOps (multiple inner calls in one UserOp) are decomposed into per-item delegation (`delegate_mode: per_item`), so each inner call is validated independently.
+- **EntryPoint verification**: The template enforces that `verifyingContract` in the EIP-712 domain matches the configured EntryPoint address (v0.6 or v0.7).
+
+**Example flow:**
+
+```
+UserOp (EIP-712 typed data)
+  -> eip4337_userop template validates:
+       - sender in allowed_senders
+       - paymaster in allowed_paymasters
+       - initCode blocked (or allowed)
+       - callGasLimit <= max_call_gas_limit
+  -> parse callData: execute(USDC_addr, 0, transfer(Alice, 100e6))
+  -> delegate to "erc20" rule:
+       - validates USDC contract address
+       - validates Alice in allowed_recipients
+       - validates 100e6 <= max_amount
+  -> all pass -> sign the UserOp
+```
+
+**Typical setup:**
+
+```yaml
+rules:
+  - template: eip4337_userop
+    id: "userop"
+    variables:
+      chain_id: "1"
+      entrypoint_address: "0x5FF137D4b0FDCD49DcA30c7CF57E578a026338cc"
+      allowed_senders: "0xYourSmartAccount"
+      allowed_paymasters: "0xYourPaymaster"
+      allow_initcode: "false"
+      max_call_gas_limit: "1000000"
+      allowed_targets: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"  # USDC
+      delegate_to: "erc20"
+  - template: erc20_transfer
+    id: "erc20"
+    variables:
+      chain_id: "1"
+      token_address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+      allowed_recipients: "0xAlice,0xBob"
+      max_amount: "1000000000"  # 1000 USDC
+```
+
+This also applies to EIP-6900 modular accounts, which use the same UserOp signing flow.
+
+---
+
 ## Summary
 
 | Use case   | Main rule types / features |
@@ -69,5 +127,6 @@ You get **parameter-level intent verification** (not just â€œthis key can signâ€
 | **Treasury** | `evm_address_list`, `evm_value_limit`, manual approval, notifications |
 | **Bot**      | `evm_contract_method`, `evm_solidity_expression`, `evm_value_limit`, per-key rate limit |
 | **DeFi**     | `evm_solidity_expression`, `evm_contract_method`, `evm_value_limit`, EIP-712 |
+| **EIP-4337** | `eip4337_userop` template, delegation to inner call rules (ERC20, native, DEX), EntryPoint verification |
 
 For API details, rule syntax, and configuration, see [api.md](api.md), [rule-syntax.md](rule-syntax.md), and [config.example.yaml](../config.example.yaml).

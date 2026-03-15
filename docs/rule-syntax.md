@@ -228,6 +228,49 @@ These are reserved by the Solidity language:
       }
 ```
 
+## Rule Type: `evm_solidity_expression`
+
+Foundry-based Solidity expression rules. Validate signing requests by generating and executing Solidity code via Forge.
+
+### Config Schema
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `expression` | string | No | Solidity require() statements for transaction validation |
+| `functions` | string | No | Solidity function definitions that auto-match by selector |
+| `typed_data_expression` | string | No | Solidity require() statements for EIP-712 typed data |
+| `sign_type_filter` | string | No | Single sign type: `"transaction"` or `"typed_data"` |
+
+At least one of `expression`, `functions`, or `typed_data_expression` must be provided. Max 10KB per field. Dangerous patterns (`selfdestruct`, `delegatecall`, `create2`) are rejected.
+
+### Behavior by Mode
+
+- **whitelist**: allow if all require() statements pass
+- **blocklist**: block if all require() statements pass
+
+### Example
+
+```yaml
+- name: "USDC Transfer to Treasury"
+  type: "evm_solidity_expression"
+  mode: "whitelist"
+  chain_type: "evm"
+  enabled: true
+  config:
+    functions: |
+      function transfer(address recipient, uint256 amount) external {
+          require(
+              recipient == 0x9Ce3316B865e940227EA724AFdeAAA2759f1AA7C,
+              "recipient must be Treasury"
+          );
+      }
+    sign_type_filter: "transaction"
+```
+
+See [Context Variables](#context-variables) and [Examples](#examples) below for detailed usage.
+
+---
+
 ## Rule Type: `message_pattern`
 
 Validate personal sign / EIP-191 messages against regex patterns.
@@ -488,6 +531,127 @@ type SignerRestrictionConfig struct {
 ## Rule Type: `chain_restriction`
 
 **NOTE:** This type is defined as a constant (`RuleTypeChainRestriction = "chain_restriction"`) but has NO evaluator implementation. Include in rule files for forward compatibility but no config validation is performed beyond basic JSON parsing.
+
+---
+
+## Rule Type: `evm_js`
+
+JavaScript rules executed in a Sobek (Goja) sandbox. The script must define a `validate(input)` function that returns `{ valid, reason?, payload? }`.
+
+### Config Schema
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `script` | string | Yes | JavaScript source (max 64KB). Must define `validate(input)` |
+| `sign_type_filter` | string | No | Comma-separated sign types (e.g. `"typed_data,transaction"`). Only `evm_js` supports CSV here |
+| `delegate_to` | string | No | Target rule ID for delegation |
+| `delegate_mode` | string | No | `"single"` (default) or `"per_item"` |
+| `items_key` | string | No | For `per_item` delegation; key in payload containing items array (default `"items"`) |
+| `payload_key` | string | No | For `single` delegation; key in payload to forward |
+| `test_cases` | array | Yes | At least 1 positive + 1 negative test case required |
+
+### Input Shape
+
+The `validate(input)` function receives a `RuleInput` object:
+
+```json
+{
+  "sign_type": "transaction | typed_data | personal_sign",
+  "chain_id": 137,
+  "signer": "0x...",
+  "transaction": { "from": "0x...", "to": "0x...", "value": "0x0", "data": "0x...", "methodId": "0xa9059cbb" },
+  "typed_data": { "types": {}, "primaryType": "Order", "domain": {}, "message": {} },
+  "personal_sign": { "message": "..." }
+}
+```
+
+Only the field matching `sign_type` is populated; others are `null`.
+
+### Behavior by Mode
+
+- **whitelist**: allow if `validate()` returns `{ valid: true }`
+- **blocklist**: block if `validate()` returns `{ valid: true }`
+
+### Example
+
+```yaml
+- name: "ERC20 Transfer Validator"
+  type: "evm_js"
+  mode: "whitelist"
+  chain_type: "evm"
+  enabled: true
+  config:
+    script: |
+      function validate(input) {
+        if (input.sign_type !== "transaction") {
+          return { valid: false, reason: "only transactions allowed" };
+        }
+        var tx = input.transaction;
+        if (tx.methodId !== "0xa9059cbb") {
+          return { valid: false, reason: "only ERC20 transfer allowed" };
+        }
+        return { valid: true };
+      }
+    sign_type_filter: "transaction"
+    test_cases:
+      - name: "should allow ERC20 transfer"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x53c68c954f85a29d2098e90addaf41baf2ff0a50"
+          transaction:
+            from: "0x53c68c954f85a29d2098e90addaf41baf2ff0a50"
+            to: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            value: "0x0"
+            data: "0xa9059cbb000000000000000000000000..."
+            methodId: "0xa9059cbb"
+        expect_pass: true
+      - name: "should reject non-transfer"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x53c68c954f85a29d2098e90addaf41baf2ff0a50"
+          transaction:
+            from: "0x53c68c954f85a29d2098e90addaf41baf2ff0a50"
+            to: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            value: "0x0"
+            data: "0x095ea7b3000000000000000000000000..."
+            methodId: "0x095ea7b3"
+        expect_pass: false
+```
+
+---
+
+## Rule Type: `evm_dynamic_blocklist`
+
+Runtime-synced address blocklist from external URLs (e.g. OFAC, scam databases). The actual address lists are configured at the top-level `dynamic_blocklist` config (see [configuration.md](configuration.md#dynamic_blocklist)); this rule type controls **what to check** against those lists.
+
+### Config Schema
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `check_recipient` | bool | Conditional | Check `tx.to` for transactions against the blocklist |
+| `check_verifying_contract` | bool | Conditional | Check `domain.verifyingContract` for typed_data against the blocklist |
+
+At least one of `check_recipient` or `check_verifying_contract` must be `true`.
+
+### Behavior by Mode
+
+- **blocklist** (typical): block if any checked address is on the dynamic blocklist. If blocklist is unavailable and `fail_mode` is `"close"`, all requests are rejected.
+- **whitelist** (unusual): allow if any checked address is on the list.
+
+### Example
+
+```yaml
+- name: "Dynamic Address Blocklist"
+  type: "evm_dynamic_blocklist"
+  mode: "blocklist"
+  chain_type: "evm"
+  enabled: true
+  config:
+    check_recipient: true
+    check_verifying_contract: true
+```
 
 ---
 

@@ -229,6 +229,51 @@ Notes:
 - `security.ip_rate_limit <= 0` disables pre-auth IP rate limiting.
 - `security.nonce_required` defaults to **true** when omitted (recommended).
 
+## Dynamic Blocklist
+
+### dynamic_blocklist
+
+Runtime address blocklist synced from external URLs.
+
+```yaml
+dynamic_blocklist:
+  enabled: false
+  sync_interval: "1h"
+  fail_mode: "open"
+  cache_file: "data/blocklist_cache.json"
+  sources:
+    - name: "OFAC SDN List"
+      type: "url_text"
+      url: "https://example.com/ofac-addresses.txt"
+    - name: "Scam Database"
+      type: "url_json"
+      url: "https://example.com/scam-addresses.json"
+      json_path: "data.addresses"
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `enabled` | bool | `false` | Enable dynamic blocklist |
+| `sync_interval` | string | `"1h"` | How often to refresh from sources (min: 1m) |
+| `fail_mode` | string | `"open"` | `"open"` = use stale cache on failure, `"close"` = reject all |
+| `cache_file` | string | `""` | Local file for persisting fetched addresses |
+| `sources` | array | `[]` | List of address list sources |
+
+Source config:
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `name` | string | Human-readable source name |
+| `type` | string | `"url_text"` (one address per line) or `"url_json"` (JSON with path) |
+| `url` | string | URL to fetch (http:// or https:// only) |
+| `json_path` | string | For `url_json`: dot-path to address array (e.g. `"data.addresses"`) |
+
+Notes:
+- On startup, the cache file is loaded first (no network required). Background sync starts asynchronously.
+- On partial source failure, successfully fetched addresses are merged into the existing cache.
+- On total sync failure with `fail_mode: "close"` and no cached addresses, all requests matching `evm_dynamic_blocklist` rules are rejected.
+- To use dynamic blocklist rules, define `evm_dynamic_blocklist` rules under `rules` (see [rule-syntax.md](rule-syntax.md#rule-type-evm_dynamic_blocklist)).
+
 ## Audit Monitor
 
 ```yaml

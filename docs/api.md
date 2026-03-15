@@ -2237,15 +2237,351 @@ Non-admin keys with `allowed_hd_wallets` permission can also sign with any deriv
 
 ---
 
+## Templates
+
+Template endpoints are available when the template service is configured. **All require admin API key authentication.** Mutating operations (POST, PATCH, DELETE) are disabled when `security.rules_api_readonly` is true (403). Config-sourced templates cannot be updated or deleted via API.
+
+### List Templates
+
+```
+GET /api/v1/templates
+```
+
+**Auth:** Admin API key required.
+
+**Query Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `type` | string | Filter by rule type (e.g. `evm_js`, `evm_solidity_expression`) |
+| `source` | string | Filter by source (`api`, `config`) |
+| `enabled` | string | `"true"` to return only enabled templates |
+| `limit` | int | Max results (default: 100, max: 1000) |
+| `offset` | int | Pagination offset |
+
+**Response (200):**
+
+```json
+{
+  "templates": [
+    {
+      "id": "tmpl_api_1234567890",
+      "name": "ERC-20 Transfer Template",
+      "description": "Validates ERC-20 transfers",
+      "type": "evm_js",
+      "mode": "whitelist",
+      "source": "api",
+      "variables": [
+        { "name": "chain_id", "type": "string", "description": "Chain ID", "required": true }
+      ],
+      "config": { "expression": "..." },
+      "budget_metering": { "method": "calldata_param", "unit": "${chain_id}:${token_address}" },
+      "enabled": true,
+      "created_at": "2024-01-15T10:00:00Z",
+      "updated_at": "2024-01-15T10:00:00Z"
+    }
+  ],
+  "total": 1
+}
+```
+
+---
+
+### Get Template
+
+```
+GET /api/v1/templates/{id}
+```
+
+**Auth:** Admin API key required.
+
+**Response (200):** Single template object (same shape as items in the list response).
+
+**Errors:** 404 if template not found.
+
+---
+
+### Create Template
+
+```
+POST /api/v1/templates
+```
+
+**Auth:** Admin API key required. Blocked when `security.rules_api_readonly` is true (403).
+
+**Request Body:**
+
+```json
+{
+  "name": "My Custom Template",
+  "description": "Optional description",
+  "type": "evm_js",
+  "mode": "whitelist",
+  "variables": [
+    { "name": "chain_id", "type": "string", "description": "Chain ID", "required": true, "default": "" }
+  ],
+  "config": { "expression": "..." },
+  "budget_metering": { "method": "none" },
+  "test_variables": { "chain_id": "1" },
+  "enabled": true
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | Yes | Template name (used by instances to reference the template) |
+| `description` | string | No | Human-readable description |
+| `type` | string | Yes | Rule type (e.g. `evm_js`, `evm_solidity_expression`, `evm_address_list`) |
+| `mode` | string | Yes | Rule mode: `whitelist` or `blocklist` |
+| `variables` | array | No | Variable definitions with name, type, description, required, default |
+| `config` | object | Yes | Rule config (may contain `${var}` placeholders) |
+| `budget_metering` | object | No | Budget metering configuration |
+| `test_variables` | object | No | Default variable values for validation |
+| `enabled` | bool | Yes | Whether the template is active |
+
+**Response (201):** Created template object.
+
+---
+
+### Update Template
+
+```
+PATCH /api/v1/templates/{id}
+```
+
+**Auth:** Admin API key required. Blocked when `security.rules_api_readonly` is true (403). Cannot update config-sourced templates (403).
+
+**Request Body:** (all fields optional)
+
+```json
+{
+  "name": "Updated Name",
+  "description": "Updated description",
+  "config": { "expression": "..." },
+  "enabled": false
+}
+```
+
+**Response (200):** Updated template object.
+
+---
+
+### Delete Template
+
+```
+DELETE /api/v1/templates/{id}
+```
+
+**Auth:** Admin API key required. Blocked when `security.rules_api_readonly` is true (403). Cannot delete config-sourced templates (403).
+
+**Response:** 204 No Content on success. 404 if not found.
+
+---
+
+### Instantiate Template (Create Instance)
+
+```
+POST /api/v1/templates/{id}/instantiate
+```
+
+**Auth:** Admin API key required. Blocked when `security.rules_api_readonly` is true (403).
+
+**Request Body:**
+
+```json
+{
+  "template_name": "Optional name override",
+  "name": "My instance rule name",
+  "variables": { "chain_id": "137", "token_address": "0x..." },
+  "chain_type": "evm",
+  "chain_id": "137",
+  "api_key_id": "key_123",
+  "signer_address": "0x...",
+  "expires_at": "2025-01-15T00:00:00Z",
+  "expires_in": "168h",
+  "budget": {
+    "max_total": "1000000000000000000",
+    "max_per_tx": "100000000000000000",
+    "max_tx_count": 100,
+    "alert_pct": 80
+  },
+  "schedule": {
+    "period": "24h",
+    "start_at": "2024-01-15T00:00:00Z"
+  }
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `variables` | object | Yes | Variable values to substitute into the template |
+| `template_name` | string | No | Override template lookup by name instead of path `{id}` |
+| `name` | string | No | Custom name for the created rule instance |
+| `chain_type` | string | No | Scope to chain type (e.g. `evm`) |
+| `chain_id` | string | No | Scope to chain ID |
+| `api_key_id` | string | No | Scope to specific API key |
+| `signer_address` | string | No | Scope to specific signer |
+| `expires_at` | string | No | Absolute expiration (RFC3339) |
+| `expires_in` | string | No | Relative expiration duration (e.g. `"24h"`, `"168h"`) |
+| `budget` | object | No | Budget enforcement config |
+| `schedule` | object | No | Budget reset schedule |
+
+**Response (201):**
+
+```json
+{
+  "rule": { "id": "rule_xyz", "name": "...", "type": "evm_js", "...": "..." },
+  "budget": { "id": "...", "max_total": "...", "..." : "..." }
+}
+```
+
+---
+
+### Revoke Template Instance
+
+```
+POST /api/v1/templates/instances/{ruleId}/revoke
+```
+
+**Auth:** Admin API key required. Blocked when `security.rules_api_readonly` is true (403).
+
+**Response (200):**
+
+```json
+{
+  "status": "revoked",
+  "rule_id": "rule_xyz"
+}
+```
+
+**Errors:** 404 if instance not found.
+
+---
+
 ## Presets
 
 Preset endpoints are available only when `presets.dir` is set in server config. **All require admin API key.** Apply is disabled when `security.rules_api_readonly` is true (403).
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `GET /api/v1/presets` | GET | List presets. Response: `{ "presets": [ { "id": "<filename>", "template_names": ["..."] }, ... ] }`. |
-| `GET /api/v1/presets/:id/vars` | GET | Get variable override hints for preset `:id` (filename, e.g. `polymarket_safe_polygon.preset.yaml`). Response: `{ "override_hints": ["var1", "var2", ... ] }`. |
-| `POST /api/v1/presets/:id/apply` | POST | Apply preset with optional body `{ "variables": { "key": "value", ... } }`. Creates one template instance per preset rule in one transaction. Response (201): `{ "results": [ { "rule": { ... }, "budget": { ... }? }, ... ] }`. Templates must exist in the template library. |
+### List Presets
+
+```
+GET /api/v1/presets
+```
+
+**Auth:** Admin API key required.
+
+**Response (200):**
+
+```json
+{
+  "presets": [
+    {
+      "id": "polymarket_safe_polygon.preset.js.yaml",
+      "template_names": ["Polymarket Auth Template", "Polymarket Safe Template"]
+    }
+  ]
+}
+```
+
+---
+
+### Get Preset Variables
+
+```
+GET /api/v1/presets/{id}/vars
+```
+
+**Auth:** Admin API key required.
+
+**Path Parameters:**
+
+| Parameter | Description |
+|-----------|-------------|
+| `id` | Preset filename (e.g. `polymarket_safe_polygon.preset.js.yaml`). The server also tries `{id}.yaml` and `{id}.preset.yaml` if no extension is provided. |
+
+**Response (200):**
+
+```json
+{
+  "override_hints": ["allowed_safe_addresses", "allowed_safe_address_for_testing"]
+}
+```
+
+**Errors:** 404 if preset not found. 400 if preset file is invalid.
+
+---
+
+### Apply Preset
+
+```
+POST /api/v1/presets/{id}/apply
+```
+
+**Auth:** Admin API key required. Blocked when `security.rules_api_readonly` is true (403). Requires template service and database to be configured.
+
+**Request Body:** (optional)
+
+```json
+{
+  "variables": {
+    "allowed_safe_addresses": "0xYourSafe1,0xYourSafe2",
+    "allowed_safe_address_for_testing": "0xYourSafe1"
+  }
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `variables` | object | No | Variable overrides merged with preset defaults |
+
+**Response (201):**
+
+```json
+{
+  "results": [
+    {
+      "rule": { "id": "rule_abc", "name": "Polymarket Safe rules (Polygon)", "..." : "..." },
+      "budget": { "id": "...", "max_total": "...", "..." : "..." }
+    }
+  ]
+}
+```
+
+All rules in the preset are created in a single database transaction (all succeed or all roll back). Templates referenced by the preset must already exist in the template library (database).
+
+**Errors:** 404 if preset not found. 400 if preset parsing or template resolution fails. 403 if read-only mode. 503 if template service or database not configured.
+
+---
+
+## ACLs
+
+### Get IP Whitelist Config
+
+```
+GET /api/v1/acls/ip-whitelist
+```
+
+**Auth:** Admin API key required. Only registered when `security.ip_whitelist` is configured.
+
+**Response (200):**
+
+```json
+{
+  "enabled": true,
+  "allowed_ips": ["10.0.0.1", "192.168.1.0/24"],
+  "trust_proxy": true,
+  "trusted_proxies": ["172.16.0.0/12"]
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `enabled` | bool | Whether IP whitelist enforcement is active |
+| `allowed_ips` | array | List of allowed IP addresses or CIDR ranges |
+| `trust_proxy` | bool | Whether to trust proxy headers (X-Forwarded-For) |
+| `trusted_proxies` | array | List of trusted proxy IP addresses or CIDR ranges |
+
+This is a read-only endpoint. IP whitelist configuration is managed via `config.yaml` only.
 
 ---
 
