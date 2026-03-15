@@ -93,6 +93,31 @@ The server starts with no signers. To add your first signer (import a private ke
 
 If you prefer manual control, see [docs/configuration.md](docs/configuration.md) for the full config reference and use `config.example.yaml` as a starting point.
 
+## Why Remote Signer
+
+The most capable open-source signing service for EVM chains. Fireblocks-level policy control, self-hosted and free.
+
+| Capability | remote-signer | Fireblocks | web3signer | Vault |
+|-----------|:---:|:---:|:---:|:---:|
+| Address whitelist/blocklist | Y | Y | Basic | - |
+| Value limits + budgets | Y | Y | - | - |
+| **JS scripting rules** | **Y** | - | - | - |
+| **Solidity expression rules** | **Y** | - | - | - |
+| **Composable delegation chains** | **Y** | - | - | - |
+| **23 protocol templates** | **Y** | N/A | - | - |
+| **OFAC dynamic blocklist** | **Y** | Paid | - | - |
+| Multi-chain matrix presets | Y | N/A | - | - |
+| Open source | Y | - | Y | Y |
+| Self-hosted | Y | - | Y | Y |
+
+**92,000+ lines of code** -- 48K production Go, 61K test code, 2,173 unit + 214 E2E tests.
+
+**23 rule templates** covering: ERC-20/721/1155, Permits (EIP-2612/4494), DEX (Uniswap V2/V3/V4), Staking, Safe + MultiSend, EIP-4337 Account Abstraction, EIP-2771 Meta-TX, OFAC Blocklist, Gas Cap, and more.
+
+**Composable rules**: Safe -> MultiSend -> ERC20 transfer validation, all in a single recursive delegation chain.
+
+See [Competitive Analysis](docs/competitive-analysis.md) for the full breakdown.
+
 ### Adding Signers
 
 The server starts without signers. Add them after startup:
@@ -118,6 +143,7 @@ The server starts without signers. Add them after startup:
 
 | Document | Description |
 |----------|-------------|
+| [Competitive Analysis](docs/competitive-analysis.md) | Market positioning, feature comparison vs Fireblocks/web3signer/Vault |
 | [Use Cases](docs/use-cases.md) | Treasury, bot, DeFi scenarios |
 | [Architecture](docs/architecture.md) | System design, layers, adapters |
 
@@ -152,6 +178,7 @@ The server starts without signers. Add them after startup:
 |----------|-------------|
 | [Security Overview](docs/security.md) | Defense-in-depth: 8 layers from network to application |
 | [Security Review](docs/security-review.md) | Findings, priorities, implementation status |
+| [Admin Operation Alerting](docs/security/admin-operation-alerting.md) | Real-time alerts on all privileged operations |
 
 ### Development
 
@@ -167,14 +194,20 @@ The server starts without signers. Add them after startup:
 
 - [x] EIP-712 Typed Data Validation
 - [x] Terminal UI (TUI)
-- [x] Go Client SDK
-- [x] JS/TS Client SDK
-- [ ] Solidity Rule Coverage Enforcement
+- [x] Go / TypeScript / Rust Client SDKs
+- [x] MCP Server (AI agent integration)
+- [x] 23 Rule Templates (ERC-20/721/1155, Permit, DEX, Safe, 4337, etc.)
+- [x] Multi-chain Presets (USDC, Uniswap V2/V3/V4)
+- [x] OFAC Dynamic Blocklist
+- [x] Real-time Admin Operation Alerting
+- [x] EIP-4337 Account Abstraction Support
+- [ ] Auto-Discovery Delegation (zero-config rule composition)
+- [ ] Internal Signer Transfer Rules
 - [ ] Solana Chain Support
 - [ ] Cosmos Chain Support
 - [ ] Bitcoin Chain Support
 - [ ] Web UI Dashboard
-- [ ] Audit Log Export (S3, Elasticsearch)
+- [ ] MPC / TSS Integration
 
 ## License
 
