@@ -418,9 +418,8 @@ func (s *TemplateService) createBudgetWithRepo(ctx context.Context, budgetRepo s
 	if alertPct <= 0 {
 		alertPct = 80
 	}
-	budgetID := fmt.Sprintf("bdg_%s_%s", rule.ID, unit)
 	budget := &types.RuleBudget{
-		ID:         budgetID,
+		ID:         types.BudgetID(rule.ID, unit),
 		RuleID:     rule.ID,
 		Unit:       unit,
 		MaxTotal:   budgetCfg.MaxTotal,

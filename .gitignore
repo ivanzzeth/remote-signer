@@ -77,6 +77,9 @@ remote-signer.db
 # Docker volumes and cache
 postgres_data/
 forge_cache/
+# Rust build artifacts
+target/
+
 # Build artifacts
 cache/
 out/

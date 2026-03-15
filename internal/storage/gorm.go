@@ -67,6 +67,11 @@ func NewDB(cfg Config) (*gorm.DB, error) {
 		return nil, fmt.Errorf("failed to auto-migrate: %w", err)
 	}
 
+	// Run versioned SQL migrations (e.g. widen columns) from internal/storage/migrations/<dialect>/
+	if err := runMigrations(db, cfg.DSN); err != nil {
+		return nil, fmt.Errorf("migrations: %w", err)
+	}
+
 	return db, nil
 }
 
@@ -97,6 +102,10 @@ func NewDBWithLogger(cfg Config, logLevel logger.LogLevel) (*gorm.DB, error) {
 		&types.AuditRecord{},
 	); err != nil {
 		return nil, fmt.Errorf("failed to auto-migrate: %w", err)
+	}
+
+	if err := runMigrations(db, cfg.DSN); err != nil {
+		return nil, fmt.Errorf("migrations: %w", err)
 	}
 
 	return db, nil

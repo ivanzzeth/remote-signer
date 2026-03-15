@@ -13,6 +13,35 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/preset"
 )
 
+// quotedYAMLString is a string that marshals to YAML as a double-quoted scalar.
+// Used for values containing ':' so the colon is not interpreted as key-value.
+type quotedYAMLString string
+
+func (q quotedYAMLString) MarshalYAML() (interface{}, error) {
+	return &yaml.Node{Kind: yaml.ScalarNode, Value: string(q), Style: yaml.DoubleQuotedStyle}, nil
+}
+
+// quoteColonStrings walks rule/template config maps and replaces string values
+// that contain ':' with quotedYAMLString so they are emitted quoted and parse correctly.
+func quoteColonStrings(in interface{}) {
+	switch v := in.(type) {
+	case map[string]interface{}:
+		for k, val := range v {
+			quoteColonStrings(val)
+			if s, ok := val.(string); ok && strings.Contains(s, ":") {
+				v[k] = quotedYAMLString(s)
+			}
+		}
+	case []interface{}:
+		for i, val := range v {
+			quoteColonStrings(val)
+			if s, ok := val.(string); ok && strings.Contains(s, ":") {
+				v[i] = quotedYAMLString(s)
+			}
+		}
+	}
+}
+
 var presetCmd = &cobra.Command{
 	Use:   "preset",
 	Short: "List presets or create rules from a preset",
@@ -226,6 +255,16 @@ func mergeCompositePresetIntoConfig(configPath string, rules []config.RuleConfig
 		cfg.Rules = append(filtered, rules...)
 	} else {
 		cfg.Rules = append(cfg.Rules, rules...)
+	}
+	for i := range cfg.Rules {
+		if cfg.Rules[i].Config != nil {
+			quoteColonStrings(cfg.Rules[i].Config)
+		}
+	}
+	for i := range cfg.Templates {
+		if cfg.Templates[i].Config != nil {
+			quoteColonStrings(cfg.Templates[i].Config)
+		}
 	}
 	out, err := yaml.Marshal(cfg)
 	if err != nil {

@@ -1803,7 +1803,7 @@ func TestRevokeInstance(t *testing.T) {
 
 		// Seed a budget
 		budget := &types.RuleBudget{
-			ID:       "bdg_inst_revoke_1_eth",
+			ID:       types.BudgetID(ruleID, "eth"),
 			RuleID:   ruleID,
 			Unit:     "eth",
 			MaxTotal: "100",

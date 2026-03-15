@@ -59,7 +59,7 @@ Docker Commands:
     run --no-screen   Start in background (no screen; use when no keystore password needed)
     attach      Reattach to running remote-signer session (only when started with 'run' without --no-screen)
     down        Stop all services
-    restart     Restart remote-signer interactively (for password input)
+    restart     Restart remote-signer (use --no-screen for background, no password)
     logs        View service logs
     build       Build Docker images
     clean       Remove all containers and volumes
@@ -356,17 +356,36 @@ stop_services() {
 }
 
 # =============================================================================
-# Restart services (interactive mode for password input)
+# Restart services
 # =============================================================================
+# restart_services [--no-screen]
+#   Without --no-screen: interactive (screen, for keystore password).
+#   With --no-screen: stop, rebuild, then start in background (docker_compose up -d).
 restart_services() {
+    local no_screen=false
+    if [ "${1:-}" = "--no-screen" ] || [ "${1:-}" = "-n" ]; then
+        no_screen=true
+    fi
+
     log_info "Restarting services..."
     cd "$PROJECT_DIR"
 
     # Stop remote-signer first
+    screen -S remote-signer -X quit 2>/dev/null || true
     docker_compose stop remote-signer 2>/dev/null || true
     docker rm -f remote-signer-app 2>/dev/null || true
 
-    # Run remote-signer interactively using screen
+    log_info "Building latest image..."
+    docker_build_with_retry remote-signer
+
+    if [ "$no_screen" = true ]; then
+        log_info "Starting remote-signer in background (no screen)..."
+        docker_compose up -d
+        log_info "Server is running in background. View logs: $0 logs -f"
+        return
+    fi
+
+    # Interactive: run remote-signer in screen for password input
     log_info "Starting remote-signer (enter keystore password when prompted)..."
     log_info ""
     log_info ">>> After entering password, press Ctrl+A then D to detach screen <<<"
@@ -374,14 +393,6 @@ restart_services() {
     log_info ">>> Use './scripts/deploy.sh attach' to reattach                  <<<"
     log_info ""
 
-    # Kill any existing screen session
-    screen -S remote-signer -X quit 2>/dev/null || true
-
-    # Always rebuild to ensure latest code is deployed
-    log_info "Building latest image..."
-    docker_build_with_retry remote-signer
-
-    # Start in screen session (interactive)
     cd "$PROJECT_DIR"
     exec screen -S remote-signer "${DOCKER_COMPOSE[@]}" run -it --service-ports --name remote-signer-app remote-signer
 }
@@ -738,7 +749,8 @@ case "${1:-}" in
         stop_services
         ;;
     restart)
-        restart_services
+        shift
+        restart_services "$@"
         ;;
     logs)
         shift

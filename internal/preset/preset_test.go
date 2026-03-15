@@ -352,6 +352,27 @@ schedule:
 	assert.Equal(t, "24h", rules[0].Schedule["period"])
 }
 
+func TestParsePresetFile_BudgetUnitNotSubstituted(t *testing.T) {
+	data := []byte(`name: "Test"
+template: "T"
+chain_type: "evm"
+chain_id: "137"
+enabled: true
+variables:
+  chain_id: "137"
+  token_address: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+budget:
+  unit: "${chain_id}:${token_address}"
+  max_total: "1000000"
+`)
+	rules, err := ParsePresetFile(data, nil)
+	require.NoError(t, err)
+	require.Len(t, rules, 1)
+	// unit must remain template form so config only needs variables changed when switching chains
+	assert.Equal(t, "${chain_id}:${token_address}", rules[0].Budget["unit"])
+	assert.Equal(t, "1000000", rules[0].Budget["max_total"])
+}
+
 func TestParsePresetFile_InvalidYAML(t *testing.T) {
 	_, err := ParsePresetFile([]byte("not yaml"), nil)
 	require.Error(t, err)
