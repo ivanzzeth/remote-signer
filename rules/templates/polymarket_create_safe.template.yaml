@@ -2,10 +2,6 @@
 # Split from polymarket_safe.template.yaml. No Safe address required.
 
 variables:
-  - name: chain_id
-    type: string
-    description: "Chain ID (e.g. 137 for Polygon)"
-    required: true
   - name: safe_proxy_factory_address
     type: address
     description: "Safe Proxy Factory contract address"

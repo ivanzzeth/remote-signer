@@ -6,10 +6,6 @@
 # Uses engine-injected: eq, toChecksum, isAddress, selector, fail, ok.
 
 variables:
-  - name: chain_id
-    type: string
-    description: "Chain ID (e.g. 1 for mainnet)"
-    required: true
   - name: allowed_safe_addresses
     type: address_list
     description: "Comma-separated allowed Safe addresses (verifyingContract / tx to)"

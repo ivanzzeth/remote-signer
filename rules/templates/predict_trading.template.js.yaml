@@ -2,10 +2,6 @@
 # Same logic as predict_trading.template.yaml but uses evm_js for faster validation (no Forge).
 
 variables:
-  - name: chain_id
-    type: string
-    description: "Chain ID (e.g. 56 for BNB Chain)"
-    required: true
   - name: order_domain_name
     type: string
     description: "EIP-712 Order domain name (e.g. predict.fun CTF Exchange)"

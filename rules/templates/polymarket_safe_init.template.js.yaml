@@ -2,10 +2,6 @@
 # After createProxy, add polymarket_safe_polygon preset with --set allowed_safe_addresses=<your_safe>.
 
 variables:
-  - name: chain_id
-    type: string
-    description: "Chain ID (e.g. 137 for Polygon)"
-    required: true
   - name: safe_proxy_factory_address
     type: address
     description: "Safe Proxy Factory contract address"

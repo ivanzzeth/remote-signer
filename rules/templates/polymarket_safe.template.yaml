@@ -5,10 +5,6 @@
 # Use test_variables for validate-rules; use instance config.variables for deployment.
 
 variables:
-  - name: chain_id
-    type: string
-    description: "Chain ID (e.g. 137 for Polygon)"
-    required: true
   - name: ctf_exchange_address
     type: address
     description: "CTF Exchange contract address"

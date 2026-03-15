@@ -1,10 +1,6 @@
 # Polymarket protocol rules (evm_js). Compose with Safe template: Safe handles SafeTx/execTransaction and delegates inner calls to "Polymarket transactions" rule from this template.
 
 variables:
-  - name: chain_id
-    type: string
-    description: "Chain ID (e.g. 137 for Polygon)"
-    required: true
   - name: ctf_exchange_address
     type: address
     description: "CTF Exchange contract address"
