@@ -487,12 +487,10 @@ func (i *RuleInitializer) syncRule(ctx context.Context, repo storage.RuleReposit
 		Config:      configJSON,
 		Enabled:     ruleCfg.Enabled,
 	}
-	if len(ruleCfg.Variables) > 0 {
-		variablesJSON, err := json.Marshal(ruleCfg.Variables)
-		if err != nil {
-			return fmt.Errorf("failed to marshal rule variables: %w", err)
-		}
-		rule.Variables = variablesJSON
+	// Prepare variables map; chain_id will be injected from rule-level scope below.
+	variables := make(map[string]interface{})
+	for k, v := range ruleCfg.Variables {
+		variables[k] = v
 	}
 
 	// Set and validate optional scope fields
@@ -509,7 +507,23 @@ func (i *RuleInitializer) syncRule(ctx context.Context, repo storage.RuleReposit
 	}
 	if ruleCfg.ChainID != "" {
 		rule.ChainID = &ruleCfg.ChainID
+		// Inject chain_id as reserved variable from rule-level scope.
+		if old, exists := variables["chain_id"]; exists && fmt.Sprintf("%v", old) != ruleCfg.ChainID {
+			i.logger.Warn("overriding config chain_id variable with rule-level scope",
+				"rule", ruleCfg.Name, "var_value", old, "scope_value", ruleCfg.ChainID)
+		}
+		variables["chain_id"] = ruleCfg.ChainID
 	}
+
+	// Marshal variables (with chain_id injected from scope)
+	if len(variables) > 0 {
+		variablesJSON, err := json.Marshal(variables)
+		if err != nil {
+			return fmt.Errorf("failed to marshal rule variables: %w", err)
+		}
+		rule.Variables = variablesJSON
+	}
+
 	if ruleCfg.APIKeyID != "" {
 		rule.APIKeyID = &ruleCfg.APIKeyID
 	}

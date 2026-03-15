@@ -1,9 +1,5 @@
 # Polymarket Trading (Order + SafeTx + execTransaction) — capability template. Split from polymarket_safe.template.yaml.
 variables:
-- name: chain_id
-  type: string
-  description: Chain ID (e.g. 137 for Polygon)
-  required: true
 - name: ctf_exchange_address
   type: address
   description: CTF Exchange contract address

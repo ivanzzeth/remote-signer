@@ -123,6 +123,9 @@ func (s *TemplateService) CreateInstance(ctx context.Context, req *CreateInstanc
 	// 4. Fill defaults for optional variables
 	resolvedVars := resolveDefaults(varDefs, req.Variables)
 
+	// 4.5. Inject reserved variables from rule scope
+	injectReservedVariables(resolvedVars, req, s.logger)
+
 	// 5. Substitute variables in config
 	resolvedConfig, err := SubstituteVariables(tmpl.Config, resolvedVars)
 	if err != nil {
@@ -267,6 +270,7 @@ func (s *TemplateService) createInstanceFromResolved(
 		return nil, fmt.Errorf("variable validation failed: %w", err)
 	}
 	resolvedVars := resolveDefaults(varDefs, req.Variables)
+	injectReservedVariables(resolvedVars, req, s.logger)
 	resolvedConfig, err := SubstituteVariables(tmpl.Config, resolvedVars)
 	if err != nil {
 		return nil, fmt.Errorf("variable substitution failed: %w", err)
@@ -443,6 +447,19 @@ func (s *TemplateService) createBudgetWithRepo(ctx context.Context, budgetRepo s
 	return budget, nil
 }
 
+// injectReservedVariables injects reserved variables (e.g. chain_id) from the
+// rule-level scope into the resolved variables map.  If the user already
+// supplied a value it is overwritten and a warning is logged.
+func injectReservedVariables(vars map[string]string, req *CreateInstanceRequest, logger *slog.Logger) {
+	if req.ChainID != nil {
+		if old, exists := vars["chain_id"]; exists && old != *req.ChainID {
+			logger.Warn("overriding user-supplied chain_id variable with rule-level scope",
+				"user_value", old, "scope_value", *req.ChainID)
+		}
+		vars["chain_id"] = *req.ChainID
+	}
+}
+
 // SubstituteVariables replaces ${var} placeholders in config JSON with actual values
 func SubstituteVariables(configJSON []byte, vars map[string]string) ([]byte, error) {
 	result := string(configJSON)
@@ -465,9 +482,21 @@ func SubstituteVariables(configJSON []byte, vars map[string]string) ([]byte, err
 	return []byte(result), nil
 }
 
+// reservedVariables are auto-injected from rule scope and should not be
+// required from user input.  Templates that still list them are tolerated
+// (backward-compat) but the definition is silently skipped during validation.
+var reservedVariables = map[string]bool{
+	"chain_id": true,
+}
+
 // validateVariables validates the provided variables against the template definitions
 func validateVariables(defs []types.TemplateVariable, vars map[string]string) error {
 	for _, def := range defs {
+		// Skip reserved variables – they are injected from rule scope.
+		if reservedVariables[def.Name] {
+			continue
+		}
+
 		val, provided := vars[def.Name]
 
 		// Check required

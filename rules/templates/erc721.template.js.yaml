@@ -4,10 +4,6 @@
 # All parameters validated: allowlists for addresses (empty = any).
 
 variables:
-  - name: chain_id
-    type: string
-    description: "Chain ID (e.g. 1 for mainnet)"
-    required: true
   - name: token_address
     type: address
     description: "ERC721 NFT contract address"

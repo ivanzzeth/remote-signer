@@ -3,10 +3,6 @@
 # Template does not care about EOA vs Safe; trading is the same capability.
 
 variables:
-  - name: chain_id
-    type: string
-    description: "Chain ID (e.g. 56 for BNB Chain)"
-    required: true
   - name: order_domain_name
     type: string
     description: "EIP-712 Order domain name (e.g. predict.fun CTF Exchange)"

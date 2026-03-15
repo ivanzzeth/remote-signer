@@ -3,10 +3,6 @@
 # Gnosis MultiSend packed format per tx: operation(1) + to(20) + value(32) + dataLength(32) + data.
 
 variables:
-  - name: chain_id
-    type: string
-    description: "Chain ID (e.g. 1 for mainnet)"
-    required: true
   - name: multisend_contract_address
     type: address
     description: "Multisend contract address (tx 'to')"

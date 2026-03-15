@@ -2,10 +2,6 @@
 # Split from polymarket_safe.template.yaml. Use with polymarket_eoa_polygon or composite Safe presets.
 
 variables:
-  - name: chain_id
-    type: string
-    description: "Chain ID (e.g. 137 for Polygon)"
-    required: true
   - name: clob_auth_domain_name
     type: string
     description: "ClobAuth EIP-712 domain name"

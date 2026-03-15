@@ -3,10 +3,6 @@
 # Template does not care about EOA vs Safe; enable_trading is the same capability.
 
 variables:
-  - name: chain_id
-    type: string
-    description: "Chain ID (e.g. 56 for BNB Chain)"
-    required: true
   - name: usdt_address
     type: address
     description: "USDT token address"
