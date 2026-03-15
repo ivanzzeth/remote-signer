@@ -1,0 +1,64 @@
+# Preset: USDC transfer/approve limits across major EVM chains (matrix).
+# Creates one pair of rules (transfer-limit + approve-limit) per chain.
+#
+# Usage:
+#   # Deploy all chains at once:
+#   remote-signer-cli preset create-from usdc.preset.js.yaml --set max_transfer_amount=1000000000 --config config.yaml --write
+#
+#   # Deploy single chain (override chain_id to filter — matrix still expands all, use config to pick):
+#   remote-signer-cli preset create-from usdc.preset.js.yaml --set max_transfer_amount=1000000000 --config config.yaml --write
+#
+# Budget amount convention: all amounts are in USDC smallest unit (6 decimals).
+#   1 USDC = 1000000, 1000 USDC = 1000000000, 10000 USDC = 10000000000.
+#
+# Contract addresses sourced from Circle's official documentation:
+#   https://developers.circle.com/stablecoins/docs/usdc-on-main-networks
+
+name: "USDC (JS)"
+template_paths:
+  - "rules/templates/erc20.template.js.yaml"
+template_names:
+  - "ERC20 Template"
+chain_type: "evm"
+enabled: true
+
+matrix:
+  # Native USDC (Circle-issued)
+  - chain_id: "1"       # Ethereum
+    token_address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+  - chain_id: "137"     # Polygon PoS (native USDC)
+    token_address: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
+  - chain_id: "42161"   # Arbitrum One
+    token_address: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"
+  - chain_id: "10"      # Optimism
+    token_address: "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85"
+  - chain_id: "43114"   # Avalanche C-Chain
+    token_address: "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E"
+  - chain_id: "8453"    # Base
+    token_address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+
+defaults:
+  max_transfer_amount: ""    # required — user must --set (e.g. 1000000000 = 1000 USDC)
+  max_approve_amount: "-1"   # -1 = no cap
+  budget_period: "24h"
+  allowed_recipients: ""
+  allowed_spenders: ""
+  allowed_transfer_from: ""
+
+budget:
+  unit: "${chain_id}:${token_address}"
+  max_total: "${max_transfer_amount}"
+  max_per_tx: "${max_transfer_amount}"
+  max_tx_count: 0
+  alert_pct: 80
+
+schedule:
+  period: "${budget_period}"
+
+override_hints:
+  - max_transfer_amount
+  - max_approve_amount
+  - budget_period
+  - allowed_recipients
+  - allowed_spenders
+  - allowed_transfer_from
