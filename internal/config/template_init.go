@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -474,6 +475,9 @@ func expandInstanceRule(rule RuleConfig, templates map[string]TemplateConfig) ([
 		}
 		if rule.ChainID != "" {
 			templateRules[idx].ChainID = rule.ChainID
+			// Inject chain_id into test_cases inputs so the rule engine's scope
+			// filter matches during validation (test_cases default to chain_id=1).
+			injectChainIDIntoTestCases(templateRules[idx].TestCases, rule.ChainID)
 		}
 		if rule.APIKeyID != "" {
 			templateRules[idx].APIKeyID = rule.APIKeyID
@@ -491,6 +495,8 @@ func expandInstanceRule(rule RuleConfig, templates map[string]TemplateConfig) ([
 			}
 		}
 		// Attach template test_variables so startup validation runs test cases with expected pass/fail.
+		// Do NOT override with instance variables — test_cases are designed for
+		// test_variables and expect specific addresses/values.
 		if len(tmpl.TestVariables) > 0 {
 			templateRules[idx].TestVariables = make(map[string]string, len(tmpl.TestVariables))
 			for k, v := range tmpl.TestVariables {
@@ -524,9 +530,56 @@ func expandInstanceRule(rule RuleConfig, templates map[string]TemplateConfig) ([
 				}
 			}
 		}
+	} else if len(templateRules) > 0 {
+		// No explicit instance id — derive a scope-based suffix so that multiple
+		// instances of the same template (e.g. USDC on chain 1 vs chain 137) get
+		// unique sub-rule IDs.  Format: "{original_id}-{chain_type}-{chain_id}".
+		scopeSuffix := instanceScopeSuffix(rule)
+		if scopeSuffix != "" {
+			for idx := range templateRules {
+				tid := strings.TrimSpace(templateRules[idx].Id)
+				if tid != "" {
+					templateRules[idx].Id = tid + "-" + scopeSuffix
+				}
+			}
+		}
 	}
 
 	return templateRules, nil
+}
+
+// injectChainIDIntoTestCases sets chain_id in each test case's input to match the
+// rule's scope. Without this, test cases default to chain_id=1 and the rule engine's
+// scope filter rejects them for non-chain-1 rules.
+func injectChainIDIntoTestCases(testCases []TestCaseConfig, chainID string) {
+	if chainID == "" {
+		return
+	}
+	// Parse as int for JSON numeric type (chain_id in test input is numeric)
+	chainIDNum, err := strconv.ParseInt(chainID, 10, 64)
+	for i := range testCases {
+		if testCases[i].Input == nil {
+			continue
+		}
+		if err == nil {
+			testCases[i].Input["chain_id"] = chainIDNum
+		} else {
+			testCases[i].Input["chain_id"] = chainID
+		}
+	}
+}
+
+// instanceScopeSuffix returns a suffix like "evm-137" from the instance rule's
+// scope fields (chain_type, chain_id).  Returns "" if no scope is set.
+func instanceScopeSuffix(rule RuleConfig) string {
+	parts := make([]string, 0, 2)
+	if rule.ChainType != "" {
+		parts = append(parts, rule.ChainType)
+	}
+	if rule.ChainID != "" {
+		parts = append(parts, rule.ChainID)
+	}
+	return strings.Join(parts, "-")
 }
 
 // fillOptionalTemplateVariables fills missing optional variables from template defaults.
