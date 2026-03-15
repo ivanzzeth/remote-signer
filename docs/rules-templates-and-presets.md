@@ -116,7 +116,7 @@ rs.typedData.requireDomain(ctx.domain, { name: config.domain_name, version: conf
 **Address and amount checks:**
 ```javascript
 rs.addr.requireInList(spender, config.allowed_spenders, 'spender not allowed');
-rs.addr.requireInListIfNonEmpty(to, config.allowed_recipients, 'to not allowed');  // empty list = any
+rs.addr.requireInListIfNonEmpty(to, config.allowed_recipients, 'to not allowed');  // empty list = any (but many templates now mark this variable as REQUIRED)
 rs.addr.requireZero(msg.taker, 'taker must be zero');
 rs.bigint.requireLte(amount, config.max_amount, 'transfer');  // empty/0 max = no limit
 ```
@@ -408,7 +408,7 @@ All templates live under `rules/templates/`.
 
 | File | Engine | Description |
 |------|--------|-------------|
-| `dex_swap.template.js.yaml` | evm_js | Uniswap V2 router swap method whitelist |
+| `dex_swap.template.js.yaml` | evm_js | Uniswap V2 router swap with full parameter validation (recipient=signer, token path, amount cap) |
 | `dex_swap_v3.template.js.yaml` | evm_js | Uniswap V3 SwapRouter + V4 Universal Router |
 | `staking.template.js.yaml` | evm_js | Common staking operations (stake, unstake, withdraw, claimRewards, exit) |
 

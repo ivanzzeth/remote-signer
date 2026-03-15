@@ -81,8 +81,8 @@ Budget resets according to `budget_period` (default: 24h).
 | max_transfer_amount | string | Yes | "" (must set) | Max amount per transfer/transferFrom, in smallest unit (6 decimals). E.g. 1000000000 = 1000 USDC |
 | max_approve_amount | string | No | "-1" (no cap) | Max amount per approve. -1 = no cap, 0 = block all |
 | budget_period | string | No | "24h" | Budget reset period (e.g. 24h, 168h) |
-| allowed_recipients | address_list | No | "" (any) | Comma-separated addresses allowed as transfer(to) or transferFrom(..., to) |
-| allowed_spenders | address_list | No | "" (any) | Comma-separated addresses allowed as approve(spender) |
+| allowed_recipients | address_list | **Yes** | - | Comma-separated addresses allowed as transfer(to) or transferFrom(..., to). REQUIRED: must explicitly list allowed recipient addresses |
+| allowed_spenders | address_list | **Yes** | - | Comma-separated addresses allowed as approve(spender). REQUIRED: must explicitly list allowed spender addresses |
 | allowed_transfer_from | address_list | No | "" (any) | Comma-separated addresses allowed as transferFrom(from, ...) |
 
 ---
@@ -91,13 +91,17 @@ Budget resets according to `budget_period` (default: 24h).
 
 ### Deploy USDC rules for all chains with transfer cap
 
+`allowed_recipients` and `allowed_spenders` are **required** -- you must explicitly specify them.
+
 ```bash
 remote-signer-cli preset create-from usdc.preset.js.yaml \
   --set max_transfer_amount=1000000000 \
+  --set allowed_recipients=0x5B38Da6a701c568545dCfcB03FcB875f56beddC4 \
+  --set allowed_spenders=0xE592427A0AEce92De3Edee1F18E0157C05861564 \
   --config config.yaml --write
 ```
 
-### Deploy with recipient restrictions and custom budget period
+### Deploy with custom budget period
 
 ```bash
 remote-signer-cli preset create-from usdc.preset.js.yaml \

@@ -10,7 +10,7 @@ Uniswap decentralized exchange protocol, supporting V2, V3, and V4 across major 
 
 | Version | Router Type | Key Difference |
 | --- | --- | --- |
-| V2 | Router02 | 6 swap methods, dynamic-array path routing, no deep calldata validation |
+| V2 | Router02 | 6 swap methods, full parameter validation: recipient=signer, token path allowlists, amount cap |
 | V3 | SwapRouter | Tuple-encoded params (exactInputSingle/exactOutputSingle), token/amount validation |
 | V4 | Universal Router | Single entry point for V2+V3+V4, method selector whitelist only (no deep calldata validation) |
 
@@ -55,30 +55,38 @@ Uniswap decentralized exchange protocol, supporting V2, V3, and V4 across major 
 
 ---
 
-## 3. V2 Rules: Swap Method Whitelist
+## 3. V2 Rules: Swap with Full Parameter Validation
 
-V2 validation: router address whitelist + method selector whitelist only. Dynamic-array params (path, amounts) are NOT decoded or validated.
+V2 validation: router address + method selector whitelist + **full parameter-level validation**. All fund-related parameters are decoded and checked:
+- **recipient (`to`)** MUST equal the signer address (prevents output theft)
+- **amountIn / amountInMax** capped by `max_amount_in`
+- **path[0]** (tokenIn) and **path[last]** (tokenOut) checked against allowlists
+
+Methods with 5 ABI params (swapExactTokensForTokens, swapTokensForExactTokens, swapExactTokensForETH, swapTokensForExactETH) decode `(uint256, uint256, address[], address, uint256)`. Methods with 4 ABI params (swapExactETHForTokens, swapETHForExactTokens) decode `(uint256, address[], address, uint256)`. In both cases the `to` (recipient) address is validated against the signer.
 
 | Rule | Contract | Method | Selector | Params | Notes |
 | --- | --- | --- | --- | --- | --- |
-| swapExactTokensForTokens | router_address | swapExactTokensForTokens(uint256,uint256,address[],address,uint256) | 0x38ed1739 | Router must match config | Exact input, variable output |
-| swapExactETHForTokens | router_address | swapExactETHForTokens(uint256,address[],address,uint256) | 0x7ff36ab5 | Router must match config | ETH in, token out |
-| swapExactTokensForETH | router_address | swapExactTokensForETH(uint256,uint256,address[],address,uint256) | 0x18cbafe5 | Router must match config | Token in, ETH out |
-| swapTokensForExactTokens | router_address | swapTokensForExactTokens(uint256,uint256,address[],address,uint256) | 0x8803dbee | Router must match config | Variable input, exact output |
-| swapETHForExactTokens | router_address | swapETHForExactTokens(uint256,address[],address,uint256) | 0xfb3bdb41 | Router must match config | ETH in, exact token out |
-| swapTokensForExactETH | router_address | swapTokensForExactETH(uint256,uint256,address[],address,uint256) | 0x4a25d94a | Router must match config | Token in, exact ETH out |
+| swapExactTokensForTokens | router_address | swapExactTokensForTokens(uint256,uint256,address[],address,uint256) | 0x38ed1739 | recipient=signer<br>amountIn <= max_amount_in<br>path[0] in allowed_token_in<br>path[last] in allowed_token_out | Exact input, variable output |
+| swapExactETHForTokens | router_address | swapExactETHForTokens(uint256,address[],address,uint256) | 0x7ff36ab5 | recipient=signer<br>path[0] in allowed_token_in<br>path[last] in allowed_token_out | ETH in, token out |
+| swapExactTokensForETH | router_address | swapExactTokensForETH(uint256,uint256,address[],address,uint256) | 0x18cbafe5 | recipient=signer<br>amountIn <= max_amount_in<br>path[0] in allowed_token_in<br>path[last] in allowed_token_out | Token in, ETH out |
+| swapTokensForExactTokens | router_address | swapTokensForExactTokens(uint256,uint256,address[],address,uint256) | 0x8803dbee | recipient=signer<br>amountIn <= max_amount_in<br>path[0] in allowed_token_in<br>path[last] in allowed_token_out | Variable input, exact output |
+| swapETHForExactTokens | router_address | swapETHForExactTokens(uint256,address[],address,uint256) | 0xfb3bdb41 | recipient=signer<br>path[0] in allowed_token_in<br>path[last] in allowed_token_out | ETH in, exact token out |
+| swapTokensForExactETH | router_address | swapTokensForExactETH(uint256,uint256,address[],address,uint256) | 0x4a25d94a | recipient=signer<br>amountIn <= max_amount_in<br>path[0] in allowed_token_in<br>path[last] in allowed_token_out | Token in, exact ETH out |
 
 **Configuration variables**:
 
-| Variable | Type | Required | Description |
-| --- | --- | --- | --- |
-| router_address | address | Yes | V2 Router contract address |
+| Variable | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| router_address | address | Yes | - | V2 Router contract address |
+| allowed_token_in | address_list | No | "" (any) | Comma-separated allowed input token addresses (path[0]) |
+| allowed_token_out | address_list | No | "" (any) | Comma-separated allowed output token addresses (path[last]) |
+| max_amount_in | string | No | "-1" (no cap) | Max input amount per swap, in token smallest unit |
 
 ---
 
 ## 4. V3 Rules: SwapRouter with Tuple Validation
 
-V3 validation: router address + method selector whitelist + tuple-decoded token/amount checks for single-hop swaps.
+V3 validation: router address + method selector whitelist + tuple-decoded token/amount checks for single-hop swaps. **recipient MUST equal the signer** (prevents output theft).
 
 ### exactInputSingle
 
@@ -97,7 +105,7 @@ struct ExactInputSingleParams {
 
 | Rule | Contract | Method | Selector | Params | Notes |
 | --- | --- | --- | --- | --- | --- |
-| exactInputSingle | router_address | exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160)) | 0x414bf389 | tokenIn in allowed_token_in<br>tokenOut in allowed_token_out<br>amountIn <= max_amount_in | Tuple decoded; per-token + per-amount validation |
+| exactInputSingle | router_address | exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160)) | 0x414bf389 | recipient=signer<br>tokenIn in allowed_token_in<br>tokenOut in allowed_token_out<br>amountIn <= max_amount_in | Tuple decoded; recipient + per-token + per-amount validation |
 
 ### exactOutputSingle
 
@@ -116,7 +124,7 @@ struct ExactOutputSingleParams {
 
 | Rule | Contract | Method | Selector | Params | Notes |
 | --- | --- | --- | --- | --- | --- |
-| exactOutputSingle | router_address | exactOutputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160)) | 0xdb3e2198 | tokenIn in allowed_token_in<br>tokenOut in allowed_token_out<br>amountInMaximum <= max_amount_in | Tuple decoded; per-token + per-amount validation |
+| exactOutputSingle | router_address | exactOutputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160)) | 0xdb3e2198 | recipient=signer<br>tokenIn in allowed_token_in<br>tokenOut in allowed_token_out<br>amountInMaximum <= max_amount_in | Tuple decoded; recipient + per-token + per-amount validation |
 
 ### Recognized but NOT Fully Validated
 
