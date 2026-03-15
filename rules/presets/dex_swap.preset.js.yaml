@@ -12,8 +12,6 @@ enabled: true
 variables:
   chain_id: "1"
   router_address: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
-  allowed_tokens: ""
-  max_amount_in: "-1"
 override_hints:
   - chain_id
   - router_address

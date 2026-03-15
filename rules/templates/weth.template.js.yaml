@@ -116,7 +116,7 @@ rules:
             data: "0x2e1a7d4d0000000000000000000000000000000000000000000000000de0b6b3a7640000"
         expect_pass: true
       # Negative cases use signer 0x000...0002 so e2e full-engine does not match "Allow hot wallet signer"
-      - name: "reject: withdraw 0 amount"
+      - name: "pass: withdraw 0 amount (within cap)"
         input:
           sign_type: "transaction"
           chain_id: 1

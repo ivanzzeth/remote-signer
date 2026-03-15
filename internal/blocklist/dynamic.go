@@ -47,8 +47,9 @@ type DynamicBlocklist struct {
 	syncErrors  int64
 
 	// lifecycle
-	cancel context.CancelFunc
-	done   chan struct{}
+	started bool
+	cancel  context.CancelFunc
+	done    chan struct{}
 }
 
 // NewDynamicBlocklist creates a new dynamic blocklist from config.
@@ -93,6 +94,11 @@ func NewDynamicBlocklist(cfg Config, logger *slog.Logger) (*DynamicBlocklist, er
 // Start loads the local cache (instant, no network), then begins background sync.
 // Returns immediately after loading cache — first remote sync happens asynchronously.
 func (b *DynamicBlocklist) Start(ctx context.Context, interval time.Duration) error {
+	if b.started {
+		return fmt.Errorf("blocklist already started")
+	}
+	b.started = true
+
 	// 1. Load persisted cache (fast, no network).
 	if n := b.loadCache(); n > 0 {
 		b.logger.Info("blocklist loaded from cache", "addresses", n, "file", b.cacheFile)
@@ -203,9 +209,12 @@ func (b *DynamicBlocklist) sync(ctx context.Context) {
 	if len(errs) > 0 {
 		b.lastSyncErr = fmt.Sprintf("%d source(s) failed: %s", len(errs), errs[0])
 		b.syncErrors++
-		// On partial failure: merge successful results with existing cache.
+		// On partial failure: merge successful results INTO existing cache to avoid
+		// dropping addresses from sources that failed this cycle (fail-closed direction).
 		if len(merged) > 0 {
-			b.addrs = merged
+			for addr := range merged {
+				b.addrs[addr] = true
+			}
 			b.logger.Warn("blocklist partial sync", "total", len(merged), "errors", len(errs))
 		} else {
 			// Total failure: keep existing cache (fail-open) or clear (fail-close handled by IsFailClosed).

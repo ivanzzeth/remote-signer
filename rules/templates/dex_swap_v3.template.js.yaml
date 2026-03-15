@@ -58,9 +58,9 @@ rules:
 
           if (eq(ctx.selector, exactInputSingleSel)) return validateExactInputSingle(ctx.payloadHex);
           if (eq(ctx.selector, exactOutputSingleSel)) return validateExactOutputSingle(ctx.payloadHex);
-          if (eq(ctx.selector, exactInputSel) || eq(ctx.selector, exactOutputSel)) return ok();
-          if (eq(ctx.selector, multicallSel) || eq(ctx.selector, multicallNoDeadlineSel)) return ok();
-          if (eq(ctx.selector, executeUniversalSel)) return ok();
+          if (eq(ctx.selector, exactInputSel) || eq(ctx.selector, exactOutputSel)) revert('method not fully validated — use exactInputSingle or exactOutputSingle');
+          if (eq(ctx.selector, multicallSel) || eq(ctx.selector, multicallNoDeadlineSel)) revert('method not fully validated — use exactInputSingle or exactOutputSingle');
+          if (eq(ctx.selector, executeUniversalSel)) revert('method not fully validated — use exactInputSingle or exactOutputSingle');
           revert('method not allowed');
         }
 

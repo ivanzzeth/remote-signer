@@ -115,7 +115,7 @@ rules:
           if (eq(sel, executeSel)) return parseExecute(signer, sender, payload);
           if (eq(sel, executeBatchSel)) return parseExecuteBatch(signer, sender, payload);
           if (eq(sel, executeBatchNoValSel)) return parseExecuteBatchNoVal(signer, sender, payload);
-          return ok();
+          revert('unsupported callData selector');
         }
         function resolveDelegateTo(targetChecksum) {
           return rs.delegate.resolveByTarget(targetChecksum, config.delegate_to_by_target, config.delegate_to);
@@ -125,7 +125,7 @@ rules:
             sign_type: 'transaction',
             chain_id: parseInt(chainId, 10) || 0,
             signer: signer,
-            transaction: { from: signer, to: dest, value: value || '0x0', data: funcData || '0x' }
+            transaction: { from: signer, to: dest, value: value || '0', data: funcData || '0x' }
           };
         }
         function parseExecute(signer, sender, payload) {
@@ -138,7 +138,8 @@ rules:
           var delegateTo = resolveDelegateTo(destChecksum);
           var chainId = config.chain_id;
           var funcData = dec[2] || '0x';
-          var p = buildPayload(signer, chainId, destChecksum, '0x0', funcData);
+          var valueStr = (dec[1] !== undefined && dec[1] !== null) ? String(dec[1]) : '0';
+          var p = buildPayload(signer, chainId, destChecksum, valueStr, funcData);
           if (delegateTo) return { valid: true, payload: p, delegate_to: delegateTo };
           return ok();
         }
@@ -155,7 +156,7 @@ rules:
             var destChecksum = toChecksum(dests[i]);
             var delegateTo = resolveDelegateTo(destChecksum);
             items.push({
-              payload: buildPayload(signer, chainId, destChecksum, '0x0', funcs[i] || '0x'),
+              payload: buildPayload(signer, chainId, destChecksum, (values[i] !== undefined && values[i] !== null) ? String(values[i]) : '0', funcs[i] || '0x'),
               delegate_to: delegateTo || ''
             });
           }
@@ -175,7 +176,7 @@ rules:
             var destChecksum = toChecksum(dests[i]);
             var delegateTo = resolveDelegateTo(destChecksum);
             items.push({
-              payload: buildPayload(signer, chainId, destChecksum, '0x0', funcs[i] || '0x'),
+              payload: buildPayload(signer, chainId, destChecksum, '0', funcs[i] || '0x'),
               delegate_to: delegateTo || ''
             });
           }

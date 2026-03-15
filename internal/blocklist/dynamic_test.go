@@ -185,3 +185,34 @@ func TestDynamicBlocklist_CaseInsensitive(t *testing.T) {
 	blocked, _ := bl.IsBlocked("0xD882CFC20F52F2599D84B8E8D58C7FB62CFE344B")
 	assert.True(t, blocked)
 }
+
+func TestNewSource_RejectsFileScheme(t *testing.T) {
+	_, err := NewSource(SourceConfig{
+		Name: "bad", Type: "url_text", URL: "file:///etc/passwd",
+	}, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "http://")
+}
+
+func TestDynamicBlocklist_DoubleStartReturnsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("0xd882cFc20F52f2599D84b8e8D58C7FB62cfE344b\n"))
+	}))
+	defer srv.Close()
+
+	cfg := Config{
+		Enabled:  true,
+		FailMode: "open",
+		Sources:  []SourceConfig{{Name: "test", Type: "url_text", URL: srv.URL}},
+	}
+	bl, err := NewDynamicBlocklist(cfg, testLogger())
+	require.NoError(t, err)
+
+	err = bl.Start(context.Background(), 1*time.Hour)
+	require.NoError(t, err)
+	defer bl.Stop()
+
+	err = bl.Start(context.Background(), 1*time.Hour)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "already started")
+}

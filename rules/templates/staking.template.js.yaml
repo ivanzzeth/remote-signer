@@ -14,6 +14,11 @@ variables:
     description: "Budget cap: max amount per stake(uint256) call, in token smallest unit (same as calldata uint256). -1 = no cap, 0 = block all; empty in preset -> -1."
     required: false
     default: "-1"
+  - name: max_unstake_amount
+    type: string
+    description: "Max amount per unstake/withdraw call, in token smallest unit. -1 = no cap."
+    required: false
+    default: "-1"
   - name: allowed_methods
     type: string
     description: "Comma-separated method names allowed. Default covers common staking patterns: stake,unstake,withdraw,claimRewards,getReward. Empty = use default."
@@ -28,6 +33,7 @@ test_variables:
   chain_id: "1"
   staking_address: "0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84"
   max_stake_amount: "1000000000000000000"
+  max_unstake_amount: "1000000000000000000"
 
 rules:
   - id: "staking-ops"
@@ -54,7 +60,18 @@ rules:
             rs.bigint.requireLte(dec[0], config.max_stake_amount, 'stake exceeds cap');
             return ok();
           }
-          if (eq(ctx.selector, unstakeSel) || eq(ctx.selector, withdrawSel)) return ok();
+          if (eq(ctx.selector, unstakeSel)) {
+            var dec = abi.decode(ctx.payloadHex, ['uint256']);
+            require(dec && dec.length === 1, 'unstake decode failed');
+            rs.bigint.requireLte(dec[0], config.max_unstake_amount, 'unstake exceeds cap');
+            return ok();
+          }
+          if (eq(ctx.selector, withdrawSel)) {
+            var dec = abi.decode(ctx.payloadHex, ['uint256']);
+            require(dec && dec.length === 1, 'withdraw decode failed');
+            rs.bigint.requireLte(dec[0], config.max_unstake_amount, 'withdraw exceeds cap');
+            return ok();
+          }
           if (eq(ctx.selector, claimRewardsSel) || eq(ctx.selector, getRewardSel) || eq(ctx.selector, exitSel)) return ok();
           revert('method not allowed');
         }

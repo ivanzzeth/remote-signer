@@ -419,6 +419,10 @@ func run() error {
 			}
 			syncInterval = parsed
 		}
+		const minSyncInterval = 1 * time.Minute
+		if syncInterval < minSyncInterval {
+			return fmt.Errorf("dynamic_blocklist.sync_interval must be >= 1m (got %s)", syncInterval)
+		}
 		if err := dynBlocklist.Start(context.Background(), syncInterval); err != nil {
 			return fmt.Errorf("failed to start dynamic blocklist: %w", err)
 		}

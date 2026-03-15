@@ -33,6 +33,9 @@ func NewSource(cfg SourceConfig, httpClient *http.Client) (Source, error) {
 	if cfg.URL == "" {
 		return nil, fmt.Errorf("source %q: url is required", cfg.Name)
 	}
+	if !strings.HasPrefix(cfg.URL, "https://") && !strings.HasPrefix(cfg.URL, "http://") {
+		return nil, fmt.Errorf("source %q: url must start with http:// or https:// (got %q)", cfg.Name, cfg.URL)
+	}
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 30 * time.Second}
 	}

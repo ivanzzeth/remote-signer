@@ -3,29 +3,19 @@
 # Covers V2 swap methods: swapExactTokensForTokens, swapExactETHForTokens, swapExactTokensForETH,
 #   swapTokensForExactTokens, swapETHForExactTokens, swapTokensForExactETH.
 # V3 methods (exactInputSingle, exactInput) are future work — tuple params require more complex decoding.
-# Validation: router address whitelist + method selector whitelist.
+# Validation: router address whitelist + method selector whitelist only.
+# NOTE: V2 dynamic-array params (path, amounts) are not decoded/validated.
+# For per-token or per-amount controls, use dex_swap_v3 with exactInputSingle/exactOutputSingle.
 
 variables:
   - name: router_address
     type: address
     description: "DEX router contract address (e.g. Uniswap V2 Router 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D)"
     required: true
-  - name: allowed_tokens
-    type: address_list
-    description: "Comma-separated allowed token addresses in swap path. Empty = any token."
-    required: false
-    default: ""
-  - name: max_amount_in
-    type: string
-    description: "Max input amount per swap, in token smallest unit. -1 = no cap."
-    required: false
-    default: "-1"
 
 test_variables:
   chain_id: "1"
   router_address: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
-  allowed_tokens: ""
-  max_amount_in: "-1"
 
 rules:
   - id: "dex-swap-v2"

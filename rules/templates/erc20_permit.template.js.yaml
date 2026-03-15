@@ -17,12 +17,18 @@ variables:
     description: "Max permit value in token smallest unit. -1 = no cap, 0 = block all."
     required: false
     default: "-1"
+  - name: max_deadline
+    type: string
+    description: "Max deadline timestamp. -1 = no limit."
+    required: false
+    default: "-1"
 
 test_variables:
   chain_id: "1"
   token_address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
   allowed_spenders: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
   max_permit_value: "1000000000"
+  max_deadline: "-1"
 
 rules:
   - id: "erc20-permit"
@@ -50,6 +56,9 @@ rules:
           rs.typedData.requireSignerMatch(msg.owner, input.signer, 'owner must be signer');
           rs.addr.requireInListIfNonEmpty(msg.spender, config.allowed_spenders, 'spender not allowed');
           rs.bigint.requireLte(msg.value || '0', config.max_permit_value, 'permit value exceeds cap');
+          if (msg.deadline !== undefined && msg.deadline !== null) {
+            rs.bigint.requireLte(msg.deadline, config.max_deadline, 'permit deadline too far');
+          }
           return ok();
         }
     test_cases:
