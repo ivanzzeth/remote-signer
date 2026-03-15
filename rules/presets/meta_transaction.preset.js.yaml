@@ -14,8 +14,11 @@ variables:
   forwarder_address: "0xd8253782c45a12053594b9deB72d8e8aB2Fca54c"
   allowed_targets: ""
   max_value: "0"
+  delegate_to: ""
+  delegate_to_by_target: ""
 override_hints:
   - chain_id
   - forwarder_address
   - allowed_targets
   - max_value
+  - delegate_to_by_target

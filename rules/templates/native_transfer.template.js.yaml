@@ -3,6 +3,9 @@
 # Covers: native value transfers (tx.data is "0x" or empty, tx.value > 0).
 # Parameters validated: allowlists for recipients, caps for amounts.
 
+#
+# SECURITY: Address list variables with "Empty = any" provide NO restriction when left empty.
+# Always configure allowed_* lists for production deployments.
 variables:
   - name: max_transfer_amount
     type: string

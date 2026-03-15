@@ -11,6 +11,9 @@
 #   - executeBatch(address[] dest, bytes[] func)                   sel: 0x18dfb3c7
 #
 # Note: EIP-6900 modular accounts use the same UserOp signing flow; this template applies to both.
+#
+# SECURITY: Variables with "Empty = any" (allowed_senders, allowed_paymasters, allowed_targets)
+# provide NO restriction when left empty. Always configure these for production deployments.
 
 variables:
   - name: entrypoint_address
@@ -106,7 +109,11 @@ rules:
         }
         function parseCallData(signer, sender, callData) {
           var hex = (callData || '').replace(/^0[xX]/, '');
-          if (hex.length < 8) return ok();
+          if (hex.length < 8) {
+            var hasTargets = (config.allowed_targets || '').trim().length > 0;
+            require(!hasTargets || hex.length === 0, 'callData too short for target validation');
+            return ok();
+          }
           var sel = '0x' + hex.substring(0, 8);
           var payload = '0x' + hex.substring(8);
           var executeSel = selector('execute(address,uint256,bytes)');

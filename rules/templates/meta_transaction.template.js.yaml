@@ -1,7 +1,11 @@
 # EIP-2771 Meta Transaction template (evm_js) — typed_data validation for meta-tx forward requests.
 # Validates EIP-712 typed data with primaryType "ForwardRequest" for gasless transactions.
 # EIP-2771 allows users to sign a ForwardRequest that a relayer submits on-chain via a trusted forwarder.
-# Covers: domain verification (trusted forwarder), target contract allowlist, value/gas caps.
+#
+# Composable: parses the inner `data` field and DELEGATES to other rules via delegate_to / delegate_to_by_target,
+# just like the Safe and EIP-4337 templates. This enables recursive validation of the actual call inside the meta-tx.
+#
+# Covers: domain verification (trusted forwarder), target contract allowlist, value/gas caps, inner calldata delegation.
 
 variables:
   - name: forwarder_address
@@ -18,12 +22,24 @@ variables:
     description: "Max value (in wei) allowed in ForwardRequest. -1 = no cap, 0 = no value transfers."
     required: false
     default: "0"
+  - name: delegate_to
+    type: string
+    description: "Default target rule ID for inner calldata delegation (optional)"
+    required: false
+    default: ""
+  - name: delegate_to_by_target
+    type: string
+    description: "Optional 'addr:rule_id,addr:rule_id' to route by inner target address"
+    required: false
+    default: ""
 
 test_variables:
   chain_id: "1"
   forwarder_address: "0xd8253782c45a12053594b9deB72d8e8aB2Fca54c"
   allowed_targets: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
   max_value: "0"
+  delegate_to: ""
+  delegate_to_by_target: ""
 
 rules:
   - id: "meta-tx-forward-request"
@@ -32,9 +48,11 @@ rules:
     mode: "whitelist"
     enabled: true
     chain_id: "${chain_id}"
-    description: "Validate EIP-2771 meta-tx ForwardRequest typed data; trusted forwarder, target allowlist, value cap"
+    description: "Validate EIP-2771 meta-tx ForwardRequest; target allowlist, value cap, inner calldata delegation"
     config:
       sign_type_filter: "typed_data"
+      delegate_to: "${delegate_to}"
+      delegate_mode: "single"
       script: |
         function validate(input) {
           var td = rs.typedData.require(input, 'ForwardRequest');
@@ -50,6 +68,21 @@ rules:
           rs.typedData.requireSignerMatch(msg.from, input.signer, 'from must be signer');
           rs.addr.requireInListIfNonEmpty(msg.to, config.allowed_targets, 'target not allowed');
           rs.bigint.requireLte(msg.value || '0', config.max_value, 'value exceeds cap');
+          var innerData = msg.data || '0x';
+          var innerHex = (innerData || '').replace(/^0[xX]/, '');
+          if (innerHex.length >= 8) {
+            var targetChecksum = toChecksum(msg.to);
+            var delegateTo = rs.delegate.resolveByTarget(targetChecksum, config.delegate_to_by_target, config.delegate_to);
+            if (delegateTo) {
+              var payload = {
+                sign_type: 'transaction',
+                chain_id: parseInt(config.chain_id, 10) || 0,
+                signer: input.signer,
+                transaction: { from: input.signer, to: targetChecksum, value: '0', data: innerData }
+              };
+              return { valid: true, payload: payload, delegate_to: delegateTo };
+            }
+          }
           return ok();
         }
     test_cases:

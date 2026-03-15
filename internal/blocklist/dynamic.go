@@ -94,10 +94,13 @@ func NewDynamicBlocklist(cfg Config, logger *slog.Logger) (*DynamicBlocklist, er
 // Start loads the local cache (instant, no network), then begins background sync.
 // Returns immediately after loading cache — first remote sync happens asynchronously.
 func (b *DynamicBlocklist) Start(ctx context.Context, interval time.Duration) error {
+	b.mu.Lock()
 	if b.started {
+		b.mu.Unlock()
 		return fmt.Errorf("blocklist already started")
 	}
 	b.started = true
+	b.mu.Unlock()
 
 	// 1. Load persisted cache (fast, no network).
 	if n := b.loadCache(); n > 0 {

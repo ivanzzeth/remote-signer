@@ -2,6 +2,9 @@
 # Validates EIP-712 typed data for gasless transfers (USDC, EURC, etc.).
 # Covers: domain verification, recipient allowlists, value caps.
 
+#
+# SECURITY: Address list variables with "Empty = any" provide NO restriction when left empty.
+# Always configure allowed_* lists for production deployments.
 variables:
   - name: token_address
     type: address

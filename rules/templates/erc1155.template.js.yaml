@@ -3,6 +3,9 @@
 # Covers: safeTransferFrom, safeBatchTransferFrom, setApprovalForAll.
 # All parameters validated: allowlists for addresses (empty = any).
 
+#
+# SECURITY: Address list variables with "Empty = any" provide NO restriction when left empty.
+# Always configure allowed_* lists for production deployments.
 variables:
   - name: token_address
     type: address

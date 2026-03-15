@@ -6,6 +6,9 @@
 # Validation: router address + method selector whitelist + tuple-decoded token/amount checks
 #   for exactInputSingle and exactOutputSingle.
 
+#
+# SECURITY: Address list variables with "Empty = any" provide NO restriction when left empty.
+# Always configure allowed_* lists for production deployments.
 variables:
   - name: router_address
     type: address
