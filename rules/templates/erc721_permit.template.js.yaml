@@ -1,0 +1,136 @@
+# ERC721 Permit (EIP-4494) template (evm_js) — typed_data validation for NFT permit signatures.
+# Validates EIP-712 typed data with primaryType "Permit" for gasless NFT approvals.
+# EIP-4494 allows NFT owners to sign a permit granting a spender approval for a specific tokenId.
+# Covers: domain verification, spender allowlist, nonce/deadline validation.
+
+variables:
+  - name: token_address
+    type: address
+    description: "ERC721 NFT contract address (verifyingContract in EIP-712 domain)"
+    required: true
+  - name: allowed_spenders
+    type: address_list
+    description: "Comma-separated addresses allowed as permit spender. Empty = any."
+    required: false
+    default: ""
+
+test_variables:
+  chain_id: "1"
+  token_address: "0xBC4ca0EdA7647A8aB7C2061c2E118A18a936f13D"
+  allowed_spenders: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+
+rules:
+  - id: "erc721-permit"
+    name: "ERC721 Permit (EIP-4494)"
+    type: "evm_js"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "${chain_id}"
+    description: "Validate ERC721 permit typed data signatures (EIP-4494); domain, spender allowlist"
+    config:
+      sign_type_filter: "typed_data"
+      script: |
+        function validate(input) {
+          var td = rs.typedData.require(input, 'Permit');
+          rs.typedData.requireDomain(td.domain, {
+            chainId: config.chain_id,
+            requireVerifyingContract: true,
+            allowedContracts: config.token_address
+          });
+          var msg = td.message;
+          require(msg, 'missing message');
+          require(msg.spender && isAddress(msg.spender), 'invalid spender');
+          require(msg.tokenId !== undefined && msg.tokenId !== null, 'missing tokenId');
+          rs.addr.requireInListIfNonEmpty(msg.spender, config.allowed_spenders, 'spender not allowed');
+          return ok();
+        }
+    test_cases:
+      - name: "pass: valid NFT permit with allowed spender"
+        input:
+          sign_type: "typed_data"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          typed_data:
+            types:
+              EIP712Domain:
+                - { name: "name", type: "string" }
+                - { name: "version", type: "string" }
+                - { name: "chainId", type: "uint256" }
+                - { name: "verifyingContract", type: "address" }
+              Permit:
+                - { name: "spender", type: "address" }
+                - { name: "tokenId", type: "uint256" }
+                - { name: "nonce", type: "uint256" }
+                - { name: "deadline", type: "uint256" }
+            primaryType: "Permit"
+            domain:
+              name: "BoredApeYachtClub"
+              version: "1"
+              chainId: "1"
+              verifyingContract: "0xBC4ca0EdA7647A8aB7C2061c2E118A18a936f13D"
+            message:
+              spender: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+              tokenId: "1234"
+              nonce: "0"
+              deadline: "1999999999"
+        expect_pass: true
+      - name: "reject: spender not in allowlist"
+        input:
+          sign_type: "typed_data"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          typed_data:
+            types:
+              EIP712Domain:
+                - { name: "name", type: "string" }
+                - { name: "version", type: "string" }
+                - { name: "chainId", type: "uint256" }
+                - { name: "verifyingContract", type: "address" }
+              Permit:
+                - { name: "spender", type: "address" }
+                - { name: "tokenId", type: "uint256" }
+                - { name: "nonce", type: "uint256" }
+                - { name: "deadline", type: "uint256" }
+            primaryType: "Permit"
+            domain:
+              name: "BoredApeYachtClub"
+              version: "1"
+              chainId: "1"
+              verifyingContract: "0xBC4ca0EdA7647A8aB7C2061c2E118A18a936f13D"
+            message:
+              spender: "0x000000000000000000000000000000000000dEaD"
+              tokenId: "1234"
+              nonce: "0"
+              deadline: "1999999999"
+        expect_pass: false
+        expect_reason: "spender not allowed"
+      - name: "reject: wrong verifyingContract"
+        input:
+          sign_type: "typed_data"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          typed_data:
+            types:
+              EIP712Domain:
+                - { name: "name", type: "string" }
+                - { name: "version", type: "string" }
+                - { name: "chainId", type: "uint256" }
+                - { name: "verifyingContract", type: "address" }
+              Permit:
+                - { name: "spender", type: "address" }
+                - { name: "tokenId", type: "uint256" }
+                - { name: "nonce", type: "uint256" }
+                - { name: "deadline", type: "uint256" }
+            primaryType: "Permit"
+            domain:
+              name: "BoredApeYachtClub"
+              version: "1"
+              chainId: "1"
+              verifyingContract: "0x000000000000000000000000000000000000dEaD"
+            message:
+              spender: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+              tokenId: "1234"
+              nonce: "0"
+              deadline: "1999999999"
+        expect_pass: false
+        expect_reason: "invalid verifying contract"

@@ -412,6 +412,22 @@ templates:
     config:
       path: "rules/templates/max_gas_cap.template.js.yaml"
 
+  # ERC721 Permit (EIP-4494) typed_data NFT approval signature
+  - name: "ERC721 Permit Template"
+    type: "file"
+    description: "ERC721 permit typed data (EIP-4494) with spender allowlist"
+    enabled: true
+    config:
+      path: "rules/templates/erc721_permit.template.js.yaml"
+
+  # EIP-2771 Meta Transaction ForwardRequest typed_data
+  - name: "Meta Transaction Template"
+    type: "file"
+    description: "EIP-2771 meta-tx ForwardRequest with trusted forwarder and target allowlist"
+    enabled: true
+    config:
+      path: "rules/templates/meta_transaction.template.js.yaml"
+
 # =============================================================================
 # Rules configuration
 # =============================================================================

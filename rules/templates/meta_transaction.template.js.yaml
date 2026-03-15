@@ -1,0 +1,162 @@
+# EIP-2771 Meta Transaction template (evm_js) — typed_data validation for meta-tx forward requests.
+# Validates EIP-712 typed data with primaryType "ForwardRequest" for gasless transactions.
+# EIP-2771 allows users to sign a ForwardRequest that a relayer submits on-chain via a trusted forwarder.
+# Covers: domain verification (trusted forwarder), target contract allowlist, value/gas caps.
+
+variables:
+  - name: forwarder_address
+    type: address
+    description: "Trusted forwarder contract address (verifyingContract in EIP-712 domain)"
+    required: true
+  - name: allowed_targets
+    type: address_list
+    description: "Comma-separated target contract addresses allowed in ForwardRequest.to. Empty = any."
+    required: false
+    default: ""
+  - name: max_value
+    type: string
+    description: "Max value (in wei) allowed in ForwardRequest. -1 = no cap, 0 = no value transfers."
+    required: false
+    default: "0"
+
+test_variables:
+  chain_id: "1"
+  forwarder_address: "0xd8253782c45a12053594b9deB72d8e8aB2Fca54c"
+  allowed_targets: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+  max_value: "0"
+
+rules:
+  - id: "meta-tx-forward-request"
+    name: "Meta Transaction ForwardRequest (EIP-2771)"
+    type: "evm_js"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "${chain_id}"
+    description: "Validate EIP-2771 meta-tx ForwardRequest typed data; trusted forwarder, target allowlist, value cap"
+    config:
+      sign_type_filter: "typed_data"
+      script: |
+        function validate(input) {
+          var td = rs.typedData.require(input, 'ForwardRequest');
+          rs.typedData.requireDomain(td.domain, {
+            chainId: config.chain_id,
+            requireVerifyingContract: true,
+            allowedContracts: config.forwarder_address
+          });
+          var msg = td.message;
+          require(msg, 'missing message');
+          require(msg.from && isAddress(msg.from), 'invalid from');
+          require(msg.to && isAddress(msg.to), 'invalid to');
+          rs.typedData.requireSignerMatch(msg.from, input.signer, 'from must be signer');
+          rs.addr.requireInListIfNonEmpty(msg.to, config.allowed_targets, 'target not allowed');
+          rs.bigint.requireLte(msg.value || '0', config.max_value, 'value exceeds cap');
+          return ok();
+        }
+    test_cases:
+      - name: "pass: valid forward request to allowed target"
+        input:
+          sign_type: "typed_data"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          typed_data:
+            types:
+              EIP712Domain:
+                - { name: "name", type: "string" }
+                - { name: "version", type: "string" }
+                - { name: "chainId", type: "uint256" }
+                - { name: "verifyingContract", type: "address" }
+              ForwardRequest:
+                - { name: "from", type: "address" }
+                - { name: "to", type: "address" }
+                - { name: "value", type: "uint256" }
+                - { name: "gas", type: "uint256" }
+                - { name: "nonce", type: "uint256" }
+                - { name: "deadline", type: "uint48" }
+                - { name: "data", type: "bytes" }
+            primaryType: "ForwardRequest"
+            domain:
+              name: "MinimalForwarder"
+              version: "0.0.1"
+              chainId: "1"
+              verifyingContract: "0xd8253782c45a12053594b9deB72d8e8aB2Fca54c"
+            message:
+              from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+              to: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+              value: "0"
+              gas: "100000"
+              nonce: "0"
+              deadline: "1999999999"
+              data: "0xa9059cbb"
+        expect_pass: true
+      - name: "reject: target not in allowlist"
+        input:
+          sign_type: "typed_data"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          typed_data:
+            types:
+              EIP712Domain:
+                - { name: "name", type: "string" }
+                - { name: "version", type: "string" }
+                - { name: "chainId", type: "uint256" }
+                - { name: "verifyingContract", type: "address" }
+              ForwardRequest:
+                - { name: "from", type: "address" }
+                - { name: "to", type: "address" }
+                - { name: "value", type: "uint256" }
+                - { name: "gas", type: "uint256" }
+                - { name: "nonce", type: "uint256" }
+                - { name: "deadline", type: "uint48" }
+                - { name: "data", type: "bytes" }
+            primaryType: "ForwardRequest"
+            domain:
+              name: "MinimalForwarder"
+              version: "0.0.1"
+              chainId: "1"
+              verifyingContract: "0xd8253782c45a12053594b9deB72d8e8aB2Fca54c"
+            message:
+              from: "0x0000000000000000000000000000000000000002"
+              to: "0x000000000000000000000000000000000000dEaD"
+              value: "0"
+              gas: "100000"
+              nonce: "0"
+              deadline: "1999999999"
+              data: "0x"
+        expect_pass: false
+        expect_reason: "target not allowed"
+      - name: "reject: from does not match signer"
+        input:
+          sign_type: "typed_data"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          typed_data:
+            types:
+              EIP712Domain:
+                - { name: "name", type: "string" }
+                - { name: "version", type: "string" }
+                - { name: "chainId", type: "uint256" }
+                - { name: "verifyingContract", type: "address" }
+              ForwardRequest:
+                - { name: "from", type: "address" }
+                - { name: "to", type: "address" }
+                - { name: "value", type: "uint256" }
+                - { name: "gas", type: "uint256" }
+                - { name: "nonce", type: "uint256" }
+                - { name: "deadline", type: "uint48" }
+                - { name: "data", type: "bytes" }
+            primaryType: "ForwardRequest"
+            domain:
+              name: "MinimalForwarder"
+              version: "0.0.1"
+              chainId: "1"
+              verifyingContract: "0xd8253782c45a12053594b9deB72d8e8aB2Fca54c"
+            message:
+              from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+              to: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+              value: "0"
+              gas: "100000"
+              nonce: "0"
+              deadline: "1999999999"
+              data: "0x"
+        expect_pass: false
+        expect_reason: "from must be signer"

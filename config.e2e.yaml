@@ -138,6 +138,16 @@ templates:
     enabled: true
     config:
       path: "rules/templates/max_gas_cap.template.js.yaml"
+  - name: "ERC721 Permit Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/erc721_permit.template.js.yaml"
+  - name: "Meta Transaction Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/meta_transaction.template.js.yaml"
   - name: "Polymarket Template"
     type: "file"
     enabled: true
