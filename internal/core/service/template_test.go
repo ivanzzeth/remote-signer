@@ -1367,7 +1367,7 @@ func TestRevokeInstance(t *testing.T) {
 
 		// Seed associated budget
 		budget := &types.RuleBudget{
-			ID:       "bdg_inst_abc123_eth",
+			ID:       types.BudgetID(ruleID, "eth"),
 			RuleID:   ruleID,
 			Unit:     "eth",
 			MaxTotal: "100",
@@ -1513,7 +1513,7 @@ func TestRevokeInstance(t *testing.T) {
 		// Seed two budgets for the same rule
 		for _, unit := range []string{"eth", "usdt"} {
 			b := &types.RuleBudget{
-				ID:       fmt.Sprintf("bdg_%s_%s", ruleID, unit),
+				ID:       types.BudgetID(ruleID, unit),
 				RuleID:   ruleID,
 				Unit:     unit,
 				MaxTotal: "100",

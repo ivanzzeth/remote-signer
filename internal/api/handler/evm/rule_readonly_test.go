@@ -299,13 +299,14 @@ func TestRuleHandler_ListBudgets(t *testing.T) {
 	rule := newAPIRule()
 	repo.addRule(rule)
 
+	unit := "1:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
 	budgetRepo := &mockBudgetRepo{
 		listByRuleID: func(_ context.Context, ruleID types.RuleID) ([]*types.RuleBudget, error) {
 			return []*types.RuleBudget{
 				{
-					ID:       "bdg_1",
+					ID:       types.BudgetID(ruleID, unit),
 					RuleID:   ruleID,
-					Unit:     "1:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+					Unit:     unit,
 					MaxTotal: "1000",
 					Spent:    "100",
 					TxCount:  5,
@@ -328,7 +329,7 @@ func TestRuleHandler_ListBudgets(t *testing.T) {
 	err = json.NewDecoder(w.Body).Decode(&budgets)
 	require.NoError(t, err)
 	require.Len(t, budgets, 1)
-	assert.Equal(t, "bdg_1", budgets[0].ID)
-	assert.Equal(t, "1:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", budgets[0].Unit)
+	assert.Equal(t, types.BudgetID(rule.ID, unit), budgets[0].ID)
+	assert.Equal(t, unit, budgets[0].Unit)
 	assert.Equal(t, "100", budgets[0].Spent)
 }

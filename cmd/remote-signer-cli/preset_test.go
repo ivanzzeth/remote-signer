@@ -251,6 +251,62 @@ api_keys:
 	require.Len(t, cfg.Rules, 1)
 }
 
+// TestMergeRulesAndTemplateIntoConfig_QuotesUnitWithColon ensures budget.unit values
+// containing ':' (e.g. "${chain_id}:${token_address}") are written as quoted YAML so
+// the colon is not parsed as key-value (mapping values are not allowed in this context).
+func TestMergeRulesAndTemplateIntoConfig_QuotesUnitWithColon(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	minimal := `server:
+  host: "0.0.0.0"
+  port: 8548
+  tls:
+    enabled: false
+database:
+  dsn: "file:./data/test.db"
+chains:
+  evm:
+    enabled: true
+api_keys:
+  - id: "admin"
+    name: "Admin"
+    public_key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    admin: true
+    enabled: true
+    rate_limit: 100
+`
+	require.NoError(t, os.WriteFile(configPath, []byte(minimal), 0600))
+
+	rule := config.RuleConfig{
+		Name: "ERC20 Budget", Type: "instance", Mode: "whitelist",
+		ChainType: "evm", ChainID: "1", Enabled: true,
+		Config: map[string]interface{}{
+			"template": "ERC20 Template",
+			"variables": map[string]interface{}{"chain_id": "1", "token_address": "0xabc"},
+			"budget": map[string]interface{}{
+				"unit": "${chain_id}:${token_address}",
+				"max_total": "1000",
+			},
+		},
+	}
+
+	err := mergeRulesAndTemplateIntoConfig(configPath, []config.RuleConfig{rule}, "ERC20 Template", "rules/templates/erc20.yaml")
+	require.NoError(t, err)
+
+	raw, err := os.ReadFile(configPath)
+	require.NoError(t, err)
+	// Must be written quoted so YAML parser does not treat the colon as key-value
+	assert.Contains(t, string(raw), `"${chain_id}:${token_address}"`, "budget.unit must be double-quoted in YAML output")
+	// Round-trip: config.Load must parse without "mapping values are not allowed" error
+	cfg, err := config.Load(configPath)
+	require.NoError(t, err)
+	require.Len(t, cfg.Rules, 1)
+	// budget["unit"] after Load is env-expanded (${chain_id} etc.), so we only assert structure
+	budget, _ := cfg.Rules[0].Config["budget"].(map[string]interface{})
+	require.NotNil(t, budget)
+	assert.Contains(t, budget, "unit")
+}
+
 func TestGetPresetVarsWithDescriptions(t *testing.T) {
 	dir := t.TempDir()
 	presetsDir := filepath.Join(dir, "presets")

@@ -1193,30 +1193,19 @@ step_preset_rules() {
         if [ -n "$vars_out" ]; then
             echo ""
             echo "Enter values for the following variables (descriptions from template)."
-            echo "  Use comma-separated (a,b,c) or newline-separated (one per line; empty line to finish)."
+            echo "  One value per line (empty = use preset default). Comma-separated on one line for list values."
             # Read vars from fd 3 so that 'read -rp' below still reads from terminal (stdin), not from vars_out
             while IFS= read -r line <&3; do
                 [[ -z "$line" ]] && continue
                 name="${line%%$'\t'*}"
                 desc="${line#*$'\t'}"
                 if [ -n "$name" ]; then
-                    val=""
-                    first=1
-                    while true; do
-                        if [ "$first" -eq 1 ]; then
-                            if [ -n "$desc" ]; then
-                                read -rp "  $name ($desc): " ln
-                            else
-                                read -rp "  $name: " ln
-                            fi
-                            first=0
-                        else
-                            read -rp "    " ln
-                        fi
-                        ln=$(printf '%s' "$ln" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-                        [[ -z "$ln" ]] && break
-                        val="${val:+$val,}$ln"
-                    done
+                    if [ -n "$desc" ]; then
+                        read -rp "  $name ($desc): " val
+                    else
+                        read -rp "  $name: " val
+                    fi
+                    val=$(printf '%s' "$val" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
                     set_args+=(--set "$name=$val")
                 fi
             done 3<<< "$vars_out"

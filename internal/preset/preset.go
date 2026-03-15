@@ -184,7 +184,7 @@ func ParsePresetFile(data []byte, overrides map[string]string) ([]PresetRule, er
 				Enabled:     single.Enabled,
 			}
 			if len(single.Budget) > 0 {
-				r.Budget = substituteMapVars(copyMapInterface(single.Budget), variables)
+				r.Budget = substituteBudgetMapVars(copyMapInterface(single.Budget), variables)
 			}
 			if len(single.Schedule) > 0 {
 				r.Schedule = substituteMapVars(copyMapInterface(single.Schedule), variables)
@@ -215,7 +215,7 @@ func ParsePresetFile(data []byte, overrides map[string]string) ([]PresetRule, er
 			Enabled:     single.Enabled,
 		}
 		if len(single.Budget) > 0 {
-			r.Budget = substituteMapVars(copyMapInterface(single.Budget), variables)
+			r.Budget = substituteBudgetMapVars(copyMapInterface(single.Budget), variables)
 		}
 		if len(single.Schedule) > 0 {
 			r.Schedule = substituteMapVars(copyMapInterface(single.Schedule), variables)
@@ -265,7 +265,7 @@ func ParsePresetFile(data []byte, overrides map[string]string) ([]PresetRule, er
 			Enabled:     r.Enabled,
 		}
 		if b, ok := r.Config["budget"].(map[string]interface{}); ok && len(b) > 0 {
-			pr.Budget = substituteMapVars(copyMapInterface(b), vars)
+			pr.Budget = substituteBudgetMapVars(copyMapInterface(b), vars)
 		}
 		if s, ok := r.Config["schedule"].(map[string]interface{}); ok && len(s) > 0 {
 			pr.Schedule = substituteMapVars(copyMapInterface(s), vars)
@@ -324,6 +324,28 @@ func copyMapInterface(m map[string]interface{}) map[string]interface{} {
 	out := make(map[string]interface{}, len(m))
 	for k, v := range m {
 		out[k] = v
+	}
+	return out
+}
+
+// substituteBudgetMapVars substitutes ${var} in budget map values, except for the "unit" key.
+// The unit key is kept as-is (e.g. "${chain_id}:${token_address}") so that config only needs
+// variables (chain_id, token_address) changed when switching chains; sync resolves unit at runtime.
+func substituteBudgetMapVars(m map[string]interface{}, variables map[string]interface{}) map[string]interface{} {
+	if m == nil {
+		return m
+	}
+	out := make(map[string]interface{}, len(m))
+	for k, v := range m {
+		if k == "unit" {
+			out[k] = v
+			continue
+		}
+		if len(variables) > 0 {
+			out[k] = substituteVarInValue(v, variables)
+		} else {
+			out[k] = v
+		}
 	}
 	return out
 }

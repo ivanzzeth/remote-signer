@@ -967,6 +967,14 @@ func validateEVMJSRulesAtStartup(ctx context.Context, expandedRules []config.Rul
 			}
 			ruleForTest.Variables = variablesJSON
 		}
+		// When using template test_variables, set rule scope (ChainID, etc.) from them so the rule
+		// matches the test case's chain_id and validation passes (e.g. test uses chain_id 1).
+		if len(cfg.TestVariables) > 0 {
+			if v, ok := cfg.TestVariables["chain_id"]; ok && v != "" {
+				chainIDVal := v
+				ruleForTest.ChainID = &chainIDVal
+			}
+		}
 
 		// Build isolated engine (blocklist + this rule only) so expected-fail cases are not allowed by another whitelist rule.
 		testEngine, err := buildIsolatedEngineForRule(ctx, allRulesMap, &ruleForTest, solidityEval, log)

@@ -124,7 +124,7 @@ func (i *RuleInitializer) SyncFromConfig(ctx context.Context, rules []RuleConfig
 
 	var pendingBudgets []pendingBudgetCreate
 	syncBody := func(repo storage.RuleRepository) error {
-		return i.executeSyncBody(ctx, repo, expandedRules, expectedIDs, templatesByName, &pendingBudgets)
+		return i.executeSyncBody(ctx, repo, i.budgetRepo, expandedRules, expectedIDs, templatesByName, &pendingBudgets)
 	}
 
 	if txRepo, ok := i.repo.(storage.Transactional); ok {
@@ -137,10 +137,10 @@ func (i *RuleInitializer) SyncFromConfig(ctx context.Context, rules []RuleConfig
 		}
 	}
 
-	// Create budget records after the transaction so we do not use a second DB connection inside the tx.
+	// Sync budgets from config after the transaction: diff so DB matches config (delete stale units, ensure current unit exists).
 	for _, p := range pendingBudgets {
-		if createErr := createBudgetFromInstanceConfig(ctx, p.Rule, p.Tmpl, p.InstanceBudget, i.budgetRepo); createErr != nil {
-			return fmt.Errorf("create budget for rule %s: %w", p.Rule.ID, createErr)
+		if syncErr := syncBudgetFromConfig(ctx, p.Rule, p.Tmpl, p.InstanceBudget, i.budgetRepo); syncErr != nil {
+			return fmt.Errorf("sync budget for rule %s: %w", p.Rule.ID, syncErr)
 		}
 	}
 	return nil
@@ -183,9 +183,10 @@ func (i *RuleInitializer) preloadTemplatesForSync(ctx context.Context, expandedR
 
 // executeSyncBody performs the actual sync: delete stale rules, upsert current rules, verify consistency.
 // repo is the (possibly transactional) repository to use for all operations.
+// budgetRepo is optional; when set, budgets for deleted rules are removed so DB stays in sync with config.
 // templatesByName is optional; when set, instance-rule template lookup uses it instead of templateRepo (avoids DB calls inside tx).
-// pendingBudgets is filled with new rules that need a budget record; caller creates them after the transaction.
-func (i *RuleInitializer) executeSyncBody(ctx context.Context, repo storage.RuleRepository, expandedRules []RuleConfig, expectedIDs map[types.RuleID]bool, templatesByName map[string]*types.RuleTemplate, pendingBudgets *[]pendingBudgetCreate) error {
+// pendingBudgets is filled with rules that need budget sync; caller runs syncBudgetFromConfig after the transaction.
+func (i *RuleInitializer) executeSyncBody(ctx context.Context, repo storage.RuleRepository, budgetRepo storage.BudgetRepository, expandedRules []RuleConfig, expectedIDs map[types.RuleID]bool, templatesByName map[string]*types.RuleTemplate, pendingBudgets *[]pendingBudgetCreate) error {
 	// Get all existing config-sourced rules from database
 	configSource := types.RuleSourceConfig
 	existingRules, err := repo.List(ctx, storage.RuleFilter{
@@ -196,10 +197,15 @@ func (i *RuleInitializer) executeSyncBody(ctx context.Context, repo storage.Rule
 		return fmt.Errorf("failed to list config rules: %w", err)
 	}
 
-	// Delete config rules that are no longer in config
+	// Delete config rules that are no longer in config (and their budgets so DB matches config)
 	deleted := 0
 	for _, rule := range existingRules {
 		if !expectedIDs[rule.ID] {
+			if budgetRepo != nil {
+				if delErr := budgetRepo.DeleteByRuleID(ctx, rule.ID); delErr != nil {
+					return fmt.Errorf("failed to delete budgets for stale config rule %s: %w", rule.ID, delErr)
+				}
+			}
 			if err := repo.Delete(ctx, rule.ID); err != nil {
 				return fmt.Errorf("failed to delete stale config rule %s: %w", rule.ID, err)
 			}
@@ -604,6 +610,19 @@ func (i *RuleInitializer) syncRule(ctx context.Context, repo storage.RuleReposit
 			return fmt.Errorf("failed to update rule: %w", err)
 		}
 
+		// When variables (e.g. chain_id) change, the budget unit changes; ensure a budget record exists for the current unit.
+		if i.budgetRepo != nil && len(instanceBudget) > 0 && tmpl != nil && len(tmpl.BudgetMetering) > 0 && pendingBudgets != nil {
+			ruleCopy := new(types.Rule)
+			*ruleCopy = *existing
+			ruleCopy.Variables = make([]byte, len(existing.Variables))
+			copy(ruleCopy.Variables, existing.Variables)
+			*pendingBudgets = append(*pendingBudgets, pendingBudgetCreate{
+				Rule:           ruleCopy,
+				Tmpl:           tmpl,
+				InstanceBudget: instanceBudget,
+			})
+		}
+
 		i.logger.Info("Updated rule from config",
 			"id", ruleID,
 			"name", ruleCfg.Name,
@@ -681,13 +700,30 @@ func substituteBudgetValue(v interface{}, vars map[string]string) interface{} {
 	}
 }
 
-// createBudgetFromInstanceConfig creates a budget record for a config-synced instance rule
-// so that budget enforcement (max_total, max_per_tx) and period reset apply.
-// All budget fields support template variables (${var}); unit is required and must resolve to non-empty.
-// Optional fields (max_total, max_per_tx, max_tx_count, alert_pct): empty after substitution is accepted (defaults: 0 or 80).
-func createBudgetFromInstanceConfig(ctx context.Context, rule *types.Rule, tmpl *types.RuleTemplate, budgetMap map[string]interface{}, budgetRepo storage.BudgetRepository) error {
+// syncBudgetFromConfig makes the DB budget state match config: remove budgets for units no longer in config,
+// then ensure the current unit has a budget record. Keeps config-sourced rules' budgets in sync and avoids stale units.
+func syncBudgetFromConfig(ctx context.Context, rule *types.Rule, tmpl *types.RuleTemplate, budgetMap map[string]interface{}, budgetRepo storage.BudgetRepository) error {
+	currentUnit, err := resolveBudgetUnit(rule, tmpl, budgetMap)
+	if err != nil {
+		return err
+	}
+	existingList, err := budgetRepo.ListByRuleID(ctx, rule.ID)
+	if err != nil {
+		return fmt.Errorf("list budgets for rule: %w", err)
+	}
+	for _, b := range existingList {
+		if b.Unit != currentUnit {
+			if delErr := budgetRepo.Delete(ctx, b.ID); delErr != nil {
+				return fmt.Errorf("delete stale budget %s (unit=%s): %w", b.ID, b.Unit, delErr)
+			}
+		}
+	}
+	return createBudgetFromInstanceConfig(ctx, rule, tmpl, budgetMap, budgetRepo)
+}
+
+// resolveBudgetUnit returns the normalized budget unit for a config-sourced rule (same logic as createBudgetFromInstanceConfig).
+func resolveBudgetUnit(rule *types.Rule, tmpl *types.RuleTemplate, budgetMap map[string]interface{}) (string, error) {
 	vars := ruleVariablesToStringMap(rule.Variables)
-	// Resolve unit from budget map: support both "unit" and "Unit" and substitute with rule variables.
 	unitRaw, _ := budgetMap["unit"].(string)
 	if unitRaw == "" {
 		if u, ok := budgetMap["Unit"].(string); ok {
@@ -698,7 +734,58 @@ func createBudgetFromInstanceConfig(ctx context.Context, rule *types.Rule, tmpl 
 		unitRaw = strings.ReplaceAll(unitRaw, "${"+k+"}", v)
 	}
 	unit := strings.TrimSpace(unitRaw)
-	// Substitute remaining budget fields for max_total, max_per_tx, etc.
+	substituted := substituteBudgetMapVars(budgetMap, vars)
+	if substituted == nil {
+		substituted = budgetMap
+	}
+	if unit == "" {
+		if v, ok := substituted["unit"]; ok && v != nil {
+			unit = strings.TrimSpace(fmt.Sprintf("%v", v))
+		}
+	}
+	if unit == "" {
+		return "", fmt.Errorf("budget.unit is required when budget is set (e.g. \"${chain_id}:${token_address}\") to identify what is being consumed")
+	}
+	if strings.Contains(unit, "${") {
+		return "", fmt.Errorf("budget.unit is required and must resolve to a non-empty value after variable substitution (rule %s had unit %q, variables=%s)", rule.ID, unit, string(rule.Variables))
+	}
+	if unit == ":" || len(unit) < 3 {
+		if len(tmpl.BudgetMetering) > 0 && len(vars) > 0 {
+			var metering types.BudgetMetering
+			if err := json.Unmarshal(tmpl.BudgetMetering, &metering); err == nil && metering.Unit != "" {
+				unitFallback := metering.Unit
+				for k, v := range vars {
+					unitFallback = strings.ReplaceAll(unitFallback, "${"+k+"}", v)
+				}
+				unitFallback = strings.TrimSpace(unitFallback)
+				if unitFallback != "" && !strings.Contains(unitFallback, "${") {
+					unit = unitFallback
+				}
+			}
+		}
+	}
+	if unit == ":" || len(unit) < 3 {
+		return "", fmt.Errorf("budget.unit resolved to invalid value %q for rule %s (variables=%s)", unit, rule.ID, string(rule.Variables))
+	}
+	return rulepkg.NormalizeBudgetUnit(unit), nil
+}
+
+// createBudgetFromInstanceConfig creates a budget record for a config-synced instance rule
+// so that budget enforcement (max_total, max_per_tx) and period reset apply.
+// All budget fields support template variables (${var}); unit is required and must resolve to non-empty.
+// Optional fields (max_total, max_per_tx, max_tx_count, alert_pct): empty after substitution is accepted (defaults: 0 or 80).
+func createBudgetFromInstanceConfig(ctx context.Context, rule *types.Rule, tmpl *types.RuleTemplate, budgetMap map[string]interface{}, budgetRepo storage.BudgetRepository) error {
+	vars := ruleVariablesToStringMap(rule.Variables)
+	unitRaw, _ := budgetMap["unit"].(string)
+	if unitRaw == "" {
+		if u, ok := budgetMap["Unit"].(string); ok {
+			unitRaw = u
+		}
+	}
+	for k, v := range vars {
+		unitRaw = strings.ReplaceAll(unitRaw, "${"+k+"}", v)
+	}
+	unit := strings.TrimSpace(unitRaw)
 	substituted := substituteBudgetMapVars(budgetMap, vars)
 	if substituted == nil {
 		substituted = budgetMap
@@ -715,7 +802,6 @@ func createBudgetFromInstanceConfig(ctx context.Context, rule *types.Rule, tmpl 
 		return fmt.Errorf("budget.unit is required and must resolve to a non-empty value after variable substitution (rule %s had unit %q, variables=%s)", rule.ID, unit, string(rule.Variables))
 	}
 	if unit == ":" || len(unit) < 3 {
-		// Fallback: resolve unit from template budget_metering.unit (e.g. "${chain_id}:${token_address}") with rule variables.
 		if len(tmpl.BudgetMetering) > 0 && len(vars) > 0 {
 			var metering types.BudgetMetering
 			if err := json.Unmarshal(tmpl.BudgetMetering, &metering); err == nil && metering.Unit != "" {
@@ -782,9 +868,17 @@ func createBudgetFromInstanceConfig(ctx context.Context, rule *types.Rule, tmpl 
 			}
 		}
 	}
-	budgetID := fmt.Sprintf("bdg_%s_%s", rule.ID, unit)
+	// Idempotent: if a budget for this rule+unit already exists (e.g. from a previous sync or after variable change), skip create.
+	existing, err := budgetRepo.GetByRuleID(ctx, rule.ID, unit)
+	if err == nil && existing != nil {
+		return nil // budget already exists for current unit
+	}
+	if err != nil && !types.IsNotFound(err) {
+		return fmt.Errorf("failed to check existing budget: %w", err)
+	}
+
 	budget := &types.RuleBudget{
-		ID:         budgetID,
+		ID:         types.BudgetID(rule.ID, unit),
 		RuleID:     rule.ID,
 		Unit:       unit,
 		MaxTotal:   maxTotal,
