@@ -359,11 +359,13 @@ func (m *dynamicBudgetRepo) CreateOrGet(ctx context.Context, budget *types.RuleB
 	defer m.mu.Unlock()
 	key := string(budget.RuleID) + ":" + budget.Unit
 	if existing, ok := m.state[key]; ok {
-		return existing, false, nil
+		cp := *existing
+		return &cp, false, nil
 	}
 	m.created = append(m.created, budget)
 	m.state[key] = budget
-	return budget, true, nil
+	cp := *budget
+	return &cp, true, nil
 }
 
 // TestBudgetChecker_DynamicBudget_AutoCreateKnownUnit tests that when JS returns {amount, unit}
