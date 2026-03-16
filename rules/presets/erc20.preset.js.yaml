@@ -15,7 +15,6 @@ chain_type: "evm"
 chain_id: "1"
 enabled: true
 variables:
-  chain_id: "1"
   token_address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
   # Amounts in token smallest unit (e.g. USDC 6 decimals: 1000000 = 1 USDC, 1000000000 = 1000 USDC).
   max_transfer_amount: "-1"   # -1 = no cap; 0 = cap of 0 (block all)
@@ -36,7 +35,6 @@ schedule:
   period: "${budget_period}"   # e.g. 24h, 168h; overridable via --set budget_period=168h
   # start_at: optional RFC3339
 override_hints:
-  - chain_id
   - token_address
   - max_transfer_amount
   - max_approve_amount

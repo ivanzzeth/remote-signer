@@ -14,7 +14,6 @@ chain_type: "evm"
 chain_id: "1"
 enabled: true
 variables:
-  chain_id: "1"
   staking_address: "0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84"
   max_stake_amount: "-1"
   max_unstake_amount: "-1"
@@ -25,7 +24,6 @@ budget:
   max_tx_count: 0
   alert_pct: 80
 override_hints:
-  - chain_id
   - staking_address
   - max_stake_amount
   - max_unstake_amount

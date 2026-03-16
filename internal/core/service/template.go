@@ -447,9 +447,12 @@ func (s *TemplateService) createBudgetWithRepo(ctx context.Context, budgetRepo s
 	return budget, nil
 }
 
-// injectReservedVariables injects reserved variables (e.g. chain_id) from the
-// rule-level scope into the resolved variables map.  If the user already
-// supplied a value it is overwritten and a warning is logged.
+// injectReservedVariables injects reserved variables from the rule-level scope
+// into the resolved variables map. chain_id is always taken from
+// CreateInstanceRequest.ChainID (the rule-level scope), never from user input.
+// If the user supplied a chain_id in variables, it is overwritten and a warning
+// is logged — this is a backward-compat path for old presets/configs that still
+// have chain_id in their variables section (which is now deprecated).
 func injectReservedVariables(vars map[string]string, req *CreateInstanceRequest, logger *slog.Logger) {
 	if req.ChainID != nil {
 		if old, exists := vars["chain_id"]; exists && old != *req.ChainID {
@@ -483,7 +486,14 @@ func SubstituteVariables(configJSON []byte, vars map[string]string) ([]byte, err
 }
 
 // reservedVariables are auto-injected from rule scope and should not be
-// required from user input.  Templates that still list them are tolerated
+// declared in template variable definitions or preset variables sections.
+//
+// DEPRECATED in variables: chain_id is now always injected from the rule-level
+// chain_id scope field. Do NOT declare chain_id in template variables or preset
+// variables — it will be ignored and overwritten. Use the top-level chain_id
+// field in presets/config instead.
+//
+// Old templates/presets that still list chain_id as a variable are tolerated
 // (backward-compat) but the definition is silently skipped during validation.
 var reservedVariables = map[string]bool{
 	"chain_id": true,

@@ -10,13 +10,11 @@ chain_type: "evm"
 chain_id: "1"
 enabled: true
 variables:
-  chain_id: "1"
   router_address: "0xE592427A0AEce92De3Edee1F18E0157C05861564"
   allowed_token_in: ""
   allowed_token_out: ""
   max_amount_in: "-1"
 override_hints:
-  - chain_id
   - router_address
   - allowed_token_in
   - allowed_token_out

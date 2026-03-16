@@ -418,9 +418,10 @@ func parseMatrixPreset(
 }
 
 // applyChainIDOverride syncs the chain_id override into PresetRule.ChainID (scope).
-// chain_id is a reserved variable: if the user passes --set chain_id=X, it must
-// update the rule-level scope so that injectReservedVariables in the service layer
-// uses the correct value.
+// chain_id is a reserved variable — it should NOT appear in preset variables
+// sections (deprecated). The only source of truth is the rule-level chain_id
+// field. If the user passes --set chain_id=X, it updates the rule-level scope
+// so that injectReservedVariables in the service layer uses the correct value.
 func applyChainIDOverride(r *PresetRule, overrides map[string]string) {
 	if v, ok := overrides["chain_id"]; ok && v != "" {
 		r.ChainID = v

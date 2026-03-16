@@ -16,7 +16,6 @@ chain_type: "evm"
 chain_id: "56"
 enabled: true
 variables:
-  chain_id: "56"
   order_domain_name: "predict.fun CTF Exchange"
   order_domain_version: "1"
   usdt_address: "0x55d398326f99059fF775485246999027B3197955"

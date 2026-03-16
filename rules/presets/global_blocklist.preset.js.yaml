@@ -10,8 +10,6 @@ chain_type: "evm"
 chain_id: "1"
 enabled: true
 variables:
-  chain_id: "1"
   blocked_addresses: "0x0000000000000000000000000000000000000000,0x000000000000000000000000000000000000dEaD"
 override_hints:
-  - chain_id
   - blocked_addresses

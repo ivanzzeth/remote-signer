@@ -11,7 +11,6 @@ chain_type: "evm"
 chain_id: "137"
 enabled: true
 variables:
-  chain_id: "137"
   safe_proxy_factory_address: "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"
   safe_factory_domain_name: "Polymarket Contract Proxy Factory"
   usdc_bridged_address: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"

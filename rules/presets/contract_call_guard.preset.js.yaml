@@ -10,10 +10,8 @@ chain_type: "evm"
 chain_id: "1"
 enabled: true
 variables:
-  chain_id: "1"
   allowed_contracts: ""
   allowed_selectors: ""
 override_hints:
-  - chain_id
   - allowed_contracts
   - allowed_selectors

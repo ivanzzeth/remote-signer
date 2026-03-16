@@ -10,14 +10,12 @@ chain_type: "evm"
 chain_id: "1"
 enabled: true
 variables:
-  chain_id: "1"
   token_address: "0xBC4ca0EdA7647A8aB7C2061c2E118A18a936f13D"
   allowed_recipients: ""
   allowed_transfer_from: ""
   allowed_approve_to: ""
   allowed_operators: ""
 override_hints:
-  - chain_id
   - token_address
   - allowed_recipients
   - allowed_transfer_from
