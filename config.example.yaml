@@ -55,6 +55,15 @@ chains:
     # Directory for storing HD wallets created via API
     hd_wallet_dir: "./data/hd-wallets"
 
+    # EVM RPC gateway for JS rule sandbox (read-only queries: decimals, ERC165, etc.)
+    # Used by agent rules and any JS rule that calls web3.call() / erc20.decimals().
+    # URL pattern: ${base_url}/${chain_id} or ${base_url}/${chain_id}/api_key/${api_key}
+    # Deploy your own evm-gateway or use any compatible multi-chain RPC router.
+    rpc_gateway:
+      base_url: "${EVM_RPC_GATEWAY_URL:-}"             # e.g. https://your-gateway.example.com/chain/evm
+      api_key: "${EVM_RPC_GATEWAY_API_KEY:-}"           # optional, for authenticated endpoints
+      cache_ttl: "24h"                                  # token metadata cache TTL
+
     # Foundry configuration for Solidity expression rules
     foundry:
       enabled: true

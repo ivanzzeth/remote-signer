@@ -951,6 +951,10 @@ chains:
       # hd_wallets: []     # Create via TUI or API after startup
     keystore_dir: "./data/keystores"
     hd_wallet_dir: "./data/hd-wallets"
+    rpc_gateway:
+      base_url: "${EVM_RPC_GATEWAY_URL:-}"
+      api_key: "${EVM_RPC_GATEWAY_API_KEY:-}"
+      cache_ttl: "24h"
     foundry:
       enabled: true
       forge_path: ""

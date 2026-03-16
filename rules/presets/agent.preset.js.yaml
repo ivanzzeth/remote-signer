@@ -1,10 +1,18 @@
-# Preset: Agent (evm_js) — multi-chain matrix for AI agent operation.
+# Preset: Agent (evm_js) — AI agent with dynamic per-token budget tracking.
 # Three sub-rules: agent-tx (whitelist), agent-sign (whitelist), agent-safety (blocklist).
-# Use: remote-signer-cli preset create-from agent.preset.js.yaml [--config config.yaml --write] [--set max_message_length=2048]
-# Chains: Ethereum (1), Polygon (137), Arbitrum (42161), Optimism (10), Base (8453).
 #
-# Budget is dynamic (validateBudget returns {amount, unit}). Configure known_units and
-# unknown_default in the budget section below for per-token limits.
+# No chain_id restriction — agent can interact with ANY chain.
+# Budget tracks spending per {chain_id}:{token} dynamically.
+#
+# Usage:
+#   remote-signer-cli preset create-from agent.preset.js.yaml \
+#     --set max_native_total=1 --set max_native_per_tx=0.1 \
+#     --set max_unknown_token_total=1000 \
+#     --config config.yaml --write
+#
+# All budget values are overridable via --set. Defaults are conservative.
+# Budget amounts use unit_decimal mode — human-readable (e.g. "1" = 1 ETH, "1000" = 1000 USDC).
+# Token decimals are auto-queried from chain via rpc_gateway.
 
 name: "Agent"
 template_paths:
@@ -12,48 +20,55 @@ template_paths:
 template_names:
   - "Agent Template"
 chain_type: "evm"
+# No chain_id — matches ALL chains. Budget isolates per chain automatically.
 enabled: true
-
-matrix:
-  - chain_id: "1"
-  - chain_id: "137"
-  - chain_id: "42161"
-  - chain_id: "10"
-  - chain_id: "8453"
-
-defaults:
-  max_message_length: "1024"
-  budget_period: "24h"
-
 variables:
+  # Personal sign message length limit (bytes)
   max_message_length: "1024"
-
+  # Budget period (reset interval)
+  budget_period: "24h"
+  # Native token budget (human-readable, e.g. "1" = 1 ETH/MATIC/BNB)
+  max_native_total: "1"
+  max_native_per_tx: "0.1"
+  # Transaction count budget (for calls not matching known token patterns)
+  max_tx_count: "1000"
+  # Signature count budget (personal_sign + typed_data)
+  max_sign_count: "500"
+  # Unknown token default budget (human-readable, decimals auto-queried)
+  max_unknown_token_total: "1000"
+  max_unknown_token_per_tx: "100"
+  max_unknown_token_tx_count: "50"
 budget:
   dynamic: true
   unit_decimal: true
   known_units:
     native:
-      max_total: "1"
-      max_per_tx: "0.1"
+      max_total: "${max_native_total}"
+      max_per_tx: "${max_native_per_tx}"
       decimals: 18
     tx_count:
-      max_total: "1000"
+      max_total: "${max_tx_count}"
       max_per_tx: "1"
       decimals: 0
     sign_count:
-      max_total: "500"
+      max_total: "${max_sign_count}"
       max_per_tx: "1"
       decimals: 0
   unknown_default:
-    max_total: "1000"
-    max_per_tx: "100"
-    max_tx_count: 50
+    max_total: "${max_unknown_token_total}"
+    max_per_tx: "${max_unknown_token_per_tx}"
+    max_tx_count: "${max_unknown_token_tx_count}"
   period: "${budget_period}"
   alert_pct: 80
-
 schedule:
   period: "${budget_period}"
-
 override_hints:
   - max_message_length
   - budget_period
+  - max_native_total
+  - max_native_per_tx
+  - max_tx_count
+  - max_sign_count
+  - max_unknown_token_total
+  - max_unknown_token_per_tx
+  - max_unknown_token_tx_count

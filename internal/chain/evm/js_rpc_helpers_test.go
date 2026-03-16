@@ -430,15 +430,15 @@ func TestJSRPC_ERC165SupportsInterfaceInScript(t *testing.T) {
 }
 
 func TestRPCProvider_URLBuilding(t *testing.T) {
-	p, err := NewRPCProvider("https://your-evm-gateway.example.com/chain/evm", "mykey123")
+	p, err := NewRPCProvider("https://evm-gateway.example.com/chain/evm", "mykey123")
 	require.NoError(t, err)
 	url := p.rpcURL("137")
-	assert.Equal(t, "https://your-evm-gateway.example.com/chain/evm/137/api_key/mykey123", url)
+	assert.Equal(t, "https://evm-gateway.example.com/chain/evm/137/api_key/mykey123", url)
 
-	p2, err := NewRPCProvider("https://your-evm-gateway.example.com/chain/evm/", "")
+	p2, err := NewRPCProvider("https://evm-gateway.example.com/chain/evm/", "")
 	require.NoError(t, err)
 	url2 := p2.rpcURL("1")
-	assert.Equal(t, "https://your-evm-gateway.example.com/chain/evm/1", url2)
+	assert.Equal(t, "https://evm-gateway.example.com/chain/evm/1", url2)
 }
 
 func TestRPCProvider_EmptyBaseURL(t *testing.T) {
