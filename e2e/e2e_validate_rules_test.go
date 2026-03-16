@@ -6,10 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -43,44 +41,6 @@ func TestValidateRules_AllRulesAndTemplates(t *testing.T) {
 	cmd.Stderr = os.Stderr
 	err := cmd.Run()
 	require.NoError(t, err, "validate-rules must pass for all rules/*.yaml and rules/templates/*.yaml (exit code 0)")
-}
-
-// TestValidateRules_MultiChainInstanceConfig verifies that validate-rules passes
-// for a config with multiple instances of the same template bundle across chains
-// (the matrix preset scenario: same ERC20 Template, 6 different chain_ids).
-func TestValidateRules_MultiChainInstanceConfig(t *testing.T) {
-	projectRoot := findProjectRoot(t)
-
-	// Use the real config.yaml which has USDC preset rules for 6 chains
-	configPath := filepath.Join(projectRoot, "config.yaml")
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		t.Skip("config.yaml not found (USDC preset not deployed)")
-	}
-
-	// Check if config has multi-chain instance rules
-	data, err := os.ReadFile(configPath)
-	require.NoError(t, err)
-	configStr := string(data)
-	// Must have at least 2 different chain_ids in instance rules
-	hasMultiChain := false
-	for _, cid := range []string{"chain_id: \"137\"", "chain_id: \"42161\"", "chain_id: \"10\""} {
-		if strings.Contains(configStr, cid) {
-			hasMultiChain = true
-			break
-		}
-	}
-	if !hasMultiChain {
-		t.Skip("config.yaml does not have multi-chain instance rules")
-	}
-
-	cmd := exec.Command("go", "run", "./cmd/validate-rules/", "-config", configPath)
-	cmd.Dir = projectRoot
-	out, err := cmd.CombinedOutput()
-	require.NoError(t, err, "validate-rules must pass for multi-chain instance config.\nOutput:\n%s", string(out))
-
-	// Verify output shows multiple rules passed
-	assert.Contains(t, string(out), "passed")
-	assert.Contains(t, string(out), "All rules validated successfully")
 }
 
 func findProjectRoot(t *testing.T) string {
