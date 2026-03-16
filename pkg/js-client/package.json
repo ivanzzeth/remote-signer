@@ -1,6 +1,6 @@
 {
   "name": "remote-signer-client",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "JavaScript client for remote-signer service. Supports both browser and Node.js.",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
@@ -30,7 +30,8 @@
   "dependencies": {
     "@babel/runtime": "^7.28.6",
     "@noble/ed25519": "^2.0.0",
-    "@noble/hashes": "^1.3.0"
+    "@noble/hashes": "^1.3.0",
+    "eip155-chains": "^0.1.3"
   },
   "devDependencies": {
     "@babel/core": "^7.29.0",

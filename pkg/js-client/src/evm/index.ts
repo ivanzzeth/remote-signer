@@ -42,3 +42,4 @@ export * from "./hdwallets";
 export * from "./remote_signer";
 export * from "./guard";
 export * from "./ethsig";
+export * from "./eip1193";

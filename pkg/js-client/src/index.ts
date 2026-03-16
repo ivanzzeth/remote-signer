@@ -49,6 +49,7 @@ export {
   EvmHDWalletService,
   EvmGuardService,
   RemoteSigner,
+  EIP1193Provider,
 } from "./evm";
 export type {
   // Shared EVM types
@@ -96,6 +97,9 @@ export type {
   DeriveAddressRequest,
   DeriveAddressResponse,
   ListDerivedAddressesResponse,
+  // EIP-1193
+  EIP1193ProviderConfig,
+  EIP1193RequestArgs,
   // Ethsig interfaces
   Signer,
   AddressGetter,
