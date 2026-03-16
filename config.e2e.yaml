@@ -25,6 +25,10 @@ chains:
           key_env: "E2E_TEST_SIGNER2_KEY"
           enabled: true
     keystore_dir: "./data/keystores-e2e"
+    rpc_gateway:
+      base_url: "${EVM_RPC_GATEWAY_URL:-}"
+      api_key: "${EVM_RPC_GATEWAY_API_KEY:-}"
+      cache_ttl: "1h"
     foundry:
       enabled: true
       forge_path: ""
