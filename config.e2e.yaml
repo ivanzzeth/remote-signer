@@ -173,6 +173,11 @@ templates:
     enabled: true
     config:
       path: "rules/templates/polymarket.template.js.yaml"
+  - name: "Agent Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/agent.template.js.yaml"
 
 # Rules for e2e testing
 # Rules can be defined here (config source) or via API (api source)

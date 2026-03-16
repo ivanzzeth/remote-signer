@@ -213,6 +213,57 @@ defaults: {}
 			panic("failed to write e2e matrix preset file: " + err.Error())
 		}
 
+		// Agent preset: references "Agent Template" (loaded from config.e2e.yaml), 5-chain matrix
+		agentPresetContent := []byte(`name: "Agent"
+template_paths:
+  - "rules/templates/agent.template.js.yaml"
+template_names:
+  - "Agent Template"
+chain_type: "evm"
+enabled: true
+matrix:
+  - chain_id: "1"
+  - chain_id: "137"
+  - chain_id: "42161"
+  - chain_id: "10"
+  - chain_id: "8453"
+defaults:
+  max_message_length: "1024"
+  budget_period: "24h"
+variables:
+  max_message_length: "1024"
+budget:
+  dynamic: true
+  unit_decimal: true
+  known_units:
+    native:
+      max_total: "1"
+      max_per_tx: "0.1"
+      decimals: 18
+    tx_count:
+      max_total: "1000"
+      max_per_tx: "1"
+      decimals: 0
+    sign_count:
+      max_total: "500"
+      max_per_tx: "1"
+      decimals: 0
+  unknown_default:
+    max_total: "1000"
+    max_per_tx: "100"
+    max_tx_count: 50
+  period: "${budget_period}"
+  alert_pct: 80
+schedule:
+  period: "${budget_period}"
+override_hints:
+  - max_message_length
+  - budget_period
+`)
+		if err := os.WriteFile(filepath.Join(presetsDir, "agent.preset.js.yaml"), agentPresetContent, 0644); err != nil {
+			panic("failed to write agent preset file: " + err.Error())
+		}
+
 		e2ePresetsDir = presetsDir
 		presetsDirAbs, err := filepath.Abs(presetsDir)
 		if err != nil {

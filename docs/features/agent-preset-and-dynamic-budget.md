@@ -1,6 +1,6 @@
 # Agent Preset & Dynamic Budget Design
 
-**Status:** Draft
+**Status:** Implemented
 **Author:** Ivan + Claude
 **Date:** 2026-03-16
 
