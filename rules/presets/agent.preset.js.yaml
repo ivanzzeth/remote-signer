@@ -1,0 +1,59 @@
+# Preset: Agent (evm_js) — multi-chain matrix for AI agent operation.
+# Three sub-rules: agent-tx (whitelist), agent-sign (whitelist), agent-safety (blocklist).
+# Use: remote-signer-cli preset create-from agent.preset.js.yaml [--config config.yaml --write] [--set max_message_length=2048]
+# Chains: Ethereum (1), Polygon (137), Arbitrum (42161), Optimism (10), Base (8453).
+#
+# Budget is dynamic (validateBudget returns {amount, unit}). Configure known_units and
+# unknown_default in the budget section below for per-token limits.
+
+name: "Agent"
+template_paths:
+  - "rules/templates/agent.template.js.yaml"
+template_names:
+  - "Agent Template"
+chain_type: "evm"
+enabled: true
+
+matrix:
+  - chain_id: "1"
+  - chain_id: "137"
+  - chain_id: "42161"
+  - chain_id: "10"
+  - chain_id: "8453"
+
+defaults:
+  max_message_length: "1024"
+  budget_period: "24h"
+
+variables:
+  max_message_length: "1024"
+
+budget:
+  dynamic: true
+  unit_decimal: true
+  known_units:
+    native:
+      max_total: "1"
+      max_per_tx: "0.1"
+      decimals: 18
+    tx_count:
+      max_total: "1000"
+      max_per_tx: "1"
+      decimals: 0
+    sign_count:
+      max_total: "500"
+      max_per_tx: "1"
+      decimals: 0
+  unknown_default:
+    max_total: "1000"
+    max_per_tx: "100"
+    max_tx_count: 50
+  period: "${budget_period}"
+  alert_pct: 80
+
+schedule:
+  period: "${budget_period}"
+
+override_hints:
+  - max_message_length
+  - budget_period

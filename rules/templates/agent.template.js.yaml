@@ -1,0 +1,405 @@
+# Agent template (evm_js) — three sub-rules for AI agent operation.
+# Filename *.template.js.yaml = template fully driven by evm_js rules (no evm_solidity_expression).
+# Sub-rules:
+#   agent-tx       (whitelist) — allow any transaction; dynamic budget by token/native/count
+#   agent-sign     (whitelist) — allow personal_sign (length limit) and typed_data (Permit budget)
+#   agent-safety   (blocklist) — block known dangerous admin function selectors
+#
+# Requires Phase 1 (dynamic budget) and Phase 2 (JS RPC injection) features.
+
+variables:
+  - name: max_message_length
+    type: string
+    description: "Max personal_sign message length in characters. -1 = no limit."
+    required: false
+    default: "1024"
+
+budget_metering:
+  method: "js"
+  dynamic: true
+
+test_variables:
+  chain_id: "1"
+  max_message_length: "1024"
+
+rules:
+  # ── agent-tx: allow any transaction, track budget dynamically ──
+  - id: "agent-tx"
+    name: "Agent Transaction"
+    type: "evm_js"
+    mode: "whitelist"
+    enabled: true
+    description: "Allow any contract call; validateBudget dynamically detects ERC20/ERC721/ERC1155/native/other and returns {amount, unit}"
+    config:
+      sign_type_filter: "transaction"
+      script: |
+        function validate(input) {
+          require(input.sign_type === 'transaction', 'not a transaction');
+          require(input.transaction, 'missing transaction');
+          return ok();
+        }
+        function validateBudget(input) {
+          var tx = input.transaction;
+          if (!tx) return { amount: 1n, unit: 'tx_count' };
+          var data = (tx.data || '0x').replace(/^0x/, '');
+
+          // Native-only transfer (no calldata or short calldata)
+          if (data.length < 8) {
+            if (tx.value && BigInt(tx.value) > 0n) {
+              return { amount: BigInt(tx.value), unit: 'native' };
+            }
+            return { amount: 1n, unit: 'tx_count' };
+          }
+
+          var sel = '0x' + data.slice(0, 8);
+          var payloadHex = data.slice(8);
+
+          var transferSel = selector('transfer(address,uint256)');
+          var transferFromSel = selector('transferFrom(address,address,uint256)');
+          var approveSel = selector('approve(address,uint256)');
+          var safeTransferFrom3Sel = selector('safeTransferFrom(address,address,uint256)');
+          var safeTransferFrom4Sel = selector('safeTransferFrom(address,address,uint256,bytes)');
+          var safeTransferFrom1155Sel = selector('safeTransferFrom(address,address,uint256,uint256,bytes)');
+
+          // ERC20 transfer(to, amount)
+          if (eq(sel, transferSel)) {
+            var dec = abi.decode(payloadHex, ['address', 'uint256']);
+            return { amount: dec[1], unit: tx.to };
+          }
+
+          // ERC20 approve(spender, amount)
+          if (eq(sel, approveSel)) {
+            var dec = abi.decode(payloadHex, ['address', 'uint256']);
+            return { amount: dec[1], unit: tx.to + ':approve' };
+          }
+
+          // transferFrom(from, to, amount/tokenId) — ambiguous between ERC20 and ERC721
+          // HIGH-4: check erc20.decimals() to distinguish; default to ERC20 (more conservative)
+          if (eq(sel, transferFromSel)) {
+            var hasDecimals = false;
+            try { var d = erc20.decimals(tx.to); hasDecimals = (d > 0); } catch(e) {}
+            if (hasDecimals) {
+              var dec = abi.decode(payloadHex, ['address', 'address', 'uint256']);
+              return { amount: dec[2], unit: tx.to };
+            }
+            return { amount: 1n, unit: tx.to + ':nft' };
+          }
+
+          // safeTransferFrom with 3 args (ERC721) or 4 args (ERC721 with data)
+          if (eq(sel, safeTransferFrom3Sel) || eq(sel, safeTransferFrom4Sel)) {
+            var hasDecimals = false;
+            try { var d = erc20.decimals(tx.to); hasDecimals = (d > 0); } catch(e) {}
+            if (hasDecimals) {
+              var dec = abi.decode(payloadHex, ['address', 'address', 'uint256']);
+              return { amount: dec[2], unit: tx.to };
+            }
+            return { amount: 1n, unit: tx.to + ':nft' };
+          }
+
+          // ERC1155 safeTransferFrom(from, to, id, amount, data)
+          if (eq(sel, safeTransferFrom1155Sel)) {
+            var dec = abi.decode(payloadHex, ['address', 'address', 'uint256', 'uint256', 'bytes']);
+            return { amount: dec[3], unit: tx.to + ':1155' };
+          }
+
+          // Contract call with native value
+          if (tx.value && BigInt(tx.value) > 0n) {
+            return { amount: BigInt(tx.value), unit: 'native' };
+          }
+
+          // Other calls: count
+          return { amount: 1n, unit: 'tx_count' };
+        }
+    test_cases:
+      # Positive: ERC20 transfer
+      - name: "pass: ERC20 transfer"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            value: "0x0"
+            data: "0xa9059cbb0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc400000000000000000000000000000000000000000000000000000000000f4240"
+            methodId: "0xa9059cbb"
+        expect_pass: true
+      # Positive: native value transfer
+      - name: "pass: native value transfer"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+            value: "0xDE0B6B3A7640000"
+            data: "0x"
+        expect_pass: true
+      # Positive: arbitrary contract call (tx_count budget)
+      - name: "pass: arbitrary contract call"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+            value: "0x0"
+            data: "0x06fdde03"
+            methodId: "0x06fdde03"
+        expect_pass: true
+      # Negative: wrong sign_type (personal_sign sent to tx rule)
+      - name: "reject: personal_sign is not a transaction"
+        input:
+          sign_type: "personal"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          personal_sign:
+            message: "hello"
+        expect_pass: false
+      # Negative: ERC20 approve (still allowed by agent-tx, budget tracks separately)
+      - name: "pass: ERC20 approve"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            value: "0x0"
+            data: "0x095ea7b30000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc400000000000000000000000000000000000000000000000000000000000f4240"
+            methodId: "0x095ea7b3"
+        expect_pass: true
+
+  # ── agent-sign: allow personal_sign and typed_data ──
+  - id: "agent-sign"
+    name: "Agent Signature"
+    type: "evm_js"
+    mode: "whitelist"
+    enabled: true
+    description: "Allow personal_sign with message length limit and typed_data; Permit signatures tracked in budget"
+    config:
+      sign_type_filter: "personal_sign,typed_data"
+      script: |
+        function validate(input) {
+          if (input.sign_type === 'personal_sign') {
+            var msg = input.personal_sign.message;
+            var maxLen = parseInt(config.max_message_length) || 1024;
+            if (maxLen > 0) {
+              require(msg.length <= maxLen,
+                'message too long (' + msg.length + ' > ' + maxLen + ')');
+            }
+            return ok();
+          }
+
+          if (input.sign_type === 'typed_data') {
+            var td = input.typed_data;
+            require(td, 'missing typed_data');
+            return ok();
+          }
+
+          revert('unsupported sign type: ' + input.sign_type);
+        }
+        function validateBudget(input) {
+          if (input.sign_type === 'personal_sign') {
+            return { amount: 1n, unit: 'sign_count' };
+          }
+          if (input.sign_type === 'typed_data') {
+            var td = input.typed_data;
+            if (td.primaryType === 'Permit' || td.primaryType === 'PermitSingle') {
+              var token = (td.domain || {}).verifyingContract || '';
+              var value = BigInt((td.message || {}).value || '0');
+              return { amount: value, unit: token + ':permit' };
+            }
+          }
+          return { amount: 1n, unit: 'sign_count' };
+        }
+    test_cases:
+      # Positive: short personal_sign
+      - name: "pass: personal_sign within length limit"
+        input:
+          sign_type: "personal"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          personal_sign:
+            message: "Sign in to dApp"
+        expect_pass: true
+      # Positive: typed_data (non-Permit)
+      - name: "pass: typed_data non-Permit"
+        input:
+          sign_type: "typed_data"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          typed_data:
+            primaryType: "Order"
+            domain:
+              name: "TestDApp"
+              chainId: "1"
+              verifyingContract: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+            message:
+              maker: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+              amount: "1000000"
+        expect_pass: true
+      # Positive: typed_data Permit (budget tracked)
+      - name: "pass: typed_data Permit"
+        input:
+          sign_type: "typed_data"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          typed_data:
+            primaryType: "Permit"
+            domain:
+              name: "USD Coin"
+              chainId: "1"
+              verifyingContract: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            message:
+              owner: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+              spender: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+              value: "1000000"
+              nonce: "0"
+              deadline: "1700000000"
+        expect_pass: true
+      # Negative: personal_sign too long (default limit is 1024)
+      - name: "reject: personal_sign exceeds length limit"
+        input:
+          sign_type: "personal"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          personal_sign:
+            message: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA_OVER_1024"
+        expect_pass: false
+        expect_reason: "message too long"
+
+  # ── agent-safety: block dangerous admin function selectors ──
+  - id: "agent-safety"
+    name: "Agent Safety"
+    type: "evm_js"
+    mode: "blocklist"
+    enabled: true
+    description: "Block known dangerous selectors: setApprovalForAll(true), transferOwnership, renounceOwnership, upgradeTo, upgradeToAndCall"
+    config:
+      sign_type_filter: "transaction"
+      script: |
+        function validate(input) {
+          if (input.sign_type !== 'transaction' || !input.transaction) return ok();
+          var tx = input.transaction;
+          var data = (tx.data || '0x').replace(/^0x/, '');
+          if (data.length < 8) return ok();
+          var sel = '0x' + data.slice(0, 8);
+          var payloadHex = data.slice(8);
+
+          // setApprovalForAll(address,bool) — block when setting true
+          if (eq(sel, selector('setApprovalForAll(address,bool)'))) {
+            var dec = abi.decode(payloadHex, ['address', 'bool']);
+            if (dec[1]) {
+              return fail('setApprovalForAll(true) is blocked for agent safety');
+            }
+            return ok();
+          }
+
+          // transferOwnership(address)
+          if (eq(sel, selector('transferOwnership(address)'))) {
+            return fail('transferOwnership is blocked for agent safety');
+          }
+
+          // renounceOwnership()
+          if (eq(sel, selector('renounceOwnership()'))) {
+            return fail('renounceOwnership is blocked for agent safety');
+          }
+
+          // upgradeTo(address)
+          if (eq(sel, selector('upgradeTo(address)'))) {
+            return fail('upgradeTo is blocked for agent safety');
+          }
+
+          // upgradeToAndCall(address,bytes)
+          if (eq(sel, selector('upgradeToAndCall(address,bytes)'))) {
+            return fail('upgradeToAndCall is blocked for agent safety');
+          }
+
+          return ok();
+        }
+    test_cases:
+      # Positive: normal ERC20 transfer not blocked
+      - name: "pass: ERC20 transfer not blocked"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            value: "0x0"
+            data: "0xa9059cbb0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc400000000000000000000000000000000000000000000000000000000000f4240"
+            methodId: "0xa9059cbb"
+        expect_pass: true
+      # Positive: setApprovalForAll(false) is allowed (revoking)
+      - name: "pass: setApprovalForAll(false) allowed"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            value: "0x0"
+            data: "0xa22cb4650000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc40000000000000000000000000000000000000000000000000000000000000000"
+            methodId: "0xa22cb465"
+        expect_pass: true
+      # Negative: setApprovalForAll(true) blocked
+      - name: "reject: setApprovalForAll(true) blocked"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
+            to: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            value: "0x0"
+            data: "0xa22cb4650000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc40000000000000000000000000000000000000000000000000000000000000001"
+            methodId: "0xa22cb465"
+        expect_pass: false
+        expect_reason: "setApprovalForAll(true) is blocked"
+      # Negative: transferOwnership blocked
+      - name: "reject: transferOwnership blocked"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
+            to: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            value: "0x0"
+            data: "0xf2fde38b0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc4"
+            methodId: "0xf2fde38b"
+        expect_pass: false
+        expect_reason: "transferOwnership is blocked"
+      # Negative: renounceOwnership blocked
+      - name: "reject: renounceOwnership blocked"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
+            to: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            value: "0x0"
+            data: "0x715018a6"
+            methodId: "0x715018a6"
+        expect_pass: false
+        expect_reason: "renounceOwnership is blocked"
+      # Negative: upgradeTo blocked
+      - name: "reject: upgradeTo blocked"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
+            to: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            value: "0x0"
+            data: "0x3659cfe60000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc4"
+            methodId: "0x3659cfe6"
+        expect_pass: false
+        expect_reason: "upgradeTo is blocked"
