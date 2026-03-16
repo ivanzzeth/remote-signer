@@ -6,12 +6,33 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
+
+const (
+	// defaultMaxDynamicUnits is the default cap on distinct dynamic budget units per rule.
+	// SECURITY: Without this cap, an attacker could target N tokens to get N * max_total effective budget.
+	defaultMaxDynamicUnits = 100
+
+	// maxDecimalDigits is the maximum token decimals allowed.
+	// SECURITY: PostgreSQL NUMERIC precision is ~131072 digits. 77 decimals can represent
+	// up to 10^77, which is far beyond any realistic token. Values above this risk overflow.
+	maxDecimalDigits = 77
+
+	// maxUnitLength caps the unit string length to prevent storage abuse.
+	maxUnitLength = 256
+)
+
+// validDynamicUnitRe matches safe dynamic unit strings.
+// Allowed patterns:
+//   - Hex address: 0x followed by 40 hex chars, optionally with :suffix (e.g. 0xAbC123...:approve)
+//   - Named units: alphanumeric with underscores (e.g. native, tx_count, sign_count)
+var validDynamicUnitRe = regexp.MustCompile(`^(?:0x[0-9a-fA-F]{1,40}(?::[a-z_0-9]+)?|[a-zA-Z][a-zA-Z0-9_]*)$`)
 
 // BudgetAlertNotifier sends budget alert notifications.
 // Implementations should be non-blocking (async) to avoid delaying sign requests.
@@ -21,9 +42,10 @@ type BudgetAlertNotifier interface {
 }
 
 // BudgetJSEvaluator evaluates the spend amount for evm_js rules when budget_metering.method is "js".
-// The script's validateBudget(input) is called and must return a bigint or decimal string.
+// The script's validateBudget(input) is called and must return a bigint, decimal string,
+// or {amount, unit} object for dynamic budget support.
 type BudgetJSEvaluator interface {
-	EvaluateBudget(ctx context.Context, rule *types.Rule, req *types.SignRequest, parsed *types.ParsedPayload) (*big.Int, error)
+	EvaluateBudget(ctx context.Context, rule *types.Rule, req *types.SignRequest, parsed *types.ParsedPayload) (*types.BudgetResult, error)
 }
 
 // BudgetChecker checks and deducts budget for rule instances
@@ -102,6 +124,12 @@ func (bc *BudgetChecker) CheckAndDeductBudget(
 		return true, nil
 	}
 
+	// For dynamic budget with JS method, the unit is determined at evaluation time,
+	// so we defer budget lookup until after JS evaluation.
+	if metering.Dynamic && metering.Method == "js" {
+		return bc.checkDynamicBudget(ctx, rule, req, parsed, metering)
+	}
+
 	unit := metering.Unit
 	if unit == "" {
 		unit = "count"
@@ -136,10 +164,11 @@ func (bc *BudgetChecker) CheckAndDeductBudget(
 		if bc.jsEvaluator == nil {
 			return false, fmt.Errorf("budget metering method %q requires SetJSEvaluator to be set", metering.Method)
 		}
-		amount, err = bc.jsEvaluator.EvaluateBudget(ctx, rule, req, parsed)
-		if err != nil {
-			return false, fmt.Errorf("js budget evaluation: %w", err)
+		budgetResult, evalErr := bc.jsEvaluator.EvaluateBudget(ctx, rule, req, parsed)
+		if evalErr != nil {
+			return false, fmt.Errorf("js budget evaluation: %w", evalErr)
 		}
+		amount = budgetResult.Amount
 	} else {
 		amount, err = ExtractAmount(metering, req, parsed)
 		if err != nil {
@@ -191,6 +220,240 @@ func (bc *BudgetChecker) CheckAndDeductBudget(
 	go bc.checkAlertThreshold(rule.ID, unit, budget)
 
 	return true, nil
+}
+
+// checkDynamicBudget handles the dynamic budget path where the unit is determined by JS evaluation.
+// Called when metering.Dynamic is true and method is "js".
+//
+// SECURITY (HIGH-1 known limitation): A single multicall TX that batches N transfers
+// only costs 1 tx_count. This is a v1 trade-off; the per-token amount budget still applies
+// to each transfer's decoded amount if the JS validateBudget correctly decodes the inner calls.
+// For multicall-unaware scripts, the tx_count fallback undercounts. Document in operator guide.
+func (bc *BudgetChecker) checkDynamicBudget(
+	ctx context.Context,
+	rule *types.Rule,
+	req *types.SignRequest,
+	parsed *types.ParsedPayload,
+	metering types.BudgetMetering,
+) (bool, error) {
+	if bc.jsEvaluator == nil {
+		return false, fmt.Errorf("budget metering method %q requires SetJSEvaluator to be set", metering.Method)
+	}
+
+	budgetResult, evalErr := bc.jsEvaluator.EvaluateBudget(ctx, rule, req, parsed)
+	if evalErr != nil {
+		return false, fmt.Errorf("js budget evaluation: %w", evalErr)
+	}
+
+	amount := budgetResult.Amount
+	rawUnit := budgetResult.Unit
+	if rawUnit == "" {
+		return false, fmt.Errorf("dynamic budget JS must return {amount, unit} but unit was empty")
+	}
+
+	// SECURITY (CRITICAL-2): Validate unit string to prevent injection and storage abuse.
+	if err := validateDynamicUnit(rawUnit); err != nil {
+		return false, fmt.Errorf("invalid dynamic budget unit: %w", err)
+	}
+
+	chainID := ""
+	if rule.ChainID != nil {
+		chainID = *rule.ChainID
+	}
+	unit := NormalizeBudgetUnit(chainID + ":" + rawUnit)
+
+	// Look up or auto-create budget for the dynamic unit
+	budget, err := bc.budgetRepo.GetByRuleID(ctx, rule.ID, unit)
+	if err != nil {
+		if !types.IsNotFound(err) {
+			return false, fmt.Errorf("failed to get dynamic budget: %w", err)
+		}
+		budget, err = bc.autoCreateDynamicBudget(ctx, rule, unit, rawUnit, metering)
+		if err != nil {
+			return false, fmt.Errorf("failed to auto-create dynamic budget: %w", err)
+		}
+	}
+
+	// Check periodic renewal
+	if err := bc.checkPeriodicRenewal(ctx, rule, budget, unit); err != nil {
+		return false, fmt.Errorf("failed to check periodic renewal for rule %s: %w", rule.ID, err)
+	}
+
+	// Check per-tx limit
+	if budget.MaxPerTx != "" && budget.MaxPerTx != "-1" {
+		maxPerTx := new(big.Int)
+		if _, ok := maxPerTx.SetString(budget.MaxPerTx, 10); !ok {
+			return false, fmt.Errorf("invalid max_per_tx value %q for rule %s", budget.MaxPerTx, rule.ID)
+		}
+		if amount.Cmp(maxPerTx) > 0 {
+			bc.logger.Warn("per-tx budget exceeded",
+				"rule_id", rule.ID,
+				"amount", amount.String(),
+				"max_per_tx", budget.MaxPerTx,
+			)
+			return false, nil
+		}
+	}
+
+	// Atomic spend
+	if err := bc.budgetRepo.AtomicSpend(ctx, rule.ID, unit, amount.String()); err != nil {
+		if err == storage.ErrBudgetExceeded {
+			bc.logger.Warn("total budget exceeded",
+				"rule_id", rule.ID,
+				"unit", unit,
+				"amount", amount.String(),
+			)
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to deduct budget: %w", err)
+	}
+
+	bc.logger.Info("budget deducted",
+		"rule_id", rule.ID,
+		"unit", unit,
+		"amount", amount.String(),
+		"max_total", budget.MaxTotal,
+		"tx_count_after", budget.TxCount+1,
+	)
+
+	// #nosec G118 -- intentional: async alert check must outlive request context
+	go bc.checkAlertThreshold(rule.ID, unit, budget)
+
+	return true, nil
+}
+
+// validateDynamicUnit validates the raw unit string from JS validateBudget return.
+// SECURITY (CRITICAL-2): Prevents injection attacks and storage abuse via crafted unit strings.
+func validateDynamicUnit(rawUnit string) error {
+	if len(rawUnit) > maxUnitLength {
+		return fmt.Errorf("unit string too long (%d > %d)", len(rawUnit), maxUnitLength)
+	}
+	if !validDynamicUnitRe.MatchString(rawUnit) {
+		return fmt.Errorf("unit %q does not match allowed pattern (hex address or alphanumeric name)", rawUnit)
+	}
+	return nil
+}
+
+// autoCreateDynamicBudget creates a new budget record for a dynamic unit discovered at evaluation time.
+// Looks up known_units config first, then falls back to unknown_default. Applies unit_decimal conversion.
+//
+// SECURITY (CRITICAL-2): Enforces MaxDynamicUnits to cap the number of distinct units per rule.
+// SECURITY (CRITICAL-3): Uses CreateOrGet (upsert) to prevent TOCTOU race on concurrent auto-creation.
+func (bc *BudgetChecker) autoCreateDynamicBudget(
+	ctx context.Context,
+	rule *types.Rule,
+	normalizedUnit string,
+	rawUnit string,
+	metering types.BudgetMetering,
+) (*types.RuleBudget, error) {
+	// SECURITY (CRITICAL-2): Enforce max dynamic units per rule.
+	maxUnits := metering.MaxDynamicUnits
+	if maxUnits <= 0 {
+		maxUnits = defaultMaxDynamicUnits
+	}
+	unitCount, err := bc.budgetRepo.CountByRuleID(ctx, rule.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count dynamic units: %w", err)
+	}
+	if unitCount >= maxUnits {
+		return nil, fmt.Errorf("dynamic budget unit limit reached (%d/%d) for rule %s", unitCount, maxUnits, rule.ID)
+	}
+
+	// Look up unit config: check known_units by raw unit (before chain_id prefix), then unknown_default
+	var conf *types.UnitConf
+	if metering.KnownUnits != nil {
+		if c, ok := metering.KnownUnits[rawUnit]; ok {
+			conf = &c
+		} else if c, ok := metering.KnownUnits[NormalizeBudgetUnit(rawUnit)]; ok {
+			conf = &c
+		}
+	}
+	if conf == nil {
+		if metering.UnknownDefault != nil {
+			conf = metering.UnknownDefault
+		} else {
+			// SECURITY: no config for unknown unit and no default — fail-closed
+			return nil, fmt.Errorf("no budget config for dynamic unit %q and no unknown_default configured", rawUnit)
+		}
+	}
+
+	maxTotal := conf.MaxTotal
+	maxPerTx := conf.MaxPerTx
+
+	// unit_decimal conversion: convert human-readable limits to raw big integer
+	if metering.UnitDecimal {
+		decimals := conf.Decimals
+		// SECURITY (MEDIUM-5): Validate decimals range to prevent overflow.
+		if err := validateDecimals(decimals); err != nil {
+			return nil, fmt.Errorf("invalid decimals for unit %q: %w", rawUnit, err)
+		}
+		if decimals <= 0 {
+			// For now, fail-closed when decimals not configured and no RPC available
+			// Phase 2 will add erc20.decimals() auto-query via RPC
+			return nil, fmt.Errorf("unit_decimal enabled but decimals not configured for unit %q (RPC auto-query not yet implemented)", rawUnit)
+		}
+		var convertErr error
+		maxTotal, convertErr = decimalToRaw(maxTotal, decimals)
+		if convertErr != nil {
+			return nil, fmt.Errorf("failed to convert max_total for unit %q: %w", rawUnit, convertErr)
+		}
+		if maxPerTx != "" && maxPerTx != "-1" {
+			maxPerTx, convertErr = decimalToRaw(maxPerTx, decimals)
+			if convertErr != nil {
+				return nil, fmt.Errorf("failed to convert max_per_tx for unit %q: %w", rawUnit, convertErr)
+			}
+		}
+	}
+
+	alertPct := conf.AlertPct
+	if alertPct <= 0 {
+		alertPct = 80 // default
+	}
+
+	budget := &types.RuleBudget{
+		ID:         types.BudgetID(rule.ID, normalizedUnit),
+		RuleID:     rule.ID,
+		Unit:       normalizedUnit,
+		MaxTotal:   maxTotal,
+		MaxPerTx:   maxPerTx,
+		Spent:      "0",
+		AlertPct:   alertPct,
+		TxCount:    0,
+		MaxTxCount: conf.MaxTxCount,
+	}
+
+	// SECURITY (CRITICAL-3): Use CreateOrGet to prevent TOCTOU race.
+	// Concurrent requests that both find "not found" will both call this;
+	// only one will actually create, the other gets the existing record.
+	result, created, err := bc.budgetRepo.CreateOrGet(ctx, budget)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create-or-get budget record: %w", err)
+	}
+
+	if created {
+		bc.logger.Info("auto-created dynamic budget record",
+			"rule_id", rule.ID,
+			"unit", normalizedUnit,
+			"raw_unit", rawUnit,
+			"max_total", maxTotal,
+			"max_per_tx", maxPerTx,
+		)
+	}
+
+	return result, nil
+}
+
+// validateDecimals checks that decimals are within a safe range.
+// SECURITY (MEDIUM-5): Reject negative decimals (possible from malicious contracts)
+// and excessively large values that could cause overflow in decimal-to-raw conversion.
+func validateDecimals(decimals int) error {
+	if decimals < 0 {
+		return fmt.Errorf("negative decimals (%d) not allowed", decimals)
+	}
+	if decimals > maxDecimalDigits {
+		return fmt.Errorf("decimals %d exceeds maximum %d", decimals, maxDecimalDigits)
+	}
+	return nil
 }
 
 // checkPeriodicRenewal checks if the budget needs to be reset for a new period
@@ -431,6 +694,49 @@ func valueToBigInt(v interface{}) (*big.Int, error) {
 // Lowercases the string so address casing (0xA0b8 vs 0xa0b8) does not cause mismatches.
 func NormalizeBudgetUnit(unit string) string {
 	return strings.ToLower(unit)
+}
+
+// decimalToRaw converts a human-readable decimal string (e.g. "1000") with the given number of
+// decimals to a raw big integer string (e.g. "1000000000" for decimals=6).
+// Supports both integer and fractional inputs (e.g. "0.1" with decimals=18).
+func decimalToRaw(humanStr string, decimals int) (string, error) {
+	if humanStr == "" || humanStr == "-1" {
+		return humanStr, nil
+	}
+
+	// Split on decimal point
+	parts := strings.Split(humanStr, ".")
+	if len(parts) > 2 {
+		return "", fmt.Errorf("invalid decimal string %q: multiple decimal points", humanStr)
+	}
+
+	intPart := parts[0]
+	fracPart := ""
+	if len(parts) == 2 {
+		fracPart = parts[1]
+	}
+
+	// Validate no negative
+	if strings.HasPrefix(intPart, "-") {
+		return "", fmt.Errorf("negative budget limit not allowed: %q", humanStr)
+	}
+
+	// Truncate or pad fractional part to exactly `decimals` digits
+	if len(fracPart) > decimals {
+		return "", fmt.Errorf("fractional part of %q exceeds %d decimals", humanStr, decimals)
+	}
+	fracPart = fracPart + strings.Repeat("0", decimals-len(fracPart))
+
+	// Combine: intPart + fracPart (no decimal point) = raw value
+	rawStr := intPart + fracPart
+
+	// Validate it parses as a big integer
+	z := new(big.Int)
+	if _, ok := z.SetString(rawStr, 10); !ok {
+		return "", fmt.Errorf("failed to parse %q as big integer", rawStr)
+	}
+
+	return z.String(), nil
 }
 
 // substituteUnitVariables replaces ${var} in unit using rule.Variables so the unit matches

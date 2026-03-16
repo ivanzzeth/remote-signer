@@ -3,6 +3,7 @@ package types
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"math/big"
 	"time"
 )
 
@@ -27,6 +28,14 @@ type RuleBudget struct {
 // TableName specifies the table name for GORM
 func (RuleBudget) TableName() string {
 	return "rule_budgets"
+}
+
+// BudgetResult is returned by JS validateBudget when dynamic budget is enabled.
+// It carries both the spend amount and the dynamic unit string.
+// When Unit is empty, the static unit from BudgetMetering is used (backward compatible).
+type BudgetResult struct {
+	Amount *big.Int
+	Unit   string // dynamic unit from JS; empty means use static unit
 }
 
 // BudgetID returns a deterministic 64-char id for (ruleID, unit) so it fits varchar(64).

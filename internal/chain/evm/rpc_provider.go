@@ -1,0 +1,382 @@
+package evm
+
+import (
+	"bytes"
+	"context"
+	"crypto/tls"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/ethereum/go-ethereum/common"
+)
+
+const (
+	rpcCallTimeout     = 5 * time.Second
+	rpcMaxCallsPerEval = 10
+
+	// Global rate limiter defaults
+	rpcGlobalRatePerSec  = 50  // max RPC calls per second across all evaluations
+	rpcGlobalBurstSize   = 100 // token bucket burst
+
+	// Circuit breaker defaults
+	circuitBreakerThreshold = 10 // consecutive errors to trip
+	circuitBreakerResetTime = 30 * time.Second
+)
+
+// blockedRPCMethods are write methods that must never be called from the JS sandbox.
+var blockedRPCMethods = map[string]bool{
+	"eth_sendTransaction":    true,
+	"eth_sendRawTransaction": true,
+	"eth_sign":               true,
+	"personal_sign":          true,
+	"eth_signTransaction":    true,
+	"eth_signTypedData":      true,
+	"eth_signTypedData_v4":   true,
+}
+
+// allowedRPCMethods are the only methods the JS sandbox may invoke.
+var allowedRPCMethods = map[string]bool{
+	"eth_call":    true,
+	"eth_getCode": true,
+}
+
+// chainIDPattern validates that chain IDs are numeric only (SSRF prevention).
+var chainIDPattern = regexp.MustCompile(`^[0-9]+$`)
+
+// RPCGatewayConfig holds configuration for the EVM RPC gateway used by JS rules.
+type RPCGatewayConfig struct {
+	BaseURL  string        `yaml:"base_url" json:"base_url"`
+	APIKey   string        `yaml:"api_key,omitempty" json:"api_key,omitempty"`
+	CacheTTL time.Duration `yaml:"cache_ttl" json:"cache_ttl"`
+}
+
+// tokenBucket implements a simple token-bucket rate limiter.
+type tokenBucket struct {
+	mu       sync.Mutex
+	tokens   float64
+	maxBurst float64
+	rate     float64 // tokens per second
+	lastTime time.Time
+}
+
+func newTokenBucket(ratePerSec, burst float64) *tokenBucket {
+	return &tokenBucket{
+		tokens:   burst,
+		maxBurst: burst,
+		rate:     ratePerSec,
+		lastTime: time.Now(),
+	}
+}
+
+// allow tries to consume one token. Returns false if rate limited.
+func (tb *tokenBucket) allow() bool {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+	now := time.Now()
+	elapsed := now.Sub(tb.lastTime).Seconds()
+	tb.lastTime = now
+	tb.tokens += elapsed * tb.rate
+	if tb.tokens > tb.maxBurst {
+		tb.tokens = tb.maxBurst
+	}
+	if tb.tokens < 1 {
+		return false
+	}
+	tb.tokens--
+	return true
+}
+
+// circuitBreaker tracks consecutive errors and trips open to prevent cascading failures.
+type circuitBreaker struct {
+	mu              sync.Mutex
+	consecutiveErrs int
+	threshold       int
+	trippedAt       time.Time
+	resetTime       time.Duration
+}
+
+func newCircuitBreaker(threshold int, resetTime time.Duration) *circuitBreaker {
+	return &circuitBreaker{
+		threshold: threshold,
+		resetTime: resetTime,
+	}
+}
+
+// isOpen returns true if the circuit is tripped (too many consecutive errors).
+func (cb *circuitBreaker) isOpen() bool {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	if cb.consecutiveErrs < cb.threshold {
+		return false
+	}
+	// Auto-reset after resetTime
+	if time.Since(cb.trippedAt) > cb.resetTime {
+		cb.consecutiveErrs = 0
+		return false
+	}
+	return true
+}
+
+// recordSuccess resets the error count.
+func (cb *circuitBreaker) recordSuccess() {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	cb.consecutiveErrs = 0
+}
+
+// recordError increments the error count and may trip the circuit.
+func (cb *circuitBreaker) recordError() {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	cb.consecutiveErrs++
+	if cb.consecutiveErrs >= cb.threshold {
+		cb.trippedAt = time.Now()
+	}
+}
+
+// RPCProvider performs read-only JSON-RPC calls via the evm-gateway.
+type RPCProvider struct {
+	baseURL string
+	apiKey  string
+	client  *http.Client
+	limiter *tokenBucket
+	breaker *circuitBreaker
+}
+
+// NewRPCProvider creates a new RPCProvider. baseURL must not be empty.
+// SECURITY: The HTTP client disables redirects (SSRF prevention) and enforces TLS verification.
+func NewRPCProvider(baseURL, apiKey string) (*RPCProvider, error) {
+	if strings.TrimSpace(baseURL) == "" {
+		return nil, fmt.Errorf("rpc gateway base_url is required")
+	}
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		},
+		DialContext: (&net.Dialer{
+			Timeout: 5 * time.Second,
+		}).DialContext,
+		TLSHandshakeTimeout: 5 * time.Second,
+	}
+	return &RPCProvider{
+		baseURL: strings.TrimRight(strings.TrimSpace(baseURL), "/"),
+		apiKey:  strings.TrimSpace(apiKey),
+		client: &http.Client{
+			Timeout:   rpcCallTimeout,
+			Transport: transport,
+			// SECURITY: Disable redirects to prevent SSRF via 3xx responses
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return fmt.Errorf("rpc provider does not follow redirects")
+			},
+		},
+		limiter: newTokenBucket(rpcGlobalRatePerSec, rpcGlobalBurstSize),
+		breaker: newCircuitBreaker(circuitBreakerThreshold, circuitBreakerResetTime),
+	}, nil
+}
+
+// rpcURL builds the full RPC endpoint URL for a given chain ID.
+// SECURITY: chainID is validated as numeric-only before reaching this method.
+func (p *RPCProvider) rpcURL(chainID string) string {
+	url := p.baseURL + "/" + chainID
+	if p.apiKey != "" {
+		url += "/api_key/" + p.apiKey
+	}
+	return url
+}
+
+type jsonRPCRequest struct {
+	JSONRPC string        `json:"jsonrpc"`
+	Method  string        `json:"method"`
+	Params  []interface{} `json:"params"`
+	ID      int           `json:"id"`
+}
+
+type jsonRPCResponse struct {
+	JSONRPC string          `json:"jsonrpc"`
+	Result  json.RawMessage `json:"result"`
+	Error   *jsonRPCError   `json:"error,omitempty"`
+	ID      int             `json:"id"`
+}
+
+type jsonRPCError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+// ValidateChainID validates that a chain ID is a positive integer string (SSRF prevention).
+func ValidateChainID(chainID string) error {
+	chainID = strings.TrimSpace(chainID)
+	if chainID == "" {
+		return fmt.Errorf("chain_id is required")
+	}
+	if !chainIDPattern.MatchString(chainID) {
+		return fmt.Errorf("chain_id must be numeric: %q", chainID)
+	}
+	// Ensure it's a valid positive integer (not just "0000")
+	n, err := strconv.ParseUint(chainID, 10, 64)
+	if err != nil || n == 0 {
+		return fmt.Errorf("chain_id must be a positive integer: %q", chainID)
+	}
+	return nil
+}
+
+// ValidateHexData validates that data is a valid hex string with 0x prefix.
+func ValidateHexData(data string) error {
+	if !strings.HasPrefix(data, "0x") && !strings.HasPrefix(data, "0X") {
+		return fmt.Errorf("data must start with 0x")
+	}
+	raw := data[2:]
+	if len(raw)%2 != 0 {
+		return fmt.Errorf("data hex must have even length")
+	}
+	if _, err := hex.DecodeString(raw); err != nil {
+		return fmt.Errorf("data contains invalid hex: %w", err)
+	}
+	return nil
+}
+
+// ValidateEthAddress validates a 20-byte Ethereum address (0x + 40 hex chars).
+func ValidateEthAddress(addr string) error {
+	if !common.IsHexAddress(addr) {
+		return fmt.Errorf("invalid address: %s", addr)
+	}
+	return nil
+}
+
+// Call performs eth_call and returns the hex result.
+func (p *RPCProvider) Call(ctx context.Context, chainID, to, data string) (string, error) {
+	if err := ValidateChainID(chainID); err != nil {
+		return "", fmt.Errorf("call: %w", err)
+	}
+	if err := ValidateEthAddress(to); err != nil {
+		return "", fmt.Errorf("call: %w", err)
+	}
+	if err := ValidateHexData(data); err != nil {
+		return "", fmt.Errorf("call: %w", err)
+	}
+	params := []interface{}{
+		map[string]string{"to": to, "data": data},
+		"latest",
+	}
+	return p.doRPC(ctx, chainID, "eth_call", params)
+}
+
+// GetCode performs eth_getCode and returns the hex bytecode.
+func (p *RPCProvider) GetCode(ctx context.Context, chainID, address string) (string, error) {
+	if err := ValidateChainID(chainID); err != nil {
+		return "", fmt.Errorf("getCode: %w", err)
+	}
+	if err := ValidateEthAddress(address); err != nil {
+		return "", fmt.Errorf("getCode: %w", err)
+	}
+	params := []interface{}{address, "latest"}
+	return p.doRPC(ctx, chainID, "eth_getCode", params)
+}
+
+func (p *RPCProvider) doRPC(ctx context.Context, chainID, method string, params []interface{}) (string, error) {
+	if blockedRPCMethods[method] {
+		return "", fmt.Errorf("rpc method %q is blocked", method)
+	}
+	if !allowedRPCMethods[method] {
+		return "", fmt.Errorf("rpc method %q is not allowed", method)
+	}
+
+	// SECURITY: Check circuit breaker — if too many consecutive errors, fail fast
+	if p.breaker.isOpen() {
+		return "", fmt.Errorf("rpc circuit breaker open: too many consecutive errors, using cached data only")
+	}
+
+	// SECURITY: Global rate limit across all evaluations
+	if !p.limiter.allow() {
+		return "", fmt.Errorf("rpc global rate limit exceeded")
+	}
+
+	reqBody, err := json.Marshal(jsonRPCRequest{
+		JSONRPC: "2.0",
+		Method:  method,
+		Params:  params,
+		ID:      1,
+	})
+	if err != nil {
+		return "", fmt.Errorf("marshal rpc request: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, rpcCallTimeout)
+	defer cancel()
+
+	url := p.rpcURL(chainID)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
+	if err != nil {
+		return "", fmt.Errorf("create http request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		p.breaker.recordError()
+		return "", fmt.Errorf("rpc request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1MB limit
+	if err != nil {
+		p.breaker.recordError()
+		return "", fmt.Errorf("read rpc response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		p.breaker.recordError()
+		return "", fmt.Errorf("rpc returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var rpcResp jsonRPCResponse
+	if err := json.Unmarshal(body, &rpcResp); err != nil {
+		p.breaker.recordError()
+		return "", fmt.Errorf("unmarshal rpc response: %w", err)
+	}
+	if rpcResp.Error != nil {
+		p.breaker.recordError()
+		return "", fmt.Errorf("rpc error %d: %s", rpcResp.Error.Code, rpcResp.Error.Message)
+	}
+
+	var result string
+	if err := json.Unmarshal(rpcResp.Result, &result); err != nil {
+		p.breaker.recordError()
+		return "", fmt.Errorf("unmarshal rpc result: %w", err)
+	}
+
+	p.breaker.recordSuccess()
+	return result, nil
+}
+
+// RPCCallCounter tracks RPC calls per evaluation to enforce rate limits.
+type RPCCallCounter struct {
+	count int
+	max   int
+}
+
+// NewRPCCallCounter creates a counter with the given max calls per evaluation.
+func NewRPCCallCounter(max int) *RPCCallCounter {
+	if max <= 0 {
+		max = rpcMaxCallsPerEval
+	}
+	return &RPCCallCounter{max: max}
+}
+
+// Increment increments the counter and returns an error if the limit is exceeded.
+func (c *RPCCallCounter) Increment() error {
+	c.count++
+	if c.count > c.max {
+		return fmt.Errorf("rpc call limit exceeded (%d max per evaluation)", c.max)
+	}
+	return nil
+}

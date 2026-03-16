@@ -24,6 +24,7 @@ type APIKeyResponse struct {
 	Name              string     `json:"name"`
 	Source            string     `json:"source"`
 	Admin             bool       `json:"admin"`
+	Agent             bool       `json:"agent"`
 	Enabled           bool       `json:"enabled"`
 	RateLimit         int        `json:"rate_limit"`
 	AllowAllSigners   bool       `json:"allow_all_signers"`
@@ -41,9 +42,10 @@ type APIKeyResponse struct {
 type CreateAPIKeyRequest struct {
 	ID                string   `json:"id"`
 	Name              string   `json:"name"`
-	PublicKey         string   `json:"public_key"`            // Ed25519 public key, hex or base64 DER
+	PublicKey         string   `json:"public_key"` // Ed25519 public key, hex or base64 DER
 	Admin             bool     `json:"admin"`
-	RateLimit         int      `json:"rate_limit,omitempty"`  // default 100
+	Agent             bool     `json:"agent"`
+	RateLimit         int      `json:"rate_limit,omitempty"` // default 100
 	AllowAllSigners   bool     `json:"allow_all_signers"`
 	AllowAllHDWallets bool     `json:"allow_all_hd_wallets"`
 	AllowedSigners    []string `json:"allowed_signers,omitempty"`
@@ -56,6 +58,7 @@ type UpdateAPIKeyRequest struct {
 	Name              *string  `json:"name,omitempty"`
 	Enabled           *bool    `json:"enabled,omitempty"`
 	Admin             *bool    `json:"admin,omitempty"`
+	Agent             *bool    `json:"agent,omitempty"`
 	RateLimit         *int     `json:"rate_limit,omitempty"`
 	AllowAllSigners   *bool    `json:"allow_all_signers,omitempty"`
 	AllowAllHDWallets *bool    `json:"allow_all_hd_wallets,omitempty"`
@@ -270,6 +273,12 @@ func (h *APIKeyHandler) createAPIKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate admin and agent are mutually exclusive
+	if req.Admin && req.Agent {
+		h.writeError(w, "admin and agent are mutually exclusive", http.StatusBadRequest)
+		return
+	}
+
 	// Validate array sizes
 	if len(req.AllowedSigners) > 100 {
 		h.writeError(w, "allowed_signers exceeds maximum of 100 entries", http.StatusBadRequest)
@@ -285,6 +294,7 @@ func (h *APIKeyHandler) createAPIKey(w http.ResponseWriter, r *http.Request) {
 		Name:              req.Name,
 		PublicKeyHex:      req.PublicKey,
 		Admin:             req.Admin,
+		Agent:             req.Agent,
 		RateLimit:         rateLimit,
 		AllowAllSigners:   req.AllowAllSigners,
 		AllowAllHDWallets: req.AllowAllHDWallets,
@@ -375,6 +385,14 @@ func (h *APIKeyHandler) updateAPIKey(w http.ResponseWriter, r *http.Request, id 
 	}
 	if req.Admin != nil {
 		key.Admin = *req.Admin
+	}
+	if req.Agent != nil {
+		key.Agent = *req.Agent
+	}
+	// Validate admin and agent are mutually exclusive after applying updates
+	if key.Admin && key.Agent {
+		h.writeError(w, "admin and agent are mutually exclusive", http.StatusBadRequest)
+		return
 	}
 	if req.RateLimit != nil {
 		if *req.RateLimit < 1 || *req.RateLimit > 10000 {
@@ -513,6 +531,7 @@ func toAPIKeyResponse(key *types.APIKey) APIKeyResponse {
 		Name:              key.Name,
 		Source:            key.Source,
 		Admin:             key.Admin,
+		Agent:             key.Agent,
 		Enabled:           key.Enabled,
 		RateLimit:         key.RateLimit,
 		AllowAllSigners:   key.AllowAllSigners,

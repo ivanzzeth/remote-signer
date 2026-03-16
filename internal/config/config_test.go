@@ -372,6 +372,25 @@ func TestValidate_DisabledAPIKeyWithoutPublicKey(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestValidate_AdminAndAgentMutuallyExclusive(t *testing.T) {
+	cfg := validConfig()
+	cfg.APIKeys = []APIKeyConfig{
+		{ID: "key1", Enabled: true, PublicKey: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Admin: true, Agent: true},
+	}
+	err := validate(cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "admin and agent are mutually exclusive")
+}
+
+func TestValidate_AgentKeyOnly(t *testing.T) {
+	cfg := validConfig()
+	cfg.APIKeys = []APIKeyConfig{
+		{ID: "key1", Enabled: true, PublicKey: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Agent: true},
+	}
+	err := validate(cfg)
+	assert.NoError(t, err)
+}
+
 // ---------------------------------------------------------------------------
 // setDefaults
 // ---------------------------------------------------------------------------

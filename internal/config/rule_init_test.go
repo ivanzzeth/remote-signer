@@ -596,6 +596,12 @@ func (m *mockBudgetRepoForCreate) ListByRuleIDs(ctx context.Context, ruleIDs []t
 func (m *mockBudgetRepoForCreate) MarkAlertSent(ctx context.Context, ruleID types.RuleID, unit string) error {
 	return nil
 }
+func (m *mockBudgetRepoForCreate) CountByRuleID(_ context.Context, _ types.RuleID) (int, error) {
+	return 0, nil
+}
+func (m *mockBudgetRepoForCreate) CreateOrGet(_ context.Context, budget *types.RuleBudget) (*types.RuleBudget, bool, error) {
+	return budget, true, nil
+}
 
 // createBudgetFromInstanceConfig accepts empty for optional fields (template variable instantiated to empty)
 func TestCreateBudgetFromInstanceConfig_AcceptsEmptyOptionalFields(t *testing.T) {
@@ -728,6 +734,12 @@ func (s *spyBudgetRepo) ResetBudget(ctx context.Context, ruleID types.RuleID, un
 }
 func (s *spyBudgetRepo) MarkAlertSent(ctx context.Context, ruleID types.RuleID, unit string) error {
 	return nil
+}
+func (s *spyBudgetRepo) CountByRuleID(_ context.Context, _ types.RuleID) (int, error) {
+	return 0, nil
+}
+func (s *spyBudgetRepo) CreateOrGet(_ context.Context, budget *types.RuleBudget) (*types.RuleBudget, bool, error) {
+	return budget, true, nil
 }
 
 func TestSyncBudgetFromConfig_DeletesStaleUnits(t *testing.T) {

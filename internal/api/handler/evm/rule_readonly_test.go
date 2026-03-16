@@ -106,6 +106,12 @@ func (m *mockBudgetRepo) ListByRuleIDs(_ context.Context, _ []types.RuleID) ([]*
 func (m *mockBudgetRepo) MarkAlertSent(_ context.Context, _ types.RuleID, _ string) error {
 	return nil
 }
+func (m *mockBudgetRepo) CountByRuleID(_ context.Context, _ types.RuleID) (int, error) {
+	return 0, nil
+}
+func (m *mockBudgetRepo) CreateOrGet(_ context.Context, budget *types.RuleBudget) (*types.RuleBudget, bool, error) {
+	return budget, true, nil
+}
 
 // addRule adds a rule to the mock repo directly.
 func (m *mockRuleRepo) addRule(rule *types.Rule) {

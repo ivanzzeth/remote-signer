@@ -412,7 +412,7 @@ func TestJSHelper_Keccak256_Text(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "keccak256 text should work: %s", res.Reason)
 }
 
@@ -424,7 +424,7 @@ func TestJSHelper_Keccak256_Hex(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "keccak256 hex should work: %s", res.Reason)
 }
 
@@ -436,7 +436,7 @@ func TestJSHelper_Keccak256_InvalidHex(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "keccak256 invalid hex: %s", res.Reason)
 }
 
@@ -448,7 +448,7 @@ func TestJSHelper_Selector(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "selector should match: %s", res.Reason)
 }
 
@@ -460,7 +460,7 @@ func TestJSHelper_ToChecksum(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "toChecksum: %s", res.Reason)
 }
 
@@ -472,7 +472,7 @@ func TestJSHelper_IsAddress(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "isAddress: %s", res.Reason)
 }
 
@@ -484,7 +484,7 @@ func TestJSHelper_ToWei(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "toWei: %s", res.Reason)
 }
 
@@ -496,7 +496,7 @@ func TestJSHelper_ToWei_Invalid(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "toWei invalid: %s", res.Reason)
 }
 
@@ -508,7 +508,7 @@ func TestJSHelper_FromWei(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "fromWei: %s", res.Reason)
 }
 
@@ -520,7 +520,7 @@ func TestJSHelper_FromWei_Invalid(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "fromWei invalid: %s", res.Reason)
 }
 
@@ -533,7 +533,7 @@ func TestJSHelper_Eq(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "eq: %s", res.Reason)
 }
 
@@ -545,7 +545,7 @@ func TestJSHelper_AbiEncode_TooFewArgs(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "abi.encode no args: %s", res.Reason)
 }
 
@@ -557,7 +557,7 @@ func TestJSHelper_AbiDecode_TooFewArgs(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "abi.decode no args: %s", res.Reason)
 }
 
@@ -569,7 +569,7 @@ func TestJSHelper_AbiDecode_InvalidHex(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "abi.decode invalid hex: %s", res.Reason)
 }
 
@@ -582,7 +582,7 @@ func TestJSHelper_AbiEncode_TypeMismatch(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "abi.encode mismatch: %s", res.Reason)
 }
 
@@ -654,7 +654,7 @@ func TestRemovedGlobals_Eval(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "eval removal: %s", res.Reason)
 }
 
@@ -665,7 +665,7 @@ func TestRemovedGlobals_MathRandom(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "Math.random removal: %s", res.Reason)
 }
 
@@ -689,7 +689,7 @@ func TestRs_TxRequire_Success(t *testing.T) {
 			Data: "0xa9059cbb00000000000000000000000011111111111111111111111111111111111111110000000000000000000000000000000000000000000000000000000000000001",
 		},
 	}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "rs.tx.require success: %s", res.Reason)
 }
 
@@ -701,7 +701,7 @@ func TestRs_TxRequire_WrongSignType(t *testing.T) {
 		return fail("should fail");
 	}`
 	input := &RuleInput{SignType: "typed_data", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.False(t, res.Valid)
 	assert.Contains(t, res.Reason, "transaction only")
 }
@@ -714,7 +714,7 @@ func TestRs_TxRequire_MissingTx(t *testing.T) {
 		return fail("should fail");
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.False(t, res.Valid)
 	assert.Contains(t, res.Reason, "missing tx")
 }
@@ -734,7 +734,7 @@ func TestRs_TxRequire_ShortCalldata(t *testing.T) {
 			Data: "0xa905",
 		},
 	}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.False(t, res.Valid)
 	assert.Contains(t, res.Reason, "calldata too short")
 }
@@ -752,7 +752,7 @@ func TestRs_BigIntParse_SuccessAndType(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "rs.bigint.parse: %s", res.Reason)
 }
 
@@ -764,7 +764,7 @@ func TestRs_BigIntParse_Invalid(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "rs.bigint.parse invalid: %s", res.Reason)
 }
 
@@ -788,7 +788,7 @@ func TestRs_BigIntUint256_Range(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "rs.bigint.uint256 range: %s", res.Reason)
 }
 
@@ -802,7 +802,7 @@ func TestRs_IntRequire_Success(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "rs.int require: %s", res.Reason)
 }
 
@@ -817,7 +817,7 @@ func TestRs_AddrInList_Array(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "rs.addr.inList array: %s", res.Reason)
 }
 
@@ -829,7 +829,7 @@ func TestRs_AddrInList_String(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "rs.addr.inList string: %s", res.Reason)
 }
 
@@ -842,7 +842,7 @@ func TestRs_AddrNotInList(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "rs.addr.notInList: %s", res.Reason)
 }
 
@@ -856,7 +856,7 @@ func TestRs_AddrRequireNotInList(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script1, input, nil)
+	res := e.wrappedValidate(script1, input, nil, nil)
 	assert.True(t, res.Valid, "rs.addr.requireNotInList (not in list): %s", res.Reason)
 
 	// Test 2: address IN list → panic (caught by engine as fail)
@@ -865,7 +865,7 @@ func TestRs_AddrRequireNotInList(t *testing.T) {
 		rs.addr.requireNotInList(usdt, [usdt], "must not be usdt");
 		return ok();
 	}`
-	res = e.wrappedValidate(script2, input, nil)
+	res = e.wrappedValidate(script2, input, nil, nil)
 	assert.False(t, res.Valid, "rs.addr.requireNotInList (in list) should fail")
 	assert.Contains(t, res.Reason, "must not be usdt")
 }
@@ -878,7 +878,7 @@ func TestRs_AddrRequireInList(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "rs.addr.requireInList: %s", res.Reason)
 }
 
@@ -890,7 +890,7 @@ func TestRs_AddrRequireInList_Fail(t *testing.T) {
 		return fail("should fail");
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.False(t, res.Valid)
 	assert.Contains(t, res.Reason, "spender not allowed")
 }
@@ -903,7 +903,7 @@ func TestRs_AddrIsZero(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "rs.addr.isZero: %s", res.Reason)
 }
 
@@ -915,7 +915,7 @@ func TestRs_AddrRequireZero(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "rs.addr.requireZero: %s", res.Reason)
 }
 
@@ -931,7 +931,7 @@ func TestRs_BigIntRequireLte_NoLimit(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "rs.bigint.requireLte: %s", res.Reason)
 }
 
@@ -943,7 +943,7 @@ func TestRs_BigIntRequireLte_ExceedsCap(t *testing.T) {
 		return r;
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.False(t, res.Valid)
 	assert.Contains(t, res.Reason, "transfer exceeds cap")
 }
@@ -955,7 +955,7 @@ func TestRs_BigIntRequireLte_EmptyMaxFails(t *testing.T) {
 		return r;
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.False(t, res.Valid, "empty max must fail")
 	assert.Contains(t, res.Reason, "max required")
 }
@@ -970,7 +970,7 @@ func TestRs_BigIntRequireZero(t *testing.T) {
 		return r;
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.False(t, res.Valid)
 	assert.Contains(t, res.Reason, "must be zero")
 }
@@ -979,7 +979,7 @@ func TestRs_Revert_BecomesFail(t *testing.T) {
 	e, _ := NewJSRuleEvaluator(testLogger())
 	script := `function validate(i){ revert("exceeds cap"); return ok(); }`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.False(t, res.Valid)
 	assert.Equal(t, "exceeds cap", res.Reason)
 }
@@ -988,7 +988,7 @@ func TestRs_Require_BecomesFailWhenFalsy(t *testing.T) {
 	e, _ := NewJSRuleEvaluator(testLogger())
 	script := `function validate(i){ require(false, "not allowed"); return ok(); }`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.False(t, res.Valid)
 	assert.Equal(t, "not allowed", res.Reason)
 }
@@ -997,7 +997,7 @@ func TestRs_Require_PassesWhenTruthy(t *testing.T) {
 	e, _ := NewJSRuleEvaluator(testLogger())
 	script := `function validate(i){ require(true, "ignored"); return ok(); }`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid)
 }
 
@@ -1005,7 +1005,7 @@ func TestRs_AnyThrow_BecomesFail(t *testing.T) {
 	e, _ := NewJSRuleEvaluator(testLogger())
 	script := `function validate(i){ throw new Error("custom error"); }`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.False(t, res.Valid)
 	assert.Contains(t, res.Reason, "custom error")
 }
@@ -1020,7 +1020,7 @@ func TestRs_AddrRequireInListIfNonEmpty(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "rs.addr.requireInListIfNonEmpty: %s", res.Reason)
 }
 
@@ -1032,7 +1032,7 @@ func TestRs_AddrRequireInListIfNonEmpty_Fail(t *testing.T) {
 		return r;
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.False(t, res.Valid)
 	assert.Contains(t, res.Reason, "spender not allowed")
 }
@@ -1053,7 +1053,7 @@ func TestRs_TypedDataRequire_Success(t *testing.T) {
 			Message:     map[string]interface{}{"maker": "0x53c68c954f85a29d2098e90addaf41baf2ff0a50"},
 		},
 	}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "rs.typedData.require: %s", res.Reason)
 }
 
@@ -1075,7 +1075,7 @@ func TestRs_TypedDataMatch(t *testing.T) {
 			Message:     map[string]interface{}{"maker": "0x53c68c954f85a29d2098e90addaf41baf2ff0a50"},
 		},
 	}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "rs.typedData.match: %s", res.Reason)
 }
 
@@ -1087,7 +1087,7 @@ func TestRs_TypedDataRequire_WrongSignType(t *testing.T) {
 		return fail("should fail");
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.False(t, res.Valid)
 	assert.Contains(t, res.Reason, "typed_data")
 }
@@ -1114,7 +1114,7 @@ func TestRs_TypedDataRequireDomain(t *testing.T) {
 			Message: map[string]interface{}{},
 		},
 	}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "rs.typedData.requireDomain: %s", res.Reason)
 }
 
@@ -1126,7 +1126,7 @@ func TestRs_TypedDataRequireSignerMatch(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "rs.typedData.requireSignerMatch: %s", res.Reason)
 }
 
@@ -1216,7 +1216,7 @@ func TestRs_SafeParseExecTransactionData_Valid(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "safe.parseExecTransactionData valid: %s", res.Reason)
 }
 
@@ -1232,7 +1232,7 @@ func TestRs_SafeParseExecTransactionData_NonZeroValue(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "safe nonzero value: %s", res.Reason)
 }
 
@@ -1248,7 +1248,7 @@ func TestRs_SafeParseExecTransactionData_DelegateCall(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "safe delegatecall: %s", res.Reason)
 }
 
@@ -1260,7 +1260,7 @@ func TestRs_SafeParseExecTransactionData_TooShort(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "safe too short: %s", res.Reason)
 }
 
@@ -1272,7 +1272,7 @@ func TestRs_SafeParseExecTransactionData_Empty(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "safe empty: %s", res.Reason)
 }
 
@@ -1288,7 +1288,7 @@ func TestRs_ConfigRequireNonEmpty_Valid(t *testing.T) {
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
 	config := map[string]interface{}{"token": "0xdead"}
-	res := e.wrappedValidate(script, input, config)
+	res := e.wrappedValidate(script, input, config, nil)
 	assert.True(t, res.Valid, "config requireNonEmpty valid: %s", res.Reason)
 }
 
@@ -1299,7 +1299,7 @@ func TestRs_ConfigRequireNonEmpty_Missing(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, map[string]interface{}{})
+	res := e.wrappedValidate(script, input, map[string]interface{}{}, nil)
 	assert.False(t, res.Valid)
 	assert.Contains(t, res.Reason, "missing token")
 }
@@ -1312,7 +1312,7 @@ func TestRs_ConfigRequireNonEmpty_WhitespaceOnly(t *testing.T) {
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
 	config := map[string]interface{}{"token": "   "}
-	res := e.wrappedValidate(script, input, config)
+	res := e.wrappedValidate(script, input, config, nil)
 	assert.False(t, res.Valid)
 	assert.Contains(t, res.Reason, "missing token")
 }
@@ -1370,7 +1370,7 @@ func TestRs_BigIntInt256_Range(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "rs.bigint.int256 range: %s", res.Reason)
 }
 
@@ -1388,7 +1388,7 @@ func TestRs_BigIntRequireEq_Success(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "rs.bigint.requireEq: %s", res.Reason)
 }
 
@@ -1399,7 +1399,7 @@ func TestRs_BigIntRequireEq_Failure(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.False(t, res.Valid)
 	assert.Contains(t, res.Reason, "values differ")
 }
@@ -1436,7 +1436,7 @@ func TestRs_AddrRequireNotInList_InvalidAddr(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.False(t, res.Valid, "invalid address should fail requireNotInList")
 	assert.Contains(t, res.Reason, "blocked")
 }

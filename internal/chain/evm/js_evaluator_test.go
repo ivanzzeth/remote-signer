@@ -36,7 +36,7 @@ func TestJSRuleEvaluator_wrappedValidate_Minimal(t *testing.T) {
 	require.NoError(t, err)
 	script := `function validate(i){ return { valid: true }; }`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "expected valid=true, got reason=%s", res.Reason)
 }
 
@@ -66,7 +66,7 @@ func TestJSRuleEvaluator_Evaluate_WhitelistPass(t *testing.T) {
 	// Build same RuleInput as Evaluate would; run wrappedValidate to isolate script_error
 	ruleInput, err := BuildRuleInput(req, parsed)
 	require.NoError(t, err)
-	res := e.wrappedValidate(script, ruleInput, nil)
+	res := e.wrappedValidate(script, ruleInput, nil, nil)
 	require.True(t, res.Valid, "wrappedValidate with full RuleInput should pass: reason=%s", res.Reason)
 
 	matched, reason, err := e.Evaluate(context.Background(), rule, req, parsed)
@@ -173,7 +173,7 @@ func TestJSRuleEvaluator_AbiEncodeDecode(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "abi roundtrip should pass: %s", res.Reason)
 }
 
@@ -192,7 +192,7 @@ func TestJSRuleEvaluator_AbiDecodeTransferFromPayload(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "transferFrom payload decode should pass: %s", res.Reason)
 }
 
@@ -217,7 +217,7 @@ func TestJSRuleEvaluator_AbiTuple(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "abi tuple roundtrip should pass: %s", res.Reason)
 }
 
@@ -241,7 +241,7 @@ func TestJSRuleEvaluator_AbiTupleMixed(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid, "abi mixed tuple roundtrip should pass: %s", res.Reason)
 }
 
@@ -259,10 +259,11 @@ function validateBudget(i){ return 42n; }`
 	}
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
 
-	amount, err := e.EvaluateBudgetWithInput(context.Background(), rule, input)
+	result, err := e.EvaluateBudgetWithInput(context.Background(), rule, input)
 	require.NoError(t, err)
-	require.NotNil(t, amount)
-	assert.Equal(t, int64(42), amount.Int64())
+	require.NotNil(t, result)
+	assert.Equal(t, int64(42), result.Amount.Int64())
+	assert.Empty(t, result.Unit, "plain bigint return should have empty unit")
 }
 
 func TestJSRuleEvaluator_EvaluateBudgetWithInput_NoValidateBudget_ReturnsZero(t *testing.T) {
@@ -274,10 +275,10 @@ func TestJSRuleEvaluator_EvaluateBudgetWithInput_NoValidateBudget_ReturnsZero(t 
 	rule := &types.Rule{ID: "test", Type: types.RuleTypeEVMJS, Config: mustMarshalJSON(cfg)}
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
 
-	amount, err := e.EvaluateBudgetWithInput(context.Background(), rule, input)
+	result, err := e.EvaluateBudgetWithInput(context.Background(), rule, input)
 	require.NoError(t, err)
-	require.NotNil(t, amount)
-	assert.True(t, amount.Sign() == 0, "expected 0 when validateBudget is missing, got %s", amount.String())
+	require.NotNil(t, result)
+	assert.True(t, result.Amount.Sign() == 0, "expected 0 when validateBudget is missing, got %s", result.Amount.String())
 }
 
 func TestJSRuleEvaluator_EvaluateBudget_FromRequest(t *testing.T) {
@@ -300,9 +301,89 @@ function validateBudget(i){ return 100n; }`
 	}
 	parsed := &types.ParsedPayload{}
 
-	amount, err := e.EvaluateBudget(context.Background(), rule, req, parsed)
+	result, err := e.EvaluateBudget(context.Background(), rule, req, parsed)
 	require.NoError(t, err)
-	require.NotNil(t, amount)
-	assert.Equal(t, 0, amount.Cmp(big.NewInt(100)))
+	require.NotNil(t, result)
+	assert.Equal(t, 0, result.Amount.Cmp(big.NewInt(100)))
+}
+
+func TestJSRuleEvaluator_EvaluateBudget_DynamicUnit(t *testing.T) {
+	e, err := NewJSRuleEvaluator(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})))
+	require.NoError(t, err)
+
+	script := `function validate(i){ return ok(); }
+function validateBudget(i){ return { amount: 500000n, unit: "0xUSDC" }; }`
+	cfg := JSRuleConfig{Script: script}
+	rule := &types.Rule{
+		ID:     "test-dynamic-unit",
+		Type:   types.RuleTypeEVMJS,
+		Config: mustMarshalJSON(cfg),
+	}
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+
+	result, err := e.EvaluateBudgetWithInput(context.Background(), rule, input)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, int64(500000), result.Amount.Int64())
+	assert.Equal(t, "0xUSDC", result.Unit)
+}
+
+func TestJSRuleEvaluator_EvaluateBudget_DynamicUnitNative(t *testing.T) {
+	e, err := NewJSRuleEvaluator(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})))
+	require.NoError(t, err)
+
+	script := `function validate(i){ return ok(); }
+function validateBudget(i){ return { amount: 1n, unit: "tx_count" }; }`
+	cfg := JSRuleConfig{Script: script}
+	rule := &types.Rule{
+		ID:     "test-tx-count",
+		Type:   types.RuleTypeEVMJS,
+		Config: mustMarshalJSON(cfg),
+	}
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+
+	result, err := e.EvaluateBudgetWithInput(context.Background(), rule, input)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, int64(1), result.Amount.Int64())
+	assert.Equal(t, "tx_count", result.Unit)
+}
+
+func TestJSRuleEvaluator_EvaluateBudget_DynamicUnitMissingAmount(t *testing.T) {
+	e, err := NewJSRuleEvaluator(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})))
+	require.NoError(t, err)
+
+	script := `function validate(i){ return ok(); }
+function validateBudget(i){ return { unit: "native" }; }`
+	cfg := JSRuleConfig{Script: script}
+	rule := &types.Rule{
+		ID:     "test-no-amount",
+		Type:   types.RuleTypeEVMJS,
+		Config: mustMarshalJSON(cfg),
+	}
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+
+	_, err = e.EvaluateBudgetWithInput(context.Background(), rule, input)
+	require.Error(t, err, "should error when amount is missing from object")
+	assert.Contains(t, err.Error(), "amount")
+}
+
+func TestJSRuleEvaluator_EvaluateBudget_DynamicUnitEmptyUnit(t *testing.T) {
+	e, err := NewJSRuleEvaluator(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})))
+	require.NoError(t, err)
+
+	script := `function validate(i){ return ok(); }
+function validateBudget(i){ return { amount: 1n, unit: "" }; }`
+	cfg := JSRuleConfig{Script: script}
+	rule := &types.Rule{
+		ID:     "test-empty-unit",
+		Type:   types.RuleTypeEVMJS,
+		Config: mustMarshalJSON(cfg),
+	}
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+
+	_, err = e.EvaluateBudgetWithInput(context.Background(), rule, input)
+	require.Error(t, err, "should error when unit is empty in object")
+	assert.Contains(t, err.Error(), "unit")
 }
 

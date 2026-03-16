@@ -96,25 +96,25 @@ func NewRuleHandler(ruleRepo storage.RuleRepository, logger *slog.Logger, opts .
 
 // RuleResponse represents a rule in API responses
 type RuleResponse struct {
-	ID                 string          `json:"id"`
-	Name               string          `json:"name"`
-	Description        string          `json:"description,omitempty"`
-	Type               string          `json:"type"`
-	Mode               string          `json:"mode"`
-	Source             string          `json:"source"`
-	ChainType          *string         `json:"chain_type,omitempty"`
-	ChainID            *string         `json:"chain_id,omitempty"`
-	APIKeyID           *string         `json:"api_key_id,omitempty"`
-	SignerAddress      *string         `json:"signer_address,omitempty"`
-	Config             json.RawMessage `json:"config,omitempty"`
-	Enabled            bool            `json:"enabled"`
-	CreatedAt          string          `json:"created_at"`
-	UpdatedAt          string          `json:"updated_at"`
-	ExpiresAt          *string         `json:"expires_at,omitempty"`
-	MatchCount         uint64          `json:"match_count"`
-	LastMatchedAt      *string         `json:"last_matched_at,omitempty"`
-	BudgetPeriod       string          `json:"budget_period,omitempty"`        // e.g. "24h0m0s"; set when schedule.period is configured
-	BudgetPeriodStart  *string         `json:"budget_period_start,omitempty"`  // RFC3339; when first period began
+	ID                string          `json:"id"`
+	Name              string          `json:"name"`
+	Description       string          `json:"description,omitempty"`
+	Type              string          `json:"type"`
+	Mode              string          `json:"mode"`
+	Source            string          `json:"source"`
+	ChainType         *string         `json:"chain_type,omitempty"`
+	ChainID           *string         `json:"chain_id,omitempty"`
+	APIKeyID          *string         `json:"api_key_id,omitempty"`
+	SignerAddress     *string         `json:"signer_address,omitempty"`
+	Config            json.RawMessage `json:"config,omitempty"`
+	Enabled           bool            `json:"enabled"`
+	CreatedAt         string          `json:"created_at"`
+	UpdatedAt         string          `json:"updated_at"`
+	ExpiresAt         *string         `json:"expires_at,omitempty"`
+	MatchCount        uint64          `json:"match_count"`
+	LastMatchedAt     *string         `json:"last_matched_at,omitempty"`
+	BudgetPeriod      string          `json:"budget_period,omitempty"`       // e.g. "24h0m0s"; set when schedule.period is configured
+	BudgetPeriodStart *string         `json:"budget_period_start,omitempty"` // RFC3339; when first period began
 }
 
 // ListRulesResponse represents the response for listing rules
@@ -544,12 +544,20 @@ func (h *RuleHandler) listRules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Agent keys get redacted responses (no script source in config)
+	apiKey := middleware.GetAPIKey(r.Context())
+	redact := apiKey != nil && apiKey.Agent
+
 	resp := ListRulesResponse{
 		Rules: make([]RuleResponse, 0, len(rules)),
 		Total: total,
 	}
 	for _, rule := range rules {
-		resp.Rules = append(resp.Rules, h.toRuleResponse(rule))
+		rr := h.toRuleResponse(rule)
+		if redact {
+			rr.Config = nil
+		}
+		resp.Rules = append(resp.Rules, rr)
 	}
 
 	h.writeJSON(w, resp, http.StatusOK)
@@ -567,7 +575,13 @@ func (h *RuleHandler) getRule(w http.ResponseWriter, r *http.Request, ruleID str
 		return
 	}
 
-	h.writeJSON(w, h.toRuleResponse(rule), http.StatusOK)
+	rr := h.toRuleResponse(rule)
+	// Agent keys get redacted responses (no script source in config)
+	apiKey := middleware.GetAPIKey(r.Context())
+	if apiKey != nil && apiKey.Agent {
+		rr.Config = nil
+	}
+	h.writeJSON(w, rr, http.StatusOK)
 }
 
 func (h *RuleHandler) listBudgets(w http.ResponseWriter, r *http.Request, ruleID string) {
@@ -630,17 +644,17 @@ func (h *RuleHandler) deleteRule(w http.ResponseWriter, r *http.Request, ruleID 
 
 func (h *RuleHandler) toRuleResponse(rule *types.Rule) RuleResponse {
 	resp := RuleResponse{
-		ID:            string(rule.ID),
-		Name:          rule.Name,
-		Description:   rule.Description,
-		Type:          string(rule.Type),
-		Mode:          string(rule.Mode),
-		Source:        string(rule.Source),
-		Config:        rule.Config,
-		Enabled:       rule.Enabled,
-		CreatedAt:     rule.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:     rule.UpdatedAt.Format(time.RFC3339),
-		MatchCount:    rule.MatchCount,
+		ID:          string(rule.ID),
+		Name:        rule.Name,
+		Description: rule.Description,
+		Type:        string(rule.Type),
+		Mode:        string(rule.Mode),
+		Source:      string(rule.Source),
+		Config:      rule.Config,
+		Enabled:     rule.Enabled,
+		CreatedAt:   rule.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:   rule.UpdatedAt.Format(time.RFC3339),
+		MatchCount:  rule.MatchCount,
 	}
 
 	if rule.ChainType != nil {

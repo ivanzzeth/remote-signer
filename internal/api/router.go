@@ -31,24 +31,24 @@ type RouterConfig struct {
 	Version                  string
 	IPWhitelistConfig        *middleware.IPWhitelist
 	IPWhitelistConfigForRead *config.IPWhitelistConfig // optional: for GET /api/v1/acls/ip-whitelist (admin, read-only)
-	IPRateLimit              int // requests per minute per IP (pre-auth); 0 = use default (200)
-	SolidityValidator  *evm.SolidityRuleValidator
-	JSEvaluator        *evm.JSRuleEvaluator
-	Template           *TemplateConfig
-	ApprovalGuard      *service.ManualApprovalGuard // optional: for admin resume endpoint
-	APIKeyRepo         storage.APIKeyRepository     // optional: for signer access visibility and API key management
-	RulesAPIReadonly   bool                         // block rule/template mutations via API
-	SignersAPIReadonly  bool                         // block signer/HD-wallet creation via API
-	APIKeysAPIReadonly bool                         // block API key management via API
-	AlertService       *middleware.SecurityAlertService // optional: real-time security alerts
-	AuditLogger        *audit.AuditLogger              // optional: persistent audit logging
-	SignTimeout        time.Duration                   // context timeout for sign operations (default: 30s)
-	AutoLockTimeout    time.Duration                   // signer auto-lock timeout (for health endpoint)
-	AuditRetentionDays int                             // audit log retention days (for health endpoint)
-	BudgetRepo         storage.BudgetRepository        // optional: for GET /api/v1/evm/rules/{id}/budgets
+	IPRateLimit              int                       // requests per minute per IP (pre-auth); 0 = use default (200)
+	SolidityValidator        *evm.SolidityRuleValidator
+	JSEvaluator              *evm.JSRuleEvaluator
+	Template                 *TemplateConfig
+	ApprovalGuard            *service.ManualApprovalGuard     // optional: for admin resume endpoint
+	APIKeyRepo               storage.APIKeyRepository         // optional: for signer access visibility and API key management
+	RulesAPIReadonly         bool                             // block rule/template mutations via API
+	SignersAPIReadonly       bool                             // block signer/HD-wallet creation via API
+	APIKeysAPIReadonly       bool                             // block API key management via API
+	AlertService             *middleware.SecurityAlertService // optional: real-time security alerts
+	AuditLogger              *audit.AuditLogger               // optional: persistent audit logging
+	SignTimeout              time.Duration                    // context timeout for sign operations (default: 30s)
+	AutoLockTimeout          time.Duration                    // signer auto-lock timeout (for health endpoint)
+	AuditRetentionDays       int                              // audit log retention days (for health endpoint)
+	BudgetRepo               storage.BudgetRepository         // optional: for GET /api/v1/evm/rules/{id}/budgets
 	// Preset API (admin-only). When PresetsDir is non-empty, GET/POST /api/v1/presets are registered.
-	PresetsDir string     // directory containing preset YAML files (resolved absolute path)
-	PresetsDB  *gorm.DB   // optional: for preset apply transaction; required when PresetsDir is set and template service is used
+	PresetsDir string   // directory containing preset YAML files (resolved absolute path)
+	PresetsDB  *gorm.DB // optional: for preset apply transaction; required when PresetsDir is set and template service is used
 }
 
 // Router handles HTTP routing
@@ -197,9 +197,9 @@ func (r *Router) setupRoutes() error {
 		requestHandler.ServeHTTP(w, req)
 	})))
 
-	// Rule management routes (with auth + admin required for all operations)
-	r.mux.Handle("/api/v1/evm/rules", r.withAuthAndAdmin(ruleHandler))
-	r.mux.Handle("/api/v1/evm/rules/", r.withAuthAndAdmin(ruleHandler))
+	// Rule management routes (agent: read-only GET; admin: full access)
+	r.mux.Handle("/api/v1/evm/rules", r.withAuthAndAgentOrAdmin(ruleHandler))
+	r.mux.Handle("/api/v1/evm/rules/", r.withAuthAndAgentOrAdmin(ruleHandler))
 
 	// Approval guard resume (admin only)
 	if r.config.ApprovalGuard != nil {
@@ -267,7 +267,7 @@ func (r *Router) setupRoutes() error {
 		})))
 	}
 
-	// Preset API (admin-only). Requires PresetsDir; apply also requires PresetsDB and template service.
+	// Preset API (agent: read-only GET; admin: full access). Requires PresetsDir; apply also requires PresetsDB and template service.
 	if r.config.PresetsDir != "" {
 		var templateSvc *service.TemplateService
 		if r.config.Template != nil {
@@ -286,8 +286,8 @@ func (r *Router) setupRoutes() error {
 		if r.config.AuditLogger != nil {
 			presetHandler.SetAuditLogger(r.config.AuditLogger)
 		}
-		r.mux.Handle("/api/v1/presets", r.withAuthAndAdmin(presetHandler))
-		r.mux.Handle("/api/v1/presets/", r.withAuthAndAdmin(http.HandlerFunc(presetHandler.ServeHTTP)))
+		r.mux.Handle("/api/v1/presets", r.withAuthAndAgentOrAdmin(presetHandler))
+		r.mux.Handle("/api/v1/presets/", r.withAuthAndAgentOrAdmin(http.HandlerFunc(presetHandler.ServeHTTP)))
 	}
 
 	return nil
@@ -315,6 +315,26 @@ func (r *Router) withAuth(h http.Handler) http.Handler {
 // requireAdmin wraps a handler with admin middleware (must be used after auth)
 func (r *Router) requireAdmin(h http.Handler) http.Handler {
 	return middleware.AdminMiddleware(r.logger)(h)
+}
+
+// withAuthAndAgentOrAdmin wraps a handler with authentication and agent-or-admin middleware.
+// Agent keys get read-only (GET) access; admin keys get full access; dev keys are denied.
+func (r *Router) withAuthAndAgentOrAdmin(h http.Handler) http.Handler {
+	middlewares := []func(http.Handler) http.Handler{
+		middleware.SecurityHeadersMiddleware(),
+		middleware.RecoveryMiddleware(r.logger),
+		middleware.ClientIPMiddleware(r.ipWhitelist),
+		middleware.LoggingMiddleware(r.logger, r.config.AuditLogger),
+		middleware.IPRateLimitMiddleware(r.rateLimiter, r.ipWhitelist, r.config.IPRateLimit, r.config.AlertService),
+		middleware.AuthMiddleware(r.authVerifier, r.logger, r.config.AuditLogger, r.config.AlertService),
+		middleware.AgentOrAdminMiddleware(r.logger, r.config.AlertService),
+		middleware.RateLimitMiddleware(r.rateLimiter, r.config.AuditLogger, r.config.AlertService),
+		middleware.ContentTypeMiddleware(),
+	}
+	if r.ipWhitelist != nil {
+		middlewares = append(middlewares, middleware.IPWhitelistMiddleware(r.ipWhitelist))
+	}
+	return r.chain(h, middlewares...)
 }
 
 // withAuthAndAdmin wraps a handler with authentication and admin middleware

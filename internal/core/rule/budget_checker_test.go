@@ -821,6 +821,12 @@ type stubBudgetRepo struct {
 }
 
 func (r *stubBudgetRepo) Create(ctx context.Context, budget *types.RuleBudget) error { return nil }
+func (r *stubBudgetRepo) CreateOrGet(ctx context.Context, budget *types.RuleBudget) (*types.RuleBudget, bool, error) {
+	return budget, true, nil
+}
+func (r *stubBudgetRepo) CountByRuleID(ctx context.Context, ruleID types.RuleID) (int, error) {
+	return 0, nil
+}
 func (r *stubBudgetRepo) Delete(ctx context.Context, id string) error               { return nil }
 func (r *stubBudgetRepo) DeleteByRuleID(ctx context.Context, ruleID types.RuleID) error {
 	return nil
@@ -868,17 +874,19 @@ type stubTemplateRepo struct {
 // stubJSEvaluator implements BudgetJSEvaluator for method "js" tests.
 type stubJSEvaluator struct {
 	amount *big.Int
+	unit   string // dynamic unit; empty for backward compat
 	err    error
 }
 
-func (s *stubJSEvaluator) EvaluateBudget(ctx context.Context, rule *types.Rule, req *types.SignRequest, parsed *types.ParsedPayload) (*big.Int, error) {
+func (s *stubJSEvaluator) EvaluateBudget(ctx context.Context, rule *types.Rule, req *types.SignRequest, parsed *types.ParsedPayload) (*types.BudgetResult, error) {
 	if s.err != nil {
 		return nil, s.err
 	}
-	if s.amount == nil {
-		return big.NewInt(0), nil
+	amount := big.NewInt(0)
+	if s.amount != nil {
+		amount = new(big.Int).Set(s.amount)
 	}
-	return new(big.Int).Set(s.amount), nil
+	return &types.BudgetResult{Amount: amount, Unit: s.unit}, nil
 }
 
 func (r *stubTemplateRepo) Get(ctx context.Context, id string) (*types.RuleTemplate, error) {

@@ -63,6 +63,7 @@ func NewDB(cfg Config) (*gorm.DB, error) {
 		&types.RuleBudget{},
 		&types.APIKey{},
 		&types.AuditRecord{},
+		&types.TokenMetadata{},
 	); err != nil {
 		return nil, fmt.Errorf("failed to auto-migrate: %w", err)
 	}
@@ -100,6 +101,7 @@ func NewDBWithLogger(cfg Config, logLevel logger.LogLevel) (*gorm.DB, error) {
 		&types.RuleBudget{},
 		&types.APIKey{},
 		&types.AuditRecord{},
+		&types.TokenMetadata{},
 	); err != nil {
 		return nil, fmt.Errorf("failed to auto-migrate: %w", err)
 	}

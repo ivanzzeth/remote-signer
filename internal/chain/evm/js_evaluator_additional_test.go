@@ -211,7 +211,7 @@ func TestWrappedValidate_EmptyReturnReason(t *testing.T) {
 	// Script returns valid=false with no reason → should get default message
 	script := `function validate(i){ return { valid: false }; }`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.False(t, res.Valid)
 	assert.Contains(t, res.Reason, "script returned valid=false with empty reason")
 }
@@ -220,7 +220,7 @@ func TestWrappedValidate_UndefinedReturn(t *testing.T) {
 	e, _ := NewJSRuleEvaluator(testLogger())
 	script := `function validate(i){ return undefined; }`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.False(t, res.Valid)
 	assert.Contains(t, res.Reason, "invalid_shape")
 }
@@ -229,7 +229,7 @@ func TestWrappedValidate_NonObjectReturn(t *testing.T) {
 	e, _ := NewJSRuleEvaluator(testLogger())
 	script := `function validate(i){ return "just a string"; }`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.False(t, res.Valid)
 	assert.Contains(t, res.Reason, "invalid_shape")
 }
@@ -238,7 +238,7 @@ func TestWrappedValidate_NoValidateFunction(t *testing.T) {
 	e, _ := NewJSRuleEvaluator(testLogger())
 	script := `var x = 42;`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.False(t, res.Valid)
 	assert.Contains(t, res.Reason, "validate is not defined")
 }
@@ -247,7 +247,7 @@ func TestWrappedValidate_ValidateNotFunction(t *testing.T) {
 	e, _ := NewJSRuleEvaluator(testLogger())
 	script := `var validate = "not a function";`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.False(t, res.Valid)
 	assert.Contains(t, res.Reason, "validate is not a function")
 }
@@ -256,7 +256,7 @@ func TestWrappedValidate_ScriptSyntaxError(t *testing.T) {
 	e, _ := NewJSRuleEvaluator(testLogger())
 	script := `function validate(i) { return { valid: true ` // unclosed brace
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.False(t, res.Valid)
 	assert.Contains(t, res.Reason, "script_error")
 }
@@ -265,7 +265,7 @@ func TestWrappedValidate_ScriptRuntimeError(t *testing.T) {
 	e, _ := NewJSRuleEvaluator(testLogger())
 	script := `function validate(i){ throw new Error("boom"); }`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.False(t, res.Valid)
 	assert.Contains(t, res.Reason, "boom")
 }
@@ -274,7 +274,7 @@ func TestWrappedValidate_WithConfig(t *testing.T) {
 	e, _ := NewJSRuleEvaluator(testLogger())
 	script := `function validate(i){ return { valid: config.max_value === "100" }; }`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, map[string]interface{}{"max_value": "100"})
+	res := e.wrappedValidate(script, input, map[string]interface{}{"max_value": "100"}, nil)
 	assert.True(t, res.Valid)
 }
 
@@ -282,7 +282,7 @@ func TestWrappedValidate_PayloadAndDelegateTo(t *testing.T) {
 	e, _ := NewJSRuleEvaluator(testLogger())
 	script := `function validate(i){ return { valid: true, reason: "ok", payload: { key: "value" }, delegate_to: "rule-2" }; }`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.True(t, res.Valid)
 	assert.Equal(t, "rule-2", res.DelegateTo)
 	assert.NotNil(t, res.Payload)
@@ -291,7 +291,7 @@ func TestWrappedValidate_PayloadAndDelegateTo(t *testing.T) {
 func TestWrappedValidate_NilInput(t *testing.T) {
 	e, _ := NewJSRuleEvaluator(testLogger())
 	script := `function validate(i){ return ok(); }`
-	res := e.wrappedValidate(script, nil, nil)
+	res := e.wrappedValidate(script, nil, nil, nil)
 	// nil input → ruleInputToMap returns nil → input is set to nil in VM
 	assert.True(t, res.Valid)
 }
@@ -300,7 +300,7 @@ func TestWrappedValidate_FailHelper(t *testing.T) {
 	e, _ := NewJSRuleEvaluator(testLogger())
 	script := `function validate(i){ return fail("bad transaction"); }`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.False(t, res.Valid)
 	assert.Contains(t, res.Reason, "bad transaction")
 }
@@ -309,7 +309,7 @@ func TestWrappedValidate_FailHelperNoArg(t *testing.T) {
 	e, _ := NewJSRuleEvaluator(testLogger())
 	script := `function validate(i){ return fail(); }`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.False(t, res.Valid)
 	// Empty reason from fail() → default message
 	assert.Contains(t, res.Reason, "script returned valid=false with empty reason")
@@ -902,7 +902,7 @@ func TestSecurity_EvalRecoveryViaConstructor(t *testing.T) {
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
 	for _, atk := range attacks {
 		t.Run(atk.name, func(t *testing.T) {
-			res := e.wrappedValidate(atk.script, input, nil)
+			res := e.wrappedValidate(atk.script, input, nil, nil)
 			// Must NOT return valid=true — the Function constructor is poisoned
 			assert.False(t, res.Valid, "sandbox escape: %s returned valid=true", atk.name)
 			t.Logf("blocked: valid=%v reason=%q", res.Valid, res.Reason)
@@ -943,7 +943,7 @@ func TestSecurity_PrototypePollution(t *testing.T) {
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
 	for _, atk := range attacks {
 		t.Run(atk.name, func(t *testing.T) {
-			res := e.wrappedValidate(atk.script, input, nil)
+			res := e.wrappedValidate(atk.script, input, nil, nil)
 			t.Logf("result: valid=%v reason=%q", res.Valid, res.Reason)
 		})
 	}
@@ -987,7 +987,7 @@ func TestSecurity_CraftedReturnValues(t *testing.T) {
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
 	for _, atk := range attacks {
 		t.Run(atk.name, func(t *testing.T) {
-			res := e.wrappedValidate(atk.script, input, nil)
+			res := e.wrappedValidate(atk.script, input, nil, nil)
 			if atk.expectFail {
 				assert.False(t, res.Valid, "should not be valid")
 			}
@@ -1004,7 +1004,7 @@ func TestSecurity_CPUDoSWithinTimeout(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.False(t, res.Valid)
 	assert.Contains(t, res.Reason, "timeout")
 }
@@ -1020,7 +1020,7 @@ func TestSecurity_MemoryBomb(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	assert.False(t, res.Valid)
 	// Should be either timeout or memory_limit_exceeded
 	assert.True(t, strings.Contains(res.Reason, "timeout") || strings.Contains(res.Reason, "memory"),
@@ -1042,9 +1042,9 @@ func TestSecurity_VMIsolation(t *testing.T) {
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
 	// Run rule 1
-	e.wrappedValidate(script1, input, nil)
+	e.wrappedValidate(script1, input, nil, nil)
 	// Run rule 2 — must NOT see globalSecret
-	res := e.wrappedValidate(script2, input, nil)
+	res := e.wrappedValidate(script2, input, nil, nil)
 	assert.True(t, res.Valid, "VM isolation broken: %s", res.Reason)
 }
 
@@ -1060,7 +1060,7 @@ func TestSecurity_RegexDoS(t *testing.T) {
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	// Sobek handles this without catastrophic backtracking; either completes or times out.
 	// Both outcomes are safe — the important thing is it does NOT hang the process.
 	t.Logf("regex DoS: valid=%v reason=%q", res.Valid, res.Reason)
@@ -1075,7 +1075,7 @@ func TestSecurity_OverrideBuiltinHelpers(t *testing.T) {
 		return fail("should still validate");
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
-	res := e.wrappedValidate(script, input, nil)
+	res := e.wrappedValidate(script, input, nil, nil)
 	// If the script writer overrides fail(), it's the script writer's own bug.
 	// This is acceptable since the script IS the validation logic itself.
 	// But log the result for awareness.
@@ -1092,7 +1092,7 @@ func TestSecurity_ErrorMessageExfiltration(t *testing.T) {
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
 	config := map[string]interface{}{"api_key": "sk-secret-12345678901234567890"}
-	res := e.wrappedValidate(script, input, config)
+	res := e.wrappedValidate(script, input, config, nil)
 	assert.False(t, res.Valid)
 	// Reason should be truncated to 120 chars — partial mitigation
 	assert.LessOrEqual(t, len(res.Reason), jsRuleMaxReasonLen, "reason should be truncated")

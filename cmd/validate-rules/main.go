@@ -822,7 +822,7 @@ func validateRules(ctx context.Context, rules []RuleConfig, validator *evm.Solid
 						result.FailedTestCases++
 						result.Valid = false
 					} else {
-						amount, err := jsEval.EvaluateBudgetWithInput(ctx, rule, ruleInput)
+						budgetResult, err := jsEval.EvaluateBudgetWithInput(ctx, rule, ruleInput)
 						if err != nil {
 							tcResult.Passed = false
 							tcResult.Error = fmt.Sprintf("validateBudget: %v", err)
@@ -835,9 +835,9 @@ func validateRules(ctx context.Context, rules []RuleConfig, validator *evm.Solid
 								tcResult.Error = fmt.Sprintf("invalid expect_budget_amount %q", tc.ExpectBudgetAmount)
 								result.FailedTestCases++
 								result.Valid = false
-							} else if amount.Cmp(expected) != 0 {
+							} else if budgetResult.Amount.Cmp(expected) != 0 {
 								tcResult.Passed = false
-								tcResult.Error = fmt.Sprintf("expect_budget_amount %s but got %s", tc.ExpectBudgetAmount, amount.String())
+								tcResult.Error = fmt.Sprintf("expect_budget_amount %s but got %s", tc.ExpectBudgetAmount, budgetResult.Amount.String())
 								result.FailedTestCases++
 								result.Valid = false
 							}

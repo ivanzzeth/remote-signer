@@ -284,6 +284,13 @@ func (r *mockBudgetRepo) MarkAlertSent(_ context.Context, _ types.RuleID, _ stri
 	return nil
 }
 
+func (r *mockBudgetRepo) CountByRuleID(_ context.Context, _ types.RuleID) (int, error) {
+	return 0, nil
+}
+func (r *mockBudgetRepo) CreateOrGet(_ context.Context, budget *types.RuleBudget) (*types.RuleBudget, bool, error) {
+	return budget, true, nil
+}
+
 // helper to count budgets in the mock repo
 func (r *mockBudgetRepo) count() int {
 	r.mu.RLock()

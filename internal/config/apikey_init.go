@@ -126,6 +126,7 @@ func (i *APIKeyInitializer) syncKey(ctx context.Context, keyCfg APIKeyConfig) er
 			AllowedHDWallets:  pq.StringArray(keyCfg.AllowedHDWallets),
 			RateLimit:         rateLimit,
 			Admin:             keyCfg.Admin,
+			Agent:             keyCfg.Agent,
 			Enabled:           keyCfg.Enabled,
 			Source:            types.APIKeySourceConfig,
 			CreatedAt:         time.Now(),
@@ -140,6 +141,7 @@ func (i *APIKeyInitializer) syncKey(ctx context.Context, keyCfg APIKeyConfig) er
 			"id", keyCfg.ID,
 			"name", keyCfg.Name,
 			"admin", keyCfg.Admin,
+			"agent", keyCfg.Agent,
 			"enabled", keyCfg.Enabled,
 		)
 		if i.auditLogger != nil {
@@ -156,6 +158,7 @@ func (i *APIKeyInitializer) syncKey(ctx context.Context, keyCfg APIKeyConfig) er
 		existing.AllowedHDWallets = pq.StringArray(keyCfg.AllowedHDWallets)
 		existing.RateLimit = rateLimit
 		existing.Admin = keyCfg.Admin
+		existing.Agent = keyCfg.Agent
 		existing.Enabled = keyCfg.Enabled
 		existing.Source = types.APIKeySourceConfig
 		existing.UpdatedAt = time.Now()
@@ -168,6 +171,7 @@ func (i *APIKeyInitializer) syncKey(ctx context.Context, keyCfg APIKeyConfig) er
 			"id", keyCfg.ID,
 			"name", keyCfg.Name,
 			"admin", keyCfg.Admin,
+			"agent", keyCfg.Agent,
 			"enabled", keyCfg.Enabled,
 		)
 		if i.auditLogger != nil {

@@ -19,34 +19,34 @@ import (
 
 // Config is the root configuration structure
 type Config struct {
-	Server           ServerConfig               `yaml:"server"`
-	Database         storage.Config             `yaml:"database"`
-	Chains           ChainsConfig               `yaml:"chains"`
-	Notify           notify.Config              `yaml:"notify"`
-	NotifyChannel    notify.Channel             `yaml:"notify_channels"`
-	AuditMonitor     audit.MonitorConfig        `yaml:"audit_monitor"`
-	Security         SecurityConfig             `yaml:"security"`
-	Logger           LoggerConfig               `yaml:"logger"`
-	APIKeys          []APIKeyConfig             `yaml:"api_keys"`
-	Templates        []TemplateConfig           `yaml:"templates"`
-	Rules            []RuleConfig               `yaml:"rules"`
-	Presets          *PresetsConfig             `yaml:"presets,omitempty"`
-	DynamicBlocklist *DynamicBlocklistConfig    `yaml:"dynamic_blocklist,omitempty"`
+	Server           ServerConfig            `yaml:"server"`
+	Database         storage.Config          `yaml:"database"`
+	Chains           ChainsConfig            `yaml:"chains"`
+	Notify           notify.Config           `yaml:"notify"`
+	NotifyChannel    notify.Channel          `yaml:"notify_channels"`
+	AuditMonitor     audit.MonitorConfig     `yaml:"audit_monitor"`
+	Security         SecurityConfig          `yaml:"security"`
+	Logger           LoggerConfig            `yaml:"logger"`
+	APIKeys          []APIKeyConfig          `yaml:"api_keys"`
+	Templates        []TemplateConfig        `yaml:"templates"`
+	Rules            []RuleConfig            `yaml:"rules"`
+	Presets          *PresetsConfig          `yaml:"presets,omitempty"`
+	DynamicBlocklist *DynamicBlocklistConfig `yaml:"dynamic_blocklist,omitempty"`
 }
 
 // DynamicBlocklistConfig configures the runtime address blocklist synced from external URLs.
 type DynamicBlocklistConfig struct {
-	Enabled      bool                       `yaml:"enabled"`
-	SyncInterval string                     `yaml:"sync_interval"` // e.g. "1h", "30m"
-	FailMode     string                     `yaml:"fail_mode"`     // "open" (default) or "close"
-	CacheFile    string                     `yaml:"cache_file"`    // local file for persisting fetched addresses
-	Sources      []DynamicBlocklistSource   `yaml:"sources"`
+	Enabled      bool                     `yaml:"enabled"`
+	SyncInterval string                   `yaml:"sync_interval"` // e.g. "1h", "30m"
+	FailMode     string                   `yaml:"fail_mode"`     // "open" (default) or "close"
+	CacheFile    string                   `yaml:"cache_file"`    // local file for persisting fetched addresses
+	Sources      []DynamicBlocklistSource `yaml:"sources"`
 }
 
 // DynamicBlocklistSource defines an address list source.
 type DynamicBlocklistSource struct {
 	Name     string `yaml:"name"`
-	Type     string `yaml:"type"`      // "url_text" or "url_json"
+	Type     string `yaml:"type"` // "url_text" or "url_json"
 	URL      string `yaml:"url"`
 	JSONPath string `yaml:"json_path"` // for url_json: dot-path to address array
 }
@@ -103,7 +103,7 @@ type RuleConfig struct {
 	APIKeyID      string                 `yaml:"api_key_id,omitempty" json:"api_key_id,omitempty"`
 	SignerAddress string                 `yaml:"signer_address,omitempty" json:"signer_address,omitempty"`
 	Config        map[string]interface{} `yaml:"config" json:"config"`
-	Variables     map[string]interface{} `yaml:"variables,omitempty" json:"variables,omitempty"`   // instance/template variable values (e.g. for evm_js config)
+	Variables     map[string]interface{} `yaml:"variables,omitempty" json:"variables,omitempty"`           // instance/template variable values (e.g. for evm_js config)
 	TestVariables map[string]string      `yaml:"test_variables,omitempty" json:"test_variables,omitempty"` // from template; used for running test cases at startup so expectations match
 	TestCases     []TestCaseConfig       `yaml:"test_cases,omitempty" json:"test_cases,omitempty"`         // test cases for validation (evm_js, solidity, etc.)
 	Enabled       bool                   `yaml:"enabled" json:"enabled"`
@@ -119,10 +119,11 @@ type APIKeyConfig struct {
 	AllowAllHDWallets bool     `yaml:"allow_all_hd_wallets"` // When true: key can use any HD wallet (derive, sign derived)
 	AllowedChainTypes []string `yaml:"allowed_chain_types"`  // Empty = all chains allowed
 	AllowedSigners    []string `yaml:"allowed_signers"`      // Signer addresses; empty = none (unless allow_all_signers)
-	AllowedHDWallets  []string `yaml:"allowed_hd_wallets"`  // HD wallet primary addresses; empty = none (unless allow_all_hd_wallets)
+	AllowedHDWallets  []string `yaml:"allowed_hd_wallets"`   // HD wallet primary addresses; empty = none (unless allow_all_hd_wallets)
 	RateLimit         int      `yaml:"rate_limit"`           // Requests per minute (default: 100)
 	Enabled           bool     `yaml:"enabled"`              // Whether the key is active
 	Admin             bool     `yaml:"admin"`                // Admin keys can approve requests and manage rules
+	Agent             bool     `yaml:"agent"`                // Agent keys can sign and read rules/budgets (read-only)
 }
 
 // ResolvePublicKey returns the public key hex, resolving from env var and auto-detecting format (hex or base64)
@@ -204,11 +205,12 @@ type ChainsConfig struct {
 
 // EVMConfig contains EVM chain configuration
 type EVMConfig struct {
-	Enabled      bool             `yaml:"enabled"`
-	Signers      evm.SignerConfig `yaml:"signers"`
-	KeystoreDir  string           `yaml:"keystore_dir"`   // Directory for storing dynamically created keystores
-	HDWalletDir  string           `yaml:"hd_wallet_dir"`  // Directory for storing HD wallets
-	Foundry      FoundryConfig    `yaml:"foundry"`
+	Enabled     bool                 `yaml:"enabled"`
+	Signers     evm.SignerConfig     `yaml:"signers"`
+	KeystoreDir string               `yaml:"keystore_dir"`  // Directory for storing dynamically created keystores
+	HDWalletDir string               `yaml:"hd_wallet_dir"` // Directory for storing HD wallets
+	Foundry     FoundryConfig        `yaml:"foundry"`
+	RPCGateway  evm.RPCGatewayConfig `yaml:"rpc_gateway"` // RPC gateway for JS rule sandbox (read-only)
 }
 
 // FoundryConfig contains Foundry (forge) configuration for Solidity rules
@@ -222,12 +224,12 @@ type FoundryConfig struct {
 
 // SecurityConfig contains security-related settings
 type SecurityConfig struct {
-	MaxRequestAge    time.Duration     `yaml:"max_request_age"`
-	RateLimitDefault int               `yaml:"rate_limit_default"`
+	MaxRequestAge    time.Duration `yaml:"max_request_age"`
+	RateLimitDefault int           `yaml:"rate_limit_default"`
 	// IPRateLimit is the maximum requests per minute from a single IP address (pre-auth).
 	// Protects against unauthenticated flood attacks. Default: 200.
-	IPRateLimit int `yaml:"ip_rate_limit"`
-	IPWhitelist      IPWhitelistConfig `yaml:"ip_whitelist"`
+	IPRateLimit int               `yaml:"ip_rate_limit"`
+	IPWhitelist IPWhitelistConfig `yaml:"ip_whitelist"`
 	// ManualApprovalEnabled: when true, requests with no whitelist match go to manual approval;
 	// when false (default), they are rejected immediately. Default false for stricter security.
 	ManualApprovalEnabled bool `yaml:"manual_approval_enabled"`
@@ -458,6 +460,10 @@ func validate(cfg *Config) error {
 		// Skip public key validation for disabled keys
 		if !key.Enabled {
 			continue
+		}
+
+		if key.Admin && key.Agent {
+			return fmt.Errorf("api_keys[%d] (%s): admin and agent are mutually exclusive", i, key.ID)
 		}
 
 		if key.PublicKey == "" && key.PublicKeyEnv == "" {

@@ -67,7 +67,7 @@ func TestSafeRule_SplitRequestFromDB(t *testing.T) {
 	e, err := NewJSRuleEvaluator(slog.Default())
 	require.NoError(t, err)
 
-	res := e.wrappedValidate(safeScript, ruleInput, config)
+	res := e.wrappedValidate(safeScript, ruleInput, config, nil)
 
 	t.Logf("Valid=%v Reason=%q", res.Valid, res.Reason)
 	if !res.Valid {

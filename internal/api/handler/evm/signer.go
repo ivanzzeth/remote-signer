@@ -24,7 +24,7 @@ type SignerHandler struct {
 	apiKeyRepo    storage.APIKeyRepository // nil = no filtering/enrichment
 	readOnly      bool                     // when true, block signer creation via API
 	logger        *slog.Logger
-	auditLogger   *audit.AuditLogger       // optional: audit logging
+	auditLogger   *audit.AuditLogger // optional: audit logging
 }
 
 // NewSignerHandler creates a new signer handler
@@ -182,9 +182,11 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 		requestedLimit = limit
 	}
 
-	// Determine if non-admin filtering is needed
+	// Determine if non-admin filtering is needed.
+	// Agent keys always get filtered to their explicit allowed_signers/hd_wallets only
+	// (allow_all_signers is ignored for agent keys to enforce "own signers" restriction).
 	needsFiltering := apiKey != nil && !apiKey.Admin &&
-		(len(apiKey.AllowedSigners) > 0 || len(apiKey.AllowedHDWallets) > 0)
+		(apiKey.Agent || len(apiKey.AllowedSigners) > 0 || len(apiKey.AllowedHDWallets) > 0)
 
 	filter := types.SignerFilter{
 		Type: signerType,
@@ -218,8 +220,16 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		for _, s := range result.Signers {
-			if middleware.CheckSignerPermissionWithHDWallets(apiKey, s.Address, hdMgr) {
-				filteredSigners = append(filteredSigners, s)
+			if apiKey.Agent {
+				// Agent keys: strict filtering using explicit allowed_signers only
+				// (ignore allow_all_signers/allow_all_hd_wallets)
+				if middleware.CheckSignerPermissionExplicit(apiKey, s.Address, hdMgr) {
+					filteredSigners = append(filteredSigners, s)
+				}
+			} else {
+				if middleware.CheckSignerPermissionWithHDWallets(apiKey, s.Address, hdMgr) {
+					filteredSigners = append(filteredSigners, s)
+				}
 			}
 		}
 	} else {

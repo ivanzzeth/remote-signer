@@ -46,4 +46,25 @@ type BudgetMetering struct {
 	ParamType  string `json:"param_type,omitempty" yaml:"param_type,omitempty"`   // for calldata_param: "uint256", etc.
 	FieldPath  string `json:"field_path,omitempty" yaml:"field_path,omitempty"`   // for typed_data_field: "message.amount"
 	Decimals   int    `json:"decimals,omitempty" yaml:"decimals,omitempty"`
+
+	// Dynamic budget: when true, validateBudget may return {amount, unit} and the unit
+	// is resolved at evaluation time rather than being fixed at rule creation.
+	Dynamic      bool                `json:"dynamic,omitempty" yaml:"dynamic,omitempty"`
+	UnitDecimal  bool                `json:"unit_decimal,omitempty" yaml:"unit_decimal,omitempty"`
+	KnownUnits   map[string]UnitConf `json:"known_units,omitempty" yaml:"known_units,omitempty"`
+	UnknownDefault *UnitConf         `json:"unknown_default,omitempty" yaml:"unknown_default,omitempty"`
+
+	// SECURITY: MaxDynamicUnits caps the number of distinct dynamic budget units per rule.
+	// Without this, an attacker could target N different tokens to get N * max_total effective budget.
+	// Default: 100. Set to 0 to disable (not recommended).
+	MaxDynamicUnits int `json:"max_dynamic_units,omitempty" yaml:"max_dynamic_units,omitempty"`
+}
+
+// UnitConf defines budget limits for a known or unknown dynamic budget unit.
+type UnitConf struct {
+	MaxTotal   string `json:"max_total" yaml:"max_total"`
+	MaxPerTx   string `json:"max_per_tx,omitempty" yaml:"max_per_tx,omitempty"`
+	MaxTxCount int    `json:"max_tx_count,omitempty" yaml:"max_tx_count,omitempty"`
+	Decimals   int    `json:"decimals,omitempty" yaml:"decimals,omitempty"` // explicit decimals; 0 means auto-query
+	AlertPct   int    `json:"alert_pct,omitempty" yaml:"alert_pct,omitempty"`
 }

@@ -19,16 +19,17 @@ type APIKey struct {
 	PublicKeyHex string `json:"public_key" gorm:"type:varchar(128)"` // Ed25519 public key, hex encoded
 
 	// Permissions (empty list = no access; use allow_all_signers / allow_all_hd_wallets to grant all)
-	AllowAllSigners   bool            `json:"allow_all_signers" gorm:"default:false"`         // when true: any signer (private_key, keystore)
-	AllowAllHDWallets bool            `json:"allow_all_hd_wallets" gorm:"default:false"`      // when true: any HD wallet (derive, sign derived)
-	AllowedChainTypes pq.StringArray  `json:"allowed_chain_types,omitempty" gorm:"type:text[]"` // empty = all chains
-	AllowedSigners    pq.StringArray  `json:"allowed_signers,omitempty" gorm:"type:text[]"`    // signer addresses; empty = none
-	AllowedHDWallets  pq.StringArray  `json:"allowed_hd_wallets,omitempty" gorm:"type:text[]"`  // HD wallet primary addresses; empty = none
+	AllowAllSigners   bool           `json:"allow_all_signers" gorm:"default:false"`           // when true: any signer (private_key, keystore)
+	AllowAllHDWallets bool           `json:"allow_all_hd_wallets" gorm:"default:false"`        // when true: any HD wallet (derive, sign derived)
+	AllowedChainTypes pq.StringArray `json:"allowed_chain_types,omitempty" gorm:"type:text[]"` // empty = all chains
+	AllowedSigners    pq.StringArray `json:"allowed_signers,omitempty" gorm:"type:text[]"`     // signer addresses; empty = none
+	AllowedHDWallets  pq.StringArray `json:"allowed_hd_wallets,omitempty" gorm:"type:text[]"`  // HD wallet primary addresses; empty = none
 
 	RateLimit int  `json:"rate_limit" gorm:"default:100"` // requests per minute
 	Admin     bool `json:"admin" gorm:"default:false"`    // admin keys can approve requests and manage rules
+	Agent     bool `json:"agent" gorm:"default:false"`    // agent keys can sign and read rules/budgets (read-only)
 
-	Enabled    bool       `json:"enabled" gorm:"index;default:true"`
+	Enabled bool `json:"enabled" gorm:"index;default:true"`
 	// Source indicates where the API key was created: "config" (from config file) or "api" (created via API).
 	// Default "config" for backward compatibility with existing keys.
 	Source     string     `json:"source" gorm:"type:varchar(10);default:'config';not null"`
@@ -62,6 +63,17 @@ func (k *APIKey) IsAllowedSigner(address string) bool {
 	if k.AllowAllSigners {
 		return true
 	}
+	return k.isExplicitlyAllowedSigner(address)
+}
+
+// IsAllowedSignerExplicit checks only the explicit AllowedSigners list,
+// ignoring AllowAllSigners. Used for agent keys that must be restricted
+// to their explicitly listed signers only.
+func (k *APIKey) IsAllowedSignerExplicit(address string) bool {
+	return k.isExplicitlyAllowedSigner(address)
+}
+
+func (k *APIKey) isExplicitlyAllowedSigner(address string) bool {
 	if len(k.AllowedSigners) == 0 {
 		return false
 	}
@@ -79,6 +91,16 @@ func (k *APIKey) IsAllowedHDWallet(primaryAddress string) bool {
 	if k.AllowAllHDWallets {
 		return true
 	}
+	return k.isExplicitlyAllowedHDWallet(primaryAddress)
+}
+
+// IsAllowedHDWalletExplicit checks only the explicit AllowedHDWallets list,
+// ignoring AllowAllHDWallets. Used for agent keys.
+func (k *APIKey) IsAllowedHDWalletExplicit(primaryAddress string) bool {
+	return k.isExplicitlyAllowedHDWallet(primaryAddress)
+}
+
+func (k *APIKey) isExplicitlyAllowedHDWallet(primaryAddress string) bool {
 	if len(k.AllowedHDWallets) == 0 {
 		return false
 	}

@@ -54,7 +54,9 @@ func trimConfigValue(v interface{}) interface{} {
 
 // JSRuleEvaluator evaluates evm_js rules in-process via Sobek.
 type JSRuleEvaluator struct {
-	logger *slog.Logger
+	logger        *slog.Logger
+	rpcProvider   *RPCProvider
+	metadataCache *TokenMetadataCache
 }
 
 // NewJSRuleEvaluator creates a new JS rule evaluator.
@@ -63,6 +65,32 @@ func NewJSRuleEvaluator(logger *slog.Logger) (*JSRuleEvaluator, error) {
 		return nil, fmt.Errorf("logger is required")
 	}
 	return &JSRuleEvaluator{logger: logger}, nil
+}
+
+// SetRPCProvider configures the RPC provider and token metadata cache for read-only
+// on-chain queries from JS rules (web3.call, erc20.decimals, etc.).
+func (e *JSRuleEvaluator) SetRPCProvider(provider *RPCProvider, cache *TokenMetadataCache) {
+	e.rpcProvider = provider
+	e.metadataCache = cache
+}
+
+// buildRPCContext creates an RPCInjectionContext for a given chain ID, or nil if RPC is not configured.
+// SECURITY: chainID is validated as a positive numeric integer to prevent SSRF via path injection.
+func (e *JSRuleEvaluator) buildRPCContext(ctx context.Context, chainID string) *RPCInjectionContext {
+	if e.rpcProvider == nil {
+		return nil
+	}
+	if err := ValidateChainID(chainID); err != nil {
+		e.logger.Warn("invalid chain_id for RPC context, disabling RPC for this evaluation", "chain_id", chainID, "error", err)
+		return nil
+	}
+	return &RPCInjectionContext{
+		ChainID:  chainID,
+		Provider: e.rpcProvider,
+		Cache:    e.metadataCache,
+		Counter:  NewRPCCallCounter(rpcMaxCallsPerEval),
+		Ctx:      ctx,
+	}
 }
 
 // Type returns the rule type this evaluator handles.
@@ -141,16 +169,10 @@ func (e *JSRuleEvaluator) Evaluate(ctx context.Context, r *types.Rule, req *type
 		}
 	}
 
-	result := e.wrappedValidate(cfg.Script, ruleInput, configObj)
+	rpcCtx := e.buildRPCContext(ctx, req.ChainID)
+	result := e.wrappedValidate(cfg.Script, ruleInput, configObj, rpcCtx)
 
 	if !result.Valid {
-		// For blocklist: "violated" when valid=false. For whitelist: "matched" when valid=true.
-		// So we return matched = result.Valid (whitelist matches when valid; blocklist "violated" when !valid).
-		// Engine interprets: blocklist wants (true = block), whitelist wants (true = allow).
-		// So for blocklist we need to return (true, reason) when valid=false → block.
-		// For whitelist we need to return (true, reason) when valid=true → allow.
-		// So matched = result.Valid is correct: when valid, we return (true, ...) = allow/match; when invalid, (false, ...) = no match / blocklist will not "fire" from this rule's perspective... Wait, for blocklist the engine does: if matched then block. So "matched" for blocklist means "rule fires = block". So when valid=false we want to BLOCK, so we want "matched"=true for blocklist. So for blocklist: matched = !result.Valid. For whitelist: matched = result.Valid. So we need to return different things based on mode!
-		// Re-read engine: for blocklist, evaluator.Evaluate returns (violated, reason, err). If violated true → block. So our "matched" for blocklist is "violated". So we return (true, reason) when we want to block = when valid=false. So matched = !result.Valid for blocklist, matched = result.Valid for whitelist.
 		if r.Mode == types.RuleModeBlocklist {
 			return true, result.Reason, nil
 		}
@@ -191,7 +213,8 @@ func (e *JSRuleEvaluator) EvaluateWithDelegation(ctx context.Context, r *types.R
 		}
 	}
 
-	result := e.wrappedValidate(cfg.Script, ruleInput, configObj)
+	rpcCtx := e.buildRPCContext(ctx, req.ChainID)
+	result := e.wrappedValidate(cfg.Script, ruleInput, configObj, rpcCtx)
 
 	if !result.Valid {
 		if r.Mode == types.RuleModeBlocklist {
@@ -272,12 +295,13 @@ func parseDelegateToIDs(delegateTo string) []types.RuleID {
 // ValidateWithInput runs the rule script with the given input and config, returns the sanitized result.
 // Used by JSRuleValidator to run test cases.
 func (e *JSRuleEvaluator) ValidateWithInput(script string, input *RuleInput, config map[string]interface{}) JSRuleValidateResult {
-	return e.wrappedValidate(script, input, config)
+	return e.wrappedValidate(script, input, config, nil)
 }
 
 // EvaluateBudget runs the rule script's validateBudget(input) and returns the spend amount for budget metering.
 // Used when template budget_metering.method is "js". Returns (nil, error) on any failure (fail-closed).
-func (e *JSRuleEvaluator) EvaluateBudget(ctx context.Context, r *types.Rule, req *types.SignRequest, parsed *types.ParsedPayload) (*big.Int, error) {
+// Supports both plain BigInt return (backward compat) and {amount, unit} object for dynamic budget.
+func (e *JSRuleEvaluator) EvaluateBudget(ctx context.Context, r *types.Rule, req *types.SignRequest, parsed *types.ParsedPayload) (*types.BudgetResult, error) {
 	ruleInput, err := BuildRuleInput(req, parsed)
 	if err != nil {
 		return nil, fmt.Errorf("build rule input: %w", err)
@@ -295,12 +319,13 @@ func (e *JSRuleEvaluator) EvaluateBudget(ctx context.Context, r *types.Rule, req
 			return nil, fmt.Errorf("invalid rule variables JSON: %w", err)
 		}
 	}
-	return e.wrappedValidateBudget(cfg.Script, ruleInput, configObj)
+	rpcCtx := e.buildRPCContext(ctx, req.ChainID)
+	return e.wrappedValidateBudget(cfg.Script, ruleInput, configObj, rpcCtx)
 }
 
 // EvaluateBudgetWithInput runs validateBudget(input) with the given input and rule config.
 // Used by JSRuleValidator to assert expect_budget_amount in test cases.
-func (e *JSRuleEvaluator) EvaluateBudgetWithInput(ctx context.Context, r *types.Rule, input *RuleInput) (*big.Int, error) {
+func (e *JSRuleEvaluator) EvaluateBudgetWithInput(ctx context.Context, r *types.Rule, input *RuleInput) (*types.BudgetResult, error) {
 	var cfg JSRuleConfig
 	if err := json.Unmarshal(r.Config, &cfg); err != nil {
 		return nil, fmt.Errorf("invalid evm_js config: %w", err)
@@ -314,12 +339,13 @@ func (e *JSRuleEvaluator) EvaluateBudgetWithInput(ctx context.Context, r *types.
 			return nil, fmt.Errorf("invalid rule variables JSON: %w", err)
 		}
 	}
-	return e.wrappedValidateBudget(cfg.Script, input, configObj)
+	return e.wrappedValidateBudget(cfg.Script, input, configObj, nil)
 }
 
-// wrappedValidateBudget runs script in a sandbox, calls validateBudget(input), and returns the amount as *big.Int.
-// Missing validateBudget or return 0n → 0. Error or invalid return type → fail-closed (error).
-func (e *JSRuleEvaluator) wrappedValidateBudget(script string, input *RuleInput, config map[string]interface{}) (*big.Int, error) {
+// wrappedValidateBudget runs script in a sandbox, calls validateBudget(input), and returns BudgetResult.
+// Supports both plain BigInt return (backward compat, Unit="") and {amount, unit} object (dynamic budget).
+// Missing validateBudget or return 0n → amount=0. Error or invalid return type → fail-closed (error).
+func (e *JSRuleEvaluator) wrappedValidateBudget(script string, input *RuleInput, config map[string]interface{}, rpcCtx *RPCInjectionContext) (*types.BudgetResult, error) {
 	vm := sobek.New()
 	defer vm.ClearInterrupt()
 
@@ -337,6 +363,9 @@ func (e *JSRuleEvaluator) wrappedValidateBudget(script string, input *RuleInput,
 	}
 	if err := injectHelpers(vm); err != nil {
 		return nil, fmt.Errorf("inject helpers: %w", err)
+	}
+	if err := injectRPCHelpers(vm, rpcCtx); err != nil {
+		return nil, fmt.Errorf("inject rpc helpers: %w", err)
 	}
 	if err := removeGlobals(vm); err != nil {
 		return nil, fmt.Errorf("remove globals: %w", err)
@@ -374,7 +403,7 @@ func (e *JSRuleEvaluator) wrappedValidateBudget(script string, input *RuleInput,
 
 	validateBudgetVal := vm.Get("validateBudget")
 	if validateBudgetVal == nil || isUndefined(validateBudgetVal) {
-		return big.NewInt(0), nil
+		return &types.BudgetResult{Amount: big.NewInt(0)}, nil
 	}
 	fn, ok := sobek.AssertFunction(validateBudgetVal)
 	if !ok {
@@ -395,20 +424,54 @@ func (e *JSRuleEvaluator) wrappedValidateBudget(script string, input *RuleInput,
 		return nil, fmt.Errorf("validateBudget: %w", callErr)
 	}
 	if res == nil || isUndefined(res) {
-		return big.NewInt(0), nil
+		return &types.BudgetResult{Amount: big.NewInt(0)}, nil
 	}
 
-	// Accept bigint (exported as int64 when small) or decimal string
 	exported := res.Export()
+
+	// Check for {amount, unit} object (dynamic budget)
+	if obj, ok := exported.(map[string]interface{}); ok {
+		return parseBudgetResultObject(obj)
+	}
+
+	// Plain BigInt / number / string (backward compatible, no dynamic unit)
+	amount, err := exportedToBigInt(exported)
+	if err != nil {
+		return nil, fmt.Errorf("validateBudget: %w", err)
+	}
+	return &types.BudgetResult{Amount: amount}, nil
+}
+
+// parseBudgetResultObject parses a {amount, unit} JS object into BudgetResult.
+func parseBudgetResultObject(obj map[string]interface{}) (*types.BudgetResult, error) {
+	amountRaw, ok := obj["amount"]
+	if !ok {
+		return nil, fmt.Errorf("validateBudget returned object without 'amount' field")
+	}
+	amount, err := exportedToBigInt(amountRaw)
+	if err != nil {
+		return nil, fmt.Errorf("validateBudget amount: %w", err)
+	}
+
+	unit, _ := obj["unit"].(string)
+	if unit == "" {
+		return nil, fmt.Errorf("validateBudget returned object with empty 'unit' field")
+	}
+
+	return &types.BudgetResult{Amount: amount, Unit: unit}, nil
+}
+
+// exportedToBigInt converts a Sobek-exported value (int64, uint64, string, *big.Int) to *big.Int.
+func exportedToBigInt(exported interface{}) (*big.Int, error) {
 	switch v := exported.(type) {
 	case int64:
 		if v < 0 {
-			return nil, fmt.Errorf("validateBudget returned negative amount: %d", v)
+			return nil, fmt.Errorf("negative amount: %d", v)
 		}
 		return big.NewInt(v), nil
 	case int:
 		if v < 0 {
-			return nil, fmt.Errorf("validateBudget returned negative amount: %d", v)
+			return nil, fmt.Errorf("negative amount: %d", v)
 		}
 		return big.NewInt(int64(v)), nil
 	case uint64:
@@ -416,26 +479,25 @@ func (e *JSRuleEvaluator) wrappedValidateBudget(script string, input *RuleInput,
 	case string:
 		z := new(big.Int)
 		if _, ok := z.SetString(strings.TrimSpace(v), 10); !ok {
-			return nil, fmt.Errorf("validateBudget returned invalid decimal string: %q", v)
+			return nil, fmt.Errorf("invalid decimal string: %q", v)
 		}
 		if z.Sign() < 0 {
-			return nil, fmt.Errorf("validateBudget returned negative amount")
+			return nil, fmt.Errorf("negative amount")
 		}
 		return z, nil
 	default:
-		// Sobek may export BigInt as *big.Int in some versions
 		if bi, ok := exported.(*big.Int); ok {
 			if bi.Sign() < 0 {
-				return nil, fmt.Errorf("validateBudget returned negative amount")
+				return nil, fmt.Errorf("negative amount")
 			}
 			return new(big.Int).Set(bi), nil
 		}
-		return nil, fmt.Errorf("validateBudget return type unsupported: %T (use bigint or decimal string)", exported)
+		return nil, fmt.Errorf("unsupported type %T (use bigint or decimal string)", exported)
 	}
 }
 
 // wrappedValidate runs script in a sandbox, calls validate(input), and returns sanitized result.
-func (e *JSRuleEvaluator) wrappedValidate(script string, input *RuleInput, config map[string]interface{}) JSRuleValidateResult {
+func (e *JSRuleEvaluator) wrappedValidate(script string, input *RuleInput, config map[string]interface{}, rpcCtx *RPCInjectionContext) JSRuleValidateResult {
 	vm := sobek.New()
 	defer vm.ClearInterrupt()
 
@@ -453,6 +515,9 @@ func (e *JSRuleEvaluator) wrappedValidate(script string, input *RuleInput, confi
 		return JSRuleValidateResult{Valid: false, Reason: sanitizeReason("script_error", err.Error(), false)}
 	}
 	if err := injectHelpers(vm); err != nil {
+		return JSRuleValidateResult{Valid: false, Reason: sanitizeReason("script_error", err.Error(), false)}
+	}
+	if err := injectRPCHelpers(vm, rpcCtx); err != nil {
 		return JSRuleValidateResult{Valid: false, Reason: sanitizeReason("script_error", err.Error(), false)}
 	}
 
