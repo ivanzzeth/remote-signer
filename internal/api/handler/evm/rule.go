@@ -761,7 +761,15 @@ func (h *RuleHandler) validateJSRule(rule *types.Rule, testCases []JSRuleTestCas
 			failed = append(failed, fmt.Sprintf("test %q: build input: %v", tc.Name, err))
 			continue
 		}
-		result := h.jsEvaluator.ValidateWithInput(cfg.Script, ruleInput, nil)
+		// Build config map from the rule's raw JSON config so user-defined keys (e.g. max_message_length)
+		// are available to the JS script via the global `config` object.
+		var cfgMap map[string]interface{}
+		if len(rule.Config) > 0 {
+			if err := json.Unmarshal(rule.Config, &cfgMap); err != nil {
+				return fmt.Errorf("failed to unmarshal rule config for JS validation: %w", err)
+			}
+		}
+		result := h.jsEvaluator.ValidateWithInput(cfg.Script, ruleInput, cfgMap)
 
 		// For isolated validation: valid=true means pass, valid=false means fail
 		actualPass := result.Valid

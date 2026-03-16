@@ -60,6 +60,14 @@ type ListRulesFilter struct {
 	Offset        int
 }
 
+// JSRuleTestCase is a test case for evm_js rules submitted via API.
+type JSRuleTestCase struct {
+	Name         string                 `json:"name"`
+	Input        map[string]interface{} `json:"input"`
+	ExpectPass   bool                   `json:"expect_pass"`
+	ExpectReason string                 `json:"expect_reason,omitempty"`
+}
+
 // CreateRuleRequest represents a request to create a new rule.
 type CreateRuleRequest struct {
 	Name          string                 `json:"name"`
@@ -72,6 +80,7 @@ type CreateRuleRequest struct {
 	SignerAddress *string                `json:"signer_address,omitempty"`
 	Config        map[string]interface{} `json:"config"`
 	Enabled       bool                   `json:"enabled"`
+	TestCases     []JSRuleTestCase       `json:"test_cases,omitempty"`
 }
 
 // UpdateRuleRequest represents a request to update an existing rule.

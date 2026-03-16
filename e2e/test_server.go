@@ -501,6 +501,7 @@ func (ts *TestServer) Start() error {
 		ApprovalGuard: approvalGuard,
 		APIKeyRepo:    apiKeyRepo,
 		BudgetRepo:    budgetRepo,
+		JSEvaluator:   jsEval,
 	}
 	if ts.config.PresetsDir != "" {
 		routerConfig.PresetsDir = ts.config.PresetsDir
