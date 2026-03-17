@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -57,10 +58,17 @@ type ListAPIKeysResponse struct {
 
 // APIKeyHandler handles API key management endpoints.
 type APIKeyHandler struct {
-	repo        storage.APIKeyRepository
-	readOnly    bool
-	logger      *slog.Logger
-	auditLogger *audit.AuditLogger
+	repo          storage.APIKeyRepository
+	accessService AccessServiceForKeyDelete // optional: for signer ownership checks + cascade
+	readOnly      bool
+	logger        *slog.Logger
+	auditLogger   *audit.AuditLogger
+}
+
+// AccessServiceForKeyDelete is the subset of SignerAccessService needed by the API key delete handler.
+type AccessServiceForKeyDelete interface {
+	CountOwnedSigners(ctx context.Context, ownerID string) (int64, error)
+	CleanupForDeletedKey(ctx context.Context, apiKeyID string) error
 }
 
 // NewAPIKeyHandler creates a new API key handler.
@@ -81,6 +89,11 @@ func NewAPIKeyHandler(repo storage.APIKeyRepository, logger *slog.Logger, readOn
 // SetAuditLogger sets the audit logger for API key management operations.
 func (h *APIKeyHandler) SetAuditLogger(al *audit.AuditLogger) {
 	h.auditLogger = al
+}
+
+// SetAccessService sets the access service for signer ownership checks during key deletion.
+func (h *APIKeyHandler) SetAccessService(svc AccessServiceForKeyDelete) {
+	h.accessService = svc
 }
 
 // ServeHTTP handles /api/v1/api-keys (GET list, POST create).
@@ -338,6 +351,13 @@ func (h *APIKeyHandler) updateAPIKey(w http.ResponseWriter, r *http.Request, id 
 		return
 	}
 
+	// Self-protection: cannot change own role
+	callerKey := middleware.GetAPIKey(r.Context())
+	if callerKey != nil && callerKey.ID == id && req.Role != nil {
+		h.writeError(w, "cannot change your own role", http.StatusBadRequest)
+		return
+	}
+
 	// Apply partial updates
 	if req.Name != nil {
 		if *req.Name == "" {
@@ -401,6 +421,13 @@ func (h *APIKeyHandler) deleteAPIKey(w http.ResponseWriter, r *http.Request, id 
 		return
 	}
 
+	// Self-protection: cannot delete self
+	callerKey := middleware.GetAPIKey(r.Context())
+	if callerKey != nil && callerKey.ID == id {
+		h.writeError(w, "cannot delete your own API key", http.StatusBadRequest)
+		return
+	}
+
 	key, err := h.repo.Get(r.Context(), id)
 	if err != nil {
 		if types.IsNotFound(err) {
@@ -439,7 +466,21 @@ func (h *APIKeyHandler) deleteAPIKey(w http.ResponseWriter, r *http.Request, id 
 			}
 		}
 		if adminKeyCount <= 1 {
-			h.writeError(w, "cannot delete the last admin API key", http.StatusForbidden)
+			h.writeError(w, "cannot delete the last admin API key", http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Precondition: key must own 0 signers
+	if h.accessService != nil {
+		ownedCount, countErr := h.accessService.CountOwnedSigners(r.Context(), id)
+		if countErr != nil {
+			h.logger.Error("failed to count owned signers", slog.String("id", id), slog.String("error", countErr.Error()))
+			h.writeError(w, "failed to check signer ownership", http.StatusInternalServerError)
+			return
+		}
+		if ownedCount > 0 {
+			h.writeError(w, "delete or transfer signers first", http.StatusBadRequest)
 			return
 		}
 	}
@@ -457,16 +498,26 @@ func (h *APIKeyHandler) deleteAPIKey(w http.ResponseWriter, r *http.Request, id 
 		return
 	}
 
+	// Cascade: rules + applied_to + signer_access
+	if h.accessService != nil {
+		if cleanupErr := h.accessService.CleanupForDeletedKey(r.Context(), id); cleanupErr != nil {
+			h.logger.Error("cascade cleanup failed after API key delete",
+				slog.String("id", id),
+				slog.String("error", cleanupErr.Error()),
+			)
+			// Key is already deleted — log but do not fail the response
+		}
+	}
+
 	h.logger.Info("API key deleted",
 		slog.String("id", id),
 		slog.String("name", key.Name),
 	)
 
 	if h.auditLogger != nil {
-		apiKey := middleware.GetAPIKey(r.Context())
 		actorKeyID := ""
-		if apiKey != nil {
-			actorKeyID = apiKey.ID
+		if callerKey != nil {
+			actorKeyID = callerKey.ID
 		}
 		h.auditLogger.LogAPIKeySynced(r.Context(), "deleted_via_api:"+actorKeyID, key.ID, key.Name)
 	}

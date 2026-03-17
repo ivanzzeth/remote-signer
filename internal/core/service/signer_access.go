@@ -21,6 +21,7 @@ type SignerAccessService struct {
 	ownershipRepo storage.SignerOwnershipRepository
 	accessRepo    storage.SignerAccessRepository
 	apiKeyRepo    storage.APIKeyRepository
+	ruleRepo      storage.RuleRepository
 	hdWalletMgrFn func() (HDWalletParentResolver, error)
 	logger        *slog.Logger
 }
@@ -52,6 +53,11 @@ func NewSignerAccessService(
 		hdWalletMgrFn: hdWalletMgrFn,
 		logger:        logger,
 	}, nil
+}
+
+// SetRuleRepo sets the rule repository for cascade operations (API key delete).
+func (s *SignerAccessService) SetRuleRepo(repo storage.RuleRepository) {
+	s.ruleRepo = repo
 }
 
 // CheckAccess returns true if the caller (identified by API key ID) can use the signer.
@@ -238,4 +244,150 @@ func (s *SignerAccessService) GetOwnedAddresses(ctx context.Context, ownerID str
 // GetAccessibleAddresses returns all signer addresses the API key has been granted access to.
 func (s *SignerAccessService) GetAccessibleAddresses(ctx context.Context, apiKeyID string) ([]string, error) {
 	return s.accessRepo.ListAccessibleAddresses(ctx, apiKeyID)
+}
+
+// TransferOwnership atomically transfers signer ownership to a new owner and clears the access list.
+// Only the current owner can transfer. The old owner loses ALL access.
+func (s *SignerAccessService) TransferOwnership(ctx context.Context, callerKeyID, signerAddress, newOwnerID string) error {
+	if callerKeyID == newOwnerID {
+		return fmt.Errorf("cannot transfer signer to yourself")
+	}
+
+	isOwner, err := s.IsOwner(ctx, callerKeyID, signerAddress)
+	if err != nil {
+		return err
+	}
+	if !isOwner {
+		return fmt.Errorf("not the owner of signer %s", signerAddress)
+	}
+
+	// Verify new owner API key exists
+	if _, err := s.apiKeyRepo.Get(ctx, newOwnerID); err != nil {
+		if types.IsNotFound(err) {
+			return fmt.Errorf("new owner API key %s not found", newOwnerID)
+		}
+		return fmt.Errorf("failed to verify new owner: %w", err)
+	}
+
+	// Atomically: update owner + clear access list
+	txRepo, ok := s.ownershipRepo.(storage.SignerOwnershipTransactional)
+	if !ok {
+		return fmt.Errorf("ownership repository does not support transactions")
+	}
+
+	if err := txRepo.RunInTransaction(ctx, func(txOwnership storage.SignerOwnershipRepository, txAccess storage.SignerAccessRepository) error {
+		if updateErr := txOwnership.UpdateOwner(ctx, signerAddress, newOwnerID); updateErr != nil {
+			return fmt.Errorf("failed to update owner: %w", updateErr)
+		}
+		if deleteErr := txAccess.DeleteBySigner(ctx, signerAddress); deleteErr != nil {
+			return fmt.Errorf("failed to clear access list: %w", deleteErr)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	s.logger.Info("signer ownership transferred",
+		"signer_address", signerAddress,
+		"from", callerKeyID,
+		"to", newOwnerID,
+	)
+	return nil
+}
+
+// DeleteSigner deletes the ownership record and cascades to delete all access records.
+// Only the current owner can delete.
+func (s *SignerAccessService) DeleteSigner(ctx context.Context, callerKeyID, signerAddress string) error {
+	isOwner, err := s.IsOwner(ctx, callerKeyID, signerAddress)
+	if err != nil {
+		return err
+	}
+	if !isOwner {
+		return fmt.Errorf("not the owner of signer %s", signerAddress)
+	}
+
+	// Cascade: delete access records first, then ownership
+	if err := s.accessRepo.DeleteBySigner(ctx, signerAddress); err != nil {
+		return fmt.Errorf("failed to delete access records: %w", err)
+	}
+	if err := s.ownershipRepo.Delete(ctx, signerAddress); err != nil {
+		return fmt.Errorf("failed to delete ownership: %w", err)
+	}
+
+	s.logger.Info("signer deleted",
+		"signer_address", signerAddress,
+		"deleted_by", callerKeyID,
+	)
+	return nil
+}
+
+// CleanupForDeletedKey performs cascade cleanup when an API key is deleted:
+// 1. DELETE rules WHERE owner = key
+// 2. Remove key from all rules' applied_to (delete rule if applied_to becomes empty)
+// 3. DELETE signer_access WHERE api_key_id = key
+func (s *SignerAccessService) CleanupForDeletedKey(ctx context.Context, apiKeyID string) error {
+	if s.ruleRepo == nil {
+		// No rule repo: only clean up access records
+		return s.accessRepo.DeleteByAPIKey(ctx, apiKeyID)
+	}
+
+	// 1. Delete rules owned by this key
+	ownedRules, err := s.ruleRepo.List(ctx, storage.RuleFilter{Owner: &apiKeyID, Limit: 100000})
+	if err != nil {
+		return fmt.Errorf("failed to list owned rules: %w", err)
+	}
+	for _, r := range ownedRules {
+		if delErr := s.ruleRepo.Delete(ctx, r.ID); delErr != nil {
+			return fmt.Errorf("failed to delete rule %s: %w", r.ID, delErr)
+		}
+	}
+
+	// 2. Remove key from applied_to in all rules (delete rule if applied_to becomes empty)
+	allRules, err := s.ruleRepo.List(ctx, storage.RuleFilter{Limit: 100000})
+	if err != nil {
+		return fmt.Errorf("failed to list all rules: %w", err)
+	}
+	for _, r := range allRules {
+		newAppliedTo := removeFromSlice(r.AppliedTo, apiKeyID)
+		if len(newAppliedTo) == len(r.AppliedTo) {
+			continue // key was not in applied_to
+		}
+		if len(newAppliedTo) == 0 {
+			// applied_to became empty, delete the rule
+			if delErr := s.ruleRepo.Delete(ctx, r.ID); delErr != nil {
+				return fmt.Errorf("failed to delete rule %s (empty applied_to): %w", r.ID, delErr)
+			}
+		} else {
+			r.AppliedTo = newAppliedTo
+			if updateErr := s.ruleRepo.Update(ctx, r); updateErr != nil {
+				return fmt.Errorf("failed to update rule %s applied_to: %w", r.ID, updateErr)
+			}
+		}
+	}
+
+	// 3. Delete signer_access records
+	if err := s.accessRepo.DeleteByAPIKey(ctx, apiKeyID); err != nil {
+		return fmt.Errorf("failed to delete access records: %w", err)
+	}
+
+	s.logger.Info("cascade cleanup completed for deleted API key",
+		"api_key_id", apiKeyID,
+	)
+	return nil
+}
+
+// CountOwnedSigners returns how many signers the given API key owns.
+func (s *SignerAccessService) CountOwnedSigners(ctx context.Context, ownerID string) (int64, error) {
+	return s.ownershipRepo.CountByOwner(ctx, ownerID)
+}
+
+// removeFromSlice removes all occurrences of val from slice.
+func removeFromSlice(slice []string, val string) []string {
+	result := make([]string, 0, len(slice))
+	for _, s := range slice {
+		if s != val {
+			result = append(result, s)
+		}
+	}
+	return result
 }

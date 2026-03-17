@@ -21,6 +21,12 @@ type SignerOwnershipRepository interface {
 	CountByOwner(ctx context.Context, ownerID string) (int64, error)
 }
 
+// SignerOwnershipTransactional is implemented by ownership repos that support atomic operations
+// spanning both ownership and access repos within a single DB transaction.
+type SignerOwnershipTransactional interface {
+	RunInTransaction(ctx context.Context, fn func(txOwnership SignerOwnershipRepository, txAccess SignerAccessRepository) error) error
+}
+
 // GormSignerOwnershipRepository implements SignerOwnershipRepository using GORM.
 type GormSignerOwnershipRepository struct {
 	db *gorm.DB
@@ -99,4 +105,13 @@ func (r *GormSignerOwnershipRepository) CountByOwner(ctx context.Context, ownerI
 	var count int64
 	err := r.db.WithContext(ctx).Model(&types.SignerOwnership{}).Where("owner_id = ?", ownerID).Count(&count).Error
 	return count, err
+}
+
+// RunInTransaction runs fn inside a database transaction with both ownership and access repos.
+func (r *GormSignerOwnershipRepository) RunInTransaction(ctx context.Context, fn func(txOwnership SignerOwnershipRepository, txAccess SignerAccessRepository) error) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		txOwnership := &GormSignerOwnershipRepository{db: tx}
+		txAccess := &GormSignerAccessRepository{db: tx}
+		return fn(txOwnership, txAccess)
+	})
 }

@@ -159,6 +159,11 @@ security:
   # Unlock/lock remain allowed. Low risk: API never exposes private keys or passwords.
   signers_api_readonly: false
 
+  # Resource limits: maximum keystores/HD wallets a single API key can own.
+  # 0 = no limit. These defaults prevent unbounded resource consumption.
+  max_keystores_per_key: 5
+  max_hd_wallets_per_key: 3
+
   # Auto-lock: automatically lock signers after this duration since unlock.
   # Default: 0 (disabled). Sends alert to notify channel when auto-locked.
   # auto_lock_timeout: "1h"

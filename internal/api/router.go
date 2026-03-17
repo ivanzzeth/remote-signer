@@ -54,6 +54,9 @@ type RouterConfig struct {
 	// Preset API (admin-only). When PresetsDir is non-empty, GET/POST /api/v1/presets are registered.
 	PresetsDir string   // directory containing preset YAML files (resolved absolute path)
 	PresetsDB  *gorm.DB // optional: for preset apply transaction; required when PresetsDir is set and template service is used
+	// Resource limits
+	MaxKeystoresPerKey int // max keystores per API key (0 = no limit, default 5)
+	MaxHDWalletsPerKey int // max HD wallets per API key (0 = no limit, default 3)
 }
 
 // Router handles HTTP routing
@@ -198,6 +201,9 @@ func (r *Router) setupRoutes() error {
 	if r.config.AuditLogger != nil {
 		signerHandler.SetAuditLogger(r.config.AuditLogger)
 	}
+	if r.config.MaxKeystoresPerKey > 0 {
+		signerHandler.SetMaxKeystoresPerKey(r.config.MaxKeystoresPerKey)
+	}
 
 	hdWalletHandler, err := evmhandler.NewHDWalletHandler(r.signerManager, accessService, r.logger, r.config.SignersAPIReadonly)
 	if err != nil {
@@ -205,6 +211,9 @@ func (r *Router) setupRoutes() error {
 	}
 	if r.config.AuditLogger != nil {
 		hdWalletHandler.SetAuditLogger(r.config.AuditLogger)
+	}
+	if r.config.MaxHDWalletsPerKey > 0 {
+		hdWalletHandler.SetMaxHDWalletsPerKey(r.config.MaxHDWalletsPerKey)
 	}
 
 	// Audit handler
@@ -254,6 +263,11 @@ func (r *Router) setupRoutes() error {
 	r.mux.Handle("/api/v1/audit", r.withAuthAndPerm(middleware.PermReadAudit, auditHandler))
 	r.mux.Handle("/api/v1/audit/requests/", r.withAuthAndPerm(middleware.PermReadAudit, http.HandlerFunc(auditHandler.ServeRequestHTTP)))
 
+	// Set rule repo on access service for cascade cleanup
+	if accessService != nil {
+		accessService.SetRuleRepo(r.ruleRepo)
+	}
+
 	// API key management routes (admin only)
 	if r.config.APIKeyRepo != nil {
 		apiKeyHandler, err := handler.NewAPIKeyHandler(r.config.APIKeyRepo, r.logger, r.config.APIKeysAPIReadonly)
@@ -262,6 +276,9 @@ func (r *Router) setupRoutes() error {
 		}
 		if r.config.AuditLogger != nil {
 			apiKeyHandler.SetAuditLogger(r.config.AuditLogger)
+		}
+		if accessService != nil {
+			apiKeyHandler.SetAccessService(accessService)
 		}
 		r.mux.Handle("/api/v1/api-keys", r.withAuthAndPerm(middleware.PermManageAPIKeys, apiKeyHandler))
 		r.mux.Handle("/api/v1/api-keys/", r.withAuthAndPerm(middleware.PermManageAPIKeys, http.HandlerFunc(apiKeyHandler.ServeKeyHTTP)))

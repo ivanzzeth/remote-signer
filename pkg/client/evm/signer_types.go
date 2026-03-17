@@ -25,6 +25,11 @@ type GrantAccessRequest struct {
 	APIKeyID string `json:"api_key_id"`
 }
 
+// TransferOwnershipRequest represents a request to transfer signer ownership.
+type TransferOwnershipRequest struct {
+	NewOwnerID string `json:"new_owner_id"`
+}
+
 // SignerInfo represents a signer in API responses (used by HD wallets).
 type SignerInfo struct {
 	Address string `json:"address"`

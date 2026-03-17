@@ -267,6 +267,14 @@ type SecurityConfig struct {
 
 	// SignTimeout: context timeout for sign operations. Default: 30s.
 	SignTimeout time.Duration `yaml:"sign_timeout"`
+
+	// MaxKeystoresPerKey limits how many keystores a single API key can own.
+	// 0 = no limit. Default: 5.
+	MaxKeystoresPerKey int `yaml:"max_keystores_per_key"`
+
+	// MaxHDWalletsPerKey limits how many HD wallets a single API key can own.
+	// 0 = no limit. Default: 3.
+	MaxHDWalletsPerKey int `yaml:"max_hd_wallets_per_key"`
 }
 
 // IsRulesAPIReadonly returns whether rule/template mutations via API are disabled.
@@ -522,6 +530,14 @@ func setDefaults(cfg *Config) {
 	// Rule limits defaults
 	if cfg.Security.MaxRulesPerAPIKey <= 0 {
 		cfg.Security.MaxRulesPerAPIKey = 50
+	}
+
+	// Resource limit defaults
+	if cfg.Security.MaxKeystoresPerKey <= 0 {
+		cfg.Security.MaxKeystoresPerKey = 5
+	}
+	if cfg.Security.MaxHDWalletsPerKey <= 0 {
+		cfg.Security.MaxHDWalletsPerKey = 3
 	}
 
 	// ApprovalGuard defaults

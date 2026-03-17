@@ -1327,7 +1327,7 @@ func TestAPIKeyHandler_Delete_LastAdminKey(t *testing.T) {
 	require.NoError(t, err)
 
 	rr := doAPIKeyItemRequest(t, h, http.MethodDelete, "/api/v1/api-keys/only-admin", nil, apikeyAdminKey())
-	assert.Equal(t, http.StatusForbidden, rr.Code)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
 
 	var errResp map[string]string
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&errResp))

@@ -20,11 +20,17 @@ import (
 
 // SignerHandler handles signer management endpoints
 type SignerHandler struct {
-	signerManager evm.SignerManager
-	accessService *service.SignerAccessService
-	readOnly      bool // when true, block signer creation via API
-	logger        *slog.Logger
-	auditLogger   *audit.AuditLogger // optional: audit logging
+	signerManager      evm.SignerManager
+	accessService      *service.SignerAccessService
+	readOnly           bool // when true, block signer creation via API
+	maxKeystoresPerKey int  // resource limit: max keystores per API key (0 = no limit)
+	logger             *slog.Logger
+	auditLogger        *audit.AuditLogger // optional: audit logging
+}
+
+// TransferOwnershipRequest represents the request to transfer signer ownership.
+type TransferOwnershipRequest struct {
+	NewOwnerID string `json:"new_owner_id"`
 }
 
 // NewSignerHandler creates a new signer handler
@@ -49,6 +55,11 @@ func NewSignerHandler(signerManager evm.SignerManager, accessService *service.Si
 // SetAuditLogger sets the audit logger for signer management operations.
 func (h *SignerHandler) SetAuditLogger(al *audit.AuditLogger) {
 	h.auditLogger = al
+}
+
+// SetMaxKeystoresPerKey sets the resource limit for maximum keystores per API key.
+func (h *SignerHandler) SetMaxKeystoresPerKey(max int) {
+	h.maxKeystoresPerKey = max
 }
 
 // SignerResponse represents a signer in API responses
@@ -281,6 +292,20 @@ func (h *SignerHandler) createSigner(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Enforce resource limit: max keystores per key
+	if h.maxKeystoresPerKey > 0 {
+		count, countErr := h.accessService.CountOwnedSigners(r.Context(), apiKey.ID)
+		if countErr != nil {
+			h.logger.Error("failed to count owned signers", slog.String("error", countErr.Error()))
+			h.writeError(w, "failed to check resource limits", http.StatusInternalServerError)
+			return
+		}
+		if int(count) >= h.maxKeystoresPerKey {
+			h.writeError(w, fmt.Sprintf("resource limit exceeded: maximum %d keystores per API key", h.maxKeystoresPerKey), http.StatusForbidden)
+			return
+		}
+	}
+
 	var req CreateSignerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.writeError(w, "invalid request body", http.StatusBadRequest)
@@ -357,16 +382,29 @@ func (h *SignerHandler) HandleSignerAction(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Parse path: /api/v1/evm/signers/{address}/{action}[/{extra}]
+	// Parse path: /api/v1/evm/signers/{address}[/{action}[/{extra}]]
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1/evm/signers/")
 	parts := strings.SplitN(path, "/", 3)
-	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
-		h.writeError(w, "invalid path: expected /api/v1/evm/signers/{address}/{action}", http.StatusBadRequest)
+	if len(parts) < 1 || parts[0] == "" {
+		h.writeError(w, "invalid path: expected /api/v1/evm/signers/{address}", http.StatusBadRequest)
 		return
 	}
 
 	address := parts[0]
-	action := parts[1]
+	action := ""
+	if len(parts) >= 2 {
+		action = parts[1]
+	}
+
+	// Handle DELETE /api/v1/evm/signers/{address} (no action segment)
+	if action == "" {
+		if r.Method == http.MethodDelete {
+			h.handleDeleteSigner(w, r, address)
+			return
+		}
+		h.writeError(w, "invalid path: expected /api/v1/evm/signers/{address}/{action}", http.StatusBadRequest)
+		return
+	}
 
 	switch action {
 	case "unlock":
@@ -387,6 +425,12 @@ func (h *SignerHandler) HandleSignerAction(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		h.handleApproveSigner(w, r, address)
+	case "transfer":
+		if r.Method != http.MethodPost {
+			h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		h.handleTransferOwnership(w, r, address)
 	case "access":
 		extra := ""
 		if len(parts) == 3 {
@@ -556,6 +600,77 @@ func (h *SignerHandler) handleApproveSigner(w http.ResponseWriter, r *http.Reque
 	)
 
 	h.writeJSON(w, map[string]string{"status": "approved", "signer_address": address}, http.StatusOK)
+}
+
+// handleTransferOwnership handles POST /api/v1/evm/signers/{address}/transfer
+func (h *SignerHandler) handleTransferOwnership(w http.ResponseWriter, r *http.Request, address string) {
+	apiKey := middleware.GetAPIKey(r.Context())
+
+	var req TransferOwnershipRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.NewOwnerID == "" {
+		h.writeError(w, "new_owner_id is required", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.accessService.TransferOwnership(r.Context(), apiKey.ID, address, req.NewOwnerID); err != nil {
+		if strings.Contains(err.Error(), "not the owner") {
+			h.writeError(w, err.Error(), http.StatusForbidden)
+			return
+		}
+		if strings.Contains(err.Error(), "not found") {
+			h.writeError(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if strings.Contains(err.Error(), "cannot transfer signer to yourself") {
+			h.writeError(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		h.logger.Error("failed to transfer ownership",
+			slog.String("address", address),
+			slog.String("error", err.Error()),
+		)
+		h.writeError(w, "failed to transfer ownership", http.StatusInternalServerError)
+		return
+	}
+
+	if h.auditLogger != nil {
+		h.auditLogger.LogSignerCreated(r.Context(), apiKey.ID, r.RemoteAddr, address, "transfer:"+req.NewOwnerID)
+	}
+
+	h.writeJSON(w, map[string]string{
+		"status":         "transferred",
+		"signer_address": address,
+		"new_owner_id":   req.NewOwnerID,
+	}, http.StatusOK)
+}
+
+// handleDeleteSigner handles DELETE /api/v1/evm/signers/{address}
+func (h *SignerHandler) handleDeleteSigner(w http.ResponseWriter, r *http.Request, address string) {
+	apiKey := middleware.GetAPIKey(r.Context())
+
+	if err := h.accessService.DeleteSigner(r.Context(), apiKey.ID, address); err != nil {
+		if strings.Contains(err.Error(), "not the owner") {
+			h.writeError(w, err.Error(), http.StatusForbidden)
+			return
+		}
+		h.logger.Error("failed to delete signer",
+			slog.String("address", address),
+			slog.String("error", err.Error()),
+		)
+		h.writeError(w, "failed to delete signer", http.StatusInternalServerError)
+		return
+	}
+
+	if h.auditLogger != nil {
+		h.auditLogger.LogSignerCreated(r.Context(), apiKey.ID, r.RemoteAddr, address, "deleted")
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // handleAccess routes access sub-actions

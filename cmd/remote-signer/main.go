@@ -722,6 +722,8 @@ func run() error {
 		SignersAPIReadonly:            cfg.Security.IsSignersAPIReadonly(),
 		APIKeysAPIReadonly:            cfg.Security.IsAPIKeysAPIReadonly(),
 		MaxRulesPerAPIKey:             cfg.Security.MaxRulesPerAPIKey,
+		MaxKeystoresPerKey:            cfg.Security.MaxKeystoresPerKey,
+		MaxHDWalletsPerKey:            cfg.Security.MaxHDWalletsPerKey,
 		RequireApprovalForAgentRules:  cfg.Security.RequireApprovalForAgentRules,
 		AlertService:       securityAlertService,
 		AuditLogger:        auditLogger,

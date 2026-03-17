@@ -10,7 +10,7 @@ import (
 
 var signerCmd = &cobra.Command{
 	Use:   "signer",
-	Short: "Manage EVM signers (list, create, unlock, lock, approve, access)",
+	Short: "Manage EVM signers (list, create, unlock, lock, approve, transfer, delete, access)",
 }
 
 // ── signer list ──────────────────────────────────────────────────────────────
@@ -136,6 +136,50 @@ var signerApproveCmd = &cobra.Command{
 
 // ── signer access ────────────────────────────────────────────────────────────
 
+// ── signer transfer ───────────────────────────────────────────────────────
+
+var signerTransferTo string
+
+var signerTransferCmd = &cobra.Command{
+	Use:   "transfer <address>",
+	Short: "Transfer signer ownership to another API key (owner only)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c, err := newClientFromFlags(cmd)
+		if err != nil {
+			return err
+		}
+		if err := c.EVM.Signers.TransferOwnership(cmd.Context(), args[0], &evm.TransferOwnershipRequest{
+			NewOwnerID: signerTransferTo,
+		}); err != nil {
+			return fmt.Errorf("transfer signer: %w", err)
+		}
+		fmt.Printf("Signer %s transferred to %s\n", args[0], signerTransferTo)
+		return nil
+	},
+}
+
+// ── signer delete ─────────────────────────────────────────────────────────
+
+var signerDeleteCmd = &cobra.Command{
+	Use:   "delete <address>",
+	Short: "Delete a signer (owner only)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c, err := newClientFromFlags(cmd)
+		if err != nil {
+			return err
+		}
+		if err := c.EVM.Signers.DeleteSigner(cmd.Context(), args[0]); err != nil {
+			return fmt.Errorf("delete signer: %w", err)
+		}
+		fmt.Printf("Signer %s deleted\n", args[0])
+		return nil
+	},
+}
+
+// ── signer access ────────────────────────────────────────────────────────
+
 var signerAccessCmd = &cobra.Command{
 	Use:   "access",
 	Short: "Manage signer access grants",
@@ -232,6 +276,11 @@ func init() {
 		panic(err)
 	}
 
+	signerTransferCmd.Flags().StringVar(&signerTransferTo, "to", "", "API key ID to transfer ownership to")
+	if err := signerTransferCmd.MarkFlagRequired("to"); err != nil {
+		panic(err)
+	}
+
 	signerAccessCmd.AddCommand(signerAccessGrantCmd)
 	signerAccessCmd.AddCommand(signerAccessRevokeCmd)
 	signerAccessCmd.AddCommand(signerAccessListCmd)
@@ -241,5 +290,7 @@ func init() {
 	signerCmd.AddCommand(signerUnlockCmd)
 	signerCmd.AddCommand(signerLockCmd)
 	signerCmd.AddCommand(signerApproveCmd)
+	signerCmd.AddCommand(signerTransferCmd)
+	signerCmd.AddCommand(signerDeleteCmd)
 	signerCmd.AddCommand(signerAccessCmd)
 }

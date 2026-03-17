@@ -18,16 +18,22 @@ import (
 
 // HDWalletHandler handles HD wallet management endpoints.
 type HDWalletHandler struct {
-	signerManager evmchain.SignerManager
-	accessService *service.SignerAccessService
-	readOnly      bool // when true, block HD wallet creation/derive via API
-	logger        *slog.Logger
-	auditLogger   *audit.AuditLogger // optional: audit logging
+	signerManager      evmchain.SignerManager
+	accessService      *service.SignerAccessService
+	readOnly           bool // when true, block HD wallet creation/derive via API
+	maxHDWalletsPerKey int  // resource limit: max HD wallets per API key (0 = no limit)
+	logger             *slog.Logger
+	auditLogger        *audit.AuditLogger // optional: audit logging
 }
 
 // SetAuditLogger sets the audit logger for HD wallet operations.
 func (h *HDWalletHandler) SetAuditLogger(al *audit.AuditLogger) {
 	h.auditLogger = al
+}
+
+// SetMaxHDWalletsPerKey sets the resource limit for maximum HD wallets per API key.
+func (h *HDWalletHandler) SetMaxHDWalletsPerKey(max int) {
+	h.maxHDWalletsPerKey = max
 }
 
 // NewHDWalletHandler creates a new HD wallet handler.
@@ -171,6 +177,23 @@ func (h *HDWalletHandler) createOrImport(w http.ResponseWriter, r *http.Request)
 	if h.readOnly {
 		h.writeError(w, "HD wallet creation via API is disabled (security.signers_api_readonly)", http.StatusForbidden)
 		return
+	}
+
+	// Enforce resource limit: max HD wallets per key
+	if h.maxHDWalletsPerKey > 0 {
+		apiKey := middleware.GetAPIKey(r.Context())
+		if apiKey != nil {
+			count, countErr := h.accessService.CountOwnedSigners(r.Context(), apiKey.ID)
+			if countErr != nil {
+				h.logger.Error("failed to count owned signers", slog.String("error", countErr.Error()))
+				h.writeError(w, "failed to check resource limits", http.StatusInternalServerError)
+				return
+			}
+			if int(count) >= h.maxHDWalletsPerKey {
+				h.writeError(w, fmt.Sprintf("resource limit exceeded: maximum %d HD wallets per API key", h.maxHDWalletsPerKey), http.StatusForbidden)
+				return
+			}
+		}
 	}
 
 	mgr, err := h.signerManager.HDWalletManager()

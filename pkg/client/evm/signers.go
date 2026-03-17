@@ -104,3 +104,16 @@ func (s *SignerService) ListAccess(ctx context.Context, address string) ([]Signe
 	}
 	return resp, nil
 }
+
+// TransferOwnership transfers signer ownership to a new API key (owner only).
+// Clears the entire access list; old owner loses ALL access.
+func (s *SignerService) TransferOwnership(ctx context.Context, address string, req *TransferOwnershipRequest) error {
+	path := fmt.Sprintf("/api/v1/evm/signers/%s/transfer", address)
+	return s.transport.Request(ctx, http.MethodPost, path, req, nil, http.StatusOK)
+}
+
+// DeleteSigner deletes a signer's ownership and access records (owner only).
+func (s *SignerService) DeleteSigner(ctx context.Context, address string) error {
+	path := fmt.Sprintf("/api/v1/evm/signers/%s", address)
+	return s.transport.Request(ctx, http.MethodDelete, path, nil, nil, http.StatusNoContent)
+}
