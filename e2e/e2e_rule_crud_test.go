@@ -14,6 +14,7 @@ import (
 )
 
 func TestRule_AdminCanCreateRule(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 	rule := &evm.CreateRuleRequest{
 		Name:    "Test Rule - Address Whitelist",
@@ -38,6 +39,7 @@ func TestRule_AdminCanCreateRule(t *testing.T) {
 }
 
 func TestRule_AdminCanListRules(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 	resp, err := adminClient.EVM.Rules.List(ctx, nil)
 	require.NoError(t, err)
@@ -46,6 +48,7 @@ func TestRule_AdminCanListRules(t *testing.T) {
 }
 
 func TestRule_AdminCanGetRule(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 	createReq := &evm.CreateRuleRequest{
 		Name:    "Test Rule - Get",
@@ -64,6 +67,7 @@ func TestRule_AdminCanGetRule(t *testing.T) {
 }
 
 func TestRule_AdminCanUpdateRule(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 	createReq := &evm.CreateRuleRequest{
 		Name:    "Test Rule - Update Original",
@@ -85,6 +89,7 @@ func TestRule_AdminCanUpdateRule(t *testing.T) {
 }
 
 func TestRule_AdminCanDeleteRule(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 	createReq := &evm.CreateRuleRequest{
 		Name:    "Test Rule - Delete",
@@ -101,6 +106,7 @@ func TestRule_AdminCanDeleteRule(t *testing.T) {
 }
 
 func TestRule_AdminCanDisableRule(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 	createReq := &evm.CreateRuleRequest{
 		Name:    "Test Rule - Disable",
@@ -122,6 +128,7 @@ func TestRule_AdminCanDisableRule(t *testing.T) {
 }
 
 func TestRule_NonAdminCannotCreateRule(t *testing.T) {
+	snapshotRules(t)
 	if nonAdminClient == nil {
 		t.Skip("Skipping: non-admin client not configured")
 	}
@@ -141,6 +148,7 @@ func TestRule_NonAdminCannotCreateRule(t *testing.T) {
 }
 
 func TestRule_NonAdminCannotUpdateRule(t *testing.T) {
+	snapshotRules(t)
 	if nonAdminClient == nil {
 		t.Skip("Skipping: non-admin client not configured")
 	}
@@ -162,6 +170,7 @@ func TestRule_NonAdminCannotUpdateRule(t *testing.T) {
 }
 
 func TestRule_NonAdminCannotDeleteRule(t *testing.T) {
+	snapshotRules(t)
 	if nonAdminClient == nil {
 		t.Skip("Skipping: non-admin client not configured")
 	}
@@ -183,6 +192,7 @@ func TestRule_NonAdminCannotDeleteRule(t *testing.T) {
 }
 
 func TestRule_NonAdminCannotListRules(t *testing.T) {
+	snapshotRules(t)
 	if nonAdminClient == nil {
 		t.Skip("Skipping: non-admin client not configured")
 	}

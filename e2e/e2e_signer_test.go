@@ -13,6 +13,7 @@ import (
 )
 
 func TestSigner_ListSigners(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	// List signers (should include the test signer)
@@ -37,6 +38,7 @@ func TestSigner_ListSigners(t *testing.T) {
 }
 
 func TestSigner_ListSignersWithTypeFilter(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	// Filter by private_key type
@@ -63,6 +65,7 @@ func TestSigner_ListSignersWithTypeFilter(t *testing.T) {
 }
 
 func TestSigner_ListSignersPagination(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	// Test pagination with small limit
@@ -94,6 +97,7 @@ func TestSigner_ListSignersPagination(t *testing.T) {
 }
 
 func TestSigner_CreateKeystoreSigner(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("Skipping: keystore creation test not supported with external server")
 	}
@@ -134,6 +138,7 @@ func TestSigner_CreateKeystoreSigner(t *testing.T) {
 }
 
 func TestSigner_CreateSignerValidationErrors(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	tests := []struct {
@@ -185,6 +190,7 @@ func TestSigner_CreateSignerValidationErrors(t *testing.T) {
 }
 
 func TestSigner_NonAdminCanListSigners(t *testing.T) {
+	snapshotRules(t)
 	if nonAdminClient == nil {
 		t.Skip("Skipping: non-admin client not configured")
 	}
@@ -201,6 +207,7 @@ func TestSigner_NonAdminCanListSigners(t *testing.T) {
 }
 
 func TestSigner_NonAdminCannotCreateSigner(t *testing.T) {
+	snapshotRules(t)
 	if nonAdminClient == nil {
 		t.Skip("Skipping: non-admin client not configured")
 	}

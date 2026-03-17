@@ -238,6 +238,7 @@ func sendERC20Transfer(t *testing.T, signer *evm.RemoteSigner, tokenAddr string,
 // TestAgentBudget_SignCount_ExhaustsLimit applies the agent preset with max_sign_count=3,
 // sends 3 personal_sign requests (all should pass), then sends a 4th (should fail).
 func TestAgentBudget_SignCount_ExhaustsLimit(t *testing.T) {
+	snapshotRules(t)
 	ruleIDs := applyAgentPresetForBudget(t, map[string]string{
 		"max_sign_count": "3",
 		// Set high limits for other budget types so they don't interfere
@@ -276,6 +277,7 @@ func TestAgentBudget_SignCount_ExhaustsLimit(t *testing.T) {
 // TestAgentBudget_TxCount_ExhaustsLimit applies the agent preset with max_tx_count=3,
 // sends 3 contract call transactions (all should pass), then sends a 4th (should fail).
 func TestAgentBudget_TxCount_ExhaustsLimit(t *testing.T) {
+	snapshotRules(t)
 	ruleIDs := applyAgentPresetForBudget(t, map[string]string{
 		"max_tx_count":    "3",
 		"max_sign_count":  "10000",
@@ -322,6 +324,7 @@ func TestAgentBudget_TxCount_ExhaustsLimit(t *testing.T) {
 //   4. Send 0.15 ETH -> should pass (cumulative 0.35 ETH, within total)
 //   5. Send 0.2 ETH -> should fail (cumulative 0.55 ETH > total 0.5 ETH)
 func TestAgentBudget_Native_TotalAndPerTx(t *testing.T) {
+	snapshotRules(t)
 	ruleIDs := applyAgentPresetForBudget(t, map[string]string{
 		"max_native_total":  "0.5",
 		"max_native_per_tx": "0.2",
@@ -370,6 +373,7 @@ func TestAgentBudget_Native_TotalAndPerTx(t *testing.T) {
 // NOT in known_units. The system should auto-create a budget unit using unknown_default
 // limits, then enforce those limits.
 func TestAgentBudget_DynamicUnit_UnknownToken(t *testing.T) {
+	snapshotRules(t)
 	ruleIDs := applyAgentPresetForBudget(t, map[string]string{
 		"max_unknown_token_total":    "100",
 		"max_unknown_token_per_tx":   "50",
@@ -431,6 +435,7 @@ func TestAgentBudget_DynamicUnit_UnknownToken(t *testing.T) {
 // not feasible in E2E. The unit tests (budget_test.go) cover period reset logic.
 // Here we verify that the budget_period field is set on rules created via preset.
 func TestAgentBudget_PeriodReset_FieldPresent(t *testing.T) {
+	snapshotRules(t)
 	ruleIDs := applyAgentPresetForBudget(t, map[string]string{
 		"budget_period": "1h",
 	})
@@ -459,6 +464,7 @@ func TestAgentBudget_PeriodReset_FieldPresent(t *testing.T) {
 // If RPC is not available, the first transfer will fail on decimals query (fail-closed)
 // which is also valid behavior. The test adapts accordingly.
 func TestAgentBudget_MaxDynamicUnits_Cap(t *testing.T) {
+	snapshotRules(t)
 	ruleIDs := applyAgentPresetForBudget(t, map[string]string{
 		"max_unknown_token_total":    "1000000",
 		"max_unknown_token_per_tx":   "1000000",
@@ -519,6 +525,7 @@ func TestAgentBudget_MaxDynamicUnits_Cap(t *testing.T) {
 // This is tested by creating a template with a simple count_only budget and verifying
 // that normalized addresses map to the same unit.
 func TestAgentBudget_UnitNormalization(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	// Create a simple template with count_only budget for normalization testing.
@@ -600,6 +607,7 @@ function validateBudget(input) {
 // and a contract call (non-transfer) passes through without consuming native budget,
 // but still increments tx_count.
 func TestAgentBudget_ZeroValue_Passthrough(t *testing.T) {
+	snapshotRules(t)
 	ruleIDs := applyAgentPresetForBudget(t, map[string]string{
 		"max_native_total":  "0.001",  // Very low native budget
 		"max_native_per_tx": "0.0005", // Very low per-tx
@@ -641,6 +649,7 @@ func TestAgentBudget_ZeroValue_Passthrough(t *testing.T) {
 // max_sign_count=3 (overriding the default 500), then verifies that only 3
 // personal_sign requests are allowed — proving the override worked.
 func TestAgentBudget_VariableOverride_ViaPreset(t *testing.T) {
+	snapshotRules(t)
 	ruleIDs := applyAgentPresetForBudget(t, map[string]string{
 		"max_sign_count":    "3",
 		"max_tx_count":      "10000",
@@ -679,6 +688,7 @@ func TestAgentBudget_VariableOverride_ViaPreset(t *testing.T) {
 // TestAgentBudget_ListBudgets_API verifies that the GET /evm/rules/:id/budgets API
 // returns correct budget records after rule creation and sign requests.
 func TestAgentBudget_ListBudgets_API(t *testing.T) {
+	snapshotRules(t)
 	ruleIDs := applyAgentPresetForBudget(t, map[string]string{
 		"max_sign_count":    "10",
 		"max_tx_count":      "10",

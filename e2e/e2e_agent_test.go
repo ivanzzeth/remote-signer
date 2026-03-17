@@ -29,6 +29,7 @@ import (
 // TestAgent_PresetApply deploys the agent preset via API and verifies that
 // 3 sub-rules are created (agent-tx, agent-sign, agent-safety) from the template bundle.
 func TestAgent_PresetApply(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 	skipIfPresetAPIDisabled(t)
 
@@ -114,6 +115,7 @@ func createAgentClient(t *testing.T) *client.Client {
 // TestAgent_APIKey_ReadRules verifies that an agent API key can read rules (GET)
 // but cannot create rules (POST returns 403).
 func TestAgent_APIKey_ReadRules(t *testing.T) {
+	snapshotRules(t)
 	agentClient := createAgentClient(t)
 	ctx := context.Background()
 
@@ -141,6 +143,7 @@ func TestAgent_APIKey_ReadRules(t *testing.T) {
 
 // TestAgent_APIKey_ReadBudgets verifies that an agent API key can read budget info.
 func TestAgent_APIKey_ReadBudgets(t *testing.T) {
+	snapshotRules(t)
 	agentClient := createAgentClient(t)
 	ctx := context.Background()
 
@@ -164,6 +167,7 @@ func TestAgent_APIKey_ReadBudgets(t *testing.T) {
 // TestAgent_APIKey_ConfigRedacted verifies that when an agent reads a rule,
 // the Config field is null/redacted (script not exposed to agent).
 func TestAgent_APIKey_ConfigRedacted(t *testing.T) {
+	snapshotRules(t)
 	agentClient := createAgentClient(t)
 	ctx := context.Background()
 
@@ -203,6 +207,7 @@ func TestAgent_APIKey_ConfigRedacted(t *testing.T) {
 
 // TestAgent_APIKey_CannotDeleteRules verifies that agent keys cannot delete rules.
 func TestAgent_APIKey_CannotDeleteRules(t *testing.T) {
+	snapshotRules(t)
 	agentClient := createAgentClient(t)
 	ctx := context.Background()
 
@@ -225,6 +230,7 @@ func TestAgent_APIKey_CannotDeleteRules(t *testing.T) {
 
 // TestAgent_APIKey_CannotApplyPresets verifies that agent keys cannot apply presets.
 func TestAgent_APIKey_CannotApplyPresets(t *testing.T) {
+	snapshotRules(t)
 	agentClient := createAgentClient(t)
 	ctx := context.Background()
 	skipIfPresetAPIDisabled(t)
@@ -490,6 +496,7 @@ func createAgentSafetyRule(t *testing.T) *evm.Rule {
 // TestAgent_SignTransaction_ERC20Transfer creates the agent-tx whitelist rule and signs
 // an ERC20 transfer(to, amount) transaction. Should PASS.
 func TestAgent_SignTransaction_ERC20Transfer(t *testing.T) {
+	snapshotRules(t)
 	createAgentTxRule(t)
 	createAgentSafetyRule(t) // safety should not block ERC20 transfer
 
@@ -523,6 +530,7 @@ func TestAgent_SignTransaction_ERC20Transfer(t *testing.T) {
 // TestAgent_SignTransaction_NativeTransfer creates the agent-tx whitelist rule and signs
 // a native value transfer (no calldata). Should PASS.
 func TestAgent_SignTransaction_NativeTransfer(t *testing.T) {
+	snapshotRules(t)
 	createAgentTxRule(t)
 	createAgentSafetyRule(t) // safety should not block native transfers
 
@@ -551,6 +559,7 @@ func TestAgent_SignTransaction_NativeTransfer(t *testing.T) {
 // TestAgent_PersonalSign_OK creates the agent-sign whitelist rule and signs
 // a personal message within the 1024-char length limit. Should PASS.
 func TestAgent_PersonalSign_OK(t *testing.T) {
+	snapshotRules(t)
 	createAgentSignRule(t)
 
 	address := common.HexToAddress(signerAddress)
@@ -566,6 +575,7 @@ func TestAgent_PersonalSign_OK(t *testing.T) {
 // signer2 and signs a personal message exceeding max_message_length (1024).
 // Uses signer2 to avoid interference from other whitelist rules in config.e2e.yaml.
 func TestAgent_PersonalSign_TooLong(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 	chainType := "evm"
 
@@ -633,6 +643,7 @@ func TestAgent_PersonalSign_TooLong(t *testing.T) {
 // and the agent-tx whitelist rule, then signs a transaction with transferOwnership(address)
 // selector. Should be BLOCKED by agent-safety.
 func TestAgent_Safety_BlocksTransferOwnership(t *testing.T) {
+	snapshotRules(t)
 	createAgentTxRule(t)
 	createAgentSafetyRule(t)
 
@@ -671,6 +682,7 @@ func TestAgent_Safety_BlocksTransferOwnership(t *testing.T) {
 // and the agent-tx whitelist rule, then signs a transaction with setApprovalForAll(address,true).
 // Should be BLOCKED by agent-safety.
 func TestAgent_Safety_BlocksSetApprovalForAll(t *testing.T) {
+	snapshotRules(t)
 	createAgentTxRule(t)
 	createAgentSafetyRule(t)
 
@@ -709,6 +721,7 @@ func TestAgent_Safety_BlocksSetApprovalForAll(t *testing.T) {
 // and the agent-tx whitelist rule, then signs a normal contract call (name() selector 0x06fdde03).
 // Should PASS because name() is not in the blocklist.
 func TestAgent_Safety_AllowsNormalCall(t *testing.T) {
+	snapshotRules(t)
 	// Previous blocklist tests may trigger approval guard (consecutive rejections).
 	// Resume it before testing the positive case.
 	_ = adminClient.EVM.Guard.Resume(context.Background())

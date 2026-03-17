@@ -28,6 +28,7 @@ func skipIfPresetAPIDisabled(t *testing.T) {
 }
 
 func TestPreset_List(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 	skipIfPresetAPIDisabled(t)
 
@@ -48,6 +49,7 @@ func TestPreset_List(t *testing.T) {
 }
 
 func TestPreset_Vars(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 	skipIfPresetAPIDisabled(t)
 
@@ -58,6 +60,7 @@ func TestPreset_Vars(t *testing.T) {
 }
 
 func TestPreset_Vars_NotFound(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 	skipIfPresetAPIDisabled(t)
 
@@ -69,6 +72,7 @@ func TestPreset_Vars_NotFound(t *testing.T) {
 }
 
 func TestPreset_Vars_PathTraversal(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 	skipIfPresetAPIDisabled(t)
 
@@ -82,6 +86,7 @@ func TestPreset_Vars_PathTraversal(t *testing.T) {
 }
 
 func TestPreset_Apply_Success(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 	skipIfPresetAPIDisabled(t)
 
@@ -112,12 +117,12 @@ func TestPreset_Apply_Success(t *testing.T) {
 	require.Len(t, applyResp.Results, 1)
 	assert.NotEmpty(t, applyResp.Results[0].Rule)
 
-	// Cleanup: revoke the created instance (rule ID is inside Rule JSON)
-	// We could parse applyResp.Results[0].Rule to get rule ID; for e2e we just leave the instance or delete by listing rules from template.
-	// Optional: list rules, find inst_* from this template, revoke. Skip for brevity.
+	// Cleanup: revoke the created instance rules
+	cleanupApplyResults(t, applyResp.Results)
 }
 
 func TestPreset_Matrix_Apply_MultiChain(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 	skipIfPresetAPIDisabled(t)
 
@@ -147,6 +152,9 @@ func TestPreset_Matrix_Apply_MultiChain(t *testing.T) {
 	require.NotNil(t, applyResp)
 	require.Len(t, applyResp.Results, 3, "matrix preset should produce 3 rules (one per chain)")
 
+	// Cleanup: revoke the created instance rules
+	cleanupApplyResults(t, applyResp.Results)
+
 	// Verify each rule has correct chain_id scope
 	chainIDs := make(map[string]bool)
 	for _, result := range applyResp.Results {
@@ -164,6 +172,7 @@ func TestPreset_Matrix_Apply_MultiChain(t *testing.T) {
 }
 
 func TestPreset_Matrix_List_Shows_Template(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 	skipIfPresetAPIDisabled(t)
 
@@ -182,6 +191,7 @@ func TestPreset_Matrix_List_Shows_Template(t *testing.T) {
 }
 
 func TestPreset_Apply_Forbidden_NonAdmin(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 	skipIfPresetAPIDisabled(t)
 	if nonAdminClient == nil {

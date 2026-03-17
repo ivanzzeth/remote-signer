@@ -16,6 +16,7 @@ import (
 )
 
 func TestRule_SignTypeRestrictionAllowsPersonalSign(t *testing.T) {
+	snapshotRules(t)
 	address := common.HexToAddress(signerAddress)
 	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	sig, err := signer.PersonalSign("Test sign type restriction allows personal_sign")
@@ -24,6 +25,7 @@ func TestRule_SignTypeRestrictionAllowsPersonalSign(t *testing.T) {
 }
 
 func TestRule_SignTypeRestrictionAllowsTransaction(t *testing.T) {
+	snapshotRules(t)
 	address := common.HexToAddress(signerAddress)
 	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	to := common.HexToAddress(treasuryAddress)
@@ -42,6 +44,7 @@ func TestRule_SignTypeRestrictionAllowsTransaction(t *testing.T) {
 }
 
 func TestRule_SignTypeRestrictionAllowsHashSign(t *testing.T) {
+	snapshotRules(t)
 	address := common.HexToAddress(signerAddress)
 	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	hash := common.HexToHash("0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890")
@@ -51,6 +54,7 @@ func TestRule_SignTypeRestrictionAllowsHashSign(t *testing.T) {
 }
 
 func TestRule_CreateSignTypeRestrictionViaAPI(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 	createReq := &evm.CreateRuleRequest{
 		Name:    "Test Sign Type Restriction via API",
@@ -61,15 +65,16 @@ func TestRule_CreateSignTypeRestrictionViaAPI(t *testing.T) {
 	}
 	created, err := adminClient.EVM.Rules.Create(ctx, createReq)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = adminClient.EVM.Rules.Delete(context.Background(), created.ID) })
 	assert.Equal(t, "sign_type_restriction", string(created.Type))
 	assert.Equal(t, "whitelist", string(created.Mode))
-	require.NoError(t, adminClient.EVM.Rules.Delete(ctx, created.ID))
 }
 
 // TestSecurityExample_SignTypeAllowsPersonalTypedDataTransaction mirrors rules/security.example.yaml
 // "Allowed signing methods": personal, typed_data, transaction are allowed. We assert personal and
 // transaction pass; hash is not in the example whitelist but config.e2e may allow it, so we do not assert hash rejected.
 func TestSecurityExample_SignTypeAllowsPersonalTypedDataTransaction(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 	createReq := &evm.CreateRuleRequest{
 		Name:    "E2E Security Example - Allowed signing methods",
@@ -99,6 +104,7 @@ func TestSecurityExample_SignTypeAllowsPersonalTypedDataTransaction(t *testing.T
 }
 
 func TestRule_SignTypeRestrictionBlocksDisallowedType(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 	createReq := &evm.CreateRuleRequest{
 		Name:    "Test Sign Type Blocklist - Only Transaction",

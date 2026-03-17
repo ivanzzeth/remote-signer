@@ -102,6 +102,7 @@ func createTestAddressListRule(t *testing.T, c *client.Client, name string) *evm
 // =============================================================================
 
 func TestRBAC_A1_Admin(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 	// Use existing adminClient
 
@@ -171,6 +172,7 @@ func TestRBAC_A1_Admin(t *testing.T) {
 }
 
 func TestRBAC_A2_Dev(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 	devClient := createRoleClient(t, "dev", "e2e-rbac-dev")
 
@@ -274,6 +276,7 @@ func TestRBAC_A2_Dev(t *testing.T) {
 }
 
 func TestRBAC_A3_Agent(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 	agentClient := createRoleClient(t, "agent", "e2e-rbac-agent")
 
@@ -325,7 +328,7 @@ func TestRBAC_A3_Agent(t *testing.T) {
 
 	t.Run("A3.6_cannot_create_rule_star", func(t *testing.T) {
 		chainType := "evm"
-		_, err := agentClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
+		rule, err := agentClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 			Name:      "RBAC-A3.6 agent star",
 			Type:      "evm_address_list",
 			Mode:      "whitelist",
@@ -338,6 +341,8 @@ func TestRBAC_A3_Agent(t *testing.T) {
 		// OR it returns 403. Check which behavior the server implements.
 		if err != nil {
 			expectAPIError(t, err, 403, "agent CANNOT create rule with applied_to=[*]")
+		} else {
+			t.Cleanup(func() { _ = adminClient.EVM.Rules.Delete(context.Background(), rule.ID) })
 		}
 		// If no error, the rule was created but applied_to should be forced to ["self"]
 	})
@@ -434,6 +439,7 @@ func TestRBAC_A3_Agent(t *testing.T) {
 }
 
 func TestRBAC_A4_Strategy(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 	stratClient := createRoleClient(t, "strategy", "e2e-rbac-strategy")
 
@@ -481,6 +487,7 @@ func TestRBAC_A4_Strategy(t *testing.T) {
 // =============================================================================
 
 func TestRBAC_B1_OwnerAutoSet(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	t.Run("B1.1_agent_owner", func(t *testing.T) {
@@ -526,6 +533,7 @@ func TestRBAC_B1_OwnerAutoSet(t *testing.T) {
 }
 
 func TestRBAC_B2_AppliedToEnforcement(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	t.Run("B2.1_agent_forced_self", func(t *testing.T) {
@@ -588,12 +596,14 @@ func TestRBAC_B2_AppliedToEnforcement(t *testing.T) {
 // =============================================================================
 
 func TestRBAC_C1_ImmediateActivation(t *testing.T) {
+	snapshotRules(t)
 	agentClient := createRoleClient(t, "agent", "e2e-rbac-c1-agent")
 	rule := createTestAddressListRule(t, agentClient, "RBAC-C1.1 immediate active")
 	assert.Equal(t, "active", rule.Status)
 }
 
 func TestRBAC_C4_Deletion(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	t.Run("C4.1_agent_delete_own_active", func(t *testing.T) {
@@ -623,6 +633,7 @@ func TestRBAC_C4_Deletion(t *testing.T) {
 }
 
 func TestRBAC_C5_Immutable(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	t.Run("C5.1_admin_create_immutable", func(t *testing.T) {
@@ -662,6 +673,7 @@ func TestRBAC_C5_Immutable(t *testing.T) {
 // =============================================================================
 
 func TestRBAC_D2_BlockedRuleTypes(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 	agentClient := createRoleClient(t, "agent", "e2e-rbac-d2-agent")
 	devClient := createRoleClient(t, "dev", "e2e-rbac-d2-dev")
@@ -798,6 +810,7 @@ func TestRBAC_D2_BlockedRuleTypes(t *testing.T) {
 // =============================================================================
 
 func TestRBAC_E_ConfigSourcedRules(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	t.Run("E1_E2_config_rules_have_star_and_config_owner", func(t *testing.T) {
@@ -824,6 +837,7 @@ func TestRBAC_E_ConfigSourcedRules(t *testing.T) {
 // =============================================================================
 
 func TestRBAC_F_Audit(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	t.Run("F1_agent_create_rule_audit", func(t *testing.T) {
@@ -870,6 +884,7 @@ func TestRBAC_F_Audit(t *testing.T) {
 // =============================================================================
 
 func TestRBAC_G_MultiAgentIsolation(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	agentAClient := createRoleClient(t, "agent", "e2e-rbac-g-agent-a")

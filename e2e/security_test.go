@@ -31,6 +31,7 @@ import (
 // =============================================================================
 
 func TestSecurity_ReplayAttack_SameNonce(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("replay test may interfere with external server state")
 	}
@@ -84,6 +85,7 @@ func TestSecurity_ReplayAttack_SameNonce(t *testing.T) {
 }
 
 func TestSecurity_ReplayAttack_ExpiredTimestamp(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	// Use a timestamp from 5 minutes ago (well outside 60s window)
@@ -119,6 +121,7 @@ func TestSecurity_ReplayAttack_ExpiredTimestamp(t *testing.T) {
 }
 
 func TestSecurity_AuthBypass_MissingHeaders(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 	baseURL := getBaseURL()
 
@@ -171,6 +174,7 @@ func TestSecurity_AuthBypass_MissingHeaders(t *testing.T) {
 }
 
 func TestSecurity_AuthBypass_WrongKey(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	// Generate a completely different Ed25519 key pair
@@ -205,6 +209,7 @@ func TestSecurity_AuthBypass_WrongKey(t *testing.T) {
 }
 
 func TestSecurity_AuthBypass_TamperedBody(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	// Sign with the original body
@@ -244,6 +249,7 @@ func TestSecurity_AuthBypass_TamperedBody(t *testing.T) {
 }
 
 func TestSecurity_AuthBypass_UnknownAPIKeyID(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	ts := time.Now().UnixMilli()
@@ -282,6 +288,7 @@ func TestSecurity_AuthBypass_UnknownAPIKeyID(t *testing.T) {
 // =============================================================================
 
 func TestSecurity_AdminEscalation_NonAdminKey(t *testing.T) {
+	snapshotRules(t)
 	if nonAdminClient == nil {
 		t.Skip("non-admin client not configured")
 	}
@@ -317,6 +324,7 @@ func TestSecurity_AdminEscalation_NonAdminKey(t *testing.T) {
 // =============================================================================
 
 func TestSecurity_BlocklistBypass_AddressCasing(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("rule bypass test modifies server state")
 	}
@@ -357,6 +365,7 @@ func TestSecurity_BlocklistBypass_AddressCasing(t *testing.T) {
 }
 
 func TestSecurity_ValueLimitBypass_Overflow(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("value limit test requires known rule configuration")
 	}
@@ -403,6 +412,7 @@ func TestSecurity_ValueLimitBypass_Overflow(t *testing.T) {
 // =============================================================================
 
 func TestSecurity_ConcurrentApproval_RaceCondition(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("race condition test requires internal server control")
 	}
@@ -484,6 +494,7 @@ func TestSecurity_ConcurrentApproval_RaceCondition(t *testing.T) {
 // =============================================================================
 
 func TestSecurity_OversizedPayload(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 	baseURL := getBaseURL()
 
@@ -527,6 +538,7 @@ func TestSecurity_OversizedPayload(t *testing.T) {
 }
 
 func TestSecurity_InvalidJSONPayload(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	invalidPayloads := []string{
@@ -577,6 +589,7 @@ func TestSecurity_InvalidJSONPayload(t *testing.T) {
 // =============================================================================
 
 func TestSecurity_AuditLogAccess_NonAdminKey(t *testing.T) {
+	snapshotRules(t)
 	if nonAdminClient == nil {
 		t.Skip("non-admin client not configured")
 	}
@@ -594,6 +607,7 @@ func TestSecurity_AuditLogAccess_NonAdminKey(t *testing.T) {
 }
 
 func TestSecurity_AuditLogAccess_NonAdminCannotFilterByAPIKeyID(t *testing.T) {
+	snapshotRules(t)
 	if nonAdminClient == nil {
 		t.Skip("non-admin client not configured")
 	}
@@ -619,6 +633,7 @@ func TestSecurity_AuditLogAccess_NonAdminCannotFilterByAPIKeyID(t *testing.T) {
 // =============================================================================
 
 func TestSecurity_RuleConfigValidation_EmptyAddressList(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	// Create an address whitelist rule with empty addresses — should be rejected
@@ -635,6 +650,7 @@ func TestSecurity_RuleConfigValidation_EmptyAddressList(t *testing.T) {
 }
 
 func TestSecurity_RuleConfigValidation_InvalidAddressFormat(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	// Create a rule with invalid address format
@@ -651,6 +667,7 @@ func TestSecurity_RuleConfigValidation_InvalidAddressFormat(t *testing.T) {
 }
 
 func TestSecurity_RuleConfigValidation_MissingRequiredField(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	// Create a value limit rule without max_value — required field
@@ -665,6 +682,7 @@ func TestSecurity_RuleConfigValidation_MissingRequiredField(t *testing.T) {
 }
 
 func TestSecurity_RuleConfigValidation_WildcardAddress(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	// Try creating a rule with wildcard address that might match everything
@@ -686,6 +704,7 @@ func TestSecurity_RuleConfigValidation_WildcardAddress(t *testing.T) {
 // =============================================================================
 
 func TestSecurity_SolidityInjection_Selfdestruct(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	// Try to create a rule with selfdestruct — should be rejected by config validation
@@ -702,6 +721,7 @@ func TestSecurity_SolidityInjection_Selfdestruct(t *testing.T) {
 }
 
 func TestSecurity_SolidityInjection_Delegatecall(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	// Try to create a rule with delegatecall — should be rejected
@@ -718,6 +738,7 @@ func TestSecurity_SolidityInjection_Delegatecall(t *testing.T) {
 }
 
 func TestSecurity_SolidityInjection_LargeExpression(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	// Try to create a rule with a very large expression (100KB) for DoS
@@ -745,6 +766,7 @@ func TestSecurity_SolidityInjection_LargeExpression(t *testing.T) {
 // =============================================================================
 
 func TestSecurity_ReplayAttack_NoNonce_WhenRequired(t *testing.T) {
+	snapshotRules(t)
 	// This test verifies that when nonce_required=true, requests without
 	// X-Nonce header are rejected — even if the signature is otherwise valid.
 	// This catches the bug where nonce enforcement check happens after
@@ -794,6 +816,7 @@ func TestSecurity_ReplayAttack_NoNonce_WhenRequired(t *testing.T) {
 // =============================================================================
 
 func TestSecurity_AddressCasingBypass_WhitelistRule(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	// Create a whitelist rule with a specific address casing
@@ -829,6 +852,7 @@ func TestSecurity_AddressCasingBypass_WhitelistRule(t *testing.T) {
 // =============================================================================
 
 func TestRedTeam_AddressBlocklist_BypassViaPersonalSign(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("red team test modifies server state")
 	}
@@ -877,6 +901,7 @@ func TestRedTeam_AddressBlocklist_BypassViaPersonalSign(t *testing.T) {
 }
 
 func TestRedTeam_ValueLimitBlocklist_BypassViaNilValue(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("red team test modifies server state")
 	}
@@ -914,6 +939,7 @@ func TestRedTeam_ValueLimitBlocklist_BypassViaNilValue(t *testing.T) {
 }
 
 func TestRedTeam_ContractMethodBlocklist_BypassViaPlainTransfer(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("red team test modifies server state")
 	}
@@ -958,6 +984,7 @@ func TestRedTeam_ContractMethodBlocklist_BypassViaPlainTransfer(t *testing.T) {
 // =============================================================================
 
 func TestRedTeam_BlocklistPrecedence_OverridesWhitelist(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("red team test modifies server state")
 	}
@@ -1006,6 +1033,7 @@ func TestRedTeam_BlocklistPrecedence_OverridesWhitelist(t *testing.T) {
 }
 
 func TestRedTeam_SignTypeBlocklist_OverridesWhitelist(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("red team test modifies server state")
 	}
@@ -1052,6 +1080,7 @@ func TestRedTeam_SignTypeBlocklist_OverridesWhitelist(t *testing.T) {
 }
 
 func TestRedTeam_MultiRule_WhitelistAddress_BlocklistValue(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("red team test modifies server state")
 	}
@@ -1132,6 +1161,7 @@ func TestRedTeam_MultiRule_WhitelistAddress_BlocklistValue(t *testing.T) {
 // =============================================================================
 
 func TestRedTeam_ValueLimit_ExactBoundary(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("red team test modifies server state")
 	}
@@ -1185,6 +1215,7 @@ func TestRedTeam_ValueLimit_ExactBoundary(t *testing.T) {
 }
 
 func TestRedTeam_ValueLimit_ZeroValue(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("red team test modifies server state")
 	}
@@ -1235,6 +1266,7 @@ func TestRedTeam_ValueLimit_ZeroValue(t *testing.T) {
 }
 
 func TestRedTeam_AddressBlocklist_ZeroAddress(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("red team test modifies server state")
 	}
@@ -1270,6 +1302,7 @@ func TestRedTeam_AddressBlocklist_ZeroAddress(t *testing.T) {
 }
 
 func TestRedTeam_DisabledBlocklistRule_AttackWindow(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("red team test modifies server state")
 	}
@@ -1342,6 +1375,7 @@ func TestRedTeam_DisabledBlocklistRule_AttackWindow(t *testing.T) {
 }
 
 func TestRedTeam_SignerRestriction_BlocklistMode(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("red team test modifies server state")
 	}
@@ -1379,6 +1413,7 @@ func TestRedTeam_SignerRestriction_BlocklistMode(t *testing.T) {
 // =============================================================================
 
 func TestRedTeam_WhitelistDoesNotOverApprove_PersonalSign(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("red team test modifies server state")
 	}
@@ -1421,6 +1456,7 @@ func TestRedTeam_WhitelistDoesNotOverApprove_PersonalSign(t *testing.T) {
 }
 
 func TestRedTeam_NullScopeRule_AppliesToAllSigners(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("red team test modifies server state")
 	}
@@ -1457,6 +1493,7 @@ func TestRedTeam_NullScopeRule_AppliesToAllSigners(t *testing.T) {
 }
 
 func TestRedTeam_AddressBlocklist_CasingNormalization(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("red team test modifies server state")
 	}
@@ -1507,6 +1544,7 @@ func TestRedTeam_AddressBlocklist_CasingNormalization(t *testing.T) {
 // =============================================================================
 
 func TestRedTeam_Auth_FutureTimestamp(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	// Use a timestamp 30 seconds in the FUTURE against an AUTHENTICATED endpoint.
@@ -1546,6 +1584,7 @@ func TestRedTeam_Auth_FutureTimestamp(t *testing.T) {
 }
 
 func TestRedTeam_Auth_FutureTimestamp_PreSign(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	// Pre-sign a request with timestamp 10 seconds in the future.
@@ -1584,6 +1623,7 @@ func TestRedTeam_Auth_FutureTimestamp_PreSign(t *testing.T) {
 }
 
 func TestRedTeam_ConcurrentNonce_RaceCondition(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("concurrent nonce test requires internal server with nonce store")
 	}
@@ -1657,6 +1697,7 @@ func TestRedTeam_ConcurrentNonce_RaceCondition(t *testing.T) {
 // =============================================================================
 
 func TestRedTeam_SignerPermission_CaseSensitiveBypass(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("requires controlled API key configuration")
 	}
@@ -1692,6 +1733,7 @@ func TestRedTeam_SignerPermission_CaseSensitiveBypass(t *testing.T) {
 }
 
 func TestRedTeam_PreviewRule_NonAdminAccess(t *testing.T) {
+	snapshotRules(t)
 	if nonAdminClient == nil {
 		t.Skip("non-admin client not configured")
 	}
@@ -1746,6 +1788,7 @@ func TestRedTeam_PreviewRule_NonAdminAccess(t *testing.T) {
 }
 
 func TestRedTeam_NonceCollision_ColonInNonce(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("nonce collision test requires internal server")
 	}
@@ -1793,6 +1836,7 @@ func TestRedTeam_NonceCollision_ColonInNonce(t *testing.T) {
 // =============================================================================
 
 func TestRedTeam_HashPayload_InvalidHex(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	// "0xGGGG..." has 64 chars after prefix (length=66) but invalid hex chars.
@@ -1818,6 +1862,7 @@ func TestRedTeam_HashPayload_InvalidHex(t *testing.T) {
 }
 
 func TestRedTeam_ErrorInfoLeak_StructType(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 	baseURL := getBaseURL()
 
@@ -1862,6 +1907,7 @@ func TestRedTeam_ErrorInfoLeak_StructType(t *testing.T) {
 }
 
 func TestRedTeam_ErrorInfoLeak_FieldNames(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 	baseURL := getBaseURL()
 
@@ -1905,6 +1951,7 @@ func TestRedTeam_ErrorInfoLeak_FieldNames(t *testing.T) {
 }
 
 func TestRedTeam_PayloadSize_LargeTransactionData(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	// Create a 512KB data field (hex-encoded, so ~1MB in JSON)
@@ -1941,6 +1988,7 @@ func TestRedTeam_PayloadSize_LargeTransactionData(t *testing.T) {
 // =============================================================================
 
 func TestRedTeam_SignHandler_InvalidSignType(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	// Attack: use an invalid sign_type to bypass validation
@@ -1958,6 +2006,7 @@ func TestRedTeam_SignHandler_InvalidSignType(t *testing.T) {
 }
 
 func TestRedTeam_SignHandler_InvalidSignerAddress(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	// Attack: signer_address without valid Ethereum format
@@ -1979,6 +2028,7 @@ func TestRedTeam_SignHandler_InvalidSignerAddress(t *testing.T) {
 }
 
 func TestRedTeam_SignHandler_InvalidChainID(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	// Attack: various invalid chain_id values
@@ -2004,6 +2054,7 @@ func TestRedTeam_SignHandler_InvalidChainID(t *testing.T) {
 }
 
 func TestRedTeam_SignHandler_NegativeTransactionValue(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	// Attack: negative ETH value — big.Int accepts negative numbers
@@ -2032,6 +2083,7 @@ func TestRedTeam_SignHandler_NegativeTransactionValue(t *testing.T) {
 }
 
 func TestRedTeam_SignHandler_NegativeGasPrice(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	// Attack: negative gas price
@@ -2060,6 +2112,7 @@ func TestRedTeam_SignHandler_NegativeGasPrice(t *testing.T) {
 }
 
 func TestRedTeam_SignHandler_InvalidToAddress(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	// Attack: invalid "to" address — common.HexToAddress silently returns zero address
@@ -2088,6 +2141,7 @@ func TestRedTeam_SignHandler_InvalidToAddress(t *testing.T) {
 }
 
 func TestRedTeam_SignHandler_OversizedPayload(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	// Attack: 3MB payload to exceed the 2MB payload limit
@@ -2108,6 +2162,7 @@ func TestRedTeam_SignHandler_OversizedPayload(t *testing.T) {
 }
 
 func TestRedTeam_SignHandler_OversizedMessage(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	// Attack: 2MB personal message to exceed the 1MB message limit
@@ -2128,6 +2183,7 @@ func TestRedTeam_SignHandler_OversizedMessage(t *testing.T) {
 }
 
 func TestRedTeam_SignHandler_OversizedTxData(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 
 	// Attack: 256KB+ transaction data to exceed the 128KB limit
@@ -2158,6 +2214,7 @@ func TestRedTeam_SignHandler_OversizedTxData(t *testing.T) {
 }
 
 func TestRedTeam_ListRequests_InvalidStatusFilter(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 	baseURL := getBaseURL()
 
@@ -2197,6 +2254,7 @@ func TestRedTeam_ListRequests_InvalidStatusFilter(t *testing.T) {
 }
 
 func TestRedTeam_ListRequests_InvalidCursor(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 	baseURL := getBaseURL()
 
@@ -2232,6 +2290,7 @@ func TestRedTeam_ListRequests_InvalidCursor(t *testing.T) {
 }
 
 func TestRedTeam_SecurityHeaders_Present(t *testing.T) {
+	snapshotRules(t)
 	baseURL := getBaseURL()
 
 	// Check security headers on /health (unauthenticated endpoint)
@@ -2250,6 +2309,7 @@ func TestRedTeam_SecurityHeaders_Present(t *testing.T) {
 }
 
 func TestRedTeam_HeaderLength_OversizedAPIKeyID(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 	baseURL := getBaseURL()
 
@@ -2294,6 +2354,7 @@ func TestRedTeam_HeaderLength_OversizedAPIKeyID(t *testing.T) {
 // approve(validSpender, max) targeting a FAKE ERC20 contract address.
 // The rule's txTo check should block this.
 func TestRedTeam_PT5_FakeTokenApprove(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("requires internal server with Foundry support")
 	}
@@ -2388,6 +2449,7 @@ func TestRedTeam_PT5_FakeTokenApprove(t *testing.T) {
 // allows transfer() on a specific ERC20 contract, then sends
 // transfer(treasury, amount) targeting a fake ERC20 contract.
 func TestRedTeam_PT5_FakeTokenTransfer(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("requires internal server with Foundry support")
 	}
@@ -2478,6 +2540,7 @@ func TestRedTeam_PT5_FakeTokenTransfer(t *testing.T) {
 // NOTE: The Solidity code avoids the word "delegatecall" which is blocked
 // by the API's dangerous pattern filter. The rule uses "operation must be zero".
 func TestRedTeam_PT5_ExecTxDelegatecall(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("requires internal server with Foundry support")
 	}
@@ -2617,6 +2680,7 @@ func TestRedTeam_PT5_ExecTxDelegatecall(t *testing.T) {
 // execTransaction, then sends execTransaction with gasPrice>0 and
 // gasToken=USDT to attempt gas-fee draining of the Safe.
 func TestRedTeam_PT5_ExecTxGasDrain(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("requires internal server with Foundry support")
 	}
@@ -2757,6 +2821,7 @@ func TestRedTeam_PT5_ExecTxGasDrain(t *testing.T) {
 // before other whitelist rules (signer_restriction, sign_type_restriction)
 // can auto-approve it.
 func TestRedTeam_PT5_FakeExchangeOrder(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("requires internal server with Foundry support")
 	}
@@ -2905,6 +2970,7 @@ func TestRedTeam_PT5_FakeExchangeOrder(t *testing.T) {
 // NOTE: The Solidity code avoids the word "delegatecall" which is blocked
 // by the API's dangerous pattern filter. The rule uses "operation must be zero".
 func TestRedTeam_PT5_SafeTxDelegatecall(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("requires internal server with Foundry support")
 	}

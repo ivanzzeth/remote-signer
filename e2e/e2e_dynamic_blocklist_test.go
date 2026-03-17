@@ -30,6 +30,7 @@ const blockedTestAddr = "0xd882cFc20F52f2599D84b8e8D58C7FB62cfE344b"
 // TestDynamicBlocklist_BlocksSignToSanctionedAddress verifies that the dynamic blocklist
 // blocks signing requests to addresses fetched from an external source at runtime.
 func TestDynamicBlocklist_BlocksSignToSanctionedAddress(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("dynamic blocklist e2e requires internal server with mock HTTP source")
 	}
@@ -80,6 +81,7 @@ func TestDynamicBlocklist_BlocksSignToSanctionedAddress(t *testing.T) {
 // TestDynamicBlocklist_CacheFileLoadsOnRestart verifies that the blocklist loads
 // from the local cache file at startup without needing network access.
 func TestDynamicBlocklist_CacheFileLoadsOnRestart(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("dynamic blocklist e2e requires internal server")
 	}
@@ -119,6 +121,7 @@ func TestDynamicBlocklist_CacheFileLoadsOnRestart(t *testing.T) {
 
 // TestDynamicBlocklist_JSONSource verifies the url_json source type.
 func TestDynamicBlocklist_JSONSource(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("dynamic blocklist e2e requires internal server with mock HTTP source")
 	}
@@ -157,6 +160,7 @@ func TestDynamicBlocklist_JSONSource(t *testing.T) {
 // TestDynamicBlocklist_Evaluator_IntegrationWithEngine tests the evaluator
 // through the full rule engine (create rule via API, sign, verify blocked).
 func TestDynamicBlocklist_Evaluator_IntegrationWithEngine(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("dynamic blocklist e2e requires internal server with mock HTTP source")
 	}

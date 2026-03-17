@@ -16,6 +16,7 @@ import (
 )
 
 func TestRule_SolidityBlocklist_PassesForNormalAddress(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("Solidity blocklist rule is in config.e2e.yaml")
 	}
@@ -37,6 +38,7 @@ func TestRule_SolidityBlocklist_PassesForNormalAddress(t *testing.T) {
 }
 
 func TestRule_TransactionToBurnAddressBlocked(t *testing.T) {
+	snapshotRules(t)
 	address := common.HexToAddress(signerAddress)
 	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	to := common.HexToAddress(burnAddress)
@@ -63,6 +65,7 @@ const zeroAddress = "0x0000000000000000000000000000000000000000"
 // test_cases "should block zero address" (expect_reason: "blocked: zero address").
 // Creates the same blocklist rule via API so the test does not depend on config.
 func TestSecurityExample_BlocklistBlocksZeroAddress(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 	rule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name:    "E2E Security Example - Block malicious addresses",

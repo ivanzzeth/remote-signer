@@ -19,6 +19,7 @@ import (
 const treasuryExampleBackup = "0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2"
 
 func TestRule_TransactionToTreasuryPasses(t *testing.T) {
+	snapshotRules(t)
 	address := common.HexToAddress(signerAddress)
 	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	to := common.HexToAddress(treasuryAddress)
@@ -41,6 +42,7 @@ func TestRule_TransactionToTreasuryPasses(t *testing.T) {
 }
 
 func TestRule_AddressWhitelist_RejectsNonListedAddress(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("evm_address_list and signer_restriction are from config.e2e.yaml")
 	}
@@ -64,6 +66,7 @@ func TestRule_AddressWhitelist_RejectsNonListedAddress(t *testing.T) {
 // TestTreasuryExample_AddressWhitelistAllowsListedAddresses mirrors rules/treasury.example.yaml
 // "Allow transfers to treasury": evm_address_list whitelist with main + backup treasury.
 func TestTreasuryExample_AddressWhitelistAllowsListedAddresses(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 	chainType := "evm"
 	rule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{

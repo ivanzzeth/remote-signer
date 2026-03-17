@@ -81,7 +81,7 @@ func TestConfigDriven_ERC20InstanceHasBudget(t *testing.T) {
 	ctx := context.Background()
 	unit := "1:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
 	t.Logf("[ERC20InstanceHasBudget] step 1: listing rules")
-	listResp, err := adminClient.EVM.Rules.List(ctx, nil)
+	listResp, err := adminClient.EVM.Rules.List(ctx, &evm.ListRulesFilter{Limit: 1000})
 	require.NoError(t, err, "list rules")
 	t.Logf("[ERC20InstanceHasBudget] step 2: got %d rules, iterating for ERC20 transfer/approve", len(listResp.Rules))
 	var foundBudget bool
@@ -119,7 +119,7 @@ func TestConfigDriven_ERC20RuleHasSchedule(t *testing.T) {
 	}
 	ctx := context.Background()
 	t.Logf("[ERC20RuleHasSchedule] step 1: listing rules")
-	listResp, err := adminClient.EVM.Rules.List(ctx, nil)
+	listResp, err := adminClient.EVM.Rules.List(ctx, &evm.ListRulesFilter{Limit: 1000})
 	require.NoError(t, err, "list rules")
 	t.Logf("[ERC20RuleHasSchedule] step 2: got %d rules", len(listResp.Rules))
 	var foundSchedule bool
@@ -154,7 +154,7 @@ func TestConfigDriven_Schedule_PeriodReset(t *testing.T) {
 	}
 	ctx := context.Background()
 	t.Logf("[Schedule_PeriodReset] step 1: listing rules")
-	listResp, err := adminClient.EVM.Rules.List(ctx, nil)
+	listResp, err := adminClient.EVM.Rules.List(ctx, &evm.ListRulesFilter{Limit: 1000})
 	require.NoError(t, err, "list rules")
 	t.Logf("[Schedule_PeriodReset] step 2: got %d rules", len(listResp.Rules))
 	var scheduleRuleID string
@@ -282,7 +282,7 @@ func TestConfigDriven_ERC20Budget_DeductedOnSign(t *testing.T) {
 	require.Equal(t, "completed", resp.Status)
 	t.Logf("[ERC20Budget_DeductedOnSign] step 2: sign completed, listing rules")
 
-	listResp, err := adminClient.EVM.Rules.List(ctx, nil)
+	listResp, err := adminClient.EVM.Rules.List(ctx, &evm.ListRulesFilter{Limit: 1000})
 	require.NoError(t, err)
 	t.Logf("[ERC20Budget_DeductedOnSign] step 3: got %d rules, checking budgets for unit %s", len(listResp.Rules), erc20BudgetUnit)
 	// Find the transfer rule that has a budget with the USDC unit (erc20_erc20-transfer-limit, not the schedule one).

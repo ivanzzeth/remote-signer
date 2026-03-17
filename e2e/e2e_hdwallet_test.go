@@ -19,6 +19,7 @@ import (
 // =============================================================================
 
 func TestHDWallet_CreateAndList(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("Skipping: HD wallet creation test not supported with external server")
 	}
@@ -74,6 +75,7 @@ func TestHDWallet_CreateAndList(t *testing.T) {
 }
 
 func TestHDWallet_DeriveAddresses(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("Skipping: HD wallet derive test not supported with external server")
 	}
@@ -125,6 +127,7 @@ func TestHDWallet_DeriveAddresses(t *testing.T) {
 }
 
 func TestHDWallet_DerivedAddressCanSign(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("Skipping: HD wallet signing test not supported with external server")
 	}
@@ -140,7 +143,7 @@ func TestHDWallet_DerivedAddressCanSign(t *testing.T) {
 	primaryAddr := createResp.PrimaryAddress
 
 	// First, create a signer restriction whitelist rule for this address
-	_, err = adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
+	signerRule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
 		Name: "E2E HD wallet signer allow",
 		Type: "signer_restriction",
 		Mode: "whitelist",
@@ -150,6 +153,11 @@ func TestHDWallet_DerivedAddressCanSign(t *testing.T) {
 		Enabled: true,
 	})
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		if delErr := adminClient.EVM.Rules.Delete(context.Background(), signerRule.ID); delErr != nil {
+			t.Logf("Warning: failed to cleanup HD wallet signer rule: %v", delErr)
+		}
+	})
 
 	// Sign a personal message with the primary address
 	payload, err := json.Marshal(map[string]interface{}{"message": "Hello from HD wallet"})
@@ -168,6 +176,7 @@ func TestHDWallet_DerivedAddressCanSign(t *testing.T) {
 }
 
 func TestHDWallet_NonAdminCannotCreate(t *testing.T) {
+	snapshotRules(t)
 	if nonAdminClient == nil {
 		t.Skip("Skipping: non-admin client not configured")
 	}
@@ -186,6 +195,7 @@ func TestHDWallet_NonAdminCannotCreate(t *testing.T) {
 }
 
 func TestHDWallet_NonAdminCannotList(t *testing.T) {
+	snapshotRules(t)
 	if nonAdminClient == nil {
 		t.Skip("Skipping: non-admin client not configured")
 	}
@@ -202,6 +212,7 @@ func TestHDWallet_NonAdminCannotList(t *testing.T) {
 }
 
 func TestHDWallet_ValidationErrors(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("Skipping: HD wallet validation test not supported with external server")
 	}

@@ -15,6 +15,7 @@ import (
 )
 
 func TestRule_SignerRestrictionAllowsTestSigner(t *testing.T) {
+	snapshotRules(t)
 	address := common.HexToAddress(signerAddress)
 	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	sig, err := signer.PersonalSign("Test signer restriction allows test signer")
@@ -23,6 +24,7 @@ func TestRule_SignerRestrictionAllowsTestSigner(t *testing.T) {
 }
 
 func TestRule_SignerRestrictionBlocksUnknownSigner(t *testing.T) {
+	snapshotRules(t)
 	unknownSigner := common.HexToAddress("0x0000000000000000000000000000000000000001")
 	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, unknownSigner, chainID)
 	_, err := signer.PersonalSign("Test signer restriction blocks unknown signer")
@@ -30,6 +32,7 @@ func TestRule_SignerRestrictionBlocksUnknownSigner(t *testing.T) {
 }
 
 func TestRule_SignerRestriction_BlocksSignerNotInAllowList(t *testing.T) {
+	snapshotRules(t)
 	if useExternalServer {
 		t.Skip("signer_restriction config is from config.e2e.yaml")
 	}
@@ -61,6 +64,7 @@ func TestRule_SignerRestriction_BlocksSignerNotInAllowList(t *testing.T) {
 }
 
 func TestRule_CreateSignerRestrictionViaAPI(t *testing.T) {
+	snapshotRules(t)
 	ctx := context.Background()
 	createReq := &evm.CreateRuleRequest{
 		Name:    "Test Signer Restriction via API",
