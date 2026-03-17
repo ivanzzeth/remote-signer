@@ -1186,44 +1186,6 @@ step_ensure_cli_tools() {
     echo ""
 }
 
-# Auto-apply agent preset with default budget values (non-interactive).
-# Called after config generation so agent key already exists in config.
-step_agent_preset() {
-    echo -e "${BOLD}=============================================================${NC}"
-    echo -e "${BOLD}  Agent Rules (auto-initialize)${NC}"
-    echo -e "${BOLD}=============================================================${NC}"
-    echo ""
-    echo "The agent key can create its own rules, but needs initial budget-controlled"
-    echo "rules to start signing safely. Applying agent preset with conservative defaults..."
-    echo ""
-
-    export PATH="$BIN_DIR:$PATH"
-    if ! command -v remote-signer-cli &>/dev/null; then
-        log_warn "remote-signer-cli not found; skipping agent preset. Apply manually later:"
-        echo "  remote-signer-cli preset create-from agent.preset.js.yaml --config $CONFIG_FILE --write"
-        echo ""
-        return 0
-    fi
-
-    local PRESETS_DIR="${PROJECT_DIR}/rules/presets"
-    local AGENT_PRESET="agent.preset.js.yaml"
-    if [ ! -f "$PRESETS_DIR/$AGENT_PRESET" ]; then
-        log_warn "Agent preset not found: $PRESETS_DIR/$AGENT_PRESET"
-        return 0
-    fi
-
-    # Apply with defaults (conservative budget: 1 ETH total, 0.1 per tx, 24h period)
-    if remote-signer-cli preset create-from "$AGENT_PRESET" \
-        --config "$PROJECT_DIR/$CONFIG_FILE" --write \
-        --presets-dir "$PRESETS_DIR" 2>&1; then
-        log_info "Agent preset applied (budget: 1 native/24h, 0.1/tx). Tune in config if needed."
-    else
-        log_warn "Failed to apply agent preset. Apply manually:"
-        echo "  remote-signer-cli preset create-from $AGENT_PRESET --config $CONFIG_FILE --write"
-    fi
-    echo ""
-}
-
 # Interactive step: optionally add rule(s) from preset(s). Prompts for preset choice and variable overrides (with descriptions from template).
 # Requires remote-signer-cli from step_ensure_cli_tools (no download/build here).
 step_preset_rules() {
@@ -1555,6 +1517,28 @@ start_server_now() {
             attempt=$((attempt + 1))
         done
 
+        # Apply agent preset via API (creates rules with owner=agent, applied_to=["self"])
+        log_info "Applying agent preset rules via API..."
+        local cli_auth_args=()
+        cli_auth_args+=(--api-key-id agent --api-key-file data/agent_private.pem --url "${SCHEME}://localhost:${PORT}")
+        if [ "$TLS_CHOICE" = "3" ]; then
+            cli_auth_args+=(--tls-ca ./certs/ca.crt --tls-cert ./certs/client.crt --tls-key ./certs/client.key)
+        elif [ "$TLS_CHOICE" = "2" ]; then
+            cli_auth_args+=(--tls-ca ./certs/ca.crt)
+        fi
+        if command -v remote-signer-cli &>/dev/null; then
+            if remote-signer-cli preset apply agent "${cli_auth_args[@]}" 2>&1; then
+                log_info "Agent preset applied (owner=agent, budget: 1 native/24h). Rules are properly scoped."
+            else
+                log_warn "Failed to apply agent preset. Apply manually after startup:"
+                echo "  remote-signer-cli preset apply agent ${cli_auth_args[*]}"
+            fi
+        else
+            log_warn "remote-signer-cli not found; skipping agent preset. Apply manually:"
+            echo "  remote-signer-cli preset apply agent --api-key-id agent --api-key-file data/agent_private.pem --url ${SCHEME}://localhost:${PORT}"
+        fi
+        echo ""
+
         # Offer to open TUI so user can add signers without pasting key
         echo ""
         read -rp "Open TUI to add signers now? (Y/n): " OPEN_TUI
@@ -1664,9 +1648,6 @@ main() {
 
     # CLI tools (download or build) — before preset so remote-signer-cli is available
     step_ensure_cli_tools
-
-    # Auto-apply agent preset (budget-controlled rules for agent key)
-    step_agent_preset
 
     # Step 5b: Optionally add additional rules from presets (interactive)
     step_preset_rules
