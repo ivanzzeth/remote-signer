@@ -600,7 +600,7 @@ func TestAPIKeySyncFromConfig_CreateNewKey(t *testing.T) {
 			PublicKey: hexPubKey,
 			Enabled:   true,
 			RateLimit: 200,
-			Admin:     true,
+			Role:      "admin",
 		},
 	}
 
@@ -612,7 +612,7 @@ func TestAPIKeySyncFromConfig_CreateNewKey(t *testing.T) {
 	assert.Equal(t, "Test Key", saved.Name)
 	assert.Equal(t, hexPubKey, saved.PublicKeyHex)
 	assert.Equal(t, 200, saved.RateLimit)
-	assert.True(t, saved.Admin)
+	assert.Equal(t, types.RoleAdmin, saved.Role)
 	assert.True(t, saved.Enabled)
 }
 
@@ -1246,8 +1246,9 @@ func TestRuleSyncFromConfig_WithScopeFields(t *testing.T) {
 	assert.Equal(t, types.ChainType("evm"), *saved.ChainType)
 	require.NotNil(t, saved.ChainID)
 	assert.Equal(t, "1", *saved.ChainID)
-	require.NotNil(t, saved.APIKeyID)
-	assert.Equal(t, "api-key-1", *saved.APIKeyID)
+	assert.Equal(t, "config", saved.Owner)
+	assert.Equal(t, []string{"*"}, []string(saved.AppliedTo))
+	assert.Equal(t, types.RuleStatusActive, saved.Status)
 	require.NotNil(t, saved.SignerAddress)
 }
 

@@ -210,7 +210,7 @@ func (s *TemplateService) createInstanceFromResolved(
 		rule.ChainID = req.ChainID
 	}
 	if req.APIKeyID != nil {
-		rule.APIKeyID = req.APIKeyID
+		rule.Owner = *req.APIKeyID
 	}
 	if req.SignerAddress != nil {
 		rule.SignerAddress = req.SignerAddress
@@ -361,7 +361,7 @@ func (s *TemplateService) createInstanceFromBundle(
 			rule.ChainID = req.ChainID
 		}
 		if req.APIKeyID != nil {
-			rule.APIKeyID = req.APIKeyID
+			rule.Owner = *req.APIKeyID
 		}
 		if req.SignerAddress != nil {
 			rule.SignerAddress = req.SignerAddress

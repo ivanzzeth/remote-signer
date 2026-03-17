@@ -1222,8 +1222,8 @@ func TestCreateInstance(t *testing.T) {
 		if result.Rule.ChainID == nil || *result.Rule.ChainID != "1" {
 			t.Errorf("expected ChainID '1', got %v", result.Rule.ChainID)
 		}
-		if result.Rule.APIKeyID == nil || *result.Rule.APIKeyID != "key-123" {
-			t.Errorf("expected APIKeyID 'key-123', got %v", result.Rule.APIKeyID)
+		if result.Rule.Owner != "key-123" {
+			t.Errorf("expected APIKeyID 'key-123', got %v", result.Rule.Owner)
 		}
 		if result.Rule.SignerAddress == nil || *result.Rule.SignerAddress != signerAddr {
 			t.Errorf("expected SignerAddress %q, got %v", signerAddr, result.Rule.SignerAddress)

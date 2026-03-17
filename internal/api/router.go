@@ -45,7 +45,9 @@ type RouterConfig struct {
 	SignTimeout              time.Duration                    // context timeout for sign operations (default: 30s)
 	AutoLockTimeout          time.Duration                    // signer auto-lock timeout (for health endpoint)
 	AuditRetentionDays       int                              // audit log retention days (for health endpoint)
-	BudgetRepo               storage.BudgetRepository         // optional: for GET /api/v1/evm/rules/{id}/budgets
+	BudgetRepo                    storage.BudgetRepository         // optional: for GET /api/v1/evm/rules/{id}/budgets
+	MaxRulesPerAPIKey             int                              // per-key rule count limit (0 = no limit, default 50)
+	RequireApprovalForAgentRules  bool                             // require admin approval for agent whitelist rules
 	// Preset API (admin-only). When PresetsDir is non-empty, GET/POST /api/v1/presets are registered.
 	PresetsDir string   // directory containing preset YAML files (resolved absolute path)
 	PresetsDB  *gorm.DB // optional: for preset apply transaction; required when PresetsDir is set and template service is used
@@ -152,6 +154,13 @@ func (r *Router) setupRoutes() error {
 	if r.config.RulesAPIReadonly {
 		ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithReadOnly())
 	}
+	if r.config.APIKeyRepo != nil {
+		ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithAPIKeyRepo(r.config.APIKeyRepo))
+	}
+	if r.config.MaxRulesPerAPIKey > 0 {
+		ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithMaxRulesPerKey(r.config.MaxRulesPerAPIKey))
+	}
+	ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithRequireApproval(r.config.RequireApprovalForAgentRules))
 	ruleHandler, err := evmhandler.NewRuleHandler(r.ruleRepo, r.logger, ruleHandlerOpts...)
 	if err != nil {
 		return err
@@ -180,49 +189,45 @@ func (r *Router) setupRoutes() error {
 	}
 
 	// EVM routes (with auth)
-	r.mux.Handle("/api/v1/evm/sign", r.withAuth(signHandler))
-	r.mux.Handle("/api/v1/evm/requests", r.withAuth(listHandler))
+	r.mux.Handle("/api/v1/evm/sign", r.withAuthAndPerm(middleware.PermSignRequest, signHandler))
+	r.mux.Handle("/api/v1/evm/requests", r.withAuthAndPerm(middleware.PermListOwnRequests, listHandler))
 	r.mux.Handle("/api/v1/evm/requests/", r.withAuth(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		// Route to approval handler if path ends with /approve (admin only)
 		if strings.HasSuffix(req.URL.Path, "/approve") {
-			r.requireAdmin(approvalHandler).ServeHTTP(w, req)
+			middleware.RequirePermission(middleware.PermApproveRequest, r.logger, r.config.AlertService)(approvalHandler).ServeHTTP(w, req)
 			return
 		}
 		// Route to preview-rule handler if path ends with /preview-rule (admin only)
 		if strings.HasSuffix(req.URL.Path, "/preview-rule") {
-			r.requireAdmin(previewRuleHandler).ServeHTTP(w, req)
+			middleware.RequirePermission(middleware.PermApproveRequest, r.logger, r.config.AlertService)(previewRuleHandler).ServeHTTP(w, req)
 			return
 		}
-		// Otherwise, route to request handler
+		// Otherwise, route to request handler (any authenticated user can view own requests)
 		requestHandler.ServeHTTP(w, req)
 	})))
 
-	// Rule management routes (agent: read-only GET; admin: full access)
-	r.mux.Handle("/api/v1/evm/rules", r.withAuthAndAgentOrAdmin(ruleHandler))
-	r.mux.Handle("/api/v1/evm/rules/", r.withAuthAndAgentOrAdmin(ruleHandler))
+	// Rule management routes (RBAC: PermListRules covers GET for admin/dev/agent)
+	r.mux.Handle("/api/v1/evm/rules", r.withAuthAndPerm(middleware.PermListRules, ruleHandler))
+	r.mux.Handle("/api/v1/evm/rules/", r.withAuthAndPerm(middleware.PermListRules, ruleHandler))
 
 	// Approval guard resume (admin only)
 	if r.config.ApprovalGuard != nil {
-		r.mux.Handle("/api/v1/evm/guard/resume", r.withAuthAndAdmin(http.HandlerFunc(r.handleGuardResume)))
+		r.mux.Handle("/api/v1/evm/guard/resume", r.withAuthAndPerm(middleware.PermResumeGuard, http.HandlerFunc(r.handleGuardResume)))
 	}
 
-	// Signer management routes: withAuth (not withAuthAndAdmin) is intentional here.
-	// The same endpoint handles both GET (list signers — non-admin can list their allowed
-	// signers) and POST (create signer — admin only). The handler enforces admin checks
-	// for mutating operations (POST/PUT/DELETE) at the handler level, because Go's
-	// http.ServeMux does not support per-method middleware.
-	r.mux.Handle("/api/v1/evm/signers", r.withAuth(signerHandler))
-	// Signer action routes: /api/v1/evm/signers/{address}/unlock, /lock
-	// Handler-level admin check applies for lock/unlock actions.
-	r.mux.Handle("/api/v1/evm/signers/", r.withAuth(http.HandlerFunc(signerHandler.HandleSignerAction)))
+	// Signer management routes
+	// GET: PermReadSigners (all roles); POST: PermCreateSigners checked in handler
+	r.mux.Handle("/api/v1/evm/signers", r.withAuthAndPerm(middleware.PermReadSigners, signerHandler))
+	// Signer action routes: /api/v1/evm/signers/{address}/unlock, /lock (admin only via PermUnlockSigner in handler)
+	r.mux.Handle("/api/v1/evm/signers/", r.withAuthAndPerm(middleware.PermReadSigners, http.HandlerFunc(signerHandler.HandleSignerAction)))
 
-	// HD wallet management routes (auth required; admin/HD wallet permission checked in handler)
+	// HD wallet management routes
 	r.mux.Handle("/api/v1/evm/hd-wallets", r.withAuth(hdWalletHandler))
 	r.mux.Handle("/api/v1/evm/hd-wallets/", r.withAuth(hdWalletHandler))
 
-	// Audit routes (with auth + admin required — audit logs contain sensitive data)
-	r.mux.Handle("/api/v1/audit", r.withAuthAndAdmin(auditHandler))
-	r.mux.Handle("/api/v1/audit/requests/", r.withAuthAndAdmin(http.HandlerFunc(auditHandler.ServeRequestHTTP)))
+	// Audit routes
+	r.mux.Handle("/api/v1/audit", r.withAuthAndPerm(middleware.PermReadAudit, auditHandler))
+	r.mux.Handle("/api/v1/audit/requests/", r.withAuthAndPerm(middleware.PermReadAudit, http.HandlerFunc(auditHandler.ServeRequestHTTP)))
 
 	// API key management routes (admin only)
 	if r.config.APIKeyRepo != nil {
@@ -233,17 +238,17 @@ func (r *Router) setupRoutes() error {
 		if r.config.AuditLogger != nil {
 			apiKeyHandler.SetAuditLogger(r.config.AuditLogger)
 		}
-		r.mux.Handle("/api/v1/api-keys", r.withAuthAndAdmin(apiKeyHandler))
-		r.mux.Handle("/api/v1/api-keys/", r.withAuthAndAdmin(http.HandlerFunc(apiKeyHandler.ServeKeyHTTP)))
+		r.mux.Handle("/api/v1/api-keys", r.withAuthAndPerm(middleware.PermManageAPIKeys, apiKeyHandler))
+		r.mux.Handle("/api/v1/api-keys/", r.withAuthAndPerm(middleware.PermManageAPIKeys, http.HandlerFunc(apiKeyHandler.ServeKeyHTTP)))
 	}
 
 	// ACLs read-only routes (admin only): IP whitelist config
 	if r.config.IPWhitelistConfigForRead != nil {
 		aclHandler := handler.NewACLHandler(r.config.IPWhitelistConfigForRead)
-		r.mux.Handle("/api/v1/acls/ip-whitelist", r.withAuthAndAdmin(aclHandler))
+		r.mux.Handle("/api/v1/acls/ip-whitelist", r.withAuthAndPerm(middleware.PermReadACLs, aclHandler))
 	}
 
-	// Template routes (with auth + admin required)
+	// Template routes (read: PermReadTemplates; mutate: PermInstantiateTemplate checked in handler)
 	if r.config.Template != nil && r.config.Template.TemplateRepo != nil && r.config.Template.TemplateService != nil {
 		templateHandler, err := handler.NewTemplateHandler(
 			r.config.Template.TemplateRepo,
@@ -255,8 +260,8 @@ func (r *Router) setupRoutes() error {
 			return err
 		}
 
-		r.mux.Handle("/api/v1/templates", r.withAuthAndAdmin(templateHandler))
-		r.mux.Handle("/api/v1/templates/", r.withAuthAndAdmin(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		r.mux.Handle("/api/v1/templates", r.withAuthAndPerm(middleware.PermReadTemplates, templateHandler))
+		r.mux.Handle("/api/v1/templates/", r.withAuthAndPerm(middleware.PermReadTemplates, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			// Route to instance handler if path starts with /instances/
 			if strings.HasPrefix(req.URL.Path, "/api/v1/templates/instances/") {
 				templateHandler.ServeInstanceHTTP(w, req)
@@ -267,7 +272,7 @@ func (r *Router) setupRoutes() error {
 		})))
 	}
 
-	// Preset API (agent: read-only GET; admin: full access). Requires PresetsDir; apply also requires PresetsDB and template service.
+	// Preset API (read: PermReadPresets; apply: PermApplyPreset checked in handler)
 	if r.config.PresetsDir != "" {
 		var templateSvc *service.TemplateService
 		if r.config.Template != nil {
@@ -286,8 +291,8 @@ func (r *Router) setupRoutes() error {
 		if r.config.AuditLogger != nil {
 			presetHandler.SetAuditLogger(r.config.AuditLogger)
 		}
-		r.mux.Handle("/api/v1/presets", r.withAuthAndAgentOrAdmin(presetHandler))
-		r.mux.Handle("/api/v1/presets/", r.withAuthAndAgentOrAdmin(http.HandlerFunc(presetHandler.ServeHTTP)))
+		r.mux.Handle("/api/v1/presets", r.withAuthAndPerm(middleware.PermReadPresets, presetHandler))
+		r.mux.Handle("/api/v1/presets/", r.withAuthAndPerm(middleware.PermReadPresets, http.HandlerFunc(presetHandler.ServeHTTP)))
 	}
 
 	return nil
@@ -312,14 +317,8 @@ func (r *Router) withAuth(h http.Handler) http.Handler {
 	return r.chain(h, middlewares...)
 }
 
-// requireAdmin wraps a handler with admin middleware (must be used after auth)
-func (r *Router) requireAdmin(h http.Handler) http.Handler {
-	return middleware.AdminMiddleware(r.logger)(h)
-}
-
-// withAuthAndAgentOrAdmin wraps a handler with authentication and agent-or-admin middleware.
-// Agent keys get read-only (GET) access; admin keys get full access; dev keys are denied.
-func (r *Router) withAuthAndAgentOrAdmin(h http.Handler) http.Handler {
+// withAuthAndPerm wraps a handler with authentication + RBAC permission middleware.
+func (r *Router) withAuthAndPerm(perm middleware.Permission, h http.Handler) http.Handler {
 	middlewares := []func(http.Handler) http.Handler{
 		middleware.SecurityHeadersMiddleware(),
 		middleware.RecoveryMiddleware(r.logger),
@@ -327,30 +326,10 @@ func (r *Router) withAuthAndAgentOrAdmin(h http.Handler) http.Handler {
 		middleware.LoggingMiddleware(r.logger, r.config.AuditLogger),
 		middleware.IPRateLimitMiddleware(r.rateLimiter, r.ipWhitelist, r.config.IPRateLimit, r.config.AlertService),
 		middleware.AuthMiddleware(r.authVerifier, r.logger, r.config.AuditLogger, r.config.AlertService),
-		middleware.AgentOrAdminMiddleware(r.logger, r.config.AlertService),
+		middleware.RequirePermission(perm, r.logger, r.config.AlertService),
 		middleware.RateLimitMiddleware(r.rateLimiter, r.config.AuditLogger, r.config.AlertService),
 		middleware.ContentTypeMiddleware(),
 	}
-	if r.ipWhitelist != nil {
-		middlewares = append(middlewares, middleware.IPWhitelistMiddleware(r.ipWhitelist))
-	}
-	return r.chain(h, middlewares...)
-}
-
-// withAuthAndAdmin wraps a handler with authentication and admin middleware
-func (r *Router) withAuthAndAdmin(h http.Handler) http.Handler {
-	middlewares := []func(http.Handler) http.Handler{
-		middleware.SecurityHeadersMiddleware(),
-		middleware.RecoveryMiddleware(r.logger),
-		middleware.ClientIPMiddleware(r.ipWhitelist),
-		middleware.LoggingMiddleware(r.logger, r.config.AuditLogger),
-		middleware.IPRateLimitMiddleware(r.rateLimiter, r.ipWhitelist, r.config.IPRateLimit, r.config.AlertService),
-		middleware.AuthMiddleware(r.authVerifier, r.logger, r.config.AuditLogger, r.config.AlertService),
-		middleware.AdminMiddleware(r.logger, r.config.AlertService),
-		middleware.RateLimitMiddleware(r.rateLimiter, r.config.AuditLogger, r.config.AlertService),
-		middleware.ContentTypeMiddleware(),
-	}
-	// Add IP whitelist as outermost middleware (checked first)
 	if r.ipWhitelist != nil {
 		middlewares = append(middlewares, middleware.IPWhitelistMiddleware(r.ipWhitelist))
 	}

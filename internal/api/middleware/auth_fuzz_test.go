@@ -100,7 +100,7 @@ func setupFuzzVerifier(t testing.TB) (*auth.Verifier, ed25519.PublicKey, ed25519
 			Name:         "Fuzz Test Key",
 			PublicKeyHex: hex.EncodeToString(pub),
 			Enabled:      true,
-			Admin:        true,
+			Role:         types.RoleAdmin,
 		},
 	}}
 

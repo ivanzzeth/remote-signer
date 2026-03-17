@@ -131,13 +131,28 @@ func (a *AuditLogger) LogRuleCreated(ctx context.Context, apiKeyID, clientIP str
 	})
 }
 
-// LogRuleUpdated logs a rule update event.
-func (a *AuditLogger) LogRuleUpdated(ctx context.Context, apiKeyID, clientIP string, ruleID types.RuleID, ruleName string) {
+// RuleUpdateDiff holds before/after config for audit trail.
+type RuleUpdateDiff struct {
+	OldConfig json.RawMessage `json:"old_config,omitempty"`
+	NewConfig json.RawMessage `json:"new_config,omitempty"`
+}
+
+// LogRuleUpdated logs a rule update event with optional before/after config diff.
+func (a *AuditLogger) LogRuleUpdated(ctx context.Context, apiKeyID, clientIP string, ruleID types.RuleID, ruleName string, oldConfig, newConfig []byte) {
+	var details []byte
+	if oldConfig != nil || newConfig != nil {
+		diff := RuleUpdateDiff{
+			OldConfig: oldConfig,
+			NewConfig: newConfig,
+		}
+		details, _ = json.Marshal(diff)
+	}
 	a.log(ctx, &types.AuditRecord{
 		EventType:    types.AuditEventTypeRuleUpdated,
 		APIKeyID:     apiKeyID,
 		ActorAddress: clientIP,
 		RuleID:       &ruleID,
+		Details:      details,
 		ErrorMessage: fmt.Sprintf("rule updated: %s", ruleName),
 	})
 }
@@ -150,6 +165,28 @@ func (a *AuditLogger) LogRuleDeleted(ctx context.Context, apiKeyID, clientIP str
 		ActorAddress: clientIP,
 		RuleID:       &ruleID,
 		ErrorMessage: fmt.Sprintf("rule deleted: %s", string(ruleID)),
+	})
+}
+
+// LogRuleApproved logs an admin approval of a pending rule.
+func (a *AuditLogger) LogRuleApproved(ctx context.Context, adminKeyID, clientIP string, ruleID types.RuleID, originalOwner string) {
+	a.log(ctx, &types.AuditRecord{
+		EventType:    types.AuditEventTypeRuleApproved,
+		APIKeyID:     adminKeyID,
+		ActorAddress: clientIP,
+		RuleID:       &ruleID,
+		ErrorMessage: fmt.Sprintf("rule approved: owner=%s", originalOwner),
+	})
+}
+
+// LogRuleRejected logs an admin rejection of a pending rule.
+func (a *AuditLogger) LogRuleRejected(ctx context.Context, adminKeyID, clientIP string, ruleID types.RuleID, originalOwner, reason string) {
+	a.log(ctx, &types.AuditRecord{
+		EventType:    types.AuditEventTypeRuleRejected,
+		APIKeyID:     adminKeyID,
+		ActorAddress: clientIP,
+		RuleID:       &ruleID,
+		ErrorMessage: fmt.Sprintf("rule rejected: owner=%s reason=%s", originalOwner, reason),
 	})
 }
 
@@ -329,6 +366,8 @@ var highRiskEvents = map[types.AuditEventType]bool{
 	types.AuditEventTypeRuleCreated:      true,
 	types.AuditEventTypeRuleUpdated:      true,
 	types.AuditEventTypeRuleDeleted:      true,
+	types.AuditEventTypeRuleApproved:     true,
+	types.AuditEventTypeRuleRejected:     true,
 	// Config sync (startup + SIGHUP reload) — only fires on actual changes
 	types.AuditEventTypeConfigReloaded:   true,
 	types.AuditEventTypeTemplateSynced:   true,

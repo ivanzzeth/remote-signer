@@ -171,7 +171,7 @@ func adminAPIKey() *types.APIKey {
 	return &types.APIKey{
 		ID:    "test-admin",
 		Name:  "Test Admin",
-		Admin: true,
+		Role:  types.RoleAdmin,
 	}
 }
 

@@ -122,8 +122,8 @@ func (h *RequestHandler) getRequest(w http.ResponseWriter, r *http.Request, apiK
 		return
 	}
 
-	// Non-admin may only view requests created with their API key; admin may view any
-	if !apiKey.Admin && req.APIKeyID != apiKey.ID {
+	// Non-admin/dev may only view requests created with their API key
+	if !apiKey.IsAdmin() && !apiKey.IsDev() && req.APIKeyID != apiKey.ID {
 		h.writeError(w, "not authorized to view this request", http.StatusForbidden)
 		return
 	}
@@ -170,11 +170,11 @@ func (h *ListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build filter: non-admin keys only see their own requests; admin sees all
+	// Build filter: admin/dev see all requests; others see only their own
 	filter := storage.RequestFilter{
 		Limit: 20, // default limit
 	}
-	if !apiKey.Admin {
+	if !apiKey.IsAdmin() && !apiKey.IsDev() {
 		filter.APIKeyID = &apiKey.ID
 	}
 

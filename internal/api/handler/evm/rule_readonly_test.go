@@ -123,7 +123,7 @@ func (m *mockRuleRepo) addRule(rule *types.Rule) {
 func adminCtx() context.Context {
 	return context.WithValue(context.Background(), middleware.APIKeyContextKey, &types.APIKey{
 		ID:    "admin-key",
-		Admin: true,
+		Role:  types.RoleAdmin,
 	})
 }
 

@@ -1,6 +1,10 @@
 package types
 
-import "time"
+import (
+	"time"
+
+	"github.com/lib/pq"
+)
 
 // RuleID is a unique identifier for rules
 type RuleID string
@@ -50,6 +54,16 @@ const (
 	RuleModeBlocklist RuleMode = "blocklist"
 )
 
+// RuleStatus represents the lifecycle status of a rule.
+type RuleStatus string
+
+const (
+	RuleStatusActive          RuleStatus = "active"
+	RuleStatusPendingApproval RuleStatus = "pending_approval"
+	RuleStatusRejected        RuleStatus = "rejected"
+	RuleStatusRevoked         RuleStatus = "revoked"
+)
+
 // Rule represents a signing authorization rule
 type Rule struct {
 	ID          RuleID     `json:"id" gorm:"primaryKey;type:varchar(64)"`
@@ -62,8 +76,21 @@ type Rule struct {
 	// Scope
 	ChainType     *ChainType `json:"chain_type,omitempty" gorm:"index;type:varchar(32)"` // nil = all chains
 	ChainID       *string    `json:"chain_id,omitempty" gorm:"type:varchar(32)"`
-	APIKeyID      *string    `json:"api_key_id,omitempty" gorm:"index;type:varchar(64)"`
 	SignerAddress *string    `json:"signer_address,omitempty" gorm:"index;type:varchar(128)"`
+
+	// Ownership & scoping
+	// Owner is the API key ID that created this rule. "config" for rules from config file / preset CLI.
+	Owner string `json:"owner" gorm:"type:varchar(64);not null;default:'config';index"`
+	// AppliedTo controls which API keys this rule affects at runtime.
+	// ["*"] = all keys (admin only), ["self"] = owner only (default for non-admin),
+	// ["key-1", "key-2"] = specific keys (admin only).
+	AppliedTo pq.StringArray `json:"applied_to" gorm:"type:text[];not null"`
+	// Status: "active", "pending_approval", "rejected", "revoked"
+	Status RuleStatus `json:"status" gorm:"type:varchar(32);not null;default:'active';index"`
+	// ApprovedBy: admin key ID that approved a pending rule.
+	ApprovedBy *string `json:"approved_by,omitempty" gorm:"type:varchar(64)"`
+	// Immutable: when true, rule cannot be modified or deleted via API.
+	Immutable bool `json:"immutable" gorm:"default:false"`
 
 	// Chain-specific config stored as JSON
 	Config []byte `json:"config" gorm:"type:jsonb"`

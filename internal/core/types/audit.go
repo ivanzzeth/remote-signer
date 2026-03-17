@@ -26,9 +26,11 @@ const (
 	AuditEventTypeApprovalDenied   AuditEventType = "approval_denied"
 
 	// Rule management events
-	AuditEventTypeRuleCreated AuditEventType = "rule_created"
-	AuditEventTypeRuleUpdated AuditEventType = "rule_updated"
-	AuditEventTypeRuleDeleted AuditEventType = "rule_deleted"
+	AuditEventTypeRuleCreated  AuditEventType = "rule_created"
+	AuditEventTypeRuleUpdated  AuditEventType = "rule_updated"
+	AuditEventTypeRuleDeleted  AuditEventType = "rule_deleted"
+	AuditEventTypeRuleApproved AuditEventType = "rule_approved"
+	AuditEventTypeRuleRejected AuditEventType = "rule_rejected"
 
 	// Security events
 	AuditEventTypeRateLimitHit AuditEventType = "rate_limit_hit"

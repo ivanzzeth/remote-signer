@@ -140,7 +140,7 @@ func auditAPIKey() *types.APIKey {
 		ID:      "audit-test-key",
 		Name:    "Audit Test Key",
 		Enabled: true,
-		Admin:   true,
+		Role:    types.RoleAdmin,
 	}
 }
 

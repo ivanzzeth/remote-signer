@@ -347,7 +347,7 @@ func testAPIKey() *types.APIKey {
 		ID:      "test-key-001",
 		Name:    "Test Key",
 		Enabled: true,
-		Admin:   true,
+		Role:    types.RoleAdmin,
 	}
 }
 
@@ -1641,8 +1641,8 @@ func TestInstantiateTemplate(t *testing.T) {
 		if rule.ChainID == nil || *rule.ChainID != "1" {
 			t.Errorf("expected ChainID '1', got %v", rule.ChainID)
 		}
-		if rule.APIKeyID == nil || *rule.APIKeyID != "key-123" {
-			t.Errorf("expected APIKeyID 'key-123', got %v", rule.APIKeyID)
+		if rule.Owner != "key-123" {
+			t.Errorf("expected Owner 'key-123', got %v", rule.Owner)
 		}
 		if rule.SignerAddress == nil || *rule.SignerAddress != signerAddr {
 			t.Errorf("expected SignerAddress %q, got %v", signerAddr, rule.SignerAddress)

@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
+
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/audit"
 	evmchain "github.com/ivanzzeth/remote-signer/internal/chain/evm"
@@ -27,15 +29,33 @@ import (
 // - <custom>: config custom IDs (alphanumeric, hyphen, underscore, 1-64 chars).
 var ruleIDPattern = regexp.MustCompile(`^(rule_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|cfg_[0-9a-f]{16}|cfg_\d+|[a-zA-Z0-9][0-9A-Za-z_\-]{0,63})$`)
 
+// apiKeyIDPattern validates API key ID format (SA-6).
+var apiKeyIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
+
+// blockedAgentRuleTypes are rule types that agents cannot create or modify to.
+var blockedAgentRuleTypes = map[types.RuleType]bool{
+	types.RuleTypeEVMJS:                  true,
+	types.RuleTypeSignerRestriction:      true,
+	types.RuleTypeEVMSolidityExpression:  true,
+}
+
+// blockedDevRuleTypes are rule types that dev role cannot create.
+var blockedDevRuleTypes = map[types.RuleType]bool{
+	types.RuleTypeSignerRestriction: true,
+}
+
 // RuleHandler handles rule management endpoints
 type RuleHandler struct {
 	ruleRepo          storage.RuleRepository
 	budgetRepo        storage.BudgetRepository
+	apiKeyRepo        storage.APIKeyRepository
 	solidityValidator *evmchain.SolidityRuleValidator
 	jsEvaluator       *evmchain.JSRuleEvaluator
 	auditLogger       *audit.AuditLogger
 	readOnly          bool // when true, block all rule mutations via API
 	logger            *slog.Logger
+	maxRulesPerKey    int  // per-key rule count limit (0 = no limit)
+	requireApproval   bool // require admin approval for agent whitelist rules
 }
 
 // RuleHandlerOption is a functional option for RuleHandler
@@ -76,6 +96,27 @@ func WithReadOnly() RuleHandlerOption {
 	}
 }
 
+// WithAPIKeyRepo sets the API key repository for validating applied_to key IDs.
+func WithAPIKeyRepo(repo storage.APIKeyRepository) RuleHandlerOption {
+	return func(h *RuleHandler) {
+		h.apiKeyRepo = repo
+	}
+}
+
+// WithMaxRulesPerKey sets the per-key rule count limit.
+func WithMaxRulesPerKey(max int) RuleHandlerOption {
+	return func(h *RuleHandler) {
+		h.maxRulesPerKey = max
+	}
+}
+
+// WithRequireApproval enables admin approval for agent whitelist rules.
+func WithRequireApproval(require bool) RuleHandlerOption {
+	return func(h *RuleHandler) {
+		h.requireApproval = require
+	}
+}
+
 // NewRuleHandler creates a new rule handler
 func NewRuleHandler(ruleRepo storage.RuleRepository, logger *slog.Logger, opts ...RuleHandlerOption) (*RuleHandler, error) {
 	if ruleRepo == nil {
@@ -104,7 +145,11 @@ type RuleResponse struct {
 	Source            string          `json:"source"`
 	ChainType         *string         `json:"chain_type,omitempty"`
 	ChainID           *string         `json:"chain_id,omitempty"`
-	APIKeyID          *string         `json:"api_key_id,omitempty"`
+	Owner             *string         `json:"owner,omitempty"`
+	AppliedTo         []string        `json:"applied_to,omitempty"`
+	Status            string          `json:"status,omitempty"`
+	ApprovedBy        *string         `json:"approved_by,omitempty"`
+	Immutable         bool            `json:"immutable,omitempty"`
 	SignerAddress     *string         `json:"signer_address,omitempty"`
 	Config            json.RawMessage `json:"config,omitempty"`
 	Enabled           bool            `json:"enabled"`
@@ -161,6 +206,24 @@ func (h *RuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Sub-resource: /api/v1/evm/rules/{id}/approve or /api/v1/evm/rules/{id}/reject
+	if strings.HasSuffix(path, "/approve") {
+		ruleID := strings.TrimSuffix(path, "/approve")
+		ruleID = strings.Trim(ruleID, "/")
+		if ruleID != "" && !strings.Contains(ruleID, "/") && r.Method == http.MethodPost {
+			h.approveRule(w, r, ruleID)
+			return
+		}
+	}
+	if strings.HasSuffix(path, "/reject") {
+		ruleID := strings.TrimSuffix(path, "/reject")
+		ruleID = strings.Trim(ruleID, "/")
+		if ruleID != "" && !strings.Contains(ruleID, "/") && r.Method == http.MethodPost {
+			h.rejectRule(w, r, ruleID)
+			return
+		}
+	}
+
 	// Specific rule operations: /api/v1/evm/rules/{id}
 	ruleID := strings.Trim(path, "/")
 	if !ruleIDPattern.MatchString(ruleID) {
@@ -195,10 +258,11 @@ type CreateRuleRequest struct {
 	Mode          string                 `json:"mode"`
 	ChainType     *string                `json:"chain_type,omitempty"`
 	ChainID       *string                `json:"chain_id,omitempty"`
-	APIKeyID      *string                `json:"api_key_id,omitempty"`
 	SignerAddress *string                `json:"signer_address,omitempty"`
 	Config        map[string]interface{} `json:"config"`
 	Enabled       bool                   `json:"enabled"`
+	Immutable     bool                   `json:"immutable,omitempty"`
+	AppliedTo     []string               `json:"applied_to,omitempty"`
 	TestCases     []JSRuleTestCase       `json:"test_cases,omitempty"` // required for evm_js rules
 }
 
@@ -206,18 +270,30 @@ type CreateRuleRequest struct {
 type UpdateRuleRequest struct {
 	Name          string                 `json:"name,omitempty"`
 	Description   string                 `json:"description,omitempty"`
+	Type          string                 `json:"type,omitempty"`
 	Config        map[string]interface{} `json:"config,omitempty"`
 	ChainType     *string                `json:"chain_type,omitempty"`
 	ChainID       *string                `json:"chain_id,omitempty"`
-	APIKeyID      *string                `json:"api_key_id,omitempty"`
 	SignerAddress *string                `json:"signer_address,omitempty"`
 	Enabled       *bool                  `json:"enabled,omitempty"`
+	AppliedTo     []string               `json:"applied_to,omitempty"`
 	TestCases     []JSRuleTestCase       `json:"test_cases,omitempty"` // required for evm_js when updating config
+}
+
+// RejectRuleRequest represents a request body for POST /evm/rules/:id/reject
+type RejectRuleRequest struct {
+	Reason string `json:"reason"`
 }
 
 func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
 	if h.readOnly {
 		h.writeError(w, "rule creation via API is disabled (security.rules_api_readonly)", http.StatusForbidden)
+		return
+	}
+
+	apiKey := middleware.GetAPIKey(r.Context())
+	if apiKey == nil {
+		h.writeError(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
@@ -246,6 +322,76 @@ func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, "mode must be 'whitelist' or 'blocklist'", http.StatusBadRequest)
 		return
 	}
+
+	ruleType := types.RuleType(req.Type)
+
+	// Agent: block restricted rule types
+	if apiKey.IsAgent() && blockedAgentRuleTypes[ruleType] {
+		h.writeError(w, fmt.Sprintf("agent role cannot create rules of type %q", req.Type), http.StatusForbidden)
+		return
+	}
+
+	// Dev: block signer_restriction
+	if apiKey.IsDev() && blockedDevRuleTypes[ruleType] {
+		h.writeError(w, fmt.Sprintf("dev role cannot create rules of type %q", req.Type), http.StatusForbidden)
+		return
+	}
+
+	// Per-key rule count limit (admin exempt)
+	if !apiKey.IsAdmin() && h.maxRulesPerKey > 0 {
+		ownerID := apiKey.ID
+		count, err := h.ruleRepo.Count(r.Context(), storage.RuleFilter{Owner: &ownerID})
+		if err != nil {
+			h.logger.Error("failed to count rules for owner", "error", err, "owner", ownerID)
+			h.writeError(w, "failed to check rule count", http.StatusInternalServerError)
+			return
+		}
+		if count >= h.maxRulesPerKey {
+			h.writeError(w, fmt.Sprintf("rule limit exceeded: maximum %d rules per API key", h.maxRulesPerKey), http.StatusForbidden)
+			return
+		}
+	}
+
+	// Determine applied_to based on role
+	var appliedTo pq.StringArray
+	if apiKey.IsAdmin() {
+		if len(req.AppliedTo) > 0 {
+			appliedTo = pq.StringArray(req.AppliedTo)
+		} else {
+			appliedTo = pq.StringArray{"*"}
+		}
+		// Validate non-wildcard key IDs exist (SA-6)
+		if h.apiKeyRepo != nil {
+			for _, keyID := range appliedTo {
+				if keyID == "*" || keyID == "self" {
+					continue
+				}
+				if !apiKeyIDPattern.MatchString(keyID) {
+					h.writeError(w, fmt.Sprintf("invalid applied_to key ID format: %q", keyID), http.StatusBadRequest)
+					return
+				}
+				if _, err := h.apiKeyRepo.Get(r.Context(), keyID); err != nil {
+					if types.IsNotFound(err) {
+						h.writeError(w, fmt.Sprintf("applied_to key ID not found: %q", keyID), http.StatusBadRequest)
+						return
+					}
+					h.logger.Error("failed to validate applied_to key ID", "error", err, "key_id", keyID)
+					h.writeError(w, "failed to validate applied_to", http.StatusInternalServerError)
+					return
+				}
+			}
+		}
+	} else {
+		// Non-admin: force applied_to = ["self"]
+		appliedTo = pq.StringArray{"self"}
+	}
+
+	// Determine status based on role and config
+	status := types.RuleStatusActive
+	if apiKey.IsAgent() && h.requireApproval && req.Mode == "whitelist" {
+		status = types.RuleStatusPendingApproval
+	}
+	// Agent blocklist rules are always active immediately (self-restriction is safe)
 
 	// Validate rule config format (shared with config load and validate-rules)
 	if err := ruleconfig.ValidateRuleConfig(req.Type, req.Config); err != nil {
@@ -277,16 +423,26 @@ func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Only admin can set immutable
+	immutable := false
+	if apiKey.IsAdmin() {
+		immutable = req.Immutable
+	}
+
 	// Build rule
 	rule := &types.Rule{
 		ID:          ruleID,
 		Name:        req.Name,
 		Description: req.Description,
-		Type:        types.RuleType(req.Type),
+		Type:        ruleType,
 		Mode:        types.RuleMode(req.Mode),
 		Source:      types.RuleSourceAPI,
 		Config:      configJSON,
 		Enabled:     req.Enabled,
+		Owner:       apiKey.ID, // auto-set from caller
+		AppliedTo:   appliedTo,
+		Status:      status,
+		Immutable:   immutable,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
@@ -302,9 +458,6 @@ func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ChainID != nil {
 		rule.ChainID = req.ChainID
-	}
-	if req.APIKeyID != nil {
-		rule.APIKeyID = req.APIKeyID
 	}
 	if req.SignerAddress != nil {
 		rule.SignerAddress = req.SignerAddress
@@ -335,23 +488,29 @@ func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.logger.Info("rule created", "rule_id", rule.ID, "name", rule.Name)
+	h.logger.Info("rule created", "rule_id", rule.ID, "name", rule.Name, "owner", rule.Owner, "applied_to", rule.AppliedTo, "status", rule.Status)
 	if h.auditLogger != nil {
-		apiKey := middleware.GetAPIKey(r.Context())
-		apiKeyID := ""
-		if apiKey != nil {
-			apiKeyID = apiKey.ID
-		}
 		clientIP, _ := r.Context().Value(middleware.ClientIPContextKey).(string)
-		h.auditLogger.LogRuleCreated(r.Context(), apiKeyID, clientIP, rule.ID, rule.Name)
+		h.auditLogger.LogRuleCreated(r.Context(), apiKey.ID, clientIP, rule.ID, rule.Name)
 	}
-	h.writeJSON(w, h.toRuleResponse(rule), http.StatusCreated)
+
+	responseStatus := http.StatusCreated
+	if rule.Status == types.RuleStatusPendingApproval {
+		responseStatus = http.StatusAccepted
+	}
+	h.writeJSON(w, h.toRuleResponse(rule), responseStatus)
 }
 
 func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID string) {
 	var req UpdateRuleRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.writeError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	apiKey := middleware.GetAPIKey(r.Context())
+	if apiKey == nil {
+		h.writeError(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
@@ -375,6 +534,35 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 		h.writeError(w, "cannot update config-sourced rules via API", http.StatusForbidden)
 		return
 	}
+
+	// Immutable check
+	if rule.Immutable {
+		h.writeError(w, "cannot modify immutable rule", http.StatusForbidden)
+		return
+	}
+
+	// Ownership check: only owner or admin can modify
+	if !apiKey.IsAdmin() && rule.Owner != apiKey.ID {
+		h.writeError(w, "permission denied: can only modify own rules", http.StatusForbidden)
+		return
+	}
+
+	// Agent: block changing to restricted rule types
+	if req.Type != "" && apiKey.IsAgent() && blockedAgentRuleTypes[types.RuleType(req.Type)] {
+		h.writeError(w, fmt.Sprintf("agent role cannot change rule type to %q", req.Type), http.StatusForbidden)
+		return
+	}
+
+	// Agent: cannot change applied_to
+	if len(req.AppliedTo) > 0 && !apiKey.IsAdmin() {
+		// Non-admin cannot change applied_to (forced to ["self"])
+		h.writeError(w, "only admin can change applied_to", http.StatusForbidden)
+		return
+	}
+
+	// Save old config for audit diff
+	oldConfig := make([]byte, len(rule.Config))
+	copy(oldConfig, rule.Config)
 
 	// Update fields if provided
 	if req.Name != "" {
@@ -409,15 +597,16 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 	if req.ChainID != nil {
 		rule.ChainID = req.ChainID
 	}
-	if req.APIKeyID != nil {
-		rule.APIKeyID = req.APIKeyID
-	}
 	if req.SignerAddress != nil {
 		if !validate.IsValidEthereumAddress(*req.SignerAddress) {
 			h.writeError(w, "invalid signer_address: must be 0x followed by 40 hex characters", http.StatusBadRequest)
 			return
 		}
 		rule.SignerAddress = req.SignerAddress
+	}
+	// Admin can change applied_to
+	if len(req.AppliedTo) > 0 && apiKey.IsAdmin() {
+		rule.AppliedTo = pq.StringArray(req.AppliedTo)
 	}
 	rule.UpdatedAt = time.Now()
 
@@ -448,13 +637,8 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 
 	h.logger.Info("rule updated", "rule_id", ruleID)
 	if h.auditLogger != nil {
-		apiKey := middleware.GetAPIKey(r.Context())
-		apiKeyID := ""
-		if apiKey != nil {
-			apiKeyID = apiKey.ID
-		}
 		clientIP, _ := r.Context().Value(middleware.ClientIPContextKey).(string)
-		h.auditLogger.LogRuleUpdated(r.Context(), apiKeyID, clientIP, rule.ID, rule.Name)
+		h.auditLogger.LogRuleUpdated(r.Context(), apiKey.ID, clientIP, rule.ID, rule.Name, oldConfig, rule.Config)
 	}
 	h.writeJSON(w, h.toRuleResponse(rule), http.StatusOK)
 }
@@ -488,8 +672,8 @@ func (h *RuleHandler) listRules(w http.ResponseWriter, r *http.Request) {
 		}
 		filter.SignerAddress = &signerAddress
 	}
-	if apiKeyID := query.Get("api_key_id"); apiKeyID != "" {
-		filter.APIKeyID = &apiKeyID
+	if owner := query.Get("owner"); owner != "" {
+		filter.Owner = &owner
 	}
 	if ruleType := query.Get("type"); ruleType != "" {
 		if !validate.IsValidRuleType(ruleType) {
@@ -546,7 +730,7 @@ func (h *RuleHandler) listRules(w http.ResponseWriter, r *http.Request) {
 
 	// Agent keys get redacted responses (no script source in config)
 	apiKey := middleware.GetAPIKey(r.Context())
-	redact := apiKey != nil && apiKey.Agent
+	redact := apiKey != nil && apiKey.IsAgent()
 
 	resp := ListRulesResponse{
 		Rules: make([]RuleResponse, 0, len(rules)),
@@ -578,7 +762,7 @@ func (h *RuleHandler) getRule(w http.ResponseWriter, r *http.Request, ruleID str
 	rr := h.toRuleResponse(rule)
 	// Agent keys get redacted responses (no script source in config)
 	apiKey := middleware.GetAPIKey(r.Context())
-	if apiKey != nil && apiKey.Agent {
+	if apiKey != nil && apiKey.IsAgent() {
 		rr.Config = nil
 	}
 	h.writeJSON(w, rr, http.StatusOK)
@@ -598,6 +782,12 @@ func (h *RuleHandler) listBudgets(w http.ResponseWriter, r *http.Request, ruleID
 }
 
 func (h *RuleHandler) deleteRule(w http.ResponseWriter, r *http.Request, ruleID string) {
+	apiKey := middleware.GetAPIKey(r.Context())
+	if apiKey == nil {
+		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	// Fetch rule first for readOnly and source guards
 	rule, err := h.ruleRepo.Get(r.Context(), types.RuleID(ruleID))
 	if err != nil {
@@ -619,6 +809,18 @@ func (h *RuleHandler) deleteRule(w http.ResponseWriter, r *http.Request, ruleID 
 		return
 	}
 
+	// Immutable check
+	if rule.Immutable {
+		h.writeError(w, "cannot delete immutable rule", http.StatusForbidden)
+		return
+	}
+
+	// Ownership check: only owner or admin can delete
+	if !apiKey.IsAdmin() && rule.Owner != apiKey.ID {
+		h.writeError(w, "permission denied: can only delete own rules", http.StatusForbidden)
+		return
+	}
+
 	if err := h.ruleRepo.Delete(r.Context(), rule.ID); err != nil {
 		if types.IsNotFound(err) {
 			h.writeError(w, "rule not found", http.StatusNotFound)
@@ -631,15 +833,112 @@ func (h *RuleHandler) deleteRule(w http.ResponseWriter, r *http.Request, ruleID 
 
 	h.logger.Info("rule deleted", "rule_id", ruleID)
 	if h.auditLogger != nil {
-		apiKey := middleware.GetAPIKey(r.Context())
-		apiKeyID := ""
-		if apiKey != nil {
-			apiKeyID = apiKey.ID
-		}
 		clientIP, _ := r.Context().Value(middleware.ClientIPContextKey).(string)
-		h.auditLogger.LogRuleDeleted(r.Context(), apiKeyID, clientIP, rule.ID)
+		h.auditLogger.LogRuleDeleted(r.Context(), apiKey.ID, clientIP, rule.ID)
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// approveRule handles POST /api/v1/evm/rules/{id}/approve (admin only via RBAC)
+func (h *RuleHandler) approveRule(w http.ResponseWriter, r *http.Request, ruleID string) {
+	apiKey := middleware.GetAPIKey(r.Context())
+	if apiKey == nil {
+		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Only admin can approve (enforced by RBAC middleware PermApproveRule,
+	// but double-check here for defense in depth)
+	if !apiKey.IsAdmin() {
+		h.writeError(w, "permission denied: only admin can approve rules", http.StatusForbidden)
+		return
+	}
+
+	rule, err := h.ruleRepo.Get(r.Context(), types.RuleID(ruleID))
+	if err != nil {
+		if types.IsNotFound(err) {
+			h.writeError(w, "rule not found", http.StatusNotFound)
+			return
+		}
+		h.logger.Error("failed to get rule", "error", err, "rule_id", ruleID)
+		h.writeError(w, "failed to get rule", http.StatusInternalServerError)
+		return
+	}
+
+	if rule.Status != types.RuleStatusPendingApproval {
+		h.writeError(w, fmt.Sprintf("rule is not pending approval (current status: %s)", rule.Status), http.StatusBadRequest)
+		return
+	}
+
+	rule.Status = types.RuleStatusActive
+	approvedBy := apiKey.ID
+	rule.ApprovedBy = &approvedBy
+	rule.UpdatedAt = time.Now()
+
+	if err := h.ruleRepo.Update(r.Context(), rule); err != nil {
+		h.logger.Error("failed to approve rule", "error", err, "rule_id", ruleID)
+		h.writeError(w, "failed to approve rule", http.StatusInternalServerError)
+		return
+	}
+
+	h.logger.Info("rule approved", "rule_id", ruleID, "approved_by", apiKey.ID)
+	if h.auditLogger != nil {
+		clientIP, _ := r.Context().Value(middleware.ClientIPContextKey).(string)
+		h.auditLogger.LogRuleApproved(r.Context(), apiKey.ID, clientIP, rule.ID, rule.Owner)
+	}
+	h.writeJSON(w, h.toRuleResponse(rule), http.StatusOK)
+}
+
+// rejectRule handles POST /api/v1/evm/rules/{id}/reject (admin only via RBAC)
+func (h *RuleHandler) rejectRule(w http.ResponseWriter, r *http.Request, ruleID string) {
+	apiKey := middleware.GetAPIKey(r.Context())
+	if apiKey == nil {
+		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if !apiKey.IsAdmin() {
+		h.writeError(w, "permission denied: only admin can reject rules", http.StatusForbidden)
+		return
+	}
+
+	var req RejectRuleRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		// Allow empty body (reason is optional)
+		req.Reason = ""
+	}
+
+	rule, err := h.ruleRepo.Get(r.Context(), types.RuleID(ruleID))
+	if err != nil {
+		if types.IsNotFound(err) {
+			h.writeError(w, "rule not found", http.StatusNotFound)
+			return
+		}
+		h.logger.Error("failed to get rule", "error", err, "rule_id", ruleID)
+		h.writeError(w, "failed to get rule", http.StatusInternalServerError)
+		return
+	}
+
+	if rule.Status != types.RuleStatusPendingApproval {
+		h.writeError(w, fmt.Sprintf("rule is not pending approval (current status: %s)", rule.Status), http.StatusBadRequest)
+		return
+	}
+
+	rule.Status = types.RuleStatusRejected
+	rule.UpdatedAt = time.Now()
+
+	if err := h.ruleRepo.Update(r.Context(), rule); err != nil {
+		h.logger.Error("failed to reject rule", "error", err, "rule_id", ruleID)
+		h.writeError(w, "failed to reject rule", http.StatusInternalServerError)
+		return
+	}
+
+	h.logger.Info("rule rejected", "rule_id", ruleID, "rejected_by", apiKey.ID, "reason", req.Reason)
+	if h.auditLogger != nil {
+		clientIP, _ := r.Context().Value(middleware.ClientIPContextKey).(string)
+		h.auditLogger.LogRuleRejected(r.Context(), apiKey.ID, clientIP, rule.ID, rule.Owner, req.Reason)
+	}
+	h.writeJSON(w, h.toRuleResponse(rule), http.StatusOK)
 }
 
 func (h *RuleHandler) toRuleResponse(rule *types.Rule) RuleResponse {
@@ -655,6 +954,7 @@ func (h *RuleHandler) toRuleResponse(rule *types.Rule) RuleResponse {
 		CreatedAt:   rule.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:   rule.UpdatedAt.Format(time.RFC3339),
 		MatchCount:  rule.MatchCount,
+		Immutable:   rule.Immutable,
 	}
 
 	if rule.ChainType != nil {
@@ -664,8 +964,18 @@ func (h *RuleHandler) toRuleResponse(rule *types.Rule) RuleResponse {
 	if rule.ChainID != nil {
 		resp.ChainID = rule.ChainID
 	}
-	if rule.APIKeyID != nil {
-		resp.APIKeyID = rule.APIKeyID
+	if rule.Owner != "" {
+		owner := rule.Owner
+		resp.Owner = &owner
+	}
+	if len(rule.AppliedTo) > 0 {
+		resp.AppliedTo = []string(rule.AppliedTo)
+	}
+	if rule.Status != "" {
+		resp.Status = string(rule.Status)
+	}
+	if rule.ApprovedBy != nil {
+		resp.ApprovedBy = rule.ApprovedBy
 	}
 	if rule.SignerAddress != nil {
 		resp.SignerAddress = rule.SignerAddress

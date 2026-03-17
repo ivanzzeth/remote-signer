@@ -32,16 +32,13 @@ func withDelegationCtx(ctx context.Context, depth int, path map[types.RuleID]boo
 	return context.WithValue(ctx, delegationCtxKey{}, delegationCtxVal{Depth: depth, Path: path})
 }
 
-// ruleScopeMatches returns true if the rule's scope (ChainType, ChainID, APIKeyID, SignerAddress) matches the request.
+// ruleScopeMatches returns true if the rule's scope (ChainType, ChainID, SignerAddress) matches the request.
 // Nil rule scope fields mean "any".
 func ruleScopeMatches(rule *types.Rule, req *types.SignRequest) bool {
 	if rule.ChainType != nil && *rule.ChainType != req.ChainType {
 		return false
 	}
 	if rule.ChainID != nil && *rule.ChainID != req.ChainID {
-		return false
-	}
-	if rule.APIKeyID != nil && *rule.APIKeyID != req.APIKeyID {
 		return false
 	}
 	if rule.SignerAddress != nil && !strings.EqualFold(*rule.SignerAddress, req.SignerAddress) {
@@ -55,22 +52,19 @@ func (e *WhitelistRuleEngine) logScopeMismatch(rule *types.Rule, req *types.Sign
 	if e.logger == nil || rule == nil || req == nil {
 		return
 	}
-	var ruleChainType, ruleChainID, ruleAPIKeyID, ruleSigner string
+	var ruleChainType, ruleChainID, ruleSigner string
 	if rule.ChainType != nil {
 		ruleChainType = string(*rule.ChainType)
 	}
 	if rule.ChainID != nil {
 		ruleChainID = *rule.ChainID
 	}
-	if rule.APIKeyID != nil {
-		ruleAPIKeyID = *rule.APIKeyID
-	}
 	if rule.SignerAddress != nil {
 		ruleSigner = *rule.SignerAddress
 	}
 	e.logger.Info("delegation target scope mismatch",
 		"target_id", targetID,
-		"rule_chain_type", ruleChainType, "rule_chain_id", ruleChainID, "rule_api_key_id", ruleAPIKeyID, "rule_signer", ruleSigner,
+		"rule_chain_type", ruleChainType, "rule_chain_id", ruleChainID, "rule_owner", rule.Owner, "rule_signer", ruleSigner,
 		"req_chain_type", string(req.ChainType), "req_chain_id", req.ChainID, "req_api_key_id", req.APIKeyID, "req_signer", req.SignerAddress,
 	)
 }
@@ -188,13 +182,12 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 		return nil, fmt.Errorf("request is required")
 	}
 
-	// Get all applicable rules filtered by chain_type, chain_id, signer, api_key.
+	// Get all applicable rules filtered by chain_type, chain_id, signer.
 	// SECURITY: Use Limit=-1 to fetch ALL matching rules without pagination.
 	// A default limit (e.g. 100) could silently drop blocklist rules, allowing
 	// malicious transactions through. This is a security-critical path.
 	filter := storage.RuleFilter{
 		ChainType:     &req.ChainType,
-		APIKeyID:      &req.APIKeyID,
 		SignerAddress: &req.SignerAddress,
 		EnabledOnly:   true,
 		Limit:         -1, // No limit: must load ALL rules for security evaluation
@@ -206,6 +199,10 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 	if err != nil {
 		return nil, fmt.Errorf("failed to list rules: %w", err)
 	}
+
+	// Phase 3: Filter rules by caller's API key ID (applied_to + status scoping).
+	// Only rules with status="active" AND matching applied_to are evaluated.
+	rules = FilterRulesForCaller(rules, req.APIKeyID)
 
 	// SECURITY: Take a single RLock to filter rules and snapshot evaluators atomically.
 	// This eliminates the window where evaluators could change between filterRulesBySignType
@@ -827,7 +824,6 @@ func (e *WhitelistRuleEngine) evaluateWhitelistBatch(
 func (e *WhitelistRuleEngine) evaluateBlocklistForRequest(ctx context.Context, req *types.SignRequest, parsed *types.ParsedPayload) (*EvaluationResult, error) {
 	filter := storage.RuleFilter{
 		ChainType:     &req.ChainType,
-		APIKeyID:      &req.APIKeyID,
 		SignerAddress: &req.SignerAddress,
 		EnabledOnly:   true,
 		Limit:         -1, // No limit: must load ALL rules for security evaluation
@@ -839,6 +835,9 @@ func (e *WhitelistRuleEngine) evaluateBlocklistForRequest(ctx context.Context, r
 	if err != nil {
 		return nil, fmt.Errorf("failed to list rules for delegation blocklist check: %w", err)
 	}
+
+	// Phase 3: Filter rules by caller's API key ID (applied_to + status scoping).
+	rules = FilterRulesForCaller(rules, req.APIKeyID)
 
 	e.mu.RLock()
 	rules = e.filterRulesBySignType(rules, req.SignType)

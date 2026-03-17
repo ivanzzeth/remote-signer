@@ -231,7 +231,7 @@ func TestCloneRule_DeepCopy(t *testing.T) {
 		ID:            "r1",
 		ChainType:     &evm,
 		ChainID:       &chain,
-		APIKeyID:      &key,
+		Owner:      key,
 		SignerAddress: &signer,
 	}
 
@@ -287,13 +287,13 @@ func TestMemoryRuleRepo_List_APIKeyIDFilter(t *testing.T) {
 	key1 := "key-1"
 	key2 := "key-2"
 
-	repo.Create(ctx, &types.Rule{ID: "rk1", APIKeyID: &key1, Enabled: true})
-	repo.Create(ctx, &types.Rule{ID: "rk2", APIKeyID: &key2, Enabled: true})
-	repo.Create(ctx, &types.Rule{ID: "rk3", APIKeyID: nil, Enabled: true}) // nil = applies to all
+	repo.Create(ctx, &types.Rule{ID: "rk1", Owner: key1, Enabled: true})
+	repo.Create(ctx, &types.Rule{ID: "rk2", Owner: key2, Enabled: true})
+	repo.Create(ctx, &types.Rule{ID: "rk3", Owner: "", Enabled: true}) // nil = applies to all
 
-	list, err := repo.List(ctx, RuleFilter{APIKeyID: &key1})
+	list, err := repo.List(ctx, RuleFilter{Owner: &key1})
 	require.NoError(t, err)
-	assert.Len(t, list, 2, "should include key-1 specific and nil (any key)")
+	assert.Len(t, list, 1, "should include key-1 specific only (Owner filtering is exact match)")
 }
 
 func TestMemoryRuleRepo_List_SignerAddressFilter(t *testing.T) {
@@ -336,12 +336,12 @@ func TestMemoryRuleRepo_List_CombinedFilters(t *testing.T) {
 	signer1 := "0xAAA"
 
 	repo.Create(ctx, &types.Rule{
-		ID: "rcf1", ChainType: &evm, ChainID: &chain1, APIKeyID: &key1,
+		ID: "rcf1", ChainType: &evm, ChainID: &chain1, Owner: key1,
 		SignerAddress: &signer1, Type: types.RuleTypeEVMAddressList,
 		Source: types.RuleSourceConfig, Enabled: true,
 	})
 	repo.Create(ctx, &types.Rule{
-		ID: "rcf2", ChainType: &solana, ChainID: &chain1, APIKeyID: &key1,
+		ID: "rcf2", ChainType: &solana, ChainID: &chain1, Owner: key1,
 		SignerAddress: &signer1, Type: types.RuleTypeEVMAddressList,
 		Source: types.RuleSourceConfig, Enabled: true,
 	})
@@ -351,7 +351,7 @@ func TestMemoryRuleRepo_List_CombinedFilters(t *testing.T) {
 	list, err := repo.List(ctx, RuleFilter{
 		ChainType:     &evm,
 		ChainID:       &chain1,
-		APIKeyID:      &key1,
+		Owner:      &key1,
 		SignerAddress: &signer1,
 		Type:          &ruleType,
 		Source:        &source,

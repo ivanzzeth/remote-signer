@@ -59,15 +59,25 @@ func (m *signerMockSignerManager) LockSigner(ctx context.Context, address string
 // --- Mock APIKeyRepository ---
 
 type mockAPIKeyRepo struct {
+	keys   map[string]*types.APIKey
 	listFn func(ctx context.Context, filter storage.APIKeyFilter) ([]*types.APIKey, error)
+}
+
+func newMockAPIKeyRepo() *mockAPIKeyRepo {
+	return &mockAPIKeyRepo{keys: make(map[string]*types.APIKey)}
 }
 
 func (m *mockAPIKeyRepo) Create(_ context.Context, _ *types.APIKey) error {
 	return fmt.Errorf("not implemented")
 }
 
-func (m *mockAPIKeyRepo) Get(_ context.Context, _ string) (*types.APIKey, error) {
-	return nil, fmt.Errorf("not implemented")
+func (m *mockAPIKeyRepo) Get(_ context.Context, id string) (*types.APIKey, error) {
+	if m.keys != nil {
+		if k, ok := m.keys[id]; ok {
+			return k, nil
+		}
+	}
+	return nil, types.ErrNotFound
 }
 
 func (m *mockAPIKeyRepo) Update(_ context.Context, _ *types.APIKey) error {
@@ -181,7 +191,7 @@ func TestListSigners_NonAdmin_FilteredByAllowedSigners(t *testing.T) {
 	apiKey := &types.APIKey{
 		ID:             "non-admin-key",
 		Name:           "dev-key",
-		Admin:          false,
+		Role:           types.RoleDev,
 		Enabled:        true,
 		AllowedSigners: pq.StringArray{"0x1111111111111111111111111111111111111111"},
 	}
@@ -205,7 +215,7 @@ func TestListSigners_NonAdmin_EmptyAllowed_SeesAll(t *testing.T) {
 	apiKey := &types.APIKey{
 		ID:      "non-admin-all",
 		Name:    "full-access-key",
-		Admin:   false,
+		Role:    types.RoleDev,
 		Enabled: true,
 		// AllowedSigners is empty -> all signers visible
 	}
@@ -228,7 +238,7 @@ func TestListSigners_NonAdmin_CaseInsensitiveFilter(t *testing.T) {
 	apiKey := &types.APIKey{
 		ID:             "non-admin-case",
 		Name:           "case-key",
-		Admin:          false,
+		Role:           types.RoleDev,
 		Enabled:        true,
 		AllowedSigners: pq.StringArray{"0X1111111111111111111111111111111111111111"},
 	}
@@ -267,7 +277,7 @@ func TestListSigners_NonAdmin_PaginationOnFiltered(t *testing.T) {
 	apiKey := &types.APIKey{
 		ID:    "paginated-key",
 		Name:  "paginated",
-		Admin: false,
+		Role:  types.RoleDev,
 		AllowedSigners: pq.StringArray{
 			"0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
 			"0xCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
@@ -305,7 +315,7 @@ func TestListSigners_Admin_EnrichedWithAllowedKeys(t *testing.T) {
 				{
 					ID:             "admin-key",
 					Name:           "admin",
-					Admin:          true,
+					Role:           types.RoleAdmin,
 					AllowedSigners: pq.StringArray{}, // empty = all
 				},
 				{
@@ -331,7 +341,7 @@ func TestListSigners_Admin_EnrichedWithAllowedKeys(t *testing.T) {
 	adminAPIKey := &types.APIKey{
 		ID:    "admin-key",
 		Name:  "admin",
-		Admin: true,
+		Role:  types.RoleAdmin,
 	}
 
 	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers", adminAPIKey)
@@ -368,7 +378,7 @@ func TestListSigners_Admin_NoApiKeyRepo_NoEnrichment(t *testing.T) {
 	adminAPIKey := &types.APIKey{
 		ID:    "admin-key",
 		Name:  "admin",
-		Admin: true,
+		Role:  types.RoleAdmin,
 	}
 
 	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers", adminAPIKey)

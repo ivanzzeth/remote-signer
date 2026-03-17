@@ -551,7 +551,7 @@ func TestLogScopeMismatch_AllFields(t *testing.T) {
 	rule := &types.Rule{
 		ChainType:     &ct,
 		ChainID:       ptrStr("1"),
-		APIKeyID:      ptrStr("api-1"),
+		Owner:         "api-1",
 		SignerAddress: ptrStr("0xABC"),
 	}
 	req := &types.SignRequest{

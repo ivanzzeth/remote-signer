@@ -13,12 +13,12 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// AdminMiddleware
+// RequirePermission (RBAC)
 // ---------------------------------------------------------------------------
 
-func TestAdminMiddleware_NoAPIKeyInContext(t *testing.T) {
+func TestRequirePermission_NoAPIKeyInContext(t *testing.T) {
 	logger := newTestLogger()
-	mw := AdminMiddleware(logger)
+	mw := RequirePermission(PermManageAPIKeys, logger)
 
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("next handler should not be called when there is no API key")
@@ -31,14 +31,14 @@ func TestAdminMiddleware_NoAPIKeyInContext(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, rr.Code)
 }
 
-func TestAdminMiddleware_NonAdminKey(t *testing.T) {
+func TestRequirePermission_NonAdminKey(t *testing.T) {
 	logger := newTestLogger()
-	mw := AdminMiddleware(logger)
+	mw := RequirePermission(PermManageAPIKeys, logger)
 
 	apiKey := &types.APIKey{
-		ID:    "key-1",
-		Name:  "regular-key",
-		Admin: false,
+		ID:   "key-1",
+		Name: "regular-key",
+		Role: types.RoleStrategy,
 	}
 
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -55,14 +55,14 @@ func TestAdminMiddleware_NonAdminKey(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, rr.Code)
 }
 
-func TestAdminMiddleware_AdminKey(t *testing.T) {
+func TestRequirePermission_AdminKey(t *testing.T) {
 	logger := newTestLogger()
-	mw := AdminMiddleware(logger)
+	mw := RequirePermission(PermManageAPIKeys, logger)
 
 	apiKey := &types.APIKey{
-		ID:    "key-admin",
-		Name:  "admin-key",
-		Admin: true,
+		ID:   "key-admin",
+		Name: "admin-key",
+		Role: types.RoleAdmin,
 	}
 
 	called := false

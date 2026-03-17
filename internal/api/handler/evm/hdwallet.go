@@ -105,7 +105,7 @@ func (h *HDWalletHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case path == "" || path == "/":
 		// Create/import and list-all require admin
-		if !apiKey.Admin {
+		if !apiKey.IsAdmin() {
 			h.writeError(w, "admin access required", http.StatusForbidden)
 			return
 		}
@@ -127,7 +127,7 @@ func (h *HDWalletHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		address := parts[0]
 
 		// Per-wallet actions: admin OR AllowedHDWallets permission
-		if !apiKey.Admin && !apiKey.IsAllowedHDWallet(address) {
+		if !apiKey.IsAdmin() && !apiKey.IsAllowedHDWallet(address) {
 			h.writeError(w, "not authorized for this HD wallet", http.StatusForbidden)
 			return
 		}

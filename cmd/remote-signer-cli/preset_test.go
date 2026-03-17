@@ -171,7 +171,7 @@ api_keys:
   - id: "admin"
     name: "Admin"
     public_key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-    admin: true
+    role: admin
     enabled: true
     rate_limit: 100
 `
@@ -227,7 +227,7 @@ api_keys:
   - id: "admin"
     name: "Admin"
     public_key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-    admin: true
+    role: admin
     enabled: true
     rate_limit: 100
 `
@@ -271,7 +271,7 @@ api_keys:
   - id: "admin"
     name: "Admin"
     public_key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-    admin: true
+    role: admin
     enabled: true
     rate_limit: 100
 `

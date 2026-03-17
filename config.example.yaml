@@ -217,8 +217,8 @@ logger:
 # Keys defined here will be synced to the database on startup.
 #
 # Admin vs Non-Admin Keys:
-#   - admin: true  -> Can approve requests, view/manage rules
-#   - admin: false -> Can only submit sign requests and view request status
+#   - role: admin  -> Can approve requests, view/manage rules
+#   - role: dev -> Can only submit sign requests and view request status
 #
 # IMPORTANT: Docker Deployment Note
 # When deploying with Docker, environment variable references (e.g., public_key_env: "VAR_NAME")
@@ -230,7 +230,7 @@ api_keys:
   - id: "admin-key"
     name: "Admin Key"
     public_key_env: "ADMIN_PUBLIC_KEY"  # Read from .env or environment (hex or base64, auto-detected)
-    admin: true                          # Admin can approve requests and manage rules
+    role: admin                          # Admin can approve requests and manage rules
     enabled: true
     rate_limit: 1000
 
@@ -238,7 +238,7 @@ api_keys:
   - id: "my-app-key"
     name: "My Application"
     public_key_env: "MY_APP_PUBLIC_KEY"  # Read from .env or environment (hex or base64, auto-detected)
-    admin: false                          # Non-admin: cannot approve, view or manage rules
+    role: dev                          # Non-admin: cannot approve, view or manage rules
     enabled: true
     rate_limit: 100
     # Normal deployment: default false (explicit below). setup.sh uses true for local dev.
@@ -255,21 +255,21 @@ api_keys:
   # - id: "dev-key"
   #   name: "Development Key"
   #   public_key: "MCowBQYDK2VwAyEA..."  # Base64 DER format (auto-detected)
-  #   admin: true
+  #   role: admin
   #   enabled: true
 
   # Example 4: Direct public key in hex format
   # - id: "hex-key"
   #   name: "Hex Format Key"
   #   public_key: "d75a980182b10ab7..."  # Ed25519 public key (64 hex chars = 32 bytes, auto-detected)
-  #   admin: false
+  #   role: dev
   #   enabled: true
 
   # Example 5: HD wallet-scoped key (can derive and sign with all derived addresses)
   # - id: "hd-app-key"
   #   name: "HD Wallet App"
   #   public_key_env: "HD_APP_PUBLIC_KEY"
-  #   admin: false
+  #   role: dev
   #   enabled: true
   #   allowed_hd_wallets:
   #     - "0xHDWalletPrimaryAddress"   # Can derive + sign with all derived addresses

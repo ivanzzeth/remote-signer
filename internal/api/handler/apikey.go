@@ -20,22 +20,21 @@ var apiKeyIDPattern = regexp.MustCompile(`^[a-zA-Z0-9-]+$`)
 
 // APIKeyResponse represents an API key in API responses.
 type APIKeyResponse struct {
-	ID                string     `json:"id"`
-	Name              string     `json:"name"`
-	Source            string     `json:"source"`
-	Admin             bool       `json:"admin"`
-	Agent             bool       `json:"agent"`
-	Enabled           bool       `json:"enabled"`
-	RateLimit         int        `json:"rate_limit"`
-	AllowAllSigners   bool       `json:"allow_all_signers"`
-	AllowAllHDWallets bool       `json:"allow_all_hd_wallets"`
-	AllowedSigners    []string   `json:"allowed_signers,omitempty"`
-	AllowedHDWallets  []string   `json:"allowed_hd_wallets,omitempty"`
-	AllowedChainTypes []string   `json:"allowed_chain_types,omitempty"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
-	LastUsedAt        *time.Time `json:"last_used_at,omitempty"`
-	ExpiresAt         *time.Time `json:"expires_at,omitempty"`
+	ID                string             `json:"id"`
+	Name              string             `json:"name"`
+	Source            string             `json:"source"`
+	Role              types.APIKeyRole   `json:"role"`
+	Enabled           bool               `json:"enabled"`
+	RateLimit         int                `json:"rate_limit"`
+	AllowAllSigners   bool               `json:"allow_all_signers"`
+	AllowAllHDWallets bool               `json:"allow_all_hd_wallets"`
+	AllowedSigners    []string           `json:"allowed_signers,omitempty"`
+	AllowedHDWallets  []string           `json:"allowed_hd_wallets,omitempty"`
+	AllowedChainTypes []string           `json:"allowed_chain_types,omitempty"`
+	CreatedAt         time.Time          `json:"created_at"`
+	UpdatedAt         time.Time          `json:"updated_at"`
+	LastUsedAt        *time.Time         `json:"last_used_at,omitempty"`
+	ExpiresAt         *time.Time         `json:"expires_at,omitempty"`
 }
 
 // CreateAPIKeyRequest represents the request to create an API key.
@@ -43,8 +42,7 @@ type CreateAPIKeyRequest struct {
 	ID                string   `json:"id"`
 	Name              string   `json:"name"`
 	PublicKey         string   `json:"public_key"` // Ed25519 public key, hex or base64 DER
-	Admin             bool     `json:"admin"`
-	Agent             bool     `json:"agent"`
+	Role              string   `json:"role"`       // admin, dev, agent, strategy
 	RateLimit         int      `json:"rate_limit,omitempty"` // default 100
 	AllowAllSigners   bool     `json:"allow_all_signers"`
 	AllowAllHDWallets bool     `json:"allow_all_hd_wallets"`
@@ -57,8 +55,7 @@ type CreateAPIKeyRequest struct {
 type UpdateAPIKeyRequest struct {
 	Name              *string  `json:"name,omitempty"`
 	Enabled           *bool    `json:"enabled,omitempty"`
-	Admin             *bool    `json:"admin,omitempty"`
-	Agent             *bool    `json:"agent,omitempty"`
+	Role              *string  `json:"role,omitempty"` // admin, dev, agent, strategy
 	RateLimit         *int     `json:"rate_limit,omitempty"`
 	AllowAllSigners   *bool    `json:"allow_all_signers,omitempty"`
 	AllowAllHDWallets *bool    `json:"allow_all_hd_wallets,omitempty"`
@@ -273,9 +270,13 @@ func (h *APIKeyHandler) createAPIKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate admin and agent are mutually exclusive
-	if req.Admin && req.Agent {
-		h.writeError(w, "admin and agent are mutually exclusive", http.StatusBadRequest)
+	// Validate role
+	if req.Role == "" {
+		h.writeError(w, "role is required (admin, dev, agent, strategy)", http.StatusBadRequest)
+		return
+	}
+	if !types.IsValidAPIKeyRole(req.Role) {
+		h.writeError(w, fmt.Sprintf("invalid role %q (must be admin, dev, agent, or strategy)", req.Role), http.StatusBadRequest)
 		return
 	}
 
@@ -293,8 +294,7 @@ func (h *APIKeyHandler) createAPIKey(w http.ResponseWriter, r *http.Request) {
 		ID:                req.ID,
 		Name:              req.Name,
 		PublicKeyHex:      req.PublicKey,
-		Admin:             req.Admin,
-		Agent:             req.Agent,
+		Role:              types.APIKeyRole(req.Role),
 		RateLimit:         rateLimit,
 		AllowAllSigners:   req.AllowAllSigners,
 		AllowAllHDWallets: req.AllowAllHDWallets,
@@ -383,16 +383,12 @@ func (h *APIKeyHandler) updateAPIKey(w http.ResponseWriter, r *http.Request, id 
 	if req.Enabled != nil {
 		key.Enabled = *req.Enabled
 	}
-	if req.Admin != nil {
-		key.Admin = *req.Admin
-	}
-	if req.Agent != nil {
-		key.Agent = *req.Agent
-	}
-	// Validate admin and agent are mutually exclusive after applying updates
-	if key.Admin && key.Agent {
-		h.writeError(w, "admin and agent are mutually exclusive", http.StatusBadRequest)
-		return
+	if req.Role != nil {
+		if !types.IsValidAPIKeyRole(*req.Role) {
+			h.writeError(w, fmt.Sprintf("invalid role %q (must be admin, dev, agent, or strategy)", *req.Role), http.StatusBadRequest)
+			return
+		}
+		key.Role = types.APIKeyRole(*req.Role)
 	}
 	if req.RateLimit != nil {
 		if *req.RateLimit < 1 || *req.RateLimit > 10000 {
@@ -467,14 +463,14 @@ func (h *APIKeyHandler) deleteAPIKey(w http.ResponseWriter, r *http.Request, id 
 	}
 
 	// Prevent deleting the last admin key (lockout protection)
-	if key.Admin {
+	if key.IsAdmin() {
 		adminCount, err := h.repo.Count(r.Context(), storage.APIKeyFilter{EnabledOnly: true})
 		if err != nil {
 			h.logger.Error("failed to count admin keys", slog.String("error", err.Error()))
 			h.writeError(w, "failed to verify admin key count", http.StatusInternalServerError)
 			return
 		}
-		// Count admin keys by iterating — simpler than adding an Admin filter to Count
+		// Count admin keys by iterating — simpler than adding a Role filter to Count
 		allKeys, err := h.repo.List(r.Context(), storage.APIKeyFilter{EnabledOnly: true, Limit: adminCount})
 		if err != nil {
 			h.logger.Error("failed to list keys for admin check", slog.String("error", err.Error()))
@@ -483,7 +479,7 @@ func (h *APIKeyHandler) deleteAPIKey(w http.ResponseWriter, r *http.Request, id 
 		}
 		adminKeyCount := 0
 		for _, k := range allKeys {
-			if k.Admin && k.Enabled {
+			if k.IsAdmin() && k.Enabled {
 				adminKeyCount++
 			}
 		}
@@ -530,8 +526,7 @@ func toAPIKeyResponse(key *types.APIKey) APIKeyResponse {
 		ID:                key.ID,
 		Name:              key.Name,
 		Source:            key.Source,
-		Admin:             key.Admin,
-		Agent:             key.Agent,
+		Role:              key.Role,
 		Enabled:           key.Enabled,
 		RateLimit:         key.RateLimit,
 		AllowAllSigners:   key.AllowAllSigners,

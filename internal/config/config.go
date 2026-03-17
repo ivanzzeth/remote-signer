@@ -13,6 +13,7 @@ import (
 
 	"github.com/ivanzzeth/remote-signer/internal/audit"
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
+	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/notify"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
@@ -122,8 +123,7 @@ type APIKeyConfig struct {
 	AllowedHDWallets  []string `yaml:"allowed_hd_wallets"`   // HD wallet primary addresses; empty = none (unless allow_all_hd_wallets)
 	RateLimit         int      `yaml:"rate_limit"`           // Requests per minute (default: 100)
 	Enabled           bool     `yaml:"enabled"`              // Whether the key is active
-	Admin             bool     `yaml:"admin"`                // Admin keys can approve requests and manage rules
-	Agent             bool     `yaml:"agent"`                // Agent keys can sign and read rules/budgets (read-only)
+	Role              string   `yaml:"role"`                 // API key role: admin, dev, agent, strategy
 }
 
 // ResolvePublicKey returns the public key hex, resolving from env var and auto-detecting format (hex or base64)
@@ -256,6 +256,15 @@ type SecurityConfig struct {
 	// AllowSIGHUPRulesReload enables reloading rules from config when receiving SIGHUP.
 	// Default (nil) = false (secure by default). When disabled, SIGHUP is ignored (process stays alive).
 	AllowSIGHUPRulesReload *bool `yaml:"allow_sighup_rules_reload"`
+
+	// MaxRulesPerAPIKey limits how many rules a single non-admin API key can own.
+	// Admin keys are exempt. Default: 50.
+	MaxRulesPerAPIKey int `yaml:"max_rules_per_api_key"`
+
+	// RequireApprovalForAgentRules: when true, agent-created whitelist rules start as "pending_approval"
+	// and require admin approval before becoming active. Blocklist rules are always active immediately.
+	// Default: false.
+	RequireApprovalForAgentRules bool `yaml:"require_approval_for_agent_rules"`
 
 	// AutoLockTimeout: automatically lock signers after this duration since unlock.
 	// Default: 0 (disabled). Example: "1h", "30m".
@@ -462,8 +471,11 @@ func validate(cfg *Config) error {
 			continue
 		}
 
-		if key.Admin && key.Agent {
-			return fmt.Errorf("api_keys[%d] (%s): admin and agent are mutually exclusive", i, key.ID)
+		if key.Role == "" {
+			return fmt.Errorf("api_keys[%d] (%s): role is required (admin, dev, agent, strategy)", i, key.ID)
+		}
+		if !types.IsValidAPIKeyRole(key.Role) {
+			return fmt.Errorf("api_keys[%d] (%s): invalid role %q (must be admin, dev, agent, or strategy)", i, key.ID, key.Role)
 		}
 
 		if key.PublicKey == "" && key.PublicKeyEnv == "" {
@@ -510,6 +522,11 @@ func setDefaults(cfg *Config) {
 		if cfg.Chains.EVM.HDWalletDir == "" {
 			cfg.Chains.EVM.HDWalletDir = "./data/hd-wallets"
 		}
+	}
+
+	// Rule limits defaults
+	if cfg.Security.MaxRulesPerAPIKey <= 0 {
+		cfg.Security.MaxRulesPerAPIKey = 50
 	}
 
 	// ApprovalGuard defaults

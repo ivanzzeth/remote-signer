@@ -524,9 +524,11 @@ func (i *RuleInitializer) syncRule(ctx context.Context, repo storage.RuleReposit
 		rule.Variables = variablesJSON
 	}
 
-	if ruleCfg.APIKeyID != "" {
-		rule.APIKeyID = &ruleCfg.APIKeyID
-	}
+	// Config-sourced rules: owner="config", applied_to=["*"], status="active"
+	rule.Owner = "config"
+	rule.AppliedTo = []string{"*"}
+	rule.Status = types.RuleStatusActive
+
 	if ruleCfg.SignerAddress != "" {
 		if !pkgvalidate.IsValidEthereumAddress(ruleCfg.SignerAddress) {
 			return fmt.Errorf("rule %q: invalid signer_address %q: must be 0x followed by 40 hex characters", ruleCfg.Name, ruleCfg.SignerAddress)
@@ -613,7 +615,9 @@ func (i *RuleInitializer) syncRule(ctx context.Context, repo storage.RuleReposit
 		existing.Config = rule.Config
 		existing.ChainType = rule.ChainType
 		existing.ChainID = rule.ChainID
-		existing.APIKeyID = rule.APIKeyID
+		existing.Owner = rule.Owner
+		existing.AppliedTo = rule.AppliedTo
+		existing.Status = rule.Status
 		existing.SignerAddress = rule.SignerAddress
 		existing.Enabled = rule.Enabled
 		existing.Variables = rule.Variables
@@ -652,7 +656,7 @@ func (i *RuleInitializer) syncRule(ctx context.Context, repo storage.RuleReposit
 			"mode", ruleCfg.Mode,
 		)
 		if i.auditLogger != nil {
-			i.auditLogger.LogRuleUpdated(ctx, "config", "config-sync", ruleID, ruleCfg.Name)
+			i.auditLogger.LogRuleUpdated(ctx, "config", "config-sync", ruleID, ruleCfg.Name, nil, nil)
 		}
 	}
 

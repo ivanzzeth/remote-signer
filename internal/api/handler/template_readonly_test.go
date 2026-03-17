@@ -155,6 +155,6 @@ func TestTemplateHandler_ReadOnly_GetAllowed(t *testing.T) {
 func adminAPIKey() *types.APIKey {
 	return &types.APIKey{
 		ID:    "admin-key",
-		Admin: true,
+		Role:  types.RoleAdmin,
 	}
 }

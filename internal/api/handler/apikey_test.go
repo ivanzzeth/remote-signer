@@ -180,7 +180,7 @@ func apikeyAdminKey() *types.APIKey {
 		ID:      "admin-key-1",
 		Name:    "Admin Key",
 		Enabled: true,
-		Admin:   true,
+		Role:    types.RoleAdmin,
 		Source:  types.APIKeySourceAPI,
 	}
 }
@@ -235,7 +235,7 @@ func makeTestAPIKey(id, name, source string, enabled bool) *types.APIKey {
 		PublicKeyHex: "abcdef1234567890",
 		Source:       source,
 		Enabled:      enabled,
-		Admin:        false,
+		Role:         types.RoleStrategy,
 		RateLimit:    100,
 		CreatedAt:    now,
 		UpdatedAt:    now,
@@ -555,7 +555,7 @@ func TestAPIKeyHandler_Create_Success(t *testing.T) {
 		ID:              "my-new-key",
 		Name:            "My New Key",
 		PublicKey:       "abcdef1234567890abcdef1234567890",
-		Admin:           false,
+		Role:            "strategy",
 		AllowAllSigners: true,
 	}
 
@@ -586,6 +586,7 @@ func TestAPIKeyHandler_Create_WithCustomRateLimit(t *testing.T) {
 		ID:        "rate-key",
 		Name:      "Rate Key",
 		PublicKey: "abcdef",
+		Role:      "admin",
 		RateLimit: 50,
 	}
 
@@ -688,6 +689,7 @@ func TestAPIKeyHandler_Create_ValidIDWithHyphens(t *testing.T) {
 		ID:        "my-key-123",
 		Name:      "Hyphen Key",
 		PublicKey: "abcdef",
+		Role:      "admin",
 	}
 
 	rr := doAPIKeyCollectionRequest(t, h, http.MethodPost, "/api/v1/api-keys", reqBody, apikeyAdminKey())
@@ -762,6 +764,7 @@ func TestAPIKeyHandler_Create_DuplicateID(t *testing.T) {
 		ID:        "dup-key",
 		Name:      "Duplicate",
 		PublicKey: "abcdef",
+		Role:      "admin",
 	}
 
 	rr := doAPIKeyCollectionRequest(t, h, http.MethodPost, "/api/v1/api-keys", reqBody, apikeyAdminKey())
@@ -820,6 +823,7 @@ func TestAPIKeyHandler_Create_RepoGetFailsAfterCreate(t *testing.T) {
 		ID:        "get-fail-key",
 		Name:      "Get Fail Key",
 		PublicKey: "abcdef",
+		Role:      "admin",
 	}
 
 	rr := doAPIKeyCollectionRequest(t, h, http.MethodPost, "/api/v1/api-keys", reqBody, apikeyAdminKey())
@@ -872,14 +876,14 @@ func TestAPIKeyHandler_Update_AllFields(t *testing.T) {
 
 	newName := "All Updated"
 	newEnabled := false
-	newAdmin := true
+	newRole := "admin"
 	newRateLimit := 200
 	newAllowAllSigners := true
 	newAllowAllHDWallets := true
 	reqBody := UpdateAPIKeyRequest{
 		Name:              &newName,
 		Enabled:           &newEnabled,
-		Admin:             &newAdmin,
+		Role:              &newRole,
 		RateLimit:         &newRateLimit,
 		AllowAllSigners:   &newAllowAllSigners,
 		AllowAllHDWallets: &newAllowAllHDWallets,
@@ -895,7 +899,7 @@ func TestAPIKeyHandler_Update_AllFields(t *testing.T) {
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
 	assert.Equal(t, "All Updated", resp.Name)
 	assert.False(t, resp.Enabled)
-	assert.True(t, resp.Admin)
+	assert.Equal(t, types.RoleAdmin, resp.Role)
 	assert.Equal(t, 200, resp.RateLimit)
 	assert.True(t, resp.AllowAllSigners)
 	assert.True(t, resp.AllowAllHDWallets)
@@ -1242,6 +1246,7 @@ func TestAPIKeyHandler_Create_NoContextAPIKey(t *testing.T) {
 		ID:        "no-ctx-key",
 		Name:      "No Context Key",
 		PublicKey: "abcdef",
+		Role:      "admin",
 	}
 
 	// Request without API key in context
@@ -1287,6 +1292,7 @@ func TestAPIKeyHandler_Create_RateLimitBounds(t *testing.T) {
 				ID:        tc.id,
 				Name:      "Rate Limit Test",
 				PublicKey: "abcdef",
+				Role:      "admin",
 				RateLimit: tc.rateLimit,
 			}
 
@@ -1329,6 +1335,7 @@ func TestAPIKeyHandler_Create_AllowedSignersTooMany(t *testing.T) {
 		ID:             "many-signers",
 		Name:           "Many Signers",
 		PublicKey:      "abcdef",
+		Role:           "admin",
 		AllowedSigners: signers,
 	}
 
@@ -1354,6 +1361,7 @@ func TestAPIKeyHandler_Create_AllowedHDWalletsTooMany(t *testing.T) {
 		ID:               "many-wallets",
 		Name:             "Many Wallets",
 		PublicKey:        "abcdef",
+		Role:             "admin",
 		AllowedHDWallets: wallets,
 	}
 
@@ -1399,7 +1407,7 @@ func TestAPIKeyHandler_Delete_LastAdminKey(t *testing.T) {
 	repo := newMockAPIKeyRepo()
 	// Only one admin key
 	adminKey := makeTestAPIKey("only-admin", "Only Admin", types.APIKeySourceAPI, true)
-	adminKey.Admin = true
+	adminKey.Role = types.RoleAdmin
 	repo.seed(adminKey)
 
 	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
@@ -1417,9 +1425,9 @@ func TestAPIKeyHandler_Delete_AdminKeyWithOtherAdmins(t *testing.T) {
 	repo := newMockAPIKeyRepo()
 	// Two admin keys
 	admin1 := makeTestAPIKey("admin-1", "Admin 1", types.APIKeySourceAPI, true)
-	admin1.Admin = true
+	admin1.Role = types.RoleAdmin
 	admin2 := makeTestAPIKey("admin-2", "Admin 2", types.APIKeySourceAPI, true)
-	admin2.Admin = true
+	admin2.Role = types.RoleAdmin
 	repo.seed(admin1)
 	repo.seed(admin2)
 
@@ -1440,7 +1448,7 @@ func TestAPIKeyHandler_Delete_NonAdminKeySkipsAdminCheck(t *testing.T) {
 	repo := newMockAPIKeyRepo()
 	// Non-admin key — should skip the admin count check entirely
 	key := makeTestAPIKey("non-admin", "Non Admin", types.APIKeySourceAPI, true)
-	key.Admin = false
+	key.Role = types.RoleStrategy
 	repo.seed(key)
 
 	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
@@ -1453,7 +1461,7 @@ func TestAPIKeyHandler_Delete_NonAdminKeySkipsAdminCheck(t *testing.T) {
 func TestAPIKeyHandler_Delete_AdminCountError(t *testing.T) {
 	repo := newMockAPIKeyRepo()
 	adminKey := makeTestAPIKey("admin-err", "Admin Err", types.APIKeySourceAPI, true)
-	adminKey.Admin = true
+	adminKey.Role = types.RoleAdmin
 	repo.seed(adminKey)
 	repo.countFn = func(_ context.Context, _ storage.APIKeyFilter) (int, error) {
 		return 0, fmt.Errorf("count error")
@@ -1469,7 +1477,7 @@ func TestAPIKeyHandler_Delete_AdminCountError(t *testing.T) {
 func TestAPIKeyHandler_Delete_AdminListError(t *testing.T) {
 	repo := newMockAPIKeyRepo()
 	adminKey := makeTestAPIKey("admin-lerr", "Admin ListErr", types.APIKeySourceAPI, true)
-	adminKey.Admin = true
+	adminKey.Role = types.RoleAdmin
 	repo.seed(adminKey)
 	repo.listFn = func(_ context.Context, _ storage.APIKeyFilter) ([]*types.APIKey, error) {
 		return nil, fmt.Errorf("list error")

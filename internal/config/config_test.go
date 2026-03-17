@@ -356,7 +356,7 @@ func TestValidate_APIKeyWithoutID(t *testing.T) {
 func TestValidate_EnabledAPIKeyWithoutPublicKey(t *testing.T) {
 	cfg := validConfig()
 	cfg.APIKeys = []APIKeyConfig{
-		{ID: "key1", Enabled: true},
+		{ID: "key1", Enabled: true, Role: "admin"},
 	}
 	err := validate(cfg)
 	require.Error(t, err)
@@ -372,23 +372,35 @@ func TestValidate_DisabledAPIKeyWithoutPublicKey(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestValidate_AdminAndAgentMutuallyExclusive(t *testing.T) {
+func TestValidate_MissingRole(t *testing.T) {
 	cfg := validConfig()
 	cfg.APIKeys = []APIKeyConfig{
-		{ID: "key1", Enabled: true, PublicKey: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Admin: true, Agent: true},
+		{ID: "key1", Enabled: true, PublicKey: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 	}
 	err := validate(cfg)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "admin and agent are mutually exclusive")
+	assert.Contains(t, err.Error(), "role is required")
 }
 
-func TestValidate_AgentKeyOnly(t *testing.T) {
+func TestValidate_InvalidRole(t *testing.T) {
 	cfg := validConfig()
 	cfg.APIKeys = []APIKeyConfig{
-		{ID: "key1", Enabled: true, PublicKey: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Agent: true},
+		{ID: "key1", Enabled: true, PublicKey: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Role: "superadmin"},
 	}
 	err := validate(cfg)
-	assert.NoError(t, err)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid role")
+}
+
+func TestValidate_ValidRoles(t *testing.T) {
+	for _, role := range []string{"admin", "dev", "agent", "strategy"} {
+		cfg := validConfig()
+		cfg.APIKeys = []APIKeyConfig{
+			{ID: "key1", Enabled: true, PublicKey: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Role: role},
+		}
+		err := validate(cfg)
+		assert.NoError(t, err, "role %q should be valid", role)
+	}
 }
 
 // ---------------------------------------------------------------------------

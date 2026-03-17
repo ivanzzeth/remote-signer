@@ -1042,7 +1042,7 @@ func configToRuleWithID(idx int, cfg RuleConfig) (*types.Rule, error) {
 		rule.ChainID = &cfg.ChainID
 	}
 	if cfg.APIKeyID != "" {
-		rule.APIKeyID = &cfg.APIKeyID
+		rule.Owner = cfg.APIKeyID
 	}
 	if cfg.SignerAddress != "" {
 		rule.SignerAddress = &cfg.SignerAddress

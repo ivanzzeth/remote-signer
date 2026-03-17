@@ -127,8 +127,9 @@ func (h *SignerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		h.listSigners(w, r)
 	case http.MethodPost:
-		// Create requires admin
-		if !apiKey.Admin {
+		// Create requires PermCreateSigners (admin only); RBAC middleware handles route-level
+		// check, but POST shares the same route as GET so we check here.
+		if !apiKey.IsAdmin() {
 			h.writeError(w, "admin access required", http.StatusForbidden)
 			return
 		}
@@ -185,8 +186,8 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 	// Determine if non-admin filtering is needed.
 	// Agent keys always get filtered to their explicit allowed_signers/hd_wallets only
 	// (allow_all_signers is ignored for agent keys to enforce "own signers" restriction).
-	needsFiltering := apiKey != nil && !apiKey.Admin &&
-		(apiKey.Agent || len(apiKey.AllowedSigners) > 0 || len(apiKey.AllowedHDWallets) > 0)
+	needsFiltering := apiKey != nil && !apiKey.IsAdmin() &&
+		(apiKey.IsAgent() || len(apiKey.AllowedSigners) > 0 || len(apiKey.AllowedHDWallets) > 0)
 
 	filter := types.SignerFilter{
 		Type: signerType,
@@ -220,7 +221,7 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		for _, s := range result.Signers {
-			if apiKey.Agent {
+			if apiKey.IsAgent() {
 				// Agent keys: strict filtering using explicit allowed_signers only
 				// (ignore allow_all_signers/allow_all_hd_wallets)
 				if middleware.CheckSignerPermissionExplicit(apiKey, s.Address, hdMgr) {
@@ -256,7 +257,7 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 
 	// Build admin enrichment data
 	var accessData *allowedKeysData
-	if apiKey != nil && apiKey.Admin && h.apiKeyRepo != nil {
+	if apiKey != nil && apiKey.IsAdmin() && h.apiKeyRepo != nil {
 		accessData, err = h.buildAllowedKeysData(r)
 		if err != nil {
 			h.logger.Error("failed to build allowed keys data", slog.String("error", err.Error()))
@@ -428,7 +429,7 @@ func (h *SignerHandler) HandleSignerAction(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if !apiKey.Admin {
+	if !apiKey.IsAdmin() {
 		h.writeError(w, "admin access required", http.StatusForbidden)
 		return
 	}
