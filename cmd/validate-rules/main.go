@@ -858,7 +858,8 @@ func validateRules(ctx context.Context, rules []RuleConfig, validator *evm.Solid
 			string(types.RuleTypeEVMValueLimit),
 			string(types.RuleTypeSignerRestriction),
 			string(types.RuleTypeSignTypeRestriction),
-			string(types.RuleTypeChainRestriction):
+			string(types.RuleTypeChainRestriction),
+			string(types.RuleTypeEVMDynamicBlocklist):
 			// Declarative rules → JSON deserialization + basic validation
 			rule, err := configToRule(i, ruleCfg)
 			if err != nil {

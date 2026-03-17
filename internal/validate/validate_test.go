@@ -330,13 +330,13 @@ func TestValidRuleTypes(t *testing.T) {
 	expectedTypes := []string{
 		"signer_restriction", "chain_restriction", "sign_type_restriction",
 		"message_pattern", "evm_address_list", "evm_contract_method",
-		"evm_value_limit", "evm_solidity_expression", "evm_js",
+		"evm_value_limit", "evm_solidity_expression", "evm_js", "evm_dynamic_blocklist",
 	}
 	for _, rt := range expectedTypes {
 		assert.True(t, ValidRuleTypes[types.RuleType(rt)], "expected %q in ValidRuleTypes", rt)
 	}
 	assert.False(t, ValidRuleTypes[types.RuleType("evm_address_whitelist")]) // legacy name NOT in canonical set
-	assert.Equal(t, 9, len(ValidRuleTypes), "expected exactly 9 valid rule types")
+	assert.Equal(t, 10, len(ValidRuleTypes), "expected exactly 10 valid rule types")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

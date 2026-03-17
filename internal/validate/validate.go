@@ -87,6 +87,7 @@ var ValidRuleTypes = map[types.RuleType]bool{
 	types.RuleTypeEVMValueLimit:       true,
 	types.RuleTypeEVMSolidityExpression: true,
 	types.RuleTypeEVMJS:                true,
+	types.RuleTypeEVMDynamicBlocklist:  true,
 }
 
 // ValidRuleSources is the set of allowed rule source values.
