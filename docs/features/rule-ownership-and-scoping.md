@@ -213,14 +213,39 @@ When agent creates a rule via API:
   - `signer_restriction` — could affect signer assignment
   - `evm_solidity_expression` — arbitrary expression execution
 
-### 3.5 Config-Sourced Rules (Preset CLI / config.yaml)
+### 3.5 Config-Sourced Rules (config.yaml only)
 
-Rules from config.yaml / preset CLI:
+Rules from config.yaml are **global security rules only**:
 - `owner = "config"` (treated as admin-owned)
-- `applied_to = ["*"]` (global)
+- `applied_to = ["*"]` (global — applies to ALL API keys)
 - `status = "active"`
 - Read-only via API (when `rules_api_readonly: true`)
-- Includes agent preset rules — these are admin-created (via CLI), not agent-created
+
+**Design Decision (2026-03-17):** Config rules are exclusively for global security policies
+(e.g. `evm_dynamic_blocklist`, OFAC sanctions). Scoped rules (agent presets, per-key budgets)
+MUST be created via API after server starts, so RBAC properly assigns `owner` and `applied_to`:
+- Agent preset → created via `POST /evm/rules` with agent API key → `owner=agent, applied_to=["self"]`
+- Admin rules for specific keys → created via API → `applied_to=["key-1", "key-2"]`
+
+**Rationale:** Putting scoped rules in config bypasses RBAC (hardcoded `owner="config", applied_to=["*"]`),
+which means agent budget rules would incorrectly constrain admin/dev/strategy signing.
+The CLI (`remote-signer-cli`) must support full CRUD (matching `pkg/client` SDK) so setup.sh
+can create scoped rules after server startup.
+
+### 3.6 Setup Flow for Scoped Rules
+
+```
+setup.sh:
+  1. Generate config.yaml (global rules only: dynamic_blocklist, etc.)
+  2. Start server (Docker or local)
+  3. Wait for health check
+  4. CLI: create agent preset rules via API (owner=agent, applied_to=["self"])
+     remote-signer-cli preset apply agent.preset.js.yaml \
+       --api-key-id agent --api-key-file data/agent_private.pem \
+       --url https://localhost:8548 [--tls-*]
+```
+
+This ensures agent rules go through the standard API path with proper RBAC enforcement.
 
 ---
 
@@ -587,14 +612,15 @@ Every case below MUST be an E2E test (real server, real HTTP requests). Not unit
 **D3. Rate limiting on CRUD**
 - D3.1 agent rapid-fire creates/deletes same rule → rate limited after N requests
 
-#### Group E: Config-Sourced Rules
+#### Group E: Config-Sourced Rules (Global Security Only)
 
 - E1 config-sourced rules have applied_to=["*"] → affect all keys
 - E2 config-sourced rules have owner="config"
 - E3 config-sourced rules cannot be deleted via API (when rules_api_readonly)
-- E4 agent sign request matches config-sourced whitelist → allowed
-- E5 strategy sign request matches config-sourced whitelist → allowed
-- E6 agent preset rules are config-sourced (owner="config"), not agent-created
+- E4 agent sign request matches config-sourced blocklist → rejected (global security)
+- E5 strategy sign request matches config-sourced blocklist → rejected (global security)
+- E6 agent preset rules are NOT config-sourced — created via API (owner=agent, applied_to=["self"])
+- E7 config should only contain global security rules (blocklist, sanctions), not scoped rules
 
 #### Group F: Audit
 

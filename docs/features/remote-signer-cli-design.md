@@ -4,6 +4,129 @@
 
 - **CLI framework**: Use **Cobra** (`github.com/spf13/cobra`) for remote-signer-cli instead of hand-rolled flag/arg parsing. Cobra is the de facto standard in the Go ecosystem (used by Kubernetes, Hugo, GitHub CLI); it handles subcommands, POSIX flags, and argument order correctly.
 - **Validate binary name**: Ship the rules-validator binary as **`remote-signer-validate-rules`** (not `validate-rules`) to avoid clashing with other tools in the user’s global PATH. All references (release assets, setup.sh, CLI exec lookup) use this name.
+- **Full API client integration (2026-03-17)**: CLI must wrap ALL `pkg/client` SDK capabilities as subcommands. Currently CLI is local-only (config parse, preset YAML merge). This blocks the setup.sh flow where scoped rules (agent presets) need to be created via API after server starts. See §7.
+
+---
+
+## 7. Full API Client Integration (Phase 2)
+
+### 7.1 Design Decision
+
+**Config rules are global security only** (blocklist, sanctions). Scoped rules (agent presets, per-key budgets) MUST be created via API so RBAC properly assigns `owner` and `applied_to`. See `docs/features/rule-ownership-and-scoping.md §3.5`.
+
+This means CLI needs authenticated remote API access (same as TUI), not just local file operations.
+
+### 7.2 Auth Flags (shared across all remote subcommands)
+
+```
+Global flags (persistent):
+  --url <URL>              Server URL (default: https://localhost:8548)
+  --api-key-id <ID>        API key ID for authentication
+  --api-key-file <path>    Path to Ed25519 private key PEM file
+  --tls-ca <path>          CA certificate for TLS verification
+  --tls-cert <path>        Client certificate for mTLS
+  --tls-key <path>         Client key for mTLS
+  --tls-skip-verify        Skip TLS verification (testing only)
+  -o, --output <format>    Output format: table (default), json, yaml
+```
+
+### 7.3 Target Command Tree
+
+```
+remote-signer-cli
+├── (existing local commands)
+│   ├── rule list-templates       (local config parse)
+│   ├── preset list               (local file listing)
+│   ├── preset create-from        (local YAML merge → config)
+│   ├── preset vars               (local variable listing)
+│   ├── validate                  (exec validate-rules binary)
+│   └── tui                       (exec TUI binary)
+│
+├── (new remote API commands — requires auth flags)
+│   ├── health                    Health check
+│   ├── metrics                   Prometheus metrics
+│   │
+│   ├── rule list                 GET /api/v1/evm/rules
+│   ├── rule get <id>             GET /api/v1/evm/rules/:id
+│   ├── rule create               POST /api/v1/evm/rules (from flags or YAML file)
+│   ├── rule update <id>          PATCH /api/v1/evm/rules/:id
+│   ├── rule delete <id>          DELETE /api/v1/evm/rules/:id
+│   ├── rule toggle <id>          PATCH (enable/disable)
+│   ├── rule approve <id>         POST /api/v1/evm/rules/:id/approve
+│   ├── rule reject <id>          POST /api/v1/evm/rules/:id/reject
+│   ├── rule budgets <id>         GET /api/v1/evm/rules/:id/budgets
+│   │
+│   ├── preset apply <name>       POST /api/v1/presets/:id/apply (remote API, NOT local merge)
+│   │
+│   ├── signer list               GET /api/v1/evm/signers
+│   ├── signer create             POST /api/v1/evm/signers
+│   ├── signer unlock <addr>      POST /api/v1/evm/signers/:addr/unlock
+│   ├── signer lock <addr>        POST /api/v1/evm/signers/:addr/lock
+│   │
+│   ├── hdwallet list             GET /api/v1/evm/hd-wallets
+│   ├── hdwallet create           POST /api/v1/evm/hd-wallets
+│   ├── hdwallet import           POST /api/v1/evm/hd-wallets/import
+│   ├── hdwallet derive <addr>    POST /api/v1/evm/hd-wallets/:addr/derive
+│   ├── hdwallet list-derived <a> GET /api/v1/evm/hd-wallets/:addr/derived
+│   │
+│   ├── template list             GET /api/v1/templates
+│   ├── template get <id>         GET /api/v1/templates/:id
+│   ├── template create           POST /api/v1/templates
+│   ├── template delete <id>      DELETE /api/v1/templates/:id
+│   ├── template instantiate <id> POST /api/v1/templates/:id/instantiate
+│   │
+│   ├── apikey list               GET /api/v1/api-keys
+│   ├── apikey get <id>           GET /api/v1/api-keys/:id
+│   ├── apikey create             POST /api/v1/api-keys
+│   ├── apikey update <id>        PATCH /api/v1/api-keys/:id
+│   ├── apikey delete <id>        DELETE /api/v1/api-keys/:id
+│   │
+│   ├── request list              GET /api/v1/evm/requests
+│   ├── request get <id>          GET /api/v1/evm/requests/:id
+│   ├── request approve <id>      POST /api/v1/evm/requests/:id/approve
+│   │
+│   ├── audit list                GET /api/v1/audit
+│   │
+│   └── sign                      POST /api/v1/evm/sign (for scripting/testing)
+│
+└── version
+```
+
+### 7.4 setup.sh Flow Change
+
+Before (broken — agent rules in config with wrong owner/applied_to):
+```
+setup.sh → generate config with agent preset rules → start server
+```
+
+After (correct — RBAC-compliant):
+```
+setup.sh:
+  1. Generate config.yaml (global rules only: dynamic_blocklist)
+  2. Start server, wait for health
+  3. remote-signer-cli preset apply agent.preset.js.yaml \
+       --api-key-id agent --api-key-file data/agent_private.pem \
+       --url https://localhost:8548 [--tls-*]
+     → POST /api/v1/presets/agent/apply
+     → Server creates rules with owner=agent, applied_to=["self"]
+```
+
+### 7.5 Implementation Priority
+
+Phase 2a (blocks setup.sh fix):
+1. Auth flags infrastructure (pkg/client init from CLI flags)
+2. `preset apply` (remote API, not local merge)
+3. `rule list/get/create/delete/toggle`
+4. `health`
+
+Phase 2b (full parity):
+5. `signer list/create/unlock/lock`
+6. `hdwallet *`
+7. `template *`
+8. `apikey *`
+9. `request *`
+10. `audit list`
+11. `sign`
 
 ---
 
