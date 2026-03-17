@@ -42,11 +42,13 @@ rule validation (via remote-signer-validate-rules), and launching the TUI (remot
 }
 
 func init() {
+	registerAuthFlags(rootCmd)
 	rootCmd.AddCommand(ruleCmd)
 	rootCmd.AddCommand(presetCmd)
 	rootCmd.AddCommand(validateCmd)
 	rootCmd.AddCommand(tuiCmd)
 	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(healthCmd)
 }
 
 var versionCmd = &cobra.Command{
