@@ -215,17 +215,33 @@ The server starts without signers. Add them after startup:
 
 ## Roadmap
 
+### Completed
+
 - [x] EIP-712 Typed Data Validation
 - [x] Terminal UI (TUI)
 - [x] Go / TypeScript / Rust Client SDKs
 - [x] MCP Server (AI agent integration)
-- [x] 23 Rule Templates (ERC-20/721/1155, Permit, DEX, Safe, 4337, etc.)
+- [x] 33 Rule Templates (ERC-20/721/1155, Permit, DEX, Safe, 4337, etc.)
 - [x] Multi-chain Presets (USDC, Uniswap V2/V3/V4)
 - [x] OFAC Dynamic Blocklist
 - [x] Real-time Admin Operation Alerting
 - [x] EIP-4337 Account Abstraction Support
+- [x] RBAC Rule Ownership (owner/applied_to/status on every rule)
+- [x] CLI `evm` Command Structure (sign/rule/signer with multi-chain ready architecture)
+
+### In Progress: Signer Ownership & Access Control
+
+Per-signer ownership model — each signer has an owner and an explicit access list. Admin key leak only affects admin's own signers, not the entire system. See [design doc](docs/features/signer-ownership-access-control.md).
+
+- [ ] **Phase 1**: Signer Ownership — owner_id on signers, owner-only sign/unlock/lock
+- [ ] **Phase 2**: Access List — grant/revoke signer access to other API keys, HD wallet inheritance
+- [ ] **Phase 3**: Lifecycle Safety — transfer ownership, delete cascade, approval gate, resource limits
+- [ ] **Phase 4a**: API Key Encrypted Keystore — Ed25519 keystore with password encryption (via ethsig)
+- [ ] **Phase 4b**: Internal Transfer Rule — same-owner scope for multi-tenant signer isolation
+
+### Future
+
 - [ ] Auto-Discovery Delegation (zero-config rule composition)
-- [ ] Internal Signer Transfer Rules
 - [ ] Solana Chain Support
 - [ ] Cosmos Chain Support
 - [ ] Bitcoin Chain Support

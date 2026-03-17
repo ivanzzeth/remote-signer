@@ -163,16 +163,38 @@ curl --cacert certs/ca.crt --cert certs/client.crt --key certs/client.key https:
 
 ## 路线图
 
+### 已完成
+
 - [x] EIP-712 结构化数据校验
 - [x] 终端界面 (TUI)
-- [x] Go 客户端 SDK
-- [x] JS/TS 客户端 SDK
-- [ ] Solidity 规则覆盖率强制
+- [x] Go / TypeScript / Rust 客户端 SDK
+- [x] MCP Server（AI Agent 集成）
+- [x] 33 个规则模板（ERC-20/721/1155、Permit、DEX、Safe、4337 等）
+- [x] 多链矩阵 Preset（USDC、Uniswap V2/V3/V4）
+- [x] OFAC 动态黑名单
+- [x] 实时管理员安全告警
+- [x] EIP-4337 账户抽象支持
+- [x] RBAC 规则所有权（每条规则有 owner/applied_to/status）
+- [x] CLI `evm` 命令结构（sign/rule/signer，多链可扩展架构）
+
+### 进行中：Signer 所有权与访问控制
+
+Signer 级别的所有权模型 — 每个 signer 有独立的 owner 和显式 access list。即使 admin key 泄漏，也只影响 admin 自己的 signer，不会波及其他人的资产。详见[设计文档](docs/features/signer-ownership-access-control.md)。
+
+- [ ] **Phase 1**：Signer 所有权 — signer 绑定 owner，仅 owner 可签名/解锁/锁定
+- [ ] **Phase 2**：访问列表 — owner 授权其他 API key 使用 signer，HD Wallet 继承
+- [ ] **Phase 3**：生命周期安全 — 所有权转移、级联删除、审批门控、资源限额
+- [ ] **Phase 4a**：API Key 加密存储 — Ed25519 keystore 密码加密（基于 ethsig）
+- [ ] **Phase 4b**：内部转账规则 — same_owner 作用域，多租户 signer 隔离
+
+### 未来
+
+- [ ] 自动发现委托（零配置规则组合）
 - [ ] Solana 链支持
 - [ ] Cosmos 链支持
 - [ ] Bitcoin 链支持
 - [ ] Web 控制台
-- [ ] 审计日志导出（S3、Elasticsearch）
+- [ ] MPC / TSS 集成
 
 ## 许可证
 
