@@ -447,7 +447,7 @@ func (m *APIKeysModel) renderKeyRow(k apikeys.APIKey, selected bool) string {
 	}
 
 	adminStr := "No"
-	if k.Admin {
+	if k.Role == "admin" {
 		adminStr = "Yes"
 	}
 
@@ -480,7 +480,7 @@ func (m *APIKeysModel) renderKeyRow(k apikeys.APIKey, selected bool) string {
 
 	// Color admin
 	adminStyle := styles.MutedColor
-	if k.Admin {
+	if k.Role == "admin" {
 		adminStyle = lipgloss.NewStyle().Foreground(styles.ErrorColor).Bold(true)
 	}
 	adminPart := adminStyle.Render(fmt.Sprintf("%-7s", adminStr))
@@ -514,7 +514,7 @@ func (m *APIKeysModel) buildDetailContent() {
 		{"ID", k.ID, lipgloss.NewStyle()},
 		{"Name", k.Name, lipgloss.NewStyle()},
 		{"Source", k.Source, lipgloss.NewStyle()},
-		{"Admin", formatBool(k.Admin), adminStyle(k.Admin)},
+		{"Role", string(k.Role), lipgloss.NewStyle()},
 		{"Enabled", formatBool(k.Enabled), enabledStyle(k.Enabled)},
 		{"Rate Limit", formatRateLimit(k.RateLimit), lipgloss.NewStyle()},
 		{"Allow All Signers", formatBool(k.AllowAllSigners), lipgloss.NewStyle()},

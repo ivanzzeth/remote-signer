@@ -15,11 +15,13 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/lib/pq"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 
 	"github.com/ivanzzeth/remote-signer/internal/api"
+	"github.com/ivanzzeth/remote-signer/internal/audit"
 	"github.com/ivanzzeth/remote-signer/internal/blocklist"
 	"github.com/ivanzzeth/remote-signer/internal/chain"
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
@@ -518,6 +520,12 @@ func (ts *TestServer) Start() error {
 		return fmt.Errorf("failed to discover locked signers: %w", err)
 	}
 
+	// Initialize audit logger for rule/API key CRUD audit events
+	auditLogger, err := audit.NewAuditLogger(auditRepo, log)
+	if err != nil {
+		return fmt.Errorf("failed to create audit logger: %w", err)
+	}
+
 	// Initialize router (include BudgetRepo so GET /api/v1/evm/rules/{id}/budgets works for budget e2e tests)
 	routerConfig := api.RouterConfig{
 		Version: "e2e-test",
@@ -529,6 +537,7 @@ func (ts *TestServer) Start() error {
 		APIKeyRepo:    apiKeyRepo,
 		BudgetRepo:    budgetRepo,
 		JSEvaluator:   jsEval,
+		AuditLogger:   auditLogger,
 	}
 	if ts.config.PresetsDir != "" {
 		routerConfig.PresetsDir = ts.config.PresetsDir
@@ -654,7 +663,7 @@ func (ts *TestServer) createAPIKey(repo storage.APIKeyRepository) error {
 		Name:             "E2E Test Admin API Key",
 		PublicKeyHex:     hex.EncodeToString(ts.config.APIKeyPublicKey),
 		RateLimit:        1000,
-		Admin:            true,
+		Role:             types.RoleAdmin,
 		AllowAllSigners:  true,
 		Enabled:          true,
 		CreatedAt:        time.Now(),
@@ -672,7 +681,7 @@ func (ts *TestServer) createAPIKey(repo storage.APIKeyRepository) error {
 			Name:             "E2E Test Non-Admin API Key",
 			PublicKeyHex:     hex.EncodeToString(ts.config.NonAdminAPIKeyPublicKey),
 			RateLimit:        1000,
-			Admin:            false,
+			Role:             types.RoleAgent,
 			AllowAllSigners:  true,
 			Enabled:          true,
 			CreatedAt:        time.Now(),
@@ -705,6 +714,8 @@ func (ts *TestServer) createWhitelistRule(repo storage.RuleRepository) error {
 		ChainType:   &chainType,
 		Config:      []byte(config),
 		Enabled:     true,
+		Owner:       "config",
+		AppliedTo:   pq.StringArray{"*"},
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
@@ -733,6 +744,8 @@ func (ts *TestServer) createBlocklistRule(repo storage.RuleRepository) error {
 		ChainType:   &chainType,
 		Config:      []byte(config),
 		Enabled:     true,
+		Owner:       "config",
+		AppliedTo:   pq.StringArray{"*"},
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
@@ -765,6 +778,8 @@ func (ts *TestServer) createJSBlocklistRule(repo storage.RuleRepository) error {
 		ChainType:   &chainType,
 		Config:      []byte(config),
 		Enabled:     true,
+		Owner:       "config",
+		AppliedTo:   pq.StringArray{"*"},
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
@@ -789,6 +804,8 @@ func (ts *TestServer) createSignTypeRestrictionRule(repo storage.RuleRepository)
 		ChainType:   &chainType,
 		Config:      []byte(config),
 		Enabled:     true,
+		Owner:       "config",
+		AppliedTo:   pq.StringArray{"*"},
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}

@@ -17,6 +17,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/audit"
 	evmchain "github.com/ivanzzeth/remote-signer/internal/chain/evm"
+	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/ruleconfig"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
@@ -728,16 +729,24 @@ func (h *RuleHandler) listRules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Agent keys get redacted responses (no script source in config)
+	// Scope rules for non-admin, non-dev callers (agent, strategy).
+	// Agents/strategies only see rules that apply to them.
+	// Admins and devs see all rules.
 	apiKey := middleware.GetAPIKey(r.Context())
+	if apiKey != nil && !apiKey.IsAdmin() && !apiKey.IsDev() {
+		rules = rule.FilterRulesForCaller(rules, apiKey.ID)
+		total = len(rules)
+	}
+
+	// Agent keys get redacted responses (no script source in config)
 	redact := apiKey != nil && apiKey.IsAgent()
 
 	resp := ListRulesResponse{
 		Rules: make([]RuleResponse, 0, len(rules)),
 		Total: total,
 	}
-	for _, rule := range rules {
-		rr := h.toRuleResponse(rule)
+	for _, r := range rules {
+		rr := h.toRuleResponse(r)
 		if redact {
 			rr.Config = nil
 		}
@@ -748,7 +757,7 @@ func (h *RuleHandler) listRules(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *RuleHandler) getRule(w http.ResponseWriter, r *http.Request, ruleID string) {
-	rule, err := h.ruleRepo.Get(r.Context(), types.RuleID(ruleID))
+	gotRule, err := h.ruleRepo.Get(r.Context(), types.RuleID(ruleID))
 	if err != nil {
 		if types.IsNotFound(err) {
 			h.writeError(w, "rule not found", http.StatusNotFound)
@@ -759,9 +768,18 @@ func (h *RuleHandler) getRule(w http.ResponseWriter, r *http.Request, ruleID str
 		return
 	}
 
-	rr := h.toRuleResponse(rule)
-	// Agent keys get redacted responses (no script source in config)
+	// Scope check: non-admin, non-dev callers can only see rules that apply to them
 	apiKey := middleware.GetAPIKey(r.Context())
+	if apiKey != nil && !apiKey.IsAdmin() && !apiKey.IsDev() {
+		filtered := rule.FilterRulesForCaller([]*types.Rule{gotRule}, apiKey.ID)
+		if len(filtered) == 0 {
+			h.writeError(w, "rule not found", http.StatusNotFound)
+			return
+		}
+	}
+
+	rr := h.toRuleResponse(gotRule)
+	// Agent keys get redacted responses (no script source in config)
 	if apiKey != nil && apiKey.IsAgent() {
 		rr.Config = nil
 	}

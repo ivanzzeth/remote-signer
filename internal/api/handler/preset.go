@@ -143,6 +143,12 @@ type ApplyPresetRequest struct {
 }
 
 func (h *PresetHandler) apply(w http.ResponseWriter, r *http.Request, id string) {
+	// Check apply_preset permission (admin-only)
+	apiKey := middleware.GetAPIKey(r.Context())
+	if apiKey == nil || !middleware.HasPermission(apiKey.Role, middleware.PermApplyPreset) {
+		h.writeError(w, "forbidden: apply_preset permission required", http.StatusForbidden)
+		return
+	}
 	if h.readOnly {
 		h.writeError(w, "preset apply is disabled (security.rules_api_readonly)", http.StatusForbidden)
 		return

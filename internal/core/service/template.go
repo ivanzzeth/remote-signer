@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lib/pq"
+
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
@@ -199,6 +201,8 @@ func (s *TemplateService) createInstanceFromResolved(
 		TemplateID:  &tmpl.ID,
 		Variables:   variablesJSON,
 		Enabled:     true,
+		AppliedTo:   pq.StringArray{"*"},
+		Owner:       "config",
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
@@ -348,6 +352,8 @@ func (s *TemplateService) createInstanceFromBundle(
 			TemplateID:  &tmpl.ID,
 			Variables:   variablesJSON,
 			Enabled:     true,
+			AppliedTo:   pq.StringArray{"*"},
+			Owner:       "config",
 			CreatedAt:   time.Now(),
 			UpdatedAt:   time.Now(),
 		}

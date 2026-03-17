@@ -78,8 +78,7 @@ func createAgentClient(t *testing.T) *client.Client {
 		ID:              agentKeyID,
 		Name:            "E2E Agent Test Key",
 		PublicKey:       agentPubHex,
-		Admin:           false,
-		Agent:           true,
+		Role:            "agent",
 		RateLimit:       500,
 		AllowAllSigners: true,
 	})
@@ -91,7 +90,7 @@ func createAgentClient(t *testing.T) *client.Client {
 		require.NoError(t, err)
 	}
 	require.NotNil(t, created)
-	assert.True(t, created.Agent, "created key should have agent=true")
+	assert.Equal(t, "agent", created.Role, "created key should have role=agent")
 
 	t.Cleanup(func() {
 		if delErr := adminClient.APIKeys.Delete(context.Background(), agentKeyID); delErr != nil {
@@ -124,18 +123,20 @@ func TestAgent_APIKey_ReadRules(t *testing.T) {
 	require.NotNil(t, resp)
 	assert.GreaterOrEqual(t, resp.Total, 1, "agent should see at least one rule")
 
-	// Agent should NOT be able to create rules (POST)
+	// Agent should NOT be able to create scripted rules (e.g. evm_js)
+	chainType := "evm"
 	_, err = agentClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
-		Name:    "Agent Should Not Create This",
-		Type:    "evm_address_list",
-		Mode:    "whitelist",
-		Config:  map[string]interface{}{"addresses": []string{"0x0000000000000000000000000000000000000001"}},
-		Enabled: true,
+		Name:      "Agent Should Not Create This",
+		Type:      "evm_js",
+		Mode:      "whitelist",
+		ChainType: &chainType,
+		Config:    map[string]interface{}{"script": "function validate(input) { return ok(); }"},
+		Enabled:   true,
 	})
-	require.Error(t, err, "agent should not be able to create rules")
+	require.Error(t, err, "agent should not be able to create evm_js rules")
 	apiErr, ok := err.(*client.APIError)
 	require.True(t, ok, "expected APIError, got %T: %v", err, err)
-	assert.Equal(t, 403, apiErr.StatusCode, "agent POST rules should return 403")
+	assert.Equal(t, 403, apiErr.StatusCode, "agent POST evm_js rules should return 403")
 }
 
 // TestAgent_APIKey_ReadBudgets verifies that an agent API key can read budget info.

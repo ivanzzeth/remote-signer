@@ -7,8 +7,7 @@ type APIKey struct {
 	ID                string     `json:"id"`
 	Name              string     `json:"name"`
 	Source            string     `json:"source"`
-	Admin             bool       `json:"admin"`
-	Agent             bool       `json:"agent"`
+	Role              string     `json:"role"` // admin, dev, agent, strategy
 	Enabled           bool       `json:"enabled"`
 	RateLimit         int        `json:"rate_limit"`
 	AllowAllSigners   bool       `json:"allow_all_signers"`
@@ -41,8 +40,7 @@ type CreateRequest struct {
 	ID                string   `json:"id"`
 	Name              string   `json:"name"`
 	PublicKey         string   `json:"public_key"`
-	Admin             bool     `json:"admin"`
-	Agent             bool     `json:"agent"`
+	Role              string   `json:"role"` // admin, dev, agent, strategy
 	RateLimit         int      `json:"rate_limit,omitempty"`
 	AllowAllSigners   bool     `json:"allow_all_signers"`
 	AllowAllHDWallets bool     `json:"allow_all_hd_wallets"`
@@ -55,8 +53,7 @@ type CreateRequest struct {
 type UpdateRequest struct {
 	Name              *string  `json:"name,omitempty"`
 	Enabled           *bool    `json:"enabled,omitempty"`
-	Admin             *bool    `json:"admin,omitempty"`
-	Agent             *bool    `json:"agent,omitempty"`
+	Role              *string  `json:"role,omitempty"` // admin, dev, agent, strategy
 	RateLimit         *int     `json:"rate_limit,omitempty"`
 	AllowAllSigners   *bool    `json:"allow_all_signers,omitempty"`
 	AllowAllHDWallets *bool    `json:"allow_all_hd_wallets,omitempty"`

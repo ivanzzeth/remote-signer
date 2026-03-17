@@ -457,8 +457,8 @@ func (m *RuleDetailModel) renderDetail() string {
 	if m.rule.ChainID != nil {
 		info = append(info, struct{ key, value string }{"Chain ID", *m.rule.ChainID})
 	}
-	if m.rule.APIKeyID != nil {
-		info = append(info, struct{ key, value string }{"API Key ID", *m.rule.APIKeyID})
+	if m.rule.Owner != nil {
+		info = append(info, struct{ key, value string }{"Owner", *m.rule.Owner})
 	}
 	if m.rule.SignerAddress != nil {
 		info = append(info, struct{ key, value string }{"Signer", *m.rule.SignerAddress})

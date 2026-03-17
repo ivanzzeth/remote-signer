@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lib/pq"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
@@ -53,6 +54,7 @@ func TestRuleRepo_List_ExcludesExpiredRules_WhenEnabledOnly(t *testing.T) {
 		Source:    types.RuleSourceConfig,
 		Enabled:   true,
 		ExpiresAt: nil,
+		AppliedTo: pq.StringArray{"self"},
 	}
 	require.NoError(t, repo.Create(ctx, noExpiry))
 
@@ -64,6 +66,7 @@ func TestRuleRepo_List_ExcludesExpiredRules_WhenEnabledOnly(t *testing.T) {
 		Source:    types.RuleSourceConfig,
 		Enabled:   true,
 		ExpiresAt: &expiredAt,
+		AppliedTo: pq.StringArray{"self"},
 	}
 	require.NoError(t, repo.Create(ctx, expired))
 
@@ -75,6 +78,7 @@ func TestRuleRepo_List_ExcludesExpiredRules_WhenEnabledOnly(t *testing.T) {
 		Source:    types.RuleSourceConfig,
 		Enabled:   true,
 		ExpiresAt: &notExpiredAt,
+		AppliedTo: pq.StringArray{"self"},
 	}
 	require.NoError(t, repo.Create(ctx, valid))
 
@@ -112,6 +116,7 @@ func TestRuleRepo_List_ReturnsExpiredRules_WhenNotEnabledOnly(t *testing.T) {
 		Source:    types.RuleSourceConfig,
 		Enabled:   true,
 		ExpiresAt: &expiredAt,
+		AppliedTo: pq.StringArray{"self"},
 	}
 	require.NoError(t, repo.Create(ctx, r))
 
@@ -149,7 +154,7 @@ func TestGormRuleRepo_Get(t *testing.T) {
 	_, repo := setupIsolatedRuleRepoTestDB(t)
 	ctx := context.Background()
 
-	rule := &types.Rule{ID: "grr-get-1", Name: "test-get", Enabled: true, Type: types.RuleTypeEVMAddressList, Source: types.RuleSourceConfig}
+	rule := &types.Rule{ID: "grr-get-1", Name: "test-get", Enabled: true, Type: types.RuleTypeEVMAddressList, Source: types.RuleSourceConfig, AppliedTo: pq.StringArray{"self"}}
 	require.NoError(t, repo.Create(ctx, rule))
 
 	got, err := repo.Get(ctx, "grr-get-1")
@@ -168,7 +173,7 @@ func TestGormRuleRepo_Update(t *testing.T) {
 	_, repo := setupIsolatedRuleRepoTestDB(t)
 	ctx := context.Background()
 
-	rule := &types.Rule{ID: "grr-upd-1", Name: "original", Enabled: true, Type: types.RuleTypeEVMAddressList, Source: types.RuleSourceConfig}
+	rule := &types.Rule{ID: "grr-upd-1", Name: "original", Enabled: true, Type: types.RuleTypeEVMAddressList, Source: types.RuleSourceConfig, AppliedTo: pq.StringArray{"self"}}
 	require.NoError(t, repo.Create(ctx, rule))
 
 	rule.Name = "updated"
@@ -193,7 +198,7 @@ func TestGormRuleRepo_Delete(t *testing.T) {
 	_, repo := setupIsolatedRuleRepoTestDB(t)
 	ctx := context.Background()
 
-	rule := &types.Rule{ID: "grr-del-1", Name: "to-delete", Enabled: true, Type: types.RuleTypeEVMAddressList, Source: types.RuleSourceConfig}
+	rule := &types.Rule{ID: "grr-del-1", Name: "to-delete", Enabled: true, Type: types.RuleTypeEVMAddressList, Source: types.RuleSourceConfig, AppliedTo: pq.StringArray{"self"}}
 	require.NoError(t, repo.Create(ctx, rule))
 
 	err := repo.Delete(ctx, "grr-del-1")
@@ -214,8 +219,8 @@ func TestGormRuleRepo_ListByChainType(t *testing.T) {
 	ctx := context.Background()
 
 	evm := types.ChainTypeEVM
-	require.NoError(t, repo.Create(ctx, &types.Rule{ID: "grr-lbct-1", ChainType: &evm, Enabled: true, Type: types.RuleTypeEVMAddressList, Source: types.RuleSourceConfig}))
-	require.NoError(t, repo.Create(ctx, &types.Rule{ID: "grr-lbct-2", Enabled: false, Type: types.RuleTypeEVMAddressList, Source: types.RuleSourceConfig}))
+	require.NoError(t, repo.Create(ctx, &types.Rule{ID: "grr-lbct-1", ChainType: &evm, Enabled: true, Type: types.RuleTypeEVMAddressList, Source: types.RuleSourceConfig, AppliedTo: pq.StringArray{"self"}}))
+	require.NoError(t, repo.Create(ctx, &types.Rule{ID: "grr-lbct-2", Enabled: false, Type: types.RuleTypeEVMAddressList, Source: types.RuleSourceConfig, AppliedTo: pq.StringArray{"self"}}))
 
 	list, err := repo.ListByChainType(ctx, types.ChainTypeEVM)
 	require.NoError(t, err)
@@ -227,7 +232,7 @@ func TestGormRuleRepo_IncrementMatchCount(t *testing.T) {
 	_, repo := setupIsolatedRuleRepoTestDB(t)
 	ctx := context.Background()
 
-	rule := &types.Rule{ID: "grr-inc-1", Name: "counter", Enabled: true, Type: types.RuleTypeEVMAddressList, Source: types.RuleSourceConfig}
+	rule := &types.Rule{ID: "grr-inc-1", Name: "counter", Enabled: true, Type: types.RuleTypeEVMAddressList, Source: types.RuleSourceConfig, AppliedTo: pq.StringArray{"self"}}
 	require.NoError(t, repo.Create(ctx, rule))
 
 	err := repo.IncrementMatchCount(ctx, "grr-inc-1")
@@ -268,6 +273,7 @@ func TestGormRuleRepo_List_AllFilters(t *testing.T) {
 		Owner:      apiKeyID,
 		SignerAddress: &signerAddr,
 		Enabled:       true,
+		AppliedTo: pq.StringArray{"self"},
 	}
 	require.NoError(t, repo.Create(ctx, rule))
 
@@ -308,11 +314,12 @@ func TestGormRuleRepo_List_Pagination(t *testing.T) {
 
 	for i := 0; i < 5; i++ {
 		require.NoError(t, repo.Create(ctx, &types.Rule{
-			ID:      types.RuleID(fmt.Sprintf("grr-pag-%d", i)),
-			Name:    fmt.Sprintf("rule-%d", i),
-			Type:    types.RuleTypeEVMAddressList,
-			Source:  types.RuleSourceConfig,
-			Enabled: true,
+			ID:        types.RuleID(fmt.Sprintf("grr-pag-%d", i)),
+			Name:      fmt.Sprintf("rule-%d", i),
+			Type:      types.RuleTypeEVMAddressList,
+			Source:    types.RuleSourceConfig,
+			Enabled:   true,
+			AppliedTo: pq.StringArray{"self"},
 		}))
 	}
 

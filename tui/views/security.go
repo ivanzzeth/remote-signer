@@ -611,7 +611,7 @@ func (m *SecurityModel) renderExpandedDetail() string {
 					sourceTag = " [config]"
 				}
 				adminTag := ""
-				if k.Admin {
+				if k.Role == "admin" {
 					adminTag = " (admin)"
 				}
 				b.WriteString(fmt.Sprintf("    %s (%s)%s%s\n", accentStyle.Render(k.ID), k.Name, adminTag, sourceTag))

@@ -37,7 +37,7 @@ func TestAPIKey_List(t *testing.T) {
 	for _, key := range resp.Keys {
 		if key.ID == adminAPIKeyID {
 			found = true
-			assert.True(t, key.Admin, "Admin key should have admin=true")
+			assert.Equal(t, "admin", key.Role, "Admin key should have role=admin")
 			assert.True(t, key.Enabled, "Admin key should be enabled")
 			assert.NotEmpty(t, key.ID, "Key should have an ID")
 			break
@@ -122,7 +122,7 @@ func TestAPIKey_Get(t *testing.T) {
 	require.NotNil(t, key)
 
 	assert.Equal(t, adminAPIKeyID, key.ID)
-	assert.True(t, key.Admin, "Admin key should have admin=true")
+	assert.Equal(t, "admin", key.Role, "Admin key should have role=admin")
 	assert.True(t, key.Enabled, "Admin key should be enabled")
 	assert.NotZero(t, key.CreatedAt, "CreatedAt should be set")
 	assert.NotZero(t, key.UpdatedAt, "UpdatedAt should be set")
@@ -162,7 +162,7 @@ func TestAPIKey_Create_ReadonlyMode(t *testing.T) {
 		ID:              "e2e-readonly-test-key",
 		Name:            "E2E Readonly Test",
 		PublicKey:       hex.EncodeToString(pubKey),
-		Admin:           false,
+		Role:            "strategy",
 		AllowAllSigners: true,
 	}
 
@@ -200,7 +200,7 @@ func TestAPIKey_Create_And_Get(t *testing.T) {
 		ID:              "e2e-create-get-test-key",
 		Name:            "E2E Create Get Test",
 		PublicKey:       hex.EncodeToString(pubKey),
-		Admin:           false,
+		Role:            "strategy",
 		RateLimit:       200,
 		AllowAllSigners: true,
 	}
@@ -227,7 +227,7 @@ func TestAPIKey_Create_And_Get(t *testing.T) {
 	assert.Equal(t, "E2E Create Get Test", created.Name)
 	assert.Equal(t, "api", created.Source, "API-created key should have source=api")
 	assert.True(t, created.Enabled, "Newly created key should be enabled")
-	assert.False(t, created.Admin, "Key should not be admin")
+	assert.Equal(t, "strategy", created.Role, "Key should have role=strategy")
 
 	// Now fetch it back
 	fetched, err := adminClient.APIKeys.Get(ctx, created.ID)
@@ -237,7 +237,7 @@ func TestAPIKey_Create_And_Get(t *testing.T) {
 	assert.Equal(t, created.ID, fetched.ID)
 	assert.Equal(t, created.Name, fetched.Name)
 	assert.Equal(t, created.Source, fetched.Source)
-	assert.Equal(t, created.Admin, fetched.Admin)
+	assert.Equal(t, created.Role, fetched.Role)
 	assert.Equal(t, created.Enabled, fetched.Enabled)
 }
 
@@ -283,7 +283,7 @@ func TestAPIKey_Update_APISource(t *testing.T) {
 		ID:              "e2e-update-test-key",
 		Name:            "E2E Update Test Original",
 		PublicKey:       hex.EncodeToString(pubKey),
-		Admin:           false,
+		Role:            "strategy",
 		AllowAllSigners: true,
 	})
 	if err != nil {
@@ -356,7 +356,7 @@ func TestAPIKey_Delete_APISource(t *testing.T) {
 		ID:              "e2e-delete-test-key",
 		Name:            "E2E Delete Test",
 		PublicKey:       hex.EncodeToString(pubKey),
-		Admin:           false,
+		Role:            "strategy",
 		AllowAllSigners: true,
 	})
 	if err != nil {
@@ -447,7 +447,7 @@ func TestAPIKey_NonAdminCannotCreate(t *testing.T) {
 		ID:              "e2e-nonadmin-create-attempt",
 		Name:            "Should Not Be Created",
 		PublicKey:       hex.EncodeToString(pubKey),
-		Admin:           false,
+		Role:            "strategy",
 		AllowAllSigners: true,
 	})
 	require.Error(t, err)

@@ -15,7 +15,11 @@ type Rule struct {
 	Source            string     `json:"source"`
 	ChainType         *string    `json:"chain_type,omitempty"`
 	ChainID           *string    `json:"chain_id,omitempty"`
-	APIKeyID          *string    `json:"api_key_id,omitempty"`
+	Owner             *string    `json:"owner,omitempty"`
+	AppliedTo         []string   `json:"applied_to,omitempty"`
+	Status            string     `json:"status,omitempty"`
+	ApprovedBy        *string    `json:"approved_by,omitempty"`
+	Immutable         bool       `json:"immutable,omitempty"`
 	SignerAddress     *string    `json:"signer_address,omitempty"`
 	Config            RuleConfig `json:"config,omitempty"`
 	Enabled           bool       `json:"enabled"`
@@ -76,10 +80,11 @@ type CreateRuleRequest struct {
 	Mode          string                 `json:"mode"`
 	ChainType     *string                `json:"chain_type,omitempty"`
 	ChainID       *string                `json:"chain_id,omitempty"`
-	APIKeyID      *string                `json:"api_key_id,omitempty"`
 	SignerAddress *string                `json:"signer_address,omitempty"`
 	Config        map[string]interface{} `json:"config"`
 	Enabled       bool                   `json:"enabled"`
+	Immutable     bool                   `json:"immutable,omitempty"`
+	AppliedTo     []string               `json:"applied_to,omitempty"`
 	TestCases     []JSRuleTestCase       `json:"test_cases,omitempty"`
 }
 
@@ -87,8 +92,11 @@ type CreateRuleRequest struct {
 type UpdateRuleRequest struct {
 	Name        string                 `json:"name,omitempty"`
 	Description string                 `json:"description,omitempty"`
+	Type        string                 `json:"type,omitempty"`
 	Config      map[string]interface{} `json:"config,omitempty"`
 	Enabled     bool                   `json:"enabled"`
+	AppliedTo   []string               `json:"applied_to,omitempty"`
+	TestCases   []JSRuleTestCase       `json:"test_cases,omitempty"`
 }
 
 // RuleBudget represents a budget record for a rule instance (GET /api/v1/evm/rules/{id}/budgets).
