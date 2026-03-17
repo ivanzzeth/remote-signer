@@ -52,12 +52,12 @@ api_keys:
 - id: admin-key
   name: Admin Key
   public_key_env: ADMIN_PUBLIC_KEY
-  admin: true
+  role: admin
   enabled: true
   rate_limit: 1000
 - id: my-app-key
   name: My Application
   public_key_env: MY_APP_PUBLIC_KEY
-  admin: false
+  role: dev
   enabled: true
   rate_limit: 100

@@ -393,8 +393,8 @@ api_keys:
   - id: "agent-trading-bot"
     name: "Trading Bot"
     public_key: "..."
-    admin: false
-    agent: true
+    role: dev
+    role: agent
     enabled: true
     rate_limit: 300
     allow_all_signers: false

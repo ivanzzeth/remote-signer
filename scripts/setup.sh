@@ -1028,14 +1028,14 @@ api_keys:
   - id: "admin"
     name: "Admin"
     public_key: "$ADMIN_PUBLIC_KEY"
-    admin: true
+    role: admin
     enabled: true
     rate_limit: ${ADMIN_RATE_LIMIT:-1000}
 
   - id: "dev"
     name: "Dev"
     public_key: "$DEV_PUBLIC_KEY"
-    admin: false
+    role: dev
     enabled: true
     rate_limit: ${DEV_RATE_LIMIT:-100}
     allow_all_signers: true      # setup: allow any signer for local dev

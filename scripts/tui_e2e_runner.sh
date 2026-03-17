@@ -48,7 +48,7 @@ chains:
       enabled: false
 api_keys:
   - id: admin
-    admin: true
+    role: admin
     enabled: true
     public_key: "$ADMIN_PUBLIC_HEX"
 security:

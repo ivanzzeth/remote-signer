@@ -14,7 +14,7 @@ chains:
       enabled: false
 api_keys:
   - id: admin
-    admin: true
+    role: admin
     enabled: true
     public_key: "8dc2cc5e1cf4108e577d9cfc03984255f6b6a5411e23c1f355c3289d0376f2ac"
 security:

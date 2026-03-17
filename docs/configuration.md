@@ -110,14 +110,14 @@ api_keys:
     name: "Admin"                          # Human-readable name
     public_key: "MCowBQYDK2VwAyEA..."     # Base64 or hex (auto-detected)
     # public_key_env: "ADMIN_PUBLIC_KEY"   # Or read from env var
-    admin: true                            # Can manage rules, approve requests, create signers
+    role: admin                            # Can manage rules, approve requests, create signers
     enabled: true
     rate_limit: 1000                       # Requests per minute
 
   - id: "dev"
     name: "Dev"
     public_key: "MCowBQYDK2VwAyEA..."
-    admin: false                           # Can only submit sign requests
+    role: dev                           # Can only submit sign requests
     enabled: true
     rate_limit: 100
     # Optional scope restrictions:
@@ -144,7 +144,7 @@ openssl pkey -in data/admin_public.pem -pubin -outform DER | base64
 
 ### Permission model
 
-| Field | `admin: true` | `admin: false` |
+| Field | `role: admin` | `role: dev` |
 |-------|---------------|----------------|
 | Submit sign requests | Yes | Yes |
 | View request status | Yes | Own requests only |

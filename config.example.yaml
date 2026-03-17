@@ -512,6 +512,7 @@ rules:
   # Requires dynamic_blocklist section above to be enabled.
   # -------------------------------------------------------------------------
   - name: "Dynamic Address Blocklist"
+    id: "dynamic-address-blocklist"
     type: "evm_dynamic_blocklist"
     mode: "blocklist"
     chain_type: "evm"
@@ -530,6 +531,7 @@ rules:
   # allowed_safe_addresses: the testing address must be contained in the
   # allowed list, or startup validation (template test cases) will fail.
   - name: "Polymarket Safe rules (Polygon)"
+    id: "polymarket-safe-polygon"
     type: "instance"
     chain_type: "evm"
     chain_id: "137"
@@ -558,6 +560,7 @@ rules:
   # Solidity version (requires Forge): preset predict_eoa_bnb
   # JS version (no Forge): preset predict_eoa_bnb.preset.js.yaml
   - name: "Predict.fun EOA (BNB) (Predict Auth Template)"
+    id: "predict-auth-bnb"
     type: "instance"
     chain_type: "evm"
     chain_id: "56"
@@ -566,6 +569,7 @@ rules:
       template: "Predict Auth Template"
       variables: {}
   - name: "Predict.fun EOA (BNB) (Predict Enable Trading Template)"
+    id: "predict-enable-trading-bnb"
     type: "instance"
     chain_type: "evm"
     chain_id: "56"
@@ -586,6 +590,7 @@ rules:
         neg_risk_adapter_yb: "0x41dCe1A4B8FB5e6327701750aF6231B7CD0B2A40"
         signer_address_for_testing: "0x1111111111111111111111111111111111111111"
   - name: "Predict.fun EOA (BNB) (Predict Trading Template)"
+    id: "predict-trading-bnb"
     type: "instance"
     chain_type: "evm"
     chain_id: "56"
@@ -612,6 +617,7 @@ rules:
   # allowed_safe_addresses. Startup validation runs template test cases using the
   # testing address; if it is not in the allowed list, validation fails.
   - name: "Opinion Safe rules (BSC)"
+    id: "opinion-safe-bsc"
     type: "instance"
     chain_type: "evm"
     chain_id: "56"

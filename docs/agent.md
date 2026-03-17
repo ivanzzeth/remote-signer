@@ -51,8 +51,8 @@ api_keys:
   - id: "trading-bot"
     name: "Trading Bot"
     public_key: "<ed25519-public-key-hex>"
-    admin: false
-    agent: true
+    role: dev
+    role: agent
     enabled: true
     rate_limit: 300
     allow_all_signers: false
