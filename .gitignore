@@ -130,3 +130,4 @@ bin/
 e2e/data/
 verify-setup-polymarket
 remote-signer-cli
+.playwright-cli/
