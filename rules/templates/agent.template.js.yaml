@@ -13,14 +13,74 @@ variables:
     description: "Max personal_sign message length in characters. -1 = no limit."
     required: false
     default: "1024"
+  - name: max_native_total
+    type: string
+    description: "Max total native token budget (human-readable, e.g. 1 = 1 ETH)"
+    required: false
+    default: "1"
+  - name: max_native_per_tx
+    type: string
+    description: "Max native token per transaction (human-readable)"
+    required: false
+    default: "0.1"
+  - name: max_tx_count
+    type: string
+    description: "Max transaction count for non-token calls"
+    required: false
+    default: "1000"
+  - name: max_sign_count
+    type: string
+    description: "Max signature count (personal_sign + typed_data)"
+    required: false
+    default: "500"
+  - name: max_unknown_token_total
+    type: string
+    description: "Max total budget for unknown tokens (human-readable, decimals auto-queried)"
+    required: false
+    default: "1000"
+  - name: max_unknown_token_per_tx
+    type: string
+    description: "Max per-tx budget for unknown tokens (human-readable)"
+    required: false
+    default: "100"
+  - name: max_unknown_token_tx_count
+    type: string
+    description: "Max tx count for unknown tokens"
+    required: false
+    default: "50"
 
 budget_metering:
   method: "js"
   dynamic: true
+  unit_decimal: true
+  known_units:
+    native:
+      max_total: "${max_native_total}"
+      max_per_tx: "${max_native_per_tx}"
+      decimals: 18
+    tx_count:
+      max_total: "${max_tx_count}"
+      max_per_tx: "1"
+      decimals: 0
+    sign_count:
+      max_total: "${max_sign_count}"
+      max_per_tx: "1"
+      decimals: 0
+  unknown_default:
+    max_total: "${max_unknown_token_total}"
+    max_per_tx: "${max_unknown_token_per_tx}"
+    max_tx_count: ${max_unknown_token_tx_count}
 
 test_variables:
   chain_id: "1"
   max_message_length: "1024"
+  max_native_total: "1"
+  max_native_per_tx: "0.1"
+  max_tx_count: "1000"
+  max_sign_count: "500"
+  max_unknown_token_total: "1000"
+  max_unknown_token_per_tx: "100"
+  max_unknown_token_tx_count: "50"
 
 rules:
   # ── agent-tx: allow any transaction, track budget dynamically ──

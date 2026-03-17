@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
@@ -48,13 +49,30 @@ type BudgetJSEvaluator interface {
 	EvaluateBudget(ctx context.Context, rule *types.Rule, req *types.SignRequest, parsed *types.ParsedPayload) (*types.BudgetResult, error)
 }
 
+// DecimalsQuerier queries ERC20 token decimals via RPC.
+// Implementations should use caching (e.g. TokenMetadataCache) to avoid redundant RPC calls.
+type DecimalsQuerier interface {
+	// QueryDecimals returns the decimals for the given token address on the given chain.
+	// Returns an error if the RPC call fails or the contract does not implement decimals().
+	QueryDecimals(ctx context.Context, chainID, address string) (int, error)
+}
+
+// isEthAddressRe matches a 0x-prefixed hex string of exactly 40 hex characters (Ethereum address).
+var isEthAddressRe = regexp.MustCompile(`^0x[0-9a-fA-F]{40}$`)
+
 // BudgetChecker checks and deducts budget for rule instances
 type BudgetChecker struct {
-	budgetRepo   storage.BudgetRepository
-	templateRepo storage.TemplateRepository
-	notifier     BudgetAlertNotifier
-	jsEvaluator  BudgetJSEvaluator // optional: for method "js" budget metering
-	logger       *slog.Logger
+	budgetRepo       storage.BudgetRepository
+	templateRepo     storage.TemplateRepository
+	notifier         BudgetAlertNotifier
+	jsEvaluator      BudgetJSEvaluator // optional: for method "js" budget metering
+	decimalsQuerier  DecimalsQuerier    // optional: for auto-querying ERC20 decimals when unit_decimal is true
+	logger           *slog.Logger
+
+	// decimalsCache caches queried decimals results keyed by "chainID:address" (lowercased).
+	// SECURITY: Cache is per BudgetChecker instance; decimals are immutable for deployed tokens.
+	decimalsCacheMu sync.RWMutex
+	decimalsCache   map[string]int
 }
 
 // NewBudgetChecker creates a new budget checker
@@ -64,9 +82,10 @@ func NewBudgetChecker(
 	logger *slog.Logger,
 ) *BudgetChecker {
 	return &BudgetChecker{
-		budgetRepo:   budgetRepo,
-		templateRepo: templateRepo,
-		logger:       logger,
+		budgetRepo:    budgetRepo,
+		templateRepo:  templateRepo,
+		logger:        logger,
+		decimalsCache: make(map[string]int),
 	}
 }
 
@@ -81,6 +100,13 @@ func (bc *BudgetChecker) SetNotifier(n BudgetAlertNotifier) {
 // Required when any template uses method "js"; otherwise CheckAndDeductBudget fails closed for those rules.
 func (bc *BudgetChecker) SetJSEvaluator(eval BudgetJSEvaluator) {
 	bc.jsEvaluator = eval
+}
+
+// SetDecimalsQuerier sets the decimals querier for auto-querying ERC20 token decimals.
+// When set and unit_decimal is true, address-like units with decimals=0 will auto-query
+// via RPC instead of failing. Without this, address units with decimals=0 fail-closed.
+func (bc *BudgetChecker) SetDecimalsQuerier(q DecimalsQuerier) {
+	bc.decimalsQuerier = q
 }
 
 // CheckAndDeductBudget checks if the rule has budget and deducts the spending amount.
@@ -116,7 +142,10 @@ func (bc *BudgetChecker) CheckAndDeductBudget(
 		// No metering defined — no budget constraint
 		return true, nil
 	}
-	if err := json.Unmarshal(tmpl.BudgetMetering, &metering); err != nil {
+	// Substitute template variables in raw JSON before parsing so that int fields
+	// like max_tx_count can be resolved from "${var}" strings to actual integers.
+	meteringJSON := SubstituteMeteringJSON(tmpl.BudgetMetering, rule.Variables)
+	if err := json.Unmarshal(meteringJSON, &metering); err != nil {
 		return false, fmt.Errorf("failed to parse budget metering: %w", err)
 	}
 
@@ -383,24 +412,47 @@ func (bc *BudgetChecker) autoCreateDynamicBudget(
 	// unit_decimal conversion: convert human-readable limits to raw big integer
 	if metering.UnitDecimal {
 		decimals := conf.Decimals
+
+		if decimals == 0 {
+			// Decimals not explicitly configured. Behavior depends on the unit type:
+			// - Address-like unit (0x + 40 hex chars): auto-query erc20.decimals() via RPC
+			// - Named unit (sign_count, tx_count, native without explicit decimals): skip conversion
+			//   These are integer counters where decimals=0 means no fractional part.
+			unitBase := extractUnitBase(rawUnit) // strip :suffix (e.g. "0xABC:approve" -> "0xABC")
+			if isEthAddressRe.MatchString(unitBase) {
+				// Address unit: auto-query decimals via RPC
+				chainID := ""
+				if rule.ChainID != nil {
+					chainID = *rule.ChainID
+				}
+				queried, queryErr := bc.queryDecimalsCached(ctx, chainID, unitBase)
+				if queryErr != nil {
+					// SECURITY: fail-closed when RPC is unavailable — cannot determine correct
+					// decimal conversion, allowing through could under-count budget usage.
+					return nil, fmt.Errorf("unit_decimal auto-query failed for unit %q on chain %q: %w", rawUnit, chainID, queryErr)
+				}
+				decimals = queried
+			}
+			// else: named unit with decimals=0 → skip conversion (decimals stays 0, decimalToRaw is a no-op)
+		}
+
 		// SECURITY (MEDIUM-5): Validate decimals range to prevent overflow.
 		if err := validateDecimals(decimals); err != nil {
 			return nil, fmt.Errorf("invalid decimals for unit %q: %w", rawUnit, err)
 		}
-		if decimals <= 0 {
-			// For now, fail-closed when decimals not configured and no RPC available
-			// Phase 2 will add erc20.decimals() auto-query via RPC
-			return nil, fmt.Errorf("unit_decimal enabled but decimals not configured for unit %q (RPC auto-query not yet implemented)", rawUnit)
-		}
-		var convertErr error
-		maxTotal, convertErr = decimalToRaw(maxTotal, decimals)
-		if convertErr != nil {
-			return nil, fmt.Errorf("failed to convert max_total for unit %q: %w", rawUnit, convertErr)
-		}
-		if maxPerTx != "" && maxPerTx != "-1" {
-			maxPerTx, convertErr = decimalToRaw(maxPerTx, decimals)
+
+		// Only perform conversion when decimals > 0; decimals=0 means raw values are already correct
+		if decimals > 0 {
+			var convertErr error
+			maxTotal, convertErr = decimalToRaw(maxTotal, decimals)
 			if convertErr != nil {
-				return nil, fmt.Errorf("failed to convert max_per_tx for unit %q: %w", rawUnit, convertErr)
+				return nil, fmt.Errorf("failed to convert max_total for unit %q: %w", rawUnit, convertErr)
+			}
+			if maxPerTx != "" && maxPerTx != "-1" {
+				maxPerTx, convertErr = decimalToRaw(maxPerTx, decimals)
+				if convertErr != nil {
+					return nil, fmt.Errorf("failed to convert max_per_tx for unit %q: %w", rawUnit, convertErr)
+				}
 			}
 		}
 	}
@@ -737,6 +789,164 @@ func decimalToRaw(humanStr string, decimals int) (string, error) {
 	}
 
 	return z.String(), nil
+}
+
+// queryDecimalsCached queries ERC20 decimals via the decimalsQuerier with in-memory caching.
+// SECURITY: fail-closed when decimalsQuerier is not set.
+func (bc *BudgetChecker) queryDecimalsCached(ctx context.Context, chainID, address string) (int, error) {
+	if bc.decimalsQuerier == nil {
+		return 0, fmt.Errorf("decimals querier not configured (SetDecimalsQuerier not called)")
+	}
+
+	cacheKey := strings.ToLower(chainID + ":" + address)
+
+	bc.decimalsCacheMu.RLock()
+	if cached, ok := bc.decimalsCache[cacheKey]; ok {
+		bc.decimalsCacheMu.RUnlock()
+		return cached, nil
+	}
+	bc.decimalsCacheMu.RUnlock()
+
+	decimals, err := bc.decimalsQuerier.QueryDecimals(ctx, chainID, address)
+	if err != nil {
+		return 0, err
+	}
+
+	bc.decimalsCacheMu.Lock()
+	bc.decimalsCache[cacheKey] = decimals
+	bc.decimalsCacheMu.Unlock()
+
+	bc.logger.Info("auto-queried ERC20 decimals",
+		"chain_id", chainID,
+		"address", address,
+		"decimals", decimals,
+	)
+
+	return decimals, nil
+}
+
+// extractUnitBase extracts the base address from a unit string that may have a :suffix.
+// e.g. "0xABC123...:approve" -> "0xABC123...", "native" -> "native"
+func extractUnitBase(rawUnit string) string {
+	if idx := strings.Index(rawUnit, ":"); idx >= 0 {
+		return rawUnit[:idx]
+	}
+	return rawUnit
+}
+
+// SubstituteMeteringJSON replaces ${var} placeholders in raw BudgetMetering JSON bytes
+// using the rule's bound variables. This allows template budget_metering to use
+// template variables (e.g. ${max_native_total}) that get resolved per-instance at runtime.
+// Substitution happens on the raw JSON string before unmarshal so that int fields like
+// max_tx_count can be resolved from "${var}" to actual integers.
+// Returns the substituted JSON bytes, or the original if no variables are provided.
+func SubstituteMeteringJSON(meteringJSON []byte, variablesJSON []byte) []byte {
+	if len(meteringJSON) == 0 || len(variablesJSON) == 0 {
+		return meteringJSON
+	}
+	vars := variablesToStringMap(variablesJSON)
+	if len(vars) == 0 {
+		return meteringJSON
+	}
+	s := string(meteringJSON)
+	for k, v := range vars {
+		// Replace "${var}" (with quotes) with the bare value for numeric contexts.
+		// e.g. "max_tx_count":"${max_unknown_token_tx_count}" → "max_tx_count":"50"
+		// The JSON string value "50" works for string fields, and for int fields
+		// we also replace the quoted form to handle: "max_tx_count":"${var}" → "max_tx_count":50
+		s = strings.ReplaceAll(s, "${"+k+"}", v)
+	}
+	// Fix quoted integers: When a template has e.g. max_tx_count: ${var} in YAML,
+	// it becomes "max_tx_count":"50" in JSON after substitution. For int fields,
+	// JSON unmarshal expects unquoted numbers. Detect and fix this pattern.
+	// We look for "field_name":"<digits>" where field is an int type.
+	s = unquoteIntFields(s, []string{"max_tx_count", "decimals", "alert_pct", "max_dynamic_units", "param_index"})
+	return []byte(s)
+}
+
+// unquoteIntFields replaces "field":"<digits>" with "field":<digits> in JSON for
+// fields that expect integer values. This handles the case where ${var} substitution
+// produces a quoted number string that needs to be an unquoted JSON integer.
+func unquoteIntFields(jsonStr string, fields []string) string {
+	for _, field := range fields {
+		// Match "field":"digits" or "field": "digits" (with optional whitespace after colon)
+		// and replace with "field":digits (preserving original spacing)
+		for _, sep := range []string{`":"`, `": "`} {
+			prefix := `"` + field + sep
+			colonSep := sep[:len(sep)-1] // `":` or `": ` — everything before the opening quote of value
+			for {
+				idx := strings.Index(jsonStr, prefix)
+				if idx < 0 {
+					break
+				}
+				valueStart := idx + len(prefix)
+				endQuote := strings.Index(jsonStr[valueStart:], `"`)
+				if endQuote < 0 {
+					break
+				}
+				value := jsonStr[valueStart : valueStart+endQuote]
+				trimmed := strings.TrimSpace(value)
+				if isIntegerString(trimmed) {
+					oldStr := prefix + value + `"`
+					newStr := `"` + field + colonSep + trimmed
+					jsonStr = strings.Replace(jsonStr, oldStr, newStr, 1)
+				} else {
+					break
+				}
+			}
+		}
+	}
+	return jsonStr
+}
+
+// isIntegerString returns true if s is a valid integer (optionally negative).
+func isIntegerString(s string) bool {
+	if s == "" {
+		return false
+	}
+	start := 0
+	if s[0] == '-' {
+		start = 1
+	}
+	if start >= len(s) {
+		return false
+	}
+	for i := start; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// substituteVarsInStr replaces ${var} with values from the map.
+func substituteVarsInStr(s string, vars map[string]string) string {
+	for k, v := range vars {
+		s = strings.ReplaceAll(s, "${"+k+"}", v)
+	}
+	return s
+}
+
+// variablesToStringMap parses rule.Variables JSON into a string map.
+func variablesToStringMap(variablesJSON []byte) map[string]string {
+	if len(variablesJSON) == 0 {
+		return nil
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(variablesJSON, &raw); err != nil || len(raw) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(raw))
+	for k, v := range raw {
+		if v == nil {
+			continue
+		}
+		s := strings.TrimSpace(fmt.Sprintf("%v", v))
+		if s != "" {
+			out[k] = s
+		}
+	}
+	return out
 }
 
 // substituteUnitVariables replaces ${var} in unit using rule.Variables so the unit matches

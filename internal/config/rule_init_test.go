@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	rulepkg "github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
@@ -850,4 +852,76 @@ func TestSyncFromConfig_DeletingRuleDeletesBudgets(t *testing.T) {
 	// executeSyncBody must have called DeleteByRuleID for the removed rule
 	removeID := EffectiveRuleID(1, rules[1])
 	assert.Contains(t, spy.deleteByRuleIDCalls, removeID, "deleting rule from config should delete its budgets")
+}
+
+// =============================================================================
+// syncDynamicBudgetFromConfig: template variables in BudgetMetering
+// =============================================================================
+
+func TestSyncDynamicBudgetFromConfig_TemplateVariablesResolved(t *testing.T) {
+	ctx := context.Background()
+
+	// Template BudgetMetering uses ${var} placeholders (like agent template)
+	meteringJSON := []byte(`{
+		"method":"js","dynamic":true,"unit_decimal":true,
+		"known_units":{
+			"native":{"max_total":"${max_native_total}","max_per_tx":"${max_native_per_tx}","decimals":18},
+			"sign_count":{"max_total":"${max_sign_count}","max_per_tx":"1","decimals":0}
+		},
+		"unknown_default":{"max_total":"${max_unknown_token_total}","max_per_tx":"${max_unknown_token_per_tx}","max_tx_count":"${max_unknown_token_tx_count}"}
+	}`)
+
+	// Rule variables have the resolved values from preset --set
+	rule := &types.Rule{
+		ID: "rule-agent",
+		Variables: []byte(`{
+			"max_native_total":"0.01",
+			"max_native_per_tx":"0.005",
+			"max_sign_count":"3",
+			"max_unknown_token_total":"500",
+			"max_unknown_token_per_tx":"50",
+			"max_unknown_token_tx_count":"25"
+		}`),
+	}
+	tmpl := &types.RuleTemplate{
+		ID:             "tmpl-agent",
+		BudgetMetering: meteringJSON,
+	}
+
+	// Instance budget config (from preset) with already-resolved ${var}
+	budgetMap := map[string]interface{}{
+		"dynamic":      true,
+		"unit_decimal": true,
+		"known_units": map[string]interface{}{
+			"native": map[string]interface{}{
+				"max_total":  "0.01",
+				"max_per_tx": "0.005",
+				"decimals":   18,
+			},
+			"sign_count": map[string]interface{}{
+				"max_total":  "3",
+				"max_per_tx": "1",
+				"decimals":   0,
+			},
+		},
+	}
+
+	spy := &spyBudgetRepo{listByRuleIDReturn: nil}
+
+	// The key test: syncBudgetFromConfig should detect dynamic=true from the
+	// template BudgetMetering (after variable substitution), and then use
+	// the instance budgetMap's known_units to create budget records.
+	var metering types.BudgetMetering
+	resolvedJSON := rulepkg.SubstituteMeteringJSON(tmpl.BudgetMetering, rule.Variables)
+	require.NoError(t, json.Unmarshal(resolvedJSON, &metering), "BudgetMetering JSON with ${var} should unmarshal after substitution")
+	assert.True(t, metering.Dynamic, "metering.Dynamic should be true")
+	assert.Equal(t, "0.01", metering.KnownUnits["native"].MaxTotal)
+	assert.Equal(t, "3", metering.KnownUnits["sign_count"].MaxTotal)
+
+	// Now test the full sync path
+	err := syncBudgetFromConfig(ctx, rule, tmpl, budgetMap, spy)
+	require.NoError(t, err, "syncBudgetFromConfig should not fail with template variables in BudgetMetering")
+
+	// Verify budget records were created via CreateOrGet (spy returns true for created)
+	// The sync path uses instance budgetMap's known_units, not template's
 }

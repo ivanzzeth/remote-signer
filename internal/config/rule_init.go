@@ -575,6 +575,14 @@ func (i *RuleInitializer) syncRule(ctx context.Context, repo storage.RuleReposit
 
 		// Defer budget creation until after the transaction to avoid using a second DB connection inside tx.
 		// Copy rule (heap) so Variables are not overwritten when the next syncRule reuses the same rule struct.
+		i.logger.Info("syncRule budget check",
+			"rule_id", ruleID,
+			"budgetRepo_nil", i.budgetRepo == nil,
+			"instanceBudget_len", len(instanceBudget),
+			"tmpl_nil", tmpl == nil,
+			"tmpl_budgetMetering_len", func() int { if tmpl != nil { return len(tmpl.BudgetMetering) }; return -1 }(),
+			"pendingBudgets_nil", pendingBudgets == nil,
+		)
 		if i.budgetRepo != nil && len(instanceBudget) > 0 && tmpl != nil && len(tmpl.BudgetMetering) > 0 && pendingBudgets != nil {
 			ruleCopy := new(types.Rule)
 			*ruleCopy = *rule
@@ -716,7 +724,21 @@ func substituteBudgetValue(v interface{}, vars map[string]string) interface{} {
 
 // syncBudgetFromConfig makes the DB budget state match config: remove budgets for units no longer in config,
 // then ensure the current unit has a budget record. Keeps config-sourced rules' budgets in sync and avoids stale units.
+// For dynamic budget templates (budget_metering.dynamic=true), known_units from the preset config are pre-created
+// and no static budget.unit field is required (units are determined at JS evaluation time).
 func syncBudgetFromConfig(ctx context.Context, rule *types.Rule, tmpl *types.RuleTemplate, budgetMap map[string]interface{}, budgetRepo storage.BudgetRepository) error {
+	// Check if this is a dynamic budget template — if so, pre-create known_units budgets instead of requiring a static unit.
+	if tmpl != nil && len(tmpl.BudgetMetering) > 0 {
+		var metering types.BudgetMetering
+		// Substitute template variables in BudgetMetering JSON so that ${var} placeholders
+		// (e.g. "${max_unknown_token_tx_count}") are resolved before JSON unmarshal.
+		// This is needed because int fields like max_tx_count would fail to parse as "${var}" strings.
+		resolvedJSON := rulepkg.SubstituteMeteringJSON(tmpl.BudgetMetering, rule.Variables)
+		if err := json.Unmarshal(resolvedJSON, &metering); err == nil && metering.Dynamic {
+			return syncDynamicBudgetFromConfig(ctx, rule, tmpl, budgetMap, budgetRepo, &metering)
+		}
+	}
+
 	currentUnit, err := resolveBudgetUnit(rule, tmpl, budgetMap)
 	if err != nil {
 		return err
@@ -733,6 +755,114 @@ func syncBudgetFromConfig(ctx context.Context, rule *types.Rule, tmpl *types.Rul
 		}
 	}
 	return createBudgetFromInstanceConfig(ctx, rule, tmpl, budgetMap, budgetRepo)
+}
+
+// syncDynamicBudgetFromConfig handles budget sync for dynamic budget templates.
+// Pre-creates budget records for each known_unit defined in the preset config.
+// Unknown units will be auto-created at runtime by the budget checker.
+func syncDynamicBudgetFromConfig(ctx context.Context, rule *types.Rule, tmpl *types.RuleTemplate, budgetMap map[string]interface{}, budgetRepo storage.BudgetRepository, metering *types.BudgetMetering) error {
+	vars := ruleVariablesToStringMap(rule.Variables)
+	substituted := substituteBudgetMapVars(budgetMap, vars)
+	if substituted == nil {
+		substituted = budgetMap
+	}
+
+	// Resolve alert_pct
+	alertPct := 80
+	if v, ok := substituted["alert_pct"]; ok && v != nil {
+		if s := strings.TrimSpace(fmt.Sprintf("%v", v)); s != "" {
+			var n int
+			if _, err := fmt.Sscanf(s, "%d", &n); err == nil && n > 0 {
+				alertPct = n
+			}
+		}
+	}
+
+	// Collect known_units from the instance budget config (preset-generated)
+	knownUnitsRaw, _ := substituted["known_units"]
+	knownUnits := make(map[string]map[string]interface{})
+	switch ku := knownUnitsRaw.(type) {
+	case map[string]interface{}:
+		for unitName, conf := range ku {
+			if confMap, ok := conf.(map[string]interface{}); ok {
+				knownUnits[unitName] = confMap
+			}
+		}
+	case map[interface{}]interface{}:
+		for k, v := range ku {
+			if sk, ok := k.(string); ok {
+				if confMap, ok := v.(map[string]interface{}); ok {
+					knownUnits[sk] = confMap
+				} else if confMap2, ok := v.(map[interface{}]interface{}); ok {
+					converted := make(map[string]interface{})
+					for ck, cv := range confMap2 {
+						if cks, ok := ck.(string); ok {
+							converted[cks] = cv
+						}
+					}
+					knownUnits[sk] = converted
+				}
+			}
+		}
+	}
+
+	// Build set of expected units
+	expectedUnits := make(map[string]bool)
+	for unitName := range knownUnits {
+		expectedUnits[rulepkg.NormalizeBudgetUnit(unitName)] = true
+	}
+
+	// Remove stale budgets (units no longer in known_units)
+	existingList, err := budgetRepo.ListByRuleID(ctx, rule.ID)
+	if err != nil {
+		return fmt.Errorf("list budgets for rule: %w", err)
+	}
+	for _, b := range existingList {
+		if !expectedUnits[b.Unit] {
+			if delErr := budgetRepo.Delete(ctx, b.ID); delErr != nil {
+				return fmt.Errorf("delete stale budget %s (unit=%s): %w", b.ID, b.Unit, delErr)
+			}
+		}
+	}
+
+	// Create budget records for each known_unit (idempotent via CreateOrGet)
+	for unitName, unitConf := range knownUnits {
+		unit := rulepkg.NormalizeBudgetUnit(unitName)
+		maxTotal := stringFromMapField(unitConf, "max_total")
+		maxPerTx := stringFromMapField(unitConf, "max_per_tx")
+		maxTxCount := 0
+		if s := stringFromMapField(unitConf, "max_tx_count"); s != "" {
+			fmt.Sscanf(s, "%d", &maxTxCount)
+		}
+
+		budget := &types.RuleBudget{
+			ID:         types.BudgetID(rule.ID, unit),
+			RuleID:     rule.ID,
+			Unit:       unit,
+			MaxTotal:   maxTotal,
+			MaxPerTx:   maxPerTx,
+			MaxTxCount: maxTxCount,
+			AlertPct:   alertPct,
+			Spent:      "0",
+			CreatedAt:  time.Now(),
+			UpdatedAt:  time.Now(),
+		}
+
+		if _, _, err := budgetRepo.CreateOrGet(ctx, budget); err != nil {
+			return fmt.Errorf("create budget for unit %s: %w", unit, err)
+		}
+	}
+
+	return nil
+}
+
+// stringFromMapField extracts a trimmed string from a map field.
+func stringFromMapField(m map[string]interface{}, key string) string {
+	v, ok := m[key]
+	if !ok || v == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprintf("%v", v))
 }
 
 // resolveBudgetUnit returns the normalized budget unit for a config-sourced rule (same logic as createBudgetFromInstanceConfig).
@@ -766,7 +896,8 @@ func resolveBudgetUnit(rule *types.Rule, tmpl *types.RuleTemplate, budgetMap map
 	if unit == ":" || len(unit) < 3 {
 		if len(tmpl.BudgetMetering) > 0 && len(vars) > 0 {
 			var metering types.BudgetMetering
-			if err := json.Unmarshal(tmpl.BudgetMetering, &metering); err == nil && metering.Unit != "" {
+			resolvedBM := rulepkg.SubstituteMeteringJSON(tmpl.BudgetMetering, rule.Variables)
+			if err := json.Unmarshal(resolvedBM, &metering); err == nil && metering.Unit != "" {
 				unitFallback := metering.Unit
 				for k, v := range vars {
 					unitFallback = strings.ReplaceAll(unitFallback, "${"+k+"}", v)
@@ -818,7 +949,8 @@ func createBudgetFromInstanceConfig(ctx context.Context, rule *types.Rule, tmpl 
 	if unit == ":" || len(unit) < 3 {
 		if len(tmpl.BudgetMetering) > 0 && len(vars) > 0 {
 			var metering types.BudgetMetering
-			if err := json.Unmarshal(tmpl.BudgetMetering, &metering); err == nil && metering.Unit != "" {
+			resolvedBM := rulepkg.SubstituteMeteringJSON(tmpl.BudgetMetering, rule.Variables)
+			if err := json.Unmarshal(resolvedBM, &metering); err == nil && metering.Unit != "" {
 				unitFallback := metering.Unit
 				for k, v := range vars {
 					unitFallback = strings.ReplaceAll(unitFallback, "${"+k+"}", v)

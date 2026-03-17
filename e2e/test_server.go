@@ -152,6 +152,7 @@ func (ts *TestServer) Start() error {
 		&types.AuditRecord{},
 		&types.RuleTemplate{},
 		&types.RuleBudget{},
+		&types.TokenMetadata{},
 	); err != nil {
 		return fmt.Errorf("failed to migrate database: %w", err)
 	}
@@ -370,6 +371,32 @@ func (ts *TestServer) Start() error {
 	}
 	ruleEngine.RegisterEvaluator(jsEval)
 	budgetChecker.SetJSEvaluator(jsEval)
+
+	// Wire RPC provider for JS sandbox and budget decimals auto-query (if configured)
+	if cfg != nil && cfg.Chains.EVM != nil && cfg.Chains.EVM.RPCGateway.BaseURL != "" {
+		rpcProvider, err := evm.NewRPCProvider(cfg.Chains.EVM.RPCGateway.BaseURL, cfg.Chains.EVM.RPCGateway.APIKey)
+		if err != nil {
+			log.Warn("Failed to create RPC provider, decimals auto-query disabled", "error", err)
+		} else {
+			cacheTTL := cfg.Chains.EVM.RPCGateway.CacheTTL
+			if cacheTTL <= 0 {
+				cacheTTL = 24 * time.Hour
+			}
+			metadataCache, err := evm.NewTokenMetadataCache(db, rpcProvider, cacheTTL)
+			if err != nil {
+				log.Warn("Failed to create token metadata cache", "error", err)
+			} else {
+				jsEval.SetRPCProvider(rpcProvider, metadataCache)
+				decimalsQuerier, err := evm.NewDecimalsQuerierAdapter(metadataCache)
+				if err != nil {
+					log.Warn("Failed to create decimals querier adapter", "error", err)
+				} else {
+					budgetChecker.SetDecimalsQuerier(decimalsQuerier)
+					log.Info("RPC provider configured for JS sandbox and budget decimals auto-query")
+				}
+			}
+		}
+	}
 
 	// Register Solidity expression evaluator for blocklist rules (optional - requires forge)
 	// Use config if available, otherwise use defaults

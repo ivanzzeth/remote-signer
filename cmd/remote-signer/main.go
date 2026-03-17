@@ -388,6 +388,32 @@ func run() error {
 	ruleEngine.RegisterEvaluator(jsEval)
 	budgetChecker.SetJSEvaluator(jsEval)
 
+	// Wire RPC provider for JS sandbox read-only queries and budget decimals auto-query
+	if cfg.Chains.EVM != nil && cfg.Chains.EVM.RPCGateway.BaseURL != "" {
+		rpcProvider, err := evm.NewRPCProvider(cfg.Chains.EVM.RPCGateway.BaseURL, cfg.Chains.EVM.RPCGateway.APIKey)
+		if err != nil {
+			return fmt.Errorf("failed to create RPC provider: %w", err)
+		}
+		cacheTTL := cfg.Chains.EVM.RPCGateway.CacheTTL
+		if cacheTTL <= 0 {
+			cacheTTL = 24 * time.Hour
+		}
+		metadataCache, err := evm.NewTokenMetadataCache(nil, rpcProvider, cacheTTL)
+		if err != nil {
+			return fmt.Errorf("failed to create token metadata cache: %w", err)
+		}
+		jsEval.SetRPCProvider(rpcProvider, metadataCache)
+		decimalsQuerier, err := evm.NewDecimalsQuerierAdapter(metadataCache)
+		if err != nil {
+			return fmt.Errorf("failed to create decimals querier: %w", err)
+		}
+		budgetChecker.SetDecimalsQuerier(decimalsQuerier)
+		log.Info("RPC provider configured for JS sandbox and budget decimals auto-query",
+			"base_url", cfg.Chains.EVM.RPCGateway.BaseURL,
+			"cache_ttl", cacheTTL,
+		)
+	}
+
 	// Register Solidity expression evaluator (already created and validated above)
 	if solidityEval != nil {
 		ruleEngine.RegisterEvaluator(solidityEval)
