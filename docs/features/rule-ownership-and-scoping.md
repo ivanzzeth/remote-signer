@@ -358,20 +358,19 @@ GET /api/v1/evm/rules?status=pending     # admin: pending approvals
 - Config-sourced rules: `owner = "config"`, `applied_to = ["*"]`, `status = "active"`
 - Keep existing two-phase evaluation (blocklist → whitelist), filter ensures correct scope
 
-### Phase 4: Agent Rule CRUD
+### Phase 4: Agent Rule CRUD + Approval Flow + Immutable Rules
 - Agent can create/modify/delete own **declarative** rules via API
 - Middleware enforces: `owner = caller`, `applied_to = ["self"]` for non-admin
 - Per-key rule count limit (`security.max_rules_per_api_key`)
 - Block `evm_js`, `signer_restriction`, `evm_solidity_expression` for agent role
 - Validate `applied_to` key IDs exist at creation time
-
-### Phase 5: Approval Flow + Immutable Rules
-- `security.require_approval_for_agent_rules` config option
-- Pending status for agent whitelist rules (when enabled)
-- Admin approve/reject endpoints: `POST /evm/rules/:id/approve`, `POST /evm/rules/:id/reject`
-- `immutable: true` flag — blocks API modification/deletion
-- Notification on pending rule creation (if notifier configured)
-- Audit logging with full before/after diff on rule updates
+- **Approval flow** (reuses existing approval pattern from sign request approval):
+  - `security.require_approval_for_agent_rules` config option
+  - Pending status for agent whitelist rules (when enabled)
+  - `POST /evm/rules/:id/approve`, `POST /evm/rules/:id/reject` (same state machine pattern as `POST /evm/requests/:id/approve`)
+  - Notification on pending rule creation (if notifier configured)
+- **Immutable rules**: `immutable: true` flag — blocks API modification/deletion
+- **Audit diff**: rule update logs record full `old_config` + `new_config` JSON
 
 ### Phase 6: E2E Tests
 
