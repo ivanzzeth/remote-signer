@@ -219,11 +219,22 @@ func (h *PresetHandler) apply(w http.ResponseWriter, r *http.Request, id string)
 			if err != nil {
 				return fmt.Errorf("create instance for %q: %w", item.req.TemplateName, err)
 			}
-			resItem := map[string]interface{}{"rule": result.Rule}
-			if result.Budget != nil {
-				resItem["budget"] = result.Budget
+			// If the template was a bundle, emit one result entry per sub-rule
+			if len(result.SubRules) > 0 {
+				for i, subRule := range result.SubRules {
+					resItem := map[string]interface{}{"rule": subRule}
+					if i < len(result.SubBudgets) && result.SubBudgets[i] != nil {
+						resItem["budget"] = result.SubBudgets[i]
+					}
+					results = append(results, resItem)
+				}
+			} else {
+				resItem := map[string]interface{}{"rule": result.Rule}
+				if result.Budget != nil {
+					resItem["budget"] = result.Budget
+				}
+				results = append(results, resItem)
 			}
-			results = append(results, resItem)
 		}
 		return nil
 	})

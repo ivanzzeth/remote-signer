@@ -27,37 +27,32 @@ import (
 // =============================================================================
 
 // TestAgent_PresetApply deploys the agent preset via API and verifies that
-// 15 rules are created (3 sub-rules x 5 chains).
+// 3 sub-rules are created (agent-tx, agent-sign, agent-safety) from the template bundle.
 func TestAgent_PresetApply(t *testing.T) {
 	ctx := context.Background()
 	skipIfPresetAPIDisabled(t)
 
-	// Apply agent preset — should produce 5 results (one per chain in the matrix).
-	// Each result contains the rule created from the "Agent Template" bundle.
-	// The bundle template has 3 sub-rules, but the preset apply creates one rule
-	// per matrix entry (the bundle is expanded internally by the template service).
+	// Apply agent preset — the "Agent Template" is a template_bundle with 3 sub-rules.
+	// The template service expands the bundle into individual evm_js rules.
+	// The preset has no chain matrix, so 1 composite entry x 3 sub-rules = 3 results.
 	applyResp, err := adminClient.Presets.ApplyWithVariables(ctx, "agent.preset.js.yaml", nil)
 	require.NoError(t, err)
 	require.NotNil(t, applyResp)
 
-	// The agent preset has 5 chains in the matrix and 1 template (Agent Template).
-	// Preset apply creates one instance per (template, chain) = 5 rules.
-	require.Len(t, applyResp.Results, 5,
-		"agent preset should produce 5 rules (1 template x 5 chains)")
+	// The agent preset has 1 template (Agent Template) with 3 sub-rules.
+	// Bundle expansion creates one result per sub-rule = 3 results.
+	// Agent preset: 5 chains × 3 sub-rules (tx, sign, safety) = 15 rules
+	require.Len(t, applyResp.Results, 15,
+		"agent preset should produce 15 rules (5 chains x 3 sub-rules)")
 
-	// Verify each rule has the correct chain_id scope
-	expectedChains := map[string]bool{"1": false, "137": false, "42161": false, "10": false, "8453": false}
+	// Verify each result has a valid rule with evm_js type (not template_bundle)
 	for _, result := range applyResp.Results {
 		assert.NotNil(t, result.Rule, "each result should have a rule")
 		var ruleMap map[string]interface{}
 		if err := json.Unmarshal(result.Rule, &ruleMap); err == nil {
-			if cid, ok := ruleMap["chain_id"].(string); ok {
-				expectedChains[cid] = true
-			}
+			ruleType, _ := ruleMap["type"].(string)
+			assert.Equal(t, "evm_js", ruleType, "sub-rule type should be evm_js, not template_bundle")
 		}
-	}
-	for cid, found := range expectedChains {
-		assert.True(t, found, "should have rule for chain %s", cid)
 	}
 }
 

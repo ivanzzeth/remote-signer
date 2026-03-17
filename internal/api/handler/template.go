@@ -606,6 +606,24 @@ func (h *TemplateHandler) instantiateTemplate(w http.ResponseWriter, r *http.Req
 		}
 	}
 
+	// Include expanded sub-rules for template_bundle responses
+	if len(result.SubRules) > 0 {
+		subRulesJSON, err := json.Marshal(result.SubRules)
+		if err != nil {
+			h.logger.Error("failed to marshal sub-rules", "error", err)
+		} else {
+			resp["sub_rules"] = json.RawMessage(subRulesJSON)
+		}
+		if len(result.SubBudgets) > 0 {
+			subBudgetsJSON, err := json.Marshal(result.SubBudgets)
+			if err != nil {
+				h.logger.Error("failed to marshal sub-budgets", "error", err)
+			} else {
+				resp["sub_budgets"] = json.RawMessage(subBudgetsJSON)
+			}
+		}
+	}
+
 	h.logger.Info("instance created from template",
 		"template_id", templateID,
 		"rule_id", result.Rule.ID,

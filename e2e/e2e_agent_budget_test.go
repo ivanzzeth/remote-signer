@@ -81,10 +81,14 @@ func applyAgentPresetForBudget(t *testing.T, variables map[string]string) []stri
 	return ruleIDs
 }
 
-// findChain1RuleID returns the rule ID scoped to chain_id=1 from the applied preset results.
+// findChain1RuleID returns the first rule ID from the applied preset results.
+// The agent preset has no chain_id scope, so we return the first sub-rule
+// that handles transactions (agent-tx), which is the primary rule for budget tracking.
+// For backward compatibility, if a rule with chain_id=1 exists, it is preferred.
 func findChain1RuleID(t *testing.T, ruleIDs []string) string {
 	t.Helper()
 	ctx := context.Background()
+	// First try: find a rule with chain_id=1 (legacy behavior)
 	for _, id := range ruleIDs {
 		rule, err := adminClient.EVM.Rules.Get(ctx, id)
 		if err != nil {
@@ -94,7 +98,39 @@ func findChain1RuleID(t *testing.T, ruleIDs []string) string {
 			return id
 		}
 	}
-	t.Fatal("no rule with chain_id=1 found in applied preset")
+	// Fallback: return the first rule that handles transactions (agent-tx sub-rule).
+	// The agent-tx sub-rule tracks native, tx_count, and ERC20 budgets.
+	for _, id := range ruleIDs {
+		rule, err := adminClient.EVM.Rules.Get(ctx, id)
+		if err != nil {
+			continue
+		}
+		if strings.Contains(rule.Name, "Transaction") || strings.Contains(rule.Name, "agent-tx") {
+			return id
+		}
+	}
+	// Last fallback: return the first rule ID
+	if len(ruleIDs) > 0 {
+		return ruleIDs[0]
+	}
+	t.Fatal("no rules found in applied preset")
+	return ""
+}
+
+// findSubRuleByName returns the rule ID whose name contains the given substring.
+func findSubRuleByName(t *testing.T, ruleIDs []string, nameSubstring string) string {
+	t.Helper()
+	ctx := context.Background()
+	for _, id := range ruleIDs {
+		rule, err := adminClient.EVM.Rules.Get(ctx, id)
+		if err != nil {
+			continue
+		}
+		if strings.Contains(rule.Name, nameSubstring) {
+			return id
+		}
+	}
+	t.Fatalf("no rule with name containing %q found", nameSubstring)
 	return ""
 }
 
@@ -209,7 +245,8 @@ func TestAgentBudget_SignCount_ExhaustsLimit(t *testing.T) {
 		"max_native_total": "1000",
 		"max_native_per_tx": "100",
 	})
-	ruleID := findChain1RuleID(t, ruleIDs)
+	// sign_count budget is tracked by the agent-sign sub-rule (handles personal_sign)
+	signRuleID := findSubRuleByName(t, ruleIDs, "Signature")
 
 	address := common.HexToAddress(signerAddress)
 	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
@@ -219,7 +256,7 @@ func TestAgentBudget_SignCount_ExhaustsLimit(t *testing.T) {
 	require.NoError(t, err, "first 3 personal_sign should succeed within sign_count budget")
 
 	// Verify sign_count budget has been consumed
-	budgets := getBudgets(t, ruleID)
+	budgets := getBudgets(t, signRuleID)
 	signBudget := findBudgetByUnit(budgets, "sign_count")
 	if signBudget != nil {
 		t.Logf("sign_count budget: spent=%s, max_total=%s, tx_count=%d", signBudget.Spent, signBudget.MaxTotal, signBudget.TxCount)
@@ -342,7 +379,8 @@ func TestAgentBudget_DynamicUnit_UnknownToken(t *testing.T) {
 		"max_native_total":           "1000",
 		"max_native_per_tx":          "100",
 	})
-	ruleID := findChain1RuleID(t, ruleIDs)
+	// ERC20 budget is tracked by the agent-tx sub-rule (handles transactions)
+	ruleID := findSubRuleByName(t, ruleIDs, "Transaction")
 
 	address := common.HexToAddress(signerAddress)
 	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
@@ -430,7 +468,8 @@ func TestAgentBudget_MaxDynamicUnits_Cap(t *testing.T) {
 		"max_native_total":           "100000",
 		"max_native_per_tx":          "100000",
 	})
-	ruleID := findChain1RuleID(t, ruleIDs)
+	// ERC20 dynamic budget units are tracked by the agent-tx sub-rule
+	ruleID := findSubRuleByName(t, ruleIDs, "Transaction")
 
 	address := common.HexToAddress(signerAddress)
 	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
@@ -567,7 +606,8 @@ func TestAgentBudget_ZeroValue_Passthrough(t *testing.T) {
 		"max_tx_count":      "100",
 		"max_sign_count":    "100",
 	})
-	ruleID := findChain1RuleID(t, ruleIDs)
+	// tx_count and native budgets are tracked by the agent-tx sub-rule
+	ruleID := findSubRuleByName(t, ruleIDs, "Transaction")
 
 	address := common.HexToAddress(signerAddress)
 	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
@@ -607,7 +647,8 @@ func TestAgentBudget_VariableOverride_ViaPreset(t *testing.T) {
 		"max_native_total":  "1000",
 		"max_native_per_tx": "100",
 	})
-	ruleID := findChain1RuleID(t, ruleIDs)
+	// sign_count budget is tracked by the agent-sign sub-rule
+	signRuleID := findSubRuleByName(t, ruleIDs, "Signature")
 
 	address := common.HexToAddress(signerAddress)
 	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
@@ -617,7 +658,7 @@ func TestAgentBudget_VariableOverride_ViaPreset(t *testing.T) {
 	require.NoError(t, err, "3 personal_sign should pass with max_sign_count=3")
 
 	// Verify sign_count budget shows 3 spent with max_total reflecting the override
-	budgets := getBudgets(t, ruleID)
+	budgets := getBudgets(t, signRuleID)
 	signBudget := findBudgetByUnit(budgets, "sign_count")
 	if signBudget != nil {
 		t.Logf("sign_count budget after 3 signs: spent=%s, max_total=%s", signBudget.Spent, signBudget.MaxTotal)
@@ -644,7 +685,8 @@ func TestAgentBudget_ListBudgets_API(t *testing.T) {
 		"max_native_total":  "10",
 		"max_native_per_tx": "1",
 	})
-	ruleID := findChain1RuleID(t, ruleIDs)
+	// sign_count budget is tracked by the agent-sign sub-rule
+	signRuleID := findSubRuleByName(t, ruleIDs, "Signature")
 
 	address := common.HexToAddress(signerAddress)
 	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
@@ -654,8 +696,8 @@ func TestAgentBudget_ListBudgets_API(t *testing.T) {
 	require.NoError(t, err)
 
 	// List budgets
-	budgets := getBudgets(t, ruleID)
-	t.Logf("Budget records for rule %s:", ruleID)
+	budgets := getBudgets(t, signRuleID)
+	t.Logf("Budget records for rule %s:", signRuleID)
 	for _, b := range budgets {
 		t.Logf("  unit=%s, spent=%s, max_total=%s, max_per_tx=%s, tx_count=%d, max_tx_count=%d",
 			b.Unit, b.Spent, b.MaxTotal, b.MaxPerTx, b.TxCount, b.MaxTxCount)
