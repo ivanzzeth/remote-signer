@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 
+	"github.com/ivanzzeth/remote-signer/internal/api/handler"
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/audit"
 	evmchain "github.com/ivanzzeth/remote-signer/internal/chain/evm"
@@ -29,9 +30,6 @@ import (
 // - cfg_<16hex> or cfg_<digits>: config rules (auto-generated or legacy)
 // - <custom>: config custom IDs (alphanumeric, hyphen, underscore, 1-64 chars).
 var ruleIDPattern = regexp.MustCompile(`^(rule_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|cfg_[0-9a-f]{16}|cfg_\d+|[a-zA-Z0-9][0-9A-Za-z_\-]{0,63})$`)
-
-// apiKeyIDPattern validates API key ID format (SA-6).
-var apiKeyIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 
 // blockedAgentRuleTypes are rule types that agents cannot create or modify to.
 var blockedAgentRuleTypes = map[types.RuleType]bool{
@@ -353,46 +351,17 @@ func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Determine applied_to based on role
-	var appliedTo pq.StringArray
-	if apiKey.IsAdmin() {
-		if len(req.AppliedTo) > 0 {
-			appliedTo = pq.StringArray(req.AppliedTo)
-		} else {
-			appliedTo = pq.StringArray{"*"}
-		}
-		// Validate non-wildcard key IDs exist (SA-6)
-		if h.apiKeyRepo != nil {
-			for _, keyID := range appliedTo {
-				if keyID == "*" || keyID == "self" {
-					continue
-				}
-				if !apiKeyIDPattern.MatchString(keyID) {
-					h.writeError(w, fmt.Sprintf("invalid applied_to key ID format: %q", keyID), http.StatusBadRequest)
-					return
-				}
-				if _, err := h.apiKeyRepo.Get(r.Context(), keyID); err != nil {
-					if types.IsNotFound(err) {
-						h.writeError(w, fmt.Sprintf("applied_to key ID not found: %q", keyID), http.StatusBadRequest)
-						return
-					}
-					h.logger.Error("failed to validate applied_to key ID", "error", err, "key_id", keyID)
-					h.writeError(w, "failed to validate applied_to", http.StatusInternalServerError)
-					return
-				}
-			}
-		}
-	} else {
-		// Non-admin: force applied_to = ["self"]
-		appliedTo = pq.StringArray{"self"}
+	// Determine owner, applied_to, and status via shared RBAC logic
+	ownership, err := handler.DetermineRuleOwnership(
+		r.Context(), apiKey, req.AppliedTo,
+		types.RuleMode(req.Mode), h.requireApproval, h.apiKeyRepo,
+	)
+	if err != nil {
+		h.writeError(w, err.Error(), http.StatusBadRequest)
+		return
 	}
-
-	// Determine status based on role and config
-	status := types.RuleStatusActive
-	if apiKey.IsAgent() && h.requireApproval && req.Mode == "whitelist" {
-		status = types.RuleStatusPendingApproval
-	}
-	// Agent blocklist rules are always active immediately (self-restriction is safe)
+	appliedTo := ownership.AppliedTo
+	status := ownership.Status
 
 	// Validate rule config format (shared with config load and validate-rules)
 	if err := ruleconfig.ValidateRuleConfig(req.Type, req.Config); err != nil {

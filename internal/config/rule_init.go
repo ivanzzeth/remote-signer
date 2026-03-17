@@ -836,7 +836,9 @@ func syncDynamicBudgetFromConfig(ctx context.Context, rule *types.Rule, tmpl *ty
 		maxPerTx := stringFromMapField(unitConf, "max_per_tx")
 		maxTxCount := 0
 		if s := stringFromMapField(unitConf, "max_tx_count"); s != "" {
-			fmt.Sscanf(s, "%d", &maxTxCount)
+			if _, err := fmt.Sscanf(s, "%d", &maxTxCount); err != nil {
+				return fmt.Errorf("invalid max_tx_count %q for budget unit %q: %w", s, unit, err)
+			}
 		}
 
 		budget := &types.RuleBudget{

@@ -66,6 +66,12 @@ type CreateInstanceRequest struct {
 	APIKeyID      *string `json:"api_key_id,omitempty"`
 	SignerAddress *string `json:"signer_address,omitempty"`
 
+	// RBAC ownership fields — set by handler, not request body.
+	// When set, these override the defaults (owner="config", applied_to=["*"], status=active).
+	Owner     string           `json:"-"`
+	AppliedTo []string         `json:"-"`
+	Status    types.RuleStatus `json:"-"`
+
 	// Optional: time-limited
 	ExpiresAt *time.Time     `json:"expires_at,omitempty"`
 	ExpiresIn *time.Duration `json:"expires_in,omitempty"` // alternative: duration from now
@@ -190,6 +196,22 @@ func (s *TemplateService) createInstanceFromResolved(
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal resolved variables: %w", err)
 	}
+	// Determine ownership: prefer RBAC fields from handler, fall back to legacy defaults
+	owner := "config"
+	if req.Owner != "" {
+		owner = req.Owner
+	} else if req.APIKeyID != nil {
+		owner = *req.APIKeyID
+	}
+	appliedTo := pq.StringArray{"*"}
+	if len(req.AppliedTo) > 0 {
+		appliedTo = pq.StringArray(req.AppliedTo)
+	}
+	status := types.RuleStatusActive
+	if req.Status != "" {
+		status = req.Status
+	}
+
 	rule := &types.Rule{
 		ID:          ruleID,
 		Name:        s.resolveInstanceName(req, tmpl),
@@ -201,8 +223,9 @@ func (s *TemplateService) createInstanceFromResolved(
 		TemplateID:  &tmpl.ID,
 		Variables:   variablesJSON,
 		Enabled:     true,
-		AppliedTo:   pq.StringArray{"*"},
-		Owner:       "config",
+		AppliedTo:   appliedTo,
+		Owner:       owner,
+		Status:      status,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
@@ -212,9 +235,6 @@ func (s *TemplateService) createInstanceFromResolved(
 	}
 	if req.ChainID != nil {
 		rule.ChainID = req.ChainID
-	}
-	if req.APIKeyID != nil {
-		rule.Owner = *req.APIKeyID
 	}
 	if req.SignerAddress != nil {
 		rule.SignerAddress = req.SignerAddress
@@ -341,6 +361,22 @@ func (s *TemplateService) createInstanceFromBundle(
 			ruleName = baseName + " / " + sub.Name
 		}
 
+		// Determine ownership: prefer RBAC fields from handler, fall back to legacy defaults
+		owner := "config"
+		if req.Owner != "" {
+			owner = req.Owner
+		} else if req.APIKeyID != nil {
+			owner = *req.APIKeyID
+		}
+		bundleAppliedTo := pq.StringArray{"*"}
+		if len(req.AppliedTo) > 0 {
+			bundleAppliedTo = pq.StringArray(req.AppliedTo)
+		}
+		bundleStatus := types.RuleStatusActive
+		if req.Status != "" {
+			bundleStatus = req.Status
+		}
+
 		rule := &types.Rule{
 			ID:          subRuleID,
 			Name:        ruleName,
@@ -352,8 +388,9 @@ func (s *TemplateService) createInstanceFromBundle(
 			TemplateID:  &tmpl.ID,
 			Variables:   variablesJSON,
 			Enabled:     true,
-			AppliedTo:   pq.StringArray{"*"},
-			Owner:       "config",
+			AppliedTo:   bundleAppliedTo,
+			Owner:       owner,
+			Status:      bundleStatus,
 			CreatedAt:   time.Now(),
 			UpdatedAt:   time.Now(),
 		}
@@ -365,9 +402,6 @@ func (s *TemplateService) createInstanceFromBundle(
 		}
 		if req.ChainID != nil {
 			rule.ChainID = req.ChainID
-		}
-		if req.APIKeyID != nil {
-			rule.Owner = *req.APIKeyID
 		}
 		if req.SignerAddress != nil {
 			rule.SignerAddress = req.SignerAddress

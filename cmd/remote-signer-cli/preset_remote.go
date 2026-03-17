@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/ivanzzeth/remote-signer/pkg/client/presets"
 	"github.com/spf13/cobra"
 )
 
@@ -30,7 +31,11 @@ var presetApplyCmd = &cobra.Command{
 		}
 
 		presetName := args[0]
-		resp, err := c.Presets.ApplyWithVariables(context.Background(), presetName, variables)
+		req := &presets.ApplyRequest{
+			Variables: variables,
+			AppliedTo: presetApplyAppliedToFlags,
+		}
+		resp, err := c.Presets.Apply(context.Background(), presetName, req)
 		if err != nil {
 			return fmt.Errorf("failed to apply preset %q: %w", presetName, err)
 		}
@@ -42,9 +47,13 @@ var presetApplyCmd = &cobra.Command{
 	},
 }
 
-var presetApplySetFlags []string
+var (
+	presetApplySetFlags       []string
+	presetApplyAppliedToFlags []string
+)
 
 func init() {
 	presetApplyCmd.Flags().StringArrayVar(&presetApplySetFlags, "set", nil, "Variable override (key=value, repeatable)")
+	presetApplyCmd.Flags().StringSliceVar(&presetApplyAppliedToFlags, "applied-to", nil, "Scope rules to specific API key IDs (comma-separated or repeatable)")
 	presetCmd.AddCommand(presetApplyCmd)
 }

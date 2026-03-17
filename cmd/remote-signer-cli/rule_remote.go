@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -113,9 +114,10 @@ func runRuleCreate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	data, err := os.ReadFile(flagRuleCreateFile)
+	cleanPath := filepath.Clean(flagRuleCreateFile)
+	data, err := os.ReadFile(cleanPath) // #nosec G304 -- user-provided CLI flag, path cleaned
 	if err != nil {
-		return fmt.Errorf("read file %s: %w", flagRuleCreateFile, err)
+		return fmt.Errorf("read file %s: %w", cleanPath, err)
 	}
 
 	var req evm.CreateRuleRequest
@@ -279,7 +281,9 @@ func printTable(headers []string, rows [][]string) {
 	for _, row := range rows {
 		fmt.Fprintln(w, strings.Join(row, "\t"))
 	}
-	w.Flush()
+	if err := w.Flush(); err != nil {
+		fmt.Fprintf(os.Stderr, "flush table: %v\n", err)
+	}
 }
 
 // --- registration ---
@@ -295,7 +299,9 @@ func init() {
 
 	// create flags
 	ruleCreateCmd.Flags().StringVarP(&flagRuleCreateFile, "file", "f", "", "Path to YAML/JSON rule definition file")
-	ruleCreateCmd.MarkFlagRequired("file")
+	if err := ruleCreateCmd.MarkFlagRequired("file"); err != nil {
+		panic(err)
+	}
 
 	// toggle flags
 	ruleToggleCmd.Flags().BoolVar(&flagToggleEnable, "enable", false, "Enable the rule")
@@ -303,7 +309,9 @@ func init() {
 
 	// reject flags
 	ruleRejectCmd.Flags().StringVar(&flagRejectReason, "reason", "", "Reason for rejection")
-	ruleRejectCmd.MarkFlagRequired("reason")
+	if err := ruleRejectCmd.MarkFlagRequired("reason"); err != nil {
+		panic(err)
+	}
 
 	// register all subcommands
 	ruleCmd.AddCommand(ruleListRemoteCmd)

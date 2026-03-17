@@ -43,7 +43,17 @@ rule validation (via remote-signer-validate-rules), and launching the TUI (remot
 
 func init() {
 	registerAuthFlags(rootCmd)
+
+	// Chain-specific: canonical path is "evm rule", "evm sign", etc.
+	rootCmd.AddCommand(evmCmd)
+
+	// Top-level aliases for backward compatibility (scripts, setup.sh, etc.)
+	// "rule ..." is equivalent to "evm rule ..."
+	// "sign ..." is equivalent to "evm sign ..."
 	rootCmd.AddCommand(ruleCmd)
+	rootCmd.AddCommand(signCmd)
+
+	// Cross-chain / global commands stay at top level
 	rootCmd.AddCommand(presetCmd)
 	rootCmd.AddCommand(validateCmd)
 	rootCmd.AddCommand(tuiCmd)

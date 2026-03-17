@@ -63,6 +63,7 @@ func (s *Service) Vars(ctx context.Context, id string) (*VarsResponse, error) {
 // ApplyRequest is the body for POST /api/v1/presets/:id/apply.
 type ApplyRequest struct {
 	Variables map[string]string `json:"variables,omitempty"`
+	AppliedTo []string          `json:"applied_to,omitempty"`
 }
 
 // ApplyResultItem is one entry in the apply response.

@@ -255,6 +255,8 @@ func (r *Router) setupRoutes() error {
 			r.config.Template.TemplateService,
 			r.logger,
 			r.config.RulesAPIReadonly,
+			handler.WithTemplateRequireApproval(r.config.RequireApprovalForAgentRules),
+			handler.WithTemplateAPIKeyRepo(r.config.APIKeyRepo),
 		)
 		if err != nil {
 			return err
@@ -284,6 +286,8 @@ func (r *Router) setupRoutes() error {
 			templateSvc,
 			r.config.RulesAPIReadonly,
 			r.logger,
+			handler.WithPresetRequireApproval(r.config.RequireApprovalForAgentRules),
+			handler.WithPresetAPIKeyRepo(r.config.APIKeyRepo),
 		)
 		if err != nil {
 			return err

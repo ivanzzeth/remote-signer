@@ -6,6 +6,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/ivanzzeth/remote-signer/pkg/client"
 	"github.com/spf13/cobra"
@@ -65,7 +66,8 @@ func newClientFromFlags(cmd *cobra.Command) (*client.Client, error) {
 
 // loadEd25519PrivateKey reads a PEM file and extracts the Ed25519 private key.
 func loadEd25519PrivateKey(path string) (ed25519.PrivateKey, error) {
-	data, err := os.ReadFile(path)
+	cleanPath := filepath.Clean(path)
+	data, err := os.ReadFile(cleanPath) // #nosec G304 -- user-provided CLI flag, path cleaned
 	if err != nil {
 		return nil, err
 	}

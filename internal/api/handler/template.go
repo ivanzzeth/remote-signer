@@ -22,6 +22,25 @@ type TemplateHandler struct {
 	templateService *service.TemplateService
 	readOnly        bool // when true, block all template mutations via API
 	logger          *slog.Logger
+	requireApproval bool
+	apiKeyRepo      storage.APIKeyRepository
+}
+
+// TemplateHandlerOption is a functional option for TemplateHandler.
+type TemplateHandlerOption func(*TemplateHandler)
+
+// WithTemplateRequireApproval enables admin approval for agent whitelist rules created via template instantiation.
+func WithTemplateRequireApproval(v bool) TemplateHandlerOption {
+	return func(h *TemplateHandler) {
+		h.requireApproval = v
+	}
+}
+
+// WithTemplateAPIKeyRepo sets the API key repository for applied_to validation.
+func WithTemplateAPIKeyRepo(repo storage.APIKeyRepository) TemplateHandlerOption {
+	return func(h *TemplateHandler) {
+		h.apiKeyRepo = repo
+	}
 }
 
 // NewTemplateHandler creates a new template handler
@@ -30,6 +49,7 @@ func NewTemplateHandler(
 	templateService *service.TemplateService,
 	logger *slog.Logger,
 	readOnly bool,
+	opts ...TemplateHandlerOption,
 ) (*TemplateHandler, error) {
 	if templateRepo == nil {
 		return nil, fmt.Errorf("template repository is required")
@@ -40,12 +60,16 @@ func NewTemplateHandler(
 	if logger == nil {
 		return nil, fmt.Errorf("logger is required")
 	}
-	return &TemplateHandler{
+	h := &TemplateHandler{
 		templateRepo:    templateRepo,
 		templateService: templateService,
 		readOnly:        readOnly,
 		logger:          logger,
-	}, nil
+	}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h, nil
 }
 
 // TemplateResponse represents a template in API responses
@@ -576,6 +600,28 @@ func (h *TemplateHandler) instantiateTemplate(w http.ResponseWriter, r *http.Req
 			Period:  d,
 			StartAt: req.Schedule.StartAt,
 		}
+	}
+
+	// Apply RBAC ownership
+	apiKey := middleware.GetAPIKey(r.Context())
+	if apiKey != nil {
+		// Resolve template to get mode for RBAC determination
+		tmpl, err := h.templateService.ResolveTemplate(r.Context(), instanceReq)
+		if err != nil {
+			h.writeError(w, fmt.Sprintf("failed to resolve template: %s", err.Error()), http.StatusBadRequest)
+			return
+		}
+		ownership, err := DetermineRuleOwnership(
+			r.Context(), apiKey, nil,
+			tmpl.Mode, h.requireApproval, h.apiKeyRepo,
+		)
+		if err != nil {
+			h.writeError(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		instanceReq.Owner = ownership.Owner
+		instanceReq.AppliedTo = []string(ownership.AppliedTo)
+		instanceReq.Status = ownership.Status
 	}
 
 	// Create instance

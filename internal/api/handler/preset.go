@@ -22,12 +22,31 @@ import (
 
 // PresetHandler handles preset list, vars, and apply (admin-only).
 type PresetHandler struct {
-	presetsDir   string
-	db           *gorm.DB
-	templateSvc  *service.TemplateService
-	readOnly     bool
-	logger       *slog.Logger
-	auditLogger  *audit.AuditLogger
+	presetsDir      string
+	db              *gorm.DB
+	templateSvc     *service.TemplateService
+	readOnly        bool
+	logger          *slog.Logger
+	auditLogger     *audit.AuditLogger
+	requireApproval bool
+	apiKeyRepo      storage.APIKeyRepository
+}
+
+// PresetHandlerOption is a functional option for PresetHandler.
+type PresetHandlerOption func(*PresetHandler)
+
+// WithPresetRequireApproval enables admin approval for agent whitelist rules created via preset.
+func WithPresetRequireApproval(v bool) PresetHandlerOption {
+	return func(h *PresetHandler) {
+		h.requireApproval = v
+	}
+}
+
+// WithPresetAPIKeyRepo sets the API key repository for applied_to validation.
+func WithPresetAPIKeyRepo(repo storage.APIKeyRepository) PresetHandlerOption {
+	return func(h *PresetHandler) {
+		h.apiKeyRepo = repo
+	}
 }
 
 // NewPresetHandler creates a preset handler. presetsDir must be absolute. db is required for apply (transaction).
@@ -37,6 +56,7 @@ func NewPresetHandler(
 	templateSvc *service.TemplateService,
 	readOnly bool,
 	logger *slog.Logger,
+	opts ...PresetHandlerOption,
 ) (*PresetHandler, error) {
 	if presetsDir == "" {
 		return nil, fmt.Errorf("presets directory is required")
@@ -44,13 +64,17 @@ func NewPresetHandler(
 	if logger == nil {
 		return nil, fmt.Errorf("logger is required")
 	}
-	return &PresetHandler{
+	h := &PresetHandler{
 		presetsDir:  presetsDir,
 		db:          db,
 		templateSvc: templateSvc,
 		readOnly:    readOnly,
 		logger:      logger,
-	}, nil
+	}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h, nil
 }
 
 // SetAuditLogger sets the audit logger for recording preset apply events.
@@ -140,6 +164,7 @@ func (h *PresetHandler) vars(w http.ResponseWriter, _ *http.Request, id string) 
 // ApplyPresetRequest is the body for POST /api/v1/presets/:id/apply
 type ApplyPresetRequest struct {
 	Variables map[string]string `json:"variables"`
+	AppliedTo []string          `json:"applied_to,omitempty"`
 }
 
 func (h *PresetHandler) apply(w http.ResponseWriter, r *http.Request, id string) {
@@ -207,6 +232,18 @@ func (h *PresetHandler) apply(w http.ResponseWriter, r *http.Request, id string)
 			h.writeError(w, fmt.Sprintf("template %q: %s", pr.TemplateName, err.Error()), http.StatusBadRequest)
 			return
 		}
+		// Apply RBAC ownership to each instance request
+		ownership, err := DetermineRuleOwnership(
+			r.Context(), apiKey, body.AppliedTo,
+			tmpl.Mode, h.requireApproval, h.apiKeyRepo,
+		)
+		if err != nil {
+			h.writeError(w, fmt.Sprintf("RBAC for template %q: %s", pr.TemplateName, err.Error()), http.StatusBadRequest)
+			return
+		}
+		req.Owner = ownership.Owner
+		req.AppliedTo = []string(ownership.AppliedTo)
+		req.Status = ownership.Status
 		resolved = append(resolved, resolvedItem{tmpl: tmpl, req: req})
 	}
 	var results []map[string]interface{}
@@ -277,7 +314,7 @@ func (h *PresetHandler) readPresetFile(id string) ([]byte, error) {
 	}
 	tryPaths := []string{basePath}
 	if filepath.Ext(basePath) == "" {
-		tryPaths = append(tryPaths, basePath+".yaml", basePath+".preset.yaml")
+		tryPaths = append(tryPaths, basePath+".yaml", basePath+".preset.yaml", basePath+".preset.js.yaml")
 	}
 	if filepath.Ext(basePath) == ".preset" {
 		tryPaths = append(tryPaths, basePath+".yaml")

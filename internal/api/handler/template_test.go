@@ -1641,8 +1641,9 @@ func TestInstantiateTemplate(t *testing.T) {
 		if rule.ChainID == nil || *rule.ChainID != "1" {
 			t.Errorf("expected ChainID '1', got %v", rule.ChainID)
 		}
-		if rule.Owner != "key-123" {
-			t.Errorf("expected Owner 'key-123', got %v", rule.Owner)
+		// RBAC: owner is the authenticated caller, not the request body api_key_id
+		if rule.Owner != "test-key-001" {
+			t.Errorf("expected Owner 'test-key-001' (from API key context), got %v", rule.Owner)
 		}
 		if rule.SignerAddress == nil || *rule.SignerAddress != signerAddr {
 			t.Errorf("expected SignerAddress %q, got %v", signerAddr, rule.SignerAddress)
@@ -1666,8 +1667,8 @@ func TestInstantiateTemplate(t *testing.T) {
 			t.Errorf("expected status %d, got %d", http.StatusBadRequest, rr.Code)
 		}
 		errResp := decodeErrorResponse(t, rr)
-		if !strings.Contains(errResp.Error, "failed to create instance") {
-			t.Errorf("expected error about failed instance creation, got %q", errResp.Error)
+		if !strings.Contains(errResp.Error, "failed to resolve template") && !strings.Contains(errResp.Error, "failed to create instance") {
+			t.Errorf("expected error about template resolution or instance creation, got %q", errResp.Error)
 		}
 	})
 
