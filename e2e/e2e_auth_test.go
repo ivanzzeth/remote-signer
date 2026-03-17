@@ -16,7 +16,7 @@ import (
 
 func TestAuth_AdminCanAccessAdminEndpoints(t *testing.T) {
 	ctx := context.Background()
-	rules, err := adminClient.EVM.Rules.List(ctx, nil)
+	rules, err := adminClient.EVM.Rules.List(ctx, &evm.ListRulesFilter{Limit: 1000})
 	require.NoError(t, err)
 	assert.NotNil(t, rules)
 }

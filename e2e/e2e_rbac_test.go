@@ -102,7 +102,6 @@ func createTestAddressListRule(t *testing.T, c *client.Client, name string) *evm
 // =============================================================================
 
 func TestRBAC_A1_Admin(t *testing.T) {
-	snapshotRules(t)
 	ctx := context.Background()
 	// Use existing adminClient
 
@@ -159,7 +158,7 @@ func TestRBAC_A1_Admin(t *testing.T) {
 	})
 
 	t.Run("A1.9_list_all_rules", func(t *testing.T) {
-		resp, err := adminClient.EVM.Rules.List(ctx, nil)
+		resp, err := adminClient.EVM.Rules.List(ctx, &evm.ListRulesFilter{Limit: 1000})
 		require.NoError(t, err)
 		assert.GreaterOrEqual(t, resp.Total, 1)
 	})
@@ -172,7 +171,6 @@ func TestRBAC_A1_Admin(t *testing.T) {
 }
 
 func TestRBAC_A2_Dev(t *testing.T) {
-	snapshotRules(t)
 	ctx := context.Background()
 	devClient := createRoleClient(t, "dev", "e2e-rbac-dev")
 
@@ -237,7 +235,7 @@ func TestRBAC_A2_Dev(t *testing.T) {
 	})
 
 	t.Run("A2.10_list_all_rules", func(t *testing.T) {
-		resp, err := devClient.EVM.Rules.List(ctx, nil)
+		resp, err := devClient.EVM.Rules.List(ctx, &evm.ListRulesFilter{Limit: 1000})
 		require.NoError(t, err)
 		assert.GreaterOrEqual(t, resp.Total, 1)
 	})
@@ -276,7 +274,6 @@ func TestRBAC_A2_Dev(t *testing.T) {
 }
 
 func TestRBAC_A3_Agent(t *testing.T) {
-	snapshotRules(t)
 	ctx := context.Background()
 	agentClient := createRoleClient(t, "agent", "e2e-rbac-agent")
 
@@ -439,12 +436,11 @@ func TestRBAC_A3_Agent(t *testing.T) {
 }
 
 func TestRBAC_A4_Strategy(t *testing.T) {
-	snapshotRules(t)
 	ctx := context.Background()
 	stratClient := createRoleClient(t, "strategy", "e2e-rbac-strategy")
 
 	t.Run("A4.3_cannot_list_rules", func(t *testing.T) {
-		_, err := stratClient.EVM.Rules.List(ctx, nil)
+		_, err := stratClient.EVM.Rules.List(ctx, &evm.ListRulesFilter{Limit: 1000})
 		expectAPIError(t, err, 403, "strategy CANNOT list rules")
 	})
 
@@ -487,7 +483,6 @@ func TestRBAC_A4_Strategy(t *testing.T) {
 // =============================================================================
 
 func TestRBAC_B1_OwnerAutoSet(t *testing.T) {
-	snapshotRules(t)
 	ctx := context.Background()
 
 	t.Run("B1.1_agent_owner", func(t *testing.T) {
@@ -515,7 +510,7 @@ func TestRBAC_B1_OwnerAutoSet(t *testing.T) {
 
 	t.Run("B1.3_config_sourced_owner", func(t *testing.T) {
 		// Config-sourced rules should have owner="config"
-		resp, err := adminClient.EVM.Rules.List(ctx, nil)
+		resp, err := adminClient.EVM.Rules.List(ctx, &evm.ListRulesFilter{Limit: 1000})
 		require.NoError(t, err)
 		var configRule *evm.Rule
 		for i, r := range resp.Rules {
@@ -533,7 +528,6 @@ func TestRBAC_B1_OwnerAutoSet(t *testing.T) {
 }
 
 func TestRBAC_B2_AppliedToEnforcement(t *testing.T) {
-	snapshotRules(t)
 	ctx := context.Background()
 
 	t.Run("B2.1_agent_forced_self", func(t *testing.T) {
@@ -596,14 +590,12 @@ func TestRBAC_B2_AppliedToEnforcement(t *testing.T) {
 // =============================================================================
 
 func TestRBAC_C1_ImmediateActivation(t *testing.T) {
-	snapshotRules(t)
 	agentClient := createRoleClient(t, "agent", "e2e-rbac-c1-agent")
 	rule := createTestAddressListRule(t, agentClient, "RBAC-C1.1 immediate active")
 	assert.Equal(t, "active", rule.Status)
 }
 
 func TestRBAC_C4_Deletion(t *testing.T) {
-	snapshotRules(t)
 	ctx := context.Background()
 
 	t.Run("C4.1_agent_delete_own_active", func(t *testing.T) {
@@ -615,7 +607,7 @@ func TestRBAC_C4_Deletion(t *testing.T) {
 
 	t.Run("C4.3_agent_cannot_delete_config_rule", func(t *testing.T) {
 		agentClient := createRoleClient(t, "agent", "e2e-rbac-c4-agent2")
-		resp, err := adminClient.EVM.Rules.List(ctx, nil)
+		resp, err := adminClient.EVM.Rules.List(ctx, &evm.ListRulesFilter{Limit: 1000})
 		require.NoError(t, err)
 		var configRuleID string
 		for _, r := range resp.Rules {
@@ -633,7 +625,6 @@ func TestRBAC_C4_Deletion(t *testing.T) {
 }
 
 func TestRBAC_C5_Immutable(t *testing.T) {
-	snapshotRules(t)
 	ctx := context.Background()
 
 	t.Run("C5.1_admin_create_immutable", func(t *testing.T) {
@@ -673,7 +664,6 @@ func TestRBAC_C5_Immutable(t *testing.T) {
 // =============================================================================
 
 func TestRBAC_D2_BlockedRuleTypes(t *testing.T) {
-	snapshotRules(t)
 	ctx := context.Background()
 	agentClient := createRoleClient(t, "agent", "e2e-rbac-d2-agent")
 	devClient := createRoleClient(t, "dev", "e2e-rbac-d2-dev")
@@ -810,11 +800,10 @@ func TestRBAC_D2_BlockedRuleTypes(t *testing.T) {
 // =============================================================================
 
 func TestRBAC_E_ConfigSourcedRules(t *testing.T) {
-	snapshotRules(t)
 	ctx := context.Background()
 
 	t.Run("E1_E2_config_rules_have_star_and_config_owner", func(t *testing.T) {
-		resp, err := adminClient.EVM.Rules.List(ctx, nil)
+		resp, err := adminClient.EVM.Rules.List(ctx, &evm.ListRulesFilter{Limit: 1000})
 		require.NoError(t, err)
 
 		var configRuleFound bool
@@ -837,7 +826,6 @@ func TestRBAC_E_ConfigSourcedRules(t *testing.T) {
 // =============================================================================
 
 func TestRBAC_F_Audit(t *testing.T) {
-	snapshotRules(t)
 	ctx := context.Background()
 
 	t.Run("F1_agent_create_rule_audit", func(t *testing.T) {
@@ -884,7 +872,6 @@ func TestRBAC_F_Audit(t *testing.T) {
 // =============================================================================
 
 func TestRBAC_G_MultiAgentIsolation(t *testing.T) {
-	snapshotRules(t)
 	ctx := context.Background()
 
 	agentAClient := createRoleClient(t, "agent", "e2e-rbac-g-agent-a")
@@ -898,7 +885,7 @@ func TestRBAC_G_MultiAgentIsolation(t *testing.T) {
 		ruleB := createTestAddressListRule(t, agentBClient, "RBAC-G agent-B rule")
 
 		// Agent-A lists rules — should NOT see agent-B's rule
-		respA, err := agentAClient.EVM.Rules.List(ctx, nil)
+		respA, err := agentAClient.EVM.Rules.List(ctx, &evm.ListRulesFilter{Limit: 1000})
 		require.NoError(t, err)
 
 		for _, r := range respA.Rules {
@@ -914,7 +901,7 @@ func TestRBAC_G_MultiAgentIsolation(t *testing.T) {
 	})
 
 	t.Run("G1_agentA_sees_own_rule", func(t *testing.T) {
-		respA, err := agentAClient.EVM.Rules.List(ctx, nil)
+		respA, err := agentAClient.EVM.Rules.List(ctx, &evm.ListRulesFilter{Limit: 1000})
 		require.NoError(t, err)
 		var found bool
 		for _, r := range respA.Rules {

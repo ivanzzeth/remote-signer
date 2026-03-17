@@ -29,6 +29,7 @@ import (
 // through the HTTP sign API, verifying expected pass/fail results.
 // This ensures real transaction data is validated through the full HTTP stack.
 func TestConfigDrivenRuleValidation(t *testing.T) {
+	ensureGuardResumed(t)
 	if useExternalServer {
 		t.Skip("config-driven test uses config.e2e.yaml rules")
 	}
@@ -75,6 +76,7 @@ func TestConfigDrivenRuleValidation(t *testing.T) {
 // TestConfigDriven_ERC20InstanceHasBudget verifies that the ERC20 instance in config.e2e.yaml
 // (with budget and schedule) gets budget records on server sync, so budget enforcement runs.
 func TestConfigDriven_ERC20InstanceHasBudget(t *testing.T) {
+	ensureGuardResumed(t)
 	if useExternalServer {
 		t.Skip("config-driven test uses config.e2e.yaml rules")
 	}
@@ -114,6 +116,7 @@ func TestConfigDriven_ERC20InstanceHasBudget(t *testing.T) {
 
 // TestConfigDriven_ERC20RuleHasSchedule verifies that the ERC20 instance rule has schedule (period 24h) from config.
 func TestConfigDriven_ERC20RuleHasSchedule(t *testing.T) {
+	ensureGuardResumed(t)
 	if useExternalServer {
 		t.Skip("config-driven test uses config.e2e.yaml rules")
 	}
@@ -149,6 +152,7 @@ const (
 // TestConfigDriven_Schedule_PeriodReset verifies that budget is reset at period boundary: spend, wait for new period, spend again.
 // Uses the "ERC20 schedule (1s)" instance (period 1s); after 2s the budget resets so a second transfer succeeds and spent is 100.
 func TestConfigDriven_Schedule_PeriodReset(t *testing.T) {
+	ensureGuardResumed(t)
 	if useExternalServer {
 		t.Skip("config-driven test uses config.e2e.yaml rules")
 	}
@@ -256,6 +260,7 @@ const (
 
 // TestConfigDriven_ERC20Budget_DeductedOnSign signs one ERC20 transfer (amount 100); expects success and budget spent increases.
 func TestConfigDriven_ERC20Budget_DeductedOnSign(t *testing.T) {
+	ensureGuardResumed(t)
 	if useExternalServer {
 		t.Skip("config-driven test uses config.e2e.yaml rules")
 	}
@@ -313,6 +318,7 @@ func TestConfigDriven_ERC20Budget_DeductedOnSign(t *testing.T) {
 // TestConfigDriven_ERC20Budget_RejectedWhenPerTxExceeded signs transfer(amount 1000000001) which exceeds max_per_tx 1000000000.
 // Amounts are in token smallest unit (USDC 6 decimals: 1000000000 = 1000 USDC). Config and test use same convention.
 func TestConfigDriven_ERC20Budget_RejectedWhenPerTxExceeded(t *testing.T) {
+	ensureGuardResumed(t)
 	if useExternalServer {
 		t.Skip("config-driven test uses config.e2e.yaml rules")
 	}
@@ -342,6 +348,7 @@ func TestConfigDriven_ERC20Budget_RejectedWhenPerTxExceeded(t *testing.T) {
 // TestConfigDriven_ERC20Budget_RejectedWhenTotalExceeded exhausts budget with two transfers, then third is rejected.
 // Uses 499999950 each so that if DeductedOnSign already ran (spent 100), total 100+499999950+499999950 = 999999900+100 = 1000000000; then +1 exceeds.
 func TestConfigDriven_ERC20Budget_RejectedWhenTotalExceeded(t *testing.T) {
+	ensureGuardResumed(t)
 	if useExternalServer {
 		t.Skip("config-driven test uses config.e2e.yaml rules")
 	}
@@ -377,6 +384,7 @@ func TestConfigDriven_ERC20Budget_RejectedWhenTotalExceeded(t *testing.T) {
 // TestConfigDriven_ERC20Budget_RejectedWhenTxCountExceeded uses the "ERC20 instance (tx count)" with max_tx_count=2:
 // two transfers succeed, the third is rejected by AtomicSpend (tx_count >= max_tx_count).
 func TestConfigDriven_ERC20Budget_RejectedWhenTxCountExceeded(t *testing.T) {
+	ensureGuardResumed(t)
 	if useExternalServer {
 		t.Skip("config-driven test uses config.e2e.yaml rules")
 	}
@@ -410,6 +418,7 @@ func TestConfigDriven_ERC20Budget_RejectedWhenTxCountExceeded(t *testing.T) {
 // TestConfigDriven_ERC20Budget_RejectedWhenMaxPerTxZero uses the "ERC20 instance (per-tx zero)" with max_per_tx=0:
 // any single transfer is rejected by CheckAndDeductBudget (amount > 0 when max_per_tx is 0).
 func TestConfigDriven_ERC20Budget_RejectedWhenMaxPerTxZero(t *testing.T) {
+	ensureGuardResumed(t)
 	if useExternalServer {
 		t.Skip("config-driven test uses config.e2e.yaml rules")
 	}
@@ -438,6 +447,7 @@ func TestConfigDriven_ERC20Budget_RejectedWhenMaxPerTxZero(t *testing.T) {
 // TestConfigDriven_ERC20Budget_AllowedWhenMaxPerTxUnlimited uses "ERC20 instance (per-tx unlimited)" with max_per_tx="-1":
 // a single transfer up to max_total (1000000) is allowed (no per-tx cap).
 func TestConfigDriven_ERC20Budget_AllowedWhenMaxPerTxUnlimited(t *testing.T) {
+	ensureGuardResumed(t)
 	if useExternalServer {
 		t.Skip("config-driven test uses config.e2e.yaml rules")
 	}
@@ -468,6 +478,7 @@ func TestConfigDriven_ERC20Budget_AllowedWhenMaxPerTxUnlimited(t *testing.T) {
 // TestConfigDriven_ERC20Budget_AllowedWhenMaxTotalUnlimited uses "ERC20 instance (total unlimited)" with max_total="-1":
 // multiple transfers succeed (no total cap).
 func TestConfigDriven_ERC20Budget_AllowedWhenMaxTotalUnlimited(t *testing.T) {
+	ensureGuardResumed(t)
 	if useExternalServer {
 		t.Skip("config-driven test uses config.e2e.yaml rules")
 	}

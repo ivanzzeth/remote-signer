@@ -14,7 +14,7 @@ import (
 )
 
 func TestRule_MessagePattern_AllowsMatching(t *testing.T) {
-	snapshotRules(t)
+	ensureGuardResumed(t)
 	ctx := context.Background()
 	chainType := "evm"
 	rule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
@@ -38,7 +38,7 @@ func TestRule_MessagePattern_AllowsMatching(t *testing.T) {
 }
 
 func TestRule_MessagePattern_RejectsMatchingBlocklist(t *testing.T) {
-	snapshotRules(t)
+	ensureGuardResumed(t)
 	ctx := context.Background()
 	chainType := "evm"
 	rule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{

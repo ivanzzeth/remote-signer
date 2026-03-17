@@ -28,7 +28,6 @@ func skipIfPresetAPIDisabled(t *testing.T) {
 }
 
 func TestPreset_List(t *testing.T) {
-	snapshotRules(t)
 	ctx := context.Background()
 	skipIfPresetAPIDisabled(t)
 
@@ -49,7 +48,6 @@ func TestPreset_List(t *testing.T) {
 }
 
 func TestPreset_Vars(t *testing.T) {
-	snapshotRules(t)
 	ctx := context.Background()
 	skipIfPresetAPIDisabled(t)
 
@@ -60,7 +58,6 @@ func TestPreset_Vars(t *testing.T) {
 }
 
 func TestPreset_Vars_NotFound(t *testing.T) {
-	snapshotRules(t)
 	ctx := context.Background()
 	skipIfPresetAPIDisabled(t)
 
@@ -72,7 +69,6 @@ func TestPreset_Vars_NotFound(t *testing.T) {
 }
 
 func TestPreset_Vars_PathTraversal(t *testing.T) {
-	snapshotRules(t)
 	ctx := context.Background()
 	skipIfPresetAPIDisabled(t)
 
@@ -86,7 +82,6 @@ func TestPreset_Vars_PathTraversal(t *testing.T) {
 }
 
 func TestPreset_Apply_Success(t *testing.T) {
-	snapshotRules(t)
 	ctx := context.Background()
 	skipIfPresetAPIDisabled(t)
 
@@ -122,7 +117,6 @@ func TestPreset_Apply_Success(t *testing.T) {
 }
 
 func TestPreset_Matrix_Apply_MultiChain(t *testing.T) {
-	snapshotRules(t)
 	ctx := context.Background()
 	skipIfPresetAPIDisabled(t)
 
@@ -172,7 +166,6 @@ func TestPreset_Matrix_Apply_MultiChain(t *testing.T) {
 }
 
 func TestPreset_Matrix_List_Shows_Template(t *testing.T) {
-	snapshotRules(t)
 	ctx := context.Background()
 	skipIfPresetAPIDisabled(t)
 
@@ -191,7 +184,6 @@ func TestPreset_Matrix_List_Shows_Template(t *testing.T) {
 }
 
 func TestPreset_Apply_Forbidden_NonAdmin(t *testing.T) {
-	snapshotRules(t)
 	ctx := context.Background()
 	skipIfPresetAPIDisabled(t)
 	if nonAdminClient == nil {

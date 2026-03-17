@@ -16,6 +16,7 @@ import (
 )
 
 func TestRequest_ListRequests(t *testing.T) {
+	ensureGuardResumed(t)
 	ctx := context.Background()
 
 	// First make a sign request (transaction to treasury to match whitelist)
@@ -46,6 +47,7 @@ func TestRequest_ListRequests(t *testing.T) {
 }
 
 func TestRequest_GetRequest(t *testing.T) {
+	ensureGuardResumed(t)
 	// With Example 8 (signer_restriction) and Example 9 (sign_type_restriction),
 	// personal_sign is auto-approved for the test signer
 	ctx := context.Background()
@@ -72,6 +74,7 @@ func TestRequest_GetRequest(t *testing.T) {
 // =============================================================================
 
 func TestAudit_ListAuditRecords(t *testing.T) {
+	ensureGuardResumed(t)
 	ctx := context.Background()
 
 	// Make some requests first (transaction to treasury to match whitelist)

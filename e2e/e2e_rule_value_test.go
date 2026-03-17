@@ -15,7 +15,7 @@ import (
 )
 
 func TestRule_ValueLimitWhitelist_AllowsUnderLimit(t *testing.T) {
-	snapshotRules(t)
+	ensureGuardResumed(t)
 	if useExternalServer {
 		t.Skip("Value limit rule is in config.e2e.yaml")
 	}
@@ -38,7 +38,7 @@ func TestRule_ValueLimitWhitelist_AllowsUnderLimit(t *testing.T) {
 }
 
 func TestRule_ValueLimitRuleBlocks(t *testing.T) {
-	snapshotRules(t)
+	ensureGuardResumed(t)
 	ctx := context.Background()
 	createReq := &evm.CreateRuleRequest{
 		Name:    "Test Value Limit - Block High Value",
@@ -72,7 +72,7 @@ const treasuryExampleMaxValueWei = "100000000000000000000"
 // TestTreasuryExample_ValueLimitAllowsUnder100ETH mirrors rules/treasury.example.yaml
 // "Treasury transfer limit": evm_value_limit whitelist max 100 ETH; allow when value <= max.
 func TestTreasuryExample_ValueLimitAllowsUnder100ETH(t *testing.T) {
-	snapshotRules(t)
+	ensureGuardResumed(t)
 	ctx := context.Background()
 	chainType := "evm"
 	rule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
@@ -103,7 +103,7 @@ func TestTreasuryExample_ValueLimitAllowsUnder100ETH(t *testing.T) {
 // TestTreasuryExample_ValueLimitBlocksOver100ETH mirrors rules/treasury.example.yaml:
 // use a blocklist rule so that value > 100 ETH is explicitly blocked (same policy as "allow only when value <= 100").
 func TestTreasuryExample_ValueLimitBlocksOver100ETH(t *testing.T) {
-	snapshotRules(t)
+	ensureGuardResumed(t)
 	ctx := context.Background()
 	chainType := "evm"
 	rule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{

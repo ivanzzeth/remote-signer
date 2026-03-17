@@ -15,7 +15,7 @@ import (
 )
 
 func TestRule_ContractMethod_AllowsTransfer(t *testing.T) {
-	snapshotRules(t)
+	ensureGuardResumed(t)
 	ctx := context.Background()
 	chainType := "evm"
 	rule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{
@@ -49,7 +49,7 @@ func TestRule_ContractMethod_AllowsTransfer(t *testing.T) {
 }
 
 func TestRule_ContractMethod_BlocklistBlocksApproval(t *testing.T) {
-	snapshotRules(t)
+	ensureGuardResumed(t)
 	ctx := context.Background()
 	chainType := "evm"
 	rule, err := adminClient.EVM.Rules.Create(ctx, &evm.CreateRuleRequest{

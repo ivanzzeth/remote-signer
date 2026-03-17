@@ -23,7 +23,7 @@ import (
 // TestRule_JSBlocklistBlocksBurnAddress verifies that an evm_js rule with mode blocklist
 // blocks a transaction when the script returns invalid (e2e coverage for JS blocklist).
 func TestRule_JSBlocklistBlocksBurnAddress(t *testing.T) {
-	snapshotRules(t)
+	ensureGuardResumed(t)
 	ctx := context.Background()
 	// Use zero address so we don't rely on the server's default burn-address blocklist
 	blockedAddr := "0x0000000000000000000000000000000000000000"
@@ -67,7 +67,7 @@ func TestRule_JSBlocklistBlocksBurnAddress(t *testing.T) {
 }
 
 func TestRule_SignRequestMatchesWhitelistRule(t *testing.T) {
-	snapshotRules(t)
+	ensureGuardResumed(t)
 	// With Example 8 (signer_restriction) and Example 9 (sign_type_restriction),
 	// personal_sign is auto-approved for the test signer
 	address := common.HexToAddress(signerAddress)
@@ -82,7 +82,7 @@ func TestRule_SignRequestMatchesWhitelistRule(t *testing.T) {
 // delegate_to in config points to target rule; engine delegates and target allows.
 // config.e2e.yaml defines "Delegate Single" (script returns valid+payload) and "Delegate Target" (always allows).
 func TestRule_DelegationSinglePasses(t *testing.T) {
-	snapshotRules(t)
+	ensureGuardResumed(t)
 	if useExternalServer {
 		t.Skip("delegation e2e uses config.e2e.yaml rules (Delegate Single / Delegate Target)")
 	}
@@ -90,7 +90,7 @@ func TestRule_DelegationSinglePasses(t *testing.T) {
 	ctx := context.Background()
 
 	// Optional: assert config has correct delegation target
-	rulesResp, err := adminClient.EVM.Rules.List(ctx, nil)
+	rulesResp, err := adminClient.EVM.Rules.List(ctx, &evm.ListRulesFilter{Limit: 1000})
 	require.NoError(t, err)
 	var targetID, delegateSingleID string
 	for _, r := range rulesResp.Rules {
@@ -135,7 +135,7 @@ func TestRule_DelegationSinglePasses(t *testing.T) {
 // Submits a SafeTx (typed_data) where the inner tx is to the multisend contract with one ERC20 transfer;
 // Safe rule delegates to Multisend rule, which decodes the batch and delegates per_item to ERC20 rule.
 func TestRule_SafeMultisendERC20Chain(t *testing.T) {
-	snapshotRules(t)
+	ensureGuardResumed(t)
 	if useExternalServer {
 		t.Skip("Safe=>Multisend=>ERC20 chain uses config.e2e.yaml instance rules")
 	}
@@ -210,7 +210,7 @@ func TestRule_SafeMultisendERC20Chain(t *testing.T) {
 // TestRule_SafeMultisendMultiDelegate verifies Multisend with multiple delegation targets (ERC20, ERC721).
 // Batch has two items: ERC20 transfer and ERC721 transferFrom; each item is validated by the matching rule (erc20 or erc721).
 func TestRule_SafeMultisendMultiDelegate(t *testing.T) {
-	snapshotRules(t)
+	ensureGuardResumed(t)
 	if useExternalServer {
 		t.Skip("Safe=>Multisend=>(ERC20|ERC721) uses config.e2e.yaml instance rules")
 	}
@@ -299,7 +299,7 @@ func TestRule_SafeMultisendMultiDelegate(t *testing.T) {
 // Submits a SafeTx (typed_data) on chain 137 with inner call USDC.e approve(CTF Exchange, max);
 // Safe rule (safe-polymarket) delegates to polymarket-transactions which validates the Polymarket calls.
 func TestRule_PolymarketSafeChain(t *testing.T) {
-	snapshotRules(t)
+	ensureGuardResumed(t)
 	if useExternalServer {
 		t.Skip("Polymarket Safe chain uses config.e2e.yaml instance rules (Polymarket + Safe Polymarket)")
 	}
@@ -362,7 +362,7 @@ func TestRule_PolymarketSafeChain(t *testing.T) {
 // TestRule_PolymarketSafeChain_CTFSetApprovalForAll mirrors polymarket_safe.template.yaml test case:
 // "should pass SafeTx with CTF setApprovalForAll to Exchange (real tx 0x4f1356ad)".
 func TestRule_PolymarketSafeChain_CTFSetApprovalForAll(t *testing.T) {
-	snapshotRules(t)
+	ensureGuardResumed(t)
 	if useExternalServer {
 		t.Skip("Polymarket Safe chain uses config.e2e.yaml instance rules")
 	}
@@ -423,7 +423,7 @@ func TestRule_PolymarketSafeChain_CTFSetApprovalForAll(t *testing.T) {
 // TestRule_PolymarketSafeChain_RejectDelegateCall mirrors polymarket_safe.template.yaml test case:
 // "should reject SafeTx with DELEGATECALL".
 func TestRule_PolymarketSafeChain_RejectDelegateCall(t *testing.T) {
-	snapshotRules(t)
+	ensureGuardResumed(t)
 	if useExternalServer {
 		t.Skip("Polymarket Safe chain uses config.e2e.yaml instance rules")
 	}
@@ -485,7 +485,7 @@ func TestRule_PolymarketSafeChain_RejectDelegateCall(t *testing.T) {
 // TestRule_PolymarketSafeChain_CTFRedeemPositions mirrors polymarket_safe.template.yaml complex case:
 // "should pass SafeTx with CTF redeemPositions (real tx 0x714b3d)" — Polygon tx, inner redeemPositions(USDC.e, 0x0, conditionId, [1,2]).
 func TestRule_PolymarketSafeChain_CTFRedeemPositions(t *testing.T) {
-	snapshotRules(t)
+	ensureGuardResumed(t)
 	if useExternalServer {
 		t.Skip("Polymarket Safe chain uses config.e2e.yaml instance rules")
 	}
@@ -545,7 +545,7 @@ func TestRule_PolymarketSafeChain_CTFRedeemPositions(t *testing.T) {
 // TestRule_PolymarketSafeChain_ExecTransactionCTFRedeemPositions mirrors polymarket_safe.template.yaml complex case:
 // "should pass execTransaction with real CTF redeemPositions (real tx 0x714b3d)" — raw tx to Safe with execTransaction(CTF, 0, redeemPositions(...), ...).
 func TestRule_PolymarketSafeChain_ExecTransactionCTFRedeemPositions(t *testing.T) {
-	snapshotRules(t)
+	ensureGuardResumed(t)
 	if useExternalServer {
 		t.Skip("Polymarket Safe chain uses config.e2e.yaml instance rules")
 	}

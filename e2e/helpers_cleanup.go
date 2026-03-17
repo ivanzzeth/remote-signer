@@ -36,6 +36,13 @@ func cleanupApplyResults(t *testing.T, results []presets.ApplyResultItem) {
 	})
 }
 
+// ensureGuardResumed resumes the approval guard if it was triggered by previous tests.
+// Call this at the start of any test that needs to sign successfully.
+func ensureGuardResumed(t *testing.T) {
+	t.Helper()
+	_ = adminClient.EVM.Guard.Resume(context.Background())
+}
+
 // snapshotRules records the current set of rule IDs and registers a t.Cleanup
 // that deletes any rules added during the test. This prevents state leakage
 // between tests without requiring each test to manually track its created rules.

@@ -19,7 +19,7 @@ import (
 // =============================================================================
 
 func TestSigner_LockAndUnlock_Keystore(t *testing.T) {
-	snapshotRules(t)
+	ensureGuardResumed(t)
 	if useExternalServer {
 		t.Skip("Skipping: keystore lock/unlock test not supported with external server")
 	}
@@ -107,7 +107,7 @@ func TestSigner_LockAndUnlock_Keystore(t *testing.T) {
 }
 
 func TestSigner_LockAndUnlock_HDWallet(t *testing.T) {
-	snapshotRules(t)
+	ensureGuardResumed(t)
 	if useExternalServer {
 		t.Skip("Skipping: HD wallet lock/unlock test not supported with external server")
 	}
@@ -154,7 +154,7 @@ func TestSigner_LockAndUnlock_HDWallet(t *testing.T) {
 }
 
 func TestSigner_UnlockAlreadyUnlocked(t *testing.T) {
-	snapshotRules(t)
+	ensureGuardResumed(t)
 	if useExternalServer {
 		t.Skip("Skipping: unlock test not supported with external server")
 	}
@@ -173,7 +173,7 @@ func TestSigner_UnlockAlreadyUnlocked(t *testing.T) {
 }
 
 func TestSigner_LockNonExistent(t *testing.T) {
-	snapshotRules(t)
+	ensureGuardResumed(t)
 	ctx := context.Background()
 
 	_, err := adminClient.EVM.Signers.Lock(ctx, "0x0000000000000000000000000000000000000000")
@@ -185,7 +185,7 @@ func TestSigner_LockNonExistent(t *testing.T) {
 }
 
 func TestSigner_UnlockNonExistent(t *testing.T) {
-	snapshotRules(t)
+	ensureGuardResumed(t)
 	ctx := context.Background()
 
 	_, err := adminClient.EVM.Signers.Unlock(ctx, "0x0000000000000000000000000000000000000000", &evm.UnlockSignerRequest{
@@ -199,7 +199,7 @@ func TestSigner_UnlockNonExistent(t *testing.T) {
 }
 
 func TestSigner_NonAdminCannotLockOrUnlock(t *testing.T) {
-	snapshotRules(t)
+	ensureGuardResumed(t)
 	if nonAdminClient == nil {
 		t.Skip("Skipping: non-admin client not configured")
 	}

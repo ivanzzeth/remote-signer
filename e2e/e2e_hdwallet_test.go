@@ -19,7 +19,7 @@ import (
 // =============================================================================
 
 func TestHDWallet_CreateAndList(t *testing.T) {
-	snapshotRules(t)
+	ensureGuardResumed(t)
 	if useExternalServer {
 		t.Skip("Skipping: HD wallet creation test not supported with external server")
 	}
@@ -75,7 +75,7 @@ func TestHDWallet_CreateAndList(t *testing.T) {
 }
 
 func TestHDWallet_DeriveAddresses(t *testing.T) {
-	snapshotRules(t)
+	ensureGuardResumed(t)
 	if useExternalServer {
 		t.Skip("Skipping: HD wallet derive test not supported with external server")
 	}
@@ -127,7 +127,7 @@ func TestHDWallet_DeriveAddresses(t *testing.T) {
 }
 
 func TestHDWallet_DerivedAddressCanSign(t *testing.T) {
-	snapshotRules(t)
+	ensureGuardResumed(t)
 	if useExternalServer {
 		t.Skip("Skipping: HD wallet signing test not supported with external server")
 	}
@@ -176,7 +176,7 @@ func TestHDWallet_DerivedAddressCanSign(t *testing.T) {
 }
 
 func TestHDWallet_NonAdminCannotCreate(t *testing.T) {
-	snapshotRules(t)
+	ensureGuardResumed(t)
 	if nonAdminClient == nil {
 		t.Skip("Skipping: non-admin client not configured")
 	}
@@ -195,7 +195,7 @@ func TestHDWallet_NonAdminCannotCreate(t *testing.T) {
 }
 
 func TestHDWallet_NonAdminCannotList(t *testing.T) {
-	snapshotRules(t)
+	ensureGuardResumed(t)
 	if nonAdminClient == nil {
 		t.Skip("Skipping: non-admin client not configured")
 	}
@@ -212,7 +212,7 @@ func TestHDWallet_NonAdminCannotList(t *testing.T) {
 }
 
 func TestHDWallet_ValidationErrors(t *testing.T) {
-	snapshotRules(t)
+	ensureGuardResumed(t)
 	if useExternalServer {
 		t.Skip("Skipping: HD wallet validation test not supported with external server")
 	}
