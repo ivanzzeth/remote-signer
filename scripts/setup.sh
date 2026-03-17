@@ -451,7 +451,8 @@ print_banner() {
     echo "A secure, policy-driven signing service for EVM chains."
     echo ""
     echo -e "Key concepts:"
-    echo -e "  ${CYAN}API Keys${NC}    Ed25519 key pairs authenticate clients"
+    echo -e "  ${CYAN}API Keys${NC}    Ed25519 key pairs authenticate clients (4 RBAC roles)"
+    echo -e "  ${CYAN}Roles${NC}       admin / dev / agent / strategy"
     echo -e "  ${CYAN}Rules${NC}       Policy engine controls what gets signed"
     echo -e "  ${CYAN}TLS/mTLS${NC}    Transport security between client & server"
     echo -e "  ${CYAN}TUI${NC}         Terminal UI for management & approvals"
@@ -495,13 +496,18 @@ step_api_keys() {
     echo -e "${BOLD}  Step 2/6: API Keys${NC}"
     echo -e "${BOLD}=============================================================${NC}"
     echo ""
-    echo "Two API key pairs (admin + dev):"
+    echo "Four API key pairs (RBAC roles):"
     echo ""
-    echo -e "  ${CYAN}admin${NC}  Full access: manage signers, approve requests, manage rules"
-    echo -e "  ${CYAN}dev${NC}    Limited: submit sign requests only"
+    echo -e "  ${CYAN}admin${NC}     Full access: manage signers, approve requests, manage all rules"
+    echo -e "  ${CYAN}dev${NC}       Sign requests, view requests, create/manage own rules"
+    echo -e "  ${CYAN}agent${NC}     AI agent: sign, create/manage own rules, read budgets/templates/presets"
+    echo -e "  ${CYAN}strategy${NC}  Strategy executor: sign requests, view own requests (minimal)"
     echo ""
 
     mkdir -p "$DATA_DIR"
+
+    # All 4 role names
+    API_KEY_ROLES=(admin dev agent strategy)
 
     REGENERATE_KEYS=true
     if [ -f "$DATA_DIR/admin_private.pem" ] || [ -f "$DATA_DIR/admin_public.pem" ]; then
@@ -515,38 +521,39 @@ step_api_keys() {
     fi
 
     if [ "$REGENERATE_KEYS" = true ]; then
-        log_info "Generating admin API key..."
-        "$SCRIPT_DIR/generate-api-key.sh" -n admin -o "$DATA_DIR" -f > /dev/null 2>&1
-        log_info "Generating dev API key..."
-        "$SCRIPT_DIR/generate-api-key.sh" -n dev -o "$DATA_DIR" -f > /dev/null 2>&1
+        for role in "${API_KEY_ROLES[@]}"; do
+            log_info "Generating $role API key..."
+            "$SCRIPT_DIR/generate-api-key.sh" -n "$role" -o "$DATA_DIR" -f > /dev/null 2>&1
+        done
     fi
 
-    # Load public/private key values (from newly generated or existing files)
-    ADMIN_PUBLIC_KEY=$(openssl pkey -in "$DATA_DIR/admin_public.pem" -pubin -outform DER 2>/dev/null | base64 | tr -d '\n')
-    ADMIN_PRIVATE_KEY=$(openssl pkey -in "$DATA_DIR/admin_private.pem" -outform DER 2>/dev/null | base64 | tr -d '\n')
-    if [ -z "$ADMIN_PUBLIC_KEY" ] || [ -z "$ADMIN_PRIVATE_KEY" ]; then
-        log_error "Failed to read admin key from $DATA_DIR/admin_*.pem"
-        exit 1
-    fi
-    echo -e "  Key ID:      ${GREEN}admin${NC}"
-    echo -e "  Private key: ${DIM}$DATA_DIR/admin_private.pem${NC}  (keep secret!)"
-    echo -e "  Public key:  ${DIM}$DATA_DIR/admin_public.pem${NC}"
-    echo ""
+    # Load public/private key values for each role (from newly generated or existing files)
+    # Helper: generate key if missing, then load
+    _load_role_key() {
+        local role="$1"
+        if [ ! -f "$DATA_DIR/${role}_private.pem" ] || [ ! -f "$DATA_DIR/${role}_public.pem" ]; then
+            log_info "Generating $role API key..."
+            "$SCRIPT_DIR/generate-api-key.sh" -n "$role" -o "$DATA_DIR" -f > /dev/null 2>&1
+        fi
+        local pub priv
+        pub=$(openssl pkey -in "$DATA_DIR/${role}_public.pem" -pubin -outform DER 2>/dev/null | base64 | tr -d '\n')
+        priv=$(openssl pkey -in "$DATA_DIR/${role}_private.pem" -outform DER 2>/dev/null | base64 | tr -d '\n')
+        if [ -z "$pub" ] || [ -z "$priv" ]; then
+            log_error "Failed to read $role key from $DATA_DIR/${role}_*.pem"
+            exit 1
+        fi
+        # Export to caller via naming convention
+        eval "${role^^}_PUBLIC_KEY=\$pub"
+        eval "${role^^}_PRIVATE_KEY=\$priv"
+        echo -e "  Key ID:      ${GREEN}${role}${NC}"
+        echo -e "  Private key: ${DIM}$DATA_DIR/${role}_private.pem${NC}  (keep secret!)"
+        echo -e "  Public key:  ${DIM}$DATA_DIR/${role}_public.pem${NC}"
+        echo ""
+    }
 
-    if [ ! -f "$DATA_DIR/dev_private.pem" ] || [ ! -f "$DATA_DIR/dev_public.pem" ]; then
-        log_info "Generating dev API key..."
-        "$SCRIPT_DIR/generate-api-key.sh" -n dev -o "$DATA_DIR" -f > /dev/null 2>&1
-    fi
-    DEV_PUBLIC_KEY=$(openssl pkey -in "$DATA_DIR/dev_public.pem" -pubin -outform DER 2>/dev/null | base64 | tr -d '\n')
-    DEV_PRIVATE_KEY=$(openssl pkey -in "$DATA_DIR/dev_private.pem" -outform DER 2>/dev/null | base64 | tr -d '\n')
-    if [ -z "$DEV_PUBLIC_KEY" ] || [ -z "$DEV_PRIVATE_KEY" ]; then
-        log_error "Failed to read dev key from $DATA_DIR/dev_*.pem"
-        exit 1
-    fi
-    echo -e "  Key ID:      ${GREEN}dev${NC}"
-    echo -e "  Private key: ${DIM}$DATA_DIR/dev_private.pem${NC}  (keep secret!)"
-    echo -e "  Public key:  ${DIM}$DATA_DIR/dev_public.pem${NC}"
-    echo ""
+    for role in "${API_KEY_ROLES[@]}"; do
+        _load_role_key "$role"
+    done
 }
 
 step_tls() {
@@ -775,6 +782,16 @@ step_security_settings() {
     DEV_RATE_LIMIT=$(printf '%s' "${DEV_RATE_LIMIT}" | tr -d '[:space:]')
     [ -z "$DEV_RATE_LIMIT" ] && DEV_RATE_LIMIT=100
     log_info "Dev rate_limit: $DEV_RATE_LIMIT"
+
+    read -rp "  Agent key rate limit (req/min) [500]: " AGENT_RATE_LIMIT
+    AGENT_RATE_LIMIT=$(printf '%s' "${AGENT_RATE_LIMIT}" | tr -d '[:space:]')
+    [ -z "$AGENT_RATE_LIMIT" ] && AGENT_RATE_LIMIT=500
+    log_info "Agent rate_limit: $AGENT_RATE_LIMIT"
+
+    read -rp "  Strategy key rate limit (req/min) [200]: " STRATEGY_RATE_LIMIT
+    STRATEGY_RATE_LIMIT=$(printf '%s' "${STRATEGY_RATE_LIMIT}" | tr -d '[:space:]')
+    [ -z "$STRATEGY_RATE_LIMIT" ] && STRATEGY_RATE_LIMIT=200
+    log_info "Strategy rate_limit: $STRATEGY_RATE_LIMIT"
 
     read -rp "  Default rate limit for other keys (req/min) [100]: " RATE_LIMIT_DEFAULT
     RATE_LIMIT_DEFAULT=$(printf '%s' "${RATE_LIMIT_DEFAULT}" | tr -d '[:space:]')
@@ -1015,7 +1032,8 @@ dynamic_blocklist:
 
 # --- Default security rules (auto-enabled) ---
 rules:
-  - name: "Dynamic Address Blocklist"
+  - id: "dynamic-blocklist"
+    name: "Dynamic Address Blocklist"
     type: "evm_dynamic_blocklist"
     mode: "blocklist"
     chain_type: "evm"
@@ -1040,6 +1058,24 @@ api_keys:
     rate_limit: ${DEV_RATE_LIMIT:-100}
     allow_all_signers: true      # setup: allow any signer for local dev
     allow_all_hd_wallets: true   # setup: allow any HD wallet for local dev
+
+  - id: "agent"
+    name: "Agent"
+    public_key: "$AGENT_PUBLIC_KEY"
+    role: agent
+    enabled: true
+    rate_limit: ${AGENT_RATE_LIMIT:-500}
+    allow_all_signers: true      # agent needs access to sign with any signer
+    allow_all_hd_wallets: true
+
+  - id: "strategy"
+    name: "Strategy"
+    public_key: "$STRATEGY_PUBLIC_KEY"
+    role: strategy
+    enabled: true
+    rate_limit: ${STRATEGY_RATE_LIMIT:-200}
+    allow_all_signers: true      # strategy manages own rules per signer
+    allow_all_hd_wallets: true
 $PRESETS_YAML
 CONFIGEOF
 
@@ -1098,7 +1134,7 @@ ENVEOF
     fi
 
     echo -e "  ${DIM}Server:${NC}    ${SCHEME}://localhost:${PORT}"
-    echo -e "  ${DIM}API Keys:${NC}  admin (admin), dev (limited)"
+    echo -e "  ${DIM}API Keys:${NC}  admin, dev, agent, strategy (4 RBAC roles)"
     echo -e "  ${DIM}Foundry:${NC}   enabled"
 
     case "$TLS_CHOICE" in
@@ -1150,6 +1186,44 @@ step_ensure_cli_tools() {
     echo ""
 }
 
+# Auto-apply agent preset with default budget values (non-interactive).
+# Called after config generation so agent key already exists in config.
+step_agent_preset() {
+    echo -e "${BOLD}=============================================================${NC}"
+    echo -e "${BOLD}  Agent Rules (auto-initialize)${NC}"
+    echo -e "${BOLD}=============================================================${NC}"
+    echo ""
+    echo "The agent key can create its own rules, but needs initial budget-controlled"
+    echo "rules to start signing safely. Applying agent preset with conservative defaults..."
+    echo ""
+
+    export PATH="$BIN_DIR:$PATH"
+    if ! command -v remote-signer-cli &>/dev/null; then
+        log_warn "remote-signer-cli not found; skipping agent preset. Apply manually later:"
+        echo "  remote-signer-cli preset create-from agent.preset.js.yaml --config $CONFIG_FILE --write"
+        echo ""
+        return 0
+    fi
+
+    local PRESETS_DIR="${PROJECT_DIR}/rules/presets"
+    local AGENT_PRESET="agent.preset.js.yaml"
+    if [ ! -f "$PRESETS_DIR/$AGENT_PRESET" ]; then
+        log_warn "Agent preset not found: $PRESETS_DIR/$AGENT_PRESET"
+        return 0
+    fi
+
+    # Apply with defaults (conservative budget: 1 ETH total, 0.1 per tx, 24h period)
+    if remote-signer-cli preset create-from "$AGENT_PRESET" \
+        --config "$PROJECT_DIR/$CONFIG_FILE" --write \
+        --presets-dir "$PRESETS_DIR" 2>&1; then
+        log_info "Agent preset applied (budget: 1 native/24h, 0.1/tx). Tune in config if needed."
+    else
+        log_warn "Failed to apply agent preset. Apply manually:"
+        echo "  remote-signer-cli preset create-from $AGENT_PRESET --config $CONFIG_FILE --write"
+    fi
+    echo ""
+}
+
 # Interactive step: optionally add rule(s) from preset(s). Prompts for preset choice and variable overrides (with descriptions from template).
 # Requires remote-signer-cli from step_ensure_cli_tools (no download/build here).
 step_preset_rules() {
@@ -1157,7 +1231,7 @@ step_preset_rules() {
     echo -e "${BOLD}  Step 4b: Add rules from preset (optional)${NC}"
     echo -e "${BOLD}=============================================================${NC}"
     echo ""
-    echo "You can add a rule from a preset (e.g. Polymarket Safe). Variables will be prompted with descriptions from the template."
+    echo "You can add additional rules from presets (e.g. Polymarket Safe). Variables will be prompted with descriptions from the template."
     echo ""
     read -rp "Add a rule from a preset? (Y/n): " ADD_PRESET
     ADD_PRESET="${ADD_PRESET:-Y}"
@@ -1283,6 +1357,14 @@ step_done() {
     fi
     echo ""
 
+    # --- API key summary ---
+    echo -e "${CYAN}API Keys generated:${NC}"
+    echo -e "  ${GREEN}admin${NC}     data/admin_private.pem     Full access (manage signers, approve, CRUD rules)"
+    echo -e "  ${GREEN}dev${NC}       data/dev_private.pem       Sign, view requests, create/manage own rules"
+    echo -e "  ${GREEN}agent${NC}     data/agent_private.pem     AI agent (sign, create/manage own rules, read budgets)"
+    echo -e "  ${GREEN}strategy${NC}  data/strategy_private.pem  Strategy executor (sign, view own requests)"
+    echo ""
+
     # --- Add signer ---
     echo -e "${CYAN}Add a signer (after server is running):${NC}"
     echo ""
@@ -1307,6 +1389,11 @@ step_done() {
     fi
     echo ""
     echo "    Or set REMOTE_SIGNER_PRIVATE_KEY and omit -api-key-file. Then use Signers tab to add keystore or HD wallet."
+    echo ""
+    echo -e "  ${CYAN}Connect as other roles:${NC}"
+    echo "    remote-signer-tui -api-key-id dev      -api-key-file data/dev_private.pem      -url ${SCHEME}://localhost:${PORT}"
+    echo "    remote-signer-tui -api-key-id agent    -api-key-file data/agent_private.pem    -url ${SCHEME}://localhost:${PORT}"
+    echo "    remote-signer-tui -api-key-id strategy -api-key-file data/strategy_private.pem -url ${SCHEME}://localhost:${PORT}"
     echo ""
     if [ ! -x "$TUI_BIN" ]; then
         echo "  (No Go? Add signers via API instead — see docs/api.md)"
@@ -1578,7 +1665,10 @@ main() {
     # CLI tools (download or build) — before preset so remote-signer-cli is available
     step_ensure_cli_tools
 
-    # Step 5b: Optionally add rules from presets (interactive)
+    # Auto-apply agent preset (budget-controlled rules for agent key)
+    step_agent_preset
+
+    # Step 5b: Optionally add additional rules from presets (interactive)
     step_preset_rules
 
     # Step 6/6: Done

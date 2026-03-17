@@ -216,9 +216,11 @@ logger:
 # Each key has an Ed25519 public key stored here; the client keeps the private key.
 # Keys defined here will be synced to the database on startup.
 #
-# Admin vs Non-Admin Keys:
-#   - role: admin  -> Can approve requests, view/manage rules
-#   - role: dev -> Can only submit sign requests and view request status
+# RBAC Roles (4 roles):
+#   - role: admin     -> Full access: manage signers, approve requests, CRUD all rules/keys
+#   - role: dev       -> Sign, view all requests, create/manage own rules, read budgets/templates/presets/audit
+#   - role: agent     -> Sign, create/manage own rules (declarative), read budgets/templates/presets/signers
+#   - role: strategy  -> Sign, view own requests, read own signers (minimal permissions)
 #
 # IMPORTANT: Docker Deployment Note
 # When deploying with Docker, environment variable references (e.g., public_key_env: "VAR_NAME")
@@ -234,11 +236,11 @@ api_keys:
     enabled: true
     rate_limit: 1000
 
-  # Example 2: Non-admin application key (can only submit sign requests)
+  # Example 2: Dev application key (can only submit sign requests)
   - id: "my-app-key"
     name: "My Application"
     public_key_env: "MY_APP_PUBLIC_KEY"  # Read from .env or environment (hex or base64, auto-detected)
-    role: dev                          # Non-admin: cannot approve, view or manage rules
+    role: dev                          # Dev: submit sign requests and view own status
     enabled: true
     rate_limit: 100
     # Normal deployment: default false (explicit below). setup.sh uses true for local dev.
@@ -250,6 +252,26 @@ api_keys:
     #   - "0x1111111111111111111111111111111111111111"
     # allowed_hd_wallets: []             # Empty = no HD wallet access (unless allow_all_hd_wallets: true)
     #   - "0xABCD..."                    # Grants access to all derived addresses + derive permission
+
+  # Example 2b: Agent key (AI agent that can create/manage own rules + sign within budget)
+  # - id: "agent-key"
+  #   name: "AI Agent"
+  #   public_key_env: "AGENT_PUBLIC_KEY"
+  #   role: agent                        # Agent: sign, create/manage own rules, read budgets/templates/presets
+  #   enabled: true
+  #   rate_limit: 500
+  #   allow_all_signers: true
+  #   allow_all_hd_wallets: true
+
+  # Example 2c: Strategy key (minimal: sign requests + view own status only)
+  # - id: "strategy-key"
+  #   name: "Strategy Executor"
+  #   public_key_env: "STRATEGY_PUBLIC_KEY"
+  #   role: strategy                     # Strategy: sign requests, view own requests, read own signers
+  #   enabled: true
+  #   rate_limit: 200
+  #   allow_all_signers: true
+  #   allow_all_hd_wallets: true
 
   # Example 3: Direct public key in base64 format (for development/testing only)
   # - id: "dev-key"

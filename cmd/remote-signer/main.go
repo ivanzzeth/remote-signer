@@ -1157,6 +1157,12 @@ func buildIsolatedEngineForRule(ctx context.Context, allRulesMap map[types.RuleI
 	minimalRepo := storage.NewMemoryRuleRepository()
 	for _, r := range allRulesMap {
 		if r.Mode == types.RuleModeBlocklist {
+			// Skip evm_dynamic_blocklist — its evaluator depends on runtime DynamicBlocklist
+			// which is not available during startup validation. Including it would cause
+			// "no evaluator registered" errors in the isolated engine.
+			if r.Type == types.RuleTypeEVMDynamicBlocklist {
+				continue
+			}
 			if err := minimalRepo.Create(ctx, r); err != nil {
 				return nil, fmt.Errorf("add blocklist rule %s: %w", r.ID, err)
 			}
