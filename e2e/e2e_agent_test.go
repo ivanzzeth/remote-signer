@@ -45,6 +45,9 @@ func TestAgent_PresetApply(t *testing.T) {
 	require.Len(t, applyResp.Results, 15,
 		"agent preset should produce 15 rules (5 chains x 3 sub-rules)")
 
+	// Cleanup created rules
+	cleanupApplyResults(t, applyResp.Results)
+
 	// Verify each result has a valid rule with evm_js type (not template_bundle)
 	for _, result := range applyResp.Results {
 		assert.NotNil(t, result.Rule, "each result should have a rule")

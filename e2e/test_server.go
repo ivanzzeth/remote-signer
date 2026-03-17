@@ -662,7 +662,7 @@ func (ts *TestServer) createAPIKey(repo storage.APIKeyRepository) error {
 		ID:               ts.config.APIKeyID,
 		Name:             "E2E Test Admin API Key",
 		PublicKeyHex:     hex.EncodeToString(ts.config.APIKeyPublicKey),
-		RateLimit:        1000,
+		RateLimit:        10000, // high limit for e2e test suite
 		Role:             types.RoleAdmin,
 		AllowAllSigners:  true,
 		Enabled:          true,
@@ -681,7 +681,7 @@ func (ts *TestServer) createAPIKey(repo storage.APIKeyRepository) error {
 			Name:             "E2E Test Non-Admin API Key",
 			PublicKeyHex:     hex.EncodeToString(ts.config.NonAdminAPIKeyPublicKey),
 			RateLimit:        1000,
-			Role:             types.RoleAgent,
+			Role:             types.RoleStrategy, // strategy: can sign but cannot create/list rules or templates
 			AllowAllSigners:  true,
 			Enabled:          true,
 			CreatedAt:        time.Now(),
