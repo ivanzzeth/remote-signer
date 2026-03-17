@@ -510,7 +510,17 @@ step_api_keys() {
     API_KEY_ROLES=(admin dev agent strategy)
 
     REGENERATE_KEYS=true
-    if [ -f "$DATA_DIR/admin_private.pem" ] || [ -f "$DATA_DIR/admin_public.pem" ]; then
+    ADMIN_KEYSTORE_DIR="$DATA_DIR/apikeys"
+    # Check for existing keys: admin keystore or PEM
+    if [ -d "$ADMIN_KEYSTORE_DIR" ] && ls "$ADMIN_KEYSTORE_DIR"/ed25519--*.json >/dev/null 2>&1; then
+        echo -e "  ${YELLOW}Existing admin keystore found in $ADMIN_KEYSTORE_DIR/${NC}"
+        read -rp "  Regenerate keys? (y/N): " REGEN
+        if [[ ! "$REGEN" =~ ^[Yy]$ ]]; then
+            REGENERATE_KEYS=false
+            log_info "Using existing API keys (config will use these so TUI can connect)."
+        fi
+        echo ""
+    elif [ -f "$DATA_DIR/admin_private.pem" ] || [ -f "$DATA_DIR/admin_public.pem" ]; then
         echo -e "  ${YELLOW}Existing API keys found in $DATA_DIR/${NC}"
         read -rp "  Regenerate keys? (y/N): " REGEN
         if [[ ! "$REGEN" =~ ^[Yy]$ ]]; then
@@ -520,16 +530,53 @@ step_api_keys() {
         echo ""
     fi
 
+    # Generate admin key using encrypted keystore (if remote-signer-cli is available)
+    _generate_admin_keystore() {
+        if command -v remote-signer-cli &>/dev/null; then
+            log_info "Generating admin API key (encrypted keystore)..."
+            echo -e "  ${CYAN}You will be prompted for a password to encrypt the admin key.${NC}"
+            echo -e "  ${CYAN}Remember this password — you will need it to authenticate.${NC}"
+            echo ""
+            remote-signer-cli keystore create -d "$ADMIN_KEYSTORE_DIR" --label admin
+        else
+            log_warn "remote-signer-cli not found; falling back to PEM for admin key."
+            "$SCRIPT_DIR/generate-api-key.sh" -n admin -o "$DATA_DIR" -f > /dev/null 2>&1
+        fi
+    }
+
+    # Load admin public key from keystore or PEM
+    _load_admin_key() {
+        # Try keystore first
+        local ks_file
+        ks_file=$(ls "$ADMIN_KEYSTORE_DIR"/ed25519--*.json 2>/dev/null | head -1)
+        if [ -n "$ks_file" ] && command -v remote-signer-cli &>/dev/null; then
+            # Identifier in the keystore file is the Ed25519 public key hex
+            local identifier
+            identifier=$(remote-signer-cli keystore show -k "$ks_file" -o json 2>/dev/null | grep -o '"Identifier":"[^"]*"' | cut -d'"' -f4)
+            if [ -n "$identifier" ]; then
+                ADMIN_PUBLIC_KEY="$identifier"
+                ADMIN_KEYSTORE_FILE="$ks_file"
+                echo -e "  Key ID:      ${GREEN}admin${NC}"
+                echo -e "  Keystore:    ${DIM}$ks_file${NC}  (encrypted, keep password safe!)"
+                echo -e "  Public key:  ${DIM}$identifier${NC} (hex)"
+                echo ""
+                return
+            fi
+        fi
+        # Fallback to PEM
+        _load_role_key_pem admin
+    }
+
     if [ "$REGENERATE_KEYS" = true ]; then
-        for role in "${API_KEY_ROLES[@]}"; do
+        _generate_admin_keystore
+        for role in dev agent strategy; do
             log_info "Generating $role API key..."
             "$SCRIPT_DIR/generate-api-key.sh" -n "$role" -o "$DATA_DIR" -f > /dev/null 2>&1
         done
     fi
 
-    # Load public/private key values for each role (from newly generated or existing files)
-    # Helper: generate key if missing, then load
-    _load_role_key() {
+    # Load public/private key values for non-admin roles (PEM)
+    _load_role_key_pem() {
         local role="$1"
         if [ ! -f "$DATA_DIR/${role}_private.pem" ] || [ ! -f "$DATA_DIR/${role}_public.pem" ]; then
             log_info "Generating $role API key..."
@@ -551,8 +598,9 @@ step_api_keys() {
         echo ""
     }
 
-    for role in "${API_KEY_ROLES[@]}"; do
-        _load_role_key "$role"
+    _load_admin_key
+    for role in dev agent strategy; do
+        _load_role_key_pem "$role"
     done
 }
 

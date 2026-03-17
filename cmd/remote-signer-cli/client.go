@@ -8,20 +8,23 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/ivanzzeth/ethsig/keystore"
 	"github.com/ivanzzeth/remote-signer/pkg/client"
 	"github.com/spf13/cobra"
 )
 
 // Auth flag variables (bound to persistent flags on rootCmd)
 var (
-	flagURL           string
-	flagAPIKeyID      string
-	flagAPIKeyFile    string
-	flagTLSCA         string
-	flagTLSCert       string
-	flagTLSKey        string
-	flagTLSSkipVerify bool
-	flagOutputFormat  string
+	flagURL              string
+	flagAPIKeyID         string
+	flagAPIKeyFile       string
+	flagAPIKeyKeystore   string
+	flagAPIKeyPasswordEnv string
+	flagTLSCA            string
+	flagTLSCert          string
+	flagTLSKey           string
+	flagTLSSkipVerify    bool
+	flagOutputFormat     string
 )
 
 // registerAuthFlags adds persistent auth flags to the root command.
@@ -30,6 +33,8 @@ func registerAuthFlags(rootCmd *cobra.Command) {
 	pf.StringVar(&flagURL, "url", "https://localhost:8548", "Remote signer server URL")
 	pf.StringVar(&flagAPIKeyID, "api-key-id", "", "API key ID for authentication")
 	pf.StringVar(&flagAPIKeyFile, "api-key-file", "", "Path to Ed25519 private key PEM file")
+	pf.StringVar(&flagAPIKeyKeystore, "api-key-keystore", "", "Path to Ed25519 encrypted keystore file (mutually exclusive with --api-key-file)")
+	pf.StringVar(&flagAPIKeyPasswordEnv, "api-key-password-env", "", "Environment variable name containing the keystore password (for CI; default: interactive prompt)")
 	pf.StringVar(&flagTLSCA, "tls-ca", "", "CA certificate for TLS verification")
 	pf.StringVar(&flagTLSCert, "tls-cert", "", "Client certificate for mTLS")
 	pf.StringVar(&flagTLSKey, "tls-key", "", "Client key for mTLS")
@@ -42,13 +47,26 @@ func newClientFromFlags(cmd *cobra.Command) (*client.Client, error) {
 	if flagAPIKeyID == "" {
 		return nil, fmt.Errorf("--api-key-id is required")
 	}
-	if flagAPIKeyFile == "" {
-		return nil, fmt.Errorf("--api-key-file is required")
+	if flagAPIKeyFile != "" && flagAPIKeyKeystore != "" {
+		return nil, fmt.Errorf("--api-key-file and --api-key-keystore are mutually exclusive")
+	}
+	if flagAPIKeyFile == "" && flagAPIKeyKeystore == "" {
+		return nil, fmt.Errorf("one of --api-key-file or --api-key-keystore is required")
 	}
 
-	privKey, err := loadEd25519PrivateKey(flagAPIKeyFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load private key from %s: %w", flagAPIKeyFile, err)
+	var privKey ed25519.PrivateKey
+	if flagAPIKeyKeystore != "" {
+		key, err := loadEd25519FromKeystore(cmd, flagAPIKeyKeystore)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load key from keystore %s: %w", flagAPIKeyKeystore, err)
+		}
+		privKey = key
+	} else {
+		key, err := loadEd25519PrivateKey(flagAPIKeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load private key from %s: %w", flagAPIKeyFile, err)
+		}
+		privKey = key
 	}
 
 	cfg := client.Config{
@@ -62,6 +80,44 @@ func newClientFromFlags(cmd *cobra.Command) (*client.Client, error) {
 	}
 
 	return client.NewClient(cfg)
+}
+
+// loadEd25519FromKeystore decrypts an ethsig encrypted keystore to get the Ed25519 private key.
+func loadEd25519FromKeystore(cmd *cobra.Command, keystorePath string) (ed25519.PrivateKey, error) {
+	password, err := resolveKeystorePassword(cmd)
+	if err != nil {
+		return nil, fmt.Errorf("resolve keystore password: %w", err)
+	}
+	defer keystore.SecureZeroize(password)
+
+	seedBytes, err := keystore.ExportEnhancedKey(keystorePath, password, keystore.KeyFormatHex)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt keystore: %w", err)
+	}
+	defer keystore.SecureZeroize(seedBytes)
+
+	// seedBytes is hex-encoded; parse back to raw bytes
+	rawSeed, err := keystore.ParseKeyInput(seedBytes, keystore.KeyFormatHex, keystore.KeyTypeEd25519)
+	if err != nil {
+		return nil, fmt.Errorf("parse seed from keystore: %w", err)
+	}
+	defer keystore.SecureZeroize(rawSeed)
+
+	return ed25519.NewKeyFromSeed(rawSeed), nil
+}
+
+// resolveKeystorePassword gets the password from --api-key-password-env or interactive prompt.
+func resolveKeystorePassword(cmd *cobra.Command) ([]byte, error) {
+	if flagAPIKeyPasswordEnv != "" {
+		envVal := os.Getenv(flagAPIKeyPasswordEnv)
+		if envVal == "" {
+			return nil, fmt.Errorf("environment variable %s is empty or not set", flagAPIKeyPasswordEnv)
+		}
+		return []byte(envVal), nil
+	}
+
+	fmt.Fprint(os.Stderr, "Enter keystore password: ")
+	return keystore.ReadSecret(cmd.Context())
 }
 
 // loadEd25519PrivateKey reads a PEM file and extracts the Ed25519 private key.

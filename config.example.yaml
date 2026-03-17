@@ -288,14 +288,27 @@ api_keys:
   # Grant access to HD wallet primary address, and all derived addresses inherit access.
 
 # To generate an Ed25519 key pair:
-# 1. Using openssl (recommended):
+#
+# Option A: Encrypted keystore (recommended for admin keys):
+#    remote-signer-cli keystore create -d ./data/apikeys --label admin
+#    # The keystore file is encrypted with a password. The "Identifier" is the public key (hex).
+#    # Use with CLI: --api-key-keystore ./data/apikeys/ed25519--<pubkey>.json
+#    # Use with TUI: -api-key-keystore ./data/apikeys/ed25519--<pubkey>.json
+#    # For CI (non-interactive): --api-key-password-env MY_PASSWORD_VAR
+#    # Manage keystores:
+#    #   remote-signer-cli keystore list -d ./data/apikeys
+#    #   remote-signer-cli keystore show -k ./data/apikeys/ed25519--<pubkey>.json
+#    #   remote-signer-cli keystore verify -k ./data/apikeys/ed25519--<pubkey>.json
+#    #   remote-signer-cli keystore change-password -k ./data/apikeys/ed25519--<pubkey>.json
+#
+# Option B: Using openssl (PEM format):
 #    openssl genpkey -algorithm ed25519 -out private.pem
 #    openssl pkey -in private.pem -pubout -out public.pem
 #    # Extract base64 keys:
 #    openssl pkey -in private.pem -outform DER | base64        # private key (for TUI/client, keep secret!)
 #    openssl pkey -in public.pem -pubin -outform DER | base64  # public key (for public_key)
 #
-# 2. Using openssl (hex format):
+# Option C: Using openssl (hex format):
 #    openssl pkey -in private.pem -outform DER | tail -c 32 | xxd -p -c 64        # private key hex
 #    openssl pkey -in public.pem -pubin -outform DER | tail -c 32 | xxd -p -c 64  # public key hex
 

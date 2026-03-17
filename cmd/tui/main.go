@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/x509"
 	"encoding/base64"
@@ -16,6 +17,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"golang.org/x/term"
 
+	"github.com/ivanzzeth/ethsig/keystore"
 	"github.com/ivanzzeth/remote-signer/pkg/client"
 	"github.com/ivanzzeth/remote-signer/tui"
 )
@@ -23,15 +25,23 @@ import (
 func main() {
 	// Parse flags
 	var (
-		baseURL       = flag.String("url", "https://localhost:8548", "Remote signer service URL")
-		apiKeyID      = flag.String("api-key-id", "", "API key ID for authentication")
-		apiKeyFile    = flag.String("api-key-file", "", "Path to API key PEM file (e.g. data/admin_private.pem); avoids paste")
-		tlsCA         = flag.String("tls-ca", "", "Path to CA certificate to verify server (for HTTPS)")
-		tlsCert       = flag.String("tls-cert", "", "Path to client certificate (for mTLS)")
-		tlsKey        = flag.String("tls-key", "", "Path to client private key (for mTLS)")
-		tlsSkipVerify = flag.Bool("tls-skip-verify", false, "Skip server certificate verification (insecure, testing only)")
+		baseURL          = flag.String("url", "https://localhost:8548", "Remote signer service URL")
+		apiKeyID         = flag.String("api-key-id", "", "API key ID for authentication")
+		apiKeyFile       = flag.String("api-key-file", "", "Path to API key PEM file (e.g. data/admin_private.pem); avoids paste")
+		apiKeyKeystore   = flag.String("api-key-keystore", "", "Path to Ed25519 encrypted keystore file (mutually exclusive with -api-key-file)")
+		apiKeyPasswordEnv = flag.String("api-key-password-env", "", "Environment variable name containing the keystore password (for CI)")
+		tlsCA            = flag.String("tls-ca", "", "Path to CA certificate to verify server (for HTTPS)")
+		tlsCert          = flag.String("tls-cert", "", "Path to client certificate (for mTLS)")
+		tlsKey           = flag.String("tls-key", "", "Path to client private key (for mTLS)")
+		tlsSkipVerify    = flag.Bool("tls-skip-verify", false, "Skip server certificate verification (insecure, testing only)")
 	)
 	flag.Parse()
+
+	// Validate mutually exclusive flags
+	if *apiKeyFile != "" && *apiKeyKeystore != "" {
+		fmt.Fprintln(os.Stderr, "Error: -api-key-file and -api-key-keystore are mutually exclusive.")
+		os.Exit(1)
+	}
 
 	// Validate required parameters
 	if *apiKeyID == "" {
@@ -42,17 +52,34 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Resolve private key: api-key-file > env var > interactive prompt
-	var privateKey string
-	if *apiKeyFile != "" {
+	// Build client config
+	cfg := client.Config{
+		BaseURL:       *baseURL,
+		APIKeyID:      *apiKeyID,
+		TLSSkipVerify: *tlsSkipVerify,
+	}
+
+	// Resolve private key: keystore > api-key-file > env var > interactive prompt
+	if *apiKeyKeystore != "" {
+		privKey, err := loadPrivateKeyFromKeystore(*apiKeyKeystore, *apiKeyPasswordEnv)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error loading key from keystore: %v\n", err)
+			os.Exit(1)
+		}
+		cfg.PrivateKey = privKey
+	} else if *apiKeyFile != "" {
 		key, err := loadPrivateKeyFromFile(*apiKeyFile)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error loading API key from file: %v\n", err)
 			os.Exit(1)
 		}
-		privateKey = key
+		if isHexKey(key) {
+			cfg.PrivateKeyHex = key
+		} else {
+			cfg.PrivateKeyBase64 = key
+		}
 	} else {
-		privateKey = os.Getenv("REMOTE_SIGNER_PRIVATE_KEY")
+		privateKey := os.Getenv("REMOTE_SIGNER_PRIVATE_KEY")
 		if privateKey == "" {
 			key, err := readPrivateKeyFromPrompt()
 			if err != nil {
@@ -60,6 +87,11 @@ func main() {
 				os.Exit(1)
 			}
 			privateKey = key
+		}
+		if isHexKey(privateKey) {
+			cfg.PrivateKeyHex = privateKey
+		} else {
+			cfg.PrivateKeyBase64 = privateKey
 		}
 	}
 
@@ -69,6 +101,7 @@ func main() {
 	if *baseURL == "" {
 		*baseURL = "https://localhost:8548"
 	}
+	cfg.BaseURL = *baseURL
 
 	// TLS: env then defaults for HTTPS. When URL is https:// and no TLS flags/env set, use certs/ in current directory (same layout as scripts/gen-certs.sh: ca.crt, client.crt, client.key).
 	if *tlsCA == "" {
@@ -87,22 +120,11 @@ func main() {
 	}
 	if !*tlsSkipVerify && os.Getenv("REMOTE_SIGNER_TLS_SKIP_VERIFY") == "1" {
 		*tlsSkipVerify = true
+		cfg.TLSSkipVerify = true
 	}
-
-	// Detect key format: hex (64+ hex chars) or base64
-	cfg := client.Config{
-		BaseURL:       *baseURL,
-		APIKeyID:      *apiKeyID,
-		TLSCAFile:     *tlsCA,
-		TLSCertFile:   *tlsCert,
-		TLSKeyFile:    *tlsKey,
-		TLSSkipVerify: *tlsSkipVerify,
-	}
-	if isHexKey(privateKey) {
-		cfg.PrivateKeyHex = privateKey
-	} else {
-		cfg.PrivateKeyBase64 = privateKey
-	}
+	cfg.TLSCAFile = *tlsCA
+	cfg.TLSCertFile = *tlsCert
+	cfg.TLSKeyFile = *tlsKey
 
 	// Create client
 	c, err := client.NewClient(cfg)
@@ -124,6 +146,40 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// loadPrivateKeyFromKeystore decrypts an ethsig encrypted keystore and returns the Ed25519 private key.
+func loadPrivateKeyFromKeystore(keystorePath, passwordEnvVar string) (ed25519.PrivateKey, error) {
+	var password []byte
+	if passwordEnvVar != "" {
+		envVal := os.Getenv(passwordEnvVar)
+		if envVal == "" {
+			return nil, fmt.Errorf("environment variable %s is empty or not set", passwordEnvVar)
+		}
+		password = []byte(envVal)
+	} else {
+		fmt.Fprint(os.Stderr, "Enter keystore password: ")
+		pw, err := keystore.ReadSecret(context.Background())
+		if err != nil {
+			return nil, fmt.Errorf("read password: %w", err)
+		}
+		password = pw
+	}
+	defer keystore.SecureZeroize(password)
+
+	seedBytes, err := keystore.ExportEnhancedKey(keystorePath, password, keystore.KeyFormatHex)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt keystore: %w", err)
+	}
+	defer keystore.SecureZeroize(seedBytes)
+
+	rawSeed, err := keystore.ParseKeyInput(seedBytes, keystore.KeyFormatHex, keystore.KeyTypeEd25519)
+	if err != nil {
+		return nil, fmt.Errorf("parse seed: %w", err)
+	}
+	defer keystore.SecureZeroize(rawSeed)
+
+	return ed25519.NewKeyFromSeed(rawSeed), nil
 }
 
 // loadPrivateKeyFromFile reads an Ed25519 private key from a PEM file (e.g. data/admin_private.pem).

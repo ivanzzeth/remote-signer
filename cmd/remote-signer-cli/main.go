@@ -57,6 +57,7 @@ func init() {
 	rootCmd.AddCommand(presetCmd)
 	rootCmd.AddCommand(validateCmd)
 	rootCmd.AddCommand(tuiCmd)
+	rootCmd.AddCommand(keystoreCmd)
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(healthCmd)
 }

@@ -30,9 +30,9 @@ func runMigrations(db *gorm.DB, dsn string) error {
 		embedPath = "migrations/postgres"
 	case "sqlite", "sqlite3":
 		// golang-migrate sqlite3 driver expects "sqlite3://<path>?query".
-		// GORM sqlite DSN uses "file:./path?params" but golang-migrate
-		// cannot parse "sqlite3://file:./path" (treats "file" as host).
-		// Strip "file:" prefix and pass just the path+query.
+		// GORM sqlite DSN uses "file:./path?params" or "file::memory:?cache=shared".
+		// Strip "file:" prefix so golang-migrate doesn't treat "file" as host.
+		// For in-memory DBs (":memory:" or "::memory:"), keep as-is after stripping "file:".
 		cleaned := dsn
 		if strings.HasPrefix(cleaned, "file:") {
 			cleaned = strings.TrimPrefix(cleaned, "file:")
