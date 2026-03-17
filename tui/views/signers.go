@@ -1025,34 +1025,14 @@ func (m *SignersModel) renderHDDeriveIndex(content *strings.Builder) {
 	content.WriteString(styles.MutedColor.Render("Enter: derive | Esc: cancel"))
 }
 
-// hasAccessColumn returns true if any signer has AllowedKeys (admin view).
-func (m *SignersModel) hasAccessColumn() bool {
+// hasOwnerColumn returns true if any signer has ownership info.
+func (m *SignersModel) hasOwnerColumn() bool {
 	for _, s := range m.signers {
-		if len(s.AllowedKeys) > 0 {
+		if s.OwnerID != "" {
 			return true
 		}
 	}
 	return false
-}
-
-// formatAccessColumn formats the AllowedKeys list into a short display string.
-func formatAccessColumn(keys []evm.AllowedKeyInfo) string {
-	if len(keys) == 0 {
-		return "-"
-	}
-	const maxShow = 2
-	names := make([]string, 0, maxShow)
-	for i, k := range keys {
-		if i >= maxShow {
-			break
-		}
-		names = append(names, k.Name)
-	}
-	result := strings.Join(names, ", ")
-	if len(keys) > maxShow {
-		result += fmt.Sprintf(" (+%d)", len(keys)-maxShow)
-	}
-	return result
 }
 
 func (m *SignersModel) renderSigners() string {
@@ -1073,10 +1053,10 @@ func (m *SignersModel) renderSigners() string {
 	}
 
 	// Table header
-	showAccess := m.hasAccessColumn()
-	if showAccess {
-		headerRow := fmt.Sprintf("%-44s  %-14s  %-14s  %-8s  %-30s",
-			"Address", "Type", "Status", "Enabled", "Access")
+	showOwner := m.hasOwnerColumn()
+	if showOwner {
+		headerRow := fmt.Sprintf("%-44s  %-14s  %-14s  %-8s  %-20s",
+			"Address", "Type", "Status", "Enabled", "Owner")
 		content.WriteString(styles.TableHeaderStyle.Render(headerRow))
 	} else {
 		headerRow := fmt.Sprintf("%-44s  %-14s  %-14s  %-8s",
@@ -1091,7 +1071,7 @@ func (m *SignersModel) renderSigners() string {
 		content.WriteString(styles.MutedColor.Render("  No signers found"))
 	} else {
 		for i, signer := range m.signers {
-			row := m.renderSignerRow(signer, i == m.selectedIdx, showAccess)
+			row := m.renderSignerRow(signer, i == m.selectedIdx, showOwner)
 			content.WriteString(row)
 			content.WriteString("\n")
 		}
@@ -1135,7 +1115,7 @@ func (m *SignersModel) IsCapturingInput() bool {
 	return m.showCreate || m.showFilter || m.showUnlock
 }
 
-func (m *SignersModel) renderSignerRow(signer evm.Signer, selected bool, showAccess bool) string {
+func (m *SignersModel) renderSignerRow(signer evm.Signer, selected bool, showOwner bool) string {
 	// Format address
 	address := signer.Address
 	if len(address) > 44 {
@@ -1161,18 +1141,21 @@ func (m *SignersModel) renderSignerRow(signer evm.Signer, selected bool, showAcc
 		}
 	}
 
-	accessStr := ""
-	if showAccess {
-		accessStr = formatAccessColumn(signer.AllowedKeys)
+	ownerStr := ""
+	if showOwner {
+		ownerStr = signer.OwnerID
+		if ownerStr == "" {
+			ownerStr = "-"
+		}
 	}
 
-	if showAccess {
-		row := fmt.Sprintf("%-44s  %-14s  %-14s  %-8s  %-30s",
+	if showOwner {
+		row := fmt.Sprintf("%-44s  %-14s  %-14s  %-8s  %-20s",
 			address,
 			signer.Type,
 			status,
 			enabled,
-			accessStr,
+			ownerStr,
 		)
 		if selected {
 			return styles.TableSelectedRowStyle.Render(row)
@@ -1215,13 +1198,13 @@ func (m *SignersModel) renderSignerRow(signer evm.Signer, selected bool, showAcc
 	}
 	enabledPart := enabledStyle.Render(fmt.Sprintf("%-8s", enabled))
 
-	if showAccess {
-		row := fmt.Sprintf("%-44s  %s  %s  %s  %-30s",
+	if showOwner {
+		row := fmt.Sprintf("%-44s  %s  %s  %s  %-20s",
 			address,
 			typePart,
 			statusPart,
 			enabledPart,
-			accessStr,
+			ownerStr,
 		)
 		return styles.TableRowStyle.Render(row)
 	}

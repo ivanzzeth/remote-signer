@@ -159,44 +159,14 @@ func (m *SignerDetailModel) renderDetail() string {
 		content.WriteString(fmt.Sprintf("%s %s\n", keyStr, valueStr))
 	}
 
-	// Access Control section (only when AllowedKeys is present)
-	if len(m.signer.AllowedKeys) > 0 {
+	// Ownership section
+	if m.signer.OwnerID != "" {
 		content.WriteString("\n")
-		content.WriteString(styles.SubtitleStyle.Render("Access Control"))
+		content.WriteString(styles.SubtitleStyle.Render("Ownership"))
 		content.WriteString("\n")
-		content.WriteString(styles.MutedColor.Render(
-			fmt.Sprintf("%d API key(s) have access to this signer", len(m.signer.AllowedKeys)),
-		))
-		content.WriteString("\n\n")
-
-		// Table header
-		headerRow := fmt.Sprintf("  %-20s  %-20s  %-14s", "Key Name", "Key ID", "Access")
-		content.WriteString(styles.TableHeaderStyle.Render(headerRow))
+		ownerLine := fmt.Sprintf("  Owner: %s  Status: %s", m.signer.OwnerID, m.signer.Status)
+		content.WriteString(styles.TableRowStyle.Render(ownerLine))
 		content.WriteString("\n")
-
-		// Table rows
-		for _, k := range m.signer.AllowedKeys {
-			accessStr := k.AccessType
-			switch accessStr {
-			case "unrestricted":
-				accessStr = "all signers"
-			case "hd_wallet":
-				accessStr = "via HD wallet"
-			}
-
-			name := k.Name
-			if len(name) > 20 {
-				name = name[:17] + "..."
-			}
-			id := k.ID
-			if len(id) > 20 {
-				id = id[:17] + "..."
-			}
-
-			row := fmt.Sprintf("  %-20s  %-20s  %-14s", name, id, accessStr)
-			content.WriteString(styles.TableRowStyle.Render(row))
-			content.WriteString("\n")
-		}
 	}
 
 	// Set content in viewport
@@ -215,7 +185,7 @@ func (m *SignerDetailModel) renderDetail() string {
 
 	// Footer with scroll info and help
 	scrollInfo := fmt.Sprintf("(%d%% scrolled)", int(m.viewport.ScrollPercent()*100))
-	helpText := "j/k: scroll | Esc: back"
+	helpText := "j/k: scroll | Esc: back | CLI: signer access grant/revoke/list"
 	view.WriteString(styles.HelpStyle.Render(fmt.Sprintf("%s  %s", scrollInfo, helpText)))
 
 	return view.String()

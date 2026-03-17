@@ -20,48 +20,33 @@ var apiKeyIDPattern = regexp.MustCompile(`^[a-zA-Z0-9-]+$`)
 
 // APIKeyResponse represents an API key in API responses.
 type APIKeyResponse struct {
-	ID                string             `json:"id"`
-	Name              string             `json:"name"`
-	Source            string             `json:"source"`
-	Role              types.APIKeyRole   `json:"role"`
-	Enabled           bool               `json:"enabled"`
-	RateLimit         int                `json:"rate_limit"`
-	AllowAllSigners   bool               `json:"allow_all_signers"`
-	AllowAllHDWallets bool               `json:"allow_all_hd_wallets"`
-	AllowedSigners    []string           `json:"allowed_signers,omitempty"`
-	AllowedHDWallets  []string           `json:"allowed_hd_wallets,omitempty"`
-	AllowedChainTypes []string           `json:"allowed_chain_types,omitempty"`
-	CreatedAt         time.Time          `json:"created_at"`
-	UpdatedAt         time.Time          `json:"updated_at"`
-	LastUsedAt        *time.Time         `json:"last_used_at,omitempty"`
-	ExpiresAt         *time.Time         `json:"expires_at,omitempty"`
+	ID         string           `json:"id"`
+	Name       string           `json:"name"`
+	Source     string           `json:"source"`
+	Role       types.APIKeyRole `json:"role"`
+	Enabled    bool             `json:"enabled"`
+	RateLimit  int              `json:"rate_limit"`
+	CreatedAt  time.Time        `json:"created_at"`
+	UpdatedAt  time.Time        `json:"updated_at"`
+	LastUsedAt *time.Time       `json:"last_used_at,omitempty"`
+	ExpiresAt  *time.Time       `json:"expires_at,omitempty"`
 }
 
 // CreateAPIKeyRequest represents the request to create an API key.
 type CreateAPIKeyRequest struct {
-	ID                string   `json:"id"`
-	Name              string   `json:"name"`
-	PublicKey         string   `json:"public_key"` // Ed25519 public key, hex or base64 DER
-	Role              string   `json:"role"`       // admin, dev, agent, strategy
-	RateLimit         int      `json:"rate_limit,omitempty"` // default 100
-	AllowAllSigners   bool     `json:"allow_all_signers"`
-	AllowAllHDWallets bool     `json:"allow_all_hd_wallets"`
-	AllowedSigners    []string `json:"allowed_signers,omitempty"`
-	AllowedHDWallets  []string `json:"allowed_hd_wallets,omitempty"`
-	AllowedChainTypes []string `json:"allowed_chain_types,omitempty"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	PublicKey string `json:"public_key"` // Ed25519 public key, hex or base64 DER
+	Role      string `json:"role"`       // admin, dev, agent, strategy
+	RateLimit int    `json:"rate_limit,omitempty"` // default 100
 }
 
 // UpdateAPIKeyRequest represents the request to update an API key.
 type UpdateAPIKeyRequest struct {
-	Name              *string  `json:"name,omitempty"`
-	Enabled           *bool    `json:"enabled,omitempty"`
-	Role              *string  `json:"role,omitempty"` // admin, dev, agent, strategy
-	RateLimit         *int     `json:"rate_limit,omitempty"`
-	AllowAllSigners   *bool    `json:"allow_all_signers,omitempty"`
-	AllowAllHDWallets *bool    `json:"allow_all_hd_wallets,omitempty"`
-	AllowedSigners    []string `json:"allowed_signers,omitempty"`
-	AllowedHDWallets  []string `json:"allowed_hd_wallets,omitempty"`
-	AllowedChainTypes []string `json:"allowed_chain_types,omitempty"`
+	Name      *string `json:"name,omitempty"`
+	Enabled   *bool   `json:"enabled,omitempty"`
+	Role      *string `json:"role,omitempty"` // admin, dev, agent, strategy
+	RateLimit *int    `json:"rate_limit,omitempty"`
 }
 
 // ListAPIKeysResponse represents the response for listing API keys.
@@ -280,29 +265,14 @@ func (h *APIKeyHandler) createAPIKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate array sizes
-	if len(req.AllowedSigners) > 100 {
-		h.writeError(w, "allowed_signers exceeds maximum of 100 entries", http.StatusBadRequest)
-		return
-	}
-	if len(req.AllowedHDWallets) > 100 {
-		h.writeError(w, "allowed_hd_wallets exceeds maximum of 100 entries", http.StatusBadRequest)
-		return
-	}
-
 	key := &types.APIKey{
-		ID:                req.ID,
-		Name:              req.Name,
-		PublicKeyHex:      req.PublicKey,
-		Role:              types.APIKeyRole(req.Role),
-		RateLimit:         rateLimit,
-		AllowAllSigners:   req.AllowAllSigners,
-		AllowAllHDWallets: req.AllowAllHDWallets,
-		AllowedSigners:    req.AllowedSigners,
-		AllowedHDWallets:  req.AllowedHDWallets,
-		AllowedChainTypes: req.AllowedChainTypes,
-		Enabled:           true,
-		Source:            types.APIKeySourceAPI,
+		ID:           req.ID,
+		Name:         req.Name,
+		PublicKeyHex: req.PublicKey,
+		Role:         types.APIKeyRole(req.Role),
+		RateLimit:    rateLimit,
+		Enabled:      true,
+		Source:       types.APIKeySourceAPI,
 	}
 
 	if err := h.repo.Create(r.Context(), key); err != nil {
@@ -396,21 +366,6 @@ func (h *APIKeyHandler) updateAPIKey(w http.ResponseWriter, r *http.Request, id 
 			return
 		}
 		key.RateLimit = *req.RateLimit
-	}
-	if req.AllowAllSigners != nil {
-		key.AllowAllSigners = *req.AllowAllSigners
-	}
-	if req.AllowAllHDWallets != nil {
-		key.AllowAllHDWallets = *req.AllowAllHDWallets
-	}
-	if req.AllowedSigners != nil {
-		key.AllowedSigners = req.AllowedSigners
-	}
-	if req.AllowedHDWallets != nil {
-		key.AllowedHDWallets = req.AllowedHDWallets
-	}
-	if req.AllowedChainTypes != nil {
-		key.AllowedChainTypes = req.AllowedChainTypes
 	}
 
 	if err := h.repo.Update(r.Context(), key); err != nil {
@@ -522,30 +477,18 @@ func (h *APIKeyHandler) deleteAPIKey(w http.ResponseWriter, r *http.Request, id 
 // toAPIKeyResponse converts a types.APIKey to an APIKeyResponse.
 // Never includes PublicKeyHex for security.
 func toAPIKeyResponse(key *types.APIKey) APIKeyResponse {
-	resp := APIKeyResponse{
-		ID:                key.ID,
-		Name:              key.Name,
-		Source:            key.Source,
-		Role:              key.Role,
-		Enabled:           key.Enabled,
-		RateLimit:         key.RateLimit,
-		AllowAllSigners:   key.AllowAllSigners,
-		AllowAllHDWallets: key.AllowAllHDWallets,
-		CreatedAt:         key.CreatedAt,
-		UpdatedAt:         key.UpdatedAt,
-		LastUsedAt:        key.LastUsedAt,
-		ExpiresAt:         key.ExpiresAt,
+	return APIKeyResponse{
+		ID:         key.ID,
+		Name:       key.Name,
+		Source:     key.Source,
+		Role:       key.Role,
+		Enabled:    key.Enabled,
+		RateLimit:  key.RateLimit,
+		CreatedAt:  key.CreatedAt,
+		UpdatedAt:  key.UpdatedAt,
+		LastUsedAt: key.LastUsedAt,
+		ExpiresAt:  key.ExpiresAt,
 	}
-	if len(key.AllowedSigners) > 0 {
-		resp.AllowedSigners = key.AllowedSigners
-	}
-	if len(key.AllowedHDWallets) > 0 {
-		resp.AllowedHDWallets = key.AllowedHDWallets
-	}
-	if len(key.AllowedChainTypes) > 0 {
-		resp.AllowedChainTypes = key.AllowedChainTypes
-	}
-	return resp
 }
 
 // writeJSON writes a JSON response.

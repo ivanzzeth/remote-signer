@@ -12,32 +12,35 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/audit"
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
+	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/secure"
-	"github.com/ivanzzeth/remote-signer/internal/storage"
 	"github.com/ivanzzeth/remote-signer/internal/validate"
 )
 
 // SignerHandler handles signer management endpoints
 type SignerHandler struct {
 	signerManager evm.SignerManager
-	apiKeyRepo    storage.APIKeyRepository // nil = no filtering/enrichment
-	readOnly      bool                     // when true, block signer creation via API
+	accessService *service.SignerAccessService
+	readOnly      bool // when true, block signer creation via API
 	logger        *slog.Logger
 	auditLogger   *audit.AuditLogger // optional: audit logging
 }
 
 // NewSignerHandler creates a new signer handler
-func NewSignerHandler(signerManager evm.SignerManager, apiKeyRepo storage.APIKeyRepository, logger *slog.Logger, readOnly bool) (*SignerHandler, error) {
+func NewSignerHandler(signerManager evm.SignerManager, accessService *service.SignerAccessService, logger *slog.Logger, readOnly bool) (*SignerHandler, error) {
 	if signerManager == nil {
 		return nil, fmt.Errorf("signer manager is required")
+	}
+	if accessService == nil {
+		return nil, fmt.Errorf("access service is required")
 	}
 	if logger == nil {
 		return nil, fmt.Errorf("logger is required")
 	}
 	return &SignerHandler{
 		signerManager: signerManager,
-		apiKeyRepo:    apiKeyRepo,
+		accessService: accessService,
 		readOnly:      readOnly,
 		logger:        logger,
 	}, nil
@@ -48,21 +51,15 @@ func (h *SignerHandler) SetAuditLogger(al *audit.AuditLogger) {
 	h.auditLogger = al
 }
 
-// AllowedKeyInfo represents an API key that has access to a signer
-type AllowedKeyInfo struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	AccessType string `json:"access_type"` // "unrestricted" or "explicit"
-}
-
 // SignerResponse represents a signer in API responses
 type SignerResponse struct {
-	Address     string           `json:"address"`
-	Type        string           `json:"type"`
-	Enabled     bool             `json:"enabled"`
-	Locked      bool             `json:"locked"`
-	UnlockedAt  *time.Time       `json:"unlocked_at,omitempty"`
-	AllowedKeys []AllowedKeyInfo `json:"allowed_keys,omitempty"`
+	Address    string     `json:"address"`
+	Type       string     `json:"type"`
+	Enabled    bool       `json:"enabled"`
+	Locked     bool       `json:"locked"`
+	UnlockedAt *time.Time `json:"unlocked_at,omitempty"`
+	OwnerID    string     `json:"owner_id,omitempty"`
+	Status     string     `json:"status,omitempty"` // ownership status: active, pending_approval
 }
 
 // UnlockSignerRequest represents the request to unlock a locked signer
@@ -95,28 +92,20 @@ type CreateSignerResponse struct {
 	Enabled bool   `json:"enabled"`
 }
 
-// allowedKeysData holds precomputed access data for admin enrichment.
-type allowedKeysData struct {
-	unrestricted   []AllowedKeyInfo            // keys with empty AllowedSigners (access all)
-	explicitAccess map[string][]AllowedKeyInfo // lowercase address -> keys with explicit access
+// GrantAccessRequest represents the request to grant access to a signer.
+type GrantAccessRequest struct {
+	APIKeyID string `json:"api_key_id"`
 }
 
-// keysForSigner returns the combined AllowedKeyInfo for a given signer address.
-func (d *allowedKeysData) keysForSigner(address string) []AllowedKeyInfo {
-	lower := strings.ToLower(address)
-	explicit := d.explicitAccess[lower]
-	if len(d.unrestricted) == 0 && len(explicit) == 0 {
-		return nil
-	}
-	result := make([]AllowedKeyInfo, 0, len(d.unrestricted)+len(explicit))
-	result = append(result, d.unrestricted...)
-	result = append(result, explicit...)
-	return result
+// SignerAccessResponse represents an access grant entry.
+type SignerAccessResponse struct {
+	APIKeyID  string    `json:"api_key_id"`
+	GrantedBy string    `json:"granted_by"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // ServeHTTP handles /api/v1/evm/signers
 func (h *SignerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Get API key from context
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
 		h.writeError(w, "unauthorized", http.StatusUnauthorized)
@@ -127,12 +116,6 @@ func (h *SignerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		h.listSigners(w, r)
 	case http.MethodPost:
-		// Create requires PermCreateSigners (admin only); RBAC middleware handles route-level
-		// check, but POST shares the same route as GET so we check here.
-		if !apiKey.IsAdmin() {
-			h.writeError(w, "admin access required", http.StatusForbidden)
-			return
-		}
 		h.createSigner(w, r)
 	default:
 		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -140,16 +123,15 @@ func (h *SignerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // listSigners handles GET /api/v1/evm/signers
+// All roles see only signers they own or have been granted access to.
 func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
-
 	apiKey := middleware.GetAPIKey(r.Context())
 
 	// Parse filter parameters
 	requestedOffset := 0
-	requestedLimit := 20 // Default limit
+	requestedLimit := 20
 
-	// Parse type filter (strict: unknown type returns 400)
 	var signerType *types.SignerType
 	if typeStr := query.Get("type"); typeStr != "" {
 		if !validate.IsValidSignerType(typeStr) {
@@ -160,7 +142,6 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 		signerType = &st
 	}
 
-	// Parse offset
 	if offsetStr := query.Get("offset"); offsetStr != "" {
 		offset, err := strconv.Atoi(offsetStr)
 		if err != nil || offset < 0 {
@@ -170,7 +151,6 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 		requestedOffset = offset
 	}
 
-	// Parse limit
 	if limitStr := query.Get("limit"); limitStr != "" {
 		limit, err := strconv.Atoi(limitStr)
 		if err != nil || limit < 0 {
@@ -178,30 +158,17 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if limit > 100 {
-			limit = 100 // Max limit
+			limit = 100
 		}
 		requestedLimit = limit
 	}
 
-	// Determine if non-admin filtering is needed.
-	// Agent keys always get filtered to their explicit allowed_signers/hd_wallets only
-	// (allow_all_signers is ignored for agent keys to enforce "own signers" restriction).
-	needsFiltering := apiKey != nil && !apiKey.IsAdmin() &&
-		(apiKey.IsAgent() || len(apiKey.AllowedSigners) > 0 || len(apiKey.AllowedHDWallets) > 0)
-
+	// Get all signers from manager
 	filter := types.SignerFilter{
-		Type: signerType,
+		Type:   signerType,
+		Offset: 0,
+		Limit:  100000,
 	}
-
-	if needsFiltering {
-		// Fetch all signers (ignoring pagination) so we can filter client-side
-		filter.Offset = 0
-		filter.Limit = 10000
-	} else {
-		filter.Offset = requestedOffset
-		filter.Limit = requestedLimit
-	}
-
 	result, err := h.signerManager.ListSigners(r.Context(), filter)
 	if err != nil {
 		h.logger.Error("failed to list signers", slog.String("error", err.Error()))
@@ -209,63 +176,67 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Apply non-admin filtering (includes HD wallet derived addresses)
+	// Build allowed addresses set from ownership + access
+	ownedAddrs, err := h.accessService.GetOwnedAddresses(r.Context(), apiKey.ID)
+	if err != nil {
+		h.logger.Error("failed to get owned addresses", slog.String("error", err.Error()))
+		h.writeError(w, "failed to list signers", http.StatusInternalServerError)
+		return
+	}
+	grantedAddrs, err := h.accessService.GetAccessibleAddresses(r.Context(), apiKey.ID)
+	if err != nil {
+		h.logger.Error("failed to get accessible addresses", slog.String("error", err.Error()))
+		h.writeError(w, "failed to list signers", http.StatusInternalServerError)
+		return
+	}
+
+	allowedSet := make(map[string]bool)
+	for _, a := range ownedAddrs {
+		allowedSet[strings.ToLower(a)] = true
+	}
+	for _, a := range grantedAddrs {
+		allowedSet[strings.ToLower(a)] = true
+	}
+
+	// Also include HD wallet derived addresses whose parent is allowed
+	if h.signerManager != nil {
+		hdMgr, hdErr := h.signerManager.HDWalletManager()
+		if hdErr == nil && hdMgr != nil {
+			for _, primary := range hdMgr.ListPrimaryAddresses() {
+				if allowedSet[strings.ToLower(primary)] {
+					derived, dErr := hdMgr.ListDerivedAddresses(primary)
+					if dErr == nil {
+						for _, d := range derived {
+							allowedSet[strings.ToLower(d.Address)] = true
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Filter signers by allowed set
 	var filteredSigners []types.SignerInfo
-	if needsFiltering {
-		var hdMgr middleware.HDWalletDerivedLister
-		if h.signerManager != nil {
-			var hdErr error
-			hdMgr, hdErr = h.signerManager.HDWalletManager()
-			if hdErr != nil {
-				h.logger.Warn("failed to get HD wallet manager for permission check", "error", hdErr)
-			}
+	for _, s := range result.Signers {
+		if allowedSet[strings.ToLower(s.Address)] {
+			filteredSigners = append(filteredSigners, s)
 		}
-		for _, s := range result.Signers {
-			if apiKey.IsAgent() {
-				// Agent keys: strict filtering using explicit allowed_signers only
-				// (ignore allow_all_signers/allow_all_hd_wallets)
-				if middleware.CheckSignerPermissionExplicit(apiKey, s.Address, hdMgr) {
-					filteredSigners = append(filteredSigners, s)
-				}
-			} else {
-				if middleware.CheckSignerPermissionWithHDWallets(apiKey, s.Address, hdMgr) {
-					filteredSigners = append(filteredSigners, s)
-				}
-			}
-		}
+	}
+
+	total := len(filteredSigners)
+	// Apply manual pagination
+	if requestedOffset >= len(filteredSigners) {
+		filteredSigners = nil
 	} else {
-		filteredSigners = result.Signers
-	}
-
-	// Calculate total and apply manual pagination for filtered results
-	total := result.Total
-	hasMore := result.HasMore
-	if needsFiltering {
-		total = len(filteredSigners)
-		// Apply manual pagination
-		if requestedOffset >= len(filteredSigners) {
-			filteredSigners = nil
-		} else {
-			end := requestedOffset + requestedLimit
-			if end > len(filteredSigners) {
-				end = len(filteredSigners)
-			}
-			filteredSigners = filteredSigners[requestedOffset:end]
+		end := requestedOffset + requestedLimit
+		if end > len(filteredSigners) {
+			end = len(filteredSigners)
 		}
-		hasMore = requestedOffset+requestedLimit < total
+		filteredSigners = filteredSigners[requestedOffset:end]
 	}
+	hasMore := requestedOffset+requestedLimit < total
 
-	// Build admin enrichment data
-	var accessData *allowedKeysData
-	if apiKey != nil && apiKey.IsAdmin() && h.apiKeyRepo != nil {
-		accessData, err = h.buildAllowedKeysData(r)
-		if err != nil {
-			h.logger.Error("failed to build allowed keys data", slog.String("error", err.Error()))
-			// Non-fatal: continue without enrichment
-		}
-	}
-
-	// Convert to response
+	// Convert to response with ownership info
 	signers := make([]SignerResponse, len(filteredSigners))
 	for i, s := range filteredSigners {
 		signers[i] = SignerResponse{
@@ -275,8 +246,10 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 			Locked:     s.Locked,
 			UnlockedAt: s.UnlockedAt,
 		}
-		if accessData != nil {
-			signers[i].AllowedKeys = accessData.keysForSigner(s.Address)
+		ownership, oErr := h.accessService.GetOwnership(r.Context(), s.Address)
+		if oErr == nil && ownership != nil {
+			signers[i].OwnerID = ownership.OwnerID
+			signers[i].Status = string(ownership.Status)
 		}
 	}
 
@@ -289,74 +262,22 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, resp, http.StatusOK)
 }
 
-// buildAllowedKeysData fetches all enabled API keys and builds a lookup
-// for which keys can access which signers.
-func (h *SignerHandler) buildAllowedKeysData(r *http.Request) (*allowedKeysData, error) {
-	apiKeys, err := h.apiKeyRepo.List(r.Context(), storage.APIKeyFilter{
-		EnabledOnly: true,
-		Limit:       1000,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list API keys: %w", err)
-	}
-
-	data := &allowedKeysData{
-		explicitAccess: make(map[string][]AllowedKeyInfo),
-	}
-
-	for _, key := range apiKeys {
-		info := AllowedKeyInfo{
-			ID:   key.ID,
-			Name: key.Name,
-		}
-		if len(key.AllowedSigners) == 0 && len(key.AllowedHDWallets) == 0 {
-			info.AccessType = "unrestricted"
-			data.unrestricted = append(data.unrestricted, info)
-		} else {
-			// Explicit signer access
-			if len(key.AllowedSigners) > 0 {
-				explicitInfo := info
-				explicitInfo.AccessType = "explicit"
-				for _, addr := range key.AllowedSigners {
-					lower := strings.ToLower(addr)
-					data.explicitAccess[lower] = append(data.explicitAccess[lower], explicitInfo)
-				}
-			}
-			// HD wallet derived address access
-			if len(key.AllowedHDWallets) > 0 {
-				hdInfo := info
-				hdInfo.AccessType = "hd_wallet"
-				var hdMgr evm.HDWalletManager
-				if h.signerManager != nil {
-					var hdErr error
-					hdMgr, hdErr = h.signerManager.HDWalletManager()
-					if hdErr != nil {
-						h.logger.Warn("failed to get HD wallet manager", "error", hdErr)
-					}
-				}
-				if hdMgr != nil {
-					for _, primaryAddr := range key.AllowedHDWallets {
-						derived, err := hdMgr.ListDerivedAddresses(primaryAddr)
-						if err != nil {
-							continue
-						}
-						for _, d := range derived {
-							lower := strings.ToLower(d.Address)
-							data.explicitAccess[lower] = append(data.explicitAccess[lower], hdInfo)
-						}
-					}
-				}
-			}
-		}
-	}
-
-	return data, nil
-}
-
 // createSigner handles POST /api/v1/evm/signers
 func (h *SignerHandler) createSigner(w http.ResponseWriter, r *http.Request) {
 	if h.readOnly {
 		h.writeError(w, "signer creation via API is disabled (security.signers_api_readonly)", http.StatusForbidden)
+		return
+	}
+
+	apiKey := middleware.GetAPIKey(r.Context())
+	if apiKey == nil {
+		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// RBAC check: PermCreateSigners required (admin, dev, agent via rbac.go)
+	if !middleware.HasPermission(apiKey.Role, middleware.PermCreateSigners) {
+		h.writeError(w, "permission denied", http.StatusForbidden)
 		return
 	}
 
@@ -371,18 +292,15 @@ func (h *SignerHandler) createSigner(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// Convert to types.CreateSignerRequest
 	createReq := types.CreateSignerRequest{
 		Type: types.SignerType(req.Type),
 	}
-
 	if req.Keystore != nil {
 		createReq.Keystore = &types.CreateKeystoreParams{
 			Password: req.Keystore.Password,
 		}
 	}
 
-	// Validate request
 	if err := createReq.Validate(); err != nil {
 		h.writeError(w, err.Error(), http.StatusBadRequest)
 		return
@@ -398,18 +316,28 @@ func (h *SignerHandler) createSigner(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Set ownership: admin = active, non-admin = pending_approval
+	status := types.SignerOwnershipPendingApproval
+	if apiKey.IsAdmin() {
+		status = types.SignerOwnershipActive
+	}
+	if err := h.accessService.SetOwner(r.Context(), signerInfo.Address, apiKey.ID, status); err != nil {
+		h.logger.Error("failed to set signer ownership",
+			slog.String("address", signerInfo.Address),
+			slog.String("error", err.Error()),
+		)
+		// Non-fatal: signer was created, ownership can be fixed manually
+	}
+
 	h.logger.Info("signer created",
 		slog.String("address", signerInfo.Address),
 		slog.String("type", signerInfo.Type),
+		slog.String("owner", apiKey.ID),
+		slog.String("status", string(status)),
 	)
 
 	if h.auditLogger != nil {
-		apiKey := middleware.GetAPIKey(r.Context())
-		keyID := ""
-		if apiKey != nil {
-			keyID = apiKey.ID
-		}
-		h.auditLogger.LogSignerCreated(r.Context(), keyID, r.RemoteAddr, signerInfo.Address, signerInfo.Type)
+		h.auditLogger.LogSignerCreated(r.Context(), apiKey.ID, r.RemoteAddr, signerInfo.Address, signerInfo.Type)
 	}
 
 	resp := CreateSignerResponse{
@@ -429,20 +357,10 @@ func (h *SignerHandler) HandleSignerAction(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if !apiKey.IsAdmin() {
-		h.writeError(w, "admin access required", http.StatusForbidden)
-		return
-	}
-
-	if r.Method != http.MethodPost {
-		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// Parse path: /api/v1/evm/signers/{address}/{action}
+	// Parse path: /api/v1/evm/signers/{address}/{action}[/{extra}]
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1/evm/signers/")
-	parts := strings.SplitN(path, "/", 2)
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+	parts := strings.SplitN(path, "/", 3)
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
 		h.writeError(w, "invalid path: expected /api/v1/evm/signers/{address}/{action}", http.StatusBadRequest)
 		return
 	}
@@ -452,9 +370,29 @@ func (h *SignerHandler) HandleSignerAction(w http.ResponseWriter, r *http.Reques
 
 	switch action {
 	case "unlock":
+		if r.Method != http.MethodPost {
+			h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		h.handleUnlock(w, r, address)
 	case "lock":
+		if r.Method != http.MethodPost {
+			h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		h.handleLock(w, r, address)
+	case "approve":
+		if r.Method != http.MethodPost {
+			h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		h.handleApproveSigner(w, r, address)
+	case "access":
+		extra := ""
+		if len(parts) == 3 {
+			extra = parts[2]
+		}
+		h.handleAccess(w, r, address, extra)
 	default:
 		h.writeError(w, "unknown action: "+action, http.StatusBadRequest)
 	}
@@ -462,6 +400,24 @@ func (h *SignerHandler) HandleSignerAction(w http.ResponseWriter, r *http.Reques
 
 // handleUnlock handles POST /api/v1/evm/signers/{address}/unlock
 func (h *SignerHandler) handleUnlock(w http.ResponseWriter, r *http.Request, address string) {
+	apiKey := middleware.GetAPIKey(r.Context())
+
+	// Owner check — return 404 if signer has no ownership record (orphan/non-existent)
+	isOwner, err := h.accessService.IsOwner(r.Context(), apiKey.ID, address)
+	if err != nil {
+		h.writeError(w, "failed to check ownership", http.StatusInternalServerError)
+		return
+	}
+	if !isOwner {
+		// Distinguish 404 from 403: if no ownership record exists at all, treat as not found
+		if _, oErr := h.accessService.GetOwnership(r.Context(), address); oErr != nil && types.IsNotFound(oErr) {
+			h.writeError(w, "signer not found", http.StatusNotFound)
+			return
+		}
+		h.writeError(w, "only the signer owner can unlock", http.StatusForbidden)
+		return
+	}
+
 	var req UnlockSignerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.writeError(w, "invalid request body", http.StatusBadRequest)
@@ -498,12 +454,7 @@ func (h *SignerHandler) handleUnlock(w http.ResponseWriter, r *http.Request, add
 	)
 
 	if h.auditLogger != nil {
-		apiKey := middleware.GetAPIKey(r.Context())
-		keyID := ""
-		if apiKey != nil {
-			keyID = apiKey.ID
-		}
-		h.auditLogger.LogSignerUnlocked(r.Context(), keyID, r.RemoteAddr, address)
+		h.auditLogger.LogSignerUnlocked(r.Context(), apiKey.ID, r.RemoteAddr, address)
 	}
 
 	h.writeJSON(w, SignerResponse{
@@ -517,6 +468,24 @@ func (h *SignerHandler) handleUnlock(w http.ResponseWriter, r *http.Request, add
 
 // handleLock handles POST /api/v1/evm/signers/{address}/lock
 func (h *SignerHandler) handleLock(w http.ResponseWriter, r *http.Request, address string) {
+	apiKey := middleware.GetAPIKey(r.Context())
+
+	// Owner check — return 404 if signer has no ownership record (orphan/non-existent)
+	isOwner, err := h.accessService.IsOwner(r.Context(), apiKey.ID, address)
+	if err != nil {
+		h.writeError(w, "failed to check ownership", http.StatusInternalServerError)
+		return
+	}
+	if !isOwner {
+		// Distinguish 404 from 403: if no ownership record exists at all, treat as not found
+		if _, oErr := h.accessService.GetOwnership(r.Context(), address); oErr != nil && types.IsNotFound(oErr) {
+			h.writeError(w, "signer not found", http.StatusNotFound)
+			return
+		}
+		h.writeError(w, "only the signer owner can lock", http.StatusForbidden)
+		return
+	}
+
 	info, err := h.signerManager.LockSigner(r.Context(), address)
 	if err != nil {
 		if types.IsSignerNotFound(err) {
@@ -541,12 +510,7 @@ func (h *SignerHandler) handleLock(w http.ResponseWriter, r *http.Request, addre
 	)
 
 	if h.auditLogger != nil {
-		apiKey := middleware.GetAPIKey(r.Context())
-		keyID := ""
-		if apiKey != nil {
-			keyID = apiKey.ID
-		}
-		h.auditLogger.LogSignerLocked(r.Context(), keyID, r.RemoteAddr, address)
+		h.auditLogger.LogSignerLocked(r.Context(), apiKey.ID, r.RemoteAddr, address)
 	}
 
 	h.writeJSON(w, SignerResponse{
@@ -556,6 +520,132 @@ func (h *SignerHandler) handleLock(w http.ResponseWriter, r *http.Request, addre
 		Locked:     info.Locked,
 		UnlockedAt: info.UnlockedAt,
 	}, http.StatusOK)
+}
+
+// handleApproveSigner handles POST /api/v1/evm/signers/{address}/approve (admin only)
+func (h *SignerHandler) handleApproveSigner(w http.ResponseWriter, r *http.Request, address string) {
+	apiKey := middleware.GetAPIKey(r.Context())
+	if !apiKey.IsAdmin() {
+		h.writeError(w, "admin access required", http.StatusForbidden)
+		return
+	}
+
+	ownership, err := h.accessService.GetOwnership(r.Context(), address)
+	if err != nil {
+		if types.IsNotFound(err) {
+			h.writeError(w, "no ownership record for this signer", http.StatusNotFound)
+			return
+		}
+		h.writeError(w, "failed to get ownership", http.StatusInternalServerError)
+		return
+	}
+
+	if ownership.Status == types.SignerOwnershipActive {
+		h.writeError(w, "signer is already active", http.StatusConflict)
+		return
+	}
+
+	if err := h.accessService.SetOwner(r.Context(), address, ownership.OwnerID, types.SignerOwnershipActive); err != nil {
+		h.writeError(w, "failed to approve signer", http.StatusInternalServerError)
+		return
+	}
+
+	h.logger.Info("signer approved",
+		slog.String("address", address),
+		slog.String("approved_by", apiKey.ID),
+	)
+
+	h.writeJSON(w, map[string]string{"status": "approved", "signer_address": address}, http.StatusOK)
+}
+
+// handleAccess routes access sub-actions
+func (h *SignerHandler) handleAccess(w http.ResponseWriter, r *http.Request, address, extra string) {
+	switch r.Method {
+	case http.MethodGet:
+		// GET /api/v1/evm/signers/{address}/access — list access
+		h.handleListAccess(w, r, address)
+	case http.MethodPost:
+		// POST /api/v1/evm/signers/{address}/access — grant access
+		h.handleGrantAccess(w, r, address)
+	case http.MethodDelete:
+		// DELETE /api/v1/evm/signers/{address}/access/{keyID}
+		if extra == "" {
+			h.writeError(w, "api_key_id is required in path", http.StatusBadRequest)
+			return
+		}
+		h.handleRevokeAccess(w, r, address, extra)
+	default:
+		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleGrantAccess handles POST /api/v1/evm/signers/{address}/access
+func (h *SignerHandler) handleGrantAccess(w http.ResponseWriter, r *http.Request, address string) {
+	apiKey := middleware.GetAPIKey(r.Context())
+
+	var req GrantAccessRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.APIKeyID == "" {
+		h.writeError(w, "api_key_id is required", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.accessService.GrantAccess(r.Context(), apiKey.ID, address, req.APIKeyID); err != nil {
+		h.logger.Error("failed to grant access",
+			slog.String("address", address),
+			slog.String("error", err.Error()),
+		)
+		h.writeError(w, err.Error(), http.StatusForbidden)
+		return
+	}
+
+	h.writeJSON(w, map[string]string{"status": "granted", "signer_address": address, "api_key_id": req.APIKeyID}, http.StatusOK)
+}
+
+// handleRevokeAccess handles DELETE /api/v1/evm/signers/{address}/access/{keyID}
+func (h *SignerHandler) handleRevokeAccess(w http.ResponseWriter, r *http.Request, address, keyID string) {
+	apiKey := middleware.GetAPIKey(r.Context())
+
+	if err := h.accessService.RevokeAccess(r.Context(), apiKey.ID, address, keyID); err != nil {
+		h.logger.Error("failed to revoke access",
+			slog.String("address", address),
+			slog.String("error", err.Error()),
+		)
+		h.writeError(w, err.Error(), http.StatusForbidden)
+		return
+	}
+
+	h.writeJSON(w, map[string]string{"status": "revoked", "signer_address": address, "api_key_id": keyID}, http.StatusOK)
+}
+
+// handleListAccess handles GET /api/v1/evm/signers/{address}/access
+func (h *SignerHandler) handleListAccess(w http.ResponseWriter, r *http.Request, address string) {
+	apiKey := middleware.GetAPIKey(r.Context())
+
+	accesses, err := h.accessService.ListAccess(r.Context(), apiKey.ID, address)
+	if err != nil {
+		h.logger.Error("failed to list access",
+			slog.String("address", address),
+			slog.String("error", err.Error()),
+		)
+		h.writeError(w, err.Error(), http.StatusForbidden)
+		return
+	}
+
+	resp := make([]SignerAccessResponse, len(accesses))
+	for i, a := range accesses {
+		resp[i] = SignerAccessResponse{
+			APIKeyID:  a.APIKeyID,
+			GrantedBy: a.GrantedBy,
+			CreatedAt: a.CreatedAt,
+		}
+	}
+
+	h.writeJSON(w, resp, http.StatusOK)
 }
 
 // writeJSON writes a JSON response

@@ -243,25 +243,19 @@ api_keys:
     role: dev                          # Dev: submit sign requests and view own status
     enabled: true
     rate_limit: 100
-    # Normal deployment: default false (explicit below). setup.sh uses true for local dev.
-    # allow_all_signers: false           # false = restrict to allowed_signers list; true = any signer
-    # allow_all_hd_wallets: false       # false = restrict to allowed_hd_wallets; true = any HD wallet
-    # Optional: restrict to specific chains or signers
-    # allowed_chain_types: ["evm"]       # Empty = all chains allowed
-    # allowed_signers: []                # Empty = no signer access (unless allow_all_signers: true)
-    #   - "0x1111111111111111111111111111111111111111"
-    # allowed_hd_wallets: []             # Empty = no HD wallet access (unless allow_all_hd_wallets: true)
-    #   - "0xABCD..."                    # Grants access to all derived addresses + derive permission
+    # Signer access is now managed via signer ownership & access control:
+    #   - Signers are assigned to the admin who first starts the server
+    #   - Grant access: POST /api/v1/evm/signers/{addr}/access
+    #   - Revoke access: DELETE /api/v1/evm/signers/{addr}/access/{keyID}
+    #   - CLI: remote-signer-cli evm signer access grant/revoke/list
 
   # Example 2b: Agent key (AI agent that can create/manage own rules + sign within budget)
   # - id: "agent-key"
   #   name: "AI Agent"
   #   public_key_env: "AGENT_PUBLIC_KEY"
-  #   role: agent                        # Agent: sign, create/manage own rules, read budgets/templates/presets
+  #   role: agent                        # Agent: sign, create/manage own rules, read budgets/templates/presets, create signers
   #   enabled: true
   #   rate_limit: 500
-  #   allow_all_signers: true
-  #   allow_all_hd_wallets: true
 
   # Example 2c: Strategy key (minimal: sign requests + view own status only)
   # - id: "strategy-key"
@@ -270,8 +264,6 @@ api_keys:
   #   role: strategy                     # Strategy: sign requests, view own requests, read own signers
   #   enabled: true
   #   rate_limit: 200
-  #   allow_all_signers: true
-  #   allow_all_hd_wallets: true
 
   # Example 3: Direct public key in base64 format (for development/testing only)
   # - id: "dev-key"
@@ -287,14 +279,8 @@ api_keys:
   #   role: dev
   #   enabled: true
 
-  # Example 5: HD wallet-scoped key (can derive and sign with all derived addresses)
-  # - id: "hd-app-key"
-  #   name: "HD Wallet App"
-  #   public_key_env: "HD_APP_PUBLIC_KEY"
-  #   role: dev
-  #   enabled: true
-  #   allowed_hd_wallets:
-  #     - "0xHDWalletPrimaryAddress"   # Can derive + sign with all derived addresses
+  # Example 5: HD wallet access is now managed via signer ownership & access control API
+  # Grant access to HD wallet primary address, and all derived addresses inherit access.
 
 # To generate an Ed25519 key pair:
 # 1. Using openssl (recommended):

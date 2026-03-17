@@ -15,7 +15,41 @@ import (
 
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
+
+// --- Phase4 mock API key repo ---
+
+type phase4MockAPIKeyRepo struct {
+	keys map[string]*types.APIKey
+}
+
+func newPhase4MockAPIKeyRepo() *phase4MockAPIKeyRepo {
+	return &phase4MockAPIKeyRepo{keys: make(map[string]*types.APIKey)}
+}
+
+func (m *phase4MockAPIKeyRepo) Create(_ context.Context, _ *types.APIKey) error { return nil }
+func (m *phase4MockAPIKeyRepo) Get(_ context.Context, id string) (*types.APIKey, error) {
+	if k, ok := m.keys[id]; ok {
+		return k, nil
+	}
+	return nil, types.ErrNotFound
+}
+func (m *phase4MockAPIKeyRepo) Update(_ context.Context, _ *types.APIKey) error { return nil }
+func (m *phase4MockAPIKeyRepo) Delete(_ context.Context, _ string) error        { return nil }
+func (m *phase4MockAPIKeyRepo) List(_ context.Context, _ storage.APIKeyFilter) ([]*types.APIKey, error) {
+	return nil, nil
+}
+func (m *phase4MockAPIKeyRepo) UpdateLastUsed(_ context.Context, _ string) error { return nil }
+func (m *phase4MockAPIKeyRepo) Count(_ context.Context, _ storage.APIKeyFilter) (int, error) {
+	return 0, nil
+}
+func (m *phase4MockAPIKeyRepo) DeleteBySourceExcluding(_ context.Context, _ string, _ []string) (int64, error) {
+	return 0, nil
+}
+func (m *phase4MockAPIKeyRepo) BackfillSource(_ context.Context, _ string) (int64, error) {
+	return 0, nil
+}
 
 // --- Helpers ---
 
@@ -135,7 +169,7 @@ func TestPhase4_AgentAppliedToForcedSelf(t *testing.T) {
 
 func TestPhase4_AdminCreatesWithAppliedToValidKey(t *testing.T) {
 	repo := newMockRuleRepo()
-	apiKeyRepo := newMockAPIKeyRepo()
+	apiKeyRepo := newPhase4MockAPIKeyRepo()
 	apiKeyRepo.keys["agent-1"] = &types.APIKey{ID: "agent-1", Role: types.RoleAgent}
 	h, err := NewRuleHandler(repo, slog.Default(), WithAPIKeyRepo(apiKeyRepo))
 	require.NoError(t, err)
@@ -151,7 +185,7 @@ func TestPhase4_AdminCreatesWithAppliedToValidKey(t *testing.T) {
 
 func TestPhase4_AdminCreatesWithAppliedToNonexistentKey_BadRequest(t *testing.T) {
 	repo := newMockRuleRepo()
-	apiKeyRepo := newMockAPIKeyRepo()
+	apiKeyRepo := newPhase4MockAPIKeyRepo()
 	h, err := NewRuleHandler(repo, slog.Default(), WithAPIKeyRepo(apiKeyRepo))
 	require.NoError(t, err)
 

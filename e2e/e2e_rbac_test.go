@@ -30,12 +30,11 @@ func createRoleClient(t *testing.T, role, keyID string) *client.Client {
 	require.NoError(t, err)
 
 	created, err := adminClient.APIKeys.Create(ctx, &apikeys.CreateRequest{
-		ID:              keyID,
-		Name:            fmt.Sprintf("E2E %s key", role),
-		PublicKey:       hex.EncodeToString(pubKey),
-		Role:            role,
-		RateLimit:       500,
-		AllowAllSigners: true,
+		ID:        keyID,
+		Name:      fmt.Sprintf("E2E %s key", role),
+		PublicKey: hex.EncodeToString(pubKey),
+		Role:      role,
+		RateLimit: 500,
 	})
 	if err != nil {
 		apiErr, ok := err.(*client.APIError)

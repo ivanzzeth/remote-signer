@@ -517,8 +517,6 @@ func (m *APIKeysModel) buildDetailContent() {
 		{"Role", string(k.Role), lipgloss.NewStyle()},
 		{"Enabled", formatBool(k.Enabled), enabledStyle(k.Enabled)},
 		{"Rate Limit", formatRateLimit(k.RateLimit), lipgloss.NewStyle()},
-		{"Allow All Signers", formatBool(k.AllowAllSigners), lipgloss.NewStyle()},
-		{"Allow All HD Wallets", formatBool(k.AllowAllHDWallets), lipgloss.NewStyle()},
 	}
 
 	for _, item := range info {
@@ -547,47 +545,7 @@ func (m *APIKeysModel) buildDetailContent() {
 		content.WriteString(fmt.Sprintf("%s %s\n", keyStr, ts.value))
 	}
 
-	// Allowed Signers
-	content.WriteString("\n")
-	content.WriteString(styles.SubtitleStyle.Render("Allowed Signers"))
-	content.WriteString("\n")
-	if k.AllowAllSigners {
-		content.WriteString(styles.SuccessStyle.Render("All signers allowed"))
-		content.WriteString("\n")
-	} else if len(k.AllowedSigners) == 0 {
-		content.WriteString(styles.MutedColor.Render("None"))
-		content.WriteString("\n")
-	} else {
-		for _, addr := range k.AllowedSigners {
-			content.WriteString(fmt.Sprintf("  %s\n", addr))
-		}
-	}
-
-	// Allowed HD Wallets
-	content.WriteString("\n")
-	content.WriteString(styles.SubtitleStyle.Render("Allowed HD Wallets"))
-	content.WriteString("\n")
-	if k.AllowAllHDWallets {
-		content.WriteString(styles.SuccessStyle.Render("All HD wallets allowed"))
-		content.WriteString("\n")
-	} else if len(k.AllowedHDWallets) == 0 {
-		content.WriteString(styles.MutedColor.Render("None"))
-		content.WriteString("\n")
-	} else {
-		for _, addr := range k.AllowedHDWallets {
-			content.WriteString(fmt.Sprintf("  %s\n", addr))
-		}
-	}
-
-	// Allowed Chain Types
-	if len(k.AllowedChainTypes) > 0 {
-		content.WriteString("\n")
-		content.WriteString(styles.SubtitleStyle.Render("Allowed Chain Types"))
-		content.WriteString("\n")
-		for _, ct := range k.AllowedChainTypes {
-			content.WriteString(fmt.Sprintf("  %s\n", ct))
-		}
-	}
+	// Note: signer access is now managed via signer ownership/access, not on API keys
 
 	m.viewport.SetContent(content.String())
 	m.viewport.GotoTop()

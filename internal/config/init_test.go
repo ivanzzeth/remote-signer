@@ -765,28 +765,6 @@ func TestAPIKeySyncFromConfig_MultipleKeys(t *testing.T) {
 	assert.ErrorIs(t, err, types.ErrNotFound)
 }
 
-func TestAPIKeySyncFromConfig_WithAllowedChainTypesAndSigners(t *testing.T) {
-	repo := newMockAPIKeyRepo()
-	init, err := NewAPIKeyInitializer(repo, testLogger())
-	require.NoError(t, err)
-
-	keys := []APIKeyConfig{
-		{
-			ID: "key-perms", Name: "Perms", PublicKey: hexPubKey, Enabled: true,
-			AllowedChainTypes: []string{"evm"},
-			AllowedSigners:    []string{"0x1234567890abcdef1234567890abcdef12345678"},
-		},
-	}
-
-	err = init.SyncFromConfig(context.Background(), keys)
-	require.NoError(t, err)
-
-	saved, err := repo.Get(context.Background(), "key-perms")
-	require.NoError(t, err)
-	assert.Equal(t, []string{"evm"}, []string(saved.AllowedChainTypes))
-	assert.Equal(t, []string{"0x1234567890abcdef1234567890abcdef12345678"}, []string(saved.AllowedSigners))
-}
-
 // ===========================================================================
 // APIKeyInitializer.SyncFromConfig - Source management tests
 // ===========================================================================

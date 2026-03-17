@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -58,6 +59,8 @@ func initTestDB() (*gorm.DB, error) {
 		&types.Rule{},
 		&types.APIKey{},
 		&types.AuditRecord{},
+		&types.SignerOwnership{},
+		&types.SignerAccess{},
 	); err != nil {
 		return nil, fmt.Errorf("failed to migrate database: %w", err)
 	}
@@ -106,6 +109,7 @@ func initTestServices(
 	log *slog.Logger,
 	tlsCertFile, tlsKeyFile, tlsCAFile string,
 	tlsClientAuth bool,
+	db *gorm.DB,
 ) (*api.Server, error) {
 	// Initialize chain registry
 	chainRegistry := chain.NewRegistry()
@@ -194,10 +198,32 @@ func initTestServices(
 		return nil, fmt.Errorf("failed to create signer manager: %w", err)
 	}
 
+	// Create ownership and access repos for signer access service
+	signerOwnershipRepo, err := storage.NewGormSignerOwnershipRepository(db)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create signer ownership repository: %w", err)
+	}
+	signerAccessRepo, err := storage.NewGormSignerAccessRepository(db)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create signer access repository: %w", err)
+	}
+
+	// Assign ownership of test signer to admin key so lock/unlock tests work
+	ownershipRecord := &types.SignerOwnership{
+		SignerAddress: ts.config.SignerAddress,
+		OwnerID:       ts.config.APIKeyID,
+		Status:        types.SignerOwnershipActive,
+	}
+	if upsertErr := signerOwnershipRepo.Upsert(context.Background(), ownershipRecord); upsertErr != nil {
+		log.Warn("Failed to set initial signer ownership for TLS test", "error", upsertErr)
+	}
+
 	// Router
 	router, err := api.NewRouter(authVerifier, signService, signerManager, ruleRepo, auditRepo, log, api.RouterConfig{
-		Version:    "e2e-tls-test",
-		APIKeyRepo: apiKeyRepo,
+		Version:             "e2e-tls-test",
+		APIKeyRepo:          apiKeyRepo,
+		SignerOwnershipRepo: signerOwnershipRepo,
+		SignerAccessRepo:    signerAccessRepo,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create router: %w", err)

@@ -4,21 +4,16 @@ import "time"
 
 // APIKey represents an API key in responses.
 type APIKey struct {
-	ID                string     `json:"id"`
-	Name              string     `json:"name"`
-	Source            string     `json:"source"`
-	Role              string     `json:"role"` // admin, dev, agent, strategy
-	Enabled           bool       `json:"enabled"`
-	RateLimit         int        `json:"rate_limit"`
-	AllowAllSigners   bool       `json:"allow_all_signers"`
-	AllowAllHDWallets bool       `json:"allow_all_hd_wallets"`
-	AllowedSigners    []string   `json:"allowed_signers,omitempty"`
-	AllowedHDWallets  []string   `json:"allowed_hd_wallets,omitempty"`
-	AllowedChainTypes []string   `json:"allowed_chain_types,omitempty"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
-	LastUsedAt        *time.Time `json:"last_used_at,omitempty"`
-	ExpiresAt         *time.Time `json:"expires_at,omitempty"`
+	ID         string     `json:"id"`
+	Name       string     `json:"name"`
+	Source     string     `json:"source"`
+	Role       string     `json:"role"` // admin, dev, agent, strategy
+	Enabled    bool       `json:"enabled"`
+	RateLimit  int        `json:"rate_limit"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
+	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
 }
 
 // ListResponse represents the response from listing API keys.
@@ -37,27 +32,17 @@ type ListFilter struct {
 
 // CreateRequest represents a request to create an API key.
 type CreateRequest struct {
-	ID                string   `json:"id"`
-	Name              string   `json:"name"`
-	PublicKey         string   `json:"public_key"`
-	Role              string   `json:"role"` // admin, dev, agent, strategy
-	RateLimit         int      `json:"rate_limit,omitempty"`
-	AllowAllSigners   bool     `json:"allow_all_signers"`
-	AllowAllHDWallets bool     `json:"allow_all_hd_wallets"`
-	AllowedSigners    []string `json:"allowed_signers,omitempty"`
-	AllowedHDWallets  []string `json:"allowed_hd_wallets,omitempty"`
-	AllowedChainTypes []string `json:"allowed_chain_types,omitempty"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	PublicKey string `json:"public_key"`
+	Role      string `json:"role"` // admin, dev, agent, strategy
+	RateLimit int    `json:"rate_limit,omitempty"`
 }
 
 // UpdateRequest represents a request to update an API key.
 type UpdateRequest struct {
-	Name              *string  `json:"name,omitempty"`
-	Enabled           *bool    `json:"enabled,omitempty"`
-	Role              *string  `json:"role,omitempty"` // admin, dev, agent, strategy
-	RateLimit         *int     `json:"rate_limit,omitempty"`
-	AllowAllSigners   *bool    `json:"allow_all_signers,omitempty"`
-	AllowAllHDWallets *bool    `json:"allow_all_hd_wallets,omitempty"`
-	AllowedSigners    []string `json:"allowed_signers,omitempty"`
-	AllowedHDWallets  []string `json:"allowed_hd_wallets,omitempty"`
-	AllowedChainTypes []string `json:"allowed_chain_types,omitempty"`
+	Name      *string `json:"name,omitempty"`
+	Enabled   *bool   `json:"enabled,omitempty"`
+	Role      *string `json:"role,omitempty"` // admin, dev, agent, strategy
+	RateLimit *int    `json:"rate_limit,omitempty"`
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/audit"
 	evmchain "github.com/ivanzzeth/remote-signer/internal/chain/evm"
+	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/secure"
 	"github.com/ivanzzeth/remote-signer/internal/validate"
@@ -18,6 +19,7 @@ import (
 // HDWalletHandler handles HD wallet management endpoints.
 type HDWalletHandler struct {
 	signerManager evmchain.SignerManager
+	accessService *service.SignerAccessService
 	readOnly      bool // when true, block HD wallet creation/derive via API
 	logger        *slog.Logger
 	auditLogger   *audit.AuditLogger // optional: audit logging
@@ -29,15 +31,19 @@ func (h *HDWalletHandler) SetAuditLogger(al *audit.AuditLogger) {
 }
 
 // NewHDWalletHandler creates a new HD wallet handler.
-func NewHDWalletHandler(signerManager evmchain.SignerManager, logger *slog.Logger, readOnly bool) (*HDWalletHandler, error) {
+func NewHDWalletHandler(signerManager evmchain.SignerManager, accessService *service.SignerAccessService, logger *slog.Logger, readOnly bool) (*HDWalletHandler, error) {
 	if signerManager == nil {
 		return nil, fmt.Errorf("signer manager is required")
+	}
+	if accessService == nil {
+		return nil, fmt.Errorf("access service is required")
 	}
 	if logger == nil {
 		return nil, fmt.Errorf("logger is required")
 	}
 	return &HDWalletHandler{
 		signerManager: signerManager,
+		accessService: accessService,
 		readOnly:      readOnly,
 		logger:        logger,
 	}, nil
@@ -104,13 +110,13 @@ func (h *HDWalletHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case path == "" || path == "/":
-		// Create/import and list-all require admin
-		if !apiKey.IsAdmin() {
-			h.writeError(w, "admin access required", http.StatusForbidden)
-			return
-		}
 		switch r.Method {
 		case http.MethodPost:
+			// Create/import requires admin
+			if !apiKey.IsAdmin() {
+				h.writeError(w, "admin access required", http.StatusForbidden)
+				return
+			}
 			h.createOrImport(w, r)
 		case http.MethodGet:
 			h.listWallets(w, r)
@@ -126,8 +132,13 @@ func (h *HDWalletHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		address := parts[0]
 
-		// Per-wallet actions: admin OR AllowedHDWallets permission
-		if !apiKey.IsAdmin() && !apiKey.IsAllowedHDWallet(address) {
+		// Per-wallet actions: check ownership/access
+		allowed, accessErr := h.accessService.CheckAccess(r.Context(), apiKey.ID, address)
+		if accessErr != nil {
+			h.writeError(w, "failed to check access", http.StatusInternalServerError)
+			return
+		}
+		if !allowed {
 			h.writeError(w, "not authorized for this HD wallet", http.StatusForbidden)
 			return
 		}
@@ -218,8 +229,23 @@ func (h *HDWalletHandler) createOrImport(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Set ownership for the newly created HD wallet's primary address
+	apiKey := middleware.GetAPIKey(r.Context())
+	if apiKey != nil {
+		status := types.SignerOwnershipPendingApproval
+		if apiKey.IsAdmin() {
+			status = types.SignerOwnershipActive
+		}
+		if ownerErr := h.accessService.SetOwner(r.Context(), info.PrimaryAddress, apiKey.ID, status); ownerErr != nil {
+			h.logger.Error("failed to set HD wallet ownership",
+				slog.String("address", info.PrimaryAddress),
+				slog.String("error", ownerErr.Error()),
+			)
+			// Non-fatal: wallet was created, ownership can be fixed manually
+		}
+	}
+
 	if h.auditLogger != nil {
-		apiKey := middleware.GetAPIKey(r.Context())
 		keyID := ""
 		if apiKey != nil {
 			keyID = apiKey.ID
@@ -235,6 +261,7 @@ func (h *HDWalletHandler) createOrImport(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *HDWalletHandler) listWallets(w http.ResponseWriter, r *http.Request) {
+	apiKey := middleware.GetAPIKey(r.Context())
 	mgr, err := h.signerManager.HDWalletManager()
 	if err != nil {
 		h.writeError(w, err.Error(), http.StatusNotImplemented)
@@ -243,11 +270,23 @@ func (h *HDWalletHandler) listWallets(w http.ResponseWriter, r *http.Request) {
 
 	wallets := mgr.ListHDWallets()
 
-	resp := listHDWalletsResponse{
-		Wallets: make([]hdWalletResponse, len(wallets)),
+	// Filter by ownership/access
+	var filtered []evmchain.HDWalletInfo
+	for _, wallet := range wallets {
+		allowed, accessErr := h.accessService.CheckAccess(r.Context(), apiKey.ID, wallet.PrimaryAddress)
+		if accessErr != nil {
+			continue
+		}
+		if allowed {
+			filtered = append(filtered, wallet)
+		}
 	}
-	for i, w := range wallets {
-		resp.Wallets[i] = toHDWalletResponse(&w)
+
+	resp := listHDWalletsResponse{
+		Wallets: make([]hdWalletResponse, len(filtered)),
+	}
+	for i := range filtered {
+		resp.Wallets[i] = toHDWalletResponse(&filtered[i])
 	}
 
 	h.writeJSON(w, resp, http.StatusOK)

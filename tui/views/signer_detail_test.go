@@ -43,9 +43,6 @@ func TestSignerDetailModel_LoadSigner(t *testing.T) {
 			Address: "0x1111111111111111111111111111111111111111",
 			Type:    "private_key",
 			Enabled: true,
-			AllowedKeys: []evm.AllowedKeyInfo{
-				{ID: "admin-key", Name: "Admin Key", AccessType: "unrestricted"},
-			},
 		}
 
 		model.LoadSigner(signer)
@@ -53,7 +50,6 @@ func TestSignerDetailModel_LoadSigner(t *testing.T) {
 		assert.Equal(t, "0x1111111111111111111111111111111111111111", model.signer.Address)
 		assert.Equal(t, "private_key", model.signer.Type)
 		assert.True(t, model.signer.Enabled)
-		assert.Len(t, model.signer.AllowedKeys, 1)
 		assert.False(t, model.goBack)
 	})
 
@@ -98,31 +94,6 @@ func TestSignerDetailModel_View_BasicInfo(t *testing.T) {
 		model := newTestSignerDetailModel(t)
 		view := model.View()
 		assert.Equal(t, "No signer loaded", view)
-	})
-}
-
-func TestSignerDetailModel_View_AccessControl(t *testing.T) {
-	t.Run("renders access table when AllowedKeys present", func(t *testing.T) {
-		model := newTestSignerDetailModel(t)
-		model.LoadSigner(evm.Signer{
-			Address: "0x1111111111111111111111111111111111111111",
-			Type:    "private_key",
-			Enabled: true,
-			AllowedKeys: []evm.AllowedKeyInfo{
-				{ID: "admin-key", Name: "Admin Key", AccessType: "unrestricted"},
-				{ID: "readonly-key", Name: "Read Only Key", AccessType: "unrestricted"},
-				{ID: "dev-key", Name: "Dev Key", AccessType: "explicit"},
-			},
-		})
-
-		view := model.View()
-		assert.Contains(t, view, "Access Control")
-		assert.Contains(t, view, "3 API key(s) have access")
-		assert.Contains(t, view, "Admin Key")
-		assert.Contains(t, view, "Read Only Key")
-		assert.Contains(t, view, "Dev Key")
-		assert.Contains(t, view, "all signers")
-		assert.Contains(t, view, "explicit")
 	})
 }
 

@@ -202,13 +202,11 @@ func TestHDWallet_NonAdminCannotList(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Non-admin should NOT be able to list HD wallets (admin-only route)
-	_, err := nonAdminClient.EVM.HDWallets.List(ctx)
-	require.Error(t, err)
-
-	apiErr, ok := err.(*client.APIError)
-	require.True(t, ok, "expected APIError, got %T", err)
-	assert.Equal(t, 403, apiErr.StatusCode, "Non-admin should get 403 Forbidden")
+	// Non-admin can list HD wallets but sees only those they own/have access to.
+	// With no ownership or access grants, the list should be empty.
+	listResp, err := nonAdminClient.EVM.HDWallets.List(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 0, len(listResp.Wallets), "Non-admin should see no HD wallets without access")
 }
 
 func TestHDWallet_ValidationErrors(t *testing.T) {

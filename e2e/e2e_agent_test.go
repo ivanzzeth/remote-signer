@@ -78,12 +78,11 @@ func createAgentClient(t *testing.T) *client.Client {
 
 	// Create agent API key via admin client
 	created, err := adminClient.APIKeys.Create(ctx, &apikeys.CreateRequest{
-		ID:              agentKeyID,
-		Name:            "E2E Agent Test Key",
-		PublicKey:       agentPubHex,
-		Role:            "agent",
-		RateLimit:       500,
-		AllowAllSigners: true,
+		ID:        agentKeyID,
+		Name:      "E2E Agent Test Key",
+		PublicKey: agentPubHex,
+		Role:      "agent",
+		RateLimit: 500,
 	})
 	if err != nil {
 		apiErr, ok := err.(*client.APIError)

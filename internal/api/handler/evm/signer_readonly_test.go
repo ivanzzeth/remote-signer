@@ -22,7 +22,8 @@ func TestSignerHandler_ReadOnly_CreateBlocked(t *testing.T) {
 		},
 	}
 
-	h, err := NewSignerHandler(sm, nil, slog.Default(), true)
+	accessSvc := newSignerTestAccessService(t)
+	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), true)
 	require.NoError(t, err)
 
 	body := `{"type":"keystore","keystore":{"password":"test123"}}`
@@ -46,7 +47,8 @@ func TestSignerHandler_ReadOnly_ListAllowed(t *testing.T) {
 		},
 	}
 
-	h, err := NewSignerHandler(sm, nil, slog.Default(), true)
+	accessSvc := newSignerTestAccessService(t)
+	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), true)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/evm/signers", nil)
@@ -61,7 +63,8 @@ func TestSignerHandler_ReadOnly_ListAllowed(t *testing.T) {
 func TestHDWalletHandler_ReadOnly_CreateBlocked(t *testing.T) {
 	sm := newMockSignerManagerForHD()
 
-	h, err := NewHDWalletHandler(sm, slog.Default(), true)
+	accessSvc := newTestAccessService(t)
+	h, err := NewHDWalletHandler(sm, accessSvc, slog.Default(), true)
 	require.NoError(t, err)
 
 	body := `{"action":"create","password":"test123"}`
@@ -78,7 +81,16 @@ func TestHDWalletHandler_ReadOnly_CreateBlocked(t *testing.T) {
 func TestHDWalletHandler_ReadOnly_DeriveBlocked(t *testing.T) {
 	sm := newMockSignerManagerForHD()
 
-	h, err := NewHDWalletHandler(sm, slog.Default(), true)
+	// Grant ownership so access check passes, then readonly check blocks
+	ownerships := map[string]*types.SignerOwnership{
+		"0x0000000000000000000000000000000000000001": {
+			SignerAddress: "0x0000000000000000000000000000000000000001",
+			OwnerID:       "admin-key",
+			Status:        types.SignerOwnershipActive,
+		},
+	}
+	accessSvc := newTestAccessServiceWithOwnerships(t, ownerships)
+	h, err := NewHDWalletHandler(sm, accessSvc, slog.Default(), true)
 	require.NoError(t, err)
 
 	body := `{"index":1}`

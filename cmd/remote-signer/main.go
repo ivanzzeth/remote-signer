@@ -34,7 +34,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
-const version = "0.1.18"
+const version = "0.1.19"
 
 func main() {
 	if err := run(); err != nil {
@@ -118,6 +118,16 @@ func run() error {
 	auditRepo, err := storage.NewGormAuditRepository(db)
 	if err != nil {
 		return fmt.Errorf("failed to create audit repository: %w", err)
+	}
+
+	signerOwnershipRepo, err := storage.NewGormSignerOwnershipRepository(db)
+	if err != nil {
+		return fmt.Errorf("failed to create signer ownership repository: %w", err)
+	}
+
+	signerAccessRepo, err := storage.NewGormSignerAccessRepository(db)
+	if err != nil {
+		return fmt.Errorf("failed to create signer access repository: %w", err)
 	}
 
 	// Initialize audit logger early so config sync can record rule changes
@@ -334,6 +344,11 @@ func run() error {
 		// Discover locked signers from disk (keystores and HD wallets not in config)
 		if err := evmSignerManager.DiscoverLockedSigners(context.Background()); err != nil {
 			return fmt.Errorf("failed to discover locked signers: %w", err)
+		}
+
+		// Sync signer ownership (assign unowned signers to first admin)
+		if err := config.SyncSignerOwnership(context.Background(), evmSignerManager, signerOwnershipRepo, apiKeyRepo, log); err != nil {
+			return fmt.Errorf("failed to sync signer ownership: %w", err)
 		}
 
 		if evmRegistry.SignerCount() == 0 && evmRegistry.TotalCount() == 0 {
@@ -698,9 +713,11 @@ func run() error {
 			TemplateRepo:    templateRepo,
 			TemplateService: templateService,
 		},
-		ApprovalGuard:      approvalGuard,
-		APIKeyRepo:         apiKeyRepo,
-		BudgetRepo:         budgetRepo,
+		ApprovalGuard:       approvalGuard,
+		APIKeyRepo:          apiKeyRepo,
+		SignerOwnershipRepo: signerOwnershipRepo,
+		SignerAccessRepo:    signerAccessRepo,
+		BudgetRepo:          budgetRepo,
 		RulesAPIReadonly:              cfg.Security.IsRulesAPIReadonly(),
 		SignersAPIReadonly:            cfg.Security.IsSignersAPIReadonly(),
 		APIKeysAPIReadonly:            cfg.Security.IsAPIKeysAPIReadonly(),

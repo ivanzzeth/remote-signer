@@ -452,7 +452,7 @@ func (ts *TestServer) StartWithTLS(certFile, keyFile, caFile string, enableMTLS 
 
 	// Initialize all services and create server with TLS
 	server, err := initTestServices(ts, requestRepo, ruleRepo, apiKeyRepo, auditRepo, log,
-		certFile, keyFile, caFile, enableMTLS)
+		certFile, keyFile, caFile, enableMTLS, db)
 	if err != nil {
 		return err
 	}

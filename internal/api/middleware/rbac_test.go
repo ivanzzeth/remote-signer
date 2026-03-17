@@ -30,13 +30,13 @@ func TestHasPermission_DevPermissions(t *testing.T) {
 		PermSignRequest, PermListOwnRequests, PermListAllRequests,
 		PermListRules, PermCreateRuleSelf, PermModifyOwnRule, PermDeleteOwnRule,
 		PermReadBudgets, PermReadTemplates, PermReadPresets,
-		PermReadSigners, PermReadHDWallets,
+		PermReadSigners, PermCreateSigners, PermReadHDWallets,
 		PermReadAudit, PermReadMetrics,
 	}
 	denied := []Permission{
 		PermApproveRequest, PermCreateRuleAny, PermModifyAnyRule, PermDeleteAnyRule, PermApproveRule,
 		PermInstantiateTemplate, PermApplyPreset,
-		PermCreateSigners, PermUnlockSigner, PermCreateHDWallet,
+		PermUnlockSigner, PermCreateHDWallet,
 		PermManageAPIKeys, PermReadACLs, PermResumeGuard,
 	}
 
@@ -53,13 +53,13 @@ func TestHasPermission_AgentPermissions(t *testing.T) {
 		PermSignRequest, PermListOwnRequests,
 		PermListRules, PermCreateRuleSelf, PermModifyOwnRule, PermDeleteOwnRule,
 		PermReadBudgets, PermReadTemplates, PermReadPresets,
-		PermReadSigners, PermReadHDWallets,
+		PermReadSigners, PermCreateSigners, PermReadHDWallets,
 	}
 	denied := []Permission{
 		PermListAllRequests, PermApproveRequest,
 		PermCreateRuleAny, PermModifyAnyRule, PermDeleteAnyRule, PermApproveRule,
 		PermInstantiateTemplate, PermApplyPreset,
-		PermCreateSigners, PermUnlockSigner, PermCreateHDWallet,
+		PermUnlockSigner, PermCreateHDWallet,
 		PermManageAPIKeys, PermReadAudit, PermReadMetrics, PermReadACLs, PermResumeGuard,
 	}
 
@@ -216,10 +216,10 @@ func TestRBACAccessControlMatrix(t *testing.T) {
 		{"presets - agent", PermReadPresets, agentKey, http.StatusOK, true},
 		{"presets - strategy denied", PermReadPresets, strategyKey, http.StatusForbidden, false},
 
-		// Create signers: admin only
+		// Create signers: admin, dev, agent
 		{"create signers - admin", PermCreateSigners, adminKey, http.StatusOK, true},
-		{"create signers - dev denied", PermCreateSigners, devKey, http.StatusForbidden, false},
-		{"create signers - agent denied", PermCreateSigners, agentKey, http.StatusForbidden, false},
+		{"create signers - dev", PermCreateSigners, devKey, http.StatusOK, true},
+		{"create signers - agent", PermCreateSigners, agentKey, http.StatusOK, true},
 		{"create signers - strategy denied", PermCreateSigners, strategyKey, http.StatusForbidden, false},
 
 		// Read signers: all roles

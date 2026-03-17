@@ -75,3 +75,32 @@ func (s *SignerService) Lock(ctx context.Context, address string) (*LockSignerRe
 	}
 	return &resp, nil
 }
+
+// ApproveSigner approves a pending signer (admin only).
+func (s *SignerService) ApproveSigner(ctx context.Context, address string) error {
+	path := fmt.Sprintf("/api/v1/evm/signers/%s/approve", address)
+	return s.transport.Request(ctx, http.MethodPost, path, nil, nil, http.StatusOK)
+}
+
+// GrantAccess grants access to a signer for another API key (owner only).
+func (s *SignerService) GrantAccess(ctx context.Context, address string, req *GrantAccessRequest) error {
+	path := fmt.Sprintf("/api/v1/evm/signers/%s/access", address)
+	return s.transport.Request(ctx, http.MethodPost, path, req, nil, http.StatusOK)
+}
+
+// RevokeAccess revokes access from a signer for an API key (owner only).
+func (s *SignerService) RevokeAccess(ctx context.Context, address, apiKeyID string) error {
+	path := fmt.Sprintf("/api/v1/evm/signers/%s/access/%s", address, apiKeyID)
+	return s.transport.Request(ctx, http.MethodDelete, path, nil, nil, http.StatusOK)
+}
+
+// ListAccess lists access grants for a signer (owner only).
+func (s *SignerService) ListAccess(ctx context.Context, address string) ([]SignerAccessEntry, error) {
+	var resp []SignerAccessEntry
+	path := fmt.Sprintf("/api/v1/evm/signers/%s/access", address)
+	err := s.transport.Request(ctx, http.MethodGet, path, nil, &resp, http.StatusOK)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}

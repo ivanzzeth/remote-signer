@@ -65,6 +65,9 @@ const (
 
 	// Guard
 	PermResumeGuard Permission = "resume_guard"
+
+	// Signer ownership
+	PermApproveSigner Permission = "approve_signer"
 )
 
 // rolePermissions is the static permission matrix matching Section 2.2 of the design doc.
@@ -98,6 +101,7 @@ var rolePermissions = map[types.APIKeyRole]map[Permission]bool{
 		PermReadMetrics:         true,
 		PermReadACLs:            true,
 		PermResumeGuard:         true,
+		PermApproveSigner:       true,
 	},
 	types.RoleDev: {
 		PermSignRequest:         true,
@@ -111,6 +115,7 @@ var rolePermissions = map[types.APIKeyRole]map[Permission]bool{
 		PermReadTemplates:       true,
 		PermReadPresets:         true,
 		PermReadSigners:         true,
+		PermCreateSigners:       true,
 		PermReadHDWallets:       true,
 		PermReadAudit:           true,
 		PermReadMetrics:         true,
@@ -126,6 +131,7 @@ var rolePermissions = map[types.APIKeyRole]map[Permission]bool{
 		PermReadTemplates:   true,
 		PermReadPresets:     true,
 		PermReadSigners:     true, // own signers only
+		PermCreateSigners:   true,
 		PermReadHDWallets:   true, // own wallets only
 	},
 	types.RoleStrategy: {

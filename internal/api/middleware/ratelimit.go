@@ -4,12 +4,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/ivanzzeth/remote-signer/internal/audit"
-	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
 
 // RateLimiter implements a simple sliding window rate limiter
@@ -180,108 +178,10 @@ func PermissionMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Extract chain type from URL path
-			// Expected format: /api/v1/{chain_type}/...
 			// Permission checking is done at the handler level where we have more context
 			// This middleware just ensures the API key is valid
 
 			next.ServeHTTP(w, r)
 		})
 	}
-}
-
-// CheckChainPermission checks if the API key is allowed to access the given chain type
-func CheckChainPermission(apiKey *types.APIKey, chainType types.ChainType) bool {
-	if apiKey == nil {
-		return false
-	}
-	return apiKey.IsAllowedChain(chainType)
-}
-
-// CheckSignerPermission checks if the API key is allowed to use the given signer
-func CheckSignerPermission(apiKey *types.APIKey, signerAddress string) bool {
-	if apiKey == nil {
-		return false
-	}
-	return apiKey.IsAllowedSigner(signerAddress)
-}
-
-// HDWalletDerivedLister can list primary HD wallet addresses and their derived addresses.
-// Extracted to avoid importing the full evm package in middleware.
-type HDWalletDerivedLister interface {
-	ListPrimaryAddresses() []string
-	ListDerivedAddresses(primaryAddr string) ([]types.SignerInfo, error)
-}
-
-// CheckSignerPermissionExplicit checks only explicitly listed AllowedSigners and AllowedHDWallets,
-// ignoring allow_all_signers/allow_all_hd_wallets. Used for agent keys that must be restricted
-// to their explicitly assigned signers only.
-func CheckSignerPermissionExplicit(apiKey *types.APIKey, signerAddress string, hdMgr HDWalletDerivedLister) bool {
-	if apiKey == nil {
-		return false
-	}
-	if apiKey.IsAllowedSignerExplicit(signerAddress) {
-		return true
-	}
-	if hdMgr == nil {
-		return false
-	}
-	if len(apiKey.AllowedHDWallets) == 0 {
-		return false
-	}
-	for _, primaryAddr := range apiKey.AllowedHDWallets {
-		derived, err := hdMgr.ListDerivedAddresses(primaryAddr)
-		if err != nil {
-			continue
-		}
-		for _, d := range derived {
-			if strings.EqualFold(d.Address, signerAddress) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// CheckSignerPermissionWithHDWallets checks allow_all_signers / AllowedSigners, then allow_all_hd_wallets / AllowedHDWallets (derived).
-// hdMgr may be nil (treated as no HD wallet check).
-func CheckSignerPermissionWithHDWallets(apiKey *types.APIKey, signerAddress string, hdMgr HDWalletDerivedLister) bool {
-	if apiKey == nil {
-		return false
-	}
-	if apiKey.IsAllowedSigner(signerAddress) {
-		return true
-	}
-	if hdMgr == nil {
-		return false
-	}
-	if apiKey.AllowAllHDWallets {
-		for _, primaryAddr := range hdMgr.ListPrimaryAddresses() {
-			derived, err := hdMgr.ListDerivedAddresses(primaryAddr)
-			if err != nil {
-				continue
-			}
-			for _, d := range derived {
-				if strings.EqualFold(d.Address, signerAddress) {
-					return true
-				}
-			}
-		}
-		return false
-	}
-	if len(apiKey.AllowedHDWallets) == 0 {
-		return false
-	}
-	for _, primaryAddr := range apiKey.AllowedHDWallets {
-		derived, err := hdMgr.ListDerivedAddresses(primaryAddr)
-		if err != nil {
-			continue
-		}
-		for _, d := range derived {
-			if strings.EqualFold(d.Address, signerAddress) {
-				return true
-			}
-		}
-	}
-	return false
 }

@@ -6,8 +6,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/lib/pq"
-
 	"github.com/ivanzzeth/remote-signer/internal/audit"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
@@ -116,20 +114,15 @@ func (i *APIKeyInitializer) syncKey(ctx context.Context, keyCfg APIKeyConfig) er
 	if existing == nil {
 		// Create new key
 		newKey := &types.APIKey{
-			ID:                keyCfg.ID,
-			Name:              keyCfg.Name,
-			PublicKeyHex:      publicKey,
-			AllowAllSigners:   keyCfg.AllowAllSigners,
-			AllowAllHDWallets: keyCfg.AllowAllHDWallets,
-			AllowedChainTypes: pq.StringArray(keyCfg.AllowedChainTypes),
-			AllowedSigners:    pq.StringArray(keyCfg.AllowedSigners),
-			AllowedHDWallets:  pq.StringArray(keyCfg.AllowedHDWallets),
-			RateLimit:         rateLimit,
-			Role:              types.APIKeyRole(keyCfg.Role),
-			Enabled:           keyCfg.Enabled,
-			Source:            types.APIKeySourceConfig,
-			CreatedAt:         time.Now(),
-			UpdatedAt:         time.Now(),
+			ID:           keyCfg.ID,
+			Name:         keyCfg.Name,
+			PublicKeyHex: publicKey,
+			RateLimit:    rateLimit,
+			Role:         types.APIKeyRole(keyCfg.Role),
+			Enabled:      keyCfg.Enabled,
+			Source:       types.APIKeySourceConfig,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
 		}
 
 		if err := i.repo.Create(ctx, newKey); err != nil {
@@ -149,11 +142,6 @@ func (i *APIKeyInitializer) syncKey(ctx context.Context, keyCfg APIKeyConfig) er
 		// Update existing key with config values
 		existing.Name = keyCfg.Name
 		existing.PublicKeyHex = publicKey
-		existing.AllowAllSigners = keyCfg.AllowAllSigners
-		existing.AllowAllHDWallets = keyCfg.AllowAllHDWallets
-		existing.AllowedChainTypes = pq.StringArray(keyCfg.AllowedChainTypes)
-		existing.AllowedSigners = pq.StringArray(keyCfg.AllowedSigners)
-		existing.AllowedHDWallets = pq.StringArray(keyCfg.AllowedHDWallets)
 		existing.RateLimit = rateLimit
 		existing.Role = types.APIKeyRole(keyCfg.Role)
 		existing.Enabled = keyCfg.Enabled

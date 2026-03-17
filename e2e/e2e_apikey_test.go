@@ -163,7 +163,7 @@ func TestAPIKey_Create_ReadonlyMode(t *testing.T) {
 		Name:            "E2E Readonly Test",
 		PublicKey:       hex.EncodeToString(pubKey),
 		Role:            "strategy",
-		AllowAllSigners: true,
+
 	}
 
 	key, createErr := adminClient.APIKeys.Create(ctx, req)
@@ -202,7 +202,7 @@ func TestAPIKey_Create_And_Get(t *testing.T) {
 		PublicKey:       hex.EncodeToString(pubKey),
 		Role:            "strategy",
 		RateLimit:       200,
-		AllowAllSigners: true,
+
 	}
 
 	created, err := adminClient.APIKeys.Create(ctx, req)
@@ -284,7 +284,7 @@ func TestAPIKey_Update_APISource(t *testing.T) {
 		Name:            "E2E Update Test Original",
 		PublicKey:       hex.EncodeToString(pubKey),
 		Role:            "strategy",
-		AllowAllSigners: true,
+
 	})
 	if err != nil {
 		apiErr, ok := err.(*client.APIError)
@@ -357,7 +357,7 @@ func TestAPIKey_Delete_APISource(t *testing.T) {
 		Name:            "E2E Delete Test",
 		PublicKey:       hex.EncodeToString(pubKey),
 		Role:            "strategy",
-		AllowAllSigners: true,
+
 	})
 	if err != nil {
 		apiErr, ok := err.(*client.APIError)
@@ -448,7 +448,7 @@ func TestAPIKey_NonAdminCannotCreate(t *testing.T) {
 		Name:            "Should Not Be Created",
 		PublicKey:       hex.EncodeToString(pubKey),
 		Role:            "strategy",
-		AllowAllSigners: true,
+
 	})
 	require.Error(t, err)
 

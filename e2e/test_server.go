@@ -155,6 +155,8 @@ func (ts *TestServer) Start() error {
 		&types.RuleTemplate{},
 		&types.RuleBudget{},
 		&types.TokenMetadata{},
+		&types.SignerOwnership{},
+		&types.SignerAccess{},
 	); err != nil {
 		return fmt.Errorf("failed to migrate database: %w", err)
 	}
@@ -188,6 +190,16 @@ func (ts *TestServer) Start() error {
 	budgetRepo, err := storage.NewGormBudgetRepository(db)
 	if err != nil {
 		return fmt.Errorf("failed to create budget repository: %w", err)
+	}
+
+	signerOwnershipRepo, err := storage.NewGormSignerOwnershipRepository(db)
+	if err != nil {
+		return fmt.Errorf("failed to create signer ownership repository: %w", err)
+	}
+
+	signerAccessRepo, err := storage.NewGormSignerAccessRepository(db)
+	if err != nil {
+		return fmt.Errorf("failed to create signer access repository: %w", err)
 	}
 
 	// Initialize API keys from config if available, otherwise create test keys
@@ -520,6 +532,25 @@ func (ts *TestServer) Start() error {
 		return fmt.Errorf("failed to discover locked signers: %w", err)
 	}
 
+	// Sync signer ownership
+	if err := config.SyncSignerOwnership(context.Background(), signerManager, signerOwnershipRepo, apiKeyRepo, log); err != nil {
+		return fmt.Errorf("failed to sync signer ownership: %w", err)
+	}
+
+	// Grant the non-admin (strategy) key access to the primary test signer so that
+	// existing e2e tests (e.g. TestAuth_NonAdminCanSubmitSignRequest, TestSigner_NonAdminCanListSigners)
+	// continue to work under the new ownership model.
+	if ts.config.NonAdminAPIKeyID != "" {
+		nonAdminAccess := &types.SignerAccess{
+			SignerAddress: ts.config.SignerAddress,
+			APIKeyID:      ts.config.NonAdminAPIKeyID,
+			GrantedBy:     ts.config.APIKeyID, // granted by admin
+		}
+		if grantErr := signerAccessRepo.Grant(context.Background(), nonAdminAccess); grantErr != nil {
+			log.Warn("Failed to grant non-admin access to test signer (may already exist)", "error", grantErr)
+		}
+	}
+
 	// Initialize audit logger for rule/API key CRUD audit events
 	auditLogger, err := audit.NewAuditLogger(auditRepo, log)
 	if err != nil {
@@ -533,11 +564,13 @@ func (ts *TestServer) Start() error {
 			TemplateRepo:    templateRepo,
 			TemplateService: templateService,
 		},
-		ApprovalGuard: approvalGuard,
-		APIKeyRepo:    apiKeyRepo,
-		BudgetRepo:    budgetRepo,
-		JSEvaluator:   jsEval,
-		AuditLogger:   auditLogger,
+		ApprovalGuard:       approvalGuard,
+		APIKeyRepo:          apiKeyRepo,
+		SignerOwnershipRepo: signerOwnershipRepo,
+		SignerAccessRepo:    signerAccessRepo,
+		BudgetRepo:          budgetRepo,
+		JSEvaluator:         jsEval,
+		AuditLogger:         auditLogger,
 	}
 	if ts.config.PresetsDir != "" {
 		routerConfig.PresetsDir = ts.config.PresetsDir
@@ -657,17 +690,16 @@ func (ts *TestServer) waitForReady(ctx context.Context) error {
 func (ts *TestServer) createAPIKey(repo storage.APIKeyRepository) error {
 	ctx := context.Background()
 
-	// Create admin API key (AllowAllSigners so e2e can sign with test signers)
+	// Create admin API key
 	adminKey := &types.APIKey{
-		ID:               ts.config.APIKeyID,
-		Name:             "E2E Test Admin API Key",
-		PublicKeyHex:     hex.EncodeToString(ts.config.APIKeyPublicKey),
-		RateLimit:        10000, // high limit for e2e test suite
-		Role:             types.RoleAdmin,
-		AllowAllSigners:  true,
-		Enabled:          true,
-		CreatedAt:        time.Now(),
-		UpdatedAt:        time.Now(),
+		ID:           ts.config.APIKeyID,
+		Name:         "E2E Test Admin API Key",
+		PublicKeyHex: hex.EncodeToString(ts.config.APIKeyPublicKey),
+		RateLimit:    10000, // high limit for e2e test suite
+		Role:         types.RoleAdmin,
+		Enabled:      true,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
 	}
 
 	if err := repo.Create(ctx, adminKey); err != nil {
@@ -677,15 +709,14 @@ func (ts *TestServer) createAPIKey(repo storage.APIKeyRepository) error {
 	// Create non-admin API key if configured
 	if ts.config.NonAdminAPIKeyID != "" && ts.config.NonAdminAPIKeyPublicKey != nil {
 		nonAdminKey := &types.APIKey{
-			ID:               ts.config.NonAdminAPIKeyID,
-			Name:             "E2E Test Non-Admin API Key",
-			PublicKeyHex:     hex.EncodeToString(ts.config.NonAdminAPIKeyPublicKey),
-			RateLimit:        1000,
-			Role:             types.RoleStrategy, // strategy: can sign but cannot create/list rules or templates
-			AllowAllSigners:  true,
-			Enabled:          true,
-			CreatedAt:        time.Now(),
-			UpdatedAt:        time.Now(),
+			ID:           ts.config.NonAdminAPIKeyID,
+			Name:         "E2E Test Non-Admin API Key",
+			PublicKeyHex: hex.EncodeToString(ts.config.NonAdminAPIKeyPublicKey),
+			RateLimit:    1000,
+			Role:         types.RoleStrategy, // strategy: can sign but cannot create/list rules or templates
+			Enabled:      true,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
 		}
 
 		if err := repo.Create(ctx, nonAdminKey); err != nil {

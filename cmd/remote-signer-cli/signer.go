@@ -10,7 +10,7 @@ import (
 
 var signerCmd = &cobra.Command{
 	Use:   "signer",
-	Short: "Manage EVM signers (list, unlock, lock)",
+	Short: "Manage EVM signers (list, create, unlock, lock, approve, access)",
 }
 
 // ── signer list ──────────────────────────────────────────────────────────────
@@ -32,11 +32,11 @@ var signerListCmd = &cobra.Command{
 		}
 		fmt.Printf("Total: %d\n", resp.Total)
 		printTable(
-			[]string{"ADDRESS", "TYPE", "ENABLED", "LOCKED"},
+			[]string{"ADDRESS", "TYPE", "ENABLED", "LOCKED", "OWNER", "STATUS"},
 			func() [][]string {
 				rows := make([][]string, len(resp.Signers))
 				for i, s := range resp.Signers {
-					rows[i] = []string{s.Address, s.Type, strconv.FormatBool(s.Enabled), strconv.FormatBool(s.Locked)}
+					rows[i] = []string{s.Address, s.Type, strconv.FormatBool(s.Enabled), strconv.FormatBool(s.Locked), s.OwnerID, s.Status}
 				}
 				return rows
 			}(),
@@ -51,7 +51,7 @@ var signerCreatePassword string
 
 var signerCreateCmd = &cobra.Command{
 	Use:   "create",
-	Short: "Create a new keystore signer (admin only)",
+	Short: "Create a new keystore signer",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c, err := newClientFromFlags(cmd)
 		if err != nil {
@@ -115,6 +115,102 @@ var signerLockCmd = &cobra.Command{
 	},
 }
 
+// ── signer approve ───────────────────────────────────────────────────────────
+
+var signerApproveCmd = &cobra.Command{
+	Use:   "approve <address>",
+	Short: "Approve a pending signer (admin only)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c, err := newClientFromFlags(cmd)
+		if err != nil {
+			return err
+		}
+		if err := c.EVM.Signers.ApproveSigner(cmd.Context(), args[0]); err != nil {
+			return fmt.Errorf("approve signer: %w", err)
+		}
+		fmt.Printf("Signer %s approved\n", args[0])
+		return nil
+	},
+}
+
+// ── signer access ────────────────────────────────────────────────────────────
+
+var signerAccessCmd = &cobra.Command{
+	Use:   "access",
+	Short: "Manage signer access grants",
+}
+
+var signerAccessGrantKeyID string
+
+var signerAccessGrantCmd = &cobra.Command{
+	Use:   "grant <address>",
+	Short: "Grant access to a signer for another API key (owner only)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c, err := newClientFromFlags(cmd)
+		if err != nil {
+			return err
+		}
+		if err := c.EVM.Signers.GrantAccess(cmd.Context(), args[0], &evm.GrantAccessRequest{
+			APIKeyID: signerAccessGrantKeyID,
+		}); err != nil {
+			return fmt.Errorf("grant access: %w", err)
+		}
+		fmt.Printf("Access granted to %s for signer %s\n", signerAccessGrantKeyID, args[0])
+		return nil
+	},
+}
+
+var signerAccessRevokeKeyID string
+
+var signerAccessRevokeCmd = &cobra.Command{
+	Use:   "revoke <address>",
+	Short: "Revoke access from a signer for an API key (owner only)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c, err := newClientFromFlags(cmd)
+		if err != nil {
+			return err
+		}
+		if err := c.EVM.Signers.RevokeAccess(cmd.Context(), args[0], signerAccessRevokeKeyID); err != nil {
+			return fmt.Errorf("revoke access: %w", err)
+		}
+		fmt.Printf("Access revoked from %s for signer %s\n", signerAccessRevokeKeyID, args[0])
+		return nil
+	},
+}
+
+var signerAccessListCmd = &cobra.Command{
+	Use:   "list <address>",
+	Short: "List access grants for a signer (owner only)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c, err := newClientFromFlags(cmd)
+		if err != nil {
+			return err
+		}
+		accesses, err := c.EVM.Signers.ListAccess(cmd.Context(), args[0])
+		if err != nil {
+			return fmt.Errorf("list access: %w", err)
+		}
+		if flagOutputFormat == "json" {
+			return printJSON(accesses)
+		}
+		printTable(
+			[]string{"API_KEY_ID", "GRANTED_BY", "CREATED_AT"},
+			func() [][]string {
+				rows := make([][]string, len(accesses))
+				for i, a := range accesses {
+					rows[i] = []string{a.APIKeyID, a.GrantedBy, a.CreatedAt.Format("2006-01-02T15:04:05Z")}
+				}
+				return rows
+			}(),
+		)
+		return nil
+	},
+}
+
 func init() {
 	signerUnlockCmd.Flags().StringVar(&signerUnlockPassword, "password", "", "Keystore password")
 	if err := signerUnlockCmd.MarkFlagRequired("password"); err != nil {
@@ -126,8 +222,24 @@ func init() {
 		panic(err)
 	}
 
+	signerAccessGrantCmd.Flags().StringVar(&signerAccessGrantKeyID, "to", "", "API key ID to grant access to")
+	if err := signerAccessGrantCmd.MarkFlagRequired("to"); err != nil {
+		panic(err)
+	}
+
+	signerAccessRevokeCmd.Flags().StringVar(&signerAccessRevokeKeyID, "from", "", "API key ID to revoke access from")
+	if err := signerAccessRevokeCmd.MarkFlagRequired("from"); err != nil {
+		panic(err)
+	}
+
+	signerAccessCmd.AddCommand(signerAccessGrantCmd)
+	signerAccessCmd.AddCommand(signerAccessRevokeCmd)
+	signerAccessCmd.AddCommand(signerAccessListCmd)
+
 	signerCmd.AddCommand(signerListCmd)
 	signerCmd.AddCommand(signerCreateCmd)
 	signerCmd.AddCommand(signerUnlockCmd)
 	signerCmd.AddCommand(signerLockCmd)
+	signerCmd.AddCommand(signerApproveCmd)
+	signerCmd.AddCommand(signerAccessCmd)
 }

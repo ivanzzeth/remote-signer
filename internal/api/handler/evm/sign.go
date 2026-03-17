@@ -22,6 +22,7 @@ import (
 type SignHandler struct {
 	signService    *service.SignService
 	signerManager  evm.SignerManager
+	accessService  *service.SignerAccessService
 	logger         *slog.Logger
 	alertService   *middleware.SecurityAlertService
 	signTimeout    time.Duration // context timeout for sign operations (default: 30s)
@@ -38,9 +39,12 @@ func (h *SignHandler) SetSignTimeout(d time.Duration) {
 }
 
 // NewSignHandler creates a new sign handler
-func NewSignHandler(signService *service.SignService, signerManager evm.SignerManager, logger *slog.Logger) (*SignHandler, error) {
+func NewSignHandler(signService *service.SignService, signerManager evm.SignerManager, accessService *service.SignerAccessService, logger *slog.Logger) (*SignHandler, error) {
 	if signService == nil {
 		return nil, fmt.Errorf("sign service is required")
+	}
+	if accessService == nil {
+		return nil, fmt.Errorf("access service is required")
 	}
 	if logger == nil {
 		return nil, fmt.Errorf("logger is required")
@@ -48,6 +52,7 @@ func NewSignHandler(signService *service.SignService, signerManager evm.SignerMa
 	return &SignHandler{
 		signService:   signService,
 		signerManager: signerManager,
+		accessService: accessService,
 		logger:        logger,
 	}, nil
 }
@@ -86,23 +91,6 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
 		h.writeError(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	// Check chain permission
-	if !middleware.CheckChainPermission(apiKey, types.ChainTypeEVM) {
-		h.logger.Warn("chain permission denied",
-			"api_key_id", apiKey.ID,
-			"chain_type", "evm",
-		)
-		if h.alertService != nil {
-			clientIP, _ := r.Context().Value(middleware.ClientIPContextKey).(string)
-			h.alertService.Alert(middleware.AlertChainDenied, apiKey.ID,
-				fmt.Sprintf("[Remote Signer] CHAIN ACCESS DENIED\n\nAPI Key: %s (%s)\nIP: %s\nChain: EVM\nTime: %s",
-					apiKey.ID, apiKey.Name, clientIP,
-					time.Now().UTC().Format(time.RFC3339)))
-		}
-		h.writeError(w, "not authorized for EVM chain", http.StatusForbidden)
 		return
 	}
 
@@ -150,16 +138,18 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check signer permission (includes HD wallet derived address check)
-	var hdMgr middleware.HDWalletDerivedLister
-	if h.signerManager != nil {
-		var hdErr error
-		hdMgr, hdErr = h.signerManager.HDWalletManager()
-		if hdErr != nil {
-			h.logger.Warn("failed to get HD wallet manager for permission check", "error", hdErr)
-		}
+	// Check signer access via ownership/access service
+	allowed, err := h.accessService.CheckAccess(r.Context(), apiKey.ID, req.SignerAddress)
+	if err != nil {
+		h.logger.Error("signer access check failed",
+			"api_key_id", apiKey.ID,
+			"signer_address", req.SignerAddress,
+			"error", err,
+		)
+		h.writeError(w, "failed to check signer access", http.StatusInternalServerError)
+		return
 	}
-	if !middleware.CheckSignerPermissionWithHDWallets(apiKey, req.SignerAddress, hdMgr) {
+	if !allowed {
 		h.logger.Warn("signer permission denied",
 			"api_key_id", apiKey.ID,
 			"signer_address", req.SignerAddress,

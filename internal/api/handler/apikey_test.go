@@ -464,8 +464,6 @@ func TestAPIKeyHandler_List_Empty(t *testing.T) {
 func TestAPIKeyHandler_Get_Success(t *testing.T) {
 	repo := newMockAPIKeyRepo()
 	key := makeTestAPIKey("key-get-1", "Get Key", types.APIKeySourceAPI, true)
-	key.AllowAllSigners = true
-	key.AllowedChainTypes = []string{"evm", "solana"}
 	repo.seed(key)
 
 	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
@@ -480,8 +478,6 @@ func TestAPIKeyHandler_Get_Success(t *testing.T) {
 	assert.Equal(t, "Get Key", resp.Name)
 	assert.Equal(t, "api", resp.Source)
 	assert.True(t, resp.Enabled)
-	assert.True(t, resp.AllowAllSigners)
-	assert.Equal(t, []string{"evm", "solana"}, resp.AllowedChainTypes)
 }
 
 func TestAPIKeyHandler_Get_NotFound(t *testing.T) {
@@ -552,11 +548,10 @@ func TestAPIKeyHandler_Create_Success(t *testing.T) {
 	require.NoError(t, err)
 
 	reqBody := CreateAPIKeyRequest{
-		ID:              "my-new-key",
-		Name:            "My New Key",
-		PublicKey:       "abcdef1234567890abcdef1234567890",
-		Role:            "strategy",
-		AllowAllSigners: true,
+		ID:        "my-new-key",
+		Name:      "My New Key",
+		PublicKey: "abcdef1234567890abcdef1234567890",
+		Role:      "strategy",
 	}
 
 	rr := doAPIKeyCollectionRequest(t, h, http.MethodPost, "/api/v1/api-keys", reqBody, apikeyAdminKey())
@@ -568,7 +563,6 @@ func TestAPIKeyHandler_Create_Success(t *testing.T) {
 	assert.Equal(t, "My New Key", resp.Name)
 	assert.Equal(t, types.APIKeySourceAPI, resp.Source)
 	assert.True(t, resp.Enabled)
-	assert.True(t, resp.AllowAllSigners)
 	assert.Equal(t, 100, resp.RateLimit) // default rate limit
 
 	// Verify key is stored
@@ -878,18 +872,11 @@ func TestAPIKeyHandler_Update_AllFields(t *testing.T) {
 	newEnabled := false
 	newRole := "admin"
 	newRateLimit := 200
-	newAllowAllSigners := true
-	newAllowAllHDWallets := true
 	reqBody := UpdateAPIKeyRequest{
-		Name:              &newName,
-		Enabled:           &newEnabled,
-		Role:              &newRole,
-		RateLimit:         &newRateLimit,
-		AllowAllSigners:   &newAllowAllSigners,
-		AllowAllHDWallets: &newAllowAllHDWallets,
-		AllowedSigners:    []string{"0xabc"},
-		AllowedHDWallets:  []string{"0xdef"},
-		AllowedChainTypes: []string{"evm"},
+		Name:      &newName,
+		Enabled:   &newEnabled,
+		Role:      &newRole,
+		RateLimit: &newRateLimit,
 	}
 
 	rr := doAPIKeyItemRequest(t, h, http.MethodPut, "/api/v1/api-keys/upd-all", reqBody, apikeyAdminKey())
@@ -901,11 +888,6 @@ func TestAPIKeyHandler_Update_AllFields(t *testing.T) {
 	assert.False(t, resp.Enabled)
 	assert.Equal(t, types.RoleAdmin, resp.Role)
 	assert.Equal(t, 200, resp.RateLimit)
-	assert.True(t, resp.AllowAllSigners)
-	assert.True(t, resp.AllowAllHDWallets)
-	assert.Equal(t, []string{"0xabc"}, resp.AllowedSigners)
-	assert.Equal(t, []string{"0xdef"}, resp.AllowedHDWallets)
-	assert.Equal(t, []string{"evm"}, resp.AllowedChainTypes)
 }
 
 func TestAPIKeyHandler_Update_ReadOnly(t *testing.T) {
@@ -1181,7 +1163,7 @@ func TestAPIKeyHandler_ServeKeyHTTP_MethodNotAllowed(t *testing.T) {
 // Tests: toAPIKeyResponse
 // ---------------------------------------------------------------------------
 
-func TestToAPIKeyResponse_OmitsEmptySlices(t *testing.T) {
+func TestToAPIKeyResponse_BasicFields(t *testing.T) {
 	key := &types.APIKey{
 		ID:      "resp-test",
 		Name:    "Response Test",
@@ -1190,26 +1172,9 @@ func TestToAPIKeyResponse_OmitsEmptySlices(t *testing.T) {
 	}
 
 	resp := toAPIKeyResponse(key)
-	assert.Nil(t, resp.AllowedSigners)
-	assert.Nil(t, resp.AllowedHDWallets)
-	assert.Nil(t, resp.AllowedChainTypes)
-}
-
-func TestToAPIKeyResponse_IncludesNonEmptySlices(t *testing.T) {
-	key := &types.APIKey{
-		ID:                "resp-test-2",
-		Name:              "Response Test 2",
-		Source:            types.APIKeySourceAPI,
-		Enabled:           true,
-		AllowedSigners:    []string{"0xabc"},
-		AllowedHDWallets:  []string{"0xdef"},
-		AllowedChainTypes: []string{"evm"},
-	}
-
-	resp := toAPIKeyResponse(key)
-	assert.Equal(t, []string{"0xabc"}, resp.AllowedSigners)
-	assert.Equal(t, []string{"0xdef"}, resp.AllowedHDWallets)
-	assert.Equal(t, []string{"evm"}, resp.AllowedChainTypes)
+	assert.Equal(t, "resp-test", resp.ID)
+	assert.Equal(t, "Response Test", resp.Name)
+	assert.True(t, resp.Enabled)
 }
 
 func TestToAPIKeyResponse_IncludesOptionalTimeFields(t *testing.T) {
@@ -1319,58 +1284,6 @@ func TestAPIKeyHandler_Create_PublicKeyTooLong(t *testing.T) {
 	var errResp map[string]string
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&errResp))
 	assert.Contains(t, errResp["error"], "public_key exceeds maximum length")
-}
-
-func TestAPIKeyHandler_Create_AllowedSignersTooMany(t *testing.T) {
-	repo := newMockAPIKeyRepo()
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
-	require.NoError(t, err)
-
-	signers := make([]string, 101)
-	for i := range signers {
-		signers[i] = fmt.Sprintf("0x%040d", i)
-	}
-
-	reqBody := CreateAPIKeyRequest{
-		ID:             "many-signers",
-		Name:           "Many Signers",
-		PublicKey:      "abcdef",
-		Role:           "admin",
-		AllowedSigners: signers,
-	}
-
-	rr := doAPIKeyCollectionRequest(t, h, http.MethodPost, "/api/v1/api-keys", reqBody, apikeyAdminKey())
-	assert.Equal(t, http.StatusBadRequest, rr.Code)
-
-	var errResp map[string]string
-	require.NoError(t, json.NewDecoder(rr.Body).Decode(&errResp))
-	assert.Contains(t, errResp["error"], "allowed_signers exceeds maximum")
-}
-
-func TestAPIKeyHandler_Create_AllowedHDWalletsTooMany(t *testing.T) {
-	repo := newMockAPIKeyRepo()
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
-	require.NoError(t, err)
-
-	wallets := make([]string, 101)
-	for i := range wallets {
-		wallets[i] = fmt.Sprintf("0x%040d", i)
-	}
-
-	reqBody := CreateAPIKeyRequest{
-		ID:               "many-wallets",
-		Name:             "Many Wallets",
-		PublicKey:        "abcdef",
-		Role:             "admin",
-		AllowedHDWallets: wallets,
-	}
-
-	rr := doAPIKeyCollectionRequest(t, h, http.MethodPost, "/api/v1/api-keys", reqBody, apikeyAdminKey())
-	assert.Equal(t, http.StatusBadRequest, rr.Code)
-
-	var errResp map[string]string
-	require.NoError(t, json.NewDecoder(rr.Body).Decode(&errResp))
-	assert.Contains(t, errResp["error"], "allowed_hd_wallets exceeds maximum")
 }
 
 func TestAPIKeyHandler_Update_RateLimitBounds(t *testing.T) {

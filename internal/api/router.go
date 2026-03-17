@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -37,6 +38,8 @@ type RouterConfig struct {
 	Template                 *TemplateConfig
 	ApprovalGuard            *service.ManualApprovalGuard     // optional: for admin resume endpoint
 	APIKeyRepo               storage.APIKeyRepository         // optional: for signer access visibility and API key management
+	SignerOwnershipRepo      storage.SignerOwnershipRepository // for signer ownership tracking
+	SignerAccessRepo         storage.SignerAccessRepository    // for signer access grants
 	RulesAPIReadonly         bool                             // block rule/template mutations via API
 	SignersAPIReadonly       bool                             // block signer/HD-wallet creation via API
 	APIKeysAPIReadonly       bool                             // block API key management via API
@@ -106,8 +109,30 @@ func (r *Router) setupRoutes() error {
 	// Prometheus metrics (no auth; same port as API)
 	r.mux.Handle("/metrics", middleware.SecurityHeadersMiddleware()(metrics.Handler()))
 
+	// Create SignerAccessService
+	var accessService *service.SignerAccessService
+	if r.config.SignerOwnershipRepo != nil && r.config.SignerAccessRepo != nil && r.config.APIKeyRepo != nil {
+		hdWalletMgrFn := func() (service.HDWalletParentResolver, error) {
+			if r.signerManager == nil {
+				return nil, fmt.Errorf("no signer manager")
+			}
+			return r.signerManager.HDWalletManager()
+		}
+		var svcErr error
+		accessService, svcErr = service.NewSignerAccessService(
+			r.config.SignerOwnershipRepo,
+			r.config.SignerAccessRepo,
+			r.config.APIKeyRepo,
+			hdWalletMgrFn,
+			r.logger,
+		)
+		if svcErr != nil {
+			return fmt.Errorf("failed to create signer access service: %w", svcErr)
+		}
+	}
+
 	// EVM handlers
-	signHandler, err := evmhandler.NewSignHandler(r.signService, r.signerManager, r.logger)
+	signHandler, err := evmhandler.NewSignHandler(r.signService, r.signerManager, accessService, r.logger)
 	if err != nil {
 		return err
 	}
@@ -166,7 +191,7 @@ func (r *Router) setupRoutes() error {
 		return err
 	}
 
-	signerHandler, err := evmhandler.NewSignerHandler(r.signerManager, r.config.APIKeyRepo, r.logger, r.config.SignersAPIReadonly)
+	signerHandler, err := evmhandler.NewSignerHandler(r.signerManager, accessService, r.logger, r.config.SignersAPIReadonly)
 	if err != nil {
 		return err
 	}
@@ -174,7 +199,7 @@ func (r *Router) setupRoutes() error {
 		signerHandler.SetAuditLogger(r.config.AuditLogger)
 	}
 
-	hdWalletHandler, err := evmhandler.NewHDWalletHandler(r.signerManager, r.logger, r.config.SignersAPIReadonly)
+	hdWalletHandler, err := evmhandler.NewHDWalletHandler(r.signerManager, accessService, r.logger, r.config.SignersAPIReadonly)
 	if err != nil {
 		return err
 	}
