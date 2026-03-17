@@ -334,7 +334,63 @@ GET /api/v1/evm/rules?status=pending     # admin: pending approvals
 
 ---
 
-## 6. Implementation Plan
+## 6. Code Impact Analysis
+
+### 6.1 Reuse (no change or trivial)
+
+| File | Reason |
+|------|--------|
+| `middleware/auth.go` | Ed25519 auth unchanged; just reads APIKey from context |
+| `middleware/ratelimit.go` | Already covers all routes including rule CRUD |
+| `middleware/ipwhitelist.go` | Unchanged |
+| `middleware/security_headers.go` | Unchanged |
+| `middleware/security_alert.go` | Unchanged |
+| `middleware/content_type.go` | Unchanged |
+| `middleware/logging.go` | Unchanged |
+| `internal/core/rule/whitelist.go` (core evaluation) | Two-phase engine (blocklist → whitelist) unchanged; add pre-filter only |
+| `internal/core/service/sign.go` | Sign flow unchanged |
+| `internal/core/service/approval.go` | Sign request approval unchanged; rule approval reuses same pattern |
+| `internal/core/service/approval_guard.go` | Unchanged |
+| `internal/audit/logger.go` (framework) | Reuse audit framework; add new event types + diff |
+
+### 6.2 Delete & Rewrite
+
+| File | Action |
+|------|--------|
+| `middleware/admin.go` | **DELETE** — replaced by rbac.go |
+| `middleware/agent.go` | **DELETE** — replaced by rbac.go |
+| **NEW** `middleware/rbac.go` | Static permission matrix, `RequirePermission(perm)` middleware |
+| `internal/core/types/auth.go` | **REWRITE** APIKey struct: `Admin bool` + `Agent bool` → `Role APIKeyRole` |
+| `internal/config/config.go` (APIKeyConfig) | **REWRITE** `Admin bool` + `Agent bool` → `Role string` |
+| `internal/config/apikey_init.go` | **REWRITE** all `.Admin` / `.Agent` → `.Role` |
+| `internal/api/handler/apikey.go` | **REWRITE** request/response structs: Admin/Agent bools → Role |
+| `internal/api/router.go` | **REWRITE** `withAuthAndAdmin()` / `withAuthAndAgentOrAdmin()` → `withAuth(rbac.Require(Perm))` |
+
+### 6.3 Extend (medium changes)
+
+| File | Changes |
+|------|---------|
+| `internal/core/types/rule.go` | Add `Owner`, `AppliedTo pq.StringArray`, `Status`, `ApprovedBy`, `Immutable`; delete `APIKeyID` |
+| `internal/api/handler/evm/rule.go` | Owner/applied_to enforcement on CRUD; type restriction for agent; approve/reject endpoints |
+| `internal/api/handler/evm/signer.go` | Delete ~5 `apiKey.Admin`/`apiKey.Agent` checks (rbac middleware handles) |
+| `internal/api/handler/evm/hdwallet.go` | Delete ~2 `apiKey.Admin` checks |
+| `internal/api/handler/evm/request.go` | Delete ~2 `apiKey.Admin` checks |
+| `internal/config/rule_init.go` | Config-sourced rules set `owner="config"`, `applied_to=["*"]`, `status="active"` |
+| `internal/audit/logger.go` | `LogRuleUpdated` adds old/new config JSON diff; new `LogRuleApproved`, `LogRuleRejected` |
+| `internal/core/rule/whitelist.go` | `Evaluate` entry adds rule pre-filter by `applied_to` + `status` |
+
+### 6.4 Summary
+
+| Category | Files | Effort |
+|----------|-------|--------|
+| Reuse (no change) | 10+ | Zero |
+| Delete & Rewrite | 8 (2 delete, 1 new, 5 rewrite) | High |
+| Extend | 8 | Medium |
+| **Total touched** | **~16 files** | |
+
+---
+
+## 7. Implementation Plan
 
 **This is v1.0.0 — a clean break. No backward compatibility with pre-v1 config/schema.**
 
