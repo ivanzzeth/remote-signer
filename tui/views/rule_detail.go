@@ -460,6 +460,12 @@ func (m *RuleDetailModel) renderDetail() string {
 	if m.rule.Owner != nil {
 		info = append(info, struct{ key, value string }{"Owner", *m.rule.Owner})
 	}
+	if len(m.rule.AppliedTo) > 0 {
+		info = append(info, struct{ key, value string }{"Applied To", strings.Join(m.rule.AppliedTo, ", ")})
+	}
+	if m.rule.Status != "" {
+		info = append(info, struct{ key, value string }{"Status", m.rule.Status})
+	}
 	if m.rule.SignerAddress != nil {
 		info = append(info, struct{ key, value string }{"Signer", *m.rule.SignerAddress})
 	}
@@ -488,6 +494,16 @@ func (m *RuleDetailModel) renderDetail() string {
 				valueStr = styles.SuccessStyle.Render("Yes")
 			} else {
 				valueStr = styles.MutedColor.Render("No")
+			}
+		}
+		if item.key == "Status" {
+			switch item.value {
+			case "active":
+				valueStr = styles.SuccessStyle.Render(item.value)
+			case "pending_approval":
+				valueStr = styles.WarningStyle.Render(item.value)
+			case "rejected":
+				valueStr = styles.ErrorStyle.Render(item.value)
 			}
 		}
 		content.WriteString(fmt.Sprintf("%s %s\n", keyStr, valueStr))
