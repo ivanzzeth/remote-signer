@@ -143,6 +143,106 @@ var simulateStatusCmd = &cobra.Command{
 	},
 }
 
+// ── simulate batch ──────────────────────────────────────────────────────────
+
+var (
+	simBatchChainID string
+	simBatchFrom    string
+	simBatchTxs     []string // format: "to:value:data" per tx
+)
+
+var simulateBatchCmd = &cobra.Command{
+	Use:   "batch --chain-id <id> --from <addr> --tx <to>:<value>:<data> [--tx ...]",
+	Short: "Simulate multiple transactions in sequence (batch)",
+	Long: `Simulate multiple transactions in a single batch. Each --tx flag is "to:value:data".
+Example: simulate batch --chain-id 137 --from 0xABC --tx 0xUSDC:0x0:0x095ea7b3... --tx 0xRouter:0x0:0xf2c42696...`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(simBatchTxs) == 0 {
+			return fmt.Errorf("at least one --tx is required")
+		}
+
+		c, err := newClientFromFlags(cmd)
+		if err != nil {
+			return err
+		}
+
+		var txs []evm.SimulateTxDTO
+		for _, raw := range simBatchTxs {
+			parts := splitBatchTx(raw)
+			if len(parts) < 3 {
+				return fmt.Errorf("invalid --tx format %q, expected to:value:data", raw)
+			}
+			txs = append(txs, evm.SimulateTxDTO{
+				To:    parts[0],
+				Value: parts[1],
+				Data:  parts[2],
+			})
+		}
+
+		resp, err := c.EVM.Simulate.SimulateBatch(context.Background(), &evm.SimulateBatchRequest{
+			ChainID:      simBatchChainID,
+			From:         simBatchFrom,
+			Transactions: txs,
+		})
+		if err != nil {
+			return fmt.Errorf("batch simulation failed: %w", err)
+		}
+
+		if flagOutputFormat == "json" {
+			return printJSON(resp)
+		}
+
+		for i, r := range resp.Results {
+			status := "SUCCESS"
+			if !r.Success {
+				status = "REVERTED"
+			}
+			fmt.Printf("Tx %d: %s  gas=%d  approval=%v\n", i, status, r.GasUsed, r.HasApproval)
+			if r.RevertReason != "" {
+				fmt.Printf("  Revert: %s\n", r.RevertReason)
+			}
+			for _, bc := range r.BalanceChanges {
+				fmt.Printf("  %s %s: %s (%s)\n", bc.Token, bc.Direction, bc.Amount, bc.Standard)
+			}
+		}
+
+		if len(resp.NetBalanceChanges) > 0 {
+			fmt.Println("\nNet Balance Changes:")
+			printTable(
+				[]string{"TOKEN", "STANDARD", "AMOUNT", "DIRECTION"},
+				func() [][]string {
+					rows := make([][]string, len(resp.NetBalanceChanges))
+					for i, bc := range resp.NetBalanceChanges {
+						rows[i] = []string{bc.Token, bc.Standard, bc.Amount, bc.Direction}
+					}
+					return rows
+				}(),
+			)
+		}
+
+		return nil
+	},
+}
+
+// splitBatchTx splits "to:value:data" — data may contain colons (hex), so split on first 2 only.
+func splitBatchTx(s string) []string {
+	// Split into at most 3 parts: to, value, data (data can contain ':')
+	parts := make([]string, 0, 3)
+	for i := 0; i < 2; i++ {
+		idx := 0
+		for idx < len(s) && s[idx] != ':' {
+			idx++
+		}
+		if idx >= len(s) {
+			break
+		}
+		parts = append(parts, s[:idx])
+		s = s[idx+1:]
+	}
+	parts = append(parts, s)
+	return parts
+}
+
 func init() {
 	simulateTxCmd.Flags().StringVar(&simChainID, "chain-id", "1", "Chain ID")
 	simulateTxCmd.Flags().StringVar(&simFrom, "from", "", "Sender address (0x-prefixed)")
@@ -158,7 +258,15 @@ func init() {
 		panic(err)
 	}
 
+	simulateBatchCmd.Flags().StringVar(&simBatchChainID, "chain-id", "1", "Chain ID")
+	simulateBatchCmd.Flags().StringVar(&simBatchFrom, "from", "", "Sender address")
+	simulateBatchCmd.Flags().StringArrayVar(&simBatchTxs, "tx", nil, "Transaction in format to:value:data (repeatable)")
+	if err := simulateBatchCmd.MarkFlagRequired("from"); err != nil {
+		panic(err)
+	}
+
 	simulateCmd.AddCommand(simulateTxCmd)
+	simulateCmd.AddCommand(simulateBatchCmd)
 	simulateCmd.AddCommand(simulateStatusCmd)
 }
 

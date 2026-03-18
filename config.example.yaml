@@ -90,6 +90,7 @@ chains:
       sync_interval: "60s"                 # periodic health check / restart interval
       timeout: "60s"                       # per-simulation timeout (includes remote RPC state fetch)
       max_chains: 10                       # max concurrent anvil forks
+      prune_history: 0                     # anvil --prune-history: max states in memory (0=minimal, -1=keep all)
       batch_window: "1s"                   # accumulation window for future batch sign fallback
       batch_max_size: 20                   # max txs per batch
 

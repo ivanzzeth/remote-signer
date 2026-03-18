@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"log/slog"
 	"net"
 	"net/http"
@@ -52,6 +53,7 @@ type AnvilForkManagerConfig struct {
 	SyncInterval   time.Duration
 	Timeout        time.Duration
 	MaxChains      int
+	PruneHistory   int // anvil --prune-history: max states in memory (0 = minimal, -1 = disabled/keep all)
 }
 
 // anvilInstance represents a running anvil process.
@@ -200,12 +202,20 @@ func (m *anvilForkManagerImpl) startInstance(ctx context.Context, chainID string
 		"--no-mining",
 		"--silent",
 	}
+	// Limit memory usage: prune historical states
+	if m.cfg.PruneHistory >= 0 {
+		args = append(args, "--prune-history", strconv.Itoa(m.cfg.PruneHistory))
+	}
 
 	// Use background context: anvil is a persistent process that must outlive individual requests.
 	// The request ctx is only used for waiting on readiness, not for the process lifecycle.
 	cmd := exec.CommandContext(context.Background(), m.cfg.AnvilPath, args...) // #nosec G204 -- admin-configured
 	cmd.Stdout = nil
-	cmd.Stderr = nil
+	// Capture stderr so we can see crash messages
+	stderrPipe, pipeErr := cmd.StderrPipe()
+	if pipeErr != nil {
+		return nil, fmt.Errorf("failed to create stderr pipe for anvil: %w", pipeErr)
+	}
 
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start anvil for chain %s: %w", chainID, err)
@@ -217,6 +227,25 @@ func (m *anvilForkManagerImpl) startInstance(ctx context.Context, chainID string
 		rpcURL:  rpcURL,
 		port:    port,
 	}
+
+	// Background goroutine: wait for anvil to exit and log the reason.
+	// This ensures we know immediately when anvil dies (not just at the next health check).
+	go func() {
+		// Read stderr in background
+		stderrBytes, _ := io.ReadAll(stderrPipe)
+		waitErr := cmd.Wait()
+		exitCode := -1
+		if cmd.ProcessState != nil {
+			exitCode = cmd.ProcessState.ExitCode()
+		}
+		stderrStr := strings.TrimSpace(string(stderrBytes))
+		m.logger.Error("anvil process exited unexpectedly",
+			"chain_id", chainID,
+			"exit_code", exitCode,
+			"error", waitErr,
+			"stderr", stderrStr,
+		)
+	}()
 
 	// Wait for anvil to become ready
 	if err := m.waitForReady(ctx, inst); err != nil {

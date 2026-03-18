@@ -222,12 +222,13 @@ type FoundryConfig struct {
 // Uses anvil (Foundry) to fork chains and simulate transactions locally.
 type SimulationConfig struct {
 	Enabled      bool          `yaml:"enabled"`
-	AnvilPath    string        `yaml:"anvil_path"`     // path to anvil binary, empty = "data/foundry/anvil" then PATH
-	SyncInterval time.Duration `yaml:"sync_interval"`  // periodic anvil_reset interval (default: 60s)
-	Timeout      time.Duration `yaml:"timeout"`        // per-simulation timeout (default: 10s)
-	MaxChains    int           `yaml:"max_chains"`     // max concurrent anvil forks (default: 10)
-	BatchWindow  time.Duration `yaml:"batch_window"`   // accumulation window for single sign fallback (default: 1s)
-	BatchMaxSize int           `yaml:"batch_max_size"` // max txs per batch (default: 20)
+	AnvilPath    string        `yaml:"anvil_path"`      // path to anvil binary, empty = "data/foundry/anvil" then PATH
+	SyncInterval time.Duration `yaml:"sync_interval"`   // periodic health check interval (default: 60s)
+	Timeout      time.Duration `yaml:"timeout"`         // per-simulation timeout (default: 60s)
+	MaxChains    int           `yaml:"max_chains"`      // max concurrent anvil forks (default: 10)
+	BatchWindow  time.Duration `yaml:"batch_window"`    // accumulation window for single sign fallback (default: 1s)
+	BatchMaxSize int           `yaml:"batch_max_size"`  // max txs per batch (default: 20)
+	PruneHistory int           `yaml:"prune_history"`   // anvil --prune-history: max states in memory (default: 0 = minimal)
 }
 
 // SecurityConfig contains security-related settings
