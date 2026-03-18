@@ -428,6 +428,11 @@ func (m *anvilForkManagerImpl) simulateSingleTx(ctx context.Context, inst *anvil
 		txObj["gas"] = gas
 	}
 
+	// Impersonate sender so anvil accepts the tx without a private key
+	if _, impErr := m.doAnvilRPC(ctx, inst, "anvil_impersonateAccount", []interface{}{from}); impErr != nil {
+		return nil, fmt.Errorf("impersonate account failed: %w", impErr)
+	}
+
 	// eth_sendTransaction (local execution)
 	txHashRaw, err := m.doAnvilRPC(ctx, inst, "eth_sendTransaction", []interface{}{txObj})
 	if err != nil {

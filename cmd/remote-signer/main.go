@@ -735,6 +735,17 @@ func run() error {
 		)
 	}
 
+	// Wire simulation fallback to sign service
+	if simulator != nil {
+		simRule, simRuleErr := evm.NewSimulationBudgetRule(simulator, nil, log)
+		if simRuleErr != nil {
+			log.Warn("failed to create simulation budget rule", "error", simRuleErr)
+		} else {
+			signService.SetSimulationRule(simRule)
+			log.Info("simulation budget rule enabled for sign service fallback")
+		}
+	}
+
 	// Initialize router
 	routerConfig := api.RouterConfig{
 		Version:                  version,

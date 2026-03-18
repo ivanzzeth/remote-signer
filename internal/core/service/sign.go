@@ -11,6 +11,7 @@ import (
 
 	"github.com/ivanzzeth/remote-signer/internal/audit"
 	"github.com/ivanzzeth/remote-signer/internal/chain"
+	evmchain "github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/statemachine"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
@@ -29,8 +30,9 @@ type SignService struct {
 	stateMachine          *statemachine.StateMachine
 	approvalService       *ApprovalService
 	auditLogger           *audit.AuditLogger   // optional: persistent audit logging
-	approvalGuard         *ManualApprovalGuard // optional: pauses requests when too many consecutive manual-approval outcomes
-	manualApprovalEnabled bool                // when false, no whitelist match → reject immediately
+	approvalGuard         *ManualApprovalGuard        // optional: pauses requests when too many consecutive manual-approval outcomes
+	simulationRule        *evmchain.SimulationBudgetRule // optional: simulation-based budget fallback for unmatched transactions
+	manualApprovalEnabled bool                         // when false, no whitelist match → reject immediately
 	logger                *slog.Logger
 }
 
@@ -87,6 +89,13 @@ func (s *SignService) SetApprovalGuard(guard *ManualApprovalGuard) {
 // or are rejected immediately (false). Default is false. Call after construction from config.
 func (s *SignService) SetManualApprovalEnabled(enabled bool) {
 	s.manualApprovalEnabled = enabled
+}
+
+// SetSimulationRule sets the optional simulation-based budget fallback rule.
+// When set, unmatched transactions are simulated on an anvil fork and budget
+// is checked against actual token outflows before signing.
+func (s *SignService) SetSimulationRule(rule *evmchain.SimulationBudgetRule) {
+	s.simulationRule = rule
 }
 
 // SignRequest represents a request to sign data
@@ -239,7 +248,40 @@ func (s *SignService) Sign(ctx context.Context, req *SignRequest) (*SignResponse
 		return s.processApprovedRequest(ctx, signReq, matchedRuleID, nil, reason, adapter)
 	}
 
-	// No whitelist rule matched
+	// No whitelist rule matched — try simulation fallback before manual approval
+	if s.simulationRule != nil && s.simulationRule.Available() {
+		outcome, simErr := s.simulationRule.EvaluateSingle(ctx, signReq, parsed)
+		if simErr != nil {
+			s.logger.Error("simulation fallback error", "request_id", signReq.ID, "error", simErr)
+		} else if outcome.Decision == "allow" {
+			s.logger.Info("request allowed by simulation fallback",
+				"request_id", signReq.ID,
+			)
+			if s.approvalGuard != nil {
+				s.approvalGuard.RecordNonManualApproval()
+			}
+			return s.processApprovedRequest(ctx, signReq, nil, nil, "simulation-approved", adapter)
+		} else if outcome.Decision == "deny" {
+			reason := "simulation budget exceeded"
+			s.logger.Warn("request denied by simulation fallback",
+				"request_id", signReq.ID,
+				"reason", reason,
+			)
+			if s.approvalGuard != nil {
+				s.approvalGuard.RecordRuleRejected()
+			}
+			if _, smErr := s.stateMachine.RejectOnAuthorization(ctx, signReq.ID, "simulation", reason); smErr != nil {
+				s.logger.Error("failed to reject request", "error", smErr)
+			}
+			return &SignResponse{
+				RequestID: signReq.ID,
+				Status:    types.StatusRejected,
+				Message:   reason,
+			}, nil
+		}
+		// outcome.Decision == "no_match" — simulation didn't apply, fall through to manual approval
+	}
+
 	if !s.manualApprovalEnabled {
 		if s.approvalGuard != nil {
 			s.approvalGuard.RecordRuleRejected()
