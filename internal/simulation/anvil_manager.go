@@ -313,14 +313,31 @@ func (m *anvilForkManagerImpl) restartInstance(ctx context.Context, inst *anvilI
 		"--silent",
 	}
 
-	cmd := exec.CommandContext(ctx, m.cfg.AnvilPath, args...) // #nosec G204
+	// Use background context for restart too — must not be tied to any request context
+	cmd := exec.CommandContext(context.Background(), m.cfg.AnvilPath, args...) // #nosec G204
 	cmd.Stdout = nil
-	cmd.Stderr = nil
-
+	// Capture stderr for crash diagnostics
+	restartStderrPipe, _ := cmd.StderrPipe()
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to restart anvil for chain %s: %w", inst.chainID, err)
 	}
 	inst.cmd = cmd
+
+	// Monitor restarted process
+	go func() {
+		stderrBytes, _ := io.ReadAll(restartStderrPipe)
+		waitErr := cmd.Wait()
+		exitCode := -1
+		if cmd.ProcessState != nil {
+			exitCode = cmd.ProcessState.ExitCode()
+		}
+		m.logger.Error("restarted anvil process exited",
+			"chain_id", inst.chainID,
+			"exit_code", exitCode,
+			"error", waitErr,
+			"stderr", strings.TrimSpace(string(stderrBytes)),
+		)
+	}()
 
 	if err := m.waitForReady(ctx, inst); err != nil {
 		if killErr := cmd.Process.Kill(); killErr != nil {
@@ -335,9 +352,14 @@ func (m *anvilForkManagerImpl) restartInstance(ctx context.Context, inst *anvilI
 }
 
 // Simulate simulates a single transaction.
+// Uses an independent context (not tied to HTTP request) so that client disconnects
+// don't kill the anvil process mid-simulation.
 func (m *anvilForkManagerImpl) Simulate(ctx context.Context, req *SimulationRequest) (*SimulationResult, error) {
 	start := time.Now()
-	simCtx, cancel := context.WithTimeout(ctx, m.cfg.Timeout)
+	// Independent context: simulation must complete even if the caller's context is canceled
+	// (e.g., HTTP client timeout). Otherwise anvil RPC calls get interrupted mid-execution,
+	// leaving the fork in a broken state.
+	simCtx, cancel := context.WithTimeout(context.Background(), m.cfg.Timeout)
 	defer cancel()
 
 	inst, err := m.getOrStartInstance(simCtx, req.ChainID)
@@ -382,10 +404,13 @@ func (m *anvilForkManagerImpl) Simulate(ctx context.Context, req *SimulationRequ
 }
 
 // SimulateBatch simulates multiple transactions in sequence.
+// SimulateBatch simulates multiple transactions in sequence.
+// Uses an independent context (not tied to HTTP request) to prevent client disconnects
+// from killing anvil mid-simulation.
 func (m *anvilForkManagerImpl) SimulateBatch(ctx context.Context, req *BatchSimulationRequest) (*BatchSimulationResult, error) {
 	start := time.Now()
 	metrics.RecordSimulationBatchSize(len(req.Transactions))
-	simCtx, cancel := context.WithTimeout(ctx, m.cfg.Timeout)
+	simCtx, cancel := context.WithTimeout(context.Background(), m.cfg.Timeout)
 	defer cancel()
 
 	inst, err := m.getOrStartInstance(simCtx, req.ChainID)

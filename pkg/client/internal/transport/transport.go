@@ -46,7 +46,7 @@ func NewTransport(cfg Config, auth *Auth) (*Transport, error) {
 
 	httpClient := cfg.HTTPClient
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 30 * time.Second}
+		httpClient = &http.Client{Timeout: 120 * time.Second}
 	}
 
 	if cfg.TLS != nil {
