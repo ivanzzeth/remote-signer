@@ -717,6 +717,7 @@ func run() error {
 			Timeout:       cfg.Chains.EVM.Simulation.Timeout,
 			MaxChains:     cfg.Chains.EVM.Simulation.MaxChains,
 			PruneHistory:  cfg.Chains.EVM.Simulation.PruneHistory,
+			CacheDir:      cfg.Chains.EVM.Simulation.CacheDir,
 		}
 		var simErr error
 		simulator, simErr = simulation.NewAnvilForkManager(simCfg, log)

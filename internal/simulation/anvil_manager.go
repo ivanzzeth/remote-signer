@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"os/exec"
 	"strconv"
 	"sync"
@@ -53,7 +54,8 @@ type AnvilForkManagerConfig struct {
 	SyncInterval   time.Duration
 	Timeout        time.Duration
 	MaxChains      int
-	PruneHistory   int // anvil --prune-history: max states in memory (0 = minimal, -1 = disabled/keep all)
+	PruneHistory   int    // anvil --prune-history: max states in memory (0 = minimal, -1 = disabled/keep all)
+	CacheDir       string // directory for anvil fork RPC cache (persists across restarts)
 }
 
 // anvilInstance represents a running anvil process.
@@ -100,6 +102,14 @@ func NewAnvilForkManager(cfg AnvilForkManagerConfig, logger *slog.Logger) (Anvil
 		anvilPath = pathLookup
 	}
 	cfg.AnvilPath = anvilPath
+
+	// Ensure cache directory exists for persistent fork RPC cache
+	if cfg.CacheDir != "" {
+		if mkErr := os.MkdirAll(cfg.CacheDir, 0755); mkErr != nil {
+			return nil, fmt.Errorf("failed to create anvil cache dir %s: %w", cfg.CacheDir, mkErr)
+		}
+		logger.Info("anvil cache directory ready", "path", cfg.CacheDir)
+	}
 
 	// Verify anvil is executable
 	verifyCtx, verifyCancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -211,6 +221,13 @@ func (m *anvilForkManagerImpl) startInstance(ctx context.Context, chainID string
 	// The request ctx is only used for waiting on readiness, not for the process lifecycle.
 	cmd := exec.CommandContext(context.Background(), m.cfg.AnvilPath, args...) // #nosec G204 -- admin-configured
 	cmd.Stdout = nil
+	// Set FOUNDRY_HOME so anvil persists fork RPC cache to disk.
+	// This survives anvil restarts — subsequent forks of the same chain skip remote RPC calls.
+	if m.cfg.CacheDir != "" {
+		absCache, _ := filepath.Abs(m.cfg.CacheDir)
+		cmd.Env = append(os.Environ(), "FOUNDRY_HOME="+absCache)
+	}
+
 	// Capture stderr so we can see crash messages
 	stderrPipe, pipeErr := cmd.StderrPipe()
 	if pipeErr != nil {

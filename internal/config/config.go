@@ -229,6 +229,7 @@ type SimulationConfig struct {
 	BatchWindow  time.Duration `yaml:"batch_window"`    // accumulation window for single sign fallback (default: 1s)
 	BatchMaxSize int           `yaml:"batch_max_size"`  // max txs per batch (default: 20)
 	PruneHistory int           `yaml:"prune_history"`   // anvil --prune-history: max states in memory (default: 0 = minimal)
+	CacheDir     string        `yaml:"cache_dir"`       // anvil fork RPC cache directory (default: data/anvil-cache). Persists across restarts.
 }
 
 // SecurityConfig contains security-related settings
@@ -561,6 +562,9 @@ func setDefaults(cfg *Config) {
 		}
 		if sim.BatchMaxSize <= 0 {
 			sim.BatchMaxSize = 20
+		}
+		if sim.CacheDir == "" {
+			sim.CacheDir = "data/anvil-cache"
 		}
 	}
 
