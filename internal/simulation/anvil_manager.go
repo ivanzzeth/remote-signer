@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/ivanzzeth/remote-signer/internal/metrics"
 )
 
 const (
@@ -34,6 +36,9 @@ type AnvilForkManager interface {
 
 	// MarkDirty marks a chain for lazy sync (call after tx broadcast).
 	MarkDirty(chainID string)
+
+	// Status returns the status of all running anvil fork instances.
+	Status(ctx context.Context) *ManagerStatus
 
 	// Close shuts down all anvil processes.
 	Close() error
@@ -293,28 +298,33 @@ func (m *anvilForkManagerImpl) restartInstance(ctx context.Context, inst *anvilI
 		return fmt.Errorf("restarted anvil for chain %s failed to become ready: %w", inst.chainID, err)
 	}
 
+	metrics.RecordAnvilForkRestart(inst.chainID)
 	m.logger.Info("anvil fork restarted", "chain_id", inst.chainID, "restart_count", inst.restartCount)
 	return nil
 }
 
 // Simulate simulates a single transaction.
 func (m *anvilForkManagerImpl) Simulate(ctx context.Context, req *SimulationRequest) (*SimulationResult, error) {
+	start := time.Now()
 	simCtx, cancel := context.WithTimeout(ctx, m.cfg.Timeout)
 	defer cancel()
 
 	inst, err := m.getOrStartInstance(simCtx, req.ChainID)
 	if err != nil {
+		metrics.RecordSimulationRequest(req.ChainID, metrics.SimStatusError, time.Since(start))
 		return nil, err
 	}
 
 	// Sync if dirty
 	if err := m.syncIfDirtyInternal(simCtx, inst); err != nil {
+		metrics.RecordSimulationRequest(req.ChainID, metrics.SimStatusError, time.Since(start))
 		return nil, fmt.Errorf("sync failed: %w", err)
 	}
 
 	// Snapshot
 	snapshotID, err := m.snapshot(simCtx, inst)
 	if err != nil {
+		metrics.RecordSimulationRequest(req.ChainID, metrics.SimStatusError, time.Since(start))
 		return nil, fmt.Errorf("snapshot failed: %w", err)
 	}
 
@@ -327,30 +337,42 @@ func (m *anvilForkManagerImpl) Simulate(ctx context.Context, req *SimulationRequ
 	}
 
 	if err != nil {
+		metrics.RecordSimulationRequest(req.ChainID, metrics.SimStatusError, time.Since(start))
 		return nil, err
 	}
+
+	status := metrics.SimStatusSuccess
+	if !result.Success {
+		status = metrics.SimStatusRevert
+	}
+	metrics.RecordSimulationRequest(req.ChainID, status, time.Since(start))
 
 	return result, nil
 }
 
 // SimulateBatch simulates multiple transactions in sequence.
 func (m *anvilForkManagerImpl) SimulateBatch(ctx context.Context, req *BatchSimulationRequest) (*BatchSimulationResult, error) {
+	start := time.Now()
+	metrics.RecordSimulationBatchSize(len(req.Transactions))
 	simCtx, cancel := context.WithTimeout(ctx, m.cfg.Timeout)
 	defer cancel()
 
 	inst, err := m.getOrStartInstance(simCtx, req.ChainID)
 	if err != nil {
+		metrics.RecordSimulationRequest(req.ChainID, metrics.SimStatusError, time.Since(start))
 		return nil, err
 	}
 
 	// Sync if dirty
 	if err := m.syncIfDirtyInternal(simCtx, inst); err != nil {
+		metrics.RecordSimulationRequest(req.ChainID, metrics.SimStatusError, time.Since(start))
 		return nil, fmt.Errorf("sync failed: %w", err)
 	}
 
 	// Snapshot
 	snapshotID, err := m.snapshot(simCtx, inst)
 	if err != nil {
+		metrics.RecordSimulationRequest(req.ChainID, metrics.SimStatusError, time.Since(start))
 		return nil, fmt.Errorf("snapshot failed: %w", err)
 	}
 
@@ -364,6 +386,7 @@ func (m *anvilForkManagerImpl) SimulateBatch(ctx context.Context, req *BatchSimu
 			if revertErr := m.revert(simCtx, inst, snapshotID); revertErr != nil {
 				m.logger.Error("revert failed after batch simulation error", "chain_id", req.ChainID, "error", revertErr)
 			}
+			metrics.RecordSimulationRequest(req.ChainID, metrics.SimStatusError, time.Since(start))
 			return nil, fmt.Errorf("simulation failed for tx %d: %w", len(results), err)
 		}
 		results = append(results, *result)
@@ -377,6 +400,8 @@ func (m *anvilForkManagerImpl) SimulateBatch(ctx context.Context, req *BatchSimu
 
 	// Compute net balance changes
 	netChanges := ComputeNetBalanceChanges(results, req.From)
+
+	metrics.RecordSimulationRequest(req.ChainID, metrics.SimStatusSuccess, time.Since(start))
 
 	return &BatchSimulationResult{
 		Results:           results,
@@ -498,6 +523,7 @@ func (m *anvilForkManagerImpl) syncIfDirtyInternal(ctx context.Context, inst *an
 	}
 
 	inst.dirty = false
+	metrics.RecordAnvilForkSync(inst.chainID)
 	m.logger.Debug("anvil fork synced (dirty flag cleared)", "chain_id", inst.chainID)
 	return nil
 }
@@ -515,6 +541,60 @@ func (m *anvilForkManagerImpl) MarkDirty(chainID string) {
 	inst.mu.Lock()
 	inst.dirty = true
 	inst.mu.Unlock()
+}
+
+// Status returns the status of all running anvil fork instances.
+func (m *anvilForkManagerImpl) Status(ctx context.Context) *ManagerStatus {
+	m.mu.RLock()
+	chains := make(map[string]*anvilInstance, len(m.instances))
+	for chainID, inst := range m.instances {
+		chains[chainID] = inst
+	}
+	anvilPath := m.cfg.AnvilPath
+	m.mu.RUnlock()
+
+	// Get anvil version
+	verCtx, verCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer verCancel()
+	verOut, verErr := exec.CommandContext(verCtx, anvilPath, "--version").CombinedOutput() // #nosec G204 -- admin-configured path
+	anvilVersion := ""
+	if verErr == nil {
+		anvilVersion = string(bytes.TrimSpace(verOut))
+	}
+
+	status := &ManagerStatus{
+		Enabled:      true,
+		AnvilVersion: anvilVersion,
+		Chains:       make(map[string]*ChainStatus, len(chains)),
+	}
+
+	for chainID, inst := range chains {
+		cs := &ChainStatus{
+			Port: inst.port,
+		}
+
+		inst.mu.Lock()
+		cs.RestartCount = inst.restartCount
+		cs.Dirty = inst.dirty
+		inst.mu.Unlock()
+
+		// Health check: get block number
+		blockRaw, err := m.doAnvilRPC(ctx, inst, "eth_blockNumber", nil)
+		if err != nil {
+			cs.Status = "unhealthy"
+			cs.Error = err.Error()
+		} else {
+			cs.Status = "healthy"
+			var blockNum string
+			if jsonErr := json.Unmarshal(blockRaw, &blockNum); jsonErr == nil {
+				cs.BlockNumber = blockNum
+			}
+		}
+
+		status.Chains[chainID] = cs
+	}
+
+	return status
 }
 
 // Close shuts down all anvil processes.

@@ -67,11 +67,27 @@ chains:
     # Transaction simulation engine (anvil fork)
     # Simulates transactions on a local anvil fork to predict balance changes,
     # gas usage, and detect approvals. Requires anvil binary (Foundry).
-    # Endpoints: POST /api/v1/evm/simulate, POST /api/v1/evm/simulate/batch
+    #
+    # API Endpoints:
+    #   POST /api/v1/evm/simulate        — simulate a single transaction
+    #   POST /api/v1/evm/simulate/batch  — simulate multiple transactions in sequence
+    #   GET  /api/v1/evm/simulate/status — health/status of all anvil fork instances
+    #   POST /api/v1/evm/sign/batch      — simulate + sign atomically (requires rule engine)
+    #
+    # CLI:
+    #   remote-signer-cli evm simulate tx --chain-id 1 --from 0x... --to 0x... --data 0x...
+    #   remote-signer-cli evm simulate status
+    #
+    # Prometheus Metrics (on /metrics):
+    #   remote_signer_simulation_requests_total{chain_id, status}
+    #   remote_signer_simulation_duration_seconds{chain_id}
+    #   remote_signer_simulation_batch_size
+    #   remote_signer_anvil_fork_sync_total{chain_id}
+    #   remote_signer_anvil_fork_restarts_total{chain_id}
     simulation:
       enabled: false
       anvil_path: "data/foundry/anvil"     # path to anvil binary (default: data/foundry/anvil, then PATH)
-      sync_interval: "60s"                 # periodic fork reset interval
+      sync_interval: "60s"                 # periodic health check / restart interval
       timeout: "60s"                       # per-simulation timeout (includes remote RPC state fetch)
       max_chains: 10                       # max concurrent anvil forks
       batch_window: "1s"                   # accumulation window for future batch sign fallback

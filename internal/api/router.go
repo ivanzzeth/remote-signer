@@ -277,6 +277,7 @@ func (r *Router) setupRoutes() error {
 		}
 		r.mux.Handle("/api/v1/evm/simulate", r.withAuthAndPerm(middleware.PermSignRequest, simulateHandler))
 		r.mux.Handle("/api/v1/evm/simulate/batch", r.withAuthAndPerm(middleware.PermSignRequest, http.HandlerFunc(simulateHandler.ServeBatchHTTP)))
+		r.mux.Handle("/api/v1/evm/simulate/status", r.withAuthAndPerm(middleware.PermSignRequest, http.HandlerFunc(simulateHandler.ServeStatusHTTP)))
 	}
 
 	// Batch sign route (optional, requires rule engine; simulation rule is optional)

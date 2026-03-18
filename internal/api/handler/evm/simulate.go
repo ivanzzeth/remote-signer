@@ -215,6 +215,17 @@ func (h *SimulateHandler) ServeBatchHTTP(w http.ResponseWriter, r *http.Request)
 	h.writeJSON(w, resp, http.StatusOK)
 }
 
+// ServeStatusHTTP handles GET /api/v1/evm/simulate/status.
+func (h *SimulateHandler) ServeStatusHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	status := h.simulator.Status(r.Context())
+	h.writeJSON(w, status, http.StatusOK)
+}
+
 // toBalanceChangeJSON converts simulation BalanceChange to JSON-friendly format.
 func toBalanceChangeJSON(changes []simulation.BalanceChange) []BalanceChangeJSON {
 	result := make([]BalanceChangeJSON, len(changes))

@@ -81,6 +81,33 @@ type SimulateResultDTO struct {
 	RevertReason   string             `json:"revert_reason,omitempty"`
 }
 
+// SimulationStatusResponse is the response from GET /api/v1/evm/simulate/status.
+type SimulationStatusResponse struct {
+	Enabled      bool                         `json:"enabled"`
+	AnvilVersion string                       `json:"anvil_version"`
+	Chains       map[string]ChainStatusDTO    `json:"chains"`
+}
+
+// ChainStatusDTO is the status of a single anvil fork instance.
+type ChainStatusDTO struct {
+	Status       string `json:"status"`
+	Port         int    `json:"port"`
+	BlockNumber  string `json:"block_number,omitempty"`
+	RestartCount int    `json:"restart_count"`
+	Dirty        bool   `json:"dirty"`
+	Error        string `json:"error,omitempty"`
+}
+
+// Status returns the status of all running simulation anvil forks.
+func (s *SimulateService) Status(ctx context.Context) (*SimulationStatusResponse, error) {
+	var resp SimulationStatusResponse
+	err := s.transport.Request(ctx, http.MethodGet, "/api/v1/evm/simulate/status", nil, &resp, http.StatusOK)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // Simulate simulates a single transaction.
 func (s *SimulateService) Simulate(ctx context.Context, req *SimulateRequest) (*SimulateResponse, error) {
 	var resp SimulateResponse

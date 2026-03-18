@@ -55,6 +55,23 @@ type BalanceChange struct {
 	TokenID   *big.Int `json:"token_id,omitempty"`   // non-nil for ERC721/ERC1155
 }
 
+// ManagerStatus is the overall status of the AnvilForkManager.
+type ManagerStatus struct {
+	Enabled      bool                    `json:"enabled"`
+	AnvilVersion string                  `json:"anvil_version"`
+	Chains       map[string]*ChainStatus `json:"chains"`
+}
+
+// ChainStatus is the status of a single anvil fork instance.
+type ChainStatus struct {
+	Status       string `json:"status"`                  // "healthy" or "unhealthy"
+	Port         int    `json:"port"`
+	BlockNumber  string `json:"block_number,omitempty"`   // hex block number from eth_blockNumber
+	RestartCount int    `json:"restart_count"`
+	Dirty        bool   `json:"dirty"`
+	Error        string `json:"error,omitempty"`
+}
+
 // SimEvent represents a parsed event from simulation.
 type SimEvent struct {
 	Address  string            `json:"address"`

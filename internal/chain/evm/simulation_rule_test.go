@@ -31,7 +31,10 @@ func (m *mockSimulator) SimulateBatch(_ context.Context, _ *simulation.BatchSimu
 
 func (m *mockSimulator) SyncIfDirty(_ context.Context, _ string) error { return nil }
 func (m *mockSimulator) MarkDirty(_ string)                            {}
-func (m *mockSimulator) Close() error                                   { return nil }
+func (m *mockSimulator) Status(_ context.Context) *simulation.ManagerStatus {
+	return &simulation.ManagerStatus{Enabled: true}
+}
+func (m *mockSimulator) Close() error { return nil }
 
 func simTestLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
