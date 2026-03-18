@@ -201,7 +201,9 @@ func (m *anvilForkManagerImpl) startInstance(ctx context.Context, chainID string
 		"--silent",
 	}
 
-	cmd := exec.CommandContext(ctx, m.cfg.AnvilPath, args...) // #nosec G204 -- admin-configured
+	// Use background context: anvil is a persistent process that must outlive individual requests.
+	// The request ctx is only used for waiting on readiness, not for the process lifecycle.
+	cmd := exec.CommandContext(context.Background(), m.cfg.AnvilPath, args...) // #nosec G204 -- admin-configured
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 
