@@ -16,6 +16,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/config"
 	"github.com/ivanzzeth/remote-signer/internal/core/auth"
+	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/metrics"
 	"github.com/ivanzzeth/remote-signer/internal/simulation"
@@ -58,8 +59,14 @@ type RouterConfig struct {
 	// Resource limits
 	MaxKeystoresPerKey int // max keystores per API key (0 = no limit, default 5)
 	MaxHDWalletsPerKey int // max HD wallets per API key (0 = no limit, default 3)
-	// Simulation engine (optional). When set, POST /api/v1/evm/simulate and /simulate/batch are registered.
+	// Simulation engine (optional). When set, POST /api/v1/evm/simulate, /simulate/batch, and /sign/batch are registered.
 	Simulator simulation.AnvilForkManager
+	// SimulationRule is the built-in simulation budget fallback rule (optional).
+	// When set together with Simulator, the batch sign endpoint uses it for transactions
+	// that don't match any user-defined whitelist rule.
+	SimulationRule *evm.SimulationBudgetRule
+	// RuleEngine is required for batch sign to evaluate rules per-tx before signing.
+	RuleEngine rule.RuleEngine
 }
 
 // Router handles HTTP routing
@@ -270,6 +277,28 @@ func (r *Router) setupRoutes() error {
 		}
 		r.mux.Handle("/api/v1/evm/simulate", r.withAuthAndPerm(middleware.PermSignRequest, simulateHandler))
 		r.mux.Handle("/api/v1/evm/simulate/batch", r.withAuthAndPerm(middleware.PermSignRequest, http.HandlerFunc(simulateHandler.ServeBatchHTTP)))
+	}
+
+	// Batch sign route (optional, requires rule engine; simulation rule is optional)
+	if r.config.RuleEngine != nil && accessService != nil {
+		batchSignHandler, bsErr := evmhandler.NewBatchSignHandler(evmhandler.BatchSignHandlerConfig{
+			SignService:    r.signService,
+			SignerManager:  r.signerManager,
+			AccessService:  accessService,
+			SimulationRule: r.config.SimulationRule,
+			RuleEngine:     r.config.RuleEngine,
+			Logger:         r.logger,
+		})
+		if bsErr != nil {
+			return fmt.Errorf("failed to create batch sign handler: %w", bsErr)
+		}
+		if r.config.AlertService != nil {
+			batchSignHandler.SetAlertService(r.config.AlertService)
+		}
+		if r.config.SignTimeout > 0 {
+			batchSignHandler.SetSignTimeout(r.config.SignTimeout)
+		}
+		r.mux.Handle("/api/v1/evm/sign/batch", r.withAuthAndPerm(middleware.PermSignRequest, batchSignHandler))
 	}
 
 	// Audit routes
