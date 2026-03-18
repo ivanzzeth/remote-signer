@@ -262,7 +262,10 @@ func (s *SignService) Sign(ctx context.Context, req *SignRequest) (*SignResponse
 			}
 			return s.processApprovedRequest(ctx, signReq, nil, nil, "simulation-approved", adapter)
 		} else if outcome.Decision == "deny" {
-			reason := "simulation budget exceeded"
+			reason := outcome.Reason
+			if reason == "" {
+				reason = "simulation denied"
+			}
 			s.logger.Warn("request denied by simulation fallback",
 				"request_id", signReq.ID,
 				"reason", reason,

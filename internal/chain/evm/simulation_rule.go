@@ -53,6 +53,7 @@ func (r *SimulationBudgetRule) Available() bool {
 // SimulationOutcome represents the result of simulation-based evaluation.
 type SimulationOutcome struct {
 	Decision   string                         // "allow", "deny", "no_match"
+	Reason     string                         // human-readable reason for deny
 	Simulation *simulation.SimulationResult   // non-nil when simulation ran
 }
 
@@ -105,14 +106,16 @@ func (r *SimulationBudgetRule) EvaluateSingle(
 		return &SimulationOutcome{Decision: "no_match"}, nil
 	}
 
-	// Check if simulation itself reverted
+	// Check if simulation itself reverted — this means the tx has a problem
+	// (insufficient balance, expired data, wrong params), NOT a budget issue.
 	if !result.Success {
+		reason := fmt.Sprintf("transaction simulation reverted: %s", result.RevertReason)
 		r.logger.Warn("simulation reverted in fallback rule",
 			"chain_id", req.ChainID,
 			"signer", req.SignerAddress,
 			"revert_reason", result.RevertReason,
 		)
-		return &SimulationOutcome{Decision: "deny", Simulation: result}, nil
+		return &SimulationOutcome{Decision: "deny", Reason: reason, Simulation: result}, nil
 	}
 
 	// If approval detected, return no_match to let the existing manual approval flow handle it.
@@ -128,12 +131,13 @@ func (r *SimulationBudgetRule) EvaluateSingle(
 
 	// Budget check against balance changes (outflows only)
 	if err := r.checkBudgetFromBalanceChanges(ctx, req.ChainID, req.SignerAddress, result.BalanceChanges); err != nil {
+		reason := fmt.Sprintf("simulation budget exceeded: %s", err)
 		r.logger.Warn("budget check failed in simulation fallback",
 			"chain_id", req.ChainID,
 			"signer", req.SignerAddress,
 			"error", err,
 		)
-		return &SimulationOutcome{Decision: "deny", Simulation: result}, nil
+		return &SimulationOutcome{Decision: "deny", Reason: reason, Simulation: result}, nil
 	}
 
 	return &SimulationOutcome{Decision: "allow", Simulation: result}, nil
