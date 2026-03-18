@@ -1,5 +1,7 @@
-# Preset: Agent (evm_js) — AI agent with dynamic per-token budget tracking.
-# Three sub-rules: agent-tx (whitelist), agent-sign (whitelist), agent-safety (blocklist).
+# Preset: Agent (evm_js) — AI agent with simulation-based budget tracking.
+# Two sub-rules: agent-sign (whitelist), agent-safety (blocklist).
+# Transaction signing has NO whitelist rule — falls through to SimulationBudgetRule
+# which forks the chain, simulates the tx, and tracks real token outflows.
 #
 # No chain_id restriction — agent can interact with ANY chain.
 # Budget tracks spending per {chain_id}:{token} dynamically.

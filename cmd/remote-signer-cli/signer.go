@@ -2,8 +2,10 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 
+	"github.com/ivanzzeth/ethsig/keystore"
 	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 	"github.com/spf13/cobra"
 )
@@ -57,10 +59,19 @@ var signerCreateCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		password := signerCreatePassword
+		if password == "" {
+			pwBytes, readErr := keystore.ReadPasswordWithConfirm(cmd.Context(), "Enter keystore password")
+			if readErr != nil {
+				return fmt.Errorf("failed to read password: %w", readErr)
+			}
+			password = string(pwBytes)
+			keystore.SecureZeroize(pwBytes)
+		}
 		signer, err := c.EVM.Signers.Create(cmd.Context(), &evm.CreateSignerRequest{
 			Type: "keystore",
 			Keystore: &evm.CreateKeystoreParams{
-				Password: signerCreatePassword,
+				Password: password,
 			},
 		})
 		if err != nil {
@@ -84,8 +95,19 @@ var signerUnlockCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		password := signerUnlockPassword
+		if password == "" {
+			fmt.Fprint(os.Stderr, "Enter keystore password: ")
+			pwBytes, readErr := keystore.ReadSecret(cmd.Context())
+			if readErr != nil {
+				return fmt.Errorf("failed to read password: %w", readErr)
+			}
+			password = string(pwBytes)
+			keystore.SecureZeroize(pwBytes)
+			fmt.Fprintln(os.Stderr)
+		}
 		resp, err := c.EVM.Signers.Unlock(cmd.Context(), args[0], &evm.UnlockSignerRequest{
-			Password: signerUnlockPassword,
+			Password: password,
 		})
 		if err != nil {
 			return fmt.Errorf("unlock signer: %w", err)
@@ -256,15 +278,9 @@ var signerAccessListCmd = &cobra.Command{
 }
 
 func init() {
-	signerUnlockCmd.Flags().StringVar(&signerUnlockPassword, "password", "", "Keystore password")
-	if err := signerUnlockCmd.MarkFlagRequired("password"); err != nil {
-		panic(err)
-	}
+	signerUnlockCmd.Flags().StringVar(&signerUnlockPassword, "password", "", "Keystore password (omit for interactive prompt)")
 
-	signerCreateCmd.Flags().StringVar(&signerCreatePassword, "password", "", "Keystore password")
-	if err := signerCreateCmd.MarkFlagRequired("password"); err != nil {
-		panic(err)
-	}
+	signerCreateCmd.Flags().StringVar(&signerCreatePassword, "password", "", "Keystore password (omit for interactive prompt)")
 
 	signerAccessGrantCmd.Flags().StringVar(&signerAccessGrantKeyID, "to", "", "API key ID to grant access to")
 	if err := signerAccessGrantCmd.MarkFlagRequired("to"); err != nil {

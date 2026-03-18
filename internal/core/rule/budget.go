@@ -285,8 +285,9 @@ func (bc *BudgetChecker) checkDynamicBudget(
 		return false, fmt.Errorf("invalid dynamic budget unit: %w", err)
 	}
 
-	chainID := ""
-	if rule.ChainID != nil {
+	// Prefer request chain_id (always present) over rule chain_id (may be empty for multi-chain rules)
+	chainID := req.ChainID
+	if chainID == "" && rule.ChainID != nil {
 		chainID = *rule.ChainID
 	}
 	unit := NormalizeBudgetUnit(chainID + ":" + rawUnit)
@@ -297,7 +298,7 @@ func (bc *BudgetChecker) checkDynamicBudget(
 		if !types.IsNotFound(err) {
 			return false, fmt.Errorf("failed to get dynamic budget: %w", err)
 		}
-		budget, err = bc.autoCreateDynamicBudget(ctx, rule, unit, rawUnit, metering)
+		budget, err = bc.autoCreateDynamicBudget(ctx, rule, req, unit, rawUnit, metering)
 		if err != nil {
 			return false, fmt.Errorf("failed to auto-create dynamic budget: %w", err)
 		}
@@ -371,6 +372,7 @@ func validateDynamicUnit(rawUnit string) error {
 func (bc *BudgetChecker) autoCreateDynamicBudget(
 	ctx context.Context,
 	rule *types.Rule,
+	req *types.SignRequest,
 	normalizedUnit string,
 	rawUnit string,
 	metering types.BudgetMetering,
@@ -421,8 +423,9 @@ func (bc *BudgetChecker) autoCreateDynamicBudget(
 			unitBase := extractUnitBase(rawUnit) // strip :suffix (e.g. "0xABC:approve" -> "0xABC")
 			if isEthAddressRe.MatchString(unitBase) {
 				// Address unit: auto-query decimals via RPC
-				chainID := ""
-				if rule.ChainID != nil {
+				// Prefer request chain_id over rule chain_id (multi-chain rules have no chain_id)
+				chainID := req.ChainID
+				if chainID == "" && rule.ChainID != nil {
 					chainID = *rule.ChainID
 				}
 				queried, queryErr := bc.queryDecimalsCached(ctx, chainID, unitBase)

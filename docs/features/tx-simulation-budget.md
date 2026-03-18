@@ -745,6 +745,33 @@ simulation:
 
 ---
 
+## Agent Preset Changes (TODO)
+
+### Remove agent-tx whitelist rule
+The `agent-tx` rule ("allow any transaction") bypasses simulation entirely — all
+transactions are matched by the whitelist and budget is tracked via calldata parsing
+only. For unknown calldata (DEX swaps, aggregator routes), budget falls back to
+`tx_count` which does not track actual token spending.
+
+**Fix**: Remove `agent-tx` from the agent template. All transaction signing will
+fall through to SimulationBudgetRule, which simulates on anvil fork and tracks
+real token outflows via Transfer events.
+
+After removal, agent preset keeps:
+- `agent-sign` (whitelist): personal_sign + typed_data
+- `agent-safety` (blocklist): dangerous selectors
+
+### Typed data: restrict verifyingContract
+The `agent-sign` rule currently allows signing any typed data. This is dangerous —
+an agent could sign a Permit for an arbitrary contract/spender, equivalent to an
+unlimited approve.
+
+**Fix**: Add a `allowed_verifying_contracts` template variable to `agent-sign`.
+Only typed data with `domain.verifyingContract` in the whitelist is allowed.
+Unknown contracts fall through to manual approval.
+
+---
+
 ## Dependencies
 
 - Foundry (`anvil`) installed on the server
