@@ -34,6 +34,12 @@ chains:
       forge_path: ""
       cache_dir: "./data/forge-cache-e2e"
       timeout: "30s"
+    simulation:
+      enabled: true
+      anvil_path: ""  # auto-detect: data/foundry/anvil then PATH
+      sync_interval: "60s"
+      timeout: "30s"
+      max_chains: 5
 
 notify:
   slack:

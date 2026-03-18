@@ -205,7 +205,8 @@ type EVMConfig struct {
 	KeystoreDir string               `yaml:"keystore_dir"`  // Directory for storing dynamically created keystores
 	HDWalletDir string               `yaml:"hd_wallet_dir"` // Directory for storing HD wallets
 	Foundry     FoundryConfig        `yaml:"foundry"`
-	RPCGateway  evm.RPCGatewayConfig `yaml:"rpc_gateway"` // RPC gateway for JS rule sandbox (read-only)
+	RPCGateway  evm.RPCGatewayConfig `yaml:"rpc_gateway"`   // RPC gateway for JS rule sandbox (read-only)
+	Simulation  SimulationConfig     `yaml:"simulation"`    // Transaction simulation engine (anvil fork)
 }
 
 // FoundryConfig contains Foundry (forge) configuration for Solidity rules
@@ -215,6 +216,18 @@ type FoundryConfig struct {
 	CacheDir  string        `yaml:"cache_dir"`  // cache directory for compiled scripts
 	TempDir   string        `yaml:"temp_dir"`   // workspace dir for rule scripts and lib/forge-std; empty = os.TempDir()/remote-signer-rules. For Docker, set to /app/data/forge-workspace and mount repo data/forge-workspace.
 	Timeout   time.Duration `yaml:"timeout"`    // max execution time per rule (default: 30s)
+}
+
+// SimulationConfig contains transaction simulation engine configuration.
+// Uses anvil (Foundry) to fork chains and simulate transactions locally.
+type SimulationConfig struct {
+	Enabled      bool          `yaml:"enabled"`
+	AnvilPath    string        `yaml:"anvil_path"`     // path to anvil binary, empty = "data/foundry/anvil" then PATH
+	SyncInterval time.Duration `yaml:"sync_interval"`  // periodic anvil_reset interval (default: 60s)
+	Timeout      time.Duration `yaml:"timeout"`        // per-simulation timeout (default: 10s)
+	MaxChains    int           `yaml:"max_chains"`     // max concurrent anvil forks (default: 10)
+	BatchWindow  time.Duration `yaml:"batch_window"`   // accumulation window for single sign fallback (default: 1s)
+	BatchMaxSize int           `yaml:"batch_max_size"` // max txs per batch (default: 20)
 }
 
 // SecurityConfig contains security-related settings
@@ -524,6 +537,29 @@ func setDefaults(cfg *Config) {
 		}
 		if cfg.Chains.EVM.HDWalletDir == "" {
 			cfg.Chains.EVM.HDWalletDir = "./data/hd-wallets"
+		}
+	}
+
+	// Simulation engine defaults
+	if cfg.Chains.EVM != nil && cfg.Chains.EVM.Simulation.Enabled {
+		sim := &cfg.Chains.EVM.Simulation
+		if sim.AnvilPath == "" {
+			sim.AnvilPath = "data/foundry/anvil"
+		}
+		if sim.SyncInterval <= 0 {
+			sim.SyncInterval = 60 * time.Second
+		}
+		if sim.Timeout <= 0 {
+			sim.Timeout = 60 * time.Second
+		}
+		if sim.MaxChains <= 0 {
+			sim.MaxChains = 10
+		}
+		if sim.BatchWindow <= 0 {
+			sim.BatchWindow = 1 * time.Second
+		}
+		if sim.BatchMaxSize <= 0 {
+			sim.BatchMaxSize = 20
 		}
 	}
 

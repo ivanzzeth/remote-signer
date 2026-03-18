@@ -64,6 +64,19 @@ chains:
       api_key: "${EVM_RPC_GATEWAY_API_KEY:-}"           # optional, for authenticated endpoints
       cache_ttl: "24h"                                  # token metadata cache TTL
 
+    # Transaction simulation engine (anvil fork)
+    # Simulates transactions on a local anvil fork to predict balance changes,
+    # gas usage, and detect approvals. Requires anvil binary (Foundry).
+    # Endpoints: POST /api/v1/evm/simulate, POST /api/v1/evm/simulate/batch
+    simulation:
+      enabled: false
+      anvil_path: "data/foundry/anvil"     # path to anvil binary (default: data/foundry/anvil, then PATH)
+      sync_interval: "60s"                 # periodic fork reset interval
+      timeout: "60s"                       # per-simulation timeout (includes remote RPC state fetch)
+      max_chains: 10                       # max concurrent anvil forks
+      batch_window: "1s"                   # accumulation window for future batch sign fallback
+      batch_max_size: 20                   # max txs per batch
+
     # Foundry configuration for Solidity expression rules
     foundry:
       enabled: true

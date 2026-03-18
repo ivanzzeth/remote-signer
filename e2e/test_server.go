@@ -31,6 +31,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/statemachine"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/simulation"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
@@ -59,6 +60,7 @@ type TestServer struct {
 	baseURL    string
 	tlsCerts   *tlsCerts // set by StartWithTLS for mTLS health-check
 	ruleEngine *rule.WhitelistRuleEngine // exposed for dynamic evaluator registration in e2e tests
+	simulator  simulation.AnvilForkManager // optional: for simulation e2e tests
 }
 
 // NewTestServer creates a new test server instance
@@ -557,6 +559,27 @@ func (ts *TestServer) Start() error {
 		return fmt.Errorf("failed to create audit logger: %w", err)
 	}
 
+	// Initialize simulation engine (optional, requires RPC gateway + anvil)
+	if cfg != nil && cfg.Chains.EVM != nil && cfg.Chains.EVM.Simulation.Enabled &&
+		cfg.Chains.EVM.RPCGateway.BaseURL != "" {
+		simCfg := cfg.Chains.EVM.Simulation
+		rpcGateway := cfg.Chains.EVM.RPCGateway
+		sim, simErr := simulation.NewAnvilForkManager(simulation.AnvilForkManagerConfig{
+			AnvilPath:     simCfg.AnvilPath,
+			RPCGatewayURL: rpcGateway.BaseURL,
+			RPCGatewayKey: rpcGateway.APIKey,
+			SyncInterval:  simCfg.SyncInterval,
+			Timeout:       simCfg.Timeout,
+			MaxChains:     simCfg.MaxChains,
+		}, log)
+		if simErr != nil {
+			log.Warn("Simulation engine not available, skipping", "error", simErr)
+		} else {
+			ts.simulator = sim
+			log.Info("Simulation engine initialized for e2e tests")
+		}
+	}
+
 	// Initialize router (include BudgetRepo so GET /api/v1/evm/rules/{id}/budgets works for budget e2e tests)
 	routerConfig := api.RouterConfig{
 		Version: "e2e-test",
@@ -571,6 +594,7 @@ func (ts *TestServer) Start() error {
 		BudgetRepo:          budgetRepo,
 		JSEvaluator:         jsEval,
 		AuditLogger:         auditLogger,
+		Simulator:           ts.simulator,
 	}
 	if ts.config.PresetsDir != "" {
 		routerConfig.PresetsDir = ts.config.PresetsDir
@@ -650,9 +674,21 @@ func (ts *TestServer) Stop() {
 		ts.server.Shutdown(ctx)
 	}
 
+	// Shutdown simulation engine
+	if ts.simulator != nil {
+		if err := ts.simulator.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to close simulation engine: %v\n", err)
+		}
+	}
+
 	// Cleanup environment
 	os.Unsetenv("E2E_TEST_SIGNER_KEY")
 	os.Unsetenv("E2E_TEST_SIGNER2_KEY")
+}
+
+// HasSimulator returns true if the simulation engine is available.
+func (ts *TestServer) HasSimulator() bool {
+	return ts.simulator != nil
 }
 
 // BaseURL returns the base URL of the test server

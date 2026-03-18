@@ -31,6 +31,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/logger"
 	"github.com/ivanzzeth/remote-signer/internal/notify"
 	"github.com/ivanzzeth/remote-signer/internal/ruleconfig"
+	"github.com/ivanzzeth/remote-signer/internal/simulation"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
@@ -701,6 +702,39 @@ func run() error {
 		}
 	}
 
+	// Initialize simulation engine (optional)
+	var simulator simulation.AnvilForkManager
+	if cfg.Chains.EVM != nil && cfg.Chains.EVM.Simulation.Enabled {
+		rpcGatewayURL := ""
+		if cfg.Chains.EVM.RPCGateway.BaseURL != "" {
+			rpcGatewayURL = cfg.Chains.EVM.RPCGateway.BaseURL
+		}
+		simCfg := simulation.AnvilForkManagerConfig{
+			AnvilPath:     cfg.Chains.EVM.Simulation.AnvilPath,
+			RPCGatewayURL: rpcGatewayURL,
+			RPCGatewayKey: cfg.Chains.EVM.RPCGateway.APIKey,
+			SyncInterval:  cfg.Chains.EVM.Simulation.SyncInterval,
+			Timeout:       cfg.Chains.EVM.Simulation.Timeout,
+			MaxChains:     cfg.Chains.EVM.Simulation.MaxChains,
+		}
+		var simErr error
+		simulator, simErr = simulation.NewAnvilForkManager(simCfg, log)
+		if simErr != nil {
+			return fmt.Errorf("failed to create simulation engine: %w", simErr)
+		}
+		defer func() {
+			if closeErr := simulator.Close(); closeErr != nil {
+				log.Error("failed to close simulation engine", "error", closeErr)
+			}
+		}()
+		log.Info("simulation engine initialized",
+			"anvil_path", cfg.Chains.EVM.Simulation.AnvilPath,
+			"sync_interval", cfg.Chains.EVM.Simulation.SyncInterval,
+			"timeout", cfg.Chains.EVM.Simulation.Timeout,
+			"max_chains", cfg.Chains.EVM.Simulation.MaxChains,
+		)
+	}
+
 	// Initialize router
 	routerConfig := api.RouterConfig{
 		Version:                  version,
@@ -730,6 +764,7 @@ func run() error {
 		SignTimeout:        cfg.Security.SignTimeout,
 		AutoLockTimeout:    cfg.Security.AutoLockTimeout,
 		AuditRetentionDays: cfg.AuditMonitor.RetentionDays,
+		Simulator:          simulator,
 	}
 	if presetsDir != "" {
 		routerConfig.PresetsDir = presetsDir

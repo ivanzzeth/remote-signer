@@ -18,6 +18,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/auth"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/metrics"
+	"github.com/ivanzzeth/remote-signer/internal/simulation"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
@@ -57,6 +58,8 @@ type RouterConfig struct {
 	// Resource limits
 	MaxKeystoresPerKey int // max keystores per API key (0 = no limit, default 5)
 	MaxHDWalletsPerKey int // max HD wallets per API key (0 = no limit, default 3)
+	// Simulation engine (optional). When set, POST /api/v1/evm/simulate and /simulate/batch are registered.
+	Simulator simulation.AnvilForkManager
 }
 
 // Router handles HTTP routing
@@ -258,6 +261,16 @@ func (r *Router) setupRoutes() error {
 	// HD wallet management routes
 	r.mux.Handle("/api/v1/evm/hd-wallets", r.withAuth(hdWalletHandler))
 	r.mux.Handle("/api/v1/evm/hd-wallets/", r.withAuth(hdWalletHandler))
+
+	// Simulation routes (optional, requires simulation engine)
+	if r.config.Simulator != nil {
+		simulateHandler, simErr := evmhandler.NewSimulateHandler(r.config.Simulator, r.logger)
+		if simErr != nil {
+			return fmt.Errorf("failed to create simulate handler: %w", simErr)
+		}
+		r.mux.Handle("/api/v1/evm/simulate", r.withAuthAndPerm(middleware.PermSignRequest, simulateHandler))
+		r.mux.Handle("/api/v1/evm/simulate/batch", r.withAuthAndPerm(middleware.PermSignRequest, http.HandlerFunc(simulateHandler.ServeBatchHTTP)))
+	}
 
 	// Audit routes
 	r.mux.Handle("/api/v1/audit", r.withAuthAndPerm(middleware.PermReadAudit, auditHandler))
