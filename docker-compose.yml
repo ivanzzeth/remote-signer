@@ -93,7 +93,9 @@ services:
       # Proxy settings (needed for Telegram/external API access in some networks)
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
-      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,::1}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,::1,host.docker.internal}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command: ["/app/remote-signer", "-config", "/app/config.yaml"]
     volumes:
       # Mirror repo layout: /app = project root, paths identical to repo

@@ -46,7 +46,14 @@ func NewTransport(cfg Config, auth *Auth) (*Transport, error) {
 
 	httpClient := cfg.HTTPClient
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 120 * time.Second}
+		httpClient = &http.Client{
+			Timeout: 120 * time.Second,
+			Transport: &http.Transport{
+				// Disable idle connection reuse to prevent stale TLS connections
+				// from causing "bad record MAC" errors on long-running requests.
+				DisableKeepAlives: true,
+			},
+		}
 	}
 
 	if cfg.TLS != nil {

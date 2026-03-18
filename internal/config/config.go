@@ -219,17 +219,17 @@ type FoundryConfig struct {
 }
 
 // SimulationConfig contains transaction simulation engine configuration.
-// Uses anvil (Foundry) to fork chains and simulate transactions locally.
 type SimulationConfig struct {
 	Enabled      bool          `yaml:"enabled"`
-	AnvilPath    string        `yaml:"anvil_path"`      // path to anvil binary, empty = "data/foundry/anvil" then PATH
-	SyncInterval time.Duration `yaml:"sync_interval"`   // periodic health check interval (default: 60s)
+	Backend      string        `yaml:"backend"`         // "rpc" (eth_simulateV1 via gateway) or "anvil" (local fork). Default: "rpc"
+	AnvilPath    string        `yaml:"anvil_path"`      // [anvil] path to anvil binary
+	SyncInterval time.Duration `yaml:"sync_interval"`   // [anvil] periodic health check interval (default: 60s)
 	Timeout      time.Duration `yaml:"timeout"`         // per-simulation timeout (default: 60s)
-	MaxChains    int           `yaml:"max_chains"`      // max concurrent anvil forks (default: 10)
+	MaxChains    int           `yaml:"max_chains"`      // [anvil] max concurrent anvil forks (default: 10)
 	BatchWindow  time.Duration `yaml:"batch_window"`    // accumulation window for single sign fallback (default: 1s)
 	BatchMaxSize int           `yaml:"batch_max_size"`  // max txs per batch (default: 20)
-	PruneHistory int           `yaml:"prune_history"`   // anvil --prune-history: max states in memory (default: 0 = minimal)
-	CacheDir     string        `yaml:"cache_dir"`       // anvil fork RPC cache directory (default: data/anvil-cache). Persists across restarts.
+	PruneHistory int           `yaml:"prune_history"`   // [anvil] --prune-history: max states in memory (default: 0 = minimal)
+	CacheDir     string        `yaml:"cache_dir"`       // [anvil] fork RPC cache directory (default: data/anvil-cache)
 }
 
 // SecurityConfig contains security-related settings
