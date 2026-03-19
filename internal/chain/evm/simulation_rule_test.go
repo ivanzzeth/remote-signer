@@ -90,7 +90,9 @@ func TestSimulationBudgetRule_SimulationReverts(t *testing.T) {
 	assert.NotNil(t, outcome.Simulation)
 }
 
-func TestSimulationBudgetRule_ApprovalDetected_ReturnsNoMatch(t *testing.T) {
+func TestSimulationBudgetRule_ApprovalOnly_AllowWithZeroBudget(t *testing.T) {
+	// Pure approve tx: has approval event but zero balance outflow.
+	// Budget is based on balance changes, not events — approve costs nothing.
 	sim := &mockSimulator{
 		simulateResult: &simulation.SimulationResult{
 			Success:     true,
@@ -98,6 +100,8 @@ func TestSimulationBudgetRule_ApprovalDetected_ReturnsNoMatch(t *testing.T) {
 			Events: []simulation.SimEvent{
 				{Event: "Approval", Standard: "erc20"},
 			},
+			// No balance changes — approve doesn't move tokens
+			BalanceChanges: []simulation.BalanceChange{},
 		},
 	}
 	r, err := NewSimulationBudgetRule(sim, nil, simTestLogger())
@@ -114,8 +118,56 @@ func TestSimulationBudgetRule_ApprovalDetected_ReturnsNoMatch(t *testing.T) {
 		Value:     &val,
 	})
 	require.NoError(t, err)
-	// Approval detected -> returns no_match so existing manual approval flow handles it
-	assert.Equal(t, "no_match", outcome.Decision)
+	// Approve has no outflow -> budget passes -> allow
+	assert.Equal(t, "allow", outcome.Decision)
+}
+
+func TestSimulationBudgetRule_SwapWithApproval_TracksBudget(t *testing.T) {
+	// DEX swap tx: has internal approval event AND actual token outflow.
+	// Budget should track the outflow, not skip because of approval.
+	sim := &mockSimulator{
+		simulateResult: &simulation.SimulationResult{
+			Success:     true,
+			HasApproval: true, // internal DEX approval
+			Events: []simulation.SimEvent{
+				{Event: "Approval", Standard: "erc20"},
+				{Event: "Transfer", Standard: "erc20"},
+			},
+			BalanceChanges: []simulation.BalanceChange{
+				{
+					Token:     "0x2791bca1f2de4661ed88a30c99a7a9449aa84174",
+					Standard:  "erc20",
+					Amount:    big.NewInt(-1000000), // -1 USDC.e outflow
+					Direction: "outflow",
+				},
+				{
+					Token:     "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359",
+					Standard:  "erc20",
+					Amount:    big.NewInt(999989), // +0.999989 USDC inflow
+					Direction: "inflow",
+				},
+			},
+		},
+	}
+	// No budget repo -> budget passes through, but outflows are still processed
+	r, err := NewSimulationBudgetRule(sim, nil, simTestLogger())
+	require.NoError(t, err)
+
+	to := "0x057cfd839aa88994d1a8a8c6d336cf21550f05ef"
+	val := "0"
+	outcome, err := r.EvaluateSingle(context.Background(), &types.SignRequest{
+		ChainID:       "137",
+		SignerAddress: "0x764602FeaD618416E42b48c633d90869fF19759E",
+		SignType:      SignTypeTransaction,
+	}, &types.ParsedPayload{
+		Recipient: &to,
+		Value:     &val,
+	})
+	require.NoError(t, err)
+	// Has approval event but also has outflow. Budget check runs (no repo = pass).
+	assert.Equal(t, "allow", outcome.Decision)
+	assert.NotNil(t, outcome.Simulation)
+	assert.True(t, outcome.Simulation.HasApproval)
 }
 
 func TestSimulationBudgetRule_AllowNoBudgetRepo(t *testing.T) {
@@ -150,26 +202,40 @@ func TestSimulationBudgetRule_AllowNoBudgetRepo(t *testing.T) {
 	assert.Equal(t, "allow", outcome.Decision)
 }
 
-func TestSimulationBudgetRule_BatchApprovalDetected_ReturnsNoMatch(t *testing.T) {
+func TestSimulationBudgetRule_BatchApproveAndSwap_TracksBudget(t *testing.T) {
+	// Batch: approve + swap. Approve has no outflow, swap has outflow.
+	// Budget should track the net outflow, not skip because of approval.
 	sim := &mockSimulator{
 		simulateBatchResult: &simulation.BatchSimulationResult{
 			Results: []simulation.SimulationResult{
-				{Success: true, HasApproval: true},
-				{Success: true, HasApproval: false},
+				{Success: true, HasApproval: true}, // approve tx
+				{
+					Success:     true,
+					HasApproval: true, // swap has internal approval
+					BalanceChanges: []simulation.BalanceChange{
+						{Token: "0x2791bca1f2de4661ed88a30c99a7a9449aa84174", Amount: big.NewInt(-1000000), Direction: "outflow"},
+						{Token: "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359", Amount: big.NewInt(999989), Direction: "inflow"},
+					},
+				},
 			},
-			NetBalanceChanges: []simulation.BalanceChange{},
+			NetBalanceChanges: []simulation.BalanceChange{
+				{Token: "0x2791bca1f2de4661ed88a30c99a7a9449aa84174", Amount: big.NewInt(-1000000), Direction: "outflow"},
+				{Token: "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359", Amount: big.NewInt(999989), Direction: "inflow"},
+			},
 		},
 	}
 	r, err := NewSimulationBudgetRule(sim, nil, simTestLogger())
 	require.NoError(t, err)
 
 	txParams := []simulation.TxParams{
-		{To: "0xabc", Value: "0", Data: "0x095ea7b3"},
-		{To: "0xdef", Value: "0", Data: "0xf2c42696"},
+		{To: "0x2791bca1f2de4661ed88a30c99a7a9449aa84174", Value: "0", Data: "0x095ea7b3"},
+		{To: "0x057cfd839aa88994d1a8a8c6d336cf21550f05ef", Value: "0", Data: "0xf2c42696"},
 	}
-	outcome, err := r.EvaluateBatch(context.Background(), "1", "0xf39F", txParams)
+	outcome, err := r.EvaluateBatch(context.Background(), "137", "0x764602FeaD618416E42b48c633d90869fF19759E", txParams)
 	require.NoError(t, err)
-	assert.Equal(t, "no_match", outcome.Decision)
+	// Approval events don't skip budget. No budget repo = pass through.
+	assert.Equal(t, "allow", outcome.Decision)
+	assert.NotNil(t, outcome.Simulation)
 }
 
 func TestSimulationBudgetRule_BatchReverted(t *testing.T) {
@@ -185,8 +251,8 @@ func TestSimulationBudgetRule_BatchReverted(t *testing.T) {
 	require.NoError(t, err)
 
 	txParams := []simulation.TxParams{
-		{To: "0xabc", Value: "0"},
-		{To: "0xdef", Value: "0"},
+		{To: "0x1234567890abcdef1234567890abcdef12345678", Value: "0"},
+		{To: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd", Value: "0"},
 	}
 	outcome, err := r.EvaluateBatch(context.Background(), "1", "0xf39F", txParams)
 	require.NoError(t, err)
@@ -201,12 +267,12 @@ func TestSimulationBudgetRule_BatchAllowNoBudget(t *testing.T) {
 				{
 					Success: true,
 					BalanceChanges: []simulation.BalanceChange{
-						{Token: "0xusdc", Amount: big.NewInt(-100), Direction: "outflow"},
+						{Token: "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359", Amount: big.NewInt(-100), Direction: "outflow"},
 					},
 				},
 			},
 			NetBalanceChanges: []simulation.BalanceChange{
-				{Token: "0xusdc", Amount: big.NewInt(-100), Direction: "outflow"},
+				{Token: "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359", Amount: big.NewInt(-100), Direction: "outflow"},
 			},
 		},
 	}
@@ -214,8 +280,8 @@ func TestSimulationBudgetRule_BatchAllowNoBudget(t *testing.T) {
 	require.NoError(t, err)
 
 	txParams := []simulation.TxParams{
-		{To: "0xabc", Value: "0"},
-		{To: "0xdef", Value: "0"},
+		{To: "0x1234567890abcdef1234567890abcdef12345678", Value: "0"},
+		{To: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd", Value: "0"},
 	}
 	outcome, err := r.EvaluateBatch(context.Background(), "1", "0xf39F", txParams)
 	require.NoError(t, err)

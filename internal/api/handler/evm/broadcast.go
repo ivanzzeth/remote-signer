@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
+	"github.com/ivanzzeth/remote-signer/internal/validate"
 )
 
 // BroadcastHandler handles broadcasting signed transactions.
@@ -53,12 +54,12 @@ func (h *BroadcastHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.ChainID == "" {
-		h.writeError(w, "chain_id is required", http.StatusBadRequest)
+	if req.ChainID == "" || !validate.IsValidChainID(req.ChainID) {
+		h.writeError(w, "chain_id is required and must be a positive decimal integer", http.StatusBadRequest)
 		return
 	}
-	if req.SignedTxHex == "" {
-		h.writeError(w, "signed_tx_hex is required", http.StatusBadRequest)
+	if req.SignedTxHex == "" || !validate.IsValidHexData(req.SignedTxHex) {
+		h.writeError(w, "signed_tx_hex is required and must be valid 0x-prefixed hex", http.StatusBadRequest)
 		return
 	}
 

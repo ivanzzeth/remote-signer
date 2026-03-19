@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/ivanzzeth/remote-signer/internal/simulation"
+	"github.com/ivanzzeth/remote-signer/internal/validate"
 )
 
 // SimulateHandler handles transaction simulation requests.
@@ -104,16 +105,20 @@ func (h *SimulateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.ChainID == "" {
-		h.writeError(w, "chain_id is required", http.StatusBadRequest)
+	if req.ChainID == "" || !validate.IsValidChainID(req.ChainID) {
+		h.writeError(w, "chain_id is required and must be a positive decimal integer", http.StatusBadRequest)
 		return
 	}
-	if req.From == "" {
-		h.writeError(w, "from is required", http.StatusBadRequest)
+	if req.From == "" || !validate.IsValidEthereumAddress(req.From) {
+		h.writeError(w, "from is required and must be a valid 0x-prefixed Ethereum address", http.StatusBadRequest)
 		return
 	}
-	if req.To == "" {
-		h.writeError(w, "to is required", http.StatusBadRequest)
+	if req.To == "" || !validate.IsValidEthereumAddress(req.To) {
+		h.writeError(w, "to is required and must be a valid 0x-prefixed Ethereum address", http.StatusBadRequest)
+		return
+	}
+	if req.Data != "" && !validate.IsValidHexData(req.Data) {
+		h.writeError(w, "data must be valid 0x-prefixed hex calldata", http.StatusBadRequest)
 		return
 	}
 
@@ -158,21 +163,29 @@ func (h *SimulateHandler) ServeBatchHTTP(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if req.ChainID == "" {
-		h.writeError(w, "chain_id is required", http.StatusBadRequest)
+	if req.ChainID == "" || !validate.IsValidChainID(req.ChainID) {
+		h.writeError(w, "chain_id is required and must be a positive decimal integer", http.StatusBadRequest)
 		return
 	}
-	if req.From == "" {
-		h.writeError(w, "from is required", http.StatusBadRequest)
+	if req.From == "" || !validate.IsValidEthereumAddress(req.From) {
+		h.writeError(w, "from is required and must be a valid 0x-prefixed Ethereum address", http.StatusBadRequest)
 		return
 	}
 	if len(req.Transactions) == 0 {
-		h.writeError(w, "transactions is required", http.StatusBadRequest)
+		h.writeError(w, "transactions is required and must not be empty", http.StatusBadRequest)
 		return
 	}
 
 	txs := make([]simulation.TxParams, len(req.Transactions))
 	for i, tx := range req.Transactions {
+		if tx.To == "" || !validate.IsValidEthereumAddress(tx.To) {
+			h.writeError(w, fmt.Sprintf("transactions[%d].to must be a valid 0x-prefixed Ethereum address", i), http.StatusBadRequest)
+			return
+		}
+		if tx.Data != "" && !validate.IsValidHexData(tx.Data) {
+			h.writeError(w, fmt.Sprintf("transactions[%d].data must be valid 0x-prefixed hex calldata", i), http.StatusBadRequest)
+			return
+		}
 		txs[i] = simulation.TxParams{
 			To:    tx.To,
 			Value: tx.Value,
