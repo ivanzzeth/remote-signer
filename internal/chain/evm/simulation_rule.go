@@ -125,9 +125,9 @@ func (r *SimulationBudgetRule) getManagedSigners(ctx context.Context) map[string
 }
 
 // hasManagedSignerApproval checks if the simulation result contains approval events for any managed signer.
-func (r *SimulationBudgetRule) hasManagedSignerApproval(ctx context.Context, result *simulation.SimulationResult, to, data string) bool {
+func (r *SimulationBudgetRule) hasManagedSignerApproval(ctx context.Context, result *simulation.SimulationResult) bool {
 	managedSigners := r.getManagedSigners(ctx)
-	return simulation.DetectApproval(result.Events, data, managedSigners)
+	return simulation.DetectApproval(result.Events, managedSigners)
 }
 
 // EvaluateSingle evaluates a single sign request that wasn't matched by any user rule.
@@ -200,7 +200,7 @@ func (r *SimulationBudgetRule) EvaluateSingle(
 	// After budget passes: check if any managed signer has approval events.
 	// Only approvals where the owner is one of our managed signers matter.
 	// Internal contract-to-contract approvals (DEX router internals) are ignored.
-	if r.hasManagedSignerApproval(ctx, result, to, data) {
+	if r.hasManagedSignerApproval(ctx, result) {
 		r.logger.Info("approval detected for managed signer, deferring to manual approval",
 			"chain_id", req.ChainID,
 			"signer", req.SignerAddress,
@@ -272,7 +272,7 @@ func (r *SimulationBudgetRule) EvaluateBatch(
 	// After budget passes: check if any tx has approval events for our managed signers.
 	managedSigners := r.getManagedSigners(ctx)
 	for i, result := range batchResult.Results {
-		if simulation.DetectApproval(result.Events, txParams[i].Data, managedSigners) {
+		if simulation.DetectApproval(result.Events, managedSigners) {
 			r.logger.Info("approval detected for managed signer in batch, deferring to manual approval",
 				"chain_id", chainID,
 				"signer", signerAddress,

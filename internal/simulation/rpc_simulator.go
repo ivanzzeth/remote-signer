@@ -323,7 +323,7 @@ func (s *rpcSimulator) parseCallResult(call ethSimCallResult, from, to, value st
 
 	// Mark HasApproval if any approval event exists (unfiltered).
 	// The simulation budget rule re-checks with managed signer filtering.
-	hasApproval := DetectApproval(events, "", nil)
+	hasApproval := DetectApproval(events, nil)
 
 	result := &SimulationResult{
 		Success:        success,

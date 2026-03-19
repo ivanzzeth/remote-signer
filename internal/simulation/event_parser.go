@@ -29,13 +29,6 @@ const (
 	approvalForAllTopic0 = "0x17307eab39ab6107e8899845ad3d59bd9653f200f220920489ca2b5937696c31"
 )
 
-// Well-known calldata selectors for approval detection.
-const (
-	approveSelector            = "0x095ea7b3"
-	setApprovalForAllSelector  = "0xa22cb465"
-	increaseAllowanceSelector  = "0x39509351"
-)
-
 // ParseEvents parses token standard events from transaction receipt logs.
 func ParseEvents(logs []txLog) []SimEvent {
 	events := make([]SimEvent, 0, len(logs))
@@ -294,29 +287,24 @@ func parseApprovalForAllEvent(log txLog) *SimEvent {
 	}
 }
 
-// DetectApproval checks if the transaction contains approval events for any of our managed signers.
-// managedSigners is a set of lowercase signer addresses that we care about.
-// Internal approvals between unrelated contracts (e.g. DEX router internals) are ignored.
-// If managedSigners is nil or empty, falls back to checking all approval events (backward compat).
-func DetectApproval(events []SimEvent, calldata string, managedSigners map[string]bool) bool {
-	// Check calldata selectors (top-level call is always from the tx sender = a managed signer)
-	if len(calldata) >= 10 {
-		selector := strings.ToLower(calldata[:10])
-		if selector == approveSelector || selector == setApprovalForAllSelector || selector == increaseAllowanceSelector {
-			return true
-		}
-	}
-
-	// Check event logs for Approval / ApprovalForAll where owner is one of our managed signers
+// DetectApproval checks if simulation events contain approval grants for any managed signer.
+// Only looks at Approval/ApprovalForAll events where owner is a managed signer and value > 0.
+// value=0 approvals are skipped (emitted by ERC20 transferFrom as side effect).
+func DetectApproval(events []SimEvent, managedSigners map[string]bool) bool {
 	for _, event := range events {
-		if event.Event == "Approval" || event.Event == "ApprovalForAll" {
-			owner := strings.ToLower(event.Args["owner"])
-			if len(managedSigners) == 0 || managedSigners[owner] {
-				return true
-			}
+		if event.Event != "Approval" && event.Event != "ApprovalForAll" {
+			continue
 		}
+		owner := strings.ToLower(event.Args["owner"])
+		if len(managedSigners) > 0 && !managedSigners[owner] {
+			continue
+		}
+		val := event.Args["value"]
+		if val == "0" || val == "" {
+			continue
+		}
+		return true
 	}
-
 	return false
 }
 

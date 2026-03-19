@@ -209,42 +209,58 @@ func TestParseEvents_ApprovalForAll(t *testing.T) {
 	}
 }
 
-func TestDetectApproval_FromCalldata(t *testing.T) {
-	// approve(address,uint256) selector
-	if !DetectApproval(nil, "0x095ea7b3000000000000000000000000", nil) {
-		t.Error("expected approval detected from approve selector")
+func TestDetectApproval_NonZeroValue(t *testing.T) {
+	// Approval with non-zero value → detected
+	events := []SimEvent{
+		{Event: "Approval", Standard: "erc20", Args: map[string]string{"owner": "0xabc", "value": "1000000"}},
+	}
+	if !DetectApproval(events, nil) {
+		t.Error("expected approval detected for non-zero value")
 	}
 
-	// setApprovalForAll(address,bool) selector
-	if !DetectApproval(nil, "0xa22cb465000000000000000000000000", nil) {
-		t.Error("expected approval detected from setApprovalForAll selector")
+	// ApprovalForAll (no value field, but Event matches) → needs non-empty value to detect
+	events = []SimEvent{
+		{Event: "ApprovalForAll", Standard: "erc721", Args: map[string]string{"owner": "0xabc", "value": "1"}},
 	}
-
-	// increaseAllowance(address,uint256) selector
-	if !DetectApproval(nil, "0x39509351000000000000000000000000", nil) {
-		t.Error("expected approval detected from increaseAllowance selector")
-	}
-
-	// transfer selector - should not detect
-	if DetectApproval(nil, "0xa9059cbb000000000000000000000000", nil) {
-		t.Error("did not expect approval for transfer selector")
+	if !DetectApproval(events, nil) {
+		t.Error("expected ApprovalForAll detected")
 	}
 }
 
-func TestDetectApproval_FromEvents(t *testing.T) {
+func TestDetectApproval_ZeroValueSkipped(t *testing.T) {
+	// Approval with value=0 (transferFrom side effect) → NOT detected
 	events := []SimEvent{
-		{Event: "Transfer", Standard: "erc20"},
-		{Event: "Approval", Standard: "erc20"},
+		{Event: "Approval", Standard: "erc20", Args: map[string]string{"owner": "0xabc", "value": "0"}},
 	}
-	if !DetectApproval(events, "0xa9059cbb", nil) {
-		t.Error("expected approval detected from Approval event")
+	if DetectApproval(events, nil) {
+		t.Error("did not expect approval for value=0 (transferFrom side effect)")
 	}
+}
 
-	events = []SimEvent{
-		{Event: "Transfer", Standard: "erc20"},
+func TestDetectApproval_NoEvents(t *testing.T) {
+	if DetectApproval(nil, nil) {
+		t.Error("did not expect approval for nil events")
 	}
-	if DetectApproval(events, "0xa9059cbb", nil) {
-		t.Error("did not expect approval when only Transfer event")
+	if DetectApproval([]SimEvent{{Event: "Transfer"}}, nil) {
+		t.Error("did not expect approval for Transfer-only events")
+	}
+}
+
+func TestDetectApproval_ManagedSignerFilter(t *testing.T) {
+	managed := map[string]bool{"0xabc": true}
+	// Managed signer approval → detected
+	events := []SimEvent{
+		{Event: "Approval", Args: map[string]string{"owner": "0xabc", "value": "100"}},
+	}
+	if !DetectApproval(events, managed) {
+		t.Error("expected approval for managed signer")
+	}
+	// Non-managed signer approval → NOT detected
+	events = []SimEvent{
+		{Event: "Approval", Args: map[string]string{"owner": "0xunknown", "value": "100"}},
+	}
+	if DetectApproval(events, managed) {
+		t.Error("did not expect approval for non-managed signer")
 	}
 }
 

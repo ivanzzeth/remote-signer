@@ -91,14 +91,16 @@ func TestSimulationBudgetRule_SimulationReverts(t *testing.T) {
 }
 
 func TestSimulationBudgetRule_ApprovalOnly_RequiresManualApproval(t *testing.T) {
-	// Pure approve tx: has approval event but zero balance outflow.
-	// Budget passes (no outflow), but approval is security-sensitive → requires manual approval.
+	// Approve tx: simulation emits Approval event with non-zero value for our signer.
+	// Budget passes (no outflow), but approval detected → manual approval required.
 	sim := &mockSimulator{
 		simulateResult: &simulation.SimulationResult{
 			Success:     true,
 			HasApproval: true,
 			Events: []simulation.SimEvent{
-				{Event: "Approval", Standard: "erc20"},
+				{Event: "Approval", Standard: "erc20", Args: map[string]string{
+					"owner": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266", "spender": "0x5b38da6a701c568545dcfcb03fcb875f56beddc4", "value": "1000000",
+				}},
 			},
 			BalanceChanges: []simulation.BalanceChange{},
 		},
@@ -123,33 +125,24 @@ func TestSimulationBudgetRule_ApprovalOnly_RequiresManualApproval(t *testing.T) 
 }
 
 func TestSimulationBudgetRule_SwapWithApproval_TracksBudget(t *testing.T) {
-	// DEX swap tx: has internal approval event AND actual token outflow.
-	// Budget should track the outflow, not skip because of approval.
+	// DEX swap: has Approval event with value=0 (transferFrom side effect) + actual outflow.
+	// value=0 approval is NOT a real approval grant → should auto-allow, not manual approval.
 	sim := &mockSimulator{
 		simulateResult: &simulation.SimulationResult{
 			Success:     true,
-			HasApproval: true, // internal DEX approval
+			HasApproval: true,
 			Events: []simulation.SimEvent{
-				{Event: "Approval", Standard: "erc20"},
+				{Event: "Approval", Standard: "erc20", Args: map[string]string{
+					"owner": "0x764602fead618416e42b48c633d90869ff19759e", "spender": "0x3b86917369b83a6892f553609f3c2f439c184e31", "value": "0",
+				}},
 				{Event: "Transfer", Standard: "erc20"},
 			},
 			BalanceChanges: []simulation.BalanceChange{
-				{
-					Token:     "0x2791bca1f2de4661ed88a30c99a7a9449aa84174",
-					Standard:  "erc20",
-					Amount:    big.NewInt(-1000000), // -1 USDC.e outflow
-					Direction: "outflow",
-				},
-				{
-					Token:     "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359",
-					Standard:  "erc20",
-					Amount:    big.NewInt(999989), // +0.999989 USDC inflow
-					Direction: "inflow",
-				},
+				{Token: "0x2791bca1f2de4661ed88a30c99a7a9449aa84174", Standard: "erc20", Amount: big.NewInt(-1000000), Direction: "outflow"},
+				{Token: "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359", Standard: "erc20", Amount: big.NewInt(999989), Direction: "inflow"},
 			},
 		},
 	}
-	// No budget repo -> budget passes through, but outflows are still processed
 	r, err := NewSimulationBudgetRule(sim, nil, nil, nil, nil, simTestLogger())
 	require.NoError(t, err)
 
@@ -164,10 +157,8 @@ func TestSimulationBudgetRule_SwapWithApproval_TracksBudget(t *testing.T) {
 		Value:     &val,
 	})
 	require.NoError(t, err)
-	// Has approval event + outflow. Budget check runs (no repo = pass), then approval → manual approval.
-	assert.Equal(t, "no_match", outcome.Decision)
-	assert.NotNil(t, outcome.Simulation)
-	assert.True(t, outcome.Simulation.HasApproval)
+	// value=0 approval is skipped → no managed signer approval → auto-allow
+	assert.Equal(t, "allow", outcome.Decision)
 }
 
 func TestSimulationBudgetRule_SwapNoApproval_Allow(t *testing.T) {
@@ -236,15 +227,20 @@ func TestSimulationBudgetRule_AllowNoBudgetRepo(t *testing.T) {
 }
 
 func TestSimulationBudgetRule_BatchApproveAndSwap_TracksBudget(t *testing.T) {
-	// Batch: approve + swap. Approve has no outflow, swap has outflow.
-	// Budget should track the net outflow, not skip because of approval.
+	// Batch: approve (non-zero value) + swap (value=0 side effect).
+	// Approve tx has real Approval event → entire batch needs manual approval.
 	sim := &mockSimulator{
 		simulateBatchResult: &simulation.BatchSimulationResult{
 			Results: []simulation.SimulationResult{
-				{Success: true, HasApproval: true}, // approve tx
+				{Success: true, HasApproval: true, Events: []simulation.SimEvent{
+					{Event: "Approval", Args: map[string]string{"owner": "0x764602fead618416e42b48c633d90869ff19759e", "value": "1000000"}},
+				}},
 				{
 					Success:     true,
-					HasApproval: true, // swap has internal approval
+					HasApproval: true,
+					Events: []simulation.SimEvent{
+						{Event: "Approval", Args: map[string]string{"owner": "0x764602fead618416e42b48c633d90869ff19759e", "value": "0"}}, // transferFrom side effect
+					},
 					BalanceChanges: []simulation.BalanceChange{
 						{Token: "0x2791bca1f2de4661ed88a30c99a7a9449aa84174", Amount: big.NewInt(-1000000), Direction: "outflow"},
 						{Token: "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359", Amount: big.NewInt(999989), Direction: "inflow"},
