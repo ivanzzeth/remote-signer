@@ -332,6 +332,8 @@ POST /api/v1/evm/sign/batch
 
 ### 1. AnvilForkManager
 
+> **TODO**: Anvil backend has hardcoded timeouts (120s startup, 15s health check, 500ms health check pause) that should be extracted to config fields. Low priority since RPC backend is the recommended default.
+
 Manages one persistent `anvil` process per chain. Uses `evm_snapshot` / `evm_revert` for atomic simulations (no cache invalidation).
 
 #### Lifecycle
@@ -645,6 +647,8 @@ Rule engine evaluation:
 ```
 
 #### Batch Window
+
+> **TODO**: Batch window accumulator is NOT YET IMPLEMENTED. Currently each single sign request is simulated independently. The design below is the target state for a future iteration.
 
 Single sign requests that fall through to simulation are accumulated:
 
