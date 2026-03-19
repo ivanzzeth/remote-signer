@@ -355,3 +355,89 @@ func TestNewSimulationBudgetRule_NilLogger(t *testing.T) {
 	_, err := NewSimulationBudgetRule(nil, nil, nil, nil, nil, nil)
 	assert.Error(t, err, "expected error for nil logger")
 }
+
+func TestSimulationBudgetRule_GasCostEstimation(t *testing.T) {
+	r, err := NewSimulationBudgetRule(&mockSimulator{}, nil, nil, nil, nil, simTestLogger())
+	require.NoError(t, err)
+
+	// EIP-1559 tx with gasFeeCap
+	payload1559 := []byte(`{"transaction":{"to":"0x1234567890abcdef1234567890abcdef12345678","value":"0","data":"0x","gas":21000,"gasFeeCap":"50000000000","gasTipCap":"1000000000","txType":"eip1559"}}`)
+	gasCost := r.estimateGasCost(21000, payload1559)
+	require.NotNil(t, gasCost)
+	// 21000 * 50000000000 = 1050000000000000 (1.05e15 wei)
+	expected := new(big.Int).Mul(big.NewInt(21000), big.NewInt(50000000000))
+	assert.Equal(t, expected.String(), gasCost.String())
+
+	// Legacy tx with gasPrice
+	payloadLegacy := []byte(`{"transaction":{"to":"0x1234567890abcdef1234567890abcdef12345678","value":"0","data":"0x","gas":21000,"gasPrice":"20000000000","txType":"legacy"}}`)
+	gasCost2 := r.estimateGasCost(21000, payloadLegacy)
+	require.NotNil(t, gasCost2)
+	expected2 := new(big.Int).Mul(big.NewInt(21000), big.NewInt(20000000000))
+	assert.Equal(t, expected2.String(), gasCost2.String())
+
+	// Zero gasUsed -> nil
+	assert.Nil(t, r.estimateGasCost(0, payloadLegacy))
+
+	// Empty payload -> nil
+	assert.Nil(t, r.estimateGasCost(21000, nil))
+
+	// gasPrice=0 -> nil (no cost)
+	payloadZero := []byte(`{"transaction":{"to":"0x1234","value":"0","data":"0x","gas":21000,"gasPrice":"0","txType":"legacy"}}`)
+	assert.Nil(t, r.estimateGasCost(21000, payloadZero))
+}
+
+func TestAppendGasCostToBalanceChanges(t *testing.T) {
+	gasCost := big.NewInt(1050000000000000) // 1.05e15 wei
+
+	// Case 1: No existing native outflow → new entry added
+	changes := []simulation.BalanceChange{
+		{Token: "0xusdc", Standard: "erc20", Amount: big.NewInt(-1000000), Direction: "outflow"},
+	}
+	result := appendGasCostToBalanceChanges(changes, gasCost)
+	assert.Len(t, result, 2)
+	assert.Equal(t, "native", result[1].Token)
+	assert.Equal(t, new(big.Int).Neg(gasCost).String(), result[1].Amount.String())
+
+	// Case 2: Existing native outflow → merged
+	changes2 := []simulation.BalanceChange{
+		{Token: "native", Standard: "native", Amount: big.NewInt(-500000000000000), Direction: "outflow"},
+	}
+	result2 := appendGasCostToBalanceChanges(changes2, gasCost)
+	assert.Len(t, result2, 1)
+	expectedMerged := new(big.Int).Sub(big.NewInt(-500000000000000), gasCost)
+	assert.Equal(t, expectedMerged.String(), result2[0].Amount.String())
+
+	// Original should not be mutated
+	assert.Equal(t, big.NewInt(-500000000000000).String(), changes2[0].Amount.String())
+}
+
+func TestSimulationBudgetRule_EvaluateSingle_WithGasCost(t *testing.T) {
+	// Verify that EvaluateSingle includes gas cost in budget check.
+	// Use a simulation with gasUsed=100000, and a payload with gasFeeCap=100 Gwei.
+	sim := &mockSimulator{
+		simulateResult: &simulation.SimulationResult{
+			Success: true,
+			GasUsed: 100000,
+			BalanceChanges: []simulation.BalanceChange{
+				{Token: "0xusdc", Standard: "erc20", Amount: big.NewInt(-1000000), Direction: "outflow"},
+			},
+		},
+	}
+	r, err := NewSimulationBudgetRule(sim, nil, nil, nil, nil, simTestLogger())
+	require.NoError(t, err)
+
+	to := "0x1234567890abcdef1234567890abcdef12345678"
+	val := "0"
+	outcome, err := r.EvaluateSingle(context.Background(), &types.SignRequest{
+		ChainID:       "1",
+		SignerAddress: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+		SignType:      SignTypeTransaction,
+		Payload:       []byte(`{"transaction":{"to":"0x1234567890abcdef1234567890abcdef12345678","value":"0","data":"0xa9059cbb","gas":100000,"gasFeeCap":"100000000000","gasTipCap":"1000000000","txType":"eip1559"}}`),
+	}, &types.ParsedPayload{
+		Recipient: &to,
+		Value:     &val,
+	})
+	require.NoError(t, err)
+	// No budget repo → passes through → allow
+	assert.Equal(t, "allow", outcome.Decision)
+}
