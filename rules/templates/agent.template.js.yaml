@@ -48,6 +48,11 @@ variables:
     description: "Max tx count for unknown tokens"
     required: false
     default: "50"
+  - name: allowed_spenders
+    type: string
+    description: "Comma-separated allowed spender addresses for Permit/Permit2 signatures. If empty, all Permit sigs are blocked (fail-closed)."
+    required: false
+    default: ""
 
 budget_metering:
   method: "js"
@@ -81,6 +86,7 @@ test_variables:
   max_unknown_token_total: "1000"
   max_unknown_token_per_tx: "100"
   max_unknown_token_tx_count: "50"
+  allowed_spenders: "0x5b38da6a701c568545dcfcb03fcb875f56beddc4,0x3b86917369b83a6892f553609f3c2f439c184e31"
 
 rules:
   # ── agent-tx: REMOVED ──
@@ -103,10 +109,45 @@ rules:
     type: "evm_js"
     mode: "whitelist"
     enabled: true
-    description: "Allow personal_sign with message length limit and typed_data; Permit signatures tracked in budget"
+    description: "Allow personal_sign (length limit) and typed_data. Permit/Permit2 spender must be in allowed_spenders list. Budget tracks Permit value."
     config:
       sign_type_filter: "personal_sign,typed_data"
+      # Comma-separated allowed spender addresses for Permit/Permit2 signatures.
+      # If empty, ALL Permit signatures are blocked (fail-closed).
+      # Example: "0x3b86917369b83a6892f553609f3c2f439c184e31,0xdef1c0ded9bec7f1a1670819833240f027b25eff"
+      allowed_spenders: "${allowed_spenders}"
       script: |
+        // Permit-like primaryTypes that grant spending permission
+        var PERMIT_TYPES = ['Permit', 'PermitSingle', 'PermitBatch', 'PermitTransferFrom', 'PermitBatchTransferFrom'];
+
+        function isPermitType(primaryType) {
+          for (var i = 0; i < PERMIT_TYPES.length; i++) {
+            if (primaryType === PERMIT_TYPES[i]) return true;
+          }
+          return false;
+        }
+
+        function getAllowedSpenders() {
+          var raw = config.allowed_spenders || '';
+          if (!raw || raw === '${allowed_spenders}') return [];
+          var parts = raw.split(',');
+          var result = [];
+          for (var i = 0; i < parts.length; i++) {
+            var addr = parts[i].trim().toLowerCase();
+            if (addr) result.push(addr);
+          }
+          return result;
+        }
+
+        function extractSpender(td) {
+          var msg = td.message || {};
+          // ERC2612 Permit: message.spender
+          if (msg.spender) return msg.spender.toLowerCase();
+          // Permit2 PermitSingle: message.details.spender or message.spender
+          if (msg.details && msg.details.spender) return msg.details.spender.toLowerCase();
+          return '';
+        }
+
         function validate(input) {
           if (input.sign_type === 'personal_sign') {
             var msg = input.personal_sign.message;
@@ -121,6 +162,24 @@ rules:
           if (input.sign_type === 'typed_data') {
             var td = input.typed_data;
             require(td, 'missing typed_data');
+
+            // Permit-like signatures: check spender whitelist
+            if (isPermitType(td.primaryType)) {
+              var allowed = getAllowedSpenders();
+              if (allowed.length === 0) {
+                return fail('Permit signatures require allowed_spenders config (fail-closed)');
+              }
+              var spender = extractSpender(td);
+              require(spender, 'could not extract spender from Permit message');
+              var found = false;
+              for (var i = 0; i < allowed.length; i++) {
+                if (allowed[i] === spender) { found = true; break; }
+              }
+              if (!found) {
+                return fail('Permit spender ' + spender + ' is not in allowed_spenders whitelist');
+              }
+            }
+
             return ok();
           }
 
@@ -132,9 +191,9 @@ rules:
           }
           if (input.sign_type === 'typed_data') {
             var td = input.typed_data;
-            if (td.primaryType === 'Permit' || td.primaryType === 'PermitSingle') {
+            if (isPermitType(td.primaryType)) {
               var token = (td.domain || {}).verifyingContract || '';
-              var value = BigInt((td.message || {}).value || '0');
+              var value = BigInt((td.message || {}).value || (td.message || {}).amount || '0');
               return { amount: value, unit: token + ':permit' };
             }
           }
@@ -185,6 +244,48 @@ rules:
               nonce: "0"
               deadline: "1700000000"
         expect_pass: true
+      # Negative: Permit with spender NOT in whitelist
+      - name: "reject: Permit with unauthorized spender"
+        input:
+          sign_type: "typed_data"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          typed_data:
+            primaryType: "Permit"
+            domain:
+              name: "USD Coin"
+              chainId: "1"
+              verifyingContract: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            message:
+              owner: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+              spender: "0xdEAD000000000000000000000000000000000000"
+              value: "1000000"
+              nonce: "0"
+              deadline: "1700000000"
+        expect_pass: false
+        expect_reason: "not in allowed_spenders whitelist"
+      # Negative: PermitSingle (Permit2) with unauthorized spender
+      - name: "reject: Permit2 PermitSingle unauthorized spender"
+        input:
+          sign_type: "typed_data"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          typed_data:
+            primaryType: "PermitSingle"
+            domain:
+              name: "Permit2"
+              chainId: "1"
+              verifyingContract: "0x000000000022D473030F116dDEE9F6B43aC78BA3"
+            message:
+              details:
+                token: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+                amount: "1000000"
+                expiration: "1700000000"
+                nonce: "0"
+              spender: "0xdEAD000000000000000000000000000000000000"
+              sigDeadline: "1700000000"
+        expect_pass: false
+        expect_reason: "not in allowed_spenders whitelist"
       # Negative: personal_sign too long (default limit is 1024)
       - name: "reject: personal_sign exceeds length limit"
         input:
