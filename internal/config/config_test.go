@@ -403,6 +403,36 @@ func TestValidate_ValidRoles(t *testing.T) {
 	}
 }
 
+func TestValidate_SimulationEnabledWithoutBudgetDefaults(t *testing.T) {
+	cfg := validConfig()
+	cfg.Chains.EVM.Simulation = SimulationConfig{
+		Enabled: true,
+		// All budget fields empty (zero values)
+	}
+	err := validate(cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "simulation is enabled but no budget defaults configured")
+}
+
+func TestValidate_SimulationEnabledWithBudgetDefaults(t *testing.T) {
+	cfg := validConfig()
+	cfg.Chains.EVM.Simulation = SimulationConfig{
+		Enabled:            true,
+		BudgetNativeMaxTotal: "0.01",
+	}
+	err := validate(cfg)
+	assert.NoError(t, err)
+}
+
+func TestValidate_SimulationDisabledWithoutBudgetDefaults(t *testing.T) {
+	cfg := validConfig()
+	cfg.Chains.EVM.Simulation = SimulationConfig{
+		Enabled: false,
+	}
+	err := validate(cfg)
+	assert.NoError(t, err)
+}
+
 // ---------------------------------------------------------------------------
 // setDefaults
 // ---------------------------------------------------------------------------
@@ -438,18 +468,25 @@ func TestSetDefaults_EmptyLoggerLevel(t *testing.T) {
 	assert.Equal(t, "info", cfg.Logger.Level)
 }
 
-func TestSetDefaults_ApprovalGuardEnabledZeroThreshold(t *testing.T) {
+func TestSetDefaults_ApprovalGuardEnabledZeroRejectionThreshold(t *testing.T) {
 	cfg := &Config{}
 	cfg.Security.ApprovalGuard.Enabled = true
 	setDefaults(cfg)
-	assert.Equal(t, 10, cfg.Security.ApprovalGuard.Threshold)
+	assert.Equal(t, float64(50), cfg.Security.ApprovalGuard.RejectionThresholdPct)
+}
+
+func TestSetDefaults_ApprovalGuardEnabledZeroMinSamples(t *testing.T) {
+	cfg := &Config{}
+	cfg.Security.ApprovalGuard.Enabled = true
+	setDefaults(cfg)
+	assert.Equal(t, 10, cfg.Security.ApprovalGuard.MinSamples)
 }
 
 func TestSetDefaults_ApprovalGuardEnabledZeroWindow(t *testing.T) {
 	cfg := &Config{}
 	cfg.Security.ApprovalGuard.Enabled = true
 	setDefaults(cfg)
-	assert.Equal(t, 5*time.Minute, cfg.Security.ApprovalGuard.Window)
+	assert.Equal(t, 1*time.Hour, cfg.Security.ApprovalGuard.Window)
 }
 
 func TestSetDefaults_ApprovalGuardEnabledZeroResume(t *testing.T) {
@@ -481,6 +518,23 @@ func TestSetDefaults_PreservesExistingValues(t *testing.T) {
 func TestSecurityConfig_IsSIGHUPRulesReloadEnabled_DefaultFalse(t *testing.T) {
 	var s SecurityConfig
 	assert.False(t, s.IsSIGHUPRulesReloadEnabled())
+}
+
+func TestSecurityConfig_IsRequireApprovalForAgentRules_DefaultTrue(t *testing.T) {
+	var s SecurityConfig
+	assert.True(t, s.IsRequireApprovalForAgentRules(), "default should be true (secure by default)")
+}
+
+func TestSecurityConfig_IsRequireApprovalForAgentRules_ExplicitFalse(t *testing.T) {
+	val := false
+	s := SecurityConfig{RequireApprovalForAgentRules: &val}
+	assert.False(t, s.IsRequireApprovalForAgentRules())
+}
+
+func TestSecurityConfig_IsRequireApprovalForAgentRules_ExplicitTrue(t *testing.T) {
+	val := true
+	s := SecurityConfig{RequireApprovalForAgentRules: &val}
+	assert.True(t, s.IsRequireApprovalForAgentRules())
 }
 
 // ---------------------------------------------------------------------------

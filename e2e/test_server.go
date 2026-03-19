@@ -486,12 +486,13 @@ func (ts *TestServer) Start() error {
 	var approvalGuard *service.ManualApprovalGuard
 	if cfg != nil && cfg.Security.ApprovalGuard.Enabled {
 		approvalGuard, err = service.NewManualApprovalGuard(service.ManualApprovalGuardConfig{
-			Window:      cfg.Security.ApprovalGuard.Window,
-			Threshold:   cfg.Security.ApprovalGuard.Threshold,
-			ResumeAfter: cfg.Security.ApprovalGuard.ResumeAfter,
-			NotifySvc:   nil,
-			Channel:     nil,
-			Logger:      log,
+			Window:                cfg.Security.ApprovalGuard.Window,
+			RejectionThresholdPct: cfg.Security.ApprovalGuard.RejectionThresholdPct,
+			MinSamples:            cfg.Security.ApprovalGuard.MinSamples,
+			ResumeAfter:           cfg.Security.ApprovalGuard.ResumeAfter,
+			NotifySvc:             nil,
+			Channel:               nil,
+			Logger:                log,
 		})
 		if err != nil {
 			return fmt.Errorf("failed to create approval guard: %w", err)

@@ -98,9 +98,14 @@ func (s *SignService) SetSimulationRule(rule *evmchain.SimulationBudgetRule) {
 	s.simulationRule = rule
 }
 
+// ErrStrategyRoleSimulationBlocked is returned when a strategy role request reaches simulation fallback,
+// indicating rule misconfiguration. Strategy keys must have explicit rules for all operations.
+var ErrStrategyRoleSimulationBlocked = errors.New("strategy role request has no matching whitelist rule: explicit rules required for all operations")
+
 // SignRequest represents a request to sign data
 type SignRequest struct {
 	APIKeyID      string          `json:"api_key_id"`
+	APIKeyRole    types.APIKeyRole `json:"api_key_role"`
 	ChainType     types.ChainType `json:"chain_type"`
 	ChainID       string          `json:"chain_id"`
 	SignerAddress string          `json:"signer_address"`
@@ -246,6 +251,27 @@ func (s *SignService) Sign(ctx context.Context, req *SignRequest) (*SignResponse
 			s.approvalGuard.RecordNonManualApproval()
 		}
 		return s.processApprovedRequest(ctx, signReq, matchedRuleID, nil, reason, adapter)
+	}
+
+	// No whitelist rule matched — strategy role must have explicit rules for all operations.
+	// Reaching this point means rules are misconfigured; reject immediately without simulation.
+	if req.APIKeyRole == types.RoleStrategy {
+		s.logger.Warn("strategy role request has no matching whitelist rule, skipping simulation fallback",
+			"request_id", signReq.ID,
+			"api_key_id", req.APIKeyID,
+		)
+		if s.approvalGuard != nil {
+			s.approvalGuard.RecordRuleRejected()
+		}
+		rejectReason := "strategy role requires explicit rules for all operations; no matching whitelist rule found"
+		if _, smErr := s.stateMachine.RejectOnAuthorization(ctx, signReq.ID, "system", rejectReason); smErr != nil {
+			s.logger.Error("failed to reject request", "error", smErr)
+		}
+		return &SignResponse{
+			RequestID: signReq.ID,
+			Status:    types.StatusRejected,
+			Message:   rejectReason,
+		}, nil
 	}
 
 	// No whitelist rule matched — try simulation fallback before manual approval

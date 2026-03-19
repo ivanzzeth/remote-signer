@@ -2,13 +2,17 @@ package evm
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"math/big"
 	"os"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/simulation"
+	"github.com/ivanzzeth/remote-signer/internal/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -441,3 +445,358 @@ func TestSimulationBudgetRule_EvaluateSingle_WithGasCost(t *testing.T) {
 	// No budget repo → passes through → allow
 	assert.Equal(t, "allow", outcome.Decision)
 }
+
+// --- Mock types for ENH-2 and IMP-3 tests ---
+
+// mockSimBudgetRepo implements storage.BudgetRepository for simulation budget tests.
+type mockSimBudgetRepo struct {
+	mu       sync.Mutex
+	budgets  map[string]*types.RuleBudget // key: ruleID + ":" + unit
+	countMap map[types.RuleID]int         // override for CountByRuleID
+}
+
+func newMockSimBudgetRepo() *mockSimBudgetRepo {
+	return &mockSimBudgetRepo{
+		budgets:  make(map[string]*types.RuleBudget),
+		countMap: make(map[types.RuleID]int),
+	}
+}
+
+func (m *mockSimBudgetRepo) Create(_ context.Context, budget *types.RuleBudget) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := string(budget.RuleID) + ":" + budget.Unit
+	m.budgets[key] = budget
+	return nil
+}
+
+func (m *mockSimBudgetRepo) CreateOrGet(_ context.Context, budget *types.RuleBudget) (*types.RuleBudget, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := string(budget.RuleID) + ":" + budget.Unit
+	if existing, ok := m.budgets[key]; ok {
+		return existing, false, nil
+	}
+	now := time.Now()
+	budget.CreatedAt = now
+	budget.UpdatedAt = now
+	m.budgets[key] = budget
+	return budget, true, nil
+}
+
+func (m *mockSimBudgetRepo) GetByRuleID(_ context.Context, ruleID types.RuleID, unit string) (*types.RuleBudget, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := string(ruleID) + ":" + unit
+	if b, ok := m.budgets[key]; ok {
+		cp := *b
+		return &cp, nil
+	}
+	return nil, types.ErrNotFound
+}
+
+func (m *mockSimBudgetRepo) CountByRuleID(_ context.Context, ruleID types.RuleID) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if cnt, ok := m.countMap[ruleID]; ok {
+		return cnt, nil
+	}
+	// Count actual budgets
+	count := 0
+	prefix := string(ruleID) + ":"
+	for key := range m.budgets {
+		if len(key) >= len(prefix) && key[:len(prefix)] == prefix {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (m *mockSimBudgetRepo) Delete(_ context.Context, _ string) error              { return nil }
+func (m *mockSimBudgetRepo) DeleteByRuleID(_ context.Context, _ types.RuleID) error { return nil }
+func (m *mockSimBudgetRepo) AtomicSpend(_ context.Context, _ types.RuleID, _ string, _ string) error {
+	return nil
+}
+func (m *mockSimBudgetRepo) ResetBudget(_ context.Context, _ types.RuleID, _ string, _ time.Time) error {
+	return nil
+}
+func (m *mockSimBudgetRepo) ListByRuleID(_ context.Context, _ types.RuleID) ([]*types.RuleBudget, error) {
+	return nil, nil
+}
+func (m *mockSimBudgetRepo) ListByRuleIDs(_ context.Context, _ []types.RuleID) ([]*types.RuleBudget, error) {
+	return nil, nil
+}
+func (m *mockSimBudgetRepo) MarkAlertSent(_ context.Context, _ types.RuleID, _ string) error {
+	return nil
+}
+
+// setCount overrides CountByRuleID for a specific ruleID.
+func (m *mockSimBudgetRepo) setCount(ruleID types.RuleID, count int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.countMap[ruleID] = count
+}
+
+// mockDecimalsQuerier implements rule.DecimalsQuerier for testing.
+type mockDecimalsQuerier struct {
+	decimals map[string]int   // key: chainID + ":" + address
+	errs     map[string]error // key: chainID + ":" + address
+}
+
+func newMockDecimalsQuerier() *mockDecimalsQuerier {
+	return &mockDecimalsQuerier{
+		decimals: make(map[string]int),
+		errs:     make(map[string]error),
+	}
+}
+
+func (m *mockDecimalsQuerier) setDecimals(chainID, address string, d int) {
+	m.decimals[chainID+":"+address] = d
+}
+
+func (m *mockDecimalsQuerier) QueryDecimals(_ context.Context, chainID, address string) (int, error) {
+	key := chainID + ":" + address
+	if err, ok := m.errs[key]; ok {
+		return 0, err
+	}
+	if d, ok := m.decimals[key]; ok {
+		return d, nil
+	}
+	return 0, fmt.Errorf("decimals not configured for %s", key)
+}
+
+// mockDecimalsAlerter implements DecimalsAnomalyAlerter for testing.
+type mockDecimalsAlerter struct {
+	mu     sync.Mutex
+	alerts []decimalsAlert
+}
+
+type decimalsAlert struct {
+	ChainID  string
+	Token    string
+	Decimals int
+	Reason   string
+}
+
+func (m *mockDecimalsAlerter) AlertDecimalsAnomaly(_ context.Context, chainID, token string, decimals int, reason string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.alerts = append(m.alerts, decimalsAlert{
+		ChainID:  chainID,
+		Token:    token,
+		Decimals: decimals,
+		Reason:   reason,
+	})
+}
+
+func (m *mockDecimalsAlerter) alertCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.alerts)
+}
+
+// --- ENH-2 Tests: MaxDynamicUnits ---
+
+func TestAutoCreateBudget_StopsAtMaxDynamicUnits(t *testing.T) {
+	repo := newMockSimBudgetRepo()
+	defaults := &SimBudgetDefaults{
+		ERC20MaxTotal:   "100",
+		ERC20MaxPerTx:   "50",
+		MaxDynamicUnits: 2,
+	}
+	dq := newMockDecimalsQuerier()
+	dq.setDecimals("1", "0xtoken1", 6)
+	dq.setDecimals("1", "0xtoken2", 6)
+	dq.setDecimals("1", "0xtoken3", 6)
+
+	r, err := NewSimulationBudgetRule(&mockSimulator{}, repo, defaults, dq, nil, nil, simTestLogger())
+	require.NoError(t, err)
+
+	syntheticRuleID := types.RuleID("sim:0xsigner")
+
+	// First token: should succeed
+	b1, err := r.autoCreateBudget(context.Background(), "1", "0xsigner", "0xtoken1", syntheticRuleID, "1:0xtoken1")
+	require.NoError(t, err)
+	require.NotNil(t, b1)
+
+	// Second token: should succeed (count is now 1)
+	b2, err := r.autoCreateBudget(context.Background(), "1", "0xsigner", "0xtoken2", syntheticRuleID, "1:0xtoken2")
+	require.NoError(t, err)
+	require.NotNil(t, b2)
+
+	// Third token: should fail (count is now 2, limit is 2)
+	b3, err := r.autoCreateBudget(context.Background(), "1", "0xsigner", "0xtoken3", syntheticRuleID, "1:0xtoken3")
+	assert.Error(t, err)
+	assert.Nil(t, b3)
+	assert.Contains(t, err.Error(), "simulation budget unit limit reached")
+}
+
+func TestAutoCreateBudget_WithinLimitStillWorks(t *testing.T) {
+	repo := newMockSimBudgetRepo()
+	defaults := &SimBudgetDefaults{
+		NativeMaxTotal: "1",
+		NativeMaxPerTx: "0.5",
+	}
+
+	r, err := NewSimulationBudgetRule(&mockSimulator{}, repo, defaults, nil, nil, nil, simTestLogger())
+	require.NoError(t, err)
+
+	syntheticRuleID := types.RuleID("sim:0xsigner")
+
+	// Native token with count=0, default limit=100 -> should succeed
+	b, err := r.autoCreateBudget(context.Background(), "1", "0xsigner", "native", syntheticRuleID, "1:native")
+	require.NoError(t, err)
+	require.NotNil(t, b)
+	assert.Equal(t, "1000000000000000000", b.MaxTotal) // 1 ETH = 1e18
+}
+
+func TestAutoCreateBudget_DefaultMaxDynamicUnits(t *testing.T) {
+	// Verify default of 100 is used when MaxDynamicUnits is 0
+	repo := newMockSimBudgetRepo()
+	defaults := &SimBudgetDefaults{
+		ERC20MaxTotal: "100",
+		ERC20MaxPerTx: "50",
+		// MaxDynamicUnits: 0 -> use default 100
+	}
+	dq := newMockDecimalsQuerier()
+	dq.setDecimals("1", "0xtoken", 6)
+
+	r, err := NewSimulationBudgetRule(&mockSimulator{}, repo, defaults, dq, nil, nil, simTestLogger())
+	require.NoError(t, err)
+
+	// Set count to 100 (at limit)
+	syntheticRuleID := types.RuleID("sim:0xsigner")
+	repo.setCount(syntheticRuleID, 100)
+
+	b, err := r.autoCreateBudget(context.Background(), "1", "0xsigner", "0xtoken", syntheticRuleID, "1:0xtoken")
+	assert.Error(t, err)
+	assert.Nil(t, b)
+	assert.Contains(t, err.Error(), "simulation budget unit limit reached (100/100)")
+}
+
+// --- IMP-3 Tests: Decimals Anomaly Alert ---
+
+func TestAutoCreateBudget_AnomalousDecimals_Alerts(t *testing.T) {
+	tests := []struct {
+		name      string
+		decimals  int
+		wantAlert bool
+	}{
+		{"decimals_0_alerts", 0, true},
+		{"decimals_25_alerts", 25, true},
+		{"decimals_77_alerts", 77, true},
+		{"decimals_6_no_alert", 6, false},
+		{"decimals_18_no_alert", 18, false},
+		{"decimals_24_no_alert", 24, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newMockSimBudgetRepo()
+			defaults := &SimBudgetDefaults{
+				ERC20MaxTotal: "100",
+				ERC20MaxPerTx: "50",
+			}
+			dq := newMockDecimalsQuerier()
+			dq.setDecimals("1", "0xtoken", tt.decimals)
+
+			alerter := &mockDecimalsAlerter{}
+
+			r, err := NewSimulationBudgetRule(&mockSimulator{}, repo, defaults, dq, nil, nil, simTestLogger())
+			require.NoError(t, err)
+			r.SetDecimalsAlerter(alerter)
+
+			syntheticRuleID := types.RuleID("sim:0xsigner")
+			_, err = r.autoCreateBudget(context.Background(), "1", "0xsigner", "0xtoken", syntheticRuleID, "1:0xtoken")
+			require.NoError(t, err)
+
+			if tt.wantAlert {
+				assert.Equal(t, 1, alerter.alertCount(), "expected anomaly alert for decimals=%d", tt.decimals)
+			} else {
+				assert.Equal(t, 0, alerter.alertCount(), "expected no alert for decimals=%d", tt.decimals)
+			}
+		})
+	}
+}
+
+func TestAutoCreateBudget_NativeToken_NoDecimalsAlert(t *testing.T) {
+	// Native tokens always use decimals=18, should never trigger anomaly alert
+	repo := newMockSimBudgetRepo()
+	defaults := &SimBudgetDefaults{
+		NativeMaxTotal: "1",
+		NativeMaxPerTx: "0.5",
+	}
+	alerter := &mockDecimalsAlerter{}
+
+	r, err := NewSimulationBudgetRule(&mockSimulator{}, repo, defaults, nil, nil, nil, simTestLogger())
+	require.NoError(t, err)
+	r.SetDecimalsAlerter(alerter)
+
+	syntheticRuleID := types.RuleID("sim:0xsigner")
+	_, err = r.autoCreateBudget(context.Background(), "1", "0xsigner", "native", syntheticRuleID, "1:native")
+	require.NoError(t, err)
+	assert.Equal(t, 0, alerter.alertCount())
+}
+
+func TestCheckBudgetFromBalanceChanges_DenyOnUnitLimitReached(t *testing.T) {
+	// End-to-end test: checkBudgetFromBalanceChanges should return error when unit limit reached
+	repo := newMockSimBudgetRepo()
+	defaults := &SimBudgetDefaults{
+		ERC20MaxTotal:   "100",
+		ERC20MaxPerTx:   "50",
+		MaxDynamicUnits: 1,
+	}
+	dq := newMockDecimalsQuerier()
+	dq.setDecimals("1", "0xtoken_a", 6)
+	dq.setDecimals("1", "0xtoken_b", 6)
+
+	sim := &mockSimulator{
+		simulateResult: &simulation.SimulationResult{
+			Success: true,
+			BalanceChanges: []simulation.BalanceChange{
+				{Token: "0xtoken_a", Standard: "erc20", Amount: big.NewInt(-1000000), Direction: "outflow"},
+			},
+		},
+	}
+
+	r, err := NewSimulationBudgetRule(sim, repo, defaults, dq, nil, nil, simTestLogger())
+	require.NoError(t, err)
+
+	to := "0x1234567890abcdef1234567890abcdef12345678"
+	val := "0"
+
+	// First request: creates budget for token_a -> should allow
+	outcome1, err := r.EvaluateSingle(context.Background(), &types.SignRequest{
+		ChainID:       "1",
+		SignerAddress: "0xSigner",
+		SignType:      SignTypeTransaction,
+	}, &types.ParsedPayload{
+		Recipient: &to,
+		Value:     &val,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "allow", outcome1.Decision)
+
+	// Second request with different token: should deny (unit limit=1 reached)
+	sim.simulateResult = &simulation.SimulationResult{
+		Success: true,
+		BalanceChanges: []simulation.BalanceChange{
+			{Token: "0xtoken_b", Standard: "erc20", Amount: big.NewInt(-500000), Direction: "outflow"},
+		},
+	}
+
+	outcome2, err := r.EvaluateSingle(context.Background(), &types.SignRequest{
+		ChainID:       "1",
+		SignerAddress: "0xSigner",
+		SignType:      SignTypeTransaction,
+	}, &types.ParsedPayload{
+		Recipient: &to,
+		Value:     &val,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "deny", outcome2.Decision)
+	assert.Contains(t, outcome2.Reason, "simulation budget unit limit reached")
+}
+
+// Ensure unused import for storage.ErrBudgetExceeded (used by mock)
+var _ = storage.ErrBudgetExceeded

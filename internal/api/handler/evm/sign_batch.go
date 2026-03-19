@@ -355,6 +355,7 @@ func (h *BatchSignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	for i, item := range req.Requests {
 		signReq := &service.SignRequest{
 			APIKeyID:      apiKey.ID,
+			APIKeyRole:    apiKey.Role,
 			ChainType:     types.ChainTypeEVM,
 			ChainID:       item.ChainID,
 			SignerAddress:  item.SignerAddress,

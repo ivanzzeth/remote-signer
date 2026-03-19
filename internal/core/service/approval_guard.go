@@ -9,50 +9,88 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/notify"
 )
 
-// ManualApprovalGuard pauses all sign requests when too many consecutive
-// "not auto-approved" outcomes occur within a time window (manual approval or rule-blocked),
-// and sends an alert via notify. Used to detect API key abuse / brute-force: valid API key
-// but requests repeatedly rejected by rules or needing manual approval.
+// guardEvent records a single request outcome within the sliding window.
+type guardEvent struct {
+	ts        time.Time
+	rejected  bool // true = rejection (manual-approval or rule-blocked), false = auto-approved
+}
+
+// ManualApprovalGuard pauses all sign requests when the rejection rate within a
+// sliding time window exceeds a configurable threshold (and minimum sample size
+// is met). This prevents the alternating-pattern bypass where an attacker
+// interleaves legitimate and malicious requests to reset a consecutive counter.
+//
 // After resumeAfter duration it auto-resumes so the team has time to respond.
 type ManualApprovalGuard struct {
-	window       time.Duration
-	threshold    int
-	resumeAfter  time.Duration
-	notifySvc    *notify.NotifyService
-	channel      *notify.Channel
-	logger       *slog.Logger
-	mu           sync.Mutex
-	paused       bool
-	consecutive  []time.Time  // timestamps of consecutive rejections (manual-approval or rule-blocked)
-	resumeTimer  *time.Timer  // nil when not paused or no auto-resume
+	window              time.Duration
+	rejectionThreshPct  float64 // 0-100 percentage
+	minSamples          int
+	resumeAfter         time.Duration
+	notifySvc           *notify.NotifyService
+	channel             *notify.Channel
+	logger              *slog.Logger
+	mu                  sync.Mutex
+	paused              bool
+	events              []guardEvent // sliding window of timestamped outcomes
+	resumeTimer         *time.Timer  // nil when not paused or no auto-resume
+	nowFunc             func() time.Time // for testing; defaults to time.Now
 }
 
 // ManualApprovalGuardConfig configures the guard.
 type ManualApprovalGuardConfig struct {
-	Window      time.Duration
-	Threshold   int
-	ResumeAfter time.Duration // pause duration after which to auto-resume (e.g. 2h); 0 = no auto-resume
+	// Window is the sliding time window for rate calculation. Default: 1h.
+	Window time.Duration
+	// RejectionThresholdPct is the rejection rate percentage (0-100) that triggers pause.
+	// Default: 50 (i.e. >50% rejections triggers pause).
+	RejectionThresholdPct float64
+	// MinSamples is the minimum number of events within the window before the
+	// rejection rate check is applied. Default: 10.
+	MinSamples  int
+	// ResumeAfter is the pause duration after which to auto-resume (e.g. 2h); 0 = no auto-resume.
+	ResumeAfter time.Duration
 	NotifySvc   *notify.NotifyService
 	Channel     *notify.Channel
 	Logger      *slog.Logger
 }
 
+const (
+	defaultWindow              = time.Hour
+	defaultRejectionThreshPct  = 50.0
+	defaultMinSamples          = 10
+)
+
 // NewManualApprovalGuard creates a new guard. NotifySvc and Channel may be nil when disabled.
 func NewManualApprovalGuard(cfg ManualApprovalGuardConfig) (*ManualApprovalGuard, error) {
-	if cfg.Threshold <= 0 {
-		return nil, fmt.Errorf("approval guard threshold must be positive, got %d", cfg.Threshold)
-	}
 	if cfg.Logger == nil {
 		return nil, fmt.Errorf("logger is required")
 	}
+
+	window := cfg.Window
+	if window <= 0 {
+		window = defaultWindow
+	}
+	threshPct := cfg.RejectionThresholdPct
+	if threshPct <= 0 {
+		threshPct = defaultRejectionThreshPct
+	}
+	if threshPct > 100 {
+		return nil, fmt.Errorf("rejection threshold percentage must be <= 100, got %.1f", threshPct)
+	}
+	minSamples := cfg.MinSamples
+	if minSamples <= 0 {
+		minSamples = defaultMinSamples
+	}
+
 	g := &ManualApprovalGuard{
-		window:      cfg.Window,
-		threshold:   cfg.Threshold,
-		resumeAfter: cfg.ResumeAfter,
-		notifySvc:   cfg.NotifySvc,
-		channel:     cfg.Channel,
-		logger:      cfg.Logger,
-		consecutive: make([]time.Time, 0, cfg.Threshold+2),
+		window:             window,
+		rejectionThreshPct: threshPct,
+		minSamples:         minSamples,
+		resumeAfter:        cfg.ResumeAfter,
+		notifySvc:          cfg.NotifySvc,
+		channel:            cfg.Channel,
+		logger:             cfg.Logger,
+		events:             make([]guardEvent, 0, minSamples*2),
+		nowFunc:            time.Now,
 	}
 	return g, nil
 }
@@ -64,42 +102,74 @@ func (g *ManualApprovalGuard) IsPaused() bool {
 	return g.paused
 }
 
-// recordRejection adds one "not auto-approved" outcome and may trigger pause. Call with g.mu not held.
-func (g *ManualApprovalGuard) recordRejection() {
-	g.mu.Lock()
-	now := time.Now()
-	g.consecutive = append(g.consecutive, now)
-	for len(g.consecutive) > g.threshold {
-		g.consecutive = g.consecutive[1:]
+// expireOldEvents removes events outside the sliding window. Call with g.mu held.
+func (g *ManualApprovalGuard) expireOldEvents(now time.Time) {
+	cutoff := now.Add(-g.window)
+	i := 0
+	for i < len(g.events) && g.events[i].ts.Before(cutoff) {
+		i++
 	}
-	shouldPause := false
-	if len(g.consecutive) >= g.threshold {
-		first := g.consecutive[0]
-		if g.window <= 0 || now.Sub(first) <= g.window {
-			shouldPause = true
+	if i > 0 {
+		g.events = g.events[i:]
+	}
+}
+
+// checkAndMaybePause evaluates the sliding window and triggers pause if needed.
+// Call with g.mu held. Returns true if pause was triggered (caller must send alert after unlocking).
+func (g *ManualApprovalGuard) checkAndMaybePause(now time.Time) bool {
+	g.expireOldEvents(now)
+
+	total := len(g.events)
+	if total < g.minSamples {
+		return false
+	}
+
+	rejections := 0
+	for _, e := range g.events {
+		if e.rejected {
+			rejections++
 		}
 	}
-	if shouldPause {
+
+	rate := float64(rejections) / float64(total) * 100.0
+	if rate > g.rejectionThreshPct {
 		g.paused = true
-		g.consecutive = nil
+		g.events = nil
 		g.startResumeTimer()
-		g.mu.Unlock()
-		g.sendPauseAlert()
-		return
+		return true
 	}
+	return false
+}
+
+// recordOutcome adds an event to the sliding window and checks if pause should trigger.
+func (g *ManualApprovalGuard) recordOutcome(rejected bool) {
+	g.mu.Lock()
+	now := g.nowFunc()
+	g.events = append(g.events, guardEvent{ts: now, rejected: rejected})
+	triggered := g.checkAndMaybePause(now)
 	g.mu.Unlock()
+
+	if triggered {
+		g.sendPauseAlert()
+	}
 }
 
 // RecordManualApproval records a request that required manual approval (no whitelist match).
-// Counts toward consecutive "rejection" for abuse detection.
+// Counts as a rejection toward the sliding window rate calculation.
 func (g *ManualApprovalGuard) RecordManualApproval() {
-	g.recordRejection()
+	g.recordOutcome(true)
 }
 
 // RecordRuleRejected records a request that was blocked by a blocklist rule.
-// Counts toward consecutive "rejection" to detect API key abuse / brute-force via valid path.
+// Counts as a rejection toward the sliding window rate calculation.
 func (g *ManualApprovalGuard) RecordRuleRejected() {
-	g.recordRejection()
+	g.recordOutcome(true)
+}
+
+// RecordNonManualApproval records a request that was auto-approved.
+// Counts as an approval in the sliding window (does NOT reset the window).
+func (g *ManualApprovalGuard) RecordNonManualApproval() {
+	g.recordOutcome(false)
 }
 
 // startResumeTimer starts a timer to auto-resume after g.resumeAfter. Call with g.mu held.
@@ -124,18 +194,12 @@ func (g *ManualApprovalGuard) startResumeTimer() {
 	})
 }
 
-// RecordNonManualApproval resets the consecutive counter (request was auto-approved or blocked).
-func (g *ManualApprovalGuard) RecordNonManualApproval() {
-	g.mu.Lock()
-	g.consecutive = nil
-	g.mu.Unlock()
-}
-
-// Resume clears the paused state so sign requests are accepted again. Call via admin API or after auto-resume timer.
+// Resume clears the paused state so sign requests are accepted again.
+// Call via admin API or after auto-resume timer.
 func (g *ManualApprovalGuard) Resume() {
 	g.mu.Lock()
 	g.paused = false
-	g.consecutive = nil
+	g.events = nil
 	if g.resumeTimer != nil {
 		g.resumeTimer.Stop()
 		g.resumeTimer = nil
@@ -153,13 +217,15 @@ func (g *ManualApprovalGuard) sendPauseAlert() {
 	if g.resumeAfter > 0 {
 		resumeHint = fmt.Sprintf("Auto-resume in %s, or use admin API to resume now.", g.resumeAfter)
 	}
-	msg := fmt.Sprintf("[Remote Signer] Approval guard triggered: %d consecutive rejected/pending-approval requests within %s (possible API key abuse). All sign requests are paused. %s", g.threshold, g.window, resumeHint)
+	msg := fmt.Sprintf("[Remote Signer] Approval guard triggered: rejection rate exceeded %.0f%% (min %d samples) within %s window (possible API key abuse). All sign requests are paused. %s",
+		g.rejectionThreshPct, g.minSamples, g.window, resumeHint)
 	if err := g.notifySvc.Send(g.channel, msg); err != nil {
 		g.logger.Error("failed to send approval guard alert", "error", err)
 		return
 	}
 	g.logger.Warn("approval guard paused sign requests and sent alert",
-		"threshold", g.threshold,
+		"rejection_threshold_pct", g.rejectionThreshPct,
+		"min_samples", g.minSamples,
 		"window", g.window,
 	)
 }

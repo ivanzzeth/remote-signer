@@ -571,12 +571,13 @@ func run() error {
 	var approvalGuard *service.ManualApprovalGuard
 	if cfg.Security.ApprovalGuard.Enabled {
 		approvalGuard, err = service.NewManualApprovalGuard(service.ManualApprovalGuardConfig{
-			Window:      cfg.Security.ApprovalGuard.Window,
-			Threshold:   cfg.Security.ApprovalGuard.Threshold,
-			ResumeAfter: cfg.Security.ApprovalGuard.ResumeAfter,
-			NotifySvc:   notifyService,
-			Channel:     &cfg.NotifyChannel,
-			Logger:      log,
+			Window:                cfg.Security.ApprovalGuard.Window,
+			RejectionThresholdPct: cfg.Security.ApprovalGuard.RejectionThresholdPct,
+			MinSamples:            cfg.Security.ApprovalGuard.MinSamples,
+			ResumeAfter:           cfg.Security.ApprovalGuard.ResumeAfter,
+			NotifySvc:             notifyService,
+			Channel:               &cfg.NotifyChannel,
+			Logger:                log,
 		})
 		if err != nil {
 			return fmt.Errorf("failed to create approval guard: %w", err)
@@ -584,7 +585,8 @@ func run() error {
 		signService.SetApprovalGuard(approvalGuard)
 		log.Info("approval guard enabled",
 			"window", cfg.Security.ApprovalGuard.Window,
-			"threshold", cfg.Security.ApprovalGuard.Threshold,
+			"rejection_threshold_pct", cfg.Security.ApprovalGuard.RejectionThresholdPct,
+			"min_samples", cfg.Security.ApprovalGuard.MinSamples,
 			"resume_after", cfg.Security.ApprovalGuard.ResumeAfter,
 		)
 	}
@@ -821,7 +823,7 @@ func run() error {
 		MaxRulesPerAPIKey:             cfg.Security.MaxRulesPerAPIKey,
 		MaxKeystoresPerKey:            cfg.Security.MaxKeystoresPerKey,
 		MaxHDWalletsPerKey:            cfg.Security.MaxHDWalletsPerKey,
-		RequireApprovalForAgentRules:  cfg.Security.RequireApprovalForAgentRules,
+		RequireApprovalForAgentRules:  cfg.Security.IsRequireApprovalForAgentRules(),
 		AlertService:       securityAlertService,
 		AuditLogger:        auditLogger,
 		SignTimeout:        cfg.Security.SignTimeout,

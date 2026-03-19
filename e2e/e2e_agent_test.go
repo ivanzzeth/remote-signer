@@ -225,18 +225,17 @@ func TestAgent_APIKey_CannotDeleteRules(t *testing.T) {
 	assert.Equal(t, 403, apiErr.StatusCode, "agent DELETE rules should return 403")
 }
 
-// TestAgent_APIKey_CannotApplyPresets verifies that agent keys cannot apply presets.
-func TestAgent_APIKey_CannotApplyPresets(t *testing.T) {
+// TestAgent_APIKey_CanApplyPresets verifies that agent keys can apply presets
+// (creates self-owned rules with applied_to=["self"]).
+func TestAgent_APIKey_CanApplyPresets(t *testing.T) {
 	agentClient := createAgentClient(t)
 	ctx := context.Background()
 	skipIfPresetAPIDisabled(t)
 
-	// Agent should NOT be able to apply presets (POST)
-	_, err := agentClient.Presets.Apply(ctx, "agent.preset.js.yaml", nil)
-	require.Error(t, err, "agent should not be able to apply presets")
-	apiErr, ok := err.(*client.APIError)
-	require.True(t, ok, "expected APIError, got %T: %v", err, err)
-	assert.Equal(t, 403, apiErr.StatusCode, "agent POST preset apply should return 403")
+	// Agent CAN apply presets — rules are created with owner=agent, applied_to=["self"]
+	results, err := agentClient.Presets.Apply(ctx, "agent.preset.js.yaml", nil)
+	require.NoError(t, err, "agent should be able to apply presets (self-owned rules)")
+	require.NotNil(t, results)
 }
 
 // =============================================================================

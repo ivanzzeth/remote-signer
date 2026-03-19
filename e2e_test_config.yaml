@@ -36,8 +36,9 @@ security:
   signers_api_readonly: false
   approval_guard:
     enabled: false
-    window: 5m
-    threshold: 10
+    window: 1h
+    rejection_threshold_pct: 50
+    min_samples: 10
     resume_after: 2h
   ip_whitelist:
     enabled: false
