@@ -241,13 +241,13 @@ func init() {
 
 	// tx subcommand
 	signTxCmd.Flags().StringVar(&signTxTo, "to", "", "Recipient address")
-	signTxCmd.Flags().StringVar(&signTxValue, "value", "0", "Value in wei")
+	signTxCmd.Flags().StringVar(&signTxValue, "value", "0", "Value in wei (decimal or hex, e.g. '1000000' or '0xF4240')")
 	signTxCmd.Flags().StringVar(&signTxData, "data", "", "Calldata (0x hex)")
 	signTxCmd.Flags().Int64Var(&signTxNonce, "nonce", -1, "Nonce (-1 = auto-fetch from chain)")
 	signTxCmd.Flags().Uint64Var(&signTxGas, "gas", 21000, "Gas limit")
-	signTxCmd.Flags().StringVar(&signTxGasPrice, "gas-price", "", "Gas price in wei (legacy)")
-	signTxCmd.Flags().StringVar(&signTxGasTipCap, "gas-tip-cap", "", "Max priority fee per gas in wei, decimal (e.g. 30000000000 for 30 Gwei)")
-	signTxCmd.Flags().StringVar(&signTxGasFeeCap, "gas-fee-cap", "", "Max fee per gas in wei, decimal (e.g. 30000000000 for 30 Gwei)")
+	signTxCmd.Flags().StringVar(&signTxGasPrice, "gas-price", "", "Gas price in wei, decimal or hex (legacy/eip2930)")
+	signTxCmd.Flags().StringVar(&signTxGasTipCap, "gas-tip-cap", "", "Max priority fee in wei, decimal or hex (e.g. '30000000000' or '0x6FC23AC00')")
+	signTxCmd.Flags().StringVar(&signTxGasFeeCap, "gas-fee-cap", "", "Max fee per gas in wei, decimal or hex (e.g. '150000000000' or '0x22ECB25C00')")
 	signTxCmd.Flags().StringVar(&signTxType, "tx-type", "legacy", "Transaction type: legacy, eip1559, eip2930")
 
 	// personal subcommand

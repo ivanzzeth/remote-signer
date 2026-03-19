@@ -1,6 +1,6 @@
 {
   "name": "remote-signer-mcp",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "MCP server for remote-signer service. Run with: npx remote-signer-mcp",
   "type": "module",
   "main": "build/index.js",

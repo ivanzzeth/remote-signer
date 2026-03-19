@@ -227,11 +227,11 @@ Example:
 
 func init() {
 	simulateTxCmd.Flags().StringVar(&simChainID, "chain-id", "1", "Chain ID")
-	simulateTxCmd.Flags().StringVar(&simFrom, "from", "", "Sender address (0x-prefixed)")
-	simulateTxCmd.Flags().StringVar(&simTo, "to", "", "Recipient address (0x-prefixed)")
-	simulateTxCmd.Flags().StringVar(&simValue, "value", "0x0", "Value in hex wei")
-	simulateTxCmd.Flags().StringVar(&simData, "data", "", "Calldata (0x hex)")
-	simulateTxCmd.Flags().StringVar(&simGas, "gas", "", "Gas limit (hex)")
+	simulateTxCmd.Flags().StringVar(&simFrom, "from", "", "Sender address (0x-prefixed, 42 chars)")
+	simulateTxCmd.Flags().StringVar(&simTo, "to", "", "Recipient address (0x-prefixed, 42 chars)")
+	simulateTxCmd.Flags().StringVar(&simValue, "value", "0x0", "Value in wei (decimal or hex, e.g. '1000000' or '0xF4240')")
+	simulateTxCmd.Flags().StringVar(&simData, "data", "", "Calldata (0x-prefixed hex)")
+	simulateTxCmd.Flags().StringVar(&simGas, "gas", "", "Gas limit (decimal or hex)")
 
 	if err := simulateTxCmd.MarkFlagRequired("from"); err != nil {
 		panic(err)

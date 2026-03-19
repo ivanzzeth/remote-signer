@@ -373,13 +373,13 @@ server.registerTool(
         .string()
         .optional()
         .describe("Recipient address (0x-prefixed). Omit for contract creation."),
-      value: z.string().describe("Transaction value in wei (decimal string)"),
+      value: z.string().describe("Transaction value in wei. Accepts decimal ('1000000000') or hex ('0x3B9ACA00')"),
       data: z
         .string()
         .optional()
         .describe("Transaction calldata (0x-prefixed hex)"),
       gas: z.number().describe("Gas limit"),
-      nonce: z.number().optional().describe("Transaction nonce"),
+      nonce: z.number().optional().describe("Transaction nonce. Omit to auto-fetch from chain"),
       tx_type: z
         .enum(["legacy", "eip1559", "eip2930"])
         .default("legacy")
@@ -387,15 +387,15 @@ server.registerTool(
       gas_price: z
         .string()
         .optional()
-        .describe("Gas price in wei (for legacy / eip2930)"),
+        .describe("Gas price in wei (legacy/eip2930). Accepts decimal or hex, e.g. '30000000000' or '0x6FC23AC00'"),
       gas_tip_cap: z
         .string()
         .optional()
-        .describe("Max priority fee per gas in wei (for EIP-1559)"),
+        .describe("Max priority fee per gas in wei (EIP-1559). Accepts decimal or hex, e.g. '30000000000' or '0x6FC23AC00'"),
       gas_fee_cap: z
         .string()
         .optional()
-        .describe("Max fee per gas in wei (for EIP-1559)"),
+        .describe("Max fee per gas in wei (EIP-1559). Accepts decimal or hex, e.g. '150000000000' or '0x22ECB25C00'"),
       wait_for_approval: z.boolean().default(false).describe("Wait for manual approval if pending"),
     },
   },
@@ -1232,12 +1232,12 @@ server.registerTool(
       "Simulate a single EVM transaction using eth_simulateV1. " +
       "Returns success/revert status, gas used, balance changes, and events.",
     inputSchema: {
-      chain_id: z.string().describe("Chain ID, e.g. '1' for Ethereum mainnet"),
-      from: z.string().describe("Sender address (0x-prefixed)"),
-      to: z.string().describe("Recipient address (0x-prefixed)"),
-      value: z.string().optional().describe("Transaction value in wei (decimal string)"),
+      chain_id: z.string().describe("Chain ID (decimal, e.g. '137' for Polygon)"),
+      from: z.string().describe("Sender address (0x-prefixed, 42 chars)"),
+      to: z.string().describe("Recipient address (0x-prefixed, 42 chars)"),
+      value: z.string().optional().describe("Transaction value in wei. Accepts decimal or hex (e.g. '0x0')"),
       data: z.string().optional().describe("Transaction calldata (0x-prefixed hex)"),
-      gas: z.string().optional().describe("Gas limit (decimal string)"),
+      gas: z.string().optional().describe("Gas limit. Accepts decimal or hex"),
     },
   },
   async ({ chain_id, from, to, value, data, gas }) => {
@@ -1269,15 +1269,15 @@ server.registerTool(
       "Simulate multiple EVM transactions in sequence. " +
       "Returns per-tx results and net balance changes.",
     inputSchema: {
-      chain_id: z.string().describe("Chain ID, e.g. '1' for Ethereum mainnet"),
-      from: z.string().describe("Sender address (0x-prefixed)"),
+      chain_id: z.string().describe("Chain ID (decimal, e.g. '137' for Polygon)"),
+      from: z.string().describe("Sender address (0x-prefixed, 42 chars)"),
       transactions: z
         .array(
           z.object({
-            to: z.string().describe("Recipient address (0x-prefixed)"),
-            value: z.string().optional().describe("Value in wei"),
+            to: z.string().describe("Recipient address (0x-prefixed, 42 chars)"),
+            value: z.string().optional().describe("Value in wei. Accepts decimal or hex"),
             data: z.string().optional().describe("Calldata (0x-prefixed hex)"),
-            gas: z.string().optional().describe("Gas limit"),
+            gas: z.string().optional().describe("Gas limit. Accepts decimal or hex"),
           })
         )
         .describe("Array of transactions to simulate in sequence"),
