@@ -338,7 +338,7 @@ For more details, see [Rust SDK README](./pkg/rs-client/README.md).
 
 The MCP server (`pkg/mcp-server/`) exposes remote-signer operations as [Model Context Protocol](https://modelcontextprotocol.io/) tools, enabling AI agents (Claude Code, Cursor, etc.) to manage signers, rules, templates, and signing requests programmatically.
 
-- **Package**: `remote-signer-mcp` (npm, v0.0.3)
+- **Package**: `remote-signer-mcp` (npm, v0.0.5)
 - **Protocol**: MCP over stdio
 - **Auth**: Same Ed25519 authentication as other SDKs
 - **TLS/mTLS**: Supported via environment variables
@@ -381,6 +381,137 @@ Add to your MCP config (`.cursor/mcp.json` or `.mcp.json`):
 ```
 
 Once configured, AI agents can create signers, manage rules, sign transactions, and approve requests through natural language. For more details, see [MCP Server README](./pkg/mcp-server/README.md).
+
+---
+
+## CLI Commands
+
+The `remote-signer-cli` provides command-line access to all server operations. Requires auth flags: `--url`, `--api-key-id`, `--api-key-file`.
+
+### Request Management
+
+```bash
+# List signing requests (defaults to "authorizing" status)
+remote-signer-cli evm request list [--status authorizing]
+
+# Get request details
+remote-signer-cli evm request get <request-id>
+
+# Approve a pending request (signer owner only)
+remote-signer-cli evm request approve <request-id>
+
+# Reject a pending request (signer owner only)
+remote-signer-cli evm request reject <request-id>
+
+# Preview auto-generated rule for a request
+remote-signer-cli evm request preview-rule <request-id>
+```
+
+### Transaction Operations
+
+```bash
+# Broadcast a signed transaction
+remote-signer-cli evm broadcast <signed-tx-hex> --chain-id <id> [--wait]
+
+# Simulate a single transaction
+remote-signer-cli evm simulate tx --chain-id 1 --from 0x... --to 0x... --data 0x...
+
+# Simulate a batch of transactions (JSON format)
+remote-signer-cli evm simulate batch --chain-id 1 --from 0x... \
+  --tx '{"to":"0x...","value":"0x0","data":"0x..."}' \
+  --tx '{"to":"0x...","value":"0x0","data":"0x..."}'
+```
+
+### Guard Management
+
+```bash
+# Resume approval guard after it trips
+remote-signer-cli evm guard resume
+```
+
+### Transaction Signing Notes
+
+- **Nonce**: When omitted or set to -1, the server auto-fetches from chain via `eth_getTransactionCount`.
+- **Gas params**: `gasPrice`, `gasTipCap`, `gasFeeCap`, and `value` accept both decimal (`"20000000000"`) and hex (`"0x4a817c800"`) formats.
+- **Input validation**: All API handlers validate Ethereum addresses (0x + 40 hex chars), chain_id (positive decimal), hex calldata, and hex values.
+
+---
+
+## Batch Signing
+
+```typescript
+// Sign multiple transactions atomically
+const result = await client.evm.sign.executeBatch({
+  requests: [
+    {
+      chain_id: '1',
+      signer_address: '0x...',
+      sign_type: 'transaction',
+      payload: { transaction: { to: '0x...', value: '0x0', data: '0x095ea7b3...' } }
+    },
+    {
+      chain_id: '1',
+      signer_address: '0x...',
+      sign_type: 'transaction',
+      payload: { transaction: { to: '0x...', value: '0x0', data: '0xf2c42696...' } }
+    }
+  ]
+});
+```
+
+## Simulation
+
+```typescript
+// Simulate a single transaction
+const simResult = await client.evm.simulate({
+  chainId: '1',
+  from: '0x...',
+  to: '0x...',
+  value: '0x0',
+  data: '0x...'
+});
+
+// Simulate a batch
+const batchResult = await client.evm.simulateBatch({
+  chainId: '1',
+  from: '0x...',
+  transactions: [
+    { to: '0x...', value: '0x0', data: '0x...' },
+    { to: '0x...', value: '0x0', data: '0x...' }
+  ]
+});
+
+// Check simulation engine status
+const status = await client.evm.simulate.status();
+```
+
+## Signer Access Control
+
+```typescript
+// Grant signer access to another API key
+await client.evm.signers.grantAccess('0xSignerAddress', { api_key_id: 'agent-key' });
+
+// Revoke signer access
+await client.evm.signers.revokeAccess('0xSignerAddress', 'agent-key');
+
+// List who has access to a signer
+const access = await client.evm.signers.listAccess('0xSignerAddress');
+
+// Transfer signer ownership
+await client.evm.signers.transferOwnership('0xSignerAddress', { new_owner_id: 'new-admin' });
+```
+
+## Request Approval (Owner Only)
+
+Only the signer's **owner API key** can approve or reject pending requests:
+
+```typescript
+// Approve a pending request (must be signer owner)
+await client.approveRequest('request-id', { approved: true });
+
+// Reject a pending request
+await client.approveRequest('request-id', { approved: false });
+```
 
 ---
 

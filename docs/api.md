@@ -1971,6 +1971,10 @@ Sign EIP-712 typed data.
 #### `transaction`
 Sign an Ethereum transaction.
 
+**Nonce**: When `nonce` is omitted or set to `-1`, the server auto-fetches the next nonce from the chain via `eth_getTransactionCount`. Explicitly set `nonce` to a non-negative value to override.
+
+**Gas and value params**: All gas parameters (`gasPrice`, `gasTipCap`, `gasFeeCap`, `value`) accept both decimal strings (`"20000000000"`) and `0x`-prefixed hex strings (`"0x4a817c800"`), matching Ethereum RPC conventions.
+
 **Legacy Transaction:**
 ```json
 {
@@ -1980,7 +1984,6 @@ Sign an Ethereum transaction.
       "to": "0xrecipient_address",
       "value": "1000000000000000000",
       "data": "0x",
-      "nonce": 0,
       "gas": 21000,
       "gasPrice": "20000000000",
       "txType": "legacy"
@@ -1998,10 +2001,9 @@ Sign an Ethereum transaction.
       "to": "0xrecipient_address",
       "value": "0",
       "data": "0xa9059cbb000000000000000000000000...",
-      "nonce": 5,
       "gas": 100000,
-      "gasTipCap": "1000000000",
-      "gasFeeCap": "30000000000",
+      "gasTipCap": "0x3b9aca00",
+      "gasFeeCap": "0x6fc23ac00",
       "txType": "eip1559"
     }
   }

@@ -123,6 +123,80 @@ const response = await client.approveRequest('request-id', {
 });
 ```
 
+#### `evm.simulate(request: SimulateRequest): Promise<SimulateResponse>`
+
+Simulate a single transaction.
+
+```typescript
+const result = await client.evm.simulate({
+  chainId: '1',
+  from: '0x...',
+  to: '0x...',
+  value: '0x0',
+  data: '0x...',
+});
+```
+
+#### `evm.simulateBatch(request: SimulateBatchRequest): Promise<SimulateBatchResponse>`
+
+Simulate multiple transactions in sequence.
+
+```typescript
+const result = await client.evm.simulateBatch({
+  chainId: '1',
+  from: '0x...',
+  transactions: [
+    { to: '0x...', value: '0x0', data: '0x...' },
+    { to: '0x...', value: '0x0', data: '0x...' },
+  ],
+});
+```
+
+#### `evm.simulate.status(): Promise<SimulateStatusResponse>`
+
+Check simulation engine health/status.
+
+#### `evm.sign.executeBatch(request: BatchSignRequest): Promise<BatchSignResponse>`
+
+Sign multiple transactions atomically (simulate + sign).
+
+```typescript
+const result = await client.evm.sign.executeBatch({
+  requests: [
+    { chain_id: '1', signer_address: '0x...', sign_type: 'transaction', payload: { ... } },
+    { chain_id: '1', signer_address: '0x...', sign_type: 'transaction', payload: { ... } },
+  ],
+});
+```
+
+#### Signer Access Control
+
+```typescript
+// Grant access to another API key
+await client.evm.signers.grantAccess('0xAddr', { api_key_id: 'other-key' });
+
+// Revoke access
+await client.evm.signers.revokeAccess('0xAddr', 'other-key');
+
+// List access
+const access = await client.evm.signers.listAccess('0xAddr');
+
+// Transfer ownership
+await client.evm.signers.transferOwnership('0xAddr', { new_owner_id: 'new-admin' });
+
+// Delete signer
+await client.evm.signers.deleteSigner('0xAddr');
+```
+
+#### Rule Approval
+
+Only the signer's **owner API key** can approve or reject pending requests:
+
+```typescript
+await client.approveRequest('request-id', { approved: true });
+await client.approveRequest('request-id', { approved: false });
+```
+
 ## Error Handling
 
 The client throws specific error types:

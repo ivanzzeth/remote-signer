@@ -455,6 +455,28 @@ Only the **signer's owner API key** can approve or reject pending requests for t
 | Agent key → agent-owned signer | Agent key | Agent key | Permitted: agent controls its own signer |
 | Agent key → admin-owned signer | Agent key | Agent key | **Blocked (403)**: agent is not the signer owner |
 
+### Permit / Permit2 spender whitelist
+
+Agent rules that allow `typed_data` signing now require an `allowed_spenders` configuration for Permit and Permit2 typed data signatures. This is a **fail-closed** security control:
+
+- **Default empty = all Permit signatures blocked**: if `allowed_spenders` is empty or not configured, any Permit/Permit2 typed data signing request is rejected.
+- **Covered types**: `Permit` (EIP-2612), `PermitSingle`, `PermitBatch`, `PermitTransferFrom`, `PermitBatchTransferFrom` (Uniswap Permit2).
+- **Configure with known DEX router addresses**: only add addresses of trusted contracts (e.g. Uniswap Router, 1inch Router) to `allowed_spenders`.
+
+This prevents a compromised agent key from signing unlimited token approvals to arbitrary spender addresses — equivalent to unlimited `approve()` but harder to detect since it uses off-chain signatures.
+
+```yaml
+# Example: agent rule with Permit spender whitelist
+rules:
+  - name: "Agent typed_data rule"
+    type: "evm_js"
+    mode: "whitelist"
+    config:
+      allowed_spenders:
+        - "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD"  # Uniswap Universal Router
+        - "0x000000000022D473030F116dDEE9F6B43aC78BA3"  # Permit2 contract
+```
+
 ---
 
 ## 12. Middleware Security Chain

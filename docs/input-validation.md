@@ -76,6 +76,14 @@ All inputs (API, config, CLI) are strictly validated so invalid or unknown value
 - **validate-rules**  
   Uses `ruleconfig.ValidateRuleConfig` for declarative rule config (same as API and config load). Solidity and JS rules have their own validators.
 
+## Transaction field handling
+
+- **Nonce**: When omitted or set to `-1`, the server auto-fetches the next nonce from the chain via `eth_getTransactionCount`. No more defaulting to `0`.
+- **Gas and value params**: All gas parameters (`gasPrice`, `gasTipCap`, `gasFeeCap`, `value`) accept both decimal strings (`"20000000000"`) and `0x`-prefixed hex strings (`"0x4a817c800"`), matching Ethereum RPC conventions. Invalid hex or non-numeric strings are rejected with 400.
+- **Ethereum addresses**: Validated as `0x` + exactly 40 hex characters.
+- **Chain ID**: Must be a positive decimal integer string.
+- **Calldata**: Must be valid hex (with `0x` prefix).
+
 ## Not validated here
 
 - **Template config** (create/update and template_init): may contain variable placeholders (e.g. `${target}`). Resolved and validated when an instance is created.

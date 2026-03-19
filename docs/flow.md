@@ -353,10 +353,12 @@ ChainAdapter.Sign()
 
 ## Manual Approval Flow
 
+Only the **signer's owner API key** can approve or reject pending requests for that signer. An agent key that submits a request to an admin-owned signer cannot self-approve.
+
 ```
-┌──────────┐                    ┌─────────────┐
-│  Client  │                    │   Admin     │
-└────┬─────┘                    └──────┬──────┘
+┌──────────┐                    ┌───────────────────┐
+│  Client  │                    │ Signer Owner Key  │
+└────┬─────┘                    └──────┬────────────┘
      │                                 │
      │  POST /sign                     │
      │─────────────▶                   │
@@ -370,6 +372,7 @@ ChainAdapter.Sign()
      │             └──────────────┘    │
      │                                 │
      │                                 │  POST /requests/{id}/approve
+     │                                 │  (must be signer owner)
      │                                 │────────────────▶
      │                                 │
      │                                 │  200 OK

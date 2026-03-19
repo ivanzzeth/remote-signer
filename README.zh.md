@@ -176,6 +176,12 @@ curl --cacert certs/ca.crt --cert certs/client.crt --key certs/client.key https:
 - [x] EIP-4337 账户抽象支持
 - [x] RBAC 规则所有权（每条规则有 owner/applied_to/status）
 - [x] CLI `evm` 命令结构（sign/rule/signer，多链可扩展架构）
+- [x] 交易模拟引擎（eth_simulateV1 RPC + anvil 后端）
+- [x] Signer 所有权与访问控制（owner-only 审批，grant/revoke 访问）
+- [x] Permit/Permit2 Spender 白名单（fail-closed，allowed_spenders 配置）
+- [x] 请求管理 CLI（list/get/approve/reject/preview-rule）
+- [x] JS Client SDK v0.0.4（SimulateService, executeBatch, signer 访问控制）
+- [x] MCP Server v0.0.5（simulate, broadcast, guard resume 工具）
 
 ### 进行中：Signer 所有权与访问控制
 

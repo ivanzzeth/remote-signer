@@ -228,6 +228,12 @@ The server starts without signers. Add them after startup:
 - [x] EIP-4337 Account Abstraction Support
 - [x] RBAC Rule Ownership (owner/applied_to/status on every rule)
 - [x] CLI `evm` Command Structure (sign/rule/signer with multi-chain ready architecture)
+- [x] Transaction Simulation Engine (eth_simulateV1 RPC + anvil backends)
+- [x] Signer Ownership & Access Control (owner-only approval, grant/revoke access)
+- [x] Permit/Permit2 Spender Whitelist (fail-closed, allowed_spenders config)
+- [x] Request Management CLI (list/get/approve/reject/preview-rule)
+- [x] JS Client SDK v0.0.4 (SimulateService, executeBatch, signer access control)
+- [x] MCP Server v0.0.5 (simulate, broadcast, guard resume tools)
 
 ### In Progress: Signer Ownership & Access Control
 

@@ -100,6 +100,41 @@ chains:
 | `temp_dir` | string | -- | Workspace directory with forge-std |
 | `timeout` | duration | `30s` | Max execution time per rule evaluation |
 
+## Simulation
+
+Transaction simulation engine for predicting balance changes, gas usage, and approval detection.
+
+```yaml
+chains:
+  evm:
+    simulation:
+      enabled: false
+      backend: "rpc"                       # "rpc" (default) or "anvil"
+      sync_interval: "60s"                 # periodic health check / restart interval
+      timeout: "60s"                       # per-simulation timeout
+      max_chains: 10                       # max concurrent anvil forks (anvil backend only)
+      anvil_path: "data/foundry/anvil"     # path to anvil binary (anvil backend only)
+      prune_history: 0                     # anvil --prune-history (anvil backend only)
+      cache_dir: "data/anvil-cache"        # persistent fork RPC cache (anvil backend only)
+      batch_window: "1s"                   # accumulation window for batch sign fallback
+      batch_max_size: 20                   # max txs per batch
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enabled` | bool | `false` | Enable simulation engine |
+| `backend` | string | `"rpc"` | `"rpc"` uses `eth_simulateV1` via RPC gateway (<1s latency, recommended). `"anvil"` uses local fork processes (known OOM/startup issues). |
+| `sync_interval` | duration | `"60s"` | Periodic health check / anvil restart interval |
+| `timeout` | duration | `"60s"` | Per-simulation timeout |
+| `max_chains` | int | `10` | Max concurrent anvil forks (anvil backend only) |
+| `anvil_path` | string | `"data/foundry/anvil"` | Path to anvil binary (anvil backend only) |
+| `prune_history` | int | `0` | Anvil `--prune-history` flag (anvil backend only, 0=minimal, -1=keep all) |
+| `cache_dir` | string | `"data/anvil-cache"` | Persistent fork RPC cache directory (anvil backend only) |
+| `batch_window` | duration | `"1s"` | Accumulation window for single sign batch fallback |
+| `batch_max_size` | int | `20` | Max transactions per batch |
+
+API endpoints: `POST /api/v1/evm/simulate`, `POST /api/v1/evm/simulate/batch`, `GET /api/v1/evm/simulate/status`. See [tx-simulation-budget.md](features/tx-simulation-budget.md) for details.
+
 ## API Keys
 
 API keys authenticate clients to the signing service using Ed25519 key pairs.

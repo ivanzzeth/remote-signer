@@ -71,6 +71,56 @@ Sensitive values can be set **by path** (recommended) or by raw value.
 
 Paths in `env` are resolved from the process working directory (often the workspace root when Cursor starts the MCP server).
 
+## Available Tools
+
+The MCP server exposes the following tools for AI agents:
+
+### Signing & Transactions
+- **evm_sign_transaction** — Sign a transaction (may require manual approval from signer owner if no whitelist rule matches)
+- **evm_sign_personal_message** — Sign a personal message
+- **evm_sign_typed_data** — Sign EIP-712 typed data
+- **evm_sign_hash** — Sign a pre-hashed value
+- **evm_simulate_tx** — Simulate a single transaction (predict balance changes, gas usage, approval detection)
+- **evm_simulate_batch** — Simulate multiple transactions in sequence
+- **evm_broadcast_tx** — Broadcast a signed transaction to the network
+
+### Request Management
+- **evm_list_requests** — List signing requests (defaults to "authorizing" status)
+- **evm_get_request** — Get details of a specific request
+- **evm_approve_request** — Approve a pending request (signer owner only)
+
+### Signer Management
+- **evm_create_signer** — Create a new signer (keystore)
+- **evm_list_signers** — List all signers
+- **evm_create_hd_wallet** — Create an HD wallet
+- **evm_import_hd_wallet** — Import an HD wallet from mnemonic
+- **evm_derive_address** — Derive addresses from HD wallet
+- **evm_list_derived_addresses** — List derived addresses
+- **evm_list_hd_wallets** — List HD wallets
+
+### Rules & Templates
+- **evm_create_rule** — Create an authorization rule
+- **evm_get_rule** — Get rule details
+- **evm_list_rules** — List rules
+- **evm_delete_rule** — Delete a rule
+- **evm_update_rule** — Update a rule
+- **evm_toggle_rule** — Enable/disable a rule
+- **evm_preview_rule** — Preview auto-generated rule for a request
+- **evm_list_rule_budgets** — List rule budget usage
+
+### Operations
+- **evm_guard_resume** — Resume approval guard after it trips
+- **get_metrics** — Get Prometheus metrics
+
+### Templates
+- **create_template** / **get_template** / **list_templates** / **update_template** / **delete_template** — Template CRUD
+- **instantiate_template** / **revoke_template_instance** — Template instance management
+
+### Audit
+- **list_audit_logs** — Query audit log records
+
+Published: **remote-signer-mcp@0.0.5**
+
 ## Install and run locally
 
 ```bash
@@ -89,7 +139,7 @@ When testing HTTPS or TLS fixes before publishing:
    node projects/personal/ivanzzeth/remote-signer/pkg/mcp-server/scripts/test-https.mjs
    ```
    You should see `OK: { "rules": [...] }` or a connection error if the backend is down — not "Client sent an HTTP request to an HTTPS server".
-3. **Cover all MCP tools:** run the full self-test (all 16 tools over HTTPS):
+3. **Cover all MCP tools:** run the full self-test (all tools over HTTPS):
    ```bash
    node projects/personal/ivanzzeth/remote-signer/pkg/mcp-server/scripts/test-all-tools.mjs
    ```

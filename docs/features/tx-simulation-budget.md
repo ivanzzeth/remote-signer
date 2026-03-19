@@ -1,6 +1,6 @@
 # Transaction Simulation Engine
 
-## Status: Design
+## Status: Implemented
 
 ## Problem
 
@@ -10,7 +10,18 @@ Example: An agent swaps 2300 USDC → ETH via OKX DEX router. The budget engine 
 
 ## Solution
 
-Add a transaction simulation layer to remote-signer using Foundry's `anvil` as a persistent per-chain fork. The simulation engine is a **general-purpose infrastructure** that:
+Add a transaction simulation layer to remote-signer. Two backends are available:
+
+### Simulation Backends
+
+| Backend | Config value | Description | Latency | Recommended |
+|---------|-------------|-------------|---------|-------------|
+| **RPC** (`eth_simulateV1`) | `"rpc"` (default) | Calls `eth_simulateV1` via RPC gateway | <1s | Yes (production) |
+| **Anvil** (local fork) | `"anvil"` | Persistent per-chain `anvil` fork process | 2-5s cold, <500ms warm | No (OOM/startup issues) |
+
+The **RPC backend** is the default and recommended choice. It delegates simulation to the RPC gateway's `eth_simulateV1` endpoint, avoiding the operational complexity of managing local anvil processes. The anvil backend is retained for environments without `eth_simulateV1` support but has known OOM and startup issues in production.
+
+The simulation engine is a **general-purpose infrastructure** that:
 
 1. Provides public API endpoints for single and batch simulation
 2. Parses standard token events (ERC20/ERC721/ERC1155/WETH/native) and computes balance changes
@@ -22,7 +33,7 @@ The simulation engine is independent of budget logic — it returns structured r
 ```
                     ┌────────────────────────────────────┐
                     │   TransactionSimulator              │
-                    │   (AnvilForkManager + EventParser)  │
+                    │   (RPC or AnvilFork + EventParser)  │
                     └───┬──────────────┬─────────────┬───┘
                         │              │             │
            ┌────────────▼──┐  ┌────────▼────────┐  ┌▼──────────────────┐
@@ -239,11 +250,11 @@ const signed = await client.evm.sign.executeBatch({requests: [...]});
 │                  TransactionSimulator (infrastructure)                │
 │                                                                      │
 │  ┌────────────────┐  ┌────────────────┐  ┌────────────────────────┐ │
-│  │ AnvilForkMgr   │  │ EventLogParser │  │ BalanceChangeCalc      │ │
-│  │ (per-chain     │  │ (ERC20/721/    │  │ (net per token         │ │
-│  │  anvil fork,   │  │  1155/WETH/    │  │  per signer, supports  │ │
-│  │  snapshot/     │  │  native/       │  │  single + batch)       │ │
-│  │  revert)       │  │  approval)     │  │                        │ │
+│  │ Backend        │  │ EventLogParser │  │ BalanceChangeCalc      │ │
+│  │ (RPC: eth_     │  │ (ERC20/721/    │  │ (net per token         │ │
+│  │  simulateV1    │  │  1155/WETH/    │  │  per signer, supports  │ │
+│  │  or Anvil:     │  │  native/       │  │  single + batch)       │ │
+│  │  fork+snapshot)│  │  approval)     │  │                        │ │
 │  └────────────────┘  └────────────────┘  └────────────────────────┘ │
 └──────┬──────────────────────────────────────────┬───────────────────┘
        │                                          │
@@ -283,8 +294,11 @@ Sign request arrives (sign_type: transaction)
   │   └── Parse all receipts → balance changes per tx + net totals
   │
   ├── Per-request evaluation:
-  │   ├── Has approval event? → require manual approval
-  │   └── Budget check against net balance changes → allow/deny
+  │   ├── Budget check against net balance changes (ALWAYS runs first)
+  │   │   └── Approve txs have no outflow → budget passes
+  │   │   └── Swap txs → budget deducted for outflows
+  │   ├── Has approval event (HasApproval)? → require manual approval
+  │   └── No approval event + budget passed → auto-allow
   │
   └── Return result to each waiting request
 ```
@@ -303,10 +317,11 @@ POST /api/v1/evm/sign/batch
   │   ├── evm_revert
   │   └── Compute per-tx + net balance changes
   │
-  ├── Budget check against NET balance changes (not per-tx)
+  ├── Budget check against NET balance changes (not per-tx, ALWAYS runs first)
   │   └── Batch is atomic: all pass or all fail
   │
   ├── Has any approval event? → require manual approval for batch
+  │   └── Budget already passed; approval is an additional gate
   │
   └── Sign all txs → return batch result
 ```
@@ -668,15 +683,23 @@ For batch sign: if ANY tx in the batch has approval, the entire batch requires m
 ```yaml
 simulation:
   enabled: true                          # enable/disable simulation engine
-  sync_interval: "60s"                   # periodic anvil_reset interval
+  backend: "rpc"                         # "rpc" (default, recommended) or "anvil"
+  sync_interval: "60s"                   # periodic health check / restart interval
   batch_window: "1s"                     # accumulation window for single sign fallback
   batch_max_size: 20                     # max txs per batch
-  timeout: "10s"                         # per-simulation timeout
-  anvil_path: "anvil"                    # path to anvil binary
-  max_chains: 10                         # max concurrent anvil forks
-  startup_chains: []                     # pre-warm chains (e.g., ["1", "137"])
+  timeout: "60s"                         # per-simulation timeout (includes remote RPC state fetch)
+  max_chains: 10                         # max concurrent anvil forks (anvil backend only)
+  anvil_path: "data/foundry/anvil"      # path to anvil binary (anvil backend only)
+  prune_history: 0                       # anvil --prune-history (anvil backend only, 0=minimal)
+  cache_dir: "data/anvil-cache"          # persistent fork RPC cache dir (anvil backend only)
   require_approval_for_approvals: true   # force manual approval for approve txs
 ```
+
+**Backend selection:**
+- `"rpc"` (default): Uses `eth_simulateV1` via the configured RPC gateway. No local processes to manage. Recommended for production.
+- `"anvil"`: Starts local `anvil` fork processes per chain. Has known OOM and startup reliability issues. Use only if your RPC provider does not support `eth_simulateV1`.
+
+The `prune_history` and `cache_dir` options only apply to the anvil backend.
 
 ---
 
@@ -774,6 +797,6 @@ Unknown contracts fall through to manual approval.
 
 ## Dependencies
 
-- Foundry (`anvil`) installed on the server
-- `rpc_gateway` configured with RPC URLs for target chains
+- **RPC backend (default)**: `rpc_gateway` configured with RPC URLs for target chains (must support `eth_simulateV1`)
+- **Anvil backend**: Foundry (`anvil`) installed on the server + `rpc_gateway` configured
 - Manual approval guard enabled (for approve tx handling)

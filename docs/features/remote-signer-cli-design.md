@@ -81,9 +81,19 @@ remote-signer-cli
 │   ├── apikey update <id>        PATCH /api/v1/api-keys/:id
 │   ├── apikey delete <id>        DELETE /api/v1/api-keys/:id
 │   │
-│   ├── request list              GET /api/v1/evm/requests
+│   ├── request list [--status]    GET /api/v1/evm/requests (defaults to --status authorizing)
 │   ├── request get <id>          GET /api/v1/evm/requests/:id
-│   ├── request approve <id>      POST /api/v1/evm/requests/:id/approve
+│   ├── request approve <id>      POST /api/v1/evm/requests/:id/approve (signer owner only)
+│   ├── request reject <id>       POST /api/v1/evm/requests/:id/reject (signer owner only)
+│   ├── request preview-rule <id> GET /api/v1/evm/requests/:id/preview-rule
+│   │
+│   ├── guard resume              POST /api/v1/evm/guard/resume
+│   │
+│   ├── broadcast <signed-tx>     POST /api/v1/evm/broadcast (--chain-id, --wait)
+│   │
+│   ├── simulate tx               POST /api/v1/evm/simulate
+│   ├── simulate batch            POST /api/v1/evm/simulate/batch (--tx JSON format)
+│   ├── simulate status           GET /api/v1/evm/simulate/status
 │   │
 │   ├── audit list                GET /api/v1/audit
 │   │

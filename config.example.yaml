@@ -86,12 +86,15 @@ chains:
     #   remote_signer_anvil_fork_restarts_total{chain_id}
     simulation:
       enabled: false
-      anvil_path: "data/foundry/anvil"     # path to anvil binary (default: data/foundry/anvil, then PATH)
+      backend: "rpc"                       # "rpc" (default, recommended) or "anvil"
+                                           # rpc: uses eth_simulateV1 via rpc_gateway (<1s latency)
+                                           # anvil: local fork process (known OOM/startup issues, not recommended for production)
+      anvil_path: "data/foundry/anvil"     # path to anvil binary (anvil backend only)
       sync_interval: "60s"                 # periodic health check / restart interval
       timeout: "60s"                       # per-simulation timeout (includes remote RPC state fetch)
-      max_chains: 10                       # max concurrent anvil forks
-      prune_history: 0                     # anvil --prune-history: max states in memory (0=minimal, -1=keep all)
-      cache_dir: "data/anvil-cache"        # persistent fork RPC cache dir (survives restarts, speeds up re-fork)
+      max_chains: 10                       # max concurrent anvil forks (anvil backend only)
+      prune_history: 0                     # anvil --prune-history: max states in memory (0=minimal, -1=keep all, anvil backend only)
+      cache_dir: "data/anvil-cache"        # persistent fork RPC cache dir (anvil backend only)
       batch_window: "1s"                   # accumulation window for future batch sign fallback
       batch_max_size: 20                   # max txs per batch
 
