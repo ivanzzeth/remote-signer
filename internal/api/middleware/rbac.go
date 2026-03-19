@@ -121,18 +121,20 @@ var rolePermissions = map[types.APIKeyRole]map[Permission]bool{
 		PermReadMetrics:         true,
 	},
 	types.RoleAgent: {
-		PermSignRequest:     true,
-		PermListOwnRequests: true,
-		PermListRules:       true, // scoped to own + applied_to=self in handler
-		PermCreateRuleSelf:  true, // declarative only, enforced in handler
-		PermModifyOwnRule:   true, // declarative only
-		PermDeleteOwnRule:   true,
-		PermReadBudgets:     true, // own rules only, enforced in handler
-		PermReadTemplates:   true,
-		PermReadPresets:     true,
-		PermReadSigners:     true, // own signers only
-		PermCreateSigners:   true,
-		PermReadHDWallets:   true, // own wallets only
+		PermSignRequest:         true,
+		PermListOwnRequests:     true,
+		PermListRules:           true, // scoped to own + applied_to=self in handler
+		PermCreateRuleSelf:      true, // declarative only, enforced in handler
+		PermModifyOwnRule:       true, // declarative only
+		PermDeleteOwnRule:       true,
+		PermReadBudgets:         true, // own rules only, enforced in handler
+		PermReadTemplates:       true,
+		PermReadPresets:         true,
+		PermApplyPreset:         true, // creates rules owned by agent, applied_to=self only
+		PermInstantiateTemplate: true, // same — creates own rules
+		PermReadSigners:         true, // own signers only
+		PermCreateSigners:       true,
+		PermReadHDWallets:       true, // own wallets only
 	},
 	types.RoleStrategy: {
 		PermSignRequest:     true,

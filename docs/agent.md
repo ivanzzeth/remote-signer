@@ -18,15 +18,11 @@ The agent feature consists of:
 
 ### 1. Deploy Agent Preset
 
-Apply the agent preset to create rules for all supported chains:
+Apply the agent preset via API to create **instance rules** (modifiable via API):
 
-```bash
-remote-signer-cli preset create-from agent.preset.js.yaml \
-  --config config.yaml \
-  --write
-```
+> **IMPORTANT**: Do NOT use `--config config.yaml --write`. That creates config-sourced rules which cannot be modified via API. Always use the Preset API to create instance rules.
 
-Or via API (admin key required):
+Via API (admin key required):
 
 ```
 POST /api/v1/presets/agent.preset.js.yaml/apply
