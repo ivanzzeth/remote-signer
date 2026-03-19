@@ -551,7 +551,7 @@ func (m *anvilForkManagerImpl) simulateSingleTx(ctx context.Context, inst *anvil
 	balanceChanges := ComputeBalanceChanges(events, from, to, value)
 
 	// Detect approvals
-	hasApproval := DetectApproval(events, nil)
+	hasApproval := DetectApproval(context.Background(), events, nil, "", nil)
 
 	revertReason := ""
 	if !success {

@@ -785,7 +785,11 @@ func run() error {
 		if evmAdapter != nil {
 			signerLister = evm.NewEVMAdapterSignerLister(evmAdapter)
 		}
-		simRule, simRuleErr := evm.NewSimulationBudgetRule(simulator, budgetRepo, simBudgetDefaults, decimalsQuerier, signerLister, log)
+		var allowanceQuerier simulation.AllowanceQuerier
+		if rpcProvider != nil {
+			allowanceQuerier = evm.NewRPCAllowanceQuerier(rpcProvider)
+		}
+		simRule, simRuleErr := evm.NewSimulationBudgetRule(simulator, budgetRepo, simBudgetDefaults, decimalsQuerier, signerLister, allowanceQuerier, log)
 		if simRuleErr != nil {
 			log.Warn("failed to create simulation budget rule", "error", simRuleErr)
 		} else {

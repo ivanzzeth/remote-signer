@@ -38,13 +38,30 @@ type ManagedSignerLister interface {
 	ListManagedAddresses(ctx context.Context) (map[string]bool, error)
 }
 
+// RPCAllowanceQuerier adapts RPCProvider to simulation.AllowanceQuerier.
+type RPCAllowanceQuerier struct {
+	provider *RPCProvider
+}
+
+func NewRPCAllowanceQuerier(provider *RPCProvider) *RPCAllowanceQuerier {
+	if provider == nil {
+		return nil
+	}
+	return &RPCAllowanceQuerier{provider: provider}
+}
+
+func (q *RPCAllowanceQuerier) QueryAllowance(ctx context.Context, chainID, token, owner, spender string) (*big.Int, error) {
+	return q.provider.QueryAllowance(ctx, chainID, token, owner, spender)
+}
+
 type SimulationBudgetRule struct {
-	simulator        simulation.AnvilForkManager
-	budgetRepo       storage.BudgetRepository
-	budgetDefaults   *SimBudgetDefaults
-	decimalsQuerier  rule.DecimalsQuerier
-	signerLister     ManagedSignerLister
-	logger           *slog.Logger
+	simulator         simulation.AnvilForkManager
+	budgetRepo        storage.BudgetRepository
+	budgetDefaults    *SimBudgetDefaults
+	decimalsQuerier   rule.DecimalsQuerier
+	signerLister      ManagedSignerLister
+	allowanceQuerier  simulation.AllowanceQuerier
+	logger            *slog.Logger
 }
 
 // NewSimulationBudgetRule creates a new SimulationBudgetRule.
@@ -56,18 +73,20 @@ func NewSimulationBudgetRule(
 	budgetDefaults *SimBudgetDefaults,
 	decimalsQuerier rule.DecimalsQuerier,
 	signerLister ManagedSignerLister,
+	allowanceQuerier simulation.AllowanceQuerier,
 	logger *slog.Logger,
 ) (*SimulationBudgetRule, error) {
 	if logger == nil {
 		return nil, fmt.Errorf("logger is required")
 	}
 	return &SimulationBudgetRule{
-		simulator:       simulator,
-		budgetRepo:      budgetRepo,
-		budgetDefaults:  budgetDefaults,
-		decimalsQuerier: decimalsQuerier,
-		signerLister:    signerLister,
-		logger:          logger,
+		simulator:        simulator,
+		budgetRepo:       budgetRepo,
+		budgetDefaults:   budgetDefaults,
+		decimalsQuerier:  decimalsQuerier,
+		signerLister:     signerLister,
+		allowanceQuerier: allowanceQuerier,
+		logger:           logger,
 	}, nil
 }
 
@@ -125,10 +144,11 @@ func (r *SimulationBudgetRule) getManagedSigners(ctx context.Context) map[string
 	return signers
 }
 
-// hasManagedSignerApproval checks if the simulation result contains approval events for any managed signer.
-func (r *SimulationBudgetRule) hasManagedSignerApproval(ctx context.Context, result *simulation.SimulationResult) bool {
+// hasManagedSignerApproval checks if the simulation result contains real approval grants for managed signers.
+// Uses on-chain allowance comparison to distinguish real approvals from transferFrom side effects.
+func (r *SimulationBudgetRule) hasManagedSignerApproval(ctx context.Context, chainID string, result *simulation.SimulationResult) bool {
 	managedSigners := r.getManagedSigners(ctx)
-	return simulation.DetectApproval(result.Events, managedSigners)
+	return simulation.DetectApproval(ctx, result.Events, managedSigners, chainID, r.allowanceQuerier)
 }
 
 // EvaluateSingle evaluates a single sign request that wasn't matched by any user rule.
@@ -214,7 +234,7 @@ func (r *SimulationBudgetRule) EvaluateSingle(
 	// After budget passes: check if any managed signer has approval events.
 	// Only approvals where the owner is one of our managed signers matter.
 	// Internal contract-to-contract approvals (DEX router internals) are ignored.
-	if r.hasManagedSignerApproval(ctx, result) {
+	if r.hasManagedSignerApproval(ctx, req.ChainID, result) {
 		r.logger.Info("approval detected for managed signer, deferring to manual approval",
 			"chain_id", req.ChainID,
 			"signer", req.SignerAddress,
@@ -298,7 +318,7 @@ func (r *SimulationBudgetRule) EvaluateBatch(
 	// After budget passes: check approval events + dangerous state changes for managed signers.
 	managedSigners := r.getManagedSigners(ctx)
 	for i, result := range batchResult.Results {
-		if simulation.DetectApproval(result.Events, managedSigners) {
+		if simulation.DetectApproval(ctx, result.Events, managedSigners, chainID, r.allowanceQuerier) {
 			r.logger.Info("approval detected for managed signer in batch, deferring to manual approval",
 				"chain_id", chainID, "signer", signerAddress, "tx_index", i,
 			)

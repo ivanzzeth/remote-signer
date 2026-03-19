@@ -1,6 +1,7 @@
 package simulation
 
 import (
+	"context"
 	"testing"
 )
 
@@ -214,7 +215,7 @@ func TestDetectApproval_NonZeroValue(t *testing.T) {
 	events := []SimEvent{
 		{Event: "Approval", Standard: "erc20", Args: map[string]string{"owner": "0xabc", "value": "1000000"}},
 	}
-	if !DetectApproval(events, nil) {
+	if !DetectApproval(context.Background(), events, nil, "", nil) {
 		t.Error("expected approval detected for non-zero value")
 	}
 
@@ -222,7 +223,7 @@ func TestDetectApproval_NonZeroValue(t *testing.T) {
 	events = []SimEvent{
 		{Event: "ApprovalForAll", Standard: "erc721", Args: map[string]string{"owner": "0xabc", "value": "1"}},
 	}
-	if !DetectApproval(events, nil) {
+	if !DetectApproval(context.Background(), events, nil, "", nil) {
 		t.Error("expected ApprovalForAll detected")
 	}
 }
@@ -232,16 +233,16 @@ func TestDetectApproval_ZeroValueSkipped(t *testing.T) {
 	events := []SimEvent{
 		{Event: "Approval", Standard: "erc20", Args: map[string]string{"owner": "0xabc", "value": "0"}},
 	}
-	if DetectApproval(events, nil) {
+	if DetectApproval(context.Background(), events, nil, "", nil) {
 		t.Error("did not expect approval for value=0 (transferFrom side effect)")
 	}
 }
 
 func TestDetectApproval_NoEvents(t *testing.T) {
-	if DetectApproval(nil, nil) {
+	if DetectApproval(context.Background(), nil, nil, "", nil) {
 		t.Error("did not expect approval for nil events")
 	}
-	if DetectApproval([]SimEvent{{Event: "Transfer"}}, nil) {
+	if DetectApproval(context.Background(), []SimEvent{{Event: "Transfer"}}, nil, "", nil) {
 		t.Error("did not expect approval for Transfer-only events")
 	}
 }
@@ -252,14 +253,14 @@ func TestDetectApproval_ManagedSignerFilter(t *testing.T) {
 	events := []SimEvent{
 		{Event: "Approval", Args: map[string]string{"owner": "0xabc", "value": "100"}},
 	}
-	if !DetectApproval(events, managed) {
+	if !DetectApproval(context.Background(), events, managed, "", nil) {
 		t.Error("expected approval for managed signer")
 	}
 	// Non-managed signer approval → NOT detected
 	events = []SimEvent{
 		{Event: "Approval", Args: map[string]string{"owner": "0xunknown", "value": "100"}},
 	}
-	if DetectApproval(events, managed) {
+	if DetectApproval(context.Background(), events, managed, "", nil) {
 		t.Error("did not expect approval for non-managed signer")
 	}
 }
