@@ -230,6 +230,12 @@ type SimulationConfig struct {
 	BatchMaxSize int           `yaml:"batch_max_size"`  // max txs per batch (default: 20)
 	PruneHistory int           `yaml:"prune_history"`   // [anvil] --prune-history: max states in memory (default: 0 = minimal)
 	CacheDir     string        `yaml:"cache_dir"`       // [anvil] fork RPC cache directory (default: data/anvil-cache)
+	// Budget defaults for auto-created simulation budget records (human-readable units).
+	// Decimals are auto-queried from chain. "-1" = unlimited.
+	BudgetNativeMaxTotal string `yaml:"budget_native_max_total"`  // native token max total per period (default: "0.01")
+	BudgetNativeMaxPerTx string `yaml:"budget_native_max_per_tx"` // native token max per tx (default: "0.005")
+	BudgetERC20MaxTotal  string `yaml:"budget_erc20_max_total"`   // ERC20 max total per period per token (default: "100")
+	BudgetERC20MaxPerTx  string `yaml:"budget_erc20_max_per_tx"`  // ERC20 max per tx per token (default: "50")
 }
 
 // SecurityConfig contains security-related settings
@@ -565,6 +571,18 @@ func setDefaults(cfg *Config) {
 		}
 		if sim.CacheDir == "" {
 			sim.CacheDir = "data/anvil-cache"
+		}
+		if sim.BudgetNativeMaxTotal == "" {
+			sim.BudgetNativeMaxTotal = "0.01"
+		}
+		if sim.BudgetNativeMaxPerTx == "" {
+			sim.BudgetNativeMaxPerTx = "0.005"
+		}
+		if sim.BudgetERC20MaxTotal == "" {
+			sim.BudgetERC20MaxTotal = "100"
+		}
+		if sim.BudgetERC20MaxPerTx == "" {
+			sim.BudgetERC20MaxPerTx = "50"
 		}
 	}
 

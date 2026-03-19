@@ -22,26 +22,43 @@ import (
 //     naturally route to manual approval)
 //   - Extract net balance changes -> feed outflows into budget engine
 //   - Budget passes -> allow; budget exceeded -> deny
+// SimBudgetDefaults configures auto-created budget records for unknown tokens.
+// Values are in human-readable units (e.g. "100" = 100 USDC, "0.01" = 0.01 ETH).
+// Decimals are auto-queried from chain via DecimalsQuerier.
+type SimBudgetDefaults struct {
+	NativeMaxTotal string // max total native per period (human-readable, e.g. "0.01")
+	NativeMaxPerTx string // max native per tx (human-readable, e.g. "0.005")
+	ERC20MaxTotal  string // max total ERC20 per period per token (human-readable, e.g. "100")
+	ERC20MaxPerTx  string // max ERC20 per tx per token (human-readable, e.g. "50")
+}
+
 type SimulationBudgetRule struct {
-	simulator  simulation.AnvilForkManager
-	budgetRepo storage.BudgetRepository
-	logger     *slog.Logger
+	simulator        simulation.AnvilForkManager
+	budgetRepo       storage.BudgetRepository
+	budgetDefaults   *SimBudgetDefaults
+	decimalsQuerier  rule.DecimalsQuerier
+	logger           *slog.Logger
 }
 
 // NewSimulationBudgetRule creates a new SimulationBudgetRule.
 // simulator may be nil (in which case the rule always returns no-match).
+// budgetDefaults may be nil (in which case unknown tokens have no limit).
 func NewSimulationBudgetRule(
 	simulator simulation.AnvilForkManager,
 	budgetRepo storage.BudgetRepository,
+	budgetDefaults *SimBudgetDefaults,
+	decimalsQuerier rule.DecimalsQuerier,
 	logger *slog.Logger,
 ) (*SimulationBudgetRule, error) {
 	if logger == nil {
 		return nil, fmt.Errorf("logger is required")
 	}
 	return &SimulationBudgetRule{
-		simulator:  simulator,
-		budgetRepo: budgetRepo,
-		logger:     logger,
+		simulator:       simulator,
+		budgetRepo:      budgetRepo,
+		budgetDefaults:  budgetDefaults,
+		decimalsQuerier: decimalsQuerier,
+		logger:          logger,
 	}, nil
 }
 
@@ -251,15 +268,14 @@ func (r *SimulationBudgetRule) checkBudgetFromBalanceChanges(
 
 		budget, err := r.budgetRepo.GetByRuleID(ctx, syntheticRuleID, unit)
 		if err != nil {
-			if types.IsNotFound(err) {
-				// No budget record for this token — allow (no constraint configured)
-				r.logger.Debug("no simulation budget record, allowing",
-					"signer", signerAddress,
-					"unit", unit,
-				)
-				continue
+			if !types.IsNotFound(err) {
+				return fmt.Errorf("failed to get simulation budget: %w", err)
 			}
-			return fmt.Errorf("failed to get simulation budget: %w", err)
+			// Auto-create budget record with defaults
+			budget = r.autoCreateBudget(ctx, chainID, signerAddress, change.Token, syntheticRuleID, unit)
+			if budget == nil {
+				continue // no defaults → allow without limit
+			}
 		}
 
 		// Check per-tx limit
@@ -289,6 +305,116 @@ func (r *SimulationBudgetRule) checkBudgetFromBalanceChanges(
 	}
 
 	return nil
+}
+
+// autoCreateBudget creates a budget record with defaults for a previously unseen token.
+// Returns nil if no defaults are configured (allow without limit).
+func (r *SimulationBudgetRule) autoCreateBudget(
+	ctx context.Context,
+	chainID string,
+	signerAddress string,
+	token string,
+	syntheticRuleID types.RuleID,
+	unit string,
+) *types.RuleBudget {
+	if r.budgetDefaults == nil {
+		r.logger.Debug("no simulation budget defaults, allowing without limit",
+			"signer", signerAddress, "unit", unit)
+		return nil
+	}
+
+	isNative := strings.ToLower(token) == "native"
+
+	var maxTotalHuman, maxPerTxHuman string
+	var decimals int
+	if isNative {
+		maxTotalHuman = r.budgetDefaults.NativeMaxTotal
+		maxPerTxHuman = r.budgetDefaults.NativeMaxPerTx
+		decimals = 18
+	} else {
+		maxTotalHuman = r.budgetDefaults.ERC20MaxTotal
+		maxPerTxHuman = r.budgetDefaults.ERC20MaxPerTx
+		// Query decimals from chain
+		if r.decimalsQuerier != nil {
+			d, dErr := r.decimalsQuerier.QueryDecimals(ctx, chainID, token)
+			if dErr != nil {
+				r.logger.Warn("failed to query decimals, using 18",
+					"token", token, "chain_id", chainID, "error", dErr)
+				decimals = 18
+			} else {
+				decimals = d
+			}
+		} else {
+			decimals = 18
+		}
+	}
+
+	if maxTotalHuman == "" {
+		r.logger.Debug("no simulation budget default for token type, allowing",
+			"signer", signerAddress, "unit", unit, "native", isNative)
+		return nil
+	}
+
+	// Convert human-readable to raw (e.g. "100" with 6 decimals → "100000000")
+	maxTotal := humanToRaw(maxTotalHuman, decimals)
+	maxPerTx := humanToRaw(maxPerTxHuman, decimals)
+
+	newBudget := &types.RuleBudget{
+		ID:       types.BudgetID(syntheticRuleID, unit),
+		RuleID:   syntheticRuleID,
+		Unit:     unit,
+		MaxTotal: maxTotal,
+		MaxPerTx: maxPerTx,
+		AlertPct: 80,
+	}
+
+	created, _, createErr := r.budgetRepo.CreateOrGet(ctx, newBudget)
+	if createErr != nil {
+		r.logger.Error("failed to auto-create simulation budget",
+			"unit", unit, "error", createErr)
+		return nil
+	}
+
+	r.logger.Info("auto-created simulation budget",
+		"signer", signerAddress,
+		"unit", unit,
+		"token", token,
+		"decimals", decimals,
+		"max_total", maxTotal,
+		"max_per_tx", maxPerTx,
+	)
+	return created
+}
+
+// humanToRaw converts a human-readable decimal string to raw integer with the given decimals.
+// e.g. humanToRaw("100", 6) → "100000000", humanToRaw("0.01", 18) → "10000000000000000"
+func humanToRaw(human string, decimals int) string {
+	if human == "" || human == "-1" {
+		return human // -1 = unlimited
+	}
+
+	// Split on decimal point
+	parts := strings.SplitN(human, ".", 2)
+	intPart := parts[0]
+	fracPart := ""
+	if len(parts) == 2 {
+		fracPart = parts[1]
+	}
+
+	// Pad or trim fractional part to exactly `decimals` digits
+	if len(fracPart) > decimals {
+		fracPart = fracPart[:decimals]
+	} else {
+		fracPart += strings.Repeat("0", decimals-len(fracPart))
+	}
+
+	raw := intPart + fracPart
+	// Remove leading zeros (but keep at least "0")
+	raw = strings.TrimLeft(raw, "0")
+	if raw == "" {
+		raw = "0"
+	}
+	return raw
 }
 
 // extractTxParamsForSimulation extracts transaction parameters from a parsed payload for simulation.

@@ -407,6 +407,7 @@ func run() error {
 
 	// Wire RPC provider for JS sandbox read-only queries, budget decimals auto-query, and broadcast
 	var rpcProvider *evm.RPCProvider
+	var decimalsQuerier rule.DecimalsQuerier
 	if cfg.Chains.EVM != nil && cfg.Chains.EVM.RPCGateway.BaseURL != "" {
 		rpcProvider, err = evm.NewRPCProvider(cfg.Chains.EVM.RPCGateway.BaseURL, cfg.Chains.EVM.RPCGateway.APIKey)
 		if err != nil {
@@ -425,9 +426,10 @@ func run() error {
 		if evmAdapter != nil {
 			evmAdapter.SetRPCProvider(rpcProvider)
 		}
-		decimalsQuerier, err := evm.NewDecimalsQuerierAdapter(metadataCache)
-		if err != nil {
-			return fmt.Errorf("failed to create decimals querier: %w", err)
+		var dqErr error
+		decimalsQuerier, dqErr = evm.NewDecimalsQuerierAdapter(metadataCache)
+		if dqErr != nil {
+			return fmt.Errorf("failed to create decimals querier: %w", dqErr)
 		}
 		budgetChecker.SetDecimalsQuerier(decimalsQuerier)
 		log.Info("RPC provider configured for JS sandbox and budget decimals auto-query",
@@ -773,7 +775,13 @@ func run() error {
 
 	// Wire simulation fallback to sign service
 	if simulator != nil {
-		simRule, simRuleErr := evm.NewSimulationBudgetRule(simulator, nil, log)
+		simBudgetDefaults := &evm.SimBudgetDefaults{
+			NativeMaxTotal: cfg.Chains.EVM.Simulation.BudgetNativeMaxTotal,
+			NativeMaxPerTx: cfg.Chains.EVM.Simulation.BudgetNativeMaxPerTx,
+			ERC20MaxTotal:  cfg.Chains.EVM.Simulation.BudgetERC20MaxTotal,
+			ERC20MaxPerTx:  cfg.Chains.EVM.Simulation.BudgetERC20MaxPerTx,
+		}
+		simRule, simRuleErr := evm.NewSimulationBudgetRule(simulator, budgetRepo, simBudgetDefaults, decimalsQuerier, log)
 		if simRuleErr != nil {
 			log.Warn("failed to create simulation budget rule", "error", simRuleErr)
 		} else {
