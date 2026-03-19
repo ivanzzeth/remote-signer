@@ -13,4 +13,6 @@ func init() {
 	evmCmd.AddCommand(ruleCmd)
 	evmCmd.AddCommand(signerCmd)
 	evmCmd.AddCommand(simulateCmd)
+	evmCmd.AddCommand(requestCmd)
+	evmCmd.AddCommand(guardCmd)
 }
