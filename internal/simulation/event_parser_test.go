@@ -264,6 +264,119 @@ func TestDetectApproval_ManagedSignerFilter(t *testing.T) {
 	}
 }
 
+func TestDetectDangerousStateChanges_OwnershipTransferred(t *testing.T) {
+	managed := map[string]bool{"0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266": true}
+
+	// Managed signer losing ownership → detected
+	logs := []txLog{{
+		Topics: []string{
+			"0x8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0",
+			"0x000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266", // previousOwner (managed)
+			"0x0000000000000000000000001234567890abcdef1234567890abcdef12345678", // newOwner
+		},
+	}}
+	reason := DetectDangerousStateChanges(logs, managed)
+	if reason == "" {
+		t.Error("expected OwnershipTransferred to be detected for managed signer")
+	}
+
+	// Non-managed signer losing ownership → NOT detected
+	logs2 := []txLog{{
+		Topics: []string{
+			"0x8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0",
+			"0x0000000000000000000000001111111111111111111111111111111111111111", // not managed
+			"0x0000000000000000000000002222222222222222222222222222222222222222",
+		},
+	}}
+	reason2 := DetectDangerousStateChanges(logs2, managed)
+	if reason2 != "" {
+		t.Errorf("did not expect detection for non-managed signer, got: %s", reason2)
+	}
+}
+
+func TestDetectDangerousStateChanges_ApprovalForAll(t *testing.T) {
+	managed := map[string]bool{"0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266": true}
+
+	// ApprovalForAll(true) for managed signer → detected
+	logs := []txLog{{
+		Topics: []string{
+			"0x17307eab39ab6107e8899845ad3d59bd9653f200f220920489ca2b5937696c31",
+			"0x000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266", // owner (managed)
+			"0x0000000000000000000000001234567890abcdef1234567890abcdef12345678", // operator
+		},
+		Data: "0x0000000000000000000000000000000000000000000000000000000000000001", // approved=true
+	}}
+	reason := DetectDangerousStateChanges(logs, managed)
+	if reason == "" {
+		t.Error("expected ApprovalForAll(true) to be detected for managed signer")
+	}
+
+	// ApprovalForAll(false) = revoke → NOT detected
+	logs2 := []txLog{{
+		Topics: []string{
+			"0x17307eab39ab6107e8899845ad3d59bd9653f200f220920489ca2b5937696c31",
+			"0x000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+			"0x0000000000000000000000001234567890abcdef1234567890abcdef12345678",
+		},
+		Data: "0x0000000000000000000000000000000000000000000000000000000000000000", // approved=false
+	}}
+	reason2 := DetectDangerousStateChanges(logs2, managed)
+	if reason2 != "" {
+		t.Errorf("did not expect detection for ApprovalForAll(false), got: %s", reason2)
+	}
+}
+
+func TestDetectDangerousStateChanges_Upgraded(t *testing.T) {
+	// Any Upgraded event → detected (regardless of managed signers)
+	logs := []txLog{{
+		Topics: []string{
+			"0xbc7cd75a20ee27fd9adebab32041f755214dbc6bffa90cc0225b39da2e5c2d3b",
+			"0x0000000000000000000000001234567890abcdef1234567890abcdef12345678", // new implementation
+		},
+	}}
+	reason := DetectDangerousStateChanges(logs, nil)
+	if reason == "" {
+		t.Error("expected Upgraded event to be detected")
+	}
+}
+
+func TestDetectDangerousStateChanges_AdminChanged(t *testing.T) {
+	// Any AdminChanged event → detected
+	logs := []txLog{{
+		Topics: []string{
+			"0x7e644d79422f17c01e4894b5f4f588d331ebfa28653d42ae832dc59e38c9798f",
+		},
+		Data: "0x0000000000000000000000001111111111111111111111111111111111111111" +
+			"0000000000000000000000002222222222222222222222222222222222222222",
+	}}
+	reason := DetectDangerousStateChanges(logs, nil)
+	if reason == "" {
+		t.Error("expected AdminChanged event to be detected")
+	}
+}
+
+func TestDetectDangerousStateChanges_SafeEvents(t *testing.T) {
+	managed := map[string]bool{"0xabc": true}
+
+	// Transfer event → NOT dangerous
+	logs := []txLog{{
+		Topics: []string{
+			"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+			"0x000000000000000000000000abc0000000000000000000000000000000000000",
+			"0x000000000000000000000000def0000000000000000000000000000000000000",
+		},
+	}}
+	reason := DetectDangerousStateChanges(logs, managed)
+	if reason != "" {
+		t.Errorf("Transfer event should not be dangerous, got: %s", reason)
+	}
+
+	// Empty logs → safe
+	if DetectDangerousStateChanges(nil, managed) != "" {
+		t.Error("nil logs should be safe")
+	}
+}
+
 func TestParseEvents_EmptyLogs(t *testing.T) {
 	events := ParseEvents(nil)
 	if len(events) != 0 {
