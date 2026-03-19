@@ -6,13 +6,13 @@ This guide covers how AI agents interact with the remote-signer service. The age
 
 The agent feature consists of:
 
-- **Agent Template** (`rules/templates/agent.template.js.yaml`): Three sub-rules that define what an agent can do
-  - `agent-tx` (whitelist): Allows any transaction; dynamically tracks budget by token/native/count
-  - `agent-sign` (whitelist): Allows `personal_sign` (with length limit) and `typed_data` (Permit budget tracked)
+- **Agent Template** (`rules/templates/agent.template.js.yaml`): Two sub-rules that define what an agent can do
+  - `agent-sign` (whitelist): Allows `personal_sign` (with length limit) and `typed_data` (Permit/Permit2 requires `allowed_spenders` whitelist, budget tracked)
   - `agent-safety` (blocklist): Blocks dangerous admin functions (transferOwnership, upgradeTo, setApprovalForAll(true), etc.)
-- **Agent Preset** (`rules/presets/agent.preset.js.yaml`): Deploys the template across 5 chains (Ethereum, Polygon, Arbitrum, Optimism, Base)
+- **Simulation Budget Rule** (fallback): Transactions that don't match any whitelist rule are simulated via `eth_simulateV1`. Budget is tracked based on actual balance changes (not declared intent). Approve events for managed signers require manual approval.
+- **Agent Preset** (`rules/presets/agent.preset.js.yaml`): Deploys the template with configurable budgets
 - **Agent API Key**: A role between `admin` and `dev` that can sign + read rules/budgets but cannot modify rules
-- **Dynamic Budget**: Automatically tracks spending per token without pre-declaring every token
+- **Dynamic Budget**: Automatically tracks spending per token without pre-declaring every token. Decimals queried from chain. Gas cost included in native budget.
 
 ## Setup
 
@@ -411,3 +411,167 @@ func main() {
     }
 }
 ```
+
+---
+
+## dApp Frontend Automation (Playwright + EIP-1193)
+
+For agents that need to interact with dApp frontends (Uniswap, Aave, etc.), Remote Signer provides an EIP-1193 provider that bridges browser wallet interactions to the signing service.
+
+### Architecture
+
+```
+┌─────────────────────┐     EIP-1193      ┌──────────────────┐     mTLS/Ed25519     ┌─────────────────┐
+│  Playwright Browser  │ ◄──────────────► │ EIP-1193 Provider │ ◄────────────────► │  Remote Signer  │
+│  (Uniswap, Aave...) │   inject wallet   │ (in-browser shim) │   sign + broadcast  │  (rules+budget) │
+└─────────────────────┘                   └──────────────────┘                     └─────────────────┘
+                                                                                          │
+                                                                                   ┌──────┴──────┐
+                                                                                   │ Admin (MCP) │
+                                                                                   │ approve txs │
+                                                                                   └─────────────┘
+```
+
+### Roles
+
+| Role | Tooling | Responsibilities |
+|------|---------|-----------------|
+| **Agent** | Playwright + EIP-1193 Provider | Navigate dApp UI, select tokens/amounts, confirm swaps |
+| **Admin** | CLI / MCP / TUI | Monitor authorizing requests, approve security-sensitive operations (approve, permit) |
+
+### E2E Flow: Uniswap Swap (Polygon USDC.e → USDC)
+
+#### Phase 0: Prerequisites
+
+```bash
+# 1. Remote-signer running with simulation + budget
+docker compose up -d remote-signer
+
+# 2. Signer unlocked
+remote-signer-cli evm signer unlock 0x764602... --api-key-id admin ...
+
+# 3. Agent rules deployed (agent-sign + agent-safety + simulation budget)
+remote-signer-cli preset create-from agent.preset.js.yaml \
+  --set allowed_spenders="0x3b86917369b83a6892f553609f3c2f439c184e31" \
+  --config config.yaml --write
+
+# 4. RPC gateway available (for simulation + nonce + broadcast)
+curl http://localhost:8545/evm/137 -X POST -d '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}'
+```
+
+#### Phase 1: Agent opens dApp
+
+```
+Agent (Playwright):
+  1. Launch Chromium with EIP-1193 provider injected
+     → Provider configured with: remote-signer URL, agent API key, signer address, chain ID
+  2. Navigate to app.uniswap.org
+  3. Wallet auto-connects (EIP-6963 announcement)
+  4. Switch to Polygon network (chain ID 137)
+  5. Select swap: USDC.e → USDC, amount: 1
+  6. Click "Swap"
+```
+
+#### Phase 2: Approve flow (security-sensitive → manual approval)
+
+```
+Uniswap → eth_sendTransaction(approve USDC.e for router)
+  │
+  ▼
+EIP-1193 Provider → POST /api/v1/evm/sign (agent API key)
+  │
+  ▼
+Remote Signer:
+  ├─ Blocklist: approve() selector not blocked (only setApprovalForAll(true) is)
+  ├─ Whitelist: no match (no tx whitelist rule)
+  ├─ Simulation fallback:
+  │   ├─ eth_simulateV1: success, Approval event detected (owner=managed signer, value>0)
+  │   ├─ Budget: no outflow (approve doesn't move tokens) → passes
+  │   └─ Approval detected → return no_match → manual approval required
+  └─ Status: authorizing (waiting for signer owner)
+
+Admin (MCP/CLI):
+  ├─ evm_list_requests(status=authorizing) → sees approve request
+  ├─ Reviews: approve USDC.e to known DEX router ✓
+  └─ evm_approve_request(id, approved=true) → signed
+
+EIP-1193 Provider:
+  ├─ Polls GET /api/v1/evm/requests/{id} until status=completed
+  ├─ Gets signed_data → broadcasts via eth_sendRawTransaction
+  └─ Returns tx_hash to Uniswap
+
+Uniswap: shows "Approve confirmed" ✓
+```
+
+#### Phase 3: Swap flow (budget-gated → auto-approve)
+
+```
+Uniswap → eth_sendTransaction(swap via router)
+  │
+  ▼
+EIP-1193 Provider → POST /api/v1/evm/sign (agent API key)
+  │
+  ▼
+Remote Signer:
+  ├─ Blocklist: swap selector not blocked ✓
+  ├─ Whitelist: no match
+  ├─ Simulation fallback:
+  │   ├─ eth_simulateV1: success
+  │   ├─ Events: Approval(value=0) for signer → skipped (transferFrom side effect)
+  │   ├─ Balance changes: -1 USDC.e, +0.999 USDC
+  │   ├─ Gas cost: ~366k gas × gasFeeCap → added to native outflow
+  │   ├─ Budget: 1 USDC.e ≤ 100 max, 0.005 MATIC ≤ 0.01 max → passes
+  │   ├─ No dangerous state changes → passes
+  │   └─ Decision: allow → auto-sign (no admin needed)
+  └─ Status: completed (immediate)
+
+EIP-1193 Provider:
+  ├─ Gets signed_data immediately
+  ├─ Broadcasts via eth_sendRawTransaction
+  └─ Returns tx_hash to Uniswap
+
+Uniswap: shows "Swap confirmed" ✓
+```
+
+#### Phase 4: Verification
+
+```bash
+# Budget deducted
+docker compose exec postgres psql -U signer -d remote_signer \
+  -c "SELECT unit, spent, max_total FROM rule_budgets WHERE rule_id LIKE 'sim:%';"
+# → 137:0x2791bca1... spent=1000000 (1 USDC.e)
+
+# On-chain confirmed
+cast receipt <approve_tx_hash> --rpc-url http://localhost:8545/evm/137
+cast receipt <swap_tx_hash> --rpc-url http://localhost:8545/evm/137
+```
+
+### Security Model in dApp Automation
+
+| Operation | Detection Method | Action | Admin Needed |
+|-----------|-----------------|--------|-------------|
+| ERC20 approve | Simulation: Approval event, owner=managed signer, value>0 | Manual approval | **Yes** |
+| ERC20 transfer / swap | Simulation: balance change outflow | Budget check → auto-allow | No |
+| Permit / Permit2 sign | Rule: `allowed_spenders` whitelist | Allow if spender known | No |
+| transferOwnership | Blocklist: selector match | **Block** | No (hard reject) |
+| OwnershipTransferred (via multicall) | Simulation: dangerous event | Manual approval | **Yes** |
+| Proxy upgrade | Simulation: Upgraded event | Manual approval | **Yes** |
+| Native transfer (gas) | Simulation: gasUsed × gasPrice | Native budget check | No |
+
+### Key Design Principles
+
+1. **Agent is autonomous within budget** — normal swaps, transfers auto-sign without admin
+2. **Security-sensitive ops need human review** — approve, ownership changes, proxy upgrades
+3. **Simulation is the security boundary** — not calldata selectors, not blocklist alone
+4. **Budget is verified, not self-reported** — server simulates and checks actual balance changes
+5. **Admin can be async** — agent's EIP-1193 provider polls; admin approves when available
+
+### File Locations
+
+| Component | Location |
+|-----------|----------|
+| Playwright POC | `projects/tech-research/playwright-poc/` |
+| EIP-1193 Provider | `pkg/js-client/` (`EIP1193Provider` class) |
+| Web3 context helper | `playwright-poc/src/web3-context.mjs` |
+| Remote signer bridge | `playwright-poc/src/remote-signer-bridge.mjs` |
+| EIP-1193 browser shim | `playwright-poc/src/eip1193-shim.mjs` |
