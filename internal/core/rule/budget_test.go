@@ -797,7 +797,8 @@ func TestBudgetChecker_UnitDecimal_AddressUnit_AutoQuery_RPCFails_FailsClosed(t 
 	}
 
 	ok, err := bc.CheckAndDeductBudget(context.Background(), rule, &types.SignRequest{ID: "req"}, &types.ParsedPayload{})
-	require.Error(t, err, "should fail-closed when RPC is unavailable")
+	// RPC timeout (not a revert) → fail-closed
+	require.Error(t, err, "should fail-closed when RPC is unavailable (not a revert)")
 	assert.False(t, ok)
 	assert.Contains(t, err.Error(), "auto-query failed")
 }
