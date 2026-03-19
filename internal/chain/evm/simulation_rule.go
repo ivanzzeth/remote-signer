@@ -118,18 +118,8 @@ func (r *SimulationBudgetRule) EvaluateSingle(
 		return &SimulationOutcome{Decision: "deny", Reason: reason, Simulation: result}, nil
 	}
 
-	// If approval detected, return no_match to let the existing manual approval flow handle it.
-	// Approve transactions that don't match any whitelist rule naturally require manual approval
-	// through the ManualApprovalGuard in the sign service.
-	if result.HasApproval {
-		r.logger.Info("approval detected in simulation, deferring to manual approval flow",
-			"chain_id", req.ChainID,
-			"signer", req.SignerAddress,
-		)
-		return &SimulationOutcome{Decision: "no_match", Simulation: result}, nil
-	}
-
-	// Budget check against balance changes (outflows only)
+	// Budget check against balance changes (outflows only).
+	// Approve events don't move tokens — they have no outflow, so budget is unaffected.
 	if err := r.checkBudgetFromBalanceChanges(ctx, req.ChainID, req.SignerAddress, result.BalanceChanges); err != nil {
 		reason := fmt.Sprintf("simulation budget exceeded: %s", err)
 		r.logger.Warn("budget check failed in simulation fallback",
@@ -190,18 +180,8 @@ func (r *SimulationBudgetRule) EvaluateBatch(
 		}
 	}
 
-	// If any tx has approval events, defer to manual approval
-	for _, result := range batchResult.Results {
-		if result.HasApproval {
-			r.logger.Info("approval detected in batch simulation, deferring to manual approval flow",
-				"chain_id", chainID,
-				"signer", signerAddress,
-			)
-			return &BatchSimulationOutcome{Decision: "no_match", Simulation: batchResult}, nil
-		}
-	}
-
-	// Budget check against NET balance changes (not per-tx)
+	// Budget check against NET balance changes (not per-tx).
+	// Approve events don't move tokens — they have no outflow, so budget is unaffected.
 	if err := r.checkBudgetFromBalanceChanges(ctx, chainID, signerAddress, batchResult.NetBalanceChanges); err != nil {
 		r.logger.Warn("budget check failed in batch simulation",
 			"chain_id", chainID,
