@@ -2,6 +2,7 @@ package evm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math/big"
@@ -185,9 +186,22 @@ func (r *SimulationBudgetRule) EvaluateSingle(
 		return &SimulationOutcome{Decision: "deny", Reason: reason, Simulation: result}, nil
 	}
 
+	// GAP-2 fix: Add gas cost as native outflow so budget tracks gas fees.
+	// Extract gasPrice/gasFeeCap from original payload to compute max gas cost.
+	balanceChanges := result.BalanceChanges
+	if gasCost := r.estimateGasCost(result.GasUsed, req.Payload); gasCost != nil && gasCost.Sign() > 0 {
+		balanceChanges = appendGasCostToBalanceChanges(balanceChanges, gasCost)
+		r.logger.Debug("added gas cost to balance changes",
+			"chain_id", req.ChainID,
+			"signer", req.SignerAddress,
+			"gas_cost_wei", gasCost.String(),
+			"gas_used", result.GasUsed,
+		)
+	}
+
 	// Budget check against balance changes (outflows only).
 	// Always run budget check first, even for approve txs (approve has no outflow, so budget is unaffected).
-	if err := r.checkBudgetFromBalanceChanges(ctx, req.ChainID, req.SignerAddress, result.BalanceChanges); err != nil {
+	if err := r.checkBudgetFromBalanceChanges(ctx, req.ChainID, req.SignerAddress, balanceChanges); err != nil {
 		reason := fmt.Sprintf("simulation budget exceeded: %s", err)
 		r.logger.Warn("budget check failed in simulation fallback",
 			"chain_id", req.ChainID,
@@ -468,6 +482,87 @@ func humanToRaw(human string, decimals int) string {
 		raw = "0"
 	}
 	return raw
+}
+
+// estimateGasCost computes the maximum gas cost from gasUsed and the tx payload's gas price.
+// For EIP-1559 txs, uses gasFeeCap (the maximum the sender will pay per gas unit).
+// For legacy/EIP-2930 txs, uses gasPrice.
+// Returns nil if gas price cannot be determined (budget will not track gas cost).
+func (r *SimulationBudgetRule) estimateGasCost(gasUsed uint64, payload []byte) *big.Int {
+	if gasUsed == 0 || len(payload) == 0 {
+		return nil
+	}
+
+	// Parse the EVM payload to extract gas price fields
+	var evmPayload EVMSignPayload
+	if err := json.Unmarshal(payload, &evmPayload); err != nil {
+		r.logger.Debug("failed to unmarshal payload for gas cost estimation", "error", err)
+		return nil
+	}
+	if evmPayload.Transaction == nil {
+		return nil
+	}
+	tx := evmPayload.Transaction
+
+	var gasPriceWei *big.Int
+
+	// EIP-1559: use gasFeeCap (max fee per gas)
+	if tx.GasFeeCap != "" {
+		gasPriceWei = new(big.Int)
+		if _, ok := gasPriceWei.SetString(tx.GasFeeCap, 10); !ok {
+			// Try hex
+			if _, ok := gasPriceWei.SetString(strings.TrimPrefix(tx.GasFeeCap, "0x"), 16); !ok {
+				gasPriceWei = nil
+			}
+		}
+	}
+
+	// Legacy/EIP-2930: use gasPrice
+	if gasPriceWei == nil && tx.GasPrice != "" {
+		gasPriceWei = new(big.Int)
+		if _, ok := gasPriceWei.SetString(tx.GasPrice, 10); !ok {
+			if _, ok := gasPriceWei.SetString(strings.TrimPrefix(tx.GasPrice, "0x"), 16); !ok {
+				gasPriceWei = nil
+			}
+		}
+	}
+
+	if gasPriceWei == nil || gasPriceWei.Sign() <= 0 {
+		return nil
+	}
+
+	// gasCost = gasUsed * gasPrice
+	gasUsedBig := new(big.Int).SetUint64(gasUsed)
+	return new(big.Int).Mul(gasUsedBig, gasPriceWei)
+}
+
+// appendGasCostToBalanceChanges merges a gas cost (positive big.Int representing native outflow)
+// into existing balance changes. If a native outflow already exists, it increases the outflow amount.
+// Otherwise, a new "native" outflow entry is appended.
+func appendGasCostToBalanceChanges(changes []simulation.BalanceChange, gasCost *big.Int) []simulation.BalanceChange {
+	// Make a copy to avoid mutating the simulation result
+	result := make([]simulation.BalanceChange, len(changes))
+	copy(result, changes)
+
+	// Look for an existing native outflow to merge with
+	for i, c := range result {
+		if strings.ToLower(c.Token) == "native" && c.Amount != nil && c.Amount.Sign() < 0 {
+			// Increase the existing native outflow by gasCost
+			merged := new(big.Int).Sub(c.Amount, gasCost) // more negative = larger outflow
+			result[i].Amount = merged
+			return result
+		}
+	}
+
+	// No existing native outflow — add a new entry
+	negGas := new(big.Int).Neg(gasCost)
+	result = append(result, simulation.BalanceChange{
+		Token:     "native",
+		Standard:  "native",
+		Amount:    negGas,
+		Direction: "outflow",
+	})
+	return result
 }
 
 // extractTxParamsForSimulation extracts transaction parameters from a parsed payload for simulation.
