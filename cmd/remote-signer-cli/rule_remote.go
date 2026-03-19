@@ -313,13 +313,76 @@ func init() {
 		panic(err)
 	}
 
+	// update flags
+	ruleUpdateCmd.Flags().StringVar(&flagUpdateName, "name", "", "New rule name")
+	ruleUpdateCmd.Flags().StringVar(&flagUpdateDescription, "description", "", "New description")
+	ruleUpdateCmd.Flags().StringArrayVar(&flagUpdateConfig, "set-config", nil, "Set config field (key=value, repeatable)")
+
 	// register all subcommands
 	ruleCmd.AddCommand(ruleListRemoteCmd)
 	ruleCmd.AddCommand(ruleGetCmd)
 	ruleCmd.AddCommand(ruleCreateCmd)
+	ruleCmd.AddCommand(ruleUpdateCmd)
 	ruleCmd.AddCommand(ruleDeleteCmd)
 	ruleCmd.AddCommand(ruleToggleCmd)
 	ruleCmd.AddCommand(ruleApproveCmd)
 	ruleCmd.AddCommand(ruleRejectCmd)
 	ruleCmd.AddCommand(ruleBudgetsCmd)
+}
+
+// --- rule update ---
+
+var (
+	flagUpdateName        string
+	flagUpdateDescription string
+	flagUpdateConfig      []string
+)
+
+var ruleUpdateCmd = &cobra.Command{
+	Use:   "update <rule-id>",
+	Short: "Update a rule's config, name, or description",
+	Long: `Update a rule. Use --set-config to modify config fields.
+
+Example:
+  rule update agent-sign-evm --set-config "allowed_spenders=0xabc,0xdef"
+  rule update my-rule --name "New Name" --description "Updated"`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c, err := newClientFromFlags(cmd)
+		if err != nil {
+			return err
+		}
+
+		req := &evm.UpdateRuleRequest{}
+
+		if flagUpdateName != "" {
+			req.Name = flagUpdateName
+		}
+		if flagUpdateDescription != "" {
+			req.Description = flagUpdateDescription
+		}
+
+		if len(flagUpdateConfig) > 0 {
+			req.Config = make(map[string]interface{})
+			for _, kv := range flagUpdateConfig {
+				parts := strings.SplitN(kv, "=", 2)
+				if len(parts) != 2 {
+					return fmt.Errorf("invalid --set-config format %q, expected key=value", kv)
+				}
+				req.Config[parts[0]] = parts[1]
+			}
+		}
+
+		rule, err := c.EVM.Rules.Update(cmd.Context(), args[0], req)
+		if err != nil {
+			return fmt.Errorf("update rule: %w", err)
+		}
+
+		if flagOutputFormat == "json" {
+			return printJSON(rule)
+		}
+
+		fmt.Printf("Rule %s updated\n", rule.ID)
+		return nil
+	},
 }
