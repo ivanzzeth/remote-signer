@@ -105,7 +105,7 @@ func NewAnvilForkManager(cfg AnvilForkManagerConfig, logger *slog.Logger) (Anvil
 
 	// Ensure cache directory exists for persistent fork RPC cache
 	if cfg.CacheDir != "" {
-		if mkErr := os.MkdirAll(cfg.CacheDir, 0755); mkErr != nil {
+		if mkErr := os.MkdirAll(cfg.CacheDir, 0750); mkErr != nil {
 			return nil, fmt.Errorf("failed to create anvil cache dir %s: %w", cfg.CacheDir, mkErr)
 		}
 		logger.Info("anvil cache directory ready", "path", cfg.CacheDir)

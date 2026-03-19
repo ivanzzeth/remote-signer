@@ -405,7 +405,7 @@ func hexDecode(s string) ([]byte, error) {
 		if hi < 0 || lo < 0 {
 			return nil, fmt.Errorf("invalid hex char")
 		}
-		b[i] = byte(hi<<4 | lo)
+		b[i] = byte(hi<<4 | lo) // #nosec G115 -- hi and lo are 0-15, shift+or fits in byte
 	}
 	return b, nil
 }
