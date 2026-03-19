@@ -36,6 +36,7 @@ type SimulationResult struct {
 	GasUsed        uint64          `json:"gas_used"`
 	BalanceChanges []BalanceChange `json:"balance_changes"`
 	Events         []SimEvent      `json:"events"`
+	RawLogs        []txLog         `json:"-"` // raw logs for deep event analysis (not serialized to API)
 	HasApproval    bool            `json:"has_approval"`
 	RevertReason   string          `json:"revert_reason,omitempty"`
 }

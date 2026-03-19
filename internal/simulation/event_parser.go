@@ -27,6 +27,14 @@ const (
 
 	// ERC721 ApprovalForAll
 	approvalForAllTopic0 = "0x17307eab39ab6107e8899845ad3d59bd9653f200f220920489ca2b5937696c31"
+
+	// Dangerous state change events (detected in simulation for manual approval)
+	// OwnershipTransferred(address indexed previousOwner, address indexed newOwner)
+	ownershipTransferredTopic0 = "0x8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0"
+	// Upgraded(address indexed implementation)
+	upgradedTopic0 = "0xbc7cd75a20ee27fd9adebab32041f755214dbc6bffa90cc0225b39da2e5c2d3b"
+	// AdminChanged(address previousAdmin, address newAdmin)
+	adminChangedTopic0 = "0x7e644d79422f17c01e4894b5f4f588d331ebfa28653d42ae832dc59e38c9798f"
 )
 
 // ParseEvents parses token standard events from transaction receipt logs.
@@ -306,6 +314,59 @@ func DetectApproval(events []SimEvent, managedSigners map[string]bool) bool {
 		return true
 	}
 	return false
+}
+
+// DetectDangerousStateChanges checks if simulation logs contain dangerous state change events
+// affecting any managed signer. These events indicate administrative operations (ownership transfer,
+// proxy upgrade, etc.) that should require manual approval regardless of how they were triggered
+// (direct call, multicall wrapper, etc.).
+//
+// Returns a human-readable reason if detected, or empty string if safe.
+func DetectDangerousStateChanges(logs []txLog, managedSigners map[string]bool) string {
+	for _, log := range logs {
+		if len(log.Topics) == 0 {
+			continue
+		}
+		topic0 := strings.ToLower(log.Topics[0])
+
+		switch topic0 {
+		case ownershipTransferredTopic0:
+			// OwnershipTransferred(address indexed previousOwner, address indexed newOwner)
+			if len(log.Topics) >= 2 {
+				prevOwner := strings.ToLower(topicToAddress(log.Topics[1]))
+				if len(managedSigners) == 0 || managedSigners[prevOwner] {
+					return "OwnershipTransferred detected: managed signer losing ownership"
+				}
+			}
+
+		case approvalForAllTopic0:
+			// ApprovalForAll(address indexed owner, address indexed operator, bool approved)
+			// Check if approved=true (data field, last byte != 0) and owner is managed signer
+			if len(log.Topics) >= 2 {
+				owner := strings.ToLower(topicToAddress(log.Topics[1]))
+				if len(managedSigners) == 0 || managedSigners[owner] {
+					// Check approved flag in data (bool, last byte)
+					data := trimHexPrefix(log.Data)
+					if len(data) >= 64 {
+						lastByte := data[len(data)-1]
+						if lastByte != '0' { // approved = true
+							return "ApprovalForAll(true) detected for managed signer"
+						}
+					}
+				}
+			}
+
+		case upgradedTopic0:
+			// Upgraded(address indexed implementation)
+			// Any proxy upgrade in the tx is suspicious
+			return "proxy Upgraded event detected"
+
+		case adminChangedTopic0:
+			// AdminChanged(address previousAdmin, address newAdmin)
+			return "proxy AdminChanged event detected"
+		}
+	}
+	return ""
 }
 
 // Helper functions for parsing hex data

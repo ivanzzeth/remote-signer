@@ -222,6 +222,18 @@ func (r *SimulationBudgetRule) EvaluateSingle(
 		return &SimulationOutcome{Decision: "no_match", Simulation: result}, nil
 	}
 
+	// Check for dangerous state change events (OwnershipTransferred, Upgraded, etc.)
+	// These are caught regardless of how they were triggered (direct call, multicall, etc.)
+	managedSigners := r.getManagedSigners(ctx)
+	if reason := simulation.DetectDangerousStateChanges(result.RawLogs, managedSigners); reason != "" {
+		r.logger.Info("dangerous state change detected, deferring to manual approval",
+			"chain_id", req.ChainID,
+			"signer", req.SignerAddress,
+			"reason", reason,
+		)
+		return &SimulationOutcome{Decision: "no_match", Simulation: result}, nil
+	}
+
 	return &SimulationOutcome{Decision: "allow", Simulation: result}, nil
 }
 
@@ -283,14 +295,18 @@ func (r *SimulationBudgetRule) EvaluateBatch(
 		return &BatchSimulationOutcome{Decision: "deny", Simulation: batchResult}, nil
 	}
 
-	// After budget passes: check if any tx has approval events for our managed signers.
+	// After budget passes: check approval events + dangerous state changes for managed signers.
 	managedSigners := r.getManagedSigners(ctx)
 	for i, result := range batchResult.Results {
 		if simulation.DetectApproval(result.Events, managedSigners) {
 			r.logger.Info("approval detected for managed signer in batch, deferring to manual approval",
-				"chain_id", chainID,
-				"signer", signerAddress,
-				"tx_index", i,
+				"chain_id", chainID, "signer", signerAddress, "tx_index", i,
+			)
+			return &BatchSimulationOutcome{Decision: "no_match", Simulation: batchResult}, nil
+		}
+		if reason := simulation.DetectDangerousStateChanges(result.RawLogs, managedSigners); reason != "" {
+			r.logger.Info("dangerous state change detected in batch, deferring to manual approval",
+				"chain_id", chainID, "signer", signerAddress, "tx_index", i, "reason", reason,
 			)
 			return &BatchSimulationOutcome{Decision: "no_match", Simulation: batchResult}, nil
 		}
@@ -556,13 +572,21 @@ func appendGasCostToBalanceChanges(changes []simulation.BalanceChange, gasCost *
 
 	// No existing native outflow — add a new entry
 	negGas := new(big.Int).Neg(gasCost)
-	result = append(result, simulation.BalanceChange{
-		Token:     "native",
-		Standard:  "native",
-		Amount:    negGas,
-		Direction: "outflow",
-	})
+	result = append(result, newNativeOutflow(negGas))
 	return result
+}
+
+// nativeBalanceLabel is the token identifier for native currency balance changes.
+const nativeBalanceLabel = "native"
+
+// newNativeOutflow creates a BalanceChange entry for native token outflow (e.g. gas cost).
+func newNativeOutflow(amount *big.Int) simulation.BalanceChange {
+	return simulation.BalanceChange{
+		Token:     nativeBalanceLabel,
+		Standard:  nativeBalanceLabel,
+		Amount:    amount,
+		Direction: "outflow",
+	}
 }
 
 // extractTxParamsForSimulation extracts transaction parameters from a parsed payload for simulation.
