@@ -430,8 +430,8 @@ Pending → Authorizing (rule engine evaluates)
   │
   ├→ Rejected (blocklist rule matched) [FINAL - no appeal]
   ├→ Pending Manual Approval (no whitelist match + manual_approval_enabled)
-  │    ├→ Approved → Signing
-  │    └→ Denied [FINAL]
+  │    ├→ Approved by signer owner → Signing
+  │    └→ Denied by signer owner [FINAL]
   └→ Signing (whitelist matched or approved)
        ├→ Completed (signature created) [FINAL]
        └→ Failed (signing error) [FINAL]
@@ -440,6 +440,20 @@ Pending → Authorizing (rule engine evaluates)
 **Timeline fields**: `created_at`, `updated_at` (last status change), `completed_at` (final state reached).
 
 **Audit trail**: each state transition is logged with the event type, rule matches are tracked in `rule_evaluation_result`, approval info stored in `approved_by` / `approved_at`.
+
+### Manual approval authorization
+
+Only the **signer's owner API key** can approve or reject pending requests for that signer. This is a critical security boundary:
+
+- **Agent key compromised**: even if an attacker obtains an agent API key with access to a signer, they cannot self-approve transactions. Only the admin who owns the signer can approve.
+- **Self-owned signers**: if an API key creates its own signer (via HD wallet derivation or keystore import), that key is the owner and can approve its own requests. This is by design — the key controls what it created.
+- **Separation of concerns**: the key that *submits* a signing request does not need to be the key that *approves* it. This enables workflows where agents submit and admins approve.
+
+| Scenario | Submit | Approve | Result |
+|----------|--------|---------|--------|
+| Agent key → admin-owned signer | Agent key | Admin key | Secure: admin reviews agent's requests |
+| Agent key → agent-owned signer | Agent key | Agent key | Permitted: agent controls its own signer |
+| Agent key → admin-owned signer | Agent key | Agent key | **Blocked (403)**: agent is not the signer owner |
 
 ---
 
@@ -799,8 +813,8 @@ Each defense point is assumed to be independently compromisable. This analysis m
 |--------|--------|
 | **Attack vector** | Overly broad rules (e.g. address list with `*`, no value limit, no chain restriction), or attacker creates permissive rules via compromised admin key |
 | **Attacker gains** | Auto-approval for requests that should require scrutiny; bypass manual approval workflow |
-| **Cannot do** | Bypass blocklist (evaluated first); exceed budget limits on the rule; use signers outside API key scope |
-| **Remaining defenses** | Blocklist rules (checked first), budget/period limits, API key scope restrictions, signer custody |
+| **Cannot do** | Bypass blocklist (evaluated first); exceed budget limits on the rule; use signers outside API key scope; self-approve requests on signers they don't own |
+| **Remaining defenses** | Blocklist rules (checked first), budget/period limits, API key scope restrictions, signer ownership-based approval, signer custody |
 | **Blast radius** | **Medium–High** — depends on rule scope. A permissive whitelist + compromised API key = auto-approved transactions up to budget limit |
 | **Mitigation** | Principle of least privilege for rules; mandatory budget limits on whitelist rules; regular rule audit; `rules_api_readonly: true`; template system for standardized rule patterns |
 

@@ -166,7 +166,7 @@ func (r *Router) setupRoutes() error {
 		return err
 	}
 
-	approvalHandler, err := evmhandler.NewApprovalHandler(r.signService, r.logger, r.config.RulesAPIReadonly)
+	approvalHandler, err := evmhandler.NewApprovalHandler(r.signService, accessService, r.logger, r.config.RulesAPIReadonly)
 	if err != nil {
 		return err
 	}
