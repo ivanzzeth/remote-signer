@@ -576,7 +576,7 @@ func setDefaults(cfg *Config) {
 			sim.BudgetNativeMaxTotal = "0.01"
 		}
 		if sim.BudgetNativeMaxPerTx == "" {
-			sim.BudgetNativeMaxPerTx = "0.02"
+			sim.BudgetNativeMaxPerTx = "0.1"
 		}
 		if sim.BudgetERC20MaxTotal == "" {
 			sim.BudgetERC20MaxTotal = "100"
