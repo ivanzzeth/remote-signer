@@ -46,6 +46,9 @@ func NewRPCSimulator(cfg RPCSimulatorConfig, logger *slog.Logger) (AnvilForkMana
 		cfg: cfg,
 		client: &http.Client{
 			Timeout: cfg.Timeout,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return fmt.Errorf("rpc simulator does not follow redirects (SSRF prevention)")
+			},
 		},
 		logger: logger,
 	}, nil
