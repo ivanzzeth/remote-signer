@@ -1221,6 +1221,145 @@ server.registerTool(
 );
 
 // ===========================================================================
+// Tool: evm_simulate_tx  –  POST /api/v1/evm/simulate
+// ===========================================================================
+
+server.registerTool(
+  "evm_simulate_tx",
+  {
+    title: "Simulate EVM Transaction",
+    description:
+      "Simulate a single EVM transaction using eth_simulateV1. " +
+      "Returns success/revert status, gas used, balance changes, and events.",
+    inputSchema: {
+      chain_id: z.string().describe("Chain ID, e.g. '1' for Ethereum mainnet"),
+      from: z.string().describe("Sender address (0x-prefixed)"),
+      to: z.string().describe("Recipient address (0x-prefixed)"),
+      value: z.string().optional().describe("Transaction value in wei (decimal string)"),
+      data: z.string().optional().describe("Transaction calldata (0x-prefixed hex)"),
+      gas: z.string().optional().describe("Gas limit (decimal string)"),
+    },
+  },
+  async ({ chain_id, from, to, value, data, gas }) => {
+    try {
+      const response = await client.evm.simulate.simulate({
+        chain_id,
+        from,
+        to,
+        value,
+        data,
+        gas,
+      });
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_simulate_batch  –  POST /api/v1/evm/simulate/batch
+// ===========================================================================
+
+server.registerTool(
+  "evm_simulate_batch",
+  {
+    title: "Simulate Batch EVM Transactions",
+    description:
+      "Simulate multiple EVM transactions in sequence. " +
+      "Returns per-tx results and net balance changes.",
+    inputSchema: {
+      chain_id: z.string().describe("Chain ID, e.g. '1' for Ethereum mainnet"),
+      from: z.string().describe("Sender address (0x-prefixed)"),
+      transactions: z
+        .array(
+          z.object({
+            to: z.string().describe("Recipient address (0x-prefixed)"),
+            value: z.string().optional().describe("Value in wei"),
+            data: z.string().optional().describe("Calldata (0x-prefixed hex)"),
+            gas: z.string().optional().describe("Gas limit"),
+          })
+        )
+        .describe("Array of transactions to simulate in sequence"),
+    },
+  },
+  async ({ chain_id, from, transactions }) => {
+    try {
+      const response = await client.evm.simulate.simulateBatch({
+        chain_id,
+        from,
+        transactions,
+      });
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_broadcast_tx  –  POST /api/v1/evm/broadcast
+// ===========================================================================
+
+server.registerTool(
+  "evm_broadcast_tx",
+  {
+    title: "Broadcast Signed Transaction",
+    description:
+      "Broadcast a signed EVM transaction to the network. Returns tx hash.",
+    inputSchema: {
+      chain_id: z.string().describe("Chain ID, e.g. '1' for Ethereum mainnet"),
+      signed_tx: z
+        .string()
+        .describe("Hex-encoded signed transaction (0x-prefixed)"),
+    },
+  },
+  async ({ chain_id, signed_tx }) => {
+    try {
+      // The JS client does not yet have a broadcast method; call the API directly.
+      const url = `${BASE_URL}/api/v1/evm/broadcast`;
+      const body = JSON.stringify({ chain_id, signed_tx });
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      });
+      if (!resp.ok) {
+        const text = await resp.text();
+        return err(new Error(`broadcast failed (${resp.status}): ${text}`));
+      }
+      const data = await resp.json();
+      return ok(data);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_guard_resume  –  POST /api/v1/evm/guard/resume
+// ===========================================================================
+
+server.registerTool(
+  "evm_guard_resume",
+  {
+    title: "Resume Approval Guard",
+    description:
+      "Resume the approval guard after it has been tripped. " +
+      "Unpauses signing operations.",
+    inputSchema: {},
+  },
+  async () => {
+    try {
+      await client.evm.guard.resume();
+      return ok({ success: true, message: "Guard resumed" });
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
 // Tool: get_metrics  –  GET /metrics (no auth)
 // ===========================================================================
 
