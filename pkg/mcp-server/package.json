@@ -27,7 +27,7 @@
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
-    "remote-signer-client": "^0.0.2",
+    "remote-signer-client": "^0.0.4",
     "zod": "^3.25.0"
   },
   "devDependencies": {
