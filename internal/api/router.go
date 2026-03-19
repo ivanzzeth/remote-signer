@@ -67,6 +67,8 @@ type RouterConfig struct {
 	SimulationRule *evm.SimulationBudgetRule
 	// RuleEngine is required for batch sign to evaluate rules per-tx before signing.
 	RuleEngine rule.RuleEngine
+	// RPCProvider is the optional RPC provider for broadcast endpoint.
+	RPCProvider *evm.RPCProvider
 }
 
 // Router handles HTTP routing
@@ -278,6 +280,15 @@ func (r *Router) setupRoutes() error {
 		r.mux.Handle("/api/v1/evm/simulate", r.withAuthAndPerm(middleware.PermSignRequest, simulateHandler))
 		r.mux.Handle("/api/v1/evm/simulate/batch", r.withAuthAndPerm(middleware.PermSignRequest, http.HandlerFunc(simulateHandler.ServeBatchHTTP)))
 		r.mux.Handle("/api/v1/evm/simulate/status", r.withAuthAndPerm(middleware.PermSignRequest, http.HandlerFunc(simulateHandler.ServeStatusHTTP)))
+	}
+
+	// Broadcast route (optional, requires RPC provider)
+	if r.config.RPCProvider != nil {
+		broadcastHandler, bcErr := evmhandler.NewBroadcastHandler(r.config.RPCProvider, r.logger)
+		if bcErr != nil {
+			return fmt.Errorf("failed to create broadcast handler: %w", bcErr)
+		}
+		r.mux.Handle("/api/v1/evm/broadcast", r.withAuthAndPerm(middleware.PermSignRequest, broadcastHandler))
 	}
 
 	// Batch sign route (optional, requires rule engine; simulation rule is optional)

@@ -15,4 +15,5 @@ func init() {
 	evmCmd.AddCommand(simulateCmd)
 	evmCmd.AddCommand(requestCmd)
 	evmCmd.AddCommand(guardCmd)
+	evmCmd.AddCommand(broadcastCmd)
 }

@@ -45,8 +45,9 @@ var blockedRPCMethods = map[string]bool{
 
 // allowedRPCMethods are the only methods the JS sandbox may invoke.
 var allowedRPCMethods = map[string]bool{
-	"eth_call":    true,
-	"eth_getCode": true,
+	"eth_call":                true,
+	"eth_getCode":             true,
+	"eth_getTransactionCount": true,
 }
 
 // chainIDPattern validates that chain IDs are numeric only (SSRF prevention).
@@ -280,6 +281,178 @@ func (p *RPCProvider) GetCode(ctx context.Context, chainID, address string) (str
 	}
 	params := []interface{}{address, "latest"}
 	return p.doRPC(ctx, chainID, "eth_getCode", params)
+}
+
+// GetTransactionCount performs eth_getTransactionCount and returns the nonce.
+func (p *RPCProvider) GetTransactionCount(ctx context.Context, chainID, address string) (uint64, error) {
+	if err := ValidateChainID(chainID); err != nil {
+		return 0, fmt.Errorf("getTransactionCount: %w", err)
+	}
+	if err := ValidateEthAddress(address); err != nil {
+		return 0, fmt.Errorf("getTransactionCount: %w", err)
+	}
+	params := []interface{}{address, "pending"}
+	result, err := p.doRPC(ctx, chainID, "eth_getTransactionCount", params)
+	if err != nil {
+		return 0, err
+	}
+	// Parse hex result
+	result = strings.TrimPrefix(result, "0x")
+	n, err := strconv.ParseUint(result, 16, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid nonce hex %q: %w", result, err)
+	}
+	return n, nil
+}
+
+// SendRawTransaction broadcasts a signed transaction via eth_sendRawTransaction.
+// This method bypasses the allowedRPCMethods check since it is not called from JS sandbox.
+func (p *RPCProvider) SendRawTransaction(ctx context.Context, chainID, signedTxHex string) (string, error) {
+	if err := ValidateChainID(chainID); err != nil {
+		return "", fmt.Errorf("sendRawTransaction: %w", err)
+	}
+	params := []interface{}{signedTxHex}
+	return p.doRPCUnchecked(ctx, chainID, "eth_sendRawTransaction", params)
+}
+
+// GetTransactionReceipt fetches the receipt of a transaction by hash.
+// Returns empty string result if the tx is not yet mined.
+func (p *RPCProvider) GetTransactionReceipt(ctx context.Context, chainID, txHash string) (json.RawMessage, error) {
+	if err := ValidateChainID(chainID); err != nil {
+		return nil, fmt.Errorf("getTransactionReceipt: %w", err)
+	}
+	params := []interface{}{txHash}
+	return p.doRPCRaw(ctx, chainID, "eth_getTransactionReceipt", params)
+}
+
+// doRPCUnchecked performs a JSON-RPC call without allowedRPCMethods check.
+// Used for server-side operations (broadcast) that are not exposed to JS sandbox.
+func (p *RPCProvider) doRPCUnchecked(ctx context.Context, chainID, method string, params []interface{}) (string, error) {
+	// SECURITY: Check circuit breaker
+	if p.breaker.isOpen() {
+		return "", fmt.Errorf("rpc circuit breaker open: too many consecutive errors")
+	}
+	if !p.limiter.allow() {
+		return "", fmt.Errorf("rpc global rate limit exceeded")
+	}
+
+	reqBody, err := json.Marshal(jsonRPCRequest{
+		JSONRPC: "2.0",
+		Method:  method,
+		Params:  params,
+		ID:      1,
+	})
+	if err != nil {
+		return "", fmt.Errorf("marshal rpc request: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, rpcCallTimeout)
+	defer cancel()
+
+	url := p.rpcURL(chainID)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
+	if err != nil {
+		return "", fmt.Errorf("create http request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		p.breaker.recordError()
+		return "", fmt.Errorf("rpc request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		p.breaker.recordError()
+		return "", fmt.Errorf("read rpc response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		p.breaker.recordError()
+		return "", fmt.Errorf("rpc returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var rpcResp jsonRPCResponse
+	if err := json.Unmarshal(body, &rpcResp); err != nil {
+		p.breaker.recordError()
+		return "", fmt.Errorf("unmarshal rpc response: %w", err)
+	}
+	if rpcResp.Error != nil {
+		p.breaker.recordError()
+		return "", fmt.Errorf("rpc error %d: %s", rpcResp.Error.Code, rpcResp.Error.Message)
+	}
+
+	var result string
+	if err := json.Unmarshal(rpcResp.Result, &result); err != nil {
+		p.breaker.recordError()
+		return "", fmt.Errorf("unmarshal rpc result: %w", err)
+	}
+
+	p.breaker.recordSuccess()
+	return result, nil
+}
+
+// doRPCRaw performs a JSON-RPC call and returns the raw result JSON.
+func (p *RPCProvider) doRPCRaw(ctx context.Context, chainID, method string, params []interface{}) (json.RawMessage, error) {
+	if p.breaker.isOpen() {
+		return nil, fmt.Errorf("rpc circuit breaker open: too many consecutive errors")
+	}
+	if !p.limiter.allow() {
+		return nil, fmt.Errorf("rpc global rate limit exceeded")
+	}
+
+	reqBody, err := json.Marshal(jsonRPCRequest{
+		JSONRPC: "2.0",
+		Method:  method,
+		Params:  params,
+		ID:      1,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal rpc request: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, rpcCallTimeout)
+	defer cancel()
+
+	url := p.rpcURL(chainID)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
+	if err != nil {
+		return nil, fmt.Errorf("create http request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		p.breaker.recordError()
+		return nil, fmt.Errorf("rpc request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		p.breaker.recordError()
+		return nil, fmt.Errorf("read rpc response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		p.breaker.recordError()
+		return nil, fmt.Errorf("rpc returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var rpcResp jsonRPCResponse
+	if err := json.Unmarshal(body, &rpcResp); err != nil {
+		p.breaker.recordError()
+		return nil, fmt.Errorf("unmarshal rpc response: %w", err)
+	}
+	if rpcResp.Error != nil {
+		p.breaker.recordError()
+		return nil, fmt.Errorf("rpc error %d: %s", rpcResp.Error.Code, rpcResp.Error.Message)
+	}
+
+	p.breaker.recordSuccess()
+	return rpcResp.Result, nil
 }
 
 func (p *RPCProvider) doRPC(ctx context.Context, chainID, method string, params []interface{}) (string, error) {

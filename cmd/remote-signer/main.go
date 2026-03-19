@@ -269,6 +269,7 @@ func run() error {
 
 	// Initialize EVM adapter and signer manager if enabled
 	var evmSignerManager evm.SignerManager
+	var evmAdapter *evm.EVMAdapter
 	if cfg.Chains.EVM != nil && cfg.Chains.EVM.Enabled {
 		// Provider-based signer initialization
 		evmRegistry := evm.NewEmptySignerRegistry()
@@ -356,7 +357,7 @@ func run() error {
 			log.Warn("No signers configured. Add signers via TUI or API after startup.")
 		}
 
-		evmAdapter, err := evm.NewEVMAdapter(evmRegistry)
+		evmAdapter, err = evm.NewEVMAdapter(evmRegistry)
 		if err != nil {
 			return fmt.Errorf("failed to create EVM adapter: %w", err)
 		}
@@ -404,9 +405,10 @@ func run() error {
 	ruleEngine.RegisterEvaluator(jsEval)
 	budgetChecker.SetJSEvaluator(jsEval)
 
-	// Wire RPC provider for JS sandbox read-only queries and budget decimals auto-query
+	// Wire RPC provider for JS sandbox read-only queries, budget decimals auto-query, and broadcast
+	var rpcProvider *evm.RPCProvider
 	if cfg.Chains.EVM != nil && cfg.Chains.EVM.RPCGateway.BaseURL != "" {
-		rpcProvider, err := evm.NewRPCProvider(cfg.Chains.EVM.RPCGateway.BaseURL, cfg.Chains.EVM.RPCGateway.APIKey)
+		rpcProvider, err = evm.NewRPCProvider(cfg.Chains.EVM.RPCGateway.BaseURL, cfg.Chains.EVM.RPCGateway.APIKey)
 		if err != nil {
 			return fmt.Errorf("failed to create RPC provider: %w", err)
 		}
@@ -419,6 +421,10 @@ func run() error {
 			return fmt.Errorf("failed to create token metadata cache: %w", err)
 		}
 		jsEval.SetRPCProvider(rpcProvider, metadataCache)
+		// Wire RPC provider to EVM adapter for nonce auto-fetch
+		if evmAdapter != nil {
+			evmAdapter.SetRPCProvider(rpcProvider)
+		}
 		decimalsQuerier, err := evm.NewDecimalsQuerierAdapter(metadataCache)
 		if err != nil {
 			return fmt.Errorf("failed to create decimals querier: %w", err)
@@ -806,6 +812,7 @@ func run() error {
 		AutoLockTimeout:    cfg.Security.AutoLockTimeout,
 		AuditRetentionDays: cfg.AuditMonitor.RetentionDays,
 		Simulator:          simulator,
+		RPCProvider:        rpcProvider,
 	}
 	if presetsDir != "" {
 		routerConfig.PresetsDir = presetsDir

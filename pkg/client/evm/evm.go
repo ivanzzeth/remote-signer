@@ -14,6 +14,7 @@ type Service struct {
 	HDWallets *HDWalletService
 	Guard     *GuardService
 	Simulate  *SimulateService
+	Broadcast *BroadcastService
 }
 
 // NewService creates a new EVM service group.
@@ -27,5 +28,6 @@ func NewService(t *transport.Transport) *Service {
 		HDWallets: &HDWalletService{transport: t, sign: sign},
 		Guard:     &GuardService{transport: t},
 		Simulate:  &SimulateService{transport: t},
+		Broadcast: &BroadcastService{transport: t},
 	}
 }

@@ -14,6 +14,7 @@ import type {
   TransactionPayload,
 } from "./types";
 import type { RequestStatusResponse } from "./requests";
+import type { SimulateResponse } from "./simulate";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -40,6 +41,34 @@ export interface SignResponse {
   signed_data?: string;
   message?: string;
   rule_matched_id?: string;
+}
+
+/** A single item in a batch sign request. */
+export interface BatchSignItemRequest {
+  chain_id: string;
+  signer_address: string;
+  sign_type: SignType;
+  transaction: Record<string, any>;
+}
+
+/** Batch sign request. */
+export interface BatchSignRequest {
+  requests: BatchSignItemRequest[];
+}
+
+/** Per-transaction result in a batch sign response. */
+export interface BatchSignResultDTO {
+  index: number;
+  request_id?: string;
+  signature?: string;
+  signed_data?: string;
+  simulation?: SimulateResponse;
+}
+
+/** Batch sign response. */
+export interface BatchSignResponse {
+  results: BatchSignResultDTO[];
+  net_balance_changes?: import("./simulate").BalanceChangeDTO[];
 }
 
 // ---------------------------------------------------------------------------
@@ -71,6 +100,18 @@ export class EvmSignService {
    */
   async executeAsync(request: SignRequest): Promise<SignResponse> {
     return this.doSign(request, false);
+  }
+
+  /**
+   * Submit a batch of signing requests atomically.
+   * If any transaction fails rules/budget/simulation, the entire batch is rejected.
+   */
+  async executeBatch(request: BatchSignRequest): Promise<BatchSignResponse> {
+    return this.transport.request<BatchSignResponse>(
+      "POST",
+      "/api/v1/evm/sign/batch",
+      request,
+    );
   }
 
   // -----------------------------------------------------------------------

@@ -182,4 +182,26 @@ export class EvmRuleService {
     );
     return list ?? [];
   }
+
+  /**
+   * Approve a pending rule (POST /api/v1/evm/rules/{ruleID}/approve).
+   */
+  async approve(ruleID: string): Promise<Rule> {
+    return this.transport.request<Rule>(
+      "POST",
+      `/api/v1/evm/rules/${encodeURIComponent(ruleID)}/approve`,
+      null,
+    );
+  }
+
+  /**
+   * Reject a pending rule (POST /api/v1/evm/rules/{ruleID}/reject).
+   */
+  async reject(ruleID: string, reason: string): Promise<Rule> {
+    return this.transport.request<Rule>(
+      "POST",
+      `/api/v1/evm/rules/${encodeURIComponent(ruleID)}/reject`,
+      { reason },
+    );
+  }
 }

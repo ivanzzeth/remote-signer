@@ -260,7 +260,7 @@ var guardResumeCmd = &cobra.Command{
 
 func init() {
 	// request list
-	requestListCmd.Flags().StringVar(&reqListStatus, "status", "", "Filter by status (pending, authorizing, signing, completed, rejected, failed)")
+	requestListCmd.Flags().StringVar(&reqListStatus, "status", "authorizing", "Filter by status (pending, authorizing, signing, completed, rejected, failed). Default: authorizing")
 	requestListCmd.Flags().StringVar(&reqListSigner, "signer", "", "Filter by signer address")
 	requestListCmd.Flags().StringVar(&reqListChainID, "chain-id", "", "Filter by chain ID")
 	requestListCmd.Flags().IntVar(&reqListLimit, "limit", 20, "Max results")

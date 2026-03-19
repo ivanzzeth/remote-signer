@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
@@ -148,14 +149,18 @@ var simulateStatusCmd = &cobra.Command{
 var (
 	simBatchChainID string
 	simBatchFrom    string
-	simBatchTxs     []string // format: "to:value:data" per tx
+	simBatchTxs     []string // format: JSON per tx
 )
 
 var simulateBatchCmd = &cobra.Command{
-	Use:   "batch --chain-id <id> --from <addr> --tx <to>:<value>:<data> [--tx ...]",
+	Use:   `batch --chain-id <id> --from <addr> --tx '{"to":"0x...","value":"0x0","data":"0x..."}' [--tx ...]`,
 	Short: "Simulate multiple transactions in sequence (batch)",
-	Long: `Simulate multiple transactions in a single batch. Each --tx flag is "to:value:data".
-Example: simulate batch --chain-id 137 --from 0xABC --tx 0xUSDC:0x0:0x095ea7b3... --tx 0xRouter:0x0:0xf2c42696...`,
+	Long: `Simulate multiple transactions in a single batch. Each --tx flag is a JSON object.
+
+Example:
+  simulate batch --chain-id 137 --from 0xABC \
+    --tx '{"to":"0xUSDC","value":"0x0","data":"0x095ea7b3..."}' \
+    --tx '{"to":"0xRouter","value":"0x0","data":"0xf2c42696..."}'`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(simBatchTxs) == 0 {
 			return fmt.Errorf("at least one --tx is required")
@@ -168,15 +173,11 @@ Example: simulate batch --chain-id 137 --from 0xABC --tx 0xUSDC:0x0:0x095ea7b3..
 
 		var txs []evm.SimulateTxDTO
 		for _, raw := range simBatchTxs {
-			parts := splitBatchTx(raw)
-			if len(parts) < 3 {
-				return fmt.Errorf("invalid --tx format %q, expected to:value:data", raw)
+			var tx evm.SimulateTxDTO
+			if err := json.Unmarshal([]byte(raw), &tx); err != nil {
+				return fmt.Errorf("invalid --tx JSON %q: %w", raw, err)
 			}
-			txs = append(txs, evm.SimulateTxDTO{
-				To:    parts[0],
-				Value: parts[1],
-				Data:  parts[2],
-			})
+			txs = append(txs, tx)
 		}
 
 		resp, err := c.EVM.Simulate.SimulateBatch(context.Background(), &evm.SimulateBatchRequest{
@@ -224,25 +225,6 @@ Example: simulate batch --chain-id 137 --from 0xABC --tx 0xUSDC:0x0:0x095ea7b3..
 	},
 }
 
-// splitBatchTx splits "to:value:data" — data may contain colons (hex), so split on first 2 only.
-func splitBatchTx(s string) []string {
-	// Split into at most 3 parts: to, value, data (data can contain ':')
-	parts := make([]string, 0, 3)
-	for i := 0; i < 2; i++ {
-		idx := 0
-		for idx < len(s) && s[idx] != ':' {
-			idx++
-		}
-		if idx >= len(s) {
-			break
-		}
-		parts = append(parts, s[:idx])
-		s = s[idx+1:]
-	}
-	parts = append(parts, s)
-	return parts
-}
-
 func init() {
 	simulateTxCmd.Flags().StringVar(&simChainID, "chain-id", "1", "Chain ID")
 	simulateTxCmd.Flags().StringVar(&simFrom, "from", "", "Sender address (0x-prefixed)")
@@ -260,7 +242,7 @@ func init() {
 
 	simulateBatchCmd.Flags().StringVar(&simBatchChainID, "chain-id", "1", "Chain ID")
 	simulateBatchCmd.Flags().StringVar(&simBatchFrom, "from", "", "Sender address")
-	simulateBatchCmd.Flags().StringArrayVar(&simBatchTxs, "tx", nil, "Transaction in format to:value:data (repeatable)")
+	simulateBatchCmd.Flags().StringArrayVar(&simBatchTxs, "tx", nil, `Transaction as JSON: '{"to":"0x...","value":"0x0","data":"0x..."}' (repeatable)`)
 	if err := simulateBatchCmd.MarkFlagRequired("from"); err != nil {
 		panic(err)
 	}

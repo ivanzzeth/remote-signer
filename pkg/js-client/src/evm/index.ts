@@ -9,6 +9,7 @@ import { EvmRuleService } from "./rules";
 import { EvmSignerService } from "./signers";
 import { EvmHDWalletService } from "./hdwallets";
 import { EvmGuardService } from "./guard";
+import { EvmSimulateService } from "./simulate";
 
 // ---------------------------------------------------------------------------
 // Composite EVM service
@@ -21,6 +22,7 @@ export class EvmService {
   public readonly signers: EvmSignerService;
   public readonly hdWallets: EvmHDWalletService;
   public readonly guard: EvmGuardService;
+  public readonly simulate: EvmSimulateService;
 
   constructor(transport: HttpTransport, pollInterval: number, pollTimeout: number) {
     this.sign = new EvmSignService(transport, pollInterval, pollTimeout);
@@ -29,6 +31,7 @@ export class EvmService {
     this.signers = new EvmSignerService(transport);
     this.hdWallets = new EvmHDWalletService(transport, this.sign);
     this.guard = new EvmGuardService(transport);
+    this.simulate = new EvmSimulateService(transport);
   }
 }
 
@@ -41,5 +44,6 @@ export * from "./signers";
 export * from "./hdwallets";
 export * from "./remote_signer";
 export * from "./guard";
+export * from "./simulate";
 export * from "./ethsig";
 export * from "./eip1193";

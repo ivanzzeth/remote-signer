@@ -359,7 +359,11 @@ server.registerTool(
     title: "Sign Transaction",
     description:
       "Sign an EVM transaction (Legacy, EIP-2930, or EIP-1559). " +
-      "Returns the signed raw transaction hex.",
+      "Returns the signed raw transaction hex. " +
+      "Flow: if no matching whitelist rule exists and manual approval is enabled, " +
+      "the request enters 'authorizing' status. Set wait_for_approval=true to block " +
+      "until approved, or use evm_list_requests (status='authorizing') to find pending " +
+      "requests and evm_approve_request to approve them.",
     inputSchema: {
       chain_id: z.string().describe("Chain ID, e.g. '1' for Ethereum mainnet"),
       signer_address: z
@@ -457,7 +461,9 @@ server.registerTool(
   {
     title: "List Requests",
     description:
-      "List signing requests with optional filters for status, signer, and chain",
+      "List signing requests with optional filters for status, signer, and chain. " +
+      "Tip: use status='authorizing' to find requests pending manual approval, " +
+      "which is the most common filter for approval workflows.",
     inputSchema: {
       status: z
         .enum(["pending", "authorizing", "signing", "completed", "rejected", "failed"])
@@ -495,8 +501,10 @@ server.registerTool(
   {
     title: "Approve/Reject Request",
     description:
-      "Approve or reject a pending signing request (requires admin API key). " +
-      "Optionally generate a rule to auto-approve similar future requests.",
+      "Approve or reject a pending signing request. " +
+      "Authorization: requires an API key that owns the signer (signer owner model). " +
+      "The API key used to approve must have ownership or access grant for the signer " +
+      "address in the request. Optionally generate a rule to auto-approve similar future requests.",
     inputSchema: {
       request_id: z.string().describe("The signing request ID to approve/reject"),
       approved: z.boolean().describe("true to approve, false to reject"),

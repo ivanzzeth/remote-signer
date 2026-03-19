@@ -21,6 +21,23 @@ var signCmd = &cobra.Command{
 var signTxCmd = &cobra.Command{
 	Use:   "tx",
 	Short: "Sign an EVM transaction",
+	Long: `Sign an EVM transaction (Legacy, EIP-2930, or EIP-1559).
+
+Returns the signed raw transaction hex and signature. If the request requires
+manual approval, returns a pending status with a request_id.
+
+Example (EIP-1559):
+  remote-signer-cli evm sign tx \
+    --signer 0xYourAddress \
+    --chain-id 1 \
+    --to 0xRecipient \
+    --value 0 \
+    --data 0x \
+    --gas 21000 \
+    --tx-type eip1559 \
+    --gas-tip-cap 1000000000 \
+    --gas-fee-cap 30000000000 \
+    --nonce -1`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c, err := newClientFromFlags(cmd)
 		if err != nil {
@@ -226,11 +243,11 @@ func init() {
 	signTxCmd.Flags().StringVar(&signTxTo, "to", "", "Recipient address")
 	signTxCmd.Flags().StringVar(&signTxValue, "value", "0", "Value in wei")
 	signTxCmd.Flags().StringVar(&signTxData, "data", "", "Calldata (0x hex)")
-	signTxCmd.Flags().Int64Var(&signTxNonce, "nonce", -1, "Nonce (-1 = omit)")
+	signTxCmd.Flags().Int64Var(&signTxNonce, "nonce", -1, "Nonce (-1 = auto-fetch from chain)")
 	signTxCmd.Flags().Uint64Var(&signTxGas, "gas", 21000, "Gas limit")
 	signTxCmd.Flags().StringVar(&signTxGasPrice, "gas-price", "", "Gas price in wei (legacy)")
-	signTxCmd.Flags().StringVar(&signTxGasTipCap, "gas-tip-cap", "", "Max priority fee (EIP-1559)")
-	signTxCmd.Flags().StringVar(&signTxGasFeeCap, "gas-fee-cap", "", "Max fee per gas (EIP-1559)")
+	signTxCmd.Flags().StringVar(&signTxGasTipCap, "gas-tip-cap", "", "Max priority fee per gas in wei, decimal (e.g. 30000000000 for 30 Gwei)")
+	signTxCmd.Flags().StringVar(&signTxGasFeeCap, "gas-fee-cap", "", "Max fee per gas in wei, decimal (e.g. 30000000000 for 30 Gwei)")
 	signTxCmd.Flags().StringVar(&signTxType, "tx-type", "legacy", "Transaction type: legacy, eip1559, eip2930")
 
 	// personal subcommand

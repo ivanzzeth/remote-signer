@@ -48,6 +48,7 @@ export {
   EvmSignerService,
   EvmHDWalletService,
   EvmGuardService,
+  EvmSimulateService,
   RemoteSigner,
   EIP1193Provider,
 } from "./evm";
@@ -67,6 +68,10 @@ export type {
   // Sign types
   SignRequest,
   SignResponse,
+  BatchSignItemRequest,
+  BatchSignRequest,
+  BatchSignResultDTO,
+  BatchSignResponse,
   // Request types
   RequestStatusResponse,
   ListRequestsFilter,
@@ -90,6 +95,9 @@ export type {
   ListSignersResponse,
   CreateSignerRequest,
   CreateSignerResponse,
+  GrantAccessRequest,
+  TransferOwnershipRequest,
+  SignerAccessEntry,
   // HD wallet types
   CreateHDWalletRequest,
   HDWalletResponse,
@@ -97,6 +105,17 @@ export type {
   DeriveAddressRequest,
   DeriveAddressResponse,
   ListDerivedAddressesResponse,
+  // Simulate types
+  SimulateRequest,
+  SimulateResponse,
+  BalanceChangeDTO,
+  SimEventDTO,
+  SimulateTxDTO,
+  SimulateBatchRequest,
+  SimulateResultDTO,
+  SimulateBatchResponse,
+  ChainStatusDTO,
+  SimulationStatusResponse,
   // EIP-1193
   EIP1193ProviderConfig,
   EIP1193RequestArgs,
