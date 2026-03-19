@@ -32,11 +32,17 @@ type SimBudgetDefaults struct {
 	ERC20MaxPerTx  string // max ERC20 per tx per token (human-readable, e.g. "50")
 }
 
+// ManagedSignerLister returns the set of all signer addresses managed by the system.
+type ManagedSignerLister interface {
+	ListManagedAddresses(ctx context.Context) (map[string]bool, error)
+}
+
 type SimulationBudgetRule struct {
 	simulator        simulation.AnvilForkManager
 	budgetRepo       storage.BudgetRepository
 	budgetDefaults   *SimBudgetDefaults
 	decimalsQuerier  rule.DecimalsQuerier
+	signerLister     ManagedSignerLister
 	logger           *slog.Logger
 }
 
@@ -48,6 +54,7 @@ func NewSimulationBudgetRule(
 	budgetRepo storage.BudgetRepository,
 	budgetDefaults *SimBudgetDefaults,
 	decimalsQuerier rule.DecimalsQuerier,
+	signerLister ManagedSignerLister,
 	logger *slog.Logger,
 ) (*SimulationBudgetRule, error) {
 	if logger == nil {
@@ -58,6 +65,7 @@ func NewSimulationBudgetRule(
 		budgetRepo:      budgetRepo,
 		budgetDefaults:  budgetDefaults,
 		decimalsQuerier: decimalsQuerier,
+		signerLister:    signerLister,
 		logger:          logger,
 	}, nil
 }
@@ -78,6 +86,48 @@ type SimulationOutcome struct {
 type BatchSimulationOutcome struct {
 	Decision   string                              // "allow", "deny", "no_match"
 	Simulation *simulation.BatchSimulationResult   // non-nil when simulation ran
+}
+
+// EVMAdapterSignerLister adapts EVMAdapter to ManagedSignerLister.
+type EVMAdapterSignerLister struct {
+	adapter *EVMAdapter
+}
+
+// NewEVMAdapterSignerLister creates a new adapter.
+func NewEVMAdapterSignerLister(adapter *EVMAdapter) *EVMAdapterSignerLister {
+	return &EVMAdapterSignerLister{adapter: adapter}
+}
+
+// ListManagedAddresses returns all managed signer addresses as a lowercase set.
+func (l *EVMAdapterSignerLister) ListManagedAddresses(ctx context.Context) (map[string]bool, error) {
+	signers, err := l.adapter.ListSigners(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]bool, len(signers))
+	for _, s := range signers {
+		result[strings.ToLower(s.Address)] = true
+	}
+	return result, nil
+}
+
+// getManagedSigners returns the set of all managed signer addresses (lowercase).
+func (r *SimulationBudgetRule) getManagedSigners(ctx context.Context) map[string]bool {
+	if r.signerLister == nil {
+		return nil
+	}
+	signers, err := r.signerLister.ListManagedAddresses(ctx)
+	if err != nil {
+		r.logger.Warn("failed to list managed signers for approval check", "error", err)
+		return nil
+	}
+	return signers
+}
+
+// hasManagedSignerApproval checks if the simulation result contains approval events for any managed signer.
+func (r *SimulationBudgetRule) hasManagedSignerApproval(ctx context.Context, result *simulation.SimulationResult, to, data string) bool {
+	managedSigners := r.getManagedSigners(ctx)
+	return simulation.DetectApproval(result.Events, data, managedSigners)
 }
 
 // EvaluateSingle evaluates a single sign request that wasn't matched by any user rule.
@@ -147,10 +197,11 @@ func (r *SimulationBudgetRule) EvaluateSingle(
 		return &SimulationOutcome{Decision: "deny", Reason: reason, Simulation: result}, nil
 	}
 
-	// After budget passes: if approval events detected, require signer owner manual approval.
-	// Approve txs don't move funds but grant spending permission — security-sensitive, needs human review.
-	if result.HasApproval {
-		r.logger.Info("approval detected after budget check, deferring to manual approval",
+	// After budget passes: check if any managed signer has approval events.
+	// Only approvals where the owner is one of our managed signers matter.
+	// Internal contract-to-contract approvals (DEX router internals) are ignored.
+	if r.hasManagedSignerApproval(ctx, result, to, data) {
+		r.logger.Info("approval detected for managed signer, deferring to manual approval",
 			"chain_id", req.ChainID,
 			"signer", req.SignerAddress,
 		)
@@ -218,12 +269,14 @@ func (r *SimulationBudgetRule) EvaluateBatch(
 		return &BatchSimulationOutcome{Decision: "deny", Simulation: batchResult}, nil
 	}
 
-	// After budget passes: if any tx has approval events, require manual approval for entire batch.
-	for _, result := range batchResult.Results {
-		if result.HasApproval {
-			r.logger.Info("approval detected in batch after budget check, deferring to manual approval",
+	// After budget passes: check if any tx has approval events for our managed signers.
+	managedSigners := r.getManagedSigners(ctx)
+	for i, result := range batchResult.Results {
+		if simulation.DetectApproval(result.Events, txParams[i].Data, managedSigners) {
+			r.logger.Info("approval detected for managed signer in batch, deferring to manual approval",
 				"chain_id", chainID,
 				"signer", signerAddress,
+				"tx_index", i,
 			)
 			return &BatchSimulationOutcome{Decision: "no_match", Simulation: batchResult}, nil
 		}

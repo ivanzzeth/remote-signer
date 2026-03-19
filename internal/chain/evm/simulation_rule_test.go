@@ -41,7 +41,7 @@ func simTestLogger() *slog.Logger {
 }
 
 func TestSimulationBudgetRule_NotAvailable(t *testing.T) {
-	r, err := NewSimulationBudgetRule(nil, nil, nil, nil, simTestLogger())
+	r, err := NewSimulationBudgetRule(nil, nil, nil, nil, nil, simTestLogger())
 	require.NoError(t, err)
 
 	assert.False(t, r.Available())
@@ -55,7 +55,7 @@ func TestSimulationBudgetRule_NotAvailable(t *testing.T) {
 
 func TestSimulationBudgetRule_NonTransactionSignType(t *testing.T) {
 	sim := &mockSimulator{}
-	r, err := NewSimulationBudgetRule(sim, nil, nil, nil, simTestLogger())
+	r, err := NewSimulationBudgetRule(sim, nil, nil, nil, nil, simTestLogger())
 	require.NoError(t, err)
 
 	outcome, err := r.EvaluateSingle(context.Background(), &types.SignRequest{
@@ -72,7 +72,7 @@ func TestSimulationBudgetRule_SimulationReverts(t *testing.T) {
 			RevertReason: "execution reverted",
 		},
 	}
-	r, err := NewSimulationBudgetRule(sim, nil, nil, nil, simTestLogger())
+	r, err := NewSimulationBudgetRule(sim, nil, nil, nil, nil, simTestLogger())
 	require.NoError(t, err)
 
 	to := "0x1234567890abcdef1234567890abcdef12345678"
@@ -103,7 +103,7 @@ func TestSimulationBudgetRule_ApprovalOnly_RequiresManualApproval(t *testing.T) 
 			BalanceChanges: []simulation.BalanceChange{},
 		},
 	}
-	r, err := NewSimulationBudgetRule(sim, nil, nil, nil, simTestLogger())
+	r, err := NewSimulationBudgetRule(sim, nil, nil, nil, nil, simTestLogger())
 	require.NoError(t, err)
 
 	to := "0x1234567890abcdef1234567890abcdef12345678"
@@ -150,7 +150,7 @@ func TestSimulationBudgetRule_SwapWithApproval_TracksBudget(t *testing.T) {
 		},
 	}
 	// No budget repo -> budget passes through, but outflows are still processed
-	r, err := NewSimulationBudgetRule(sim, nil, nil, nil, simTestLogger())
+	r, err := NewSimulationBudgetRule(sim, nil, nil, nil, nil, simTestLogger())
 	require.NoError(t, err)
 
 	to := "0x057cfd839aa88994d1a8a8c6d336cf21550f05ef"
@@ -185,7 +185,7 @@ func TestSimulationBudgetRule_SwapNoApproval_Allow(t *testing.T) {
 			},
 		},
 	}
-	r, err := NewSimulationBudgetRule(sim, nil, nil, nil, simTestLogger())
+	r, err := NewSimulationBudgetRule(sim, nil, nil, nil, nil, simTestLogger())
 	require.NoError(t, err)
 
 	to := "0x057cfd839aa88994d1a8a8c6d336cf21550f05ef"
@@ -218,7 +218,7 @@ func TestSimulationBudgetRule_AllowNoBudgetRepo(t *testing.T) {
 		},
 	}
 	// No budget repo -> budget check passes through
-	r, err := NewSimulationBudgetRule(sim, nil, nil, nil, simTestLogger())
+	r, err := NewSimulationBudgetRule(sim, nil, nil, nil, nil, simTestLogger())
 	require.NoError(t, err)
 
 	to := "0x1234567890abcdef1234567890abcdef12345678"
@@ -257,7 +257,7 @@ func TestSimulationBudgetRule_BatchApproveAndSwap_TracksBudget(t *testing.T) {
 			},
 		},
 	}
-	r, err := NewSimulationBudgetRule(sim, nil, nil, nil, simTestLogger())
+	r, err := NewSimulationBudgetRule(sim, nil, nil, nil, nil, simTestLogger())
 	require.NoError(t, err)
 
 	txParams := []simulation.TxParams{
@@ -280,7 +280,7 @@ func TestSimulationBudgetRule_BatchReverted(t *testing.T) {
 			},
 		},
 	}
-	r, err := NewSimulationBudgetRule(sim, nil, nil, nil, simTestLogger())
+	r, err := NewSimulationBudgetRule(sim, nil, nil, nil, nil, simTestLogger())
 	require.NoError(t, err)
 
 	txParams := []simulation.TxParams{
@@ -309,7 +309,7 @@ func TestSimulationBudgetRule_BatchAllowNoBudget(t *testing.T) {
 			},
 		},
 	}
-	r, err := NewSimulationBudgetRule(sim, nil, nil, nil, simTestLogger())
+	r, err := NewSimulationBudgetRule(sim, nil, nil, nil, nil, simTestLogger())
 	require.NoError(t, err)
 
 	txParams := []simulation.TxParams{
@@ -323,7 +323,7 @@ func TestSimulationBudgetRule_BatchAllowNoBudget(t *testing.T) {
 
 func TestSimulationBudgetRule_BatchEmpty(t *testing.T) {
 	sim := &mockSimulator{}
-	r, err := NewSimulationBudgetRule(sim, nil, nil, nil, simTestLogger())
+	r, err := NewSimulationBudgetRule(sim, nil, nil, nil, nil, simTestLogger())
 	require.NoError(t, err)
 
 	_, err = r.EvaluateBatch(context.Background(), "1", "0xf39F", nil)
@@ -356,6 +356,6 @@ func TestExtractTxParamsForSimulation_NilParsed(t *testing.T) {
 }
 
 func TestNewSimulationBudgetRule_NilLogger(t *testing.T) {
-	_, err := NewSimulationBudgetRule(nil, nil, nil, nil, nil)
+	_, err := NewSimulationBudgetRule(nil, nil, nil, nil, nil, nil)
 	assert.Error(t, err, "expected error for nil logger")
 }

@@ -211,22 +211,22 @@ func TestParseEvents_ApprovalForAll(t *testing.T) {
 
 func TestDetectApproval_FromCalldata(t *testing.T) {
 	// approve(address,uint256) selector
-	if !DetectApproval(nil, "0x095ea7b3000000000000000000000000") {
+	if !DetectApproval(nil, "0x095ea7b3000000000000000000000000", nil) {
 		t.Error("expected approval detected from approve selector")
 	}
 
 	// setApprovalForAll(address,bool) selector
-	if !DetectApproval(nil, "0xa22cb465000000000000000000000000") {
+	if !DetectApproval(nil, "0xa22cb465000000000000000000000000", nil) {
 		t.Error("expected approval detected from setApprovalForAll selector")
 	}
 
 	// increaseAllowance(address,uint256) selector
-	if !DetectApproval(nil, "0x39509351000000000000000000000000") {
+	if !DetectApproval(nil, "0x39509351000000000000000000000000", nil) {
 		t.Error("expected approval detected from increaseAllowance selector")
 	}
 
 	// transfer selector - should not detect
-	if DetectApproval(nil, "0xa9059cbb000000000000000000000000") {
+	if DetectApproval(nil, "0xa9059cbb000000000000000000000000", nil) {
 		t.Error("did not expect approval for transfer selector")
 	}
 }
@@ -236,14 +236,14 @@ func TestDetectApproval_FromEvents(t *testing.T) {
 		{Event: "Transfer", Standard: "erc20"},
 		{Event: "Approval", Standard: "erc20"},
 	}
-	if !DetectApproval(events, "0xa9059cbb") {
+	if !DetectApproval(events, "0xa9059cbb", nil) {
 		t.Error("expected approval detected from Approval event")
 	}
 
 	events = []SimEvent{
 		{Event: "Transfer", Standard: "erc20"},
 	}
-	if DetectApproval(events, "0xa9059cbb") {
+	if DetectApproval(events, "0xa9059cbb", nil) {
 		t.Error("did not expect approval when only Transfer event")
 	}
 }

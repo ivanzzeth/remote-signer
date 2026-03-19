@@ -294,9 +294,12 @@ func parseApprovalForAllEvent(log txLog) *SimEvent {
 	}
 }
 
-// DetectApproval checks if the transaction or its events contain approvals.
-func DetectApproval(events []SimEvent, calldata string) bool {
-	// Check calldata selectors
+// DetectApproval checks if the transaction contains approval events for any of our managed signers.
+// managedSigners is a set of lowercase signer addresses that we care about.
+// Internal approvals between unrelated contracts (e.g. DEX router internals) are ignored.
+// If managedSigners is nil or empty, falls back to checking all approval events (backward compat).
+func DetectApproval(events []SimEvent, calldata string, managedSigners map[string]bool) bool {
+	// Check calldata selectors (top-level call is always from the tx sender = a managed signer)
 	if len(calldata) >= 10 {
 		selector := strings.ToLower(calldata[:10])
 		if selector == approveSelector || selector == setApprovalForAllSelector || selector == increaseAllowanceSelector {
@@ -304,10 +307,13 @@ func DetectApproval(events []SimEvent, calldata string) bool {
 		}
 	}
 
-	// Check event logs for Approval / ApprovalForAll
+	// Check event logs for Approval / ApprovalForAll where owner is one of our managed signers
 	for _, event := range events {
 		if event.Event == "Approval" || event.Event == "ApprovalForAll" {
-			return true
+			owner := strings.ToLower(event.Args["owner"])
+			if len(managedSigners) == 0 || managedSigners[owner] {
+				return true
+			}
 		}
 	}
 

@@ -781,7 +781,11 @@ func run() error {
 			ERC20MaxTotal:  cfg.Chains.EVM.Simulation.BudgetERC20MaxTotal,
 			ERC20MaxPerTx:  cfg.Chains.EVM.Simulation.BudgetERC20MaxPerTx,
 		}
-		simRule, simRuleErr := evm.NewSimulationBudgetRule(simulator, budgetRepo, simBudgetDefaults, decimalsQuerier, log)
+		var signerLister evm.ManagedSignerLister
+		if evmAdapter != nil {
+			signerLister = evm.NewEVMAdapterSignerLister(evmAdapter)
+		}
+		simRule, simRuleErr := evm.NewSimulationBudgetRule(simulator, budgetRepo, simBudgetDefaults, decimalsQuerier, signerLister, log)
 		if simRuleErr != nil {
 			log.Warn("failed to create simulation budget rule", "error", simRuleErr)
 		} else {

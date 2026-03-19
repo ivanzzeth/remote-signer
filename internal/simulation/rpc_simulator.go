@@ -321,13 +321,9 @@ func (s *rpcSimulator) parseCallResult(call ethSimCallResult, from, to, value st
 	events := ParseEvents(ethSimLogsToTxLogs(call.Logs))
 	balanceChanges := ComputeBalanceChanges(events, from, to, value)
 
-	hasApproval := false
-	for _, ev := range events {
-		if ev.Event == "Approval" || ev.Event == "ApprovalForAll" {
-			hasApproval = true
-			break
-		}
-	}
+	// Mark HasApproval if any approval event exists (unfiltered).
+	// The simulation budget rule re-checks with managed signer filtering.
+	hasApproval := DetectApproval(events, "", nil)
 
 	result := &SimulationResult{
 		Success:        success,
