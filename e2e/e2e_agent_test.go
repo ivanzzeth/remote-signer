@@ -39,11 +39,11 @@ func TestAgent_PresetApply(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, applyResp)
 
-	// The agent preset has 1 template (Agent Template) with 3 sub-rules.
-	// Bundle expansion creates one result per sub-rule = 3 results.
-	// Agent preset: 5 chains × 3 sub-rules (tx, sign, safety) = 15 rules
-	require.Len(t, applyResp.Results, 15,
-		"agent preset should produce 15 rules (5 chains x 3 sub-rules)")
+	// The agent preset has 1 template (Agent Template) with 2 sub-rules (sign + safety).
+	// agent-tx was removed — transactions fall through to SimulationBudgetRule.
+	// Agent preset: 5 chains × 2 sub-rules (sign, safety) = 10 rules
+	require.Len(t, applyResp.Results, 10,
+		"agent preset should produce 10 rules (5 chains x 2 sub-rules)")
 
 	// Cleanup created rules
 	cleanupApplyResults(t, applyResp.Results)

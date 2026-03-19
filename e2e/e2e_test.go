@@ -232,6 +232,7 @@ defaults:
   budget_period: "24h"
 variables:
   max_message_length: "1024"
+  allowed_spenders: "0x0000000000000000000000000000000000000001"
 budget:
   dynamic: true
   unit_decimal: true

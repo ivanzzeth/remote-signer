@@ -129,7 +129,7 @@ rules:
 
         function getAllowedSpenders() {
           var raw = config.allowed_spenders || '';
-          if (!raw || raw === '${allowed_spenders}') return [];
+          if (!raw) return [];
           var parts = raw.split(',');
           var result = [];
           for (var i = 0; i < parts.length; i++) {
