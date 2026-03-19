@@ -119,7 +119,7 @@ func (r *SimulationBudgetRule) EvaluateSingle(
 	}
 
 	// Budget check against balance changes (outflows only).
-	// Approve events don't move tokens — they have no outflow, so budget is unaffected.
+	// Always run budget check first, even for approve txs (approve has no outflow, so budget is unaffected).
 	if err := r.checkBudgetFromBalanceChanges(ctx, req.ChainID, req.SignerAddress, result.BalanceChanges); err != nil {
 		reason := fmt.Sprintf("simulation budget exceeded: %s", err)
 		r.logger.Warn("budget check failed in simulation fallback",
@@ -128,6 +128,16 @@ func (r *SimulationBudgetRule) EvaluateSingle(
 			"error", err,
 		)
 		return &SimulationOutcome{Decision: "deny", Reason: reason, Simulation: result}, nil
+	}
+
+	// After budget passes: if approval events detected, require signer owner manual approval.
+	// Approve txs don't move funds but grant spending permission — security-sensitive, needs human review.
+	if result.HasApproval {
+		r.logger.Info("approval detected after budget check, deferring to manual approval",
+			"chain_id", req.ChainID,
+			"signer", req.SignerAddress,
+		)
+		return &SimulationOutcome{Decision: "no_match", Simulation: result}, nil
 	}
 
 	return &SimulationOutcome{Decision: "allow", Simulation: result}, nil
@@ -189,6 +199,17 @@ func (r *SimulationBudgetRule) EvaluateBatch(
 			"error", err,
 		)
 		return &BatchSimulationOutcome{Decision: "deny", Simulation: batchResult}, nil
+	}
+
+	// After budget passes: if any tx has approval events, require manual approval for entire batch.
+	for _, result := range batchResult.Results {
+		if result.HasApproval {
+			r.logger.Info("approval detected in batch after budget check, deferring to manual approval",
+				"chain_id", chainID,
+				"signer", signerAddress,
+			)
+			return &BatchSimulationOutcome{Decision: "no_match", Simulation: batchResult}, nil
+		}
 	}
 
 	return &BatchSimulationOutcome{Decision: "allow", Simulation: batchResult}, nil

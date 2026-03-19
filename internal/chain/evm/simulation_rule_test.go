@@ -90,9 +90,9 @@ func TestSimulationBudgetRule_SimulationReverts(t *testing.T) {
 	assert.NotNil(t, outcome.Simulation)
 }
 
-func TestSimulationBudgetRule_ApprovalOnly_AllowWithZeroBudget(t *testing.T) {
+func TestSimulationBudgetRule_ApprovalOnly_RequiresManualApproval(t *testing.T) {
 	// Pure approve tx: has approval event but zero balance outflow.
-	// Budget is based on balance changes, not events — approve costs nothing.
+	// Budget passes (no outflow), but approval is security-sensitive → requires manual approval.
 	sim := &mockSimulator{
 		simulateResult: &simulation.SimulationResult{
 			Success:     true,
@@ -100,7 +100,6 @@ func TestSimulationBudgetRule_ApprovalOnly_AllowWithZeroBudget(t *testing.T) {
 			Events: []simulation.SimEvent{
 				{Event: "Approval", Standard: "erc20"},
 			},
-			// No balance changes — approve doesn't move tokens
 			BalanceChanges: []simulation.BalanceChange{},
 		},
 	}
@@ -118,8 +117,9 @@ func TestSimulationBudgetRule_ApprovalOnly_AllowWithZeroBudget(t *testing.T) {
 		Value:     &val,
 	})
 	require.NoError(t, err)
-	// Approve has no outflow -> budget passes -> allow
-	assert.Equal(t, "allow", outcome.Decision)
+	// Approve: budget passes (no outflow) but HasApproval → no_match → manual approval
+	assert.Equal(t, "no_match", outcome.Decision)
+	assert.NotNil(t, outcome.Simulation)
 }
 
 func TestSimulationBudgetRule_SwapWithApproval_TracksBudget(t *testing.T) {
@@ -164,10 +164,43 @@ func TestSimulationBudgetRule_SwapWithApproval_TracksBudget(t *testing.T) {
 		Value:     &val,
 	})
 	require.NoError(t, err)
-	// Has approval event but also has outflow. Budget check runs (no repo = pass).
-	assert.Equal(t, "allow", outcome.Decision)
+	// Has approval event + outflow. Budget check runs (no repo = pass), then approval → manual approval.
+	assert.Equal(t, "no_match", outcome.Decision)
 	assert.NotNil(t, outcome.Simulation)
 	assert.True(t, outcome.Simulation.HasApproval)
+}
+
+func TestSimulationBudgetRule_SwapNoApproval_Allow(t *testing.T) {
+	// Simple swap without approval events → budget check → allow.
+	sim := &mockSimulator{
+		simulateResult: &simulation.SimulationResult{
+			Success:     true,
+			HasApproval: false,
+			Events: []simulation.SimEvent{
+				{Event: "Transfer", Standard: "erc20"},
+			},
+			BalanceChanges: []simulation.BalanceChange{
+				{Token: "0x2791bca1f2de4661ed88a30c99a7a9449aa84174", Amount: big.NewInt(-1000000), Direction: "outflow"},
+				{Token: "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359", Amount: big.NewInt(999989), Direction: "inflow"},
+			},
+		},
+	}
+	r, err := NewSimulationBudgetRule(sim, nil, simTestLogger())
+	require.NoError(t, err)
+
+	to := "0x057cfd839aa88994d1a8a8c6d336cf21550f05ef"
+	val := "0"
+	outcome, err := r.EvaluateSingle(context.Background(), &types.SignRequest{
+		ChainID:       "137",
+		SignerAddress: "0x764602FeaD618416E42b48c633d90869fF19759E",
+		SignType:      SignTypeTransaction,
+	}, &types.ParsedPayload{
+		Recipient: &to,
+		Value:     &val,
+	})
+	require.NoError(t, err)
+	// No approval event → budget passes → allow (auto-sign)
+	assert.Equal(t, "allow", outcome.Decision)
 }
 
 func TestSimulationBudgetRule_AllowNoBudgetRepo(t *testing.T) {
@@ -233,8 +266,8 @@ func TestSimulationBudgetRule_BatchApproveAndSwap_TracksBudget(t *testing.T) {
 	}
 	outcome, err := r.EvaluateBatch(context.Background(), "137", "0x764602FeaD618416E42b48c633d90869fF19759E", txParams)
 	require.NoError(t, err)
-	// Approval events don't skip budget. No budget repo = pass through.
-	assert.Equal(t, "allow", outcome.Decision)
+	// Budget passes (no repo), but approval detected → manual approval required
+	assert.Equal(t, "no_match", outcome.Decision)
 	assert.NotNil(t, outcome.Simulation)
 }
 
