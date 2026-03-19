@@ -562,10 +562,15 @@ func (p *RPCProvider) doRPC(ctx context.Context, chainID, method string, params 
 	return result, nil
 }
 
-// RPCCallCounter tracks RPC calls per evaluation to enforce rate limits.
+// rpcMaxTotalTime is the maximum cumulative time allowed for all RPC calls within a single evaluation.
+const rpcMaxTotalTime = 15 * time.Second
+
+// RPCCallCounter tracks RPC calls per evaluation to enforce rate limits and cumulative duration.
 type RPCCallCounter struct {
-	count int
-	max   int
+	count         int
+	max           int
+	cumulativeDur time.Duration
+	maxTotalTime  time.Duration
 }
 
 // NewRPCCallCounter creates a counter with the given max calls per evaluation.
@@ -573,7 +578,7 @@ func NewRPCCallCounter(max int) *RPCCallCounter {
 	if max <= 0 {
 		max = rpcMaxCallsPerEval
 	}
-	return &RPCCallCounter{max: max}
+	return &RPCCallCounter{max: max, maxTotalTime: rpcMaxTotalTime}
 }
 
 // Increment increments the counter and returns an error if the limit is exceeded.
@@ -583,4 +588,19 @@ func (c *RPCCallCounter) Increment() error {
 		return fmt.Errorf("rpc call limit exceeded (%d max per evaluation)", c.max)
 	}
 	return nil
+}
+
+// AddDuration adds the duration of an RPC call to the cumulative total.
+// Returns an error if the cumulative duration exceeds the configured limit.
+func (c *RPCCallCounter) AddDuration(d time.Duration) error {
+	c.cumulativeDur += d
+	if c.cumulativeDur > c.maxTotalTime {
+		return fmt.Errorf("rpc cumulative time limit exceeded (%s max, used %s)", c.maxTotalTime, c.cumulativeDur)
+	}
+	return nil
+}
+
+// CumulativeDuration returns the total time spent in RPC calls.
+func (c *RPCCallCounter) CumulativeDuration() time.Duration {
+	return c.cumulativeDur
 }

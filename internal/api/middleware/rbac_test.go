@@ -53,12 +53,12 @@ func TestHasPermission_AgentPermissions(t *testing.T) {
 		PermSignRequest, PermListOwnRequests,
 		PermListRules, PermCreateRuleSelf, PermModifyOwnRule, PermDeleteOwnRule,
 		PermReadBudgets, PermReadTemplates, PermReadPresets,
+		PermInstantiateTemplate, PermApplyPreset,
 		PermReadSigners, PermCreateSigners, PermReadHDWallets,
 	}
 	denied := []Permission{
 		PermListAllRequests, PermApproveRequest,
 		PermCreateRuleAny, PermModifyAnyRule, PermDeleteAnyRule, PermApproveRule,
-		PermInstantiateTemplate, PermApplyPreset,
 		PermUnlockSigner, PermCreateHDWallet,
 		PermManageAPIKeys, PermReadAudit, PermReadMetrics, PermReadACLs, PermResumeGuard,
 	}

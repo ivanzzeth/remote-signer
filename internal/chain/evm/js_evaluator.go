@@ -371,6 +371,7 @@ func (e *JSRuleEvaluator) wrappedValidateBudget(script string, input *RuleInput,
 		return nil, fmt.Errorf("remove globals: %w", err)
 	}
 
+	// Timeout and memory guard (same as wrappedValidate — pausable timer for pure JS execution).
 	// Note: Memory monitoring uses process-wide runtime.ReadMemStats, not per-VM tracking.
 	// Under concurrent JS evaluations, allocation growth may be attributed to the wrong VM.
 	// This provides defense-in-depth rather than precise per-evaluation enforcement.
@@ -378,7 +379,11 @@ func (e *JSRuleEvaluator) wrappedValidateBudget(script string, input *RuleInput,
 	runtime.ReadMemStats(&memBefore)
 	done := make(chan struct{})
 	defer close(done)
-	time.AfterFunc(jsRuleTimeout, func() { vm.Interrupt("timeout") })
+	jsTimer := newPausableTimer(vm, jsRuleTimeout)
+	defer jsTimer.Stop()
+	if rpcCtx != nil {
+		rpcCtx.Timer = jsTimer
+	}
 	go func() {
 		ticker := time.NewTicker(5 * time.Millisecond)
 		defer ticker.Stop()
@@ -526,7 +531,9 @@ func (e *JSRuleEvaluator) wrappedValidate(script string, input *RuleInput, confi
 		return JSRuleValidateResult{Valid: false, Reason: sanitizeReason("script_error", err.Error(), false)}
 	}
 
-	// Timeout and memory guard. The timer interrupts the VM after jsRuleTimeout.
+	// Timeout and memory guard. The pausable timer interrupts the VM after jsRuleTimeout
+	// of pure JS execution time. The timer pauses during Go-side RPC callbacks so that
+	// network I/O does not consume the JS execution budget.
 	// The memory monitor polls allocations and interrupts if growth exceeds jsRuleMaxAllocBytes.
 	// Note: Memory monitoring uses process-wide runtime.ReadMemStats, not per-VM tracking.
 	// Under concurrent JS evaluations, allocation growth may be attributed to the wrong VM.
@@ -535,7 +542,11 @@ func (e *JSRuleEvaluator) wrappedValidate(script string, input *RuleInput, confi
 	runtime.ReadMemStats(&memBefore)
 	done := make(chan struct{})
 	defer close(done)
-	time.AfterFunc(jsRuleTimeout, func() { vm.Interrupt("timeout") })
+	jsTimer := newPausableTimer(vm, jsRuleTimeout)
+	defer jsTimer.Stop()
+	if rpcCtx != nil {
+		rpcCtx.Timer = jsTimer
+	}
 	go func() {
 		ticker := time.NewTicker(5 * time.Millisecond)
 		defer ticker.Stop()

@@ -14,6 +14,10 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
+// defaultSimMaxDynamicUnits is the default cap on distinct dynamic budget units per synthetic rule.
+// SECURITY: Without this cap, an attacker could target N tokens to get N * max_total effective budget.
+const defaultSimMaxDynamicUnits = 100
+
 // SimulationBudgetRule is a built-in fallback rule that runs AFTER all user-defined rules.
 // When no user whitelist rule matches a sign_type=transaction request:
 //   - If simulator not available: return no-match (preserves existing deny/manual-approval behavior)
@@ -27,10 +31,11 @@ import (
 // Values are in human-readable units (e.g. "100" = 100 USDC, "0.01" = 0.01 ETH).
 // Decimals are auto-queried from chain via DecimalsQuerier.
 type SimBudgetDefaults struct {
-	NativeMaxTotal string // max total native per period (human-readable, e.g. "0.01")
-	NativeMaxPerTx string // max native per tx (human-readable, e.g. "0.005")
-	ERC20MaxTotal  string // max total ERC20 per period per token (human-readable, e.g. "100")
-	ERC20MaxPerTx  string // max ERC20 per tx per token (human-readable, e.g. "50")
+	NativeMaxTotal  string // max total native per period (human-readable, e.g. "0.01")
+	NativeMaxPerTx  string // max native per tx (human-readable, e.g. "0.005")
+	ERC20MaxTotal   string // max total ERC20 per period per token (human-readable, e.g. "100")
+	ERC20MaxPerTx   string // max ERC20 per tx per token (human-readable, e.g. "50")
+	MaxDynamicUnits int    // max distinct token budget units per synthetic rule; 0 = use default (100)
 }
 
 // ManagedSignerLister returns the set of all signer addresses managed by the system.
@@ -54,6 +59,13 @@ func (q *RPCAllowanceQuerier) QueryAllowance(ctx context.Context, chainID, token
 	return q.provider.QueryAllowance(ctx, chainID, token, owner, spender)
 }
 
+// DecimalsAnomalyAlerter is called when token decimals are anomalous (>24 or ==0 for non-native).
+// Implementations should be non-blocking (async) to avoid delaying sign requests.
+type DecimalsAnomalyAlerter interface {
+	// AlertDecimalsAnomaly sends an alert about anomalous token decimals.
+	AlertDecimalsAnomaly(ctx context.Context, chainID, token string, decimals int, reason string)
+}
+
 type SimulationBudgetRule struct {
 	simulator         simulation.AnvilForkManager
 	budgetRepo        storage.BudgetRepository
@@ -61,6 +73,7 @@ type SimulationBudgetRule struct {
 	decimalsQuerier   rule.DecimalsQuerier
 	signerLister      ManagedSignerLister
 	allowanceQuerier  simulation.AllowanceQuerier
+	decimalsAlerter   DecimalsAnomalyAlerter
 	logger            *slog.Logger
 }
 
@@ -88,6 +101,13 @@ func NewSimulationBudgetRule(
 		allowanceQuerier: allowanceQuerier,
 		logger:           logger,
 	}, nil
+}
+
+// SetDecimalsAlerter sets the alerter for anomalous token decimals.
+// This is a setter instead of a constructor param because the notification system
+// may be created after SimulationBudgetRule in the application initialization order.
+func (r *SimulationBudgetRule) SetDecimalsAlerter(a DecimalsAnomalyAlerter) {
+	r.decimalsAlerter = a
 }
 
 // Available returns true if the simulation engine is configured and ready.
@@ -375,7 +395,11 @@ func (r *SimulationBudgetRule) checkBudgetFromBalanceChanges(
 				return fmt.Errorf("failed to get simulation budget: %w", err)
 			}
 			// Auto-create budget record with defaults
-			budget = r.autoCreateBudget(ctx, chainID, signerAddress, change.Token, syntheticRuleID, unit)
+			var createErr error
+			budget, createErr = r.autoCreateBudget(ctx, chainID, signerAddress, change.Token, syntheticRuleID, unit)
+			if createErr != nil {
+				return fmt.Errorf("failed to auto-create simulation budget: %w", createErr)
+			}
 			if budget == nil {
 				continue // no defaults → allow without limit
 			}
@@ -411,7 +435,8 @@ func (r *SimulationBudgetRule) checkBudgetFromBalanceChanges(
 }
 
 // autoCreateBudget creates a budget record with defaults for a previously unseen token.
-// Returns nil if no defaults are configured (allow without limit).
+// Returns (nil, nil) if no defaults are configured (allow without limit).
+// Returns (nil, error) if the dynamic unit limit is reached (fail-closed).
 func (r *SimulationBudgetRule) autoCreateBudget(
 	ctx context.Context,
 	chainID string,
@@ -419,11 +444,24 @@ func (r *SimulationBudgetRule) autoCreateBudget(
 	token string,
 	syntheticRuleID types.RuleID,
 	unit string,
-) *types.RuleBudget {
+) (*types.RuleBudget, error) {
 	if r.budgetDefaults == nil {
 		r.logger.Debug("no simulation budget defaults, allowing without limit",
 			"signer", signerAddress, "unit", unit)
-		return nil
+		return nil, nil
+	}
+
+	// SECURITY: Enforce max dynamic units per synthetic rule to prevent budget amplification.
+	maxUnits := r.budgetDefaults.MaxDynamicUnits
+	if maxUnits <= 0 {
+		maxUnits = defaultSimMaxDynamicUnits
+	}
+	unitCount, countErr := r.budgetRepo.CountByRuleID(ctx, syntheticRuleID)
+	if countErr != nil {
+		return nil, fmt.Errorf("failed to count simulation budget units: %w", countErr)
+	}
+	if unitCount >= maxUnits {
+		return nil, fmt.Errorf("simulation budget unit limit reached (%d/%d) for signer %s", unitCount, maxUnits, signerAddress)
 	}
 
 	isNative := strings.ToLower(token) == "native"
@@ -450,12 +488,22 @@ func (r *SimulationBudgetRule) autoCreateBudget(
 		} else {
 			decimals = 18
 		}
+		// Alert on anomalous decimals (>24 or ==0 for non-native tokens).
+		// Do NOT block the transaction — alert only, continue with queried decimals.
+		if decimals > 24 || decimals == 0 {
+			reason := fmt.Sprintf("token %s on chain %s has anomalous decimals=%d", token, chainID, decimals)
+			r.logger.Warn("anomalous token decimals detected",
+				"token", token, "chain_id", chainID, "decimals", decimals)
+			if r.decimalsAlerter != nil {
+				r.decimalsAlerter.AlertDecimalsAnomaly(ctx, chainID, token, decimals, reason)
+			}
+		}
 	}
 
 	if maxTotalHuman == "" {
 		r.logger.Debug("no simulation budget default for token type, allowing",
 			"signer", signerAddress, "unit", unit, "native", isNative)
-		return nil
+		return nil, nil
 	}
 
 	// Convert human-readable to raw (e.g. "100" with 6 decimals → "100000000")
@@ -473,9 +521,7 @@ func (r *SimulationBudgetRule) autoCreateBudget(
 
 	created, _, createErr := r.budgetRepo.CreateOrGet(ctx, newBudget)
 	if createErr != nil {
-		r.logger.Error("failed to auto-create simulation budget",
-			"unit", unit, "error", createErr)
-		return nil
+		return nil, fmt.Errorf("failed to auto-create simulation budget: %w", createErr)
 	}
 
 	r.logger.Info("auto-created simulation budget",
@@ -486,7 +532,7 @@ func (r *SimulationBudgetRule) autoCreateBudget(
 		"max_total", maxTotal,
 		"max_per_tx", maxPerTx,
 	)
-	return created
+	return created, nil
 }
 
 // humanToRaw converts a human-readable decimal string to raw integer with the given decimals.

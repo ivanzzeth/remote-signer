@@ -279,8 +279,10 @@ type SecurityConfig struct {
 
 	// RequireApprovalForAgentRules: when true, agent-created whitelist rules start as "pending_approval"
 	// and require admin approval before becoming active. Blocklist rules are always active immediately.
-	// Default: false.
-	RequireApprovalForAgentRules bool `yaml:"require_approval_for_agent_rules"`
+	// Default (nil) = true (secure by default). When false, agent-created whitelist rules
+	// (including template instantiation with custom variables like allowed_spenders) become
+	// active immediately without admin review, which is a security risk.
+	RequireApprovalForAgentRules *bool `yaml:"require_approval_for_agent_rules"`
 
 	// AutoLockTimeout: automatically lock signers after this duration since unlock.
 	// Default: 0 (disabled). Example: "1h", "30m".
@@ -325,6 +327,15 @@ func (s SecurityConfig) IsAPIKeysAPIReadonly() bool {
 	return *s.APIKeysAPIReadonly
 }
 
+// IsRequireApprovalForAgentRules returns whether agent-created whitelist rules require admin approval.
+// Defaults to true (secure by default) when not explicitly configured.
+func (s SecurityConfig) IsRequireApprovalForAgentRules() bool {
+	if s.RequireApprovalForAgentRules == nil {
+		return true
+	}
+	return *s.RequireApprovalForAgentRules
+}
+
 // IsSIGHUPRulesReloadEnabled returns whether SIGHUP-triggered rules reload is enabled.
 // Defaults to false (secure by default) when not explicitly configured.
 func (s SecurityConfig) IsSIGHUPRulesReloadEnabled() bool {
@@ -340,10 +351,11 @@ func (s SecurityConfig) IsSIGHUPRulesReloadEnabled() bool {
 // Use case: detect API key abuse — attacker with valid API key repeatedly hits rule rejections or pending approval.
 // After ResumeAfter the guard auto-resumes so the team has time to respond.
 type ApprovalGuardConfig struct {
-	Enabled     bool          `yaml:"enabled"`
-	Window      time.Duration `yaml:"window"`       // time window for counting (e.g. 5m); 0 = no window check
-	Threshold   int           `yaml:"threshold"`    // consecutive rejections (blocked or manual-approval) that trigger pause (e.g. 10)
-	ResumeAfter time.Duration `yaml:"resume_after"` // pause duration after which to auto-resume (e.g. 2h)
+	Enabled               bool          `yaml:"enabled"`
+	Window                time.Duration `yaml:"window"`                  // sliding time window for rate calculation (default: 1h)
+	RejectionThresholdPct float64       `yaml:"rejection_threshold_pct"` // rejection rate % that triggers pause (default: 50)
+	MinSamples            int           `yaml:"min_samples"`             // minimum events in window before rate check applies (default: 10)
+	ResumeAfter           time.Duration `yaml:"resume_after"`            // pause duration after which to auto-resume (e.g. 2h)
 }
 
 // IPWhitelistConfig contains IP whitelist settings
@@ -389,17 +401,17 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
-	if err := validate(cfg); err != nil {
-		return nil, fmt.Errorf("config validation failed: %w", err)
-	}
-
 	// Prefer DATABASE_DSN env over config (required for Docker host network: config may have "postgres" hostname)
 	if dsn := os.Getenv("DATABASE_DSN"); dsn != "" {
 		cfg.Database.DSN = dsn
 	}
 
-	// Set defaults
+	// Set defaults before validation so that default budget values are populated
 	setDefaults(cfg)
+
+	if err := validate(cfg); err != nil {
+		return nil, fmt.Errorf("config validation failed: %w", err)
+	}
 
 	return cfg, nil
 }
@@ -476,6 +488,15 @@ func validate(cfg *Config) error {
 			if _, err := os.Stat(cfg.Server.TLS.CAFile); err != nil {
 				return fmt.Errorf("TLS ca_file not found: %s", cfg.Server.TLS.CAFile)
 			}
+		}
+	}
+
+	// Validate simulation requires budget defaults
+	if cfg.Chains.EVM != nil && cfg.Chains.EVM.Simulation.Enabled {
+		sim := cfg.Chains.EVM.Simulation
+		if sim.BudgetNativeMaxTotal == "" && sim.BudgetNativeMaxPerTx == "" &&
+			sim.BudgetERC20MaxTotal == "" && sim.BudgetERC20MaxPerTx == "" {
+			return fmt.Errorf("simulation is enabled but no budget defaults configured (budget_native_max_total, budget_native_max_per_tx, budget_erc20_max_total, budget_erc20_max_per_tx are all empty); this allows unlimited spending — configure budget limits or disable simulation")
 		}
 	}
 
@@ -600,11 +621,14 @@ func setDefaults(cfg *Config) {
 	}
 
 	// ApprovalGuard defaults
-	if cfg.Security.ApprovalGuard.Enabled && cfg.Security.ApprovalGuard.Threshold <= 0 {
-		cfg.Security.ApprovalGuard.Threshold = 10
+	if cfg.Security.ApprovalGuard.Enabled && cfg.Security.ApprovalGuard.RejectionThresholdPct <= 0 {
+		cfg.Security.ApprovalGuard.RejectionThresholdPct = 50
+	}
+	if cfg.Security.ApprovalGuard.Enabled && cfg.Security.ApprovalGuard.MinSamples <= 0 {
+		cfg.Security.ApprovalGuard.MinSamples = 10
 	}
 	if cfg.Security.ApprovalGuard.Enabled && cfg.Security.ApprovalGuard.Window <= 0 {
-		cfg.Security.ApprovalGuard.Window = 5 * time.Minute
+		cfg.Security.ApprovalGuard.Window = 1 * time.Hour
 	}
 	if cfg.Security.ApprovalGuard.Enabled && cfg.Security.ApprovalGuard.ResumeAfter <= 0 {
 		cfg.Security.ApprovalGuard.ResumeAfter = 2 * time.Hour

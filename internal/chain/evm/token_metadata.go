@@ -180,8 +180,9 @@ func (c *TokenMetadataCache) IsERC721(ctx context.Context, chainID, address stri
 	if c.db != nil {
 		var meta TokenMetadata
 		err := c.db.WithContext(ctx).Where("chain_id = ? AND address = ?", chainID, address).First(&meta).Error
-		if err == nil && meta.IsERC721 && time.Since(meta.QueriedAt) < c.cacheTTL {
-			return true, nil
+		if err == nil && meta.ERC721Checked && time.Since(meta.QueriedAt) < c.cacheTTL {
+			// Both positive and negative results are cached once ERC721Checked is true.
+			return meta.IsERC721, nil
 		}
 	}
 
@@ -193,9 +194,22 @@ func (c *TokenMetadataCache) IsERC721(ctx context.Context, chainID, address stri
 	if result {
 		// Anti-spoofing: if contract also has decimals(), treat as ERC20 (conservative)
 		if c.hasDecimals(ctx, chainID, address, counter) {
+			c.upsertField(ctx, chainID, address, func(m *TokenMetadata) {
+				m.ERC721Checked = true
+				m.IsERC721 = false
+			})
 			return false, nil
 		}
-		c.upsertField(ctx, chainID, address, func(m *TokenMetadata) { m.IsERC721 = true })
+		c.upsertField(ctx, chainID, address, func(m *TokenMetadata) {
+			m.ERC721Checked = true
+			m.IsERC721 = true
+		})
+	} else {
+		// Cache negative result so subsequent calls skip RPC.
+		c.upsertField(ctx, chainID, address, func(m *TokenMetadata) {
+			m.ERC721Checked = true
+			m.IsERC721 = false
+		})
 	}
 	return result, nil
 }
@@ -208,8 +222,9 @@ func (c *TokenMetadataCache) IsERC1155(ctx context.Context, chainID, address str
 	if c.db != nil {
 		var meta TokenMetadata
 		err := c.db.WithContext(ctx).Where("chain_id = ? AND address = ?", chainID, address).First(&meta).Error
-		if err == nil && meta.IsERC1155 && time.Since(meta.QueriedAt) < c.cacheTTL {
-			return true, nil
+		if err == nil && meta.ERC1155Checked && time.Since(meta.QueriedAt) < c.cacheTTL {
+			// Both positive and negative results are cached once ERC1155Checked is true.
+			return meta.IsERC1155, nil
 		}
 	}
 
@@ -221,9 +236,22 @@ func (c *TokenMetadataCache) IsERC1155(ctx context.Context, chainID, address str
 	if result {
 		// Anti-spoofing: if contract also has decimals(), treat as ERC20 (conservative)
 		if c.hasDecimals(ctx, chainID, address, counter) {
+			c.upsertField(ctx, chainID, address, func(m *TokenMetadata) {
+				m.ERC1155Checked = true
+				m.IsERC1155 = false
+			})
 			return false, nil
 		}
-		c.upsertField(ctx, chainID, address, func(m *TokenMetadata) { m.IsERC1155 = true })
+		c.upsertField(ctx, chainID, address, func(m *TokenMetadata) {
+			m.ERC1155Checked = true
+			m.IsERC1155 = true
+		})
+	} else {
+		// Cache negative result so subsequent calls skip RPC.
+		c.upsertField(ctx, chainID, address, func(m *TokenMetadata) {
+			m.ERC1155Checked = true
+			m.IsERC1155 = false
+		})
 	}
 	return result, nil
 }

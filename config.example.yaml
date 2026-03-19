@@ -198,6 +198,14 @@ security:
   max_keystores_per_key: 5
   max_hd_wallets_per_key: 3
 
+  # Require admin approval for agent-created whitelist rules (default: true, secure by default).
+  # When true, agent-created whitelist rules start as "pending_approval" and require admin approval.
+  # When false, agent-created whitelist rules (including template instantiation with custom
+  # variables like allowed_spenders) become active immediately without admin review.
+  # SECURITY: Setting to false is a risk — a compromised agent API key could create permissive
+  # whitelist rules that take effect instantly. Only set to false in trusted/dev environments.
+  require_approval_for_agent_rules: true
+
   # Auto-lock: automatically lock signers after this duration since unlock.
   # Default: 0 (disabled). Sends alert to notify channel when auto-locked.
   # auto_lock_timeout: "1h"
@@ -205,13 +213,14 @@ security:
   # Sign timeout: context timeout for sign operations. Default: 30s.
   # sign_timeout: "30s"
 
-  # Approval guard: pause when too many consecutive "not auto-approved" outcomes (blocked by rule or manual approval)
-  # Use case: API key leaked — attacker uses valid key to brute-force; guard detects burst and pauses + alerts
+  # Approval guard: pause when rejection rate in a sliding window exceeds threshold
+  # Use case: API key leaked — attacker uses valid key to brute-force; guard detects high rejection rate and pauses + alerts
   approval_guard:
     enabled: false
-    window: "5m"            # time window for counting
-    threshold: 10           # consecutive rejections (blocked or pending approval) that trigger pause
-    resume_after: "2h"      # pause duration; then auto-resume
+    window: "1h"                    # sliding time window for rate calculation (default: 1h)
+    rejection_threshold_pct: 50     # rejection rate % that triggers pause (default: 50)
+    min_samples: 10                 # minimum events in window before rate check applies (default: 10)
+    resume_after: "2h"              # pause duration; then auto-resume
 
   # NOTE: Blocklist rules use mandatory Fail-Closed behavior.
   # Any blocklist rule evaluation error will immediately reject the request.

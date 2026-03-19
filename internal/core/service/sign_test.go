@@ -582,7 +582,7 @@ func TestSign(t *testing.T) {
 
 		guard, err := NewManualApprovalGuard(ManualApprovalGuardConfig{
 			Window:    time.Minute,
-			Threshold: 1,
+			RejectionThresholdPct: 1, MinSamples: 1,
 			Logger:    newTestLogger(),
 		})
 		if err != nil {
@@ -638,7 +638,7 @@ func TestSign(t *testing.T) {
 
 		guard, err := NewManualApprovalGuard(ManualApprovalGuardConfig{
 			Window:    5 * time.Minute,
-			Threshold: 5,
+			MinSamples: 1000,
 			Logger:    newTestLogger(),
 		})
 		if err != nil {
@@ -678,7 +678,7 @@ func TestSign(t *testing.T) {
 
 		guard, err := NewManualApprovalGuard(ManualApprovalGuardConfig{
 			Window:    5 * time.Minute,
-			Threshold: 10,
+			MinSamples: 1000,
 			Logger:    newTestLogger(),
 		})
 		if err != nil {
@@ -708,7 +708,7 @@ func TestSign(t *testing.T) {
 
 		guard, err := NewManualApprovalGuard(ManualApprovalGuardConfig{
 			Window:    5 * time.Minute,
-			Threshold: 10,
+			MinSamples: 1000,
 			Logger:    newTestLogger(),
 		})
 		if err != nil {
@@ -736,7 +736,7 @@ func TestSign(t *testing.T) {
 
 		guard, err := NewManualApprovalGuard(ManualApprovalGuardConfig{
 			Window:    5 * time.Minute,
-			Threshold: 10,
+			MinSamples: 1000,
 			Logger:    newTestLogger(),
 		})
 		if err != nil {
@@ -782,6 +782,82 @@ func TestSign(t *testing.T) {
 			t.Errorf("expected authorizing, got %q", resp.Status)
 		}
 	})
+
+	t.Run("strategy_role_no_whitelist_match_rejected_without_simulation", func(t *testing.T) {
+		f := newSignServiceFixture(t)
+		f.ruleEngine.matchedRuleID = nil
+		svc := f.build(t)
+		// Even with manual approval enabled and simulation available,
+		// strategy role should be rejected immediately
+		svc.SetManualApprovalEnabled(true)
+
+		resp, err := svc.Sign(ctx, &SignRequest{
+			APIKeyID:      "strategy-key-1",
+			APIKeyRole:    types.RoleStrategy,
+			ChainType:     types.ChainTypeEVM,
+			ChainID:       "1",
+			SignerAddress: "0xsigner",
+			SignType:      "eth_signTransaction",
+			Payload:       []byte(`{}`),
+		})
+		if err != nil {
+			t.Fatalf("Sign should not return error for strategy rejection: %v", err)
+		}
+		if resp.Status != types.StatusRejected {
+			t.Errorf("expected status %q, got %q", types.StatusRejected, resp.Status)
+		}
+		if !strings.Contains(resp.Message, "strategy role requires explicit rules") {
+			t.Errorf("expected strategy role rejection message, got: %q", resp.Message)
+		}
+	})
+
+	t.Run("agent_role_no_whitelist_match_reaches_manual_approval", func(t *testing.T) {
+		f := newSignServiceFixture(t)
+		f.ruleEngine.matchedRuleID = nil
+		svc := f.build(t)
+		svc.SetManualApprovalEnabled(true)
+
+		resp, err := svc.Sign(ctx, &SignRequest{
+			APIKeyID:      "agent-key-1",
+			APIKeyRole:    types.RoleAgent,
+			ChainType:     types.ChainTypeEVM,
+			ChainID:       "1",
+			SignerAddress: "0xsigner",
+			SignType:      "eth_signTransaction",
+			Payload:       []byte(`{}`),
+		})
+		if err != nil {
+			t.Fatalf("Sign failed: %v", err)
+		}
+		// Agent role should proceed to manual approval (not be blocked like strategy)
+		if resp.Status != types.StatusAuthorizing {
+			t.Errorf("expected status %q, got %q", types.StatusAuthorizing, resp.Status)
+		}
+	})
+
+	t.Run("strategy_role_with_whitelist_match_succeeds", func(t *testing.T) {
+		f := newSignServiceFixture(t)
+		ruleID := types.RuleID("rule-strategy")
+		f.ruleEngine.matchedRuleID = &ruleID
+		f.ruleEngine.matchReason = "strategy rule matched"
+		svc := f.build(t)
+
+		resp, err := svc.Sign(ctx, &SignRequest{
+			APIKeyID:      "strategy-key-1",
+			APIKeyRole:    types.RoleStrategy,
+			ChainType:     types.ChainTypeEVM,
+			ChainID:       "1",
+			SignerAddress: "0xsigner",
+			SignType:      "eth_signTransaction",
+			Payload:       []byte(`{}`),
+		})
+		if err != nil {
+			t.Fatalf("Sign failed: %v", err)
+		}
+		if resp.Status != types.StatusCompleted {
+			t.Errorf("expected status %q, got %q", types.StatusCompleted, resp.Status)
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -794,7 +870,7 @@ func TestSetApprovalGuard(t *testing.T) {
 
 	guard, err := NewManualApprovalGuard(ManualApprovalGuardConfig{
 		Window:    time.Minute,
-		Threshold: 5,
+		MinSamples: 1000,
 		Logger:    newTestLogger(),
 	})
 	if err != nil {

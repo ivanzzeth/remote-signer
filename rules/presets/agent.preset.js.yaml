@@ -40,10 +40,11 @@ variables:
   max_unknown_token_total: "1000"
   max_unknown_token_per_tx: "100"
   max_unknown_token_tx_count: "50"
-  # Comma-separated allowed spender addresses for Permit/Permit2 signatures.
+  # Comma-separated trusted contract addresses shared across signature types.
+  # Permit: spender must be in this list. Non-Permit typed_data: verifyingContract must be in this list.
   # If empty, ALL Permit signatures are blocked (fail-closed). Set to known DEX routers.
   # Example: "0x3b86917369b83a6892f553609f3c2f439c184e31"
-  allowed_spenders: ""
+  trusted_contracts: ""
 budget:
   dynamic: true
   unit_decimal: true
@@ -78,4 +79,4 @@ override_hints:
   - max_unknown_token_total
   - max_unknown_token_per_tx
   - max_unknown_token_tx_count
-  - allowed_spenders
+  - trusted_contracts

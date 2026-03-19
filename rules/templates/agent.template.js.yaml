@@ -48,9 +48,9 @@ variables:
     description: "Max tx count for unknown tokens"
     required: false
     default: "50"
-  - name: allowed_spenders
+  - name: trusted_contracts
     type: string
-    description: "Comma-separated allowed spender addresses for Permit/Permit2 signatures. If empty, all Permit sigs are blocked (fail-closed)."
+    description: "Comma-separated trusted contract addresses. For Permit/Permit2: spender must be in this list. For non-Permit typed_data: domain.verifyingContract must be in this list. If empty, Permit sigs are blocked (fail-closed)."
     required: false
     default: ""
 
@@ -86,7 +86,7 @@ test_variables:
   max_unknown_token_total: "1000"
   max_unknown_token_per_tx: "100"
   max_unknown_token_tx_count: "50"
-  allowed_spenders: "0x5b38da6a701c568545dcfcb03fcb875f56beddc4,0x3b86917369b83a6892f553609f3c2f439c184e31"
+  trusted_contracts: "0x5b38da6a701c568545dcfcb03fcb875f56beddc4,0x3b86917369b83a6892f553609f3c2f439c184e31"
 
 rules:
   # ── agent-tx: REMOVED ──
@@ -109,13 +109,13 @@ rules:
     type: "evm_js"
     mode: "whitelist"
     enabled: true
-    description: "Allow personal_sign (length limit) and typed_data. Permit/Permit2 spender must be in allowed_spenders list. Budget tracks Permit value."
+    description: "Allow personal_sign (length limit) and typed_data. Permit/Permit2 spender must be in trusted_contracts. Non-Permit typed_data verifyingContract must be in trusted_contracts. Budget tracks Permit value."
     config:
       sign_type_filter: "personal_sign,typed_data"
-      # Comma-separated allowed spender addresses for Permit/Permit2 signatures.
-      # If empty, ALL Permit signatures are blocked (fail-closed).
-      # Example: "0x3b86917369b83a6892f553609f3c2f439c184e31,0xdef1c0ded9bec7f1a1670819833240f027b25eff"
-      allowed_spenders: "${allowed_spenders}"
+      # Comma-separated trusted contract addresses shared across signature types.
+      # Permit: spender must be in this list. Non-Permit: domain.verifyingContract must be in this list.
+      # If empty, all Permit signatures are blocked (fail-closed).
+      trusted_contracts: "${trusted_contracts}"
       script: |
         // Permit-like primaryTypes that grant spending permission
         var PERMIT_TYPES = ['Permit', 'PermitSingle', 'PermitBatch', 'PermitTransferFrom', 'PermitBatchTransferFrom'];
@@ -127,8 +127,7 @@ rules:
           return false;
         }
 
-        function getAllowedSpenders() {
-          var raw = config.allowed_spenders || '';
+        function parseAddressList(raw) {
           if (!raw) return [];
           var parts = raw.split(',');
           var result = [];
@@ -139,6 +138,10 @@ rules:
           return result;
         }
 
+        function getTrustedContracts() {
+          return parseAddressList(config.trusted_contracts || '');
+        }
+
         function extractSpender(td) {
           var msg = td.message || {};
           // ERC2612 Permit: message.spender
@@ -146,6 +149,13 @@ rules:
           // Permit2 PermitSingle: message.details.spender or message.spender
           if (msg.details && msg.details.spender) return msg.details.spender.toLowerCase();
           return '';
+        }
+
+        function addressInList(addr, list) {
+          for (var i = 0; i < list.length; i++) {
+            if (list[i] === addr) return true;
+          }
+          return false;
         }
 
         function validate(input) {
@@ -163,20 +173,35 @@ rules:
             var td = input.typed_data;
             require(td, 'missing typed_data');
 
-            // Permit-like signatures: check spender whitelist
+            var trusted = getTrustedContracts();
+
+            // Permit-like signatures: check spender against trusted_contracts
             if (isPermitType(td.primaryType)) {
-              var allowed = getAllowedSpenders();
-              if (allowed.length === 0) {
-                return fail('Permit signatures require allowed_spenders config (fail-closed)');
+              if (trusted.length === 0) {
+                return fail('Permit signatures require trusted_contracts config (fail-closed)');
               }
               var spender = extractSpender(td);
               require(spender, 'could not extract spender from Permit message');
-              var found = false;
-              for (var i = 0; i < allowed.length; i++) {
-                if (allowed[i] === spender) { found = true; break; }
+              if (!addressInList(spender, trusted)) {
+                return fail('Permit spender ' + spender + ' is not in trusted_contracts whitelist');
               }
-              if (!found) {
-                return fail('Permit spender ' + spender + ' is not in allowed_spenders whitelist');
+              // Validate Permit value type (must be string or number for BigInt conversion)
+              var rawVal = (td.message || {}).value || (td.message || {}).amount || '0';
+              if (typeof rawVal !== 'string' && typeof rawVal !== 'number') {
+                return fail('invalid Permit value type: expected string or number, got ' + typeof rawVal);
+              }
+              return ok();
+            }
+
+            // Non-Permit typed_data: check domain.verifyingContract against trusted_contracts
+            if (trusted.length > 0) {
+              var domain = td.domain || {};
+              var verifyingContract = (domain.verifyingContract || '').toLowerCase();
+              if (!verifyingContract) {
+                return fail('typed_data missing domain.verifyingContract');
+              }
+              if (!addressInList(verifyingContract, trusted)) {
+                return fail('verifyingContract ' + verifyingContract + ' is not in trusted_contracts whitelist');
               }
             }
 
@@ -193,7 +218,11 @@ rules:
             var td = input.typed_data;
             if (isPermitType(td.primaryType)) {
               var token = (td.domain || {}).verifyingContract || '';
-              var value = BigInt((td.message || {}).value || (td.message || {}).amount || '0');
+              var rawVal = (td.message || {}).value || (td.message || {}).amount || '0';
+              if (typeof rawVal !== 'string' && typeof rawVal !== 'number') {
+                revert('invalid Permit value type: expected string or number, got ' + typeof rawVal);
+              }
+              var value = BigInt(rawVal);
               return { amount: value, unit: token + ':permit' };
             }
           }
@@ -263,7 +292,7 @@ rules:
               nonce: "0"
               deadline: "1700000000"
         expect_pass: false
-        expect_reason: "not in allowed_spenders whitelist"
+        expect_reason: "not in trusted_contracts whitelist"
       # Negative: PermitSingle (Permit2) with unauthorized spender
       - name: "reject: Permit2 PermitSingle unauthorized spender"
         input:
@@ -285,7 +314,7 @@ rules:
               spender: "0xdEAD000000000000000000000000000000000000"
               sigDeadline: "1700000000"
         expect_pass: false
-        expect_reason: "not in allowed_spenders whitelist"
+        expect_reason: "not in trusted_contracts whitelist"
       # Negative: personal_sign too long (default limit is 1024)
       - name: "reject: personal_sign exceeds length limit"
         input:
@@ -296,6 +325,76 @@ rules:
             message: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA_OVER_1024"
         expect_pass: false
         expect_reason: "message too long"
+      # Negative: Permit with object value (not string/number) — triggers type validation
+      - name: "reject: Permit with object value type"
+        input:
+          sign_type: "typed_data"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          typed_data:
+            primaryType: "Permit"
+            domain:
+              name: "USD Coin"
+              chainId: "1"
+              verifyingContract: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            message:
+              owner: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+              spender: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+              value:
+                hex: "0xF4240"
+              nonce: "0"
+              deadline: "1700000000"
+        expect_pass: false
+        expect_reason: "invalid Permit value type"
+      # Positive: non-Permit typed_data with trusted verifyingContract
+      - name: "pass: non-Permit typed_data with trusted verifyingContract"
+        input:
+          sign_type: "typed_data"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          typed_data:
+            primaryType: "Order"
+            domain:
+              name: "TestDEX"
+              chainId: "1"
+              verifyingContract: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+            message:
+              maker: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+              amount: "1000000"
+        expect_pass: true
+      # Negative: non-Permit typed_data with untrusted verifyingContract
+      - name: "reject: non-Permit typed_data with untrusted verifyingContract"
+        input:
+          sign_type: "typed_data"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          typed_data:
+            primaryType: "Order"
+            domain:
+              name: "UnknownDEX"
+              chainId: "1"
+              verifyingContract: "0xdEAD000000000000000000000000000000000000"
+            message:
+              maker: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+              amount: "1000000"
+        expect_pass: false
+        expect_reason: "not in trusted_contracts whitelist"
+      # Negative: non-Permit typed_data missing verifyingContract
+      - name: "reject: non-Permit typed_data missing verifyingContract"
+        input:
+          sign_type: "typed_data"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          typed_data:
+            primaryType: "Order"
+            domain:
+              name: "TestDEX"
+              chainId: "1"
+            message:
+              maker: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+              amount: "1000000"
+        expect_pass: false
+        expect_reason: "missing domain.verifyingContract"
 
   # ── agent-safety: block dangerous admin function selectors ──
   - id: "agent-safety"
@@ -343,6 +442,13 @@ rules:
           if (eq(sel, selector('upgradeToAndCall(address,bytes)'))) {
             return fail('upgradeToAndCall is blocked for agent safety');
           }
+
+          // TODO: Add the following dangerous selectors in a future update:
+          // - changeAdmin(address) — proxy admin transfer
+          // - changeProxyAdmin(address) — transparent proxy admin transfer
+          // - increaseAllowance(address,uint256) — can be used for infinite approve pattern
+          // - Gnosis Safe execTransaction(address,uint256,bytes,uint8,uint256,uint256,uint256,address,address,bytes)
+          //   — arbitrary execution through Safe multisig; agents should not call this directly
 
           return ok();
         }

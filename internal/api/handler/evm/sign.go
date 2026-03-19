@@ -170,6 +170,7 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Process sign request
 	signReq := &service.SignRequest{
 		APIKeyID:      apiKey.ID,
+		APIKeyRole:    apiKey.Role,
 		ChainType:     types.ChainTypeEVM,
 		ChainID:       req.ChainID,
 		SignerAddress: req.SignerAddress,

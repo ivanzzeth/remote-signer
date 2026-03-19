@@ -4,9 +4,37 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/grafana/sobek"
 )
+
+// wrapRPCCallback wraps a Go callback function to pause the JS timer before
+// executing the RPC call and resume it afterward. It also tracks cumulative
+// RPC duration on the counter. If the cumulative time limit is exceeded,
+// it panics with an error value (caught by the Sobek VM as a JS exception).
+func wrapRPCCallback(vm *sobek.Runtime, rpcCtx *RPCInjectionContext, fn func(sobek.FunctionCall) sobek.Value) func(sobek.FunctionCall) sobek.Value {
+	return func(call sobek.FunctionCall) sobek.Value {
+		if rpcCtx.Timer != nil {
+			rpcCtx.Timer.Pause()
+		}
+		start := time.Now()
+		defer func() {
+			elapsed := time.Since(start)
+			if err := rpcCtx.Counter.AddDuration(elapsed); err != nil {
+				// Resume timer before panicking so the VM can process the interrupt
+				if rpcCtx.Timer != nil {
+					rpcCtx.Timer.Resume()
+				}
+				panic(vm.ToValue(err.Error()))
+			}
+			if rpcCtx.Timer != nil {
+				rpcCtx.Timer.Resume()
+			}
+		}()
+		return fn(call)
+	}
+}
 
 // RPCInjectionContext holds per-evaluation state for RPC helpers in the JS sandbox.
 type RPCInjectionContext struct {
@@ -15,6 +43,7 @@ type RPCInjectionContext struct {
 	Cache    *TokenMetadataCache
 	Counter  *RPCCallCounter
 	Ctx      context.Context
+	Timer    *pausableTimer // pausable JS execution timer; paused during RPC callbacks
 }
 
 // injectRPCHelpers injects web3, erc20, erc165, isERC721, isERC1155 into the JS VM.
@@ -25,12 +54,16 @@ func injectRPCHelpers(vm *sobek.Runtime, rpcCtx *RPCInjectionContext) error {
 		return injectRPCStubs(vm)
 	}
 
+	wrap := func(fn func(sobek.FunctionCall) sobek.Value) func(sobek.FunctionCall) sobek.Value {
+		return wrapRPCCallback(vm, rpcCtx, fn)
+	}
+
 	// web3 object
 	web3Obj := vm.NewObject()
-	if err := web3Obj.Set("call", vm.ToValue(jsWeb3Call(vm, rpcCtx))); err != nil {
+	if err := web3Obj.Set("call", vm.ToValue(wrap(jsWeb3Call(vm, rpcCtx)))); err != nil {
 		return err
 	}
-	if err := web3Obj.Set("getCode", vm.ToValue(jsWeb3GetCode(vm, rpcCtx))); err != nil {
+	if err := web3Obj.Set("getCode", vm.ToValue(wrap(jsWeb3GetCode(vm, rpcCtx)))); err != nil {
 		return err
 	}
 	if err := vm.Set("web3", web3Obj); err != nil {
@@ -39,13 +72,13 @@ func injectRPCHelpers(vm *sobek.Runtime, rpcCtx *RPCInjectionContext) error {
 
 	// erc20 object
 	erc20Obj := vm.NewObject()
-	if err := erc20Obj.Set("decimals", vm.ToValue(jsERC20Decimals(vm, rpcCtx))); err != nil {
+	if err := erc20Obj.Set("decimals", vm.ToValue(wrap(jsERC20Decimals(vm, rpcCtx)))); err != nil {
 		return err
 	}
-	if err := erc20Obj.Set("symbol", vm.ToValue(jsERC20Symbol(vm, rpcCtx))); err != nil {
+	if err := erc20Obj.Set("symbol", vm.ToValue(wrap(jsERC20Symbol(vm, rpcCtx)))); err != nil {
 		return err
 	}
-	if err := erc20Obj.Set("name", vm.ToValue(jsERC20Name(vm, rpcCtx))); err != nil {
+	if err := erc20Obj.Set("name", vm.ToValue(wrap(jsERC20Name(vm, rpcCtx)))); err != nil {
 		return err
 	}
 	if err := vm.Set("erc20", erc20Obj); err != nil {
@@ -54,7 +87,7 @@ func injectRPCHelpers(vm *sobek.Runtime, rpcCtx *RPCInjectionContext) error {
 
 	// erc165 object
 	erc165Obj := vm.NewObject()
-	if err := erc165Obj.Set("supportsInterface", vm.ToValue(jsERC165SupportsInterface(vm, rpcCtx))); err != nil {
+	if err := erc165Obj.Set("supportsInterface", vm.ToValue(wrap(jsERC165SupportsInterface(vm, rpcCtx)))); err != nil {
 		return err
 	}
 	if err := vm.Set("erc165", erc165Obj); err != nil {
@@ -62,10 +95,10 @@ func injectRPCHelpers(vm *sobek.Runtime, rpcCtx *RPCInjectionContext) error {
 	}
 
 	// Top-level convenience functions
-	if err := vm.Set("isERC721", vm.ToValue(jsIsERC721(vm, rpcCtx))); err != nil {
+	if err := vm.Set("isERC721", vm.ToValue(wrap(jsIsERC721(vm, rpcCtx)))); err != nil {
 		return err
 	}
-	if err := vm.Set("isERC1155", vm.ToValue(jsIsERC1155(vm, rpcCtx))); err != nil {
+	if err := vm.Set("isERC1155", vm.ToValue(wrap(jsIsERC1155(vm, rpcCtx)))); err != nil {
 		return err
 	}
 
