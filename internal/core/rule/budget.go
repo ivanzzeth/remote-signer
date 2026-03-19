@@ -430,11 +430,20 @@ func (bc *BudgetChecker) autoCreateDynamicBudget(
 				}
 				queried, queryErr := bc.queryDecimalsCached(ctx, chainID, unitBase)
 				if queryErr != nil {
-					// SECURITY: fail-closed when RPC is unavailable — cannot determine correct
-					// decimal conversion, allowing through could under-count budget usage.
-					return nil, fmt.Errorf("unit_decimal auto-query failed for unit %q on chain %q: %w", rawUnit, chainID, queryErr)
+					errMsg := queryErr.Error()
+					if strings.Contains(errMsg, "execution reverted") || strings.Contains(errMsg, "rpc error 3:") {
+						// Contract revert = not an ERC20 token (e.g. Permit2 contract).
+						// Default to decimals=0: budget amounts used as raw integers.
+						bc.logger.Debug("decimals() reverted, not an ERC20 token, defaulting to decimals=0",
+							"unit", rawUnit, "chain_id", chainID)
+						decimals = 0
+					} else {
+						// RPC unavailable, timeout, rate limit, etc. — fail-closed.
+						return nil, fmt.Errorf("unit_decimal auto-query failed for unit %q on chain %q: %w", rawUnit, chainID, queryErr)
+					}
+				} else {
+					decimals = queried
 				}
-				decimals = queried
 			}
 			// else: named unit with decimals=0 → skip conversion (decimals stays 0, decimalToRaw is a no-op)
 		}

@@ -233,7 +233,7 @@ type SimulationConfig struct {
 	// Budget defaults for auto-created simulation budget records (human-readable units).
 	// Decimals are auto-queried from chain. "-1" = unlimited.
 	BudgetNativeMaxTotal string `yaml:"budget_native_max_total"`  // native token max total per period (default: "0.01")
-	BudgetNativeMaxPerTx string `yaml:"budget_native_max_per_tx"` // native token max per tx (default: "0.005")
+	BudgetNativeMaxPerTx string `yaml:"budget_native_max_per_tx"` // native token max per tx (default: "0.02")
 	BudgetERC20MaxTotal  string `yaml:"budget_erc20_max_total"`   // ERC20 max total per period per token (default: "100")
 	BudgetERC20MaxPerTx  string `yaml:"budget_erc20_max_per_tx"`  // ERC20 max per tx per token (default: "50")
 }
@@ -576,7 +576,7 @@ func setDefaults(cfg *Config) {
 			sim.BudgetNativeMaxTotal = "0.01"
 		}
 		if sim.BudgetNativeMaxPerTx == "" {
-			sim.BudgetNativeMaxPerTx = "0.005"
+			sim.BudgetNativeMaxPerTx = "0.02"
 		}
 		if sim.BudgetERC20MaxTotal == "" {
 			sim.BudgetERC20MaxTotal = "100"
