@@ -593,14 +593,18 @@ Example (approve + swap):
 
 #### Approval Detection
 
-Top-level calldata selectors:
-- `approve(address,uint256)` — `0x095ea7b3`
-- `setApprovalForAll(address,bool)` — `0xa22cb465`
-- `increaseAllowance(address,uint256)` — `0x39509351`
+Detection is based on **simulation events only** (not calldata parsing):
 
-PLUS: any `Approval` / `ApprovalForAll` event in simulation logs (catches nested approvals).
+- `Approval` event where `owner` is a managed signer AND `value > 0`
+- `ApprovalForAll` event where `owner` is a managed signer AND `value > 0`
 
-If detected → `HasApproval = true` → route to manual approval.
+Filtering rules:
+- **Managed signer filter**: only approvals where the `owner` (topic[1]) is one of our managed signer addresses trigger manual approval. Internal contract-to-contract approvals (e.g. DEX router internals) are ignored.
+- **Zero-value filter**: `Approval` events with `value=0` are skipped — these are emitted by ERC20 `transferFrom()` as a side effect (allowance consumed), not actual approval grants.
+
+If detected → route to manual approval (signer owner must approve).
+
+> **Note**: Top-level calldata selector checking (`approve()` / `setApprovalForAll()` / `increaseAllowance()`) was considered but is **redundant** when simulation is available. If `approve()` succeeds, the standard `Approval` event is emitted and caught by event detection. If `approve()` reverts, the simulation returns `success: false` and the tx is denied anyway. Non-standard tokens that don't emit `Approval` events are inherently broken and should not be trusted.
 
 #### Files
 
