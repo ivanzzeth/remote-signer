@@ -595,18 +595,39 @@ Example (approve + swap):
 
 #### Approval Detection
 
-Detection is based on **simulation events only** (not calldata parsing):
+Detection is based on **simulation events + on-chain allowance comparison** (not calldata parsing):
 
-- `Approval` event where `owner` is a managed signer AND `value > 0`
-- `ApprovalForAll` event where `owner` is a managed signer AND `value > 0`
+##### ERC20 Approval: Allowance Increase Detection
 
-Filtering rules:
+ERC20 `transferFrom()` emits an `Approval` event with the REMAINING allowance (not zero). When a signer has a large allowance (e.g. max uint256 for Permit2), every `transferFrom` emits `Approval(owner, spender, remainingAllowance)` where remaining ≈ max — this is NOT a new approval grant but a side effect.
+
+**Solution**: Compare event value with current on-chain allowance:
+
+```
+For each ERC20 Approval event where owner = managed signer:
+  1. Query on-chain: currentAllowance = allowance(owner, spender)
+  2. If event.value > currentAllowance → allowance INCREASED → real approval → manual approval
+  3. If event.value ≤ currentAllowance → transferFrom consumed some → side effect → safe, skip
+```
+
+This works because:
+- `approve(spender, amount)` sets new allowance → if amount > current, it increased
+- `transferFrom` decreases allowance → event.value < current → skipped
+- Requires 1 RPC call (`eth_call` for `allowance()`) per Approval event (rare in normal swaps)
+
+##### ApprovalForAll (ERC721/ERC1155)
+
+No side-effect issue — `transferFrom` does not emit `ApprovalForAll`. Detected directly.
+
+##### Filtering rules
+
 - **Managed signer filter**: only approvals where the `owner` (topic[1]) is one of our managed signer addresses trigger manual approval. Internal contract-to-contract approvals (e.g. DEX router internals) are ignored.
-- **Zero-value filter**: `Approval` events with `value=0` are skipped — these are emitted by ERC20 `transferFrom()` as a side effect (allowance consumed), not actual approval grants.
+- **Allowance increase filter** (ERC20 only): queries on-chain allowance to distinguish real approvals from `transferFrom` side effects.
+- **Fallback**: if allowance query fails, non-zero Approval events are treated as suspicious (fail-closed).
 
 If detected → route to manual approval (signer owner must approve).
 
-> **Note**: Top-level calldata selector checking (`approve()` / `setApprovalForAll()` / `increaseAllowance()`) was considered but is **redundant** when simulation is available. If `approve()` succeeds, the standard `Approval` event is emitted and caught by event detection. If `approve()` reverts, the simulation returns `success: false` and the tx is denied anyway. Non-standard tokens that don't emit `Approval` events are inherently broken and should not be trusted.
+> **Note**: Top-level calldata selector checking was considered but is **redundant** — simulation catches the effects regardless of how they're triggered. On-chain allowance comparison is the authoritative method for ERC20.
 
 #### Files
 

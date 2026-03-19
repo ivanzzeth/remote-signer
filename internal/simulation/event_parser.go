@@ -1,6 +1,7 @@
 package simulation
 
 import (
+	"context"
 	"math/big"
 	"strings"
 )
@@ -295,10 +296,22 @@ func parseApprovalForAllEvent(log txLog) *SimEvent {
 	}
 }
 
-// DetectApproval checks if simulation events contain approval grants for any managed signer.
-// Only looks at Approval/ApprovalForAll events where owner is a managed signer and value > 0.
-// value=0 approvals are skipped (emitted by ERC20 transferFrom as side effect).
-func DetectApproval(events []SimEvent, managedSigners map[string]bool) bool {
+// AllowanceQuerier queries on-chain ERC20 allowance for approval detection.
+type AllowanceQuerier interface {
+	// QueryAllowance returns the current on-chain allowance(owner, spender) for a token.
+	QueryAllowance(ctx context.Context, chainID, token, owner, spender string) (*big.Int, error)
+}
+
+// DetectApproval checks if simulation events contain REAL approval grants (not transferFrom side effects).
+//
+// For ERC20 Approval events: queries on-chain allowance and compares with event value.
+// If event.value > on-chain allowance → allowance increased → real approval → return true.
+// If event.value ≤ on-chain allowance → transferFrom consumed some → side effect → skip.
+//
+// For ApprovalForAll: no side-effect issue (transferFrom doesn't emit it), checked directly.
+//
+// If querier is nil, falls back to value>0 heuristic (less accurate).
+func DetectApproval(ctx context.Context, events []SimEvent, managedSigners map[string]bool, chainID string, querier AllowanceQuerier) bool {
 	for _, event := range events {
 		if event.Event != "Approval" && event.Event != "ApprovalForAll" {
 			continue
@@ -307,10 +320,42 @@ func DetectApproval(events []SimEvent, managedSigners map[string]bool) bool {
 		if len(managedSigners) > 0 && !managedSigners[owner] {
 			continue
 		}
+
+		// ApprovalForAll: no transferFrom side-effect issue, check directly
+		if event.Event == "ApprovalForAll" {
+			return true
+		}
+
+		// ERC20 Approval: check if allowance actually increased
 		val := event.Args["value"]
 		if val == "0" || val == "" {
 			continue
 		}
+
+		spender := strings.ToLower(event.Args["spender"])
+		token := strings.ToLower(event.Address)
+
+		eventValue := new(big.Int)
+		if _, ok := eventValue.SetString(val, 10); !ok {
+			// Can't parse value, treat as suspicious
+			return true
+		}
+
+		// Query on-chain allowance to compare
+		if querier != nil && chainID != "" && token != "" && spender != "" {
+			currentAllowance, err := querier.QueryAllowance(ctx, chainID, token, owner, spender)
+			if err == nil && currentAllowance != nil {
+				if eventValue.Cmp(currentAllowance) <= 0 {
+					// event.value ≤ current allowance → transferFrom consumed some → not a new approval
+					continue
+				}
+				// event.value > current allowance → allowance increased → real approval
+				return true
+			}
+			// Query failed, fall through to suspicious
+		}
+
+		// No querier or query failed → treat non-zero approval as suspicious
 		return true
 	}
 	return false

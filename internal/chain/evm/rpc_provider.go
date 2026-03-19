@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"regexp"
@@ -323,6 +324,36 @@ func (p *RPCProvider) GetTransactionReceipt(ctx context.Context, chainID, txHash
 	}
 	params := []interface{}{txHash}
 	return p.doRPCRaw(ctx, chainID, "eth_getTransactionReceipt", params)
+}
+
+// QueryAllowance queries on-chain ERC20 allowance(owner, spender) for a token contract.
+// Returns the current allowance as *big.Int.
+func (p *RPCProvider) QueryAllowance(ctx context.Context, chainID, token, owner, spender string) (*big.Int, error) {
+	// allowance(address,address) selector = 0xdd62ed3e
+	// Encode: selector + padded owner + padded spender
+	ownerPadded := fmt.Sprintf("%064s", strings.TrimPrefix(strings.ToLower(owner), "0x"))
+	spenderPadded := fmt.Sprintf("%064s", strings.TrimPrefix(strings.ToLower(spender), "0x"))
+	data := "0xdd62ed3e" + ownerPadded + spenderPadded
+
+	params := []interface{}{
+		map[string]string{"to": token, "data": data},
+		"latest",
+	}
+	result, err := p.doRPCUnchecked(ctx, chainID, "eth_call", params)
+	if err != nil {
+		return nil, fmt.Errorf("allowance query failed: %w", err)
+	}
+
+	// Parse hex result
+	result = strings.TrimPrefix(result, "0x")
+	if result == "" {
+		return big.NewInt(0), nil
+	}
+	val := new(big.Int)
+	if _, ok := val.SetString(result, 16); !ok {
+		return nil, fmt.Errorf("invalid allowance response: %s", result)
+	}
+	return val, nil
 }
 
 // doRPCUnchecked performs a JSON-RPC call without allowedRPCMethods check.
