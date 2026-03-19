@@ -321,7 +321,8 @@ func (s *rpcSimulator) parseCallResult(call ethSimCallResult, from, to, value st
 	success := call.Status == "0x1"
 
 	// Parse events from logs (reuse existing parser)
-	events := ParseEvents(ethSimLogsToTxLogs(call.Logs))
+	rawLogs := ethSimLogsToTxLogs(call.Logs)
+	events := ParseEvents(rawLogs)
 	balanceChanges := ComputeBalanceChanges(events, from, to, value)
 
 	// Mark HasApproval if any approval event exists (unfiltered).
@@ -333,6 +334,7 @@ func (s *rpcSimulator) parseCallResult(call ethSimCallResult, from, to, value st
 		GasUsed:        gasUsed,
 		BalanceChanges: balanceChanges,
 		Events:         events,
+		RawLogs:        rawLogs,
 		HasApproval:    hasApproval,
 	}
 

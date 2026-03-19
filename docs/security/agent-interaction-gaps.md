@@ -6,13 +6,13 @@ Tracks known security gaps in agent free-interaction scenarios. Each gap has a p
 
 ### GAP-1: Multicall wrapping bypasses blocklist
 - **Attack**: Agent sends multicall/batch, internally calls transferOwnership. Top-level selector is multicall, not in blocklist.
-- **Status**: TODO
-- **Fix**: Add multicall/batch selectors to agent-safety blocklist. When detected, require manual approval (treat like approve).
+- **Status**: FIXED
+- **Fix**: Simulation-level dangerous event detection (OwnershipTransferred, ApprovalForAll, Upgraded, AdminChanged). Catches dangerous operations regardless of how triggered (direct call, multicall, etc.). Blocklist is fast-fail only; simulation is the real security boundary.
 
 ### GAP-2: Gas fees not counted in simulation budget
 - **Attack**: Agent sets gasPrice=1000 Gwei, each tx burns large MATIC. Budget only tracks token outflow, not gas.
-- **Status**: TODO
-- **Fix**: In simulation budget rule, add gasUsed × effectiveGasPrice to native outflow.
+- **Status**: FIXED
+- **Fix**: Gas cost (gasUsed × gasFeeCap/gasPrice) added as native outflow in simulation budget rule.
 
 ## MEDIUM Priority
 
