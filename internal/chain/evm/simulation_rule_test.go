@@ -7,6 +7,7 @@ import (
 	"math/big"
 	"os"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -800,3 +801,67 @@ func TestCheckBudgetFromBalanceChanges_DenyOnUnitLimitReached(t *testing.T) {
 
 // Ensure unused import for storage.ErrBudgetExceeded (used by mock)
 var _ = storage.ErrBudgetExceeded
+
+// ─────────────────────────────────────────────────────────────────────────────
+// V3-6: Simulation autoCreateBudget TOCTOU — post-create verification
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestAutoCreateBudget_TOCTOU_ConcurrentUnitsRespectMax verifies that concurrent
+// creation of simulation budget units for different tokens respects MaxDynamicUnits.
+func TestAutoCreateBudget_TOCTOU_ConcurrentUnitsRespectMax(t *testing.T) {
+	const maxUnits = 3
+	const numGoroutines = 10
+
+	repo := newMockSimBudgetRepo()
+	defaults := &SimBudgetDefaults{
+		ERC20MaxTotal:   "100",
+		ERC20MaxPerTx:   "50",
+		MaxDynamicUnits: maxUnits,
+	}
+	dq := newMockDecimalsQuerier()
+	for i := 0; i < numGoroutines; i++ {
+		dq.setDecimals("1", fmt.Sprintf("0xtoken%d", i), 6)
+	}
+
+	r, err := NewSimulationBudgetRule(&mockSimulator{}, repo, defaults, dq, nil, nil, simTestLogger())
+	require.NoError(t, err)
+
+	syntheticRuleID := types.RuleID("sim:0xsigner")
+
+	var wg sync.WaitGroup
+	var successCount int32
+	var errorCount int32
+
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			token := fmt.Sprintf("0xtoken%d", idx)
+			unit := fmt.Sprintf("1:%s", token)
+			_, createErr := r.autoCreateBudget(context.Background(), "1", "0xsigner", token, syntheticRuleID, unit)
+			if createErr != nil {
+				atomic.AddInt32(&errorCount, 1)
+			} else {
+				atomic.AddInt32(&successCount, 1)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	// Count actual budgets stored
+	repo.mu.Lock()
+	finalCount := 0
+	for key := range repo.budgets {
+		if len(key) > len(string(syntheticRuleID))+1 && key[:len(string(syntheticRuleID))+1] == string(syntheticRuleID)+":" {
+			finalCount++
+		}
+	}
+	repo.mu.Unlock()
+
+	t.Logf("successes=%d errors=%d final_budget_count=%d", successCount, errorCount, finalCount)
+
+	assert.LessOrEqual(t, finalCount, maxUnits,
+		"final budget count must not exceed MaxDynamicUnits (%d), got %d", maxUnits, finalCount)
+	assert.Greater(t, int(successCount), 0, "at least one goroutine should succeed")
+	assert.Greater(t, int(errorCount), 0, "excess goroutines should fail")
+}

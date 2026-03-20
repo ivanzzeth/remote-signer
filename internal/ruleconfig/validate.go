@@ -211,6 +211,10 @@ func validateJSRuleConfig(config map[string]interface{}) error {
 	if len(script) > maxJSScriptLength {
 		return fmt.Errorf("config.script exceeds maximum size (%d bytes, max %d)", len(script), maxJSScriptLength)
 	}
+	// Static security check: block dangerous JS patterns (prototype pollution, sandbox escape, etc.)
+	if err := validate.ValidateJSCodeSecurity(script); err != nil {
+		return fmt.Errorf("config.script security check failed: %w", err)
+	}
 	if v, ok := config["sign_type_filter"]; ok && v != nil {
 		s, ok := v.(string)
 		if !ok {

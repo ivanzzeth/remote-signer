@@ -6,40 +6,20 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
-	"regexp"
 	"strings"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/validate"
 )
-
-// dangerousJSPatterns contains regex patterns for dangerous JavaScript constructs.
-// These are checked before rule execution as a defense-in-depth layer alongside
-// the runtime sandbox (removeGlobals()).
-var dangerousJSPatterns = []*regexp.Regexp{
-	// Prototype pollution / sandbox escape
-	regexp.MustCompile(`__proto__`),                          // direct prototype manipulation
-	regexp.MustCompile(`constructor\s*\.\s*constructor`),     // sandbox escape via "".constructor.constructor("return this")()
-	regexp.MustCompile(`Object\s*\.\s*getPrototypeOf`),       // prototype chain exploration
-	regexp.MustCompile(`Object\s*\.\s*setPrototypeOf`),       // prototype chain modification
-	regexp.MustCompile(`Object\s*\.\s*defineProperty`),       // property hijacking via getter/setter redefinition
-
-	// Dynamic code execution
-	regexp.MustCompile(`\bFunction\s*\(`),  // new Function("...") is equivalent to eval
-	regexp.MustCompile(`\bimport\s*\(`),    // dynamic import()
-
-	// Node.js dangerous modules
-	regexp.MustCompile(`\bchild_process\b`), // command execution via child_process
-}
 
 // ValidateJSCodeSecurity checks JavaScript code for dangerous patterns.
 // Returns nil if code is safe, or SecurityError if dangerous patterns are found.
+// Delegates to the shared validate.ValidateJSCodeSecurity and wraps the result.
 func ValidateJSCodeSecurity(code string) *SecurityError {
-	for _, pattern := range dangerousJSPatterns {
-		if pattern.MatchString(code) {
-			return &SecurityError{
-				Pattern: pattern.String(),
-				Message: fmt.Sprintf("dangerous pattern detected: %s - this construct is not allowed in JS rules for security reasons", pattern.String()),
-			}
+	if err := validate.ValidateJSCodeSecurity(code); err != nil {
+		return &SecurityError{
+			Pattern: "js_security",
+			Message: err.Error(),
 		}
 	}
 	return nil

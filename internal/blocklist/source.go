@@ -37,7 +37,12 @@ func NewSource(cfg SourceConfig, httpClient *http.Client) (Source, error) {
 		return nil, fmt.Errorf("source %q: url must start with http:// or https:// (got %q)", cfg.Name, cfg.URL)
 	}
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 30 * time.Second}
+		httpClient = &http.Client{
+			Timeout: 30 * time.Second,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
 	}
 	switch cfg.Type {
 	case "url_text":
