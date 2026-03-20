@@ -519,9 +519,31 @@ func (r *SimulationBudgetRule) autoCreateBudget(
 		AlertPct: 80,
 	}
 
-	created, _, createErr := r.budgetRepo.CreateOrGet(ctx, newBudget)
+	result, wasCreated, createErr := r.budgetRepo.CreateOrGet(ctx, newBudget)
 	if createErr != nil {
 		return nil, fmt.Errorf("failed to auto-create simulation budget: %w", createErr)
+	}
+
+	if wasCreated {
+		// SECURITY (V3-6): Post-create verification to catch TOCTOU race on MaxDynamicUnits.
+		// Multiple concurrent requests for different tokens can all pass the pre-create count
+		// check and create records, exceeding MaxDynamicUnits. Re-check after creation and
+		// roll back if limit is now exceeded.
+		postCount, countErr := r.budgetRepo.CountByRuleID(ctx, syntheticRuleID)
+		if countErr != nil {
+			if delErr := r.budgetRepo.Delete(ctx, newBudget.ID); delErr != nil {
+				r.logger.Error("failed to delete budget after count error",
+					"signer", signerAddress, "unit", unit, "error", delErr)
+			}
+			return nil, fmt.Errorf("failed to re-count simulation budget units after create: %w", countErr)
+		}
+		if postCount > maxUnits {
+			if delErr := r.budgetRepo.Delete(ctx, newBudget.ID); delErr != nil {
+				r.logger.Error("failed to delete excess simulation budget",
+					"signer", signerAddress, "unit", unit, "error", delErr)
+			}
+			return nil, fmt.Errorf("simulation budget unit limit exceeded after race (%d/%d) for signer %s", postCount, maxUnits, signerAddress)
+		}
 	}
 
 	r.logger.Info("auto-created simulation budget",
@@ -532,7 +554,7 @@ func (r *SimulationBudgetRule) autoCreateBudget(
 		"max_total", maxTotal,
 		"max_per_tx", maxPerTx,
 	)
-	return created, nil
+	return result, nil
 }
 
 // humanToRaw converts a human-readable decimal string to raw integer with the given decimals.

@@ -231,6 +231,10 @@ func (s *SignService) Sign(ctx context.Context, req *SignRequest) (*SignResponse
 				"reason", blockedErr.Reason,
 			)
 			// Reject immediately - no manual approval possible
+			// SECURITY NOTE (V3-5): Rule names are intentionally included in error responses
+			// to help agents and clients understand which security policy blocked their request.
+			// Rule names are generic (e.g., "Agent Safety") and do not expose specific configuration
+			// details. Accepted risk per security audit v3.
 			rejectReason := fmt.Sprintf("blocked by rule %s: %s", blockedErr.RuleName, blockedErr.Reason)
 			if _, smErr := s.stateMachine.RejectOnAuthorization(ctx, signReq.ID, "system", rejectReason); smErr != nil {
 				s.logger.Error("failed to reject blocked request", "error", smErr)

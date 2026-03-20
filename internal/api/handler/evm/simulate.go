@@ -150,6 +150,10 @@ func (h *SimulateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, resp, http.StatusOK)
 }
 
+// maxBatchSimulateSize is the maximum number of transactions in a single batch simulate request.
+// Consistent with maxBatchSize in sign_batch.go.
+const maxBatchSimulateSize = 20
+
 // ServeBatchHTTP handles POST /api/v1/evm/simulate/batch.
 func (h *SimulateHandler) ServeBatchHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -173,6 +177,10 @@ func (h *SimulateHandler) ServeBatchHTTP(w http.ResponseWriter, r *http.Request)
 	}
 	if len(req.Transactions) == 0 {
 		h.writeError(w, "transactions is required and must not be empty", http.StatusBadRequest)
+		return
+	}
+	if len(req.Transactions) > maxBatchSimulateSize {
+		h.writeError(w, fmt.Sprintf("batch size %d exceeds maximum %d", len(req.Transactions), maxBatchSimulateSize), http.StatusBadRequest)
 		return
 	}
 

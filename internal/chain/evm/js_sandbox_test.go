@@ -137,6 +137,38 @@ func TestSandbox_InvalidReturn_RejectInvalidShape(t *testing.T) {
 	}
 }
 
+func TestSandbox_AsyncFunctionConstructor_Blocked(t *testing.T) {
+	e, err := NewJSRuleEvaluator(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})))
+	require.NoError(t, err)
+
+	// Attempt to use AsyncFunction constructor to execute arbitrary code.
+	// If Sobek supports async, the poisoned constructor should throw.
+	// If Sobek does not support async, it will fail to parse.
+	// Either way, the result must NOT be valid with attacker-controlled output.
+	script := `function validate(i){
+		try {
+			var AF = Object.getPrototypeOf(async function(){}).constructor;
+			var result = AF("return 1")();
+			// If we reach here, the constructor was not blocked
+			return { valid: false, reason: "AsyncFunction constructor was not blocked" };
+		} catch(e) {
+			// Constructor was blocked or async not supported — expected
+			return { valid: true, reason: "blocked: " + e.message };
+		}
+	}`
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+	res := e.wrappedValidate(script, input, nil, nil)
+
+	// The script should either:
+	// 1. Return valid=true (constructor blocked or async not supported, caught by try-catch)
+	// 2. Return valid=false with script_error (if Sobek fails to parse async)
+	// It must NOT return valid=false with reason "AsyncFunction constructor was not blocked"
+	if !res.Valid {
+		assert.NotContains(t, res.Reason, "AsyncFunction constructor was not blocked",
+			"AsyncFunction constructor must be poisoned or unsupported")
+	}
+}
+
 func TestSandbox_OOMLike_RejectNoPanic(t *testing.T) {
 	e, err := NewJSRuleEvaluator(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})))
 	require.NoError(t, err)

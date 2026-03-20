@@ -245,8 +245,16 @@ func (bc *BudgetChecker) CheckAndDeductBudget(
 		"tx_count_after", budget.TxCount+1,
 	)
 
-	// #nosec G118 -- intentional: async alert check must outlive request context
-	go bc.checkAlertThreshold(rule.ID, unit, budget)
+	// SECURITY (V3-9): Re-fetch budget after AtomicSpend so alert goroutine sees post-spend data.
+	// The budget variable above is a pre-spend snapshot; using it would cause the alert to
+	// evaluate against stale Spent values, potentially missing threshold crossings.
+	freshBudget, freshErr := bc.budgetRepo.GetByRuleID(ctx, rule.ID, unit)
+	if freshErr != nil {
+		bc.logger.Warn("failed to fetch fresh budget for alert check", "error", freshErr)
+	} else {
+		// #nosec G118 -- intentional: async alert check must outlive request context
+		go bc.checkAlertThreshold(rule.ID, unit, freshBudget)
+	}
 
 	return true, nil
 }
@@ -346,8 +354,14 @@ func (bc *BudgetChecker) checkDynamicBudget(
 		"tx_count_after", budget.TxCount+1,
 	)
 
-	// #nosec G118 -- intentional: async alert check must outlive request context
-	go bc.checkAlertThreshold(rule.ID, unit, budget)
+	// SECURITY (V3-9): Re-fetch budget after AtomicSpend so alert goroutine sees post-spend data.
+	freshBudget, freshErr := bc.budgetRepo.GetByRuleID(ctx, rule.ID, unit)
+	if freshErr != nil {
+		bc.logger.Warn("failed to fetch fresh budget for alert check", "error", freshErr)
+	} else {
+		// #nosec G118 -- intentional: async alert check must outlive request context
+		go bc.checkAlertThreshold(rule.ID, unit, freshBudget)
+	}
 
 	return true, nil
 }
@@ -495,6 +509,28 @@ func (bc *BudgetChecker) autoCreateDynamicBudget(
 	}
 
 	if created {
+		// SECURITY (V3-6): Post-create verification to catch TOCTOU race on MaxDynamicUnits.
+		// Multiple concurrent requests for different units can all pass the pre-create count
+		// check and create records, exceeding MaxDynamicUnits. Re-check after creation and
+		// roll back if limit is now exceeded.
+		postCount, countErr := bc.budgetRepo.CountByRuleID(ctx, rule.ID)
+		if countErr != nil {
+			// Count failed — delete the just-created record to be safe (fail-closed).
+			if delErr := bc.budgetRepo.Delete(ctx, budget.ID); delErr != nil {
+				bc.logger.Error("failed to delete budget after count error",
+					"rule_id", rule.ID, "unit", normalizedUnit, "error", delErr)
+			}
+			return nil, fmt.Errorf("failed to re-count dynamic units after create: %w", countErr)
+		}
+		if postCount > maxUnits {
+			// Race condition: another concurrent request also created a unit, exceeding the limit.
+			if delErr := bc.budgetRepo.Delete(ctx, budget.ID); delErr != nil {
+				bc.logger.Error("failed to delete excess dynamic budget",
+					"rule_id", rule.ID, "unit", normalizedUnit, "error", delErr)
+			}
+			return nil, fmt.Errorf("dynamic budget unit limit exceeded after race (%d/%d) for rule %s", postCount, maxUnits, rule.ID)
+		}
+
 		bc.logger.Info("auto-created dynamic budget record",
 			"rule_id", rule.ID,
 			"unit", normalizedUnit,

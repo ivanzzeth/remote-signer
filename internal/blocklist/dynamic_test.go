@@ -421,3 +421,34 @@ func TestNewDynamicBlocklist_ValidationErrors(t *testing.T) {
 		})
 	}
 }
+
+// TestSource_DefaultClientDoesNotFollowRedirects verifies that the default HTTP
+// client (created when nil is passed to NewSource) does not follow redirects.
+// This prevents SSRF via open-redirect chains.
+func TestSource_DefaultClientDoesNotFollowRedirects(t *testing.T) {
+	// Target server (should NOT be reached).
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("redirect target was reached; default client should not follow redirects")
+		w.Write([]byte("0xd882cFc20F52f2599D84b8e8D58C7FB62cfE344b\n"))
+	}))
+	defer target.Close()
+
+	// Redirector: sends 302 to the target.
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	defer redirector.Close()
+
+	// Create source with nil httpClient (uses default with CheckRedirect).
+	src, err := NewSource(SourceConfig{
+		Name: "redirect-test",
+		Type: "url_text",
+		URL:  redirector.URL,
+	}, nil)
+	require.NoError(t, err)
+
+	_, err = src.Fetch(context.Background())
+	// The fetch should fail because the 302 response is returned as-is (not 200).
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "HTTP 302")
+}

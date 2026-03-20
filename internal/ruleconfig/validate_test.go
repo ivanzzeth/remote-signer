@@ -736,6 +736,87 @@ func TestValidateJSRuleConfig_ExtraBranches(t *testing.T) {
 
 // ---------- validateSignTypeRestrictionConfig: non-array non-string type (was 94.1%) ----------
 
+// ---------- V3-4: validateJSRuleConfig calls ValidateJSCodeSecurity ----------
+
+func TestValidateJSRuleConfig_DangerousPatternsRejected(t *testing.T) {
+	tests := []struct {
+		name   string
+		script string
+		errMsg string
+	}{
+		{
+			name:   "__proto__ manipulation",
+			script: `function validate(i){ i.__proto__.polluted = true; return { valid: true }; }`,
+			errMsg: "dangerous pattern",
+		},
+		{
+			name:   "constructor.constructor escape",
+			script: `function validate(i){ return "".constructor.constructor("return this")(); }`,
+			errMsg: "dangerous pattern",
+		},
+		{
+			name:   "Object.defineProperty hijacking",
+			script: `function validate(i){ Object.defineProperty({}, 'x', {get: function(){}}); return { valid: true }; }`,
+			errMsg: "dangerous pattern",
+		},
+		{
+			name:   "Object.getPrototypeOf exploration",
+			script: `function validate(i){ Object.getPrototypeOf({}); return { valid: true }; }`,
+			errMsg: "dangerous pattern",
+		},
+		{
+			name:   "Object.setPrototypeOf modification",
+			script: `function validate(i){ Object.setPrototypeOf({}, null); return { valid: true }; }`,
+			errMsg: "dangerous pattern",
+		},
+		{
+			name:   "new Function() code execution",
+			script: `function validate(i){ var f = Function("return 1"); return { valid: true }; }`,
+			errMsg: "dangerous pattern",
+		},
+		{
+			name:   "dynamic import()",
+			script: `function validate(i){ import("os"); return { valid: true }; }`,
+			errMsg: "dangerous pattern",
+		},
+		{
+			name:   "child_process module",
+			script: `function validate(i){ require("child_process"); return { valid: true }; }`,
+			errMsg: "dangerous pattern",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := map[string]interface{}{
+				"script": tt.script,
+			}
+			err := ValidateRuleConfig("evm_js", config)
+			if err == nil {
+				t.Errorf("expected error for dangerous pattern in script %q", tt.name)
+				return
+			}
+			if !strings.Contains(err.Error(), tt.errMsg) {
+				t.Errorf("error = %v, want message containing %q", err.Error(), tt.errMsg)
+			}
+		})
+	}
+}
+
+func TestValidateJSRuleConfig_SafeScriptAccepted(t *testing.T) {
+	config := map[string]interface{}{
+		"script": `function validate(input) {
+			if (input.value > 1000000000000000000) {
+				return { valid: false, reason: "value too high" };
+			}
+			return { valid: true };
+		}`,
+	}
+	err := ValidateRuleConfig("evm_js", config)
+	if err != nil {
+		t.Errorf("expected no error for safe script, got: %v", err)
+	}
+}
+
 func TestValidateSignTypeRestrictionConfig_NonArrayNonString(t *testing.T) {
 	err := ValidateRuleConfig("sign_type_restriction", map[string]interface{}{
 		"allowed_sign_types": 12345,

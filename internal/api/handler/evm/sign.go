@@ -191,55 +191,49 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	chainType := string(types.ChainTypeEVM)
 
 	if err != nil {
-		if types.IsSignerLocked(err) {
-			h.logger.Warn("signer is locked",
-				"signer_address", req.SignerAddress,
-				"sign_type", req.SignType,
-				"chain_id", req.ChainID,
-			)
-			metrics.RecordSignRequestDuration(chainType, req.SignType, metrics.SignOutcomeError, duration)
-			h.writeError(w, fmt.Sprintf("signer is locked: %s — unlock via POST /api/v1/evm/signers/%s/unlock", req.SignerAddress, req.SignerAddress), http.StatusForbidden)
-			return
-		}
-		if types.IsNotFound(err) || types.IsSignerNotFound(err) {
+		// SECURITY NOTE (V3-10): Different responses for locked vs not-found signers are intentional.
+		// AI agents need to distinguish these states to guide human operators (e.g., "unlock signer"
+		// vs "signer doesn't exist"). This endpoint is behind authentication + signer access control,
+		// so only authorized users see this information. Accepted risk per security audit v3.
+		errResult := categorizeSignError(err, req.SignerAddress)
+
+		// Choose appropriate log level and metrics outcome based on error category
+		outcome := metrics.SignOutcomeError
+		switch errResult.StatusCode {
+		case http.StatusNotFound:
+			outcome = metrics.SignOutcomeNotFound
 			h.logger.Warn("signer not found",
 				"signer_address", req.SignerAddress,
 				"sign_type", req.SignType,
 				"chain_id", req.ChainID,
 			)
-			metrics.RecordSignRequestDuration(chainType, req.SignType, metrics.SignOutcomeNotFound, duration)
-			h.writeError(w, fmt.Sprintf("signer not found: %s", req.SignerAddress), http.StatusNotFound)
-			return
-		}
-		if errors.Is(err, types.ErrInvalidPayload) {
+		case http.StatusForbidden:
+			if errors.Is(err, service.ErrManualApprovalDisabled) {
+				outcome = metrics.SignOutcomeRejected
+			}
+			h.logger.Warn("sign request forbidden",
+				"signer_address", req.SignerAddress,
+				"sign_type", req.SignType,
+				"chain_id", req.ChainID,
+			)
+		case http.StatusBadRequest:
 			h.logger.Warn("invalid payload",
 				"error", err,
 				"signer_address", req.SignerAddress,
 				"sign_type", req.SignType,
 				"chain_id", req.ChainID,
 			)
-			metrics.RecordSignRequestDuration(chainType, req.SignType, metrics.SignOutcomeError, duration)
-			h.writeError(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if errors.Is(err, service.ErrManualApprovalDisabled) {
-			h.logger.Warn("request rejected: no matching rule and manual approval disabled",
+		default:
+			h.logger.Error("sign request failed",
+				"error", err,
 				"signer_address", req.SignerAddress,
 				"sign_type", req.SignType,
 				"chain_id", req.ChainID,
 			)
-			metrics.RecordSignRequestDuration(chainType, req.SignType, metrics.SignOutcomeRejected, duration)
-			h.writeError(w, "no matching rule and manual approval is disabled", http.StatusForbidden)
-			return
 		}
-		h.logger.Error("sign request failed",
-			"error", err,
-			"signer_address", req.SignerAddress,
-			"sign_type", req.SignType,
-			"chain_id", req.ChainID,
-		)
-		metrics.RecordSignRequestDuration(chainType, req.SignType, metrics.SignOutcomeError, duration)
-		h.writeError(w, "sign request failed", http.StatusInternalServerError)
+
+		metrics.RecordSignRequestDuration(chainType, req.SignType, outcome, duration)
+		h.writeError(w, errResult.Message, errResult.StatusCode)
 		return
 	}
 

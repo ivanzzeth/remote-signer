@@ -667,7 +667,7 @@ func removeGlobals(vm *sobek.Runtime) error {
 	// SECURITY: Poison Function.prototype.constructor to prevent sandbox escape via
 	// (function(){}).constructor("return malicious_code")() — merely setting Function
 	// to undefined is NOT enough since the constructor is still on the prototype chain.
-	// Also freeze GeneratorFunction constructor via the same pattern.
+	// Also freeze GeneratorFunction and AsyncFunction constructors via the same pattern.
 	if _, err := vm.RunString(`
 		(function(){
 			var noop = function(){throw new Error("Function constructor is disabled");};
@@ -676,6 +676,13 @@ func removeGlobals(vm *sobek.Runtime) error {
 			try {
 				var GP = (function*(){}).constructor.prototype;
 				Object.defineProperty(GP, "constructor", {value: noop, writable: false, configurable: false});
+			} catch(e) {}
+			// Poison AsyncFunction constructor (defense-in-depth).
+			// Sobek may not support async function syntax; try-catch ensures graceful skip.
+			try {
+				var afNoop = function(){throw new Error("AsyncFunction constructor is disabled");};
+				var AF = Object.getPrototypeOf(async function(){});
+				Object.defineProperty(AF, "constructor", {value: afNoop, writable: false, configurable: false});
 			} catch(e) {}
 		})();
 	`); err != nil {

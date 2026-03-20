@@ -281,6 +281,10 @@ func (h *BatchSignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					"reason", blockedErr.Reason,
 				)
 				metrics.RecordSignRequestDuration(string(types.ChainTypeEVM), "transaction", metrics.SignOutcomeRejected, time.Since(start))
+				// SECURITY NOTE (V3-5): Rule names are intentionally included in error responses
+				// to help agents and clients understand which security policy blocked their request.
+				// Rule names are generic (e.g., "Agent Safety") and do not expose specific configuration
+				// details. Accepted risk per security audit v3.
 				h.writeError(w, fmt.Sprintf("batch rejected: tx %d blocked by rule %s: %s", i, blockedErr.RuleName, blockedErr.Reason), http.StatusForbidden)
 				return
 			}
@@ -366,9 +370,10 @@ func (h *BatchSignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		resp, signErr := h.signService.Sign(signCtx, signReq)
 		if signErr != nil {
+			errResult := categorizeSignError(signErr, item.SignerAddress)
 			h.logger.Error("batch sign failed for tx", "index", i, "error", signErr)
 			metrics.RecordSignRequestDuration(string(types.ChainTypeEVM), "transaction", metrics.SignOutcomeError, time.Since(start))
-			h.writeError(w, fmt.Sprintf("batch sign failed at tx %d: %s", i, signErr.Error()), http.StatusInternalServerError)
+			h.writeError(w, fmt.Sprintf("batch sign failed at tx %d: %s", i, errResult.Message), errResult.StatusCode)
 			return
 		}
 
