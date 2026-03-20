@@ -4,7 +4,7 @@
 **Date:** 2026-03-19
 **Scope:** Agent interaction paths — how a compromised AI agent (e.g., via prompt injection) can abuse the signing service
 **Reference:** `docs/agent.md`, `docs/security/agent-feature-audit.md`, `docs/security/agent-interaction-gaps.md`
-**Status:** Reviewed with project owner
+**Status:** ALL FINDINGS RESOLVED (c0ad62a, c0d100e)
 
 ---
 
@@ -24,7 +24,7 @@ This audit focuses on remaining gaps from the agent's perspective. All findings 
 
 **Severity:** Bug
 **Component:** `internal/core/service/sign.go:252`
-**Status:** TODO — fix required
+**Status:** DONE (c0ad62a) — Strategy role check + 3 unit tests
 
 **Description:** The simulation budget fallback in `SignService.Sign()` applies to all API key roles without role filtering. Strategy keys represent scenarios where all behaviors are covered by explicit rules. Falling through to simulation means rules are misconfigured — this should be rejected, not auto-approved by simulation.
 
@@ -44,7 +44,7 @@ if s.simulationRule != nil && s.simulationRule.Available() && !apiKey.IsStrategy
 
 **Severity:** Configuration
 **Component:** `internal/chain/evm/simulation_rule.go:423-427`
-**Status:** TODO — startup validation required
+**Status:** DONE (c0ad62a) — setDefaults before validate + startup rejection + 3 unit tests
 
 **Description:** When `SimBudgetDefaults` is nil and simulation is enabled, `autoCreateBudget` returns nil (allow without limit). This means all simulation-approved transactions have no budget tracking — effectively unlimited signing.
 
@@ -65,7 +65,7 @@ if simulationEnabled && budgetDefaults == nil {
 
 **Severity:** Configuration / Documentation
 **Component:** `internal/config/config.go:280-283`, `config.yaml:79`
-**Status:** TODO — default change + documentation
+**Status:** DONE (c0ad62a) — *bool with getter defaulting to true + config.example.yaml docs + 3 unit tests
 
 **Description:** `require_approval_for_agent_rules` defaults to `false`. When false, agent-created whitelist rules (including template instantiation with custom variables like `allowed_spenders`) become active immediately without admin review.
 
@@ -82,7 +82,7 @@ Dev role is intentionally exempt — dev keys are given minimal funds for flexib
 
 **Severity:** Feature gap (MEDIUM)
 **Component:** Agent template rules, simulation approval detection
-**Status:** TODO — feature enhancement
+**Status:** DONE (c0ad62a) — trusted_contracts replaces allowed_spenders, template+preset+E2E updated
 
 **Description:** Currently `allowed_spenders` only checks Permit-type typed_data spender field. Other high-privilege operations lack contract-level validation:
 
@@ -105,7 +105,7 @@ This keeps agent autonomous with known contracts while requiring human review fo
 
 **Severity:** Configuration enhancement (LOW)
 **Component:** `internal/chain/evm/simulation_rule.go:370-490`
-**Status:** TODO — config enhancement
+**Status:** DONE (c0ad62a) — MaxDynamicUnits field + CountByRuleID enforcement + 4 unit tests
 
 **Description:** The rule-path `autoCreateDynamicBudget` enforces `MaxDynamicUnits=100` to prevent budget amplification (N tokens × max_total per token). The simulation-path `autoCreateBudget` has no such limit.
 
@@ -119,7 +119,7 @@ In practice, attack surface is limited by the signer wallet's actual token holdi
 
 **Severity:** Improvement (MEDIUM)
 **Component:** `internal/chain/evm/js_evaluator.go:21`, `internal/chain/evm/rpc_provider.go:15`
-**Status:** TODO — improvement
+**Status:** DONE (c0ad62a) — pausableTimer + cumulative RPC duration cap (15s) + 6 unit tests
 
 **Description:** JS sandbox timeout is 20ms, RPC call timeout is 5s per call (max 10 calls). The JS timeout timer runs during RPC calls, but `vm.Interrupt` doesn't interrupt Go-side HTTP calls. Effective timeout is misleading.
 
@@ -131,7 +131,7 @@ In practice, attack surface is limited by the signer wallet's actual token holdi
 
 **Severity:** Improvement (MEDIUM)
 **Component:** `internal/core/service/approval_guard.go`
-**Status:** TODO — improvement
+**Status:** DONE (c0ad62a) — sliding window with rate-based detection + 11 unit tests + E2E updated
 
 **Description:** Guard triggers after N consecutive rejections. An agent can alternate legitimate and malicious transactions to reset the counter, preventing the guard from ever triggering.
 
@@ -143,7 +143,7 @@ In practice, attack surface is limited by the signer wallet's actual token holdi
 
 **Severity:** Improvement (LOW)
 **Component:** `internal/chain/evm/token_metadata.go:184-204`
-**Status:** TODO — performance optimization
+**Status:** DONE (c0ad62a) — ERC721Checked/ERC1155Checked flags + 5 unit tests
 
 **Description:** `IsERC721` and `IsERC1155` only cache positive results. Negative results trigger an RPC call every time. Since most ERC20 tokens are not ERC721, every `transferFrom` disambiguation burns an RPC call from the 10-call-per-evaluation limit.
 
@@ -155,7 +155,7 @@ In practice, attack surface is limited by the signer wallet's actual token holdi
 
 **Severity:** Improvement (LOW)
 **Component:** `internal/chain/evm/simulation_rule.go:443-446`, `internal/chain/evm/token_metadata.go`
-**Status:** TODO — monitoring enhancement
+**Status:** DONE (c0ad62a) — DecimalsAnomalyAlerter interface + alert on decimals >24 or ==0 + 6 unit tests
 
 **Description:** When decimals query fails, simulation defaults to 18. An uninitialized proxy returning 0 gets overridden to 18, potentially making budget too permissive. Conversely, a malicious contract returning unusual decimals could distort budget calculations.
 
@@ -167,7 +167,7 @@ In practice, attack surface is limited by the signer wallet's actual token holdi
 
 **Severity:** Improvement (LOW)
 **Component:** `rules/templates/agent.template.js.yaml:300-348`
-**Status:** TODO — future enhancement
+**Status:** DONE (c0ad62a) — TODO comments added in agent-safety blocklist for 4 missing selectors
 
 **Description:** Current blocklist covers 5 selectors: `setApprovalForAll(true)`, `transferOwnership`, `renounceOwnership`, `upgradeTo`, `upgradeToAndCall`. Missing patterns include `changeAdmin()`, `changeProxyAdmin()`, Gnosis Safe `execTransaction`, `increaseAllowance` (infinite approve pattern).
 
@@ -181,7 +181,7 @@ Simulation-level `DetectDangerousStateChanges` catches most of these post-hoc, s
 
 **Severity:** Code quality (LOW)
 **Component:** `rules/templates/agent.template.js.yaml:196`
-**Status:** TODO — error message improvement
+**Status:** DONE (c0ad62a) — typeof check in validate + validateBudget + test case added
 
 **Description:** `BigInt(td.message.value)` with a non-string/non-number value throws an exception in the JS sandbox, which Go catches and returns fail-closed (error). **Not a security vulnerability** — the request is rejected. However, the error message (`validateBudget: ...`) is unclear.
 
