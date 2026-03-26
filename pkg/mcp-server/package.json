@@ -1,6 +1,6 @@
 {
   "name": "remote-signer-mcp",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "MCP server for remote-signer service. Run with: npx remote-signer-mcp",
   "type": "module",
   "main": "build/index.js",
@@ -27,7 +27,7 @@
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
-    "remote-signer-client": "^0.0.4",
+    "remote-signer-client": "^0.0.5",
     "zod": "^3.25.0"
   },
   "devDependencies": {

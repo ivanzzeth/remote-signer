@@ -155,6 +155,31 @@ export type {
   RevokeInstanceResponse,
 } from "./templates";
 
+// API Keys
+export { APIKeyService } from "./apikeys";
+export type {
+  APIKey,
+  ListAPIKeysFilter,
+  ListAPIKeysResponse,
+  CreateAPIKeyRequest,
+  UpdateAPIKeyRequest,
+} from "./apikeys";
+
+// ACLs
+export { ACLService } from "./acls";
+export type { IPWhitelistResponse } from "./acls";
+
+// Presets
+export { PresetService } from "./presets";
+export type {
+  PresetEntry,
+  ListPresetsResponse,
+  PresetVarsResponse,
+  ApplyPresetRequest,
+  ApplyResultItem,
+  ApplyPresetResponse,
+} from "./presets";
+
 // Errors
 export * from "./errors";
 
