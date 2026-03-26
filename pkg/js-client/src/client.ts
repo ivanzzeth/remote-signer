@@ -7,6 +7,9 @@ import { HttpTransport, ClientConfig } from "./transport";
 import { EvmService } from "./evm";
 import { AuditService } from "./audit";
 import { TemplateService } from "./templates";
+import { APIKeyService } from "./apikeys";
+import { ACLService } from "./acls";
+import { PresetService } from "./presets";
 
 // ---------------------------------------------------------------------------
 // Types kept at client level
@@ -32,6 +35,9 @@ export class RemoteSignerClient {
   public readonly evm: EvmService;
   public readonly audit: AuditService;
   public readonly templates: TemplateService;
+  public readonly apiKeys: APIKeyService;
+  public readonly acls: ACLService;
+  public readonly presets: PresetService;
   private transport: HttpTransport;
 
   constructor(config: ClientConfig) {
@@ -43,6 +49,9 @@ export class RemoteSignerClient {
     this.evm = new EvmService(this.transport, pollInterval, pollTimeout);
     this.audit = new AuditService(this.transport);
     this.templates = new TemplateService(this.transport);
+    this.apiKeys = new APIKeyService(this.transport);
+    this.acls = new ACLService(this.transport);
+    this.presets = new PresetService(this.transport);
   }
 
   /**

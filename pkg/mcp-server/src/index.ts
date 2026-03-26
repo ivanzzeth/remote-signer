@@ -1439,6 +1439,494 @@ server.registerTool(
 );
 
 // ===========================================================================
+// Tool: evm_unlock_signer  –  POST /api/v1/evm/signers/{address}/unlock
+// ===========================================================================
+
+server.registerTool(
+  "evm_unlock_signer",
+  {
+    title: "Unlock EVM Signer",
+    description:
+      "Unlock a locked signer with its password (admin only). " +
+      "The signer must be in locked state.",
+    inputSchema: {
+      address: z.string().describe("Signer Ethereum address (0x-prefixed)"),
+      password: z.string().describe("Password to decrypt the keystore"),
+    },
+  },
+  async ({ address, password }) => {
+    try {
+      const response = await client.evm.signers.unlock(address, { password });
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_lock_signer  –  POST /api/v1/evm/signers/{address}/lock
+// ===========================================================================
+
+server.registerTool(
+  "evm_lock_signer",
+  {
+    title: "Lock EVM Signer",
+    description:
+      "Lock an unlocked signer (admin only). Locked signers cannot sign requests.",
+    inputSchema: {
+      address: z.string().describe("Signer Ethereum address (0x-prefixed)"),
+    },
+  },
+  async ({ address }) => {
+    try {
+      const response = await client.evm.signers.lock(address);
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_approve_signer  –  POST /api/v1/evm/signers/{address}/approve
+// ===========================================================================
+
+server.registerTool(
+  "evm_approve_signer",
+  {
+    title: "Approve Pending EVM Signer",
+    description:
+      "Approve a signer that is in pending_approval state (admin only).",
+    inputSchema: {
+      address: z.string().describe("Signer Ethereum address (0x-prefixed)"),
+    },
+  },
+  async ({ address }) => {
+    try {
+      await client.evm.signers.approveSigner(address);
+      return ok({ status: "approved", address });
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_grant_signer_access  –  POST /api/v1/evm/signers/{address}/access
+// ===========================================================================
+
+server.registerTool(
+  "evm_grant_signer_access",
+  {
+    title: "Grant Signer Access",
+    description:
+      "Grant another API key access to use a signer (owner only).",
+    inputSchema: {
+      address: z.string().describe("Signer Ethereum address (0x-prefixed)"),
+      api_key_id: z.string().describe("API key ID to grant access to"),
+    },
+  },
+  async ({ address, api_key_id }) => {
+    try {
+      await client.evm.signers.grantAccess(address, { api_key_id });
+      return ok({ status: "granted", address, api_key_id });
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_revoke_signer_access  –  DELETE /api/v1/evm/signers/{address}/access/{id}
+// ===========================================================================
+
+server.registerTool(
+  "evm_revoke_signer_access",
+  {
+    title: "Revoke Signer Access",
+    description:
+      "Revoke an API key's access to a signer (owner only).",
+    inputSchema: {
+      address: z.string().describe("Signer Ethereum address (0x-prefixed)"),
+      api_key_id: z.string().describe("API key ID to revoke access from"),
+    },
+  },
+  async ({ address, api_key_id }) => {
+    try {
+      await client.evm.signers.revokeAccess(address, api_key_id);
+      return ok({ status: "revoked", address, api_key_id });
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_list_signer_access  –  GET /api/v1/evm/signers/{address}/access
+// ===========================================================================
+
+server.registerTool(
+  "evm_list_signer_access",
+  {
+    title: "List Signer Access Grants",
+    description:
+      "List all API keys that have access to a signer (owner only).",
+    inputSchema: {
+      address: z.string().describe("Signer Ethereum address (0x-prefixed)"),
+    },
+  },
+  async ({ address }) => {
+    try {
+      const entries = await client.evm.signers.listAccess(address);
+      return ok({ address, access: entries });
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_transfer_signer_ownership  –  POST /api/v1/evm/signers/{address}/transfer
+// ===========================================================================
+
+server.registerTool(
+  "evm_transfer_signer_ownership",
+  {
+    title: "Transfer Signer Ownership",
+    description:
+      "Transfer signer ownership to another API key (owner only). " +
+      "WARNING: This clears the entire access list — old owner loses ALL access.",
+    inputSchema: {
+      address: z.string().describe("Signer Ethereum address (0x-prefixed)"),
+      new_owner_id: z.string().describe("API key ID of the new owner"),
+    },
+  },
+  async ({ address, new_owner_id }) => {
+    try {
+      await client.evm.signers.transferOwnership(address, { new_owner_id });
+      return ok({ status: "transferred", address, new_owner_id });
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_delete_signer  –  DELETE /api/v1/evm/signers/{address}
+// ===========================================================================
+
+server.registerTool(
+  "evm_delete_signer",
+  {
+    title: "Delete EVM Signer",
+    description:
+      "Delete a signer's ownership and access records (owner only). " +
+      "WARNING: This is irreversible — the signer will no longer be usable.",
+    inputSchema: {
+      address: z.string().describe("Signer Ethereum address (0x-prefixed)"),
+    },
+  },
+  async ({ address }) => {
+    try {
+      await client.evm.signers.deleteSigner(address);
+      return ok({ status: "deleted", address });
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_approve_rule  –  POST /api/v1/evm/rules/{id}/approve
+// ===========================================================================
+
+server.registerTool(
+  "evm_approve_rule",
+  {
+    title: "Approve Pending Rule",
+    description:
+      "Approve a rule that is in pending state (admin only).",
+    inputSchema: {
+      rule_id: z.string().describe("Rule ID to approve"),
+    },
+  },
+  async ({ rule_id }) => {
+    try {
+      const rule = await client.evm.rules.approve(rule_id);
+      return ok(rule);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_reject_rule  –  POST /api/v1/evm/rules/{id}/reject
+// ===========================================================================
+
+server.registerTool(
+  "evm_reject_rule",
+  {
+    title: "Reject Pending Rule",
+    description:
+      "Reject a rule that is in pending state (admin only).",
+    inputSchema: {
+      rule_id: z.string().describe("Rule ID to reject"),
+      reason: z.string().describe("Reason for rejecting the rule"),
+    },
+  },
+  async ({ rule_id, reason }) => {
+    try {
+      const rule = await client.evm.rules.reject(rule_id, reason);
+      return ok(rule);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: list_api_keys  –  GET /api/v1/api-keys
+// ===========================================================================
+
+server.registerTool(
+  "list_api_keys",
+  {
+    title: "List API Keys",
+    description:
+      "List API keys with optional filters (admin only).",
+    inputSchema: {
+      source: z.string().optional().describe("Filter by source"),
+      enabled: z.boolean().optional().describe("Filter by enabled state"),
+      limit: z.number().optional().default(50).describe("Max results (default 50)"),
+      offset: z.number().optional().default(0).describe("Pagination offset"),
+    },
+  },
+  async ({ source, enabled, limit, offset }) => {
+    try {
+      const response = await client.apiKeys.list({ source, enabled, limit, offset });
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: get_api_key  –  GET /api/v1/api-keys/{id}
+// ===========================================================================
+
+server.registerTool(
+  "get_api_key",
+  {
+    title: "Get API Key",
+    description:
+      "Get an API key by ID (admin only).",
+    inputSchema: {
+      id: z.string().describe("API key ID"),
+    },
+  },
+  async ({ id }) => {
+    try {
+      const key = await client.apiKeys.get(id);
+      return ok(key);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: create_api_key  –  POST /api/v1/api-keys
+// ===========================================================================
+
+server.registerTool(
+  "create_api_key",
+  {
+    title: "Create API Key",
+    description:
+      "Create a new API key (admin only). Roles: admin, dev, agent, strategy.",
+    inputSchema: {
+      id: z.string().describe("Unique API key ID"),
+      name: z.string().describe("Human-readable name"),
+      public_key: z.string().describe("Ed25519 public key (hex)"),
+      role: z
+        .enum(["admin", "dev", "agent", "strategy"])
+        .describe("Role for the API key"),
+      rate_limit: z.number().optional().describe("Rate limit (requests/minute)"),
+    },
+  },
+  async ({ id, name, public_key, role, rate_limit }) => {
+    try {
+      const key = await client.apiKeys.create({ id, name, public_key, role, rate_limit });
+      return ok(key);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: update_api_key  –  PUT /api/v1/api-keys/{id}
+// ===========================================================================
+
+server.registerTool(
+  "update_api_key",
+  {
+    title: "Update API Key",
+    description:
+      "Update an API key's properties (admin only).",
+    inputSchema: {
+      id: z.string().describe("API key ID to update"),
+      name: z.string().optional().describe("New name"),
+      enabled: z.boolean().optional().describe("Enable/disable the key"),
+      role: z
+        .enum(["admin", "dev", "agent", "strategy"])
+        .optional()
+        .describe("New role"),
+      rate_limit: z.number().optional().describe("New rate limit"),
+    },
+  },
+  async ({ id, name, enabled, role, rate_limit }) => {
+    try {
+      const key = await client.apiKeys.update(id, { name, enabled, role, rate_limit });
+      return ok(key);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: delete_api_key  –  DELETE /api/v1/api-keys/{id}
+// ===========================================================================
+
+server.registerTool(
+  "delete_api_key",
+  {
+    title: "Delete API Key",
+    description:
+      "Delete an API key (admin only). WARNING: This is irreversible.",
+    inputSchema: {
+      id: z.string().describe("API key ID to delete"),
+    },
+  },
+  async ({ id }) => {
+    try {
+      await client.apiKeys.delete(id);
+      return ok({ status: "deleted", id });
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: get_ip_whitelist  –  GET /api/v1/acls/ip-whitelist
+// ===========================================================================
+
+server.registerTool(
+  "get_ip_whitelist",
+  {
+    title: "Get IP Whitelist",
+    description:
+      "Get the IP whitelist configuration (admin only). " +
+      "Shows whether IP filtering is enabled, allowed IPs, and proxy trust settings.",
+    inputSchema: {},
+  },
+  async () => {
+    try {
+      const response = await client.acls.getIPWhitelist();
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: list_presets  –  GET /api/v1/presets
+// ===========================================================================
+
+server.registerTool(
+  "list_presets",
+  {
+    title: "List Presets",
+    description:
+      "List all available rule presets (admin only). " +
+      "Presets are pre-configured rule template bundles that can be applied with variables.",
+    inputSchema: {},
+  },
+  async () => {
+    try {
+      const response = await client.presets.list();
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: get_preset_vars  –  GET /api/v1/presets/{id}/vars
+// ===========================================================================
+
+server.registerTool(
+  "get_preset_vars",
+  {
+    title: "Get Preset Variables",
+    description:
+      "Get variable hints for a preset (admin only). " +
+      "Shows which variables can be overridden when applying the preset.",
+    inputSchema: {
+      id: z.string().describe("Preset ID"),
+    },
+  },
+  async ({ id }) => {
+    try {
+      const response = await client.presets.vars(id);
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: apply_preset  –  POST /api/v1/presets/{id}/apply
+// ===========================================================================
+
+server.registerTool(
+  "apply_preset",
+  {
+    title: "Apply Preset",
+    description:
+      "Apply a rule preset to create rule/template instances (admin only). " +
+      "Variables override template defaults. applied_to restricts which templates are instantiated.",
+    inputSchema: {
+      id: z.string().describe("Preset ID to apply"),
+      variables: z
+        .record(z.string())
+        .optional()
+        .describe("Variable overrides (key-value pairs)"),
+      applied_to: z
+        .array(z.string())
+        .optional()
+        .describe("Restrict to specific template names within the preset"),
+    },
+  },
+  async ({ id, variables, applied_to }) => {
+    try {
+      const response = await client.presets.apply(id, { variables, applied_to });
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
 // Start server
 // ===========================================================================
 
