@@ -513,7 +513,17 @@ func (m *mockSimBudgetRepo) CountByRuleID(_ context.Context, ruleID types.RuleID
 	return count, nil
 }
 
-func (m *mockSimBudgetRepo) Delete(_ context.Context, _ string) error              { return nil }
+func (m *mockSimBudgetRepo) Delete(_ context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for key, b := range m.budgets {
+		if b.ID == id {
+			delete(m.budgets, key)
+			return nil
+		}
+	}
+	return nil
+}
 func (m *mockSimBudgetRepo) DeleteByRuleID(_ context.Context, _ types.RuleID) error { return nil }
 func (m *mockSimBudgetRepo) AtomicSpend(_ context.Context, _ types.RuleID, _ string, _ string) error {
 	return nil
