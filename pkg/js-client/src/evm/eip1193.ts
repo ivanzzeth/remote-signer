@@ -198,7 +198,20 @@ export class EIP1193Provider {
   // -------------------------------------------------------------------------
 
   private async _personalSign(params: unknown[]): Promise<string> {
-    const [message] = params as [string, string];
+    const [messageParam] = params as [string, string];
+    // personal_sign RPC spec requires hex-encoded message (0x-prefixed).
+    // Decode hex to UTF-8 text for remote-signer, matching MetaMask behavior:
+    // if 0x-prefixed treat as hex, otherwise pass as-is.
+    const message =
+      typeof messageParam === "string" && messageParam.startsWith("0x")
+        ? new TextDecoder().decode(
+            new Uint8Array(
+              (messageParam.slice(2).match(/.{1,2}/g) ?? []).map((b) =>
+                parseInt(b, 16),
+              ),
+            ),
+          )
+        : messageParam;
     return this._signer.personalSign(message);
   }
 
