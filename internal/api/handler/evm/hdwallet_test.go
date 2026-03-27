@@ -152,6 +152,10 @@ func (m *mockSignerManager) LockSigner(_ context.Context, _ string) (*types.Sign
 	return nil, fmt.Errorf("not implemented in mock")
 }
 
+func (m *mockSignerManager) DeleteSigner(_ context.Context, _ string) error {
+	return fmt.Errorf("not implemented in mock")
+}
+
 // --- Mock repos for access service ---
 
 type stubOwnershipRepo struct {
@@ -178,6 +182,15 @@ func (s *stubOwnershipRepo) GetByOwner(_ context.Context, _ string) ([]*types.Si
 func (s *stubOwnershipRepo) Delete(_ context.Context, _ string) error                { return nil }
 func (s *stubOwnershipRepo) UpdateOwner(_ context.Context, _, _ string) error         { return nil }
 func (s *stubOwnershipRepo) CountByOwner(_ context.Context, _ string) (int64, error)  { return 0, nil }
+func (s *stubOwnershipRepo) CountByOwnerAndType(_ context.Context, _ string, _ types.SignerType) (int64, error) {
+	return 0, nil
+}
+func (s *stubOwnershipRepo) GetBoth(_ context.Context, senderAddress, recipientAddress string) (*types.SignerOwnership, *types.SignerOwnership, error) {
+	// Simple stub implementation for tests
+	sender, _ := s.Get(nil, senderAddress)
+	recipient, _ := s.Get(nil, recipientAddress)
+	return sender, recipient, nil
+}
 
 type stubAccessRepo struct{}
 

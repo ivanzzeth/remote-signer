@@ -126,12 +126,21 @@ describe("EIP1193Provider", () => {
 
   // -- personal_sign --
 
-  test("personal_sign calls signer.personalSign", async () => {
-    const message = "0x48656c6c6f";
-    const sig = await provider.request({ method: "personal_sign", params: [message, ADDRESS] });
+  test("personal_sign decodes hex message to UTF-8", async () => {
+    const hexMessage = "0x48656c6c6f"; // "Hello"
+    const sig = await provider.request({ method: "personal_sign", params: [hexMessage, ADDRESS] });
     expect(sig).toBe("0x" + "ab".repeat(65));
     expect(signService.execute).toHaveBeenCalledWith(
-      expect.objectContaining({ chain_id: "1", sign_type: "personal", payload: { message } }),
+      expect.objectContaining({ chain_id: "1", sign_type: "personal", payload: { message: "Hello" } }),
+    );
+  });
+
+  test("personal_sign passes plain text as-is", async () => {
+    const plainMessage = "Hello, World!";
+    const sig = await provider.request({ method: "personal_sign", params: [plainMessage, ADDRESS] });
+    expect(sig).toBe("0x" + "ab".repeat(65));
+    expect(signService.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ chain_id: "1", sign_type: "personal", payload: { message: "Hello, World!" } }),
     );
   });
 
