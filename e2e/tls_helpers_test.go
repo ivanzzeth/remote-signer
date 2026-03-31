@@ -154,6 +154,12 @@ func initTestServices(
 	ruleEngine.RegisterEvaluator(&evm.ValueLimitEvaluator{})
 	ruleEngine.RegisterEvaluator(&evm.SignerRestrictionEvaluator{})
 	ruleEngine.RegisterEvaluator(&evm.SignTypeRestrictionEvaluator{})
+	// Internal transfer evaluator: nil repo for validation-only mode
+	internalTransferEval, err := evm.NewInternalTransferEvaluator(nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create internal transfer evaluator: %w", err)
+	}
+	ruleEngine.RegisterEvaluator(internalTransferEval)
 
 	// Notifier (noop for tests)
 	notifier, err := service.NewNoopNotifier()

@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -15,10 +16,15 @@ import (
 type SignerOwnershipRepository interface {
 	Upsert(ctx context.Context, ownership *types.SignerOwnership) error
 	Get(ctx context.Context, signerAddress string) (*types.SignerOwnership, error)
+	// GetBoth atomically fetches ownership records for two addresses.
+	// Returns (senderOwnership, recipientOwnership, error).
+	// If an address is not found, that ownership will be nil (not an error).
+	GetBoth(ctx context.Context, senderAddress, recipientAddress string) (*types.SignerOwnership, *types.SignerOwnership, error)
 	GetByOwner(ctx context.Context, ownerID string) ([]*types.SignerOwnership, error)
 	Delete(ctx context.Context, signerAddress string) error
 	UpdateOwner(ctx context.Context, signerAddress, newOwnerID string) error
 	CountByOwner(ctx context.Context, ownerID string) (int64, error)
+	CountByOwnerAndType(ctx context.Context, ownerID string, signerType types.SignerType) (int64, error)
 }
 
 // SignerOwnershipTransactional is implemented by ownership repos that support atomic operations
@@ -49,7 +55,7 @@ func (r *GormSignerOwnershipRepository) Upsert(ctx context.Context, ownership *t
 
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "signer_address"}},
-		DoUpdates: clause.AssignmentColumns([]string{"owner_id", "status", "updated_at"}),
+		DoUpdates: clause.AssignmentColumns([]string{"owner_id", "status", "signer_type", "display_name", "tags", "updated_at"}),
 	}).Create(ownership).Error
 }
 
@@ -63,6 +69,32 @@ func (r *GormSignerOwnershipRepository) Get(ctx context.Context, signerAddress s
 		return nil, err
 	}
 	return &ownership, nil
+}
+
+// GetBoth atomically fetches ownership records for two addresses in a single query.
+// This prevents TOCTOU race conditions when comparing ownership.
+func (r *GormSignerOwnershipRepository) GetBoth(ctx context.Context, senderAddress, recipientAddress string) (*types.SignerOwnership, *types.SignerOwnership, error) {
+	var ownerships []types.SignerOwnership
+	senderLower := strings.ToLower(senderAddress)
+	recipientLower := strings.ToLower(recipientAddress)
+
+	err := r.db.WithContext(ctx).
+		Where("LOWER(signer_address) IN ?", []string{senderLower, recipientLower}).
+		Find(&ownerships).Error
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var senderOwnership, recipientOwnership *types.SignerOwnership
+	for i := range ownerships {
+		if strings.EqualFold(ownerships[i].SignerAddress, senderAddress) {
+			senderOwnership = &ownerships[i]
+		} else if strings.EqualFold(ownerships[i].SignerAddress, recipientAddress) {
+			recipientOwnership = &ownerships[i]
+		}
+	}
+
+	return senderOwnership, recipientOwnership, nil
 }
 
 func (r *GormSignerOwnershipRepository) GetByOwner(ctx context.Context, ownerID string) ([]*types.SignerOwnership, error) {
@@ -104,6 +136,15 @@ func (r *GormSignerOwnershipRepository) UpdateOwner(ctx context.Context, signerA
 func (r *GormSignerOwnershipRepository) CountByOwner(ctx context.Context, ownerID string) (int64, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Model(&types.SignerOwnership{}).Where("owner_id = ?", ownerID).Count(&count).Error
+	return count, err
+}
+
+// CountByOwnerAndType counts signers owned by ownerID with a specific type.
+func (r *GormSignerOwnershipRepository) CountByOwnerAndType(ctx context.Context, ownerID string, signerType types.SignerType) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&types.SignerOwnership{}).
+		Where("owner_id = ? AND signer_type = ?", ownerID, signerType).
+		Count(&count).Error
 	return count, err
 }
 

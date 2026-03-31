@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/ivanzzeth/remote-signer/pkg/client/internal/transport"
@@ -22,6 +23,9 @@ func (s *SignerService) List(ctx context.Context, filter *ListSignersFilter) (*L
 	if filter != nil {
 		if filter.Type != "" {
 			params = append(params, fmt.Sprintf("type=%s", filter.Type))
+		}
+		if filter.Tag != "" {
+			params = append(params, fmt.Sprintf("tag=%s", url.QueryEscape(filter.Tag)))
 		}
 		if filter.Limit > 0 {
 			params = append(params, fmt.Sprintf("limit=%d", filter.Limit))
@@ -116,4 +120,15 @@ func (s *SignerService) TransferOwnership(ctx context.Context, address string, r
 func (s *SignerService) DeleteSigner(ctx context.Context, address string) error {
 	path := fmt.Sprintf("/api/v1/evm/signers/%s", address)
 	return s.transport.Request(ctx, http.MethodDelete, path, nil, nil, http.StatusNoContent)
+}
+
+// PatchSignerLabels updates display name and/or tags (owner only).
+func (s *SignerService) PatchSignerLabels(ctx context.Context, address string, req *PatchSignerLabelsRequest) (*Signer, error) {
+	var out Signer
+	path := fmt.Sprintf("/api/v1/evm/signers/%s", address)
+	err := s.transport.Request(ctx, http.MethodPatch, path, req, &out, http.StatusOK)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
 }

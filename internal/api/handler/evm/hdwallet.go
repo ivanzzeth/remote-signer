@@ -1,6 +1,7 @@
 package evm
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -74,6 +75,8 @@ type hdWalletResponse struct {
 	DerivedCount   int                  `json:"derived_count"`
 	Derived        []signerInfoResponse `json:"derived,omitempty"`
 	Locked         bool                 `json:"locked"`
+	DisplayName    string               `json:"display_name,omitempty"`
+	Tags           []string             `json:"tags,omitempty"`
 }
 
 type signerInfoResponse struct {
@@ -183,9 +186,10 @@ func (h *HDWalletHandler) createOrImport(w http.ResponseWriter, r *http.Request)
 	if h.maxHDWalletsPerKey > 0 {
 		apiKey := middleware.GetAPIKey(r.Context())
 		if apiKey != nil {
-			count, countErr := h.accessService.CountOwnedSigners(r.Context(), apiKey.ID)
+			// BUGFIX: Count only HD wallets, not all signer types
+			count, countErr := h.accessService.CountOwnedHDWallets(r.Context(), apiKey.ID)
 			if countErr != nil {
-				h.logger.Error("failed to count owned signers", slog.String("error", countErr.Error()))
+				h.logger.Error("failed to count owned HD wallets", slog.String("error", countErr.Error()))
 				h.writeError(w, "failed to check resource limits", http.StatusInternalServerError)
 				return
 			}
@@ -259,7 +263,7 @@ func (h *HDWalletHandler) createOrImport(w http.ResponseWriter, r *http.Request)
 		if apiKey.IsAdmin() {
 			status = types.SignerOwnershipActive
 		}
-		if ownerErr := h.accessService.SetOwner(r.Context(), info.PrimaryAddress, apiKey.ID, status); ownerErr != nil {
+		if ownerErr := h.accessService.SetOwnerWithType(r.Context(), info.PrimaryAddress, apiKey.ID, status, types.SignerTypeHDWallet); ownerErr != nil {
 			h.logger.Error("failed to set HD wallet ownership",
 				slog.String("address", info.PrimaryAddress),
 				slog.String("error", ownerErr.Error()),
@@ -280,7 +284,7 @@ func (h *HDWalletHandler) createOrImport(w http.ResponseWriter, r *http.Request)
 		h.auditLogger.LogHDWalletCreated(r.Context(), keyID, r.RemoteAddr, info.PrimaryAddress, action)
 	}
 
-	h.writeJSON(w, toHDWalletResponse(info), http.StatusCreated)
+	h.writeJSON(w, h.hdWalletResponse(r.Context(), info), http.StatusCreated)
 }
 
 func (h *HDWalletHandler) listWallets(w http.ResponseWriter, r *http.Request) {
@@ -309,7 +313,7 @@ func (h *HDWalletHandler) listWallets(w http.ResponseWriter, r *http.Request) {
 		Wallets: make([]hdWalletResponse, len(filtered)),
 	}
 	for i := range filtered {
-		resp.Wallets[i] = toHDWalletResponse(&filtered[i])
+		resp.Wallets[i] = h.hdWalletResponse(r.Context(), &filtered[i])
 	}
 
 	h.writeJSON(w, resp, http.StatusOK)
@@ -407,14 +411,19 @@ func (h *HDWalletHandler) listDerived(w http.ResponseWriter, r *http.Request, pr
 
 // --- Helpers ---
 
-func toHDWalletResponse(info *evmchain.HDWalletInfo) hdWalletResponse {
-	return hdWalletResponse{
+func (h *HDWalletHandler) hdWalletResponse(ctx context.Context, info *evmchain.HDWalletInfo) hdWalletResponse {
+	out := hdWalletResponse{
 		PrimaryAddress: info.PrimaryAddress,
 		BasePath:       info.BasePath,
 		DerivedCount:   info.DerivedCount,
 		Derived:        toSignerInfoResponseList(info.Derived),
 		Locked:         info.Locked,
 	}
+	if own, err := h.accessService.GetOwnership(ctx, info.PrimaryAddress); err == nil && own != nil {
+		out.DisplayName = own.DisplayName
+		out.Tags = own.Tags()
+	}
+	return out
 }
 
 func toSignerInfoResponseList(infos []types.SignerInfo) []signerInfoResponse {

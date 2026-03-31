@@ -542,6 +542,12 @@ func validateRules(ctx context.Context, rules []RuleConfig, validator *evm.Solid
 		ruleEngine.RegisterEvaluator(&evm.SignerRestrictionEvaluator{})
 		ruleEngine.RegisterEvaluator(&evm.SignTypeRestrictionEvaluator{})
 		ruleEngine.RegisterEvaluator(&evm.MessagePatternEvaluator{})
+		// Internal transfer evaluator: nil repo for validation-only mode
+		internalTransferEval, err := evm.NewInternalTransferEvaluator(nil)
+		if err != nil {
+			return nil, 0, 0, fmt.Errorf("internal transfer evaluator: %w", err)
+		}
+		ruleEngine.RegisterEvaluator(internalTransferEval)
 		if hasSolidity && validator != nil {
 			if solidityEval := validator.Evaluator(); solidityEval != nil {
 				ruleEngine.RegisterEvaluator(solidityEval)
@@ -960,6 +966,12 @@ func buildEngineForRuleTest(ctx context.Context, fullRepo *storage.MemoryRuleRep
 	eng.RegisterEvaluator(&evm.SignerRestrictionEvaluator{})
 	eng.RegisterEvaluator(&evm.SignTypeRestrictionEvaluator{})
 	eng.RegisterEvaluator(&evm.MessagePatternEvaluator{})
+	// Internal transfer evaluator: nil repo for validation-only mode
+	internalTransferEval, err := evm.NewInternalTransferEvaluator(nil)
+	if err != nil {
+		return nil, err
+	}
+	eng.RegisterEvaluator(internalTransferEval)
 	if hasSolidity && validator != nil {
 		if solidityEval := validator.Evaluator(); solidityEval != nil {
 			eng.RegisterEvaluator(solidityEval)

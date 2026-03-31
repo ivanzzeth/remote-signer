@@ -8,6 +8,7 @@ import (
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
+	"github.com/ivanzzeth/remote-signer/internal/validate"
 )
 
 // HDWalletParentResolver resolves parent-child relationships for HD wallet addresses.
@@ -214,13 +215,51 @@ func (s *SignerAccessService) ListAccess(ctx context.Context, ownerKeyID, signer
 }
 
 // SetOwner sets the owner of a signer. Used during discovery and signer creation.
+// Defaults to keystore signer type for backward compatibility.
 func (s *SignerAccessService) SetOwner(ctx context.Context, signerAddress, ownerID string, status types.SignerOwnershipStatus) error {
+	return s.SetOwnerWithType(ctx, signerAddress, ownerID, status, types.SignerTypeKeystore)
+}
+
+// SetOwnerWithType sets the owner of a signer with an explicit signer type.
+// Used during HD wallet creation and signer discovery.
+func (s *SignerAccessService) SetOwnerWithType(ctx context.Context, signerAddress, ownerID string, status types.SignerOwnershipStatus, signerType types.SignerType) error {
 	ownership := &types.SignerOwnership{
 		SignerAddress: signerAddress,
 		OwnerID:       ownerID,
+		SignerType:    signerType,
 		Status:        status,
 	}
 	return s.ownershipRepo.Upsert(ctx, ownership)
+}
+
+// PatchSignerLabels updates display name and/or tags on the ownership row. Only the owner may call.
+// At least one of patch.DisplayName or patch.Tags must be non-nil.
+func (s *SignerAccessService) PatchSignerLabels(ctx context.Context, callerKeyID, signerAddress string, patch types.SignerLabelPatch) error {
+	if patch.DisplayName == nil && patch.Tags == nil {
+		return fmt.Errorf("no fields to update")
+	}
+	isOwner, err := s.IsOwner(ctx, callerKeyID, signerAddress)
+	if err != nil {
+		return err
+	}
+	if !isOwner {
+		return fmt.Errorf("not the owner of signer %s", signerAddress)
+	}
+	o, err := s.ownershipRepo.Get(ctx, signerAddress)
+	if err != nil {
+		return err
+	}
+	if patch.DisplayName != nil {
+		o.DisplayName = validate.NormalizeSignerDisplayName(*patch.DisplayName)
+	}
+	if patch.Tags != nil {
+		norm, normErr := validate.NormalizeSignerTags(*patch.Tags)
+		if normErr != nil {
+			return normErr
+		}
+		o.TagsJSON = types.FormatSignerTagsJSON(norm)
+	}
+	return s.ownershipRepo.Upsert(ctx, o)
 }
 
 // GetOwnership returns the ownership record for a signer.
@@ -379,6 +418,11 @@ func (s *SignerAccessService) CleanupForDeletedKey(ctx context.Context, apiKeyID
 // CountOwnedSigners returns how many signers the given API key owns.
 func (s *SignerAccessService) CountOwnedSigners(ctx context.Context, ownerID string) (int64, error) {
 	return s.ownershipRepo.CountByOwner(ctx, ownerID)
+}
+
+// CountOwnedHDWallets returns how many HD wallets the given API key owns.
+func (s *SignerAccessService) CountOwnedHDWallets(ctx context.Context, ownerID string) (int64, error) {
+	return s.ownershipRepo.CountByOwnerAndType(ctx, ownerID, types.SignerTypeHDWallet)
 }
 
 // removeFromSlice removes all occurrences of val from slice.

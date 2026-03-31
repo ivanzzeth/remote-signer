@@ -4,13 +4,15 @@ import "time"
 
 // Signer represents a signer configuration.
 type Signer struct {
-	Address    string     `json:"address"`
-	Type       string     `json:"type"`
-	Enabled    bool       `json:"enabled"`
-	Locked     bool       `json:"locked"`
-	UnlockedAt *time.Time `json:"unlocked_at,omitempty"`
-	OwnerID    string     `json:"owner_id,omitempty"`
-	Status     string     `json:"status,omitempty"` // ownership status: active, pending_approval
+	Address     string     `json:"address"`
+	Type        string     `json:"type"`
+	Enabled     bool       `json:"enabled"`
+	Locked      bool       `json:"locked"`
+	UnlockedAt  *time.Time `json:"unlocked_at,omitempty"`
+	OwnerID     string     `json:"owner_id,omitempty"`
+	Status      string     `json:"status,omitempty"` // ownership status: active, pending_approval
+	DisplayName string     `json:"display_name,omitempty"`
+	Tags        []string   `json:"tags,omitempty"`
 }
 
 // SignerAccessEntry represents an access grant on a signer.
@@ -58,8 +60,16 @@ type ListSignersResponse struct {
 
 // CreateSignerRequest represents a request to create a new signer.
 type CreateSignerRequest struct {
-	Type     string                `json:"type"`
-	Keystore *CreateKeystoreParams `json:"keystore,omitempty"`
+	Type        string                `json:"type"`
+	Keystore    *CreateKeystoreParams `json:"keystore,omitempty"`
+	DisplayName string                `json:"display_name,omitempty"`
+	Tags        []string              `json:"tags,omitempty"`
+}
+
+// PatchSignerLabelsRequest updates display name and/or tags (owner only).
+type PatchSignerLabelsRequest struct {
+	DisplayName *string   `json:"display_name"`
+	Tags        *[]string `json:"tags"`
 }
 
 // CreateKeystoreParams contains parameters for creating a keystore signer.
@@ -70,6 +80,7 @@ type CreateKeystoreParams struct {
 // ListSignersFilter contains filter options for listing signers.
 type ListSignersFilter struct {
 	Type   string
+	Tag    string
 	Offset int
 	Limit  int
 }

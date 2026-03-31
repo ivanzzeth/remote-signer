@@ -398,6 +398,13 @@ func run() error {
 	ruleEngine.RegisterEvaluator(&evm.SignTypeRestrictionEvaluator{})
 	ruleEngine.RegisterEvaluator(&evm.MessagePatternEvaluator{})
 
+	// Register internal transfer evaluator (requires ownership repo)
+	internalTransferEval, err := evm.NewInternalTransferEvaluator(signerOwnershipRepo)
+	if err != nil {
+		return fmt.Errorf("failed to create internal transfer evaluator: %w", err)
+	}
+	ruleEngine.RegisterEvaluator(internalTransferEval)
+
 	jsEval, err := evm.NewJSRuleEvaluator(log)
 	if err != nil {
 		return fmt.Errorf("failed to create JS rule evaluator: %w", err)
@@ -1306,6 +1313,12 @@ func buildIsolatedEngineForRule(ctx context.Context, allRulesMap map[types.RuleI
 	eng.RegisterEvaluator(&evm.SignerRestrictionEvaluator{})
 	eng.RegisterEvaluator(&evm.SignTypeRestrictionEvaluator{})
 	eng.RegisterEvaluator(&evm.MessagePatternEvaluator{})
+	// Internal transfer evaluator: nil repo for validation-only mode
+	internalTransferEval, err := evm.NewInternalTransferEvaluator(nil)
+	if err != nil {
+		return nil, err
+	}
+	eng.RegisterEvaluator(internalTransferEval)
 	if solidityEval != nil {
 		eng.RegisterEvaluator(solidityEval)
 	}

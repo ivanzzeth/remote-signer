@@ -229,21 +229,12 @@ The server starts without signers. Add them after startup:
 - [x] RBAC Rule Ownership (owner/applied_to/status on every rule)
 - [x] CLI `evm` Command Structure (sign/rule/signer with multi-chain ready architecture)
 - [x] Transaction Simulation Engine (eth_simulateV1 RPC + anvil backends)
-- [x] Signer Ownership & Access Control (owner-only approval, grant/revoke access)
+- [x] Signer Ownership & Access Control — per-signer owner model with access list, transfer, delete cascade, resource limits, API key encrypted keystore
 - [x] Permit/Permit2 Spender Whitelist (fail-closed, allowed_spenders config)
 - [x] Request Management CLI (list/get/approve/reject/preview-rule)
 - [x] JS Client SDK v0.0.4 (SimulateService, executeBatch, signer access control)
 - [x] MCP Server v0.0.5 (simulate, broadcast, guard resume tools)
-
-### In Progress: Signer Ownership & Access Control
-
-Per-signer ownership model — each signer has an owner and an explicit access list. Admin key leak only affects admin's own signers, not the entire system. See [design doc](docs/features/signer-ownership-access-control.md).
-
-- [ ] **Phase 1**: Signer Ownership — owner_id on signers, owner-only sign/unlock/lock
-- [ ] **Phase 2**: Access List — grant/revoke signer access to other API keys, HD wallet inheritance
-- [ ] **Phase 3**: Lifecycle Safety — transfer ownership, delete cascade, approval gate, resource limits
-- [ ] **Phase 4a**: API Key Encrypted Keystore — Ed25519 keystore with password encryption (via ethsig)
-- [ ] **Phase 4b**: Internal Transfer Rule — same-owner scope for multi-tenant signer isolation
+- [x] Internal Transfer Rule — same-owner scope for multi-tenant signer isolation (ETH, ERC20/721/1155)
 
 ### Future
 

@@ -13,10 +13,10 @@ import (
 
 // SignService is a mock implementation of evm.SignAPI.
 type SignService struct {
-	mu                sync.RWMutex
-	ExecuteFunc       func(ctx context.Context, req *evm.SignRequest) (*evm.SignResponse, error)
-	ExecuteAsyncFunc  func(ctx context.Context, req *evm.SignRequest) (*evm.SignResponse, error)
-	Calls             map[string][]any
+	mu               sync.RWMutex
+	ExecuteFunc      func(ctx context.Context, req *evm.SignRequest) (*evm.SignResponse, error)
+	ExecuteAsyncFunc func(ctx context.Context, req *evm.SignRequest) (*evm.SignResponse, error)
+	Calls            map[string][]any
 }
 
 func NewSignService() *SignService {
@@ -184,12 +184,13 @@ var _ evm.RuleAPI = (*RuleService)(nil)
 
 // SignerService is a mock implementation of evm.SignerAPI.
 type SignerService struct {
-	mu         sync.RWMutex
-	ListFunc   func(ctx context.Context, filter *evm.ListSignersFilter) (*evm.ListSignersResponse, error)
-	CreateFunc func(ctx context.Context, req *evm.CreateSignerRequest) (*evm.Signer, error)
-	UnlockFunc func(ctx context.Context, address string, req *evm.UnlockSignerRequest) (*evm.UnlockSignerResponse, error)
-	LockFunc   func(ctx context.Context, address string) (*evm.LockSignerResponse, error)
-	Calls      map[string][]any
+	mu                    sync.RWMutex
+	ListFunc              func(ctx context.Context, filter *evm.ListSignersFilter) (*evm.ListSignersResponse, error)
+	CreateFunc            func(ctx context.Context, req *evm.CreateSignerRequest) (*evm.Signer, error)
+	UnlockFunc            func(ctx context.Context, address string, req *evm.UnlockSignerRequest) (*evm.UnlockSignerResponse, error)
+	LockFunc              func(ctx context.Context, address string) (*evm.LockSignerResponse, error)
+	PatchSignerLabelsFunc func(ctx context.Context, address string, req *evm.PatchSignerLabelsRequest) (*evm.Signer, error)
+	Calls                 map[string][]any
 }
 
 func NewSignerService() *SignerService {
@@ -232,6 +233,14 @@ func (m *SignerService) Lock(ctx context.Context, address string) (*evm.LockSign
 		return m.LockFunc(ctx, address)
 	}
 	return &evm.LockSignerResponse{}, nil
+}
+
+func (m *SignerService) PatchSignerLabels(ctx context.Context, address string, req *evm.PatchSignerLabelsRequest) (*evm.Signer, error) {
+	m.recordCall("PatchSignerLabels", address, req)
+	if m.PatchSignerLabelsFunc != nil {
+		return m.PatchSignerLabelsFunc(ctx, address, req)
+	}
+	return &evm.Signer{}, nil
 }
 
 var _ evm.SignerAPI = (*SignerService)(nil)
@@ -373,15 +382,15 @@ var _ audit.API = (*AuditService)(nil)
 
 // TemplateService is a mock implementation of templates.API.
 type TemplateService struct {
-	mu                  sync.RWMutex
-	ListFunc            func(ctx context.Context, filter *templates.ListFilter) (*templates.ListResponse, error)
-	GetFunc             func(ctx context.Context, templateID string) (*templates.Template, error)
-	CreateFunc          func(ctx context.Context, req *templates.CreateRequest) (*templates.Template, error)
-	UpdateFunc          func(ctx context.Context, templateID string, req *templates.UpdateRequest) (*templates.Template, error)
-	DeleteFunc          func(ctx context.Context, templateID string) error
-	InstantiateFunc     func(ctx context.Context, templateID string, req *templates.InstantiateRequest) (*templates.InstantiateResponse, error)
-	RevokeInstanceFunc  func(ctx context.Context, ruleID string) (*templates.RevokeInstanceResponse, error)
-	Calls               map[string][]any
+	mu                 sync.RWMutex
+	ListFunc           func(ctx context.Context, filter *templates.ListFilter) (*templates.ListResponse, error)
+	GetFunc            func(ctx context.Context, templateID string) (*templates.Template, error)
+	CreateFunc         func(ctx context.Context, req *templates.CreateRequest) (*templates.Template, error)
+	UpdateFunc         func(ctx context.Context, templateID string, req *templates.UpdateRequest) (*templates.Template, error)
+	DeleteFunc         func(ctx context.Context, templateID string) error
+	InstantiateFunc    func(ctx context.Context, templateID string, req *templates.InstantiateRequest) (*templates.InstantiateResponse, error)
+	RevokeInstanceFunc func(ctx context.Context, ruleID string) (*templates.RevokeInstanceResponse, error)
+	Calls              map[string][]any
 }
 
 func NewTemplateService() *TemplateService {

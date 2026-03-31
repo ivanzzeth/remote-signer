@@ -1,7 +1,9 @@
 package evm
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -64,13 +66,15 @@ func (h *SignerHandler) SetMaxKeystoresPerKey(max int) {
 
 // SignerResponse represents a signer in API responses
 type SignerResponse struct {
-	Address    string     `json:"address"`
-	Type       string     `json:"type"`
-	Enabled    bool       `json:"enabled"`
-	Locked     bool       `json:"locked"`
-	UnlockedAt *time.Time `json:"unlocked_at,omitempty"`
-	OwnerID    string     `json:"owner_id,omitempty"`
-	Status     string     `json:"status,omitempty"` // ownership status: active, pending_approval
+	Address     string     `json:"address"`
+	Type        string     `json:"type"`
+	Enabled     bool       `json:"enabled"`
+	Locked      bool       `json:"locked"`
+	UnlockedAt  *time.Time `json:"unlocked_at,omitempty"`
+	OwnerID     string     `json:"owner_id,omitempty"`
+	Status      string     `json:"status,omitempty"` // ownership status: active, pending_approval
+	DisplayName string     `json:"display_name,omitempty"`
+	Tags        []string   `json:"tags,omitempty"`
 }
 
 // UnlockSignerRequest represents the request to unlock a locked signer
@@ -87,8 +91,10 @@ type ListSignersResponse struct {
 
 // CreateSignerRequest represents the request to create a signer
 type CreateSignerRequest struct {
-	Type     string                 `json:"type"`
-	Keystore *CreateKeystoreRequest `json:"keystore,omitempty"`
+	Type        string                 `json:"type"`
+	Keystore    *CreateKeystoreRequest `json:"keystore,omitempty"`
+	DisplayName string                 `json:"display_name,omitempty"`
+	Tags        []string               `json:"tags,omitempty"`
 }
 
 // CreateKeystoreRequest contains keystore creation parameters
@@ -98,9 +104,17 @@ type CreateKeystoreRequest struct {
 
 // CreateSignerResponse represents the response after creating a signer
 type CreateSignerResponse struct {
-	Address string `json:"address"`
-	Type    string `json:"type"`
-	Enabled bool   `json:"enabled"`
+	Address     string   `json:"address"`
+	Type        string   `json:"type"`
+	Enabled     bool     `json:"enabled"`
+	DisplayName string   `json:"display_name,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+}
+
+// PatchSignerLabelsRequest updates human-readable signer labels (owner only).
+type PatchSignerLabelsRequest struct {
+	DisplayName *string   `json:"display_name"`
+	Tags        *[]string `json:"tags"`
 }
 
 // GrantAccessRequest represents the request to grant access to a signer.
@@ -174,6 +188,8 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 		requestedLimit = limit
 	}
 
+	tagFilter := strings.TrimSpace(query.Get("tag"))
+
 	// Get all signers from manager
 	filter := types.SignerFilter{
 		Type:   signerType,
@@ -234,6 +250,20 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if tagFilter != "" {
+		var tagged []types.SignerInfo
+		for _, s := range filteredSigners {
+			own, oErr := h.accessService.GetOwnership(r.Context(), s.Address)
+			if oErr != nil || own == nil {
+				continue
+			}
+			if validate.SignerHasTag(own.Tags(), tagFilter) {
+				tagged = append(tagged, s)
+			}
+		}
+		filteredSigners = tagged
+	}
+
 	total := len(filteredSigners)
 	// Apply manual pagination
 	if requestedOffset >= len(filteredSigners) {
@@ -250,18 +280,7 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 	// Convert to response with ownership info
 	signers := make([]SignerResponse, len(filteredSigners))
 	for i, s := range filteredSigners {
-		signers[i] = SignerResponse{
-			Address:    s.Address,
-			Type:       s.Type,
-			Enabled:    s.Enabled,
-			Locked:     s.Locked,
-			UnlockedAt: s.UnlockedAt,
-		}
-		ownership, oErr := h.accessService.GetOwnership(r.Context(), s.Address)
-		if oErr == nil && ownership != nil {
-			signers[i].OwnerID = ownership.OwnerID
-			signers[i].Status = string(ownership.Status)
-		}
+		signers[i] = h.newSignerResponse(r.Context(), s)
 	}
 
 	resp := ListSignersResponse{
@@ -352,6 +371,25 @@ func (h *SignerHandler) createSigner(w http.ResponseWriter, r *http.Request) {
 			slog.String("error", err.Error()),
 		)
 		// Non-fatal: signer was created, ownership can be fixed manually
+	} else {
+		var dn *string
+		if strings.TrimSpace(req.DisplayName) != "" {
+			v := strings.TrimSpace(req.DisplayName)
+			dn = &v
+		}
+		var tg *[]string
+		if len(req.Tags) > 0 {
+			tg = &req.Tags
+		}
+		if dn != nil || tg != nil {
+			patch := types.SignerLabelPatch{DisplayName: dn, Tags: tg}
+			if patchErr := h.accessService.PatchSignerLabels(r.Context(), apiKey.ID, signerInfo.Address, patch); patchErr != nil {
+				h.logger.Warn("failed to set initial signer labels",
+					slog.String("address", signerInfo.Address),
+					slog.String("error", patchErr.Error()),
+				)
+			}
+		}
 	}
 
 	h.logger.Info("signer created",
@@ -369,6 +407,10 @@ func (h *SignerHandler) createSigner(w http.ResponseWriter, r *http.Request) {
 		Address: signerInfo.Address,
 		Type:    signerInfo.Type,
 		Enabled: signerInfo.Enabled,
+	}
+	if own, oErr := h.accessService.GetOwnership(r.Context(), signerInfo.Address); oErr == nil && own != nil {
+		resp.DisplayName = own.DisplayName
+		resp.Tags = own.Tags()
 	}
 
 	h.writeJSON(w, resp, http.StatusCreated)
@@ -396,10 +438,14 @@ func (h *SignerHandler) HandleSignerAction(w http.ResponseWriter, r *http.Reques
 		action = parts[1]
 	}
 
-	// Handle DELETE /api/v1/evm/signers/{address} (no action segment)
+	// Handle DELETE or PATCH /api/v1/evm/signers/{address} (no action segment)
 	if action == "" {
 		if r.Method == http.MethodDelete {
 			h.handleDeleteSigner(w, r, address)
+			return
+		}
+		if r.Method == http.MethodPatch {
+			h.handlePatchSignerLabels(w, r, address)
 			return
 		}
 		h.writeError(w, "invalid path: expected /api/v1/evm/signers/{address}/{action}", http.StatusBadRequest)
@@ -501,13 +547,7 @@ func (h *SignerHandler) handleUnlock(w http.ResponseWriter, r *http.Request, add
 		h.auditLogger.LogSignerUnlocked(r.Context(), apiKey.ID, r.RemoteAddr, address)
 	}
 
-	h.writeJSON(w, SignerResponse{
-		Address:    info.Address,
-		Type:       info.Type,
-		Enabled:    info.Enabled,
-		Locked:     info.Locked,
-		UnlockedAt: info.UnlockedAt,
-	}, http.StatusOK)
+	h.writeJSON(w, h.newSignerResponse(r.Context(), *info), http.StatusOK)
 }
 
 // handleLock handles POST /api/v1/evm/signers/{address}/lock
@@ -557,13 +597,7 @@ func (h *SignerHandler) handleLock(w http.ResponseWriter, r *http.Request, addre
 		h.auditLogger.LogSignerLocked(r.Context(), apiKey.ID, r.RemoteAddr, address)
 	}
 
-	h.writeJSON(w, SignerResponse{
-		Address:    info.Address,
-		Type:       info.Type,
-		Enabled:    info.Enabled,
-		Locked:     info.Locked,
-		UnlockedAt: info.UnlockedAt,
-	}, http.StatusOK)
+	h.writeJSON(w, h.newSignerResponse(r.Context(), *info), http.StatusOK)
 }
 
 // handleApproveSigner handles POST /api/v1/evm/signers/{address}/approve (admin only)
@@ -653,16 +687,78 @@ func (h *SignerHandler) handleTransferOwnership(w http.ResponseWriter, r *http.R
 func (h *SignerHandler) handleDeleteSigner(w http.ResponseWriter, r *http.Request, address string) {
 	apiKey := middleware.GetAPIKey(r.Context())
 
-	if err := h.accessService.DeleteSigner(r.Context(), apiKey.ID, address); err != nil {
-		if strings.Contains(err.Error(), "not the owner") {
-			h.writeError(w, err.Error(), http.StatusForbidden)
+	// Check ownership first
+	isOwner, err := h.accessService.IsOwner(r.Context(), apiKey.ID, address)
+	if err != nil {
+		h.logger.Error("failed to check ownership", slog.String("error", err.Error()))
+		h.writeError(w, "failed to check ownership", http.StatusInternalServerError)
+		return
+	}
+	if !isOwner {
+		// Distinguish 404 from 403: if no ownership record exists at all, treat as not found
+		if _, oErr := h.accessService.GetOwnership(r.Context(), address); oErr != nil && types.IsNotFound(oErr) {
+			h.writeError(w, "signer not found", http.StatusNotFound)
 			return
 		}
-		h.logger.Error("failed to delete signer",
+		h.writeError(w, "only the signer owner can delete", http.StatusForbidden)
+		return
+	}
+
+	// Get signer type to determine if HD wallet (for derived address cleanup)
+	var signerType string
+	info, err := h.signerManager.ListSigners(r.Context(), types.SignerFilter{Offset: 0, Limit: 100000})
+	if err == nil {
+		for _, s := range info.Signers {
+			if strings.EqualFold(s.Address, address) {
+				signerType = s.Type
+				break
+			}
+		}
+	}
+
+	// Delete signer from provider (files, in-memory state, registry) BEFORE database cleanup
+	// This is critical for HD wallets to clean derived addresses too
+	if err := h.signerManager.DeleteSigner(r.Context(), address); err != nil {
+		if types.IsSignerNotFound(err) {
+			h.writeError(w, "signer not found", http.StatusNotFound)
+			return
+		}
+		h.logger.Error("failed to delete signer from provider",
 			slog.String("address", address),
 			slog.String("error", err.Error()),
 		)
 		h.writeError(w, "failed to delete signer", http.StatusInternalServerError)
+		return
+	}
+
+	// For HD wallets, also delete all derived addresses from ownership DB
+	if signerType == string(types.SignerTypeHDWallet) {
+		hdMgr, hdErr := h.signerManager.HDWalletManager()
+		if hdErr == nil && hdMgr != nil {
+			derived, dErr := hdMgr.ListDerivedAddresses(address)
+			if dErr == nil {
+				for _, d := range derived {
+					if strings.EqualFold(d.Address, address) {
+						continue // primary already handled
+					}
+					if delErr := h.accessService.DeleteSigner(r.Context(), apiKey.ID, d.Address); delErr != nil {
+						h.logger.Warn("failed to delete derived signer ownership",
+							slog.String("address", d.Address),
+							slog.String("error", delErr.Error()),
+						)
+					}
+				}
+			}
+		}
+	}
+
+	// Delete ownership and access records from database
+	if err := h.accessService.DeleteSigner(r.Context(), apiKey.ID, address); err != nil {
+		h.logger.Error("failed to delete signer ownership",
+			slog.String("address", address),
+			slog.String("error", err.Error()),
+		)
+		h.writeError(w, "failed to delete signer ownership", http.StatusInternalServerError)
 		return
 	}
 
@@ -761,6 +857,78 @@ func (h *SignerHandler) handleListAccess(w http.ResponseWriter, r *http.Request,
 	}
 
 	h.writeJSON(w, resp, http.StatusOK)
+}
+
+func (h *SignerHandler) newSignerResponse(ctx context.Context, s types.SignerInfo) SignerResponse {
+	resp := SignerResponse{
+		Address:    s.Address,
+		Type:       s.Type,
+		Enabled:    s.Enabled,
+		Locked:     s.Locked,
+		UnlockedAt: s.UnlockedAt,
+	}
+	if ownership, oErr := h.accessService.GetOwnership(ctx, s.Address); oErr == nil && ownership != nil {
+		resp.OwnerID = ownership.OwnerID
+		resp.Status = string(ownership.Status)
+		resp.DisplayName = ownership.DisplayName
+		resp.Tags = ownership.Tags()
+	}
+	return resp
+}
+
+func (h *SignerHandler) signerInfoByAddress(ctx context.Context, address string) (types.SignerInfo, error) {
+	res, err := h.signerManager.ListSigners(ctx, types.SignerFilter{Limit: 100000})
+	if err != nil {
+		return types.SignerInfo{}, err
+	}
+	for _, s := range res.Signers {
+		if strings.EqualFold(s.Address, address) {
+			return s, nil
+		}
+	}
+	return types.SignerInfo{}, types.ErrSignerNotFound
+}
+
+// handlePatchSignerLabels handles PATCH /api/v1/evm/signers/{address}
+func (h *SignerHandler) handlePatchSignerLabels(w http.ResponseWriter, r *http.Request, address string) {
+	apiKey := middleware.GetAPIKey(r.Context())
+
+	var req PatchSignerLabelsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.DisplayName == nil && req.Tags == nil {
+		h.writeError(w, "at least one of display_name or tags is required", http.StatusBadRequest)
+		return
+	}
+	patch := types.SignerLabelPatch{DisplayName: req.DisplayName, Tags: req.Tags}
+	if err := h.accessService.PatchSignerLabels(r.Context(), apiKey.ID, address, patch); err != nil {
+		msg := err.Error()
+		if strings.Contains(msg, "not the owner") {
+			h.writeError(w, msg, http.StatusForbidden)
+			return
+		}
+		if types.IsNotFound(err) {
+			h.writeError(w, "ownership not found for signer", http.StatusNotFound)
+			return
+		}
+		h.writeError(w, msg, http.StatusBadRequest)
+		return
+	}
+
+	info, err := h.signerInfoByAddress(r.Context(), address)
+	if err != nil {
+		if errors.Is(err, types.ErrSignerNotFound) {
+			h.writeError(w, "signer not found", http.StatusNotFound)
+			return
+		}
+		h.logger.Error("failed to load signer after label patch", slog.String("address", address), slog.String("error", err.Error()))
+		h.writeError(w, "failed to load signer", http.StatusInternalServerError)
+		return
+	}
+
+	h.writeJSON(w, h.newSignerResponse(r.Context(), info), http.StatusOK)
 }
 
 // writeJSON writes a JSON response
