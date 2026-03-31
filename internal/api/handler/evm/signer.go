@@ -867,6 +867,20 @@ func (h *SignerHandler) newSignerResponse(ctx context.Context, s types.SignerInf
 		Locked:     s.Locked,
 		UnlockedAt: s.UnlockedAt,
 	}
+
+	// For HD wallets, dynamically check runtime unlock status
+	// (DB field may be stale after unlock)
+	if s.Type == string(types.SignerTypeHDWallet) {
+		if hdwMgr, err := h.signerManager.HDWalletManager(); err == nil {
+			// Try to list derived addresses - success means unlocked
+			if _, listErr := hdwMgr.ListDerivedAddresses(s.Address); listErr == nil {
+				resp.Locked = false
+			} else {
+				resp.Locked = true
+			}
+		}
+	}
+
 	if ownership, oErr := h.accessService.GetOwnership(ctx, s.Address); oErr == nil && ownership != nil {
 		resp.OwnerID = ownership.OwnerID
 		resp.Status = string(ownership.Status)
