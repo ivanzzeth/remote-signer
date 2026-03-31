@@ -310,11 +310,11 @@ if [ -n "$STAGED_RULES" ]; then
     if command -v forge &> /dev/null; then
         echo -n "Validating rule files... "
         # shellcheck disable=SC2086
-        if go run ./cmd/validate-rules/ $STAGED_RULES 2>/dev/null; then
+        if go run ./cmd/remote-signer-validate-rules/ $STAGED_RULES 2>/dev/null; then
             echo -e "${GREEN}OK${NC}"
         else
             echo -e "${RED}FAIL${NC}"
-            echo "Rule validation failed. Run 'go run ./cmd/validate-rules/ -v rules/*.yaml' or 'remote-signer-validate-rules -v rules/*.yaml' for details."
+            echo "Rule validation failed. Run 'go run ./cmd/remote-signer-validate-rules/ -v rules/*.yaml' or 'remote-signer-validate-rules -v rules/*.yaml' for details."
             FAILED=1
         fi
     else

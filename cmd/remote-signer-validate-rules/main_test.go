@@ -23,7 +23,7 @@ import (
 func projectRoot(t *testing.T) string {
 	_, filename, _, _ := runtime.Caller(0)
 	dir := filepath.Dir(filename)
-	// main_test.go is in cmd/validate-rules; go up to repo root
+	// main_test.go is in cmd/remote-signer-validate-rules; go up to repo root
 	root := filepath.Join(dir, "..", "..")
 	abs, err := filepath.Abs(root)
 	require.NoError(t, err)
@@ -32,7 +32,7 @@ func projectRoot(t *testing.T) string {
 
 // TestConfigExampleYAMLValidates ensures config.example.yaml loads, expands, and all
 // enabled Solidity expression rules pass validation. Same pipeline as:
-//   go run ./cmd/validate-rules/ -config config.example.yaml
+//   go run ./cmd/remote-signer-validate-rules/ -config config.example.yaml
 // If this test fails, config.example.yaml or the expanded rules are broken; fix the
 // config or the validator so that the example config validates.
 func TestConfigExampleYAMLValidates(t *testing.T) {

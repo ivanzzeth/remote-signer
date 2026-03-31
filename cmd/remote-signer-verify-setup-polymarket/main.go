@@ -4,10 +4,10 @@
 // Usage:
 //
 //	# 1) createProxy sign (server must be running with polymarket_safe_init preset, signer created via TUI)
-//	go run ./cmd/verify-setup-polymarket -step createproxy -signer 0x4F2fE52763B4E89afC5bB061644d60Cd3C488717
+//	go run ./cmd/remote-signer-verify-setup-polymarket -step createproxy -signer 0x4F2fE52763B4E89afC5bB061644d60Cd3C488717
 //
 //	# 2) Add full preset and restart server, then run trading sign:
-//	go run ./cmd/verify-setup-polymarket -step trade -signer 0x4F2fE52763B4E89afC5bB061644d60Cd3C488717
+//	go run ./cmd/remote-signer-verify-setup-polymarket -step trade -signer 0x4F2fE52763B4E89afC5bB061644d60Cd3C488717
 package main
 
 import (

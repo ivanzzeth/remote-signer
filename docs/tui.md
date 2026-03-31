@@ -6,7 +6,7 @@ The remote-signer includes a terminal-based management interface for monitoring 
 
 ```bash
 # -o output path must come before the package path (go build -o <binary> <pkg>)
-go build -o remote-signer-tui ./cmd/tui
+go build -o remote-signer-tui ./cmd/remote-signer-tui
 ```
 
 ## Run

@@ -174,7 +174,7 @@ Phase 2b (full parity):
   3. **ExpandFileRules**(expandedRules, configDir)  
      Expands `type: file` rules by loading rules from their `config.path`.
 
-- **Key types**: `internal/config/config.go` — `TemplateConfig`, `RuleConfig`; expansion in `internal/config/template_init.go` and `rule_init.go`; rules validator in `cmd/validate-rules/` (binary name: `remote-signer-validate-rules`).
+- **Key types**: `internal/config/config.go` — `TemplateConfig`, `RuleConfig`; expansion in `internal/config/template_init.go` and `rule_init.go`; rules validator in `cmd/remote-signer-validate-rules/` (binary name: `remote-signer-validate-rules`).
 
 ### 2.2 Templates today
 
@@ -183,8 +183,8 @@ Phase 2b (full parity):
 
 ### 2.3 Rules validator and TUI
 
-- **Rules validator**: Built as **`remote-signer-validate-rules`** (see plan §0); source in `cmd/validate-rules/` (or `cmd/remote-signer-validate-rules/` after rename). Supports `-config config.yaml` (expand templates + instance + file rules, then validate) and direct rule/template file paths.
-- **TUI**: `cmd/tui/main.go` — binary `remote-signer-tui`; connects to server, manages signers/rules/requests etc.
+- **Rules validator**: Built as **`remote-signer-validate-rules`** (see plan §0); source in `cmd/remote-signer-validate-rules/`. Supports `-config config.yaml` (expand templates + instance + file rules, then validate) and direct rule/template file paths.
+- **TUI**: `cmd/remote-signer-tui/main.go` — binary `remote-signer-tui`; connects to server, manages signers/rules/requests etc.
 
 ---
 
@@ -254,7 +254,7 @@ rules:
 
 ### 3.2 remote-signer-cli layout
 
-Single binary: **remote-signer-cli** (or **rscli** as shorthand in docs).
+Single binary: **remote-signer-cli** (install with `go install github.com/ivanzzeth/remote-signer/cmd/remote-signer-cli@latest`).
 
 **Subcommands:**
 
@@ -263,7 +263,7 @@ Single binary: **remote-signer-cli** (or **rscli** as shorthand in docs).
 | **rule** | List templates from config |
 | **preset** | List presets, create rules from a preset |
 | **validate** | Validate rules (current validate-rules behavior) |
-| **tui** | Launch TUI (same as current `cmd/tui`) |
+| **tui** | Launch TUI (same as current `cmd/remote-signer-tui`) |
 
 **`rule` subcommands:**
 
@@ -280,7 +280,7 @@ Single binary: **remote-signer-cli** (or **rscli** as shorthand in docs).
 
 **`validate`** (top-level): same as `rule validate` (alias or delegate).
 
-**`tui`**: run the TUI (same as current TUI binary; can be same package `cmd/tui` invoked from CLI, or exec of `remote-signer-tui` if we keep releasing TUI separately). Prefer in-process (single CLI binary that embeds TUI) so one download gives both CLI and TUI.
+**`tui`**: run the TUI (exec of `remote-signer-tui` binary, or build from `cmd/remote-signer-tui`). Prefer in-process (single CLI binary that embeds TUI) so one download gives both CLI and TUI.
 
 ### 3.3 Config patching (--config and --write)
 

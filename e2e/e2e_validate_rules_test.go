@@ -35,7 +35,7 @@ func TestValidateRules_AllRulesAndTemplates(t *testing.T) {
 	}
 	require.NotEmpty(t, files, "no rule/template YAML files found under rules/ and rules/templates/")
 
-	cmd := exec.Command("go", append([]string{"run", "./cmd/validate-rules/"}, files...)...)
+	cmd := exec.Command("go", append([]string{"run", "./cmd/remote-signer-validate-rules/"}, files...)...)
 	cmd.Dir = projectRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -54,6 +54,6 @@ func findProjectRoot(t *testing.T) string {
 			}
 		}
 	}
-	require.Fail(t, "project root (with go.mod and cmd/validate-rules) not found")
+	require.Fail(t, "project root (with go.mod and cmd/remote-signer-validate-rules) not found")
 	return ""
 }

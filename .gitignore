@@ -17,7 +17,7 @@
 /remote-signer-tui
 /audit-monitor
 /cmd/remote-signer/remote-signer
-/cmd/tui/tui
+/cmd/remote-signer-tui/remote-signer-tui
 /validate-rules
 
 # Code coverage profiles and other test artifacts
