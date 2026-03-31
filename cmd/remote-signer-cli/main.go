@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const version = "0.1.14"
+const version = "0.1.15"
 
 func main() {
 	// Pass-through subcommands: forward all args to the child binary so flags like -config work.
@@ -60,6 +60,8 @@ func init() {
 	rootCmd.AddCommand(keystoreCmd)
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(healthCmd)
+	rootCmd.AddCommand(metricsCmd)
+	rootCmd.AddCommand(doctorCmd)
 }
 
 var versionCmd = &cobra.Command{
