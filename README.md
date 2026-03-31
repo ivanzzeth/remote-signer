@@ -235,6 +235,7 @@ The server starts without signers. Add them after startup:
 - [x] JS Client SDK v0.0.4 (SimulateService, executeBatch, signer access control)
 - [x] MCP Server v0.0.5 (simulate, broadcast, guard resume tools)
 - [x] Internal Transfer Rule — same-owner scope for multi-tenant signer isolation (ETH, ERC20/721/1155)
+- [x] Full CLI API Parity — api-key CRUD, audit logs, ACL view, HD wallet management, template CRUD/instantiate/revoke
 
 ### Future
 

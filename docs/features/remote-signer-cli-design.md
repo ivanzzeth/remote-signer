@@ -4,7 +4,7 @@
 
 - **CLI framework**: Use **Cobra** (`github.com/spf13/cobra`) for remote-signer-cli instead of hand-rolled flag/arg parsing. Cobra is the de facto standard in the Go ecosystem (used by Kubernetes, Hugo, GitHub CLI); it handles subcommands, POSIX flags, and argument order correctly.
 - **Validate binary name**: Ship the rules-validator binary as **`remote-signer-validate-rules`** (not `validate-rules`) to avoid clashing with other tools in the user’s global PATH. All references (release assets, setup.sh, CLI exec lookup) use this name.
-- **Full API client integration (2026-03-17)**: CLI must wrap ALL `pkg/client` SDK capabilities as subcommands. Currently CLI is local-only (config parse, preset YAML merge). This blocks the setup.sh flow where scoped rules (agent presets) need to be created via API after server starts. See §7.
+- ✅ **Full API client integration (completed 2026-03-31)**: CLI wraps ALL `pkg/client` SDK capabilities as subcommands. Phase 2a and 2b complete — see §7.5 for full checklist.
 
 ---
 
@@ -62,24 +62,32 @@ remote-signer-cli
 │   ├── signer create             POST /api/v1/evm/signers
 │   ├── signer unlock <addr>      POST /api/v1/evm/signers/:addr/unlock
 │   ├── signer lock <addr>        POST /api/v1/evm/signers/:addr/lock
+│   ├── signer approve <addr>     POST /api/v1/evm/signers/:addr/approve (admin)
+│   ├── signer transfer <addr>    POST /api/v1/evm/signers/:addr/transfer (owner)
+│   ├── signer delete <addr>      DELETE /api/v1/evm/signers/:addr (owner)
+│   ├── signer access grant <a>   POST /api/v1/evm/signers/:addr/access (owner)
+│   ├── signer access revoke <a>  DELETE /api/v1/evm/signers/:addr/access/:keyID (owner)
+│   ├── signer access list <a>    GET /api/v1/evm/signers/:addr/access (owner)
 │   │
 │   ├── hdwallet list             GET /api/v1/evm/hd-wallets
 │   ├── hdwallet create           POST /api/v1/evm/hd-wallets
-│   ├── hdwallet import           POST /api/v1/evm/hd-wallets/import
+│   ├── hdwallet import           POST /api/v1/evm/hd-wallets (action=import)
 │   ├── hdwallet derive <addr>    POST /api/v1/evm/hd-wallets/:addr/derive
 │   ├── hdwallet list-derived <a> GET /api/v1/evm/hd-wallets/:addr/derived
 │   │
 │   ├── template list             GET /api/v1/templates
 │   ├── template get <id>         GET /api/v1/templates/:id
 │   ├── template create           POST /api/v1/templates
+│   ├── template update <id>      PATCH /api/v1/templates/:id
 │   ├── template delete <id>      DELETE /api/v1/templates/:id
 │   ├── template instantiate <id> POST /api/v1/templates/:id/instantiate
+│   ├── template revoke-instance  POST /api/v1/templates/instances/:ruleID/revoke
 │   │
-│   ├── apikey list               GET /api/v1/api-keys
-│   ├── apikey get <id>           GET /api/v1/api-keys/:id
-│   ├── apikey create             POST /api/v1/api-keys
-│   ├── apikey update <id>        PATCH /api/v1/api-keys/:id
-│   ├── apikey delete <id>        DELETE /api/v1/api-keys/:id
+│   ├── api-key list              GET /api/v1/api-keys
+│   ├── api-key get <id>          GET /api/v1/api-keys/:id
+│   ├── api-key create            POST /api/v1/api-keys
+│   ├── api-key update <id>       PUT /api/v1/api-keys/:id
+│   ├── api-key delete <id>       DELETE /api/v1/api-keys/:id
 │   │
 │   ├── request list [--status]    GET /api/v1/evm/requests (defaults to --status authorizing)
 │   ├── request get <id>          GET /api/v1/evm/requests/:id
@@ -96,6 +104,8 @@ remote-signer-cli
 │   ├── simulate status           GET /api/v1/evm/simulate/status
 │   │
 │   ├── audit list                GET /api/v1/audit
+│   │
+│   ├── acl ip-whitelist          GET /api/v1/acls/ip-whitelist (admin)
 │   │
 │   └── sign                      POST /api/v1/evm/sign (for scripting/testing)
 │
@@ -123,20 +133,25 @@ setup.sh:
 
 ### 7.5 Implementation Priority
 
-Phase 2a (blocks setup.sh fix):
-1. Auth flags infrastructure (pkg/client init from CLI flags)
-2. `preset apply` (remote API, not local merge)
-3. `rule list/get/create/delete/toggle`
-4. `health`
+Phase 2a (blocks setup.sh fix) — ✅ DONE:
+1. ✅ Auth flags infrastructure (pkg/client init from CLI flags)
+2. ✅ `preset apply` (remote API, not local merge)
+3. ✅ `rule list/get/create/update/delete/toggle/approve/reject/budgets`
+4. ✅ `health`
 
-Phase 2b (full parity):
-5. `signer list/create/unlock/lock`
-6. `hdwallet *`
-7. `template *`
-8. `apikey *`
-9. `request *`
-10. `audit list`
-11. `sign`
+Phase 2b (full parity) — ✅ DONE:
+5. ✅ `signer list/create/unlock/lock/approve/transfer/delete/access`
+6. ✅ `hdwallet list/create/import/derive/list-derived`
+7. ✅ `template list/get/create/update/delete/instantiate/revoke-instance`
+8. ✅ `api-key list/get/create/update/delete`
+9. ✅ `request list/get/approve/reject/preview-rule`
+10. ✅ `audit list`
+11. ✅ `acl ip-whitelist`
+12. ✅ `sign tx/personal/hash/typed-data`
+13. ✅ `simulate tx/batch/status`
+14. ✅ `broadcast`
+15. ✅ `guard resume`
+16. ✅ `doctor`, `metrics`, `keystore`
 
 ---
 

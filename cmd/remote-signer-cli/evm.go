@@ -17,4 +17,7 @@ func init() {
 	evmCmd.AddCommand(requestCmd)
 	evmCmd.AddCommand(guardCmd)
 	evmCmd.AddCommand(broadcastCmd)
+	evmCmd.AddCommand(hdwalletCmd)
+	evmCmd.AddCommand(apiKeyCmd)
+	evmCmd.AddCommand(templateCmd)
 }
