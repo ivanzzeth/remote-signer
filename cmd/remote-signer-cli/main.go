@@ -53,6 +53,12 @@ func init() {
 	rootCmd.AddCommand(ruleCmd)
 	rootCmd.AddCommand(signCmd)
 
+	// Top-level aliases for management commands
+	rootCmd.AddCommand(apiKeyCmd)
+	rootCmd.AddCommand(templateCmd)
+	rootCmd.AddCommand(auditCmd)
+	rootCmd.AddCommand(aclCmd)
+
 	// Cross-chain / global commands stay at top level
 	rootCmd.AddCommand(presetCmd)
 	rootCmd.AddCommand(validateCmd)

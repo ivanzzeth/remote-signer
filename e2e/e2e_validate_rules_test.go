@@ -49,7 +49,7 @@ func findProjectRoot(t *testing.T) string {
 	require.NoError(t, err)
 	for dir := wd; dir != "/" && dir != ""; dir = filepath.Dir(dir) {
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			if _, err := os.Stat(filepath.Join(dir, "cmd", "validate-rules")); err == nil {
+			if _, err := os.Stat(filepath.Join(dir, "cmd", "remote-signer-validate-rules")); err == nil {
 				return dir
 			}
 		}
