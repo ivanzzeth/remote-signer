@@ -29,11 +29,11 @@ jobs:
               GOOS=$goos GOARCH=$goarch CGO_ENABLED=0 go build \
                 -ldflags="-s -w" \
                 -o "remote-signer-tui-${goos}-${goarch}" \
-                ./cmd/tui
+                ./cmd/remote-signer-tui
               GOOS=$goos GOARCH=$goarch CGO_ENABLED=0 go build \
                 -ldflags="-s -w" \
                 -o "remote-signer-validate-rules-${goos}-${goarch}" \
-                ./cmd/validate-rules
+                ./cmd/remote-signer-validate-rules
               GOOS=$goos GOARCH=$goarch CGO_ENABLED=0 go build \
                 -ldflags="-s -w" \
                 -o "remote-signer-cli-${goos}-${goarch}" \

@@ -394,7 +394,7 @@ remote-signer-cli evm signer list \
 | File | Change |
 |------|--------|
 | `cmd/remote-signer-cli/client.go` | Keystore loading + password prompt |
-| `cmd/tui/main.go` | Keystore loading + password prompt |
+| `cmd/remote-signer-tui/main.go` | Keystore loading + password prompt |
 | `scripts/setup.sh` | Generate encrypted keystores |
 
 ---

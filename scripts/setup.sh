@@ -136,13 +136,13 @@ build_from_source_binaries() {
 
     log_info "Building CLI tools from source (this may take a minute)..."
     local ok=0
-    if (cd "$PROJECT_DIR" && go build -o "$BIN_DIR/remote-signer-tui" ./cmd/tui 2>/dev/null); then
+    if (cd "$PROJECT_DIR" && go build -o "$BIN_DIR/remote-signer-tui" ./cmd/remote-signer-tui 2>/dev/null); then
         log_info "Built remote-signer-tui"
         ok=1
     else
         log_warn "Failed to build remote-signer-tui"
     fi
-    if (cd "$PROJECT_DIR" && go build -o "$BIN_DIR/remote-signer-validate-rules" ./cmd/validate-rules 2>/dev/null); then
+    if (cd "$PROJECT_DIR" && go build -o "$BIN_DIR/remote-signer-validate-rules" ./cmd/remote-signer-validate-rules 2>/dev/null); then
         log_info "Built remote-signer-validate-rules"
         ok=1
     else
@@ -1383,7 +1383,7 @@ step_done() {
         echo "    remote-signer-tui -api-key-id admin -api-key-file data/admin_private.pem \\"
         echo "      # or: $TUI_BIN -api-key-id admin -api-key-file data/admin_private.pem \\"
     else
-        echo "    go build -o remote-signer-tui ./cmd/tui   # requires Go 1.24+ (https://go.dev/dl/)"
+        echo "    go build -o remote-signer-tui ./cmd/remote-signer-tui   # requires Go 1.24+ (https://go.dev/dl/)"
         echo "    remote-signer-tui -api-key-id admin -api-key-file data/admin_private.pem \\"
     fi
     if [ "$TLS_CHOICE" = "3" ]; then
@@ -1596,7 +1596,7 @@ start_server_now() {
                 log_info "Launching TUI (use Signers tab to create keystore or HD wallet)..."
                 run_tui_for_setup
             elif [ ! -x "$TUI_BIN" ]; then
-                log_warn "TUI binary not found. Build with: go build -o remote-signer-tui ./cmd/tui"
+                log_warn "TUI binary not found. Build with: go build -o remote-signer-tui ./cmd/remote-signer-tui"
                 log_info "When ready, run: ./scripts/deploy.sh $([ "$DEPLOY_MODE" = "docker" ] && echo 'run --no-screen' || echo local-run)"
             else
                 log_warn "data/admin_private.pem not found; run setup again or use TUI with REMOTE_SIGNER_PRIVATE_KEY."

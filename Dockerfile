@@ -20,7 +20,7 @@ COPY . .
 
 # Build binaries with optimizations (architecture auto-detected from build platform)
 RUN CGO_ENABLED=0 go build -ldflags="-w -s" -o /remote-signer ./cmd/remote-signer
-RUN CGO_ENABLED=0 go build -ldflags="-w -s" -o /remote-signer-tui ./cmd/tui
+RUN CGO_ENABLED=0 go build -ldflags="-w -s" -o /remote-signer-tui ./cmd/remote-signer-tui
 
 # =============================================================================
 # Stage 2: Final minimal image
