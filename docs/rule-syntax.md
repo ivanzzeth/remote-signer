@@ -655,6 +655,81 @@ At least one of `check_recipient` or `check_verifying_contract` must be `true`.
 
 ---
 
+## Rule Type: `evm_internal_transfer`
+
+A whitelist-only rule that allows transfers between signers owned by the same API key. This enables multi-tenant custodial signing where each tenant's signers are isolated.
+
+### Supported Transfer Types
+
+| Type | Method | Selector | Recipient Source |
+|------|--------|----------|------------------|
+| ETH | native transfer | N/A | `tx.to` |
+| ERC20 | `transfer(address,uint256)` | `0xa9059cbb` | calldata[4:36] |
+| ERC20/721 | `transferFrom(address,address,uint256)` | `0x23b872dd` | calldata[36:68] |
+| ERC721 | `safeTransferFrom(address,address,uint256)` | `0x42842e0e` | calldata[36:68] |
+| ERC721 | `safeTransferFrom(address,address,uint256,bytes)` | `0xb88d4fde` | calldata[36:68] |
+| ERC1155 | `safeTransferFrom(...)` | `0xf242432a` | calldata[36:68] |
+| ERC1155 | `safeBatchTransferFrom(...)` | `0x2eb2c2d6` | calldata[36:68] |
+
+### Config Schema
+
+```yaml
+config:
+  match_mode: "owner_id"  # Optional, defaults to "owner_id"
+```
+
+### Config Go Struct
+
+```go
+type InternalTransferConfig struct {
+    MatchMode string `json:"match_mode,omitempty"` // "owner_id" (default) | "user_id" (future)
+}
+```
+
+### Behavior
+
+- **Mode**: Whitelist only (blocklist mode is not applicable)
+- **Sign Type**: Only applies to `transaction` sign type
+- **Matching Logic**:
+  1. Extract recipient address from transaction (`tx.to`) or calldata (for token transfers)
+  2. Look up ownership for both sender and recipient
+  3. Match if both have the same `owner_id` AND recipient status is `active`
+  4. Return neutral (no match) for:
+     - Non-transaction sign types
+     - Recipient is not a managed signer (external address)
+     - Recipient has `pending_approval` status
+     - Different owners
+
+### Security Notes
+
+1. **Pending signer protection**: Transfers to pending signers are blocked (neutral), preventing self-registration attacks
+2. **Owner isolation**: Cross-owner transfers require other rules or manual approval
+3. **External addresses**: Transfers to external addresses return neutral, allowing other whitelist rules to match
+
+### Example
+
+```yaml
+rules:
+  - name: "Allow internal transfers"
+    type: evm_internal_transfer
+    mode: whitelist
+    enabled: true
+    owner: admin
+    applied_to: ["*"]
+    config: {}
+```
+
+### Multi-Tenancy Extension (Future)
+
+When auth service integration is enabled, `match_mode: "user_id"` will allow transfers between signers owned by API keys belonging to the same user:
+
+```yaml
+config:
+  match_mode: "user_id"  # Requires auth service integration
+```
+
+---
+
 ## Migration Guide
 
 If you have existing rules using the old variable names, update them as follows:

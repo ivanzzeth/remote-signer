@@ -27,6 +27,7 @@ const (
 	RuleTypeEVMSolidityExpression  RuleType = "evm_solidity_expression"  // Solidity expression rules (Foundry-based)
 	RuleTypeEVMJS                  RuleType = "evm_js"                    // JS rules (in-process Sobek); validate(input) → { valid, reason?, payload? }
 	RuleTypeEVMDynamicBlocklist    RuleType = "evm_dynamic_blocklist"    // Dynamic blocklist: runtime-synced from external URLs (OFAC, scam DBs)
+	RuleTypeEVMInternalTransfer    RuleType = "evm_internal_transfer"    // Internal transfer: same-owner signer transfers (whitelist-only)
 )
 
 // RuleSource represents where the rule came from

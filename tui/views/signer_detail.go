@@ -146,12 +146,43 @@ func (m *SignerDetailModel) renderDetail() string {
 		key   string
 		value string
 		style lipgloss.Style
-	}{
-		{"Address", m.signer.Address, lipgloss.NewStyle()},
-		{"Type", m.signer.Type, lipgloss.NewStyle()},
-		{"Lock State", lockedStr, lockedStyle},
-		{"Enabled", enabledStr, enabledStyle},
+	}{}
+	if strings.TrimSpace(m.signer.DisplayName) != "" {
+		info = append(info, struct {
+			key   string
+			value string
+			style lipgloss.Style
+		}{"Name", m.signer.DisplayName, lipgloss.NewStyle()})
 	}
+	if len(m.signer.Tags) > 0 {
+		info = append(info, struct {
+			key   string
+			value string
+			style lipgloss.Style
+		}{"Tags", strings.Join(m.signer.Tags, ", "), lipgloss.NewStyle()})
+	}
+	info = append(info,
+		struct {
+			key   string
+			value string
+			style lipgloss.Style
+		}{"Address", m.signer.Address, lipgloss.NewStyle()},
+		struct {
+			key   string
+			value string
+			style lipgloss.Style
+		}{"Type", m.signer.Type, lipgloss.NewStyle()},
+		struct {
+			key   string
+			value string
+			style lipgloss.Style
+		}{"Lock State", lockedStr, lockedStyle},
+		struct {
+			key   string
+			value string
+			style lipgloss.Style
+		}{"Enabled", enabledStr, enabledStyle},
+	)
 
 	for _, item := range info {
 		keyStr := styles.InfoKeyStyle.Render(item.key + ":")

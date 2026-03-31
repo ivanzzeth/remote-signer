@@ -33,6 +33,10 @@ type SignerManager interface {
 
 	// LockSigner locks an unlocked signer (remove key from memory).
 	LockSigner(ctx context.Context, address string) (*types.SignerInfo, error)
+
+	// DeleteSigner permanently deletes a signer (removes file, cleans in-memory state).
+	// For HD wallets, this deletes the entire wallet and all derived addresses.
+	DeleteSigner(ctx context.Context, address string) error
 }
 
 // AutoLockCallback is called when a signer is automatically locked due to timeout.
@@ -273,4 +277,34 @@ func (m *SignerManagerImpl) LockSigner(ctx context.Context, address string) (*ty
 	logger.EVM().Info().Str("address", address).Str("type", info.Type).Msg("signer locked")
 
 	return &updatedInfo, nil
+}
+
+// DeleteSigner permanently deletes a signer (removes file, cleans in-memory state).
+// For HD wallets, this deletes the entire wallet and all derived addresses.
+func (m *SignerManagerImpl) DeleteSigner(ctx context.Context, address string) error {
+	info, ok := m.registry.GetSignerInfo(address)
+	if !ok {
+		return types.ErrSignerNotFound
+	}
+
+	p, ok := m.registry.Provider(types.SignerType(info.Type))
+	if !ok {
+		return fmt.Errorf("no provider for signer type %q", info.Type)
+	}
+
+	deleter, ok := p.(SignerDeleter)
+	if !ok {
+		return fmt.Errorf("provider %q does not support delete", info.Type)
+	}
+
+	// Cancel auto-lock timer if running
+	m.cancelAutoLockTimer(address)
+
+	// Call provider's delete method (handles file deletion, in-memory cleanup, registry unregistration)
+	if err := deleter.DeleteSigner(ctx, address); err != nil {
+		return err
+	}
+
+	logger.EVM().Info().Str("address", address).Str("type", info.Type).Msg("signer deleted")
+	return nil
 }

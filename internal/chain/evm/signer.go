@@ -293,6 +293,18 @@ func (r *SignerRegistry) LockSigner(address string) error {
 	return nil
 }
 
+// UnregisterSigner removes a signer from the registry entirely.
+// Used when permanently deleting a signer.
+func (r *SignerRegistry) UnregisterSigner(address string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	addrKey := normalizeAddress(address)
+	delete(r.signers, addrKey)
+	delete(r.info, addrKey)
+	logger.EVM().Info().Str("address", address).Msg("registry: UnregisterSigner")
+}
+
 // IsLocked returns true if signer exists but is locked.
 func (r *SignerRegistry) IsLocked(address string) bool {
 	r.mu.RLock()

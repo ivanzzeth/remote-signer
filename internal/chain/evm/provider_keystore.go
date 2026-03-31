@@ -3,6 +3,7 @@ package evm
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -214,9 +215,49 @@ func (p *KeystoreProvider) LockSigner(ctx context.Context, address string) error
 	return fmt.Errorf("keystore file not found for address %s", address)
 }
 
+// DeleteSigner permanently deletes a keystore signer (removes file and cleans in-memory state).
+func (p *KeystoreProvider) DeleteSigner(ctx context.Context, address string) error {
+	addrKey := normalizeAddress(address)
+
+	// Find the keystore file path by scanning the directory
+	keystores, err := keystore.ListKeystores(p.keystoreDir)
+	if err != nil {
+		return fmt.Errorf("failed to list keystores: %w", err)
+	}
+
+	var keystorePath string
+	for _, ks := range keystores {
+		if normalizeAddress(ks.Address) == addrKey {
+			keystorePath = ks.Path
+			break
+		}
+	}
+
+	if keystorePath == "" {
+		return fmt.Errorf("keystore file not found for address %s", address)
+	}
+
+	// Remove the keystore file
+	if err := os.Remove(keystorePath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to delete keystore file: %w", err)
+	}
+
+	// Clean in-memory state
+	p.mu.Lock()
+	delete(p.lockedPaths, addrKey)
+	p.mu.Unlock()
+
+	// Unregister from the shared registry
+	p.registry.UnregisterSigner(addrKey)
+
+	logger.EVM().Info().Str("address", address).Str("path", keystorePath).Msg("keystore signer deleted")
+	return nil
+}
+
 // Compile-time interface checks.
 var (
 	_ SignerDiscoverer = (*KeystoreProvider)(nil)
 	_ SignerUnlocker   = (*KeystoreProvider)(nil)
 	_ SignerLocker     = (*KeystoreProvider)(nil)
+	_ SignerDeleter    = (*KeystoreProvider)(nil)
 )

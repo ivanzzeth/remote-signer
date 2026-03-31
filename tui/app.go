@@ -634,11 +634,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Check if user selected a wallet for detail view
 		if m.hdwallets.ShouldOpenDetail() {
-			addr := m.hdwallets.GetSelectedPrimaryAddr()
+			w := m.hdwallets.GetSelectedWallet()
 			m.hdwallets.ResetOpenDetail()
 			m.previousView = m.currentView
 			m.currentView = ViewHDWalletDetail
-			cmds = append(cmds, m.hdwalletDetail.LoadWallet(addr))
+			cmds = append(cmds, m.hdwalletDetail.LoadWallet(w))
 		}
 
 	case ViewHDWalletDetail:

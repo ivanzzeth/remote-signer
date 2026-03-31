@@ -89,8 +89,16 @@ type SignersModel struct {
 	offset      int
 	limit       int
 	typeFilter  string
+	tagFilter   string
+	filterKind  string // "type" or "tag"
 	showFilter  bool
 	filterInput textinput.Model
+
+	// Edit display name / tags (owner)
+	showEditLabels bool
+	editFocus      int // 0 = name, 1 = tags
+	editNameInput  textinput.Model
+	editTagsInput  textinput.Model
 
 	// Unlock/lock signer state
 	showUnlock         bool
@@ -99,14 +107,14 @@ type SignersModel struct {
 	unlockCooldownUtil map[string]time.Time // address → cooldown expiry
 
 	// Create signer state
-	showCreate       bool
-	createStep       int // 0: select type, 1: enter password (keystore) or loading wallets (hd), 2: confirm (keystore) or pick wallet (hd), 3: enter index (hd)
-	typeIdx          int // 0=keystore, 1=hd_wallet
-	selectedType     string
-	passwordInput    textinput.Model
-	confirmInput     textinput.Model
-	showPassword     bool
-	actionResult     string
+	showCreate    bool
+	createStep    int // 0: select type, 1: enter password (keystore) or loading wallets (hd), 2: confirm (keystore) or pick wallet (hd), 3: enter index (hd)
+	typeIdx       int // 0=keystore, 1=hd_wallet
+	selectedType  string
+	passwordInput textinput.Model
+	confirmInput  textinput.Model
+	showPassword  bool
+	actionResult  string
 
 	// HD wallet derive state (in create flow)
 	hdwallets_svc evm.HDWalletAPI
@@ -162,6 +170,14 @@ type SignerHDDeriveMsg struct {
 	Err     error
 }
 
+// SignerLabelsPatchMsg is sent when signer labels are updated via PATCH.
+type SignerLabelsPatchMsg struct {
+	Signer  *evm.Signer
+	Success bool
+	Message string
+	Err     error
+}
+
 // NewSignersModel creates a new signers model
 func NewSignersModel(c *client.Client, ctx context.Context) (*SignersModel, error) {
 	if c == nil {
@@ -206,6 +222,14 @@ func newSignersModelFromService(svc evm.SignerAPI, hdSvc evm.HDWalletAPI, ctx co
 	unlockInput.Width = 40
 	unlockInput.EchoMode = textinput.EchoPassword
 
+	editName := textinput.New()
+	editName.Placeholder = "Display name (optional)"
+	editName.Width = 50
+
+	editTags := textinput.New()
+	editTags.Placeholder = "Tags: comma-separated"
+	editTags.Width = 50
+
 	return &SignersModel{
 		signers_svc:        svc,
 		hdwallets_svc:      hdSvc,
@@ -218,6 +242,8 @@ func newSignersModelFromService(svc evm.SignerAPI, hdSvc evm.HDWalletAPI, ctx co
 		confirmInput:       confirmInput,
 		indexInput:         idxInput,
 		unlockInput:        unlockInput,
+		editNameInput:      editName,
+		editTagsInput:      editTags,
 		unlockAttempts:     make(map[string]int),
 		unlockCooldownUtil: make(map[string]time.Time),
 	}, nil
@@ -250,6 +276,7 @@ func (m *SignersModel) loadData() tea.Cmd {
 	return func() tea.Msg {
 		filter := &evm.ListSignersFilter{
 			Type:   m.typeFilter,
+			Tag:    m.tagFilter,
 			Limit:  m.limit,
 			Offset: m.offset,
 		}
@@ -326,6 +353,25 @@ func (m *SignersModel) loadHDWallets() tea.Cmd {
 			return SignerHDWalletListMsg{Err: err}
 		}
 		return SignerHDWalletListMsg{Wallets: resp.Wallets}
+	}
+}
+
+func (m *SignersModel) patchSignerLabels(address, displayName, tagsCSV string) tea.Cmd {
+	return func() tea.Msg {
+		tags := ParseTagsCSV(tagsCSV)
+		dn := strings.TrimSpace(displayName)
+		dnPtr := &dn
+		tagsPtr := &tags
+		req := &evm.PatchSignerLabelsRequest{DisplayName: dnPtr, Tags: tagsPtr}
+		signer, err := m.signers_svc.PatchSignerLabels(m.ctx, address, req)
+		if err != nil {
+			return SignerLabelsPatchMsg{Success: false, Err: err}
+		}
+		return SignerLabelsPatchMsg{
+			Signer:  signer,
+			Success: true,
+			Message: fmt.Sprintf("Updated labels for %s", address),
+		}
 	}
 }
 
@@ -441,6 +487,19 @@ func (m *SignersModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case SignerLabelsPatchMsg:
+		m.loading = false
+		if msg.Err != nil {
+			m.actionResult = styles.ErrorStyle.Render(fmt.Sprintf("Error: %v", msg.Err))
+		} else {
+			m.showEditLabels = false
+			m.editNameInput.Blur()
+			m.editTagsInput.Blur()
+			m.actionResult = styles.SuccessStyle.Render(msg.Message)
+			return m, m.Refresh()
+		}
+		return m, nil
+
 	case spinner.TickMsg:
 		if m.loading {
 			var cmd tea.Cmd
@@ -488,6 +547,49 @@ func (m *SignersModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// Edit signer labels (name + tags)
+		if m.showEditLabels {
+			switch msg.String() {
+			case "esc":
+				m.showEditLabels = false
+				m.editNameInput.Blur()
+				m.editTagsInput.Blur()
+				return m, nil
+			case "tab":
+				if m.editFocus == 0 {
+					m.editFocus = 1
+					m.editNameInput.Blur()
+					m.editTagsInput.Focus()
+				} else {
+					m.editFocus = 0
+					m.editTagsInput.Blur()
+					m.editNameInput.Focus()
+				}
+				return m, textinput.Blink
+			case "enter":
+				signer := m.GetSelectedSigner()
+				if signer == nil {
+					m.showEditLabels = false
+					return m, nil
+				}
+				m.loading = true
+				m.actionResult = ""
+				return m, tea.Batch(m.spinner.Tick, m.patchSignerLabels(
+					signer.Address,
+					m.editNameInput.Value(),
+					m.editTagsInput.Value(),
+				))
+			default:
+				var cmd tea.Cmd
+				if m.editFocus == 0 {
+					m.editNameInput, cmd = m.editNameInput.Update(msg)
+				} else {
+					m.editTagsInput, cmd = m.editTagsInput.Update(msg)
+				}
+				return m, cmd
+			}
+		}
+
 		// Handle create signer flow
 		if m.showCreate {
 			return m.handleCreateInput(msg)
@@ -497,7 +599,11 @@ func (m *SignersModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.showFilter {
 			switch msg.String() {
 			case "enter":
-				m.typeFilter = m.filterInput.Value()
+				if m.filterKind == "tag" {
+					m.tagFilter = strings.TrimSpace(m.filterInput.Value())
+				} else {
+					m.typeFilter = m.filterInput.Value()
+				}
 				m.showFilter = false
 				m.filterInput.Blur()
 				m.offset = 0
@@ -520,9 +626,31 @@ func (m *SignersModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.Refresh()
 		case "f":
 			m.showFilter = true
-			m.filterInput.Placeholder = "Signer type (private_key, keystore)"
+			m.filterKind = "type"
+			m.filterInput.SetValue(m.typeFilter)
+			m.filterInput.Placeholder = "Signer type (private_key, keystore, hd_wallet)"
 			m.filterInput.Focus()
 			return m, textinput.Blink
+		case "t":
+			m.showFilter = true
+			m.filterKind = "tag"
+			m.filterInput.SetValue(m.tagFilter)
+			m.filterInput.Placeholder = "Tag label (exact match)"
+			m.filterInput.Focus()
+			return m, textinput.Blink
+		case "e":
+			sel := m.GetSelectedSigner()
+			if sel != nil {
+				m.showEditLabels = true
+				m.editFocus = 0
+				m.editNameInput.SetValue(sel.DisplayName)
+				m.editTagsInput.SetValue(strings.Join(sel.Tags, ", "))
+				m.editNameInput.Focus()
+				m.editTagsInput.Blur()
+				m.actionResult = ""
+				return m, textinput.Blink
+			}
+			return m, nil
 		case "up", "k":
 			if m.selectedIdx > 0 {
 				m.selectedIdx--
@@ -578,6 +706,7 @@ func (m *SignersModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "c":
 			// Clear filters
 			m.typeFilter = ""
+			m.tagFilter = ""
 			m.filterInput.SetValue("")
 			m.offset = 0
 			m.selectedIdx = 0
@@ -810,6 +939,10 @@ func (m *SignersModel) View() string {
 		return m.renderFilterInput()
 	}
 
+	if m.showEditLabels {
+		return m.renderEditLabelsForm()
+	}
+
 	if m.loading {
 		return m.renderLoading()
 	}
@@ -878,11 +1011,48 @@ func (m *SignersModel) renderUnlockForm() string {
 func (m *SignersModel) renderFilterInput() string {
 	var content strings.Builder
 
-	content.WriteString(styles.SubtitleStyle.Render("Filter by Type"))
+	title := "Filter by Type"
+	if m.filterKind == "tag" {
+		title = "Filter by Tag"
+	}
+	content.WriteString(styles.SubtitleStyle.Render(title))
 	content.WriteString("\n\n")
 	content.WriteString(m.filterInput.View())
 	content.WriteString("\n\n")
 	content.WriteString(styles.MutedColor.Render("Press Enter to apply, Esc to cancel"))
+
+	return lipgloss.Place(
+		m.width,
+		m.height,
+		lipgloss.Center,
+		lipgloss.Center,
+		styles.BoxStyle.Render(content.String()),
+	)
+}
+
+func (m *SignersModel) renderEditLabelsForm() string {
+	var content strings.Builder
+	sel := m.GetSelectedSigner()
+	addr := ""
+	if sel != nil {
+		addr = sel.Address
+	}
+	content.WriteString(styles.TitleStyle.Render("Edit Signer Labels"))
+	content.WriteString("\n\n")
+	content.WriteString(fmt.Sprintf("Address: %s\n\n", styles.HighlightStyle.Render(addr)))
+	content.WriteString(styles.SubtitleStyle.Render("Display name"))
+	content.WriteString("\n")
+	content.WriteString(m.editNameInput.View())
+	content.WriteString("\n\n")
+	content.WriteString(styles.SubtitleStyle.Render("Tags (comma-separated)"))
+	content.WriteString("\n")
+	content.WriteString(m.editTagsInput.View())
+	content.WriteString("\n\n")
+	if m.actionResult != "" {
+		content.WriteString(m.actionResult)
+		content.WriteString("\n\n")
+	}
+	content.WriteString(styles.MutedColor.Render("Tab: switch field | Enter: save | Esc: cancel"))
 
 	return lipgloss.Place(
 		m.width,
@@ -1043,6 +1213,9 @@ func (m *SignersModel) renderSigners() string {
 	if m.typeFilter != "" {
 		header += styles.MutedColor.Render(fmt.Sprintf(" (filtered: type=%s)", m.typeFilter))
 	}
+	if m.tagFilter != "" {
+		header += styles.MutedColor.Render(fmt.Sprintf(" (tag=%s)", m.tagFilter))
+	}
 	content.WriteString(header)
 	content.WriteString("\n\n")
 
@@ -1096,7 +1269,7 @@ func (m *SignersModel) renderSigners() string {
 
 	// Help
 	content.WriteString("\n\n")
-	helpText := "Enter: view detail | up/down: navigate | u: unlock | l: lock | +/a: create signer | f: filter | c: clear | n/p: next/prev | r: refresh"
+	helpText := "Enter: detail | ↑/↓ | u: unlock | l: lock | +/a: create | e: edit name/tags | f: type | t: tag | c: clear | n/p page | r: refresh"
 	content.WriteString(styles.HelpStyle.Render(helpText))
 
 	return content.String()
@@ -1112,7 +1285,7 @@ func (m *SignersModel) GetSelectedSigner() *evm.Signer {
 
 // IsCapturingInput returns true when this view is capturing keyboard input (form/filter active).
 func (m *SignersModel) IsCapturingInput() bool {
-	return m.showCreate || m.showFilter || m.showUnlock
+	return m.showCreate || m.showFilter || m.showUnlock || m.showEditLabels
 }
 
 func (m *SignersModel) renderSignerRow(signer evm.Signer, selected bool, showOwner bool) string {
@@ -1131,8 +1304,6 @@ func (m *SignersModel) renderSignerRow(signer evm.Signer, selected bool, showOwn
 	if signer.Locked {
 		status = "Locked"
 	} else if signer.UnlockedAt != nil {
-		// Show auto-lock countdown if available
-		// We don't know the exact timeout from TUI, but we show unlock age
 		elapsed := time.Since(*signer.UnlockedAt)
 		if elapsed < time.Hour {
 			status = fmt.Sprintf("Unlocked %dm", int(elapsed.Minutes()))
@@ -1149,35 +1320,14 @@ func (m *SignersModel) renderSignerRow(signer evm.Signer, selected bool, showOwn
 		}
 	}
 
-	if showOwner {
-		row := fmt.Sprintf("%-44s  %-14s  %-14s  %-8s  %-20s",
-			address,
-			signer.Type,
-			status,
-			enabled,
-			ownerStr,
-		)
-		if selected {
-			return styles.TableSelectedRowStyle.Render(row)
-		}
-	} else {
-		row := fmt.Sprintf("%-44s  %-14s  %-14s  %-8s",
-			address,
-			signer.Type,
-			status,
-			enabled,
-		)
-		if selected {
-			return styles.TableSelectedRowStyle.Render(row)
-		}
-	}
-
 	// Color type
 	typeStyle := styles.MutedColor
 	switch signer.Type {
 	case "private_key":
 		typeStyle = styles.WarningStyle
 	case "keystore":
+		typeStyle = styles.SuccessStyle
+	case "hd_wallet":
 		typeStyle = styles.SuccessStyle
 	}
 	typePart := typeStyle.Render(fmt.Sprintf("%-14s", signer.Type))
@@ -1198,22 +1348,30 @@ func (m *SignersModel) renderSignerRow(signer evm.Signer, selected bool, showOwn
 	}
 	enabledPart := enabledStyle.Render(fmt.Sprintf("%-8s", enabled))
 
+	var row string
 	if showOwner {
-		row := fmt.Sprintf("%-44s  %s  %s  %s  %-20s",
+		row = fmt.Sprintf("%-44s  %s  %s  %s  %-20s",
 			address,
 			typePart,
 			statusPart,
 			enabledPart,
 			ownerStr,
 		)
-		return styles.TableRowStyle.Render(row)
+	} else {
+		row = fmt.Sprintf("%-44s  %s  %s  %s",
+			address,
+			typePart,
+			statusPart,
+			enabledPart,
+		)
 	}
 
-	row := fmt.Sprintf("%-44s  %s  %s  %s",
-		address,
-		typePart,
-		statusPart,
-		enabledPart,
-	)
+	if sum := HumanLabelLine(signer.DisplayName, signer.Tags); sum != "" {
+		row += "\n  " + styles.MutedColor.Render(sum)
+	}
+
+	if selected {
+		return styles.TableSelectedRowStyle.Render(row)
+	}
 	return styles.TableRowStyle.Render(row)
 }

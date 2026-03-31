@@ -3,6 +3,7 @@ package evm
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 
@@ -696,9 +697,66 @@ func appendUniqueUint32(s []uint32, v uint32) []uint32 {
 	return append(s, v)
 }
 
+// DeleteSigner permanently deletes an HD wallet (removes file, cleans in-memory state, derivation state).
+// For HD wallets, this deletes the entire wallet and all derived addresses.
+func (p *HDWalletProvider) DeleteSigner(ctx context.Context, primaryAddress string) error {
+	addrKey := normalizeAddress(primaryAddress)
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	var walletPath string
+	var derivedAddrs []string
+
+	// Check if wallet is loaded (unlocked)
+	if state, exists := p.wallets[addrKey]; exists {
+		walletPath = state.walletPath
+		// Close the wallet to zeroize keys
+		if err := state.wallet.Close(); err != nil {
+			logger.EVM().Warn().Err(err).Msg("failed to close wallet during delete")
+		}
+		// Collect derived addresses for registry cleanup
+		for _, d := range state.derived {
+			derivedAddrs = append(derivedAddrs, normalizeAddress(d.Address))
+		}
+		delete(p.wallets, addrKey)
+	}
+
+	// Check if wallet is locked
+	if path, exists := p.lockedPaths[addrKey]; exists {
+		walletPath = path
+		delete(p.lockedPaths, addrKey)
+	}
+
+	if walletPath == "" {
+		return fmt.Errorf("HD wallet not found for address %s", primaryAddress)
+	}
+
+	// Remove the wallet file
+	if err := os.Remove(walletPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to delete HD wallet file: %w", err)
+	}
+
+	// Delete derivation state
+	if err := p.derivStore.Delete(addrKey); err != nil {
+		logger.EVM().Warn().Str("address", primaryAddress).Err(err).Msg("failed to delete derivation state")
+	}
+
+	// Unregister all derived signers from registry
+	for _, derivedAddr := range derivedAddrs {
+		p.registry.UnregisterSigner(derivedAddr)
+	}
+	// Unregister primary address
+	p.registry.UnregisterSigner(addrKey)
+
+	logger.EVM().Info().Str("primary_address", primaryAddress).Str("path", walletPath).Int("derived_count", len(derivedAddrs)).Msg("HD wallet deleted")
+	return nil
+}
+
 // Compile-time interface checks.
 var (
 	_ SignerDiscoverer = (*HDWalletProvider)(nil)
 	_ SignerUnlocker   = (*HDWalletProvider)(nil)
 	_ SignerLocker     = (*HDWalletProvider)(nil)
+	_ SignerDeleter    = (*HDWalletProvider)(nil)
 )
