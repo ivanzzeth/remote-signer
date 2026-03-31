@@ -25,6 +25,7 @@ var (
 	flagTLSKey           string
 	flagTLSSkipVerify    bool
 	flagOutputFormat     string
+	flagJSON             bool
 )
 
 // registerAuthFlags adds persistent auth flags to the root command.
@@ -40,6 +41,12 @@ func registerAuthFlags(rootCmd *cobra.Command) {
 	pf.StringVar(&flagTLSKey, "tls-key", "", "Client key for mTLS")
 	pf.BoolVar(&flagTLSSkipVerify, "tls-skip-verify", false, "Skip TLS certificate verification (testing only)")
 	pf.StringVarP(&flagOutputFormat, "output", "o", "table", "Output format: table, json, yaml")
+	pf.BoolVar(&flagJSON, "json", false, "Machine-readable JSON output (sets -o json; PRD agent output)")
+	rootCmd.PersistentPreRun = func(cmd *cobra.Command, args []string) {
+		if flagJSON {
+			flagOutputFormat = "json"
+		}
+	}
 }
 
 // newClientFromFlags creates a pkg/client.Client using the persistent auth flags.
