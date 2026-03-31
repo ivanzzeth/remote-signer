@@ -868,20 +868,48 @@ func (h *SignerHandler) newSignerResponse(ctx context.Context, s types.SignerInf
 		UnlockedAt: s.UnlockedAt,
 	}
 
-	// For HD wallets, dynamically check runtime unlock status
-	// (DB field may be stale after unlock)
+	// For HD wallets, dynamically check runtime unlock status and find primary address
+	// (DB field may be stale after unlock, derived addresses need to inherit primary's ownership)
+	var primaryAddress string
 	if s.Type == string(types.SignerTypeHDWallet) {
 		if hdwMgr, err := h.signerManager.HDWalletManager(); err == nil {
-			// Try to list derived addresses - success means unlocked
-			if _, listErr := hdwMgr.ListDerivedAddresses(s.Address); listErr == nil {
-				resp.Locked = false
-			} else {
-				resp.Locked = true
+			// Check all unlocked HD wallets to see if this address belongs to any of them
+			unlocked := false
+			for _, wallet := range hdwMgr.ListHDWallets() {
+				if !wallet.Locked {
+					// Check if this address is the primary address
+					if strings.EqualFold(wallet.PrimaryAddress, s.Address) {
+						unlocked = true
+						primaryAddress = wallet.PrimaryAddress
+						break
+					}
+					// Check if this address is a derived address
+					derived, err := hdwMgr.ListDerivedAddresses(wallet.PrimaryAddress)
+					if err == nil {
+						for _, d := range derived {
+							if strings.EqualFold(d.Address, s.Address) {
+								unlocked = true
+								primaryAddress = wallet.PrimaryAddress // Derived address inherits from primary
+								break
+							}
+						}
+						if unlocked {
+							break
+						}
+					}
+				}
 			}
+			resp.Locked = !unlocked
 		}
 	}
 
-	if ownership, oErr := h.accessService.GetOwnership(ctx, s.Address); oErr == nil && ownership != nil {
+	// Get ownership: try current address first, fallback to primary address for derived addresses
+	ownership, oErr := h.accessService.GetOwnership(ctx, s.Address)
+	if oErr != nil && primaryAddress != "" && !strings.EqualFold(primaryAddress, s.Address) {
+		// Derived address has no ownership record, use primary address's ownership
+		ownership, oErr = h.accessService.GetOwnership(ctx, primaryAddress)
+	}
+	if oErr == nil && ownership != nil {
 		resp.OwnerID = ownership.OwnerID
 		resp.Status = string(ownership.Status)
 		resp.DisplayName = ownership.DisplayName
