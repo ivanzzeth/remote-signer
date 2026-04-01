@@ -66,15 +66,17 @@ func (h *SignerHandler) SetMaxKeystoresPerKey(max int) {
 
 // SignerResponse represents a signer in API responses
 type SignerResponse struct {
-	Address     string     `json:"address"`
-	Type        string     `json:"type"`
-	Enabled     bool       `json:"enabled"`
-	Locked      bool       `json:"locked"`
-	UnlockedAt  *time.Time `json:"unlocked_at,omitempty"`
-	OwnerID     string     `json:"owner_id,omitempty"`
-	Status      string     `json:"status,omitempty"` // ownership status: active, pending_approval
-	DisplayName string     `json:"display_name,omitempty"`
-	Tags        []string   `json:"tags,omitempty"`
+	Address           string     `json:"address"`
+	Type              string     `json:"type"`
+	Enabled           bool       `json:"enabled"`
+	Locked            bool       `json:"locked"`
+	UnlockedAt        *time.Time `json:"unlocked_at,omitempty"`
+	OwnerID           string     `json:"owner_id,omitempty"`
+	Status            string     `json:"status,omitempty"` // ownership status: active, pending_approval
+	DisplayName       string     `json:"display_name,omitempty"`
+	Tags              []string   `json:"tags,omitempty"`
+	HDParentAddress   string     `json:"hd_parent_address,omitempty"`   // for derived addresses: parent HD wallet address
+	HDDerivationIndex *uint32    `json:"hd_derivation_index,omitempty"` // for derived addresses: derivation index
 }
 
 // UnlockSignerRequest represents the request to unlock a locked signer
@@ -915,6 +917,14 @@ func (h *SignerHandler) newSignerResponse(ctx context.Context, s types.SignerInf
 		resp.DisplayName = ownership.DisplayName
 		resp.Tags = ownership.Tags()
 	}
+
+	// Fill HD hierarchy info if this is a derived address
+	hierarchy := h.signerManager.GetHDHierarchy()
+	if info, ok := hierarchy[strings.ToLower(s.Address)]; ok {
+		resp.HDParentAddress = info.ParentAddress
+		resp.HDDerivationIndex = &info.DerivationIndex
+	}
+
 	return resp
 }
 

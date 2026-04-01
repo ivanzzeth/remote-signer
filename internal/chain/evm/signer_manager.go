@@ -14,6 +14,12 @@ import (
 // Compile-time check that SignerManagerImpl implements SignerManager.
 var _ SignerManager = (*SignerManagerImpl)(nil)
 
+// HDHierarchyInfo stores parent-child relationship for HD derived addresses
+type HDHierarchyInfo struct {
+	ParentAddress   string
+	DerivationIndex uint32
+}
+
 // SignerManager manages signer lifecycle operations
 type SignerManager interface {
 	// CreateSigner creates a new signer based on the request type
@@ -37,6 +43,9 @@ type SignerManager interface {
 	// DeleteSigner permanently deletes a signer (removes file, cleans in-memory state).
 	// For HD wallets, this deletes the entire wallet and all derived addresses.
 	DeleteSigner(ctx context.Context, address string) error
+
+	// GetHDHierarchy returns the HD wallet hierarchy (address → parent info) with caching.
+	GetHDHierarchy() map[string]HDHierarchyInfo
 }
 
 // AutoLockCallback is called when a signer is automatically locked due to timeout.
@@ -49,6 +58,11 @@ type SignerManagerImpl struct {
 	autoLockTimers  map[string]*time.Timer
 	timerMu         sync.Mutex
 	onAutoLock      AutoLockCallback // optional callback for auto-lock notifications
+
+	// HD wallet hierarchy cache (address → parent info)
+	hdHierarchyCache     map[string]HDHierarchyInfo
+	hdHierarchyCacheMu   sync.RWMutex
+	hdHierarchyCacheTime time.Time
 }
 
 // NewSignerManager creates a new SignerManager
@@ -57,8 +71,9 @@ func NewSignerManager(registry *SignerRegistry) (*SignerManagerImpl, error) {
 		return nil, fmt.Errorf("registry is required")
 	}
 	return &SignerManagerImpl{
-		registry:       registry,
-		autoLockTimers: make(map[string]*time.Timer),
+		registry:         registry,
+		autoLockTimers:   make(map[string]*time.Timer),
+		hdHierarchyCache: make(map[string]HDHierarchyInfo),
 	}, nil
 }
 
@@ -306,5 +321,99 @@ func (m *SignerManagerImpl) DeleteSigner(ctx context.Context, address string) er
 	}
 
 	logger.EVM().Info().Str("address", address).Str("type", info.Type).Msg("signer deleted")
+
+	// Invalidate HD hierarchy cache when deleting signers
+	m.hdHierarchyCacheMu.Lock()
+	m.hdHierarchyCacheTime = time.Time{}
+	m.hdHierarchyCacheMu.Unlock()
+
 	return nil
+}
+
+// GetHDHierarchy returns the HD wallet hierarchy (address → parent info) with caching.
+// Cache is valid for 5 minutes to avoid rebuilding on every request.
+func (m *SignerManagerImpl) GetHDHierarchy() map[string]HDHierarchyInfo {
+	m.hdHierarchyCacheMu.RLock()
+	if time.Since(m.hdHierarchyCacheTime) < 5*time.Minute && len(m.hdHierarchyCache) > 0 {
+		defer m.hdHierarchyCacheMu.RUnlock()
+		// Return a copy to avoid external mutation
+		result := make(map[string]HDHierarchyInfo, len(m.hdHierarchyCache))
+		for k, v := range m.hdHierarchyCache {
+			result[k] = v
+		}
+		return result
+	}
+	m.hdHierarchyCacheMu.RUnlock()
+
+	// Rebuild cache
+	m.hdHierarchyCacheMu.Lock()
+	defer m.hdHierarchyCacheMu.Unlock()
+
+	// Double-check after acquiring write lock
+	if time.Since(m.hdHierarchyCacheTime) < 5*time.Minute && len(m.hdHierarchyCache) > 0 {
+		result := make(map[string]HDHierarchyInfo, len(m.hdHierarchyCache))
+		for k, v := range m.hdHierarchyCache {
+			result[k] = v
+		}
+		return result
+	}
+
+	m.hdHierarchyCache = m.buildHDHierarchy()
+	m.hdHierarchyCacheTime = time.Now()
+
+	result := make(map[string]HDHierarchyInfo, len(m.hdHierarchyCache))
+	for k, v := range m.hdHierarchyCache {
+		result[k] = v
+	}
+	return result
+}
+
+// buildHDHierarchy reconstructs HD wallet parent-child relationships from derivation state.
+func (m *SignerManagerImpl) buildHDHierarchy() map[string]HDHierarchyInfo {
+	hierarchy := make(map[string]HDHierarchyInfo)
+
+	// Get HD wallet provider
+	p, ok := m.registry.Provider(types.SignerTypeHDWallet)
+	if !ok {
+		return hierarchy // No HD wallet provider configured
+	}
+
+	hdProvider, ok := p.(*HDWalletProvider)
+	if !ok {
+		return hierarchy // Provider is not HDWalletProvider
+	}
+
+	// Access provider state (need to hold lock)
+	hdProvider.mu.RLock()
+	defer hdProvider.mu.RUnlock()
+
+	// Iterate over all loaded HD wallets
+	for primaryAddr, state := range hdProvider.wallets {
+		// Load derived indices from persistent store
+		indices := hdProvider.derivStore.Load(primaryAddr)
+		if len(indices) == 0 {
+			continue
+		}
+
+		// Rebuild address → parent mapping
+		for _, idx := range indices {
+			derivedAddr, err := state.wallet.DeriveAddress(idx)
+			if err != nil {
+				logger.EVM().Warn().
+					Str("primary_address", primaryAddr).
+					Uint32("index", idx).
+					Err(err).
+					Msg("failed to derive address for hierarchy")
+				continue
+			}
+
+			hierarchy[normalizeAddress(derivedAddr.Hex())] = HDHierarchyInfo{
+				ParentAddress:   primaryAddr,
+				DerivationIndex: idx,
+			}
+		}
+	}
+
+	logger.EVM().Debug().Int("derived_count", len(hierarchy)).Msg("HD hierarchy rebuilt")
+	return hierarchy
 }
