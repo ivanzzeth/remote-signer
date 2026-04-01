@@ -380,7 +380,7 @@ dynamic_blocklist:
   enabled: true
   sync_interval: "1h"       # How often to refresh from remote sources
   fail_mode: "open"          # "open" = use stale cache on failure, "close" = reject all
-  cache_file: "data/blocklist_cache.json"
+  cache_file: "data/forge-workspace/blocklist_cache.json"
   sources:
     - name: "OFAC SDN ETH"
       type: "url_text"
