@@ -76,7 +76,7 @@ e2e 使用的模板以 `config.e2e.yaml` 中声明的为准（E2E Minimal, E2E S
 | `e2e_pagination_test.go` | 所有 `TestPagination_*` | - |
 | `e2e_signer_test.go` | 所有 `TestSigner_*`（List, ListWithTypeFilter, ListSignersPagination, CreateKeystoreSigner, CreateSignerValidationErrors, NonAdmin*） | - |
 | `e2e_template_test.go` | 所有 `TestTemplate_*`（含 ConfigLoadedTemplatesAndInstanceRules、InstanceWithBudget 等） | 模板加载与实例 |
-| `e2e_client_test.go`（可选） | `TestJavaScriptClientE2E`、`TestMetaMaskSnapE2E` | 客户端集成 |
+| `e2e_client_test.go`（可选） | `TestJavaScriptClientE2E` | 客户端集成 |
 
 现有 `security_test.go`、`tls_test.go`、`tls_helpers_test.go` 保持不变。
 

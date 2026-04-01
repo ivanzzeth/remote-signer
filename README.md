@@ -186,7 +186,7 @@ The server starts without signers. Add them after startup:
 | Document | Description |
 |----------|-------------|
 | [API Reference](docs/api.md) | Complete endpoint docs: authentication, signing, rules, audit |
-| [Integration Guide](INTEGRATION.md) | JS/TS client library, MetaMask Snap |
+| [Integration Guide](INTEGRATION.md) | JS/TS client library, Rust SDK, MCP server |
 
 ### Deploy & Operate
 
