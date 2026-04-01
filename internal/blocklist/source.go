@@ -92,31 +92,56 @@ func (s *urlJSONSource) Fetch(ctx context.Context) ([]string, error) {
 	return extractJSONAddresses(body, s.jsonPath, s.name)
 }
 
-// httpGet fetches URL content with context support.
+// httpGet fetches URL content with context support and retry on 5xx errors.
 func httpGet(ctx context.Context, client *http.Client, url string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("User-Agent", "remote-signer-blocklist/1.0")
+	const maxRetries = 3
+	backoff := 1 * time.Second
 
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("fetch %s: %w", url, err)
-	}
-	defer resp.Body.Close()
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(backoff):
+				backoff *= 2 // exponential backoff: 1s, 2s, 4s
+			}
+		}
 
-	if resp.StatusCode != http.StatusOK {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return nil, fmt.Errorf("create request: %w", err)
+		}
+		req.Header.Set("User-Agent", "remote-signer-blocklist/1.0")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			if attempt < maxRetries-1 {
+				continue // retry on network error
+			}
+			return nil, fmt.Errorf("fetch %s: %w", url, err)
+		}
+
+		if resp.StatusCode == http.StatusOK {
+			defer resp.Body.Close()
+			// Limit response body to 10MB to prevent abuse.
+			const maxBody = 10 * 1024 * 1024
+			body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
+			if err != nil {
+				return nil, fmt.Errorf("read body: %w", err)
+			}
+			return body, nil
+		}
+
+		resp.Body.Close()
+
+		// Retry on 5xx (server errors), fail immediately on 4xx (client errors)
+		if resp.StatusCode >= 500 && attempt < maxRetries-1 {
+			continue
+		}
 		return nil, fmt.Errorf("fetch %s: HTTP %d", url, resp.StatusCode)
 	}
 
-	// Limit response body to 10MB to prevent abuse.
-	const maxBody = 10 * 1024 * 1024
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
-	if err != nil {
-		return nil, fmt.Errorf("read body: %w", err)
-	}
-	return body, nil
+	return nil, fmt.Errorf("fetch %s: max retries exceeded", url)
 }
 
 // parseTextAddresses parses one-address-per-line text, skipping empty lines and # comments.
