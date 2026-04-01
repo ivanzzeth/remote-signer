@@ -38,6 +38,8 @@ type SignerAPI interface {
 	Unlock(ctx context.Context, address string, req *UnlockSignerRequest) (*UnlockSignerResponse, error)
 	Lock(ctx context.Context, address string) (*LockSignerResponse, error)
 	PatchSignerLabels(ctx context.Context, address string, req *PatchSignerLabelsRequest) (*Signer, error)
+	ListWallets(ctx context.Context, filter *ListSignersFilter) (*ListWalletsResponse, error)
+	ListWalletSigners(ctx context.Context, walletID string, filter *ListSignersFilter) (*WalletSignersResponse, error)
 }
 
 // HDWalletAPI defines the HD wallet management operations interface.

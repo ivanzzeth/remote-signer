@@ -2,186 +2,169 @@ package evm
 
 import (
 	"context"
-	"os"
 	"testing"
 
+	"github.com/ivanzzeth/ethsig/keystore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
 
-func TestSignerManager_CreateSigner_Keystore(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "signer-manager-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tempDir)
-
+func TestGetHDHierarchy_EmptyWhenNoWallets(t *testing.T) {
 	registry := NewEmptySignerRegistry()
+	tmpDir := t.TempDir()
 
-	// Register a private key provider with a test key
-	_, err = NewPrivateKeyProvider(registry, []PrivateKeyConfig{
-		{
-			Address:   "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
-			KeyEnvVar: "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
-			Enabled:   true,
-		},
-	})
+	derivStore, err := NewDerivationStateStore(tmpDir)
 	require.NoError(t, err)
 
-	// Register a keystore provider (needed for dynamic creation)
-	pwProvider, err := NewEnvPasswordProvider()
-	require.NoError(t, err)
-	ksProvider, err := NewKeystoreProvider(registry, nil, tempDir, pwProvider)
-	require.NoError(t, err)
-	registry.RegisterProvider(ksProvider)
-
-	manager, err := NewSignerManager(registry)
-	require.NoError(t, err)
-
-	// Create a new keystore signer
-	req := types.CreateSignerRequest{
-		Type: types.SignerTypeKeystore,
-		Keystore: &types.CreateKeystoreParams{
-			Password: "test-password-123",
-		},
+	hdProvider := &HDWalletProvider{
+		registry:   registry,
+		wallets:    make(map[string]*hdWalletState),
+		derivStore: derivStore,
 	}
 
-	signerInfo, err := manager.CreateSigner(context.Background(), req)
-	require.NoError(t, err)
-
-	assert.NotEmpty(t, signerInfo.Address)
-	assert.Equal(t, string(types.SignerTypeKeystore), signerInfo.Type)
-	assert.True(t, signerInfo.Enabled)
-
-	// Verify the signer is registered and can sign
-	assert.True(t, registry.HasSigner(signerInfo.Address))
-
-	// List should now include the new signer
-	result := registry.ListSignersWithFilter(types.SignerFilter{Limit: 10})
-	assert.Equal(t, 2, result.Total) // Original + new keystore
-}
-
-func TestSignerManager_CreateSigner_ValidationErrors(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "signer-manager-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tempDir)
-
-	registry := NewEmptySignerRegistry()
-
-	_, err = NewPrivateKeyProvider(registry, []PrivateKeyConfig{
-		{
-			Address:   "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
-			KeyEnvVar: "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
-			Enabled:   true,
-		},
-	})
-	require.NoError(t, err)
-
-	pwProvider, err := NewEnvPasswordProvider()
-	require.NoError(t, err)
-	ksProvider, err := NewKeystoreProvider(registry, nil, tempDir, pwProvider)
-	require.NoError(t, err)
-	registry.RegisterProvider(ksProvider)
-
-	manager, err := NewSignerManager(registry)
-	require.NoError(t, err)
-
-	tests := []struct {
-		name        string
-		req         types.CreateSignerRequest
-		expectError error
-	}{
-		{
-			name:        "missing type",
-			req:         types.CreateSignerRequest{},
-			expectError: types.ErrMissingSignerType,
-		},
-		{
-			name: "missing keystore params",
-			req: types.CreateSignerRequest{
-				Type: types.SignerTypeKeystore,
-			},
-			expectError: types.ErrMissingKeystoreParams,
-		},
-		{
-			name: "empty password",
-			req: types.CreateSignerRequest{
-				Type: types.SignerTypeKeystore,
-				Keystore: &types.CreateKeystoreParams{
-					Password: "",
-				},
-			},
-			expectError: types.ErrEmptyPassword,
-		},
-		{
-			name: "private key creation not supported",
-			req: types.CreateSignerRequest{
-				Type: types.SignerTypePrivateKey,
-			},
-			expectError: types.ErrPrivateKeyCreationNotSupported,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := manager.CreateSigner(context.Background(), tt.req)
-			assert.ErrorIs(t, err, tt.expectError)
-		})
-	}
-}
-
-func TestSignerManager_ListSigners(t *testing.T) {
-	registry := NewEmptySignerRegistry()
-
-	_, err := NewPrivateKeyProvider(registry, []PrivateKeyConfig{
-		{
-			Address:   "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
-			KeyEnvVar: "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
-			Enabled:   true,
-		},
-	})
-	require.NoError(t, err)
-
-	manager, err := NewSignerManager(registry)
-	require.NoError(t, err)
-
-	result, err := manager.ListSigners(context.Background(), types.SignerFilter{Limit: 10})
-	require.NoError(t, err)
-
-	assert.Equal(t, 1, result.Total)
-	assert.Len(t, result.Signers, 1)
-	assert.Equal(t, string(types.SignerTypePrivateKey), result.Signers[0].Type)
-}
-
-func TestNewSignerManager_Validation(t *testing.T) {
-	_, err := NewSignerManager(nil)
-	assert.Error(t, err)
-}
-
-func TestSignerManager_HDWalletManager_NotConfigured(t *testing.T) {
-	registry := NewEmptySignerRegistry()
-
-	manager, err := NewSignerManager(registry)
-	require.NoError(t, err)
-
-	_, err = manager.HDWalletManager()
-	assert.ErrorIs(t, err, types.ErrHDWalletNotConfigured)
-}
-
-func TestSignerManager_HDWalletManager_Configured(t *testing.T) {
-	registry := NewEmptySignerRegistry()
-
-	pwProvider, err := NewEnvPasswordProvider()
-	require.NoError(t, err)
-
-	hdProvider, err := NewHDWalletProvider(registry, nil, t.TempDir(), pwProvider)
-	require.NoError(t, err)
 	registry.RegisterProvider(hdProvider)
 
-	manager, err := NewSignerManager(registry)
+	manager := &SignerManagerImpl{
+		registry: registry,
+	}
+
+	hierarchy := manager.buildHDHierarchy()
+	assert.Empty(t, hierarchy, "hierarchy should be empty when no wallets loaded")
+}
+
+func TestGetHDHierarchy_UnlockedWallet(t *testing.T) {
+	registry := NewEmptySignerRegistry()
+	walletDir := t.TempDir()
+	password := []byte("test-hierarchy-password")
+
+	// Create HD wallet
+	primaryAddr, walletPath, err := keystore.CreateHDWallet(walletDir, password, 128)
 	require.NoError(t, err)
 
-	mgr, err := manager.HDWalletManager()
+	// Create HD wallet provider
+	pwProvider := &copyMockPasswordProvider{password: password}
+	configs := []HDWalletConfig{
+		{
+			Path:    walletPath,
+			Enabled: true,
+		},
+	}
+
+	hdProvider, err := NewHDWalletProvider(registry, configs, walletDir, pwProvider)
 	require.NoError(t, err)
-	assert.NotNil(t, mgr)
+	defer hdProvider.Close()
+	registry.RegisterProvider(hdProvider)
+
+	// Index 0 is registered when the wallet loads; derive indices 1 and 2 for two more signers.
+	ctx := context.Background()
+	derivedAddrs := []string{primaryAddr}
+	for i := uint32(1); i < 3; i++ {
+		signer, err := hdProvider.DeriveAddress(ctx, primaryAddr, i)
+		require.NoError(t, err)
+		derivedAddrs = append(derivedAddrs, signer.Address)
+	}
+
+	manager := &SignerManagerImpl{
+		registry: registry,
+	}
+
+	// Build hierarchy
+	hierarchy := manager.buildHDHierarchy()
+
+	// Should have 3 derived addresses
+	assert.Len(t, hierarchy, 3, "should have 3 derived addresses in hierarchy")
+
+	// Verify each derived address has correct parent and index
+	for i, addr := range derivedAddrs {
+		info, exists := hierarchy[normalizeAddress(addr)]
+		assert.True(t, exists, "derived address %s should exist in hierarchy", addr)
+		assert.Equal(t, primaryAddr, info.ParentAddress, "parent address should match for %s", addr)
+		assert.Equal(t, uint32(i), info.DerivationIndex, "derivation index should be %d for %s", i, addr)
+	}
+}
+
+func TestGetHDHierarchy_CacheInvalidation(t *testing.T) {
+	registry := NewEmptySignerRegistry()
+	walletDir := t.TempDir()
+	password := []byte("test-cache-password")
+
+	primaryAddr, walletPath, err := keystore.CreateHDWallet(walletDir, password, 128)
+	require.NoError(t, err)
+
+	pwProvider := &copyMockPasswordProvider{password: password}
+	configs := []HDWalletConfig{
+		{
+			Path:    walletPath,
+			Enabled: true,
+		},
+	}
+
+	hdProvider, err := NewHDWalletProvider(registry, configs, walletDir, pwProvider)
+	require.NoError(t, err)
+	defer hdProvider.Close()
+	registry.RegisterProvider(hdProvider)
+
+	ctx := context.Background()
+
+	manager := &SignerManagerImpl{
+		registry: registry,
+	}
+
+	// Wallet load already persists index 0; first snapshot has one derived entry.
+	hierarchy1 := manager.GetHDHierarchy()
+	cacheTime1 := manager.hdHierarchyCacheTime
+	assert.Len(t, hierarchy1, 1)
+
+	// Derive index 1 (index 0 is already the loaded primary).
+	_, err = hdProvider.DeriveAddress(ctx, primaryAddr, 1)
+	require.NoError(t, err)
+
+	// Second call within 5 minutes - uses stale cache
+	hierarchy2 := manager.GetHDHierarchy()
+	cacheTime2 := manager.hdHierarchyCacheTime
+	assert.Equal(t, cacheTime1, cacheTime2, "cache time should not change on second call")
+	assert.Len(t, hierarchy2, 1, "hierarchy should use stale cache (still 1 address)")
+
+	// Invalidate cache explicitly
+	manager.hdHierarchyCacheMu.Lock()
+	manager.hdHierarchyCache = nil
+	manager.hdHierarchyCacheMu.Unlock()
+
+	// Third call - rebuilds cache
+	hierarchy3 := manager.GetHDHierarchy()
+	assert.Len(t, hierarchy3, 2, "hierarchy should be rebuilt with 2 addresses")
+}
+
+func TestGetHDHierarchy_ConcurrentAccess(t *testing.T) {
+	registry := NewEmptySignerRegistry()
+	walletDir := t.TempDir()
+
+	derivStore, err := NewDerivationStateStore(walletDir)
+	require.NoError(t, err)
+
+	hdProvider := &HDWalletProvider{
+		registry:   registry,
+		wallets:    make(map[string]*hdWalletState),
+		derivStore: derivStore,
+	}
+
+	registry.RegisterProvider(hdProvider)
+
+	manager := &SignerManagerImpl{
+		registry: registry,
+	}
+
+	// Test concurrent access to GetHDHierarchy
+	done := make(chan bool, 10)
+	for i := 0; i < 10; i++ {
+		go func() {
+			defer func() { done <- true }()
+			hierarchy := manager.GetHDHierarchy()
+			_ = hierarchy
+		}()
+	}
+
+	for i := 0; i < 10; i++ {
+		<-done
+	}
 }

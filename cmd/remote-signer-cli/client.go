@@ -29,16 +29,18 @@ var (
 )
 
 // registerAuthFlags adds persistent auth flags to the root command.
+// Supports environment variables: REMOTE_SIGNER_URL, REMOTE_SIGNER_API_KEY_ID, REMOTE_SIGNER_API_KEY_FILE,
+// REMOTE_SIGNER_TLS_CA, REMOTE_SIGNER_TLS_CERT, REMOTE_SIGNER_TLS_KEY
 func registerAuthFlags(rootCmd *cobra.Command) {
 	pf := rootCmd.PersistentFlags()
-	pf.StringVar(&flagURL, "url", "https://localhost:8548", "Remote signer server URL")
-	pf.StringVar(&flagAPIKeyID, "api-key-id", "", "API key ID for authentication")
-	pf.StringVar(&flagAPIKeyFile, "api-key-file", "", "Path to Ed25519 private key PEM file")
-	pf.StringVar(&flagAPIKeyKeystore, "api-key-keystore", "", "Path to Ed25519 encrypted keystore file (mutually exclusive with --api-key-file)")
+	pf.StringVar(&flagURL, "url", getEnvOrDefault("REMOTE_SIGNER_URL", "https://localhost:8548"), "Remote signer server URL (env: REMOTE_SIGNER_URL)")
+	pf.StringVar(&flagAPIKeyID, "api-key-id", os.Getenv("REMOTE_SIGNER_API_KEY_ID"), "API key ID for authentication (env: REMOTE_SIGNER_API_KEY_ID)")
+	pf.StringVar(&flagAPIKeyFile, "api-key-file", os.Getenv("REMOTE_SIGNER_API_KEY_FILE"), "Path to Ed25519 private key PEM file (env: REMOTE_SIGNER_API_KEY_FILE)")
+	pf.StringVar(&flagAPIKeyKeystore, "api-key-keystore", os.Getenv("REMOTE_SIGNER_API_KEY_KEYSTORE"), "Path to Ed25519 encrypted keystore file (mutually exclusive with --api-key-file) (env: REMOTE_SIGNER_API_KEY_KEYSTORE)")
 	pf.StringVar(&flagAPIKeyPasswordEnv, "api-key-password-env", "", "Environment variable name containing the keystore password (for CI; default: interactive prompt)")
-	pf.StringVar(&flagTLSCA, "tls-ca", "", "CA certificate for TLS verification")
-	pf.StringVar(&flagTLSCert, "tls-cert", "", "Client certificate for mTLS")
-	pf.StringVar(&flagTLSKey, "tls-key", "", "Client key for mTLS")
+	pf.StringVar(&flagTLSCA, "tls-ca", os.Getenv("REMOTE_SIGNER_TLS_CA"), "CA certificate for TLS verification (env: REMOTE_SIGNER_TLS_CA)")
+	pf.StringVar(&flagTLSCert, "tls-cert", os.Getenv("REMOTE_SIGNER_TLS_CERT"), "Client certificate for mTLS (env: REMOTE_SIGNER_TLS_CERT)")
+	pf.StringVar(&flagTLSKey, "tls-key", os.Getenv("REMOTE_SIGNER_TLS_KEY"), "Client key for mTLS (env: REMOTE_SIGNER_TLS_KEY)")
 	pf.BoolVar(&flagTLSSkipVerify, "tls-skip-verify", false, "Skip TLS certificate verification (testing only)")
 	pf.StringVarP(&flagOutputFormat, "output", "o", "table", "Output format: table, json, yaml")
 	pf.BoolVar(&flagJSON, "json", false, "Machine-readable JSON output (sets -o json; PRD agent output)")
@@ -47,6 +49,14 @@ func registerAuthFlags(rootCmd *cobra.Command) {
 			flagOutputFormat = "json"
 		}
 	}
+}
+
+// getEnvOrDefault returns environment variable value or default if not set.
+func getEnvOrDefault(key, defaultValue string) string {
+	if val := os.Getenv(key); val != "" {
+		return val
+	}
+	return defaultValue
 }
 
 // newClientFromFlags creates a pkg/client.Client using the persistent auth flags.

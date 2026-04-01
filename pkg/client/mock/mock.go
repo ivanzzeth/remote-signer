@@ -184,13 +184,15 @@ var _ evm.RuleAPI = (*RuleService)(nil)
 
 // SignerService is a mock implementation of evm.SignerAPI.
 type SignerService struct {
-	mu                    sync.RWMutex
-	ListFunc              func(ctx context.Context, filter *evm.ListSignersFilter) (*evm.ListSignersResponse, error)
-	CreateFunc            func(ctx context.Context, req *evm.CreateSignerRequest) (*evm.Signer, error)
-	UnlockFunc            func(ctx context.Context, address string, req *evm.UnlockSignerRequest) (*evm.UnlockSignerResponse, error)
-	LockFunc              func(ctx context.Context, address string) (*evm.LockSignerResponse, error)
-	PatchSignerLabelsFunc func(ctx context.Context, address string, req *evm.PatchSignerLabelsRequest) (*evm.Signer, error)
-	Calls                 map[string][]any
+	mu                     sync.RWMutex
+	ListFunc               func(ctx context.Context, filter *evm.ListSignersFilter) (*evm.ListSignersResponse, error)
+	CreateFunc             func(ctx context.Context, req *evm.CreateSignerRequest) (*evm.Signer, error)
+	UnlockFunc             func(ctx context.Context, address string, req *evm.UnlockSignerRequest) (*evm.UnlockSignerResponse, error)
+	LockFunc               func(ctx context.Context, address string) (*evm.LockSignerResponse, error)
+	PatchSignerLabelsFunc  func(ctx context.Context, address string, req *evm.PatchSignerLabelsRequest) (*evm.Signer, error)
+	ListWalletsFunc        func(ctx context.Context, filter *evm.ListSignersFilter) (*evm.ListWalletsResponse, error)
+	ListWalletSignersFunc  func(ctx context.Context, walletID string, filter *evm.ListSignersFilter) (*evm.WalletSignersResponse, error)
+	Calls                  map[string][]any
 }
 
 func NewSignerService() *SignerService {
@@ -241,6 +243,22 @@ func (m *SignerService) PatchSignerLabels(ctx context.Context, address string, r
 		return m.PatchSignerLabelsFunc(ctx, address, req)
 	}
 	return &evm.Signer{}, nil
+}
+
+func (m *SignerService) ListWallets(ctx context.Context, filter *evm.ListSignersFilter) (*evm.ListWalletsResponse, error) {
+	m.recordCall("ListWallets", filter)
+	if m.ListWalletsFunc != nil {
+		return m.ListWalletsFunc(ctx, filter)
+	}
+	return &evm.ListWalletsResponse{Wallets: []evm.Wallet{}}, nil
+}
+
+func (m *SignerService) ListWalletSigners(ctx context.Context, walletID string, filter *evm.ListSignersFilter) (*evm.WalletSignersResponse, error) {
+	m.recordCall("ListWalletSigners", walletID, filter)
+	if m.ListWalletSignersFunc != nil {
+		return m.ListWalletSignersFunc(ctx, walletID, filter)
+	}
+	return &evm.WalletSignersResponse{Signers: []evm.Signer{}}, nil
 }
 
 var _ evm.SignerAPI = (*SignerService)(nil)

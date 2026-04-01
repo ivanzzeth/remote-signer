@@ -123,6 +123,7 @@ func (m *mockHDWalletManager) ListPrimaryAddresses() []string {
 type mockSignerManager struct {
 	hdWalletMgr    *mockHDWalletManager
 	hdWalletMgrErr error
+	hdHierarchy      map[string]evmchain.HDHierarchyInfo // optional; GetHDHierarchy return value
 }
 
 func (m *mockSignerManager) CreateSigner(_ context.Context, _ types.CreateSignerRequest) (*types.SignerInfo, error) {
@@ -154,6 +155,17 @@ func (m *mockSignerManager) LockSigner(_ context.Context, _ string) (*types.Sign
 
 func (m *mockSignerManager) DeleteSigner(_ context.Context, _ string) error {
 	return fmt.Errorf("not implemented in mock")
+}
+
+func (m *mockSignerManager) GetHDHierarchy() map[string]evmchain.HDHierarchyInfo {
+	if m.hdHierarchy == nil {
+		return nil
+	}
+	out := make(map[string]evmchain.HDHierarchyInfo, len(m.hdHierarchy))
+	for k, v := range m.hdHierarchy {
+		out[k] = v
+	}
+	return out
 }
 
 // --- Mock repos for access service ---

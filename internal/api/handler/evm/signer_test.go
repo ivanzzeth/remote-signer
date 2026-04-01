@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -22,8 +23,9 @@ import (
 // --- Mock SignerManager for signer tests ---
 
 type signerMockSignerManager struct {
-	listSignersFn  func(ctx context.Context, filter types.SignerFilter) (types.SignerListResult, error)
-	createSignerFn func(ctx context.Context, req types.CreateSignerRequest) (*types.SignerInfo, error)
+	listSignersFn    func(ctx context.Context, filter types.SignerFilter) (types.SignerListResult, error)
+	createSignerFn   func(ctx context.Context, req types.CreateSignerRequest) (*types.SignerInfo, error)
+	getHDHierarchyFn func() map[string]evmchain.HDHierarchyInfo
 }
 
 func (m *signerMockSignerManager) CreateSigner(ctx context.Context, req types.CreateSignerRequest) (*types.SignerInfo, error) {
@@ -58,6 +60,13 @@ func (m *signerMockSignerManager) LockSigner(ctx context.Context, address string
 
 func (m *signerMockSignerManager) DeleteSigner(ctx context.Context, address string) error {
 	return fmt.Errorf("not implemented")
+}
+
+func (m *signerMockSignerManager) GetHDHierarchy() map[string]evmchain.HDHierarchyInfo {
+	if m.getHDHierarchyFn != nil {
+		return m.getHDHierarchyFn()
+	}
+	return nil
 }
 
 // --- Stub repos for access service ---
@@ -301,4 +310,250 @@ func TestListSigners_Unauthorized(t *testing.T) {
 	// No API key in context
 	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers", nil)
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+}
+
+// TestListSigners_IncludesHDParentInJSON exercises GET /api/v1/evm/signers JSON shape for derived HD addresses
+// (same path the CLI uses). Hierarchy keys are EIP-55; signer addresses may be lowercase in storage.
+func TestListSigners_IncludesHDParentInJSON(t *testing.T) {
+	derivedLower := "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	derivedKey := common.HexToAddress(derivedLower).Hex()
+	primary := "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+
+	sm := &signerMockSignerManager{
+		listSignersFn: func(_ context.Context, _ types.SignerFilter) (types.SignerListResult, error) {
+			return types.SignerListResult{
+				Signers: []types.SignerInfo{
+					{Address: derivedLower, Type: string(types.SignerTypeHDWallet), Enabled: true, Locked: false},
+				},
+				Total: 1,
+			}, nil
+		},
+		getHDHierarchyFn: func() map[string]evmchain.HDHierarchyInfo {
+			return map[string]evmchain.HDHierarchyInfo{
+				derivedKey: {ParentAddress: primary, DerivationIndex: 2},
+			}
+		},
+	}
+
+	ownerships := []*types.SignerOwnership{
+		{SignerAddress: derivedLower, OwnerID: "admin-key", Status: types.SignerOwnershipActive},
+	}
+	accessSvc := newSignerTestAccessServiceWithOwnerships(t, ownerships)
+
+	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), false)
+	require.NoError(t, err)
+
+	adminAPIKey := &types.APIKey{
+		ID:   "admin-key",
+		Name: "admin",
+		Role: types.RoleAdmin,
+	}
+
+	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers", adminAPIKey)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp ListSignersResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	require.Len(t, resp.Signers, 1)
+	assert.Equal(t, primary, resp.Signers[0].HDParentAddress)
+	require.NotNil(t, resp.Signers[0].HDDerivationIndex)
+	assert.Equal(t, uint32(2), *resp.Signers[0].HDDerivationIndex)
+}
+
+// TestListSigners_GroupByWallet tests group_by_wallet=true returns wallets instead of flat signer list
+func TestListSigners_GroupByWallet(t *testing.T) {
+	primaryAddr := "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	derived1 := "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+	derived2 := "0xCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
+	keystore1 := "0x1111111111111111111111111111111111111111"
+	keystore2 := "0x2222222222222222222222222222222222222222"
+
+	sm := &signerMockSignerManager{
+		listSignersFn: func(_ context.Context, _ types.SignerFilter) (types.SignerListResult, error) {
+			return types.SignerListResult{
+				Signers: []types.SignerInfo{
+					{Address: primaryAddr, Type: string(types.SignerTypeHDWallet), Enabled: true, Locked: false},
+					{Address: derived1, Type: string(types.SignerTypeHDWallet), Enabled: true, Locked: false},
+					{Address: derived2, Type: string(types.SignerTypeHDWallet), Enabled: true, Locked: false},
+					{Address: keystore1, Type: string(types.SignerTypeKeystore), Enabled: false, Locked: true},
+					{Address: keystore2, Type: string(types.SignerTypeKeystore), Enabled: false, Locked: true},
+				},
+				Total: 5,
+			}, nil
+		},
+		getHDHierarchyFn: func() map[string]evmchain.HDHierarchyInfo {
+			return map[string]evmchain.HDHierarchyInfo{
+				common.HexToAddress(primaryAddr).Hex(): {ParentAddress: primaryAddr, DerivationIndex: 0},
+				common.HexToAddress(derived1).Hex():    {ParentAddress: primaryAddr, DerivationIndex: 1},
+				common.HexToAddress(derived2).Hex():    {ParentAddress: primaryAddr, DerivationIndex: 2},
+			}
+		},
+	}
+
+	ownerships := []*types.SignerOwnership{
+		{SignerAddress: primaryAddr, OwnerID: "admin-key", Status: types.SignerOwnershipActive},
+		{SignerAddress: derived1, OwnerID: "admin-key", Status: types.SignerOwnershipActive},
+		{SignerAddress: derived2, OwnerID: "admin-key", Status: types.SignerOwnershipActive},
+		{SignerAddress: keystore1, OwnerID: "admin-key", Status: types.SignerOwnershipActive},
+		{SignerAddress: keystore2, OwnerID: "admin-key", Status: types.SignerOwnershipActive},
+	}
+	accessSvc := newSignerTestAccessServiceWithOwnerships(t, ownerships)
+
+	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), false)
+	require.NoError(t, err)
+
+	adminAPIKey := &types.APIKey{
+		ID:   "admin-key",
+		Name: "admin",
+		Role: types.RoleAdmin,
+	}
+
+	// Test with group_by_wallet=true
+	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?group_by_wallet=true", adminAPIKey)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp ListWalletsResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+
+	// Should have 3 wallets: 1 HD wallet + 2 keystore wallets
+	assert.Equal(t, 3, resp.Total)
+	assert.Len(t, resp.Wallets, 3)
+
+	// Find the HD wallet
+	var hdWallet *WalletResponse
+	for i := range resp.Wallets {
+		if resp.Wallets[i].WalletID == primaryAddr {
+			hdWallet = &resp.Wallets[i]
+			break
+		}
+	}
+	require.NotNil(t, hdWallet, "HD wallet should be in response")
+	assert.Equal(t, "hd_wallet", hdWallet.WalletType)
+	assert.Equal(t, primaryAddr, hdWallet.PrimaryAddress)
+	assert.Equal(t, 3, hdWallet.SignerCount, "HD wallet should have 3 signers (primary + 2 derived)")
+	assert.True(t, hdWallet.Enabled)
+	assert.False(t, hdWallet.Locked)
+
+	// Check keystore wallets
+	keystoreCount := 0
+	for i := range resp.Wallets {
+		if resp.Wallets[i].WalletType == "keystore" {
+			keystoreCount++
+			assert.Equal(t, 1, resp.Wallets[i].SignerCount, "keystore wallet should have 1 signer")
+			assert.False(t, resp.Wallets[i].Enabled)
+			assert.True(t, resp.Wallets[i].Locked)
+		}
+	}
+	assert.Equal(t, 2, keystoreCount, "should have 2 keystore wallets")
+}
+
+// TestListWalletSigners tests /api/v1/evm/wallets/{wallet_id}/signers endpoint
+func TestListWalletSigners(t *testing.T) {
+	primaryAddr := "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	derived1 := "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+	derived2 := "0xCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
+	keystore1 := "0x1111111111111111111111111111111111111111"
+
+	sm := &signerMockSignerManager{
+		listSignersFn: func(_ context.Context, _ types.SignerFilter) (types.SignerListResult, error) {
+			return types.SignerListResult{
+				Signers: []types.SignerInfo{
+					{Address: primaryAddr, Type: string(types.SignerTypeHDWallet), Enabled: true, Locked: false},
+					{Address: derived1, Type: string(types.SignerTypeHDWallet), Enabled: true, Locked: false},
+					{Address: derived2, Type: string(types.SignerTypeHDWallet), Enabled: true, Locked: false},
+					{Address: keystore1, Type: string(types.SignerTypeKeystore), Enabled: false, Locked: true},
+				},
+				Total: 4,
+			}, nil
+		},
+		getHDHierarchyFn: func() map[string]evmchain.HDHierarchyInfo {
+			return map[string]evmchain.HDHierarchyInfo{
+				common.HexToAddress(primaryAddr).Hex(): {ParentAddress: primaryAddr, DerivationIndex: 0},
+				common.HexToAddress(derived1).Hex():    {ParentAddress: primaryAddr, DerivationIndex: 1},
+				common.HexToAddress(derived2).Hex():    {ParentAddress: primaryAddr, DerivationIndex: 2},
+			}
+		},
+	}
+
+	ownerships := []*types.SignerOwnership{
+		{SignerAddress: primaryAddr, OwnerID: "admin-key", Status: types.SignerOwnershipActive},
+		{SignerAddress: derived1, OwnerID: "admin-key", Status: types.SignerOwnershipActive},
+		{SignerAddress: derived2, OwnerID: "admin-key", Status: types.SignerOwnershipActive},
+		{SignerAddress: keystore1, OwnerID: "admin-key", Status: types.SignerOwnershipActive},
+	}
+	accessSvc := newSignerTestAccessServiceWithOwnerships(t, ownerships)
+
+	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), false)
+	require.NoError(t, err)
+
+	adminAPIKey := &types.APIKey{
+		ID:   "admin-key",
+		Name: "admin",
+		Role: types.RoleAdmin,
+	}
+
+	t.Run("list HD wallet signers", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/evm/wallets/"+primaryAddr+"/signers", nil)
+		req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, adminAPIKey))
+		rec := httptest.NewRecorder()
+
+		h.HandleWalletSigners(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		var resp WalletSignersResponse
+		require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+
+		assert.Equal(t, primaryAddr, resp.WalletID)
+		assert.Equal(t, "hd_wallet", resp.WalletType)
+		assert.Equal(t, 3, resp.Total)
+		assert.Len(t, resp.Signers, 3)
+
+		// Check ordering by derivation index
+		assert.Equal(t, primaryAddr, resp.Signers[0].Address)
+		require.NotNil(t, resp.Signers[0].HDDerivationIndex)
+		assert.Equal(t, uint32(0), *resp.Signers[0].HDDerivationIndex)
+
+		assert.Equal(t, derived1, resp.Signers[1].Address)
+		require.NotNil(t, resp.Signers[1].HDDerivationIndex)
+		assert.Equal(t, uint32(1), *resp.Signers[1].HDDerivationIndex)
+
+		assert.Equal(t, derived2, resp.Signers[2].Address)
+		require.NotNil(t, resp.Signers[2].HDDerivationIndex)
+		assert.Equal(t, uint32(2), *resp.Signers[2].HDDerivationIndex)
+	})
+
+	t.Run("list keystore wallet signers", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/evm/wallets/"+keystore1+"/signers", nil)
+		req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, adminAPIKey))
+		rec := httptest.NewRecorder()
+
+		h.HandleWalletSigners(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		var resp WalletSignersResponse
+		require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+
+		assert.Equal(t, keystore1, resp.WalletID)
+		assert.Equal(t, "keystore", resp.WalletType)
+		assert.Equal(t, 1, resp.Total)
+		assert.Len(t, resp.Signers, 1)
+		assert.Equal(t, keystore1, resp.Signers[0].Address)
+	})
+
+	t.Run("non-existent wallet returns empty", func(t *testing.T) {
+		nonExistent := "0x9999999999999999999999999999999999999999"
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/evm/wallets/"+nonExistent+"/signers", nil)
+		req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, adminAPIKey))
+		rec := httptest.NewRecorder()
+
+		h.HandleWalletSigners(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		var resp WalletSignersResponse
+		require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+
+		assert.Equal(t, nonExistent, resp.WalletID)
+		assert.Equal(t, 0, resp.Total)
+		assert.Empty(t, resp.Signers)
+	})
 }
