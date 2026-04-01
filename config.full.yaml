@@ -385,7 +385,7 @@ dynamic_blocklist:
   sources:
     - name: "OFAC SDN ETH"
       type: "url_text"
-      url: "https://raw.githubusercontent.com/0xB10C/ofac-sanctioned-digital-currency-addresses/main/sanctioned_addresses_ETH.txt"
+      url: "https://raw.githubusercontent.com/0xB10C/ofac-sanctioned-digital-currency-addresses/lists/sanctioned_addresses_ETH.txt"
     # Add your own sources as needed:
     # - name: "Custom Internal"
     #   type: "url_text"
