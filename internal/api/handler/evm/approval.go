@@ -16,14 +16,14 @@ import (
 
 // ApprovalHandler handles manual approval requests
 type ApprovalHandler struct {
-	signService    *service.SignService
+	signService    service.SignServiceAPI
 	accessService  *service.SignerAccessService
 	rulesReadOnly  bool // when true, block auto-rule creation during approval
 	logger         *slog.Logger
 }
 
 // NewApprovalHandler creates a new approval handler
-func NewApprovalHandler(signService *service.SignService, accessService *service.SignerAccessService, logger *slog.Logger, rulesReadOnly bool) (*ApprovalHandler, error) {
+func NewApprovalHandler(signService service.SignServiceAPI, accessService *service.SignerAccessService, logger *slog.Logger, rulesReadOnly bool) (*ApprovalHandler, error) {
 	if signService == nil {
 		return nil, fmt.Errorf("sign service is required")
 	}
@@ -202,12 +202,12 @@ func (h *ApprovalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // PreviewRuleHandler handles POST /api/v1/evm/requests/{id}/preview-rule
 type PreviewRuleHandler struct {
-	signService *service.SignService
+	signService service.SignServiceAPI
 	logger      *slog.Logger
 }
 
 // NewPreviewRuleHandler creates a new preview rule handler
-func NewPreviewRuleHandler(signService *service.SignService, logger *slog.Logger) (*PreviewRuleHandler, error) {
+func NewPreviewRuleHandler(signService service.SignServiceAPI, logger *slog.Logger) (*PreviewRuleHandler, error) {
 	if signService == nil {
 		return nil, fmt.Errorf("sign service is required")
 	}

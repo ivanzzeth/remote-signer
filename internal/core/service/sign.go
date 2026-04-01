@@ -22,6 +22,20 @@ import (
 // Caller should respond with 403 Forbidden.
 var ErrManualApprovalDisabled = errors.New("no matching whitelist rule and manual approval is disabled")
 
+// SignServiceAPI defines the methods used by HTTP handlers for sign operations.
+// This interface enables mock-based unit testing of handlers without constructing a full SignService.
+type SignServiceAPI interface {
+	Sign(ctx context.Context, req *SignRequest) (*SignResponse, error)
+	GetRequest(ctx context.Context, id types.SignRequestID) (*types.SignRequest, error)
+	ListRequests(ctx context.Context, filter storage.RequestFilter) ([]*types.SignRequest, error)
+	CountRequests(ctx context.Context, filter storage.RequestFilter) (int, error)
+	ProcessApproval(ctx context.Context, requestID types.SignRequestID, req *ApprovalRequest) (*ApprovalResponse, error)
+	PreviewRuleForRequest(ctx context.Context, requestID types.SignRequestID, opts *rule.RuleGenerateOptions) (*types.Rule, error)
+}
+
+// Compile-time interface check.
+var _ SignServiceAPI = (*SignService)(nil)
+
 // SignService orchestrates the signing request lifecycle
 type SignService struct {
 	chainRegistry         *chain.Registry

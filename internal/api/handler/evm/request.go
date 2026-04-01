@@ -29,13 +29,13 @@ var validStatuses = map[types.SignRequestStatus]bool{
 
 // RequestHandler handles request status queries
 type RequestHandler struct {
-	signService *service.SignService
+	signService service.SignServiceAPI
 	ruleRepo    storage.RuleRepository
 	logger      *slog.Logger
 }
 
 // NewRequestHandler creates a new request handler
-func NewRequestHandler(signService *service.SignService, ruleRepo storage.RuleRepository, logger *slog.Logger) (*RequestHandler, error) {
+func NewRequestHandler(signService service.SignServiceAPI, ruleRepo storage.RuleRepository, logger *slog.Logger) (*RequestHandler, error) {
 	if signService == nil {
 		return nil, fmt.Errorf("sign service is required")
 	}
@@ -133,13 +133,13 @@ func (h *RequestHandler) getRequest(w http.ResponseWriter, r *http.Request, apiK
 
 // ListHandler handles listing requests
 type ListHandler struct {
-	signService *service.SignService
+	signService service.SignServiceAPI
 	ruleRepo    storage.RuleRepository
 	logger      *slog.Logger
 }
 
 // NewListHandler creates a new list handler
-func NewListHandler(signService *service.SignService, ruleRepo storage.RuleRepository, logger *slog.Logger) (*ListHandler, error) {
+func NewListHandler(signService service.SignServiceAPI, ruleRepo storage.RuleRepository, logger *slog.Logger) (*ListHandler, error) {
 	if signService == nil {
 		return nil, fmt.Errorf("sign service is required")
 	}

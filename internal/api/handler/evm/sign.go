@@ -20,7 +20,7 @@ import (
 
 // SignHandler handles EVM sign requests
 type SignHandler struct {
-	signService    *service.SignService
+	signService    service.SignServiceAPI
 	signerManager  evm.SignerManager
 	accessService  *service.SignerAccessService
 	logger         *slog.Logger
@@ -39,7 +39,7 @@ func (h *SignHandler) SetSignTimeout(d time.Duration) {
 }
 
 // NewSignHandler creates a new sign handler
-func NewSignHandler(signService *service.SignService, signerManager evm.SignerManager, accessService *service.SignerAccessService, logger *slog.Logger) (*SignHandler, error) {
+func NewSignHandler(signService service.SignServiceAPI, signerManager evm.SignerManager, accessService *service.SignerAccessService, logger *slog.Logger) (*SignHandler, error) {
 	if signService == nil {
 		return nil, fmt.Errorf("sign service is required")
 	}
