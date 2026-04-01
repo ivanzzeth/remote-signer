@@ -4,15 +4,17 @@ import "time"
 
 // Signer represents a signer configuration.
 type Signer struct {
-	Address     string     `json:"address"`
-	Type        string     `json:"type"`
-	Enabled     bool       `json:"enabled"`
-	Locked      bool       `json:"locked"`
-	UnlockedAt  *time.Time `json:"unlocked_at,omitempty"`
-	OwnerID     string     `json:"owner_id,omitempty"`
-	Status      string     `json:"status,omitempty"` // ownership status: active, pending_approval
-	DisplayName string     `json:"display_name,omitempty"`
-	Tags        []string   `json:"tags,omitempty"`
+	Address           string     `json:"address"`
+	Type              string     `json:"type"`
+	Enabled           bool       `json:"enabled"`
+	Locked            bool       `json:"locked"`
+	UnlockedAt        *time.Time `json:"unlocked_at,omitempty"`
+	OwnerID           string     `json:"owner_id,omitempty"`
+	Status            string     `json:"status,omitempty"` // ownership status: active, pending_approval
+	DisplayName       string     `json:"display_name,omitempty"`
+	Tags              []string   `json:"tags,omitempty"`
+	HDParentAddress   string     `json:"hd_parent_address,omitempty"`   // for derived addresses: parent HD wallet address
+	HDDerivationIndex *uint32    `json:"hd_derivation_index,omitempty"` // for derived addresses: derivation index
 }
 
 // SignerAccessEntry represents an access grant on a signer.

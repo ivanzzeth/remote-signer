@@ -63,9 +63,11 @@ type ParsedPayload struct {
 
 // SignerInfo describes a signer
 type SignerInfo struct {
-	Address    string     `json:"address"`
-	Type       string     `json:"type"`                  // "private_key", "keystore", "hd_wallet"
-	Enabled    bool       `json:"enabled"`
-	Locked     bool       `json:"locked"`                // true = exists but not usable until unlocked
-	UnlockedAt *time.Time `json:"unlocked_at,omitempty"` // when the signer was last unlocked (for auto-lock countdown)
+	Address           string     `json:"address"`
+	Type              string     `json:"type"`                       // "private_key", "keystore", "hd_wallet"
+	Enabled           bool       `json:"enabled"`
+	Locked            bool       `json:"locked"`                     // true = exists but not usable until unlocked
+	UnlockedAt        *time.Time `json:"unlocked_at,omitempty"`      // when the signer was last unlocked (for auto-lock countdown)
+	HDParentAddress   string     `json:"hd_parent_address,omitempty"` // for derived addresses: parent HD wallet address
+	HDDerivationIndex *uint32    `json:"hd_derivation_index,omitempty"` // for derived addresses: derivation index
 }
