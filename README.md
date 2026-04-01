@@ -140,7 +140,7 @@ The server starts with no signers. To add your first signer (import a private ke
 
 ### Manual Setup
 
-If you prefer manual control, see [docs/configuration.md](docs/configuration.md) for the full config reference and use `config.example.yaml` as a starting point.
+If you prefer manual control, see [docs/configuration.md](docs/configuration.md) for the full config reference. Use `config.example.yaml` (minimal configuration) or `config.full.yaml` (complete examples) as starting points.
 
 ### Adding Signers
 
@@ -179,7 +179,8 @@ The server starts without signers. Add them after startup:
 | [Rules, Templates & Presets](docs/rules-templates-and-presets.md) | Concepts: rule templates, instances, presets, and examples |
 | [Rule Syntax Reference](docs/rule-syntax.md) | All rule types: address list, value limit, Solidity, JS, message pattern |
 | [JS Rules (evm_js)](docs/architecture/js-rules-v1.md) | In-process JavaScript rules via Sobek |
-| [config.example.yaml](config.example.yaml) | Annotated configuration template |
+| [config.example.yaml](config.example.yaml) | Minimal production-ready configuration |
+| [config.full.yaml](config.full.yaml) | Complete examples of all features and protocols |
 
 ### Integrate
 

@@ -1,0 +1,1011 @@
+# =========================================================================
+# Remote Signer — FULL CONFIGURATION EXAMPLE
+# =========================================================================
+# This file contains ALL available configuration options with extensive
+# examples of templates and rules for various protocols (Polymarket,
+# Predict.fun, Opinion, DEX, ERC20, etc.).
+#
+# For production use:
+#   - Start with config.example.yaml (minimal configuration)
+#   - Reference this file to learn about available features
+#   - Copy specific templates/rules as needed for your use case
+#   - See docs/configuration.md for detailed guidance
+#
+# See also:
+#   - config.example.yaml: Minimal production-ready configuration
+#   - rules/presets/: Pre-configured rule bundles for common protocols
+#   - docs/rules-templates-and-presets.md: Detailed documentation
+# =========================================================================
+
+server:
+  host: "0.0.0.0"
+  port: 8548
+  # read_timeout: 30s   # optional; default 30s
+  # write_timeout: 30s # optional; default 30s
+  # TLS/mTLS configuration
+  # Generate certificates: ./scripts/gen-certs.sh [extra-ip1] [extra-ip2]
+  tls:
+    enabled: false
+    cert_file: "./certs/server.crt"
+    key_file: "./certs/server.key"
+    # CA certificate for mTLS client verification
+    ca_file: "./certs/ca.crt"
+    # Set to true to require client certificates (mTLS)
+    client_auth: false
+
+database:
+  # PostgreSQL connection string
+  # Uses DATABASE_DSN env var if set (auto-configured by docker-compose)
+  # Falls back to localhost for local development
+  dsn: "${DATABASE_DSN:-postgres://signer:signer_password@localhost:5432/remote_signer?sslmode=disable}"
+  # dsn: "file:./data/remote-signer.db?_journal_mode=WAL&_busy_timeout=5000"
+
+chains:
+  evm:
+    enabled: true
+    signers:
+      # Private keys - can use direct hex value or environment variable
+      private_keys:
+        # Placeholder: set your signer address and key via env (DO NOT commit real keys)
+        - address: "0x1111111111111111111111111111111111111111"
+          key_env: "EVM_PRIVATE_KEY_1"  # Hex key from env only; never paste real key here
+          enabled: true
+      # Keystores with password from environment
+      # keystores:
+      #   - address: "0x2222222222222222222222222222222222222222"
+      #     path: "/etc/signer/keystores/"
+      #     password_env: "EVM_KEYSTORE_PASSWORD_1"
+      #     enabled: true
+
+      # HD Wallets - derive multiple addresses from a single mnemonic
+      # hd_wallets:
+      #   - path: "./data/hd-wallets/wallet1.json"
+      #     password_env: "HD_WALLET_PASSWORD_1"
+      #     # password_stdin: false    # Set true to read password from stdin
+      #     derive_indices: [0, 1, 2]  # Indices to derive at startup
+      #     enabled: true
+
+    # Directory for storing dynamically created keystores via API
+    keystore_dir: "./data/keystores"
+
+    # Directory for storing HD wallets created via API
+    hd_wallet_dir: "./data/hd-wallets"
+
+    # EVM RPC gateway for JS rule sandbox (read-only queries: decimals, ERC165, etc.)
+    # Used by agent rules and any JS rule that calls web3.call() / erc20.decimals().
+    # URL pattern: ${base_url}/${chain_id} or ${base_url}/${chain_id}/api_key/${api_key}
+    # Deploy your own evm-gateway or use any compatible multi-chain RPC router.
+    rpc_gateway:
+      base_url: "${EVM_RPC_GATEWAY_URL:-}"             # e.g. https://your-gateway.example.com/chain/evm
+      api_key: "${EVM_RPC_GATEWAY_API_KEY:-}"           # optional, for authenticated endpoints
+      cache_ttl: "24h"                                  # token metadata cache TTL
+
+    # Transaction simulation engine (anvil fork)
+    # Simulates transactions on a local anvil fork to predict balance changes,
+    # gas usage, and detect approvals. Requires anvil binary (Foundry).
+    #
+    # API Endpoints:
+    #   POST /api/v1/evm/simulate        — simulate a single transaction
+    #   POST /api/v1/evm/simulate/batch  — simulate multiple transactions in sequence
+    #   GET  /api/v1/evm/simulate/status — health/status of all anvil fork instances
+    #   POST /api/v1/evm/sign/batch      — simulate + sign atomically (requires rule engine)
+    #
+    # CLI:
+    #   remote-signer-cli evm simulate tx --chain-id 1 --from 0x... --to 0x... --data 0x...
+    #   remote-signer-cli evm simulate status
+    #
+    # Prometheus Metrics (on /metrics):
+    #   remote_signer_simulation_requests_total{chain_id, status}
+    #   remote_signer_simulation_duration_seconds{chain_id}
+    #   remote_signer_simulation_batch_size
+    #   remote_signer_anvil_fork_sync_total{chain_id}
+    #   remote_signer_anvil_fork_restarts_total{chain_id}
+    simulation:
+      enabled: false
+      backend: "rpc"                       # "rpc" (default, recommended) or "anvil"
+                                           # rpc: uses eth_simulateV1 via rpc_gateway (<1s latency)
+                                           # anvil: local fork process (known OOM/startup issues, not recommended for production)
+      anvil_path: "data/foundry/anvil"     # path to anvil binary (anvil backend only)
+      sync_interval: "60s"                 # periodic health check / restart interval
+      timeout: "60s"                       # per-simulation timeout (includes remote RPC state fetch)
+      max_chains: 10                       # max concurrent anvil forks (anvil backend only)
+      prune_history: 0                     # anvil --prune-history: max states in memory (0=minimal, -1=keep all, anvil backend only)
+      cache_dir: "data/anvil-cache"        # persistent fork RPC cache dir (anvil backend only)
+      batch_window: "1s"                   # accumulation window for future batch sign fallback
+      batch_max_size: 20                   # max txs per batch
+
+    # Foundry configuration for Solidity expression rules
+    foundry:
+      enabled: true
+      forge_path: ""
+      cache_dir: "./data/forge-cache"
+      temp_dir: "./data/forge-workspace"
+      timeout: "30s"
+
+notify:
+  slack:
+    enabled: false
+    bot_token: "${SLACK_BOT_TOKEN}"
+  pushover:
+    enabled: false
+    app_token: "${PUSHOVER_APP_TOKEN}"
+    retry: 30        # seconds between retries for emergency notifications
+    expire: 300      # seconds until notification expires
+    max_retries: 3   # max HTTP request retries
+    retry_delay: 1   # initial retry delay in seconds
+  webhook:
+    enabled: false
+    # Optional custom headers sent with every webhook request
+    headers:
+      Authorization: "Bearer ${WEBHOOK_AUTH_TOKEN}"
+    # HTTP client timeout (default: 10s)
+    timeout: "10s"
+  telegram:
+    enabled: false
+    bot_token: "${TELEGRAM_BOT_TOKEN}"  # From @BotFather
+
+# Notification channels for approval requests
+notify_channels:
+  slack:
+    - "you_slack_channel"  # Slack channel ID
+  pushover:
+    - "user_key_here"  # Pushover user key
+  webhook:
+    - "https://example.com/webhook"  # Webhook URL
+  telegram:
+    - "-1001234567890"  # Chat ID (group/channel) or @channel_username
+
+# Background audit monitor — scans audit records for anomaly patterns
+# and sends notifications when thresholds are exceeded.
+audit_monitor:
+  enabled: false
+  interval: "1h"        # scan interval
+  lookback_hours: 1     # hours to look back per scan
+  # Anomaly thresholds (per source per lookback window)
+  auth_failure_threshold: 5       # auth failures per hour
+  blocklist_reject_threshold: 3   # sign rejections per hour
+  high_freq_threshold: 100        # requests per hour
+  # Audit log retention: automatically delete records older than this (default: 90 days, 0 = disable)
+  retention_days: 90
+  cleanup_interval: "24h"         # how often to run cleanup
+
+# Preset API (admin-only). When set, GET/POST /api/v1/presets list/vars/apply are enabled.
+# Dir is resolved relative to the config file directory. Apply creates template instances in one transaction.
+# presets:
+#   dir: "./rules/presets"
+
+security:
+  # Maximum age of signed requests (prevents replay attacks)
+  # SECURITY: Keep this short (30-60s) to minimize replay window
+  # 60s is recommended - enough for network latency, but limits replay attacks
+  max_request_age: "60s"
+
+  # Default rate limit per API key (requests per minute)
+  rate_limit_default: 100
+
+  # Per-IP rate limit (requests per minute, pre-auth). Protects against unauthenticated flood attacks.
+  ip_rate_limit: 200
+
+  # Nonce requirement for replay protection
+  # When true (default), requests MUST include X-Nonce header
+  # When false, legacy requests without nonce are allowed (less secure)
+  nonce_required: true
+
+  # Manual approval: when false (default), requests with no whitelist match are rejected immediately (403).
+  # When true, they go to pending manual approval. Default false for stricter security.
+  manual_approval_enabled: false
+
+  # API lockdown: disable runtime mutation of rules/templates and signers via API.
+  # rules_api_readonly (default: true) — blocks rule/template CRUD, template instantiate/revoke,
+  # and approval auto-rule creation. Rules can only be managed through config files + restart/SIGHUP.
+  # Config-sourced rules are always immutable via API regardless of this setting.
+  rules_api_readonly: true
+
+  # Config reload (SIGHUP): when true, sending SIGHUP to the process will reload rules from config
+  # and sync them to the DB. Default false (recommended) — prevents unexpected runtime changes.
+  # Example: kill -HUP <pid>
+  allow_sighup_rules_reload: false
+  # signers_api_readonly (default: false) — blocks signer creation, HD wallet create/import/derive.
+  # Unlock/lock remain allowed. Low risk: API never exposes private keys or passwords.
+  signers_api_readonly: false
+
+  # Resource limits: maximum keystores/HD wallets a single API key can own.
+  # 0 = no limit. These defaults prevent unbounded resource consumption.
+  max_keystores_per_key: 5
+  max_hd_wallets_per_key: 3
+
+  # Require admin approval for agent-created whitelist rules (default: true, secure by default).
+  # When true, agent-created whitelist rules start as "pending_approval" and require admin approval.
+  # When false, agent-created whitelist rules (including template instantiation with custom
+  # variables like allowed_spenders) become active immediately without admin review.
+  # SECURITY: Setting to false is a risk — a compromised agent API key could create permissive
+  # whitelist rules that take effect instantly. Only set to false in trusted/dev environments.
+  require_approval_for_agent_rules: true
+
+  # Auto-lock: automatically lock signers after this duration since unlock.
+  # Default: 0 (disabled). Sends alert to notify channel when auto-locked.
+  # auto_lock_timeout: "1h"
+
+  # Sign timeout: context timeout for sign operations. Default: 30s.
+  # sign_timeout: "30s"
+
+  # Approval guard: pause when rejection rate in a sliding window exceeds threshold
+  # Use case: API key leaked — attacker uses valid key to brute-force; guard detects high rejection rate and pauses + alerts
+  approval_guard:
+    enabled: true                   # Enabled by default for better security
+    window: "1h"                    # sliding time window for rate calculation (default: 1h)
+    rejection_threshold_pct: 50     # rejection rate % that triggers pause (default: 50)
+    min_samples: 10                 # minimum events in window before rate check applies (default: 10)
+    resume_after: "2h"              # pause duration; then auto-resume
+
+  # NOTE: Blocklist rules use mandatory Fail-Closed behavior.
+  # Any blocklist rule evaluation error will immediately reject the request.
+  # This prevents attackers from bypassing security checks by causing evaluation failures.
+
+  # IP whitelist configuration
+  # When enabled, only requests from allowed IPs can access the API
+  ip_whitelist:
+    enabled: false  # Set to true to enable IP whitelist
+    # List of allowed IP addresses or CIDR ranges
+    # Examples:
+    #   - "127.0.0.1"           # Single IPv4
+    #   - "::1"                 # IPv6 localhost
+    #   - "192.168.1.0/24"      # IPv4 CIDR range
+    #   - "10.0.0.0/8"          # Private network
+    #   - "2001:db8::/32"       # IPv6 CIDR range
+    allowed_ips:
+      - "127.0.0.1"
+      - "::1"
+      # Add your allowed IPs/CIDRs here
+      # - "192.168.1.100"
+      # - "10.0.0.0/8"
+    # Trust proxy headers (X-Forwarded-For, X-Real-IP)
+    # WARNING: Only enable this if running behind a trusted reverse proxy
+    # If enabled, the first IP in X-Forwarded-For will be used as client IP
+    trust_proxy: false
+    # Trusted proxy IPs/CIDRs - only these sources can set X-Forwarded-For/X-Real-IP
+    # Required when trust_proxy is true; if empty, proxy headers are ignored (fail-closed)
+    # trusted_proxies:
+    #   - "10.0.0.1"        # nginx internal IP
+    #   - "172.16.0.0/12"   # Docker network range
+
+logger:
+  # Log level: debug, info, warn, error
+  level: "info"
+  # Pretty print (for development)
+  pretty: true
+
+# API Keys configuration
+# API keys are used for authenticating requests to the service.
+# Each key has an Ed25519 public key stored here; the client keeps the private key.
+# Keys defined here will be synced to the database on startup.
+#
+# RBAC Roles (4 roles):
+#   - role: admin     -> Full access: manage signers, approve requests, CRUD all rules/keys
+#   - role: dev       -> Sign, view all requests, create/manage own rules, read budgets/templates/presets/audit
+#   - role: agent     -> Sign, create/manage own rules (declarative), read budgets/templates/presets/signers
+#   - role: strategy  -> Sign, view own requests, read own signers (minimal permissions)
+#
+# IMPORTANT: Docker Deployment Note
+# When deploying with Docker, environment variable references (e.g., public_key_env: "VAR_NAME")
+# are NOT automatically passed to the container. You must either:
+#   1. Use direct values: public_key: "MCowBQYDK2VwAyEA..." (recommended for docker)
+#   2. Or manually add each env var to docker-compose.yml environment section
+api_keys:
+  # Example 1: Admin key with public key from environment variable (recommended for production)
+  - id: "admin-key"
+    name: "Admin Key"
+    public_key_env: "ADMIN_PUBLIC_KEY"  # Read from .env or environment (hex or base64, auto-detected)
+    role: admin                          # Admin can approve requests and manage rules
+    enabled: true
+    rate_limit: 1000
+
+  # Example 2: Dev application key (can only submit sign requests)
+  - id: "my-app-key"
+    name: "My Application"
+    public_key_env: "MY_APP_PUBLIC_KEY"  # Read from .env or environment (hex or base64, auto-detected)
+    role: dev                          # Dev: submit sign requests and view own status
+    enabled: true
+    rate_limit: 100
+    # Signer access is now managed via signer ownership & access control:
+    #   - Signers are assigned to the admin who first starts the server
+    #   - Grant access: POST /api/v1/evm/signers/{addr}/access
+    #   - Revoke access: DELETE /api/v1/evm/signers/{addr}/access/{keyID}
+    #   - CLI: remote-signer-cli evm signer access grant/revoke/list
+
+  # Example 2b: Agent key (AI agent that can create/manage own rules + sign within budget)
+  # - id: "agent-key"
+  #   name: "AI Agent"
+  #   public_key_env: "AGENT_PUBLIC_KEY"
+  #   role: agent                        # Agent: sign, create/manage own rules, read budgets/templates/presets, create signers
+  #   enabled: true
+  #   rate_limit: 500
+
+  # Example 2c: Strategy key (minimal: sign requests + view own status only)
+  # - id: "strategy-key"
+  #   name: "Strategy Executor"
+  #   public_key_env: "STRATEGY_PUBLIC_KEY"
+  #   role: strategy                     # Strategy: sign requests, view own requests, read own signers
+  #   enabled: true
+  #   rate_limit: 200
+
+  # Example 3: Direct public key in base64 format (for development/testing only)
+  # - id: "dev-key"
+  #   name: "Development Key"
+  #   public_key: "MCowBQYDK2VwAyEA..."  # Base64 DER format (auto-detected)
+  #   role: admin
+  #   enabled: true
+
+  # Example 4: Direct public key in hex format
+  # - id: "hex-key"
+  #   name: "Hex Format Key"
+  #   public_key: "d75a980182b10ab7..."  # Ed25519 public key (64 hex chars = 32 bytes, auto-detected)
+  #   role: dev
+  #   enabled: true
+
+  # Example 5: HD wallet access is now managed via signer ownership & access control API
+  # Grant access to HD wallet primary address, and all derived addresses inherit access.
+
+# To generate an Ed25519 key pair:
+#
+# Option A: Encrypted keystore (recommended for admin keys):
+#    remote-signer-cli keystore create -d ./data/apikeys --label admin
+#    # The keystore file is encrypted with a password. The "Identifier" is the public key (hex).
+#    # Use with CLI: --api-key-keystore ./data/apikeys/ed25519--<pubkey>.json
+#    # Use with TUI: -api-key-keystore ./data/apikeys/ed25519--<pubkey>.json
+#    # For CI (non-interactive): --api-key-password-env MY_PASSWORD_VAR
+#    # Manage keystores:
+#    #   remote-signer-cli keystore list -d ./data/apikeys
+#    #   remote-signer-cli keystore show -k ./data/apikeys/ed25519--<pubkey>.json
+#    #   remote-signer-cli keystore verify -k ./data/apikeys/ed25519--<pubkey>.json
+#    #   remote-signer-cli keystore change-password -k ./data/apikeys/ed25519--<pubkey>.json
+#
+# Option B: Using openssl (PEM format):
+#    openssl genpkey -algorithm ed25519 -out private.pem
+#    openssl pkey -in private.pem -pubout -out public.pem
+#    # Extract base64 keys:
+#    openssl pkey -in private.pem -outform DER | base64        # private key (for TUI/client, keep secret!)
+#    openssl pkey -in public.pem -pubin -outform DER | base64  # public key (for public_key)
+#
+# Option C: Using openssl (hex format):
+#    openssl pkey -in private.pem -outform DER | tail -c 32 | xxd -p -c 64        # private key hex
+#    openssl pkey -in public.pem -pubin -outform DER | tail -c 32 | xxd -p -c 64  # public key hex
+
+# =============================================================================
+# Dynamic Blocklist (runtime address blocklist synced from external sources)
+# =============================================================================
+# Periodically fetches sanctioned/malicious addresses from external URLs.
+# Addresses are cached locally for instant startup (no network required on boot).
+# Default sources: OFAC SDN (US Treasury sanctions) + MyEtherWallet darklist.
+dynamic_blocklist:
+  enabled: true
+  sync_interval: "1h"       # How often to refresh from remote sources
+  fail_mode: "open"          # "open" = use stale cache on failure, "close" = reject all
+  cache_file: "data/blocklist_cache.json"
+  sources:
+    - name: "OFAC SDN ETH"
+      type: "url_text"
+      url: "https://raw.githubusercontent.com/0xB10C/ofac-sanctioned-digital-currency-addresses/main/sanctioned_addresses_ETH.txt"
+    # Add your own sources as needed:
+    # - name: "Custom Internal"
+    #   type: "url_text"
+    #   url: "https://your-company.com/blocklist.txt"
+    # - name: "JSON Source"
+    #   type: "url_json"
+    #   url: "https://example.com/api/blocked-addresses"
+    #   json_path: "data.addresses"
+
+# =============================================================================
+# Templates (rule templates with ${variable} placeholders)
+# =============================================================================
+# Templates define parameterized rules. Instances bind concrete values to create
+# concrete rules. Use type "file" to load a template from a YAML file that
+# contains variables, test_variables, and rules with ${var} placeholders.
+#
+# Template file format:
+#   variables:       # list of { name, type, description, required, default }
+#   test_variables:  # map of var -> value for validate-rules (optional)
+#   rules:           # same as rules below, but with ${var_name} in config
+#
+templates:
+  # Example: Polymarket Safe rules as a template (Polygon addresses as variables)
+  - name: "Polymarket Safe Template"
+    type: "file"
+    description: "Polymarket protocol rules for Safe wallets (parameterized)"
+    enabled: true
+    config:
+      path: "rules/templates/polymarket_safe.template.yaml"
+
+  # Predict.fun: split templates (auth + enable_trading + trading). Use preset predict_eoa_bnb for quick setup.
+  - name: "Predict Auth Template"
+    type: "file"
+    description: "Predict.fun login (PersonalSign)"
+    enabled: true
+    config:
+      path: "rules/templates/predict_auth.template.yaml"
+  - name: "Predict Enable Trading Template"
+    type: "file"
+    description: "Predict.fun approve + setApprovalForAll"
+    enabled: true
+    config:
+      path: "rules/templates/predict_enable_trading.template.yaml"
+  - name: "Predict Trading Template"
+    type: "file"
+    description: "Predict.fun Order + split/merge/redeem + NegRiskAdapter"
+    enabled: true
+    config:
+      path: "rules/templates/predict_trading.template.yaml"
+
+  # Predict.fun JS templates (evm_js, no Forge required)
+  - name: "Predict Enable Trading Template (JS)"
+    type: "file"
+    description: "Predict.fun approve + setApprovalForAll (evm_js)"
+    enabled: true
+    config:
+      path: "rules/templates/predict_enable_trading.template.js.yaml"
+  - name: "Predict Trading Template (JS)"
+    type: "file"
+    description: "Predict.fun Order + split/merge/redeem + NegRiskAdapter (evm_js)"
+    enabled: true
+    config:
+      path: "rules/templates/predict_trading.template.js.yaml"
+
+  # Opinion protocol Safe rules (BSC 56)
+  - name: "Opinion Safe Template"
+    type: "file"
+    description: "Opinion protocol rules for Safe wallets on BSC (parameterized)"
+    enabled: true
+    config:
+      path: "rules/templates/opinion_safe.template.yaml"
+
+  # Native token (ETH/BNB/MATIC) transfer with amount cap and recipient allowlist
+  - name: "Native Transfer Template"
+    type: "file"
+    description: "Native token transfer limit (amount cap + recipient allowlist)"
+    enabled: true
+    config:
+      path: "rules/templates/native_transfer.template.js.yaml"
+
+  # WETH deposit/withdraw with amount cap
+  - name: "WETH Template"
+    type: "file"
+    description: "WETH wrap/unwrap (deposit + withdraw) with amount cap"
+    enabled: true
+    config:
+      path: "rules/templates/weth.template.js.yaml"
+
+  # ERC1155 multi-token with address allowlists
+  - name: "ERC1155 Template"
+    type: "file"
+    description: "ERC1155 safeTransferFrom/safeBatchTransferFrom/setApprovalForAll with allowlists"
+    enabled: true
+    config:
+      path: "rules/templates/erc1155.template.js.yaml"
+
+  # ERC20 Permit (EIP-2612) typed_data signature validation
+  - name: "ERC20 Permit Template"
+    type: "file"
+    description: "ERC20 permit typed data (EIP-2612) with spender allowlist and value cap"
+    enabled: true
+    config:
+      path: "rules/templates/erc20_permit.template.js.yaml"
+
+  # DEX swap method whitelist (Uniswap V2 Router)
+  - name: "DEX Swap Template"
+    type: "file"
+    description: "DEX swap router method whitelist (Uniswap V2)"
+    enabled: true
+    config:
+      path: "rules/templates/dex_swap.template.js.yaml"
+
+  # Generic staking contract operations
+  - name: "Staking Template"
+    type: "file"
+    description: "Generic staking ops (stake/unstake/withdraw/claimRewards) with amount cap"
+    enabled: true
+    config:
+      path: "rules/templates/staking.template.js.yaml"
+
+  # Global address blocklist (blocklist mode)
+  - name: "Global Blocklist Template"
+    type: "file"
+    description: "Block transactions to known malicious/sanctioned addresses"
+    enabled: true
+    config:
+      path: "rules/templates/global_blocklist.template.js.yaml"
+
+  # Contract + method selector whitelist
+  - name: "Contract Call Guard Template"
+    type: "file"
+    description: "Whitelist specific contracts and method selectors"
+    enabled: true
+    config:
+      path: "rules/templates/contract_call_guard.template.js.yaml"
+
+  # Max gas limit cap (blocklist mode)
+  - name: "Max Gas Cap Template"
+    type: "file"
+    description: "Block transactions with gas limit exceeding cap"
+    enabled: true
+    config:
+      path: "rules/templates/max_gas_cap.template.js.yaml"
+
+  # EIP-3009 TransferWithAuthorization/ReceiveWithAuthorization (USDC gasless transfer)
+  - name: "EIP-3009 Transfer Auth Template"
+    type: "file"
+    description: "EIP-3009 gasless transfer typed_data (USDC/EURC) with recipient allowlist and value cap"
+    enabled: true
+    config:
+      path: "rules/templates/eip3009_transfer_auth.template.js.yaml"
+
+  # EIP-1559 Fee Guard (gas limit + value cap, blocklist mode)
+  - name: "EIP-1559 Fee Guard Template"
+    type: "file"
+    description: "Block transactions exceeding gas limit or value cap"
+    enabled: true
+    config:
+      path: "rules/templates/eip1559_fee_guard.template.js.yaml"
+
+  # Uniswap V3/V4 swap with tuple decoding and token validation
+  - name: "DEX Swap V3/V4 Template"
+    type: "file"
+    description: "Uniswap V3 SwapRouter + V4 Universal Router with token allowlist and amount cap"
+    enabled: true
+    config:
+      path: "rules/templates/dex_swap_v3.template.js.yaml"
+
+  # EIP-4337 Account Abstraction UserOperation (composable, delegates callData to other rules)
+  - name: "EIP-4337 UserOp Template"
+    type: "file"
+    description: "EIP-4337 UserOperation with callData delegation (execute/executeBatch → target rules)"
+    enabled: true
+    config:
+      path: "rules/templates/eip4337_userop.template.js.yaml"
+
+  # ERC721 Permit (EIP-4494) typed_data NFT approval signature
+  - name: "ERC721 Permit Template"
+    type: "file"
+    description: "ERC721 permit typed data (EIP-4494) with spender allowlist"
+    enabled: true
+    config:
+      path: "rules/templates/erc721_permit.template.js.yaml"
+
+  # EIP-2771 Meta Transaction ForwardRequest typed_data
+  - name: "Meta Transaction Template"
+    type: "file"
+    description: "EIP-2771 meta-tx ForwardRequest with trusted forwarder and target allowlist"
+    enabled: true
+    config:
+      path: "rules/templates/meta_transaction.template.js.yaml"
+
+# =============================================================================
+# Rules configuration
+# =============================================================================
+# Rules can be defined here (config source) or via API (api source).
+# Rule evaluation: blocklist rules checked first, then whitelist rules.
+# Mode: "whitelist" = any match allows, "blocklist" = any match blocks
+#
+# Rule sources:
+#   1. type "file"   — load rules from a YAML file (path in config.path)
+#   2. type "instance" — expand from a template (config.template + config.variables)
+#   3. inline       — define rules directly below
+#
+rules:
+  # -------------------------------------------------------------------------
+  # Dynamic Blocklist rule (enabled by default for security)
+  # Blocks signing to sanctioned/malicious addresses synced at runtime.
+  # Requires dynamic_blocklist section above to be enabled.
+  # -------------------------------------------------------------------------
+  - name: "Dynamic Address Blocklist"
+    id: "dynamic-address-blocklist"
+    type: "evm_dynamic_blocklist"
+    mode: "blocklist"
+    chain_type: "evm"
+    enabled: true
+    config:
+      check_recipient: true
+      check_verifying_contract: true
+
+  # -------------------------------------------------------------------------
+  # Option A: Instance from template (template + variables → concrete rules)
+  # -------------------------------------------------------------------------
+  # References a template by name and supplies variable values. The server
+  # expands this into the same rules as the template, with ${var} replaced.
+  #
+  # For templates that use both allowed_safe_address_for_testing and
+  # allowed_safe_addresses: the testing address must be contained in the
+  # allowed list, or startup validation (template test cases) will fail.
+  - name: "Polymarket Safe rules (Polygon)"
+    id: "polymarket-safe-polygon"
+    type: "instance"
+    chain_type: "evm"
+    chain_id: "137"
+    enabled: true
+    config:
+      template: "Polymarket Safe Template"
+      variables:
+        chain_id: "137"
+        ctf_exchange_address: "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E"
+        neg_risk_adapter_address: "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296"
+        neg_risk_exchange_address: "0xC5d563A36AE78145C45a50134d48A1215220f80a"
+        conditional_tokens_address: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+        safe_proxy_factory_address: "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"
+        usdc_bridged_address: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+        # Single Safe for test payload (to, maker, signer, verifyingContract) — set your Safe address
+        allowed_safe_address_for_testing: "0x1111111111111111111111111111111111111111"
+        # Comma-separated allowed Safes (used in expressions via in()); one or multiple
+        allowed_safe_addresses: "0x1111111111111111111111111111111111111111"
+        clob_auth_domain_name: "ClobAuthDomain"
+        clob_auth_domain_version: "1"
+        ctf_exchange_domain_name: "Polymarket CTF Exchange"
+        ctf_exchange_domain_version: "1"
+        safe_factory_domain_name: "Polymarket Contract Proxy Factory"
+
+  # Predict.fun: 3 instances from split templates (BNB Chain 56).
+  # Solidity version (requires Forge): preset predict_eoa_bnb
+  # JS version (no Forge): preset predict_eoa_bnb.preset.js.yaml
+  - name: "Predict.fun EOA (BNB) (Predict Auth Template)"
+    id: "predict-auth-bnb"
+    type: "instance"
+    chain_type: "evm"
+    chain_id: "56"
+    enabled: true
+    config:
+      template: "Predict Auth Template"
+      variables: {}
+  - name: "Predict.fun EOA (BNB) (Predict Enable Trading Template)"
+    id: "predict-enable-trading-bnb"
+    type: "instance"
+    chain_type: "evm"
+    chain_id: "56"
+    enabled: true
+    config:
+      template: "Predict Enable Trading Template"
+      variables:
+        chain_id: "56"
+        usdt_address: "0x55d398326f99059fF775485246999027B3197955"
+        ct_nyb: "0x22DA1810B194ca018378464a58f6Ac2B10C9d244"
+        ct_yb: "0x9400F8Ad57e9e0F352345935d6D3175975eb1d9F"
+        neg_risk_ctf_yb: "0xF64b0b318AAf83BD9071110af24D24445719A07F"
+        ctf_exchange_nyb: "0x8BC070BEdAB741406F4B1Eb65A72bee27894B689"
+        neg_risk_exchange_nyb: "0x365fb81bd4A24D6303cd2F19c349dE6894D8d58A"
+        neg_risk_adapter_nyb: "0xc3Cf7c252f65E0d8D88537dF96569AE94a7F1A6E"
+        ctf_exchange_yb: "0x6bEb5a40C032AFc305961162d8204CDA16DECFa5"
+        neg_risk_exchange_yb: "0x8A289d458f5a134bA40015085A8F50Ffb681B41d"
+        neg_risk_adapter_yb: "0x41dCe1A4B8FB5e6327701750aF6231B7CD0B2A40"
+        signer_address_for_testing: "0x1111111111111111111111111111111111111111"
+  - name: "Predict.fun EOA (BNB) (Predict Trading Template)"
+    id: "predict-trading-bnb"
+    type: "instance"
+    chain_type: "evm"
+    chain_id: "56"
+    enabled: true
+    config:
+      template: "Predict Trading Template"
+      variables:
+        chain_id: "56"
+        order_domain_name: "predict.fun CTF Exchange"
+        order_domain_version: "1"
+        usdt_address: "0x55d398326f99059fF775485246999027B3197955"
+        ct_nyb: "0x22DA1810B194ca018378464a58f6Ac2B10C9d244"
+        ct_yb: "0x9400F8Ad57e9e0F352345935d6D3175975eb1d9F"
+        neg_risk_adapter_nyb: "0xc3Cf7c252f65E0d8D88537dF96569AE94a7F1A6E"
+        neg_risk_adapter_yb: "0x41dCe1A4B8FB5e6327701750aF6231B7CD0B2A40"
+        ctf_exchange_nyb: "0x8BC070BEdAB741406F4B1Eb65A72bee27894B689"
+        neg_risk_exchange_nyb: "0x365fb81bd4A24D6303cd2F19c349dE6894D8d58A"
+        ctf_exchange_yb: "0x6bEb5a40C032AFc305961162d8204CDA16DECFa5"
+        neg_risk_exchange_yb: "0x8A289d458f5a134bA40015085A8F50Ffb681B41d"
+        signer_address_for_testing: "0x1111111111111111111111111111111111111111"
+
+  # Opinion: instance from template (BSC 56; disable if not used)
+  # Rule-layer requirement: allowed_safe_address_for_testing must be contained in
+  # allowed_safe_addresses. Startup validation runs template test cases using the
+  # testing address; if it is not in the allowed list, validation fails.
+  - name: "Opinion Safe rules (BSC)"
+    id: "opinion-safe-bsc"
+    type: "instance"
+    chain_type: "evm"
+    chain_id: "56"
+    enabled: true
+    config:
+      template: "Opinion Safe Template"
+      variables:
+        chain_id: "56"
+        ctf_exchange_address: "0x5F45344126D6488025B0b84A3A8189F2487a7246"
+        conditional_tokens_address: "0xAD1a38cEc043e70E83a3eC30443dB285ED10D774"
+        safe_proxy_factory_address: "0xa6B71E26C5e0845f74c812102Ca7114b6a896AB2"
+        usdc_bridged_address: "0x55d398326f99059fF775485246999027B3197955"
+        # Must be one of the addresses in allowed_safe_addresses (see comment above)
+        allowed_safe_address_for_testing: "0x1111111111111111111111111111111111111111"  # Your Safe; set in real config
+        allowed_safe_addresses: "0x1111111111111111111111111111111111111111"
+        ctf_exchange_domain_name: "OPINION CTF Exchange"
+        ctf_exchange_domain_version: "1"
+        safe_singleton_address: "0xfb1bffC9d739B8D520DaF37dF666da4C687191EA"
+
+  # -------------------------------------------------------------------------
+  # Option B: Include rules from external files (legacy / non-templated)
+  # -------------------------------------------------------------------------
+  # - name: "Treasury rules"
+  #   type: "file"
+  #   config:
+  #     path: "rules/treasury.yaml"
+  # - name: "Polymarket Safe rules (direct file)"
+  #   type: "file"
+  #   config:
+  #     path: "rules/polymarket_safe.yaml"
+
+  # -------------------------------------------------------------------------
+  # Option C: Define rules inline (examples below)
+  # -------------------------------------------------------------------------
+
+  # Example 1: Simple address whitelist
+  - id: "allow-transfers-to-treasury"
+    name: "Allow transfers to treasury"
+    type: "evm_address_list"
+    mode: "whitelist"
+    enabled: true
+    # Scope filters (optional - limit which requests this rule applies to)
+    # chain_id: "1"              # Only Ethereum mainnet
+    # signer_address: "0x..."    # Only specific signer
+    # api_key_id: "key_..."      # Only specific API key
+    config:
+      addresses:
+        - "0x1111111111111111111111111111111111111111"  # Treasury / allowed address; set in real config
+        - "0x2222222222222222222222222222222222222222"
+
+  # Example 2: Contract method restriction
+  - id: "only-allow-erc20-transfer-and-approve"
+    name: "Only allow ERC20 transfer and approve"
+    type: "evm_contract_method"
+    mode: "whitelist"
+    enabled: true
+    config:
+      contract: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"  # USDC contract
+      method_sigs:
+        - "0xa9059cbb"  # transfer(address,uint256)
+        - "0x095ea7b3"  # approve(address,uint256)
+
+  # Example 3: Value limit
+  - id: "max-10-eth-per-transaction"
+    name: "Max 10 ETH per transaction"
+    type: "evm_value_limit"
+    mode: "whitelist"
+    enabled: true
+    config:
+      max_value: "10000000000000000000"  # 10 ETH in wei
+
+  # Example 4: Solidity expression rule (requires Foundry)
+  # Complex validation using native Solidity require() statements
+  - id: "max-1-eth-transfer-with-address-check"
+    name: "Max 1 ETH transfer with address check"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    config:
+      # Available variables: to, value, selector, data, chainId, signer
+      expression: |
+        require(value <= 1 ether, "exceeds 1 ETH limit");
+        require(to != address(0), "cannot send to zero address");
+      description: "Limits transfers to 1 ETH and blocks zero address"
+      # Test cases are REQUIRED - all must pass during rule loading
+      test_cases:
+        - name: "should pass for 0.5 ETH to valid address"
+          input:
+            value: "500000000000000000"  # 0.5 ETH in wei
+            to: "0x1111111111111111111111111111111111111111"
+          expect_pass: true
+        - name: "should reject for 2 ETH"
+          input:
+            value: "2000000000000000000"  # 2 ETH in wei
+            to: "0x1111111111111111111111111111111111111111"
+          expect_pass: false
+          expect_reason: "exceeds 1 ETH limit"
+        - name: "should reject zero address"
+          input:
+            value: "100000000000000000"  # 0.1 ETH
+            to: "0x0000000000000000000000000000000000000000"
+          expect_pass: false
+          expect_reason: "cannot send to zero address"
+
+  # Example 5: Blocklist rule - checked before whitelist rules
+  - id: "block-known-malicious-addresses"
+    name: "Block known malicious addresses"
+    type: "evm_solidity_expression"
+    mode: "blocklist"  # Blocklist rules block even if whitelist matches
+    enabled: true
+    config:
+      expression: |
+        require(to != 0x000000000000000000000000000000000000dEaD, "blocked: burn address");
+      description: "Block transfers to known bad addresses"
+      test_cases:
+        - name: "should pass for normal address"
+          input:
+            to: "0x1111111111111111111111111111111111111111"
+          expect_pass: true
+        - name: "should block burn address"
+          input:
+            to: "0x000000000000000000000000000000000000dEaD"
+          expect_pass: false
+          expect_reason: "blocked: burn address"
+
+  # Example 6: Function Mode - ERC20 transfer/approve validation
+  # Uses function definitions for automatic selector matching and parameter decoding
+  - id: "erc20-transfer-and-approve-limits"
+    name: "ERC20 transfer and approve limits"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    config:
+      # Function mode: define functions that match tx selectors
+      # When tx selector matches, function is called with decoded params
+      functions: |
+        function transfer(address to, uint256 amount) external {
+            require(amount <= 10000000000, "exceeds 10k limit");
+            require(to != address(0), "invalid recipient");
+        }
+        function approve(address spender, uint256 amount) external {
+            require(spender != address(0), "cannot approve zero address");
+        }
+      description: "Validate ERC20 transfer and approve with limits"
+      test_cases:
+        - name: "should pass transfer 5k"
+          input:
+            # transfer(recipient, 5000000000) — recipient is user address placeholder
+            data: "0xa9059cbb000000000000000000000000111111111111111111111111111111111111111100000000000000000000000000000000000000000000000000000001dcd65000"
+          expect_pass: true
+        - name: "should reject transfer 20k"
+          input:
+            # transfer(recipient, 20000000000)
+            data: "0xa9059cbb00000000000000000000000011111111111111111111111111111111111111110000000000000000000000000000000000000000000000000000000ba43b7400"
+          expect_pass: false
+          expect_reason: "exceeds 10k limit"
+        - name: "should pass approve valid spender"
+          input:
+            # approve(spender_contract, amount) — spender is contract address, left unchanged
+            data: "0x095ea7b30000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc40000000000000000000000000000000000000000000000000000000de0b6b3a7640000"
+          expect_pass: true
+        - name: "should reject approve zero address"
+          input:
+            # approve(0x0000000000000000000000000000000000000000, 1000000000000000000)
+            data: "0x095ea7b300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000de0b6b3a7640000"
+          expect_pass: false
+          expect_reason: "cannot approve zero address"
+
+  # Example 7: EIP-712 Typed Data Validation - Permit (EIP-2612)
+  # Validates EIP-712 signed messages like Permit, Permit2, Seaport orders
+  - id: "eip-712-permit-validation"
+    name: "EIP-712 Permit validation"
+    type: "evm_solidity_expression"
+    mode: "whitelist"
+    enabled: true
+    config:
+      typed_data_struct: |
+        struct Permit {
+            address owner;
+            address spender;
+            uint256 value;
+            uint256 nonce;
+            uint256 deadline;
+        }
+      # TypedDataExpression mode: require() statements with EIP-712 context
+      # Available variables:
+      #   - primaryType (string)         - EIP-712 primary type name
+      #   - domainName (string)          - Domain name
+      #   - domainVersion (string)       - Domain version
+      #   - domainChainId (uint256)      - Domain chain ID
+      #   - domainContract (address)     - Verifying contract address
+      #   - signer (address)             - Signing address
+      #   - chainId (uint256)            - Request chain ID
+      #   - [message fields]             - Fields from the typed data message
+      typed_data_expression: |
+        require(permit.value <= 1000000000000000000000, "permit value exceeds 1000 tokens");
+        require(permit.spender != address(0), "cannot permit zero address spender");
+        require(permit.deadline > block.timestamp, "permit deadline expired");
+      sign_type_filter: "typed_data"  # Only apply to typed_data sign requests
+      description: "Validate EIP-2612 Permit: max 1000 tokens, valid spender, future deadline"
+      test_cases:
+        - name: "should pass for 100 tokens"
+          input:
+            typed_data:
+              primaryType: "Permit"
+              domain:
+                name: "TestToken"
+                version: "1"
+                chainId: "1"
+                verifyingContract: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+              message:
+                owner: "0x1111111111111111111111111111111111111111"   # signer; set in real config
+                spender: "0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2"  # contract spender, unchanged
+                value: "100000000000000000000"
+                nonce: "0"
+                deadline: "1893456000"  # Year 2030
+          expect_pass: true
+        - name: "should reject for 2000 tokens"
+          input:
+            typed_data:
+              primaryType: "Permit"
+              domain:
+                name: "TestToken"
+                version: "1"
+                chainId: "1"
+                verifyingContract: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+              message:
+                owner: "0x1111111111111111111111111111111111111111"
+                spender: "0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2"
+                value: "2000000000000000000000"
+                nonce: "0"
+                deadline: "1893456000"
+          expect_pass: false
+          expect_reason: "permit value exceeds 1000 tokens"
+        - name: "should reject zero address spender"
+          input:
+            typed_data:
+              primaryType: "Permit"
+              domain:
+                name: "TestToken"
+                version: "1"
+                chainId: "1"
+                verifyingContract: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+              message:
+                owner: "0x1111111111111111111111111111111111111111"
+                spender: "0x0000000000000000000000000000000000000000"
+                value: "100000000000000000000"
+                nonce: "0"
+                deadline: "1893456000"
+          expect_pass: false
+          expect_reason: "cannot permit zero address spender"
+
+  # Example 8: Signer restriction - auto-approve requests from specific signers
+  # This rule allows any sign type from the specified signers
+  - id: "allow-hot-wallet-signer"
+    name: "Allow hot wallet signer"
+    type: "signer_restriction"
+    mode: "whitelist"
+    enabled: true
+    config:
+      allowed_signers:
+        - "0x1111111111111111111111111111111111111111"  # Your hot wallet; set in real config
+        - "0x2222222222222222222222222222222222222222"
+
+  # Example 9: Sign type restriction - allow only specific signing methods
+  # Useful to limit what types of signing operations are permitted
+  - id: "allow-common-signing-methods"
+    name: "Allow common signing methods"
+    type: "sign_type_restriction"
+    mode: "whitelist"
+    enabled: true
+    config:
+      # Allowed sign types: hash, raw_message, eip191, personal, typed_data, transaction
+      allowed_sign_types:
+        - "personal"     # Personal message signing (eth_sign, personal_sign)
+        - "typed_data"   # EIP-712 structured data signing (eth_signTypedData_v4)
+        - "transaction"  # Transaction signing
+        - "hash"         # Hash signing
+        - "raw_message"  # Raw message signing
+        - "eip191"       # EIP-191 signing
+
+  # Example 10: Restrict to transaction signing only
+  # Block personal_sign and other non-transaction signing to prevent phishing
+  - id: "transaction-signing-only"
+    name: "Transaction signing only"
+    type: "sign_type_restriction"
+    mode: "whitelist"
+    enabled: true
+    # Scope: only apply to specific API key
+    api_key_id: "my-app-key"
+    config:
+      allowed_sign_types:
+        - "transaction"  # Only allow transaction signing for this API key
+
+  # Example 11: Combined rule - Signer + Sign Type for personal signing
+  # Auto-approve personal_sign from specific signer
+  - id: "allow-personal-sign-from-hot-wallet"
+    name: "Allow personal sign from hot wallet"
+    type: "signer_restriction"
+    mode: "whitelist"
+    enabled: true
+    # Scope filters narrow down when this rule applies
+    signer_address: "0x1111111111111111111111111111111111111111"
+    config:
+      allowed_signers:
+        - "0x1111111111111111111111111111111111111111"
