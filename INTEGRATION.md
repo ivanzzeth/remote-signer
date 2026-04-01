@@ -1,12 +1,11 @@
 # Remote Signer Integration Guide
 
-This document provides a comprehensive guide for integrating the remote-signer service using the JavaScript client library and MetaMask Snap.
+This document provides a comprehensive guide for integrating the remote-signer service using the JavaScript client library.
 
 ## Table of Contents
 
 1. [JavaScript Client Library](#javascript-client-library)
-2. [MetaMask Snap Integration](#metamask-snap-integration)
-3. [Authentication Setup](#authentication-setup)
+2. [Authentication Setup](#authentication-setup)
 4. [Usage Examples](#usage-examples)
 5. [Error Handling](#error-handling)
 6. [Best Practices](#best-practices)
@@ -37,44 +36,6 @@ const client = new RemoteSignerClient({
 - **Automatic Polling**: Waits for manual approval when needed
 - **Type Safety**: Full TypeScript support
 - **Error Handling**: Comprehensive error types
-
-## MetaMask Snap Integration
-
-### Installation
-
-The MetaMask Snap can be installed in two ways:
-
-1. **From dApp**: Prompt users to install the snap
-2. **From MetaMask Snaps Directory**: Users can install directly
-
-### Setup in dApp
-
-```typescript
-// Install snap
-const snapId = 'npm:remote-signer-snap';
-const result = await window.ethereum.request({
-  method: 'wallet_requestSnaps',
-  params: {
-    [snapId]: {}
-  }
-});
-
-// Configure snap
-await window.ethereum.request({
-  method: 'wallet_invokeSnap',
-  params: {
-    snapId,
-    request: {
-      method: 'configure',
-      params: {
-        baseURL: 'http://localhost:8548',
-        apiKeyID: 'my-api-key',
-        privateKey: 'your-ed25519-private-key-hex'
-      }
-    }
-  }
-});
-```
 
 ## Authentication Setup
 
@@ -252,12 +213,6 @@ try {
 - **Polling intervals**: Adjust `pollInterval` based on your needs
 - **Timeouts**: Set appropriate `pollTimeout` values
 - **Connection pooling**: Reuse client instances when possible
-
-### 4. MetaMask Snap
-
-- **User confirmation**: Always show confirmation dialogs for sensitive operations
-- **State management**: Store configuration securely in snap state
-- **Error messages**: Provide clear error messages in dialogs
 
 ## Troubleshooting
 

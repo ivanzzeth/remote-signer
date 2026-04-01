@@ -136,7 +136,7 @@ curl --cacert certs/ca.crt --cert certs/client.crt --key certs/client.key https:
 | 文档 | 说明 |
 |------|------|
 | [API 参考](docs/api.md) | 认证、签名、规则、审计等接口说明 |
-| [集成指南](INTEGRATION.md) | JS/TS 客户端库、MetaMask Snap |
+| [集成指南](INTEGRATION.md) | JS/TS 客户端库、Rust SDK、MCP 服务器 |
 
 ### 部署与运维
 
