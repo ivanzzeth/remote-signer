@@ -1,23 +1,28 @@
 package evm
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
 
-	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/validate"
 )
 
+// Broadcaster defines the interface for broadcasting signed transactions.
+type Broadcaster interface {
+	SendRawTransaction(ctx context.Context, chainID, signedTxHex string) (string, error)
+}
+
 // BroadcastHandler handles broadcasting signed transactions.
 type BroadcastHandler struct {
-	rpcProvider *evm.RPCProvider
+	rpcProvider Broadcaster
 	logger      *slog.Logger
 }
 
 // NewBroadcastHandler creates a new broadcast handler.
-func NewBroadcastHandler(rpcProvider *evm.RPCProvider, logger *slog.Logger) (*BroadcastHandler, error) {
+func NewBroadcastHandler(rpcProvider Broadcaster, logger *slog.Logger) (*BroadcastHandler, error) {
 	if rpcProvider == nil {
 		return nil, fmt.Errorf("rpc provider is required")
 	}

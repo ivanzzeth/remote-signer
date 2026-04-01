@@ -28,7 +28,7 @@ const maxBatchSize = 20
 
 // BatchSignHandler handles POST /api/v1/evm/sign/batch
 type BatchSignHandler struct {
-	signService    *service.SignService
+	signService    service.SignServiceAPI
 	signerManager  evm.SignerManager
 	accessService  *service.SignerAccessService
 	simulationRule *evm.SimulationBudgetRule
@@ -40,7 +40,7 @@ type BatchSignHandler struct {
 
 // BatchSignHandlerConfig contains dependencies for the BatchSignHandler.
 type BatchSignHandlerConfig struct {
-	SignService    *service.SignService
+	SignService    service.SignServiceAPI
 	SignerManager  evm.SignerManager
 	AccessService *service.SignerAccessService
 	SimulationRule *evm.SimulationBudgetRule
