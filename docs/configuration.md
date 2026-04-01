@@ -1,6 +1,12 @@
 # Configuration Reference
 
-This document covers the full `config.yaml` structure. For a quick, annotated template see [`config.example.yaml`](../config.example.yaml).
+This document covers the full `config.yaml` structure.
+
+**Configuration templates:**
+- [`config.example.yaml`](../config.example.yaml) — Minimal production-ready configuration
+- [`config.full.yaml`](../config.full.yaml) — Complete examples of all features and protocols
+
+Use `config.example.yaml` as the starting point for most deployments. Reference `config.full.yaml` when you need specific protocol examples (Polymarket, Predict.fun, DEX, etc.).
 
 ## Config File Precedence
 
@@ -8,7 +14,8 @@ This document covers the full `config.yaml` structure. For a quick, annotated te
 |------|----------|---------|
 | `config.local.yaml` | SQLite (local file) | `deploy.sh local-run` (preferred) |
 | `config.yaml` | PostgreSQL | `deploy.sh local-run` (fallback), Docker |
-| `config.example.yaml` | -- | Template for both |
+| `config.example.yaml` | -- | Minimal template (recommended) |
+| `config.full.yaml` | -- | Complete examples (reference) |
 
 `setup.sh` generates the appropriate file based on your chosen deployment mode.
 
@@ -242,12 +249,13 @@ security:
   auto_lock_timeout: "0s"          # Default: 0s (disabled). Auto-lock signers after unlock.
   sign_timeout: "30s"              # Default: 30s. Context timeout for signing operations.
 
-  # Approval guard: detect API key abuse
+  # Approval guard: detect API key abuse (pause signing when rejection rate exceeds threshold)
   approval_guard:
-    enabled: false
-    window: "5m"
-    threshold: 10                 # Consecutive non-approvals before pause
-    resume_after: "2h"
+    enabled: true                        # Default: true. Enabled for better security.
+    window: "1h"                         # Default: 1h. Sliding time window for rate calculation.
+    rejection_threshold_pct: 50          # Default: 50. Rejection rate % that triggers pause.
+    min_samples: 10                      # Default: 10. Minimum events in window before rate check applies.
+    resume_after: "2h"                   # Default: 2h. Pause duration before auto-resume.
 
   # IP whitelist
   ip_whitelist:

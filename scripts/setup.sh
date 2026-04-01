@@ -851,10 +851,15 @@ step_security_settings() {
     [ -z "$IP_RATE_LIMIT" ] && IP_RATE_LIMIT=200
     log_info "ip_rate_limit: $IP_RATE_LIMIT"
 
-    read -rp "  Approval guard threshold (consecutive rejections before pause) [10]: " APPROVAL_GUARD_THRESHOLD
-    APPROVAL_GUARD_THRESHOLD=$(printf '%s' "${APPROVAL_GUARD_THRESHOLD}" | tr -d '[:space:]')
-    [ -z "$APPROVAL_GUARD_THRESHOLD" ] && APPROVAL_GUARD_THRESHOLD=10
-    log_info "approval_guard.threshold: $APPROVAL_GUARD_THRESHOLD"
+    read -rp "  Approval guard rejection rate threshold (%) [50]: " APPROVAL_GUARD_REJECTION_PCT
+    APPROVAL_GUARD_REJECTION_PCT=$(printf '%s' "${APPROVAL_GUARD_REJECTION_PCT}" | tr -d '[:space:]')
+    [ -z "$APPROVAL_GUARD_REJECTION_PCT" ] && APPROVAL_GUARD_REJECTION_PCT=50
+    log_info "approval_guard.rejection_threshold_pct: $APPROVAL_GUARD_REJECTION_PCT"
+
+    read -rp "  Approval guard minimum samples [10]: " APPROVAL_GUARD_MIN_SAMPLES
+    APPROVAL_GUARD_MIN_SAMPLES=$(printf '%s' "${APPROVAL_GUARD_MIN_SAMPLES}" | tr -d '[:space:]')
+    [ -z "$APPROVAL_GUARD_MIN_SAMPLES" ] && APPROVAL_GUARD_MIN_SAMPLES=10
+    log_info "approval_guard.min_samples: $APPROVAL_GUARD_MIN_SAMPLES"
 
     echo ""
 }
@@ -1040,8 +1045,9 @@ security:
   sign_timeout: "${SIGN_TIMEOUT:-30s}"        # context timeout for sign operations
   approval_guard:
     enabled: true                 # pause signing when too many rejections (detect key abuse)
-    window: "5m"
-    threshold: ${APPROVAL_GUARD_THRESHOLD:-10}
+    window: "1h"
+    rejection_threshold_pct: ${APPROVAL_GUARD_REJECTION_PCT:-50}
+    min_samples: ${APPROVAL_GUARD_MIN_SAMPLES:-10}
     resume_after: "2h"
   ip_whitelist:
     enabled: ${IP_WHITELIST_ENABLED:-false}
