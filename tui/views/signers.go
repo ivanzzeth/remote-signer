@@ -73,6 +73,18 @@ func validatePassword(pw string) (errMsg string, warnMsg string) {
 	return "", ""
 }
 
+// hdWalletIsPrimaryRow returns true when s is the HD wallet root row (primary / derivation index 0).
+// The API may set hd_parent_address to the same address as s for the primary; older APIs used empty parent.
+func hdWalletIsPrimaryRow(s evm.Signer) bool {
+	if s.Type != "hd_wallet" {
+		return false
+	}
+	if s.HDParentAddress == "" {
+		return true
+	}
+	return strings.EqualFold(s.HDParentAddress, s.Address)
+}
+
 // SignersModel represents the signers list view
 type SignersModel struct {
 	signers_svc evm.SignerAPI
@@ -746,8 +758,7 @@ func (m *SignersModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case " ", "space":
 			// Toggle HD wallet expansion
 			signer := m.GetSelectedSigner()
-			if signer != nil && signer.Type == "hd_wallet" && signer.HDParentAddress == "" {
-				// This is a primary HD wallet address
+			if signer != nil && hdWalletIsPrimaryRow(*signer) {
 				key := strings.ToLower(signer.Address)
 				m.expandedHDWallets[key] = !m.expandedHDWallets[key]
 			}
@@ -1268,12 +1279,13 @@ func (m *SignersModel) renderSigners() string {
 
 		// First pass: collect all signers and group derived addresses
 		for _, s := range m.signers {
-			if s.HDParentAddress == "" {
-				// Primary address (or non-HD signer)
+			isDerivedHD := s.Type == "hd_wallet" && s.HDParentAddress != "" && !strings.EqualFold(s.HDParentAddress, s.Address)
+			if !isDerivedHD {
+				// Root row: keystore / private_key / HD primary (including API self-parent)
 				primaryMap[strings.ToLower(s.Address)] = len(displayList)
 				displayList = append(displayList, displayItem{signer: s, isChild: false})
 			} else {
-				// Derived address - attach to parent
+				// Derived HD address — attach under parent primary
 				parentKey := strings.ToLower(s.HDParentAddress)
 				if idx, ok := primaryMap[parentKey]; ok {
 					displayList[idx].children = append(displayList[idx].children, s)
@@ -1284,14 +1296,18 @@ func (m *SignersModel) renderSigners() string {
 			}
 		}
 
+		selectedAddr := ""
+		if m.selectedIdx >= 0 && m.selectedIdx < len(m.signers) {
+			selectedAddr = strings.ToLower(m.signers[m.selectedIdx].Address)
+		}
+
 		// Second pass: render with hierarchy
-		displayIdx := 0
 		for _, item := range displayList {
+			sel := selectedAddr != "" && strings.EqualFold(selectedAddr, item.signer.Address)
 			// Render primary address
-			row := m.renderSignerRow(item.signer, displayIdx == m.selectedIdx, showOwner, 0)
+			row := m.renderSignerRow(item.signer, sel, showOwner, 0)
 			content.WriteString(row)
 			content.WriteString("\n")
-			displayIdx++
 
 			// Render children if HD wallet and has children
 			if item.signer.Type == "hd_wallet" && len(item.children) > 0 {
@@ -1299,10 +1315,10 @@ func (m *SignersModel) renderSigners() string {
 				if expanded {
 					// Show all derived addresses with indentation
 					for _, child := range item.children {
-						childRow := m.renderSignerRow(child, displayIdx == m.selectedIdx, showOwner, 2)
+						childSel := selectedAddr != "" && strings.EqualFold(selectedAddr, child.Address)
+						childRow := m.renderSignerRow(child, childSel, showOwner, 2)
 						content.WriteString(childRow)
 						content.WriteString("\n")
-						displayIdx++
 					}
 				} else {
 					// Show collapsed indicator

@@ -267,6 +267,9 @@ func (r *Router) setupRoutes() error {
 	// Signer action routes: /api/v1/evm/signers/{address}/unlock, /lock (admin only via PermUnlockSigner in handler)
 	r.mux.Handle("/api/v1/evm/signers/", r.withAuthAndPerm(middleware.PermReadSigners, http.HandlerFunc(signerHandler.HandleSignerAction)))
 
+	// Wallet routes - list signers under a wallet
+	r.mux.Handle("/api/v1/evm/wallets/", r.withAuthAndPerm(middleware.PermReadSigners, http.HandlerFunc(signerHandler.HandleWalletSigners)))
+
 	// HD wallet management routes
 	r.mux.Handle("/api/v1/evm/hd-wallets", r.withAuth(hdWalletHandler))
 	r.mux.Handle("/api/v1/evm/hd-wallets/", r.withAuth(hdWalletHandler))

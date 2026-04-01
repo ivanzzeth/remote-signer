@@ -13,8 +13,40 @@ type Signer struct {
 	Status            string     `json:"status,omitempty"` // ownership status: active, pending_approval
 	DisplayName       string     `json:"display_name,omitempty"`
 	Tags              []string   `json:"tags,omitempty"`
+	WalletID          string     `json:"wallet_id,omitempty"`           // wallet identifier (for HD: primary address, for keystore: own address)
 	HDParentAddress   string     `json:"hd_parent_address,omitempty"`   // for derived addresses: parent HD wallet address
 	HDDerivationIndex *uint32    `json:"hd_derivation_index,omitempty"` // for derived addresses: derivation index
+}
+
+// Wallet represents a wallet (group of signers)
+type Wallet struct {
+	WalletID       string     `json:"wallet_id"`
+	WalletType     string     `json:"wallet_type"`
+	PrimaryAddress string     `json:"primary_address"`
+	SignerCount    int        `json:"signer_count"`
+	Enabled        bool       `json:"enabled"`
+	Locked         bool       `json:"locked"`
+	UnlockedAt     *time.Time `json:"unlocked_at,omitempty"`
+	OwnerID        string     `json:"owner_id,omitempty"`
+	Status         string     `json:"status,omitempty"`
+	DisplayName    string     `json:"display_name,omitempty"`
+	Tags           []string   `json:"tags,omitempty"`
+}
+
+// ListWalletsResponse represents the response from listing wallets
+type ListWalletsResponse struct {
+	Wallets []Wallet `json:"wallets"`
+	Total   int      `json:"total"`
+	HasMore bool     `json:"has_more"`
+}
+
+// WalletSignersResponse represents the response from listing wallet's signers
+type WalletSignersResponse struct {
+	WalletID   string   `json:"wallet_id"`
+	WalletType string   `json:"wallet_type"`
+	Signers    []Signer `json:"signers"`
+	Total      int      `json:"total"`
+	HasMore    bool     `json:"has_more"`
 }
 
 // SignerAccessEntry represents an access grant on a signer.

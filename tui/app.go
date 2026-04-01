@@ -30,6 +30,7 @@ const (
 	ViewMetrics
 	ViewHDWallets
 	ViewHDWalletDetail
+	ViewWallets
 	ViewSecurity
 	ViewAPIKeys
 	ViewIPWhitelist
@@ -207,8 +208,8 @@ type Model struct {
 	width        int
 	height       int
 	activeTab    int
-	rulesSubTab  int // 0=Rules, 1=Templates, 2=Presets, 3=API Keys, 4=IP Whitelist; only when activeTab==2 (ACLs)
-	signersSubTab int // 0=List, 1=HD Wallets; only when activeTab==4 (Signers)
+	rulesSubTab   int // 0=Rules, 1=Templates, 2=Presets, 3=API Keys, 4=IP Whitelist; only when activeTab==2 (ACLs)
+	signersSubTab int // 0=List, 1=HD Wallets, 2=Wallets; only when activeTab==4 (Signers)
 	currentView  ViewType
 	previousView ViewType
 	help         help.Model
@@ -217,23 +218,24 @@ type Model struct {
 	statusMsg    string
 
 	// Views
-	dashboard      *views.DashboardModel
-	requests       *views.RequestsModel
-	requestDetail  *views.RequestDetailModel
-	rules          *views.RulesModel
-	ruleDetail     *views.RuleDetailModel
-	audit          *views.AuditModel
-	signers        *views.SignersModel
-	signerDetail   *views.SignerDetailModel
-	metrics        *views.MetricsModel
-	hdwallets      *views.HDWalletsModel
-	hdwalletDetail *views.HDWalletDetailModel
+	dashboard        *views.DashboardModel
+	requests         *views.RequestsModel
+	requestDetail    *views.RequestDetailModel
+	rules            *views.RulesModel
+	ruleDetail       *views.RuleDetailModel
+	audit            *views.AuditModel
+	signers          *views.SignersModel
+	signerDetail     *views.SignerDetailModel
+	metrics          *views.MetricsModel
+	hdwallets        *views.HDWalletsModel
+	hdwalletDetail   *views.HDWalletDetailModel
+	wallets          *views.WalletsModel
 	security         *views.SecurityModel
 	apikeysView      *views.APIKeysModel
 	ipWhitelistView  *views.IPWhitelistModel
 	templates        *views.TemplatesModel
-	presets        *views.PresetsModel
-	presetDetail   *views.PresetDetailModel
+	presets          *views.PresetsModel
+	presetDetail     *views.PresetDetailModel
 }
 
 // NewModel creates a new application model
@@ -301,6 +303,11 @@ func NewModel(c *client.Client) (*Model, error) {
 		return nil, fmt.Errorf("failed to create hdwallet detail view: %w", err)
 	}
 
+	wallets, err := views.NewWalletsModel(c, ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create wallets view: %w", err)
+	}
+
 	security, err := views.NewSecurityModel(c, ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create security view: %w", err)
@@ -332,29 +339,30 @@ func NewModel(c *client.Client) (*Model, error) {
 	}
 
 	return &Model{
-		client:        c,
-		ctx:           ctx,
-		activeTab:     0,
-		signersSubTab: 0,
-		currentView:   ViewDashboard,
-		help:           h,
-		dashboard:      dashboard,
-		requests:       requests,
-		requestDetail:  requestDetail,
-		rules:          rules,
-		ruleDetail:     ruleDetail,
-		audit:          audit,
-		signers:        signers,
-		signerDetail:   signerDetail,
-		metrics:        metrics,
-		hdwallets:      hdwallets,
-		hdwalletDetail: hdwalletDetail,
-		security:       security,
-		apikeysView:    apikeysView,
+		client:          c,
+		ctx:             ctx,
+		activeTab:       0,
+		signersSubTab:   0,
+		currentView:     ViewDashboard,
+		help:            h,
+		dashboard:       dashboard,
+		requests:        requests,
+		requestDetail:   requestDetail,
+		rules:           rules,
+		ruleDetail:      ruleDetail,
+		audit:           audit,
+		signers:         signers,
+		signerDetail:    signerDetail,
+		metrics:         metrics,
+		hdwallets:       hdwallets,
+		hdwalletDetail:  hdwalletDetail,
+		wallets:         wallets,
+		security:        security,
+		apikeysView:     apikeysView,
 		ipWhitelistView: ipWhitelistView,
-		templates:      templates,
-		presets:        presets,
-		presetDetail:   presetDetail,
+		templates:       templates,
+		presets:         presets,
+		presetDetail:    presetDetail,
 	}, nil
 }
 
@@ -368,6 +376,7 @@ func (m Model) Init() tea.Cmd {
 		m.signers.Init(),
 		m.metrics.Init(),
 		m.hdwallets.Init(),
+		m.wallets.Init(),
 		m.security.Init(),
 		m.apikeysView.Init(),
 		m.templates.Init(),
@@ -498,8 +507,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.currentView = m.rulesSubTabToView(m.rulesSubTab)
 					return m, m.refreshCurrentView()
 				}
-				if m.currentView == ViewSigners || m.currentView == ViewHDWallets {
-					m.signersSubTab = (m.signersSubTab + 1) % 2 // List <-> HD Wallets
+				if m.currentView == ViewSigners || m.currentView == ViewHDWallets || m.currentView == ViewWallets {
+					m.signersSubTab = (m.signersSubTab + 1) % 3 // List <-> HD Wallets <-> Wallets
 					m.currentView = m.signersSubTabToView(m.signersSubTab)
 					return m, m.refreshCurrentView()
 				}
@@ -514,8 +523,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.currentView = m.rulesSubTabToView(m.rulesSubTab)
 					return m, m.refreshCurrentView()
 				}
-				if m.currentView == ViewSigners || m.currentView == ViewHDWallets {
-					m.signersSubTab = (m.signersSubTab + 1) % 2 // List <-> HD Wallets
+				if m.currentView == ViewSigners || m.currentView == ViewHDWallets || m.currentView == ViewWallets {
+					m.signersSubTab = (m.signersSubTab + 1) % 3 // List <-> HD Wallets <-> Wallets
 					m.currentView = m.signersSubTabToView(m.signersSubTab)
 					return m, m.refreshCurrentView()
 				}
@@ -652,6 +661,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.hdwallets.Refresh())
 		}
 
+	case ViewWallets:
+		newWallets, cmd := m.wallets.Update(msg)
+		m.wallets = newWallets.(*views.WalletsModel)
+		cmds = append(cmds, cmd)
+
 	case ViewSecurity:
 		newSecurity, cmd := m.security.Update(msg)
 		m.security = newSecurity.(*views.SecurityModel)
@@ -767,9 +781,9 @@ func (m Model) renderHeader() string {
 		out = lipgloss.JoinVertical(lipgloss.Left, out, subLine)
 	}
 
-	// Signers sub-tabs when Signers is the active top-level tab (List | HD Wallets)
+	// Signers sub-tabs when Signers is the active top-level tab (List | HD Wallets | Wallets)
 	if m.activeTab == 4 {
-		subNames := []string{"List", "HD Wallets"}
+		subNames := []string{"List", "HD Wallets", "Wallets"}
 		var subRendered []string
 		for i, name := range subNames {
 			if i == m.signersSubTab {
@@ -825,6 +839,8 @@ func (m Model) renderContent(_ int) string {
 		return m.hdwallets.View()
 	case ViewHDWalletDetail:
 		return m.hdwalletDetail.View()
+	case ViewWallets:
+		return m.wallets.View()
 	case ViewSecurity:
 		return m.security.View()
 	case ViewAPIKeys:
@@ -858,6 +874,8 @@ func (m Model) refreshCurrentView() tea.Cmd {
 		return m.metrics.Refresh()
 	case ViewHDWallets:
 		return m.hdwallets.Refresh()
+	case ViewWallets:
+		return m.wallets.Init()
 	case ViewSecurity:
 		return m.security.Refresh()
 	case ViewAPIKeys:
@@ -891,6 +909,8 @@ func (m Model) isCurrentViewCapturingInput() bool {
 		return m.hdwallets.IsCapturingInput()
 	case ViewHDWalletDetail:
 		return m.hdwalletDetail.IsCapturingInput()
+	case ViewWallets:
+		return m.wallets.IsCapturingInput()
 	case ViewSecurity:
 		return m.security.IsCapturingInput()
 	case ViewAPIKeys:
@@ -930,22 +950,24 @@ func (m Model) tabToView(tab int) ViewType {
 	}
 }
 
-// signersSubTabToView returns the ViewType for the given Signers sub-tab (0=List, 1=HD Wallets).
+// signersSubTabToView returns the ViewType for the given Signers sub-tab (0=List, 1=HD Wallets, 2=Wallets).
 func (m Model) signersSubTabToView(sub int) ViewType {
 	switch sub {
 	case 1:
 		return ViewHDWallets
+	case 2:
+		return ViewWallets
 	default:
 		return ViewSigners
 	}
 }
 
 // isTopLevelView returns true when the current view is one of the seven top-level tab views
-// (including ACLs sub-views and Signers sub-views: List, HD Wallets).
+// (including ACLs sub-views and Signers sub-views: List, HD Wallets, Wallets).
 func (m Model) isTopLevelView() bool {
 	switch m.currentView {
 	case ViewDashboard, ViewRequests, ViewRules, ViewAudit, ViewSigners, ViewMetrics,
-		ViewHDWallets, ViewSecurity, ViewAPIKeys, ViewIPWhitelist, ViewTemplates, ViewPresets:
+		ViewHDWallets, ViewWallets, ViewSecurity, ViewAPIKeys, ViewIPWhitelist, ViewTemplates, ViewPresets:
 		return true
 	default:
 		return false

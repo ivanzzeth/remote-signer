@@ -132,7 +132,7 @@ func httpGet(ctx context.Context, client *http.Client, url string) ([]byte, erro
 			return body, nil
 		}
 
-		resp.Body.Close()
+		_ = resp.Body.Close() // Ignore close error on non-200 response body
 
 		// Retry on 5xx (server errors), fail immediately on 4xx (client errors)
 		if resp.StatusCode >= 500 && attempt < maxRetries-1 {

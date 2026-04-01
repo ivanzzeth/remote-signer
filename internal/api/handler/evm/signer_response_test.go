@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -377,4 +378,53 @@ func TestNewSignerResponse_HDWallet_CaseInsensitive(t *testing.T) {
 	})
 	assert.False(t, resp2.Locked, "case-insensitive match on derived")
 	assert.Equal(t, "user-1", resp2.OwnerID, "derived should inherit primary ownership")
+}
+
+func TestNewSignerResponse_HDWallet_DerivedHierarchyUsesCanonicalAddressKey(t *testing.T) {
+	// GetHDHierarchy keys match normalizeAddress (EIP-55). Signer list may use any casing; lookup must still work.
+	primaryAddr := "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	derivedLower := "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	derivedKey := common.HexToAddress(derivedLower).Hex()
+
+	mgr := &mockSignerManager{
+		hdWalletMgr: &mockHDWalletManager{
+			listHDWalletsFn: func() []evmchain.HDWalletInfo {
+				return []evmchain.HDWalletInfo{
+					{PrimaryAddress: primaryAddr, Locked: false},
+				}
+			},
+			listDerivedAddrsFn: func(_ string) ([]types.SignerInfo, error) {
+				return []types.SignerInfo{
+					{Address: derivedLower, Type: string(types.SignerTypeHDWallet), Enabled: true},
+				}, nil
+			},
+		},
+		hdHierarchy: map[string]evmchain.HDHierarchyInfo{
+			derivedKey: {
+				ParentAddress:   primaryAddr,
+				DerivationIndex: 1,
+			},
+		},
+	}
+
+	accessSvc := newStrictAccessService(t, map[string]*types.SignerOwnership{
+		primaryAddr: {
+			SignerAddress: primaryAddr,
+			OwnerID:       "user-1",
+			Status:        types.SignerOwnershipActive,
+		},
+	})
+
+	handler, err := NewSignerHandler(mgr, accessSvc, slog.Default(), false)
+	require.NoError(t, err)
+
+	resp := handler.newSignerResponse(context.Background(), types.SignerInfo{
+		Address: derivedLower,
+		Type:    string(types.SignerTypeHDWallet),
+		Enabled: true,
+		Locked:  true,
+	})
+	assert.Equal(t, primaryAddr, resp.HDParentAddress)
+	require.NotNil(t, resp.HDDerivationIndex)
+	assert.Equal(t, uint32(1), *resp.HDDerivationIndex)
 }

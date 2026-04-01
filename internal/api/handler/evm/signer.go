@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/audit"
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
@@ -75,8 +77,40 @@ type SignerResponse struct {
 	Status            string     `json:"status,omitempty"` // ownership status: active, pending_approval
 	DisplayName       string     `json:"display_name,omitempty"`
 	Tags              []string   `json:"tags,omitempty"`
+	WalletID          string     `json:"wallet_id,omitempty"`           // wallet identifier (for HD: primary address, for keystore: own address)
 	HDParentAddress   string     `json:"hd_parent_address,omitempty"`   // for derived addresses: parent HD wallet address
 	HDDerivationIndex *uint32    `json:"hd_derivation_index,omitempty"` // for derived addresses: derivation index
+}
+
+// WalletResponse represents a wallet in API responses
+type WalletResponse struct {
+	WalletID       string     `json:"wallet_id"`
+	WalletType     string     `json:"wallet_type"` // hd_wallet, keystore, etc.
+	PrimaryAddress string     `json:"primary_address"`
+	SignerCount    int        `json:"signer_count"` // number of signers under this wallet
+	Enabled        bool       `json:"enabled"`
+	Locked         bool       `json:"locked"`
+	UnlockedAt     *time.Time `json:"unlocked_at,omitempty"`
+	OwnerID        string     `json:"owner_id,omitempty"`
+	Status         string     `json:"status,omitempty"` // ownership status: active, pending_approval
+	DisplayName    string     `json:"display_name,omitempty"`
+	Tags           []string   `json:"tags,omitempty"`
+}
+
+// ListWalletsResponse represents the response from listing wallets
+type ListWalletsResponse struct {
+	Wallets []WalletResponse `json:"wallets"`
+	Total   int              `json:"total"`
+	HasMore bool             `json:"has_more"`
+}
+
+// WalletSignersResponse represents the response from listing wallet's signers
+type WalletSignersResponse struct {
+	WalletID   string            `json:"wallet_id"`
+	WalletType string            `json:"wallet_type"`
+	Signers    []SignerResponse  `json:"signers"`
+	Total      int               `json:"total"`
+	HasMore    bool              `json:"has_more"`
 }
 
 // UnlockSignerRequest represents the request to unlock a locked signer
@@ -158,6 +192,7 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 	// Parse filter parameters
 	requestedOffset := 0
 	requestedLimit := 20
+	groupByWallet := query.Get("group_by_wallet") == "true"
 
 	var signerType *types.SignerType
 	if typeStr := query.Get("type"); typeStr != "" {
@@ -264,6 +299,12 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		filteredSigners = tagged
+	}
+
+	if groupByWallet {
+		// Group signers by wallet_id
+		h.listWallets(w, r, filteredSigners, requestedOffset, requestedLimit, tagFilter)
+		return
 	}
 
 	total := len(filteredSigners)
@@ -918,11 +959,19 @@ func (h *SignerHandler) newSignerResponse(ctx context.Context, s types.SignerInf
 		resp.Tags = ownership.Tags()
 	}
 
-	// Fill HD hierarchy info if this is a derived address
+	// Fill HD hierarchy info if this is a derived address.
+	// Keys from SignerManager.GetHDHierarchy match chain/evm.normalizeAddress (EIP-55), not lowercase hex.
 	hierarchy := h.signerManager.GetHDHierarchy()
-	if info, ok := hierarchy[strings.ToLower(s.Address)]; ok {
+	if info, ok := hierarchy[common.HexToAddress(s.Address).Hex()]; ok {
 		resp.HDParentAddress = info.ParentAddress
 		resp.HDDerivationIndex = &info.DerivationIndex
+	}
+
+	// Set wallet_id: for HD derived addresses use parent, otherwise use own address
+	if resp.HDParentAddress != "" {
+		resp.WalletID = resp.HDParentAddress
+	} else {
+		resp.WalletID = s.Address
 	}
 
 	return resp
@@ -998,4 +1047,230 @@ func (h *SignerHandler) writeError(w http.ResponseWriter, message string, status
 	w.WriteHeader(status)
 	// #nosec G104 -- HTTP response write error cannot be meaningfully handled
 	json.NewEncoder(w).Encode(map[string]string{"error": message})
+}
+
+// listWallets groups signers by wallet and returns wallet list
+func (h *SignerHandler) listWallets(w http.ResponseWriter, r *http.Request, signers []types.SignerInfo, offset, limit int, tagFilter string) {
+	// Group signers by wallet_id
+	walletMap := make(map[string][]types.SignerInfo)
+	for _, s := range signers {
+		resp := h.newSignerResponse(r.Context(), s)
+		walletID := resp.WalletID
+		walletMap[walletID] = append(walletMap[walletID], s)
+	}
+
+	// Build wallet list
+	var wallets []WalletResponse
+	for walletID, signerGroup := range walletMap {
+		if len(signerGroup) == 0 {
+			continue
+		}
+
+		// Use the first signer to build wallet info (all signers in same wallet share ownership/metadata)
+		primary := signerGroup[0]
+		resp := h.newSignerResponse(r.Context(), primary)
+
+		wallet := WalletResponse{
+			WalletID:       walletID,
+			WalletType:     primary.Type,
+			PrimaryAddress: walletID, // For HD: primary address; for keystore: own address
+			SignerCount:    len(signerGroup),
+			Enabled:        resp.Enabled,
+			Locked:         resp.Locked,
+			UnlockedAt:     resp.UnlockedAt,
+			OwnerID:        resp.OwnerID,
+			Status:         resp.Status,
+			DisplayName:    resp.DisplayName,
+			Tags:           resp.Tags,
+		}
+		wallets = append(wallets, wallet)
+	}
+
+	// Sort wallets by wallet_id for deterministic pagination
+	sort.Slice(wallets, func(i, j int) bool {
+		return strings.ToLower(wallets[i].WalletID) < strings.ToLower(wallets[j].WalletID)
+	})
+
+	total := len(wallets)
+
+	// Apply pagination at wallet level
+	if offset >= len(wallets) {
+		wallets = nil
+	} else {
+		end := offset + limit
+		if end > len(wallets) {
+			end = len(wallets)
+		}
+		wallets = wallets[offset:end]
+	}
+
+	hasMore := offset+limit < total
+
+	resp := ListWalletsResponse{
+		Wallets: wallets,
+		Total:   total,
+		HasMore: hasMore,
+	}
+
+	h.writeJSON(w, resp, http.StatusOK)
+}
+
+// listWalletSigners handles GET /api/v1/evm/wallets/{wallet_id}/signers
+func (h *SignerHandler) listWalletSigners(w http.ResponseWriter, r *http.Request, walletID string) {
+	query := r.URL.Query()
+	apiKey := middleware.GetAPIKey(r.Context())
+
+	requestedOffset := 0
+	requestedLimit := 20
+
+	if offsetStr := query.Get("offset"); offsetStr != "" {
+		offset, err := strconv.Atoi(offsetStr)
+		if err != nil || offset < 0 {
+			h.writeError(w, "invalid offset parameter", http.StatusBadRequest)
+			return
+		}
+		requestedOffset = offset
+	}
+
+	if limitStr := query.Get("limit"); limitStr != "" {
+		limit, err := strconv.Atoi(limitStr)
+		if err != nil || limit < 0 {
+			h.writeError(w, "invalid limit parameter", http.StatusBadRequest)
+			return
+		}
+		if limit > 100 {
+			limit = 100
+		}
+		requestedLimit = limit
+	}
+
+	// Get all signers from manager
+	filter := types.SignerFilter{
+		Offset: 0,
+		Limit:  100000,
+	}
+	result, err := h.signerManager.ListSigners(r.Context(), filter)
+	if err != nil {
+		h.logger.Error("failed to list signers", slog.String("error", err.Error()))
+		h.writeError(w, "failed to list signers", http.StatusInternalServerError)
+		return
+	}
+
+	// Build allowed addresses set
+	ownedAddrs, err := h.accessService.GetOwnedAddresses(r.Context(), apiKey.ID)
+	if err != nil {
+		h.logger.Error("failed to get owned addresses", slog.String("error", err.Error()))
+		h.writeError(w, "failed to list signers", http.StatusInternalServerError)
+		return
+	}
+	grantedAddrs, err := h.accessService.GetAccessibleAddresses(r.Context(), apiKey.ID)
+	if err != nil {
+		h.logger.Error("failed to get accessible addresses", slog.String("error", err.Error()))
+		h.writeError(w, "failed to list signers", http.StatusInternalServerError)
+		return
+	}
+
+	allowedSet := make(map[string]bool)
+	for _, a := range ownedAddrs {
+		allowedSet[strings.ToLower(a)] = true
+	}
+	for _, a := range grantedAddrs {
+		allowedSet[strings.ToLower(a)] = true
+	}
+
+	// Include HD wallet derived addresses
+	if h.signerManager != nil {
+		hdMgr, hdErr := h.signerManager.HDWalletManager()
+		if hdErr == nil && hdMgr != nil {
+			for _, primary := range hdMgr.ListPrimaryAddresses() {
+				if allowedSet[strings.ToLower(primary)] {
+					derived, dErr := hdMgr.ListDerivedAddresses(primary)
+					if dErr == nil {
+						for _, d := range derived {
+							allowedSet[strings.ToLower(d.Address)] = true
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Filter signers belonging to this wallet
+	var walletSigners []types.SignerInfo
+	var walletType string
+	for _, s := range result.Signers {
+		if !allowedSet[strings.ToLower(s.Address)] {
+			continue
+		}
+		resp := h.newSignerResponse(r.Context(), s)
+		if strings.EqualFold(resp.WalletID, walletID) {
+			walletSigners = append(walletSigners, s)
+			if walletType == "" {
+				walletType = s.Type
+			}
+		}
+	}
+
+	// Sort by derivation index for HD wallets, or by address for others
+	if len(walletSigners) > 0 {
+		sort.Slice(walletSigners, func(i, j int) bool {
+			respI := h.newSignerResponse(r.Context(), walletSigners[i])
+			respJ := h.newSignerResponse(r.Context(), walletSigners[j])
+			if respI.HDDerivationIndex != nil && respJ.HDDerivationIndex != nil {
+				return *respI.HDDerivationIndex < *respJ.HDDerivationIndex
+			}
+			return strings.ToLower(walletSigners[i].Address) < strings.ToLower(walletSigners[j].Address)
+		})
+	}
+
+	total := len(walletSigners)
+
+	// Apply pagination
+	if requestedOffset >= len(walletSigners) {
+		walletSigners = nil
+	} else {
+		end := requestedOffset + requestedLimit
+		if end > len(walletSigners) {
+			end = len(walletSigners)
+		}
+		walletSigners = walletSigners[requestedOffset:end]
+	}
+
+	hasMore := requestedOffset+requestedLimit < total
+
+	// Convert to response
+	signers := make([]SignerResponse, len(walletSigners))
+	for i, s := range walletSigners {
+		signers[i] = h.newSignerResponse(r.Context(), s)
+	}
+
+	resp := WalletSignersResponse{
+		WalletID:   walletID,
+		WalletType: walletType,
+		Signers:    signers,
+		Total:      total,
+		HasMore:    hasMore,
+	}
+
+	h.writeJSON(w, resp, http.StatusOK)
+}
+
+// HandleWalletSigners handles GET /api/v1/evm/wallets/{wallet_id}/signers
+func (h *SignerHandler) HandleWalletSigners(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse wallet_id from path: /api/v1/evm/wallets/{wallet_id}/signers
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/evm/wallets/")
+	path = strings.TrimSuffix(path, "/signers")
+	walletID := strings.TrimSpace(path)
+
+	if walletID == "" {
+		h.writeError(w, "wallet_id is required", http.StatusBadRequest)
+		return
+	}
+
+	h.listWalletSigners(w, r, walletID)
 }

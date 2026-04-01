@@ -220,8 +220,14 @@ func (b *DynamicBlocklist) sync(ctx context.Context) {
 			}
 			b.logger.Warn("blocklist partial sync", "total", len(merged), "errors", len(errs))
 		} else {
-			// Total failure: keep existing cache (fail-open) or clear (fail-close handled by IsFailClosed).
-			b.logger.Error("blocklist sync failed completely, keeping stale cache", "cached", len(b.addrs))
+			// Total failure: in fail-close mode, clear cache to block all requests.
+			// In fail-open mode, keep existing cache.
+			if b.failMode == "close" {
+				b.addrs = make(map[string]bool)
+				b.logger.Error("blocklist sync failed completely in fail-close mode, clearing cache", "cached", len(b.addrs))
+			} else {
+				b.logger.Error("blocklist sync failed completely, keeping stale cache", "cached", len(b.addrs))
+			}
 		}
 		return
 	}

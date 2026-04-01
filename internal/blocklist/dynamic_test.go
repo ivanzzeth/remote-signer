@@ -21,6 +21,22 @@ func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 }
 
+// waitForSync polls until the blocklist has completed at least one sync attempt (success or failure).
+func waitForSync(t *testing.T, bl *DynamicBlocklist, timeout time.Duration) {
+	t.Helper()
+	start := time.Now()
+	for {
+		m := bl.Metrics()
+		if !m.LastSyncAt.IsZero() {
+			return // sync completed (may have failed, but it ran)
+		}
+		if time.Since(start) > timeout {
+			t.Fatal("timeout waiting for sync to complete")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 func TestDynamicBlocklist_URLText(t *testing.T) {
 	// Serve a text file with addresses.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -160,7 +176,7 @@ func TestDynamicBlocklist_FailClosed(t *testing.T) {
 	require.NoError(t, err)
 	defer bl.Stop()
 
-	time.Sleep(500 * time.Millisecond)
+	waitForSync(t, bl, 10*time.Second)
 
 	assert.True(t, bl.IsFailClosed(), "should be fail-closed with no data")
 }
@@ -286,7 +302,7 @@ func TestDynamicBlocklist_PartialSyncPreservesFailedSourceAddresses(t *testing.T
 	require.NoError(t, err)
 	defer bl.Stop()
 
-	time.Sleep(500 * time.Millisecond)
+	waitForSync(t, bl, 10*time.Second)
 
 	// Source A's address should be present despite source B failing.
 	assert.GreaterOrEqual(t, bl.AddressCount(), 1)
