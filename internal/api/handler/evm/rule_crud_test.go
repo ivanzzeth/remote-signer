@@ -307,6 +307,120 @@ func TestRuleHandler_RejectRule_NotAdmin(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
 
+// --- Reject rule (more) ---
+
+func TestRuleHandler_RejectRule_NotPending(t *testing.T) {
+	repo := newMockRuleRepo()
+	rule := newAPIRule()
+	rule.Status = types.RuleStatusActive
+	repo.addRule(rule)
+
+	h, err := NewRuleHandler(repo, slog.Default())
+	require.NoError(t, err)
+
+	rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/reject", nil, ruleAdminKey())
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "not pending")
+}
+
+func TestRuleHandler_RejectRule_NotFound(t *testing.T) {
+	h, err := NewRuleHandler(newMockRuleRepo(), slog.Default())
+	require.NoError(t, err)
+
+	rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/nonexistent/reject", nil, ruleAdminKey())
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+// --- Update rule ---
+
+func TestRuleHandler_UpdateRule_Success(t *testing.T) {
+	repo := newMockRuleRepo()
+	rule := newAPIRule()
+	rule.Owner = "admin-key"
+	repo.addRule(rule)
+
+	h, err := NewRuleHandler(repo, slog.Default())
+	require.NoError(t, err)
+
+	body := `{"name":"updated-name","description":"updated desc"}`
+	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var resp RuleResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, "updated-name", resp.Name)
+}
+
+func TestRuleHandler_UpdateRule_NotFound(t *testing.T) {
+	h, err := NewRuleHandler(newMockRuleRepo(), slog.Default())
+	require.NoError(t, err)
+
+	body := `{"name":"updated"}`
+	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/nonexistent", body, ruleAdminKey())
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestRuleHandler_UpdateRule_Immutable(t *testing.T) {
+	repo := newMockRuleRepo()
+	rule := newAPIRule()
+	rule.Immutable = true
+	repo.addRule(rule)
+
+	h, err := NewRuleHandler(repo, slog.Default())
+	require.NoError(t, err)
+
+	body := `{"name":"hacked"}`
+	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+	assert.Contains(t, rec.Body.String(), "immutable")
+}
+
+func TestRuleHandler_UpdateRule_NotOwner(t *testing.T) {
+	repo := newMockRuleRepo()
+	rule := newAPIRule()
+	rule.Owner = "other-owner"
+	repo.addRule(rule)
+
+	h, err := NewRuleHandler(repo, slog.Default())
+	require.NoError(t, err)
+
+	body := `{"name":"hacked"}`
+	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAgentKey())
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+	assert.Contains(t, rec.Body.String(), "permission denied")
+}
+
+func TestRuleHandler_UpdateRule_InvalidBody(t *testing.T) {
+	repo := newMockRuleRepo()
+	rule := newAPIRule()
+	repo.addRule(rule)
+
+	h, err := NewRuleHandler(repo, slog.Default())
+	require.NoError(t, err)
+
+	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), "bad json", ruleAdminKey())
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestRuleHandler_UpdateRule_EnableDisable(t *testing.T) {
+	repo := newMockRuleRepo()
+	rule := newAPIRule()
+	rule.Owner = "admin-key"
+	rule.Enabled = true
+	repo.addRule(rule)
+
+	h, err := NewRuleHandler(repo, slog.Default())
+	require.NoError(t, err)
+
+	body := `{"enabled":false}`
+	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var resp RuleResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.False(t, resp.Enabled)
+}
+
 // --- Method not allowed ---
 
 func TestRuleHandler_MethodNotAllowed(t *testing.T) {
