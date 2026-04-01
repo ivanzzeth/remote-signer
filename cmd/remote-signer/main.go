@@ -803,6 +803,12 @@ func run() error {
 			log.Warn("failed to create simulation budget rule", "error", simRuleErr)
 		} else {
 			signService.SetSimulationRule(simRule)
+			// Start batch accumulator if configured
+			if cfg.Chains.EVM.Simulation.BatchWindow > 0 {
+				simRule.SetBatchConfig(cfg.Chains.EVM.Simulation.BatchWindow, cfg.Chains.EVM.Simulation.BatchMaxSize)
+				simRule.StartAccumulator()
+				defer simRule.StopAccumulator()
+			}
 			log.Info("simulation budget rule enabled for sign service fallback")
 		}
 	}

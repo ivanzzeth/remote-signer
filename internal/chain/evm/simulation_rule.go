@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"math/big"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
@@ -75,6 +77,13 @@ type SimulationBudgetRule struct {
 	allowanceQuerier  simulation.AllowanceQuerier
 	decimalsAlerter   DecimalsAnomalyAlerter
 	logger            *slog.Logger
+
+	// Batch accumulator fields (set via SetBatchConfig + StartAccumulator).
+	batchWindow  time.Duration
+	batchMaxSize int
+	pendingCh    chan *pendingSimRequest
+	stopCh       chan struct{}
+	accWg        sync.WaitGroup
 }
 
 // NewSimulationBudgetRule creates a new SimulationBudgetRule.
@@ -198,7 +207,13 @@ func (r *SimulationBudgetRule) EvaluateSingle(
 		return &SimulationOutcome{Decision: "no_match"}, nil
 	}
 
-	// Simulate
+	// If batch accumulator is active, enqueue and wait for batch result.
+	if r.accumulatorActive() {
+		txp := simulation.TxParams{To: to, Value: value, Data: data, Gas: gas}
+		return r.enqueueAndWait(ctx, req, txp, req.Payload)
+	}
+
+	// Simulate (synchronous single-tx path)
 	simReq := &simulation.SimulationRequest{
 		ChainID: req.ChainID,
 		From:    req.SignerAddress,

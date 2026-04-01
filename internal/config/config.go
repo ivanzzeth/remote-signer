@@ -226,7 +226,7 @@ type SimulationConfig struct {
 	SyncInterval time.Duration `yaml:"sync_interval"`   // [anvil] periodic health check interval (default: 60s)
 	Timeout      time.Duration `yaml:"timeout"`         // per-simulation timeout (default: 60s)
 	MaxChains    int           `yaml:"max_chains"`      // [anvil] max concurrent anvil forks (default: 10)
-	BatchWindow  time.Duration `yaml:"batch_window"`    // accumulation window for single sign fallback (default: 1s)
+	BatchWindow  time.Duration `yaml:"batch_window"`    // accumulation window for single sign fallback (default: 5s; 0 = disabled)
 	BatchMaxSize int           `yaml:"batch_max_size"`  // max txs per batch (default: 20)
 	PruneHistory int           `yaml:"prune_history"`   // [anvil] --prune-history: max states in memory (default: 0 = minimal)
 	CacheDir     string        `yaml:"cache_dir"`       // [anvil] fork RPC cache directory (default: data/anvil-cache)
