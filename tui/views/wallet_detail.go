@@ -15,19 +15,21 @@ import (
 
 // WalletDetailModel represents the wallet detail view.
 type WalletDetailModel struct {
-	signers_svc evm.SignerAPI
-	ctx         context.Context
-	width       int
-	height      int
-	spinner     spinner.Model
-	loading     bool
-	err         error
-	walletID    string
-	wallet      *evm.Wallet // wallet metadata from list
-	signers     []evm.Signer
-	selectedIdx int
-	goBack      bool
-	actionResult string
+	signers_svc   evm.SignerAPI
+	hdwallets_svc evm.HDWalletAPI
+	ctx           context.Context
+	width         int
+	height        int
+	spinner       spinner.Model
+	loading       bool
+	err           error
+	walletID      string
+	wallet        *evm.Wallet // wallet metadata from list
+	basePath      string      // for HD wallets
+	signers       []evm.Signer
+	selectedIdx   int
+	goBack        bool
+	actionResult  string
 }
 
 // WalletDetailDataMsg is sent when wallet detail data is loaded.
@@ -42,11 +44,11 @@ func NewWalletDetailModel(c *client.Client, ctx context.Context) (*WalletDetailM
 	if c == nil {
 		return nil, fmt.Errorf("client is required")
 	}
-	return newWalletDetailModelFromService(c.EVM.Signers, ctx)
+	return newWalletDetailModelFromService(c.EVM.Signers, c.EVM.HDWallets, ctx)
 }
 
 // newWalletDetailModelFromService creates a wallet detail model from service (for testing).
-func newWalletDetailModelFromService(svc evm.SignerAPI, ctx context.Context) (*WalletDetailModel, error) {
+func newWalletDetailModelFromService(svc evm.SignerAPI, hdSvc evm.HDWalletAPI, ctx context.Context) (*WalletDetailModel, error) {
 	if svc == nil {
 		return nil, fmt.Errorf("signer service is required")
 	}
@@ -59,9 +61,10 @@ func newWalletDetailModelFromService(svc evm.SignerAPI, ctx context.Context) (*W
 	s.Style = styles.SpinnerStyle
 
 	return &WalletDetailModel{
-		signers_svc: svc,
-		ctx:         ctx,
-		spinner:     s,
+		signers_svc:   svc,
+		hdwallets_svc: hdSvc,
+		ctx:           ctx,
+		spinner:       s,
 	}, nil
 }
 
@@ -107,6 +110,7 @@ func (m *WalletDetailModel) ResetGoBack() {
 
 func (m *WalletDetailModel) loadWalletData() tea.Cmd {
 	return func() tea.Msg {
+		// Fetch signers
 		resp, err := m.signers_svc.ListWalletSigners(m.ctx, m.walletID, nil)
 		if err != nil {
 			return WalletDetailDataMsg{
@@ -114,6 +118,22 @@ func (m *WalletDetailModel) loadWalletData() tea.Cmd {
 				Err:    err,
 			}
 		}
+
+		// If HD wallet, fetch base path
+		var basePath string
+		if m.wallet != nil && m.wallet.WalletType == "hd_wallet" && m.hdwallets_svc != nil {
+			hdResp, err := m.hdwallets_svc.List(m.ctx)
+			if err == nil && hdResp != nil {
+				for _, hw := range hdResp.Wallets {
+					if hw.PrimaryAddress == m.wallet.PrimaryAddress {
+						basePath = hw.BasePath
+						break
+					}
+				}
+			}
+		}
+
+		m.basePath = basePath
 		return WalletDetailDataMsg{
 			Wallet:  m.wallet,
 			Signers: resp.Signers,
@@ -224,16 +244,24 @@ func (m *WalletDetailModel) View() string {
 	if len(m.signers) == 0 {
 		content.WriteString(styles.MutedColor.Render("  No signers found in this wallet"))
 	} else {
+		isHDWallet := m.wallet != nil && m.wallet.WalletType == "hd_wallet"
+
 		// Table header
-		headerRow := fmt.Sprintf("%-44s  %-14s  %-14s  %-8s",
-			"Address", "Type", "Status", "Enabled")
+		var headerRow string
+		if isHDWallet {
+			headerRow = fmt.Sprintf("%-6s  %-44s  %-14s  %-14s  %-8s  %-60s",
+				"INDEX", "ADDRESS", "TYPE", "STATUS", "ENABLED", "PATH")
+		} else {
+			headerRow = fmt.Sprintf("%-44s  %-14s  %-14s  %-8s",
+				"ADDRESS", "TYPE", "STATUS", "ENABLED")
+		}
 		content.WriteString(styles.TableHeaderStyle.Render(headerRow))
 		content.WriteString("\n")
 
 		// Rows
 		for i, s := range m.signers {
 			selected := i == m.selectedIdx
-			row := m.renderSignerRow(s, selected)
+			row := m.renderSignerRow(s, selected, isHDWallet)
 			content.WriteString(row)
 			content.WriteString("\n")
 		}
@@ -247,7 +275,7 @@ func (m *WalletDetailModel) View() string {
 	return content.String()
 }
 
-func (m *WalletDetailModel) renderSignerRow(s evm.Signer, selected bool) string {
+func (m *WalletDetailModel) renderSignerRow(s evm.Signer, selected bool, isHDWallet bool) string {
 	addr := s.Address
 	if len(addr) > 42 {
 		addr = addr[:42]
@@ -263,8 +291,27 @@ func (m *WalletDetailModel) renderSignerRow(s evm.Signer, selected bool) string 
 		enabled = "No"
 	}
 
-	row := fmt.Sprintf("%-44s  %-14s  %-14s  %-8s",
-		addr, signerType, status, enabled)
+	var row string
+	if isHDWallet {
+		// For HD wallet: INDEX | ADDRESS | TYPE | STATUS | ENABLED | PATH
+		index := "-"
+		path := "-"
+		if s.HDDerivationIndex != nil {
+			index = fmt.Sprintf("%d", *s.HDDerivationIndex)
+			// Construct full path
+			if m.basePath != "" {
+				path = fmt.Sprintf("%s/%d", m.basePath, *s.HDDerivationIndex)
+			} else {
+				// Fallback to generic Ethereum path
+				path = fmt.Sprintf("m/44'/60'/0'/0/%d", *s.HDDerivationIndex)
+			}
+		}
+		row = fmt.Sprintf("%-6s  %-44s  %-14s  %-14s  %-8s  %-60s",
+			index, addr, signerType, status, enabled, path)
+	} else {
+		row = fmt.Sprintf("%-44s  %-14s  %-14s  %-8s",
+			addr, signerType, status, enabled)
+	}
 
 	if selected {
 		return styles.TableSelectedRowStyle.Render(row)
