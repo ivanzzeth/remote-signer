@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -15,19 +16,26 @@ import (
 
 // CollectionHandler handles wallet collection CRUD endpoints.
 type CollectionHandler struct {
-	repo   storage.CollectionRepository
-	logger *slog.Logger
+	repo          storage.CollectionRepository
+	ownershipRepo storage.SignerOwnershipRepository
+	accessRepo    storage.SignerAccessRepository
+	logger        *slog.Logger
 }
 
 // NewCollectionHandler creates a new collection handler.
-func NewCollectionHandler(repo storage.CollectionRepository, logger *slog.Logger) (*CollectionHandler, error) {
+func NewCollectionHandler(repo storage.CollectionRepository, ownershipRepo storage.SignerOwnershipRepository, accessRepo storage.SignerAccessRepository, logger *slog.Logger) (*CollectionHandler, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("collection repository is required")
 	}
 	if logger == nil {
 		return nil, fmt.Errorf("logger is required")
 	}
-	return &CollectionHandler{repo: repo, logger: logger}, nil
+	return &CollectionHandler{
+		repo:          repo,
+		ownershipRepo: ownershipRepo,
+		accessRepo:    accessRepo,
+		logger:        logger,
+	}, nil
 }
 
 // --- Request/Response types ---
@@ -324,6 +332,12 @@ func (h *CollectionHandler) listMembers(w http.ResponseWriter, r *http.Request, 
 }
 
 func (h *CollectionHandler) addMember(w http.ResponseWriter, r *http.Request, collectionID string) {
+	apiKey := middleware.GetAPIKey(r.Context())
+	if apiKey == nil {
+		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	var req addMemberRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.writeError(w, "invalid request body", http.StatusBadRequest)
@@ -333,6 +347,21 @@ func (h *CollectionHandler) addMember(w http.ResponseWriter, r *http.Request, co
 	if strings.TrimSpace(req.WalletID) == "" {
 		h.writeError(w, "wallet_id is required", http.StatusBadRequest)
 		return
+	}
+
+	// Verify caller owns or has access to the wallet being added.
+	// Admins bypass this check.
+	if !apiKey.IsAdmin() {
+		authorized, err := h.callerCanAccessWallet(r.Context(), apiKey.ID, req.WalletID)
+		if err != nil {
+			h.logger.Error("failed to verify wallet access", "error", err)
+			h.writeError(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if !authorized {
+			h.writeError(w, "unauthorized to add wallet: caller does not own or have access to this wallet", http.StatusForbidden)
+			return
+		}
 	}
 
 	member := &types.CollectionMember{
@@ -355,6 +384,33 @@ func (h *CollectionHandler) addMember(w http.ResponseWriter, r *http.Request, co
 		WalletID:     member.WalletID,
 		AddedAt:      member.AddedAt.UTC().Format("2006-01-02T15:04:05Z"),
 	}, http.StatusCreated)
+}
+
+// callerCanAccessWallet checks whether the caller owns or has access to the given wallet address.
+func (h *CollectionHandler) callerCanAccessWallet(ctx context.Context, apiKeyID, walletID string) (bool, error) {
+	// Check ownership: caller is the owner of the signer
+	if h.ownershipRepo != nil {
+		ownership, err := h.ownershipRepo.Get(ctx, walletID)
+		if err == nil && ownership.OwnerID == apiKeyID && ownership.Status == types.SignerOwnershipActive {
+			return true, nil
+		}
+		if err != nil && !types.IsNotFound(err) {
+			return false, fmt.Errorf("failed to check ownership: %w", err)
+		}
+	}
+
+	// Check access: caller has a signer_access grant for this address
+	if h.accessRepo != nil {
+		hasAccess, err := h.accessRepo.HasAccess(ctx, walletID, apiKeyID)
+		if err != nil {
+			return false, fmt.Errorf("failed to check access: %w", err)
+		}
+		if hasAccess {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 func (h *CollectionHandler) removeMember(w http.ResponseWriter, r *http.Request, collectionID, walletID string) {

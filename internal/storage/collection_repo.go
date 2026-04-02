@@ -93,14 +93,27 @@ func (r *GormCollectionRepository) Update(ctx context.Context, collection *types
 }
 
 func (r *GormCollectionRepository) Delete(ctx context.Context, id string) error {
-	result := r.db.WithContext(ctx).Delete(&types.WalletCollection{}, "id = ?", id)
-	if result.Error != nil {
-		return fmt.Errorf("failed to delete collection: %w", result.Error)
-	}
-	if result.RowsAffected == 0 {
-		return types.ErrNotFound
-	}
-	return nil
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Delete all members first (CASCADE)
+		if err := tx.Where("collection_id = ?", id).Delete(&types.CollectionMember{}).Error; err != nil {
+			return fmt.Errorf("failed to delete collection members: %w", err)
+		}
+
+		// Clean up stale signer_access rows that reference this collection via wallet_id
+		if err := tx.Where("wallet_id = ?", id).Delete(&types.SignerAccess{}).Error; err != nil {
+			return fmt.Errorf("failed to clean up signer access for collection: %w", err)
+		}
+
+		// Delete the collection itself
+		result := tx.Delete(&types.WalletCollection{}, "id = ?", id)
+		if result.Error != nil {
+			return fmt.Errorf("failed to delete collection: %w", result.Error)
+		}
+		if result.RowsAffected == 0 {
+			return types.ErrNotFound
+		}
+		return nil
+	})
 }
 
 func (r *GormCollectionRepository) List(ctx context.Context, filter types.CollectionFilter) (*types.CollectionListResult, error) {

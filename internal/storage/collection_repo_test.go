@@ -19,6 +19,7 @@ func setupCollectionTestDB(t *testing.T) (*gorm.DB, *GormCollectionRepository) {
 	require.NoError(t, db.AutoMigrate(
 		&types.WalletCollection{},
 		&types.CollectionMember{},
+		&types.SignerAccess{},
 	))
 	repo, err := NewGormCollectionRepository(db)
 	require.NoError(t, err)
@@ -95,6 +96,86 @@ func TestCollectionRepo_Delete(t *testing.T) {
 
 	_, err = repo.Get(ctx, coll.ID)
 	assert.ErrorIs(t, err, types.ErrNotFound)
+}
+
+func TestCollectionRepo_Delete_CascadeMembers(t *testing.T) {
+	db, repo := setupCollectionTestDB(t)
+	ctx := context.Background()
+
+	coll := &types.WalletCollection{Name: "With Members", OwnerID: "key-1"}
+	require.NoError(t, repo.Create(ctx, coll))
+
+	// Add two members
+	require.NoError(t, repo.AddMember(ctx, &types.CollectionMember{
+		CollectionID: coll.ID,
+		WalletID:     "0xWallet1",
+	}))
+	require.NoError(t, repo.AddMember(ctx, &types.CollectionMember{
+		CollectionID: coll.ID,
+		WalletID:     "0xWallet2",
+	}))
+
+	// Verify members exist
+	members, err := repo.ListMembers(ctx, coll.ID)
+	require.NoError(t, err)
+	assert.Len(t, members, 2)
+
+	// Delete collection
+	require.NoError(t, repo.Delete(ctx, coll.ID))
+
+	// Verify collection is gone
+	_, err = repo.Get(ctx, coll.ID)
+	assert.ErrorIs(t, err, types.ErrNotFound)
+
+	// Verify members are also gone (CASCADE)
+	var count int64
+	require.NoError(t, db.Model(&types.CollectionMember{}).Where("collection_id = ?", coll.ID).Count(&count).Error)
+	assert.Equal(t, int64(0), count, "collection members should be deleted on cascade")
+}
+
+func TestCollectionRepo_Delete_CleansUpSignerAccess(t *testing.T) {
+	db, repo := setupCollectionTestDB(t)
+	ctx := context.Background()
+
+	coll := &types.WalletCollection{Name: "With Access Grants", OwnerID: "key-1"}
+	require.NoError(t, repo.Create(ctx, coll))
+
+	// Create signer_access entries that reference this collection via wallet_id
+	accessRepo, err := NewGormSignerAccessRepository(db)
+	require.NoError(t, err)
+
+	require.NoError(t, accessRepo.Grant(ctx, &types.SignerAccess{
+		SignerAddress: "0xSigner1",
+		APIKeyID:      "grantee-1",
+		GrantedBy:     "key-1",
+		WalletID:      coll.ID, // points to the collection
+	}))
+	require.NoError(t, accessRepo.Grant(ctx, &types.SignerAccess{
+		SignerAddress: "0xSigner2",
+		APIKeyID:      "grantee-2",
+		GrantedBy:     "key-1",
+		WalletID:      coll.ID, // points to the collection
+	}))
+
+	// Also create an access entry NOT tied to this collection (should survive)
+	require.NoError(t, accessRepo.Grant(ctx, &types.SignerAccess{
+		SignerAddress: "0xOtherSigner",
+		APIKeyID:      "grantee-3",
+		GrantedBy:     "key-1",
+		WalletID:      "some-other-id",
+	}))
+
+	// Delete the collection
+	require.NoError(t, repo.Delete(ctx, coll.ID))
+
+	// Verify signer_access entries referencing the collection are gone
+	var count int64
+	require.NoError(t, db.Model(&types.SignerAccess{}).Where("wallet_id = ?", coll.ID).Count(&count).Error)
+	assert.Equal(t, int64(0), count, "signer_access referencing deleted collection should be cleaned up")
+
+	// Verify unrelated signer_access is still there
+	require.NoError(t, db.Model(&types.SignerAccess{}).Where("wallet_id = ?", "some-other-id").Count(&count).Error)
+	assert.Equal(t, int64(1), count, "unrelated signer_access should not be deleted")
 }
 
 func TestCollectionRepo_Delete_NotFound(t *testing.T) {

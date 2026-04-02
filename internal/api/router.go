@@ -349,7 +349,7 @@ func (r *Router) setupRoutes() error {
 
 	// Collection routes (all authenticated users can manage their own collections)
 	if r.config.CollectionRepo != nil {
-		collectionHandler, collErr := handler.NewCollectionHandler(r.config.CollectionRepo, r.logger)
+		collectionHandler, collErr := handler.NewCollectionHandler(r.config.CollectionRepo, r.config.SignerOwnershipRepo, r.config.SignerAccessRepo, r.logger)
 		if collErr != nil {
 			return fmt.Errorf("failed to create collection handler: %w", collErr)
 		}
