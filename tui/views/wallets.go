@@ -289,10 +289,26 @@ func (m *WalletsModel) SelectedWallet() string {
 	return m.selectedWallet
 }
 
+// GetSelectedWallet returns the selected wallet object for detail view.
+func (m *WalletsModel) GetSelectedWallet() evm.Wallet {
+	for _, w := range m.wallets {
+		if w.WalletID == m.selectedWallet {
+			return w
+		}
+	}
+	return evm.Wallet{WalletID: m.selectedWallet}
+}
+
 // ClearDetailFlag clears the go-to-detail flag.
 func (m *WalletsModel) ClearDetailFlag() {
 	m.goDetail = false
 	m.selectedWallet = ""
+}
+
+// Refresh reloads the wallets list.
+func (m *WalletsModel) Refresh() tea.Cmd {
+	m.loading = true
+	return tea.Batch(m.spinner.Tick, m.fetchWallets)
 }
 
 // IsCapturingInput returns true if the view is capturing input.

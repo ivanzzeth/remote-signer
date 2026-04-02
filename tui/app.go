@@ -31,6 +31,7 @@ const (
 	ViewHDWallets
 	ViewHDWalletDetail
 	ViewWallets
+	ViewWalletDetail
 	ViewSecurity
 	ViewAPIKeys
 	ViewIPWhitelist
@@ -230,6 +231,7 @@ type Model struct {
 	hdwallets        *views.HDWalletsModel
 	hdwalletDetail   *views.HDWalletDetailModel
 	wallets          *views.WalletsModel
+	walletDetail     *views.WalletDetailModel
 	security         *views.SecurityModel
 	apikeysView      *views.APIKeysModel
 	ipWhitelistView  *views.IPWhitelistModel
@@ -308,6 +310,11 @@ func NewModel(c *client.Client) (*Model, error) {
 		return nil, fmt.Errorf("failed to create wallets view: %w", err)
 	}
 
+	walletDetail, err := views.NewWalletDetailModel(c, ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create wallet detail view: %w", err)
+	}
+
 	security, err := views.NewSecurityModel(c, ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create security view: %w", err)
@@ -357,6 +364,7 @@ func NewModel(c *client.Client) (*Model, error) {
 		hdwallets:       hdwallets,
 		hdwalletDetail:  hdwalletDetail,
 		wallets:         wallets,
+		walletDetail:    walletDetail,
 		security:        security,
 		apikeysView:     apikeysView,
 		ipWhitelistView: ipWhitelistView,
@@ -406,6 +414,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.metrics.SetSize(msg.Width, msg.Height-6)
 		m.hdwallets.SetSize(msg.Width, msg.Height-6)
 		m.hdwalletDetail.SetSize(msg.Width, msg.Height-6)
+		m.wallets.SetSize(msg.Width, msg.Height-6)
+		m.walletDetail.SetSize(msg.Width, msg.Height-6)
 		m.security.SetSize(msg.Width, msg.Height-6)
 		m.apikeysView.SetSize(msg.Width, msg.Height-6)
 		m.ipWhitelistView.SetSize(msg.Width, msg.Height-6)
@@ -534,7 +544,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 			case key.Matches(msg, keys.Back):
-				if m.currentView == ViewRequestDetail || m.currentView == ViewRuleDetail || m.currentView == ViewSignerDetail || m.currentView == ViewHDWalletDetail || m.currentView == ViewPresetDetail {
+				if m.currentView == ViewRequestDetail || m.currentView == ViewRuleDetail || m.currentView == ViewSignerDetail || m.currentView == ViewHDWalletDetail || m.currentView == ViewWalletDetail || m.currentView == ViewPresetDetail {
 					m.currentView = m.previousView
 					return m, m.refreshCurrentView()
 				}
@@ -665,6 +675,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		newWallets, cmd := m.wallets.Update(msg)
 		m.wallets = newWallets.(*views.WalletsModel)
 		cmds = append(cmds, cmd)
+
+		// Check if user selected a wallet for detail view
+		if m.wallets.ShouldShowDetail() {
+			w := m.wallets.GetSelectedWallet()
+			m.wallets.ClearDetailFlag()
+			m.previousView = m.currentView
+			m.currentView = ViewWalletDetail
+			cmds = append(cmds, m.walletDetail.LoadWallet(w))
+		}
+
+	case ViewWalletDetail:
+		newDetail, cmd := m.walletDetail.Update(msg)
+		m.walletDetail = newDetail.(*views.WalletDetailModel)
+		cmds = append(cmds, cmd)
+
+		if m.walletDetail.ShouldGoBack() {
+			m.currentView = ViewWallets
+			m.walletDetail.ResetGoBack()
+			cmds = append(cmds, m.wallets.Refresh())
+		}
 
 	case ViewSecurity:
 		newSecurity, cmd := m.security.Update(msg)
@@ -841,6 +871,8 @@ func (m Model) renderContent(_ int) string {
 		return m.hdwalletDetail.View()
 	case ViewWallets:
 		return m.wallets.View()
+	case ViewWalletDetail:
+		return m.walletDetail.View()
 	case ViewSecurity:
 		return m.security.View()
 	case ViewAPIKeys:
@@ -911,6 +943,8 @@ func (m Model) isCurrentViewCapturingInput() bool {
 		return m.hdwalletDetail.IsCapturingInput()
 	case ViewWallets:
 		return m.wallets.IsCapturingInput()
+	case ViewWalletDetail:
+		return m.walletDetail.IsCapturingInput()
 	case ViewSecurity:
 		return m.security.IsCapturingInput()
 	case ViewAPIKeys:
