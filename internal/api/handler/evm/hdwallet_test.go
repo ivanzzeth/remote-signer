@@ -212,6 +212,9 @@ func (s *stubAccessRepo) List(_ context.Context, _ string) ([]*types.SignerAcces
 	return nil, nil
 }
 func (s *stubAccessRepo) HasAccess(_ context.Context, _, _ string) (bool, error)       { return false, nil }
+func (s *stubAccessRepo) HasAccessViaWallet(_ context.Context, _, _ string) (bool, error) {
+	return false, nil
+}
 func (s *stubAccessRepo) DeleteBySigner(_ context.Context, _ string) error             { return nil }
 func (s *stubAccessRepo) DeleteByAPIKey(_ context.Context, _ string) error             { return nil }
 func (s *stubAccessRepo) ListAccessibleAddresses(_ context.Context, _ string) ([]string, error) {

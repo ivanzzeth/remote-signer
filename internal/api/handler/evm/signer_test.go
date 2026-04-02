@@ -111,6 +111,9 @@ func (s *signerStubAccessRepo) List(_ context.Context, _ string) ([]*types.Signe
 func (s *signerStubAccessRepo) HasAccess(_ context.Context, _, _ string) (bool, error) {
 	return false, nil
 }
+func (s *signerStubAccessRepo) HasAccessViaWallet(_ context.Context, _, _ string) (bool, error) {
+	return false, nil
+}
 func (s *signerStubAccessRepo) DeleteBySigner(_ context.Context, _ string) error { return nil }
 func (s *signerStubAccessRepo) DeleteByAPIKey(_ context.Context, _ string) error { return nil }
 func (s *signerStubAccessRepo) ListAccessibleAddresses(_ context.Context, _ string) ([]string, error) {

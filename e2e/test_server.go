@@ -159,6 +159,8 @@ func (ts *TestServer) Start() error {
 		&types.TokenMetadata{},
 		&types.SignerOwnership{},
 		&types.SignerAccess{},
+		&types.WalletCollection{},
+		&types.CollectionMember{},
 	); err != nil {
 		return fmt.Errorf("failed to migrate database: %w", err)
 	}
@@ -202,6 +204,11 @@ func (ts *TestServer) Start() error {
 	signerAccessRepo, err := storage.NewGormSignerAccessRepository(db)
 	if err != nil {
 		return fmt.Errorf("failed to create signer access repository: %w", err)
+	}
+
+	collectionRepo, err := storage.NewGormCollectionRepository(db)
+	if err != nil {
+		return fmt.Errorf("failed to create collection repository: %w", err)
 	}
 
 	// Initialize API keys from config if available, otherwise create test keys
@@ -603,6 +610,7 @@ func (ts *TestServer) Start() error {
 		JSEvaluator:         jsEval,
 		AuditLogger:         auditLogger,
 		Simulator:           ts.simulator,
+		CollectionRepo:      collectionRepo,
 	}
 	if ts.config.PresetsDir != "" {
 		routerConfig.PresetsDir = ts.config.PresetsDir

@@ -68,6 +68,9 @@ const (
 
 	// Signer ownership
 	PermApproveSigner Permission = "approve_signer"
+
+	// Collections
+	PermManageCollections Permission = "manage_collections"
 )
 
 // rolePermissions is the static permission matrix matching Section 2.2 of the design doc.
@@ -102,6 +105,7 @@ var rolePermissions = map[types.APIKeyRole]map[Permission]bool{
 		PermReadACLs:            true,
 		PermResumeGuard:         true,
 		PermApproveSigner:       true,
+		PermManageCollections:   true,
 	},
 	types.RoleDev: {
 		PermSignRequest:         true,
@@ -119,6 +123,7 @@ var rolePermissions = map[types.APIKeyRole]map[Permission]bool{
 		PermReadHDWallets:       true,
 		PermReadAudit:           true,
 		PermReadMetrics:         true,
+		PermManageCollections:   true,
 	},
 	types.RoleAgent: {
 		PermSignRequest:         true,
@@ -135,6 +140,7 @@ var rolePermissions = map[types.APIKeyRole]map[Permission]bool{
 		PermReadSigners:         true, // own signers only
 		PermCreateSigners:       true,
 		PermReadHDWallets:       true, // own wallets only
+		PermManageCollections:   true, // own collections only
 	},
 	types.RoleStrategy: {
 		PermSignRequest:     true,

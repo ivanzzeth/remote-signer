@@ -53,6 +53,17 @@ type HDWalletAPI interface {
 	GetSigners(ctx context.Context, primaryAddr string, chainID string, start, count uint32) ([]*RemoteSigner, error)
 }
 
+// CollectionAPI defines the wallet collection operations interface.
+type CollectionAPI interface {
+	Create(ctx context.Context, req *CreateCollectionRequest) (*Collection, error)
+	Get(ctx context.Context, id string) (*Collection, error)
+	List(ctx context.Context, filter *ListCollectionsFilter) (*ListCollectionsResponse, error)
+	Delete(ctx context.Context, id string) error
+	AddMember(ctx context.Context, collectionID string, req *AddCollectionMemberRequest) (*CollectionMember, error)
+	RemoveMember(ctx context.Context, collectionID, walletID string) error
+	ListMembers(ctx context.Context, collectionID string) (*ListCollectionMembersResponse, error)
+}
+
 // GuardAPI defines the approval guard interface.
 type GuardAPI interface {
 	Resume(ctx context.Context) error
@@ -70,5 +81,6 @@ var (
 	_ RuleAPI     = (*RuleService)(nil)
 	_ SignerAPI   = (*SignerService)(nil)
 	_ HDWalletAPI = (*HDWalletService)(nil)
-	_ GuardAPI    = (*GuardService)(nil)
+	_ GuardAPI      = (*GuardService)(nil)
+	_ CollectionAPI = (*CollectionService)(nil)
 )

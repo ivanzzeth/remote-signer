@@ -19,12 +19,13 @@ type HDWalletParentResolver interface {
 
 // SignerAccessService manages signer ownership and access control.
 type SignerAccessService struct {
-	ownershipRepo storage.SignerOwnershipRepository
-	accessRepo    storage.SignerAccessRepository
-	apiKeyRepo    storage.APIKeyRepository
-	ruleRepo      storage.RuleRepository
-	hdWalletMgrFn func() (HDWalletParentResolver, error)
-	logger        *slog.Logger
+	ownershipRepo  storage.SignerOwnershipRepository
+	accessRepo     storage.SignerAccessRepository
+	apiKeyRepo     storage.APIKeyRepository
+	ruleRepo       storage.RuleRepository
+	collectionRepo storage.CollectionRepository
+	hdWalletMgrFn  func() (HDWalletParentResolver, error)
+	logger         *slog.Logger
 }
 
 // NewSignerAccessService creates a new SignerAccessService.
@@ -61,11 +62,17 @@ func (s *SignerAccessService) SetRuleRepo(repo storage.RuleRepository) {
 	s.ruleRepo = repo
 }
 
+// SetCollectionRepo sets the collection repository for collection-based access resolution.
+func (s *SignerAccessService) SetCollectionRepo(repo storage.CollectionRepository) {
+	s.collectionRepo = repo
+}
+
 // CheckAccess returns true if the caller (identified by API key ID) can use the signer.
 // Access is granted if:
 // 1. The caller owns the signer and it is active.
 // 2. The caller has an explicit access grant and the signer is active.
 // 3. The signer is a derived HD wallet address whose parent satisfies (1) or (2).
+// 4. The signer belongs to a collection that the caller has access to (via wallet_id in signer_access).
 func (s *SignerAccessService) CheckAccess(ctx context.Context, callerKeyID, signerAddress string) (bool, error) {
 	allowed, err := s.checkDirectAccess(ctx, callerKeyID, signerAddress)
 	if err != nil {
@@ -76,20 +83,62 @@ func (s *SignerAccessService) CheckAccess(ctx context.Context, callerKeyID, sign
 	}
 
 	// Check if this is a derived address
-	if s.hdWalletMgrFn == nil {
-		return false, nil
-	}
-	hdMgr, err := s.hdWalletMgrFn()
-	if err != nil || hdMgr == nil {
-		return false, nil
+	if s.hdWalletMgrFn != nil {
+		hdMgr, hdErr := s.hdWalletMgrFn()
+		if hdErr == nil && hdMgr != nil {
+			parentAddr, found := s.findParentAddress(hdMgr, signerAddress)
+			if found {
+				parentAllowed, parentErr := s.checkDirectAccess(ctx, callerKeyID, parentAddr)
+				if parentErr != nil {
+					return false, parentErr
+				}
+				if parentAllowed {
+					return true, nil
+				}
+			}
+		}
 	}
 
-	parentAddr, found := s.findParentAddress(hdMgr, signerAddress)
-	if !found {
-		return false, nil
+	// Check collection-based access: does the signer belong to a collection
+	// that the caller has been granted access to?
+	if s.collectionRepo != nil {
+		collAllowed, collErr := s.checkCollectionAccess(ctx, callerKeyID, signerAddress)
+		if collErr != nil {
+			return false, collErr
+		}
+		if collAllowed {
+			return true, nil
+		}
 	}
 
-	return s.checkDirectAccess(ctx, callerKeyID, parentAddr)
+	return false, nil
+}
+
+// checkCollectionAccess checks if the caller has access to the signer via a collection.
+// It looks up all collections containing the signer address, then checks if the caller
+// has an access grant with wallet_id matching any of those collection IDs.
+func (s *SignerAccessService) checkCollectionAccess(ctx context.Context, callerKeyID, signerAddress string) (bool, error) {
+	collections, err := s.collectionRepo.GetCollectionsForWallet(ctx, signerAddress)
+	if err != nil {
+		return false, fmt.Errorf("failed to get collections for wallet: %w", err)
+	}
+
+	for _, coll := range collections {
+		// Check if the caller owns the collection
+		if coll.OwnerID == callerKeyID {
+			return true, nil
+		}
+		// Check if the caller has an access grant with wallet_id = collection ID
+		hasAccess, accessErr := s.accessRepo.HasAccessViaWallet(ctx, callerKeyID, coll.ID)
+		if accessErr != nil {
+			return false, fmt.Errorf("failed to check collection access: %w", accessErr)
+		}
+		if hasAccess {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 // checkDirectAccess checks ownership or explicit access for an address (not derived).

@@ -541,3 +541,84 @@ func (m *APIKeyService) Delete(ctx context.Context, id string) error {
 }
 
 var _ apikeys.API = (*APIKeyService)(nil)
+
+// CollectionService is a mock implementation of evm.CollectionAPI.
+type CollectionService struct {
+	mu               sync.RWMutex
+	CreateFunc       func(ctx context.Context, req *evm.CreateCollectionRequest) (*evm.Collection, error)
+	GetFunc          func(ctx context.Context, id string) (*evm.Collection, error)
+	ListFunc         func(ctx context.Context, filter *evm.ListCollectionsFilter) (*evm.ListCollectionsResponse, error)
+	DeleteFunc       func(ctx context.Context, id string) error
+	AddMemberFunc    func(ctx context.Context, collectionID string, req *evm.AddCollectionMemberRequest) (*evm.CollectionMember, error)
+	RemoveMemberFunc func(ctx context.Context, collectionID, walletID string) error
+	ListMembersFunc  func(ctx context.Context, collectionID string) (*evm.ListCollectionMembersResponse, error)
+	Calls            map[string][]any
+}
+
+func NewCollectionService() *CollectionService {
+	return &CollectionService{Calls: make(map[string][]any)}
+}
+
+func (m *CollectionService) recordCall(method string, args ...any) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.Calls[method] = append(m.Calls[method], args)
+}
+
+func (m *CollectionService) Create(ctx context.Context, req *evm.CreateCollectionRequest) (*evm.Collection, error) {
+	m.recordCall("Create", req)
+	if m.CreateFunc != nil {
+		return m.CreateFunc(ctx, req)
+	}
+	return &evm.Collection{}, nil
+}
+
+func (m *CollectionService) Get(ctx context.Context, id string) (*evm.Collection, error) {
+	m.recordCall("Get", id)
+	if m.GetFunc != nil {
+		return m.GetFunc(ctx, id)
+	}
+	return &evm.Collection{}, nil
+}
+
+func (m *CollectionService) List(ctx context.Context, filter *evm.ListCollectionsFilter) (*evm.ListCollectionsResponse, error) {
+	m.recordCall("List", filter)
+	if m.ListFunc != nil {
+		return m.ListFunc(ctx, filter)
+	}
+	return &evm.ListCollectionsResponse{Collections: []evm.Collection{}}, nil
+}
+
+func (m *CollectionService) Delete(ctx context.Context, id string) error {
+	m.recordCall("Delete", id)
+	if m.DeleteFunc != nil {
+		return m.DeleteFunc(ctx, id)
+	}
+	return nil
+}
+
+func (m *CollectionService) AddMember(ctx context.Context, collectionID string, req *evm.AddCollectionMemberRequest) (*evm.CollectionMember, error) {
+	m.recordCall("AddMember", collectionID, req)
+	if m.AddMemberFunc != nil {
+		return m.AddMemberFunc(ctx, collectionID, req)
+	}
+	return &evm.CollectionMember{}, nil
+}
+
+func (m *CollectionService) RemoveMember(ctx context.Context, collectionID, walletID string) error {
+	m.recordCall("RemoveMember", collectionID, walletID)
+	if m.RemoveMemberFunc != nil {
+		return m.RemoveMemberFunc(ctx, collectionID, walletID)
+	}
+	return nil
+}
+
+func (m *CollectionService) ListMembers(ctx context.Context, collectionID string) (*evm.ListCollectionMembersResponse, error) {
+	m.recordCall("ListMembers", collectionID)
+	if m.ListMembersFunc != nil {
+		return m.ListMembersFunc(ctx, collectionID)
+	}
+	return &evm.ListCollectionMembersResponse{Members: []evm.CollectionMember{}}, nil
+}
+
+var _ evm.CollectionAPI = (*CollectionService)(nil)

@@ -56,6 +56,9 @@ type RouterConfig struct {
 	// Preset API (admin-only). When PresetsDir is non-empty, GET/POST /api/v1/presets are registered.
 	PresetsDir string   // directory containing preset YAML files (resolved absolute path)
 	PresetsDB  *gorm.DB // optional: for preset apply transaction; required when PresetsDir is set and template service is used
+	// Collections
+	CollectionRepo storage.CollectionRepository // optional: for wallet collection CRUD
+
 	// Resource limits
 	MaxKeystoresPerKey int // max keystores per API key (0 = no limit, default 5)
 	MaxHDWalletsPerKey int // max HD wallets per API key (0 = no limit, default 3)
@@ -323,6 +326,9 @@ func (r *Router) setupRoutes() error {
 	// Set rule repo on access service for cascade cleanup
 	if accessService != nil {
 		accessService.SetRuleRepo(r.ruleRepo)
+		if r.config.CollectionRepo != nil {
+			accessService.SetCollectionRepo(r.config.CollectionRepo)
+		}
 	}
 
 	// API key management routes (admin only)
@@ -339,6 +345,16 @@ func (r *Router) setupRoutes() error {
 		}
 		r.mux.Handle("/api/v1/api-keys", r.withAuthAndPerm(middleware.PermManageAPIKeys, apiKeyHandler))
 		r.mux.Handle("/api/v1/api-keys/", r.withAuthAndPerm(middleware.PermManageAPIKeys, http.HandlerFunc(apiKeyHandler.ServeKeyHTTP)))
+	}
+
+	// Collection routes (all authenticated users can manage their own collections)
+	if r.config.CollectionRepo != nil {
+		collectionHandler, collErr := handler.NewCollectionHandler(r.config.CollectionRepo, r.logger)
+		if collErr != nil {
+			return fmt.Errorf("failed to create collection handler: %w", collErr)
+		}
+		r.mux.Handle("/api/v1/collections", r.withAuthAndPerm(middleware.PermManageCollections, collectionHandler))
+		r.mux.Handle("/api/v1/collections/", r.withAuthAndPerm(middleware.PermManageCollections, http.HandlerFunc(collectionHandler.ServeCollectionHTTP)))
 	}
 
 	// ACLs read-only routes (admin only): IP whitelist config
