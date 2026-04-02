@@ -17,6 +17,7 @@ type SignerAccessRepository interface {
 	Revoke(ctx context.Context, signerAddress, apiKeyID string) error
 	List(ctx context.Context, signerAddress string) ([]*types.SignerAccess, error)
 	HasAccess(ctx context.Context, signerAddress, apiKeyID string) (bool, error)
+	HasAccessViaWallet(ctx context.Context, apiKeyID, walletID string) (bool, error)
 	DeleteBySigner(ctx context.Context, signerAddress string) error
 	DeleteByAPIKey(ctx context.Context, apiKeyID string) error
 	ListAccessibleAddresses(ctx context.Context, apiKeyID string) ([]string, error)
@@ -87,6 +88,17 @@ func (r *GormSignerAccessRepository) DeleteByAPIKey(ctx context.Context, apiKeyI
 	return r.db.WithContext(ctx).
 		Where("api_key_id = ?", apiKeyID).
 		Delete(&types.SignerAccess{}).Error
+}
+
+func (r *GormSignerAccessRepository) HasAccessViaWallet(ctx context.Context, apiKeyID, walletID string) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&types.SignerAccess{}).
+		Where("api_key_id = ? AND wallet_id = ?", apiKeyID, walletID).
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 func (r *GormSignerAccessRepository) ListAccessibleAddresses(ctx context.Context, apiKeyID string) ([]string, error) {

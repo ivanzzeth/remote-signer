@@ -76,6 +76,7 @@ type SignerAccess struct {
 	SignerAddress string    `json:"signer_address" gorm:"type:varchar(42);not null;uniqueIndex:idx_signer_access_addr_key"`
 	APIKeyID      string    `json:"api_key_id" gorm:"type:varchar(64);not null;uniqueIndex:idx_signer_access_addr_key"`
 	GrantedBy     string    `json:"granted_by" gorm:"type:varchar(64);not null"`
+	WalletID      string    `json:"wallet_id,omitempty" gorm:"type:varchar(255);index"`
 	CreatedAt     time.Time `json:"created_at"`
 }
 

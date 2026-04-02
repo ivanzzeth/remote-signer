@@ -1210,7 +1210,7 @@ func (m *SignersModel) renderSigners() string {
 	var content strings.Builder
 
 	// Header
-	header := styles.SubtitleStyle.Render("Signers")
+	header := styles.SubtitleStyle.Render("All Signers")
 	if m.typeFilter != "" {
 		header += styles.MutedColor.Render(fmt.Sprintf(" (filtered: type=%s)", m.typeFilter))
 	}
@@ -1229,12 +1229,12 @@ func (m *SignersModel) renderSigners() string {
 	// Table header
 	showOwner := m.hasOwnerColumn()
 	if showOwner {
-		headerRow := fmt.Sprintf("%-44s  %-14s  %-14s  %-8s  %-20s",
-			"Address", "Type", "Status", "Enabled", "Owner")
+		headerRow := fmt.Sprintf("%-44s  %-14s  %-14s  %-8s  %-24s  %-20s",
+			"Address", "Type", "Status", "Enabled", "Parent Wallet", "Owner")
 		content.WriteString(styles.TableHeaderStyle.Render(headerRow))
 	} else {
-		headerRow := fmt.Sprintf("%-44s  %-14s  %-14s  %-8s",
-			"Address", "Type", "Status", "Enabled")
+		headerRow := fmt.Sprintf("%-44s  %-14s  %-14s  %-8s  %-24s",
+			"Address", "Type", "Status", "Enabled", "Parent Wallet")
 		content.WriteString(styles.TableHeaderStyle.Render(headerRow))
 	}
 	content.WriteString("\n")
@@ -1356,21 +1356,31 @@ func (m *SignersModel) renderSignerRow(signer evm.Signer, selected bool, showOwn
 	}
 	enabledPart := enabledStyle.Render(fmt.Sprintf("%-8s", enabled))
 
+	// Parent wallet
+	parentWallet := signer.WalletID
+	if parentWallet == "" {
+		parentWallet = "-"
+	} else if len(parentWallet) > 22 {
+		parentWallet = parentWallet[:19] + "..."
+	}
+
 	var row string
 	if showOwner {
-		row = fmt.Sprintf("%-44s  %s  %s  %s  %-20s",
+		row = fmt.Sprintf("%-44s  %s  %s  %s  %-24s  %-20s",
 			address,
 			typePart,
 			statusPart,
 			enabledPart,
+			parentWallet,
 			ownerStr,
 		)
 	} else {
-		row = fmt.Sprintf("%-44s  %s  %s  %s",
+		row = fmt.Sprintf("%-44s  %s  %s  %s  %-24s",
 			address,
 			typePart,
 			statusPart,
 			enabledPart,
+			parentWallet,
 		)
 	}
 
