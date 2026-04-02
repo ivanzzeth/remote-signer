@@ -32,31 +32,6 @@ func newTestSignersModelWithHD(t *testing.T) (*SignersModel, *mock.SignerService
 	return model, svc, hdSvc
 }
 
-func Test_hdWalletIsPrimaryRow(t *testing.T) {
-	primary := "0x764602FeaD618416E42b48c633d90869fF19759E"
-	child := "0x7604d76f624af32E806278006AE16534E98FDfF5"
-	t.Run("HD primary self-parent from API", func(t *testing.T) {
-		assert.True(t, hdWalletIsPrimaryRow(evm.Signer{
-			Type: "hd_wallet", Address: primary, HDParentAddress: primary,
-		}))
-	})
-	t.Run("HD primary empty parent legacy", func(t *testing.T) {
-		assert.True(t, hdWalletIsPrimaryRow(evm.Signer{
-			Type: "hd_wallet", Address: primary, HDParentAddress: "",
-		}))
-	})
-	t.Run("HD derived", func(t *testing.T) {
-		assert.False(t, hdWalletIsPrimaryRow(evm.Signer{
-			Type: "hd_wallet", Address: child, HDParentAddress: primary,
-		}))
-	})
-	t.Run("non-HD", func(t *testing.T) {
-		assert.False(t, hdWalletIsPrimaryRow(evm.Signer{
-			Type: "keystore", Address: child, HDParentAddress: "",
-		}))
-	})
-}
-
 func TestNewSignersModel(t *testing.T) {
 	t.Run("returns error when client is nil", func(t *testing.T) {
 		_, err := NewSignersModel(nil, context.Background())

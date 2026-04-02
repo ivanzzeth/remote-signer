@@ -73,18 +73,6 @@ func validatePassword(pw string) (errMsg string, warnMsg string) {
 	return "", ""
 }
 
-// hdWalletIsPrimaryRow returns true when s is the HD wallet root row (primary / derivation index 0).
-// The API may set hd_parent_address to the same address as s for the primary; older APIs used empty parent.
-func hdWalletIsPrimaryRow(s evm.Signer) bool {
-	if s.Type != "hd_wallet" {
-		return false
-	}
-	if s.HDParentAddress == "" {
-		return true
-	}
-	return strings.EqualFold(s.HDParentAddress, s.Address)
-}
-
 // SignersModel represents the signers list view
 type SignersModel struct {
 	signers_svc evm.SignerAPI
@@ -134,8 +122,6 @@ type SignersModel struct {
 	hdWalletIdx   int
 	indexInput    textinput.Model
 
-	// HD wallet hierarchy display
-	expandedHDWallets map[string]bool // primary address → expanded state
 }
 
 // SignersDataMsg is sent when signers data is loaded
@@ -261,7 +247,6 @@ func newSignersModelFromService(svc evm.SignerAPI, hdSvc evm.HDWalletAPI, ctx co
 		editTagsInput:      editTags,
 		unlockAttempts:     make(map[string]int),
 		unlockCooldownUtil: make(map[string]time.Time),
-		expandedHDWallets:  make(map[string]bool),
 	}, nil
 }
 
@@ -753,14 +738,6 @@ func (m *SignersModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.loading = true
 				m.actionResult = ""
 				return m, tea.Batch(m.spinner.Tick, m.lockSigner(signer.Address))
-			}
-			return m, nil
-		case " ", "space":
-			// Toggle HD wallet expansion
-			signer := m.GetSelectedSigner()
-			if signer != nil && hdWalletIsPrimaryRow(*signer) {
-				key := strings.ToLower(signer.Address)
-				m.expandedHDWallets[key] = !m.expandedHDWallets[key]
 			}
 			return m, nil
 		case "+", "a":
@@ -1262,75 +1239,16 @@ func (m *SignersModel) renderSigners() string {
 	}
 	content.WriteString("\n")
 
-	// Rows with HD wallet hierarchy
+	// Rows (flat list)
 	if len(m.signers) == 0 {
 		content.WriteString("\n")
 		content.WriteString(styles.MutedColor.Render("  No signers found"))
 	} else {
-		// Group signers: primary addresses and derived addresses
-		type displayItem struct {
-			signer   evm.Signer
-			isChild  bool
-			children []evm.Signer
-		}
-
-		primaryMap := make(map[string]int) // primary address → index in displayList
-		var displayList []displayItem
-
-		// First pass: collect all signers and group derived addresses
-		for _, s := range m.signers {
-			isDerivedHD := s.Type == "hd_wallet" && s.HDParentAddress != "" && !strings.EqualFold(s.HDParentAddress, s.Address)
-			if !isDerivedHD {
-				// Root row: keystore / private_key / HD primary (including API self-parent)
-				primaryMap[strings.ToLower(s.Address)] = len(displayList)
-				displayList = append(displayList, displayItem{signer: s, isChild: false})
-			} else {
-				// Derived HD address — attach under parent primary
-				parentKey := strings.ToLower(s.HDParentAddress)
-				if idx, ok := primaryMap[parentKey]; ok {
-					displayList[idx].children = append(displayList[idx].children, s)
-				} else {
-					// Parent not in list (filtered out?), show as standalone
-					displayList = append(displayList, displayItem{signer: s, isChild: false})
-				}
-			}
-		}
-
-		selectedAddr := ""
-		if m.selectedIdx >= 0 && m.selectedIdx < len(m.signers) {
-			selectedAddr = strings.ToLower(m.signers[m.selectedIdx].Address)
-		}
-
-		// Second pass: render with hierarchy
-		for _, item := range displayList {
-			sel := selectedAddr != "" && strings.EqualFold(selectedAddr, item.signer.Address)
-			// Render primary address
-			row := m.renderSignerRow(item.signer, sel, showOwner, 0)
+		for i, s := range m.signers {
+			selected := i == m.selectedIdx
+			row := m.renderSignerRow(s, selected, showOwner, 0)
 			content.WriteString(row)
 			content.WriteString("\n")
-
-			// Render children if HD wallet and has children
-			if item.signer.Type == "hd_wallet" && len(item.children) > 0 {
-				expanded := m.expandedHDWallets[strings.ToLower(item.signer.Address)]
-				if expanded {
-					// Show all derived addresses with indentation
-					for _, child := range item.children {
-						childSel := selectedAddr != "" && strings.EqualFold(selectedAddr, child.Address)
-						childRow := m.renderSignerRow(child, childSel, showOwner, 2)
-						content.WriteString(childRow)
-						content.WriteString("\n")
-					}
-				} else {
-					// Show collapsed indicator
-					indicator := fmt.Sprintf("  └─ %d derived address", len(item.children))
-					if len(item.children) > 1 {
-						indicator += "es"
-					}
-					indicator += " (space to expand)"
-					content.WriteString(styles.MutedColor.Render(indicator))
-					content.WriteString("\n")
-				}
-			}
 		}
 	}
 
@@ -1353,7 +1271,7 @@ func (m *SignersModel) renderSigners() string {
 
 	// Help
 	content.WriteString("\n\n")
-	helpText := "Enter: detail | ↑/↓ | Space: expand/collapse HD | u: unlock | l: lock | +/a: create | e: edit name/tags | f: type | t: tag | c: clear | n/p page | r: refresh"
+	helpText := "Enter: detail | ↑/↓ | u: unlock | l: lock | +/a: create | e: edit name/tags | f: type | t: tag | c: clear | n/p page | r: refresh"
 	content.WriteString(styles.HelpStyle.Render(helpText))
 
 	return content.String()

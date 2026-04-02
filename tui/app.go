@@ -508,7 +508,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, m.refreshCurrentView()
 				}
 				if m.currentView == ViewSigners || m.currentView == ViewHDWallets || m.currentView == ViewWallets {
-					m.signersSubTab = (m.signersSubTab + 1) % 3 // List <-> HD Wallets <-> Wallets
+					m.signersSubTab = (m.signersSubTab + 2) % 3 // prev sub-tab (0->2, 1->0, 2->1)
 					m.currentView = m.signersSubTabToView(m.signersSubTab)
 					return m, m.refreshCurrentView()
 				}
