@@ -301,6 +301,18 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 		filteredSigners = tagged
 	}
 
+	excludeHDDerived := query.Get("exclude_hd_derived") == "true" || query.Get("exclude_hd_derived") == "1"
+	if excludeHDDerived {
+		var kept []types.SignerInfo
+		for _, s := range filteredSigners {
+			if h.signerIsHDDerivedNonPrimary(s.Address) {
+				continue
+			}
+			kept = append(kept, s)
+		}
+		filteredSigners = kept
+	}
+
 	if groupByWallet {
 		// Group signers by wallet_id
 		h.listWallets(w, r, filteredSigners, requestedOffset, requestedLimit, tagFilter)
@@ -977,6 +989,24 @@ func (h *SignerHandler) newSignerResponse(ctx context.Context, s types.SignerInf
 	return resp
 }
 
+// signerIsHDDerivedNonPrimary reports whether address is an HD-derived signer (derivation index > 0).
+// Primary HD addresses use index 0; keystore/private_key and addresses missing from hierarchy are false.
+func (h *SignerHandler) signerIsHDDerivedNonPrimary(address string) bool {
+	if h.signerManager == nil {
+		return false
+	}
+	hierarchy := h.signerManager.GetHDHierarchy()
+	if len(hierarchy) == 0 {
+		return false
+	}
+	key := common.HexToAddress(address).Hex()
+	info, ok := hierarchy[key]
+	if !ok {
+		return false
+	}
+	return info.DerivationIndex > 0
+}
+
 func (h *SignerHandler) signerInfoByAddress(ctx context.Context, address string) (types.SignerInfo, error) {
 	res, err := h.signerManager.ListSigners(ctx, types.SignerFilter{Limit: 100000})
 	if err != nil {
@@ -1122,6 +1152,7 @@ func (h *SignerHandler) listWalletSigners(w http.ResponseWriter, r *http.Request
 
 	requestedOffset := 0
 	requestedLimit := 20
+	excludeHDDerived := query.Get("exclude_hd_derived") == "true" || query.Get("exclude_hd_derived") == "1"
 
 	if offsetStr := query.Get("offset"); offsetStr != "" {
 		offset, err := strconv.Atoi(offsetStr)
@@ -1200,6 +1231,9 @@ func (h *SignerHandler) listWalletSigners(w http.ResponseWriter, r *http.Request
 	var walletType string
 	for _, s := range result.Signers {
 		if !allowedSet[strings.ToLower(s.Address)] {
+			continue
+		}
+		if excludeHDDerived && h.signerIsHDDerivedNonPrimary(s.Address) {
 			continue
 		}
 		resp := h.newSignerResponse(r.Context(), s)

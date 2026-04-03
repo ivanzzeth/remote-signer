@@ -3,6 +3,7 @@ package views
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
@@ -10,9 +11,19 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/ivanzzeth/remote-signer/pkg/client"
 	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 	"github.com/ivanzzeth/remote-signer/pkg/client/mock"
 )
+
+func TestFormatHDWalletRoleLine(t *testing.T) {
+	ix0 := uint32(0)
+	ix3 := uint32(3)
+	assert.Equal(t, "", formatHDWalletRoleLine(evm.Signer{Type: "keystore"}))
+	assert.Equal(t, "HD: primary", formatHDWalletRoleLine(evm.Signer{Type: "hd_wallet", HDDerivationIndex: &ix0}))
+	assert.Equal(t, "HD: derived #3", formatHDWalletRoleLine(evm.Signer{Type: "hd_wallet", HDDerivationIndex: &ix3}))
+	assert.Equal(t, "HD: ?", formatHDWalletRoleLine(evm.Signer{Type: "hd_wallet"}))
+}
 
 func newTestSignersModel(t *testing.T) (*SignersModel, *mock.SignerService) {
 	t.Helper()
@@ -354,6 +365,7 @@ func TestSignersModel_LoadData(t *testing.T) {
 		assert.Equal(t, "keystore", capturedFilter.Type)
 		assert.Equal(t, 10, capturedFilter.Offset)
 		assert.Equal(t, 20, capturedFilter.Limit)
+		assert.True(t, capturedFilter.ExcludeHDDerived, "default should exclude HD derived via API")
 
 		dataMsg, ok := msg.(SignersDataMsg)
 		require.True(t, ok)
@@ -671,6 +683,14 @@ func TestValidatePassword(t *testing.T) {
 	})
 }
 
+func TestUnlockErrShouldCountFailedAttempt(t *testing.T) {
+	assert.False(t, unlockErrShouldCountFailedAttempt(errors.New("network")))
+	assert.False(t, unlockErrShouldCountFailedAttempt(&client.APIError{StatusCode: http.StatusForbidden}))
+	assert.False(t, unlockErrShouldCountFailedAttempt(&client.APIError{StatusCode: http.StatusNotFound}))
+	assert.False(t, unlockErrShouldCountFailedAttempt(&client.APIError{StatusCode: http.StatusConflict}))
+	assert.True(t, unlockErrShouldCountFailedAttempt(&client.APIError{StatusCode: http.StatusInternalServerError}))
+}
+
 func TestSignersModel_UnlockRateLimiting(t *testing.T) {
 	t.Run("blocks after max failed attempts", func(t *testing.T) {
 		model, svc := newTestSignersModel(t)
@@ -681,14 +701,14 @@ func TestSignersModel_UnlockRateLimiting(t *testing.T) {
 		model.selectedIdx = 0
 
 		svc.UnlockFunc = func(ctx context.Context, address string, req *evm.UnlockSignerRequest) (*evm.Signer, error) {
-			return nil, errors.New("wrong password")
+			return nil, &client.APIError{StatusCode: http.StatusInternalServerError, Code: "unlock_failed", Message: "wrong password"}
 		}
 
 		addr := model.signers[0].Address
 
-		// Simulate maxUnlockAttempts failures
+		// Simulate maxUnlockAttempts failures (API returns 500 for bad password today)
 		for i := 0; i < maxUnlockAttempts; i++ {
-			msg := SignerUnlockMsg{Address: addr, Success: false, Err: errors.New("wrong password")}
+			msg := SignerUnlockMsg{Address: addr, Success: false, Err: &client.APIError{StatusCode: http.StatusInternalServerError, Code: "unlock_failed", Message: "wrong password"}}
 			model.Update(msg)
 		}
 
