@@ -33,6 +33,9 @@ func (s *SignerService) List(ctx context.Context, filter *ListSignersFilter) (*L
 		if filter.Offset > 0 {
 			params = append(params, fmt.Sprintf("offset=%d", filter.Offset))
 		}
+		if filter.ExcludeHDDerived {
+			params = append(params, "exclude_hd_derived=true")
+		}
 	}
 
 	if len(params) > 0 {
@@ -173,6 +176,9 @@ func (s *SignerService) ListWalletSigners(ctx context.Context, walletID string, 
 		}
 		if filter.Offset > 0 {
 			params = append(params, fmt.Sprintf("offset=%d", filter.Offset))
+		}
+		if filter.ExcludeHDDerived {
+			params = append(params, "exclude_hd_derived=true")
 		}
 	}
 

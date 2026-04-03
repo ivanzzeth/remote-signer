@@ -363,6 +363,64 @@ func TestListSigners_IncludesHDParentInJSON(t *testing.T) {
 	assert.Equal(t, uint32(2), *resp.Signers[0].HDDerivationIndex)
 }
 
+// TestListSigners_ExcludeHDDerived verifies exclude_hd_derived omits derivation index > 0 from the flat list.
+func TestListSigners_ExcludeHDDerived(t *testing.T) {
+	primaryAddr := "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	derived1 := "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+	derived2 := "0xCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
+
+	sm := &signerMockSignerManager{
+		listSignersFn: func(_ context.Context, _ types.SignerFilter) (types.SignerListResult, error) {
+			return types.SignerListResult{
+				Signers: []types.SignerInfo{
+					{Address: primaryAddr, Type: string(types.SignerTypeHDWallet), Enabled: true, Locked: false},
+					{Address: derived1, Type: string(types.SignerTypeHDWallet), Enabled: true, Locked: false},
+					{Address: derived2, Type: string(types.SignerTypeHDWallet), Enabled: true, Locked: false},
+				},
+				Total: 3,
+			}, nil
+		},
+		getHDHierarchyFn: func() map[string]evmchain.HDHierarchyInfo {
+			return map[string]evmchain.HDHierarchyInfo{
+				common.HexToAddress(primaryAddr).Hex(): {ParentAddress: primaryAddr, DerivationIndex: 0},
+				common.HexToAddress(derived1).Hex():    {ParentAddress: primaryAddr, DerivationIndex: 1},
+				common.HexToAddress(derived2).Hex():    {ParentAddress: primaryAddr, DerivationIndex: 2},
+			}
+		},
+	}
+
+	ownerships := []*types.SignerOwnership{
+		{SignerAddress: primaryAddr, OwnerID: "admin-key", Status: types.SignerOwnershipActive},
+		{SignerAddress: derived1, OwnerID: "admin-key", Status: types.SignerOwnershipActive},
+		{SignerAddress: derived2, OwnerID: "admin-key", Status: types.SignerOwnershipActive},
+	}
+	accessSvc := newSignerTestAccessServiceWithOwnerships(t, ownerships)
+
+	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), false)
+	require.NoError(t, err)
+
+	adminAPIKey := &types.APIKey{
+		ID:   "admin-key",
+		Name: "admin",
+		Role: types.RoleAdmin,
+	}
+
+	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?exclude_hd_derived=true", adminAPIKey)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp ListSignersResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	require.Len(t, resp.Signers, 1)
+	assert.Equal(t, primaryAddr, resp.Signers[0].Address)
+
+	recAll := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers", adminAPIKey)
+	require.Equal(t, http.StatusOK, recAll.Code)
+
+	var respAll ListSignersResponse
+	require.NoError(t, json.NewDecoder(recAll.Body).Decode(&respAll))
+	require.Len(t, respAll.Signers, 3)
+}
+
 // TestListSigners_GroupByWallet tests group_by_wallet=true returns wallets instead of flat signer list
 func TestListSigners_GroupByWallet(t *testing.T) {
 	primaryAddr := "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"

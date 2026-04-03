@@ -117,4 +117,7 @@ type ListSignersFilter struct {
 	Tag    string
 	Offset int
 	Limit  int
+	// ExcludeHDDerived when true asks the server to omit HD-derived signers (derivation index > 0).
+	// Primary HD wallet (index 0), keystore, and private_key signers are still listed.
+	ExcludeHDDerived bool
 }

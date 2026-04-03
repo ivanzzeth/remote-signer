@@ -2,7 +2,9 @@ package views
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -73,6 +75,42 @@ func validatePassword(pw string) (errMsg string, warnMsg string) {
 	return "", ""
 }
 
+// unlockErrShouldCountFailedAttempt returns true only when the unlock failure should
+// consume a password-attempt slot (e.g. wrong password). Authorization, not-found,
+// and validation errors must not count — otherwise an attacker could burn the user's
+// attempts with 403/404 without knowing the password.
+func unlockErrShouldCountFailedAttempt(err error) bool {
+	var apiErr *client.APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	switch apiErr.StatusCode {
+	case http.StatusBadRequest,
+		http.StatusUnauthorized,
+		http.StatusForbidden,
+		http.StatusNotFound,
+		http.StatusConflict,
+		http.StatusTooManyRequests:
+		return false
+	default:
+		return true
+	}
+}
+
+// formatHDWalletRoleLine returns a short HD role hint for display (data comes from API).
+func formatHDWalletRoleLine(s evm.Signer) string {
+	if s.Type != "hd_wallet" {
+		return ""
+	}
+	if s.HDDerivationIndex == nil {
+		return "HD: ?"
+	}
+	if *s.HDDerivationIndex == 0 {
+		return "HD: primary"
+	}
+	return fmt.Sprintf("HD: derived #%d", *s.HDDerivationIndex)
+}
+
 // SignersModel represents the signers list view
 type SignersModel struct {
 	signers_svc evm.SignerAPI
@@ -93,6 +131,9 @@ type SignersModel struct {
 	filterKind  string // "type" or "tag"
 	showFilter  bool
 	filterInput textinput.Model
+
+	// excludeHDDerived mirrors GET ?exclude_hd_derived=true (server-side filter). Default true for a shorter list.
+	excludeHDDerived bool
 
 	// Edit display name / tags (owner)
 	showEditLabels bool
@@ -247,6 +288,7 @@ func newSignersModelFromService(svc evm.SignerAPI, hdSvc evm.HDWalletAPI, ctx co
 		editTagsInput:      editTags,
 		unlockAttempts:     make(map[string]int),
 		unlockCooldownUtil: make(map[string]time.Time),
+		excludeHDDerived:   true,
 	}, nil
 }
 
@@ -276,10 +318,11 @@ func (m *SignersModel) Refresh() tea.Cmd {
 func (m *SignersModel) loadData() tea.Cmd {
 	return func() tea.Msg {
 		filter := &evm.ListSignersFilter{
-			Type:   m.typeFilter,
-			Tag:    m.tagFilter,
-			Limit:  m.limit,
-			Offset: m.offset,
+			Type:             m.typeFilter,
+			Tag:              m.tagFilter,
+			Limit:            m.limit,
+			Offset:           m.offset,
+			ExcludeHDDerived: m.excludeHDDerived,
 		}
 
 		resp, err := m.signers_svc.List(m.ctx, filter)
@@ -441,9 +484,11 @@ func (m *SignersModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SignerUnlockMsg:
 		m.loading = false
 		if msg.Err != nil {
-			// Security: track failed attempts for rate limiting
-			m.unlockAttempts[msg.Address]++
-			if m.unlockAttempts[msg.Address] >= maxUnlockAttempts {
+			countAttempt := unlockErrShouldCountFailedAttempt(msg.Err)
+			if countAttempt {
+				m.unlockAttempts[msg.Address]++
+			}
+			if countAttempt && m.unlockAttempts[msg.Address] >= maxUnlockAttempts {
 				m.unlockCooldownUtil[msg.Address] = time.Now().Add(unlockCooldownDuration)
 				m.unlockAttempts[msg.Address] = 0
 				m.showUnlock = false
@@ -451,11 +496,13 @@ func (m *SignersModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					fmt.Sprintf("Too many failed attempts for %s. Locked for %s",
 						msg.Address, unlockCooldownDuration),
 				)
-			} else {
+			} else if countAttempt {
 				remaining := maxUnlockAttempts - m.unlockAttempts[msg.Address]
 				m.actionResult = styles.ErrorStyle.Render(
 					fmt.Sprintf("Error: %v (%d attempts remaining)", msg.Err, remaining),
 				)
+			} else {
+				m.actionResult = styles.ErrorStyle.Render(fmt.Sprintf("Error: %v", msg.Err))
 			}
 		} else {
 			// Success: clear rate limit state
@@ -624,6 +671,11 @@ func (m *SignersModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Normal key handling
 		switch msg.String() {
 		case "r":
+			return m, m.Refresh()
+		case "d":
+			m.excludeHDDerived = !m.excludeHDDerived
+			m.offset = 0
+			m.selectedIdx = 0
 			return m, m.Refresh()
 		case "f":
 			m.showFilter = true
@@ -1217,6 +1269,11 @@ func (m *SignersModel) renderSigners() string {
 	if m.tagFilter != "" {
 		header += styles.MutedColor.Render(fmt.Sprintf(" (tag=%s)", m.tagFilter))
 	}
+	if m.excludeHDDerived {
+		header += styles.MutedColor.Render(" · HD derived hidden")
+	} else {
+		header += styles.MutedColor.Render(" · all HD signers")
+	}
 	content.WriteString(header)
 	content.WriteString("\n\n")
 
@@ -1271,7 +1328,7 @@ func (m *SignersModel) renderSigners() string {
 
 	// Help
 	content.WriteString("\n\n")
-	helpText := "Enter: detail | ↑/↓ | u: unlock | l: lock | +/a: create | e: edit name/tags | f: type | t: tag | c: clear | n/p page | r: refresh"
+	helpText := "Enter: detail | ↑/↓ | u: unlock | l: lock | +/a: create | e: edit name/tags | d: toggle HD derived | f: type | t: tag | c: clear | n/p page | r: refresh"
 	content.WriteString(styles.HelpStyle.Render(helpText))
 
 	return content.String()
@@ -1384,8 +1441,15 @@ func (m *SignersModel) renderSignerRow(signer evm.Signer, selected bool, showOwn
 		)
 	}
 
+	var metaParts []string
 	if sum := HumanLabelLine(signer.DisplayName, signer.Tags); sum != "" {
-		row += "\n  " + styles.MutedColor.Render(sum)
+		metaParts = append(metaParts, sum)
+	}
+	if hd := formatHDWalletRoleLine(signer); hd != "" {
+		metaParts = append(metaParts, hd)
+	}
+	if len(metaParts) > 0 {
+		row += "\n  " + styles.MutedColor.Render(strings.Join(metaParts, " | "))
 	}
 
 	if selected {
