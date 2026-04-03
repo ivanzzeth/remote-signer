@@ -120,7 +120,7 @@ func TestWalletMemberManagement(t *testing.T) {
 	assert.GreaterOrEqual(t, len(members.Members), 1)
 	found := false
 	for _, m := range members.Members {
-		if m.WalletID == walletID {
+		if m.SignerAddress == walletID {
 			found = true
 			break
 		}
@@ -331,10 +331,10 @@ func TestWalletMemberTypes_KeystoreAndHDWallet(t *testing.T) {
 	foundKeystore := false
 	foundHD := false
 	for _, m := range members.Members {
-		if m.WalletID == keystoreWalletID {
+		if m.SignerAddress == keystoreWalletID {
 			foundKeystore = true
 		}
-		if m.WalletID == hdWalletID {
+		if m.SignerAddress == hdWalletID {
 			foundHD = true
 		}
 	}
