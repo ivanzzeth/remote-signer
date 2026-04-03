@@ -66,8 +66,8 @@ func NewDB(cfg Config) (*gorm.DB, error) {
 		&types.TokenMetadata{},
 		&types.SignerOwnership{},
 		&types.SignerAccess{},
-		&types.WalletCollection{},
-		&types.CollectionMember{},
+		&types.Wallet{},
+		&types.WalletMember{},
 	); err != nil {
 		return nil, fmt.Errorf("failed to auto-migrate: %w", err)
 	}
@@ -108,8 +108,8 @@ func NewDBWithLogger(cfg Config, logLevel logger.LogLevel) (*gorm.DB, error) {
 		&types.TokenMetadata{},
 		&types.SignerOwnership{},
 		&types.SignerAccess{},
-		&types.WalletCollection{},
-		&types.CollectionMember{},
+		&types.Wallet{},
+		&types.WalletMember{},
 	); err != nil {
 		return nil, fmt.Errorf("failed to auto-migrate: %w", err)
 	}

@@ -14,23 +14,23 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
-// CollectionHandler handles wallet collection CRUD endpoints.
-type CollectionHandler struct {
-	repo          storage.CollectionRepository
+// WalletHandler handles wallet CRUD endpoints.
+type WalletHandler struct {
+	repo          storage.WalletRepository
 	ownershipRepo storage.SignerOwnershipRepository
 	accessRepo    storage.SignerAccessRepository
 	logger        *slog.Logger
 }
 
-// NewCollectionHandler creates a new collection handler.
-func NewCollectionHandler(repo storage.CollectionRepository, ownershipRepo storage.SignerOwnershipRepository, accessRepo storage.SignerAccessRepository, logger *slog.Logger) (*CollectionHandler, error) {
+// NewWalletHandler creates a new wallet handler.
+func NewWalletHandler(repo storage.WalletRepository, ownershipRepo storage.SignerOwnershipRepository, accessRepo storage.SignerAccessRepository, logger *slog.Logger) (*WalletHandler, error) {
 	if repo == nil {
-		return nil, fmt.Errorf("collection repository is required")
+		return nil, fmt.Errorf("wallet repository is required")
 	}
 	if logger == nil {
 		return nil, fmt.Errorf("logger is required")
 	}
-	return &CollectionHandler{
+	return &WalletHandler{
 		repo:          repo,
 		ownershipRepo: ownershipRepo,
 		accessRepo:    accessRepo,
@@ -40,21 +40,22 @@ func NewCollectionHandler(repo storage.CollectionRepository, ownershipRepo stora
 
 // --- Request/Response types ---
 
-type createCollectionRequest struct {
+type createWalletRequest struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 }
 
-type updateCollectionRequest struct {
+type updateWalletRequest struct {
 	Name        *string `json:"name,omitempty"`
 	Description *string `json:"description,omitempty"`
 }
 
 type addMemberRequest struct {
-	WalletID string `json:"wallet_id"`
+	SignerAddress string `json:"signer_address"`
+	WalletID      string `json:"wallet_id,omitempty"`
 }
 
-type collectionResponse struct {
+type walletResponse struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
@@ -63,16 +64,16 @@ type collectionResponse struct {
 	UpdatedAt   string `json:"updated_at"`
 }
 
-type collectionListResponse struct {
-	Collections []collectionResponse `json:"collections"`
+type walletListResponse struct {
+	Wallets []walletResponse `json:"wallets"`
 	Total       int                  `json:"total"`
 	HasMore     bool                 `json:"has_more"`
 }
 
 type memberResponse struct {
-	CollectionID string `json:"collection_id"`
-	WalletID     string `json:"wallet_id"`
-	AddedAt      string `json:"added_at"`
+	WalletID      string `json:"wallet_id"`
+	SignerAddress string `json:"signer_address"`
+	AddedAt       string `json:"added_at"`
 }
 
 type membersListResponse struct {
@@ -81,65 +82,65 @@ type membersListResponse struct {
 
 // --- Handler entry points ---
 
-// ServeHTTP handles /api/v1/collections (list, create).
-func (h *CollectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+// ServeHTTP handles /api/v1/wallets (list, create).
+func (h *WalletHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		h.listCollections(w, r)
+		h.listWallets(w, r)
 	case http.MethodPost:
-		h.createCollection(w, r)
+		h.createWallet(w, r)
 	default:
 		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 
-// ServeCollectionHTTP handles /api/v1/collections/{id} and /api/v1/collections/{id}/members[/{walletID}]
-func (h *CollectionHandler) ServeCollectionHTTP(w http.ResponseWriter, r *http.Request) {
-	// Parse: /api/v1/collections/{id}[/members[/{walletID}]]
-	path := strings.TrimPrefix(r.URL.Path, "/api/v1/collections/")
+// ServeWalletHTTP handles /api/v1/wallets/{id} and /api/v1/wallets/{id}/members[/{signerAddress}]
+func (h *WalletHandler) ServeWalletHTTP(w http.ResponseWriter, r *http.Request) {
+	// Parse: /api/v1/wallets/{id}[/members[/{signerAddress}]]
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/wallets/")
 	path = strings.TrimSuffix(path, "/")
 
 	parts := strings.SplitN(path, "/", 3)
 	if len(parts) < 1 || parts[0] == "" {
-		h.writeError(w, "collection ID required", http.StatusBadRequest)
+		h.writeError(w, "wallet ID required", http.StatusBadRequest)
 		return
 	}
 
-	collectionID := parts[0]
+	walletID := parts[0]
 
-	// Verify the collection exists and the caller owns it
+	// Verify the wallet exists and the caller owns it
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
 		h.writeError(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	collection, err := h.repo.Get(r.Context(), collectionID)
+	wallet, err := h.repo.Get(r.Context(), walletID)
 	if err != nil {
 		if types.IsNotFound(err) {
-			h.writeError(w, "collection not found", http.StatusNotFound)
+			h.writeError(w, "wallet not found", http.StatusNotFound)
 			return
 		}
-		h.logger.Error("failed to get collection", "error", err)
+		h.logger.Error("failed to get wallet", "error", err)
 		h.writeError(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
 	// Only owner or admin can access
-	if collection.OwnerID != apiKey.ID && !apiKey.IsAdmin() {
-		h.writeError(w, "collection not found", http.StatusNotFound)
+	if wallet.OwnerID != apiKey.ID && !apiKey.IsAdmin() {
+		h.writeError(w, "wallet not found", http.StatusNotFound)
 		return
 	}
 
 	if len(parts) == 1 {
-		// /api/v1/collections/{id}
+		// /api/v1/wallets/{id}
 		switch r.Method {
 		case http.MethodGet:
-			h.getCollection(w, collection)
+			h.getWallet(w, wallet)
 		case http.MethodPatch:
-			h.updateCollection(w, r, collection)
+			h.updateWallet(w, r, wallet)
 		case http.MethodDelete:
-			h.deleteCollection(w, r, collectionID)
+			h.deleteWallet(w, r, walletID)
 		default:
 			h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
@@ -148,23 +149,23 @@ func (h *CollectionHandler) ServeCollectionHTTP(w http.ResponseWriter, r *http.R
 
 	if parts[1] == "members" {
 		if len(parts) == 2 {
-			// /api/v1/collections/{id}/members
+			// /api/v1/wallets/{id}/members
 			switch r.Method {
 			case http.MethodGet:
-				h.listMembers(w, r, collectionID)
+				h.listMembers(w, r, walletID)
 			case http.MethodPost:
-				h.addMember(w, r, collectionID)
+				h.addMember(w, r, walletID)
 			default:
 				h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
 			}
 			return
 		}
 		if len(parts) == 3 {
-			// /api/v1/collections/{id}/members/{walletID}
-			walletID := parts[2]
+			// /api/v1/wallets/{id}/members/{signerAddress}
+			signerAddress := parts[2]
 			switch r.Method {
 			case http.MethodDelete:
-				h.removeMember(w, r, collectionID, walletID)
+				h.removeMember(w, r, walletID, signerAddress)
 			default:
 				h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
 			}
@@ -177,14 +178,14 @@ func (h *CollectionHandler) ServeCollectionHTTP(w http.ResponseWriter, r *http.R
 
 // --- CRUD operations ---
 
-func (h *CollectionHandler) createCollection(w http.ResponseWriter, r *http.Request) {
+func (h *WalletHandler) createWallet(w http.ResponseWriter, r *http.Request) {
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
 		h.writeError(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	var req createCollectionRequest
+	var req createWalletRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.writeError(w, "invalid request body", http.StatusBadRequest)
 		return
@@ -195,32 +196,32 @@ func (h *CollectionHandler) createCollection(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	collection := &types.WalletCollection{
+	wallet := &types.Wallet{
 		Name:        strings.TrimSpace(req.Name),
 		Description: req.Description,
 		OwnerID:     apiKey.ID,
 	}
 
-	if err := h.repo.Create(r.Context(), collection); err != nil {
-		h.logger.Error("failed to create collection", "error", err)
-		h.writeError(w, "failed to create collection", http.StatusInternalServerError)
+	if err := h.repo.Create(r.Context(), wallet); err != nil {
+		h.logger.Error("failed to create wallet", "error", err)
+		h.writeError(w, "failed to create wallet", http.StatusInternalServerError)
 		return
 	}
 
-	h.writeJSON(w, h.toResponse(collection), http.StatusCreated)
+	h.writeJSON(w, h.toResponse(wallet), http.StatusCreated)
 }
 
-func (h *CollectionHandler) listCollections(w http.ResponseWriter, r *http.Request) {
+func (h *WalletHandler) listWallets(w http.ResponseWriter, r *http.Request) {
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
 		h.writeError(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	filter := types.CollectionFilter{
+	filter := types.WalletFilter{
 		OwnerID: apiKey.ID,
 	}
-	// Admin can see all collections
+	// Admin can see all wallets
 	if apiKey.IsAdmin() {
 		if ownerFilter := r.URL.Query().Get("owner_id"); ownerFilter != "" {
 			filter.OwnerID = ownerFilter
@@ -244,29 +245,29 @@ func (h *CollectionHandler) listCollections(w http.ResponseWriter, r *http.Reque
 
 	result, err := h.repo.List(r.Context(), filter)
 	if err != nil {
-		h.logger.Error("failed to list collections", "error", err)
-		h.writeError(w, "failed to list collections", http.StatusInternalServerError)
+		h.logger.Error("failed to list wallets", "error", err)
+		h.writeError(w, "failed to list wallets", http.StatusInternalServerError)
 		return
 	}
 
-	resp := collectionListResponse{
-		Collections: make([]collectionResponse, 0, len(result.Collections)),
+	resp := walletListResponse{
+		Wallets: make([]walletResponse, 0, len(result.Wallets)),
 		Total:       result.Total,
 		HasMore:     result.HasMore,
 	}
-	for i := range result.Collections {
-		resp.Collections = append(resp.Collections, h.toResponse(&result.Collections[i]))
+	for i := range result.Wallets {
+		resp.Wallets = append(resp.Wallets, h.toResponse(&result.Wallets[i]))
 	}
 
 	h.writeJSON(w, resp, http.StatusOK)
 }
 
-func (h *CollectionHandler) getCollection(w http.ResponseWriter, collection *types.WalletCollection) {
-	h.writeJSON(w, h.toResponse(collection), http.StatusOK)
+func (h *WalletHandler) getWallet(w http.ResponseWriter, wallet *types.Wallet) {
+	h.writeJSON(w, h.toResponse(wallet), http.StatusOK)
 }
 
-func (h *CollectionHandler) updateCollection(w http.ResponseWriter, r *http.Request, collection *types.WalletCollection) {
-	var req updateCollectionRequest
+func (h *WalletHandler) updateWallet(w http.ResponseWriter, r *http.Request, wallet *types.Wallet) {
+	var req updateWalletRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.writeError(w, "invalid request body", http.StatusBadRequest)
 		return
@@ -278,29 +279,29 @@ func (h *CollectionHandler) updateCollection(w http.ResponseWriter, r *http.Requ
 			h.writeError(w, "name cannot be empty", http.StatusBadRequest)
 			return
 		}
-		collection.Name = name
+		wallet.Name = name
 	}
 	if req.Description != nil {
-		collection.Description = *req.Description
+		wallet.Description = *req.Description
 	}
 
-	if err := h.repo.Update(r.Context(), collection); err != nil {
-		h.logger.Error("failed to update collection", "error", err)
-		h.writeError(w, "failed to update collection", http.StatusInternalServerError)
+	if err := h.repo.Update(r.Context(), wallet); err != nil {
+		h.logger.Error("failed to update wallet", "error", err)
+		h.writeError(w, "failed to update wallet", http.StatusInternalServerError)
 		return
 	}
 
-	h.writeJSON(w, h.toResponse(collection), http.StatusOK)
+	h.writeJSON(w, h.toResponse(wallet), http.StatusOK)
 }
 
-func (h *CollectionHandler) deleteCollection(w http.ResponseWriter, r *http.Request, collectionID string) {
-	if err := h.repo.Delete(r.Context(), collectionID); err != nil {
+func (h *WalletHandler) deleteWallet(w http.ResponseWriter, r *http.Request, walletID string) {
+	if err := h.repo.Delete(r.Context(), walletID); err != nil {
 		if types.IsNotFound(err) {
-			h.writeError(w, "collection not found", http.StatusNotFound)
+			h.writeError(w, "wallet not found", http.StatusNotFound)
 			return
 		}
-		h.logger.Error("failed to delete collection", "error", err)
-		h.writeError(w, "failed to delete collection", http.StatusInternalServerError)
+		h.logger.Error("failed to delete wallet", "error", err)
+		h.writeError(w, "failed to delete wallet", http.StatusInternalServerError)
 		return
 	}
 
@@ -309,8 +310,8 @@ func (h *CollectionHandler) deleteCollection(w http.ResponseWriter, r *http.Requ
 
 // --- Member operations ---
 
-func (h *CollectionHandler) listMembers(w http.ResponseWriter, r *http.Request, collectionID string) {
-	members, err := h.repo.ListMembers(r.Context(), collectionID)
+func (h *WalletHandler) listMembers(w http.ResponseWriter, r *http.Request, walletID string) {
+	members, err := h.repo.ListMembers(r.Context(), walletID)
 	if err != nil {
 		h.logger.Error("failed to list members", "error", err)
 		h.writeError(w, "failed to list members", http.StatusInternalServerError)
@@ -322,16 +323,16 @@ func (h *CollectionHandler) listMembers(w http.ResponseWriter, r *http.Request, 
 	}
 	for _, m := range members {
 		resp.Members = append(resp.Members, memberResponse{
-			CollectionID: m.CollectionID,
-			WalletID:     m.WalletID,
-			AddedAt:      m.AddedAt.UTC().Format("2006-01-02T15:04:05Z"),
+			WalletID:      m.SignerAddress,
+			SignerAddress: m.SignerAddress,
+			AddedAt:       m.AddedAt.UTC().Format("2006-01-02T15:04:05Z"),
 		})
 	}
 
 	h.writeJSON(w, resp, http.StatusOK)
 }
 
-func (h *CollectionHandler) addMember(w http.ResponseWriter, r *http.Request, collectionID string) {
+func (h *WalletHandler) addMember(w http.ResponseWriter, r *http.Request, walletID string) {
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
 		h.writeError(w, "unauthorized", http.StatusUnauthorized)
@@ -344,33 +345,36 @@ func (h *CollectionHandler) addMember(w http.ResponseWriter, r *http.Request, co
 		return
 	}
 
-	if strings.TrimSpace(req.WalletID) == "" {
-		h.writeError(w, "wallet_id is required", http.StatusBadRequest)
+	if strings.TrimSpace(req.SignerAddress) == "" {
+		req.SignerAddress = strings.TrimSpace(req.WalletID)
+	}
+	if strings.TrimSpace(req.SignerAddress) == "" {
+		h.writeError(w, "signer_address is required", http.StatusBadRequest)
 		return
 	}
 
 	// Verify caller owns or has access to the wallet being added.
 	// Admins bypass this check.
 	if !apiKey.IsAdmin() {
-		authorized, err := h.callerCanAccessWallet(r.Context(), apiKey.ID, req.WalletID)
+		authorized, err := h.callerCanAccessWallet(r.Context(), apiKey.ID, req.SignerAddress)
 		if err != nil {
 			h.logger.Error("failed to verify wallet access", "error", err)
 			h.writeError(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 		if !authorized {
-			h.writeError(w, "unauthorized to add wallet: caller does not own or have access to this wallet", http.StatusForbidden)
+			h.writeError(w, "unauthorized to add signer: caller does not own or have access to this signer", http.StatusForbidden)
 			return
 		}
 	}
 
-	member := &types.CollectionMember{
-		CollectionID: collectionID,
-		WalletID:     req.WalletID,
+	member := &types.WalletMember{
+		WalletID:      walletID,
+		SignerAddress: req.SignerAddress,
 	}
 
 	if err := h.repo.AddMember(r.Context(), member); err != nil {
-		if strings.Contains(err.Error(), "nested collections are not allowed") {
+		if strings.Contains(err.Error(), "nested wallets are not allowed") {
 			h.writeError(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -380,14 +384,14 @@ func (h *CollectionHandler) addMember(w http.ResponseWriter, r *http.Request, co
 	}
 
 	h.writeJSON(w, memberResponse{
-		CollectionID: member.CollectionID,
-		WalletID:     member.WalletID,
-		AddedAt:      member.AddedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		WalletID:      member.SignerAddress,
+		SignerAddress: member.SignerAddress,
+		AddedAt:       member.AddedAt.UTC().Format("2006-01-02T15:04:05Z"),
 	}, http.StatusCreated)
 }
 
 // callerCanAccessWallet checks whether the caller owns or has access to the given wallet address.
-func (h *CollectionHandler) callerCanAccessWallet(ctx context.Context, apiKeyID, walletID string) (bool, error) {
+func (h *WalletHandler) callerCanAccessWallet(ctx context.Context, apiKeyID, walletID string) (bool, error) {
 	// Check ownership: caller is the owner of the signer
 	if h.ownershipRepo != nil {
 		ownership, err := h.ownershipRepo.Get(ctx, walletID)
@@ -413,8 +417,8 @@ func (h *CollectionHandler) callerCanAccessWallet(ctx context.Context, apiKeyID,
 	return false, nil
 }
 
-func (h *CollectionHandler) removeMember(w http.ResponseWriter, r *http.Request, collectionID, walletID string) {
-	if err := h.repo.RemoveMember(r.Context(), collectionID, walletID); err != nil {
+func (h *WalletHandler) removeMember(w http.ResponseWriter, r *http.Request, walletID, signerAddress string) {
+	if err := h.repo.RemoveMember(r.Context(), walletID, signerAddress); err != nil {
 		if types.IsNotFound(err) {
 			h.writeError(w, "member not found", http.StatusNotFound)
 			return
@@ -429,8 +433,8 @@ func (h *CollectionHandler) removeMember(w http.ResponseWriter, r *http.Request,
 
 // --- Helpers ---
 
-func (h *CollectionHandler) toResponse(c *types.WalletCollection) collectionResponse {
-	return collectionResponse{
+func (h *WalletHandler) toResponse(c *types.Wallet) walletResponse {
+	return walletResponse{
 		ID:          c.ID,
 		Name:        c.Name,
 		Description: c.Description,
@@ -440,14 +444,14 @@ func (h *CollectionHandler) toResponse(c *types.WalletCollection) collectionResp
 	}
 }
 
-func (h *CollectionHandler) writeJSON(w http.ResponseWriter, data interface{}, status int) {
+func (h *WalletHandler) writeJSON(w http.ResponseWriter, data interface{}, status int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	// #nosec G104 -- HTTP response write error cannot be meaningfully handled
 	json.NewEncoder(w).Encode(data)
 }
 
-func (h *CollectionHandler) writeError(w http.ResponseWriter, message string, status int) {
+func (h *WalletHandler) writeError(w http.ResponseWriter, message string, status int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	// #nosec G104 -- HTTP response write error cannot be meaningfully handled

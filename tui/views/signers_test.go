@@ -758,3 +758,33 @@ func TestSignersModel_UnlockRateLimiting(t *testing.T) {
 	})
 }
 
+func TestSignersModel_shiftD_opensDeleteConfirm(t *testing.T) {
+	m, _ := newTestSignersModel(t)
+	m.loading = false
+	m.signers = []evm.Signer{{Address: "0xabc", Type: "keystore"}}
+	m.selectedIdx = 0
+
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}})
+	wm := out.(*SignersModel)
+	assert.True(t, wm.showDeleteSigner)
+	assert.True(t, wm.IsCapturingInput())
+}
+
+func TestSignersModel_deleteSignerCmd(t *testing.T) {
+	svc := mock.NewSignerService()
+	var gotAddr string
+	svc.DeleteFunc = func(ctx context.Context, address string) error {
+		gotAddr = address
+		return nil
+	}
+	m, err := newSignersModelFromService(svc, mock.NewHDWalletService(), context.Background())
+	require.NoError(t, err)
+
+	cmd := m.deleteSigner("0xdead")
+	raw := cmd()
+	msg, ok := raw.(SignerDeleteMsg)
+	require.True(t, ok)
+	assert.NoError(t, msg.Err)
+	assert.Equal(t, "0xdead", gotAddr)
+}
+

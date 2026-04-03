@@ -182,7 +182,7 @@ func (h *RuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path = strings.TrimPrefix(path, "/")
 
 	if path == "" {
-		// Collection operations: GET /api/v1/evm/rules or POST /api/v1/evm/rules
+		// Wallet operations: GET /api/v1/evm/rules or POST /api/v1/evm/rules
 		switch r.Method {
 		case http.MethodGet:
 			h.listRules(w, r)

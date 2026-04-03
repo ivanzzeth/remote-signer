@@ -147,6 +147,9 @@ type SignersModel struct {
 	unlockAttempts     map[string]int       // address → failed attempt count
 	unlockCooldownUtil map[string]time.Time // address → cooldown expiry
 
+	// Delete signer (Shift+D)
+	showDeleteSigner bool
+
 	// Create signer state
 	showCreate    bool
 	createStep    int // 0: select type, 1: enter password (keystore) or loading wallets (hd), 2: confirm (keystore) or pick wallet (hd), 3: enter index (hd)
@@ -215,6 +218,14 @@ type SignerHDDeriveMsg struct {
 // SignerLabelsPatchMsg is sent when signer labels are updated via PATCH.
 type SignerLabelsPatchMsg struct {
 	Signer  *evm.Signer
+	Success bool
+	Message string
+	Err     error
+}
+
+// SignerDeleteMsg is sent when a signer delete completes.
+type SignerDeleteMsg struct {
+	Address string
 	Success bool
 	Message string
 	Err     error
@@ -387,6 +398,20 @@ func (m *SignersModel) lockSigner(address string) tea.Cmd {
 	}
 }
 
+func (m *SignersModel) deleteSigner(address string) tea.Cmd {
+	return func() tea.Msg {
+		err := m.signers_svc.DeleteSigner(m.ctx, address)
+		if err != nil {
+			return SignerDeleteMsg{Address: address, Err: err}
+		}
+		return SignerDeleteMsg{
+			Address: address,
+			Success: true,
+			Message: fmt.Sprintf("Deleted signer %s", address),
+		}
+	}
+}
+
 func (m *SignersModel) loadHDWallets() tea.Cmd {
 	return func() tea.Msg {
 		if m.hdwallets_svc == nil {
@@ -548,6 +573,17 @@ func (m *SignersModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case SignerDeleteMsg:
+		m.loading = false
+		if msg.Err != nil {
+			m.actionResult = styles.ErrorStyle.Render(fmt.Sprintf("Error: %v", msg.Err))
+		} else {
+			m.actionResult = styles.SuccessStyle.Render(msg.Message)
+			m.selectedIdx = 0
+			return m, m.Refresh()
+		}
+		return m, nil
+
 	case spinner.TickMsg:
 		if m.loading {
 			var cmd tea.Cmd
@@ -668,10 +704,35 @@ func (m *SignersModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// Delete signer confirmation (Shift+D)
+		if m.showDeleteSigner {
+			switch msg.String() {
+			case "y", "Y":
+				m.showDeleteSigner = false
+				sel := m.GetSelectedSigner()
+				if sel != nil {
+					m.loading = true
+					m.actionResult = ""
+					return m, tea.Batch(m.spinner.Tick, m.deleteSigner(sel.Address))
+				}
+				return m, nil
+			case "n", "N", "esc":
+				m.showDeleteSigner = false
+				return m, nil
+			}
+			return m, nil
+		}
+
 		// Normal key handling
 		switch msg.String() {
 		case "r":
 			return m, m.Refresh()
+		case "D":
+			sel := m.GetSelectedSigner()
+			if sel != nil {
+				m.showDeleteSigner = true
+			}
+			return m, nil
 		case "d":
 			m.excludeHDDerived = !m.excludeHDDerived
 			m.offset = 0
@@ -996,6 +1057,10 @@ func (m *SignersModel) View() string {
 		return m.renderEditLabelsForm()
 	}
 
+	if m.showDeleteSigner {
+		return m.renderSignerDeleteConfirm()
+	}
+
 	if m.loading {
 		return m.renderLoading()
 	}
@@ -1005,6 +1070,40 @@ func (m *SignersModel) View() string {
 	}
 
 	return m.renderSigners()
+}
+
+func (m *SignersModel) renderSignerDeleteConfirm() string {
+	var content strings.Builder
+	content.WriteString(styles.TitleStyle.Render("Delete Signer"))
+	content.WriteString("\n\n")
+
+	sel := m.GetSelectedSigner()
+	if sel != nil {
+		content.WriteString(fmt.Sprintf("Address: %s\n", sel.Address))
+		content.WriteString(fmt.Sprintf("Type: %s\n", sel.Type))
+		if sel.Type == "hd_wallet" {
+			content.WriteString("\n")
+			content.WriteString(styles.WarningStyle.Render(
+				"HD wallet: deleting removes the wallet file and all derivation state. This cannot be undone.",
+			))
+			content.WriteString("\n")
+		}
+	}
+
+	content.WriteString("\n")
+	content.WriteString(styles.ErrorStyle.Render("Permanently delete this signer? (owner only)"))
+	content.WriteString("\n\n")
+	content.WriteString(styles.ButtonDangerStyle.Render(" [y] Yes, Delete "))
+	content.WriteString("  ")
+	content.WriteString(styles.ButtonStyle.Render(" [n] No, Cancel "))
+
+	return lipgloss.Place(
+		m.width,
+		m.height,
+		lipgloss.Center,
+		lipgloss.Center,
+		styles.BoxStyle.Render(content.String()),
+	)
 }
 
 func (m *SignersModel) renderLoading() string {
@@ -1287,11 +1386,11 @@ func (m *SignersModel) renderSigners() string {
 	showOwner := m.hasOwnerColumn()
 	if showOwner {
 		headerRow := fmt.Sprintf("%-44s  %-14s  %-14s  %-8s  %-24s  %-20s",
-			"Address", "Type", "Status", "Enabled", "Parent Wallet", "Owner")
+			"Address", "Type", "Status", "Enabled", "HD Parent", "Owner")
 		content.WriteString(styles.TableHeaderStyle.Render(headerRow))
 	} else {
 		headerRow := fmt.Sprintf("%-44s  %-14s  %-14s  %-8s  %-24s",
-			"Address", "Type", "Status", "Enabled", "Parent Wallet")
+			"Address", "Type", "Status", "Enabled", "HD Parent")
 		content.WriteString(styles.TableHeaderStyle.Render(headerRow))
 	}
 	content.WriteString("\n")
@@ -1328,7 +1427,7 @@ func (m *SignersModel) renderSigners() string {
 
 	// Help
 	content.WriteString("\n\n")
-	helpText := "Enter: detail | ↑/↓ | u: unlock | l: lock | +/a: create | e: edit name/tags | d: toggle HD derived | f: type | t: tag | c: clear | n/p page | r: refresh"
+	helpText := "Enter: detail | ↑/↓ | u: unlock | l: lock | +/a: create | e: edit name/tags | D: delete | d: toggle HD derived | f: type | t: tag | c: clear | n/p page | r: refresh"
 	content.WriteString(styles.HelpStyle.Render(helpText))
 
 	return content.String()
@@ -1344,7 +1443,7 @@ func (m *SignersModel) GetSelectedSigner() *evm.Signer {
 
 // IsCapturingInput returns true when this view is capturing keyboard input (form/filter active).
 func (m *SignersModel) IsCapturingInput() bool {
-	return m.showCreate || m.showFilter || m.showUnlock || m.showEditLabels
+	return m.showCreate || m.showFilter || m.showUnlock || m.showEditLabels || m.showDeleteSigner
 }
 
 func (m *SignersModel) renderSignerRow(signer evm.Signer, selected bool, showOwner bool, indent int) string {
@@ -1413,7 +1512,7 @@ func (m *SignersModel) renderSignerRow(signer evm.Signer, selected bool, showOwn
 	}
 	enabledPart := enabledStyle.Render(fmt.Sprintf("%-8s", enabled))
 
-	// Parent wallet
+	// HD parent marker (not wallet membership)
 	parentWallet := signer.WalletID
 	if parentWallet == "" {
 		parentWallet = "-"

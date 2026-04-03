@@ -192,7 +192,7 @@ func (h *TemplateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path = strings.TrimPrefix(path, "/")
 
 	if path == "" {
-		// Collection operations: GET /api/v1/templates or POST /api/v1/templates
+		// Wallet operations: GET /api/v1/templates or POST /api/v1/templates
 		switch r.Method {
 		case http.MethodGet:
 			h.listTemplates(w, r)

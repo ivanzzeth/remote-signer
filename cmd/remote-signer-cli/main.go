@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const version = "0.1.15"
+const version = "0.1.16"
 
 func main() {
 	// Pass-through subcommands: forward all args to the child binary so flags like -config work.

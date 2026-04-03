@@ -75,6 +75,17 @@ remote-signer-cli
 │   ├── hdwallet derive <addr>    POST /api/v1/evm/hd-wallets/:addr/derive
 │   ├── hdwallet list-derived <a> GET /api/v1/evm/hd-wallets/:addr/derived
 │   │
+│   ├── wallet list               GET /api/v1/evm/signers?group_by_wallet=true
+│   ├── wallet signers <walletID> GET /api/v1/evm/wallets/:id/signers
+│   │
+│   ├── wallet create         POST /api/v1/wallets
+│   ├── wallet list           GET /api/v1/wallets
+│   ├── wallet get <id>       GET /api/v1/wallets/:id
+│   ├── wallet delete <id>    DELETE /api/v1/wallets/:id
+│   ├── wallet members list <id>              GET /api/v1/wallets/:id/members
+│   ├── wallet members add <id> --wallet-id POST /api/v1/wallets/:id/members
+│   ├── wallet members remove <id> <walletID> DELETE .../members/:walletID
+│   │
 │   ├── template list             GET /api/v1/templates
 │   ├── template get <id>         GET /api/v1/templates/:id
 │   ├── template create           POST /api/v1/templates

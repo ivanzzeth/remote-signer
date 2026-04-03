@@ -8,84 +8,96 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/ivanzzeth/remote-signer/pkg/client"
 	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 	"github.com/ivanzzeth/remote-signer/tui/styles"
 )
 
-// WalletsModel represents the wallets list view.
 type WalletsModel struct {
-	signersSvc  evm.SignerAPI
-	ctx         context.Context
-	width       int
-	height      int
-	spinner     spinner.Model
-	loading     bool
-	err         error
-	wallets     []evm.Wallet
-	selectedIdx int
-	tagFilter   string
-	showFilter  bool
-	filterInput textinput.Model
-
-	// Navigation to detail view
-	goDetail       bool
-	selectedWallet string
+	walletsSvc   evm.WalletAPI
+	ctx          context.Context
+	spinner      spinner.Model
+	loading      bool
+	err          error
+	wallets      []evm.Wallet
+	total        int
+	selectedIdx  int
+	offset       int
+	limit        int
+	goDetail     bool
+	selectedID   string
+	showCreate   bool
+	createInput  textinput.Model
+	showDelete   bool
+	actionResult string
 }
 
-// WalletsDataMsg is sent when wallets data is loaded.
-type WalletsDataMsg struct {
-	Wallets []evm.Wallet
-	Err     error
+type walletsDataMsg struct {
+	wallets []evm.Wallet
+	total   int
+	err     error
 }
 
-// NewWalletsModel creates a new wallets model.
+type walletsActionMsg struct {
+	action string
+	err    error
+}
+
 func NewWalletsModel(c *client.Client, ctx context.Context) (*WalletsModel, error) {
-	if c == nil {
-		return nil, fmt.Errorf("client is required")
+	if c == nil || c.EVM == nil || c.EVM.Wallets == nil {
+		return nil, fmt.Errorf("wallet API is required")
+	}
+	return newWalletsModelFromService(c.EVM.Wallets, ctx)
+}
+
+func newWalletsModelFromService(wallets evm.WalletAPI, ctx context.Context) (*WalletsModel, error) {
+	if wallets == nil {
+		return nil, fmt.Errorf("wallet API is required")
 	}
 	if ctx == nil {
 		return nil, fmt.Errorf("context is required")
 	}
-
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = styles.SpinnerStyle
-
-	filterInput := textinput.New()
-	filterInput.Placeholder = "Filter by tag..."
-	filterInput.Width = 40
-
+	in := textinput.New()
+	in.Placeholder = "Wallet name"
+	in.Width = 40
 	return &WalletsModel{
-		signersSvc:  c.EVM.Signers,
+		walletsSvc:  wallets,
 		ctx:         ctx,
 		spinner:     s,
 		loading:     true,
-		filterInput: filterInput,
+		limit:       20,
+		createInput: in,
 	}, nil
 }
 
-// Init initializes the wallets model.
-func (m *WalletsModel) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, m.fetchWallets)
-}
+func (m *WalletsModel) Init() tea.Cmd { return tea.Batch(m.spinner.Tick, m.fetchWallets) }
 
-// Update handles messages for the wallets model.
 func (m *WalletsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmds []tea.Cmd
-
 	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-
 	case tea.KeyMsg:
-		if m.showFilter {
-			return m.handleFilterInput(msg)
+		if m.showCreate {
+			return m.updateCreate(msg)
 		}
-
+		if m.showDelete {
+			switch msg.String() {
+			case "y", "Y":
+				m.showDelete = false
+				if m.selectedIdx < len(m.wallets) {
+					m.loading = true
+					id := m.wallets[m.selectedIdx].ID
+					return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+						return walletsActionMsg{action: "delete", err: m.walletsSvc.Delete(m.ctx, id)}
+					})
+				}
+			case "n", "N", "esc":
+				m.showDelete = false
+			}
+			return m, nil
+		}
 		switch msg.String() {
 		case "up", "k":
 			if m.selectedIdx > 0 {
@@ -96,230 +108,132 @@ func (m *WalletsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selectedIdx++
 			}
 		case "enter":
-			if len(m.wallets) > 0 && m.selectedIdx < len(m.wallets) {
+			if m.selectedIdx < len(m.wallets) {
 				m.goDetail = true
-				m.selectedWallet = m.wallets[m.selectedIdx].WalletID
+				m.selectedID = m.wallets[m.selectedIdx].ID
 			}
-		case "f":
-			m.showFilter = true
-			m.filterInput.Focus()
+		case "a", "+":
+			m.showCreate = true
+			m.createInput.SetValue("")
+			m.createInput.Focus()
+			return m, textinput.Blink
+		case "D":
+			if len(m.wallets) > 0 {
+				m.showDelete = true
+			}
 		case "r":
 			m.loading = true
 			return m, tea.Batch(m.spinner.Tick, m.fetchWallets)
 		}
-
-	case WalletsDataMsg:
+	case walletsDataMsg:
 		m.loading = false
-		m.err = msg.Err
-		if msg.Err == nil {
-			m.wallets = msg.Wallets
-			if m.selectedIdx >= len(m.wallets) {
-				m.selectedIdx = 0
-			}
+		if msg.err != nil {
+			m.err = msg.err
+		} else {
+			m.wallets = msg.wallets
+			m.total = msg.total
+			m.err = nil
 		}
-
+	case walletsActionMsg:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.actionResult = styles.ErrorStyle.Render(fmt.Sprintf("Wallet %s failed: %v", msg.action, msg.err))
+			return m, nil
+		}
+		m.err = nil
+		if msg.action == "create" {
+			m.actionResult = styles.SuccessStyle.Render("Wallet created")
+		} else if msg.action == "delete" {
+			m.actionResult = styles.SuccessStyle.Render("Wallet deleted")
+		}
+		m.loading = true
+		return m, tea.Batch(m.spinner.Tick, m.fetchWallets)
 	case spinner.TickMsg:
 		if m.loading {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
-			cmds = append(cmds, cmd)
+			return m, cmd
 		}
 	}
-
-	return m, tea.Batch(cmds...)
+	return m, nil
 }
 
-// handleFilterInput handles filter input mode.
-func (m *WalletsModel) handleFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	var cmd tea.Cmd
-
+func (m *WalletsModel) updateCreate(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
-		m.showFilter = false
-		m.filterInput.Blur()
+		m.showCreate = false
 		return m, nil
 	case "enter":
-		m.tagFilter = m.filterInput.Value()
-		m.showFilter = false
-		m.filterInput.Blur()
+		name := strings.TrimSpace(m.createInput.Value())
+		m.showCreate = false
+		if name == "" {
+			m.actionResult = styles.ErrorStyle.Render("Wallet name required")
+			return m, nil
+		}
 		m.loading = true
-		return m, tea.Batch(m.spinner.Tick, m.fetchWallets)
+		return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
+			_, err := m.walletsSvc.Create(m.ctx, &evm.CreateWalletRequest{Name: name})
+			return walletsActionMsg{action: "create", err: err}
+		})
 	}
-
-	m.filterInput, cmd = m.filterInput.Update(msg)
+	var cmd tea.Cmd
+	m.createInput, cmd = m.createInput.Update(msg)
 	return m, cmd
 }
 
-// View renders the wallets view.
 func (m *WalletsModel) View() string {
 	if m.loading {
-		return fmt.Sprintf("\n  %s Loading wallets...", m.spinner.View())
+		return "\n  " + m.spinner.View() + " Loading wallets..."
 	}
-
 	if m.err != nil {
-		return fmt.Sprintf("\n  Error: %v\n\n  Press 'r' to retry", m.err)
+		return fmt.Sprintf("\n  Error: %v", m.err)
 	}
-
-	if m.showFilter {
-		return m.renderFilterInput()
+	if m.showCreate {
+		return "New Wallet\n\n  " + m.createInput.View() + "\n\n  enter: create • esc: cancel"
 	}
-
-	return m.renderWalletsList()
-}
-
-// renderFilterInput renders the filter input form.
-func (m *WalletsModel) renderFilterInput() string {
+	if m.showDelete {
+		return "Delete wallet?\n\n  y: confirm • n: cancel"
+	}
 	var b strings.Builder
-
-	b.WriteString(styles.TitleStyle.Render("Filter Wallets by Tag") + "\n\n")
-	b.WriteString("  " + m.filterInput.View() + "\n\n")
-	b.WriteString(styles.HelpStyle.Render("  enter: apply filter • esc: cancel"))
-
-	return b.String()
-}
-
-// renderWalletsList renders the wallets list.
-func (m *WalletsModel) renderWalletsList() string {
-	var b strings.Builder
-
-	title := "Wallets"
-	if m.tagFilter != "" {
-		title += fmt.Sprintf(" (tag: %s)", m.tagFilter)
+	b.WriteString(styles.TitleStyle.Render("Wallets") + "\n\n")
+	if m.actionResult != "" {
+		b.WriteString(m.actionResult + "\n\n")
 	}
-	b.WriteString(styles.TitleStyle.Render(title) + "\n\n")
-
-	if len(m.wallets) == 0 {
-		b.WriteString("  No wallets found\n")
-		return b.String()
-	}
-
-	// Table header
-	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-	b.WriteString(headerStyle.Render(fmt.Sprintf(
-		"  %-44s %-12s %-8s %-8s %-8s\n",
-		"WALLET ID",
-		"TYPE",
-		"SIGNERS",
-		"ENABLED",
-		"LOCKED",
-	)))
-	b.WriteString(strings.Repeat("─", m.width) + "\n")
-
-	// Table rows
 	for i, w := range m.wallets {
-		enabled := "✗"
-		if w.Enabled {
-			enabled = "✓"
-		}
-		locked := "✗"
-		if w.Locked {
-			locked = "✓"
-		}
-
-		displayName := w.DisplayName
-		if displayName == "" {
-			displayName = truncate(w.WalletID, 40)
-		} else {
-			displayName = truncate(displayName, 40)
-		}
-
-		rowStyle := lipgloss.NewStyle()
+		prefix := "  "
 		if i == m.selectedIdx {
-			rowStyle = rowStyle.Background(lipgloss.Color("240"))
+			prefix = "➜ "
 		}
-
-		row := fmt.Sprintf(
-			"  %-44s %-12s %-8d %-8s %-8s",
-			displayName,
-			w.WalletType,
-			w.SignerCount,
-			enabled,
-			locked,
-		)
-
-		b.WriteString(rowStyle.Render(row) + "\n")
-
-		// Show tags if present
-		if len(w.Tags) > 0 {
-			tagsStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-			tagsStr := "    Tags: " + strings.Join(w.Tags, ", ")
-			b.WriteString(tagsStyle.Render(tagsStr) + "\n")
-		}
+		b.WriteString(fmt.Sprintf("%s%s (%s)\n", prefix, w.Name, w.ID))
 	}
-
-	b.WriteString("\n")
-	b.WriteString(styles.HelpStyle.Render(
-		"  ↑/k up • ↓/j down • enter: details • f: filter • r: refresh • q: quit",
-	))
-
+	b.WriteString(fmt.Sprintf("\nTotal: %d\n", m.total))
+	b.WriteString(styles.HelpStyle.Render("↑/↓: select • enter: detail • a: create • D: delete • r: refresh • q: quit"))
 	return b.String()
 }
 
-// fetchWallets fetches wallets from the API.
 func (m *WalletsModel) fetchWallets() tea.Msg {
-	filter := &evm.ListSignersFilter{}
-	if m.tagFilter != "" {
-		filter.Tag = m.tagFilter
-	}
-
-	resp, err := m.signersSvc.ListWallets(m.ctx, filter)
+	resp, err := m.walletsSvc.List(m.ctx, &evm.ListWalletsFilter{Offset: m.offset, Limit: m.limit})
 	if err != nil {
-		return WalletsDataMsg{Err: err}
+		return walletsDataMsg{err: err}
 	}
-
-	return WalletsDataMsg{
-		Wallets: resp.Wallets,
-		Err:     nil,
-	}
+	return walletsDataMsg{wallets: resp.Wallets, total: resp.Total}
 }
 
-// SetSize sets the size of the view.
-func (m *WalletsModel) SetSize(width, height int) {
-	m.width = width
-	m.height = height
-}
-
-// ShouldShowDetail returns true if the user selected a wallet to view details.
-func (m *WalletsModel) ShouldShowDetail() bool {
-	return m.goDetail
-}
-
-// SelectedWallet returns the selected wallet ID.
-func (m *WalletsModel) SelectedWallet() string {
-	return m.selectedWallet
-}
-
-// GetSelectedWallet returns the selected wallet object for detail view.
-func (m *WalletsModel) GetSelectedWallet() evm.Wallet {
-	for _, w := range m.wallets {
-		if w.WalletID == m.selectedWallet {
-			return w
-		}
-	}
-	return evm.Wallet{WalletID: m.selectedWallet}
-}
-
-// ClearDetailFlag clears the go-to-detail flag.
-func (m *WalletsModel) ClearDetailFlag() {
-	m.goDetail = false
-	m.selectedWallet = ""
-}
-
-// Refresh reloads the wallets list.
+func (m *WalletsModel) SetSize(width, height int) {}
+func (m *WalletsModel) ShouldShowDetail() bool { return m.goDetail }
+func (m *WalletsModel) SelectedWallet() string { return m.selectedID }
+func (m *WalletsModel) ClearDetailFlag()       { m.goDetail, m.selectedID = false, "" }
 func (m *WalletsModel) Refresh() tea.Cmd {
 	m.loading = true
 	return tea.Batch(m.spinner.Tick, m.fetchWallets)
 }
-
-// IsCapturingInput returns true if the view is capturing input.
-func (m *WalletsModel) IsCapturingInput() bool {
-	return m.showFilter
-}
-
-// truncate truncates a string to the specified length.
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
+func (m *WalletsModel) IsCapturingInput() bool { return m.showCreate || m.showDelete }
+func (m *WalletsModel) GetSelectedWallet() evm.Wallet {
+	for _, w := range m.wallets {
+		if w.ID == m.selectedID {
+			return w
+		}
 	}
-	return s[:maxLen-3] + "..."
+	return evm.Wallet{ID: m.selectedID}
 }

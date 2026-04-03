@@ -185,7 +185,7 @@ func apikeyAdminKey() *types.APIKey {
 	}
 }
 
-func doAPIKeyCollectionRequest(t *testing.T, h *APIKeyHandler, method, path string, body any, apiKey *types.APIKey) *httptest.ResponseRecorder {
+func doAPIKeyWalletRequest(t *testing.T, h *APIKeyHandler, method, path string, body any, apiKey *types.APIKey) *httptest.ResponseRecorder {
 	t.Helper()
 	var bodyReader *bytes.Buffer
 	if body != nil {
@@ -281,7 +281,7 @@ func TestAPIKeyHandler_List_Success(t *testing.T) {
 	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
 	require.NoError(t, err)
 
-	rr := doAPIKeyCollectionRequest(t, h, http.MethodGet, "/api/v1/api-keys", nil, apikeyAdminKey())
+	rr := doAPIKeyWalletRequest(t, h, http.MethodGet, "/api/v1/api-keys", nil, apikeyAdminKey())
 	assert.Equal(t, http.StatusOK, rr.Code)
 	assert.Equal(t, "application/json", rr.Header().Get("Content-Type"))
 
@@ -306,7 +306,7 @@ func TestAPIKeyHandler_List_WithSourceFilter(t *testing.T) {
 	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
 	require.NoError(t, err)
 
-	rr := doAPIKeyCollectionRequest(t, h, http.MethodGet, "/api/v1/api-keys?source=api", nil, apikeyAdminKey())
+	rr := doAPIKeyWalletRequest(t, h, http.MethodGet, "/api/v1/api-keys?source=api", nil, apikeyAdminKey())
 	assert.Equal(t, http.StatusOK, rr.Code)
 
 	var resp ListAPIKeysResponse
@@ -324,7 +324,7 @@ func TestAPIKeyHandler_List_WithEnabledFilter(t *testing.T) {
 	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
 	require.NoError(t, err)
 
-	rr := doAPIKeyCollectionRequest(t, h, http.MethodGet, "/api/v1/api-keys?enabled=true", nil, apikeyAdminKey())
+	rr := doAPIKeyWalletRequest(t, h, http.MethodGet, "/api/v1/api-keys?enabled=true", nil, apikeyAdminKey())
 	assert.Equal(t, http.StatusOK, rr.Code)
 
 	var resp ListAPIKeysResponse
@@ -339,7 +339,7 @@ func TestAPIKeyHandler_List_InvalidEnabledParam(t *testing.T) {
 	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
 	require.NoError(t, err)
 
-	rr := doAPIKeyCollectionRequest(t, h, http.MethodGet, "/api/v1/api-keys?enabled=notbool", nil, apikeyAdminKey())
+	rr := doAPIKeyWalletRequest(t, h, http.MethodGet, "/api/v1/api-keys?enabled=notbool", nil, apikeyAdminKey())
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 
 	var errResp map[string]string
@@ -352,7 +352,7 @@ func TestAPIKeyHandler_List_InvalidLimitParam(t *testing.T) {
 	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
 	require.NoError(t, err)
 
-	rr := doAPIKeyCollectionRequest(t, h, http.MethodGet, "/api/v1/api-keys?limit=abc", nil, apikeyAdminKey())
+	rr := doAPIKeyWalletRequest(t, h, http.MethodGet, "/api/v1/api-keys?limit=abc", nil, apikeyAdminKey())
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 
 	var errResp map[string]string
@@ -365,7 +365,7 @@ func TestAPIKeyHandler_List_NegativeLimitParam(t *testing.T) {
 	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
 	require.NoError(t, err)
 
-	rr := doAPIKeyCollectionRequest(t, h, http.MethodGet, "/api/v1/api-keys?limit=-1", nil, apikeyAdminKey())
+	rr := doAPIKeyWalletRequest(t, h, http.MethodGet, "/api/v1/api-keys?limit=-1", nil, apikeyAdminKey())
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
 
@@ -384,7 +384,7 @@ func TestAPIKeyHandler_List_LimitClamping(t *testing.T) {
 	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
 	require.NoError(t, err)
 
-	rr := doAPIKeyCollectionRequest(t, h, http.MethodGet, "/api/v1/api-keys?limit=500", nil, apikeyAdminKey())
+	rr := doAPIKeyWalletRequest(t, h, http.MethodGet, "/api/v1/api-keys?limit=500", nil, apikeyAdminKey())
 	assert.Equal(t, http.StatusOK, rr.Code)
 	// limit > 100 should be clamped to 100
 	assert.Equal(t, 100, capturedFilter.Limit)
@@ -395,7 +395,7 @@ func TestAPIKeyHandler_List_InvalidOffsetParam(t *testing.T) {
 	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
 	require.NoError(t, err)
 
-	rr := doAPIKeyCollectionRequest(t, h, http.MethodGet, "/api/v1/api-keys?offset=abc", nil, apikeyAdminKey())
+	rr := doAPIKeyWalletRequest(t, h, http.MethodGet, "/api/v1/api-keys?offset=abc", nil, apikeyAdminKey())
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
 
@@ -404,7 +404,7 @@ func TestAPIKeyHandler_List_NegativeOffsetParam(t *testing.T) {
 	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
 	require.NoError(t, err)
 
-	rr := doAPIKeyCollectionRequest(t, h, http.MethodGet, "/api/v1/api-keys?offset=-5", nil, apikeyAdminKey())
+	rr := doAPIKeyWalletRequest(t, h, http.MethodGet, "/api/v1/api-keys?offset=-5", nil, apikeyAdminKey())
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
 
@@ -417,7 +417,7 @@ func TestAPIKeyHandler_List_Error(t *testing.T) {
 	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
 	require.NoError(t, err)
 
-	rr := doAPIKeyCollectionRequest(t, h, http.MethodGet, "/api/v1/api-keys", nil, apikeyAdminKey())
+	rr := doAPIKeyWalletRequest(t, h, http.MethodGet, "/api/v1/api-keys", nil, apikeyAdminKey())
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
 
 	var errResp map[string]string
@@ -434,7 +434,7 @@ func TestAPIKeyHandler_List_CountError(t *testing.T) {
 	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
 	require.NoError(t, err)
 
-	rr := doAPIKeyCollectionRequest(t, h, http.MethodGet, "/api/v1/api-keys", nil, apikeyAdminKey())
+	rr := doAPIKeyWalletRequest(t, h, http.MethodGet, "/api/v1/api-keys", nil, apikeyAdminKey())
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
 
 	var errResp map[string]string
@@ -447,7 +447,7 @@ func TestAPIKeyHandler_List_Empty(t *testing.T) {
 	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
 	require.NoError(t, err)
 
-	rr := doAPIKeyCollectionRequest(t, h, http.MethodGet, "/api/v1/api-keys", nil, apikeyAdminKey())
+	rr := doAPIKeyWalletRequest(t, h, http.MethodGet, "/api/v1/api-keys", nil, apikeyAdminKey())
 	assert.Equal(t, http.StatusOK, rr.Code)
 
 	var resp ListAPIKeysResponse
@@ -554,7 +554,7 @@ func TestAPIKeyHandler_Create_Success(t *testing.T) {
 		Role:      "strategy",
 	}
 
-	rr := doAPIKeyCollectionRequest(t, h, http.MethodPost, "/api/v1/api-keys", reqBody, apikeyAdminKey())
+	rr := doAPIKeyWalletRequest(t, h, http.MethodPost, "/api/v1/api-keys", reqBody, apikeyAdminKey())
 	assert.Equal(t, http.StatusCreated, rr.Code)
 
 	var resp APIKeyResponse
@@ -584,7 +584,7 @@ func TestAPIKeyHandler_Create_WithCustomRateLimit(t *testing.T) {
 		RateLimit: 50,
 	}
 
-	rr := doAPIKeyCollectionRequest(t, h, http.MethodPost, "/api/v1/api-keys", reqBody, apikeyAdminKey())
+	rr := doAPIKeyWalletRequest(t, h, http.MethodPost, "/api/v1/api-keys", reqBody, apikeyAdminKey())
 	assert.Equal(t, http.StatusCreated, rr.Code)
 
 	var resp APIKeyResponse
@@ -603,7 +603,7 @@ func TestAPIKeyHandler_Create_ReadOnly(t *testing.T) {
 		PublicKey: "abcdef",
 	}
 
-	rr := doAPIKeyCollectionRequest(t, h, http.MethodPost, "/api/v1/api-keys", reqBody, apikeyAdminKey())
+	rr := doAPIKeyWalletRequest(t, h, http.MethodPost, "/api/v1/api-keys", reqBody, apikeyAdminKey())
 	assert.Equal(t, http.StatusForbidden, rr.Code)
 
 	var errResp map[string]string
@@ -622,7 +622,7 @@ func TestAPIKeyHandler_Create_InvalidID_Empty(t *testing.T) {
 		PublicKey: "abcdef",
 	}
 
-	rr := doAPIKeyCollectionRequest(t, h, http.MethodPost, "/api/v1/api-keys", reqBody, apikeyAdminKey())
+	rr := doAPIKeyWalletRequest(t, h, http.MethodPost, "/api/v1/api-keys", reqBody, apikeyAdminKey())
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 
 	var errResp map[string]string
@@ -642,7 +642,7 @@ func TestAPIKeyHandler_Create_InvalidID_TooLong(t *testing.T) {
 		PublicKey: "abcdef",
 	}
 
-	rr := doAPIKeyCollectionRequest(t, h, http.MethodPost, "/api/v1/api-keys", reqBody, apikeyAdminKey())
+	rr := doAPIKeyWalletRequest(t, h, http.MethodPost, "/api/v1/api-keys", reqBody, apikeyAdminKey())
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 
 	var errResp map[string]string
@@ -664,7 +664,7 @@ func TestAPIKeyHandler_Create_InvalidID_SpecialChars(t *testing.T) {
 				PublicKey: "abcdef",
 			}
 
-			rr := doAPIKeyCollectionRequest(t, h, http.MethodPost, "/api/v1/api-keys", reqBody, apikeyAdminKey())
+			rr := doAPIKeyWalletRequest(t, h, http.MethodPost, "/api/v1/api-keys", reqBody, apikeyAdminKey())
 			assert.Equal(t, http.StatusBadRequest, rr.Code)
 
 			var errResp map[string]string
@@ -686,7 +686,7 @@ func TestAPIKeyHandler_Create_ValidIDWithHyphens(t *testing.T) {
 		Role:      "admin",
 	}
 
-	rr := doAPIKeyCollectionRequest(t, h, http.MethodPost, "/api/v1/api-keys", reqBody, apikeyAdminKey())
+	rr := doAPIKeyWalletRequest(t, h, http.MethodPost, "/api/v1/api-keys", reqBody, apikeyAdminKey())
 	assert.Equal(t, http.StatusCreated, rr.Code)
 }
 
@@ -701,7 +701,7 @@ func TestAPIKeyHandler_Create_MissingName(t *testing.T) {
 		PublicKey: "abcdef",
 	}
 
-	rr := doAPIKeyCollectionRequest(t, h, http.MethodPost, "/api/v1/api-keys", reqBody, apikeyAdminKey())
+	rr := doAPIKeyWalletRequest(t, h, http.MethodPost, "/api/v1/api-keys", reqBody, apikeyAdminKey())
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 
 	var errResp map[string]string
@@ -720,7 +720,7 @@ func TestAPIKeyHandler_Create_NameTooLong(t *testing.T) {
 		PublicKey: "abcdef",
 	}
 
-	rr := doAPIKeyCollectionRequest(t, h, http.MethodPost, "/api/v1/api-keys", reqBody, apikeyAdminKey())
+	rr := doAPIKeyWalletRequest(t, h, http.MethodPost, "/api/v1/api-keys", reqBody, apikeyAdminKey())
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 
 	var errResp map[string]string
@@ -739,7 +739,7 @@ func TestAPIKeyHandler_Create_MissingPublicKey(t *testing.T) {
 		PublicKey: "",
 	}
 
-	rr := doAPIKeyCollectionRequest(t, h, http.MethodPost, "/api/v1/api-keys", reqBody, apikeyAdminKey())
+	rr := doAPIKeyWalletRequest(t, h, http.MethodPost, "/api/v1/api-keys", reqBody, apikeyAdminKey())
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 
 	var errResp map[string]string
@@ -761,7 +761,7 @@ func TestAPIKeyHandler_Create_DuplicateID(t *testing.T) {
 		Role:      "admin",
 	}
 
-	rr := doAPIKeyCollectionRequest(t, h, http.MethodPost, "/api/v1/api-keys", reqBody, apikeyAdminKey())
+	rr := doAPIKeyWalletRequest(t, h, http.MethodPost, "/api/v1/api-keys", reqBody, apikeyAdminKey())
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
 
 	var errResp map[string]string
@@ -793,7 +793,7 @@ func TestAPIKeyHandler_Create_MethodNotAllowed(t *testing.T) {
 	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
 	require.NoError(t, err)
 
-	rr := doAPIKeyCollectionRequest(t, h, http.MethodPut, "/api/v1/api-keys", nil, apikeyAdminKey())
+	rr := doAPIKeyWalletRequest(t, h, http.MethodPut, "/api/v1/api-keys", nil, apikeyAdminKey())
 	assert.Equal(t, http.StatusMethodNotAllowed, rr.Code)
 
 	var errResp map[string]string
@@ -820,7 +820,7 @@ func TestAPIKeyHandler_Create_RepoGetFailsAfterCreate(t *testing.T) {
 		Role:      "admin",
 	}
 
-	rr := doAPIKeyCollectionRequest(t, h, http.MethodPost, "/api/v1/api-keys", reqBody, apikeyAdminKey())
+	rr := doAPIKeyWalletRequest(t, h, http.MethodPost, "/api/v1/api-keys", reqBody, apikeyAdminKey())
 	// Should still return 201 even if re-fetch fails
 	assert.Equal(t, http.StatusCreated, rr.Code)
 
@@ -1261,7 +1261,7 @@ func TestAPIKeyHandler_Create_RateLimitBounds(t *testing.T) {
 				RateLimit: tc.rateLimit,
 			}
 
-			rr := doAPIKeyCollectionRequest(t, h, http.MethodPost, "/api/v1/api-keys", reqBody, apikeyAdminKey())
+			rr := doAPIKeyWalletRequest(t, h, http.MethodPost, "/api/v1/api-keys", reqBody, apikeyAdminKey())
 			assert.Equal(t, tc.wantCode, rr.Code)
 		})
 	}
@@ -1278,7 +1278,7 @@ func TestAPIKeyHandler_Create_PublicKeyTooLong(t *testing.T) {
 		PublicKey: strings.Repeat("a", 129),
 	}
 
-	rr := doAPIKeyCollectionRequest(t, h, http.MethodPost, "/api/v1/api-keys", reqBody, apikeyAdminKey())
+	rr := doAPIKeyWalletRequest(t, h, http.MethodPost, "/api/v1/api-keys", reqBody, apikeyAdminKey())
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 
 	var errResp map[string]string

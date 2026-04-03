@@ -56,8 +56,8 @@ type RouterConfig struct {
 	// Preset API (admin-only). When PresetsDir is non-empty, GET/POST /api/v1/presets are registered.
 	PresetsDir string   // directory containing preset YAML files (resolved absolute path)
 	PresetsDB  *gorm.DB // optional: for preset apply transaction; required when PresetsDir is set and template service is used
-	// Collections
-	CollectionRepo storage.CollectionRepository // optional: for wallet collection CRUD
+	// Wallets
+	WalletRepo storage.WalletRepository // optional: for wallet CRUD
 
 	// Resource limits
 	MaxKeystoresPerKey int // max keystores per API key (0 = no limit, default 5)
@@ -270,9 +270,6 @@ func (r *Router) setupRoutes() error {
 	// Signer action routes: /api/v1/evm/signers/{address}/unlock, /lock (admin only via PermUnlockSigner in handler)
 	r.mux.Handle("/api/v1/evm/signers/", r.withAuthAndPerm(middleware.PermReadSigners, http.HandlerFunc(signerHandler.HandleSignerAction)))
 
-	// Wallet routes - list signers under a wallet
-	r.mux.Handle("/api/v1/evm/wallets/", r.withAuthAndPerm(middleware.PermReadSigners, http.HandlerFunc(signerHandler.HandleWalletSigners)))
-
 	// HD wallet management routes
 	r.mux.Handle("/api/v1/evm/hd-wallets", r.withAuth(hdWalletHandler))
 	r.mux.Handle("/api/v1/evm/hd-wallets/", r.withAuth(hdWalletHandler))
@@ -326,8 +323,8 @@ func (r *Router) setupRoutes() error {
 	// Set rule repo on access service for cascade cleanup
 	if accessService != nil {
 		accessService.SetRuleRepo(r.ruleRepo)
-		if r.config.CollectionRepo != nil {
-			accessService.SetCollectionRepo(r.config.CollectionRepo)
+		if r.config.WalletRepo != nil {
+			accessService.SetWalletRepo(r.config.WalletRepo)
 		}
 	}
 
@@ -347,14 +344,14 @@ func (r *Router) setupRoutes() error {
 		r.mux.Handle("/api/v1/api-keys/", r.withAuthAndPerm(middleware.PermManageAPIKeys, http.HandlerFunc(apiKeyHandler.ServeKeyHTTP)))
 	}
 
-	// Collection routes (all authenticated users can manage their own collections)
-	if r.config.CollectionRepo != nil {
-		collectionHandler, collErr := handler.NewCollectionHandler(r.config.CollectionRepo, r.config.SignerOwnershipRepo, r.config.SignerAccessRepo, r.logger)
+	// Wallet routes (all authenticated users can manage their own wallets)
+	if r.config.WalletRepo != nil {
+		walletHandler, collErr := handler.NewWalletHandler(r.config.WalletRepo, r.config.SignerOwnershipRepo, r.config.SignerAccessRepo, r.logger)
 		if collErr != nil {
-			return fmt.Errorf("failed to create collection handler: %w", collErr)
+			return fmt.Errorf("failed to create wallet handler: %w", collErr)
 		}
-		r.mux.Handle("/api/v1/collections", r.withAuthAndPerm(middleware.PermManageCollections, collectionHandler))
-		r.mux.Handle("/api/v1/collections/", r.withAuthAndPerm(middleware.PermManageCollections, http.HandlerFunc(collectionHandler.ServeCollectionHTTP)))
+		r.mux.Handle("/api/v1/wallets", r.withAuthAndPerm(middleware.PermManageWallets, walletHandler))
+		r.mux.Handle("/api/v1/wallets/", r.withAuthAndPerm(middleware.PermManageWallets, http.HandlerFunc(walletHandler.ServeWalletHTTP)))
 	}
 
 	// ACLs read-only routes (admin only): IP whitelist config
