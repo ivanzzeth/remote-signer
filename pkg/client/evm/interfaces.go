@@ -38,8 +38,7 @@ type SignerAPI interface {
 	Unlock(ctx context.Context, address string, req *UnlockSignerRequest) (*UnlockSignerResponse, error)
 	Lock(ctx context.Context, address string) (*LockSignerResponse, error)
 	PatchSignerLabels(ctx context.Context, address string, req *PatchSignerLabelsRequest) (*Signer, error)
-	ListWallets(ctx context.Context, filter *ListSignersFilter) (*ListWalletsResponse, error)
-	ListWalletSigners(ctx context.Context, walletID string, filter *ListSignersFilter) (*WalletSignersResponse, error)
+	DeleteSigner(ctx context.Context, address string) error
 }
 
 // HDWalletAPI defines the HD wallet management operations interface.
@@ -53,15 +52,15 @@ type HDWalletAPI interface {
 	GetSigners(ctx context.Context, primaryAddr string, chainID string, start, count uint32) ([]*RemoteSigner, error)
 }
 
-// CollectionAPI defines the wallet collection operations interface.
-type CollectionAPI interface {
-	Create(ctx context.Context, req *CreateCollectionRequest) (*Collection, error)
-	Get(ctx context.Context, id string) (*Collection, error)
-	List(ctx context.Context, filter *ListCollectionsFilter) (*ListCollectionsResponse, error)
+// WalletAPI defines the wallet operations interface.
+type WalletAPI interface {
+	Create(ctx context.Context, req *CreateWalletRequest) (*Wallet, error)
+	Get(ctx context.Context, id string) (*Wallet, error)
+	List(ctx context.Context, filter *ListWalletsFilter) (*ListWalletsResponse, error)
 	Delete(ctx context.Context, id string) error
-	AddMember(ctx context.Context, collectionID string, req *AddCollectionMemberRequest) (*CollectionMember, error)
-	RemoveMember(ctx context.Context, collectionID, walletID string) error
-	ListMembers(ctx context.Context, collectionID string) (*ListCollectionMembersResponse, error)
+	AddMember(ctx context.Context, walletID string, req *AddWalletMemberRequest) (*WalletMember, error)
+	RemoveMember(ctx context.Context, walletID, signerAddress string) error
+	ListMembers(ctx context.Context, walletID string) (*ListWalletMembersResponse, error)
 }
 
 // GuardAPI defines the approval guard interface.
@@ -81,6 +80,6 @@ var (
 	_ RuleAPI     = (*RuleService)(nil)
 	_ SignerAPI   = (*SignerService)(nil)
 	_ HDWalletAPI = (*HDWalletService)(nil)
-	_ GuardAPI      = (*GuardService)(nil)
-	_ CollectionAPI = (*CollectionService)(nil)
+	_ GuardAPI  = (*GuardService)(nil)
+	_ WalletAPI = (*WalletService)(nil)
 )

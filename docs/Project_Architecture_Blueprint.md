@@ -853,7 +853,7 @@ signService, _ := service.NewSignService(chainRegistry, ...)
 | `Template` | `templates` | `id` (varchar(128)) | → `rules` (many instances) |
 | `SignerOwnership` | `signer_ownership` | `(address, chain_type)` | → `api_keys` (OwnerID) |
 | `SignerAccess` | `signer_access` | `(signer_address, api_key_id)` | → `signer_ownership`, → `api_keys` |
-| `WalletCollection` | `wallet_collections` | `id` (bigserial) | → `api_keys` (OwnerID) |
+| `WalletCollection` | `wallet_wallets` | `id` (bigserial) | → `api_keys` (OwnerID) |
 
 ### 5.2 Entity Relationships
 
@@ -1087,7 +1087,7 @@ const (
 | `read_acls` | ✓ | - | - | - |
 | `resume_guard` | ✓ | - | - | - |
 | `approve_signer` | ✓ | - | - | - |
-| `manage_collections` | ✓ | ✓ | - | - |
+| `manage_wallets` | ✓ | ✓ | - | - |
 
 **Permission Check**:
 ```go

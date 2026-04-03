@@ -190,8 +190,7 @@ type SignerService struct {
 	UnlockFunc             func(ctx context.Context, address string, req *evm.UnlockSignerRequest) (*evm.UnlockSignerResponse, error)
 	LockFunc               func(ctx context.Context, address string) (*evm.LockSignerResponse, error)
 	PatchSignerLabelsFunc  func(ctx context.Context, address string, req *evm.PatchSignerLabelsRequest) (*evm.Signer, error)
-	ListWalletsFunc        func(ctx context.Context, filter *evm.ListSignersFilter) (*evm.ListWalletsResponse, error)
-	ListWalletSignersFunc  func(ctx context.Context, walletID string, filter *evm.ListSignersFilter) (*evm.WalletSignersResponse, error)
+	DeleteFunc             func(ctx context.Context, address string) error
 	Calls                  map[string][]any
 }
 
@@ -245,20 +244,12 @@ func (m *SignerService) PatchSignerLabels(ctx context.Context, address string, r
 	return &evm.Signer{}, nil
 }
 
-func (m *SignerService) ListWallets(ctx context.Context, filter *evm.ListSignersFilter) (*evm.ListWalletsResponse, error) {
-	m.recordCall("ListWallets", filter)
-	if m.ListWalletsFunc != nil {
-		return m.ListWalletsFunc(ctx, filter)
+func (m *SignerService) DeleteSigner(ctx context.Context, address string) error {
+	m.recordCall("DeleteSigner", address)
+	if m.DeleteFunc != nil {
+		return m.DeleteFunc(ctx, address)
 	}
-	return &evm.ListWalletsResponse{Wallets: []evm.Wallet{}}, nil
-}
-
-func (m *SignerService) ListWalletSigners(ctx context.Context, walletID string, filter *evm.ListSignersFilter) (*evm.WalletSignersResponse, error) {
-	m.recordCall("ListWalletSigners", walletID, filter)
-	if m.ListWalletSignersFunc != nil {
-		return m.ListWalletSignersFunc(ctx, walletID, filter)
-	}
-	return &evm.WalletSignersResponse{Signers: []evm.Signer{}}, nil
+	return nil
 }
 
 var _ evm.SignerAPI = (*SignerService)(nil)
@@ -542,54 +533,54 @@ func (m *APIKeyService) Delete(ctx context.Context, id string) error {
 
 var _ apikeys.API = (*APIKeyService)(nil)
 
-// CollectionService is a mock implementation of evm.CollectionAPI.
-type CollectionService struct {
+// WalletService is a mock implementation of evm.WalletAPI.
+type WalletService struct {
 	mu               sync.RWMutex
-	CreateFunc       func(ctx context.Context, req *evm.CreateCollectionRequest) (*evm.Collection, error)
-	GetFunc          func(ctx context.Context, id string) (*evm.Collection, error)
-	ListFunc         func(ctx context.Context, filter *evm.ListCollectionsFilter) (*evm.ListCollectionsResponse, error)
+	CreateFunc       func(ctx context.Context, req *evm.CreateWalletRequest) (*evm.Wallet, error)
+	GetFunc          func(ctx context.Context, id string) (*evm.Wallet, error)
+	ListFunc         func(ctx context.Context, filter *evm.ListWalletsFilter) (*evm.ListWalletsResponse, error)
 	DeleteFunc       func(ctx context.Context, id string) error
-	AddMemberFunc    func(ctx context.Context, collectionID string, req *evm.AddCollectionMemberRequest) (*evm.CollectionMember, error)
-	RemoveMemberFunc func(ctx context.Context, collectionID, walletID string) error
-	ListMembersFunc  func(ctx context.Context, collectionID string) (*evm.ListCollectionMembersResponse, error)
+	AddMemberFunc    func(ctx context.Context, walletID string, req *evm.AddWalletMemberRequest) (*evm.WalletMember, error)
+	RemoveMemberFunc func(ctx context.Context, walletID, signerAddress string) error
+	ListMembersFunc  func(ctx context.Context, walletID string) (*evm.ListWalletMembersResponse, error)
 	Calls            map[string][]any
 }
 
-func NewCollectionService() *CollectionService {
-	return &CollectionService{Calls: make(map[string][]any)}
+func NewWalletService() *WalletService {
+	return &WalletService{Calls: make(map[string][]any)}
 }
 
-func (m *CollectionService) recordCall(method string, args ...any) {
+func (m *WalletService) recordCall(method string, args ...any) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.Calls[method] = append(m.Calls[method], args)
 }
 
-func (m *CollectionService) Create(ctx context.Context, req *evm.CreateCollectionRequest) (*evm.Collection, error) {
+func (m *WalletService) Create(ctx context.Context, req *evm.CreateWalletRequest) (*evm.Wallet, error) {
 	m.recordCall("Create", req)
 	if m.CreateFunc != nil {
 		return m.CreateFunc(ctx, req)
 	}
-	return &evm.Collection{}, nil
+	return &evm.Wallet{}, nil
 }
 
-func (m *CollectionService) Get(ctx context.Context, id string) (*evm.Collection, error) {
+func (m *WalletService) Get(ctx context.Context, id string) (*evm.Wallet, error) {
 	m.recordCall("Get", id)
 	if m.GetFunc != nil {
 		return m.GetFunc(ctx, id)
 	}
-	return &evm.Collection{}, nil
+	return &evm.Wallet{}, nil
 }
 
-func (m *CollectionService) List(ctx context.Context, filter *evm.ListCollectionsFilter) (*evm.ListCollectionsResponse, error) {
+func (m *WalletService) List(ctx context.Context, filter *evm.ListWalletsFilter) (*evm.ListWalletsResponse, error) {
 	m.recordCall("List", filter)
 	if m.ListFunc != nil {
 		return m.ListFunc(ctx, filter)
 	}
-	return &evm.ListCollectionsResponse{Collections: []evm.Collection{}}, nil
+	return &evm.ListWalletsResponse{Wallets: []evm.Wallet{}}, nil
 }
 
-func (m *CollectionService) Delete(ctx context.Context, id string) error {
+func (m *WalletService) Delete(ctx context.Context, id string) error {
 	m.recordCall("Delete", id)
 	if m.DeleteFunc != nil {
 		return m.DeleteFunc(ctx, id)
@@ -597,28 +588,28 @@ func (m *CollectionService) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-func (m *CollectionService) AddMember(ctx context.Context, collectionID string, req *evm.AddCollectionMemberRequest) (*evm.CollectionMember, error) {
-	m.recordCall("AddMember", collectionID, req)
+func (m *WalletService) AddMember(ctx context.Context, walletID string, req *evm.AddWalletMemberRequest) (*evm.WalletMember, error) {
+	m.recordCall("AddMember", walletID, req)
 	if m.AddMemberFunc != nil {
-		return m.AddMemberFunc(ctx, collectionID, req)
+		return m.AddMemberFunc(ctx, walletID, req)
 	}
-	return &evm.CollectionMember{}, nil
+	return &evm.WalletMember{}, nil
 }
 
-func (m *CollectionService) RemoveMember(ctx context.Context, collectionID, walletID string) error {
-	m.recordCall("RemoveMember", collectionID, walletID)
+func (m *WalletService) RemoveMember(ctx context.Context, walletID, signerAddress string) error {
+	m.recordCall("RemoveMember", walletID, signerAddress)
 	if m.RemoveMemberFunc != nil {
-		return m.RemoveMemberFunc(ctx, collectionID, walletID)
+		return m.RemoveMemberFunc(ctx, walletID, signerAddress)
 	}
 	return nil
 }
 
-func (m *CollectionService) ListMembers(ctx context.Context, collectionID string) (*evm.ListCollectionMembersResponse, error) {
-	m.recordCall("ListMembers", collectionID)
+func (m *WalletService) ListMembers(ctx context.Context, walletID string) (*evm.ListWalletMembersResponse, error) {
+	m.recordCall("ListMembers", walletID)
 	if m.ListMembersFunc != nil {
-		return m.ListMembersFunc(ctx, collectionID)
+		return m.ListMembersFunc(ctx, walletID)
 	}
-	return &evm.ListCollectionMembersResponse{Members: []evm.CollectionMember{}}, nil
+	return &evm.ListWalletMembersResponse{Members: []evm.WalletMember{}}, nil
 }
 
-var _ evm.CollectionAPI = (*CollectionService)(nil)
+var _ evm.WalletAPI = (*WalletService)(nil)

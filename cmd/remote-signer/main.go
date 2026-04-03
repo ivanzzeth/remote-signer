@@ -35,7 +35,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
-const version = "0.1.28"
+const version = "0.1.31"
 
 func main() {
 	if err := run(); err != nil {
@@ -129,6 +129,12 @@ func run() error {
 	signerAccessRepo, err := storage.NewGormSignerAccessRepository(db)
 	if err != nil {
 		return fmt.Errorf("failed to create signer access repository: %w", err)
+	}
+
+	// Initialize wallet repository (optional routes: /api/v1/wallets*)
+	walletRepo, err := storage.NewGormWalletRepository(db)
+	if err != nil {
+		return fmt.Errorf("failed to create wallet repository: %w", err)
 	}
 
 	// Initialize audit logger early so config sync can record rule changes
@@ -829,6 +835,7 @@ func run() error {
 		APIKeyRepo:          apiKeyRepo,
 		SignerOwnershipRepo: signerOwnershipRepo,
 		SignerAccessRepo:    signerAccessRepo,
+		WalletRepo:          walletRepo,
 		BudgetRepo:          budgetRepo,
 		RulesAPIReadonly:              cfg.Security.IsRulesAPIReadonly(),
 		SignersAPIReadonly:            cfg.Security.IsSignersAPIReadonly(),

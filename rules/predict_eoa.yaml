@@ -653,7 +653,7 @@ rules:
             );
             // collateralToken must be USDT
             require(collateralToken == 0x55d398326f99059fF775485246999027B3197955, "collateral must be USDT");
-            // parentCollectionId must be zero (root collection)
+            // parentCollectionId must be zero (root wallet)
             require(parentCollectionId == bytes32(0), "parent must be zero");
         }
 
@@ -666,7 +666,7 @@ rules:
             );
             // collateralToken must be USDT
             require(collateralToken == 0x55d398326f99059fF775485246999027B3197955, "collateral must be USDT");
-            // parentCollectionId must be zero (root collection)
+            // parentCollectionId must be zero (root wallet)
             require(parentCollectionId == bytes32(0), "parent must be zero");
         }
 
@@ -679,7 +679,7 @@ rules:
             );
             // collateralToken must be USDT
             require(collateralToken == 0x55d398326f99059fF775485246999027B3197955, "collateral must be USDT");
-            // parentCollectionId must be zero (root collection)
+            // parentCollectionId must be zero (root wallet)
             require(parentCollectionId == bytes32(0), "parent must be zero");
         }
       description: "CT split/merge/redeem with collateral=USDT and parentCollectionId=0"
@@ -800,7 +800,7 @@ rules:
             );
             // collateralToken must be USDT
             require(collateralToken == 0x55d398326f99059fF775485246999027B3197955, "collateral must be USDT");
-            // parentCollectionId must be zero (root collection)
+            // parentCollectionId must be zero (root wallet)
             require(parentCollectionId == bytes32(0), "parent must be zero");
         }
 
@@ -814,7 +814,7 @@ rules:
             );
             // collateralToken must be USDT
             require(collateralToken == 0x55d398326f99059fF775485246999027B3197955, "collateral must be USDT");
-            // parentCollectionId must be zero (root collection)
+            // parentCollectionId must be zero (root wallet)
             require(parentCollectionId == bytes32(0), "parent must be zero");
         }
 

@@ -655,13 +655,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Handle collection member navigation: Enter on a member opens its detail
+		// Handle wallet member navigation: Enter on a member opens its detail
 		if m.walletDetail.ShouldOpenMember() {
 			memberWalletID := m.walletDetail.GetOpenMemberWalletID()
 			if memberWalletID != "" {
 				// Load the member wallet detail (re-enter ViewWalletDetail for the member)
 				memberWallet := evm.Wallet{WalletID: memberWalletID}
-				m.previousView = ViewWalletDetail // back will return to the collection detail
+				m.previousView = ViewWalletDetail // back will return to the wallet detail
 				cmds = append(cmds, m.walletDetail.LoadWallet(memberWallet))
 			}
 		}

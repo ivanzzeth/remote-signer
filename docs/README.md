@@ -6,22 +6,22 @@ This directory contains documentation for the Remote Signer service.
 
 ### Features
 Detailed feature documentation and usage guides:
-- [Collection Wallets](features/collection-wallets.md) - Wallet grouping and batch authorization
+- [Collection Wallets](features/wallet-wallets.md) - Wallet grouping and batch authorization
 
 ### API Reference
 API endpoint documentation:
-- [Collections API](api/collections.md) - Collection management endpoints
+- [Collections API](api/wallets.md) - Collection management endpoints
 
 ## Quick Links
 
 ### For Users
-- [Collection Wallets Guide](features/collection-wallets.md) - Learn how to use Collections for wallet grouping and team access management
+- [Collection Wallets Guide](features/wallet-wallets.md) - Learn how to use Collections for wallet grouping and team access management
 
 ### For Developers
-- [Collections API](api/collections.md) - API reference for Collection CRUD operations
+- [Collections API](api/wallets.md) - API reference for Collection CRUD operations
 
 ### For Administrators
-- Security considerations in [Collection Wallets](features/collection-wallets.md#security)
+- Security considerations in [Collection Wallets](features/wallet-wallets.md#security)
 
 ## Related Documentation
 

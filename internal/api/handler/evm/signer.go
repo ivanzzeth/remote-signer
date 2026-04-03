@@ -192,7 +192,6 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 	// Parse filter parameters
 	requestedOffset := 0
 	requestedLimit := 20
-	groupByWallet := query.Get("group_by_wallet") == "true"
 
 	var signerType *types.SignerType
 	if typeStr := query.Get("type"); typeStr != "" {
@@ -311,12 +310,6 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 			kept = append(kept, s)
 		}
 		filteredSigners = kept
-	}
-
-	if groupByWallet {
-		// Group signers by wallet_id
-		h.listWallets(w, r, filteredSigners, requestedOffset, requestedLimit, tagFilter)
-		return
 	}
 
 	total := len(filteredSigners)

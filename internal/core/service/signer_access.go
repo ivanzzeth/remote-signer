@@ -23,7 +23,7 @@ type SignerAccessService struct {
 	accessRepo     storage.SignerAccessRepository
 	apiKeyRepo     storage.APIKeyRepository
 	ruleRepo       storage.RuleRepository
-	collectionRepo storage.CollectionRepository
+	walletRepo storage.WalletRepository
 	hdWalletMgrFn  func() (HDWalletParentResolver, error)
 	logger         *slog.Logger
 }
@@ -62,9 +62,9 @@ func (s *SignerAccessService) SetRuleRepo(repo storage.RuleRepository) {
 	s.ruleRepo = repo
 }
 
-// SetCollectionRepo sets the collection repository for collection-based access resolution.
-func (s *SignerAccessService) SetCollectionRepo(repo storage.CollectionRepository) {
-	s.collectionRepo = repo
+// SetWalletRepo sets the wallet repository for wallet-based access resolution.
+func (s *SignerAccessService) SetWalletRepo(repo storage.WalletRepository) {
+	s.walletRepo = repo
 }
 
 // CheckAccess returns true if the caller (identified by API key ID) can use the signer.
@@ -72,7 +72,7 @@ func (s *SignerAccessService) SetCollectionRepo(repo storage.CollectionRepositor
 // 1. The caller owns the signer and it is active.
 // 2. The caller has an explicit access grant and the signer is active.
 // 3. The signer is a derived HD wallet address whose parent satisfies (1) or (2).
-// 4. The signer belongs to a collection that the caller has access to (via wallet_id in signer_access).
+// 4. The signer belongs to a wallet that the caller has access to (via wallet_id in signer_access).
 func (s *SignerAccessService) CheckAccess(ctx context.Context, callerKeyID, signerAddress string) (bool, error) {
 	allowed, err := s.checkDirectAccess(ctx, callerKeyID, signerAddress)
 	if err != nil {
@@ -99,14 +99,14 @@ func (s *SignerAccessService) CheckAccess(ctx context.Context, callerKeyID, sign
 		}
 	}
 
-	// Check collection-based access: does the signer belong to a collection
+	// Check wallet-based access: does the signer belong to a wallet
 	// that the caller has been granted access to?
-	if s.collectionRepo != nil {
-		collAllowed, collErr := s.checkCollectionAccess(ctx, callerKeyID, signerAddress)
-		if collErr != nil {
-			return false, collErr
+	if s.walletRepo != nil {
+		walletAllowed, walletErr := s.checkWalletAccess(ctx, callerKeyID, signerAddress)
+		if walletErr != nil {
+			return false, walletErr
 		}
-		if collAllowed {
+		if walletAllowed {
 			return true, nil
 		}
 	}
@@ -114,24 +114,24 @@ func (s *SignerAccessService) CheckAccess(ctx context.Context, callerKeyID, sign
 	return false, nil
 }
 
-// checkCollectionAccess checks if the caller has access to the signer via a collection.
-// It looks up all collections containing the signer address, then checks if the caller
-// has an access grant with wallet_id matching any of those collection IDs.
-func (s *SignerAccessService) checkCollectionAccess(ctx context.Context, callerKeyID, signerAddress string) (bool, error) {
-	collections, err := s.collectionRepo.GetCollectionsForWallet(ctx, signerAddress)
+// checkWalletAccess checks if the caller has access to the signer via a wallet.
+// It looks up all wallets containing the signer address, then checks if the caller
+// has an access grant with wallet_id matching any of those wallet IDs.
+func (s *SignerAccessService) checkWalletAccess(ctx context.Context, callerKeyID, signerAddress string) (bool, error) {
+	wallets, err := s.walletRepo.GetWalletsForSigner(ctx, signerAddress)
 	if err != nil {
-		return false, fmt.Errorf("failed to get collections for wallet: %w", err)
+		return false, fmt.Errorf("failed to get wallets for signer: %w", err)
 	}
 
-	for _, coll := range collections {
-		// Check if the caller owns the collection
-		if coll.OwnerID == callerKeyID {
+	for _, wallet := range wallets {
+		// Check if the caller owns the wallet
+		if wallet.OwnerID == callerKeyID {
 			return true, nil
 		}
-		// Check if the caller has an access grant with wallet_id = collection ID
-		hasAccess, accessErr := s.accessRepo.HasAccessViaWallet(ctx, callerKeyID, coll.ID)
+		// Check if the caller has an access grant with wallet_id = wallet ID
+		hasAccess, accessErr := s.accessRepo.HasAccessViaWallet(ctx, callerKeyID, wallet.ID)
 		if accessErr != nil {
-			return false, fmt.Errorf("failed to check collection access: %w", accessErr)
+			return false, fmt.Errorf("failed to check wallet access: %w", accessErr)
 		}
 		if hasAccess {
 			return true, nil
