@@ -395,8 +395,8 @@ func (m *APIKeysModel) renderList() string {
 	content.WriteString("\n\n")
 
 	// Table header
-	headerRow := fmt.Sprintf("%-20s  %-20s  %-8s  %-7s  %-8s  %-10s",
-		"ID", "Name", "Source", "Admin", "Enabled", "Rate Limit")
+	headerRow := fmt.Sprintf("%-20s  %-20s  %-8s  %-10s  %-8s  %-10s",
+		"ID", "Name", "Source", "Role", "Enabled", "Rate Limit")
 	content.WriteString(styles.TableHeaderStyle.Render(headerRow))
 	content.WriteString("\n")
 
@@ -446,9 +446,9 @@ func (m *APIKeysModel) renderKeyRow(k apikeys.APIKey, selected bool) string {
 		name = name[:17] + "..."
 	}
 
-	adminStr := "No"
-	if k.Role == "admin" {
-		adminStr = "Yes"
+	roleStr := string(k.Role)
+	if roleStr == "" {
+		roleStr = "-"
 	}
 
 	enabledStr := "Yes"
@@ -461,8 +461,8 @@ func (m *APIKeysModel) renderKeyRow(k apikeys.APIKey, selected bool) string {
 		rateLimitStr = "unlimited"
 	}
 
-	row := fmt.Sprintf("%-20s  %-20s  %-8s  %-7s  %-8s  %-10s",
-		id, name, k.Source, adminStr, enabledStr, rateLimitStr)
+	row := fmt.Sprintf("%-20s  %-20s  %-8s  %-10s  %-8s  %-10s",
+		id, name, k.Source, roleStr, enabledStr, rateLimitStr)
 
 	if selected {
 		return styles.TableSelectedRowStyle.Render(row)
@@ -478,12 +478,12 @@ func (m *APIKeysModel) renderKeyRow(k apikeys.APIKey, selected bool) string {
 	}
 	sourcePart := sourceStyle.Render(fmt.Sprintf("%-8s", k.Source))
 
-	// Color admin
-	adminStyle := styles.MutedColor
+	// Color role
+	roleStyle := styles.MutedColor
 	if k.Role == "admin" {
-		adminStyle = lipgloss.NewStyle().Foreground(styles.ErrorColor).Bold(true)
+		roleStyle = lipgloss.NewStyle().Foreground(styles.ErrorColor).Bold(true)
 	}
-	adminPart := adminStyle.Render(fmt.Sprintf("%-7s", adminStr))
+	rolePart := roleStyle.Render(fmt.Sprintf("%-10s", roleStr))
 
 	// Color enabled
 	enabledStyle := styles.SuccessStyle
@@ -493,7 +493,7 @@ func (m *APIKeysModel) renderKeyRow(k apikeys.APIKey, selected bool) string {
 	enabledPart := enabledStyle.Render(fmt.Sprintf("%-8s", enabledStr))
 
 	coloredRow := fmt.Sprintf("%-20s  %-20s  %s  %s  %s  %-10s",
-		id, name, sourcePart, adminPart, enabledPart, rateLimitStr)
+		id, name, sourcePart, rolePart, enabledPart, rateLimitStr)
 	return styles.TableRowStyle.Render(coloredRow)
 }
 
