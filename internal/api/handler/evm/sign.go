@@ -15,17 +15,19 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/metrics"
+	"github.com/ivanzzeth/remote-signer/internal/storage"
 	"github.com/ivanzzeth/remote-signer/internal/validate"
 )
 
 // SignHandler handles EVM sign requests
 type SignHandler struct {
-	signService    service.SignServiceAPI
-	signerManager  evm.SignerManager
-	accessService  *service.SignerAccessService
-	logger         *slog.Logger
-	alertService   *middleware.SecurityAlertService
-	signTimeout    time.Duration // context timeout for sign operations (default: 30s)
+	signService   service.SignServiceAPI
+	signerManager evm.SignerManager
+	accessService *service.SignerAccessService
+	signerRepo    storage.SignerRepository
+	logger        *slog.Logger
+	alertService  *middleware.SecurityAlertService
+	signTimeout   time.Duration // context timeout for sign operations (default: 30s)
 }
 
 // SetAlertService sets the security alert service for real-time notifications.
@@ -36,6 +38,11 @@ func (h *SignHandler) SetAlertService(alertService *middleware.SecurityAlertServ
 // SetSignTimeout sets the context timeout for sign operations.
 func (h *SignHandler) SetSignTimeout(d time.Duration) {
 	h.signTimeout = d
+}
+
+// SetSignerRepo sets signer repository for material status guard checks.
+func (h *SignHandler) SetSignerRepo(repo storage.SignerRepository) {
+	h.signerRepo = repo
 }
 
 // NewSignHandler creates a new sign handler
@@ -163,6 +170,15 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		h.writeError(w, "not authorized for this signer", http.StatusForbidden)
 		return
+	}
+	if h.signerRepo != nil {
+		rec, recErr := h.signerRepo.Get(r.Context(), req.SignerAddress)
+		if recErr == nil && rec != nil {
+			if rec.MaterialStatus != types.SignerMaterialStatusPresent {
+				h.writeError(w, fmt.Sprintf("signer material unavailable: %s", rec.MaterialStatus), http.StatusConflict)
+				return
+			}
+		}
 	}
 
 	start := time.Now()

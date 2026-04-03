@@ -7,13 +7,8 @@ type Wallet struct {
 	ID          string    `json:"id"`
 	Name        string    `json:"name"`
 	Description string    `json:"description,omitempty"`
-	MemberCount int       `json:"member_count"`
-	WalletID       string     `json:"wallet_id,omitempty"`
-	WalletType     string     `json:"wallet_type,omitempty"`
-	PrimaryAddress string     `json:"primary_address,omitempty"`
-	SignerCount    int        `json:"signer_count,omitempty"`
-	Enabled        bool       `json:"enabled,omitempty"`
-	Locked         bool       `json:"locked,omitempty"`
+	OwnerID     string    `json:"owner_id,omitempty"`
+	MemberCount int       `json:"member_count,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
@@ -40,9 +35,9 @@ type ListWalletsFilter struct {
 
 // ListWalletsResponse represents the response from listing wallets.
 type ListWalletsResponse struct {
-	Wallets     []Wallet `json:"wallets"`
-	Total       int      `json:"total"`
-	HasMore     bool     `json:"has_more"`
+	Wallets []Wallet `json:"wallets"`
+	Total   int      `json:"total"`
+	HasMore bool     `json:"has_more"`
 }
 
 // AddWalletMemberRequest represents a request to add a signer member to a wallet.

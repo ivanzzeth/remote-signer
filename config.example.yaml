@@ -70,6 +70,13 @@ chains:
     # Directory for storing HD wallets created via API
     hd_wallet_dir: "./data/hd-wallets"
 
+    # Reconcile signer key material status (present/missing/corrupted) into DB table signers.
+    # Startup check catches missing files before serving; interval check catches runtime deletions.
+    material_check:
+      enabled: true
+      startup_check: true
+      interval: "10m"
+
     # EVM RPC gateway for JS rule sandbox (read-only queries: decimals, ERC165, etc.)
     # Used by agent rules and any JS rule that calls web3.call() / erc20.decimals().
     # URL pattern: ${base_url}/${chain_id} or ${base_url}/${chain_id}/api_key/${api_key}

@@ -26,6 +26,8 @@ type WalletRepository interface {
 
 	// GetWalletsForSigner returns all wallets that contain the given signer.
 	GetWalletsForSigner(ctx context.Context, signerAddress string) ([]types.Wallet, error)
+	// GetWalletsForSigners returns signer-address to wallets mapping in batch.
+	GetWalletsForSigners(ctx context.Context, signerAddresses []string) (map[string][]types.Wallet, error)
 }
 
 // GormWalletRepository implements WalletRepository using GORM.
@@ -220,3 +222,41 @@ func (r *GormWalletRepository) GetWalletsForSigner(ctx context.Context, signerAd
 	return wallets, nil
 }
 
+func (r *GormWalletRepository) GetWalletsForSigners(ctx context.Context, signerAddresses []string) (map[string][]types.Wallet, error) {
+	result := make(map[string][]types.Wallet)
+	if len(signerAddresses) == 0 {
+		return result, nil
+	}
+	type row struct {
+		SignerAddress string
+		WalletID      string
+		Name          string
+		Description   string
+		OwnerID       string
+		CreatedAt     time.Time
+		UpdatedAt     time.Time
+	}
+	rows := make([]row, 0)
+	err := r.db.WithContext(ctx).
+		Table("wallet_members").
+		Select("wallet_members.signer_address, wallets.id as wallet_id, wallets.name, wallets.description, wallets.owner_id, wallets.created_at, wallets.updated_at").
+		Joins("JOIN wallets ON wallet_members.wallet_id = wallets.id").
+		Where("wallet_members.signer_address IN ?", signerAddresses).
+		Order("wallets.created_at DESC").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to batch get wallets for signers: %w", err)
+	}
+	for _, r := range rows {
+		w := types.Wallet{
+			ID:          r.WalletID,
+			Name:        r.Name,
+			Description: r.Description,
+			OwnerID:     r.OwnerID,
+			CreatedAt:   r.CreatedAt,
+			UpdatedAt:   r.UpdatedAt,
+		}
+		result[r.SignerAddress] = append(result[r.SignerAddress], w)
+	}
+	return result, nil
+}

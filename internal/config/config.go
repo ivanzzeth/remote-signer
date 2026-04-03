@@ -200,13 +200,21 @@ type ChainsConfig struct {
 
 // EVMConfig contains EVM chain configuration
 type EVMConfig struct {
-	Enabled     bool                 `yaml:"enabled"`
-	Signers     evm.SignerConfig     `yaml:"signers"`
-	KeystoreDir string               `yaml:"keystore_dir"`  // Directory for storing dynamically created keystores
-	HDWalletDir string               `yaml:"hd_wallet_dir"` // Directory for storing HD wallets
-	Foundry     FoundryConfig        `yaml:"foundry"`
-	RPCGateway  evm.RPCGatewayConfig `yaml:"rpc_gateway"`   // RPC gateway for JS rule sandbox (read-only)
-	Simulation  SimulationConfig     `yaml:"simulation"`    // Transaction simulation engine (anvil fork)
+	Enabled       bool                      `yaml:"enabled"`
+	Signers       evm.SignerConfig          `yaml:"signers"`
+	MaterialCheck SignerMaterialCheckConfig `yaml:"material_check"`
+	KeystoreDir   string                    `yaml:"keystore_dir"`  // Directory for storing dynamically created keystores
+	HDWalletDir   string                    `yaml:"hd_wallet_dir"` // Directory for storing HD wallets
+	Foundry       FoundryConfig             `yaml:"foundry"`
+	RPCGateway    evm.RPCGatewayConfig      `yaml:"rpc_gateway"` // RPC gateway for JS rule sandbox (read-only)
+	Simulation    SimulationConfig          `yaml:"simulation"`  // Transaction simulation engine (anvil fork)
+}
+
+// SignerMaterialCheckConfig controls reconciliation of local key material status.
+type SignerMaterialCheckConfig struct {
+	Enabled      bool          `yaml:"enabled"`
+	StartupCheck bool          `yaml:"startup_check"`
+	Interval     time.Duration `yaml:"interval"`
 }
 
 // FoundryConfig contains Foundry (forge) configuration for Solidity rules
@@ -221,15 +229,15 @@ type FoundryConfig struct {
 // SimulationConfig contains transaction simulation engine configuration.
 type SimulationConfig struct {
 	Enabled      bool          `yaml:"enabled"`
-	Backend      string        `yaml:"backend"`         // "rpc" (eth_simulateV1 via gateway) or "anvil" (local fork). Default: "rpc"
-	AnvilPath    string        `yaml:"anvil_path"`      // [anvil] path to anvil binary
-	SyncInterval time.Duration `yaml:"sync_interval"`   // [anvil] periodic health check interval (default: 60s)
-	Timeout      time.Duration `yaml:"timeout"`         // per-simulation timeout (default: 60s)
-	MaxChains    int           `yaml:"max_chains"`      // [anvil] max concurrent anvil forks (default: 10)
-	BatchWindow  time.Duration `yaml:"batch_window"`    // accumulation window for single sign fallback (default: 5s; 0 = disabled)
-	BatchMaxSize int           `yaml:"batch_max_size"`  // max txs per batch (default: 20)
-	PruneHistory int           `yaml:"prune_history"`   // [anvil] --prune-history: max states in memory (default: 0 = minimal)
-	CacheDir     string        `yaml:"cache_dir"`       // [anvil] fork RPC cache directory (default: data/anvil-cache)
+	Backend      string        `yaml:"backend"`        // "rpc" (eth_simulateV1 via gateway) or "anvil" (local fork). Default: "rpc"
+	AnvilPath    string        `yaml:"anvil_path"`     // [anvil] path to anvil binary
+	SyncInterval time.Duration `yaml:"sync_interval"`  // [anvil] periodic health check interval (default: 60s)
+	Timeout      time.Duration `yaml:"timeout"`        // per-simulation timeout (default: 60s)
+	MaxChains    int           `yaml:"max_chains"`     // [anvil] max concurrent anvil forks (default: 10)
+	BatchWindow  time.Duration `yaml:"batch_window"`   // accumulation window for single sign fallback (default: 5s; 0 = disabled)
+	BatchMaxSize int           `yaml:"batch_max_size"` // max txs per batch (default: 20)
+	PruneHistory int           `yaml:"prune_history"`  // [anvil] --prune-history: max states in memory (default: 0 = minimal)
+	CacheDir     string        `yaml:"cache_dir"`      // [anvil] fork RPC cache directory (default: data/anvil-cache)
 	// Budget defaults for auto-created simulation budget records (human-readable units).
 	// Decimals are auto-queried from chain. "-1" = unlimited.
 	BudgetNativeMaxTotal string `yaml:"budget_native_max_total"`  // native token max total per period (default: "0.01")
@@ -499,6 +507,11 @@ func validate(cfg *Config) error {
 			return fmt.Errorf("simulation is enabled but no budget defaults configured (budget_native_max_total, budget_native_max_per_tx, budget_erc20_max_total, budget_erc20_max_per_tx are all empty); this allows unlimited spending — configure budget limits or disable simulation")
 		}
 	}
+	if cfg.Chains.EVM != nil && cfg.Chains.EVM.MaterialCheck.Enabled {
+		if cfg.Chains.EVM.MaterialCheck.Interval < time.Minute {
+			return fmt.Errorf("chains.evm.material_check.interval must be >= 1m")
+		}
+	}
 
 	// Validate API keys
 	seenIDs := make(map[string]bool)
@@ -566,6 +579,9 @@ func setDefaults(cfg *Config) {
 		}
 		if cfg.Chains.EVM.HDWalletDir == "" {
 			cfg.Chains.EVM.HDWalletDir = "./data/hd-wallets"
+		}
+		if cfg.Chains.EVM.MaterialCheck.Interval <= 0 {
+			cfg.Chains.EVM.MaterialCheck.Interval = 10 * time.Minute
 		}
 	}
 

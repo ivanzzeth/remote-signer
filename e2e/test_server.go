@@ -58,8 +58,8 @@ type TestServer struct {
 	db         *gorm.DB
 	cancelFunc context.CancelFunc
 	baseURL    string
-	tlsCerts   *tlsCerts // set by StartWithTLS for mTLS health-check
-	ruleEngine *rule.WhitelistRuleEngine // exposed for dynamic evaluator registration in e2e tests
+	tlsCerts   *tlsCerts                   // set by StartWithTLS for mTLS health-check
+	ruleEngine *rule.WhitelistRuleEngine   // exposed for dynamic evaluator registration in e2e tests
 	simulator  simulation.AnvilForkManager // optional: for simulation e2e tests
 }
 
@@ -199,6 +199,10 @@ func (ts *TestServer) Start() error {
 	signerOwnershipRepo, err := storage.NewGormSignerOwnershipRepository(db)
 	if err != nil {
 		return fmt.Errorf("failed to create signer ownership repository: %w", err)
+	}
+	signerRepo, err := storage.NewGormSignerRepository(db)
+	if err != nil {
+		return fmt.Errorf("failed to create signer repository: %w", err)
 	}
 
 	signerAccessRepo, err := storage.NewGormSignerAccessRepository(db)
@@ -604,6 +608,7 @@ func (ts *TestServer) Start() error {
 		},
 		ApprovalGuard:       approvalGuard,
 		APIKeyRepo:          apiKeyRepo,
+		SignerRepo:          signerRepo,
 		SignerOwnershipRepo: signerOwnershipRepo,
 		SignerAccessRepo:    signerAccessRepo,
 		BudgetRepo:          budgetRepo,

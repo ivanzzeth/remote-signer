@@ -31,28 +31,29 @@ type TemplateConfig struct {
 
 // RouterConfig contains configuration for the router
 type RouterConfig struct {
-	Version                  string
-	IPWhitelistConfig        *middleware.IPWhitelist
-	IPWhitelistConfigForRead *config.IPWhitelistConfig // optional: for GET /api/v1/acls/ip-whitelist (admin, read-only)
-	IPRateLimit              int                       // requests per minute per IP (pre-auth); 0 = use default (200)
-	SolidityValidator        *evm.SolidityRuleValidator
-	JSEvaluator              *evm.JSRuleEvaluator
-	Template                 *TemplateConfig
-	ApprovalGuard            *service.ManualApprovalGuard     // optional: for admin resume endpoint
-	APIKeyRepo               storage.APIKeyRepository         // optional: for signer access visibility and API key management
-	SignerOwnershipRepo      storage.SignerOwnershipRepository // for signer ownership tracking
-	SignerAccessRepo         storage.SignerAccessRepository    // for signer access grants
-	RulesAPIReadonly         bool                             // block rule/template mutations via API
-	SignersAPIReadonly       bool                             // block signer/HD-wallet creation via API
-	APIKeysAPIReadonly       bool                             // block API key management via API
-	AlertService             *middleware.SecurityAlertService // optional: real-time security alerts
-	AuditLogger              *audit.AuditLogger               // optional: persistent audit logging
-	SignTimeout              time.Duration                    // context timeout for sign operations (default: 30s)
-	AutoLockTimeout          time.Duration                    // signer auto-lock timeout (for health endpoint)
-	AuditRetentionDays       int                              // audit log retention days (for health endpoint)
-	BudgetRepo                    storage.BudgetRepository         // optional: for GET /api/v1/evm/rules/{id}/budgets
-	MaxRulesPerAPIKey             int                              // per-key rule count limit (0 = no limit, default 50)
-	RequireApprovalForAgentRules  bool                             // require admin approval for agent whitelist rules
+	Version                      string
+	IPWhitelistConfig            *middleware.IPWhitelist
+	IPWhitelistConfigForRead     *config.IPWhitelistConfig // optional: for GET /api/v1/acls/ip-whitelist (admin, read-only)
+	IPRateLimit                  int                       // requests per minute per IP (pre-auth); 0 = use default (200)
+	SolidityValidator            *evm.SolidityRuleValidator
+	JSEvaluator                  *evm.JSRuleEvaluator
+	Template                     *TemplateConfig
+	ApprovalGuard                *service.ManualApprovalGuard      // optional: for admin resume endpoint
+	APIKeyRepo                   storage.APIKeyRepository          // optional: for signer access visibility and API key management
+	SignerOwnershipRepo          storage.SignerOwnershipRepository // for signer ownership tracking
+	SignerAccessRepo             storage.SignerAccessRepository    // for signer access grants
+	SignerRepo                   storage.SignerRepository          // DB signer inventory/material status
+	RulesAPIReadonly             bool                              // block rule/template mutations via API
+	SignersAPIReadonly           bool                              // block signer/HD-wallet creation via API
+	APIKeysAPIReadonly           bool                              // block API key management via API
+	AlertService                 *middleware.SecurityAlertService  // optional: real-time security alerts
+	AuditLogger                  *audit.AuditLogger                // optional: persistent audit logging
+	SignTimeout                  time.Duration                     // context timeout for sign operations (default: 30s)
+	AutoLockTimeout              time.Duration                     // signer auto-lock timeout (for health endpoint)
+	AuditRetentionDays           int                               // audit log retention days (for health endpoint)
+	BudgetRepo                   storage.BudgetRepository          // optional: for GET /api/v1/evm/rules/{id}/budgets
+	MaxRulesPerAPIKey            int                               // per-key rule count limit (0 = no limit, default 50)
+	RequireApprovalForAgentRules bool                              // require admin approval for agent whitelist rules
 	// Preset API (admin-only). When PresetsDir is non-empty, GET/POST /api/v1/presets are registered.
 	PresetsDir string   // directory containing preset YAML files (resolved absolute path)
 	PresetsDB  *gorm.DB // optional: for preset apply transaction; required when PresetsDir is set and template service is used
@@ -154,6 +155,9 @@ func (r *Router) setupRoutes() error {
 	if err != nil {
 		return err
 	}
+	if r.config.SignerRepo != nil {
+		signHandler.SetSignerRepo(r.config.SignerRepo)
+	}
 	if r.config.AlertService != nil {
 		signHandler.SetAlertService(r.config.AlertService)
 	}
@@ -212,6 +216,12 @@ func (r *Router) setupRoutes() error {
 	signerHandler, err := evmhandler.NewSignerHandler(r.signerManager, accessService, r.logger, r.config.SignersAPIReadonly)
 	if err != nil {
 		return err
+	}
+	if r.config.SignerRepo != nil {
+		signerHandler.SetSignerRepo(r.config.SignerRepo)
+	}
+	if r.config.WalletRepo != nil {
+		signerHandler.SetWalletRepo(r.config.WalletRepo)
 	}
 	if r.config.AuditLogger != nil {
 		signerHandler.SetAuditLogger(r.config.AuditLogger)

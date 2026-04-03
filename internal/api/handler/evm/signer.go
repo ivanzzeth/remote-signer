@@ -19,6 +19,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/secure"
+	"github.com/ivanzzeth/remote-signer/internal/storage"
 	"github.com/ivanzzeth/remote-signer/internal/validate"
 )
 
@@ -26,6 +27,8 @@ import (
 type SignerHandler struct {
 	signerManager      evm.SignerManager
 	accessService      *service.SignerAccessService
+	signerRepo         storage.SignerRepository
+	walletRepo         storage.WalletRepository
 	readOnly           bool // when true, block signer creation via API
 	maxKeystoresPerKey int  // resource limit: max keystores per API key (0 = no limit)
 	logger             *slog.Logger
@@ -56,6 +59,16 @@ func NewSignerHandler(signerManager evm.SignerManager, accessService *service.Si
 	}, nil
 }
 
+// SetSignerRepo sets DB signer inventory repository for response enrichment.
+func (h *SignerHandler) SetSignerRepo(repo storage.SignerRepository) {
+	h.signerRepo = repo
+}
+
+// SetWalletRepo sets wallet repository for signer->wallet aggregation.
+func (h *SignerHandler) SetWalletRepo(repo storage.WalletRepository) {
+	h.walletRepo = repo
+}
+
 // SetAuditLogger sets the audit logger for signer management operations.
 func (h *SignerHandler) SetAuditLogger(al *audit.AuditLogger) {
 	h.auditLogger = al
@@ -68,18 +81,26 @@ func (h *SignerHandler) SetMaxKeystoresPerKey(max int) {
 
 // SignerResponse represents a signer in API responses
 type SignerResponse struct {
-	Address           string     `json:"address"`
-	Type              string     `json:"type"`
-	Enabled           bool       `json:"enabled"`
-	Locked            bool       `json:"locked"`
-	UnlockedAt        *time.Time `json:"unlocked_at,omitempty"`
-	OwnerID           string     `json:"owner_id,omitempty"`
-	Status            string     `json:"status,omitempty"` // ownership status: active, pending_approval
-	DisplayName       string     `json:"display_name,omitempty"`
-	Tags              []string   `json:"tags,omitempty"`
-	WalletID          string     `json:"wallet_id,omitempty"`           // wallet identifier (for HD: primary address, for keystore: own address)
-	HDParentAddress   string     `json:"hd_parent_address,omitempty"`   // for derived addresses: parent HD wallet address
-	HDDerivationIndex *uint32    `json:"hd_derivation_index,omitempty"` // for derived addresses: derivation index
+	Address           string            `json:"address"`
+	Type              string            `json:"type"`
+	Enabled           bool              `json:"enabled"`
+	Locked            bool              `json:"locked"`
+	UnlockedAt        *time.Time        `json:"unlocked_at,omitempty"`
+	OwnerID           string            `json:"owner_id,omitempty"`
+	Status            string            `json:"status,omitempty"` // ownership status: active, pending_approval
+	DisplayName       string            `json:"display_name,omitempty"`
+	Tags              []string          `json:"tags,omitempty"`
+	PrimaryAddress    string            `json:"primary_address,omitempty"`     // for HD derived: parent HD address; otherwise self
+	HDDerivationIndex *uint32           `json:"hd_derivation_index,omitempty"` // for derived addresses: derivation index
+	MaterialStatus    string            `json:"material_status,omitempty"`
+	MaterialCheckedAt *time.Time        `json:"material_checked_at,omitempty"`
+	MaterialMissingAt *time.Time        `json:"material_missing_at,omitempty"`
+	Wallets           []SignerWalletRef `json:"wallets,omitempty"`
+}
+
+type SignerWalletRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 // WalletResponse represents a wallet in API responses
@@ -106,11 +127,11 @@ type ListWalletsResponse struct {
 
 // WalletSignersResponse represents the response from listing wallet's signers
 type WalletSignersResponse struct {
-	WalletID   string            `json:"wallet_id"`
-	WalletType string            `json:"wallet_type"`
-	Signers    []SignerResponse  `json:"signers"`
-	Total      int               `json:"total"`
-	HasMore    bool              `json:"has_more"`
+	WalletID   string           `json:"wallet_id"`
+	WalletType string           `json:"wallet_type"`
+	Signers    []SignerResponse `json:"signers"`
+	Total      int              `json:"total"`
+	HasMore    bool             `json:"has_more"`
 }
 
 // UnlockSignerRequest represents the request to unlock a locked signer
@@ -327,8 +348,27 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 
 	// Convert to response with ownership info
 	signers := make([]SignerResponse, len(filteredSigners))
+	addresses := make([]string, 0, len(filteredSigners))
 	for i, s := range filteredSigners {
 		signers[i] = h.newSignerResponse(r.Context(), s)
+		addresses = append(addresses, s.Address)
+	}
+	if h.walletRepo != nil && len(addresses) > 0 {
+		walletsMap, mapErr := h.walletRepo.GetWalletsForSigners(r.Context(), addresses)
+		if mapErr != nil {
+			h.logger.Warn("failed to aggregate wallets for signers", slog.String("error", mapErr.Error()))
+		} else {
+			for i := range signers {
+				ws := walletsMap[signers[i].Address]
+				if len(ws) == 0 {
+					continue
+				}
+				signers[i].Wallets = make([]SignerWalletRef, 0, len(ws))
+				for _, w := range ws {
+					signers[i].Wallets = append(signers[i].Wallets, SignerWalletRef{ID: w.ID, Name: w.Name})
+				}
+			}
+		}
 	}
 
 	resp := ListSignersResponse{
@@ -916,45 +956,51 @@ func (h *SignerHandler) newSignerResponse(ctx context.Context, s types.SignerInf
 		UnlockedAt: s.UnlockedAt,
 	}
 
-	// For HD wallets, dynamically check runtime unlock status and find primary address
-	// (DB field may be stale after unlock, derived addresses need to inherit primary's ownership)
-	var primaryAddress string
+	primaryAddress := s.Address
 	if s.Type == string(types.SignerTypeHDWallet) {
 		if hdwMgr, err := h.signerManager.HDWalletManager(); err == nil {
-			// Check all unlocked HD wallets to see if this address belongs to any of them
+			found := false
 			unlocked := false
 			for _, wallet := range hdwMgr.ListHDWallets() {
-				if !wallet.Locked {
-					// Check if this address is the primary address
-					if strings.EqualFold(wallet.PrimaryAddress, s.Address) {
-						unlocked = true
+				if strings.EqualFold(wallet.PrimaryAddress, s.Address) {
+					primaryAddress = wallet.PrimaryAddress
+					unlocked = !wallet.Locked
+					found = true
+					break
+				}
+				derived, derr := hdwMgr.ListDerivedAddresses(wallet.PrimaryAddress)
+				if derr != nil {
+					continue
+				}
+				for _, d := range derived {
+					if strings.EqualFold(d.Address, s.Address) {
 						primaryAddress = wallet.PrimaryAddress
+						unlocked = !wallet.Locked
+						found = true
 						break
 					}
-					// Check if this address is a derived address
-					derived, err := hdwMgr.ListDerivedAddresses(wallet.PrimaryAddress)
-					if err == nil {
-						for _, d := range derived {
-							if strings.EqualFold(d.Address, s.Address) {
-								unlocked = true
-								primaryAddress = wallet.PrimaryAddress // Derived address inherits from primary
-								break
-							}
-						}
-						if unlocked {
-							break
-						}
-					}
+				}
+				if found {
+					break
 				}
 			}
-			resp.Locked = !unlocked
+			if found {
+				resp.Locked = !unlocked
+				resp.Enabled = unlocked
+			}
 		}
 	}
 
+	// Fill HD hierarchy info if this is a derived address.
+	// Keys from SignerManager.GetHDHierarchy match chain/evm.normalizeAddress (EIP-55), not lowercase hex.
+	hierarchy := h.signerManager.GetHDHierarchy()
+	if info, ok := hierarchy[common.HexToAddress(s.Address).Hex()]; ok {
+		primaryAddress = info.ParentAddress
+		resp.HDDerivationIndex = &info.DerivationIndex
+	}
 	// Get ownership: try current address first, fallback to primary address for derived addresses
 	ownership, oErr := h.accessService.GetOwnership(ctx, s.Address)
 	if oErr != nil && primaryAddress != "" && !strings.EqualFold(primaryAddress, s.Address) {
-		// Derived address has no ownership record, use primary address's ownership
 		ownership, oErr = h.accessService.GetOwnership(ctx, primaryAddress)
 	}
 	if oErr == nil && ownership != nil {
@@ -963,20 +1009,23 @@ func (h *SignerHandler) newSignerResponse(ctx context.Context, s types.SignerInf
 		resp.DisplayName = ownership.DisplayName
 		resp.Tags = ownership.Tags()
 	}
+	resp.PrimaryAddress = primaryAddress
 
-	// Fill HD hierarchy info if this is a derived address.
-	// Keys from SignerManager.GetHDHierarchy match chain/evm.normalizeAddress (EIP-55), not lowercase hex.
-	hierarchy := h.signerManager.GetHDHierarchy()
-	if info, ok := hierarchy[common.HexToAddress(s.Address).Hex()]; ok {
-		resp.HDParentAddress = info.ParentAddress
-		resp.HDDerivationIndex = &info.DerivationIndex
+	if h.signerRepo != nil {
+		if rec, err := h.signerRepo.Get(ctx, s.Address); err == nil && rec != nil {
+			if rec.PrimaryAddress != "" {
+				resp.PrimaryAddress = rec.PrimaryAddress
+			}
+			resp.MaterialStatus = string(rec.MaterialStatus)
+			resp.MaterialCheckedAt = rec.MaterialCheckedAt
+			resp.MaterialMissingAt = rec.MaterialMissingAt
+			resp.Locked = rec.Locked
+			resp.Enabled = rec.Enabled
+			resp.HDDerivationIndex = rec.HDDerivationIndex
+		}
 	}
-
-	// Set wallet_id: for HD derived addresses use parent, otherwise use own address
-	if resp.HDParentAddress != "" {
-		resp.WalletID = resp.HDParentAddress
-	} else {
-		resp.WalletID = s.Address
+	if resp.PrimaryAddress == "" {
+		resp.PrimaryAddress = s.Address
 	}
 
 	return resp
@@ -1078,7 +1127,7 @@ func (h *SignerHandler) listWallets(w http.ResponseWriter, r *http.Request, sign
 	walletMap := make(map[string][]types.SignerInfo)
 	for _, s := range signers {
 		resp := h.newSignerResponse(r.Context(), s)
-		walletID := resp.WalletID
+		walletID := resp.PrimaryAddress
 		walletMap[walletID] = append(walletMap[walletID], s)
 	}
 
@@ -1230,7 +1279,7 @@ func (h *SignerHandler) listWalletSigners(w http.ResponseWriter, r *http.Request
 			continue
 		}
 		resp := h.newSignerResponse(r.Context(), s)
-		if strings.EqualFold(resp.WalletID, walletID) {
+		if strings.EqualFold(resp.PrimaryAddress, walletID) {
 			walletSigners = append(walletSigners, s)
 			if walletType == "" {
 				walletType = s.Type

@@ -31,7 +31,7 @@ func TestRunMigrations_AppliedOnce(t *testing.T) {
 	row := db.Raw("SELECT version FROM schema_migrations LIMIT 1").Row()
 	require.NoError(t, row.Err())
 	require.NoError(t, row.Scan(&version))
-	assert.Equal(t, uint(2), version, "migration version 2 should be recorded")
+	assert.Equal(t, uint(3), version, "migration version 3 should be recorded")
 
 	// Second run: idempotent (ErrNoChange), no error
 	err = runMigrations(db, dsn)

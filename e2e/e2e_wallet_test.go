@@ -295,17 +295,17 @@ func TestWalletMemberTypes_KeystoreAndHDWallet(t *testing.T) {
 			_ = adminClient.EVM.Signers.DeleteSigner(context.Background(), createdHD)
 		})
 		hdSigner = &evm.Signer{
-			Address: created.PrimaryAddress,
+			Address:       created.PrimaryAddress,
 			SignerAddress: created.PrimaryAddress,
-			Type:    "hd_wallet",
+			Type:          "hd_wallet",
 		}
 	}
 
-	keystoreWalletID := keystoreSigner.WalletID
+	keystoreWalletID := keystoreSigner.PrimaryAddress
 	if keystoreWalletID == "" {
 		keystoreWalletID = keystoreSigner.Address
 	}
-	hdWalletID := hdSigner.WalletID
+	hdWalletID := hdSigner.PrimaryAddress
 	if hdWalletID == "" {
 		hdWalletID = hdSigner.Address
 	}

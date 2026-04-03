@@ -4,19 +4,27 @@ import "time"
 
 // Signer represents a signer configuration.
 type Signer struct {
-	Address           string     `json:"address"`
-	SignerAddress     string     `json:"signer_address,omitempty"`
-	Type              string     `json:"type"`
-	Enabled           bool       `json:"enabled"`
-	Locked            bool       `json:"locked"`
-	UnlockedAt        *time.Time `json:"unlocked_at,omitempty"`
-	OwnerID           string     `json:"owner_id,omitempty"`
-	Status            string     `json:"status,omitempty"` // ownership status: active, pending_approval
-	DisplayName       string     `json:"display_name,omitempty"`
-	Tags              []string   `json:"tags,omitempty"`
-	WalletID          string     `json:"wallet_id,omitempty"`           // wallet identifier (for HD: primary address, for keystore: own address)
-	HDParentAddress   string     `json:"hd_parent_address,omitempty"`   // for derived addresses: parent HD wallet address
-	HDDerivationIndex *uint32    `json:"hd_derivation_index,omitempty"` // for derived addresses: derivation index
+	Address           string            `json:"address"`
+	SignerAddress     string            `json:"signer_address,omitempty"`
+	Type              string            `json:"type"`
+	Enabled           bool              `json:"enabled"`
+	Locked            bool              `json:"locked"`
+	UnlockedAt        *time.Time        `json:"unlocked_at,omitempty"`
+	OwnerID           string            `json:"owner_id,omitempty"`
+	Status            string            `json:"status,omitempty"` // ownership status: active, pending_approval
+	DisplayName       string            `json:"display_name,omitempty"`
+	Tags              []string          `json:"tags,omitempty"`
+	PrimaryAddress    string            `json:"primary_address,omitempty"`
+	HDDerivationIndex *uint32           `json:"hd_derivation_index,omitempty"` // for derived addresses: derivation index
+	MaterialStatus    string            `json:"material_status,omitempty"`
+	MaterialCheckedAt *time.Time        `json:"material_checked_at,omitempty"`
+	MaterialMissingAt *time.Time        `json:"material_missing_at,omitempty"`
+	Wallets           []SignerWalletRef `json:"wallets,omitempty"`
+}
+
+type SignerWalletRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 // SignerAccessEntry represents an access grant on a signer.

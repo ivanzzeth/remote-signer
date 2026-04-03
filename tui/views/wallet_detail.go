@@ -59,12 +59,12 @@ func newWalletDetailModelFromService(wallets evm.WalletAPI, signers evm.SignerAP
 	return &WalletDetailModel{walletsSvc: wallets, signersSvc: signers, ctx: ctx, spinner: s}, nil
 }
 
-func (m *WalletDetailModel) Init() tea.Cmd { return nil }
-func (m *WalletDetailModel) SetSize(width, height int) {}
-func (m *WalletDetailModel) ShouldGoBack() bool { return m.goBack }
-func (m *WalletDetailModel) ResetGoBack() { m.goBack = false }
-func (m *WalletDetailModel) IsCapturingInput() bool { return m.showAddPicker || m.showRemove }
-func (m *WalletDetailModel) ShouldOpenMember() bool { return false }
+func (m *WalletDetailModel) Init() tea.Cmd                 { return nil }
+func (m *WalletDetailModel) SetSize(width, height int)     {}
+func (m *WalletDetailModel) ShouldGoBack() bool            { return m.goBack }
+func (m *WalletDetailModel) ResetGoBack()                  { m.goBack = false }
+func (m *WalletDetailModel) IsCapturingInput() bool        { return m.showAddPicker || m.showRemove }
+func (m *WalletDetailModel) ShouldOpenMember() bool        { return false }
 func (m *WalletDetailModel) GetOpenMemberWalletID() string { return "" }
 
 func (m *WalletDetailModel) LoadWallet(w evm.Wallet) tea.Cmd {
@@ -228,16 +228,33 @@ func (m *WalletDetailModel) View() string {
 	}
 	var b strings.Builder
 	b.WriteString(styles.TitleStyle.Render("Wallet Detail") + "\n\n")
-	b.WriteString(fmt.Sprintf("Wallet ID: %s\n\n", m.walletID))
+	if m.wallet != nil {
+		b.WriteString(fmt.Sprintf("ID: %s\n", m.wallet.ID))
+		b.WriteString(fmt.Sprintf("Name: %s\n", m.wallet.Name))
+		b.WriteString(fmt.Sprintf("Description: %s\n", strings.TrimSpace(defaultString(m.wallet.Description, "-"))))
+		b.WriteString(fmt.Sprintf("Owner: %s\n", strings.TrimSpace(defaultString(m.wallet.OwnerID, "-"))))
+		b.WriteString(fmt.Sprintf("Created: %s\n", m.wallet.CreatedAt.Format("2006-01-02 15:04:05")))
+		b.WriteString(fmt.Sprintf("Updated: %s\n\n", m.wallet.UpdatedAt.Format("2006-01-02 15:04:05")))
+	} else {
+		b.WriteString(fmt.Sprintf("ID: %s\n\n", m.walletID))
+	}
 	if m.actionMessage != "" {
 		b.WriteString(m.actionMessage + "\n\n")
 	}
+	b.WriteString(styles.TableHeaderStyle.Render(fmt.Sprintf("%-2s  %-44s  %-20s", "", "Signer Address", "Added At")))
+	b.WriteString("\n")
 	for i, member := range m.members {
 		prefix := "  "
 		if i == m.selectedIdx {
 			prefix = "➜ "
 		}
-		b.WriteString(fmt.Sprintf("%s%s\n", prefix, member.SignerAddress))
+		row := fmt.Sprintf("%-2s  %-44s  %-20s", prefix, member.SignerAddress, member.AddedAt.Format("2006-01-02 15:04:05"))
+		if i == m.selectedIdx {
+			b.WriteString(styles.TableSelectedRowStyle.Render(row))
+		} else {
+			b.WriteString(styles.TableRowStyle.Render(row))
+		}
+		b.WriteString("\n")
 	}
 	b.WriteString("\n")
 	b.WriteString(styles.HelpStyle.Render("↑/↓: select • a: add • d: remove • D: delete wallet • r: refresh • esc: back"))
@@ -263,4 +280,11 @@ func (m *WalletDetailModel) loadAddCandidates() tea.Cmd {
 		}
 		return walletDetailAddCandidatesMsg{signers: candidates}
 	}
+}
+
+func defaultString(v string, fallback string) string {
+	if strings.TrimSpace(v) == "" {
+		return fallback
+	}
+	return v
 }

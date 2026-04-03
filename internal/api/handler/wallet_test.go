@@ -62,7 +62,7 @@ func TestAddMember_CrossUserPrivilegeEscalation(t *testing.T) {
 	require.NoError(t, collRepo.Create(ctx, collB))
 
 	// User B tries to add User A's wallet to their wallet
-	body, _ := json.Marshal(addMemberRequest{WalletID: walletA})
+	body, _ := json.Marshal(addMemberRequest{SignerAddress: walletA})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/wallets/"+collB.ID+"/members", bytes.NewReader(body))
 
 	// Set User B as the authenticated caller (non-admin)
@@ -115,7 +115,7 @@ func TestAddMember_OwnerCanAddOwnWallet(t *testing.T) {
 	require.NoError(t, collRepo.Create(ctx, collA))
 
 	// User A adds their own wallet to their wallet
-	body, _ := json.Marshal(addMemberRequest{WalletID: walletA})
+	body, _ := json.Marshal(addMemberRequest{SignerAddress: walletA})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/wallets/"+collA.ID+"/members", bytes.NewReader(body))
 
 	apiKeyA := &types.APIKey{ID: "user-a", Name: "User A", Role: types.RoleDev, Enabled: true}
@@ -165,7 +165,7 @@ func TestAddMember_AccessGranteeCanAddWallet(t *testing.T) {
 	require.NoError(t, collRepo.Create(ctx, collB))
 
 	// User B adds a wallet they have access to
-	body, _ := json.Marshal(addMemberRequest{WalletID: walletA})
+	body, _ := json.Marshal(addMemberRequest{SignerAddress: walletA})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/wallets/"+collB.ID+"/members", bytes.NewReader(body))
 
 	apiKeyB := &types.APIKey{ID: "user-b", Name: "User B", Role: types.RoleDev, Enabled: true}
@@ -207,7 +207,7 @@ func TestAddMember_AdminBypassesOwnershipCheck(t *testing.T) {
 	require.NoError(t, collRepo.Create(ctx, collAdmin))
 
 	// Admin adds User A's wallet (should be allowed)
-	body, _ := json.Marshal(addMemberRequest{WalletID: walletA})
+	body, _ := json.Marshal(addMemberRequest{SignerAddress: walletA})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/wallets/"+collAdmin.ID+"/members", bytes.NewReader(body))
 
 	adminKey := &types.APIKey{ID: "admin-key", Name: "Admin", Role: types.RoleAdmin, Enabled: true}
