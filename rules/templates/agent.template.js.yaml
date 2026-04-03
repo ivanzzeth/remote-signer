@@ -92,7 +92,7 @@ rules:
   # ── agent-tx: REMOVED ──
   # The "allow any transaction" whitelist rule has been removed.
   # All transaction signing now falls through to the SimulationBudgetRule,
-  # which forks the chain via anvil, simulates the tx, parses Transfer events,
+  # which uses eth_simulateV1, parses Transfer events,
   # and tracks actual token outflows in the budget engine.
   #
   # Why: The old agent-tx allowed ANY calldata (including DEX swaps, aggregator

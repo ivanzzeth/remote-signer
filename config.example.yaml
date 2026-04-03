@@ -86,14 +86,13 @@ chains:
       api_key: "${EVM_RPC_GATEWAY_API_KEY:-}"           # optional, for authenticated endpoints
       cache_ttl: "24h"                                  # token metadata cache TTL
 
-    # Transaction simulation engine (anvil fork)
-    # Simulates transactions on a local anvil fork to predict balance changes,
-    # gas usage, and detect approvals. Requires anvil binary (Foundry).
+    # Transaction simulation (eth_simulateV1 via rpc_gateway)
+    # Predicts balance changes, gas usage, and approvals from simulated receipts/logs.
     #
     # API Endpoints:
     #   POST /api/v1/evm/simulate        — simulate a single transaction
     #   POST /api/v1/evm/simulate/batch  — simulate multiple transactions in sequence
-    #   GET  /api/v1/evm/simulate/status — health/status of all anvil fork instances
+    #   GET  /api/v1/evm/simulate/status — engine status (engine_version, optional per-chain)
     #   POST /api/v1/evm/sign/batch      — simulate + sign atomically (requires rule engine)
     #
     # CLI:
@@ -104,19 +103,9 @@ chains:
     #   remote_signer_simulation_requests_total{chain_id, status}
     #   remote_signer_simulation_duration_seconds{chain_id}
     #   remote_signer_simulation_batch_size
-    #   remote_signer_anvil_fork_sync_total{chain_id}
-    #   remote_signer_anvil_fork_restarts_total{chain_id}
     simulation:
       enabled: false
-      backend: "rpc"                       # "rpc" (default, recommended) or "anvil"
-                                           # rpc: uses eth_simulateV1 via rpc_gateway (<1s latency)
-                                           # anvil: local fork process (known OOM/startup issues, not recommended for production)
-      anvil_path: "data/foundry/anvil"     # path to anvil binary (anvil backend only)
-      sync_interval: "60s"                 # periodic health check / restart interval
       timeout: "60s"                       # per-simulation timeout (includes remote RPC state fetch)
-      max_chains: 10                       # max concurrent anvil forks (anvil backend only)
-      prune_history: 0                     # anvil --prune-history: max states in memory (0=minimal, -1=keep all, anvil backend only)
-      cache_dir: "data/anvil-cache"        # persistent fork RPC cache dir (anvil backend only)
       batch_window: "1s"                   # accumulation window for future batch sign fallback
       batch_max_size: 20                   # max txs per batch
 

@@ -56,27 +56,12 @@ var (
 			Buckets: prometheus.LinearBuckets(1, 1, 20), // 1 to 20
 		},
 	)
-	anvilForkSyncTotal = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "remote_signer_anvil_fork_sync_total",
-			Help: "Total number of anvil fork sync (reset) operations by chain_id",
-		},
-		[]string{"chain_id"},
-	)
-	anvilForkRestartsTotal = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "remote_signer_anvil_fork_restarts_total",
-			Help: "Total number of anvil fork restarts by chain_id",
-		},
-		[]string{"chain_id"},
-	)
 )
 
 func init() {
 	prometheus.MustRegister(
 		ruleEvalDuration, ruleEvalTotal, signRequestDuration,
 		simulationRequestsTotal, simulationDurationSeconds, simulationBatchSize,
-		anvilForkSyncTotal, anvilForkRestartsTotal,
 	)
 }
 
@@ -125,16 +110,6 @@ func RecordSimulationRequest(chainID, status string, duration time.Duration) {
 // RecordSimulationBatchSize records the size of a batch simulation.
 func RecordSimulationBatchSize(size int) {
 	simulationBatchSize.Observe(float64(size))
-}
-
-// RecordAnvilForkSync records an anvil fork sync (reset) event.
-func RecordAnvilForkSync(chainID string) {
-	anvilForkSyncTotal.WithLabelValues(chainID).Inc()
-}
-
-// RecordAnvilForkRestart records an anvil fork restart event.
-func RecordAnvilForkRestart(chainID string) {
-	anvilForkRestartsTotal.WithLabelValues(chainID).Inc()
 }
 
 // Handler returns the HTTP handler for the /metrics endpoint (Prometheus exposition format).

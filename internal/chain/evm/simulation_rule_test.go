@@ -18,7 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// mockSimulator implements simulation.AnvilForkManager for testing.
+// mockSimulator implements simulation.Simulator for testing.
 type mockSimulator struct {
 	simulateResult      *simulation.SimulationResult
 	simulateErr         error

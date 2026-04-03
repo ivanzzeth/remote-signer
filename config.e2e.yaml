@@ -36,10 +36,8 @@ chains:
       timeout: "30s"
     simulation:
       enabled: true
-      anvil_path: ""  # auto-detect: data/foundry/anvil then PATH
-      sync_interval: "60s"
+      # eth_simulateV1 via rpc_gateway
       timeout: "30s"
-      max_chains: 5
       budget_native_max_total: "1"
       budget_native_max_per_tx: "0.1"
       budget_erc20_max_total: "1000"

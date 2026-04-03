@@ -372,7 +372,7 @@ fi
 
 # 7. Run e2e tests (using port 18548 to avoid conflict with production on 8548). No skip; long timeout for budget/schedule e2e.
 echo -n "Running e2e tests... "
-# Exclude TestSimulate_* (requires external RPC gateway + anvil fork, too slow for pre-commit)
+# Exclude TestSimulate_* (requires external RPC gateway, too slow for pre-commit)
 if E2E_API_PORT=18548 go test -tags e2e ./e2e/... -count=1 -timeout 10m -skip 'TestSimulate_' 2>/dev/null; then
     echo -e "${GREEN}OK${NC}"
 else

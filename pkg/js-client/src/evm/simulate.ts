@@ -77,7 +77,7 @@ export interface SimulateBatchResponse {
   net_balance_changes: BalanceChangeDTO[];
 }
 
-/** Status of a single anvil fork instance. */
+/** Per-chain simulator status (optional; RPC backend may return empty). */
 export interface ChainStatusDTO {
   status: string;
   port: number;
@@ -90,7 +90,7 @@ export interface ChainStatusDTO {
 /** Response from GET /api/v1/evm/simulate/status. */
 export interface SimulationStatusResponse {
   enabled: boolean;
-  anvil_version: string;
+  engine_version: string;
   chains: Record<string, ChainStatusDTO>;
 }
 
@@ -124,7 +124,7 @@ export class EvmSimulateService {
   }
 
   /**
-   * Get the status of all running simulation anvil forks.
+   * Get simulation engine status (enabled flag, engine id string, optional per-chain details).
    */
   async status(): Promise<SimulationStatusResponse> {
     return this.transport.request<SimulationStatusResponse>(

@@ -49,7 +49,7 @@ func (m *accMockSimulator) Close() error                                    { re
 
 // --- Helpers ---
 
-func newAccTestRule(t *testing.T, sim simulation.AnvilForkManager, window time.Duration, maxSize int) *SimulationBudgetRule {
+func newAccTestRule(t *testing.T, sim simulation.Simulator, window time.Duration, maxSize int) *SimulationBudgetRule {
 	t.Helper()
 	r, err := NewSimulationBudgetRule(sim, nil, nil, nil, nil, nil, slog.Default())
 	require.NoError(t, err)

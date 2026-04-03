@@ -106,7 +106,7 @@ func (s *SignService) SetManualApprovalEnabled(enabled bool) {
 }
 
 // SetSimulationRule sets the optional simulation-based budget fallback rule.
-// When set, unmatched transactions are simulated on an anvil fork and budget
+// When set, unmatched transactions are simulated via eth_simulateV1 and budget
 // is checked against actual token outflows before signing.
 func (s *SignService) SetSimulationRule(rule *evmchain.SimulationBudgetRule) {
 	s.simulationRule = rule

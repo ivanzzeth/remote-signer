@@ -207,7 +207,7 @@ type EVMConfig struct {
 	HDWalletDir   string                    `yaml:"hd_wallet_dir"` // Directory for storing HD wallets
 	Foundry       FoundryConfig             `yaml:"foundry"`
 	RPCGateway    evm.RPCGatewayConfig      `yaml:"rpc_gateway"` // RPC gateway for JS rule sandbox (read-only)
-	Simulation    SimulationConfig          `yaml:"simulation"`  // Transaction simulation engine (anvil fork)
+	Simulation    SimulationConfig          `yaml:"simulation"`  // Transaction simulation (eth_simulateV1 via rpc_gateway)
 }
 
 // SignerMaterialCheckConfig controls reconciliation of local key material status.
@@ -228,16 +228,10 @@ type FoundryConfig struct {
 
 // SimulationConfig contains transaction simulation engine configuration.
 type SimulationConfig struct {
-	Enabled      bool          `yaml:"enabled"`
-	Backend      string        `yaml:"backend"`        // "rpc" (eth_simulateV1 via gateway) or "anvil" (local fork). Default: "rpc"
-	AnvilPath    string        `yaml:"anvil_path"`     // [anvil] path to anvil binary
-	SyncInterval time.Duration `yaml:"sync_interval"`  // [anvil] periodic health check interval (default: 60s)
-	Timeout      time.Duration `yaml:"timeout"`        // per-simulation timeout (default: 60s)
-	MaxChains    int           `yaml:"max_chains"`     // [anvil] max concurrent anvil forks (default: 10)
+	Enabled bool          `yaml:"enabled"`
+	Timeout time.Duration `yaml:"timeout"` // per-simulation timeout (default: 60s)
 	BatchWindow  time.Duration `yaml:"batch_window"`   // accumulation window for single sign fallback (default: 5s; 0 = disabled)
 	BatchMaxSize int           `yaml:"batch_max_size"` // max txs per batch (default: 20)
-	PruneHistory int           `yaml:"prune_history"`  // [anvil] --prune-history: max states in memory (default: 0 = minimal)
-	CacheDir     string        `yaml:"cache_dir"`      // [anvil] fork RPC cache directory (default: data/anvil-cache)
 	// Budget defaults for auto-created simulation budget records (human-readable units).
 	// Decimals are auto-queried from chain. "-1" = unlimited.
 	BudgetNativeMaxTotal string `yaml:"budget_native_max_total"`  // native token max total per period (default: "0.01")
@@ -588,26 +582,14 @@ func setDefaults(cfg *Config) {
 	// Simulation engine defaults
 	if cfg.Chains.EVM != nil && cfg.Chains.EVM.Simulation.Enabled {
 		sim := &cfg.Chains.EVM.Simulation
-		if sim.AnvilPath == "" {
-			sim.AnvilPath = "data/foundry/anvil"
-		}
-		if sim.SyncInterval <= 0 {
-			sim.SyncInterval = 60 * time.Second
-		}
 		if sim.Timeout <= 0 {
 			sim.Timeout = 60 * time.Second
-		}
-		if sim.MaxChains <= 0 {
-			sim.MaxChains = 10
 		}
 		if sim.BatchWindow <= 0 {
 			sim.BatchWindow = 1 * time.Second
 		}
 		if sim.BatchMaxSize <= 0 {
 			sim.BatchMaxSize = 20
-		}
-		if sim.CacheDir == "" {
-			sim.CacheDir = "data/anvil-cache"
 		}
 		if sim.BudgetNativeMaxTotal == "" {
 			sim.BudgetNativeMaxTotal = "0.01"
