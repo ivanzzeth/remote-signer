@@ -229,7 +229,7 @@ The server starts without signers. Add them after startup:
 - [x] EIP-4337 Account Abstraction Support
 - [x] RBAC Rule Ownership (owner/applied_to/status on every rule)
 - [x] CLI `evm` Command Structure (sign/rule/signer with multi-chain ready architecture)
-- [x] Transaction Simulation Engine (eth_simulateV1 RPC + anvil backends)
+- [x] Transaction Simulation Engine (eth_simulateV1 via RPC gateway)
 - [x] Signer Ownership & Access Control — per-signer owner model with access list, transfer, delete cascade, resource limits, API key encrypted keystore
 - [x] Permit/Permit2 Spender Whitelist (fail-closed, allowed_spenders config)
 - [x] Request Management CLI (list/get/approve/reject/preview-rule)

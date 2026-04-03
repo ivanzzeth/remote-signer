@@ -69,7 +69,7 @@ type DecimalsAnomalyAlerter interface {
 }
 
 type SimulationBudgetRule struct {
-	simulator         simulation.AnvilForkManager
+	simulator         simulation.Simulator
 	budgetRepo        storage.BudgetRepository
 	budgetDefaults    *SimBudgetDefaults
 	decimalsQuerier   rule.DecimalsQuerier
@@ -90,7 +90,7 @@ type SimulationBudgetRule struct {
 // simulator may be nil (in which case the rule always returns no-match).
 // budgetDefaults may be nil (in which case unknown tokens have no limit).
 func NewSimulationBudgetRule(
-	simulator simulation.AnvilForkManager,
+	simulator simulation.Simulator,
 	budgetRepo storage.BudgetRepository,
 	budgetDefaults *SimBudgetDefaults,
 	decimalsQuerier rule.DecimalsQuerier,

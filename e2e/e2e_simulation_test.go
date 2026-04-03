@@ -18,7 +18,7 @@ import (
 )
 
 // skipIfNoSimulator skips the test when the simulation engine is not available.
-// This happens when either: (a) the test server has no simulator (no RPC gateway / no anvil),
+// This happens when either: (a) the test server has no simulator (no RPC gateway),
 // or (b) running against an external server (we cannot inspect its capabilities).
 func skipIfNoSimulator(t *testing.T) {
 	t.Helper()
@@ -26,12 +26,12 @@ func skipIfNoSimulator(t *testing.T) {
 		t.Skip("simulation e2e tests require internal test server with simulator")
 	}
 	if testServer == nil || !testServer.HasSimulator() {
-		t.Skip("simulation requires RPC gateway and anvil binary; set EVM_RPC_GATEWAY_URL to enable")
+		t.Skip("simulation requires RPC gateway (eth_simulateV1); set EVM_RPC_GATEWAY_URL to enable")
 	}
 }
 
 // skipOnInfraError skips the test if the error indicates an infrastructure problem
-// (e.g. RPC gateway unreachable, anvil fork timeout) rather than a logic bug.
+// (e.g. RPC gateway unreachable, simulation timeout) rather than a logic bug.
 func skipOnInfraError(t *testing.T, err error) {
 	t.Helper()
 	if err == nil {
@@ -44,8 +44,7 @@ func skipOnInfraError(t *testing.T, err error) {
 		"connection reset",
 		"i/o timeout",
 		"no such host",
-		"anvil",
-		"fork",
+		"eth_simulate",
 	}
 	for _, p := range infraPatterns {
 		if strings.Contains(strings.ToLower(msg), p) {

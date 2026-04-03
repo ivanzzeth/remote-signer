@@ -100,7 +100,7 @@ var simulateTxCmd = &cobra.Command{
 
 var simulateStatusCmd = &cobra.Command{
 	Use:   "status",
-	Short: "Show simulation engine status (anvil fork instances)",
+	Short: "Show simulation engine status (eth_simulateV1 via RPC gateway)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c, err := newClientFromFlags(cmd)
 		if err != nil {
@@ -117,7 +117,7 @@ var simulateStatusCmd = &cobra.Command{
 		}
 
 		fmt.Printf("Enabled:       %v\n", resp.Enabled)
-		fmt.Printf("Anvil Version: %s\n", resp.AnvilVersion)
+		fmt.Printf("Engine: %s\n", resp.EngineVersion)
 
 		if len(resp.Chains) == 0 {
 			fmt.Println("Chains:        (none running)")

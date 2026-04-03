@@ -64,7 +64,7 @@ type RouterConfig struct {
 	MaxKeystoresPerKey int // max keystores per API key (0 = no limit, default 5)
 	MaxHDWalletsPerKey int // max HD wallets per API key (0 = no limit, default 3)
 	// Simulation engine (optional). When set, POST /api/v1/evm/simulate, /simulate/batch, and /sign/batch are registered.
-	Simulator simulation.AnvilForkManager
+	Simulator simulation.Simulator
 	// SimulationRule is the built-in simulation budget fallback rule (optional).
 	// When set together with Simulator, the batch sign endpoint uses it for transactions
 	// that don't match any user-defined whitelist rule.

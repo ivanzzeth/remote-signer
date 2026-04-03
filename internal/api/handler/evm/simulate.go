@@ -13,12 +13,12 @@ import (
 
 // SimulateHandler handles transaction simulation requests.
 type SimulateHandler struct {
-	simulator simulation.AnvilForkManager
+	simulator simulation.Simulator
 	logger    *slog.Logger
 }
 
 // NewSimulateHandler creates a new simulation handler.
-func NewSimulateHandler(simulator simulation.AnvilForkManager, logger *slog.Logger) (*SimulateHandler, error) {
+func NewSimulateHandler(simulator simulation.Simulator, logger *slog.Logger) (*SimulateHandler, error) {
 	if simulator == nil {
 		return nil, fmt.Errorf("simulator is required")
 	}

@@ -1,4 +1,4 @@
-// Package simulation provides transaction simulation using anvil forks.
+// Package simulation provides transaction simulation via eth_simulateV1 (RPC gateway).
 package simulation
 
 import (
@@ -36,7 +36,7 @@ type SimulationResult struct {
 	GasUsed        uint64          `json:"gas_used"`
 	BalanceChanges []BalanceChange `json:"balance_changes"`
 	Events         []SimEvent      `json:"events"`
-	RawLogs        []txLog         `json:"-"` // raw logs for deep event analysis (not serialized to API)
+	RawLogs        []TxLog         `json:"-"` // raw logs for deep event analysis (not serialized to API)
 	HasApproval    bool            `json:"has_approval"`
 	RevertReason   string          `json:"revert_reason,omitempty"`
 }
@@ -45,6 +45,13 @@ type SimulationResult struct {
 type BatchSimulationResult struct {
 	Results           []SimulationResult `json:"results"`
 	NetBalanceChanges []BalanceChange    `json:"net_balance_changes"`
+}
+
+// TxLog is a single log entry from a transaction receipt or eth_simulateV1 output.
+type TxLog struct {
+	Address string   `json:"address"`
+	Topics  []string `json:"topics"`
+	Data    string   `json:"data"`
 }
 
 // BalanceChange represents a token balance change from simulation.
@@ -56,14 +63,14 @@ type BalanceChange struct {
 	TokenID   *big.Int `json:"token_id,omitempty"`   // non-nil for ERC721/ERC1155
 }
 
-// ManagerStatus is the overall status of the AnvilForkManager.
+// ManagerStatus is the overall status of the simulation engine.
 type ManagerStatus struct {
-	Enabled      bool                    `json:"enabled"`
-	AnvilVersion string                  `json:"anvil_version"`
-	Chains       map[string]*ChainStatus `json:"chains"`
+	Enabled       bool                    `json:"enabled"`
+	EngineVersion string                  `json:"engine_version"`
+	Chains        map[string]*ChainStatus `json:"chains"`
 }
 
-// ChainStatus is the status of a single anvil fork instance.
+// ChainStatus is reserved for per-chain simulator health (RPC backend returns empty chains).
 type ChainStatus struct {
 	Status       string `json:"status"`                  // "healthy" or "unhealthy"
 	Port         int    `json:"port"`

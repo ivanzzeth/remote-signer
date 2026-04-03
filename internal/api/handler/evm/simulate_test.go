@@ -16,22 +16,22 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/simulation"
 )
 
-// --- Mock AnvilForkManager ---
+// --- Mock Simulator ---
 
-type mockAnvilForkManager struct {
+type mockSimulator struct {
 	simulateFn      func(ctx context.Context, req *simulation.SimulationRequest) (*simulation.SimulationResult, error)
 	simulateBatchFn func(ctx context.Context, req *simulation.BatchSimulationRequest) (*simulation.BatchSimulationResult, error)
 	statusFn        func(ctx context.Context) *simulation.ManagerStatus
 }
 
-func (m *mockAnvilForkManager) Simulate(ctx context.Context, req *simulation.SimulationRequest) (*simulation.SimulationResult, error) {
+func (m *mockSimulator) Simulate(ctx context.Context, req *simulation.SimulationRequest) (*simulation.SimulationResult, error) {
 	if m.simulateFn != nil {
 		return m.simulateFn(ctx, req)
 	}
 	return &simulation.SimulationResult{Success: true, GasUsed: 21000}, nil
 }
 
-func (m *mockAnvilForkManager) SimulateBatch(ctx context.Context, req *simulation.BatchSimulationRequest) (*simulation.BatchSimulationResult, error) {
+func (m *mockSimulator) SimulateBatch(ctx context.Context, req *simulation.BatchSimulationRequest) (*simulation.BatchSimulationResult, error) {
 	if m.simulateBatchFn != nil {
 		return m.simulateBatchFn(ctx, req)
 	}
@@ -40,15 +40,15 @@ func (m *mockAnvilForkManager) SimulateBatch(ctx context.Context, req *simulatio
 	}, nil
 }
 
-func (m *mockAnvilForkManager) SyncIfDirty(_ context.Context, _ string) error { return nil }
-func (m *mockAnvilForkManager) MarkDirty(_ string)                            {}
-func (m *mockAnvilForkManager) Status(ctx context.Context) *simulation.ManagerStatus {
+func (m *mockSimulator) SyncIfDirty(_ context.Context, _ string) error { return nil }
+func (m *mockSimulator) MarkDirty(_ string)                            {}
+func (m *mockSimulator) Status(ctx context.Context) *simulation.ManagerStatus {
 	if m.statusFn != nil {
 		return m.statusFn(ctx)
 	}
 	return &simulation.ManagerStatus{}
 }
-func (m *mockAnvilForkManager) Close() error { return nil }
+func (m *mockSimulator) Close() error { return nil }
 
 // --- Helpers ---
 
@@ -69,7 +69,7 @@ func doSimulateRequest(t *testing.T, handler http.Handler, method, path string, 
 	return rec
 }
 
-func newTestSimulateHandler(t *testing.T, mgr simulation.AnvilForkManager) *SimulateHandler {
+func newTestSimulateHandler(t *testing.T, mgr simulation.Simulator) *SimulateHandler {
 	t.Helper()
 	h, err := NewSimulateHandler(mgr, slog.Default())
 	require.NoError(t, err)
@@ -86,13 +86,13 @@ func TestNewSimulateHandler(t *testing.T) {
 	})
 
 	t.Run("nil_logger_returns_error", func(t *testing.T) {
-		_, err := NewSimulateHandler(&mockAnvilForkManager{}, nil)
+		_, err := NewSimulateHandler(&mockSimulator{}, nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "logger is required")
 	})
 
 	t.Run("valid_args", func(t *testing.T) {
-		h, err := NewSimulateHandler(&mockAnvilForkManager{}, slog.Default())
+		h, err := NewSimulateHandler(&mockSimulator{}, slog.Default())
 		require.NoError(t, err)
 		assert.NotNil(t, h)
 	})
@@ -101,13 +101,13 @@ func TestNewSimulateHandler(t *testing.T) {
 // --- ServeHTTP (single simulate) tests ---
 
 func TestSimulateHandler_MethodNotAllowed(t *testing.T) {
-	h := newTestSimulateHandler(t, &mockAnvilForkManager{})
+	h := newTestSimulateHandler(t, &mockSimulator{})
 	rec := doSimulateRequest(t, h, http.MethodGet, "/api/v1/evm/simulate", nil)
 	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
 }
 
 func TestSimulateHandler_InvalidBody(t *testing.T) {
-	h := newTestSimulateHandler(t, &mockAnvilForkManager{})
+	h := newTestSimulateHandler(t, &mockSimulator{})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/evm/simulate", bytes.NewBufferString("not json"))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -116,7 +116,7 @@ func TestSimulateHandler_InvalidBody(t *testing.T) {
 }
 
 func TestSimulateHandler_MissingChainID(t *testing.T) {
-	h := newTestSimulateHandler(t, &mockAnvilForkManager{})
+	h := newTestSimulateHandler(t, &mockSimulator{})
 	body := SimulateRequest{From: "0x1111111111111111111111111111111111111111", To: "0x2222222222222222222222222222222222222222"}
 	rec := doSimulateRequest(t, h, http.MethodPost, "/api/v1/evm/simulate", body)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
@@ -126,14 +126,14 @@ func TestSimulateHandler_MissingChainID(t *testing.T) {
 }
 
 func TestSimulateHandler_InvalidChainID(t *testing.T) {
-	h := newTestSimulateHandler(t, &mockAnvilForkManager{})
+	h := newTestSimulateHandler(t, &mockSimulator{})
 	body := SimulateRequest{ChainID: "abc", From: "0x1111111111111111111111111111111111111111", To: "0x2222222222222222222222222222222222222222"}
 	rec := doSimulateRequest(t, h, http.MethodPost, "/api/v1/evm/simulate", body)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 func TestSimulateHandler_MissingFrom(t *testing.T) {
-	h := newTestSimulateHandler(t, &mockAnvilForkManager{})
+	h := newTestSimulateHandler(t, &mockSimulator{})
 	body := SimulateRequest{ChainID: "1", To: "0x2222222222222222222222222222222222222222"}
 	rec := doSimulateRequest(t, h, http.MethodPost, "/api/v1/evm/simulate", body)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
@@ -143,14 +143,14 @@ func TestSimulateHandler_MissingFrom(t *testing.T) {
 }
 
 func TestSimulateHandler_InvalidFrom(t *testing.T) {
-	h := newTestSimulateHandler(t, &mockAnvilForkManager{})
+	h := newTestSimulateHandler(t, &mockSimulator{})
 	body := SimulateRequest{ChainID: "1", From: "not-an-address", To: "0x2222222222222222222222222222222222222222"}
 	rec := doSimulateRequest(t, h, http.MethodPost, "/api/v1/evm/simulate", body)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 func TestSimulateHandler_MissingTo(t *testing.T) {
-	h := newTestSimulateHandler(t, &mockAnvilForkManager{})
+	h := newTestSimulateHandler(t, &mockSimulator{})
 	body := SimulateRequest{ChainID: "1", From: "0x1111111111111111111111111111111111111111"}
 	rec := doSimulateRequest(t, h, http.MethodPost, "/api/v1/evm/simulate", body)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
@@ -160,7 +160,7 @@ func TestSimulateHandler_MissingTo(t *testing.T) {
 }
 
 func TestSimulateHandler_InvalidData(t *testing.T) {
-	h := newTestSimulateHandler(t, &mockAnvilForkManager{})
+	h := newTestSimulateHandler(t, &mockSimulator{})
 	body := SimulateRequest{
 		ChainID: "1",
 		From:    "0x1111111111111111111111111111111111111111",
@@ -175,7 +175,7 @@ func TestSimulateHandler_InvalidData(t *testing.T) {
 }
 
 func TestSimulateHandler_Success(t *testing.T) {
-	mgr := &mockAnvilForkManager{
+	mgr := &mockSimulator{
 		simulateFn: func(_ context.Context, req *simulation.SimulationRequest) (*simulation.SimulationResult, error) {
 			assert.Equal(t, "1", req.ChainID)
 			assert.Equal(t, "0x1111111111111111111111111111111111111111", req.From)
@@ -202,9 +202,9 @@ func TestSimulateHandler_Success(t *testing.T) {
 }
 
 func TestSimulateHandler_SimulatorError(t *testing.T) {
-	mgr := &mockAnvilForkManager{
+	mgr := &mockSimulator{
 		simulateFn: func(_ context.Context, _ *simulation.SimulationRequest) (*simulation.SimulationResult, error) {
-			return nil, fmt.Errorf("anvil fork crashed")
+			return nil, fmt.Errorf("simulation engine error")
 		},
 	}
 	h := newTestSimulateHandler(t, mgr)
@@ -223,7 +223,7 @@ func TestSimulateHandler_SimulatorError(t *testing.T) {
 // --- ServeBatchHTTP tests ---
 
 func TestSimulateHandler_BatchSuccess(t *testing.T) {
-	mgr := &mockAnvilForkManager{
+	mgr := &mockSimulator{
 		simulateBatchFn: func(_ context.Context, req *simulation.BatchSimulationRequest) (*simulation.BatchSimulationResult, error) {
 			assert.Equal(t, 2, len(req.Transactions))
 			return &simulation.BatchSimulationResult{
@@ -256,7 +256,7 @@ func TestSimulateHandler_BatchSuccess(t *testing.T) {
 }
 
 func TestSimulateHandler_BatchMethodNotAllowed(t *testing.T) {
-	h := newTestSimulateHandler(t, &mockAnvilForkManager{})
+	h := newTestSimulateHandler(t, &mockSimulator{})
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/evm/simulate/batch", nil)
 	rec := httptest.NewRecorder()
 	h.ServeBatchHTTP(rec, req)
@@ -264,7 +264,7 @@ func TestSimulateHandler_BatchMethodNotAllowed(t *testing.T) {
 }
 
 func TestSimulateHandler_BatchEmptyTransactions(t *testing.T) {
-	h := newTestSimulateHandler(t, &mockAnvilForkManager{})
+	h := newTestSimulateHandler(t, &mockSimulator{})
 	body := BatchSimulateRequest{
 		ChainID:      "1",
 		From:         "0x1111111111111111111111111111111111111111",
@@ -279,7 +279,7 @@ func TestSimulateHandler_BatchEmptyTransactions(t *testing.T) {
 }
 
 func TestSimulateHandler_BatchExceedsMax(t *testing.T) {
-	h := newTestSimulateHandler(t, &mockAnvilForkManager{})
+	h := newTestSimulateHandler(t, &mockSimulator{})
 	txs := make([]TxParamsJSON, 21) // exceeds maxBatchSimulateSize=20
 	for i := range txs {
 		txs[i] = TxParamsJSON{To: "0x2222222222222222222222222222222222222222"}
@@ -301,7 +301,7 @@ func TestSimulateHandler_BatchExceedsMax(t *testing.T) {
 }
 
 func TestSimulateHandler_BatchInvalidTxTo(t *testing.T) {
-	h := newTestSimulateHandler(t, &mockAnvilForkManager{})
+	h := newTestSimulateHandler(t, &mockSimulator{})
 	body := BatchSimulateRequest{
 		ChainID: "1",
 		From:    "0x1111111111111111111111111111111111111111",
@@ -318,7 +318,7 @@ func TestSimulateHandler_BatchInvalidTxTo(t *testing.T) {
 }
 
 func TestSimulateHandler_BatchSimulatorError(t *testing.T) {
-	mgr := &mockAnvilForkManager{
+	mgr := &mockSimulator{
 		simulateBatchFn: func(_ context.Context, _ *simulation.BatchSimulationRequest) (*simulation.BatchSimulationResult, error) {
 			return nil, fmt.Errorf("batch failed")
 		},
@@ -342,7 +342,7 @@ func TestSimulateHandler_BatchSimulatorError(t *testing.T) {
 // --- ServeStatusHTTP tests ---
 
 func TestSimulateHandler_StatusSuccess(t *testing.T) {
-	mgr := &mockAnvilForkManager{
+	mgr := &mockSimulator{
 		statusFn: func(_ context.Context) *simulation.ManagerStatus {
 			return &simulation.ManagerStatus{}
 		},
@@ -355,7 +355,7 @@ func TestSimulateHandler_StatusSuccess(t *testing.T) {
 }
 
 func TestSimulateHandler_StatusMethodNotAllowed(t *testing.T) {
-	h := newTestSimulateHandler(t, &mockAnvilForkManager{})
+	h := newTestSimulateHandler(t, &mockSimulator{})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/evm/simulate/status", nil)
 	rec := httptest.NewRecorder()
 	h.ServeStatusHTTP(rec, req)

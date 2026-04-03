@@ -311,7 +311,7 @@ func (h *BatchSignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				if ep.Transaction.To != nil {
 					to = *ep.Transaction.To
 				}
-				// Convert decimal value to hex for anvil RPC
+				// Convert decimal value to hex for JSON-RPC
 			hexValue := decimalToHex(ep.Transaction.Value)
 			txParams[i] = simulation.TxParams{
 				To:    to,
@@ -429,7 +429,7 @@ func (h *BatchSignHandler) writeError(w http.ResponseWriter, message string, sta
 	h.writeJSON(w, ErrorResponse{Error: message}, status)
 }
 
-// decimalToHex converts a decimal string value to hex format for anvil RPC.
+// decimalToHex converts a decimal string value to hex format for JSON-RPC.
 // Returns "0x0" for empty or zero values.
 func decimalToHex(decimal string) string {
 	if decimal == "" || decimal == "0" {

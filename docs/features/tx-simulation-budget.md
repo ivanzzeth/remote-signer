@@ -10,16 +10,15 @@ Example: An agent swaps 2300 USDC → ETH via OKX DEX router. The budget engine 
 
 ## Solution
 
-Add a transaction simulation layer to remote-signer. Two backends are available:
+Add a transaction simulation layer to remote-signer. Simulation uses **`eth_simulateV1`** on the configured `rpc_gateway` (no local fork process).
 
-### Simulation Backends
+### Simulation engine
 
-| Backend | Config value | Description | Latency | Recommended |
-|---------|-------------|-------------|---------|-------------|
-| **RPC** (`eth_simulateV1`) | `"rpc"` (default) | Calls `eth_simulateV1` via RPC gateway | <1s | Yes (production) |
-| **Anvil** (local fork) | `"anvil"` | Persistent per-chain `anvil` fork process | 2-5s cold, <500ms warm | No (OOM/startup issues) |
+| Mechanism | Description | Latency |
+|-----------|-------------|---------|
+| **RPC** (`eth_simulateV1`) | Calls `eth_simulateV1` via RPC gateway | Typically &lt;1s |
 
-The **RPC backend** is the default and recommended choice. It delegates simulation to the RPC gateway's `eth_simulateV1` endpoint, avoiding the operational complexity of managing local anvil processes. The anvil backend is retained for environments without `eth_simulateV1` support but has known OOM and startup issues in production.
+The gateway must expose `eth_simulateV1` for chains you simulate.
 
 The simulation engine is a **general-purpose infrastructure** that:
 
@@ -33,7 +32,7 @@ The simulation engine is independent of budget logic — it returns structured r
 ```
                     ┌────────────────────────────────────┐
                     │   TransactionSimulator              │
-                    │   (RPC or AnvilFork + EventParser)  │
+                    │   (RPCSimulator + EventParser)      │
                     └───┬──────────────┬─────────────┬───┘
                         │              │             │
            ┌────────────▼──┐  ┌────────▼────────┐  ┌▼──────────────────┐
@@ -100,7 +99,7 @@ Simulate a single transaction. Any authenticated API key can call this.
 
 ### `POST /api/v1/evm/simulate/batch`
 
-Simulate multiple transactions in sequence on the same fork state. Each tx sees the state changes from previous txs.
+Simulate multiple transactions in sequence on the same base state. Each tx sees the state changes from previous txs (via `eth_simulateV1` batch semantics on the gateway).
 
 #### Request
 
@@ -251,10 +250,10 @@ const signed = await client.evm.sign.executeBatch({requests: [...]});
 │                                                                      │
 │  ┌────────────────┐  ┌────────────────┐  ┌────────────────────────┐ │
 │  │ Backend        │  │ EventLogParser │  │ BalanceChangeCalc      │ │
-│  │ (RPC: eth_     │  │ (ERC20/721/    │  │ (net per token         │ │
+│  │ (eth_          │  │ (ERC20/721/    │  │ (net per token         │ │
 │  │  simulateV1    │  │  1155/WETH/    │  │  per signer, supports  │ │
-│  │  or Anvil:     │  │  native/       │  │  single + batch)       │ │
-│  │  fork+snapshot)│  │  approval)     │  │                        │ │
+│  │  via gateway)  │  │  native/       │  │  single + batch)       │ │
+│  │                │  │  approval)     │  │                        │ │
 │  └────────────────┘  └────────────────┘  └────────────────────────┘ │
 └──────┬──────────────────────────────────────────┬───────────────────┘
        │                                          │
@@ -285,13 +284,8 @@ Sign request arrives (sign_type: transaction)
   ├── Batch accumulation window (configurable, default 1s)
   │   └── Collect all unmatched tx requests for same chain_id
   │
-  ├── Batch simulation on anvil fork:
-  │   ├── evm_snapshot → save fork state
-  │   ├── For each tx in batch (arrival order):
-  │   │   ├── eth_sendTransaction (local execution on fork)
-  │   │   └── eth_getTransactionReceipt → logs + gas
-  │   ├── evm_revert → restore fork state (no permanent change)
-  │   └── Parse all receipts → balance changes per tx + net totals
+  ├── Batch simulation via eth_simulateV1 (sequential txs on same base state):
+  │   └── Parse results → balance changes per tx + net totals
   │
   ├── Per-request evaluation:
   │   ├── Budget check against net balance changes (ALWAYS runs first)
@@ -311,10 +305,7 @@ POST /api/v1/evm/sign/batch
   ├── User rules evaluate each tx (fast path)
   │   └── All must pass (any blocklist hit → reject entire batch)
   │
-  ├── Simulate entire batch on anvil fork:
-  │   ├── evm_snapshot
-  │   ├── Execute all txs in sequence
-  │   ├── evm_revert
+  ├── Simulate entire batch via eth_simulateV1 (sequential execution)
   │   └── Compute per-tx + net balance changes
   │
   ├── Budget check against NET balance changes (not per-tx, ALWAYS runs first)
@@ -330,110 +321,42 @@ POST /api/v1/evm/sign/batch
 
 ## Component Design
 
-### 1. AnvilForkManager
+### 1. RPCSimulator (`Simulator`)
 
-> **TODO**: Anvil backend has hardcoded timeouts (120s startup, 15s health check, 500ms health check pause) that should be extracted to config fields. Low priority since RPC backend is the recommended default.
+Implements `internal/simulation.Simulator`. For each request it calls **`eth_simulateV1`** on the RPC gateway URL for the target `chain_id`, then parses receipts/logs via `EventParser`. No local node is started.
 
-Manages one persistent `anvil` process per chain. Uses `evm_snapshot` / `evm_revert` for atomic simulations (no cache invalidation).
-
-#### Lifecycle
-
-```
-Server startup
-  → For each chain_id in startup_chains (or lazy on first request):
-    → Start: anvil --fork-url <rpc_gateway>/<chain_id> --port <auto> --no-mining
-    → Health check: eth_blockNumber
-    → Ready
-
-Periodic sync (every sync_interval):
-    → anvil_reset (re-fork from latest block)
-    → Only happens when no simulation is in progress (mutex)
-
-Post-broadcast sync:
-    → Mark chain as "dirty"
-    → Next simulation request triggers anvil_reset before snapshot (lazy)
-    → Consecutive broadcasts only trigger one reset (natural debounce)
-
-Per-simulation (atomic, no state leak):
-    → evm_snapshot → ID
-    → Execute tx(s) via eth_sendTransaction
-    → Collect receipts
-    → evm_revert(ID) → state restored
-    → Simulation never pollutes the fork state
-
-Server shutdown:
-    → SIGTERM all anvil processes → graceful exit
-
-Crash recovery:
-    → Health check fails → restart anvil
-    → Max 3 retries → mark chain simulation-unavailable
-```
-
-#### Why snapshot/revert instead of reset
-
-| Approach | Cache behavior | Latency |
-|----------|---------------|---------|
-| `anvil_reset` per simulation | Clears all cached state, next sim is cold | 2-5s (cold cache) |
-| `evm_snapshot` + `evm_revert` | Cache preserved, only simulation changes rolled back | < 500ms (warm cache) |
-
-`anvil_reset` is reserved for periodic sync (every 60s) or dirty-flag sync — infrequent enough that cold cache is acceptable.
-
-#### Config
+#### Config (relevant fields)
 
 ```yaml
-simulation:
-  enabled: true
-  sync_interval: "60s"          # periodic fork reset interval
-  batch_window: "1s"            # accumulation window for single sign requests
-  batch_max_size: 20            # max txs per batch
-  startup_chains: []            # pre-warm chain IDs (empty = lazy start)
-  anvil_path: "anvil"           # path to anvil binary
-  timeout: "10s"                # per-simulation timeout
-  max_chains: 10                # max concurrent anvil forks
-  require_approval_for_approvals: true  # force manual approval for approve txs
-```
-
-#### Interface
-
-```go
-type AnvilForkManager interface {
-    // GetForkURL returns the local anvil RPC URL for a chain.
-    // Starts anvil lazily if not running.
-    GetForkURL(ctx context.Context, chainID string) (string, error)
-
-    // Snapshot creates a state snapshot, returns snapshot ID.
-    Snapshot(ctx context.Context, chainID string) (string, error)
-
-    // Revert rolls back to a snapshot. Cache is preserved.
-    Revert(ctx context.Context, chainID string, snapshotID string) error
-
-    // SyncIfDirty resets the fork if the chain was marked dirty.
-    SyncIfDirty(ctx context.Context, chainID string) error
-
-    // MarkDirty marks a chain for lazy sync (call after tx broadcast).
-    MarkDirty(chainID string)
-
-    // Close shuts down all anvil processes.
-    Close() error
-}
+chains:
+  evm:
+    rpc_gateway:
+      base_url: "https://your-gateway.example.com/chain/evm"
+      api_key: "${EVM_RPC_GATEWAY_API_KEY:-}"
+    simulation:
+      enabled: true
+      timeout: "60s"
+      batch_window: "1s"
+      batch_max_size: 20
 ```
 
 #### Files
 
 | File | Description |
 |------|-------------|
-| `internal/simulation/anvil_manager.go` | AnvilForkManager implementation |
-| `internal/simulation/anvil_manager_test.go` | Unit tests |
+| `internal/simulation/rpc_simulator.go` | `eth_simulateV1` client + `Simulator` implementation |
+| `internal/simulation/simulator.go` | `Simulator` interface |
+| `internal/simulation/event_parser.go` | Log → balance change / approval detection |
 
 ---
 
 ### 2. TransactionSimulator
 
-Simulates single or batch transactions on the fork and returns parsed results.
+Simulates single or batch transactions via the gateway and returns parsed results.
 
 #### Simulation Method
 
-Uses `evm_snapshot` → `eth_sendTransaction` (local) → `eth_getTransactionReceipt` → `evm_revert`. No `debug_traceCall` needed — anvil executes the tx locally and returns a full receipt with logs.
+Uses **`eth_simulateV1`** (stateless on the signer): the gateway returns execution results and logs; the signer does not run a local EVM.
 
 ```go
 type SimulationRequest struct {
@@ -661,7 +584,7 @@ Rule engine evaluation:
      → Only for sign_type: transaction
      → Enqueue into batch window (1s / max 20 txs)
      → On batch trigger:
-       → Simulate batch on anvil fork
+       → Simulate batch via eth_simulateV1
        → Per-tx: approval? → manual approval
        → Per-tx: budget check against net balance changes
        → Return allow/deny to each waiting request
@@ -678,7 +601,7 @@ Request arrives → enqueue with response channel
   → Timer starts (1s) or batch full (20 txs)
   → Batch fires:
     → Group by chain_id
-    → Per chain: snapshot → execute all → revert → parse
+    → Per chain: eth_simulateV1 batch → parse
     → Distribute results to waiting response channels
 ```
 
@@ -712,23 +635,13 @@ For batch sign: if ANY tx in the batch has approval, the entire batch requires m
 ```yaml
 simulation:
   enabled: true                          # enable/disable simulation engine
-  backend: "rpc"                         # "rpc" (default, recommended) or "anvil"
-  sync_interval: "60s"                   # periodic health check / restart interval
   batch_window: "1s"                     # accumulation window for single sign fallback
   batch_max_size: 20                     # max txs per batch
   timeout: "60s"                         # per-simulation timeout (includes remote RPC state fetch)
-  max_chains: 10                         # max concurrent anvil forks (anvil backend only)
-  anvil_path: "data/foundry/anvil"      # path to anvil binary (anvil backend only)
-  prune_history: 0                       # anvil --prune-history (anvil backend only, 0=minimal)
-  cache_dir: "data/anvil-cache"          # persistent fork RPC cache dir (anvil backend only)
   require_approval_for_approvals: true   # force manual approval for approve txs
 ```
 
-**Backend selection:**
-- `"rpc"` (default): Uses `eth_simulateV1` via the configured RPC gateway. No local processes to manage. Recommended for production.
-- `"anvil"`: Starts local `anvil` fork processes per chain. Has known OOM and startup reliability issues. Use only if your RPC provider does not support `eth_simulateV1`.
-
-The `prune_history` and `cache_dir` options only apply to the anvil backend.
+Simulation always uses **`eth_simulateV1`** through `chains.evm.rpc_gateway`. Ensure the gateway supports it for your chains.
 
 ---
 
@@ -736,15 +649,15 @@ The `prune_history` and `cache_dir` options only apply to the anvil backend.
 
 ### Threat: Simulation divergence from mainnet
 
-**Risk**: Anvil fork state may be stale (up to 60s behind).
+**Risk**: Gateway `eth_simulateV1` may use a block head slightly behind the tip.
 
-**Mitigation**: 60s sync interval + dirty-flag lazy sync after broadcast. Budget is a spending limit, not exact accounting. snapshot/revert ensures simulations don't pollute each other.
+**Mitigation**: Budget is a spending limit, not exact on-chain accounting. Treat simulation as best-effort preview.
 
-### Threat: Anvil process compromise
+### Threat: Compromised RPC / gateway
 
-**Risk**: Fake simulation results from compromised anvil.
+**Risk**: Fake simulation results from a malicious or buggy gateway.
 
-**Mitigation**: Anvil runs on localhost only. Managed by remote-signer with health checks. No external exposure.
+**Mitigation**: Run a trusted RPC gateway; monitor for anomalies; manual approval remains the backstop for high-risk patterns (e.g. approvals).
 
 ### Threat: Approve bypass via nested calls
 
@@ -768,9 +681,9 @@ The `prune_history` and `cache_dir` options only apply to the anvil backend.
 
 ## Implementation Phases
 
-### Phase 1: AnvilForkManager + TransactionSimulator + Public API
-- Anvil process lifecycle (start/stop/sync/health/snapshot/revert)
-- Single + batch simulation via anvil RPC
+### Phase 1: RPCSimulator + TransactionSimulator + Public API
+- `eth_simulateV1` integration via RPC gateway
+- Single + batch simulation
 - Event log parsing for ERC20/ERC721/ERC1155/WETH/native/approval
 - Net balance change calculation (single + batch)
 - `POST /api/v1/evm/simulate` endpoint
@@ -791,7 +704,7 @@ The `prune_history` and `cache_dir` options only apply to the anvil backend.
 ### Phase 3: Operational
 - Config schema + config.example.yaml
 - Health endpoint: `GET /api/v1/evm/simulate/status`
-- Metrics: simulation latency, batch size, fork sync count
+- Metrics: simulation latency, batch size
 - CLI: `remote-signer-cli evm simulate <tx-params>`
 - Documentation
 
@@ -806,7 +719,7 @@ only. For unknown calldata (DEX swaps, aggregator routes), budget falls back to
 `tx_count` which does not track actual token spending.
 
 **Fix**: Remove `agent-tx` from the agent template. All transaction signing will
-fall through to SimulationBudgetRule, which simulates on anvil fork and tracks
+fall through to SimulationBudgetRule, which simulates via eth_simulateV1 and tracks
 real token outflows via Transfer events.
 
 After removal, agent preset keeps:
@@ -826,6 +739,5 @@ Unknown contracts fall through to manual approval.
 
 ## Dependencies
 
-- **RPC backend (default)**: `rpc_gateway` configured with RPC URLs for target chains (must support `eth_simulateV1`)
-- **Anvil backend**: Foundry (`anvil`) installed on the server + `rpc_gateway` configured
+- **`rpc_gateway`**: configured with RPC URLs for target chains (must support `eth_simulateV1` for simulation)
 - Manual approval guard enabled (for approve tx handling)

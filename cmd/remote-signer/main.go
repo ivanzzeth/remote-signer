@@ -750,61 +750,24 @@ func run() error {
 		}
 	}
 
-	// Initialize simulation engine (optional)
-	var simulator simulation.AnvilForkManager
+	// Initialize simulation engine (optional; eth_simulateV1 via rpc_gateway)
+	var simulator simulation.Simulator
 	if cfg.Chains.EVM != nil && cfg.Chains.EVM.Simulation.Enabled {
-		rpcGatewayURL := ""
-		if cfg.Chains.EVM.RPCGateway.BaseURL != "" {
-			rpcGatewayURL = cfg.Chains.EVM.RPCGateway.BaseURL
+		rpcGatewayURL := cfg.Chains.EVM.RPCGateway.BaseURL
+		simCfg := simulation.RPCSimulatorConfig{
+			RPCGatewayURL: rpcGatewayURL,
+			RPCGatewayKey: cfg.Chains.EVM.RPCGateway.APIKey,
+			Timeout:       cfg.Chains.EVM.Simulation.Timeout,
 		}
-
-		backend := cfg.Chains.EVM.Simulation.Backend
-		if backend == "" {
-			backend = "rpc" // default to RPC (eth_simulateV1)
+		sim, simErr := simulation.NewRPCSimulator(simCfg, log)
+		if simErr != nil {
+			return fmt.Errorf("failed to create RPC simulation engine: %w", simErr)
 		}
-
-		var simErr error
-		switch backend {
-		case "rpc":
-			simCfg := simulation.RPCSimulatorConfig{
-				RPCGatewayURL: rpcGatewayURL,
-				RPCGatewayKey: cfg.Chains.EVM.RPCGateway.APIKey,
-				Timeout:       cfg.Chains.EVM.Simulation.Timeout,
-			}
-			simulator, simErr = simulation.NewRPCSimulator(simCfg, log)
-			if simErr != nil {
-				return fmt.Errorf("failed to create RPC simulation engine: %w", simErr)
-			}
-			log.Info("simulation engine initialized (rpc/eth_simulateV1)",
-				"gateway", rpcGatewayURL,
-				"timeout", cfg.Chains.EVM.Simulation.Timeout,
-			)
-		case "anvil":
-			// NOTE: anvil backend has known issues with OOM kills and fork startup failures
-			// on some RPC providers. Use "rpc" backend unless you need stateful simulation.
-			simCfg := simulation.AnvilForkManagerConfig{
-				AnvilPath:     cfg.Chains.EVM.Simulation.AnvilPath,
-				RPCGatewayURL: rpcGatewayURL,
-				RPCGatewayKey: cfg.Chains.EVM.RPCGateway.APIKey,
-				SyncInterval:  cfg.Chains.EVM.Simulation.SyncInterval,
-				Timeout:       cfg.Chains.EVM.Simulation.Timeout,
-				MaxChains:     cfg.Chains.EVM.Simulation.MaxChains,
-				PruneHistory:  cfg.Chains.EVM.Simulation.PruneHistory,
-				CacheDir:      cfg.Chains.EVM.Simulation.CacheDir,
-			}
-			simulator, simErr = simulation.NewAnvilForkManager(simCfg, log)
-			if simErr != nil {
-				return fmt.Errorf("failed to create anvil simulation engine: %w", simErr)
-			}
-			log.Info("simulation engine initialized (anvil)",
-				"anvil_path", cfg.Chains.EVM.Simulation.AnvilPath,
-				"sync_interval", cfg.Chains.EVM.Simulation.SyncInterval,
-				"timeout", cfg.Chains.EVM.Simulation.Timeout,
-				"max_chains", cfg.Chains.EVM.Simulation.MaxChains,
-			)
-		default:
-			return fmt.Errorf("unknown simulation backend: %q (supported: rpc, anvil)", backend)
-		}
+		simulator = sim
+		log.Info("simulation engine initialized (rpc/eth_simulateV1)",
+			"gateway", rpcGatewayURL,
+			"timeout", cfg.Chains.EVM.Simulation.Timeout,
+		)
 
 		defer func() {
 			if closeErr := simulator.Close(); closeErr != nil {

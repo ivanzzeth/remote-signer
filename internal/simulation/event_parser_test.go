@@ -6,7 +6,7 @@ import (
 )
 
 func TestParseEvents_ERC20Transfer(t *testing.T) {
-	logs := []txLog{
+	logs := []TxLog{
 		{
 			Address: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
 			Topics: []string{
@@ -42,7 +42,7 @@ func TestParseEvents_ERC20Transfer(t *testing.T) {
 }
 
 func TestParseEvents_ERC721Transfer(t *testing.T) {
-	logs := []txLog{
+	logs := []TxLog{
 		{
 			Address: "0xbc4ca0eda7647a8ab7c2061c2e118a18a936f13d",
 			Topics: []string{
@@ -73,7 +73,7 @@ func TestParseEvents_ERC721Transfer(t *testing.T) {
 }
 
 func TestParseEvents_ERC1155TransferSingle(t *testing.T) {
-	logs := []txLog{
+	logs := []TxLog{
 		{
 			Address: "0x1234567890abcdef1234567890abcdef12345678",
 			Topics: []string{
@@ -108,7 +108,7 @@ func TestParseEvents_ERC1155TransferSingle(t *testing.T) {
 }
 
 func TestParseEvents_WETHDeposit(t *testing.T) {
-	logs := []txLog{
+	logs := []TxLog{
 		{
 			Address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
 			Topics: []string{
@@ -137,7 +137,7 @@ func TestParseEvents_WETHDeposit(t *testing.T) {
 }
 
 func TestParseEvents_WETHWithdrawal(t *testing.T) {
-	logs := []txLog{
+	logs := []TxLog{
 		{
 			Address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
 			Topics: []string{
@@ -162,7 +162,7 @@ func TestParseEvents_WETHWithdrawal(t *testing.T) {
 }
 
 func TestParseEvents_Approval(t *testing.T) {
-	logs := []txLog{
+	logs := []TxLog{
 		{
 			Address: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
 			Topics: []string{
@@ -188,7 +188,7 @@ func TestParseEvents_Approval(t *testing.T) {
 }
 
 func TestParseEvents_ApprovalForAll(t *testing.T) {
-	logs := []txLog{
+	logs := []TxLog{
 		{
 			Address: "0xbc4ca0eda7647a8ab7c2061c2e118a18a936f13d",
 			Topics: []string{
@@ -269,7 +269,7 @@ func TestDetectDangerousStateChanges_OwnershipTransferred(t *testing.T) {
 	managed := map[string]bool{"0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266": true}
 
 	// Managed signer losing ownership → detected
-	logs := []txLog{{
+	logs := []TxLog{{
 		Topics: []string{
 			"0x8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0",
 			"0x000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266", // previousOwner (managed)
@@ -282,7 +282,7 @@ func TestDetectDangerousStateChanges_OwnershipTransferred(t *testing.T) {
 	}
 
 	// Non-managed signer losing ownership → NOT detected
-	logs2 := []txLog{{
+	logs2 := []TxLog{{
 		Topics: []string{
 			"0x8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0",
 			"0x0000000000000000000000001111111111111111111111111111111111111111", // not managed
@@ -299,7 +299,7 @@ func TestDetectDangerousStateChanges_ApprovalForAll(t *testing.T) {
 	managed := map[string]bool{"0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266": true}
 
 	// ApprovalForAll(true) for managed signer → detected
-	logs := []txLog{{
+	logs := []TxLog{{
 		Topics: []string{
 			"0x17307eab39ab6107e8899845ad3d59bd9653f200f220920489ca2b5937696c31",
 			"0x000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266", // owner (managed)
@@ -313,7 +313,7 @@ func TestDetectDangerousStateChanges_ApprovalForAll(t *testing.T) {
 	}
 
 	// ApprovalForAll(false) = revoke → NOT detected
-	logs2 := []txLog{{
+	logs2 := []TxLog{{
 		Topics: []string{
 			"0x17307eab39ab6107e8899845ad3d59bd9653f200f220920489ca2b5937696c31",
 			"0x000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266",
@@ -329,7 +329,7 @@ func TestDetectDangerousStateChanges_ApprovalForAll(t *testing.T) {
 
 func TestDetectDangerousStateChanges_Upgraded(t *testing.T) {
 	// Any Upgraded event → detected (regardless of managed signers)
-	logs := []txLog{{
+	logs := []TxLog{{
 		Topics: []string{
 			"0xbc7cd75a20ee27fd9adebab32041f755214dbc6bffa90cc0225b39da2e5c2d3b",
 			"0x0000000000000000000000001234567890abcdef1234567890abcdef12345678", // new implementation
@@ -343,7 +343,7 @@ func TestDetectDangerousStateChanges_Upgraded(t *testing.T) {
 
 func TestDetectDangerousStateChanges_AdminChanged(t *testing.T) {
 	// Any AdminChanged event → detected
-	logs := []txLog{{
+	logs := []TxLog{{
 		Topics: []string{
 			"0x7e644d79422f17c01e4894b5f4f588d331ebfa28653d42ae832dc59e38c9798f",
 		},
@@ -360,7 +360,7 @@ func TestDetectDangerousStateChanges_SafeEvents(t *testing.T) {
 	managed := map[string]bool{"0xabc": true}
 
 	// Transfer event → NOT dangerous
-	logs := []txLog{{
+	logs := []TxLog{{
 		Topics: []string{
 			"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
 			"0x000000000000000000000000abc0000000000000000000000000000000000000",
@@ -384,14 +384,14 @@ func TestParseEvents_EmptyLogs(t *testing.T) {
 		t.Errorf("expected 0 events, got %d", len(events))
 	}
 
-	events = ParseEvents([]txLog{})
+	events = ParseEvents([]TxLog{})
 	if len(events) != 0 {
 		t.Errorf("expected 0 events, got %d", len(events))
 	}
 }
 
 func TestParseEvents_UnknownTopic(t *testing.T) {
-	logs := []txLog{
+	logs := []TxLog{
 		{
 			Address: "0x1234567890abcdef1234567890abcdef12345678",
 			Topics:  []string{"0xdeadbeef00000000000000000000000000000000000000000000000000000000"},

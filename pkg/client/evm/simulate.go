@@ -83,12 +83,12 @@ type SimulateResultDTO struct {
 
 // SimulationStatusResponse is the response from GET /api/v1/evm/simulate/status.
 type SimulationStatusResponse struct {
-	Enabled      bool                         `json:"enabled"`
-	AnvilVersion string                       `json:"anvil_version"`
-	Chains       map[string]ChainStatusDTO    `json:"chains"`
+	Enabled       bool                      `json:"enabled"`
+	EngineVersion string                    `json:"engine_version"`
+	Chains        map[string]ChainStatusDTO `json:"chains"`
 }
 
-// ChainStatusDTO is the status of a single anvil fork instance.
+// ChainStatusDTO is reserved for per-chain simulator health (RPC backend may return empty).
 type ChainStatusDTO struct {
 	Status       string `json:"status"`
 	Port         int    `json:"port"`
@@ -98,7 +98,7 @@ type ChainStatusDTO struct {
 	Error        string `json:"error,omitempty"`
 }
 
-// Status returns the status of all running simulation anvil forks.
+// Status returns simulation engine status from GET /api/v1/evm/simulate/status.
 func (s *SimulateService) Status(ctx context.Context) (*SimulationStatusResponse, error) {
 	var resp SimulationStatusResponse
 	err := s.transport.Request(ctx, http.MethodGet, "/api/v1/evm/simulate/status", nil, &resp, http.StatusOK)

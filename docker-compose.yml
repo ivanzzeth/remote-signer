@@ -108,7 +108,6 @@ services:
       - ./data/foundry:/app/data/foundry:ro
       - ./data/forge-workspace:/app/data/forge-workspace
       - ./data/forge-cache:/app/data/forge-cache
-      - ./data/anvil-cache:/app/data/anvil-cache
       # Solc compiler cache: forge auto-downloads solc by pragma version (bind mount so signer can write)
       - ./data/svm:/home/signer/.svm
     # No "ports:" needed — host network mode binds directly to host's port 8548

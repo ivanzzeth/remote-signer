@@ -60,7 +60,7 @@ type TestServer struct {
 	baseURL    string
 	tlsCerts   *tlsCerts                   // set by StartWithTLS for mTLS health-check
 	ruleEngine *rule.WhitelistRuleEngine   // exposed for dynamic evaluator registration in e2e tests
-	simulator  simulation.AnvilForkManager // optional: for simulation e2e tests
+	simulator  simulation.Simulator // optional: RPC eth_simulateV1 for simulation e2e tests
 }
 
 // NewTestServer creates a new test server instance
@@ -578,24 +578,24 @@ func (ts *TestServer) Start() error {
 		return fmt.Errorf("failed to create audit logger: %w", err)
 	}
 
-	// Initialize simulation engine (optional, requires RPC gateway + anvil)
+	// Initialize simulation engine (optional; eth_simulateV1 via rpc_gateway — matches main.go)
 	if cfg != nil && cfg.Chains.EVM != nil && cfg.Chains.EVM.Simulation.Enabled &&
 		cfg.Chains.EVM.RPCGateway.BaseURL != "" {
+		rpcGatewayURL := cfg.Chains.EVM.RPCGateway.BaseURL
 		simCfg := cfg.Chains.EVM.Simulation
-		rpcGateway := cfg.Chains.EVM.RPCGateway
-		sim, simErr := simulation.NewAnvilForkManager(simulation.AnvilForkManagerConfig{
-			AnvilPath:     simCfg.AnvilPath,
-			RPCGatewayURL: rpcGateway.BaseURL,
-			RPCGatewayKey: rpcGateway.APIKey,
-			SyncInterval:  simCfg.SyncInterval,
+		sim, simErr := simulation.NewRPCSimulator(simulation.RPCSimulatorConfig{
+			RPCGatewayURL: rpcGatewayURL,
+			RPCGatewayKey: cfg.Chains.EVM.RPCGateway.APIKey,
 			Timeout:       simCfg.Timeout,
-			MaxChains:     simCfg.MaxChains,
 		}, log)
 		if simErr != nil {
 			log.Warn("Simulation engine not available, skipping", "error", simErr)
 		} else {
 			ts.simulator = sim
-			log.Info("Simulation engine initialized for e2e tests")
+			log.Info("Simulation engine initialized for e2e (rpc/eth_simulateV1)",
+				"gateway", rpcGatewayURL,
+				"timeout", simCfg.Timeout,
+			)
 		}
 	}
 

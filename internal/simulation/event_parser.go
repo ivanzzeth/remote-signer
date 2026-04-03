@@ -39,7 +39,7 @@ const (
 )
 
 // ParseEvents parses token standard events from transaction receipt logs.
-func ParseEvents(logs []txLog) []SimEvent {
+func ParseEvents(logs []TxLog) []SimEvent {
 	events := make([]SimEvent, 0, len(logs))
 
 	for _, log := range logs {
@@ -98,7 +98,7 @@ func ParseEvents(logs []txLog) []SimEvent {
 // parseTransferEvent parses ERC20 or ERC721 Transfer events.
 // ERC20: 3 topics (topic0, from, to) + 32-byte data (value)
 // ERC721: 4 topics (topic0, from, to, tokenId) + empty data
-func parseTransferEvent(log txLog) *SimEvent {
+func parseTransferEvent(log TxLog) *SimEvent {
 	if len(log.Topics) == 3 {
 		// ERC20 Transfer
 		from := topicToAddress(log.Topics[1])
@@ -141,7 +141,7 @@ func parseTransferEvent(log txLog) *SimEvent {
 // parseTransferSingleEvent parses ERC1155 TransferSingle events.
 // Topics: [topic0, operator (indexed), from (indexed), to (indexed)]
 // Data: [id (uint256), value (uint256)]
-func parseTransferSingleEvent(log txLog) *SimEvent {
+func parseTransferSingleEvent(log TxLog) *SimEvent {
 	if len(log.Topics) < 4 {
 		return nil
 	}
@@ -169,7 +169,7 @@ func parseTransferSingleEvent(log txLog) *SimEvent {
 // parseTransferBatchEvent parses ERC1155 TransferBatch events.
 // Topics: [topic0, operator (indexed), from (indexed), to (indexed)]
 // Data: [ids (uint256[]), values (uint256[])]
-func parseTransferBatchEvent(log txLog) []SimEvent {
+func parseTransferBatchEvent(log TxLog) []SimEvent {
 	if len(log.Topics) < 4 {
 		return nil
 	}
@@ -204,7 +204,7 @@ func parseTransferBatchEvent(log txLog) []SimEvent {
 // parseDepositEvent parses WETH Deposit events.
 // Topics: [topic0, dst (indexed)]
 // Data: [wad (uint256)]
-func parseDepositEvent(log txLog) *SimEvent {
+func parseDepositEvent(log TxLog) *SimEvent {
 	if len(log.Topics) < 2 {
 		return nil
 	}
@@ -226,7 +226,7 @@ func parseDepositEvent(log txLog) *SimEvent {
 // parseWithdrawalEvent parses WETH Withdrawal events.
 // Topics: [topic0, src (indexed)]
 // Data: [wad (uint256)]
-func parseWithdrawalEvent(log txLog) *SimEvent {
+func parseWithdrawalEvent(log TxLog) *SimEvent {
 	if len(log.Topics) < 2 {
 		return nil
 	}
@@ -246,7 +246,7 @@ func parseWithdrawalEvent(log txLog) *SimEvent {
 }
 
 // parseApprovalEvent parses ERC20/ERC721 Approval events.
-func parseApprovalEvent(log txLog) *SimEvent {
+func parseApprovalEvent(log TxLog) *SimEvent {
 	if len(log.Topics) < 3 {
 		return nil
 	}
@@ -277,7 +277,7 @@ func parseApprovalEvent(log txLog) *SimEvent {
 }
 
 // parseApprovalForAllEvent parses ERC721/ERC1155 ApprovalForAll events.
-func parseApprovalForAllEvent(log txLog) *SimEvent {
+func parseApprovalForAllEvent(log TxLog) *SimEvent {
 	if len(log.Topics) < 3 {
 		return nil
 	}
@@ -367,7 +367,7 @@ func DetectApproval(ctx context.Context, events []SimEvent, managedSigners map[s
 // (direct call, multicall wrapper, etc.).
 //
 // Returns a human-readable reason if detected, or empty string if safe.
-func DetectDangerousStateChanges(logs []txLog, managedSigners map[string]bool) string {
+func DetectDangerousStateChanges(logs []TxLog, managedSigners map[string]bool) string {
 	for _, log := range logs {
 		if len(log.Topics) == 0 {
 			continue

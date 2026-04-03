@@ -23,7 +23,7 @@ type RPCSimulatorConfig struct {
 	Timeout       time.Duration // per-simulation timeout
 }
 
-// rpcSimulator implements AnvilForkManager using eth_simulateV1 via RPC gateway.
+// rpcSimulator implements Simulator using eth_simulateV1 via RPC gateway.
 type rpcSimulator struct {
 	cfg    RPCSimulatorConfig
 	client *http.Client
@@ -31,7 +31,7 @@ type rpcSimulator struct {
 }
 
 // NewRPCSimulator creates a new RPC-based simulator.
-func NewRPCSimulator(cfg RPCSimulatorConfig, logger *slog.Logger) (AnvilForkManager, error) {
+func NewRPCSimulator(cfg RPCSimulatorConfig, logger *slog.Logger) (Simulator, error) {
 	if logger == nil {
 		return nil, fmt.Errorf("logger is required")
 	}
@@ -195,9 +195,9 @@ func (s *rpcSimulator) MarkDirty(_ string) {}
 // Status returns the simulator status.
 func (s *rpcSimulator) Status(_ context.Context) *ManagerStatus {
 	return &ManagerStatus{
-		Enabled:      true,
-		AnvilVersion: "rpc (eth_simulateV1)",
-		Chains:       map[string]*ChainStatus{},
+		Enabled:       true,
+		EngineVersion: "rpc (eth_simulateV1)",
+		Chains:        map[string]*ChainStatus{},
 	}
 }
 
@@ -348,11 +348,11 @@ func (s *rpcSimulator) parseCallResult(call ethSimCallResult, from, to, value st
 	return result
 }
 
-// ethSimLogsToTxLogs converts eth_simulateV1 logs to txLog (reuses existing parser).
-func ethSimLogsToTxLogs(logs []ethSimLog) []txLog {
-	out := make([]txLog, len(logs))
+// ethSimLogsToTxLogs converts eth_simulateV1 logs to TxLog (reuses existing parser).
+func ethSimLogsToTxLogs(logs []ethSimLog) []TxLog {
+	out := make([]TxLog, len(logs))
 	for i, l := range logs {
-		out[i] = txLog{
+		out[i] = TxLog{
 			Address: l.Address,
 			Topics:  l.Topics,
 			Data:    l.Data,
