@@ -424,7 +424,7 @@ func TestNewSignerResponse_HDWallet_DerivedHierarchyUsesCanonicalAddressKey(t *t
 		Enabled: true,
 		Locked:  true,
 	})
-	assert.Equal(t, primaryAddr, resp.HDParentAddress)
+	assert.Equal(t, primaryAddr, resp.PrimaryAddress)
 	require.NotNil(t, resp.HDDerivationIndex)
 	assert.Equal(t, uint32(1), *resp.HDDerivationIndex)
 }

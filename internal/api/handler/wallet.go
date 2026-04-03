@@ -52,7 +52,6 @@ type updateWalletRequest struct {
 
 type addMemberRequest struct {
 	SignerAddress string `json:"signer_address"`
-	WalletID      string `json:"wallet_id,omitempty"`
 }
 
 type walletResponse struct {
@@ -66,8 +65,8 @@ type walletResponse struct {
 
 type walletListResponse struct {
 	Wallets []walletResponse `json:"wallets"`
-	Total       int                  `json:"total"`
-	HasMore     bool                 `json:"has_more"`
+	Total   int              `json:"total"`
+	HasMore bool             `json:"has_more"`
 }
 
 type memberResponse struct {
@@ -252,8 +251,8 @@ func (h *WalletHandler) listWallets(w http.ResponseWriter, r *http.Request) {
 
 	resp := walletListResponse{
 		Wallets: make([]walletResponse, 0, len(result.Wallets)),
-		Total:       result.Total,
-		HasMore:     result.HasMore,
+		Total:   result.Total,
+		HasMore: result.HasMore,
 	}
 	for i := range result.Wallets {
 		resp.Wallets = append(resp.Wallets, h.toResponse(&result.Wallets[i]))
@@ -323,7 +322,7 @@ func (h *WalletHandler) listMembers(w http.ResponseWriter, r *http.Request, wall
 	}
 	for _, m := range members {
 		resp.Members = append(resp.Members, memberResponse{
-			WalletID:      m.SignerAddress,
+			WalletID:      m.WalletID,
 			SignerAddress: m.SignerAddress,
 			AddedAt:       m.AddedAt.UTC().Format("2006-01-02T15:04:05Z"),
 		})
@@ -345,9 +344,6 @@ func (h *WalletHandler) addMember(w http.ResponseWriter, r *http.Request, wallet
 		return
 	}
 
-	if strings.TrimSpace(req.SignerAddress) == "" {
-		req.SignerAddress = strings.TrimSpace(req.WalletID)
-	}
 	if strings.TrimSpace(req.SignerAddress) == "" {
 		h.writeError(w, "signer_address is required", http.StatusBadRequest)
 		return
@@ -384,7 +380,7 @@ func (h *WalletHandler) addMember(w http.ResponseWriter, r *http.Request, wallet
 	}
 
 	h.writeJSON(w, memberResponse{
-		WalletID:      member.SignerAddress,
+		WalletID:      member.WalletID,
 		SignerAddress: member.SignerAddress,
 		AddedAt:       member.AddedAt.UTC().Format("2006-01-02T15:04:05Z"),
 	}, http.StatusCreated)

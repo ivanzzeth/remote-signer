@@ -41,34 +41,34 @@ const (
 
 // keyMap defines the key bindings for the application
 type keyMap struct {
-	Tab       key.Binding
-	ShiftTab  key.Binding
-	Enter     key.Binding
-	Back      key.Binding
-	Refresh   key.Binding
-	Approve   key.Binding
-	Reject    key.Binding
-	Filter    key.Binding
-	Help      key.Binding
-	Quit      key.Binding
-	Up        key.Binding
-	Down      key.Binding
-	Left      key.Binding
-	Right     key.Binding
-	PageUp    key.Binding
-	PageDown  key.Binding
-	Home      key.Binding
-	End       key.Binding
-	Delete    key.Binding
-	Toggle    key.Binding
-	Generate  key.Binding
-	Number1   key.Binding
-	Number2   key.Binding
-	Number3   key.Binding
-	Number4   key.Binding
-	Number5   key.Binding
-	Number6   key.Binding
-	Number7   key.Binding
+	Tab      key.Binding
+	ShiftTab key.Binding
+	Enter    key.Binding
+	Back     key.Binding
+	Refresh  key.Binding
+	Approve  key.Binding
+	Reject   key.Binding
+	Filter   key.Binding
+	Help     key.Binding
+	Quit     key.Binding
+	Up       key.Binding
+	Down     key.Binding
+	Left     key.Binding
+	Right    key.Binding
+	PageUp   key.Binding
+	PageDown key.Binding
+	Home     key.Binding
+	End      key.Binding
+	Delete   key.Binding
+	Toggle   key.Binding
+	Generate key.Binding
+	Number1  key.Binding
+	Number2  key.Binding
+	Number3  key.Binding
+	Number4  key.Binding
+	Number5  key.Binding
+	Number6  key.Binding
+	Number7  key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
@@ -203,38 +203,38 @@ var keys = keyMap{
 
 // Model represents the main application state
 type Model struct {
-	client       *client.Client
-	ctx          context.Context
-	width        int
-	height       int
-	activeTab    int
+	client        *client.Client
+	ctx           context.Context
+	width         int
+	height        int
+	activeTab     int
 	rulesSubTab   int // 0=Rules, 1=Templates, 2=Presets, 3=API Keys, 4=IP Whitelist; only when activeTab==2 (ACLs)
 	signersSubTab int // 0=Wallets, 1=All Signers; only when activeTab==4 (Wallets)
-	currentView  ViewType
-	previousView ViewType
-	help         help.Model
-	showHelp     bool
-	err          error
-	statusMsg    string
+	currentView   ViewType
+	previousView  ViewType
+	help          help.Model
+	showHelp      bool
+	err           error
+	statusMsg     string
 
 	// Views
-	dashboard        *views.DashboardModel
-	requests         *views.RequestsModel
-	requestDetail    *views.RequestDetailModel
-	rules            *views.RulesModel
-	ruleDetail       *views.RuleDetailModel
-	audit            *views.AuditModel
-	signers          *views.SignersModel
-	signerDetail     *views.SignerDetailModel
-	metrics          *views.MetricsModel
-	wallets          *views.WalletsModel
-	walletDetail     *views.WalletDetailModel
-	security         *views.SecurityModel
-	apikeysView      *views.APIKeysModel
-	ipWhitelistView  *views.IPWhitelistModel
-	templates        *views.TemplatesModel
-	presets          *views.PresetsModel
-	presetDetail     *views.PresetDetailModel
+	dashboard       *views.DashboardModel
+	requests        *views.RequestsModel
+	requestDetail   *views.RequestDetailModel
+	rules           *views.RulesModel
+	ruleDetail      *views.RuleDetailModel
+	audit           *views.AuditModel
+	signers         *views.SignersModel
+	signerDetail    *views.SignerDetailModel
+	metrics         *views.MetricsModel
+	wallets         *views.WalletsModel
+	walletDetail    *views.WalletDetailModel
+	security        *views.SecurityModel
+	apikeysView     *views.APIKeysModel
+	ipWhitelistView *views.IPWhitelistModel
+	templates       *views.TemplatesModel
+	presets         *views.PresetsModel
+	presetDetail    *views.PresetDetailModel
 }
 
 // NewModel creates a new application model
@@ -660,7 +660,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			memberWalletID := m.walletDetail.GetOpenMemberWalletID()
 			if memberWalletID != "" {
 				// Load the member wallet detail (re-enter ViewWalletDetail for the member)
-				memberWallet := evm.Wallet{WalletID: memberWalletID}
+				memberWallet := evm.Wallet{ID: memberWalletID}
 				m.previousView = ViewWalletDetail // back will return to the wallet detail
 				cmds = append(cmds, m.walletDetail.LoadWallet(memberWallet))
 			}

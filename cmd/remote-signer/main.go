@@ -125,6 +125,10 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("failed to create signer ownership repository: %w", err)
 	}
+	signerRepo, err := storage.NewGormSignerRepository(db)
+	if err != nil {
+		return fmt.Errorf("failed to create signer repository: %w", err)
+	}
 
 	signerAccessRepo, err := storage.NewGormSignerAccessRepository(db)
 	if err != nil {
@@ -357,6 +361,27 @@ func run() error {
 		// Sync signer ownership (assign unowned signers to first admin)
 		if err := config.SyncSignerOwnership(context.Background(), evmSignerManager, signerOwnershipRepo, apiKeyRepo, log); err != nil {
 			return fmt.Errorf("failed to sync signer ownership: %w", err)
+		}
+		if cfg.Chains.EVM.MaterialCheck.Enabled {
+			checker, checkerErr := service.NewSignerMaterialChecker(
+				evmSignerManager,
+				signerRepo,
+				cfg.Chains.EVM.KeystoreDir,
+				cfg.Chains.EVM.HDWalletDir,
+				cfg.Chains.EVM.MaterialCheck.Interval,
+				log,
+			)
+			if checkerErr != nil {
+				return fmt.Errorf("failed to create signer material checker: %w", checkerErr)
+			}
+			if cfg.Chains.EVM.MaterialCheck.StartupCheck {
+				if runErr := checker.RunOnce(context.Background()); runErr != nil {
+					return fmt.Errorf("startup signer material check failed: %w", runErr)
+				}
+			}
+			checkerCtx, checkerCancel := context.WithCancel(context.Background())
+			defer checkerCancel()
+			go checker.Start(checkerCtx)
 		}
 
 		if evmRegistry.SignerCount() == 0 && evmRegistry.TotalCount() == 0 {
@@ -825,32 +850,33 @@ func run() error {
 		IPWhitelistConfig:        ipWhitelist,
 		IPWhitelistConfigForRead: &cfg.Security.IPWhitelist,
 		IPRateLimit:              cfg.Security.IPRateLimit,
-		SolidityValidator: solidityValidator,
-		JSEvaluator:       jsEval,
-		Template:          &api.TemplateConfig{
+		SolidityValidator:        solidityValidator,
+		JSEvaluator:              jsEval,
+		Template: &api.TemplateConfig{
 			TemplateRepo:    templateRepo,
 			TemplateService: templateService,
 		},
-		ApprovalGuard:       approvalGuard,
-		APIKeyRepo:          apiKeyRepo,
-		SignerOwnershipRepo: signerOwnershipRepo,
-		SignerAccessRepo:    signerAccessRepo,
-		WalletRepo:          walletRepo,
-		BudgetRepo:          budgetRepo,
-		RulesAPIReadonly:              cfg.Security.IsRulesAPIReadonly(),
-		SignersAPIReadonly:            cfg.Security.IsSignersAPIReadonly(),
-		APIKeysAPIReadonly:            cfg.Security.IsAPIKeysAPIReadonly(),
-		MaxRulesPerAPIKey:             cfg.Security.MaxRulesPerAPIKey,
-		MaxKeystoresPerKey:            cfg.Security.MaxKeystoresPerKey,
-		MaxHDWalletsPerKey:            cfg.Security.MaxHDWalletsPerKey,
-		RequireApprovalForAgentRules:  cfg.Security.IsRequireApprovalForAgentRules(),
-		AlertService:       securityAlertService,
-		AuditLogger:        auditLogger,
-		SignTimeout:        cfg.Security.SignTimeout,
-		AutoLockTimeout:    cfg.Security.AutoLockTimeout,
-		AuditRetentionDays: cfg.AuditMonitor.RetentionDays,
-		Simulator:          simulator,
-		RPCProvider:        rpcProvider,
+		ApprovalGuard:                approvalGuard,
+		APIKeyRepo:                   apiKeyRepo,
+		SignerRepo:                   signerRepo,
+		SignerOwnershipRepo:          signerOwnershipRepo,
+		SignerAccessRepo:             signerAccessRepo,
+		WalletRepo:                   walletRepo,
+		BudgetRepo:                   budgetRepo,
+		RulesAPIReadonly:             cfg.Security.IsRulesAPIReadonly(),
+		SignersAPIReadonly:           cfg.Security.IsSignersAPIReadonly(),
+		APIKeysAPIReadonly:           cfg.Security.IsAPIKeysAPIReadonly(),
+		MaxRulesPerAPIKey:            cfg.Security.MaxRulesPerAPIKey,
+		MaxKeystoresPerKey:           cfg.Security.MaxKeystoresPerKey,
+		MaxHDWalletsPerKey:           cfg.Security.MaxHDWalletsPerKey,
+		RequireApprovalForAgentRules: cfg.Security.IsRequireApprovalForAgentRules(),
+		AlertService:                 securityAlertService,
+		AuditLogger:                  auditLogger,
+		SignTimeout:                  cfg.Security.SignTimeout,
+		AutoLockTimeout:              cfg.Security.AutoLockTimeout,
+		AuditRetentionDays:           cfg.AuditMonitor.RetentionDays,
+		Simulator:                    simulator,
+		RPCProvider:                  rpcProvider,
 	}
 	if presetsDir != "" {
 		routerConfig.PresetsDir = presetsDir

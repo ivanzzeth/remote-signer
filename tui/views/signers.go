@@ -111,6 +111,25 @@ func formatHDWalletRoleLine(s evm.Signer) string {
 	return fmt.Sprintf("HD: derived #%d", *s.HDDerivationIndex)
 }
 
+func formatSignerWallets(s evm.Signer) string {
+	if len(s.Wallets) == 0 {
+		return "-"
+	}
+	names := make([]string, 0, len(s.Wallets))
+	for _, w := range s.Wallets {
+		if strings.TrimSpace(w.Name) != "" {
+			names = append(names, w.Name)
+			continue
+		}
+		names = append(names, w.ID)
+	}
+	joined := strings.Join(names, ",")
+	if len(joined) > 22 {
+		return joined[:19] + "..."
+	}
+	return joined
+}
+
 // SignersModel represents the signers list view
 type SignersModel struct {
 	signers_svc evm.SignerAPI
@@ -165,7 +184,6 @@ type SignersModel struct {
 	hdWallets     []evm.HDWalletResponse
 	hdWalletIdx   int
 	indexInput    textinput.Model
-
 }
 
 // SignersDataMsg is sent when signers data is loaded
@@ -1385,12 +1403,12 @@ func (m *SignersModel) renderSigners() string {
 	// Table header
 	showOwner := m.hasOwnerColumn()
 	if showOwner {
-		headerRow := fmt.Sprintf("%-44s  %-14s  %-14s  %-8s  %-24s  %-20s",
-			"Address", "Type", "Status", "Enabled", "HD Parent", "Owner")
+		headerRow := fmt.Sprintf("%-44s  %-14s  %-14s  %-8s  %-24s  %-24s  %-20s",
+			"Address", "Type", "Status", "Enabled", "Primary Address", "Wallets", "Owner")
 		content.WriteString(styles.TableHeaderStyle.Render(headerRow))
 	} else {
-		headerRow := fmt.Sprintf("%-44s  %-14s  %-14s  %-8s  %-24s",
-			"Address", "Type", "Status", "Enabled", "HD Parent")
+		headerRow := fmt.Sprintf("%-44s  %-14s  %-14s  %-8s  %-24s  %-24s",
+			"Address", "Type", "Status", "Enabled", "Primary Address", "Wallets")
 		content.WriteString(styles.TableHeaderStyle.Render(headerRow))
 	}
 	content.WriteString("\n")
@@ -1512,31 +1530,34 @@ func (m *SignersModel) renderSignerRow(signer evm.Signer, selected bool, showOwn
 	}
 	enabledPart := enabledStyle.Render(fmt.Sprintf("%-8s", enabled))
 
-	// HD parent marker (not wallet membership)
-	parentWallet := signer.WalletID
-	if parentWallet == "" {
-		parentWallet = "-"
-	} else if len(parentWallet) > 22 {
-		parentWallet = parentWallet[:19] + "..."
+	primaryAddress := signer.PrimaryAddress
+	if primaryAddress == "" {
+		primaryAddress = signer.Address
 	}
+	if len(primaryAddress) > 22 {
+		primaryAddress = primaryAddress[:19] + "..."
+	}
+	wallets := formatSignerWallets(signer)
 
 	var row string
 	if showOwner {
-		row = fmt.Sprintf("%-44s  %s  %s  %s  %-24s  %-20s",
+		row = fmt.Sprintf("%-44s  %s  %s  %s  %-24s  %-24s  %-20s",
 			address,
 			typePart,
 			statusPart,
 			enabledPart,
-			parentWallet,
+			primaryAddress,
+			wallets,
 			ownerStr,
 		)
 	} else {
-		row = fmt.Sprintf("%-44s  %s  %s  %s  %-24s",
+		row = fmt.Sprintf("%-44s  %s  %s  %s  %-24s  %-24s",
 			address,
 			typePart,
 			statusPart,
 			enabledPart,
-			parentWallet,
+			primaryAddress,
+			wallets,
 		)
 	}
 
@@ -1546,6 +1567,9 @@ func (m *SignersModel) renderSignerRow(signer evm.Signer, selected bool, showOwn
 	}
 	if hd := formatHDWalletRoleLine(signer); hd != "" {
 		metaParts = append(metaParts, hd)
+	}
+	if signer.MaterialStatus != "" && signer.MaterialStatus != "present" {
+		metaParts = append(metaParts, "material:"+signer.MaterialStatus)
 	}
 	if len(metaParts) > 0 {
 		row += "\n  " + styles.MutedColor.Render(strings.Join(metaParts, " | "))

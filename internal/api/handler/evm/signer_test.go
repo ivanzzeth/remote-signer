@@ -90,9 +90,11 @@ func (s *signerStubOwnershipRepo) GetByOwner(_ context.Context, ownerID string) 
 	}
 	return result, nil
 }
-func (s *signerStubOwnershipRepo) Delete(_ context.Context, _ string) error                { return nil }
-func (s *signerStubOwnershipRepo) UpdateOwner(_ context.Context, _, _ string) error         { return nil }
-func (s *signerStubOwnershipRepo) CountByOwner(_ context.Context, _ string) (int64, error)  { return 0, nil }
+func (s *signerStubOwnershipRepo) Delete(_ context.Context, _ string) error         { return nil }
+func (s *signerStubOwnershipRepo) UpdateOwner(_ context.Context, _, _ string) error { return nil }
+func (s *signerStubOwnershipRepo) CountByOwner(_ context.Context, _ string) (int64, error) {
+	return 0, nil
+}
 func (s *signerStubOwnershipRepo) CountByOwnerAndType(_ context.Context, _ string, _ types.SignerType) (int64, error) {
 	return 0, nil
 }
@@ -358,7 +360,7 @@ func TestListSigners_IncludesHDParentInJSON(t *testing.T) {
 	var resp ListSignersResponse
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
 	require.Len(t, resp.Signers, 1)
-	assert.Equal(t, primary, resp.Signers[0].HDParentAddress)
+	assert.Equal(t, primary, resp.Signers[0].PrimaryAddress)
 	require.NotNil(t, resp.Signers[0].HDDerivationIndex)
 	assert.Equal(t, uint32(2), *resp.Signers[0].HDDerivationIndex)
 }
