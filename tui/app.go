@@ -31,6 +31,8 @@ const (
 	ViewMetrics
 	ViewWallets
 	ViewWalletDetail
+	ViewHDWallets
+	ViewHDWalletDetail
 	ViewSecurity
 	ViewAPIKeys
 	ViewIPWhitelist
@@ -209,7 +211,7 @@ type Model struct {
 	height        int
 	activeTab     int
 	rulesSubTab   int // 0=Rules, 1=Templates, 2=Presets, 3=API Keys, 4=IP Whitelist; only when activeTab==2 (ACLs)
-	signersSubTab int // 0=Wallets, 1=All Signers; only when activeTab==4 (Wallets)
+	signersSubTab int // 0=Wallets, 1=All Signers, 2=HD Wallets; only when activeTab==4 (Wallets)
 	currentView   ViewType
 	previousView  ViewType
 	help          help.Model
@@ -229,6 +231,8 @@ type Model struct {
 	metrics         *views.MetricsModel
 	wallets         *views.WalletsModel
 	walletDetail    *views.WalletDetailModel
+	hdwallets       *views.HDWalletsModel
+	hdwalletDetail  *views.HDWalletDetailModel
 	security        *views.SecurityModel
 	apikeysView     *views.APIKeysModel
 	ipWhitelistView *views.IPWhitelistModel
@@ -302,6 +306,16 @@ func NewModel(c *client.Client) (*Model, error) {
 		return nil, fmt.Errorf("failed to create wallet detail view: %w", err)
 	}
 
+	hdwallets, err := views.NewHDWalletsModel(c, ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create HD wallets view: %w", err)
+	}
+
+	hdwalletDetail, err := views.NewHDWalletDetailModel(c, ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create HD wallet detail view: %w", err)
+	}
+
 	security, err := views.NewSecurityModel(c, ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create security view: %w", err)
@@ -350,6 +364,8 @@ func NewModel(c *client.Client) (*Model, error) {
 		metrics:         metrics,
 		wallets:         wallets,
 		walletDetail:    walletDetail,
+		hdwallets:       hdwallets,
+		hdwalletDetail:  hdwalletDetail,
 		security:        security,
 		apikeysView:     apikeysView,
 		ipWhitelistView: ipWhitelistView,
@@ -369,6 +385,7 @@ func (m Model) Init() tea.Cmd {
 		m.signers.Init(),
 		m.metrics.Init(),
 		m.wallets.Init(),
+		m.hdwallets.Init(),
 		m.security.Init(),
 		m.apikeysView.Init(),
 		m.templates.Init(),
@@ -398,6 +415,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.metrics.SetSize(msg.Width, msg.Height-6)
 		m.wallets.SetSize(msg.Width, msg.Height-6)
 		m.walletDetail.SetSize(msg.Width, msg.Height-6)
+		m.hdwallets.SetSize(msg.Width, msg.Height-6)
+		m.hdwalletDetail.SetSize(msg.Width, msg.Height-6)
 		m.security.SetSize(msg.Width, msg.Height-6)
 		m.apikeysView.SetSize(msg.Width, msg.Height-6)
 		m.ipWhitelistView.SetSize(msg.Width, msg.Height-6)
@@ -499,8 +518,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.currentView = m.rulesSubTabToView(m.rulesSubTab)
 					return m, m.refreshCurrentView()
 				}
-				if m.currentView == ViewWallets || m.currentView == ViewSigners {
-					m.signersSubTab = (m.signersSubTab + 1) % 2 // toggle Wallets <-> All Signers
+				if m.currentView == ViewWallets || m.currentView == ViewSigners || m.currentView == ViewHDWallets {
+					m.signersSubTab = (m.signersSubTab + 2) % 3 // prev: Wallets <-> Signers <-> HD Wallets
 					m.currentView = m.signersSubTabToView(m.signersSubTab)
 					return m, m.refreshCurrentView()
 				}
@@ -515,8 +534,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.currentView = m.rulesSubTabToView(m.rulesSubTab)
 					return m, m.refreshCurrentView()
 				}
-				if m.currentView == ViewWallets || m.currentView == ViewSigners {
-					m.signersSubTab = (m.signersSubTab + 1) % 2 // Wallets <-> All Signers
+				if m.currentView == ViewWallets || m.currentView == ViewSigners || m.currentView == ViewHDWallets {
+					m.signersSubTab = (m.signersSubTab + 1) % 3 // next: Wallets <-> Signers <-> HD Wallets
 					m.currentView = m.signersSubTabToView(m.signersSubTab)
 					return m, m.refreshCurrentView()
 				}
@@ -526,7 +545,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 			case key.Matches(msg, keys.Back):
-				if m.currentView == ViewRequestDetail || m.currentView == ViewRuleDetail || m.currentView == ViewSignerDetail || m.currentView == ViewWalletDetail || m.currentView == ViewPresetDetail {
+				if m.currentView == ViewRequestDetail || m.currentView == ViewRuleDetail || m.currentView == ViewSignerDetail || m.currentView == ViewWalletDetail || m.currentView == ViewHDWalletDetail || m.currentView == ViewPresetDetail {
 					m.currentView = m.previousView
 					return m, m.refreshCurrentView()
 				}
@@ -666,6 +685,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	case ViewHDWallets:
+		newHD, cmd := m.hdwallets.Update(msg)
+		m.hdwallets = newHD.(*views.HDWalletsModel)
+		cmds = append(cmds, cmd)
+
+		if m.hdwallets.ShouldOpenDetail() {
+			w := m.hdwallets.GetSelectedWallet()
+			m.hdwallets.ResetOpenDetail()
+			m.previousView = m.currentView
+			m.currentView = ViewHDWalletDetail
+			cmds = append(cmds, m.hdwalletDetail.LoadWallet(w))
+		}
+
+	case ViewHDWalletDetail:
+		newHDDetail, cmd := m.hdwalletDetail.Update(msg)
+		m.hdwalletDetail = newHDDetail.(*views.HDWalletDetailModel)
+		cmds = append(cmds, cmd)
+
+		if m.hdwalletDetail.ShouldGoBack() {
+			m.currentView = ViewHDWallets
+			m.hdwalletDetail.ResetGoBack()
+			cmds = append(cmds, m.hdwallets.Refresh())
+		}
+
 	case ViewSecurity:
 		newSecurity, cmd := m.security.Update(msg)
 		m.security = newSecurity.(*views.SecurityModel)
@@ -781,9 +824,9 @@ func (m Model) renderHeader() string {
 		out = lipgloss.JoinVertical(lipgloss.Left, out, subLine)
 	}
 
-	// Wallets sub-tabs when Wallets is the active top-level tab (Wallets | All Signers)
+	// Wallets sub-tabs when Wallets is the active top-level tab (Wallets | All Signers | HD Wallets)
 	if m.activeTab == 4 {
-		subNames := []string{"Wallets", "All Signers"}
+		subNames := []string{"Wallets", "All Signers", "HD Wallets"}
 		var subRendered []string
 		for i, name := range subNames {
 			if i == m.signersSubTab {
@@ -839,6 +882,10 @@ func (m Model) renderContent(_ int) string {
 		return m.wallets.View()
 	case ViewWalletDetail:
 		return m.walletDetail.View()
+	case ViewHDWallets:
+		return m.hdwallets.View()
+	case ViewHDWalletDetail:
+		return m.hdwalletDetail.View()
 	case ViewSecurity:
 		return m.security.View()
 	case ViewAPIKeys:
@@ -872,6 +919,8 @@ func (m Model) refreshCurrentView() tea.Cmd {
 		return m.metrics.Refresh()
 	case ViewWallets:
 		return m.wallets.Init()
+	case ViewHDWallets:
+		return m.hdwallets.Refresh()
 	case ViewSecurity:
 		return m.security.Refresh()
 	case ViewAPIKeys:
@@ -905,6 +954,10 @@ func (m Model) isCurrentViewCapturingInput() bool {
 		return m.wallets.IsCapturingInput()
 	case ViewWalletDetail:
 		return m.walletDetail.IsCapturingInput()
+	case ViewHDWallets:
+		return m.hdwallets.IsCapturingInput()
+	case ViewHDWalletDetail:
+		return m.hdwalletDetail.IsCapturingInput()
 	case ViewSecurity:
 		return m.security.IsCapturingInput()
 	case ViewAPIKeys:
@@ -944,22 +997,24 @@ func (m Model) tabToView(tab int) ViewType {
 	}
 }
 
-// signersSubTabToView returns the ViewType for the given Wallets sub-tab (0=Wallets, 1=All Signers).
+// signersSubTabToView returns the ViewType for the given Wallets sub-tab (0=Wallets, 1=All Signers, 2=HD Wallets).
 func (m Model) signersSubTabToView(sub int) ViewType {
 	switch sub {
 	case 1:
 		return ViewSigners
+	case 2:
+		return ViewHDWallets
 	default:
 		return ViewWallets
 	}
 }
 
 // isTopLevelView returns true when the current view is one of the seven top-level tab views
-// (including ACLs sub-views and Wallets sub-views: Wallets, All Signers).
+// (including ACLs sub-views and Wallets sub-views: Wallets, All Signers, HD Wallets).
 func (m Model) isTopLevelView() bool {
 	switch m.currentView {
 	case ViewDashboard, ViewRequests, ViewRules, ViewAudit, ViewSigners, ViewMetrics,
-		ViewWallets, ViewSecurity, ViewAPIKeys, ViewIPWhitelist, ViewTemplates, ViewPresets:
+		ViewWallets, ViewHDWallets, ViewSecurity, ViewAPIKeys, ViewIPWhitelist, ViewTemplates, ViewPresets:
 		return true
 	default:
 		return false
