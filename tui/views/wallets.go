@@ -203,29 +203,36 @@ func (m *WalletsModel) View() string {
 	if m.actionResult != "" {
 		b.WriteString(m.actionResult + "\n\n")
 	}
-	b.WriteString(styles.TableHeaderStyle.Render(fmt.Sprintf("%-2s  %-18s  %-24s  %-16s  %-16s  %-16s", "", "Name", "Description", "Owner", "Created", "Updated")))
+	b.WriteString(styles.TableHeaderStyle.Render(fmt.Sprintf("%-2s  %-14s  %-16s  %-22s  %-14s  %-14s  %-14s", "", "Wallet ID", "Name", "Description", "Owner", "Created", "Updated")))
 	b.WriteString("\n")
 	for i, w := range m.wallets {
 		prefix := "  "
 		if i == m.selectedIdx {
 			prefix = "➜ "
 		}
+		idCol := w.ID
+		if idCol == "" {
+			idCol = "-"
+		} else {
+			idCol = truncate(idCol, 14)
+		}
 		desc := w.Description
 		if desc == "" {
 			desc = "-"
 		}
-		if len(desc) > 24 {
-			desc = desc[:21] + "..."
+		if len(desc) > 22 {
+			desc = desc[:19] + "..."
 		}
 		owner := "-"
 		if w.OwnerID != "" {
 			owner = w.OwnerID
 		}
-		row := fmt.Sprintf("%-2s  %-18s  %-24s  %-16s  %-16s  %-16s",
+		row := fmt.Sprintf("%-2s  %-14s  %-16s  %-22s  %-14s  %-14s  %-14s",
 			prefix,
-			truncate(w.Name, 18),
+			idCol,
+			truncate(w.Name, 16),
 			desc,
-			truncate(owner, 16),
+			truncate(owner, 14),
 			w.CreatedAt.Format("2006-01-02 15:04"),
 			w.UpdatedAt.Format("2006-01-02 15:04"),
 		)
