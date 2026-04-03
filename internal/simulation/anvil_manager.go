@@ -264,8 +264,8 @@ func (m *anvilForkManagerImpl) startInstance(ctx context.Context, chainID string
 		)
 	}()
 
-	// Wait for anvil to become ready
-	if err := m.waitForReady(ctx, inst); err != nil {
+	// Wait for anvil to become ready (lock not held on inst.mu)
+	if err := m.waitForReady(ctx, inst, false); err != nil {
 		// Kill the process if it didn't become ready
 		if killErr := cmd.Process.Kill(); killErr != nil {
 			m.logger.Error("failed to kill unready anvil process", "chain_id", chainID, "error", killErr)
@@ -278,7 +278,9 @@ func (m *anvilForkManagerImpl) startInstance(ctx context.Context, chainID string
 }
 
 // waitForReady polls anvil until it responds to eth_blockNumber.
-func (m *anvilForkManagerImpl) waitForReady(ctx context.Context, inst *anvilInstance) error {
+// If lockHeld is true, the caller already holds inst.mu (e.g. restartInstance) and we must use
+// doAnvilRPCLocked — otherwise doAnvilRPC would try to Lock(inst.mu) again and deadlock forever.
+func (m *anvilForkManagerImpl) waitForReady(ctx context.Context, inst *anvilInstance, lockHeld bool) error {
 	deadline := time.Now().Add(120 * time.Second)
 	for time.Now().Before(deadline) {
 		select {
@@ -286,7 +288,14 @@ func (m *anvilForkManagerImpl) waitForReady(ctx context.Context, inst *anvilInst
 			return ctx.Err()
 		default:
 		}
-		if m.healthCheck(ctx, inst) {
+		var ok bool
+		if lockHeld {
+			_, err := m.doAnvilRPCLocked(ctx, inst, "eth_blockNumber", nil)
+			ok = err == nil
+		} else {
+			ok = m.healthCheck(ctx, inst)
+		}
+		if ok {
 			return nil
 		}
 		time.Sleep(healthCheckPause)
@@ -356,7 +365,7 @@ func (m *anvilForkManagerImpl) restartInstance(ctx context.Context, inst *anvilI
 		)
 	}()
 
-	if err := m.waitForReady(ctx, inst); err != nil {
+	if err := m.waitForReady(ctx, inst, true); err != nil {
 		if killErr := cmd.Process.Kill(); killErr != nil {
 			m.logger.Error("failed to kill unready restarted anvil", "chain_id", inst.chainID, "error", killErr)
 		}
