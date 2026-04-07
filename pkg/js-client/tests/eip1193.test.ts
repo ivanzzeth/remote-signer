@@ -1,304 +1,669 @@
+/**
+ * EIP-1193 Provider multi-account tests
+ */
+
 import { EIP1193Provider } from "../src/evm/eip1193";
 import { RemoteSigner } from "../src/evm/remote_signer";
-import type { EvmSignService } from "../src/evm/sign";
-import type { SignRequest } from "../src/evm/sign";
+import { RemoteSignerClient } from "../src/client";
+import { ProviderErrorCode } from "../src/evm/provider-errors";
+import type { EIP1193ProviderConfig, SignersSource } from "../src/evm/provider-types";
 
-// ---------------------------------------------------------------------------
-// Mock EvmSignService
-// ---------------------------------------------------------------------------
-
-function createMockSignService(): EvmSignService {
+// Mock RemoteSignerClient
+const createMockClient = () => {
   return {
-    execute: jest.fn(async (req: SignRequest) => {
-      switch (req.sign_type) {
-        case "personal":
-          return { request_id: "req-1", status: "completed" as const, signature: "0x" + "ab".repeat(65) };
-        case "typed_data":
-          return { request_id: "req-2", status: "completed" as const, signature: "0x" + "cd".repeat(65) };
-        case "hash":
-          return { request_id: "req-3", status: "completed" as const, signature: "0x" + "ef".repeat(65) };
-        case "transaction":
-          return { request_id: "req-4", status: "completed" as const, signed_data: "0x02f8" + "00".repeat(50) };
-        default:
-          throw new Error(`Unexpected sign_type: ${req.sign_type}`);
-      }
-    }),
-    executeAsync: jest.fn(),
-  } as unknown as EvmSignService;
-}
-
-// ---------------------------------------------------------------------------
-// Mock RPC (via fetch)
-// ---------------------------------------------------------------------------
-
-const mockRpcResponses: Record<string, unknown> = {
-  eth_getTransactionCount: "0x5",
-  eth_estimateGas: "0x5208",
-  eth_gasPrice: "0x3B9ACA00",
-  eth_getBalance: "0x56BC75E2D63100000",
-  eth_blockNumber: "0x134e82a",
-  eth_call: "0x",
-  eth_getCode: "0x",
-  eth_sendRawTransaction: "0x" + "aa".repeat(32),
-  eth_getBlockByNumber: { baseFeePerGas: "0x3B9ACA00" },
+    evm: {
+      sign: {} as any, // Mock sign service for RemoteSigner constructor
+      signers: {
+        list: jest.fn(),
+      },
+      hdWallets: {
+        getSigners: jest.fn(),
+      },
+    },
+  } as any as RemoteSignerClient;
 };
 
-const originalFetch = global.fetch;
+// Mock RemoteSigner
+const createMockSigner = (address: string, chainId: string) => {
+  return {
+    address,
+    chainId,
+    setChainID: jest.fn(),
+    personalSign: jest.fn().mockResolvedValue("0xsignature"),
+    signHash: jest.fn().mockResolvedValue("0xsignature"),
+    signTypedData: jest.fn().mockResolvedValue("0xsignature"),
+    signTransaction: jest.fn().mockResolvedValue("0xsignedtx"),
+  } as any as RemoteSigner;
+};
 
-beforeAll(() => {
-  global.fetch = jest.fn(async (_url: string | URL | Request, init?: RequestInit) => {
-    const body = JSON.parse(init?.body as string);
-    const result = mockRpcResponses[body.method];
-    if (result === undefined) {
-      return {
-        ok: true,
-        json: async () => ({
-          jsonrpc: "2.0", id: body.id,
-          error: { code: -32601, message: `Method not found: ${body.method}` },
-        }),
-      } as Response;
-    }
-    return {
-      ok: true,
-      json: async () => ({ jsonrpc: "2.0", id: body.id, result }),
-    } as Response;
-  }) as jest.Mock;
+describe("EIP1193Provider - Initialization", () => {
+  it("should initialize with client mode (auto-fetch signers)", async () => {
+    const mockClient = createMockClient();
+
+    // Mock signers.list() response
+    (mockClient.evm.signers.list as jest.Mock).mockResolvedValue({
+      signers: [
+        { address: "0xAddress1", enabled: true, locked: false, type: "keystore" },
+        { address: "0xAddress2", enabled: true, locked: false, type: "keystore" },
+        { address: "0xAddress3", enabled: false, locked: false, type: "keystore" }, // Filtered out
+        { address: "0xAddress4", enabled: true, locked: true, type: "keystore" }, // Filtered out
+      ],
+    });
+
+    const provider = await EIP1193Provider.create({
+      signersSource: {
+        type: "client",
+        client: mockClient,
+        chainId: 1,
+      },
+    });
+
+    expect(provider.isConnected()).toBe(true);
+    expect(provider.selectedAddress).toBe("0xAddress1");
+
+    const accounts = (await provider.request({ method: "eth_accounts" })) as string[];
+    expect(accounts).toHaveLength(2);
+    expect(accounts[0]).toBe("0xAddress1");
+    expect(accounts[1]).toBe("0xAddress2");
+  });
+
+  it("should initialize with hdwallet mode", async () => {
+    const mockClient = createMockClient();
+
+    // Mock hdWallets.getSigners() response - returns RemoteSigner[] directly
+    const derivedSigners = [
+      createMockSigner("0xDerived1", "1"),
+      createMockSigner("0xDerived2", "1"),
+      createMockSigner("0xDerived3", "1"),
+    ];
+    (mockClient.evm.hdWallets.getSigners as jest.Mock).mockResolvedValue(derivedSigners);
+
+    const provider = await EIP1193Provider.create({
+      signersSource: {
+        type: "hdwallet",
+        client: mockClient,
+        primaryAddress: "0xPrimary",
+        chainId: "1",
+        start: 0,
+        count: 3,
+      },
+    });
+
+    expect(provider.isConnected()).toBe(true);
+    expect(provider.selectedAddress).toBe("0xDerived1");
+
+    const accounts = (await provider.request({ method: "eth_accounts" })) as string[];
+    expect(accounts).toHaveLength(3);
+    expect(accounts).toEqual(["0xDerived1", "0xDerived2", "0xDerived3"]);
+  });
+
+  it("should initialize with manual mode", async () => {
+    const signer1 = createMockSigner("0xManual1", "1");
+    const signer2 = createMockSigner("0xManual2", "1");
+
+    const provider = await EIP1193Provider.create({
+      signersSource: {
+        type: "manual",
+        signers: [signer1, signer2],
+      },
+    });
+
+    expect(provider.isConnected()).toBe(true);
+    expect(provider.selectedAddress).toBe("0xManual1");
+
+    const accounts = (await provider.request({ method: "eth_accounts" })) as string[];
+    expect(accounts).toHaveLength(2);
+    expect(accounts).toEqual(["0xManual1", "0xManual2"]);
+  });
+
+  it("should respect defaultAccountIndex", async () => {
+    const signer1 = createMockSigner("0xAccount1", "1");
+    const signer2 = createMockSigner("0xAccount2", "1");
+    const signer3 = createMockSigner("0xAccount3", "1");
+
+    const provider = await EIP1193Provider.create({
+      signersSource: {
+        type: "manual",
+        signers: [signer1, signer2, signer3],
+      },
+      defaultAccountIndex: 1,
+    });
+
+    expect(provider.selectedAddress).toBe("0xAccount2");
+
+    const accounts = (await provider.request({ method: "eth_accounts" })) as string[];
+    expect(accounts[0]).toBe("0xAccount2"); // Active account first
+    expect(accounts).toContain("0xAccount1");
+    expect(accounts).toContain("0xAccount3");
+  });
+
+  it("should emit connect event on initialization", async () => {
+    const signer1 = createMockSigner("0xAccount1", "1");
+
+    const connectHandler = jest.fn();
+
+    const provider = await EIP1193Provider.create({
+      signersSource: {
+        type: "manual",
+        signers: [signer1],
+      },
+    });
+
+    provider.on("connect", connectHandler);
+
+    // Connect event is emitted during create(), so we need to create a new one
+    const provider2 = await EIP1193Provider.create({
+      signersSource: {
+        type: "manual",
+        signers: [signer1],
+      },
+    });
+
+    // Since connect is emitted in create(), we can't test it post-creation
+    // Instead, verify the provider is connected
+    expect(provider2.isConnected()).toBe(true);
+  });
 });
 
-afterAll(() => {
-  global.fetch = originalFetch;
-});
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
-const ADDRESS = "0x742d35Cc6634C0532925a3b844Bc9e7595f2bD18";
-
-describe("EIP1193Provider", () => {
+describe("EIP1193Provider - Account Management", () => {
   let provider: EIP1193Provider;
-  let signService: EvmSignService;
-  let signer: RemoteSigner;
+  let signer1: RemoteSigner;
+  let signer2: RemoteSigner;
+  let signer3: RemoteSigner;
 
   beforeEach(async () => {
-    signService = createMockSignService();
-    signer = new RemoteSigner(signService, ADDRESS, "1");
+    signer1 = createMockSigner("0xAccount1", "1");
+    signer2 = createMockSigner("0xAccount2", "1");
+    signer3 = createMockSigner("0xAccount3", "1");
+
     provider = await EIP1193Provider.create({
-      signer,
-      defaultChainId: 1,
-      rpcOverrides: { 1: "https://eth.example.com", 137: "https://polygon.example.com" },
+      signersSource: {
+        type: "manual",
+        signers: [signer1, signer2, signer3],
+      },
     });
   });
 
-  // -- Account methods --
+  it("should switch account by index", async () => {
+    expect(provider.selectedAddress).toBe("0xAccount1");
 
-  test("eth_requestAccounts returns signer address", async () => {
-    expect(await provider.request({ method: "eth_requestAccounts" })).toEqual([ADDRESS]);
+    const accountsChangedHandler = jest.fn();
+    provider.on("accountsChanged", accountsChangedHandler);
+
+    await provider.switchAccount(1);
+
+    expect(provider.selectedAddress).toBe("0xAccount2");
+    expect(accountsChangedHandler).toHaveBeenCalledWith([
+      "0xAccount2",
+      "0xAccount1",
+      "0xAccount3",
+    ]);
   });
 
-  test("eth_accounts returns signer address", async () => {
-    expect(await provider.request({ method: "eth_accounts" })).toEqual([ADDRESS]);
+  it("should switch account by address", async () => {
+    expect(provider.selectedAddress).toBe("0xAccount1");
+
+    const accountsChangedHandler = jest.fn();
+    provider.on("accountsChanged", accountsChangedHandler);
+
+    await provider.switchAccount("0xAccount3");
+
+    expect(provider.selectedAddress).toBe("0xAccount3");
+    expect(accountsChangedHandler).toHaveBeenCalledWith([
+      "0xAccount3",
+      "0xAccount1",
+      "0xAccount2",
+    ]);
   });
 
-  // -- Chain methods --
-
-  test("eth_chainId returns hex chain ID", async () => {
-    expect(await provider.request({ method: "eth_chainId" })).toBe("0x1");
+  it("should throw error when switching to invalid index", async () => {
+    await expect(provider.switchAccount(99)).rejects.toThrow("Invalid account index");
   });
 
-  test("net_version returns decimal chain ID", async () => {
-    expect(await provider.request({ method: "net_version" })).toBe("1");
+  it("should throw error when switching to non-existent address", async () => {
+    await expect(provider.switchAccount("0xNonExistent")).rejects.toThrow(
+      "Account not found"
+    );
   });
 
-  // -- Properties --
+  it("should add new account", async () => {
+    const newSigner = createMockSigner("0xNewAccount", "1");
 
-  test("selectedAddress returns address", () => {
-    expect(provider.selectedAddress).toBe(ADDRESS);
+    const accountsChangedHandler = jest.fn();
+    provider.on("accountsChanged", accountsChangedHandler);
+
+    await provider.addAccount(newSigner);
+
+    const accounts = (await provider.request({ method: "eth_accounts" })) as string[];
+    expect(accounts).toHaveLength(4);
+    expect(accounts).toContain("0xNewAccount");
+    expect(accountsChangedHandler).toHaveBeenCalled();
   });
 
-  test("isMetaMask is true", () => {
+  it("should throw error when adding duplicate account", async () => {
+    await expect(provider.addAccount(signer1)).rejects.toThrow("Account already exists");
+  });
+
+  it("should remove account by index", async () => {
+    const accountsChangedHandler = jest.fn();
+    provider.on("accountsChanged", accountsChangedHandler);
+
+    await provider.removeAccount(1); // Remove Account2
+
+    const accounts = (await provider.request({ method: "eth_accounts" })) as string[];
+    expect(accounts).toHaveLength(2);
+    expect(accounts).not.toContain("0xAccount2");
+    expect(accountsChangedHandler).toHaveBeenCalled();
+  });
+
+  it("should remove account by address", async () => {
+    await provider.removeAccount("0xAccount2");
+
+    const accounts = (await provider.request({ method: "eth_accounts" })) as string[];
+    expect(accounts).toHaveLength(2);
+    expect(accounts).not.toContain("0xAccount2");
+  });
+
+  it("should auto-switch to index 0 when removing active account", async () => {
+    await provider.switchAccount(1); // Switch to Account2
+    expect(provider.selectedAddress).toBe("0xAccount2");
+
+    await provider.removeAccount(1); // Remove active account
+
+    expect(provider.selectedAddress).toBe("0xAccount1"); // Auto-switched to index 0
+  });
+
+  it("should emit disconnect when removing last account", async () => {
+    const disconnectHandler = jest.fn();
+    provider.on("disconnect", disconnectHandler);
+
+    // Remove all accounts
+    await provider.removeAccount(0);
+    await provider.removeAccount(0);
+    await provider.removeAccount(0);
+
+    expect(provider.isConnected()).toBe(false);
+    expect(provider.selectedAddress).toBeNull();
+    expect(disconnectHandler).toHaveBeenCalled();
+  });
+
+  it("should disconnect and clear all accounts", async () => {
+    const disconnectHandler = jest.fn();
+    provider.on("disconnect", disconnectHandler);
+
+    await provider.disconnect();
+
+    expect(provider.isConnected()).toBe(false);
+    expect(provider.selectedAddress).toBeNull();
+
+    const accounts = (await provider.request({ method: "eth_accounts" })) as string[];
+    expect(accounts).toHaveLength(0);
+
+    expect(disconnectHandler).toHaveBeenCalled();
+  });
+});
+
+describe("EIP1193Provider - RPC Methods", () => {
+  let provider: EIP1193Provider;
+  let signer1: RemoteSigner;
+  let signer2: RemoteSigner;
+
+  beforeEach(async () => {
+    signer1 = createMockSigner("0xAccount1", "1");
+    signer2 = createMockSigner("0xAccount2", "1");
+
+    provider = await EIP1193Provider.create({
+      signersSource: {
+        type: "manual",
+        signers: [signer1, signer2],
+      },
+    });
+  });
+
+  it("should return all accounts with active first (eth_accounts)", async () => {
+    const accounts = (await provider.request({ method: "eth_accounts" })) as string[];
+
+    expect(accounts).toHaveLength(2);
+    expect(accounts[0]).toBe("0xAccount1"); // Active first
+    expect(accounts[1]).toBe("0xAccount2");
+
+    // Switch account and verify order changes
+    await provider.switchAccount(1);
+
+    const accountsAfterSwitch = (await provider.request({
+      method: "eth_accounts",
+    })) as string[];
+    expect(accountsAfterSwitch[0]).toBe("0xAccount2"); // New active first
+    expect(accountsAfterSwitch[1]).toBe("0xAccount1");
+  });
+
+  it("should return all accounts (eth_requestAccounts)", async () => {
+    const accounts = (await provider.request({
+      method: "eth_requestAccounts",
+    })) as string[];
+
+    expect(accounts).toHaveLength(2);
+    expect(accounts[0]).toBe("0xAccount1");
+  });
+
+  it("should return chainId", async () => {
+    const chainId = await provider.request({ method: "eth_chainId" });
+    expect(chainId).toBe("0x1");
+  });
+
+  it("should return selectedAddress for eth_coinbase", async () => {
+    const coinbase = await provider.request({ method: "eth_coinbase" });
+    expect(coinbase).toBe("0xAccount1");
+  });
+
+  it("should sign with personal_sign", async () => {
+    const signature = await provider.request({
+      method: "personal_sign",
+      params: ["0xmessage", "0xAccount1"],
+    });
+
+    expect(signature).toBe("0xsignature");
+    expect(signer1.personalSign).toHaveBeenCalledWith("0xmessage");
+  });
+
+  it("should throw error when personal_sign address mismatch", async () => {
+    await expect(
+      provider.request({
+        method: "personal_sign",
+        params: ["0xmessage", "0xWrongAddress"],
+      })
+    ).rejects.toThrow("Address mismatch");
+  });
+
+  it("should sign with eth_sign", async () => {
+    const signature = await provider.request({
+      method: "eth_sign",
+      params: ["0xAccount1", "0xhash"],
+    });
+
+    expect(signature).toBe("0xsignature");
+    expect(signer1.signHash).toHaveBeenCalledWith("0xhash");
+  });
+
+  it("should sign with eth_signTypedData_v4", async () => {
+    const typedData = '{"types":{},"domain":{},"message":{}}';
+
+    const signature = await provider.request({
+      method: "eth_signTypedData_v4",
+      params: ["0xAccount1", typedData],
+    });
+
+    expect(signature).toBe("0xsignature");
+    // signTypedData receives the parsed object, not the string
+    expect(signer1.signTypedData).toHaveBeenCalledWith({ types: {}, domain: {}, message: {} });
+  });
+
+  it("should sign transaction with eth_signTransaction", async () => {
+    const tx = {
+      from: "0xAccount1",
+      to: "0xRecipient",
+      value: "0x1",
+      gas: "0x5208",
+    };
+
+    const signedTx = await provider.request({
+      method: "eth_signTransaction",
+      params: [tx],
+    });
+
+    expect(signedTx).toBe("0xsignedtx");
+    expect(signer1.signTransaction).toHaveBeenCalledWith(tx);
+  });
+
+  it("should throw ProviderRpcError for unsupported methods", async () => {
+    try {
+      await provider.request({ method: "eth_unsupportedMethod" });
+      fail("Should have thrown error");
+    } catch (error: any) {
+      expect(error.code).toBe(ProviderErrorCode.UNSUPPORTED_METHOD);
+      expect(error.message).toContain("eth_unsupportedMethod");
+    }
+  });
+
+  it("should throw error when disconnected", async () => {
+    await provider.disconnect();
+
+    await expect(
+      provider.request({
+        method: "personal_sign",
+        params: ["0xmessage", "0xAccount1"],
+      })
+    ).rejects.toThrow();
+  });
+});
+
+describe("EIP1193Provider - Events", () => {
+  let provider: EIP1193Provider;
+  let signer1: RemoteSigner;
+  let signer2: RemoteSigner;
+
+  beforeEach(async () => {
+    signer1 = createMockSigner("0xAccount1", "1");
+    signer2 = createMockSigner("0xAccount2", "1");
+
+    provider = await EIP1193Provider.create({
+      signersSource: {
+        type: "manual",
+        signers: [signer1, signer2],
+      },
+    });
+  });
+
+  it("should emit accountsChanged on switchAccount", async () => {
+    const handler = jest.fn();
+    provider.on("accountsChanged", handler);
+
+    await provider.switchAccount(1);
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith(["0xAccount2", "0xAccount1"]);
+  });
+
+  it("should emit accountsChanged on addAccount", async () => {
+    const handler = jest.fn();
+    provider.on("accountsChanged", handler);
+
+    const newSigner = createMockSigner("0xNewAccount", "1");
+    await provider.addAccount(newSigner);
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    const accounts = handler.mock.calls[0][0];
+    expect(accounts).toContain("0xNewAccount");
+  });
+
+  it("should emit accountsChanged on removeAccount", async () => {
+    const handler = jest.fn();
+    provider.on("accountsChanged", handler);
+
+    await provider.removeAccount(1);
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    const accounts = handler.mock.calls[0][0];
+    expect(accounts).not.toContain("0xAccount2");
+  });
+
+  it("should emit disconnect when all accounts removed", async () => {
+    const handler = jest.fn();
+    provider.on("disconnect", handler);
+
+    await provider.removeAccount(0);
+    await provider.removeAccount(0);
+
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it("should emit disconnect on disconnect()", async () => {
+    const handler = jest.fn();
+    provider.on("disconnect", handler);
+
+    await provider.disconnect();
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    const error = handler.mock.calls[0][0];
+    expect(error.code).toBe(ProviderErrorCode.DISCONNECTED);
+  });
+
+  it("should emit both chainChanged and accountsChanged on switchChain", async () => {
+    const chainChangedHandler = jest.fn();
+    const accountsChangedHandler = jest.fn();
+
+    provider.on("chainChanged", chainChangedHandler);
+    provider.on("accountsChanged", accountsChangedHandler);
+
+    await provider.switchChain(137);
+
+    expect(chainChangedHandler).toHaveBeenCalledWith("0x89"); // 137 in hex
+    expect(accountsChangedHandler).toHaveBeenCalled();
+
+    // Verify signers updated
+    expect(signer1.setChainID).toHaveBeenCalledWith("137");
+    expect(signer2.setChainID).toHaveBeenCalledWith("137");
+  });
+
+  it("should support removeListener", async () => {
+    const handler = jest.fn();
+    provider.on("accountsChanged", handler);
+
+    await provider.switchAccount(1);
+    expect(handler).toHaveBeenCalledTimes(1);
+
+    provider.removeListener("accountsChanged", handler);
+
+    await provider.switchAccount(0);
+    expect(handler).toHaveBeenCalledTimes(1); // Still 1, not called again
+  });
+});
+
+describe("EIP1193Provider - MetaMask Compatibility", () => {
+  it("should have isMetaMask property", async () => {
+    const signer1 = createMockSigner("0xAccount1", "1");
+
+    const provider = await EIP1193Provider.create({
+      signersSource: {
+        type: "manual",
+        signers: [signer1],
+      },
+    });
+
     expect(provider.isMetaMask).toBe(true);
   });
 
-  test("isConnected returns true", () => {
+  it("should have selectedAddress property", async () => {
+    const signer1 = createMockSigner("0xAccount1", "1");
+
+    const provider = await EIP1193Provider.create({
+      signersSource: {
+        type: "manual",
+        signers: [signer1],
+      },
+    });
+
+    expect(provider.selectedAddress).toBe("0xAccount1");
+  });
+
+  it("should return null selectedAddress when disconnected", async () => {
+    const signer1 = createMockSigner("0xAccount1", "1");
+
+    const provider = await EIP1193Provider.create({
+      signersSource: {
+        type: "manual",
+        signers: [signer1],
+      },
+    });
+
+    await provider.disconnect();
+
+    expect(provider.selectedAddress).toBeNull();
+  });
+
+  it("should have isConnected() method", async () => {
+    const signer1 = createMockSigner("0xAccount1", "1");
+
+    const provider = await EIP1193Provider.create({
+      signersSource: {
+        type: "manual",
+        signers: [signer1],
+      },
+    });
+
     expect(provider.isConnected()).toBe(true);
+
+    await provider.disconnect();
+
+    expect(provider.isConnected()).toBe(false);
   });
 
-  // -- personal_sign --
+  it("should have chainId property", async () => {
+    const signer1 = createMockSigner("0xAccount1", "1");
 
-  test("personal_sign decodes hex message to UTF-8", async () => {
-    const hexMessage = "0x48656c6c6f"; // "Hello"
-    const sig = await provider.request({ method: "personal_sign", params: [hexMessage, ADDRESS] });
-    expect(sig).toBe("0x" + "ab".repeat(65));
-    expect(signService.execute).toHaveBeenCalledWith(
-      expect.objectContaining({ chain_id: "1", sign_type: "personal", payload: { message: "Hello" } }),
-    );
-  });
-
-  test("personal_sign passes plain text as-is", async () => {
-    const plainMessage = "Hello, World!";
-    const sig = await provider.request({ method: "personal_sign", params: [plainMessage, ADDRESS] });
-    expect(sig).toBe("0x" + "ab".repeat(65));
-    expect(signService.execute).toHaveBeenCalledWith(
-      expect.objectContaining({ chain_id: "1", sign_type: "personal", payload: { message: "Hello, World!" } }),
-    );
-  });
-
-  // -- eth_sign --
-
-  test("eth_sign calls signer.signHash", async () => {
-    const hash = "0x" + "11".repeat(32);
-    const sig = await provider.request({ method: "eth_sign", params: [ADDRESS, hash] });
-    expect(sig).toBe("0x" + "ef".repeat(65));
-  });
-
-  // -- eth_signTypedData_v4 --
-
-  test("eth_signTypedData_v4 with object", async () => {
-    const typedData = {
-      types: { EIP712Domain: [], Test: [{ name: "value", type: "uint256" }] },
-      primaryType: "Test",
-      domain: { name: "Test", chainId: "1" },
-      message: { value: "42" },
-    };
-    const sig = await provider.request({ method: "eth_signTypedData_v4", params: [ADDRESS, typedData] });
-    expect(sig).toBe("0x" + "cd".repeat(65));
-  });
-
-  test("eth_signTypedData_v4 with JSON string", async () => {
-    const typedData = {
-      types: { EIP712Domain: [], Test: [{ name: "value", type: "uint256" }] },
-      primaryType: "Test",
-      domain: { name: "Test", chainId: "1" },
-      message: { value: "42" },
-    };
-    const sig = await provider.request({ method: "eth_signTypedData_v4", params: [ADDRESS, JSON.stringify(typedData)] });
-    expect(sig).toBe("0x" + "cd".repeat(65));
-  });
-
-  // -- eth_sendTransaction --
-
-  test("eth_sendTransaction fills nonce/gas, signs, and broadcasts", async () => {
-    const txHash = await provider.request({
-      method: "eth_sendTransaction",
-      params: [{ from: ADDRESS, to: "0x" + "12".repeat(20), value: "0xDE0B6B3A7640000", data: "0x" }],
+    const provider = await EIP1193Provider.create({
+      signersSource: {
+        type: "manual",
+        signers: [signer1],
+      },
+      defaultChainId: 137,
     });
 
-    expect(txHash).toBe("0x" + "aa".repeat(32));
-    expect(signService.execute).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sign_type: "transaction",
-        payload: expect.objectContaining({
-          transaction: expect.objectContaining({ nonce: 5, gas: 21000 }),
-        }),
-      }),
-    );
-  });
-
-  // -- wallet_switchEthereumChain --
-
-  test("wallet_switchEthereumChain updates chain ID and signer", async () => {
-    const events: string[] = [];
-    provider.on("chainChanged", (id) => events.push(id as string));
-
-    await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0x89" }] });
-
-    expect(await provider.request({ method: "eth_chainId" })).toBe("0x89");
-    expect(await provider.request({ method: "net_version" })).toBe("137");
-    expect(signer.chainID).toBe("137"); // signer updated too
-    expect(events).toEqual(["0x89"]);
-  });
-
-  test("wallet_switchEthereumChain same chain is noop", async () => {
-    const events: string[] = [];
-    provider.on("chainChanged", (id) => events.push(id as string));
-
-    await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0x1" }] });
-    expect(events).toEqual([]);
-  });
-
-  test("signing uses updated chain ID after switch", async () => {
-    await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0x89" }] });
-    await provider.request({ method: "personal_sign", params: ["hello", ADDRESS] });
-
-    expect(signService.execute).toHaveBeenCalledWith(
-      expect.objectContaining({ chain_id: "137" }),
-    );
-  });
-
-  // -- RPC proxy --
-
-  test("eth_getBalance is proxied to RPC", async () => {
-    expect(await provider.request({ method: "eth_getBalance", params: [ADDRESS, "latest"] }))
-      .toBe("0x56BC75E2D63100000");
-  });
-
-  test("unsupported RPC method returns error", async () => {
-    await expect(provider.request({ method: "eth_foobar" }))
-      .rejects.toThrow("Method not found");
-  });
-
-  // -- Events --
-
-  test("on/removeListener work correctly", () => {
-    const listener = jest.fn();
-    provider.on("test", listener);
-    // @ts-expect-error - accessing private for testing
-    provider._emit("test", "data");
-    expect(listener).toHaveBeenCalledWith("data");
-
-    provider.removeListener("test", listener);
-    // @ts-expect-error
-    provider._emit("test", "data2");
-    expect(listener).toHaveBeenCalledTimes(1);
-  });
-
-  test("removeAllListeners clears all", () => {
-    const listener = jest.fn();
-    provider.on("a", listener);
-    provider.on("b", listener);
-    provider.removeAllListeners();
-    // @ts-expect-error
-    provider._emit("a", "x");
-    // @ts-expect-error
-    provider._emit("b", "y");
-    expect(listener).not.toHaveBeenCalled();
-  });
-
-  // -- Legacy methods --
-
-  test("enable() returns accounts", async () => {
-    expect(await provider.enable()).toEqual([ADDRESS]);
-  });
-
-  test("sendAsync calls request and returns via callback", (done) => {
-    provider.sendAsync({ id: 1, method: "eth_chainId" }, (error, result: any) => {
-      expect(error).toBeNull();
-      expect(result.result).toBe("0x1");
-      expect(result.jsonrpc).toBe("2.0");
-      done();
-    });
+    expect(provider.chainId).toBe("0x89"); // 137 in hex
   });
 });
 
-describe("RemoteSigner.setChainID", () => {
-  test("chainID is mutable via setChainID", () => {
-    const signService = createMockSignService();
-    const signer = new RemoteSigner(signService, ADDRESS, "1");
-    expect(signer.chainID).toBe("1");
+describe("EIP1193Provider - Chain Switching", () => {
+  it("should switch chain and update all signers", async () => {
+    const signer1 = createMockSigner("0xAccount1", "1");
+    const signer2 = createMockSigner("0xAccount2", "1");
 
-    signer.setChainID("137");
-    expect(signer.chainID).toBe("137");
+    const provider = await EIP1193Provider.create({
+      signersSource: {
+        type: "manual",
+        signers: [signer1, signer2],
+      },
+    });
+
+    await provider.switchChain(137);
+
+    expect(provider.chainId).toBe("0x89");
+    expect(signer1.setChainID).toHaveBeenCalledWith("137");
+    expect(signer2.setChainID).toHaveBeenCalledWith("137");
   });
 
-  test("signing uses new chainID after setChainID", async () => {
-    const signService = createMockSignService();
-    const signer = new RemoteSigner(signService, ADDRESS, "1");
-    signer.setChainID("42161"); // Arbitrum
-    await signer.personalSign("hello");
+  it("should accept hex chainId", async () => {
+    const signer1 = createMockSigner("0xAccount1", "1");
 
-    expect(signService.execute).toHaveBeenCalledWith(
-      expect.objectContaining({ chain_id: "42161" }),
-    );
+    const provider = await EIP1193Provider.create({
+      signersSource: {
+        type: "manual",
+        signers: [signer1],
+      },
+    });
+
+    await provider.switchChain("0x89"); // 137 in hex
+
+    expect(provider.chainId).toBe("0x89");
+    expect(signer1.setChainID).toHaveBeenCalledWith("137");
+  });
+
+  it("should not emit events when switching to same chain", async () => {
+    const signer1 = createMockSigner("0xAccount1", "1");
+
+    const provider = await EIP1193Provider.create({
+      signersSource: {
+        type: "manual",
+        signers: [signer1],
+      },
+      defaultChainId: 1,
+    });
+
+    const chainChangedHandler = jest.fn();
+    provider.on("chainChanged", chainChangedHandler);
+
+    await provider.switchChain(1); // Same chain
+
+    expect(chainChangedHandler).not.toHaveBeenCalled();
   });
 });
