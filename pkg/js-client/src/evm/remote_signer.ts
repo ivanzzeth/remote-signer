@@ -77,12 +77,18 @@ export class RemoteSigner implements Signer {
 
   /** Sign using personal_sign (EIP-191 version 0x45). */
   async personalSign(message: string): Promise<string> {
+    console.log("[RemoteSigner] personalSign called:", {
+      address: this.address,
+      chainId: this._chainID,
+      message
+    });
     const resp = await this.signService.execute({
       chain_id: this._chainID,
       signer_address: this.address,
       sign_type: "personal",
       payload: { message },
     });
+    console.log("[RemoteSigner] personalSign response:", resp);
     return resp.signature!;
   }
 

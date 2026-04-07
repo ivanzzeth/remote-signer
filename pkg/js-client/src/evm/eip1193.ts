@@ -325,7 +325,12 @@ export class EIP1193Provider {
     this._activeIndex = 0;
     this._connected = false;
 
-    this._emit("disconnect", providerErrors.disconnected("User disconnected"));
+    // EIP-1193: disconnect event error code MUST follow CloseEvent status codes (1000-1015)
+    // 1000 = Normal Closure
+    this._emit("disconnect", {
+      code: 1000,
+      message: "User disconnected",
+    } as any);
   }
 
   /**
@@ -355,6 +360,14 @@ export class EIP1193Provider {
       case "personal_sign": {
         const [message, address] = params as [string, string];
         const signer = this._getActiveSigner();
+
+        console.log("[EIP1193] personal_sign called:", {
+          message,
+          address,
+          signerAddress: signer.address,
+          signerChainId: (signer as any).chainId || (signer as any)._chainID,
+          providerChainId: this._chainId
+        });
 
         // Verify address matches active signer
         if (address.toLowerCase() !== signer.address.toLowerCase()) {
@@ -473,6 +486,51 @@ export class EIP1193Provider {
           throw new Error(result.error.message);
         }
         return result.result;
+      }
+
+      // Wallet methods
+      case "wallet_requestPermissions": {
+        // Return permission approval (for eth_accounts)
+        return [{ parentCapability: "eth_accounts" }];
+      }
+
+      case "wallet_switchEthereumChain": {
+        console.log("[EIP1193] wallet_switchEthereumChain called:", params);
+
+        // Switch chain
+        const chainIdParam = (params as any[])?.[0]?.chainId;
+        if (!chainIdParam) {
+          console.error("[EIP1193] wallet_switchEthereumChain: Missing chainId parameter");
+          throw providerErrors.rpc(-32602, "Missing chainId parameter");
+        }
+
+        const newChainId = parseInt(chainIdParam, 16);
+        if (isNaN(newChainId)) {
+          console.error("[EIP1193] wallet_switchEthereumChain: Invalid chainId format:", chainIdParam);
+          throw providerErrors.rpc(-32602, "Invalid chainId format");
+        }
+
+        console.log("[EIP1193] Switching from chain", this._chainId, "to chain", newChainId);
+
+        // Update chainId and all signers
+        this._chainId = newChainId;
+        const newChainIdStr = newChainId.toString();
+        console.log("[EIP1193] Updating signers to chainId:", newChainIdStr);
+        for (const signer of this._signers) {
+          signer.setChainID(newChainIdStr);
+        }
+
+        // Emit chainChanged event
+        console.log("[EIP1193] Emitting chainChanged:", `0x${newChainId.toString(16)}`);
+        this._emit("chainChanged", `0x${newChainId.toString(16)}`);
+
+        // EIP-1193: MUST also emit accountsChanged when chain switches
+        // Because the accounts available may change when switching chains
+        console.log("[EIP1193] Emitting accountsChanged:", this._getAccounts());
+        this._emit("accountsChanged", this._getAccounts());
+
+        console.log("[EIP1193] wallet_switchEthereumChain completed successfully");
+        return null;
       }
 
       // Unsupported methods
