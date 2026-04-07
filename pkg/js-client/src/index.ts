@@ -51,6 +51,8 @@ export {
   EvmSimulateService,
   RemoteSigner,
   EIP1193Provider,
+  ProviderRpcError,
+  providerErrors,
 } from "./evm";
 export type {
   // Shared EVM types
@@ -116,9 +118,13 @@ export type {
   SimulateBatchResponse,
   ChainStatusDTO,
   SimulationStatusResponse,
-  // EIP-1193
+  // EIP-1193 Provider types
   EIP1193ProviderConfig,
-  EIP1193RequestArgs,
+  SignersSource,
+  RequestArguments,
+  ProviderConnectInfo,
+  ProviderMessage,
+  ProviderErrorCode,
   // Ethsig interfaces
   Signer,
   AddressGetter,

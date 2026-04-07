@@ -46,4 +46,6 @@ export * from "./remote_signer";
 export * from "./guard";
 export * from "./simulate";
 export * from "./ethsig";
+export * from "./provider-errors";
+export * from "./provider-types";
 export * from "./eip1193";

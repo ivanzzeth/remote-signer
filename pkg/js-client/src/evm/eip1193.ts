@@ -1,425 +1,574 @@
 /**
- * EIP-1193 Provider backed by RemoteSigner.
- *
- * Signing operations (personal_sign, eth_signTypedData_v4, eth_sendTransaction)
- * are proxied to the remote-signer service. Read-only RPC calls (eth_call,
- * eth_getBalance, etc.) are forwarded to a JSON-RPC node resolved automatically
- * via `eip155-chains` or user-provided overrides.
- *
- * @example
- * ```typescript
- * import { RemoteSignerClient, EIP1193Provider } from 'remote-signer-client';
- *
- * const client = new RemoteSignerClient({ ... });
- * const signer = client.evm.hdWallets.getSigner(primaryAddr, "1", 0);
- * const provider = await EIP1193Provider.create({
- *   signer,
- *   defaultChainId: 1,
- * });
- *
- * // Use as window.ethereum in a browser context
- * window.ethereum = provider;
- * ```
+ * EIP-1193 Ethereum Provider implementation with multi-account support
+ * @see https://eips.ethereum.org/EIPS/eip-1193
  */
 
-import type { TypedData, Transaction } from "./types";
-import type { RemoteSigner } from "./remote_signer";
+import { RemoteSigner } from "./remote_signer";
+import { ProviderRpcError, providerErrors } from "./provider-errors";
+import type {
+  EIP1193ProviderConfig,
+  SignersSource,
+  RequestArguments,
+  ProviderConnectInfo,
+  ProviderMessage,
+} from "./provider-types";
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-export interface EIP1193ProviderConfig {
-  /** RemoteSigner instance (from client.evm.hdWallets.getSigner or manual construction). */
-  signer: RemoteSigner;
-  /** Initial chain ID. Defaults to 1 (Ethereum mainnet). */
-  defaultChainId?: number;
-  /** Optional RPC URL overrides per chain ID. Takes precedence over eip155-chains. */
-  rpcOverrides?: Record<number, string>;
-  /**
-   * Custom RPC resolver. If provided, takes precedence over eip155-chains.
-   * Called when no rpcOverrides entry exists for a chain.
-   */
-  rpcResolver?: (chainId: number) => string | Promise<string>;
-}
-
-export interface EIP1193RequestArgs {
-  method: string;
-  params?: unknown[] | Record<string, unknown>;
-}
-
-type EventListener = (...args: unknown[]) => void;
-
-// ---------------------------------------------------------------------------
-// EIP-1193 Provider
-// ---------------------------------------------------------------------------
-
+/**
+ * EIP-1193 compliant Ethereum Provider with multi-account support
+ *
+ * Features:
+ * - Multi-account management (switchAccount, addAccount, removeAccount)
+ * - Three initialization modes (client auto-fetch, HD wallet derive, manual)
+ * - Full EIP-1193 event system (connect, disconnect, chainChanged, accountsChanged, message)
+ * - MetaMask compatibility (selectedAddress, isMetaMask, isConnected)
+ * - Standard ProviderRpcError with EIP-1193 error codes
+ *
+ * @example
+ * // Initialize from remote-signer client
+ * const provider = await EIP1193Provider.create({
+ *   signersSource: {
+ *     type: "client",
+ *     client: remoteSignerClient,
+ *     chainId: 1
+ *   }
+ * });
+ *
+ * // Switch account
+ * await provider.switchAccount(1); // by index
+ * await provider.switchAccount("0x..."); // by address
+ *
+ * // Listen to events
+ * provider.on("accountsChanged", (accounts) => console.log("Accounts:", accounts));
+ */
 export class EIP1193Provider {
-  // MetaMask compatibility flags
-  public readonly isMetaMask = true;
-  public readonly isConnected = () => true;
-
+  // Internal state
+  private _signers: RemoteSigner[] = [];
+  private _activeIndex: number = 0;
   private _chainId: number;
-  private _rpcUrl: string | null = null;
-  private readonly _signer: RemoteSigner;
-  private readonly _rpcOverrides: Record<number, string>;
-  private readonly _rpcResolver?: (chainId: number) => string | Promise<string>;
-  private readonly _events: Map<string, Set<EventListener>> = new Map();
-  private readonly _rpcCache: Map<number, string> = new Map();
+  private _connected: boolean = false;
+  private _rpcOverrides: Record<number, string>;
+  private _rpcResolver?: (chainId: number) => string | Promise<string>;
 
+  // Event emitter
+  private _eventHandlers: Map<string, Set<(...args: any[]) => void>> = new Map();
+
+  // MetaMask compatibility flag
+  public readonly isMetaMask = true;
+
+  /**
+   * Private constructor - use EIP1193Provider.create() instead
+   */
   private constructor(config: EIP1193ProviderConfig) {
-    this._signer = config.signer;
     this._chainId = config.defaultChainId ?? 1;
+    this._activeIndex = config.defaultAccountIndex ?? 0;
     this._rpcOverrides = config.rpcOverrides ?? {};
     this._rpcResolver = config.rpcResolver;
   }
 
   /**
-   * Create and initialize an EIP1193Provider.
-   * Resolves the initial RPC URL before returning.
+   * Create and initialize a new EIP-1193 Provider
+   *
+   * This async factory method replaces the constructor to support async initialization
+   *
+   * @param config Provider configuration with signersSource
+   * @returns Initialized provider instance
+   * @throws {ProviderRpcError} If initialization fails
    */
-  static async create(config: EIP1193ProviderConfig): Promise<EIP1193Provider> {
+  public static async create(config: EIP1193ProviderConfig): Promise<EIP1193Provider> {
     const provider = new EIP1193Provider(config);
-    provider._syncSignerChainId();
-    await provider._resolveRpc(provider._chainId);
-    provider._emit("connect", { chainId: provider.chainId });
+    await provider._initializeSigners(config.signersSource);
+
+    // Validate active index
+    if (provider._signers.length > 0) {
+      if (provider._activeIndex >= provider._signers.length) {
+        provider._activeIndex = 0;
+      }
+      provider._connected = true;
+
+      // Emit connect event
+      provider._emit("connect", {
+        chainId: `0x${provider._chainId.toString(16)}`,
+      } as ProviderConnectInfo);
+    }
+
     return provider;
   }
 
-  // -------------------------------------------------------------------------
-  // EIP-1193 properties (MetaMask-compatible)
-  // -------------------------------------------------------------------------
+  /**
+   * Initialize signers from the configured source
+   *
+   * Supports three modes:
+   * 1. client: Auto-fetch from remote-signer backend (filters enabled & unlocked)
+   * 2. hdwallet: Batch derive from HD wallet
+   * 3. manual: Use pre-created RemoteSigner array
+   */
+  private async _initializeSigners(source: SignersSource): Promise<void> {
+    switch (source.type) {
+      case "client": {
+        // Auto-fetch all available signers from backend
+        const { signers: signerInfos } = await source.client.evm.signers.list();
 
-  get selectedAddress(): string {
-    return this._signer.getAddress();
-  }
+        // Filter for enabled and unlocked signers
+        const validSigners = signerInfos.filter((s) => s.enabled && !s.locked);
 
-  get chainId(): string {
-    return "0x" + this._chainId.toString(16);
-  }
+        // Convert to RemoteSigner instances
+        this._signers = validSigners.map((info) =>
+          new RemoteSigner(
+            source.client.evm.sign,
+            info.address,
+            source.chainId?.toString() ?? this._chainId.toString()
+          )
+        );
+        break;
+      }
 
-  get networkVersion(): string {
-    return this._chainId.toString();
-  }
+      case "hdwallet": {
+        // Batch derive from HD wallet
+        const start = source.start ?? 0;
+        const count = source.count ?? 10;
 
-  // -------------------------------------------------------------------------
-  // EIP-1193 core method
-  // -------------------------------------------------------------------------
+        this._signers = await source.client.evm.hdWallets.getSigners(
+          source.primaryAddress,
+          source.chainId,
+          start,
+          count
+        );
+        break;
+      }
 
-  async request(args: EIP1193RequestArgs): Promise<unknown> {
-    const { method, params } = args;
-    const p = (params ?? []) as unknown[];
-
-    switch (method) {
-      case "eth_requestAccounts":
-      case "eth_accounts":
-        return [this._signer.getAddress()];
-
-      case "eth_chainId":
-        return this.chainId;
-
-      case "net_version":
-        return this.networkVersion;
-
-      case "personal_sign":
-        return this._personalSign(p);
-
-      case "eth_sign":
-        return this._ethSign(p);
-
-      case "eth_signTypedData_v4":
-        return this._signTypedDataV4(p);
-
-      case "eth_sendTransaction":
-        return this._sendTransaction(p);
-
-      case "wallet_switchEthereumChain":
-        return this._switchChain(p);
-
-      case "wallet_addEthereumChain":
-        return null;
-
-      case "wallet_requestPermissions":
-        return [{ parentCapability: "eth_accounts" }];
-
-      case "wallet_getPermissions":
-        return [{ parentCapability: "eth_accounts" }];
+      case "manual": {
+        // Use pre-created signers directly
+        this._signers = [...source.signers];
+        break;
+      }
 
       default:
-        return this._rpcCall(method, p);
+        throw new Error("Invalid signers source type");
     }
   }
 
-  // -------------------------------------------------------------------------
-  // EIP-1193 events
-  // -------------------------------------------------------------------------
-
-  on(event: string, listener: EventListener): this {
-    if (!this._events.has(event)) {
-      this._events.set(event, new Set());
-    }
-    this._events.get(event)!.add(listener);
-    return this;
+  /**
+   * Get current active account address
+   * Returns null if not connected or no accounts
+   */
+  public get selectedAddress(): string | null {
+    return this._connected && this._signers.length > 0
+      ? this._signers[this._activeIndex].address
+      : null;
   }
 
-  removeListener(event: string, listener: EventListener): this {
-    this._events.get(event)?.delete(listener);
-    return this;
+  /**
+   * Get current chain ID as hex string
+   */
+  public get chainId(): string {
+    return `0x${this._chainId.toString(16)}`;
   }
 
-  removeAllListeners(event?: string): this {
-    if (event) {
-      this._events.delete(event);
-    } else {
-      this._events.clear();
-    }
-    return this;
+  /**
+   * Check if provider is connected
+   * Returns true only if connected AND has at least one account
+   */
+  public isConnected(): boolean {
+    return this._connected && this._signers.length > 0;
   }
 
-  /** Legacy enable method. */
-  async enable(): Promise<string[]> {
-    return [this._signer.getAddress()];
-  }
-
-  /** Legacy sendAsync method. */
-  sendAsync(
-    payload: { id?: number; method: string; params?: unknown[] },
-    callback: (error: unknown, result?: unknown) => void,
-  ): void {
-    this.request({ method: payload.method, params: payload.params })
-      .then((result) =>
-        callback(null, { id: payload.id, jsonrpc: "2.0", result }),
-      )
-      .catch((error) => callback(error));
-  }
-
-  // -------------------------------------------------------------------------
-  // Signing methods (proxied to remote-signer)
-  // -------------------------------------------------------------------------
-
-  private async _personalSign(params: unknown[]): Promise<string> {
-    const [messageParam] = params as [string, string];
-    // personal_sign RPC spec requires hex-encoded message (0x-prefixed).
-    // Decode hex to UTF-8 text for remote-signer, matching MetaMask behavior:
-    // if 0x-prefixed treat as hex, otherwise pass as-is.
-    const message =
-      typeof messageParam === "string" && messageParam.startsWith("0x")
-        ? new TextDecoder().decode(
-            new Uint8Array(
-              (messageParam.slice(2).match(/.{1,2}/g) ?? []).map((b) =>
-                parseInt(b, 16),
-              ),
-            ),
-          )
-        : messageParam;
-    return this._signer.personalSign(message);
-  }
-
-  private async _ethSign(params: unknown[]): Promise<string> {
-    const [, hash] = params as [string, string];
-    return this._signer.signHash(hash);
-  }
-
-  private async _signTypedDataV4(params: unknown[]): Promise<string> {
-    const [, typedDataRaw] = params as [string, string | TypedData];
-    const typedData: TypedData =
-      typeof typedDataRaw === "string" ? JSON.parse(typedDataRaw) : typedDataRaw;
-    return this._signer.signTypedData(typedData);
-  }
-
-  private async _sendTransaction(params: unknown[]): Promise<string> {
-    const [txParams] = params as [Record<string, unknown>];
-
-    const from = (txParams.from as string) ?? this._signer.getAddress();
-    const to = txParams.to as string | undefined;
-    const value = (txParams.value as string) ?? "0x0";
-    const data = (txParams.data as string) ?? "0x";
-
-    // Fill nonce
-    let nonce = txParams.nonce as number | undefined;
-    if (nonce === undefined) {
-      const nonceHex = (await this._rpcCall("eth_getTransactionCount", [
-        from,
-        "pending",
-      ])) as string;
-      nonce = parseInt(nonceHex, 16);
+  /**
+   * Get all account addresses (active account first)
+   */
+  private _getAccounts(): string[] {
+    if (!this._connected || this._signers.length === 0) {
+      return [];
     }
 
-    // Fill gas
-    let gas = txParams.gas as number | string | undefined;
-    if (gas === undefined) {
-      gas = txParams.gasLimit as string | undefined;
+    // Return all accounts with active first
+    const active = this._signers[this._activeIndex].address;
+    const others = this._signers
+      .filter((_, i) => i !== this._activeIndex)
+      .map((s) => s.address);
+
+    return [active, ...others];
+  }
+
+  /**
+   * Get current active signer
+   */
+  private _getActiveSigner(): RemoteSigner {
+    if (!this._connected || this._signers.length === 0) {
+      throw providerErrors.disconnected();
     }
-    if (gas === undefined) {
-      const gasHex = (await this._rpcCall("eth_estimateGas", [
-        { from, to, value, data },
-      ])) as string;
-      gas = parseInt(gasHex, 16);
-    }
-    if (typeof gas === "string") {
-      gas = parseInt(gas, 16);
+    return this._signers[this._activeIndex];
+  }
+
+  /**
+   * Switch active account by address or index
+   *
+   * @param addressOrIndex Account address (string) or index (number)
+   * @throws {ProviderRpcError} If account not found or provider disconnected
+   */
+  public async switchAccount(addressOrIndex: string | number): Promise<void> {
+    if (!this._connected || this._signers.length === 0) {
+      throw providerErrors.disconnected();
     }
 
-    // Determine tx type and gas pricing
-    const maxFeePerGas = txParams.maxFeePerGas as string | undefined;
-    const maxPriorityFeePerGas = txParams.maxPriorityFeePerGas as string | undefined;
-    const gasPrice = txParams.gasPrice as string | undefined;
+    let newIndex: number;
 
-    let tx: Transaction;
-
-    if (maxFeePerGas || maxPriorityFeePerGas) {
-      let feeCap = maxFeePerGas;
-      let tipCap = maxPriorityFeePerGas;
-      if (!feeCap || !tipCap) {
-        const block = (await this._rpcCall("eth_getBlockByNumber", [
-          "latest",
-          false,
-        ])) as { baseFeePerGas?: string } | null;
-        const baseFee = block?.baseFeePerGas ?? "0x0";
-        tipCap = tipCap ?? "0x59682F00"; // 1.5 gwei default
-        feeCap =
-          feeCap ??
-          "0x" +
-            (parseInt(baseFee, 16) * 2 + parseInt(tipCap, 16)).toString(16);
+    if (typeof addressOrIndex === "number") {
+      // Switch by index
+      if (addressOrIndex < 0 || addressOrIndex >= this._signers.length) {
+        throw new Error(`Invalid account index: ${addressOrIndex}`);
       }
-      tx = { to, value, data, nonce, gas, gasFeeCap: feeCap, gasTipCap: tipCap, txType: "eip1559" };
+      newIndex = addressOrIndex;
     } else {
-      let price = gasPrice;
-      if (!price) {
-        price = (await this._rpcCall("eth_gasPrice", [])) as string;
+      // Switch by address
+      const address = addressOrIndex.toLowerCase();
+      newIndex = this._signers.findIndex((s) => s.address.toLowerCase() === address);
+
+      if (newIndex === -1) {
+        throw new Error(`Account not found: ${addressOrIndex}`);
       }
-      tx = { to, value, data, nonce, gas, gasPrice: price, txType: "legacy" };
     }
 
-    // Sign via remote-signer
-    const signedTx = await this._signer.signTransaction(tx);
+    if (newIndex === this._activeIndex) {
+      // Already active, no-op
+      return;
+    }
 
-    // Broadcast
-    return (await this._rpcCall("eth_sendRawTransaction", [signedTx])) as string;
+    this._activeIndex = newIndex;
+    this._emit("accountsChanged", this._getAccounts());
   }
 
-  // -------------------------------------------------------------------------
-  // Chain switching
-  // -------------------------------------------------------------------------
+  /**
+   * Add a new account to the provider
+   *
+   * @param signer RemoteSigner instance to add
+   */
+  public async addAccount(signer: RemoteSigner): Promise<void> {
+    // Check if account already exists
+    const exists = this._signers.some(
+      (s) => s.address.toLowerCase() === signer.address.toLowerCase()
+    );
 
-  private async _switchChain(params: unknown[]): Promise<null> {
-    const [{ chainId: chainIdHex }] = params as [{ chainId: string }];
-    const newChainId = parseInt(chainIdHex, 16);
+    if (exists) {
+      throw new Error(`Account already exists: ${signer.address}`);
+    }
+
+    this._signers.push(signer);
+
+    // If this is the first account, set as active and mark connected
+    if (this._signers.length === 1) {
+      this._activeIndex = 0;
+      this._connected = true;
+
+      this._emit("connect", {
+        chainId: this.chainId,
+      } as ProviderConnectInfo);
+    }
+
+    this._emit("accountsChanged", this._getAccounts());
+  }
+
+  /**
+   * Remove an account from the provider
+   *
+   * @param addressOrIndex Account address (string) or index (number)
+   * @throws {Error} If account not found
+   */
+  public async removeAccount(addressOrIndex: string | number): Promise<void> {
+    if (this._signers.length === 0) {
+      throw new Error("No accounts to remove");
+    }
+
+    let indexToRemove: number;
+
+    if (typeof addressOrIndex === "number") {
+      if (addressOrIndex < 0 || addressOrIndex >= this._signers.length) {
+        throw new Error(`Invalid account index: ${addressOrIndex}`);
+      }
+      indexToRemove = addressOrIndex;
+    } else {
+      const address = addressOrIndex.toLowerCase();
+      indexToRemove = this._signers.findIndex(
+        (s) => s.address.toLowerCase() === address
+      );
+
+      if (indexToRemove === -1) {
+        throw new Error(`Account not found: ${addressOrIndex}`);
+      }
+    }
+
+    // Remove the account
+    this._signers.splice(indexToRemove, 1);
+
+    // Adjust active index if necessary
+    if (indexToRemove === this._activeIndex) {
+      // Removed active account, switch to first available
+      this._activeIndex = 0;
+    } else if (indexToRemove < this._activeIndex) {
+      // Removed account before active, adjust index
+      this._activeIndex--;
+    }
+
+    // If no accounts left, disconnect
+    if (this._signers.length === 0) {
+      this._connected = false;
+      this._emit("disconnect", providerErrors.disconnected("All accounts removed"));
+    } else {
+      this._emit("accountsChanged", this._getAccounts());
+    }
+  }
+
+  /**
+   * Disconnect provider and clear all accounts
+   */
+  public async disconnect(): Promise<void> {
+    this._signers = [];
+    this._activeIndex = 0;
+    this._connected = false;
+
+    this._emit("disconnect", providerErrors.disconnected("User disconnected"));
+  }
+
+  /**
+   * Handle EIP-1193 JSON-RPC requests
+   *
+   * @param args Request arguments
+   * @returns Promise resolving to the result
+   */
+  public async request(args: RequestArguments): Promise<unknown> {
+    const { method, params } = args;
+
+    switch (method) {
+      // Account methods
+      case "eth_accounts":
+      case "eth_requestAccounts":
+        return this._getAccounts();
+
+      case "eth_coinbase":
+        return this.selectedAddress;
+
+      // Chain methods
+      case "eth_chainId":
+      case "net_version":
+        return this.chainId;
+
+      // Signing methods
+      case "personal_sign": {
+        const [message, address] = params as [string, string];
+        const signer = this._getActiveSigner();
+
+        // Verify address matches active signer
+        if (address.toLowerCase() !== signer.address.toLowerCase()) {
+          throw providerErrors.unauthorized(
+            `Address mismatch: expected ${signer.address}, got ${address}`
+          );
+        }
+
+        return await signer.personalSign(message);
+      }
+
+      case "eth_sign": {
+        const [address, hash] = params as [string, string];
+        const signer = this._getActiveSigner();
+
+        if (address.toLowerCase() !== signer.address.toLowerCase()) {
+          throw providerErrors.unauthorized(
+            `Address mismatch: expected ${signer.address}, got ${address}`
+          );
+        }
+
+        return await signer.signHash(hash);
+      }
+
+      case "eth_signTypedData":
+      case "eth_signTypedData_v3":
+      case "eth_signTypedData_v4": {
+        const [address, typedData] = params as [string, any];
+        const signer = this._getActiveSigner();
+
+        if (address.toLowerCase() !== signer.address.toLowerCase()) {
+          throw providerErrors.unauthorized(
+            `Address mismatch: expected ${signer.address}, got ${address}`
+          );
+        }
+
+        // signTypedData expects typed data object, handle both string and object
+        const typedDataObj = typeof typedData === "string" ? JSON.parse(typedData) : typedData;
+        return await signer.signTypedData(typedDataObj);
+      }
+
+      case "eth_sendTransaction": {
+        const [tx] = params as [any];
+        const signer = this._getActiveSigner();
+
+        // Verify from address if provided
+        if (tx.from && tx.from.toLowerCase() !== signer.address.toLowerCase()) {
+          throw providerErrors.unauthorized(
+            `Address mismatch: expected ${signer.address}, got ${tx.from}`
+          );
+        }
+
+        const signedTx = await signer.signTransaction(tx);
+
+        // Broadcast via RPC
+        const rpcUrl = await this._getRpcUrl();
+        const response = await fetch(rpcUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: Date.now(),
+            method: "eth_sendRawTransaction",
+            params: [signedTx],
+          }),
+        });
+
+        const result: any = await response.json();
+        if (result.error) {
+          throw new Error(result.error.message);
+        }
+        return result.result;
+      }
+
+      case "eth_signTransaction": {
+        const [tx] = params as [any];
+        const signer = this._getActiveSigner();
+
+        if (tx.from && tx.from.toLowerCase() !== signer.address.toLowerCase()) {
+          throw providerErrors.unauthorized(
+            `Address mismatch: expected ${signer.address}, got ${tx.from}`
+          );
+        }
+
+        return await signer.signTransaction(tx);
+      }
+
+      // Read methods - delegate to RPC provider
+      case "eth_blockNumber":
+      case "eth_call":
+      case "eth_estimateGas":
+      case "eth_gasPrice":
+      case "eth_getBalance":
+      case "eth_getBlockByHash":
+      case "eth_getBlockByNumber":
+      case "eth_getCode":
+      case "eth_getLogs":
+      case "eth_getStorageAt":
+      case "eth_getTransactionByHash":
+      case "eth_getTransactionCount":
+      case "eth_getTransactionReceipt": {
+        const rpcUrl = await this._getRpcUrl();
+        const response = await fetch(rpcUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: Date.now(),
+            method,
+            params: (params as any[]) ?? [],
+          }),
+        });
+
+        const result: any = await response.json();
+        if (result.error) {
+          throw new Error(result.error.message);
+        }
+        return result.result;
+      }
+
+      // Unsupported methods
+      default:
+        throw providerErrors.unsupportedMethod(method);
+    }
+  }
+
+  /**
+   * Get RPC URL for the current chain
+   */
+  private async _getRpcUrl(): Promise<string> {
+    let rpcUrl: string | undefined = this._rpcOverrides[this._chainId];
+
+    if (!rpcUrl && this._rpcResolver) {
+      rpcUrl = await this._rpcResolver(this._chainId);
+    }
+
+    if (!rpcUrl) {
+      throw new Error(`No RPC URL configured for chain ${this._chainId}`);
+    }
+
+    return rpcUrl;
+  }
+
+  /**
+   * Switch to a different chain
+   *
+   * @param chainId New chain ID (number or hex string)
+   */
+  public async switchChain(chainId: number | string): Promise<void> {
+    const newChainId =
+      typeof chainId === "string"
+        ? parseInt(chainId.replace("0x", ""), 16)
+        : chainId;
 
     if (newChainId === this._chainId) {
-      return null;
+      return; // Already on this chain
     }
 
-    await this._resolveRpc(newChainId);
+    const oldChainId = this._chainId;
     this._chainId = newChainId;
-    this._syncSignerChainId();
-    this._emit("chainChanged", this.chainId);
-    return null;
-  }
 
-  // -------------------------------------------------------------------------
-  // RPC proxy
-  // -------------------------------------------------------------------------
-
-  private async _rpcCall(method: string, params: unknown[]): Promise<unknown> {
-    const rpcUrl = await this._getCurrentRpcUrl();
-    const body = JSON.stringify({
-      jsonrpc: "2.0",
-      id: Date.now(),
-      method,
-      params,
+    // Update all signers to use new chain
+    const chainIdStr = newChainId.toString();
+    this._signers.forEach((signer) => {
+      signer.setChainID(chainIdStr);
     });
 
-    const resp = await fetch(rpcUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body,
-    });
-
-    if (!resp.ok) {
-      throw new Error(`RPC request failed: ${resp.status} ${resp.statusText}`);
-    }
-
-    const json = (await resp.json()) as {
-      result?: unknown;
-      error?: { code: number; message: string };
-    };
-
-    if (json.error) {
-      const err = new Error(json.error.message) as Error & { code: number };
-      err.code = json.error.code;
-      throw err;
-    }
-
-    return json.result;
+    // Emit both chainChanged and accountsChanged (per EIP-1193)
+    this._emit("chainChanged", `0x${newChainId.toString(16)}`);
+    this._emit("accountsChanged", this._getAccounts());
   }
 
-  // -------------------------------------------------------------------------
-  // RPC resolution
-  // -------------------------------------------------------------------------
-
-  private async _getCurrentRpcUrl(): Promise<string> {
-    if (this._rpcUrl) {
-      return this._rpcUrl;
+  /**
+   * Register an event listener
+   *
+   * @param event Event name
+   * @param handler Event handler function
+   */
+  public on(event: string, handler: (...args: any[]) => void): void {
+    if (!this._eventHandlers.has(event)) {
+      this._eventHandlers.set(event, new Set());
     }
-    return this._resolveRpc(this._chainId);
+    this._eventHandlers.get(event)!.add(handler);
   }
 
-  private async _resolveRpc(chainId: number): Promise<string> {
-    const cached = this._rpcCache.get(chainId);
-    if (cached) {
-      this._rpcUrl = cached;
-      return cached;
-    }
-
-    const override = this._rpcOverrides[chainId];
-    if (override) {
-      this._rpcCache.set(chainId, override);
-      this._rpcUrl = override;
-      return override;
-    }
-
-    if (this._rpcResolver) {
-      const url = await this._rpcResolver(chainId);
-      this._rpcCache.set(chainId, url);
-      this._rpcUrl = url;
-      return url;
-    }
-
-    try {
-      const { getRpcsByChainId } = await import("eip155-chains");
-      const rpcs = await getRpcsByChainId(chainId);
-      if (!rpcs || rpcs.length === 0) {
-        throw new Error(`No RPC endpoints found for chain ${chainId}`);
-      }
-      const httpsRpc = rpcs.find((r) => r.url.startsWith("https://"));
-      const url = httpsRpc ? httpsRpc.url : rpcs[0].url;
-      this._rpcCache.set(chainId, url);
-      this._rpcUrl = url;
-      return url;
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      throw new Error(`Failed to resolve RPC for chain ${chainId}: ${msg}`);
+  /**
+   * Unregister an event listener
+   *
+   * @param event Event name
+   * @param handler Event handler function
+   */
+  public removeListener(event: string, handler: (...args: any[]) => void): void {
+    const handlers = this._eventHandlers.get(event);
+    if (handlers) {
+      handlers.delete(handler);
     }
   }
 
-  // -------------------------------------------------------------------------
-  // Internal helpers
-  // -------------------------------------------------------------------------
-
-  private _syncSignerChainId(): void {
-    this._signer.setChainID(this._chainId.toString());
-  }
-
-  private _emit(event: string, ...args: unknown[]): void {
-    const listeners = this._events.get(event);
-    if (!listeners) return;
-    for (const listener of listeners) {
-      try {
-        listener(...args);
-      } catch {
-        // Event listeners must not break the provider
-      }
+  /**
+   * Emit an event to all registered listeners
+   *
+   * @param event Event name
+   * @param args Event arguments
+   */
+  private _emit(event: string, ...args: any[]): void {
+    const handlers = this._eventHandlers.get(event);
+    if (handlers) {
+      handlers.forEach((handler) => {
+        try {
+          handler(...args);
+        } catch (error) {
+          console.error(`Error in ${event} handler:`, error);
+        }
+      });
     }
   }
 }
