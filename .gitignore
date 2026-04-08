@@ -131,3 +131,4 @@ e2e/data/
 verify-setup-polymarket
 /remote-signer-cli
 .playwright-cli/
+pkg/js-client/tests/.test-server-keys.json
