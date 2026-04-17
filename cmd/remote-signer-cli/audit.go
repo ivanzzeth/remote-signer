@@ -35,6 +35,7 @@ var (
 	flagAuditEndTime       string
 	flagAuditLimit         int
 	flagAuditCursor        string
+	flagAuditCursorID      string
 )
 
 func runAuditList(cmd *cobra.Command, args []string) error {
@@ -70,6 +71,9 @@ func runAuditList(cmd *cobra.Command, args []string) error {
 	if flagAuditCursor != "" {
 		filter.Cursor = &flagAuditCursor
 	}
+	if flagAuditCursorID != "" {
+		filter.CursorID = &flagAuditCursorID
+	}
 
 	resp, err := c.Audit.List(cmd.Context(), filter)
 	if err != nil {
@@ -99,6 +103,9 @@ func runAuditList(cmd *cobra.Command, args []string) error {
 	if resp.NextCursor != nil {
 		fmt.Printf("\nNext cursor: %s\n", *resp.NextCursor)
 	}
+	if resp.NextCursorID != nil {
+		fmt.Printf("Next cursor id: %s\n", *resp.NextCursorID)
+	}
 	return nil
 }
 
@@ -115,6 +122,7 @@ func init() {
 	auditListCmd.Flags().StringVar(&flagAuditEndTime, "end-time", "", "Filter until time (RFC3339)")
 	auditListCmd.Flags().IntVar(&flagAuditLimit, "limit", 50, "Max results to return")
 	auditListCmd.Flags().StringVar(&flagAuditCursor, "cursor", "", "Pagination cursor from previous response")
+	auditListCmd.Flags().StringVar(&flagAuditCursorID, "cursor-id", "", "Pagination cursor id from previous response")
 
 	auditCmd.AddCommand(auditListCmd)
 }
