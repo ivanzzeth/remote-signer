@@ -211,6 +211,7 @@ The server starts without signers. Add them after startup:
 | [Components](docs/components.md) | Core interfaces, data types, services |
 | [Request Flow](docs/flow.md) | 8-step signing flow with state machine |
 | [Testing Guide](docs/testing.md) | Unit tests, E2E, rule validation, coverage |
+| [SDK ⇄ CLI matrix](docs/sdk-cli-matrix.md) | Auditable mapping of `pkg/client` vs `remote-signer-cli` (prevents “full parity” drift) |
 
 **Versioning** — The version shown in the TUI and `/health` follows the repository tag (e.g. tag `v0.1.1` → version `0.1.1`). When you change code under `tui/`, bump the version in `cmd/remote-signer/main.go`; the pre-commit hook enforces this.
 
@@ -236,7 +237,7 @@ The server starts without signers. Add them after startup:
 - [x] JS Client SDK v0.0.4 (SimulateService, executeBatch, signer access control)
 - [x] MCP Server v0.0.5 (simulate, broadcast, guard resume tools)
 - [x] Internal Transfer Rule — same-owner scope for multi-tenant signer isolation (ETH, ERC20/721/1155)
-- [x] Full CLI API Parity — api-key CRUD, audit logs, ACL view, HD wallet management, template CRUD/instantiate/revoke
+- [x] Admin / operator CLI coverage — api-key CRUD, audit logs, ACL view, HD wallet management, template CRUD/instantiate/revoke (see [SDK ⇄ CLI matrix](docs/sdk-cli-matrix.md); SDK may still be a superset)
 
 ### Future
 
