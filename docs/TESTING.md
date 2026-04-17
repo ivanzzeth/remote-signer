@@ -6,6 +6,36 @@
 go test ./...
 ```
 
+On resource-constrained machines:
+
+```bash
+GOMAXPROCS=1 go test -p 1 ./...
+```
+
+## Git hooks (`scripts/install-hooks.sh`)
+
+Install or refresh hooks after cloning or when hook scripts change:
+
+```bash
+./scripts/install-hooks.sh
+```
+
+### Pre-commit and E2E
+
+The **pre-commit** hook runs security scans and, when E2E is enabled for your commit, starts an ephemeral server on **`E2E_API_PORT=18548`** (to avoid colliding with a dev server on `8548`).
+
+#### When E2E runs (default: auto)
+
+| Situation | Behavior |
+|-----------|----------|
+| **`REMOTE_SIGNER_PRE_COMMIT_E2E=auto` (default)** | If **every** staged path matches a **doc / ops-only** allowlist (`*.md`, `docs/*`, `.github/*`, common image extensions, `.gitignore`, `.secrets.baseline`, …), **E2E is skipped**. **Any other** staged file runs E2E. |
+| **Force E2E** | `REMOTE_SIGNER_FORCE_PRE_COMMIT_E2E=1` or `REMOTE_SIGNER_PRE_COMMIT_E2E=force` |
+| **Skip E2E** | `REMOTE_SIGNER_SKIP_PRE_COMMIT_E2E=1` or `REMOTE_SIGNER_PRE_COMMIT_E2E=skip` (escape hatch; prefer fixing the environment) |
+
+When E2E runs, the hook uses `GOMAXPROCS=1`, `go test -p 1`, a **10m** timeout, and `-skip 'TestSimulate_'` (external RPC gateway; too slow for local hooks).
+
+**Pre-push** still runs `go test ./...` (see the `pre-push` hook in the same installer script). Remote CI may add additional jobs; local hooks are an extra safety net, not a substitute for full pipeline coverage.
+
 ## E2E Tests
 
 E2E tests verify the complete signing workflow against a running server.
@@ -16,6 +46,12 @@ The simplest way — automatically starts an in-memory test server:
 
 ```bash
 go test -tags=e2e ./e2e/...
+```
+
+For a closer match to what **pre-commit** runs when E2E is enabled:
+
+```bash
+GOMAXPROCS=1 E2E_API_PORT=18548 go test -p 1 -tags=e2e ./e2e/... -count=1 -timeout 10m -skip 'TestSimulate_'
 ```
 
 ### External Server
