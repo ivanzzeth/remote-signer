@@ -323,14 +323,56 @@ else
     echo -e "TUI version check... ${GREEN}OK (no staged tui/ changes)${NC}"
 fi
 
-# 7. Run e2e tests (using port 18548 to avoid conflict with production on 8548)
-echo -n "Running e2e tests... "
-if E2E_API_PORT=18548 go test -tags e2e ./e2e/... -count=1 -timeout 2m 2>/dev/null; then
-    echo -e "${GREEN}OK${NC}"
+# 7. E2E tests (ephemeral server on E2E_API_PORT). Gated for doc-only commits; overridable via env (see docs/testing.md).
+STAGED_FOR_E2E=$(git diff --cached --name-only --diff-filter=ACM)
+SHOULD_RUN_E2E=1
+if [ "${REMOTE_SIGNER_SKIP_PRE_COMMIT_E2E:-}" = "1" ] || [ "${REMOTE_SIGNER_SKIP_PRE_COMMIT_E2E:-}" = "true" ]; then
+    SHOULD_RUN_E2E=0
+elif [ "${REMOTE_SIGNER_FORCE_PRE_COMMIT_E2E:-}" = "1" ] || [ "${REMOTE_SIGNER_FORCE_PRE_COMMIT_E2E:-}" = "true" ]; then
+    SHOULD_RUN_E2E=1
 else
-    echo -e "${RED}FAIL${NC}"
-    echo "E2E tests failed. Run 'E2E_API_PORT=18548 go test -tags e2e -v ./e2e/...' for details."
-    FAILED=1
+    case "${REMOTE_SIGNER_PRE_COMMIT_E2E:-auto}" in
+        0|false|no|skip|off) SHOULD_RUN_E2E=0 ;;
+        1|true|yes|force|on) SHOULD_RUN_E2E=1 ;;
+        auto|*)
+            if [ -z "$STAGED_FOR_E2E" ]; then
+                SHOULD_RUN_E2E=0
+            else
+                SHOULD_RUN_E2E=0
+                for f in $STAGED_FOR_E2E; do
+                    case "$f" in
+                        *.md|*.rst) ;;
+                        docs/*) ;;
+                        .github/*) ;;
+                        LICENSE*|COPYING*|NOTICE*) ;;
+                        SECURITY.md) ;;
+                        *.png|*.jpg|*.jpeg|*.gif|*.svg|*.webp|*.ico) ;;
+                        .gitignore|.gitattributes|.editorconfig) ;;
+                        .secrets.baseline) ;;
+                        *)
+                            SHOULD_RUN_E2E=1
+                            break
+                            ;;
+                    esac
+                done
+            fi
+            ;;
+    esac
+fi
+
+if [ "$SHOULD_RUN_E2E" -eq 1 ]; then
+    echo -n "Running e2e tests... "
+    # Exclude TestSimulate_* (external RPC gateway). GOMAXPROCS=1 -p 1 reduces fork pressure on constrained machines.
+    if GOMAXPROCS=1 E2E_API_PORT=18548 go test -p 1 -tags e2e ./e2e/... -count=1 -timeout 10m -skip 'TestSimulate_' 2>/dev/null; then
+        echo -e "${GREEN}OK${NC}"
+    else
+        echo -e "${RED}FAIL${NC}"
+        echo "E2E tests failed. Run 'GOMAXPROCS=1 E2E_API_PORT=18548 go test -p 1 -tags e2e -v -timeout 10m ./e2e/...' for details."
+        FAILED=1
+    fi
+else
+    echo -e "Running e2e tests... ${YELLOW}SKIP${NC} (doc-only / non-runtime staged paths, or e2e disabled via env)"
+    echo "  Override: REMOTE_SIGNER_FORCE_PRE_COMMIT_E2E=1  |  Always skip: REMOTE_SIGNER_SKIP_PRE_COMMIT_E2E=1  |  See docs/testing.md"
 fi
 
 echo "=== Pre-commit checks complete ==="
