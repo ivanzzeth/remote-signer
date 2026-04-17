@@ -11,6 +11,15 @@ It exists to prevent accidental “full parity” claims: **the SDK is a superse
 - **Intentionally not CLI (defer)**: deliberate product choice; use TUI/HTTP/SDK for now.
 - **Needs board scope**: would materially expand operator-facing surface area or security posture; should be a separate decision.
 
+## CLI-only observability (not an SDK mapping)
+
+These commands exist for **operator/debuggability** and are intentionally **not** modeled as `pkg/client` APIs. They still matter for WEB “stable operator contracts” work because they are the fastest way to prove “which CLI build is running” and “can this workstation reach the server with the configured TLS/material paths”.
+
+| Command | Purpose | Machine-readable output |
+|---|---|---|
+| `version` | Prints the embedded `remote-signer-cli` build version string. | N/A (single-line text is the contract). |
+| `doctor` | Local checks: default `--url` `/health` reachability, optional TLS file readability, optional authenticated `Health` via SDK when API key material is configured. **Does not print secrets.** | Use `--output json` (aliases: `-o json`, `--json`) for a stable JSON report (`ok`, `version`, `checks[]`). |
+
 ## Top-level client (`pkg/client.Client`)
 
 | SDK API | CLI | Decision | Notes |
