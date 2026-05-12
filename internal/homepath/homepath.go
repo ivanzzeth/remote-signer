@@ -18,13 +18,14 @@ import (
 )
 
 const (
-	configFile       = "config.yaml"
-	sqliteFile       = "remote-signer.db"
-	apiKeysSubdir    = "apikeys"
-	adminPrivKeyFile = "admin.key.priv"
-	adminPubKeyFile  = "admin.key.pub"
-	envHome          = "REMOTE_SIGNER_HOME"
-	envConfig        = "REMOTE_SIGNER_CONFIG"
+	configFile             = "config.yaml"
+	sqliteFile             = "remote-signer.db"
+	apiKeysSubdir          = "apikeys"
+	signerKeystoresSubdir  = "keystores"
+	adminPrivKeyFile       = "admin.key.priv"
+	adminPubKeyFile        = "admin.key.pub"
+	envHome                = "REMOTE_SIGNER_HOME"
+	envConfig              = "REMOTE_SIGNER_CONFIG"
 )
 
 // Home returns the remote-signer per-user home directory path without creating it.
@@ -79,17 +80,29 @@ func DefaultSQLiteDSN() (string, error) {
 	return fmt.Sprintf("file:%s?_journal_mode=WAL&_busy_timeout=5000", p), nil
 }
 
-// APIKeysDir returns the directory that holds Ed25519 keystores and PEM
-// keypairs used to authenticate to the remote-signer API. The directory
-// lives under the home dir so the bootstrap admin keypair, any keys minted
-// via `api-key keygen`, and keystores created via `keystore create` all
-// share a single, isolated location.
+// APIKeysDir returns the directory that holds the Ed25519 PEM/keystore files
+// callers use to authenticate to the remote-signer API. The bootstrap admin
+// keypair, anything minted via `api-key keygen`, and keystores created via
+// `api-key keystore create` all share this location.
 func APIKeysDir() (string, error) {
 	h, err := Home()
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(h, apiKeysSubdir), nil
+}
+
+// SignerKeystoresDir returns the directory that holds encrypted keystores
+// for chain-side signing keys (typically secp256k1 for EVM). The daemon
+// writes here when an admin creates a signer through the HTTP API; the
+// top-level `keystore` CLI defaults its --dir flag here so the same path
+// works for both inspection and rotation.
+func SignerKeystoresDir() (string, error) {
+	h, err := Home()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(h, signerKeystoresSubdir), nil
 }
 
 // AdminKeyPaths returns the bootstrap admin private/public key file paths.
