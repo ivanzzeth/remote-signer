@@ -94,25 +94,36 @@ type SimulationSnapshot struct {
 	BudgetERC20MaxPerTx  string        `json:"budget_erc20_max_per_tx"`
 }
 
-// BlocklistSnapshot — placeholder for PR7d (replaces config.DynamicBlocklistConfig).
+// BlocklistSnapshot mirrors config.DynamicBlocklistConfig. SyncInterval is
+// kept as the human-readable string ("1h", "30m") that YAML uses; the
+// overlay layer parses it into time.Duration when assigning to the runtime
+// config so cfg consumers see no behaviour change.
 type BlocklistSnapshot struct {
 	Enabled      bool             `json:"enabled"`
-	SyncInterval time.Duration    `json:"sync_interval"`
+	SyncInterval string           `json:"sync_interval"`
 	FailMode     string           `json:"fail_mode"`
 	CacheFile    string           `json:"cache_file"`
 	Sources      []BlocklistEntry `json:"sources"`
 }
 
-// BlocklistEntry — placeholder for PR7d.
+// BlocklistEntry mirrors config.DynamicBlocklistSource (one address-list source).
 type BlocklistEntry struct {
+	Name     string `json:"name"`
 	Type     string `json:"type"`
 	URL      string `json:"url"`
-	JSONPath string `json:"json_path"`
+	JSONPath string `json:"json_path,omitempty"`
 }
 
-// AuditMonitorSnapshot — placeholder for PR7d.
+// AuditMonitorSnapshot mirrors audit.MonitorConfig.
 type AuditMonitorSnapshot struct {
-	Enabled bool `json:"enabled"`
+	Enabled                  bool          `json:"enabled"`
+	Interval                 time.Duration `json:"interval"`
+	LookbackHours            int           `json:"lookback_hours"`
+	AuthFailureThreshold     int           `json:"auth_failure_threshold"`
+	BlocklistRejectThreshold int           `json:"blocklist_reject_threshold"`
+	HighFreqThreshold        int           `json:"high_freq_threshold"`
+	RetentionDays            int           `json:"retention_days"`
+	CleanupInterval          time.Duration `json:"cleanup_interval"`
 }
 
 // NotifySnapshot mirrors what used to live under the YAML `notify` and
@@ -171,12 +182,15 @@ type NotifyChannels struct {
 	Telegram []string `json:"telegram,omitempty"`
 }
 
-// RPCGatewaySnapshot — placeholder for PR7d.
+// RPCGatewaySnapshot mirrors evm.RPCGatewayConfig (read-only EVM RPC proxy
+// used by the JS rule sandbox).
 type RPCGatewaySnapshot struct {
-	Enabled bool `json:"enabled"`
+	BaseURL  string        `json:"base_url"`
+	APIKey   string        `json:"api_key,omitempty"`
+	CacheTTL time.Duration `json:"cache_ttl"`
 }
 
-// MaterialCheckSnapshot — placeholder for PR7d.
+// MaterialCheckSnapshot mirrors config.SignerMaterialCheckConfig.
 type MaterialCheckSnapshot struct {
 	Enabled      bool          `json:"enabled"`
 	StartupCheck bool          `json:"startup_check"`

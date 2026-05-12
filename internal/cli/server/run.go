@@ -203,17 +203,41 @@ func Run(args []string) error {
 	if err := settings.SeedNotify(context.Background(), settingsStore, notifyYAMLToSnapshot(&cfg.Notify, &cfg.NotifyChannel)); err != nil {
 		return fmt.Errorf("failed to seed notify settings: %w", err)
 	}
+	if err := settings.SeedAuditMonitor(context.Background(), settingsStore, auditMonitorToSnapshot(cfg.AuditMonitor)); err != nil {
+		return fmt.Errorf("failed to seed audit_monitor settings: %w", err)
+	}
+	if err := settings.SeedBlocklist(context.Background(), settingsStore, blocklistToSnapshot(cfg.DynamicBlocklist)); err != nil {
+		return fmt.Errorf("failed to seed blocklist settings: %w", err)
+	}
+	if cfg.Chains.EVM != nil {
+		if err := settings.SeedFoundry(context.Background(), settingsStore, foundryToSnapshot(cfg.Chains.EVM.Foundry)); err != nil {
+			return fmt.Errorf("failed to seed foundry settings: %w", err)
+		}
+		if err := settings.SeedSimulation(context.Background(), settingsStore, simulationToSnapshot(cfg.Chains.EVM.Simulation)); err != nil {
+			return fmt.Errorf("failed to seed simulation settings: %w", err)
+		}
+		if err := settings.SeedRPCGateway(context.Background(), settingsStore, rpcGatewayToSnapshot(cfg.Chains.EVM.RPCGateway)); err != nil {
+			return fmt.Errorf("failed to seed rpc_gateway settings: %w", err)
+		}
+		if err := settings.SeedMaterialCheck(context.Background(), settingsStore, materialCheckToSnapshot(cfg.Chains.EVM.MaterialCheck)); err != nil {
+			return fmt.Errorf("failed to seed material_check settings: %w", err)
+		}
+	}
 	settingsMgr := settings.NewManager(settingsStore, log)
 	if err := settingsMgr.Reload(context.Background()); err != nil {
 		return fmt.Errorf("failed to load settings: %w", err)
 	}
-	// From here on, mgr.Security() / mgr.Notify() are the source of truth.
-	// Overlay snapshots back onto cfg so the existing downstream wiring (rate
-	// limiter, IP whitelist, signer auto-lock, approval guard, notify
-	// service, budget alerter, audit monitor) picks up DB values without
-	// touching every read site.
+	// From here on, mgr.* groups are the source of truth. Overlay snapshots
+	// back onto cfg so the existing downstream wiring (rate limiter, IP
+	// whitelist, signer auto-lock, approval guard, notify service, budget
+	// alerter, audit monitor, Solidity evaluator, simulator, JS RPC
+	// gateway, blocklist syncer) picks up DB values without touching every
+	// read site. PR7e/g will retire cfg.* in favour of mgr.* reads.
 	applySecuritySnapshot(cfg, settingsMgr.Security())
 	applyNotifySnapshot(&cfg.Notify, &cfg.NotifyChannel, settingsMgr.Notify())
+	applyAuditMonitorSnapshot(cfg, settingsMgr.AuditMonitor())
+	applyBlocklistSnapshot(cfg, settingsMgr.Blocklist())
+	applyEVMSnapshots(cfg, settingsMgr.Foundry(), settingsMgr.Simulation(), settingsMgr.RPCGateway(), settingsMgr.MaterialCheck())
 
 	// Initialize API keys from config
 	apiKeyInit, err := config.NewAPIKeyInitializer(apiKeyRepo, log)
