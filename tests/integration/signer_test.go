@@ -14,6 +14,48 @@ import (
 // strongPassword satisfies the password policy (>=16 chars, all 4 classes).
 const strongPassword = "IntegTest-Pass!123456"
 
+// TestKeystore_APIKeyAliasMirrorsTopLevel boots the alias path
+// (`api-key keystore`) against an explicit --dir and asserts it produces a
+// keystore the top-level `keystore show` can read back. Confirms the two
+// trees share a single underlying ethsig/keystore implementation and that
+// the alias mounting in init() doesn't drift away from the canonical
+// subtree.
+func TestKeystore_APIKeyAliasMirrorsTopLevel(t *testing.T) {
+	dir := t.TempDir()
+
+	// Mint via the alias path.
+	createCmd := exec.Command(binaryPath, "api-key", "keystore", "create",
+		"-d", dir, "--label", "alias-test")
+	createCmd.Env = append(os.Environ(), "REMOTE_SIGNER_KEYSTORE_PASSWORD="+strongPassword)
+	if out, err := createCmd.CombinedOutput(); err != nil {
+		t.Fatalf("api-key keystore create: %v\n%s", err, out)
+	}
+
+	// Read back via the top-level path.
+	entries, _ := os.ReadDir(dir)
+	var keystoreFile string
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".json") {
+			keystoreFile = filepath.Join(dir, e.Name())
+			break
+		}
+	}
+	if keystoreFile == "" {
+		t.Fatalf("alias create produced no .json keystore in %s", dir)
+	}
+
+	showOut, _, err := cli(t, "keystore", "show", "-k", keystoreFile)
+	if err != nil {
+		t.Fatalf("keystore show via top-level: %v\n%s", err, showOut)
+	}
+	if !strings.Contains(showOut, "ed25519") {
+		t.Errorf("expected ed25519 key (alias default) in show output:\n%s", showOut)
+	}
+	if !strings.Contains(showOut, "alias-test") {
+		t.Errorf("expected label 'alias-test' to survive round-trip:\n%s", showOut)
+	}
+}
+
 // TestKeystore_CreateShowVerifyList runs the local keystore subcommands as
 // an end-to-end flow. The CLI does not contact the daemon for any of these
 // — keystores are file-backed under --dir.
