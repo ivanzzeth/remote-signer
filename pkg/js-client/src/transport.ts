@@ -215,7 +215,7 @@ export class HttpTransport {
 
     // Sign the request with nonce for replay protection
     const nonce = generateNonce();
-    const signature = signRequestWithNonce(
+    const signature = await signRequestWithNonce(
       this.privateKey,
       timestamp,
       nonce,

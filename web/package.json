@@ -10,11 +10,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@noble/ed25519": "^2.1.0",
-    "@noble/hashes": "^1.4.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^6.26.2"
+    "react-router-dom": "^6.26.2",
+    "remote-signer-client": "file:../pkg/js-client"
   },
   "devDependencies": {
     "@types/node": "^22.7.5",
