@@ -2,14 +2,26 @@
 
 ## Overview
 
-Remote-Signer is designed to be deployed as a stateless service with a SQL database as the backing store. Two deployment options are supported:
+Remote-Signer ships as a single binary (`remote-signer`) that hosts the daemon, the TUI, the rule validator, and the operator/admin CLI. Two deployment topologies are supported:
 
 | Option | Description |
 |--------|-------------|
-| **Direct build** | Compile the Go binary and run on the host (e.g. `./scripts/deploy.sh local-run` or `./remote-signer`). Use SQLite (file DSN) or PostgreSQL. |
-| **Docker** | Run with Docker Compose; includes PostgreSQL. Suited for production. |
+| **Direct build / release binary** | Run `remote-signer server start` on the host. Default config uses SQLite (`file:./data/remote-signer.db`); no external services required. Suitable for single-instance setups. |
+| **Docker** | Run with Docker Compose; includes PostgreSQL. Suited for multi-instance / production setups where the same dataset is shared across replicas. |
 
 See the main [README](../README.md#deployment) for quick commands. This document covers deployment configurations and considerations in detail.
+
+## Single-Instance vs Multi-Instance
+
+| Concern | Single-Instance (default) | Multi-Instance |
+|---|---|---|
+| Database | SQLite file (WAL mode) | PostgreSQL |
+| External services | None | PostgreSQL (+ load balancer for HA) |
+| Replay-protection nonce store | In-memory (`InMemoryNonceStore`) | ⚠️ A Redis/SQL-backed nonce store is **not yet implemented**. Running multiple instances today means each replica has its own in-memory nonce cache, so a replayed request routed to a different replica would not be detected. Use a sticky session / single-active deployment until a shared nonce store ships. |
+| Simulation accumulator | In-process | In-process today; a broker-backed implementation is a future improvement. |
+| Recommended for | Self-hosted services, dev/staging, low-to-mid traffic production | Horizontally scaled production behind a load balancer — once the shared nonce store lands. |
+
+Set `DATABASE_DSN` to a `postgres://...` URL to opt into the multi-instance topology; the default `file:./data/remote-signer.db` DSN in `config.example.yaml` is overridden automatically. `docker-compose.yml` does this for you.
 
 ## Deployment Diagram
 

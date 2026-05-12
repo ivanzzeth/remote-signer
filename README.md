@@ -90,7 +90,24 @@ See [Competitive Analysis](docs/competitive-analysis.md) for the full breakdown.
 
 ## Quick Start
 
-### One-Line Install (recommended)
+### Three-Command Single-Instance (SQLite, no Docker)
+
+```bash
+# 1. Download the release binary for your platform (linux/darwin × amd64/arm64).
+curl -sSLf -o remote-signer \
+  "https://github.com/ivanzzeth/remote-signer/releases/latest/download/remote-signer-$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')" \
+  && chmod +x remote-signer
+
+# 2. Drop in a config (defaults to SQLite at ./data/remote-signer.db).
+curl -sSLf -o config.yaml https://raw.githubusercontent.com/ivanzzeth/remote-signer/main/config.example.yaml
+
+# 3. Start the daemon.
+./remote-signer server start -config config.yaml
+```
+
+Everything ships in the single `remote-signer` binary: `server`, `tui`, `validate`, and every operator command (`rule`, `sign`, `keystore`, `preset`, ...).
+
+### One-Line Install (interactive setup wizard)
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/ivanzzeth/remote-signer/main/scripts/setup.sh)
@@ -109,12 +126,12 @@ cd remote-signer
 ### Prerequisites
 
 - openssl
-- Docker (recommended) or Go 1.24+ (for local mode)
+- Docker (multi-instance / PostgreSQL) or just the release binary (single-instance / SQLite)
 
 ### What the Setup Wizard Does
 
 The interactive setup walks through 5 steps:
-1. **Deployment mode** -- Docker + PostgreSQL (recommended) or Local + SQLite (dev only)
+1. **Deployment mode** -- Docker + PostgreSQL (multi-instance) or Local + SQLite (single-instance, release binary works out of the box)
 2. **API keys** -- Generates `admin` and `dev` Ed25519 key pairs
 3. **TLS** -- HTTP, TLS, or mTLS (Docker defaults to mTLS)
 4. **Configuration** -- Writes a ready-to-run config file with auto-generated secrets
@@ -146,7 +163,7 @@ If you prefer manual control, see [docs/configuration.md](docs/configuration.md)
 
 The server starts without signers. Add them after startup:
 
-- **TUI** (recommended): Use `-api-key-file data/admin_private.pem` so you don't need to paste the key. Example (plain HTTP): `./remote-signer-tui -api-key-id admin -api-key-file data/admin_private.pem -url http://localhost:8548`. **If you enabled TLS** during setup, use `https://` and pass CA (and for mTLS, client cert/key), e.g. `-url https://localhost:8548 -tls-ca ./certs/ca.crt` or with mTLS: `-tls-ca ./certs/ca.crt -tls-cert ./certs/client.crt -tls-key ./certs/client.key`. See [docs/tui.md](docs/tui.md#tls--mtls). After setup (Docker), you can choose "Open TUI to add signers now?" to launch it. In the **Signers** tab create a keystore (import private key) or create/import an HD wallet. **Password requirements (enforced)**: at least 16 characters, and must include uppercase + lowercase + digit + symbol. 24+ characters recommended.
+- **TUI** (recommended): Use `-api-key-file data/admin_private.pem` so you don't need to paste the key. Example (plain HTTP): `./remote-signer tui -api-key-id admin -api-key-file data/admin_private.pem -url http://localhost:8548`. **If you enabled TLS** during setup, use `https://` and pass CA (and for mTLS, client cert/key), e.g. `-url https://localhost:8548 -tls-ca ./certs/ca.crt` or with mTLS: `-tls-ca ./certs/ca.crt -tls-cert ./certs/client.crt -tls-key ./certs/client.key`. See [docs/tui.md](docs/tui.md#tls--mtls). After setup (Docker), you can choose "Open TUI to add signers now?" to launch it. In the **Signers** tab create a keystore (import private key) or create/import an HD wallet. **Password requirements (enforced)**: at least 16 characters, and must include uppercase + lowercase + digit + symbol. 24+ characters recommended.
 - **API**: `POST /api/v1/evm/signers` (admin only). See [docs/api.md](docs/api.md).
 - **Config**: Edit `chains.evm.signers.private_keys` in your config file. See [docs/configuration.md](docs/configuration.md#chains-evm).
 
@@ -211,7 +228,7 @@ The server starts without signers. Add them after startup:
 | [Components](docs/components.md) | Core interfaces, data types, services |
 | [Request Flow](docs/flow.md) | 8-step signing flow with state machine |
 | [Testing Guide](docs/testing.md) | Unit tests, E2E, rule validation, coverage |
-| [SDK ⇄ CLI matrix](docs/sdk-cli-matrix.md) | Auditable mapping of `pkg/client` vs `remote-signer-cli` (prevents “full parity” drift) |
+| [SDK ⇄ CLI matrix](docs/sdk-cli-matrix.md) | Auditable mapping of `pkg/client` vs `remote-signer` (prevents “full parity” drift) |
 
 **Versioning** — The version shown in the TUI and `/health` follows the repository tag (e.g. tag `v0.1.1` → version `0.1.1`). When you change code under `tui/`, bump the version in `cmd/remote-signer/main.go`; the pre-commit hook enforces this.
 

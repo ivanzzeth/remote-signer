@@ -162,13 +162,13 @@ V4 使用与 V3 相同的 `dex_swap_v3.template.js.yaml` 模板。Universal Rout
 ### 部署 V2 规则到所有链
 
 ```bash
-remote-signer-cli preset create-from uniswap_v2.preset.js.yaml --config config.yaml --write
+remote-signer preset create-from uniswap_v2.preset.js.yaml --config config.yaml --write
 ```
 
 ### 部署 V3 规则到所有链（含 token 限制）
 
 ```bash
-remote-signer-cli preset create-from uniswap_v3.preset.js.yaml \
+remote-signer preset create-from uniswap_v3.preset.js.yaml \
   --set allowed_token_in=0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2 \
   --set max_amount_in=10000000000000000000 \
   --config config.yaml --write
@@ -177,13 +177,13 @@ remote-signer-cli preset create-from uniswap_v3.preset.js.yaml \
 ### 部署 V4 Universal Router 规则到所有链
 
 ```bash
-remote-signer-cli preset create-from uniswap_v4.preset.js.yaml --config config.yaml --write
+remote-signer preset create-from uniswap_v4.preset.js.yaml --config config.yaml --write
 ```
 
 ### 部署单链 V2（自定义 router）
 
 ```bash
-remote-signer-cli preset create-from dex_swap.preset.js.yaml \
+remote-signer preset create-from dex_swap.preset.js.yaml \
   --set chain_id=1 \
   --set router_address=0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D \
   --config config.yaml --write
@@ -192,7 +192,7 @@ remote-signer-cli preset create-from dex_swap.preset.js.yaml \
 ### 部署单链 V3（含 token 和金额限制）
 
 ```bash
-remote-signer-cli preset create-from dex_swap_v3.preset.js.yaml \
+remote-signer preset create-from dex_swap_v3.preset.js.yaml \
   --set chain_id=1 \
   --set router_address=0xE592427A0AEce92De3Edee1F18E0157C05861564 \
   --set allowed_token_in=0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2 \

@@ -83,12 +83,12 @@ CheckSignerAccess(caller, signer_address):
 
 ```bash
 # CLI: signer list shows owner column
-remote-signer-cli evm signer list
+remote-signer evm signer list
 # ADDRESS              TYPE       OWNER    STATUS
 # 0x53c68c95...        keystore   admin    unlocked
 
 # CLI: approve pending signer (admin)
-remote-signer-cli evm signer approve <address>
+remote-signer evm signer approve <address>
 ```
 
 TUI: Signer list adds Owner column. Non-owner cannot unlock/lock.
@@ -113,7 +113,7 @@ TUI: Signer list adds Owner column. Non-owner cannot unlock/lock.
 | `internal/api/middleware/ratelimit.go` | Remove CheckSignerPermissionWithHDWallets |
 | `internal/api/router.go` | Register approve endpoint |
 | `pkg/client/evm/signer_types.go` | Remove AllowAll fields; add OwnerID |
-| `cmd/remote-signer-cli/signer.go` | Owner column in list; approve command |
+| `internal/cli/admin/signer.go` | Owner column in list; approve command |
 | `tui/views/signers.go` | Owner column |
 | `config.example.yaml` | Remove signer permission fields from api_keys |
 | `e2e/test_server.go` | Remove AllowAllSigners, use explicit ownership |
@@ -202,9 +202,9 @@ Signer list extends to: `owner_id = caller OR signer_access.api_key_id = caller`
 ### CLI/TUI Changes
 
 ```bash
-remote-signer-cli evm signer access grant <address> --to <api-key-id>
-remote-signer-cli evm signer access revoke <address> --from <api-key-id>
-remote-signer-cli evm signer access list <address>
+remote-signer evm signer access grant <address> --to <api-key-id>
+remote-signer evm signer access revoke <address> --from <api-key-id>
+remote-signer evm signer access list <address>
 ```
 
 TUI: Signer detail view shows access list. Owner sees [g]rant / [r]evoke hotkeys. Non-owner sees read-only access list (if granted) or nothing.
@@ -225,7 +225,7 @@ TUI: Signer detail view shows access list. Owner sees [g]rant / [r]evoke hotkeys
 | `internal/api/router.go` | Register access endpoints |
 | `pkg/client/evm/signers.go` | GrantAccess/RevokeAccess/ListAccess |
 | `pkg/client/evm/signer_types.go` | SignerAccess type |
-| `cmd/remote-signer-cli/signer.go` | `access grant/revoke/list` subcommands |
+| `internal/cli/admin/signer.go` | `access grant/revoke/list` subcommands |
 | `tui/views/signer_detail.go` | Access list display + grant/revoke UI |
 | `e2e/e2e_signer_access_test.go` | NEW |
 
@@ -305,8 +305,8 @@ security:
 ### CLI/TUI Changes
 
 ```bash
-remote-signer-cli evm signer transfer <address> --to <api-key-id>
-remote-signer-cli evm signer delete <address>
+remote-signer evm signer transfer <address> --to <api-key-id>
+remote-signer evm signer delete <address>
 ```
 
 TUI: Signer detail adds [t]ransfer / [d]elete. API key management tab shows cascade warnings on delete.
@@ -325,7 +325,7 @@ TUI: Signer detail adds [t]ransfer / [d]elete. API key management tab shows casc
 | `internal/api/handler/evm/signer.go` | Transfer/delete endpoints; approve endpoint |
 | `internal/api/handler/apikey.go` | Delete precondition + cascade + self-protection |
 | `internal/config/config.go` | max_keystores_per_key, max_hd_wallets_per_key |
-| `cmd/remote-signer-cli/signer.go` | transfer/delete subcommands |
+| `internal/cli/admin/signer.go` | transfer/delete subcommands |
 | `tui/views/signer_detail.go` | Transfer/delete UI |
 
 ### Unit Tests
@@ -372,7 +372,7 @@ ethsig keystore create --algo ed25519 --out data/apikeys/agent-2.json
 ethsig keystore pubkey data/apikeys/agent-2.json
 
 # Use with CLI
-remote-signer-cli evm signer list \
+remote-signer evm signer list \
   --api-key-id agent-2 --api-key-keystore data/apikeys/agent-2.json
 # Interactive: "Enter API key password: ****"
 ```
@@ -393,8 +393,8 @@ remote-signer-cli evm signer list \
 
 | File | Change |
 |------|--------|
-| `cmd/remote-signer-cli/client.go` | Keystore loading + password prompt |
-| `cmd/remote-signer-tui/main.go` | Keystore loading + password prompt |
+| `internal/cli/admin/client.go` | Keystore loading + password prompt |
+| `internal/cli/tui/run.go` | Keystore loading + password prompt |
 | `scripts/setup.sh` | Generate encrypted keystores |
 
 ---
@@ -611,30 +611,30 @@ AUTH_AGENT="--api-key-id agent --api-key-file data/agent_private.pem ..."
 # --- API Key lifecycle ---
 openssl genpkey -algorithm ED25519 -out /tmp/agent2.pem
 PUB=$(openssl pkey -in /tmp/agent2.pem -pubout -text -noout | grep -A2 "pub:" | tail -2 | tr -d ' :\n')
-remote-signer-cli apikey create --id agent-2 --name "Agent 2" --role agent --public-key $PUB $AUTH_ADMIN
+remote-signer apikey create --id agent-2 --name "Agent 2" --role agent --public-key $PUB $AUTH_ADMIN
 # 201, zero permissions
 
 # --- Phase 1: Ownership ---
-remote-signer-cli evm signer create --password test123 $AUTH_ADMIN       # active, owner=admin
-remote-signer-cli evm signer list $AUTH_ADMIN                            # sees signer
-remote-signer-cli evm signer list $AUTH_AGENT                            # empty
-remote-signer-cli evm sign personal "test" --signer <addr> $AUTH_AGENT   # 403
+remote-signer evm signer create --password test123 $AUTH_ADMIN       # active, owner=admin
+remote-signer evm signer list $AUTH_ADMIN                            # sees signer
+remote-signer evm signer list $AUTH_AGENT                            # empty
+remote-signer evm sign personal "test" --signer <addr> $AUTH_AGENT   # 403
 
 # --- Phase 2: Access ---
-remote-signer-cli evm signer access grant <addr> --to agent $AUTH_ADMIN  # 201
-remote-signer-cli evm sign personal "test" --signer <addr> $AUTH_AGENT   # OK
-remote-signer-cli evm signer access revoke <addr> --from agent $AUTH_ADMIN
-remote-signer-cli evm sign personal "test" --signer <addr> $AUTH_AGENT   # 403
+remote-signer evm signer access grant <addr> --to agent $AUTH_ADMIN  # 201
+remote-signer evm sign personal "test" --signer <addr> $AUTH_AGENT   # OK
+remote-signer evm signer access revoke <addr> --from agent $AUTH_ADMIN
+remote-signer evm sign personal "test" --signer <addr> $AUTH_AGENT   # 403
 
 # --- Phase 3: Transfer ---
-remote-signer-cli evm signer transfer <addr> --to agent $AUTH_ADMIN
-remote-signer-cli evm sign personal "test" --signer <addr> $AUTH_ADMIN   # 403 (not owner)
-remote-signer-cli evm sign personal "test" --signer <addr> $AUTH_AGENT   # OK (now owner)
-remote-signer-cli evm signer access list <addr> $AUTH_AGENT              # empty (cleared)
+remote-signer evm signer transfer <addr> --to agent $AUTH_ADMIN
+remote-signer evm sign personal "test" --signer <addr> $AUTH_ADMIN   # 403 (not owner)
+remote-signer evm sign personal "test" --signer <addr> $AUTH_AGENT   # OK (now owner)
+remote-signer evm signer access list <addr> $AUTH_AGENT              # empty (cleared)
 
 # --- Phase 3: Delete cascade ---
-remote-signer-cli evm signer delete <addr> $AUTH_AGENT                   # owner deletes
-remote-signer-cli apikey delete agent-2 $AUTH_ADMIN                      # cascade: rules + access
+remote-signer evm signer delete <addr> $AUTH_AGENT                   # owner deletes
+remote-signer apikey delete agent-2 $AUTH_ADMIN                      # cascade: rules + access
 ```
 
 ## Manual Verification (TUI)

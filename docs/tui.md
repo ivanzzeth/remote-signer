@@ -6,23 +6,23 @@ The remote-signer includes a terminal-based management interface for monitoring 
 
 ```bash
 # -o output path must come before the package path (go build -o <binary> <pkg>)
-go build -o remote-signer-tui ./cmd/remote-signer-tui
+go build -o remote-signer tui ./cmd/remote-signer
 ```
 
 ## Run
 
 ```bash
 # Recommended: use API key PEM file (no paste)
-./remote-signer-tui -api-key-id admin -api-key-file data/admin_private.pem -url http://localhost:8548
+./remote-signer tui -api-key-id admin -api-key-file data/admin_private.pem -url http://localhost:8548
 
 # Or environment variable
 export REMOTE_SIGNER_URL=http://localhost:8548
 export REMOTE_SIGNER_API_KEY_ID=admin
 export REMOTE_SIGNER_PRIVATE_KEY=your-ed25519-private-key
-./remote-signer-tui
+./remote-signer tui
 
 # Or inline env vars
-REMOTE_SIGNER_PRIVATE_KEY=your-ed25519-private-key ./remote-signer-tui -url http://localhost:8548 -api-key-id admin
+REMOTE_SIGNER_PRIVATE_KEY=your-ed25519-private-key ./remote-signer tui -url http://localhost:8548 -api-key-id admin
 ```
 
 If neither `-api-key-file` nor `REMOTE_SIGNER_PRIVATE_KEY` is set, the TUI will prompt for the key interactively.

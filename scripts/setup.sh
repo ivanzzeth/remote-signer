@@ -20,7 +20,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 DATA_DIR="${PROJECT_DIR}/data"
-# Binaries from release go here; added to PATH so remote-signer-cli, remote-signer-tui, remote-signer-validate-rules are available
+# Binary from release goes here; added to PATH so `remote-signer` is on PATH
 BIN_DIR="${REMOTE_SIGNER_BIN_DIR:-$PROJECT_DIR/bin}"
 
 # GitHub repo for release downloads (public repo required for unauthenticated download)
@@ -94,7 +94,7 @@ download_release_binary() {
     return 1
 }
 
-# Download all release binaries (remote-signer-tui, remote-signer-validate-rules, remote-signer-cli) into BIN_DIR and add BIN_DIR to PATH.
+# Download the unified remote-signer release binary into BIN_DIR and add BIN_DIR to PATH.
 # Exports PATH for current process; optionally appends to user's shell rc so new terminals have it.
 download_release_binaries_and_set_path() {
     mkdir -p "$BIN_DIR"
@@ -107,19 +107,14 @@ download_release_binaries_and_set_path() {
         return 1
     fi
 
-    local got_any=0
-    if download_release_binary "remote-signer-tui"; then got_any=1; fi
-    if download_release_binary "remote-signer-validate-rules"; then got_any=1; fi
-    if download_release_binary "remote-signer-cli"; then got_any=1; fi
-
-    if [ "$got_any" -eq 0 ]; then
+    if ! download_release_binary "remote-signer"; then
         return 1
     fi
     add_bin_dir_to_path
     return 0
 }
 
-# Build remote-signer-tui, remote-signer-validate-rules, remote-signer-cli from source into BIN_DIR.
+# Build the unified remote-signer binary from source into BIN_DIR.
 # Requires Go and go.mod in PROJECT_DIR. Exports PATH and adds BIN_DIR to shell rc on success.
 build_from_source_binaries() {
     mkdir -p "$BIN_DIR"
@@ -134,35 +129,18 @@ build_from_source_binaries() {
         return 1
     fi
 
-    log_info "Building CLI tools from source (this may take a minute)..."
-    local ok=0
-    if (cd "$PROJECT_DIR" && go build -o "$BIN_DIR/remote-signer-tui" ./cmd/remote-signer-tui 2>/dev/null); then
-        log_info "Built remote-signer-tui"
-        ok=1
+    log_info "Building remote-signer from source (this may take a minute)..."
+    if (cd "$PROJECT_DIR" && go build -o "$BIN_DIR/remote-signer" ./cmd/remote-signer 2>/dev/null); then
+        log_info "Built remote-signer"
     else
-        log_warn "Failed to build remote-signer-tui"
-    fi
-    if (cd "$PROJECT_DIR" && go build -o "$BIN_DIR/remote-signer-validate-rules" ./cmd/remote-signer-validate-rules 2>/dev/null); then
-        log_info "Built remote-signer-validate-rules"
-        ok=1
-    else
-        log_warn "Failed to build remote-signer-validate-rules"
-    fi
-    if (cd "$PROJECT_DIR" && go build -o "$BIN_DIR/remote-signer-cli" ./cmd/remote-signer-cli 2>/dev/null); then
-        log_info "Built remote-signer-cli"
-        ok=1
-    else
-        log_warn "Failed to build remote-signer-cli"
-    fi
-
-    if [ "$ok" -eq 0 ]; then
+        log_warn "Failed to build remote-signer"
         return 1
     fi
     add_bin_dir_to_path
     return 0
 }
 
-# Add BIN_DIR to PATH in the user's shell rc so new terminals have remote-signer-cli, remote-signer-tui, remote-signer-validate-rules on PATH.
+# Add BIN_DIR to PATH in the user's shell rc so new terminals have remote-signer on PATH.
 add_bin_dir_to_path() {
     local rc line
     if [ -n "${ZSH_VERSION:-}" ]; then
@@ -176,9 +154,9 @@ add_bin_dir_to_path() {
         return 0
     fi
     echo "" >> "$rc"
-    echo "# Remote Signer CLI/TUI/remote-signer-validate-rules (added by setup.sh)" >> "$rc"
+    echo "# Remote Signer (added by setup.sh)" >> "$rc"
     echo "$line" >> "$rc"
-    log_info "Added $BIN_DIR to PATH in $rc. Run \`source $rc\` or open a new terminal to use remote-signer-cli, remote-signer-tui, remote-signer-validate-rules from anywhere."
+    log_info "Added $BIN_DIR to PATH in $rc. Run \`source $rc\` or open a new terminal to use remote-signer from anywhere."
 }
 
 detect_os() {
@@ -468,8 +446,8 @@ step_deployment_mode() {
     echo -e "${BOLD}=============================================================${NC}"
     echo ""
     echo "How do you want to run remote-signer?"
-    echo -e "  ${CYAN}1)${NC} Docker ${DIM}(PostgreSQL + security hardening)${NC} \u2b50 recommended"
-    echo -e "  ${CYAN}2)${NC} Local  ${DIM}(SQLite, no Docker needed) — for development only${NC}"
+    echo -e "  ${CYAN}1)${NC} Docker ${DIM}(PostgreSQL + security hardening; multi-instance ready)${NC} \u2b50 recommended for production"
+    echo -e "  ${CYAN}2)${NC} Local  ${DIM}(single-instance SQLite, no external services; release binary works out of the box)${NC}"
     echo ""
     DEPLOY_MODE_CHOICE=$(ask "Select [1/2]" 1 1 2)
 
@@ -530,16 +508,16 @@ step_api_keys() {
         echo ""
     fi
 
-    # Generate admin key using encrypted keystore (if remote-signer-cli is available)
+    # Generate admin key using encrypted keystore (if remote-signer is available)
     _generate_admin_keystore() {
-        if command -v remote-signer-cli &>/dev/null; then
+        if command -v remote-signer &>/dev/null; then
             log_info "Generating admin API key (encrypted keystore)..."
             echo -e "  ${CYAN}You will be prompted for a password to encrypt the admin key.${NC}"
             echo -e "  ${CYAN}Remember this password — you will need it to authenticate.${NC}"
             echo ""
-            remote-signer-cli keystore create -d "$ADMIN_KEYSTORE_DIR" --label admin
+            remote-signer keystore create -d "$ADMIN_KEYSTORE_DIR" --label admin
         else
-            log_warn "remote-signer-cli not found; falling back to PEM for admin key."
+            log_warn "remote-signer not found; falling back to PEM for admin key."
             "$SCRIPT_DIR/generate-api-key.sh" -n admin -o "$DATA_DIR" -f > /dev/null 2>&1
         fi
     }
@@ -549,10 +527,10 @@ step_api_keys() {
         # Try keystore first
         local ks_file
         ks_file=$(ls "$ADMIN_KEYSTORE_DIR"/ed25519--*.json 2>/dev/null | head -1)
-        if [ -n "$ks_file" ] && command -v remote-signer-cli &>/dev/null; then
+        if [ -n "$ks_file" ] && command -v remote-signer &>/dev/null; then
             # Identifier in the keystore file is the Ed25519 public key hex
             local identifier
-            identifier=$(remote-signer-cli keystore show -k "$ks_file" -o json 2>/dev/null | grep -o '"Identifier":"[^"]*"' | cut -d'"' -f4)
+            identifier=$(remote-signer keystore show -k "$ks_file" -o json 2>/dev/null | grep -o '"Identifier":"[^"]*"' | cut -d'"' -f4)
             if [ -n "$identifier" ]; then
                 ADMIN_PUBLIC_KEY="$identifier"
                 ADMIN_KEYSTORE_FILE="$ks_file"
@@ -1102,19 +1080,19 @@ ENVEOF
     echo ""
 }
 
-# Step: ask user to download or build CLI tools (tui, validate-rules, cli). Runs before preset so preset can use remote-signer-cli.
+# Step: ask user to download or build the remote-signer binary. Runs before preset so preset can use `remote-signer`.
 step_ensure_cli_tools() {
     echo -e "${BOLD}=============================================================${NC}"
-    echo -e "${BOLD}  CLI tools (required for preset step and TUI)${NC}"
+    echo -e "${BOLD}  remote-signer binary (required for preset step and TUI)${NC}"
     echo -e "${BOLD}=============================================================${NC}"
     echo ""
-    echo -e "${CYAN}remote-signer-tui, remote-signer-validate-rules, remote-signer-cli:${NC}"
+    echo -e "${CYAN}remote-signer (single binary; hosts server, tui, validate, and admin subcommands):${NC}"
     echo "  1) Download from release (latest; no Go required)"
     echo "  2) Build from source (requires Go)"
     echo ""
     BINARIES_CHOICE=$(ask "Choose [1/2]" 1 1 2)
 
-    TUI_BIN="$BIN_DIR/remote-signer-tui"
+    TUI_BIN="$BIN_DIR/remote-signer"
     mkdir -p "$BIN_DIR"
     export PATH="$BIN_DIR:$PATH"
     if [ "$BINARIES_CHOICE" = "2" ]; then
@@ -1128,14 +1106,14 @@ step_ensure_cli_tools() {
             build_from_source_binaries || true
         fi
     fi
-    if [ ! -x "$TUI_BIN" ] && [ -x "$PROJECT_DIR/remote-signer-tui" ]; then
-        TUI_BIN="$PROJECT_DIR/remote-signer-tui"
+    if [ ! -x "$TUI_BIN" ] && [ -x "$PROJECT_DIR/remote-signer" ]; then
+        TUI_BIN="$PROJECT_DIR/remote-signer"
     fi
 
     # Validate config immediately so we fail fast before preset step (avoids wasting time on preset selection if config is invalid)
-    if [ -f "$PROJECT_DIR/$CONFIG_FILE" ] && command -v remote-signer-validate-rules &>/dev/null; then
+    if [ -f "$PROJECT_DIR/$CONFIG_FILE" ] && command -v remote-signer validate &>/dev/null; then
         log_info "Validating config..."
-        if ! remote-signer-validate-rules -config "$PROJECT_DIR/$CONFIG_FILE" 2>&1; then
+        if ! remote-signer validate -config "$PROJECT_DIR/$CONFIG_FILE" 2>&1; then
             log_error "Config validation failed. Fix $CONFIG_FILE before adding presets (e.g. invalid duration: auto_lock_timeout: \"\" — use \"0\" for disabled)."
             exit 1
         fi
@@ -1144,7 +1122,7 @@ step_ensure_cli_tools() {
 }
 
 # Interactive step: optionally add rule(s) from preset(s). Prompts for preset choice and variable overrides (with descriptions from template).
-# Requires remote-signer-cli from step_ensure_cli_tools (no download/build here).
+# Requires remote-signer from step_ensure_cli_tools (no download/build here).
 step_preset_rules() {
     echo -e "${BOLD}=============================================================${NC}"
     echo -e "${BOLD}  Step 4b: Add rules from preset (optional)${NC}"
@@ -1159,8 +1137,8 @@ step_preset_rules() {
     fi
 
     export PATH="$BIN_DIR:$PATH"
-    if ! command -v remote-signer-cli &>/dev/null; then
-        log_warn "remote-signer-cli not found; skipping preset step. Re-run setup and choose to download or build CLI tools first."
+    if ! command -v remote-signer &>/dev/null; then
+        log_warn "remote-signer not found; skipping preset step. Re-run setup and choose to download or build CLI tools first."
         return 0
     fi
 
@@ -1172,7 +1150,7 @@ step_preset_rules() {
 
     while true; do
         # List presets: output is "# Preset file | template(s)" then "file.yaml | Template Name"
-        list_out=$(remote-signer-cli preset list --presets-dir "$PRESETS_DIR" 2>/dev/null) || break
+        list_out=$(remote-signer preset list --presets-dir "$PRESETS_DIR" 2>/dev/null) || break
         presets=()
         while IFS= read -r line; do
             [[ "$line" =~ ^# ]] && continue
@@ -1208,7 +1186,7 @@ step_preset_rules() {
 
         # Get variables to prompt (override_hints from preset; descriptions from template, including budget/schedule vars if preset has them)
         set_args=()
-        vars_out=$(remote-signer-cli preset vars "$PRESET_FILE" --presets-dir "$PRESETS_DIR" --project-dir "$PROJECT_DIR" 2>/dev/null) || true
+        vars_out=$(remote-signer preset vars "$PRESET_FILE" --presets-dir "$PRESETS_DIR" --project-dir "$PROJECT_DIR" 2>/dev/null) || true
         if [ -n "$vars_out" ]; then
             echo ""
             echo "Enter values for the following variables (descriptions from template)."
@@ -1232,9 +1210,9 @@ step_preset_rules() {
 
         log_info "Adding rule from preset: $PRESET_NAME"
         if [ ${#set_args[@]} -gt 0 ]; then
-            remote-signer-cli preset create-from "$PRESET_FILE" --config "$PROJECT_DIR/$CONFIG_FILE" --write --presets-dir "$PRESETS_DIR" "${set_args[@]}" || log_warn "Failed to add preset rule"
+            remote-signer preset create-from "$PRESET_FILE" --config "$PROJECT_DIR/$CONFIG_FILE" --write --presets-dir "$PRESETS_DIR" "${set_args[@]}" || log_warn "Failed to add preset rule"
         else
-            remote-signer-cli preset create-from "$PRESET_FILE" --config "$PROJECT_DIR/$CONFIG_FILE" --write --presets-dir "$PRESETS_DIR" || log_warn "Failed to add preset rule"
+            remote-signer preset create-from "$PRESET_FILE" --config "$PROJECT_DIR/$CONFIG_FILE" --write --presets-dir "$PRESETS_DIR" || log_warn "Failed to add preset rule"
         fi
 
         echo ""
@@ -1289,11 +1267,11 @@ step_done() {
     echo ""
     echo "  Via TUI (recommended: use -api-key-file to avoid paste):"
     if [ -x "$TUI_BIN" ]; then
-        echo "    remote-signer-tui -api-key-id admin -api-key-file data/admin_private.pem \\"
+        echo "    remote-signer tui -api-key-id admin -api-key-file data/admin_private.pem \\"
         echo "      # or: $TUI_BIN -api-key-id admin -api-key-file data/admin_private.pem \\"
     else
-        echo "    go build -o remote-signer-tui ./cmd/remote-signer-tui   # requires Go 1.24+ (https://go.dev/dl/)"
-        echo "    remote-signer-tui -api-key-id admin -api-key-file data/admin_private.pem \\"
+        echo "    go build -o remote-signer tui ./cmd/remote-signer   # requires Go 1.24+ (https://go.dev/dl/)"
+        echo "    remote-signer tui -api-key-id admin -api-key-file data/admin_private.pem \\"
     fi
     if [ "$TLS_CHOICE" = "3" ]; then
         echo "      -url ${SCHEME}://localhost:${PORT} \\"
@@ -1310,16 +1288,16 @@ step_done() {
     echo "    Or set REMOTE_SIGNER_PRIVATE_KEY and omit -api-key-file. Then use Signers tab to add keystore or HD wallet."
     echo ""
     echo -e "  ${CYAN}Connect as other roles:${NC}"
-    echo "    remote-signer-tui -api-key-id dev      -api-key-file data/dev_private.pem      -url ${SCHEME}://localhost:${PORT}"
-    echo "    remote-signer-tui -api-key-id agent    -api-key-file data/agent_private.pem    -url ${SCHEME}://localhost:${PORT}"
-    echo "    remote-signer-tui -api-key-id strategy -api-key-file data/strategy_private.pem -url ${SCHEME}://localhost:${PORT}"
+    echo "    remote-signer tui -api-key-id dev      -api-key-file data/dev_private.pem      -url ${SCHEME}://localhost:${PORT}"
+    echo "    remote-signer tui -api-key-id agent    -api-key-file data/agent_private.pem    -url ${SCHEME}://localhost:${PORT}"
+    echo "    remote-signer tui -api-key-id strategy -api-key-file data/strategy_private.pem -url ${SCHEME}://localhost:${PORT}"
     echo ""
     if [ ! -x "$TUI_BIN" ]; then
         echo "  (No Go? Add signers via API instead — see docs/api.md)"
         echo ""
     fi
-    if [ -d "$BIN_DIR" ] && [ -x "$BIN_DIR/remote-signer-tui" ]; then
-        echo -e "  ${DIM}CLI tools on PATH:${NC} remote-signer-tui, remote-signer-validate-rules, remote-signer-cli (from $BIN_DIR)"
+    if [ -d "$BIN_DIR" ] && [ -x "$BIN_DIR/remote-signer" ]; then
+        echo -e "  ${DIM}On PATH:${NC} remote-signer (from $BIN_DIR; tui/validate are subcommands)"
         echo ""
     fi
     echo "  Via API (create keystore):"
@@ -1483,16 +1461,16 @@ start_server_now() {
         elif [ "$TLS_CHOICE" = "2" ]; then
             cli_auth_args+=(--tls-ca ./certs/ca.crt)
         fi
-        if command -v remote-signer-cli &>/dev/null; then
-            if remote-signer-cli preset apply agent "${cli_auth_args[@]}" 2>&1; then
+        if command -v remote-signer &>/dev/null; then
+            if remote-signer preset apply agent "${cli_auth_args[@]}" 2>&1; then
                 log_info "Agent preset applied (owner=agent, budget: 1 native/24h). Rules are properly scoped."
             else
                 log_warn "Failed to apply agent preset. Apply manually after startup:"
-                echo "  remote-signer-cli preset apply agent ${cli_auth_args[*]}"
+                echo "  remote-signer preset apply agent ${cli_auth_args[*]}"
             fi
         else
-            log_warn "remote-signer-cli not found; skipping agent preset. Apply manually:"
-            echo "  remote-signer-cli preset apply agent --api-key-id agent --api-key-file data/agent_private.pem --url ${SCHEME}://localhost:${PORT}"
+            log_warn "remote-signer not found; skipping agent preset. Apply manually:"
+            echo "  remote-signer preset apply agent --api-key-id agent --api-key-file data/agent_private.pem --url ${SCHEME}://localhost:${PORT}"
         fi
         echo ""
 
@@ -1505,7 +1483,7 @@ start_server_now() {
                 log_info "Launching TUI (use Signers tab to create keystore or HD wallet)..."
                 run_tui_for_setup
             elif [ ! -x "$TUI_BIN" ]; then
-                log_warn "TUI binary not found. Build with: go build -o remote-signer-tui ./cmd/remote-signer-tui"
+                log_warn "TUI binary not found. Build with: go build -o remote-signer tui ./cmd/remote-signer"
                 log_info "When ready, run: ./scripts/deploy.sh $([ "$DEPLOY_MODE" = "docker" ] && echo 'run --no-screen' || echo local-run)"
             else
                 log_warn "data/admin_private.pem not found; run setup again or use TUI with REMOTE_SIGNER_PRIVATE_KEY."
@@ -1603,7 +1581,7 @@ main() {
     # Step 5/6: Generate configuration
     step_generate_config
 
-    # CLI tools (download or build) — before preset so remote-signer-cli is available
+    # CLI tools (download or build) — before preset so remote-signer is available
     step_ensure_cli_tools
 
     # Step 5b: Optionally add additional rules from presets (interactive)

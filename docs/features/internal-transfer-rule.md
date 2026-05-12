@@ -173,7 +173,7 @@ rules:
 
 ```bash
 # CLI
-remote-signer-cli evm rule create \
+remote-signer evm rule create \
   --name "Allow internal transfers" \
   --type evm_internal_transfer \
   --mode whitelist

@@ -94,7 +94,7 @@ Budget resets according to `budget_period` (default: 24h).
 `allowed_recipients` and `allowed_spenders` are **required** -- you must explicitly specify them.
 
 ```bash
-remote-signer-cli preset create-from usdc.preset.js.yaml \
+remote-signer preset create-from usdc.preset.js.yaml \
   --set max_transfer_amount=1000000000 \
   --set allowed_recipients=0x5B38Da6a701c568545dCfcB03FcB875f56beddC4 \
   --set allowed_spenders=0xE592427A0AEce92De3Edee1F18E0157C05861564 \
@@ -104,7 +104,7 @@ remote-signer-cli preset create-from usdc.preset.js.yaml \
 ### Deploy with custom budget period
 
 ```bash
-remote-signer-cli preset create-from usdc.preset.js.yaml \
+remote-signer preset create-from usdc.preset.js.yaml \
   --set max_transfer_amount=10000000000 \
   --set max_approve_amount=100000000000 \
   --set allowed_recipients=0x5B38Da6a701c568545dCfcB03FcB875f56beddC4 \
@@ -116,7 +116,7 @@ remote-signer-cli preset create-from usdc.preset.js.yaml \
 ### Deploy single-chain with ERC20 template directly
 
 ```bash
-remote-signer-cli preset create-from erc20.preset.js.yaml \
+remote-signer preset create-from erc20.preset.js.yaml \
   --set chain_id=1 \
   --set token_address=0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48 \
   --set max_transfer_amount=1000000000 \

@@ -15,10 +15,10 @@ go run ./cmd/remote-signer-verify-setup-polymarket/ -step createproxy -signer "$
 
 echo "[2/4] Add full preset (polymarket_safe_polygon) to config..."
 # Use same placeholder Safe address as in setup for vars
-if command -v remote-signer-cli &>/dev/null; then
-  CLI=remote-signer-cli
+if command -v remote-signer &>/dev/null; then
+  CLI=remote-signer
 else
-  CLI="go run ./cmd/remote-signer-cli/"
+  CLI="go run ./cmd/remote-signer"
 fi
 $CLI preset create-from polymarket_safe_polygon.preset.js.yaml \
   --config "$CONFIG" --write \

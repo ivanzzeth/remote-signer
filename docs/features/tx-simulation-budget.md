@@ -705,7 +705,7 @@ Simulation always uses **`eth_simulateV1`** through `chains.evm.rpc_gateway`. En
 - Config schema + config.example.yaml
 - Health endpoint: `GET /api/v1/evm/simulate/status`
 - Metrics: simulation latency, batch size
-- CLI: `remote-signer-cli evm simulate <tx-params>`
+- CLI: `remote-signer evm simulate <tx-params>`
 - Documentation
 
 ---
