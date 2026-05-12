@@ -464,6 +464,19 @@ func validate(cfg *Config) error {
 		return fmt.Errorf("database DSN is required")
 	}
 
+	// v0.3.0 breaking change: api_keys/templates/rules can no longer live in
+	// config.yaml. They are managed exclusively via the admin API and CLI so
+	// changes apply at runtime without restart.
+	if len(cfg.APIKeys) > 0 {
+		return fmt.Errorf(`config.yaml: "api_keys" is no longer supported. Manage API keys via the admin API: 'remote-signer api-key create ...' (use 'remote-signer api-key keygen --out ...' to mint the keypair first). On a fresh install the admin key is auto-generated at ~/.remote-signer/admin.key.{priv,pub}`)
+	}
+	if len(cfg.Templates) > 0 {
+		return fmt.Errorf(`config.yaml: "templates" is no longer supported. Manage rule templates via 'remote-signer template' or the /api/v1/templates HTTP API. See docs/rules-templates-and-presets.md`)
+	}
+	if len(cfg.Rules) > 0 {
+		return fmt.Errorf(`config.yaml: "rules" is no longer supported. Manage rules via 'remote-signer rule create ...' or the /api/v1/evm/rules HTTP API. See docs/rules-templates-and-presets.md`)
+	}
+
 	// Validate at least one chain is enabled
 	if cfg.Chains.EVM == nil || !cfg.Chains.EVM.Enabled {
 		return fmt.Errorf("at least one chain must be enabled")

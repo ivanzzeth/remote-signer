@@ -332,75 +332,39 @@ func TestValidate_MTLSWithNonExistentCAFile(t *testing.T) {
 	assert.Contains(t, err.Error(), "TLS ca_file not found")
 }
 
-func TestValidate_DuplicateAPIKeyIDs(t *testing.T) {
+// API-key validation tests (TestValidate_*APIKey*, TestValidate_*Role) lived
+// here to cover the cfg.APIKeys field. v0.3.0 retires that field; presence of
+// api_keys in config.yaml is now a fatal load error (see
+// TestValidate_RejectsLegacyAPIKeysField). Per-key validation moved to the
+// admin API surface where it is enforced on POST /api/v1/api-keys.
+
+func TestValidate_RejectsLegacyAPIKeysField(t *testing.T) {
 	cfg := validConfig()
 	cfg.APIKeys = []APIKeyConfig{
-		{ID: "key1", Enabled: false},
-		{ID: "key1", Enabled: false},
+		{ID: "legacy", Enabled: true, Role: "admin", PublicKey: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 	}
 	err := validate(cfg)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "duplicate id")
+	assert.Contains(t, err.Error(), "api_keys")
+	assert.Contains(t, err.Error(), "no longer supported")
 }
 
-func TestValidate_APIKeyWithoutID(t *testing.T) {
+func TestValidate_RejectsLegacyTemplatesField(t *testing.T) {
 	cfg := validConfig()
-	cfg.APIKeys = []APIKeyConfig{
-		{ID: "", Enabled: true},
-	}
+	cfg.Templates = []TemplateConfig{{Name: "legacy"}}
 	err := validate(cfg)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "id is required")
+	assert.Contains(t, err.Error(), "templates")
+	assert.Contains(t, err.Error(), "no longer supported")
 }
 
-func TestValidate_EnabledAPIKeyWithoutPublicKey(t *testing.T) {
+func TestValidate_RejectsLegacyRulesField(t *testing.T) {
 	cfg := validConfig()
-	cfg.APIKeys = []APIKeyConfig{
-		{ID: "key1", Enabled: true, Role: "admin"},
-	}
+	cfg.Rules = []RuleConfig{{Name: "legacy", Type: "evm_address_list", Mode: "whitelist", Enabled: true}}
 	err := validate(cfg)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "public_key or public_key_env is required")
-}
-
-func TestValidate_DisabledAPIKeyWithoutPublicKey(t *testing.T) {
-	cfg := validConfig()
-	cfg.APIKeys = []APIKeyConfig{
-		{ID: "key1", Enabled: false},
-	}
-	err := validate(cfg)
-	assert.NoError(t, err)
-}
-
-func TestValidate_MissingRole(t *testing.T) {
-	cfg := validConfig()
-	cfg.APIKeys = []APIKeyConfig{
-		{ID: "key1", Enabled: true, PublicKey: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
-	}
-	err := validate(cfg)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "role is required")
-}
-
-func TestValidate_InvalidRole(t *testing.T) {
-	cfg := validConfig()
-	cfg.APIKeys = []APIKeyConfig{
-		{ID: "key1", Enabled: true, PublicKey: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Role: "superadmin"},
-	}
-	err := validate(cfg)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid role")
-}
-
-func TestValidate_ValidRoles(t *testing.T) {
-	for _, role := range []string{"admin", "dev", "agent", "strategy"} {
-		cfg := validConfig()
-		cfg.APIKeys = []APIKeyConfig{
-			{ID: "key1", Enabled: true, PublicKey: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Role: role},
-		}
-		err := validate(cfg)
-		assert.NoError(t, err, "role %q should be valid", role)
-	}
+	assert.Contains(t, err.Error(), "rules")
+	assert.Contains(t, err.Error(), "no longer supported")
 }
 
 func TestValidate_SimulationEnabledWithoutBudgetDefaults(t *testing.T) {
