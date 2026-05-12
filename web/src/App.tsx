@@ -7,6 +7,7 @@ import { Audit } from "./pages/Audit";
 import { Dashboard } from "./pages/Dashboard";
 import { Login } from "./pages/Login";
 import { Rules } from "./pages/Rules";
+import { Settings } from "./pages/Settings";
 import { Signers } from "./pages/Signers";
 
 /**
@@ -44,6 +45,7 @@ export function App() {
         <Route path="/rules" element={<Rules />} />
         <Route path="/api-keys" element={<ApiKeys />} />
         <Route path="/audit" element={<Audit />} />
+        <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>
