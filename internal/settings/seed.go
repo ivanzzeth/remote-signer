@@ -54,6 +54,11 @@ func SeedMaterialCheck(ctx context.Context, store Store, s *MaterialCheckSnapsho
 	return seedIfMissing(ctx, store, GroupMaterialCheck, s)
 }
 
+// SeedWeb seeds the web-UI group (defaults to enabled on a fresh install).
+func SeedWeb(ctx context.Context, store Store, s *WebSnapshot) error {
+	return seedIfMissing(ctx, store, GroupWeb, s)
+}
+
 func seedIfMissing(ctx context.Context, store Store, key Group, value any) error {
 	_, err := store.Get(ctx, key)
 	if err == nil {

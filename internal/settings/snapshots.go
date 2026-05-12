@@ -196,3 +196,20 @@ type MaterialCheckSnapshot struct {
 	StartupCheck bool          `json:"startup_check"`
 	Interval     time.Duration `json:"interval"`
 }
+
+// WebSnapshot controls the embedded web UI. Enabled gates whether the
+// catch-all "/" handler is registered at all; DevProxy, when non-empty,
+// switches the handler from embed.FS to a reverse proxy pointed at a
+// running Vite dev server (the front-end developer's workflow).
+type WebSnapshot struct {
+	Enabled  bool   `json:"enabled"`
+	DevProxy string `json:"dev_proxy,omitempty"`
+}
+
+// DefaultWeb returns the secure-by-default snapshot. Enabled=true is the
+// "easy install" choice — operators who want a headless deployment can
+// flip it off via `remote-signer settings set web enabled=false` without
+// losing any other configuration.
+func DefaultWeb() *WebSnapshot {
+	return &WebSnapshot{Enabled: true}
+}

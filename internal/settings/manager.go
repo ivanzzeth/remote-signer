@@ -41,6 +41,7 @@ type Manager struct {
 	auditMonitor  atomic.Pointer[AuditMonitorSnapshot]
 	rpcGateway    atomic.Pointer[RPCGatewaySnapshot]
 	materialCheck atomic.Pointer[MaterialCheckSnapshot]
+	web           atomic.Pointer[WebSnapshot]
 }
 
 // Option configures a Manager.
@@ -80,6 +81,7 @@ func NewManager(store Store, log *slog.Logger, opts ...Option) *Manager {
 	m.auditMonitor.Store(&AuditMonitorSnapshot{})
 	m.rpcGateway.Store(&RPCGatewaySnapshot{})
 	m.materialCheck.Store(&MaterialCheckSnapshot{})
+	m.web.Store(DefaultWeb())
 	return m
 }
 
@@ -108,6 +110,9 @@ func (m *Manager) RPCGateway() *RPCGatewaySnapshot { return m.rpcGateway.Load() 
 
 // MaterialCheck returns the current material-check snapshot.
 func (m *Manager) MaterialCheck() *MaterialCheckSnapshot { return m.materialCheck.Load() }
+
+// Web returns the current web-UI snapshot.
+func (m *Manager) Web() *WebSnapshot { return m.web.Load() }
 
 // Reload performs a single full refresh from the store. Used at startup to
 // hydrate from any existing system_settings rows and after writes to publish
@@ -197,6 +202,13 @@ func (m *Manager) applyRow(row *Setting) {
 			return
 		}
 		m.materialCheck.Store(&s)
+	case GroupWeb:
+		var s WebSnapshot
+		if err := json.Unmarshal([]byte(row.ValueJSON), &s); err != nil {
+			m.log.Warn("settings: bad json", "group", row.Key, "err", err)
+			return
+		}
+		m.web.Store(&s)
 	}
 }
 
@@ -264,6 +276,14 @@ func (m *Manager) UpdateMaterialCheck(ctx context.Context, s *MaterialCheckSnaps
 		return fmt.Errorf("nil material check snapshot")
 	}
 	return m.put(ctx, GroupMaterialCheck, s, actor)
+}
+
+// UpdateWeb persists a new web-UI snapshot.
+func (m *Manager) UpdateWeb(ctx context.Context, s *WebSnapshot, actor string) error {
+	if s == nil {
+		return fmt.Errorf("nil web snapshot")
+	}
+	return m.put(ctx, GroupWeb, s, actor)
 }
 
 func (m *Manager) put(ctx context.Context, key Group, value any, actor string) error {
