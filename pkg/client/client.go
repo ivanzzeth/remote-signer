@@ -21,6 +21,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/pkg/client/acls"
 	"github.com/ivanzzeth/remote-signer/pkg/client/apikeys"
 	"github.com/ivanzzeth/remote-signer/pkg/client/audit"
+	"github.com/ivanzzeth/remote-signer/pkg/client/clientsettings"
 	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 	"github.com/ivanzzeth/remote-signer/pkg/client/internal/transport"
 	"github.com/ivanzzeth/remote-signer/pkg/client/presets"
@@ -46,6 +47,9 @@ type Client struct {
 
 	// Presets provides preset list/vars/apply (admin only; requires server presets.dir).
 	Presets *presets.Service
+
+	// Settings reads/writes runtime-mutable configuration groups (admin only).
+	Settings *clientsettings.Service
 
 	transport *transport.Transport
 }
@@ -142,6 +146,7 @@ func NewClient(cfg Config) (*Client, error) {
 		APIKeys:   apikeys.NewService(t),
 		ACLs:      acls.NewService(t),
 		Presets:   presets.NewService(t),
+		Settings:  clientsettings.NewService(t),
 		transport: t,
 	}, nil
 }

@@ -38,6 +38,7 @@ func Register(root *cobra.Command) {
 	root.AddCommand(healthCmd)
 	root.AddCommand(metricsCmd)
 	root.AddCommand(doctorCmd)
+	root.AddCommand(settingsCmd)
 
 	// Local-only inspection (no server contact)
 	root.AddCommand(configCmd)

@@ -19,6 +19,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/metrics"
+	"github.com/ivanzzeth/remote-signer/internal/settings"
 	"github.com/ivanzzeth/remote-signer/internal/simulation"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
@@ -59,6 +60,11 @@ type RouterConfig struct {
 	PresetsDB  *gorm.DB // optional: for preset apply transaction; required when PresetsDir is set and template service is used
 	// Wallets
 	WalletRepo storage.WalletRepository // optional: for wallet CRUD
+
+	// SettingsManager backs /api/v1/admin/settings/:group and is read by the
+	// daemon for runtime-mutable knobs (security/foundry/simulation/...).
+	// When nil, the admin settings endpoints are not registered.
+	SettingsManager *settings.Manager
 
 	// Resource limits
 	MaxKeystoresPerKey int // max keystores per API key (0 = no limit, default 5)
@@ -368,6 +374,17 @@ func (r *Router) setupRoutes() error {
 	if r.config.IPWhitelistConfigForRead != nil {
 		aclHandler := handler.NewACLHandler(r.config.IPWhitelistConfigForRead)
 		r.mux.Handle("/api/v1/acls/ip-whitelist", r.withAuthAndPerm(middleware.PermReadACLs, aclHandler))
+	}
+
+	// Runtime-mutable settings (admin only). PUT against /api/v1/admin/settings/security
+	// persists into system_settings and refreshes the local snapshot; PR7c/d
+	// add the other groups as they become DB-backed.
+	if r.config.SettingsManager != nil {
+		settingsHandler := handler.NewSettingsHandler(r.config.SettingsManager, r.logger)
+		if r.config.AuditLogger != nil {
+			settingsHandler.SetAuditLogger(r.config.AuditLogger)
+		}
+		r.mux.Handle("/api/v1/admin/settings/", r.withAuthAndPerm(middleware.PermManageSettings, settingsHandler))
 	}
 
 	// Template routes (read: PermReadTemplates; mutate: PermInstantiateTemplate checked in handler)

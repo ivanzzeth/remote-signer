@@ -191,10 +191,24 @@ func Run(args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create settings store: %w", err)
 	}
+	// One-shot seed: lift the security knobs out of cfg.Security into
+	// system_settings on first launch so existing YAML-driven deployments do
+	// not lose behaviour. Subsequent launches read the row directly and
+	// ignore cfg.Security.
+	yamlSecurity := securityYAMLView(cfg)
+	seedSnapshot := settings.SecurityFromConfigValues(yamlSecurity)
+	if err := settings.SeedSecurity(context.Background(), settingsStore, seedSnapshot); err != nil {
+		return fmt.Errorf("failed to seed security settings: %w", err)
+	}
 	settingsMgr := settings.NewManager(settingsStore, log)
 	if err := settingsMgr.Reload(context.Background()); err != nil {
 		return fmt.Errorf("failed to load settings: %w", err)
 	}
+	// From here on, mgr.Security() is the source of truth. Overlay the
+	// snapshot back onto cfg.Security so the rest of run.go (rate limiter,
+	// IP whitelist, signer auto-lock, approval guard) picks up DB values
+	// without touching dozens of read sites.
+	applySecuritySnapshot(cfg, settingsMgr.Security())
 
 	// Initialize API keys from config
 	apiKeyInit, err := config.NewAPIKeyInitializer(apiKeyRepo, log)
@@ -901,6 +915,7 @@ func Run(args []string) error {
 		AuditRetentionDays:           cfg.AuditMonitor.RetentionDays,
 		Simulator:                    simulator,
 		RPCProvider:                  rpcProvider,
+		SettingsManager:              settingsMgr,
 	}
 	if presetsDir != "" {
 		routerConfig.PresetsDir = presetsDir
