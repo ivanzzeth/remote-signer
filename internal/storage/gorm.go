@@ -23,6 +23,26 @@ import (
 // sqliteDriverName matches the name modernc.org/sqlite registers with database/sql.
 const sqliteDriverName = "sqlite"
 
+// tuneConnectionPool applies engine-specific pool settings. SQLite is
+// single-writer at the file level; modernc.org/sqlite under concurrent
+// gorm.Save / Transaction calls reports
+// "cannot start a transaction within a transaction" when two goroutines
+// share a connection that is mid-tx. Capping MaxOpenConns to 1 serialises
+// the writer and matches the single-instance deployment model the binary
+// is built for. Postgres deployments keep gorm's defaults.
+func tuneConnectionPool(db *gorm.DB, dsn string) error {
+	if !strings.HasPrefix(dsn, "file:") && !strings.HasSuffix(dsn, ".db") {
+		return nil
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return err
+	}
+	sqlDB.SetMaxOpenConns(1)
+	sqlDB.SetMaxIdleConns(1)
+	return nil
+}
+
 // detectDialector returns the appropriate GORM dialector based on DSN format.
 // For SQLite, the pure-Go modernc.org/sqlite driver is selected explicitly so
 // CGO-disabled builds work; mattn/go-sqlite3 is intentionally not used.
@@ -62,6 +82,10 @@ func NewDB(cfg Config) (*gorm.DB, error) {
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
+	}
+
+	if err := tuneConnectionPool(db, cfg.DSN); err != nil {
+		return nil, fmt.Errorf("failed to tune connection pool: %w", err)
 	}
 
 	// Auto-migrate all models (backward-compatible schema changes only)
@@ -111,6 +135,10 @@ func NewDBWithLogger(cfg Config, logLevel logger.LogLevel) (*gorm.DB, error) {
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
+	}
+
+	if err := tuneConnectionPool(db, cfg.DSN); err != nil {
+		return nil, fmt.Errorf("failed to tune connection pool: %w", err)
 	}
 
 	if err := db.AutoMigrate(
