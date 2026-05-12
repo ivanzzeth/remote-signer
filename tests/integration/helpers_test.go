@@ -206,9 +206,11 @@ func startDaemon(t *testing.T, opts ...daemonOption) *daemon {
 func (d *daemon) url() string { return fmt.Sprintf("http://127.0.0.1:%d", d.port) }
 
 // adminKeyPath returns the bootstrap admin private-key path. Exists once the
-// daemon has finished booting.
+// daemon has finished booting. Mirrors homepath.AdminKeyPaths() — the
+// bootstrap keypair lives under the apikeys/ subdirectory so every API
+// credential file shares a single location.
 func (d *daemon) adminKeyPath() string {
-	return filepath.Join(d.home, "admin.key.priv")
+	return filepath.Join(d.home, "apikeys", "admin.key.priv")
 }
 
 // waitReady polls /health every 100ms until it returns 200 or the deadline

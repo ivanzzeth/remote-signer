@@ -20,6 +20,7 @@ import (
 const (
 	configFile       = "config.yaml"
 	sqliteFile       = "remote-signer.db"
+	apiKeysSubdir    = "apikeys"
 	adminPrivKeyFile = "admin.key.priv"
 	adminPubKeyFile  = "admin.key.pub"
 	envHome          = "REMOTE_SIGNER_HOME"
@@ -78,13 +79,28 @@ func DefaultSQLiteDSN() (string, error) {
 	return fmt.Sprintf("file:%s?_journal_mode=WAL&_busy_timeout=5000", p), nil
 }
 
-// AdminKeyPaths returns the bootstrap admin private/public key file paths.
-func AdminKeyPaths() (privPath, pubPath string, err error) {
+// APIKeysDir returns the directory that holds Ed25519 keystores and PEM
+// keypairs used to authenticate to the remote-signer API. The directory
+// lives under the home dir so the bootstrap admin keypair, any keys minted
+// via `api-key keygen`, and keystores created via `keystore create` all
+// share a single, isolated location.
+func APIKeysDir() (string, error) {
 	h, err := Home()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(h, apiKeysSubdir), nil
+}
+
+// AdminKeyPaths returns the bootstrap admin private/public key file paths.
+// They live under APIKeysDir so the operator only needs to memorise a single
+// directory ($HOME/.remote-signer/apikeys) for every credential.
+func AdminKeyPaths() (privPath, pubPath string, err error) {
+	dir, err := APIKeysDir()
 	if err != nil {
 		return "", "", err
 	}
-	return filepath.Join(h, adminPrivKeyFile), filepath.Join(h, adminPubKeyFile), nil
+	return filepath.Join(dir, adminPrivKeyFile), filepath.Join(dir, adminPubKeyFile), nil
 }
 
 // ResolveConfigPath determines which config.yaml the server should load.

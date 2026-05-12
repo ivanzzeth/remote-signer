@@ -52,14 +52,14 @@ remote-signer api-key keygen --out ./my-app
 ### 2. Register API Key with the Service
 
 ```bash
-# Authenticate as admin (see ~/.remote-signer/admin.key.priv on a fresh install)
+# Authenticate as admin (see ~/.remote-signer/apikeys/admin.key.priv on a fresh install)
 remote-signer api-key create \
   --id my-app \
   --name "My Application" \
   --role dev \
   --public-key <hex-from-step-1> \
   --rate-limit 100 \
-  --api-key-id admin --api-key-file ~/.remote-signer/admin.key.priv \
+  --api-key-id admin --api-key-file ~/.remote-signer/apikeys/admin.key.priv \
   --url http://localhost:8548
 ```
 

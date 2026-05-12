@@ -105,13 +105,13 @@ curl -sSLf -o remote-signer \
 On the very first launch the daemon creates `~/.remote-signer/` (mode 0700)
 with a default `config.yaml` (SQLite at `~/.remote-signer/remote-signer.db`,
 listen on `:8548`, no TLS) and generates an admin Ed25519 keypair at
-`~/.remote-signer/admin.key.priv` / `.pub`. The private key file path is
+`~/.remote-signer/apikeys/admin.key.priv` / `.pub`. The private key file path is
 printed once to stderr — keep it safe. Use it for every admin call:
 
 ```bash
 ./remote-signer rule list \
   --api-key-id admin \
-  --api-key-file ~/.remote-signer/admin.key.priv \
+  --api-key-file ~/.remote-signer/apikeys/admin.key.priv \
   --url http://localhost:8548
 ```
 
