@@ -5,8 +5,9 @@ import (
 )
 
 const (
-	APIKeySourceConfig = "config"
-	APIKeySourceAPI    = "api"
+	APIKeySourceConfig    = "config"
+	APIKeySourceAPI       = "api"
+	APIKeySourceBootstrap = "bootstrap"
 )
 
 // APIKeyRole represents the role of an API key (admin/dev/agent/strategy).

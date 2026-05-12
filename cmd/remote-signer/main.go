@@ -27,6 +27,13 @@ import (
 )
 
 func main() {
+	// Zero-config UX: `remote-signer` with no args boots the daemon — same as
+	// `remote-signer server start`. Subcommands ("tui", "validate",
+	// "rule list", etc.) keep working because the rewrite only fires when no
+	// arguments are present.
+	if len(os.Args) == 1 {
+		os.Args = append(os.Args, "server", "start")
+	}
 	root := newRootCmd()
 	if err := root.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
