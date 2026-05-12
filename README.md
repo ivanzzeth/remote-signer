@@ -90,22 +90,34 @@ See [Competitive Analysis](docs/competitive-analysis.md) for the full breakdown.
 
 ## Quick Start
 
-### Three-Command Single-Instance (SQLite, no Docker)
+### One-Command Single-Instance (SQLite, no Docker, no config)
 
 ```bash
-# 1. Download the release binary for your platform (linux/darwin × amd64/arm64).
+# 1. Download the release binary for your platform.
 curl -sSLf -o remote-signer \
   "https://github.com/ivanzzeth/remote-signer/releases/latest/download/remote-signer-$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')" \
   && chmod +x remote-signer
 
-# 2. Drop in a config (defaults to SQLite at ./data/remote-signer.db).
-curl -sSLf -o config.yaml https://raw.githubusercontent.com/ivanzzeth/remote-signer/main/config.example.yaml
-
-# 3. Start the daemon.
-./remote-signer server start -config config.yaml
+# 2. Just run it.
+./remote-signer
 ```
 
-Everything ships in the single `remote-signer` binary: `server`, `tui`, `validate`, and every operator command (`rule`, `sign`, `keystore`, `preset`, ...).
+On the very first launch the daemon creates `~/.remote-signer/` (mode 0700)
+with a default `config.yaml` (SQLite at `~/.remote-signer/remote-signer.db`,
+listen on `:8548`, no TLS) and generates an admin Ed25519 keypair at
+`~/.remote-signer/admin.key.priv` / `.pub`. The private key file path is
+printed once to stderr — keep it safe. Use it for every admin call:
+
+```bash
+./remote-signer rule list \
+  --api-key-id admin \
+  --api-key-file ~/.remote-signer/admin.key.priv \
+  --url http://localhost:8548
+```
+
+Everything ships in the single `remote-signer` binary: `server start`, `tui`,
+`validate`, and every operator command (`rule`, `sign`, `keystore`, `preset`,
+`settings`, `api-key`, ...).
 
 ### One-Line Install (interactive setup wizard)
 

@@ -41,22 +41,28 @@
 
 ## 快速开始
 
-### 三条命令单实例启动（SQLite，无需 Docker）
+### 一条命令单实例启动（SQLite，零配置）
 
 ```bash
-# 1. 下载 release 二进制（linux/darwin × amd64/arm64）。
+# 1. 下载 release 二进制
 curl -sSLf -o remote-signer \
   "https://github.com/ivanzzeth/remote-signer/releases/latest/download/remote-signer-$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')" \
   && chmod +x remote-signer
 
-# 2. 拷一份默认配置（DSN 默认指向本地 SQLite ./data/remote-signer.db）。
-curl -sSLf -o config.yaml https://raw.githubusercontent.com/ivanzzeth/remote-signer/main/config.example.yaml
-
-# 3. 启动 daemon。
-./remote-signer server start -config config.yaml
+# 2. 直接跑。
+./remote-signer
 ```
 
-`remote-signer` 单二进制同时承担 `server`、`tui`、`validate` 以及所有运维子命令（`rule`、`sign`、`keystore`、`preset`...）。
+首次启动会自动创建 `~/.remote-signer/`（0700），写入默认 `config.yaml`（SQLite 在 `~/.remote-signer/remote-signer.db`，监听 `:8548`，无 TLS），并生成 admin Ed25519 keypair（`~/.remote-signer/admin.key.priv` / `.pub`）。stderr 只打印路径，私钥仅落盘。后续所有 admin 命令用该私钥：
+
+```bash
+./remote-signer rule list \
+  --api-key-id admin \
+  --api-key-file ~/.remote-signer/admin.key.priv \
+  --url http://localhost:8548
+```
+
+`remote-signer` 单二进制同时承担 `server start`、`tui`、`validate` 以及所有运维子命令（`rule`、`sign`、`keystore`、`preset`、`settings`、`api-key`...）。
 
 ### 一键安装（交互式向导）
 

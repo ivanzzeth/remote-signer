@@ -40,23 +40,24 @@ This creates 5 rule instances (one per chain). Each rule is a bundle containing 
 
 ### 2. Create Agent API Key
 
-Add to `config.yaml`:
+Mint a keypair locally and register it with the service (the YAML
+`api_keys:` block is no longer supported as of v0.3.0):
 
-```yaml
-api_keys:
-  - id: "trading-bot"
-    name: "Trading Bot"
-    public_key: "<ed25519-public-key-hex>"
-    role: dev
-    role: agent
-    enabled: true
-    rate_limit: 300
-    allow_all_signers: false
-    allowed_signers:
-      - "0xYourAgentSignerAddress"
+```bash
+remote-signer api-key keygen --out ./trading-bot
+
+remote-signer api-key create \
+  --id trading-bot \
+  --name "Trading Bot" \
+  --role agent \
+  --rate-limit 300 \
+  --public-key <hex-from-keygen> \
+  --allowed-signers 0xYourAgentSignerAddress \
+  --api-key-id admin --api-key-file ~/.remote-signer/admin.key.priv \
+  --url http://localhost:8548
 ```
 
-Or create via API:
+Or post directly to the HTTP API:
 
 ```
 POST /api/v1/api-keys

@@ -41,30 +41,31 @@ const client = new RemoteSignerClient({
 
 ### 1. Generate Ed25519 Key Pair
 
+Use the built-in keygen — no openssl needed:
+
 ```bash
-# Generate private key
-openssl genpkey -algorithm ed25519 -out private_key.pem
-
-# Extract private key in hex format
-openssl pkey -in private_key.pem -text | grep 'priv:' -A 3 | tail -n +2 | tr -d ':\n '
-
-# Extract public key in hex format
-openssl pkey -in private_key.pem -pubout -out public_key.pem
-openssl pkey -pubin -in public_key.pem -text | grep 'pub:' -A 3 | tail -n +2 | tr -d ':\n '
+remote-signer api-key keygen --out ./my-app
+# Writes my-app.priv (0600) and my-app.pub (0644) as PEM, and prints
+# the hex public key plus a ready-to-run `api-key create` command.
 ```
 
-### 2. Register API Key
+### 2. Register API Key with the Service
 
-Add the public key to your `config.yaml`:
-
-```yaml
-api_keys:
-  - id: "my-api-key"
-    name: "My Application"
-    public_key: "your-public-key-hex"  # 64 hex characters
-    enabled: true
-    rate_limit: 100
+```bash
+# Authenticate as admin (see ~/.remote-signer/admin.key.priv on a fresh install)
+remote-signer api-key create \
+  --id my-app \
+  --name "My Application" \
+  --role dev \
+  --public-key <hex-from-step-1> \
+  --rate-limit 100 \
+  --api-key-id admin --api-key-file ~/.remote-signer/admin.key.priv \
+  --url http://localhost:8548
 ```
+
+The service stores the public key in its `api_keys` table; the matching
+private key from step 1 stays on the client and signs every outbound
+request.
 
 ### 3. Use Private Key in Client
 

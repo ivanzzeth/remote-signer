@@ -111,15 +111,10 @@ chains:
       cache_dir: "./data/forge-cache"
       timeout: "30s"
 
-api_keys:
-  - id: "client-1"
-    name: "Production Client"
-    public_key: "MCowBQYDK2VwAyEA..."   # Ed25519 public key (base64 or hex)
-    enabled: true
-    rate_limit: 100                      # requests per minute
-    # allowed_chain_types: []            # empty = all
-    # allowed_signers: []                 # empty = all
-    # allowed_hd_wallets: []             # HD wallet primary addresses (empty = none)
+# API keys are no longer in config.yaml. Mint and register via CLI after first launch:
+#   remote-signer api-key keygen --out ./client-1
+#   remote-signer api-key create --id client-1 --role dev --public-key <hex> \
+#     --rate-limit 100 --api-key-id admin --api-key-file ~/.remote-signer/admin.key.priv
 
 notify:
   slack:
