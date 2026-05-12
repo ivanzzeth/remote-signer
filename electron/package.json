@@ -1,0 +1,59 @@
+{
+  "name": "@ivanzzeth/remote-signer-desktop",
+  "private": true,
+  "version": "0.4.0-dev",
+  "description": "Electron desktop shell around the remote-signer daemon",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "npm run build && electron .",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder",
+    "clean": "rm -rf dist out"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.5",
+    "electron": "^32.1.2",
+    "electron-builder": "^25.0.5",
+    "typescript": "~5.6.2"
+  },
+  "build": {
+    "appId": "com.ivanzzeth.remote-signer",
+    "productName": "Remote Signer",
+    "asar": true,
+    "files": [
+      "dist/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../remote-signer",
+        "to": "bin/remote-signer",
+        "filter": ["remote-signer"]
+      }
+    ],
+    "directories": {
+      "buildResources": "assets",
+      "output": "out"
+    },
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        { "target": "dmg", "arch": ["arm64", "x64"] }
+      ],
+      "hardenedRuntime": false
+    },
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ]
+    },
+    "linux": {
+      "category": "Development",
+      "target": [
+        { "target": "AppImage", "arch": ["x64", "arm64"] }
+      ]
+    }
+  }
+}
