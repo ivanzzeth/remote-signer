@@ -42,10 +42,13 @@ import (
 // Returns a non-nil error on any setup or runtime failure. Blocks until the
 // daemon shuts down cleanly via signal or until a fatal error occurs.
 func Run(args []string) error {
-	fs := flag.NewFlagSet("server", flag.ContinueOnError)
+	fs := flag.NewFlagSet("remote-signer server start", flag.ContinueOnError)
 	configPath := fs.String("config", "config.yaml", "path to config file")
 	envFile := fs.String("env", ".env", "path to .env file (optional, ignored if not exists)")
 	if err := fs.Parse(args); err != nil {
+		if err == flag.ErrHelp {
+			return nil
+		}
 		return err
 	}
 

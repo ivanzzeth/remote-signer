@@ -27,7 +27,7 @@ import (
 // Run executes the TUI CLI with the given args (not including argv[0]).
 // Returns a non-nil error on any setup or runtime failure.
 func Run(args []string) error {
-	fs := flag.NewFlagSet("tui", flag.ContinueOnError)
+	fs := flag.NewFlagSet("remote-signer tui", flag.ContinueOnError)
 	var (
 		baseURL           = fs.String("url", "https://localhost:8548", "Remote signer service URL")
 		apiKeyID          = fs.String("api-key-id", "", "API key ID for authentication")
@@ -40,6 +40,9 @@ func Run(args []string) error {
 		tlsSkipVerify     = fs.Bool("tls-skip-verify", false, "Skip server certificate verification (insecure, testing only)")
 	)
 	if err := fs.Parse(args); err != nil {
+		if err == flag.ErrHelp {
+			return nil
+		}
 		return err
 	}
 
