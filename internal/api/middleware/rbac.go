@@ -71,6 +71,9 @@ const (
 
 	// Wallets
 	PermManageWallets Permission = "manage_wallets"
+
+	// Runtime-mutable settings (system_settings table, see internal/settings)
+	PermManageSettings Permission = "manage_settings"
 )
 
 // rolePermissions is the static permission matrix matching Section 2.2 of the design doc.
@@ -105,7 +108,8 @@ var rolePermissions = map[types.APIKeyRole]map[Permission]bool{
 		PermReadACLs:            true,
 		PermResumeGuard:         true,
 		PermApproveSigner:       true,
-		PermManageWallets:   true,
+		PermManageWallets:       true,
+		PermManageSettings:      true,
 	},
 	types.RoleDev: {
 		PermSignRequest:         true,

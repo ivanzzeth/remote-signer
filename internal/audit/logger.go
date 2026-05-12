@@ -265,6 +265,19 @@ func (a *AuditLogger) LogConfigReloaded(ctx context.Context, success bool, errMs
 	a.log(ctx, record)
 }
 
+// LogSettingsUpdated logs an admin write to system_settings. Used by the
+// settings handler to record who changed which configuration group; the
+// payload snapshot is stored as the error_message text (existing schema
+// field — kept for backwards compat).
+func (a *AuditLogger) LogSettingsUpdated(ctx context.Context, apiKeyID, group, payload string) {
+	a.log(ctx, &types.AuditRecord{
+		EventType:    types.AuditEventTypeConfigReloaded,
+		ActorAddress: apiKeyID,
+		APIKeyID:     apiKeyID,
+		ErrorMessage: fmt.Sprintf("settings updated: %s — %s", group, payload),
+	})
+}
+
 // LogTemplateSynced logs a template sync event (create/update/delete from config).
 func (a *AuditLogger) LogTemplateSynced(ctx context.Context, action, templateID, templateName string) {
 	a.log(ctx, &types.AuditRecord{
