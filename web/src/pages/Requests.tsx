@@ -63,23 +63,14 @@ export function Requests() {
     }
   }
 
-  async function reject(id: string, reason: string) {
-    if (!reason.trim()) {
-      setMutationError("rejection reason is required");
-      return;
-    }
+  async function reject(id: string) {
+    if (!confirm("Reject this request? It cannot be re-approved later.")) return;
     const client = getClient();
     if (!client) return;
     setBusy(id);
     setMutationError(null);
     try {
-      // The server expects `approved: false` plus a free-form reason that
-      // gets recorded in the audit trail; the SDK shape doesn't model the
-      // reason field directly, so we attach it through an index cast.
-      await client.evm.requests.approve(id, {
-        approved: false,
-        ...({ reason } as Record<string, unknown>),
-      } as Parameters<typeof client.evm.requests.approve>[1]);
+      await client.evm.requests.approve(id, { approved: false });
       setSelectedId(null);
       reload();
     } catch (e) {
@@ -158,7 +149,7 @@ export function Requests() {
                       setSelectedId((id) => (id === r.id ? null : r.id))
                     }
                     onApprove={() => approve(r.id)}
-                    onReject={(reason) => reject(r.id, reason)}
+                    onReject={() => reject(r.id)}
                     busy={busy === r.id}
                   />
                 ))}
@@ -182,10 +173,9 @@ function RequestRow({
   expanded: boolean;
   onToggle: () => void;
   onApprove: () => void;
-  onReject: (reason: string) => void;
+  onReject: () => void;
   busy: boolean;
 }) {
-  const [rejectReason, setRejectReason] = useState("");
   const pending = req.status === "pending" || req.status === "authorizing";
 
   return (
@@ -235,7 +225,7 @@ function RequestRow({
             </dl>
 
             {pending && (
-              <div className="mt-4 flex flex-wrap items-end gap-3 border-t border-ink-200 pt-3">
+              <div className="mt-4 flex gap-3 border-t border-ink-200 pt-3">
                 <button
                   type="button"
                   onClick={(e) => {
@@ -247,25 +237,13 @@ function RequestRow({
                 >
                   Approve
                 </button>
-                <div className="flex-1 min-w-[200px]">
-                  <label className="mb-1 block text-[11px] uppercase tracking-wide text-ink-500">
-                    Rejection reason
-                  </label>
-                  <input
-                    type="text"
-                    value={rejectReason}
-                    onClick={(e) => e.stopPropagation()}
-                    onChange={(e) => setRejectReason(e.target.value)}
-                    className="w-full rounded-md border border-ink-300 px-2 py-1 text-sm"
-                  />
-                </div>
                 <button
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    onReject(rejectReason);
+                    onReject();
                   }}
-                  disabled={busy || !rejectReason.trim()}
+                  disabled={busy}
                   className="rounded-md border border-red-200 px-3 py-1 text-xs text-red-700 hover:bg-red-50 disabled:opacity-50"
                 >
                   Reject

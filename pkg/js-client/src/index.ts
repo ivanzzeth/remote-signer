@@ -95,6 +95,7 @@ export type {
   SignerInfo,
   ListSignersFilter,
   ListSignersResponse,
+  CreateKeystoreParams,
   CreateSignerRequest,
   CreateSignerResponse,
   GrantAccessRequest,

@@ -25,13 +25,30 @@ export interface ListSignersResponse {
   signers: SignerInfo[];
 }
 
-export interface CreateSignerRequest {
+/** Parameters for keystore-backed signer creation. */
+export interface CreateKeystoreParams {
   password: string;
+}
+
+/**
+ * Body shape for POST /api/v1/evm/signers. The daemon supports one signer
+ * `type` today (`"keystore"`); future types (e.g. HSM, MPC) would be
+ * disjoint top-level options, hence the nested params rather than a flat
+ * `password` field.
+ */
+export interface CreateSignerRequest {
+  type: string;
+  keystore?: CreateKeystoreParams;
+  display_name?: string;
+  tags?: string[];
 }
 
 export interface CreateSignerResponse {
   address: string;
-  message: string;
+  type: string;
+  enabled: boolean;
+  display_name?: string;
+  tags?: string[];
 }
 
 export interface UnlockSignerRequest {
