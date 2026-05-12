@@ -71,9 +71,13 @@ logger:
 # Unlock the mutation paths the 8c e2e specs need. Production daemons
 # default to readonly for rules + api-keys (operator must opt in via the
 # CLI or settings PUT); for tests we always want writable.
+#
+# manual_approval_enabled lets the approval flow spec park a request as
+# pending instead of 403-ing it when no rule matches.
 security:
   rules_api_readonly: false
   api_keys_api_readonly: false
+  manual_approval_enabled: true
 
 chains:
   evm:
