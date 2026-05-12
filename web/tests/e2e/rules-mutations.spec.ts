@@ -52,6 +52,45 @@ test("toggle a rule between enabled/disabled via the UI", async ({
   expect(reloaded.enabled).toBe(false);
 });
 
+test("create a rule via the UI adds it to the table", async ({
+  authedPage,
+}) => {
+  await authedPage.click("text=Rules");
+  await authedPage.click("button:has-text('New rule')");
+
+  const name = `e2e-create-${Date.now()}`;
+  await authedPage.fill("input >> nth=0", name); // Name (first input)
+  // Type defaults to evm_address_list — the textarea is pre-filled. Just
+  // change mode to make the rule unique-ish and submit.
+  await authedPage.selectOption("select >> nth=1", "blocklist");
+  await authedPage.click("button:has-text('Create rule')");
+
+  const row = authedPage.locator("tr", {
+    has: authedPage.locator(`text=${name}`),
+  });
+  await expect(row).toBeVisible();
+  await expect(row.getByText("blocklist")).toBeVisible();
+});
+
+test("create form with malformed config JSON shows a parse error", async ({
+  authedPage,
+}) => {
+  await authedPage.click("text=Rules");
+  await authedPage.click("button:has-text('New rule')");
+
+  await authedPage.fill("input >> nth=0", `e2e-bad-config-${Date.now()}`);
+  await authedPage.locator("textarea").fill("{ not valid json");
+  await authedPage.click("button:has-text('Create rule')");
+
+  // The component surfaces the JSON.parse() error in a red ErrorBanner
+  // inside the form rather than going to the server. Chrome's JSON.parse
+  // message starts with "Expected …" — match the banner specifically
+  // rather than `JSON` (which appears in the label + textarea too).
+  await expect(
+    authedPage.locator("div.text-red-800", { hasText: "Expected" }),
+  ).toBeVisible();
+});
+
 test("delete a rule via the UI removes it from the table", async ({
   authedPage,
 }) => {
