@@ -186,6 +186,10 @@ export type {
   ApplyPresetResponse,
 } from "./presets";
 
+// Settings
+export { SettingsService, SETTINGS_GROUPS } from "./settings";
+export type { SettingsGroup, SettingsSnapshot } from "./settings";
+
 // Errors
 export * from "./errors";
 

@@ -25,6 +25,7 @@ export function Layout({ children }: LayoutProps) {
         <NavItem to="/rules">Rules</NavItem>
         <NavItem to="/api-keys">API Keys</NavItem>
         <NavItem to="/audit">Audit log</NavItem>
+        <NavItem to="/settings">Settings</NavItem>
 
         <div className="mt-auto border-t border-ink-200 px-3 pt-3">
           {creds && (
