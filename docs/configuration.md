@@ -168,7 +168,7 @@ block at startup. Manage them via the admin CLI / HTTP API instead.
 
 On the very first launch (no API keys in the database yet) the daemon
 generates an Ed25519 admin keypair, writes it to
-`~/.remote-signer/admin.key.priv` (0600) and `~/.remote-signer/admin.key.pub`
+`~/.remote-signer/apikeys/admin.key.priv` (0600) and `~/.remote-signer/apikeys/admin.key.pub`
 (0644), and inserts the row into `api_keys` with `source=bootstrap`. The
 private key is never logged. Subsequent launches are no-ops.
 
@@ -187,7 +187,7 @@ remote-signer api-key create \
   --public-key <hex-from-keygen> \
   --rate-limit 100 \
   --api-key-id admin \
-  --api-key-file ~/.remote-signer/admin.key.priv \
+  --api-key-file ~/.remote-signer/apikeys/admin.key.priv \
   --url http://localhost:8548
 ```
 

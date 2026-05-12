@@ -52,7 +52,7 @@ func TestBootstrap_FirstLaunch(t *testing.T) {
 		t.Fatalf("admin.key.priv parse: %v", err)
 	}
 
-	pubPath := filepath.Join(d.home, "admin.key.pub")
+	pubPath := filepath.Join(d.home, "apikeys", "admin.key.pub")
 	pubInfo, err := os.Stat(pubPath)
 	if err != nil {
 		t.Fatalf("stat admin.key.pub: %v", err)
@@ -89,7 +89,7 @@ func TestBootstrap_SecondLaunchIsNoop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	firstPub, err := os.ReadFile(filepath.Join(d.home, "admin.key.pub"))
+	firstPub, err := os.ReadFile(filepath.Join(d.home, "apikeys", "admin.key.pub"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestBootstrap_SecondLaunchIsNoop(t *testing.T) {
 	if string(firstPriv) != string(secondPriv) {
 		t.Errorf("admin.key.priv rotated on second launch")
 	}
-	secondPub, err := os.ReadFile(filepath.Join(d2.home, "admin.key.pub"))
+	secondPub, err := os.ReadFile(filepath.Join(d2.home, "apikeys", "admin.key.pub"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
@@ -37,6 +38,14 @@ func bootstrapAdminKeyIfNeeded(ctx context.Context, repo storage.APIKeyRepositor
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return fmt.Errorf("generate ed25519 keypair: %w", err)
+	}
+
+	// The apikeys/ subdir holds every API-credential file the operator may
+	// touch (bootstrap admin, keys minted via `api-key keygen`, keystores
+	// created via `keystore create`). Daemon home is 0700; the parent dir
+	// inherits the same lockdown.
+	if err := os.MkdirAll(filepath.Dir(privPath), 0700); err != nil {
+		return fmt.Errorf("create api-keys dir: %w", err)
 	}
 
 	privPEM, err := encodeEd25519PrivPEM(priv)

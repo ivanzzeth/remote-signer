@@ -53,12 +53,12 @@ curl -sSLf -o remote-signer \
 ./remote-signer
 ```
 
-首次启动会自动创建 `~/.remote-signer/`（0700），写入默认 `config.yaml`（SQLite 在 `~/.remote-signer/remote-signer.db`，监听 `:8548`，无 TLS），并生成 admin Ed25519 keypair（`~/.remote-signer/admin.key.priv` / `.pub`）。stderr 只打印路径，私钥仅落盘。后续所有 admin 命令用该私钥：
+首次启动会自动创建 `~/.remote-signer/`（0700），写入默认 `config.yaml`（SQLite 在 `~/.remote-signer/remote-signer.db`，监听 `:8548`，无 TLS），并生成 admin Ed25519 keypair（`~/.remote-signer/apikeys/admin.key.priv` / `.pub`）。stderr 只打印路径，私钥仅落盘。后续所有 admin 命令用该私钥：
 
 ```bash
 ./remote-signer rule list \
   --api-key-id admin \
-  --api-key-file ~/.remote-signer/admin.key.priv \
+  --api-key-file ~/.remote-signer/apikeys/admin.key.priv \
   --url http://localhost:8548
 ```
 

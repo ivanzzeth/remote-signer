@@ -114,7 +114,7 @@ chains:
 # API keys are no longer in config.yaml. Mint and register via CLI after first launch:
 #   remote-signer api-key keygen --out ./client-1
 #   remote-signer api-key create --id client-1 --role dev --public-key <hex> \
-#     --rate-limit 100 --api-key-id admin --api-key-file ~/.remote-signer/admin.key.priv
+#     --rate-limit 100 --api-key-id admin --api-key-file ~/.remote-signer/apikeys/admin.key.priv
 
 notify:
   slack:

@@ -7,7 +7,21 @@ import (
 
 	"github.com/ivanzzeth/ethsig/keystore"
 	"github.com/spf13/cobra"
+
+	"github.com/ivanzzeth/remote-signer/internal/homepath"
 )
+
+// defaultKeystoreDir resolves where `keystore create/list` should put files
+// by default. Prefers the per-user home dir (~/.remote-signer/apikeys/) so
+// the keystore CLI shares a location with the bootstrap admin keypair and
+// any keys minted via `api-key keygen`. Falls back to the legacy local
+// path when $HOME cannot be resolved (eg. some CI sandboxes).
+func defaultKeystoreDir() string {
+	if dir, err := homepath.APIKeysDir(); err == nil {
+		return dir
+	}
+	return "./data/apikeys"
+}
 
 // keystore flag variables
 var (
@@ -35,6 +49,14 @@ var keystoreCreateCmd = &cobra.Command{
 			return fmt.Errorf("read password: %w", err)
 		}
 		defer keystore.SecureZeroize(password)
+
+		// Ensure the target dir exists with 0700 — when the default
+		// resolves to ~/.remote-signer/apikeys this is the first user
+		// hitting the path on a fresh install, before the daemon has
+		// ever run.
+		if err := os.MkdirAll(flagKeystoreDir, 0700); err != nil {
+			return fmt.Errorf("create keystore dir %s: %w", flagKeystoreDir, err)
+		}
 
 		identifier, path, err := keystore.CreateEnhancedKey(
 			flagKeystoreDir,
@@ -230,12 +252,13 @@ func readKeystorePasswordSingle(ctx context.Context) ([]byte, error) {
 // -- registration -----------------------------------------------------------
 
 func init() {
+	defaultDir := defaultKeystoreDir()
 	// create flags
-	keystoreCreateCmd.Flags().StringVarP(&flagKeystoreDir, "dir", "d", "./data/apikeys", "Directory to store keystore files")
+	keystoreCreateCmd.Flags().StringVarP(&flagKeystoreDir, "dir", "d", defaultDir, "Directory to store keystore files")
 	keystoreCreateCmd.Flags().StringVar(&flagKeystoreLabel, "label", "", "Optional label for the keystore")
 
 	// list flags
-	keystoreListCmd.Flags().StringVarP(&flagKeystoreDir, "dir", "d", "./data/apikeys", "Directory containing keystore files")
+	keystoreListCmd.Flags().StringVarP(&flagKeystoreDir, "dir", "d", defaultDir, "Directory containing keystore files")
 
 	// show flags
 	keystoreShowCmd.Flags().StringVarP(&flagKeystorePath, "keystore", "k", "", "Path to keystore file")

@@ -53,7 +53,7 @@ remote-signer api-key create \
   --rate-limit 300 \
   --public-key <hex-from-keygen> \
   --allowed-signers 0xYourAgentSignerAddress \
-  --api-key-id admin --api-key-file ~/.remote-signer/admin.key.priv \
+  --api-key-id admin --api-key-file ~/.remote-signer/apikeys/admin.key.priv \
   --url http://localhost:8548
 ```
 
