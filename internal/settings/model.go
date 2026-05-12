@@ -43,6 +43,7 @@ const (
 	GroupFoundry       Group = "evm.foundry"
 	GroupRPCGateway    Group = "evm.rpc_gateway"
 	GroupMaterialCheck Group = "evm.material_check"
+	GroupWeb           Group = "web"
 )
 
 // Source distinguishes who or what wrote a setting row — useful for audit

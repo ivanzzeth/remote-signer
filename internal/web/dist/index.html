@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>remote-signer — web UI not built</title>
+    <style>
+      body { font-family: system-ui, -apple-system, sans-serif; max-width: 640px; margin: 4rem auto; padding: 0 1rem; line-height: 1.5; color: #222; }
+      code, pre { background: #f4f4f4; border-radius: 4px; padding: 0.15rem 0.4rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.95em; }
+      pre { padding: 1rem; overflow-x: auto; }
+      h1 { font-size: 1.5rem; }
+      .note { background: #fff8c4; padding: 1rem 1.25rem; border-radius: 6px; border: 1px solid #f1d75c; }
+    </style>
+  </head>
+  <body>
+    <h1>remote-signer web UI was not bundled into this binary</h1>
+    <p>
+      This is the placeholder page shipped with source builds. The HTTP API
+      (under <code>/api/v1/</code>) and the operator CLI are unaffected — use
+      <code>remote-signer rule list</code>, <code>remote-signer settings show
+      security</code>, and friends as documented.
+    </p>
+    <div class="note">
+      <p>To build the web UI from source:</p>
+      <pre>cd web &amp;&amp; npm ci &amp;&amp; npm run build
+go build -o remote-signer ./cmd/remote-signer</pre>
+      <p>Or grab a release build from
+        <code>https://github.com/ivanzzeth/remote-signer/releases</code> —
+        the binaries published there always include a fresh UI bundle.
+      </p>
+    </div>
+    <p>
+      To disable this catch-all entirely:
+      <code>remote-signer settings set web enabled=false</code>.
+    </p>
+  </body>
+</html>

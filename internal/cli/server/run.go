@@ -206,6 +206,13 @@ func Run(args []string) error {
 	if err := settings.SeedAuditMonitor(context.Background(), settingsStore, auditMonitorToSnapshot(cfg.AuditMonitor)); err != nil {
 		return fmt.Errorf("failed to seed audit_monitor settings: %w", err)
 	}
+	// Web UI defaults to enabled — operators who want a headless deployment
+	// flip it off with `remote-signer settings set web enabled=false`. The
+	// catch-all "/" handler reads this snapshot every request, so changes
+	// take effect on the next Manager refresh cycle.
+	if err := settings.SeedWeb(context.Background(), settingsStore, settings.DefaultWeb()); err != nil {
+		return fmt.Errorf("failed to seed web settings: %w", err)
+	}
 	if err := settings.SeedBlocklist(context.Background(), settingsStore, blocklistToSnapshot(cfg.DynamicBlocklist)); err != nil {
 		return fmt.Errorf("failed to seed blocklist settings: %w", err)
 	}

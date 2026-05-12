@@ -22,6 +22,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/settings"
 	"github.com/ivanzzeth/remote-signer/internal/simulation"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
+	"github.com/ivanzzeth/remote-signer/internal/web"
 )
 
 // TemplateConfig contains template-related dependencies for the router
@@ -436,6 +437,16 @@ func (r *Router) setupRoutes() error {
 		}
 		r.mux.Handle("/api/v1/presets", r.withAuthAndPerm(middleware.PermReadPresets, presetHandler))
 		r.mux.Handle("/api/v1/presets/", r.withAuthAndPerm(middleware.PermReadPresets, http.HandlerFunc(presetHandler.ServeHTTP)))
+	}
+
+	// Web UI catch-all. Must be registered LAST so every explicit
+	// /api/v1/* and /health-style route wins ServeMux's longest-prefix
+	// match. The handler internally short-circuits when
+	// settings.web.enabled is false, so this registration is unconditional
+	// — flipping the setting at runtime is enough to disable the UI.
+	if r.config.SettingsManager != nil {
+		webHandler := web.NewHandler(r.config.SettingsManager, r.logger)
+		r.mux.Handle("/", webHandler)
 	}
 
 	return nil

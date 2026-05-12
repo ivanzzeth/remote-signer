@@ -169,6 +169,18 @@ func (h *SettingsHandler) handlePut(w http.ResponseWriter, r *http.Request, grou
 		}
 		h.recordAudit(r.Context(), actor, group, &patch)
 		writeSettingsJSON(w, http.StatusOK, h.mgr.MaterialCheck())
+	case settings.GroupWeb:
+		var patch settings.WebSnapshot
+		if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := h.mgr.UpdateWeb(r.Context(), &patch, actor); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		h.recordAudit(r.Context(), actor, group, &patch)
+		writeSettingsJSON(w, http.StatusOK, h.mgr.Web())
 	default:
 		http.Error(w, "unknown or read-only settings group: "+string(group), http.StatusBadRequest)
 	}
@@ -192,6 +204,8 @@ func (h *SettingsHandler) snapshot(group settings.Group) (any, error) {
 		return h.mgr.RPCGateway(), nil
 	case settings.GroupMaterialCheck:
 		return h.mgr.MaterialCheck(), nil
+	case settings.GroupWeb:
+		return h.mgr.Web(), nil
 	default:
 		return nil, fmt.Errorf("unknown settings group: %s", group)
 	}
