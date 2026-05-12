@@ -34,6 +34,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/logger"
 	"github.com/ivanzzeth/remote-signer/internal/notify"
 	"github.com/ivanzzeth/remote-signer/internal/ruleconfig"
+	"github.com/ivanzzeth/remote-signer/internal/settings"
 	"github.com/ivanzzeth/remote-signer/internal/simulation"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 	"github.com/ivanzzeth/remote-signer/internal/version"
@@ -179,6 +180,20 @@ func Run(args []string) error {
 	auditLogger, err := audit.NewAuditLogger(auditRepo, log)
 	if err != nil {
 		return fmt.Errorf("failed to create audit logger: %w", err)
+	}
+
+	// Bring up the runtime-mutable settings store. PR7a wires the Manager but
+	// no consumer reads from it yet — PR7b/c/d will progressively switch the
+	// security middleware, notify dispatcher, and EVM subsystems to read here
+	// instead of from cfg.* . The background poll keeps replicas in sync at
+	// 5s cadence so admin-initiated edits propagate without restart.
+	settingsStore, err := settings.NewGormStore(db)
+	if err != nil {
+		return fmt.Errorf("failed to create settings store: %w", err)
+	}
+	settingsMgr := settings.NewManager(settingsStore, log)
+	if err := settingsMgr.Reload(context.Background()); err != nil {
+		return fmt.Errorf("failed to load settings: %w", err)
 	}
 
 	// Initialize API keys from config
@@ -926,6 +941,12 @@ func Run(args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create API server: %w", err)
 	}
+
+	// Start the settings hot-reload loop. Bound to the shutdown context below
+	// so a SIGINT/SIGTERM cleanly stops the poll goroutine alongside HTTP.
+	settingsCtx, settingsCancel := context.WithCancel(context.Background())
+	defer settingsCancel()
+	settingsMgr.Start(settingsCtx)
 
 	// Handle graceful shutdown and SIGHUP for config reload
 	sigCh := make(chan os.Signal, 1)
