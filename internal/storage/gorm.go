@@ -4,6 +4,13 @@ import (
 	"fmt"
 	"strings"
 
+	// Pure-Go SQLite driver. Registers under database/sql name "sqlite", which
+	// detectDialector passes to gorm.io/driver/sqlite via Config.DriverName so
+	// CGO_ENABLED=0 release builds can still open SQLite databases. mattn/go-sqlite3
+	// (gorm.io/driver/sqlite's default) requires CGO and would block single-instance
+	// deployment of the release binary.
+	_ "modernc.org/sqlite"
+
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -12,11 +19,16 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
 
-// detectDialector returns the appropriate GORM dialector based on DSN format
+// sqliteDriverName matches the name modernc.org/sqlite registers with database/sql.
+const sqliteDriverName = "sqlite"
+
+// detectDialector returns the appropriate GORM dialector based on DSN format.
+// For SQLite, the pure-Go modernc.org/sqlite driver is selected explicitly so
+// CGO-disabled builds work; mattn/go-sqlite3 is intentionally not used.
 func detectDialector(dsn string) (gorm.Dialector, error) {
 	// SQLite: starts with "file:" or ends with ".db"
 	if strings.HasPrefix(dsn, "file:") || strings.HasSuffix(dsn, ".db") {
-		return sqlite.Open(dsn), nil
+		return sqlite.New(sqlite.Config{DSN: dsn, DriverName: sqliteDriverName}), nil
 	}
 
 	// PostgreSQL: starts with "postgres://" or "postgresql://"

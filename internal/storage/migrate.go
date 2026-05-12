@@ -7,7 +7,10 @@ import (
 
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
-	_ "github.com/golang-migrate/migrate/v4/database/sqlite3"
+	// The "sqlite" (singular) driver uses modernc.org/sqlite — pure Go, no CGO.
+	// The "sqlite3" driver pulls mattn/go-sqlite3 which would force CGO into the
+	// release/Docker build.
+	_ "github.com/golang-migrate/migrate/v4/database/sqlite"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"gorm.io/gorm"
 )
@@ -29,7 +32,7 @@ func runMigrations(db *gorm.DB, dsn string) error {
 		migrateURL = dsn
 		embedPath = "migrations/postgres"
 	case "sqlite", "sqlite3":
-		// golang-migrate sqlite3 driver expects "sqlite3://<path>?query".
+		// golang-migrate's pure-Go sqlite driver expects "sqlite://<path>?query".
 		// GORM sqlite DSN uses "file:./path?params" or "file::memory:?cache=shared".
 		// Strip "file:" prefix so golang-migrate doesn't treat "file" as host.
 		// For in-memory DBs (":memory:" or "::memory:"), keep as-is after stripping "file:".
@@ -37,7 +40,7 @@ func runMigrations(db *gorm.DB, dsn string) error {
 		if strings.HasPrefix(cleaned, "file:") {
 			cleaned = strings.TrimPrefix(cleaned, "file:")
 		}
-		migrateURL = "sqlite3://" + cleaned
+		migrateURL = "sqlite://" + cleaned
 		embedPath = "migrations/sqlite"
 	default:
 		return fmt.Errorf("unsupported dialect for migrations: %s", dialector)

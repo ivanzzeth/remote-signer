@@ -33,11 +33,13 @@ server:
     client_auth: false
 
 database:
-  # PostgreSQL connection string
-  # Uses DATABASE_DSN env var if set (auto-configured by docker-compose)
-  # Falls back to localhost for local development
-  dsn: "${DATABASE_DSN:-postgres://signer:signer_password@localhost:5432/remote_signer?sslmode=disable}"
-  # dsn: "file:./data/remote-signer.db?_journal_mode=WAL&_busy_timeout=5000"
+  # Default: SQLite (single-instance, file-based, zero external services).
+  # WAL + busy_timeout are recommended for any workload with concurrent writers.
+  # Set DATABASE_DSN to override (e.g. for multi-instance deployments backed by
+  # PostgreSQL; docker-compose injects this automatically).
+  dsn: "${DATABASE_DSN:-file:./data/remote-signer.db?_journal_mode=WAL&_busy_timeout=5000}"
+  # Multi-instance / PostgreSQL example (uncomment + set DATABASE_DSN to use):
+  # dsn: "${DATABASE_DSN:-postgres://signer:signer_password@localhost:5432/remote_signer?sslmode=disable}"
 
 chains:
   evm:
