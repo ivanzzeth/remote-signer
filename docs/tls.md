@@ -102,7 +102,7 @@ curl --cacert certs/ca.crt \
      https://localhost:8548/health
 
 # TUI
-./remote-signer-tui \
+./remote-signer tui \
   -tls-ca ./certs/ca.crt \
   -tls-cert ./certs/client.crt \
   -tls-key ./certs/client.key \

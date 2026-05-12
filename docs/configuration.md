@@ -364,7 +364,7 @@ rules:
         allowed_safe_addresses: "0xYourSafe"
 ```
 
-**Presets** (optional): Pre-filled instance data in `rules/presets/*.yaml`; use **remote-signer-cli** or **setup.sh** to generate or merge rules from a preset with minimal overrides. See [rules-templates-and-presets.md](rules-templates-and-presets.md#5-presets).
+**Presets** (optional): Pre-filled instance data in `rules/presets/*.yaml`; use **remote-signer** or **setup.sh** to generate or merge rules from a preset with minimal overrides. See [rules-templates-and-presets.md](rules-templates-and-presets.md#5-presets).
 
 ### Rule evaluation order
 

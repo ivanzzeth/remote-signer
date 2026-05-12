@@ -41,7 +41,24 @@
 
 ## 快速开始
 
-### 一键安装（推荐）
+### 三条命令单实例启动（SQLite，无需 Docker）
+
+```bash
+# 1. 下载 release 二进制（linux/darwin × amd64/arm64）。
+curl -sSLf -o remote-signer \
+  "https://github.com/ivanzzeth/remote-signer/releases/latest/download/remote-signer-$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')" \
+  && chmod +x remote-signer
+
+# 2. 拷一份默认配置（DSN 默认指向本地 SQLite ./data/remote-signer.db）。
+curl -sSLf -o config.yaml https://raw.githubusercontent.com/ivanzzeth/remote-signer/main/config.example.yaml
+
+# 3. 启动 daemon。
+./remote-signer server start -config config.yaml
+```
+
+`remote-signer` 单二进制同时承担 `server`、`tui`、`validate` 以及所有运维子命令（`rule`、`sign`、`keystore`、`preset`...）。
+
+### 一键安装（交互式向导）
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/ivanzzeth/remote-signer/main/scripts/setup.sh)
@@ -60,12 +77,12 @@ cd remote-signer
 ### 环境要求
 
 - openssl
-- Docker（推荐）或 Go 1.24+（本地模式）
+- Docker（多实例 / PostgreSQL）或直接下载 release 二进制（单实例 / SQLite）
 
 ### 安装向导会做什么
 
 交互式安装包含 5 步：
-1. **部署模式** — Docker + PostgreSQL（推荐）或 本地 + SQLite（仅开发）
+1. **部署模式** — Docker + PostgreSQL（多实例）或 本地 + SQLite（单实例，release 二进制开箱即用）
 2. **API 密钥** — 生成 `admin` 与 `dev` 的 Ed25519 密钥对
 3. **TLS** — HTTP、TLS 或 mTLS（Docker 默认 mTLS）
 4. **配置** — 生成可运行的配置文件与自动生成的密钥
@@ -97,7 +114,7 @@ curl --cacert certs/ca.crt --cert certs/client.crt --key certs/client.key https:
 
 服务启动时没有签名者，需在启动后添加：
 
-- **TUI**（推荐）：使用 `-api-key-file data/admin_private.pem` 无需粘贴密钥。示例（明文 HTTP）：`./remote-signer-tui -api-key-id admin -api-key-file data/admin_private.pem -url http://localhost:8548`。**若安装时启用了 TLS**，需使用 `https://` 并指定 CA（mTLS 时还需客户端证书与私钥），例如 `-url https://localhost:8548 -tls-ca ./certs/ca.crt`，或 mTLS：`-tls-ca ./certs/ca.crt -tls-cert ./certs/client.crt -tls-key ./certs/client.key`。详见 [docs/tui.md](docs/tui.md#tls--mtls)。安装完成后（Docker 模式）可选择「Open TUI to add signers now?」直接启动 TUI。在 **签名者** 标签页可创建 keystore（导入私钥）或创建/导入 HD 钱包。**密码强度要求（强制校验）**：至少 16 位，且必须包含大写 + 小写 + 数字 + 符号；建议 24 位以上。
+- **TUI**（推荐）：使用 `-api-key-file data/admin_private.pem` 无需粘贴密钥。示例（明文 HTTP）：`./remote-signer tui -api-key-id admin -api-key-file data/admin_private.pem -url http://localhost:8548`。**若安装时启用了 TLS**，需使用 `https://` 并指定 CA（mTLS 时还需客户端证书与私钥），例如 `-url https://localhost:8548 -tls-ca ./certs/ca.crt`，或 mTLS：`-tls-ca ./certs/ca.crt -tls-cert ./certs/client.crt -tls-key ./certs/client.key`。详见 [docs/tui.md](docs/tui.md#tls--mtls)。安装完成后（Docker 模式）可选择「Open TUI to add signers now?」直接启动 TUI。在 **签名者** 标签页可创建 keystore（导入私钥）或创建/导入 HD 钱包。**密码强度要求（强制校验）**：至少 16 位，且必须包含大写 + 小写 + 数字 + 符号；建议 24 位以上。
 - **API**：`POST /api/v1/evm/signers`（仅 admin）。见 [docs/api.md](docs/api.md)
 - **配置文件**：编辑配置中的 `chains.evm.signers.private_keys`。见 [docs/configuration.md](docs/configuration.md#chains-evm)
 

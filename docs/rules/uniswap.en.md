@@ -162,13 +162,13 @@ For production use with the Universal Router, only `exactInputSingle` and `exact
 ### Deploy V2 rules for all chains
 
 ```bash
-remote-signer-cli preset create-from uniswap_v2.preset.js.yaml --config config.yaml --write
+remote-signer preset create-from uniswap_v2.preset.js.yaml --config config.yaml --write
 ```
 
 ### Deploy V3 rules for all chains with token restrictions
 
 ```bash
-remote-signer-cli preset create-from uniswap_v3.preset.js.yaml \
+remote-signer preset create-from uniswap_v3.preset.js.yaml \
   --set allowed_token_in=0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2 \
   --set max_amount_in=10000000000000000000 \
   --config config.yaml --write
@@ -177,13 +177,13 @@ remote-signer-cli preset create-from uniswap_v3.preset.js.yaml \
 ### Deploy V4 Universal Router rules for all chains
 
 ```bash
-remote-signer-cli preset create-from uniswap_v4.preset.js.yaml --config config.yaml --write
+remote-signer preset create-from uniswap_v4.preset.js.yaml --config config.yaml --write
 ```
 
 ### Deploy single-chain V2 with custom router
 
 ```bash
-remote-signer-cli preset create-from dex_swap.preset.js.yaml \
+remote-signer preset create-from dex_swap.preset.js.yaml \
   --set chain_id=1 \
   --set router_address=0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D \
   --config config.yaml --write
@@ -192,7 +192,7 @@ remote-signer-cli preset create-from dex_swap.preset.js.yaml \
 ### Deploy single-chain V3 with token and amount restrictions
 
 ```bash
-remote-signer-cli preset create-from dex_swap_v3.preset.js.yaml \
+remote-signer preset create-from dex_swap_v3.preset.js.yaml \
   --set chain_id=1 \
   --set router_address=0xE592427A0AEce92De3Edee1F18E0157C05861564 \
   --set allowed_token_in=0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2 \

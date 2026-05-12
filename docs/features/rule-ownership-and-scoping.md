@@ -229,7 +229,7 @@ MUST be created via API after server starts, so RBAC properly assigns `owner` an
 
 **Rationale:** Putting scoped rules in config bypasses RBAC (hardcoded `owner="config", applied_to=["*"]`),
 which means agent budget rules would incorrectly constrain admin/dev/strategy signing.
-The CLI (`remote-signer-cli`) must support full CRUD (matching `pkg/client` SDK) so setup.sh
+The CLI (`remote-signer`) must support full CRUD (matching `pkg/client` SDK) so setup.sh
 can create scoped rules after server startup.
 
 ### 3.6 Setup Flow for Scoped Rules
@@ -240,7 +240,7 @@ setup.sh:
   2. Start server (Docker or local)
   3. Wait for health check
   4. CLI: create agent preset rules via API (owner=agent, applied_to=["self"])
-     remote-signer-cli preset apply agent.preset.js.yaml \
+     remote-signer preset apply agent.preset.js.yaml \
        --api-key-id agent --api-key-file data/agent_private.pem \
        --url https://localhost:8548 [--tls-*]
 ```

@@ -341,38 +341,38 @@ Once configured, AI agents can create signers, manage rules, sign transactions, 
 
 ## CLI Commands
 
-The `remote-signer-cli` provides command-line access to all server operations. Requires auth flags: `--url`, `--api-key-id`, `--api-key-file`.
+The `remote-signer` provides command-line access to all server operations. Requires auth flags: `--url`, `--api-key-id`, `--api-key-file`.
 
 ### Request Management
 
 ```bash
 # List signing requests (defaults to "authorizing" status)
-remote-signer-cli evm request list [--status authorizing]
+remote-signer evm request list [--status authorizing]
 
 # Get request details
-remote-signer-cli evm request get <request-id>
+remote-signer evm request get <request-id>
 
 # Approve a pending request (signer owner only)
-remote-signer-cli evm request approve <request-id>
+remote-signer evm request approve <request-id>
 
 # Reject a pending request (signer owner only)
-remote-signer-cli evm request reject <request-id>
+remote-signer evm request reject <request-id>
 
 # Preview auto-generated rule for a request
-remote-signer-cli evm request preview-rule <request-id>
+remote-signer evm request preview-rule <request-id>
 ```
 
 ### Transaction Operations
 
 ```bash
 # Broadcast a signed transaction
-remote-signer-cli evm broadcast <signed-tx-hex> --chain-id <id> [--wait]
+remote-signer evm broadcast <signed-tx-hex> --chain-id <id> [--wait]
 
 # Simulate a single transaction
-remote-signer-cli evm simulate tx --chain-id 1 --from 0x... --to 0x... --data 0x...
+remote-signer evm simulate tx --chain-id 1 --from 0x... --to 0x... --data 0x...
 
 # Simulate a batch of transactions (JSON format)
-remote-signer-cli evm simulate batch --chain-id 1 --from 0x... \
+remote-signer evm simulate batch --chain-id 1 --from 0x... \
   --tx '{"to":"0x...","value":"0x0","data":"0x..."}' \
   --tx '{"to":"0x...","value":"0x0","data":"0x..."}'
 ```
@@ -381,7 +381,7 @@ remote-signer-cli evm simulate batch --chain-id 1 --from 0x... \
 
 ```bash
 # Resume approval guard after it trips
-remote-signer-cli evm guard resume
+remote-signer evm guard resume
 ```
 
 ### Transaction Signing Notes

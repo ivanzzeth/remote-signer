@@ -1,12 +1,12 @@
-# Go SDK (`pkg/client`) ⇄ `remote-signer-cli` matrix
+# Go SDK (`pkg/client`) ⇄ `remote-signer` matrix
 
-This document is the **auditable** mapping between the Go SDK surface (`github.com/ivanzzeth/remote-signer/pkg/client`) and what `remote-signer-cli` exposes today.
+This document is the **auditable** mapping between the Go SDK surface (`github.com/ivanzzeth/remote-signer/pkg/client`) and what `remote-signer` exposes today.
 
 It exists to prevent accidental “full parity” claims: **the SDK is a superset of what we want to expose via a terminal UX**, and some workflows are intentionally **TUI-first** or **HTTP-only**.
 
 ## Legend
 
-- **CLI covered**: there is a `remote-signer-cli` subcommand that calls the SDK method(s) directly.
+- **CLI covered**: there is a `remote-signer` subcommand that calls the SDK method(s) directly.
 - **CLI partial**: CLI exists but does not expose every filter/field the SDK supports (gap is noted).
 - **Intentionally not CLI (defer)**: deliberate product choice; use TUI/HTTP/SDK for now.
 - **Needs board scope**: would materially expand operator-facing surface area or security posture; should be a separate decision.
@@ -17,7 +17,7 @@ These commands exist for **operator/debuggability** and are intentionally **not*
 
 | Command | Purpose | Machine-readable output |
 |---|---|---|
-| `version` | Prints the embedded `remote-signer-cli` build version string. | N/A (single-line text is the contract). |
+| `version` | Prints the embedded `remote-signer` build version string. | N/A (single-line text is the contract). |
 | `doctor` | Local checks: default `--url` `/health` reachability, optional TLS file readability, optional authenticated `Health` via SDK when API key material is configured. **Does not print secrets.** | Use `--output json` (aliases: `-o json`, `--json`) for a stable JSON report (`ok`, `version`, `checks[]`). |
 
 ## Top-level client (`pkg/client.Client`)
@@ -77,7 +77,7 @@ The EVM SDK is large (signing, rules, wallets, requests, simulation, broadcast, 
 
 These are **SDK-present** capabilities that are still intentionally **not** mirrored as CLI commands because they are primarily interactive or are not “safe” as scriptable operators:
 
-- **Anything better served by the TUI** (interactive workflows): use `remote-signer-cli tui` (pass-through) or the web/TUI surfaces.
+- **Anything better served by the TUI** (interactive workflows): use `remote-signer tui` (pass-through) or the web/TUI surfaces.
 - **Low-level “compose arbitrary calldata” helpers** (if added in the future): must remain behind explicit, validated intent types (per product governance), not free-form blobs.
 
 ## Change policy (how to edit this file)

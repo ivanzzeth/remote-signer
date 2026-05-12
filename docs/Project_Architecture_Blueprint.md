@@ -62,11 +62,14 @@ Remote-Signer is a **policy-driven signing service** built in **Go 1.24+** for E
 ```
 remote-signer/
 ├── cmd/
-│   ├── remote-signer/           # API server main
-│   ├── remote-signer-cli/       # CLI tool (33 commands)
-│   ├── remote-signer-tui/       # Terminal UI
-│   └── remote-signer-validate-rules/ # Rule validator
+│   └── remote-signer/           # Unified binary (cobra root). Subcommands:
+│                                #   server start | tui | validate | rule/sign/keystore/preset/...
 ├── internal/
+│   ├── cli/                     # Subcommand implementations wired by cmd/remote-signer
+│   │   ├── server/              # daemon
+│   │   ├── tui/                 # operator TUI
+│   │   ├── validate/            # rule validator
+│   │   └── admin/               # operator/admin commands
 │   ├── core/                    # Domain layer (PURE, no external deps)
 │   │   ├── types/               # Domain models (11 files)
 │   │   ├── rule/                # Rule engine (5 files)
@@ -753,10 +756,11 @@ if signer.UnlockedAt != nil && time.Since(*signer.UnlockedAt) > autoLockTimeout 
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│ PRESENTATION LAYER (cmd/)                                        │
-│  - CLI (remote-signer-cli): 33 commands                          │
-│  - TUI (remote-signer-tui): Bubbletea interface                  │
-│  - API Server (remote-signer): HTTP/TLS server                   │
+│ PRESENTATION LAYER (cmd/remote-signer/, cobra subcommands)       │
+│  - server start: HTTP/TLS daemon                                 │
+│  - tui:          Bubbletea interactive client                    │
+│  - validate:     offline rule/template/config validator          │
+│  - rule/sign/keystore/preset/apikey/...: 30+ operator commands   │
 └───────────────────────────┬──────────────────────────────────────┘
                             │
 ┌───────────────────────────▼──────────────────────────────────────┐

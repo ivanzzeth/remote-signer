@@ -444,10 +444,10 @@ For agents that need to interact with dApp frontends (Uniswap, Aave, etc.), Remo
 docker compose up -d remote-signer
 
 # 2. Signer unlocked
-remote-signer-cli evm signer unlock 0x764602... --api-key-id admin ...
+remote-signer evm signer unlock 0x764602... --api-key-id admin ...
 
 # 3. Agent rules deployed (agent-sign + agent-safety + simulation budget)
-remote-signer-cli preset create-from agent.preset.js.yaml \
+remote-signer preset create-from agent.preset.js.yaml \
   --set allowed_spenders="0x3b86917369b83a6892f553609f3c2f439c184e31" \
   --config config.yaml --write
 

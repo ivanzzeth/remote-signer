@@ -44,7 +44,7 @@ File and artifact names use a single pattern so that **type** (template vs insta
 A **template** is a YAML file that defines:
 
 - **variables**: list of `{ name, type, description, required }` (e.g. `chain_id`, `ctf_exchange_address`, `allowed_safe_addresses`).
-- **test_variables**: (optional) default values used when validating the template in isolation (e.g. `remote-signer-validate-rules rules/templates/polymarket_safe.template.yaml` or `remote-signer-cli validate rules/...`).
+- **test_variables**: (optional) default values used when validating the template in isolation (e.g. `remote-signer validate rules/templates/polymarket_safe.template.yaml` or `remote-signer validate rules/...`).
 - **rules**: the same structure as config rules, but with **placeholders** like `${chain_id}` or `${allowed_safe_addresses}` in expressions and config.
 
 The server does not evaluate the template file directly. It loads templates listed in `config.templates` (type `file` with a `path`). When a **rule** of type `instance` references that template and supplies `config.variables`, the server substitutes those values into the template’s rules and expands them into concrete rules.
@@ -82,7 +82,7 @@ variables:
     description: "Comma-separated allowed Safe addresses"
     required: true
 
-test_variables:   # used by remote-signer-validate-rules / remote-signer-cli validate when validating this file alone
+test_variables:   # used by remote-signer validate / remote-signer validate when validating this file alone
   chain_id: "137"
   allowed_safe_addresses: "0x..."
 
@@ -192,7 +192,7 @@ Instance rules are the main way to use shared templates (Polymarket, Predict, Op
 A **preset** is a YAML file that stores one or more **instance-style rule(s)** with default variables already filled in. It does not add a new rule type: it is a convenience format so you can:
 
 - Avoid copying long variable blocks from `config.example.yaml`.
-- Override only a few values (e.g. your Safe address) and optionally merge the result into your `config.yaml` via **remote-signer-cli** or **setup.sh**.
+- Override only a few values (e.g. your Safe address) and optionally merge the result into your `config.yaml` via **remote-signer** or **setup.sh**.
 
 Presets live under `rules/presets/` (e.g. `polymarket_safe_polygon.preset.js.yaml`). The **CLI** uses them for list/vars/create-from and setup; when `presets.dir` is set in config, the **server** can also read the same directory and expose a preset API (list, vars, apply) for admin keys.
 
@@ -286,22 +286,22 @@ Template files define variables with a **description** field; that description i
 
 ### 5.6 Using presets with the CLI
 
-(When **remote-signer-cli** is available.)
+(When **remote-signer** is available.)
 
 - **List presets**:  
-  `remote-signer-cli preset list`  
+  `remote-signer preset list`  
   Scans `rules/presets/` and shows preset name(s) and template name(s).
 
 - **Variables to prompt (for scripts)**:  
-  `remote-signer-cli preset vars <preset-name> --presets-dir rules/presets --project-dir .`  
+  `remote-signer preset vars <preset-name> --presets-dir rules/presets --project-dir .`  
   Outputs one line per override variable: `name<TAB>description`. Used by setup to show descriptions when prompting.
 
 - **Generate a rule from a preset (no config change)**:  
-  `remote-signer-cli preset create-from polymarket_safe_polygon --set allowed_safe_addresses=0xYourSafe`  
+  `remote-signer preset create-from polymarket_safe_polygon --set allowed_safe_addresses=0xYourSafe`  
   Outputs the rule YAML so you can paste it into `config.yaml`.
 
 - **Append the rule to config (and inject template if missing)**:  
-  `remote-signer-cli preset create-from polymarket_safe_polygon --config config.yaml --write --set allowed_safe_addresses=0xYourSafe`  
+  `remote-signer preset create-from polymarket_safe_polygon --config config.yaml --write --set allowed_safe_addresses=0xYourSafe`  
   If the preset has `template_path` and the config does not yet define that template, the CLI adds the template entry from the preset.
 
 - **Composite presets (multiple templates)**  
@@ -349,7 +349,7 @@ You can load several presets into the same config (e.g. Polymarket and Opinion).
 - **Multiple overrides**:  
   `--set key1=val1 --set key2=val2`
 
-For multi-rule presets, the CLI may support something like `--rule-index 0` to target the first rule. See the CLI help and [remote-signer-cli design](features/remote-signer-cli-design.md) for details.
+For multi-rule presets, the CLI may support something like `--rule-index 0` to target the first rule. See the CLI help and [remote-signer design](features/remote-signer-cli-design.md) for details.
 
 ### 5.10 Server preset API (admin-only)
 
@@ -367,12 +367,12 @@ Apply uses the same preset format and variable substitution as the CLI; the serv
 
 **setup.sh** runs an optional step (Step 4b) after generating config: “Add rules from preset?”. If the user agrees, it:
 
-1. Ensures **remote-signer-cli** is available (download from release or build from repo).
-2. Lists presets via `remote-signer-cli preset list`.
+1. Ensures **remote-signer** is available (download from release or build from repo).
+2. Lists presets via `remote-signer preset list`.
 3. Lets the user choose a preset by number.
-4. Runs `remote-signer-cli preset vars <name>` to get variables and their **descriptions** from the template (using the preset’s `template_path`).
+4. Runs `remote-signer preset vars <name>` to get variables and their **descriptions** from the template (using the preset’s `template_path`).
 5. Prompts for each variable, showing the description (e.g. “allowed_safe_addresses (Comma-separated list of allowed Safe addresses…):”).
-6. Runs `remote-signer-cli preset create-from <name> --config config.yaml --write --set ...`, which injects the template into config if needed and appends the rule.
+6. Runs `remote-signer preset create-from <name> --config config.yaml --write --set ...`, which injects the template into config if needed and appends the rule.
 7. Optionally repeats for another preset.
 
 New users get a working rule set by picking a preset and filling in a few values with clear descriptions, without editing long YAML by hand.
@@ -531,4 +531,4 @@ All presets live under `rules/presets/`.
 | **Preset** | `rules/presets/*.yaml` | Pre-filled instance(s); used by CLI/setup to generate or merge rule(s) with minimal overrides. See section 6.2 for the full list. |
 | **Inline / file rules** | `config.rules` (type other than `instance` / `file`) or external YAML | Static or file-loaded rules without template expansion. |
 
-For validation of template files (with `test_variables`) or full config (with templates + instance + file rules), use **remote-signer-validate-rules** or `remote-signer-cli validate`. See [testing.md](testing.md) and [configuration.md](configuration.md).
+For validation of template files (with `test_variables`) or full config (with templates + instance + file rules), use **remote-signer validate** or `remote-signer validate`. See [testing.md](testing.md) and [configuration.md](configuration.md).

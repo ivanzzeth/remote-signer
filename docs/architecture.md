@@ -78,11 +78,13 @@ Remote-Signer is a modular, secure signing service with multi-chain extensibilit
 ```
 remote-signer/
 ├── cmd/
-│   ├── remote-signer/           # API server entry point
-│   ├── remote-signer-cli/       # CLI tool (preset management, rule validation)
-│   ├── validate-rules/          # Rule/template validation tool
-│   └── tui/                     # Terminal UI entry point
+│   └── remote-signer/           # Unified binary: cobra root for server/tui/validate/admin
 ├── internal/
+│   ├── cli/                     # Subcommand implementations called by cmd/remote-signer
+│   │   ├── server/              # `remote-signer server start` (daemon)
+│   │   ├── tui/                 # `remote-signer tui`
+│   │   ├── validate/            # `remote-signer validate`
+│   │   └── admin/               # operator commands (rule/sign/keystore/preset/apikey/...)
 │   ├── api/                     # HTTP API layer
 │   │   ├── handler/             # Request handlers
 │   │   │   └── evm/             # EVM-specific (sign, rules, signers, HD wallets)
