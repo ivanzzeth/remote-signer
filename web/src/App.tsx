@@ -6,6 +6,7 @@ import { ApiKeys } from "./pages/ApiKeys";
 import { Audit } from "./pages/Audit";
 import { Dashboard } from "./pages/Dashboard";
 import { Login } from "./pages/Login";
+import { Requests } from "./pages/Requests";
 import { Rules } from "./pages/Rules";
 import { Settings } from "./pages/Settings";
 import { Signers } from "./pages/Signers";
@@ -42,6 +43,7 @@ export function App() {
         <Route path="/" element={<Dashboard />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/signers" element={<Signers />} />
+        <Route path="/requests" element={<Requests />} />
         <Route path="/rules" element={<Rules />} />
         <Route path="/api-keys" element={<ApiKeys />} />
         <Route path="/audit" element={<Audit />} />
