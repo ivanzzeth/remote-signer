@@ -1,0 +1,6 @@
+# The Vite build writes here. index.html is committed as a placeholder
+# (see ./index.html) and is overwritten when `make web` runs; everything
+# else under this directory is build-output and must stay out of git.
+*
+!.gitignore
+!index.html

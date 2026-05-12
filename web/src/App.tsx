@@ -1,0 +1,51 @@
+import { useEffect, useState } from "react";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { Layout } from "./components/Layout";
+import { getCredentials, subscribeAuth } from "./lib/auth";
+import { Dashboard } from "./pages/Dashboard";
+import { Login } from "./pages/Login";
+
+/**
+ * Top-level shell. The router takes one of three shapes:
+ *
+ * - Unauthenticated → /login (and any other path redirects there)
+ * - Authenticated   → Layout-wrapped routes (dashboard, etc.)
+ *
+ * Auth state lives in module scope (lib/auth) and updates fire a subscriber
+ * callback, which we wire into a React state update so the router re-renders
+ * the moment credentials are imported or cleared.
+ */
+export function App() {
+  const [authed, setAuthed] = useState(() => getCredentials() !== null);
+
+  useEffect(() => {
+    return subscribeAuth(() => setAuthed(getCredentials() !== null));
+  }, []);
+
+  if (!authed) {
+    return (
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="*" element={<RedirectToLogin />} />
+      </Routes>
+    );
+  }
+
+  return (
+    <Layout>
+      <Routes>
+        <Route path="/" element={<Dashboard />} />
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Layout>
+  );
+}
+
+/** Preserves the user's intended destination so we can bounce them back
+ *  after login. Stored in location state, not in localStorage, so a tab
+ *  open is the only thing that survives across the login screen. */
+function RedirectToLogin() {
+  const location = useLocation();
+  return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+}
