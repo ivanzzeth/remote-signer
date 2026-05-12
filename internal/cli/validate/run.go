@@ -91,7 +91,7 @@ type TemplateFile struct {
 // Run executes the validate CLI with the given args (not including argv[0]).
 // Returns a non-nil error on validation failure or invalid usage.
 func Run(args []string) error {
-	fs := flag.NewFlagSet("validate", flag.ContinueOnError)
+	fs := flag.NewFlagSet("remote-signer validate", flag.ContinueOnError)
 	configPath := fs.String("config", "", "validate rules from config file (same expansion as server: templates + instance + file rules)")
 	listRuleIDs := fs.Bool("list-rule-ids", false, "with -config: print deterministic rule IDs for each expanded rule (for delegate_to); then exit")
 	forgePath := fs.String("forge", "", "path to forge binary (default: auto-detect from PATH)")
@@ -119,6 +119,9 @@ func Run(args []string) error {
 		fmt.Fprintf(os.Stderr, "  %s -json rules/myapp.yaml > results.json\n", prog)
 	}
 	if err := fs.Parse(args); err != nil {
+		if err == flag.ErrHelp {
+			return nil
+		}
 		return err
 	}
 
