@@ -15,15 +15,25 @@ import (
 // callers can run it before any Reload — the seed value will be picked up by
 // the next Reload.
 func SeedSecurity(ctx context.Context, store Store, snapshot *SecuritySnapshot) error {
-	_, err := store.Get(ctx, GroupSecurity)
+	return seedIfMissing(ctx, store, GroupSecurity, snapshot)
+}
+
+// SeedNotify writes the given notify snapshot to the store unless a notify
+// row already exists. Same one-shot semantics as SeedSecurity.
+func SeedNotify(ctx context.Context, store Store, snapshot *NotifySnapshot) error {
+	return seedIfMissing(ctx, store, GroupNotify, snapshot)
+}
+
+func seedIfMissing(ctx context.Context, store Store, key Group, value any) error {
+	_, err := store.Get(ctx, key)
 	if err == nil {
-		return nil // already seeded
+		return nil
 	}
 	if !errors.Is(err, ErrNotFound) {
 		return err
 	}
 	mgr := &Manager{store: store, interval: DefaultRefreshInterval}
-	return mgr.put(ctx, GroupSecurity, snapshot, UpdatedByBootstrap)
+	return mgr.put(ctx, key, value, UpdatedByBootstrap)
 }
 
 // SecurityFromConfigValues constructs a snapshot from the loose-typed values
