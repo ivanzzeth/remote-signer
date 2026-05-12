@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { APIError } from "remote-signer-client";
 import {
   Badge,
   Card,
@@ -6,15 +8,53 @@ import {
   Loading,
   PageHeader,
 } from "../components/ui";
+import { getClient } from "../lib/auth";
 import { useApi } from "../lib/useApi";
 
 /**
  * Lists every rule (whitelist/blocklist) registered on the daemon. This
  * is the operator's first stop when a sign request was unexpectedly
  * denied or auto-approved — the rule set is the source of truth.
+ *
+ * Mutations supported inline: toggle enabled, delete. Creating new rules
+ * stays in the CLI for now — the rule shape varies enough by type that a
+ * generic UI form would be more harm than help.
  */
 export function Rules() {
   const { data, loading, error, reload } = useApi((c) => c.evm.rules.list());
+  const [mutationError, setMutationError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  async function toggle(id: string, currentEnabled: boolean) {
+    const client = getClient();
+    if (!client) return;
+    setBusy(id);
+    setMutationError(null);
+    try {
+      await client.evm.rules.toggle(id, !currentEnabled);
+      reload();
+    } catch (e) {
+      setMutationError(formatMutationError(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function destroy(id: string, name: string) {
+    if (!confirm(`Delete rule "${name}"? This cannot be undone.`)) return;
+    const client = getClient();
+    if (!client) return;
+    setBusy(id);
+    setMutationError(null);
+    try {
+      await client.evm.rules.delete(id);
+      reload();
+    } catch (e) {
+      setMutationError(formatMutationError(e));
+    } finally {
+      setBusy(null);
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -32,6 +72,8 @@ export function Rules() {
         }
       />
 
+      {mutationError && <ErrorBanner msg={mutationError} />}
+
       <Card>
         {loading && <Loading />}
         {error && <ErrorBanner msg={error} />}
@@ -46,7 +88,8 @@ export function Rules() {
                   <th className="py-1 pr-3 font-normal">Type</th>
                   <th className="py-1 pr-3 font-normal">Mode</th>
                   <th className="py-1 pr-3 font-normal">Source</th>
-                  <th className="py-1 font-normal">Status</th>
+                  <th className="py-1 pr-3 font-normal">Status</th>
+                  <th className="py-1 font-normal">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -69,10 +112,30 @@ export function Rules() {
                     <td className="py-1 pr-3 text-xs text-ink-500">
                       {r.source}
                     </td>
-                    <td className="py-1">
+                    <td className="py-1 pr-3">
                       <Badge tone={r.enabled ? "green" : "neutral"}>
                         {r.enabled ? "enabled" : "disabled"}
                       </Badge>
+                    </td>
+                    <td className="py-1">
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          disabled={busy === r.id}
+                          onClick={() => toggle(r.id, r.enabled)}
+                          className="rounded-md border border-ink-200 px-2 py-0.5 text-xs text-ink-700 hover:bg-ink-100 disabled:opacity-50"
+                        >
+                          {r.enabled ? "Disable" : "Enable"}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy === r.id}
+                          onClick={() => destroy(r.id, r.name)}
+                          className="rounded-md border border-red-200 px-2 py-0.5 text-xs text-red-700 hover:bg-red-50 disabled:opacity-50"
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -82,4 +145,10 @@ export function Rules() {
       </Card>
     </div>
   );
+}
+
+function formatMutationError(e: unknown): string {
+  if (e instanceof APIError) return `HTTP ${e.statusCode}: ${e.message}`;
+  if (e instanceof Error) return e.message;
+  return String(e);
 }

@@ -68,6 +68,13 @@ logger:
   level: warn
   pretty: false
 
+# Unlock the mutation paths the 8c e2e specs need. Production daemons
+# default to readonly for rules + api-keys (operator must opt in via the
+# CLI or settings PUT); for tests we always want writable.
+security:
+  rules_api_readonly: false
+  api_keys_api_readonly: false
+
 chains:
   evm:
     enabled: true
