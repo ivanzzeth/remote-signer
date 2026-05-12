@@ -24,6 +24,36 @@ func SeedNotify(ctx context.Context, store Store, snapshot *NotifySnapshot) erro
 	return seedIfMissing(ctx, store, GroupNotify, snapshot)
 }
 
+// SeedAuditMonitor seeds the audit-monitor group.
+func SeedAuditMonitor(ctx context.Context, store Store, s *AuditMonitorSnapshot) error {
+	return seedIfMissing(ctx, store, GroupAuditMonitor, s)
+}
+
+// SeedBlocklist seeds the dynamic blocklist group.
+func SeedBlocklist(ctx context.Context, store Store, s *BlocklistSnapshot) error {
+	return seedIfMissing(ctx, store, GroupBlocklist, s)
+}
+
+// SeedSimulation seeds the EVM simulation group.
+func SeedSimulation(ctx context.Context, store Store, s *SimulationSnapshot) error {
+	return seedIfMissing(ctx, store, GroupSimulation, s)
+}
+
+// SeedFoundry seeds the EVM foundry group.
+func SeedFoundry(ctx context.Context, store Store, s *FoundrySnapshot) error {
+	return seedIfMissing(ctx, store, GroupFoundry, s)
+}
+
+// SeedRPCGateway seeds the EVM RPC gateway group.
+func SeedRPCGateway(ctx context.Context, store Store, s *RPCGatewaySnapshot) error {
+	return seedIfMissing(ctx, store, GroupRPCGateway, s)
+}
+
+// SeedMaterialCheck seeds the EVM signer-material-check group.
+func SeedMaterialCheck(ctx context.Context, store Store, s *MaterialCheckSnapshot) error {
+	return seedIfMissing(ctx, store, GroupMaterialCheck, s)
+}
+
 func seedIfMissing(ctx context.Context, store Store, key Group, value any) error {
 	_, err := store.Get(ctx, key)
 	if err == nil {

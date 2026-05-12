@@ -97,6 +97,78 @@ func (h *SettingsHandler) handlePut(w http.ResponseWriter, r *http.Request, grou
 		}
 		h.recordAudit(r.Context(), actor, group, &patch)
 		writeSettingsJSON(w, http.StatusOK, h.mgr.Notify())
+	case settings.GroupAuditMonitor:
+		var patch settings.AuditMonitorSnapshot
+		if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := h.mgr.UpdateAuditMonitor(r.Context(), &patch, actor); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		h.recordAudit(r.Context(), actor, group, &patch)
+		writeSettingsJSON(w, http.StatusOK, h.mgr.AuditMonitor())
+	case settings.GroupBlocklist:
+		var patch settings.BlocklistSnapshot
+		if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := h.mgr.UpdateBlocklist(r.Context(), &patch, actor); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		h.recordAudit(r.Context(), actor, group, &patch)
+		writeSettingsJSON(w, http.StatusOK, h.mgr.Blocklist())
+	case settings.GroupSimulation:
+		var patch settings.SimulationSnapshot
+		if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := h.mgr.UpdateSimulation(r.Context(), &patch, actor); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		h.recordAudit(r.Context(), actor, group, &patch)
+		writeSettingsJSON(w, http.StatusOK, h.mgr.Simulation())
+	case settings.GroupFoundry:
+		var patch settings.FoundrySnapshot
+		if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := h.mgr.UpdateFoundry(r.Context(), &patch, actor); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		h.recordAudit(r.Context(), actor, group, &patch)
+		writeSettingsJSON(w, http.StatusOK, h.mgr.Foundry())
+	case settings.GroupRPCGateway:
+		var patch settings.RPCGatewaySnapshot
+		if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := h.mgr.UpdateRPCGateway(r.Context(), &patch, actor); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		h.recordAudit(r.Context(), actor, group, &patch)
+		writeSettingsJSON(w, http.StatusOK, h.mgr.RPCGateway())
+	case settings.GroupMaterialCheck:
+		var patch settings.MaterialCheckSnapshot
+		if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := h.mgr.UpdateMaterialCheck(r.Context(), &patch, actor); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		h.recordAudit(r.Context(), actor, group, &patch)
+		writeSettingsJSON(w, http.StatusOK, h.mgr.MaterialCheck())
 	default:
 		http.Error(w, "unknown or read-only settings group: "+string(group), http.StatusBadRequest)
 	}
