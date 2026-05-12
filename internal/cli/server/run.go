@@ -200,15 +200,20 @@ func Run(args []string) error {
 	if err := settings.SeedSecurity(context.Background(), settingsStore, seedSnapshot); err != nil {
 		return fmt.Errorf("failed to seed security settings: %w", err)
 	}
+	if err := settings.SeedNotify(context.Background(), settingsStore, notifyYAMLToSnapshot(&cfg.Notify, &cfg.NotifyChannel)); err != nil {
+		return fmt.Errorf("failed to seed notify settings: %w", err)
+	}
 	settingsMgr := settings.NewManager(settingsStore, log)
 	if err := settingsMgr.Reload(context.Background()); err != nil {
 		return fmt.Errorf("failed to load settings: %w", err)
 	}
-	// From here on, mgr.Security() is the source of truth. Overlay the
-	// snapshot back onto cfg.Security so the rest of run.go (rate limiter,
-	// IP whitelist, signer auto-lock, approval guard) picks up DB values
-	// without touching dozens of read sites.
+	// From here on, mgr.Security() / mgr.Notify() are the source of truth.
+	// Overlay snapshots back onto cfg so the existing downstream wiring (rate
+	// limiter, IP whitelist, signer auto-lock, approval guard, notify
+	// service, budget alerter, audit monitor) picks up DB values without
+	// touching every read site.
 	applySecuritySnapshot(cfg, settingsMgr.Security())
+	applyNotifySnapshot(&cfg.Notify, &cfg.NotifyChannel, settingsMgr.Notify())
 
 	// Initialize API keys from config
 	apiKeyInit, err := config.NewAPIKeyInitializer(apiKeyRepo, log)

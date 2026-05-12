@@ -34,6 +34,7 @@ type Manager struct {
 	interval time.Duration
 
 	security      atomic.Pointer[SecuritySnapshot]
+	notify        atomic.Pointer[NotifySnapshot]
 	foundry       atomic.Pointer[FoundrySnapshot]
 	simulation    atomic.Pointer[SimulationSnapshot]
 	blocklist     atomic.Pointer[BlocklistSnapshot]
@@ -72,6 +73,7 @@ func NewManager(store Store, log *slog.Logger, opts ...Option) *Manager {
 	}
 	// Seed defaults so callers never get nil pointers before the first Reload.
 	m.security.Store(DefaultSecurity())
+	m.notify.Store(&NotifySnapshot{})
 	m.foundry.Store(&FoundrySnapshot{})
 	m.simulation.Store(&SimulationSnapshot{})
 	m.blocklist.Store(&BlocklistSnapshot{})
@@ -85,6 +87,9 @@ func NewManager(store Store, log *slog.Logger, opts ...Option) *Manager {
 // be treated as immutable; callers that need to mutate must go through
 // UpdateSecurity.
 func (m *Manager) Security() *SecuritySnapshot { return m.security.Load() }
+
+// Notify returns the current notify snapshot (providers + recipient channels).
+func (m *Manager) Notify() *NotifySnapshot { return m.notify.Load() }
 
 // Foundry returns the current foundry snapshot.
 func (m *Manager) Foundry() *FoundrySnapshot { return m.foundry.Load() }
@@ -143,6 +148,13 @@ func (m *Manager) applyRow(row *Setting) {
 			return
 		}
 		m.security.Store(&s)
+	case GroupNotify:
+		var s NotifySnapshot
+		if err := json.Unmarshal([]byte(row.ValueJSON), &s); err != nil {
+			m.log.Warn("settings: bad json", "group", row.Key, "err", err)
+			return
+		}
+		m.notify.Store(&s)
 	case GroupFoundry:
 		var s FoundrySnapshot
 		if err := json.Unmarshal([]byte(row.ValueJSON), &s); err != nil {
@@ -196,6 +208,14 @@ func (m *Manager) UpdateSecurity(ctx context.Context, s *SecuritySnapshot, actor
 		return fmt.Errorf("nil security snapshot")
 	}
 	return m.put(ctx, GroupSecurity, s, actor)
+}
+
+// UpdateNotify persists a new notify snapshot (providers + channels).
+func (m *Manager) UpdateNotify(ctx context.Context, s *NotifySnapshot, actor string) error {
+	if s == nil {
+		return fmt.Errorf("nil notify snapshot")
+	}
+	return m.put(ctx, GroupNotify, s, actor)
 }
 
 // UpdateFoundry persists a new foundry snapshot.

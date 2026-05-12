@@ -85,6 +85,18 @@ func (h *SettingsHandler) handlePut(w http.ResponseWriter, r *http.Request, grou
 		}
 		h.recordAudit(r.Context(), actor, group, &patch)
 		writeSettingsJSON(w, http.StatusOK, h.mgr.Security())
+	case settings.GroupNotify:
+		var patch settings.NotifySnapshot
+		if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := h.mgr.UpdateNotify(r.Context(), &patch, actor); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		h.recordAudit(r.Context(), actor, group, &patch)
+		writeSettingsJSON(w, http.StatusOK, h.mgr.Notify())
 	default:
 		http.Error(w, "unknown or read-only settings group: "+string(group), http.StatusBadRequest)
 	}
@@ -94,6 +106,8 @@ func (h *SettingsHandler) snapshot(group settings.Group) (any, error) {
 	switch group {
 	case settings.GroupSecurity:
 		return h.mgr.Security(), nil
+	case settings.GroupNotify:
+		return h.mgr.Notify(), nil
 	case settings.GroupFoundry:
 		return h.mgr.Foundry(), nil
 	case settings.GroupSimulation:

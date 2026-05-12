@@ -36,7 +36,7 @@ type Group string
 
 const (
 	GroupSecurity      Group = "security"
-	GroupNotify        Group = "notify_channels" // populated by the notify_channels typed table, not by this k/v store
+	GroupNotify        Group = "notify"
 	GroupAuditMonitor  Group = "audit_monitor"
 	GroupBlocklist     Group = "evm.dynamic_blocklist"
 	GroupSimulation    Group = "evm.simulation"

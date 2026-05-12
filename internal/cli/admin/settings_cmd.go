@@ -107,26 +107,58 @@ treated as raw strings. Nested keys use dot notation, e.g.
 
 // applyAssignment turns key=value into a mutation on snap. Values that parse
 // as JSON are applied as-is (preserving numbers/bools/objects); anything else
-// becomes a string.
+// becomes a string. Dotted keys like "ip_whitelist.enabled" or
+// "channels.slack" descend into nested maps so callers can target a single
+// field without rewriting the entire snapshot.
 func applyAssignment(snap map[string]any, s string) error {
 	eq := strings.IndexByte(s, '=')
 	if eq <= 0 {
 		return fmt.Errorf("expected key=value, got %q", s)
 	}
 	key, raw := s[:eq], s[eq+1:]
-	var value any
-	if err := json.Unmarshal([]byte(raw), &value); err != nil {
-		// Try bare strings, integers, booleans without quoting.
-		if b, e := strconv.ParseBool(raw); e == nil {
-			value = b
-		} else if n, e := strconv.ParseInt(raw, 10, 64); e == nil {
-			value = n
-		} else {
-			value = raw
+	value := parseValue(raw)
+	path := strings.Split(key, ".")
+	return setNested(snap, path, value)
+}
+
+// setNested writes value at path inside obj, creating intermediate map[string]any
+// nodes as needed. If an intermediate node already exists and is not a map,
+// the call fails so the user gets a clear error instead of silently nuking
+// a typed value.
+func setNested(obj map[string]any, path []string, value any) error {
+	for i, segment := range path {
+		if i == len(path)-1 {
+			obj[segment] = value
+			return nil
 		}
+		existing, ok := obj[segment]
+		if !ok || existing == nil {
+			next := make(map[string]any)
+			obj[segment] = next
+			obj = next
+			continue
+		}
+		next, isMap := existing.(map[string]any)
+		if !isMap {
+			return fmt.Errorf("cannot descend into %q: existing value is %T, not an object", segment, existing)
+		}
+		obj = next
 	}
-	snap[key] = value
 	return nil
+}
+
+func parseValue(raw string) any {
+	var v any
+	if err := json.Unmarshal([]byte(raw), &v); err == nil {
+		return v
+	}
+	if b, e := strconv.ParseBool(raw); e == nil {
+		return b
+	}
+	if n, e := strconv.ParseInt(raw, 10, 64); e == nil {
+		return n
+	}
+	return raw
 }
 
 func init() {

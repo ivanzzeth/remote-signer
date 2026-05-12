@@ -115,6 +115,62 @@ type AuditMonitorSnapshot struct {
 	Enabled bool `json:"enabled"`
 }
 
+// NotifySnapshot mirrors what used to live under the YAML `notify` and
+// `notify_channels` blocks. The two are bundled into a single snapshot so
+// admins can update provider credentials and recipient routing atomically;
+// the API exposes this as a single group "notify".
+type NotifySnapshot struct {
+	Providers NotifyProviders `json:"providers"`
+	Channels  NotifyChannels  `json:"channels"`
+}
+
+// NotifyProviders holds per-provider service config (tokens, timeouts).
+// Field names align with notify.Config in the notify package.
+type NotifyProviders struct {
+	Slack    *NotifySlackProvider    `json:"slack,omitempty"`
+	Pushover *NotifyPushoverProvider `json:"pushover,omitempty"`
+	Webhook  *NotifyWebhookProvider  `json:"webhook,omitempty"`
+	Telegram *NotifyTelegramProvider `json:"telegram,omitempty"`
+}
+
+// NotifySlackProvider holds Slack service config (bot token).
+type NotifySlackProvider struct {
+	Enabled  bool   `json:"enabled"`
+	BotToken string `json:"bot_token"`
+}
+
+// NotifyPushoverProvider holds Pushover service config (app token, retry).
+type NotifyPushoverProvider struct {
+	Enabled    bool `json:"enabled"`
+	AppToken   string `json:"app_token"`
+	Retry      int  `json:"retry"`
+	Expire     int  `json:"expire"`
+	MaxRetries int  `json:"max_retries"`
+	RetryDelay int  `json:"retry_delay"`
+}
+
+// NotifyWebhookProvider holds webhook service config (headers, timeout).
+type NotifyWebhookProvider struct {
+	Enabled bool              `json:"enabled"`
+	Headers map[string]string `json:"headers,omitempty"`
+	Timeout time.Duration     `json:"timeout,omitempty"`
+}
+
+// NotifyTelegramProvider holds Telegram service config (bot token).
+type NotifyTelegramProvider struct {
+	Enabled  bool   `json:"enabled"`
+	BotToken string `json:"bot_token"`
+}
+
+// NotifyChannels holds the recipient lists used to fan a single notification
+// out to multiple destinations within each provider. Mirrors notify.Channel.
+type NotifyChannels struct {
+	Slack    []string `json:"slack,omitempty"`
+	Pushover []string `json:"pushover,omitempty"`
+	Webhook  []string `json:"webhook,omitempty"`
+	Telegram []string `json:"telegram,omitempty"`
+}
+
 // RPCGatewaySnapshot — placeholder for PR7d.
 type RPCGatewaySnapshot struct {
 	Enabled bool `json:"enabled"`
