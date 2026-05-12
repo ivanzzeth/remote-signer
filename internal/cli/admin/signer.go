@@ -77,7 +77,12 @@ var signerCreateCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("create signer: %w", err)
 		}
-		fmt.Printf("Created signer: %s\n", signer.Address)
+		// Human-friendly status line is omitted for machine-readable output
+		// so callers that pipe stdout into a JSON decoder don't have to
+		// strip the preamble.
+		if flagOutputFormat != "json" {
+			fmt.Printf("Created signer: %s\n", signer.Address)
+		}
 		return printJSON(signer)
 	},
 }

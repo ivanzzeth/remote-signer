@@ -73,26 +73,31 @@ func TestACL_IPWhitelist(t *testing.T) {
 // TestAudit_List validates the audit-log read path. The bootstrap admin
 // key creation is itself audited, so a fresh daemon already has at least
 // one row.
-//
-// NOTE: `audit list` defines a *local* --api-key-id flag (filter) that
-// shadows the *global* --api-key-id auth flag, leaving the global
-// unparsed. We pass credentials via env vars to sidestep the collision —
-// the underlying client supports both. The CLI itself should ideally
-// rename the filter flag (e.g. --filter-api-key-id); tracking separately.
 func TestAudit_List(t *testing.T) {
 	d := startDaemon(t)
-	cmd := exec.Command(binaryPath, "--json", "audit", "list", "--limit", "10")
-	cmd.Env = append(os.Environ(),
-		"REMOTE_SIGNER_URL="+d.url(),
-		"REMOTE_SIGNER_API_KEY_ID=admin",
-		"REMOTE_SIGNER_API_KEY_FILE="+d.adminKeyPath(),
-	)
-	out, err := cmd.CombinedOutput()
+	stdout, _, err := d.runCLI(t, "--json", "audit", "list", "--limit", "10")
 	if err != nil {
-		t.Fatalf("audit list: %v\noutput: %s", err, out)
+		t.Fatalf("audit list: %v", err)
 	}
-	if !strings.Contains(string(out), "{") {
-		t.Errorf("expected JSON output, got: %s", out)
+	if !strings.Contains(stdout, "{") {
+		t.Errorf("expected JSON output, got: %s", stdout)
+	}
+}
+
+// TestAudit_FilterByAPIKey exercises the renamed --by-api-key-id filter
+// (separate from the global --api-key-id auth flag) so the audit list
+// can still be scoped to events emitted by a specific key.
+func TestAudit_FilterByAPIKey(t *testing.T) {
+	d := startDaemon(t)
+	stdout, stderr, err := d.runCLI(t, "--json", "audit", "list",
+		"--by-api-key-id", "admin",
+		"--limit", "10",
+	)
+	if err != nil {
+		t.Fatalf("audit list --by-api-key-id: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "{") {
+		t.Errorf("expected JSON, got: %s", stdout)
 	}
 }
 
