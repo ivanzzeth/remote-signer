@@ -22,8 +22,8 @@
     </p>
     <div class="note">
       <p>To build the web UI from source:</p>
-      <pre>cd web &amp;&amp; npm ci &amp;&amp; npm run build
-go build -o remote-signer ./cmd/remote-signer</pre>
+      <pre>make web    # cd web &amp;&amp; npm ci &amp;&amp; npm run build
+make build  # rebuild the binary with the fresh bundle embedded</pre>
       <p>Or grab a release build from
         <code>https://github.com/ivanzzeth/remote-signer/releases</code> —
         the binaries published there always include a fresh UI bundle.
