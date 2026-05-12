@@ -47,4 +47,19 @@ export class SettingsService {
       null,
     );
   }
+
+  /**
+   * Replaces the snapshot for one group. The daemon validates the shape per
+   * group; bad input returns 400 with the validation error in the body.
+   */
+  async put(
+    group: SettingsGroup,
+    snapshot: SettingsSnapshot,
+  ): Promise<SettingsSnapshot> {
+    return this.transport.request<SettingsSnapshot>(
+      "PUT",
+      `/api/v1/admin/settings/${group}`,
+      snapshot,
+    );
+  }
 }
