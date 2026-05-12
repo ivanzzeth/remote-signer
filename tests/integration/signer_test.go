@@ -14,20 +14,6 @@ import (
 // strongPassword satisfies the password policy (>=16 chars, all 4 classes).
 const strongPassword = "IntegTest-Pass!123456"
 
-// extractJSONObject finds the first '{' in s and returns the substring from
-// there to the matching trailing '}'. The signer-create CLI prints a
-// human-friendly "Created signer: 0x..." line before its JSON body even
-// under --json, so callers that decode the response need to skip the
-// preamble. Tracked separately as a CLI ergonomics fix.
-func extractJSONObject(s string) string {
-	i := strings.Index(s, "{")
-	j := strings.LastIndex(s, "}")
-	if i < 0 || j < 0 || j < i {
-		return s
-	}
-	return s[i : j+1]
-}
-
 // TestKeystore_CreateShowVerifyList runs the local keystore subcommands as
 // an end-to-end flow. The CLI does not contact the daemon for any of these
 // — keystores are file-backed under --dir.
@@ -107,7 +93,7 @@ func TestSigner_CreateListLockUnlock(t *testing.T) {
 	var created struct {
 		Address string `json:"address"`
 	}
-	if err := json.Unmarshal([]byte(extractJSONObject(createStdout)), &created); err != nil {
+	if err := json.Unmarshal([]byte(createStdout), &created); err != nil {
 		t.Fatalf("decode signer create: %v\nstdout: %s", err, createStdout)
 	}
 	if !strings.HasPrefix(created.Address, "0x") || len(created.Address) != 42 {
@@ -152,7 +138,7 @@ func TestSign_RejectsWithoutMatchingRule(t *testing.T) {
 	var created struct {
 		Address string `json:"address"`
 	}
-	if err := json.Unmarshal([]byte(extractJSONObject(createStdout)), &created); err != nil {
+	if err := json.Unmarshal([]byte(createStdout), &created); err != nil {
 		t.Fatalf("decode signer: %v\nstdout: %s", err, createStdout)
 	}
 

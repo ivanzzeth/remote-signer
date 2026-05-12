@@ -114,7 +114,10 @@ func runAuditList(cmd *cobra.Command, args []string) error {
 func init() {
 	auditListCmd.Flags().StringVar(&flagAuditEventType, "event-type", "", "Filter by event type")
 	auditListCmd.Flags().StringVar(&flagAuditSeverity, "severity", "", "Filter by severity")
-	auditListCmd.Flags().StringVar(&flagAuditAPIKeyID, "api-key-id", "", "Filter by API key ID")
+	// "--by-api-key-id" rather than "--api-key-id" so the local filter does
+	// not shadow the global persistent --api-key-id auth flag (the cobra
+	// resolver lets the local override win, leaving the auth helper empty).
+	auditListCmd.Flags().StringVar(&flagAuditAPIKeyID, "by-api-key-id", "", "Filter by the API key ID that emitted the event")
 	auditListCmd.Flags().StringVar(&flagAuditSignerAddress, "signer-address", "", "Filter by signer address")
 	auditListCmd.Flags().StringVar(&flagAuditChainType, "chain-type", "", "Filter by chain type")
 	auditListCmd.Flags().StringVar(&flagAuditChainID, "chain-id", "", "Filter by chain ID")
