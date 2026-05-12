@@ -30,6 +30,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/statemachine"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/homepath"
 	"github.com/ivanzzeth/remote-signer/internal/logger"
 	"github.com/ivanzzeth/remote-signer/internal/notify"
 	"github.com/ivanzzeth/remote-signer/internal/ruleconfig"
@@ -43,7 +44,7 @@ import (
 // daemon shuts down cleanly via signal or until a fatal error occurs.
 func Run(args []string) error {
 	fs := flag.NewFlagSet("remote-signer server start", flag.ContinueOnError)
-	configPath := fs.String("config", "config.yaml", "path to config file")
+	configFlag := fs.String("config", "", "path to config file (default: ~/.remote-signer/config.yaml, falling back to ./config.yaml; auto-generated on first run)")
 	envFile := fs.String("env", ".env", "path to .env file (optional, ignored if not exists)")
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {
@@ -62,10 +63,41 @@ func Run(args []string) error {
 		// .env file not found is OK - use system environment variables
 	}
 
+	// Ensure ~/.remote-signer exists (0700) before resolving the config path so
+	// auto-generated config and bootstrap key files land in a private dir.
+	if _, err := homepath.EnsureHome(); err != nil {
+		return fmt.Errorf("ensure remote-signer home: %w", err)
+	}
+
+	// Resolve the config file:
+	//   -config flag → $REMOTE_SIGNER_CONFIG → ~/.remote-signer/config.yaml → ./config.yaml
+	// On the first launch nothing exists yet; write a minimal default to the
+	// home dir so the user has something to edit later.
+	configPath, exists, err := homepath.ResolveConfigPath(*configFlag)
+	if err != nil {
+		return fmt.Errorf("resolve config path: %w", err)
+	}
+	if !exists {
+		if err := homepath.WriteDefaultConfig(configPath); err != nil {
+			return fmt.Errorf("write default config: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "[INIT] wrote default config to %s\n", configPath)
+	}
+
 	// Load configuration
-	cfg, err := config.Load(*configPath)
+	cfg, err := config.Load(configPath)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// If the config left DSN empty (e.g. operator hand-trimmed the file),
+	// fall back to the SQLite path under the home dir so the daemon still boots.
+	if cfg.Database.DSN == "" {
+		dsn, err := homepath.DefaultSQLiteDSN()
+		if err != nil {
+			return fmt.Errorf("compute default DSN: %w", err)
+		}
+		cfg.Database.DSN = dsn
 	}
 
 	// Initialize zerolog logger (for notify module)
@@ -159,6 +191,18 @@ func Run(args []string) error {
 		return fmt.Errorf("failed to sync API keys from config: %w", err)
 	}
 
+	// Auto-bootstrap an admin Ed25519 keypair when the api_keys table is
+	// empty so the operator can use a fresh single-binary install without any
+	// pre-flight steps. Subsequent launches are no-ops; the private key is
+	// only written to disk, never to logs or stderr.
+	adminPrivPath, adminPubPath, err := homepath.AdminKeyPaths()
+	if err != nil {
+		return fmt.Errorf("resolve admin key paths: %w", err)
+	}
+	if err := bootstrapAdminKeyIfNeeded(context.Background(), apiKeyRepo, adminPrivPath, adminPubPath, log); err != nil {
+		return fmt.Errorf("bootstrap admin api key: %w", err)
+	}
+
 	// Initialize template repository
 	templateRepo, err := storage.NewGormTemplateRepository(db)
 	if err != nil {
@@ -176,7 +220,7 @@ func Run(args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create template initializer: %w", err)
 	}
-	templateInit.SetConfigDir(filepath.Dir(*configPath))
+	templateInit.SetConfigDir(filepath.Dir(configPath))
 	templateInit.SetAuditLogger(auditLogger)
 	if err := templateInit.SyncFromConfig(context.Background(), cfg.Templates); err != nil {
 		return fmt.Errorf("failed to sync templates from config: %w", err)
@@ -188,7 +232,7 @@ func Run(args []string) error {
 		return fmt.Errorf("failed to create rule initializer: %w", err)
 	}
 	// Set config directory for resolving relative paths in rule files
-	ruleInit.SetConfigDir(filepath.Dir(*configPath))
+	ruleInit.SetConfigDir(filepath.Dir(configPath))
 	ruleInit.SetAuditLogger(auditLogger)
 	ruleInit.SetTemplateRepo(templateRepo)
 	ruleInit.SetBudgetRepo(budgetRepo)
@@ -206,7 +250,7 @@ func Run(args []string) error {
 	}
 	// Expand file-type rules so startup validation covers evm_js rules from external files.
 	// SyncFromConfig already expanded them into the DB, but expandedRules still has "file" stubs.
-	expandedRulesWithFiles, err := config.ExpandFileRules(expandedRules, filepath.Dir(*configPath), log)
+	expandedRulesWithFiles, err := config.ExpandFileRules(expandedRules, filepath.Dir(configPath), log)
 	if err != nil {
 		return fmt.Errorf("failed to expand file rules for validation: %w", err)
 	}
@@ -743,7 +787,7 @@ func Run(args []string) error {
 	if cfg.Presets != nil && cfg.Presets.Dir != "" {
 		presetsDir = cfg.Presets.Dir
 		if !filepath.IsAbs(presetsDir) {
-			presetsDir = filepath.Join(filepath.Dir(*configPath), presetsDir)
+			presetsDir = filepath.Join(filepath.Dir(configPath), presetsDir)
 		}
 		var errAbs error
 		presetsDir, errAbs = filepath.Abs(presetsDir)
@@ -905,7 +949,7 @@ func Run(args []string) error {
 					continue
 				}
 				log.Info("Received SIGHUP, reloading rules from config")
-				reloadRules(*configPath, ruleInit, templateInit, auditLogger, log)
+				reloadRules(configPath, ruleInit, templateInit, auditLogger, log)
 				continue
 			}
 			log.Info("Received shutdown signal", "signal", sig.String())
