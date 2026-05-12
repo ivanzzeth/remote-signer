@@ -1,12 +1,40 @@
 # Configuration Reference
 
-This document covers the full `config.yaml` structure.
+This document covers the `config.yaml` structure used at startup.
 
 **Configuration templates:**
 - [`config.example.yaml`](../config.example.yaml) — Minimal production-ready configuration
 - [`config.full.yaml`](../config.full.yaml) — Complete examples of all features and protocols
 
 Use `config.example.yaml` as the starting point for most deployments. Reference `config.full.yaml` when you need specific protocol examples (Polymarket, Predict.fun, DEX, etc.).
+
+## What lives in config.yaml vs the database
+
+As of v0.3.0, config.yaml only holds the **bootstrap** settings the daemon
+needs before the database is reachable (listen address, TLS files, DSN,
+logger). Every other knob — API keys, rules, templates, notify providers
+and recipients, security limits, IP whitelist, audit thresholds, dynamic
+blocklist sources, simulation/foundry/RPC-gateway settings — lives in the
+database and is managed at runtime via the admin HTTP API or
+`remote-signer settings ...` / `remote-signer api-key ...` /
+`remote-signer rule ...` etc.
+
+| Concern | Where it lives | How to edit |
+|---|---|---|
+| `server` (port, TLS), `database.dsn`, `logger` | `config.yaml` | Restart required |
+| `chains.evm.enabled`, signer directories | `config.yaml` | Restart required |
+| API keys, rules, templates | `api_keys`/`rules`/`rule_templates` tables | `remote-signer api-key/rule/template ...`, or HTTP API |
+| Security, IP whitelist, rate limits, approval guard | `system_settings.security` (JSON) | `remote-signer settings set security …`, or `PUT /api/v1/admin/settings/security` |
+| Notify providers + recipient channels | `system_settings.notify` (JSON) | `remote-signer settings set notify …` |
+| Audit monitor thresholds | `system_settings.audit_monitor` | same |
+| Dynamic blocklist sources | `system_settings.evm.dynamic_blocklist` | same |
+| EVM simulation / foundry / RPC gateway / material check | `system_settings.evm.*` | same |
+
+YAML files that still contain `api_keys:`, `templates:`, or `rules:`
+sections fail to load — the error message points at the replacement
+command. The retired settings are seeded into the database from YAML the
+first time a Phase-3 build sees them; any subsequent edits go through the
+admin surface.
 
 ## Config File Precedence
 
@@ -132,45 +160,49 @@ API endpoints: `POST /api/v1/evm/simulate`, `POST /api/v1/evm/simulate/batch`, `
 
 ## API Keys
 
-API keys authenticate clients to the signing service using Ed25519 key pairs.
+API keys authenticate clients using Ed25519 key pairs. As of v0.3.0 keys are
+**not configured in config.yaml** — the daemon rejects a non-empty `api_keys`
+block at startup. Manage them via the admin CLI / HTTP API instead.
 
-```yaml
-api_keys:
-  - id: "admin"                            # Unique identifier (X-API-Key-ID header)
-    name: "Admin"                          # Human-readable name
-    public_key: "MCowBQYDK2VwAyEA..."     # Base64 or hex (auto-detected)
-    # public_key_env: "ADMIN_PUBLIC_KEY"   # Or read from env var
-    role: admin                            # Can manage rules, approve requests, create signers
-    enabled: true
-    rate_limit: 1000                       # Requests per minute
+### Bootstrap admin key
 
-  - id: "dev"
-    name: "Dev"
-    public_key: "MCowBQYDK2VwAyEA..."
-    role: dev                           # Can only submit sign requests
-    enabled: true
-    rate_limit: 100
-    # Optional scope restrictions:
-    # allowed_chain_types: ["evm"]         # Empty = all chains
-    # allowed_signers:                     # Empty = all signers
-    #   - "0x1234..."
-    # allowed_hd_wallets:                  # Empty = no HD wallet access
-    #   - "0xPrimaryAddress..."            # Grants access to all derived addresses
-```
+On the very first launch (no API keys in the database yet) the daemon
+generates an Ed25519 admin keypair, writes it to
+`~/.remote-signer/admin.key.priv` (0600) and `~/.remote-signer/admin.key.pub`
+(0644), and inserts the row into `api_keys` with `source=bootstrap`. The
+private key is never logged. Subsequent launches are no-ops.
 
-### Key generation
+### Generate a new API key
 
 ```bash
-# Generate a key pair
-./scripts/generate-api-key.sh -n admin
+# Mint locally — no daemon contact needed.
+remote-signer api-key keygen --out ./alice
+# Writes alice.priv and alice.pub; prints the hex public key.
 
-# Or manually:
-openssl genpkey -algorithm ed25519 -out data/admin_private.pem
-openssl pkey -in data/admin_private.pem -pubout -out data/admin_public.pem
-
-# Extract base64 for config:
-openssl pkey -in data/admin_public.pem -pubin -outform DER | base64
+# Register with the service as an admin.
+remote-signer api-key create \
+  --id alice \
+  --name "Alice" \
+  --role dev \
+  --public-key <hex-from-keygen> \
+  --rate-limit 100 \
+  --api-key-id admin \
+  --api-key-file ~/.remote-signer/admin.key.priv \
+  --url http://localhost:8548
 ```
+
+### List / update / delete
+
+```bash
+remote-signer api-key list
+remote-signer api-key update alice --rate-limit 500
+remote-signer api-key delete alice
+```
+
+All operations are admin-only. The full set of fields (including scope
+restrictions like `allowed_signers`, `allowed_hd_wallets`,
+`allowed_chain_types`) is documented at
+`/api/v1/api-keys` — see [docs/api.md](api.md).
 
 ### Permission model
 
@@ -185,8 +217,6 @@ openssl pkey -in data/admin_public.pem -pubin -outform DER | base64
 | `allowed_signers: [addr]` | Only listed | Only listed |
 | `allowed_hd_wallets: []` | All HD wallets | **No** HD wallet access |
 | `allowed_hd_wallets: [addr]` | Only listed | Only listed |
-
-Keys defined in the config file are synced to the database on startup.
 
 ## Notifications
 
@@ -406,7 +436,6 @@ Supported `method` values: `count_only`, `tx_value`, `calldata_param`, `typed_da
 | `EVM_SIGNER_KEY_1` | `chains.evm.signers.private_keys[].key_env` | EVM private key (hex, no 0x) |
 | `EVM_KEYSTORE_PASSWORD_1` | `chains.evm.signers.keystores[].password_env` | Keystore password |
 | `HD_WALLET_PASSWORD_1` | `chains.evm.signers.hd_wallets[].password_env` | HD wallet password |
-| `ADMIN_PUBLIC_KEY` | `api_keys[].public_key_env` | Admin API public key |
 | `DATABASE_DSN` | `database.dsn` | Database connection string |
 | `SLACK_BOT_TOKEN` | `notify.slack.bot_token` | Slack bot token |
 | `PUSHOVER_APP_TOKEN` | `notify.pushover.app_token` | Pushover app token |
