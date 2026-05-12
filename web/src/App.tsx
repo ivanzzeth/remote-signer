@@ -2,8 +2,12 @@ import { useEffect, useState } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { getCredentials, subscribeAuth } from "./lib/auth";
+import { ApiKeys } from "./pages/ApiKeys";
+import { Audit } from "./pages/Audit";
 import { Dashboard } from "./pages/Dashboard";
 import { Login } from "./pages/Login";
+import { Rules } from "./pages/Rules";
+import { Signers } from "./pages/Signers";
 
 /**
  * Top-level shell. The router takes one of three shapes:
@@ -36,6 +40,10 @@ export function App() {
       <Routes>
         <Route path="/" element={<Dashboard />} />
         <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/signers" element={<Signers />} />
+        <Route path="/rules" element={<Rules />} />
+        <Route path="/api-keys" element={<ApiKeys />} />
+        <Route path="/audit" element={<Audit />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>
