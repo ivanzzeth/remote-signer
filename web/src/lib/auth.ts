@@ -1,15 +1,25 @@
-// In-memory credential store. The simplification PR8 chose: web UI never
-// persists the private key. A page reload requires re-import; this matches
-// the threat model where private keys live on disk encrypted (via
-// `remote-signer keystore create`) and only the unwrapped bytes ever
-// touch the browser.
+// In-memory credential store + RemoteSignerClient lifecycle.
+//
+// Phase-8 simplification: the web UI never persists the private key. A page
+// reload requires re-import; this matches the threat model where keys live
+// on disk encrypted (via `remote-signer keystore create`) and only the
+// unwrapped seed ever touches the browser.
+//
+// All HTTP I/O goes through the linked SDK (`remote-signer-client`), so this
+// module is the single owner of the client instance and broadcasts changes
+// to React via subscribeAuth().
 
-import { derivePublicKey, bytesToHex } from "./crypto";
+import {
+  RemoteSignerClient,
+  bytesToHex,
+  derivePublicKey,
+} from "remote-signer-client";
 
 export interface Credentials {
   apiKeyID: string;
   privateKey: Uint8Array;
   publicKeyHex: string;
+  client: RemoteSignerClient;
 }
 
 let current: Credentials | null = null;
@@ -17,6 +27,11 @@ const listeners = new Set<() => void>();
 
 export function getCredentials(): Credentials | null {
   return current;
+}
+
+/** Convenience accessor for pages that only need the SDK client. */
+export function getClient(): RemoteSignerClient | null {
+  return current?.client ?? null;
 }
 
 export async function setCredentials(
@@ -29,10 +44,19 @@ export async function setCredentials(
     );
   }
   const pub = await derivePublicKey(privateKey);
+  // The SDK signs each request itself; we just hand it the seed + id. baseURL
+  // is empty so the SDK joins paths against the current page origin — same
+  // host the SPA was served from, which is the daemon itself.
+  const client = new RemoteSignerClient({
+    baseURL: window.location.origin,
+    apiKeyID,
+    privateKey,
+  });
   current = {
     apiKeyID,
     privateKey,
     publicKeyHex: bytesToHex(pub),
+    client,
   };
   for (const l of listeners) l();
   return current;

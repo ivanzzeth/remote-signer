@@ -1,7 +1,7 @@
 import { type FormEvent, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { parsePrivateKey } from "remote-signer-client";
 import { setCredentials } from "../lib/auth";
-import { parsePrivateKey } from "../lib/crypto";
 
 /**
  * Credential import screen. The threat model documented in

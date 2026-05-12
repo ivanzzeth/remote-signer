@@ -1,28 +1,21 @@
 import { useEffect, useState } from "react";
-import { getCredentials } from "../lib/auth";
-import { APIError, apiRequest, plainGet } from "../lib/client";
+import {
+  APIError,
+  type HealthResponse as SDKHealthResponse,
+  type ListAuditResponse,
+} from "remote-signer-client";
+import { getClient, getCredentials } from "../lib/auth";
 
-interface HealthResponse {
-  status: string;
-  version: string;
+// Local extension of the SDK's HealthResponse — the daemon adds a `security`
+// block that the SDK type doesn't model yet (it's an operational summary,
+// not part of the published health contract).
+interface HealthResponse extends SDKHealthResponse {
   security?: {
     auto_lock_timeout?: string;
     sign_timeout?: string;
     audit_retention_days?: number;
     content_type_validation?: boolean;
   };
-}
-
-interface AuditListResponse {
-  records: Array<{
-    id: string;
-    event_type: string;
-    severity: string;
-    timestamp: string;
-    api_key_id?: string;
-  }>;
-  total: number;
-  has_more: boolean;
 }
 
 /**
@@ -39,17 +32,22 @@ interface AuditListResponse {
  */
 export function Dashboard() {
   const creds = getCredentials();
+  const client = getClient();
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
 
-  const [audit, setAudit] = useState<AuditListResponse | null>(null);
+  const [audit, setAudit] = useState<ListAuditResponse | null>(null);
   const [auditError, setAuditError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!client) return;
     let mounted = true;
-    plainGet<HealthResponse>("/health")
+    // /health is unauthenticated but RemoteSignerClient.health() signs anyway
+    // so we always have one consistent call path. The daemon accepts both.
+    client
+      .health()
       .then((r) => {
-        if (mounted) setHealth(r);
+        if (mounted) setHealth(r as HealthResponse);
       })
       .catch((err) => {
         if (mounted) setHealthError(errMessage(err));
@@ -57,18 +55,20 @@ export function Dashboard() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [client]);
 
   useEffect(() => {
+    if (!client) return;
     let mounted = true;
-    apiRequest<AuditListResponse>("GET", "/api/v1/audit?limit=5")
+    client.audit
+      .list({ limit: 5 })
       .then((r) => {
         if (mounted) setAudit(r);
       })
       .catch((err) => {
         if (!mounted) return;
         if (err instanceof APIError) {
-          setAuditError(`HTTP ${err.status}: ${err.message}`);
+          setAuditError(`HTTP ${err.statusCode}: ${err.message}`);
           return;
         }
         setAuditError(errMessage(err));
@@ -76,7 +76,7 @@ export function Dashboard() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [client]);
 
   return (
     <div className="space-y-6">
@@ -138,7 +138,7 @@ export function Dashboard() {
                     </td>
                     <td className="py-1 pr-3">{r.event_type}</td>
                     <td className="py-1 pr-3 font-mono text-xs text-ink-700">
-                      {r.api_key_id ?? "—"}
+                      {r.api_key_id || "—"}
                     </td>
                     <td className="py-1">{r.severity}</td>
                   </tr>
