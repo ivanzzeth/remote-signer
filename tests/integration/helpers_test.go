@@ -158,7 +158,20 @@ func startDaemon(t *testing.T, opts ...daemonOption) *daemon {
 		}
 	} else {
 		dsn := fmt.Sprintf("file:%s/remote-signer.db?_journal_mode=WAL&_busy_timeout=5000", home)
-		yaml := fmt.Sprintf("server:\n  host: 127.0.0.1\n  port: %d\n  tls:\n    enabled: false\ndatabase:\n  dsn: %q\nlogger:\n  level: info\nchains:\n  evm:\n    enabled: true\n", port, dsn)
+		// Pin keystore and HD-wallet directories under the per-test home so
+		// signer create/HD wallet create do not leak across parallel tests.
+		// Without this the daemon defaults to ./data/{keystores,hd-wallets}
+		// relative to its working directory and quickly hits the per-key
+		// resource limits.
+		yaml := fmt.Sprintf(
+			"server:\n  host: 127.0.0.1\n  port: %d\n  tls:\n    enabled: false\n"+
+				"database:\n  dsn: %q\n"+
+				"logger:\n  level: info\n"+
+				"chains:\n  evm:\n    enabled: true\n    keystore_dir: %q\n    hd_wallet_dir: %q\n",
+			port, dsn,
+			filepath.Join(home, "keystores"),
+			filepath.Join(home, "hd-wallets"),
+		)
 		if err := os.WriteFile(configPath, []byte(yaml), 0600); err != nil {
 			t.Fatalf("write default config.yaml: %v", err)
 		}
@@ -261,9 +274,11 @@ func (d *daemon) wait() error {
 }
 
 // dumpLog writes the daemon log to the test output. Called on failure.
+// The log lives in the parent of the home dir (the tempdir root) so it is
+// not nuked by the daemon's own home-dir creation path; see startDaemon.
 func (d *daemon) dumpLog() {
 	d.t.Helper()
-	logPath := filepath.Join(d.home, "daemon.log")
+	logPath := filepath.Join(filepath.Dir(d.home), "daemon.log")
 	data, err := os.ReadFile(logPath)
 	if err != nil {
 		d.t.Logf("daemon log unreadable: %v", err)
