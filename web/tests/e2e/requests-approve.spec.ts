@@ -36,15 +36,10 @@ test("approve a pending request via the UI completes it", async ({
 }) => {
   const c = adminClient();
 
-  // The SDK's CreateSignerRequest type is stale (single password field);
-  // the server expects { type, keystore: { password } }. Cast through any
-  // to send the real shape — fixing the SDK type is a separate concern.
-  const signer = (await (c.evm.signers.create as unknown as (
-    req: unknown,
-  ) => Promise<{ address: string }>)({
+  const signer = await c.evm.signers.create({
     type: "keystore",
     keystore: { password: "e2e-approve-pw" },
-  })) as { address: string };
+  });
 
   // The SDK throws SignError when executeAsync returns a non-completed
   // status — including the "pending" we want. Catch and pull the
