@@ -17,6 +17,7 @@ import (
 	"gorm.io/gorm/logger"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/settings"
 )
 
 // sqliteDriverName matches the name modernc.org/sqlite registers with database/sql.
@@ -81,6 +82,7 @@ func NewDB(cfg Config) (*gorm.DB, error) {
 		&types.SignerAccess{},
 		&types.Wallet{},
 		&types.WalletMember{},
+		&settings.Setting{},
 	); err != nil {
 		return nil, fmt.Errorf("failed to auto-migrate: %w", err)
 	}
@@ -124,6 +126,7 @@ func NewDBWithLogger(cfg Config, logLevel logger.LogLevel) (*gorm.DB, error) {
 		&types.SignerAccess{},
 		&types.Wallet{},
 		&types.WalletMember{},
+		&settings.Setting{},
 	); err != nil {
 		return nil, fmt.Errorf("failed to auto-migrate: %w", err)
 	}
