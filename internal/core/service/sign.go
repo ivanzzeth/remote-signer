@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,6 +22,18 @@ import (
 // ErrManualApprovalDisabled is returned when no whitelist rule matches and manual approval is disabled.
 // Caller should respond with 403 Forbidden.
 var ErrManualApprovalDisabled = errors.New("no matching whitelist rule and manual approval is disabled")
+
+// isLockedSignerErr reports whether the sign error came from a locked
+// signer. Chain adapters surface this with phrasing like
+// "failed to get signer: signer is locked" — matching on "is locked"
+// is intentionally loose so adapter wording changes don't silently
+// turn this back into a "failed" request.
+func isLockedSignerErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "is locked")
+}
 
 // SignServiceAPI defines the methods used by HTTP handlers for sign operations.
 // This interface enables mock-based unit testing of handlers without constructing a full SignService.
@@ -374,7 +387,17 @@ func (s *SignService) processApprovedRequest(
 	// Perform signing
 	result, err := adapter.Sign(ctx, signReq.SignerAddress, signReq.SignType, signReq.ChainID, signReq.Payload)
 	if err != nil {
-		// Transition to failed
+		// A locked signer is a transient operator-fixable state, not a
+		// final decision on the request. Revert to authorizing so the
+		// same approval can be retried after unlock, instead of burning
+		// the request to "failed" and forcing the caller to resubmit.
+		if isLockedSignerErr(err) {
+			if _, smErr := s.stateMachine.RevertSigningToAuthorizing(ctx, signReq.ID, err.Error()); smErr != nil {
+				s.logger.Error("failed to revert request to authorizing", "error", smErr)
+			}
+			return nil, fmt.Errorf("signing failed: %w", err)
+		}
+		// Permanent failure: transition to failed
 		if _, smErr := s.stateMachine.FailSign(ctx, signReq.ID, err.Error()); smErr != nil {
 			s.logger.Error("failed to transition to failed state", "error", smErr)
 		}

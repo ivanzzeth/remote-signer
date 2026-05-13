@@ -179,6 +179,14 @@ func (h *ApprovalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.signService.ProcessApproval(r.Context(), types.SignRequestID(requestID), approvalReq)
 	if err != nil {
 		h.logger.Error("failed to process approval", "error", err, "request_id", requestID)
+		// A locked signer is an operator-actionable state, not an internal
+		// fault — surface 423 with the underlying reason so the UI can
+		// prompt the user to unlock before retrying. Any wording containing
+		// "is locked" comes from chain adapters' GetSigner path.
+		if strings.Contains(err.Error(), "is locked") {
+			h.writeError(w, "signer is locked — unlock it before approving", http.StatusLocked)
+			return
+		}
 		h.writeError(w, "failed to process approval", http.StatusInternalServerError)
 		return
 	}

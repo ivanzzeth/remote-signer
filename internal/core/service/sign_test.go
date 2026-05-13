@@ -1259,6 +1259,61 @@ func TestProcessApproval(t *testing.T) {
 		}
 	})
 
+	// Regression: a locked-signer error during ProcessApproval must NOT
+	// burn the request to "failed". Operators see locked signers as a
+	// transient state they can fix; if approval moved the request to a
+	// terminal state, they'd have to ask the caller to resubmit just
+	// because someone forgot to unlock first.
+	t.Run("manual_approval_locked_signer_keeps_authorizing", func(t *testing.T) {
+		f := newSignServiceFixture(t)
+		f.adapter.signErr = fmt.Errorf("failed to get signer: signer is locked")
+		f.adapter.signResult = nil
+		svc := f.build(t)
+
+		req := &types.SignRequest{
+			ID:            "req-approve-locked",
+			ChainType:     types.ChainTypeEVM,
+			ChainID:       "1",
+			SignerAddress: "0xsigner",
+			SignType:      "eth_signTransaction",
+			Payload:       []byte(`{}`),
+			Status:        types.StatusAuthorizing,
+			CreatedAt:     time.Now(),
+			UpdatedAt:     time.Now(),
+		}
+		if err := f.requestRepo.Create(ctx, req); err != nil {
+			t.Fatalf("failed to seed request: %v", err)
+		}
+
+		_, err := svc.ProcessApproval(ctx, "req-approve-locked", &ApprovalRequest{
+			Approved:   true,
+			ApprovedBy: "admin",
+		})
+		if err == nil {
+			t.Fatal("expected error when signer is locked")
+		}
+		if !strings.Contains(err.Error(), "is locked") {
+			t.Errorf("expected locked-signer error, got: %v", err)
+		}
+
+		// Request must remain in authorizing so the operator can
+		// approve again after unlocking — and the stale error must
+		// not leak into the next attempt's view.
+		got, err := f.requestRepo.Get(ctx, "req-approve-locked")
+		if err != nil {
+			t.Fatalf("failed to re-read request: %v", err)
+		}
+		if got.Status != types.StatusAuthorizing {
+			t.Errorf("expected status=authorizing after locked-signer failure, got %q", got.Status)
+		}
+		if got.ErrorMessage != "" {
+			t.Errorf("expected error_message to be cleared, got %q", got.ErrorMessage)
+		}
+		if got.CompletedAt != nil {
+			t.Errorf("expected completed_at to be nil, got %v", got.CompletedAt)
+		}
+	})
+
 	t.Run("manual_approval_rule_generation_fails_still_signs", func(t *testing.T) {
 		f := newSignServiceFixture(t)
 
