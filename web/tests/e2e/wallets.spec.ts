@@ -1,4 +1,23 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  RemoteSignerClient,
+  parsePrivateKey,
+} from "remote-signer-client";
 import { expect, test } from "./fixtures";
+import { getState } from "./global-setup";
+
+function adminClient() {
+  const state = getState();
+  const seed = parsePrivateKey(
+    readFileSync(join(state.home, "apikeys", "admin.key.priv"), "utf8"),
+  );
+  return new RemoteSignerClient({
+    baseURL: `http://127.0.0.1:${process.env.E2E_PORT ?? 18548}`,
+    apiKeyID: "admin",
+    privateKey: seed,
+  });
+}
 
 test("create wallet + add member + delete via UI", async ({ authedPage }) => {
   // We need a signer to add as a member. Use the SDK to mint one quickly —
@@ -33,4 +52,63 @@ test("create wallet + add member + delete via UI", async ({ authedPage }) => {
   authedPage.once("dialog", (d) => d.accept());
   await row.getByRole("button", { name: "Delete" }).click();
   await expect(authedPage.locator(`text=${walletName}`)).toHaveCount(0);
+});
+
+test("add member uses signer picker filtered by type", async ({
+  authedPage,
+}) => {
+  // Seed a keystore signer + import one private-key signer via the SDK so
+  // the picker has two distinct types to filter between.
+  const c = adminClient();
+  const stamp = Date.now();
+  const keystore = await c.evm.signers.create({
+    type: "keystore",
+    keystore: { password: `pw-${stamp}` },
+    display_name: `e2e-keystore-${stamp}`,
+  });
+
+  const walletName = `e2e-picker-${stamp}`;
+  await authedPage
+    .getByRole("link", { name: "Wallets", exact: true })
+    .click();
+  await authedPage.click("button:has-text('New wallet')");
+  await authedPage.fill("input >> nth=0", walletName);
+  await authedPage.click("button:has-text('Create wallet')");
+
+  const row = authedPage.locator("tr", {
+    has: authedPage.locator(`text=${walletName}`),
+  });
+  await row.click();
+
+  // Picker is a <select> for the signer. The keystore we just seeded
+  // should be one of its options.
+  const picker = authedPage
+    .locator("form")
+    .filter({ hasText: "Signer" })
+    .locator("select")
+    .nth(1); // first select is Type, second is Signer
+  await expect(picker).toBeVisible();
+  await picker.selectOption(keystore.address);
+  await authedPage.click("button:has-text('Add member')");
+
+  // The selected address now appears in the Members table.
+  await expect(
+    authedPage.locator(`text=${keystore.address}`).first(),
+  ).toBeVisible({ timeout: 5_000 });
+
+  // After adding, the picker should no longer offer this signer (filtered
+  // out by `memberAddrs`). Eligibility text appears when the list empties.
+  await expect(
+    authedPage.locator(`option[value='${keystore.address}']`),
+  ).toHaveCount(0);
+
+  // Cleanup: remove the member + delete the wallet. The member row is
+  // identified by the signer address; Remove is on the same row.
+  const memberRow = authedPage.locator("tr", {
+    has: authedPage.locator(`text=${keystore.address}`),
+  });
+  authedPage.once("dialog", (d) => d.accept()); // remove member confirm
+  await memberRow.getByRole("button", { name: "Remove" }).click();
+  authedPage.once("dialog", (d) => d.accept()); // delete wallet confirm
+  await row.getByRole("button", { name: "Delete" }).click();
 });
