@@ -11,7 +11,6 @@ import {
   ErrorBanner,
   Loading,
   PageHeader,
-  Row,
 } from "../components/ui";
 import { getClient } from "../lib/auth";
 
@@ -21,33 +20,33 @@ type GroupState =
   | { status: "error"; msg: string };
 
 /**
- * Per-group settings viewer + raw JSON editor. The editor PUTs the full
- * snapshot back; the daemon validates the shape. We deliberately don't
- * try to be schema-aware — settings shapes vary too much group-to-group
- * (durations as strings, nested objects for IPWhitelist/ApprovalGuard,
- * arrays of strings, etc.) and a typed form per group would be 9× the
- * code without proportional value for an admin who already understands
- * the YAML config shape.
+ * Runtime settings editor. Each of the daemon's nine groups gets a
+ * typed form rendered from the JSON snapshot: booleans become
+ * checkboxes, numbers in duration-flavoured fields render as "30s"
+ * strings, string arrays render as one-per-line textareas, nested
+ * objects recurse. Advanced operators still get a raw-JSON fallback
+ * for fields the type-sniffer doesn't model.
+ *
+ * Left rail switches groups; saves are per-group via settings.put().
  */
 export function Settings() {
   const [groups, setGroups] = useState<Record<string, GroupState>>(() =>
     Object.fromEntries(SETTINGS_GROUPS.map((g) => [g, { status: "loading" }])),
   );
+  const [selected, setSelected] = useState<SettingsGroup>(SETTINGS_GROUPS[0]);
 
   function fetchOne(g: SettingsGroup) {
     const client = getClient();
     if (!client) return;
     setGroups((prev) => ({ ...prev, [g]: { status: "loading" } }));
     client.settings.get(g).then(
-      (data) => setGroups((prev) => ({ ...prev, [g]: { status: "ok", data } })),
+      (data) =>
+        setGroups((prev) => ({ ...prev, [g]: { status: "ok", data } })),
       (err) => {
-        const msg =
-          err instanceof APIError
-            ? `HTTP ${err.statusCode}: ${err.message}`
-            : err instanceof Error
-              ? err.message
-              : String(err);
-        setGroups((prev) => ({ ...prev, [g]: { status: "error", msg } }));
+        setGroups((prev) => ({
+          ...prev,
+          [g]: { status: "error", msg: formatErr(err) },
+        }));
       },
     );
   }
@@ -69,17 +68,10 @@ export function Settings() {
       for (const r of results) {
         if (r.status !== "fulfilled") continue;
         const v = r.value;
-        if ("err" in v) {
-          const msg =
-            v.err instanceof APIError
-              ? `HTTP ${v.err.statusCode}: ${v.err.message}`
-              : v.err instanceof Error
-                ? v.err.message
-                : String(v.err);
-          next[v.g] = { status: "error", msg };
-        } else {
-          next[v.g] = { status: "ok", data: v.data };
-        }
+        next[v.g] =
+          "err" in v
+            ? { status: "error", msg: formatErr(v.err) }
+            : { status: "ok", data: v.data };
       }
       setGroups(next);
     });
@@ -88,170 +80,423 @@ export function Settings() {
     };
   }, []);
 
+  const selectedState = groups[selected];
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Settings"
-        subtitle="Runtime-mutable configuration groups. Edits PUT the whole group; daemon validates the JSON shape."
+        subtitle="Runtime-mutable configuration. Saved per group; the daemon validates each PUT."
       />
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        {SETTINGS_GROUPS.map((g) => (
-          <GroupCard
-            key={g}
-            group={g}
-            state={groups[g]}
-            onSaved={() => fetchOne(g)}
-          />
-        ))}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-[14rem_1fr]">
+        <nav className="rounded-lg border border-ink-200 bg-white p-2">
+          {SETTINGS_GROUPS.map((g) => {
+            const state = groups[g];
+            const dot =
+              state?.status === "error"
+                ? "bg-red-400"
+                : state?.status === "loading"
+                  ? "bg-ink-300 animate-pulse"
+                  : "bg-green-400";
+            return (
+              <button
+                key={g}
+                type="button"
+                onClick={() => setSelected(g)}
+                className={`flex w-full items-center justify-between rounded px-3 py-1.5 text-left text-sm transition ${
+                  selected === g
+                    ? "bg-accent-500 text-white"
+                    : "text-ink-700 hover:bg-ink-100"
+                }`}
+              >
+                <span className="truncate font-mono text-xs">{g}</span>
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${dot}`}
+                  aria-hidden
+                />
+              </button>
+            );
+          })}
+        </nav>
+
+        <Card title={selected}>
+          {selectedState?.status === "loading" || !selectedState ? (
+            <Loading />
+          ) : selectedState.status === "error" ? (
+            <ErrorBanner msg={selectedState.msg} />
+          ) : (
+            <GroupEditor
+              key={selected}
+              group={selected}
+              initial={selectedState.data}
+              onSaved={() => fetchOne(selected)}
+            />
+          )}
+        </Card>
       </div>
     </div>
   );
 }
 
-function GroupCard({
-  group,
-  state,
-  onSaved,
-}: {
-  group: SettingsGroup;
-  state: GroupState;
-  onSaved: () => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  return (
-    <Card
-      title={group}
-      actions={
-        state?.status === "ok" && !editing ? (
-          <button
-            type="button"
-            onClick={() => setEditing(true)}
-            className="rounded-md border border-ink-200 px-2 py-0.5 text-xs text-ink-700 hover:bg-ink-100"
-          >
-            Edit
-          </button>
-        ) : null
-      }
-    >
-      {!state || state.status === "loading" ? (
-        <Loading />
-      ) : state.status === "error" ? (
-        <ErrorBanner msg={state.msg} />
-      ) : editing ? (
-        <GroupEditor
-          group={group}
-          initial={state.data}
-          onCancel={() => setEditing(false)}
-          onSaved={() => {
-            setEditing(false);
-            onSaved();
-          }}
-        />
-      ) : (
-        <GroupViewer data={state.data} />
-      )}
-    </Card>
-  );
-}
-
-function GroupViewer({ data }: { data: SettingsSnapshot }) {
-  const entries = Object.entries(data);
-  if (entries.length === 0) return <Empty msg="empty group" />;
-  return (
-    <dl className="space-y-1 text-sm">
-      {entries.map(([k, v]) => (
-        <Row key={k} k={k} v={formatValue(v)} mono={isSimpleValue(v)} />
-      ))}
-    </dl>
-  );
-}
+// --- Editor -----------------------------------------------------------------
 
 function GroupEditor({
   group,
   initial,
-  onCancel,
   onSaved,
 }: {
   group: SettingsGroup;
   initial: SettingsSnapshot;
-  onCancel: () => void;
   onSaved: () => void;
 }) {
-  const [json, setJson] = useState(() => JSON.stringify(initial, null, 2));
+  const [value, setValue] = useState<SettingsSnapshot>(() =>
+    structuredClone(initial),
+  );
+  const [advanced, setAdvanced] = useState(false);
+  const [rawJson, setRawJson] = useState(() =>
+    JSON.stringify(initial, null, 2),
+  );
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const dirty = JSON.stringify(value) !== JSON.stringify(initial);
+
+  function setField(path: string[], v: unknown) {
+    setValue((prev) => {
+      const next = structuredClone(prev) as Record<string, unknown>;
+      let cur: Record<string, unknown> = next;
+      for (let i = 0; i < path.length - 1; i++) {
+        cur = cur[path[i]] as Record<string, unknown>;
+      }
+      cur[path[path.length - 1]] = v;
+      return next as SettingsSnapshot;
+    });
+  }
 
   async function save() {
     setError(null);
-    let parsed: SettingsSnapshot;
-    try {
-      parsed = JSON.parse(json);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "JSON parse error");
-      return;
+    let payload = value;
+    if (advanced) {
+      try {
+        payload = JSON.parse(rawJson);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "invalid JSON");
+        return;
+      }
     }
     const client = getClient();
     if (!client) return;
     setSaving(true);
     try {
-      await client.settings.put(group, parsed);
+      await client.settings.put(group, payload);
       onSaved();
     } catch (e) {
-      if (e instanceof APIError) {
-        setError(`HTTP ${e.statusCode}: ${e.message}`);
-      } else {
-        setError(e instanceof Error ? e.message : String(e));
-      }
+      setError(formatErr(e));
     } finally {
       setSaving(false);
     }
   }
 
+  const entries = Object.entries(value);
+
   return (
-    <div className="space-y-2">
-      <textarea
-        value={json}
-        onChange={(e) => setJson(e.target.value)}
-        rows={Math.min(20, json.split("\n").length + 1)}
-        spellCheck={false}
-        className="block w-full rounded-md border border-ink-300 p-2 font-mono text-[11px]"
-      />
+    <div className="space-y-4">
+      {entries.length === 0 ? (
+        <Empty msg="empty group" />
+      ) : advanced ? (
+        <textarea
+          value={rawJson}
+          onChange={(e) => setRawJson(e.target.value)}
+          rows={Math.min(24, rawJson.split("\n").length + 1)}
+          spellCheck={false}
+          className="block w-full rounded-md border border-ink-300 p-2 font-mono text-[11px]"
+        />
+      ) : (
+        <dl className="space-y-2 text-sm">
+          {entries.map(([k, v]) => (
+            <FieldRow
+              key={k}
+              path={[k]}
+              fieldKey={k}
+              value={v}
+              onChange={setField}
+            />
+          ))}
+        </dl>
+      )}
+
       {error && <ErrorBanner msg={error} />}
-      <div className="flex justify-end gap-2">
-        <button
-          type="button"
-          onClick={onCancel}
-          disabled={saving}
-          className="rounded-md border border-ink-200 px-2 py-0.5 text-xs text-ink-700 hover:bg-ink-100 disabled:opacity-50"
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          onClick={save}
-          disabled={saving}
-          className="rounded-md bg-accent-500 px-2 py-0.5 text-xs font-medium text-white hover:bg-accent-600 disabled:opacity-50"
-        >
-          {saving ? "Saving…" : "Save"}
-        </button>
+
+      <div className="flex items-center justify-between border-t border-ink-200 pt-3">
+        <label className="flex items-center gap-2 text-xs text-ink-500">
+          <input
+            type="checkbox"
+            checked={advanced}
+            onChange={(e) => {
+              const next = e.target.checked;
+              if (next) {
+                setRawJson(JSON.stringify(value, null, 2));
+              } else {
+                try {
+                  setValue(JSON.parse(rawJson));
+                } catch {
+                  // ignore — let the user fix invalid JSON before flipping back
+                }
+              }
+              setAdvanced(next);
+            }}
+          />
+          Advanced (raw JSON)
+        </label>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setValue(structuredClone(initial));
+              setRawJson(JSON.stringify(initial, null, 2));
+              setError(null);
+            }}
+            disabled={!dirty && rawJson === JSON.stringify(initial, null, 2)}
+            className="rounded-md border border-ink-200 px-3 py-1 text-xs text-ink-700 hover:bg-ink-100 disabled:opacity-50"
+          >
+            Reset
+          </button>
+          <button
+            type="button"
+            onClick={save}
+            disabled={saving}
+            className="rounded-md bg-accent-500 px-3 py-1 text-xs font-medium text-white hover:bg-accent-600 disabled:opacity-50"
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
-function isSimpleValue(v: unknown): boolean {
+// --- Field rendering --------------------------------------------------------
+
+const DURATION_KEY_RE = /(timeout|_age|_window|_after|_interval|_ttl)$/;
+const NS_PER = {
+  ns: 1,
+  us: 1_000,
+  µs: 1_000,
+  ms: 1_000_000,
+  s: 1_000_000_000,
+  m: 60_000_000_000,
+  h: 3_600_000_000_000,
+} as const;
+
+function isDurationField(key: string, value: unknown): boolean {
+  return typeof value === "number" && DURATION_KEY_RE.test(key);
+}
+
+function formatDuration(ns: number): string {
+  if (ns === 0) return "0s";
+  if (ns % NS_PER.h === 0) return `${ns / NS_PER.h}h`;
+  if (ns % NS_PER.m === 0) return `${ns / NS_PER.m}m`;
+  if (ns % NS_PER.s === 0) return `${ns / NS_PER.s}s`;
+  if (ns % NS_PER.ms === 0) return `${ns / NS_PER.ms}ms`;
+  return `${ns}ns`;
+}
+
+function parseDuration(s: string): number | null {
+  const m = s.trim().match(/^(-?\d+(?:\.\d+)?)\s*(ns|us|µs|ms|s|m|h)$/i);
+  if (!m) return null;
+  const n = parseFloat(m[1]);
+  const unit = m[2].toLowerCase() as keyof typeof NS_PER;
+  return Math.round(n * NS_PER[unit]);
+}
+
+function FieldRow({
+  path,
+  fieldKey,
+  value,
+  onChange,
+}: {
+  path: string[];
+  fieldKey: string;
+  value: unknown;
+  onChange: (path: string[], v: unknown) => void;
+}) {
+  // Nested object → indent + recurse. Skip arrays here (handled below).
+  if (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  ) {
+    const obj = value as Record<string, unknown>;
+    const entries = Object.entries(obj);
+    return (
+      <div className="rounded-md border border-ink-200 p-3">
+        <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-ink-500">
+          {fieldKey}
+        </div>
+        {entries.length === 0 ? (
+          <p className="text-xs text-ink-500">empty</p>
+        ) : (
+          <dl className="space-y-2">
+            {entries.map(([k, v]) => (
+              <FieldRow
+                key={k}
+                path={[...path, k]}
+                fieldKey={k}
+                value={v}
+                onChange={onChange}
+              />
+            ))}
+          </dl>
+        )}
+      </div>
+    );
+  }
+
   return (
-    v === null ||
-    typeof v === "string" ||
-    typeof v === "number" ||
-    typeof v === "boolean"
+    <div className="grid grid-cols-1 items-center gap-1 md:grid-cols-[16rem_1fr]">
+      <dt className="font-mono text-xs text-ink-500">{fieldKey}</dt>
+      <dd>
+        <FieldInput
+          fieldKey={fieldKey}
+          value={value}
+          onChange={(v) => onChange(path, v)}
+        />
+      </dd>
+    </div>
   );
 }
 
-function formatValue(v: unknown): string {
-  if (v === null || v === undefined) return "—";
-  if (typeof v === "string") return v;
-  if (typeof v === "number" || typeof v === "boolean") return String(v);
-  return JSON.stringify(v);
+function FieldInput({
+  fieldKey,
+  value,
+  onChange,
+}: {
+  fieldKey: string;
+  value: unknown;
+  onChange: (v: unknown) => void;
+}) {
+  // Boolean → toggle.
+  if (typeof value === "boolean") {
+    return (
+      <label className="inline-flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={value}
+          onChange={(e) => onChange(e.target.checked)}
+          className="h-4 w-4"
+        />
+        <span className="text-ink-700">{value ? "true" : "false"}</span>
+      </label>
+    );
+  }
+
+  // Duration-like number → "30s" input with parsing.
+  if (isDurationField(fieldKey, value)) {
+    return <DurationInput value={value as number} onChange={onChange} />;
+  }
+
+  // Plain number.
+  if (typeof value === "number") {
+    return (
+      <input
+        type="number"
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-48 rounded-md border border-ink-300 px-2 py-1 text-sm"
+      />
+    );
+  }
+
+  // String[] → newline-separated textarea.
+  if (Array.isArray(value)) {
+    const joined = value.map((v) => String(v)).join("\n");
+    return (
+      <textarea
+        value={joined}
+        onChange={(e) => {
+          const next = e.target.value
+            .split("\n")
+            .map((s) => s.trim())
+            .filter(Boolean);
+          onChange(next);
+        }}
+        rows={Math.max(2, value.length + 1)}
+        spellCheck={false}
+        className="block w-full rounded-md border border-ink-300 p-2 font-mono text-xs"
+        placeholder="one entry per line"
+      />
+    );
+  }
+
+  // null → empty text input that materialises into a string on type.
+  if (value === null) {
+    return (
+      <input
+        type="text"
+        value=""
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-md border border-ink-300 px-2 py-1 text-sm"
+        placeholder="null"
+      />
+    );
+  }
+
+  // String fallback.
+  return (
+    <input
+      type="text"
+      value={String(value)}
+      onChange={(e) => onChange(e.target.value)}
+      className="w-full rounded-md border border-ink-300 px-2 py-1 text-sm font-mono"
+    />
+  );
+}
+
+function DurationInput({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  const [text, setText] = useState(() => formatDuration(value));
+  const [bad, setBad] = useState(false);
+
+  useEffect(() => {
+    setText(formatDuration(value));
+    setBad(false);
+  }, [value]);
+
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        type="text"
+        value={text}
+        onChange={(e) => {
+          const t = e.target.value;
+          setText(t);
+          const parsed = parseDuration(t);
+          if (parsed === null) {
+            setBad(true);
+          } else {
+            setBad(false);
+            onChange(parsed);
+          }
+        }}
+        className={`w-32 rounded-md border px-2 py-1 text-sm font-mono ${
+          bad ? "border-red-400" : "border-ink-300"
+        }`}
+        placeholder="30s"
+      />
+      <span className="text-[11px] text-ink-500">
+        {bad ? "use e.g. 30s, 5m, 1h" : "ns under the hood"}
+      </span>
+    </div>
+  );
+}
+
+function formatErr(e: unknown): string {
+  if (e instanceof APIError) return `HTTP ${e.statusCode}: ${e.message}`;
+  if (e instanceof Error) return e.message;
+  return String(e);
 }
