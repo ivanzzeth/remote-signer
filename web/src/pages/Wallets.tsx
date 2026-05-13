@@ -182,9 +182,27 @@ function MembersPanel({ walletID }: { walletID: string }) {
     (c) => c.wallets.listMembers(walletID),
     [walletID],
   );
+  // Fetch the full signer roster so the operator picks from a dropdown
+  // instead of typing addresses by hand. We re-fetch on every panel open
+  // (cheap: signers list is small) so newly-added signers show up.
+  const signers = useApi((c) => c.evm.signers.list(), [walletID]);
   const [addError, setAddError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [typeFilter, setTypeFilter] = useState<string>("");
   const [newSigner, setNewSigner] = useState("");
+
+  // Set of addresses already in this wallet — used to hide them from the
+  // picker so the operator can't re-add the same signer.
+  const memberAddrs = new Set(
+    (members.data?.members ?? []).map((m) => m.signer_address.toLowerCase()),
+  );
+  const allSigners = signers.data?.signers ?? [];
+  const allTypes = Array.from(new Set(allSigners.map((s) => s.type))).sort();
+  const eligible = allSigners.filter(
+    (s) =>
+      !memberAddrs.has(s.address.toLowerCase()) &&
+      (typeFilter === "" || s.type === typeFilter),
+  );
 
   async function add() {
     if (!newSigner.trim()) return;
@@ -198,6 +216,7 @@ function MembersPanel({ walletID }: { walletID: string }) {
       });
       setNewSigner("");
       members.reload();
+      signers.reload();
     } catch (e) {
       setAddError(formatErr(e));
     } finally {
@@ -231,17 +250,55 @@ function MembersPanel({ walletID }: { walletID: string }) {
         }}
         className="flex flex-wrap items-end gap-3 rounded-md border border-ink-200 p-3"
       >
-        <div className="flex-1 min-w-[280px]">
+        <div>
           <label className="mb-1 block text-[11px] uppercase tracking-wide text-ink-500">
-            Add signer (0x-prefixed address)
+            Type
           </label>
-          <input
-            type="text"
-            value={newSigner}
-            onChange={(e) => setNewSigner(e.target.value)}
-            placeholder="0x…"
-            className="w-full rounded-md border border-ink-300 px-2 py-1 font-mono text-xs"
-          />
+          <select
+            value={typeFilter}
+            onChange={(e) => {
+              setTypeFilter(e.target.value);
+              setNewSigner("");
+            }}
+            className="rounded-md border border-ink-300 px-2 py-1 text-sm"
+          >
+            <option value="">all</option>
+            {allTypes.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex-1 min-w-[320px]">
+          <label className="mb-1 block text-[11px] uppercase tracking-wide text-ink-500">
+            Signer
+          </label>
+          {signers.loading ? (
+            <div className="text-xs text-ink-500">Loading signers…</div>
+          ) : eligible.length === 0 ? (
+            <div className="text-xs text-ink-500">
+              {allSigners.length === 0
+                ? "No signers configured yet — create one on the Signers page."
+                : "No eligible signers (all already members or filtered out)."}
+            </div>
+          ) : (
+            <select
+              value={newSigner}
+              onChange={(e) => setNewSigner(e.target.value)}
+              className="w-full rounded-md border border-ink-300 px-2 py-1 font-mono text-xs"
+            >
+              <option value="">— pick a signer —</option>
+              {eligible.map((s) => (
+                <option key={s.address} value={s.address}>
+                  {s.address}
+                  {s.display_name ? `  ·  ${s.display_name}` : ""}
+                  {`  ·  ${s.type}`}
+                  {s.locked ? "  ·  locked" : ""}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
         <button
           type="submit"
