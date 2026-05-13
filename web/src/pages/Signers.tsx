@@ -32,6 +32,7 @@ export function Signers() {
     password: string;
     displayName: string;
     tags: string[];
+    privateKeyHex?: string;
   }) {
     const client = getClient();
     if (!client) return;
@@ -39,7 +40,12 @@ export function Signers() {
     try {
       await client.evm.signers.create({
         type: "keystore",
-        keystore: { password: input.password },
+        keystore: {
+          password: input.password,
+          ...(input.privateKeyHex
+            ? { private_key_hex: input.privateKeyHex }
+            : {}),
+        },
         ...(input.displayName ? { display_name: input.displayName } : {}),
         ...(input.tags.length ? { tags: input.tags } : {}),
       });
@@ -279,35 +285,91 @@ function CreateForm({
     password: string;
     displayName: string;
     tags: string[];
+    privateKeyHex?: string;
   }) => void;
 }) {
+  const [mode, setMode] = useState<"generate" | "import">("generate");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [privateKeyHex, setPrivateKeyHex] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [tagsCsv, setTagsCsv] = useState("");
-  const [mismatchError, setMismatchError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (password !== confirmPassword) {
-      setMismatchError("passwords do not match");
+      setError("passwords do not match");
       return;
     }
     if (password.length < 8) {
-      setMismatchError("password must be at least 8 characters");
+      setError("password must be at least 8 characters");
       return;
     }
-    setMismatchError(null);
+    let hex: string | undefined;
+    if (mode === "import") {
+      hex = privateKeyHex.trim().replace(/^0x/i, "");
+      if (!/^[0-9a-fA-F]{64}$/.test(hex)) {
+        setError("private key must be 64 hex chars (with or without 0x)");
+        return;
+      }
+    }
+    setError(null);
     const tags = tagsCsv
       .split(",")
       .map((t) => t.trim())
       .filter(Boolean);
-    onSubmit({ password, displayName: displayName.trim(), tags });
+    onSubmit({
+      password,
+      displayName: displayName.trim(),
+      tags,
+      privateKeyHex: hex,
+    });
   }
 
   return (
     <Card title="New signer">
       <form onSubmit={submit} className="space-y-3">
+        <div className="flex gap-2 rounded-md border border-ink-200 bg-ink-50 p-1">
+          {(["generate", "import"] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setMode(m)}
+              className={`flex-1 rounded px-3 py-1 text-xs font-medium transition ${
+                mode === m
+                  ? "bg-white text-ink-900 shadow-sm"
+                  : "text-ink-500 hover:text-ink-900"
+              }`}
+            >
+              {m === "generate" ? "Generate fresh keypair" : "Import private key"}
+            </button>
+          ))}
+        </div>
+
+        {mode === "import" && (
+          <div>
+            <label className="mb-1 block text-[11px] uppercase tracking-wide text-ink-500">
+              Private key (hex, with or without 0x)
+            </label>
+            <input
+              type="password"
+              value={privateKeyHex}
+              onChange={(e) => setPrivateKeyHex(e.target.value)}
+              required
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="0x…"
+              className="w-full rounded-md border border-ink-300 px-2 py-1 font-mono text-xs"
+            />
+            <p className="mt-1 text-[11px] text-ink-500">
+              Treated as sensitive — the input is masked. The hex bytes leave
+              the browser exactly once over the signed HTTPS body; the daemon
+              encrypts them into a v3 keystore on disk.
+            </p>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <Field
             label="Keystore password"
@@ -336,11 +398,21 @@ function CreateForm({
             onChange={setTagsCsv}
           />
         </div>
-        {mismatchError && <ErrorBanner msg={mismatchError} />}
+        {error && <ErrorBanner msg={error} />}
         <p className="text-xs text-ink-500">
-          The daemon generates a fresh secp256k1 keypair and writes the
-          encrypted keystore under <code>~/.remote-signer/keystores/</code>.
-          Save the password — it's the only way to unlock later.
+          {mode === "generate" ? (
+            <>
+              Daemon generates a fresh secp256k1 keypair and writes the
+              encrypted keystore under <code>~/.remote-signer/keystores/</code>.
+              Save the password — it's the only way to unlock later.
+            </>
+          ) : (
+            <>
+              Daemon encrypts the supplied private key into a new v3 keystore
+              under <code>~/.remote-signer/keystores/</code>. The original
+              hex is not retained server-side.
+            </>
+          )}
         </p>
         <div className="flex justify-end">
           <button
@@ -348,7 +420,7 @@ function CreateForm({
             disabled={!password || !confirmPassword}
             className="rounded-md bg-accent-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-600 disabled:cursor-not-allowed disabled:bg-ink-300"
           >
-            Create signer
+            {mode === "import" ? "Import signer" : "Create signer"}
           </button>
         </div>
       </form>

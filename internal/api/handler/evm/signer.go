@@ -154,9 +154,13 @@ type CreateSignerRequest struct {
 	Tags        []string               `json:"tags,omitempty"`
 }
 
-// CreateKeystoreRequest contains keystore creation parameters
+// CreateKeystoreRequest contains keystore creation parameters. Setting
+// PrivateKeyHex (raw secp256k1, 64 hex chars with or without 0x prefix)
+// flips the handler into import mode — the daemon encrypts the supplied
+// key into a fresh keystore instead of generating one.
 type CreateKeystoreRequest struct {
-	Password string `json:"password"`
+	Password      string `json:"password"`
+	PrivateKeyHex string `json:"private_key_hex,omitempty"`
 }
 
 // CreateSignerResponse represents the response after creating a signer
@@ -421,6 +425,9 @@ func (h *SignerHandler) createSigner(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		if req.Keystore != nil {
 			secure.ZeroString(&req.Keystore.Password)
+			// PrivateKeyHex is just as sensitive as the password — overwrite
+			// the request struct's copy after we hand it off to the manager.
+			secure.ZeroString(&req.Keystore.PrivateKeyHex)
 		}
 	}()
 
@@ -429,7 +436,8 @@ func (h *SignerHandler) createSigner(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Keystore != nil {
 		createReq.Keystore = &types.CreateKeystoreParams{
-			Password: req.Keystore.Password,
+			Password:      req.Keystore.Password,
+			PrivateKeyHex: req.Keystore.PrivateKeyHex,
 		}
 	}
 

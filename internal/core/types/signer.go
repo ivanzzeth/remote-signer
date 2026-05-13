@@ -42,9 +42,13 @@ func (r *CreateSignerRequest) TypedParams() interface{} {
 	}
 }
 
-// CreateKeystoreParams contains parameters for creating a keystore signer
+// CreateKeystoreParams contains parameters for creating a keystore signer.
+// When PrivateKeyHex is empty the provider generates a fresh secp256k1 key;
+// when set (with or without 0x prefix) it imports the given key into a new
+// encrypted keystore file under the same provider directory.
 type CreateKeystoreParams struct {
-	Password string `json:"password"`
+	Password      string `json:"password"`
+	PrivateKeyHex string `json:"private_key_hex,omitempty"`
 }
 
 // CreateHDWalletParams contains parameters for creating an HD wallet
