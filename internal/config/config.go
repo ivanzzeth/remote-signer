@@ -303,10 +303,12 @@ type SecurityConfig struct {
 }
 
 // IsRulesAPIReadonly returns whether rule/template mutations via API are disabled.
-// Defaults to true (secure by default) when not explicitly configured.
+// Defaults to false so a freshly-bootstrapped daemon is usable through the
+// UI/API out of the box; flip to true via Settings → security to harden
+// after the rule set is hand-curated. RBAC + approval flags still apply.
 func (s SecurityConfig) IsRulesAPIReadonly() bool {
 	if s.RulesAPIReadonly == nil {
-		return true
+		return false
 	}
 	return *s.RulesAPIReadonly
 }
@@ -321,10 +323,10 @@ func (s SecurityConfig) IsSignersAPIReadonly() bool {
 }
 
 // IsAPIKeysAPIReadonly returns whether API key management via API is disabled.
-// Defaults to true (secure by default) when not explicitly configured.
+// Defaults to false (see IsRulesAPIReadonly for rationale).
 func (s SecurityConfig) IsAPIKeysAPIReadonly() bool {
 	if s.APIKeysAPIReadonly == nil {
-		return true
+		return false
 	}
 	return *s.APIKeysAPIReadonly
 }

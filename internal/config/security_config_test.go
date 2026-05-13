@@ -9,9 +9,9 @@ import (
 func boolPtr(b bool) *bool { return &b }
 
 func TestIsRulesAPIReadonly(t *testing.T) {
-	t.Run("defaults to true when nil", func(t *testing.T) {
+	t.Run("defaults to false when nil", func(t *testing.T) {
 		sc := SecurityConfig{RulesAPIReadonly: nil}
-		assert.True(t, sc.IsRulesAPIReadonly())
+		assert.False(t, sc.IsRulesAPIReadonly())
 	})
 
 	t.Run("returns true when set to true", func(t *testing.T) {
