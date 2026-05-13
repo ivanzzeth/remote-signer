@@ -52,18 +52,26 @@ type ApprovalGuard struct {
 	ResumeAfter           time.Duration `json:"resume_after"`
 }
 
-// DefaultSecurity returns the secure-by-default snapshot Manager seeds when
-// no system_settings row exists for the security group. Values match the
-// current config.setDefaults() behaviour so PR7b can be a pure migration.
+// DefaultSecurity returns the snapshot Manager seeds when no
+// system_settings row exists for the security group.
+//
+// The *_api_readonly flags default to FALSE so a freshly-bootstrapped
+// daemon is usable through the API/UI out of the box — they're a
+// post-setup hardening switch, not a "secure on first run" stance. The
+// real security guard is RBAC (admin-only writes) + the
+// require_approval_for_agent_rules flag on non-admin keys, both of
+// which stay on. Operators who want to freeze a hand-curated config
+// against further API edits flip these to true via the Settings UI or
+// config.yaml — and that's the load-bearing knob, not the default.
 func DefaultSecurity() *SecuritySnapshot {
 	return &SecuritySnapshot{
 		MaxRequestAge:                60 * time.Second,
 		RateLimitDefault:             100,
 		IPRateLimit:                  200,
 		NonceRequired:                true,
-		RulesAPIReadonly:             true,
+		RulesAPIReadonly:             false,
 		SignersAPIReadonly:           false,
-		APIKeysAPIReadonly:           true,
+		APIKeysAPIReadonly:           false,
 		AllowSIGHUPRulesReload:       false,
 		MaxRulesPerAPIKey:            50,
 		RequireApprovalForAgentRules: true,
