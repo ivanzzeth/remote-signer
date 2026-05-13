@@ -276,6 +276,18 @@ func (r *Router) setupRoutes() error {
 	r.mux.Handle("/api/v1/evm/rules", r.withAuthAndPerm(middleware.PermListRules, ruleHandler))
 	r.mux.Handle("/api/v1/evm/rules/", r.withAuthAndPerm(middleware.PermListRules, ruleHandler))
 
+	// Budget overview route — surfaces every budget row including
+	// synthetic simulation budgets (rule_id "sim:*"), which the per-rule
+	// listing under /rules/{id}/budgets can't see because they have no
+	// row in the rules table.
+	if r.config.BudgetRepo != nil {
+		budgetListHandler, blErr := evmhandler.NewBudgetListHandler(r.config.BudgetRepo, r.ruleRepo, r.logger)
+		if blErr != nil {
+			return fmt.Errorf("failed to create budget list handler: %w", blErr)
+		}
+		r.mux.Handle("/api/v1/evm/budgets", r.withAuthAndPerm(middleware.PermReadBudgets, budgetListHandler))
+	}
+
 	// Approval guard resume (admin only)
 	if r.config.ApprovalGuard != nil {
 		r.mux.Handle("/api/v1/evm/guard/resume", r.withAuthAndPerm(middleware.PermResumeGuard, http.HandlerFunc(r.handleGuardResume)))

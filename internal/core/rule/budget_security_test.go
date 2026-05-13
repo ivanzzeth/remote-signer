@@ -137,6 +137,9 @@ func (r *raceBudgetRepo) ListByRuleID(_ context.Context, _ types.RuleID) ([]*typ
 func (r *raceBudgetRepo) ListByRuleIDs(_ context.Context, _ []types.RuleID) ([]*types.RuleBudget, error) {
 	return nil, nil
 }
+func (r *raceBudgetRepo) ListAll(_ context.Context) ([]*types.RuleBudget, error) {
+	return nil, nil
+}
 func (r *raceBudgetRepo) MarkAlertSent(_ context.Context, _ types.RuleID, _ string) error {
 	return nil
 }
@@ -324,6 +327,9 @@ func (r *alertCaptureBudgetRepo) ListByRuleID(_ context.Context, _ types.RuleID)
 	return nil, nil
 }
 func (r *alertCaptureBudgetRepo) ListByRuleIDs(_ context.Context, _ []types.RuleID) ([]*types.RuleBudget, error) {
+	return nil, nil
+}
+func (r *alertCaptureBudgetRepo) ListAll(_ context.Context) ([]*types.RuleBudget, error) {
 	return nil, nil
 }
 func (r *alertCaptureBudgetRepo) ResetBudget(_ context.Context, _ types.RuleID, _ string, _ time.Time) error {
