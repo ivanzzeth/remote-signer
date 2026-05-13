@@ -280,6 +280,17 @@ func (r *mockBudgetRepo) ListByRuleIDs(_ context.Context, ruleIDs []types.RuleID
 	return out, nil
 }
 
+func (r *mockBudgetRepo) ListAll(_ context.Context) ([]*types.RuleBudget, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]*types.RuleBudget, 0, len(r.budgets))
+	for _, b := range r.budgets {
+		cp := *b
+		out = append(out, &cp)
+	}
+	return out, nil
+}
+
 func (r *mockBudgetRepo) MarkAlertSent(_ context.Context, _ types.RuleID, _ string) error {
 	return nil
 }

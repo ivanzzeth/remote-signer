@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
+  type BudgetEntry,
   type HealthResponse as SDKHealthResponse,
-  type Rule,
-  type RuleBudget,
 } from "remote-signer-client";
 import {
   Badge,
@@ -44,8 +43,7 @@ interface HealthResponse extends SDKHealthResponse {
  *      cross-check against admin.key.pub on disk before trusting writes
  */
 interface HotBudget {
-  rule: Rule;
-  budget: RuleBudget;
+  entry: BudgetEntry;
   pct: number;
 }
 
@@ -54,9 +52,9 @@ export function Dashboard() {
   const health = useApi((c) => c.health() as Promise<HealthResponse>);
   const audit = useApi((c) => c.audit.list({ limit: 5 }));
 
-  // Fan out across every rule's budgets so the operator sees the hottest
-  // few without leaving the dashboard. Refreshes only on mount — they
-  // can hit /budgets for a live view.
+  // Single GET /api/v1/evm/budgets — surfaces both rule and simulation
+  // budgets in one shot. Refreshes only on mount; /budgets has a Refresh
+  // button for a live view.
   const [hotBudgets, setHotBudgets] = useState<HotBudget[] | null>(null);
   useEffect(() => {
     const client = getClient();
@@ -64,21 +62,16 @@ export function Dashboard() {
     let mounted = true;
     (async () => {
       try {
-        const rules = await client.evm.rules.list();
-        const lists = await Promise.all(
-          rules.rules.map((r) =>
-            client.evm.rules
-              .listBudgets(r.id)
-              .then((bs) => bs.map((b) => ({ rule: r, budget: b, pct: pctUsed(b) })))
-              .catch(() => [] as HotBudget[]),
-          ),
-        );
+        const resp = await client.evm.budgets.list();
         if (!mounted) return;
-        const all = lists.flat();
-        all.sort((a, b) => b.pct - a.pct);
+        const rows = resp.budgets.map((entry) => ({
+          entry,
+          pct: pctUsed(entry),
+        }));
+        rows.sort((a, b) => b.pct - a.pct);
         // Only show budgets at or past the threshold — silence the
         // dashboard when nothing is interesting.
-        const hot = all
+        const hot = rows
           .filter((x) => x.pct >= HOT_BUDGET_THRESHOLD_PCT)
           .slice(0, HOT_BUDGET_TOP_N);
         setHotBudgets(hot);
@@ -142,20 +135,25 @@ export function Dashboard() {
           }
         >
           <ul className="space-y-2 text-sm">
-            {hotBudgets.map(({ rule, budget, pct }) => (
+            {hotBudgets.map(({ entry, pct }) => (
               <li
-                key={budget.id}
+                key={entry.id}
                 className="grid grid-cols-1 items-center gap-2 md:grid-cols-[1fr_8rem_4rem]"
               >
                 <div>
                   <Link
-                    to="/rules"
+                    to="/budgets"
                     className="text-ink-900 hover:text-accent-600"
                   >
-                    {rule.name}
+                    {entry.kind === "rule"
+                      ? entry.rule_name || entry.rule_id
+                      : entry.signer_address
+                        ? shorten(entry.signer_address)
+                        : entry.rule_id}
                   </Link>
                   <span className="ml-2 font-mono text-[11px] text-ink-500">
-                    {budget.unit}
+                    {entry.kind === "simulation" ? "sim · " : ""}
+                    {entry.unit}
                   </span>
                 </div>
                 <ProgressBar pct={pct} />

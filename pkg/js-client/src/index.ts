@@ -49,6 +49,7 @@ export {
   EvmHDWalletService,
   EvmGuardService,
   EvmSimulateService,
+  EvmBudgetService,
   RemoteSigner,
   EIP1193Provider,
   ProviderRpcError,
@@ -119,6 +120,10 @@ export type {
   SimulateBatchResponse,
   ChainStatusDTO,
   SimulationStatusResponse,
+  // Budgets
+  BudgetKind,
+  BudgetEntry,
+  ListBudgetsResponse,
   // EIP-1193 Provider types
   EIP1193ProviderConfig,
   SignersSource,

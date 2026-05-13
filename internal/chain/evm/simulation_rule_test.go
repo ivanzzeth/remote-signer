@@ -537,6 +537,9 @@ func (m *mockSimBudgetRepo) ListByRuleID(_ context.Context, _ types.RuleID) ([]*
 func (m *mockSimBudgetRepo) ListByRuleIDs(_ context.Context, _ []types.RuleID) ([]*types.RuleBudget, error) {
 	return nil, nil
 }
+func (m *mockSimBudgetRepo) ListAll(_ context.Context) ([]*types.RuleBudget, error) {
+	return nil, nil
+}
 func (m *mockSimBudgetRepo) MarkAlertSent(_ context.Context, _ types.RuleID, _ string) error {
 	return nil
 }

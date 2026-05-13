@@ -33,6 +33,11 @@ type BudgetRepository interface {
 	ResetBudget(ctx context.Context, ruleID types.RuleID, unit string, currentPeriodStart time.Time) error
 	ListByRuleID(ctx context.Context, ruleID types.RuleID) ([]*types.RuleBudget, error)
 	ListByRuleIDs(ctx context.Context, ruleIDs []types.RuleID) ([]*types.RuleBudget, error)
+	// ListAll returns every budget row, ordered by created_at desc. Used by
+	// the operator-facing /budgets list which must surface synthetic
+	// simulation budgets (rule_id "sim:0x...") that don't appear in the
+	// rules table — fanning out from rules.list() would miss them.
+	ListAll(ctx context.Context) ([]*types.RuleBudget, error)
 	// MarkAlertSent sets alert_sent=true for the given rule+unit budget.
 	// This prevents duplicate alert notifications within the same period.
 	MarkAlertSent(ctx context.Context, ruleID types.RuleID, unit string) error
@@ -234,6 +239,16 @@ func (r *GormBudgetRepository) ListByRuleIDs(ctx context.Context, ruleIDs []type
 	}
 	var budgets []*types.RuleBudget
 	err := r.db.WithContext(ctx).Where("rule_id IN ?", ruleIDs).Find(&budgets).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to list budgets: %w", err)
+	}
+	return budgets, nil
+}
+
+// ListAll returns every budget row, newest first.
+func (r *GormBudgetRepository) ListAll(ctx context.Context) ([]*types.RuleBudget, error) {
+	var budgets []*types.RuleBudget
+	err := r.db.WithContext(ctx).Order("created_at DESC").Find(&budgets).Error
 	if err != nil {
 		return nil, fmt.Errorf("failed to list budgets: %w", err)
 	}

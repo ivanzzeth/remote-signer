@@ -595,6 +595,9 @@ func (m *mockBudgetRepoForCreate) ListByRuleID(ctx context.Context, ruleID types
 func (m *mockBudgetRepoForCreate) ListByRuleIDs(ctx context.Context, ruleIDs []types.RuleID) ([]*types.RuleBudget, error) {
 	return nil, nil
 }
+func (m *mockBudgetRepoForCreate) ListAll(ctx context.Context) ([]*types.RuleBudget, error) {
+	return nil, nil
+}
 func (m *mockBudgetRepoForCreate) MarkAlertSent(ctx context.Context, ruleID types.RuleID, unit string) error {
 	return nil
 }
@@ -708,6 +711,9 @@ func (s *spyBudgetRepo) ListByRuleID(ctx context.Context, ruleID types.RuleID) (
 	return s.listByRuleIDReturn, nil
 }
 func (s *spyBudgetRepo) ListByRuleIDs(ctx context.Context, ruleIDs []types.RuleID) ([]*types.RuleBudget, error) {
+	return nil, nil
+}
+func (s *spyBudgetRepo) ListAll(ctx context.Context) ([]*types.RuleBudget, error) {
 	return nil, nil
 }
 func (s *spyBudgetRepo) GetByRuleID(ctx context.Context, ruleID types.RuleID, unit string) (*types.RuleBudget, error) {

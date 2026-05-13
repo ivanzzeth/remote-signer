@@ -837,6 +837,9 @@ func (r *stubBudgetRepo) ListByRuleID(ctx context.Context, ruleID types.RuleID) 
 func (r *stubBudgetRepo) ListByRuleIDs(ctx context.Context, ruleIDs []types.RuleID) ([]*types.RuleBudget, error) {
 	return nil, nil
 }
+func (r *stubBudgetRepo) ListAll(ctx context.Context) ([]*types.RuleBudget, error) {
+	return nil, nil
+}
 func (r *stubBudgetRepo) GetByRuleID(ctx context.Context, ruleID types.RuleID, unit string) (*types.RuleBudget, error) {
 	r.lastUnit = unit
 	if r.getErr != nil {
