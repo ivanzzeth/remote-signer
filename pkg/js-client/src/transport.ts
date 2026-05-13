@@ -286,12 +286,19 @@ export class HttpTransport {
       }
 
       if (!response.ok) {
-        const error = data as { error?: string; message?: string };
-        throw new APIError(
-          error.message || `HTTP ${response.status}`,
-          response.status,
-          error.error
-        );
+        // Daemon error envelopes vary: most handlers write
+        // {"error": "..."} (rule, signer, hd_wallet, apikey), some emit
+        // {"message": "..."}, and a few use http.Error which surfaces a
+        // bare text body. Try them in that order so the UI sees the
+        // actual reason ("rule creation via API is disabled …") rather
+        // than the generic "HTTP 403".
+        const env = data as { error?: string; message?: string };
+        const description =
+          env.error ||
+          env.message ||
+          (typeof data === "string" ? (data as string) : "") ||
+          `HTTP ${response.status}`;
+        throw new APIError(description, response.status, env.error);
       }
 
       return data as T;
