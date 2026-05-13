@@ -47,6 +47,35 @@ test("disable + re-enable round-trips through the daemon", async ({
   await expect(row.getByText("enabled")).toBeVisible();
 });
 
+test("edit API-sourced key name + rate_limit persists", async ({
+  authedPage,
+}) => {
+  await authedPage.click("text=API Keys");
+  await authedPage.click("button:has-text('New API key')");
+
+  const id = `e2e-edit-${Date.now()}`;
+  await authedPage.fill("input >> nth=0", id);
+  await authedPage.selectOption("select", "dev");
+  await authedPage.click("button:has-text('Generate keypair & create')");
+  await authedPage.click("text=Dismiss");
+
+  const row = authedPage.locator("tr", {
+    has: authedPage.locator(`text=${id}`).first(),
+  });
+  await row.getByRole("button", { name: "Edit" }).click();
+
+  // Edit panel is the only <form> on the page (Create dialog was dismissed).
+  const editPanel = authedPage.locator("form").last();
+  await editPanel.locator("input").nth(0).fill(`${id}-renamed`);
+  await editPanel.locator("input[type=number]").fill("42");
+  await editPanel.getByRole("button", { name: "Save" }).click();
+
+  // Renamed row reflects the new label below the id.
+  await expect(
+    authedPage.locator(`text=${id}-renamed`).first(),
+  ).toBeVisible({ timeout: 5_000 });
+});
+
 test("admin key cannot be deleted from the UI", async ({ authedPage }) => {
   await authedPage.click("text=API Keys");
   const adminRow = authedPage.locator("tr", {

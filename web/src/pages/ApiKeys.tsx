@@ -1,5 +1,10 @@
-import { useState } from "react";
-import { APIError, bytesToHex, derivePublicKey } from "remote-signer-client";
+import { Fragment, useState } from "react";
+import {
+  APIError,
+  type APIKey,
+  bytesToHex,
+  derivePublicKey,
+} from "remote-signer-client";
 import {
   Badge,
   Card,
@@ -40,6 +45,26 @@ export function ApiKeys() {
   const [busy, setBusy] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [newKey, setNewKey] = useState<NewKeyState | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
+
+  async function saveEdit(
+    id: string,
+    patch: { name?: string; role?: string; rate_limit?: number },
+  ) {
+    const client = getClient();
+    if (!client) return;
+    setBusy(id);
+    setMutationError(null);
+    try {
+      await client.apiKeys.update(id, patch);
+      setEditing(null);
+      reload();
+    } catch (e) {
+      setMutationError(formatMutationError(e));
+    } finally {
+      setBusy(null);
+    }
+  }
 
   // --- mutations -----------------------------------------------------------
 
@@ -164,7 +189,8 @@ export function ApiKeys() {
               </thead>
               <tbody>
                 {data.keys.map((k) => (
-                  <tr key={k.id} className="border-t border-ink-100">
+                  <Fragment key={k.id}>
+                  <tr className="border-t border-ink-100">
                     <td className="py-1 pr-3">
                       <div className="font-mono text-xs text-ink-900">
                         {k.id}
@@ -203,6 +229,21 @@ export function ApiKeys() {
                         </button>
                         <button
                           type="button"
+                          disabled={busy === k.id || k.source !== "api"}
+                          onClick={() =>
+                            setEditing((id) => (id === k.id ? null : k.id))
+                          }
+                          title={
+                            k.source !== "api"
+                              ? "config-sourced keys can only be edited in config.yaml"
+                              : ""
+                          }
+                          className="rounded-md border border-ink-200 px-2 py-0.5 text-xs text-ink-700 hover:bg-ink-100 disabled:opacity-50"
+                        >
+                          {editing === k.id ? "Cancel" : "Edit"}
+                        </button>
+                        <button
+                          type="button"
                           disabled={busy === k.id || k.id === "admin"}
                           onClick={() => destroy(k.id)}
                           title={
@@ -217,6 +258,19 @@ export function ApiKeys() {
                       </div>
                     </td>
                   </tr>
+                  {editing === k.id && (
+                    <tr className="border-t border-ink-100 bg-ink-50">
+                      <td colSpan={6} className="px-4 py-3">
+                        <EditForm
+                          apiKey={k}
+                          busy={busy === k.id}
+                          onCancel={() => setEditing(null)}
+                          onSave={(patch) => saveEdit(k.id, patch)}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
@@ -381,6 +435,79 @@ function seedToPem(seed: Uint8Array): string {
     ...lines,
     "-----END PRIVATE KEY-----",
   ].join("\n");
+}
+
+function EditForm({
+  apiKey,
+  busy,
+  onCancel,
+  onSave,
+}: {
+  apiKey: APIKey;
+  busy: boolean;
+  onCancel: () => void;
+  onSave: (patch: { name?: string; role?: string; rate_limit?: number }) => void;
+}) {
+  const [name, setName] = useState(apiKey.name);
+  const [role, setRole] = useState(apiKey.role);
+  const [rateLimit, setRateLimit] = useState(String(apiKey.rate_limit ?? ""));
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        onSave({
+          name: name.trim() || undefined,
+          role,
+          rate_limit: rateLimit ? Number(rateLimit) : undefined,
+        });
+      }}
+      className="space-y-3"
+    >
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <Field label="Name" value={name} onChange={setName} />
+        <div>
+          <label className="mb-1 block text-[11px] uppercase tracking-wide text-ink-500">
+            Role
+          </label>
+          <select
+            value={role}
+            onChange={(e) => setRole(e.target.value)}
+            className="w-full rounded-md border border-ink-300 px-2 py-1 text-sm"
+          >
+            {ROLES.map((r) => (
+              <option key={r} value={r}>
+                {r}
+              </option>
+            ))}
+          </select>
+        </div>
+        <Field
+          label="Rate limit (req/min)"
+          value={rateLimit}
+          onChange={setRateLimit}
+          type="number"
+        />
+      </div>
+      <div className="flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={busy}
+          className="rounded-md border border-ink-200 px-2 py-0.5 text-xs text-ink-700 hover:bg-ink-100 disabled:opacity-50"
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          disabled={busy}
+          className="rounded-md bg-accent-500 px-2 py-0.5 text-xs font-medium text-white hover:bg-accent-600 disabled:opacity-50"
+        >
+          {busy ? "Saving…" : "Save"}
+        </button>
+      </div>
+    </form>
+  );
 }
 
 function formatMutationError(e: unknown): string {

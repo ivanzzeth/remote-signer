@@ -91,6 +91,58 @@ test("create form with malformed config JSON shows a parse error", async ({
   ).toBeVisible();
 });
 
+test("edit a rule's config + name persists across reload", async ({
+  authedPage,
+}) => {
+  const c = adminClient();
+  const rule = await c.evm.rules.create({
+    name: `e2e-edit-${Date.now()}`,
+    type: "evm_address_list",
+    mode: "whitelist",
+    chain_type: "evm",
+    chain_id: "1",
+    config: { addresses: ["0x0000000000000000000000000000000000000003"] },
+    enabled: true,
+  });
+
+  await authedPage.click("text=Rules");
+  const row = authedPage.locator("tr", {
+    has: authedPage.locator(`text=${rule.name}`),
+  });
+  await expect(row).toBeVisible();
+  // Click Edit (button inside row, doesn't toggle expand thanks to
+  // stopPropagation on the actions container).
+  await row.getByRole("button", { name: "Edit" }).click();
+
+  // Edit panel renders below the row. Update the name and config.
+  const newName = `${rule.name}-updated`;
+  // Edit form's first <input> is name.
+  await authedPage.locator("input[type=text]").last().focus();
+  // Locate the inputs/textarea inside the detail panel.
+  const editPanel = authedPage.locator("text=Edit rule").locator("..");
+  await editPanel.locator("input").nth(0).fill(newName);
+  await editPanel.locator("textarea").fill(
+    JSON.stringify(
+      { addresses: ["0x0000000000000000000000000000000000000004"] },
+      null,
+      2,
+    ),
+  );
+  await editPanel.getByRole("button", { name: "Save" }).click();
+
+  // Row name reflects the new value.
+  await expect(
+    authedPage.locator("tr", { has: authedPage.locator(`text=${newName}`) }),
+  ).toBeVisible();
+
+  // SDK round-trip confirms config persisted.
+  const reloaded = await c.evm.rules.get(rule.id);
+  expect(reloaded.name).toBe(newName);
+  expect(reloaded.config.addresses).toEqual([
+    "0x0000000000000000000000000000000000000004",
+  ]);
+});
+
 test("delete a rule via the UI removes it from the table", async ({
   authedPage,
 }) => {
