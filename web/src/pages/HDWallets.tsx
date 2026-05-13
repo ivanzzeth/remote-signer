@@ -45,14 +45,19 @@ export function HDWallets() {
     }
   }
 
-  async function importWallet(input: { password: string; mnemonic: string }) {
+  async function importWallet(input: {
+    password: string;
+    mnemonic?: string;
+    walletJson?: string;
+  }) {
     const client = getClient();
     if (!client) return;
     setMutationError(null);
     try {
       await client.evm.hdWallets.import({
         password: input.password,
-        mnemonic: input.mnemonic,
+        ...(input.mnemonic ? { mnemonic: input.mnemonic } : {}),
+        ...(input.walletJson ? { wallet_json: input.walletJson } : {}),
       });
       setShowImport(false);
       reload();
@@ -402,12 +407,32 @@ function CreateForm({
 function ImportForm({
   onSubmit,
 }: {
-  onSubmit: (v: { password: string; mnemonic: string }) => void;
+  onSubmit: (v: {
+    password: string;
+    mnemonic?: string;
+    walletJson?: string;
+  }) => void;
 }) {
+  type Mode = "mnemonic" | "wallet-json";
+  const [mode, setMode] = useState<Mode>("mnemonic");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [mnemonic, setMnemonic] = useState("");
+  const [walletJson, setWalletJson] = useState("");
   const [error, setError] = useState<string | null>(null);
+
+  async function onFilePicked(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setError(null);
+    try {
+      setWalletJson(await file.text());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      e.target.value = "";
+    }
+  }
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -419,34 +444,97 @@ function ImportForm({
       setError("password must be at least 8 characters");
       return;
     }
-    const words = mnemonic.trim().split(/\s+/).length;
-    if (words !== 12 && words !== 15 && words !== 18 && words !== 21 && words !== 24) {
-      setError(
-        `mnemonic must be 12/15/18/21/24 words (got ${words})`,
-      );
+    if (mode === "mnemonic") {
+      const words = mnemonic.trim().split(/\s+/).length;
+      if (![12, 15, 18, 21, 24].includes(words)) {
+        setError(`mnemonic must be 12/15/18/21/24 words (got ${words})`);
+        return;
+      }
+      setError(null);
+      onSubmit({ password, mnemonic: mnemonic.trim() });
+      return;
+    }
+    // wallet-json mode
+    const trimmed = walletJson.trim();
+    if (!trimmed) {
+      setError("paste or upload a wallet JSON");
+      return;
+    }
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (!parsed.mnemonic || typeof parsed.mnemonic !== "object") {
+        setError("not an HD wallet JSON (missing encrypted mnemonic)");
+        return;
+      }
+    } catch {
+      setError("wallet JSON is not valid JSON");
       return;
     }
     setError(null);
-    onSubmit({ password, mnemonic: mnemonic.trim() });
+    onSubmit({ password, walletJson: trimmed });
   }
 
   return (
     <Card title="Import HD wallet">
       <form onSubmit={submit} className="space-y-3">
-        <div>
-          <label className="mb-1 block text-[11px] uppercase tracking-wide text-ink-500">
-            BIP-39 mnemonic
-          </label>
-          <textarea
-            value={mnemonic}
-            onChange={(e) => setMnemonic(e.target.value)}
-            rows={3}
-            spellCheck={false}
-            placeholder="abandon abandon abandon …"
-            className="block w-full rounded-md border border-ink-300 p-2 font-mono text-[11px]"
-            required
-          />
+        <div className="flex gap-2 rounded-md border border-ink-200 bg-ink-50 p-1">
+          {([
+            ["mnemonic", "From mnemonic"],
+            ["wallet-json", "From wallet JSON"],
+          ] as const).map(([m, label]) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setMode(m as Mode)}
+              className={`flex-1 rounded px-3 py-1 text-xs font-medium transition ${
+                mode === m
+                  ? "bg-white text-ink-900 shadow-sm"
+                  : "text-ink-500 hover:text-ink-900"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
+
+        {mode === "mnemonic" ? (
+          <div>
+            <label className="mb-1 block text-[11px] uppercase tracking-wide text-ink-500">
+              BIP-39 mnemonic
+            </label>
+            <textarea
+              value={mnemonic}
+              onChange={(e) => setMnemonic(e.target.value)}
+              rows={3}
+              spellCheck={false}
+              placeholder="abandon abandon abandon …"
+              className="block w-full rounded-md border border-ink-300 p-2 font-mono text-[11px]"
+            />
+          </div>
+        ) : (
+          <div>
+            <label className="mb-1 flex items-center justify-between text-[11px] uppercase tracking-wide text-ink-500">
+              <span>HDWalletFile JSON</span>
+              <label className="cursor-pointer text-accent-600 hover:text-accent-500">
+                <input
+                  type="file"
+                  className="hidden"
+                  accept=".json,application/json"
+                  onChange={onFilePicked}
+                />
+                Load from file…
+              </label>
+            </label>
+            <textarea
+              value={walletJson}
+              onChange={(e) => setWalletJson(e.target.value)}
+              rows={5}
+              spellCheck={false}
+              placeholder='{"version":1,"primary_address":"…","mnemonic":{…},"hd_config":{…}}'
+              className="block w-full rounded-md border border-ink-300 p-2 font-mono text-[11px]"
+            />
+          </div>
+        )}
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <Field
             label="Password"
@@ -467,13 +555,17 @@ function ImportForm({
         </div>
         {error && <ErrorBanner msg={error} />}
         <p className="text-xs text-ink-500">
-          The mnemonic is sent to the daemon over the signed HTTPS body and
-          stored encrypted under the password. It never reaches localStorage.
+          {mode === "mnemonic"
+            ? "Daemon stores the mnemonic encrypted under the password. It never reaches localStorage."
+            : "Daemon decrypts the embedded mnemonic with the password and re-imports it under its wallet dir."}
         </p>
         <div className="flex justify-end">
           <button
             type="submit"
-            disabled={!password || !mnemonic}
+            disabled={
+              !password ||
+              (mode === "mnemonic" ? !mnemonic : !walletJson)
+            }
             className="rounded-md bg-accent-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-600 disabled:cursor-not-allowed disabled:bg-ink-300"
           >
             Import wallet

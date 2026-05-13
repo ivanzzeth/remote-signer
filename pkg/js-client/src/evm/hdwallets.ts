@@ -14,7 +14,15 @@ import type { SignerInfo } from "./signers";
 export interface CreateHDWalletRequest {
   action?: "create" | "import"; // default: "create"
   password: string;
-  mnemonic?: string; // required for import
+  /** Required for action="import" when wallet_json is not set. */
+  mnemonic?: string;
+  /**
+   * Required for action="import" when mnemonic is not set. Full
+   * HDWalletFile JSON (as written by another remote-signer instance);
+   * the daemon decrypts the embedded mnemonic with `password` and
+   * re-imports it.
+   */
+  wallet_json?: string;
   entropy_bits?: number; // for create, default 256
 }
 
