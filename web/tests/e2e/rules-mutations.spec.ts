@@ -72,20 +72,21 @@ test("create a rule via the UI adds it to the table", async ({
   await expect(row.getByText("blocklist")).toBeVisible();
 });
 
-test("create form with malformed config JSON shows a parse error", async ({
+test("create form Advanced raw-JSON path catches malformed input", async ({
   authedPage,
 }) => {
   await authedPage.click("text=Rules");
   await authedPage.click("button:has-text('New rule')");
 
   await authedPage.fill("input >> nth=0", `e2e-bad-config-${Date.now()}`);
+  // Switch the config editor into Advanced raw-JSON mode.
+  await authedPage.getByLabel(/Advanced \(raw JSON\)/).check();
   await authedPage.locator("textarea").fill("{ not valid json");
   await authedPage.click("button:has-text('Create rule')");
 
   // The component surfaces the JSON.parse() error in a red ErrorBanner
   // inside the form rather than going to the server. Chrome's JSON.parse
-  // message starts with "Expected …" — match the banner specifically
-  // rather than `JSON` (which appears in the label + textarea too).
+  // message starts with "Expected …".
   await expect(
     authedPage.locator("div.text-red-800", { hasText: "Expected" }),
   ).toBeVisible();
@@ -114,13 +115,13 @@ test("edit a rule's config + name persists across reload", async ({
   // stopPropagation on the actions container).
   await row.getByRole("button", { name: "Edit" }).click();
 
-  // Edit panel renders below the row. Update the name and config.
+  // Edit panel renders below the row. Update the name first, then flip
+  // the config editor into Advanced raw-JSON so we can swap the whole
+  // addresses list in one shot.
   const newName = `${rule.name}-updated`;
-  // Edit form's first <input> is name.
-  await authedPage.locator("input[type=text]").last().focus();
-  // Locate the inputs/textarea inside the detail panel.
   const editPanel = authedPage.locator("text=Edit rule").locator("..");
   await editPanel.locator("input").nth(0).fill(newName);
+  await editPanel.getByLabel(/Advanced \(raw JSON\)/).check();
   await editPanel.locator("textarea").fill(
     JSON.stringify(
       { addresses: ["0x0000000000000000000000000000000000000004"] },
@@ -141,6 +142,37 @@ test("edit a rule's config + name persists across reload", async ({
   expect(reloaded.config.addresses).toEqual([
     "0x0000000000000000000000000000000000000004",
   ]);
+});
+
+test("typed editor adds an address through the per-row input", async ({
+  authedPage,
+}) => {
+  await authedPage.click("text=Rules");
+  await authedPage.click("button:has-text('New rule')");
+
+  const name = `e2e-typed-${Date.now()}`;
+  await authedPage.fill("input >> nth=0", name);
+  // Default type is evm_address_list → the typed editor renders a
+  // "+ Add address" button + one empty address input.
+  await authedPage.click("button:has-text('+ Add address')");
+  // Fill the second row (the first is the template placeholder).
+  const addressInputs = authedPage.locator(
+    "input[placeholder='0x…']",
+  );
+  await addressInputs
+    .nth(1)
+    .fill("0x000000000000000000000000000000000000DEAD");
+
+  await authedPage.click("button:has-text('Create rule')");
+
+  const c = adminClient();
+  // Find by name (server normalises so just look it up).
+  const list = await c.evm.rules.list();
+  const created = list.rules.find((r) => r.name === name);
+  expect(created).toBeTruthy();
+  expect(
+    (created!.config as { addresses: string[] }).addresses,
+  ).toContain("0x000000000000000000000000000000000000DEAD");
 });
 
 test("delete a rule via the UI removes it from the table", async ({

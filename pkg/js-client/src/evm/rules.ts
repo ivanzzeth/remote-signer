@@ -13,7 +13,11 @@ export type RuleType =
   | "evm_contract_method"
   | "evm_value_limit"
   | "evm_solidity_expression"
+  | "evm_js"
+  | "evm_dynamic_blocklist"
+  | "evm_internal_transfer"
   | "signer_restriction"
+  | "chain_restriction"
   | "sign_type_restriction"
   | "message_pattern";
 
