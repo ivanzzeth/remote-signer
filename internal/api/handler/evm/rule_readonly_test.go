@@ -81,13 +81,21 @@ func (m *mockRuleRepo) IncrementMatchCount(_ context.Context, _ types.RuleID) er
 type mockBudgetRepo struct {
 	listByRuleID func(context.Context, types.RuleID) ([]*types.RuleBudget, error)
 	listAll      func(context.Context) ([]*types.RuleBudget, error)
+	getFn        func(context.Context, string) (*types.RuleBudget, error)
+	updateFn     func(context.Context, *types.RuleBudget) error
+	deleteFn     func(context.Context, string) error
 }
 
 func (m *mockBudgetRepo) Create(_ context.Context, _ *types.RuleBudget) error   { return nil }
 func (m *mockBudgetRepo) GetByRuleID(_ context.Context, _ types.RuleID, _ string) (*types.RuleBudget, error) {
 	return nil, nil
 }
-func (m *mockBudgetRepo) Delete(_ context.Context, _ string) error              { return nil }
+func (m *mockBudgetRepo) Delete(ctx context.Context, id string) error {
+	if m.deleteFn != nil {
+		return m.deleteFn(ctx, id)
+	}
+	return nil
+}
 func (m *mockBudgetRepo) DeleteByRuleID(_ context.Context, _ types.RuleID) error { return nil }
 func (m *mockBudgetRepo) AtomicSpend(_ context.Context, _ types.RuleID, _, _ string) error {
 	return nil
@@ -109,6 +117,18 @@ func (m *mockBudgetRepo) ListAll(ctx context.Context) ([]*types.RuleBudget, erro
 		return m.listAll(ctx)
 	}
 	return nil, nil
+}
+func (m *mockBudgetRepo) Get(ctx context.Context, id string) (*types.RuleBudget, error) {
+	if m.getFn != nil {
+		return m.getFn(ctx, id)
+	}
+	return nil, types.ErrNotFound
+}
+func (m *mockBudgetRepo) Update(ctx context.Context, budget *types.RuleBudget) error {
+	if m.updateFn != nil {
+		return m.updateFn(ctx, budget)
+	}
+	return nil
 }
 func (m *mockBudgetRepo) MarkAlertSent(_ context.Context, _ types.RuleID, _ string) error {
 	return nil

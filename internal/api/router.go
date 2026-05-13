@@ -276,16 +276,34 @@ func (r *Router) setupRoutes() error {
 	r.mux.Handle("/api/v1/evm/rules", r.withAuthAndPerm(middleware.PermListRules, ruleHandler))
 	r.mux.Handle("/api/v1/evm/rules/", r.withAuthAndPerm(middleware.PermListRules, ruleHandler))
 
-	// Budget overview route — surfaces every budget row including
-	// synthetic simulation budgets (rule_id "sim:*"), which the per-rule
-	// listing under /rules/{id}/budgets can't see because they have no
-	// row in the rules table.
+	// Budget routes:
+	//   GET    /api/v1/evm/budgets         list (PermReadBudgets)
+	//   POST   /api/v1/evm/budgets         create (PermManageBudgets, in-handler)
+	//   GET    /api/v1/evm/budgets/{id}    detail (PermReadBudgets)
+	//   PATCH  /api/v1/evm/budgets/{id}    update (PermManageBudgets, in-handler)
+	//   DELETE /api/v1/evm/budgets/{id}    delete (PermManageBudgets, in-handler)
+	//   POST   /api/v1/evm/budgets/{id}/reset reset (PermManageBudgets, in-handler)
+	//
+	// The list view exists because synthetic simulation budgets
+	// (rule_id "sim:*") have no row in the rules table, so a UI that
+	// fans out over rules.list() can never see them.
 	if r.config.BudgetRepo != nil {
 		budgetListHandler, blErr := evmhandler.NewBudgetListHandler(r.config.BudgetRepo, r.ruleRepo, r.logger)
 		if blErr != nil {
 			return fmt.Errorf("failed to create budget list handler: %w", blErr)
 		}
+		budgetItemHandler, biErr := evmhandler.NewBudgetItemHandler(r.config.BudgetRepo, r.ruleRepo, r.logger)
+		if biErr != nil {
+			return fmt.Errorf("failed to create budget item handler: %w", biErr)
+		}
+		if r.config.AuditLogger != nil {
+			budgetListHandler.SetAuditLogger(r.config.AuditLogger)
+			budgetItemHandler.SetAuditLogger(r.config.AuditLogger)
+		}
+		// Gate at the perm "read"; the handler itself escalates to
+		// PermManageBudgets for mutating method/path combos.
 		r.mux.Handle("/api/v1/evm/budgets", r.withAuthAndPerm(middleware.PermReadBudgets, budgetListHandler))
+		r.mux.Handle("/api/v1/evm/budgets/", r.withAuthAndPerm(middleware.PermReadBudgets, budgetItemHandler))
 	}
 
 	// Approval guard resume (admin only)
