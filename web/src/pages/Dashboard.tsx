@@ -1,5 +1,9 @@
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   type HealthResponse as SDKHealthResponse,
+  type Rule,
+  type RuleBudget,
 } from "remote-signer-client";
 import {
   Badge,
@@ -11,8 +15,12 @@ import {
   Row,
   shorten,
 } from "../components/ui";
-import { getCredentials } from "../lib/auth";
+import { getClient, getCredentials } from "../lib/auth";
 import { useApi } from "../lib/useApi";
+import { ProgressBar, pctUsed } from "./Budgets";
+
+const HOT_BUDGET_THRESHOLD_PCT = 50;
+const HOT_BUDGET_TOP_N = 5;
 
 // Local extension of the SDK's HealthResponse — the daemon adds a `security`
 // block that the SDK type doesn't model yet (it's an operational summary,
@@ -35,10 +43,53 @@ interface HealthResponse extends SDKHealthResponse {
  *   3. credential metadata — show api key id + pub key so the operator can
  *      cross-check against admin.key.pub on disk before trusting writes
  */
+interface HotBudget {
+  rule: Rule;
+  budget: RuleBudget;
+  pct: number;
+}
+
 export function Dashboard() {
   const creds = getCredentials();
   const health = useApi((c) => c.health() as Promise<HealthResponse>);
   const audit = useApi((c) => c.audit.list({ limit: 5 }));
+
+  // Fan out across every rule's budgets so the operator sees the hottest
+  // few without leaving the dashboard. Refreshes only on mount — they
+  // can hit /budgets for a live view.
+  const [hotBudgets, setHotBudgets] = useState<HotBudget[] | null>(null);
+  useEffect(() => {
+    const client = getClient();
+    if (!client) return;
+    let mounted = true;
+    (async () => {
+      try {
+        const rules = await client.evm.rules.list();
+        const lists = await Promise.all(
+          rules.rules.map((r) =>
+            client.evm.rules
+              .listBudgets(r.id)
+              .then((bs) => bs.map((b) => ({ rule: r, budget: b, pct: pctUsed(b) })))
+              .catch(() => [] as HotBudget[]),
+          ),
+        );
+        if (!mounted) return;
+        const all = lists.flat();
+        all.sort((a, b) => b.pct - a.pct);
+        // Only show budgets at or past the threshold — silence the
+        // dashboard when nothing is interesting.
+        const hot = all
+          .filter((x) => x.pct >= HOT_BUDGET_THRESHOLD_PCT)
+          .slice(0, HOT_BUDGET_TOP_N);
+        setHotBudgets(hot);
+      } catch {
+        if (mounted) setHotBudgets([]);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   return (
     <div className="space-y-6">
@@ -77,6 +128,45 @@ export function Dashboard() {
           )}
         </Card>
       </section>
+
+      {hotBudgets && hotBudgets.length > 0 && (
+        <Card
+          title={`Budgets at ≥${HOT_BUDGET_THRESHOLD_PCT}% used`}
+          actions={
+            <Link
+              to="/budgets"
+              className="text-xs text-accent-600 hover:text-accent-500"
+            >
+              all budgets →
+            </Link>
+          }
+        >
+          <ul className="space-y-2 text-sm">
+            {hotBudgets.map(({ rule, budget, pct }) => (
+              <li
+                key={budget.id}
+                className="grid grid-cols-1 items-center gap-2 md:grid-cols-[1fr_8rem_4rem]"
+              >
+                <div>
+                  <Link
+                    to="/rules"
+                    className="text-ink-900 hover:text-accent-600"
+                  >
+                    {rule.name}
+                  </Link>
+                  <span className="ml-2 font-mono text-[11px] text-ink-500">
+                    {budget.unit}
+                  </span>
+                </div>
+                <ProgressBar pct={pct} />
+                <div className="text-right font-mono text-xs text-ink-700">
+                  {pct.toFixed(0)}%
+                </div>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
 
       <Card title="Recent audit events">
         {audit.loading && <Loading />}
