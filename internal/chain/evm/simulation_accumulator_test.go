@@ -414,6 +414,12 @@ func (m *accMockBudgetRepo) ListByRuleIDs(_ context.Context, _ []types.RuleID) (
 func (m *accMockBudgetRepo) ListAll(_ context.Context) ([]*types.RuleBudget, error) {
 	return nil, nil
 }
+func (m *accMockBudgetRepo) Get(_ context.Context, _ string) (*types.RuleBudget, error) {
+	return nil, types.ErrNotFound
+}
+func (m *accMockBudgetRepo) Update(_ context.Context, _ *types.RuleBudget) error {
+	return nil
+}
 func (m *accMockBudgetRepo) MarkAlertSent(_ context.Context, _ types.RuleID, _ string) error {
 	return nil
 }

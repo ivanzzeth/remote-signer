@@ -324,6 +324,25 @@ func (r *mockBudgetRepo) ListAll(_ context.Context) ([]*types.RuleBudget, error)
 	}
 	return out, nil
 }
+func (r *mockBudgetRepo) Get(_ context.Context, id string) (*types.RuleBudget, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if b, ok := r.budgets[id]; ok {
+		cp := *b
+		return &cp, nil
+	}
+	return nil, types.ErrNotFound
+}
+func (r *mockBudgetRepo) Update(_ context.Context, budget *types.RuleBudget) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.budgets[budget.ID]; !ok {
+		return types.ErrNotFound
+	}
+	cp := *budget
+	r.budgets[budget.ID] = &cp
+	return nil
+}
 
 func (r *mockBudgetRepo) MarkAlertSent(_ context.Context, _ types.RuleID, _ string) error {
 	return nil

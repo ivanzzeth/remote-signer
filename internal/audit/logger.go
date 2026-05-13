@@ -278,6 +278,19 @@ func (a *AuditLogger) LogSettingsUpdated(ctx context.Context, apiKeyID, group, p
 	})
 }
 
+// LogBudgetMutation records an admin-driven create/update/reset/delete
+// on a budget row. Detail is stored on error_message (existing schema
+// field reused for audit context — same convention as the other
+// LogSettings-style helpers).
+func (a *AuditLogger) LogBudgetMutation(ctx context.Context, apiKeyID, action, budgetID, detail string) {
+	a.log(ctx, &types.AuditRecord{
+		EventType:    types.AuditEventTypeConfigReloaded,
+		ActorAddress: apiKeyID,
+		APIKeyID:     apiKeyID,
+		ErrorMessage: fmt.Sprintf("budget.%s id=%s — %s", action, budgetID, detail),
+	})
+}
+
 // LogTemplateSynced logs a template sync event (create/update/delete from config).
 func (a *AuditLogger) LogTemplateSynced(ctx context.Context, action, templateID, templateName string) {
 	a.log(ctx, &types.AuditRecord{

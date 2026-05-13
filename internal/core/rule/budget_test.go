@@ -63,6 +63,12 @@ func (m *mockBudgetRepoForRenewal) ListByRuleIDs(ctx context.Context, ruleIDs []
 func (m *mockBudgetRepoForRenewal) ListAll(ctx context.Context) ([]*types.RuleBudget, error) {
 	return nil, nil
 }
+func (m *mockBudgetRepoForRenewal) Get(ctx context.Context, id string) (*types.RuleBudget, error) {
+	return nil, types.ErrNotFound
+}
+func (m *mockBudgetRepoForRenewal) Update(ctx context.Context, budget *types.RuleBudget) error {
+	return nil
+}
 
 func (m *mockBudgetRepoForRenewal) GetByRuleID(ctx context.Context, ruleID types.RuleID, unit string) (*types.RuleBudget, error) {
 	m.mu.Lock()
@@ -321,6 +327,12 @@ func (m *dynamicBudgetRepo) ListByRuleIDs(ctx context.Context, ruleIDs []types.R
 }
 func (m *dynamicBudgetRepo) ListAll(ctx context.Context) ([]*types.RuleBudget, error) {
 	return nil, nil
+}
+func (m *dynamicBudgetRepo) Get(ctx context.Context, id string) (*types.RuleBudget, error) {
+	return nil, types.ErrNotFound
+}
+func (m *dynamicBudgetRepo) Update(ctx context.Context, budget *types.RuleBudget) error {
+	return nil
 }
 func (m *dynamicBudgetRepo) ResetBudget(ctx context.Context, ruleID types.RuleID, unit string, t time.Time) error {
 	return nil

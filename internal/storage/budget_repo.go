@@ -19,6 +19,16 @@ type BudgetRepository interface {
 	// Returns the budget (created or existing) and a bool indicating if it was created (true) or already existed (false).
 	CreateOrGet(ctx context.Context, budget *types.RuleBudget) (*types.RuleBudget, bool, error)
 	GetByRuleID(ctx context.Context, ruleID types.RuleID, unit string) (*types.RuleBudget, error)
+	// Get fetches a budget by its primary key. Used by the
+	// administrative /budgets/{id} endpoints where the caller already
+	// has the deterministic ID (SHA256 of rule_id+unit) rather than the
+	// two component fields.
+	Get(ctx context.Context, id string) (*types.RuleBudget, error)
+	// Update persists changes to mutable fields (max_total, max_per_tx,
+	// max_tx_count, alert_pct, alert_sent, spent, tx_count). It does
+	// NOT permit changes to id/rule_id/unit/created_at — those define
+	// the row's identity and the budget hash.
+	Update(ctx context.Context, budget *types.RuleBudget) error
 	// CountByRuleID returns the number of distinct budget units for a rule.
 	// SECURITY: Used to enforce MaxDynamicUnits limit to prevent budget amplification attacks.
 	CountByRuleID(ctx context.Context, ruleID types.RuleID) (int, error)
@@ -253,4 +263,49 @@ func (r *GormBudgetRepository) ListAll(ctx context.Context) ([]*types.RuleBudget
 		return nil, fmt.Errorf("failed to list budgets: %w", err)
 	}
 	return budgets, nil
+}
+
+// Get returns a single budget by primary key.
+func (r *GormBudgetRepository) Get(ctx context.Context, id string) (*types.RuleBudget, error) {
+	var budget types.RuleBudget
+	err := r.db.WithContext(ctx).First(&budget, "id = ?", id).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, types.ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to get budget: %w", err)
+	}
+	return &budget, nil
+}
+
+// Update writes mutable fields back. We pin the columns explicitly so a
+// caller passing a stale id/rule_id/unit can't accidentally relocate
+// the row — those parts define the budget's identity and hash.
+func (r *GormBudgetRepository) Update(ctx context.Context, budget *types.RuleBudget) error {
+	if budget == nil {
+		return fmt.Errorf("budget cannot be nil")
+	}
+	if budget.ID == "" {
+		return fmt.Errorf("budget id is required")
+	}
+	budget.UpdatedAt = time.Now()
+	result := r.db.WithContext(ctx).Model(&types.RuleBudget{}).
+		Where("id = ?", budget.ID).
+		Updates(map[string]any{
+			"max_total":    budget.MaxTotal,
+			"max_per_tx":   budget.MaxPerTx,
+			"max_tx_count": budget.MaxTxCount,
+			"alert_pct":    budget.AlertPct,
+			"alert_sent":   budget.AlertSent,
+			"spent":        budget.Spent,
+			"tx_count":     budget.TxCount,
+			"updated_at":   budget.UpdatedAt,
+		})
+	if result.Error != nil {
+		return fmt.Errorf("failed to update budget: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return types.ErrNotFound
+	}
+	return nil
 }

@@ -32,7 +32,8 @@ const (
 	PermApproveRule    Permission = "approve_rule"
 
 	// Budgets
-	PermReadBudgets Permission = "read_budgets"
+	PermReadBudgets   Permission = "read_budgets"
+	PermManageBudgets Permission = "manage_budgets" // create/update/reset/delete; admin only
 
 	// Templates
 	PermReadTemplates      Permission = "read_templates"
@@ -93,6 +94,7 @@ var rolePermissions = map[types.APIKeyRole]map[Permission]bool{
 		PermDeleteAnyRule:       true,
 		PermApproveRule:         true,
 		PermReadBudgets:         true,
+		PermManageBudgets:       true,
 		PermReadTemplates:       true,
 		PermInstantiateTemplate: true,
 		PermReadPresets:         true,

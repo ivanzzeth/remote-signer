@@ -78,6 +78,12 @@ func (m *budgetExceededBudgetRepo) ListByRuleIDs(ctx context.Context, ruleIDs []
 func (m *budgetExceededBudgetRepo) ListAll(ctx context.Context) ([]*types.RuleBudget, error) {
 	return nil, nil
 }
+func (m *budgetExceededBudgetRepo) Get(ctx context.Context, id string) (*types.RuleBudget, error) {
+	return nil, types.ErrNotFound
+}
+func (m *budgetExceededBudgetRepo) Update(ctx context.Context, budget *types.RuleBudget) error {
+	return nil
+}
 
 func (m *budgetExceededBudgetRepo) GetByRuleID(ctx context.Context, ruleID types.RuleID, unit string) (*types.RuleBudget, error) {
 	m.mu.Lock()
