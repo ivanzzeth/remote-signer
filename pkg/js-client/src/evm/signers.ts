@@ -36,6 +36,12 @@ export interface ListSignersResponse {
 /** Parameters for keystore-backed signer creation. */
 export interface CreateKeystoreParams {
   password: string;
+  /**
+   * Optional raw secp256k1 private key (64 hex chars, with or without 0x
+   * prefix). When set, the daemon imports the key into a new encrypted
+   * keystore instead of generating a fresh keypair.
+   */
+  private_key_hex?: string;
 }
 
 /**

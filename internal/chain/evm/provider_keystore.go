@@ -95,9 +95,26 @@ func (p *KeystoreProvider) CreateSigner(ctx context.Context, params interface{})
 	password := []byte(ksParams.Password)
 	defer keystore.SecureZeroize(password)
 
-	address, keystorePath, err := keystore.CreateKeystore(p.keystoreDir, password)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create keystore: %w", err)
+	var (
+		address      string
+		keystorePath string
+		err          error
+	)
+	if ksParams.PrivateKeyHex != "" {
+		// Import path: encrypt the operator-supplied private key into a
+		// fresh v3 keystore. ethsig handles 0x stripping and 32-byte
+		// length validation internally; we zeroise the hex copy here too.
+		privHex := []byte(ksParams.PrivateKeyHex)
+		defer keystore.SecureZeroize(privHex)
+		address, keystorePath, err = keystore.ImportPrivateKey(p.keystoreDir, privHex, password)
+		if err != nil {
+			return nil, fmt.Errorf("failed to import private key: %w", err)
+		}
+	} else {
+		address, keystorePath, err = keystore.CreateKeystore(p.keystoreDir, password)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create keystore: %w", err)
+		}
 	}
 
 	logger.EVM().Info().Str("address", address).Str("path", keystorePath).Msg("keystore created")
