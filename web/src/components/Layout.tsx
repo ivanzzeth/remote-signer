@@ -22,6 +22,8 @@ export function Layout({ children }: LayoutProps) {
 
         <NavItem to="/dashboard">Dashboard</NavItem>
         <NavItem to="/signers">Signers</NavItem>
+        <NavItem to="/hd-wallets">HD Wallets</NavItem>
+        <NavItem to="/wallets">Wallets</NavItem>
         <NavItem to="/requests">Requests</NavItem>
         <NavItem to="/rules">Rules</NavItem>
         <NavItem to="/api-keys">API Keys</NavItem>
