@@ -33,6 +33,7 @@ export function Signers() {
     displayName: string;
     tags: string[];
     privateKeyHex?: string;
+    keystoreJson?: string;
   }) {
     const client = getClient();
     if (!client) return;
@@ -44,6 +45,9 @@ export function Signers() {
           password: input.password,
           ...(input.privateKeyHex
             ? { private_key_hex: input.privateKeyHex }
+            : {}),
+          ...(input.keystoreJson
+            ? { keystore_json: input.keystoreJson }
             : {}),
         },
         ...(input.displayName ? { display_name: input.displayName } : {}),
@@ -286,15 +290,31 @@ function CreateForm({
     displayName: string;
     tags: string[];
     privateKeyHex?: string;
+    keystoreJson?: string;
   }) => void;
 }) {
-  const [mode, setMode] = useState<"generate" | "import">("generate");
+  type Mode = "generate" | "import-hex" | "import-json";
+  const [mode, setMode] = useState<Mode>("generate");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [privateKeyHex, setPrivateKeyHex] = useState("");
+  const [keystoreJson, setKeystoreJson] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [tagsCsv, setTagsCsv] = useState("");
   const [error, setError] = useState<string | null>(null);
+
+  async function onFilePicked(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setError(null);
+    try {
+      setKeystoreJson(await file.text());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      e.target.value = "";
+    }
+  }
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -307,12 +327,31 @@ function CreateForm({
       return;
     }
     let hex: string | undefined;
-    if (mode === "import") {
+    let json: string | undefined;
+    if (mode === "import-hex") {
       hex = privateKeyHex.trim().replace(/^0x/i, "");
       if (!/^[0-9a-fA-F]{64}$/.test(hex)) {
         setError("private key must be 64 hex chars (with or without 0x)");
         return;
       }
+    }
+    if (mode === "import-json") {
+      const trimmed = keystoreJson.trim();
+      if (!trimmed) {
+        setError("paste or upload a v3 keystore JSON");
+        return;
+      }
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (!parsed.crypto && !parsed.Crypto) {
+          setError("not a v3 keystore JSON (missing crypto field)");
+          return;
+        }
+      } catch {
+        setError("keystore JSON is not valid JSON");
+        return;
+      }
+      json = trimmed;
     }
     setError(null);
     const tags = tagsCsv
@@ -324,6 +363,7 @@ function CreateForm({
       displayName: displayName.trim(),
       tags,
       privateKeyHex: hex,
+      keystoreJson: json,
     });
   }
 
@@ -331,23 +371,27 @@ function CreateForm({
     <Card title="New signer">
       <form onSubmit={submit} className="space-y-3">
         <div className="flex gap-2 rounded-md border border-ink-200 bg-ink-50 p-1">
-          {(["generate", "import"] as const).map((m) => (
+          {([
+            ["generate", "Generate fresh keypair"],
+            ["import-hex", "Import private key"],
+            ["import-json", "Import keystore JSON"],
+          ] as const).map(([m, label]) => (
             <button
               key={m}
               type="button"
-              onClick={() => setMode(m)}
+              onClick={() => setMode(m as Mode)}
               className={`flex-1 rounded px-3 py-1 text-xs font-medium transition ${
                 mode === m
                   ? "bg-white text-ink-900 shadow-sm"
                   : "text-ink-500 hover:text-ink-900"
               }`}
             >
-              {m === "generate" ? "Generate fresh keypair" : "Import private key"}
+              {label}
             </button>
           ))}
         </div>
 
-        {mode === "import" && (
+        {mode === "import-hex" && (
           <div>
             <label className="mb-1 block text-[11px] uppercase tracking-wide text-ink-500">
               Private key (hex, with or without 0x)
@@ -366,6 +410,36 @@ function CreateForm({
               Treated as sensitive — the input is masked. The hex bytes leave
               the browser exactly once over the signed HTTPS body; the daemon
               encrypts them into a v3 keystore on disk.
+            </p>
+          </div>
+        )}
+
+        {mode === "import-json" && (
+          <div>
+            <label className="mb-1 flex items-center justify-between text-[11px] uppercase tracking-wide text-ink-500">
+              <span>v3 Keystore JSON</span>
+              <label className="cursor-pointer text-accent-600 hover:text-accent-500">
+                <input
+                  type="file"
+                  className="hidden"
+                  accept=".json,.txt,application/json"
+                  onChange={onFilePicked}
+                />
+                Load from file…
+              </label>
+            </label>
+            <textarea
+              value={keystoreJson}
+              onChange={(e) => setKeystoreJson(e.target.value)}
+              rows={6}
+              spellCheck={false}
+              placeholder='{"version":3,"id":"…","address":"…","crypto":{…}}'
+              className="block w-full rounded-md border border-ink-300 p-2 font-mono text-[11px]"
+            />
+            <p className="mt-1 text-[11px] text-ink-500">
+              Paste a v3 keystore JSON (or upload via Load from file). The
+              password below must unlock it; the daemon decrypts locally,
+              then re-encrypts under <code>~/.remote-signer/keystores/</code>.
             </p>
           </div>
         )}
@@ -400,17 +474,24 @@ function CreateForm({
         </div>
         {error && <ErrorBanner msg={error} />}
         <p className="text-xs text-ink-500">
-          {mode === "generate" ? (
+          {mode === "generate" && (
             <>
               Daemon generates a fresh secp256k1 keypair and writes the
               encrypted keystore under <code>~/.remote-signer/keystores/</code>.
               Save the password — it's the only way to unlock later.
             </>
-          ) : (
+          )}
+          {mode === "import-hex" && (
             <>
-              Daemon encrypts the supplied private key into a new v3 keystore
-              under <code>~/.remote-signer/keystores/</code>. The original
-              hex is not retained server-side.
+              Daemon encrypts the supplied private key into a new v3 keystore.
+              The original hex is not retained server-side.
+            </>
+          )}
+          {mode === "import-json" && (
+            <>
+              Daemon verifies the keystore JSON unlocks with the password
+              you provided, then re-encrypts it under its own keystore dir.
+              The source file is not retained.
             </>
           )}
         </p>
@@ -420,7 +501,7 @@ function CreateForm({
             disabled={!password || !confirmPassword}
             className="rounded-md bg-accent-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-600 disabled:cursor-not-allowed disabled:bg-ink-300"
           >
-            {mode === "import" ? "Import signer" : "Create signer"}
+            {mode === "generate" ? "Create signer" : "Import signer"}
           </button>
         </div>
       </form>

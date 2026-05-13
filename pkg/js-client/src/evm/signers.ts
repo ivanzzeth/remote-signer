@@ -33,15 +33,24 @@ export interface ListSignersResponse {
   signers: SignerInfo[];
 }
 
-/** Parameters for keystore-backed signer creation. */
+/**
+ * Parameters for keystore-backed signer creation. Set at most one of
+ * private_key_hex / keystore_json — leaving both empty creates a fresh
+ * keypair.
+ */
 export interface CreateKeystoreParams {
   password: string;
   /**
-   * Optional raw secp256k1 private key (64 hex chars, with or without 0x
-   * prefix). When set, the daemon imports the key into a new encrypted
-   * keystore instead of generating a fresh keypair.
+   * Raw secp256k1 private key (64 hex chars, with or without 0x prefix).
+   * When set the daemon imports the key into a new encrypted keystore.
    */
   private_key_hex?: string;
+  /**
+   * Full v3 keystore JSON (as written by `remote-signer keystore create`
+   * or any compatible tool). The daemon decrypts with `password`, then
+   * re-encrypts under its keystore dir.
+   */
+  keystore_json?: string;
 }
 
 /**
