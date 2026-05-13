@@ -82,4 +82,26 @@ chains:
       budget_native_max_per_tx: "0.1"
       budget_erc20_max_total: "100"
       budget_erc20_max_per_tx: "50"
+
+    # Reconciles DB signer records against on-disk keystore files. If
+    # an operator deletes a keystore out of band, the signer is marked
+    # material_status=missing and stops accepting sign requests.
+    material_check:
+      enabled: true
+      startup_check: true
+      interval: 1h
+
+# Audit monitor watches the audit log for anomalies and fans alerts
+# out through the configured notify providers. Thresholds count
+# matching events within lookback_hours; tune via Settings →
+# audit_monitor.
+audit_monitor:
+  enabled: true
+  interval: 5m
+  lookback_hours: 1
+  auth_failure_threshold: 20
+  blocklist_reject_threshold: 10
+  high_freq_threshold: 100
+  retention_days: 90
+  cleanup_interval: 24h
 `
