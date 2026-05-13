@@ -361,6 +361,10 @@ func (h *HDWalletHandler) deriveAddresses(w http.ResponseWriter, r *http.Request
 		// Single derive
 		info, err := mgr.DeriveAddress(r.Context(), primaryAddr, *req.Index)
 		if err != nil {
+			if strings.Contains(err.Error(), "is locked") {
+				h.writeError(w, err.Error(), http.StatusLocked)
+				return
+			}
 			h.logger.Error("derive address failed",
 				slog.String("primary_address", primaryAddr),
 				slog.String("error", err.Error()),
@@ -376,6 +380,10 @@ func (h *HDWalletHandler) deriveAddresses(w http.ResponseWriter, r *http.Request
 		}
 		infos, err := mgr.DeriveAddresses(r.Context(), primaryAddr, *req.Start, *req.Count)
 		if err != nil {
+			if strings.Contains(err.Error(), "is locked") {
+				h.writeError(w, err.Error(), http.StatusLocked)
+				return
+			}
 			h.logger.Error("derive addresses failed",
 				slog.String("primary_address", primaryAddr),
 				slog.String("error", err.Error()),
@@ -413,6 +421,13 @@ func (h *HDWalletHandler) listDerived(w http.ResponseWriter, r *http.Request, pr
 
 	derived, err := mgr.ListDerivedAddresses(primaryAddr)
 	if err != nil {
+		// "is locked … (unlock first)" is operational state, not an
+		// internal error — return 423 so the UI can render a friendly
+		// "Unlock first" hint without staring at a 500.
+		if strings.Contains(err.Error(), "is locked") {
+			h.writeError(w, err.Error(), http.StatusLocked)
+			return
+		}
 		h.logger.Error("list derived addresses failed",
 			slog.String("primary_address", primaryAddr),
 			slog.String("error", err.Error()),
