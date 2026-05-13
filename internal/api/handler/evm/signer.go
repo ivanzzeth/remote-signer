@@ -1046,9 +1046,11 @@ func (h *SignerHandler) newSignerResponse(ctx context.Context, s types.SignerInf
 			resp.MaterialStatus = string(rec.MaterialStatus)
 			resp.MaterialCheckedAt = rec.MaterialCheckedAt
 			resp.MaterialMissingAt = rec.MaterialMissingAt
-			resp.Locked = rec.Locked
-			resp.Enabled = rec.Enabled
 			resp.HDDerivationIndex = rec.HDDerivationIndex
+			// Locked/Enabled deliberately not pulled from the DB record —
+			// the SignerRegistry is the source of truth for live lock
+			// state. The DB row is refreshed only on material_check ticks
+			// (default 1h), so it lags reality between Unlock/Lock calls.
 		}
 	}
 	if resp.PrimaryAddress == "" {
