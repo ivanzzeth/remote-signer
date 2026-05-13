@@ -1,21 +1,22 @@
 import { expect, test } from "./fixtures";
 
-test("Signers page renders empty state on a fresh daemon", async ({
-  authedPage,
-}) => {
+// The e2e suite shares one daemon across specs; by the time these run other
+// specs may have seeded signers/rules. Assert only that the page heading +
+// table headings render — content is exercised by the mutation specs.
+test("Signers page renders", async ({ authedPage }) => {
   await authedPage.click("text=Signers");
   await expect(
     authedPage.getByRole("heading", { name: "Signers" }),
   ).toBeVisible();
-  await expect(authedPage.locator("text=No signers configured")).toBeVisible();
+  await expect(authedPage.getByRole("button", { name: "New signer" })).toBeVisible();
 });
 
-test("Rules page renders empty state", async ({ authedPage }) => {
+test("Rules page renders", async ({ authedPage }) => {
   await authedPage.click("text=Rules");
   await expect(
     authedPage.getByRole("heading", { name: "Rules" }),
   ).toBeVisible();
-  await expect(authedPage.locator("text=No rules defined")).toBeVisible();
+  await expect(authedPage.getByRole("button", { name: "New rule" })).toBeVisible();
 });
 
 test("API Keys page lists the bootstrap admin", async ({ authedPage }) => {

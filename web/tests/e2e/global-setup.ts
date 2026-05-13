@@ -78,6 +78,10 @@ security:
   rules_api_readonly: false
   api_keys_api_readonly: false
   manual_approval_enabled: true
+  # 100/min default is too tight when the full e2e suite hammers the
+  # admin key — bump generously so tests don't fight the rate limiter.
+  rate_limit_default: 100000
+  ip_rate_limit: 100000
 
 chains:
   evm:
