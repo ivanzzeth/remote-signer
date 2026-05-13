@@ -31,6 +31,10 @@ export interface RequestStatusResponse {
   rule_matched_name?: string;
   approved_by?: string;
   approved_at?: string;
+  // How the request transitioned out of authorizing: "manual" (admin),
+  // "rule" (whitelist rule matched), "simulation" (simulation fallback
+  // allowed it). Empty until the request reaches signing/completed.
+  approval_source?: "manual" | "rule" | "simulation";
   created_at: string;
   updated_at: string;
   completed_at?: string;
