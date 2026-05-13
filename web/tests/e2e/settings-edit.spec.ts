@@ -3,16 +3,16 @@ import { join } from "node:path";
 import {
   RemoteSignerClient,
   parsePrivateKey,
-  type SettingsSnapshot,
 } from "remote-signer-client";
 import { expect, test } from "./fixtures";
 import { getState } from "./global-setup";
 
 /**
- * Round-trip: open Settings → Edit "security" → bump max_request_age →
- * Save → reload via SDK → assert the new value persisted.
+ * Round-trip: open Settings → security → typed form bumps
+ * max_request_age via the duration input → Save → reload via SDK →
+ * assert the value persisted as the right nanosecond count.
  */
-test("security settings edit persists across PUT/GET", async ({
+test("security max_request_age edit persists via the typed form", async ({
   authedPage,
 }) => {
   await authedPage.click("text=Settings");
@@ -20,36 +20,29 @@ test("security settings edit persists across PUT/GET", async ({
     authedPage.getByRole("heading", { name: "Settings" }),
   ).toBeVisible();
 
-  // Wait for security card content to land (rate_limit_default is in every
-  // snapshot regardless of overrides).
-  await expect(
-    authedPage.locator("text=rate_limit_default").first(),
-  ).toBeVisible();
-
-  // Find the security card and click its Edit button.
-  const securityCard = authedPage.locator("section", {
-    has: authedPage.getByRole("heading", { name: "security" }),
+  // Default selected group is "security"; the form renders one row per
+  // field — the max_request_age row contains a duration text input.
+  const ageRow = authedPage.locator("div", {
+    hasText: "max_request_age",
   });
-  await securityCard.getByRole("button", { name: "Edit" }).click();
+  await expect(ageRow.first()).toBeVisible({ timeout: 5_000 });
 
-  const textarea = securityCard.locator("textarea");
-  await expect(textarea).toBeVisible();
-  const initial = JSON.parse((await textarea.inputValue()) || "{}");
+  // The duration input is the first <input type=text> inside the row.
+  // Default value renders as "1m" (60 seconds in ns).
+  const durationInput = authedPage
+    .locator("input[type='text']")
+    .filter({ hasNotText: "" })
+    .first();
+  // Actually grab the input by its proximity to the label.
+  const input = authedPage
+    .locator("dl > div", { has: authedPage.locator("text=max_request_age") })
+    .locator("input")
+    .first();
+  await input.fill("90s");
 
-  // Bump max_request_age and save. The setting value is serialized in
-  // Go's time.Duration form: number of nanoseconds, JSON-encoded.
-  const patched: SettingsSnapshot = {
-    ...initial,
-    max_request_age: 90_000_000_000, // 90s
-  };
-  await textarea.fill(JSON.stringify(patched, null, 2));
-  await securityCard.getByRole("button", { name: "Save" }).click();
+  await authedPage.getByRole("button", { name: "Save" }).click();
 
-  // After save the card returns to viewer mode.
-  await expect(securityCard.locator("textarea")).toHaveCount(0);
-  await expect(securityCard.locator("text=Edit")).toBeVisible();
-
-  // Confirm the change is durable by reading via the SDK (server-side).
+  // Cross-check via SDK.
   const state = getState();
   const seed = parsePrivateKey(
     readFileSync(join(state.home, "apikeys", "admin.key.priv"), "utf8"),
@@ -59,6 +52,44 @@ test("security settings edit persists across PUT/GET", async ({
     apiKeyID: "admin",
     privateKey: seed,
   });
-  const reloaded = await client.settings.get("security");
-  expect(reloaded.max_request_age).toBe(90_000_000_000);
+  await expect
+    .poll(async () => (await client.settings.get("security")).max_request_age, {
+      timeout: 5_000,
+    })
+    .toBe(90_000_000_000);
+
+  // suppress unused
+  void durationInput;
+});
+
+test("Advanced raw-JSON fallback still writes the snapshot", async ({
+  authedPage,
+}) => {
+  await authedPage.click("text=Settings");
+  await authedPage.getByRole("button", { name: "security" }).click();
+  await authedPage
+    .getByLabel(/Advanced \(raw JSON\)/)
+    .check();
+  const textarea = authedPage.locator("textarea").first();
+  await expect(textarea).toBeVisible();
+
+  const raw = JSON.parse(await textarea.inputValue());
+  raw.rate_limit_default = 12345;
+  await textarea.fill(JSON.stringify(raw, null, 2));
+  await authedPage.getByRole("button", { name: "Save" }).click();
+
+  const state = getState();
+  const seed = parsePrivateKey(
+    readFileSync(join(state.home, "apikeys", "admin.key.priv"), "utf8"),
+  );
+  const client = new RemoteSignerClient({
+    baseURL: `http://127.0.0.1:${process.env.E2E_PORT ?? 18548}`,
+    apiKeyID: "admin",
+    privateKey: seed,
+  });
+  await expect
+    .poll(async () => (await client.settings.get("security")).rate_limit_default, {
+      timeout: 5_000,
+    })
+    .toBe(12345);
 });
