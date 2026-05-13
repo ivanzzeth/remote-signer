@@ -9,6 +9,7 @@ import {
   PageHeader,
   shorten,
 } from "../components/ui";
+
 import { getClient } from "../lib/auth";
 import { useApi } from "../lib/useApi";
 
@@ -28,6 +29,27 @@ export function HDWallets() {
   const [showCreate, setShowCreate] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [unlockTarget, setUnlockTarget] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  async function unlock(address: string, password: string) {
+    const client = getClient();
+    if (!client) return;
+    setBusy(address);
+    setMutationError(null);
+    try {
+      // HD wallets surface as signers (type=hd_wallet) and reuse the
+      // signer unlock endpoint — the manager dispatches to the HD wallet
+      // provider's UnlockSigner based on the signer's recorded type.
+      await client.evm.signers.unlock(address, { password });
+      setUnlockTarget(null);
+      reload();
+    } catch (e) {
+      setMutationError(formatErr(e));
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function create(input: { password: string; entropyBits: number }) {
     const client = getClient();
@@ -121,7 +143,9 @@ export function HDWallets() {
                 <tr>
                   <th className="py-1 pr-3 font-normal">Primary address</th>
                   <th className="py-1 pr-3 font-normal">Base path</th>
-                  <th className="py-1 font-normal">Derived</th>
+                  <th className="py-1 pr-3 font-normal">State</th>
+                  <th className="py-1 pr-3 font-normal">Derived</th>
+                  <th className="py-1 font-normal">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -135,12 +159,23 @@ export function HDWallets() {
                         id === w.primary_address ? null : w.primary_address,
                       )
                     }
+                    onUnlockClick={() => setUnlockTarget(w.primary_address)}
+                    busy={busy === w.primary_address}
                   />
                 ))}
               </tbody>
             </table>
           ))}
       </Card>
+
+      {unlockTarget && (
+        <UnlockDialog
+          address={unlockTarget}
+          busy={busy === unlockTarget}
+          onCancel={() => setUnlockTarget(null)}
+          onSubmit={(password) => unlock(unlockTarget, password)}
+        />
+      )}
     </div>
   );
 }
@@ -149,10 +184,14 @@ function HDWalletRow({
   wallet,
   expanded,
   onToggle,
+  onUnlockClick,
+  busy,
 }: {
   wallet: HDWalletResponse;
   expanded: boolean;
   onToggle: () => void;
+  onUnlockClick: () => void;
+  busy: boolean;
 }) {
   return (
     <>
@@ -166,16 +205,111 @@ function HDWalletRow({
         <td className="py-1 pr-3 font-mono text-xs text-ink-700">
           {wallet.base_path}
         </td>
-        <td className="py-1 text-ink-700">{wallet.derived_count}</td>
+        <td className="py-1 pr-3">
+          <Badge tone={wallet.locked ? "red" : "green"}>
+            {wallet.locked ? "locked" : "unlocked"}
+          </Badge>
+        </td>
+        <td className="py-1 pr-3 text-ink-700">{wallet.derived_count}</td>
+        <td className="py-1">
+          <div
+            className="flex gap-2"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {wallet.locked && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={onUnlockClick}
+                className="rounded-md border border-ink-200 px-2 py-0.5 text-xs text-ink-700 hover:bg-ink-100 disabled:opacity-50"
+              >
+                Unlock
+              </button>
+            )}
+          </div>
+        </td>
       </tr>
       {expanded && (
         <tr className="border-t border-ink-100 bg-ink-50">
-          <td colSpan={3} className="px-4 py-3">
-            <ExpandedPanel address={wallet.primary_address} />
+          <td colSpan={5} className="px-4 py-3">
+            {wallet.locked ? (
+              <Empty msg="This wallet is locked — derived addresses are unavailable until you unlock it." />
+            ) : (
+              <ExpandedPanel address={wallet.primary_address} />
+            )}
           </td>
         </tr>
       )}
     </>
+  );
+}
+
+function UnlockDialog({
+  address,
+  busy,
+  onCancel,
+  onSubmit,
+}: {
+  address: string;
+  busy: boolean;
+  onCancel: () => void;
+  onSubmit: (password: string) => void;
+}) {
+  const [password, setPassword] = useState("");
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/30"
+      onClick={onCancel}
+    >
+      <div
+        className="w-full max-w-sm rounded-lg border border-ink-200 bg-white p-5 shadow-lg"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="mb-1 text-sm font-semibold text-ink-900">
+          Unlock HD wallet
+        </h2>
+        <p className="mb-4 font-mono text-[11px] text-ink-500">{address}</p>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            onSubmit(password);
+          }}
+          className="space-y-3"
+        >
+          <div>
+            <label className="mb-1 block text-[11px] uppercase tracking-wide text-ink-500">
+              Wallet password
+            </label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              autoFocus
+              autoComplete="current-password"
+              className="w-full rounded-md border border-ink-300 px-2 py-1 text-sm"
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={busy}
+              className="rounded-md border border-ink-200 px-3 py-1 text-xs text-ink-700 hover:bg-ink-100 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={busy || !password}
+              className="rounded-md bg-accent-500 px-3 py-1 text-xs font-medium text-white hover:bg-accent-600 disabled:opacity-50"
+            >
+              Unlock
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }
 

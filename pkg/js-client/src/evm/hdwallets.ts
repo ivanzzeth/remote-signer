@@ -31,6 +31,10 @@ export interface HDWalletResponse {
   base_path: string;
   derived_count: number;
   derived?: SignerInfo[];
+  /** True for wallets discovered on disk but not unlocked since startup. */
+  locked?: boolean;
+  display_name?: string;
+  tags?: string[];
 }
 
 export interface ListHDWalletsResponse {
