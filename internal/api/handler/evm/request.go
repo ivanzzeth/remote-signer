@@ -70,9 +70,14 @@ type RequestDetailResponse struct {
 	RuleMatchedID    *string         `json:"rule_matched_id,omitempty"`
 	RuleMatchedName  *string         `json:"rule_matched_name,omitempty"`
 	ApprovedBy       *string         `json:"approved_by,omitempty"`
-	CreatedAt        string          `json:"created_at"`
-	UpdatedAt        string          `json:"updated_at"`
-	CompletedAt      *string         `json:"completed_at,omitempty"`
+	// ApprovalSource is one of "manual", "rule", "simulation" once the
+	// request has been approved. Emitted even when the row predates the
+	// column so the UI can render a single consistent "approved by …"
+	// line for all three paths.
+	ApprovalSource string `json:"approval_source,omitempty"`
+	CreatedAt      string `json:"created_at"`
+	UpdatedAt      string `json:"updated_at"`
+	CompletedAt    *string `json:"completed_at,omitempty"`
 }
 
 // ListRequestsResponse represents the response for listing requests
@@ -301,6 +306,17 @@ func toDetailResponse(ctx context.Context, ruleRepo storage.RuleRepository, req 
 		ApprovedBy:    req.ApprovedBy,
 		CreatedAt:     req.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt:     req.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+	}
+	// Only attribute once the request has actually been approved.
+	// Pending/authorizing rows have neither approver nor matched rule
+	// yet — emitting "simulation" there would be a lie.
+	switch req.Status {
+	case types.StatusSigning, types.StatusCompleted, types.StatusFailed:
+		if req.ApprovalSource != "" {
+			resp.ApprovalSource = req.ApprovalSource
+		} else {
+			resp.ApprovalSource = types.DeriveApprovalSource(req.RuleMatchedID, req.ApprovedBy)
+		}
 	}
 	if req.RuleMatchedID != nil && ruleRepo != nil {
 		rule, err := ruleRepo.Get(ctx, types.RuleID(*req.RuleMatchedID))

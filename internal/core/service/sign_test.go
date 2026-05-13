@@ -1154,6 +1154,18 @@ func TestProcessApproval(t *testing.T) {
 		if resp.SignResponse.Signature == nil {
 			t.Error("expected non-nil signature")
 		}
+		// Manual approval must record approval_source="manual" so the UI
+		// can attribute it without inferring from empty fields.
+		got, err := f.requestRepo.Get(ctx, "req-approve")
+		if err != nil {
+			t.Fatalf("failed to re-read request: %v", err)
+		}
+		if got.ApprovalSource != types.ApprovalSourceManual {
+			t.Errorf("expected approval_source=manual, got %q", got.ApprovalSource)
+		}
+		if got.ApprovedBy == nil || *got.ApprovedBy != "admin" {
+			t.Errorf("expected approved_by=admin, got %v", got.ApprovedBy)
+		}
 	})
 
 	t.Run("manual_approval_with_rule_generation", func(t *testing.T) {

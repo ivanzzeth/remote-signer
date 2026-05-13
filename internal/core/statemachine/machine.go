@@ -89,6 +89,7 @@ func (sm *StateMachine) ApproveForSigning(ctx context.Context, reqID types.SignR
 	}
 	req.ApprovedBy = approvedBy
 	req.ApprovedAt = &now
+	req.ApprovalSource = types.DeriveApprovalSource(req.RuleMatchedID, approvedBy)
 	req.UpdatedAt = now
 
 	if err := sm.requestRepo.CompareAndUpdate(ctx, req, expectedStatus); err != nil {

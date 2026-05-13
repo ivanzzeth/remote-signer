@@ -5,7 +5,7 @@ import {
   type RequestStatus,
   type RequestStatusResponse,
 } from "remote-signer-client";
-import { Badge, Card, ErrorBanner, Loading } from "../components/ui";
+import { Badge, Card, ErrorBanner, Loading, shorten } from "../components/ui";
 import { getClient } from "../lib/auth";
 import { useApi } from "../lib/useApi";
 
@@ -346,7 +346,8 @@ function JsonBlock({ value }: { value: unknown }) {
 
 function hasOutcome(req: RequestStatusResponse): boolean {
   return Boolean(
-    req.rule_matched_id ||
+    req.approval_source ||
+      req.rule_matched_id ||
       req.approved_by ||
       req.error_message ||
       req.signature ||
@@ -358,25 +359,9 @@ function OutcomeView({ req }: { req: RequestStatusResponse }) {
   return (
     <div className="space-y-3">
       <FieldGrid>
-        {req.rule_matched_id && (
-          <Field label="Matched rule">
-            {req.rule_matched_name ? (
-              <>
-                <span>{req.rule_matched_name}</span>
-                <Mono>
-                  <span className="ml-2 text-ink-500">
-                    {req.rule_matched_id}
-                  </span>
-                </Mono>
-              </>
-            ) : (
-              <Mono>{req.rule_matched_id}</Mono>
-            )}
-          </Field>
-        )}
-        {req.approved_by && (
+        {req.approval_source && (
           <Field label="Approved by">
-            <Mono>{req.approved_by}</Mono>
+            <ApprovalAttribution req={req} />
           </Field>
         )}
         {req.approved_at && (
@@ -396,6 +381,70 @@ function OutcomeView({ req }: { req: RequestStatusResponse }) {
       )}
     </div>
   );
+}
+
+// ApprovalAttribution renders a single clickable line that explains
+// exactly who let this request through. Three shapes, one per
+// approval_source value:
+//
+//   manual     "API key · admin"                   → /api-keys
+//   rule       "Rule · NON_BURN"                   → /rules
+//   simulation "Simulation budget · 0x21f4…A0B8"   → /budgets/sim:<addr>
+//
+// Each is a Link so operators can drill into the artifact that approved
+// the spend without going through a search box.
+function ApprovalAttribution({ req }: { req: RequestStatusResponse }) {
+  const linkClass =
+    "text-accent-600 hover:text-accent-500 hover:underline underline-offset-2";
+
+  if (req.approval_source === "manual") {
+    const id = req.approved_by || "—";
+    return (
+      <span className="text-sm">
+        <span className="mr-1 text-ink-500">API key ·</span>
+        <Link to="/api-keys" className={`font-mono ${linkClass}`}>
+          {id}
+        </Link>
+      </span>
+    );
+  }
+
+  if (req.approval_source === "rule") {
+    const label = req.rule_matched_name || req.rule_matched_id || "—";
+    return (
+      <span className="text-sm">
+        <span className="mr-1 text-ink-500">Rule ·</span>
+        <Link to="/rules" className={linkClass}>
+          {label}
+        </Link>
+        {req.rule_matched_id && req.rule_matched_name && (
+          <span className="ml-2 font-mono text-[11px] text-ink-500">
+            {req.rule_matched_id}
+          </span>
+        )}
+      </span>
+    );
+  }
+
+  if (req.approval_source === "simulation") {
+    const addr = req.signer_address;
+    // sim:<lowercased address> is how the daemon stores it; the budget
+    // detail route uses the same id verbatim.
+    const budgetID = `sim:${addr.toLowerCase()}`;
+    return (
+      <span className="text-sm">
+        <span className="mr-1 text-ink-500">Simulation budget ·</span>
+        <Link
+          to={`/budgets/${encodeURIComponent(budgetID)}`}
+          className={`font-mono ${linkClass}`}
+        >
+          {shorten(addr)}
+        </Link>
+      </span>
+    );
+  }
+
+  return <span className="text-sm text-ink-500">—</span>;
 }
 
 function HexBlock({ label, value }: { label: string; value: string }) {
