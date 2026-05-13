@@ -2,11 +2,14 @@ package evm
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
+	gethkeystore "github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ivanzzeth/ethsig"
 	"github.com/ivanzzeth/ethsig/keystore"
 
@@ -100,17 +103,39 @@ func (p *KeystoreProvider) CreateSigner(ctx context.Context, params interface{})
 		keystorePath string
 		err          error
 	)
-	if ksParams.PrivateKeyHex != "" {
-		// Import path: encrypt the operator-supplied private key into a
-		// fresh v3 keystore. ethsig handles 0x stripping and 32-byte
-		// length validation internally; we zeroise the hex copy here too.
+	switch {
+	case ksParams.KeystoreJSON != "":
+		// Import from a v3 keystore JSON the operator already has on hand.
+		// Decrypt locally to (a) verify the supplied password unlocks it and
+		// (b) extract the raw private key, then re-encrypt under the
+		// daemon's keystore dir so scrypt params + file naming stay
+		// consistent with the rest of the directory.
+		decryptedKey, decryptErr := gethkeystore.DecryptKey([]byte(ksParams.KeystoreJSON), string(password))
+		if decryptErr != nil {
+			return nil, fmt.Errorf("failed to decrypt supplied keystore JSON: %w", decryptErr)
+		}
+		// crypto.FromECDSA returns the 32-byte big-endian private key bytes.
+		privBytes := crypto.FromECDSA(decryptedKey.PrivateKey)
+		defer func() {
+			for i := range privBytes {
+				privBytes[i] = 0
+			}
+		}()
+		address, keystorePath, err = keystore.ImportPrivateKey(p.keystoreDir, []byte(hex.EncodeToString(privBytes)), password)
+		if err != nil {
+			return nil, fmt.Errorf("failed to import decrypted keystore: %w", err)
+		}
+	case ksParams.PrivateKeyHex != "":
+		// Import the operator-supplied private key into a fresh v3 keystore.
+		// ethsig handles 0x stripping and 32-byte length validation; we
+		// zeroise the hex copy here so the GC can't leak it cheaply.
 		privHex := []byte(ksParams.PrivateKeyHex)
 		defer keystore.SecureZeroize(privHex)
 		address, keystorePath, err = keystore.ImportPrivateKey(p.keystoreDir, privHex, password)
 		if err != nil {
 			return nil, fmt.Errorf("failed to import private key: %w", err)
 		}
-	} else {
+	default:
 		address, keystorePath, err = keystore.CreateKeystore(p.keystoreDir, password)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create keystore: %w", err)

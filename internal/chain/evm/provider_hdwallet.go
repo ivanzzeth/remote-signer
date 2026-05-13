@@ -2,14 +2,17 @@ package evm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 	"sync"
 
+	gethkeystore "github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ivanzzeth/ethsig"
 	"github.com/ivanzzeth/ethsig/keystore"
+	"github.com/tyler-smith/go-bip39"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/logger"
@@ -240,19 +243,69 @@ func (p *HDWalletProvider) CreateHDWallet(ctx context.Context, params types.Crea
 	}, nil
 }
 
-// ImportHDWallet imports an HD wallet from a mnemonic and registers the primary address.
-func (p *HDWalletProvider) ImportHDWallet(ctx context.Context, params types.ImportHDWalletParams) (*HDWalletInfo, error) {
-	if params.Mnemonic == "" {
-		return nil, fmt.Errorf("mnemonic is required")
+// hdWalletFileShape mirrors keystore.HDWalletFile just enough to extract
+// the encrypted mnemonic. We re-declare it locally rather than reaching
+// into the ethsig package's internals so a future upstream rename can't
+// silently break this code path.
+type hdWalletFileShape struct {
+	Mnemonic gethkeystore.CryptoJSON `json:"mnemonic"`
+}
+
+// decryptMnemonicFromJSON pulls the encrypted entropy out of an HDWalletFile
+// JSON, decrypts it with password, and reconstructs the BIP-39 mnemonic.
+// The caller must zeroise the returned bytes.
+func decryptMnemonicFromJSON(walletJSON string, password []byte) ([]byte, error) {
+	var wf hdWalletFileShape
+	if err := json.Unmarshal([]byte(walletJSON), &wf); err != nil {
+		return nil, fmt.Errorf("invalid wallet json: %w", err)
 	}
+	entropy, err := gethkeystore.DecryptDataV3(wf.Mnemonic, string(password))
+	if err != nil {
+		return nil, fmt.Errorf("decrypt mnemonic: %w", err)
+	}
+	defer keystore.SecureZeroize(entropy)
+	mnemonicStr, err := bip39.NewMnemonic(entropy)
+	if err != nil {
+		return nil, fmt.Errorf("reconstruct mnemonic: %w", err)
+	}
+	return []byte(mnemonicStr), nil
+}
+
+// ImportHDWallet imports an HD wallet and registers the primary address.
+// Accepts two import modes — caller picks one by populating either field:
+//   - Mnemonic: raw BIP-39 phrase.
+//   - WalletJSON: full HDWalletFile JSON (as written by a remote-signer
+//     instance, copied off another host or exported via the CLI). The
+//     daemon decrypts the embedded mnemonic with Password and re-imports
+//     it so file naming + scrypt params stay consistent.
+func (p *HDWalletProvider) ImportHDWallet(ctx context.Context, params types.ImportHDWalletParams) (*HDWalletInfo, error) {
 	if params.Password == "" {
 		return nil, types.ErrEmptyPassword
 	}
+	if params.Mnemonic == "" && params.WalletJSON == "" {
+		return nil, fmt.Errorf("mnemonic or wallet_json is required")
+	}
 
-	mnemonic := []byte(params.Mnemonic)
 	password := []byte(params.Password)
-	defer keystore.SecureZeroize(mnemonic)
 	defer keystore.SecureZeroize(password)
+
+	var (
+		mnemonic []byte
+		err      error
+	)
+	if params.WalletJSON != "" {
+		// Decrypt the embedded mnemonic locally to verify the password
+		// works, then re-import through the normal path. The temporary
+		// file path is the only way ethsig hands us the mnemonic since
+		// HDWallet decryption is keyed off a walletPath.
+		mnemonic, err = decryptMnemonicFromJSON(params.WalletJSON, password)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decrypt wallet json: %w", err)
+		}
+	} else {
+		mnemonic = []byte(params.Mnemonic)
+	}
+	defer keystore.SecureZeroize(mnemonic)
 
 	address, walletPath, err := keystore.ImportHDWallet(p.walletDir, mnemonic, password)
 	if err != nil {

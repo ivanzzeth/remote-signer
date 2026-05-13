@@ -154,13 +154,15 @@ type CreateSignerRequest struct {
 	Tags        []string               `json:"tags,omitempty"`
 }
 
-// CreateKeystoreRequest contains keystore creation parameters. Setting
-// PrivateKeyHex (raw secp256k1, 64 hex chars with or without 0x prefix)
-// flips the handler into import mode — the daemon encrypts the supplied
-// key into a fresh keystore instead of generating one.
+// CreateKeystoreRequest contains keystore creation parameters. Pick one
+// import mode by populating exactly one field — leaving both empty creates
+// a fresh keypair:
+//   - PrivateKeyHex: raw secp256k1 (64 hex chars, 0x prefix optional).
+//   - KeystoreJSON: full v3 keystore JSON encrypted with Password.
 type CreateKeystoreRequest struct {
 	Password      string `json:"password"`
 	PrivateKeyHex string `json:"private_key_hex,omitempty"`
+	KeystoreJSON  string `json:"keystore_json,omitempty"`
 }
 
 // CreateSignerResponse represents the response after creating a signer
@@ -425,9 +427,10 @@ func (h *SignerHandler) createSigner(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		if req.Keystore != nil {
 			secure.ZeroString(&req.Keystore.Password)
-			// PrivateKeyHex is just as sensitive as the password — overwrite
-			// the request struct's copy after we hand it off to the manager.
+			// PrivateKeyHex / KeystoreJSON are sensitive — overwrite the
+			// request struct's copy after handoff to the manager.
 			secure.ZeroString(&req.Keystore.PrivateKeyHex)
+			secure.ZeroString(&req.Keystore.KeystoreJSON)
 		}
 	}()
 
@@ -435,9 +438,14 @@ func (h *SignerHandler) createSigner(w http.ResponseWriter, r *http.Request) {
 		Type: types.SignerType(req.Type),
 	}
 	if req.Keystore != nil {
+		if req.Keystore.PrivateKeyHex != "" && req.Keystore.KeystoreJSON != "" {
+			h.writeError(w, "specify private_key_hex or keystore_json, not both", http.StatusBadRequest)
+			return
+		}
 		createReq.Keystore = &types.CreateKeystoreParams{
 			Password:      req.Keystore.Password,
 			PrivateKeyHex: req.Keystore.PrivateKeyHex,
+			KeystoreJSON:  req.Keystore.KeystoreJSON,
 		}
 	}
 
@@ -496,7 +504,18 @@ func (h *SignerHandler) createSigner(w http.ResponseWriter, r *http.Request) {
 	)
 
 	if h.auditLogger != nil {
-		h.auditLogger.LogSignerCreated(r.Context(), apiKey.ID, r.RemoteAddr, signerInfo.Address, signerInfo.Type)
+		// Audit records the creation mode so an operator can later tell
+		// "import" provenance apart from a fresh keypair.
+		mode := signerInfo.Type
+		if req.Keystore != nil {
+			switch {
+			case req.Keystore.KeystoreJSON != "":
+				mode = signerInfo.Type + ":import-keystore-json"
+			case req.Keystore.PrivateKeyHex != "":
+				mode = signerInfo.Type + ":import-hex"
+			}
+		}
+		h.auditLogger.LogSignerCreated(r.Context(), apiKey.ID, r.RemoteAddr, signerInfo.Address, mode)
 	}
 
 	resp := CreateSignerResponse{

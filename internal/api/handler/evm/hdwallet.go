@@ -62,8 +62,9 @@ type createHDWalletRequest struct {
 	Action   string `json:"action"` // "create" or "import"
 	Password string `json:"password"`
 
-	// For import
-	Mnemonic string `json:"mnemonic,omitempty"`
+	// For import — exactly one of Mnemonic / WalletJSON should be set.
+	Mnemonic   string `json:"mnemonic,omitempty"`
+	WalletJSON string `json:"wallet_json,omitempty"`
 
 	// For create
 	EntropyBits int `json:"entropy_bits,omitempty"`
@@ -214,6 +215,9 @@ func (h *HDWalletHandler) createOrImport(w http.ResponseWriter, r *http.Request)
 	defer func() {
 		secure.ZeroString(&req.Password)
 		secure.ZeroString(&req.Mnemonic)
+		// WalletJSON has the encrypted mnemonic envelope; not as sensitive
+		// as the cleartext mnemonic but still discardable post-import.
+		secure.ZeroString(&req.WalletJSON)
 	}()
 
 	if req.Password == "" {
@@ -225,13 +229,18 @@ func (h *HDWalletHandler) createOrImport(w http.ResponseWriter, r *http.Request)
 
 	switch req.Action {
 	case "import":
-		if req.Mnemonic == "" {
-			h.writeError(w, "mnemonic is required for import", http.StatusBadRequest)
+		if req.Mnemonic == "" && req.WalletJSON == "" {
+			h.writeError(w, "mnemonic or wallet_json is required for import", http.StatusBadRequest)
+			return
+		}
+		if req.Mnemonic != "" && req.WalletJSON != "" {
+			h.writeError(w, "specify either mnemonic or wallet_json, not both", http.StatusBadRequest)
 			return
 		}
 		info, err = mgr.ImportHDWallet(r.Context(), types.ImportHDWalletParams{
-			Mnemonic: req.Mnemonic,
-			Password: req.Password,
+			Mnemonic:   req.Mnemonic,
+			WalletJSON: req.WalletJSON,
+			Password:   req.Password,
 		})
 	case "create", "":
 		info, err = mgr.CreateHDWallet(r.Context(), types.CreateHDWalletParams{
@@ -280,6 +289,15 @@ func (h *HDWalletHandler) createOrImport(w http.ResponseWriter, r *http.Request)
 		action := req.Action
 		if action == "" {
 			action = "create"
+		}
+		// Differentiate the two import flavours so the audit trail records
+		// whether the operator pasted a mnemonic or uploaded a wallet JSON.
+		if action == "import" {
+			if req.WalletJSON != "" {
+				action = "import:wallet-json"
+			} else {
+				action = "import:mnemonic"
+			}
 		}
 		h.auditLogger.LogHDWalletCreated(r.Context(), keyID, r.RemoteAddr, info.PrimaryAddress, action)
 	}
