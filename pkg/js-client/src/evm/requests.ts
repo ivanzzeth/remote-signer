@@ -19,10 +19,16 @@ export interface RequestStatusResponse {
   signer_address: string;
   sign_type: string;
   status: RequestStatus;
+  client_ip?: string;
+  // Chain-specific request payload. Only populated by GET
+  // /api/v1/evm/requests/{id} (the detail endpoint); list responses
+  // typically omit it to keep page payloads small.
+  payload?: Record<string, unknown>;
   signature?: string;
   signed_data?: string;
   error_message?: string;
   rule_matched_id?: string;
+  rule_matched_name?: string;
   approved_by?: string;
   approved_at?: string;
   created_at: string;
