@@ -60,4 +60,26 @@ chains:
     enabled: true
     keystore_dir: "%s"
     hd_wallet_dir: "%s"
+
+    # Shared public RPC gateway — used by the JS rule sandbox AND by
+    # the simulation engine below. Override base_url for a self-hosted
+    # node; api_key (optional) is forwarded as a bearer header.
+    rpc_gateway:
+      base_url: https://evm.web3gate.xyz/evm
+      cache_ttl: 24h
+
+    # Simulation engine: when on, each sign request is run through
+    # eth_simulateV1 against rpc_gateway before signing so the operator
+    # can see balance + log diffs and reject obvious mistakes. The
+    # budget defaults keep one stray request from draining wallets —
+    # tune via Settings → evm.simulation.
+    simulation:
+      enabled: true
+      timeout: 60s
+      batch_window: 1s
+      batch_max_size: 20
+      budget_native_max_total: "0.01"
+      budget_native_max_per_tx: "0.1"
+      budget_erc20_max_total: "100"
+      budget_erc20_max_per_tx: "50"
 `
