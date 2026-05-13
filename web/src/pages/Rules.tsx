@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import {
   APIError,
   type CreateRuleRequest,
+  type Rule,
   type RuleMode,
   type RuleType,
 } from "remote-signer-client";
@@ -60,6 +61,8 @@ export function Rules() {
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
 
   async function create(input: CreateRuleRequest) {
     const client = getClient();
@@ -71,6 +74,57 @@ export function Rules() {
       reload();
     } catch (e) {
       setMutationError(formatMutationError(e));
+    }
+  }
+
+  async function approve(id: string) {
+    const client = getClient();
+    if (!client) return;
+    setBusy(id);
+    setMutationError(null);
+    try {
+      await client.evm.rules.approve(id);
+      reload();
+    } catch (e) {
+      setMutationError(formatMutationError(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function reject(id: string) {
+    const reason = prompt("Reject this rule — reason?");
+    if (reason === null) return; // user cancelled
+    const client = getClient();
+    if (!client) return;
+    setBusy(id);
+    setMutationError(null);
+    try {
+      await client.evm.rules.reject(id, reason);
+      reload();
+    } catch (e) {
+      setMutationError(formatMutationError(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function update(
+    id: string,
+    patch: { name?: string; description?: string; config?: Record<string, unknown> },
+  ) {
+    const client = getClient();
+    if (!client) return;
+    setBusy(id);
+    setMutationError(null);
+    try {
+      await client.evm.rules.update(id, patch);
+      setEditing(null);
+      reload();
+    } catch (e) {
+      setMutationError(formatMutationError(e));
+    } finally {
+      setBusy(null);
     }
   }
 
@@ -154,7 +208,13 @@ export function Rules() {
               </thead>
               <tbody>
                 {data.rules.map((r) => (
-                  <tr key={r.id} className="border-t border-ink-100">
+                  <Fragment key={r.id}>
+                  <tr
+                    className="cursor-pointer border-t border-ink-100 hover:bg-ink-50"
+                    onClick={() =>
+                      setExpanded((id) => (id === r.id ? null : r.id))
+                    }
+                  >
                     <td className="py-1 pr-3">
                       <div className="text-ink-900">{r.name}</div>
                       <div className="font-mono text-[11px] text-ink-500">
@@ -173,23 +233,82 @@ export function Rules() {
                       {r.source}
                     </td>
                     <td className="py-1 pr-3">
-                      <Badge tone={r.enabled ? "green" : "neutral"}>
-                        {r.enabled ? "enabled" : "disabled"}
-                      </Badge>
+                      <div className="flex flex-col gap-1">
+                        <Badge tone={r.enabled ? "green" : "neutral"}>
+                          {r.enabled ? "enabled" : "disabled"}
+                        </Badge>
+                        {r.status && r.status !== "active" && (
+                          <Badge
+                            tone={
+                              r.status === "pending_approval"
+                                ? "yellow"
+                                : "red"
+                            }
+                          >
+                            {r.status}
+                          </Badge>
+                        )}
+                      </div>
                     </td>
                     <td className="py-1">
-                      <div className="flex gap-2">
+                      <div
+                        className="flex flex-wrap gap-2"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {r.status === "pending_approval" ? (
+                          <>
+                            <button
+                              type="button"
+                              disabled={busy === r.id}
+                              onClick={() => approve(r.id)}
+                              className="rounded-md bg-accent-500 px-2 py-0.5 text-xs font-medium text-white hover:bg-accent-600 disabled:opacity-50"
+                            >
+                              Approve
+                            </button>
+                            <button
+                              type="button"
+                              disabled={busy === r.id}
+                              onClick={() => reject(r.id)}
+                              className="rounded-md border border-red-200 px-2 py-0.5 text-xs text-red-700 hover:bg-red-50 disabled:opacity-50"
+                            >
+                              Reject
+                            </button>
+                          </>
+                        ) : null}
                         <button
                           type="button"
-                          disabled={busy === r.id}
+                          disabled={busy === r.id || r.immutable}
                           onClick={() => toggle(r.id, r.enabled)}
+                          title={
+                            r.immutable
+                              ? "immutable rule (set in config.yaml)"
+                              : ""
+                          }
                           className="rounded-md border border-ink-200 px-2 py-0.5 text-xs text-ink-700 hover:bg-ink-100 disabled:opacity-50"
                         >
                           {r.enabled ? "Disable" : "Enable"}
                         </button>
                         <button
                           type="button"
-                          disabled={busy === r.id}
+                          disabled={busy === r.id || r.immutable}
+                          onClick={() => {
+                            if (editing === r.id) {
+                              setEditing(null);
+                            } else {
+                              setEditing(r.id);
+                              // Force the detail panel open so the form
+                              // renders even if the operator never clicked
+                              // the row to expand it.
+                              setExpanded(r.id);
+                            }
+                          }}
+                          className="rounded-md border border-ink-200 px-2 py-0.5 text-xs text-ink-700 hover:bg-ink-100 disabled:opacity-50"
+                        >
+                          {editing === r.id ? "Cancel" : "Edit"}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy === r.id || r.immutable}
                           onClick={() => destroy(r.id, r.name)}
                           className="rounded-md border border-red-200 px-2 py-0.5 text-xs text-red-700 hover:bg-red-50 disabled:opacity-50"
                         >
@@ -198,11 +317,190 @@ export function Rules() {
                       </div>
                     </td>
                   </tr>
+                  {expanded === r.id && (
+                    <tr className="border-t border-ink-100 bg-ink-50">
+                      <td colSpan={6} className="px-4 py-3">
+                        <RuleDetailPanel
+                          rule={r}
+                          editing={editing === r.id}
+                          onCancelEdit={() => setEditing(null)}
+                          onSave={(patch) => update(r.id, patch)}
+                          busy={busy === r.id}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
           ))}
       </Card>
+    </div>
+  );
+}
+
+function RuleDetailPanel({
+  rule,
+  editing,
+  onCancelEdit,
+  onSave,
+  busy,
+}: {
+  rule: Rule;
+  editing: boolean;
+  onCancelEdit: () => void;
+  onSave: (patch: {
+    name?: string;
+    description?: string;
+    config?: Record<string, unknown>;
+  }) => void;
+  busy: boolean;
+}) {
+  const budgets = useApi(
+    (c) => c.evm.rules.listBudgets(rule.id),
+    [rule.id],
+  );
+  const [name, setName] = useState(rule.name);
+  const [description, setDescription] = useState(rule.description ?? "");
+  const [configJson, setConfigJson] = useState(() =>
+    JSON.stringify(rule.config, null, 2),
+  );
+  const [parseError, setParseError] = useState<string | null>(null);
+
+  function save() {
+    setParseError(null);
+    let config: Record<string, unknown>;
+    try {
+      config = JSON.parse(configJson);
+    } catch (e) {
+      setParseError(e instanceof Error ? e.message : "invalid JSON");
+      return;
+    }
+    onSave({
+      name: name.trim(),
+      description: description.trim(),
+      config,
+    });
+  }
+
+  return (
+    <div className="space-y-4" onClick={(e) => e.stopPropagation()}>
+      {editing ? (
+        <div className="space-y-3">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-500">
+            Edit rule
+          </h3>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-[11px] uppercase tracking-wide text-ink-500">
+                Name
+              </label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="w-full rounded-md border border-ink-300 px-2 py-1 text-sm"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-[11px] uppercase tracking-wide text-ink-500">
+                Description
+              </label>
+              <input
+                type="text"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                className="w-full rounded-md border border-ink-300 px-2 py-1 text-sm"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] uppercase tracking-wide text-ink-500">
+              Config (JSON)
+            </label>
+            <textarea
+              value={configJson}
+              onChange={(e) => setConfigJson(e.target.value)}
+              rows={Math.min(12, configJson.split("\n").length + 1)}
+              spellCheck={false}
+              className="block w-full rounded-md border border-ink-300 p-2 font-mono text-[11px]"
+            />
+          </div>
+          {parseError && <ErrorBanner msg={parseError} />}
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={onCancelEdit}
+              disabled={busy}
+              className="rounded-md border border-ink-200 px-2 py-0.5 text-xs text-ink-700 hover:bg-ink-100 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={save}
+              disabled={busy}
+              className="rounded-md bg-accent-500 px-2 py-0.5 text-xs font-medium text-white hover:bg-accent-600 disabled:opacity-50"
+            >
+              {busy ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div>
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-500">
+            Config
+          </h3>
+          <pre className="overflow-x-auto rounded border border-ink-200 bg-white p-2 font-mono text-[11px] text-ink-900">
+            {JSON.stringify(rule.config, null, 2)}
+          </pre>
+        </div>
+      )}
+
+      <div>
+        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-500">
+          Budgets
+        </h3>
+        {budgets.loading && <Loading />}
+        {budgets.error && <ErrorBanner msg={budgets.error} />}
+        {budgets.data &&
+          (budgets.data.length === 0 ? (
+            <Empty msg="No budgets attached to this rule." />
+          ) : (
+            <table className="w-full text-left text-sm">
+              <thead className="text-xs uppercase text-ink-500">
+                <tr>
+                  <th className="py-1 pr-3 font-normal">Unit</th>
+                  <th className="py-1 pr-3 font-normal">Spent / Max</th>
+                  <th className="py-1 pr-3 font-normal">Tx</th>
+                  <th className="py-1 font-normal">Alert</th>
+                </tr>
+              </thead>
+              <tbody>
+                {budgets.data.map((b) => (
+                  <tr key={b.id} className="border-t border-ink-100">
+                    <td className="py-1 pr-3 font-mono text-xs text-ink-700">
+                      {b.unit}
+                    </td>
+                    <td className="py-1 pr-3 font-mono text-xs text-ink-700">
+                      {b.spent} / {b.max_total}
+                    </td>
+                    <td className="py-1 pr-3 font-mono text-xs text-ink-700">
+                      {b.tx_count}
+                      {b.max_tx_count ? ` / ${b.max_tx_count}` : ""}
+                    </td>
+                    <td className="py-1">
+                      <Badge tone={b.alert_sent ? "red" : "neutral"}>
+                        {b.alert_pct}% {b.alert_sent ? "(sent)" : ""}
+                      </Badge>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ))}
+      </div>
     </div>
   );
 }
