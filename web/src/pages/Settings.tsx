@@ -201,9 +201,7 @@ function GroupEditor({
 
   return (
     <div className="space-y-4">
-      {entries.length === 0 ? (
-        <Empty msg="empty group" />
-      ) : advanced ? (
+      {advanced ? (
         <textarea
           value={rawJson}
           onChange={(e) => setRawJson(e.target.value)}
@@ -211,6 +209,13 @@ function GroupEditor({
           spellCheck={false}
           className="block w-full rounded-md border border-ink-300 p-2 font-mono text-[11px]"
         />
+      ) : group === "notify" ? (
+        <NotifyEditor
+          value={value}
+          onChange={(next) => setValue(next)}
+        />
+      ) : entries.length === 0 ? (
+        <Empty msg="empty group" />
       ) : (
         <dl className="space-y-2 text-sm">
           {entries.map(([k, v]) => (
@@ -493,6 +498,321 @@ function DurationInput({
       </span>
     </div>
   );
+}
+
+// --- Notify-specific editor -------------------------------------------------
+//
+// notify's wire shape is `{providers: {slack?, pushover?, webhook?, telegram?},
+// channels: {slack?, pushover?, webhook?, telegram?}}` — every leaf is
+// optional and the snapshot is `{providers:{}, channels:{}}` until the
+// operator configures something. The generic field-shape sniffer can't
+// suggest provider keys out of thin air, so notify gets a typed form
+// keyed off the daemon's NotifySnapshot struct.
+
+type NotifyProviderKind = "slack" | "pushover" | "webhook" | "telegram";
+const PROVIDER_KINDS: NotifyProviderKind[] = [
+  "slack",
+  "pushover",
+  "webhook",
+  "telegram",
+];
+
+type NotifyProviders = Partial<Record<NotifyProviderKind, Record<string, unknown>>>;
+type NotifyChannels = Partial<Record<NotifyProviderKind, string[]>>;
+
+function NotifyEditor({
+  value,
+  onChange,
+}: {
+  value: SettingsSnapshot;
+  onChange: (next: SettingsSnapshot) => void;
+}) {
+  const providers = (value.providers ?? {}) as NotifyProviders;
+  const channels = (value.channels ?? {}) as NotifyChannels;
+
+  function setProvider(kind: NotifyProviderKind, patch: Record<string, unknown> | null) {
+    const nextProviders = { ...providers };
+    if (patch === null) {
+      delete nextProviders[kind];
+    } else {
+      nextProviders[kind] = patch;
+    }
+    onChange({ ...value, providers: nextProviders });
+  }
+
+  function setChannel(kind: NotifyProviderKind, recipients: string[]) {
+    const nextChannels = { ...channels };
+    if (recipients.length === 0) {
+      delete nextChannels[kind];
+    } else {
+      nextChannels[kind] = recipients;
+    }
+    onChange({ ...value, channels: nextChannels });
+  }
+
+  return (
+    <div className="space-y-6">
+      <section>
+        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-500">
+          Providers
+        </h3>
+        <div className="space-y-3">
+          {PROVIDER_KINDS.map((kind) => (
+            <ProviderCard
+              key={kind}
+              kind={kind}
+              config={providers[kind] ?? null}
+              onChange={(patch) => setProvider(kind, patch)}
+            />
+          ))}
+        </div>
+      </section>
+
+      <section>
+        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-500">
+          Channels (recipients per provider)
+        </h3>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          {PROVIDER_KINDS.map((kind) => (
+            <ChannelInput
+              key={kind}
+              kind={kind}
+              recipients={channels[kind] ?? []}
+              onChange={(next) => setChannel(kind, next)}
+            />
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+const PROVIDER_DEFAULTS: Record<NotifyProviderKind, Record<string, unknown>> = {
+  slack: { enabled: true, bot_token: "" },
+  pushover: {
+    enabled: true,
+    app_token: "",
+    retry: 60,
+    expire: 3600,
+    max_retries: 3,
+    retry_delay: 5,
+  },
+  webhook: { enabled: true, headers: {}, timeout: 5_000_000_000 },
+  telegram: { enabled: true, bot_token: "" },
+};
+
+const PROVIDER_LABELS: Record<NotifyProviderKind, string> = {
+  slack: "Slack",
+  pushover: "Pushover",
+  webhook: "Webhook",
+  telegram: "Telegram",
+};
+
+function ProviderCard({
+  kind,
+  config,
+  onChange,
+}: {
+  kind: NotifyProviderKind;
+  config: Record<string, unknown> | null;
+  onChange: (next: Record<string, unknown> | null) => void;
+}) {
+  const present = config !== null;
+  return (
+    <div
+      className={`rounded-md border p-3 ${
+        present ? "border-ink-300 bg-white" : "border-ink-200 bg-ink-50"
+      }`}
+    >
+      <label className="flex items-center justify-between gap-3">
+        <span className="text-sm font-medium text-ink-900">
+          {PROVIDER_LABELS[kind]}
+        </span>
+        <span className="inline-flex items-center gap-2 text-xs text-ink-500">
+          <input
+            type="checkbox"
+            checked={present}
+            onChange={(e) =>
+              onChange(e.target.checked ? PROVIDER_DEFAULTS[kind] : null)
+            }
+            className="h-4 w-4"
+          />
+          {present ? "configured" : "not configured"}
+        </span>
+      </label>
+
+      {present && (
+        <div className="mt-3 space-y-2">
+          {Object.entries(config).map(([k, v]) => (
+            <ProviderField
+              key={k}
+              fieldKey={k}
+              value={v}
+              onChange={(next) => onChange({ ...config, [k]: next })}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProviderField({
+  fieldKey,
+  value,
+  onChange,
+}: {
+  fieldKey: string;
+  value: unknown;
+  onChange: (v: unknown) => void;
+}) {
+  // Webhook headers is a string→string map; render as a small KV editor.
+  if (
+    fieldKey === "headers" &&
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  ) {
+    return (
+      <HeadersEditor
+        value={value as Record<string, string>}
+        onChange={onChange}
+      />
+    );
+  }
+  return (
+    <div className="grid grid-cols-1 items-center gap-1 md:grid-cols-[12rem_1fr]">
+      <span className="font-mono text-[11px] text-ink-500">{fieldKey}</span>
+      <FieldInput
+        fieldKey={fieldKey}
+        value={value}
+        onChange={onChange}
+      />
+    </div>
+  );
+}
+
+function HeadersEditor({
+  value,
+  onChange,
+}: {
+  value: Record<string, string>;
+  onChange: (v: Record<string, string>) => void;
+}) {
+  const entries = Object.entries(value);
+  const [newKey, setNewKey] = useState("");
+  const [newVal, setNewVal] = useState("");
+  return (
+    <div className="grid grid-cols-1 gap-1 md:grid-cols-[12rem_1fr]">
+      <span className="font-mono text-[11px] text-ink-500">headers</span>
+      <div className="space-y-1">
+        {entries.length === 0 && (
+          <div className="text-[11px] text-ink-500">no headers</div>
+        )}
+        {entries.map(([k, v]) => (
+          <div key={k} className="flex items-center gap-2">
+            <input
+              type="text"
+              value={k}
+              readOnly
+              className="w-40 rounded-md border border-ink-200 bg-ink-50 px-2 py-1 font-mono text-xs"
+            />
+            <input
+              type="text"
+              value={v}
+              onChange={(e) => onChange({ ...value, [k]: e.target.value })}
+              className="flex-1 rounded-md border border-ink-300 px-2 py-1 text-xs"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                const next = { ...value };
+                delete next[k];
+                onChange(next);
+              }}
+              className="rounded-md border border-red-200 px-2 py-0.5 text-xs text-red-700 hover:bg-red-50"
+            >
+              ×
+            </button>
+          </div>
+        ))}
+        <div className="flex items-center gap-2 border-t border-ink-100 pt-1">
+          <input
+            type="text"
+            value={newKey}
+            onChange={(e) => setNewKey(e.target.value)}
+            placeholder="X-Header"
+            className="w-40 rounded-md border border-ink-300 px-2 py-1 font-mono text-xs"
+          />
+          <input
+            type="text"
+            value={newVal}
+            onChange={(e) => setNewVal(e.target.value)}
+            placeholder="value"
+            className="flex-1 rounded-md border border-ink-300 px-2 py-1 text-xs"
+          />
+          <button
+            type="button"
+            disabled={!newKey.trim()}
+            onClick={() => {
+              onChange({ ...value, [newKey.trim()]: newVal });
+              setNewKey("");
+              setNewVal("");
+            }}
+            className="rounded-md bg-accent-500 px-2 py-0.5 text-xs font-medium text-white hover:bg-accent-600 disabled:opacity-50"
+          >
+            Add
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ChannelInput({
+  kind,
+  recipients,
+  onChange,
+}: {
+  kind: NotifyProviderKind;
+  recipients: string[];
+  onChange: (next: string[]) => void;
+}) {
+  return (
+    <div>
+      <label className="mb-1 block text-[11px] uppercase tracking-wide text-ink-500">
+        {PROVIDER_LABELS[kind]}
+      </label>
+      <textarea
+        value={recipients.join("\n")}
+        onChange={(e) =>
+          onChange(
+            e.target.value
+              .split("\n")
+              .map((s) => s.trim())
+              .filter(Boolean),
+          )
+        }
+        rows={3}
+        spellCheck={false}
+        placeholder={recipientPlaceholder(kind)}
+        className="block w-full rounded-md border border-ink-300 p-2 font-mono text-[11px]"
+      />
+    </div>
+  );
+}
+
+function recipientPlaceholder(kind: NotifyProviderKind): string {
+  switch (kind) {
+    case "slack":
+      return "#alerts\nU0123ABC";
+    case "telegram":
+      return "@channel_id\n123456789";
+    case "pushover":
+      return "user-key-1";
+    case "webhook":
+      return "https://hooks.example.com/abc";
+  }
 }
 
 function formatErr(e: unknown): string {
