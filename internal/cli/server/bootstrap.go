@@ -26,7 +26,12 @@ import (
 // paths and hex public key are surfaced, so log shippers (systemd journal,
 // Docker logs) never see the secret. Subsequent launches with a non-empty
 // api_keys table are no-ops.
-func bootstrapAdminKeyIfNeeded(ctx context.Context, repo storage.APIKeyRepository, privPath, pubPath string, log *slog.Logger) error {
+// bootstrapAdminKeyIfNeeded provisions a fresh admin api key the first time
+// the daemon boots into an empty database. defaultRateLimit is the
+// security.rate_limit_default from config.yaml (falls back to 100/min when
+// unset) so operators can lift the limit before first launch without having
+// to PATCH the row after the fact.
+func bootstrapAdminKeyIfNeeded(ctx context.Context, repo storage.APIKeyRepository, privPath, pubPath string, defaultRateLimit int, log *slog.Logger) error {
 	count, err := repo.Count(ctx, storage.APIKeyFilter{})
 	if err != nil {
 		return fmt.Errorf("count api keys: %w", err)
@@ -67,12 +72,16 @@ func bootstrapAdminKeyIfNeeded(ctx context.Context, repo storage.APIKeyRepositor
 		return fmt.Errorf("write %s: %w", pubPath, err)
 	}
 
+	rateLimit := defaultRateLimit
+	if rateLimit <= 0 {
+		rateLimit = 100
+	}
 	now := time.Now()
 	key := &types.APIKey{
 		ID:           "admin",
 		Name:         "admin (bootstrap)",
 		PublicKeyHex: hex.EncodeToString(pub),
-		RateLimit:    100,
+		RateLimit:    rateLimit,
 		Role:         types.RoleAdmin,
 		Enabled:      true,
 		Source:       types.APIKeySourceBootstrap,

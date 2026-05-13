@@ -264,7 +264,7 @@ func Run(args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolve admin key paths: %w", err)
 	}
-	if err := bootstrapAdminKeyIfNeeded(context.Background(), apiKeyRepo, adminPrivPath, adminPubPath, log); err != nil {
+	if err := bootstrapAdminKeyIfNeeded(context.Background(), apiKeyRepo, adminPrivPath, adminPubPath, cfg.Security.RateLimitDefault, log); err != nil {
 		return fmt.Errorf("bootstrap admin api key: %w", err)
 	}
 
