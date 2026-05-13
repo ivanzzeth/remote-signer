@@ -234,6 +234,31 @@ func TestApprovalHandler_ProcessError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
+// A locked-signer error must surface as 423 Locked, not 500, so the UI
+// can prompt the operator to unlock and retry rather than presenting it
+// as an internal fault. The "is locked" substring is what GetSigner emits
+// across chain adapters.
+func TestApprovalHandler_ProcessError_LockedSigner_Returns423(t *testing.T) {
+	signReq := pendingSignRequest()
+	svc := &mockSignService{
+		getRequestFn: func(_ context.Context, _ types.SignRequestID) (*types.SignRequest, error) {
+			return signReq, nil
+		},
+		processApprovalFn: func(_ context.Context, _ types.SignRequestID, _ *service.ApprovalRequest) (*service.ApprovalResponse, error) {
+			return nil, fmt.Errorf("signing failed: failed to get signer: signer is locked")
+		},
+	}
+	accessSvc := newFlexAccessService(t, map[string]string{
+		"0x1111111111111111111111111111111111111111": "owner-key",
+	})
+	h, _ := NewApprovalHandler(svc, accessSvc, slog.Default(), false)
+
+	body := ApprovalAPIRequest{Approved: true}
+	rec := doApprovalRequest(t, h, http.MethodPost, "/api/v1/evm/requests/req-pending-001/approve", body, approvalAdminKey())
+	assert.Equal(t, http.StatusLocked, rec.Code)
+	assert.Contains(t, rec.Body.String(), "locked")
+}
+
 func TestApprovalHandler_RulesReadOnly_BlocksAutoRule(t *testing.T) {
 	signReq := pendingSignRequest()
 	svc := &mockSignService{
