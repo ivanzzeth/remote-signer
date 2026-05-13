@@ -30,6 +30,16 @@ export interface Rule {
   chain_id?: string;
   api_key_id?: string;
   signer_address?: string;
+  /** API key that created the rule. "config" for rules sourced from config.yaml. */
+  owner?: string;
+  /** Approval state: "active", "pending_approval", "rejected", "revoked". */
+  status?: string;
+  /** Admin key id that approved a pending rule. */
+  approved_by?: string;
+  /** Rules with immutable=true cannot be edited or deleted via API. */
+  immutable?: boolean;
+  /** ["*"] = all keys, ["self"] = owner only, ["key-1", ...] = specific keys. */
+  applied_to?: string[];
   config: Record<string, any>;
   enabled: boolean;
   expires_at?: string;

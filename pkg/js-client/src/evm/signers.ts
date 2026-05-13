@@ -13,6 +13,14 @@ export interface SignerInfo {
   type: string;
   enabled: boolean;
   locked: boolean;
+  /** Ownership state: "active" or "pending_approval". Empty for legacy signers. */
+  status?: string;
+  owner_id?: string;
+  display_name?: string;
+  tags?: string[];
+  /** True for HD-derived child addresses (the parent address is in primary_address). */
+  primary_address?: string;
+  hd_derivation_index?: number;
 }
 
 export interface ListSignersFilter {

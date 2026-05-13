@@ -11,6 +11,7 @@ import { APIKeyService } from "./apikeys";
 import { ACLService } from "./acls";
 import { PresetService } from "./presets";
 import { SettingsService } from "./settings";
+import { WalletService } from "./wallets";
 
 // ---------------------------------------------------------------------------
 // Types kept at client level
@@ -40,6 +41,7 @@ export class RemoteSignerClient {
   public readonly acls: ACLService;
   public readonly presets: PresetService;
   public readonly settings: SettingsService;
+  public readonly wallets: WalletService;
   private transport: HttpTransport;
 
   constructor(config: ClientConfig) {
@@ -55,6 +57,7 @@ export class RemoteSignerClient {
     this.acls = new ACLService(this.transport);
     this.presets = new PresetService(this.transport);
     this.settings = new SettingsService(this.transport);
+    this.wallets = new WalletService(this.transport);
   }
 
   /**
