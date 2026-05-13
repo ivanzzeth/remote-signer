@@ -769,7 +769,7 @@ func TestHDWalletHandler_ValidationErrors(t *testing.T) {
 
 		var errResp map[string]string
 		decodeJSON(t, rec, &errResp)
-		assert.Contains(t, errResp["error"], "mnemonic is required for import")
+		assert.Contains(t, errResp["error"], "mnemonic or wallet_json is required for import")
 	})
 
 	t.Run("invalid action", func(t *testing.T) {
