@@ -191,6 +191,18 @@ export type {
 export { SettingsService, SETTINGS_GROUPS } from "./settings";
 export type { SettingsGroup, SettingsSnapshot } from "./settings";
 
+// Wallets (organisational collections of signers — not multi-sig).
+export { WalletService } from "./wallets";
+export type {
+  Wallet,
+  WalletMember,
+  CreateWalletRequest,
+  ListWalletsFilter,
+  ListWalletsResponse,
+  AddWalletMemberRequest,
+  ListWalletMembersResponse,
+} from "./wallets";
+
 // Errors
 export * from "./errors";
 
