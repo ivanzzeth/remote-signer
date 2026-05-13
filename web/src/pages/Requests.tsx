@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import {
   APIError,
   type ListRequestsFilter,
@@ -12,7 +13,7 @@ import {
   ErrorBanner,
   Loading,
   PageHeader,
-  Row,
+  shorten,
 } from "../components/ui";
 import { getClient } from "../lib/auth";
 import { useApi } from "../lib/useApi";
@@ -27,14 +28,16 @@ const STATUSES: RequestStatus[] = [
 ];
 
 /**
- * Sign-request approval queue. Lists every request the daemon has on file;
- * an admin can drill into a row to approve or reject. The status filter
- * defaults to `pending` because that's the only state with pending work
- * for a human — completed/rejected are history.
+ * Sign-request queue overview. Rows link out to /requests/:id for the
+ * full payload + action view; the only inline actions are Approve and
+ * Reject for rows whose status still admits them, which is the most
+ * common operator gesture.
  */
 export function Requests() {
-  const [status, setStatus] = useState<RequestStatus | "">("pending");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Default to "all" so freshly-landed operators see history + active
+  // queue together; filtering by `authorizing` is one click away and
+  // restoring it as the default hid completed/rejected from view.
+  const [status, setStatus] = useState<RequestStatus | "">("");
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -54,7 +57,6 @@ export function Requests() {
     setMutationError(null);
     try {
       await client.evm.requests.approve(id, { approved: true });
-      setSelectedId(null);
       reload();
     } catch (e) {
       setMutationError(formatErr(e));
@@ -71,7 +73,6 @@ export function Requests() {
     setMutationError(null);
     try {
       await client.evm.requests.approve(id, { approved: false });
-      setSelectedId(null);
       reload();
     } catch (e) {
       setMutationError(formatErr(e));
@@ -84,7 +85,7 @@ export function Requests() {
     <div className="space-y-6">
       <PageHeader
         title="Sign requests"
-        subtitle="Approve or reject pending requests; review history of completed ones."
+        subtitle="Approve or reject pending requests; click a row for full details."
         actions={
           <button
             type="button"
@@ -106,10 +107,7 @@ export function Requests() {
             </label>
             <select
               value={status}
-              onChange={(e) => {
-                setStatus(e.target.value as RequestStatus | "");
-                setSelectedId(null);
-              }}
+              onChange={(e) => setStatus(e.target.value as RequestStatus | "")}
               className="rounded-md border border-ink-300 px-2 py-1 text-sm"
             >
               <option value="">all</option>
@@ -136,7 +134,8 @@ export function Requests() {
                   <th className="py-1 pr-3 font-normal">Chain</th>
                   <th className="py-1 pr-3 font-normal">Type</th>
                   <th className="py-1 pr-3 font-normal">By</th>
-                  <th className="py-1 font-normal">Status</th>
+                  <th className="py-1 pr-3 font-normal">Status</th>
+                  <th className="py-1 font-normal text-right">Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -144,13 +143,9 @@ export function Requests() {
                   <RequestRow
                     key={r.id}
                     req={r}
-                    expanded={selectedId === r.id}
-                    onToggle={() =>
-                      setSelectedId((id) => (id === r.id ? null : r.id))
-                    }
+                    busy={busy === r.id}
                     onApprove={() => approve(r.id)}
                     onReject={() => reject(r.id)}
-                    busy={busy === r.id}
                   />
                 ))}
               </tbody>
@@ -163,97 +158,72 @@ export function Requests() {
 
 function RequestRow({
   req,
-  expanded,
-  onToggle,
+  busy,
   onApprove,
   onReject,
-  busy,
 }: {
   req: RequestStatusResponse;
-  expanded: boolean;
-  onToggle: () => void;
+  busy: boolean;
   onApprove: () => void;
   onReject: () => void;
-  busy: boolean;
 }) {
-  const pending = req.status === "pending" || req.status === "authorizing";
+  const navigate = useNavigate();
+  const actionable = req.status === "pending" || req.status === "authorizing";
 
   return (
-    <>
-      <tr
-        className="cursor-pointer border-t border-ink-100 hover:bg-ink-50"
-        onClick={onToggle}
+    <tr
+      className="cursor-pointer border-t border-ink-100 hover:bg-ink-50"
+      onClick={() => navigate(`/requests/${req.id}`)}
+    >
+      <td className="py-1 pr-3 font-mono text-xs text-ink-700">
+        {req.created_at}
+      </td>
+      <td className="py-1 pr-3 font-mono text-xs text-ink-900">
+        {shorten(req.signer_address)}
+      </td>
+      <td className="py-1 pr-3 font-mono text-xs text-ink-700">
+        {req.chain_type}/{req.chain_id}
+      </td>
+      <td className="py-1 pr-3 text-xs">{req.sign_type}</td>
+      <td className="py-1 pr-3 font-mono text-xs text-ink-700">
+        {req.api_key_id}
+      </td>
+      <td className="py-1 pr-3">
+        <Badge tone={statusTone(req.status)}>{req.status}</Badge>
+      </td>
+      <td
+        className="py-1 text-right"
+        onClick={(e) => e.stopPropagation()}
       >
-        <td className="py-1 pr-3 font-mono text-xs text-ink-700">
-          {req.created_at}
-        </td>
-        <td className="py-1 pr-3 font-mono text-xs text-ink-900">
-          {req.signer_address}
-        </td>
-        <td className="py-1 pr-3 font-mono text-xs text-ink-700">
-          {req.chain_type}/{req.chain_id}
-        </td>
-        <td className="py-1 pr-3 text-xs">{req.sign_type}</td>
-        <td className="py-1 pr-3 font-mono text-xs text-ink-700">
-          {req.api_key_id}
-        </td>
-        <td className="py-1">
-          <Badge tone={statusTone(req.status)}>{req.status}</Badge>
-        </td>
-      </tr>
-      {expanded && (
-        <tr className="border-t border-ink-100 bg-ink-50">
-          <td colSpan={6} className="px-4 py-3">
-            <dl className="grid grid-cols-1 gap-1 text-sm md:grid-cols-2">
-              <Row k="ID" v={req.id} mono />
-              <Row k="Updated" v={req.updated_at} mono />
-              {req.completed_at && (
-                <Row k="Completed" v={req.completed_at} mono />
-              )}
-              {req.rule_matched_id && (
-                <Row k="Matched rule" v={req.rule_matched_id} mono />
-              )}
-              {req.approved_by && (
-                <Row k="Approved by" v={req.approved_by} mono />
-              )}
-              {req.error_message && (
-                <Row k="Error" v={req.error_message} />
-              )}
-              {req.signature && (
-                <Row k="Signature" v={req.signature.slice(0, 32) + "…"} mono />
-              )}
-            </dl>
-
-            {pending && (
-              <div className="mt-4 flex gap-3 border-t border-ink-200 pt-3">
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onApprove();
-                  }}
-                  disabled={busy}
-                  className="rounded-md bg-accent-500 px-3 py-1 text-xs font-medium text-white hover:bg-accent-600 disabled:opacity-50"
-                >
-                  Approve
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onReject();
-                  }}
-                  disabled={busy}
-                  className="rounded-md border border-red-200 px-3 py-1 text-xs text-red-700 hover:bg-red-50 disabled:opacity-50"
-                >
-                  Reject
-                </button>
-              </div>
-            )}
-          </td>
-        </tr>
-      )}
-    </>
+        {actionable ? (
+          <div className="inline-flex gap-1">
+            <button
+              type="button"
+              onClick={onApprove}
+              disabled={busy}
+              className="rounded-md bg-accent-500 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-accent-600 disabled:opacity-50"
+            >
+              Approve
+            </button>
+            <button
+              type="button"
+              onClick={onReject}
+              disabled={busy}
+              className="rounded-md border border-red-200 px-2 py-0.5 text-[11px] text-red-700 hover:bg-red-50 disabled:opacity-50"
+            >
+              Reject
+            </button>
+          </div>
+        ) : (
+          <Link
+            to={`/requests/${req.id}`}
+            className="text-[11px] text-accent-600 hover:text-accent-500"
+          >
+            details →
+          </Link>
+        )}
+      </td>
+    </tr>
   );
 }
 

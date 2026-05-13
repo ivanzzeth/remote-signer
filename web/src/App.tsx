@@ -8,6 +8,7 @@ import { Budgets } from "./pages/Budgets";
 import { Dashboard } from "./pages/Dashboard";
 import { HDWallets } from "./pages/HDWallets";
 import { Login } from "./pages/Login";
+import { RequestDetail } from "./pages/RequestDetail";
 import { Requests } from "./pages/Requests";
 import { Rules } from "./pages/Rules";
 import { Settings } from "./pages/Settings";
@@ -49,6 +50,7 @@ export function App() {
         <Route path="/hd-wallets" element={<HDWallets />} />
         <Route path="/wallets" element={<Wallets />} />
         <Route path="/requests" element={<Requests />} />
+        <Route path="/requests/:id" element={<RequestDetail />} />
         <Route path="/rules" element={<Rules />} />
         <Route path="/budgets" element={<Budgets />} />
         <Route path="/api-keys" element={<ApiKeys />} />
