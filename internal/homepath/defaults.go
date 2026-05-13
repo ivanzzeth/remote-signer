@@ -55,6 +55,12 @@ logger:
   level: info
   pretty: true
 
+security:
+  # Park unmatched sign requests in the approval queue (/requests) instead
+  # of rejecting them outright. Flip to false once your whitelist rules
+  # cover the daemon's intended traffic.
+  manual_approval_enabled: true
+
 chains:
   evm:
     enabled: true

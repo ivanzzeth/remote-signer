@@ -69,6 +69,7 @@ func DefaultSecurity() *SecuritySnapshot {
 		RateLimitDefault:             100,
 		IPRateLimit:                  200,
 		NonceRequired:                true,
+		ManualApprovalEnabled:        true,
 		RulesAPIReadonly:             false,
 		SignersAPIReadonly:           false,
 		APIKeysAPIReadonly:           false,
