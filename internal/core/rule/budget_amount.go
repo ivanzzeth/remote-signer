@@ -1,3 +1,5 @@
+// Package rule implements rule engine, budget checking, and whitelist/blocklist evaluation.
+// This file extracts monetary amounts from transaction data for budget deduction.
 package rule
 
 import (

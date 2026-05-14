@@ -1,3 +1,5 @@
+// Package handler provides HTTP handlers for template, MCP, broadcast, and config management.
+// This file contains response/request types for the template management endpoints.
 package handler
 
 import (

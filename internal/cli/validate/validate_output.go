@@ -1,3 +1,5 @@
+// Package validate provides the rule-validation CLI logic for remote-signer validate.
+// This file formats validation output in JSON or human-readable text.
 package validate
 
 import (

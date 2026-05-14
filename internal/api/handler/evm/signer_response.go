@@ -1,3 +1,5 @@
+// Package evm provides HTTP handlers for EVM signer and rule management API.
+// This file contains response/request types for the signer management endpoints.
 package evm
 
 import (
