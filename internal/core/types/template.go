@@ -122,14 +122,17 @@ func (RulePreset) TableName() string {
 //                          base58, etc.); the surrounding template's
 //                          chain_type field decides validation
 //   address_list  []string
-//   uint256       string — decimal big integer (precision-safe); sentinel
-//                          "-1" allowed where the rule supports it
-//   uint256_list  []string
+//   bigint        string — decimal big integer (precision-safe); sentinel
+//                          "-1" allowed where the rule supports it.
+//                          Replaces the EVM-flavored "uint256" name —
+//                          same on-the-wire shape, chain-neutral name.
+//   bigint_list   []string
 //   string        string
 //   bool          bool
 //   bytes         string — 0x + even-length hex
-//   bytes4        string — 0x + 8 hex (EVM function selector;
-//                          retained for parity with calldata params)
+//   bytes4        string — 0x + 8 hex (EVM function selector; kept as a
+//                          named alias so calldata-param rules stay
+//                          legible. Same wire format as bytes.)
 //   duration      string — Go time.ParseDuration form ("30s", "24h")
 //   enum          string — must appear in the variable's Options
 //   json          any   — opaque; only syntactic validation
@@ -138,8 +141,8 @@ type VariableType string
 const (
 	VarTypeAddress     VariableType = "address"
 	VarTypeAddressList VariableType = "address_list"
-	VarTypeUint256     VariableType = "uint256"
-	VarTypeUint256List VariableType = "uint256_list"
+	VarTypeBigInt      VariableType = "bigint"
+	VarTypeBigIntList  VariableType = "bigint_list"
 	VarTypeString      VariableType = "string"
 	VarTypeBool        VariableType = "bool"
 	VarTypeBytes       VariableType = "bytes"
@@ -154,7 +157,7 @@ const (
 func IsValidVariableType(s string) bool {
 	switch VariableType(s) {
 	case VarTypeAddress, VarTypeAddressList,
-		VarTypeUint256, VarTypeUint256List,
+		VarTypeBigInt, VarTypeBigIntList,
 		VarTypeString, VarTypeBool,
 		VarTypeBytes, VarTypeBytes4,
 		VarTypeDuration, VarTypeEnum, VarTypeJSON:

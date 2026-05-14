@@ -736,7 +736,7 @@ func TestCreateInstance(t *testing.T) {
 		budgetRepo := newMockBudgetRepo()
 
 		vars := []types.TemplateVariable{
-			{Name: "max_value", Type: "uint256", Description: "Max value", Required: false, Default: "1000000"},
+			{Name: "max_value", Type: "bigint", Description: "Max value", Required: false, Default: "1000000"},
 		}
 		config := []byte(`{"max_value":"${max_value}"}`)
 		tmpl := makeTemplate("tmpl-opt", "Optional Var Template", vars, config)
@@ -768,7 +768,7 @@ func TestCreateInstance(t *testing.T) {
 		budgetRepo := newMockBudgetRepo()
 
 		vars := []types.TemplateVariable{
-			{Name: "max_value", Type: "uint256", Description: "Max value", Required: false, Default: "1000000"},
+			{Name: "max_value", Type: "bigint", Description: "Max value", Required: false, Default: "1000000"},
 		}
 		config := []byte(`{"max_value":"${max_value}"}`)
 		tmpl := makeTemplate("tmpl-override", "Override Default", vars, config)
@@ -1191,7 +1191,7 @@ func TestCreateInstance(t *testing.T) {
 		budgetRepo := newMockBudgetRepo()
 
 		vars := []types.TemplateVariable{
-			{Name: "amount", Type: "uint256", Required: true},
+			{Name: "amount", Type: "bigint", Required: true},
 		}
 		config := []byte(`{"amount":"${amount}"}`)
 		tmpl := makeTemplate("tmpl-inv-uint", "Invalid Uint", vars, config)
@@ -1207,10 +1207,10 @@ func TestCreateInstance(t *testing.T) {
 			Variables:  map[string]string{"amount": "not-a-number"},
 		})
 		if err == nil {
-			t.Fatal("expected error for invalid uint256")
+			t.Fatal("expected error for invalid bigint")
 		}
-		if !strings.Contains(err.Error(), "invalid uint256") {
-			t.Errorf("error should mention invalid uint256, got: %v", err)
+		if !strings.Contains(err.Error(), "invalid bigint") {
+			t.Errorf("error should mention invalid bigint, got: %v", err)
 		}
 	})
 
@@ -1658,7 +1658,7 @@ func TestValidateVariableType_Extended(t *testing.T) {
 		budgetRepo := newMockBudgetRepo()
 
 		vars := []types.TemplateVariable{
-			{Name: "amounts", Type: "uint256_list", Required: true},
+			{Name: "amounts", Type: "bigint_list", Required: true},
 		}
 		config := []byte(`{"amounts":"${amounts}"}`)
 		tmpl := makeTemplate("tmpl-uintlist", "Uint256 List", vars, config)
@@ -1689,7 +1689,7 @@ func TestValidateVariableType_Extended(t *testing.T) {
 		budgetRepo := newMockBudgetRepo()
 
 		vars := []types.TemplateVariable{
-			{Name: "amounts", Type: "uint256_list", Required: true},
+			{Name: "amounts", Type: "bigint_list", Required: true},
 		}
 		config := []byte(`{"amounts":"${amounts}"}`)
 		tmpl := makeTemplate("tmpl-uintlist-inv", "Invalid Uint256 List", vars, config)
@@ -1707,9 +1707,9 @@ func TestValidateVariableType_Extended(t *testing.T) {
 			},
 		})
 		if err == nil {
-			t.Fatal("expected error for invalid uint256 in list")
+			t.Fatal("expected error for invalid bigint in list")
 		}
-		if !strings.Contains(err.Error(), "invalid uint256 in list") {
+		if !strings.Contains(err.Error(), "invalid bigint in list") {
 			t.Errorf("unexpected error: %v", err)
 		}
 	})
@@ -1869,7 +1869,7 @@ func TestValidateVariableType_Extended(t *testing.T) {
 		budgetRepo := newMockBudgetRepo()
 
 		vars := []types.TemplateVariable{
-			{Name: "amount", Type: "uint256", Required: true},
+			{Name: "amount", Type: "bigint", Required: true},
 		}
 		config := []byte(`{"amount":"${amount}"}`)
 		tmpl := makeTemplate("tmpl-neg", "Negative Uint", vars, config)
@@ -1897,7 +1897,7 @@ func TestValidateVariableType_Extended(t *testing.T) {
 		budgetRepo := newMockBudgetRepo()
 
 		vars := []types.TemplateVariable{
-			{Name: "amount", Type: "uint256", Required: true},
+			{Name: "amount", Type: "bigint", Required: true},
 		}
 		config := []byte(`{"amount":"${amount}"}`)
 		tmpl := makeTemplate("tmpl-empty-uint", "Empty Uint", vars, config)
