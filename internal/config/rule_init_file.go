@@ -1,3 +1,5 @@
+// Package config handles remote-signer configuration loading and rule initialization.
+// This file expands file-based rule references from config into flat rule lists.
 package config
 
 import (

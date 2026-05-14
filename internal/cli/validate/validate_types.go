@@ -1,3 +1,5 @@
+// Package validate provides the rule-validation CLI logic for remote-signer validate.
+// This file contains all shared data types for validation (rule config, test cases, templates).
 package validate
 
 import (

@@ -1,3 +1,5 @@
+// Package config handles remote-signer configuration loading and rule initialization.
+// This file syncs budget configurations from rule config and templates into storage.
 package config
 
 import (

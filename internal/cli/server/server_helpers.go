@@ -1,3 +1,5 @@
+// Package server provides the daemon entrypoint for remote-signer server.
+// This file contains utility functions for the server daemon startup flow.
 package server
 
 import (

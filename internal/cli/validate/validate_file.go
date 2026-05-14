@@ -1,3 +1,5 @@
+// Package validate provides the rule-validation CLI logic for remote-signer validate.
+// This file handles file-level rule validation including template variables and rule ID generation.
 package validate
 
 import (

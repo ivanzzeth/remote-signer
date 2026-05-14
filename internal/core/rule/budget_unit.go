@@ -1,3 +1,5 @@
+// Package rule implements rule engine, budget checking, and whitelist/blocklist evaluation.
+// This file handles budget unit normalization, decimal conversion, and variable substitution.
 package rule
 
 import (

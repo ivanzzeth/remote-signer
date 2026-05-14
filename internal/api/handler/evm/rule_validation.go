@@ -1,3 +1,5 @@
+// Package evm provides HTTP handlers for EVM signer and rule management API.
+// This file validates Solidity and JS rule configurations before persisting them.
 package evm
 
 import (

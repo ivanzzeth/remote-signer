@@ -1,3 +1,5 @@
+// Package server provides the daemon entrypoint for remote-signer server.
+// This file handles v0.3 file-based Template + Preset Registry sync at startup.
 package server
 
 import (

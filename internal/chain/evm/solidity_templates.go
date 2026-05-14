@@ -1,3 +1,5 @@
+// Package evm provides the EVM chain implementation including rule evaluation,
+// signer management, and transaction processing for the remote-signer daemon.
 package evm
 
 // Env var names for request-as-input (one compile per rule, no recompile when request changes)

@@ -1,3 +1,5 @@
+// Package evm provides the EVM chain implementation including rule evaluation,
+// signer management, and transaction processing for the remote-signer daemon.
 package evm
 
 import (
