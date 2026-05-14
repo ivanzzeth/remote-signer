@@ -75,27 +75,47 @@ func NewTemplateHandler(
 
 // TemplateResponse represents a template in API responses
 type TemplateResponse struct {
-	ID             string              `json:"id"`
-	Name           string              `json:"name"`
-	Description    string              `json:"description,omitempty"`
-	Type           string              `json:"type"`
-	Mode           string              `json:"mode"`
-	Source         string              `json:"source"`
+	ID             string                `json:"id"`
+	Name           string                `json:"name"`
+	Description    string                `json:"description,omitempty"`
+	Type           string                `json:"type"`
+	Mode           string                `json:"mode"`
+	Source         string                `json:"source"`
+	// ChainType surfaces the template's chain family — empty for off-chain
+	// templates (sign_type_allowlist etc.). The UI uses this for the
+	// "Chain" column and for filtering; before R10 the column showed
+	// every row as off-chain because this field was missing from the wire.
+	ChainType      string                `json:"chain_type,omitempty"`
+	SourcePath     string                `json:"source_path,omitempty"`
 	Variables      []TemplateVarResponse `json:"variables,omitempty"`
-	Config         json.RawMessage     `json:"config,omitempty"`
-	BudgetMetering json.RawMessage     `json:"budget_metering,omitempty"`
-	Enabled        bool                `json:"enabled"`
-	CreatedAt      string              `json:"created_at"`
-	UpdatedAt      string              `json:"updated_at"`
+	VariableGroups json.RawMessage       `json:"variable_groups,omitempty"`
+	Config         json.RawMessage       `json:"config,omitempty"`
+	BudgetMetering json.RawMessage       `json:"budget_metering,omitempty"`
+	Enabled        bool                  `json:"enabled"`
+	CreatedAt      string                `json:"created_at"`
+	UpdatedAt      string                `json:"updated_at"`
 }
 
-// TemplateVarResponse represents a template variable in API responses
+// TemplateVarResponse represents a template variable in API responses.
+// Carries every UI-relevant field so the typed-widget dispatch on the
+// frontend (R10) doesn't have to make a second roundtrip per variable.
 type TemplateVarResponse struct {
-	Name        string `json:"name"`
-	Type        string `json:"type"`
-	Description string `json:"description,omitempty"`
-	Required    bool   `json:"required"`
-	Default     string `json:"default,omitempty"`
+	Name        string   `json:"name"`
+	Type        string   `json:"type"`
+	Label       string   `json:"label,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Required    bool     `json:"required"`
+	// Default is `any` server-side; the SDK types it as `unknown` and
+	// stringifies in the UI when needed. Round-trip via json.RawMessage
+	// preserves the natural shape (string / number / bool / array).
+	Default     json.RawMessage `json:"default,omitempty"`
+	Placeholder string   `json:"placeholder,omitempty"`
+	Hint        string   `json:"hint,omitempty"`
+	Options     []string `json:"options,omitempty"`
+	Sensitive   bool     `json:"sensitive,omitempty"`
+	Pattern     string   `json:"pattern,omitempty"`
+	Min         *string  `json:"min,omitempty"`
+	Max         *string  `json:"max,omitempty"`
 }
 
 // ListTemplatesResponse represents the response for listing templates
@@ -711,35 +731,49 @@ func (h *TemplateHandler) toTemplateResponse(tmpl *types.RuleTemplate) TemplateR
 		Type:        string(tmpl.Type),
 		Mode:        string(tmpl.Mode),
 		Source:      string(tmpl.Source),
+		ChainType:   string(tmpl.ChainType),
+		SourcePath:  tmpl.SourcePath,
 		Config:      tmpl.Config,
 		Enabled:     tmpl.Enabled,
 		CreatedAt:   tmpl.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:   tmpl.UpdatedAt.Format(time.RFC3339),
 	}
 
-	// Parse variables
+	if len(tmpl.VariableGroups) > 0 {
+		resp.VariableGroups = tmpl.VariableGroups
+	}
+
+	// Parse variables, preserving every UI-relevant field so R10's
+	// typed widgets can render bool checkboxes, enum selects, list
+	// textareas, etc. without a per-variable second roundtrip.
 	if len(tmpl.Variables) > 0 {
 		var vars []types.TemplateVariable
 		if err := json.Unmarshal(tmpl.Variables, &vars); err == nil {
 			resp.Variables = make([]TemplateVarResponse, len(vars))
 			for i, v := range vars {
-				// Default is typed (any) post-R1; the wire still uses
-				// a string field pending R9's SDK update. Coerce
-				// strings straight through, non-strings via Sprint.
-				var defaultStr string
+				// Marshal Default back to raw JSON so the natural shape
+				// (string / number / bool / array) survives the round-
+				// trip. Nil default → omit field entirely.
+				var defaultRaw json.RawMessage
 				if v.Default != nil {
-					if s, ok := v.Default.(string); ok {
-						defaultStr = s
-					} else {
-						defaultStr = fmt.Sprint(v.Default)
+					if b, err := json.Marshal(v.Default); err == nil {
+						defaultRaw = b
 					}
 				}
 				resp.Variables[i] = TemplateVarResponse{
 					Name:        v.Name,
 					Type:        string(v.Type),
+					Label:       v.Label,
 					Description: v.Description,
 					Required:    v.Required,
-					Default:     defaultStr,
+					Default:     defaultRaw,
+					Placeholder: v.Placeholder,
+					Hint:        v.Hint,
+					Options:     v.Options,
+					Sensitive:   v.Sensitive,
+					Pattern:     v.Pattern,
+					Min:         v.Min,
+					Max:         v.Max,
 				}
 			}
 		}
