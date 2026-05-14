@@ -42,7 +42,6 @@ git clone https://github.com/ivanzzeth/remote-signer.git && cd remote-signer && 
 | [部署指南](docs/deployment.md) | Docker、Kubernetes、高可用、监控、备份 |
 | [规则、模板与预设](docs/rules-templates-and-presets.md) | 概念：规则模板、实例、预设 |
 | [规则语法参考](docs/rule-syntax.md) | 所有规则类型及示例 |
-| [API 参考](docs/api.md) | 完整接口说明 |
 | [集成指南](INTEGRATION.md) | Go/TS/Rust SDK、MCP 服务器 |
 | [TLS / mTLS 指南](docs/tls.md) | 证书信任模型、生成、生产实践 |
 | [TUI 指南](docs/tui.md) | 终端界面：构建、运行、快捷键 |
