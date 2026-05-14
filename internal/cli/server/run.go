@@ -28,7 +28,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/config"
 	"github.com/ivanzzeth/remote-signer/internal/core/auth"
 	"github.com/ivanzzeth/remote-signer/internal/core/registry"
-	"github.com/ivanzzeth/remote-signer/internal/core/rule"
+	rulepkg "github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/statemachine"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
@@ -551,10 +551,10 @@ func Run(args []string) error {
 	}
 
 	// Initialize rule engine (with optional budget checker for template instances)
-	budgetChecker := rule.NewBudgetChecker(budgetRepo, templateRepo, log)
-	ruleEngine, err := rule.NewWhitelistRuleEngine(ruleRepo, log,
-		rule.WithBudgetChecker(budgetChecker),
-		rule.WithDelegationPayloadConverter(evm.DelegatePayloadToSignRequest),
+	budgetChecker := rulepkg.NewBudgetChecker(budgetRepo, templateRepo, log)
+	ruleEngine, err := rulepkg.NewWhitelistRuleEngine(ruleRepo, log,
+		rulepkg.WithBudgetChecker(budgetChecker),
+		rulepkg.WithDelegationPayloadConverter(evm.DelegatePayloadToSignRequest),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create rule engine: %w", err)
@@ -584,7 +584,7 @@ func Run(args []string) error {
 
 	// Wire RPC provider for JS sandbox read-only queries, budget decimals auto-query, and broadcast
 	var rpcProvider *evm.RPCProvider
-	var decimalsQuerier rule.DecimalsQuerier
+	var decimalsQuerier rulepkg.DecimalsQuerier
 	if cfg.Chains.EVM != nil && cfg.Chains.EVM.RPCGateway.BaseURL != "" {
 		rpcProvider, err = evm.NewRPCProvider(cfg.Chains.EVM.RPCGateway.BaseURL, cfg.Chains.EVM.RPCGateway.APIKey)
 		if err != nil {
@@ -715,7 +715,7 @@ func Run(args []string) error {
 	}
 
 	// Initialize rule generator
-	ruleGenerator, err := rule.NewDefaultRuleGenerator()
+	ruleGenerator, err := rulepkg.NewDefaultRuleGenerator()
 	if err != nil {
 		return fmt.Errorf("failed to create rule generator: %w", err)
 	}
@@ -1443,7 +1443,24 @@ func validateEVMJSRulesAtStartup(ctx context.Context, expandedRules []config.Rul
 		}
 
 		// Build isolated engine (blocklist + this rule only) so expected-fail cases are not allowed by another whitelist rule.
-		testEngine, err := buildIsolatedEngineForRule(ctx, allRulesMap, &ruleForTest, solidityEval, log)
+		evaluators := []rulepkg.RuleEvaluator{
+			&evm.AddressListEvaluator{},
+			&evm.ContractMethodEvaluator{},
+			&evm.ValueLimitEvaluator{},
+			&evm.SignerRestrictionEvaluator{},
+			&evm.SignTypeRestrictionEvaluator{},
+			&evm.MessagePatternEvaluator{},
+		}
+		internalTransferEval, evalErr := evm.NewInternalTransferEvaluator(nil)
+		if evalErr != nil {
+			failed = append(failed, fmt.Sprintf("%s: create internal transfer evaluator: %v", cfg.Name, evalErr))
+			continue
+		}
+		evaluators = append(evaluators, internalTransferEval)
+		if solidityEval != nil {
+			evaluators = append(evaluators, solidityEval)
+		}
+		testEngine, err := rulepkg.BuildIsolatedEngine(ctx, allRulesMap, &ruleForTest, log, evaluators, rulepkg.WithDelegationPayloadConverter(evm.DelegatePayloadToSignRequest))
 		if err != nil {
 			failed = append(failed, fmt.Sprintf("%s: build isolated engine: %v", cfg.Name, err))
 			continue
@@ -1530,91 +1547,7 @@ func validateEVMJSRulesAtStartup(ctx context.Context, expandedRules []config.Rul
 	return nil
 }
 
-// buildIsolatedEngineForRule builds an engine containing only blocklist rules plus the given rule
-// (and its delegation targets). Used so evm_js expected-fail test cases are not allowed by another whitelist rule.
-func buildIsolatedEngineForRule(ctx context.Context, allRulesMap map[types.RuleID]*types.Rule, ruleUnderTest *types.Rule, solidityEval *evm.SolidityRuleEvaluator, log *slog.Logger) (*rule.WhitelistRuleEngine, error) {
-	minimalRepo := storage.NewMemoryRuleRepository()
-	for _, r := range allRulesMap {
-		if r.Mode == types.RuleModeBlocklist {
-			// Skip evm_dynamic_blocklist — its evaluator depends on runtime DynamicBlocklist
-			// which is not available during startup validation. Including it would cause
-			// "no evaluator registered" errors in the isolated engine.
-			if r.Type == types.RuleTypeEVMDynamicBlocklist {
-				continue
-			}
-			if err := minimalRepo.Create(ctx, r); err != nil {
-				return nil, fmt.Errorf("add blocklist rule %s: %w", r.ID, err)
-			}
-		}
-	}
-	if ruleUnderTest.Mode != types.RuleModeBlocklist {
-		if err := minimalRepo.Create(ctx, ruleUnderTest); err != nil {
-			return nil, fmt.Errorf("add rule under test %s: %w", ruleUnderTest.ID, err)
-		}
-	}
-	if err := addDelegationTargetsForValidation(ctx, ruleUnderTest, allRulesMap, minimalRepo, make(map[types.RuleID]bool), log); err != nil {
-		return nil, err
-	}
-	eng, err := rule.NewWhitelistRuleEngine(minimalRepo, log, rule.WithDelegationPayloadConverter(evm.DelegatePayloadToSignRequest))
-	if err != nil {
-		return nil, err
-	}
-	eng.RegisterEvaluator(&evm.AddressListEvaluator{})
-	eng.RegisterEvaluator(&evm.ContractMethodEvaluator{})
-	eng.RegisterEvaluator(&evm.ValueLimitEvaluator{})
-	eng.RegisterEvaluator(&evm.SignerRestrictionEvaluator{})
-	eng.RegisterEvaluator(&evm.SignTypeRestrictionEvaluator{})
-	eng.RegisterEvaluator(&evm.MessagePatternEvaluator{})
-	// Internal transfer evaluator: nil repo for validation-only mode
-	internalTransferEval, err := evm.NewInternalTransferEvaluator(nil)
-	if err != nil {
-		return nil, err
-	}
-	eng.RegisterEvaluator(internalTransferEval)
-	if solidityEval != nil {
-		eng.RegisterEvaluator(solidityEval)
-	}
-	return eng, nil
-}
-
-// addDelegationTargetsForValidation recursively adds delegation target rules to the minimal repo
-// with Enabled=false so they are reachable via Get() but not included in List(EnabledOnly=true).
-func addDelegationTargetsForValidation(ctx context.Context, r *types.Rule, allRulesMap map[types.RuleID]*types.Rule, minimalRepo *storage.MemoryRuleRepository, visited map[types.RuleID]bool, log *slog.Logger) error {
-	if visited[r.ID] {
-		return nil
-	}
-	visited[r.ID] = true
-	var cfg struct {
-		DelegateTo string `json:"delegate_to"`
-	}
-	if err := json.Unmarshal(r.Config, &cfg); err != nil {
-		return fmt.Errorf("unmarshal config for rule %q: %w", r.ID, err)
-	}
-	if cfg.DelegateTo == "" {
-		return nil
-	}
-	for _, part := range strings.Split(cfg.DelegateTo, ",") {
-		targetID := types.RuleID(strings.TrimSpace(part))
-		if targetID == "" {
-			continue
-		}
-		target, ok := allRulesMap[targetID]
-		if !ok {
-			return fmt.Errorf("rule %q delegate_to references non-existent target %q", r.ID, targetID)
-		}
-		clone := *target
-		clone.Enabled = false
-		if err := minimalRepo.Create(ctx, &clone); err != nil {
-			log.Debug("delegation target already in minimal repo", "target", targetID)
-		}
-		if err := addDelegationTargetsForValidation(ctx, target, allRulesMap, minimalRepo, visited, log); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// validateMessagePatternRulesAtStartup validates all message_pattern rules at startup
+	// validateMessagePatternRulesAtStartup validates all message_pattern rules at startup
 // (same as validate-rules: regex compile + test cases). If any fail, startup fails.
 func validateMessagePatternRulesAtStartup(ctx context.Context, ruleRepo storage.RuleRepository, log *slog.Logger) error {
 	ruleType := types.RuleTypeMessagePattern
