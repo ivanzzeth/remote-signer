@@ -650,8 +650,16 @@ func validateVariables(defs []types.TemplateVariable, vars map[string]string) er
 
 		val, provided := vars[def.Name]
 
-		// Check required
-		if def.Required && !provided && def.Default == "" {
+		// Check required. Default is typed (any) post-R1 — missing
+		// means nil, or a string that's still empty after the
+		// no-default zero value. Non-string defaults (bool, []string)
+		// always count as "has a default" since their zero values are
+		// legitimate concrete defaults the operator chose.
+		hasDefault := def.Default != nil
+		if s, ok := def.Default.(string); ok && s == "" {
+			hasDefault = false
+		}
+		if def.Required && !provided && !hasDefault {
 			return fmt.Errorf("required variable '%s' is missing", def.Name)
 		}
 
@@ -669,9 +677,12 @@ func validateVariables(defs []types.TemplateVariable, vars map[string]string) er
 	return nil
 }
 
-// validateVariableType validates a variable value against its declared type
-func validateVariableType(name, varType, value string) error {
-	switch varType {
+// validateVariableType validates a variable value against its declared
+// type. value is the wire string at apply time; the typed re-parse for
+// substitution happens later in R5's typed substituter — this is the
+// legacy validator kept alive while the type system migrates.
+func validateVariableType(name string, varType types.VariableType, value string) error {
+	switch string(varType) {
 	case "address":
 		if !isValidAddress(value) {
 			return fmt.Errorf("variable '%s': invalid address format '%s'", name, value)
@@ -704,16 +715,30 @@ func validateVariableType(name, varType, value string) error {
 	return nil
 }
 
-// resolveDefaults fills in default values for optional variables that were not provided
+// resolveDefaults fills in default values for optional variables that
+// were not provided. Default is typed (any) — R5 will rewrite the
+// substituter to dispatch on type; for now this legacy path coerces
+// string defaults straight through and uses fmt.Sprint for the rest
+// so the existing tests keep passing through R1.
 func resolveDefaults(defs []types.TemplateVariable, vars map[string]string) map[string]string {
 	result := make(map[string]string, len(vars))
 	for k, v := range vars {
 		result[k] = v
 	}
 	for _, def := range defs {
-		if _, provided := result[def.Name]; !provided && def.Default != "" {
-			result[def.Name] = def.Default
+		if _, provided := result[def.Name]; provided {
+			continue
 		}
+		if def.Default == nil {
+			continue
+		}
+		if s, ok := def.Default.(string); ok {
+			if s != "" {
+				result[def.Name] = s
+			}
+			continue
+		}
+		result[def.Name] = fmt.Sprint(def.Default)
 	}
 	return result
 }

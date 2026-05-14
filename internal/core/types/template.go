@@ -25,13 +25,125 @@ func (RuleTemplate) TableName() string {
 	return "rule_templates"
 }
 
-// TemplateVariable defines a variable in a rule template
+// VariableType is the canonical type tag for a template variable. The
+// substituter, validator, and UI widgets all dispatch on this string;
+// adding a new kind means extending the enum + each of those layers.
+//
+// Semantics by type:
+//
+//   address       string — chain-specific format (EVM 0x+40hex, Solana
+//                          base58, etc.); the surrounding template's
+//                          chain_type field decides validation
+//   address_list  []string
+//   uint256       string — decimal big integer (precision-safe); sentinel
+//                          "-1" allowed where the rule supports it
+//   uint256_list  []string
+//   string        string
+//   bool          bool
+//   bytes         string — 0x + even-length hex
+//   bytes4        string — 0x + 8 hex (EVM function selector;
+//                          retained for parity with calldata params)
+//   duration      string — Go time.ParseDuration form ("30s", "24h")
+//   enum          string — must appear in the variable's Options
+//   json          any   — opaque; only syntactic validation
+type VariableType string
+
+const (
+	VarTypeAddress     VariableType = "address"
+	VarTypeAddressList VariableType = "address_list"
+	VarTypeUint256     VariableType = "uint256"
+	VarTypeUint256List VariableType = "uint256_list"
+	VarTypeString      VariableType = "string"
+	VarTypeBool        VariableType = "bool"
+	VarTypeBytes       VariableType = "bytes"
+	VarTypeBytes4      VariableType = "bytes4"
+	VarTypeDuration    VariableType = "duration"
+	VarTypeEnum        VariableType = "enum"
+	VarTypeJSON        VariableType = "json"
+)
+
+// IsValidVariableType reports whether s is one of the canonical
+// variable types. Used by the registry's sync-time validator.
+func IsValidVariableType(s string) bool {
+	switch VariableType(s) {
+	case VarTypeAddress, VarTypeAddressList,
+		VarTypeUint256, VarTypeUint256List,
+		VarTypeString, VarTypeBool,
+		VarTypeBytes, VarTypeBytes4,
+		VarTypeDuration, VarTypeEnum, VarTypeJSON:
+		return true
+	}
+	return false
+}
+
+// TemplateVariable defines a variable on a rule template. The "core"
+// fields (Name, Type, Required, Default) are load-bearing — they drive
+// substitution and validation. The "UI" fields (Label, Placeholder,
+// Hint, Sensitive) are operator ergonomics: the form renders better
+// with them, but the substituter doesn't read them.
 type TemplateVariable struct {
-	Name        string `json:"name" yaml:"name"`
-	Type        string `json:"type" yaml:"type"`                           // "address", "uint256", "string", "address_list", "uint256_list"
+	// Name is the programmatic key used in ${var} substitution and in
+	// apply requests. Stable; treat as code, not UX.
+	Name string `json:"name" yaml:"name"`
+
+	// Type is the canonical kind. See VariableType for the enum and
+	// the wire shape each kind expects.
+	Type VariableType `json:"type" yaml:"type"`
+
+	// Label is the human-friendly title the UI shows above the input.
+	// Falls back to Name when empty.
+	Label string `json:"label,omitempty" yaml:"label,omitempty"`
+
+	// Description is one or two sentences of context the operator
+	// reads while filling the form. Render below the input.
 	Description string `json:"description,omitempty" yaml:"description,omitempty"`
-	Required    bool   `json:"required" yaml:"required"`                   // default true
-	Default     string `json:"default,omitempty" yaml:"default,omitempty"` // default value if not required
+
+	// Required gates apply: when true and no value is supplied (and
+	// no Default), the daemon rejects the request.
+	Required bool `json:"required" yaml:"required"`
+
+	// Default is the value used when the operator omits the variable
+	// at apply time. Type follows the Type field — string for address,
+	// []string for address_list, bool for bool, etc. — so YAML carries
+	// the natural shape without runtime parsing tricks.
+	Default any `json:"default,omitempty" yaml:"default,omitempty"`
+
+	// Placeholder is what the input box shows in ghost text before
+	// the operator types. Useful for examples ("0xA0b8...").
+	Placeholder string `json:"placeholder,omitempty" yaml:"placeholder,omitempty"`
+
+	// Hint is a short tip rendered as muted text next to the input —
+	// e.g. "Use -1 for unlimited". For longer guidance use Description.
+	Hint string `json:"hint,omitempty" yaml:"hint,omitempty"`
+
+	// Options enumerates the legal values for Type=enum. Validator
+	// requires the operator-supplied value to appear in this list.
+	Options []string `json:"options,omitempty" yaml:"options,omitempty"`
+
+	// Sensitive marks a variable that carries credentials. The UI
+	// masks it (password input), the audit log redacts the value.
+	// Daemon enforcement is best-effort — operators should still keep
+	// secrets out of YAML.
+	Sensitive bool `json:"sensitive,omitempty" yaml:"sensitive,omitempty"`
+
+	// Pattern is an optional regex constraint, applied after the
+	// type-specific format check. Empty = no extra constraint.
+	Pattern string `json:"pattern,omitempty" yaml:"pattern,omitempty"`
+
+	// Min / Max bound numeric values (uint256, duration). For
+	// uint256 they're decimal big-int strings; for duration they're
+	// Go duration forms ("1h"). nil = unbounded.
+	Min *string `json:"min,omitempty" yaml:"min,omitempty"`
+	Max *string `json:"max,omitempty" yaml:"max,omitempty"`
+}
+
+// VariableGroup is an optional grouping hint for long forms. The UI
+// renders one section per group, in declared order, with any variables
+// not named in any group falling into an "Other" trailing section.
+type VariableGroup struct {
+	Title       string   `json:"title" yaml:"title"`
+	Description string   `json:"description,omitempty" yaml:"description,omitempty"`
+	Variables   []string `json:"variables" yaml:"variables"`
 }
 
 // BudgetMetering defines how to extract "spend amount" from each request for budget enforcement.
