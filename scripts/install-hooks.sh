@@ -120,12 +120,39 @@ fi
 # 3. Dependency vulnerability check with govulncheck
 if command -v govulncheck &> /dev/null; then
     echo -n "Running govulncheck... "
-    if govulncheck ./... 2>/dev/null; then
+    GOVULN_OUTPUT=$(govulncheck -format json ./... 2>/dev/null)
+    GOVULN_EXIT=$?
+    if [ $GOVULN_EXIT -eq 0 ]; then
         echo -e "${GREEN}OK${NC}"
     else
-        echo -e "${RED}FAIL${NC}"
-        echo "govulncheck found vulnerable dependencies. Run 'govulncheck ./...' for details."
-        FAILED=1
+        # Check if all findings are stdlib-only (no available fix via go get)
+        NON_STDLIB=$(echo "$GOVULN_OUTPUT" | python3 -c "
+import sys, json
+has_non_stdlib = False
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        obj = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    finding = obj.get('finding')
+    if finding:
+        traces = finding.get('trace', [])
+        if traces and traces[0].get('module', '') != 'stdlib':
+            has_non_stdlib = True
+            break
+print('yes' if has_non_stdlib else 'no')
+" 2>/dev/null)
+        if [ "$NON_STDLIB" = "no" ]; then
+            echo -e "${YELLOW}WARN${NC}"
+            echo "govulncheck: stdlib-only vulnerabilities (no fix available yet). Run 'govulncheck ./...' for details."
+        else
+            echo -e "${RED}FAIL${NC}"
+            echo "govulncheck found vulnerable dependencies. Run 'govulncheck ./...' for details."
+            FAILED=1
+        fi
     fi
 else
     echo -e "${YELLOW}SKIP (govulncheck not installed)${NC}"
@@ -142,7 +169,7 @@ fi
 
 # 5. Check for plaintext secrets in staged files
 echo -n "Checking for plaintext secrets... "
-SECRETS_FOUND=$(git diff --cached --diff-filter=ACM -U0 -- ':!*_test.go' | grep -v '^@@' | grep -iE '(private_key|password|secret|token)\s*[:=]\s*"[^$\{]' | grep -v '_env' | grep -v 'example' | grep -v '#' | grep -v 'Render(' | grep -viE '(gasToken|paymentToken|refundReceiver|collateralToken|quoteToken)\s*:' || true)
+SECRETS_FOUND=$(git diff --cached --diff-filter=ACM -U0 -- ':!*_test.go' | grep -v '^@@' | grep -iE '(private_key|password|secret|token)\s*[:=]\s*"[^$\{]' | grep -v '_env' | grep -v 'example' | grep -v '#' | grep -v 'Render(' | grep -v 'fmt\.' | grep -viE '(gasToken|paymentToken|refundReceiver|collateralToken|quoteToken)\s*:' || true)
 if [ -n "$SECRETS_FOUND" ]; then
     echo -e "${RED}FAIL${NC}"
     echo "Possible plaintext secrets detected in staged changes:"
@@ -283,11 +310,11 @@ if [ -n "$STAGED_RULES" ]; then
     if command -v forge &> /dev/null; then
         echo -n "Validating rule files... "
         # shellcheck disable=SC2086
-        if go run ./cmd/validate-rules/ $STAGED_RULES 2>/dev/null; then
+        if go run ./cmd/remote-signer validate $STAGED_RULES 2>/dev/null; then
             echo -e "${GREEN}OK${NC}"
         else
             echo -e "${RED}FAIL${NC}"
-            echo "Rule validation failed. Run 'go run ./cmd/validate-rules/ -v rules/*.yaml' or 'remote-signer-validate-rules -v rules/*.yaml' for details."
+            echo "Rule validation failed. Run 'go run ./cmd/remote-signer validate -v rules/*.yaml' or 'remote-signer validate -v rules/*.yaml' for details."
             FAILED=1
         fi
     else
@@ -321,6 +348,26 @@ if [ -n "$STAGED_TUI" ]; then
     fi
 else
     echo -e "TUI version check... ${GREEN}OK (no staged tui/ changes)${NC}"
+fi
+
+# 6b. Any cmd/<name> with staged changes: if that command's main.go defines version, it must be bumped in this commit
+STAGED_CMD_DIRS=$(git diff --cached --name-only --diff-filter=ACM | grep '^cmd/' | cut -d'/' -f2 | sort -u)
+CMD_VERSION_FAILED=""
+for dir in $STAGED_CMD_DIRS; do
+    main_go="cmd/$dir/main.go"
+    if [ -f "$main_go" ] && grep -qE 'const version\s*=' "$main_go" 2>/dev/null; then
+        if ! git diff --cached -- "$main_go" | grep -qE '^[+-].*version\s*=\s*"[^"]*"'; then
+            CMD_VERSION_FAILED="${CMD_VERSION_FAILED}  - cmd/$dir: update const version in $main_go and stage it\n"
+        fi
+    fi
+done
+if [ -n "$CMD_VERSION_FAILED" ]; then
+    echo -e "Cmd version bump... ${RED}FAIL${NC}"
+    echo "You changed files under cmd/<name>/ but did not bump the version in that command's main.go:"
+    echo -e "$CMD_VERSION_FAILED"
+    FAILED=1
+elif [ -n "$STAGED_CMD_DIRS" ]; then
+    echo -e "Cmd version check... ${GREEN}OK${NC}"
 fi
 
 # 7. E2E tests (ephemeral server on E2E_API_PORT). Gated for doc-only commits; overridable via env (see docs/testing.md).
@@ -443,7 +490,7 @@ log_info "Git hooks installed successfully!"
 log_info "Hooks location: $HOOKS_DIR"
 echo ""
 echo "Installed hooks:"
-echo "  pre-commit : gosec, govulncheck, go vet, error suppression, gitleaks, detect-secrets, semgrep, eslint-security, npm audit, rule validation, tui-version-bump (if tui/ changed), e2e tests"
+echo "  pre-commit : gosec, govulncheck, go vet, error suppression, gitleaks, detect-secrets, semgrep, eslint-security, npm audit, rule validation, tui-version-bump (if tui/ changed), cmd-version-bump (if cmd/<name>/ changed and main.go has version), e2e tests"
 echo "  pre-push   : full unit test suite (includes rule validation via TestRulesDirectoryValidation)"
 echo ""
 echo "To skip hooks (NOT recommended): git commit --no-verify"

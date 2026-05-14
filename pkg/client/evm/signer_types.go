@@ -1,19 +1,47 @@
 package evm
 
-// AllowedKeyInfo represents an API key that has access to a signer (admin view only).
-type AllowedKeyInfo struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	AccessType string `json:"access_type"` // "unrestricted" or "explicit"
-}
+import "time"
 
 // Signer represents a signer configuration.
 type Signer struct {
-	Address     string           `json:"address"`
-	Type        string           `json:"type"`
-	Enabled     bool             `json:"enabled"`
-	Locked      bool             `json:"locked"`
-	AllowedKeys []AllowedKeyInfo `json:"allowed_keys,omitempty"`
+	Address           string            `json:"address"`
+	SignerAddress     string            `json:"signer_address,omitempty"`
+	Type              string            `json:"type"`
+	Enabled           bool              `json:"enabled"`
+	Locked            bool              `json:"locked"`
+	UnlockedAt        *time.Time        `json:"unlocked_at,omitempty"`
+	OwnerID           string            `json:"owner_id,omitempty"`
+	Status            string            `json:"status,omitempty"` // ownership status: active, pending_approval
+	DisplayName       string            `json:"display_name,omitempty"`
+	Tags              []string          `json:"tags,omitempty"`
+	PrimaryAddress    string            `json:"primary_address,omitempty"`
+	HDDerivationIndex *uint32           `json:"hd_derivation_index,omitempty"` // for derived addresses: derivation index
+	MaterialStatus    string            `json:"material_status,omitempty"`
+	MaterialCheckedAt *time.Time        `json:"material_checked_at,omitempty"`
+	MaterialMissingAt *time.Time        `json:"material_missing_at,omitempty"`
+	Wallets           []SignerWalletRef `json:"wallets,omitempty"`
+}
+
+type SignerWalletRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// SignerAccessEntry represents an access grant on a signer.
+type SignerAccessEntry struct {
+	APIKeyID  string    `json:"api_key_id"`
+	GrantedBy string    `json:"granted_by"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// GrantAccessRequest represents a request to grant signer access.
+type GrantAccessRequest struct {
+	APIKeyID string `json:"api_key_id"`
+}
+
+// TransferOwnershipRequest represents a request to transfer signer ownership.
+type TransferOwnershipRequest struct {
+	NewOwnerID string `json:"new_owner_id"`
 }
 
 // SignerInfo represents a signer in API responses (used by HD wallets).
@@ -44,8 +72,16 @@ type ListSignersResponse struct {
 
 // CreateSignerRequest represents a request to create a new signer.
 type CreateSignerRequest struct {
-	Type     string                `json:"type"`
-	Keystore *CreateKeystoreParams `json:"keystore,omitempty"`
+	Type        string                `json:"type"`
+	Keystore    *CreateKeystoreParams `json:"keystore,omitempty"`
+	DisplayName string                `json:"display_name,omitempty"`
+	Tags        []string              `json:"tags,omitempty"`
+}
+
+// PatchSignerLabelsRequest updates display name and/or tags (owner only).
+type PatchSignerLabelsRequest struct {
+	DisplayName *string   `json:"display_name"`
+	Tags        *[]string `json:"tags"`
 }
 
 // CreateKeystoreParams contains parameters for creating a keystore signer.
@@ -56,6 +92,10 @@ type CreateKeystoreParams struct {
 // ListSignersFilter contains filter options for listing signers.
 type ListSignersFilter struct {
 	Type   string
+	Tag    string
 	Offset int
 	Limit  int
+	// ExcludeHDDerived when true asks the server to omit HD-derived signers (derivation index > 0).
+	// Primary HD wallet (index 0), keystore, and private_key signers are still listed.
+	ExcludeHDDerived bool
 }

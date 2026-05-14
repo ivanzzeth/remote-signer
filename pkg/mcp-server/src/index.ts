@@ -4,22 +4,100 @@
  * Remote Signer MCP Server
  *
  * Provides MCP tools for interacting with the remote-signer service.
- * Uses the @remote-signer/client TypeScript SDK for authentication and API calls.
- *
- * Each tool has explicit, well-typed parameters so that LLMs can call them
- * without ambiguity.  EVM tools are prefixed with "evm_" for namespace clarity
- * and future multi-chain extensibility (e.g. solana_sign_message).
+ * Uses the remote-signer-client npm package for authentication and API calls.
  *
  * Configuration via environment variables:
- *   REMOTE_SIGNER_URL        - Base URL of the remote-signer service (default: http://localhost:8548)
- *   REMOTE_SIGNER_API_KEY_ID - API key ID for authentication
- *   REMOTE_SIGNER_PRIVATE_KEY - Ed25519 private key (hex) for request signing
+ *   REMOTE_SIGNER_URL             - Base URL (default: http://localhost:8548)
+ *   REMOTE_SIGNER_API_KEY_ID      - API key ID for authentication
+ *   REMOTE_SIGNER_PRIVATE_KEY     - Ed25519 private key (hex); use this OR _FILE
+ *   REMOTE_SIGNER_PRIVATE_KEY_FILE - Path to PEM file (e.g. data/admin_private.pem); use this OR hex above
+ *   TLS / mTLS (optional):
+ *   REMOTE_SIGNER_CA_FILE         - Path to CA cert (PEM) for server cert verification
+ *   REMOTE_SIGNER_CLIENT_CERT_FILE - Path to client cert (PEM) for mTLS
+ *   REMOTE_SIGNER_CLIENT_KEY_FILE  - Path to client private key (PEM) for mTLS
+ *   REMOTE_SIGNER_TLS_INSECURE_SKIP_VERIFY - Set to "1" or "true" to skip server cert verify (insecure)
  */
 
+import * as fs from "fs";
+import * as path from "path";
+import * as crypto from "crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { RemoteSignerClient } from "@remote-signer/client";
+import { RemoteSignerClient } from "remote-signer-client";
+
+// ---------------------------------------------------------------------------
+// Resolve private key: from hex env or from PEM file path
+// ---------------------------------------------------------------------------
+
+function readPrivateKeyHex(): string {
+  const hex = process.env.REMOTE_SIGNER_PRIVATE_KEY?.trim();
+  if (hex) return hex;
+  const filePath = process.env.REMOTE_SIGNER_PRIVATE_KEY_FILE?.trim();
+  if (!filePath) return "";
+  const resolved = path.resolve(filePath);
+  if (!fs.existsSync(resolved)) {
+    console.error(`Error: REMOTE_SIGNER_PRIVATE_KEY_FILE not found: ${resolved}`);
+    process.exit(1);
+  }
+  const pem = fs.readFileSync(resolved, "utf8");
+  try {
+    const key = crypto.createPrivateKey(pem);
+    const jwk = key.export({ format: "jwk" }) as { d?: string };
+    if (!jwk.d) {
+      console.error("Error: PEM file does not contain an Ed25519 private key (no 'd' in JWK)");
+      process.exit(1);
+    }
+    const bytes = Buffer.from(jwk.d, "base64url");
+    return bytes.toString("hex");
+  } catch (e) {
+    console.error("Error: failed to read private key from PEM file:", e);
+    process.exit(1);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Resolve TLS config from path env vars (optional)
+// ---------------------------------------------------------------------------
+
+function readTLSConfig(): { ca?: string; cert?: string; key?: string; rejectUnauthorized?: boolean } | undefined {
+  const caPath = process.env.REMOTE_SIGNER_CA_FILE?.trim();
+  const certPath = process.env.REMOTE_SIGNER_CLIENT_CERT_FILE?.trim();
+  const keyPath = process.env.REMOTE_SIGNER_CLIENT_KEY_FILE?.trim();
+  const skipVerify = process.env.REMOTE_SIGNER_TLS_INSECURE_SKIP_VERIFY;
+  const rejectUnauthorized = !(skipVerify === "1" || skipVerify === "true");
+
+  if (!caPath && !certPath && !keyPath && rejectUnauthorized) return undefined;
+
+  const tls: { ca?: string; cert?: string; key?: string; rejectUnauthorized?: boolean } = {
+    rejectUnauthorized,
+  };
+  if (caPath) {
+    const p = path.resolve(caPath);
+    if (!fs.existsSync(p)) {
+      console.error(`Error: REMOTE_SIGNER_CA_FILE not found: ${p}`);
+      process.exit(1);
+    }
+    tls.ca = fs.readFileSync(p, "utf8");
+  }
+  if (certPath) {
+    const p = path.resolve(certPath);
+    if (!fs.existsSync(p)) {
+      console.error(`Error: REMOTE_SIGNER_CLIENT_CERT_FILE not found: ${p}`);
+      process.exit(1);
+    }
+    tls.cert = fs.readFileSync(p, "utf8");
+  }
+  if (keyPath) {
+    const p = path.resolve(keyPath);
+    if (!fs.existsSync(p)) {
+      console.error(`Error: REMOTE_SIGNER_CLIENT_KEY_FILE not found: ${p}`);
+      process.exit(1);
+    }
+    tls.key = fs.readFileSync(p, "utf8");
+  }
+  return tls;
+}
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -27,18 +105,19 @@ import { RemoteSignerClient } from "@remote-signer/client";
 
 const BASE_URL = process.env.REMOTE_SIGNER_URL || "http://localhost:8548";
 const API_KEY_ID = process.env.REMOTE_SIGNER_API_KEY_ID || "";
-const PRIVATE_KEY = process.env.REMOTE_SIGNER_PRIVATE_KEY || "";
+const PRIVATE_KEY = readPrivateKeyHex();
 
 if (!API_KEY_ID || !PRIVATE_KEY) {
   console.error(
-    "Error: REMOTE_SIGNER_API_KEY_ID and REMOTE_SIGNER_PRIVATE_KEY environment variables are required."
+    "Error: API key and private key are required. Set either:"
   );
-  console.error("Set the following environment variables:");
-  console.error("  REMOTE_SIGNER_API_KEY_ID   – your API key ID");
-  console.error("  REMOTE_SIGNER_PRIVATE_KEY  – Ed25519 private key (hex)");
+  console.error("  REMOTE_SIGNER_API_KEY_ID + REMOTE_SIGNER_PRIVATE_KEY (hex), or");
+  console.error("  REMOTE_SIGNER_API_KEY_ID + REMOTE_SIGNER_PRIVATE_KEY_FILE (path to PEM)");
   console.error("See .mcp.json.example for a configuration template.");
   process.exit(1);
 }
+
+const tlsConfig = readTLSConfig();
 
 // ---------------------------------------------------------------------------
 // Client & Server instances
@@ -50,6 +129,7 @@ const client = new RemoteSignerClient({
   privateKey: PRIVATE_KEY,
   pollInterval: 2000,
   pollTimeout: 300000,
+  ...(tlsConfig && { httpClient: { tls: tlsConfig } }),
 });
 
 const server = new McpServer({
@@ -279,7 +359,11 @@ server.registerTool(
     title: "Sign Transaction",
     description:
       "Sign an EVM transaction (Legacy, EIP-2930, or EIP-1559). " +
-      "Returns the signed raw transaction hex.",
+      "Returns the signed raw transaction hex. " +
+      "Flow: if no matching whitelist rule exists and manual approval is enabled, " +
+      "the request enters 'authorizing' status. Set wait_for_approval=true to block " +
+      "until approved, or use evm_list_requests (status='authorizing') to find pending " +
+      "requests and evm_approve_request to approve them.",
     inputSchema: {
       chain_id: z.string().describe("Chain ID, e.g. '1' for Ethereum mainnet"),
       signer_address: z
@@ -289,13 +373,13 @@ server.registerTool(
         .string()
         .optional()
         .describe("Recipient address (0x-prefixed). Omit for contract creation."),
-      value: z.string().describe("Transaction value in wei (decimal string)"),
+      value: z.string().describe("Transaction value in wei. Accepts decimal ('1000000000') or hex ('0x3B9ACA00')"),
       data: z
         .string()
         .optional()
         .describe("Transaction calldata (0x-prefixed hex)"),
       gas: z.number().describe("Gas limit"),
-      nonce: z.number().optional().describe("Transaction nonce"),
+      nonce: z.number().optional().describe("Transaction nonce. Omit to auto-fetch from chain"),
       tx_type: z
         .enum(["legacy", "eip1559", "eip2930"])
         .default("legacy")
@@ -303,15 +387,15 @@ server.registerTool(
       gas_price: z
         .string()
         .optional()
-        .describe("Gas price in wei (for legacy / eip2930)"),
+        .describe("Gas price in wei (legacy/eip2930). Accepts decimal or hex, e.g. '30000000000' or '0x6FC23AC00'"),
       gas_tip_cap: z
         .string()
         .optional()
-        .describe("Max priority fee per gas in wei (for EIP-1559)"),
+        .describe("Max priority fee per gas in wei (EIP-1559). Accepts decimal or hex, e.g. '30000000000' or '0x6FC23AC00'"),
       gas_fee_cap: z
         .string()
         .optional()
-        .describe("Max fee per gas in wei (for EIP-1559)"),
+        .describe("Max fee per gas in wei (EIP-1559). Accepts decimal or hex, e.g. '150000000000' or '0x22ECB25C00'"),
       wait_for_approval: z.boolean().default(false).describe("Wait for manual approval if pending"),
     },
   },
@@ -377,7 +461,9 @@ server.registerTool(
   {
     title: "List Requests",
     description:
-      "List signing requests with optional filters for status, signer, and chain",
+      "List signing requests with optional filters for status, signer, and chain. " +
+      "Tip: use status='authorizing' to find requests pending manual approval, " +
+      "which is the most common filter for approval workflows.",
     inputSchema: {
       status: z
         .enum(["pending", "authorizing", "signing", "completed", "rejected", "failed"])
@@ -415,8 +501,10 @@ server.registerTool(
   {
     title: "Approve/Reject Request",
     description:
-      "Approve or reject a pending signing request (requires admin API key). " +
-      "Optionally generate a rule to auto-approve similar future requests.",
+      "Approve or reject a pending signing request. " +
+      "Authorization: requires an API key that owns the signer (signer owner model). " +
+      "The API key used to approve must have ownership or access grant for the signer " +
+      "address in the request. Optionally generate a rule to auto-approve similar future requests.",
     inputSchema: {
       request_id: z.string().describe("The signing request ID to approve/reject"),
       approved: z.boolean().describe("true to approve, false to reject"),
@@ -668,6 +756,631 @@ server.registerTool(
 );
 
 // ===========================================================================
+// Tool: evm_list_rule_budgets  –  GET /api/v1/evm/rules/{id}/budgets
+// ===========================================================================
+
+server.registerTool(
+  "evm_list_rule_budgets",
+  {
+    title: "List Rule Budgets",
+    description:
+      "List budget records for a rule (spent, limits, alerts). " +
+      "Requires admin API key.",
+    inputSchema: {
+      rule_id: z.string().describe("The rule ID"),
+    },
+  },
+  async ({ rule_id }) => {
+    try {
+      const budgets = await client.evm.rules.listBudgets(rule_id);
+      return ok({ rule_id, budgets });
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_toggle_rule  –  PATCH /api/v1/evm/rules/{id} (enabled)
+// ===========================================================================
+
+server.registerTool(
+  "evm_toggle_rule",
+  {
+    title: "Toggle Rule",
+    description: "Enable or disable a rule by ID (requires admin API key)",
+    inputSchema: {
+      rule_id: z.string().describe("The rule ID to toggle"),
+      enabled: z.boolean().describe("true to enable, false to disable"),
+    },
+  },
+  async ({ rule_id, enabled }) => {
+    try {
+      const response = await client.evm.rules.toggle(rule_id, enabled);
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_list_hd_wallets  –  GET /api/v1/evm/hd-wallets
+// ===========================================================================
+
+server.registerTool(
+  "evm_list_hd_wallets",
+  {
+    title: "List HD Wallets",
+    description: "List all HD wallets (primary addresses and derived counts)",
+    inputSchema: {},
+  },
+  async () => {
+    try {
+      const response = await client.evm.hdWallets.list();
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_create_hd_wallet  –  POST /api/v1/evm/hd-wallets (action=create)
+// ===========================================================================
+
+server.registerTool(
+  "evm_create_hd_wallet",
+  {
+    title: "Create HD Wallet",
+    description:
+      "Create a new HD wallet. Returns primary address and base path. " +
+      "WARNING: Using this tool through an LLM is very dangerous and may lead to private key or mnemonic leakage. Prefer creating HD wallets via CLI or trusted tools only.",
+    inputSchema: {
+      password: z.string().describe("Password to encrypt the wallet"),
+      entropy_bits: z
+        .number()
+        .optional()
+        .default(256)
+        .describe("Entropy bits for mnemonic (default 256)"),
+    },
+  },
+  async ({ password, entropy_bits }) => {
+    try {
+      const response = await client.evm.hdWallets.create({
+        password,
+        entropy_bits,
+      });
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_import_hd_wallet  –  POST /api/v1/evm/hd-wallets (action=import)
+// ===========================================================================
+
+server.registerTool(
+  "evm_import_hd_wallet",
+  {
+    title: "Import HD Wallet",
+    description:
+      "Import an HD wallet from a mnemonic phrase. " +
+      "WARNING: Using this tool through an LLM is very dangerous and may lead to private key or mnemonic leakage. Never paste mnemonics into LLM conversations. Prefer importing via CLI or trusted tools only.",
+    inputSchema: {
+      password: z.string().describe("Password to encrypt the wallet"),
+      mnemonic: z.string().describe("BIP-39 mnemonic phrase"),
+    },
+  },
+  async ({ password, mnemonic }) => {
+    try {
+      const response = await client.evm.hdWallets.import({
+        password,
+        mnemonic,
+      });
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_derive_address  –  POST /api/v1/evm/hd-wallets/{primary}/derive
+// ===========================================================================
+
+server.registerTool(
+  "evm_derive_address",
+  {
+    title: "Derive Address",
+    description:
+      "Derive one or more addresses from an HD wallet. " +
+      "Use index for a single address, or start+count for a range.",
+    inputSchema: {
+      primary_address: z
+        .string()
+        .describe("Primary (recovery) address of the HD wallet"),
+      index: z
+        .number()
+        .optional()
+        .describe("Derive a single address at this index"),
+      start: z.number().optional().describe("Start index (for range)"),
+      count: z.number().optional().describe("Number of addresses (for range)"),
+    },
+  },
+  async ({ primary_address, index, start, count }) => {
+    try {
+      const response = await client.evm.hdWallets.deriveAddress(primary_address, {
+        index,
+        start,
+        count,
+      });
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_list_derived_addresses  –  GET /api/v1/evm/hd-wallets/{primary}/derived
+// ===========================================================================
+
+server.registerTool(
+  "evm_list_derived_addresses",
+  {
+    title: "List Derived Addresses",
+    description: "List derived addresses for an HD wallet",
+    inputSchema: {
+      primary_address: z
+        .string()
+        .describe("Primary (recovery) address of the HD wallet"),
+    },
+  },
+  async ({ primary_address }) => {
+    try {
+      const response = await client.evm.hdWallets.listDerived(primary_address);
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: list_templates  –  GET /api/v1/templates
+// ===========================================================================
+
+server.registerTool(
+  "list_templates",
+  {
+    title: "List Templates",
+    description: "List rule templates with optional filters",
+    inputSchema: {
+      type: z.string().optional().describe("Filter by type"),
+      source: z.string().optional().describe("Filter by source"),
+      enabled: z.boolean().optional().describe("Filter by enabled"),
+      limit: z.number().optional().describe("Max results"),
+      offset: z.number().optional().describe("Offset for pagination"),
+    },
+  },
+  async ({ type, source, enabled, limit, offset }) => {
+    try {
+      const response = await client.templates.list({
+        type,
+        source,
+        enabled,
+        limit,
+        offset,
+      });
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: get_template  –  GET /api/v1/templates/{id}
+// ===========================================================================
+
+server.registerTool(
+  "get_template",
+  {
+    title: "Get Template",
+    description: "Get a template by ID",
+    inputSchema: {
+      template_id: z.string().describe("The template ID"),
+    },
+  },
+  async ({ template_id }) => {
+    try {
+      const response = await client.templates.get(template_id);
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: create_template  –  POST /api/v1/templates
+// ===========================================================================
+
+server.registerTool(
+  "create_template",
+  {
+    title: "Create Template",
+    description: "Create a new rule template (requires admin API key)",
+    inputSchema: {
+      name: z.string().describe("Template name"),
+      description: z.string().optional().describe("Template description"),
+      type: z.string().describe("Template type"),
+      mode: z.string().describe("Template mode (e.g. whitelist, blocklist)"),
+      config: z.record(z.any()).describe("Template config object"),
+      enabled: z.boolean().describe("Whether the template is enabled"),
+      variables: z
+        .array(
+          z.object({
+            name: z.string(),
+            type: z.string(),
+            description: z.string().optional(),
+            required: z.boolean(),
+            default: z.string().optional(),
+          })
+        )
+        .optional()
+        .describe("Template variables"),
+      budget_metering: z.record(z.any()).optional().describe("Budget metering config"),
+      test_variables: z.record(z.string()).optional().describe("Test variable values"),
+    },
+  },
+  async ({
+    name,
+    description,
+    type,
+    mode,
+    config,
+    enabled,
+    variables,
+    budget_metering,
+    test_variables,
+  }) => {
+    try {
+      const response = await client.templates.create({
+        name,
+        description,
+        type,
+        mode,
+        config,
+        enabled,
+        variables,
+        budget_metering,
+        test_variables,
+      } as any);
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: update_template  –  PATCH /api/v1/templates/{id}
+// ===========================================================================
+
+server.registerTool(
+  "update_template",
+  {
+    title: "Update Template",
+    description: "Update an existing template",
+    inputSchema: {
+      template_id: z.string().describe("The template ID to update"),
+      name: z.string().optional().describe("New name"),
+      description: z.string().optional().describe("New description"),
+      config: z.record(z.any()).optional().describe("New config"),
+      enabled: z.boolean().optional().describe("Enable/disable"),
+    },
+  },
+  async ({ template_id, name, description, config, enabled }) => {
+    try {
+      const response = await client.templates.update(template_id, {
+        name,
+        description,
+        config,
+        enabled,
+      });
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: delete_template  –  DELETE /api/v1/templates/{id}
+// ===========================================================================
+
+server.registerTool(
+  "delete_template",
+  {
+    title: "Delete Template",
+    description: "Delete a template by ID",
+    inputSchema: {
+      template_id: z.string().describe("The template ID to delete"),
+    },
+  },
+  async ({ template_id }) => {
+    try {
+      await client.templates.delete(template_id);
+      return ok({ success: true, message: `Template ${template_id} deleted` });
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: instantiate_template  –  POST /api/v1/templates/{id}/instantiate
+// ===========================================================================
+
+server.registerTool(
+  "instantiate_template",
+  {
+    title: "Instantiate Template",
+    description:
+      "Instantiate a template into a concrete rule (with variables and optional budget/schedule)",
+    inputSchema: {
+      template_id: z.string().describe("The template ID"),
+      variables: z.record(z.string()).describe("Variable values keyed by name"),
+      template_name: z.string().optional().describe("Override template name"),
+      name: z.string().optional().describe("Rule name"),
+      chain_type: z.string().optional().describe("Chain type (e.g. evm)"),
+      chain_id: z.string().optional().describe("Chain ID"),
+      api_key_id: z.string().optional().describe("Scope to API key"),
+      signer_address: z.string().optional().describe("Scope to signer"),
+      expires_at: z.string().optional().describe("Expiry (RFC3339)"),
+      expires_in: z.string().optional().describe("Expiry duration (e.g. 24h)"),
+      budget: z
+        .object({
+          max_total: z.string(),
+          max_per_tx: z.string(),
+          max_tx_count: z.number().optional(),
+          alert_pct: z.number().optional(),
+        })
+        .optional()
+        .describe("Budget config for the instance"),
+      schedule: z
+        .object({
+          period: z.string(),
+          start_at: z.string().optional(),
+        })
+        .optional()
+        .describe("Schedule config"),
+    },
+  },
+  async (args) => {
+    try {
+      const {
+        template_id,
+        variables,
+        template_name,
+        name,
+        chain_type,
+        chain_id,
+        api_key_id,
+        signer_address,
+        expires_at,
+        expires_in,
+        budget,
+        schedule,
+      } = args;
+      const response = await client.templates.instantiate(template_id, {
+        variables,
+        template_name,
+        name,
+        chain_type,
+        chain_id,
+        api_key_id,
+        signer_address,
+        expires_at,
+        expires_in,
+        budget,
+        schedule,
+      });
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: revoke_template_instance  –  DELETE /api/v1/templates/instances/{rule_id}
+// ===========================================================================
+
+server.registerTool(
+  "revoke_template_instance",
+  {
+    title: "Revoke Template Instance",
+    description: "Revoke (delete) a rule that was created from a template",
+    inputSchema: {
+      rule_id: z.string().describe("The rule ID (instance) to revoke"),
+    },
+  },
+  async ({ rule_id }) => {
+    try {
+      const response = await client.templates.revokeInstance(rule_id);
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_simulate_tx  –  POST /api/v1/evm/simulate
+// ===========================================================================
+
+server.registerTool(
+  "evm_simulate_tx",
+  {
+    title: "Simulate EVM Transaction",
+    description:
+      "Simulate a single EVM transaction using eth_simulateV1. " +
+      "Returns success/revert status, gas used, balance changes, and events.",
+    inputSchema: {
+      chain_id: z.string().describe("Chain ID (decimal, e.g. '137' for Polygon)"),
+      from: z.string().describe("Sender address (0x-prefixed, 42 chars)"),
+      to: z.string().describe("Recipient address (0x-prefixed, 42 chars)"),
+      value: z.string().optional().describe("Transaction value in wei. Accepts decimal or hex (e.g. '0x0')"),
+      data: z.string().optional().describe("Transaction calldata (0x-prefixed hex)"),
+      gas: z.string().optional().describe("Gas limit. Accepts decimal or hex"),
+    },
+  },
+  async ({ chain_id, from, to, value, data, gas }) => {
+    try {
+      const response = await client.evm.simulate.simulate({
+        chain_id,
+        from,
+        to,
+        value,
+        data,
+        gas,
+      });
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_simulate_batch  –  POST /api/v1/evm/simulate/batch
+// ===========================================================================
+
+server.registerTool(
+  "evm_simulate_batch",
+  {
+    title: "Simulate Batch EVM Transactions",
+    description:
+      "Simulate multiple EVM transactions in sequence. " +
+      "Returns per-tx results and net balance changes.",
+    inputSchema: {
+      chain_id: z.string().describe("Chain ID (decimal, e.g. '137' for Polygon)"),
+      from: z.string().describe("Sender address (0x-prefixed, 42 chars)"),
+      transactions: z
+        .array(
+          z.object({
+            to: z.string().describe("Recipient address (0x-prefixed, 42 chars)"),
+            value: z.string().optional().describe("Value in wei. Accepts decimal or hex"),
+            data: z.string().optional().describe("Calldata (0x-prefixed hex)"),
+            gas: z.string().optional().describe("Gas limit. Accepts decimal or hex"),
+          })
+        )
+        .describe("Array of transactions to simulate in sequence"),
+    },
+  },
+  async ({ chain_id, from, transactions }) => {
+    try {
+      const response = await client.evm.simulate.simulateBatch({
+        chain_id,
+        from,
+        transactions,
+      });
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_broadcast_tx  –  POST /api/v1/evm/broadcast
+// ===========================================================================
+
+server.registerTool(
+  "evm_broadcast_tx",
+  {
+    title: "Broadcast Signed Transaction",
+    description:
+      "Broadcast a signed EVM transaction to the network. Returns tx hash.",
+    inputSchema: {
+      chain_id: z.string().describe("Chain ID, e.g. '1' for Ethereum mainnet"),
+      signed_tx: z
+        .string()
+        .describe("Hex-encoded signed transaction (0x-prefixed)"),
+    },
+  },
+  async ({ chain_id, signed_tx }) => {
+    try {
+      // The JS client does not yet have a broadcast method; call the API directly.
+      const url = `${BASE_URL}/api/v1/evm/broadcast`;
+      const body = JSON.stringify({ chain_id, signed_tx });
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      });
+      if (!resp.ok) {
+        const text = await resp.text();
+        return err(new Error(`broadcast failed (${resp.status}): ${text}`));
+      }
+      const data = await resp.json();
+      return ok(data);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_guard_resume  –  POST /api/v1/evm/guard/resume
+// ===========================================================================
+
+server.registerTool(
+  "evm_guard_resume",
+  {
+    title: "Resume Approval Guard",
+    description:
+      "Resume the approval guard after it has been tripped. " +
+      "Unpauses signing operations.",
+    inputSchema: {},
+  },
+  async () => {
+    try {
+      await client.evm.guard.resume();
+      return ok({ success: true, message: "Guard resumed" });
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: get_metrics  –  GET /metrics (no auth)
+// ===========================================================================
+
+server.registerTool(
+  "get_metrics",
+  {
+    title: "Get Metrics",
+    description: "Prometheus metrics from the remote-signer service (no auth)",
+    inputSchema: {},
+  },
+  async () => {
+    try {
+      const metrics = await client.metrics();
+      return ok({ metrics });
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
 // Tool: list_audit_logs  –  GET /api/v1/audit
 // ===========================================================================
 
@@ -718,6 +1431,496 @@ server.registerTool(
         end_time,
         limit,
       });
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_unlock_signer  –  POST /api/v1/evm/signers/{address}/unlock
+// ===========================================================================
+
+server.registerTool(
+  "evm_unlock_signer",
+  {
+    title: "Unlock EVM Signer",
+    description:
+      "Unlock a locked signer with its password (admin only). " +
+      "The signer must be in locked state.",
+    inputSchema: {
+      address: z.string().describe("Signer Ethereum address (0x-prefixed)"),
+      password: z.string().describe("Password to decrypt the keystore"),
+    },
+  },
+  async ({ address, password }) => {
+    try {
+      const response = await client.evm.signers.unlock(address, { password });
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_lock_signer  –  POST /api/v1/evm/signers/{address}/lock
+// ===========================================================================
+
+server.registerTool(
+  "evm_lock_signer",
+  {
+    title: "Lock EVM Signer",
+    description:
+      "Lock an unlocked signer (admin only). Locked signers cannot sign requests.",
+    inputSchema: {
+      address: z.string().describe("Signer Ethereum address (0x-prefixed)"),
+    },
+  },
+  async ({ address }) => {
+    try {
+      const response = await client.evm.signers.lock(address);
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_approve_signer  –  POST /api/v1/evm/signers/{address}/approve
+// ===========================================================================
+
+server.registerTool(
+  "evm_approve_signer",
+  {
+    title: "Approve Pending EVM Signer",
+    description:
+      "Approve a signer that is in pending_approval state (admin only).",
+    inputSchema: {
+      address: z.string().describe("Signer Ethereum address (0x-prefixed)"),
+    },
+  },
+  async ({ address }) => {
+    try {
+      await client.evm.signers.approveSigner(address);
+      return ok({ status: "approved", address });
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_grant_signer_access  –  POST /api/v1/evm/signers/{address}/access
+// ===========================================================================
+
+server.registerTool(
+  "evm_grant_signer_access",
+  {
+    title: "Grant Signer Access",
+    description:
+      "Grant another API key access to use a signer (owner only).",
+    inputSchema: {
+      address: z.string().describe("Signer Ethereum address (0x-prefixed)"),
+      api_key_id: z.string().describe("API key ID to grant access to"),
+    },
+  },
+  async ({ address, api_key_id }) => {
+    try {
+      await client.evm.signers.grantAccess(address, { api_key_id });
+      return ok({ status: "granted", address, api_key_id });
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_revoke_signer_access  –  DELETE /api/v1/evm/signers/{address}/access/{id}
+// ===========================================================================
+
+server.registerTool(
+  "evm_revoke_signer_access",
+  {
+    title: "Revoke Signer Access",
+    description:
+      "Revoke an API key's access to a signer (owner only).",
+    inputSchema: {
+      address: z.string().describe("Signer Ethereum address (0x-prefixed)"),
+      api_key_id: z.string().describe("API key ID to revoke access from"),
+    },
+  },
+  async ({ address, api_key_id }) => {
+    try {
+      await client.evm.signers.revokeAccess(address, api_key_id);
+      return ok({ status: "revoked", address, api_key_id });
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_list_signer_access  –  GET /api/v1/evm/signers/{address}/access
+// ===========================================================================
+
+server.registerTool(
+  "evm_list_signer_access",
+  {
+    title: "List Signer Access Grants",
+    description:
+      "List all API keys that have access to a signer (owner only).",
+    inputSchema: {
+      address: z.string().describe("Signer Ethereum address (0x-prefixed)"),
+    },
+  },
+  async ({ address }) => {
+    try {
+      const entries = await client.evm.signers.listAccess(address);
+      return ok({ address, access: entries });
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_transfer_signer_ownership  –  POST /api/v1/evm/signers/{address}/transfer
+// ===========================================================================
+
+server.registerTool(
+  "evm_transfer_signer_ownership",
+  {
+    title: "Transfer Signer Ownership",
+    description:
+      "Transfer signer ownership to another API key (owner only). " +
+      "WARNING: This clears the entire access list — old owner loses ALL access.",
+    inputSchema: {
+      address: z.string().describe("Signer Ethereum address (0x-prefixed)"),
+      new_owner_id: z.string().describe("API key ID of the new owner"),
+    },
+  },
+  async ({ address, new_owner_id }) => {
+    try {
+      await client.evm.signers.transferOwnership(address, { new_owner_id });
+      return ok({ status: "transferred", address, new_owner_id });
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_delete_signer  –  DELETE /api/v1/evm/signers/{address}
+// ===========================================================================
+
+server.registerTool(
+  "evm_delete_signer",
+  {
+    title: "Delete EVM Signer",
+    description:
+      "Delete a signer's ownership and access records (owner only). " +
+      "WARNING: This is irreversible — the signer will no longer be usable.",
+    inputSchema: {
+      address: z.string().describe("Signer Ethereum address (0x-prefixed)"),
+    },
+  },
+  async ({ address }) => {
+    try {
+      await client.evm.signers.deleteSigner(address);
+      return ok({ status: "deleted", address });
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_approve_rule  –  POST /api/v1/evm/rules/{id}/approve
+// ===========================================================================
+
+server.registerTool(
+  "evm_approve_rule",
+  {
+    title: "Approve Pending Rule",
+    description:
+      "Approve a rule that is in pending state (admin only).",
+    inputSchema: {
+      rule_id: z.string().describe("Rule ID to approve"),
+    },
+  },
+  async ({ rule_id }) => {
+    try {
+      const rule = await client.evm.rules.approve(rule_id);
+      return ok(rule);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_reject_rule  –  POST /api/v1/evm/rules/{id}/reject
+// ===========================================================================
+
+server.registerTool(
+  "evm_reject_rule",
+  {
+    title: "Reject Pending Rule",
+    description:
+      "Reject a rule that is in pending state (admin only).",
+    inputSchema: {
+      rule_id: z.string().describe("Rule ID to reject"),
+      reason: z.string().describe("Reason for rejecting the rule"),
+    },
+  },
+  async ({ rule_id, reason }) => {
+    try {
+      const rule = await client.evm.rules.reject(rule_id, reason);
+      return ok(rule);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: list_api_keys  –  GET /api/v1/api-keys
+// ===========================================================================
+
+server.registerTool(
+  "list_api_keys",
+  {
+    title: "List API Keys",
+    description:
+      "List API keys with optional filters (admin only).",
+    inputSchema: {
+      source: z.string().optional().describe("Filter by source"),
+      enabled: z.boolean().optional().describe("Filter by enabled state"),
+      limit: z.number().optional().default(50).describe("Max results (default 50)"),
+      offset: z.number().optional().default(0).describe("Pagination offset"),
+    },
+  },
+  async ({ source, enabled, limit, offset }) => {
+    try {
+      const response = await client.apiKeys.list({ source, enabled, limit, offset });
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: get_api_key  –  GET /api/v1/api-keys/{id}
+// ===========================================================================
+
+server.registerTool(
+  "get_api_key",
+  {
+    title: "Get API Key",
+    description:
+      "Get an API key by ID (admin only).",
+    inputSchema: {
+      id: z.string().describe("API key ID"),
+    },
+  },
+  async ({ id }) => {
+    try {
+      const key = await client.apiKeys.get(id);
+      return ok(key);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: create_api_key  –  POST /api/v1/api-keys
+// ===========================================================================
+
+server.registerTool(
+  "create_api_key",
+  {
+    title: "Create API Key",
+    description:
+      "Create a new API key (admin only). Roles: admin, dev, agent, strategy.",
+    inputSchema: {
+      id: z.string().describe("Unique API key ID"),
+      name: z.string().describe("Human-readable name"),
+      public_key: z.string().describe("Ed25519 public key (hex)"),
+      role: z
+        .enum(["admin", "dev", "agent", "strategy"])
+        .describe("Role for the API key"),
+      rate_limit: z.number().optional().describe("Rate limit (requests/minute)"),
+    },
+  },
+  async ({ id, name, public_key, role, rate_limit }) => {
+    try {
+      const key = await client.apiKeys.create({ id, name, public_key, role, rate_limit });
+      return ok(key);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: update_api_key  –  PUT /api/v1/api-keys/{id}
+// ===========================================================================
+
+server.registerTool(
+  "update_api_key",
+  {
+    title: "Update API Key",
+    description:
+      "Update an API key's properties (admin only).",
+    inputSchema: {
+      id: z.string().describe("API key ID to update"),
+      name: z.string().optional().describe("New name"),
+      enabled: z.boolean().optional().describe("Enable/disable the key"),
+      role: z
+        .enum(["admin", "dev", "agent", "strategy"])
+        .optional()
+        .describe("New role"),
+      rate_limit: z.number().optional().describe("New rate limit"),
+    },
+  },
+  async ({ id, name, enabled, role, rate_limit }) => {
+    try {
+      const key = await client.apiKeys.update(id, { name, enabled, role, rate_limit });
+      return ok(key);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: delete_api_key  –  DELETE /api/v1/api-keys/{id}
+// ===========================================================================
+
+server.registerTool(
+  "delete_api_key",
+  {
+    title: "Delete API Key",
+    description:
+      "Delete an API key (admin only). WARNING: This is irreversible.",
+    inputSchema: {
+      id: z.string().describe("API key ID to delete"),
+    },
+  },
+  async ({ id }) => {
+    try {
+      await client.apiKeys.delete(id);
+      return ok({ status: "deleted", id });
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: get_ip_whitelist  –  GET /api/v1/acls/ip-whitelist
+// ===========================================================================
+
+server.registerTool(
+  "get_ip_whitelist",
+  {
+    title: "Get IP Whitelist",
+    description:
+      "Get the IP whitelist configuration (admin only). " +
+      "Shows whether IP filtering is enabled, allowed IPs, and proxy trust settings.",
+    inputSchema: {},
+  },
+  async () => {
+    try {
+      const response = await client.acls.getIPWhitelist();
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: list_presets  –  GET /api/v1/presets
+// ===========================================================================
+
+server.registerTool(
+  "list_presets",
+  {
+    title: "List Presets",
+    description:
+      "List all available rule presets (admin only). " +
+      "Presets are pre-configured rule template bundles that can be applied with variables.",
+    inputSchema: {},
+  },
+  async () => {
+    try {
+      const response = await client.presets.list();
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: get_preset  –  GET /api/v1/presets/{id}
+// ===========================================================================
+
+server.registerTool(
+  "get_preset",
+  {
+    title: "Get Preset Detail",
+    description:
+      "Get the full detail of a preset (admin only): name, chain, " +
+      "referenced templates, and each override variable resolved against " +
+      "the template's declared type, description, and default. " +
+      "Replaces the v0.2 `get_preset_vars` tool.",
+    inputSchema: {
+      id: z.string().describe("Preset ID"),
+    },
+  },
+  async ({ id }) => {
+    try {
+      const response = await client.presets.get(id);
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: apply_preset  –  POST /api/v1/presets/{id}/apply
+// ===========================================================================
+
+server.registerTool(
+  "apply_preset",
+  {
+    title: "Apply Preset",
+    description:
+      "Apply a rule preset to create rule/template instances (admin only). " +
+      "Variables override template defaults. applied_to restricts which templates are instantiated.",
+    inputSchema: {
+      id: z.string().describe("Preset ID to apply"),
+      variables: z
+        .record(z.string())
+        .optional()
+        .describe("Variable overrides (key-value pairs)"),
+      applied_to: z
+        .array(z.string())
+        .optional()
+        .describe("Restrict to specific template names within the preset"),
+    },
+  },
+  async ({ id, variables, applied_to }) => {
+    try {
+      const response = await client.presets.apply(id, { variables, applied_to });
       return ok(response);
     } catch (error) {
       return err(error);

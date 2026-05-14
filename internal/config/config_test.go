@@ -332,41 +332,66 @@ func TestValidate_MTLSWithNonExistentCAFile(t *testing.T) {
 	assert.Contains(t, err.Error(), "TLS ca_file not found")
 }
 
-func TestValidate_DuplicateAPIKeyIDs(t *testing.T) {
+// API-key validation tests (TestValidate_*APIKey*, TestValidate_*Role) lived
+// here to cover the cfg.APIKeys field. v0.3.0 retires that field; presence of
+// api_keys in config.yaml is now a fatal load error (see
+// TestValidate_RejectsLegacyAPIKeysField). Per-key validation moved to the
+// admin API surface where it is enforced on POST /api/v1/api-keys.
+
+func TestValidate_RejectsLegacyAPIKeysField(t *testing.T) {
 	cfg := validConfig()
 	cfg.APIKeys = []APIKeyConfig{
-		{ID: "key1", Enabled: false},
-		{ID: "key1", Enabled: false},
+		{ID: "legacy", Enabled: true, Role: "admin", PublicKey: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 	}
 	err := validate(cfg)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "duplicate id")
+	assert.Contains(t, err.Error(), "api_keys")
+	assert.Contains(t, err.Error(), "no longer supported")
 }
 
-func TestValidate_APIKeyWithoutID(t *testing.T) {
+func TestValidate_RejectsLegacyTemplatesField(t *testing.T) {
 	cfg := validConfig()
-	cfg.APIKeys = []APIKeyConfig{
-		{ID: "", Enabled: true},
+	cfg.Templates = []TemplateConfig{{Name: "legacy"}}
+	err := validate(cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "templates")
+	assert.Contains(t, err.Error(), "no longer supported")
+}
+
+func TestValidate_RejectsLegacyRulesField(t *testing.T) {
+	cfg := validConfig()
+	cfg.Rules = []RuleConfig{{Name: "legacy", Type: "evm_address_list", Mode: "whitelist", Enabled: true}}
+	err := validate(cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "rules")
+	assert.Contains(t, err.Error(), "no longer supported")
+}
+
+func TestValidate_SimulationEnabledWithoutBudgetDefaults(t *testing.T) {
+	cfg := validConfig()
+	cfg.Chains.EVM.Simulation = SimulationConfig{
+		Enabled: true,
+		// All budget fields empty (zero values)
 	}
 	err := validate(cfg)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "id is required")
+	assert.Contains(t, err.Error(), "simulation is enabled but no budget defaults configured")
 }
 
-func TestValidate_EnabledAPIKeyWithoutPublicKey(t *testing.T) {
+func TestValidate_SimulationEnabledWithBudgetDefaults(t *testing.T) {
 	cfg := validConfig()
-	cfg.APIKeys = []APIKeyConfig{
-		{ID: "key1", Enabled: true},
+	cfg.Chains.EVM.Simulation = SimulationConfig{
+		Enabled:            true,
+		BudgetNativeMaxTotal: "0.01",
 	}
 	err := validate(cfg)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "public_key or public_key_env is required")
+	assert.NoError(t, err)
 }
 
-func TestValidate_DisabledAPIKeyWithoutPublicKey(t *testing.T) {
+func TestValidate_SimulationDisabledWithoutBudgetDefaults(t *testing.T) {
 	cfg := validConfig()
-	cfg.APIKeys = []APIKeyConfig{
-		{ID: "key1", Enabled: false},
+	cfg.Chains.EVM.Simulation = SimulationConfig{
+		Enabled: false,
 	}
 	err := validate(cfg)
 	assert.NoError(t, err)
@@ -407,18 +432,25 @@ func TestSetDefaults_EmptyLoggerLevel(t *testing.T) {
 	assert.Equal(t, "info", cfg.Logger.Level)
 }
 
-func TestSetDefaults_ApprovalGuardEnabledZeroThreshold(t *testing.T) {
+func TestSetDefaults_ApprovalGuardEnabledZeroRejectionThreshold(t *testing.T) {
 	cfg := &Config{}
 	cfg.Security.ApprovalGuard.Enabled = true
 	setDefaults(cfg)
-	assert.Equal(t, 10, cfg.Security.ApprovalGuard.Threshold)
+	assert.Equal(t, float64(50), cfg.Security.ApprovalGuard.RejectionThresholdPct)
+}
+
+func TestSetDefaults_ApprovalGuardEnabledZeroMinSamples(t *testing.T) {
+	cfg := &Config{}
+	cfg.Security.ApprovalGuard.Enabled = true
+	setDefaults(cfg)
+	assert.Equal(t, 10, cfg.Security.ApprovalGuard.MinSamples)
 }
 
 func TestSetDefaults_ApprovalGuardEnabledZeroWindow(t *testing.T) {
 	cfg := &Config{}
 	cfg.Security.ApprovalGuard.Enabled = true
 	setDefaults(cfg)
-	assert.Equal(t, 5*time.Minute, cfg.Security.ApprovalGuard.Window)
+	assert.Equal(t, 1*time.Hour, cfg.Security.ApprovalGuard.Window)
 }
 
 func TestSetDefaults_ApprovalGuardEnabledZeroResume(t *testing.T) {
@@ -450,6 +482,23 @@ func TestSetDefaults_PreservesExistingValues(t *testing.T) {
 func TestSecurityConfig_IsSIGHUPRulesReloadEnabled_DefaultFalse(t *testing.T) {
 	var s SecurityConfig
 	assert.False(t, s.IsSIGHUPRulesReloadEnabled())
+}
+
+func TestSecurityConfig_IsRequireApprovalForAgentRules_DefaultTrue(t *testing.T) {
+	var s SecurityConfig
+	assert.True(t, s.IsRequireApprovalForAgentRules(), "default should be true (secure by default)")
+}
+
+func TestSecurityConfig_IsRequireApprovalForAgentRules_ExplicitFalse(t *testing.T) {
+	val := false
+	s := SecurityConfig{RequireApprovalForAgentRules: &val}
+	assert.False(t, s.IsRequireApprovalForAgentRules())
+}
+
+func TestSecurityConfig_IsRequireApprovalForAgentRules_ExplicitTrue(t *testing.T) {
+	val := true
+	s := SecurityConfig{RequireApprovalForAgentRules: &val}
+	assert.True(t, s.IsRequireApprovalForAgentRules())
 }
 
 // ---------------------------------------------------------------------------

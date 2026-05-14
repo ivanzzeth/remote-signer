@@ -461,8 +461,6 @@ func TestRuleScopeMatches(t *testing.T) {
 	solana := types.ChainTypeSolana
 	chain1 := "1"
 	chain137 := "137"
-	key1 := "key-1"
-	key2 := "key-2"
 	signer1 := "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 	signer2 := "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
 
@@ -483,12 +481,10 @@ func TestRuleScopeMatches(t *testing.T) {
 		{"mismatch chain type", &types.Rule{ChainType: &solana}, false},
 		{"match chain ID", &types.Rule{ChainID: &chain1}, true},
 		{"mismatch chain ID", &types.Rule{ChainID: &chain137}, false},
-		{"match API key", &types.Rule{APIKeyID: &key1}, true},
-		{"mismatch API key", &types.Rule{APIKeyID: &key2}, false},
 		{"match signer", &types.Rule{SignerAddress: &signer1}, true},
 		{"mismatch signer", &types.Rule{SignerAddress: &signer2}, false},
 		{"case-insensitive signer match", &types.Rule{SignerAddress: strPtr("0xF39FD6E51AAD88F6F4CE6AB8827279CFFFB92266")}, true},
-		{"all fields match", &types.Rule{ChainType: &evm, ChainID: &chain1, APIKeyID: &key1, SignerAddress: &signer1}, true},
+		{"all fields match", &types.Rule{ChainType: &evm, ChainID: &chain1, SignerAddress: &signer1}, true},
 	}
 
 	for _, tc := range tests {

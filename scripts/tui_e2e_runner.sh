@@ -48,7 +48,7 @@ chains:
       enabled: false
 api_keys:
   - id: admin
-    admin: true
+    role: admin
     enabled: true
     public_key: "$ADMIN_PUBLIC_HEX"
 security:
@@ -64,10 +64,10 @@ templates: []
 EOF
 
 # Start server in background
-go run ./cmd/remote-signer -config "$CONFIG" &
+go run ./cmd/remote-signer server start -config "$CONFIG" &
 SRV_PID=$!
 trap "kill $SRV_PID 2>/dev/null || true" EXIT
 sleep 3
 
 # Run TUI (foreground)
-exec go run ./cmd/tui -api-key-id admin -api-key-file "$DATA_DIR/admin_private.pem" -url "http://localhost:$PORT"
+exec go run ./cmd/remote-signer tui -api-key-id admin -api-key-file "$DATA_DIR/admin_private.pem" -url "http://localhost:$PORT"

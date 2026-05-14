@@ -137,6 +137,46 @@ func (r *mockTemplateRepo) Count(_ context.Context, filter storage.TemplateFilte
 	return count, nil
 }
 
+func (r *mockTemplateRepo) Upsert(_ context.Context, tmpl *types.RuleTemplate) (bool, error) {
+	if tmpl == nil {
+		return false, fmt.Errorf("template cannot be nil")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if existing, ok := r.templates[tmpl.ID]; ok {
+		if existing.ContentHash != "" && existing.ContentHash == tmpl.ContentHash {
+			return false, nil
+		}
+		clone := *tmpl
+		r.templates[tmpl.ID] = &clone
+		return true, nil
+	}
+	clone := *tmpl
+	r.templates[tmpl.ID] = &clone
+	return true, nil
+}
+
+func (r *mockTemplateRepo) ListIDsBySource(_ context.Context, source types.RuleSource) ([]string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var ids []string
+	for id, t := range r.templates {
+		if t.Source == source {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+
+func (r *mockTemplateRepo) DeleteMany(_ context.Context, ids []string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, id := range ids {
+		delete(r.templates, id)
+	}
+	return nil
+}
+
 type mockRuleRepo struct {
 	mu    sync.RWMutex
 	rules map[types.RuleID]*types.Rule
@@ -314,8 +354,45 @@ func (r *mockBudgetRepo) ListByRuleIDs(_ context.Context, ruleIDs []types.RuleID
 	return out, nil
 }
 
+func (r *mockBudgetRepo) ListAll(_ context.Context) ([]*types.RuleBudget, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]*types.RuleBudget, 0, len(r.budgets))
+	for _, b := range r.budgets {
+		cp := *b
+		out = append(out, &cp)
+	}
+	return out, nil
+}
+func (r *mockBudgetRepo) Get(_ context.Context, id string) (*types.RuleBudget, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if b, ok := r.budgets[id]; ok {
+		cp := *b
+		return &cp, nil
+	}
+	return nil, types.ErrNotFound
+}
+func (r *mockBudgetRepo) Update(_ context.Context, budget *types.RuleBudget) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.budgets[budget.ID]; !ok {
+		return types.ErrNotFound
+	}
+	cp := *budget
+	r.budgets[budget.ID] = &cp
+	return nil
+}
+
 func (r *mockBudgetRepo) MarkAlertSent(_ context.Context, _ types.RuleID, _ string) error {
 	return nil
+}
+
+func (r *mockBudgetRepo) CountByRuleID(_ context.Context, _ types.RuleID) (int, error) {
+	return 0, nil
+}
+func (r *mockBudgetRepo) CreateOrGet(_ context.Context, budget *types.RuleBudget) (*types.RuleBudget, bool, error) {
+	return budget, true, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -340,7 +417,7 @@ func testAPIKey() *types.APIKey {
 		ID:      "test-key-001",
 		Name:    "Test Key",
 		Enabled: true,
-		Admin:   true,
+		Role:    types.RoleAdmin,
 	}
 }
 
@@ -1634,8 +1711,9 @@ func TestInstantiateTemplate(t *testing.T) {
 		if rule.ChainID == nil || *rule.ChainID != "1" {
 			t.Errorf("expected ChainID '1', got %v", rule.ChainID)
 		}
-		if rule.APIKeyID == nil || *rule.APIKeyID != "key-123" {
-			t.Errorf("expected APIKeyID 'key-123', got %v", rule.APIKeyID)
+		// RBAC: owner is the authenticated caller, not the request body api_key_id
+		if rule.Owner != "test-key-001" {
+			t.Errorf("expected Owner 'test-key-001' (from API key context), got %v", rule.Owner)
 		}
 		if rule.SignerAddress == nil || *rule.SignerAddress != signerAddr {
 			t.Errorf("expected SignerAddress %q, got %v", signerAddr, rule.SignerAddress)
@@ -1659,8 +1737,8 @@ func TestInstantiateTemplate(t *testing.T) {
 			t.Errorf("expected status %d, got %d", http.StatusBadRequest, rr.Code)
 		}
 		errResp := decodeErrorResponse(t, rr)
-		if !strings.Contains(errResp.Error, "failed to create instance") {
-			t.Errorf("expected error about failed instance creation, got %q", errResp.Error)
+		if !strings.Contains(errResp.Error, "failed to resolve template") && !strings.Contains(errResp.Error, "failed to create instance") {
+			t.Errorf("expected error about template resolution or instance creation, got %q", errResp.Error)
 		}
 	})
 
@@ -1803,7 +1881,7 @@ func TestRevokeInstance(t *testing.T) {
 
 		// Seed a budget
 		budget := &types.RuleBudget{
-			ID:       "bdg_inst_revoke_1_eth",
+			ID:       types.BudgetID(ruleID, "eth"),
 			RuleID:   ruleID,
 			Unit:     "eth",
 			MaxTotal: "100",

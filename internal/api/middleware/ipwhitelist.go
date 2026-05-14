@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/ivanzzeth/remote-signer/internal/config"
 )
@@ -20,6 +21,7 @@ type IPWhitelist struct {
 	trustedProxies map[string]struct{} // exact trusted proxy IP matches
 	trustedProxyCIDRs []*net.IPNet     // trusted proxy CIDR ranges
 	logger         *slog.Logger
+	alertService   *SecurityAlertService
 }
 
 // NewIPWhitelist creates a new IP whitelist from configuration
@@ -105,6 +107,11 @@ func NewIPWhitelist(cfg config.IPWhitelistConfig, logger *slog.Logger) (*IPWhite
 	)
 
 	return w, nil
+}
+
+// SetAlertService sets the security alert service for real-time notifications.
+func (w *IPWhitelist) SetAlertService(alertService *SecurityAlertService) {
+	w.alertService = alertService
 }
 
 // IsAllowed checks if an IP address is in the whitelist
@@ -220,6 +227,11 @@ func IPWhitelistMiddleware(whitelist *IPWhitelist) func(http.Handler) http.Handl
 					"path", r.URL.Path,
 					"method", r.Method,
 				)
+				if whitelist.alertService != nil {
+					whitelist.alertService.Alert(AlertIPBlocked, clientIP,
+						fmt.Sprintf("[Remote Signer] IP BLOCKED\n\nIP: %s\nRemote: %s\nPath: %s %s\nTime: %s",
+							clientIP, r.RemoteAddr, r.Method, r.URL.Path, time.Now().UTC().Format(time.RFC3339)))
+				}
 				http.Error(w, "forbidden", http.StatusForbidden)
 				return
 			}

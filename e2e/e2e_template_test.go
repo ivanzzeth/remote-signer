@@ -16,6 +16,7 @@ import (
 )
 
 func TestTemplate_AdminCanCreateTemplate(t *testing.T) {
+	ensureGuardResumed(t)
 	ctx := context.Background()
 
 	req := &templates.CreateRequest{
@@ -57,9 +58,10 @@ func TestTemplate_AdminCanCreateTemplate(t *testing.T) {
 // config.e2e.yaml defines one file template (Minimal Template) and one instance
 // rule; the expanded rule "From Template Instance" must appear in the rules list.
 func TestTemplate_ConfigLoadedTemplatesAndInstanceRules(t *testing.T) {
+	ensureGuardResumed(t)
 	ctx := context.Background()
 
-	resp, err := adminClient.EVM.Rules.List(ctx, nil)
+	resp, err := adminClient.EVM.Rules.List(ctx, &evm.ListRulesFilter{Limit: 1000})
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
@@ -76,6 +78,7 @@ func TestTemplate_ConfigLoadedTemplatesAndInstanceRules(t *testing.T) {
 }
 
 func TestTemplate_AdminCanListTemplates(t *testing.T) {
+	ensureGuardResumed(t)
 	ctx := context.Background()
 
 	// Get initial count
@@ -106,6 +109,7 @@ func TestTemplate_AdminCanListTemplates(t *testing.T) {
 }
 
 func TestTemplate_AdminCanGetTemplate(t *testing.T) {
+	ensureGuardResumed(t)
 	ctx := context.Background()
 
 	// Create a template
@@ -137,6 +141,7 @@ func TestTemplate_AdminCanGetTemplate(t *testing.T) {
 }
 
 func TestTemplate_AdminCanUpdateTemplate(t *testing.T) {
+	ensureGuardResumed(t)
 	ctx := context.Background()
 
 	// Create a template
@@ -169,6 +174,7 @@ func TestTemplate_AdminCanUpdateTemplate(t *testing.T) {
 }
 
 func TestTemplate_AdminCanDeleteTemplate(t *testing.T) {
+	ensureGuardResumed(t)
 	ctx := context.Background()
 
 	// Create a template
@@ -193,6 +199,7 @@ func TestTemplate_AdminCanDeleteTemplate(t *testing.T) {
 }
 
 func TestTemplate_AdminCanInstantiateTemplate(t *testing.T) {
+	ensureGuardResumed(t)
 	ctx := context.Background()
 
 	// Create a template with a variable
@@ -239,6 +246,7 @@ func TestTemplate_AdminCanInstantiateTemplate(t *testing.T) {
 // can be created and that one matching sign request succeeds (budget is deducted).
 // Full budget-exhaustion behavior is covered by unit tests (whitelist + BudgetChecker).
 func TestTemplate_InstanceWithBudget_CreateAndSign(t *testing.T) {
+	ensureGuardResumed(t)
 	ctx := context.Background()
 
 	createReq := &templates.CreateRequest{
@@ -299,6 +307,7 @@ func TestTemplate_InstanceWithBudget_CreateAndSign(t *testing.T) {
 }
 
 func TestTemplate_AdminCanRevokeInstance(t *testing.T) {
+	ensureGuardResumed(t)
 	ctx := context.Background()
 
 	// Create a template with a variable
@@ -356,6 +365,7 @@ func TestTemplate_AdminCanRevokeInstance(t *testing.T) {
 }
 
 func TestTemplate_NonAdminCannotCreateTemplate(t *testing.T) {
+	ensureGuardResumed(t)
 	if nonAdminClient == nil {
 		t.Skip("Skipping: non-admin client not configured")
 	}
@@ -379,6 +389,7 @@ func TestTemplate_NonAdminCannotCreateTemplate(t *testing.T) {
 }
 
 func TestTemplate_NonAdminCannotListTemplates(t *testing.T) {
+	ensureGuardResumed(t)
 	if nonAdminClient == nil {
 		t.Skip("Skipping: non-admin client not configured")
 	}

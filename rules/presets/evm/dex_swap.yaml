@@ -1,0 +1,14 @@
+# Preset: DEX Swap V2 method whitelist (evm_js). Validates Uniswap V2 router address + swap method selectors.
+# Use: remote-signer-cli preset create-from dex_swap.preset.js.yaml [--config config.yaml --write] [--set chain_id=1 --set router_address=0x...]
+
+name: "DEX Swap (JS)"
+chain_type: "evm"
+chain_id: "1"
+enabled: true
+variables:
+  router_address: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
+template_ids:
+  - evm/dex_swap
+operator_overrides:
+  - name: router_address
+    required: false

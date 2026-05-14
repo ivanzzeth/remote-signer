@@ -12,7 +12,9 @@ import (
 
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	evmchain "github.com/ivanzzeth/remote-signer/internal/chain/evm"
+	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -121,6 +123,7 @@ func (m *mockHDWalletManager) ListPrimaryAddresses() []string {
 type mockSignerManager struct {
 	hdWalletMgr    *mockHDWalletManager
 	hdWalletMgrErr error
+	hdHierarchy      map[string]evmchain.HDHierarchyInfo // optional; GetHDHierarchy return value
 }
 
 func (m *mockSignerManager) CreateSigner(_ context.Context, _ types.CreateSignerRequest) (*types.SignerInfo, error) {
@@ -150,12 +153,121 @@ func (m *mockSignerManager) LockSigner(_ context.Context, _ string) (*types.Sign
 	return nil, fmt.Errorf("not implemented in mock")
 }
 
+func (m *mockSignerManager) DeleteSigner(_ context.Context, _ string) error {
+	return fmt.Errorf("not implemented in mock")
+}
+
+func (m *mockSignerManager) GetHDHierarchy() map[string]evmchain.HDHierarchyInfo {
+	if m.hdHierarchy == nil {
+		return nil
+	}
+	out := make(map[string]evmchain.HDHierarchyInfo, len(m.hdHierarchy))
+	for k, v := range m.hdHierarchy {
+		out[k] = v
+	}
+	return out
+}
+
+// --- Mock repos for access service ---
+
+type stubOwnershipRepo struct {
+	ownerships map[string]*types.SignerOwnership // keyed by signer address
+}
+
+func (s *stubOwnershipRepo) Upsert(_ context.Context, _ *types.SignerOwnership) error { return nil }
+func (s *stubOwnershipRepo) Get(_ context.Context, addr string) (*types.SignerOwnership, error) {
+	if s.ownerships != nil {
+		if o, ok := s.ownerships[addr]; ok {
+			return o, nil
+		}
+	}
+	// Default: return ownership for test-admin so access checks pass in tests
+	return &types.SignerOwnership{
+		SignerAddress: addr,
+		OwnerID:      "test-admin",
+		Status:       types.SignerOwnershipActive,
+	}, nil
+}
+func (s *stubOwnershipRepo) GetByOwner(_ context.Context, _ string) ([]*types.SignerOwnership, error) {
+	return nil, nil
+}
+func (s *stubOwnershipRepo) Delete(_ context.Context, _ string) error                { return nil }
+func (s *stubOwnershipRepo) UpdateOwner(_ context.Context, _, _ string) error         { return nil }
+func (s *stubOwnershipRepo) CountByOwner(_ context.Context, _ string) (int64, error)  { return 0, nil }
+func (s *stubOwnershipRepo) CountByOwnerAndType(_ context.Context, _ string, _ types.SignerType) (int64, error) {
+	return 0, nil
+}
+func (s *stubOwnershipRepo) GetBoth(_ context.Context, senderAddress, recipientAddress string) (*types.SignerOwnership, *types.SignerOwnership, error) {
+	// Simple stub implementation for tests
+	sender, _ := s.Get(nil, senderAddress)
+	recipient, _ := s.Get(nil, recipientAddress)
+	return sender, recipient, nil
+}
+
+type stubAccessRepo struct{}
+
+func (s *stubAccessRepo) Grant(_ context.Context, _ *types.SignerAccess) error         { return nil }
+func (s *stubAccessRepo) Revoke(_ context.Context, _, _ string) error                  { return nil }
+func (s *stubAccessRepo) List(_ context.Context, _ string) ([]*types.SignerAccess, error) {
+	return nil, nil
+}
+func (s *stubAccessRepo) HasAccess(_ context.Context, _, _ string) (bool, error)       { return false, nil }
+func (s *stubAccessRepo) HasAccessViaWallet(_ context.Context, _, _ string) (bool, error) {
+	return false, nil
+}
+func (s *stubAccessRepo) DeleteBySigner(_ context.Context, _ string) error             { return nil }
+func (s *stubAccessRepo) DeleteByAPIKey(_ context.Context, _ string) error             { return nil }
+func (s *stubAccessRepo) ListAccessibleAddresses(_ context.Context, _ string) ([]string, error) {
+	return nil, nil
+}
+
+type stubAPIKeyRepoForAccess struct{}
+
+func (s *stubAPIKeyRepoForAccess) Create(_ context.Context, _ *types.APIKey) error { return nil }
+func (s *stubAPIKeyRepoForAccess) Get(_ context.Context, _ string) (*types.APIKey, error) {
+	return nil, types.ErrNotFound
+}
+func (s *stubAPIKeyRepoForAccess) Update(_ context.Context, _ *types.APIKey) error { return nil }
+func (s *stubAPIKeyRepoForAccess) Delete(_ context.Context, _ string) error        { return nil }
+func (s *stubAPIKeyRepoForAccess) List(_ context.Context, _ storage.APIKeyFilter) ([]*types.APIKey, error) {
+	return nil, nil
+}
+func (s *stubAPIKeyRepoForAccess) UpdateLastUsed(_ context.Context, _ string) error { return nil }
+func (s *stubAPIKeyRepoForAccess) Count(_ context.Context, _ storage.APIKeyFilter) (int, error) {
+	return 0, nil
+}
+func (s *stubAPIKeyRepoForAccess) DeleteBySourceExcluding(_ context.Context, _ string, _ []string) (int64, error) {
+	return 0, nil
+}
+func (s *stubAPIKeyRepoForAccess) BackfillSource(_ context.Context, _ string) (int64, error) {
+	return 0, nil
+}
+
+func newTestAccessService(t *testing.T) *service.SignerAccessService {
+	t.Helper()
+	return newTestAccessServiceWithOwnerships(t, nil)
+}
+
+func newTestAccessServiceWithOwnerships(t *testing.T, ownerships map[string]*types.SignerOwnership) *service.SignerAccessService {
+	t.Helper()
+	svc, err := service.NewSignerAccessService(
+		&stubOwnershipRepo{ownerships: ownerships},
+		&stubAccessRepo{},
+		&stubAPIKeyRepoForAccess{},
+		nil,
+		slog.Default(),
+	)
+	require.NoError(t, err)
+	return svc
+}
+
 // --- Test helpers ---
 
 func newTestHDWalletHandler(t *testing.T, sm evmchain.SignerManager) *HDWalletHandler {
 	t.Helper()
 	logger := slog.Default()
-	h, err := NewHDWalletHandler(sm, logger, false)
+	accessSvc := newTestAccessService(t)
+	h, err := NewHDWalletHandler(sm, accessSvc, logger, false)
 	require.NoError(t, err)
 	return h
 }
@@ -171,7 +283,7 @@ func adminAPIKey() *types.APIKey {
 	return &types.APIKey{
 		ID:    "test-admin",
 		Name:  "Test Admin",
-		Admin: true,
+		Role:  types.RoleAdmin,
 	}
 }
 
@@ -208,14 +320,16 @@ func decodeJSON(t *testing.T, rec *httptest.ResponseRecorder, v interface{}) {
 // --- Constructor tests ---
 
 func TestNewHDWalletHandler_NilSignerManager(t *testing.T) {
-	_, err := NewHDWalletHandler(nil, slog.Default(), false)
+	accessSvc := newTestAccessService(t)
+	_, err := NewHDWalletHandler(nil, accessSvc, slog.Default(), false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "signer manager is required")
 }
 
 func TestNewHDWalletHandler_NilLogger(t *testing.T) {
 	sm := newDefaultMockSignerManager()
-	_, err := NewHDWalletHandler(sm, nil, false)
+	accessSvc := newTestAccessService(t)
+	_, err := NewHDWalletHandler(sm, accessSvc, nil, false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "logger is required")
 }
@@ -267,6 +381,8 @@ func TestHDWalletHandler_CreateWallet_WithEntropyBits(t *testing.T) {
 	var capturedParams types.CreateHDWalletParams
 	sm := newDefaultMockSignerManager()
 	sm.hdWalletMgr.createWalletFn = func(_ context.Context, params types.CreateHDWalletParams) (*evmchain.HDWalletInfo, error) {
+		// Copy strings defensively: secure.ZeroString will zero the backing array after handler returns.
+		params.Password = string([]byte(params.Password))
 		capturedParams = params
 		return &evmchain.HDWalletInfo{
 			PrimaryAddress: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -330,6 +446,9 @@ func TestHDWalletHandler_ImportWallet(t *testing.T) {
 	var capturedParams types.ImportHDWalletParams
 	sm := newDefaultMockSignerManager()
 	sm.hdWalletMgr.importWalletFn = func(_ context.Context, params types.ImportHDWalletParams) (*evmchain.HDWalletInfo, error) {
+		// Copy strings defensively: secure.ZeroString will zero the backing array after handler returns.
+		params.Password = string([]byte(params.Password))
+		params.Mnemonic = string([]byte(params.Mnemonic))
 		capturedParams = params
 		return &evmchain.HDWalletInfo{
 			PrimaryAddress: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
@@ -650,7 +769,7 @@ func TestHDWalletHandler_ValidationErrors(t *testing.T) {
 
 		var errResp map[string]string
 		decodeJSON(t, rec, &errResp)
-		assert.Contains(t, errResp["error"], "mnemonic is required for import")
+		assert.Contains(t, errResp["error"], "mnemonic or wallet_json is required for import")
 	})
 
 	t.Run("invalid action", func(t *testing.T) {

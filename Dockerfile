@@ -18,9 +18,9 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build binaries with optimizations (architecture auto-detected from build platform)
+# Build the unified binary with optimizations (architecture auto-detected from build platform).
+# The single `remote-signer` executable hosts every subcommand: server, tui, validate, and admin/operator CLI.
 RUN CGO_ENABLED=0 go build -ldflags="-w -s" -o /remote-signer ./cmd/remote-signer
-RUN CGO_ENABLED=0 go build -ldflags="-w -s" -o /remote-signer-tui ./cmd/tui
 
 # =============================================================================
 # Stage 2: Final minimal image
@@ -39,19 +39,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN useradd -m -u 1000 signer
 WORKDIR /app
 
-# Copy binaries from builder
+# Copy the unified binary from the builder
 COPY --from=builder /remote-signer /app/remote-signer
-COPY --from=builder /remote-signer-tui /app/remote-signer-tui
 
 # Note: Foundry binaries (forge, cast) are mounted via docker-compose volume
 # from host ./data/foundry/ to container /usr/local/bin/
 
-# Create directories
-RUN mkdir -p /app/data /app/data/keystores /app/data/hd-wallets /app/configs /var/cache/remote-signer/forge && \
+# Create directories (layout matches repo: config at root, data/ under root)
+RUN mkdir -p /app/data /app/data/keystores /app/data/hd-wallets /var/cache/remote-signer/forge && \
     chown -R signer:signer /app /var/cache/remote-signer
 
-# Copy example config
-COPY config.example.yaml /app/configs/config.example.yaml
+# Copy example config (at /app root to match repo layout)
+COPY config.example.yaml /app/config.example.yaml
 
 # Switch to non-root user
 USER signer
@@ -63,5 +62,5 @@ EXPOSE 8548
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:8548/health || exit 1
 
-# Default command
-CMD ["/app/remote-signer", "-config", "/app/configs/config.yaml"]
+# Default command (config at /app so ./data/forge-cache resolves to /app/data/forge-cache)
+CMD ["/app/remote-signer", "server", "start", "-config", "/app/config.yaml"]

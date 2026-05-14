@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
+	"time"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/logger"
@@ -11,6 +13,12 @@ import (
 
 // Compile-time check that SignerManagerImpl implements SignerManager.
 var _ SignerManager = (*SignerManagerImpl)(nil)
+
+// HDHierarchyInfo stores parent-child relationship for HD derived addresses
+type HDHierarchyInfo struct {
+	ParentAddress   string
+	DerivationIndex uint32
+}
 
 // SignerManager manages signer lifecycle operations
 type SignerManager interface {
@@ -31,11 +39,30 @@ type SignerManager interface {
 
 	// LockSigner locks an unlocked signer (remove key from memory).
 	LockSigner(ctx context.Context, address string) (*types.SignerInfo, error)
+
+	// DeleteSigner permanently deletes a signer (removes file, cleans in-memory state).
+	// For HD wallets, this deletes the entire wallet and all derived addresses.
+	DeleteSigner(ctx context.Context, address string) error
+
+	// GetHDHierarchy returns the HD wallet hierarchy (address → parent info) with caching.
+	GetHDHierarchy() map[string]HDHierarchyInfo
 }
+
+// AutoLockCallback is called when a signer is automatically locked due to timeout.
+type AutoLockCallback func(address string)
 
 // SignerManagerImpl implements SignerManager
 type SignerManagerImpl struct {
-	registry *SignerRegistry
+	registry        *SignerRegistry
+	autoLockTimeout time.Duration           // 0 means disabled
+	autoLockTimers  map[string]*time.Timer
+	timerMu         sync.Mutex
+	onAutoLock      AutoLockCallback // optional callback for auto-lock notifications
+
+	// HD wallet hierarchy cache (address → parent info)
+	hdHierarchyCache     map[string]HDHierarchyInfo
+	hdHierarchyCacheMu   sync.RWMutex
+	hdHierarchyCacheTime time.Time
 }
 
 // NewSignerManager creates a new SignerManager
@@ -43,7 +70,71 @@ func NewSignerManager(registry *SignerRegistry) (*SignerManagerImpl, error) {
 	if registry == nil {
 		return nil, fmt.Errorf("registry is required")
 	}
-	return &SignerManagerImpl{registry: registry}, nil
+	return &SignerManagerImpl{
+		registry:         registry,
+		autoLockTimers:   make(map[string]*time.Timer),
+		hdHierarchyCache: make(map[string]HDHierarchyInfo),
+	}, nil
+}
+
+// SetAutoLockTimeout configures automatic locking of signers after the given
+// duration since unlock. Set to 0 to disable.
+func (m *SignerManagerImpl) SetAutoLockTimeout(d time.Duration) {
+	m.autoLockTimeout = d
+}
+
+// SetOnAutoLock sets a callback that fires when a signer is automatically locked.
+func (m *SignerManagerImpl) SetOnAutoLock(fn AutoLockCallback) {
+	m.onAutoLock = fn
+}
+
+// StopAutoLockTimers cancels all pending auto-lock timers. Call on shutdown.
+func (m *SignerManagerImpl) StopAutoLockTimers() {
+	m.timerMu.Lock()
+	defer m.timerMu.Unlock()
+	for addr, t := range m.autoLockTimers {
+		t.Stop()
+		delete(m.autoLockTimers, addr)
+	}
+}
+
+// startAutoLockTimer starts (or resets) the auto-lock timer for the given address.
+func (m *SignerManagerImpl) startAutoLockTimer(address string) {
+	if m.autoLockTimeout <= 0 {
+		return
+	}
+	m.timerMu.Lock()
+	defer m.timerMu.Unlock()
+
+	if existing, ok := m.autoLockTimers[address]; ok {
+		existing.Stop()
+	}
+
+	m.autoLockTimers[address] = time.AfterFunc(m.autoLockTimeout, func() {
+		m.timerMu.Lock()
+		delete(m.autoLockTimers, address)
+		m.timerMu.Unlock()
+
+		if _, err := m.LockSigner(context.Background(), address); err != nil {
+			logger.EVM().Warn().Str("address", address).Err(err).Msg("auto-lock failed")
+			return
+		}
+		logger.EVM().Info().Str("address", address).Dur("timeout", m.autoLockTimeout).Msg("signer auto-locked")
+
+		if m.onAutoLock != nil {
+			m.onAutoLock(address)
+		}
+	})
+}
+
+// cancelAutoLockTimer cancels the auto-lock timer for the given address.
+func (m *SignerManagerImpl) cancelAutoLockTimer(address string) {
+	m.timerMu.Lock()
+	defer m.timerMu.Unlock()
+	if t, ok := m.autoLockTimers[address]; ok {
+		t.Stop()
+		delete(m.autoLockTimers, address)
+	}
 }
 
 // CreateSigner dispatches to the appropriate provider via type assertion.
@@ -160,6 +251,8 @@ func (m *SignerManagerImpl) UnlockSigner(ctx context.Context, address string, pa
 
 	logger.EVM().Info().Str("address", address).Str("type", info.Type).Msg("signer unlocked")
 
+	m.startAutoLockTimer(address)
+
 	return &updatedInfo, nil
 }
 
@@ -192,9 +285,135 @@ func (m *SignerManagerImpl) LockSigner(ctx context.Context, address string) (*ty
 		return nil, fmt.Errorf("failed to lock signer in registry: %w", err)
 	}
 
+	m.cancelAutoLockTimer(address)
+
 	updatedInfo, _ := m.registry.GetSignerInfo(address)
 
 	logger.EVM().Info().Str("address", address).Str("type", info.Type).Msg("signer locked")
 
 	return &updatedInfo, nil
+}
+
+// DeleteSigner permanently deletes a signer (removes file, cleans in-memory state).
+// For HD wallets, this deletes the entire wallet and all derived addresses.
+func (m *SignerManagerImpl) DeleteSigner(ctx context.Context, address string) error {
+	info, ok := m.registry.GetSignerInfo(address)
+	if !ok {
+		return types.ErrSignerNotFound
+	}
+
+	p, ok := m.registry.Provider(types.SignerType(info.Type))
+	if !ok {
+		return fmt.Errorf("no provider for signer type %q", info.Type)
+	}
+
+	deleter, ok := p.(SignerDeleter)
+	if !ok {
+		return fmt.Errorf("provider %q does not support delete", info.Type)
+	}
+
+	// Cancel auto-lock timer if running
+	m.cancelAutoLockTimer(address)
+
+	// Call provider's delete method (handles file deletion, in-memory cleanup, registry unregistration)
+	if err := deleter.DeleteSigner(ctx, address); err != nil {
+		return err
+	}
+
+	logger.EVM().Info().Str("address", address).Str("type", info.Type).Msg("signer deleted")
+
+	// Invalidate HD hierarchy cache when deleting signers
+	m.hdHierarchyCacheMu.Lock()
+	m.hdHierarchyCacheTime = time.Time{}
+	m.hdHierarchyCacheMu.Unlock()
+
+	return nil
+}
+
+// GetHDHierarchy returns the HD wallet hierarchy (address → parent info) with caching.
+// Cache is valid for 5 minutes to avoid rebuilding on every request.
+func (m *SignerManagerImpl) GetHDHierarchy() map[string]HDHierarchyInfo {
+	m.hdHierarchyCacheMu.RLock()
+	if time.Since(m.hdHierarchyCacheTime) < 5*time.Minute && len(m.hdHierarchyCache) > 0 {
+		defer m.hdHierarchyCacheMu.RUnlock()
+		// Return a copy to avoid external mutation
+		result := make(map[string]HDHierarchyInfo, len(m.hdHierarchyCache))
+		for k, v := range m.hdHierarchyCache {
+			result[k] = v
+		}
+		return result
+	}
+	m.hdHierarchyCacheMu.RUnlock()
+
+	// Rebuild cache
+	m.hdHierarchyCacheMu.Lock()
+	defer m.hdHierarchyCacheMu.Unlock()
+
+	// Double-check after acquiring write lock
+	if time.Since(m.hdHierarchyCacheTime) < 5*time.Minute && len(m.hdHierarchyCache) > 0 {
+		result := make(map[string]HDHierarchyInfo, len(m.hdHierarchyCache))
+		for k, v := range m.hdHierarchyCache {
+			result[k] = v
+		}
+		return result
+	}
+
+	m.hdHierarchyCache = m.buildHDHierarchy()
+	m.hdHierarchyCacheTime = time.Now()
+
+	result := make(map[string]HDHierarchyInfo, len(m.hdHierarchyCache))
+	for k, v := range m.hdHierarchyCache {
+		result[k] = v
+	}
+	return result
+}
+
+// buildHDHierarchy reconstructs HD wallet parent-child relationships from derivation state.
+func (m *SignerManagerImpl) buildHDHierarchy() map[string]HDHierarchyInfo {
+	hierarchy := make(map[string]HDHierarchyInfo)
+
+	// Get HD wallet provider
+	p, ok := m.registry.Provider(types.SignerTypeHDWallet)
+	if !ok {
+		return hierarchy // No HD wallet provider configured
+	}
+
+	hdProvider, ok := p.(*HDWalletProvider)
+	if !ok {
+		return hierarchy // Provider is not HDWalletProvider
+	}
+
+	// Access provider state (need to hold lock)
+	hdProvider.mu.RLock()
+	defer hdProvider.mu.RUnlock()
+
+	// Iterate over all loaded HD wallets
+	for primaryAddr, state := range hdProvider.wallets {
+		// Load derived indices from persistent store
+		indices := hdProvider.derivStore.Load(primaryAddr)
+		if len(indices) == 0 {
+			continue
+		}
+
+		// Rebuild address → parent mapping
+		for _, idx := range indices {
+			derivedAddr, err := state.wallet.DeriveAddress(idx)
+			if err != nil {
+				logger.EVM().Warn().
+					Str("primary_address", primaryAddr).
+					Uint32("index", idx).
+					Err(err).
+					Msg("failed to derive address for hierarchy")
+				continue
+			}
+
+			hierarchy[normalizeAddress(derivedAddr.Hex())] = HDHierarchyInfo{
+				ParentAddress:   primaryAddr,
+				DerivationIndex: idx,
+			}
+		}
+	}
+
+	logger.EVM().Debug().Int("derived_count", len(hierarchy)).Msg("HD hierarchy rebuilt")
+	return hierarchy
 }

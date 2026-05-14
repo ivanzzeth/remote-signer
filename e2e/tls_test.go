@@ -168,6 +168,7 @@ func writeECKey(t *testing.T, path string, key *ecdsa.PrivateKey) {
 // =============================================================================
 
 func TestTLS_ServerStartsWithTLS(t *testing.T) {
+	ensureGuardResumed(t)
 	if useExternalServer {
 		t.Skip("Skipping: TLS tests require internal server mode")
 	}
@@ -269,6 +270,7 @@ func TestTLS_ServerStartsWithTLS(t *testing.T) {
 }
 
 func TestTLS_ServerWithTLSOnlyNoMTLS(t *testing.T) {
+	ensureGuardResumed(t)
 	if useExternalServer {
 		t.Skip("Skipping: TLS tests require internal server mode")
 	}
@@ -340,6 +342,7 @@ func TestTLS_ServerWithTLSOnlyNoMTLS(t *testing.T) {
 }
 
 func TestTLS_SigningOverMTLS(t *testing.T) {
+	ensureGuardResumed(t)
 	if useExternalServer {
 		t.Skip("Skipping: TLS tests require internal server mode")
 	}
@@ -449,7 +452,7 @@ func (ts *TestServer) StartWithTLS(certFile, keyFile, caFile string, enableMTLS 
 
 	// Initialize all services and create server with TLS
 	server, err := initTestServices(ts, requestRepo, ruleRepo, apiKeyRepo, auditRepo, log,
-		certFile, keyFile, caFile, enableMTLS)
+		certFile, keyFile, caFile, enableMTLS, db)
 	if err != nil {
 		return err
 	}

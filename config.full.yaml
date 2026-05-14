@@ -1,0 +1,314 @@
+# =========================================================================
+# Remote Signer — FULL CONFIGURATION EXAMPLE
+# =========================================================================
+# This file contains ALL available configuration options with extensive
+# examples of templates and rules for various protocols (Polymarket,
+# Predict.fun, Opinion, DEX, ERC20, etc.).
+#
+# For production use:
+#   - Start with config.example.yaml (minimal configuration)
+#   - Reference this file to learn about available features
+#   - Copy specific templates/rules as needed for your use case
+#   - See docs/configuration.md for detailed guidance
+#
+# See also:
+#   - config.example.yaml: Minimal production-ready configuration
+#   - rules/presets/: Pre-configured rule bundles for common protocols
+#   - docs/rules-templates-and-presets.md: Detailed documentation
+# =========================================================================
+
+server:
+  host: "0.0.0.0"
+  port: 8548
+  # read_timeout: 30s   # optional; default 30s
+  # write_timeout: 30s # optional; default 30s
+  # TLS/mTLS configuration
+  # Generate certificates: ./scripts/gen-certs.sh [extra-ip1] [extra-ip2]
+  tls:
+    enabled: false
+    cert_file: "./certs/server.crt"
+    key_file: "./certs/server.key"
+    # CA certificate for mTLS client verification
+    ca_file: "./certs/ca.crt"
+    # Set to true to require client certificates (mTLS)
+    client_auth: false
+
+database:
+  # Default: SQLite (single-instance, file-based, zero external services).
+  # WAL + busy_timeout are recommended for any workload with concurrent writers.
+  # Set DATABASE_DSN to override (e.g. for multi-instance deployments backed by
+  # PostgreSQL; docker-compose injects this automatically).
+  dsn: "${DATABASE_DSN:-file:./data/remote-signer.db?_journal_mode=WAL&_busy_timeout=5000}"
+  # Multi-instance / PostgreSQL example (uncomment + set DATABASE_DSN to use):
+  # dsn: "${DATABASE_DSN:-postgres://signer:signer_password@localhost:5432/remote_signer?sslmode=disable}"
+
+chains:
+  evm:
+    enabled: true
+    signers:
+      # Private keys - can use direct hex value or environment variable
+      private_keys:
+        # Placeholder: set your signer address and key via env (DO NOT commit real keys)
+        - address: "0x1111111111111111111111111111111111111111"
+          key_env: "EVM_PRIVATE_KEY_1"  # Hex key from env only; never paste real key here
+          enabled: true
+      # Keystores with password from environment
+      # keystores:
+      #   - address: "0x2222222222222222222222222222222222222222"
+      #     path: "/etc/signer/keystores/"
+      #     password_env: "EVM_KEYSTORE_PASSWORD_1"
+      #     enabled: true
+
+      # HD Wallets - derive multiple addresses from a single mnemonic
+      # hd_wallets:
+      #   - path: "./data/hd-wallets/wallet1.json"
+      #     password_env: "HD_WALLET_PASSWORD_1"
+      #     # password_stdin: false    # Set true to read password from stdin
+      #     derive_indices: [0, 1, 2]  # Indices to derive at startup
+      #     enabled: true
+
+    # Directory for storing dynamically created keystores via API
+    keystore_dir: "./data/keystores"
+
+    # Directory for storing HD wallets created via API
+    hd_wallet_dir: "./data/hd-wallets"
+
+    # EVM RPC gateway for JS rule sandbox (read-only queries: decimals, ERC165, etc.)
+    # Used by agent rules and any JS rule that calls web3.call() / erc20.decimals().
+    # URL pattern: ${base_url}/${chain_id} or ${base_url}/${chain_id}/api_key/${api_key}
+    # Deploy your own evm-gateway or use any compatible multi-chain RPC router.
+    rpc_gateway:
+      base_url: "${EVM_RPC_GATEWAY_URL:-}"             # e.g. https://your-gateway.example.com/chain/evm
+      api_key: "${EVM_RPC_GATEWAY_API_KEY:-}"           # optional, for authenticated endpoints
+      cache_ttl: "24h"                                  # token metadata cache TTL
+
+    # Transaction simulation (eth_simulateV1 via rpc_gateway)
+    # Predicts balance changes, gas usage, and approvals from simulated receipts/logs.
+    #
+    # API Endpoints:
+    #   POST /api/v1/evm/simulate        — simulate a single transaction
+    #   POST /api/v1/evm/simulate/batch  — simulate multiple transactions in sequence
+    #   GET  /api/v1/evm/simulate/status — engine status (engine_version, optional per-chain)
+    #   POST /api/v1/evm/sign/batch      — simulate + sign atomically (requires rule engine)
+    #
+    # CLI:
+    #   remote-signer-cli evm simulate tx --chain-id 1 --from 0x... --to 0x... --data 0x...
+    #   remote-signer-cli evm simulate status
+    #
+    # Prometheus Metrics (on /metrics):
+    #   remote_signer_simulation_requests_total{chain_id, status}
+    #   remote_signer_simulation_duration_seconds{chain_id}
+    #   remote_signer_simulation_batch_size
+    simulation:
+      enabled: false
+      timeout: "60s"                       # per-simulation timeout (includes remote RPC state fetch)
+      batch_window: "1s"                   # accumulation window for future batch sign fallback
+      batch_max_size: 20                   # max txs per batch
+
+    # Foundry configuration for Solidity expression rules
+    foundry:
+      enabled: true
+      forge_path: ""
+      cache_dir: "./data/forge-cache"
+      temp_dir: "./data/forge-workspace"
+      timeout: "30s"
+
+notify:
+  slack:
+    enabled: false
+    bot_token: "${SLACK_BOT_TOKEN}"
+  pushover:
+    enabled: false
+    app_token: "${PUSHOVER_APP_TOKEN}"
+    retry: 30        # seconds between retries for emergency notifications
+    expire: 300      # seconds until notification expires
+    max_retries: 3   # max HTTP request retries
+    retry_delay: 1   # initial retry delay in seconds
+  webhook:
+    enabled: false
+    # Optional custom headers sent with every webhook request
+    headers:
+      Authorization: "Bearer ${WEBHOOK_AUTH_TOKEN}"
+    # HTTP client timeout (default: 10s)
+    timeout: "10s"
+  telegram:
+    enabled: false
+    bot_token: "${TELEGRAM_BOT_TOKEN}"  # From @BotFather
+
+# Notification channels for approval requests
+notify_channels:
+  slack:
+    - "you_slack_channel"  # Slack channel ID
+  pushover:
+    - "user_key_here"  # Pushover user key
+  webhook:
+    - "https://example.com/webhook"  # Webhook URL
+  telegram:
+    - "-1001234567890"  # Chat ID (group/channel) or @channel_username
+
+# Background audit monitor — scans audit records for anomaly patterns
+# and sends notifications when thresholds are exceeded.
+audit_monitor:
+  enabled: false
+  interval: "1h"        # scan interval
+  lookback_hours: 1     # hours to look back per scan
+  # Anomaly thresholds (per source per lookback window)
+  auth_failure_threshold: 5       # auth failures per hour
+  blocklist_reject_threshold: 3   # sign rejections per hour
+  high_freq_threshold: 100        # requests per hour
+  # Audit log retention: automatically delete records older than this (default: 90 days, 0 = disable)
+  retention_days: 90
+  cleanup_interval: "24h"         # how often to run cleanup
+
+# Preset API (admin-only). When set, GET/POST /api/v1/presets list/vars/apply are enabled.
+# Dir is resolved relative to the config file directory. Apply creates template instances in one transaction.
+# presets:
+#   dir: "./rules/presets"
+
+security:
+  # Maximum age of signed requests (prevents replay attacks)
+  # SECURITY: Keep this short (30-60s) to minimize replay window
+  # 60s is recommended - enough for network latency, but limits replay attacks
+  max_request_age: "60s"
+
+  # Default rate limit per API key (requests per minute)
+  rate_limit_default: 100
+
+  # Per-IP rate limit (requests per minute, pre-auth). Protects against unauthenticated flood attacks.
+  ip_rate_limit: 200
+
+  # Nonce requirement for replay protection
+  # When true (default), requests MUST include X-Nonce header
+  # When false, legacy requests without nonce are allowed (less secure)
+  nonce_required: true
+
+  # Manual approval: when false (default), requests with no whitelist match are rejected immediately (403).
+  # When true, they go to pending manual approval. Default false for stricter security.
+  manual_approval_enabled: false
+
+  # API lockdown: disable runtime mutation of rules/templates and signers via API.
+  # rules_api_readonly (default: true) — blocks rule/template CRUD, template instantiate/revoke,
+  # and approval auto-rule creation. Rules can only be managed through config files + restart/SIGHUP.
+  # Config-sourced rules are always immutable via API regardless of this setting.
+  rules_api_readonly: true
+
+  # Config reload (SIGHUP): when true, sending SIGHUP to the process will reload rules from config
+  # and sync them to the DB. Default false (recommended) — prevents unexpected runtime changes.
+  # Example: kill -HUP <pid>
+  allow_sighup_rules_reload: false
+  # signers_api_readonly (default: false) — blocks signer creation, HD wallet create/import/derive.
+  # Unlock/lock remain allowed. Low risk: API never exposes private keys or passwords.
+  signers_api_readonly: false
+
+  # Resource limits: maximum keystores/HD wallets a single API key can own.
+  # 0 = no limit. These defaults prevent unbounded resource consumption.
+  max_keystores_per_key: 5
+  max_hd_wallets_per_key: 3
+
+  # Require admin approval for agent-created whitelist rules (default: true, secure by default).
+  # When true, agent-created whitelist rules start as "pending_approval" and require admin approval.
+  # When false, agent-created whitelist rules (including template instantiation with custom
+  # variables like allowed_spenders) become active immediately without admin review.
+  # SECURITY: Setting to false is a risk — a compromised agent API key could create permissive
+  # whitelist rules that take effect instantly. Only set to false in trusted/dev environments.
+  require_approval_for_agent_rules: true
+
+  # Auto-lock: automatically lock signers after this duration since unlock.
+  # Default: 0 (disabled). Sends alert to notify channel when auto-locked.
+  # auto_lock_timeout: "1h"
+
+  # Sign timeout: context timeout for sign operations. Default: 30s.
+  # sign_timeout: "30s"
+
+  # Approval guard: pause when rejection rate in a sliding window exceeds threshold
+  # Use case: API key leaked — attacker uses valid key to brute-force; guard detects high rejection rate and pauses + alerts
+  approval_guard:
+    enabled: true                   # Enabled by default for better security
+    window: "1h"                    # sliding time window for rate calculation (default: 1h)
+    rejection_threshold_pct: 50     # rejection rate % that triggers pause (default: 50)
+    min_samples: 10                 # minimum events in window before rate check applies (default: 10)
+    resume_after: "2h"              # pause duration; then auto-resume
+
+  # NOTE: Blocklist rules use mandatory Fail-Closed behavior.
+  # Any blocklist rule evaluation error will immediately reject the request.
+  # This prevents attackers from bypassing security checks by causing evaluation failures.
+
+  # IP whitelist configuration
+  # When enabled, only requests from allowed IPs can access the API
+  ip_whitelist:
+    enabled: false  # Set to true to enable IP whitelist
+    # List of allowed IP addresses or CIDR ranges
+    # Examples:
+    #   - "127.0.0.1"           # Single IPv4
+    #   - "::1"                 # IPv6 localhost
+    #   - "192.168.1.0/24"      # IPv4 CIDR range
+    #   - "10.0.0.0/8"          # Private network
+    #   - "2001:db8::/32"       # IPv6 CIDR range
+    allowed_ips:
+      - "127.0.0.1"
+      - "::1"
+      # Add your allowed IPs/CIDRs here
+      # - "192.168.1.100"
+      # - "10.0.0.0/8"
+    # Trust proxy headers (X-Forwarded-For, X-Real-IP)
+    # WARNING: Only enable this if running behind a trusted reverse proxy
+    # If enabled, the first IP in X-Forwarded-For will be used as client IP
+    trust_proxy: false
+    # Trusted proxy IPs/CIDRs - only these sources can set X-Forwarded-For/X-Real-IP
+    # Required when trust_proxy is true; if empty, proxy headers are ignored (fail-closed)
+    # trusted_proxies:
+    #   - "10.0.0.1"        # nginx internal IP
+    #   - "172.16.0.0/12"   # Docker network range
+
+logger:
+  # Log level: debug, info, warn, error
+  level: "info"
+  # Pretty print (for development)
+  pretty: true
+
+# API Keys configuration
+# API keys are used for authenticating requests to the service.
+# Each key has an Ed25519 public key stored here; the client keeps the private key.
+# Keys defined here will be synced to the database on startup.
+#
+# RBAC Roles (4 roles):
+#   - role: admin     -> Full access: manage signers, approve requests, CRUD all rules/keys
+#   - role: dev       -> Sign, view all requests, create/manage own rules, read budgets/templates/presets/audit
+#   - role: agent     -> Sign, create/manage own rules (declarative), read budgets/templates/presets/signers
+#   - role: strategy  -> Sign, view own requests, read own signers (minimal permissions)
+#
+# IMPORTANT: Docker Deployment Note
+# When deploying with Docker, environment variable references (e.g., public_key_env: "VAR_NAME")
+# are NOT automatically passed to the container. You must either:
+#   1. Use direct values: public_key: "MCowBQYDK2VwAyEA..." (recommended for docker)
+#   2. Or manually add each env var to docker-compose.yml environment section
+dynamic_blocklist:
+  enabled: true
+  sync_interval: "1h"       # How often to refresh from remote sources
+  fail_mode: "open"          # "open" = use stale cache on failure, "close" = reject all
+  cache_file: "data/forge-workspace/blocklist_cache.json"
+  sources:
+    - name: "OFAC SDN ETH"
+      type: "url_text"
+      url: "https://raw.githubusercontent.com/0xB10C/ofac-sanctioned-digital-currency-addresses/lists/sanctioned_addresses_ETH.txt"
+    # Add your own sources as needed:
+    # - name: "Custom Internal"
+    #   type: "url_text"
+    #   url: "https://your-company.com/blocklist.txt"
+    # - name: "JSON Source"
+    #   type: "url_json"
+    #   url: "https://example.com/api/blocked-addresses"
+    #   json_path: "data.addresses"
+
+# =============================================================================
+# Templates (rule templates with ${variable} placeholders)
+# =============================================================================
+# Templates define parameterized rules. Instances bind concrete values to create
+# concrete rules. Use type "file" to load a template from a YAML file that
+# contains variables, test_variables, and rules with ${var} placeholders.
+#
+# Template file format:
+#   variables:       # list of { name, type, description, required, default }
+#   test_variables:  # map of var -> value for validate-rules (optional)
+#   rules:           # same as rules below, but with ${var_name} in config
+#

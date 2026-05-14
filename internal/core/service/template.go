@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lib/pq"
+
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
@@ -64,6 +66,12 @@ type CreateInstanceRequest struct {
 	APIKeyID      *string `json:"api_key_id,omitempty"`
 	SignerAddress *string `json:"signer_address,omitempty"`
 
+	// RBAC ownership fields — set by handler, not request body.
+	// When set, these override the defaults (owner="config", applied_to=["*"], status=active).
+	Owner     string           `json:"-"`
+	AppliedTo []string         `json:"-"`
+	Status    types.RuleStatus `json:"-"`
+
 	// Optional: time-limited
 	ExpiresAt *time.Time     `json:"expires_at,omitempty"`
 	ExpiresIn *time.Duration `json:"expires_in,omitempty"` // alternative: duration from now
@@ -89,10 +97,15 @@ type ScheduleConfig struct {
 	StartAt *time.Time   `json:"start_at,omitempty"`  // default: now
 }
 
-// CreateInstanceResult contains the created rule and optional budget
+// CreateInstanceResult contains the created rule(s) and optional budget(s).
+// For single-rule templates, Rule and Budget are set directly.
+// For template_bundle templates, SubRules and SubBudgets contain all expanded sub-rules;
+// Rule/Budget point to the first sub-rule for backward compatibility.
 type CreateInstanceResult struct {
-	Rule   *types.Rule       `json:"rule"`
-	Budget *types.RuleBudget `json:"budget,omitempty"`
+	Rule       *types.Rule         `json:"rule"`
+	Budget     *types.RuleBudget   `json:"budget,omitempty"`
+	SubRules   []*types.Rule       `json:"sub_rules,omitempty"`
+	SubBudgets []*types.RuleBudget `json:"sub_budgets,omitempty"`
 }
 
 // CreateInstance creates a rule instance from a template with bound variables
@@ -107,31 +120,97 @@ func (s *TemplateService) CreateInstance(ctx context.Context, req *CreateInstanc
 		return nil, fmt.Errorf("failed to resolve template: %w", err)
 	}
 
-	// 2. Parse variable definitions
+	// Delegate to createInstanceFromResolved which handles both single-rule and bundle templates
+	return s.createInstanceFromResolved(ctx, s.ruleRepo, s.budgetRepo, tmpl, req)
+}
+
+// CreateInstanceWithTx creates a rule instance from a template using the given repos (e.g. tx-scoped).
+// Resolves template via DB; for preset apply use ResolveTemplate outside tx then CreateInstanceFromResolvedWithTx inside tx to avoid deadlock with single DB connection.
+func (s *TemplateService) CreateInstanceWithTx(
+	ctx context.Context,
+	ruleRepo storage.RuleRepository,
+	budgetRepo storage.BudgetRepository,
+	req *CreateInstanceRequest,
+) (*CreateInstanceResult, error) {
+	if req == nil {
+		return nil, fmt.Errorf("request is required")
+	}
+	if ruleRepo == nil || budgetRepo == nil {
+		return nil, fmt.Errorf("rule and budget repositories are required")
+	}
+	tmpl, err := s.resolveTemplate(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve template: %w", err)
+	}
+	return s.createInstanceFromResolved(ctx, ruleRepo, budgetRepo, tmpl, req)
+}
+
+// CreateInstanceFromResolvedWithTx creates a rule instance using an already-resolved template and tx-scoped repos.
+// Use after ResolveTemplate outside the transaction so preset apply does not need a second DB connection.
+func (s *TemplateService) CreateInstanceFromResolvedWithTx(
+	ctx context.Context,
+	ruleRepo storage.RuleRepository,
+	budgetRepo storage.BudgetRepository,
+	tmpl *types.RuleTemplate,
+	req *CreateInstanceRequest,
+) (*CreateInstanceResult, error) {
+	if tmpl == nil || req == nil {
+		return nil, fmt.Errorf("template and request are required")
+	}
+	if ruleRepo == nil || budgetRepo == nil {
+		return nil, fmt.Errorf("rule and budget repositories are required")
+	}
+	return s.createInstanceFromResolved(ctx, ruleRepo, budgetRepo, tmpl, req)
+}
+
+func (s *TemplateService) createInstanceFromResolved(
+	ctx context.Context,
+	ruleRepo storage.RuleRepository,
+	budgetRepo storage.BudgetRepository,
+	tmpl *types.RuleTemplate,
+	req *CreateInstanceRequest,
+) (*CreateInstanceResult, error) {
 	var varDefs []types.TemplateVariable
 	if len(tmpl.Variables) > 0 {
 		if err := json.Unmarshal(tmpl.Variables, &varDefs); err != nil {
 			return nil, fmt.Errorf("failed to parse template variables: %w", err)
 		}
 	}
-
-	// 3. Validate variables
 	if err := validateVariables(varDefs, req.Variables); err != nil {
 		return nil, fmt.Errorf("variable validation failed: %w", err)
 	}
-
-	// 4. Fill defaults for optional variables
 	resolvedVars := resolveDefaults(varDefs, req.Variables)
-
-	// 5. Substitute variables in config
+	injectReservedVariables(resolvedVars, req, s.logger)
 	resolvedConfig, err := SubstituteVariables(tmpl.Config, resolvedVars)
 	if err != nil {
 		return nil, fmt.Errorf("variable substitution failed: %w", err)
 	}
 
-	// 6. Build Rule
+	// If template is a bundle, expand into sub-rules
+	if tmpl.Type == "template_bundle" {
+		return s.createInstanceFromBundle(ctx, ruleRepo, budgetRepo, tmpl, req, resolvedVars, resolvedConfig)
+	}
+
 	ruleID := s.generateInstanceRuleID(tmpl.ID, resolvedVars)
-	variablesJSON, _ := json.Marshal(resolvedVars)
+	variablesJSON, err := json.Marshal(resolvedVars)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal resolved variables: %w", err)
+	}
+	// Determine ownership: prefer RBAC fields from handler, fall back to legacy defaults
+	owner := "config"
+	if req.Owner != "" {
+		owner = req.Owner
+	} else if req.APIKeyID != nil {
+		owner = *req.APIKeyID
+	}
+	appliedTo := pq.StringArray{"*"}
+	if len(req.AppliedTo) > 0 {
+		appliedTo = pq.StringArray(req.AppliedTo)
+	}
+	status := types.RuleStatusActive
+	if req.Status != "" {
+		status = req.Status
+	}
 
 	rule := &types.Rule{
 		ID:          ruleID,
@@ -144,11 +223,12 @@ func (s *TemplateService) CreateInstance(ctx context.Context, req *CreateInstanc
 		TemplateID:  &tmpl.ID,
 		Variables:   variablesJSON,
 		Enabled:     true,
+		AppliedTo:   appliedTo,
+		Owner:       owner,
+		Status:      status,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
-
-	// Set scope
 	if req.ChainType != nil {
 		ct := types.ChainType(*req.ChainType)
 		rule.ChainType = &ct
@@ -156,22 +236,15 @@ func (s *TemplateService) CreateInstance(ctx context.Context, req *CreateInstanc
 	if req.ChainID != nil {
 		rule.ChainID = req.ChainID
 	}
-	if req.APIKeyID != nil {
-		rule.APIKeyID = req.APIKeyID
-	}
 	if req.SignerAddress != nil {
 		rule.SignerAddress = req.SignerAddress
 	}
-
-	// Set expiry
 	if req.ExpiresAt != nil {
 		rule.ExpiresAt = req.ExpiresAt
 	} else if req.ExpiresIn != nil {
 		expiresAt := time.Now().Add(*req.ExpiresIn)
 		rule.ExpiresAt = &expiresAt
 	}
-
-	// Set schedule
 	if req.Schedule != nil {
 		rule.BudgetPeriod = &req.Schedule.Period
 		if req.Schedule.StartAt != nil {
@@ -181,34 +254,230 @@ func (s *TemplateService) CreateInstance(ctx context.Context, req *CreateInstanc
 			rule.BudgetPeriodStart = &now
 		}
 	}
-
-	// 7. Save Rule
-	if err := s.ruleRepo.Create(ctx, rule); err != nil {
+	if err := ruleRepo.Create(ctx, rule); err != nil {
 		return nil, fmt.Errorf("failed to create rule: %w", err)
 	}
-
-	s.logger.Info("Created rule instance from template",
-		"rule_id", rule.ID,
-		"template_id", tmpl.ID,
-		"template_name", tmpl.Name,
-	)
-
 	result := &CreateInstanceResult{Rule: rule}
-
-	// 8. Create budget if specified
 	if req.Budget != nil {
-		budget, err := s.createBudget(ctx, rule, tmpl, req.Budget)
+		budget, err := s.createBudgetWithRepo(ctx, budgetRepo, rule, tmpl, req.Budget)
 		if err != nil {
-			// Rollback rule creation
-			if delErr := s.ruleRepo.Delete(ctx, rule.ID); delErr != nil {
-				s.logger.Error("failed to rollback rule creation", "error", delErr)
+			if delErr := ruleRepo.Delete(ctx, rule.ID); delErr != nil {
+				s.logger.Error("failed to rollback rule creation in tx", "error", delErr)
 			}
 			return nil, fmt.Errorf("failed to create budget: %w", err)
 		}
 		result.Budget = budget
 	}
+	return result, nil
+}
+
+// bundleSubRule represents a single sub-rule parsed from a template_bundle's rules_json.
+type bundleSubRule struct {
+	ID          string                 `json:"id,omitempty"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description,omitempty"`
+	Type        string                 `json:"type"`
+	Mode        string                 `json:"mode"`
+	Config      map[string]interface{} `json:"config"`
+	Enabled     bool                   `json:"enabled"`
+}
+
+// createInstanceFromBundle expands a template_bundle into individual sub-rules,
+// creating each as a separate rule in the database. This matches the CLI behavior
+// in expandInstanceRule (internal/config/template_init.go).
+func (s *TemplateService) createInstanceFromBundle(
+	ctx context.Context,
+	ruleRepo storage.RuleRepository,
+	budgetRepo storage.BudgetRepository,
+	tmpl *types.RuleTemplate,
+	req *CreateInstanceRequest,
+	resolvedVars map[string]string,
+	resolvedConfig []byte,
+) (*CreateInstanceResult, error) {
+	// Parse the resolved config to extract rules_json
+	var configMap map[string]interface{}
+	if err := json.Unmarshal(resolvedConfig, &configMap); err != nil {
+		return nil, fmt.Errorf("failed to parse resolved bundle config: %w", err)
+	}
+	rulesJSON, ok := configMap["rules_json"].(string)
+	if !ok {
+		return nil, fmt.Errorf("template_bundle %q has no rules_json in config", tmpl.Name)
+	}
+
+	// Parse the sub-rules
+	var subRules []bundleSubRule
+	if err := json.Unmarshal([]byte(rulesJSON), &subRules); err != nil {
+		return nil, fmt.Errorf("failed to parse bundle rules_json: %w", err)
+	}
+	if len(subRules) == 0 {
+		return nil, fmt.Errorf("template_bundle %q has no sub-rules", tmpl.Name)
+	}
+
+	variablesJSON, err := json.Marshal(resolvedVars)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal resolved variables: %w", err)
+	}
+
+	baseName := s.resolveInstanceName(req, tmpl)
+
+	result := &CreateInstanceResult{
+		SubRules:   make([]*types.Rule, 0, len(subRules)),
+		SubBudgets: make([]*types.RuleBudget, 0),
+	}
+
+	var createdRuleIDs []types.RuleID // track for rollback
+
+	for _, sub := range subRules {
+		subConfigJSON, err := json.Marshal(sub.Config)
+		if err != nil {
+			s.rollbackRules(ctx, ruleRepo, createdRuleIDs)
+			return nil, fmt.Errorf("failed to marshal sub-rule config: %w", err)
+		}
+
+		// Inject instance variables into sub-rule config for evaluators
+		var subConfig map[string]interface{}
+		if err := json.Unmarshal(subConfigJSON, &subConfig); err != nil {
+			s.rollbackRules(ctx, ruleRepo, createdRuleIDs)
+			return nil, fmt.Errorf("failed to parse sub-rule config: %w", err)
+		}
+		for k, v := range resolvedVars {
+			subConfig[k] = v
+		}
+		subConfigJSON, err = json.Marshal(subConfig)
+		if err != nil {
+			s.rollbackRules(ctx, ruleRepo, createdRuleIDs)
+			return nil, fmt.Errorf("failed to re-marshal sub-rule config: %w", err)
+		}
+
+		// Generate a unique ID per sub-rule using the sub-rule's id/name as differentiator
+		subIDSuffix := sub.ID
+		if subIDSuffix == "" {
+			subIDSuffix = sub.Name
+		}
+		subRuleID := s.generateBundleSubRuleID(tmpl.ID, resolvedVars, subIDSuffix)
+
+		ruleName := baseName
+		if len(subRules) > 1 {
+			ruleName = baseName + " / " + sub.Name
+		}
+
+		// Determine ownership: prefer RBAC fields from handler, fall back to legacy defaults
+		owner := "config"
+		if req.Owner != "" {
+			owner = req.Owner
+		} else if req.APIKeyID != nil {
+			owner = *req.APIKeyID
+		}
+		bundleAppliedTo := pq.StringArray{"*"}
+		if len(req.AppliedTo) > 0 {
+			bundleAppliedTo = pq.StringArray(req.AppliedTo)
+		}
+		bundleStatus := types.RuleStatusActive
+		if req.Status != "" {
+			bundleStatus = req.Status
+		}
+
+		rule := &types.Rule{
+			ID:          subRuleID,
+			Name:        ruleName,
+			Description: sub.Description,
+			Type:        types.RuleType(sub.Type),
+			Mode:        types.RuleMode(sub.Mode),
+			Source:      types.RuleSourceInstance,
+			Config:      subConfigJSON,
+			TemplateID:  &tmpl.ID,
+			Variables:   variablesJSON,
+			Enabled:     true,
+			AppliedTo:   bundleAppliedTo,
+			Owner:       owner,
+			Status:      bundleStatus,
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
+		}
+
+		// Apply scope from request
+		if req.ChainType != nil {
+			ct := types.ChainType(*req.ChainType)
+			rule.ChainType = &ct
+		}
+		if req.ChainID != nil {
+			rule.ChainID = req.ChainID
+		}
+		if req.SignerAddress != nil {
+			rule.SignerAddress = req.SignerAddress
+		}
+
+		// Expiry
+		if req.ExpiresAt != nil {
+			rule.ExpiresAt = req.ExpiresAt
+		} else if req.ExpiresIn != nil {
+			expiresAt := time.Now().Add(*req.ExpiresIn)
+			rule.ExpiresAt = &expiresAt
+		}
+
+		// Schedule
+		if req.Schedule != nil {
+			rule.BudgetPeriod = &req.Schedule.Period
+			if req.Schedule.StartAt != nil {
+				rule.BudgetPeriodStart = req.Schedule.StartAt
+			} else {
+				now := time.Now()
+				rule.BudgetPeriodStart = &now
+			}
+		}
+
+		if err := ruleRepo.Create(ctx, rule); err != nil {
+			s.rollbackRules(ctx, ruleRepo, createdRuleIDs)
+			return nil, fmt.Errorf("failed to create sub-rule %q: %w", sub.Name, err)
+		}
+		createdRuleIDs = append(createdRuleIDs, rule.ID)
+		result.SubRules = append(result.SubRules, rule)
+
+		// Create budget for each sub-rule if budget is specified
+		if req.Budget != nil {
+			budget, err := s.createBudgetWithRepo(ctx, budgetRepo, rule, tmpl, req.Budget)
+			if err != nil {
+				s.rollbackRules(ctx, ruleRepo, createdRuleIDs)
+				return nil, fmt.Errorf("failed to create budget for sub-rule %q: %w", sub.Name, err)
+			}
+			result.SubBudgets = append(result.SubBudgets, budget)
+		}
+
+		s.logger.Info("Created sub-rule from template bundle",
+			"rule_id", rule.ID,
+			"sub_rule_name", sub.Name,
+			"template_id", tmpl.ID,
+			"template_name", tmpl.Name,
+			"type", sub.Type,
+			"mode", sub.Mode,
+		)
+	}
+
+	// Set Rule to the first sub-rule for backward compatibility
+	if len(result.SubRules) > 0 {
+		result.Rule = result.SubRules[0]
+	}
+	if len(result.SubBudgets) > 0 {
+		result.Budget = result.SubBudgets[0]
+	}
 
 	return result, nil
+}
+
+// rollbackRules deletes all previously created rules (used on bundle expansion failure).
+func (s *TemplateService) rollbackRules(ctx context.Context, ruleRepo storage.RuleRepository, ruleIDs []types.RuleID) {
+	for _, id := range ruleIDs {
+		if err := ruleRepo.Delete(ctx, id); err != nil {
+			s.logger.Error("failed to rollback sub-rule creation", "rule_id", id, "error", err)
+		}
+	}
+}
+
+// generateBundleSubRuleID generates a deterministic rule ID for a sub-rule within a bundle.
+func (s *TemplateService) generateBundleSubRuleID(templateID string, vars map[string]string, subRuleSuffix string) types.RuleID {
+	data := fmt.Sprintf("instance:%s:%v:%s:%d", templateID, vars, subRuleSuffix, time.Now().UnixNano())
+	hash := sha256.Sum256([]byte(data))
+	return types.RuleID("inst_" + hex.EncodeToString(hash[:8]))
 }
 
 // RevokeInstance disables a rule instance and deletes its budgets
@@ -235,6 +504,11 @@ func (s *TemplateService) RevokeInstance(ctx context.Context, ruleID types.RuleI
 
 	s.logger.Info("Revoked rule instance", "rule_id", ruleID)
 	return nil
+}
+
+// ResolveTemplate finds the template by ID or name (for use outside a DB transaction, e.g. preset apply).
+func (s *TemplateService) ResolveTemplate(ctx context.Context, req *CreateInstanceRequest) (*types.RuleTemplate, error) {
+	return s.resolveTemplate(ctx, req)
 }
 
 // resolveTemplate finds the template by ID or name
@@ -265,23 +539,32 @@ func (s *TemplateService) generateInstanceRuleID(templateID string, vars map[str
 
 // createBudget creates a budget record for the instance
 func (s *TemplateService) createBudget(ctx context.Context, rule *types.Rule, tmpl *types.RuleTemplate, budgetCfg *BudgetConfig) (*types.RuleBudget, error) {
-	// Determine unit from template's BudgetMetering
-	unit := "count" // default
+	return s.createBudgetWithRepo(ctx, s.budgetRepo, rule, tmpl, budgetCfg)
+}
+
+// createBudgetWithRepo creates a budget using the given repo (for use with tx-scoped repo).
+func (s *TemplateService) createBudgetWithRepo(ctx context.Context, budgetRepo storage.BudgetRepository, rule *types.Rule, tmpl *types.RuleTemplate, budgetCfg *BudgetConfig) (*types.RuleBudget, error) {
+	unit := "count"
 	if len(tmpl.BudgetMetering) > 0 {
 		var metering types.BudgetMetering
 		if err := json.Unmarshal(tmpl.BudgetMetering, &metering); err == nil && metering.Unit != "" {
 			unit = metering.Unit
+			if strings.Contains(unit, "${") && len(rule.Variables) > 0 {
+				var vars map[string]string
+				if err := json.Unmarshal(rule.Variables, &vars); err == nil {
+					for k, v := range vars {
+						unit = strings.ReplaceAll(unit, "${"+k+"}", v)
+					}
+				}
+			}
 		}
 	}
-
 	alertPct := budgetCfg.AlertPct
 	if alertPct <= 0 {
 		alertPct = 80
 	}
-
-	budgetID := fmt.Sprintf("bdg_%s_%s", rule.ID, unit)
 	budget := &types.RuleBudget{
-		ID:         budgetID,
+		ID:         types.BudgetID(rule.ID, unit),
 		RuleID:     rule.ID,
 		Unit:       unit,
 		MaxTotal:   budgetCfg.MaxTotal,
@@ -291,17 +574,10 @@ func (s *TemplateService) createBudget(ctx context.Context, rule *types.Rule, tm
 		TxCount:    0,
 		MaxTxCount: budgetCfg.MaxTxCount,
 	}
-
-	if err := s.budgetRepo.Create(ctx, budget); err != nil {
+	if err := budgetRepo.Create(ctx, budget); err != nil {
 		return nil, err
 	}
-
-	attrs := []any{
-		"rule_id", rule.ID,
-		"budget_id", budget.ID,
-		"unit", unit,
-		"max_total", budgetCfg.MaxTotal,
-	}
+	attrs := []any{"rule_id", rule.ID, "budget_id", budget.ID, "unit", unit, "max_total", budgetCfg.MaxTotal}
 	if rule.BudgetPeriod != nil {
 		attrs = append(attrs, "budget_period", rule.BudgetPeriod.String(), "period_renewal", true)
 		if rule.BudgetPeriodStart != nil {
@@ -309,11 +585,34 @@ func (s *TemplateService) createBudget(ctx context.Context, rule *types.Rule, tm
 		}
 	}
 	s.logger.Info("Created budget for instance", attrs...)
-
 	return budget, nil
 }
 
-// SubstituteVariables replaces ${var} placeholders in config JSON with actual values
+// injectReservedVariables injects reserved variables from the rule-level scope
+// into the resolved variables map. chain_id is always taken from
+// CreateInstanceRequest.ChainID (the rule-level scope), never from user input.
+// If the user supplied a chain_id in variables, it is overwritten and a warning
+// is logged — this is a backward-compat path for old presets/configs that still
+// have chain_id in their variables section (which is now deprecated).
+func injectReservedVariables(vars map[string]string, req *CreateInstanceRequest, logger *slog.Logger) {
+	if req.ChainID != nil {
+		if old, exists := vars["chain_id"]; exists && old != *req.ChainID {
+			logger.Warn("overriding user-supplied chain_id variable with rule-level scope",
+				"user_value", old, "scope_value", *req.ChainID)
+		}
+		vars["chain_id"] = *req.ChainID
+	}
+}
+
+// SubstituteVariables replaces ${var} placeholders in config JSON with
+// actual values.
+//
+// Deprecated: This is the pre-R5 string-only substituter. New callers
+// should use SubstituteTyped (substitute.go) which respects the
+// variable's declared type so bool/list/json values land as proper JSON
+// literals rather than quoted strings. Kept while R8 migrates the
+// preset apply / template instance handlers; will be removed when
+// the last call site is rewritten.
 func SubstituteVariables(configJSON []byte, vars map[string]string) ([]byte, error) {
 	result := string(configJSON)
 	for k, v := range vars {
@@ -335,13 +634,40 @@ func SubstituteVariables(configJSON []byte, vars map[string]string) ([]byte, err
 	return []byte(result), nil
 }
 
+// reservedVariables are auto-injected from rule scope and should not be
+// declared in template variable definitions or preset variables sections.
+//
+// DEPRECATED in variables: chain_id is now always injected from the rule-level
+// chain_id scope field. Do NOT declare chain_id in template variables or preset
+// variables — it will be ignored and overwritten. Use the top-level chain_id
+// field in presets/config instead.
+//
+// Old templates/presets that still list chain_id as a variable are tolerated
+// (backward-compat) but the definition is silently skipped during validation.
+var reservedVariables = map[string]bool{
+	"chain_id": true,
+}
+
 // validateVariables validates the provided variables against the template definitions
 func validateVariables(defs []types.TemplateVariable, vars map[string]string) error {
 	for _, def := range defs {
+		// Skip reserved variables – they are injected from rule scope.
+		if reservedVariables[def.Name] {
+			continue
+		}
+
 		val, provided := vars[def.Name]
 
-		// Check required
-		if def.Required && !provided && def.Default == "" {
+		// Check required. Default is typed (any) post-R1 — missing
+		// means nil, or a string that's still empty after the
+		// no-default zero value. Non-string defaults (bool, []string)
+		// always count as "has a default" since their zero values are
+		// legitimate concrete defaults the operator chose.
+		hasDefault := def.Default != nil
+		if s, ok := def.Default.(string); ok && s == "" {
+			hasDefault = false
+		}
+		if def.Required && !provided && !hasDefault {
 			return fmt.Errorf("required variable '%s' is missing", def.Name)
 		}
 
@@ -359,18 +685,21 @@ func validateVariables(defs []types.TemplateVariable, vars map[string]string) er
 	return nil
 }
 
-// validateVariableType validates a variable value against its declared type
-func validateVariableType(name, varType, value string) error {
+// validateVariableType validates a variable value against its declared
+// type. value is the wire string at apply time; the typed re-parse for
+// substitution happens later in R5's typed substituter — this is the
+// legacy validator kept alive while the type system migrates.
+func validateVariableType(name string, varType types.VariableType, value string) error {
 	switch varType {
-	case "address":
+	case types.VarTypeAddress:
 		if !isValidAddress(value) {
 			return fmt.Errorf("variable '%s': invalid address format '%s'", name, value)
 		}
-	case "uint256":
+	case types.VarTypeBigInt:
 		if !isValidUint256(value) {
-			return fmt.Errorf("variable '%s': invalid uint256 format '%s'", name, value)
+			return fmt.Errorf("variable '%s': invalid bigint format '%s'", name, value)
 		}
-	case "address_list":
+	case types.VarTypeAddressList:
 		parts := strings.Split(value, ",")
 		for _, part := range parts {
 			part = strings.TrimSpace(part)
@@ -378,15 +707,15 @@ func validateVariableType(name, varType, value string) error {
 				return fmt.Errorf("variable '%s': invalid address in list '%s'", name, part)
 			}
 		}
-	case "uint256_list":
+	case types.VarTypeBigIntList:
 		parts := strings.Split(value, ",")
 		for _, part := range parts {
 			part = strings.TrimSpace(part)
 			if part != "" && !isValidUint256(part) {
-				return fmt.Errorf("variable '%s': invalid uint256 in list '%s'", name, part)
+				return fmt.Errorf("variable '%s': invalid bigint in list '%s'", name, part)
 			}
 		}
-	case "string":
+	case types.VarTypeString:
 		// Any string is valid
 	default:
 		// Unknown type, skip validation
@@ -394,16 +723,30 @@ func validateVariableType(name, varType, value string) error {
 	return nil
 }
 
-// resolveDefaults fills in default values for optional variables that were not provided
+// resolveDefaults fills in default values for optional variables that
+// were not provided. Default is typed (any) — R5 will rewrite the
+// substituter to dispatch on type; for now this legacy path coerces
+// string defaults straight through and uses fmt.Sprint for the rest
+// so the existing tests keep passing through R1.
 func resolveDefaults(defs []types.TemplateVariable, vars map[string]string) map[string]string {
 	result := make(map[string]string, len(vars))
 	for k, v := range vars {
 		result[k] = v
 	}
 	for _, def := range defs {
-		if _, provided := result[def.Name]; !provided && def.Default != "" {
-			result[def.Name] = def.Default
+		if _, provided := result[def.Name]; provided {
+			continue
 		}
+		if def.Default == nil {
+			continue
+		}
+		if s, ok := def.Default.(string); ok {
+			if s != "" {
+				result[def.Name] = s
+			}
+			continue
+		}
+		result[def.Name] = fmt.Sprint(def.Default)
 	}
 	return result
 }

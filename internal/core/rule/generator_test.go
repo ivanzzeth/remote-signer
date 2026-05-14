@@ -382,8 +382,7 @@ func TestGenerate_ScopeFieldsPropagated(t *testing.T) {
 	assert.Equal(t, types.ChainTypeEVM, *rule.ChainType)
 	require.NotNil(t, rule.ChainID)
 	assert.Equal(t, "137", *rule.ChainID)
-	require.NotNil(t, rule.APIKeyID)
-	assert.Equal(t, "api-key-42", *rule.APIKeyID)
+	assert.Equal(t, "api-key-42", rule.Owner)
 	require.NotNil(t, rule.SignerAddress)
 	assert.Equal(t, "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266", *rule.SignerAddress)
 }

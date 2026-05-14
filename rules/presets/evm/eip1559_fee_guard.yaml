@@ -1,0 +1,17 @@
+# Preset: EIP-1559 Fee Guard (evm_js). Blocklist mode — blocks transactions exceeding gas limit or value cap.
+# Use: remote-signer-cli preset create-from eip1559_fee_guard.preset.js.yaml [--config config.yaml --write] [--set max_gas=500000 --set max_value=1000000000000000000]
+
+name: "EIP-1559 Fee Guard (JS)"
+chain_type: "evm"
+chain_id: "1"
+enabled: true
+variables:
+  max_gas: "500000"
+  max_value: "-1"
+template_ids:
+  - evm/eip1559_fee_guard
+operator_overrides:
+  - name: max_gas
+    required: false
+  - name: max_value
+    required: false

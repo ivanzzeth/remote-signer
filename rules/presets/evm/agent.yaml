@@ -1,0 +1,90 @@
+# Preset: Agent (evm_js) — AI agent with simulation-based budget tracking.
+# Two sub-rules: agent-sign (whitelist), agent-safety (blocklist).
+# Transaction signing has NO whitelist rule — falls through to SimulationBudgetRule
+# which forks the chain, simulates the tx, and tracks real token outflows.
+#
+# No chain_id restriction — agent can interact with ANY chain.
+# Budget tracks spending per {chain_id}:{token} dynamically.
+#
+# Usage:
+#   remote-signer-cli preset create-from agent.preset.js.yaml \
+#     --set max_native_total=1 --set max_native_per_tx=0.1 \
+#     --set max_unknown_token_total=1000 \
+#     --config config.yaml --write
+#
+# All budget values are overridable via --set. Defaults are conservative.
+# Budget amounts use unit_decimal mode — human-readable (e.g. "1" = 1 ETH, "1000" = 1000 USDC).
+# Token decimals are auto-queried from chain via rpc_gateway.
+
+name: "Agent"
+chain_type: "evm"
+# No chain_id — matches ALL chains. Budget isolates per chain automatically.
+enabled: true
+variables:
+  # Personal sign message length limit (bytes)
+  max_message_length: "1024"
+  # Budget period (reset interval)
+  budget_period: "24h"
+  # Native token budget (human-readable, e.g. "1" = 1 ETH/MATIC/BNB)
+  max_native_total: "1"
+  max_native_per_tx: "0.1"
+  # Transaction count budget (for calls not matching known token patterns)
+  max_tx_count: "1000"
+  # Signature count budget (personal_sign + typed_data)
+  max_sign_count: "500"
+  # Unknown token default budget (human-readable, decimals auto-queried)
+  max_unknown_token_total: "1000"
+  max_unknown_token_per_tx: "100"
+  max_unknown_token_tx_count: "50"
+  # Comma-separated trusted contract addresses shared across signature types.
+  # Permit: spender must be in this list. Non-Permit typed_data: verifyingContract must be in this list.
+  # If empty, ALL Permit signatures are blocked (fail-closed). Set to known DEX routers.
+  # Example: "0x3b86917369b83a6892f553609f3c2f439c184e31"
+  trusted_contracts: ""
+budget:
+  dynamic: true
+  unit_decimal: true
+  known_units:
+    native:
+      max_total: "${max_native_total}"
+      max_per_tx: "${max_native_per_tx}"
+      decimals: 18
+    tx_count:
+      max_total: "${max_tx_count}"
+      max_per_tx: "1"
+      decimals: 0
+    sign_count:
+      max_total: "${max_sign_count}"
+      max_per_tx: "1"
+      decimals: 0
+  unknown_default:
+    max_total: "${max_unknown_token_total}"
+    max_per_tx: "${max_unknown_token_per_tx}"
+    max_tx_count: "${max_unknown_token_tx_count}"
+  period: "${budget_period}"
+  alert_pct: 80
+schedule:
+  period: "${budget_period}"
+template_ids:
+  - evm/agent
+operator_overrides:
+  - name: max_message_length
+    required: false
+  - name: budget_period
+    required: false
+  - name: max_native_total
+    required: false
+  - name: max_native_per_tx
+    required: false
+  - name: max_tx_count
+    required: false
+  - name: max_sign_count
+    required: false
+  - name: max_unknown_token_total
+    required: false
+  - name: max_unknown_token_per_tx
+    required: false
+  - name: max_unknown_token_tx_count
+    required: false
+  - name: trusted_contracts
+    required: false

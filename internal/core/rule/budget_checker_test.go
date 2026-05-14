@@ -83,6 +83,37 @@ func TestBudgetChecker_MeteringMethodEmpty(t *testing.T) {
 	assert.True(t, ok)
 }
 
+func TestBudgetChecker_MethodJs_NoEvaluator_FailClosed(t *testing.T) {
+	metering, _ := json.Marshal(types.BudgetMetering{Method: "js", Unit: "tok"})
+	tr := &stubTemplateRepo{tmpl: &types.RuleTemplate{ID: "t1", BudgetMetering: metering}}
+	br := &stubBudgetRepo{budget: &types.RuleBudget{RuleID: "r1", Unit: "tok", MaxTotal: "100", Spent: "0"}}
+	bc := NewBudgetChecker(br, tr, slog.Default())
+	// SetJSEvaluator not called → method "js" must fail-closed
+	rule := &types.Rule{ID: "r1", TemplateID: ptrStr("t1")}
+	ok, err := bc.CheckAndDeductBudget(context.Background(), rule, &types.SignRequest{}, nil)
+	require.Error(t, err)
+	assert.False(t, ok)
+	assert.Contains(t, err.Error(), "SetJSEvaluator")
+}
+
+func TestBudgetChecker_MethodJs_WithEvaluator_DeductsCorrectly(t *testing.T) {
+	metering, _ := json.Marshal(types.BudgetMetering{Method: "js", Unit: "tok"})
+	tr := &stubTemplateRepo{tmpl: &types.RuleTemplate{ID: "t1", BudgetMetering: metering}}
+	br := &stubBudgetRepo{
+		budget: &types.RuleBudget{RuleID: "r1", Unit: "tok", MaxTotal: "100", Spent: "0", MaxPerTx: "50"},
+	}
+	bc := NewBudgetChecker(br, tr, slog.Default())
+	bc.SetJSEvaluator(&stubJSEvaluator{amount: big.NewInt(10)})
+	rule := &types.Rule{ID: "r1", TemplateID: ptrStr("t1")}
+	ok, err := bc.CheckAndDeductBudget(context.Background(), rule, &types.SignRequest{}, nil)
+	require.NoError(t, err)
+	assert.True(t, ok)
+	assert.True(t, br.atomicSpendCalled)
+	assert.Equal(t, "10", br.lastAtomicSpendAmount)
+	assert.Equal(t, types.RuleID("r1"), br.lastAtomicSpendRuleID)
+	assert.Equal(t, "tok", br.lastAtomicSpendUnit)
+}
+
 func TestBudgetChecker_InvalidMeteringJSON(t *testing.T) {
 	tr := &stubTemplateRepo{tmpl: &types.RuleTemplate{ID: "t1", BudgetMetering: []byte(`{bad}`)}}
 	bc := NewBudgetChecker(&stubBudgetRepo{}, tr, slog.Default())
@@ -122,15 +153,13 @@ func TestBudgetChecker_PerTxLimitExceeded(t *testing.T) {
 	tr := &stubTemplateRepo{tmpl: &types.RuleTemplate{ID: "t1", BudgetMetering: metering}}
 	br := &stubBudgetRepo{budget: &types.RuleBudget{
 		MaxTotal: "1000",
-		MaxPerTx: "0", // 0 means no per-tx limit actually... let's use something small
+		MaxPerTx: "-1", // -1 = no per-tx cap
 		Spent:    "0",
 	}}
-	// Override: MaxPerTx = "0" doesn't trigger limit. Check with non-zero.
-	br.budget.MaxPerTx = "0" // "0" is treated as no limit
 	bc := NewBudgetChecker(br, tr, slog.Default())
 	rule := &types.Rule{ID: "r1", TemplateID: ptrStr("t1")}
 
-	// count_only returns 1, maxPerTx "0" is skipped so it should pass
+	// count_only returns 1, maxPerTx "-1" = no cap so it should pass
 	ok, err := bc.CheckAndDeductBudget(context.Background(), rule, &types.SignRequest{}, nil)
 	require.NoError(t, err)
 	assert.True(t, ok)
@@ -522,7 +551,7 @@ func TestLogScopeMismatch_AllFields(t *testing.T) {
 	rule := &types.Rule{
 		ChainType:     &ct,
 		ChainID:       ptrStr("1"),
-		APIKeyID:      ptrStr("api-1"),
+		Owner:         "api-1",
 		SignerAddress: ptrStr("0xABC"),
 	}
 	req := &types.SignRequest{
@@ -777,18 +806,27 @@ func ptrStr(s string) *string { return &s }
 
 // stubBudgetRepo is a minimal BudgetRepository for unit tests.
 type stubBudgetRepo struct {
-	budget             *types.RuleBudget
-	getErr             error
-	atomicErr          error
-	atomicSpendCalled  bool
-	lastUnit           string
-	markAlertSentCalled bool
-	markAlertSentRuleID types.RuleID
-	markAlertSentUnit   string
-	markAlertSentErr    error
+	budget               *types.RuleBudget
+	getErr               error
+	atomicErr            error
+	atomicSpendCalled    bool
+	lastAtomicSpendAmount string
+	lastAtomicSpendRuleID types.RuleID
+	lastAtomicSpendUnit   string
+	lastUnit             string
+	markAlertSentCalled  bool
+	markAlertSentRuleID  types.RuleID
+	markAlertSentUnit    string
+	markAlertSentErr     error
 }
 
 func (r *stubBudgetRepo) Create(ctx context.Context, budget *types.RuleBudget) error { return nil }
+func (r *stubBudgetRepo) CreateOrGet(ctx context.Context, budget *types.RuleBudget) (*types.RuleBudget, bool, error) {
+	return budget, true, nil
+}
+func (r *stubBudgetRepo) CountByRuleID(ctx context.Context, ruleID types.RuleID) (int, error) {
+	return 0, nil
+}
 func (r *stubBudgetRepo) Delete(ctx context.Context, id string) error               { return nil }
 func (r *stubBudgetRepo) DeleteByRuleID(ctx context.Context, ruleID types.RuleID) error {
 	return nil
@@ -798,6 +836,15 @@ func (r *stubBudgetRepo) ListByRuleID(ctx context.Context, ruleID types.RuleID) 
 }
 func (r *stubBudgetRepo) ListByRuleIDs(ctx context.Context, ruleIDs []types.RuleID) ([]*types.RuleBudget, error) {
 	return nil, nil
+}
+func (r *stubBudgetRepo) ListAll(ctx context.Context) ([]*types.RuleBudget, error) {
+	return nil, nil
+}
+func (r *stubBudgetRepo) Get(ctx context.Context, id string) (*types.RuleBudget, error) {
+	return nil, types.ErrNotFound
+}
+func (r *stubBudgetRepo) Update(ctx context.Context, budget *types.RuleBudget) error {
+	return nil
 }
 func (r *stubBudgetRepo) GetByRuleID(ctx context.Context, ruleID types.RuleID, unit string) (*types.RuleBudget, error) {
 	r.lastUnit = unit
@@ -815,6 +862,9 @@ func (r *stubBudgetRepo) ResetBudget(ctx context.Context, ruleID types.RuleID, u
 }
 func (r *stubBudgetRepo) AtomicSpend(ctx context.Context, ruleID types.RuleID, unit string, amount string) error {
 	r.atomicSpendCalled = true
+	r.lastAtomicSpendAmount = amount
+	r.lastAtomicSpendRuleID = ruleID
+	r.lastAtomicSpendUnit = unit
 	return r.atomicErr
 }
 func (r *stubBudgetRepo) MarkAlertSent(ctx context.Context, ruleID types.RuleID, unit string) error {
@@ -828,6 +878,24 @@ func (r *stubBudgetRepo) MarkAlertSent(ctx context.Context, ruleID types.RuleID,
 type stubTemplateRepo struct {
 	tmpl *types.RuleTemplate
 	err  error
+}
+
+// stubJSEvaluator implements BudgetJSEvaluator for method "js" tests.
+type stubJSEvaluator struct {
+	amount *big.Int
+	unit   string // dynamic unit; empty for backward compat
+	err    error
+}
+
+func (s *stubJSEvaluator) EvaluateBudget(ctx context.Context, rule *types.Rule, req *types.SignRequest, parsed *types.ParsedPayload) (*types.BudgetResult, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	amount := big.NewInt(0)
+	if s.amount != nil {
+		amount = new(big.Int).Set(s.amount)
+	}
+	return &types.BudgetResult{Amount: amount, Unit: s.unit}, nil
 }
 
 func (r *stubTemplateRepo) Get(ctx context.Context, id string) (*types.RuleTemplate, error) {
@@ -850,6 +918,15 @@ func (r *stubTemplateRepo) List(ctx context.Context, filter storage.TemplateFilt
 }
 func (r *stubTemplateRepo) Count(ctx context.Context, filter storage.TemplateFilter) (int, error) {
 	return 0, nil
+}
+func (r *stubTemplateRepo) Upsert(ctx context.Context, tmpl *types.RuleTemplate) (bool, error) {
+	return false, nil
+}
+func (r *stubTemplateRepo) ListIDsBySource(ctx context.Context, source types.RuleSource) ([]string, error) {
+	return nil, nil
+}
+func (r *stubTemplateRepo) DeleteMany(ctx context.Context, ids []string) error {
+	return nil
 }
 
 // simpleEvaluator is a basic evaluator that returns configurable results.

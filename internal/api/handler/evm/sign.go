@@ -1,6 +1,7 @@
 package evm
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,20 +15,43 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/metrics"
+	"github.com/ivanzzeth/remote-signer/internal/storage"
 	"github.com/ivanzzeth/remote-signer/internal/validate"
 )
 
 // SignHandler handles EVM sign requests
 type SignHandler struct {
-	signService   *service.SignService
+	signService   service.SignServiceAPI
 	signerManager evm.SignerManager
+	accessService *service.SignerAccessService
+	signerRepo    storage.SignerRepository
 	logger        *slog.Logger
+	alertService  *middleware.SecurityAlertService
+	signTimeout   time.Duration // context timeout for sign operations (default: 30s)
+}
+
+// SetAlertService sets the security alert service for real-time notifications.
+func (h *SignHandler) SetAlertService(alertService *middleware.SecurityAlertService) {
+	h.alertService = alertService
+}
+
+// SetSignTimeout sets the context timeout for sign operations.
+func (h *SignHandler) SetSignTimeout(d time.Duration) {
+	h.signTimeout = d
+}
+
+// SetSignerRepo sets signer repository for material status guard checks.
+func (h *SignHandler) SetSignerRepo(repo storage.SignerRepository) {
+	h.signerRepo = repo
 }
 
 // NewSignHandler creates a new sign handler
-func NewSignHandler(signService *service.SignService, signerManager evm.SignerManager, logger *slog.Logger) (*SignHandler, error) {
+func NewSignHandler(signService service.SignServiceAPI, signerManager evm.SignerManager, accessService *service.SignerAccessService, logger *slog.Logger) (*SignHandler, error) {
 	if signService == nil {
 		return nil, fmt.Errorf("sign service is required")
+	}
+	if accessService == nil {
+		return nil, fmt.Errorf("access service is required")
 	}
 	if logger == nil {
 		return nil, fmt.Errorf("logger is required")
@@ -35,6 +59,7 @@ func NewSignHandler(signService *service.SignService, signerManager evm.SignerMa
 	return &SignHandler{
 		signService:   signService,
 		signerManager: signerManager,
+		accessService: accessService,
 		logger:        logger,
 	}, nil
 }
@@ -73,12 +98,6 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
 		h.writeError(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	// Check chain permission
-	if !middleware.CheckChainPermission(apiKey, types.ChainTypeEVM) {
-		h.writeError(w, "not authorized for EVM chain", http.StatusForbidden)
 		return
 	}
 
@@ -126,18 +145,40 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check signer permission (includes HD wallet derived address check)
-	var hdMgr middleware.HDWalletDerivedLister
-	if h.signerManager != nil {
-		var hdErr error
-		hdMgr, hdErr = h.signerManager.HDWalletManager()
-		if hdErr != nil {
-			h.logger.Warn("failed to get HD wallet manager for permission check", "error", hdErr)
-		}
+	// Check signer access via ownership/access service
+	allowed, err := h.accessService.CheckAccess(r.Context(), apiKey.ID, req.SignerAddress)
+	if err != nil {
+		h.logger.Error("signer access check failed",
+			"api_key_id", apiKey.ID,
+			"signer_address", req.SignerAddress,
+			"error", err,
+		)
+		h.writeError(w, "failed to check signer access", http.StatusInternalServerError)
+		return
 	}
-	if !middleware.CheckSignerPermissionWithHDWallets(apiKey, req.SignerAddress, hdMgr) {
+	if !allowed {
+		h.logger.Warn("signer permission denied",
+			"api_key_id", apiKey.ID,
+			"signer_address", req.SignerAddress,
+		)
+		if h.alertService != nil {
+			clientIP, _ := r.Context().Value(middleware.ClientIPContextKey).(string)
+			h.alertService.Alert(middleware.AlertSignerDenied, apiKey.ID,
+				fmt.Sprintf("[Remote Signer] SIGNER ACCESS DENIED\n\nAPI Key: %s (%s)\nIP: %s\nSigner: %s\nTime: %s",
+					apiKey.ID, apiKey.Name, clientIP, req.SignerAddress,
+					time.Now().UTC().Format(time.RFC3339)))
+		}
 		h.writeError(w, "not authorized for this signer", http.StatusForbidden)
 		return
+	}
+	if h.signerRepo != nil {
+		rec, recErr := h.signerRepo.Get(r.Context(), req.SignerAddress)
+		if recErr == nil && rec != nil {
+			if rec.MaterialStatus != types.SignerMaterialStatusPresent {
+				h.writeError(w, fmt.Sprintf("signer material unavailable: %s", rec.MaterialStatus), http.StatusConflict)
+				return
+			}
+		}
 	}
 
 	start := time.Now()
@@ -145,6 +186,7 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Process sign request
 	signReq := &service.SignRequest{
 		APIKeyID:      apiKey.ID,
+		APIKeyRole:    apiKey.Role,
 		ChainType:     types.ChainTypeEVM,
 		ChainID:       req.ChainID,
 		SignerAddress: req.SignerAddress,
@@ -153,60 +195,61 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ClientIP:      clientIP,
 	}
 
-	resp, err := h.signService.Sign(r.Context(), signReq)
+	signTimeout := h.signTimeout
+	if signTimeout == 0 {
+		signTimeout = 30 * time.Second
+	}
+	signCtx, signCancel := context.WithTimeout(r.Context(), signTimeout)
+	defer signCancel()
+
+	resp, err := h.signService.Sign(signCtx, signReq)
 	duration := time.Since(start)
 	chainType := string(types.ChainTypeEVM)
 
 	if err != nil {
-		if types.IsSignerLocked(err) {
-			h.logger.Warn("signer is locked",
-				"signer_address", req.SignerAddress,
-				"sign_type", req.SignType,
-				"chain_id", req.ChainID,
-			)
-			metrics.RecordSignRequestDuration(chainType, req.SignType, metrics.SignOutcomeError, duration)
-			h.writeError(w, fmt.Sprintf("signer is locked: %s — unlock via POST /api/v1/evm/signers/%s/unlock", req.SignerAddress, req.SignerAddress), http.StatusForbidden)
-			return
-		}
-		if types.IsNotFound(err) || types.IsSignerNotFound(err) {
+		// SECURITY NOTE (V3-10): Different responses for locked vs not-found signers are intentional.
+		// AI agents need to distinguish these states to guide human operators (e.g., "unlock signer"
+		// vs "signer doesn't exist"). This endpoint is behind authentication + signer access control,
+		// so only authorized users see this information. Accepted risk per security audit v3.
+		errResult := categorizeSignError(err, req.SignerAddress)
+
+		// Choose appropriate log level and metrics outcome based on error category
+		outcome := metrics.SignOutcomeError
+		switch errResult.StatusCode {
+		case http.StatusNotFound:
+			outcome = metrics.SignOutcomeNotFound
 			h.logger.Warn("signer not found",
 				"signer_address", req.SignerAddress,
 				"sign_type", req.SignType,
 				"chain_id", req.ChainID,
 			)
-			metrics.RecordSignRequestDuration(chainType, req.SignType, metrics.SignOutcomeNotFound, duration)
-			h.writeError(w, fmt.Sprintf("signer not found: %s", req.SignerAddress), http.StatusNotFound)
-			return
-		}
-		if errors.Is(err, types.ErrInvalidPayload) {
+		case http.StatusForbidden:
+			if errors.Is(err, service.ErrManualApprovalDisabled) {
+				outcome = metrics.SignOutcomeRejected
+			}
+			h.logger.Warn("sign request forbidden",
+				"signer_address", req.SignerAddress,
+				"sign_type", req.SignType,
+				"chain_id", req.ChainID,
+			)
+		case http.StatusBadRequest:
 			h.logger.Warn("invalid payload",
 				"error", err,
 				"signer_address", req.SignerAddress,
 				"sign_type", req.SignType,
 				"chain_id", req.ChainID,
 			)
-			metrics.RecordSignRequestDuration(chainType, req.SignType, metrics.SignOutcomeError, duration)
-			h.writeError(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if errors.Is(err, service.ErrManualApprovalDisabled) {
-			h.logger.Warn("request rejected: no matching rule and manual approval disabled",
+		default:
+			h.logger.Error("sign request failed",
+				"error", err,
 				"signer_address", req.SignerAddress,
 				"sign_type", req.SignType,
 				"chain_id", req.ChainID,
 			)
-			metrics.RecordSignRequestDuration(chainType, req.SignType, metrics.SignOutcomeRejected, duration)
-			h.writeError(w, "no matching rule and manual approval is disabled", http.StatusForbidden)
-			return
 		}
-		h.logger.Error("sign request failed",
-			"error", err,
-			"signer_address", req.SignerAddress,
-			"sign_type", req.SignType,
-			"chain_id", req.ChainID,
-		)
-		metrics.RecordSignRequestDuration(chainType, req.SignType, metrics.SignOutcomeError, duration)
-		h.writeError(w, "sign request failed", http.StatusInternalServerError)
+
+		metrics.RecordSignRequestDuration(chainType, req.SignType, outcome, duration)
+		h.writeError(w, errResult.Message, errResult.StatusCode)
 		return
 	}
 

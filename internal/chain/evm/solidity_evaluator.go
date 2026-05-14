@@ -151,16 +151,15 @@ contract RuleEvaluatorTest is Test {
 
     function test_rule() public {
         bytes memory txData = ruleContract.txData();
-        if (txData.length >= 4) {
-            (bool success, bytes memory returnData) = address(ruleContract).call(txData);
-            if (!success) {
-                if (returnData.length > 0) {
-                    assembly {
-                        revert(add(returnData, 32), mload(returnData))
-                    }
+        require(txData.length >= 4, "calldata too short: no selector");
+        (bool success, bytes memory returnData) = address(ruleContract).call(txData);
+        if (!success) {
+            if (returnData.length > 0) {
+                assembly {
+                    revert(add(returnData, 32), mload(returnData))
                 }
-                revert("no matching function or validation failed");
             }
+            revert("no matching function or validation failed");
         }
     }
 }
@@ -435,6 +434,15 @@ func (e *SolidityRuleEvaluator) Evaluate(
 		return false, "", nil
 	}
 
+	// Whitelist transaction rules: selector or decode must be valid; missing/short calldata = fail (do not allow)
+	if rule.Mode == types.RuleModeWhitelist && (config.Functions != "" || config.Expression != "") {
+		if config.TypedDataExpression == "" && config.TypedDataFunctions == "" {
+			if parsed == nil || len(parsed.RawData) < 4 {
+				return false, "transaction calldata missing or too short: no selector", nil
+			}
+		}
+	}
+
 	var passed bool
 	var reason string
 	var err error
@@ -636,9 +644,17 @@ func processInOperatorToMappings(source string, inMappingArrays map[string][]str
 			addrs := inMappingArrays[varName]
 			for _, a := range addrs {
 				addr := strings.TrimSpace(a)
-				if addr != "" {
-					constructorInits = append(constructorInits, mappingName+"["+addr+"] = true;")
+				if addr == "" {
+					continue
 				}
+				// Defense-in-depth: validate address before embedding in generated Solidity code.
+				// Invalid addresses would cause compilation failure anyway, but explicit validation
+				// catches the issue earlier with a clear error message.
+				if !common.IsHexAddress(addr) {
+					continue
+				}
+				checksumAddr := common.HexToAddress(addr).Hex()
+				constructorInits = append(constructorInits, mappingName+"["+checksumAddr+"] = true;")
 			}
 		}
 		return mappingName + "[" + expr + "]"
@@ -840,11 +856,12 @@ func (e *SolidityRuleEvaluator) executeScript(ctx context.Context, script string
 			"-vvv", // verbose for revert reasons
 		)
 	} else {
-		// Use forge script for RuleEvaluator contracts
-		// Use cache path to speed up compilation
+		// Use forge script for RuleEvaluator contracts.
+		// Foundry expects "path:ContractName" or "ContractName"; pass path:RuleEvaluator.
+		scriptTarget := scriptPath + ":RuleEvaluator"
 		cmd = exec.CommandContext(execCtx, // #nosec G204 -- foundryPath is admin-configured
 			e.foundryPath, "script",
-			scriptPath,
+			scriptTarget,
 			"--json",
 			"--cache-path", filepath.Join(e.cacheDir, "forge-cache"),
 			"-vvv", // verbose for revert reasons
@@ -2357,12 +2374,11 @@ func (e *SolidityRuleEvaluator) executeBatchScript(
 		// For cached results, we assume all tests passed or all failed together
 		// This is a simplification - in practice, batch results need per-test caching
 		results := make(map[int]*batchTestResult)
-		for testIdx, ctxIdx := range ruleIndices {
+		for _, ctxIdx := range ruleIndices {
 			results[ctxIdx] = &batchTestResult{
 				passed: cachedResult.passed,
 				reason: cachedResult.reason,
 			}
-			_ = testIdx // suppress unused warning
 		}
 		return results, nil
 	}

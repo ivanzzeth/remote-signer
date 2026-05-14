@@ -42,6 +42,12 @@ type SignerLocker interface {
 	LockSigner(ctx context.Context, address string) error
 }
 
+// SignerDeleter can permanently delete a signer (remove file, clean in-memory state).
+type SignerDeleter interface {
+	SignerProvider
+	DeleteSigner(ctx context.Context, address string) error
+}
+
 // HDWalletManager defines HD wallet-specific operations.
 // The API handler type-asserts a SignerProvider to this interface.
 type HDWalletManager interface {

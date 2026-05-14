@@ -5,13 +5,13 @@ JavaScript/TypeScript client library for the remote-signer service. This library
 ## Installation
 
 ```bash
-npm install @remote-signer/client
+npm install remote-signer-client
 ```
 
 ## Quick Start
 
 ```typescript
-import { RemoteSignerClient } from '@remote-signer/client';
+import { RemoteSignerClient } from 'remote-signer-client';
 
 const client = new RemoteSignerClient({
   baseURL: 'http://localhost:8548',
@@ -123,6 +123,80 @@ const response = await client.approveRequest('request-id', {
 });
 ```
 
+#### `evm.simulate(request: SimulateRequest): Promise<SimulateResponse>`
+
+Simulate a single transaction.
+
+```typescript
+const result = await client.evm.simulate({
+  chainId: '1',
+  from: '0x...',
+  to: '0x...',
+  value: '0x0',
+  data: '0x...',
+});
+```
+
+#### `evm.simulateBatch(request: SimulateBatchRequest): Promise<SimulateBatchResponse>`
+
+Simulate multiple transactions in sequence.
+
+```typescript
+const result = await client.evm.simulateBatch({
+  chainId: '1',
+  from: '0x...',
+  transactions: [
+    { to: '0x...', value: '0x0', data: '0x...' },
+    { to: '0x...', value: '0x0', data: '0x...' },
+  ],
+});
+```
+
+#### `evm.simulate.status(): Promise<SimulateStatusResponse>`
+
+Check simulation engine health/status.
+
+#### `evm.sign.executeBatch(request: BatchSignRequest): Promise<BatchSignResponse>`
+
+Sign multiple transactions atomically (simulate + sign).
+
+```typescript
+const result = await client.evm.sign.executeBatch({
+  requests: [
+    { chain_id: '1', signer_address: '0x...', sign_type: 'transaction', payload: { ... } },
+    { chain_id: '1', signer_address: '0x...', sign_type: 'transaction', payload: { ... } },
+  ],
+});
+```
+
+#### Signer Access Control
+
+```typescript
+// Grant access to another API key
+await client.evm.signers.grantAccess('0xAddr', { api_key_id: 'other-key' });
+
+// Revoke access
+await client.evm.signers.revokeAccess('0xAddr', 'other-key');
+
+// List access
+const access = await client.evm.signers.listAccess('0xAddr');
+
+// Transfer ownership
+await client.evm.signers.transferOwnership('0xAddr', { new_owner_id: 'new-admin' });
+
+// Delete signer
+await client.evm.signers.deleteSigner('0xAddr');
+```
+
+#### Rule Approval
+
+Only the signer's **owner API key** can approve or reject pending requests:
+
+```typescript
+await client.approveRequest('request-id', { approved: true });
+await client.approveRequest('request-id', { approved: false });
+```
+
 ## Error Handling
 
 The client throws specific error types:
@@ -133,7 +207,7 @@ The client throws specific error types:
 - `RemoteSignerError`: General client errors
 
 ```typescript
-import { APIError, SignError, TimeoutError } from '@remote-signer/client';
+import { APIError, SignError, TimeoutError } from 'remote-signer-client';
 
 try {
   await client.sign(request, true);
@@ -195,6 +269,27 @@ npm run test:e2e
 ```bash
 npm run lint
 ```
+
+## Publishing to npm
+
+The package is **unscoped** (`remote-signer-client`), same style as [eip155-chains](https://www.npmjs.com/package/eip155-chains): no org needed, always public.
+
+1. **Auth** (one-time per machine): set a token in `~/.npmrc`:
+   ```bash
+   echo "//registry.npmjs.org/:_authToken=YOUR_NPM_TOKEN" >> ~/.npmrc
+   chmod 600 ~/.npmrc
+   ```
+   Create a token at [npmjs.com](https://www.npmjs.com) → Account → Access Tokens (Automation or Publish).
+
+2. **Build and publish** from this directory:
+   ```bash
+   cd pkg/js-client
+   npm run build
+   npm publish
+   ```
+   Unscoped packages are public by default; no `--access public` needed.
+
+3. **Subsequent releases**: bump `version` in `package.json` (or `npm version patch`), then `npm publish` again.
 
 ## License
 

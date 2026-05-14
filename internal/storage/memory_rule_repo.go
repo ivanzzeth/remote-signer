@@ -95,7 +95,7 @@ func (r *MemoryRuleRepository) Delete(ctx context.Context, id types.RuleID) erro
 	return nil
 }
 
-// List returns rules matching the filter. Scope fields (ChainType, ChainID, APIKeyID, SignerAddress)
+// List returns rules matching the filter. Scope fields (ChainType, ChainID, Owner, SignerAddress)
 // use same semantics as GORM: rule field nil = applies to all; include when rule field is nil OR equals filter.
 func (r *MemoryRuleRepository) List(ctx context.Context, filter RuleFilter) ([]*types.Rule, error) {
 	r.mu.RLock()
@@ -108,7 +108,7 @@ func (r *MemoryRuleRepository) List(ctx context.Context, filter RuleFilter) ([]*
 		if filter.ChainID != nil && rule.ChainID != nil && *rule.ChainID != *filter.ChainID {
 			continue
 		}
-		if filter.APIKeyID != nil && rule.APIKeyID != nil && *rule.APIKeyID != *filter.APIKeyID {
+		if filter.Owner != nil && rule.Owner != *filter.Owner {
 			continue
 		}
 		if filter.SignerAddress != nil && rule.SignerAddress != nil && !strings.EqualFold(*rule.SignerAddress, *filter.SignerAddress) {
@@ -170,10 +170,6 @@ func cloneRule(r *types.Rule) *types.Rule {
 	if r.ChainID != nil {
 		s := *r.ChainID
 		clone.ChainID = &s
-	}
-	if r.APIKeyID != nil {
-		s := *r.APIKeyID
-		clone.APIKeyID = &s
 	}
 	if r.SignerAddress != nil {
 		s := *r.SignerAddress

@@ -18,9 +18,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ivanzzeth/remote-signer/pkg/client/acls"
+	"github.com/ivanzzeth/remote-signer/pkg/client/apikeys"
 	"github.com/ivanzzeth/remote-signer/pkg/client/audit"
+	"github.com/ivanzzeth/remote-signer/pkg/client/clientsettings"
 	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 	"github.com/ivanzzeth/remote-signer/pkg/client/internal/transport"
+	"github.com/ivanzzeth/remote-signer/pkg/client/presets"
+	"github.com/ivanzzeth/remote-signer/pkg/client/registry"
 	"github.com/ivanzzeth/remote-signer/pkg/client/templates"
 )
 
@@ -34,6 +39,23 @@ type Client struct {
 
 	// Templates provides rule template operations.
 	Templates *templates.Service
+
+	// APIKeys provides API key management operations.
+	APIKeys *apikeys.Service
+
+	// ACLs provides read-only ACL operations (admin only), e.g. IP whitelist config.
+	ACLs *acls.Service
+
+	// Presets provides preset list/detail/apply (admin only; presets
+	// live in the DB after v0.3 Registry sync).
+	Presets *presets.Service
+
+	// Registry refreshes the template + preset catalogue from disk
+	// without a daemon restart (admin only).
+	Registry *registry.Service
+
+	// Settings reads/writes runtime-mutable configuration groups (admin only).
+	Settings *clientsettings.Service
 
 	transport *transport.Transport
 }
@@ -127,14 +149,28 @@ func NewClient(cfg Config) (*Client, error) {
 		EVM:       evmSvc,
 		Audit:     audit.NewService(t),
 		Templates: templates.NewService(t),
+		APIKeys:   apikeys.NewService(t),
+		ACLs:      acls.NewService(t),
+		Presets:   presets.NewService(t),
+		Registry:  registry.NewService(t),
+		Settings:  clientsettings.NewService(t),
 		transport: t,
 	}, nil
 }
 
+// SecurityConfigInfo represents security configuration summary.
+type SecurityConfigInfo struct {
+	AutoLockTimeout       string `json:"auto_lock_timeout"`
+	SignTimeout           string `json:"sign_timeout"`
+	AuditRetentionDays    int    `json:"audit_retention_days"`
+	ContentTypeValidation bool   `json:"content_type_validation"`
+}
+
 // HealthResponse represents the health check response.
 type HealthResponse struct {
-	Status  string `json:"status"`
-	Version string `json:"version"`
+	Status   string              `json:"status"`
+	Version  string              `json:"version"`
+	Security *SecurityConfigInfo `json:"security,omitempty"`
 }
 
 // Health checks the health of the remote-signer service.

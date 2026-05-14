@@ -28,6 +28,7 @@ type RuleAPI interface {
 	Update(ctx context.Context, ruleID string, req *UpdateRuleRequest) (*Rule, error)
 	Delete(ctx context.Context, ruleID string) error
 	Toggle(ctx context.Context, ruleID string, enabled bool) (*Rule, error)
+	ListBudgets(ctx context.Context, ruleID string) ([]RuleBudget, error)
 }
 
 // SignerAPI defines the signer management operations interface.
@@ -36,6 +37,8 @@ type SignerAPI interface {
 	Create(ctx context.Context, req *CreateSignerRequest) (*Signer, error)
 	Unlock(ctx context.Context, address string, req *UnlockSignerRequest) (*UnlockSignerResponse, error)
 	Lock(ctx context.Context, address string) (*LockSignerResponse, error)
+	PatchSignerLabels(ctx context.Context, address string, req *PatchSignerLabelsRequest) (*Signer, error)
+	DeleteSigner(ctx context.Context, address string) error
 }
 
 // HDWalletAPI defines the HD wallet management operations interface.
@@ -47,6 +50,17 @@ type HDWalletAPI interface {
 	ListDerived(ctx context.Context, primaryAddr string) (*ListDerivedAddressesResponse, error)
 	GetSigner(ctx context.Context, primaryAddr string, chainID string, index uint32) (*RemoteSigner, error)
 	GetSigners(ctx context.Context, primaryAddr string, chainID string, start, count uint32) ([]*RemoteSigner, error)
+}
+
+// WalletAPI defines the wallet operations interface.
+type WalletAPI interface {
+	Create(ctx context.Context, req *CreateWalletRequest) (*Wallet, error)
+	Get(ctx context.Context, id string) (*Wallet, error)
+	List(ctx context.Context, filter *ListWalletsFilter) (*ListWalletsResponse, error)
+	Delete(ctx context.Context, id string) error
+	AddMember(ctx context.Context, walletID string, req *AddWalletMemberRequest) (*WalletMember, error)
+	RemoveMember(ctx context.Context, walletID, signerAddress string) error
+	ListMembers(ctx context.Context, walletID string) (*ListWalletMembersResponse, error)
 }
 
 // GuardAPI defines the approval guard interface.
@@ -66,5 +80,6 @@ var (
 	_ RuleAPI     = (*RuleService)(nil)
 	_ SignerAPI   = (*SignerService)(nil)
 	_ HDWalletAPI = (*HDWalletService)(nil)
-	_ GuardAPI    = (*GuardService)(nil)
+	_ GuardAPI  = (*GuardService)(nil)
+	_ WalletAPI = (*WalletService)(nil)
 )

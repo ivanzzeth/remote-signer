@@ -13,12 +13,12 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// AdminMiddleware
+// RequirePermission (RBAC)
 // ---------------------------------------------------------------------------
 
-func TestAdminMiddleware_NoAPIKeyInContext(t *testing.T) {
+func TestRequirePermission_NoAPIKeyInContext(t *testing.T) {
 	logger := newTestLogger()
-	mw := AdminMiddleware(logger)
+	mw := RequirePermission(PermManageAPIKeys, logger)
 
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("next handler should not be called when there is no API key")
@@ -31,14 +31,14 @@ func TestAdminMiddleware_NoAPIKeyInContext(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, rr.Code)
 }
 
-func TestAdminMiddleware_NonAdminKey(t *testing.T) {
+func TestRequirePermission_NonAdminKey(t *testing.T) {
 	logger := newTestLogger()
-	mw := AdminMiddleware(logger)
+	mw := RequirePermission(PermManageAPIKeys, logger)
 
 	apiKey := &types.APIKey{
-		ID:    "key-1",
-		Name:  "regular-key",
-		Admin: false,
+		ID:   "key-1",
+		Name: "regular-key",
+		Role: types.RoleStrategy,
 	}
 
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -55,14 +55,14 @@ func TestAdminMiddleware_NonAdminKey(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, rr.Code)
 }
 
-func TestAdminMiddleware_AdminKey(t *testing.T) {
+func TestRequirePermission_AdminKey(t *testing.T) {
 	logger := newTestLogger()
-	mw := AdminMiddleware(logger)
+	mw := RequirePermission(PermManageAPIKeys, logger)
 
 	apiKey := &types.APIKey{
-		ID:    "key-admin",
-		Name:  "admin-key",
-		Admin: true,
+		ID:   "key-admin",
+		Name: "admin-key",
+		Role: types.RoleAdmin,
 	}
 
 	called := false
@@ -260,7 +260,7 @@ func TestRateLimiter_Allow_WindowExpiry(t *testing.T) {
 func TestRateLimitMiddleware_NoAPIKey(t *testing.T) {
 	logger := newTestLogger()
 	rl := NewRateLimiter(logger)
-	mw := RateLimitMiddleware(rl)
+	mw := RateLimitMiddleware(rl, nil)
 
 	called := false
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -279,7 +279,7 @@ func TestRateLimitMiddleware_NoAPIKey(t *testing.T) {
 func TestRateLimitMiddleware_UnderLimit(t *testing.T) {
 	logger := newTestLogger()
 	rl := NewRateLimiter(logger)
-	mw := RateLimitMiddleware(rl)
+	mw := RateLimitMiddleware(rl, nil)
 
 	apiKey := &types.APIKey{
 		ID:        "key-under",
@@ -307,7 +307,7 @@ func TestRateLimitMiddleware_UnderLimit(t *testing.T) {
 func TestRateLimitMiddleware_OverLimit(t *testing.T) {
 	logger := newTestLogger()
 	rl := NewRateLimiter(logger)
-	mw := RateLimitMiddleware(rl)
+	mw := RateLimitMiddleware(rl, nil)
 
 	apiKey := &types.APIKey{
 		ID:        "key-over",
@@ -423,89 +423,6 @@ func TestPermissionMiddleware_WithAPIKey(t *testing.T) {
 
 	assert.True(t, called, "next handler should be called when API key is present")
 	assert.Equal(t, http.StatusOK, rr.Code)
-}
-
-// ---------------------------------------------------------------------------
-// CheckChainPermission
-// ---------------------------------------------------------------------------
-
-func TestCheckChainPermission_NilAPIKey(t *testing.T) {
-	assert.False(t, CheckChainPermission(nil, types.ChainTypeEVM))
-}
-
-func TestCheckChainPermission_AllowedChain(t *testing.T) {
-	apiKey := &types.APIKey{
-		ID:                "key-chain",
-		AllowedChainTypes: []string{"evm"},
-	}
-	assert.True(t, CheckChainPermission(apiKey, types.ChainTypeEVM))
-}
-
-func TestCheckChainPermission_DisallowedChain(t *testing.T) {
-	apiKey := &types.APIKey{
-		ID:                "key-chain-no",
-		AllowedChainTypes: []string{"solana"},
-	}
-	assert.False(t, CheckChainPermission(apiKey, types.ChainTypeEVM))
-}
-
-func TestCheckChainPermission_EmptyAllowedChains(t *testing.T) {
-	apiKey := &types.APIKey{
-		ID:                "key-chain-all",
-		AllowedChainTypes: []string{},
-	}
-	// Empty means all chains allowed
-	assert.True(t, CheckChainPermission(apiKey, types.ChainTypeEVM))
-}
-
-// ---------------------------------------------------------------------------
-// CheckSignerPermission
-// ---------------------------------------------------------------------------
-
-func TestCheckSignerPermission_NilAPIKey(t *testing.T) {
-	assert.False(t, CheckSignerPermission(nil, "0xabc"))
-}
-
-func TestCheckSignerPermission_AllowedSigner(t *testing.T) {
-	apiKey := &types.APIKey{
-		ID:             "key-signer",
-		AllowedSigners: []string{"0xABC123"},
-	}
-	assert.True(t, CheckSignerPermission(apiKey, "0xABC123"))
-}
-
-func TestCheckSignerPermission_DisallowedSigner(t *testing.T) {
-	apiKey := &types.APIKey{
-		ID:             "key-signer-no",
-		AllowedSigners: []string{"0xABC123"},
-	}
-	assert.False(t, CheckSignerPermission(apiKey, "0xDEF456"))
-}
-
-func TestCheckSignerPermission_CaseInsensitive(t *testing.T) {
-	apiKey := &types.APIKey{
-		ID:             "key-signer-ci",
-		AllowedSigners: []string{"0xABC123"},
-	}
-	assert.True(t, CheckSignerPermission(apiKey, "0xabc123"))
-}
-
-func TestCheckSignerPermission_EmptyAllowedSigners_NoAccess(t *testing.T) {
-	apiKey := &types.APIKey{
-		ID:             "key-signer-empty",
-		AllowedSigners: []string{},
-	}
-	// Empty AllowedSigners = no access (unless AllowAllSigners is true)
-	assert.False(t, CheckSignerPermission(apiKey, "0xANYTHING"))
-}
-
-func TestCheckSignerPermission_AllowAllSigners(t *testing.T) {
-	apiKey := &types.APIKey{
-		ID:               "key-signer-all",
-		AllowAllSigners:  true,
-		AllowedSigners:   []string{},
-	}
-	assert.True(t, CheckSignerPermission(apiKey, "0xANYTHING"))
 }
 
 // ---------------------------------------------------------------------------

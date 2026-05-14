@@ -16,7 +16,7 @@ import (
 
 func TestAuth_AdminCanAccessAdminEndpoints(t *testing.T) {
 	ctx := context.Background()
-	rules, err := adminClient.EVM.Rules.List(ctx, nil)
+	rules, err := adminClient.EVM.Rules.List(ctx, &evm.ListRulesFilter{Limit: 1000})
 	require.NoError(t, err)
 	assert.NotNil(t, rules)
 }
@@ -26,7 +26,8 @@ func TestAuth_NonAdminCannotAccessAdminEndpoints(t *testing.T) {
 		t.Skip("Skipping: non-admin client not configured")
 	}
 	ctx := context.Background()
-	_, err := nonAdminClient.EVM.Rules.List(ctx, nil)
+	// Agent can list rules (scoped to own), but cannot list API keys (admin-only)
+	_, err := nonAdminClient.APIKeys.List(ctx, nil)
 	require.Error(t, err)
 	apiErr, ok := err.(*client.APIError)
 	require.True(t, ok, "expected APIError, got %T", err)

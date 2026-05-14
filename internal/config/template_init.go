@@ -10,11 +10,13 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/ivanzzeth/remote-signer/internal/audit"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	pkgvalidate "github.com/ivanzzeth/remote-signer/internal/validate"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
@@ -25,9 +27,10 @@ const TemplateFileType = "file"
 
 // TemplateInitializer handles syncing templates from config to database
 type TemplateInitializer struct {
-	repo      storage.TemplateRepository
-	logger    *slog.Logger
-	configDir string // Base directory for resolving relative file paths
+	repo        storage.TemplateRepository
+	logger      *slog.Logger
+	configDir   string // Base directory for resolving relative file paths
+	auditLogger *audit.AuditLogger
 }
 
 // NewTemplateInitializer creates a new template initializer
@@ -48,6 +51,11 @@ func NewTemplateInitializer(repo storage.TemplateRepository, logger *slog.Logger
 // SetConfigDir sets the base directory for resolving relative file paths
 func (i *TemplateInitializer) SetConfigDir(dir string) {
 	i.configDir = dir
+}
+
+// SetAuditLogger sets the audit logger for recording config template sync events.
+func (i *TemplateInitializer) SetAuditLogger(al *audit.AuditLogger) {
+	i.auditLogger = al
 }
 
 // SyncFromConfig syncs templates from config to database.
@@ -90,6 +98,9 @@ func (i *TemplateInitializer) SyncFromConfig(ctx context.Context, templates []Te
 				"id", tmpl.ID,
 				"name", tmpl.Name,
 			)
+			if i.auditLogger != nil {
+				i.auditLogger.LogTemplateSynced(ctx, "deleted", tmpl.ID, tmpl.Name)
+			}
 			deleted++
 		}
 	}
@@ -115,6 +126,81 @@ func (i *TemplateInitializer) SyncFromConfig(ctx context.Context, templates []Te
 // GetLoadedTemplates returns templates expanded from config (for use by RuleInitializer)
 func (i *TemplateInitializer) GetLoadedTemplates(templates []TemplateConfig) ([]TemplateConfig, error) {
 	return ExpandTemplatesFromFiles(templates, i.configDir, i.logger)
+}
+
+// LoadTemplatesFromDir enumerates *.template*.yaml files under dir and
+// returns one {type:file,path:...} TemplateConfig per match. The
+// returned slice is meant to be appended to cfg.Templates and fed into
+// SyncFromConfig — the existing file-loader handles the rest.
+//
+// Filename convention: a template file is anything matching either of:
+//
+//   *.template.yaml          (e.g. polymarket_safe.template.yaml)
+//   *.template.js.yaml       (e.g. erc20.template.js.yaml)
+//
+// The template's name is derived from the filename (basename without
+// the .template.* suffix), but the file's own `variables:` /
+// `budget_metering:` / `rules:` block is what populates the
+// TemplateConfig fields after the file-loader runs.
+func LoadTemplatesFromDir(dir string, configDir string, logger *slog.Logger) ([]TemplateConfig, error) {
+	resolved := dir
+	if !filepath.IsAbs(resolved) {
+		resolved = filepath.Join(configDir, dir)
+	}
+	entries, err := os.ReadDir(resolved)
+	if err != nil {
+		return nil, fmt.Errorf("read templates_dir: %w", err)
+	}
+	var out []TemplateConfig
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !isTemplateFilename(name) {
+			continue
+		}
+		// Path stays relative to configDir; the file-loader resolves
+		// relative paths via configDir at load time.
+		path := filepath.Join(dir, name)
+		// Derived display name: strip .template.* suffix, replace
+		// underscores with spaces, title-case. Pure UX nicety — the
+		// file's own metadata wins downstream.
+		displayName := deriveTemplateDisplayName(name)
+		out = append(out, TemplateConfig{
+			Name:    displayName,
+			Type:    TemplateFileType,
+			Enabled: true,
+			Config:  map[string]interface{}{"path": path},
+		})
+	}
+	if logger != nil {
+		logger.Debug("enumerated templates_dir", "dir", resolved, "count", len(out))
+	}
+	return out, nil
+}
+
+// isTemplateFilename reports whether the file looks like a template
+// YAML: <name>.template.yaml or <name>.template.<lang>.yaml. We accept
+// only ".yaml" (not ".yml") to match the convention the repo uses and
+// avoid surprises if an operator drops unrelated YAML files in the dir.
+func isTemplateFilename(name string) bool {
+	if !strings.HasSuffix(name, ".yaml") {
+		return false
+	}
+	return strings.Contains(name, ".template.")
+}
+
+// deriveTemplateDisplayName produces a human-ish title from a filename.
+// "erc20.template.js.yaml" → "erc20", "polymarket_safe.template.yaml"
+// → "polymarket safe". The file's own metadata can override this.
+func deriveTemplateDisplayName(filename string) string {
+	base := filename
+	if idx := strings.Index(base, ".template."); idx > 0 {
+		base = base[:idx]
+	}
+	base = strings.ReplaceAll(base, "_", " ")
+	return base
 }
 
 // ExpandTemplatesFromFiles expands "file" type templates by loading from external YAML files.
@@ -298,6 +384,9 @@ func (i *TemplateInitializer) syncTemplate(ctx context.Context, idx int, tmplCfg
 			"name", tmplCfg.Name,
 			"type", tmplCfg.Type,
 		)
+		if i.auditLogger != nil {
+			i.auditLogger.LogTemplateSynced(ctx, "created", tmplID, tmplCfg.Name)
+		}
 	} else {
 		existing.Name = tmpl.Name
 		existing.Description = tmpl.Description
@@ -319,6 +408,9 @@ func (i *TemplateInitializer) syncTemplate(ctx context.Context, idx int, tmplCfg
 			"name", tmplCfg.Name,
 			"type", tmplCfg.Type,
 		)
+		if i.auditLogger != nil {
+			i.auditLogger.LogTemplateSynced(ctx, "updated", tmplID, tmplCfg.Name)
+		}
 	}
 
 	return nil
@@ -380,6 +472,25 @@ func expandInstanceRule(rule RuleConfig, templates map[string]TemplateConfig) ([
 		}
 	}
 
+	// Required variables must be set; no default, no fallback.
+	for _, def := range tmpl.Variables {
+		if !def.Required {
+			continue
+		}
+		val := strings.TrimSpace(variables[def.Name])
+		if val == "" {
+			return nil, fmt.Errorf("required variable %q is not set (set it in config or via preset --set %s=value)", def.Name, def.Name)
+		}
+	}
+
+	// Fill optional template variables with defaults so substitution never leaves ${var} in config.
+	// Rules must never receive unresolved placeholders — that is a design defect.
+	var errFill error
+	variables, errFill = fillOptionalTemplateVariables(tmpl.Variables, variables)
+	if errFill != nil {
+		return nil, fmt.Errorf("template variable defaults: %w", errFill)
+	}
+
 	// Get the rules JSON from template config (missing when template is disabled and file was not loaded)
 	rulesJSON, ok := tmpl.Config["rules_json"].(string)
 	if !ok {
@@ -422,6 +533,16 @@ func expandInstanceRule(rule RuleConfig, templates map[string]TemplateConfig) ([
 		}
 	}
 
+	// Capture instance-level budget and schedule for rule sync (budget enforcement + period reset).
+	var instanceBudget map[string]interface{}
+	if b, ok := rule.Config["budget"].(map[string]interface{}); ok && len(b) > 0 {
+		instanceBudget = b
+	}
+	var instanceSchedule map[string]interface{}
+	if s, ok := rule.Config["schedule"].(map[string]interface{}); ok && len(s) > 0 {
+		instanceSchedule = s
+	}
+
 	// Apply scope and instance variables to all template rules
 	for idx := range templateRules {
 		if rule.ChainType != "" {
@@ -445,6 +566,27 @@ func expandInstanceRule(rule RuleConfig, templates map[string]TemplateConfig) ([
 				templateRules[idx].Variables[k] = v
 			}
 		}
+		// Attach template test_variables so startup validation runs test cases with expected pass/fail.
+		// Do NOT override with instance variables — test_cases are designed for
+		// test_variables and expect specific addresses/values.
+		if len(tmpl.TestVariables) > 0 {
+			templateRules[idx].TestVariables = make(map[string]string, len(tmpl.TestVariables))
+			for k, v := range tmpl.TestVariables {
+				templateRules[idx].TestVariables[k] = v
+			}
+		}
+		// For rule sync: attach template name and instance budget/schedule so sync can set TemplateID and create budget.
+		if templateRules[idx].Config == nil {
+			templateRules[idx].Config = make(map[string]interface{})
+		}
+		cfg := templateRules[idx].Config
+		cfg["__template_name"] = templateName
+		if len(instanceBudget) > 0 {
+			cfg["__budget"] = instanceBudget
+		}
+		if len(instanceSchedule) > 0 {
+			cfg["__schedule"] = instanceSchedule
+		}
 	}
 	instanceID, hasInstanceID := rule.Config["id"].(string)
 	instanceID = strings.TrimSpace(instanceID)
@@ -460,9 +602,78 @@ func expandInstanceRule(rule RuleConfig, templates map[string]TemplateConfig) ([
 				}
 			}
 		}
+	} else if len(templateRules) > 0 {
+		// No explicit instance id — derive a scope-based suffix so that multiple
+		// instances of the same template (e.g. USDC on chain 1 vs chain 137) get
+		// unique sub-rule IDs.  Format: "{original_id}-{chain_type}-{chain_id}".
+		scopeSuffix := instanceScopeSuffix(rule)
+		if scopeSuffix != "" {
+			for idx := range templateRules {
+				tid := strings.TrimSpace(templateRules[idx].Id)
+				if tid != "" {
+					templateRules[idx].Id = tid + "-" + scopeSuffix
+				}
+			}
+		}
 	}
 
 	return templateRules, nil
+}
+
+// injectChainIDIntoTestCases sets chain_id in each test case's input to match the
+// rule's scope. Without this, test cases default to chain_id=1 and the rule engine's
+// scope filter rejects them for non-chain-1 rules.
+func injectChainIDIntoTestCases(testCases []TestCaseConfig, chainID string) {
+	if chainID == "" {
+		return
+	}
+	// Parse as int for JSON numeric type (chain_id in test input is numeric)
+	chainIDNum, err := strconv.ParseInt(chainID, 10, 64)
+	for i := range testCases {
+		if testCases[i].Input == nil {
+			continue
+		}
+		if err == nil {
+			testCases[i].Input["chain_id"] = chainIDNum
+		} else {
+			testCases[i].Input["chain_id"] = chainID
+		}
+	}
+}
+
+// instanceScopeSuffix returns a suffix like "evm-137" from the instance rule's
+// scope fields (chain_type, chain_id).  Returns "" if no scope is set.
+func instanceScopeSuffix(rule RuleConfig) string {
+	parts := make([]string, 0, 2)
+	if rule.ChainType != "" {
+		parts = append(parts, rule.ChainType)
+	}
+	if rule.ChainID != "" {
+		parts = append(parts, rule.ChainID)
+	}
+	return strings.Join(parts, "-")
+}
+
+// fillOptionalTemplateVariables fills missing optional variables from template defaults.
+// Optional variables (Required: false) must declare Default; returns error if not.
+func fillOptionalTemplateVariables(defs []TemplateVarConfig, vars map[string]string) (map[string]string, error) {
+	result := make(map[string]string, len(vars)+len(defs))
+	for k, v := range vars {
+		result[k] = v
+	}
+	for _, def := range defs {
+		if _, provided := result[def.Name]; provided {
+			continue
+		}
+		if def.Required {
+			continue // required vars without value: substituteVarsInString will error
+		}
+		if def.Default == nil {
+			return nil, fmt.Errorf("optional variable %q must declare default", def.Name)
+		}
+		result[def.Name] = *def.Default
+	}
+	return result, nil
 }
 
 // substituteVarsInString replaces ${var} placeholders with values

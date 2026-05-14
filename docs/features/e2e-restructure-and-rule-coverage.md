@@ -22,7 +22,7 @@
 
 **需同步修改**：
 
-- `cmd/validate-rules/main.go`：若示例/帮助中引用 `rules/polymarket_safe.yaml`，改为引用 `rules/treasury.example.yaml` 或 `config.e2e.yaml`。
+- `internal/cli/validate/run.go`：若示例/帮助中引用 `rules/polymarket_safe.yaml`，改为引用 `rules/treasury.example.yaml` 或 `config.e2e.yaml`。
 
 ### 2.2 保留（简单规则示例，并在 e2e 中覆盖）
 
@@ -76,7 +76,7 @@ e2e 使用的模板以 `config.e2e.yaml` 中声明的为准（E2E Minimal, E2E S
 | `e2e_pagination_test.go` | 所有 `TestPagination_*` | - |
 | `e2e_signer_test.go` | 所有 `TestSigner_*`（List, ListWithTypeFilter, ListSignersPagination, CreateKeystoreSigner, CreateSignerValidationErrors, NonAdmin*） | - |
 | `e2e_template_test.go` | 所有 `TestTemplate_*`（含 ConfigLoadedTemplatesAndInstanceRules、InstanceWithBudget 等） | 模板加载与实例 |
-| `e2e_client_test.go`（可选） | `TestJavaScriptClientE2E`、`TestMetaMaskSnapE2E` | 客户端集成 |
+| `e2e_client_test.go`（可选） | `TestJavaScriptClientE2E` | 客户端集成 |
 
 现有 `security_test.go`、`tls_test.go`、`tls_helpers_test.go` 保持不变。
 
@@ -121,7 +121,7 @@ e2e 使用的模板以 `config.e2e.yaml` 中声明的为准（E2E Minimal, E2E S
 
 1. **规则文件清理**  
    - 删除 `rules/polymarket_safe.yaml`、`rules/polymarket_eoa.yaml`、`rules/predict_eoa.yaml`、`rules/opinion.yaml`。  
-   - 更新 `cmd/validate-rules/main.go` 中的示例路径/帮助文案。
+   - 更新 `internal/cli/validate/run.go` 中的示例路径/帮助文案。
 
 2. **E2E 拆分**  
    - 新建上表所列 `e2e_*_test.go` 文件，按上表从 `e2e_test.go` 迁移对应 `Test*` 函数。  

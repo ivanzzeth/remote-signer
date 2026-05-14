@@ -39,7 +39,7 @@ func TestRule_AdminCanCreateRule(t *testing.T) {
 
 func TestRule_AdminCanListRules(t *testing.T) {
 	ctx := context.Background()
-	resp, err := adminClient.EVM.Rules.List(ctx, nil)
+	resp, err := adminClient.EVM.Rules.List(ctx, &evm.ListRulesFilter{Limit: 1000})
 	require.NoError(t, err)
 	assert.NotNil(t, resp)
 	assert.GreaterOrEqual(t, len(resp.Rules), 1)
@@ -187,7 +187,7 @@ func TestRule_NonAdminCannotListRules(t *testing.T) {
 		t.Skip("Skipping: non-admin client not configured")
 	}
 	ctx := context.Background()
-	_, err := nonAdminClient.EVM.Rules.List(ctx, nil)
+	_, err := nonAdminClient.EVM.Rules.List(ctx, &evm.ListRulesFilter{Limit: 1000})
 	require.Error(t, err)
 	apiErr, ok := err.(*client.APIError)
 	require.True(t, ok)

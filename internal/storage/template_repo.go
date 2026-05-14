@@ -28,6 +28,18 @@ type TemplateRepository interface {
 	Delete(ctx context.Context, id string) error
 	List(ctx context.Context, filter TemplateFilter) ([]*types.RuleTemplate, error)
 	Count(ctx context.Context, filter TemplateFilter) (int, error)
+	// Upsert writes tmpl, skipping the DB write when an existing row
+	// has the same ContentHash. Returns changed=true when the row was
+	// inserted or updated, false when the on-disk content matched the
+	// cached one. Used by the Registry's Sync loop to avoid a full
+	// JSON re-marshal on every boot.
+	Upsert(ctx context.Context, tmpl *types.RuleTemplate) (changed bool, err error)
+	// ListIDsBySource returns the IDs of every row whose Source matches
+	// the given value. Registry.Sync calls this to compute the set of
+	// rows that disappeared from a file source and need pruning.
+	ListIDsBySource(ctx context.Context, source types.RuleSource) ([]string, error)
+	// DeleteMany removes rows by ID in one statement.
+	DeleteMany(ctx context.Context, ids []string) error
 }
 
 // GormTemplateRepository implements TemplateRepository using GORM
@@ -132,6 +144,67 @@ func (r *GormTemplateRepository) List(ctx context.Context, filter TemplateFilter
 		return nil, fmt.Errorf("failed to list templates: %w", err)
 	}
 	return templates, nil
+}
+
+// Upsert inserts or updates tmpl based on content_hash. The Registry
+// uses this on every Sync — most boots see no template changes, so the
+// hash-equality fast path matters: it's a single SELECT vs. a full
+// JSON marshal + UPDATE for every row in the source.
+func (r *GormTemplateRepository) Upsert(ctx context.Context, tmpl *types.RuleTemplate) (bool, error) {
+	if tmpl == nil {
+		return false, fmt.Errorf("template cannot be nil")
+	}
+	if tmpl.ID == "" {
+		return false, fmt.Errorf("template id is required")
+	}
+	var existing types.RuleTemplate
+	err := r.db.WithContext(ctx).Select("id, content_hash").
+		First(&existing, "id = ?", tmpl.ID).Error
+	now := time.Now()
+	if err == gorm.ErrRecordNotFound {
+		tmpl.CreatedAt = now
+		tmpl.UpdatedAt = now
+		if err := r.db.WithContext(ctx).Create(tmpl).Error; err != nil {
+			return false, fmt.Errorf("failed to create template: %w", err)
+		}
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to check existing template: %w", err)
+	}
+	// Skip the write when content_hash matches. Defensive on empty
+	// hash: an unhashed existing row always loses to the incoming one.
+	if existing.ContentHash != "" && existing.ContentHash == tmpl.ContentHash {
+		return false, nil
+	}
+	tmpl.UpdatedAt = now
+	if err := r.db.WithContext(ctx).Save(tmpl).Error; err != nil {
+		return false, fmt.Errorf("failed to update template: %w", err)
+	}
+	return true, nil
+}
+
+// ListIDsBySource returns IDs of templates that came from the given source.
+func (r *GormTemplateRepository) ListIDsBySource(ctx context.Context, source types.RuleSource) ([]string, error) {
+	var ids []string
+	err := r.db.WithContext(ctx).Model(&types.RuleTemplate{}).
+		Where("source = ?", source).Pluck("id", &ids).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to list template ids by source: %w", err)
+	}
+	return ids, nil
+}
+
+// DeleteMany removes rows by ID.
+func (r *GormTemplateRepository) DeleteMany(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	if err := r.db.WithContext(ctx).
+		Delete(&types.RuleTemplate{}, "id IN ?", ids).Error; err != nil {
+		return fmt.Errorf("failed to delete templates: %w", err)
+	}
+	return nil
 }
 
 // Count returns the total count of templates matching the filter

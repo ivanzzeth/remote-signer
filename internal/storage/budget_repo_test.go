@@ -337,3 +337,78 @@ func TestBudgetRepo_MarkAlertSent_Nonexistent(t *testing.T) {
 	err := repo.MarkAlertSent(ctx, types.RuleID("nonexistent-rule"), "count")
 	assert.NoError(t, err, "MarkAlertSent on nonexistent record should not return error")
 }
+
+// --- Tests for Get / Update / ListAll (added with budget CRUD) ---
+
+func TestBudgetRepo_Get_Success(t *testing.T) {
+	_, repo := setupIsolatedBudgetTestDB(t)
+	ctx := context.Background()
+
+	b := &types.RuleBudget{
+		ID: "budget-get-1", RuleID: "rule-g", Unit: "u",
+		MaxTotal: "1000", Spent: "0",
+	}
+	require.NoError(t, repo.Create(ctx, b))
+
+	got, err := repo.Get(ctx, "budget-get-1")
+	require.NoError(t, err)
+	assert.Equal(t, types.RuleID("rule-g"), got.RuleID)
+}
+
+func TestBudgetRepo_Get_NotFound(t *testing.T) {
+	_, repo := setupIsolatedBudgetTestDB(t)
+	_, err := repo.Get(context.Background(), "missing")
+	assert.ErrorIs(t, err, types.ErrNotFound)
+}
+
+func TestBudgetRepo_Update_PatchesMutableFields(t *testing.T) {
+	_, repo := setupIsolatedBudgetTestDB(t)
+	ctx := context.Background()
+
+	b := &types.RuleBudget{
+		ID: "budget-u-1", RuleID: "rule-u", Unit: "u",
+		MaxTotal: "1000", MaxPerTx: "100", Spent: "200",
+		TxCount: 4, AlertPct: 80,
+	}
+	require.NoError(t, repo.Create(ctx, b))
+
+	b.MaxTotal = "5000"
+	b.Spent = "100"
+	b.AlertPct = 90
+	require.NoError(t, repo.Update(ctx, b))
+
+	got, err := repo.Get(ctx, "budget-u-1")
+	require.NoError(t, err)
+	assert.Equal(t, "5000", got.MaxTotal)
+	assert.Equal(t, "100", got.Spent)
+	assert.Equal(t, 90, got.AlertPct)
+	// Identity fields untouched.
+	assert.Equal(t, types.RuleID("rule-u"), got.RuleID)
+	assert.Equal(t, "u", got.Unit)
+}
+
+func TestBudgetRepo_Update_NotFound(t *testing.T) {
+	_, repo := setupIsolatedBudgetTestDB(t)
+	err := repo.Update(context.Background(), &types.RuleBudget{
+		ID: "no-such-row", RuleID: "x", Unit: "u", MaxTotal: "1",
+	})
+	assert.ErrorIs(t, err, types.ErrNotFound)
+}
+
+func TestBudgetRepo_ListAll(t *testing.T) {
+	_, repo := setupIsolatedBudgetTestDB(t)
+	ctx := context.Background()
+
+	for i, id := range []string{"b-list-1", "b-list-2", "b-list-3"} {
+		require.NoError(t, repo.Create(ctx, &types.RuleBudget{
+			ID: id, RuleID: types.RuleID("r"), Unit: id, MaxTotal: "1",
+		}))
+		_ = i
+		time.Sleep(time.Millisecond) // ensure ordering by created_at desc
+	}
+	all, err := repo.ListAll(ctx)
+	require.NoError(t, err)
+	assert.Len(t, all, 3)
+	// newest first
+	assert.Equal(t, "b-list-3", all[0].ID)
+}

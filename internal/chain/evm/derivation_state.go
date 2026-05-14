@@ -109,6 +109,54 @@ func (s *DerivationStateStore) Save(primaryAddr string, indices []uint32) error 
 	return nil
 }
 
+// Delete removes derivation state for a primary address.
+func (s *DerivationStateStore) Delete(primaryAddr string) error {
+	if primaryAddr == "" {
+		return fmt.Errorf("primary address is required")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	data, err := os.ReadFile(s.path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // nothing to delete
+		}
+		return fmt.Errorf("read derivation state: %w", err)
+	}
+
+	var file derivationStateFile
+	if err := json.Unmarshal(data, &file); err != nil {
+		return fmt.Errorf("parse derivation state: %w", err)
+	}
+
+	if file.Wallets == nil {
+		return nil
+	}
+
+	delete(file.Wallets, primaryAddr)
+
+	// If no wallets left, remove the file entirely
+	if len(file.Wallets) == 0 {
+		if err := os.Remove(s.path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove derivation state file: %w", err)
+		}
+		return nil
+	}
+
+	newData, err := json.MarshalIndent(&file, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal derivation state: %w", err)
+	}
+
+	if err := os.WriteFile(s.path, newData, 0600); err != nil {
+		return fmt.Errorf("write derivation state: %w", err)
+	}
+
+	return nil
+}
+
 // dedupeAndSort returns a sorted, deduplicated copy of indices.
 func dedupeAndSort(indices []uint32) []uint32 {
 	seen := make(map[uint32]struct{})

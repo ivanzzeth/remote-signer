@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,25 @@ type TemplateHandler struct {
 	templateService *service.TemplateService
 	readOnly        bool // when true, block all template mutations via API
 	logger          *slog.Logger
+	requireApproval bool
+	apiKeyRepo      storage.APIKeyRepository
+}
+
+// TemplateHandlerOption is a functional option for TemplateHandler.
+type TemplateHandlerOption func(*TemplateHandler)
+
+// WithTemplateRequireApproval enables admin approval for agent whitelist rules created via template instantiation.
+func WithTemplateRequireApproval(v bool) TemplateHandlerOption {
+	return func(h *TemplateHandler) {
+		h.requireApproval = v
+	}
+}
+
+// WithTemplateAPIKeyRepo sets the API key repository for applied_to validation.
+func WithTemplateAPIKeyRepo(repo storage.APIKeyRepository) TemplateHandlerOption {
+	return func(h *TemplateHandler) {
+		h.apiKeyRepo = repo
+	}
 }
 
 // NewTemplateHandler creates a new template handler
@@ -30,6 +50,7 @@ func NewTemplateHandler(
 	templateService *service.TemplateService,
 	logger *slog.Logger,
 	readOnly bool,
+	opts ...TemplateHandlerOption,
 ) (*TemplateHandler, error) {
 	if templateRepo == nil {
 		return nil, fmt.Errorf("template repository is required")
@@ -40,37 +61,61 @@ func NewTemplateHandler(
 	if logger == nil {
 		return nil, fmt.Errorf("logger is required")
 	}
-	return &TemplateHandler{
+	h := &TemplateHandler{
 		templateRepo:    templateRepo,
 		templateService: templateService,
 		readOnly:        readOnly,
 		logger:          logger,
-	}, nil
+	}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h, nil
 }
 
 // TemplateResponse represents a template in API responses
 type TemplateResponse struct {
-	ID             string              `json:"id"`
-	Name           string              `json:"name"`
-	Description    string              `json:"description,omitempty"`
-	Type           string              `json:"type"`
-	Mode           string              `json:"mode"`
-	Source         string              `json:"source"`
+	ID             string                `json:"id"`
+	Name           string                `json:"name"`
+	Description    string                `json:"description,omitempty"`
+	Type           string                `json:"type"`
+	Mode           string                `json:"mode"`
+	Source         string                `json:"source"`
+	// ChainType surfaces the template's chain family — empty for off-chain
+	// templates (sign_type_allowlist etc.). The UI uses this for the
+	// "Chain" column and for filtering; before R10 the column showed
+	// every row as off-chain because this field was missing from the wire.
+	ChainType      string                `json:"chain_type,omitempty"`
+	SourcePath     string                `json:"source_path,omitempty"`
 	Variables      []TemplateVarResponse `json:"variables,omitempty"`
-	Config         json.RawMessage     `json:"config,omitempty"`
-	BudgetMetering json.RawMessage     `json:"budget_metering,omitempty"`
-	Enabled        bool                `json:"enabled"`
-	CreatedAt      string              `json:"created_at"`
-	UpdatedAt      string              `json:"updated_at"`
+	VariableGroups json.RawMessage       `json:"variable_groups,omitempty"`
+	Config         json.RawMessage       `json:"config,omitempty"`
+	BudgetMetering json.RawMessage       `json:"budget_metering,omitempty"`
+	Enabled        bool                  `json:"enabled"`
+	CreatedAt      string                `json:"created_at"`
+	UpdatedAt      string                `json:"updated_at"`
 }
 
-// TemplateVarResponse represents a template variable in API responses
+// TemplateVarResponse represents a template variable in API responses.
+// Carries every UI-relevant field so the typed-widget dispatch on the
+// frontend (R10) doesn't have to make a second roundtrip per variable.
 type TemplateVarResponse struct {
-	Name        string `json:"name"`
-	Type        string `json:"type"`
-	Description string `json:"description,omitempty"`
-	Required    bool   `json:"required"`
-	Default     string `json:"default,omitempty"`
+	Name        string   `json:"name"`
+	Type        string   `json:"type"`
+	Label       string   `json:"label,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Required    bool     `json:"required"`
+	// Default is `any` server-side; the SDK types it as `unknown` and
+	// stringifies in the UI when needed. Round-trip via json.RawMessage
+	// preserves the natural shape (string / number / bool / array).
+	Default     json.RawMessage `json:"default,omitempty"`
+	Placeholder string   `json:"placeholder,omitempty"`
+	Hint        string   `json:"hint,omitempty"`
+	Options     []string `json:"options,omitempty"`
+	Sensitive   bool     `json:"sensitive,omitempty"`
+	Pattern     string   `json:"pattern,omitempty"`
+	Min         *string  `json:"min,omitempty"`
+	Max         *string  `json:"max,omitempty"`
 }
 
 // ListTemplatesResponse represents the response for listing templates
@@ -87,6 +132,15 @@ type CreateTemplateRequest struct {
 	Mode           string                 `json:"mode"`
 	Variables      []TemplateVarRequest   `json:"variables,omitempty"`
 	Config         map[string]interface{} `json:"config"`
+	// BudgetMetering (optional) configures how a template instance measures "spend amount"
+	// for budget enforcement.
+	//
+	// Expected keys:
+	// - method: "none" | "count_only" | "tx_value" | "calldata_param" | "typed_data_field" | "js"
+	// - unit:   budget identity string (recommended: include chain+asset identity, e.g. "${chain_id}:${token_address}")
+	//
+	// Notes:
+	// - For method "js" (evm_js rules), the script may implement validateBudget(input) and return bigint/decimal-string.
 	BudgetMetering map[string]interface{} `json:"budget_metering,omitempty"`
 	TestVariables  map[string]string      `json:"test_variables,omitempty"`
 	Enabled        bool                   `json:"enabled"`
@@ -153,13 +207,14 @@ func (h *TemplateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Determine if this is a list request or a specific template request
-	// Path: /api/v1/templates or /api/v1/templates/{id} or /api/v1/templates/{id}/instantiate
-	path := strings.TrimPrefix(r.URL.Path, "/api/v1/templates")
-	path = strings.TrimPrefix(path, "/")
+	// Path: /api/v1/templates or /api/v1/templates/{id} or /api/v1/templates/{id}/instantiate.
+	// EscapedPath instead of Path so file-stem IDs containing '/'
+	// (v0.3 Registry: "evm/erc20") round-trip through the SDK's
+	// encodeURIComponent unchanged.
+	rawPath := strings.TrimPrefix(r.URL.EscapedPath(), "/api/v1/templates")
+	rawPath = strings.TrimPrefix(rawPath, "/")
 
-	if path == "" {
-		// Collection operations: GET /api/v1/templates or POST /api/v1/templates
+	if rawPath == "" {
 		switch r.Method {
 		case http.MethodGet:
 			h.listTemplates(w, r)
@@ -171,9 +226,19 @@ func (h *TemplateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check for /instantiate sub-path
-	if strings.HasSuffix(path, "/instantiate") {
-		templateID := strings.TrimSuffix(path, "/instantiate")
+	encodedID := rawPath
+	sub := ""
+	if strings.HasSuffix(rawPath, "/instantiate") {
+		encodedID = strings.TrimSuffix(rawPath, "/instantiate")
+		sub = "instantiate"
+	}
+	templateID, err := url.PathUnescape(encodedID)
+	if err != nil {
+		h.writeError(w, "invalid template id", http.StatusBadRequest)
+		return
+	}
+
+	if sub == "instantiate" {
 		if r.Method == http.MethodPost {
 			h.instantiateTemplate(w, r, templateID)
 		} else {
@@ -182,12 +247,6 @@ func (h *TemplateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check for /revoke sub-path (on instance rule, not template)
-	// This is handled separately: POST /api/v1/templates/instances/{ruleID}/revoke
-	// But for simplicity, we handle it under the template handler
-
-	// Specific template operations: /api/v1/templates/{id}
-	templateID := path
 	switch r.Method {
 	case http.MethodGet:
 		h.getTemplate(w, r, templateID)
@@ -350,7 +409,7 @@ func (h *TemplateHandler) createTemplate(w http.ResponseWriter, r *http.Request)
 		for i, v := range req.Variables {
 			vars[i] = types.TemplateVariable{
 				Name:        v.Name,
-				Type:        v.Type,
+				Type:        types.VariableType(v.Type),
 				Description: v.Description,
 				Required:    v.Required,
 				Default:     v.Default,
@@ -569,6 +628,28 @@ func (h *TemplateHandler) instantiateTemplate(w http.ResponseWriter, r *http.Req
 		}
 	}
 
+	// Apply RBAC ownership
+	apiKey := middleware.GetAPIKey(r.Context())
+	if apiKey != nil {
+		// Resolve template to get mode for RBAC determination
+		tmpl, err := h.templateService.ResolveTemplate(r.Context(), instanceReq)
+		if err != nil {
+			h.writeError(w, fmt.Sprintf("failed to resolve template: %s", err.Error()), http.StatusBadRequest)
+			return
+		}
+		ownership, err := DetermineRuleOwnership(
+			r.Context(), apiKey, nil,
+			tmpl.Mode, h.requireApproval, h.apiKeyRepo,
+		)
+		if err != nil {
+			h.writeError(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		instanceReq.Owner = ownership.Owner
+		instanceReq.AppliedTo = []string(ownership.AppliedTo)
+		instanceReq.Status = ownership.Status
+	}
+
 	// Create instance
 	result, err := h.templateService.CreateInstance(r.Context(), instanceReq)
 	if err != nil {
@@ -594,6 +675,24 @@ func (h *TemplateHandler) instantiateTemplate(w http.ResponseWriter, r *http.Req
 			h.logger.Error("failed to marshal budget", "error", err)
 		} else {
 			resp["budget"] = json.RawMessage(budgetJSON)
+		}
+	}
+
+	// Include expanded sub-rules for template_bundle responses
+	if len(result.SubRules) > 0 {
+		subRulesJSON, err := json.Marshal(result.SubRules)
+		if err != nil {
+			h.logger.Error("failed to marshal sub-rules", "error", err)
+		} else {
+			resp["sub_rules"] = json.RawMessage(subRulesJSON)
+		}
+		if len(result.SubBudgets) > 0 {
+			subBudgetsJSON, err := json.Marshal(result.SubBudgets)
+			if err != nil {
+				h.logger.Error("failed to marshal sub-budgets", "error", err)
+			} else {
+				resp["sub_budgets"] = json.RawMessage(subBudgetsJSON)
+			}
 		}
 	}
 
@@ -632,24 +731,49 @@ func (h *TemplateHandler) toTemplateResponse(tmpl *types.RuleTemplate) TemplateR
 		Type:        string(tmpl.Type),
 		Mode:        string(tmpl.Mode),
 		Source:      string(tmpl.Source),
+		ChainType:   string(tmpl.ChainType),
+		SourcePath:  tmpl.SourcePath,
 		Config:      tmpl.Config,
 		Enabled:     tmpl.Enabled,
 		CreatedAt:   tmpl.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:   tmpl.UpdatedAt.Format(time.RFC3339),
 	}
 
-	// Parse variables
+	if len(tmpl.VariableGroups) > 0 {
+		resp.VariableGroups = tmpl.VariableGroups
+	}
+
+	// Parse variables, preserving every UI-relevant field so R10's
+	// typed widgets can render bool checkboxes, enum selects, list
+	// textareas, etc. without a per-variable second roundtrip.
 	if len(tmpl.Variables) > 0 {
 		var vars []types.TemplateVariable
 		if err := json.Unmarshal(tmpl.Variables, &vars); err == nil {
 			resp.Variables = make([]TemplateVarResponse, len(vars))
 			for i, v := range vars {
+				// Marshal Default back to raw JSON so the natural shape
+				// (string / number / bool / array) survives the round-
+				// trip. Nil default → omit field entirely.
+				var defaultRaw json.RawMessage
+				if v.Default != nil {
+					if b, err := json.Marshal(v.Default); err == nil {
+						defaultRaw = b
+					}
+				}
 				resp.Variables[i] = TemplateVarResponse{
 					Name:        v.Name,
-					Type:        v.Type,
+					Type:        string(v.Type),
+					Label:       v.Label,
 					Description: v.Description,
 					Required:    v.Required,
-					Default:     v.Default,
+					Default:     defaultRaw,
+					Placeholder: v.Placeholder,
+					Hint:        v.Hint,
+					Options:     v.Options,
+					Sensitive:   v.Sensitive,
+					Pattern:     v.Pattern,
+					Min:         v.Min,
+					Max:         v.Max,
 				}
 			}
 		}
@@ -659,7 +783,56 @@ func (h *TemplateHandler) toTemplateResponse(tmpl *types.RuleTemplate) TemplateR
 		resp.BudgetMetering = tmpl.BudgetMetering
 	}
 
+	// Derive a display-friendly Mode when the template doesn't declare
+	// one at the top level (v0.3 multi-rule templates leave it empty).
+	// Aggregates the rules array: if every rule agrees, surface that
+	// mode; if rules disagree, surface "mixed" so the list view can
+	// still tell the operator something useful at a glance.
+	if resp.Mode == "" {
+		resp.Mode = aggregateRuleModes(tmpl.Config)
+	}
+
 	return resp
+}
+
+// aggregateRuleModes pulls each rule's `mode` out of the template
+// config blob and returns:
+//
+//	""        — no rules / no modes set (shouldn't happen post-R6 but
+//	            tolerated)
+//	"whitelist" / "blocklist" — every rule agrees
+//	"mixed"   — at least two distinct modes present
+//
+// Operates on the loosely-typed config JSON rather than a typed struct
+// because the template body still carries ${var} placeholders that
+// would fail a strict unmarshal.
+func aggregateRuleModes(configJSON []byte) string {
+	if len(configJSON) == 0 {
+		return ""
+	}
+	var doc struct {
+		Rules []struct {
+			Mode string `json:"mode"`
+		} `json:"rules"`
+	}
+	if err := json.Unmarshal(configJSON, &doc); err != nil {
+		return ""
+	}
+	seen := make(map[string]bool, 2)
+	for _, r := range doc.Rules {
+		if r.Mode != "" {
+			seen[r.Mode] = true
+		}
+	}
+	switch len(seen) {
+	case 0:
+		return ""
+	case 1:
+		for m := range seen {
+			return m
+		}
+	}
+	return "mixed"
 }
 
 func (h *TemplateHandler) writeJSON(w http.ResponseWriter, data interface{}, status int) {

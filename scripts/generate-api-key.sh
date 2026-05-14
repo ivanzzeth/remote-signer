@@ -150,7 +150,7 @@ echo ""
 
 echo -e "${CYAN}=== TUI Connection Example ===${NC}"
 echo ""
-echo "./remote-signer-tui \\"
+echo "./remote-signer tui \\"
 echo "  -url http://localhost:8548 \\"
 echo "  -api-key-id $API_KEY_ID \\"
 echo "  -private-key $PRIVATE_KEY_BASE64"

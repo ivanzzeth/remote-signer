@@ -17,6 +17,31 @@ const (
 	StatusFailed      SignRequestStatus = "failed"
 )
 
+// ApprovalSource enumerates how a request transitioned from authorizing
+// to signing. It's a denormalised attribution column on SignRequest so
+// the UI doesn't have to infer it from a combination of empty/nil
+// fields. New code should always set this; legacy rows may leave it
+// blank — see DeriveApprovalSource.
+const (
+	ApprovalSourceManual     = "manual"
+	ApprovalSourceRule       = "rule"
+	ApprovalSourceSimulation = "simulation"
+)
+
+// DeriveApprovalSource recovers an attribution string from the fields
+// already on a SignRequest. Used both at write time (state machine) and
+// at read time (handler) so rows persisted before ApprovalSource
+// existed still display the same way as new ones.
+func DeriveApprovalSource(ruleMatchedID *string, approvedBy *string) string {
+	if approvedBy != nil && *approvedBy != "" {
+		return ApprovalSourceManual
+	}
+	if ruleMatchedID != nil && *ruleMatchedID != "" {
+		return ApprovalSourceRule
+	}
+	return ApprovalSourceSimulation
+}
+
 // SignRequest is chain-agnostic; payload is chain-specific JSON
 type SignRequest struct {
 	ID        SignRequestID `json:"id" gorm:"primaryKey;type:varchar(64)"`
@@ -38,6 +63,12 @@ type SignRequest struct {
 	RuleMatchedID *string    `json:"rule_matched_id,omitempty" gorm:"type:varchar(64)"`
 	ApprovedBy    *string    `json:"approved_by,omitempty" gorm:"type:varchar(128)"`
 	ApprovedAt    *time.Time `json:"approved_at,omitempty"`
+	// ApprovalSource records which gate let this request through:
+	// "manual" (admin clicked Approve), "rule" (a whitelist rule
+	// matched), or "simulation" (the simulation fallback budgeted it).
+	// Empty on rows persisted before this field was introduced;
+	// callers should derive from RuleMatchedID/ApprovedBy in that case.
+	ApprovalSource string `json:"approval_source,omitempty" gorm:"type:varchar(16);index"`
 
 	// Result
 	Signature    []byte `json:"signature,omitempty" gorm:"type:bytea"`

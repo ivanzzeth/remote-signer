@@ -297,7 +297,7 @@ func (m *AuditModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "e":
 			m.showFilter = true
 			m.filterType = "event"
-			m.filterInput.Placeholder = "Event type (e.g., sign_request, sign_complete, approval_granted)"
+			m.filterInput.Placeholder = "Event type (e.g., sign_request, sign_complete, signer_auto_locked)"
 			m.filterInput.Focus()
 			return m, textinput.Blink
 		case "s":

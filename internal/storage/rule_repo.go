@@ -14,7 +14,7 @@ import (
 type RuleFilter struct {
 	ChainType     *types.ChainType
 	ChainID       *string
-	APIKeyID      *string
+	Owner         *string
 	SignerAddress *string
 	Type          *types.RuleType
 	Source        *types.RuleSource
@@ -115,8 +115,8 @@ func (r *GormRuleRepository) List(ctx context.Context, filter RuleFilter) ([]*ty
 	if filter.ChainID != nil {
 		query = query.Where("chain_id = ? OR chain_id IS NULL", *filter.ChainID)
 	}
-	if filter.APIKeyID != nil {
-		query = query.Where("api_key_id = ? OR api_key_id IS NULL", *filter.APIKeyID)
+	if filter.Owner != nil {
+		query = query.Where("owner = ?", *filter.Owner)
 	}
 	if filter.SignerAddress != nil {
 		query = query.Where("LOWER(signer_address) = LOWER(?) OR signer_address IS NULL", *filter.SignerAddress)
@@ -165,8 +165,8 @@ func (r *GormRuleRepository) Count(ctx context.Context, filter RuleFilter) (int,
 	if filter.ChainID != nil {
 		query = query.Where("chain_id = ? OR chain_id IS NULL", *filter.ChainID)
 	}
-	if filter.APIKeyID != nil {
-		query = query.Where("api_key_id = ? OR api_key_id IS NULL", *filter.APIKeyID)
+	if filter.Owner != nil {
+		query = query.Where("owner = ?", *filter.Owner)
 	}
 	if filter.SignerAddress != nil {
 		query = query.Where("LOWER(signer_address) = LOWER(?) OR signer_address IS NULL", *filter.SignerAddress)

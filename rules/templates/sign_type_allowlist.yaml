@@ -1,0 +1,32 @@
+# Off-chain template: restrict which sign types this signer accepts.
+#
+# Demonstrates the chain-agnostic pattern — note the file lives at the
+# templates root (no chain subdirectory), so the Registry treats it as
+# chain_type="" (off-chain). Same template config drops in for EVM,
+# Solana, or any future ledger family because the rule only inspects
+# the request's sign_type, never the chain-specific payload.
+#
+# Apply as a blanket guard: "this API key may only request transaction
+# signatures, never EIP-712, never personal_sign", or invert it for
+# auth-only keys that should never sign transactions.
+
+name: "Sign-type allowlist"
+description: "Off-chain rule: restrict which sign types this signer accepts (transaction, personal_sign, eip712, ...)."
+
+variables:
+  - name: allowed_sign_types
+    type: json
+    label: "Allowed sign types"
+    description: 'JSON array of sign types this rule permits, e.g. ["transaction", "personal_sign"]. Requests with sign_type outside this list are rejected.'
+    required: true
+    placeholder: '["transaction"]'
+
+rules:
+  - id: "sign-type-allowlist"
+    name: "Allowed sign types"
+    type: "sign_type_restriction"
+    mode: "whitelist"
+    enabled: true
+    description: "Permit only the listed sign types"
+    config:
+      allowed_sign_types: "${allowed_sign_types}"

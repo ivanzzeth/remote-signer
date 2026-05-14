@@ -101,6 +101,46 @@ func (r *mockTemplateRepo) Count(_ context.Context, _ storage.TemplateFilter) (i
 	return len(r.templates), nil
 }
 
+func (r *mockTemplateRepo) Upsert(ctx context.Context, tmpl *types.RuleTemplate) (bool, error) {
+	if tmpl == nil {
+		return false, fmt.Errorf("template cannot be nil")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if existing, ok := r.templates[tmpl.ID]; ok {
+		if existing.ContentHash != "" && existing.ContentHash == tmpl.ContentHash {
+			return false, nil
+		}
+		cp := *tmpl
+		r.templates[tmpl.ID] = &cp
+		return true, nil
+	}
+	cp := *tmpl
+	r.templates[tmpl.ID] = &cp
+	return true, nil
+}
+
+func (r *mockTemplateRepo) ListIDsBySource(_ context.Context, source types.RuleSource) ([]string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var ids []string
+	for id, t := range r.templates {
+		if t.Source == source {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+
+func (r *mockTemplateRepo) DeleteMany(_ context.Context, ids []string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, id := range ids {
+		delete(r.templates, id)
+	}
+	return nil
+}
+
 // mockRuleRepo is an in-memory implementation of storage.RuleRepository.
 type mockRuleRepo struct {
 	mu    sync.RWMutex
@@ -280,8 +320,45 @@ func (r *mockBudgetRepo) ListByRuleIDs(_ context.Context, ruleIDs []types.RuleID
 	return out, nil
 }
 
+func (r *mockBudgetRepo) ListAll(_ context.Context) ([]*types.RuleBudget, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]*types.RuleBudget, 0, len(r.budgets))
+	for _, b := range r.budgets {
+		cp := *b
+		out = append(out, &cp)
+	}
+	return out, nil
+}
+func (r *mockBudgetRepo) Get(_ context.Context, id string) (*types.RuleBudget, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if b, ok := r.budgets[id]; ok {
+		cp := *b
+		return &cp, nil
+	}
+	return nil, types.ErrNotFound
+}
+func (r *mockBudgetRepo) Update(_ context.Context, budget *types.RuleBudget) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.budgets[budget.ID]; !ok {
+		return types.ErrNotFound
+	}
+	cp := *budget
+	r.budgets[budget.ID] = &cp
+	return nil
+}
+
 func (r *mockBudgetRepo) MarkAlertSent(_ context.Context, _ types.RuleID, _ string) error {
 	return nil
+}
+
+func (r *mockBudgetRepo) CountByRuleID(_ context.Context, _ types.RuleID) (int, error) {
+	return 0, nil
+}
+func (r *mockBudgetRepo) CreateOrGet(_ context.Context, budget *types.RuleBudget) (*types.RuleBudget, bool, error) {
+	return budget, true, nil
 }
 
 // helper to count budgets in the mock repo
@@ -699,7 +776,7 @@ func TestCreateInstance(t *testing.T) {
 		budgetRepo := newMockBudgetRepo()
 
 		vars := []types.TemplateVariable{
-			{Name: "max_value", Type: "uint256", Description: "Max value", Required: false, Default: "1000000"},
+			{Name: "max_value", Type: "bigint", Description: "Max value", Required: false, Default: "1000000"},
 		}
 		config := []byte(`{"max_value":"${max_value}"}`)
 		tmpl := makeTemplate("tmpl-opt", "Optional Var Template", vars, config)
@@ -731,7 +808,7 @@ func TestCreateInstance(t *testing.T) {
 		budgetRepo := newMockBudgetRepo()
 
 		vars := []types.TemplateVariable{
-			{Name: "max_value", Type: "uint256", Description: "Max value", Required: false, Default: "1000000"},
+			{Name: "max_value", Type: "bigint", Description: "Max value", Required: false, Default: "1000000"},
 		}
 		config := []byte(`{"max_value":"${max_value}"}`)
 		tmpl := makeTemplate("tmpl-override", "Override Default", vars, config)
@@ -887,6 +964,86 @@ func TestCreateInstance(t *testing.T) {
 		}
 		if result.Budget.Unit != "count" {
 			t.Errorf("expected default unit 'count', got %q", result.Budget.Unit)
+		}
+	})
+
+	t.Run("budget_metering_empty_unit_defaults_to_count", func(t *testing.T) {
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		metering := types.BudgetMetering{Method: "count_only", Unit: ""}
+		tmpl := makeTemplate("tmpl-empty-unit", "Empty Unit", requiredAddrVar, configWithVar)
+		tmpl.BudgetMetering = mustJSON(metering)
+		seedTemplate(t, tmplRepo, tmpl)
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		result, err := svc.CreateInstance(ctx, &CreateInstanceRequest{
+			TemplateID: "tmpl-empty-unit",
+			Variables:  map[string]string{"target_address": "0xffffffffffffffffffffffffffffffffffffffff"},
+			Budget:     &BudgetConfig{MaxTotal: "10", MaxPerTx: "1"},
+		})
+		if err != nil {
+			t.Fatalf("CreateInstance failed: %v", err)
+		}
+		if result.Budget == nil {
+			t.Fatal("expected non-nil budget")
+		}
+		if result.Budget.Unit != "count" {
+			t.Errorf("expected unit 'count' when BudgetMetering.Unit is empty, got %q", result.Budget.Unit)
+		}
+	})
+
+	t.Run("budget_unit_variable_substitution", func(t *testing.T) {
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		vars := []types.TemplateVariable{
+			{Name: "chain_id", Type: "string", Required: true},
+			{Name: "token_address", Type: "address", Required: true},
+		}
+		metering := types.BudgetMetering{
+			Method: "js",
+			Unit:   "${chain_id}:${token_address}",
+		}
+		configUnitSubst := []byte(`{"chain_id":"${chain_id}","token":"${token_address}"}`)
+		tmpl := makeTemplate("tmpl-unit-subst", "Unit Substitution", vars, configUnitSubst)
+		tmpl.BudgetMetering = mustJSON(metering)
+		seedTemplate(t, tmplRepo, tmpl)
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		result, err := svc.CreateInstance(ctx, &CreateInstanceRequest{
+			TemplateID: "tmpl-unit-subst",
+			Variables: map[string]string{
+				"chain_id":       "137",
+				"token_address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+			},
+			Budget: &BudgetConfig{
+				MaxTotal: "1000",
+				MaxPerTx: "100",
+			},
+		})
+		if err != nil {
+			t.Fatalf("CreateInstance failed: %v", err)
+		}
+		if result.Budget == nil {
+			t.Fatal("expected non-nil budget")
+		}
+		expectedUnit := "137:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+		if result.Budget.Unit != expectedUnit {
+			t.Errorf("expected budget unit %q (substituted from ${chain_id}:${token_address}), got %q", expectedUnit, result.Budget.Unit)
+		}
+		if budgetRepo.count() != 1 {
+			t.Errorf("expected 1 budget in repo, got %d", budgetRepo.count())
 		}
 	})
 
@@ -1074,7 +1231,7 @@ func TestCreateInstance(t *testing.T) {
 		budgetRepo := newMockBudgetRepo()
 
 		vars := []types.TemplateVariable{
-			{Name: "amount", Type: "uint256", Required: true},
+			{Name: "amount", Type: "bigint", Required: true},
 		}
 		config := []byte(`{"amount":"${amount}"}`)
 		tmpl := makeTemplate("tmpl-inv-uint", "Invalid Uint", vars, config)
@@ -1090,10 +1247,10 @@ func TestCreateInstance(t *testing.T) {
 			Variables:  map[string]string{"amount": "not-a-number"},
 		})
 		if err == nil {
-			t.Fatal("expected error for invalid uint256")
+			t.Fatal("expected error for invalid bigint")
 		}
-		if !strings.Contains(err.Error(), "invalid uint256") {
-			t.Errorf("error should mention invalid uint256, got: %v", err)
+		if !strings.Contains(err.Error(), "invalid bigint") {
+			t.Errorf("error should mention invalid bigint, got: %v", err)
 		}
 	})
 
@@ -1135,8 +1292,8 @@ func TestCreateInstance(t *testing.T) {
 		if result.Rule.ChainID == nil || *result.Rule.ChainID != "1" {
 			t.Errorf("expected ChainID '1', got %v", result.Rule.ChainID)
 		}
-		if result.Rule.APIKeyID == nil || *result.Rule.APIKeyID != "key-123" {
-			t.Errorf("expected APIKeyID 'key-123', got %v", result.Rule.APIKeyID)
+		if result.Rule.Owner != "key-123" {
+			t.Errorf("expected APIKeyID 'key-123', got %v", result.Rule.Owner)
 		}
 		if result.Rule.SignerAddress == nil || *result.Rule.SignerAddress != signerAddr {
 			t.Errorf("expected SignerAddress %q, got %v", signerAddr, result.Rule.SignerAddress)
@@ -1287,7 +1444,7 @@ func TestRevokeInstance(t *testing.T) {
 
 		// Seed associated budget
 		budget := &types.RuleBudget{
-			ID:       "bdg_inst_abc123_eth",
+			ID:       types.BudgetID(ruleID, "eth"),
 			RuleID:   ruleID,
 			Unit:     "eth",
 			MaxTotal: "100",
@@ -1433,7 +1590,7 @@ func TestRevokeInstance(t *testing.T) {
 		// Seed two budgets for the same rule
 		for _, unit := range []string{"eth", "usdt"} {
 			b := &types.RuleBudget{
-				ID:       fmt.Sprintf("bdg_%s_%s", ruleID, unit),
+				ID:       types.BudgetID(ruleID, unit),
 				RuleID:   ruleID,
 				Unit:     unit,
 				MaxTotal: "100",
@@ -1541,7 +1698,7 @@ func TestValidateVariableType_Extended(t *testing.T) {
 		budgetRepo := newMockBudgetRepo()
 
 		vars := []types.TemplateVariable{
-			{Name: "amounts", Type: "uint256_list", Required: true},
+			{Name: "amounts", Type: "bigint_list", Required: true},
 		}
 		config := []byte(`{"amounts":"${amounts}"}`)
 		tmpl := makeTemplate("tmpl-uintlist", "Uint256 List", vars, config)
@@ -1572,7 +1729,7 @@ func TestValidateVariableType_Extended(t *testing.T) {
 		budgetRepo := newMockBudgetRepo()
 
 		vars := []types.TemplateVariable{
-			{Name: "amounts", Type: "uint256_list", Required: true},
+			{Name: "amounts", Type: "bigint_list", Required: true},
 		}
 		config := []byte(`{"amounts":"${amounts}"}`)
 		tmpl := makeTemplate("tmpl-uintlist-inv", "Invalid Uint256 List", vars, config)
@@ -1590,9 +1747,9 @@ func TestValidateVariableType_Extended(t *testing.T) {
 			},
 		})
 		if err == nil {
-			t.Fatal("expected error for invalid uint256 in list")
+			t.Fatal("expected error for invalid bigint in list")
 		}
-		if !strings.Contains(err.Error(), "invalid uint256 in list") {
+		if !strings.Contains(err.Error(), "invalid bigint in list") {
 			t.Errorf("unexpected error: %v", err)
 		}
 	})
@@ -1752,7 +1909,7 @@ func TestValidateVariableType_Extended(t *testing.T) {
 		budgetRepo := newMockBudgetRepo()
 
 		vars := []types.TemplateVariable{
-			{Name: "amount", Type: "uint256", Required: true},
+			{Name: "amount", Type: "bigint", Required: true},
 		}
 		config := []byte(`{"amount":"${amount}"}`)
 		tmpl := makeTemplate("tmpl-neg", "Negative Uint", vars, config)
@@ -1780,7 +1937,7 @@ func TestValidateVariableType_Extended(t *testing.T) {
 		budgetRepo := newMockBudgetRepo()
 
 		vars := []types.TemplateVariable{
-			{Name: "amount", Type: "uint256", Required: true},
+			{Name: "amount", Type: "bigint", Required: true},
 		}
 		config := []byte(`{"amount":"${amount}"}`)
 		tmpl := makeTemplate("tmpl-empty-uint", "Empty Uint", vars, config)
@@ -1827,6 +1984,350 @@ func TestValidateVariableType_Extended(t *testing.T) {
 		})
 		if err == nil {
 			t.Fatal("expected error for address without 0x prefix")
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Reserved variable (chain_id) injection tests
+// ---------------------------------------------------------------------------
+
+func TestReservedVariableChainID(t *testing.T) {
+	ctx := context.Background()
+
+	// Helper: template with chain_id in config (like real ERC20 templates)
+	makeChainIDTemplate := func(id, name string, includeChainIDVar bool, extraVars []types.TemplateVariable) *types.RuleTemplate {
+		vars := make([]types.TemplateVariable, 0)
+		if includeChainIDVar {
+			vars = append(vars, types.TemplateVariable{
+				Name: "chain_id", Type: "string", Description: "Chain ID", Required: true,
+			})
+		}
+		vars = append(vars, extraVars...)
+		config := []byte(`{"chain":"${chain_id}","token":"${token_address}"}`)
+		return makeTemplate(id, name, vars, config)
+	}
+
+	t.Run("chain_id_injected_from_scope_no_template_var", func(t *testing.T) {
+		// Template does NOT define chain_id variable (new style).
+		// chain_id should be injected from req.ChainID.
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		tmpl := makeChainIDTemplate("tmpl-nochainvar", "No ChainID Var", false,
+			[]types.TemplateVariable{
+				{Name: "token_address", Type: "address", Required: true},
+			})
+		seedTemplate(t, tmplRepo, tmpl)
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		chainID := "137"
+		result, err := svc.CreateInstance(ctx, &CreateInstanceRequest{
+			TemplateID: "tmpl-nochainvar",
+			ChainID:    &chainID,
+			Variables: map[string]string{
+				"token_address": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+			},
+		})
+		if err != nil {
+			t.Fatalf("CreateInstance failed: %v", err)
+		}
+
+		// Config should have chain_id substituted from scope
+		expectedConfig := `{"chain":"137","token":"0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"}`
+		if string(result.Rule.Config) != expectedConfig {
+			t.Errorf("config mismatch:\nwant: %s\ngot:  %s", expectedConfig, string(result.Rule.Config))
+		}
+
+		// Variables JSON should contain chain_id
+		var storedVars map[string]string
+		if err := json.Unmarshal(result.Rule.Variables, &storedVars); err != nil {
+			t.Fatalf("failed to unmarshal variables: %v", err)
+		}
+		if storedVars["chain_id"] != "137" {
+			t.Errorf("expected stored chain_id=137, got %q", storedVars["chain_id"])
+		}
+
+		// Rule scope should be set
+		if result.Rule.ChainID == nil || *result.Rule.ChainID != "137" {
+			t.Errorf("expected rule ChainID scope=137, got %v", result.Rule.ChainID)
+		}
+	})
+
+	t.Run("chain_id_injected_overrides_user_variable", func(t *testing.T) {
+		// Template still defines chain_id variable (old style, backward compat).
+		// User provides chain_id in variables with a DIFFERENT value than scope.
+		// Scope value should win.
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		tmpl := makeChainIDTemplate("tmpl-oldstyle", "Old Style", true,
+			[]types.TemplateVariable{
+				{Name: "token_address", Type: "address", Required: true},
+			})
+		seedTemplate(t, tmplRepo, tmpl)
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		chainID := "137"
+		result, err := svc.CreateInstance(ctx, &CreateInstanceRequest{
+			TemplateID: "tmpl-oldstyle",
+			ChainID:    &chainID,
+			Variables: map[string]string{
+				"chain_id":      "1",                                          // user says chain 1 — should be overridden
+				"token_address": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+			},
+		})
+		if err != nil {
+			t.Fatalf("CreateInstance failed: %v", err)
+		}
+
+		// Config should use scope chain_id (137), not user's (1)
+		expectedConfig := `{"chain":"137","token":"0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"}`
+		if string(result.Rule.Config) != expectedConfig {
+			t.Errorf("config mismatch:\nwant: %s\ngot:  %s", expectedConfig, string(result.Rule.Config))
+		}
+
+		// Stored variable should be 137
+		var storedVars map[string]string
+		if err := json.Unmarshal(result.Rule.Variables, &storedVars); err != nil {
+			t.Fatalf("failed to unmarshal variables: %v", err)
+		}
+		if storedVars["chain_id"] != "137" {
+			t.Errorf("expected stored chain_id=137, got %q", storedVars["chain_id"])
+		}
+	})
+
+	t.Run("chain_id_required_in_old_template_skipped_during_validation", func(t *testing.T) {
+		// Template defines chain_id as required, but user does NOT provide it in variables.
+		// Should NOT fail validation — chain_id is a reserved variable.
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		tmpl := makeChainIDTemplate("tmpl-req-skip", "Required Skip", true,
+			[]types.TemplateVariable{
+				{Name: "token_address", Type: "address", Required: true},
+			})
+		seedTemplate(t, tmplRepo, tmpl)
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		chainID := "56"
+		result, err := svc.CreateInstance(ctx, &CreateInstanceRequest{
+			TemplateID: "tmpl-req-skip",
+			ChainID:    &chainID,
+			Variables: map[string]string{
+				// chain_id NOT provided — should be injected from scope
+				"token_address": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			},
+		})
+		if err != nil {
+			t.Fatalf("CreateInstance should not fail: %v", err)
+		}
+
+		expectedConfig := `{"chain":"56","token":"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`
+		if string(result.Rule.Config) != expectedConfig {
+			t.Errorf("config mismatch:\nwant: %s\ngot:  %s", expectedConfig, string(result.Rule.Config))
+		}
+	})
+
+	t.Run("no_chain_id_scope_and_no_variable_leaves_placeholder", func(t *testing.T) {
+		// Neither scope chain_id nor variable chain_id provided.
+		// ${chain_id} remains unresolved → SubstituteVariables should return error.
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		tmpl := makeChainIDTemplate("tmpl-noscope", "No Scope", false,
+			[]types.TemplateVariable{
+				{Name: "token_address", Type: "address", Required: true},
+			})
+		seedTemplate(t, tmplRepo, tmpl)
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		_, err = svc.CreateInstance(ctx, &CreateInstanceRequest{
+			TemplateID: "tmpl-noscope",
+			// ChainID is nil — no scope
+			Variables: map[string]string{
+				"token_address": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			},
+		})
+		if err == nil {
+			t.Fatal("expected error for unresolved ${chain_id}")
+		}
+		if !strings.Contains(err.Error(), "chain_id") {
+			t.Errorf("error should mention chain_id, got: %v", err)
+		}
+	})
+
+	t.Run("budget_unit_uses_injected_chain_id", func(t *testing.T) {
+		// Budget metering unit "${chain_id}:${token_address}" should resolve
+		// with the scope-injected chain_id.
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		vars := []types.TemplateVariable{
+			{Name: "token_address", Type: "address", Required: true},
+		}
+		config := []byte(`{"token":"${token_address}"}`)
+		budgetMetering := mustJSON(types.BudgetMetering{
+			Method: "js",
+			Unit:   "${chain_id}:${token_address}",
+		})
+
+		tmpl := &types.RuleTemplate{
+			ID:             "tmpl-budget",
+			Name:           "Budget Template",
+			Type:           types.RuleTypeEVMJS,
+			Mode:           types.RuleModeWhitelist,
+			Variables:      mustJSON(vars),
+			Config:         config,
+			BudgetMetering: budgetMetering,
+			Source:         types.RuleSourceConfig,
+			Enabled:        true,
+			CreatedAt:      time.Now(),
+			UpdatedAt:      time.Now(),
+		}
+		seedTemplate(t, tmplRepo, tmpl)
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		chainID := "137"
+		result, err := svc.CreateInstance(ctx, &CreateInstanceRequest{
+			TemplateID: "tmpl-budget",
+			ChainID:    &chainID,
+			Variables: map[string]string{
+				"token_address": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+			},
+			Budget: &BudgetConfig{
+				MaxTotal: "1000",
+				MaxPerTx: "100",
+			},
+		})
+		if err != nil {
+			t.Fatalf("CreateInstance failed: %v", err)
+		}
+		if result.Budget == nil {
+			t.Fatal("expected budget to be created")
+		}
+
+		// Budget unit should be "137:0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+		expectedUnit := "137:0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+		if result.Budget.Unit != expectedUnit {
+			t.Errorf("budget unit mismatch:\nwant: %s\ngot:  %s", expectedUnit, result.Budget.Unit)
+		}
+	})
+
+	t.Run("createInstanceFromResolved_also_injects_chain_id", func(t *testing.T) {
+		// Verify the tx-scoped path also injects chain_id.
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		vars := []types.TemplateVariable{
+			{Name: "token_address", Type: "address", Required: true},
+		}
+		config := []byte(`{"chain":"${chain_id}","token":"${token_address}"}`)
+		tmpl := makeTemplate("tmpl-resolved", "Resolved Path", vars, config)
+		seedTemplate(t, tmplRepo, tmpl)
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		chainID := "42161" // Arbitrum
+		result, err := svc.CreateInstanceFromResolvedWithTx(ctx, ruleRepo, budgetRepo, tmpl,
+			&CreateInstanceRequest{
+				TemplateID: "tmpl-resolved",
+				ChainID:    &chainID,
+				Variables: map[string]string{
+					"token_address": "0xcccccccccccccccccccccccccccccccccccccccc",
+				},
+			})
+		if err != nil {
+			t.Fatalf("CreateInstanceFromResolvedWithTx failed: %v", err)
+		}
+
+		expectedConfig := `{"chain":"42161","token":"0xcccccccccccccccccccccccccccccccccccccccc"}`
+		if string(result.Rule.Config) != expectedConfig {
+			t.Errorf("config mismatch:\nwant: %s\ngot:  %s", expectedConfig, string(result.Rule.Config))
+		}
+	})
+}
+
+func TestValidateVariablesSkipsReserved(t *testing.T) {
+	// chain_id is reserved — even if template marks it required with no default,
+	// validateVariables should NOT return an error when it's missing from user input.
+	defs := []types.TemplateVariable{
+		{Name: "chain_id", Type: "string", Required: true},
+		{Name: "token_address", Type: "address", Required: true},
+	}
+	vars := map[string]string{
+		"token_address": "0x1111111111111111111111111111111111111111",
+		// chain_id deliberately omitted
+	}
+	if err := validateVariables(defs, vars); err != nil {
+		t.Fatalf("expected no error (chain_id is reserved), got: %v", err)
+	}
+}
+
+func TestInjectReservedVariables(t *testing.T) {
+	logger := newTestLogger()
+
+	t.Run("injects_when_absent", func(t *testing.T) {
+		vars := map[string]string{"token": "0xabc"}
+		chainID := "137"
+		injectReservedVariables(vars, &CreateInstanceRequest{ChainID: &chainID}, logger)
+		if vars["chain_id"] != "137" {
+			t.Errorf("expected chain_id=137, got %q", vars["chain_id"])
+		}
+	})
+
+	t.Run("overrides_when_different", func(t *testing.T) {
+		vars := map[string]string{"chain_id": "1", "token": "0xabc"}
+		chainID := "137"
+		injectReservedVariables(vars, &CreateInstanceRequest{ChainID: &chainID}, logger)
+		if vars["chain_id"] != "137" {
+			t.Errorf("expected chain_id=137, got %q", vars["chain_id"])
+		}
+	})
+
+	t.Run("no_op_when_same", func(t *testing.T) {
+		vars := map[string]string{"chain_id": "137"}
+		chainID := "137"
+		injectReservedVariables(vars, &CreateInstanceRequest{ChainID: &chainID}, logger)
+		if vars["chain_id"] != "137" {
+			t.Errorf("expected chain_id=137, got %q", vars["chain_id"])
+		}
+	})
+
+	t.Run("no_op_when_nil_chain_id", func(t *testing.T) {
+		vars := map[string]string{"token": "0xabc"}
+		injectReservedVariables(vars, &CreateInstanceRequest{ChainID: nil}, logger)
+		if _, exists := vars["chain_id"]; exists {
+			t.Error("chain_id should not be injected when scope ChainID is nil")
 		}
 	})
 }

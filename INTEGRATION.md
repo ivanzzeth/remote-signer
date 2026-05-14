@@ -1,12 +1,11 @@
 # Remote Signer Integration Guide
 
-This document provides a comprehensive guide for integrating the remote-signer service using the JavaScript client library and MetaMask Snap.
+This document provides a comprehensive guide for integrating the remote-signer service using the JavaScript client library.
 
 ## Table of Contents
 
 1. [JavaScript Client Library](#javascript-client-library)
-2. [MetaMask Snap Integration](#metamask-snap-integration)
-3. [Authentication Setup](#authentication-setup)
+2. [Authentication Setup](#authentication-setup)
 4. [Usage Examples](#usage-examples)
 5. [Error Handling](#error-handling)
 6. [Best Practices](#best-practices)
@@ -38,72 +37,35 @@ const client = new RemoteSignerClient({
 - **Type Safety**: Full TypeScript support
 - **Error Handling**: Comprehensive error types
 
-## MetaMask Snap Integration
-
-### Installation
-
-The MetaMask Snap can be installed in two ways:
-
-1. **From dApp**: Prompt users to install the snap
-2. **From MetaMask Snaps Directory**: Users can install directly
-
-### Setup in dApp
-
-```typescript
-// Install snap
-const snapId = 'npm:remote-signer-snap';
-const result = await window.ethereum.request({
-  method: 'wallet_requestSnaps',
-  params: {
-    [snapId]: {}
-  }
-});
-
-// Configure snap
-await window.ethereum.request({
-  method: 'wallet_invokeSnap',
-  params: {
-    snapId,
-    request: {
-      method: 'configure',
-      params: {
-        baseURL: 'http://localhost:8548',
-        apiKeyID: 'my-api-key',
-        privateKey: 'your-ed25519-private-key-hex'
-      }
-    }
-  }
-});
-```
-
 ## Authentication Setup
 
 ### 1. Generate Ed25519 Key Pair
 
+Use the built-in keygen — no openssl needed:
+
 ```bash
-# Generate private key
-openssl genpkey -algorithm ed25519 -out private_key.pem
-
-# Extract private key in hex format
-openssl pkey -in private_key.pem -text | grep 'priv:' -A 3 | tail -n +2 | tr -d ':\n '
-
-# Extract public key in hex format
-openssl pkey -in private_key.pem -pubout -out public_key.pem
-openssl pkey -pubin -in public_key.pem -text | grep 'pub:' -A 3 | tail -n +2 | tr -d ':\n '
+remote-signer api-key keygen --out ./my-app
+# Writes my-app.priv (0600) and my-app.pub (0644) as PEM, and prints
+# the hex public key plus a ready-to-run `api-key create` command.
 ```
 
-### 2. Register API Key
+### 2. Register API Key with the Service
 
-Add the public key to your `config.yaml`:
-
-```yaml
-api_keys:
-  - id: "my-api-key"
-    name: "My Application"
-    public_key: "your-public-key-hex"  # 64 hex characters
-    enabled: true
-    rate_limit: 100
+```bash
+# Authenticate as admin (see ~/.remote-signer/apikeys/admin.key.priv on a fresh install)
+remote-signer api-key create \
+  --id my-app \
+  --name "My Application" \
+  --role dev \
+  --public-key <hex-from-step-1> \
+  --rate-limit 100 \
+  --api-key-id admin --api-key-file ~/.remote-signer/apikeys/admin.key.priv \
+  --url http://localhost:8548
 ```
+
+The service stores the public key in its `api_keys` table; the matching
+private key from step 1 stays on the client and signs every outbound
+request.
 
 ### 3. Use Private Key in Client
 
@@ -253,12 +215,6 @@ try {
 - **Timeouts**: Set appropriate `pollTimeout` values
 - **Connection pooling**: Reuse client instances when possible
 
-### 4. MetaMask Snap
-
-- **User confirmation**: Always show confirmation dialogs for sensitive operations
-- **State management**: Store configuration securely in snap state
-- **Error messages**: Provide clear error messages in dialogs
-
 ## Troubleshooting
 
 ### Connection Issues
@@ -279,9 +235,246 @@ try {
 2. **Check rules**: Verify that rules allow the requested operation
 3. **Check request format**: Ensure the payload matches the sign type
 
+## Rust SDK
+
+The Rust SDK (`pkg/rs-client/`) provides a native Rust client for the remote-signer service with Ed25519 authentication.
+
+### Installation
+
+Add to your `Cargo.toml`:
+
+```toml
+[dependencies]
+remote-signer-client = { path = "../remote-signer/pkg/rs-client" }
+```
+
+### Basic Usage
+
+```rust
+use remote_signer_client::{Client, Config};
+use remote_signer_client::evm::{SignRequest, SIGN_TYPE_PERSONAL};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = Client::new(Config {
+        base_url: "http://127.0.0.1:8548".to_string(),
+        api_key_id: "my-key".to_string(),
+        private_key_hex: Some("0x...".to_string()),
+        ..Default::default()
+    })?;
+
+    let req = SignRequest {
+        chain_id: "1".to_string(),
+        signer_address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266".to_string(),
+        sign_type: SIGN_TYPE_PERSONAL.to_string(),
+        payload: serde_json::json!({"message": "hello"}),
+    };
+
+    let resp = client.evm.sign.execute(&req)?;
+    println!("status={} sig={:?}", resp.status, resp.signature);
+
+    Ok(())
+}
+```
+
+### Authentication
+
+Requests are signed with Ed25519. The message format matches the server middleware:
+
+```
+{timestamp_ms}|{nonce}|{method}|{path_with_query}|{sha256(body)}
+```
+
+Headers sent automatically: `X-API-Key-ID`, `X-Timestamp`, `X-Nonce`, `X-Signature` (base64).
+
+For more details, see [Rust SDK README](./pkg/rs-client/README.md).
+
+---
+
+## MCP Server (AI Agent Integration)
+
+The MCP server (`pkg/mcp-server/`) exposes remote-signer operations as [Model Context Protocol](https://modelcontextprotocol.io/) tools, enabling AI agents (Claude Code, Cursor, etc.) to manage signers, rules, templates, and signing requests programmatically.
+
+- **Package**: `remote-signer-mcp` (npm, v0.0.5)
+- **Protocol**: MCP over stdio
+- **Auth**: Same Ed25519 authentication as other SDKs
+- **TLS/mTLS**: Supported via environment variables
+
+### Quick Start (no install)
+
+```bash
+npx -y remote-signer-mcp
+```
+
+### Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `REMOTE_SIGNER_URL` | No | Base URL (default: `http://localhost:8548`) |
+| `REMOTE_SIGNER_API_KEY_ID` | Yes | API key ID |
+| `REMOTE_SIGNER_PRIVATE_KEY` | One of | Ed25519 private key in hex |
+| `REMOTE_SIGNER_PRIVATE_KEY_FILE` | One of | Path to PEM file |
+
+Optional TLS variables: `REMOTE_SIGNER_CA_FILE`, `REMOTE_SIGNER_CLIENT_CERT_FILE`, `REMOTE_SIGNER_CLIENT_KEY_FILE`.
+
+### Cursor / Claude Code Configuration
+
+Add to your MCP config (`.cursor/mcp.json` or `.mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "remote-signer": {
+      "command": "npx",
+      "args": ["-y", "remote-signer-mcp"],
+      "env": {
+        "REMOTE_SIGNER_URL": "http://localhost:8548",
+        "REMOTE_SIGNER_API_KEY_ID": "admin",
+        "REMOTE_SIGNER_PRIVATE_KEY_FILE": "/path/to/admin_private.pem"
+      }
+    }
+  }
+}
+```
+
+Once configured, AI agents can create signers, manage rules, sign transactions, and approve requests through natural language. For more details, see [MCP Server README](./pkg/mcp-server/README.md).
+
+---
+
+## CLI Commands
+
+The `remote-signer` provides command-line access to all server operations. Requires auth flags: `--url`, `--api-key-id`, `--api-key-file`.
+
+### Request Management
+
+```bash
+# List signing requests (defaults to "authorizing" status)
+remote-signer evm request list [--status authorizing]
+
+# Get request details
+remote-signer evm request get <request-id>
+
+# Approve a pending request (signer owner only)
+remote-signer evm request approve <request-id>
+
+# Reject a pending request (signer owner only)
+remote-signer evm request reject <request-id>
+
+# Preview auto-generated rule for a request
+remote-signer evm request preview-rule <request-id>
+```
+
+### Transaction Operations
+
+```bash
+# Broadcast a signed transaction
+remote-signer evm broadcast <signed-tx-hex> --chain-id <id> [--wait]
+
+# Simulate a single transaction
+remote-signer evm simulate tx --chain-id 1 --from 0x... --to 0x... --data 0x...
+
+# Simulate a batch of transactions (JSON format)
+remote-signer evm simulate batch --chain-id 1 --from 0x... \
+  --tx '{"to":"0x...","value":"0x0","data":"0x..."}' \
+  --tx '{"to":"0x...","value":"0x0","data":"0x..."}'
+```
+
+### Guard Management
+
+```bash
+# Resume approval guard after it trips
+remote-signer evm guard resume
+```
+
+### Transaction Signing Notes
+
+- **Nonce**: When omitted or set to -1, the server auto-fetches from chain via `eth_getTransactionCount`.
+- **Gas params**: `gasPrice`, `gasTipCap`, `gasFeeCap`, and `value` accept both decimal (`"20000000000"`) and hex (`"0x4a817c800"`) formats.
+- **Input validation**: All API handlers validate Ethereum addresses (0x + 40 hex chars), chain_id (positive decimal), hex calldata, and hex values.
+
+---
+
+## Batch Signing
+
+```typescript
+// Sign multiple transactions atomically
+const result = await client.evm.sign.executeBatch({
+  requests: [
+    {
+      chain_id: '1',
+      signer_address: '0x...',
+      sign_type: 'transaction',
+      payload: { transaction: { to: '0x...', value: '0x0', data: '0x095ea7b3...' } }
+    },
+    {
+      chain_id: '1',
+      signer_address: '0x...',
+      sign_type: 'transaction',
+      payload: { transaction: { to: '0x...', value: '0x0', data: '0xf2c42696...' } }
+    }
+  ]
+});
+```
+
+## Simulation
+
+```typescript
+// Simulate a single transaction
+const simResult = await client.evm.simulate({
+  chainId: '1',
+  from: '0x...',
+  to: '0x...',
+  value: '0x0',
+  data: '0x...'
+});
+
+// Simulate a batch
+const batchResult = await client.evm.simulateBatch({
+  chainId: '1',
+  from: '0x...',
+  transactions: [
+    { to: '0x...', value: '0x0', data: '0x...' },
+    { to: '0x...', value: '0x0', data: '0x...' }
+  ]
+});
+
+// Check simulation engine status
+const status = await client.evm.simulate.status();
+```
+
+## Signer Access Control
+
+```typescript
+// Grant signer access to another API key
+await client.evm.signers.grantAccess('0xSignerAddress', { api_key_id: 'agent-key' });
+
+// Revoke signer access
+await client.evm.signers.revokeAccess('0xSignerAddress', 'agent-key');
+
+// List who has access to a signer
+const access = await client.evm.signers.listAccess('0xSignerAddress');
+
+// Transfer signer ownership
+await client.evm.signers.transferOwnership('0xSignerAddress', { new_owner_id: 'new-admin' });
+```
+
+## Request Approval (Owner Only)
+
+Only the signer's **owner API key** can approve or reject pending requests:
+
+```typescript
+// Approve a pending request (must be signer owner)
+await client.approveRequest('request-id', { approved: true });
+
+// Reject a pending request
+await client.approveRequest('request-id', { approved: false });
+```
+
+---
+
 ## Additional Resources
 
-- [API Documentation](../docs/API.md)
-- [Architecture Overview](../docs/ARCHITECTURE.md)
+- [API Documentation](docs/api.md)
+- [Architecture Overview](docs/architecture.md)
 - [JavaScript Client README](./pkg/js-client/README.md)
-- [MetaMask Snap README](./app/metamask-snap/README.md)
+- [Rust SDK README](./pkg/rs-client/README.md)
+- [MCP Server README](./pkg/mcp-server/README.md)

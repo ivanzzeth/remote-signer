@@ -1,6 +1,10 @@
 /**
  * HTTP transport layer for remote-signer client.
  * Handles authenticated requests, TLS configuration, and error parsing.
+ *
+ * Environment support:
+ * - Browser: uses globalThis.fetch. httpClient.tls is ignored (no custom CA or mTLS in browser).
+ * - Node.js: uses globalThis.fetch by default; if httpClient.tls is set, uses Node https module for custom CA / mTLS.
  */
 
 import { parsePrivateKey, generateNonce, signRequestWithNonce } from "./crypto";
@@ -68,18 +72,25 @@ export class HttpTransport {
 
     // Setup HTTP client
     const timeout = config.httpClient?.timeout ?? 30000; // 30 seconds
+    const base = config.baseURL.replace(/\/$/, "");
+    const isHttps = base.toLowerCase().startsWith("https://");
 
     if (config.httpClient?.fetch) {
       // User provided custom fetch function - use directly
       this.httpClient = { fetch: config.httpClient.fetch, timeout };
-    } else if (config.httpClient?.tls && HttpTransport.isNodeJS()) {
-      // Node.js environment with TLS config - create fetch with https.Agent
+    } else if (
+      HttpTransport.isNodeJS() &&
+      (isHttps || config.httpClient?.tls)
+    ) {
+      // Node.js: use https module for https URLs or when TLS config is provided.
+      // This avoids "Client sent an HTTP request to an HTTPS server" when
+      // globalThis.fetch behaves inconsistently (e.g. in MCP subprocess).
       this.httpClient = {
-        fetch: HttpTransport.createNodeTLSFetch(config.httpClient.tls),
+        fetch: HttpTransport.createNodeTLSFetch(config.httpClient?.tls ?? {}),
         timeout,
       };
     } else {
-      // Browser or Node.js without TLS - use globalThis.fetch
+      // Browser or Node.js with http URL and no TLS - use globalThis.fetch
       this.httpClient = {
         fetch: globalThis.fetch.bind(globalThis),
         timeout,
@@ -204,7 +215,7 @@ export class HttpTransport {
 
     // Sign the request with nonce for replay protection
     const nonce = generateNonce();
-    const signature = signRequestWithNonce(
+    const signature = await signRequestWithNonce(
       this.privateKey,
       timestamp,
       nonce,
@@ -275,12 +286,19 @@ export class HttpTransport {
       }
 
       if (!response.ok) {
-        const error = data as { error?: string; message?: string };
-        throw new APIError(
-          error.message || `HTTP ${response.status}`,
-          response.status,
-          error.error
-        );
+        // Daemon error envelopes vary: most handlers write
+        // {"error": "..."} (rule, signer, hd_wallet, apikey), some emit
+        // {"message": "..."}, and a few use http.Error which surfaces a
+        // bare text body. Try them in that order so the UI sees the
+        // actual reason ("rule creation via API is disabled …") rather
+        // than the generic "HTTP 403".
+        const env = data as { error?: string; message?: string };
+        const description =
+          env.error ||
+          env.message ||
+          (typeof data === "string" ? (data as string) : "") ||
+          `HTTP ${response.status}`;
+        throw new APIError(description, response.status, env.error);
       }
 
       return data as T;

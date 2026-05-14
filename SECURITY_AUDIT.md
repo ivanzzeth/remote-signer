@@ -365,7 +365,7 @@ trivy image remote-signer:latest       # Docker image CVEs
 # Alerts via: Slack/Pushover (existing notification channels)
 ```
 
-See `docs/SECURITY_REVIEW.md` § "Security Automation Plan" for full details.
+See `docs/security-review.md` § "Security Automation Plan" for full details.
 
 ---
 

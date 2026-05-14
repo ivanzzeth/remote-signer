@@ -28,6 +28,7 @@ const (
 // EVMAdapter implements types.ChainAdapter for EVM chains
 type EVMAdapter struct {
 	signerRegistry *SignerRegistry
+	rpcProvider    *RPCProvider // optional: for nonce auto-fetch
 }
 
 // Compile-time check that EVMAdapter implements ChainAdapter
@@ -39,6 +40,11 @@ func NewEVMAdapter(registry *SignerRegistry) (*EVMAdapter, error) {
 		return nil, fmt.Errorf("signer registry is required")
 	}
 	return &EVMAdapter{signerRegistry: registry}, nil
+}
+
+// SetRPCProvider sets the optional RPC provider for nonce auto-fetch.
+func (a *EVMAdapter) SetRPCProvider(rpc *RPCProvider) {
+	a.rpcProvider = rpc
 }
 
 // Type returns the chain type this adapter handles
@@ -254,6 +260,14 @@ func (a *EVMAdapter) Sign(ctx context.Context, signerAddress string, signType st
 		chainIDBig, err := parseChainID(chainID)
 		if err != nil {
 			return nil, fmt.Errorf("invalid chain ID: %w", err)
+		}
+		// Auto-fetch nonce from chain when not specified
+		if p.Transaction.Nonce == nil && a.rpcProvider != nil {
+			fetchedNonce, nonceErr := a.rpcProvider.GetTransactionCount(ctx, chainID, signerAddress)
+			if nonceErr != nil {
+				return nil, fmt.Errorf("failed to auto-fetch nonce: %w", nonceErr)
+			}
+			p.Transaction.Nonce = &fetchedNonce
 		}
 		tx, err := convertToEthTransaction(p.Transaction, chainIDBig)
 		if err != nil {
@@ -493,15 +507,23 @@ func convertToEthTransaction(payload *TransactionPayload, chainID *big.Int) (*et
 	return tx, nil
 }
 
-// parseNonNegativeBigInt parses a decimal string as a non-negative big.Int.
-// Returns error if the string is not a valid decimal integer or is negative.
+// parseNonNegativeBigInt parses a decimal or hex (0x-prefixed) string as a non-negative big.Int.
+// Returns error if the string is not a valid integer or is negative.
 func parseNonNegativeBigInt(s string, fieldName string) (*big.Int, error) {
 	if s == "" {
 		return new(big.Int), nil
 	}
 	v := new(big.Int)
-	if _, ok := v.SetString(s, 10); !ok {
-		return nil, fmt.Errorf("invalid %s: %s", fieldName, s)
+	if strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X") {
+		// Parse as hex
+		if _, ok := v.SetString(s[2:], 16); !ok {
+			return nil, fmt.Errorf("invalid %s (hex): %s", fieldName, s)
+		}
+	} else {
+		// Parse as decimal
+		if _, ok := v.SetString(s, 10); !ok {
+			return nil, fmt.Errorf("invalid %s: %s", fieldName, s)
+		}
 	}
 	if v.Sign() < 0 {
 		return nil, fmt.Errorf("%s must not be negative: %s", fieldName, s)

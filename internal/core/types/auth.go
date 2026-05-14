@@ -1,11 +1,36 @@
 package types
 
 import (
-	"strings"
 	"time"
-
-	"github.com/lib/pq"
 )
+
+const (
+	APIKeySourceConfig    = "config"
+	APIKeySourceAPI       = "api"
+	APIKeySourceBootstrap = "bootstrap"
+)
+
+// APIKeyRole represents the role of an API key (admin/dev/agent/strategy).
+type APIKeyRole string
+
+const (
+	RoleAdmin    APIKeyRole = "admin"
+	RoleDev      APIKeyRole = "dev"
+	RoleAgent    APIKeyRole = "agent"
+	RoleStrategy APIKeyRole = "strategy"
+)
+
+// ValidAPIKeyRoles contains all valid role values for validation.
+var ValidAPIKeyRoles = []APIKeyRole{RoleAdmin, RoleDev, RoleAgent, RoleStrategy}
+
+// IsValidAPIKeyRole checks if a string is a valid API key role.
+func IsValidAPIKeyRole(role string) bool {
+	switch APIKeyRole(role) {
+	case RoleAdmin, RoleDev, RoleAgent, RoleStrategy:
+		return true
+	}
+	return false
+}
 
 // APIKey represents an API key for authentication
 type APIKey struct {
@@ -13,17 +38,13 @@ type APIKey struct {
 	Name         string `json:"name" gorm:"type:varchar(255)"`
 	PublicKeyHex string `json:"public_key" gorm:"type:varchar(128)"` // Ed25519 public key, hex encoded
 
-	// Permissions (empty list = no access; use allow_all_signers / allow_all_hd_wallets to grant all)
-	AllowAllSigners   bool            `json:"allow_all_signers" gorm:"default:false"`         // when true: any signer (private_key, keystore)
-	AllowAllHDWallets bool            `json:"allow_all_hd_wallets" gorm:"default:false"`      // when true: any HD wallet (derive, sign derived)
-	AllowedChainTypes pq.StringArray  `json:"allowed_chain_types,omitempty" gorm:"type:text[]"` // empty = all chains
-	AllowedSigners    pq.StringArray  `json:"allowed_signers,omitempty" gorm:"type:text[]"`    // signer addresses; empty = none
-	AllowedHDWallets  pq.StringArray  `json:"allowed_hd_wallets,omitempty" gorm:"type:text[]"`  // HD wallet primary addresses; empty = none
+	RateLimit int        `json:"rate_limit" gorm:"default:100"`                           // requests per minute
+	Role      APIKeyRole `json:"role" gorm:"type:varchar(32);not null;default:'strategy'"` // admin/dev/agent/strategy
 
-	RateLimit int  `json:"rate_limit" gorm:"default:100"` // requests per minute
-	Admin     bool `json:"admin" gorm:"default:false"`    // admin keys can approve requests and manage rules
-
-	Enabled    bool       `json:"enabled" gorm:"index;default:true"`
+	Enabled bool `json:"enabled" gorm:"index;default:true"`
+	// Source indicates where the API key was created: "config" (from config file) or "api" (created via API).
+	// Default "config" for backward compatibility with existing keys.
+	Source     string     `json:"source" gorm:"type:varchar(10);default:'config';not null"`
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
@@ -35,52 +56,17 @@ func (APIKey) TableName() string {
 	return "api_keys"
 }
 
-// IsAllowedChain checks if the API key allows the given chain type
-func (k *APIKey) IsAllowedChain(chainType ChainType) bool {
-	if len(k.AllowedChainTypes) == 0 {
-		return true // empty = all allowed
-	}
-	for _, ct := range k.AllowedChainTypes {
-		if ct == string(chainType) {
-			return true
-		}
-	}
-	return false
-}
+// IsAdmin returns true if the API key has the admin role.
+func (k *APIKey) IsAdmin() bool { return k.Role == RoleAdmin }
 
-// IsAllowedSigner checks if the API key allows the given signer address.
-// Empty AllowedSigners = no access unless AllowAllSigners is true.
-func (k *APIKey) IsAllowedSigner(address string) bool {
-	if k.AllowAllSigners {
-		return true
-	}
-	if len(k.AllowedSigners) == 0 {
-		return false
-	}
-	for _, a := range k.AllowedSigners {
-		if strings.EqualFold(a, address) {
-			return true
-		}
-	}
-	return false
-}
+// IsDev returns true if the API key has the dev role.
+func (k *APIKey) IsDev() bool { return k.Role == RoleDev }
 
-// IsAllowedHDWallet checks if the API key grants access to the given HD wallet primary address.
-// Empty AllowedHDWallets = no access unless AllowAllHDWallets is true.
-func (k *APIKey) IsAllowedHDWallet(primaryAddress string) bool {
-	if k.AllowAllHDWallets {
-		return true
-	}
-	if len(k.AllowedHDWallets) == 0 {
-		return false
-	}
-	for _, a := range k.AllowedHDWallets {
-		if strings.EqualFold(a, primaryAddress) {
-			return true
-		}
-	}
-	return false
-}
+// IsAgent returns true if the API key has the agent role.
+func (k *APIKey) IsAgent() bool { return k.Role == RoleAgent }
+
+// IsStrategy returns true if the API key has the strategy role.
+func (k *APIKey) IsStrategy() bool { return k.Role == RoleStrategy }
 
 // SignedAPIRequest represents the authentication headers for a signed request
 type SignedAPIRequest struct {

@@ -16,21 +16,26 @@ import (
 
 // ApprovalHandler handles manual approval requests
 type ApprovalHandler struct {
-	signService    *service.SignService
+	signService    service.SignServiceAPI
+	accessService  *service.SignerAccessService
 	rulesReadOnly  bool // when true, block auto-rule creation during approval
 	logger         *slog.Logger
 }
 
 // NewApprovalHandler creates a new approval handler
-func NewApprovalHandler(signService *service.SignService, logger *slog.Logger, rulesReadOnly bool) (*ApprovalHandler, error) {
+func NewApprovalHandler(signService service.SignServiceAPI, accessService *service.SignerAccessService, logger *slog.Logger, rulesReadOnly bool) (*ApprovalHandler, error) {
 	if signService == nil {
 		return nil, fmt.Errorf("sign service is required")
+	}
+	if accessService == nil {
+		return nil, fmt.Errorf("access service is required")
 	}
 	if logger == nil {
 		return nil, fmt.Errorf("logger is required")
 	}
 	return &ApprovalHandler{
 		signService:   signService,
+		accessService: accessService,
 		rulesReadOnly: rulesReadOnly,
 		logger:        logger,
 	}, nil
@@ -106,9 +111,24 @@ func (h *ApprovalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if the API key owns this request
-	if signReq.APIKeyID != apiKey.ID {
-		h.writeError(w, "not authorized to approve this request", http.StatusForbidden)
+	// Authorization: only the signer's owner can approve requests.
+	// This prevents a compromised agent API key from self-approving transactions
+	// on signers it doesn't own. If agent key A submits a request for a signer
+	// owned by admin key B, only B can approve it.
+	ownership, err := h.accessService.GetOwnership(r.Context(), signReq.SignerAddress)
+	if err != nil {
+		h.logger.Error("failed to get signer ownership", "signer", signReq.SignerAddress, "error", err)
+		h.writeError(w, "failed to verify signer ownership", http.StatusInternalServerError)
+		return
+	}
+	if ownership.OwnerID != apiKey.ID {
+		h.logger.Warn("approval denied: caller is not signer owner",
+			"request_id", requestID,
+			"caller_api_key", apiKey.ID,
+			"signer_owner", ownership.OwnerID,
+			"signer_address", signReq.SignerAddress,
+		)
+		h.writeError(w, "not authorized: only the signer owner can approve requests", http.StatusForbidden)
 		return
 	}
 
@@ -159,6 +179,14 @@ func (h *ApprovalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.signService.ProcessApproval(r.Context(), types.SignRequestID(requestID), approvalReq)
 	if err != nil {
 		h.logger.Error("failed to process approval", "error", err, "request_id", requestID)
+		// A locked signer is an operator-actionable state, not an internal
+		// fault — surface 423 with the underlying reason so the UI can
+		// prompt the user to unlock before retrying. Any wording containing
+		// "is locked" comes from chain adapters' GetSigner path.
+		if strings.Contains(err.Error(), "is locked") {
+			h.writeError(w, "signer is locked — unlock it before approving", http.StatusLocked)
+			return
+		}
 		h.writeError(w, "failed to process approval", http.StatusInternalServerError)
 		return
 	}
@@ -182,12 +210,12 @@ func (h *ApprovalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // PreviewRuleHandler handles POST /api/v1/evm/requests/{id}/preview-rule
 type PreviewRuleHandler struct {
-	signService *service.SignService
+	signService service.SignServiceAPI
 	logger      *slog.Logger
 }
 
 // NewPreviewRuleHandler creates a new preview rule handler
-func NewPreviewRuleHandler(signService *service.SignService, logger *slog.Logger) (*PreviewRuleHandler, error) {
+func NewPreviewRuleHandler(signService service.SignServiceAPI, logger *slog.Logger) (*PreviewRuleHandler, error) {
 	if signService == nil {
 		return nil, fmt.Errorf("sign service is required")
 	}

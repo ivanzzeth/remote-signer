@@ -18,6 +18,7 @@ import (
 )
 
 func TestSign_PersonalSign(t *testing.T) {
+	ensureGuardResumed(t)
 	address := common.HexToAddress(signerAddress)
 	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	sig, err := signer.PersonalSign("Hello, Remote Signer!")
@@ -28,6 +29,7 @@ func TestSign_PersonalSign(t *testing.T) {
 }
 
 func TestSign_Hash(t *testing.T) {
+	ensureGuardResumed(t)
 	address := common.HexToAddress(signerAddress)
 	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	hash := common.HexToHash("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
@@ -38,6 +40,7 @@ func TestSign_Hash(t *testing.T) {
 }
 
 func TestSign_RawMessage(t *testing.T) {
+	ensureGuardResumed(t)
 	address := common.HexToAddress(signerAddress)
 	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	sig, err := signer.SignRawMessage([]byte("raw message bytes"))
@@ -47,6 +50,7 @@ func TestSign_RawMessage(t *testing.T) {
 }
 
 func TestSign_EIP191Message(t *testing.T) {
+	ensureGuardResumed(t)
 	address := common.HexToAddress(signerAddress)
 	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	rawMessage := "Hello, EIP-191!"
@@ -58,6 +62,7 @@ func TestSign_EIP191Message(t *testing.T) {
 }
 
 func TestSign_TypedData(t *testing.T) {
+	ensureGuardResumed(t)
 	address := common.HexToAddress(signerAddress)
 	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	typedData := eip712.TypedData{
@@ -94,6 +99,7 @@ func TestSign_TypedData(t *testing.T) {
 }
 
 func TestSign_LegacyTransaction(t *testing.T) {
+	ensureGuardResumed(t)
 	address := common.HexToAddress(signerAddress)
 	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	to := common.HexToAddress(treasuryAddress)
@@ -116,6 +122,7 @@ func TestSign_LegacyTransaction(t *testing.T) {
 }
 
 func TestSign_EIP1559Transaction(t *testing.T) {
+	ensureGuardResumed(t)
 	address := common.HexToAddress(signerAddress)
 	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	to := common.HexToAddress(treasuryAddress)
@@ -140,6 +147,7 @@ func TestSign_EIP1559Transaction(t *testing.T) {
 }
 
 func TestSign_SignerNotFound(t *testing.T) {
+	ensureGuardResumed(t)
 	unknownAddress := common.HexToAddress("0x0000000000000000000000000000000000000001")
 	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, unknownAddress, testChainID)
 	_, err := signer.PersonalSign("test message")
@@ -147,6 +155,7 @@ func TestSign_SignerNotFound(t *testing.T) {
 }
 
 func TestSign_ContextCancellation(t *testing.T) {
+	ensureGuardResumed(t)
 	address := common.HexToAddress(signerAddress)
 	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -156,6 +165,7 @@ func TestSign_ContextCancellation(t *testing.T) {
 }
 
 func TestSign_MultipleRequests(t *testing.T) {
+	ensureGuardResumed(t)
 	address := common.HexToAddress(signerAddress)
 	signer := evm.NewRemoteSigner(adminClient.EVM.Sign, address, chainID)
 	for _, msg := range []string{"Message 1", "Message 2", "Message 3"} {
@@ -166,6 +176,7 @@ func TestSign_MultipleRequests(t *testing.T) {
 }
 
 func TestSign_DirectSignAPI(t *testing.T) {
+	ensureGuardResumed(t)
 	ctx := context.Background()
 	resp, err := adminClient.EVM.Sign.Execute(ctx, &evm.SignRequest{
 		ChainID:       chainID,

@@ -20,7 +20,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 DATA_DIR="${PROJECT_DIR}/data"
-# Binaries from release go here; added to PATH so remote-signer-cli, remote-signer-tui, remote-signer-validate-rules are available
+# Binary from release goes here; added to PATH so `remote-signer` is on PATH
 BIN_DIR="${REMOTE_SIGNER_BIN_DIR:-$PROJECT_DIR/bin}"
 
 # GitHub repo for release downloads (public repo required for unauthenticated download)
@@ -94,7 +94,7 @@ download_release_binary() {
     return 1
 }
 
-# Download all release binaries (remote-signer-tui, remote-signer-validate-rules, remote-signer-cli) into BIN_DIR and add BIN_DIR to PATH.
+# Download the unified remote-signer release binary into BIN_DIR and add BIN_DIR to PATH.
 # Exports PATH for current process; optionally appends to user's shell rc so new terminals have it.
 download_release_binaries_and_set_path() {
     mkdir -p "$BIN_DIR"
@@ -107,19 +107,14 @@ download_release_binaries_and_set_path() {
         return 1
     fi
 
-    local got_any=0
-    if download_release_binary "remote-signer-tui"; then got_any=1; fi
-    if download_release_binary "remote-signer-validate-rules"; then got_any=1; fi
-    if download_release_binary "remote-signer-cli"; then got_any=1; fi
-
-    if [ "$got_any" -eq 0 ]; then
+    if ! download_release_binary "remote-signer"; then
         return 1
     fi
     add_bin_dir_to_path
     return 0
 }
 
-# Build remote-signer-tui, remote-signer-validate-rules, remote-signer-cli from source into BIN_DIR.
+# Build the unified remote-signer binary from source into BIN_DIR.
 # Requires Go and go.mod in PROJECT_DIR. Exports PATH and adds BIN_DIR to shell rc on success.
 build_from_source_binaries() {
     mkdir -p "$BIN_DIR"
@@ -134,35 +129,18 @@ build_from_source_binaries() {
         return 1
     fi
 
-    log_info "Building CLI tools from source (this may take a minute)..."
-    local ok=0
-    if (cd "$PROJECT_DIR" && go build -o "$BIN_DIR/remote-signer-tui" ./cmd/tui 2>/dev/null); then
-        log_info "Built remote-signer-tui"
-        ok=1
+    log_info "Building remote-signer from source (this may take a minute)..."
+    if (cd "$PROJECT_DIR" && go build -o "$BIN_DIR/remote-signer" ./cmd/remote-signer 2>/dev/null); then
+        log_info "Built remote-signer"
     else
-        log_warn "Failed to build remote-signer-tui"
-    fi
-    if (cd "$PROJECT_DIR" && go build -o "$BIN_DIR/remote-signer-validate-rules" ./cmd/validate-rules 2>/dev/null); then
-        log_info "Built remote-signer-validate-rules"
-        ok=1
-    else
-        log_warn "Failed to build remote-signer-validate-rules"
-    fi
-    if (cd "$PROJECT_DIR" && go build -o "$BIN_DIR/remote-signer-cli" ./cmd/remote-signer-cli 2>/dev/null); then
-        log_info "Built remote-signer-cli"
-        ok=1
-    else
-        log_warn "Failed to build remote-signer-cli"
-    fi
-
-    if [ "$ok" -eq 0 ]; then
+        log_warn "Failed to build remote-signer"
         return 1
     fi
     add_bin_dir_to_path
     return 0
 }
 
-# Add BIN_DIR to PATH in the user's shell rc so new terminals have remote-signer-cli, remote-signer-tui, remote-signer-validate-rules on PATH.
+# Add BIN_DIR to PATH in the user's shell rc so new terminals have remote-signer on PATH.
 add_bin_dir_to_path() {
     local rc line
     if [ -n "${ZSH_VERSION:-}" ]; then
@@ -176,9 +154,9 @@ add_bin_dir_to_path() {
         return 0
     fi
     echo "" >> "$rc"
-    echo "# Remote Signer CLI/TUI/remote-signer-validate-rules (added by setup.sh)" >> "$rc"
+    echo "# Remote Signer (added by setup.sh)" >> "$rc"
     echo "$line" >> "$rc"
-    log_info "Added $BIN_DIR to PATH in $rc. Run \`source $rc\` or open a new terminal to use remote-signer-cli, remote-signer-tui, remote-signer-validate-rules from anywhere."
+    log_info "Added $BIN_DIR to PATH in $rc. Run \`source $rc\` or open a new terminal to use remote-signer from anywhere."
 }
 
 detect_os() {
@@ -451,7 +429,8 @@ print_banner() {
     echo "A secure, policy-driven signing service for EVM chains."
     echo ""
     echo -e "Key concepts:"
-    echo -e "  ${CYAN}API Keys${NC}    Ed25519 key pairs authenticate clients"
+    echo -e "  ${CYAN}API Keys${NC}    Ed25519 key pairs authenticate clients (4 RBAC roles)"
+    echo -e "  ${CYAN}Roles${NC}       admin / dev / agent / strategy"
     echo -e "  ${CYAN}Rules${NC}       Policy engine controls what gets signed"
     echo -e "  ${CYAN}TLS/mTLS${NC}    Transport security between client & server"
     echo -e "  ${CYAN}TUI${NC}         Terminal UI for management & approvals"
@@ -463,12 +442,12 @@ print_banner() {
 
 step_deployment_mode() {
     echo -e "${BOLD}=============================================================${NC}"
-    echo -e "${BOLD}  Step 1/5: Deployment Mode${NC}"
+    echo -e "${BOLD}  Step 1/6: Deployment Mode${NC}"
     echo -e "${BOLD}=============================================================${NC}"
     echo ""
     echo "How do you want to run remote-signer?"
-    echo -e "  ${CYAN}1)${NC} Docker ${DIM}(PostgreSQL + security hardening)${NC} \u2b50 recommended"
-    echo -e "  ${CYAN}2)${NC} Local  ${DIM}(SQLite, no Docker needed) — for development only${NC}"
+    echo -e "  ${CYAN}1)${NC} Docker ${DIM}(PostgreSQL + security hardening; multi-instance ready)${NC} \u2b50 recommended for production"
+    echo -e "  ${CYAN}2)${NC} Local  ${DIM}(single-instance SQLite, no external services; release binary works out of the box)${NC}"
     echo ""
     DEPLOY_MODE_CHOICE=$(ask "Select [1/2]" 1 1 2)
 
@@ -492,19 +471,34 @@ step_deployment_mode() {
 
 step_api_keys() {
     echo -e "${BOLD}=============================================================${NC}"
-    echo -e "${BOLD}  Step 2/5: API Keys${NC}"
+    echo -e "${BOLD}  Step 2/6: API Keys${NC}"
     echo -e "${BOLD}=============================================================${NC}"
     echo ""
-    echo "Two API key pairs (admin + dev):"
+    echo "Four API key pairs (RBAC roles):"
     echo ""
-    echo -e "  ${CYAN}admin${NC}  Full access: manage signers, approve requests, manage rules"
-    echo -e "  ${CYAN}dev${NC}    Limited: submit sign requests only"
+    echo -e "  ${CYAN}admin${NC}     Full access: manage signers, approve requests, manage all rules"
+    echo -e "  ${CYAN}dev${NC}       Sign requests, view requests, create/manage own rules"
+    echo -e "  ${CYAN}agent${NC}     AI agent: sign, create/manage own rules, read budgets/templates/presets"
+    echo -e "  ${CYAN}strategy${NC}  Strategy executor: sign requests, view own requests (minimal)"
     echo ""
 
     mkdir -p "$DATA_DIR"
 
+    # All 4 role names
+    API_KEY_ROLES=(admin dev agent strategy)
+
     REGENERATE_KEYS=true
-    if [ -f "$DATA_DIR/admin_private.pem" ] || [ -f "$DATA_DIR/admin_public.pem" ]; then
+    ADMIN_KEYSTORE_DIR="$DATA_DIR/apikeys"
+    # Check for existing keys: admin keystore or PEM
+    if [ -d "$ADMIN_KEYSTORE_DIR" ] && ls "$ADMIN_KEYSTORE_DIR"/ed25519--*.json >/dev/null 2>&1; then
+        echo -e "  ${YELLOW}Existing admin keystore found in $ADMIN_KEYSTORE_DIR/${NC}"
+        read -rp "  Regenerate keys? (y/N): " REGEN
+        if [[ ! "$REGEN" =~ ^[Yy]$ ]]; then
+            REGENERATE_KEYS=false
+            log_info "Using existing API keys (config will use these so TUI can connect)."
+        fi
+        echo ""
+    elif [ -f "$DATA_DIR/admin_private.pem" ] || [ -f "$DATA_DIR/admin_public.pem" ]; then
         echo -e "  ${YELLOW}Existing API keys found in $DATA_DIR/${NC}"
         read -rp "  Regenerate keys? (y/N): " REGEN
         if [[ ! "$REGEN" =~ ^[Yy]$ ]]; then
@@ -514,44 +508,83 @@ step_api_keys() {
         echo ""
     fi
 
+    # Generate admin key using encrypted keystore (if remote-signer is available)
+    _generate_admin_keystore() {
+        if command -v remote-signer &>/dev/null; then
+            log_info "Generating admin API key (encrypted keystore)..."
+            echo -e "  ${CYAN}You will be prompted for a password to encrypt the admin key.${NC}"
+            echo -e "  ${CYAN}Remember this password — you will need it to authenticate.${NC}"
+            echo ""
+            remote-signer keystore create -d "$ADMIN_KEYSTORE_DIR" --label admin
+        else
+            log_warn "remote-signer not found; falling back to PEM for admin key."
+            "$SCRIPT_DIR/generate-api-key.sh" -n admin -o "$DATA_DIR" -f > /dev/null 2>&1
+        fi
+    }
+
+    # Load admin public key from keystore or PEM
+    _load_admin_key() {
+        # Try keystore first
+        local ks_file
+        ks_file=$(ls "$ADMIN_KEYSTORE_DIR"/ed25519--*.json 2>/dev/null | head -1)
+        if [ -n "$ks_file" ] && command -v remote-signer &>/dev/null; then
+            # Identifier in the keystore file is the Ed25519 public key hex
+            local identifier
+            identifier=$(remote-signer keystore show -k "$ks_file" -o json 2>/dev/null | grep -o '"Identifier":"[^"]*"' | cut -d'"' -f4)
+            if [ -n "$identifier" ]; then
+                ADMIN_PUBLIC_KEY="$identifier"
+                ADMIN_KEYSTORE_FILE="$ks_file"
+                echo -e "  Key ID:      ${GREEN}admin${NC}"
+                echo -e "  Keystore:    ${DIM}$ks_file${NC}  (encrypted, keep password safe!)"
+                echo -e "  Public key:  ${DIM}$identifier${NC} (hex)"
+                echo ""
+                return
+            fi
+        fi
+        # Fallback to PEM
+        _load_role_key_pem admin
+    }
+
     if [ "$REGENERATE_KEYS" = true ]; then
-        log_info "Generating admin API key..."
-        "$SCRIPT_DIR/generate-api-key.sh" -n admin -o "$DATA_DIR" -f > /dev/null 2>&1
-        log_info "Generating dev API key..."
-        "$SCRIPT_DIR/generate-api-key.sh" -n dev -o "$DATA_DIR" -f > /dev/null 2>&1
+        _generate_admin_keystore
+        for role in dev agent strategy; do
+            log_info "Generating $role API key..."
+            "$SCRIPT_DIR/generate-api-key.sh" -n "$role" -o "$DATA_DIR" -f > /dev/null 2>&1
+        done
     fi
 
-    # Load public/private key values (from newly generated or existing files)
-    ADMIN_PUBLIC_KEY=$(openssl pkey -in "$DATA_DIR/admin_public.pem" -pubin -outform DER 2>/dev/null | base64 | tr -d '\n')
-    ADMIN_PRIVATE_KEY=$(openssl pkey -in "$DATA_DIR/admin_private.pem" -outform DER 2>/dev/null | base64 | tr -d '\n')
-    if [ -z "$ADMIN_PUBLIC_KEY" ] || [ -z "$ADMIN_PRIVATE_KEY" ]; then
-        log_error "Failed to read admin key from $DATA_DIR/admin_*.pem"
-        exit 1
-    fi
-    echo -e "  Key ID:      ${GREEN}admin${NC}"
-    echo -e "  Private key: ${DIM}$DATA_DIR/admin_private.pem${NC}  (keep secret!)"
-    echo -e "  Public key:  ${DIM}$DATA_DIR/admin_public.pem${NC}"
-    echo ""
+    # Load public/private key values for non-admin roles (PEM)
+    _load_role_key_pem() {
+        local role="$1"
+        if [ ! -f "$DATA_DIR/${role}_private.pem" ] || [ ! -f "$DATA_DIR/${role}_public.pem" ]; then
+            log_info "Generating $role API key..."
+            "$SCRIPT_DIR/generate-api-key.sh" -n "$role" -o "$DATA_DIR" -f > /dev/null 2>&1
+        fi
+        local pub priv
+        pub=$(openssl pkey -in "$DATA_DIR/${role}_public.pem" -pubin -outform DER 2>/dev/null | base64 | tr -d '\n')
+        priv=$(openssl pkey -in "$DATA_DIR/${role}_private.pem" -outform DER 2>/dev/null | base64 | tr -d '\n')
+        if [ -z "$pub" ] || [ -z "$priv" ]; then
+            log_error "Failed to read $role key from $DATA_DIR/${role}_*.pem"
+            exit 1
+        fi
+        # Export to caller via naming convention
+        eval "${role^^}_PUBLIC_KEY=\$pub"
+        eval "${role^^}_PRIVATE_KEY=\$priv"
+        echo -e "  Key ID:      ${GREEN}${role}${NC}"
+        echo -e "  Private key: ${DIM}$DATA_DIR/${role}_private.pem${NC}  (keep secret!)"
+        echo -e "  Public key:  ${DIM}$DATA_DIR/${role}_public.pem${NC}"
+        echo ""
+    }
 
-    if [ ! -f "$DATA_DIR/dev_private.pem" ] || [ ! -f "$DATA_DIR/dev_public.pem" ]; then
-        log_info "Generating dev API key..."
-        "$SCRIPT_DIR/generate-api-key.sh" -n dev -o "$DATA_DIR" -f > /dev/null 2>&1
-    fi
-    DEV_PUBLIC_KEY=$(openssl pkey -in "$DATA_DIR/dev_public.pem" -pubin -outform DER 2>/dev/null | base64 | tr -d '\n')
-    DEV_PRIVATE_KEY=$(openssl pkey -in "$DATA_DIR/dev_private.pem" -outform DER 2>/dev/null | base64 | tr -d '\n')
-    if [ -z "$DEV_PUBLIC_KEY" ] || [ -z "$DEV_PRIVATE_KEY" ]; then
-        log_error "Failed to read dev key from $DATA_DIR/dev_*.pem"
-        exit 1
-    fi
-    echo -e "  Key ID:      ${GREEN}dev${NC}"
-    echo -e "  Private key: ${DIM}$DATA_DIR/dev_private.pem${NC}  (keep secret!)"
-    echo -e "  Public key:  ${DIM}$DATA_DIR/dev_public.pem${NC}"
-    echo ""
+    _load_admin_key
+    for role in dev agent strategy; do
+        _load_role_key_pem "$role"
+    done
 }
 
 step_tls() {
     echo -e "${BOLD}=============================================================${NC}"
-    echo -e "${BOLD}  Step 3/5: TLS Certificates${NC}"
+    echo -e "${BOLD}  Step 3/6: TLS Certificates${NC}"
     echo -e "${BOLD}=============================================================${NC}"
     echo ""
     echo "Transport security mode:"
@@ -698,9 +731,88 @@ step_ip_whitelist() {
     log_info "IP whitelist enabled with ${#IP_WHITELIST_ALLOWED_IPS[@]} entry/entries."
 }
 
+step_security_settings() {
+    echo -e "${BOLD}  Security settings${NC}"
+    echo ""
+    echo "Using recommended security defaults:"
+    echo -e "  ${DIM}• Rate limits: admin=1000, dev=100, agent=500, strategy=200 (req/min)${NC}"
+    echo -e "  ${DIM}• Audit monitor: enabled, retention=90 days${NC}"
+    echo -e "  ${DIM}• Approval guard: enabled, 50% rejection threshold${NC}"
+    echo -e "  ${DIM}• Sign timeout: 30s, auto-lock: disabled${NC}"
+    echo ""
+    echo "You can customize these in config.yaml after setup."
+    echo "See config.full.yaml for all available options."
+    echo ""
+}
+
+step_notifications() {
+    echo -e "${BOLD}=============================================================${NC}"
+    echo -e "${BOLD}  Step 4/6: Security Alerts${NC}"
+    echo -e "${BOLD}=============================================================${NC}"
+    echo ""
+    echo -e "${YELLOW}Without notifications, unauthorized access is only logged — NOT alerted.${NC}"
+    echo "Configure at least one channel to receive real-time security alerts"
+    echo "(IP blocks, auth failures, replay attacks, rate limits, etc.)."
+    echo ""
+    echo "Channels:"
+    echo -e "  ${CYAN}1)${NC} Telegram   ${DIM}bot sends to chat/channel${NC}"
+    echo -e "  ${CYAN}2)${NC} Webhook    ${DIM}HTTP POST to any URL (Slack incoming webhook, Discord, etc.)${NC}"
+    echo -e "  ${CYAN}3)${NC} Skip       ${DIM}configure later in config file${NC}"
+    echo ""
+    NOTIFY_CHOICE=$(ask "Select [1/2/3]" 1 1 2 3)
+
+    # Defaults
+    NOTIFY_TELEGRAM_ENABLED=false
+    NOTIFY_TELEGRAM_BOT_TOKEN=
+    NOTIFY_TELEGRAM_CHAT_IDS=
+    NOTIFY_WEBHOOK_ENABLED=false
+    NOTIFY_WEBHOOK_URLS=
+
+    case "$NOTIFY_CHOICE" in
+        1)
+            echo ""
+            echo -e "${CYAN}Telegram Setup:${NC}"
+            echo -e "  1. Message ${DIM}@BotFather${NC} on Telegram → /newbot → copy the bot token"
+            echo -e "  2. Add bot to your group/channel → get chat ID (e.g. ${DIM}-123456789${NC} or ${DIM}@channel_name${NC})"
+            echo ""
+            read -rp "  Paste bot token> " NOTIFY_TELEGRAM_BOT_TOKEN
+            if [ -n "$NOTIFY_TELEGRAM_BOT_TOKEN" ]; then
+                read -rp "  Chat ID(s) (comma-separated, e.g. -123456789,@mychannel): " NOTIFY_TELEGRAM_CHAT_IDS
+                if [ -n "$NOTIFY_TELEGRAM_CHAT_IDS" ]; then
+                    NOTIFY_TELEGRAM_ENABLED=true
+                    log_info "Telegram notifications enabled"
+                else
+                    log_warn "No chat IDs entered; Telegram skipped."
+                fi
+            else
+                log_warn "No bot token entered; Telegram skipped."
+            fi
+            ;;
+        2)
+            echo ""
+            echo -e "${CYAN}Webhook Setup:${NC}"
+            echo "  Enter one or more webhook URLs (comma-separated)."
+            echo -e "  ${DIM}e.g. https://hooks.slack.com/services/T.../B.../xxx${NC}"
+            echo ""
+            read -rp "  Webhook URL(s): " NOTIFY_WEBHOOK_URLS
+            if [ -n "$NOTIFY_WEBHOOK_URLS" ]; then
+                NOTIFY_WEBHOOK_ENABLED=true
+                log_info "Webhook notifications enabled"
+            else
+                log_warn "No URLs entered; webhook skipped."
+            fi
+            ;;
+        *)
+            log_warn "No notification channel configured. Security alerts will only appear in logs."
+            log_warn "To enable later, edit config → notify section. See docs/configuration.md"
+            ;;
+    esac
+    echo ""
+}
+
 step_generate_config() {
     echo -e "${BOLD}=============================================================${NC}"
-    echo -e "${BOLD}  Step 4/5: Generate Configuration${NC}"
+    echo -e "${BOLD}  Step 5/6: Generate Configuration${NC}"
     echo -e "${BOLD}=============================================================${NC}"
     echo ""
 
@@ -718,13 +830,54 @@ step_generate_config() {
         IP_WHITELIST_ALLOWED_IPS_YAML="allowed_ips: []"
     fi
 
+    # Build notify YAML from step_notifications choices
+    NOTIFY_YAML="# --- Notifications (security alerts) ---"
+    NOTIFY_CHANNELS_YAML="notify_channels:"
+    if [ "${NOTIFY_TELEGRAM_ENABLED:-false}" = "true" ] || [ "${NOTIFY_WEBHOOK_ENABLED:-false}" = "true" ]; then
+        NOTIFY_YAML="${NOTIFY_YAML}${NEWLINE}notify:"
+        if [ "${NOTIFY_TELEGRAM_ENABLED:-false}" = "true" ]; then
+            NOTIFY_YAML="${NOTIFY_YAML}${NEWLINE}  telegram:${NEWLINE}    enabled: true${NEWLINE}    bot_token: \"${NOTIFY_TELEGRAM_BOT_TOKEN}\""
+            # Build telegram chat ID list
+            TELEGRAM_CHAT_LIST=""
+            IFS=',' read -ra CHAT_PARTS <<< "$NOTIFY_TELEGRAM_CHAT_IDS"
+            for cid in "${CHAT_PARTS[@]}"; do
+                cid=$(printf '%s' "$cid" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+                [ -n "$cid" ] && TELEGRAM_CHAT_LIST="${TELEGRAM_CHAT_LIST:+$TELEGRAM_CHAT_LIST, }\"${cid}\""
+            done
+            NOTIFY_CHANNELS_YAML="${NOTIFY_CHANNELS_YAML}${NEWLINE}  telegram: [${TELEGRAM_CHAT_LIST}]"
+        fi
+        if [ "${NOTIFY_WEBHOOK_ENABLED:-false}" = "true" ]; then
+            NOTIFY_YAML="${NOTIFY_YAML}${NEWLINE}  webhook:${NEWLINE}    enabled: true${NEWLINE}    timeout: \"10s\""
+            # Build webhook URL list
+            WEBHOOK_URL_LIST=""
+            IFS=',' read -ra URL_PARTS <<< "$NOTIFY_WEBHOOK_URLS"
+            for url in "${URL_PARTS[@]}"; do
+                url=$(printf '%s' "$url" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+                [ -n "$url" ] && WEBHOOK_URL_LIST="${WEBHOOK_URL_LIST:+$WEBHOOK_URL_LIST, }\"${url}\""
+            done
+            NOTIFY_CHANNELS_YAML="${NOTIFY_CHANNELS_YAML}${NEWLINE}  webhook: [${WEBHOOK_URL_LIST}]"
+        fi
+    else
+        NOTIFY_YAML="${NOTIFY_YAML}${NEWLINE}# No notification channel configured. Edit this section to enable alerts.${NEWLINE}# See docs/configuration.md for Telegram, Webhook, Slack, Pushover options.${NEWLINE}# notify:${NEWLINE}#   telegram:${NEWLINE}#     enabled: true${NEWLINE}#     bot_token: \"your-bot-token\"${NEWLINE}#   webhook:${NEWLINE}#     enabled: true${NEWLINE}#     timeout: \"10s\""
+        NOTIFY_CHANNELS_YAML="${NOTIFY_CHANNELS_YAML}${NEWLINE}  # telegram: [\"-123456789\"]${NEWLINE}  # webhook: [\"https://hooks.example.com/alerts\"]"
+    fi
+
     # Always overwrite config so TLS, port, and keys stay in sync with setup choices
     if [ -f "$CONFIG_FILE" ]; then
         log_info "Updating existing $CONFIG_FILE"
     fi
+
+    # Docker: enable preset API by setting presets.dir (container has ./rules mounted)
+    if [ "$DEPLOY_MODE" = "docker" ]; then
+        PRESETS_YAML='presets:
+  dir: "./rules/presets"'
+    else
+        PRESETS_YAML=""
+    fi
+
     cat > "$CONFIG_FILE" << CONFIGEOF
 # Generated by setup.sh — $(date '+%Y-%m-%d %H:%M:%S')
-# Full reference: docs/CONFIGURATION.md
+# Full reference: docs/configuration.md
 # All options:    config.example.yaml
 
 server:
@@ -749,6 +902,10 @@ chains:
       # hd_wallets: []     # Create via TUI or API after startup
     keystore_dir: "./data/keystores"
     hd_wallet_dir: "./data/hd-wallets"
+    rpc_gateway:
+      base_url: "${EVM_RPC_GATEWAY_URL:-}"
+      api_key: "${EVM_RPC_GATEWAY_API_KEY:-}"
+      cache_ttl: "24h"
     foundry:
       enabled: true
       forge_path: ""
@@ -758,42 +915,112 @@ chains:
 
 security:
   max_request_age: "60s"
-  rate_limit_default: 100
+  rate_limit_default: ${RATE_LIMIT_DEFAULT:-100}
+  ip_rate_limit: ${IP_RATE_LIMIT:-200}              # pre-auth per-IP limit (req/min); protects against brute-force
   nonce_required: true
   manual_approval_enabled: false  # default: no manual approval; no-match => reject
   rules_api_readonly: true
   signers_api_readonly: false
   allow_sighup_rules_reload: false
+  auto_lock_timeout: "${AUTO_LOCK_TIMEOUT:-0}"   # auto-lock signers after unlock; empty/0 = disabled
+  sign_timeout: "${SIGN_TIMEOUT:-30s}"        # context timeout for sign operations
   approval_guard:
-    enabled: false
+    enabled: true                 # pause signing when too many rejections (detect key abuse)
+    window: "1h"
+    rejection_threshold_pct: ${APPROVAL_GUARD_REJECTION_PCT:-50}
+    min_samples: ${APPROVAL_GUARD_MIN_SAMPLES:-10}
+    resume_after: "2h"
   ip_whitelist:
     enabled: ${IP_WHITELIST_ENABLED:-false}
     $IP_WHITELIST_ALLOWED_IPS_YAML
     trust_proxy: false
 
+$NOTIFY_YAML
+
+$NOTIFY_CHANNELS_YAML
+
+# --- Audit Monitor (background anomaly detection) ---
+audit_monitor:
+  enabled: true                   # periodic anomaly scanning
+  interval: "1h"
+  lookback_hours: 1
+  auth_failure_threshold: ${AUDIT_AUTH_FAILURE_THRESHOLD:-5}       # alert if N+ auth failures/hour from same source
+  blocklist_reject_threshold: ${AUDIT_BLOCKLIST_REJECT_THRESHOLD:-3}   # alert if N+ sign rejections/hour
+  high_freq_threshold: ${AUDIT_HIGH_FREQ_THRESHOLD:-100}        # alert if N+ requests/hour from one source (e.g. 1500 for dev)
+  retention_days: ${AUDIT_RETENTION_DAYS:-90}  # auto-delete audit records older than N days; 0 = keep forever
+  cleanup_interval: "24h"         # how often to run cleanup
+
 logger:
   level: "info"
   pretty: true
+
+# --- Dynamic Blocklist (runtime address sanctions screening) ---
+dynamic_blocklist:
+  enabled: true
+  sync_interval: "1h"
+  fail_mode: "open"
+  cache_file: "data/blocklist_cache.json"
+  sources:
+    - name: "OFAC SDN ETH"
+      type: "url_text"
+      url: "https://raw.githubusercontent.com/0xB10C/ofac-sanctioned-digital-currency-addresses/main/sanctioned_addresses_ETH.txt"
+
+# --- Default security rules (auto-enabled) ---
+rules:
+  - id: "dynamic-blocklist"
+    name: "Dynamic Address Blocklist"
+    type: "evm_dynamic_blocklist"
+    mode: "blocklist"
+    chain_type: "evm"
+    enabled: true
+    config:
+      check_recipient: true
+      check_verifying_contract: true
 
 api_keys:
   - id: "admin"
     name: "Admin"
     public_key: "$ADMIN_PUBLIC_KEY"
-    admin: true
+    role: admin
     enabled: true
-    rate_limit: 1000
+    rate_limit: ${ADMIN_RATE_LIMIT:-1000}
 
   - id: "dev"
     name: "Dev"
     public_key: "$DEV_PUBLIC_KEY"
-    admin: false
+    role: dev
     enabled: true
-    rate_limit: 100
+    rate_limit: ${DEV_RATE_LIMIT:-100}
     allow_all_signers: true      # setup: allow any signer for local dev
     allow_all_hd_wallets: true   # setup: allow any HD wallet for local dev
+
+  - id: "agent"
+    name: "Agent"
+    public_key: "$AGENT_PUBLIC_KEY"
+    role: agent
+    enabled: true
+    rate_limit: ${AGENT_RATE_LIMIT:-500}
+    allow_all_signers: true      # agent needs access to sign with any signer
+    allow_all_hd_wallets: true
+
+  - id: "strategy"
+    name: "Strategy"
+    public_key: "$STRATEGY_PUBLIC_KEY"
+    role: strategy
+    enabled: true
+    rate_limit: ${STRATEGY_RATE_LIMIT:-200}
+    allow_all_signers: true      # strategy manages own rules per signer
+    allow_all_hd_wallets: true
+$PRESETS_YAML
 CONFIGEOF
 
     log_info "Configuration written to $CONFIG_FILE"
+
+    # Docker: ensure rules/presets exists so preset API and TUI can list/apply (mount is ./rules:/app/rules)
+    if [ "$DEPLOY_MODE" = "docker" ]; then
+        mkdir -p "$PROJECT_DIR/rules/presets"
+        log_info "Created rules/presets directory for preset API (Docker mount)."
+    fi
 
     # Ensure admin public_key in config matches current data/admin_public.pem
     if [ -f "$PROJECT_DIR/$CONFIG_FILE" ] && [ -n "${ADMIN_PUBLIC_KEY:-}" ]; then
@@ -842,7 +1069,7 @@ ENVEOF
     fi
 
     echo -e "  ${DIM}Server:${NC}    ${SCHEME}://localhost:${PORT}"
-    echo -e "  ${DIM}API Keys:${NC}  admin (admin), dev (limited)"
+    echo -e "  ${DIM}API Keys:${NC}  admin, dev, agent, strategy (4 RBAC roles)"
     echo -e "  ${DIM}Foundry:${NC}   enabled"
 
     case "$TLS_CHOICE" in
@@ -853,19 +1080,19 @@ ENVEOF
     echo ""
 }
 
-# Step: ask user to download or build CLI tools (tui, validate-rules, cli). Runs before preset so preset can use remote-signer-cli.
+# Step: ask user to download or build the remote-signer binary. Runs before preset so preset can use `remote-signer`.
 step_ensure_cli_tools() {
     echo -e "${BOLD}=============================================================${NC}"
-    echo -e "${BOLD}  CLI tools (required for preset step and TUI)${NC}"
+    echo -e "${BOLD}  remote-signer binary (required for preset step and TUI)${NC}"
     echo -e "${BOLD}=============================================================${NC}"
     echo ""
-    echo -e "${CYAN}remote-signer-tui, remote-signer-validate-rules, remote-signer-cli:${NC}"
+    echo -e "${CYAN}remote-signer (single binary; hosts server, tui, validate, and admin subcommands):${NC}"
     echo "  1) Download from release (latest; no Go required)"
     echo "  2) Build from source (requires Go)"
     echo ""
     BINARIES_CHOICE=$(ask "Choose [1/2]" 1 1 2)
 
-    TUI_BIN="$BIN_DIR/remote-signer-tui"
+    TUI_BIN="$BIN_DIR/remote-signer"
     mkdir -p "$BIN_DIR"
     export PATH="$BIN_DIR:$PATH"
     if [ "$BINARIES_CHOICE" = "2" ]; then
@@ -879,20 +1106,29 @@ step_ensure_cli_tools() {
             build_from_source_binaries || true
         fi
     fi
-    if [ ! -x "$TUI_BIN" ] && [ -x "$PROJECT_DIR/remote-signer-tui" ]; then
-        TUI_BIN="$PROJECT_DIR/remote-signer-tui"
+    if [ ! -x "$TUI_BIN" ] && [ -x "$PROJECT_DIR/remote-signer" ]; then
+        TUI_BIN="$PROJECT_DIR/remote-signer"
+    fi
+
+    # Validate config immediately so we fail fast before preset step (avoids wasting time on preset selection if config is invalid)
+    if [ -f "$PROJECT_DIR/$CONFIG_FILE" ] && command -v remote-signer validate &>/dev/null; then
+        log_info "Validating config..."
+        if ! remote-signer validate -config "$PROJECT_DIR/$CONFIG_FILE" 2>&1; then
+            log_error "Config validation failed. Fix $CONFIG_FILE before adding presets (e.g. invalid duration: auto_lock_timeout: \"\" — use \"0\" for disabled)."
+            exit 1
+        fi
     fi
     echo ""
 }
 
 # Interactive step: optionally add rule(s) from preset(s). Prompts for preset choice and variable overrides (with descriptions from template).
-# Requires remote-signer-cli from step_ensure_cli_tools (no download/build here).
+# Requires remote-signer from step_ensure_cli_tools (no download/build here).
 step_preset_rules() {
     echo -e "${BOLD}=============================================================${NC}"
     echo -e "${BOLD}  Step 4b: Add rules from preset (optional)${NC}"
     echo -e "${BOLD}=============================================================${NC}"
     echo ""
-    echo "You can add a rule from a preset (e.g. Polymarket Safe). Variables will be prompted with descriptions from the template."
+    echo "You can add additional rules from presets (e.g. Polymarket Safe). Variables will be prompted with descriptions from the template."
     echo ""
     read -rp "Add a rule from a preset? (Y/n): " ADD_PRESET
     ADD_PRESET="${ADD_PRESET:-Y}"
@@ -901,8 +1137,8 @@ step_preset_rules() {
     fi
 
     export PATH="$BIN_DIR:$PATH"
-    if ! command -v remote-signer-cli &>/dev/null; then
-        log_warn "remote-signer-cli not found; skipping preset step. Re-run setup and choose to download or build CLI tools first."
+    if ! command -v remote-signer &>/dev/null; then
+        log_warn "remote-signer not found; skipping preset step. Re-run setup and choose to download or build CLI tools first."
         return 0
     fi
 
@@ -914,7 +1150,7 @@ step_preset_rules() {
 
     while true; do
         # List presets: output is "# Preset file | template(s)" then "file.yaml | Template Name"
-        list_out=$(remote-signer-cli preset list --presets-dir "$PRESETS_DIR" 2>/dev/null) || break
+        list_out=$(remote-signer preset list --presets-dir "$PRESETS_DIR" 2>/dev/null) || break
         presets=()
         while IFS= read -r line; do
             [[ "$line" =~ ^# ]] && continue
@@ -948,36 +1184,25 @@ step_preset_rules() {
         PRESET_FILE="$PRESET_NAME"
         [[ "$PRESET_FILE" != *.yaml ]] && [[ "$PRESET_FILE" != *.yml ]] && PRESET_FILE="${PRESET_FILE}.yaml"
 
-        # Get variables to prompt (name + description from template)
+        # Get variables to prompt (override_hints from preset; descriptions from template, including budget/schedule vars if preset has them)
         set_args=()
-        vars_out=$(remote-signer-cli preset vars "$PRESET_FILE" --presets-dir "$PRESETS_DIR" --project-dir "$PROJECT_DIR" 2>/dev/null) || true
+        vars_out=$(remote-signer preset vars "$PRESET_FILE" --presets-dir "$PRESETS_DIR" --project-dir "$PROJECT_DIR" 2>/dev/null) || true
         if [ -n "$vars_out" ]; then
             echo ""
             echo "Enter values for the following variables (descriptions from template)."
-            echo "  Use comma-separated (a,b,c) or newline-separated (one per line; empty line to finish)."
+            echo "  One value per line (empty = use preset default). Comma-separated on one line for list values."
             # Read vars from fd 3 so that 'read -rp' below still reads from terminal (stdin), not from vars_out
             while IFS= read -r line <&3; do
                 [[ -z "$line" ]] && continue
                 name="${line%%$'\t'*}"
                 desc="${line#*$'\t'}"
                 if [ -n "$name" ]; then
-                    val=""
-                    first=1
-                    while true; do
-                        if [ "$first" -eq 1 ]; then
-                            if [ -n "$desc" ]; then
-                                read -rp "  $name ($desc): " ln
-                            else
-                                read -rp "  $name: " ln
-                            fi
-                            first=0
-                        else
-                            read -rp "    " ln
-                        fi
-                        ln=$(printf '%s' "$ln" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-                        [[ -z "$ln" ]] && break
-                        val="${val:+$val,}$ln"
-                    done
+                    if [ -n "$desc" ]; then
+                        read -rp "  $name ($desc): " val
+                    else
+                        read -rp "  $name: " val
+                    fi
+                    val=$(printf '%s' "$val" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
                     set_args+=(--set "$name=$val")
                 fi
             done 3<<< "$vars_out"
@@ -985,9 +1210,9 @@ step_preset_rules() {
 
         log_info "Adding rule from preset: $PRESET_NAME"
         if [ ${#set_args[@]} -gt 0 ]; then
-            remote-signer-cli preset create-from "$PRESET_FILE" --config "$PROJECT_DIR/$CONFIG_FILE" --write --presets-dir "$PRESETS_DIR" "${set_args[@]}" || log_warn "Failed to add preset rule"
+            remote-signer preset create-from "$PRESET_FILE" --config "$PROJECT_DIR/$CONFIG_FILE" --write --presets-dir "$PRESETS_DIR" "${set_args[@]}" || log_warn "Failed to add preset rule"
         else
-            remote-signer-cli preset create-from "$PRESET_FILE" --config "$PROJECT_DIR/$CONFIG_FILE" --write --presets-dir "$PRESETS_DIR" || log_warn "Failed to add preset rule"
+            remote-signer preset create-from "$PRESET_FILE" --config "$PROJECT_DIR/$CONFIG_FILE" --write --presets-dir "$PRESETS_DIR" || log_warn "Failed to add preset rule"
         fi
 
         echo ""
@@ -1001,7 +1226,7 @@ step_preset_rules() {
 
 step_done() {
     echo -e "${BOLD}=============================================================${NC}"
-    echo -e "${BOLD}  Step 5/5: Done!${NC}"
+    echo -e "${BOLD}  Step 6/6: Done!${NC}"
     echo -e "${BOLD}=============================================================${NC}"
     echo ""
 
@@ -1029,16 +1254,24 @@ step_done() {
     fi
     echo ""
 
+    # --- API key summary ---
+    echo -e "${CYAN}API Keys generated:${NC}"
+    echo -e "  ${GREEN}admin${NC}     data/admin_private.pem     Full access (manage signers, approve, CRUD rules)"
+    echo -e "  ${GREEN}dev${NC}       data/dev_private.pem       Sign, view requests, create/manage own rules"
+    echo -e "  ${GREEN}agent${NC}     data/agent_private.pem     AI agent (sign, create/manage own rules, read budgets)"
+    echo -e "  ${GREEN}strategy${NC}  data/strategy_private.pem  Strategy executor (sign, view own requests)"
+    echo ""
+
     # --- Add signer ---
     echo -e "${CYAN}Add a signer (after server is running):${NC}"
     echo ""
     echo "  Via TUI (recommended: use -api-key-file to avoid paste):"
     if [ -x "$TUI_BIN" ]; then
-        echo "    remote-signer-tui -api-key-id admin -api-key-file data/admin_private.pem \\"
+        echo "    remote-signer tui -api-key-id admin -api-key-file data/admin_private.pem \\"
         echo "      # or: $TUI_BIN -api-key-id admin -api-key-file data/admin_private.pem \\"
     else
-        echo "    go build -o remote-signer-tui ./cmd/tui   # requires Go 1.24+ (https://go.dev/dl/)"
-        echo "    remote-signer-tui -api-key-id admin -api-key-file data/admin_private.pem \\"
+        echo "    go build -o remote-signer tui ./cmd/remote-signer   # requires Go 1.24+ (https://go.dev/dl/)"
+        echo "    remote-signer tui -api-key-id admin -api-key-file data/admin_private.pem \\"
     fi
     if [ "$TLS_CHOICE" = "3" ]; then
         echo "      -url ${SCHEME}://localhost:${PORT} \\"
@@ -1054,16 +1287,21 @@ step_done() {
     echo ""
     echo "    Or set REMOTE_SIGNER_PRIVATE_KEY and omit -api-key-file. Then use Signers tab to add keystore or HD wallet."
     echo ""
+    echo -e "  ${CYAN}Connect as other roles:${NC}"
+    echo "    remote-signer tui -api-key-id dev      -api-key-file data/dev_private.pem      -url ${SCHEME}://localhost:${PORT}"
+    echo "    remote-signer tui -api-key-id agent    -api-key-file data/agent_private.pem    -url ${SCHEME}://localhost:${PORT}"
+    echo "    remote-signer tui -api-key-id strategy -api-key-file data/strategy_private.pem -url ${SCHEME}://localhost:${PORT}"
+    echo ""
     if [ ! -x "$TUI_BIN" ]; then
-        echo "  (No Go? Add signers via API instead — see docs/API.md)"
+        echo "  (No Go? Add signers via API instead — see docs/api.md)"
         echo ""
     fi
-    if [ -d "$BIN_DIR" ] && [ -x "$BIN_DIR/remote-signer-tui" ]; then
-        echo -e "  ${DIM}CLI tools on PATH:${NC} remote-signer-tui, remote-signer-validate-rules, remote-signer-cli (from $BIN_DIR)"
+    if [ -d "$BIN_DIR" ] && [ -x "$BIN_DIR/remote-signer" ]; then
+        echo -e "  ${DIM}On PATH:${NC} remote-signer (from $BIN_DIR; tui/validate are subcommands)"
         echo ""
     fi
     echo "  Via API (create keystore):"
-    echo "    See docs/API.md for authenticated request examples."
+    echo "    See docs/api.md for authenticated request examples."
     echo ""
 
     # --- Or add signer in config ---
@@ -1075,11 +1313,11 @@ step_done() {
     # --- Documentation ---
     echo -e "${CYAN}Documentation:${NC}"
     echo "  README.md               Quick start & overview"
-    echo "  docs/CONFIGURATION.md   Full config reference"
-    echo "  docs/RULE_SYNTAX.md     Rule types & examples"
-    echo "  docs/API.md             API reference"
-    echo "  docs/DEPLOYMENT.md      Production deployment"
-    echo "  docs/TLS.md             TLS/mTLS setup"
+    echo "  docs/configuration.md   Full config reference"
+    echo "  docs/rule-syntax.md     Rule types & examples"
+    echo "  docs/api.md             API reference"
+    echo "  docs/deployment.md      Production deployment"
+    echo "  docs/tls.md             TLS/mTLS setup"
     echo ""
 
     log_info "Setup complete!"
@@ -1145,6 +1383,36 @@ check_server_running_and_maybe_stop() {
     sleep 2
 }
 
+# Run health check against server (uses CONFIG_FILE, PORT from setup context)
+# Returns 0 if healthy, 1 if not responding
+check_server_health() {
+    local cfg="$PROJECT_DIR/$CONFIG_FILE"
+    local port="${PORT:-8548}"
+    local curl_args
+    if [ -f "$cfg" ] && grep -A1 '^\s*tls:' "$cfg" 2>/dev/null | grep -q 'enabled:\s*true'; then
+        curl_args="--cacert $PROJECT_DIR/certs/ca.crt"
+        if grep -A5 '^\s*tls:' "$cfg" 2>/dev/null | grep -q 'client_auth:\s*true'; then
+            curl_args="$curl_args --cert $PROJECT_DIR/certs/client.crt --key $PROJECT_DIR/certs/client.key"
+        fi
+        curl -s --max-time 5 $curl_args "https://localhost:${port}/health" >/dev/null 2>&1
+    else
+        curl -s --max-time 5 "http://localhost:${port}/health" >/dev/null 2>&1
+    fi
+}
+
+# Output last 100 lines of server logs (Docker or local)
+show_recent_logs() {
+    echo ""
+    log_error "Last 100 lines of server logs:"
+    echo "----------------------------------------"
+    if [ "$DEPLOY_MODE" = "docker" ]; then
+        (cd "$PROJECT_DIR" && docker compose logs --tail 100 remote-signer 2>/dev/null) || true
+    else
+        [ -f "$PROJECT_DIR/data/remote-signer.log" ] && tail -100 "$PROJECT_DIR/data/remote-signer.log" || echo "(no log file)"
+    fi
+    echo "----------------------------------------"
+}
+
 # Ask to start the server, then optionally launch TUI to add signers (one-click deploy + import flow)
 start_server_now() {
     # If server is already running, offer to stop and restart (default: yes)
@@ -1164,6 +1432,48 @@ start_server_now() {
         else
             "$SCRIPT_DIR/deploy.sh" local-run
         fi
+
+        # Wait for server to become healthy; fail fast with logs if it does not
+        log_info "Waiting for server to become healthy..."
+        local max_attempts=24
+        local attempt=1
+        while [ $attempt -le $max_attempts ]; do
+            if check_server_health; then
+                log_info "Server is healthy."
+                break
+            fi
+            if [ $attempt -eq $max_attempts ]; then
+                log_error "Server failed to start (health check did not pass after ${max_attempts} attempts)."
+                show_recent_logs
+                log_error "Fix the errors above and restart with: ./scripts/deploy.sh $([ "$DEPLOY_MODE" = "docker" ] && echo 'run --no-screen' || echo 'local-run')"
+                exit 1
+            fi
+            sleep 5
+            attempt=$((attempt + 1))
+        done
+
+        # Apply agent preset via API (creates rules with owner=agent, applied_to=["self"])
+        log_info "Applying agent preset rules via API..."
+        local cli_auth_args=()
+        cli_auth_args+=(--api-key-id agent --api-key-file data/agent_private.pem --url "${SCHEME}://localhost:${PORT}")
+        if [ "$TLS_CHOICE" = "3" ]; then
+            cli_auth_args+=(--tls-ca ./certs/ca.crt --tls-cert ./certs/client.crt --tls-key ./certs/client.key)
+        elif [ "$TLS_CHOICE" = "2" ]; then
+            cli_auth_args+=(--tls-ca ./certs/ca.crt)
+        fi
+        if command -v remote-signer &>/dev/null; then
+            if remote-signer preset apply agent "${cli_auth_args[@]}" 2>&1; then
+                log_info "Agent preset applied (owner=agent, budget: 1 native/24h). Rules are properly scoped."
+            else
+                log_warn "Failed to apply agent preset. Apply manually after startup:"
+                echo "  remote-signer preset apply agent ${cli_auth_args[*]}"
+            fi
+        else
+            log_warn "remote-signer not found; skipping agent preset. Apply manually:"
+            echo "  remote-signer preset apply agent --api-key-id agent --api-key-file data/agent_private.pem --url ${SCHEME}://localhost:${PORT}"
+        fi
+        echo ""
+
         # Offer to open TUI so user can add signers without pasting key
         echo ""
         read -rp "Open TUI to add signers now? (Y/n): " OPEN_TUI
@@ -1173,7 +1483,7 @@ start_server_now() {
                 log_info "Launching TUI (use Signers tab to create keystore or HD wallet)..."
                 run_tui_for_setup
             elif [ ! -x "$TUI_BIN" ]; then
-                log_warn "TUI binary not found. Build with: go build -o remote-signer-tui ./cmd/tui"
+                log_warn "TUI binary not found. Build with: go build -o remote-signer tui ./cmd/remote-signer"
                 log_info "When ready, run: ./scripts/deploy.sh $([ "$DEPLOY_MODE" = "docker" ] && echo 'run --no-screen' || echo local-run)"
             else
                 log_warn "data/admin_private.pem not found; run setup again or use TUI with REMOTE_SIGNER_PRIVATE_KEY."
@@ -1237,7 +1547,7 @@ main() {
     check_openssl
     check_go
 
-    # Step 1/5: Deployment mode
+    # Step 1/6: Deployment mode
     step_deployment_mode
 
     # Docker mode: ensure Docker is installed
@@ -1250,10 +1560,10 @@ main() {
         check_screen
     fi
 
-    # Step 2/5: API Keys
+    # Step 2/6: API Keys
     step_api_keys
 
-    # Step 3/5: TLS
+    # Step 3/6: TLS
     step_tls
 
     # Foundry installation (non-interactive, both modes need it)
@@ -1262,16 +1572,22 @@ main() {
     # Optional: IP whitelist (allowed_ips only)
     step_ip_whitelist
 
-    # Step 4/5: Generate configuration
+    # Optional: Security settings (auto-lock, sign timeout, audit retention)
+    step_security_settings
+
+    # Step 4/6: Security alerts (notification channels)
+    step_notifications
+
+    # Step 5/6: Generate configuration
     step_generate_config
 
-    # CLI tools (download or build) — before preset so remote-signer-cli is available
+    # CLI tools (download or build) — before preset so remote-signer is available
     step_ensure_cli_tools
 
-    # Step 4b: Optionally add rules from presets (interactive)
+    # Step 5b: Optionally add additional rules from presets (interactive)
     step_preset_rules
 
-    # Step 5/5: Done
+    # Step 6/6: Done
     step_done
 
     # One-click: offer to start the server (exec deploy.sh)
