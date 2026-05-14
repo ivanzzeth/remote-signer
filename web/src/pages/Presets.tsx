@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { type PresetEntry } from "remote-signer-client";
 import {
+  Badge,
   Card,
   Empty,
   ErrorBanner,
@@ -25,10 +26,14 @@ export function Presets() {
   const [filter, setFilter] = useState("");
 
   const all = data?.presets ?? [];
+  const lc = (s: string | undefined) => (s ?? "").toLowerCase();
+  const fl = filter.toLowerCase();
   const filtered = filter
-    ? all.filter((p) =>
-        p.id.toLowerCase().includes(filter.toLowerCase()) ||
-        p.template_names.some((t) => t.toLowerCase().includes(filter.toLowerCase())),
+    ? all.filter(
+        (p) =>
+          lc(p.id).includes(fl) ||
+          lc(p.name).includes(fl) ||
+          p.template_names.some((t) => lc(t).includes(fl)),
       )
     : all;
 
@@ -83,7 +88,8 @@ export function Presets() {
             <table className="w-full text-left text-sm">
               <thead className="text-xs uppercase text-ink-500">
                 <tr>
-                  <th className="py-1 pr-3 font-normal">ID</th>
+                  <th className="py-1 pr-3 font-normal">Name</th>
+                  <th className="py-1 pr-3 font-normal">Chain</th>
                   <th className="py-1 pr-3 font-normal">Templates</th>
                   <th className="py-1 font-normal text-right">Action</th>
                 </tr>
@@ -102,18 +108,34 @@ export function Presets() {
 }
 
 function PresetRow({ entry }: { entry: PresetEntry }) {
+  const displayName = entry.name || entry.id;
   return (
     <tr
       className="border-t border-ink-100 hover:bg-ink-50"
       data-testid={`preset-row-${entry.id}`}
     >
-      <td className="py-1 pr-3 font-mono text-xs">
-        <Link
-          to={`/presets/${encodeURIComponent(entry.id)}`}
-          className="text-ink-900 hover:text-accent-600"
-        >
-          {entry.id}
-        </Link>
+      <td className="py-1 pr-3">
+        <div>
+          <Link
+            to={`/presets/${encodeURIComponent(entry.id)}`}
+            className="text-ink-900 hover:text-accent-600"
+          >
+            {displayName}
+          </Link>
+        </div>
+        {entry.name && (
+          <div className="font-mono text-[11px] text-ink-500">{entry.id}</div>
+        )}
+      </td>
+      <td className="py-1 pr-3">
+        {entry.chain_type ? (
+          <Badge>
+            {entry.chain_type}
+            {entry.chain_id ? `/${entry.chain_id}` : ""}
+          </Badge>
+        ) : (
+          <span className="text-xs text-ink-500">—</span>
+        )}
       </td>
       <td className="py-1 pr-3 text-xs text-ink-700">
         {entry.template_names.join(", ") || "—"}

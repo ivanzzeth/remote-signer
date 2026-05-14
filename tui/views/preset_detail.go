@@ -83,11 +83,19 @@ func (m *PresetDetailModel) LoadPreset(id string) tea.Cmd {
 
 func (m *PresetDetailModel) loadVars(id string) tea.Cmd {
 	return func() tea.Msg {
-		resp, err := m.svc.Vars(m.ctx, id)
+		// v0.3 replaced /vars with the richer /presets/{id} detail
+		// endpoint. The TUI still only renders bare names, so flatten
+		// the variable details back to a string slice here — keeping
+		// PresetVarsMsg's shape stable for the rest of the view.
+		resp, err := m.svc.Get(m.ctx, id)
 		if err != nil {
 			return PresetVarsMsg{Err: err}
 		}
-		return PresetVarsMsg{Hints: resp.OverrideHints, Err: nil}
+		hints := make([]string, 0, len(resp.Variables))
+		for _, v := range resp.Variables {
+			hints = append(hints, v.Name)
+		}
+		return PresetVarsMsg{Hints: hints, Err: nil}
 	}
 }
 

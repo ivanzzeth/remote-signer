@@ -1,7 +1,12 @@
 import { useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { APIError } from "remote-signer-client";
 import {
+  APIError,
+  type PresetDetail as PresetDetailDTO,
+  type PresetVariableDetail,
+} from "remote-signer-client";
+import {
+  Badge,
   Card,
   ErrorBanner,
   Loading,
@@ -11,21 +16,22 @@ import { getClient } from "../lib/auth";
 import { useApi } from "../lib/useApi";
 
 /**
- * Apply-a-preset form. /api/v1/presets/{id}/vars returns just the
- * variable names (override_hints), no type metadata — the preset YAML
- * encodes its own defaults and the operator only needs to surface the
- * ones marked overridable. We render each as a free-text input;
- * the daemon validates downstream.
+ * Apply-a-preset form. The daemon's GET /api/v1/presets/{id} returns
+ * each override hint already joined against the referenced template's
+ * variable definition (type, description, default). Without that join
+ * the form was just opaque text inputs — the v0.2 endpoint only
+ * surfaced bare hint names — which is the friendliness gap Phase 2A
+ * closes.
  *
- * Apply returns one or more rule.id values (preset can fan out across
- * multiple templates). Success state lists them all and offers a
- * jump-to-rules action.
+ * Apply returns one or more rule.id values (a preset can fan out
+ * across multiple templates). The success state lists them all and
+ * offers a jump-to-rules action.
  */
 export function PresetDetail() {
   const { id = "" } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { data, loading, error, reload } = useApi(
-    (c) => c.presets.vars(id),
+    (c) => c.presets.get(id),
     [id],
   );
 
@@ -47,20 +53,51 @@ export function PresetDetail() {
         </button>
       </div>
 
-      <PageHeader
-        title={id}
-        subtitle="Fill the override variables; everything else uses the preset's defaults."
-      />
-
       {loading && <Loading />}
       {error && <ErrorBanner msg={error} />}
 
       {data && (
-        <ApplyForm
-          presetID={id}
-          hints={data.override_hints}
-          onApplied={() => navigate("/rules")}
-        />
+        <>
+          <PageHeader
+            title={data.name || data.id}
+            subtitle={
+              <span className="font-mono text-xs text-ink-500">{data.id}</span>
+            }
+            actions={
+              <div className="flex gap-2">
+                {data.chain_type && (
+                  <Badge>
+                    {data.chain_type}
+                    {data.chain_id ? `/${data.chain_id}` : ""}
+                  </Badge>
+                )}
+                {data.template_names.length > 0 && (
+                  <Badge tone="neutral">
+                    {data.template_names.length} template
+                    {data.template_names.length === 1 ? "" : "s"}
+                  </Badge>
+                )}
+              </div>
+            }
+          />
+
+          {data.template_names.length > 0 && (
+            <Card title="Templates referenced">
+              <ul className="space-y-1 text-sm">
+                {data.template_names.map((tn) => (
+                  <li key={tn} className="font-mono text-xs text-ink-700">
+                    {tn}
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
+
+          <ApplyForm
+            preset={data}
+            onApplied={() => navigate("/rules")}
+          />
+        </>
       )}
     </div>
   );
@@ -72,17 +109,22 @@ interface ApplyResult {
 }
 
 function ApplyForm({
-  presetID,
-  hints,
+  preset,
   onApplied,
 }: {
-  presetID: string;
-  hints: string[];
+  preset: PresetDetailDTO;
   onApplied: () => void;
 }) {
-  const [vars, setVars] = useState<Record<string, string>>(() =>
-    Object.fromEntries(hints.map((h) => [h, ""])),
-  );
+  const [vars, setVars] = useState<Record<string, string>>(() => {
+    const out: Record<string, string> = {};
+    for (const v of preset.variables) {
+      // Pre-fill with the preset's default so the operator sees
+      // exactly what will be applied; clearing the field falls back
+      // to the same default server-side.
+      out[v.name] = v.default_value ?? "";
+    }
+    return out;
+  });
   const [appliedTo, setAppliedTo] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -96,17 +138,21 @@ function ApplyForm({
     if (!c) return;
     setSubmitting(true);
     try {
-      // Strip empty values so the daemon's preset.ParsePresetFile
-      // falls back to the YAML defaults; sending "" overrides those.
+      // Strip values that match the preset's default — let the server
+      // use its own value rather than echoing it back. Empty strings
+      // also fall through to the default.
       const cleanVars: Record<string, string> = {};
-      for (const [k, v] of Object.entries(vars)) {
-        if (v !== "") cleanVars[k] = v;
+      for (const v of preset.variables) {
+        const current = vars[v.name] ?? "";
+        if (current !== "" && current !== (v.default_value ?? "")) {
+          cleanVars[v.name] = current;
+        }
       }
       const cleanApplied = appliedTo
         .split(",")
         .map((s) => s.trim())
         .filter((s) => s !== "");
-      const resp = await c.presets.apply(presetID, {
+      const resp = await c.presets.apply(preset.id, {
         variables: cleanVars,
         applied_to: cleanApplied.length > 0 ? cleanApplied : undefined,
       });
@@ -166,29 +212,20 @@ function ApplyForm({
           </div>
         )}
 
-        {hints.length === 0 && (
+        {preset.variables.length === 0 ? (
           <div className="rounded-md border border-ink-200 bg-ink-50 px-3 py-2 text-xs text-ink-700">
             This preset declares no override hints — apply with defaults.
           </div>
-        )}
-
-        {hints.map((name) => (
-          <FormRow
-            key={name}
-            label={name}
-            help="Empty → preset default applies"
-          >
-            <input
-              type="text"
-              value={vars[name] ?? ""}
-              onChange={(e) =>
-                setVars((s) => ({ ...s, [name]: e.target.value }))
-              }
-              className="w-full rounded-md border border-ink-300 px-2 py-1 font-mono text-sm"
-              data-testid={`preset-form-var-${name}`}
+        ) : (
+          preset.variables.map((v) => (
+            <VariableRow
+              key={v.name}
+              variable={v}
+              value={vars[v.name] ?? ""}
+              onChange={(val) => setVars((s) => ({ ...s, [v.name]: val }))}
             />
-          </FormRow>
-        ))}
+          ))
+        )}
 
         <FormRow
           label="Applied to"
@@ -219,23 +256,105 @@ function ApplyForm({
   );
 }
 
+function VariableRow({
+  variable,
+  value,
+  onChange,
+}: {
+  variable: PresetVariableDetail;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const testid = `preset-form-var-${variable.name}`;
+  // address_list templates expect a comma-separated list; surface as
+  // a textarea so long lists are usable.
+  if (variable.type === "address_list") {
+    return (
+      <FormRow
+        label={variable.name}
+        required={variable.required}
+        type={variable.type}
+        help={variable.description}
+      >
+        <textarea
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          rows={2}
+          placeholder={variable.default_value || "0xabc..., 0xdef..."}
+          className="w-full rounded-md border border-ink-300 px-2 py-1 font-mono text-xs"
+          data-testid={testid}
+        />
+        {variable.default_value && (
+          <Hint>default: {variable.default_value}</Hint>
+        )}
+      </FormRow>
+    );
+  }
+  const isMono =
+    variable.type === "address" ||
+    variable.type === "uint256" ||
+    variable.type === "address_list";
+  return (
+    <FormRow
+      label={variable.name}
+      required={variable.required}
+      type={variable.type}
+      help={variable.description}
+    >
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={variable.default_value || variable.type || ""}
+        className={`w-full rounded-md border border-ink-300 px-2 py-1 text-sm ${
+          isMono ? "font-mono" : ""
+        }`}
+        data-testid={testid}
+      />
+      {variable.default_value && (
+        <Hint>default: {variable.default_value}</Hint>
+      )}
+    </FormRow>
+  );
+}
+
 function FormRow({
   label,
+  required,
+  type,
   help,
   children,
 }: {
   label: string;
+  required?: boolean;
+  type?: string;
   help?: string;
   children: ReactNode;
 }) {
   return (
-    <div className="grid grid-cols-[160px_1fr] gap-4">
-      <label className="pt-1 text-sm text-ink-700">{label}</label>
+    <div className="grid grid-cols-[180px_1fr] gap-4">
+      <div className="pt-1">
+        <label className="text-sm text-ink-700">
+          {label}
+          {required && <span className="ml-1 text-red-500">*</span>}
+        </label>
+        {type && (
+          <div className="text-[10px] font-mono uppercase tracking-wider text-ink-500">
+            {type}
+          </div>
+        )}
+      </div>
       <div>
         {children}
         {help && <div className="mt-1 text-[11px] text-ink-500">{help}</div>}
       </div>
     </div>
+  );
+}
+
+function Hint({ children }: { children: ReactNode }) {
+  return (
+    <div className="mt-1 font-mono text-[10px] text-ink-500">{children}</div>
   );
 }
 

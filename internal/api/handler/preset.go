@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
@@ -20,11 +21,12 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
-// PresetHandler handles preset list, vars, and apply (admin-only).
+// PresetHandler handles preset list, detail, and apply (admin-only).
 type PresetHandler struct {
 	presetsDir      string
 	db              *gorm.DB
 	templateSvc     *service.TemplateService
+	templateRepo    storage.TemplateRepository
 	readOnly        bool
 	logger          *slog.Logger
 	auditLogger     *audit.AuditLogger
@@ -46,6 +48,17 @@ func WithPresetRequireApproval(v bool) PresetHandlerOption {
 func WithPresetAPIKeyRepo(repo storage.APIKeyRepository) PresetHandlerOption {
 	return func(h *PresetHandler) {
 		h.apiKeyRepo = repo
+	}
+}
+
+// WithPresetTemplateRepo wires a template repository so the detail
+// endpoint can join each override hint against the variable
+// definitions declared in the referenced template(s). Without this the
+// detail response degrades to bare hint names — same as the old /vars
+// endpoint, no richer.
+func WithPresetTemplateRepo(repo storage.TemplateRepository) PresetHandlerOption {
+	return func(h *PresetHandler) {
+		h.templateRepo = repo
 	}
 }
 
@@ -95,21 +108,19 @@ func (h *PresetHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	// path is preset id (filename)
+	// path is preset id (filename) — optionally followed by a sub-action.
 	parts := strings.SplitN(path, "/", 2)
 	id := parts[0]
-	switch {
-	case len(parts) == 1:
-		h.writeError(w, "not found", http.StatusNotFound)
-		return
-	case parts[1] == "vars":
+	if len(parts) == 1 {
 		if r.Method != http.MethodGet {
 			h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		h.vars(w, r, id)
+		h.detail(w, r, id)
 		return
-	case parts[1] == "apply":
+	}
+	switch parts[1] {
+	case "apply":
 		if r.Method != http.MethodPost {
 			h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -134,13 +145,42 @@ func (h *PresetHandler) list(w http.ResponseWriter, _ *http.Request) {
 	for _, e := range entries {
 		out = append(out, map[string]interface{}{
 			"id":             e.ID,
+			"name":           e.Name,
+			"chain_type":     e.ChainType,
+			"chain_id":       e.ChainID,
 			"template_names": e.TemplateNames,
 		})
 	}
 	h.writeJSON(w, map[string]interface{}{"presets": out}, http.StatusOK)
 }
 
-func (h *PresetHandler) vars(w http.ResponseWriter, _ *http.Request, id string) {
+// PresetVariableDetail is the rich shape of one override hint — bare
+// name plus type/description joined from the referenced template's
+// variable definition. Default value comes from the preset's own
+// `variables:` block when set, falling back to the template's
+// declared default.
+type PresetVariableDetail struct {
+	Name         string `json:"name"`
+	Type         string `json:"type,omitempty"`
+	Description  string `json:"description,omitempty"`
+	DefaultValue string `json:"default_value,omitempty"`
+	Required     bool   `json:"required"`
+}
+
+// PresetDetailResponse is the GET /api/v1/presets/{id} payload.
+// Frontend renders this directly; the variables array carries enough
+// information to draw a typed form without a second roundtrip.
+type PresetDetailResponse struct {
+	ID            string                 `json:"id"`
+	Name          string                 `json:"name,omitempty"`
+	ChainType     string                 `json:"chain_type,omitempty"`
+	ChainID       string                 `json:"chain_id,omitempty"`
+	Enabled       bool                   `json:"enabled"`
+	TemplateNames []string               `json:"template_names"`
+	Variables     []PresetVariableDetail `json:"variables"`
+}
+
+func (h *PresetHandler) detail(w http.ResponseWriter, r *http.Request, id string) {
 	data, err := h.readPresetFile(id)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -156,9 +196,168 @@ func (h *PresetHandler) vars(w http.ResponseWriter, _ *http.Request, id string) 
 		h.writeError(w, fmt.Sprintf("parse preset meta: %s", err.Error()), http.StatusBadRequest)
 		return
 	}
-	h.writeJSON(w, map[string]interface{}{
-		"override_hints": meta.OverrideHints,
-	}, http.StatusOK)
+
+	// Build a lookup table: variable name → definition, drawn from the
+	// referenced template(s). When templateRepo isn't wired (test
+	// daemons, embedded setups) the detail still works — variables
+	// just degrade to bare names like the old /vars endpoint.
+	varDefs := h.collectVariableDefs(r, meta)
+
+	hints := make([]PresetVariableDetail, 0, len(meta.OverrideHints))
+	for _, name := range meta.OverrideHints {
+		def := varDefs[name]
+		entry := PresetVariableDetail{Name: name}
+		entry.Type = def.Type
+		entry.Description = def.Description
+		entry.Required = def.Required
+		// Default: preset's variables[] wins (operator hand-tuned it),
+		// then template's declared default.
+		if v, ok := meta.Variables[name]; ok && v != "" {
+			entry.DefaultValue = v
+		} else {
+			entry.DefaultValue = def.Default
+		}
+		hints = append(hints, entry)
+	}
+
+	resp := PresetDetailResponse{
+		ID:            id,
+		Name:          meta.Name,
+		ChainType:     meta.ChainType,
+		ChainID:       meta.ChainID,
+		Enabled:       meta.Enabled,
+		TemplateNames: meta.TemplateNames,
+		Variables:     hints,
+	}
+	if len(resp.TemplateNames) == 0 && meta.Template != "" {
+		resp.TemplateNames = []string{meta.Template}
+	}
+	h.writeJSON(w, resp, http.StatusOK)
+}
+
+// templateVarDef is the slimmed-down view we need from a template's
+// declared variables — just enough for the detail UI.
+type templateVarDef struct {
+	Type        string
+	Description string
+	Required    bool
+	Default     string
+}
+
+func (h *PresetHandler) collectVariableDefs(r *http.Request, meta preset.PresetMeta) map[string]templateVarDef {
+	out := map[string]templateVarDef{}
+
+	// Path 1: read each referenced template file directly off disk.
+	// This is the more reliable join — the preset YAML pins exact
+	// file paths, and the template files carry the full variable
+	// definitions in a fixed shape (`variables: [{name, type,
+	// description, required, default}]`). Using the file bypasses
+	// any naming drift between the YAML and the DB row's `name`
+	// column, which can happen when templates are loaded via
+	// templates_dir (display name derived from filename).
+	paths := append([]string(nil), meta.TemplatePaths...)
+	if meta.TemplatePath != "" {
+		paths = append(paths, meta.TemplatePath)
+	}
+	// Preset paths are repo-relative, conventionally written as
+	// "rules/templates/<file>.yaml". The presetsDir typically sits at
+	// "<root>/rules/presets/", so the project root is two levels up
+	// — but we don't assume the layout. Try each ancestor in turn
+	// until the file resolves; pure project-root guessing is wobbly,
+	// fallback search is cheap (the tree is small).
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		if filepath.IsAbs(p) {
+			mergeTemplateVarsFromFile(p, out, h.logger)
+			continue
+		}
+		dir := h.presetsDir
+		for i := 0; i < 4; i++ {
+			candidate := filepath.Join(dir, p)
+			if _, err := os.Stat(candidate); err == nil {
+				mergeTemplateVarsFromFile(candidate, out, h.logger)
+				break
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+	}
+
+	// Path 2: fall back to the DB when no template_paths were set or
+	// the file read failed. Looks up by name — same caveat as above.
+	if h.templateRepo == nil {
+		return out
+	}
+	names := append([]string(nil), meta.TemplateNames...)
+	if meta.Template != "" {
+		names = append(names, meta.Template)
+	}
+	for _, tn := range names {
+		tmpl, err := h.templateRepo.GetByName(r.Context(), tn)
+		if err != nil || tmpl == nil {
+			continue
+		}
+		var vars []types.TemplateVariable
+		if len(tmpl.Variables) > 0 {
+			if err := json.Unmarshal(tmpl.Variables, &vars); err != nil {
+				h.logger.Warn("failed to decode template variables", "template", tn, "error", err)
+				continue
+			}
+		}
+		for _, v := range vars {
+			if _, ok := out[v.Name]; ok {
+				continue // file-based source wins
+			}
+			out[v.Name] = templateVarDef{
+				Type:        v.Type,
+				Description: v.Description,
+				Required:    v.Required,
+				Default:     v.Default,
+			}
+		}
+	}
+	return out
+}
+
+// mergeTemplateVarsFromFile reads a template YAML and folds each of its
+// declared variables into out. Errors are logged but never bubbled —
+// a malformed/missing template degrades to "no description", same as
+// the empty-handler case.
+func mergeTemplateVarsFromFile(path string, out map[string]templateVarDef, logger *slog.Logger) {
+	data, err := os.ReadFile(path) // #nosec G304 -- path derived from admin-curated preset YAML
+	if err != nil {
+		if logger != nil {
+			logger.Debug("preset detail: template file read failed",
+				"path", path, "error", err)
+		}
+		return
+	}
+	var file struct {
+		Variables []types.TemplateVariable `yaml:"variables"`
+	}
+	if err := yaml.Unmarshal(data, &file); err != nil {
+		if logger != nil {
+			logger.Warn("preset detail: template file parse failed",
+				"path", path, "error", err)
+		}
+		return
+	}
+	for _, v := range file.Variables {
+		if _, ok := out[v.Name]; ok {
+			continue // first match wins (preset's primary template)
+		}
+		out[v.Name] = templateVarDef{
+			Type:        v.Type,
+			Description: v.Description,
+			Required:    v.Required,
+			Default:     v.Default,
+		}
+	}
 }
 
 // ApplyPresetRequest is the body for POST /api/v1/presets/:id/apply

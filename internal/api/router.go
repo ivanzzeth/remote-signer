@@ -450,6 +450,10 @@ func (r *Router) setupRoutes() error {
 		if r.config.Template != nil {
 			templateSvc = r.config.Template.TemplateService
 		}
+		var templateRepoForPreset storage.TemplateRepository
+		if r.config.Template != nil {
+			templateRepoForPreset = r.config.Template.TemplateRepo
+		}
 		presetHandler, err := handler.NewPresetHandler(
 			r.config.PresetsDir,
 			r.config.PresetsDB,
@@ -458,6 +462,7 @@ func (r *Router) setupRoutes() error {
 			r.logger,
 			handler.WithPresetRequireApproval(r.config.RequireApprovalForAgentRules),
 			handler.WithPresetAPIKeyRepo(r.config.APIKeyRepo),
+			handler.WithPresetTemplateRepo(templateRepoForPreset),
 		)
 		if err != nil {
 			return err

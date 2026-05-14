@@ -188,7 +188,8 @@ export { PresetService } from "./presets";
 export type {
   PresetEntry,
   ListPresetsResponse,
-  PresetVarsResponse,
+  PresetDetail,
+  PresetVariableDetail,
   ApplyPresetRequest,
   ApplyResultItem,
   ApplyPresetResponse,
