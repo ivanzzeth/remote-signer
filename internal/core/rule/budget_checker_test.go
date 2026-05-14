@@ -919,6 +919,15 @@ func (r *stubTemplateRepo) List(ctx context.Context, filter storage.TemplateFilt
 func (r *stubTemplateRepo) Count(ctx context.Context, filter storage.TemplateFilter) (int, error) {
 	return 0, nil
 }
+func (r *stubTemplateRepo) Upsert(ctx context.Context, tmpl *types.RuleTemplate) (bool, error) {
+	return false, nil
+}
+func (r *stubTemplateRepo) ListIDsBySource(ctx context.Context, source types.RuleSource) ([]string, error) {
+	return nil, nil
+}
+func (r *stubTemplateRepo) DeleteMany(ctx context.Context, ids []string) error {
+	return nil
+}
 
 // simpleEvaluator is a basic evaluator that returns configurable results.
 type simpleEvaluator struct {

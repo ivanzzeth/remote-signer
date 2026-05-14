@@ -137,6 +137,46 @@ func (r *mockTemplateRepo) Count(_ context.Context, filter storage.TemplateFilte
 	return count, nil
 }
 
+func (r *mockTemplateRepo) Upsert(_ context.Context, tmpl *types.RuleTemplate) (bool, error) {
+	if tmpl == nil {
+		return false, fmt.Errorf("template cannot be nil")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if existing, ok := r.templates[tmpl.ID]; ok {
+		if existing.ContentHash != "" && existing.ContentHash == tmpl.ContentHash {
+			return false, nil
+		}
+		clone := *tmpl
+		r.templates[tmpl.ID] = &clone
+		return true, nil
+	}
+	clone := *tmpl
+	r.templates[tmpl.ID] = &clone
+	return true, nil
+}
+
+func (r *mockTemplateRepo) ListIDsBySource(_ context.Context, source types.RuleSource) ([]string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var ids []string
+	for id, t := range r.templates {
+		if t.Source == source {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+
+func (r *mockTemplateRepo) DeleteMany(_ context.Context, ids []string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, id := range ids {
+		delete(r.templates, id)
+	}
+	return nil
+}
+
 type mockRuleRepo struct {
 	mu    sync.RWMutex
 	rules map[types.RuleID]*types.Rule
