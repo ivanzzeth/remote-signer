@@ -270,6 +270,16 @@ func Run(args []string) error {
 		return fmt.Errorf("bootstrap admin api key: %w", err)
 	}
 
+	// Auto-bootstrap an agent Ed25519 keypair independently from the
+	// admin key so agents can authenticate without an operator pre-flight.
+	agentPrivPath, agentPubPath, err := homepath.AgentKeyPaths()
+	if err != nil {
+		return fmt.Errorf("resolve agent key paths: %w", err)
+	}
+	if err := bootstrapAgentKeyIfNeeded(context.Background(), apiKeyRepo, agentPrivPath, agentPubPath, cfg.Security.RateLimitDefault, log); err != nil {
+		return fmt.Errorf("bootstrap agent api key: %w", err)
+	}
+
 	// Initialize template repository
 	templateRepo, err := storage.NewGormTemplateRepository(db)
 	if err != nil {
@@ -317,9 +327,20 @@ func Run(args []string) error {
 	// empty Registry rather than failing.
 	if err := syncRegistries(context.Background(), db, cfg, configPath, log); err != nil {
 		return fmt.Errorf("registry sync: %w", err)
-	}
+		}
 
-	// Initialize rules from config (with template expansion)
+		// Bootstrap the agent preset: on first launch, the Registry loaded
+		// evm/agent preset and template into the DB. Apply the preset (create
+		// rule instances owned by the agent key) if no agent rules exist yet.
+		presetRepo, err := storage.NewGormPresetRepository(db)
+		if err != nil {
+			return fmt.Errorf("failed to create preset repository: %w", err)
+		}
+		if err := bootstrapAgentPresetIfNeeded(context.Background(), presetRepo, templateRepo, ruleRepo, budgetRepo, log); err != nil {
+			return fmt.Errorf("bootstrap agent preset: %w", err)
+		}
+
+		// Initialize rules from config (with template expansion)
 	ruleInit, err := config.NewRuleInitializer(ruleRepo, log)
 	if err != nil {
 		return fmt.Errorf("failed to create rule initializer: %w", err)

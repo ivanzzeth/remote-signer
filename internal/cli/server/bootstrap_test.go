@@ -122,3 +122,120 @@ func TestBootstrapNoopWhenKeysExist(t *testing.T) {
 		t.Errorf("admin key should not exist after no-op bootstrap")
 	}
 }
+
+func TestBootstrapAgentKeyCreatesWhenNoAgentKey(t *testing.T) {
+	tmp := t.TempDir()
+	priv := filepath.Join(tmp, "agent.key.priv")
+	pub := filepath.Join(tmp, "agent.key.pub")
+	repo := newTestRepo(t)
+
+	if err := bootstrapAgentKeyIfNeeded(context.Background(), repo, priv, pub, 0, discardLogger()); err != nil {
+		t.Fatal(err)
+	}
+
+	privInfo, err := os.Stat(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if privInfo.Mode().Perm() != 0600 {
+		t.Errorf("priv mode = %o, want 0600", privInfo.Mode().Perm())
+	}
+	pubInfo, err := os.Stat(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pubInfo.Mode().Perm() != 0644 {
+		t.Errorf("pub mode = %o, want 0644", pubInfo.Mode().Perm())
+	}
+
+	privPEM, _ := os.ReadFile(priv)
+	block, _ := pem.Decode(privPEM)
+	if block == nil || block.Type != "PRIVATE KEY" {
+		t.Fatalf("priv PEM block invalid: %v", block)
+	}
+	if _, err := x509.ParsePKCS8PrivateKey(block.Bytes); err != nil {
+		t.Errorf("priv key not parseable: %v", err)
+	}
+
+	pubPEM, _ := os.ReadFile(pub)
+	pubBlock, _ := pem.Decode(pubPEM)
+	if pubBlock == nil || pubBlock.Type != "PUBLIC KEY" {
+		t.Fatalf("pub PEM block invalid: %v", pubBlock)
+	}
+	if _, err := x509.ParsePKIXPublicKey(pubBlock.Bytes); err != nil {
+		t.Errorf("pub key not parseable: %v", err)
+	}
+
+	row, err := repo.Get(context.Background(), "agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Source != types.APIKeySourceBootstrap {
+		t.Errorf("source = %q, want %q", row.Source, types.APIKeySourceBootstrap)
+	}
+	if row.Role != types.RoleAgent {
+		t.Errorf("role = %q, want %q", row.Role, types.RoleAgent)
+	}
+	if row.ID != "agent" {
+		t.Errorf("id = %q, want %q", row.ID, "agent")
+	}
+}
+
+func TestBootstrapAgentKeyNoopWhenAgentKeyExists(t *testing.T) {
+	tmp := t.TempDir()
+	priv := filepath.Join(tmp, "agent.key.priv")
+	pub := filepath.Join(tmp, "agent.key.pub")
+	repo := newTestRepo(t)
+
+	if err := repo.Create(context.Background(), &types.APIKey{
+		ID:           "agent",
+		Name:         "agent (bootstrap)",
+		PublicKeyHex: "00",
+		Role:         types.RoleAgent,
+		Enabled:      true,
+		Source:       types.APIKeySourceBootstrap,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := bootstrapAgentKeyIfNeeded(context.Background(), repo, priv, pub, 0, discardLogger()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(priv); !os.IsNotExist(err) {
+		t.Errorf("priv file should not exist after no-op bootstrap: %v", err)
+	}
+}
+
+func TestBootstrapAgentKeyCreatesWhenAdminKeyExists(t *testing.T) {
+	tmp := t.TempDir()
+	priv := filepath.Join(tmp, "agent.key.priv")
+	pub := filepath.Join(tmp, "agent.key.pub")
+	repo := newTestRepo(t)
+
+	// First create an admin key — this should NOT block agent key creation
+	if err := repo.Create(context.Background(), &types.APIKey{
+		ID:           "admin",
+		Name:         "admin (bootstrap)",
+		PublicKeyHex: "00",
+		Role:         types.RoleAdmin,
+		Enabled:      true,
+		Source:       types.APIKeySourceBootstrap,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := bootstrapAgentKeyIfNeeded(context.Background(), repo, priv, pub, 0, discardLogger()); err != nil {
+		t.Fatal(err)
+	}
+
+	row, err := repo.Get(context.Background(), "agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Source != types.APIKeySourceBootstrap {
+		t.Errorf("source = %q, want %q", row.Source, types.APIKeySourceBootstrap)
+	}
+	if row.Role != types.RoleAgent {
+		t.Errorf("role = %q, want %q", row.Role, types.RoleAgent)
+	}
+}
