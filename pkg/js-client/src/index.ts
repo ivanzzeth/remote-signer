@@ -124,6 +124,8 @@ export type {
   BudgetKind,
   BudgetEntry,
   ListBudgetsResponse,
+  CreateBudgetRequest,
+  UpdateBudgetRequest,
   // EIP-1193 Provider types
   EIP1193ProviderConfig,
   SignersSource,
