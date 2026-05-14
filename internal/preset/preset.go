@@ -14,8 +14,14 @@ import (
 )
 
 // PresetEntry is a preset file summary for listing (e.g. presets directory).
+// Name/ChainType/ChainID are populated from the YAML's top-level fields
+// when available — they let the list UI render a human label and chain
+// badge without forcing a second fetch per row.
 type PresetEntry struct {
 	ID            string   // file name without path
+	Name          string   // YAML `name` field; empty for ad-hoc presets
+	ChainType     string   // e.g. "evm"
+	ChainID       string   // e.g. "1"
 	TemplateNames []string // template name(s) used by this preset
 }
 
@@ -26,6 +32,16 @@ type PresetMeta struct {
 	TemplatePaths []string
 	TemplateNames []string
 	OverrideHints []string
+	// Name / ChainType / ChainID surface the preset's top-level YAML
+	// metadata so the detail endpoint can return them without a second
+	// parse. Variables holds the preset's full variable defaults (not
+	// just the override_hints subset) — the detail handler resolves
+	// each hint against this map to find its current default.
+	Name      string
+	ChainType string
+	ChainID   string
+	Variables map[string]string
+	Enabled   bool
 }
 
 // PresetRule is one rule derived from a preset. Used by CLI to build config.RuleConfig
@@ -65,8 +81,18 @@ func ListPresets(dir string) ([]PresetEntry, error) {
 		if err != nil {
 			continue
 		}
+		// Pull the rich identity fields in one parse so the list view
+		// doesn't have to refetch — names alone aren't enough for the
+		// operator to tell presets apart.
+		meta, _ := GetPresetMeta(data)
 		names := TemplateNamesFromData(data)
-		out = append(out, PresetEntry{ID: e.Name(), TemplateNames: names})
+		out = append(out, PresetEntry{
+			ID:            e.Name(),
+			Name:          meta.Name,
+			ChainType:     meta.ChainType,
+			ChainID:       meta.ChainID,
+			TemplateNames: names,
+		})
 	}
 	return out, nil
 }
@@ -101,15 +127,24 @@ func TemplateNamesFromData(data []byte) []string {
 	return names
 }
 
-// GetPresetMeta parses preset YAML and returns template name(s), template_path(s), and override_hints.
+// GetPresetMeta parses preset YAML and returns template references,
+// override hints, plus the top-level identity / chain fields. Variables
+// are collected after coercing each value to a string — the preset YAML
+// accepts ints and strings interchangeably; the detail UI wants a
+// consistent shape.
 func GetPresetMeta(data []byte) (PresetMeta, error) {
 	var out PresetMeta
 	var single struct {
-		Template      string   `yaml:"template"`
-		TemplatePath  string   `yaml:"template_path"`
-		TemplatePaths []string `yaml:"template_paths"`
-		TemplateNames []string `yaml:"template_names"`
-		OverrideHints []string `yaml:"override_hints"`
+		Template      string                 `yaml:"template"`
+		TemplatePath  string                 `yaml:"template_path"`
+		TemplatePaths []string               `yaml:"template_paths"`
+		TemplateNames []string               `yaml:"template_names"`
+		OverrideHints []string               `yaml:"override_hints"`
+		Name          string                 `yaml:"name"`
+		ChainType     string                 `yaml:"chain_type"`
+		ChainID       string                 `yaml:"chain_id"`
+		Enabled       bool                   `yaml:"enabled"`
+		Variables     map[string]interface{} `yaml:"variables"`
 	}
 	if err := yaml.Unmarshal(data, &single); err != nil {
 		return out, fmt.Errorf("parse preset meta: %w", err)
@@ -121,6 +156,14 @@ func GetPresetMeta(data []byte) (PresetMeta, error) {
 	out.OverrideHints = single.OverrideHints
 	if out.OverrideHints == nil {
 		out.OverrideHints = []string{}
+	}
+	out.Name = single.Name
+	out.ChainType = single.ChainType
+	out.ChainID = single.ChainID
+	out.Enabled = single.Enabled
+	out.Variables = mapInterfaceToStringMap(normalizeVariables(single.Variables))
+	if out.Variables == nil {
+		out.Variables = map[string]string{}
 	}
 	return out, nil
 }

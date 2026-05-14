@@ -1869,23 +1869,25 @@ server.registerTool(
 );
 
 // ===========================================================================
-// Tool: get_preset_vars  –  GET /api/v1/presets/{id}/vars
+// Tool: get_preset  –  GET /api/v1/presets/{id}
 // ===========================================================================
 
 server.registerTool(
-  "get_preset_vars",
+  "get_preset",
   {
-    title: "Get Preset Variables",
+    title: "Get Preset Detail",
     description:
-      "Get variable hints for a preset (admin only). " +
-      "Shows which variables can be overridden when applying the preset.",
+      "Get the full detail of a preset (admin only): name, chain, " +
+      "referenced templates, and each override variable resolved against " +
+      "the template's declared type, description, and default. " +
+      "Replaces the v0.2 `get_preset_vars` tool.",
     inputSchema: {
       id: z.string().describe("Preset ID"),
     },
   },
   async ({ id }) => {
     try {
-      const response = await client.presets.vars(id);
+      const response = await client.presets.get(id);
       return ok(response);
     } catch (error) {
       return err(error);

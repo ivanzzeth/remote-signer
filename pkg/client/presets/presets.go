@@ -44,15 +44,33 @@ func (s *Service) List(ctx context.Context) (*ListResponse, error) {
 	return &out, nil
 }
 
-// VarsResponse is the response for GET /api/v1/presets/:id/vars.
-type VarsResponse struct {
-	OverrideHints []string `json:"override_hints"`
+// VariableDetail is the per-variable metadata on a preset detail response.
+type VariableDetail struct {
+	Name         string `json:"name"`
+	Type         string `json:"type,omitempty"`
+	Description  string `json:"description,omitempty"`
+	DefaultValue string `json:"default_value,omitempty"`
+	Required     bool   `json:"required"`
 }
 
-// Vars returns variable override hints for a preset (admin only).
-func (s *Service) Vars(ctx context.Context, id string) (*VarsResponse, error) {
-	path := "/api/v1/presets/" + url.PathEscape(id) + "/vars"
-	var out VarsResponse
+// DetailResponse is the response for GET /api/v1/presets/:id.
+// Variables[] resolves each override hint against the referenced
+// template's variable definition; the older bare /vars endpoint that
+// returned just `override_hints []string` is gone in v0.3.
+type DetailResponse struct {
+	ID            string           `json:"id"`
+	Name          string           `json:"name,omitempty"`
+	ChainType     string           `json:"chain_type,omitempty"`
+	ChainID       string           `json:"chain_id,omitempty"`
+	Enabled       bool             `json:"enabled"`
+	TemplateNames []string         `json:"template_names"`
+	Variables     []VariableDetail `json:"variables"`
+}
+
+// Get returns rich detail for a preset (admin only).
+func (s *Service) Get(ctx context.Context, id string) (*DetailResponse, error) {
+	path := "/api/v1/presets/" + url.PathEscape(id)
+	var out DetailResponse
 	err := s.transport.Request(ctx, http.MethodGet, path, nil, &out, http.StatusOK)
 	if err != nil {
 		return nil, err

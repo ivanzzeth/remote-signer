@@ -10,6 +10,12 @@ import { HttpTransport } from "../transport";
 
 export interface PresetEntry {
   id: string;
+  /** Human-readable name from the preset YAML (`name:`); empty for ad-hoc presets. */
+  name?: string;
+  /** Chain scope, e.g. "evm". */
+  chain_type?: string;
+  /** Chain ID, e.g. "1" for Ethereum mainnet. */
+  chain_id?: string;
   template_names: string[];
 }
 
@@ -17,8 +23,24 @@ export interface ListPresetsResponse {
   presets: PresetEntry[];
 }
 
-export interface PresetVarsResponse {
-  override_hints: string[];
+/** Rich variable metadata for a preset's override hint. */
+export interface PresetVariableDetail {
+  name: string;
+  type?: string;
+  description?: string;
+  default_value?: string;
+  required: boolean;
+}
+
+/** GET /api/v1/presets/{id} response. */
+export interface PresetDetail {
+  id: string;
+  name?: string;
+  chain_type?: string;
+  chain_id?: string;
+  enabled: boolean;
+  template_names: string[];
+  variables: PresetVariableDetail[];
 }
 
 export interface ApplyPresetRequest {
@@ -54,12 +76,15 @@ export class PresetService {
   }
 
   /**
-   * Get variable hints for a preset (admin only).
+   * Get the full detail for a preset: identity, chain, template names,
+   * and each override hint resolved against the referenced template's
+   * variable definition (type/description/default). Replaces the old
+   * /vars endpoint which only returned bare hint names.
    */
-  async vars(id: string): Promise<PresetVarsResponse> {
-    return this.transport.request<PresetVarsResponse>(
+  async get(id: string): Promise<PresetDetail> {
+    return this.transport.request<PresetDetail>(
       "GET",
-      `/api/v1/presets/${encodeURIComponent(id)}/vars`,
+      `/api/v1/presets/${encodeURIComponent(id)}`,
       null,
     );
   }
