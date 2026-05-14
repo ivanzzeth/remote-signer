@@ -40,6 +40,40 @@ type SimBudgetDefaults struct {
 	MaxDynamicUnits int    // max distinct token budget units per synthetic rule; 0 = use default (100)
 }
 
+// SimBudgetPolicy is the live view of operator-controlled budget knobs.
+// SimulationBudgetRule polls it on every auto-create attempt so the
+// daemon's settings layer (DB-backed, runtime-mutable) can flip the
+// switch without restarting the rule. Implementations should be cheap
+// — typically just an atomic load from a Manager snapshot.
+//
+// AutoCreate returning false bypasses the entire auto-create code path
+// (no new sim:* rows written). Existing rows are still consulted and
+// debited by the regular budget check path; the toggle's scope is
+// strictly "future inventory growth".
+type SimBudgetPolicy interface {
+	AutoCreate() bool
+	Defaults() *SimBudgetDefaults
+}
+
+// StaticSimBudgetPolicy is a SimBudgetPolicy that returns the values it
+// was constructed with. Useful for tests and for embedded daemons that
+// don't run the settings layer; production wires up a settings-backed
+// adapter in cli/server/run.go.
+type StaticSimBudgetPolicy struct {
+	autoCreate bool
+	defaults   *SimBudgetDefaults
+}
+
+// NewStaticSimBudgetPolicy returns a policy that always reports the
+// same auto-create state and defaults. Passing nil for defaults is
+// equivalent to "no limits configured".
+func NewStaticSimBudgetPolicy(autoCreate bool, defaults *SimBudgetDefaults) *StaticSimBudgetPolicy {
+	return &StaticSimBudgetPolicy{autoCreate: autoCreate, defaults: defaults}
+}
+
+func (p *StaticSimBudgetPolicy) AutoCreate() bool         { return p.autoCreate }
+func (p *StaticSimBudgetPolicy) Defaults() *SimBudgetDefaults { return p.defaults }
+
 // ManagedSignerLister returns the set of all signer addresses managed by the system.
 type ManagedSignerLister interface {
 	ListManagedAddresses(ctx context.Context) (map[string]bool, error)
@@ -71,7 +105,7 @@ type DecimalsAnomalyAlerter interface {
 type SimulationBudgetRule struct {
 	simulator         simulation.Simulator
 	budgetRepo        storage.BudgetRepository
-	budgetDefaults    *SimBudgetDefaults
+	budgetPolicy      SimBudgetPolicy
 	decimalsQuerier   rule.DecimalsQuerier
 	signerLister      ManagedSignerLister
 	allowanceQuerier  simulation.AllowanceQuerier
@@ -88,11 +122,11 @@ type SimulationBudgetRule struct {
 
 // NewSimulationBudgetRule creates a new SimulationBudgetRule.
 // simulator may be nil (in which case the rule always returns no-match).
-// budgetDefaults may be nil (in which case unknown tokens have no limit).
+// policy may be nil — equivalent to "auto-create disabled, no defaults".
 func NewSimulationBudgetRule(
 	simulator simulation.Simulator,
 	budgetRepo storage.BudgetRepository,
-	budgetDefaults *SimBudgetDefaults,
+	policy SimBudgetPolicy,
 	decimalsQuerier rule.DecimalsQuerier,
 	signerLister ManagedSignerLister,
 	allowanceQuerier simulation.AllowanceQuerier,
@@ -104,7 +138,7 @@ func NewSimulationBudgetRule(
 	return &SimulationBudgetRule{
 		simulator:        simulator,
 		budgetRepo:       budgetRepo,
-		budgetDefaults:   budgetDefaults,
+		budgetPolicy:     policy,
 		decimalsQuerier:  decimalsQuerier,
 		signerLister:     signerLister,
 		allowanceQuerier: allowanceQuerier,
@@ -460,14 +494,25 @@ func (r *SimulationBudgetRule) autoCreateBudget(
 	syntheticRuleID types.RuleID,
 	unit string,
 ) (*types.RuleBudget, error) {
-	if r.budgetDefaults == nil {
+	// AutoCreate is the operator-facing kill switch. When the policy
+	// disallows new rows, treat unknown tokens as unlimited — same
+	// semantics as "no defaults configured", so the simulation engine
+	// continues to run trace + deny decisions but stops adding to the
+	// budgets table.
+	if r.budgetPolicy == nil || !r.budgetPolicy.AutoCreate() {
+		r.logger.Debug("simulation auto-create disabled, allowing without limit",
+			"signer", signerAddress, "unit", unit)
+		return nil, nil
+	}
+	defaults := r.budgetPolicy.Defaults()
+	if defaults == nil {
 		r.logger.Debug("no simulation budget defaults, allowing without limit",
 			"signer", signerAddress, "unit", unit)
 		return nil, nil
 	}
 
 	// SECURITY: Enforce max dynamic units per synthetic rule to prevent budget amplification.
-	maxUnits := r.budgetDefaults.MaxDynamicUnits
+	maxUnits := defaults.MaxDynamicUnits
 	if maxUnits <= 0 {
 		maxUnits = defaultSimMaxDynamicUnits
 	}
@@ -484,12 +529,12 @@ func (r *SimulationBudgetRule) autoCreateBudget(
 	var maxTotalHuman, maxPerTxHuman string
 	var decimals int
 	if isNative {
-		maxTotalHuman = r.budgetDefaults.NativeMaxTotal
-		maxPerTxHuman = r.budgetDefaults.NativeMaxPerTx
+		maxTotalHuman = defaults.NativeMaxTotal
+		maxPerTxHuman = defaults.NativeMaxPerTx
 		decimals = 18
 	} else {
-		maxTotalHuman = r.budgetDefaults.ERC20MaxTotal
-		maxPerTxHuman = r.budgetDefaults.ERC20MaxPerTx
+		maxTotalHuman = defaults.ERC20MaxTotal
+		maxPerTxHuman = defaults.ERC20MaxPerTx
 		// Query decimals from chain
 		if r.decimalsQuerier != nil {
 			d, dErr := r.decimalsQuerier.QueryDecimals(ctx, chainID, token)

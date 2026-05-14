@@ -21,12 +21,20 @@ func foundryToSnapshot(f config.FoundryConfig) *settings.FoundrySnapshot {
 }
 
 // simulationToSnapshot lifts cfg.Chains.EVM.Simulation into the snapshot.
+// AutoCreateBudget defaults to true here so a fresh install behaves the
+// way the simulation engine has always behaved — auto-track unknown
+// (signer, token) outflows. Admin can flip it off via Settings once
+// they want to stop accumulating sim:* rows. MaxDynamicUnits has no
+// YAML counterpart; default 100 matches the constant the rule code
+// uses as a hard fallback.
 func simulationToSnapshot(s config.SimulationConfig) *settings.SimulationSnapshot {
 	return &settings.SimulationSnapshot{
 		Enabled:              s.Enabled,
 		Timeout:              s.Timeout,
 		BatchWindow:          s.BatchWindow,
 		BatchMaxSize:         s.BatchMaxSize,
+		AutoCreateBudget:     true,
+		MaxDynamicUnits:      100,
 		BudgetNativeMaxTotal: s.BudgetNativeMaxTotal,
 		BudgetNativeMaxPerTx: s.BudgetNativeMaxPerTx,
 		BudgetERC20MaxTotal:  s.BudgetERC20MaxTotal,
