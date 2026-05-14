@@ -105,12 +105,12 @@ func NewFileTemplateSource(root string) *FileTemplateSource {
 	return &FileTemplateSource{root: root}
 }
 
-// Kind reports RuleSourceConfig — file sources are conceptually the same
-// origin as "I put it in config.yaml". Future remote sources will return
-// different kinds so prune scoping works correctly across multiple
-// concurrent Sync passes.
+// Kind reports RuleSourceFile so Registry's prune step only touches
+// rows it owns. RuleSourceConfig is reserved for the legacy
+// TemplateInitializer's inline cfg.Templates entries; mixing them would
+// have the two reconcilers fight over the same row on every boot.
 func (s *FileTemplateSource) Kind() types.RuleSource {
-	return types.RuleSourceConfig
+	return types.RuleSourceFile
 }
 
 // List walks the root and returns one *types.RuleTemplate per .yaml/.yml
@@ -247,7 +247,7 @@ func (s *FileTemplateSource) parseTemplate(path string) (*types.RuleTemplate, er
 		Config:         configJSON,
 		BudgetMetering: meteringJSON,
 		TestVariables:  testVarsJSON,
-		Source:         types.RuleSourceConfig,
+		Source:         types.RuleSourceFile,
 		SourcePath:     relPath,
 		ContentHash:    hashBytes(raw),
 		Enabled:        enabled,
@@ -272,7 +272,7 @@ func NewFilePresetSource(root string) *FilePresetSource {
 }
 
 func (s *FilePresetSource) Kind() types.RuleSource {
-	return types.RuleSourceConfig
+	return types.RuleSourceFile
 }
 
 func (s *FilePresetSource) List(ctx context.Context) ([]*types.RulePreset, error) {
@@ -391,7 +391,7 @@ func (s *FilePresetSource) parsePreset(path string) (*types.RulePreset, error) {
 		Budget:            budgetJSON,
 		Schedule:          scheduleJSON,
 		Enabled:           enabled,
-		Source:            types.RuleSourceConfig,
+		Source:            types.RuleSourceFile,
 		SourcePath:        relPath,
 		ContentHash:       hashBytes(raw),
 	}, nil

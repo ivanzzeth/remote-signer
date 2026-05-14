@@ -82,10 +82,10 @@ func (m *memPresetSource) List(_ context.Context) ([]*types.RulePreset, error) {
 func TestTemplateRegistry_Sync_CreatesOnFirstRun(t *testing.T) {
 	repo := setupTemplateDB(t)
 	src := &memTemplateSource{
-		kind: types.RuleSourceConfig,
+		kind: types.RuleSourceFile,
 		items: []*types.RuleTemplate{
-			{ID: "evm/erc20", Name: "ERC20", ContentHash: "h1", Source: types.RuleSourceConfig},
-			{ID: "evm/safe", Name: "Safe", ContentHash: "h2", Source: types.RuleSourceConfig},
+			{ID: "evm/erc20", Name: "ERC20", ContentHash: "h1", Source: types.RuleSourceFile},
+			{ID: "evm/safe", Name: "Safe", ContentHash: "h2", Source: types.RuleSourceFile},
 		},
 	}
 	reg := NewTemplateRegistry(repo, src, quietLogger())
@@ -103,9 +103,9 @@ func TestTemplateRegistry_Sync_SkipsUnchangedRows(t *testing.T) {
 	// the stored value, so Upsert should short-circuit to no writes.
 	repo := setupTemplateDB(t)
 	src := &memTemplateSource{
-		kind: types.RuleSourceConfig,
+		kind: types.RuleSourceFile,
 		items: []*types.RuleTemplate{
-			{ID: "evm/x", Name: "X", ContentHash: "abc", Source: types.RuleSourceConfig},
+			{ID: "evm/x", Name: "X", ContentHash: "abc", Source: types.RuleSourceFile},
 		},
 	}
 	reg := NewTemplateRegistry(repo, src, quietLogger())
@@ -122,9 +122,9 @@ func TestTemplateRegistry_Sync_SkipsUnchangedRows(t *testing.T) {
 func TestTemplateRegistry_Sync_UpdatesOnHashChange(t *testing.T) {
 	repo := setupTemplateDB(t)
 	src := &memTemplateSource{
-		kind: types.RuleSourceConfig,
+		kind: types.RuleSourceFile,
 		items: []*types.RuleTemplate{
-			{ID: "evm/x", Name: "v1", ContentHash: "h1", Source: types.RuleSourceConfig},
+			{ID: "evm/x", Name: "v1", ContentHash: "h1", Source: types.RuleSourceFile},
 		},
 	}
 	reg := NewTemplateRegistry(repo, src, quietLogger())
@@ -132,7 +132,7 @@ func TestTemplateRegistry_Sync_UpdatesOnHashChange(t *testing.T) {
 	require.NoError(t, err)
 
 	// Edit the item — hash changes, Sync must re-upsert.
-	src.items[0] = &types.RuleTemplate{ID: "evm/x", Name: "v2", ContentHash: "h2", Source: types.RuleSourceConfig}
+	src.items[0] = &types.RuleTemplate{ID: "evm/x", Name: "v2", ContentHash: "h2", Source: types.RuleSourceFile}
 	rep, err := reg.Sync(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, 1, rep.Changed)
@@ -145,10 +145,10 @@ func TestTemplateRegistry_Sync_UpdatesOnHashChange(t *testing.T) {
 func TestTemplateRegistry_Sync_PrunesMissingRows(t *testing.T) {
 	repo := setupTemplateDB(t)
 	src := &memTemplateSource{
-		kind: types.RuleSourceConfig,
+		kind: types.RuleSourceFile,
 		items: []*types.RuleTemplate{
-			{ID: "evm/a", Name: "A", ContentHash: "h", Source: types.RuleSourceConfig},
-			{ID: "evm/b", Name: "B", ContentHash: "h", Source: types.RuleSourceConfig},
+			{ID: "evm/a", Name: "A", ContentHash: "h", Source: types.RuleSourceFile},
+			{ID: "evm/b", Name: "B", ContentHash: "h", Source: types.RuleSourceFile},
 		},
 	}
 	reg := NewTemplateRegistry(repo, src, quietLogger())
@@ -175,7 +175,7 @@ func TestTemplateRegistry_Sync_DoesNotPruneOtherSources(t *testing.T) {
 	require.NoError(t, repo.Create(context.Background(), apiRow))
 
 	src := &memTemplateSource{
-		kind:  types.RuleSourceConfig,
+		kind:  types.RuleSourceFile,
 		items: nil, // empty config source
 	}
 	reg := NewTemplateRegistry(repo, src, quietLogger())
@@ -195,10 +195,10 @@ func TestTemplateRegistry_Sync_DuplicateIDInSourceRecorded(t *testing.T) {
 	// the operator's radar.
 	repo := setupTemplateDB(t)
 	src := &memTemplateSource{
-		kind: types.RuleSourceConfig,
+		kind: types.RuleSourceFile,
 		items: []*types.RuleTemplate{
-			{ID: "evm/x", Name: "A", ContentHash: "h1", Source: types.RuleSourceConfig, SourcePath: "evm/x.yaml"},
-			{ID: "evm/x", Name: "B", ContentHash: "h2", Source: types.RuleSourceConfig, SourcePath: "evm/x.yml"},
+			{ID: "evm/x", Name: "A", ContentHash: "h1", Source: types.RuleSourceFile, SourcePath: "evm/x.yaml"},
+			{ID: "evm/x", Name: "B", ContentHash: "h2", Source: types.RuleSourceFile, SourcePath: "evm/x.yml"},
 		},
 	}
 	reg := NewTemplateRegistry(repo, src, quietLogger())
@@ -213,7 +213,7 @@ func TestTemplateRegistry_Sync_DuplicateIDInSourceRecorded(t *testing.T) {
 
 func TestTemplateRegistry_Sync_SourceErrorBubbles(t *testing.T) {
 	repo := setupTemplateDB(t)
-	src := &memTemplateSource{kind: types.RuleSourceConfig, err: errors.New("source kaboom")}
+	src := &memTemplateSource{kind: types.RuleSourceFile, err: errors.New("source kaboom")}
 	reg := NewTemplateRegistry(repo, src, quietLogger())
 
 	_, err := reg.Sync(context.Background())
@@ -225,9 +225,9 @@ func TestTemplateRegistry_Sync_SourceErrorBubbles(t *testing.T) {
 func TestTemplateRegistry_Sync_EmptyIDRecordedAsError(t *testing.T) {
 	repo := setupTemplateDB(t)
 	src := &memTemplateSource{
-		kind: types.RuleSourceConfig,
+		kind: types.RuleSourceFile,
 		items: []*types.RuleTemplate{
-			{ID: "", Name: "Anon", ContentHash: "h", Source: types.RuleSourceConfig},
+			{ID: "", Name: "Anon", ContentHash: "h", Source: types.RuleSourceFile},
 		},
 	}
 	reg := NewTemplateRegistry(repo, src, quietLogger())
@@ -244,10 +244,10 @@ func TestTemplateRegistry_Sync_EmptyIDRecordedAsError(t *testing.T) {
 func TestPresetRegistry_Sync_CreateThenSkipThenDelete(t *testing.T) {
 	repo := setupPresetDB(t)
 	src := &memPresetSource{
-		kind: types.RuleSourceConfig,
+		kind: types.RuleSourceFile,
 		items: []*types.RulePreset{
-			{ID: "evm/p1", Name: "P1", ContentHash: "h", Source: types.RuleSourceConfig},
-			{ID: "evm/p2", Name: "P2", ContentHash: "h", Source: types.RuleSourceConfig},
+			{ID: "evm/p1", Name: "P1", ContentHash: "h", Source: types.RuleSourceFile},
+			{ID: "evm/p2", Name: "P2", ContentHash: "h", Source: types.RuleSourceFile},
 		},
 	}
 	reg := NewPresetRegistry(repo, src, quietLogger())
@@ -272,7 +272,7 @@ func TestPresetRegistry_Sync_CreateThenSkipThenDelete(t *testing.T) {
 
 func TestPresetRegistry_Sync_SourceErrorBubbles(t *testing.T) {
 	repo := setupPresetDB(t)
-	src := &memPresetSource{kind: types.RuleSourceConfig, err: errors.New("kaboom")}
+	src := &memPresetSource{kind: types.RuleSourceFile, err: errors.New("kaboom")}
 	reg := NewPresetRegistry(repo, src, quietLogger())
 	_, err := reg.Sync(context.Background())
 	require.Error(t, err)

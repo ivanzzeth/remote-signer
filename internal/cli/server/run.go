@@ -17,6 +17,7 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/rs/zerolog"
+	"gorm.io/gorm"
 
 	"github.com/ivanzzeth/remote-signer/internal/api"
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
@@ -26,6 +27,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/config"
 	"github.com/ivanzzeth/remote-signer/internal/core/auth"
+	"github.com/ivanzzeth/remote-signer/internal/core/registry"
 	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/statemachine"
@@ -302,6 +304,19 @@ func Run(args []string) error {
 	}
 	if err := templateInit.SyncFromConfig(context.Background(), allTemplates); err != nil {
 		return fmt.Errorf("failed to sync templates from config: %w", err)
+	}
+
+	// Run the v0.3 Registry over rules/templates and rules/presets on
+	// disk. Templates land under types.RuleSourceFile so the legacy
+	// initializer's Source=config prune step does not touch them, and
+	// presets get a first-class DB row (the legacy path kept them on
+	// disk only). The Registry's directory roots default to cfg.TemplatesDir
+	// and cfg.Presets.Dir respectively, both resolved against the config
+	// file directory the same way the legacy paths are. Missing roots
+	// are tolerated — fresh installs without those dirs boot to an
+	// empty Registry rather than failing.
+	if err := syncRegistries(context.Background(), db, cfg, configPath, log); err != nil {
+		return fmt.Errorf("registry sync: %w", err)
 	}
 
 	// Initialize rules from config (with template expansion)
@@ -1099,6 +1114,73 @@ func reloadRules(configPath string, ruleInit *config.RuleInitializer, templateIn
 		auditLogger.LogConfigReloaded(ctx, true, "")
 	}
 	log.Info("SIGHUP: rules reloaded successfully")
+}
+
+// syncRegistries runs the v0.3 file-based Template + Preset Registry
+// sync at startup. It is non-fatal on a missing root (fresh installs
+// have no rules/ tree yet) but returns errors from parse/Upsert failures
+// so a broken YAML doesn't go silent.
+//
+// Template root resolution mirrors the legacy templates_dir handling:
+// relative paths anchor against the config file's directory so an
+// operator-installed config.yaml that references "rules/templates"
+// keeps working. Preset root follows the same rule against cfg.Presets.Dir.
+//
+// The legacy TemplateInitializer (above) keeps running in parallel for
+// inline cfg.Templates entries. Their rows live under Source=config so
+// they don't collide with Registry's Source=file rows; the two prune
+// loops are independent.
+func syncRegistries(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath string, log *slog.Logger) error {
+	tmplRoot := absDirRelativeToConfig(cfg.TemplatesDir, configPath)
+	tmplRepo, err := storage.NewGormTemplateRepository(db)
+	if err != nil {
+		return fmt.Errorf("template repo: %w", err)
+	}
+	tmplReg := registry.NewTemplateRegistry(tmplRepo, registry.NewFileTemplateSource(tmplRoot), log)
+	tmplReport, err := tmplReg.Sync(ctx)
+	if err != nil {
+		return fmt.Errorf("template registry sync (%s): %w", tmplRoot, err)
+	}
+	// One bad YAML is allowed to log-and-skip rather than abort boot —
+	// Registry returned no top-level error, just per-file Errors entries.
+	for _, e := range tmplReport.Errors {
+		log.Error("template parse error", "id", e.ID, "path", e.Path, "err", e.Err)
+	}
+
+	var presetRoot string
+	if cfg.Presets != nil && cfg.Presets.Dir != "" {
+		presetRoot = absDirRelativeToConfig(cfg.Presets.Dir, configPath)
+	}
+	presetRepo, err := storage.NewGormPresetRepository(db)
+	if err != nil {
+		return fmt.Errorf("preset repo: %w", err)
+	}
+	presetReg := registry.NewPresetRegistry(presetRepo, registry.NewFilePresetSource(presetRoot), log)
+	presetReport, err := presetReg.Sync(ctx)
+	if err != nil {
+		return fmt.Errorf("preset registry sync (%s): %w", presetRoot, err)
+	}
+	for _, e := range presetReport.Errors {
+		log.Error("preset parse error", "id", e.ID, "path", e.Path, "err", e.Err)
+	}
+	return nil
+}
+
+// absDirRelativeToConfig resolves a directory path that may be relative
+// to the config file directory. Empty input yields empty output (the
+// Registry treats that as "no source", returning an empty list).
+func absDirRelativeToConfig(dir, configPath string) string {
+	if dir == "" {
+		return ""
+	}
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(filepath.Dir(configPath), dir)
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return dir
+	}
+	return abs
 }
 
 func parseZerologLevel(level string) (zerolog.Level, error) {
