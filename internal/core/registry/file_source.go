@@ -48,9 +48,16 @@ type templateYAML struct {
 	VariableGroups []types.VariableGroup    `yaml:"variable_groups,omitempty"`
 	Rules          []map[string]any        `yaml:"rules,omitempty"`
 	Config         map[string]any          `yaml:"config,omitempty"`
-	BudgetMetering *types.BudgetMetering   `yaml:"budget_metering,omitempty"`
-	TestVariables  map[string]string       `yaml:"test_variables,omitempty"`
-	Enabled        *bool                   `yaml:"enabled,omitempty"`
+	// BudgetMetering and TestVariables are kept untyped because they
+	// can contain ${var} placeholders pre-substitution — e.g.
+	//   budget_metering:
+	//     unit: "${chain_id}:${token_address}"
+	// won't unmarshal into types.BudgetMetering until substitution
+	// resolves the placeholders. The Registry stores raw bytes; the
+	// substituter and downstream evaluators do typed parsing.
+	BudgetMetering map[string]any    `yaml:"budget_metering,omitempty"`
+	TestVariables  map[string]any    `yaml:"test_variables,omitempty"`
+	Enabled        *bool             `yaml:"enabled,omitempty"`
 }
 
 // presetYAML is the wire shape for a preset file. As with templates, ID
@@ -206,7 +213,7 @@ func (s *FileTemplateSource) parseTemplate(path string) (*types.RuleTemplate, er
 		return nil, fmt.Errorf("config: %w", err)
 	}
 	var meteringJSON []byte
-	if doc.BudgetMetering != nil {
+	if len(doc.BudgetMetering) > 0 {
 		meteringJSON, err = marshalJSON(doc.BudgetMetering)
 		if err != nil {
 			return nil, fmt.Errorf("budget_metering: %w", err)
