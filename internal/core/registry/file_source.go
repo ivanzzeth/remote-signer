@@ -445,13 +445,13 @@ func validateTemplate(doc *templateYAML) error {
 	if doc.Name == "" {
 		return fmt.Errorf("name is required")
 	}
-	if doc.Type == "" {
-		return fmt.Errorf("type is required")
-	}
-	if doc.Mode == "" {
-		return fmt.Errorf("mode is required")
-	}
-	if doc.Mode != types.RuleModeWhitelist && doc.Mode != types.RuleModeBlocklist {
+	// Type and Mode are optional at the template level. A template can
+	// contain multiple rules each with their own type+mode, so we can't
+	// require one canonical value — the migration leaves both empty for
+	// multi-rule templates. When set they must be well-formed; the
+	// chain-specific evaluators reject unknown types at registration
+	// time, so we only police mode strictness here.
+	if doc.Mode != "" && doc.Mode != types.RuleModeWhitelist && doc.Mode != types.RuleModeBlocklist {
 		return fmt.Errorf("mode %q invalid (must be whitelist or blocklist)", doc.Mode)
 	}
 	seen := make(map[string]bool, len(doc.Variables))

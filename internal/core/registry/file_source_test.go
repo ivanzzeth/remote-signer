@@ -241,6 +241,42 @@ variables: []
 	assert.Contains(t, err.Error(), "name is required")
 }
 
+func TestFileTemplateSource_TypeAndModeOptional(t *testing.T) {
+	// Multi-rule templates can't pick one canonical type/mode for the
+	// container. Migration leaves both empty; Registry must accept.
+	dir := t.TempDir()
+	writeFile(t, dir, "evm/multi.yaml", `
+name: Multi-rule container
+variables: []
+rules:
+  - id: r1
+    type: evm_js
+    mode: whitelist
+  - id: r2
+    type: evm_value_limit
+    mode: blocklist
+`)
+	src := NewFileTemplateSource(dir)
+	items, err := src.List(context.Background())
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	assert.Equal(t, types.RuleType(""), items[0].Type, "no top-level type required")
+	assert.Equal(t, types.RuleMode(""), items[0].Mode, "no top-level mode required")
+}
+
+func TestFileTemplateSource_ModeWhenSetMustBeValid(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "evm/bad_mode.yaml", `
+name: Bad mode
+mode: maybe
+variables: []
+`)
+	src := NewFileTemplateSource(dir)
+	_, err := src.List(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mode \"maybe\" invalid")
+}
+
 func TestFileTemplateSource_ValidateEnumRequiresOptions(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "evm/no_opts.yaml", `
