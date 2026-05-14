@@ -992,6 +992,17 @@ func Run(args []string) error {
 	} else {
 		log.Warn("preset API disabled: failed to wire preset repo", "error", err)
 	}
+	// Wire the Registry pair for POST /api/v1/registry/refresh. Building
+	// here (not at boot's syncRegistries call) keeps the handler tied to
+	// the same file roots the bootstrap sync used, so a refresh always
+	// picks up the same set of files regardless of working-directory
+	// shenanigans at request time.
+	if tmplReg, presetReg, err := buildRegistries(db, cfg, configPath, log); err == nil {
+		routerConfig.TemplateRegistry = tmplReg
+		routerConfig.PresetRegistry = presetReg
+	} else {
+		log.Warn("registry refresh endpoint disabled: failed to build registries", "error", err)
+	}
 	router, err := api.NewRouter(authVerifier, signService, evmSignerManager, ruleRepo, auditRepo, log, routerConfig)
 	if err != nil {
 		return fmt.Errorf("failed to create router: %w", err)
@@ -1138,21 +1149,31 @@ func reloadRules(configPath string, ruleInit *config.RuleInitializer, templateIn
 // they don't collide with Registry's Source=file rows; the two prune
 // loops are independent.
 func syncRegistries(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath string, log *slog.Logger) error {
+	tmplReg, presetReg, err := buildRegistries(db, cfg, configPath, log)
+	if err != nil {
+		return err
+	}
+	if _, err := runRegistrySync(ctx, tmplReg, "template", log); err != nil {
+		return err
+	}
+	if _, err := runRegistrySync(ctx, presetReg, "preset", log); err != nil {
+		return err
+	}
+	return nil
+}
+
+// buildRegistries constructs Template + Preset Registry instances bound
+// to the live db handle and the configured source roots. Used both at
+// boot (one-shot sync) and by the runtime refresh handler so the
+// handler doesn't need to re-resolve paths or re-wire repositories on
+// every POST /api/v1/registry/refresh.
+func buildRegistries(db *gorm.DB, cfg *config.Config, configPath string, log *slog.Logger) (*registry.TemplateRegistry, *registry.PresetRegistry, error) {
 	tmplRoot := absDirRelativeToConfig(cfg.TemplatesDir, configPath)
 	tmplRepo, err := storage.NewGormTemplateRepository(db)
 	if err != nil {
-		return fmt.Errorf("template repo: %w", err)
+		return nil, nil, fmt.Errorf("template repo: %w", err)
 	}
 	tmplReg := registry.NewTemplateRegistry(tmplRepo, registry.NewFileTemplateSource(tmplRoot), log)
-	tmplReport, err := tmplReg.Sync(ctx)
-	if err != nil {
-		return fmt.Errorf("template registry sync (%s): %w", tmplRoot, err)
-	}
-	// One bad YAML is allowed to log-and-skip rather than abort boot —
-	// Registry returned no top-level error, just per-file Errors entries.
-	for _, e := range tmplReport.Errors {
-		log.Error("template parse error", "id", e.ID, "path", e.Path, "err", e.Err)
-	}
 
 	var presetRoot string
 	if cfg.Presets != nil && cfg.Presets.Dir != "" {
@@ -1160,17 +1181,26 @@ func syncRegistries(ctx context.Context, db *gorm.DB, cfg *config.Config, config
 	}
 	presetRepo, err := storage.NewGormPresetRepository(db)
 	if err != nil {
-		return fmt.Errorf("preset repo: %w", err)
+		return nil, nil, fmt.Errorf("preset repo: %w", err)
 	}
 	presetReg := registry.NewPresetRegistry(presetRepo, registry.NewFilePresetSource(presetRoot), log)
-	presetReport, err := presetReg.Sync(ctx)
+	return tmplReg, presetReg, nil
+}
+
+// runRegistrySync is the small adapter that lets Sync return work for
+// either kind through the same code path. The kind label is just for
+// log + error wording — the algorithm is identical.
+func runRegistrySync(ctx context.Context, r interface {
+	Sync(ctx context.Context) (registry.SyncReport, error)
+}, kind string, log *slog.Logger) (registry.SyncReport, error) {
+	rep, err := r.Sync(ctx)
 	if err != nil {
-		return fmt.Errorf("preset registry sync (%s): %w", presetRoot, err)
+		return rep, fmt.Errorf("%s registry sync: %w", kind, err)
 	}
-	for _, e := range presetReport.Errors {
-		log.Error("preset parse error", "id", e.ID, "path", e.Path, "err", e.Err)
+	for _, e := range rep.Errors {
+		log.Error(kind+" parse error", "id", e.ID, "path", e.Path, "err", e.Err)
 	}
-	return nil
+	return rep, nil
 }
 
 // absDirRelativeToConfig resolves a directory path that may be relative
