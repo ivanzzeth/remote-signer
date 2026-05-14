@@ -6,224 +6,46 @@
 
 面向 EVM 链的安全、策略驱动的签名服务。通过规则引擎控制**签什么**，而不仅是**谁可以签**。
 
-## 功能特性
-
-- **策略驱动签名** — 白名单/黑名单规则，支持 Solidity 表达式、JS 规则、地址列表、金额限制
-- **多链可扩展** — 当前支持 EVM，架构上可扩展至 Solana / Cosmos / Bitcoin
-- **人工审批流程** — 通过 Slack、Pushover、Webhook 接收待审批通知
-- **Ed25519 API 认证** — 请求签名 + nonce/时间戳防重放
-- **动态签名者管理** — 通过 API 或 TUI 在运行时创建 keystore 与 HD 钱包（助记词钱包）
-- **终端界面 (TUI)** — 在终端中管理规则、审批请求、创建签名者
-
-## 架构
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         API 层                                   │
-│  /api/v1/evm/sign    /api/v1/solana/sign    /api/v1/.../sign   │
-└───────────────────────────┬─────────────────────────────────────┘
-                            │
-┌───────────────────────────▼─────────────────────────────────────┐
-│                       核心层                                      │
-│   SignService  │  RuleEngine  │  StateMachine  │  AuditLogger   │
-└───────────────────────────┬─────────────────────────────────────┘
-                            │
-┌───────────────────────────▼─────────────────────────────────────┐
-│                    链适配层                                        │
-│      EVM Adapter (ethsig)  │  Solana / Cosmos / ... (规划中)    │
-└───────────────────────────┬─────────────────────────────────────┘
-                            │
-┌───────────────────────────▼─────────────────────────────────────┐
-│                      存储层                                       │
-│              GORM + PostgreSQL / SQLite                           │
-└─────────────────────────────────────────────────────────────────┘
-```
-
 ## 快速开始
 
 ### 一条命令单实例启动（SQLite，零配置）
 
 ```bash
-# 1. 下载 release 二进制
 curl -sSLf -o remote-signer \
   "https://github.com/ivanzzeth/remote-signer/releases/latest/download/remote-signer-$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')" \
   && chmod +x remote-signer
 
-# 2. 直接跑。
 ./remote-signer
 ```
 
-首次启动会自动创建 `~/.remote-signer/`（0700），写入默认 `config.yaml`（SQLite 在 `~/.remote-signer/remote-signer.db`，监听 `:8548`，无 TLS），并生成 admin Ed25519 keypair（`~/.remote-signer/apikeys/admin.key.priv` / `.pub`）。stderr 只打印路径，私钥仅落盘。后续所有 admin 命令用该私钥：
+首次启动自动创建 `~/.remote-signer/`，写入默认配置，并生成 admin Ed25519 密钥对。私钥路径仅打印一次到 stderr。
 
-```bash
-./remote-signer rule list \
-  --api-key-id admin \
-  --api-key-file ~/.remote-signer/apikeys/admin.key.priv \
-  --url http://localhost:8548
-```
-
-`remote-signer` 单二进制同时承担 `server start`、`tui`、`validate` 以及所有运维子命令（`rule`、`sign`、`keystore`、`preset`、`settings`、`api-key`...）。
-
-### 一键安装（交互式向导）
+### 一键安装
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/ivanzzeth/remote-signer/main/scripts/setup.sh)
 ```
 
-脚本会自动克隆仓库（如未克隆）、安装依赖并运行引导式配置。
-
-### 或手动克隆
+### 手动克隆
 
 ```bash
-git clone https://github.com/ivanzzeth/remote-signer.git
-cd remote-signer
-./scripts/setup.sh
+git clone https://github.com/ivanzzeth/remote-signer.git && cd remote-signer && ./scripts/setup.sh
 ```
-
-### 环境要求
-
-- openssl
-- Docker（多实例 / PostgreSQL）或直接下载 release 二进制（单实例 / SQLite）
-
-### 安装向导会做什么
-
-交互式安装包含 5 步：
-1. **部署模式** — Docker + PostgreSQL（多实例）或 本地 + SQLite（单实例，release 二进制开箱即用）
-2. **API 密钥** — 生成 `admin` 与 `dev` 的 Ed25519 密钥对
-3. **TLS** — HTTP、TLS 或 mTLS（Docker 默认 mTLS）
-4. **配置** — 生成可运行的配置文件与自动生成的密钥
-5. **后续步骤** — 启动命令、健康检查、如何添加签名者
-
-安装完成后：
-
-```bash
-# 启动（Docker 模式，推荐）
-./scripts/deploy.sh run
-
-# 或启动（本地模式）
-./scripts/deploy.sh local-run
-
-# 健康检查（HTTP）
-curl http://localhost:8548/health
-
-# 健康检查（mTLS）
-curl --cacert certs/ca.crt --cert certs/client.crt --key certs/client.key https://localhost:8548/health
-```
-
-服务启动时没有签名者。要添加第一个签名者（导入私钥或 HD 钱包/助记词钱包），请使用 TUI：先构建 TUI，用 `admin` 密钥连接（密钥路径在安装向导最后会给出），在 **签名者** 标签页中可创建 keystore（导入私钥）或创建/导入 HD 钱包。详见下方 [添加签名者](#添加签名者)。
-
-### 手动配置
-
-若需完全手动配置，请参阅 [docs/configuration.md](docs/configuration.md) 的完整配置说明，并以 `config.example.yaml` 为起点。
-
-### 添加签名者
-
-服务启动时没有签名者，需在启动后添加：
-
-- **TUI**（推荐）：使用 `-api-key-file data/admin_private.pem` 无需粘贴密钥。示例（明文 HTTP）：`./remote-signer tui -api-key-id admin -api-key-file data/admin_private.pem -url http://localhost:8548`。**若安装时启用了 TLS**，需使用 `https://` 并指定 CA（mTLS 时还需客户端证书与私钥），例如 `-url https://localhost:8548 -tls-ca ./certs/ca.crt`，或 mTLS：`-tls-ca ./certs/ca.crt -tls-cert ./certs/client.crt -tls-key ./certs/client.key`。详见 [docs/tui.md](docs/tui.md#tls--mtls)。安装完成后（Docker 模式）可选择「Open TUI to add signers now?」直接启动 TUI。在 **签名者** 标签页可创建 keystore（导入私钥）或创建/导入 HD 钱包。**密码强度要求（强制校验）**：至少 16 位，且必须包含大写 + 小写 + 数字 + 符号；建议 24 位以上。
-- **API**：`POST /api/v1/evm/signers`（仅 admin）。见 [docs/api.md](docs/api.md)
-- **配置文件**：编辑配置中的 `chains.evm.signers.private_keys`。见 [docs/configuration.md](docs/configuration.md#chains-evm)
-
-## 支持的签名类型
-
-| 类型 | 说明 |
-|------|------|
-| `hash` | 签预哈希数据（32 字节） |
-| `raw_message` | 签原始字节 |
-| `eip191` | 签 EIP-191 格式消息 |
-| `personal` | 签个人消息（`\x19Ethereum Signed Message:\n`） |
-| `typed_data` | 签 EIP-712 结构化数据 |
-| `transaction` | 签交易（Legacy / EIP-2930 / EIP-1559） |
 
 ## 文档
 
-### 入门
-
 | 文档 | 说明 |
 |------|------|
-| [使用场景](docs/use-cases.md) | 资金库、机器人、DeFi 等场景 |
-| [架构](docs/architecture.md) | 系统设计、分层、适配器 |
-
-### 配置
-
-| 文档 | 说明 |
-|------|------|
+| [ARCHITECTURE.md](ARCHITECTURE.md) | 核心概念、关系、数据流（Signer、Wallet、API Key、Rule、Template、Preset、Budget、Audit） |
+| [SECURITY.md](SECURITY.md) | 威胁模型、安全边界、密钥管理、破坏影响分析 |
 | [配置参考](docs/configuration.md) | 完整 `config.yaml` 说明 |
-| [规则、模板与预设](docs/rules-templates-and-presets.md) | 概念：规则模板、实例、预设及示例 |
-| [规则语法参考](docs/rule-syntax.md) | 规则类型：地址列表、金额限制、Solidity、JS、消息模式 |
-| [JS 规则 (evm_js)](docs/architecture/js-rules-v1.md) | 基于 Sobek 的进程内 JavaScript 规则 |
-| [config.example.yaml](config.example.yaml) | 带注释的配置模板 |
-
-### 集成
-
-| 文档 | 说明 |
-|------|------|
-| [API 参考](docs/api.md) | 认证、签名、规则、审计等接口说明 |
-| [集成指南](INTEGRATION.md) | JS/TS 客户端库、Rust SDK、MCP 服务器 |
-
-### 部署与运维
-
-| 文档 | 说明 |
-|------|------|
 | [部署指南](docs/deployment.md) | Docker、Kubernetes、高可用、监控、备份 |
+| [规则、模板与预设](docs/rules-templates-and-presets.md) | 概念：规则模板、实例、预设 |
+| [规则语法参考](docs/rule-syntax.md) | 所有规则类型及示例 |
+| [集成指南](INTEGRATION.md) | Go/TS/Rust SDK、MCP 服务器 |
 | [TLS / mTLS 指南](docs/tls.md) | 证书信任模型、生成、生产实践 |
 | [TUI 指南](docs/tui.md) | 终端界面：构建、运行、快捷键 |
-
-### 安全
-
-| 文档 | 说明 |
-|------|------|
-| [安全概览](docs/security.md) | 从网络到应用的 8 层防护 |
-| [安全审查](docs/security-review.md) | 发现项、优先级与实施状态 |
-
-### 开发
-
-| 文档 | 说明 |
-|------|------|
-| [组件](docs/components.md) | 核心接口、数据类型、服务 |
-| [请求流程](docs/flow.md) | 带状态机的 8 步签名流程 |
-| [测试指南](docs/testing.md) | 单元测试、E2E、规则校验、覆盖率 |
-
-## 路线图
-
-### 已完成
-
-- [x] EIP-712 结构化数据校验
-- [x] 终端界面 (TUI)
-- [x] Go / TypeScript / Rust 客户端 SDK
-- [x] MCP Server（AI Agent 集成）
-- [x] 33 个规则模板（ERC-20/721/1155、Permit、DEX、Safe、4337 等）
-- [x] 多链矩阵 Preset（USDC、Uniswap V2/V3/V4）
-- [x] OFAC 动态黑名单
-- [x] 实时管理员安全告警
-- [x] EIP-4337 账户抽象支持
-- [x] RBAC 规则所有权（每条规则有 owner/applied_to/status）
-- [x] CLI `evm` 命令结构（sign/rule/signer，多链可扩展架构）
-- [x] 交易模拟引擎（经 RPC 网关的 eth_simulateV1）
-- [x] Signer 所有权与访问控制（owner-only 审批，grant/revoke 访问）
-- [x] Permit/Permit2 Spender 白名单（fail-closed，allowed_spenders 配置）
-- [x] 请求管理 CLI（list/get/approve/reject/preview-rule）
-- [x] JS Client SDK v0.0.4（SimulateService, executeBatch, signer 访问控制）
-- [x] MCP Server v0.0.5（simulate, broadcast, guard resume 工具）
-
-### 进行中：Signer 所有权与访问控制
-
-Signer 级别的所有权模型 — 每个 signer 有独立的 owner 和显式 access list。即使 admin key 泄漏，也只影响 admin 自己的 signer，不会波及其他人的资产。详见[设计文档](docs/features/signer-ownership-access-control.md)。
-
-- [ ] **Phase 1**：Signer 所有权 — signer 绑定 owner，仅 owner 可签名/解锁/锁定
-- [ ] **Phase 2**：访问列表 — owner 授权其他 API key 使用 signer，HD Wallet 继承
-- [ ] **Phase 3**：生命周期安全 — 所有权转移、级联删除、审批门控、资源限额
-- [ ] **Phase 4a**：API Key 加密存储 — Ed25519 keystore 密码加密（基于 ethsig）
-- [ ] **Phase 4b**：内部转账规则 — same_owner 作用域，多租户 signer 隔离
-
-### 未来
-
-- [ ] 自动发现委托（零配置规则组合）
-- [ ] Solana 链支持
-- [ ] Cosmos 链支持
-- [ ] Bitcoin 链支持
-- [ ] Web 控制台
-- [ ] MPC / TSS 集成
+| [测试指南](docs/testing.md) | 单元测试、E2E、规则校验 |
 
 ## 许可证
 

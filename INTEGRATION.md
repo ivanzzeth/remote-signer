@@ -473,8 +473,7 @@ await client.approveRequest('request-id', { approved: false });
 
 ## Additional Resources
 
-- [API Documentation](docs/api.md)
-- [Architecture Overview](docs/architecture.md)
+- [Architecture Overview](ARCHITECTURE.md)
 - [JavaScript Client README](./pkg/js-client/README.md)
 - [Rust SDK README](./pkg/rs-client/README.md)
 - [MCP Server README](./pkg/mcp-server/README.md)
