@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -186,13 +187,14 @@ func (h *TemplateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Determine if this is a list request or a specific template request
-	// Path: /api/v1/templates or /api/v1/templates/{id} or /api/v1/templates/{id}/instantiate
-	path := strings.TrimPrefix(r.URL.Path, "/api/v1/templates")
-	path = strings.TrimPrefix(path, "/")
+	// Path: /api/v1/templates or /api/v1/templates/{id} or /api/v1/templates/{id}/instantiate.
+	// EscapedPath instead of Path so file-stem IDs containing '/'
+	// (v0.3 Registry: "evm/erc20") round-trip through the SDK's
+	// encodeURIComponent unchanged.
+	rawPath := strings.TrimPrefix(r.URL.EscapedPath(), "/api/v1/templates")
+	rawPath = strings.TrimPrefix(rawPath, "/")
 
-	if path == "" {
-		// Wallet operations: GET /api/v1/templates or POST /api/v1/templates
+	if rawPath == "" {
 		switch r.Method {
 		case http.MethodGet:
 			h.listTemplates(w, r)
@@ -204,9 +206,19 @@ func (h *TemplateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check for /instantiate sub-path
-	if strings.HasSuffix(path, "/instantiate") {
-		templateID := strings.TrimSuffix(path, "/instantiate")
+	encodedID := rawPath
+	sub := ""
+	if strings.HasSuffix(rawPath, "/instantiate") {
+		encodedID = strings.TrimSuffix(rawPath, "/instantiate")
+		sub = "instantiate"
+	}
+	templateID, err := url.PathUnescape(encodedID)
+	if err != nil {
+		h.writeError(w, "invalid template id", http.StatusBadRequest)
+		return
+	}
+
+	if sub == "instantiate" {
 		if r.Method == http.MethodPost {
 			h.instantiateTemplate(w, r, templateID)
 		} else {
@@ -215,12 +227,6 @@ func (h *TemplateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check for /revoke sub-path (on instance rule, not template)
-	// This is handled separately: POST /api/v1/templates/instances/{ruleID}/revoke
-	// But for simplicity, we handle it under the template handler
-
-	// Specific template operations: /api/v1/templates/{id}
-	templateID := path
 	switch r.Method {
 	case http.MethodGet:
 		h.getTemplate(w, r, templateID)

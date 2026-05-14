@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -125,10 +126,17 @@ func (h *PresetHandler) SetAuditLogger(al *audit.AuditLogger) {
 }
 
 // ServeHTTP routes /api/v1/presets and /api/v1/presets/{id}/...
+//
+// v0.3 preset IDs are file stems and contain '/' (e.g. "evm/weth"),
+// which the JS SDK passes through encodeURIComponent → "evm%2Fweth"
+// before sending. Using r.URL.EscapedPath here keeps the encoded form
+// so we can split on a literal '/' boundary (the route separator)
+// without colliding with the slash inside the ID. The ID is then
+// PathUnescape'd before lookup.
 func (h *PresetHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/api/v1/presets")
-	path = strings.Trim(path, "/")
-	if path == "" {
+	rawPath := strings.TrimPrefix(r.URL.EscapedPath(), "/api/v1/presets")
+	rawPath = strings.Trim(rawPath, "/")
+	if rawPath == "" {
 		switch r.Method {
 		case http.MethodGet:
 			h.list(w, r)
@@ -137,9 +145,20 @@ func (h *PresetHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	parts := strings.SplitN(path, "/", 2)
-	id := parts[0]
-	if len(parts) == 1 {
+	// Detect known sub-actions (just /apply for now). Anything matching
+	// "<id>/apply" treats everything before "/apply" as the encoded ID.
+	encodedID := rawPath
+	sub := ""
+	if strings.HasSuffix(rawPath, "/apply") {
+		encodedID = strings.TrimSuffix(rawPath, "/apply")
+		sub = "apply"
+	}
+	id, err := url.PathUnescape(encodedID)
+	if err != nil {
+		h.writeError(w, "invalid preset id", http.StatusBadRequest)
+		return
+	}
+	if sub == "" {
 		if r.Method != http.MethodGet {
 			h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -147,8 +166,7 @@ func (h *PresetHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.detail(w, r, id)
 		return
 	}
-	switch parts[1] {
-	case "apply":
+	if sub == "apply" {
 		if r.Method != http.MethodPost {
 			h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
