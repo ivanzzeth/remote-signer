@@ -385,8 +385,6 @@ func (h *PresetHandler) apply(w http.ResponseWriter, r *http.Request, id string)
 	}
 	presetVars, _ := decodeStringMap(p.Variables)
 	overrides, _ := decodeOperatorOverrides(p.OperatorOverrides)
-	budget, _ := decodeAnyMap(p.Budget)
-	schedule, _ := decodeAnyMap(p.Schedule)
 
 	// Required overrides that the operator didn't supply fail apply
 	// early — surfaces a clearer error than a deeper template-level
@@ -411,6 +409,32 @@ func (h *PresetHandler) apply(w http.ResponseWriter, r *http.Request, id string)
 	for k, v := range body.Variables {
 		mergedVars[k] = v
 	}
+
+	// Substitute ${var} placeholders in budget and schedule before
+	// decoding — preset YAML commonly writes
+	//   schedule: { period: "${budget_period}" }
+	//   budget:   { unit: "${chain_id}:${token_address}" }
+	// and the legacy ParsePresetFile resolved those at parse time. The
+	// substitution map includes the preset's chain scope (chain_id /
+	// chain_type) so unit-style fields resolve without the operator
+	// having to redeclare them as variables.
+	//
+	// Variables inside the templates' own config (the rule body) get
+	// substituted later by the template service when the instance is
+	// created; this pass only handles preset-level fields.
+	mergedVarsStrings := mergeForSubstitution(mergedVars, p)
+	budgetBytes, err := service.SubstituteVariables(p.Budget, mergedVarsStrings)
+	if err != nil {
+		h.writeError(w, fmt.Sprintf("substitute preset budget: %s", err.Error()), http.StatusBadRequest)
+		return
+	}
+	scheduleBytes, err := service.SubstituteVariables(p.Schedule, mergedVarsStrings)
+	if err != nil {
+		h.writeError(w, fmt.Sprintf("substitute preset schedule: %s", err.Error()), http.StatusBadRequest)
+		return
+	}
+	budget, _ := decodeAnyMap(budgetBytes)
+	schedule, _ := decodeAnyMap(scheduleBytes)
 
 	// Build one CreateInstanceRequest per template_id. They all share
 	// the merged variables, budget, schedule, and chain scope — that's
@@ -617,6 +641,31 @@ func decodeOperatorOverrides(b []byte) ([]types.OperatorOverride, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+// mergeForSubstitution builds the lookup map fed to
+// service.SubstituteVariables when resolving placeholders inside the
+// preset's budget/schedule fields. Starts from the operator-merged
+// variables and adds the preset's chain scope keys (chain_id /
+// chain_type) — those aren't user-supplied variables but presets
+// commonly reference them (`unit: "${chain_id}:${token_address}"`).
+// Pre-existing entries from mergedVars win so the operator can override
+// even chain-scope keys if they really want to (matches legacy
+// behaviour of ParsePresetFile).
+func mergeForSubstitution(mergedVars map[string]string, preset *types.RulePreset) map[string]string {
+	out := make(map[string]string, len(mergedVars)+2)
+	if preset != nil {
+		if preset.ChainID != "" {
+			out["chain_id"] = preset.ChainID
+		}
+		if preset.ChainType != "" {
+			out["chain_type"] = string(preset.ChainType)
+		}
+	}
+	for k, v := range mergedVars {
+		out[k] = v
+	}
+	return out
 }
 
 func cloneStringMap(in map[string]string) map[string]string {
