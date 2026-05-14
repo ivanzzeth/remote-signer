@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { APIError, type BudgetEntry } from "remote-signer-client";
 import {
   Badge,
@@ -9,6 +11,7 @@ import {
   shorten,
 } from "../components/ui";
 import { useApi } from "../lib/useApi";
+import { BudgetForm } from "../components/BudgetForm";
 
 /**
  * Operator budgets overview. Single GET /api/v1/evm/budgets call: the
@@ -23,13 +26,25 @@ import { useApi } from "../lib/useApi";
  * accrues against signers under it).
  */
 export function Budgets() {
+  const [creating, setCreating] = useState(false);
+  const [searchParams] = useSearchParams();
+  // signer filter — set when arriving from a sign request detail page's
+  // simulation-approval link, so the operator lands on the row that
+  // approved their request without scanning.
+  const signerFilter = (searchParams.get("signer") || "").toLowerCase();
+
   const { data, loading, error, reload } = useApi(
     (c) => c.evm.budgets.list(),
     [],
   );
 
   const entries = data?.budgets ?? [];
-  const sortedByHot = [...entries].sort(
+  const filtered = signerFilter
+    ? entries.filter((e) =>
+        (e.signer_address || "").toLowerCase() === signerFilter,
+      )
+    : entries;
+  const sortedByHot = [...filtered].sort(
     (a, b) => pctUsed(b) - pctUsed(a) || compareName(a, b),
   );
   const ruleRows = sortedByHot.filter((e) => e.kind === "rule");
@@ -41,22 +56,66 @@ export function Budgets() {
         title="Budgets"
         subtitle="Spend limits the daemon debits as it signs — by rule and by simulation fallback."
         actions={
-          <button
-            type="button"
-            onClick={reload}
-            className="rounded-md border border-ink-200 px-3 py-1 text-xs text-ink-700 hover:bg-ink-100"
-          >
-            Refresh
-          </button>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={reload}
+              className="rounded-md border border-ink-200 px-3 py-1 text-xs text-ink-700 hover:bg-ink-100"
+            >
+              Refresh
+            </button>
+            <button
+              type="button"
+              onClick={() => setCreating((v) => !v)}
+              className="rounded-md bg-accent-500 px-3 py-1 text-xs font-medium text-white hover:bg-accent-600"
+              data-testid="budget-new"
+            >
+              {creating ? "Cancel" : "New budget"}
+            </button>
+          </div>
         }
       />
+
+      {signerFilter && (
+        <div className="flex items-center gap-2 rounded-md border border-ink-200 bg-white px-3 py-2 text-xs text-ink-700">
+          <span>
+            Filtered by signer{" "}
+            <span className="font-mono">{shorten(signerFilter)}</span>
+          </span>
+          <Link
+            to="/budgets"
+            className="ml-auto text-accent-600 hover:text-accent-500"
+          >
+            clear
+          </Link>
+        </div>
+      )}
+
+      {creating && (
+        <Card title="New budget">
+          <BudgetForm
+            mode="create"
+            onCancel={() => setCreating(false)}
+            onSaved={() => {
+              setCreating(false);
+              reload();
+            }}
+          />
+        </Card>
+      )}
 
       {loading && <Loading />}
       {error && <ErrorBanner msg={error} />}
 
-      {data && entries.length === 0 && (
+      {data && filtered.length === 0 && (
         <Card>
-          <Empty msg="No budgets recorded. They appear after a rule with a budget config matches a request, or after the simulation fallback debits a signer." />
+          <Empty
+            msg={
+              signerFilter
+                ? "No budgets match this signer filter yet — clear the filter to see all rows."
+                : "No budgets recorded. Create one with the New button, or wait for a rule/simulation to trigger one."
+            }
+          />
         </Card>
       )}
 
@@ -112,9 +171,14 @@ function BudgetTable({
 }
 
 function BudgetRowView({ entry }: { entry: BudgetEntry }) {
+  const navigate = useNavigate();
   const pct = pctUsed(entry);
   return (
-    <tr className="border-t border-ink-100">
+    <tr
+      className="cursor-pointer border-t border-ink-100 hover:bg-ink-50"
+      onClick={() => navigate(`/budgets/${encodeURIComponent(entry.id)}`)}
+      data-testid={`budget-row-${entry.id}`}
+    >
       <td className="py-1 pr-3 align-top">
         <PrimaryCell entry={entry} />
       </td>

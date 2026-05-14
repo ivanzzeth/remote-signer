@@ -4,6 +4,7 @@ import { Layout } from "./components/Layout";
 import { getCredentials, subscribeAuth } from "./lib/auth";
 import { ApiKeys } from "./pages/ApiKeys";
 import { Audit } from "./pages/Audit";
+import { BudgetDetail } from "./pages/BudgetDetail";
 import { Budgets } from "./pages/Budgets";
 import { Dashboard } from "./pages/Dashboard";
 import { HDWallets } from "./pages/HDWallets";
@@ -53,6 +54,7 @@ export function App() {
         <Route path="/requests/:id" element={<RequestDetail />} />
         <Route path="/rules" element={<Rules />} />
         <Route path="/budgets" element={<Budgets />} />
+        <Route path="/budgets/:id" element={<BudgetDetail />} />
         <Route path="/api-keys" element={<ApiKeys />} />
         <Route path="/audit" element={<Audit />} />
         <Route path="/settings" element={<Settings />} />
