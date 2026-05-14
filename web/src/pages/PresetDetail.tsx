@@ -85,9 +85,14 @@ export function PresetDetail() {
           {data.template_ids.length > 0 && (
             <Card title="Templates referenced">
               <ul className="space-y-1 text-sm">
-                {data.template_ids.map((tn) => (
-                  <li key={tn} className="font-mono text-xs text-ink-700">
-                    {tn}
+                {data.template_ids.map((tid) => (
+                  <li key={tid}>
+                    <Link
+                      to={`/templates/${encodeURIComponent(tid)}`}
+                      className="font-mono text-xs text-accent-600 hover:text-accent-500"
+                    >
+                      {tid} →
+                    </Link>
                   </li>
                 ))}
               </ul>
