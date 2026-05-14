@@ -5,6 +5,7 @@ import {
   type PresetDetail as PresetDetailDTO,
   type PresetVariableDetail,
 } from "remote-signer-client";
+import { AppliedToPicker } from "../components/AppliedToPicker";
 import {
   Badge,
   Card,
@@ -125,7 +126,7 @@ function ApplyForm({
     }
     return out;
   });
-  const [appliedTo, setAppliedTo] = useState("");
+  const [appliedTo, setAppliedTo] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<ApplyResult[] | null>(null);
@@ -148,13 +149,9 @@ function ApplyForm({
           cleanVars[v.name] = current;
         }
       }
-      const cleanApplied = appliedTo
-        .split(",")
-        .map((s) => s.trim())
-        .filter((s) => s !== "");
       const resp = await c.presets.apply(preset.id, {
         variables: cleanVars,
-        applied_to: cleanApplied.length > 0 ? cleanApplied : undefined,
+        applied_to: appliedTo.length > 0 ? appliedTo : undefined,
       });
       const items = resp.results.map((r) => ({
         ruleID: (r.rule as { id?: string }).id || "(unknown)",
@@ -229,16 +226,9 @@ function ApplyForm({
 
         <FormRow
           label="Applied to"
-          help="Comma-separated API key IDs to scope the rule(s) to; empty = current key"
+          help="API keys the rule(s) will be scoped to. Pick from existing keys, or add the special values 'self' (current key) or '*' (all keys, admin only). Empty list = current key."
         >
-          <input
-            type="text"
-            value={appliedTo}
-            onChange={(e) => setAppliedTo(e.target.value)}
-            placeholder="self / *  / key-id"
-            className="w-full rounded-md border border-ink-300 px-2 py-1 font-mono text-sm"
-            data-testid="preset-form-applied-to"
-          />
+          <AppliedToPicker value={appliedTo} onChange={setAppliedTo} />
         </FormRow>
 
         <div className="flex gap-2 border-t border-ink-100 pt-3">
