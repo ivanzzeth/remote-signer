@@ -106,9 +106,86 @@ function TemplateView({
         </FieldGrid>
       </Card>
 
+      <RulesCard tmpl={tmpl} />
+
       <InstantiateForm tmpl={tmpl} onApplied={onApplied} />
     </>
   );
+}
+
+// RulesCard surfaces the template's `config.rules[]` array so the
+// operator can see exactly what sub-rules this template will expand
+// into when applied. The Mode column on the list view shows an
+// aggregate ("whitelist" / "blocklist" / "mixed"); this card explains
+// the aggregate by listing each rule's name, type, and individual mode.
+function RulesCard({ tmpl }: { tmpl: Template }) {
+  const rules = extractRules(tmpl);
+  if (rules.length === 0) {
+    return null;
+  }
+  return (
+    <Card title={`Rules (${rules.length})`}>
+      <ul className="divide-y divide-ink-100 text-sm">
+        {rules.map((r, i) => (
+          <li key={r.id || r.name || i} className="py-2">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="text-ink-900">{r.name || r.id || `rule ${i + 1}`}</div>
+                {r.description && (
+                  <div className="text-[11px] text-ink-500">{r.description}</div>
+                )}
+                {r.id && r.name && (
+                  <div className="font-mono text-[10px] text-ink-500">{r.id}</div>
+                )}
+              </div>
+              <div className="flex shrink-0 gap-1.5">
+                {r.mode && (
+                  <Badge tone={r.mode === "blocklist" ? "red" : "neutral"}>{r.mode}</Badge>
+                )}
+                {r.type && (
+                  <span className="rounded bg-ink-100 px-1.5 py-0.5 font-mono text-[10px] text-ink-700">
+                    {r.type}
+                  </span>
+                )}
+              </div>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
+interface SubRule {
+  id?: string;
+  name?: string;
+  type?: string;
+  mode?: string;
+  description?: string;
+  enabled?: boolean;
+}
+
+// extractRules pulls the rules array out of the template's config blob.
+// The server stores it as opaque JSON (Config is map<string,any>), so
+// we navigate the shape defensively rather than relying on a typed
+// SDK field.
+function extractRules(tmpl: Template): SubRule[] {
+  const cfg = tmpl.config as { rules?: unknown } | undefined;
+  if (!cfg || !Array.isArray(cfg.rules)) return [];
+  return cfg.rules.map((r) => {
+    if (r && typeof r === "object") {
+      const o = r as Record<string, unknown>;
+      return {
+        id: typeof o.id === "string" ? o.id : undefined,
+        name: typeof o.name === "string" ? o.name : undefined,
+        type: typeof o.type === "string" ? o.type : undefined,
+        mode: typeof o.mode === "string" ? o.mode : undefined,
+        description: typeof o.description === "string" ? o.description : undefined,
+        enabled: typeof o.enabled === "boolean" ? o.enabled : undefined,
+      };
+    }
+    return {};
+  });
 }
 
 interface InstantiateState {
