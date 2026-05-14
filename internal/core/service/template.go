@@ -682,16 +682,16 @@ func validateVariables(defs []types.TemplateVariable, vars map[string]string) er
 // substitution happens later in R5's typed substituter — this is the
 // legacy validator kept alive while the type system migrates.
 func validateVariableType(name string, varType types.VariableType, value string) error {
-	switch string(varType) {
-	case "address":
+	switch varType {
+	case types.VarTypeAddress:
 		if !isValidAddress(value) {
 			return fmt.Errorf("variable '%s': invalid address format '%s'", name, value)
 		}
-	case "uint256":
+	case types.VarTypeBigInt:
 		if !isValidUint256(value) {
-			return fmt.Errorf("variable '%s': invalid uint256 format '%s'", name, value)
+			return fmt.Errorf("variable '%s': invalid bigint format '%s'", name, value)
 		}
-	case "address_list":
+	case types.VarTypeAddressList:
 		parts := strings.Split(value, ",")
 		for _, part := range parts {
 			part = strings.TrimSpace(part)
@@ -699,15 +699,15 @@ func validateVariableType(name string, varType types.VariableType, value string)
 				return fmt.Errorf("variable '%s': invalid address in list '%s'", name, part)
 			}
 		}
-	case "uint256_list":
+	case types.VarTypeBigIntList:
 		parts := strings.Split(value, ",")
 		for _, part := range parts {
 			part = strings.TrimSpace(part)
 			if part != "" && !isValidUint256(part) {
-				return fmt.Errorf("variable '%s': invalid uint256 in list '%s'", name, part)
+				return fmt.Errorf("variable '%s': invalid bigint in list '%s'", name, part)
 			}
 		}
-	case "string":
+	case types.VarTypeString:
 		// Any string is valid
 	default:
 		// Unknown type, skip validation
