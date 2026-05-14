@@ -88,8 +88,13 @@ func AuthMiddleware(verifier *auth.Verifier, logger *slog.Logger, auditLogger *a
 			// Restore body for downstream handlers
 			r.Body = io.NopCloser(bytes.NewBuffer(body))
 
-			// Build full path with query string (client signs with query params)
-			path := r.URL.Path
+			// Build full path with query string (client signs with query params).
+			// Use EscapedPath() not Path so percent-encoded segments survive —
+			// v0.3 preset/template IDs contain '/' (e.g. "evm/weth"), which the
+			// JS SDK passes through encodeURIComponent → "evm%2Fweth". Go's
+			// r.URL.Path decodes that back to "/", so signing on Path here
+			// would always disagree with the client's encoded form.
+			path := r.URL.EscapedPath()
 			if r.URL.RawQuery != "" {
 				path = path + "?" + r.URL.RawQuery
 			}
