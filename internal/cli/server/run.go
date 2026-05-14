@@ -4,48 +4,32 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
-	"github.com/joho/godotenv"
-	"github.com/rs/zerolog"
-	"gorm.io/gorm"
-
-	"github.com/ivanzzeth/remote-signer/internal/api"
-	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/audit"
-	"github.com/ivanzzeth/remote-signer/internal/blocklist"
 	"github.com/ivanzzeth/remote-signer/internal/chain"
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/config"
-	"github.com/ivanzzeth/remote-signer/internal/core/auth"
-	"github.com/ivanzzeth/remote-signer/internal/core/registry"
 	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/statemachine"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/homepath"
-	"github.com/ivanzzeth/remote-signer/internal/logger"
 	"github.com/ivanzzeth/remote-signer/internal/notify"
-	"github.com/ivanzzeth/remote-signer/internal/ruleconfig"
-	"github.com/ivanzzeth/remote-signer/internal/settings"
 	"github.com/ivanzzeth/remote-signer/internal/simulation"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
-	"github.com/ivanzzeth/remote-signer/internal/version"
 )
 
 // Run executes the server daemon with the given args (not including argv[0]).
 // Returns a non-nil error on any setup or runtime failure. Blocks until the
 // daemon shuts down cleanly via signal or until a fatal error occurs.
 func Run(args []string) error {
+	// ---- Flag parsing ----
 	fs := flag.NewFlagSet("remote-signer server start", flag.ContinueOnError)
 	configFlag := fs.String("config", "", "path to config file (default: ~/.remote-signer/config.yaml, falling back to ./config.yaml; auto-generated on first run)")
 	envFile := fs.String("env", ".env", "path to .env file (optional, ignored if not exists)")
@@ -56,26 +40,11 @@ func Run(args []string) error {
 		return err
 	}
 
-	// Load .env file if exists (for development)
-	// In production, environment variables should be set directly
-	if err := godotenv.Load(*envFile); err != nil {
-		// Only log if the file exists but failed to load
-		if _, statErr := os.Stat(*envFile); statErr == nil {
-			return fmt.Errorf("failed to load .env file: %w", err)
-		}
-		// .env file not found is OK - use system environment variables
-	}
-
-	// Ensure ~/.remote-signer exists (0700) before resolving the config path so
-	// auto-generated config and bootstrap key files land in a private dir.
+	// ---- Environment and config loading ----
+	loadEnvFile(*envFile)
 	if _, err := homepath.EnsureHome(); err != nil {
 		return fmt.Errorf("ensure remote-signer home: %w", err)
 	}
-
-	// Resolve the config file:
-	//   -config flag → $REMOTE_SIGNER_CONFIG → ~/.remote-signer/config.yaml → ./config.yaml
-	// On the first launch nothing exists yet; write a minimal default to the
-	// home dir so the user has something to edit later.
 	configPath, exists, err := homepath.ResolveConfigPath(*configFlag)
 	if err != nil {
 		return fmt.Errorf("resolve config path: %w", err)
@@ -86,15 +55,10 @@ func Run(args []string) error {
 		}
 		fmt.Fprintf(os.Stderr, "[INIT] wrote default config to %s\n", configPath)
 	}
-
-	// Load configuration
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
-
-	// If the config left DSN empty (e.g. operator hand-trimmed the file),
-	// fall back to the SQLite path under the home dir so the daemon still boots.
 	if cfg.Database.DSN == "" {
 		dsn, err := homepath.DefaultSQLiteDSN()
 		if err != nil {
@@ -103,153 +67,37 @@ func Run(args []string) error {
 		cfg.Database.DSN = dsn
 	}
 
-	// Initialize zerolog logger (for notify module)
-	zerologLevel, err := parseZerologLevel(cfg.Logger.Level)
-	if err != nil {
-		return fmt.Errorf("failed to parse log level: %w", err)
-	}
-	logger.Init(zerologLevel, cfg.Logger.Pretty)
-
-	// Initialize slog logger (for rest of application)
-	slogLevel, err := parseSlogLevel(cfg.Logger.Level)
-	if err != nil {
-		return fmt.Errorf("failed to parse log level: %w", err)
-	}
-	var slogHandler slog.Handler
-	if cfg.Logger.Pretty {
-		slogHandler = slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slogLevel})
-	} else {
-		slogHandler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slogLevel})
-	}
-	log := slog.New(slogHandler)
-
+	// ---- Logger ----
+	log := initLogging(cfg.Logger.Level, cfg.Logger.Pretty)
 	log.Info("Starting remote-signer service")
-
-	// Security: warn if swap is enabled (private keys could be swapped to disk)
 	checkSwapEnabled(log)
-	// Security: disable core dumps, lock memory pages to prevent key leakage
 	hardenProcessMemory(log)
 
-	// Initialize database
+	// ---- Database + repositories ----
 	db, err := storage.NewDB(cfg.Database)
 	if err != nil {
 		return fmt.Errorf("failed to initialize database: %w", err)
 	}
 	log.Info("Database connected")
-
-	// Initialize repositories
-	requestRepo, err := storage.NewGormRequestRepository(db)
+	repos, err := initRepositories(db, log)
 	if err != nil {
-		return fmt.Errorf("failed to create request repository: %w", err)
+		return err
 	}
 
-	ruleRepo, err := storage.NewGormRuleRepository(db)
-	if err != nil {
-		return fmt.Errorf("failed to create rule repository: %w", err)
-	}
-
-	apiKeyRepo, err := storage.NewGormAPIKeyRepository(db)
-	if err != nil {
-		return fmt.Errorf("failed to create apikey repository: %w", err)
-	}
-
-	auditRepo, err := storage.NewGormAuditRepository(db)
-	if err != nil {
-		return fmt.Errorf("failed to create audit repository: %w", err)
-	}
-
-	signerOwnershipRepo, err := storage.NewGormSignerOwnershipRepository(db)
-	if err != nil {
-		return fmt.Errorf("failed to create signer ownership repository: %w", err)
-	}
-	signerRepo, err := storage.NewGormSignerRepository(db)
-	if err != nil {
-		return fmt.Errorf("failed to create signer repository: %w", err)
-	}
-
-	signerAccessRepo, err := storage.NewGormSignerAccessRepository(db)
-	if err != nil {
-		return fmt.Errorf("failed to create signer access repository: %w", err)
-	}
-
-	// Initialize wallet repository (optional routes: /api/v1/wallets*)
-	walletRepo, err := storage.NewGormWalletRepository(db)
-	if err != nil {
-		return fmt.Errorf("failed to create wallet repository: %w", err)
-	}
-
-	// Initialize audit logger early so config sync can record rule changes
-	auditLogger, err := audit.NewAuditLogger(auditRepo, log)
+	// ---- Audit logger ----
+	auditLogger, err := audit.NewAuditLogger(repos.auditRepo, log)
 	if err != nil {
 		return fmt.Errorf("failed to create audit logger: %w", err)
 	}
 
-	// Bring up the runtime-mutable settings store. PR7a wires the Manager but
-	// no consumer reads from it yet — PR7b/c/d will progressively switch the
-	// security middleware, notify dispatcher, and EVM subsystems to read here
-	// instead of from cfg.* . The background poll keeps replicas in sync at
-	// 5s cadence so admin-initiated edits propagate without restart.
-	settingsStore, err := settings.NewGormStore(db)
+	// ---- Settings store ----
+	settingsMgr, err := initSettingsStore(db, cfg, log)
 	if err != nil {
-		return fmt.Errorf("failed to create settings store: %w", err)
+		return err
 	}
-	// One-shot seed: lift the security knobs out of cfg.Security into
-	// system_settings on first launch so existing YAML-driven deployments do
-	// not lose behaviour. Subsequent launches read the row directly and
-	// ignore cfg.Security.
-	yamlSecurity := securityYAMLView(cfg)
-	seedSnapshot := settings.SecurityFromConfigValues(yamlSecurity)
-	if err := settings.SeedSecurity(context.Background(), settingsStore, seedSnapshot); err != nil {
-		return fmt.Errorf("failed to seed security settings: %w", err)
-	}
-	if err := settings.SeedNotify(context.Background(), settingsStore, notifyYAMLToSnapshot(&cfg.Notify, &cfg.NotifyChannel)); err != nil {
-		return fmt.Errorf("failed to seed notify settings: %w", err)
-	}
-	if err := settings.SeedAuditMonitor(context.Background(), settingsStore, auditMonitorToSnapshot(cfg.AuditMonitor)); err != nil {
-		return fmt.Errorf("failed to seed audit_monitor settings: %w", err)
-	}
-	// Web UI defaults to enabled — operators who want a headless deployment
-	// flip it off with `remote-signer settings set web enabled=false`. The
-	// catch-all "/" handler reads this snapshot every request, so changes
-	// take effect on the next Manager refresh cycle.
-	if err := settings.SeedWeb(context.Background(), settingsStore, settings.DefaultWeb()); err != nil {
-		return fmt.Errorf("failed to seed web settings: %w", err)
-	}
-	if err := settings.SeedBlocklist(context.Background(), settingsStore, blocklistToSnapshot(cfg.DynamicBlocklist)); err != nil {
-		return fmt.Errorf("failed to seed blocklist settings: %w", err)
-	}
-	if cfg.Chains.EVM != nil {
-		if err := settings.SeedFoundry(context.Background(), settingsStore, foundryToSnapshot(cfg.Chains.EVM.Foundry)); err != nil {
-			return fmt.Errorf("failed to seed foundry settings: %w", err)
-		}
-		if err := settings.SeedSimulation(context.Background(), settingsStore, simulationToSnapshot(cfg.Chains.EVM.Simulation)); err != nil {
-			return fmt.Errorf("failed to seed simulation settings: %w", err)
-		}
-		if err := settings.SeedRPCGateway(context.Background(), settingsStore, rpcGatewayToSnapshot(cfg.Chains.EVM.RPCGateway)); err != nil {
-			return fmt.Errorf("failed to seed rpc_gateway settings: %w", err)
-		}
-		if err := settings.SeedMaterialCheck(context.Background(), settingsStore, materialCheckToSnapshot(cfg.Chains.EVM.MaterialCheck)); err != nil {
-			return fmt.Errorf("failed to seed material_check settings: %w", err)
-		}
-	}
-	settingsMgr := settings.NewManager(settingsStore, log)
-	if err := settingsMgr.Reload(context.Background()); err != nil {
-		return fmt.Errorf("failed to load settings: %w", err)
-	}
-	// From here on, mgr.* groups are the source of truth. Overlay snapshots
-	// back onto cfg so the existing downstream wiring (rate limiter, IP
-	// whitelist, signer auto-lock, approval guard, notify service, budget
-	// alerter, audit monitor, Solidity evaluator, simulator, JS RPC
-	// gateway, blocklist syncer) picks up DB values without touching every
-	// read site. PR7e/g will retire cfg.* in favour of mgr.* reads.
-	applySecuritySnapshot(cfg, settingsMgr.Security())
-	applyNotifySnapshot(&cfg.Notify, &cfg.NotifyChannel, settingsMgr.Notify())
-	applyAuditMonitorSnapshot(cfg, settingsMgr.AuditMonitor())
-	applyBlocklistSnapshot(cfg, settingsMgr.Blocklist())
-	applyEVMSnapshots(cfg, settingsMgr.Foundry(), settingsMgr.Simulation(), settingsMgr.RPCGateway(), settingsMgr.MaterialCheck())
 
-	// Initialize API keys from config
-	apiKeyInit, err := config.NewAPIKeyInitializer(apiKeyRepo, log)
+	// ---- API keys ----
+	apiKeyInit, err := config.NewAPIKeyInitializer(repos.apiKeyRepo, log)
 	if err != nil {
 		return fmt.Errorf("failed to create API key initializer: %w", err)
 	}
@@ -257,113 +105,59 @@ func Run(args []string) error {
 	if err := apiKeyInit.SyncFromConfig(context.Background(), cfg.APIKeys); err != nil {
 		return fmt.Errorf("failed to sync API keys from config: %w", err)
 	}
-
-	// Auto-bootstrap an admin Ed25519 keypair when the api_keys table is
-	// empty so the operator can use a fresh single-binary install without any
-	// pre-flight steps. Subsequent launches are no-ops; the private key is
-	// only written to disk, never to logs or stderr.
 	adminPrivPath, adminPubPath, err := homepath.AdminKeyPaths()
 	if err != nil {
 		return fmt.Errorf("resolve admin key paths: %w", err)
 	}
-	if err := bootstrapAdminKeyIfNeeded(context.Background(), apiKeyRepo, adminPrivPath, adminPubPath, cfg.Security.RateLimitDefault, log); err != nil {
+	if err := bootstrapAdminKeyIfNeeded(context.Background(), repos.apiKeyRepo, adminPrivPath, adminPubPath, cfg.Security.RateLimitDefault, log); err != nil {
 		return fmt.Errorf("bootstrap admin api key: %w", err)
 	}
 
-	// Initialize template repository
-	templateRepo, err := storage.NewGormTemplateRepository(db)
+	// Auto-bootstrap an agent Ed25519 keypair independently from the
+	// admin key so agents can authenticate without an operator pre-flight.
+	agentPrivPath, agentPubPath, err := homepath.AgentKeyPaths()
 	if err != nil {
-		return fmt.Errorf("failed to create template repository: %w", err)
+		return fmt.Errorf("resolve agent key paths: %w", err)
+	}
+	if err := bootstrapAgentKeyIfNeeded(context.Background(), repos.apiKeyRepo, agentPrivPath, agentPubPath, cfg.Security.RateLimitDefault, log); err != nil {
+		return fmt.Errorf("bootstrap agent api key: %w", err)
 	}
 
-	// Initialize budget repository (for template instances)
-	budgetRepo, err := storage.NewGormBudgetRepository(db)
+	// ---- Templates ----
+	templateInit, allTemplates, err := initTemplates(cfg, configPath, repos.templateRepo, auditLogger, log)
 	if err != nil {
-		return fmt.Errorf("failed to create budget repository: %w", err)
+		return err
 	}
 
-	// Initialize templates from config
-	templateInit, err := config.NewTemplateInitializer(templateRepo, log)
-	if err != nil {
-		return fmt.Errorf("failed to create template initializer: %w", err)
-	}
-	templateInit.SetConfigDir(filepath.Dir(configPath))
-	templateInit.SetAuditLogger(auditLogger)
-	// Merge in any templates discovered under templates_dir before
-	// sync. The shorthand expands to a {type:file,path:...} TemplateConfig
-	// per matching file so SyncFromConfig sees one unified list and
-	// existing dedup/conflict semantics apply.
-	allTemplates := cfg.Templates
-	if cfg.TemplatesDir != "" {
-		dirTemplates, dirErr := config.LoadTemplatesFromDir(cfg.TemplatesDir, filepath.Dir(configPath), log)
-		if dirErr != nil {
-			return fmt.Errorf("failed to enumerate templates_dir %q: %w", cfg.TemplatesDir, dirErr)
-		}
-		allTemplates = append(allTemplates, dirTemplates...)
-		log.Info("templates_dir expanded", "dir", cfg.TemplatesDir, "count", len(dirTemplates))
-	}
-	if err := templateInit.SyncFromConfig(context.Background(), allTemplates); err != nil {
-		return fmt.Errorf("failed to sync templates from config: %w", err)
-	}
-
-	// Run the v0.3 Registry over rules/templates and rules/presets on
-	// disk. Templates land under types.RuleSourceFile so the legacy
-	// initializer's Source=config prune step does not touch them, and
-	// presets get a first-class DB row (the legacy path kept them on
-	// disk only). The Registry's directory roots default to cfg.TemplatesDir
-	// and cfg.Presets.Dir respectively, both resolved against the config
-	// file directory the same way the legacy paths are. Missing roots
-	// are tolerated — fresh installs without those dirs boot to an
-	// empty Registry rather than failing.
+	// ---- File-based registries ----
 	if err := syncRegistries(context.Background(), db, cfg, configPath, log); err != nil {
 		return fmt.Errorf("registry sync: %w", err)
 	}
 
-	// Initialize rules from config (with template expansion)
-	ruleInit, err := config.NewRuleInitializer(ruleRepo, log)
+	// Bootstrap the agent preset: on first launch, the Registry loaded
+	// evm/agent preset and template into the DB. Apply the preset (create
+	// rule instances owned by the agent key) if no agent rules exist yet.
+	presetRepo, err := storage.NewGormPresetRepository(db)
 	if err != nil {
-		return fmt.Errorf("failed to create rule initializer: %w", err)
+		return fmt.Errorf("failed to create preset repository: %w", err)
 	}
-	// Set config directory for resolving relative paths in rule files
-	ruleInit.SetConfigDir(filepath.Dir(configPath))
-	ruleInit.SetAuditLogger(auditLogger)
-	ruleInit.SetTemplateRepo(templateRepo)
-	ruleInit.SetBudgetRepo(budgetRepo)
-	// Expand template instance rules before syncing (type: "instance" → concrete rules)
-	loadedTemplates, err := templateInit.GetLoadedTemplates(cfg.Templates)
-	if err != nil {
-		return fmt.Errorf("failed to get loaded templates: %w", err)
-	}
-	expandedRules, err := config.ExpandInstanceRules(cfg.Rules, loadedTemplates)
-	if err != nil {
-		return fmt.Errorf("failed to expand instance rules: %w", err)
-	}
-	if err := ruleInit.SyncFromConfig(context.Background(), expandedRules); err != nil {
-		return fmt.Errorf("failed to sync rules from config: %w", err)
-	}
-	// Expand file-type rules so startup validation covers evm_js rules from external files.
-	// SyncFromConfig already expanded them into the DB, but expandedRules still has "file" stubs.
-	expandedRulesWithFiles, err := config.ExpandFileRules(expandedRules, filepath.Dir(configPath), log)
-	if err != nil {
-		return fmt.Errorf("failed to expand file rules for validation: %w", err)
+	if err := bootstrapAgentPresetIfNeeded(context.Background(), presetRepo, repos.templateRepo, repos.ruleRepo, repos.budgetRepo, log); err != nil {
+		return fmt.Errorf("bootstrap agent preset: %w", err)
 	}
 
-	// Validate that all delegate_to references point to existing rule IDs.
-	if err := config.ValidateDelegationTargets(expandedRulesWithFiles); err != nil {
-		return fmt.Errorf("delegation target validation failed: %w", err)
+	// ---- Rules ----
+	ruleInit, _, expandedRulesWithFiles, err := initRules(cfg, configPath, repos.ruleRepo, repos.budgetRepo, repos.templateRepo, templateInit, allTemplates, auditLogger, log)
+	if err != nil {
+		return err
 	}
 
-	// Initialize template service
-	templateService, err := service.NewTemplateService(templateRepo, ruleRepo, budgetRepo, log)
+	// ---- Template service ----
+	templateService, err := service.NewTemplateService(repos.templateRepo, repos.ruleRepo, repos.budgetRepo, log)
 	if err != nil {
 		return fmt.Errorf("failed to create template service: %w", err)
 	}
 
-	// =========================================================================
-	// RULE VALIDATION (BEFORE signer initialization to avoid password prompts)
-	// =========================================================================
-	// Validate Solidity expression rules FIRST, before loading signers.
-	// This ensures rule errors are caught before user needs to enter keystore passwords.
+	// ---- Rule validation (before signer init to avoid password prompts) ----
 	var solidityEval *evm.SolidityRuleEvaluator
 	var solidityValidator *evm.SolidityRuleValidator
 	if cfg.Chains.EVM != nil && cfg.Chains.EVM.Foundry.Enabled {
@@ -378,19 +172,15 @@ func Run(args []string) error {
 		}
 		log.Info("Solidity expression evaluator created (Foundry)")
 
-		// Create Solidity rule validator (for API rule validation)
 		solidityValidator, err = evm.NewSolidityRuleValidator(solidityEval, log)
 		if err != nil {
 			return fmt.Errorf("failed to create Solidity rule validator: %w", err)
 		}
 
-		// Validate all Solidity expression rules at startup
-		if err := validateSolidityRules(context.Background(), ruleRepo, solidityEval, log); err != nil {
+		if err := validateSolidityRules(context.Background(), repos.ruleRepo, solidityEval, log); err != nil {
 			return fmt.Errorf("rule validation failed: %w", err)
 		}
 	}
-
-	// Fail if config contains Solidity rules but Foundry is disabled (cannot validate them).
 	if solidityEval == nil {
 		for _, r := range expandedRulesWithFiles {
 			if r.Type == string(types.RuleTypeEVMSolidityExpression) && r.Enabled {
@@ -398,183 +188,48 @@ func Run(args []string) error {
 			}
 		}
 	}
-
-	// Validate evm_js rules at startup (same path as validate-rules; see docs/SECURITY_AUDIT_REPORT.md §4)
-	if err := validateEVMJSRulesAtStartup(context.Background(), expandedRulesWithFiles, ruleRepo, solidityEval, log); err != nil {
+	if err := validateEVMJSRulesAtStartup(context.Background(), expandedRulesWithFiles, repos.ruleRepo, solidityEval, log); err != nil {
 		return fmt.Errorf("evm_js rule validation failed: %w", err)
 	}
-
-	// Validate message_pattern rules at startup (same as validate-rules; fail if any invalid or test case fails)
-	if err := validateMessagePatternRulesAtStartup(context.Background(), ruleRepo, log); err != nil {
+	if err := validateMessagePatternRulesAtStartup(context.Background(), repos.ruleRepo, log); err != nil {
 		return fmt.Errorf("message_pattern rule validation failed: %w", err)
 	}
 
-	// =========================================================================
-	// SIGNER INITIALIZATION (after rule validation)
-	// =========================================================================
-
-	// Initialize chain registry
+	// ---- EVM signers ----
 	chainRegistry := chain.NewRegistry()
-
-	// Initialize EVM adapter and signer manager if enabled
 	var evmSignerManager evm.SignerManager
 	var evmAdapter *evm.EVMAdapter
 	if cfg.Chains.EVM != nil && cfg.Chains.EVM.Enabled {
-		// Provider-based signer initialization
-		evmRegistry := evm.NewEmptySignerRegistry()
-
-		// Check if any keystore or HD wallet requires stdin password
-		hasStdinKeystores := false
-		for _, ks := range cfg.Chains.EVM.Signers.Keystores {
-			if ks.Enabled && ks.PasswordStdin {
-				hasStdinKeystores = true
-				break
-			}
+		esm, adapter, sErr := initEVMSigners(cfg, repos, auditLogger, log)
+		if sErr != nil {
+			return sErr
 		}
-		if !hasStdinKeystores {
-			for _, hw := range cfg.Chains.EVM.Signers.HDWallets {
-				if hw.Enabled && hw.PasswordStdin {
-					hasStdinKeystores = true
-					break
-				}
-			}
-		}
-
-		pwProvider, err := evm.NewCompositePasswordProvider(hasStdinKeystores)
-		if err != nil {
-			return fmt.Errorf("failed to create password provider: %w", err)
-		}
-
-		// Ensure keystore and HD wallet directories exist
-		if err := os.MkdirAll(cfg.Chains.EVM.KeystoreDir, 0700); err != nil {
-			return fmt.Errorf("failed to create keystore directory %s: %w", cfg.Chains.EVM.KeystoreDir, err)
-		}
-		if err := os.MkdirAll(cfg.Chains.EVM.HDWalletDir, 0700); err != nil {
-			return fmt.Errorf("failed to create HD wallet directory %s: %w", cfg.Chains.EVM.HDWalletDir, err)
-		}
-
-		// 1. Load private keys
-		pkProvider, err := evm.NewPrivateKeyProvider(evmRegistry, cfg.Chains.EVM.Signers.PrivateKeys)
-		if err != nil {
-			return fmt.Errorf("failed to create private key provider: %w", err)
-		}
-		evmRegistry.RegisterProvider(pkProvider)
-
-		// 2. Load keystores
-		ksProvider, err := evm.NewKeystoreProvider(evmRegistry, cfg.Chains.EVM.Signers.Keystores, cfg.Chains.EVM.KeystoreDir, pwProvider)
-		if err != nil {
-			return fmt.Errorf("failed to create keystore provider: %w", err)
-		}
-		evmRegistry.RegisterProvider(ksProvider)
-
-		// 3. Load HD wallets
-		hdProvider, err := evm.NewHDWalletProvider(evmRegistry, cfg.Chains.EVM.Signers.HDWallets, cfg.Chains.EVM.HDWalletDir, pwProvider)
-		if err != nil {
-			return fmt.Errorf("failed to create HD wallet provider: %w", err)
-		}
-		evmRegistry.RegisterProvider(hdProvider)
-
-		defer func() {
-			if err := evmRegistry.Close(); err != nil {
-				log.Error("failed to close signer registry", "error", err)
-			}
-		}()
-
-		// Initialize signer manager for dynamic signer creation
-		signerMgrImpl, smErr := evm.NewSignerManager(evmRegistry)
-		if smErr != nil {
-			return fmt.Errorf("failed to create EVM signer manager: %w", smErr)
-		}
-		if cfg.Security.AutoLockTimeout > 0 {
-			signerMgrImpl.SetAutoLockTimeout(cfg.Security.AutoLockTimeout)
-			log.Info("Signer auto-lock enabled", "timeout", cfg.Security.AutoLockTimeout)
-		}
-		defer signerMgrImpl.StopAutoLockTimers()
-		evmSignerManager = signerMgrImpl
-
-		// Discover locked signers from disk (keystores and HD wallets not in config)
-		if err := evmSignerManager.DiscoverLockedSigners(context.Background()); err != nil {
-			return fmt.Errorf("failed to discover locked signers: %w", err)
-		}
-
-		// Sync signer ownership (assign unowned signers to first admin)
-		if err := config.SyncSignerOwnership(context.Background(), evmSignerManager, signerOwnershipRepo, apiKeyRepo, log); err != nil {
-			return fmt.Errorf("failed to sync signer ownership: %w", err)
-		}
-		if cfg.Chains.EVM.MaterialCheck.Enabled {
-			checker, checkerErr := service.NewSignerMaterialChecker(
-				evmSignerManager,
-				signerRepo,
-				cfg.Chains.EVM.KeystoreDir,
-				cfg.Chains.EVM.HDWalletDir,
-				cfg.Chains.EVM.MaterialCheck.Interval,
-				log,
-			)
-			if checkerErr != nil {
-				return fmt.Errorf("failed to create signer material checker: %w", checkerErr)
-			}
-			if cfg.Chains.EVM.MaterialCheck.StartupCheck {
-				if runErr := checker.RunOnce(context.Background()); runErr != nil {
-					return fmt.Errorf("startup signer material check failed: %w", runErr)
-				}
-			}
-			checkerCtx, checkerCancel := context.WithCancel(context.Background())
-			defer checkerCancel()
-			go checker.Start(checkerCtx)
-		}
-
-		if evmRegistry.SignerCount() == 0 && evmRegistry.TotalCount() == 0 {
-			log.Warn("No signers configured. Add signers via TUI or API after startup.")
-		}
-
-		evmAdapter, err = evm.NewEVMAdapter(evmRegistry)
-		if err != nil {
-			return fmt.Errorf("failed to create EVM adapter: %w", err)
-		}
-
+		evmSignerManager = esm
+		evmAdapter = adapter
 		if err := chainRegistry.Register(evmAdapter); err != nil {
 			return fmt.Errorf("failed to register EVM adapter: %w", err)
 		}
-
-		lockedCount := evmRegistry.TotalCount() - evmRegistry.SignerCount()
-		logger.EVM().Info().Int("unlocked", evmRegistry.SignerCount()).Int("locked", lockedCount).Int("total", evmRegistry.TotalCount()).Msg("EVM adapter registered")
-		if evmRegistry.SignerCount() > 0 {
-			logger.EVM().Warn().Int("unlocked_count", evmRegistry.SignerCount()).Msg("signer state after startup: some signers unlocked; with empty config expect all locked")
-		}
-		logger.EVM().Info().Msg("EVM signer manager initialized")
 	}
 
-	// Initialize state machine
-	stateMachine, err := statemachine.NewStateMachine(requestRepo, auditRepo, log)
+	// ---- State machine + rule engine ----
+	stateMachine, err := statemachine.NewStateMachine(repos.requestRepo, repos.auditRepo, log)
 	if err != nil {
 		return fmt.Errorf("failed to create state machine: %w", err)
 	}
-
-	// Initialize rule engine (with optional budget checker for template instances)
-	budgetChecker := rule.NewBudgetChecker(budgetRepo, templateRepo, log)
-	ruleEngine, err := rule.NewWhitelistRuleEngine(ruleRepo, log,
+	budgetChecker := rule.NewBudgetChecker(repos.budgetRepo, repos.templateRepo, log)
+	ruleEngine, err := rule.NewWhitelistRuleEngine(repos.ruleRepo, log,
 		rule.WithBudgetChecker(budgetChecker),
 		rule.WithDelegationPayloadConverter(evm.DelegatePayloadToSignRequest),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create rule engine: %w", err)
 	}
-
-	// Register EVM rule evaluators
-	ruleEngine.RegisterEvaluator(&evm.AddressListEvaluator{})
-	ruleEngine.RegisterEvaluator(&evm.ContractMethodEvaluator{})
-	ruleEngine.RegisterEvaluator(&evm.ValueLimitEvaluator{})
-	ruleEngine.RegisterEvaluator(&evm.SignerRestrictionEvaluator{})
-	ruleEngine.RegisterEvaluator(&evm.SignTypeRestrictionEvaluator{})
-	ruleEngine.RegisterEvaluator(&evm.MessagePatternEvaluator{})
-
-	// Register internal transfer evaluator (requires ownership repo)
-	internalTransferEval, err := evm.NewInternalTransferEvaluator(signerOwnershipRepo)
+	registerEVMStandardEvaluators(ruleEngine)
+	internalTransferEval, err := evm.NewInternalTransferEvaluator(repos.signerOwnershipRepo)
 	if err != nil {
 		return fmt.Errorf("failed to create internal transfer evaluator: %w", err)
 	}
 	ruleEngine.RegisterEvaluator(internalTransferEval)
-
 	jsEval, err := evm.NewJSRuleEvaluator(log)
 	if err != nil {
 		return fmt.Errorf("failed to create JS rule evaluator: %w", err)
@@ -582,131 +237,51 @@ func Run(args []string) error {
 	ruleEngine.RegisterEvaluator(jsEval)
 	budgetChecker.SetJSEvaluator(jsEval)
 
-	// Wire RPC provider for JS sandbox read-only queries, budget decimals auto-query, and broadcast
+	// ---- RPC provider ----
 	var rpcProvider *evm.RPCProvider
 	var decimalsQuerier rule.DecimalsQuerier
 	if cfg.Chains.EVM != nil && cfg.Chains.EVM.RPCGateway.BaseURL != "" {
-		rpcProvider, err = evm.NewRPCProvider(cfg.Chains.EVM.RPCGateway.BaseURL, cfg.Chains.EVM.RPCGateway.APIKey)
+		rpcProvider, decimalsQuerier, err = initRPCProvider(cfg, jsEval, evmAdapter, budgetChecker, log)
 		if err != nil {
-			return fmt.Errorf("failed to create RPC provider: %w", err)
+			return err
 		}
-		cacheTTL := cfg.Chains.EVM.RPCGateway.CacheTTL
-		if cacheTTL <= 0 {
-			cacheTTL = 24 * time.Hour
-		}
-		metadataCache, err := evm.NewTokenMetadataCache(nil, rpcProvider, cacheTTL)
-		if err != nil {
-			return fmt.Errorf("failed to create token metadata cache: %w", err)
-		}
-		jsEval.SetRPCProvider(rpcProvider, metadataCache)
-		// Wire RPC provider to EVM adapter for nonce auto-fetch
-		if evmAdapter != nil {
-			evmAdapter.SetRPCProvider(rpcProvider)
-		}
-		var dqErr error
-		decimalsQuerier, dqErr = evm.NewDecimalsQuerierAdapter(metadataCache)
-		if dqErr != nil {
-			return fmt.Errorf("failed to create decimals querier: %w", dqErr)
-		}
-		budgetChecker.SetDecimalsQuerier(decimalsQuerier)
-		log.Info("RPC provider configured for JS sandbox and budget decimals auto-query",
-			"base_url", cfg.Chains.EVM.RPCGateway.BaseURL,
-			"cache_ttl", cacheTTL,
-		)
 	}
 
-	// Register Solidity expression evaluator (already created and validated above)
+	// ---- Solidity evaluator ----
 	if solidityEval != nil {
 		ruleEngine.RegisterEvaluator(solidityEval)
 		log.Info("Solidity expression evaluator registered")
 	}
 
-	// Initialize dynamic blocklist (runtime-synced from OFAC, scam DBs, etc.)
+	// ---- Dynamic blocklist ----
 	if cfg.DynamicBlocklist != nil && cfg.DynamicBlocklist.Enabled {
-		blCfg := blocklist.Config{
-			Enabled:      cfg.DynamicBlocklist.Enabled,
-			SyncInterval: cfg.DynamicBlocklist.SyncInterval,
-			FailMode:     cfg.DynamicBlocklist.FailMode,
-			CacheFile:    cfg.DynamicBlocklist.CacheFile,
-		}
-		for _, src := range cfg.DynamicBlocklist.Sources {
-			blCfg.Sources = append(blCfg.Sources, blocklist.SourceConfig{
-				Name: src.Name, Type: src.Type, URL: src.URL, JSONPath: src.JSONPath,
-			})
-		}
-		dynBlocklist, err := blocklist.NewDynamicBlocklist(blCfg, log)
-		if err != nil {
-			return fmt.Errorf("failed to create dynamic blocklist: %w", err)
-		}
-		syncInterval := 1 * time.Hour
-		if blCfg.SyncInterval != "" {
-			parsed, err := time.ParseDuration(blCfg.SyncInterval)
-			if err != nil {
-				return fmt.Errorf("invalid dynamic_blocklist.sync_interval: %w", err)
-			}
-			syncInterval = parsed
-		}
-		const minSyncInterval = 1 * time.Minute
-		if syncInterval < minSyncInterval {
-			return fmt.Errorf("dynamic_blocklist.sync_interval must be >= 1m (got %s)", syncInterval)
-		}
-		if err := dynBlocklist.Start(context.Background(), syncInterval); err != nil {
-			return fmt.Errorf("failed to start dynamic blocklist: %w", err)
-		}
-		defer dynBlocklist.Stop()
-		blEval, err := blocklist.NewEvaluator(dynBlocklist)
-		if err != nil {
-			return fmt.Errorf("failed to create dynamic blocklist evaluator: %w", err)
+		blEval, blErr := initDynamicBlocklist(cfg, log)
+		if blErr != nil {
+			return blErr
 		}
 		ruleEngine.RegisterEvaluator(blEval)
-		log.Info("Dynamic blocklist registered", "sources", len(blCfg.Sources), "sync_interval", syncInterval, "fail_mode", blCfg.FailMode)
 	}
-
-	// Seal the rule engine: no more evaluator registrations allowed after this point.
 	ruleEngine.Seal()
 
-	// Initialize notification service
+	// ---- Notifications ----
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
-	var notifier service.Notifier
-	var notifyService *notify.NotifyService // kept at function scope for audit monitor
-	if notifyEnabled(&cfg.Notify) {
-		notifyService, err = notify.NewNotifyService(&cfg.Notify)
-		if err != nil {
-			return fmt.Errorf("failed to create notify service: %w", err)
-		}
-		notifyService.Start(ctx)
-		defer notifyService.Stop()
-
-		notifier, err = service.NewNotifyServiceNotifier(service.NotifyServiceNotifierConfig{
-			NotifyService: notifyService,
-			Channels:      &cfg.NotifyChannel,
-			Priority:      1,
-			Sound:         "persistent",
-		})
-		if err != nil {
-			return fmt.Errorf("failed to create notifier: %w", err)
-		}
-		log.Info("Notification service started")
-	} else {
-		notifier, err = service.NewNoopNotifier()
-		if err != nil {
-			return fmt.Errorf("failed to create noop notifier: %w", err)
-		}
-		log.Info("Notification service disabled")
+	nr, err := initNotificationService(ctx, cfg, log)
+	if err != nil {
+		return err
 	}
-
-	// Wire budget alert notifications
+	notifyService := nr.service
+	notifier := nr.notifier
+	if notifyService != nil {
+		defer notifyService.Stop()
+	}
 	if notifyService != nil {
 		budgetAlertNotifier := notify.NewBudgetAlertNotifier(notifyService, &cfg.NotifyChannel)
 		budgetChecker.SetNotifier(budgetAlertNotifier)
 		log.Info("Budget alert notifications enabled")
 	}
-
-	// Start audit monitor (background anomaly detection)
 	if cfg.AuditMonitor.Enabled && notifyService != nil {
-		auditMonitor, err := audit.NewMonitor(auditRepo, notifyService, &cfg.NotifyChannel, cfg.AuditMonitor, log)
+		auditMonitor, err := audit.NewMonitor(repos.auditRepo, notifyService, &cfg.NotifyChannel, cfg.AuditMonitor, log)
 		if err != nil {
 			return fmt.Errorf("failed to create audit monitor: %w", err)
 		}
@@ -714,214 +289,40 @@ func Run(args []string) error {
 		defer auditMonitor.Stop()
 	}
 
-	// Initialize rule generator
-	ruleGenerator, err := rule.NewDefaultRuleGenerator()
+	// ---- Sign service + approval ----
+	signService, approvalGuard, err := initSignService(chainRegistry, repos.ruleRepo, repos.requestRepo, ruleEngine, stateMachine, cfg, notifier, notifyService, log)
 	if err != nil {
-		return fmt.Errorf("failed to create rule generator: %w", err)
+		return err
 	}
+	signService.SetAuditLogger(auditLogger)
 
-	// Initialize approval service
-	approvalService, err := service.NewApprovalService(
-		ruleRepo,
-		ruleGenerator,
-		notifier,
-		log,
-	)
+	// ---- Auth + IP whitelist ----
+	authVerifier, ipWhitelist, nonceStore, err := initAuthAndIPWhitelist(cfg, repos.apiKeyRepo, log)
 	if err != nil {
-		return fmt.Errorf("failed to create approval service: %w", err)
-	}
-
-	// Initialize sign service
-	signService, err := service.NewSignService(
-		chainRegistry,
-		requestRepo,
-		ruleEngine,
-		stateMachine,
-		approvalService,
-		log,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create sign service: %w", err)
-	}
-
-	// Optional: approval guard — pauses all sign requests when too many consecutive manual-approval outcomes
-	var approvalGuard *service.ManualApprovalGuard
-	if cfg.Security.ApprovalGuard.Enabled {
-		approvalGuard, err = service.NewManualApprovalGuard(service.ManualApprovalGuardConfig{
-			Window:                cfg.Security.ApprovalGuard.Window,
-			RejectionThresholdPct: cfg.Security.ApprovalGuard.RejectionThresholdPct,
-			MinSamples:            cfg.Security.ApprovalGuard.MinSamples,
-			ResumeAfter:           cfg.Security.ApprovalGuard.ResumeAfter,
-			NotifySvc:             notifyService,
-			Channel:               &cfg.NotifyChannel,
-			Logger:                log,
-		})
-		if err != nil {
-			return fmt.Errorf("failed to create approval guard: %w", err)
-		}
-		signService.SetApprovalGuard(approvalGuard)
-		log.Info("approval guard enabled",
-			"window", cfg.Security.ApprovalGuard.Window,
-			"rejection_threshold_pct", cfg.Security.ApprovalGuard.RejectionThresholdPct,
-			"min_samples", cfg.Security.ApprovalGuard.MinSamples,
-			"resume_after", cfg.Security.ApprovalGuard.ResumeAfter,
-		)
-	}
-
-	signService.SetManualApprovalEnabled(cfg.Security.ManualApprovalEnabled)
-	if cfg.Security.ManualApprovalEnabled {
-		log.Info("manual approval enabled: requests with no whitelist match will go to pending approval")
-	} else {
-		log.Info("manual approval disabled: requests with no whitelist match will be rejected (403)")
-	}
-
-	// Initialize nonce store for replay protection
-	nonceStore, err := storage.NewInMemoryNonceStore(time.Minute)
-	if err != nil {
-		return fmt.Errorf("failed to create nonce store: %w", err)
+		return err
 	}
 	defer nonceStore.Close()
 
-	nonceRequired := true
-	if cfg.Security.NonceRequired != nil {
-		nonceRequired = *cfg.Security.NonceRequired
-	}
-
-	// Initialize auth verifier
-	authVerifier, err := auth.NewVerifierWithNonceStore(apiKeyRepo, nonceStore, auth.Config{
-		MaxRequestAge: cfg.Security.MaxRequestAge,
-		NonceRequired: nonceRequired,
-	})
+	// ---- Security alerts ----
+	securityAlertService, err := initSecurityAlerts(cfg, notifyService, auditLogger, evmSignerManager, ipWhitelist, log)
 	if err != nil {
-		return fmt.Errorf("failed to create auth verifier: %w", err)
+		return err
 	}
 
-	// Initialize IP whitelist
-	var ipWhitelist *middleware.IPWhitelist
-	if cfg.Security.IPWhitelist.Enabled {
-		ipWhitelist, err = middleware.NewIPWhitelist(cfg.Security.IPWhitelist, log)
-		if err != nil {
-			return fmt.Errorf("failed to create IP whitelist: %w", err)
-		}
-		log.Info("IP whitelist enabled",
-			"allowed_count", len(cfg.Security.IPWhitelist.AllowedIPs),
-			"trust_proxy", cfg.Security.IPWhitelist.TrustProxy,
-		)
-	}
-
-	// Log API lockdown settings
-	log.Info("API lockdown settings",
-		"rules_api_readonly", cfg.Security.IsRulesAPIReadonly(),
-		"signers_api_readonly", cfg.Security.IsSignersAPIReadonly(),
-		"api_keys_api_readonly", cfg.Security.IsAPIKeysAPIReadonly(),
-	)
-
-	// Initialize security alert service for real-time notifications
-	var securityAlertService *middleware.SecurityAlertService
-	if notifyService != nil {
-		securityAlertService, err = middleware.NewSecurityAlertService(
-			notifyService, &cfg.NotifyChannel, log, 5*time.Minute,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to create security alert service: %w", err)
-		}
-		stopAlertCleanup := make(chan struct{})
-		securityAlertService.StartCleanupRoutine(5*time.Minute, stopAlertCleanup)
-		defer close(stopAlertCleanup)
-		log.Info("Security alert service enabled (real-time alerts for unauthorized access)")
-	}
-
-	// Wire alert service to IP whitelist
-	if ipWhitelist != nil && securityAlertService != nil {
-		ipWhitelist.SetAlertService(securityAlertService)
-	}
-
-	// Wire auto-lock notification to signer manager
-	if notifyService != nil && evmSignerManager != nil {
-		if impl, ok := evmSignerManager.(*evm.SignerManagerImpl); ok {
-			impl.SetOnAutoLock(func(address string) {
-				auditLogger.LogSignerAutoLocked(context.Background(), address)
-				if securityAlertService != nil {
-					securityAlertService.Alert(middleware.AlertSignerAutoLocked, address,
-						fmt.Sprintf("[Remote Signer] SIGNER AUTO-LOCKED\n\nAddress: %s\nReason: unlock timeout (%s)\nTime: %s\n\nUnlock again via POST /api/v1/evm/signers/%s/unlock",
-							address, cfg.Security.AutoLockTimeout, time.Now().UTC().Format(time.RFC3339), address))
-				}
-			})
-		}
-	}
-
-	// Wire audit DB failure alerting
-	if securityAlertService != nil {
-		auditLogger.SetOnLogFailure(func(eventType types.AuditEventType, logErr error) {
-			securityAlertService.Alert(middleware.AlertAuditDBFailure, "audit_db",
-				fmt.Sprintf("[Remote Signer] AUDIT DB FAILURE\n\nEvent: %s\nError: %s\nTime: %s\n\nAudit records may be lost. Check database connectivity.",
-					eventType, logErr.Error(), time.Now().UTC().Format(time.RFC3339)))
-		})
-
-		// Wire high-risk admin operation alerting.
-		// Every privileged change (signer create/unlock, rule CRUD, config reload, etc.)
-		// triggers a real-time notification. If you didn't initiate it, investigate immediately.
-		auditLogger.SetOnHighRiskOperation(func(eventType types.AuditEventType, apiKeyID, source, detail string) {
-			alertType := auditEventToAlertType(eventType)
-			who := apiKeyID
-			if who == "" {
-				who = "system"
-			}
-			securityAlertService.Alert(alertType, source,
-				fmt.Sprintf("[Remote Signer] ADMIN OPERATION\n\nOperation: %s\nAPI Key: %s\nSource IP: %s\nDetail: %s\nTime: %s\n\nIf you did not initiate this, investigate immediately.",
-					eventType, who, source, detail, time.Now().UTC().Format(time.RFC3339)))
-		})
-	}
-
-	signService.SetAuditLogger(auditLogger)
-
-	// Presets dir (for preset API): resolve relative to config file directory
-	var presetsDir string
-	if cfg.Presets != nil && cfg.Presets.Dir != "" {
-		presetsDir = cfg.Presets.Dir
-		if !filepath.IsAbs(presetsDir) {
-			presetsDir = filepath.Join(filepath.Dir(configPath), presetsDir)
-		}
-		var errAbs error
-		presetsDir, errAbs = filepath.Abs(presetsDir)
-		if errAbs != nil {
-			return fmt.Errorf("presets dir: %w", errAbs)
-		}
-	}
-
-	// Initialize simulation engine (optional; eth_simulateV1 via rpc_gateway)
+	// ---- Simulation engine ----
 	var simulator simulation.Simulator
 	if cfg.Chains.EVM != nil && cfg.Chains.EVM.Simulation.Enabled {
-		rpcGatewayURL := cfg.Chains.EVM.RPCGateway.BaseURL
-		simCfg := simulation.RPCSimulatorConfig{
-			RPCGatewayURL: rpcGatewayURL,
-			RPCGatewayKey: cfg.Chains.EVM.RPCGateway.APIKey,
-			Timeout:       cfg.Chains.EVM.Simulation.Timeout,
+		simulator, err = initSimulation(cfg, log)
+		if err != nil {
+			return err
 		}
-		sim, simErr := simulation.NewRPCSimulator(simCfg, log)
-		if simErr != nil {
-			return fmt.Errorf("failed to create RPC simulation engine: %w", simErr)
-		}
-		simulator = sim
-		log.Info("simulation engine initialized (rpc/eth_simulateV1)",
-			"gateway", rpcGatewayURL,
-			"timeout", cfg.Chains.EVM.Simulation.Timeout,
-		)
-
 		defer func() {
 			if closeErr := simulator.Close(); closeErr != nil {
 				log.Error("failed to close simulation engine", "error", closeErr)
 			}
 		}()
 	}
-
-	// Wire simulation fallback to sign service
 	if simulator != nil {
-		// Hand the rule a settings-backed policy so flipping
-		// auto_create_budget in the Settings UI takes effect on the
-		// next sign request without restarting the daemon. The
-		// adapter is local to this package to avoid pulling the
-		// settings dependency into chain/evm.
 		simBudgetPolicy := &settingsSimBudgetPolicy{mgr: settingsMgr}
 		var signerLister evm.ManagedSignerLister
 		if evmAdapter != nil {
@@ -931,12 +332,11 @@ func Run(args []string) error {
 		if rpcProvider != nil {
 			allowanceQuerier = evm.NewRPCAllowanceQuerier(rpcProvider)
 		}
-		simRule, simRuleErr := evm.NewSimulationBudgetRule(simulator, budgetRepo, simBudgetPolicy, decimalsQuerier, signerLister, allowanceQuerier, log)
+		simRule, simRuleErr := evm.NewSimulationBudgetRule(simulator, repos.budgetRepo, simBudgetPolicy, decimalsQuerier, signerLister, allowanceQuerier, log)
 		if simRuleErr != nil {
 			log.Warn("failed to create simulation budget rule", "error", simRuleErr)
 		} else {
 			signService.SetSimulationRule(simRule)
-			// Start batch accumulator if configured
 			if cfg.Chains.EVM.Simulation.BatchWindow > 0 {
 				simRule.SetBatchConfig(cfg.Chains.EVM.Simulation.BatchWindow, cfg.Chains.EVM.Simulation.BatchMaxSize)
 				simRule.StartAccumulator()
@@ -946,115 +346,23 @@ func Run(args []string) error {
 		}
 	}
 
-	// Initialize router
-	routerConfig := api.RouterConfig{
-		Version:                  version.Version,
-		IPWhitelistConfig:        ipWhitelist,
-		IPWhitelistConfigForRead: &cfg.Security.IPWhitelist,
-		IPRateLimit:              cfg.Security.IPRateLimit,
-		SolidityValidator:        solidityValidator,
-		JSEvaluator:              jsEval,
-		Template: &api.TemplateConfig{
-			TemplateRepo:    templateRepo,
-			TemplateService: templateService,
-		},
-		ApprovalGuard:                approvalGuard,
-		APIKeyRepo:                   apiKeyRepo,
-		SignerRepo:                   signerRepo,
-		SignerOwnershipRepo:          signerOwnershipRepo,
-		SignerAccessRepo:             signerAccessRepo,
-		WalletRepo:                   walletRepo,
-		BudgetRepo:                   budgetRepo,
-		RulesAPIReadonly:             cfg.Security.IsRulesAPIReadonly(),
-		SignersAPIReadonly:           cfg.Security.IsSignersAPIReadonly(),
-		APIKeysAPIReadonly:           cfg.Security.IsAPIKeysAPIReadonly(),
-		MaxRulesPerAPIKey:            cfg.Security.MaxRulesPerAPIKey,
-		MaxKeystoresPerKey:           cfg.Security.MaxKeystoresPerKey,
-		MaxHDWalletsPerKey:           cfg.Security.MaxHDWalletsPerKey,
-		RequireApprovalForAgentRules: cfg.Security.IsRequireApprovalForAgentRules(),
-		AlertService:                 securityAlertService,
-		AuditLogger:                  auditLogger,
-		SignTimeout:                  cfg.Security.SignTimeout,
-		AutoLockTimeout:              cfg.Security.AutoLockTimeout,
-		AuditRetentionDays:           cfg.AuditMonitor.RetentionDays,
-		Simulator:                    simulator,
-		RPCProvider:                  rpcProvider,
-		SettingsManager:              settingsMgr,
-	}
-	// Preset API: wire the DB-backed repo (populated by Registry sync at boot).
-	// The legacy presetsDir is no longer used by the handler — left as a no-op
-	// placeholder so the existing config field doesn't error; it can be removed
-	// once we drop the legacy abs-path resolution above.
-	_ = presetsDir
-	if presetRepo, err := storage.NewGormPresetRepository(db); err == nil {
-		routerConfig.PresetRepo = presetRepo
-		routerConfig.PresetsDB = db
-	} else {
-		log.Warn("preset API disabled: failed to wire preset repo", "error", err)
-	}
-	// Wire the Registry pair for POST /api/v1/registry/refresh. Building
-	// here (not at boot's syncRegistries call) keeps the handler tied to
-	// the same file roots the bootstrap sync used, so a refresh always
-	// picks up the same set of files regardless of working-directory
-	// shenanigans at request time.
-	if tmplReg, presetReg, err := buildRegistries(db, cfg, configPath, log); err == nil {
-		routerConfig.TemplateRegistry = tmplReg
-		routerConfig.PresetRegistry = presetReg
-	} else {
-		log.Warn("registry refresh endpoint disabled: failed to build registries", "error", err)
-	}
-	router, err := api.NewRouter(authVerifier, signService, evmSignerManager, ruleRepo, auditRepo, log, routerConfig)
+	// ---- Router + HTTP server ----
+	rs, err := initRouterAndServer(cfg, configPath, db, repos, authVerifier, signService, evmSignerManager, approvalGuard, securityAlertService, auditLogger, settingsMgr, solidityValidator, jsEval, ipWhitelist, templateService, simulator, rpcProvider, log)
 	if err != nil {
 		return fmt.Errorf("failed to create router: %w", err)
 	}
+	server := rs.Server
 
-	// Build server config
-	serverConfig := api.DefaultServerConfig()
-	serverConfig.Host = cfg.Server.Host
-	serverConfig.Port = cfg.Server.Port
-	if cfg.Server.ReadTimeout > 0 {
-		serverConfig.ReadTimeout = cfg.Server.ReadTimeout
-	}
-	if cfg.Server.WriteTimeout > 0 {
-		serverConfig.WriteTimeout = cfg.Server.WriteTimeout
-	}
-
-	// TLS configuration
-	if cfg.Server.TLS.Enabled {
-		serverConfig.TLSEnabled = true
-		serverConfig.TLSCertFile = cfg.Server.TLS.CertFile
-		serverConfig.TLSKeyFile = cfg.Server.TLS.KeyFile
-		serverConfig.TLSCAFile = cfg.Server.TLS.CAFile
-		serverConfig.TLSClientAuth = cfg.Server.TLS.ClientAuth
-		log.Info("TLS enabled",
-			"cert_file", cfg.Server.TLS.CertFile,
-			"key_file", cfg.Server.TLS.KeyFile,
-			"mtls", cfg.Server.TLS.ClientAuth,
-		)
-	}
-
-	// Initialize API server
-	server, err := api.NewServer(router, log, serverConfig)
-	if err != nil {
-		return fmt.Errorf("failed to create API server: %w", err)
-	}
-
-	// Start the settings hot-reload loop. Bound to the shutdown context below
-	// so a SIGINT/SIGTERM cleanly stops the poll goroutine alongside HTTP.
+	// ---- Signal handling ----
 	settingsCtx, settingsCancel := context.WithCancel(context.Background())
 	defer settingsCancel()
 	settingsMgr.Start(settingsCtx)
 
-	// Handle graceful shutdown and SIGHUP for config reload
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
-
 	errCh := make(chan error, 1)
 	go func() {
-		log.Info("Starting HTTP server",
-			"host", cfg.Server.Host,
-			"port", cfg.Server.Port,
-		)
+		log.Info("Starting HTTP server", "host", cfg.Server.Host, "port", cfg.Server.Port)
 		errCh <- server.Start()
 	}()
 
@@ -1085,616 +393,5 @@ func Run(args []string) error {
 			log.Info("Service stopped")
 			return nil
 		}
-	}
-}
-
-// reloadRules re-reads config and syncs rules to DB (triggered by SIGHUP).
-// Rule engine reads from DB per-request, so no engine restart is needed.
-func reloadRules(configPath string, ruleInit *config.RuleInitializer, templateInit *config.TemplateInitializer, auditLogger *audit.AuditLogger, log *slog.Logger) {
-	ctx := context.Background()
-
-	cfg, err := config.Load(configPath)
-	if err != nil {
-		log.Error("SIGHUP: failed to reload config", "error", err)
-		if auditLogger != nil {
-			auditLogger.LogConfigReloaded(ctx, false, err.Error())
-		}
-		return
-	}
-
-	// Re-expand template instance rules
-	loadedTemplates, err := templateInit.GetLoadedTemplates(cfg.Templates)
-	if err != nil {
-		log.Error("SIGHUP: failed to get loaded templates", "error", err)
-		if auditLogger != nil {
-			auditLogger.LogConfigReloaded(ctx, false, err.Error())
-		}
-		return
-	}
-	expandedRules, err := config.ExpandInstanceRules(cfg.Rules, loadedTemplates)
-	if err != nil {
-		log.Error("SIGHUP: failed to expand instance rules", "error", err)
-		if auditLogger != nil {
-			auditLogger.LogConfigReloaded(ctx, false, err.Error())
-		}
-		return
-	}
-
-	if err := ruleInit.SyncFromConfig(ctx, expandedRules); err != nil {
-		log.Error("SIGHUP: failed to sync rules from config", "error", err)
-		if auditLogger != nil {
-			auditLogger.LogConfigReloaded(ctx, false, err.Error())
-		}
-		return
-	}
-
-	if auditLogger != nil {
-		auditLogger.LogConfigReloaded(ctx, true, "")
-	}
-	log.Info("SIGHUP: rules reloaded successfully")
-}
-
-// syncRegistries runs the v0.3 file-based Template + Preset Registry
-// sync at startup. It is non-fatal on a missing root (fresh installs
-// have no rules/ tree yet) but returns errors from parse/Upsert failures
-// so a broken YAML doesn't go silent.
-//
-// Template root resolution mirrors the legacy templates_dir handling:
-// relative paths anchor against the config file's directory so an
-// operator-installed config.yaml that references "rules/templates"
-// keeps working. Preset root follows the same rule against cfg.Presets.Dir.
-//
-// The legacy TemplateInitializer (above) keeps running in parallel for
-// inline cfg.Templates entries. Their rows live under Source=config so
-// they don't collide with Registry's Source=file rows; the two prune
-// loops are independent.
-func syncRegistries(ctx context.Context, db *gorm.DB, cfg *config.Config, configPath string, log *slog.Logger) error {
-	tmplReg, presetReg, err := buildRegistries(db, cfg, configPath, log)
-	if err != nil {
-		return err
-	}
-	if _, err := runRegistrySync(ctx, tmplReg, "template", log); err != nil {
-		return err
-	}
-	if _, err := runRegistrySync(ctx, presetReg, "preset", log); err != nil {
-		return err
-	}
-	return nil
-}
-
-// buildRegistries constructs Template + Preset Registry instances bound
-// to the live db handle and the configured source roots. Used both at
-// boot (one-shot sync) and by the runtime refresh handler so the
-// handler doesn't need to re-resolve paths or re-wire repositories on
-// every POST /api/v1/registry/refresh.
-func buildRegistries(db *gorm.DB, cfg *config.Config, configPath string, log *slog.Logger) (*registry.TemplateRegistry, *registry.PresetRegistry, error) {
-	tmplRoot := absDirRelativeToConfig(cfg.TemplatesDir, configPath)
-	tmplRepo, err := storage.NewGormTemplateRepository(db)
-	if err != nil {
-		return nil, nil, fmt.Errorf("template repo: %w", err)
-	}
-	tmplReg := registry.NewTemplateRegistry(tmplRepo, registry.NewFileTemplateSource(tmplRoot), log)
-
-	var presetRoot string
-	if cfg.Presets != nil && cfg.Presets.Dir != "" {
-		presetRoot = absDirRelativeToConfig(cfg.Presets.Dir, configPath)
-	}
-	presetRepo, err := storage.NewGormPresetRepository(db)
-	if err != nil {
-		return nil, nil, fmt.Errorf("preset repo: %w", err)
-	}
-	presetReg := registry.NewPresetRegistry(presetRepo, registry.NewFilePresetSource(presetRoot), log)
-	return tmplReg, presetReg, nil
-}
-
-// runRegistrySync is the small adapter that lets Sync return work for
-// either kind through the same code path. The kind label is just for
-// log + error wording — the algorithm is identical.
-func runRegistrySync(ctx context.Context, r interface {
-	Sync(ctx context.Context) (registry.SyncReport, error)
-}, kind string, log *slog.Logger) (registry.SyncReport, error) {
-	rep, err := r.Sync(ctx)
-	if err != nil {
-		return rep, fmt.Errorf("%s registry sync: %w", kind, err)
-	}
-	for _, e := range rep.Errors {
-		log.Error(kind+" parse error", "id", e.ID, "path", e.Path, "err", e.Err)
-	}
-	return rep, nil
-}
-
-// absDirRelativeToConfig resolves a directory path that may be relative
-// to the config file directory. Empty input yields empty output (the
-// Registry treats that as "no source", returning an empty list).
-func absDirRelativeToConfig(dir, configPath string) string {
-	if dir == "" {
-		return ""
-	}
-	if !filepath.IsAbs(dir) {
-		dir = filepath.Join(filepath.Dir(configPath), dir)
-	}
-	abs, err := filepath.Abs(dir)
-	if err != nil {
-		return dir
-	}
-	return abs
-}
-
-func parseZerologLevel(level string) (zerolog.Level, error) {
-	switch level {
-	case "debug":
-		return zerolog.DebugLevel, nil
-	case "info":
-		return zerolog.InfoLevel, nil
-	case "warn":
-		return zerolog.WarnLevel, nil
-	case "error":
-		return zerolog.ErrorLevel, nil
-	default:
-		return zerolog.InfoLevel, fmt.Errorf("unknown log level: %s", level)
-	}
-}
-
-func parseSlogLevel(level string) (slog.Level, error) {
-	switch level {
-	case "debug":
-		return slog.LevelDebug, nil
-	case "info":
-		return slog.LevelInfo, nil
-	case "warn":
-		return slog.LevelWarn, nil
-	case "error":
-		return slog.LevelError, nil
-	default:
-		return slog.LevelInfo, fmt.Errorf("unknown log level: %s", level)
-	}
-}
-
-func notifyEnabled(cfg *notify.Config) bool {
-	if cfg == nil {
-		return false
-	}
-	if cfg.Slack != nil && cfg.Slack.Enabled {
-		return true
-	}
-	if cfg.Pushover != nil && cfg.Pushover.Enabled {
-		return true
-	}
-	if cfg.Webhook != nil && cfg.Webhook.Enabled {
-		return true
-	}
-	if cfg.Telegram != nil && cfg.Telegram.Enabled {
-		return true
-	}
-	return false
-}
-
-// validateSolidityRules validates all Solidity expression rules at startup.
-// It runs the test cases defined in each rule to ensure they pass.
-// If any rule fails validation, the service will not start.
-func validateSolidityRules(ctx context.Context, ruleRepo storage.RuleRepository, evaluator *evm.SolidityRuleEvaluator, log *slog.Logger) error {
-	// Get all Solidity expression rules
-	ruleType := types.RuleTypeEVMSolidityExpression
-	rules, err := ruleRepo.List(ctx, storage.RuleFilter{
-		Type:        &ruleType,
-		EnabledOnly: true,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to list Solidity rules: %w", err)
-	}
-
-	if len(rules) == 0 {
-		log.Info("No Solidity expression rules to validate")
-		return nil
-	}
-
-	log.Info("Validating Solidity expression rules", "count", len(rules))
-	log.Info("Rule validation may take 1–3 minutes (Forge compiles and runs test cases per batch)")
-
-	// Create validator
-	validator, err := evm.NewSolidityRuleValidator(evaluator, log)
-	if err != nil {
-		return fmt.Errorf("failed to create rule validator: %w", err)
-	}
-
-	// Batch validate all rules (automatically groups by mode for optimal performance)
-	batchResult, err := validator.ValidateRulesBatch(ctx, rules)
-	if err != nil {
-		return fmt.Errorf("rule validation failed: %w", err)
-	}
-
-	// Report results
-	var failedRules []string
-	for i, result := range batchResult.Results {
-		rule := rules[i]
-		if !result.Valid {
-			// Collect failure details
-			var details string
-			if result.SyntaxError != nil {
-				details = fmt.Sprintf("syntax error: %s", result.SyntaxError.Message)
-			} else if result.FailedTestCases > 0 {
-				for _, tc := range result.TestCaseResults {
-					if !tc.Passed {
-						details = fmt.Sprintf("test case '%s' failed: expected_pass=%v, actual_pass=%v, error=%s",
-							tc.Name, tc.ExpectedPass, tc.ActualPass, tc.Error)
-						break
-					}
-				}
-			}
-
-			log.Error("Rule validation failed",
-				"rule_id", rule.ID,
-				"rule_name", rule.Name,
-				"details", details,
-				"failed_test_cases", result.FailedTestCases,
-			)
-			failedRules = append(failedRules, fmt.Sprintf("%s (%s): %s", rule.Name, rule.ID, details))
-		} else {
-			log.Info("Rule validation passed",
-				"rule_id", rule.ID,
-				"rule_name", rule.Name,
-				"test_cases", len(result.TestCaseResults),
-			)
-		}
-	}
-
-	if len(failedRules) > 0 {
-		return fmt.Errorf("%d rule(s) failed validation:\n  - %s",
-			len(failedRules), strings.Join(failedRules, "\n  - "))
-	}
-
-	log.Info("All Solidity expression rules validated successfully", "count", len(rules))
-	return nil
-}
-
-// validateEVMJSRulesAtStartup runs evm_js test cases through the same engine path as production
-// (see docs/SECURITY_AUDIT_REPORT.md §4). expandedRules must be the same list passed to SyncFromConfig
-// so rule IDs and test_cases match. If any test case fails, startup fails.
-func validateEVMJSRulesAtStartup(ctx context.Context, expandedRules []config.RuleConfig, ruleRepo storage.RuleRepository, solidityEval *evm.SolidityRuleEvaluator, log *slog.Logger) error {
-	var toValidate []struct {
-		idx  int
-		cfg  config.RuleConfig
-		rule *types.Rule
-	}
-	for i := range expandedRules {
-		cfg := &expandedRules[i]
-		if cfg.Type != string(types.RuleTypeEVMJS) || !cfg.Enabled {
-			continue
-		}
-		// Fail explicitly (same as validate-rules) when test_cases are missing or insufficient.
-		var pos, neg int
-		for _, tc := range cfg.TestCases {
-			if tc.ExpectPass {
-				pos++
-			} else {
-				neg++
-			}
-		}
-		if err := ruleconfig.ValidateJSRuleTestCasesRequirement(pos, neg); err != nil {
-			return fmt.Errorf("rule %q: %w", cfg.Name, err)
-		}
-		ruleID := config.EffectiveRuleID(i, *cfg)
-		rule, err := ruleRepo.Get(ctx, ruleID)
-		if err != nil {
-			if types.IsNotFound(err) {
-				continue
-			}
-			return fmt.Errorf("get rule %s: %w", ruleID, err)
-		}
-		toValidate = append(toValidate, struct {
-			idx  int
-			cfg  config.RuleConfig
-			rule *types.Rule
-		}{i, *cfg, rule})
-	}
-	if len(toValidate) == 0 {
-		log.Info("No evm_js rules with test_cases to validate at startup")
-		return nil
-	}
-
-	// List all rules once for building isolated engines (blocklist + delegation targets).
-	const listLimit = 10000
-	allRules, err := ruleRepo.List(ctx, storage.RuleFilter{EnabledOnly: false, Limit: listLimit})
-	if err != nil {
-		return fmt.Errorf("list rules for validation: %w", err)
-	}
-	allRulesMap := make(map[types.RuleID]*types.Rule, len(allRules))
-	for _, r := range allRules {
-		allRulesMap[r.ID] = r
-	}
-
-	jsEval, err := evm.NewJSRuleEvaluator(log)
-	if err != nil {
-		return fmt.Errorf("js evaluator for validation: %w", err)
-	}
-
-	var failed []string
-	for _, item := range toValidate {
-		cfg := item.cfg
-		ruleFromDB := item.rule
-
-		// Use template test_variables for validation so expected-fail cases (e.g. allowed_recipients set) run correctly.
-		var varsToSeed map[string]interface{}
-		if len(cfg.TestVariables) > 0 {
-			varsToSeed = make(map[string]interface{}, len(cfg.TestVariables))
-			for k, v := range cfg.TestVariables {
-				varsToSeed[k] = v
-			}
-		} else if len(cfg.Variables) > 0 {
-			varsToSeed = cfg.Variables
-		}
-		ruleForTest := *ruleFromDB
-		ruleForTest.Variables = nil
-		if len(varsToSeed) > 0 {
-			variablesJSON, err := json.Marshal(varsToSeed)
-			if err != nil {
-				failed = append(failed, fmt.Sprintf("%s: marshal test variables: %v", cfg.Name, err))
-				continue
-			}
-			ruleForTest.Variables = variablesJSON
-		}
-		// When using template test_variables, set rule scope (ChainID, etc.) from them so the rule
-		// matches the test case's chain_id and validation passes (e.g. test uses chain_id 1).
-		if len(cfg.TestVariables) > 0 {
-			if v, ok := cfg.TestVariables["chain_id"]; ok && v != "" {
-				chainIDVal := v
-				ruleForTest.ChainID = &chainIDVal
-			}
-		}
-
-		// Build isolated engine (blocklist + this rule only) so expected-fail cases are not allowed by another whitelist rule.
-		testEngine, err := buildIsolatedEngineForRule(ctx, allRulesMap, &ruleForTest, solidityEval, log)
-		if err != nil {
-			failed = append(failed, fmt.Sprintf("%s: build isolated engine: %v", cfg.Name, err))
-			continue
-		}
-		testEngine.RegisterEvaluator(jsEval)
-
-		varsForSubst := make(map[string]string)
-		if len(cfg.TestVariables) > 0 {
-			for k, v := range cfg.TestVariables {
-				varsForSubst[k] = v
-			}
-		} else {
-			for k, v := range cfg.Variables {
-				if v == nil {
-					varsForSubst[k] = ""
-				} else {
-					varsForSubst[k] = fmt.Sprintf("%v", v)
-				}
-			}
-		}
-		for _, tc := range cfg.TestCases {
-			inputCopy := make(map[string]interface{})
-			for k, v := range tc.Input {
-				inputCopy[k] = v
-			}
-			if len(varsForSubst) > 0 {
-				jsonBytes, _ := json.Marshal(inputCopy)
-				s := string(jsonBytes)
-				for k, v := range varsForSubst {
-					s = strings.ReplaceAll(s, "${"+k+"}", v)
-				}
-				if err := json.Unmarshal([]byte(s), &inputCopy); err != nil {
-					failed = append(failed, fmt.Sprintf("%s test %q: variable substitution: %v", cfg.Name, tc.Name, err))
-					continue
-				}
-			}
-			req, parsed, err := evm.TestCaseInputToSignRequest(inputCopy)
-			if err != nil {
-				failed = append(failed, fmt.Sprintf("%s test %q: build request: %v", cfg.Name, tc.Name, err))
-				continue
-			}
-			evalResult, err := testEngine.EvaluateWithResult(ctx, req, parsed)
-			if err != nil {
-				failed = append(failed, fmt.Sprintf("%s test %q: %v", cfg.Name, tc.Name, err))
-				continue
-			}
-			// For blocklist rules, "pass" means "not blocked"; for whitelist, "pass" means "allowed".
-			var actualPass bool
-			if ruleFromDB.Mode == types.RuleModeBlocklist {
-				actualPass = !evalResult.Blocked
-			} else {
-				actualPass = evalResult.Allowed
-			}
-			var actualReason string
-			if evalResult.Allowed {
-				actualReason = evalResult.AllowReason
-			} else if evalResult.Blocked {
-				actualReason = evalResult.BlockReason
-			} else {
-				actualReason = evalResult.NoMatchReason
-			}
-			if actualPass != tc.ExpectPass {
-				if tc.ExpectPass {
-					failed = append(failed, fmt.Sprintf("%s test %q: expected pass but got: %s", cfg.Name, tc.Name, actualReason))
-				} else {
-					failed = append(failed, fmt.Sprintf("%s test %q: expected fail but passed (reason: %s)", cfg.Name, tc.Name, actualReason))
-				}
-				continue
-			}
-			if tc.ExpectReason != "" && !strings.Contains(actualReason, tc.ExpectReason) {
-				// In isolated engine we only have this rule (+ blocklist), so reason comes from this rule.
-				isNoMatch := !evalResult.Blocked && !evalResult.Allowed
-				isWhitelistRule := ruleFromDB.Mode != types.RuleModeBlocklist
-				if !(isNoMatch && isWhitelistRule) {
-					failed = append(failed, fmt.Sprintf("%s test %q: expected reason containing %q but got %q", cfg.Name, tc.Name, tc.ExpectReason, actualReason))
-				}
-			}
-		}
-	}
-	if len(failed) > 0 {
-		return fmt.Errorf("%d evm_js test case(s) failed:\n  - %s", len(failed), strings.Join(failed, "\n  - "))
-	}
-	log.Info("All evm_js rules validated at startup", "rules", len(toValidate))
-	return nil
-}
-
-// buildIsolatedEngineForRule builds an engine containing only blocklist rules plus the given rule
-// (and its delegation targets). Used so evm_js expected-fail test cases are not allowed by another whitelist rule.
-func buildIsolatedEngineForRule(ctx context.Context, allRulesMap map[types.RuleID]*types.Rule, ruleUnderTest *types.Rule, solidityEval *evm.SolidityRuleEvaluator, log *slog.Logger) (*rule.WhitelistRuleEngine, error) {
-	minimalRepo := storage.NewMemoryRuleRepository()
-	for _, r := range allRulesMap {
-		if r.Mode == types.RuleModeBlocklist {
-			// Skip evm_dynamic_blocklist — its evaluator depends on runtime DynamicBlocklist
-			// which is not available during startup validation. Including it would cause
-			// "no evaluator registered" errors in the isolated engine.
-			if r.Type == types.RuleTypeEVMDynamicBlocklist {
-				continue
-			}
-			if err := minimalRepo.Create(ctx, r); err != nil {
-				return nil, fmt.Errorf("add blocklist rule %s: %w", r.ID, err)
-			}
-		}
-	}
-	if ruleUnderTest.Mode != types.RuleModeBlocklist {
-		if err := minimalRepo.Create(ctx, ruleUnderTest); err != nil {
-			return nil, fmt.Errorf("add rule under test %s: %w", ruleUnderTest.ID, err)
-		}
-	}
-	if err := addDelegationTargetsForValidation(ctx, ruleUnderTest, allRulesMap, minimalRepo, make(map[types.RuleID]bool), log); err != nil {
-		return nil, err
-	}
-	eng, err := rule.NewWhitelistRuleEngine(minimalRepo, log, rule.WithDelegationPayloadConverter(evm.DelegatePayloadToSignRequest))
-	if err != nil {
-		return nil, err
-	}
-	eng.RegisterEvaluator(&evm.AddressListEvaluator{})
-	eng.RegisterEvaluator(&evm.ContractMethodEvaluator{})
-	eng.RegisterEvaluator(&evm.ValueLimitEvaluator{})
-	eng.RegisterEvaluator(&evm.SignerRestrictionEvaluator{})
-	eng.RegisterEvaluator(&evm.SignTypeRestrictionEvaluator{})
-	eng.RegisterEvaluator(&evm.MessagePatternEvaluator{})
-	// Internal transfer evaluator: nil repo for validation-only mode
-	internalTransferEval, err := evm.NewInternalTransferEvaluator(nil)
-	if err != nil {
-		return nil, err
-	}
-	eng.RegisterEvaluator(internalTransferEval)
-	if solidityEval != nil {
-		eng.RegisterEvaluator(solidityEval)
-	}
-	return eng, nil
-}
-
-// addDelegationTargetsForValidation recursively adds delegation target rules to the minimal repo
-// with Enabled=false so they are reachable via Get() but not included in List(EnabledOnly=true).
-func addDelegationTargetsForValidation(ctx context.Context, r *types.Rule, allRulesMap map[types.RuleID]*types.Rule, minimalRepo *storage.MemoryRuleRepository, visited map[types.RuleID]bool, log *slog.Logger) error {
-	if visited[r.ID] {
-		return nil
-	}
-	visited[r.ID] = true
-	var cfg struct {
-		DelegateTo string `json:"delegate_to"`
-	}
-	if err := json.Unmarshal(r.Config, &cfg); err != nil {
-		return fmt.Errorf("unmarshal config for rule %q: %w", r.ID, err)
-	}
-	if cfg.DelegateTo == "" {
-		return nil
-	}
-	for _, part := range strings.Split(cfg.DelegateTo, ",") {
-		targetID := types.RuleID(strings.TrimSpace(part))
-		if targetID == "" {
-			continue
-		}
-		target, ok := allRulesMap[targetID]
-		if !ok {
-			return fmt.Errorf("rule %q delegate_to references non-existent target %q", r.ID, targetID)
-		}
-		clone := *target
-		clone.Enabled = false
-		if err := minimalRepo.Create(ctx, &clone); err != nil {
-			log.Debug("delegation target already in minimal repo", "target", targetID)
-		}
-		if err := addDelegationTargetsForValidation(ctx, target, allRulesMap, minimalRepo, visited, log); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// validateMessagePatternRulesAtStartup validates all message_pattern rules at startup
-// (same as validate-rules: regex compile + test cases). If any fail, startup fails.
-func validateMessagePatternRulesAtStartup(ctx context.Context, ruleRepo storage.RuleRepository, log *slog.Logger) error {
-	ruleType := types.RuleTypeMessagePattern
-	rules, err := ruleRepo.List(ctx, storage.RuleFilter{
-		Type:        &ruleType,
-		EnabledOnly: true,
-	})
-	if err != nil {
-		return fmt.Errorf("list message_pattern rules: %w", err)
-	}
-	if len(rules) == 0 {
-		log.Info("No message_pattern rules to validate at startup")
-		return nil
-	}
-
-	msgValidator, err := evm.NewMessagePatternRuleValidator(log)
-	if err != nil {
-		return fmt.Errorf("create message_pattern validator: %w", err)
-	}
-
-	var failed []string
-	for _, rule := range rules {
-		result, err := msgValidator.ValidateRule(ctx, rule)
-		if err != nil {
-			failed = append(failed, fmt.Sprintf("%s (%s): %v", rule.Name, rule.ID, err))
-			continue
-		}
-		if !result.Valid {
-			detail := "invalid config or regex"
-			if result.SyntaxError != nil {
-				detail = result.SyntaxError.Message
-			} else if result.FailedTestCases > 0 {
-				for _, tc := range result.TestCaseResults {
-					if !tc.Passed {
-						detail = fmt.Sprintf("test case %q: %s", tc.Name, tc.Error)
-						break
-					}
-				}
-			}
-			failed = append(failed, fmt.Sprintf("%s (%s): %s", rule.Name, rule.ID, detail))
-		}
-	}
-	if len(failed) > 0 {
-		return fmt.Errorf("%d message_pattern rule(s) failed validation:\n  - %s",
-			len(failed), strings.Join(failed, "\n  - "))
-	}
-	log.Info("All message_pattern rules validated at startup", "count", len(rules))
-	return nil
-}
-
-// auditEventToAlertType maps audit event types to security alert types for admin operation alerts.
-func auditEventToAlertType(eventType types.AuditEventType) middleware.SecurityAlertType {
-	switch eventType {
-	case types.AuditEventTypeSignerCreated:
-		return middleware.AlertSignerCreated
-	case types.AuditEventTypeSignerUnlocked:
-		return middleware.AlertSignerUnlocked
-	case types.AuditEventTypeSignerLocked:
-		return middleware.AlertSignerLocked
-	case types.AuditEventTypeSignerAutoLocked:
-		return middleware.AlertSignerAutoLocked
-	case types.AuditEventTypeHDWalletCreated:
-		return middleware.AlertHDWalletCreated
-	case types.AuditEventTypeHDWalletDerived:
-		return middleware.AlertHDWalletDerived
-	case types.AuditEventTypeRuleCreated:
-		return middleware.AlertRuleCreated
-	case types.AuditEventTypeRuleUpdated:
-		return middleware.AlertRuleUpdated
-	case types.AuditEventTypeRuleDeleted:
-		return middleware.AlertRuleDeleted
-	case types.AuditEventTypeConfigReloaded:
-		return middleware.AlertConfigReloaded
-	case types.AuditEventTypeTemplateSynced:
-		return middleware.AlertTemplateSynced
-	case types.AuditEventTypeAPIKeySynced:
-		return middleware.AlertAPIKeySynced
-	case types.AuditEventTypePresetApplied:
-		return middleware.AlertPresetApplied
-	default:
-		return middleware.SecurityAlertType("admin_operation")
 	}
 }

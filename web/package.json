@@ -1,7 +1,7 @@
 {
   "name": "@ivanzzeth/remote-signer-web",
   "private": true,
-  "version": "0.4.0-dev",
+  "version": "0.3.0",
   "description": "Embedded web UI for the remote-signer daemon",
   "type": "module",
   "scripts": {
