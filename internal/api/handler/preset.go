@@ -324,6 +324,99 @@ func (h *PresetHandler) collectVariableDefs(r *http.Request, meta preset.PresetM
 	return out
 }
 
+// buildPresetNamePathMap zips meta.TemplateNames with meta.TemplatePaths
+// into a name → path map. The preset YAML's two arrays are positional;
+// when only one side exists or the single-template shorthand is used,
+// the resulting map degrades gracefully to a partial mapping.
+func buildPresetNamePathMap(meta preset.PresetMeta) map[string]string {
+	out := map[string]string{}
+	n := len(meta.TemplateNames)
+	if len(meta.TemplatePaths) < n {
+		n = len(meta.TemplatePaths)
+	}
+	for i := 0; i < n; i++ {
+		if meta.TemplateNames[i] != "" && meta.TemplatePaths[i] != "" {
+			out[meta.TemplateNames[i]] = meta.TemplatePaths[i]
+		}
+	}
+	if meta.Template != "" && meta.TemplatePath != "" {
+		out[meta.Template] = meta.TemplatePath
+	}
+	return out
+}
+
+// loadTemplateFromFile reads a template YAML at path and builds a
+// transient *types.RuleTemplate suitable for handing to
+// CreateInstanceFromResolvedWithTx. It mirrors the shape config-sync
+// produces in the DB: Type=template_bundle, Mode = first sub-rule's
+// mode, Config encodes the rules_json marshalled string, Variables
+// and BudgetMetering are JSON-encoded.
+//
+// The name argument is what the preset called the template — we use
+// that on the result so downstream messaging stays consistent with
+// the operator's mental model.
+func (h *PresetHandler) loadTemplateFromFile(relPath, name string) (*types.RuleTemplate, error) {
+	resolved := relPath
+	if !filepath.IsAbs(resolved) {
+		// Same search ladder as the variable-join logic; presetsDir
+		// typically sits at "<root>/rules/presets/" but we don't
+		// hard-assume the depth.
+		dir := h.presetsDir
+		for i := 0; i < 4; i++ {
+			cand := filepath.Join(dir, relPath)
+			if _, err := os.Stat(cand); err == nil {
+				resolved = cand
+				break
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+		if !filepath.IsAbs(resolved) {
+			return nil, fmt.Errorf("template file %q not found under presetsDir ancestors", relPath)
+		}
+	}
+	data, err := os.ReadFile(resolved) // #nosec G304 -- path derived from admin-curated preset YAML
+	if err != nil {
+		return nil, fmt.Errorf("read template file: %w", err)
+	}
+	var file struct {
+		Variables      []types.TemplateVariable `yaml:"variables"`
+		BudgetMetering map[string]interface{}   `yaml:"budget_metering"`
+		Rules          []map[string]interface{} `yaml:"rules"`
+	}
+	if err := yaml.Unmarshal(data, &file); err != nil {
+		return nil, fmt.Errorf("parse template file: %w", err)
+	}
+	if len(file.Rules) == 0 {
+		return nil, fmt.Errorf("template file %q has no rules", relPath)
+	}
+	variablesJSON, _ := json.Marshal(file.Variables)
+	var meteringJSON []byte
+	if file.BudgetMetering != nil {
+		meteringJSON, _ = json.Marshal(file.BudgetMetering)
+	}
+	rulesJSON, _ := json.Marshal(file.Rules)
+	config := map[string]interface{}{"rules_json": string(rulesJSON)}
+	configJSON, _ := json.Marshal(config)
+	mode, _ := file.Rules[0]["mode"].(string)
+	if mode == "" {
+		mode = "whitelist"
+	}
+	return &types.RuleTemplate{
+		ID:             "transient_" + name,
+		Name:           name,
+		Type:           "template_bundle",
+		Mode:           types.RuleMode(mode),
+		Variables:      variablesJSON,
+		Config:         configJSON,
+		BudgetMetering: meteringJSON,
+		Enabled:        true,
+	}, nil
+}
+
 // mergeTemplateVarsFromFile reads a template YAML and folds each of its
 // declared variables into out. Errors are logged but never bubbled —
 // a malformed/missing template degrades to "no description", same as
@@ -414,6 +507,21 @@ func (h *PresetHandler) apply(w http.ResponseWriter, r *http.Request, id string)
 		h.writeError(w, "preset produced no rules", http.StatusBadRequest)
 		return
 	}
+
+	// Build a fallback mapping from template name → file path the
+	// preset YAML pinned. When ResolveTemplate misses on name — which
+	// happens whenever the templates_dir loader derived a name from
+	// filename that doesn't match the preset's `template_names:` —
+	// we read the template file directly off disk and construct a
+	// transient RuleTemplate so the apply still works without forcing
+	// the operator to hand-curate cfg.Templates.
+	meta, metaErr := preset.GetPresetMeta(data)
+	if metaErr != nil {
+		h.writeError(w, fmt.Sprintf("parse preset meta: %s", metaErr.Error()), http.StatusBadRequest)
+		return
+	}
+	pathByName := buildPresetNamePathMap(meta)
+
 	// Resolve all templates before starting the transaction so we don't need a second DB connection (avoids deadlock with single-conn SQLite).
 	type resolvedItem struct {
 		tmpl *types.RuleTemplate
@@ -427,6 +535,24 @@ func (h *PresetHandler) apply(w http.ResponseWriter, r *http.Request, id string)
 			return
 		}
 		tmpl, err := h.templateSvc.ResolveTemplate(r.Context(), req)
+		if err != nil {
+			// Fallback: load the template file directly. The preset's
+			// template_paths array pins the source, so we can build a
+			// transient RuleTemplate even when the DB row was loaded
+			// under a different name.
+			if path := pathByName[pr.TemplateName]; path != "" {
+				fallback, fbErr := h.loadTemplateFromFile(path, pr.TemplateName)
+				if fbErr == nil {
+					tmpl = fallback
+					h.logger.Debug("preset apply: template resolved via file fallback",
+						"name", pr.TemplateName, "path", path)
+					err = nil
+				} else {
+					h.logger.Warn("preset apply: file fallback failed",
+						"name", pr.TemplateName, "path", path, "error", fbErr)
+				}
+			}
+		}
 		if err != nil {
 			h.writeError(w, fmt.Sprintf("template %q: %s", pr.TemplateName, err.Error()), http.StatusBadRequest)
 			return
