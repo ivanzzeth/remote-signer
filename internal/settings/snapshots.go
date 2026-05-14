@@ -91,12 +91,24 @@ type FoundrySnapshot struct {
 	Timeout   time.Duration `json:"timeout"`
 }
 
-// SimulationSnapshot — placeholder for PR7d.
+// SimulationSnapshot is the runtime view of the simulation engine knobs.
+//
+// AutoCreateBudget gates the lazy "first-outflow" budget creation in
+// SimulationBudgetRule. When false the rule still evaluates simulation
+// results (deny on excess) but no new sim:<signer> rows are written —
+// existing rows continue to be debited so admins can disable the
+// system globally without losing in-flight spend tracking.
+//
+// MaxDynamicUnits caps how many distinct (signer, token) units a
+// single signer can accumulate, defending against budget-amplification
+// attacks where a hostile caller targets many tokens.
 type SimulationSnapshot struct {
 	Enabled              bool          `json:"enabled"`
 	Timeout              time.Duration `json:"timeout"`
 	BatchWindow          time.Duration `json:"batch_window"`
 	BatchMaxSize         int           `json:"batch_max_size"`
+	AutoCreateBudget     bool          `json:"auto_create_budget"`
+	MaxDynamicUnits      int           `json:"max_dynamic_units"`
 	BudgetNativeMaxTotal string        `json:"budget_native_max_total"`
 	BudgetNativeMaxPerTx string        `json:"budget_native_max_per_tx"`
 	BudgetERC20MaxTotal  string        `json:"budget_erc20_max_total"`

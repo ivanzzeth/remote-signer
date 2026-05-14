@@ -889,12 +889,12 @@ func Run(args []string) error {
 
 	// Wire simulation fallback to sign service
 	if simulator != nil {
-		simBudgetDefaults := &evm.SimBudgetDefaults{
-			NativeMaxTotal: cfg.Chains.EVM.Simulation.BudgetNativeMaxTotal,
-			NativeMaxPerTx: cfg.Chains.EVM.Simulation.BudgetNativeMaxPerTx,
-			ERC20MaxTotal:  cfg.Chains.EVM.Simulation.BudgetERC20MaxTotal,
-			ERC20MaxPerTx:  cfg.Chains.EVM.Simulation.BudgetERC20MaxPerTx,
-		}
+		// Hand the rule a settings-backed policy so flipping
+		// auto_create_budget in the Settings UI takes effect on the
+		// next sign request without restarting the daemon. The
+		// adapter is local to this package to avoid pulling the
+		// settings dependency into chain/evm.
+		simBudgetPolicy := &settingsSimBudgetPolicy{mgr: settingsMgr}
 		var signerLister evm.ManagedSignerLister
 		if evmAdapter != nil {
 			signerLister = evm.NewEVMAdapterSignerLister(evmAdapter)
@@ -903,7 +903,7 @@ func Run(args []string) error {
 		if rpcProvider != nil {
 			allowanceQuerier = evm.NewRPCAllowanceQuerier(rpcProvider)
 		}
-		simRule, simRuleErr := evm.NewSimulationBudgetRule(simulator, budgetRepo, simBudgetDefaults, decimalsQuerier, signerLister, allowanceQuerier, log)
+		simRule, simRuleErr := evm.NewSimulationBudgetRule(simulator, budgetRepo, simBudgetPolicy, decimalsQuerier, signerLister, allowanceQuerier, log)
 		if simRuleErr != nil {
 			log.Warn("failed to create simulation budget rule", "error", simRuleErr)
 		} else {

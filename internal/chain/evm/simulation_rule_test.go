@@ -615,6 +615,56 @@ func (m *mockDecimalsAlerter) alertCount() int {
 	return len(m.alerts)
 }
 
+// --- Auto-create toggle (operator kill switch) ---
+
+// When the policy says AutoCreate=false the rule MUST NOT write a new
+// sim:* row even when defaults are configured and a previously-unseen
+// (signer, token) pair shows up. Returning (nil, nil) here matches the
+// "unlimited / not tracked" branch the rule already used for missing
+// defaults, so downstream code sees a familiar shape.
+func TestAutoCreateBudget_DisabledByPolicy_NoRowCreated(t *testing.T) {
+	repo := newMockSimBudgetRepo()
+	defaults := &SimBudgetDefaults{
+		ERC20MaxTotal:   "100",
+		ERC20MaxPerTx:   "50",
+		MaxDynamicUnits: 10,
+	}
+	dq := newMockDecimalsQuerier()
+	dq.setDecimals("1", "0xtoken1", 6)
+
+	r, err := NewSimulationBudgetRule(&mockSimulator{}, repo, NewStaticSimBudgetPolicy(false, defaults), dq, nil, nil, simTestLogger())
+	require.NoError(t, err)
+
+	b, err := r.autoCreateBudget(context.Background(), "1", "0xsigner", "0xtoken1",
+		types.RuleID("sim:0xsigner"), "1:0xtoken1")
+	require.NoError(t, err)
+	assert.Nil(t, b, "auto-create returned a budget despite policy.AutoCreate=false")
+	assert.Empty(t, repo.budgets, "no budget row should be written when auto-create is disabled")
+}
+
+// Symmetric: AutoCreate=true with the same inputs writes a row, so we
+// know the toggle is doing the work (not e.g. defaults being parsed
+// wrong).
+func TestAutoCreateBudget_EnabledByPolicy_WritesRow(t *testing.T) {
+	repo := newMockSimBudgetRepo()
+	defaults := &SimBudgetDefaults{
+		ERC20MaxTotal:   "100",
+		ERC20MaxPerTx:   "50",
+		MaxDynamicUnits: 10,
+	}
+	dq := newMockDecimalsQuerier()
+	dq.setDecimals("1", "0xtoken1", 6)
+
+	r, err := NewSimulationBudgetRule(&mockSimulator{}, repo, NewStaticSimBudgetPolicy(true, defaults), dq, nil, nil, simTestLogger())
+	require.NoError(t, err)
+
+	b, err := r.autoCreateBudget(context.Background(), "1", "0xsigner", "0xtoken1",
+		types.RuleID("sim:0xsigner"), "1:0xtoken1")
+	require.NoError(t, err)
+	require.NotNil(t, b)
+	assert.NotEmpty(t, repo.budgets, "budget row should exist after enabled auto-create")
+}
+
 // --- ENH-2 Tests: MaxDynamicUnits ---
 
 func TestAutoCreateBudget_StopsAtMaxDynamicUnits(t *testing.T) {
@@ -629,7 +679,7 @@ func TestAutoCreateBudget_StopsAtMaxDynamicUnits(t *testing.T) {
 	dq.setDecimals("1", "0xtoken2", 6)
 	dq.setDecimals("1", "0xtoken3", 6)
 
-	r, err := NewSimulationBudgetRule(&mockSimulator{}, repo, defaults, dq, nil, nil, simTestLogger())
+	r, err := NewSimulationBudgetRule(&mockSimulator{}, repo, NewStaticSimBudgetPolicy(true, defaults), dq, nil, nil, simTestLogger())
 	require.NoError(t, err)
 
 	syntheticRuleID := types.RuleID("sim:0xsigner")
@@ -658,7 +708,7 @@ func TestAutoCreateBudget_WithinLimitStillWorks(t *testing.T) {
 		NativeMaxPerTx: "0.5",
 	}
 
-	r, err := NewSimulationBudgetRule(&mockSimulator{}, repo, defaults, nil, nil, nil, simTestLogger())
+	r, err := NewSimulationBudgetRule(&mockSimulator{}, repo, NewStaticSimBudgetPolicy(true, defaults), nil, nil, nil, simTestLogger())
 	require.NoError(t, err)
 
 	syntheticRuleID := types.RuleID("sim:0xsigner")
@@ -681,7 +731,7 @@ func TestAutoCreateBudget_DefaultMaxDynamicUnits(t *testing.T) {
 	dq := newMockDecimalsQuerier()
 	dq.setDecimals("1", "0xtoken", 6)
 
-	r, err := NewSimulationBudgetRule(&mockSimulator{}, repo, defaults, dq, nil, nil, simTestLogger())
+	r, err := NewSimulationBudgetRule(&mockSimulator{}, repo, NewStaticSimBudgetPolicy(true, defaults), dq, nil, nil, simTestLogger())
 	require.NoError(t, err)
 
 	// Set count to 100 (at limit)
@@ -722,7 +772,7 @@ func TestAutoCreateBudget_AnomalousDecimals_Alerts(t *testing.T) {
 
 			alerter := &mockDecimalsAlerter{}
 
-			r, err := NewSimulationBudgetRule(&mockSimulator{}, repo, defaults, dq, nil, nil, simTestLogger())
+			r, err := NewSimulationBudgetRule(&mockSimulator{}, repo, NewStaticSimBudgetPolicy(true, defaults), dq, nil, nil, simTestLogger())
 			require.NoError(t, err)
 			r.SetDecimalsAlerter(alerter)
 
@@ -748,7 +798,7 @@ func TestAutoCreateBudget_NativeToken_NoDecimalsAlert(t *testing.T) {
 	}
 	alerter := &mockDecimalsAlerter{}
 
-	r, err := NewSimulationBudgetRule(&mockSimulator{}, repo, defaults, nil, nil, nil, simTestLogger())
+	r, err := NewSimulationBudgetRule(&mockSimulator{}, repo, NewStaticSimBudgetPolicy(true, defaults), nil, nil, nil, simTestLogger())
 	require.NoError(t, err)
 	r.SetDecimalsAlerter(alerter)
 
@@ -779,7 +829,7 @@ func TestCheckBudgetFromBalanceChanges_DenyOnUnitLimitReached(t *testing.T) {
 		},
 	}
 
-	r, err := NewSimulationBudgetRule(sim, repo, defaults, dq, nil, nil, simTestLogger())
+	r, err := NewSimulationBudgetRule(sim, repo, NewStaticSimBudgetPolicy(true, defaults), dq, nil, nil, simTestLogger())
 	require.NoError(t, err)
 
 	to := "0x1234567890abcdef1234567890abcdef12345678"
@@ -842,7 +892,7 @@ func TestAutoCreateBudget_TOCTOU_ConcurrentUnitsRespectMax(t *testing.T) {
 		dq.setDecimals("1", fmt.Sprintf("0xtoken%d", i), 6)
 	}
 
-	r, err := NewSimulationBudgetRule(&mockSimulator{}, repo, defaults, dq, nil, nil, simTestLogger())
+	r, err := NewSimulationBudgetRule(&mockSimulator{}, repo, NewStaticSimBudgetPolicy(true, defaults), dq, nil, nil, simTestLogger())
 	require.NoError(t, err)
 
 	syntheticRuleID := types.RuleID("sim:0xsigner")
