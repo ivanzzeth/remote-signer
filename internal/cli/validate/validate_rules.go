@@ -1,3 +1,6 @@
+// Package validate implements the `remote-signer validate-rules` CLI command.
+// validate_rules.go contains the main rule validation orchestration — loading config,
+// building engines, and dispatching to rule-type-specific validation functions.
 package validate
 
 import (
@@ -7,7 +10,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"math/big"
 	"path/filepath"
 	"strings"
 
@@ -15,7 +17,6 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/config"
 	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
-	"github.com/ivanzzeth/remote-signer/internal/ruleconfig"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
@@ -287,235 +288,10 @@ func validateRules(ctx context.Context, rules []RuleConfig, validator *evm.Solid
 				failed++
 				continue
 			}
-			validationErr := validateDeclarativeRule(rule)
-			if validationErr != nil {
-				result.Valid = false
-				result.Error = validationErr.Error()
-				results = append(results, result)
-				failed++
-				continue
-			}
-			// evm_js must have test_cases and be validated through the full engine (same as production).
-			if len(ruleCfg.TestCases) < 2 {
-				result.Valid = false
-				result.Error = fmt.Sprintf("evm_js rules require at least 2 test cases (got %d): need at least one positive and one negative", len(ruleCfg.TestCases))
-				results = append(results, result)
-				failed++
-				continue
-			}
-			var pos, neg int
-			for _, tc := range ruleCfg.TestCases {
-				if tc.ExpectPass {
-					pos++
-				} else {
-					neg++
-				}
-			}
-			if err := ruleconfig.ValidateJSRuleTestCasesRequirement(pos, neg); err != nil {
-				result.Valid = false
-				result.Error = err.Error()
-				results = append(results, result)
-				failed++
-				continue
-			}
-			if ruleEngine == nil {
-				result.Valid = false
-				result.Error = "evm_js engine not initialized"
-				results = append(results, result)
-				failed++
-				continue
-			}
-			// Set Variables on rule so JS script sees config.* (same as in full repo). Prefer TestVariables for validation.
-			var varsToSeed map[string]interface{}
-			if len(ruleCfg.TestVariables) > 0 {
-				varsToSeed = make(map[string]interface{}, len(ruleCfg.TestVariables))
-				for k, v := range ruleCfg.TestVariables {
-					varsToSeed[k] = v
-				}
-			} else if len(ruleCfg.Variables) > 0 {
-				varsToSeed = ruleCfg.Variables
-			} else if len(templateTestVariables) > 0 {
-				varsToSeed = make(map[string]interface{}, len(templateTestVariables))
-				for k, v := range templateTestVariables {
-					varsToSeed[k] = v
-				}
-			}
-			if len(varsToSeed) > 0 {
-				varsJSON, err := json.Marshal(varsToSeed)
-				if err != nil {
-					result.Valid = false
-					result.Error = fmt.Sprintf("marshal rule variables: %v", err)
-					results = append(results, result)
-					failed++
-					continue
-				}
-				rule.Variables = varsJSON
-			}
-			// When using template test_variables, override rule scope (ChainID)
-			// so the rule matches the test case's chain_id (test_cases use
-			// test_variables values, not the instance's actual chain_id).
-			// This mirrors the same logic in cmd/remote-signer/main.go startup validation.
-			if len(ruleCfg.TestVariables) > 0 {
-				if v, ok := ruleCfg.TestVariables["chain_id"]; ok && v != "" {
-					chainIDVal := v
-					rule.ChainID = &chainIDVal
-				}
-			}
-			// Template files: isolated engine (blocklist + rule under test only) so other rules don't interfere.
-			// Config instances: full engine (all rules) to validate combined behavior in production context.
-			// When using the full engine, if another whitelist rule allows a request that this rule's
-			// negative test case expects to reject, the mismatch surfaces as a test failure.
-			testEngine := ruleEngine // default: full engine (all rules)
-			if !useFullEngine {
-				var buildErr error
-				testEngine, buildErr = buildEngineForRuleTest(ctx, fullRepo, rule, hasSolidity, validator, log)
-				if buildErr != nil {
-					result.Valid = false
-					result.Error = fmt.Sprintf("build test engine: %v", buildErr)
-					results = append(results, result)
-					failed++
-					continue
-				}
-			} else {
-				log.Debug("Using full engine for rule test", "rule", ruleCfg.Name)
-			}
-			result.Valid = true // pass unless a test case fails
-			// Run each test case through the test engine (blocklist + this rule only).
-			for _, tc := range ruleCfg.TestCases {
-				tcResult := evm.TestCaseResult{
-					Name:           tc.Name,
-					ExpectedPass:   tc.ExpectPass,
-					ExpectedReason: tc.ExpectReason,
-				}
-				inputCopy := make(map[string]interface{})
-				for k, v := range tc.Input {
-					inputCopy[k] = v
-				}
-				// Substitute ${var} in test input: prefer per-rule TestVariables (template test_variables) for validation.
-				var varsForSubst map[string]string
-				if len(ruleCfg.TestVariables) > 0 {
-					varsForSubst = ruleCfg.TestVariables
-				} else if len(ruleCfg.Variables) > 0 {
-					varsForSubst = interfaceMapToStringMap(ruleCfg.Variables)
-				} else {
-					varsForSubst = templateTestVariables
-				}
-				if len(varsForSubst) > 0 {
-					jsonBytes, _ := json.Marshal(inputCopy)
-					subst, err := substituteVarsInString(string(jsonBytes), varsForSubst)
-					if err != nil {
-						tcResult.Passed = false
-						tcResult.Error = fmt.Sprintf("variable substitution: %v", err)
-						result.TestCaseResults = append(result.TestCaseResults, tcResult)
-						result.FailedTestCases++
-						result.Valid = false
-						continue
-					}
-					if err := json.Unmarshal([]byte(subst), &inputCopy); err != nil {
-						tcResult.Passed = false
-						tcResult.Error = fmt.Sprintf("substituted input invalid: %v", err)
-						result.TestCaseResults = append(result.TestCaseResults, tcResult)
-						result.FailedTestCases++
-						result.Valid = false
-						continue
-					}
-				}
-				req, parsed, err := evm.TestCaseInputToSignRequest(inputCopy)
-				if err != nil {
-					tcResult.Passed = false
-					tcResult.Error = fmt.Sprintf("build request: %v", err)
-					result.TestCaseResults = append(result.TestCaseResults, tcResult)
-					result.FailedTestCases++
-					result.Valid = false
-					continue
-				}
-				evalResult, err := testEngine.EvaluateWithResult(ctx, req, parsed)
-				if err != nil {
-					tcResult.Passed = false
-					tcResult.Error = fmt.Sprintf("engine: %v", err)
-					result.TestCaseResults = append(result.TestCaseResults, tcResult)
-					result.FailedTestCases++
-					result.Valid = false
-					continue
-				}
-				// For blocklist rules, "pass" means "not blocked"; for whitelist, "pass" means "allowed".
-				if rule.Mode == types.RuleModeBlocklist {
-					tcResult.ActualPass = !evalResult.Blocked
-				} else {
-					tcResult.ActualPass = evalResult.Allowed
-				}
-				if evalResult.Allowed {
-					tcResult.ActualReason = evalResult.AllowReason
-				} else if evalResult.Blocked {
-					tcResult.ActualReason = evalResult.BlockReason
-				} else {
-					tcResult.ActualReason = evalResult.NoMatchReason
-				}
-				if tcResult.ExpectedPass != tcResult.ActualPass {
-					tcResult.Passed = false
-					if tcResult.ExpectedPass {
-						tcResult.Error = fmt.Sprintf("expected pass but got: %s", tcResult.ActualReason)
-					} else {
-						tcResult.Error = "expected fail but passed"
-					}
-					result.FailedTestCases++
-					result.Valid = false
-				} else if tc.ExpectReason != "" && !strings.Contains(tcResult.ActualReason, tc.ExpectReason) {
-					// In a multi-rule full engine, the NoMatchReason for whitelist rules depends on
-					// evaluation order and may come from a different rule. Only enforce expect_reason
-					// when the result is blocked/allowed or when using isolated (non-full) engine.
-					isNoMatch := !evalResult.Blocked && !evalResult.Allowed
-					isWhitelistRule := rule.Mode != types.RuleModeBlocklist
-					if useFullEngine && isNoMatch && isWhitelistRule {
-						tcResult.Passed = true
-					} else {
-						tcResult.Passed = false
-						tcResult.Error = fmt.Sprintf("expected reason containing %q but got %q", tc.ExpectReason, tcResult.ActualReason)
-						result.FailedTestCases++
-						result.Valid = false
-					}
-				} else {
-					tcResult.Passed = true
-				}
-				// If expect_budget_amount is set, assert validateBudget(input) return value
-				if tcResult.Passed && tc.ExpectBudgetAmount != "" && jsEval != nil {
-					ruleInput, err := evm.MapToRuleInput(inputCopy)
-					if err != nil {
-						tcResult.Passed = false
-						tcResult.Error = fmt.Sprintf("budget input: %v", err)
-						result.FailedTestCases++
-						result.Valid = false
-					} else {
-						budgetResult, err := jsEval.EvaluateBudgetWithInput(ctx, rule, ruleInput)
-						if err != nil {
-							tcResult.Passed = false
-							tcResult.Error = fmt.Sprintf("validateBudget: %v", err)
-							result.FailedTestCases++
-							result.Valid = false
-						} else {
-							expected := new(big.Int)
-							if _, ok := expected.SetString(strings.TrimSpace(tc.ExpectBudgetAmount), 10); !ok {
-								tcResult.Passed = false
-								tcResult.Error = fmt.Sprintf("invalid expect_budget_amount %q", tc.ExpectBudgetAmount)
-								result.FailedTestCases++
-								result.Valid = false
-							} else if budgetResult.Amount.Cmp(expected) != 0 {
-								tcResult.Passed = false
-								tcResult.Error = fmt.Sprintf("expect_budget_amount %s but got %s", tc.ExpectBudgetAmount, budgetResult.Amount.String())
-								result.FailedTestCases++
-								result.Valid = false
-							}
-						}
-					}
-				}
-				result.TestCaseResults = append(result.TestCaseResults, tcResult)
-			}
-			if result.Valid {
-				passed++
-			} else {
-				failed++
-			}
+			result, p, f := runEVMJSTestCases(ctx, ruleCfg, rule, ruleEngine, fullRepo, hasSolidity, validator, jsEval, templateTestVariables, useFullEngine, log)
 			results = append(results, result)
+			passed += p
+			failed += f
 
 		case string(types.RuleTypeEVMAddressList), "evm_address_whitelist",
 			string(types.RuleTypeEVMContractMethod),

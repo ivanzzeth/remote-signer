@@ -1,3 +1,6 @@
+// Package evm provides EVM-specific chain logic for the Remote Signer.
+// solidity_batch.go handles batch evaluation of Solidity expression rules, grouping
+// rules by mode and dispatching to the Forge-based script execution engine.
 package evm
 
 import (
