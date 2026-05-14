@@ -76,6 +76,13 @@ export interface CreateRuleRequest {
   chain_id?: string;
   api_key_id?: string;
   signer_address?: string;
+  /**
+   * API keys the rule will be scoped to. ["self"] (the default,
+   * server-applied when omitted) restricts the rule to the caller;
+   * ["*"] is admin-only and applies to every key; a specific list
+   * targets just those keys.
+   */
+  applied_to?: string[];
   config: Record<string, any>;
   enabled?: boolean;
   expires_at?: string;
