@@ -110,4 +110,15 @@ audit_monitor:
   high_freq_threshold: 100
   retention_days: 90
   cleanup_interval: 24h
+
+# Rule templates and presets. Operators normally copy the repo's
+# rules/ directory under ~/.remote-signer/ on first install; the
+# daemon then auto-loads everything from these two directories on
+# every boot. Remove these blocks (or point templates_dir / presets.dir
+# elsewhere) if you maintain your own template library. v0.3+: a
+# Source-based remote loader (GitHub) is on the way; until then this
+# is the local-only path.
+templates_dir: rules/templates
+presets:
+  dir: rules/presets
 `

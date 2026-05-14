@@ -287,7 +287,20 @@ func Run(args []string) error {
 	}
 	templateInit.SetConfigDir(filepath.Dir(configPath))
 	templateInit.SetAuditLogger(auditLogger)
-	if err := templateInit.SyncFromConfig(context.Background(), cfg.Templates); err != nil {
+	// Merge in any templates discovered under templates_dir before
+	// sync. The shorthand expands to a {type:file,path:...} TemplateConfig
+	// per matching file so SyncFromConfig sees one unified list and
+	// existing dedup/conflict semantics apply.
+	allTemplates := cfg.Templates
+	if cfg.TemplatesDir != "" {
+		dirTemplates, dirErr := config.LoadTemplatesFromDir(cfg.TemplatesDir, filepath.Dir(configPath), log)
+		if dirErr != nil {
+			return fmt.Errorf("failed to enumerate templates_dir %q: %w", cfg.TemplatesDir, dirErr)
+		}
+		allTemplates = append(allTemplates, dirTemplates...)
+		log.Info("templates_dir expanded", "dir", cfg.TemplatesDir, "count", len(dirTemplates))
+	}
+	if err := templateInit.SyncFromConfig(context.Background(), allTemplates); err != nil {
 		return fmt.Errorf("failed to sync templates from config: %w", err)
 	}
 

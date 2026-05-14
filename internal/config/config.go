@@ -30,6 +30,11 @@ type Config struct {
 	Logger           LoggerConfig            `yaml:"logger"`
 	APIKeys          []APIKeyConfig          `yaml:"api_keys"`
 	Templates        []TemplateConfig        `yaml:"templates"`
+	// TemplatesDir is an optional directory whose *.template*.yaml files
+	// are auto-enumerated into TemplateConfig entries at sync time.
+	// Enumerating each file by hand in Templates is verbose; this
+	// shorthand is the path home-installs use.
+	TemplatesDir     string                  `yaml:"templates_dir,omitempty"`
 	Rules            []RuleConfig            `yaml:"rules"`
 	Presets          *PresetsConfig          `yaml:"presets,omitempty"`
 	DynamicBlocklist *DynamicBlocklistConfig `yaml:"dynamic_blocklist,omitempty"`
