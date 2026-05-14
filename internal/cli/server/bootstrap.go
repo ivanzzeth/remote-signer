@@ -109,6 +109,84 @@ func bootstrapAdminKeyIfNeeded(ctx context.Context, repo storage.APIKeyRepositor
 	return nil
 }
 
+// bootstrapAgentKeyIfNeeded provisions a fresh agent Ed25519 keypair the first
+// time the daemon boots (when no agent key with source="bootstrap" exists yet).
+// Unlike the admin key check — which guards on "any key in the table" — this
+// creates the agent key independently so existing admin keys do not block it.
+//
+// The agent keypair is written to <home>/agent.key.priv (0600) and
+// <home>/agent.key.pub (0644) under the apikeys/ subdir, and an api_keys row
+// with id="agent", role="agent", source="bootstrap" is inserted.
+func bootstrapAgentKeyIfNeeded(ctx context.Context, repo storage.APIKeyRepository, privPath, pubPath string, defaultRateLimit int, log *slog.Logger) error {
+	existing, err := repo.Get(ctx, "agent")
+	if err != nil && !types.IsNotFound(err) {
+		return fmt.Errorf("get agent api key: %w", err)
+	}
+	if existing != nil && existing.Source == types.APIKeySourceBootstrap {
+		return nil
+	}
+
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return fmt.Errorf("generate ed25519 keypair: %w", err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(privPath), 0700); err != nil {
+		return fmt.Errorf("create api-keys dir: %w", err)
+	}
+
+	privPEM, err := encodeEd25519PrivPEM(priv)
+	if err != nil {
+		return fmt.Errorf("encode private key: %w", err)
+	}
+	pubPEM, err := encodeEd25519PubPEM(pub)
+	if err != nil {
+		return fmt.Errorf("encode public key: %w", err)
+	}
+
+	if err := os.WriteFile(privPath, privPEM, 0600); err != nil {
+		return fmt.Errorf("write %s: %w", privPath, err)
+	}
+	if err := os.WriteFile(pubPath, pubPEM, 0644); err != nil {
+		_ = os.Remove(privPath)
+		return fmt.Errorf("write %s: %w", pubPath, err)
+	}
+
+	rateLimit := defaultRateLimit
+	if rateLimit <= 0 {
+		rateLimit = 100
+	}
+	now := time.Now()
+	key := &types.APIKey{
+		ID:           "agent",
+		Name:         "agent (bootstrap)",
+		PublicKeyHex: hex.EncodeToString(pub),
+		RateLimit:    rateLimit,
+		Role:         types.RoleAgent,
+		Enabled:      true,
+		Source:       types.APIKeySourceBootstrap,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	if err := repo.Create(ctx, key); err != nil {
+		_ = os.Remove(privPath)
+		_ = os.Remove(pubPath)
+		return fmt.Errorf("create agent api_key row: %w", err)
+	}
+
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, "[BOOTSTRAP] First-run setup — agent API key created.")
+	fmt.Fprintln(os.Stderr, "  Private key file:  "+privPath+"  (chmod 600)")
+	fmt.Fprintln(os.Stderr, "  Public key file:   "+pubPath)
+	fmt.Fprintln(os.Stderr, "  Public key (hex):  "+hex.EncodeToString(pub))
+	fmt.Fprintln(os.Stderr, "  Role:              agent")
+	fmt.Fprintln(os.Stderr, "  This key is used by automated agents.")
+	fmt.Fprintln(os.Stderr)
+
+	log.Info("bootstrap agent API key written", "priv", privPath, "pub", pubPath)
+	return nil
+}
+
 func encodeEd25519PrivPEM(priv ed25519.PrivateKey) ([]byte, error) {
 	der, err := x509.MarshalPKCS8PrivateKey(priv)
 	if err != nil {

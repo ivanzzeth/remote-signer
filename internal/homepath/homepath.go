@@ -24,6 +24,8 @@ const (
 	signerKeystoresSubdir  = "keystores"
 	adminPrivKeyFile       = "admin.key.priv"
 	adminPubKeyFile        = "admin.key.pub"
+	agentPrivKeyFile       = "agent.key.priv"
+	agentPubKeyFile        = "agent.key.pub"
 	envHome                = "REMOTE_SIGNER_HOME"
 	envConfig              = "REMOTE_SIGNER_CONFIG"
 )
@@ -114,6 +116,17 @@ func AdminKeyPaths() (privPath, pubPath string, err error) {
 		return "", "", err
 	}
 	return filepath.Join(dir, adminPrivKeyFile), filepath.Join(dir, adminPubKeyFile), nil
+}
+
+// AgentKeyPaths returns the bootstrap agent private/public key file paths.
+// They live under APIKeysDir so the operator only needs to memorise a single
+// directory ($HOME/.remote-signer/apikeys) for every credential.
+func AgentKeyPaths() (privPath, pubPath string, err error) {
+	dir, err := APIKeysDir()
+	if err != nil {
+		return "", "", err
+	}
+	return filepath.Join(dir, agentPrivKeyFile), filepath.Join(dir, agentPubKeyFile), nil
 }
 
 // ResolveConfigPath determines which config.yaml the server should load.

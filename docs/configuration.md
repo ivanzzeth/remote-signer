@@ -110,7 +110,7 @@ chains:
     hd_wallet_dir: "./data/hd-wallets"
 ```
 
-Keystores and HD wallets can also be created dynamically after server startup via the admin API or TUI. See [api.md](api.md) for endpoints.
+Keystores and HD wallets can also be created dynamically after server startup via the admin API or TUI.
 
 ## Foundry
 
@@ -156,7 +156,7 @@ chains:
 | `batch_window` | duration | `"1s"` | Accumulation window for single sign batch fallback |
 | `batch_max_size` | int | `20` | Max transactions per batch |
 
-API endpoints: `POST /api/v1/evm/simulate`, `POST /api/v1/evm/simulate/batch`, `GET /api/v1/evm/simulate/status`. See [tx-simulation-budget.md](features/tx-simulation-budget.md) for details.
+API endpoints: `POST /api/v1/evm/simulate`, `POST /api/v1/evm/simulate/batch`, `GET /api/v1/evm/simulate/status`. See docs/agent.md (archived) for details.
 
 ## API Keys
 
@@ -202,7 +202,7 @@ remote-signer api-key delete alice
 All operations are admin-only. The full set of fields (including scope
 restrictions like `allowed_signers`, `allowed_hd_wallets`,
 `allowed_chain_types`) is documented at
-`/api/v1/api-keys` — see [docs/api.md](api.md).
+`/api/v1/api-keys`. For SDK usage, see [INTEGRATION.md](../INTEGRATION.md).
 
 ### Permission model
 
@@ -286,7 +286,7 @@ security:
 ```
 
 Notes:
-- For security design rationale and recommended production baseline, see [security.md](security.md).
+- For security design rationale and recommended production baseline, see [SECURITY.md](../SECURITY.md).
 - `security.ip_rate_limit <= 0` disables pre-auth IP rate limiting.
 - `security.nonce_required` defaults to **true** when omitted (recommended).
 
