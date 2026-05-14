@@ -1,12 +1,14 @@
 import { expect, test } from "./fixtures";
 
-test("Requests page defaults to pending filter and renders empty state", async ({
-  authedPage,
-}) => {
-  // Capture the initial fetch so we can assert the default filter shape.
+test("Requests page defaults to 'all' filter", async ({ authedPage }) => {
+  // The page now defaults to status="" (all) so the operator sees both
+  // active queue and history without flipping a filter first. The
+  // initial list fetch omits the status query param — that's the
+  // load-bearing assertion. We don't check for an empty state because
+  // other specs in the suite seed requests against the shared daemon.
   const initialReq = authedPage.waitForRequest(
     (r) =>
-      r.url().includes("/api/v1/evm/requests") && r.url().includes("status=pending"),
+      r.url().includes("/api/v1/evm/requests") && !r.url().includes("status="),
   );
   await authedPage.click("text=Requests");
   await initialReq;
@@ -14,7 +16,6 @@ test("Requests page defaults to pending filter and renders empty state", async (
   await expect(
     authedPage.getByRole("heading", { name: "Sign requests" }),
   ).toBeVisible();
-  await expect(authedPage.locator("text=No matching requests")).toBeVisible();
 });
 
 test("changing the status filter reissues the list query", async ({
@@ -33,15 +34,16 @@ test("changing the status filter reissues the list query", async ({
   await expect(authedPage.locator("text=No matching requests")).toBeVisible();
 });
 
-test("'all' filter omits the status query param", async ({ authedPage }) => {
+test("switching to 'pending' filter narrows the list query", async ({
+  authedPage,
+}) => {
   await authedPage.click("text=Requests");
 
-  // 'all' is the empty-string option; the SDK omits the param when status
-  // is "" so the URL should not include status=...
-  const allReq = authedPage.waitForRequest((r) => {
-    if (!r.url().includes("/api/v1/evm/requests")) return false;
-    return !r.url().includes("status=");
-  });
-  await authedPage.selectOption("select:near(:text('Status'))", "");
-  await allReq;
+  const pendingReq = authedPage.waitForRequest(
+    (r) =>
+      r.url().includes("/api/v1/evm/requests") &&
+      r.url().includes("status=pending"),
+  );
+  await authedPage.selectOption("select:near(:text('Status'))", "pending");
+  await pendingReq;
 });

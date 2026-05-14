@@ -428,14 +428,16 @@ function ApprovalAttribution({ req }: { req: RequestStatusResponse }) {
 
   if (req.approval_source === "simulation") {
     const addr = req.signer_address;
-    // sim:<lowercased address> is how the daemon stores it; the budget
-    // detail route uses the same id verbatim.
-    const budgetID = `sim:${addr.toLowerCase()}`;
+    // Simulation budgets are keyed by SHA256(rule_id, unit) in the
+    // daemon, which the browser can't compute without knowing the
+    // exact unit charged. The filter-by-signer view lands the operator
+    // on the matching row (usually one per signer) so they're a click
+    // away from the detail page.
     return (
       <span className="text-sm">
         <span className="mr-1 text-ink-500">Simulation budget ·</span>
         <Link
-          to={`/budgets/${encodeURIComponent(budgetID)}`}
+          to={`/budgets?signer=${encodeURIComponent(addr.toLowerCase())}`}
           className={`font-mono ${linkClass}`}
         >
           {shorten(addr)}

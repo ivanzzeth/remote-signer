@@ -61,18 +61,17 @@ test("approve a pending request via the UI completes it", async ({
   expect(requestId).toBeTruthy();
 
   await authedPage.click("text=Requests");
-  // Switch the filter to "all" before searching — the daemon may park
-  // unmatched requests as either "pending" (manual approval pipeline) or
-  // briefly "authorizing" (rule evaluation in flight), and the default
-  // /requests filter shows only "pending".
-  await authedPage.selectOption("select:near(:text('Status'))", "");
+  // List defaults to "all" so pending + authorizing both show without
+  // changing filters. Rows show the shortened signer address (head=10,
+  // tail=6) — match on the head fragment which is unique enough across
+  // a single test run, and use the inline Approve button rather than
+  // navigating to the detail page.
+  const shortPrefix = signer.address.slice(0, 10);
   const row = authedPage.locator("tr", {
-    has: authedPage.locator(`text=${signer.address}`),
+    has: authedPage.locator(`text=${shortPrefix}`),
   });
   await expect(row).toBeVisible({ timeout: 10_000 });
-
-  await row.click(); // expand the detail panel
-  await authedPage.click("button:has-text('Approve')");
+  await row.getByRole("button", { name: "Approve" }).click();
 
   // The row's status badge flips off pending/authorizing once approval
   // lands. Cross-check via the SDK that the request is no longer waiting
