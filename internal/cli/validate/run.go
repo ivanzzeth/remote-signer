@@ -13,10 +13,6 @@ import (
 
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/config"
-	"github.com/ivanzzeth/remote-signer/internal/core/rule"
-	"github.com/ivanzzeth/remote-signer/internal/core/types"
-	"github.com/ivanzzeth/remote-signer/internal/ruleconfig"
-	"github.com/ivanzzeth/remote-signer/internal/storage"
 	versionpkg "github.com/ivanzzeth/remote-signer/internal/version"
 )
 
