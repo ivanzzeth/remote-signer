@@ -115,9 +115,10 @@ function TemplateView({
 
 // RulesCard surfaces the template's `config.rules[]` array so the
 // operator can see exactly what sub-rules this template will expand
-// into when applied. The Mode column on the list view shows an
-// aggregate ("whitelist" / "blocklist" / "mixed"); this card explains
-// the aggregate by listing each rule's name, type, and individual mode.
+// into when applied. Each row is collapsible: the header carries
+// identity (name, mode, type), expanding reveals the full rule body
+// (config block with the Solidity expression / JS script / address
+// allowlist / ${var} placeholders) plus any declared test cases.
 function RulesCard({ tmpl }: { tmpl: Template }) {
   const rules = extractRules(tmpl);
   if (rules.length === 0) {
@@ -127,32 +128,131 @@ function RulesCard({ tmpl }: { tmpl: Template }) {
     <Card title={`Rules (${rules.length})`}>
       <ul className="divide-y divide-ink-100 text-sm">
         {rules.map((r, i) => (
-          <li key={r.id || r.name || i} className="py-2">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                <div className="text-ink-900">{r.name || r.id || `rule ${i + 1}`}</div>
-                {r.description && (
-                  <div className="text-[11px] text-ink-500">{r.description}</div>
-                )}
-                {r.id && r.name && (
-                  <div className="font-mono text-[10px] text-ink-500">{r.id}</div>
-                )}
-              </div>
-              <div className="flex shrink-0 gap-1.5">
-                {r.mode && (
-                  <Badge tone={r.mode === "blocklist" ? "red" : "neutral"}>{r.mode}</Badge>
-                )}
-                {r.type && (
-                  <span className="rounded bg-ink-100 px-1.5 py-0.5 font-mono text-[10px] text-ink-700">
-                    {r.type}
-                  </span>
-                )}
-              </div>
-            </div>
-          </li>
+          <RuleRow key={r.id || r.name || i} rule={r} fallbackIndex={i} />
         ))}
       </ul>
     </Card>
+  );
+}
+
+function RuleRow({ rule, fallbackIndex }: { rule: SubRule; fallbackIndex: number }) {
+  const [open, setOpen] = useState(false);
+  const title = rule.name || rule.id || `rule ${fallbackIndex + 1}`;
+  return (
+    <li className="py-2">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-start justify-between gap-3 text-left hover:bg-ink-50"
+        data-testid={`tmpl-rule-row-${rule.id || rule.name || fallbackIndex}`}
+      >
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="text-ink-500">{open ? "▼" : "▶"}</span>
+            <span className="text-ink-900">{title}</span>
+          </div>
+          {rule.description && (
+            <div className="ml-5 text-[11px] text-ink-500">{rule.description}</div>
+          )}
+          {rule.id && rule.name && (
+            <div className="ml-5 font-mono text-[10px] text-ink-500">{rule.id}</div>
+          )}
+        </div>
+        <div className="flex shrink-0 gap-1.5 pt-0.5">
+          {rule.mode && (
+            <Badge tone={rule.mode === "blocklist" ? "red" : "neutral"}>{rule.mode}</Badge>
+          )}
+          {rule.type && (
+            <span className="rounded bg-ink-100 px-1.5 py-0.5 font-mono text-[10px] text-ink-700">
+              {rule.type}
+            </span>
+          )}
+        </div>
+      </button>
+      {open && <RuleDetail rule={rule} />}
+    </li>
+  );
+}
+
+// RuleDetail shows the full rule body when a row is expanded.
+// JS rules (`evm_js`) have a `script:` field which is more readable as
+// pre-formatted code than as nested JSON; we pull it out and render the
+// rest of the config separately. Solidity expressions live under
+// `config.expression`, same treatment. Test cases get their own block
+// so operators can see what cases the template author covered.
+function RuleDetail({ rule }: { rule: SubRule }) {
+  const body = rule._raw ?? {};
+  const cfg = (body.config as Record<string, unknown> | undefined) ?? {};
+  const script = typeof cfg.script === "string" ? cfg.script : "";
+  const expression = typeof cfg.expression === "string" ? cfg.expression : "";
+  // Remaining config fields (everything other than script/expression).
+  const otherCfg: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(cfg)) {
+    if (k !== "script" && k !== "expression") {
+      otherCfg[k] = v;
+    }
+  }
+  const testCases = Array.isArray(body.test_cases) ? (body.test_cases as unknown[]) : [];
+
+  return (
+    <div className="ml-5 mt-2 space-y-3 border-l-2 border-ink-100 pl-3 text-xs">
+      {script && (
+        <CodeBlock title="config.script" body={script} lang="js" />
+      )}
+      {expression && (
+        <CodeBlock title="config.expression" body={expression} lang="sol" />
+      )}
+      {Object.keys(otherCfg).length > 0 && (
+        <CodeBlock
+          title={script || expression ? "config (other)" : "config"}
+          body={JSON.stringify(otherCfg, null, 2)}
+          lang="json"
+        />
+      )}
+      {testCases.length > 0 && (
+        <details className="text-xs">
+          <summary className="cursor-pointer text-ink-700">
+            Test cases ({testCases.length})
+          </summary>
+          <CodeBlock
+            title=""
+            body={JSON.stringify(testCases, null, 2)}
+            lang="json"
+            compact
+          />
+        </details>
+      )}
+    </div>
+  );
+}
+
+function CodeBlock({
+  title,
+  body,
+  lang,
+  compact,
+}: {
+  title: string;
+  body: string;
+  lang: string;
+  compact?: boolean;
+}) {
+  return (
+    <div>
+      {title && (
+        <div className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-wider text-ink-500">
+          <span>{title}</span>
+          <span className="font-mono">{lang}</span>
+        </div>
+      )}
+      <pre
+        className={`overflow-auto rounded bg-ink-50 p-2 font-mono text-[11px] leading-snug text-ink-800 ${
+          compact ? "max-h-48" : "max-h-96"
+        }`}
+      >
+        {body}
+      </pre>
+    </div>
   );
 }
 
@@ -163,6 +263,10 @@ interface SubRule {
   mode?: string;
   description?: string;
   enabled?: boolean;
+  // _raw carries the full original object so the expand pane can
+  // render config / test_cases / etc. without re-deriving from the
+  // template. Kept off the surface API for the row header.
+  _raw?: Record<string, unknown>;
 }
 
 // extractRules pulls the rules array out of the template's config blob.
@@ -182,6 +286,7 @@ function extractRules(tmpl: Template): SubRule[] {
         mode: typeof o.mode === "string" ? o.mode : undefined,
         description: typeof o.description === "string" ? o.description : undefined,
         enabled: typeof o.enabled === "boolean" ? o.enabled : undefined,
+        _raw: o,
       };
     }
     return {};
