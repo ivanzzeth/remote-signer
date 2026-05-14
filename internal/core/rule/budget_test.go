@@ -173,6 +173,15 @@ func (m *mockTemplateRepoForBudget) List(ctx context.Context, filter storage.Tem
 func (m *mockTemplateRepoForBudget) Count(ctx context.Context, filter storage.TemplateFilter) (int, error) {
 	return 0, nil
 }
+func (m *mockTemplateRepoForBudget) Upsert(ctx context.Context, tmpl *types.RuleTemplate) (bool, error) {
+	return false, nil
+}
+func (m *mockTemplateRepoForBudget) ListIDsBySource(ctx context.Context, source types.RuleSource) ([]string, error) {
+	return nil, nil
+}
+func (m *mockTemplateRepoForBudget) DeleteMany(ctx context.Context, ids []string) error {
+	return nil
+}
 
 // TestBudgetChecker_CheckAndDeductBudget_PeriodicRenewal_ResetsThenAllowsSpend ensures that
 // when a rule has BudgetPeriod and BudgetPeriodStart (creation time + period), and the budget

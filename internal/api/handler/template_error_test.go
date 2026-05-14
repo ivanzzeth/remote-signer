@@ -164,6 +164,46 @@ func (r *errTemplateRepo) Count(_ context.Context, filter storage.TemplateFilter
 	return count, nil
 }
 
+func (r *errTemplateRepo) Upsert(_ context.Context, tmpl *types.RuleTemplate) (bool, error) {
+	if tmpl == nil {
+		return false, fmt.Errorf("template cannot be nil")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if existing, ok := r.templates[tmpl.ID]; ok {
+		if existing.ContentHash != "" && existing.ContentHash == tmpl.ContentHash {
+			return false, nil
+		}
+		clone := *tmpl
+		r.templates[tmpl.ID] = &clone
+		return true, nil
+	}
+	clone := *tmpl
+	r.templates[tmpl.ID] = &clone
+	return true, nil
+}
+
+func (r *errTemplateRepo) ListIDsBySource(_ context.Context, source types.RuleSource) ([]string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var ids []string
+	for id, t := range r.templates {
+		if t.Source == source {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+
+func (r *errTemplateRepo) DeleteMany(_ context.Context, ids []string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, id := range ids {
+		delete(r.templates, id)
+	}
+	return nil
+}
+
 // seed inserts a template directly into the error repo
 func (r *errTemplateRepo) seed(tmpl *types.RuleTemplate) {
 	r.mu.Lock()

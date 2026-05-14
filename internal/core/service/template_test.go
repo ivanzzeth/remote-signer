@@ -101,6 +101,46 @@ func (r *mockTemplateRepo) Count(_ context.Context, _ storage.TemplateFilter) (i
 	return len(r.templates), nil
 }
 
+func (r *mockTemplateRepo) Upsert(ctx context.Context, tmpl *types.RuleTemplate) (bool, error) {
+	if tmpl == nil {
+		return false, fmt.Errorf("template cannot be nil")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if existing, ok := r.templates[tmpl.ID]; ok {
+		if existing.ContentHash != "" && existing.ContentHash == tmpl.ContentHash {
+			return false, nil
+		}
+		cp := *tmpl
+		r.templates[tmpl.ID] = &cp
+		return true, nil
+	}
+	cp := *tmpl
+	r.templates[tmpl.ID] = &cp
+	return true, nil
+}
+
+func (r *mockTemplateRepo) ListIDsBySource(_ context.Context, source types.RuleSource) ([]string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var ids []string
+	for id, t := range r.templates {
+		if t.Source == source {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+
+func (r *mockTemplateRepo) DeleteMany(_ context.Context, ids []string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, id := range ids {
+		delete(r.templates, id)
+	}
+	return nil
+}
+
 // mockRuleRepo is an in-memory implementation of storage.RuleRepository.
 type mockRuleRepo struct {
 	mu    sync.RWMutex

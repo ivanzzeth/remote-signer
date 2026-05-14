@@ -295,6 +295,46 @@ func (m *mockTemplateRepository) Count(_ context.Context, _ storage.TemplateFilt
 	return len(m.templates), nil
 }
 
+func (m *mockTemplateRepository) Upsert(_ context.Context, tmpl *types.RuleTemplate) (bool, error) {
+	if tmpl == nil {
+		return false, fmt.Errorf("template cannot be nil")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if existing, ok := m.templates[tmpl.ID]; ok {
+		if existing.ContentHash != "" && existing.ContentHash == tmpl.ContentHash {
+			return false, nil
+		}
+		clone := *tmpl
+		m.templates[tmpl.ID] = &clone
+		return true, nil
+	}
+	clone := *tmpl
+	m.templates[tmpl.ID] = &clone
+	return true, nil
+}
+
+func (m *mockTemplateRepository) ListIDsBySource(_ context.Context, source types.RuleSource) ([]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var ids []string
+	for id, t := range m.templates {
+		if t.Source == source {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+
+func (m *mockTemplateRepository) DeleteMany(_ context.Context, ids []string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, id := range ids {
+		delete(m.templates, id)
+	}
+	return nil
+}
+
 // --- error repositories ---
 
 type errorRuleRepository struct {
@@ -360,6 +400,15 @@ func (e *errorTemplateRepository) List(_ context.Context, _ storage.TemplateFilt
 }
 func (e *errorTemplateRepository) Count(_ context.Context, _ storage.TemplateFilter) (int, error) {
 	return 0, nil
+}
+func (e *errorTemplateRepository) Upsert(_ context.Context, _ *types.RuleTemplate) (bool, error) {
+	return false, nil
+}
+func (e *errorTemplateRepository) ListIDsBySource(_ context.Context, _ types.RuleSource) ([]string, error) {
+	return nil, nil
+}
+func (e *errorTemplateRepository) DeleteMany(_ context.Context, _ []string) error {
+	return nil
 }
 
 type errorAPIKeyRepository struct {
@@ -516,6 +565,15 @@ func (f *failUpdateTemplateRepo) List(ctx context.Context, filter storage.Templa
 func (f *failUpdateTemplateRepo) Count(ctx context.Context, filter storage.TemplateFilter) (int, error) {
 	return f.base.Count(ctx, filter)
 }
+func (f *failUpdateTemplateRepo) Upsert(ctx context.Context, tmpl *types.RuleTemplate) (bool, error) {
+	return f.base.Upsert(ctx, tmpl)
+}
+func (f *failUpdateTemplateRepo) ListIDsBySource(ctx context.Context, source types.RuleSource) ([]string, error) {
+	return f.base.ListIDsBySource(ctx, source)
+}
+func (f *failUpdateTemplateRepo) DeleteMany(ctx context.Context, ids []string) error {
+	return f.base.DeleteMany(ctx, ids)
+}
 
 type failDeleteTemplateRepo struct {
 	base      storage.TemplateRepository
@@ -540,6 +598,15 @@ func (f *failDeleteTemplateRepo) List(ctx context.Context, filter storage.Templa
 }
 func (f *failDeleteTemplateRepo) Count(ctx context.Context, filter storage.TemplateFilter) (int, error) {
 	return f.base.Count(ctx, filter)
+}
+func (f *failDeleteTemplateRepo) Upsert(ctx context.Context, tmpl *types.RuleTemplate) (bool, error) {
+	return f.base.Upsert(ctx, tmpl)
+}
+func (f *failDeleteTemplateRepo) ListIDsBySource(ctx context.Context, source types.RuleSource) ([]string, error) {
+	return f.base.ListIDsBySource(ctx, source)
+}
+func (f *failDeleteTemplateRepo) DeleteMany(ctx context.Context, ids []string) error {
+	return f.base.DeleteMany(ctx, ids)
 }
 
 // ===========================================================================

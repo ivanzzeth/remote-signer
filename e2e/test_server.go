@@ -155,6 +155,7 @@ func (ts *TestServer) Start() error {
 		&types.APIKey{},
 		&types.AuditRecord{},
 		&types.RuleTemplate{},
+		&types.RulePreset{},
 		&types.RuleBudget{},
 		&types.TokenMetadata{},
 		&types.SignerOwnership{},
