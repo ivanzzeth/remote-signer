@@ -981,9 +981,16 @@ func Run(args []string) error {
 		RPCProvider:                  rpcProvider,
 		SettingsManager:              settingsMgr,
 	}
-	if presetsDir != "" {
-		routerConfig.PresetsDir = presetsDir
+	// Preset API: wire the DB-backed repo (populated by Registry sync at boot).
+	// The legacy presetsDir is no longer used by the handler — left as a no-op
+	// placeholder so the existing config field doesn't error; it can be removed
+	// once we drop the legacy abs-path resolution above.
+	_ = presetsDir
+	if presetRepo, err := storage.NewGormPresetRepository(db); err == nil {
+		routerConfig.PresetRepo = presetRepo
 		routerConfig.PresetsDB = db
+	} else {
+		log.Warn("preset API disabled: failed to wire preset repo", "error", err)
 	}
 	router, err := api.NewRouter(authVerifier, signService, evmSignerManager, ruleRepo, auditRepo, log, routerConfig)
 	if err != nil {

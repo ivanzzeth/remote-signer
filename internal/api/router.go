@@ -56,9 +56,12 @@ type RouterConfig struct {
 	BudgetRepo                   storage.BudgetRepository          // optional: for GET /api/v1/evm/rules/{id}/budgets
 	MaxRulesPerAPIKey            int                               // per-key rule count limit (0 = no limit, default 50)
 	RequireApprovalForAgentRules bool                              // require admin approval for agent whitelist rules
-	// Preset API (admin-only). When PresetsDir is non-empty, GET/POST /api/v1/presets are registered.
-	PresetsDir string   // directory containing preset YAML files (resolved absolute path)
-	PresetsDB  *gorm.DB // optional: for preset apply transaction; required when PresetsDir is set and template service is used
+	// Preset API (admin-only). Presets live in the DB after v0.3 Registry
+	// sync; the handler reads them from PresetRepo and writes apply
+	// results in PresetsDB transactions. Both are required to register
+	// the /api/v1/presets routes.
+	PresetRepo storage.PresetRepository // DB-backed preset catalogue
+	PresetsDB  *gorm.DB                 // txn handle for preset apply
 	// Wallets
 	WalletRepo storage.WalletRepository // optional: for wallet CRUD
 
@@ -445,24 +448,16 @@ func (r *Router) setupRoutes() error {
 	}
 
 	// Preset API (read: PermReadPresets; apply: PermApplyPreset checked in handler)
-	if r.config.PresetsDir != "" {
-		var templateSvc *service.TemplateService
-		if r.config.Template != nil {
-			templateSvc = r.config.Template.TemplateService
-		}
-		var templateRepoForPreset storage.TemplateRepository
-		if r.config.Template != nil {
-			templateRepoForPreset = r.config.Template.TemplateRepo
-		}
+	if r.config.PresetRepo != nil && r.config.Template != nil && r.config.Template.TemplateRepo != nil {
 		presetHandler, err := handler.NewPresetHandler(
-			r.config.PresetsDir,
+			r.config.PresetRepo,
+			r.config.Template.TemplateRepo,
 			r.config.PresetsDB,
-			templateSvc,
+			r.config.Template.TemplateService,
 			r.config.RulesAPIReadonly,
 			r.logger,
 			handler.WithPresetRequireApproval(r.config.RequireApprovalForAgentRules),
 			handler.WithPresetAPIKeyRepo(r.config.APIKeyRepo),
-			handler.WithPresetTemplateRepo(templateRepoForPreset),
 		)
 		if err != nil {
 			return err
