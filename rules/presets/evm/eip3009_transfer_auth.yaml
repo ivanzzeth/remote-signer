@@ -1,0 +1,20 @@
+# Preset: EIP-3009 TransferWithAuthorization / ReceiveWithAuthorization typed_data validation (evm_js).
+# Use: remote-signer-cli preset create-from eip3009_transfer_auth.preset.js.yaml [--config config.yaml --write] [--set chain_id=1 --set token_address=0x...]
+
+name: "EIP-3009 Transfer Auth (JS)"
+chain_type: "evm"
+chain_id: "1"
+enabled: true
+variables:
+  token_address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+  max_transfer_value: "-1"
+  allowed_recipients: ""
+template_ids:
+  - evm/eip3009_transfer_auth
+operator_overrides:
+  - name: token_address
+    required: false
+  - name: max_transfer_value
+    required: false
+  - name: allowed_recipients
+    required: false

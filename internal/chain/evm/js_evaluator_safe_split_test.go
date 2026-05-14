@@ -33,7 +33,7 @@ func TestSafeRule_SplitRequestFromDB(t *testing.T) {
 
 	// Load Safe template and extract whitelist rule script (Safe SafeTx and execTransaction)
 	repoRoot := findRepoRoot(t)
-	templatePath := filepath.Join(repoRoot, "rules", "templates", "safe.template.js.yaml")
+	templatePath := filepath.Join(repoRoot, "rules", "templates", "evm", "safe.yaml")
 	data, err := os.ReadFile(templatePath)
 	require.NoError(t, err)
 
@@ -80,7 +80,7 @@ func findRepoRoot(t *testing.T) string {
 	dir, err := os.Getwd()
 	require.NoError(t, err)
 	for {
-		if _, err := os.Stat(filepath.Join(dir, "rules", "templates", "safe.template.js.yaml")); err == nil {
+		if _, err := os.Stat(filepath.Join(dir, "rules", "templates", "evm", "safe.yaml")); err == nil {
 			return dir
 		}
 		parent := filepath.Dir(dir)

@@ -1,0 +1,23 @@
+# Preset: ERC1155 safeTransferFrom/safeBatchTransferFrom/setApprovalForAll allowlists (evm_js).
+# Use: remote-signer-cli preset create-from erc1155.preset.js.yaml [--config config.yaml --write] [--set chain_id=1 --set token_address=0x...]
+
+name: "ERC1155 (JS)"
+chain_type: "evm"
+chain_id: "1"
+enabled: true
+variables:
+  token_address: "0x495f947276749Ce646f68AC8c248420045cb7b5e"
+  allowed_recipients: ""
+  allowed_transfer_from: ""
+  allowed_operators: ""
+template_ids:
+  - evm/erc1155
+operator_overrides:
+  - name: token_address
+    required: false
+  - name: allowed_recipients
+    required: false
+  - name: allowed_transfer_from
+    required: false
+  - name: allowed_operators
+    required: false
