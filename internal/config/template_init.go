@@ -128,6 +128,81 @@ func (i *TemplateInitializer) GetLoadedTemplates(templates []TemplateConfig) ([]
 	return ExpandTemplatesFromFiles(templates, i.configDir, i.logger)
 }
 
+// LoadTemplatesFromDir enumerates *.template*.yaml files under dir and
+// returns one {type:file,path:...} TemplateConfig per match. The
+// returned slice is meant to be appended to cfg.Templates and fed into
+// SyncFromConfig — the existing file-loader handles the rest.
+//
+// Filename convention: a template file is anything matching either of:
+//
+//   *.template.yaml          (e.g. polymarket_safe.template.yaml)
+//   *.template.js.yaml       (e.g. erc20.template.js.yaml)
+//
+// The template's name is derived from the filename (basename without
+// the .template.* suffix), but the file's own `variables:` /
+// `budget_metering:` / `rules:` block is what populates the
+// TemplateConfig fields after the file-loader runs.
+func LoadTemplatesFromDir(dir string, configDir string, logger *slog.Logger) ([]TemplateConfig, error) {
+	resolved := dir
+	if !filepath.IsAbs(resolved) {
+		resolved = filepath.Join(configDir, dir)
+	}
+	entries, err := os.ReadDir(resolved)
+	if err != nil {
+		return nil, fmt.Errorf("read templates_dir: %w", err)
+	}
+	var out []TemplateConfig
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !isTemplateFilename(name) {
+			continue
+		}
+		// Path stays relative to configDir; the file-loader resolves
+		// relative paths via configDir at load time.
+		path := filepath.Join(dir, name)
+		// Derived display name: strip .template.* suffix, replace
+		// underscores with spaces, title-case. Pure UX nicety — the
+		// file's own metadata wins downstream.
+		displayName := deriveTemplateDisplayName(name)
+		out = append(out, TemplateConfig{
+			Name:    displayName,
+			Type:    TemplateFileType,
+			Enabled: true,
+			Config:  map[string]interface{}{"path": path},
+		})
+	}
+	if logger != nil {
+		logger.Debug("enumerated templates_dir", "dir", resolved, "count", len(out))
+	}
+	return out, nil
+}
+
+// isTemplateFilename reports whether the file looks like a template
+// YAML: <name>.template.yaml or <name>.template.<lang>.yaml. We accept
+// only ".yaml" (not ".yml") to match the convention the repo uses and
+// avoid surprises if an operator drops unrelated YAML files in the dir.
+func isTemplateFilename(name string) bool {
+	if !strings.HasSuffix(name, ".yaml") {
+		return false
+	}
+	return strings.Contains(name, ".template.")
+}
+
+// deriveTemplateDisplayName produces a human-ish title from a filename.
+// "erc20.template.js.yaml" → "erc20", "polymarket_safe.template.yaml"
+// → "polymarket safe". The file's own metadata can override this.
+func deriveTemplateDisplayName(filename string) string {
+	base := filename
+	if idx := strings.Index(base, ".template."); idx > 0 {
+		base = base[:idx]
+	}
+	base = strings.ReplaceAll(base, "_", " ")
+	return base
+}
+
 // ExpandTemplatesFromFiles expands "file" type templates by loading from external YAML files.
 // Does not require DB; use for validation (e.g. validate-rules -config). configDir resolves relative paths.
 func ExpandTemplatesFromFiles(templates []TemplateConfig, configDir string, logger *slog.Logger) ([]TemplateConfig, error) {
