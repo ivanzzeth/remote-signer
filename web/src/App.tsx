@@ -9,11 +9,15 @@ import { Budgets } from "./pages/Budgets";
 import { Dashboard } from "./pages/Dashboard";
 import { HDWallets } from "./pages/HDWallets";
 import { Login } from "./pages/Login";
+import { PresetDetail } from "./pages/PresetDetail";
+import { Presets } from "./pages/Presets";
 import { RequestDetail } from "./pages/RequestDetail";
 import { Requests } from "./pages/Requests";
 import { Rules } from "./pages/Rules";
 import { Settings } from "./pages/Settings";
 import { Signers } from "./pages/Signers";
+import { TemplateDetail } from "./pages/TemplateDetail";
+import { Templates } from "./pages/Templates";
 import { Wallets } from "./pages/Wallets";
 
 /**
@@ -53,6 +57,10 @@ export function App() {
         <Route path="/requests" element={<Requests />} />
         <Route path="/requests/:id" element={<RequestDetail />} />
         <Route path="/rules" element={<Rules />} />
+        <Route path="/templates" element={<Templates />} />
+        <Route path="/templates/:id" element={<TemplateDetail />} />
+        <Route path="/presets" element={<Presets />} />
+        <Route path="/presets/:id" element={<PresetDetail />} />
         <Route path="/budgets" element={<Budgets />} />
         <Route path="/budgets/:id" element={<BudgetDetail />} />
         <Route path="/api-keys" element={<ApiKeys />} />

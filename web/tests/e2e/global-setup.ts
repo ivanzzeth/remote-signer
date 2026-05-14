@@ -43,6 +43,7 @@ export default async function globalSetup(): Promise<void> {
   // when invoked via `npm run test:e2e`. The Go build target writes to repo
   // root, which is ../ from here.
   const binary = resolve(__dirname, "../../../remote-signer");
+  const rulesDir = resolve(__dirname, "../../../rules");
 
   // Isolated home so the test daemon never touches the developer's actual
   // ~/.remote-signer (own SQLite, own admin key, own audit log).
@@ -88,6 +89,13 @@ chains:
     enabled: true
     keystore_dir: "${home}/keystores"
     hd_wallet_dir: "${home}/hd-wallets"
+
+# Point template + preset loaders at the repo's built-in catalogue so
+# /templates and /presets specs see real data without needing a separate
+# fixture step. Absolute paths bypass the configDir-relative resolver.
+templates_dir: "${rulesDir}/templates"
+presets:
+  dir: "${rulesDir}/presets"
 `;
   writeFileSync(join(home, "config.yaml"), cfg.trimStart());
 
