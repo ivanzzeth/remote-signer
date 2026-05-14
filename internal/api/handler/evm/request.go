@@ -29,13 +29,13 @@ var validStatuses = map[types.SignRequestStatus]bool{
 
 // RequestHandler handles request status queries
 type RequestHandler struct {
-	signService *service.SignService
+	signService service.SignServiceAPI
 	ruleRepo    storage.RuleRepository
 	logger      *slog.Logger
 }
 
 // NewRequestHandler creates a new request handler
-func NewRequestHandler(signService *service.SignService, ruleRepo storage.RuleRepository, logger *slog.Logger) (*RequestHandler, error) {
+func NewRequestHandler(signService service.SignServiceAPI, ruleRepo storage.RuleRepository, logger *slog.Logger) (*RequestHandler, error) {
 	if signService == nil {
 		return nil, fmt.Errorf("sign service is required")
 	}
@@ -70,9 +70,14 @@ type RequestDetailResponse struct {
 	RuleMatchedID    *string         `json:"rule_matched_id,omitempty"`
 	RuleMatchedName  *string         `json:"rule_matched_name,omitempty"`
 	ApprovedBy       *string         `json:"approved_by,omitempty"`
-	CreatedAt        string          `json:"created_at"`
-	UpdatedAt        string          `json:"updated_at"`
-	CompletedAt      *string         `json:"completed_at,omitempty"`
+	// ApprovalSource is one of "manual", "rule", "simulation" once the
+	// request has been approved. Emitted even when the row predates the
+	// column so the UI can render a single consistent "approved by …"
+	// line for all three paths.
+	ApprovalSource string `json:"approval_source,omitempty"`
+	CreatedAt      string `json:"created_at"`
+	UpdatedAt      string `json:"updated_at"`
+	CompletedAt    *string `json:"completed_at,omitempty"`
 }
 
 // ListRequestsResponse represents the response for listing requests
@@ -122,8 +127,8 @@ func (h *RequestHandler) getRequest(w http.ResponseWriter, r *http.Request, apiK
 		return
 	}
 
-	// Non-admin may only view requests created with their API key; admin may view any
-	if !apiKey.Admin && req.APIKeyID != apiKey.ID {
+	// Non-admin/dev may only view requests created with their API key
+	if !apiKey.IsAdmin() && !apiKey.IsDev() && req.APIKeyID != apiKey.ID {
 		h.writeError(w, "not authorized to view this request", http.StatusForbidden)
 		return
 	}
@@ -133,13 +138,13 @@ func (h *RequestHandler) getRequest(w http.ResponseWriter, r *http.Request, apiK
 
 // ListHandler handles listing requests
 type ListHandler struct {
-	signService *service.SignService
+	signService service.SignServiceAPI
 	ruleRepo    storage.RuleRepository
 	logger      *slog.Logger
 }
 
 // NewListHandler creates a new list handler
-func NewListHandler(signService *service.SignService, ruleRepo storage.RuleRepository, logger *slog.Logger) (*ListHandler, error) {
+func NewListHandler(signService service.SignServiceAPI, ruleRepo storage.RuleRepository, logger *slog.Logger) (*ListHandler, error) {
 	if signService == nil {
 		return nil, fmt.Errorf("sign service is required")
 	}
@@ -170,11 +175,11 @@ func (h *ListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build filter: non-admin keys only see their own requests; admin sees all
+	// Build filter: admin/dev see all requests; others see only their own
 	filter := storage.RequestFilter{
 		Limit: 20, // default limit
 	}
-	if !apiKey.Admin {
+	if !apiKey.IsAdmin() && !apiKey.IsDev() {
 		filter.APIKeyID = &apiKey.ID
 	}
 
@@ -301,6 +306,17 @@ func toDetailResponse(ctx context.Context, ruleRepo storage.RuleRepository, req 
 		ApprovedBy:    req.ApprovedBy,
 		CreatedAt:     req.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt:     req.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+	}
+	// Only attribute once the request has actually been approved.
+	// Pending/authorizing rows have neither approver nor matched rule
+	// yet — emitting "simulation" there would be a lie.
+	switch req.Status {
+	case types.StatusSigning, types.StatusCompleted, types.StatusFailed:
+		if req.ApprovalSource != "" {
+			resp.ApprovalSource = req.ApprovalSource
+		} else {
+			resp.ApprovalSource = types.DeriveApprovalSource(req.RuleMatchedID, req.ApprovedBy)
+		}
 	}
 	if req.RuleMatchedID != nil && ruleRepo != nil {
 		rule, err := ruleRepo.Get(ctx, types.RuleID(*req.RuleMatchedID))

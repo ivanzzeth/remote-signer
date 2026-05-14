@@ -1,0 +1,171 @@
+# ERC721 template (evm_js) — fund-flow safe, parameter-level validation for NFT methods.
+# Filename *.template.js.yaml = template fully driven by evm_js rules.
+# Covers: transferFrom, safeTransferFrom (2 overloads), approve, setApprovalForAll.
+# All parameters validated: allowlists for addresses (empty = any).
+
+name: ERC721 transfer/approve with allowlists
+variables:
+  - name: token_address
+    type: address
+    description: "ERC721 NFT contract address"
+    required: true
+  - name: allowed_recipients
+    type: address_list
+    description: "Comma-separated addresses allowed as transfer/safeTransfer 'to'. REQUIRED: must explicitly list allowed recipient addresses."
+    required: true
+  - name: allowed_transfer_from
+    type: address_list
+    # SECURITY: When empty, any 'from' address is allowed in transferFrom/safeTransferFrom. This is
+    # acceptable for the signer's own NFTs but means the rule won't restrict which addresses can be
+    # pulled from. Configure explicitly in production if the signer manages multiple source addresses.
+    description: "Comma-separated addresses allowed as 'from' in transferFrom/safeTransferFrom. Empty = any."
+    required: false
+    default: ""
+  - name: allowed_approve_to
+    type: address_list
+    description: "Comma-separated addresses allowed as approve(to). REQUIRED: must explicitly list allowed approval target addresses."
+    required: true
+  - name: allowed_operators
+    type: address_list
+    description: "Comma-separated addresses allowed as setApprovalForAll(operator). REQUIRED: must explicitly list allowed operator addresses."
+    required: true
+test_variables:
+  chain_id: "1"
+  token_address: "0xBC4ca0EdA7647A8aB7C2061c2E118A18a936f13D"
+  allowed_recipients: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+  allowed_approve_to: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+  allowed_operators: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+  allowed_transfer_from: ""
+rules:
+  - id: "erc721-transfer-approve-allowlists"
+    name: "ERC721 transfer/approve with allowlists"
+    type: "evm_js"
+    mode: "whitelist"
+    enabled: true
+    description: "ERC721 transferFrom, safeTransferFrom, approve, setApprovalForAll on configured token; parameter-level allowlists"
+    config:
+      sign_type_filter: "transaction"
+      script: |
+        function validate(input) {
+          var ctx = rs.tx.require(input);
+          var token = config.token_address;
+          require(token && isAddress(token), 'invalid token config');
+          require(rs.addr.inList(ctx.tx.to, [token]), 'wrong contract');
+          var transferFromSel = selector('transferFrom(address,address,uint256)');
+          var safeTransferFromSel = selector('safeTransferFrom(address,address,uint256)');
+          var safeTransferFromBytesSel = selector('safeTransferFrom(address,address,uint256,bytes)');
+          var approveSel = selector('approve(address,uint256)');
+          var setApprovalForAllSel = selector('setApprovalForAll(address,bool)');
+          if (eq(ctx.selector, transferFromSel)) return validateTransferFrom(ctx.payloadHex);
+          if (eq(ctx.selector, safeTransferFromSel)) return validateTransferFrom(ctx.payloadHex);
+          if (eq(ctx.selector, safeTransferFromBytesSel)) return validateSafeTransferFromBytes(ctx.payloadHex);
+          if (eq(ctx.selector, approveSel)) return validateApprove(ctx.payloadHex);
+          if (eq(ctx.selector, setApprovalForAllSel)) return validateSetApprovalForAll(ctx.payloadHex);
+          revert('only transferFrom, safeTransferFrom, approve, setApprovalForAll allowed');
+        }
+        function validateTransferFrom(payloadHex) {
+          var dec = abi.decode(payloadHex, ['address', 'address', 'uint256']);
+          require(dec && dec.length === 3, 'transferFrom decode failed');
+          var from = dec[0]; var to = dec[1];
+          require(isAddress(from), 'transferFrom from invalid');
+          require(isAddress(to), 'transferFrom to invalid');
+          rs.addr.requireInListIfNonEmpty(from, config.allowed_transfer_from, 'transferFrom from not allowed');
+          rs.addr.requireInListIfNonEmpty(to, config.allowed_recipients, 'transferFrom to not allowed');
+          return ok();
+        }
+        function validateSafeTransferFromBytes(payloadHex) {
+          var dec = abi.decode(payloadHex, ['address', 'address', 'uint256', 'bytes']);
+          require(dec && dec.length === 4, 'safeTransferFrom(bytes) decode failed');
+          var from = dec[0]; var to = dec[1];
+          require(isAddress(from), 'safeTransferFrom from invalid');
+          require(isAddress(to), 'safeTransferFrom to invalid');
+          rs.addr.requireInListIfNonEmpty(from, config.allowed_transfer_from, 'safeTransferFrom from not allowed');
+          rs.addr.requireInListIfNonEmpty(to, config.allowed_recipients, 'safeTransferFrom to not allowed');
+          return ok();
+        }
+        function validateApprove(payloadHex) {
+          var dec = abi.decode(payloadHex, ['address', 'uint256']);
+          require(dec && dec.length === 2, 'approve decode failed');
+          var to = dec[0];
+          require(isAddress(to), 'approve to invalid');
+          rs.addr.requireInListIfNonEmpty(to, config.allowed_approve_to, 'approve to not allowed');
+          return ok();
+        }
+        function validateSetApprovalForAll(payloadHex) {
+          var dec = abi.decode(payloadHex, ['address', 'bool']);
+          require(dec && dec.length === 2, 'setApprovalForAll decode failed');
+          var operator = dec[0];
+          require(isAddress(operator), 'setApprovalForAll operator invalid');
+          rs.addr.requireInListIfNonEmpty(operator, config.allowed_operators, 'setApprovalForAll operator not allowed');
+          return ok();
+        }
+    test_cases:
+      - name: "transferFrom: pass when from/to allowed"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0xBC4ca0EdA7647A8aB7C2061c2E118A18a936f13D"
+            value: "0x0"
+            data: "0x23b872dd000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb922660000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc40000000000000000000000000000000000000000000000000000000000000001"
+        expect_pass: true
+      - name: "approve: pass when to allowed"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0xBC4ca0EdA7647A8aB7C2061c2E118A18a936f13D"
+            value: "0x0"
+            data: "0x095ea7b30000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc40000000000000000000000000000000000000000000000000000000000000001"
+        expect_pass: true
+      - name: "setApprovalForAll: pass when operator allowed"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0xBC4ca0EdA7647A8aB7C2061c2E118A18a936f13D"
+            value: "0x0"
+            data: "0xa22cb4650000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc40000000000000000000000000000000000000000000000000000000000000001"
+        expect_pass: true
+      - name: "reject wrong contract"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0x000000000000000000000000000000000000dEaD"
+            value: "0x0"
+            data: "0x23b872dd000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb922660000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc40000000000000000000000000000000000000000000000000000000000000001"
+        expect_pass: false
+        expect_reason: "wrong contract"
+      - name: "reject transferFrom to disallowed recipient when allowed_recipients set"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0xBC4ca0EdA7647A8aB7C2061c2E118A18a936f13D"
+            value: "0x0"
+            data: "0x23b872dd000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb922660000000000000000000000000000000000000000000000000000000000dead000000000000000000000000000000000000000000000000000000000000000001"
+        expect_pass: false
+        expect_reason: "transferFrom to not allowed"
+      - name: "reject method not in allowlist"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0xBC4ca0EdA7647A8aB7C2061c2E118A18a936f13D"
+            value: "0x0"
+            data: "0x06fdde03"
+        expect_pass: false
+        expect_reason: "only transferFrom, safeTransferFrom, approve, setApprovalForAll allowed"

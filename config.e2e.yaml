@@ -25,11 +25,23 @@ chains:
           key_env: "E2E_TEST_SIGNER2_KEY"
           enabled: true
     keystore_dir: "./data/keystores-e2e"
+    rpc_gateway:
+      base_url: "${EVM_RPC_GATEWAY_URL:-}"
+      api_key: "${EVM_RPC_GATEWAY_API_KEY:-}"
+      cache_ttl: "1h"
     foundry:
       enabled: true
       forge_path: ""
       cache_dir: "./data/forge-cache-e2e"
       timeout: "30s"
+    simulation:
+      enabled: true
+      # eth_simulateV1 via rpc_gateway
+      timeout: "30s"
+      budget_native_max_total: "1"
+      budget_native_max_per_tx: "0.1"
+      budget_erc20_max_total: "1000"
+      budget_erc20_max_per_tx: "100"
 
 notify:
   slack:
@@ -50,7 +62,8 @@ security:
   approval_guard:
     enabled: true
     window: "2m"
-    threshold: 3
+    rejection_threshold_pct: 50
+    min_samples: 3
     resume_after: "15s"
   ip_whitelist:
     enabled: false
@@ -88,16 +101,96 @@ templates:
     enabled: true
     config:
       path: "rules/templates/erc20.template.js.yaml"
+  - name: "Native Transfer Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/native_transfer.template.js.yaml"
   - name: "ERC721 Template"
     type: "file"
     enabled: true
     config:
       path: "rules/templates/erc721.template.js.yaml"
+  - name: "WETH Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/weth.template.js.yaml"
+  - name: "ERC1155 Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/erc1155.template.js.yaml"
+  - name: "ERC20 Permit Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/erc20_permit.template.js.yaml"
+  - name: "DEX Swap Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/dex_swap.template.js.yaml"
+  - name: "Staking Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/staking.template.js.yaml"
+  - name: "Global Blocklist Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/global_blocklist.template.js.yaml"
+  - name: "Contract Call Guard Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/contract_call_guard.template.js.yaml"
+  - name: "Max Gas Cap Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/max_gas_cap.template.js.yaml"
+  - name: "ERC721 Permit Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/erc721_permit.template.js.yaml"
+  - name: "Meta Transaction Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/meta_transaction.template.js.yaml"
+  - name: "EIP-4337 UserOp Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/eip4337_userop.template.js.yaml"
+  - name: "EIP-3009 Transfer Auth Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/eip3009_transfer_auth.template.js.yaml"
+  - name: "EIP-1559 Fee Guard Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/eip1559_fee_guard.template.js.yaml"
+  - name: "DEX Swap V3/V4 Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/dex_swap_v3.template.js.yaml"
   - name: "Polymarket Template"
     type: "file"
     enabled: true
     config:
       path: "rules/templates/polymarket.template.js.yaml"
+  - name: "Agent Template"
+    type: "file"
+    enabled: true
+    config:
+      path: "rules/templates/agent.template.js.yaml"
 
 # Rules for e2e testing
 # Rules can be defined here (config source) or via API (api source)
@@ -294,6 +387,9 @@ rules:
                 data: "0x"
             expect_pass: false
 
+  # ERC20 instance with budget+schedule (same shape as erc20.preset.js.yaml) for e2e budget enforcement.
+  # Script cap (max_transfer_amount) set higher than budget max_per_tx so per-tx rejection is enforced by
+  # CheckAndDeductBudget, not by template validate(); allows testing per-tx budget rejection in e2e.
   - name: "ERC20 instance"
     type: "instance"
     chain_type: "evm"
@@ -305,9 +401,15 @@ rules:
       variables:
         chain_id: "1"
         token_address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
-        max_transfer_amount: "1000000000"
+        max_transfer_amount: "10000000000"   # script cap above budget max_per_tx so budget layer enforces per-tx
         allowed_recipients: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
         allowed_spenders: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+      budget:
+        unit: "${chain_id}:${token_address}"
+        max_total: "1000000000"
+        max_per_tx: "1000000000"
+      schedule:
+        period: "24h"
       test_cases_overrides:
         "ERC20 transfer/approve with limit":
           - name: "transfer: pass when to allowed and amount under cap"
@@ -333,6 +435,109 @@ rules:
                 data: "0xa9059cbb0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc40000000000000000000000000000000000000000000000000000000000000000"
             expect_pass: false
 
+  # ERC20 instance with 1s schedule for e2e period-reset test (same template, different token)
+  - name: "ERC20 schedule (1s)"
+    type: "instance"
+    chain_type: "evm"
+    chain_id: "1"
+    enabled: true
+    config:
+      template: "ERC20 Template"
+      id: "erc20-schedule"
+      variables:
+        chain_id: "1"
+        token_address: "0x0000000000000000000000000000000000000001"
+        max_transfer_amount: "1000"
+        allowed_recipients: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+        allowed_spenders: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+      budget:
+        unit: "${chain_id}:${token_address}"
+        max_total: "1000"
+        max_per_tx: "1000"
+      schedule:
+        period: "1s"
+
+  # ERC20 instance for e2e max_tx_count: 2 successful signs, 3rd rejected (AtomicSpend tx_count check)
+  - name: "ERC20 instance (tx count)"
+    type: "instance"
+    chain_type: "evm"
+    chain_id: "1"
+    enabled: true
+    config:
+      template: "ERC20 Template"
+      id: "erc20-txcount"
+      variables:
+        chain_id: "1"
+        token_address: "0x0000000000000000000000000000000000000002"
+        max_transfer_amount: "10000"
+        allowed_recipients: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+        allowed_spenders: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+      budget:
+        unit: "${chain_id}:${token_address}"
+        max_total: "10000"
+        max_per_tx: "10000"
+        max_tx_count: 2
+
+  # ERC20 instance for e2e max_per_tx = 0: any single transfer rejected
+  - name: "ERC20 instance (per-tx zero)"
+    type: "instance"
+    chain_type: "evm"
+    chain_id: "1"
+    enabled: true
+    config:
+      template: "ERC20 Template"
+      id: "erc20-zeroper"
+      variables:
+        chain_id: "1"
+        token_address: "0x0000000000000000000000000000000000000003"
+        max_transfer_amount: "10000"
+        allowed_recipients: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+        allowed_spenders: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+      budget:
+        unit: "${chain_id}:${token_address}"
+        max_total: "1"
+        max_per_tx: "0"
+
+  # ERC20 instance for e2e max_per_tx = -1 (no per-tx cap): single large transfer allowed up to max_total
+  - name: "ERC20 instance (per-tx unlimited)"
+    type: "instance"
+    chain_type: "evm"
+    chain_id: "1"
+    enabled: true
+    config:
+      template: "ERC20 Template"
+      id: "erc20-pertx-unlimited"
+      variables:
+        chain_id: "1"
+        token_address: "0x0000000000000000000000000000000000000004"
+        max_transfer_amount: "1000000"
+        allowed_recipients: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+        allowed_spenders: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+      budget:
+        unit: "${chain_id}:${token_address}"
+        max_total: "1000000"
+        max_per_tx: "-1"
+
+  # ERC20 instance for e2e max_total = -1 (no total cap): multiple transfers keep succeeding
+  - name: "ERC20 instance (total unlimited)"
+    type: "instance"
+    chain_type: "evm"
+    chain_id: "1"
+    enabled: true
+    config:
+      template: "ERC20 Template"
+      id: "erc20-total-unlimited"
+      variables:
+        chain_id: "1"
+        token_address: "0x0000000000000000000000000000000000000005"
+        max_transfer_amount: "10000"
+        allowed_recipients: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+        allowed_spenders: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+      budget:
+        unit: "${chain_id}:${token_address}"
+        max_total: "-1"
+        max_per_tx: "10000"
+
   - name: "ERC721 instance"
     type: "instance"
     chain_type: "evm"
@@ -345,6 +550,8 @@ rules:
         chain_id: "1"
         token_address: "0xBC4ca0EdA7647A8aB7C2061c2E118A18a936f13D"
         allowed_recipients: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+        allowed_approve_to: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+        allowed_operators: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
       test_cases_overrides:
         "ERC721 transfer/approve with allowlists":
           - name: "transferFrom: pass when from/to allowed"

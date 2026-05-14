@@ -27,6 +27,8 @@ type RuleDetailModel struct {
 	loading      bool
 	err          error
 	rule         *evm.Rule
+	budgets      []evm.RuleBudget
+	budgetsErr   error
 	showDelete   bool
 	showToggle   bool
 	actionResult string
@@ -45,6 +47,12 @@ type RuleDetailActionMsg struct {
 	Action  string
 	Success bool
 	Message string
+	Err     error
+}
+
+// RuleBudgetsDataMsg is sent when budgets for the rule are loaded
+type RuleBudgetsDataMsg struct {
+	Budgets []evm.RuleBudget
 	Err     error
 }
 
@@ -108,6 +116,8 @@ func (m *RuleDetailModel) SetSize(width, height int) {
 func (m *RuleDetailModel) LoadRule(ruleID string) tea.Cmd {
 	m.loading = true
 	m.rule = nil
+	m.budgets = nil
+	m.budgetsErr = nil
 	m.showDelete = false
 	m.showToggle = false
 	m.actionResult = ""
@@ -116,7 +126,18 @@ func (m *RuleDetailModel) LoadRule(ruleID string) tea.Cmd {
 	return tea.Batch(
 		m.spinner.Tick,
 		m.loadRuleData(ruleID),
+		m.loadBudgetsData(ruleID),
 	)
+}
+
+func (m *RuleDetailModel) loadBudgetsData(ruleID string) tea.Cmd {
+	return func() tea.Msg {
+		budgets, err := m.rules_svc.ListBudgets(m.ctx, ruleID)
+		if err != nil {
+			return RuleBudgetsDataMsg{Err: err}
+		}
+		return RuleBudgetsDataMsg{Budgets: budgets, Err: nil}
+	}
 }
 
 // ShouldGoBack returns true if the view should go back to the list
@@ -183,6 +204,16 @@ func (m *RuleDetailModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.rule = msg.Rule
 			m.err = nil
+		}
+		return m, nil
+
+	case RuleBudgetsDataMsg:
+		if msg.Err != nil {
+			m.budgetsErr = msg.Err
+			m.budgets = nil
+		} else {
+			m.budgets = msg.Budgets
+			m.budgetsErr = nil
 		}
 		return m, nil
 
@@ -426,8 +457,14 @@ func (m *RuleDetailModel) renderDetail() string {
 	if m.rule.ChainID != nil {
 		info = append(info, struct{ key, value string }{"Chain ID", *m.rule.ChainID})
 	}
-	if m.rule.APIKeyID != nil {
-		info = append(info, struct{ key, value string }{"API Key ID", *m.rule.APIKeyID})
+	if m.rule.Owner != nil {
+		info = append(info, struct{ key, value string }{"Owner", *m.rule.Owner})
+	}
+	if len(m.rule.AppliedTo) > 0 {
+		info = append(info, struct{ key, value string }{"Applied To", strings.Join(m.rule.AppliedTo, ", ")})
+	}
+	if m.rule.Status != "" {
+		info = append(info, struct{ key, value string }{"Status", m.rule.Status})
 	}
 	if m.rule.SignerAddress != nil {
 		info = append(info, struct{ key, value string }{"Signer", *m.rule.SignerAddress})
@@ -459,7 +496,34 @@ func (m *RuleDetailModel) renderDetail() string {
 				valueStr = styles.MutedColor.Render("No")
 			}
 		}
+		if item.key == "Status" {
+			switch item.value {
+			case "active":
+				valueStr = styles.SuccessStyle.Render(item.value)
+			case "pending_approval":
+				valueStr = styles.WarningStyle.Render(item.value)
+			case "rejected":
+				valueStr = styles.ErrorStyle.Render(item.value)
+			}
+		}
 		content.WriteString(fmt.Sprintf("%s %s\n", keyStr, valueStr))
+	}
+
+	// Budgets
+	content.WriteString("\n")
+	content.WriteString(styles.SubtitleStyle.Render("Budgets"))
+	content.WriteString("\n")
+	if m.budgetsErr != nil {
+		content.WriteString(styles.ErrorStyle.Render(fmt.Sprintf("Error: %v", m.budgetsErr)))
+		content.WriteString("\n")
+	} else if len(m.budgets) == 0 {
+		content.WriteString(styles.MutedColor.Render("No budgets"))
+		content.WriteString("\n")
+	} else {
+		for _, b := range m.budgets {
+			content.WriteString(fmt.Sprintf("  %s: spent %s / %s (max/tx: %s, tx count: %d)\n",
+				b.Unit, b.Spent, b.MaxTotal, b.MaxPerTx, b.TxCount))
+		}
 	}
 
 	// Config

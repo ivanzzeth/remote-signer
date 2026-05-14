@@ -13,7 +13,11 @@ export type RuleType =
   | "evm_contract_method"
   | "evm_value_limit"
   | "evm_solidity_expression"
+  | "evm_js"
+  | "evm_dynamic_blocklist"
+  | "evm_internal_transfer"
   | "signer_restriction"
+  | "chain_restriction"
   | "sign_type_restriction"
   | "message_pattern";
 
@@ -30,6 +34,16 @@ export interface Rule {
   chain_id?: string;
   api_key_id?: string;
   signer_address?: string;
+  /** API key that created the rule. "config" for rules sourced from config.yaml. */
+  owner?: string;
+  /** Approval state: "active", "pending_approval", "rejected", "revoked". */
+  status?: string;
+  /** Admin key id that approved a pending rule. */
+  approved_by?: string;
+  /** Rules with immutable=true cannot be edited or deleted via API. */
+  immutable?: boolean;
+  /** ["*"] = all keys, ["self"] = owner only, ["key-1", ...] = specific keys. */
+  applied_to?: string[];
   config: Record<string, any>;
   enabled: boolean;
   expires_at?: string;
@@ -62,6 +76,13 @@ export interface CreateRuleRequest {
   chain_id?: string;
   api_key_id?: string;
   signer_address?: string;
+  /**
+   * API keys the rule will be scoped to. ["self"] (the default,
+   * server-applied when omitted) restricts the rule to the caller;
+   * ["*"] is admin-only and applies to every key; a specific list
+   * targets just those keys.
+   */
+  applied_to?: string[];
   config: Record<string, any>;
   enabled?: boolean;
   expires_at?: string;
@@ -74,6 +95,22 @@ export interface UpdateRuleRequest {
   config?: Record<string, any>;
   enabled?: boolean;
   expires_at?: string;
+}
+
+/** Budget record for a rule (GET /api/v1/evm/rules/{id}/budgets). */
+export interface RuleBudget {
+  id: string;
+  rule_id: string;
+  unit: string;
+  max_total: string;
+  max_per_tx: string;
+  spent: string;
+  alert_pct: number;
+  alert_sent: boolean;
+  tx_count: number;
+  max_tx_count: number;
+  created_at: string;
+  updated_at: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -153,5 +190,39 @@ export class EvmRuleService {
    */
   async toggle(ruleID: string, enabled: boolean): Promise<Rule> {
     return this.update(ruleID, { enabled });
+  }
+
+  /**
+   * List budgets for a rule (GET /api/v1/evm/rules/{ruleID}/budgets).
+   */
+  async listBudgets(ruleID: string): Promise<RuleBudget[]> {
+    const list = await this.transport.request<RuleBudget[]>(
+      "GET",
+      `/api/v1/evm/rules/${encodeURIComponent(ruleID)}/budgets`,
+      null,
+    );
+    return list ?? [];
+  }
+
+  /**
+   * Approve a pending rule (POST /api/v1/evm/rules/{ruleID}/approve).
+   */
+  async approve(ruleID: string): Promise<Rule> {
+    return this.transport.request<Rule>(
+      "POST",
+      `/api/v1/evm/rules/${encodeURIComponent(ruleID)}/approve`,
+      null,
+    );
+  }
+
+  /**
+   * Reject a pending rule (POST /api/v1/evm/rules/{ruleID}/reject).
+   */
+  async reject(ruleID: string, reason: string): Promise<Rule> {
+    return this.transport.request<Rule>(
+      "POST",
+      `/api/v1/evm/rules/${encodeURIComponent(ruleID)}/reject`,
+      { reason },
+    );
   }
 }

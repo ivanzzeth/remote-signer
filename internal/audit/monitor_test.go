@@ -51,6 +51,10 @@ func (m *mockAuditRepo) GetByRequestID(_ context.Context, _ types.SignRequestID)
 	return nil, nil
 }
 
+func (m *mockAuditRepo) DeleteOlderThan(_ context.Context, _ time.Time) (int64, error) {
+	return 0, nil
+}
+
 // errorAuditRepo returns an error from Query to test the scan error path.
 type errorAuditRepo struct {
 	queryErr   error
@@ -72,6 +76,10 @@ func (e *errorAuditRepo) Count(_ context.Context, _ storage.AuditFilter) (int, e
 
 func (e *errorAuditRepo) GetByRequestID(_ context.Context, _ types.SignRequestID) ([]*types.AuditRecord, error) {
 	return nil, nil
+}
+
+func (e *errorAuditRepo) DeleteOlderThan(_ context.Context, _ time.Time) (int64, error) {
+	return 0, nil
 }
 
 // trackingAuditRepo wraps mockAuditRepo and tracks how many times Query is called.
@@ -116,6 +124,10 @@ func (t *trackingAuditRepo) Count(_ context.Context, _ storage.AuditFilter) (int
 
 func (t *trackingAuditRepo) GetByRequestID(_ context.Context, _ types.SignRequestID) ([]*types.AuditRecord, error) {
 	return nil, nil
+}
+
+func (t *trackingAuditRepo) DeleteOlderThan(_ context.Context, _ time.Time) (int64, error) {
+	return 0, nil
 }
 
 func (t *trackingAuditRepo) getQueryCalls() int {

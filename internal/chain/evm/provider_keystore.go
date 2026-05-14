@@ -2,9 +2,14 @@ package evm
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
+	"os"
+	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
+	gethkeystore "github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ivanzzeth/ethsig"
 	"github.com/ivanzzeth/ethsig/keystore"
 
@@ -17,6 +22,7 @@ type KeystoreProvider struct {
 	registry    *SignerRegistry
 	keystoreDir string
 	pwProvider  PasswordProvider
+	mu          sync.RWMutex
 	lockedPaths map[string]string // address (checksummed) -> filePath
 }
 
@@ -92,9 +98,48 @@ func (p *KeystoreProvider) CreateSigner(ctx context.Context, params interface{})
 	password := []byte(ksParams.Password)
 	defer keystore.SecureZeroize(password)
 
-	address, keystorePath, err := keystore.CreateKeystore(p.keystoreDir, password)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create keystore: %w", err)
+	var (
+		address      string
+		keystorePath string
+		err          error
+	)
+	switch {
+	case ksParams.KeystoreJSON != "":
+		// Import from a v3 keystore JSON the operator already has on hand.
+		// Decrypt locally to (a) verify the supplied password unlocks it and
+		// (b) extract the raw private key, then re-encrypt under the
+		// daemon's keystore dir so scrypt params + file naming stay
+		// consistent with the rest of the directory.
+		decryptedKey, decryptErr := gethkeystore.DecryptKey([]byte(ksParams.KeystoreJSON), string(password))
+		if decryptErr != nil {
+			return nil, fmt.Errorf("failed to decrypt supplied keystore JSON: %w", decryptErr)
+		}
+		// crypto.FromECDSA returns the 32-byte big-endian private key bytes.
+		privBytes := crypto.FromECDSA(decryptedKey.PrivateKey)
+		defer func() {
+			for i := range privBytes {
+				privBytes[i] = 0
+			}
+		}()
+		address, keystorePath, err = keystore.ImportPrivateKey(p.keystoreDir, []byte(hex.EncodeToString(privBytes)), password)
+		if err != nil {
+			return nil, fmt.Errorf("failed to import decrypted keystore: %w", err)
+		}
+	case ksParams.PrivateKeyHex != "":
+		// Import the operator-supplied private key into a fresh v3 keystore.
+		// ethsig handles 0x stripping and 32-byte length validation; we
+		// zeroise the hex copy here so the GC can't leak it cheaply.
+		privHex := []byte(ksParams.PrivateKeyHex)
+		defer keystore.SecureZeroize(privHex)
+		address, keystorePath, err = keystore.ImportPrivateKey(p.keystoreDir, privHex, password)
+		if err != nil {
+			return nil, fmt.Errorf("failed to import private key: %w", err)
+		}
+	default:
+		address, keystorePath, err = keystore.CreateKeystore(p.keystoreDir, password)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create keystore: %w", err)
+		}
 	}
 
 	logger.EVM().Info().Str("address", address).Str("path", keystorePath).Msg("keystore created")
@@ -136,6 +181,8 @@ func (p *KeystoreProvider) DiscoverLockedSigners() ([]types.SignerInfo, error) {
 	}
 
 	var discovered []types.SignerInfo
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	for _, ks := range keystores {
 		addrKey := normalizeAddress(ks.Address)
 		if p.registry.HasSigner(addrKey) {
@@ -160,7 +207,10 @@ func (p *KeystoreProvider) DiscoverLockedSigners() ([]types.SignerInfo, error) {
 // UnlockSigner unlocks a locked keystore signer with the given password.
 func (p *KeystoreProvider) UnlockSigner(ctx context.Context, address string, password string) (*ethsig.Signer, error) {
 	addrKey := normalizeAddress(address)
+
+	p.mu.RLock()
 	filePath, ok := p.lockedPaths[addrKey]
+	p.mu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("no locked keystore found for address %s", address)
 	}
@@ -174,7 +224,10 @@ func (p *KeystoreProvider) UnlockSigner(ctx context.Context, address string, pas
 	}
 
 	signer := ethsig.NewSigner(keystoreSigner)
+
+	p.mu.Lock()
 	delete(p.lockedPaths, addrKey)
+	p.mu.Unlock()
 
 	logger.EVM().Info().Str("address", address).Msg("keystore signer unlocked")
 
@@ -193,7 +246,9 @@ func (p *KeystoreProvider) LockSigner(ctx context.Context, address string) error
 
 	for _, ks := range keystores {
 		if normalizeAddress(ks.Address) == addrKey {
+			p.mu.Lock()
 			p.lockedPaths[addrKey] = ks.Path
+			p.mu.Unlock()
 			logger.EVM().Info().Str("address", address).Msg("keystore signer locked")
 			return nil
 		}
@@ -202,9 +257,49 @@ func (p *KeystoreProvider) LockSigner(ctx context.Context, address string) error
 	return fmt.Errorf("keystore file not found for address %s", address)
 }
 
+// DeleteSigner permanently deletes a keystore signer (removes file and cleans in-memory state).
+func (p *KeystoreProvider) DeleteSigner(ctx context.Context, address string) error {
+	addrKey := normalizeAddress(address)
+
+	// Find the keystore file path by scanning the directory
+	keystores, err := keystore.ListKeystores(p.keystoreDir)
+	if err != nil {
+		return fmt.Errorf("failed to list keystores: %w", err)
+	}
+
+	var keystorePath string
+	for _, ks := range keystores {
+		if normalizeAddress(ks.Address) == addrKey {
+			keystorePath = ks.Path
+			break
+		}
+	}
+
+	if keystorePath == "" {
+		return fmt.Errorf("keystore file not found for address %s", address)
+	}
+
+	// Remove the keystore file
+	if err := os.Remove(keystorePath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to delete keystore file: %w", err)
+	}
+
+	// Clean in-memory state
+	p.mu.Lock()
+	delete(p.lockedPaths, addrKey)
+	p.mu.Unlock()
+
+	// Unregister from the shared registry
+	p.registry.UnregisterSigner(addrKey)
+
+	logger.EVM().Info().Str("address", address).Str("path", keystorePath).Msg("keystore signer deleted")
+	return nil
+}
+
 // Compile-time interface checks.
 var (
 	_ SignerDiscoverer = (*KeystoreProvider)(nil)
 	_ SignerUnlocker   = (*KeystoreProvider)(nil)
 	_ SignerLocker     = (*KeystoreProvider)(nil)
+	_ SignerDeleter    = (*KeystoreProvider)(nil)
 )

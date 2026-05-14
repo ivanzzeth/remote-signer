@@ -8,12 +8,56 @@ import { HttpTransport } from "../transport";
 // Types
 // ---------------------------------------------------------------------------
 
+/**
+ * Canonical variable type tags (v0.3). Matches internal/core/types
+ * VarType* constants. The frontend dispatches widget choice on this
+ * value: address → checksum-aware input, bool → switch, bigint →
+ * big-integer-safe number input, enum → select bound to Options, etc.
+ */
+export type VariableType =
+  | "address"
+  | "address_list"
+  | "bigint"
+  | "bigint_list"
+  | "string"
+  | "bool"
+  | "bytes"
+  | "bytes4"
+  | "duration"
+  | "enum"
+  | "json";
+
 export interface TemplateVariable {
   name: string;
-  type: string;
+  type: VariableType;
+  /** UI display label; falls back to `name` when empty. */
+  label?: string;
   description?: string;
   required: boolean;
-  default?: string;
+  /** Default value. Type follows `type`; the frontend coerces at render. */
+  default?: unknown;
+  placeholder?: string;
+  hint?: string;
+  /** Legal values for `type: "enum"`. */
+  options?: string[];
+  /** Mask in UI, redact in audit log. */
+  sensitive?: boolean;
+  /** Optional regex applied after type-specific format check. */
+  pattern?: string;
+  /** Numeric bounds (decimal big-int for bigint, Go duration for duration). */
+  min?: string;
+  max?: string;
+}
+
+/**
+ * Optional UI grouping hint for long variable lists. The frontend
+ * renders one collapsible section per group; variables not in any
+ * group fall into a trailing "Other" section.
+ */
+export interface VariableGroup {
+  title: string;
+  description?: string;
+  variables: string[];
 }
 
 export interface Template {
@@ -23,9 +67,15 @@ export interface Template {
   type: string;
   mode: string;
   source: string;
+  /** Chain family (e.g. "evm"); empty for off-chain templates. */
+  chain_type?: string;
   variables?: TemplateVariable[];
+  /** UI grouping hint (v0.3+); empty = flat list. */
+  variable_groups?: VariableGroup[];
   config?: Record<string, any>;
   budget_metering?: Record<string, any>;
+  /** Origin tag: "config", "file" (Registry), "api". */
+  source_path?: string;
   enabled: boolean;
   created_at: string;
   updated_at: string;

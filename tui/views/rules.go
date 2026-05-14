@@ -472,8 +472,8 @@ func (m *RulesModel) renderRules() string {
 	}
 
 	// Table header
-	headerRow := fmt.Sprintf("%-36s  %-30s  %-24s  %-10s  %-8s  %-8s",
-		"ID", "Name", "Type", "Mode", "Enabled", "Matches")
+	headerRow := fmt.Sprintf("%-20s  %-24s  %-18s  %-10s  %-10s  %-8s  %-3s",
+		"ID", "Name", "Type", "Mode", "Owner", "Status", "On")
 	content.WriteString(styles.TableHeaderStyle.Render(headerRow))
 	content.WriteString("\n")
 
@@ -514,18 +514,34 @@ func (m *RulesModel) renderRules() string {
 func (m *RulesModel) renderRuleRow(rule evm.Rule, selected bool) string {
 	// Truncate values for display
 	id := rule.ID
-	if len(id) > 36 {
-		id = id[:33] + "..."
+	if len(id) > 20 {
+		id = id[:17] + "..."
 	}
 
 	name := rule.Name
-	if len(name) > 30 {
-		name = name[:27] + "..."
+	if len(name) > 24 {
+		name = name[:21] + "..."
 	}
 
 	ruleType := rule.Type
-	if len(ruleType) > 24 {
-		ruleType = ruleType[:21] + "..."
+	if len(ruleType) > 18 {
+		ruleType = ruleType[:15] + "..."
+	}
+
+	owner := "-"
+	if rule.Owner != nil {
+		owner = *rule.Owner
+	}
+	if len(owner) > 10 {
+		owner = owner[:7] + "..."
+	}
+
+	status := rule.Status
+	if status == "pending_approval" {
+		status = "pending"
+	}
+	if status == "" {
+		status = "active"
 	}
 
 	enabled := "Yes"
@@ -533,13 +549,8 @@ func (m *RulesModel) renderRuleRow(rule evm.Rule, selected bool) string {
 		enabled = "No"
 	}
 
-	row := fmt.Sprintf("%-36s  %-30s  %-24s  %-10s  %-8s  %-8d",
-		id,
-		name,
-		ruleType,
-		rule.Mode,
-		enabled,
-		rule.MatchCount,
+	row := fmt.Sprintf("%-20s  %-24s  %-18s  %-10s  %-10s  %-8s  %-3s",
+		id, name, ruleType, rule.Mode, owner, status, enabled,
 	)
 
 	if selected {
@@ -553,20 +564,25 @@ func (m *RulesModel) renderRuleRow(rule evm.Rule, selected bool) string {
 	}
 	modePart := modeStyle.Render(fmt.Sprintf("%-10s", rule.Mode))
 
+	// Color status
+	statusStyle := styles.SuccessStyle
+	switch status {
+	case "pending":
+		statusStyle = styles.WarningStyle
+	case "rejected":
+		statusStyle = styles.ErrorStyle
+	}
+	statusPart := statusStyle.Render(fmt.Sprintf("%-8s", status))
+
 	// Color enabled
 	enabledStyle := styles.SuccessStyle
 	if !rule.Enabled {
 		enabledStyle = styles.MutedColor
 	}
-	enabledPart := enabledStyle.Render(fmt.Sprintf("%-8s", enabled))
+	enabledPart := enabledStyle.Render(fmt.Sprintf("%-3s", enabled))
 
-	row = fmt.Sprintf("%-36s  %-30s  %-24s  %s  %s  %-8d",
-		id,
-		name,
-		ruleType,
-		modePart,
-		enabledPart,
-		rule.MatchCount,
+	row = fmt.Sprintf("%-20s  %-24s  %-18s  %s  %-10s  %s  %s",
+		id, name, ruleType, modePart, owner, statusPart, enabledPart,
 	)
 
 	return styles.TableRowStyle.Render(row)

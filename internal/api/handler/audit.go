@@ -6,12 +6,13 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
-	"github.com/ivanzzeth/remote-signer/internal/validate"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
+	"github.com/ivanzzeth/remote-signer/internal/validate"
 )
 
 // AuditHandler handles audit log endpoints
@@ -84,6 +85,46 @@ func (h *AuditHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.listAuditRecords(w, r)
 }
 
+// ServeRequestHTTP handles GET /api/v1/audit/requests/{requestID}
+func (h *AuditHandler) ServeRequestHTTP(w http.ResponseWriter, r *http.Request) {
+	apiKey := middleware.GetAPIKey(r.Context())
+	if apiKey == nil {
+		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if r.Method != http.MethodGet {
+		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract request ID from path: /api/v1/audit/requests/{requestID}
+	requestID := strings.TrimPrefix(r.URL.Path, "/api/v1/audit/requests/")
+	if requestID == "" {
+		h.writeError(w, "request_id is required", http.StatusBadRequest)
+		return
+	}
+
+	reqID := types.SignRequestID(requestID)
+	records, err := h.auditRepo.GetByRequestID(r.Context(), reqID)
+	if err != nil {
+		h.logger.Error("failed to get audit records by request ID", "error", err, "request_id", requestID)
+		h.writeError(w, "failed to get audit records", http.StatusInternalServerError)
+		return
+	}
+
+	resp := ListAuditResponse{
+		Records: make([]AuditRecordResponse, 0, len(records)),
+		Total:   len(records),
+		HasMore: false,
+	}
+	for _, record := range records {
+		resp.Records = append(resp.Records, h.toAuditRecordResponse(record))
+	}
+
+	h.writeJSON(w, resp, http.StatusOK)
+}
+
 func (h *AuditHandler) listAuditRecords(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 
@@ -101,8 +142,27 @@ func (h *AuditHandler) listAuditRecords(w http.ResponseWriter, r *http.Request) 
 		et := types.AuditEventType(eventType)
 		filter.EventType = &et
 	}
+	if severity := query.Get("severity"); severity != "" {
+		if !validate.IsValidAuditSeverity(severity) {
+			h.writeError(w, "invalid severity filter: must be one of info, warning, critical", http.StatusBadRequest)
+			return
+		}
+		sev := types.AuditSeverity(severity)
+		filter.Severity = &sev
+	}
 	if apiKeyID := query.Get("api_key_id"); apiKeyID != "" {
 		filter.APIKeyID = &apiKeyID
+	}
+	if signerAddress := query.Get("signer_address"); signerAddress != "" {
+		if !validate.IsValidEthereumAddress(signerAddress) {
+			h.writeError(w, "invalid signer_address: must be 0x followed by 40 hex characters", http.StatusBadRequest)
+			return
+		}
+		filter.SignerAddress = &signerAddress
+	}
+	if signRequestID := query.Get("sign_request_id"); signRequestID != "" {
+		reqID := types.SignRequestID(signRequestID)
+		filter.RequestID = &reqID
 	}
 	if chainType := query.Get("chain_type"); chainType != "" {
 		if !validate.IsValidChainType(chainType) {

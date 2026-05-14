@@ -13,23 +13,53 @@ import (
 
 	"github.com/ivanzzeth/remote-signer/internal/audit"
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
+	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/notify"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
 // Config is the root configuration structure
 type Config struct {
-	Server        ServerConfig        `yaml:"server"`
-	Database      storage.Config      `yaml:"database"`
-	Chains        ChainsConfig        `yaml:"chains"`
-	Notify        notify.Config       `yaml:"notify"`
-	NotifyChannel notify.Channel      `yaml:"notify_channels"`
-	AuditMonitor  audit.MonitorConfig `yaml:"audit_monitor"`
-	Security      SecurityConfig      `yaml:"security"`
-	Logger        LoggerConfig        `yaml:"logger"`
-	APIKeys       []APIKeyConfig      `yaml:"api_keys"`
-	Templates     []TemplateConfig    `yaml:"templates"`
-	Rules         []RuleConfig        `yaml:"rules"`
+	Server           ServerConfig            `yaml:"server"`
+	Database         storage.Config          `yaml:"database"`
+	Chains           ChainsConfig            `yaml:"chains"`
+	Notify           notify.Config           `yaml:"notify"`
+	NotifyChannel    notify.Channel          `yaml:"notify_channels"`
+	AuditMonitor     audit.MonitorConfig     `yaml:"audit_monitor"`
+	Security         SecurityConfig          `yaml:"security"`
+	Logger           LoggerConfig            `yaml:"logger"`
+	APIKeys          []APIKeyConfig          `yaml:"api_keys"`
+	Templates        []TemplateConfig        `yaml:"templates"`
+	// TemplatesDir is an optional directory whose *.template*.yaml files
+	// are auto-enumerated into TemplateConfig entries at sync time.
+	// Enumerating each file by hand in Templates is verbose; this
+	// shorthand is the path home-installs use.
+	TemplatesDir     string                  `yaml:"templates_dir,omitempty"`
+	Rules            []RuleConfig            `yaml:"rules"`
+	Presets          *PresetsConfig          `yaml:"presets,omitempty"`
+	DynamicBlocklist *DynamicBlocklistConfig `yaml:"dynamic_blocklist,omitempty"`
+}
+
+// DynamicBlocklistConfig configures the runtime address blocklist synced from external URLs.
+type DynamicBlocklistConfig struct {
+	Enabled      bool                     `yaml:"enabled"`
+	SyncInterval string                   `yaml:"sync_interval"` // e.g. "1h", "30m"
+	FailMode     string                   `yaml:"fail_mode"`     // "open" (default) or "close"
+	CacheFile    string                   `yaml:"cache_file"`    // local file for persisting fetched addresses
+	Sources      []DynamicBlocklistSource `yaml:"sources"`
+}
+
+// DynamicBlocklistSource defines an address list source.
+type DynamicBlocklistSource struct {
+	Name     string `yaml:"name"`
+	Type     string `yaml:"type"` // "url_text" or "url_json"
+	URL      string `yaml:"url"`
+	JSONPath string `yaml:"json_path"` // for url_json: dot-path to address array
+}
+
+// PresetsConfig configures the server preset API. When Dir is set, preset list/vars/apply endpoints are registered (admin-only).
+type PresetsConfig struct {
+	Dir string `yaml:"dir"` // required: directory containing preset YAML files (e.g. rules/presets)
 }
 
 // TemplateConfig defines a rule template in configuration
@@ -45,21 +75,23 @@ type TemplateConfig struct {
 	Enabled        bool                   `yaml:"enabled" json:"enabled"`
 }
 
-// TemplateVarConfig defines a template variable in configuration
+// TemplateVarConfig defines a template variable in configuration.
+// Optional variables (Required: false) must declare Default; validate-rules enforces this.
 type TemplateVarConfig struct {
-	Name        string `yaml:"name"`
-	Type        string `yaml:"type"`
-	Description string `yaml:"description,omitempty"`
-	Required    bool   `yaml:"required"`
-	Default     string `yaml:"default,omitempty"`
+	Name        string  `yaml:"name"`
+	Type        string  `yaml:"type"`
+	Description string  `yaml:"description,omitempty"`
+	Required    bool    `yaml:"required"`
+	Default     *string `yaml:"default,omitempty"` // nil = not declared; optional vars must declare default
 }
 
 // TestCaseConfig defines a single test case for rule validation (evm_js, solidity, etc.)
 type TestCaseConfig struct {
-	Name         string                 `yaml:"name" json:"name"`
-	Input        map[string]interface{} `yaml:"input" json:"input"`
-	ExpectPass   bool                   `yaml:"expect_pass" json:"expect_pass"`
-	ExpectReason string                 `yaml:"expect_reason,omitempty" json:"expect_reason,omitempty"`
+	Name               string                 `yaml:"name" json:"name"`
+	Input              map[string]interface{} `yaml:"input" json:"input"`
+	ExpectPass         bool                   `yaml:"expect_pass" json:"expect_pass"`
+	ExpectReason       string                 `yaml:"expect_reason,omitempty" json:"expect_reason,omitempty"`
+	ExpectBudgetAmount string                 `yaml:"expect_budget_amount,omitempty" json:"expect_budget_amount,omitempty"`
 }
 
 // RuleConfig defines a rule in configuration. JSON tags must match YAML/validator expectations
@@ -77,25 +109,21 @@ type RuleConfig struct {
 	APIKeyID      string                 `yaml:"api_key_id,omitempty" json:"api_key_id,omitempty"`
 	SignerAddress string                 `yaml:"signer_address,omitempty" json:"signer_address,omitempty"`
 	Config        map[string]interface{} `yaml:"config" json:"config"`
-	Variables     map[string]interface{} `yaml:"variables,omitempty" json:"variables,omitempty"`   // instance/template variable values (e.g. for evm_js config)
-	TestCases     []TestCaseConfig       `yaml:"test_cases,omitempty" json:"test_cases,omitempty"` // test cases for validation (evm_js, solidity, etc.)
+	Variables     map[string]interface{} `yaml:"variables,omitempty" json:"variables,omitempty"`           // instance/template variable values (e.g. for evm_js config)
+	TestVariables map[string]string      `yaml:"test_variables,omitempty" json:"test_variables,omitempty"` // from template; used for running test cases at startup so expectations match
+	TestCases     []TestCaseConfig       `yaml:"test_cases,omitempty" json:"test_cases,omitempty"`         // test cases for validation (evm_js, solidity, etc.)
 	Enabled       bool                   `yaml:"enabled" json:"enabled"`
 }
 
 // APIKeyConfig defines an API key in configuration
 type APIKeyConfig struct {
-	ID                string   `yaml:"id"`                   // Unique identifier for the API key
-	Name              string   `yaml:"name"`                 // Human-readable name
-	PublicKey         string   `yaml:"public_key"`           // Ed25519 public key (hex or base64, auto-detected)
-	PublicKeyEnv      string   `yaml:"public_key_env"`       // Environment variable containing public key
-	AllowAllSigners   bool     `yaml:"allow_all_signers"`    // When true: key can use any signer (private_key, keystore)
-	AllowAllHDWallets bool     `yaml:"allow_all_hd_wallets"` // When true: key can use any HD wallet (derive, sign derived)
-	AllowedChainTypes []string `yaml:"allowed_chain_types"`  // Empty = all chains allowed
-	AllowedSigners    []string `yaml:"allowed_signers"`      // Signer addresses; empty = none (unless allow_all_signers)
-	AllowedHDWallets  []string `yaml:"allowed_hd_wallets"`  // HD wallet primary addresses; empty = none (unless allow_all_hd_wallets)
-	RateLimit         int      `yaml:"rate_limit"`           // Requests per minute (default: 100)
-	Enabled           bool     `yaml:"enabled"`              // Whether the key is active
-	Admin             bool     `yaml:"admin"`                // Admin keys can approve requests and manage rules
+	ID           string `yaml:"id"`             // Unique identifier for the API key
+	Name         string `yaml:"name"`           // Human-readable name
+	PublicKey    string `yaml:"public_key"`     // Ed25519 public key (hex or base64, auto-detected)
+	PublicKeyEnv string `yaml:"public_key_env"` // Environment variable containing public key
+	RateLimit    int    `yaml:"rate_limit"`     // Requests per minute (default: 100)
+	Enabled      bool   `yaml:"enabled"`        // Whether the key is active
+	Role         string `yaml:"role"`           // API key role: admin, dev, agent, strategy
 }
 
 // ResolvePublicKey returns the public key hex, resolving from env var and auto-detecting format (hex or base64)
@@ -177,11 +205,21 @@ type ChainsConfig struct {
 
 // EVMConfig contains EVM chain configuration
 type EVMConfig struct {
-	Enabled      bool             `yaml:"enabled"`
-	Signers      evm.SignerConfig `yaml:"signers"`
-	KeystoreDir  string           `yaml:"keystore_dir"`   // Directory for storing dynamically created keystores
-	HDWalletDir  string           `yaml:"hd_wallet_dir"`  // Directory for storing HD wallets
-	Foundry      FoundryConfig    `yaml:"foundry"`
+	Enabled       bool                      `yaml:"enabled"`
+	Signers       evm.SignerConfig          `yaml:"signers"`
+	MaterialCheck SignerMaterialCheckConfig `yaml:"material_check"`
+	KeystoreDir   string                    `yaml:"keystore_dir"`  // Directory for storing dynamically created keystores
+	HDWalletDir   string                    `yaml:"hd_wallet_dir"` // Directory for storing HD wallets
+	Foundry       FoundryConfig             `yaml:"foundry"`
+	RPCGateway    evm.RPCGatewayConfig      `yaml:"rpc_gateway"` // RPC gateway for JS rule sandbox (read-only)
+	Simulation    SimulationConfig          `yaml:"simulation"`  // Transaction simulation (eth_simulateV1 via rpc_gateway)
+}
+
+// SignerMaterialCheckConfig controls reconciliation of local key material status.
+type SignerMaterialCheckConfig struct {
+	Enabled      bool          `yaml:"enabled"`
+	StartupCheck bool          `yaml:"startup_check"`
+	Interval     time.Duration `yaml:"interval"`
 }
 
 // FoundryConfig contains Foundry (forge) configuration for Solidity rules
@@ -193,14 +231,28 @@ type FoundryConfig struct {
 	Timeout   time.Duration `yaml:"timeout"`    // max execution time per rule (default: 30s)
 }
 
+// SimulationConfig contains transaction simulation engine configuration.
+type SimulationConfig struct {
+	Enabled bool          `yaml:"enabled"`
+	Timeout time.Duration `yaml:"timeout"` // per-simulation timeout (default: 60s)
+	BatchWindow  time.Duration `yaml:"batch_window"`   // accumulation window for single sign fallback (default: 5s; 0 = disabled)
+	BatchMaxSize int           `yaml:"batch_max_size"` // max txs per batch (default: 20)
+	// Budget defaults for auto-created simulation budget records (human-readable units).
+	// Decimals are auto-queried from chain. "-1" = unlimited.
+	BudgetNativeMaxTotal string `yaml:"budget_native_max_total"`  // native token max total per period (default: "0.01")
+	BudgetNativeMaxPerTx string `yaml:"budget_native_max_per_tx"` // native token max per tx (default: "0.02")
+	BudgetERC20MaxTotal  string `yaml:"budget_erc20_max_total"`   // ERC20 max total per period per token (default: "100")
+	BudgetERC20MaxPerTx  string `yaml:"budget_erc20_max_per_tx"`  // ERC20 max per tx per token (default: "50")
+}
+
 // SecurityConfig contains security-related settings
 type SecurityConfig struct {
-	MaxRequestAge    time.Duration     `yaml:"max_request_age"`
-	RateLimitDefault int               `yaml:"rate_limit_default"`
+	MaxRequestAge    time.Duration `yaml:"max_request_age"`
+	RateLimitDefault int           `yaml:"rate_limit_default"`
 	// IPRateLimit is the maximum requests per minute from a single IP address (pre-auth).
 	// Protects against unauthenticated flood attacks. Default: 200.
-	IPRateLimit int `yaml:"ip_rate_limit"`
-	IPWhitelist      IPWhitelistConfig `yaml:"ip_whitelist"`
+	IPRateLimit int               `yaml:"ip_rate_limit"`
+	IPWhitelist IPWhitelistConfig `yaml:"ip_whitelist"`
 	// ManualApprovalEnabled: when true, requests with no whitelist match go to manual approval;
 	// when false (default), they are rejected immediately. Default false for stricter security.
 	ManualApprovalEnabled bool `yaml:"manual_approval_enabled"`
@@ -220,16 +272,48 @@ type SecurityConfig struct {
 	// Unlock/lock remain allowed. Signers managed through config or TUI.
 	SignersAPIReadonly *bool `yaml:"signers_api_readonly"`
 
+	// APIKeysAPIReadonly disables API key management via API.
+	// Default (nil) = true (secure by default). API keys managed through config files only.
+	APIKeysAPIReadonly *bool `yaml:"api_keys_api_readonly"`
+
 	// AllowSIGHUPRulesReload enables reloading rules from config when receiving SIGHUP.
 	// Default (nil) = false (secure by default). When disabled, SIGHUP is ignored (process stays alive).
 	AllowSIGHUPRulesReload *bool `yaml:"allow_sighup_rules_reload"`
+
+	// MaxRulesPerAPIKey limits how many rules a single non-admin API key can own.
+	// Admin keys are exempt. Default: 50.
+	MaxRulesPerAPIKey int `yaml:"max_rules_per_api_key"`
+
+	// RequireApprovalForAgentRules: when true, agent-created whitelist rules start as "pending_approval"
+	// and require admin approval before becoming active. Blocklist rules are always active immediately.
+	// Default (nil) = true (secure by default). When false, agent-created whitelist rules
+	// (including template instantiation with custom variables like allowed_spenders) become
+	// active immediately without admin review, which is a security risk.
+	RequireApprovalForAgentRules *bool `yaml:"require_approval_for_agent_rules"`
+
+	// AutoLockTimeout: automatically lock signers after this duration since unlock.
+	// Default: 0 (disabled). Example: "1h", "30m".
+	AutoLockTimeout time.Duration `yaml:"auto_lock_timeout"`
+
+	// SignTimeout: context timeout for sign operations. Default: 30s.
+	SignTimeout time.Duration `yaml:"sign_timeout"`
+
+	// MaxKeystoresPerKey limits how many keystores a single API key can own.
+	// 0 = no limit. Default: 5.
+	MaxKeystoresPerKey int `yaml:"max_keystores_per_key"`
+
+	// MaxHDWalletsPerKey limits how many HD wallets a single API key can own.
+	// 0 = no limit. Default: 3.
+	MaxHDWalletsPerKey int `yaml:"max_hd_wallets_per_key"`
 }
 
 // IsRulesAPIReadonly returns whether rule/template mutations via API are disabled.
-// Defaults to true (secure by default) when not explicitly configured.
+// Defaults to false so a freshly-bootstrapped daemon is usable through the
+// UI/API out of the box; flip to true via Settings → security to harden
+// after the rule set is hand-curated. RBAC + approval flags still apply.
 func (s SecurityConfig) IsRulesAPIReadonly() bool {
 	if s.RulesAPIReadonly == nil {
-		return true
+		return false
 	}
 	return *s.RulesAPIReadonly
 }
@@ -241,6 +325,24 @@ func (s SecurityConfig) IsSignersAPIReadonly() bool {
 		return false
 	}
 	return *s.SignersAPIReadonly
+}
+
+// IsAPIKeysAPIReadonly returns whether API key management via API is disabled.
+// Defaults to false (see IsRulesAPIReadonly for rationale).
+func (s SecurityConfig) IsAPIKeysAPIReadonly() bool {
+	if s.APIKeysAPIReadonly == nil {
+		return false
+	}
+	return *s.APIKeysAPIReadonly
+}
+
+// IsRequireApprovalForAgentRules returns whether agent-created whitelist rules require admin approval.
+// Defaults to true (secure by default) when not explicitly configured.
+func (s SecurityConfig) IsRequireApprovalForAgentRules() bool {
+	if s.RequireApprovalForAgentRules == nil {
+		return true
+	}
+	return *s.RequireApprovalForAgentRules
 }
 
 // IsSIGHUPRulesReloadEnabled returns whether SIGHUP-triggered rules reload is enabled.
@@ -258,10 +360,11 @@ func (s SecurityConfig) IsSIGHUPRulesReloadEnabled() bool {
 // Use case: detect API key abuse — attacker with valid API key repeatedly hits rule rejections or pending approval.
 // After ResumeAfter the guard auto-resumes so the team has time to respond.
 type ApprovalGuardConfig struct {
-	Enabled     bool          `yaml:"enabled"`
-	Window      time.Duration `yaml:"window"`       // time window for counting (e.g. 5m); 0 = no window check
-	Threshold   int           `yaml:"threshold"`    // consecutive rejections (blocked or manual-approval) that trigger pause (e.g. 10)
-	ResumeAfter time.Duration `yaml:"resume_after"` // pause duration after which to auto-resume (e.g. 2h)
+	Enabled               bool          `yaml:"enabled"`
+	Window                time.Duration `yaml:"window"`                  // sliding time window for rate calculation (default: 1h)
+	RejectionThresholdPct float64       `yaml:"rejection_threshold_pct"` // rejection rate % that triggers pause (default: 50)
+	MinSamples            int           `yaml:"min_samples"`             // minimum events in window before rate check applies (default: 10)
+	ResumeAfter           time.Duration `yaml:"resume_after"`            // pause duration after which to auto-resume (e.g. 2h)
 }
 
 // IPWhitelistConfig contains IP whitelist settings
@@ -307,17 +410,17 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
-	if err := validate(cfg); err != nil {
-		return nil, fmt.Errorf("config validation failed: %w", err)
-	}
-
 	// Prefer DATABASE_DSN env over config (required for Docker host network: config may have "postgres" hostname)
 	if dsn := os.Getenv("DATABASE_DSN"); dsn != "" {
 		cfg.Database.DSN = dsn
 	}
 
-	// Set defaults
+	// Set defaults before validation so that default budget values are populated
 	setDefaults(cfg)
+
+	if err := validate(cfg); err != nil {
+		return nil, fmt.Errorf("config validation failed: %w", err)
+	}
 
 	return cfg, nil
 }
@@ -368,6 +471,19 @@ func validate(cfg *Config) error {
 		return fmt.Errorf("database DSN is required")
 	}
 
+	// v0.3.0 breaking change: api_keys/templates/rules can no longer live in
+	// config.yaml. They are managed exclusively via the admin API and CLI so
+	// changes apply at runtime without restart.
+	if len(cfg.APIKeys) > 0 {
+		return fmt.Errorf(`config.yaml: "api_keys" is no longer supported. Manage API keys via the admin API: 'remote-signer api-key create ...' (use 'remote-signer api-key keygen --out ...' to mint the keypair first). On a fresh install the admin key is auto-generated at ~/.remote-signer/admin.key.{priv,pub}`)
+	}
+	if len(cfg.Templates) > 0 {
+		return fmt.Errorf(`config.yaml: "templates" is no longer supported. Manage rule templates via 'remote-signer template' or the /api/v1/templates HTTP API. See docs/rules-templates-and-presets.md`)
+	}
+	if len(cfg.Rules) > 0 {
+		return fmt.Errorf(`config.yaml: "rules" is no longer supported. Manage rules via 'remote-signer rule create ...' or the /api/v1/evm/rules HTTP API. See docs/rules-templates-and-presets.md`)
+	}
+
 	// Validate at least one chain is enabled
 	if cfg.Chains.EVM == nil || !cfg.Chains.EVM.Enabled {
 		return fmt.Errorf("at least one chain must be enabled")
@@ -397,6 +513,20 @@ func validate(cfg *Config) error {
 		}
 	}
 
+	// Validate simulation requires budget defaults
+	if cfg.Chains.EVM != nil && cfg.Chains.EVM.Simulation.Enabled {
+		sim := cfg.Chains.EVM.Simulation
+		if sim.BudgetNativeMaxTotal == "" && sim.BudgetNativeMaxPerTx == "" &&
+			sim.BudgetERC20MaxTotal == "" && sim.BudgetERC20MaxPerTx == "" {
+			return fmt.Errorf("simulation is enabled but no budget defaults configured (budget_native_max_total, budget_native_max_per_tx, budget_erc20_max_total, budget_erc20_max_per_tx are all empty); this allows unlimited spending — configure budget limits or disable simulation")
+		}
+	}
+	if cfg.Chains.EVM != nil && cfg.Chains.EVM.MaterialCheck.Enabled {
+		if cfg.Chains.EVM.MaterialCheck.Interval < time.Minute {
+			return fmt.Errorf("chains.evm.material_check.interval must be >= 1m")
+		}
+	}
+
 	// Validate API keys
 	seenIDs := make(map[string]bool)
 	for i, key := range cfg.APIKeys {
@@ -411,6 +541,13 @@ func validate(cfg *Config) error {
 		// Skip public key validation for disabled keys
 		if !key.Enabled {
 			continue
+		}
+
+		if key.Role == "" {
+			return fmt.Errorf("api_keys[%d] (%s): role is required (admin, dev, agent, strategy)", i, key.ID)
+		}
+		if !types.IsValidAPIKeyRole(key.Role) {
+			return fmt.Errorf("api_keys[%d] (%s): invalid role %q (must be admin, dev, agent, or strategy)", i, key.ID, key.Role)
 		}
 
 		if key.PublicKey == "" && key.PublicKeyEnv == "" {
@@ -457,14 +594,59 @@ func setDefaults(cfg *Config) {
 		if cfg.Chains.EVM.HDWalletDir == "" {
 			cfg.Chains.EVM.HDWalletDir = "./data/hd-wallets"
 		}
+		if cfg.Chains.EVM.MaterialCheck.Interval <= 0 {
+			cfg.Chains.EVM.MaterialCheck.Interval = 10 * time.Minute
+		}
+	}
+
+	// Simulation engine defaults
+	if cfg.Chains.EVM != nil && cfg.Chains.EVM.Simulation.Enabled {
+		sim := &cfg.Chains.EVM.Simulation
+		if sim.Timeout <= 0 {
+			sim.Timeout = 60 * time.Second
+		}
+		if sim.BatchWindow <= 0 {
+			sim.BatchWindow = 1 * time.Second
+		}
+		if sim.BatchMaxSize <= 0 {
+			sim.BatchMaxSize = 20
+		}
+		if sim.BudgetNativeMaxTotal == "" {
+			sim.BudgetNativeMaxTotal = "0.01"
+		}
+		if sim.BudgetNativeMaxPerTx == "" {
+			sim.BudgetNativeMaxPerTx = "0.1"
+		}
+		if sim.BudgetERC20MaxTotal == "" {
+			sim.BudgetERC20MaxTotal = "100"
+		}
+		if sim.BudgetERC20MaxPerTx == "" {
+			sim.BudgetERC20MaxPerTx = "50"
+		}
+	}
+
+	// Rule limits defaults
+	if cfg.Security.MaxRulesPerAPIKey <= 0 {
+		cfg.Security.MaxRulesPerAPIKey = 50
+	}
+
+	// Resource limit defaults
+	if cfg.Security.MaxKeystoresPerKey <= 0 {
+		cfg.Security.MaxKeystoresPerKey = 5
+	}
+	if cfg.Security.MaxHDWalletsPerKey <= 0 {
+		cfg.Security.MaxHDWalletsPerKey = 3
 	}
 
 	// ApprovalGuard defaults
-	if cfg.Security.ApprovalGuard.Enabled && cfg.Security.ApprovalGuard.Threshold <= 0 {
-		cfg.Security.ApprovalGuard.Threshold = 10
+	if cfg.Security.ApprovalGuard.Enabled && cfg.Security.ApprovalGuard.RejectionThresholdPct <= 0 {
+		cfg.Security.ApprovalGuard.RejectionThresholdPct = 50
+	}
+	if cfg.Security.ApprovalGuard.Enabled && cfg.Security.ApprovalGuard.MinSamples <= 0 {
+		cfg.Security.ApprovalGuard.MinSamples = 10
 	}
 	if cfg.Security.ApprovalGuard.Enabled && cfg.Security.ApprovalGuard.Window <= 0 {
-		cfg.Security.ApprovalGuard.Window = 5 * time.Minute
+		cfg.Security.ApprovalGuard.Window = 1 * time.Hour
 	}
 	if cfg.Security.ApprovalGuard.Enabled && cfg.Security.ApprovalGuard.ResumeAfter <= 0 {
 		cfg.Security.ApprovalGuard.ResumeAfter = 2 * time.Hour

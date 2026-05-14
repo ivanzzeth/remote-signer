@@ -243,6 +243,10 @@ func (m *DashboardModel) renderDashboard() string {
 	rulesBox := m.renderRulesSection()
 	sections = append(sections, rulesBox)
 
+	// Security config section
+	securityBox := m.renderSecuritySection()
+	sections = append(sections, securityBox)
+
 	// Join sections horizontally if there's room
 	topRow := lipgloss.JoinHorizontal(lipgloss.Top, statusBox, "  ", requestsBox)
 
@@ -252,10 +256,12 @@ func (m *DashboardModel) renderDashboard() string {
 		m.data.LastRefresh.Format("15:04:05"),
 	))
 
+	bottomRow := lipgloss.JoinHorizontal(lipgloss.Top, rulesBox, "  ", securityBox)
+
 	return lipgloss.JoinVertical(lipgloss.Left,
 		topRow,
 		"",
-		rulesBox,
+		bottomRow,
 		"",
 		footer,
 	)
@@ -318,6 +324,50 @@ func (m *DashboardModel) renderRequestsSection() string {
 	content.WriteString(fmt.Sprintf("Total:       %d", m.data.TotalRequests))
 
 	return styles.BoxStyle.Width(40).Render(content.String())
+}
+
+func (m *DashboardModel) renderSecuritySection() string {
+	var content strings.Builder
+
+	content.WriteString(styles.SubtitleStyle.Render("Security Config"))
+	content.WriteString("\n\n")
+
+	if m.data == nil || m.data.Health == nil || m.data.Health.Security == nil {
+		content.WriteString(styles.MutedColor.Render("Not available"))
+		return styles.BoxStyle.Width(36).Render(content.String())
+	}
+
+	sec := m.data.Health.Security
+
+	// Auto-lock timeout
+	autoLockStyle := styles.SuccessStyle
+	if sec.AutoLockTimeout == "disabled" {
+		autoLockStyle = styles.WarningStyle
+	}
+	content.WriteString(fmt.Sprintf("Auto-Lock:    %s\n", autoLockStyle.Render(sec.AutoLockTimeout)))
+
+	// Sign timeout
+	content.WriteString(fmt.Sprintf("Sign Timeout: %s\n", sec.SignTimeout))
+
+	// Audit retention
+	retentionStr := "disabled"
+	retentionStyle := styles.WarningStyle
+	if sec.AuditRetentionDays > 0 {
+		retentionStr = fmt.Sprintf("%d days", sec.AuditRetentionDays)
+		retentionStyle = styles.SuccessStyle
+	}
+	content.WriteString(fmt.Sprintf("Retention:    %s\n", retentionStyle.Render(retentionStr)))
+
+	// Content-Type validation
+	ctStr := "Off"
+	ctStyle := styles.ErrorStyle
+	if sec.ContentTypeValidation {
+		ctStr = "On"
+		ctStyle = styles.SuccessStyle
+	}
+	content.WriteString(fmt.Sprintf("Content-Type: %s", ctStyle.Render(ctStr)))
+
+	return styles.BoxStyle.Width(36).Render(content.String())
 }
 
 func (m *DashboardModel) renderRulesSection() string {

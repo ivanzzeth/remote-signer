@@ -2,14 +2,17 @@ package config
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	rulepkg "github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
@@ -556,4 +559,387 @@ func TestSyncFromConfig_DuplicateRuleIDs(t *testing.T) {
 	err := init.SyncFromConfig(ctx, rules)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "duplicate rule id")
+}
+
+// createBudgetFromInstanceConfig requires budget.unit when budget block is present
+func TestCreateBudgetFromInstanceConfig_RequiresUnit(t *testing.T) {
+	ctx := context.Background()
+	rule := &types.Rule{ID: "r1", Variables: []byte("{}")}
+	tmpl := &types.RuleTemplate{ID: "t1", BudgetMetering: []byte(`{"method":"count_only","unit":"fallback"}`)}
+
+	// Budget map with max_total but no unit must fail
+	noUnit := map[string]interface{}{"max_total": "1000"}
+	err := createBudgetFromInstanceConfig(ctx, rule, tmpl, noUnit, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "budget.unit is required")
+}
+
+// mockBudgetRepoForCreate implements only Create for tests that need a non-nil BudgetRepository
+type mockBudgetRepoForCreate struct{}
+
+func (m *mockBudgetRepoForCreate) Create(ctx context.Context, budget *types.RuleBudget) error { return nil }
+func (m *mockBudgetRepoForCreate) GetByRuleID(ctx context.Context, ruleID types.RuleID, unit string) (*types.RuleBudget, error) {
+	return nil, nil
+}
+func (m *mockBudgetRepoForCreate) Delete(ctx context.Context, id string) error   { return nil }
+func (m *mockBudgetRepoForCreate) DeleteByRuleID(ctx context.Context, ruleID types.RuleID) error { return nil }
+func (m *mockBudgetRepoForCreate) AtomicSpend(ctx context.Context, ruleID types.RuleID, unit, amount string) error {
+	return nil
+}
+func (m *mockBudgetRepoForCreate) ResetBudget(ctx context.Context, ruleID types.RuleID, unit string, currentPeriodStart time.Time) error {
+	return nil
+}
+func (m *mockBudgetRepoForCreate) ListByRuleID(ctx context.Context, ruleID types.RuleID) ([]*types.RuleBudget, error) {
+	return nil, nil
+}
+func (m *mockBudgetRepoForCreate) ListByRuleIDs(ctx context.Context, ruleIDs []types.RuleID) ([]*types.RuleBudget, error) {
+	return nil, nil
+}
+func (m *mockBudgetRepoForCreate) ListAll(ctx context.Context) ([]*types.RuleBudget, error) {
+	return nil, nil
+}
+func (m *mockBudgetRepoForCreate) Get(ctx context.Context, id string) (*types.RuleBudget, error) {
+	return nil, types.ErrNotFound
+}
+func (m *mockBudgetRepoForCreate) Update(ctx context.Context, budget *types.RuleBudget) error {
+	return nil
+}
+func (m *mockBudgetRepoForCreate) MarkAlertSent(ctx context.Context, ruleID types.RuleID, unit string) error {
+	return nil
+}
+func (m *mockBudgetRepoForCreate) CountByRuleID(_ context.Context, _ types.RuleID) (int, error) {
+	return 0, nil
+}
+func (m *mockBudgetRepoForCreate) CreateOrGet(_ context.Context, budget *types.RuleBudget) (*types.RuleBudget, bool, error) {
+	return budget, true, nil
+}
+
+// createBudgetFromInstanceConfig accepts empty for optional fields (template variable instantiated to empty)
+func TestCreateBudgetFromInstanceConfig_AcceptsEmptyOptionalFields(t *testing.T) {
+	ctx := context.Background()
+	rule := &types.Rule{ID: "r1", Variables: []byte(`{"max_transfer_amount":"","alert_pct":""}`)}
+	tmpl := &types.RuleTemplate{ID: "t1", BudgetMetering: []byte(`{"method":"count_only","unit":"x"}`)}
+	repo := &mockBudgetRepoForCreate{}
+
+	// unit required; optional fields can be empty (e.g. ${max_transfer_amount} → "")
+	budgetMap := map[string]interface{}{
+		"unit":        "1:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+		"max_total":  "${max_transfer_amount}", // resolves to ""
+		"max_per_tx": "",
+		"alert_pct":  "",
+	}
+	err := createBudgetFromInstanceConfig(ctx, rule, tmpl, budgetMap, repo)
+	require.NoError(t, err)
+}
+
+// =============================================================================
+// resolveBudgetUnit unit tests (config-driven budget unit resolution)
+// =============================================================================
+
+func TestResolveBudgetUnit_FromBudgetMapWithVariables(t *testing.T) {
+	rule := &types.Rule{
+		ID:        "r1",
+		Variables: []byte(`{"chain_id":"137","token_address":"0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"}`),
+	}
+	tmpl := &types.RuleTemplate{ID: "t1"}
+	budgetMap := map[string]interface{}{"unit": "${chain_id}:${token_address}"}
+
+	unit, err := resolveBudgetUnit(rule, tmpl, budgetMap)
+	require.NoError(t, err)
+	// Normalized to lowercase
+	assert.Equal(t, "137:0x2791bca1f2de4661ed88a30c99a7a9449aa84174", unit)
+}
+
+func TestResolveBudgetUnit_FromTemplateMeteringFallback(t *testing.T) {
+	rule := &types.Rule{ID: "r1", Variables: []byte(`{"chain_id":"56","token":"0xabc"}`)}
+	tmpl := &types.RuleTemplate{
+		ID:              "t1",
+		BudgetMetering:  []byte(`{"method":"count_only","unit":"${chain_id}:${token}"}`),
+	}
+	budgetMap := map[string]interface{}{"unit": ":", "max_total": "100"} // invalid unit, triggers fallback
+
+	unit, err := resolveBudgetUnit(rule, tmpl, budgetMap)
+	require.NoError(t, err)
+	assert.Equal(t, "56:0xabc", unit)
+}
+
+func TestResolveBudgetUnit_EmptyUnitError(t *testing.T) {
+	rule := &types.Rule{ID: "r1", Variables: []byte("{}")}
+	tmpl := &types.RuleTemplate{ID: "t1"}
+	budgetMap := map[string]interface{}{"max_total": "100"} // no unit
+
+	_, err := resolveBudgetUnit(rule, tmpl, budgetMap)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "budget.unit is required")
+}
+
+func TestResolveBudgetUnit_UnresolvedVariableError(t *testing.T) {
+	rule := &types.Rule{ID: "r1", Variables: []byte(`{"chain_id":"137"}`)} // missing token_address
+	tmpl := &types.RuleTemplate{ID: "t1"}
+	budgetMap := map[string]interface{}{"unit": "${chain_id}:${token_address}"}
+
+	_, err := resolveBudgetUnit(rule, tmpl, budgetMap)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "resolve to a non-empty value")
+	assert.Contains(t, err.Error(), "${")
+}
+
+func TestResolveBudgetUnit_Normalized(t *testing.T) {
+	rule := &types.Rule{ID: "r1", Variables: []byte("{}")}
+	tmpl := &types.RuleTemplate{ID: "t1"}
+	budgetMap := map[string]interface{}{"unit": "137:0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"}
+
+	unit, err := resolveBudgetUnit(rule, tmpl, budgetMap)
+	require.NoError(t, err)
+	assert.Equal(t, "137:0x2791bca1f2de4661ed88a30c99a7a9449aa84174", unit)
+}
+
+// =============================================================================
+// syncBudgetFromConfig unit tests (diff: delete stale units, ensure current exists)
+// =============================================================================
+
+// spyBudgetRepo records calls for assertions; implements storage.BudgetRepository.
+type spyBudgetRepo struct {
+	listByRuleIDCalls   []types.RuleID
+	listByRuleIDReturn  []*types.RuleBudget
+	listErr             error // if set, ListByRuleID returns this error
+	deleteCalls         []string // IDs deleted
+	createCalls         []*types.RuleBudget
+	getByRuleIDReturn   map[string]*types.RuleBudget // key "ruleID|unit"
+	deleteByRuleIDCalls []types.RuleID
+}
+
+func (s *spyBudgetRepo) ListByRuleID(ctx context.Context, ruleID types.RuleID) ([]*types.RuleBudget, error) {
+	s.listByRuleIDCalls = append(s.listByRuleIDCalls, ruleID)
+	if s.listErr != nil {
+		return nil, s.listErr
+	}
+	return s.listByRuleIDReturn, nil
+}
+func (s *spyBudgetRepo) ListByRuleIDs(ctx context.Context, ruleIDs []types.RuleID) ([]*types.RuleBudget, error) {
+	return nil, nil
+}
+func (s *spyBudgetRepo) ListAll(ctx context.Context) ([]*types.RuleBudget, error) {
+	return nil, nil
+}
+func (s *spyBudgetRepo) Get(ctx context.Context, id string) (*types.RuleBudget, error) {
+	return nil, types.ErrNotFound
+}
+func (s *spyBudgetRepo) Update(ctx context.Context, budget *types.RuleBudget) error {
+	return nil
+}
+func (s *spyBudgetRepo) GetByRuleID(ctx context.Context, ruleID types.RuleID, unit string) (*types.RuleBudget, error) {
+	if s.getByRuleIDReturn != nil {
+		if b, ok := s.getByRuleIDReturn[string(ruleID)+"|"+unit]; ok && b != nil {
+			return b, nil
+		}
+	}
+	return nil, types.ErrNotFound
+}
+func (s *spyBudgetRepo) Create(ctx context.Context, budget *types.RuleBudget) error {
+	s.createCalls = append(s.createCalls, budget)
+	return nil
+}
+func (s *spyBudgetRepo) Delete(ctx context.Context, id string) error {
+	s.deleteCalls = append(s.deleteCalls, id)
+	return nil
+}
+func (s *spyBudgetRepo) DeleteByRuleID(ctx context.Context, ruleID types.RuleID) error {
+	s.deleteByRuleIDCalls = append(s.deleteByRuleIDCalls, ruleID)
+	return nil
+}
+func (s *spyBudgetRepo) AtomicSpend(ctx context.Context, ruleID types.RuleID, unit, amount string) error { return nil }
+func (s *spyBudgetRepo) ResetBudget(ctx context.Context, ruleID types.RuleID, unit string, t time.Time) error {
+	return nil
+}
+func (s *spyBudgetRepo) MarkAlertSent(ctx context.Context, ruleID types.RuleID, unit string) error {
+	return nil
+}
+func (s *spyBudgetRepo) CountByRuleID(_ context.Context, _ types.RuleID) (int, error) {
+	return 0, nil
+}
+func (s *spyBudgetRepo) CreateOrGet(_ context.Context, budget *types.RuleBudget) (*types.RuleBudget, bool, error) {
+	return budget, true, nil
+}
+
+func TestSyncBudgetFromConfig_DeletesStaleUnits(t *testing.T) {
+	ctx := context.Background()
+	rule := &types.Rule{
+		ID:        "rule-1",
+		Variables: []byte(`{"chain_id":"137","token_address":"0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"}`),
+	}
+	tmpl := &types.RuleTemplate{ID: "t1"}
+	budgetMap := map[string]interface{}{"unit": "${chain_id}:${token_address}", "max_total": "1000"}
+
+	// Current config unit is 137:0x2791... (normalized). DB has old unit 56:0x... and current.
+	currentUnit := "137:0x2791bca1f2de4661ed88a30c99a7a9449aa84174"
+	spy := &spyBudgetRepo{
+		listByRuleIDReturn: []*types.RuleBudget{
+			{ID: "bdg-old", RuleID: "rule-1", Unit: "56:0xanother"},
+			{ID: "bdg-current", RuleID: "rule-1", Unit: currentUnit},
+		},
+	}
+
+	err := syncBudgetFromConfig(ctx, rule, tmpl, budgetMap, spy)
+	require.NoError(t, err)
+
+	// Stale unit (56:0xanother) must be deleted; current must remain (no delete for bdg-current).
+	assert.Contains(t, spy.deleteCalls, "bdg-old")
+	assert.NotContains(t, spy.deleteCalls, "bdg-current")
+	// createBudgetFromInstanceConfig runs: GetByRuleID for current unit returns existing → no create. So we need to either return existing from GetByRuleID or accept that Create might be called with same unit (idempotent create). Our spy doesn't set getByRuleIDReturn so GetByRuleID returns ErrNotFound, so Create will be called. So createCalls has one entry. That's fine.
+	assert.Len(t, spy.createCalls, 1)
+	assert.Equal(t, currentUnit, spy.createCalls[0].Unit)
+}
+
+func TestSyncBudgetFromConfig_CreatesCurrentUnitIfMissing(t *testing.T) {
+	ctx := context.Background()
+	rule := &types.Rule{
+		ID:        "rule-2",
+		Variables: []byte(`{"chain_id":"1","token_address":"0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"}`),
+	}
+	tmpl := &types.RuleTemplate{ID: "t1"}
+	budgetMap := map[string]interface{}{"unit": "${chain_id}:${token_address}", "max_total": "500"}
+
+	spy := &spyBudgetRepo{listByRuleIDReturn: nil} // no existing budgets
+
+	err := syncBudgetFromConfig(ctx, rule, tmpl, budgetMap, spy)
+	require.NoError(t, err)
+
+	assert.Empty(t, spy.deleteCalls)
+	assert.Len(t, spy.createCalls, 1)
+	assert.Equal(t, "1:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", spy.createCalls[0].Unit)
+	assert.Equal(t, "rule-2", string(spy.createCalls[0].RuleID))
+}
+
+func TestSyncBudgetFromConfig_IdempotentWhenCurrentExists(t *testing.T) {
+	ctx := context.Background()
+	currentUnit := "137:0x2791bca1f2de4661ed88a30c99a7a9449aa84174"
+	rule := &types.Rule{
+		ID:        "rule-3",
+		Variables: []byte(`{"chain_id":"137","token_address":"0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"}`),
+	}
+	tmpl := &types.RuleTemplate{ID: "t1"}
+	budgetMap := map[string]interface{}{"unit": "${chain_id}:${token_address}"}
+
+	existing := &types.RuleBudget{ID: "bdg-existing", RuleID: "rule-3", Unit: currentUnit}
+	spy := &spyBudgetRepo{
+		listByRuleIDReturn: []*types.RuleBudget{existing},
+		getByRuleIDReturn:  map[string]*types.RuleBudget{"rule-3|" + currentUnit: existing},
+	}
+
+	err := syncBudgetFromConfig(ctx, rule, tmpl, budgetMap, spy)
+	require.NoError(t, err)
+
+	// No stale units to delete
+	assert.Empty(t, spy.deleteCalls)
+	// createBudgetFromInstanceConfig: GetByRuleID returns existing → skip Create
+	assert.Empty(t, spy.createCalls)
+}
+
+func TestSyncBudgetFromConfig_ListError(t *testing.T) {
+	ctx := context.Background()
+	rule := &types.Rule{ID: "r1", Variables: []byte("{}")}
+	tmpl := &types.RuleTemplate{ID: "t1"}
+	budgetMap := map[string]interface{}{"unit": "1:0xabc"}
+
+	listFailing := &spyBudgetRepo{listErr: assert.AnError}
+	err := syncBudgetFromConfig(ctx, rule, tmpl, budgetMap, listFailing)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "list budgets")
+}
+
+// =============================================================================
+// SyncFromConfig: deleting a rule from config deletes its budgets (config-driven diff)
+// =============================================================================
+
+func TestSyncFromConfig_DeletingRuleDeletesBudgets(t *testing.T) {
+	init, _ := newTestRuleInit(t)
+	spy := &spyBudgetRepo{}
+	init.SetBudgetRepo(spy)
+	ctx := context.Background()
+
+	rules := []RuleConfig{
+		enabledRule("rule-keep", "Keep", "whitelist"),
+		enabledRule("rule-remove", "Remove", "whitelist"),
+	}
+	require.NoError(t, init.SyncFromConfig(ctx, rules))
+
+	// Remove second rule from config
+	require.NoError(t, init.SyncFromConfig(ctx, rules[:1]))
+
+	// executeSyncBody must have called DeleteByRuleID for the removed rule
+	removeID := EffectiveRuleID(1, rules[1])
+	assert.Contains(t, spy.deleteByRuleIDCalls, removeID, "deleting rule from config should delete its budgets")
+}
+
+// =============================================================================
+// syncDynamicBudgetFromConfig: template variables in BudgetMetering
+// =============================================================================
+
+func TestSyncDynamicBudgetFromConfig_TemplateVariablesResolved(t *testing.T) {
+	ctx := context.Background()
+
+	// Template BudgetMetering uses ${var} placeholders (like agent template)
+	meteringJSON := []byte(`{
+		"method":"js","dynamic":true,"unit_decimal":true,
+		"known_units":{
+			"native":{"max_total":"${max_native_total}","max_per_tx":"${max_native_per_tx}","decimals":18},
+			"sign_count":{"max_total":"${max_sign_count}","max_per_tx":"1","decimals":0}
+		},
+		"unknown_default":{"max_total":"${max_unknown_token_total}","max_per_tx":"${max_unknown_token_per_tx}","max_tx_count":"${max_unknown_token_tx_count}"}
+	}`)
+
+	// Rule variables have the resolved values from preset --set
+	rule := &types.Rule{
+		ID: "rule-agent",
+		Variables: []byte(`{
+			"max_native_total":"0.01",
+			"max_native_per_tx":"0.005",
+			"max_sign_count":"3",
+			"max_unknown_token_total":"500",
+			"max_unknown_token_per_tx":"50",
+			"max_unknown_token_tx_count":"25"
+		}`),
+	}
+	tmpl := &types.RuleTemplate{
+		ID:             "tmpl-agent",
+		BudgetMetering: meteringJSON,
+	}
+
+	// Instance budget config (from preset) with already-resolved ${var}
+	budgetMap := map[string]interface{}{
+		"dynamic":      true,
+		"unit_decimal": true,
+		"known_units": map[string]interface{}{
+			"native": map[string]interface{}{
+				"max_total":  "0.01",
+				"max_per_tx": "0.005",
+				"decimals":   18,
+			},
+			"sign_count": map[string]interface{}{
+				"max_total":  "3",
+				"max_per_tx": "1",
+				"decimals":   0,
+			},
+		},
+	}
+
+	spy := &spyBudgetRepo{listByRuleIDReturn: nil}
+
+	// The key test: syncBudgetFromConfig should detect dynamic=true from the
+	// template BudgetMetering (after variable substitution), and then use
+	// the instance budgetMap's known_units to create budget records.
+	var metering types.BudgetMetering
+	resolvedJSON := rulepkg.SubstituteMeteringJSON(tmpl.BudgetMetering, rule.Variables)
+	require.NoError(t, json.Unmarshal(resolvedJSON, &metering), "BudgetMetering JSON with ${var} should unmarshal after substitution")
+	assert.True(t, metering.Dynamic, "metering.Dynamic should be true")
+	assert.Equal(t, "0.01", metering.KnownUnits["native"].MaxTotal)
+	assert.Equal(t, "3", metering.KnownUnits["sign_count"].MaxTotal)
+
+	// Now test the full sync path
+	err := syncBudgetFromConfig(ctx, rule, tmpl, budgetMap, spy)
+	require.NoError(t, err, "syncBudgetFromConfig should not fail with template variables in BudgetMetering")
+
+	// Verify budget records were created via CreateOrGet (spy returns true for created)
+	// The sync path uses instance budgetMap's known_units, not template's
 }

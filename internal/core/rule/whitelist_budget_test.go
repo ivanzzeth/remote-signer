@@ -75,6 +75,15 @@ func (m *budgetExceededBudgetRepo) ListByRuleID(ctx context.Context, ruleID type
 func (m *budgetExceededBudgetRepo) ListByRuleIDs(ctx context.Context, ruleIDs []types.RuleID) ([]*types.RuleBudget, error) {
 	return nil, nil
 }
+func (m *budgetExceededBudgetRepo) ListAll(ctx context.Context) ([]*types.RuleBudget, error) {
+	return nil, nil
+}
+func (m *budgetExceededBudgetRepo) Get(ctx context.Context, id string) (*types.RuleBudget, error) {
+	return nil, types.ErrNotFound
+}
+func (m *budgetExceededBudgetRepo) Update(ctx context.Context, budget *types.RuleBudget) error {
+	return nil
+}
 
 func (m *budgetExceededBudgetRepo) GetByRuleID(ctx context.Context, ruleID types.RuleID, unit string) (*types.RuleBudget, error) {
 	m.mu.Lock()
@@ -109,6 +118,12 @@ func (m *budgetExceededBudgetRepo) AtomicSpend(ctx context.Context, ruleID types
 func (m *budgetExceededBudgetRepo) MarkAlertSent(ctx context.Context, ruleID types.RuleID, unit string) error {
 	return nil
 }
+func (m *budgetExceededBudgetRepo) CountByRuleID(_ context.Context, _ types.RuleID) (int, error) {
+	return 0, nil
+}
+func (m *budgetExceededBudgetRepo) CreateOrGet(_ context.Context, budget *types.RuleBudget) (*types.RuleBudget, bool, error) {
+	return budget, true, nil
+}
 
 // budgetExceededTemplateRepo returns a template with count_only metering for any ID.
 type budgetExceededTemplateRepo struct {
@@ -134,6 +149,15 @@ func (r *budgetExceededTemplateRepo) List(ctx context.Context, filter storage.Te
 }
 func (r *budgetExceededTemplateRepo) Count(ctx context.Context, filter storage.TemplateFilter) (int, error) {
 	return 0, nil
+}
+func (r *budgetExceededTemplateRepo) Upsert(ctx context.Context, tmpl *types.RuleTemplate) (bool, error) {
+	return false, nil
+}
+func (r *budgetExceededTemplateRepo) ListIDsBySource(ctx context.Context, source types.RuleSource) ([]string, error) {
+	return nil, nil
+}
+func (r *budgetExceededTemplateRepo) DeleteMany(ctx context.Context, ids []string) error {
+	return nil
 }
 
 // TestWhitelistRuleEngine_BudgetExceeded_DeniesRequest ensures that when the first

@@ -13,6 +13,7 @@ import (
 // APIKeyFilter for querying API keys
 type APIKeyFilter struct {
 	EnabledOnly bool
+	Source      string // "config", "api", or "" for all
 	Offset      int
 	Limit       int
 }
@@ -24,7 +25,11 @@ type APIKeyRepository interface {
 	Update(ctx context.Context, key *types.APIKey) error
 	Delete(ctx context.Context, id string) error
 	List(ctx context.Context, filter APIKeyFilter) ([]*types.APIKey, error)
+	Count(ctx context.Context, filter APIKeyFilter) (int, error)
 	UpdateLastUsed(ctx context.Context, id string) error
+	// DeleteBySourceExcluding deletes all keys with the given source whose IDs are NOT in the excludeIDs list.
+	DeleteBySourceExcluding(ctx context.Context, source string, excludeIDs []string) (int64, error)
+	BackfillSource(ctx context.Context, defaultSource string) (int64, error)
 }
 
 // GormAPIKeyRepository implements APIKeyRepository using GORM
@@ -91,6 +96,10 @@ func (r *GormAPIKeyRepository) List(ctx context.Context, filter APIKeyFilter) ([
 		query = query.Where("expires_at IS NULL OR expires_at > ?", time.Now())
 	}
 
+	if filter.Source != "" {
+		query = query.Where("source = ?", filter.Source)
+	}
+
 	if filter.Offset > 0 {
 		query = query.Offset(filter.Offset)
 	}
@@ -110,6 +119,23 @@ func (r *GormAPIKeyRepository) List(ctx context.Context, filter APIKeyFilter) ([
 	return keys, nil
 }
 
+// Count returns the number of API keys matching the filter
+func (r *GormAPIKeyRepository) Count(ctx context.Context, filter APIKeyFilter) (int, error) {
+	query := r.db.WithContext(ctx).Model(&types.APIKey{})
+	if filter.EnabledOnly {
+		query = query.Where("enabled = ?", true)
+		query = query.Where("expires_at IS NULL OR expires_at > ?", time.Now())
+	}
+	if filter.Source != "" {
+		query = query.Where("source = ?", filter.Source)
+	}
+	var count int64
+	if err := query.Count(&count).Error; err != nil {
+		return 0, fmt.Errorf("failed to count API keys: %w", err)
+	}
+	return int(count), nil
+}
+
 // UpdateLastUsed updates the last used timestamp for an API key
 func (r *GormAPIKeyRepository) UpdateLastUsed(ctx context.Context, id string) error {
 	now := time.Now()
@@ -123,4 +149,28 @@ func (r *GormAPIKeyRepository) UpdateLastUsed(ctx context.Context, id string) er
 		return types.ErrNotFound
 	}
 	return nil
+}
+
+// DeleteBySourceExcluding deletes all keys with the given source whose IDs are NOT in the excludeIDs list.
+func (r *GormAPIKeyRepository) DeleteBySourceExcluding(ctx context.Context, source string, excludeIDs []string) (int64, error) {
+	query := r.db.WithContext(ctx).Where("source = ?", source)
+	if len(excludeIDs) > 0 {
+		query = query.Where("id NOT IN ?", excludeIDs)
+	}
+	result := query.Delete(&types.APIKey{})
+	if result.Error != nil {
+		return 0, fmt.Errorf("failed to delete API keys by source: %w", result.Error)
+	}
+	return result.RowsAffected, nil
+}
+
+// BackfillSource updates all keys with empty source to the given default source
+func (r *GormAPIKeyRepository) BackfillSource(ctx context.Context, defaultSource string) (int64, error) {
+	result := r.db.WithContext(ctx).Model(&types.APIKey{}).
+		Where("source = '' OR source IS NULL").
+		Update("source", defaultSource)
+	if result.Error != nil {
+		return 0, fmt.Errorf("failed to backfill source: %w", result.Error)
+	}
+	return result.RowsAffected, nil
 }

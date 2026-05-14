@@ -5,11 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/ivanzzeth/remote-signer/internal/audit"
 	"github.com/ivanzzeth/remote-signer/internal/chain"
+	evmchain "github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/statemachine"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
@@ -20,6 +23,32 @@ import (
 // Caller should respond with 403 Forbidden.
 var ErrManualApprovalDisabled = errors.New("no matching whitelist rule and manual approval is disabled")
 
+// isLockedSignerErr reports whether the sign error came from a locked
+// signer. Chain adapters surface this with phrasing like
+// "failed to get signer: signer is locked" — matching on "is locked"
+// is intentionally loose so adapter wording changes don't silently
+// turn this back into a "failed" request.
+func isLockedSignerErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "is locked")
+}
+
+// SignServiceAPI defines the methods used by HTTP handlers for sign operations.
+// This interface enables mock-based unit testing of handlers without constructing a full SignService.
+type SignServiceAPI interface {
+	Sign(ctx context.Context, req *SignRequest) (*SignResponse, error)
+	GetRequest(ctx context.Context, id types.SignRequestID) (*types.SignRequest, error)
+	ListRequests(ctx context.Context, filter storage.RequestFilter) ([]*types.SignRequest, error)
+	CountRequests(ctx context.Context, filter storage.RequestFilter) (int, error)
+	ProcessApproval(ctx context.Context, requestID types.SignRequestID, req *ApprovalRequest) (*ApprovalResponse, error)
+	PreviewRuleForRequest(ctx context.Context, requestID types.SignRequestID, opts *rule.RuleGenerateOptions) (*types.Rule, error)
+}
+
+// Compile-time interface check.
+var _ SignServiceAPI = (*SignService)(nil)
+
 // SignService orchestrates the signing request lifecycle
 type SignService struct {
 	chainRegistry         *chain.Registry
@@ -27,8 +56,10 @@ type SignService struct {
 	ruleEngine            rule.RuleEngine
 	stateMachine          *statemachine.StateMachine
 	approvalService       *ApprovalService
-	approvalGuard         *ManualApprovalGuard // optional: pauses requests when too many consecutive manual-approval outcomes
-	manualApprovalEnabled bool                // when false, no whitelist match → reject immediately
+	auditLogger           *audit.AuditLogger   // optional: persistent audit logging
+	approvalGuard         *ManualApprovalGuard        // optional: pauses requests when too many consecutive manual-approval outcomes
+	simulationRule        *evmchain.SimulationBudgetRule // optional: simulation-based budget fallback for unmatched transactions
+	manualApprovalEnabled bool                         // when false, no whitelist match → reject immediately
 	logger                *slog.Logger
 }
 
@@ -70,6 +101,11 @@ func NewSignService(
 	}, nil
 }
 
+// SetAuditLogger sets the audit logger for persistent event logging.
+func (s *SignService) SetAuditLogger(al *audit.AuditLogger) {
+	s.auditLogger = al
+}
+
 // SetApprovalGuard sets the optional guard that pauses sign requests when too many
 // consecutive manual-approval outcomes occur. Call after construction when enabled.
 func (s *SignService) SetApprovalGuard(guard *ManualApprovalGuard) {
@@ -82,9 +118,21 @@ func (s *SignService) SetManualApprovalEnabled(enabled bool) {
 	s.manualApprovalEnabled = enabled
 }
 
+// SetSimulationRule sets the optional simulation-based budget fallback rule.
+// When set, unmatched transactions are simulated via eth_simulateV1 and budget
+// is checked against actual token outflows before signing.
+func (s *SignService) SetSimulationRule(rule *evmchain.SimulationBudgetRule) {
+	s.simulationRule = rule
+}
+
+// ErrStrategyRoleSimulationBlocked is returned when a strategy role request reaches simulation fallback,
+// indicating rule misconfiguration. Strategy keys must have explicit rules for all operations.
+var ErrStrategyRoleSimulationBlocked = errors.New("strategy role request has no matching whitelist rule: explicit rules required for all operations")
+
 // SignRequest represents a request to sign data
 type SignRequest struct {
 	APIKeyID      string          `json:"api_key_id"`
+	APIKeyRole    types.APIKeyRole `json:"api_key_role"`
 	ChainType     types.ChainType `json:"chain_type"`
 	ChainID       string          `json:"chain_id"`
 	SignerAddress string          `json:"signer_address"`
@@ -140,6 +188,9 @@ func (s *SignService) Sign(ctx context.Context, req *SignRequest) (*SignResponse
 		"signer", signReq.SignerAddress,
 		"sign_type", signReq.SignType,
 	)
+	if s.auditLogger != nil {
+		s.auditLogger.LogSignRequest(ctx, signReq)
+	}
 
 	// Reject if approval guard is paused (still persisted for audit)
 	if s.approvalGuard != nil && s.approvalGuard.IsPaused() {
@@ -207,6 +258,10 @@ func (s *SignService) Sign(ctx context.Context, req *SignRequest) (*SignResponse
 				"reason", blockedErr.Reason,
 			)
 			// Reject immediately - no manual approval possible
+			// SECURITY NOTE (V3-5): Rule names are intentionally included in error responses
+			// to help agents and clients understand which security policy blocked their request.
+			// Rule names are generic (e.g., "Agent Safety") and do not expose specific configuration
+			// details. Accepted risk per security audit v3.
 			rejectReason := fmt.Sprintf("blocked by rule %s: %s", blockedErr.RuleName, blockedErr.Reason)
 			if _, smErr := s.stateMachine.RejectOnAuthorization(ctx, signReq.ID, "system", rejectReason); smErr != nil {
 				s.logger.Error("failed to reject blocked request", "error", smErr)
@@ -229,7 +284,64 @@ func (s *SignService) Sign(ctx context.Context, req *SignRequest) (*SignResponse
 		return s.processApprovedRequest(ctx, signReq, matchedRuleID, nil, reason, adapter)
 	}
 
-	// No whitelist rule matched
+	// No whitelist rule matched — strategy role must have explicit rules for all operations.
+	// Reaching this point means rules are misconfigured; reject immediately without simulation.
+	if req.APIKeyRole == types.RoleStrategy {
+		s.logger.Warn("strategy role request has no matching whitelist rule, skipping simulation fallback",
+			"request_id", signReq.ID,
+			"api_key_id", req.APIKeyID,
+		)
+		if s.approvalGuard != nil {
+			s.approvalGuard.RecordRuleRejected()
+		}
+		rejectReason := "strategy role requires explicit rules for all operations; no matching whitelist rule found"
+		if _, smErr := s.stateMachine.RejectOnAuthorization(ctx, signReq.ID, "system", rejectReason); smErr != nil {
+			s.logger.Error("failed to reject request", "error", smErr)
+		}
+		return &SignResponse{
+			RequestID: signReq.ID,
+			Status:    types.StatusRejected,
+			Message:   rejectReason,
+		}, nil
+	}
+
+	// No whitelist rule matched — try simulation fallback before manual approval
+	if s.simulationRule != nil && s.simulationRule.Available() {
+		outcome, simErr := s.simulationRule.EvaluateSingle(ctx, signReq, parsed)
+		if simErr != nil {
+			s.logger.Error("simulation fallback error", "request_id", signReq.ID, "error", simErr)
+		} else if outcome.Decision == "allow" {
+			s.logger.Info("request allowed by simulation fallback",
+				"request_id", signReq.ID,
+			)
+			if s.approvalGuard != nil {
+				s.approvalGuard.RecordNonManualApproval()
+			}
+			return s.processApprovedRequest(ctx, signReq, nil, nil, "simulation-approved", adapter)
+		} else if outcome.Decision == "deny" {
+			reason := outcome.Reason
+			if reason == "" {
+				reason = "simulation denied"
+			}
+			s.logger.Warn("request denied by simulation fallback",
+				"request_id", signReq.ID,
+				"reason", reason,
+			)
+			if s.approvalGuard != nil {
+				s.approvalGuard.RecordRuleRejected()
+			}
+			if _, smErr := s.stateMachine.RejectOnAuthorization(ctx, signReq.ID, "simulation", reason); smErr != nil {
+				s.logger.Error("failed to reject request", "error", smErr)
+			}
+			return &SignResponse{
+				RequestID: signReq.ID,
+				Status:    types.StatusRejected,
+				Message:   reason,
+			}, nil
+		}
+		// outcome.Decision == "no_match" — simulation didn't apply, fall through to manual approval
+	}
+
 	if !s.manualApprovalEnabled {
 		if s.approvalGuard != nil {
 			s.approvalGuard.RecordRuleRejected()
@@ -243,6 +355,9 @@ func (s *SignService) Sign(ctx context.Context, req *SignRequest) (*SignResponse
 	// Request manual approval
 	if s.approvalGuard != nil {
 		s.approvalGuard.RecordManualApproval()
+	}
+	if s.auditLogger != nil {
+		s.auditLogger.LogApprovalRequest(ctx, signReq)
 	}
 	if err := s.approvalService.RequestApproval(ctx, signReq); err != nil {
 		s.logger.Error("failed to request approval", "error", err)
@@ -272,7 +387,17 @@ func (s *SignService) processApprovedRequest(
 	// Perform signing
 	result, err := adapter.Sign(ctx, signReq.SignerAddress, signReq.SignType, signReq.ChainID, signReq.Payload)
 	if err != nil {
-		// Transition to failed
+		// A locked signer is a transient operator-fixable state, not a
+		// final decision on the request. Revert to authorizing so the
+		// same approval can be retried after unlock, instead of burning
+		// the request to "failed" and forcing the caller to resubmit.
+		if isLockedSignerErr(err) {
+			if _, smErr := s.stateMachine.RevertSigningToAuthorizing(ctx, signReq.ID, err.Error()); smErr != nil {
+				s.logger.Error("failed to revert request to authorizing", "error", smErr)
+			}
+			return nil, fmt.Errorf("signing failed: %w", err)
+		}
+		// Permanent failure: transition to failed
 		if _, smErr := s.stateMachine.FailSign(ctx, signReq.ID, err.Error()); smErr != nil {
 			s.logger.Error("failed to transition to failed state", "error", smErr)
 		}

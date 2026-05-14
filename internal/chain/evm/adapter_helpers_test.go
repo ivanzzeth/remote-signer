@@ -261,10 +261,15 @@ func TestParseNonNegativeBigInt_InvalidString(t *testing.T) {
 	assert.Contains(t, err.Error(), "invalid value")
 }
 
-func TestParseNonNegativeBigInt_HexStringRejected(t *testing.T) {
-	// The function uses base 10; hex strings should fail.
-	_, err := parseNonNegativeBigInt("0xff", "gasPrice")
-	require.Error(t, err)
+func TestParseNonNegativeBigInt_HexStringAccepted(t *testing.T) {
+	// Hex strings with 0x prefix are accepted (parsed as base 16).
+	val, err := parseNonNegativeBigInt("0xff", "gasPrice")
+	require.NoError(t, err)
+	assert.Equal(t, "255", val.String())
+
+	val2, err := parseNonNegativeBigInt("0x6FC23AC00", "gasTipCap") // 30 Gwei
+	require.NoError(t, err)
+	assert.Equal(t, "30000000000", val2.String())
 }
 
 func TestParseNonNegativeBigInt_FloatRejected(t *testing.T) {

@@ -26,12 +26,35 @@ const (
 	AuditEventTypeApprovalDenied   AuditEventType = "approval_denied"
 
 	// Rule management events
-	AuditEventTypeRuleCreated AuditEventType = "rule_created"
-	AuditEventTypeRuleUpdated AuditEventType = "rule_updated"
-	AuditEventTypeRuleDeleted AuditEventType = "rule_deleted"
+	AuditEventTypeRuleCreated  AuditEventType = "rule_created"
+	AuditEventTypeRuleUpdated  AuditEventType = "rule_updated"
+	AuditEventTypeRuleDeleted  AuditEventType = "rule_deleted"
+	AuditEventTypeRuleApproved AuditEventType = "rule_approved"
+	AuditEventTypeRuleRejected AuditEventType = "rule_rejected"
 
 	// Security events
 	AuditEventTypeRateLimitHit AuditEventType = "rate_limit_hit"
+
+	// Request lifecycle
+	AuditEventTypeAPIRequest AuditEventType = "api_request"
+
+	// Config sync events
+	AuditEventTypeConfigReloaded  AuditEventType = "config_reloaded"
+	AuditEventTypeTemplateSynced  AuditEventType = "template_synced"
+	AuditEventTypeAPIKeySynced    AuditEventType = "apikey_synced" // #nosec G101 -- not a credential, audit event type name
+
+	// Signer management events
+	AuditEventTypeSignerCreated    AuditEventType = "signer_created"
+	AuditEventTypeSignerLocked     AuditEventType = "signer_locked"
+	AuditEventTypeSignerUnlocked   AuditEventType = "signer_unlocked"
+	AuditEventTypeSignerAutoLocked AuditEventType = "signer_auto_locked"
+
+	// HD wallet management events
+	AuditEventTypeHDWalletCreated AuditEventType = "hdwallet_created"
+	AuditEventTypeHDWalletDerived AuditEventType = "hdwallet_derived"
+
+	// Preset events
+	AuditEventTypePresetApplied AuditEventType = "preset_applied"
 )
 
 // AuditSeverity represents the severity level of an audit event

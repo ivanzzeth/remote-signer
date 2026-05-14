@@ -1,0 +1,81 @@
+# Runs on every push to dev/main and every PR. Three independent jobs:
+#
+#   - go-test     : unit suite (`go test ./...`)
+#   - integration : black-box CLI/HTTP harness behind the `integration` tag
+#   - web-e2e     : Playwright drives the embedded React UI against a real
+#                   daemon spawned by globalSetup
+#
+# Jobs are split so a failing integration run doesn't mask a unit regression
+# in the PR check UI.
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+jobs:
+  go-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+      - name: go test ./...
+        run: go test ./...
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+      - name: go test -tags integration ./tests/integration/...
+        run: go test -tags integration ./tests/integration/...
+
+  web-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: |
+            pkg/js-client/package-lock.json
+            web/package-lock.json
+
+      # SDK is consumed via file:../pkg/js-client, so its dist/ must exist
+      # before `make build` runs `npm ci` for the web workspace.
+      - name: Build SDK
+        run: |
+          cd pkg/js-client
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Build web bundle + daemon binary
+        run: make build
+
+      - name: Install Playwright browsers
+        run: cd web && npx playwright install --with-deps chromium
+
+      - name: Run Playwright e2e
+        env:
+          CI: 'true'
+        run: cd web && npx playwright test
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: web/playwright-report/
+          retention-days: 7

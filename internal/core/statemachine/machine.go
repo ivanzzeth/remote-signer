@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/ivanzzeth/remote-signer/internal/audit"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
@@ -88,6 +89,7 @@ func (sm *StateMachine) ApproveForSigning(ctx context.Context, reqID types.SignR
 	}
 	req.ApprovedBy = approvedBy
 	req.ApprovedAt = &now
+	req.ApprovalSource = types.DeriveApprovalSource(req.RuleMatchedID, approvedBy)
 	req.UpdatedAt = now
 
 	if err := sm.requestRepo.CompareAndUpdate(ctx, req, expectedStatus); err != nil {
@@ -188,6 +190,54 @@ func (sm *StateMachine) CompleteSign(ctx context.Context, reqID types.SignReques
 	}, nil
 }
 
+// RevertSigningToAuthorizing rolls a request back from signing to
+// authorizing. It exists for transient sign-time failures (locked
+// signer, brief RPC outage) that don't reflect a final decision —
+// burning the request to "failed" would force the original caller to
+// resubmit, even though one operator action (unlock, wait, retry) is
+// enough to make the same request succeed. The audit trail still
+// records the failed attempt via the supplied reason.
+func (sm *StateMachine) RevertSigningToAuthorizing(ctx context.Context, reqID types.SignRequestID, reason string) (*TransitionResult, error) {
+	req, err := sm.requestRepo.Get(ctx, reqID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get request: %w", err)
+	}
+
+	if req.Status != types.StatusSigning {
+		return nil, fmt.Errorf("invalid state transition: cannot revert to authorizing from %s", req.Status)
+	}
+
+	now := time.Now()
+	expectedStatus := req.Status
+	req.Status = types.StatusAuthorizing
+	// Clear the transient signing attempt so the UI doesn't surface
+	// stale error/result fields on the next approve.
+	req.ErrorMessage = ""
+	req.Signature = nil
+	req.SignedData = nil
+	req.ApprovedAt = nil
+	req.ApprovedBy = nil
+	req.CompletedAt = nil
+	req.UpdatedAt = now
+
+	if err := sm.requestRepo.CompareAndUpdate(ctx, req, expectedStatus); err != nil {
+		return nil, fmt.Errorf("failed to update request: %w", err)
+	}
+
+	sm.logAudit(ctx, req, types.AuditEventTypeSignFailed, "transient: "+reason)
+
+	sm.logger.Warn("request reverted to authorizing (transient sign failure)",
+		"request_id", reqID,
+		"reason", reason,
+	)
+
+	return &TransitionResult{
+		PreviousStatus: types.StatusSigning,
+		NewStatus:      types.StatusAuthorizing,
+		Reason:         reason,
+	}, nil
+}
+
 // FailSign transitions from signing to failed
 func (sm *StateMachine) FailSign(ctx context.Context, reqID types.SignRequestID, errorMsg string) (*TransitionResult, error) {
 	req, err := sm.requestRepo.Get(ctx, reqID)
@@ -268,7 +318,7 @@ func (sm *StateMachine) logAudit(ctx context.Context, req *types.SignRequest, ev
 	record := &types.AuditRecord{
 		ID:            types.AuditID(uuid.New().String()),
 		EventType:     eventType,
-		Severity:      types.AuditSeverityInfo,
+		Severity:      audit.SeverityForEvent(eventType),
 		Timestamp:     time.Now(),
 		APIKeyID:      req.APIKeyID,
 		ActorAddress:  req.ClientIP,

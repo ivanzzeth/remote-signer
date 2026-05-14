@@ -42,9 +42,19 @@ func (r *CreateSignerRequest) TypedParams() interface{} {
 	}
 }
 
-// CreateKeystoreParams contains parameters for creating a keystore signer
+// CreateKeystoreParams contains parameters for creating a keystore signer.
+// Exactly one creation mode is selected at a time:
+//   - Both PrivateKeyHex and KeystoreJSON empty: provider generates a fresh
+//     secp256k1 key.
+//   - PrivateKeyHex set: import the raw hex key (with or without 0x).
+//   - KeystoreJSON set: decrypt the supplied v3 keystore JSON with Password,
+//     then re-encrypt under the daemon's keystore dir. Useful for promoting
+//     a keystore created by `remote-signer keystore create` (or by another
+//     tool) into a signer the daemon will sign with.
 type CreateKeystoreParams struct {
-	Password string `json:"password"`
+	Password      string `json:"password"`
+	PrivateKeyHex string `json:"private_key_hex,omitempty"`
+	KeystoreJSON  string `json:"keystore_json,omitempty"`
 }
 
 // CreateHDWalletParams contains parameters for creating an HD wallet
@@ -53,10 +63,16 @@ type CreateHDWalletParams struct {
 	EntropyBits int    `json:"entropy_bits,omitempty"` // 128-256, default 256
 }
 
-// ImportHDWalletParams contains parameters for importing an HD wallet from mnemonic
+// ImportHDWalletParams contains parameters for importing an HD wallet.
+// Exactly one of Mnemonic / WalletJSON should be set:
+//   - Mnemonic: BIP-39 phrase the daemon entropy-encodes and stores.
+//   - WalletJSON: full HDWalletFile JSON exported by `keystore export` or
+//     copied off another remote-signer instance. The daemon decrypts the
+//     embedded mnemonic with Password, then re-imports it.
 type ImportHDWalletParams struct {
-	Mnemonic string `json:"mnemonic"`
-	Password string `json:"password"`
+	Mnemonic   string `json:"mnemonic,omitempty"`
+	WalletJSON string `json:"wallet_json,omitempty"`
+	Password   string `json:"password"`
 }
 
 // DeriveAddressRequest is the request to derive a single address

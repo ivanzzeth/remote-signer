@@ -1,9 +1,13 @@
 /**
  * Remote Signer JavaScript Client Library
  *
+ * Supports both browser and Node.js:
+ * - Browser: use the ESM build (globalThis.fetch, Web Crypto API). TLS/mTLS (custom CA, client cert) is not available; use standard HTTPS.
+ * - Node.js: same ESM/CJS build; TLS/mTLS is supported via httpClient.tls (custom CA, client certificates).
+ *
  * @example
  * ```typescript
- * import { RemoteSignerClient } from '@remote-signer/client';
+ * import { RemoteSignerClient } from 'remote-signer-client';
  *
  * const client = new RemoteSignerClient({
  *   baseURL: 'http://localhost:8548',
@@ -44,7 +48,12 @@ export {
   EvmSignerService,
   EvmHDWalletService,
   EvmGuardService,
+  EvmSimulateService,
+  EvmBudgetService,
   RemoteSigner,
+  EIP1193Provider,
+  ProviderRpcError,
+  providerErrors,
 } from "./evm";
 export type {
   // Shared EVM types
@@ -62,6 +71,10 @@ export type {
   // Sign types
   SignRequest,
   SignResponse,
+  BatchSignItemRequest,
+  BatchSignRequest,
+  BatchSignResultDTO,
+  BatchSignResponse,
   // Request types
   RequestStatusResponse,
   ListRequestsFilter,
@@ -74,6 +87,7 @@ export type {
   RuleType,
   RuleMode,
   Rule,
+  RuleBudget,
   ListRulesFilter,
   ListRulesResponse,
   CreateRuleRequest,
@@ -82,8 +96,12 @@ export type {
   SignerInfo,
   ListSignersFilter,
   ListSignersResponse,
+  CreateKeystoreParams,
   CreateSignerRequest,
   CreateSignerResponse,
+  GrantAccessRequest,
+  TransferOwnershipRequest,
+  SignerAccessEntry,
   // HD wallet types
   CreateHDWalletRequest,
   HDWalletResponse,
@@ -91,6 +109,30 @@ export type {
   DeriveAddressRequest,
   DeriveAddressResponse,
   ListDerivedAddressesResponse,
+  // Simulate types
+  SimulateRequest,
+  SimulateResponse,
+  BalanceChangeDTO,
+  SimEventDTO,
+  SimulateTxDTO,
+  SimulateBatchRequest,
+  SimulateResultDTO,
+  SimulateBatchResponse,
+  ChainStatusDTO,
+  SimulationStatusResponse,
+  // Budgets
+  BudgetKind,
+  BudgetEntry,
+  ListBudgetsResponse,
+  CreateBudgetRequest,
+  UpdateBudgetRequest,
+  // EIP-1193 Provider types
+  EIP1193ProviderConfig,
+  SignersSource,
+  RequestArguments,
+  ProviderConnectInfo,
+  ProviderMessage,
+  ProviderErrorCode,
   // Ethsig interfaces
   Signer,
   AddressGetter,
@@ -114,7 +156,9 @@ export type {
 // Templates
 export { TemplateService } from "./templates";
 export type {
+  VariableType,
   TemplateVariable,
+  VariableGroup,
   Template,
   ListTemplatesFilter,
   ListTemplatesResponse,
@@ -126,6 +170,56 @@ export type {
   InstantiateResponse,
   RevokeInstanceResponse,
 } from "./templates";
+
+// API Keys
+export { APIKeyService } from "./apikeys";
+export type {
+  APIKey,
+  ListAPIKeysFilter,
+  ListAPIKeysResponse,
+  CreateAPIKeyRequest,
+  UpdateAPIKeyRequest,
+} from "./apikeys";
+
+// ACLs
+export { ACLService } from "./acls";
+export type { IPWhitelistResponse } from "./acls";
+
+// Presets
+export { PresetService } from "./presets";
+export type {
+  PresetEntry,
+  ListPresetsResponse,
+  PresetDetail,
+  PresetVariableDetail,
+  ApplyPresetRequest,
+  ApplyResultItem,
+  ApplyPresetResponse,
+} from "./presets";
+
+// Registry (hot-reload templates and presets from disk)
+export { RegistryService } from "./registry";
+export type {
+  RegistryRefreshError,
+  RegistryRefreshReport,
+  RegistryRefreshResponse,
+} from "./registry";
+
+// Settings
+export { SettingsService, SETTINGS_GROUPS } from "./settings";
+export type { SettingsGroup, SettingsSnapshot } from "./settings";
+
+// Wallets (organisational collections of signers — not multi-sig).
+export { WalletService } from "./wallets";
+export type {
+  Wallet,
+  WalletMember,
+  CreateWalletRequest,
+  ListWalletsFilter,
+  ListWalletsResponse,
+  AddWalletMemberRequest,
+  ListWalletMembersResponse,
+} from "./wallets";
 
 // Errors
 export * from "./errors";

@@ -29,7 +29,6 @@ func TestRuleScopeMatches_DelegationTarget_RealData(t *testing.T) {
 		ID:            "polymarket#transactions",
 		ChainType:     &ct,
 		ChainID:       &chainID,
-		APIKeyID:      nil,
 		SignerAddress: nil,
 	}
 
@@ -43,8 +42,8 @@ func TestRuleScopeMatches_DelegationTarget_RealData(t *testing.T) {
 			t.Errorf("ChainID mismatch: rule=%q (len=%d) req=%q (len=%d)",
 				*rule.ChainID, len(*rule.ChainID), req2.ChainID, len(req2.ChainID))
 		}
-		if rule.APIKeyID != nil && *rule.APIKeyID != req2.APIKeyID {
-			t.Errorf("APIKeyID mismatch: rule=%q req=%q", *rule.APIKeyID, req2.APIKeyID)
+		if rule.Owner != "" && rule.Owner != req2.APIKeyID {
+			t.Errorf("Owner mismatch: rule=%q req=%q", rule.Owner, req2.APIKeyID)
 		}
 		if rule.SignerAddress != nil && *rule.SignerAddress != req2.SignerAddress {
 			t.Errorf("SignerAddress mismatch: rule=%q req=%q", *rule.SignerAddress, req2.SignerAddress)

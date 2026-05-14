@@ -15,19 +15,24 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/lib/pq"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 
 	"github.com/ivanzzeth/remote-signer/internal/api"
+	"github.com/ivanzzeth/remote-signer/internal/audit"
+	"github.com/ivanzzeth/remote-signer/internal/blocklist"
 	"github.com/ivanzzeth/remote-signer/internal/chain"
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/config"
 	"github.com/ivanzzeth/remote-signer/internal/core/auth"
+	"github.com/ivanzzeth/remote-signer/internal/core/registry"
 	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/statemachine"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/simulation"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
@@ -43,6 +48,8 @@ type TestServerConfig struct {
 	NonAdminAPIKeyPublicKey ed25519.PublicKey // Ed25519 public key for non-admin API auth
 	// Optional: config file path (if set, will load from config.e2e.yaml)
 	ConfigPath string // Path to config.e2e.yaml (default: "config.e2e.yaml")
+	// Optional: presets directory (when set, GET/POST /api/v1/presets are registered)
+	PresetsDir string // Absolute path to dir containing preset YAML files
 }
 
 // TestServer manages a test instance of the remote-signer service
@@ -52,7 +59,9 @@ type TestServer struct {
 	db         *gorm.DB
 	cancelFunc context.CancelFunc
 	baseURL    string
-	tlsCerts   *tlsCerts // set by StartWithTLS for mTLS health-check
+	tlsCerts   *tlsCerts                   // set by StartWithTLS for mTLS health-check
+	ruleEngine *rule.WhitelistRuleEngine   // exposed for dynamic evaluator registration in e2e tests
+	simulator  simulation.Simulator // optional: RPC eth_simulateV1 for simulation e2e tests
 }
 
 // NewTestServer creates a new test server instance
@@ -128,7 +137,9 @@ func (ts *TestServer) Start() error {
 		return fmt.Errorf("failed to create database: %w", err)
 	}
 
-	// Ensure single connection to avoid locking issues with in-memory SQLite
+	// Single connection to avoid SQLite table lock (transaction and template reads must use same conn).
+	// Rule sync pre-loads templates before the transaction so no second conn is needed.
+	// Preset apply resolves templates before the transaction so it does not need a second conn.
 	sqlDB, err := db.DB()
 	if err != nil {
 		return fmt.Errorf("failed to get sql.DB: %w", err)
@@ -145,7 +156,13 @@ func (ts *TestServer) Start() error {
 		&types.APIKey{},
 		&types.AuditRecord{},
 		&types.RuleTemplate{},
+		&types.RulePreset{},
 		&types.RuleBudget{},
+		&types.TokenMetadata{},
+		&types.SignerOwnership{},
+		&types.SignerAccess{},
+		&types.Wallet{},
+		&types.WalletMember{},
 	); err != nil {
 		return fmt.Errorf("failed to migrate database: %w", err)
 	}
@@ -181,6 +198,25 @@ func (ts *TestServer) Start() error {
 		return fmt.Errorf("failed to create budget repository: %w", err)
 	}
 
+	signerOwnershipRepo, err := storage.NewGormSignerOwnershipRepository(db)
+	if err != nil {
+		return fmt.Errorf("failed to create signer ownership repository: %w", err)
+	}
+	signerRepo, err := storage.NewGormSignerRepository(db)
+	if err != nil {
+		return fmt.Errorf("failed to create signer repository: %w", err)
+	}
+
+	signerAccessRepo, err := storage.NewGormSignerAccessRepository(db)
+	if err != nil {
+		return fmt.Errorf("failed to create signer access repository: %w", err)
+	}
+
+	walletRepo, err := storage.NewGormWalletRepository(db)
+	if err != nil {
+		return fmt.Errorf("failed to create wallet repository: %w", err)
+	}
+
 	// Initialize API keys from config if available, otherwise create test keys
 	if cfg != nil && len(cfg.APIKeys) > 0 {
 		apiKeyInit, err := config.NewAPIKeyInitializer(apiKeyRepo, log)
@@ -209,6 +245,8 @@ func (ts *TestServer) Start() error {
 			configDir = filepath.Dir(ts.config.ConfigPath)
 			ruleInit.SetConfigDir(configDir)
 		}
+		ruleInit.SetTemplateRepo(templateRepo)
+		ruleInit.SetBudgetRepo(budgetRepo)
 
 		// Match main.go: sync templates (if any), expand instance rules, then sync rules
 		rulesToSync := cfg.Rules
@@ -338,8 +376,12 @@ func (ts *TestServer) Start() error {
 		return fmt.Errorf("failed to create state machine: %w", err)
 	}
 
-	// Initialize rule engine with whitelist and delegation converter for evm_js
-	ruleEngine, err := rule.NewWhitelistRuleEngine(ruleRepo, log, rule.WithDelegationPayloadConverter(evm.DelegatePayloadToSignRequest))
+	// Initialize rule engine with whitelist, budget checker (for template instances), and delegation converter for evm_js
+	budgetChecker := rule.NewBudgetChecker(budgetRepo, templateRepo, log)
+	ruleEngine, err := rule.NewWhitelistRuleEngine(ruleRepo, log,
+		rule.WithBudgetChecker(budgetChecker),
+		rule.WithDelegationPayloadConverter(evm.DelegatePayloadToSignRequest),
+	)
 	if err != nil {
 		return fmt.Errorf("failed to create rule engine: %w", err)
 	}
@@ -352,11 +394,45 @@ func (ts *TestServer) Start() error {
 	ruleEngine.RegisterEvaluator(&evm.SignTypeRestrictionEvaluator{})
 	ruleEngine.RegisterEvaluator(&evm.MessagePatternEvaluator{})
 
+	// Register internal transfer evaluator (requires ownership repo)
+	internalTransferEval, err := evm.NewInternalTransferEvaluator(signerOwnershipRepo)
+	if err != nil {
+		return fmt.Errorf("failed to create internal transfer evaluator: %w", err)
+	}
+	ruleEngine.RegisterEvaluator(internalTransferEval)
+
 	jsEval, err := evm.NewJSRuleEvaluator(log)
 	if err != nil {
 		return fmt.Errorf("failed to create JS rule evaluator: %w", err)
 	}
 	ruleEngine.RegisterEvaluator(jsEval)
+	budgetChecker.SetJSEvaluator(jsEval)
+
+	// Wire RPC provider for JS sandbox and budget decimals auto-query (if configured)
+	if cfg != nil && cfg.Chains.EVM != nil && cfg.Chains.EVM.RPCGateway.BaseURL != "" {
+		rpcProvider, err := evm.NewRPCProvider(cfg.Chains.EVM.RPCGateway.BaseURL, cfg.Chains.EVM.RPCGateway.APIKey)
+		if err != nil {
+			log.Warn("Failed to create RPC provider, decimals auto-query disabled", "error", err)
+		} else {
+			cacheTTL := cfg.Chains.EVM.RPCGateway.CacheTTL
+			if cacheTTL <= 0 {
+				cacheTTL = 24 * time.Hour
+			}
+			metadataCache, err := evm.NewTokenMetadataCache(db, rpcProvider, cacheTTL)
+			if err != nil {
+				log.Warn("Failed to create token metadata cache", "error", err)
+			} else {
+				jsEval.SetRPCProvider(rpcProvider, metadataCache)
+				decimalsQuerier, err := evm.NewDecimalsQuerierAdapter(metadataCache)
+				if err != nil {
+					log.Warn("Failed to create decimals querier adapter", "error", err)
+				} else {
+					budgetChecker.SetDecimalsQuerier(decimalsQuerier)
+					log.Info("RPC provider configured for JS sandbox and budget decimals auto-query")
+				}
+			}
+		}
+	}
 
 	// Register Solidity expression evaluator for blocklist rules (optional - requires forge)
 	// Use config if available, otherwise use defaults
@@ -381,6 +457,9 @@ func (ts *TestServer) Start() error {
 	} else {
 		ruleEngine.RegisterEvaluator(solidityEvaluator)
 	}
+
+	// Store rule engine for dynamic evaluator registration in e2e tests.
+	ts.ruleEngine = ruleEngine
 
 	// Initialize template service
 	templateService, err := service.NewTemplateService(templateRepo, ruleRepo, budgetRepo, log)
@@ -427,12 +506,13 @@ func (ts *TestServer) Start() error {
 	var approvalGuard *service.ManualApprovalGuard
 	if cfg != nil && cfg.Security.ApprovalGuard.Enabled {
 		approvalGuard, err = service.NewManualApprovalGuard(service.ManualApprovalGuardConfig{
-			Window:      cfg.Security.ApprovalGuard.Window,
-			Threshold:   cfg.Security.ApprovalGuard.Threshold,
-			ResumeAfter: cfg.Security.ApprovalGuard.ResumeAfter,
-			NotifySvc:   nil,
-			Channel:     nil,
-			Logger:      log,
+			Window:                cfg.Security.ApprovalGuard.Window,
+			RejectionThresholdPct: cfg.Security.ApprovalGuard.RejectionThresholdPct,
+			MinSamples:            cfg.Security.ApprovalGuard.MinSamples,
+			ResumeAfter:           cfg.Security.ApprovalGuard.ResumeAfter,
+			NotifySvc:             nil,
+			Channel:               nil,
+			Logger:                log,
 		})
 		if err != nil {
 			return fmt.Errorf("failed to create approval guard: %w", err)
@@ -475,15 +555,84 @@ func (ts *TestServer) Start() error {
 		return fmt.Errorf("failed to discover locked signers: %w", err)
 	}
 
-	// Initialize router
+	// Sync signer ownership
+	if err := config.SyncSignerOwnership(context.Background(), signerManager, signerOwnershipRepo, apiKeyRepo, log); err != nil {
+		return fmt.Errorf("failed to sync signer ownership: %w", err)
+	}
+
+	// Grant the non-admin (strategy) key access to the primary test signer so that
+	// existing e2e tests (e.g. TestAuth_NonAdminCanSubmitSignRequest, TestSigner_NonAdminCanListSigners)
+	// continue to work under the new ownership model.
+	if ts.config.NonAdminAPIKeyID != "" {
+		nonAdminAccess := &types.SignerAccess{
+			SignerAddress: ts.config.SignerAddress,
+			APIKeyID:      ts.config.NonAdminAPIKeyID,
+			GrantedBy:     ts.config.APIKeyID, // granted by admin
+		}
+		if grantErr := signerAccessRepo.Grant(context.Background(), nonAdminAccess); grantErr != nil {
+			log.Warn("Failed to grant non-admin access to test signer (may already exist)", "error", grantErr)
+		}
+	}
+
+	// Initialize audit logger for rule/API key CRUD audit events
+	auditLogger, err := audit.NewAuditLogger(auditRepo, log)
+	if err != nil {
+		return fmt.Errorf("failed to create audit logger: %w", err)
+	}
+
+	// Initialize simulation engine (optional; eth_simulateV1 via rpc_gateway — matches main.go)
+	if cfg != nil && cfg.Chains.EVM != nil && cfg.Chains.EVM.Simulation.Enabled &&
+		cfg.Chains.EVM.RPCGateway.BaseURL != "" {
+		rpcGatewayURL := cfg.Chains.EVM.RPCGateway.BaseURL
+		simCfg := cfg.Chains.EVM.Simulation
+		sim, simErr := simulation.NewRPCSimulator(simulation.RPCSimulatorConfig{
+			RPCGatewayURL: rpcGatewayURL,
+			RPCGatewayKey: cfg.Chains.EVM.RPCGateway.APIKey,
+			Timeout:       simCfg.Timeout,
+		}, log)
+		if simErr != nil {
+			log.Warn("Simulation engine not available, skipping", "error", simErr)
+		} else {
+			ts.simulator = sim
+			log.Info("Simulation engine initialized for e2e (rpc/eth_simulateV1)",
+				"gateway", rpcGatewayURL,
+				"timeout", simCfg.Timeout,
+			)
+		}
+	}
+
+	// Initialize router (include BudgetRepo so GET /api/v1/evm/rules/{id}/budgets works for budget e2e tests)
 	routerConfig := api.RouterConfig{
 		Version: "e2e-test",
 		Template: &api.TemplateConfig{
 			TemplateRepo:    templateRepo,
 			TemplateService: templateService,
 		},
-		ApprovalGuard: approvalGuard,
-		APIKeyRepo:    apiKeyRepo,
+		ApprovalGuard:       approvalGuard,
+		APIKeyRepo:          apiKeyRepo,
+		SignerRepo:          signerRepo,
+		SignerOwnershipRepo: signerOwnershipRepo,
+		SignerAccessRepo:    signerAccessRepo,
+		BudgetRepo:          budgetRepo,
+		JSEvaluator:         jsEval,
+		AuditLogger:         auditLogger,
+		Simulator:           ts.simulator,
+		WalletRepo:          walletRepo,
+	}
+	if ts.config.PresetsDir != "" {
+		// e2e tests still seed presets from a tmp dir; the v0.3 handler is
+		// DB-backed so we sync them through the Registry first and pass
+		// the DB-backed repo into the router.
+		presetSrc := registry.NewFilePresetSource(ts.config.PresetsDir)
+		presetRepo, err := storage.NewGormPresetRepository(db)
+		if err != nil {
+			return fmt.Errorf("e2e preset repo: %w", err)
+		}
+		if _, err := registry.NewPresetRegistry(presetRepo, presetSrc, log).Sync(context.Background()); err != nil {
+			return fmt.Errorf("e2e preset registry sync: %w", err)
+		}
+		routerConfig.PresetRepo = presetRepo
+		routerConfig.PresetsDB = db
 	}
 	router, err := api.NewRouter(authVerifier, signService, signerManager, ruleRepo, auditRepo, log, routerConfig)
 	if err != nil {
@@ -559,9 +708,21 @@ func (ts *TestServer) Stop() {
 		ts.server.Shutdown(ctx)
 	}
 
+	// Shutdown simulation engine
+	if ts.simulator != nil {
+		if err := ts.simulator.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to close simulation engine: %v\n", err)
+		}
+	}
+
 	// Cleanup environment
 	os.Unsetenv("E2E_TEST_SIGNER_KEY")
 	os.Unsetenv("E2E_TEST_SIGNER2_KEY")
+}
+
+// HasSimulator returns true if the simulation engine is available.
+func (ts *TestServer) HasSimulator() bool {
+	return ts.simulator != nil
 }
 
 // BaseURL returns the base URL of the test server
@@ -599,17 +760,16 @@ func (ts *TestServer) waitForReady(ctx context.Context) error {
 func (ts *TestServer) createAPIKey(repo storage.APIKeyRepository) error {
 	ctx := context.Background()
 
-	// Create admin API key (AllowAllSigners so e2e can sign with test signers)
+	// Create admin API key
 	adminKey := &types.APIKey{
-		ID:               ts.config.APIKeyID,
-		Name:             "E2E Test Admin API Key",
-		PublicKeyHex:     hex.EncodeToString(ts.config.APIKeyPublicKey),
-		RateLimit:        1000,
-		Admin:            true,
-		AllowAllSigners:  true,
-		Enabled:          true,
-		CreatedAt:        time.Now(),
-		UpdatedAt:        time.Now(),
+		ID:           ts.config.APIKeyID,
+		Name:         "E2E Test Admin API Key",
+		PublicKeyHex: hex.EncodeToString(ts.config.APIKeyPublicKey),
+		RateLimit:    10000, // high limit for e2e test suite
+		Role:         types.RoleAdmin,
+		Enabled:      true,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
 	}
 
 	if err := repo.Create(ctx, adminKey); err != nil {
@@ -619,15 +779,14 @@ func (ts *TestServer) createAPIKey(repo storage.APIKeyRepository) error {
 	// Create non-admin API key if configured
 	if ts.config.NonAdminAPIKeyID != "" && ts.config.NonAdminAPIKeyPublicKey != nil {
 		nonAdminKey := &types.APIKey{
-			ID:               ts.config.NonAdminAPIKeyID,
-			Name:             "E2E Test Non-Admin API Key",
-			PublicKeyHex:     hex.EncodeToString(ts.config.NonAdminAPIKeyPublicKey),
-			RateLimit:        1000,
-			Admin:            false,
-			AllowAllSigners:  true,
-			Enabled:          true,
-			CreatedAt:        time.Now(),
-			UpdatedAt:        time.Now(),
+			ID:           ts.config.NonAdminAPIKeyID,
+			Name:         "E2E Test Non-Admin API Key",
+			PublicKeyHex: hex.EncodeToString(ts.config.NonAdminAPIKeyPublicKey),
+			RateLimit:    1000,
+			Role:         types.RoleStrategy, // strategy: can sign but cannot create/list rules or templates
+			Enabled:      true,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
 		}
 
 		if err := repo.Create(ctx, nonAdminKey); err != nil {
@@ -656,6 +815,8 @@ func (ts *TestServer) createWhitelistRule(repo storage.RuleRepository) error {
 		ChainType:   &chainType,
 		Config:      []byte(config),
 		Enabled:     true,
+		Owner:       "config",
+		AppliedTo:   pq.StringArray{"*"},
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
@@ -684,6 +845,8 @@ func (ts *TestServer) createBlocklistRule(repo storage.RuleRepository) error {
 		ChainType:   &chainType,
 		Config:      []byte(config),
 		Enabled:     true,
+		Owner:       "config",
+		AppliedTo:   pq.StringArray{"*"},
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
@@ -716,6 +879,8 @@ func (ts *TestServer) createJSBlocklistRule(repo storage.RuleRepository) error {
 		ChainType:   &chainType,
 		Config:      []byte(config),
 		Enabled:     true,
+		Owner:       "config",
+		AppliedTo:   pq.StringArray{"*"},
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
@@ -740,9 +905,19 @@ func (ts *TestServer) createSignTypeRestrictionRule(repo storage.RuleRepository)
 		ChainType:   &chainType,
 		Config:      []byte(config),
 		Enabled:     true,
+		Owner:       "config",
+		AppliedTo:   pq.StringArray{"*"},
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
 
 	return repo.Create(ctx, rule)
+}
+
+// RegisterDynamicBlocklistEvaluator registers a dynamic blocklist evaluator with the rule engine.
+// Used by e2e tests to inject a mock blocklist at runtime.
+func (ts *TestServer) RegisterDynamicBlocklistEvaluator(eval *blocklist.Evaluator) {
+	if ts.ruleEngine != nil {
+		ts.ruleEngine.RegisterEvaluator(eval)
+	}
 }

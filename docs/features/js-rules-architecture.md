@@ -1,6 +1,6 @@
 # JS Rules Architecture Plan (v5.1 — Final Production Ready)
 
-**Canonical doc:** [docs/architecture/js-rules-v5.md](../architecture/js-rules-v5.md) — implement from there.
+**Canonical doc:** [docs/architecture/js-rules-v1.md](../architecture/js-rules-v1.md) — implement from there.
 
 **Low-latency rule evaluation via in-process JS (Sobek/Goja).**  
 **Unified contract**: Every JS rule exposes a single `validate(input)` function. The engine performs basic validation then passes a normalized `RuleInput` through; the rule decides validity. No declarative layer — only template variables + pure JS. Optional `payload` return enables **delegation** for composition (e.g. multisend → erc20).
@@ -200,6 +200,20 @@ Config object only. No substitution.
 ### 11.11 Helpers
 
 **eq** (strict), **keccak256**, **selector**, **toChecksum**, **isAddress**, **toWei**, **fromWei**, **encodeAbi** (basic types only; full in v2).
+
+**rs** module: Composable API for transaction, address, bigint, and typed-data validation. Example:
+
+```javascript
+function validate(input) {
+  var ctx = rs.tx.require(input);
+  if (!rs.addr.inList(ctx.tx.to, [config.token_address])) return fail('wrong contract');
+  if (!eq(ctx.selector, selector('transfer(address,uint256)'))) return fail('not transfer');
+  var dec = abi.decode(ctx.payloadHex, ['address', 'uint256']);
+  rs.addr.requireInList(dec[0], config.allowed_recipients, 'to not allowed');
+  rs.bigint.requireLte(dec[1], config.max_amount, 'exceeds cap');
+  return ok();
+}
+```
 
 ---
 

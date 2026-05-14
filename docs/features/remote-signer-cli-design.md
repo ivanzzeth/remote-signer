@@ -1,15 +1,174 @@
-# remote-signer-cli: Design and Implementation Plan
+# remote-signer CLI: Design and Implementation Plan
 
 ## 0. Plan items (to implement)
 
-- **CLI framework**: Use **Cobra** (`github.com/spf13/cobra`) for remote-signer-cli instead of hand-rolled flag/arg parsing. Cobra is the de facto standard in the Go ecosystem (used by Kubernetes, Hugo, GitHub CLI); it handles subcommands, POSIX flags, and argument order correctly.
-- **Validate binary name**: Ship the rules-validator binary as **`remote-signer-validate-rules`** (not `validate-rules`) to avoid clashing with other tools in the user’s global PATH. All references (release assets, setup.sh, CLI exec lookup) use this name.
+- **CLI framework**: Use **Cobra** (`github.com/spf13/cobra`) for remote-signer instead of hand-rolled flag/arg parsing. Cobra is the de facto standard in the Go ecosystem (used by Kubernetes, Hugo, GitHub CLI); it handles subcommands, POSIX flags, and argument order correctly.
+- **Validate binary name**: Ship the rules-validator binary as **`remote-signer validate`** (not `validate-rules`) to avoid clashing with other tools in the user’s global PATH. All references (release assets, setup.sh, CLI exec lookup) use this name.
+- ✅ **Full API client integration (completed 2026-03-31)**: CLI wraps ALL `pkg/client` SDK capabilities as subcommands. Phase 2a and 2b complete — see §7.5 for full checklist.
+
+---
+
+## 7. Full API Client Integration (Phase 2)
+
+### 7.1 Design Decision
+
+**Config rules are global security only** (blocklist, sanctions). Scoped rules (agent presets, per-key budgets) MUST be created via API so RBAC properly assigns `owner` and `applied_to`. See `docs/features/rule-ownership-and-scoping.md §3.5`.
+
+This means CLI needs authenticated remote API access (same as TUI), not just local file operations.
+
+### 7.2 Auth Flags (shared across all remote subcommands)
+
+```
+Global flags (persistent):
+  --url <URL>              Server URL (default: https://localhost:8548)
+  --api-key-id <ID>        API key ID for authentication
+  --api-key-file <path>    Path to Ed25519 private key PEM file
+  --tls-ca <path>          CA certificate for TLS verification
+  --tls-cert <path>        Client certificate for mTLS
+  --tls-key <path>         Client key for mTLS
+  --tls-skip-verify        Skip TLS verification (testing only)
+  -o, --output <format>    Output format: table (default), json, yaml
+```
+
+### 7.3 Target Command Tree
+
+```
+remote-signer
+├── (existing local commands)
+│   ├── rule list-templates       (local config parse)
+│   ├── preset list               (local file listing)
+│   ├── preset create-from        (local YAML merge → config)
+│   ├── preset vars               (local variable listing)
+│   ├── validate                  (exec validate-rules binary)
+│   └── tui                       (exec TUI binary)
+│
+├── (new remote API commands — requires auth flags)
+│   ├── health                    Health check
+│   ├── metrics                   Prometheus metrics
+│   │
+│   ├── rule list                 GET /api/v1/evm/rules
+│   ├── rule get <id>             GET /api/v1/evm/rules/:id
+│   ├── rule create               POST /api/v1/evm/rules (from flags or YAML file)
+│   ├── rule update <id>          PATCH /api/v1/evm/rules/:id
+│   ├── rule delete <id>          DELETE /api/v1/evm/rules/:id
+│   ├── rule toggle <id>          PATCH (enable/disable)
+│   ├── rule approve <id>         POST /api/v1/evm/rules/:id/approve
+│   ├── rule reject <id>          POST /api/v1/evm/rules/:id/reject
+│   ├── rule budgets <id>         GET /api/v1/evm/rules/:id/budgets
+│   │
+│   ├── preset apply <name>       POST /api/v1/presets/:id/apply (remote API, NOT local merge)
+│   │
+│   ├── signer list               GET /api/v1/evm/signers
+│   ├── signer create             POST /api/v1/evm/signers
+│   ├── signer unlock <addr>      POST /api/v1/evm/signers/:addr/unlock
+│   ├── signer lock <addr>        POST /api/v1/evm/signers/:addr/lock
+│   ├── signer approve <addr>     POST /api/v1/evm/signers/:addr/approve (admin)
+│   ├── signer transfer <addr>    POST /api/v1/evm/signers/:addr/transfer (owner)
+│   ├── signer delete <addr>      DELETE /api/v1/evm/signers/:addr (owner)
+│   ├── signer access grant <a>   POST /api/v1/evm/signers/:addr/access (owner)
+│   ├── signer access revoke <a>  DELETE /api/v1/evm/signers/:addr/access/:keyID (owner)
+│   ├── signer access list <a>    GET /api/v1/evm/signers/:addr/access (owner)
+│   │
+│   ├── hdwallet list             GET /api/v1/evm/hd-wallets
+│   ├── hdwallet create           POST /api/v1/evm/hd-wallets
+│   ├── hdwallet import           POST /api/v1/evm/hd-wallets (action=import)
+│   ├── hdwallet derive <addr>    POST /api/v1/evm/hd-wallets/:addr/derive
+│   ├── hdwallet list-derived <a> GET /api/v1/evm/hd-wallets/:addr/derived
+│   │
+│   ├── wallet list               GET /api/v1/evm/signers?group_by_wallet=true
+│   ├── wallet signers <walletID> GET /api/v1/evm/wallets/:id/signers
+│   │
+│   ├── wallet create         POST /api/v1/wallets
+│   ├── wallet list           GET /api/v1/wallets
+│   ├── wallet get <id>       GET /api/v1/wallets/:id
+│   ├── wallet delete <id>    DELETE /api/v1/wallets/:id
+│   ├── wallet members list <id>              GET /api/v1/wallets/:id/members
+│   ├── wallet members add <id> --wallet-id POST /api/v1/wallets/:id/members
+│   ├── wallet members remove <id> <walletID> DELETE .../members/:walletID
+│   │
+│   ├── template list             GET /api/v1/templates
+│   ├── template get <id>         GET /api/v1/templates/:id
+│   ├── template create           POST /api/v1/templates
+│   ├── template update <id>      PATCH /api/v1/templates/:id
+│   ├── template delete <id>      DELETE /api/v1/templates/:id
+│   ├── template instantiate <id> POST /api/v1/templates/:id/instantiate
+│   ├── template revoke-instance  POST /api/v1/templates/instances/:ruleID/revoke
+│   │
+│   ├── api-key list              GET /api/v1/api-keys
+│   ├── api-key get <id>          GET /api/v1/api-keys/:id
+│   ├── api-key create            POST /api/v1/api-keys
+│   ├── api-key update <id>       PUT /api/v1/api-keys/:id
+│   ├── api-key delete <id>       DELETE /api/v1/api-keys/:id
+│   │
+│   ├── request list [--status]    GET /api/v1/evm/requests (defaults to --status authorizing)
+│   ├── request get <id>          GET /api/v1/evm/requests/:id
+│   ├── request approve <id>      POST /api/v1/evm/requests/:id/approve (signer owner only)
+│   ├── request reject <id>       POST /api/v1/evm/requests/:id/reject (signer owner only)
+│   ├── request preview-rule <id> GET /api/v1/evm/requests/:id/preview-rule
+│   │
+│   ├── guard resume              POST /api/v1/evm/guard/resume
+│   │
+│   ├── broadcast <signed-tx>     POST /api/v1/evm/broadcast (--chain-id, --wait)
+│   │
+│   ├── simulate tx               POST /api/v1/evm/simulate
+│   ├── simulate batch            POST /api/v1/evm/simulate/batch (--tx JSON format)
+│   ├── simulate status           GET /api/v1/evm/simulate/status
+│   │
+│   ├── audit list                GET /api/v1/audit
+│   │
+│   ├── acl ip-whitelist          GET /api/v1/acls/ip-whitelist (admin)
+│   │
+│   └── sign                      POST /api/v1/evm/sign (for scripting/testing)
+│
+└── version
+```
+
+### 7.4 setup.sh Flow Change
+
+Before (broken — agent rules in config with wrong owner/applied_to):
+```
+setup.sh → generate config with agent preset rules → start server
+```
+
+After (correct — RBAC-compliant):
+```
+setup.sh:
+  1. Generate config.yaml (global rules only: dynamic_blocklist)
+  2. Start server, wait for health
+  3. remote-signer preset apply agent.preset.js.yaml \
+       --api-key-id agent --api-key-file data/agent_private.pem \
+       --url https://localhost:8548 [--tls-*]
+     → POST /api/v1/presets/agent/apply
+     → Server creates rules with owner=agent, applied_to=["self"]
+```
+
+### 7.5 Implementation Priority
+
+Phase 2a (blocks setup.sh fix) — ✅ DONE:
+1. ✅ Auth flags infrastructure (pkg/client init from CLI flags)
+2. ✅ `preset apply` (remote API, not local merge)
+3. ✅ `rule list/get/create/update/delete/toggle/approve/reject/budgets`
+4. ✅ `health`
+
+Phase 2b (full parity) — ✅ DONE:
+5. ✅ `signer list/create/unlock/lock/approve/transfer/delete/access`
+6. ✅ `hdwallet list/create/import/derive/list-derived`
+7. ✅ `template list/get/create/update/delete/instantiate/revoke-instance`
+8. ✅ `api-key list/get/create/update/delete`
+9. ✅ `request list/get/approve/reject/preview-rule`
+10. ✅ `audit list`
+11. ✅ `acl ip-whitelist`
+12. ✅ `sign tx/personal/hash/typed-data`
+13. ✅ `simulate tx/batch/status`
+14. ✅ `broadcast`
+15. ✅ `guard resume`
+16. ✅ `doctor`, `metrics`, `keystore`
 
 ---
 
 ## 1. Goal
 
-- **CLI tool** `remote-signer-cli` with subcommands to improve UX: create/update rule config from templates and presets, validate rules, and launch TUI.
+- **CLI tool** `remote-signer` with subcommands to improve UX: create/update rule config from templates and presets, validate rules, and launch TUI.
 - **Presets / “final template”**: Today config combines a template (e.g. `Polymarket Safe Template`) with a long `variables` block. We want a way to work from a **preset** (template + default variables) so users only override a few values (e.g. `allowed_safe_addresses`) and optionally write directly to `config.yaml`.
 - **Integration**: Expose existing **validate-rules** and **TUI** via this CLI (as subcommands); **release** the CLI binary in GitHub Actions alongside the TUI.
 
@@ -17,8 +176,8 @@
 
 - **Do not reimplement** expansion, validation, or TUI. Reuse existing code only.
 - **Config / rules / templates**: Use only `internal/config`: `Load`, `ExpandTemplatesFromFiles`, `ExpandInstanceRules`, `ExpandFileRules`, `RuleConfig`, `TemplateConfig`. No new expansion or rule logic.
-- **Validate**: Reuse the existing validate-rules flow. **Option A (preferred)**: `remote-signer-cli validate` **exec**’s the **`remote-signer-validate-rules`** binary (see plan §0) with the same flags (zero code change, single code path). **Option B**: Extract the validator’s `run()` into a callable and have both the binary and CLI call it.
-- **TUI**: `remote-signer-cli tui` **exec**’s the existing `remote-signer-tui` binary with forwarded args. No second TUI implementation, no refactor of TUI code.
+- **Validate**: Reuse the existing validate-rules flow. **Option A (preferred)**: `remote-signer validate` **exec**’s the **`remote-signer validate`** binary (see plan §0) with the same flags (zero code change, single code path). **Option B**: Extract the validator’s `run()` into a callable and have both the binary and CLI call it.
+- **TUI**: `remote-signer tui` **exec**’s the existing `remote-signer tui` binary with forwarded args. No second TUI implementation, no refactor of TUI code.
 - **Presets**: Preset files are **data only** (YAML). Parsing produces the same `RuleConfig` shape the server already uses (type `instance`, `config.template`, `config.variables`). Output or merge is just emitting/updating that structure; expansion stays in existing `ExpandInstanceRules` when the server or validate runs.
 
 ---
@@ -41,7 +200,7 @@
   3. **ExpandFileRules**(expandedRules, configDir)  
      Expands `type: file` rules by loading rules from their `config.path`.
 
-- **Key types**: `internal/config/config.go` — `TemplateConfig`, `RuleConfig`; expansion in `internal/config/template_init.go` and `rule_init.go`; rules validator in `cmd/validate-rules/` (binary name: `remote-signer-validate-rules`).
+- **Key types**: `internal/config/config.go` — `TemplateConfig`, `RuleConfig`; expansion in `internal/config/template_init.go` and `rule_init.go`; rules validator in `internal/cli/validate/` (binary name: `remote-signer validate`).
 
 ### 2.2 Templates today
 
@@ -50,8 +209,8 @@
 
 ### 2.3 Rules validator and TUI
 
-- **Rules validator**: Built as **`remote-signer-validate-rules`** (see plan §0); source in `cmd/validate-rules/` (or `cmd/remote-signer-validate-rules/` after rename). Supports `-config config.yaml` (expand templates + instance + file rules, then validate) and direct rule/template file paths.
-- **TUI**: `cmd/tui/main.go` — binary `remote-signer-tui`; connects to server, manages signers/rules/requests etc.
+- **Rules validator**: Built as **`remote-signer validate`** (see plan §0); source in `internal/cli/validate/`. Supports `-config config.yaml` (expand templates + instance + file rules, then validate) and direct rule/template file paths.
+- **TUI**: `internal/cli/tui/run.go` — binary `remote-signer tui`; connects to server, manages signers/rules/requests etc.
 
 ---
 
@@ -119,9 +278,9 @@ rules:
 
 - CLI **preset create-from** loads preset(s), applies `--set` overrides (and optional `--rule-index` for multi-rule files), and outputs rule block(s) or patches config.
 
-### 3.2 remote-signer-cli layout
+### 3.2 remote-signer layout
 
-Single binary: **remote-signer-cli** (or **rscli** as shorthand in docs).
+Single binary: **remote-signer** (install with `go install github.com/ivanzzeth/remote-signer/cmd/remote-signer@latest`).
 
 **Subcommands:**
 
@@ -130,7 +289,7 @@ Single binary: **remote-signer-cli** (or **rscli** as shorthand in docs).
 | **rule** | List templates from config |
 | **preset** | List presets, create rules from a preset |
 | **validate** | Validate rules (current validate-rules behavior) |
-| **tui** | Launch TUI (same as current `cmd/tui`) |
+| **tui** | Launch TUI (implementation lives in `internal/cli/tui/`) |
 
 **`rule` subcommands:**
 
@@ -147,7 +306,7 @@ Single binary: **remote-signer-cli** (or **rscli** as shorthand in docs).
 
 **`validate`** (top-level): same as `rule validate` (alias or delegate).
 
-**`tui`**: run the TUI (same as current TUI binary; can be same package `cmd/tui` invoked from CLI, or exec of `remote-signer-tui` if we keep releasing TUI separately). Prefer in-process (single CLI binary that embeds TUI) so one download gives both CLI and TUI.
+**`tui`**: run the TUI in-process from the unified `remote-signer` binary (implementation in `internal/cli/tui`). Single download gives server, CLI, and TUI.
 
 ### 3.3 Config patching (--config and --write)
 
@@ -170,21 +329,21 @@ Single binary: **remote-signer-cli** (or **rscli** as shorthand in docs).
 
 ### 4.1 New directory and files
 
-- **`cmd/remote-signer-cli/`**
+- **`internal/cli/admin/`**
   - Use **Cobra** for all commands and flags (see plan §0). Root command and subcommands: `rule`, `validate`, `tui`.
   - `main.go` — Cobra root; no expansion or validation logic; only delegation.
   - `rule.go` — Cobra `rule` command and child: list-templates.
   - `preset.go` — Cobra `preset` command and children: list, create-from (same behavior; flags via Cobra).
-  - `validate_cmd.go` — `validate` subcommand: **exec** **`remote-signer-validate-rules`** binary with forwarded flags.
-  - `tui_cmd.go` — `tui` subcommand: **exec** `remote-signer-tui` binary with forwarded args.
+  - `validate_cmd.go` — `validate` subcommand: **exec** **`remote-signer validate`** binary with forwarded flags.
+  - `tui_cmd.go` — `tui` subcommand: **exec** `remote-signer tui` binary with forwarded args.
 - **`rules/presets/`**
   - Preset YAML files (data only). Example: `polymarket_safe_polygon.preset.js.yaml` — same structure as one `rules` entry in config (name, type instance, config.template, config.variables). Extracted from current config.example; no new format.
   - Optional: `predict-eoa-bnb.yaml`, `opinion-safe-bsc.yaml`.
 
 ### 4.2 Reuse only (no new validation/TUI logic)
 
-- **Validate**: **Exec** the **`remote-signer-validate-rules`** binary (same flags forwarded). One code path, no refactor. Release both `remote-signer-cli` and `remote-signer-validate-rules`; CLI’s `validate` subcommand finds `remote-signer-validate-rules` in same directory or PATH and runs it.
-- **TUI**: **Exec** the existing `remote-signer-tui` binary with forwarded args. No change to TUI code. Release both binaries; CLI’s `tui` subcommand finds the TUI binary and runs it.
+- **Validate**: **Exec** the **`remote-signer validate`** binary (same flags forwarded). One code path, no refactor. Release both `remote-signer` and `remote-signer validate`; CLI’s `validate` subcommand finds `remote-signer validate` in same directory or PATH and runs it.
+- **TUI**: **Exec** the existing `remote-signer tui` binary with forwarded args. No change to TUI code. Release both binaries; CLI’s `tui` subcommand finds the TUI binary and runs it.
 - **Rule list-templates**: Use `config.Load` + `config.ExpandTemplatesFromFiles` only; print template names and variable names. No new logic.
 - **Preset list**: Read `rules/presets/*.yaml`; parse minimal fields (name, template) for listing. Presets are data.
 - **Preset create-from**: Read preset YAML into a struct that maps 1:1 to one `RuleConfig` (type `instance`, name, chain_*, config.template, config.variables). Apply `--set k=v` to variables. Output as YAML or, with `--config` + `--write`, load config (config.Load), append this rule to `cfg.Rules`, write back. Expansion is **not** done by the CLI; it only produces the same rule entry the server would have. No duplicate expansion.
@@ -204,10 +363,9 @@ Single binary: **remote-signer-cli** (or **rscli** as shorthand in docs).
 ### 4.5 Release workflow
 
 - In **`.github/workflows/release.yml`**:
-  - Add a build step for **remote-signer-cli** (same multi-arch: linux amd64/arm64, darwin amd64/arm64).
-  - Output: `remote-signer-cli-<os>-<arch>`.
-  - Upload as additional release assets (alongside existing TUI assets).
-- Build and upload **remote-signer-tui**, **remote-signer-validate-rules**, and **remote-signer-cli** (binary names per plan §0). Document that validate is available via `remote-signer-cli validate` and TUI via `remote-signer-cli tui`.
+  - Build the unified **remote-signer** binary across linux amd64/arm64 and darwin amd64/arm64.
+  - Output: `remote-signer-<os>-<arch>`.
+  - Upload as the sole release asset; `server start`, `tui`, `validate`, and every operator command ship inside it.
 
 ---
 
@@ -217,14 +375,14 @@ Single binary: **remote-signer-cli** (or **rscli** as shorthand in docs).
 
 | Area | What to test | Location / notes |
 |------|----------------|------------------|
-| **Preset parsing** | Single-rule preset: parse YAML into struct matching one `RuleConfig` (name, type instance, config.template, config.variables). | `cmd/remote-signer-cli/` or `internal/preset/` (if extracted). |
+| **Preset parsing** | Single-rule preset: parse YAML into struct matching one `RuleConfig` (name, type instance, config.template, config.variables). | `internal/cli/admin/` or `internal/preset/` (if extracted). |
 | **Preset parsing** | Multi-rule preset: parse top-level `rules:` into `[]RuleConfig`; preserve order and all fields. | Same. |
 | **Variables** | Scalar variables: string and number round-trip; `--set key=value` overwrites. | Unit test preset with mixed scalar types. |
 | **Variables** | Array variables: YAML list `["a","b"]` parses; `--set key=val1,val2` produces string `"val1,val2"`; `--set key='["v1","v2"]'` parses as JSON array and normalizes to comma-separated when writing config (or store as slice for config). | Test that merged config passes server expansion and `fillInMappingArrays` (e.g. in_mapping var). |
 | **Override application** | `--set` overrides preset variables; multiple `--set A=x --set B=y`; override does not add new keys if we restrict to preset keys (or allow extra keys). | Unit test with preset + set flags. |
 | **Config merge** | Load existing config (YAML), append one rule to `cfg.Rules`, write back; no duplicate rule when appending same preset twice (by name?) or document as append-only. | Use temp config file; assert `rules` length and content. |
 | **Config merge** | Update existing rule by name when `--update` (if implemented): replace rule with same name instead of appending. | Same. |
-| **Binary discovery** | Resolve `remote-signer-validate-rules` / `remote-signer-tui`: same dir vs PATH; return clear error when not found. | Test with mock FS or temp dir with/without binaries. |
+| **Binary discovery** | Resolve `remote-signer validate` / `remote-signer tui`: same dir vs PATH; return clear error when not found. | Test with mock FS or temp dir with/without binaries. |
 | **list-templates** | With `-config`: load config, expand templates, output table (name, path, variable names); no config → clear error. | Use fixture config + template file. |
 | **list-presets** | List presets from `rules/presets/` or `--presets-dir`: single-rule and multi-rule files; output preset name and template name(s). | Fixture presets dir. |
 
@@ -232,28 +390,28 @@ Single binary: **remote-signer-cli** (or **rscli** as shorthand in docs).
 
 | Scenario | Steps | Assertions |
 |----------|--------|------------|
-| **preset create-from → validate** | Create rule from preset (single-rule) with `--set`, write to temp config that has required `templates` section; run `remote-signer-validate-rules -config` (or `remote-signer-cli validate -config`) on that config. | Validation passes; no “template not found” or “variable missing”. |
+| **preset create-from → validate** | Create rule from preset (single-rule) with `--set`, write to temp config that has required `templates` section; run `remote-signer validate -config` (or `remote-signer validate -config`) on that config. | Validation passes; no “template not found” or “variable missing”. |
 | **preset create-from (array var)** | Preset with `allowed_safe_addresses: ["0xa", "0xb"]`; preset create-from, merge into config; run server or validate so `ExpandInstanceRules` + `ExpandFileRules` run. | Expanded rules contain correct in_mapping or substituted values. |
 | **preset create-from (multi-rule)** | Preset file with `rules:` and 2 entries; preset create-from with `--set` (applies to all or first); merge into config. | Config has 2 new rules; validate passes. |
-| **validate exec** | `remote-signer-cli validate -config <path>` exec’s `remote-signer-validate-rules` with same flags; exit code and stdout/stderr forwarded. | Exit code 0 when rules valid; non-zero when invalid; output matches running `remote-signer-validate-rules` directly. |
-| **tui exec** | `remote-signer-cli tui -url ... -api-key-id admin` exec’s `remote-signer-tui` with same args. | Process starts (integration can assert exec succeeded; full TUI is manual). |
+| **validate exec** | `remote-signer validate -config <path>` exec’s `remote-signer validate` with same flags; exit code and stdout/stderr forwarded. | Exit code 0 when rules valid; non-zero when invalid; output matches running `remote-signer validate` directly. |
+| **tui exec** | `remote-signer tui -url ... -api-key-id admin` exec’s `remote-signer tui` with same args. | Process starts (integration can assert exec succeeded; full TUI is manual). |
 
 ### 5.3 setup.sh integration
 
 | Step | Behavior | Verification |
 |------|----------|---------------|
-| **Optional step: add rules from preset** | After generating config (Step 4), prompt: “Add rules from preset? (y/N)”. If yes, run `remote-signer-cli preset list` (or read presets dir), show numbered list; user picks preset name (or index). Then prompt for override variables (e.g. `allowed_safe_addresses`, `allowed_safe_address_for_testing`) if preset has `override_hints`; or accept one line “key=value” repeats. Call `remote-signer-cli preset create-from <name> --config config.yaml --write --set ...`. | Config file contains new rule(s); server starts and validate passes. |
+| **Optional step: add rules from preset** | After generating config (Step 4), prompt: “Add rules from preset? (y/N)”. If yes, run `remote-signer preset list` (or read presets dir), show numbered list; user picks preset name (or index). Then prompt for override variables (e.g. `allowed_safe_addresses`, `allowed_safe_address_for_testing`) if preset has `override_hints`; or accept one line “key=value” repeats. Call `remote-signer preset create-from <name> --config config.yaml --write --set ...`. | Config file contains new rule(s); server starts and validate passes. |
 | **Presets dir** | If using presets, ensure `rules/presets/` exists (e.g. from repo or created by setup). If CLI is from release, presets may be in repo only — document “run from repo” or ship presets with release. | setup.sh runs without error; generated config includes selected preset rule(s). |
 | **Array variables in setup** | When prompting for e.g. `allowed_safe_addresses`, accept comma-separated input and pass as `--set allowed_safe_addresses=0xa,0xb`. | Merged rule has correct variables; validation passes. |
 
 ### 5.4 Manual test TODOs
 
-- [ ] **Full flow (local)**: Run `./scripts/setup.sh` → choose local → complete steps → when offered “Add rules from preset”, pick Polymarket preset → enter Safe address(es) → start server → run `remote-signer-cli validate -config config.yaml` → open TUI, confirm rules visible.
+- [ ] **Full flow (local)**: Run `./scripts/setup.sh` → choose local → complete steps → when offered “Add rules from preset”, pick Polymarket preset → enter Safe address(es) → start server → run `remote-signer validate -config config.yaml` → open TUI, confirm rules visible.
 - [ ] **Full flow (Docker)**: Same with Docker mode; confirm config and preset rule(s) work in container.
 - [ ] **Multi-rule preset**: Use a preset file with `rules:` and 2+ entries; run preset create-from with `--write`; open config, confirm all entries; run validate.
 - [ ] **Array variable in TUI/server**: Preset with array variable (e.g. multiple Safe addresses); preset create-from, start server, send a request that hits the rule; confirm behavior matches single-address case.
-- [ ] **Binary discovery**: Install only `remote-signer-cli` in PATH; run `remote-signer-cli validate` and `remote-signer-cli tui` — confirm clear error when `remote-signer-validate-rules` / `remote-signer-tui` not in same dir or PATH. Then place binaries in same dir, re-run — should succeed.
-- [ ] **Release assets**: After release, download CLI + TUI + remote-signer-validate-rules for one platform; run CLI validate and CLI tui from same directory; confirm no path errors.
+- [ ] **Binary discovery**: Install only `remote-signer` in PATH; run `remote-signer validate` and `remote-signer tui` — confirm clear error when `remote-signer validate` / `remote-signer tui` not in same dir or PATH. Then place binaries in same dir, re-run — should succeed.
+- [ ] **Release assets**: After release, download CLI + TUI + remote-signer validate for one platform; run CLI validate and CLI tui from same directory; confirm no path errors.
 
 ---
 
@@ -262,10 +420,10 @@ Single binary: **remote-signer-cli** (or **rscli** as shorthand in docs).
 | Item | Approach |
 |------|----------|
 | **Preset / “final template”** | Preset = one YAML (template name + full variables). No new server type. CLI uses presets to generate config rule entries. |
-| **remote-signer-cli** | One binary; subcommands: `rule` (list-templates), `preset` (list, create-from), `validate`, `tui`. |
+| **remote-signer** | One binary; cobra root with `server start`, `tui`, `validate`, `rule`, `preset`, `sign`, `keystore`, ... |
 | **preset create-from** | Load preset, apply `--set`, output rule block or patch config with `--config` + `--write`. |
-| **validate** | **Exec** existing **`remote-signer-validate-rules`** binary (same flags). No duplicate validation logic. |
-| **TUI** | **Exec** existing `remote-signer-tui` binary (forward args). No duplicate TUI logic. |
-| **Release** | Build and upload `remote-signer-cli-<os>-<arch>` in the same release workflow. |
+| **validate** | In-process cobra subcommand backed by `internal/cli/validate`. No subprocess. |
+| **TUI** | In-process cobra subcommand backed by `internal/cli/tui`. No subprocess. |
+| **Release** | Build and upload `remote-signer-<os>-<arch>` in the same release workflow. |
 
-This gives a single CLI that improves UX (presets + config patching), keeps templates as they are, and unifies rule validation and TUI under one tool while still allowing separate TUI/remote-signer-validate-rules binaries in the release if desired.
+This gives a single binary that hosts the service, CLI, and TUI under one tool — one download, one PATH entry, one version to track.

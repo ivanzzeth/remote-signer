@@ -1,11 +1,18 @@
 /**
  * Remote Signer JavaScript Client - thin facade over resource-based services.
+ * Usable in browser and Node.js; see transport.ts for HTTP/TLS behaviour per environment.
  */
 
 import { HttpTransport, ClientConfig } from "./transport";
 import { EvmService } from "./evm";
 import { AuditService } from "./audit";
 import { TemplateService } from "./templates";
+import { APIKeyService } from "./apikeys";
+import { ACLService } from "./acls";
+import { PresetService } from "./presets";
+import { RegistryService } from "./registry";
+import { SettingsService } from "./settings";
+import { WalletService } from "./wallets";
 
 // ---------------------------------------------------------------------------
 // Types kept at client level
@@ -31,6 +38,12 @@ export class RemoteSignerClient {
   public readonly evm: EvmService;
   public readonly audit: AuditService;
   public readonly templates: TemplateService;
+  public readonly apiKeys: APIKeyService;
+  public readonly acls: ACLService;
+  public readonly presets: PresetService;
+  public readonly registry: RegistryService;
+  public readonly settings: SettingsService;
+  public readonly wallets: WalletService;
   private transport: HttpTransport;
 
   constructor(config: ClientConfig) {
@@ -42,6 +55,12 @@ export class RemoteSignerClient {
     this.evm = new EvmService(this.transport, pollInterval, pollTimeout);
     this.audit = new AuditService(this.transport);
     this.templates = new TemplateService(this.transport);
+    this.apiKeys = new APIKeyService(this.transport);
+    this.acls = new ACLService(this.transport);
+    this.presets = new PresetService(this.transport);
+    this.registry = new RegistryService(this.transport);
+    this.settings = new SettingsService(this.transport);
+    this.wallets = new WalletService(this.transport);
   }
 
   /**

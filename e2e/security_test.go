@@ -289,7 +289,7 @@ func TestSecurity_AdminEscalation_NonAdminKey(t *testing.T) {
 	ctx := context.Background()
 
 	// Non-admin should NOT be able to list rules
-	_, err := nonAdminClient.EVM.Rules.List(ctx, nil)
+	_, err := nonAdminClient.EVM.Rules.List(ctx, &evm.ListRulesFilter{Limit: 1000})
 	require.Error(t, err)
 	apiErr, ok := err.(*client.APIError)
 	require.True(t, ok, "expected APIError, got %T: %v", err, err)
@@ -1855,9 +1855,10 @@ func TestRedTeam_ErrorInfoLeak_StructType(t *testing.T) {
 		"VULNERABILITY: error leaks Go struct type name")
 	assert.NotContains(t, respStr, "type evm",
 		"VULNERABILITY: error leaks package/type info")
-	// Should return a generic message
-	assert.Contains(t, strings.ToLower(respStr), "invalid request body",
-		"error response should contain generic 'invalid request body' message")
+	// Should return a generic message (either Content-Type rejection or invalid body)
+	lowerResp := strings.ToLower(respStr)
+	assert.True(t, strings.Contains(lowerResp, "invalid request body") || strings.Contains(lowerResp, "content-type must be application/json"),
+		"error response should contain generic error message, got: %s", respStr)
 }
 
 func TestRedTeam_ErrorInfoLeak_FieldNames(t *testing.T) {

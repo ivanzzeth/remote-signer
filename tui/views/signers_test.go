@@ -3,6 +3,7 @@ package views
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
@@ -10,9 +11,19 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/ivanzzeth/remote-signer/pkg/client"
 	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 	"github.com/ivanzzeth/remote-signer/pkg/client/mock"
 )
+
+func TestFormatHDWalletRoleLine(t *testing.T) {
+	ix0 := uint32(0)
+	ix3 := uint32(3)
+	assert.Equal(t, "", formatHDWalletRoleLine(evm.Signer{Type: "keystore"}))
+	assert.Equal(t, "HD: primary", formatHDWalletRoleLine(evm.Signer{Type: "hd_wallet", HDDerivationIndex: &ix0}))
+	assert.Equal(t, "HD: derived #3", formatHDWalletRoleLine(evm.Signer{Type: "hd_wallet", HDDerivationIndex: &ix3}))
+	assert.Equal(t, "HD: ?", formatHDWalletRoleLine(evm.Signer{Type: "hd_wallet"}))
+}
 
 func newTestSignersModel(t *testing.T) (*SignersModel, *mock.SignerService) {
 	t.Helper()
@@ -354,6 +365,7 @@ func TestSignersModel_LoadData(t *testing.T) {
 		assert.Equal(t, "keystore", capturedFilter.Type)
 		assert.Equal(t, 10, capturedFilter.Offset)
 		assert.Equal(t, 20, capturedFilter.Limit)
+		assert.True(t, capturedFilter.ExcludeHDDerived, "default should exclude HD derived via API")
 
 		dataMsg, ok := msg.(SignersDataMsg)
 		require.True(t, ok)
@@ -612,84 +624,6 @@ func TestSignersModel_CreateHDWalletDerive(t *testing.T) {
 	})
 }
 
-func TestSignersModel_AccessColumn(t *testing.T) {
-	t.Run("renders Access column when AllowedKeys present", func(t *testing.T) {
-		model, _ := newTestSignersModel(t)
-		model.loading = false
-		model.width = 150
-		model.height = 30
-		model.signers = []evm.Signer{
-			{
-				Address: "0x1234567890123456789012345678901234567890",
-				Type:    "keystore",
-				Enabled: true,
-				AllowedKeys: []evm.AllowedKeyInfo{
-					{ID: "admin-key", Name: "admin"},
-					{ID: "dev-key", Name: "dev-key"},
-				},
-			},
-			{
-				Address: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
-				Type:    "private_key",
-				Enabled: true,
-				AllowedKeys: []evm.AllowedKeyInfo{
-					{ID: "admin-key", Name: "admin"},
-				},
-			},
-		}
-		model.total = 2
-
-		view := model.View()
-		assert.Contains(t, view, "Access")
-		assert.Contains(t, view, "admin")
-		assert.Contains(t, view, "dev-key")
-	})
-
-	t.Run("no Access column when AllowedKeys absent", func(t *testing.T) {
-		model, _ := newTestSignersModel(t)
-		model.loading = false
-		model.width = 150
-		model.height = 30
-		model.signers = []evm.Signer{
-			{
-				Address: "0x1234567890123456789012345678901234567890",
-				Type:    "keystore",
-				Enabled: true,
-			},
-		}
-		model.total = 1
-
-		view := model.View()
-		assert.NotContains(t, view, "Access")
-	})
-
-	t.Run("Access column truncates when more than 2 keys", func(t *testing.T) {
-		model, _ := newTestSignersModel(t)
-		model.loading = false
-		model.width = 150
-		model.height = 30
-		model.signers = []evm.Signer{
-			{
-				Address: "0x1234567890123456789012345678901234567890",
-				Type:    "keystore",
-				Enabled: true,
-				AllowedKeys: []evm.AllowedKeyInfo{
-					{ID: "k1", Name: "admin"},
-					{ID: "k2", Name: "dev-key"},
-					{ID: "k3", Name: "readonly"},
-					{ID: "k4", Name: "extra"},
-				},
-			},
-		}
-		model.total = 1
-
-		view := model.View()
-		assert.Contains(t, view, "Access")
-		assert.Contains(t, view, "admin")
-		assert.Contains(t, view, "dev-key")
-		assert.Contains(t, view, "(+2)")
-	})
-}
 
 func TestValidatePassword(t *testing.T) {
 	t.Run("rejects short password", func(t *testing.T) {
@@ -749,6 +683,14 @@ func TestValidatePassword(t *testing.T) {
 	})
 }
 
+func TestUnlockErrShouldCountFailedAttempt(t *testing.T) {
+	assert.False(t, unlockErrShouldCountFailedAttempt(errors.New("network")))
+	assert.False(t, unlockErrShouldCountFailedAttempt(&client.APIError{StatusCode: http.StatusForbidden}))
+	assert.False(t, unlockErrShouldCountFailedAttempt(&client.APIError{StatusCode: http.StatusNotFound}))
+	assert.False(t, unlockErrShouldCountFailedAttempt(&client.APIError{StatusCode: http.StatusConflict}))
+	assert.True(t, unlockErrShouldCountFailedAttempt(&client.APIError{StatusCode: http.StatusInternalServerError}))
+}
+
 func TestSignersModel_UnlockRateLimiting(t *testing.T) {
 	t.Run("blocks after max failed attempts", func(t *testing.T) {
 		model, svc := newTestSignersModel(t)
@@ -759,14 +701,14 @@ func TestSignersModel_UnlockRateLimiting(t *testing.T) {
 		model.selectedIdx = 0
 
 		svc.UnlockFunc = func(ctx context.Context, address string, req *evm.UnlockSignerRequest) (*evm.Signer, error) {
-			return nil, errors.New("wrong password")
+			return nil, &client.APIError{StatusCode: http.StatusInternalServerError, Code: "unlock_failed", Message: "wrong password"}
 		}
 
 		addr := model.signers[0].Address
 
-		// Simulate maxUnlockAttempts failures
+		// Simulate maxUnlockAttempts failures (API returns 500 for bad password today)
 		for i := 0; i < maxUnlockAttempts; i++ {
-			msg := SignerUnlockMsg{Address: addr, Success: false, Err: errors.New("wrong password")}
+			msg := SignerUnlockMsg{Address: addr, Success: false, Err: &client.APIError{StatusCode: http.StatusInternalServerError, Code: "unlock_failed", Message: "wrong password"}}
 			model.Update(msg)
 		}
 
@@ -816,31 +758,33 @@ func TestSignersModel_UnlockRateLimiting(t *testing.T) {
 	})
 }
 
-func TestFormatAccessColumn(t *testing.T) {
-	t.Run("empty keys returns dash", func(t *testing.T) {
-		result := formatAccessColumn(nil)
-		assert.Equal(t, "-", result)
-	})
+func TestSignersModel_shiftD_opensDeleteConfirm(t *testing.T) {
+	m, _ := newTestSignersModel(t)
+	m.loading = false
+	m.signers = []evm.Signer{{Address: "0xabc", Type: "keystore"}}
+	m.selectedIdx = 0
 
-	t.Run("single key shows name", func(t *testing.T) {
-		result := formatAccessColumn([]evm.AllowedKeyInfo{{ID: "k1", Name: "admin"}})
-		assert.Equal(t, "admin", result)
-	})
-
-	t.Run("two keys shows both names", func(t *testing.T) {
-		result := formatAccessColumn([]evm.AllowedKeyInfo{
-			{ID: "k1", Name: "admin"},
-			{ID: "k2", Name: "dev"},
-		})
-		assert.Equal(t, "admin, dev", result)
-	})
-
-	t.Run("three or more keys truncates", func(t *testing.T) {
-		result := formatAccessColumn([]evm.AllowedKeyInfo{
-			{ID: "k1", Name: "admin"},
-			{ID: "k2", Name: "dev"},
-			{ID: "k3", Name: "readonly"},
-		})
-		assert.Equal(t, "admin, dev (+1)", result)
-	})
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}})
+	wm := out.(*SignersModel)
+	assert.True(t, wm.showDeleteSigner)
+	assert.True(t, wm.IsCapturingInput())
 }
+
+func TestSignersModel_deleteSignerCmd(t *testing.T) {
+	svc := mock.NewSignerService()
+	var gotAddr string
+	svc.DeleteFunc = func(ctx context.Context, address string) error {
+		gotAddr = address
+		return nil
+	}
+	m, err := newSignersModelFromService(svc, mock.NewHDWalletService(), context.Background())
+	require.NoError(t, err)
+
+	cmd := m.deleteSigner("0xdead")
+	raw := cmd()
+	msg, ok := raw.(SignerDeleteMsg)
+	require.True(t, ok)
+	assert.NoError(t, msg.Err)
+	assert.Equal(t, "0xdead", gotAddr)
+}
+

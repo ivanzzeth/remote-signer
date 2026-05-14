@@ -32,16 +32,13 @@ func withDelegationCtx(ctx context.Context, depth int, path map[types.RuleID]boo
 	return context.WithValue(ctx, delegationCtxKey{}, delegationCtxVal{Depth: depth, Path: path})
 }
 
-// ruleScopeMatches returns true if the rule's scope (ChainType, ChainID, APIKeyID, SignerAddress) matches the request.
+// ruleScopeMatches returns true if the rule's scope (ChainType, ChainID, SignerAddress) matches the request.
 // Nil rule scope fields mean "any".
 func ruleScopeMatches(rule *types.Rule, req *types.SignRequest) bool {
 	if rule.ChainType != nil && *rule.ChainType != req.ChainType {
 		return false
 	}
 	if rule.ChainID != nil && *rule.ChainID != req.ChainID {
-		return false
-	}
-	if rule.APIKeyID != nil && *rule.APIKeyID != req.APIKeyID {
 		return false
 	}
 	if rule.SignerAddress != nil && !strings.EqualFold(*rule.SignerAddress, req.SignerAddress) {
@@ -55,22 +52,19 @@ func (e *WhitelistRuleEngine) logScopeMismatch(rule *types.Rule, req *types.Sign
 	if e.logger == nil || rule == nil || req == nil {
 		return
 	}
-	var ruleChainType, ruleChainID, ruleAPIKeyID, ruleSigner string
+	var ruleChainType, ruleChainID, ruleSigner string
 	if rule.ChainType != nil {
 		ruleChainType = string(*rule.ChainType)
 	}
 	if rule.ChainID != nil {
 		ruleChainID = *rule.ChainID
 	}
-	if rule.APIKeyID != nil {
-		ruleAPIKeyID = *rule.APIKeyID
-	}
 	if rule.SignerAddress != nil {
 		ruleSigner = *rule.SignerAddress
 	}
 	e.logger.Info("delegation target scope mismatch",
 		"target_id", targetID,
-		"rule_chain_type", ruleChainType, "rule_chain_id", ruleChainID, "rule_api_key_id", ruleAPIKeyID, "rule_signer", ruleSigner,
+		"rule_chain_type", ruleChainType, "rule_chain_id", ruleChainID, "rule_owner", rule.Owner, "rule_signer", ruleSigner,
 		"req_chain_type", string(req.ChainType), "req_chain_id", req.ChainID, "req_api_key_id", req.APIKeyID, "req_signer", req.SignerAddress,
 	)
 }
@@ -92,6 +86,7 @@ type WhitelistRuleEngine struct {
 	budgetChecker         *BudgetChecker // optional: budget checking for template instances
 	delegationConverter   DelegationPayloadConverter
 	mu                    sync.RWMutex
+	sealed                bool // once true, RegisterEvaluator is forbidden (server is accepting requests)
 	logger                *slog.Logger
 }
 
@@ -135,12 +130,28 @@ func NewWhitelistRuleEngine(repo storage.RuleRepository, logger *slog.Logger, op
 	return engine, nil
 }
 
-// RegisterEvaluator registers a rule evaluator for a specific rule type
+// RegisterEvaluator registers a rule evaluator for a specific rule type.
+// Must be called during initialization only, before Seal() is called.
+// Panics if the engine has been sealed (i.e., after server startup).
 func (e *WhitelistRuleEngine) RegisterEvaluator(evaluator RuleEvaluator) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.sealed {
+		panic(fmt.Sprintf("RegisterEvaluator called after engine sealed: type=%s", evaluator.Type()))
+	}
 	e.evaluators[evaluator.Type()] = evaluator
 	e.logger.Info("registered rule evaluator", "type", evaluator.Type())
+}
+
+// Seal marks the engine as fully initialized. After this call, RegisterEvaluator
+// will panic. This ensures the evaluators map is effectively immutable once the
+// server starts accepting requests, eliminating the race window between RLock
+// release and re-acquire in EvaluateWithResult.
+func (e *WhitelistRuleEngine) Seal() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.sealed = true
+	e.logger.Info("rule engine sealed", "evaluator_count", len(e.evaluators))
 }
 
 // Evaluate performs two-tier rule evaluation
@@ -171,13 +182,12 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 		return nil, fmt.Errorf("request is required")
 	}
 
-	// Get all applicable rules filtered by chain_type, chain_id, signer, api_key.
+	// Get all applicable rules filtered by chain_type, chain_id, signer.
 	// SECURITY: Use Limit=-1 to fetch ALL matching rules without pagination.
 	// A default limit (e.g. 100) could silently drop blocklist rules, allowing
 	// malicious transactions through. This is a security-critical path.
 	filter := storage.RuleFilter{
 		ChainType:     &req.ChainType,
-		APIKeyID:      &req.APIKeyID,
 		SignerAddress: &req.SignerAddress,
 		EnabledOnly:   true,
 		Limit:         -1, // No limit: must load ALL rules for security evaluation
@@ -190,9 +200,20 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 		return nil, fmt.Errorf("failed to list rules: %w", err)
 	}
 
-	// Filter rules by sign type before evaluation (avoid calling evaluator for non-applicable rules)
+	// Phase 3: Filter rules by caller's API key ID (applied_to + status scoping).
+	// Only rules with status="active" AND matching applied_to are evaluated.
+	rules = FilterRulesForCaller(rules, req.APIKeyID)
+
+	// SECURITY: Take a single RLock to filter rules and snapshot evaluators atomically.
+	// This eliminates the window where evaluators could change between filterRulesBySignType
+	// and the main evaluation loop. After Seal() is called at startup, the evaluators map
+	// is effectively immutable, so the snapshot is a defense-in-depth measure.
 	e.mu.RLock()
 	rules = e.filterRulesBySignType(rules, req.SignType)
+	evaluators := make(map[types.RuleType]RuleEvaluator, len(e.evaluators))
+	for k, v := range e.evaluators {
+		evaluators[k] = v
+	}
 	e.mu.RUnlock()
 
 	// Separate rules by mode
@@ -214,14 +235,11 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 		"whitelist_count", len(whitelistRules),
 	)
 
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-
 	// Phase 1: Check blocklist rules first (mandatory Fail-Closed)
 	// ANY violation = blocked immediately (no manual approval possible)
 	// ANY evaluation error = immediate rejection (Fail-Closed is mandatory for blocklist)
 	for _, rule := range blocklistRules {
-		evaluator, exists := e.evaluators[rule.Type]
+		evaluator, exists := evaluators[rule.Type]
 		if !exists {
 			e.logger.Error("no evaluator for blocklist rule type (Fail-Closed)",
 				"type", rule.Type,
@@ -304,7 +322,7 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 			continue
 		}
 
-		_, exists := e.evaluators[rule.Type]
+		_, exists := evaluators[rule.Type]
 		if !exists {
 			e.logger.Warn("no evaluator for whitelist rule type, skipping",
 				"type", rule.Type,
@@ -806,7 +824,6 @@ func (e *WhitelistRuleEngine) evaluateWhitelistBatch(
 func (e *WhitelistRuleEngine) evaluateBlocklistForRequest(ctx context.Context, req *types.SignRequest, parsed *types.ParsedPayload) (*EvaluationResult, error) {
 	filter := storage.RuleFilter{
 		ChainType:     &req.ChainType,
-		APIKeyID:      &req.APIKeyID,
 		SignerAddress: &req.SignerAddress,
 		EnabledOnly:   true,
 		Limit:         -1, // No limit: must load ALL rules for security evaluation
@@ -818,6 +835,9 @@ func (e *WhitelistRuleEngine) evaluateBlocklistForRequest(ctx context.Context, r
 	if err != nil {
 		return nil, fmt.Errorf("failed to list rules for delegation blocklist check: %w", err)
 	}
+
+	// Phase 3: Filter rules by caller's API key ID (applied_to + status scoping).
+	rules = FilterRulesForCaller(rules, req.APIKeyID)
 
 	e.mu.RLock()
 	rules = e.filterRulesBySignType(rules, req.SignType)

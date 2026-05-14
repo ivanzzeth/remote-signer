@@ -123,6 +123,10 @@ func (r *mockAuditRepo) GetByRequestID(_ context.Context, requestID types.SignRe
 	return out, nil
 }
 
+func (r *mockAuditRepo) DeleteOlderThan(_ context.Context, _ time.Time) (int64, error) {
+	return 0, nil
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -136,7 +140,7 @@ func auditAPIKey() *types.APIKey {
 		ID:      "audit-test-key",
 		Name:    "Audit Test Key",
 		Enabled: true,
-		Admin:   true,
+		Role:    types.RoleAdmin,
 	}
 }
 

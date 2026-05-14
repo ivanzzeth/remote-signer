@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/ivanzzeth/remote-signer/pkg/client/internal/transport"
@@ -84,7 +85,7 @@ func (s *SignService) pollForResult(ctx context.Context, requestID string) (*Sig
 			}
 
 			var status RequestStatus
-			path := fmt.Sprintf("/api/v1/evm/requests/%s", requestID)
+			path := fmt.Sprintf("/api/v1/evm/requests/%s", url.PathEscape(requestID))
 			err := s.transport.Request(ctx, http.MethodGet, path, nil, &status, http.StatusOK)
 			if err != nil {
 				return nil, err

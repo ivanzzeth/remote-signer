@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/ivanzzeth/remote-signer/pkg/client/internal/transport"
@@ -61,7 +62,7 @@ func (s *RuleService) List(ctx context.Context, filter *ListRulesFilter) (*ListR
 
 // Get retrieves a specific rule by ID.
 func (s *RuleService) Get(ctx context.Context, ruleID string) (*Rule, error) {
-	path := fmt.Sprintf("/api/v1/evm/rules/%s", ruleID)
+	path := fmt.Sprintf("/api/v1/evm/rules/%s", url.PathEscape(ruleID))
 	var rule Rule
 	err := s.transport.Request(ctx, http.MethodGet, path, nil, &rule, http.StatusOK)
 	if err != nil {
@@ -83,7 +84,7 @@ func (s *RuleService) Create(ctx context.Context, req *CreateRuleRequest) (*Rule
 
 // Update updates an existing authorization rule.
 func (s *RuleService) Update(ctx context.Context, ruleID string, req *UpdateRuleRequest) (*Rule, error) {
-	path := fmt.Sprintf("/api/v1/evm/rules/%s", ruleID)
+	path := fmt.Sprintf("/api/v1/evm/rules/%s", url.PathEscape(ruleID))
 	var rule Rule
 	err := s.transport.Request(ctx, http.MethodPatch, path, req, &rule, http.StatusOK)
 	if err != nil {
@@ -94,14 +95,14 @@ func (s *RuleService) Update(ctx context.Context, ruleID string, req *UpdateRule
 
 // Delete deletes a rule by ID.
 func (s *RuleService) Delete(ctx context.Context, ruleID string) error {
-	path := fmt.Sprintf("/api/v1/evm/rules/%s", ruleID)
+	path := fmt.Sprintf("/api/v1/evm/rules/%s", url.PathEscape(ruleID))
 	return s.transport.Request(ctx, http.MethodDelete, path, nil, nil,
 		http.StatusOK, http.StatusNoContent)
 }
 
 // Toggle enables or disables a rule.
 func (s *RuleService) Toggle(ctx context.Context, ruleID string, enabled bool) (*Rule, error) {
-	path := fmt.Sprintf("/api/v1/evm/rules/%s", ruleID)
+	path := fmt.Sprintf("/api/v1/evm/rules/%s", url.PathEscape(ruleID))
 	body := map[string]bool{"enabled": enabled}
 	bodyBytes, err := json.Marshal(body)
 	if err != nil {
@@ -118,4 +119,43 @@ func (s *RuleService) Toggle(ctx context.Context, ruleID string, enabled bool) (
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 	return &rule, nil
+}
+
+// Approve approves a pending rule (POST /api/v1/evm/rules/{ruleID}/approve).
+func (s *RuleService) Approve(ctx context.Context, ruleID string) (*Rule, error) {
+	path := fmt.Sprintf("/api/v1/evm/rules/%s/approve", url.PathEscape(ruleID))
+	var rule Rule
+	err := s.transport.Request(ctx, http.MethodPost, path, nil, &rule, http.StatusOK)
+	if err != nil {
+		return nil, err
+	}
+	return &rule, nil
+}
+
+// Reject rejects a pending rule (POST /api/v1/evm/rules/{ruleID}/reject).
+func (s *RuleService) Reject(ctx context.Context, ruleID string, reason string) (*Rule, error) {
+	path := fmt.Sprintf("/api/v1/evm/rules/%s/reject", url.PathEscape(ruleID))
+	body := struct {
+		Reason string `json:"reason"`
+	}{Reason: reason}
+	var rule Rule
+	err := s.transport.Request(ctx, http.MethodPost, path, body, &rule, http.StatusOK)
+	if err != nil {
+		return nil, err
+	}
+	return &rule, nil
+}
+
+// ListBudgets returns budgets for a rule (GET /api/v1/evm/rules/{ruleID}/budgets).
+func (s *RuleService) ListBudgets(ctx context.Context, ruleID string) ([]RuleBudget, error) {
+	path := fmt.Sprintf("/api/v1/evm/rules/%s/budgets", url.PathEscape(ruleID))
+	var budgets []RuleBudget
+	err := s.transport.Request(ctx, http.MethodGet, path, nil, &budgets, http.StatusOK)
+	if err != nil {
+		return nil, err
+	}
+	if budgets == nil {
+		budgets = []RuleBudget{}
+	}
+	return budgets, nil
 }

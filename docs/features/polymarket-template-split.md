@@ -21,7 +21,7 @@
 
 ### 3.1 模板文件（新建，从现有大模板拆出）
 
-**命名遵循统一规范**：`xxx_yyy.template.yaml`（见 `docs/RULES_TEMPLATES_AND_PRESETS.md`）。
+**命名遵循统一规范**：`xxx_yyy.template.yaml`（见 `docs/rules-templates-and-presets.md`）。
 
 | 文件 | 内容概要 | 变量（variables + test_variables） |
 |------|----------|-----------------------------------|

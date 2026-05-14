@@ -1,0 +1,441 @@
+package audit
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/storage"
+)
+
+// AuditLogFailureFunc is called when audit log persistence fails.
+// Implementations should send a high-priority alert.
+type AuditLogFailureFunc func(eventType types.AuditEventType, err error)
+
+// HighRiskOperationFunc is called when a high-risk admin operation is logged.
+// Implementations should send a real-time notification so operators are immediately
+// aware of privileged changes. If no operation was expected, this signals a breach.
+type HighRiskOperationFunc func(eventType types.AuditEventType, apiKeyID, source, detail string)
+
+// AuditLogger wraps AuditRepository with typed convenience methods
+// that enforce correct severity levels. Logging errors are non-fatal
+// (logged via slog but never propagate to callers).
+type AuditLogger struct {
+	repo                storage.AuditRepository
+	logger              *slog.Logger
+	onLogFailure        AuditLogFailureFunc    // optional: alert on persistence failure
+	onHighRiskOperation HighRiskOperationFunc  // optional: alert on privileged admin operations
+}
+
+// NewAuditLogger creates a new AuditLogger.
+func NewAuditLogger(repo storage.AuditRepository, logger *slog.Logger) (*AuditLogger, error) {
+	if repo == nil {
+		return nil, fmt.Errorf("audit repository is required")
+	}
+	if logger == nil {
+		return nil, fmt.Errorf("logger is required")
+	}
+	return &AuditLogger{repo: repo, logger: logger}, nil
+}
+
+// SetOnLogFailure sets a callback that fires when audit log persistence fails.
+func (a *AuditLogger) SetOnLogFailure(fn AuditLogFailureFunc) {
+	a.onLogFailure = fn
+}
+
+// SetOnHighRiskOperation sets a callback that fires on high-risk admin operations.
+// This enables real-time alerts for privileged changes (signer create/unlock, rule CRUD, etc.).
+func (a *AuditLogger) SetOnHighRiskOperation(fn HighRiskOperationFunc) {
+	a.onHighRiskOperation = fn
+}
+
+// SeverityForEvent returns the appropriate severity for each event type.
+func SeverityForEvent(eventType types.AuditEventType) types.AuditSeverity {
+	switch eventType {
+	case types.AuditEventTypeAuthFailure, types.AuditEventTypeSignRejected, types.AuditEventTypeSignFailed:
+		return types.AuditSeverityCritical
+	case types.AuditEventTypeApprovalDenied, types.AuditEventTypeRateLimitHit:
+		return types.AuditSeverityWarning
+	case types.AuditEventTypeSignerAutoLocked:
+		return types.AuditSeverityCritical
+	case types.AuditEventTypeSignerCreated, types.AuditEventTypeSignerUnlocked, types.AuditEventTypeHDWalletCreated, types.AuditEventTypePresetApplied:
+		return types.AuditSeverityWarning
+	default:
+		return types.AuditSeverityInfo
+	}
+}
+
+// LogAuthSuccess logs a successful authentication event.
+func (a *AuditLogger) LogAuthSuccess(ctx context.Context, apiKeyID, clientIP, method, path string) {
+	a.log(ctx, &types.AuditRecord{
+		EventType:     types.AuditEventTypeAuthSuccess,
+		APIKeyID:      apiKeyID,
+		ActorAddress:  clientIP,
+		RequestMethod: method,
+		RequestPath:   path,
+	})
+}
+
+// LogAuthFailure logs a failed authentication event.
+func (a *AuditLogger) LogAuthFailure(ctx context.Context, apiKeyID, clientIP, method, path, errMsg string) {
+	a.log(ctx, &types.AuditRecord{
+		EventType:     types.AuditEventTypeAuthFailure,
+		APIKeyID:      apiKeyID,
+		ActorAddress:  clientIP,
+		RequestMethod: method,
+		RequestPath:   path,
+		ErrorMessage:  errMsg,
+	})
+}
+
+// LogSignRequest logs a new sign request creation.
+func (a *AuditLogger) LogSignRequest(ctx context.Context, req *types.SignRequest) {
+	a.log(ctx, &types.AuditRecord{
+		EventType:     types.AuditEventTypeSignRequest,
+		APIKeyID:      req.APIKeyID,
+		ActorAddress:  req.ClientIP,
+		SignRequestID: &req.ID,
+		SignerAddress: &req.SignerAddress,
+		ChainType:     &req.ChainType,
+		ChainID:       &req.ChainID,
+	})
+}
+
+// LogApprovalRequest logs a manual approval request.
+func (a *AuditLogger) LogApprovalRequest(ctx context.Context, req *types.SignRequest) {
+	a.log(ctx, &types.AuditRecord{
+		EventType:     types.AuditEventTypeApprovalRequest,
+		APIKeyID:      req.APIKeyID,
+		ActorAddress:  req.ClientIP,
+		SignRequestID: &req.ID,
+		SignerAddress: &req.SignerAddress,
+		ChainType:     &req.ChainType,
+		ChainID:       &req.ChainID,
+		ErrorMessage:  "pending manual approval",
+	})
+}
+
+// LogRuleCreated logs a rule creation event.
+func (a *AuditLogger) LogRuleCreated(ctx context.Context, apiKeyID, clientIP string, ruleID types.RuleID, ruleName string) {
+	a.log(ctx, &types.AuditRecord{
+		EventType:    types.AuditEventTypeRuleCreated,
+		APIKeyID:     apiKeyID,
+		ActorAddress: clientIP,
+		RuleID:       &ruleID,
+		ErrorMessage: fmt.Sprintf("rule created: %s", ruleName),
+	})
+}
+
+// RuleUpdateDiff holds before/after config for audit trail.
+type RuleUpdateDiff struct {
+	OldConfig json.RawMessage `json:"old_config,omitempty"`
+	NewConfig json.RawMessage `json:"new_config,omitempty"`
+}
+
+// LogRuleUpdated logs a rule update event with optional before/after config diff.
+func (a *AuditLogger) LogRuleUpdated(ctx context.Context, apiKeyID, clientIP string, ruleID types.RuleID, ruleName string, oldConfig, newConfig []byte) {
+	var details []byte
+	if oldConfig != nil || newConfig != nil {
+		diff := RuleUpdateDiff{
+			OldConfig: oldConfig,
+			NewConfig: newConfig,
+		}
+		details, _ = json.Marshal(diff)
+	}
+	a.log(ctx, &types.AuditRecord{
+		EventType:    types.AuditEventTypeRuleUpdated,
+		APIKeyID:     apiKeyID,
+		ActorAddress: clientIP,
+		RuleID:       &ruleID,
+		Details:      details,
+		ErrorMessage: fmt.Sprintf("rule updated: %s", ruleName),
+	})
+}
+
+// LogRuleDeleted logs a rule deletion event.
+func (a *AuditLogger) LogRuleDeleted(ctx context.Context, apiKeyID, clientIP string, ruleID types.RuleID) {
+	a.log(ctx, &types.AuditRecord{
+		EventType:    types.AuditEventTypeRuleDeleted,
+		APIKeyID:     apiKeyID,
+		ActorAddress: clientIP,
+		RuleID:       &ruleID,
+		ErrorMessage: fmt.Sprintf("rule deleted: %s", string(ruleID)),
+	})
+}
+
+// LogRuleApproved logs an admin approval of a pending rule.
+func (a *AuditLogger) LogRuleApproved(ctx context.Context, adminKeyID, clientIP string, ruleID types.RuleID, originalOwner string) {
+	a.log(ctx, &types.AuditRecord{
+		EventType:    types.AuditEventTypeRuleApproved,
+		APIKeyID:     adminKeyID,
+		ActorAddress: clientIP,
+		RuleID:       &ruleID,
+		ErrorMessage: fmt.Sprintf("rule approved: owner=%s", originalOwner),
+	})
+}
+
+// LogRuleRejected logs an admin rejection of a pending rule.
+func (a *AuditLogger) LogRuleRejected(ctx context.Context, adminKeyID, clientIP string, ruleID types.RuleID, originalOwner, reason string) {
+	a.log(ctx, &types.AuditRecord{
+		EventType:    types.AuditEventTypeRuleRejected,
+		APIKeyID:     adminKeyID,
+		ActorAddress: clientIP,
+		RuleID:       &ruleID,
+		ErrorMessage: fmt.Sprintf("rule rejected: owner=%s reason=%s", originalOwner, reason),
+	})
+}
+
+// APIRequestDetails contains metadata for an API request audit record.
+type APIRequestDetails struct {
+	StatusCode int    `json:"status_code"`
+	DurationMs int64  `json:"duration_ms"`
+	UserAgent  string `json:"user_agent,omitempty"`
+}
+
+// LogAPIRequest logs every API request with its outcome for full timeline reconstruction.
+func (a *AuditLogger) LogAPIRequest(ctx context.Context, apiKeyID, clientIP, method, path string, statusCode int, durationMs int64, userAgent string) {
+	details := APIRequestDetails{
+		StatusCode: statusCode,
+		DurationMs: durationMs,
+		UserAgent:  userAgent,
+	}
+	detailsJSON, err := json.Marshal(details)
+	if err != nil {
+		detailsJSON = nil
+	}
+
+	// Determine severity from status code
+	severity := types.AuditSeverityInfo
+	if statusCode >= 400 && statusCode < 500 {
+		severity = types.AuditSeverityWarning
+	} else if statusCode >= 500 {
+		severity = types.AuditSeverityCritical
+	}
+
+	record := &types.AuditRecord{
+		EventType:     types.AuditEventTypeAPIRequest,
+		APIKeyID:      apiKeyID,
+		ActorAddress:  clientIP,
+		RequestMethod: method,
+		RequestPath:   path,
+		Details:       detailsJSON,
+	}
+	record.ID = types.AuditID(uuid.New().String())
+	record.Timestamp = time.Now()
+	record.Severity = severity
+
+	if logErr := a.repo.Log(ctx, record); logErr != nil {
+		a.logger.Error("failed to log api_request audit record",
+			"error", logErr,
+			"method", method,
+			"path", path,
+		)
+		if a.onLogFailure != nil {
+			a.onLogFailure(record.EventType, logErr)
+		}
+	}
+}
+
+// LogRateLimitHit logs a rate limit event.
+func (a *AuditLogger) LogRateLimitHit(ctx context.Context, apiKeyID, clientIP, method, path string) {
+	a.log(ctx, &types.AuditRecord{
+		EventType:     types.AuditEventTypeRateLimitHit,
+		APIKeyID:      apiKeyID,
+		ActorAddress:  clientIP,
+		RequestMethod: method,
+		RequestPath:   path,
+	})
+}
+
+// LogConfigReloaded logs a SIGHUP config reload event.
+func (a *AuditLogger) LogConfigReloaded(ctx context.Context, success bool, errMsg string) {
+	record := &types.AuditRecord{
+		EventType:    types.AuditEventTypeConfigReloaded,
+		ActorAddress: "system",
+		ErrorMessage: errMsg,
+	}
+	if !success {
+		record.ErrorMessage = fmt.Sprintf("config reload failed: %s", errMsg)
+	}
+	a.log(ctx, record)
+}
+
+// LogSettingsUpdated logs an admin write to system_settings. Used by the
+// settings handler to record who changed which configuration group; the
+// payload snapshot is stored as the error_message text (existing schema
+// field — kept for backwards compat).
+func (a *AuditLogger) LogSettingsUpdated(ctx context.Context, apiKeyID, group, payload string) {
+	a.log(ctx, &types.AuditRecord{
+		EventType:    types.AuditEventTypeConfigReloaded,
+		ActorAddress: apiKeyID,
+		APIKeyID:     apiKeyID,
+		ErrorMessage: fmt.Sprintf("settings updated: %s — %s", group, payload),
+	})
+}
+
+// LogBudgetMutation records an admin-driven create/update/reset/delete
+// on a budget row. Detail is stored on error_message (existing schema
+// field reused for audit context — same convention as the other
+// LogSettings-style helpers).
+func (a *AuditLogger) LogBudgetMutation(ctx context.Context, apiKeyID, action, budgetID, detail string) {
+	a.log(ctx, &types.AuditRecord{
+		EventType:    types.AuditEventTypeConfigReloaded,
+		ActorAddress: apiKeyID,
+		APIKeyID:     apiKeyID,
+		ErrorMessage: fmt.Sprintf("budget.%s id=%s — %s", action, budgetID, detail),
+	})
+}
+
+// LogTemplateSynced logs a template sync event (create/update/delete from config).
+func (a *AuditLogger) LogTemplateSynced(ctx context.Context, action, templateID, templateName string) {
+	a.log(ctx, &types.AuditRecord{
+		EventType:    types.AuditEventTypeTemplateSynced,
+		ActorAddress: "config-sync",
+		ErrorMessage: fmt.Sprintf("template %s: %s (%s)", action, templateName, templateID),
+	})
+}
+
+// LogAPIKeySynced logs an API key sync event (create/update from config).
+func (a *AuditLogger) LogAPIKeySynced(ctx context.Context, action, keyID, keyName string) {
+	a.log(ctx, &types.AuditRecord{
+		EventType:    types.AuditEventTypeAPIKeySynced,
+		APIKeyID:     keyID,
+		ActorAddress: "config-sync",
+		ErrorMessage: fmt.Sprintf("apikey %s: %s", action, keyName),
+	})
+}
+
+// LogSignerCreated logs a signer creation event.
+func (a *AuditLogger) LogSignerCreated(ctx context.Context, apiKeyID, clientIP, address, signerType string) {
+	addr := address
+	a.log(ctx, &types.AuditRecord{
+		EventType:    types.AuditEventTypeSignerCreated,
+		APIKeyID:     apiKeyID,
+		ActorAddress: clientIP,
+		SignerAddress: &addr,
+		ErrorMessage: fmt.Sprintf("signer created: type=%s", signerType),
+	})
+}
+
+// LogSignerLocked logs a signer lock event.
+func (a *AuditLogger) LogSignerLocked(ctx context.Context, apiKeyID, clientIP, address string) {
+	addr := address
+	a.log(ctx, &types.AuditRecord{
+		EventType:    types.AuditEventTypeSignerLocked,
+		APIKeyID:     apiKeyID,
+		ActorAddress: clientIP,
+		SignerAddress: &addr,
+	})
+}
+
+// LogSignerUnlocked logs a signer unlock event.
+func (a *AuditLogger) LogSignerUnlocked(ctx context.Context, apiKeyID, clientIP, address string) {
+	addr := address
+	a.log(ctx, &types.AuditRecord{
+		EventType:    types.AuditEventTypeSignerUnlocked,
+		APIKeyID:     apiKeyID,
+		ActorAddress: clientIP,
+		SignerAddress: &addr,
+	})
+}
+
+// LogHDWalletCreated logs an HD wallet create/import event.
+func (a *AuditLogger) LogHDWalletCreated(ctx context.Context, apiKeyID, clientIP, primaryAddress, action string) {
+	addr := primaryAddress
+	a.log(ctx, &types.AuditRecord{
+		EventType:    types.AuditEventTypeHDWalletCreated,
+		APIKeyID:     apiKeyID,
+		ActorAddress: clientIP,
+		SignerAddress: &addr,
+		ErrorMessage: fmt.Sprintf("hdwallet %s", action),
+	})
+}
+
+// LogHDWalletDerived logs an HD wallet derive event.
+func (a *AuditLogger) LogHDWalletDerived(ctx context.Context, apiKeyID, clientIP, primaryAddress string, count int) {
+	addr := primaryAddress
+	a.log(ctx, &types.AuditRecord{
+		EventType:    types.AuditEventTypeHDWalletDerived,
+		APIKeyID:     apiKeyID,
+		ActorAddress: clientIP,
+		SignerAddress: &addr,
+		ErrorMessage: fmt.Sprintf("derived %d addresses", count),
+	})
+}
+
+// LogSignerAutoLocked logs an automatic signer lock event (timeout-based).
+func (a *AuditLogger) LogSignerAutoLocked(ctx context.Context, address string) {
+	addr := address
+	a.log(ctx, &types.AuditRecord{
+		EventType:    types.AuditEventTypeSignerAutoLocked,
+		ActorAddress: "system",
+		SignerAddress: &addr,
+		ErrorMessage: "signer auto-locked due to timeout",
+	})
+}
+
+// highRiskEvents defines which audit events trigger real-time admin alerts.
+var highRiskEvents = map[types.AuditEventType]bool{
+	// Signer management
+	types.AuditEventTypeSignerCreated:    true,
+	types.AuditEventTypeSignerUnlocked:   true,
+	types.AuditEventTypeSignerLocked:     true,
+	types.AuditEventTypeSignerAutoLocked: true,
+	types.AuditEventTypeHDWalletCreated:  true,
+	types.AuditEventTypeHDWalletDerived:  true,
+	// Rule management
+	types.AuditEventTypeRuleCreated:      true,
+	types.AuditEventTypeRuleUpdated:      true,
+	types.AuditEventTypeRuleDeleted:      true,
+	types.AuditEventTypeRuleApproved:     true,
+	types.AuditEventTypeRuleRejected:     true,
+	// Config sync (startup + SIGHUP reload) — only fires on actual changes
+	types.AuditEventTypeConfigReloaded:   true,
+	types.AuditEventTypeTemplateSynced:   true,
+	types.AuditEventTypeAPIKeySynced:     true,
+	// Preset apply
+	types.AuditEventTypePresetApplied:    true,
+}
+
+// IsHighRiskEvent returns true if the event type should trigger a real-time alert.
+func IsHighRiskEvent(eventType types.AuditEventType) bool {
+	return highRiskEvents[eventType]
+}
+
+// LogPresetApplied logs a preset apply event.
+func (a *AuditLogger) LogPresetApplied(ctx context.Context, apiKeyID, clientIP, presetID string, ruleCount int) {
+	a.log(ctx, &types.AuditRecord{
+		EventType:    types.AuditEventTypePresetApplied,
+		APIKeyID:     apiKeyID,
+		ActorAddress: clientIP,
+		ErrorMessage: fmt.Sprintf("preset applied: %s (%d rules created)", presetID, ruleCount),
+	})
+}
+
+// log persists an audit record with auto-generated ID, timestamp, and severity.
+func (a *AuditLogger) log(ctx context.Context, record *types.AuditRecord) {
+	record.ID = types.AuditID(uuid.New().String())
+	record.Timestamp = time.Now()
+	record.Severity = SeverityForEvent(record.EventType)
+
+	if err := a.repo.Log(ctx, record); err != nil {
+		a.logger.Error("failed to log audit record",
+			"error", err,
+			"event_type", record.EventType,
+			"api_key_id", record.APIKeyID,
+		)
+		if a.onLogFailure != nil {
+			a.onLogFailure(record.EventType, err)
+		}
+	}
+
+	// Fire high-risk operation alert (non-blocking).
+	if a.onHighRiskOperation != nil && IsHighRiskEvent(record.EventType) {
+		a.onHighRiskOperation(record.EventType, record.APIKeyID, record.ActorAddress, record.ErrorMessage)
+	}
+}

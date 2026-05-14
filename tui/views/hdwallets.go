@@ -26,8 +26,19 @@ type HDWalletsModel struct {
 	loading       bool
 	err           error
 	wallets       []evm.HDWalletResponse
+	// primaryLabels maps primary address -> signer row (display_name, tags) from GET /signers.
+	primaryLabels map[string]evm.Signer
+	tagFilter     string
+	showFilter    bool
+	filterInput   textinput.Model
 	selectedIdx   int
 	actionResult  string
+
+	// Edit display name / tags for primary (owner)
+	showEditLabels bool
+	editFocus      int // 0 = name, 1 = tags
+	editNameInput  textinput.Model
+	editTagsInput  textinput.Model
 
 	// Navigation to detail view
 	goDetail         bool
@@ -52,6 +63,7 @@ type HDWalletsModel struct {
 // HDWalletsDataMsg is sent when HD wallets data is loaded.
 type HDWalletsDataMsg struct {
 	Wallets []evm.HDWalletResponse
+	Labels  map[string]evm.Signer
 	Err     error
 }
 
@@ -66,9 +78,9 @@ type HDWalletCreateMsg struct {
 // HDWalletUnlockMsg is sent when an HD wallet unlock completes.
 type HDWalletUnlockMsg struct {
 	PrimaryAddr string
-	Success    bool
-	Message    string
-	Err        error
+	Success     bool
+	Message     string
+	Err         error
 }
 
 // NewHDWalletsModel creates a new HD wallets model.
@@ -113,6 +125,18 @@ func newHDWalletsModelFromService(hdSvc evm.HDWalletAPI, signersSvc evm.SignerAP
 	unlockInput.Width = 40
 	unlockInput.EchoMode = textinput.EchoPassword
 
+	filterInput := textinput.New()
+	filterInput.Placeholder = "Tag label (exact match)"
+	filterInput.Width = 40
+
+	editName := textinput.New()
+	editName.Placeholder = "Display name (optional)"
+	editName.Width = 50
+
+	editTags := textinput.New()
+	editTags.Placeholder = "Tags: comma-separated"
+	editTags.Width = 50
+
 	return &HDWalletsModel{
 		hdwallets_svc: hdSvc,
 		signers_svc:   signersSvc,
@@ -124,6 +148,10 @@ func newHDWalletsModelFromService(hdSvc evm.HDWalletAPI, signersSvc evm.SignerAP
 		passwordInput: pwInput,
 		confirmInput:  confirmInput,
 		unlockInput:   unlockInput,
+		filterInput:   filterInput,
+		editNameInput: editName,
+		editTagsInput: editTags,
+		primaryLabels: make(map[string]evm.Signer),
 	}, nil
 }
 
@@ -152,10 +180,77 @@ func (m *HDWalletsModel) Refresh() tea.Cmd {
 
 // GetSelectedPrimaryAddr returns the selected wallet's primary address.
 func (m *HDWalletsModel) GetSelectedPrimaryAddr() string {
-	if m.selectedIdx >= 0 && m.selectedIdx < len(m.wallets) {
-		return m.wallets[m.selectedIdx].PrimaryAddress
+	visible := m.walletsToShow()
+	if m.selectedIdx >= 0 && m.selectedIdx < len(visible) {
+		return visible[m.selectedIdx].PrimaryAddress
 	}
 	return ""
+}
+
+// GetSelectedWallet returns the selected row for opening detail (merges signer labels when API omits them).
+func (m *HDWalletsModel) GetSelectedWallet() evm.HDWalletResponse {
+	visible := m.walletsToShow()
+	if m.selectedIdx < 0 || m.selectedIdx >= len(visible) {
+		return evm.HDWalletResponse{}
+	}
+	w := visible[m.selectedIdx]
+	if lab, ok := m.primaryLabels[w.PrimaryAddress]; ok {
+		if strings.TrimSpace(w.DisplayName) == "" {
+			w.DisplayName = lab.DisplayName
+		}
+		if len(w.Tags) == 0 && len(lab.Tags) > 0 {
+			w.Tags = lab.Tags
+		}
+	}
+	return w
+}
+
+func (m *HDWalletsModel) walletsToShow() []evm.HDWalletResponse {
+	if m.tagFilter == "" {
+		return m.wallets
+	}
+	want := strings.TrimSpace(m.tagFilter)
+	if want == "" {
+		return m.wallets
+	}
+	var out []evm.HDWalletResponse
+	for _, w := range m.wallets {
+		tags := w.Tags
+		if len(tags) == 0 {
+			if lab, ok := m.primaryLabels[w.PrimaryAddress]; ok {
+				tags = lab.Tags
+			}
+		}
+		for _, t := range tags {
+			if strings.EqualFold(strings.TrimSpace(t), want) {
+				out = append(out, w)
+				break
+			}
+		}
+	}
+	return out
+}
+
+func (m *HDWalletsModel) patchSignerLabels(address, displayName, tagsCSV string) tea.Cmd {
+	return func() tea.Msg {
+		if m.signers_svc == nil {
+			return SignerLabelsPatchMsg{Success: false, Err: fmt.Errorf("signer service not available")}
+		}
+		tags := ParseTagsCSV(tagsCSV)
+		dn := strings.TrimSpace(displayName)
+		dnPtr := &dn
+		tagsPtr := &tags
+		req := &evm.PatchSignerLabelsRequest{DisplayName: dnPtr, Tags: tagsPtr}
+		signer, err := m.signers_svc.PatchSignerLabels(m.ctx, address, req)
+		if err != nil {
+			return SignerLabelsPatchMsg{Success: false, Err: err}
+		}
+		return SignerLabelsPatchMsg{
+			Signer:  signer,
+			Success: true,
+			Message: fmt.Sprintf("Updated labels for %s", address),
+		}
+	}
 }
 
 // ShouldOpenDetail returns true if the view should navigate to detail.
@@ -174,7 +269,26 @@ func (m *HDWalletsModel) loadData() tea.Cmd {
 		if err != nil {
 			return HDWalletsDataMsg{Err: err}
 		}
-		return HDWalletsDataMsg{Wallets: resp.Wallets, Err: nil}
+		labels := make(map[string]evm.Signer)
+		if m.signers_svc != nil {
+			listResp, err := m.signers_svc.List(m.ctx, &evm.ListSignersFilter{Type: "hd_wallet", Limit: 500})
+			if err == nil && listResp != nil {
+				for _, s := range listResp.Signers {
+					labels[s.Address] = s
+				}
+			}
+		}
+		wallets := resp.Wallets
+		for i := range wallets {
+			if wallets[i].DisplayName != "" || len(wallets[i].Tags) > 0 {
+				continue
+			}
+			if s, ok := labels[wallets[i].PrimaryAddress]; ok {
+				wallets[i].DisplayName = s.DisplayName
+				wallets[i].Tags = s.Tags
+			}
+		}
+		return HDWalletsDataMsg{Wallets: wallets, Labels: labels, Err: nil}
 	}
 }
 
@@ -243,7 +357,35 @@ func (m *HDWalletsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.Err
 		} else {
 			m.wallets = msg.Wallets
+			if msg.Labels != nil {
+				m.primaryLabels = msg.Labels
+			} else {
+				m.primaryLabels = make(map[string]evm.Signer)
+			}
 			m.err = nil
+			visible := m.walletsToShow()
+			if m.selectedIdx >= len(visible) {
+				m.selectedIdx = 0
+			}
+			if len(visible) == 0 {
+				m.selectedIdx = 0
+			}
+		}
+		return m, nil
+
+	case SignerLabelsPatchMsg:
+		m.loading = false
+		if msg.Err != nil {
+			m.actionResult = styles.ErrorStyle.Render(fmt.Sprintf("Error: %v", msg.Err))
+		} else {
+			m.actionResult = styles.SuccessStyle.Render(msg.Message)
+			m.showEditLabels = false
+			m.editNameInput.Blur()
+			m.editTagsInput.Blur()
+			if msg.Signer != nil {
+				m.primaryLabels[msg.Signer.Address] = *msg.Signer
+			}
+			return m, m.Refresh()
 		}
 		return m, nil
 
@@ -286,30 +428,123 @@ func (m *HDWalletsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.showCreate {
 			return m.handleCreateInput(msg)
 		}
+		if m.showFilter {
+			switch msg.String() {
+			case "enter":
+				m.tagFilter = strings.TrimSpace(m.filterInput.Value())
+				m.showFilter = false
+				m.filterInput.Blur()
+				m.selectedIdx = 0
+				return m, nil
+			case "esc":
+				m.showFilter = false
+				m.filterInput.Blur()
+				return m, nil
+			default:
+				var cmd tea.Cmd
+				m.filterInput, cmd = m.filterInput.Update(msg)
+				return m, cmd
+			}
+		}
+		if m.showEditLabels {
+			switch msg.String() {
+			case "esc":
+				m.showEditLabels = false
+				m.editNameInput.Blur()
+				m.editTagsInput.Blur()
+				return m, nil
+			case "tab":
+				if m.editFocus == 0 {
+					m.editFocus = 1
+					m.editNameInput.Blur()
+					m.editTagsInput.Focus()
+				} else {
+					m.editFocus = 0
+					m.editTagsInput.Blur()
+					m.editNameInput.Focus()
+				}
+				return m, textinput.Blink
+			case "enter":
+				visible := m.walletsToShow()
+				if m.selectedIdx < 0 || m.selectedIdx >= len(visible) {
+					m.showEditLabels = false
+					return m, nil
+				}
+				addr := visible[m.selectedIdx].PrimaryAddress
+				m.loading = true
+				m.actionResult = ""
+				return m, tea.Batch(m.spinner.Tick, m.patchSignerLabels(
+					addr,
+					m.editNameInput.Value(),
+					m.editTagsInput.Value(),
+				))
+			default:
+				var cmd tea.Cmd
+				if m.editFocus == 0 {
+					m.editNameInput, cmd = m.editNameInput.Update(msg)
+				} else {
+					m.editTagsInput, cmd = m.editTagsInput.Update(msg)
+				}
+				return m, cmd
+			}
+		}
+
+		visible := m.walletsToShow()
 
 		switch msg.String() {
 		case "r":
 			return m, m.Refresh()
+		case "t":
+			m.showFilter = true
+			m.filterInput.SetValue(m.tagFilter)
+			m.filterInput.Placeholder = "Tag label (exact match)"
+			m.filterInput.Focus()
+			return m, textinput.Blink
+		case "z":
+			m.tagFilter = ""
+			m.filterInput.SetValue("")
+			m.selectedIdx = 0
+			return m, nil
+		case "e":
+			if m.signers_svc != nil && len(visible) > 0 && m.selectedIdx < len(visible) {
+				w := visible[m.selectedIdx]
+				dn := w.DisplayName
+				tags := w.Tags
+				if dn == "" && len(tags) == 0 {
+					if lab, ok := m.primaryLabels[w.PrimaryAddress]; ok {
+						dn = lab.DisplayName
+						tags = lab.Tags
+					}
+				}
+				m.showEditLabels = true
+				m.editFocus = 0
+				m.editNameInput.SetValue(dn)
+				m.editTagsInput.SetValue(strings.Join(tags, ", "))
+				m.editNameInput.Focus()
+				m.editTagsInput.Blur()
+				return m, textinput.Blink
+			}
+			return m, nil
 		case "up", "k":
 			if m.selectedIdx > 0 {
 				m.selectedIdx--
 			}
 			return m, nil
 		case "down", "j":
-			if m.selectedIdx < len(m.wallets)-1 {
+			if m.selectedIdx < len(visible)-1 {
 				m.selectedIdx++
 			}
 			return m, nil
 		case "enter":
-			if len(m.wallets) > 0 && m.selectedIdx < len(m.wallets) {
+			if len(visible) > 0 && m.selectedIdx < len(visible) {
 				m.goDetail = true
-				m.selectedPrimAddr = m.wallets[m.selectedIdx].PrimaryAddress
+				m.selectedPrimAddr = visible[m.selectedIdx].PrimaryAddress
 			}
 			return m, nil
 		case "u":
 			// Unlock selected locked HD wallet
-			if m.signers_svc != nil && len(m.wallets) > 0 && m.selectedIdx < len(m.wallets) {
-				wallet := m.wallets[m.selectedIdx]
+			if m.signers_svc != nil && len(visible) > 0 && m.selectedIdx < len(visible) {
+				wallet := visible[m.selectedIdx]
 				if wallet.Locked {
 					m.showUnlock = true
 					m.unlockInput.SetValue("")
@@ -340,10 +575,11 @@ func (m *HDWalletsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *HDWalletsModel) handleUnlockInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	visible := m.walletsToShow()
 	switch msg.String() {
 	case "enter":
-		if m.unlockInput.Value() != "" && len(m.wallets) > 0 && m.selectedIdx < len(m.wallets) {
-			wallet := m.wallets[m.selectedIdx]
+		if m.unlockInput.Value() != "" && len(visible) > 0 && m.selectedIdx < len(visible) {
+			wallet := visible[m.selectedIdx]
 			if wallet.Locked {
 				password := m.unlockInput.Value()
 				m.loading = true
@@ -526,8 +762,14 @@ func (m *HDWalletsModel) View() string {
 	if m.showUnlock {
 		return m.renderUnlockForm()
 	}
+	if m.showEditLabels {
+		return m.renderEditLabelsForm()
+	}
 	if m.showCreate {
 		return m.renderCreateForm()
+	}
+	if m.showFilter {
+		return m.renderTagFilterForm()
 	}
 
 	if m.loading {
@@ -673,7 +915,11 @@ func (m *HDWalletsModel) renderPasswordHelp(content *strings.Builder, action str
 func (m *HDWalletsModel) renderWallets() string {
 	var content strings.Builder
 
-	content.WriteString(styles.SubtitleStyle.Render("HD Wallets"))
+	title := "HD Wallets"
+	if m.tagFilter != "" {
+		title += styles.MutedColor.Render(fmt.Sprintf(" (tag=%s)", m.tagFilter))
+	}
+	content.WriteString(styles.SubtitleStyle.Render(title))
 	content.WriteString("\n\n")
 
 	if m.actionResult != "" {
@@ -687,11 +933,16 @@ func (m *HDWalletsModel) renderWallets() string {
 	content.WriteString(styles.TableHeaderStyle.Render(headerRow))
 	content.WriteString("\n")
 
-	if len(m.wallets) == 0 {
+	visible := m.walletsToShow()
+	if len(visible) == 0 {
 		content.WriteString("\n")
-		content.WriteString(styles.MutedColor.Render("  No HD wallets found"))
+		if len(m.wallets) == 0 {
+			content.WriteString(styles.MutedColor.Render("  No HD wallets found"))
+		} else {
+			content.WriteString(styles.MutedColor.Render("  No wallets match this tag filter"))
+		}
 	} else {
-		for i, wallet := range m.wallets {
+		for i, wallet := range visible {
 			row := m.renderWalletRow(wallet, i == m.selectedIdx)
 			content.WriteString(row)
 			content.WriteString("\n")
@@ -700,16 +951,17 @@ func (m *HDWalletsModel) renderWallets() string {
 
 	// Pagination info
 	content.WriteString("\n")
-	total := len(m.wallets)
+	total := len(visible)
+	all := len(m.wallets)
 	if total == 0 {
-		content.WriteString(styles.MutedColor.Render("Showing 0 of 0"))
+		content.WriteString(styles.MutedColor.Render(fmt.Sprintf("Showing 0 of %d", all)))
 	} else {
-		content.WriteString(styles.MutedColor.Render(fmt.Sprintf("Showing 1-%d of %d", total, total)))
+		content.WriteString(styles.MutedColor.Render(fmt.Sprintf("Showing 1-%d of %d", total, all)))
 	}
 
 	// Help
 	content.WriteString("\n\n")
-	helpText := "up/down: navigate | Enter: details | u: unlock (locked) | c: create | i: import | r: refresh"
+	helpText := "up/down | Enter: details | e: edit name/tags | t: tag filter | z: clear tag | u: unlock | c: create | i: import | r: refresh"
 	content.WriteString(styles.HelpStyle.Render(helpText))
 
 	return content.String()
@@ -719,8 +971,9 @@ func (m *HDWalletsModel) renderUnlockForm() string {
 	var content strings.Builder
 	content.WriteString(styles.TitleStyle.Render("Unlock HD Wallet"))
 	content.WriteString("\n\n")
-	if len(m.wallets) > 0 && m.selectedIdx < len(m.wallets) {
-		content.WriteString(styles.SubtitleStyle.Render("Primary address: " + m.wallets[m.selectedIdx].PrimaryAddress))
+	visible := m.walletsToShow()
+	if len(visible) > 0 && m.selectedIdx < len(visible) {
+		content.WriteString(styles.SubtitleStyle.Render("Primary address: " + visible[m.selectedIdx].PrimaryAddress))
 		content.WriteString("\n\n")
 	}
 	content.WriteString(styles.SubtitleStyle.Render("Enter password:"))
@@ -740,7 +993,52 @@ func (m *HDWalletsModel) renderUnlockForm() string {
 
 // IsCapturingInput returns true when this view is capturing keyboard input (form active).
 func (m *HDWalletsModel) IsCapturingInput() bool {
-	return m.showCreate || m.showUnlock
+	return m.showCreate || m.showUnlock || m.showFilter || m.showEditLabels
+}
+
+func (m *HDWalletsModel) renderTagFilterForm() string {
+	var content strings.Builder
+	content.WriteString(styles.TitleStyle.Render("Filter by Tag"))
+	content.WriteString("\n\n")
+	content.WriteString(styles.SubtitleStyle.Render("Tag label (exact match, case-insensitive)"))
+	content.WriteString("\n\n")
+	content.WriteString(m.filterInput.View())
+	content.WriteString("\n\n")
+	content.WriteString(styles.MutedColor.Render("Enter: apply | Esc: cancel"))
+	return lipgloss.Place(
+		m.width,
+		m.height,
+		lipgloss.Center,
+		lipgloss.Center,
+		styles.BoxStyle.Render(content.String()),
+	)
+}
+
+func (m *HDWalletsModel) renderEditLabelsForm() string {
+	var content strings.Builder
+	content.WriteString(styles.TitleStyle.Render("Edit HD Wallet Labels"))
+	content.WriteString("\n\n")
+	visible := m.walletsToShow()
+	if len(visible) > 0 && m.selectedIdx < len(visible) {
+		content.WriteString(styles.MutedColor.Render(visible[m.selectedIdx].PrimaryAddress))
+		content.WriteString("\n\n")
+	}
+	content.WriteString(styles.SubtitleStyle.Render("Display name"))
+	content.WriteString("\n")
+	content.WriteString(m.editNameInput.View())
+	content.WriteString("\n\n")
+	content.WriteString(styles.SubtitleStyle.Render("Tags (comma-separated)"))
+	content.WriteString("\n")
+	content.WriteString(m.editTagsInput.View())
+	content.WriteString("\n\n")
+	content.WriteString(styles.MutedColor.Render("Tab: switch field | Enter: save | Esc: cancel"))
+	return lipgloss.Place(
+		m.width,
+		m.height,
+		lipgloss.Center,
+		lipgloss.Center,
+		styles.BoxStyle.Render(content.String()),
+	)
 }
 
 func (m *HDWalletsModel) renderWalletRow(wallet evm.HDWalletResponse, selected bool) string {
@@ -760,6 +1058,16 @@ func (m *HDWalletsModel) renderWalletRow(wallet evm.HDWalletResponse, selected b
 		wallet.DerivedCount,
 		status,
 	)
+
+	dn := ""
+	var tags []string
+	if lab, ok := m.primaryLabels[wallet.PrimaryAddress]; ok {
+		dn = lab.DisplayName
+		tags = lab.Tags
+	}
+	if sum := HumanLabelLine(dn, tags); sum != "" {
+		row += "\n  " + styles.MutedColor.Render(sum)
+	}
 
 	if selected {
 		return styles.TableSelectedRowStyle.Render(row)

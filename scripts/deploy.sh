@@ -25,16 +25,24 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# Use "docker compose" (V2 plugin) or "docker-compose" (standalone) depending on what is available
+# Resolve the docker compose command once at startup.
+# DOCKER_COMPOSE is an array so "docker compose" (two words) works correctly with "$@".
+if docker compose version &>/dev/null 2>&1; then
+    DOCKER_COMPOSE=(docker compose)
+elif command -v docker-compose &>/dev/null && docker-compose version &>/dev/null 2>&1; then
+    DOCKER_COMPOSE=(docker-compose)
+else
+    # Allow commands that don't need docker (e.g. gen-certs, local-run) to proceed
+    DOCKER_COMPOSE=()
+fi
+
+# Wrapper function for convenience within the script
 docker_compose() {
-    if docker compose version &>/dev/null 2>&1; then
-        docker compose "$@"
-    elif command -v docker-compose &>/dev/null && docker-compose version &>/dev/null 2>&1; then
-        docker-compose "$@"
-    else
+    if [ ${#DOCKER_COMPOSE[@]} -eq 0 ]; then
         log_error "Docker Compose not found. Install the 'docker compose' plugin or standalone 'docker-compose'."
         exit 1
     fi
+    "${DOCKER_COMPOSE[@]}" "$@"
 }
 
 # =============================================================================
@@ -51,7 +59,7 @@ Docker Commands:
     run --no-screen   Start in background (no screen; use when no keystore password needed)
     attach      Reattach to running remote-signer session (only when started with 'run' without --no-screen)
     down        Stop all services
-    restart     Restart remote-signer interactively (for password input)
+    restart     Restart remote-signer (use --no-screen for background, no password)
     logs        View service logs
     build       Build Docker images
     clean       Remove all containers and volumes
@@ -93,6 +101,8 @@ init_environment() {
 
     # Create data directories (forge-workspace holds lib/forge-std for Solidity rules; mounted into Docker)
     mkdir -p data/keystores data/foundry data/forge-workspace
+    # Preset API: directory for preset YAML files (Docker mounts ./rules:/app/rules)
+    mkdir -p rules/presets
 
     # Download Foundry binaries if not present
     if [ ! -f "data/foundry/forge" ]; then
@@ -226,20 +236,19 @@ start_services() {
     log_info "Starting services..."
     cd "$PROJECT_DIR"
 
-    # Check required files
+    # Check config (required); .env is optional (env vars can be set in shell)
     if [ ! -f ".env" ]; then
-        log_error ".env file not found! Run '$0 init' first."
-        exit 1
+        log_warn ".env file not found. Continuing without it (env vars from shell will be used)."
     fi
 
     if [ ! -f "config.yaml" ]; then
-        log_error "config.yaml not found! Run '$0 init' first."
+        log_error "config.yaml not found! Run '$0 init' or copy from config.example.yaml."
         exit 1
     fi
 
     # Always rebuild to ensure latest code is deployed
     log_info "Building latest image..."
-    docker_compose build remote-signer
+    docker_build_with_retry remote-signer
 
     docker_compose up -d
 
@@ -257,17 +266,16 @@ run_no_screen() {
     cd "$PROJECT_DIR"
 
     if [ ! -f ".env" ]; then
-        log_error ".env file not found! Run '$0 init' first."
-        exit 1
+        log_warn ".env file not found. Continuing without it (env vars from shell will be used)."
     fi
 
     if [ ! -f "config.yaml" ]; then
-        log_error "config.yaml not found! Run '$0 init' first."
+        log_error "config.yaml not found! Run '$0 init' or copy from config.example.yaml."
         exit 1
     fi
 
     log_info "Building image..."
-    docker_compose build remote-signer
+    docker_build_with_retry remote-signer
 
     log_info "Starting postgres and remote-signer..."
     docker_compose up -d
@@ -286,12 +294,11 @@ run_interactive() {
 
     # Check required files
     if [ ! -f ".env" ]; then
-        log_error ".env file not found! Run '$0 init' first."
-        exit 1
+        log_warn ".env file not found. Continuing without it (env vars from shell will be used)."
     fi
 
     if [ ! -f "config.yaml" ]; then
-        log_error "config.yaml not found! Run '$0 init' first."
+        log_error "config.yaml not found! Run '$0 init' or copy from config.example.yaml."
         exit 1
     fi
 
@@ -322,11 +329,11 @@ run_interactive() {
 
     # Always rebuild to ensure latest code is deployed
     log_info "Building latest image..."
-    docker_compose build remote-signer
+    docker_build_with_retry remote-signer
 
     # Start in screen session (interactive)
     cd "$PROJECT_DIR"
-    exec screen -S remote-signer docker_compose run -it --service-ports --name remote-signer-app remote-signer
+    exec screen -S remote-signer "${DOCKER_COMPOSE[@]}" run -it --service-ports --name remote-signer-app remote-signer
 }
 
 # =============================================================================
@@ -349,17 +356,36 @@ stop_services() {
 }
 
 # =============================================================================
-# Restart services (interactive mode for password input)
+# Restart services
 # =============================================================================
+# restart_services [--no-screen]
+#   Without --no-screen: interactive (screen, for keystore password).
+#   With --no-screen: stop, rebuild, then start in background (docker_compose up -d).
 restart_services() {
+    local no_screen=false
+    if [ "${1:-}" = "--no-screen" ] || [ "${1:-}" = "-n" ]; then
+        no_screen=true
+    fi
+
     log_info "Restarting services..."
     cd "$PROJECT_DIR"
 
     # Stop remote-signer first
+    screen -S remote-signer -X quit 2>/dev/null || true
     docker_compose stop remote-signer 2>/dev/null || true
     docker rm -f remote-signer-app 2>/dev/null || true
 
-    # Run remote-signer interactively using screen
+    log_info "Building latest image..."
+    docker_build_with_retry remote-signer
+
+    if [ "$no_screen" = true ]; then
+        log_info "Starting remote-signer in background (no screen)..."
+        docker_compose up -d
+        log_info "Server is running in background. View logs: $0 logs -f"
+        return
+    fi
+
+    # Interactive: run remote-signer in screen for password input
     log_info "Starting remote-signer (enter keystore password when prompted)..."
     log_info ""
     log_info ">>> After entering password, press Ctrl+A then D to detach screen <<<"
@@ -367,16 +393,8 @@ restart_services() {
     log_info ">>> Use './scripts/deploy.sh attach' to reattach                  <<<"
     log_info ""
 
-    # Kill any existing screen session
-    screen -S remote-signer -X quit 2>/dev/null || true
-
-    # Always rebuild to ensure latest code is deployed
-    log_info "Building latest image..."
-    docker_compose build remote-signer
-
-    # Start in screen session (interactive)
     cd "$PROJECT_DIR"
-    exec screen -S remote-signer docker_compose run -it --service-ports --name remote-signer-app remote-signer
+    exec screen -S remote-signer "${DOCKER_COMPOSE[@]}" run -it --service-ports --name remote-signer-app remote-signer
 }
 
 # =============================================================================
@@ -654,12 +672,38 @@ _health_check() {
 }
 
 # =============================================================================
+# Docker build with retry on network/timeout (e.g. TLS handshake timeout)
+# =============================================================================
+docker_build_with_retry() {
+    local max_attempts=5
+    local attempt=1
+    while [ $attempt -le $max_attempts ]; do
+        local out
+        out=$("${DOCKER_COMPOSE[@]}" build "$@" 2>&1)
+        local ret=$?
+        printf '%s\n' "$out"
+        if [ $ret -eq 0 ]; then
+            return 0
+        fi
+        if echo "$out" | grep -qE 'TLS handshake timeout|failed to resolve source metadata|failed to do request|net/http:.*timeout'; then
+            log_warn "Docker build failed due to network/timeout (attempt $attempt/$max_attempts), retrying in 10s..."
+            [ $attempt -lt $max_attempts ] && sleep 10
+            attempt=$((attempt + 1))
+        else
+            return $ret
+        fi
+    done
+    log_error "Docker build failed after $max_attempts attempts."
+    return 1
+}
+
+# =============================================================================
 # Build images
 # =============================================================================
 build_images() {
     log_info "Building Docker images..."
     cd "$PROJECT_DIR"
-    docker_compose build "$@"
+    docker_build_with_retry "$@"
     log_info "Build complete!"
 }
 
@@ -705,7 +749,8 @@ case "${1:-}" in
         stop_services
         ;;
     restart)
-        restart_services
+        shift
+        restart_services "$@"
         ;;
     logs)
         shift

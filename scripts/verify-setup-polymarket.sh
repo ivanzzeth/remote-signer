@@ -11,14 +11,14 @@ CONFIG="${CONFIG:-config.local.yaml}"
 cd "$PROJECT_DIR"
 
 echo "[1/4] createProxy sign (safe_init preset)..."
-go run ./cmd/verify-setup-polymarket/ -step createproxy -signer "$SIGNER" -url "${URL:-http://localhost:8548}"
+go run ./cmd/remote-signer-verify-setup-polymarket/ -step createproxy -signer "$SIGNER" -url "${URL:-http://localhost:8548}"
 
 echo "[2/4] Add full preset (polymarket_safe_polygon) to config..."
 # Use same placeholder Safe address as in setup for vars
-if command -v remote-signer-cli &>/dev/null; then
-  CLI=remote-signer-cli
+if command -v remote-signer &>/dev/null; then
+  CLI=remote-signer
 else
-  CLI="go run ./cmd/remote-signer-cli/"
+  CLI="go run ./cmd/remote-signer"
 fi
 $CLI preset create-from polymarket_safe_polygon.preset.js.yaml \
   --config "$CONFIG" --write \
@@ -45,6 +45,6 @@ sleep 3
 curl -sf "${URL:-http://localhost:8548}/health" >/dev/null || { echo "server failed to start"; tail -20 /tmp/remote-signer.log; exit 1; }
 
 echo "[4/4] Trade sign (full preset)..."
-go run ./cmd/verify-setup-polymarket/ -step trade -signer "$SIGNER" -url "${URL:-http://localhost:8548}"
+go run ./cmd/remote-signer-verify-setup-polymarket/ -step trade -signer "$SIGNER" -url "${URL:-http://localhost:8548}"
 
 echo "Done. Full flow verified."

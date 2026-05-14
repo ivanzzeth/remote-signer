@@ -17,7 +17,7 @@ type RequestService struct {
 
 // Get gets the status of a signing request.
 func (s *RequestService) Get(ctx context.Context, requestID string) (*RequestStatus, error) {
-	path := fmt.Sprintf("/api/v1/evm/requests/%s", requestID)
+	path := fmt.Sprintf("/api/v1/evm/requests/%s", url.PathEscape(requestID))
 	var status RequestStatus
 	err := s.transport.Request(ctx, http.MethodGet, path, nil, &status, http.StatusOK)
 	if err != nil {
@@ -66,7 +66,7 @@ func (s *RequestService) List(ctx context.Context, filter *ListRequestsFilter) (
 
 // Approve approves or rejects a pending signing request.
 func (s *RequestService) Approve(ctx context.Context, requestID string, req *ApproveRequest) (*ApproveResponse, error) {
-	path := fmt.Sprintf("/api/v1/evm/requests/%s/approve", requestID)
+	path := fmt.Sprintf("/api/v1/evm/requests/%s/approve", url.PathEscape(requestID))
 	var resp ApproveResponse
 	err := s.transport.Request(ctx, http.MethodPost, path, req, &resp, http.StatusOK)
 	if err != nil {
@@ -77,7 +77,7 @@ func (s *RequestService) Approve(ctx context.Context, requestID string, req *App
 
 // PreviewRule previews the rule that would be generated for a pending request.
 func (s *RequestService) PreviewRule(ctx context.Context, requestID string, req *PreviewRuleRequest) (*PreviewRuleResponse, error) {
-	path := fmt.Sprintf("/api/v1/evm/requests/%s/preview-rule", requestID)
+	path := fmt.Sprintf("/api/v1/evm/requests/%s/preview-rule", url.PathEscape(requestID))
 	var resp PreviewRuleResponse
 	err := s.transport.Request(ctx, http.MethodPost, path, req, &resp, http.StatusOK)
 	if err != nil {

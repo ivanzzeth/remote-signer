@@ -59,12 +59,12 @@ func TestHDWalletDetailModel_LoadWallet(t *testing.T) {
 			}, nil
 		}
 
-		_ = model.LoadWallet("0xprimary")
+		_ = model.LoadWallet(evm.HDWalletResponse{PrimaryAddress: "0xprimary"})
 		assert.True(t, model.loading)
 		assert.Equal(t, "0xprimary", model.primaryAddr)
 
 		// Directly call loadWalletData to test the actual data fetching
-		cmd := model.loadWalletData("0xprimary")
+		cmd := model.loadWalletData()
 		msg := cmd()
 		dataMsg, ok := msg.(HDWalletDetailDataMsg)
 		require.True(t, ok)
@@ -78,7 +78,8 @@ func TestHDWalletDetailModel_LoadWallet(t *testing.T) {
 			return nil, errors.New("not found")
 		}
 
-		cmd := model.loadWalletData("0xbadaddr")
+		_ = model.LoadWallet(evm.HDWalletResponse{PrimaryAddress: "0xbadaddr"})
+		cmd := model.loadWalletData()
 		msg := cmd()
 		dataMsg, ok := msg.(HDWalletDetailDataMsg)
 		require.True(t, ok)
@@ -161,6 +162,7 @@ func TestHDWalletDetailModel_DeriveSingle(t *testing.T) {
 			return &evm.ListDerivedAddressesResponse{}, nil
 		}
 		model.primaryAddr = "0xprimary"
+		model.seedWallet = evm.HDWalletResponse{PrimaryAddress: "0xprimary"}
 		model.showDerive = true
 
 		msg := HDWalletDeriveMsg{

@@ -51,7 +51,7 @@ Delegation lets one rule allow a request only if another rule allows a **derived
 - **Single-rule instance**: If an instance expands to **one** rule and has `config.id`, that rule's ID is exactly `config.id` (e.g. `id: "erc20"` → rule ID `"erc20"`). Use it in `delegate_to` as-is.
 - **Multi-rule instance**: If an instance expands to **multiple** rules and has `config.id`, each template rule that defines an `id` in the template gets a **namespaced** rule ID: `<instance_id>#<template_rule_id>`. The separator `#` is fixed (see `InstanceIDRuleIDSeparator` in code). Example: instance `id: "polymarket"`, template rule `id: "transactions"` → engine rule ID `"polymarket#transactions"`. So `delegate_to` must be that full string (e.g. `delegate_to: "polymarket#transactions"`). Do not use `#` inside instance or template ids.
 - **No instance id**: If the instance has no `config.id`, single-rule expansion keeps an auto-generated id (e.g. `cfg_...`); multi-rule expansion keeps each template rule's id as-is. To avoid ID collisions when using the same template in multiple instances, give each instance a unique `config.id`.
-- **Listing IDs**: Run `remote-signer-validate-rules -config <path> -list-rule-ids` (or `remote-signer-cli validate -config <path> -list-rule-ids`) to see the exact rule IDs after expansion; use those strings in `delegate_to`.
+- **Listing IDs**: Run `remote-signer validate -config <path> -list-rule-ids` (or `remote-signer validate -config <path> -list-rule-ids`) to see the exact rule IDs after expansion; use those strings in `delegate_to`.
 
 ### 4.2 Config: delegate_to and delegate_mode
 
@@ -66,7 +66,7 @@ Delegation lets one rule allow a request only if another rule allows a **derived
 
 ### 4.3 How to write a JS rule that delegates
 
-1. **Target rule ID**: Use a single-rule instance id (e.g. `"erc20"`) or a namespaced id (e.g. `"polymarket#transactions"`). Confirm with `remote-signer-validate-rules -config <path> -list-rule-ids` or `remote-signer-cli validate -config <path> -list-rule-ids`.
+1. **Target rule ID**: Use a single-rule instance id (e.g. `"erc20"`) or a namespaced id (e.g. `"polymarket#transactions"`). Confirm with `remote-signer validate -config <path> -list-rule-ids` or `remote-signer validate -config <path> -list-rule-ids`.
 2. **In config**: Set the rule `config.delegate_to` to that ID (and optionally `config.delegate_mode`). For instances, set via template variables (e.g. Safe template variables `delegate_to`, `delegate_mode`).
 3. **In script**: When the request is allowed and you have a derived payload, return `{ valid: true, payload: <RuleInput-like object>, delegate_to: "<target_rule_id>" }`. If you return `delegate_to`, it **overrides** `config.delegate_to` for this request (e.g. to route by inner `to` address). The payload must match what the target rule expects (e.g. `sign_type`, `chain_id`, `signer`, `transaction` or `typed_data`).
 4. **Single vs per_item**: **single** — one payload; target runs once (e.g. Safe → one inner call). **per_item** — `payload[items_key]` must be an array; the engine runs the target for each item (e.g. Multisend → each batch item).
@@ -213,6 +213,60 @@ Config object only. No substitution.
 ### 11.11 Helpers
 
 **eq**, **keccak256**, **selector**, **toChecksum**, **isAddress**, **toWei**, **fromWei**. **abi** (Solidity-aligned, via go-ethereum/abi): **abi.encode(types[], values[])** and **abi.decode(dataHex, types[])**; types can be strings (`"address"`, `"uint256"`, `"bool"`, `"bytes32"`, `"bytes"`, `"string"`) or **tuple** spec: `{ type: "tuple", components: [ { name: "x", type: "uint256" }, { name: "y", type: "uint256" } ] }`. Decoded tuple is an object with field names as keys.
+
+**rs** (reserved namespace): Composable module for evm_js rules. See [evm_js_rs_api.md](../evm_js_rs_api.md) for full API. Sandbox allow-list includes **rs**.
+
+**rs.* modules:**
+
+| Module | Methods | Purpose |
+|--------|---------|---------|
+| **rs.tx** | `require(input)`, `getCalldata(tx)` | Transaction validation; extracts selector + payload, enforces sign_type and calldata presence |
+| **rs.addr** | `inList(addr, list)`, `notInList(addr, list)`, `requireInList(addr, list, reason)`, `requireNotInList(addr, list, reason)`, `requireInListIfNonEmpty(addr, list, reason)`, `isZero(addr)`, `requireZero(addr, reason)` | Address checks: allowlist/blocklist matching, zero-address guards |
+| **rs.int** | `parseUint(value)`, `requireLte(value, max, reason)`, `requireEq(value, want, reason)` | Strict small-integer parsing and comparison (never silently coerces invalid input to 0) |
+| **rs.bigint** | `parse(value)`, `uint256(value)`, `int256(value)`, `requireLte(a, b, reason)`, `requireEq(a, b, reason)`, `requireZero(amount, reason)` | BigInt parsing (decimal, hex, number), range-checked uint256/int256, comparison/zero checks |
+| **rs.typedData** | `match(input, primaryType)`, `require(input, primaryType)`, `requireDomain(domain, opts)`, `requireSignerMatch(msgSigner, inputSigner, reason)` | EIP-712 typed data validation: primaryType matching, domain field checks, signer equality |
+| **rs.multisend** | `parseBatch(raw, chainId, signer)` | Gnosis MultiSend batch parsing; returns `{ items }` array of per-item RuleInput payloads |
+| **rs.delegate** | `resolveByTarget(innerTo, byTarget, defaultRule)` | Resolve delegation rule ID by inner target address; `byTarget` = `"addr:rule_id,..."` map |
+| **rs.config** | `requireNonEmpty(key, reason)` | Guard that a config variable is present and non-empty (strings are pre-trimmed on injection) |
+| **rs.gnosis.safe** | `parseExecTransactionData(calldataHex)` | Parse Safe `execTransaction(...)` calldata; extracts `innerTo`, `innerHex`, `valueZero`, `operationCALL` |
+| **rs.hex** | `requireZero32(hexValue, reason)` | Check 32-byte hex value equals zero; throws with `reason` on non-zero |
+
+**Usage examples:**
+
+```javascript
+// rs.tx + rs.addr: validate a transaction to an allowed contract
+var ctx = rs.tx.require(input);
+rs.addr.requireInList(ctx.tx.to, config.allowed_contracts, 'contract not allowed');
+
+// rs.bigint: cap ERC20 transfer amount
+var dec = abi.decode(ctx.payloadHex, ['address', 'uint256']);
+rs.bigint.requireLte(dec[1], config.max_amount, 'exceeds cap');
+
+// rs.typedData: validate EIP-712 order
+var td = rs.typedData.require(input, 'Order');
+rs.typedData.requireDomain(td.domain, { chainId: 1, allowedContracts: [config.exchange] });
+rs.typedData.requireSignerMatch(td.message.signer, input.signer, 'signer mismatch');
+
+// rs.gnosis.safe: parse Safe execTransaction and delegate inner call
+var safe = rs.gnosis.safe.parseExecTransactionData(ctx.tx.data);
+require(safe.valid, safe.reason);
+require(safe.operationCALL, 'only CALL allowed');
+return { valid: true, payload: { sign_type: 'transaction', transaction: { to: safe.innerTo, data: safe.innerHex } }, delegate_to: config.delegate_to };
+
+// rs.multisend: parse batch and delegate each item
+var batch = rs.multisend.parseBatch(payloadHex, input.chain_id, input.signer);
+require(!batch.err, batch.err);
+return { valid: true, items: batch.items };
+
+// rs.delegate: route by target address
+var ruleId = rs.delegate.resolveByTarget(innerTo, 'addr1:erc20,addr2:dex_swap', 'fallback_rule');
+
+// rs.config: require a config variable at rule startup
+rs.config.requireNonEmpty('token_address', 'token_address is required');
+
+// rs.hex: verify value field is zero
+rs.hex.requireZero32(valueSlot, 'value must be zero');
+```
 
 ---
 

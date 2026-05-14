@@ -61,6 +61,9 @@ const (
 var (
 	testServer *TestServer
 
+	// e2ePresetsDir is the temp presets dir used when starting internal server (cleaned up in TestMain).
+	e2ePresetsDir string
+
 	// Admin client (can manage rules, approve requests)
 	adminClient    *client.Client
 	adminAPIKeyID  string
@@ -172,7 +175,103 @@ func TestMain(m *testing.M) {
 			}
 		}
 
-		// Start test server with config.e2e.yaml
+		// Create presets dir for preset API e2e (one preset referencing "E2E Preset Template")
+		presetsDir, err := os.MkdirTemp("", "e2e-presets-*")
+		if err != nil {
+			panic("failed to create presets temp dir: " + err.Error())
+		}
+		presetContent := []byte(`name: "E2E From Preset"
+template: "E2E Preset Template"
+chain_type: "evm"
+chain_id: "1"
+enabled: true
+variables:
+  chain_id: "1"
+  allowed_address: "0x0000000000000000000000000000000000000001"
+override_hints:
+  - allowed_address
+`)
+		if err := os.WriteFile(filepath.Join(presetsDir, "e2e_minimal.preset.yaml"), presetContent, 0644); err != nil {
+			panic("failed to write e2e preset file: " + err.Error())
+		}
+
+		// Matrix preset: same template, 3 chains with different addresses
+		matrixContent := []byte(`name: "E2E Matrix Preset"
+template: "E2E Preset Template"
+chain_type: "evm"
+enabled: true
+matrix:
+  - chain_id: "1"
+    allowed_address: "0x0000000000000000000000000000000000000001"
+  - chain_id: "137"
+    allowed_address: "0x0000000000000000000000000000000000000002"
+  - chain_id: "42161"
+    allowed_address: "0x0000000000000000000000000000000000000003"
+defaults: {}
+`)
+		if err := os.WriteFile(filepath.Join(presetsDir, "e2e_matrix.preset.yaml"), matrixContent, 0644); err != nil {
+			panic("failed to write e2e matrix preset file: " + err.Error())
+		}
+
+		// Agent preset: references "Agent Template" (loaded from config.e2e.yaml), 5-chain matrix
+		agentPresetContent := []byte(`name: "Agent"
+template_paths:
+  - "rules/templates/agent.template.js.yaml"
+template_names:
+  - "Agent Template"
+chain_type: "evm"
+enabled: true
+matrix:
+  - chain_id: "1"
+  - chain_id: "137"
+  - chain_id: "42161"
+  - chain_id: "10"
+  - chain_id: "8453"
+defaults:
+  max_message_length: "1024"
+  budget_period: "24h"
+variables:
+  max_message_length: "1024"
+  trusted_contracts: "0x0000000000000000000000000000000000000001"
+budget:
+  dynamic: true
+  unit_decimal: true
+  known_units:
+    native:
+      max_total: "1"
+      max_per_tx: "0.1"
+      decimals: 18
+    tx_count:
+      max_total: "1000"
+      max_per_tx: "1"
+      decimals: 0
+    sign_count:
+      max_total: "500"
+      max_per_tx: "1"
+      decimals: 0
+  unknown_default:
+    max_total: "1000"
+    max_per_tx: "100"
+    max_tx_count: 50
+  period: "${budget_period}"
+  alert_pct: 80
+schedule:
+  period: "${budget_period}"
+override_hints:
+  - max_message_length
+  - budget_period
+`)
+		if err := os.WriteFile(filepath.Join(presetsDir, "agent.preset.js.yaml"), agentPresetContent, 0644); err != nil {
+			panic("failed to write agent preset file: " + err.Error())
+		}
+
+		e2ePresetsDir = presetsDir
+		presetsDirAbs, err := filepath.Abs(presetsDir)
+		if err != nil {
+			panic("failed to abs presets dir: " + err.Error())
+		}
+
+		// Start test server with config.e2e.yaml and presets dir
 		testServer, err = NewTestServer(TestServerConfig{
 			Port:                    port,
 			SignerPrivateKey:        testSignerPrivateKey,
@@ -182,6 +281,7 @@ func TestMain(m *testing.M) {
 			NonAdminAPIKeyID:        nonAdminAPIKeyID,
 			NonAdminAPIKeyPublicKey: nonAdminPubKey,
 			ConfigPath:              configPath,
+			PresetsDir:              presetsDirAbs,
 		})
 		if err != nil {
 			panic("failed to create test server: " + err.Error())
@@ -242,6 +342,11 @@ func TestMain(m *testing.M) {
 	// Cleanup (only if we started the server)
 	if testServer != nil {
 		testServer.Stop()
+	}
+	if e2ePresetsDir != "" {
+		if err := os.RemoveAll(e2ePresetsDir); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to remove e2e presets dir %s: %v\n", e2ePresetsDir, err)
+		}
 	}
 
 	os.Exit(code)

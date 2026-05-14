@@ -55,7 +55,7 @@ api_keys:
   - id: "admin-key"
     name: "Admin Key (MCP Dev)"
     public_key: "MCowBQYDK2VwAyEAPMe0qjd4NQGhpiT9rZyw9xD2ifgSSowpVdOskEfRNhs="
-    admin: true
+    role: admin
     enabled: true
     rate_limit: 1000
 
@@ -63,7 +63,7 @@ api_keys:
   - id: "dev-key-1"
     name: "Dev Key 1"
     public_key: "MCowBQYDK2VwAyEAioufmoQX6xPEcLMOWUvLcXs/5RXEgbpmJ/b6e/i8NNo="
-    admin: false
+    role: dev
     enabled: true
     rate_limit: 100
 

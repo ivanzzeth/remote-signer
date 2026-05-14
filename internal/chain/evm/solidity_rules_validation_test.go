@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -19,6 +20,18 @@ import (
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
+
+// templateHasSolidityRule reports whether any rule in the template is
+// of type evm_solidity_expression. Used to skip the forge-based
+// substitution test on templates that have no Solidity to validate.
+func templateHasSolidityRule(rules []ruleConfig) bool {
+	for _, r := range rules {
+		if r.Type == string(types.RuleTypeEVMSolidityExpression) {
+			return true
+		}
+	}
+	return false
+}
 
 // ruleConfig mirrors the RuleConfig from validate-rules CLI (avoid circular imports).
 type ruleConfig struct {
@@ -129,11 +142,24 @@ func TestRulesDirectoryValidation(t *testing.T) {
 	yamlFiles, err := filepath.Glob(filepath.Join(rulesDir, "*.yaml"))
 	require.NoError(t, err)
 
-	// Find all template YAML files
+	// Find all template YAML files. Post-R6 migration these live under
+	// chain-typed subdirectories (rules/templates/evm/*.yaml), so walk
+	// recursively rather than glob the flat dir.
 	templatesDir := filepath.Join(rulesDir, "templates")
-	templateFiles, _ := filepath.Glob(filepath.Join(templatesDir, "*.yaml"))
-	if templateFiles == nil {
-		templateFiles = []string{}
+	var templateFiles []string
+	if err := filepath.WalkDir(templatesDir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if strings.HasSuffix(p, ".yaml") || strings.HasSuffix(p, ".yml") {
+			templateFiles = append(templateFiles, p)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("walk templates dir: %v", err)
 	}
 
 	allYamlCount := len(yamlFiles) + len(templateFiles)
@@ -197,6 +223,13 @@ func TestRulesDirectoryValidation(t *testing.T) {
 		var tf templateRuleFile
 		require.NoError(t, yaml.Unmarshal(data, &tf), "failed to parse template %s", filePath)
 		if len(tf.Variables) == 0 || len(tf.Rules) == 0 {
+			continue
+		}
+		// Skip templates that contain no Solidity expression rules — they
+		// don't need a forge-substitution test pass. Lets off-chain
+		// templates (sign_type_allowlist, future rate_limit) live under
+		// rules/templates without contributing to this suite.
+		if !templateHasSolidityRule(tf.Rules) {
 			continue
 		}
 		require.NotEmpty(t, tf.TestVariables, "template %s must have test_variables for validation", filePath)

@@ -39,9 +39,87 @@ A secure, policy-driven signing service for EVM chains. Controls **what** gets s
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+## Why Remote Signer
+
+The most capable open-source signing service for EVM chains. Fireblocks-level policy control, self-hosted and free.
+
+### Policy Engine
+
+| Capability | remote-signer | Fireblocks | web3signer | Vault |
+|-----------|:---:|:---:|:---:|:---:|
+| Address whitelist/blocklist | Y | Y | Basic | - |
+| Value limits + budgets | Y | Y | - | - |
+| **JS scripting rules** | **Y** | - | - | - |
+| **Solidity expression rules** | **Y** | - | - | - |
+| **Composable delegation chains** | **Y** | - | - | - |
+| **23 protocol templates** | **Y** | N/A | - | - |
+| Multi-chain matrix presets | Y | N/A | - | - |
+
+**23 rule templates** covering: ERC-20/721/1155, Permits (EIP-2612/4494), DEX (Uniswap V2/V3/V4), Staking, Safe + MultiSend, EIP-4337 Account Abstraction, EIP-2771 Meta-TX, Gas Cap, and more.
+
+**Composable rules**: Safe -> MultiSend -> ERC20 transfer validation, all in a single recursive delegation chain.
+
+### Security
+
+| Capability | remote-signer | Fireblocks | web3signer | Vault |
+|-----------|:---:|:---:|:---:|:---:|
+| **OFAC dynamic blocklist** | **Y** | Paid | - | - |
+| **Real-time admin alerts** | **Y** | Y | - | - |
+| Ed25519 API authentication | Y | API key | API key | Token |
+| IP whitelist | Y | Y | - | Y |
+| TLS / mTLS | Y | Y | Y | Y |
+| Per-key rate limiting | Y | Y | - | Y |
+| Full audit trail | Y | Y | - | Y |
+| Memory hardening (mlockall) | Y | N/A (SaaS) | - | Y |
+| Spending budgets with reset | Y | Y | - | - |
+| Manual approval workflow | Y | Y | - | - |
+
+### Platform
+
+| Capability | remote-signer | Fireblocks | web3signer | Vault |
+|-----------|:---:|:---:|:---:|:---:|
+| Open source | Y | - | Y | Y |
+| Self-hosted | Y | - | Y | Y |
+| SDKs (Go/TS/Rust/MCP) | 4 | 5+ | 1 | 3 |
+| Terminal UI (TUI) | Y | Web UI | - | Web UI |
+| One-line setup | Y | N/A | - | - |
+
+**92,000+ lines of code** -- 48K production Go, 61K test code, 2,173 unit + 214 E2E tests.
+
+See [Competitive Analysis](docs/competitive-analysis.md) for the full breakdown.
+
 ## Quick Start
 
-### One-Line Install (recommended)
+### One-Command Single-Instance (SQLite, no Docker, no config)
+
+```bash
+# 1. Download the release binary for your platform.
+curl -sSLf -o remote-signer \
+  "https://github.com/ivanzzeth/remote-signer/releases/latest/download/remote-signer-$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')" \
+  && chmod +x remote-signer
+
+# 2. Just run it.
+./remote-signer
+```
+
+On the very first launch the daemon creates `~/.remote-signer/` (mode 0700)
+with a default `config.yaml` (SQLite at `~/.remote-signer/remote-signer.db`,
+listen on `:8548`, no TLS) and generates an admin Ed25519 keypair at
+`~/.remote-signer/apikeys/admin.key.priv` / `.pub`. The private key file path is
+printed once to stderr — keep it safe. Use it for every admin call:
+
+```bash
+./remote-signer rule list \
+  --api-key-id admin \
+  --api-key-file ~/.remote-signer/apikeys/admin.key.priv \
+  --url http://localhost:8548
+```
+
+Everything ships in the single `remote-signer` binary: `server start`, `tui`,
+`validate`, and every operator command (`rule`, `sign`, `keystore`, `preset`,
+`settings`, `api-key`, ...).
+
+### One-Line Install (interactive setup wizard)
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/ivanzzeth/remote-signer/main/scripts/setup.sh)
@@ -60,12 +138,12 @@ cd remote-signer
 ### Prerequisites
 
 - openssl
-- Docker (recommended) or Go 1.24+ (for local mode)
+- Docker (multi-instance / PostgreSQL) or just the release binary (single-instance / SQLite)
 
 ### What the Setup Wizard Does
 
 The interactive setup walks through 5 steps:
-1. **Deployment mode** -- Docker + PostgreSQL (recommended) or Local + SQLite (dev only)
+1. **Deployment mode** -- Docker + PostgreSQL (multi-instance) or Local + SQLite (single-instance, release binary works out of the box)
 2. **API keys** -- Generates `admin` and `dev` Ed25519 key pairs
 3. **TLS** -- HTTP, TLS, or mTLS (Docker defaults to mTLS)
 4. **Configuration** -- Writes a ready-to-run config file with auto-generated secrets
@@ -91,15 +169,15 @@ The server starts with no signers. To add your first signer (import a private ke
 
 ### Manual Setup
 
-If you prefer manual control, see [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full config reference and use `config.example.yaml` as a starting point.
+If you prefer manual control, see [docs/configuration.md](docs/configuration.md) for the full config reference. Use `config.example.yaml` (minimal configuration) or `config.full.yaml` (complete examples) as starting points.
 
 ### Adding Signers
 
 The server starts without signers. Add them after startup:
 
-- **TUI** (recommended): Use `-api-key-file data/admin_private.pem` so you don't need to paste the key. Example (plain HTTP): `./remote-signer-tui -api-key-id admin -api-key-file data/admin_private.pem -url http://localhost:8548`. **If you enabled TLS** during setup, use `https://` and pass CA (and for mTLS, client cert/key), e.g. `-url https://localhost:8548 -tls-ca ./certs/ca.crt` or with mTLS: `-tls-ca ./certs/ca.crt -tls-cert ./certs/client.crt -tls-key ./certs/client.key`. See [docs/TUI.md](docs/TUI.md#tls--mtls). After setup (Docker), you can choose "Open TUI to add signers now?" to launch it. In the **Signers** tab create a keystore (import private key) or create/import an HD wallet. **Password requirements (enforced)**: at least 16 characters, and must include uppercase + lowercase + digit + symbol. 24+ characters recommended.
-- **API**: `POST /api/v1/evm/signers` (admin only). See [docs/API.md](docs/API.md).
-- **Config**: Edit `chains.evm.signers.private_keys` in your config file. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md#chains-evm).
+- **TUI** (recommended): Use `-api-key-file data/admin_private.pem` so you don't need to paste the key. Example (plain HTTP): `./remote-signer tui -api-key-id admin -api-key-file data/admin_private.pem -url http://localhost:8548`. **If you enabled TLS** during setup, use `https://` and pass CA (and for mTLS, client cert/key), e.g. `-url https://localhost:8548 -tls-ca ./certs/ca.crt` or with mTLS: `-tls-ca ./certs/ca.crt -tls-cert ./certs/client.crt -tls-key ./certs/client.key`. See [docs/tui.md](docs/tui.md#tls--mtls). After setup (Docker), you can choose "Open TUI to add signers now?" to launch it. In the **Signers** tab create a keystore (import private key) or create/import an HD wallet. **Password requirements (enforced)**: at least 16 characters, and must include uppercase + lowercase + digit + symbol. 24+ characters recommended.
+- **API**: `POST /api/v1/evm/signers` (admin only). See [docs/api.md](docs/api.md).
+- **Config**: Edit `chains.evm.signers.private_keys` in your config file. See [docs/configuration.md](docs/configuration.md#chains-evm).
 
 ## Supported Sign Types
 
@@ -118,63 +196,86 @@ The server starts without signers. Add them after startup:
 
 | Document | Description |
 |----------|-------------|
-| [Use Cases](docs/USE_CASES.md) | Treasury, bot, DeFi scenarios |
-| [Architecture](docs/ARCHITECTURE.md) | System design, layers, adapters |
+| [Competitive Analysis](docs/competitive-analysis.md) | Market positioning, feature comparison vs Fireblocks/web3signer/Vault |
+| [Use Cases](docs/use-cases.md) | Treasury, bot, DeFi scenarios |
+| [Architecture](docs/architecture.md) | System design, layers, adapters |
 
 ### Configure
 
 | Document | Description |
 |----------|-------------|
-| [Configuration Reference](docs/CONFIGURATION.md) | Full `config.yaml` reference |
-| [Rules, Templates & Presets](docs/RULES_TEMPLATES_AND_PRESETS.md) | Concepts: rule templates, instances, presets, and examples |
-| [Rule Syntax Reference](docs/RULE_SYNTAX.md) | All rule types: address list, value limit, Solidity, JS, message pattern |
-| [JS Rules (evm_js)](docs/architecture/js-rules-v5.md) | In-process JavaScript rules via Sobek |
-| [config.example.yaml](config.example.yaml) | Annotated configuration template |
+| [Configuration Reference](docs/configuration.md) | Full `config.yaml` reference |
+| [Rules, Templates & Presets](docs/rules-templates-and-presets.md) | Concepts: rule templates, instances, presets, and examples |
+| [Rule Syntax Reference](docs/rule-syntax.md) | All rule types: address list, value limit, Solidity, JS, message pattern |
+| [JS Rules (evm_js)](docs/architecture/js-rules-v1.md) | In-process JavaScript rules via Sobek |
+| [config.example.yaml](config.example.yaml) | Minimal production-ready configuration |
+| [config.full.yaml](config.full.yaml) | Complete examples of all features and protocols |
 
 ### Integrate
 
 | Document | Description |
 |----------|-------------|
-| [API Reference](docs/API.md) | Complete endpoint docs: authentication, signing, rules, audit |
-| [Integration Guide](INTEGRATION.md) | JS/TS client library, MetaMask Snap |
+| [API Reference](docs/api.md) | Complete endpoint docs: authentication, signing, rules, audit |
+| [Integration Guide](INTEGRATION.md) | JS/TS client library, Rust SDK, MCP server |
 
 ### Deploy & Operate
 
 | Document | Description |
 |----------|-------------|
-| [Deployment Guide](docs/DEPLOYMENT.md) | Docker, Kubernetes, HA, monitoring, backup |
-| [TLS / mTLS Guide](docs/TLS.md) | Certificate trust model, generation, production best practices |
-| [TUI Guide](docs/TUI.md) | Terminal UI: build, run, key bindings |
+| [Deployment Guide](docs/deployment.md) | Docker, Kubernetes, HA, monitoring, backup |
+| [TLS / mTLS Guide](docs/tls.md) | Certificate trust model, generation, production best practices |
+| [TUI Guide](docs/tui.md) | Terminal UI: build, run, key bindings |
 
 ### Security
 
 | Document | Description |
 |----------|-------------|
-| [Security Overview](docs/SECURITY.md) | Defense-in-depth: 8 layers from network to application |
-| [Security Review](docs/SECURITY_REVIEW.md) | Findings, priorities, implementation status |
+| [Security Overview](docs/security.md) | Defense-in-depth: 8 layers from network to application |
+| [Security Review](docs/security-review.md) | Findings, priorities, implementation status |
 
 ### Development
 
 | Document | Description |
 |----------|-------------|
-| [Components](docs/COMPONENTS.md) | Core interfaces, data types, services |
-| [Request Flow](docs/FLOW.md) | 8-step signing flow with state machine |
-| [Testing Guide](docs/TESTING.md) | Unit tests, E2E, rule validation, coverage |
+| [Components](docs/components.md) | Core interfaces, data types, services |
+| [Request Flow](docs/flow.md) | 8-step signing flow with state machine |
+| [Testing Guide](docs/testing.md) | Unit tests, E2E, rule validation, coverage |
+| [SDK ⇄ CLI matrix](docs/sdk-cli-matrix.md) | Auditable mapping of `pkg/client` vs `remote-signer` (prevents “full parity” drift) |
 
 **Versioning** — The version shown in the TUI and `/health` follows the repository tag (e.g. tag `v0.1.1` → version `0.1.1`). When you change code under `tui/`, bump the version in `cmd/remote-signer/main.go`; the pre-commit hook enforces this.
 
 ## Roadmap
 
+### Completed
+
 - [x] EIP-712 Typed Data Validation
 - [x] Terminal UI (TUI)
-- [x] Go Client SDK
-- [x] JS/TS Client SDK
-- [ ] Solidity Rule Coverage Enforcement
+- [x] Go / TypeScript / Rust Client SDKs
+- [x] MCP Server (AI agent integration)
+- [x] 33 Rule Templates (ERC-20/721/1155, Permit, DEX, Safe, 4337, etc.)
+- [x] Multi-chain Presets (USDC, Uniswap V2/V3/V4)
+- [x] OFAC Dynamic Blocklist
+- [x] Real-time Admin Operation Alerting
+- [x] EIP-4337 Account Abstraction Support
+- [x] RBAC Rule Ownership (owner/applied_to/status on every rule)
+- [x] CLI `evm` Command Structure (sign/rule/signer with multi-chain ready architecture)
+- [x] Transaction Simulation Engine (eth_simulateV1 via RPC gateway)
+- [x] Signer Ownership & Access Control — per-signer owner model with access list, transfer, delete cascade, resource limits, API key encrypted keystore
+- [x] Permit/Permit2 Spender Whitelist (fail-closed, allowed_spenders config)
+- [x] Request Management CLI (list/get/approve/reject/preview-rule)
+- [x] JS Client SDK v0.0.4 (SimulateService, executeBatch, signer access control)
+- [x] MCP Server v0.0.5 (simulate, broadcast, guard resume tools)
+- [x] Internal Transfer Rule — same-owner scope for multi-tenant signer isolation (ETH, ERC20/721/1155)
+- [x] Admin / operator CLI coverage — api-key CRUD, audit logs, ACL view, HD wallet management, template CRUD/instantiate/revoke (see [SDK ⇄ CLI matrix](docs/sdk-cli-matrix.md); SDK may still be a superset)
+
+### Future
+
+- [ ] Auto-Discovery Delegation (zero-config rule composition)
 - [ ] Solana Chain Support
 - [ ] Cosmos Chain Support
 - [ ] Bitcoin Chain Support
 - [ ] Web UI Dashboard
-- [ ] Audit Log Export (S3, Elasticsearch)
+- [ ] MPC / TSS Integration
 
 ## License
 

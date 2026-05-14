@@ -5,6 +5,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/ivanzzeth/remote-signer/pkg/client/apikeys"
 	"github.com/ivanzzeth/remote-signer/pkg/client/audit"
 	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 	"github.com/ivanzzeth/remote-signer/pkg/client/templates"
@@ -12,10 +13,10 @@ import (
 
 // SignService is a mock implementation of evm.SignAPI.
 type SignService struct {
-	mu                sync.RWMutex
-	ExecuteFunc       func(ctx context.Context, req *evm.SignRequest) (*evm.SignResponse, error)
-	ExecuteAsyncFunc  func(ctx context.Context, req *evm.SignRequest) (*evm.SignResponse, error)
-	Calls             map[string][]any
+	mu               sync.RWMutex
+	ExecuteFunc      func(ctx context.Context, req *evm.SignRequest) (*evm.SignResponse, error)
+	ExecuteAsyncFunc func(ctx context.Context, req *evm.SignRequest) (*evm.SignResponse, error)
+	Calls            map[string][]any
 }
 
 func NewSignService() *SignService {
@@ -102,14 +103,15 @@ var _ evm.RequestAPI = (*RequestService)(nil)
 
 // RuleService is a mock implementation of evm.RuleAPI.
 type RuleService struct {
-	mu         sync.RWMutex
-	ListFunc   func(ctx context.Context, filter *evm.ListRulesFilter) (*evm.ListRulesResponse, error)
-	GetFunc    func(ctx context.Context, ruleID string) (*evm.Rule, error)
-	CreateFunc func(ctx context.Context, req *evm.CreateRuleRequest) (*evm.Rule, error)
-	UpdateFunc func(ctx context.Context, ruleID string, req *evm.UpdateRuleRequest) (*evm.Rule, error)
-	DeleteFunc func(ctx context.Context, ruleID string) error
-	ToggleFunc func(ctx context.Context, ruleID string, enabled bool) (*evm.Rule, error)
-	Calls      map[string][]any
+	mu              sync.RWMutex
+	ListFunc        func(ctx context.Context, filter *evm.ListRulesFilter) (*evm.ListRulesResponse, error)
+	GetFunc         func(ctx context.Context, ruleID string) (*evm.Rule, error)
+	CreateFunc      func(ctx context.Context, req *evm.CreateRuleRequest) (*evm.Rule, error)
+	UpdateFunc      func(ctx context.Context, ruleID string, req *evm.UpdateRuleRequest) (*evm.Rule, error)
+	DeleteFunc      func(ctx context.Context, ruleID string) error
+	ToggleFunc      func(ctx context.Context, ruleID string, enabled bool) (*evm.Rule, error)
+	ListBudgetsFunc func(ctx context.Context, ruleID string) ([]evm.RuleBudget, error)
+	Calls           map[string][]any
 }
 
 func NewRuleService() *RuleService {
@@ -170,16 +172,26 @@ func (m *RuleService) Toggle(ctx context.Context, ruleID string, enabled bool) (
 	return &evm.Rule{}, nil
 }
 
+func (m *RuleService) ListBudgets(ctx context.Context, ruleID string) ([]evm.RuleBudget, error) {
+	m.recordCall("ListBudgets", ruleID)
+	if m.ListBudgetsFunc != nil {
+		return m.ListBudgetsFunc(ctx, ruleID)
+	}
+	return nil, nil
+}
+
 var _ evm.RuleAPI = (*RuleService)(nil)
 
 // SignerService is a mock implementation of evm.SignerAPI.
 type SignerService struct {
-	mu         sync.RWMutex
-	ListFunc   func(ctx context.Context, filter *evm.ListSignersFilter) (*evm.ListSignersResponse, error)
-	CreateFunc func(ctx context.Context, req *evm.CreateSignerRequest) (*evm.Signer, error)
-	UnlockFunc func(ctx context.Context, address string, req *evm.UnlockSignerRequest) (*evm.UnlockSignerResponse, error)
-	LockFunc   func(ctx context.Context, address string) (*evm.LockSignerResponse, error)
-	Calls      map[string][]any
+	mu                     sync.RWMutex
+	ListFunc               func(ctx context.Context, filter *evm.ListSignersFilter) (*evm.ListSignersResponse, error)
+	CreateFunc             func(ctx context.Context, req *evm.CreateSignerRequest) (*evm.Signer, error)
+	UnlockFunc             func(ctx context.Context, address string, req *evm.UnlockSignerRequest) (*evm.UnlockSignerResponse, error)
+	LockFunc               func(ctx context.Context, address string) (*evm.LockSignerResponse, error)
+	PatchSignerLabelsFunc  func(ctx context.Context, address string, req *evm.PatchSignerLabelsRequest) (*evm.Signer, error)
+	DeleteFunc             func(ctx context.Context, address string) error
+	Calls                  map[string][]any
 }
 
 func NewSignerService() *SignerService {
@@ -222,6 +234,22 @@ func (m *SignerService) Lock(ctx context.Context, address string) (*evm.LockSign
 		return m.LockFunc(ctx, address)
 	}
 	return &evm.LockSignerResponse{}, nil
+}
+
+func (m *SignerService) PatchSignerLabels(ctx context.Context, address string, req *evm.PatchSignerLabelsRequest) (*evm.Signer, error) {
+	m.recordCall("PatchSignerLabels", address, req)
+	if m.PatchSignerLabelsFunc != nil {
+		return m.PatchSignerLabelsFunc(ctx, address, req)
+	}
+	return &evm.Signer{}, nil
+}
+
+func (m *SignerService) DeleteSigner(ctx context.Context, address string) error {
+	m.recordCall("DeleteSigner", address)
+	if m.DeleteFunc != nil {
+		return m.DeleteFunc(ctx, address)
+	}
+	return nil
 }
 
 var _ evm.SignerAPI = (*SignerService)(nil)
@@ -363,15 +391,15 @@ var _ audit.API = (*AuditService)(nil)
 
 // TemplateService is a mock implementation of templates.API.
 type TemplateService struct {
-	mu                  sync.RWMutex
-	ListFunc            func(ctx context.Context, filter *templates.ListFilter) (*templates.ListResponse, error)
-	GetFunc             func(ctx context.Context, templateID string) (*templates.Template, error)
-	CreateFunc          func(ctx context.Context, req *templates.CreateRequest) (*templates.Template, error)
-	UpdateFunc          func(ctx context.Context, templateID string, req *templates.UpdateRequest) (*templates.Template, error)
-	DeleteFunc          func(ctx context.Context, templateID string) error
-	InstantiateFunc     func(ctx context.Context, templateID string, req *templates.InstantiateRequest) (*templates.InstantiateResponse, error)
-	RevokeInstanceFunc  func(ctx context.Context, ruleID string) (*templates.RevokeInstanceResponse, error)
-	Calls               map[string][]any
+	mu                 sync.RWMutex
+	ListFunc           func(ctx context.Context, filter *templates.ListFilter) (*templates.ListResponse, error)
+	GetFunc            func(ctx context.Context, templateID string) (*templates.Template, error)
+	CreateFunc         func(ctx context.Context, req *templates.CreateRequest) (*templates.Template, error)
+	UpdateFunc         func(ctx context.Context, templateID string, req *templates.UpdateRequest) (*templates.Template, error)
+	DeleteFunc         func(ctx context.Context, templateID string) error
+	InstantiateFunc    func(ctx context.Context, templateID string, req *templates.InstantiateRequest) (*templates.InstantiateResponse, error)
+	RevokeInstanceFunc func(ctx context.Context, ruleID string) (*templates.RevokeInstanceResponse, error)
+	Calls              map[string][]any
 }
 
 func NewTemplateService() *TemplateService {
@@ -441,3 +469,147 @@ func (m *TemplateService) RevokeInstance(ctx context.Context, ruleID string) (*t
 }
 
 var _ templates.API = (*TemplateService)(nil)
+
+// APIKeyService is a mock implementation of apikeys.API.
+type APIKeyService struct {
+	mu         sync.RWMutex
+	ListFunc   func(ctx context.Context, filter *apikeys.ListFilter) (*apikeys.ListResponse, error)
+	GetFunc    func(ctx context.Context, id string) (*apikeys.APIKey, error)
+	CreateFunc func(ctx context.Context, req *apikeys.CreateRequest) (*apikeys.APIKey, error)
+	UpdateFunc func(ctx context.Context, id string, req *apikeys.UpdateRequest) (*apikeys.APIKey, error)
+	DeleteFunc func(ctx context.Context, id string) error
+	Calls      map[string][]any
+}
+
+func NewAPIKeyService() *APIKeyService {
+	return &APIKeyService{Calls: make(map[string][]any)}
+}
+
+func (m *APIKeyService) recordCall(method string, args ...any) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.Calls[method] = append(m.Calls[method], args)
+}
+
+func (m *APIKeyService) List(ctx context.Context, filter *apikeys.ListFilter) (*apikeys.ListResponse, error) {
+	m.recordCall("List", filter)
+	if m.ListFunc != nil {
+		return m.ListFunc(ctx, filter)
+	}
+	return &apikeys.ListResponse{}, nil
+}
+
+func (m *APIKeyService) Get(ctx context.Context, id string) (*apikeys.APIKey, error) {
+	m.recordCall("Get", id)
+	if m.GetFunc != nil {
+		return m.GetFunc(ctx, id)
+	}
+	return &apikeys.APIKey{}, nil
+}
+
+func (m *APIKeyService) Create(ctx context.Context, req *apikeys.CreateRequest) (*apikeys.APIKey, error) {
+	m.recordCall("Create", req)
+	if m.CreateFunc != nil {
+		return m.CreateFunc(ctx, req)
+	}
+	return &apikeys.APIKey{}, nil
+}
+
+func (m *APIKeyService) Update(ctx context.Context, id string, req *apikeys.UpdateRequest) (*apikeys.APIKey, error) {
+	m.recordCall("Update", id, req)
+	if m.UpdateFunc != nil {
+		return m.UpdateFunc(ctx, id, req)
+	}
+	return &apikeys.APIKey{}, nil
+}
+
+func (m *APIKeyService) Delete(ctx context.Context, id string) error {
+	m.recordCall("Delete", id)
+	if m.DeleteFunc != nil {
+		return m.DeleteFunc(ctx, id)
+	}
+	return nil
+}
+
+var _ apikeys.API = (*APIKeyService)(nil)
+
+// WalletService is a mock implementation of evm.WalletAPI.
+type WalletService struct {
+	mu               sync.RWMutex
+	CreateFunc       func(ctx context.Context, req *evm.CreateWalletRequest) (*evm.Wallet, error)
+	GetFunc          func(ctx context.Context, id string) (*evm.Wallet, error)
+	ListFunc         func(ctx context.Context, filter *evm.ListWalletsFilter) (*evm.ListWalletsResponse, error)
+	DeleteFunc       func(ctx context.Context, id string) error
+	AddMemberFunc    func(ctx context.Context, walletID string, req *evm.AddWalletMemberRequest) (*evm.WalletMember, error)
+	RemoveMemberFunc func(ctx context.Context, walletID, signerAddress string) error
+	ListMembersFunc  func(ctx context.Context, walletID string) (*evm.ListWalletMembersResponse, error)
+	Calls            map[string][]any
+}
+
+func NewWalletService() *WalletService {
+	return &WalletService{Calls: make(map[string][]any)}
+}
+
+func (m *WalletService) recordCall(method string, args ...any) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.Calls[method] = append(m.Calls[method], args)
+}
+
+func (m *WalletService) Create(ctx context.Context, req *evm.CreateWalletRequest) (*evm.Wallet, error) {
+	m.recordCall("Create", req)
+	if m.CreateFunc != nil {
+		return m.CreateFunc(ctx, req)
+	}
+	return &evm.Wallet{}, nil
+}
+
+func (m *WalletService) Get(ctx context.Context, id string) (*evm.Wallet, error) {
+	m.recordCall("Get", id)
+	if m.GetFunc != nil {
+		return m.GetFunc(ctx, id)
+	}
+	return &evm.Wallet{}, nil
+}
+
+func (m *WalletService) List(ctx context.Context, filter *evm.ListWalletsFilter) (*evm.ListWalletsResponse, error) {
+	m.recordCall("List", filter)
+	if m.ListFunc != nil {
+		return m.ListFunc(ctx, filter)
+	}
+	return &evm.ListWalletsResponse{Wallets: []evm.Wallet{}}, nil
+}
+
+func (m *WalletService) Delete(ctx context.Context, id string) error {
+	m.recordCall("Delete", id)
+	if m.DeleteFunc != nil {
+		return m.DeleteFunc(ctx, id)
+	}
+	return nil
+}
+
+func (m *WalletService) AddMember(ctx context.Context, walletID string, req *evm.AddWalletMemberRequest) (*evm.WalletMember, error) {
+	m.recordCall("AddMember", walletID, req)
+	if m.AddMemberFunc != nil {
+		return m.AddMemberFunc(ctx, walletID, req)
+	}
+	return &evm.WalletMember{}, nil
+}
+
+func (m *WalletService) RemoveMember(ctx context.Context, walletID, signerAddress string) error {
+	m.recordCall("RemoveMember", walletID, signerAddress)
+	if m.RemoveMemberFunc != nil {
+		return m.RemoveMemberFunc(ctx, walletID, signerAddress)
+	}
+	return nil
+}
+
+func (m *WalletService) ListMembers(ctx context.Context, walletID string) (*evm.ListWalletMembersResponse, error) {
+	m.recordCall("ListMembers", walletID)
+	if m.ListMembersFunc != nil {
+		return m.ListMembersFunc(ctx, walletID)
+	}
+	return &evm.ListWalletMembersResponse{Members: []evm.WalletMember{}}, nil
+}
+
+var _ evm.WalletAPI = (*WalletService)(nil)

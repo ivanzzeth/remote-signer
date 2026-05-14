@@ -1,4 +1,4 @@
-# Build and publish TUI (and optional server) binaries on tag push.
+# Build and publish the unified remote-signer binary on tag push.
 # Requires repo to be public for setup.sh to download without auth.
 name: Release
 
@@ -22,22 +22,14 @@ jobs:
         with:
           go-version-file: 'go.mod'
 
-      - name: Build binaries (multi-arch)
+      - name: Build remote-signer (multi-arch)
         run: |
           for goos in linux darwin; do
             for goarch in amd64 arm64; do
               GOOS=$goos GOARCH=$goarch CGO_ENABLED=0 go build \
                 -ldflags="-s -w" \
-                -o "remote-signer-tui-${goos}-${goarch}" \
-                ./cmd/tui
-              GOOS=$goos GOARCH=$goarch CGO_ENABLED=0 go build \
-                -ldflags="-s -w" \
-                -o "remote-signer-validate-rules-${goos}-${goarch}" \
-                ./cmd/validate-rules
-              GOOS=$goos GOARCH=$goarch CGO_ENABLED=0 go build \
-                -ldflags="-s -w" \
-                -o "remote-signer-cli-${goos}-${goarch}" \
-                ./cmd/remote-signer-cli
+                -o "remote-signer-${goos}-${goarch}" \
+                ./cmd/remote-signer
             done
           done
 
@@ -45,9 +37,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            remote-signer-tui-*
-            remote-signer-validate-rules-*
-            remote-signer-cli-*
+            remote-signer-*
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

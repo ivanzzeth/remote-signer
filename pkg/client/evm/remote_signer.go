@@ -42,6 +42,17 @@ func NewRemoteSigner(sign *SignService, address common.Address, chainID string) 
 	}
 }
 
+// ChainID returns the current chain ID.
+func (s *RemoteSigner) ChainID() string {
+	return s.chainID
+}
+
+// SetChainID updates the chain ID for subsequent signing requests.
+// This enables multi-chain workflows (e.g. EIP-1193 wallet_switchEthereumChain).
+func (s *RemoteSigner) SetChainID(chainID string) {
+	s.chainID = chainID
+}
+
 // GetAddress returns the signer's address.
 func (s *RemoteSigner) GetAddress() common.Address {
 	return s.address

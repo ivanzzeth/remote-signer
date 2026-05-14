@@ -1,13 +1,13 @@
 package middleware
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/audit"
 )
 
 // RateLimiter implements a simple sliding window rate limiter
@@ -31,7 +31,11 @@ func NewRateLimiter(logger *slog.Logger) *RateLimiter {
 }
 
 // RateLimitMiddleware creates a rate limiting middleware
-func RateLimitMiddleware(limiter *RateLimiter) func(http.Handler) http.Handler {
+func RateLimitMiddleware(limiter *RateLimiter, auditLogger *audit.AuditLogger, alertServices ...*SecurityAlertService) func(http.Handler) http.Handler {
+	var alertService *SecurityAlertService
+	if len(alertServices) > 0 {
+		alertService = alertServices[0]
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			apiKey := GetAPIKey(r.Context())
@@ -47,6 +51,16 @@ func RateLimitMiddleware(limiter *RateLimiter) func(http.Handler) http.Handler {
 					"api_key_id", apiKey.ID,
 					"rate_limit", apiKey.RateLimit,
 				)
+				clientIP, _ := r.Context().Value(ClientIPContextKey).(string)
+				if alertService != nil {
+					alertService.Alert(AlertRateLimitKey, apiKey.ID,
+						fmt.Sprintf("[Remote Signer] API KEY RATE LIMIT\n\nAPI Key: %s\nIP: %s\nLimit: %d req/min\nPath: %s %s\nTime: %s",
+							apiKey.ID, clientIP, apiKey.RateLimit, r.Method, r.URL.Path,
+							time.Now().UTC().Format(time.RFC3339)))
+				}
+				if auditLogger != nil {
+					auditLogger.LogRateLimitHit(r.Context(), apiKey.ID, clientIP, r.Method, r.URL.Path)
+				}
 				http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 				return
 			}
@@ -118,7 +132,11 @@ func (r *RateLimiter) StartCleanupRoutine(interval time.Duration, stop <-chan st
 // IPRateLimitMiddleware creates a pre-auth rate limiting middleware based on client IP.
 // Protects against unauthenticated flood attacks (e.g. brute-force with invalid API keys).
 // If limit <= 0, IP rate limiting is disabled (pass-through).
-func IPRateLimitMiddleware(limiter *RateLimiter, ipWhitelist *IPWhitelist, limit int) func(http.Handler) http.Handler {
+func IPRateLimitMiddleware(limiter *RateLimiter, ipWhitelist *IPWhitelist, limit int, alertServices ...*SecurityAlertService) func(http.Handler) http.Handler {
+	var alertService *SecurityAlertService
+	if len(alertServices) > 0 {
+		alertService = alertServices[0]
+	}
 	return func(next http.Handler) http.Handler {
 		if limit <= 0 {
 			return next // disabled
@@ -135,6 +153,12 @@ func IPRateLimitMiddleware(limiter *RateLimiter, ipWhitelist *IPWhitelist, limit
 					"limit", limit,
 					"path", r.URL.Path,
 				)
+				if alertService != nil {
+					alertService.Alert(AlertRateLimitIP, clientIP,
+						fmt.Sprintf("[Remote Signer] IP RATE LIMIT\n\nIP: %s\nLimit: %d req/min\nPath: %s %s\nTime: %s",
+							clientIP, limit, r.Method, r.URL.Path,
+							time.Now().UTC().Format(time.RFC3339)))
+				}
 				http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 				return
 			}
@@ -154,78 +178,10 @@ func PermissionMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Extract chain type from URL path
-			// Expected format: /api/v1/{chain_type}/...
 			// Permission checking is done at the handler level where we have more context
 			// This middleware just ensures the API key is valid
 
 			next.ServeHTTP(w, r)
 		})
 	}
-}
-
-// CheckChainPermission checks if the API key is allowed to access the given chain type
-func CheckChainPermission(apiKey *types.APIKey, chainType types.ChainType) bool {
-	if apiKey == nil {
-		return false
-	}
-	return apiKey.IsAllowedChain(chainType)
-}
-
-// CheckSignerPermission checks if the API key is allowed to use the given signer
-func CheckSignerPermission(apiKey *types.APIKey, signerAddress string) bool {
-	if apiKey == nil {
-		return false
-	}
-	return apiKey.IsAllowedSigner(signerAddress)
-}
-
-// HDWalletDerivedLister can list primary HD wallet addresses and their derived addresses.
-// Extracted to avoid importing the full evm package in middleware.
-type HDWalletDerivedLister interface {
-	ListPrimaryAddresses() []string
-	ListDerivedAddresses(primaryAddr string) ([]types.SignerInfo, error)
-}
-
-// CheckSignerPermissionWithHDWallets checks allow_all_signers / AllowedSigners, then allow_all_hd_wallets / AllowedHDWallets (derived).
-// hdMgr may be nil (treated as no HD wallet check).
-func CheckSignerPermissionWithHDWallets(apiKey *types.APIKey, signerAddress string, hdMgr HDWalletDerivedLister) bool {
-	if apiKey == nil {
-		return false
-	}
-	if apiKey.IsAllowedSigner(signerAddress) {
-		return true
-	}
-	if hdMgr == nil {
-		return false
-	}
-	if apiKey.AllowAllHDWallets {
-		for _, primaryAddr := range hdMgr.ListPrimaryAddresses() {
-			derived, err := hdMgr.ListDerivedAddresses(primaryAddr)
-			if err != nil {
-				continue
-			}
-			for _, d := range derived {
-				if strings.EqualFold(d.Address, signerAddress) {
-					return true
-				}
-			}
-		}
-		return false
-	}
-	if len(apiKey.AllowedHDWallets) == 0 {
-		return false
-	}
-	for _, primaryAddr := range apiKey.AllowedHDWallets {
-		derived, err := hdMgr.ListDerivedAddresses(primaryAddr)
-		if err != nil {
-			continue
-		}
-		for _, d := range derived {
-			if strings.EqualFold(d.Address, signerAddress) {
-				return true
-			}
-		}
-	}
-	return false
 }

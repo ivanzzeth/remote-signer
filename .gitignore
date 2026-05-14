@@ -17,7 +17,7 @@
 /remote-signer-tui
 /audit-monitor
 /cmd/remote-signer/remote-signer
-/cmd/tui/tui
+/cmd/remote-signer-tui/remote-signer-tui
 /validate-rules
 
 # Code coverage profiles and other test artifacts
@@ -53,6 +53,9 @@ data/foundry/*
 !data/hd-wallets/
 data/hd-wallets/*
 !data/hd-wallets/.gitkeep
+!data/svm/
+data/svm/*
+!data/svm/.gitkeep
 
 # Configuration files (sensitive)
 config.yaml
@@ -74,6 +77,9 @@ remote-signer.db
 # Docker volumes and cache
 postgres_data/
 forge_cache/
+# Rust build artifacts
+target/
+
 # Build artifacts
 cache/
 out/
@@ -123,3 +129,6 @@ bin/
 # E2E test data (generated keystores, forge cache, binaries, etc.)
 e2e/data/
 verify-setup-polymarket
+/remote-signer-cli
+.playwright-cli/
+pkg/js-client/tests/.test-server-keys.json

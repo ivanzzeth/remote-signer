@@ -691,8 +691,9 @@ func TestRemoveGlobals_CB(t *testing.T) {
 	err := removeGlobals(vm)
 	require.NoError(t, err)
 
-	// Verify that dangerous globals are undefined
-	for _, name := range []string{"eval", "Function", "Date", "console", "require", "global", "globalThis"} {
+	// Verify that dangerous globals are undefined.
+	// Note: "require" is NOT removed — it is redefined as a rule primitive require(cond, reason).
+	for _, name := range []string{"eval", "Function", "Date", "console", "global", "globalThis"} {
 		val := vm.Get(name)
 		assert.True(t, val.Equals(sobek.Undefined()), "expected %s to be undefined", name)
 	}

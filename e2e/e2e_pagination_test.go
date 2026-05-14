@@ -16,6 +16,7 @@ import (
 )
 
 func TestPagination_RequestsCursorBased(t *testing.T) {
+	ensureGuardResumed(t)
 	ctx := context.Background()
 
 	// Create multiple sign requests to test pagination
@@ -82,6 +83,7 @@ func TestPagination_RequestsCursorBased(t *testing.T) {
 }
 
 func TestPagination_RequestsWithStatusFilter(t *testing.T) {
+	ensureGuardResumed(t)
 	ctx := context.Background()
 
 	// Test pagination with status filter
@@ -116,6 +118,7 @@ func TestPagination_RequestsWithStatusFilter(t *testing.T) {
 }
 
 func TestPagination_AuditCursorBased(t *testing.T) {
+	ensureGuardResumed(t)
 	ctx := context.Background()
 
 	// Create some sign requests to generate audit records
@@ -162,6 +165,7 @@ func TestPagination_AuditCursorBased(t *testing.T) {
 }
 
 func TestPagination_AuditWithEventTypeFilter(t *testing.T) {
+	ensureGuardResumed(t)
 	ctx := context.Background()
 
 	// Test pagination with event type filter
@@ -180,6 +184,7 @@ func TestPagination_AuditWithEventTypeFilter(t *testing.T) {
 }
 
 func TestPagination_TotalCountConsistency(t *testing.T) {
+	ensureGuardResumed(t)
 	ctx := context.Background()
 
 	// Get all requests in one large page
@@ -200,6 +205,7 @@ func TestPagination_TotalCountConsistency(t *testing.T) {
 }
 
 func TestPagination_EmptyPage(t *testing.T) {
+	ensureGuardResumed(t)
 	ctx := context.Background()
 
 	// Test with a filter that returns no results. Use a signer address that no test uses.
@@ -219,6 +225,7 @@ func TestPagination_EmptyPage(t *testing.T) {
 }
 
 func TestPagination_CursorURLEncoding(t *testing.T) {
+	ensureGuardResumed(t)
 	ctx := context.Background()
 
 	// Create requests to ensure we have data

@@ -12,10 +12,52 @@ import (
 )
 
 var ethAddressRegex = regexp.MustCompile(`^0x[0-9a-fA-F]{40}$`)
+var hexDataRegex = regexp.MustCompile(`^0x([0-9a-fA-F]{2})*$`)
+var hexValueRegex = regexp.MustCompile(`^0x[0-9a-fA-F]+$`)
+var chainIDRegex = regexp.MustCompile(`^[1-9][0-9]*$`)
 
 // IsValidEthereumAddress returns true if s is a valid 0x-prefixed 40-char hex address.
 func IsValidEthereumAddress(s string) bool {
 	return ethAddressRegex.MatchString(s)
+}
+
+// IsValidHexData returns true if s is valid 0x-prefixed hex calldata (even number of hex chars).
+func IsValidHexData(s string) bool {
+	if s == "" || s == "0x" {
+		return true // empty calldata is valid
+	}
+	return hexDataRegex.MatchString(s)
+}
+
+// IsValidHexValue returns true if s is a valid 0x-prefixed hex integer (e.g. "0x0", "0x1a2b").
+func IsValidHexValue(s string) bool {
+	if s == "" || s == "0x0" {
+		return true
+	}
+	return hexValueRegex.MatchString(s)
+}
+
+// IsValidChainID returns true if s is a positive decimal integer chain ID.
+func IsValidChainID(s string) bool {
+	return chainIDRegex.MatchString(s)
+}
+
+// IsValidNumericValue returns true if s is a valid numeric value (decimal or 0x hex).
+// Accepts: "0", "123456", "0x1a2b", "0x0". Used for gas, value, nonce fields.
+func IsValidNumericValue(s string) bool {
+	if s == "" || s == "0" || s == "0x0" {
+		return true
+	}
+	if strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X") {
+		return hexValueRegex.MatchString(s)
+	}
+	// Decimal
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return len(s) > 0
 }
 
 // ValidSignTypes is the set of allowed sign_type values for requests and rule config.
@@ -87,6 +129,7 @@ var ValidRuleTypes = map[types.RuleType]bool{
 	types.RuleTypeEVMValueLimit:       true,
 	types.RuleTypeEVMSolidityExpression: true,
 	types.RuleTypeEVMJS:                true,
+	types.RuleTypeEVMDynamicBlocklist:  true,
 }
 
 // ValidRuleSources is the set of allowed rule source values.
@@ -113,6 +156,22 @@ var ValidAuditEventTypes = map[types.AuditEventType]bool{
 	types.AuditEventTypeRuleUpdated:     true,
 	types.AuditEventTypeRuleDeleted:     true,
 	types.AuditEventTypeRateLimitHit:    true,
+	types.AuditEventTypeAPIRequest:      true,
+	types.AuditEventTypeConfigReloaded:  true,
+	types.AuditEventTypeTemplateSynced:  true,
+	types.AuditEventTypeAPIKeySynced:    true,
+	types.AuditEventTypeSignerCreated:   true,
+	types.AuditEventTypeSignerLocked:    true,
+	types.AuditEventTypeSignerUnlocked:  true,
+	types.AuditEventTypeHDWalletCreated: true,
+	types.AuditEventTypeHDWalletDerived: true,
+}
+
+// ValidAuditSeverities is the set of allowed audit severity values.
+var ValidAuditSeverities = map[types.AuditSeverity]bool{
+	types.AuditSeverityInfo:     true,
+	types.AuditSeverityWarning:  true,
+	types.AuditSeverityCritical: true,
 }
 
 // ValidSignerTypes is the set of allowed signer type values.
@@ -140,6 +199,11 @@ func IsValidRuleSource(s string) bool {
 // IsValidAuditEventType returns true if s is a known audit event type.
 func IsValidAuditEventType(s string) bool {
 	return ValidAuditEventTypes[types.AuditEventType(s)]
+}
+
+// IsValidAuditSeverity returns true if s is a known audit severity.
+func IsValidAuditSeverity(s string) bool {
+	return ValidAuditSeverities[types.AuditSeverity(s)]
 }
 
 // IsValidSignerType returns true if s is a known signer type.

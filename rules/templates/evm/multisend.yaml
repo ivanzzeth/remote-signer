@@ -1,0 +1,77 @@
+# Multisend template (evm_js) — allow transactions to multisend contract; decode batch and delegate per item.
+# Filename *.template.js.yaml = template fully driven by evm_js rules (no evm_solidity_expression).
+# Gnosis MultiSend packed format per tx: operation(1) + to(20) + value(32) + dataLength(32) + data.
+
+name: Multisend allowlist and per_item delegation
+variables:
+  - name: multisend_contract_address
+    type: address
+    description: "Multisend contract address (tx 'to')"
+    required: true
+  - name: delegate_to
+    type: string
+    description: "Target rule ID(s) for per_item delegation. Comma-separated to allow multiple (e.g. ERC20,ERC721); engine tries each until one allows per item."
+    required: false
+    default: ""
+  - name: delegate_mode
+    type: string
+    description: "Delegation mode: single or per_item (default per_item when delegate_to set)"
+    required: false
+    default: "per_item"
+test_variables:
+  chain_id: "1"
+  multisend_contract_address: "0xA238CBeb142c10Ef7Ad8442C6D1f9E89e07e7761"
+  delegate_to: ""
+  delegate_mode: "per_item"
+rules:
+  - id: "multisend-allowlist-delegation"
+    name: "Multisend allowlist and per_item delegation"
+    type: "evm_js"
+    mode: "whitelist"
+    enabled: true
+    description: "Allow tx to multisend; decode batch and delegate each item to delegate_to rule"
+    config:
+      delegate_to: "${delegate_to}"
+      delegate_mode: "${delegate_mode}"
+      script: |
+        function validate(input) {
+          require(input && input.transaction && input.transaction.to, 'missing input');
+          var allowed = config.multisend_contract_address;
+          require(allowed && isAddress(allowed), 'invalid multisend config');
+          require(rs.addr.inList(input.transaction.to, [allowed]), 'to must be multisend contract');
+          var delegateTo = config.delegate_to;
+          if (delegateTo === '') return ok();
+          var ctx = rs.tx.require(input);
+          var multiSendSel = selector('multiSend(bytes)');
+          if (!eq(ctx.selector, multiSendSel)) revert('only multiSend(bytes) allowed');
+          var raw = (ctx.tx.data || '0x').replace(/^0x/, '');
+          var batch = rs.multisend.parseBatch(raw, input.chain_id, input.signer);
+          if (batch.err) return { valid: false, reason: batch.err };
+          if (batch.items.length === 0) return { valid: true };
+          var mode = (config.delegate_mode || 'per_item').trim();
+          return { valid: true, payload: { items: batch.items }, delegate_to: delegateTo, delegate_mode: mode };
+        }
+    test_cases:
+      - name: "should pass when to equals multisend contract"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0xA238CBeb142c10Ef7Ad8442C6D1f9E89e07e7761"
+            value: "0x0"
+            data: "0x"
+        expect_pass: true
+      - name: "should reject when to differs"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+            value: "0x0"
+            data: "0x"
+        expect_pass: false
+        expect_reason: "to must be multisend contract"

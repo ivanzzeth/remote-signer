@@ -13,7 +13,25 @@ import (
 // BudgetRepository defines the interface for budget persistence
 type BudgetRepository interface {
 	Create(ctx context.Context, budget *types.RuleBudget) error
+	// CreateOrGet atomically creates a budget record or returns the existing one.
+	// SECURITY: Uses INSERT ... ON CONFLICT DO NOTHING (upsert) to prevent TOCTOU
+	// race conditions where concurrent requests both find "not found" and both try to create.
+	// Returns the budget (created or existing) and a bool indicating if it was created (true) or already existed (false).
+	CreateOrGet(ctx context.Context, budget *types.RuleBudget) (*types.RuleBudget, bool, error)
 	GetByRuleID(ctx context.Context, ruleID types.RuleID, unit string) (*types.RuleBudget, error)
+	// Get fetches a budget by its primary key. Used by the
+	// administrative /budgets/{id} endpoints where the caller already
+	// has the deterministic ID (SHA256 of rule_id+unit) rather than the
+	// two component fields.
+	Get(ctx context.Context, id string) (*types.RuleBudget, error)
+	// Update persists changes to mutable fields (max_total, max_per_tx,
+	// max_tx_count, alert_pct, alert_sent, spent, tx_count). It does
+	// NOT permit changes to id/rule_id/unit/created_at — those define
+	// the row's identity and the budget hash.
+	Update(ctx context.Context, budget *types.RuleBudget) error
+	// CountByRuleID returns the number of distinct budget units for a rule.
+	// SECURITY: Used to enforce MaxDynamicUnits limit to prevent budget amplification attacks.
+	CountByRuleID(ctx context.Context, ruleID types.RuleID) (int, error)
 	Delete(ctx context.Context, id string) error
 	DeleteByRuleID(ctx context.Context, ruleID types.RuleID) error
 	// AtomicSpend atomically increments spent amount and tx count.
@@ -25,6 +43,11 @@ type BudgetRepository interface {
 	ResetBudget(ctx context.Context, ruleID types.RuleID, unit string, currentPeriodStart time.Time) error
 	ListByRuleID(ctx context.Context, ruleID types.RuleID) ([]*types.RuleBudget, error)
 	ListByRuleIDs(ctx context.Context, ruleIDs []types.RuleID) ([]*types.RuleBudget, error)
+	// ListAll returns every budget row, ordered by created_at desc. Used by
+	// the operator-facing /budgets list which must surface synthetic
+	// simulation budgets (rule_id "sim:0x...") that don't appear in the
+	// rules table — fanning out from rules.list() would miss them.
+	ListAll(ctx context.Context) ([]*types.RuleBudget, error)
 	// MarkAlertSent sets alert_sent=true for the given rule+unit budget.
 	// This prevents duplicate alert notifications within the same period.
 	MarkAlertSent(ctx context.Context, ruleID types.RuleID, unit string) error
@@ -57,6 +80,51 @@ func (r *GormBudgetRepository) Create(ctx context.Context, budget *types.RuleBud
 	return r.db.WithContext(ctx).Create(budget).Error
 }
 
+// CreateOrGet atomically creates a budget record or returns the existing one.
+// Uses a transaction with INSERT + SELECT to handle concurrent creation safely.
+func (r *GormBudgetRepository) CreateOrGet(ctx context.Context, budget *types.RuleBudget) (*types.RuleBudget, bool, error) {
+	if budget == nil {
+		return nil, false, fmt.Errorf("budget cannot be nil")
+	}
+
+	var result types.RuleBudget
+	created := false
+
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Try to find existing
+		findErr := tx.First(&result, "id = ?", budget.ID).Error
+		if findErr == nil {
+			// Already exists
+			return nil
+		}
+		if findErr != gorm.ErrRecordNotFound {
+			return fmt.Errorf("failed to check existing budget: %w", findErr)
+		}
+
+		// Not found — create
+		now := time.Now()
+		budget.CreatedAt = now
+		budget.UpdatedAt = now
+		createErr := tx.Create(budget).Error
+		if createErr != nil {
+			// Could be a race: another goroutine created it between our SELECT and INSERT.
+			// Try to fetch again.
+			retryErr := tx.First(&result, "id = ?", budget.ID).Error
+			if retryErr == nil {
+				return nil // Lost race, use existing
+			}
+			return fmt.Errorf("failed to create budget: %w", createErr)
+		}
+		result = *budget
+		created = true
+		return nil
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	return &result, created, nil
+}
+
 // GetByRuleID retrieves a budget by rule ID and unit
 func (r *GormBudgetRepository) GetByRuleID(ctx context.Context, ruleID types.RuleID, unit string) (*types.RuleBudget, error) {
 	var budget types.RuleBudget
@@ -68,6 +136,16 @@ func (r *GormBudgetRepository) GetByRuleID(ctx context.Context, ruleID types.Rul
 		return nil, fmt.Errorf("failed to get budget: %w", err)
 	}
 	return &budget, nil
+}
+
+// CountByRuleID returns the number of distinct budget units for a rule.
+func (r *GormBudgetRepository) CountByRuleID(ctx context.Context, ruleID types.RuleID) (int, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&types.RuleBudget{}).Where("rule_id = ?", ruleID).Count(&count).Error
+	if err != nil {
+		return 0, fmt.Errorf("failed to count budgets: %w", err)
+	}
+	return int(count), nil
 }
 
 // Delete deletes a budget by ID
@@ -103,7 +181,7 @@ func (r *GormBudgetRepository) AtomicSpend(ctx context.Context, ruleID types.Rul
 		    tx_count = tx_count + 1,
 		    updated_at = ?
 		WHERE rule_id = ? AND unit = ?
-		  AND (max_total = '0' OR CAST(spent AS NUMERIC) + CAST(? AS NUMERIC) <= CAST(max_total AS NUMERIC))
+		  AND (max_total = '-1' OR CAST(spent AS NUMERIC) + CAST(? AS NUMERIC) <= CAST(max_total AS NUMERIC))
 		  AND (max_tx_count = 0 OR tx_count < max_tx_count)
 	`, amount, time.Now(), ruleID, unit, amount)
 
@@ -175,4 +253,59 @@ func (r *GormBudgetRepository) ListByRuleIDs(ctx context.Context, ruleIDs []type
 		return nil, fmt.Errorf("failed to list budgets: %w", err)
 	}
 	return budgets, nil
+}
+
+// ListAll returns every budget row, newest first.
+func (r *GormBudgetRepository) ListAll(ctx context.Context) ([]*types.RuleBudget, error) {
+	var budgets []*types.RuleBudget
+	err := r.db.WithContext(ctx).Order("created_at DESC").Find(&budgets).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to list budgets: %w", err)
+	}
+	return budgets, nil
+}
+
+// Get returns a single budget by primary key.
+func (r *GormBudgetRepository) Get(ctx context.Context, id string) (*types.RuleBudget, error) {
+	var budget types.RuleBudget
+	err := r.db.WithContext(ctx).First(&budget, "id = ?", id).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, types.ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to get budget: %w", err)
+	}
+	return &budget, nil
+}
+
+// Update writes mutable fields back. We pin the columns explicitly so a
+// caller passing a stale id/rule_id/unit can't accidentally relocate
+// the row — those parts define the budget's identity and hash.
+func (r *GormBudgetRepository) Update(ctx context.Context, budget *types.RuleBudget) error {
+	if budget == nil {
+		return fmt.Errorf("budget cannot be nil")
+	}
+	if budget.ID == "" {
+		return fmt.Errorf("budget id is required")
+	}
+	budget.UpdatedAt = time.Now()
+	result := r.db.WithContext(ctx).Model(&types.RuleBudget{}).
+		Where("id = ?", budget.ID).
+		Updates(map[string]any{
+			"max_total":    budget.MaxTotal,
+			"max_per_tx":   budget.MaxPerTx,
+			"max_tx_count": budget.MaxTxCount,
+			"alert_pct":    budget.AlertPct,
+			"alert_sent":   budget.AlertSent,
+			"spent":        budget.Spent,
+			"tx_count":     budget.TxCount,
+			"updated_at":   budget.UpdatedAt,
+		})
+	if result.Error != nil {
+		return fmt.Errorf("failed to update budget: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return types.ErrNotFound
+	}
+	return nil
 }

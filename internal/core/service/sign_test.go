@@ -204,6 +204,10 @@ func (r *mockAuditRepo) GetByRequestID(_ context.Context, _ types.SignRequestID)
 	return nil, nil
 }
 
+func (r *mockAuditRepo) DeleteOlderThan(_ context.Context, _ time.Time) (int64, error) {
+	return 0, nil
+}
+
 var _ storage.AuditRepository = (*mockAuditRepo)(nil)
 
 // ---------------------------------------------------------------------------
@@ -578,7 +582,7 @@ func TestSign(t *testing.T) {
 
 		guard, err := NewManualApprovalGuard(ManualApprovalGuardConfig{
 			Window:    time.Minute,
-			Threshold: 1,
+			RejectionThresholdPct: 1, MinSamples: 1,
 			Logger:    newTestLogger(),
 		})
 		if err != nil {
@@ -634,7 +638,7 @@ func TestSign(t *testing.T) {
 
 		guard, err := NewManualApprovalGuard(ManualApprovalGuardConfig{
 			Window:    5 * time.Minute,
-			Threshold: 5,
+			MinSamples: 1000,
 			Logger:    newTestLogger(),
 		})
 		if err != nil {
@@ -674,7 +678,7 @@ func TestSign(t *testing.T) {
 
 		guard, err := NewManualApprovalGuard(ManualApprovalGuardConfig{
 			Window:    5 * time.Minute,
-			Threshold: 10,
+			MinSamples: 1000,
 			Logger:    newTestLogger(),
 		})
 		if err != nil {
@@ -704,7 +708,7 @@ func TestSign(t *testing.T) {
 
 		guard, err := NewManualApprovalGuard(ManualApprovalGuardConfig{
 			Window:    5 * time.Minute,
-			Threshold: 10,
+			MinSamples: 1000,
 			Logger:    newTestLogger(),
 		})
 		if err != nil {
@@ -732,7 +736,7 @@ func TestSign(t *testing.T) {
 
 		guard, err := NewManualApprovalGuard(ManualApprovalGuardConfig{
 			Window:    5 * time.Minute,
-			Threshold: 10,
+			MinSamples: 1000,
 			Logger:    newTestLogger(),
 		})
 		if err != nil {
@@ -778,6 +782,82 @@ func TestSign(t *testing.T) {
 			t.Errorf("expected authorizing, got %q", resp.Status)
 		}
 	})
+
+	t.Run("strategy_role_no_whitelist_match_rejected_without_simulation", func(t *testing.T) {
+		f := newSignServiceFixture(t)
+		f.ruleEngine.matchedRuleID = nil
+		svc := f.build(t)
+		// Even with manual approval enabled and simulation available,
+		// strategy role should be rejected immediately
+		svc.SetManualApprovalEnabled(true)
+
+		resp, err := svc.Sign(ctx, &SignRequest{
+			APIKeyID:      "strategy-key-1",
+			APIKeyRole:    types.RoleStrategy,
+			ChainType:     types.ChainTypeEVM,
+			ChainID:       "1",
+			SignerAddress: "0xsigner",
+			SignType:      "eth_signTransaction",
+			Payload:       []byte(`{}`),
+		})
+		if err != nil {
+			t.Fatalf("Sign should not return error for strategy rejection: %v", err)
+		}
+		if resp.Status != types.StatusRejected {
+			t.Errorf("expected status %q, got %q", types.StatusRejected, resp.Status)
+		}
+		if !strings.Contains(resp.Message, "strategy role requires explicit rules") {
+			t.Errorf("expected strategy role rejection message, got: %q", resp.Message)
+		}
+	})
+
+	t.Run("agent_role_no_whitelist_match_reaches_manual_approval", func(t *testing.T) {
+		f := newSignServiceFixture(t)
+		f.ruleEngine.matchedRuleID = nil
+		svc := f.build(t)
+		svc.SetManualApprovalEnabled(true)
+
+		resp, err := svc.Sign(ctx, &SignRequest{
+			APIKeyID:      "agent-key-1",
+			APIKeyRole:    types.RoleAgent,
+			ChainType:     types.ChainTypeEVM,
+			ChainID:       "1",
+			SignerAddress: "0xsigner",
+			SignType:      "eth_signTransaction",
+			Payload:       []byte(`{}`),
+		})
+		if err != nil {
+			t.Fatalf("Sign failed: %v", err)
+		}
+		// Agent role should proceed to manual approval (not be blocked like strategy)
+		if resp.Status != types.StatusAuthorizing {
+			t.Errorf("expected status %q, got %q", types.StatusAuthorizing, resp.Status)
+		}
+	})
+
+	t.Run("strategy_role_with_whitelist_match_succeeds", func(t *testing.T) {
+		f := newSignServiceFixture(t)
+		ruleID := types.RuleID("rule-strategy")
+		f.ruleEngine.matchedRuleID = &ruleID
+		f.ruleEngine.matchReason = "strategy rule matched"
+		svc := f.build(t)
+
+		resp, err := svc.Sign(ctx, &SignRequest{
+			APIKeyID:      "strategy-key-1",
+			APIKeyRole:    types.RoleStrategy,
+			ChainType:     types.ChainTypeEVM,
+			ChainID:       "1",
+			SignerAddress: "0xsigner",
+			SignType:      "eth_signTransaction",
+			Payload:       []byte(`{}`),
+		})
+		if err != nil {
+			t.Fatalf("Sign failed: %v", err)
+		}
+		if resp.Status != types.StatusCompleted {
+			t.Errorf("expected status %q, got %q", types.StatusCompleted, resp.Status)
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -790,7 +870,7 @@ func TestSetApprovalGuard(t *testing.T) {
 
 	guard, err := NewManualApprovalGuard(ManualApprovalGuardConfig{
 		Window:    time.Minute,
-		Threshold: 5,
+		MinSamples: 1000,
 		Logger:    newTestLogger(),
 	})
 	if err != nil {
@@ -1074,6 +1154,18 @@ func TestProcessApproval(t *testing.T) {
 		if resp.SignResponse.Signature == nil {
 			t.Error("expected non-nil signature")
 		}
+		// Manual approval must record approval_source="manual" so the UI
+		// can attribute it without inferring from empty fields.
+		got, err := f.requestRepo.Get(ctx, "req-approve")
+		if err != nil {
+			t.Fatalf("failed to re-read request: %v", err)
+		}
+		if got.ApprovalSource != types.ApprovalSourceManual {
+			t.Errorf("expected approval_source=manual, got %q", got.ApprovalSource)
+		}
+		if got.ApprovedBy == nil || *got.ApprovedBy != "admin" {
+			t.Errorf("expected approved_by=admin, got %v", got.ApprovedBy)
+		}
 	})
 
 	t.Run("manual_approval_with_rule_generation", func(t *testing.T) {
@@ -1176,6 +1268,61 @@ func TestProcessApproval(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "signing failed") {
 			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	// Regression: a locked-signer error during ProcessApproval must NOT
+	// burn the request to "failed". Operators see locked signers as a
+	// transient state they can fix; if approval moved the request to a
+	// terminal state, they'd have to ask the caller to resubmit just
+	// because someone forgot to unlock first.
+	t.Run("manual_approval_locked_signer_keeps_authorizing", func(t *testing.T) {
+		f := newSignServiceFixture(t)
+		f.adapter.signErr = fmt.Errorf("failed to get signer: signer is locked")
+		f.adapter.signResult = nil
+		svc := f.build(t)
+
+		req := &types.SignRequest{
+			ID:            "req-approve-locked",
+			ChainType:     types.ChainTypeEVM,
+			ChainID:       "1",
+			SignerAddress: "0xsigner",
+			SignType:      "eth_signTransaction",
+			Payload:       []byte(`{}`),
+			Status:        types.StatusAuthorizing,
+			CreatedAt:     time.Now(),
+			UpdatedAt:     time.Now(),
+		}
+		if err := f.requestRepo.Create(ctx, req); err != nil {
+			t.Fatalf("failed to seed request: %v", err)
+		}
+
+		_, err := svc.ProcessApproval(ctx, "req-approve-locked", &ApprovalRequest{
+			Approved:   true,
+			ApprovedBy: "admin",
+		})
+		if err == nil {
+			t.Fatal("expected error when signer is locked")
+		}
+		if !strings.Contains(err.Error(), "is locked") {
+			t.Errorf("expected locked-signer error, got: %v", err)
+		}
+
+		// Request must remain in authorizing so the operator can
+		// approve again after unlocking — and the stale error must
+		// not leak into the next attempt's view.
+		got, err := f.requestRepo.Get(ctx, "req-approve-locked")
+		if err != nil {
+			t.Fatalf("failed to re-read request: %v", err)
+		}
+		if got.Status != types.StatusAuthorizing {
+			t.Errorf("expected status=authorizing after locked-signer failure, got %q", got.Status)
+		}
+		if got.ErrorMessage != "" {
+			t.Errorf("expected error_message to be cleared, got %q", got.ErrorMessage)
+		}
+		if got.CompletedAt != nil {
+			t.Errorf("expected completed_at to be nil, got %v", got.CompletedAt)
 		}
 	})
 

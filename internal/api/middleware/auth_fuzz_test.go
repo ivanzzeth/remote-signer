@@ -59,6 +59,18 @@ func (m *mockAPIKeyRepo) UpdateLastUsed(_ context.Context, _ string) error {
 	return nil
 }
 
+func (m *mockAPIKeyRepo) Count(_ context.Context, _ storage.APIKeyFilter) (int, error) {
+	return len(m.keys), nil
+}
+
+func (m *mockAPIKeyRepo) DeleteBySourceExcluding(_ context.Context, _ string, _ []string) (int64, error) {
+	return 0, nil
+}
+
+func (m *mockAPIKeyRepo) BackfillSource(_ context.Context, _ string) (int64, error) {
+	return 0, nil
+}
+
 // mockNonceStore implements storage.NonceStore for fuzz tests.
 type mockNonceStore struct {
 	seen map[string]bool
@@ -88,7 +100,7 @@ func setupFuzzVerifier(t testing.TB) (*auth.Verifier, ed25519.PublicKey, ed25519
 			Name:         "Fuzz Test Key",
 			PublicKeyHex: hex.EncodeToString(pub),
 			Enabled:      true,
-			Admin:        true,
+			Role:         types.RoleAdmin,
 		},
 	}}
 
@@ -121,7 +133,7 @@ func FuzzAuthMiddleware_Headers(f *testing.F) {
 
 	verifier, _, _ := setupFuzzVerifier(f)
 	logger := newTestLogger()
-	middleware := AuthMiddleware(verifier, logger)
+	middleware := AuthMiddleware(verifier, logger, nil)
 
 	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -173,7 +185,7 @@ func FuzzAuthMiddleware_Body(f *testing.F) {
 
 	verifier, _, priv := setupFuzzVerifier(f)
 	logger := newTestLogger()
-	middleware := AuthMiddleware(verifier, logger)
+	middleware := AuthMiddleware(verifier, logger, nil)
 
 	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)

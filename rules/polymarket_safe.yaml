@@ -32,7 +32,7 @@
 #   UniswapV3 Router:        0xE592427A0AEce92De3Edee1F18E0157C05861564
 #
 # External Wallets:
-#   Treasury Wallet:         0x9Ce3316B865e940227EA724AFdeAAA2759f1AA7C  # Fund distribution & collection
+#   Treasury Wallet:         0x9Ce3316B865e940227EA724AFdeAAA2759f1AA7C  # Fund distribution & wallet
 #
 # EIP-712 Domains:
 #   ClobAuth Domain:         "ClobAuthDomain" (version: "1")

@@ -5,6 +5,25 @@ import (
 	"time"
 )
 
+// VariableType is the canonical type tag for a template variable.
+// Matches internal/core/types VarType* constants and the JS SDK's
+// VariableType union. Widgets dispatch on this value.
+type VariableType string
+
+const (
+	VarTypeAddress     VariableType = "address"
+	VarTypeAddressList VariableType = "address_list"
+	VarTypeBigInt      VariableType = "bigint"
+	VarTypeBigIntList  VariableType = "bigint_list"
+	VarTypeString      VariableType = "string"
+	VarTypeBool        VariableType = "bool"
+	VarTypeBytes       VariableType = "bytes"
+	VarTypeBytes4      VariableType = "bytes4"
+	VarTypeDuration    VariableType = "duration"
+	VarTypeEnum        VariableType = "enum"
+	VarTypeJSON        VariableType = "json"
+)
+
 // Template represents a rule template.
 type Template struct {
 	ID             string             `json:"id"`
@@ -13,7 +32,14 @@ type Template struct {
 	Type           string             `json:"type"`
 	Mode           string             `json:"mode"`
 	Source         string             `json:"source"`
+	// ChainType narrows the template to one chain family. Empty for
+	// off-chain templates (sign_type_allowlist, future rate_limit, ...).
+	ChainType      string             `json:"chain_type,omitempty"`
+	// SourcePath is the relative path under the configured source root,
+	// e.g. "evm/erc20.yaml" for file sources. Empty for source=api.
+	SourcePath     string             `json:"source_path,omitempty"`
 	Variables      []TemplateVariable `json:"variables,omitempty"`
+	VariableGroups json.RawMessage    `json:"variable_groups,omitempty"`
 	Config         json.RawMessage    `json:"config,omitempty"`
 	BudgetMetering json.RawMessage    `json:"budget_metering,omitempty"`
 	Enabled        bool               `json:"enabled"`
@@ -21,13 +47,35 @@ type Template struct {
 	UpdatedAt      time.Time          `json:"updated_at"`
 }
 
-// TemplateVariable describes a variable in a rule template.
+// TemplateVariable describes a variable in a rule template. v0.3
+// carries every UI-relevant field so the typed-widget dispatch
+// (bool→checkbox, enum→select, *_list→textarea, etc.) doesn't have to
+// roundtrip again for option lists or placeholder hints.
 type TemplateVariable struct {
-	Name        string `json:"name"`
-	Type        string `json:"type"`
-	Description string `json:"description,omitempty"`
-	Required    bool   `json:"required"`
-	Default     string `json:"default,omitempty"`
+	Name        string       `json:"name"`
+	Type        VariableType `json:"type"`
+	Label       string       `json:"label,omitempty"`
+	Description string       `json:"description,omitempty"`
+	Required    bool         `json:"required"`
+	// Default is raw JSON so the natural shape (string / number / bool /
+	// array) round-trips. Callers can json.Unmarshal into a concrete
+	// type if they know the variable's Type, or pass through as-is.
+	Default     json.RawMessage `json:"default,omitempty"`
+	Placeholder string          `json:"placeholder,omitempty"`
+	Hint        string          `json:"hint,omitempty"`
+	// Options enumerates the legal values for Type=enum.
+	Options   []string `json:"options,omitempty"`
+	Sensitive bool     `json:"sensitive,omitempty"`
+	Pattern   string   `json:"pattern,omitempty"`
+	Min       *string  `json:"min,omitempty"`
+	Max       *string  `json:"max,omitempty"`
+}
+
+// VariableGroup is an optional UI grouping hint for long forms.
+type VariableGroup struct {
+	Title       string   `json:"title"`
+	Description string   `json:"description,omitempty"`
+	Variables   []string `json:"variables"`
 }
 
 // ListResponse represents the response from listing templates.

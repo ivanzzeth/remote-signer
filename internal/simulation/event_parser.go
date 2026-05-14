@@ -1,0 +1,494 @@
+package simulation
+
+import (
+	"context"
+	"math/big"
+	"strings"
+)
+
+// Well-known event topic0 hashes.
+const (
+	// ERC20 Transfer / ERC721 Transfer (same topic0, distinguished by topic count)
+	transferTopic0 = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+
+	// ERC1155 TransferSingle
+	transferSingleTopic0 = "0xc3d58168c5ae7397731d063d5bbf3d657706970af1fbf4d87d8d6f7c7cc0a0fa"
+
+	// ERC1155 TransferBatch
+	transferBatchTopic0 = "0x4a39dc06d4c0dbc64b70af90fd698a233a518aa5d07e595d9738d51b3ff80634"
+
+	// WETH Deposit
+	depositTopic0 = "0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c"
+
+	// WETH Withdrawal
+	withdrawalTopic0 = "0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65"
+
+	// ERC20/ERC721 Approval
+	approvalTopic0 = "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925"
+
+	// ERC721 ApprovalForAll
+	approvalForAllTopic0 = "0x17307eab39ab6107e8899845ad3d59bd9653f200f220920489ca2b5937696c31"
+
+	// Dangerous state change events (detected in simulation for manual approval)
+	// OwnershipTransferred(address indexed previousOwner, address indexed newOwner)
+	ownershipTransferredTopic0 = "0x8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0"
+	// Upgraded(address indexed implementation)
+	upgradedTopic0 = "0xbc7cd75a20ee27fd9adebab32041f755214dbc6bffa90cc0225b39da2e5c2d3b"
+	// AdminChanged(address previousAdmin, address newAdmin)
+	adminChangedTopic0 = "0x7e644d79422f17c01e4894b5f4f588d331ebfa28653d42ae832dc59e38c9798f"
+)
+
+// ParseEvents parses token standard events from transaction receipt logs.
+func ParseEvents(logs []TxLog) []SimEvent {
+	events := make([]SimEvent, 0, len(logs))
+
+	for _, log := range logs {
+		if len(log.Topics) == 0 {
+			continue
+		}
+
+		topic0 := strings.ToLower(log.Topics[0])
+
+		switch topic0 {
+		case transferTopic0:
+			event := parseTransferEvent(log)
+			if event != nil {
+				events = append(events, *event)
+			}
+
+		case transferSingleTopic0:
+			event := parseTransferSingleEvent(log)
+			if event != nil {
+				events = append(events, *event)
+			}
+
+		case transferBatchTopic0:
+			event := parseTransferBatchEvent(log)
+			events = append(events, event...)
+
+		case depositTopic0:
+			event := parseDepositEvent(log)
+			if event != nil {
+				events = append(events, *event)
+			}
+
+		case withdrawalTopic0:
+			event := parseWithdrawalEvent(log)
+			if event != nil {
+				events = append(events, *event)
+			}
+
+		case approvalTopic0:
+			event := parseApprovalEvent(log)
+			if event != nil {
+				events = append(events, *event)
+			}
+
+		case approvalForAllTopic0:
+			event := parseApprovalForAllEvent(log)
+			if event != nil {
+				events = append(events, *event)
+			}
+		}
+	}
+
+	return events
+}
+
+// parseTransferEvent parses ERC20 or ERC721 Transfer events.
+// ERC20: 3 topics (topic0, from, to) + 32-byte data (value)
+// ERC721: 4 topics (topic0, from, to, tokenId) + empty data
+func parseTransferEvent(log TxLog) *SimEvent {
+	if len(log.Topics) == 3 {
+		// ERC20 Transfer
+		from := topicToAddress(log.Topics[1])
+		to := topicToAddress(log.Topics[2])
+		value := dataToHexValue(log.Data, 0)
+
+		return &SimEvent{
+			Address:  strings.ToLower(log.Address),
+			Event:    "Transfer",
+			Standard: "erc20",
+			Args: map[string]string{
+				"from":  from,
+				"to":    to,
+				"value": value,
+			},
+		}
+	}
+
+	if len(log.Topics) == 4 {
+		// ERC721 Transfer
+		from := topicToAddress(log.Topics[1])
+		to := topicToAddress(log.Topics[2])
+		tokenID := topicToUint256(log.Topics[3])
+
+		return &SimEvent{
+			Address:  strings.ToLower(log.Address),
+			Event:    "Transfer",
+			Standard: "erc721",
+			Args: map[string]string{
+				"from":    from,
+				"to":      to,
+				"tokenId": tokenID,
+			},
+		}
+	}
+
+	return nil
+}
+
+// parseTransferSingleEvent parses ERC1155 TransferSingle events.
+// Topics: [topic0, operator (indexed), from (indexed), to (indexed)]
+// Data: [id (uint256), value (uint256)]
+func parseTransferSingleEvent(log TxLog) *SimEvent {
+	if len(log.Topics) < 4 {
+		return nil
+	}
+
+	operator := topicToAddress(log.Topics[1])
+	from := topicToAddress(log.Topics[2])
+	to := topicToAddress(log.Topics[3])
+	id := dataToHexValue(log.Data, 0)
+	value := dataToHexValue(log.Data, 1)
+
+	return &SimEvent{
+		Address:  strings.ToLower(log.Address),
+		Event:    "TransferSingle",
+		Standard: "erc1155",
+		Args: map[string]string{
+			"operator": operator,
+			"from":     from,
+			"to":       to,
+			"id":       id,
+			"value":    value,
+		},
+	}
+}
+
+// parseTransferBatchEvent parses ERC1155 TransferBatch events.
+// Topics: [topic0, operator (indexed), from (indexed), to (indexed)]
+// Data: [ids (uint256[]), values (uint256[])]
+func parseTransferBatchEvent(log TxLog) []SimEvent {
+	if len(log.Topics) < 4 {
+		return nil
+	}
+
+	operator := topicToAddress(log.Topics[1])
+	from := topicToAddress(log.Topics[2])
+	to := topicToAddress(log.Topics[3])
+
+	// Parse dynamic arrays from data
+	data := trimHexPrefix(log.Data)
+	ids, values := parseTransferBatchData(data)
+
+	events := make([]SimEvent, 0, len(ids))
+	for i := 0; i < len(ids) && i < len(values); i++ {
+		events = append(events, SimEvent{
+			Address:  strings.ToLower(log.Address),
+			Event:    "TransferBatch",
+			Standard: "erc1155",
+			Args: map[string]string{
+				"operator": operator,
+				"from":     from,
+				"to":       to,
+				"id":       ids[i],
+				"value":    values[i],
+			},
+		})
+	}
+
+	return events
+}
+
+// parseDepositEvent parses WETH Deposit events.
+// Topics: [topic0, dst (indexed)]
+// Data: [wad (uint256)]
+func parseDepositEvent(log TxLog) *SimEvent {
+	if len(log.Topics) < 2 {
+		return nil
+	}
+
+	dst := topicToAddress(log.Topics[1])
+	wad := dataToHexValue(log.Data, 0)
+
+	return &SimEvent{
+		Address:  strings.ToLower(log.Address),
+		Event:    "Deposit",
+		Standard: "weth",
+		Args: map[string]string{
+			"dst": dst,
+			"wad": wad,
+		},
+	}
+}
+
+// parseWithdrawalEvent parses WETH Withdrawal events.
+// Topics: [topic0, src (indexed)]
+// Data: [wad (uint256)]
+func parseWithdrawalEvent(log TxLog) *SimEvent {
+	if len(log.Topics) < 2 {
+		return nil
+	}
+
+	src := topicToAddress(log.Topics[1])
+	wad := dataToHexValue(log.Data, 0)
+
+	return &SimEvent{
+		Address:  strings.ToLower(log.Address),
+		Event:    "Withdrawal",
+		Standard: "weth",
+		Args: map[string]string{
+			"src": src,
+			"wad": wad,
+		},
+	}
+}
+
+// parseApprovalEvent parses ERC20/ERC721 Approval events.
+func parseApprovalEvent(log TxLog) *SimEvent {
+	if len(log.Topics) < 3 {
+		return nil
+	}
+
+	owner := topicToAddress(log.Topics[1])
+	spender := topicToAddress(log.Topics[2])
+
+	args := map[string]string{
+		"owner":   owner,
+		"spender": spender,
+	}
+
+	standard := "erc20"
+	if len(log.Topics) == 4 {
+		// ERC721 Approval has tokenId as 4th topic
+		standard = "erc721"
+		args["tokenId"] = topicToUint256(log.Topics[3])
+	} else {
+		args["value"] = dataToHexValue(log.Data, 0)
+	}
+
+	return &SimEvent{
+		Address:  strings.ToLower(log.Address),
+		Event:    "Approval",
+		Standard: standard,
+		Args:     args,
+	}
+}
+
+// parseApprovalForAllEvent parses ERC721/ERC1155 ApprovalForAll events.
+func parseApprovalForAllEvent(log TxLog) *SimEvent {
+	if len(log.Topics) < 3 {
+		return nil
+	}
+
+	owner := topicToAddress(log.Topics[1])
+	operator := topicToAddress(log.Topics[2])
+
+	return &SimEvent{
+		Address:  strings.ToLower(log.Address),
+		Event:    "ApprovalForAll",
+		Standard: "erc721",
+		Args: map[string]string{
+			"owner":    owner,
+			"operator": operator,
+		},
+	}
+}
+
+// AllowanceQuerier queries on-chain ERC20 allowance for approval detection.
+type AllowanceQuerier interface {
+	// QueryAllowance returns the current on-chain allowance(owner, spender) for a token.
+	QueryAllowance(ctx context.Context, chainID, token, owner, spender string) (*big.Int, error)
+}
+
+// DetectApproval checks if simulation events contain REAL approval grants (not transferFrom side effects).
+//
+// For ERC20 Approval events: queries on-chain allowance and compares with event value.
+// If event.value > on-chain allowance → allowance increased → real approval → return true.
+// If event.value ≤ on-chain allowance → transferFrom consumed some → side effect → skip.
+//
+// For ApprovalForAll: no side-effect issue (transferFrom doesn't emit it), checked directly.
+//
+// If querier is nil, falls back to value>0 heuristic (less accurate).
+func DetectApproval(ctx context.Context, events []SimEvent, managedSigners map[string]bool, chainID string, querier AllowanceQuerier) bool {
+	for _, event := range events {
+		if event.Event != "Approval" && event.Event != "ApprovalForAll" {
+			continue
+		}
+		owner := strings.ToLower(event.Args["owner"])
+		if len(managedSigners) > 0 && !managedSigners[owner] {
+			continue
+		}
+
+		// ApprovalForAll: no transferFrom side-effect issue, check directly
+		if event.Event == "ApprovalForAll" {
+			return true
+		}
+
+		// ERC20 Approval: check if allowance actually increased
+		val := event.Args["value"]
+		if val == "0" || val == "" {
+			continue
+		}
+
+		spender := strings.ToLower(event.Args["spender"])
+		token := strings.ToLower(event.Address)
+
+		eventValue := new(big.Int)
+		if _, ok := eventValue.SetString(val, 10); !ok {
+			// Can't parse value, treat as suspicious
+			return true
+		}
+
+		// Query on-chain allowance to compare
+		if querier != nil && chainID != "" && token != "" && spender != "" {
+			currentAllowance, err := querier.QueryAllowance(ctx, chainID, token, owner, spender)
+			if err == nil && currentAllowance != nil {
+				if eventValue.Cmp(currentAllowance) <= 0 {
+					// event.value ≤ current allowance → transferFrom consumed some → not a new approval
+					continue
+				}
+				// event.value > current allowance → allowance increased → real approval
+				return true
+			}
+			// Query failed, fall through to suspicious
+		}
+
+		// No querier or query failed → treat non-zero approval as suspicious
+		return true
+	}
+	return false
+}
+
+// DetectDangerousStateChanges checks if simulation logs contain dangerous state change events
+// affecting any managed signer. These events indicate administrative operations (ownership transfer,
+// proxy upgrade, etc.) that should require manual approval regardless of how they were triggered
+// (direct call, multicall wrapper, etc.).
+//
+// Returns a human-readable reason if detected, or empty string if safe.
+func DetectDangerousStateChanges(logs []TxLog, managedSigners map[string]bool) string {
+	for _, log := range logs {
+		if len(log.Topics) == 0 {
+			continue
+		}
+		topic0 := strings.ToLower(log.Topics[0])
+
+		switch topic0 {
+		case ownershipTransferredTopic0:
+			// OwnershipTransferred(address indexed previousOwner, address indexed newOwner)
+			if len(log.Topics) >= 2 {
+				prevOwner := strings.ToLower(topicToAddress(log.Topics[1]))
+				if len(managedSigners) == 0 || managedSigners[prevOwner] {
+					return "OwnershipTransferred detected: managed signer losing ownership"
+				}
+			}
+
+		case approvalForAllTopic0:
+			// ApprovalForAll(address indexed owner, address indexed operator, bool approved)
+			// Check if approved=true (data field, last byte != 0) and owner is managed signer
+			if len(log.Topics) >= 2 {
+				owner := strings.ToLower(topicToAddress(log.Topics[1]))
+				if len(managedSigners) == 0 || managedSigners[owner] {
+					// Check approved flag in data (bool, last byte)
+					data := trimHexPrefix(log.Data)
+					if len(data) >= 64 {
+						lastByte := data[len(data)-1]
+						if lastByte != '0' { // approved = true
+							return "ApprovalForAll(true) detected for managed signer"
+						}
+					}
+				}
+			}
+
+		case upgradedTopic0:
+			// Upgraded(address indexed implementation)
+			// Any proxy upgrade in the tx is suspicious
+			return "proxy Upgraded event detected"
+
+		case adminChangedTopic0:
+			// AdminChanged(address previousAdmin, address newAdmin)
+			return "proxy AdminChanged event detected"
+		}
+	}
+	return ""
+}
+
+// Helper functions for parsing hex data
+
+// topicToAddress extracts an Ethereum address from a 32-byte topic (last 20 bytes).
+func topicToAddress(topic string) string {
+	topic = strings.ToLower(trimHexPrefix(topic))
+	if len(topic) < 40 {
+		return "0x" + topic
+	}
+	// Take last 40 hex chars (20 bytes)
+	return "0x" + topic[len(topic)-40:]
+}
+
+// topicToUint256 converts a 32-byte topic to a decimal string.
+func topicToUint256(topic string) string {
+	hex := trimHexPrefix(topic)
+	val := new(big.Int)
+	val.SetString(hex, 16)
+	return val.String()
+}
+
+// dataToHexValue extracts a uint256 value from ABI-encoded data at the given word index.
+func dataToHexValue(data string, wordIndex int) string {
+	hex := trimHexPrefix(data)
+	start := wordIndex * 64
+	if start+64 > len(hex) {
+		return "0"
+	}
+	word := hex[start : start+64]
+	val := new(big.Int)
+	val.SetString(word, 16)
+	return val.String()
+}
+
+// parseTransferBatchData parses the ids and values arrays from TransferBatch data.
+func parseTransferBatchData(data string) (ids []string, values []string) {
+	// ABI encoding: offset_ids(32) + offset_values(32) + len_ids(32) + ids... + len_values(32) + values...
+	if len(data) < 128 { // minimum: 2 offsets
+		return nil, nil
+	}
+
+	// Read offsets
+	idsOffset := parseUint64FromHex(data[0:64])
+	valuesOffset := parseUint64FromHex(data[64:128])
+
+	ids = parseUint256Array(data, idsOffset*2)     // *2 because offsets are in bytes, data is hex chars
+	values = parseUint256Array(data, valuesOffset*2)
+
+	return ids, values
+}
+
+// parseUint256Array parses a dynamic uint256[] from ABI-encoded data at the given hex char offset.
+func parseUint256Array(data string, hexOffset uint64) []string {
+	if hexOffset+64 > uint64(len(data)) {
+		return nil
+	}
+
+	length := parseUint64FromHex(data[hexOffset : hexOffset+64])
+	result := make([]string, 0, length)
+
+	for i := uint64(0); i < length; i++ {
+		start := hexOffset + 64 + i*64
+		if start+64 > uint64(len(data)) {
+			break
+		}
+		val := new(big.Int)
+		val.SetString(data[start:start+64], 16)
+		result = append(result, val.String())
+	}
+
+	return result
+}
+
+// parseUint64FromHex parses a hex string as uint64.
+func parseUint64FromHex(hex string) uint64 {
+	val := new(big.Int)
+	val.SetString(hex, 16)
+	return val.Uint64()
+}
