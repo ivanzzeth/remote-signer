@@ -1,0 +1,20 @@
+# Preset: ERC721 Permit (EIP-4494) typed_data validation (evm_js).
+# Use: remote-signer-cli preset create-from erc721_permit.preset.js.yaml [--config config.yaml --write] [--set chain_id=1 --set token_address=0x...]
+
+name: "ERC721 Permit (JS)"
+chain_type: "evm"
+chain_id: "1"
+enabled: true
+variables:
+  token_address: "0xBC4ca0EdA7647A8aB7C2061c2E118A18a936f13D"
+  allowed_spenders: ""
+  max_deadline: "-1"
+template_ids:
+  - evm/erc721_permit
+operator_overrides:
+  - name: token_address
+    required: false
+  - name: allowed_spenders
+    required: false
+  - name: max_deadline
+    required: false
