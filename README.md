@@ -42,7 +42,6 @@ git clone https://github.com/ivanzzeth/remote-signer.git && cd remote-signer && 
 | [Deployment Guide](docs/deployment.md) | Docker, Kubernetes, HA, monitoring, backup |
 | [Rules, Templates & Presets](docs/rules-templates-and-presets.md) | Concepts: rule templates, instances, presets |
 | [Rule Syntax Reference](docs/rule-syntax.md) | All rule types with examples |
-| [API Reference](docs/api.md) | Complete endpoint documentation |
 | [Integration Guide](INTEGRATION.md) | Go/TS/Rust SDKs, MCP server |
 | [TLS / mTLS Guide](docs/tls.md) | Certificate trust model, generation, production practices |
 | [TUI Guide](docs/tui.md) | Terminal UI: build, run, key bindings |
