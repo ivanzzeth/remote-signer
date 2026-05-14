@@ -1,3 +1,6 @@
+// Package config handles remote-signer configuration loading and rule initialization.
+// rule_init_sync.go orchestrates rule sync from config — expanding instance template rules,
+// syncing source rules, pruning orphaned rules, and syncing budgets in post-transaction.
 package config
 
 import (

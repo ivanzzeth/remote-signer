@@ -1,3 +1,6 @@
+// Package rule implements rule engine, budget checking, and whitelist/blocklist evaluation.
+// budget_checker.go defines the BudgetChecker struct and its core CheckAndDeductBudget method
+// (auto-creation and alert helpers live in budget_checker_auto.go).
 package rule
 
 import (
