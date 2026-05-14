@@ -210,6 +210,6 @@ jobs:
 
 ## 相关文档
 
-- [API 文档](../../../docs/api.md)
+- [Architecture Overview](../../../ARCHITECTURE.md)
 - [Go E2E 测试](../../../e2e/e2e_test.go)
 - [客户端 README](../README.md)

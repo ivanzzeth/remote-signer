@@ -2,35 +2,27 @@
 
 This directory contains documentation for the Remote Signer service.
 
-## Documentation Structure
+## Document Index
 
-### Features
-Detailed feature documentation and usage guides:
-- [Collection Wallets](features/wallet-wallets.md) - Wallet grouping and batch authorization
+- [Configuration Reference](configuration.md) — Full `config.yaml` reference
+- [Deployment Guide](deployment.md) — Docker, Kubernetes, HA, monitoring, backup
+- [Rules, Templates & Presets](rules-templates-and-presets.md) — Rule templates, instances, presets
+- [Rule Syntax Reference](rule-syntax.md) — All rule types with examples
+- [TLS / mTLS Guide](tls.md) — Certificate trust model, generation, production practices
+- [TUI Guide](tui.md) — Terminal UI: build, run, key bindings
+- [TUI Rules Subtabs Design](tui-rules-subtabs-design.md) — TUI rules management UX
+- [TUI Signers HD Wallets Design](tui-signers-hdwallets-design.md) — TUI signer management UX
+- [Testing Guide](testing.md) — Unit tests, E2E, rule validation
+- [SDK ⇄ CLI Matrix](sdk-cli-matrix.md) — Auditable mapping of pkg/client vs remote-signer
 
-### API Reference
-API endpoint documentation:
-- [Collections API](api/wallets.md) - Collection management endpoints
+## Rule Tutorials (by Protocol)
 
-## Quick Links
+- [Polymarket (EN)](rules/polymarket.en.md) / [Polymarket (中文)](rules/polymarket.zh.md)
+- [Predict (EN)](rules/predict.en.md) / [Predict (中文)](rules/predict.zh.md)
+- [Uniswap (EN)](rules/uniswap.en.md) / [Uniswap (中文)](rules/uniswap.zh.md)
+- [USDC (EN)](rules/usdc.en.md) / [USDC (中文)](rules/usdc.zh.md)
 
-### For Users
-- [Collection Wallets Guide](features/wallet-wallets.md) - Learn how to use Collections for wallet grouping and team access management
+## Related
 
-### For Developers
-- [Collections API](api/wallets.md) - API reference for Collection CRUD operations
-
-### For Administrators
-- Security considerations in [Collection Wallets](features/wallet-wallets.md#security)
-
-## Related Documentation
-
-- **Architecture**: See `docs/architecture/` in the monorepo root for cross-service design
-- **API Overview**: Core API concepts (authentication, RBAC, error handling)
-- **TUI Guide**: Terminal UI usage and navigation
-
-## Version
-
-Documentation version: 0.1.27
-
-Last updated: 2026-04-02
+- [ARCHITECTURE.md](../ARCHITECTURE.md) — Core concepts and data flow
+- [SECURITY.md](../SECURITY.md) — Threat model, security boundaries, key management
