@@ -327,20 +327,20 @@ func Run(args []string) error {
 	// empty Registry rather than failing.
 	if err := syncRegistries(context.Background(), db, cfg, configPath, log); err != nil {
 		return fmt.Errorf("registry sync: %w", err)
-		}
+	}
 
-		// Bootstrap the agent preset: on first launch, the Registry loaded
-		// evm/agent preset and template into the DB. Apply the preset (create
-		// rule instances owned by the agent key) if no agent rules exist yet.
-		presetRepo, err := storage.NewGormPresetRepository(db)
-		if err != nil {
-			return fmt.Errorf("failed to create preset repository: %w", err)
-		}
-		if err := bootstrapAgentPresetIfNeeded(context.Background(), presetRepo, templateRepo, ruleRepo, budgetRepo, log); err != nil {
-			return fmt.Errorf("bootstrap agent preset: %w", err)
-		}
+	// Bootstrap the agent preset: on first launch, the Registry loaded
+	// evm/agent preset and template into the DB. Apply the preset (create
+	// rule instances owned by the agent key) if no agent rules exist yet.
+	presetRepo, err := storage.NewGormPresetRepository(db)
+	if err != nil {
+		return fmt.Errorf("failed to create preset repository: %w", err)
+	}
+	if err := bootstrapAgentPresetIfNeeded(context.Background(), presetRepo, templateRepo, ruleRepo, budgetRepo, log); err != nil {
+		return fmt.Errorf("bootstrap agent preset: %w", err)
+	}
 
-		// Initialize rules from config (with template expansion)
+	// Initialize rules from config (with template expansion)
 	ruleInit, err := config.NewRuleInitializer(ruleRepo, log)
 	if err != nil {
 		return fmt.Errorf("failed to create rule initializer: %w", err)
@@ -1568,7 +1568,7 @@ func validateEVMJSRulesAtStartup(ctx context.Context, expandedRules []config.Rul
 	return nil
 }
 
-	// validateMessagePatternRulesAtStartup validates all message_pattern rules at startup
+// validateMessagePatternRulesAtStartup validates all message_pattern rules at startup
 // (same as validate-rules: regex compile + test cases). If any fail, startup fails.
 func validateMessagePatternRulesAtStartup(ctx context.Context, ruleRepo storage.RuleRepository, log *slog.Logger) error {
 	ruleType := types.RuleTypeMessagePattern
