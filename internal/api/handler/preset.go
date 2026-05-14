@@ -207,15 +207,22 @@ func (h *PresetHandler) detail(w http.ResponseWriter, r *http.Request, id string
 	for _, name := range meta.OverrideHints {
 		def := varDefs[name]
 		entry := PresetVariableDetail{Name: name}
-		entry.Type = def.Type
+		entry.Type = string(def.Type)
 		entry.Description = def.Description
 		entry.Required = def.Required
 		// Default: preset's variables[] wins (operator hand-tuned it),
-		// then template's declared default.
+		// then template's declared default. The wire format remains a
+		// string here pending R5 (the typed substituter); non-string
+		// defaults round-trip through fmt.Sprint until the UI catches
+		// up with type-aware widgets in R10.
 		if v, ok := meta.Variables[name]; ok && v != "" {
 			entry.DefaultValue = v
-		} else {
-			entry.DefaultValue = def.Default
+		} else if def.Default != nil {
+			if s, ok := def.Default.(string); ok {
+				entry.DefaultValue = s
+			} else {
+				entry.DefaultValue = fmt.Sprint(def.Default)
+			}
 		}
 		hints = append(hints, entry)
 	}
@@ -238,10 +245,10 @@ func (h *PresetHandler) detail(w http.ResponseWriter, r *http.Request, id string
 // templateVarDef is the slimmed-down view we need from a template's
 // declared variables — just enough for the detail UI.
 type templateVarDef struct {
-	Type        string
+	Type        types.VariableType
 	Description string
 	Required    bool
-	Default     string
+	Default     any
 }
 
 func (h *PresetHandler) collectVariableDefs(r *http.Request, meta preset.PresetMeta) map[string]templateVarDef {

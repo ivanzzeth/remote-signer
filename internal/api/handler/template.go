@@ -383,7 +383,7 @@ func (h *TemplateHandler) createTemplate(w http.ResponseWriter, r *http.Request)
 		for i, v := range req.Variables {
 			vars[i] = types.TemplateVariable{
 				Name:        v.Name,
-				Type:        v.Type,
+				Type:        types.VariableType(v.Type),
 				Description: v.Description,
 				Required:    v.Required,
 				Default:     v.Default,
@@ -717,12 +717,23 @@ func (h *TemplateHandler) toTemplateResponse(tmpl *types.RuleTemplate) TemplateR
 		if err := json.Unmarshal(tmpl.Variables, &vars); err == nil {
 			resp.Variables = make([]TemplateVarResponse, len(vars))
 			for i, v := range vars {
+				// Default is typed (any) post-R1; the wire still uses
+				// a string field pending R9's SDK update. Coerce
+				// strings straight through, non-strings via Sprint.
+				var defaultStr string
+				if v.Default != nil {
+					if s, ok := v.Default.(string); ok {
+						defaultStr = s
+					} else {
+						defaultStr = fmt.Sprint(v.Default)
+					}
+				}
 				resp.Variables[i] = TemplateVarResponse{
 					Name:        v.Name,
-					Type:        v.Type,
+					Type:        string(v.Type),
 					Description: v.Description,
 					Required:    v.Required,
-					Default:     v.Default,
+					Default:     defaultStr,
 				}
 			}
 		}
