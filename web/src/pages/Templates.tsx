@@ -27,11 +27,17 @@ export function Templates() {
   const [filter, setFilter] = useState("");
 
   const all = data?.templates ?? [];
+  const lc = (s: string | undefined) => (s ?? "").toLowerCase();
+  const fl = filter.toLowerCase();
+  // ID is now meaningful (file-stem, e.g. "evm/erc20"), so search hits
+  // it too — operators searching for "evm/" want chain-scoped templates.
   const filtered = filter
     ? all.filter(
         (t) =>
-          t.name.toLowerCase().includes(filter.toLowerCase()) ||
-          (t.description?.toLowerCase().includes(filter.toLowerCase()) ?? false),
+          lc(t.id).includes(fl) ||
+          lc(t.name).includes(fl) ||
+          lc(t.description).includes(fl) ||
+          lc(t.chain_type).includes(fl),
       )
     : all;
 
@@ -65,7 +71,7 @@ export function Templates() {
                 type="text"
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
-                placeholder="name or description"
+                placeholder="id, name, description, or chain"
                 className="w-full rounded-md border border-ink-300 px-2 py-1 text-sm"
               />
             </div>
@@ -87,6 +93,7 @@ export function Templates() {
               <thead className="text-xs uppercase text-ink-500">
                 <tr>
                   <th className="py-1 pr-3 font-normal">Name</th>
+                  <th className="py-1 pr-3 font-normal">Chain</th>
                   <th className="py-1 pr-3 font-normal">Mode</th>
                   <th className="py-1 pr-3 font-normal">Vars</th>
                   <th className="py-1 pr-3 font-normal">Source</th>
@@ -123,6 +130,14 @@ function TemplateRow({ tmpl }: { tmpl: Template }) {
         </Link>
         {tmpl.description && (
           <div className="text-[11px] text-ink-500">{tmpl.description.slice(0, 120)}</div>
+        )}
+        <div className="font-mono text-[10px] text-ink-500">{tmpl.id}</div>
+      </td>
+      <td className="py-1 pr-3">
+        {tmpl.chain_type ? (
+          <Badge>{tmpl.chain_type}</Badge>
+        ) : (
+          <span className="text-[11px] text-ink-500">off-chain</span>
         )}
       </td>
       <td className="py-1 pr-3">

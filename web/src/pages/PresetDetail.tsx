@@ -72,20 +72,20 @@ export function PresetDetail() {
                     {data.chain_id ? `/${data.chain_id}` : ""}
                   </Badge>
                 )}
-                {data.template_names.length > 0 && (
+                {data.template_ids.length > 0 && (
                   <Badge tone="neutral">
-                    {data.template_names.length} template
-                    {data.template_names.length === 1 ? "" : "s"}
+                    {data.template_ids.length} template
+                    {data.template_ids.length === 1 ? "" : "s"}
                   </Badge>
                 )}
               </div>
             }
           />
 
-          {data.template_names.length > 0 && (
+          {data.template_ids.length > 0 && (
             <Card title="Templates referenced">
               <ul className="space-y-1 text-sm">
-                {data.template_names.map((tn) => (
+                {data.template_ids.map((tn) => (
                   <li key={tn} className="font-mono text-xs text-ink-700">
                     {tn}
                   </li>
@@ -256,9 +256,50 @@ function VariableRow({
   onChange: (v: string) => void;
 }) {
   const testid = `preset-form-var-${variable.name}`;
-  // address_list templates expect a comma-separated list; surface as
-  // a textarea so long lists are usable.
-  if (variable.type === "address_list") {
+
+  // bool → render a toggle/checkbox so the operator picks true/false
+  // instead of typing the literal string. Internal value remains a
+  // string ("true" / "false") so the rest of the apply path stays
+  // string-keyed; SubstituteTyped coerces on the server.
+  if (variable.type === "bool") {
+    const checked = value === "true";
+    return (
+      <FormRow
+        label={variable.name}
+        required={variable.required}
+        type={variable.type}
+        help={variable.description}
+      >
+        <label className="inline-flex items-center gap-2 text-sm text-ink-700">
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={(e) => onChange(e.target.checked ? "true" : "false")}
+            data-testid={testid}
+          />
+          <span>{checked ? "true" : "false"}</span>
+        </label>
+        {variable.default_value && (
+          <Hint>default: {variable.default_value}</Hint>
+        )}
+      </FormRow>
+    );
+  }
+
+  // *_list and json → textarea (multi-line values, often pasted from
+  // elsewhere). Comma-separated for lists, raw JSON for json.
+  if (
+    variable.type === "address_list" ||
+    variable.type === "bigint_list" ||
+    variable.type === "json"
+  ) {
+    const placeholder =
+      variable.default_value ||
+      (variable.type === "json"
+        ? '{"key": "value"}'
+        : variable.type === "bigint_list"
+          ? "100, 200, 300"
+          : "0xabc..., 0xdef...");
     return (
       <FormRow
         label={variable.name}
@@ -269,8 +310,8 @@ function VariableRow({
         <textarea
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          rows={2}
-          placeholder={variable.default_value || "0xabc..., 0xdef..."}
+          rows={variable.type === "json" ? 4 : 2}
+          placeholder={placeholder}
           className="w-full rounded-md border border-ink-300 px-2 py-1 font-mono text-xs"
           data-testid={testid}
         />
@@ -280,10 +321,23 @@ function VariableRow({
       </FormRow>
     );
   }
+
+  // address / bigint / bytes / bytes4 → monospace; everything else
+  // (string / enum / duration) gets the default proportional input.
   const isMono =
     variable.type === "address" ||
-    variable.type === "uint256" ||
-    variable.type === "address_list";
+    variable.type === "bigint" ||
+    variable.type === "bytes" ||
+    variable.type === "bytes4";
+  const placeholder =
+    variable.default_value ||
+    (variable.type === "duration"
+      ? "24h"
+      : variable.type === "bigint"
+        ? "1000000000000000000"
+        : variable.type === "address"
+          ? "0x..."
+          : variable.type || "");
   return (
     <FormRow
       label={variable.name}
@@ -295,7 +349,7 @@ function VariableRow({
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder={variable.default_value || variable.type || ""}
+        placeholder={placeholder}
         className={`w-full rounded-md border border-ink-300 px-2 py-1 text-sm ${
           isMono ? "font-mono" : ""
         }`}

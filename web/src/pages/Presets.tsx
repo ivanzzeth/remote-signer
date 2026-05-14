@@ -33,7 +33,9 @@ export function Presets() {
         (p) =>
           lc(p.id).includes(fl) ||
           lc(p.name).includes(fl) ||
-          p.template_names.some((t) => lc(t).includes(fl)),
+          lc(p.description).includes(fl) ||
+          lc(p.chain_type).includes(fl) ||
+          p.template_ids.some((t) => lc(t).includes(fl)),
       )
     : all;
 
@@ -67,7 +69,7 @@ export function Presets() {
                 type="text"
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
-                placeholder="id or template name"
+                placeholder="id, name, description, chain, or template id"
                 className="w-full rounded-md border border-ink-300 px-2 py-1 text-sm"
               />
             </div>
@@ -138,7 +140,7 @@ function PresetRow({ entry }: { entry: PresetEntry }) {
         )}
       </td>
       <td className="py-1 pr-3 text-xs text-ink-700">
-        {entry.template_names.join(", ") || "—"}
+        {entry.template_ids.join(", ") || "—"}
       </td>
       <td className="py-1 text-right">
         <Link

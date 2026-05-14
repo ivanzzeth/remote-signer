@@ -21,12 +21,13 @@ import { useApi } from "../lib/useApi";
  * Submitting calls TemplateService.instantiate and lands the user on
  * /rules with a toast-style success card showing the new rule id.
  *
- * Variable types map loosely (the daemon validates):
- *   address       → text input, basic 0x-prefix hint
- *   address_list  → textarea, comma-separated
- *   uint256       → text input (kept as string to preserve precision)
- *   string        → text input
- *   anything else → text input, no special UI
+ * Variable types map to widgets (v0.3 typed; daemon revalidates):
+ *   address / bytes / bytes4 → monospace text input
+ *   address_list / bigint_list → textarea (comma-separated)
+ *   bigint / duration / string → text input
+ *   bool                     → checkbox toggle
+ *   enum                     → select bound to options
+ *   json                     → textarea (raw JSON)
  */
 export function TemplateDetail() {
   const { id = "" } = useParams<{ id: string }>();
@@ -277,9 +278,26 @@ function InstantiateForm({
 function defaultVariables(vars: TemplateVariable[]): Record<string, string> {
   const out: Record<string, string> = {};
   for (const v of vars) {
-    out[v.name] = v.default ?? "";
+    // v.default is `unknown` in the v0.3 SDK (matches Go's any). Stringify
+    // it for the form state; the widget below will reinterpret per type
+    // when needed (e.g. bool checks "true"/"false").
+    out[v.name] = stringifyDefault(v.default);
   }
   return out;
+}
+
+function stringifyDefault(v: unknown): string {
+  if (v == null) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "boolean") return v ? "true" : "false";
+  if (typeof v === "number") return String(v);
+  // Arrays / objects (address_list defaults, json) round-trip through
+  // JSON so the textarea keeps the structure visible.
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return String(v);
+  }
 }
 
 function VariableInput({
@@ -292,28 +310,83 @@ function VariableInput({
   onChange: (v: string) => void;
 }) {
   const testid = `template-form-var-${variable.name}`;
-  if (variable.type === "address_list") {
+
+  // bool → toggle.
+  if (variable.type === "bool") {
+    const checked = value === "true";
+    return (
+      <label className="inline-flex items-center gap-2 text-sm text-ink-700">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => onChange(e.target.checked ? "true" : "false")}
+          data-testid={testid}
+        />
+        <span>{checked ? "true" : "false"}</span>
+      </label>
+    );
+  }
+
+  // enum → select bound to Options.
+  if (variable.type === "enum" && variable.options && variable.options.length > 0) {
+    return (
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        required={variable.required}
+        className="w-full rounded-md border border-ink-300 px-2 py-1 text-sm"
+        data-testid={testid}
+      >
+        <option value="">— pick one —</option>
+        {variable.options.map((opt) => (
+          <option key={opt} value={opt}>
+            {opt}
+          </option>
+        ))}
+      </select>
+    );
+  }
+
+  // *_list and json → textarea.
+  if (
+    variable.type === "address_list" ||
+    variable.type === "bigint_list" ||
+    variable.type === "json"
+  ) {
+    const placeholder =
+      variable.placeholder ||
+      (variable.type === "json"
+        ? '{"key": "value"}'
+        : variable.type === "bigint_list"
+          ? "100, 200, 300"
+          : "0xabc..., 0xdef..., 0x123...");
     return (
       <textarea
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        rows={2}
-        placeholder="0xabc..., 0xdef..., 0x123..."
+        rows={variable.type === "json" ? 4 : 2}
+        placeholder={placeholder}
         required={variable.required}
         className="w-full rounded-md border border-ink-300 px-2 py-1 font-mono text-xs"
         data-testid={testid}
       />
     );
   }
+
+  const isMono =
+    variable.type === "address" ||
+    variable.type === "bigint" ||
+    variable.type === "bytes" ||
+    variable.type === "bytes4";
   return (
     <input
       type="text"
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      placeholder={variable.type}
+      placeholder={variable.placeholder || variable.type}
       required={variable.required}
       className={`w-full rounded-md border border-ink-300 px-2 py-1 text-sm ${
-        ["address", "uint256"].includes(variable.type) ? "font-mono" : ""
+        isMono ? "font-mono" : ""
       }`}
       data-testid={testid}
     />
