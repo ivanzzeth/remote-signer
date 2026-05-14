@@ -27,6 +27,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/config"
 	"github.com/ivanzzeth/remote-signer/internal/core/auth"
+	"github.com/ivanzzeth/remote-signer/internal/core/registry"
 	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/statemachine"
@@ -619,7 +620,18 @@ func (ts *TestServer) Start() error {
 		WalletRepo:          walletRepo,
 	}
 	if ts.config.PresetsDir != "" {
-		routerConfig.PresetsDir = ts.config.PresetsDir
+		// e2e tests still seed presets from a tmp dir; the v0.3 handler is
+		// DB-backed so we sync them through the Registry first and pass
+		// the DB-backed repo into the router.
+		presetSrc := registry.NewFilePresetSource(ts.config.PresetsDir)
+		presetRepo, err := storage.NewGormPresetRepository(db)
+		if err != nil {
+			return fmt.Errorf("e2e preset repo: %w", err)
+		}
+		if _, err := registry.NewPresetRegistry(presetRepo, presetSrc, log).Sync(context.Background()); err != nil {
+			return fmt.Errorf("e2e preset registry sync: %w", err)
+		}
+		routerConfig.PresetRepo = presetRepo
 		routerConfig.PresetsDB = db
 	}
 	router, err := api.NewRouter(authVerifier, signService, signerManager, ruleRepo, auditRepo, log, routerConfig)
