@@ -25,6 +25,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 	"github.com/ivanzzeth/remote-signer/pkg/client/internal/transport"
 	"github.com/ivanzzeth/remote-signer/pkg/client/presets"
+	"github.com/ivanzzeth/remote-signer/pkg/client/registry"
 	"github.com/ivanzzeth/remote-signer/pkg/client/templates"
 )
 
@@ -45,8 +46,13 @@ type Client struct {
 	// ACLs provides read-only ACL operations (admin only), e.g. IP whitelist config.
 	ACLs *acls.Service
 
-	// Presets provides preset list/vars/apply (admin only; requires server presets.dir).
+	// Presets provides preset list/detail/apply (admin only; presets
+	// live in the DB after v0.3 Registry sync).
 	Presets *presets.Service
+
+	// Registry refreshes the template + preset catalogue from disk
+	// without a daemon restart (admin only).
+	Registry *registry.Service
 
 	// Settings reads/writes runtime-mutable configuration groups (admin only).
 	Settings *clientsettings.Service
@@ -146,6 +152,7 @@ func NewClient(cfg Config) (*Client, error) {
 		APIKeys:   apikeys.NewService(t),
 		ACLs:      acls.NewService(t),
 		Presets:   presets.NewService(t),
+		Registry:  registry.NewService(t),
 		Settings:  clientsettings.NewService(t),
 		transport: t,
 	}, nil

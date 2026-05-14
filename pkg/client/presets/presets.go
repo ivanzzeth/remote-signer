@@ -23,10 +23,17 @@ func NewService(t *transport.Transport) *Service {
 	return &Service{transport: t}
 }
 
-// PresetEntry is a preset list item.
+// PresetEntry is a preset list item. v0.3 renames template_names →
+// template_ids (file-stem IDs, stable across renames) and gains the
+// description + chain scope + enabled fields the UI list view uses.
 type PresetEntry struct {
-	ID            string   `json:"id"`
-	TemplateNames []string `json:"template_names"`
+	ID          string   `json:"id"`
+	Name        string   `json:"name,omitempty"`
+	Description string   `json:"description,omitempty"`
+	ChainType   string   `json:"chain_type,omitempty"`
+	ChainID     string   `json:"chain_id,omitempty"`
+	TemplateIDs []string `json:"template_ids"`
+	Enabled     bool     `json:"enabled"`
 }
 
 // ListResponse is the response for GET /api/v1/presets.
@@ -54,17 +61,19 @@ type VariableDetail struct {
 }
 
 // DetailResponse is the response for GET /api/v1/presets/:id.
-// Variables[] resolves each override hint against the referenced
-// template's variable definition; the older bare /vars endpoint that
-// returned just `override_hints []string` is gone in v0.3.
+// Variables[] resolves each operator_override against the referenced
+// template's variable definition (type, description, default). The
+// older bare /vars endpoint that returned `override_hints []string`
+// is gone in v0.3; template_names is now template_ids.
 type DetailResponse struct {
-	ID            string           `json:"id"`
-	Name          string           `json:"name,omitempty"`
-	ChainType     string           `json:"chain_type,omitempty"`
-	ChainID       string           `json:"chain_id,omitempty"`
-	Enabled       bool             `json:"enabled"`
-	TemplateNames []string         `json:"template_names"`
-	Variables     []VariableDetail `json:"variables"`
+	ID          string           `json:"id"`
+	Name        string           `json:"name,omitempty"`
+	Description string           `json:"description,omitempty"`
+	ChainType   string           `json:"chain_type,omitempty"`
+	ChainID     string           `json:"chain_id,omitempty"`
+	Enabled     bool             `json:"enabled"`
+	TemplateIDs []string         `json:"template_ids"`
+	Variables   []VariableDetail `json:"variables"`
 }
 
 // Get returns rich detail for a preset (admin only).
