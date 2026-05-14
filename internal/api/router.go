@@ -16,6 +16,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/config"
 	"github.com/ivanzzeth/remote-signer/internal/core/auth"
+	"github.com/ivanzzeth/remote-signer/internal/core/registry"
 	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/metrics"
@@ -62,6 +63,13 @@ type RouterConfig struct {
 	// the /api/v1/presets routes.
 	PresetRepo storage.PresetRepository // DB-backed preset catalogue
 	PresetsDB  *gorm.DB                 // txn handle for preset apply
+	// Registry refresh endpoint (admin-only). Re-runs the template +
+	// preset Registry sync without restart, so an operator can edit YAML
+	// on disk and reload via `POST /api/v1/registry/refresh` instead of
+	// kicking the daemon. Both fields must be set for the route to
+	// register; nil disables the endpoint.
+	TemplateRegistry *registry.TemplateRegistry
+	PresetRegistry   *registry.PresetRegistry
 	// Wallets
 	WalletRepo storage.WalletRepository // optional: for wallet CRUD
 
@@ -467,6 +475,22 @@ func (r *Router) setupRoutes() error {
 		}
 		r.mux.Handle("/api/v1/presets", r.withAuthAndPerm(middleware.PermReadPresets, presetHandler))
 		r.mux.Handle("/api/v1/presets/", r.withAuthAndPerm(middleware.PermReadPresets, http.HandlerFunc(presetHandler.ServeHTTP)))
+	}
+
+	// Registry refresh endpoint — re-runs Template + Preset Registry
+	// sync without a daemon restart. Both registries must be wired
+	// (run.go's buildRegistries provides them at boot). Gated by the
+	// apply_preset permission since refresh can prune catalogue rows.
+	if r.config.TemplateRegistry != nil && r.config.PresetRegistry != nil {
+		refreshHandler, err := handler.NewRegistryRefreshHandler(
+			r.config.TemplateRegistry,
+			r.config.PresetRegistry,
+			r.logger,
+		)
+		if err != nil {
+			return err
+		}
+		r.mux.Handle("/api/v1/registry/refresh", r.withAuthAndPerm(middleware.PermApplyPreset, refreshHandler))
 	}
 
 	// Web UI catch-all. Must be registered LAST so every explicit
