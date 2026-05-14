@@ -1,5 +1,14 @@
 /**
  * Presets service: list, inspect, and apply rule presets.
+ *
+ * v0.3 changes (Registry-backed):
+ *   - `template_names` renamed to `template_ids` (file-stem IDs, stable
+ *     across renames).
+ *   - PresetEntry / PresetDetail gain a `description` field surfaced
+ *     from the preset YAML.
+ *   - Variables carry an `operator_overrides`-derived `required` flag
+ *     that may be true even when the underlying template variable is
+ *     optional — i.e. the preset author chose to require it.
  */
 
 import { HttpTransport } from "../transport";
@@ -10,20 +19,29 @@ import { HttpTransport } from "../transport";
 
 export interface PresetEntry {
   id: string;
-  /** Human-readable name from the preset YAML (`name:`); empty for ad-hoc presets. */
+  /** Human-readable name from the preset YAML (`name:`). */
   name?: string;
-  /** Chain scope, e.g. "evm". */
+  /** Short summary from the preset YAML (`description:`). */
+  description?: string;
+  /** Chain scope, e.g. "evm"; empty for off-chain presets. */
   chain_type?: string;
   /** Chain ID, e.g. "1" for Ethereum mainnet. */
   chain_id?: string;
-  template_names: string[];
+  /** File-stem template IDs the preset bundles. */
+  template_ids: string[];
+  enabled: boolean;
 }
 
 export interface ListPresetsResponse {
   presets: PresetEntry[];
 }
 
-/** Rich variable metadata for a preset's override hint. */
+/**
+ * Rich variable metadata for one operator-overridable preset variable.
+ * Joins preset.operator_overrides (Required flag, ordering) against the
+ * referenced template's variable definitions (type, description,
+ * default).
+ */
 export interface PresetVariableDetail {
   name: string;
   type?: string;
@@ -36,10 +54,11 @@ export interface PresetVariableDetail {
 export interface PresetDetail {
   id: string;
   name?: string;
+  description?: string;
   chain_type?: string;
   chain_id?: string;
   enabled: boolean;
-  template_names: string[];
+  template_ids: string[];
   variables: PresetVariableDetail[];
 }
 
@@ -76,10 +95,9 @@ export class PresetService {
   }
 
   /**
-   * Get the full detail for a preset: identity, chain, template names,
-   * and each override hint resolved against the referenced template's
-   * variable definition (type/description/default). Replaces the old
-   * /vars endpoint which only returned bare hint names.
+   * Get the full detail for a preset: identity, chain, template ids, and
+   * each operator-overridable variable joined against the referenced
+   * template's variable definition (type/description/default).
    */
   async get(id: string): Promise<PresetDetail> {
     return this.transport.request<PresetDetail>(
@@ -90,7 +108,8 @@ export class PresetService {
   }
 
   /**
-   * Apply a preset to create rule/template instances (admin only).
+   * Apply a preset to create rule instances (admin only). Returns one
+   * result entry per materialised rule.
    */
   async apply(
     id: string,
