@@ -240,7 +240,7 @@ func (m *PresetsModel) renderPresetRow(p presets.PresetEntry, selected bool) str
 	if len(id) > 40 {
 		id = id[:37] + "..."
 	}
-	templatesStr := strings.Join(p.TemplateNames, ", ")
+	templatesStr := strings.Join(p.TemplateIDs, ", ")
 	if len(templatesStr) > 50 {
 		templatesStr = templatesStr[:47] + "..."
 	}
