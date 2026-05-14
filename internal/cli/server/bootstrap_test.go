@@ -46,7 +46,7 @@ func TestBootstrapCreatesAdminWhenEmpty(t *testing.T) {
 	pub := filepath.Join(tmp, "admin.key.pub")
 	repo := newTestRepo(t)
 
-	if err := bootstrapAdminKeyIfNeeded(context.Background(), repo, priv, pub, discardLogger()); err != nil {
+	if err := bootstrapAdminKeyIfNeeded(context.Background(), repo, priv, pub, 0, discardLogger()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -112,7 +112,7 @@ func TestBootstrapNoopWhenKeysExist(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := bootstrapAdminKeyIfNeeded(context.Background(), repo, priv, pub, discardLogger()); err != nil {
+	if err := bootstrapAdminKeyIfNeeded(context.Background(), repo, priv, pub, 0, discardLogger()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(priv); !os.IsNotExist(err) {
