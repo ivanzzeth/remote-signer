@@ -6,6 +6,7 @@ import {
   type RuleMode,
   type RuleType,
 } from "remote-signer-client";
+import { AppliedToPicker } from "../components/AppliedToPicker";
 import {
   Badge,
   Card,
@@ -580,6 +581,7 @@ function CreateForm({
   const [chainId, setChainId] = useState("");
   const [apiKeyId, setApiKeyId] = useState("");
   const [signerAddress, setSignerAddress] = useState("");
+  const [appliedTo, setAppliedTo] = useState<string[]>([]);
   const [enabled, setEnabled] = useState(true);
   const [config, setConfig] = useState<Record<string, unknown>>(() => ({
     ...CONFIG_TEMPLATES.evm_address_list,
@@ -626,6 +628,7 @@ function CreateForm({
       ...(chainId ? { chain_id: chainId } : {}),
       ...(apiKeyId ? { api_key_id: apiKeyId } : {}),
       ...(signerAddress ? { signer_address: signerAddress } : {}),
+      ...(appliedTo.length > 0 ? { applied_to: appliedTo } : {}),
       config: payload,
       enabled,
     });
@@ -708,6 +711,18 @@ function CreateForm({
             loading={signersApi.loading}
             placeholder="(any signer)"
           />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-[11px] uppercase tracking-wide text-ink-500">
+            Applied to
+          </label>
+          <AppliedToPicker value={appliedTo} onChange={setAppliedTo} />
+          <div className="mt-1 text-[11px] text-ink-500">
+            Which API keys this rule constrains. Empty defaults to{" "}
+            <code>self</code> (the current key); admins can target other
+            keys or <code>*</code> for all.
+          </div>
         </div>
 
         <div>
