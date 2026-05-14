@@ -53,6 +53,37 @@ export interface ListBudgetsResponse {
   total: number;
 }
 
+/**
+ * POST /api/v1/evm/budgets body. The daemon refuses rule_id values that
+ * start with "sim:" — simulation budgets are owned by the simulation
+ * fallback's auto-create path which has security guards (max dynamic
+ * units, post-create TOCTOU re-check) that a manual POST would bypass.
+ */
+export interface CreateBudgetRequest {
+  rule_id: string;
+  unit: string;
+  max_total: string;
+  max_per_tx?: string;
+  max_tx_count?: number;
+  alert_pct?: number;
+}
+
+/**
+ * PATCH /api/v1/evm/budgets/{id} body. Omitted fields are left
+ * untouched; sending an explicit zero/empty value applies the change.
+ * Identity fields (rule_id, unit, id) cannot be changed — delete and
+ * recreate instead.
+ */
+export interface UpdateBudgetRequest {
+  max_total?: string;
+  max_per_tx?: string;
+  max_tx_count?: number;
+  alert_pct?: number;
+  alert_sent?: boolean;
+  spent?: string;
+  tx_count?: number;
+}
+
 export class EvmBudgetService {
   constructor(private readonly transport: HttpTransport) {}
 
@@ -68,6 +99,51 @@ export class EvmBudgetService {
     return this.transport.request<ListBudgetsResponse>(
       "GET",
       "/api/v1/evm/budgets",
+      null,
+    );
+  }
+
+  /** Fetch a single budget by its primary key. */
+  async get(id: string): Promise<BudgetEntry> {
+    return this.transport.request<BudgetEntry>(
+      "GET",
+      `/api/v1/evm/budgets/${encodeURIComponent(id)}`,
+      null,
+    );
+  }
+
+  /** Create a budget for an existing rule. Admin only. */
+  async create(req: CreateBudgetRequest): Promise<BudgetEntry> {
+    return this.transport.request<BudgetEntry>(
+      "POST",
+      "/api/v1/evm/budgets",
+      req,
+    );
+  }
+
+  /** Patch mutable fields on an existing budget. Admin only. */
+  async update(id: string, req: UpdateBudgetRequest): Promise<BudgetEntry> {
+    return this.transport.request<BudgetEntry>(
+      "PATCH",
+      `/api/v1/evm/budgets/${encodeURIComponent(id)}`,
+      req,
+    );
+  }
+
+  /** Zero spent/tx_count/alert_sent in one shot. Admin only. */
+  async reset(id: string): Promise<BudgetEntry> {
+    return this.transport.request<BudgetEntry>(
+      "POST",
+      `/api/v1/evm/budgets/${encodeURIComponent(id)}/reset`,
+      null,
+    );
+  }
+
+  /** Delete a budget row. Admin only. */
+  async delete(id: string): Promise<void> {
+    await this.transport.request<void>(
+      "DELETE",
+      `/api/v1/evm/budgets/${encodeURIComponent(id)}`,
       null,
     );
   }
