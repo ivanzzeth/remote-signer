@@ -604,7 +604,15 @@ func injectReservedVariables(vars map[string]string, req *CreateInstanceRequest,
 	}
 }
 
-// SubstituteVariables replaces ${var} placeholders in config JSON with actual values
+// SubstituteVariables replaces ${var} placeholders in config JSON with
+// actual values.
+//
+// Deprecated: This is the pre-R5 string-only substituter. New callers
+// should use SubstituteTyped (substitute.go) which respects the
+// variable's declared type so bool/list/json values land as proper JSON
+// literals rather than quoted strings. Kept while R8 migrates the
+// preset apply / template instance handlers; will be removed when
+// the last call site is rewritten.
 func SubstituteVariables(configJSON []byte, vars map[string]string) ([]byte, error) {
 	result := string(configJSON)
 	for k, v := range vars {
