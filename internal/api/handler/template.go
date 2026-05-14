@@ -783,7 +783,56 @@ func (h *TemplateHandler) toTemplateResponse(tmpl *types.RuleTemplate) TemplateR
 		resp.BudgetMetering = tmpl.BudgetMetering
 	}
 
+	// Derive a display-friendly Mode when the template doesn't declare
+	// one at the top level (v0.3 multi-rule templates leave it empty).
+	// Aggregates the rules array: if every rule agrees, surface that
+	// mode; if rules disagree, surface "mixed" so the list view can
+	// still tell the operator something useful at a glance.
+	if resp.Mode == "" {
+		resp.Mode = aggregateRuleModes(tmpl.Config)
+	}
+
 	return resp
+}
+
+// aggregateRuleModes pulls each rule's `mode` out of the template
+// config blob and returns:
+//
+//	""        — no rules / no modes set (shouldn't happen post-R6 but
+//	            tolerated)
+//	"whitelist" / "blocklist" — every rule agrees
+//	"mixed"   — at least two distinct modes present
+//
+// Operates on the loosely-typed config JSON rather than a typed struct
+// because the template body still carries ${var} placeholders that
+// would fail a strict unmarshal.
+func aggregateRuleModes(configJSON []byte) string {
+	if len(configJSON) == 0 {
+		return ""
+	}
+	var doc struct {
+		Rules []struct {
+			Mode string `json:"mode"`
+		} `json:"rules"`
+	}
+	if err := json.Unmarshal(configJSON, &doc); err != nil {
+		return ""
+	}
+	seen := make(map[string]bool, 2)
+	for _, r := range doc.Rules {
+		if r.Mode != "" {
+			seen[r.Mode] = true
+		}
+	}
+	switch len(seen) {
+	case 0:
+		return ""
+	case 1:
+		for m := range seen {
+			return m
+		}
+	}
+	return "mixed"
 }
 
 func (h *TemplateHandler) writeJSON(w http.ResponseWriter, data interface{}, status int) {
