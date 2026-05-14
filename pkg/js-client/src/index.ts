@@ -156,7 +156,9 @@ export type {
 // Templates
 export { TemplateService } from "./templates";
 export type {
+  VariableType,
   TemplateVariable,
+  VariableGroup,
   Template,
   ListTemplatesFilter,
   ListTemplatesResponse,
@@ -194,6 +196,14 @@ export type {
   ApplyResultItem,
   ApplyPresetResponse,
 } from "./presets";
+
+// Registry (hot-reload templates and presets from disk)
+export { RegistryService } from "./registry";
+export type {
+  RegistryRefreshError,
+  RegistryRefreshReport,
+  RegistryRefreshResponse,
+} from "./registry";
 
 // Settings
 export { SettingsService, SETTINGS_GROUPS } from "./settings";

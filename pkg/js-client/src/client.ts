@@ -10,6 +10,7 @@ import { TemplateService } from "./templates";
 import { APIKeyService } from "./apikeys";
 import { ACLService } from "./acls";
 import { PresetService } from "./presets";
+import { RegistryService } from "./registry";
 import { SettingsService } from "./settings";
 import { WalletService } from "./wallets";
 
@@ -40,6 +41,7 @@ export class RemoteSignerClient {
   public readonly apiKeys: APIKeyService;
   public readonly acls: ACLService;
   public readonly presets: PresetService;
+  public readonly registry: RegistryService;
   public readonly settings: SettingsService;
   public readonly wallets: WalletService;
   private transport: HttpTransport;
@@ -56,6 +58,7 @@ export class RemoteSignerClient {
     this.apiKeys = new APIKeyService(this.transport);
     this.acls = new ACLService(this.transport);
     this.presets = new PresetService(this.transport);
+    this.registry = new RegistryService(this.transport);
     this.settings = new SettingsService(this.transport);
     this.wallets = new WalletService(this.transport);
   }
