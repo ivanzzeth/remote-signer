@@ -110,7 +110,7 @@ func bootstrapAdminKeyIfNeeded(ctx context.Context, repo storage.APIKeyRepositor
 }
 
 // bootstrapAgentKeyIfNeeded provisions a fresh agent Ed25519 keypair the first
-// time the daemon boots (when no agent key with source="bootstrap" exists yet).
+// time the daemon boots (when no agent key with id="agent" exists yet).
 // Unlike the admin key check — which guards on "any key in the table" — this
 // creates the agent key independently so existing admin keys do not block it.
 //
@@ -122,7 +122,7 @@ func bootstrapAgentKeyIfNeeded(ctx context.Context, repo storage.APIKeyRepositor
 	if err != nil && !types.IsNotFound(err) {
 		return fmt.Errorf("get agent api key: %w", err)
 	}
-	if existing != nil && existing.Source == types.APIKeySourceBootstrap {
+	if existing != nil {
 		return nil
 	}
 

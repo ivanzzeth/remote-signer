@@ -117,7 +117,10 @@ func Run(args []string) error {
 		return fmt.Errorf("failed to create cache directory: %w", err)
 	}
 
-	// Initialize Solidity evaluator (same cache/temp/timeout as server when -config is used)
+	// Initialize Solidity evaluator (same cache/temp/timeout as server when -config is used).
+	// When forge is not available, skip Solidity validation gracefully — non-Solidity
+	// rules (address list, message pattern, evm_js) still validate fine.
+	var validator *evm.SolidityRuleValidator
 	evaluator, err := evm.NewSolidityRuleEvaluator(evm.SolidityEvaluatorConfig{
 		ForgePath: *forgePath,
 		CacheDir:  cacheDirectory,
@@ -125,22 +128,22 @@ func Run(args []string) error {
 		Timeout:   timeoutDuration,
 	}, log)
 	if err != nil {
-		return fmt.Errorf("failed to create Solidity evaluator: %w", err)
-	}
-
-	// Debug: Check if foundry.toml was created
-	tempDir := evaluator.GetTempDir()
-	foundryPath := filepath.Join(tempDir, "foundry.toml")
-	if _, statErr := os.Stat(foundryPath); statErr == nil {
-		log.Debug("foundry.toml exists", "path", foundryPath)
+		log.Warn("Skipping Solidity rule validation — forge not available", "error", err)
 	} else {
-		log.Error("foundry.toml does NOT exist", "path", foundryPath, "error", statErr)
-	}
+		// Debug: Check if foundry.toml was created
+		tempDir := evaluator.GetTempDir()
+		foundryPath := filepath.Join(tempDir, "foundry.toml")
+		if _, statErr := os.Stat(foundryPath); statErr == nil {
+			log.Debug("foundry.toml exists", "path", foundryPath)
+		} else {
+			log.Error("foundry.toml does NOT exist", "path", foundryPath, "error", statErr)
+		}
 
-	// Create validator
-	validator, err := evm.NewSolidityRuleValidator(evaluator, log)
-	if err != nil {
-		return fmt.Errorf("failed to create validator: %w", err)
+		// Create validator
+		validator, err = evm.NewSolidityRuleValidator(evaluator, log)
+		if err != nil {
+			return fmt.Errorf("failed to create validator: %w", err)
+		}
 	}
 
 	// Create message pattern validator
