@@ -1,1 +1,5 @@
 node_modules/
+test-results/
+tests/.server-config.json
+tests/.chrome-profile/
+playwright-report/

@@ -1,16 +1,20 @@
 {
   "name": "remote-signer-extension",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
-    "prebuild": "npm install"
+    "prebuild": "npm install",
+    "build:test-server": "cd .. && go build -o e2e-test-server ./cmd/e2e-test-server",
+    "test:e2e": "npm run build:test-server && npx playwright test --config=playwright.config.ts",
+    "test:integration": "npx playwright test --config=playwright.config.ts --grep 'integration|Integration'"
   },
   "dependencies": {
     "remote-signer-client": "^0.2.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.53.0",
     "esbuild": "^0.28.0"
   }
 }
