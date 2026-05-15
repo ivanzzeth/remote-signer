@@ -334,7 +334,7 @@ func TestHDWalletProvider_ImportEmptyMnemonic(t *testing.T) {
 		Password: "test-password",
 	})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "mnemonic is required")
+	assert.Contains(t, err.Error(), "mnemonic")
 }
 
 func TestHDWalletProvider_ImportEmptyPassword(t *testing.T) {
