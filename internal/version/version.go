@@ -6,4 +6,4 @@ package version
 // Bump on every release. Previously this was tracked separately in each
 // cmd/<name>/main.go; consolidated to a single source of truth as part of
 // the v0.3.0 single-binary refactor.
-const Version = "0.3.0-dev"
+const Version = "0.3.3"
