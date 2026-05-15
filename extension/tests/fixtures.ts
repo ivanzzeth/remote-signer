@@ -1,7 +1,8 @@
-import { test as base, type Page, type BrowserContext } from "@playwright/test";
+import { test as base, chromium, type Page, type BrowserContext } from "@playwright/test";
 import { fileURLToPath } from "url";
 import * as path from "path";
 import * as fs from "fs";
+import * as os from "os";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -10,7 +11,6 @@ const __dirname = path.dirname(__filename);
 
 export interface E2EServerInfo {
   base_url: string;
-  dapp_url: string;
   admin_api_key_id: string;
   admin_api_key_hex: string;
   non_admin_api_key_id: string;
@@ -114,6 +114,29 @@ export const test = base.extend<ExtensionFixtures>({
     await use(info);
   },
 
+  /**
+   * Override the built-in context fixture to use launchPersistentContext.
+   * This is REQUIRED for Chrome extension testing — ephemeral contexts
+   * created via browser.newContext() do NOT load Chrome extensions (MV3).
+   */
+  context: async ({}, use) => {
+    const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "rs-e2e-"));
+    const extensionPath = path.resolve(__dirname, "..");
+
+    const persistentContext = await chromium.launchPersistentContext(userDataDir, {
+      channel: "chromium",
+      args: [
+        `--disable-extensions-except=${extensionPath}`,
+        `--load-extension=${extensionPath}`,
+      ],
+    });
+
+    await use(persistentContext);
+
+    await persistentContext.close();
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  },
+
   extensionId: async ({ context }: { context: BrowserContext }, use) => {
     const extId = await detectExtensionId(context);
     await use(extId);
@@ -129,10 +152,13 @@ export const test = base.extend<ExtensionFixtures>({
     await page.close();
   },
 
-  openDapp: async ({ context, serverInfo }: { context: BrowserContext; serverInfo: E2EServerInfo }, use) => {
+  openDapp: async ({ context }: { context: BrowserContext }, use) => {
+    const dappInfoPath = path.resolve(__dirname, ".e2e-state", "dapp-server.json");
+    const dappInfo = JSON.parse(fs.readFileSync(dappInfoPath, "utf-8")) as { dapp_server_port: number };
+    const dappUrl = `http://127.0.0.1:${dappInfo.dapp_server_port}/dapp-test-page.html`;
     await use(async () => {
       const page = await context.newPage();
-      await page.goto(serverInfo.dapp_url + "/");
+      await page.goto(dappUrl);
       return page;
     });
   },

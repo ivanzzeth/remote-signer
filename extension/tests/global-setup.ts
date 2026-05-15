@@ -10,7 +10,6 @@ const __dirname = path.dirname(__filename);
 
 interface E2EServerInfo {
   base_url: string;
-  dapp_url: string;
   admin_api_key_id: string;
   admin_api_key_hex: string;
   non_admin_api_key_id: string;
@@ -21,7 +20,45 @@ interface E2EServerInfo {
 declare global {
   var __e2eServerProcess: ChildProcess | undefined;
   var __e2eServerInfo: E2EServerInfo | undefined;
-  var __dappServer: http.Server | undefined;
+  var __dappFileServer: http.Server | undefined;
+  var __dappFilePort: number | undefined;
+}
+
+/** Start a minimal static file server to serve the dApp test page over HTTP.
+ *  Chrome extension content scripts only inject on http:// and https:// origins,
+ *  so we cannot use file:// URLs. */
+function startDappFileServer(outDir: string): Promise<{ server: http.Server; port: number }> {
+  return new Promise((resolve, reject) => {
+    const server = http.createServer((req, res) => {
+      const safePath = path.basename(req.url ?? "index.html");
+      const filePath = path.join(outDir, safePath);
+      fs.readFile(filePath, (err, data) => {
+        if (err) {
+          res.writeHead(404);
+          res.end("Not found");
+          return;
+        }
+        const ext = path.extname(filePath);
+        const mime: Record<string, string> = {
+          ".html": "text/html",
+          ".js": "application/javascript",
+          ".json": "application/json",
+        };
+        res.writeHead(200, { "Content-Type": mime[ext] ?? "application/octet-stream" });
+        res.end(data);
+      });
+    });
+
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address();
+      if (!addr || typeof addr === "string") {
+        reject(new Error("Failed to get dApp file server address"));
+        return;
+      }
+      resolve({ server, port: addr.port });
+    });
+    server.on("error", reject);
+  });
 }
 
 async function globalSetup(_config: FullConfig) {
@@ -92,49 +129,31 @@ async function globalSetup(_config: FullConfig) {
   // Write server info for test fixture consumption
   const outDir = path.join(__dirname, ".e2e-state");
   fs.mkdirSync(outDir, { recursive: true });
+  fs.writeFileSync(path.join(outDir, "server.json"), JSON.stringify(info, null, 2));
 
   // Also write dApp test page that needs the server URL
   const dappHtml = generateDappPage(info);
   fs.writeFileSync(path.join(outDir, "dapp-test-page.html"), dappHtml);
 
-  // Start a static HTTP file server to serve dApp pages (file:// doesn't work with MV3 content scripts)
-  const dappServer = http.createServer((req, res) => {
-    let filePath = path.join(outDir, req.url === "/" ? "dapp-test-page.html" : req.url!);
-    // Resolve symlinks and prevent directory traversal
-    filePath = path.resolve(filePath);
-    if (!filePath.startsWith(path.resolve(outDir))) {
-      res.writeHead(403);
-      res.end("Forbidden");
-      return;
-    }
-    fs.readFile(filePath, (err, data) => {
-      if (err) {
-        res.writeHead(404);
-        res.end("Not found");
-        return;
-      }
-      res.writeHead(200, { "Content-Type": "text/html" });
-      res.end(data);
-    });
-  });
+  // Copy the Uniswap swap page so the static file server can serve it over HTTP.
+  const swapPageSrc = path.join(__dirname, "dapp", "swap-page.html");
+  if (fs.existsSync(swapPageSrc)) {
+    fs.copyFileSync(swapPageSrc, path.join(outDir, "swap-page.html"));
+  }
 
-  const dappPort = await new Promise<number>((resolve) => {
-    const server = dappServer.listen(0, "127.0.0.1", () => {
-      const addr = server.address();
-      resolve(typeof addr === "object" && addr ? addr.port : 0);
-    });
-  });
+  // Start a minimal HTTP file server for the dApp test page.
+  // Chrome extension content scripts only inject on http:// and https:// origins,
+  // so file:// URLs won't work — the dApp page MUST be served via HTTP.
+  const { server: dappServer, port: dappPort } = await startDappFileServer(outDir);
+  globalThis.__dappFileServer = dappServer;
+  globalThis.__dappFilePort = dappPort;
 
-  globalThis.__dappServer = dappServer;
-  globalThis.__e2eServerInfo!.dapp_url = `http://127.0.0.1:${dappPort}`;
-
-  // Re-write server.json with dapp_url now included
-  const fullInfo = { ...info, dapp_url: globalThis.__e2eServerInfo!.dapp_url };
-  fs.writeFileSync(path.join(outDir, "server.json"), JSON.stringify(fullInfo, null, 2));
-
-  console.log(`[global-setup] DApp file server ready at http://127.0.0.1:${dappPort}`);
+  // Write the dApp server port so fixtures can discover it
+  const dappInfo = { dapp_server_port: dappPort };
+  fs.writeFileSync(path.join(outDir, "dapp-server.json"), JSON.stringify(dappInfo));
 
   console.log(`[global-setup] Test server ready at ${info.base_url}`);
+  console.log(`[global-setup] dApp file server ready at http://127.0.0.1:${dappPort}`);
 }
 
 function generateDappPage(info: E2EServerInfo): string {

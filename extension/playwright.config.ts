@@ -29,13 +29,6 @@ export default defineConfig({
       use: {
         ...devices["Desktop Chrome"],
         channel: "chromium",
-        contextOptions: {
-          // Load the unpacked extension
-          args: [
-            `--disable-extensions-except=${EXTENSION_PATH}`,
-            `--load-extension=${EXTENSION_PATH}`,
-          ],
-        },
       },
     },
   ],

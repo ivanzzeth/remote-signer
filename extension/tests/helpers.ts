@@ -6,6 +6,13 @@ import fs from "fs";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+/** Read the dApp server port from the state file written by global-setup */
+function getDappServerUrl(): string {
+  const dappInfoPath = path.resolve(__dirname, ".e2e-state", "dapp-server.json");
+  const dappInfo = JSON.parse(fs.readFileSync(dappInfoPath, "utf-8")) as { dapp_server_port: number };
+  return `http://127.0.0.1:${dappInfo.dapp_server_port}/dapp-test-page.html`;
+}
+
 // ── Storage helpers ──────────────────────────────────────────────────────────
 
 /**
@@ -76,11 +83,9 @@ export async function fillPopupConfig(
 
 // ── dApp Page Interactions ───────────────────────────────────────────────────
 
-/** Navigate to the dApp test page (served via HTTP to support MV3 content-script injection) and wait for window.ethereum */
+/** Navigate to the dApp test page and wait for window.ethereum to be injected */
 export async function openDappAndWaitForProvider(page: Page, timeout = 15_000): Promise<void> {
-  const statePath = path.resolve(__dirname, ".e2e-state", "server.json");
-  const info = JSON.parse(fs.readFileSync(statePath, "utf-8"));
-  const dappUrl = info.dapp_url || `file://${path.resolve(__dirname, ".e2e-state", "dapp-test-page.html")}`;
+  const dappUrl = getDappServerUrl();
   await page.goto(dappUrl);
 
   await page.waitForFunction(() => !!window.ethereum, { timeout });
