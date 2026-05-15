@@ -1,6 +1,10 @@
 import type { Page } from "@playwright/test";
+import { fileURLToPath } from "url";
 import path from "path";
 import fs from "fs";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // ── Storage helpers ──────────────────────────────────────────────────────────
 
@@ -74,7 +78,7 @@ export async function fillPopupConfig(
 
 /** Navigate to the dApp test page and wait for window.ethereum to be injected */
 export async function openDappAndWaitForProvider(page: Page, timeout = 15_000): Promise<void> {
-  const dappPath = path.resolve(__dirname, "dapp-test-page.html");
+  const dappPath = path.resolve(__dirname, ".e2e-state", "dapp-test-page.html");
   await page.goto(`file://${dappPath}`);
 
   await page.waitForFunction(() => !!window.ethereum, { timeout });

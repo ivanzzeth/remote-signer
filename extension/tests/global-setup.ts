@@ -1,7 +1,11 @@
 import { type FullConfig } from "@playwright/test";
+import { fileURLToPath } from "url";
 import { spawn, ChildProcess } from "child_process";
 import * as path from "path";
 import * as fs from "fs";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 interface E2EServerInfo {
   base_url: string;
@@ -19,7 +23,7 @@ declare global {
 
 async function globalSetup(_config: FullConfig) {
   const projectRoot = path.resolve(__dirname, "..", "..");
-  const bin = path.join(projectRoot, "cmd", "e2e-test-server");
+  const bin = path.join(projectRoot, ".e2e-test-server");
 
   // Build the launcher
   await new Promise<void>((resolve, reject) => {
