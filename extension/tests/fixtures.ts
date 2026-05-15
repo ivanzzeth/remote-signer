@@ -1,6 +1,10 @@
 import { test as base, type Page, type BrowserContext } from "@playwright/test";
+import { fileURLToPath } from "url";
 import * as path from "path";
 import * as fs from "fs";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -39,16 +43,31 @@ async function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/** Detect the extension ID for an unpacked Chrome extension */
+/** Detect the extension ID for an unpacked Chrome extension (MV3) */
 export async function detectExtensionId(context: BrowserContext): Promise<string> {
   const page = await context.newPage();
   await page.goto("about:blank");
 
-  // Method 1: Check registered service workers (MV3)
-  const sws = context.serviceWorkers();
-  for (const sw of sws) {
-    const m = sw.url().match(/^chrome-extension:\/\/([a-p]{32})\//);
-    if (m) { await page.close(); return m[1]; }
+  // Method 1: Wait for and check service workers (MV3) — retry since SW may not be ready immediately
+  for (let i = 0; i < 30; i++) {
+    const sws = context.serviceWorkers();
+    for (const sw of sws) {
+      const m = sw.url().match(/^chrome-extension:\/\/([a-p]{32})\//);
+      if (m) { await page.close(); return m[1]; }
+    }
+    // Listen for newly registered service workers
+    const swFromEvent = await new Promise<string | null>((resolve) => {
+      const handler = (sw: any) => {
+        const m = sw.url().match(/^chrome-extension:\/\/([a-p]{32})\//);
+        if (m) resolve(m[1]);
+      };
+      context.on("serviceworker", handler);
+      setTimeout(() => {
+        context.off("serviceworker", handler);
+        resolve(null);
+      }, 200);
+    });
+    if (swFromEvent) { await page.close(); return swFromEvent; }
   }
 
   // Method 2: Check background pages (MV2)

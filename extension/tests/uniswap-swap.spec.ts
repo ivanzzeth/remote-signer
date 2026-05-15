@@ -1,7 +1,11 @@
 import { test, expect } from "./fixtures";
 import { encodeERC20Transfer } from "./helpers";
 import type { Page, BrowserContext } from "@playwright/test";
+import { fileURLToPath } from "url";
 import path from "path";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const SWAP_PAGE_PATH = path.resolve(__dirname, "dapp", "swap-page.html");
 
