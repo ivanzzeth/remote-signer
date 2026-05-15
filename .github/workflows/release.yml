@@ -33,11 +33,27 @@ jobs:
             done
           done
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build and package Chrome extension
+        run: |
+          cd extension
+          npm ci --no-audit --no-fund
+          node build.mjs
+          mkdir -p dist
+          zip -r dist/remote-signer-extension.zip \
+            manifest.json background.js inpage.js content-script.js \
+            rules.json popup/ -x "*.map"
+
       - name: Create Release and upload assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
             remote-signer-*
+            extension/dist/remote-signer-extension.zip
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
