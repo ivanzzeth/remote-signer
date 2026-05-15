@@ -76,10 +76,12 @@ export async function fillPopupConfig(
 
 // ── dApp Page Interactions ───────────────────────────────────────────────────
 
-/** Navigate to the dApp test page and wait for window.ethereum to be injected */
+/** Navigate to the dApp test page (served via HTTP to support MV3 content-script injection) and wait for window.ethereum */
 export async function openDappAndWaitForProvider(page: Page, timeout = 15_000): Promise<void> {
-  const dappPath = path.resolve(__dirname, ".e2e-state", "dapp-test-page.html");
-  await page.goto(`file://${dappPath}`);
+  const statePath = path.resolve(__dirname, ".e2e-state", "server.json");
+  const info = JSON.parse(fs.readFileSync(statePath, "utf-8"));
+  const dappUrl = info.dapp_url || `file://${path.resolve(__dirname, ".e2e-state", "dapp-test-page.html")}`;
+  await page.goto(dappUrl);
 
   await page.waitForFunction(() => !!window.ethereum, { timeout });
 }
