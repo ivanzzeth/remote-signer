@@ -10,6 +10,7 @@ const __dirname = path.dirname(__filename);
 
 export interface E2EServerInfo {
   base_url: string;
+  dapp_url: string;
   admin_api_key_id: string;
   admin_api_key_hex: string;
   non_admin_api_key_id: string;
@@ -128,11 +129,10 @@ export const test = base.extend<ExtensionFixtures>({
     await page.close();
   },
 
-  openDapp: async ({ context }: { context: BrowserContext }, use) => {
-    const dappPath = path.resolve(__dirname, ".e2e-state", "dapp-test-page.html");
+  openDapp: async ({ context, serverInfo }: { context: BrowserContext; serverInfo: E2EServerInfo }, use) => {
     await use(async () => {
       const page = await context.newPage();
-      await page.goto(`file://${dappPath}`);
+      await page.goto(serverInfo.dapp_url + "/");
       return page;
     });
   },
