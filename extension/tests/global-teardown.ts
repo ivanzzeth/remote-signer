@@ -1,12 +1,10 @@
 import { type FullConfig } from "@playwright/test";
 
 async function globalTeardown(_config: FullConfig) {
-  // Stop dApp HTTP file server
-  const dappServer = globalThis.__dappServer;
+  // Stop the dApp file server
+  const dappServer = globalThis.__dappFileServer;
   if (dappServer) {
-    console.log("[global-teardown] Stopping dApp file server...");
     await new Promise<void>((resolve) => dappServer.close(() => resolve()));
-    console.log("[global-teardown] DApp file server stopped");
   }
 
   const proc = globalThis.__e2eServerProcess;

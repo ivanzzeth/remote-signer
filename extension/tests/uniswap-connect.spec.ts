@@ -2,18 +2,23 @@ import { test, expect } from "./fixtures";
 import type { Page, BrowserContext } from "@playwright/test";
 import { fileURLToPath } from "url";
 import path from "path";
+import fs from "fs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const SWAP_PAGE_PATH = path.resolve(__dirname, "dapp", "swap-page.html");
+function getDappServerUrl(): string {
+  const dappInfoPath = path.resolve(__dirname, ".e2e-state", "dapp-server.json");
+  const dappInfo = JSON.parse(fs.readFileSync(dappInfoPath, "utf-8")) as { dapp_server_port: number };
+  return `http://127.0.0.1:${dappInfo.dapp_server_port}/swap-page.html`;
+}
 
 /**
  * Open the swap simulation dApp page in a new tab.
  */
 async function openSwapPage(context: BrowserContext): Promise<Page> {
   const page = await context.newPage();
-  await page.goto(`file://${SWAP_PAGE_PATH}`);
+  await page.goto(getDappServerUrl());
   return page;
 }
 

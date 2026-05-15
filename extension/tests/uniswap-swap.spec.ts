@@ -3,11 +3,16 @@ import { encodeERC20Transfer } from "./helpers";
 import type { Page, BrowserContext } from "@playwright/test";
 import { fileURLToPath } from "url";
 import path from "path";
+import fs from "fs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const SWAP_PAGE_PATH = path.resolve(__dirname, "dapp", "swap-page.html");
+function getDappServerUrl(): string {
+  const dappInfoPath = path.resolve(__dirname, ".e2e-state", "dapp-server.json");
+  const dappInfo = JSON.parse(fs.readFileSync(dappInfoPath, "utf-8")) as { dapp_server_port: number };
+  return `http://127.0.0.1:${dappInfo.dapp_server_port}/swap-page.html`;
+}
 
 // Test token addresses (same as the swap page uses)
 const USDC_TOKEN = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
@@ -16,7 +21,7 @@ const UNISWAP_ROUTER = "0xE592427A0AEce92De3Edee1F18E0157C05861564";
 
 async function openSwapPage(context: BrowserContext): Promise<Page> {
   const page = await context.newPage();
-  await page.goto(`file://${SWAP_PAGE_PATH}`);
+  await page.goto(getDappServerUrl());
   return page;
 }
 

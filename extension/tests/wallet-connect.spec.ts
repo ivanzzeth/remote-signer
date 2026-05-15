@@ -125,12 +125,8 @@ test.describe("Wallet Connection (@integration)", () => {
   test("eth_accounts returns empty array when not connected", async ({ context, extensionId }) => {
     // Do NOT configure the extension — no config means no connection possible
     const dapp = await context.newPage();
-
-    // Open a blank page first, then the dApp so the extension loads
-    await dapp.goto("about:blank");
-
-    const dappPath = path.resolve(__dirname, ".e2e-state", "dapp-test-page.html");
-    await dapp.goto(`file://${dappPath}`);
+    const dappUrl = `http://127.0.0.1:${JSON.parse(fs.readFileSync(path.resolve(__dirname, ".e2e-state", "dapp-server.json"), "utf-8")).dapp_server_port}/dapp-test-page.html`;
+    await dapp.goto(dappUrl);
     await dapp.waitForFunction(() => !!window.ethereum, { timeout: 15_000 });
 
     // Without config, eth_requestAccounts should fail
