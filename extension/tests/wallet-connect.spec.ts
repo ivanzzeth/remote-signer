@@ -1,5 +1,10 @@
 import { test, expect } from "./fixtures";
 import { openDappAndWaitForProvider, dappEIP1193Call, injectStorageConfig, TEST_ACCOUNTS, TEST_CHAINS } from "./helpers";
+import { fileURLToPath } from "url";
+import path from "path";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 test.describe("Wallet Connection (@integration)", () => {
   test("window.ethereum provider is available on dApp pages", async ({ context, extensionId, serverInfo }) => {
@@ -124,7 +129,7 @@ test.describe("Wallet Connection (@integration)", () => {
     // Open a blank page first, then the dApp so the extension loads
     await dapp.goto("about:blank");
 
-    const dappPath = require("path").resolve(__dirname, "..", "tests", ".e2e-state", "dapp-test-page.html");
+    const dappPath = path.resolve(__dirname, ".e2e-state", "dapp-test-page.html");
     await dapp.goto(`file://${dappPath}`);
     await dapp.waitForFunction(() => !!window.ethereum, { timeout: 15_000 });
 
