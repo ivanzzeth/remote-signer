@@ -206,6 +206,37 @@ func TestBootstrapAgentKeyNoopWhenAgentKeyExists(t *testing.T) {
 	}
 }
 
+// TestBootstrapAgentKeyNoopWhenNonBootstrapKeyExists verifies that
+// bootstrapAgentKeyIfNeeded is a no-op when an agent key already exists with a
+// non-bootstrap source (e.g. config sync residue, partial bootstrap from a
+// previous run). This guards against the UNIQUE constraint crash in WEB-65.
+func TestBootstrapAgentKeyNoopWhenNonBootstrapKeyExists(t *testing.T) {
+	tmp := t.TempDir()
+	priv := filepath.Join(tmp, "agent.key.priv")
+	pub := filepath.Join(tmp, "agent.key.pub")
+	repo := newTestRepo(t)
+
+	// Simulate a leftover agent key created by a non-bootstrap source
+	// (e.g. config sync, partial bootstrap that wrote the row but not the files).
+	if err := repo.Create(context.Background(), &types.APIKey{
+		ID:           "agent",
+		Name:         "agent (config sync)",
+		PublicKeyHex: "00",
+		Role:         types.RoleAgent,
+		Enabled:      true,
+		Source:       types.APIKeySourceAPI,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := bootstrapAgentKeyIfNeeded(context.Background(), repo, priv, pub, 0, discardLogger()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(priv); !os.IsNotExist(err) {
+		t.Errorf("priv file should not exist after no-op bootstrap: %v", err)
+	}
+}
+
 func TestBootstrapAgentKeyCreatesWhenAdminKeyExists(t *testing.T) {
 	tmp := t.TempDir()
 	priv := filepath.Join(tmp, "agent.key.priv")
