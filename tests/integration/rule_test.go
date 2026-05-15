@@ -111,10 +111,27 @@ config:
 }
 
 // TestRule_RejectsCreateWhenReadonly pins the secure-by-default behaviour:
-// without flipping rules_api_readonly off, rule create must fail with 403.
+// with rules_api_readonly enabled, rule create must fail with 403.
 // Distinguishes "lockdown enforced" from "lockdown silently bypassed".
 func TestRule_RejectsCreateWhenReadonly(t *testing.T) {
-	d := startDaemon(t)
+	d := startDaemon(t, withCustomConfig(`
+server:
+  host: 127.0.0.1
+  port: __PORT__
+  tls:
+    enabled: false
+database:
+  dsn: "file:__HOME__/remote-signer.db?_journal_mode=WAL&_busy_timeout=5000"
+logger:
+  level: info
+chains:
+  evm:
+    enabled: true
+    keystore_dir: __HOME__/keystores
+    hd_wallet_dir: __HOME__/hd-wallets
+security:
+  rules_api_readonly: true
+`))
 
 	ruleFile := filepath.Join(t.TempDir(), "rule.yaml")
 	const ruleYAML = `name: should-fail
