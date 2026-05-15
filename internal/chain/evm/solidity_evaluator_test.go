@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -395,6 +396,9 @@ func strPtr(s string) *string {
 // TestEvaluate_WhitelistTransaction_CalldataMissingOrTooShort ensures that in whitelist mode,
 // transaction rules (Functions or Expression) fail when parsed is nil or RawData has fewer than 4 bytes (no selector).
 func TestEvaluate_WhitelistTransaction_CalldataMissingOrTooShort(t *testing.T) {
+	if _, err := exec.LookPath("forge"); err != nil {
+		t.Skip("forge not found in PATH, skipping evaluator test (install foundry to enable)")
+	}
 	evaluator, err := NewSolidityRuleEvaluator(SolidityEvaluatorConfig{}, slog.Default())
 	require.NoError(t, err)
 

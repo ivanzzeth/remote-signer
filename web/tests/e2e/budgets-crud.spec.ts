@@ -54,7 +54,7 @@ test("create → edit → reset → delete budget through the UI", async ({
   // --- Create ---
   await authedPage.click("text=Budgets");
   await expect(
-    authedPage.getByRole("heading", { name: "Budgets" }),
+    authedPage.getByRole("heading", { name: "Budgets", exact: true }),
   ).toBeVisible();
 
   await authedPage.getByTestId("budget-new").click();
@@ -98,7 +98,7 @@ test("create → edit → reset → delete budget through the UI", async ({
   authedPage.once("dialog", (d) => d.accept());
   await authedPage.getByTestId("budget-delete").click();
   await expect(
-    authedPage.getByRole("heading", { name: "Budgets" }),
+    authedPage.getByRole("heading", { name: "Budgets", exact: true }),
   ).toBeVisible();
   await expect(
     authedPage.locator("tr", {
