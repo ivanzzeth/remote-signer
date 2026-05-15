@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>E2E Test dApp</title>
+</head>
+<body>
+  <h1>E2E Test dApp</h1>
+
+  <section>
+    <h2>Wallet Connection</h2>
+    <button id="connectBtn" data-testid="connect">Connect Wallet</button>
+    <button id="accountsBtn" data-testid="accounts">Get Accounts</button>
+    <p id="accountDisplay" data-testid="accountDisplay">Not connected</p>
+    <p id="chainDisplay" data-testid="chainDisplay">Chain: unknown</p>
+  </section>
+
+  <section>
+    <h2>Personal Sign</h2>
+    <input id="personalSignInput" data-testid="personalSignInput" type="text" value="Hello from E2E test!" />
+    <button id="personalSignBtn" data-testid="personalSign">personal_sign</button>
+    <p id="personalSignResult" data-testid="personalSignResult"></p>
+  </section>
+
+  <section>
+    <h2>Typed Data Sign</h2>
+    <button id="typedDataBtn" data-testid="typedDataSign">eth_signTypedData</button>
+    <p id="typedDataResult" data-testid="typedDataResult"></p>
+  </section>
+
+  <section>
+    <h2>Send Transaction</h2>
+    <button id="sendTxBtn" data-testid="sendTransaction">eth_sendTransaction</button>
+    <p id="sendTxResult" data-testid="sendTxResult"></p>
+  </section>
+
+  <section>
+    <h2>Switch Chain</h2>
+    <button id="switchChainBtn" data-testid="switchChain">wallet_switchEthereumChain</button>
+    <p id="switchChainResult" data-testid="switchChainResult"></p>
+  </section>
+
+  <script>
+    // Wait for window.ethereum (injected by extension's inpage.js)
+    async function waitForProvider(timeoutMs = 5000) {
+      const start = Date.now();
+      while (!window.ethereum && Date.now() - start < timeoutMs) {
+        await new Promise(r => setTimeout(r, 100));
+      }
+      if (!window.ethereum) {
+        throw new Error('Provider not found (window.ethereum not injected)');
+      }
+      return window.ethereum;
+    }
+
+    const $ = (id) => document.getElementById(id);
+
+    async function connect() {
+      try {
+        const eth = await waitForProvider();
+        const accounts = await eth.request({ method: 'eth_requestAccounts' });
+        $('accountDisplay').textContent = 'Account: ' + (accounts[0] || 'none');
+      } catch (err) {
+        $('accountDisplay').textContent = 'Error: ' + err.message;
+      }
+    }
+
+    async function getAccounts() {
+      try {
+        const eth = await waitForProvider();
+        const accounts = await eth.request({ method: 'eth_accounts' });
+        $('accountDisplay').textContent = 'Accounts: ' + (accounts.length ? accounts.join(', ') : 'none');
+        const chainId = await eth.request({ method: 'eth_chainId' });
+        $('chainDisplay').textContent = 'Chain: ' + chainId;
+      } catch (err) {
+        $('accountDisplay').textContent = 'Error: ' + err.message;
+      }
+    }
+
+    async function personalSign() {
+      try {
+        const eth = await waitForProvider();
+        const accounts = await eth.request({ method: 'eth_accounts' });
+        if (!accounts.length) throw new Error('No account connected');
+        const message = $('personalSignInput').value;
+        const hexMsg = '0x' + Array.from(new TextEncoder().encode(message))
+          .map(b => b.toString(16).padStart(2, '0')).join('');
+        const sig = await eth.request({
+          method: 'personal_sign',
+          params: [hexMsg, accounts[0]],
+        });
+        $('personalSignResult').textContent = 'Signature: ' + sig;
+      } catch (err) {
+        $('personalSignResult').textContent = 'Error: ' + err.message;
+      }
+    }
+
+    async function typedDataSign() {
+      try {
+        const eth = await waitForProvider();
+        const accounts = await eth.request({ method: 'eth_accounts' });
+        if (!accounts.length) throw new Error('No account connected');
+        const typedData = {
+          types: {
+            EIP712Domain: [
+              { name: 'name', type: 'string' },
+              { name: 'version', type: 'string' },
+              { name: 'chainId', type: 'uint256' },
+              { name: 'verifyingContract', type: 'address' },
+            ],
+            Person: [
+              { name: 'name', type: 'string' },
+              { name: 'wallet', type: 'address' },
+            ],
+            Mail: [
+              { name: 'from', type: 'Person' },
+              { name: 'to', type: 'Person' },
+              { name: 'contents', type: 'string' },
+            ],
+          },
+          primaryType: 'Mail',
+          domain: {
+            name: 'E2E Test Mail',
+            version: '1',
+            chainId: 1,
+            verifyingContract: '0xCcCCccccCCCCcCCCCCCcCcCccCcCCCcCcccccccC',
+          },
+          message: {
+            from: { name: 'Alice', wallet: accounts[0] },
+            to: { name: 'Bob', wallet: accounts[0] },
+            contents: 'Hello from E2E test!',
+          },
+        };
+        const sig = await eth.request({
+          method: 'eth_signTypedData',
+          params: [accounts[0], JSON.stringify(typedData)],
+        });
+        $('typedDataResult').textContent = 'Signature: ' + sig;
+      } catch (err) {
+        $('typedDataResult').textContent = 'Error: ' + err.message;
+      }
+    }
+
+    async function sendTransaction() {
+      try {
+        const eth = await waitForProvider();
+        const accounts = await eth.request({ method: 'eth_accounts' });
+        if (!accounts.length) throw new Error('No account connected');
+        const txHash = await eth.request({
+          method: 'eth_sendTransaction',
+          params: [{
+            from: accounts[0],
+            to: '0x0000000000000000000000000000000000000001',
+            value: '0x0',
+            data: '0x',
+          }],
+        });
+        $('sendTxResult').textContent = 'Tx Hash: ' + txHash;
+      } catch (err) {
+        $('sendTxResult').textContent = 'Error: ' + err.message;
+      }
+    }
+
+    async function switchChain() {
+      try {
+        const eth = await waitForProvider();
+        await eth.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: '0x89' }], // Polygon 137
+        });
+        const chainId = await eth.request({ method: 'eth_chainId' });
+        $('switchChainResult').textContent = 'Switched to chain: ' + chainId;
+      } catch (err) {
+        $('switchChainResult').textContent = 'Error: ' + err.message;
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      $('connectBtn').addEventListener('click', connect);
+      $('accountsBtn').addEventListener('click', getAccounts);
+      $('personalSignBtn').addEventListener('click', personalSign);
+      $('typedDataBtn').addEventListener('click', typedDataSign);
+      $('sendTxBtn').addEventListener('click', sendTransaction);
+      $('switchChainBtn').addEventListener('click', switchChain);
+    });
+  </script>
+</body>
+</html>
