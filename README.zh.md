@@ -32,6 +32,45 @@ bash <(curl -fsSL https://raw.githubusercontent.com/ivanzzeth/remote-signer/main
 git clone https://github.com/ivanzzeth/remote-signer.git && cd remote-signer && ./scripts/setup.sh
 ```
 
+## Chrome 浏览器插件
+
+Remote Signer 提供 Chrome 浏览器扩展，为每个页面注入 EIP-1193 标准的 `window.ethereum` provider，让 dApp 可以直接使用 remote-signer 服务签名。
+
+### 安装
+
+1. 构建扩展：
+   ```bash
+   cd extension && npm ci --no-audit --no-fund && node build.mjs
+   ```
+2. 打开 Chrome → `chrome://extensions`
+3. 开启**开发者模式**（右上角开关）
+4. 点击**加载已解压的扩展程序**，选择 `extension/` 目录
+5. **Remote Signer** 图标出现在工具栏
+
+### 使用
+
+1. 点击扩展图标打开弹窗
+2. 进入 **Settings**，填写：
+   - **Remote Signer URL**（默认 `http://127.0.0.1:8548`）
+   - **API Key ID** 和 **Private Key**（从 remote-signer 配置获取）
+3. 点击 **Test Connection** 验证连接
+4. 打开任意 dApp — 会自动检测到 Remote Signer provider
+
+管理 Rules/Signers/Budgets 等请点击弹窗中的 **Open Management** 打开完整的 web 管理后台。
+
+### 架构
+
+扩展采用三层隔离模式（与 MetaMask 一致）：
+
+```
+dApp 页面 (MAIN world)  ←postMessage→  content-script (ISOLATED)  ←chrome.runtime→  background (service worker)  ←fetch→  remote-signer API
+```
+
+- `inpage.js` — 注入 `window.ethereum`，支持 EIP-1193 + EIP-6963，零网络 I/O
+- `content-script.js` — 纯双向转发，MAIN world ↔ service worker
+- `background.js` — EIP1193Provider + RemoteSignerClient，处理所有签名和 RPC
+- 无需代理 — service worker 直接使用 Ed25519 签名请求
+
 ## 文档
 
 | 文档 | 说明 |

@@ -1,0 +1,387 @@
+/* ── Reset & Base ─────────────────────────────────────────────────────── */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --bg: #1a1b1e;
+  --surface: #25262b;
+  --surface-hover: #2c2e33;
+  --border: #373a40;
+  --text: #c1c2c5;
+  --text-muted: #909296;
+  --text-heading: #ffffff;
+  --accent: #627eea;
+  --accent-hover: #7b93f5;
+  --success: #51cf66;
+  --danger: #ff6b6b;
+  --warning: #fcc419;
+  --radius: 8px;
+  --radius-sm: 4px;
+}
+
+body {
+  width: 380px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+  overflow-x: hidden;
+}
+
+/* ── Header ──────────────────────────────────────────────────────────── */
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.logo-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: var(--accent);
+  border-radius: 6px;
+  color: #fff;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.logo-text {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-heading);
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.dot.connected { background: var(--success); box-shadow: 0 0 6px rgba(81, 207, 102, 0.5); }
+.dot.disconnected { background: var(--danger); }
+.dot.connecting { background: var(--warning); animation: pulse 1.5s ease-in-out infinite; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+/* ── View Management ─────────────────────────────────────────────────── */
+.view { display: flex; flex-direction: column; }
+.view.hidden { display: none; }
+
+/* ── Status Bar ──────────────────────────────────────────────────────── */
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: var(--surface);
+}
+
+.status-text {
+  font-weight: 600;
+  color: var(--success);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.badge {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--border);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.server-url {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  font-size: 11px;
+}
+
+.server-url .label {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 10px;
+}
+
+.server-url .url {
+  color: var(--text);
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 11px;
+  word-break: break-all;
+}
+
+/* ── Sections ────────────────────────────────────────────────────────── */
+.section {
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.count-badge {
+  font-size: 10px;
+  color: var(--text-muted);
+  background: var(--border);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* ── Account List ────────────────────────────────────────────────────── */
+.account-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.account-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 11px;
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.account-item:hover {
+  background: var(--surface-hover);
+}
+
+.account-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+  flex-shrink: 0;
+}
+
+/* ── Stats Grid ──────────────────────────────────────────────────────── */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 4px;
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+}
+
+.stat-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-heading);
+}
+
+.stat-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+
+/* ── Chain Select ────────────────────────────────────────────────────── */
+.chain-select {
+  width: 100%;
+  padding: 6px 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+}
+.chain-select:focus {
+  border-color: var(--accent);
+}
+
+/* ── Actions ─────────────────────────────────────────────────────────── */
+.actions {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.btn {
+  flex: 1;
+  padding: 8px 12px;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+}
+.btn-primary:hover { background: var(--accent-hover); }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-secondary {
+  background: var(--surface);
+  color: var(--text);
+}
+.btn-secondary:hover { background: var(--surface-hover); }
+
+/* ── Settings View ───────────────────────────────────────────────────── */
+#settingsView h3 {
+  padding: 16px 16px 12px;
+  font-size: 14px;
+  color: var(--text-heading);
+}
+
+.form-group {
+  padding: 8px 16px;
+  position: relative;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.form-group input {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 12px;
+  font-family: "SF Mono", "Fira Code", monospace;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.form-group input:focus {
+  border-color: var(--accent);
+}
+
+.btn-text {
+  position: absolute;
+  right: 20px;
+  bottom: 10px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+}
+.btn-text:hover { color: var(--text); }
+
+.error {
+  padding: 8px 16px;
+  margin: 8px 16px;
+  background: rgba(255, 107, 107, 0.1);
+  border: 1px solid rgba(255, 107, 107, 0.3);
+  border-radius: var(--radius-sm);
+  color: var(--danger);
+  font-size: 12px;
+}
+.error.hidden { display: none; }
+
+.settings-actions {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+}
+
+.btn-text-only {
+  padding: 8px 16px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  text-align: left;
+  font-size: 12px;
+}
+.btn-text-only:hover { color: var(--text); }
+
+/* ── Empty / Disconnected State ──────────────────────────────────────── */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 32px 16px;
+  text-align: center;
+}
+
+.empty-icon {
+  font-size: 32px;
+  margin-bottom: 12px;
+}
+
+.empty-state p {
+  margin-bottom: 4px;
+  color: var(--text);
+}
+
+.empty-state .hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+}
+
+/* ── Loading Spinner ─────────────────────────────────────────────────── */
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-bottom: 12px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

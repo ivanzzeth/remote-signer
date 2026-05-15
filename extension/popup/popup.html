@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Remote Signer</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div id="app">
+    <header>
+      <div class="logo">
+        <span class="logo-icon">RS</span>
+        <span class="logo-text">Remote Signer</span>
+      </div>
+      <span id="connectionDot" class="dot disconnected" title="Disconnected"></span>
+    </header>
+
+    <!-- CONNECTED STATE -->
+    <div id="connectedView" class="view hidden">
+      <div class="status-bar">
+        <span id="statusText" class="status-text">Connected</span>
+        <span id="versionBadge" class="badge"></span>
+      </div>
+      <div class="server-url">
+        <span class="label">Server</span>
+        <span id="serverUrlDisplay" class="url"></span>
+      </div>
+
+      <!-- Accounts -->
+      <section class="section">
+        <div class="section-header">
+          <span>Accounts</span>
+          <span id="accountCount" class="count-badge"></span>
+        </div>
+        <div id="accountList" class="account-list"></div>
+      </section>
+
+      <!-- Dashboard Stats -->
+      <section class="section">
+        <div class="section-header">
+          <span>Dashboard</span>
+        </div>
+        <div class="stats-grid">
+          <div class="stat">
+            <span class="stat-value" id="rulesStat">-</span>
+            <span class="stat-label">Rules</span>
+          </div>
+          <div class="stat">
+            <span class="stat-value" id="signersStat">-</span>
+            <span class="stat-label">Signers</span>
+          </div>
+          <div class="stat">
+            <span class="stat-value" id="requestsStat">-</span>
+            <span class="stat-label">Today</span>
+          </div>
+          <div class="stat">
+            <span class="stat-value" id="roleStat">-</span>
+            <span class="stat-label">Role</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Chain selector -->
+      <section class="section">
+        <div class="section-header">
+          <span>Chain</span>
+        </div>
+        <select id="chainSelect" class="chain-select">
+          <option value="1">Ethereum (1)</option>
+          <option value="137">Polygon (137)</option>
+          <option value="10">Optimism (10)</option>
+          <option value="42161">Arbitrum (42161)</option>
+          <option value="8453">Base (8453)</option>
+          <option value="56">BSC (56)</option>
+          <option value="11155111">Sepolia (11155111)</option>
+        </select>
+      </section>
+
+      <div class="actions">
+        <button id="settingsBtn" class="btn btn-secondary">⚙ Settings</button>
+        <button id="managementBtn" class="btn btn-primary">📂 Open Management</button>
+      </div>
+    </div>
+
+    <!-- SETTINGS VIEW -->
+    <div id="settingsView" class="view hidden">
+      <h3>Settings</h3>
+
+      <div class="form-group">
+        <label for="inputUrl">Remote Signer URL</label>
+        <input id="inputUrl" type="url" placeholder="http://127.0.0.1:8548" />
+      </div>
+
+      <div class="form-group">
+        <label for="inputKeyId">API Key ID</label>
+        <input id="inputKeyId" type="text" placeholder="agent" />
+      </div>
+
+      <div class="form-group">
+        <label for="inputPrivateKey">API Key Private Key</label>
+        <input id="inputPrivateKey" type="password" placeholder="Ed25519 private key (hex)" />
+        <button id="togglePwBtn" class="btn-text" type="button">Show</button>
+      </div>
+
+      <div id="connectionError" class="error hidden"></div>
+
+      <div class="settings-actions">
+        <button id="testConnectionBtn" class="btn btn-secondary">Test Connection</button>
+        <button id="saveConfigBtn" class="btn btn-primary">Save</button>
+      </div>
+      <button id="backToMainBtn" class="btn btn-text-only">← Back</button>
+    </div>
+
+    <!-- DISCONNECTED / ERROR VIEW -->
+    <div id="disconnectedView" class="view hidden">
+      <div class="empty-state">
+        <div class="empty-icon">🔌</div>
+        <p>Not connected to Remote Signer</p>
+        <p class="hint">Configure your connection in Settings</p>
+        <button id="disconnectedSettingsBtn" class="btn btn-primary">Open Settings</button>
+      </div>
+    </div>
+
+    <!-- LOADING VIEW -->
+    <div id="loadingView" class="view">
+      <div class="empty-state">
+        <div class="spinner"></div>
+        <p>Connecting...</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
