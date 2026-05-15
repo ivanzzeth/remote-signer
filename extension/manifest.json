@@ -1,0 +1,45 @@
+{
+  "manifest_version": 3,
+  "name": "Remote Signer",
+  "version": "0.3.2",
+  "description": "EIP-1193 wallet provider backed by remote-signer. Connect dApps to your policy-controlled signing service.",
+  "permissions": [
+    "scripting",
+    "webNavigation",
+    "storage",
+    "declarativeNetRequest",
+    "tabs"
+  ],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "csp_bypass",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "Remote Signer"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content-script.js"],
+      "run_at": "document_start",
+      "all_frames": false,
+      "world": "ISOLATED"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["inpage.js"],
+      "matches": ["http://*/*", "https://*/*"]
+    }
+  ]
+}
