@@ -37,6 +37,37 @@ jobs:
       - name: go test -tags integration ./tests/integration/...
         run: go test -tags integration ./tests/integration/...
 
+  extension-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: extension/package-lock.json
+      - name: Install dependencies
+        run: |
+          cd extension
+          npm ci --no-audit --no-fund
+      - name: Build extension
+        run: |
+          cd extension
+          node build.mjs
+      - name: Package extension
+        run: |
+          cd extension
+          mkdir -p dist
+          zip -r dist/remote-signer-extension.zip \
+            manifest.json background.js inpage.js content-script.js \
+            rules.json popup/ -x "*.map"
+      - name: Upload extension artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: remote-signer-extension
+          path: extension/dist/remote-signer-extension.zip
+          retention-days: 7
+
   web-e2e:
     runs-on: ubuntu-latest
     steps:
