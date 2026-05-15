@@ -3,12 +3,14 @@ import { fileURLToPath } from "url";
 import { spawn, ChildProcess } from "child_process";
 import * as path from "path";
 import * as fs from "fs";
+import * as http from "http";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 interface E2EServerInfo {
   base_url: string;
+  dapp_url: string;
   admin_api_key_id: string;
   admin_api_key_hex: string;
   non_admin_api_key_id: string;
@@ -19,6 +21,7 @@ interface E2EServerInfo {
 declare global {
   var __e2eServerProcess: ChildProcess | undefined;
   var __e2eServerInfo: E2EServerInfo | undefined;
+  var __dappServer: http.Server | undefined;
 }
 
 async function globalSetup(_config: FullConfig) {
@@ -89,11 +92,47 @@ async function globalSetup(_config: FullConfig) {
   // Write server info for test fixture consumption
   const outDir = path.join(__dirname, ".e2e-state");
   fs.mkdirSync(outDir, { recursive: true });
-  fs.writeFileSync(path.join(outDir, "server.json"), JSON.stringify(info, null, 2));
 
   // Also write dApp test page that needs the server URL
   const dappHtml = generateDappPage(info);
   fs.writeFileSync(path.join(outDir, "dapp-test-page.html"), dappHtml);
+
+  // Start a static HTTP file server to serve dApp pages (file:// doesn't work with MV3 content scripts)
+  const dappServer = http.createServer((req, res) => {
+    let filePath = path.join(outDir, req.url === "/" ? "dapp-test-page.html" : req.url!);
+    // Resolve symlinks and prevent directory traversal
+    filePath = path.resolve(filePath);
+    if (!filePath.startsWith(path.resolve(outDir))) {
+      res.writeHead(403);
+      res.end("Forbidden");
+      return;
+    }
+    fs.readFile(filePath, (err, data) => {
+      if (err) {
+        res.writeHead(404);
+        res.end("Not found");
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "text/html" });
+      res.end(data);
+    });
+  });
+
+  const dappPort = await new Promise<number>((resolve) => {
+    const server = dappServer.listen(0, "127.0.0.1", () => {
+      const addr = server.address();
+      resolve(typeof addr === "object" && addr ? addr.port : 0);
+    });
+  });
+
+  globalThis.__dappServer = dappServer;
+  globalThis.__e2eServerInfo!.dapp_url = `http://127.0.0.1:${dappPort}`;
+
+  // Re-write server.json with dapp_url now included
+  const fullInfo = { ...info, dapp_url: globalThis.__e2eServerInfo!.dapp_url };
+  fs.writeFileSync(path.join(outDir, "server.json"), JSON.stringify(fullInfo, null, 2));
+
+  console.log(`[global-setup] DApp file server ready at http://127.0.0.1:${dappPort}`);
 
   console.log(`[global-setup] Test server ready at ${info.base_url}`);
 }
