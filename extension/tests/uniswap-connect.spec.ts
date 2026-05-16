@@ -2,18 +2,18 @@ import { test, expect } from "./fixtures";
 import type { Page, BrowserContext } from "@playwright/test";
 import { fileURLToPath } from "url";
 import path from "path";
+import fs from "fs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const SWAP_PAGE_PATH = path.resolve(__dirname, "dapp", "swap-page.html");
-
 /**
- * Open the swap simulation dApp page in a new tab.
+ * Open the swap simulation dApp page in a new tab via the HTTP dApp server.
+ * file:// is not used because MV3 blocks content-script injection on file:// URLs.
  */
-async function openSwapPage(context: BrowserContext): Promise<Page> {
+async function openSwapPage(context: BrowserContext, dappUrl: string): Promise<Page> {
   const page = await context.newPage();
-  await page.goto(`file://${SWAP_PAGE_PATH}`);
+  await page.goto(`${dappUrl}/swap-page.html`);
   return page;
 }
 
@@ -64,7 +64,7 @@ test.describe("Uniswap Connect (@integration)", () => {
     await configureViaPopup(context, extensionId, serverInfo);
 
     // Open the swap page
-    const page = await openSwapPage(context);
+    const page = await openSwapPage(context, serverInfo.dapp_url);
     await page.waitForFunction(() => !!window.ethereum, { timeout: 15_000 });
 
     // Verify provider is available
@@ -107,7 +107,7 @@ test.describe("Uniswap Connect (@integration)", () => {
   }) => {
     await configureViaPopup(context, extensionId, serverInfo);
 
-    const page = await openSwapPage(context);
+    const page = await openSwapPage(context, serverInfo.dapp_url);
     await page.waitForFunction(() => !!window.ethereum, { timeout: 15_000 });
 
     await page.click("#btnConnect");
@@ -142,7 +142,7 @@ test.describe("Uniswap Connect (@integration)", () => {
   }) => {
     await configureViaPopup(context, extensionId, serverInfo);
 
-    const page = await openSwapPage(context);
+    const page = await openSwapPage(context, serverInfo.dapp_url);
     await page.waitForFunction(() => !!window.ethereum, { timeout: 15_000 });
 
     await page.click("#btnConnect");

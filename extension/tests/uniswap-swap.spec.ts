@@ -7,16 +7,13 @@ import path from "path";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const SWAP_PAGE_PATH = path.resolve(__dirname, "dapp", "swap-page.html");
-
-// Test token addresses (same as the swap page uses)
 const USDC_TOKEN = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
 const DAI_TOKEN = "0x6B175474E89094C44Da98b954EedeAC495271d0F";
 const UNISWAP_ROUTER = "0xE592427A0AEce92De3Edee1F18E0157C05861564";
 
-async function openSwapPage(context: BrowserContext): Promise<Page> {
+async function openSwapPage(context: BrowserContext, dappUrl: string): Promise<Page> {
   const page = await context.newPage();
-  await page.goto(`file://${SWAP_PAGE_PATH}`);
+  await page.goto(`${dappUrl}/swap-page.html`);
   return page;
 }
 
@@ -71,8 +68,8 @@ test.describe("Uniswap Swap Flow (@integration)", () => {
   }) => {
     await configureExtension(context, extensionId, serverInfo);
 
-    const page = await openSwapPage(context);
-    const account = await connectWallet(page);
+    const page = await openSwapPage(context, serverInfo.dapp_url);
+    await connectWallet(page);
 
     // Select USDC → ETH (default), set amount
     await page.selectOption("#tokenIn", "USDC");
@@ -113,8 +110,8 @@ test.describe("Uniswap Swap Flow (@integration)", () => {
   }) => {
     await configureExtension(context, extensionId, serverInfo);
 
-    const page = await openSwapPage(context);
-    const account = await connectWallet(page);
+    const page = await openSwapPage(context, serverInfo.dapp_url);
+    await connectWallet(page);
 
     await page.fill("#amountIn", "10");
 
@@ -150,8 +147,8 @@ test.describe("Uniswap Swap Flow (@integration)", () => {
   }) => {
     await configureExtension(context, extensionId, serverInfo);
 
-    const page = await openSwapPage(context);
-    const account = await connectWallet(page);
+    const page = await openSwapPage(context, serverInfo.dapp_url);
+    await connectWallet(page);
     expect(account).toMatch(/^0x[a-fA-F0-9]{40}$/);
 
     // Set up a DAI → ETH approve
@@ -206,7 +203,7 @@ test.describe("Uniswap Swap Flow (@integration)", () => {
   }) => {
     await configureExtension(context, extensionId, serverInfo);
 
-    const page = await openSwapPage(context);
+    const page = await openSwapPage(context, serverInfo.dapp_url);
     await connectWallet(page);
 
     // Directly call eth_sendTransaction from the page context, then
@@ -282,7 +279,7 @@ test.describe("Uniswap Swap Flow (@integration)", () => {
   }) => {
     await configureExtension(context, extensionId, serverInfo);
 
-    const page = await openSwapPage(context);
+    const page = await openSwapPage(context, serverInfo.dapp_url);
     await connectWallet(page);
 
     // USDC → ETH swap with approval

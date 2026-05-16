@@ -26,6 +26,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/statemachine"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
+	"github.com/lib/pq"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
@@ -171,9 +172,10 @@ func main() {
 	ruleEngine.RegisterEvaluator(jsEval)
 	budgetChecker.SetJSEvaluator(jsEval)
 
-	// Seed a whitelist rule for the test signer.
+	// Seed whitelist rules for the test signer.
 	chainType := types.ChainTypeEVM
-	ruleRepo.Create(ctx, &types.Rule{
+	now := time.Now()
+	if err := ruleRepo.Create(ctx, &types.Rule{
 		ID:          "e2e-test-rule",
 		Name:        "E2E Test Auto-Approve",
 		Description: "Auto-approve all requests for e2e testing",
@@ -184,9 +186,32 @@ func main() {
 		Config:      []byte(`{"allowed_signers":["` + testSignerAddress + `"]}`),
 		Enabled:     true,
 		Owner:       "config",
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-	})
+		AppliedTo:   pq.StringArray{"*"},
+		Status:      types.RuleStatusActive,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}); err != nil {
+		fatal("create signer restriction rule: %v", err)
+	}
+
+	if err := ruleRepo.Create(ctx, &types.Rule{
+		ID:          "e2e-test-sign-type-rule",
+		Name:        "E2E Test Sign Type Allow-All",
+		Description: "Allow all sign types for e2e testing",
+		Type:        types.RuleTypeSignTypeRestriction,
+		Mode:        types.RuleModeWhitelist,
+		Source:      types.RuleSourceConfig,
+		ChainType:   &chainType,
+		Config:      []byte(`{"allowed_sign_types":["personal","typed_data","transaction","hash","raw_message","eip191"]}`),
+		Enabled:     true,
+		Owner:       "config",
+		AppliedTo:   pq.StringArray{"*"},
+		Status:      types.RuleStatusActive,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}); err != nil {
+		fatal("create sign type restriction rule: %v", err)
+	}
 
 	// Auth verifier.
 	nonceStore, _ := storage.NewInMemoryNonceStore(time.Minute)

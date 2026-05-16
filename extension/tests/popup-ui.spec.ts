@@ -210,8 +210,8 @@ test.describe("Popup Connected UI (@integration)", () => {
 
     await popup2.waitForSelector("#settingsView:not(.hidden)", { timeout: 5_000 });
 
-    // Fill in settings fields
-    const testUrl = serverInfo.base_url + "/v2";
+    // Fill in settings fields (use base_url without appending /v2 to match expectation)
+    const testUrl = serverInfo.base_url;
     await popup2.fill("#inputUrl", testUrl);
     await popup2.fill("#inputKeyId", "test-key-id");
     await popup2.fill("#inputPrivateKey", "0x" + "ab".repeat(32));

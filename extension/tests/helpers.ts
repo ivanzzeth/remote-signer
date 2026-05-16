@@ -9,8 +9,9 @@ const __dirname = path.dirname(__filename);
 // ── Storage helpers ──────────────────────────────────────────────────────────
 
 /**
- * Inject config into chrome.storage.local for the extension.
- * Call this before opening the popup so it starts pre-configured.
+ * Inject config into chrome.storage.local for the extension AND signal the
+ * background service worker to re-initialize. Without the reinit signal, the
+ * SW will still have a stale initError from startup (before config existed).
  */
 export async function injectStorageConfig(
   page: Page,
@@ -32,6 +33,22 @@ export async function injectStorageConfig(
       });
     });
   }, config);
+
+  // Signal the background SW to re-initialize with the new config.
+  // Without this, ensureInit() returns the stale failed promise.
+  await page.evaluate((cfg) => {
+    return chrome.runtime.sendMessage({
+      type: "popup:saveConfig",
+      config: cfg,
+    }).catch(() => {
+      // SW might not be ready yet; that's OK, next request will trigger init
+    });
+  }, {
+    remoteSignerUrl: config.remoteSignerUrl,
+    apiKeyId: config.apiKeyId,
+    apiKeyPrivateKey: config.apiKeyPrivateKey,
+    selectedChain: config.selectedChain ?? 1,
+  });
 }
 
 // ── Popup Interactions ───────────────────────────────────────────────────────
@@ -80,7 +97,7 @@ export async function fillPopupConfig(
 export async function openDappAndWaitForProvider(page: Page, timeout = 15_000): Promise<void> {
   const statePath = path.resolve(__dirname, ".e2e-state", "server.json");
   const info = JSON.parse(fs.readFileSync(statePath, "utf-8"));
-  const dappUrl = info.dapp_url || `file://${path.resolve(__dirname, ".e2e-state", "dapp-test-page.html")}`;
+  const dappUrl = info.dapp_url;
   await page.goto(dappUrl);
 
   await page.waitForFunction(() => !!window.ethereum, { timeout });
