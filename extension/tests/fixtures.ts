@@ -1,7 +1,9 @@
-import { test as base, type Page, type BrowserContext } from "@playwright/test";
+import { test as base, type Page, type BrowserContext, chromium } from "@playwright/test";
 import { fileURLToPath } from "url";
 import * as path from "path";
 import * as fs from "fs";
+import { createHash } from "crypto";
+import * as os from "os";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -21,7 +23,7 @@ export interface E2EServerInfo {
 export interface ExtensionFixtures {
   /** Server info loaded from global-setup */
   serverInfo: E2EServerInfo;
-  /** Extension ID (auto-detected) */
+  /** Extension ID (deterministically derived from extension path) */
   extensionId: string;
   /** Popup page handle */
   popup: Page;
@@ -44,58 +46,28 @@ async function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/** Detect the extension ID for an unpacked Chrome extension (MV3) */
-export async function detectExtensionId(context: BrowserContext): Promise<string> {
-  const page = await context.newPage();
-  await page.goto("about:blank");
+/** Derive the deterministic extension ID for an unpacked MV3 extension.
 
-  // Method 1: Wait for and check service workers (MV3) — retry since SW may not be ready immediately
-  for (let i = 0; i < 30; i++) {
-    const sws = context.serviceWorkers();
-    for (const sw of sws) {
-      const m = sw.url().match(/^chrome-extension:\/\/([a-p]{32})\//);
-      if (m) { await page.close(); return m[1]; }
-    }
-    // Listen for newly registered service workers
-    const swFromEvent = await new Promise<string | null>((resolve) => {
-      const handler = (sw: any) => {
-        const m = sw.url().match(/^chrome-extension:\/\/([a-p]{32})\//);
-        if (m) resolve(m[1]);
-      };
-      context.on("serviceworker", handler);
-      setTimeout(() => {
-        context.off("serviceworker", handler);
-        resolve(null);
-      }, 200);
-    });
-    if (swFromEvent) { await page.close(); return swFromEvent; }
+Chrome derives unpacked extension IDs from the SHA-256 hash of the absolute
+extension path. Each byte of the first 16 hash bytes produces 2 characters (one
+from the high nibble, one from the low nibble), mapped to [a-p], yielding a 32-
+character ID.
+
+Playwright's `context.serviceWorkers()` does not enumerate MV3 service workers,
+so we compute the ID deterministically instead of at runtime.
+ */
+export function deriveExtensionId(extensionPath: string): string {
+  const hash = createHash("sha256").update(extensionPath).digest();
+  const chars = "abcdefghijklmnop";
+  let id = "";
+  for (let i = 0; i < 16; i++) {
+    id += chars[(hash[i] >> 4) & 0x0f];
+    id += chars[hash[i] & 0x0f];
   }
-
-  // Method 2: Check background pages (MV2)
-  const bgPages = context.backgroundPages();
-  for (const bg of bgPages) {
-    const m = bg.url().match(/^chrome-extension:\/\/([a-p]{32})\//);
-    if (m) { await page.close(); return m[1]; }
-  }
-
-  // Method 3: Check injected scripts on the page
-  const extId = await page.evaluate(() => {
-    const scripts = document.querySelectorAll("script");
-    for (const s of scripts) {
-      const m = s.src.match(/^chrome-extension:\/\/([a-p]{32})\//);
-      if (m) return m[1];
-    }
-    return null;
-  });
-
-  await page.close();
-  if (extId) return extId;
-
-  throw new Error(
-    "Could not detect extension ID. Ensure the extension is loaded. " +
-    "Run the extension build first: npm run build"
-  );
+  return id;
 }
+
+const EXTENSION_PATH = path.resolve(__dirname, "..");
 
 /** Open the extension popup by navigating to chrome-extension://<id>/popup/popup.html */
 export async function openPopupPage(context: BrowserContext, extensionId: string): Promise<Page> {
@@ -109,13 +81,29 @@ export async function openPopupPage(context: BrowserContext, extensionId: string
 // ── Extended Test ─────────────────────────────────────────────────────────────
 
 export const test = base.extend<ExtensionFixtures>({
+  // Override the built-in context fixture with launchPersistentContext.
+  // Standard browser contexts block chrome-extension:// navigation (ERR_BLOCKED_BY_CLIENT);
+  // persistent contexts tied to a profile directory allow extension access.
+  context: async ({}, use) => {
+    const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "pw-ext-"));
+    const context = await chromium.launchPersistentContext(userDataDir, {
+      headless: false, // required for extension loading
+      args: [
+        `--disable-extensions-except=${EXTENSION_PATH}`,
+        `--load-extension=${EXTENSION_PATH}`,
+      ],
+    });
+    await use(context);
+    await context.close();
+  },
+
   serverInfo: async ({}, use) => {
     const info = loadServerInfo();
     await use(info);
   },
 
-  extensionId: async ({ context }: { context: BrowserContext }, use) => {
-    const extId = await detectExtensionId(context);
+  extensionId: async ({ }, use) => {
+    const extId = deriveExtensionId(EXTENSION_PATH);
     await use(extId);
   },
 

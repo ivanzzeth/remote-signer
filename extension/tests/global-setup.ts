@@ -97,9 +97,18 @@ async function globalSetup(_config: FullConfig) {
   const dappHtml = generateDappPage(info);
   fs.writeFileSync(path.join(outDir, "dapp-test-page.html"), dappHtml);
 
+  // Copy dApp pages into .e2e-state so they can be served via HTTP
+  const dappDir = path.join(__dirname, "dapp");
+  if (fs.existsSync(dappDir)) {
+    for (const file of fs.readdirSync(dappDir)) {
+      fs.copyFileSync(path.join(dappDir, file), path.join(outDir, file));
+    }
+  }
+
   // Start a static HTTP file server to serve dApp pages (file:// doesn't work with MV3 content scripts)
   const dappServer = http.createServer((req, res) => {
-    let filePath = path.join(outDir, req.url === "/" ? "dapp-test-page.html" : req.url!);
+    const urlPath = req.url === "/" ? "dapp-test-page.html" : req.url!;
+    let filePath = path.join(outDir, urlPath);
     // Resolve symlinks and prevent directory traversal
     filePath = path.resolve(filePath);
     if (!filePath.startsWith(path.resolve(outDir))) {
@@ -113,7 +122,14 @@ async function globalSetup(_config: FullConfig) {
         res.end("Not found");
         return;
       }
-      res.writeHead(200, { "Content-Type": "text/html" });
+      const ext = path.extname(filePath);
+      const mimeTypes: Record<string, string> = {
+        ".html": "text/html",
+        ".js": "application/javascript",
+        ".css": "text/css",
+        ".json": "application/json",
+      };
+      res.writeHead(200, { "Content-Type": mimeTypes[ext] || "text/html" });
       res.end(data);
     });
   });

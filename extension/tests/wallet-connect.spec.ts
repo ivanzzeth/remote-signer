@@ -26,7 +26,8 @@ test.describe("Wallet Connection (@integration)", () => {
     expect(hasProvider).toBe(true);
 
     const isMetaMask = await dapp.evaluate(() => (window.ethereum as any)?.isMetaMask);
-    expect(isMetaMask).toBeUndefined();
+    // remote-signer's inpage proxy sets isMetaMask to false (not undefined)
+    expect(isMetaMask).toBe(false);
   });
 
   test("eth_requestAccounts returns account addresses after connection", async ({ context, extensionId, serverInfo }) => {
@@ -122,15 +123,12 @@ test.describe("Wallet Connection (@integration)", () => {
     }
   });
 
-  test("eth_accounts returns empty array when not connected", async ({ context, extensionId }) => {
+  test("eth_accounts returns empty array when not connected", async ({ context, extensionId, serverInfo }) => {
     // Do NOT configure the extension — no config means no connection possible
     const dapp = await context.newPage();
 
-    // Open a blank page first, then the dApp so the extension loads
-    await dapp.goto("about:blank");
-
-    const dappPath = path.resolve(__dirname, ".e2e-state", "dapp-test-page.html");
-    await dapp.goto(`file://${dappPath}`);
+    // Open the dApp via HTTP (file:// blocks MV3 content-script injection)
+    await dapp.goto(serverInfo.dapp_url);
     await dapp.waitForFunction(() => !!window.ethereum, { timeout: 15_000 });
 
     // Without config, eth_requestAccounts should fail
