@@ -1,96 +1,154 @@
-import { test as base, expect } from "@playwright/test";
-import path from "node:path";
-import fs from "node:fs";
-import { fileURLToPath } from "node:url";
+import { test as base, type Page, type BrowserContext } from "@playwright/test";
+import { fileURLToPath } from "url";
+import * as path from "path";
+import * as fs from "fs";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-/** Extension info stored by globalSetup */
-export interface ServerConfig {
-  baseURL: string;
-  signerAddress: string;
-  adminAPIKeyID: string;
-  adminAPIKeyHex: string;
-  nonAdminAPIKeyID: string;
-  nonAdminAPIKeyHex: string;
-}
+// ── Types ────────────────────────────────────────────────────────────────────
 
-/** Load the server config written by globalSetup */
-export function loadServerConfig(): ServerConfig {
-  const configPath = path.join(__dirname, ".server-config.json");
-  return JSON.parse(fs.readFileSync(configPath, "utf-8"));
+export interface E2EServerInfo {
+  base_url: string;
+  dapp_url: string;
+  admin_api_key_id: string;
+  admin_api_key_hex: string;
+  non_admin_api_key_id: string;
+  non_admin_api_key_hex: string;
+  signer_address: string;
 }
 
 export interface ExtensionFixtures {
-  /** Remote-signer server base URL */
-  serverURL: string;
-
-  /** Admin API key ID */
-  adminAPIKeyID: string;
-
-  /** Admin API key (Ed25519 hex) */
-  adminAPIKeyHex: string;
-
-  /** Non-admin API key ID */
-  nonAdminAPIKeyID: string;
-
-  /** Non-admin API key (Ed25519 hex) */
-  nonAdminAPIKeyHex: string;
-
-  /** Signer address from test server */
-  signerAddress: string;
-
-  /** Open the extension popup page */
-  openPopup: () => Promise<void>;
-
-  /** Navigate to the local dApp test page */
-  openDApp: () => Promise<void>;
+  /** Server info loaded from global-setup */
+  serverInfo: E2EServerInfo;
+  /** Extension ID (auto-detected) */
+  extensionId: string;
+  /** Popup page handle */
+  popup: Page;
+  /** Open the extension popup in a new tab and return it */
+  openPopup: (ctx: BrowserContext) => Promise<Page>;
+  /** Open a dApp test page tab */
+  openDapp: () => Promise<Page>;
+  /** Configure the extension via popup */
+  configureExtension: (page: Page, overrides?: Partial<{ url: string; apiKeyId: string; apiKeyPrivateKey: string }>) => Promise<void>;
 }
 
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function loadServerInfo(): E2EServerInfo {
+  const statePath = path.resolve(__dirname, ".e2e-state", "server.json");
+  return JSON.parse(fs.readFileSync(statePath, "utf-8"));
+}
+
+async function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Detect the extension ID for an unpacked Chrome extension (MV3) */
+export async function detectExtensionId(context: BrowserContext): Promise<string> {
+  const page = await context.newPage();
+  await page.goto("about:blank");
+
+  // Method 1: Wait for and check service workers (MV3) — retry since SW may not be ready immediately
+  for (let i = 0; i < 30; i++) {
+    const sws = context.serviceWorkers();
+    for (const sw of sws) {
+      const m = sw.url().match(/^chrome-extension:\/\/([a-p]{32})\//);
+      if (m) { await page.close(); return m[1]; }
+    }
+    // Listen for newly registered service workers
+    const swFromEvent = await new Promise<string | null>((resolve) => {
+      const handler = (sw: any) => {
+        const m = sw.url().match(/^chrome-extension:\/\/([a-p]{32})\//);
+        if (m) resolve(m[1]);
+      };
+      context.on("serviceworker", handler);
+      setTimeout(() => {
+        context.off("serviceworker", handler);
+        resolve(null);
+      }, 200);
+    });
+    if (swFromEvent) { await page.close(); return swFromEvent; }
+  }
+
+  // Method 2: Check background pages (MV2)
+  const bgPages = context.backgroundPages();
+  for (const bg of bgPages) {
+    const m = bg.url().match(/^chrome-extension:\/\/([a-p]{32})\//);
+    if (m) { await page.close(); return m[1]; }
+  }
+
+  // Method 3: Check injected scripts on the page
+  const extId = await page.evaluate(() => {
+    const scripts = document.querySelectorAll("script");
+    for (const s of scripts) {
+      const m = s.src.match(/^chrome-extension:\/\/([a-p]{32})\//);
+      if (m) return m[1];
+    }
+    return null;
+  });
+
+  await page.close();
+  if (extId) return extId;
+
+  throw new Error(
+    "Could not detect extension ID. Ensure the extension is loaded. " +
+    "Run the extension build first: npm run build"
+  );
+}
+
+/** Open the extension popup by navigating to chrome-extension://<id>/popup/popup.html */
+export async function openPopupPage(context: BrowserContext, extensionId: string): Promise<Page> {
+  const page = await context.newPage();
+  await page.goto(`chrome-extension://${extensionId}/popup/popup.html`);
+  // Wait for the popup to initialize
+  await page.waitForSelector("#app", { timeout: 10_000 });
+  return page;
+}
+
+// ── Extended Test ─────────────────────────────────────────────────────────────
+
 export const test = base.extend<ExtensionFixtures>({
-  serverURL: async ({}, use) => {
-    const cfg = loadServerConfig();
-    await use(cfg.baseURL);
+  serverInfo: async ({}, use) => {
+    const info = loadServerInfo();
+    await use(info);
   },
 
-  adminAPIKeyID: async ({}, use) => {
-    const cfg = loadServerConfig();
-    await use(cfg.adminAPIKeyID);
+  extensionId: async ({ context }: { context: BrowserContext }, use) => {
+    const extId = await detectExtensionId(context);
+    await use(extId);
   },
 
-  adminAPIKeyHex: async ({}, use) => {
-    const cfg = loadServerConfig();
-    await use(cfg.adminAPIKeyHex);
+  openPopup: async ({ context, extensionId }: { context: BrowserContext; extensionId: string }, use) => {
+    await use(async () => openPopupPage(context, extensionId as string));
   },
 
-  nonAdminAPIKeyID: async ({}, use) => {
-    const cfg = loadServerConfig();
-    await use(cfg.nonAdminAPIKeyID);
+  popup: async ({ context, extensionId }: { context: BrowserContext; extensionId: string }, use) => {
+    const page = await openPopupPage(context, extensionId as string);
+    await use(page);
+    await page.close();
   },
 
-  nonAdminAPIKeyHex: async ({}, use) => {
-    const cfg = loadServerConfig();
-    await use(cfg.nonAdminAPIKeyHex);
-  },
-
-  signerAddress: async ({}, use) => {
-    const cfg = loadServerConfig();
-    await use(cfg.signerAddress);
-  },
-
-  openPopup: async ({ context }, use) => {
+  openDapp: async ({ context, serverInfo }: { context: BrowserContext; serverInfo: E2EServerInfo }, use) => {
     await use(async () => {
-      // The extension popup URL is chrome-extension://<id>/popup/popup.html
-      // We need to find it from the service worker or by iterating background pages.
-      // Instead, open the extension via its popup action click programmatically.
-      await context.pages()[0]?.bringToFront();
+      const page = await context.newPage();
+      await page.goto(serverInfo.dapp_url + "/");
+      return page;
     });
   },
 
-  openDApp: async ({ page }, use) => {
-    await use(async () => {
-      const dappPath = path.resolve(__dirname, "dapp-test-page.html");
-      await page.goto(`file://${dappPath}`);
+  configureExtension: async ({ serverInfo }: { serverInfo: E2EServerInfo }, use) => {
+    await use(async (page: Page, overrides?: Partial<{ url: string; apiKeyId: string; apiKeyPrivateKey: string }>) => {
+      await page.click("#settingsBtn");
+      await page.fill("#inputUrl", overrides?.url ?? serverInfo.base_url);
+      await page.fill("#inputKeyId", overrides?.apiKeyId ?? serverInfo.admin_api_key_id);
+      await page.fill("#inputPrivateKey", overrides?.apiKeyPrivateKey ?? serverInfo.admin_api_key_hex);
+      await page.click("#testConnectionBtn");
+
+      // Wait for test result
+      await sleep(500);
+      await page.click("#saveConfigBtn");
+      await sleep(300);
     });
   },
 });

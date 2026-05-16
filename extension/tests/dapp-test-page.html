@@ -3,187 +3,128 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>E2E Test dApp</title>
+  <title>Remote Signer E2E Test dApp</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
+    .panel { border: 1px solid #ccc; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+    .panel h3 { margin-top: 0; }
+    pre { background: #f0f0f0; padding: 0.75rem; border-radius: 4px; overflow-x: auto; font-size: 0.85rem; }
+    button { padding: 0.5rem 1rem; margin: 0.25rem; cursor: pointer; border-radius: 4px; border: 1px solid #999; background: #fff; }
+    button:hover { background: #e8e8e8; }
+    .status { display: inline-block; padding: 0.25rem 0.5rem; border-radius: 4px; font-weight: 600; }
+    .status.ok { background: #d4edda; color: #155724; }
+    .status.err { background: #f8d7da; color: #721c24; }
+    .status.pending { background: #fff3cd; color: #856404; }
+    #results { white-space: pre-wrap; word-break: break-word; }
+  </style>
 </head>
 <body>
-  <h1>E2E Test dApp</h1>
+  <h1>Remote Signer E2E Test dApp</h1>
+  <p>This page tests the EIP-1193 provider injected by the Remote Signer extension.</p>
 
-  <section>
-    <h2>Wallet Connection</h2>
-    <button id="connectBtn" data-testid="connect">Connect Wallet</button>
-    <button id="accountsBtn" data-testid="accounts">Get Accounts</button>
-    <p id="accountDisplay" data-testid="accountDisplay">Not connected</p>
-    <p id="chainDisplay" data-testid="chainDisplay">Chain: unknown</p>
-  </section>
+  <div class="panel">
+    <h3>Provider State</h3>
+    <p>Available: <span id="providerStatus" class="status pending">checking...</span></p>
+    <p>Chain ID: <span id="chainId">-</span></p>
+    <p>Accounts: <pre id="accounts">-</pre></p>
+    <p>Connected: <span id="connected">-</span></p>
+  </div>
 
-  <section>
-    <h2>Personal Sign</h2>
-    <input id="personalSignInput" data-testid="personalSignInput" type="text" value="Hello from E2E test!" />
-    <button id="personalSignBtn" data-testid="personalSign">personal_sign</button>
-    <p id="personalSignResult" data-testid="personalSignResult"></p>
-  </section>
+  <div class="panel">
+    <h3>EIP-1193 Actions</h3>
+    <button id="btnRequestAccounts">eth_requestAccounts</button>
+    <button id="btnAccounts">eth_accounts</button>
+    <button id="btnChainId">eth_chainId</button>
+    <button id="btnPersonalSign">personal_sign</button>
+    <button id="btnSendTransaction">eth_sendTransaction</button>
+    <button id="btnSwitchChain">wallet_switchEthereumChain</button>
+    <div id="results"></div>
+  </div>
 
-  <section>
-    <h2>Typed Data Sign</h2>
-    <button id="typedDataBtn" data-testid="typedDataSign">eth_signTypedData</button>
-    <p id="typedDataResult" data-testid="typedDataResult"></p>
-  </section>
-
-  <section>
-    <h2>Send Transaction</h2>
-    <button id="sendTxBtn" data-testid="sendTransaction">eth_sendTransaction</button>
-    <p id="sendTxResult" data-testid="sendTxResult"></p>
-  </section>
-
-  <section>
-    <h2>Switch Chain</h2>
-    <button id="switchChainBtn" data-testid="switchChain">wallet_switchEthereumChain</button>
-    <p id="switchChainResult" data-testid="switchChainResult"></p>
-  </section>
+  <div class="panel">
+    <h3>Event Log</h3>
+    <pre id="eventLog">-</pre>
+  </div>
 
   <script>
-    // Wait for window.ethereum (injected by extension's inpage.js)
-    async function waitForProvider(timeoutMs = 5000) {
-      const start = Date.now();
-      while (!window.ethereum && Date.now() - start < timeoutMs) {
-        await new Promise(r => setTimeout(r, 100));
+    (function () {
+      const eventLog = [];
+      function logEvent(name, data) {
+        const entry = new Date().toISOString() + " " + name + " " + JSON.stringify(data);
+        eventLog.unshift(entry);
+        const el = document.getElementById("eventLog");
+        if (el) el.textContent = eventLog.slice(0, 50).join("\n");
       }
-      if (!window.ethereum) {
-        throw new Error('Provider not found (window.ethereum not injected)');
+
+      // Poll for provider availability
+      let checkCount = 0;
+      var checkInterval = setInterval(function () {
+        checkCount++;
+        const provider = window.ethereum;
+        const statusEl = document.getElementById("providerStatus");
+        if (!statusEl) return;
+        if (provider) {
+          clearInterval(checkInterval);
+          statusEl.textContent = "available";
+          statusEl.className = "status ok";
+          document.getElementById("chainId").textContent = provider.chainId || "-";
+          document.getElementById("connected").textContent = String(provider.isConnected ? provider.isConnected() : false);
+
+          if (provider.selectedAddress) {
+            document.getElementById("accounts").textContent = JSON.stringify([provider.selectedAddress]);
+          }
+
+          provider.on("accountsChanged", function (accounts) { logEvent("accountsChanged", accounts); });
+          provider.on("chainChanged", function (chainId) { logEvent("chainChanged", chainId); });
+          provider.on("connect", function (info) { logEvent("connect", info); });
+          provider.on("disconnect", function (error) { logEvent("disconnect", error); });
+        } else if (checkCount > 100) {
+          clearInterval(checkInterval);
+          statusEl.textContent = "unavailable (timeout)";
+          statusEl.className = "status err";
+        }
+      }, 100);
+
+      function showResult(result) {
+        document.getElementById("results").innerHTML = "<pre>" + JSON.stringify(result, null, 2).replace(/</g, "&lt;") + "</pre>";
       }
-      return window.ethereum;
-    }
 
-    const $ = (id) => document.getElementById(id);
-
-    async function connect() {
-      try {
-        const eth = await waitForProvider();
-        const accounts = await eth.request({ method: 'eth_requestAccounts' });
-        $('accountDisplay').textContent = 'Account: ' + (accounts[0] || 'none');
-      } catch (err) {
-        $('accountDisplay').textContent = 'Error: ' + err.message;
-      }
-    }
-
-    async function getAccounts() {
-      try {
-        const eth = await waitForProvider();
-        const accounts = await eth.request({ method: 'eth_accounts' });
-        $('accountDisplay').textContent = 'Accounts: ' + (accounts.length ? accounts.join(', ') : 'none');
-        const chainId = await eth.request({ method: 'eth_chainId' });
-        $('chainDisplay').textContent = 'Chain: ' + chainId;
-      } catch (err) {
-        $('accountDisplay').textContent = 'Error: ' + err.message;
-      }
-    }
-
-    async function personalSign() {
-      try {
-        const eth = await waitForProvider();
-        const accounts = await eth.request({ method: 'eth_accounts' });
-        if (!accounts.length) throw new Error('No account connected');
-        const message = $('personalSignInput').value;
-        const hexMsg = '0x' + Array.from(new TextEncoder().encode(message))
-          .map(b => b.toString(16).padStart(2, '0')).join('');
-        const sig = await eth.request({
-          method: 'personal_sign',
-          params: [hexMsg, accounts[0]],
-        });
-        $('personalSignResult').textContent = 'Signature: ' + sig;
-      } catch (err) {
-        $('personalSignResult').textContent = 'Error: ' + err.message;
-      }
-    }
-
-    async function typedDataSign() {
-      try {
-        const eth = await waitForProvider();
-        const accounts = await eth.request({ method: 'eth_accounts' });
-        if (!accounts.length) throw new Error('No account connected');
-        const typedData = {
-          types: {
-            EIP712Domain: [
-              { name: 'name', type: 'string' },
-              { name: 'version', type: 'string' },
-              { name: 'chainId', type: 'uint256' },
-              { name: 'verifyingContract', type: 'address' },
-            ],
-            Person: [
-              { name: 'name', type: 'string' },
-              { name: 'wallet', type: 'address' },
-            ],
-            Mail: [
-              { name: 'from', type: 'Person' },
-              { name: 'to', type: 'Person' },
-              { name: 'contents', type: 'string' },
-            ],
-          },
-          primaryType: 'Mail',
-          domain: {
-            name: 'E2E Test Mail',
-            version: '1',
-            chainId: 1,
-            verifyingContract: '0xCcCCccccCCCCcCCCCCCcCcCccCcCCCcCcccccccC',
-          },
-          message: {
-            from: { name: 'Alice', wallet: accounts[0] },
-            to: { name: 'Bob', wallet: accounts[0] },
-            contents: 'Hello from E2E test!',
-          },
-        };
-        const sig = await eth.request({
-          method: 'eth_signTypedData',
-          params: [accounts[0], JSON.stringify(typedData)],
-        });
-        $('typedDataResult').textContent = 'Signature: ' + sig;
-      } catch (err) {
-        $('typedDataResult').textContent = 'Error: ' + err.message;
-      }
-    }
-
-    async function sendTransaction() {
-      try {
-        const eth = await waitForProvider();
-        const accounts = await eth.request({ method: 'eth_accounts' });
-        if (!accounts.length) throw new Error('No account connected');
-        const txHash = await eth.request({
-          method: 'eth_sendTransaction',
-          params: [{
-            from: accounts[0],
-            to: '0x0000000000000000000000000000000000000001',
-            value: '0x0',
-            data: '0x',
-          }],
-        });
-        $('sendTxResult').textContent = 'Tx Hash: ' + txHash;
-      } catch (err) {
-        $('sendTxResult').textContent = 'Error: ' + err.message;
-      }
-    }
-
-    async function switchChain() {
-      try {
-        const eth = await waitForProvider();
-        await eth.request({
-          method: 'wallet_switchEthereumChain',
-          params: [{ chainId: '0x89' }], // Polygon 137
-        });
-        const chainId = await eth.request({ method: 'eth_chainId' });
-        $('switchChainResult').textContent = 'Switched to chain: ' + chainId;
-      } catch (err) {
-        $('switchChainResult').textContent = 'Error: ' + err.message;
-      }
-    }
-
-    document.addEventListener('DOMContentLoaded', () => {
-      $('connectBtn').addEventListener('click', connect);
-      $('accountsBtn').addEventListener('click', getAccounts);
-      $('personalSignBtn').addEventListener('click', personalSign);
-      $('typedDataBtn').addEventListener('click', typedDataSign);
-      $('sendTxBtn').addEventListener('click', sendTransaction);
-      $('switchChainBtn').addEventListener('click', switchChain);
-    });
+      document.getElementById("btnRequestAccounts").onclick = async function () {
+        var r = await window.ethereum.request({ method: "eth_requestAccounts", params: [] });
+        showResult(r);
+      };
+      document.getElementById("btnAccounts").onclick = async function () {
+        var r = await window.ethereum.request({ method: "eth_accounts", params: [] });
+        showResult(r);
+        document.getElementById("accounts").textContent = JSON.stringify(r);
+      };
+      document.getElementById("btnChainId").onclick = async function () {
+        var r = await window.ethereum.request({ method: "eth_chainId", params: [] });
+        showResult(r);
+        document.getElementById("chainId").textContent = r;
+      };
+      document.getElementById("btnPersonalSign").onclick = async function () {
+        var accounts = await window.ethereum.request({ method: "eth_accounts", params: [] });
+        if (!accounts || !accounts.length) { showResult("no accounts"); return; }
+        var r = await window.ethereum.request({ method: "personal_sign", params: ["0x48656c6c6f", accounts[0]] });
+        showResult(r);
+      };
+      document.getElementById("btnSendTransaction").onclick = async function () {
+        var accounts = await window.ethereum.request({ method: "eth_accounts", params: [] });
+        if (!accounts || !accounts.length) { showResult("no accounts"); return; }
+        var r = await window.ethereum.request({ method: "eth_sendTransaction", params: [{
+          from: accounts[0],
+          to: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+          value: "0x0",
+        }] });
+        showResult(r);
+      };
+      document.getElementById("btnSwitchChain").onclick = async function () {
+        var r = await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0x89" }] });
+        showResult(r);
+      };
+    })();
   </script>
 </body>
 </html>

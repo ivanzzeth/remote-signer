@@ -1,25 +1,18 @@
 import type { Page } from "@playwright/test";
-import { expect } from "./fixtures.js";
+import { fileURLToPath } from "url";
+import path from "path";
+import fs from "fs";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// ── Storage helpers ──────────────────────────────────────────────────────────
 
 /**
- * E2E test helpers for Remote Signer extension tests.
+ * Inject config into chrome.storage.local for the extension.
+ * Call this before opening the popup so it starts pre-configured.
  */
-
-/** Extension ID — determined at runtime by Playwright's chrome-extension loading */
-export function getExtensionId(page: Page): string {
-  const url = page.url();
-  const match = url.match(/^chrome-extension:\/\/([a-z]+)/);
-  if (!match) throw new Error("Not on a chrome-extension page");
-  return match[1];
-}
-
-/** Get the extension URL for a given relative path */
-export function extensionUrl(page: Page, relPath: string): string {
-  return `chrome-extension://${getExtensionId(page)}/${relPath.replace(/^\//, "")}`;
-}
-
-/** Set extension config via chrome.storage.local from the service worker's context */
-export async function setExtensionConfig(
+export async function injectStorageConfig(
   page: Page,
   config: {
     remoteSignerUrl: string;
@@ -27,70 +20,113 @@ export async function setExtensionConfig(
     apiKeyPrivateKey: string;
     selectedChain?: number;
   }
-) {
-  // Evaluate in the service worker through the popup save mechanism.
-  // The popup sends a popup:saveConfig message to background.js which
-  // writes to chrome.storage.local.
-  await page.evaluate(
-    (cfg) =>
-      chrome.runtime.sendMessage({ type: "popup:saveConfig", config: cfg }),
-    { ...config, selectedChain: config.selectedChain ?? 1 }
+): Promise<void> {
+  await page.evaluate((cfg) => {
+    return new Promise<void>((resolve, reject) => {
+      chrome.storage.local.set({ remoteSignerConfig: cfg }, () => {
+        if (chrome.runtime.lastError) {
+          reject(chrome.runtime.lastError.message);
+        } else {
+          resolve();
+        }
+      });
+    });
+  }, config);
+}
+
+// ── Popup Interactions ───────────────────────────────────────────────────────
+
+/** Navigate to the popup and wait for a specific view */
+export async function openPopupAndWaitForView(
+  extensionId: string,
+  context: any,
+  viewSelector: string,
+  timeout = 10_000
+): Promise<Page> {
+  const page = await context.newPage();
+  await page.goto(`chrome-extension://${extensionId}/popup/popup.html`);
+  await page.waitForSelector(viewSelector, { timeout });
+  return page;
+}
+
+/** Get the text content of an element by ID */
+export async function getPopupElementText(page: Page, elementId: string): Promise<string> {
+  return page.locator(`#${elementId}`).textContent() ?? "";
+}
+
+/** Switch to settings view and fill configuration */
+export async function fillPopupConfig(
+  page: Page,
+  config: { url?: string; apiKeyId?: string; apiKeyPrivateKey?: string }
+): Promise<void> {
+  // Click Settings button to switch to settings view
+  await page.click("#settingsBtn");
+  await page.waitForSelector("#settingsView:not(.hidden)", { timeout: 5_000 });
+
+  if (config.url != null) {
+    await page.fill("#inputUrl", config.url);
+  }
+  if (config.apiKeyId != null) {
+    await page.fill("#inputKeyId", config.apiKeyId);
+  }
+  if (config.apiKeyPrivateKey != null) {
+    await page.fill("#inputPrivateKey", config.apiKeyPrivateKey);
+  }
+}
+
+// ── dApp Page Interactions ───────────────────────────────────────────────────
+
+/** Navigate to the dApp test page (served via HTTP to support MV3 content-script injection) and wait for window.ethereum */
+export async function openDappAndWaitForProvider(page: Page, timeout = 15_000): Promise<void> {
+  const statePath = path.resolve(__dirname, ".e2e-state", "server.json");
+  const info = JSON.parse(fs.readFileSync(statePath, "utf-8"));
+  const dappUrl = info.dapp_url || `file://${path.resolve(__dirname, ".e2e-state", "dapp-test-page.html")}`;
+  await page.goto(dappUrl);
+
+  await page.waitForFunction(() => !!window.ethereum, { timeout });
+}
+
+/** Call an EIP-1193 method on the dApp page and return the result */
+export async function dappEIP1193Call(
+  page: Page,
+  method: string,
+  ...params: any[]
+): Promise<{ ok: boolean; result?: any; error?: any }> {
+  return page.evaluate(
+    async ({ method, params }: { method: string; params: any[] }) => {
+      try {
+        const result = await window.ethereum!.request({ method, params });
+        return { ok: true, result };
+      } catch (err: any) {
+        return { ok: false, error: { code: err.code, message: err.message } };
+      }
+    },
+    { method, params }
   );
 }
 
-/** Connect wallet on the dApp test page and verify connection state */
-export async function connectWallet(page: Page): Promise<string[]> {
-  // Click connect button
-  await page.click('[data-testid="connect"]');
-  // Wait for account to appear
-  await page.waitForFunction(() => {
-    const el = document.querySelector('[data-testid="accountDisplay"]');
-    return el && el.textContent !== "Not connected";
-  });
-  const text = await page.textContent('[data-testid="accountDisplay"]');
-  expect(text).toContain("Account: 0x");
-  const match = text?.match(/0x[a-fA-F0-9]{40}/);
-  return match ? [match[0]] : [];
+// ── Wallet Helpers ───────────────────────────────────────────────────────────
+
+/** ABI-encode a simple ERC-20 transfer for test transactions */
+export function encodeERC20Transfer(to: string, amount: string): string {
+  // transfer(address to, uint256 value) — 4-byte selector a9059cbb
+  const selector = "a9059cbb";
+  const toPadded = to.replace("0x", "").padStart(64, "0");
+  const amountPadded = BigInt(amount).toString(16).padStart(64, "0");
+  return "0x" + selector + toPadded + amountPadded;
 }
 
-/** Perform personal_sign and return the signature */
-export async function personalSign(
-  page: Page,
-  message?: string
-): Promise<string> {
-  if (message) {
-    await page.fill('[data-testid="personalSignInput"]', message);
-  }
-  await page.click('[data-testid="personalSign"]');
-  await page.waitForFunction(() => {
-    const el = document.querySelector('[data-testid="personalSignResult"]');
-    return el && el.textContent !== "" && !el.textContent?.startsWith("Error");
-  });
-  const text = await page.textContent('[data-testid="personalSignResult"]');
-  expect(text).toMatch(/Signature: 0x/);
-  return text!.replace("Signature: ", "");
-}
+// ── Test Data ────────────────────────────────────────────────────────────────
 
-/** Perform eth_signTypedData and return the signature */
-export async function signTypedData(page: Page): Promise<string> {
-  await page.click('[data-testid="typedDataSign"]');
-  await page.waitForFunction(() => {
-    const el = document.querySelector('[data-testid="typedDataResult"]');
-    return el && el.textContent !== "" && !el.textContent?.startsWith("Error");
-  });
-  const text = await page.textContent('[data-testid="typedDataResult"]');
-  expect(text).toMatch(/Signature: 0x/);
-  return text!.replace("Signature: ", "");
-}
+export const TEST_ACCOUNTS = {
+  signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+  recipient: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+  burn: "0x000000000000000000000000000000000000dEaD",
+  treasury: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4",
+} as const;
 
-/** Perform eth_sendTransaction and return the tx hash */
-export async function sendTransaction(page: Page): Promise<string> {
-  await page.click('[data-testid="sendTransaction"]');
-  await page.waitForFunction(() => {
-    const el = document.querySelector('[data-testid="sendTxResult"]');
-    return el && el.textContent !== "" && !el.textContent?.startsWith("Error");
-  });
-  const text = await page.textContent('[data-testid="sendTxResult"]');
-  expect(text).toMatch(/Tx Hash: 0x/);
-  return text!.replace("Tx Hash: ", "");
-}
+export const TEST_CHAINS = {
+  ethereum: "0x1",
+  polygon: "0x89",
+  sepolia: "0xaa36a7",
+} as const;

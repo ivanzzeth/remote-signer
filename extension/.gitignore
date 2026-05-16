@@ -1,5 +1,3 @@
 node_modules/
+tests/.e2e-state/
 test-results/
-tests/.server-config.json
-tests/.chrome-profile/
-playwright-report/
