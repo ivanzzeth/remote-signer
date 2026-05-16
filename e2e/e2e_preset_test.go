@@ -40,7 +40,7 @@ func TestPreset_List(t *testing.T) {
 	for _, p := range resp.Presets {
 		if p.ID == "e2e_minimal.preset.yaml" {
 			found = true
-			assert.Contains(t, p.TemplateIDs, "e2e_preset_template")
+			assert.Contains(t, p.TemplateNames, "E2E Preset Template")
 			break
 		}
 	}
@@ -51,21 +51,17 @@ func TestPreset_Vars(t *testing.T) {
 	ctx := context.Background()
 	skipIfPresetAPIDisabled(t)
 
-	resp, err := adminClient.Presets.Get(ctx, "e2e_minimal.preset.yaml")
+	resp, err := adminClient.Presets.Vars(ctx, "e2e_minimal.preset.yaml")
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	var names []string
-	for _, v := range resp.Variables {
-		names = append(names, v.Name)
-	}
-	assert.Contains(t, names, "allowed_address")
+	assert.Contains(t, resp.OverrideHints, "allowed_address")
 }
 
 func TestPreset_Vars_NotFound(t *testing.T) {
 	ctx := context.Background()
 	skipIfPresetAPIDisabled(t)
 
-	_, err := adminClient.Presets.Get(ctx, "nonexistent-preset-12345.yaml")
+	_, err := adminClient.Presets.Vars(ctx, "nonexistent-preset-12345.yaml")
 	require.Error(t, err)
 	apiErr, ok := err.(*client.APIError)
 	require.True(t, ok)
@@ -77,7 +73,7 @@ func TestPreset_Vars_PathTraversal(t *testing.T) {
 	skipIfPresetAPIDisabled(t)
 
 	// Id with .. is invalid. Server may return 400/404, or 401 if path normalization causes signature mismatch.
-	_, err := adminClient.Presets.Get(ctx, "../../../etc/passwd")
+	_, err := adminClient.Presets.Vars(ctx, "../../../etc/passwd")
 	require.Error(t, err)
 	apiErr, ok := err.(*client.APIError)
 	require.True(t, ok)
@@ -180,7 +176,7 @@ func TestPreset_Matrix_List_Shows_Template(t *testing.T) {
 	for _, p := range resp.Presets {
 		if p.ID == "e2e_matrix.preset.yaml" {
 			found = true
-			assert.Contains(t, p.TemplateIDs, "e2e_preset_template")
+			assert.Contains(t, p.TemplateNames, "E2E Preset Template")
 			break
 		}
 	}
