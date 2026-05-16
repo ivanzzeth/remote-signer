@@ -270,12 +270,13 @@ func TestNotifyEnabled(t *testing.T) {
 }
 
 func TestBootstrapWithRateLimit(t *testing.T) {
+	t.Setenv("REMOTE_SIGNER_KEYSTORE_PASSWORD", "test-password-12345")
 	tmp := t.TempDir()
-	priv := filepath.Join(tmp, "admin.key.priv")
+	ptrPath := filepath.Join(tmp, "admin.key.keystore")
 	pub := filepath.Join(tmp, "admin.key.pub")
 	repo := newTestRepo(t)
 
-	if err := bootstrapAdminKeyIfNeeded(context.Background(), repo, priv, pub, 500, discardLogger()); err != nil {
+	if err := bootstrapAdminKeyIfNeeded(context.Background(), repo, tmp, ptrPath, pub, 500, discardLogger()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -289,16 +290,17 @@ func TestBootstrapWithRateLimit(t *testing.T) {
 }
 
 func TestBootstrapExistingKeysNoReplace(t *testing.T) {
+	t.Setenv("REMOTE_SIGNER_KEYSTORE_PASSWORD", "test-password-12345")
 	tmp := t.TempDir()
-	priv := filepath.Join(tmp, "admin.key.priv")
+	ptrPath := filepath.Join(tmp, "admin.key.keystore")
 	pub := filepath.Join(tmp, "admin.key.pub")
 	repo := newTestRepo(t)
 
-	if err := bootstrapAdminKeyIfNeeded(context.Background(), repo, priv, pub, 100, discardLogger()); err != nil {
+	if err := bootstrapAdminKeyIfNeeded(context.Background(), repo, tmp, ptrPath, pub, 100, discardLogger()); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := bootstrapAdminKeyIfNeeded(context.Background(), repo, priv, pub, 999, discardLogger()); err != nil {
+	if err := bootstrapAdminKeyIfNeeded(context.Background(), repo, tmp, ptrPath, pub, 999, discardLogger()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -312,28 +314,20 @@ func TestBootstrapExistingKeysNoReplace(t *testing.T) {
 }
 
 func TestBootstrapAdminKeyPEMFormat(t *testing.T) {
+	// This test validates that the public key PEM is written correctly
+	// by the admin keystore bootstrap. (The private key is now stored in
+	// the encrypted keystore, not as PEM.)
+	t.Setenv("REMOTE_SIGNER_KEYSTORE_PASSWORD", "test-password-12345")
 	tmp := t.TempDir()
-	priv := filepath.Join(tmp, "admin.key.priv")
+	ptrPath := filepath.Join(tmp, "admin.key.keystore")
 	pub := filepath.Join(tmp, "admin.key.pub")
 	repo := newTestRepo(t)
 
-	if err := bootstrapAdminKeyIfNeeded(context.Background(), repo, priv, pub, 0, discardLogger()); err != nil {
+	if err := bootstrapAdminKeyIfNeeded(context.Background(), repo, tmp, ptrPath, pub, 0, discardLogger()); err != nil {
 		t.Fatal(err)
 	}
 
-	privPEM, _ := os.ReadFile(priv)
-	block, _ := pem.Decode(privPEM)
-	if block == nil || block.Type != "PRIVATE KEY" {
-		t.Fatalf("priv PEM block invalid: %v", block)
-	}
-	parsedKey, err := x509.ParsePKCS8PrivateKey(block.Bytes)
-	if err != nil {
-		t.Fatalf("priv key parse: %v", err)
-	}
-	if _, ok := parsedKey.(ed25519.PrivateKey); !ok {
-		t.Fatalf("expected ed25519 key, got %T", parsedKey)
-	}
-
+	// Verify the public key PEM.
 	pubPEM, _ := os.ReadFile(pub)
 	pubBlock, _ := pem.Decode(pubPEM)
 	if pubBlock == nil || pubBlock.Type != "PUBLIC KEY" {
