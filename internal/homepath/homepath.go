@@ -24,6 +24,7 @@ const (
 	signerKeystoresSubdir  = "keystores"
 	adminPrivKeyFile       = "admin.key.priv"
 	adminPubKeyFile        = "admin.key.pub"
+	adminKeystorePtrFile   = "admin.key.keystore"
 	agentPrivKeyFile       = "agent.key.priv"
 	agentPubKeyFile        = "agent.key.pub"
 	envHome                = "REMOTE_SIGNER_HOME"
@@ -116,6 +117,18 @@ func AdminKeyPaths() (privPath, pubPath string, err error) {
 		return "", "", err
 	}
 	return filepath.Join(dir, adminPrivKeyFile), filepath.Join(dir, adminPubKeyFile), nil
+}
+
+// AdminKeystorePtrPath returns the path of the keystore pointer file written
+// during bootstrap. The pointer file contains the actual path to the encrypted
+// keystore JSON file (since ethsig's CreateEnhancedKey generates its own
+// filename). The daemon reads this pointer on startup to locate the keystore.
+func AdminKeystorePtrPath() (string, error) {
+	dir, err := APIKeysDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, adminKeystorePtrFile), nil
 }
 
 // AgentKeyPaths returns the bootstrap agent private/public key file paths.
