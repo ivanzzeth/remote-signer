@@ -1,7 +1,8 @@
-import { test as base, type Page, type BrowserContext } from "@playwright/test";
+import { test as base, chromium, type Page, type BrowserContext } from "@playwright/test";
 import { fileURLToPath } from "url";
 import * as path from "path";
 import * as fs from "fs";
+import * as os from "os";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -108,10 +109,37 @@ export async function openPopupPage(context: BrowserContext, extensionId: string
 
 // ── Extended Test ─────────────────────────────────────────────────────────────
 
+const EXTENSION_PATH = path.resolve(__dirname, "..");
+
 export const test = base.extend<ExtensionFixtures>({
   serverInfo: async ({}, use) => {
     const info = loadServerInfo();
     await use(info);
+  },
+
+  /**
+   * Override Playwright's default context with chromium.launchPersistentContext.
+   *
+   * REQUIRED for Chrome extension testing: Playwright's default test runner
+   * provides an ephemeral context (via browser.newContext()), and Chrome
+   * refuses to load unpacked extensions into ephemeral contexts — even with
+   * --load-extension on the launch command. The extension's service worker
+   * silently never registers, so detectExtensionId loops out.
+   *
+   * The original fix for this lived in commit 6aba3ee but was dropped when
+   * fixtures.ts was rewritten for v0.3.4 — re-applying it here.
+   */
+  context: async ({}, use) => {
+    const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "rs-e2e-"));
+    const persistentContext = await chromium.launchPersistentContext(userDataDir, {
+      args: [
+        `--disable-extensions-except=${EXTENSION_PATH}`,
+        `--load-extension=${EXTENSION_PATH}`,
+      ],
+    });
+    await use(persistentContext);
+    await persistentContext.close();
+    fs.rmSync(userDataDir, { recursive: true, force: true });
   },
 
   extensionId: async ({ context }: { context: BrowserContext }, use) => {
