@@ -1,0 +1,622 @@
+# Polymarket V2 protocol rules (evm_js). CLOB Order EIP-712 + V2 transactions (pUSD, CollateralOnramp/Offramp, CtfCollateralAdapter).
+# Compose with Safe template: Safe handles execTransaction and delegates inner calls to "polymarket-v2-transactions".
+
+name: Polymarket V2 CLOB Order & Transactions
+variables:
+  - name: exchange_v2_address
+    type: address
+    description: "CTF Exchange V2 contract address"
+    required: true
+  - name: neg_risk_exchange_v2_address
+    type: address
+    description: "NegRisk Exchange V2 contract address"
+    required: true
+  - name: collateral_token_address
+    type: address
+    description: "CollateralToken (pUSD) contract address"
+    required: true
+  - name: conditional_tokens_address
+    type: address
+    description: "ConditionalTokens (CTF) contract address"
+    required: true
+  - name: ctf_collateral_adapter_address
+    type: address
+    description: "CtfCollateralAdapter contract address"
+    required: true
+  - name: neg_risk_ctf_collateral_adapter_address
+    type: address
+    description: "NegRiskCtfCollateralAdapter contract address"
+    required: true
+  - name: collateral_onramp_address
+    type: address
+    description: "CollateralOnramp contract address"
+    required: true
+  - name: collateral_offramp_address
+    type: address
+    description: "CollateralOfframp contract address"
+    required: true
+  - name: usdc_address
+    type: address
+    description: "Native USDC token address"
+    required: true
+  - name: usdc_bridged_address
+    type: address
+    description: "USDC.e (Bridged) token address"
+    required: true
+  - name: neg_risk_adapter_address
+    type: address
+    description: "NegRiskAdapter (V1) contract address (used for pUSD approve)"
+    required: true
+  - name: allowed_safe_addresses
+    type: address_list
+    description: "Comma-separated allowed Safe addresses (Order.maker whitelist)"
+    required: true
+  - name: allowed_safe_address_for_testing
+    type: address
+    description: "Single Safe address for test payload (must be in allowed_safe_addresses)"
+    required: false
+    default: ""
+  - name: v2_exchange_domain_name
+    type: string
+    description: "V2 Exchange EIP-712 domain name"
+    required: true
+  - name: v2_exchange_domain_version
+    type: string
+    description: "V2 Exchange EIP-712 domain version"
+    required: true
+test_variables:
+  chain_id: "137"
+  exchange_v2_address: "0xE111180000d2663C0091e4f400237545B87B996B"
+  neg_risk_exchange_v2_address: "0xe2222d279d744050d28e00520010520000310F59"
+  collateral_token_address: "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
+  conditional_tokens_address: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+  ctf_collateral_adapter_address: "0xADa100874d00e3331D00F2007a9c336a65009718"
+  neg_risk_ctf_collateral_adapter_address: "0xAdA200001000ef00D07553cEE7006808F895c6F1"
+  collateral_onramp_address: "0x93070a847efEf7F70739046A929D47a521F5B8ee"
+  collateral_offramp_address: "0x2957922Eb93258b93368531d39fAcCA3B4dC5854"
+  usdc_address: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
+  usdc_bridged_address: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+  neg_risk_adapter_address: "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296"
+  allowed_safe_addresses: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+  allowed_safe_address_for_testing: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+  v2_exchange_domain_name: "Polymarket CTF Exchange"
+  v2_exchange_domain_version: "2"
+rules:
+  - id: "polymarket-v2-order-signature"
+    name: "Polymarket V2 Order Signature"
+    type: "evm_js"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "${chain_id}"
+    description: "Validate V2 Order EIP-712 signatures for Polymarket CTF Exchange and NegRisk Exchange V2"
+    config:
+      sign_type_filter: "typed_data"
+      script: |
+        function validate(input) {
+          var ctx = rs.typedData.require(input, 'Order');
+          var domain = ctx.domain || {};
+          var msg = ctx.message || {};
+          var allowedContracts = [config.exchange_v2_address, config.neg_risk_exchange_v2_address];
+          rs.typedData.requireDomain(domain, {
+            name: config.v2_exchange_domain_name,
+            version: config.v2_exchange_domain_version,
+            chainId: parseInt(config.chain_id, 10),
+            allowedContracts: allowedContracts
+          });
+          require(String(msg.signer || '').trim() !== '', 'missing signer');
+          var safeAddresses = toChecksumAddressList(config.allowed_safe_addresses);
+          rs.addr.requireInList((msg.maker || '').trim(), safeAddresses, 'maker must be allowed Safe address');
+          rs.typedData.requireSignerMatch((msg.signer || '').trim(), (input.signer || '').trim(), 'order signer must match signing key');
+          return ok();
+        }
+      description: "V2 CLOB Order signature with maker whitelist and domain validation"
+      test_cases:
+        - name: "should pass valid V2 Order with ExchangeV2"
+          input:
+            sign_type: "typed_data"
+            chain_id: 137
+            signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            typed_data:
+              primaryType: "Order"
+              domain:
+                name: "Polymarket CTF Exchange"
+                version: "2"
+                chainId: "137"
+                verifyingContract: "0xE111180000d2663C0091e4f400237545B87B996B"
+              message:
+                salt: "12345"
+                maker: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+                signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+                tokenId: "1"
+                makerAmount: "1000000000000000000"
+                takerAmount: "1000000000000000000"
+                side: "0"
+                signatureType: "0"
+                timestamp: "1704067200"
+                metadata: "0x0000000000000000000000000000000000000000000000000000000000000000"
+                builder: "0x0000000000000000000000000000000000000000000000000000000000000000"
+                expiration: "1893456000"
+          expect_pass: true
+        - name: "should pass valid V2 Order with NegRiskExchangeV2"
+          input:
+            sign_type: "typed_data"
+            chain_id: 137
+            signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            typed_data:
+              primaryType: "Order"
+              domain:
+                name: "Polymarket CTF Exchange"
+                version: "2"
+                chainId: "137"
+                verifyingContract: "0xe2222d279d744050d28e00520010520000310F59"
+              message:
+                salt: "12345"
+                maker: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+                signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+                tokenId: "1"
+                makerAmount: "1000000000000000000"
+                takerAmount: "1000000000000000000"
+                side: "0"
+                signatureType: "0"
+                timestamp: "1704067200"
+                metadata: "0x0000000000000000000000000000000000000000000000000000000000000000"
+                builder: "0x0000000000000000000000000000000000000000000000000000000000000000"
+                expiration: "1893456000"
+          expect_pass: true
+        - name: "should reject wrong domain version"
+          input:
+            sign_type: "typed_data"
+            chain_id: 137
+            signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            typed_data:
+              primaryType: "Order"
+              domain:
+                name: "Polymarket CTF Exchange"
+                version: "1"
+                chainId: "137"
+                verifyingContract: "0xE111180000d2663C0091e4f400237545B87B996B"
+              message:
+                salt: "12345"
+                maker: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+                signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+                tokenId: "1"
+                makerAmount: "1000000000000000000"
+                takerAmount: "1000000000000000000"
+                side: "0"
+                signatureType: "0"
+                timestamp: "1704067200"
+                metadata: "0x0000000000000000000000000000000000000000000000000000000000000000"
+                builder: "0x0000000000000000000000000000000000000000000000000000000000000000"
+                expiration: "1893456000"
+          expect_pass: false
+          expect_reason: "invalid domain version"
+        - name: "should reject maker not in whitelist"
+          input:
+            sign_type: "typed_data"
+            chain_id: 137
+            signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            typed_data:
+              primaryType: "Order"
+              domain:
+                name: "Polymarket CTF Exchange"
+                version: "2"
+                chainId: "137"
+                verifyingContract: "0xE111180000d2663C0091e4f400237545B87B996B"
+              message:
+                salt: "12345"
+                maker: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+                signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+                tokenId: "1"
+                makerAmount: "1000000000000000000"
+                takerAmount: "1000000000000000000"
+                side: "0"
+                signatureType: "0"
+                timestamp: "1704067200"
+                metadata: "0x0000000000000000000000000000000000000000000000000000000000000000"
+                builder: "0x0000000000000000000000000000000000000000000000000000000000000000"
+                expiration: "1893456000"
+          expect_pass: false
+          expect_reason: "maker must be allowed Safe address"
+        - name: "should reject signer mismatch"
+          input:
+            sign_type: "typed_data"
+            chain_id: 137
+            signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            typed_data:
+              primaryType: "Order"
+              domain:
+                name: "Polymarket CTF Exchange"
+                version: "2"
+                chainId: "137"
+                verifyingContract: "0xE111180000d2663C0091e4f400237545B87B996B"
+              message:
+                salt: "12345"
+                maker: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+                signer: "0x1111111111111111111111111111111111111111"
+                tokenId: "1"
+                makerAmount: "1000000000000000000"
+                takerAmount: "1000000000000000000"
+                side: "0"
+                signatureType: "0"
+                timestamp: "1704067200"
+                metadata: "0x0000000000000000000000000000000000000000000000000000000000000000"
+                builder: "0x0000000000000000000000000000000000000000000000000000000000000000"
+                expiration: "1893456000"
+          expect_pass: false
+          expect_reason: "order signer must match signing key"
+  - id: "polymarket-v2-transactions"
+    name: "Polymarket V2 transactions"
+    type: "evm_js"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "${chain_id}"
+    description: "Validate V2 protocol contract calls: pUSD approve, CTF setApprovalForAll, adapter split/merge/redeem, onramp/offramp wrap/unwrap, USDC approve. Works for direct EOA calls or as Safe template delegate_to target."
+    config:
+      sign_type_filter: "transaction"
+      script: |
+        function validate(input) {
+          require(input.sign_type === 'transaction', 'sign_type must be transaction');
+          var tx = input.transaction;
+          require(tx && tx.to, 'missing transaction or to');
+          var toAddr = (tx.to || '').trim();
+          var data = (tx.data || '0x').replace(/^0x/, '');
+          if (data.length < 8) {
+            revert('missing function selector');
+          }
+          var calldata = rs.tx.getCalldata(tx);
+          require(calldata.valid, 'calldata too short');
+          var sel = calldata.selector.toLowerCase();
+          var approveSel = '0x095ea7b3';
+          var setApprovalSel = '0xa22cb465';
+          var splitSel = '0x72ce4275';
+          var mergeSel = '0x9e7212ad';
+          var redeemSel = '0x01b7037c';
+          var wrapSel = '0xe9b44a0c';
+          var unwrapSel = '0x095b3356';
+          var pUSD = toChecksum(config.collateral_token_address);
+          var ctf = toChecksum(config.conditional_tokens_address);
+          var ctfAdapter = toChecksum(config.ctf_collateral_adapter_address);
+          var negCtfAdapter = toChecksum(config.neg_risk_ctf_collateral_adapter_address);
+          var onramp = toChecksum(config.collateral_onramp_address);
+          var offramp = toChecksum(config.collateral_offramp_address);
+          var usdc = toChecksum(config.usdc_address);
+          var usdce = toChecksum(config.usdc_bridged_address);
+          var exchangeV2 = toChecksum(config.exchange_v2_address);
+          var negExchangeV2 = toChecksum(config.neg_risk_exchange_v2_address);
+          var negAdapter = toChecksum(config.neg_risk_adapter_address);
+          if (eq(toAddr, pUSD)) {
+            require(sel === approveSel, 'unsupported pUSD operation');
+            require(data.length >= 8 + 64 + 64, 'invalid approve data length');
+            var dec = abi.decode(calldata.payloadHex, ['address', 'uint256']);
+            require(dec && dec.length >= 1, 'approve decode failed');
+            var allowedSpenders = [exchangeV2, negExchangeV2, negAdapter, ctfAdapter, negCtfAdapter, offramp];
+            rs.addr.requireInList(dec[0], allowedSpenders, 'spender must be allowed V2 protocol contract');
+            return ok();
+          }
+          if (eq(toAddr, ctf)) {
+            if (sel === setApprovalSel) {
+              require(data.length >= 8 + 64 + 64, 'invalid setApprovalForAll data length');
+              var d = abi.decode(calldata.payloadHex, ['address', 'bool']);
+              require(d && d.length >= 2 && d[1], 'approval must be true');
+              var allowedOps = [exchangeV2, negExchangeV2, ctfAdapter, negCtfAdapter];
+              rs.addr.requireInList(d[0], allowedOps, 'operator must be allowed V2 protocol contract');
+              return ok();
+            }
+            if (sel === splitSel || sel === mergeSel || sel === redeemSel) {
+              return ok();
+            }
+            revert('unsupported CTF operation');
+          }
+          if (eq(toAddr, ctfAdapter)) {
+            require(sel === splitSel || sel === mergeSel || sel === redeemSel, 'unsupported CtfCollateralAdapter operation');
+            if (sel === splitSel || sel === mergeSel) {
+              require(data.length >= 8 + 164 * 2, 'invalid split/merge data length');
+              var dec2 = abi.decode(calldata.payloadHex, ['address', 'bytes32', 'bytes32', 'uint256[]', 'uint256']);
+              require(dec2 && dec2.length >= 2, 'split/merge decode failed');
+              require(rs.addr.inList(toChecksum(dec2[0]), [pUSD]), 'collateral must be pUSD');
+              return ok();
+            }
+            if (sel === redeemSel) {
+              require(data.length >= 8 + 132 * 2, 'invalid redeem data length');
+              var dec3 = abi.decode(calldata.payloadHex, ['address', 'bytes32', 'bytes32', 'uint256[]']);
+              require(dec3 && dec3.length >= 1, 'redeem decode failed');
+              require(rs.addr.inList(toChecksum(dec3[0]), [pUSD]), 'collateral must be pUSD');
+              return ok();
+            }
+          }
+          if (eq(toAddr, negCtfAdapter)) {
+            require(sel === splitSel || sel === mergeSel || sel === redeemSel, 'unsupported NegRiskCtfCollateralAdapter operation');
+            if (sel === splitSel || sel === mergeSel) {
+              require(data.length >= 8 + 164 * 2, 'invalid split/merge data length');
+              var dec4 = abi.decode(calldata.payloadHex, ['address', 'bytes32', 'bytes32', 'uint256[]', 'uint256']);
+              require(dec4 && dec4.length >= 2, 'split/merge decode failed');
+              require(rs.addr.inList(toChecksum(dec4[0]), [pUSD]), 'collateral must be pUSD');
+              return ok();
+            }
+            if (sel === redeemSel) {
+              require(data.length >= 8 + 132 * 2, 'invalid redeem data length');
+              var dec5 = abi.decode(calldata.payloadHex, ['address', 'bytes32', 'bytes32', 'uint256[]']);
+              require(dec5 && dec5.length >= 1, 'redeem decode failed');
+              require(rs.addr.inList(toChecksum(dec5[0]), [pUSD]), 'collateral must be pUSD');
+              return ok();
+            }
+          }
+          if (eq(toAddr, onramp)) {
+            require(sel === wrapSel, 'unsupported onramp operation');
+            require(data.length >= 8 + 64 * 3, 'invalid wrap data length');
+            var wrapDec = abi.decode(calldata.payloadHex, ['address', 'address', 'uint256']);
+            require(wrapDec && wrapDec.length >= 1, 'wrap decode failed');
+            var allowedAssets = [usdc, usdce];
+            rs.addr.requireInList(wrapDec[0], allowedAssets, 'wrap asset must be USDC or USDC.e');
+            return ok();
+          }
+          if (eq(toAddr, offramp)) {
+            require(sel === unwrapSel, 'unsupported offramp operation');
+            require(data.length >= 8 + 64 * 3, 'invalid unwrap data length');
+            var unwrapDec = abi.decode(calldata.payloadHex, ['address', 'address', 'uint256']);
+            require(unwrapDec && unwrapDec.length >= 1, 'unwrap decode failed');
+            require(rs.addr.inList(toChecksum(unwrapDec[0]), [usdc, usdce]), 'unwrap asset must be USDC or USDC.e');
+            return ok();
+          }
+          if (eq(toAddr, usdce) || eq(toAddr, usdc)) {
+            require(sel === approveSel, 'unsupported USDC/USDC.e operation');
+            require(data.length >= 8 + 64 + 64, 'invalid approve data length');
+            var usdcDec = abi.decode(calldata.payloadHex, ['address', 'uint256']);
+            require(usdcDec && usdcDec.length >= 1, 'approve decode failed');
+            require(eq(toChecksum(usdcDec[0]), onramp), 'approve spender must be CollateralOnramp');
+            return ok();
+          }
+          revert('unsupported target contract');
+        }
+      description: "V2 protocol transactions with parameter-level fund flow security"
+      test_cases:
+        - name: "should pass pUSD approve to ExchangeV2"
+          input:
+            sign_type: "transaction"
+            chain_id: 137
+            signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            transaction:
+              from: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              to: "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
+              value: "0x0"
+              data: "0x095ea7b3000000000000000000000000E111180000d2663C0091e4f400237545B87B996Bffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: true
+        - name: "should pass pUSD approve to NegRiskExchangeV2"
+          input:
+            sign_type: "transaction"
+            chain_id: 137
+            signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            transaction:
+              from: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              to: "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
+              value: "0x0"
+              data: "0x095ea7b3000000000000000000000000e2222d279d744050d28e00520010520000310F59ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: true
+        - name: "should pass pUSD approve to NegRiskAdapter"
+          input:
+            sign_type: "transaction"
+            chain_id: 137
+            signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            transaction:
+              from: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              to: "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
+              value: "0x0"
+              data: "0x095ea7b3000000000000000000000000d91E80cF2E7be2e162c6513ceD06f1dD0dA35296ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: true
+        - name: "should pass pUSD approve to CtfCollateralAdapter"
+          input:
+            sign_type: "transaction"
+            chain_id: 137
+            signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            transaction:
+              from: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              to: "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
+              value: "0x0"
+              data: "0x095ea7b3000000000000000000000000ADa100874d00e3331D00F2007a9c336a65009718ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: true
+        - name: "should pass pUSD approve to NegRiskCtfCollateralAdapter"
+          input:
+            sign_type: "transaction"
+            chain_id: 137
+            signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            transaction:
+              from: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              to: "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
+              value: "0x0"
+              data: "0x095ea7b3000000000000000000000000AdA200001000ef00D07553cEE7006808F895c6F1ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: true
+        - name: "should pass pUSD approve to CollateralOfframp"
+          input:
+            sign_type: "transaction"
+            chain_id: 137
+            signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            transaction:
+              from: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              to: "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
+              value: "0x0"
+              data: "0x095ea7b30000000000000000000000002957922Eb93258b93368531d39fAcCA3B4dC5854ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: true
+        - name: "should reject pUSD approve to disallowed spender"
+          input:
+            sign_type: "transaction"
+            chain_id: 137
+            signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            transaction:
+              from: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              to: "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
+              value: "0x0"
+              data: "0x095ea7b3000000000000000000000000DEADDEADDEADDEADDEADDEADDEADDEADDEADDEADffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: false
+          expect_reason: "spender must be allowed V2 protocol contract"
+        - name: "should pass CTF setApprovalForAll to ExchangeV2"
+          input:
+            sign_type: "transaction"
+            chain_id: 137
+            signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            transaction:
+              from: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              to: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+              value: "0x0"
+              data: "0xa22cb465000000000000000000000000E111180000d2663C0091e4f400237545B87B996B0000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: true
+        - name: "should pass CTF setApprovalForAll to NegRiskExchangeV2"
+          input:
+            sign_type: "transaction"
+            chain_id: 137
+            signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            transaction:
+              from: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              to: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+              value: "0x0"
+              data: "0xa22cb465000000000000000000000000e2222d279d744050d28e00520010520000310F590000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: true
+        - name: "should reject CTF setApprovalForAll to disallowed operator"
+          input:
+            sign_type: "transaction"
+            chain_id: 137
+            signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            transaction:
+              from: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              to: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+              value: "0x0"
+              data: "0xa22cb465000000000000000000000000DEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD0000000000000000000000000000000000000000000000000000000000000001"
+          expect_pass: false
+          expect_reason: "operator must be allowed V2 protocol contract"
+        - name: "should reject CTF setApprovalForAll with approved=false"
+          input:
+            sign_type: "transaction"
+            chain_id: 137
+            signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            transaction:
+              from: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              to: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+              value: "0x0"
+              data: "0xa22cb465000000000000000000000000E111180000d2663C0091e4f400237545B87B996B0000000000000000000000000000000000000000000000000000000000000000"
+          expect_pass: false
+          expect_reason: "approval must be true"
+        - name: "should pass CollateralOnramp wrap with USDC"
+          input:
+            sign_type: "transaction"
+            chain_id: 137
+            signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            transaction:
+              from: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              to: "0x93070a847efEf7F70739046A929D47a521F5B8ee"
+              value: "0x0"
+              data: "0xe9b44a0c0000000000000000000000003c499c542cEF5E3811e1192ce70d8cC03d5c3359000000000000000000000000aC52BebecA7f5FA1561fa9Ab8DA136602D21b8370000000000000000000000000000000000000000000000000de0b6b3a7640000"
+          expect_pass: true
+        - name: "should pass CollateralOnramp wrap with USDC.e"
+          input:
+            sign_type: "transaction"
+            chain_id: 137
+            signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            transaction:
+              from: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              to: "0x93070a847efEf7F70739046A929D47a521F5B8ee"
+              value: "0x0"
+              data: "0xe9b44a0c0000000000000000000000002791Bca1f2de4661ED88A30C99A7a9449Aa84174000000000000000000000000aC52BebecA7f5FA1561fa9Ab8DA136602D21b8370000000000000000000000000000000000000000000000000de0b6b3a7640000"
+          expect_pass: true
+        - name: "should reject CollateralOnramp wrap with disallowed asset"
+          input:
+            sign_type: "transaction"
+            chain_id: 137
+            signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            transaction:
+              from: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              to: "0x93070a847efEf7F70739046A929D47a521F5B8ee"
+              value: "0x0"
+              data: "0xe9b44a0c000000000000000000000000C011a7E12a19f7B1f670d46F03B03f3342E82DFB000000000000000000000000aC52BebecA7f5FA1561fa9Ab8DA136602D21b8370000000000000000000000000000000000000000000000000de0b6b3a7640000"
+          expect_pass: false
+          expect_reason: "wrap asset must be USDC or USDC.e"
+        - name: "should pass CollateralOfframp unwrap with USDC"
+          input:
+            sign_type: "transaction"
+            chain_id: 137
+            signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            transaction:
+              from: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              to: "0x2957922Eb93258b93368531d39fAcCA3B4dC5854"
+              value: "0x0"
+              data: "0x095b33560000000000000000000000003c499c542cEF5E3811e1192ce70d8cC03d5c3359000000000000000000000000aC52BebecA7f5FA1561fa9Ab8DA136602D21b8370000000000000000000000000000000000000000000000000de0b6b3a7640000"
+          expect_pass: true
+        - name: "should pass CollateralOfframp unwrap with USDC.e"
+          input:
+            sign_type: "transaction"
+            chain_id: 137
+            signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            transaction:
+              from: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              to: "0x2957922Eb93258b93368531d39fAcCA3B4dC5854"
+              value: "0x0"
+              data: "0x095b33560000000000000000000000002791Bca1f2de4661ED88A30C99A7a9449Aa84174000000000000000000000000aC52BebecA7f5FA1561fa9Ab8DA136602D21b8370000000000000000000000000000000000000000000000000de0b6b3a7640000"
+          expect_pass: true
+        - name: "should reject CollateralOfframp unwrap with disallowed asset"
+          input:
+            sign_type: "transaction"
+            chain_id: 137
+            signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            transaction:
+              from: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              to: "0x2957922Eb93258b93368531d39fAcCA3B4dC5854"
+              value: "0x0"
+              data: "0x095b3356000000000000000000000000C011a7E12a19f7B1f670d46F03B03f3342E82DFB000000000000000000000000aC52BebecA7f5FA1561fa9Ab8DA136602D21b8370000000000000000000000000000000000000000000000000de0b6b3a7640000"
+          expect_pass: false
+          expect_reason: "unwrap asset must be USDC or USDC.e"
+        - name: "should pass USDC.e approve to CollateralOnramp"
+          input:
+            sign_type: "transaction"
+            chain_id: 137
+            signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            transaction:
+              from: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+              value: "0x0"
+              data: "0x095ea7b300000000000000000000000093070a847efEf7F70739046A929D47a521F5B8eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: true
+        - name: "should reject USDC.e approve to wrong spender"
+          input:
+            sign_type: "transaction"
+            chain_id: 137
+            signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            transaction:
+              from: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              to: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+              value: "0x0"
+              data: "0x095ea7b3000000000000000000000000DEADDEADDEADDEADDEADDEADDEADDEADDEADDEADffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: false
+          expect_reason: "approve spender must be CollateralOnramp"
+        - name: "should pass USDC approve to CollateralOnramp"
+          input:
+            sign_type: "transaction"
+            chain_id: 137
+            signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            transaction:
+              from: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              to: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
+              value: "0x0"
+              data: "0x095ea7b300000000000000000000000093070a847efEf7F70739046A929D47a521F5B8eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: true
+        - name: "should reject USDC approve to wrong spender"
+          input:
+            sign_type: "transaction"
+            chain_id: 137
+            signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            transaction:
+              from: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              to: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
+              value: "0x0"
+              data: "0x095ea7b3000000000000000000000000DEADDEADDEADDEADDEADDEADDEADDEADDEADDEADffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: false
+          expect_reason: "approve spender must be CollateralOnramp"
+        - name: "should reject unsupported target contract"
+          input:
+            sign_type: "transaction"
+            chain_id: 137
+            signer: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+            transaction:
+              from: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+              to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
+              value: "0x0"
+              data: "0x095ea7b3000000000000000000000000DEADDEADDEADDEADDEADDEADDEADDEADDEADDEADffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          expect_pass: false
+          expect_reason: "unsupported target contract"
