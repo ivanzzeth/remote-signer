@@ -290,7 +290,8 @@ header {
   letter-spacing: 0.05em;
 }
 
-.form-group input {
+.form-group input,
+.form-group textarea {
   width: 100%;
   padding: 8px 10px;
   background: var(--surface);
@@ -301,9 +302,16 @@ header {
   font-family: "SF Mono", "Fira Code", monospace;
   outline: none;
   transition: border-color 0.15s;
+  box-sizing: border-box;
+  resize: vertical;
 }
-.form-group input:focus {
+.form-group input:focus,
+.form-group textarea:focus {
   border-color: var(--accent);
+}
+.form-group textarea.masked {
+  -webkit-text-security: disc;
+  text-security: disc;
 }
 
 .btn-text {

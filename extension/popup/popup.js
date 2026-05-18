@@ -273,7 +273,14 @@
     };
 
     try {
-      await send({ type: "popup:saveConfig", config: tempConfig });
+      const saveResp = await send({ type: "popup:saveConfig", config: tempConfig });
+      if (saveResp && saveResp.ok === false) {
+        els.connectionError.textContent = "Invalid configuration: " + (saveResp.error || "unknown error");
+        els.connectionError.classList.remove("hidden");
+        els.testConnectionBtn.disabled = false;
+        els.testConnectionBtn.textContent = "Test Connection";
+        return;
+      }
       const result = await send({ type: "popup:testConnection" });
       if (result && result.ok) {
         const version = result.version ? `v${result.version}` : "connected";
@@ -301,6 +308,8 @@
   async function saveConfig() {
     els.saveConfigBtn.disabled = true;
     els.saveConfigBtn.textContent = "Saving...";
+    els.connectionError.classList.add("hidden");
+    els.connectionError.textContent = "";
 
     config = {
       remoteSignerUrl: els.inputUrl.value.trim(),
@@ -309,7 +318,14 @@
       selectedChain: parseInt(els.chainSelect.value, 10) || 1,
     };
 
-    await send({ type: "popup:saveConfig", config });
+    const resp = await send({ type: "popup:saveConfig", config });
+    if (resp && resp.ok === false) {
+      els.connectionError.textContent = "Invalid configuration: " + (resp.error || "unknown error");
+      els.connectionError.classList.remove("hidden");
+      els.saveConfigBtn.disabled = false;
+      els.saveConfigBtn.textContent = "Save";
+      return;
+    }
     showView("loading");
     await initPopup();
     els.saveConfigBtn.disabled = false;
@@ -338,11 +354,13 @@
       initPopup();
     });
 
-    // Settings
+    // Settings — private key is a textarea (so PEM fits); use CSS masking
+    // instead of input[type=password] which has no equivalent on textarea.
+    els.inputPrivateKey.classList.add("masked");
+    els.togglePwBtn.textContent = "Show";
     els.togglePwBtn.addEventListener("click", () => {
-      const input = els.inputPrivateKey;
-      input.type = input.type === "password" ? "text" : "password";
-      els.togglePwBtn.textContent = input.type === "password" ? "Show" : "Hide";
+      const masked = els.inputPrivateKey.classList.toggle("masked");
+      els.togglePwBtn.textContent = masked ? "Show" : "Hide";
     });
 
     els.testConnectionBtn.addEventListener("click", testConnection);

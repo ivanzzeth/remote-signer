@@ -149,8 +149,48 @@ async function loadConfig(): Promise<StoredConfig> {
 }
 
 async function saveConfig(cfg: StoredConfig): Promise<void> {
-  cachedConfig = cfg;
-  await chrome.storage.local.set({ [configKey()]: cfg });
+  cachedConfig = {
+    ...cfg,
+    apiKeyPrivateKey: normalizePrivateKey(cfg.apiKeyPrivateKey),
+  };
+  await chrome.storage.local.set({ [configKey()]: cachedConfig });
+}
+
+/**
+ * Accept either:
+ *   - hex (with or without 0x): the SDK already handles 32 or 64 byte hex
+ *   - PEM-encoded PKCS8 Ed25519 private key (-----BEGIN PRIVATE KEY-----)
+ *
+ * For PEM input we base64-decode the body and slice the 32-byte seed at
+ * offset 16 (the OCTET STRING immediately after the standard PKCS8/Ed25519
+ * ASN.1 prefix). Works for both PKCS8 v1 (48 bytes total) and v2 (which
+ * appends the public key after the seed). Returns hex; throws on malformed
+ * input so the caller can surface a clear error.
+ */
+function normalizePrivateKey(input: string): string {
+  if (!input) return input;
+  const trimmed = input.trim();
+  if (!trimmed.includes("-----BEGIN")) return trimmed; // hex path
+  const m = trimmed.match(/-----BEGIN[^-]+-----([\s\S]+?)-----END[^-]+-----/);
+  if (!m) {
+    throw new Error("Malformed PEM: missing BEGIN/END markers");
+  }
+  const b64 = m[1].replace(/\s+/g, "");
+  let bin: string;
+  try {
+    bin = atob(b64);
+  } catch {
+    throw new Error("Malformed PEM: body is not valid base64");
+  }
+  if (bin.length < 48) {
+    throw new Error(`Malformed PEM: decoded ${bin.length} bytes, expected at least 48`);
+  }
+  // PKCS8 Ed25519: 16-byte ASN.1 prefix then 32-byte seed.
+  const seed = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) seed[i] = bin.charCodeAt(16 + i);
+  return Array.from(seed)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 // ── Dynamic content-script registration ──────────────────────────────────
@@ -575,7 +615,15 @@ async function handlePopupGetConfig() {
 }
 
 async function handlePopupSaveConfig(msg: PopupSaveConfig) {
-  await saveConfig(msg.config);
+  try {
+    await saveConfig(msg.config);
+  } catch (err: any) {
+    return {
+      type: "popup:configSaved",
+      ok: false,
+      error: err?.message || String(err),
+    };
+  }
   // Reset provider so it re-initializes with new config
   initPromise = null;
   initError = null;

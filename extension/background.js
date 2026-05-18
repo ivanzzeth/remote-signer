@@ -2786,8 +2786,33 @@
     return cachedConfig;
   }
   async function saveConfig(cfg) {
-    cachedConfig = cfg;
-    await chrome.storage.local.set({ [configKey()]: cfg });
+    cachedConfig = {
+      ...cfg,
+      apiKeyPrivateKey: normalizePrivateKey(cfg.apiKeyPrivateKey)
+    };
+    await chrome.storage.local.set({ [configKey()]: cachedConfig });
+  }
+  function normalizePrivateKey(input) {
+    if (!input) return input;
+    const trimmed = input.trim();
+    if (!trimmed.includes("-----BEGIN")) return trimmed;
+    const m = trimmed.match(/-----BEGIN[^-]+-----([\s\S]+?)-----END[^-]+-----/);
+    if (!m) {
+      throw new Error("Malformed PEM: missing BEGIN/END markers");
+    }
+    const b64 = m[1].replace(/\s+/g, "");
+    let bin;
+    try {
+      bin = atob(b64);
+    } catch {
+      throw new Error("Malformed PEM: body is not valid base64");
+    }
+    if (bin.length < 48) {
+      throw new Error(`Malformed PEM: decoded ${bin.length} bytes, expected at least 48`);
+    }
+    const seed = new Uint8Array(32);
+    for (let i = 0; i < 32; i++) seed[i] = bin.charCodeAt(16 + i);
+    return Array.from(seed).map((b) => b.toString(16).padStart(2, "0")).join("");
   }
   async function registerContentScript() {
     try {
@@ -3116,7 +3141,15 @@
     };
   }
   async function handlePopupSaveConfig(msg) {
-    await saveConfig(msg.config);
+    try {
+      await saveConfig(msg.config);
+    } catch (err2) {
+      return {
+        type: "popup:configSaved",
+        ok: false,
+        error: err2?.message || String(err2)
+      };
+    }
     initPromise = null;
     initError = null;
     provider = null;
