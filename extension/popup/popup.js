@@ -10,6 +10,10 @@
   // ── State ────────────────────────────────────────────────────────────
   let config = null;
   let isSettingsDirty = false;
+  // Tracks the last main view rendered by initPopup. The back button uses
+  // it to navigate without re-fetching state (which would wipe unsaved
+  // settings edits). Empty until initPopup has rendered once.
+  let lastMainView = "";
 
   // ── DOM refs ─────────────────────────────────────────────────────────
   const $ = (id) => document.getElementById(id);
@@ -487,6 +491,7 @@
       if (stateResp && stateResp.configured === false) {
         renderDisconnectedReason(null);
         showView("disconnected");
+        lastMainView = "disconnected";
         els.connectionDot.className = "dot disconnected";
         return;
       }
@@ -495,6 +500,7 @@
       if (!stateResp || stateResp.connected !== true) {
         renderDisconnectedReason(stateResp?.error || "Unable to reach Remote Signer");
         showView("disconnected");
+        lastMainView = "disconnected";
         els.connectionDot.className = "dot disconnected";
         return;
       }
@@ -527,10 +533,12 @@
       }
 
       showView("connected");
+      lastMainView = "connected";
     } catch (err) {
       console.error("[popup] init error:", err);
       renderDisconnectedReason(err?.message);
       showView("disconnected");
+      lastMainView = "disconnected";
       els.connectionDot.className = "dot disconnected";
     }
   }
@@ -679,8 +687,16 @@
     els.settingsBtn.addEventListener("click", showSettings);
     els.disconnectedSettingsBtn.addEventListener("click", showSettings);
     els.backToMainBtn.addEventListener("click", () => {
-      showView("loading");
-      initPopup();
+      // Just navigate views — don't re-fetch state (which would wipe
+      // unsaved edits to the settings form). lastMainView holds the most
+      // recent main view rendered by initPopup; if it's empty (no init
+      // ran yet) we full-init so the popup doesn't strand on settings.
+      if (!lastMainView) {
+        showView("loading");
+        initPopup();
+      } else {
+        showView(lastMainView);
+      }
     });
 
     // Settings — private key is a textarea (so PEM fits); use CSS masking
