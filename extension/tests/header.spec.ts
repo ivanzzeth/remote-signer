@@ -1,245 +1,174 @@
 /**
- * MetaMask-style header — chain dropdown, signer chip, role badge,
- * "Policy-controlled signing" tagline.
+ * Header chips (chain + signer) + role badge — real popup, real backend.
+ *
+ * Tests that depend on multi-signer state create a second keystore signer
+ * via the admin API at the start of their sub-suite, and dispose of it
+ * afterwards. The e2e server seed itself is single-signer.
  */
-import { test, expect, type Page } from "./fixtures";
+import { test, expect, type BrowserContext, type Page } from "./fixtures";
+import { injectStorageConfig, adminClient } from "./helpers";
 
-async function openMockedPopup(
-  context: any,
-  extensionId: string,
-  opts: {
-    signers?: Array<{ address: string; type: string; enabled: boolean; locked: boolean }>;
-    activeAddress?: string | null;
-    chainIdHex?: string;
-    apiKeyRole?: string;
-  }
-): Promise<{ page: Page; switchCalls: () => Promise<string[]>; chainCalls: () => Promise<number[]> }> {
-  const page = await context.newPage();
-  await page.addInitScript(
-    ({ opts }: { opts: any }) => {
-      const switchHistory: string[] = [];
-      const chainHistory: number[] = [];
-      let liveActive = opts.activeAddress ?? null;
-      let liveChain = opts.chainIdHex || "0x1";
-
-      const responder = (msg: any): any => {
-        if (msg.type === "popup:getConfig") {
-          return {
-            type: "popup:config",
-            config: {
-              remoteSignerUrl: "http://x",
-              apiKeyId: "k",
-              apiKeyPrivateKey: "0".repeat(64),
-              selectedChain: parseInt(liveChain, 16) || 1,
-            },
-          };
-        }
-        if (msg.type === "popup:getState") {
-          const signers = opts.signers || [];
-          const usable = signers.filter((s: any) => s.enabled && !s.locked);
-          return {
-            type: "popup:state",
-            connected: true,
-            configured: true,
-            accounts: usable.map((s: any) => s.address),
-            activeAddress: liveActive,
-            signers,
-            chainId: liveChain,
-            error: null,
-            signerStatus: {
-              total: signers.length,
-              usable: usable.length,
-              locked: signers.filter((s: any) => s.locked).length,
-              disabled: signers.filter((s: any) => !s.enabled).length,
-            },
-          };
-        }
-        if (msg.type === "popup:getDashboard") {
-          return {
-            type: "popup:dashboard",
-            signers: [],
-            signerCount: (opts.signers || []).length,
-            ruleCount: 0,
-            requestCount: 0,
-            apiKeyRole: opts.apiKeyRole || "agent",
-          };
-        }
-        if (msg.type === "popup:saveConfig") {
-          if (msg.config && typeof msg.config.selectedChain === "number") {
-            liveChain = "0x" + msg.config.selectedChain.toString(16);
-            chainHistory.push(msg.config.selectedChain);
-          }
-          return { type: "popup:configSaved", ok: true };
-        }
-        if (msg.type === "popup:switchAccount") {
-          switchHistory.push(msg.address);
-          liveActive = msg.address;
-          return { type: "popup:accountSwitched", ok: true, address: msg.address };
-        }
-        if (msg.type === "popup:getActivity") {
-          return { type: "popup:activity", ok: true, requests: [], total: 0, hasMore: false };
-        }
-        return {};
-      };
-
-      (window as any).__switchHistory = switchHistory;
-      (window as any).__chainHistory = chainHistory;
-      const realChrome = (window as any).chrome;
-      Object.defineProperty(window, "chrome", {
-        value: {
-          ...(realChrome || {}),
-          runtime: {
-            ...((realChrome && realChrome.runtime) || {}),
-            lastError: null,
-            sendMessage: (msg: any, cb: (resp: any) => void) =>
-              setTimeout(() => cb(responder(msg)), 0),
-          },
-          storage: {
-            local: {
-              get: (_k: any, cb: (o: any) => void) => setTimeout(() => cb({}), 0),
-              set: (_o: any, cb?: () => void) => setTimeout(() => cb?.(), 0),
-            },
-          },
-          tabs: { create: () => {} },
-        },
-        writable: true,
-        configurable: true,
-      });
-    },
-    { opts }
-  );
-
-  await page.goto(`chrome-extension://${extensionId}/popup/popup.html`);
-  await page.waitForSelector("#app");
-  await expect(page.locator("#connectedView")).toBeVisible();
-  return {
-    page,
-    switchCalls: async () => page.evaluate(() => (window as any).__switchHistory as string[]),
-    chainCalls: async () => page.evaluate(() => (window as any).__chainHistory as number[]),
-  };
+async function openConfiguredPopup(context: BrowserContext, extensionId: string, serverInfo: any): Promise<Page> {
+  const popup = await context.newPage();
+  await popup.goto(`chrome-extension://${extensionId}/popup/popup.html`);
+  await popup.waitForSelector("#app");
+  await injectStorageConfig(popup, {
+    remoteSignerUrl: serverInfo.base_url,
+    apiKeyId: serverInfo.admin_api_key_id,
+    apiKeyPrivateKey: serverInfo.admin_api_key_hex,
+    selectedChain: 1,
+  });
+  await popup.reload();
+  await popup.waitForSelector("#app");
+  await expect(popup.locator("#connectedView")).toBeVisible({ timeout: 15_000 });
+  return popup;
 }
 
-const A1 = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
-const A2 = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
+// ── Single-signer subset (uses only the seeded signer) ────────────────────
 
-test.describe("MetaMask-style header (@integration)", () => {
-  test("tagline reads 'Policy-controlled signing'", async ({ context, extensionId }) => {
-    const { page } = await openMockedPopup(context, extensionId, {
-      signers: [{ address: A1, type: "keystore", enabled: true, locked: false }],
-      activeAddress: A1,
-    });
-    await expect(page.locator(".logo-subtitle")).toHaveText("Policy-controlled signing");
-    await page.close();
+test.describe("AppBar header — single-signer (real backend) (@integration)", () => {
+  test("subtitle reads 'Policy-controlled signing'", async ({ context, extensionId, serverInfo }) => {
+    const popup = await openConfiguredPopup(context, extensionId, serverInfo);
+    await expect(popup.locator(".logo-subtitle")).toHaveText("Policy-controlled signing");
+    await popup.close();
   });
 
-  test("header chain chip shows current chain and opens the dropdown", async ({ context, extensionId }) => {
-    const { page } = await openMockedPopup(context, extensionId, {
-      signers: [{ address: A1, type: "keystore", enabled: true, locked: false }],
-      activeAddress: A1,
-      chainIdHex: "0x1",
-    });
-    await expect(page.locator("#appbarChainBtn")).toBeVisible();
-    await expect(page.locator("#appbarChainLabel")).toHaveText("Ethereum");
+  test("chain chip shows current chain label", async ({ context, extensionId, serverInfo }) => {
+    const popup = await openConfiguredPopup(context, extensionId, serverInfo);
+    await expect(popup.locator("#appbarChainBtn")).toBeVisible();
+    await expect(popup.locator("#appbarChainLabel")).toHaveText("Ethereum");
+    await popup.close();
+  });
 
-    await page.locator("#appbarChainBtn").click();
-    await expect(page.locator("#chainDropdown")).toBeVisible();
-    // Active chain has the ✓ marker.
-    const activeItem = page.locator("#chainDropdown .appbar-dropdown-item--active");
+  test("chain chip opens dropdown; the active chain has the ✓ marker", async ({ context, extensionId, serverInfo }) => {
+    const popup = await openConfiguredPopup(context, extensionId, serverInfo);
+    await popup.locator("#appbarChainBtn").click();
+    await expect(popup.locator("#chainDropdown")).toBeVisible();
+    const activeItem = popup.locator("#chainDropdown .appbar-dropdown-item--active");
     await expect(activeItem).toHaveCount(1);
     await expect(activeItem).toContainText("Ethereum");
-
-    await page.close();
+    await popup.close();
   });
 
-  test("picking a chain from the dropdown updates the chip and fires saveConfig", async ({ context, extensionId }) => {
-    const { page, chainCalls } = await openMockedPopup(context, extensionId, {
-      signers: [{ address: A1, type: "keystore", enabled: true, locked: false }],
-      activeAddress: A1,
-      chainIdHex: "0x1",
-    });
-    await page.locator("#appbarChainBtn").click();
-    // Polygon row.
-    await page.locator("#chainDropdown .appbar-dropdown-item:has-text('Polygon')").click();
-    await expect(page.locator("#appbarChainLabel")).toHaveText("Polygon");
-    expect(await chainCalls()).toContain(137);
-    await page.close();
+  test("picking another chain updates the chip label and persists the choice", async ({ context, extensionId, serverInfo }) => {
+    const popup = await openConfiguredPopup(context, extensionId, serverInfo);
+    await popup.locator("#appbarChainBtn").click();
+    await popup.locator("#chainDropdown .appbar-dropdown-item:has-text('Polygon')").click();
+    await expect(popup.locator("#appbarChainLabel")).toHaveText("Polygon");
+
+    const stored = await popup.evaluate(() =>
+      new Promise<any>((resolve) =>
+        chrome.storage.local.get("remoteSignerConfig", (r) => resolve(r.remoteSignerConfig))
+      )
+    );
+    expect(stored?.selectedChain).toBe(137);
+    await popup.close();
   });
 
-  test("signer chip shows shortened active address and opens the signer dropdown", async ({ context, extensionId }) => {
-    const { page } = await openMockedPopup(context, extensionId, {
-      signers: [
-        { address: A1, type: "keystore", enabled: true, locked: false },
-        { address: A2, type: "keystore", enabled: true, locked: false },
-      ],
-      activeAddress: A1,
-    });
-    await expect(page.locator("#appbarSignerBtn")).toBeVisible();
-    await expect(page.locator("#appbarSignerLabel")).toContainText("0xf39");
-
-    await page.locator("#appbarSignerBtn").click();
-    await expect(page.locator("#signerDropdown")).toBeVisible();
-    await expect(page.locator("#signerDropdown .appbar-dropdown-item")).toHaveCount(2);
-    await expect(page.locator("#signerDropdown .appbar-dropdown-item--active")).toHaveCount(1);
-    await page.close();
+  test("role badge reflects the API key role", async ({ context, extensionId, serverInfo }) => {
+    const popup = await openConfiguredPopup(context, extensionId, serverInfo);
+    await expect(popup.locator("#roleBadge")).toBeVisible({ timeout: 10_000 });
+    const text = (await popup.locator("#roleBadge").textContent())?.trim();
+    expect(["admin", "agent"]).toContain(text);
+    await popup.close();
   });
 
-  test("clicking another signer in the dropdown switches the active account", async ({ context, extensionId }) => {
-    const { page, switchCalls } = await openMockedPopup(context, extensionId, {
-      signers: [
-        { address: A1, type: "keystore", enabled: true, locked: false },
-        { address: A2, type: "keystore", enabled: true, locked: false },
-      ],
-      activeAddress: A1,
+  test("clicking outside the dropdown dismisses it", async ({ context, extensionId, serverInfo }) => {
+    const popup = await openConfiguredPopup(context, extensionId, serverInfo);
+    await popup.locator("#appbarChainBtn").click();
+    await expect(popup.locator("#chainDropdown")).toBeVisible();
+    await popup.locator(".logo-text").click();
+    await expect(popup.locator("#chainDropdown")).toHaveClass(/hidden/, { timeout: 2_000 });
+    await popup.close();
+  });
+});
+
+// ── Multi-signer subset (provisions an extra keystore signer) ─────────────
+
+test.describe("AppBar header — multi-signer (real backend) (@integration)", () => {
+  test.describe.configure({ mode: "serial" });
+
+  let keystoreAddr = "";
+
+  test.beforeAll(async ({ serverInfo }) => {
+    const admin = adminClient(serverInfo);
+    const created = await admin.evm.signers.create({
+      type: "keystore",
+      keystore: { password: "header-test-pw" },
     });
-    await page.locator("#appbarSignerBtn").click();
-    // The item that isn't currently active.
-    await page.locator(`#signerDropdown .appbar-dropdown-item:not(.appbar-dropdown-item--active)`).first().click();
-    await expect(page.locator("#appbarSignerLabel")).toContainText("0x709", { timeout: 5_000 });
-    expect(await switchCalls()).toEqual([A2]);
-    await page.close();
+    keystoreAddr = (created as any).address;
+    await admin.evm.rules.create({
+      name: "e2e-header-keystore-allow",
+      type: "signer_restriction",
+      mode: "whitelist",
+      chain_type: "evm",
+      config: { allowed_signers: [keystoreAddr] },
+      enabled: true,
+    } as any);
   });
 
-  test("locked signer is disabled in the dropdown", async ({ context, extensionId }) => {
-    const { page, switchCalls } = await openMockedPopup(context, extensionId, {
-      signers: [
-        { address: A1, type: "keystore", enabled: true, locked: false },
-        { address: A2, type: "keystore", enabled: true, locked: true },
-      ],
-      activeAddress: A1,
-    });
-    await page.locator("#appbarSignerBtn").click();
-    const lockedRow = page.locator("#signerDropdown .appbar-dropdown-item--disabled");
-    await expect(lockedRow).toHaveCount(1);
-    await expect(lockedRow).toContainText("🔒");
-    // Clicking the locked row does not fire a switch.
-    await lockedRow.click({ force: true });
-    await page.waitForTimeout(150);
-    expect(await switchCalls()).toEqual([]);
-    await page.close();
+  test.afterAll(async ({ serverInfo }) => {
+    if (!keystoreAddr) return;
+    const admin = adminClient(serverInfo);
+    await admin.evm.signers.unlock(keystoreAddr, { password: "header-test-pw" }).catch(() => {});
+    await admin.evm.signers.deleteSigner(keystoreAddr).catch(() => {});
   });
 
-  test("role badge reflects the apiKeyRole from dashboard", async ({ context, extensionId }) => {
-    const { page } = await openMockedPopup(context, extensionId, {
-      signers: [{ address: A1, type: "keystore", enabled: true, locked: false }],
-      activeAddress: A1,
-      apiKeyRole: "admin",
-    });
-    await expect(page.locator("#roleBadge")).toBeVisible();
-    await expect(page.locator("#roleBadge")).toHaveText("admin");
-    await expect(page.locator("#roleBadge")).toHaveClass(/role-badge--admin/);
-    await page.close();
+  test("signer chip shows the active address and opens a dropdown with both signers", async ({ context, extensionId, serverInfo }) => {
+    const popup = await openConfiguredPopup(context, extensionId, serverInfo);
+    await expect(popup.locator("#appbarSignerBtn")).toBeVisible();
+    const label = (await popup.locator("#appbarSignerLabel").textContent()) || "";
+    expect(label.length).toBeGreaterThan(0);
+    expect(label.startsWith("0x")).toBe(true);
+
+    await popup.locator("#appbarSignerBtn").click();
+    await expect(popup.locator("#signerDropdown")).toBeVisible();
+    await expect(popup.locator("#signerDropdown .appbar-dropdown-item")).toHaveCount(2);
+    await expect(popup.locator("#signerDropdown .appbar-dropdown-item--active")).toHaveCount(1);
+    await popup.close();
   });
 
-  test("clicking outside the dropdown dismisses it", async ({ context, extensionId }) => {
-    const { page } = await openMockedPopup(context, extensionId, {
-      signers: [{ address: A1, type: "keystore", enabled: true, locked: false }],
-      activeAddress: A1,
-    });
-    await page.locator("#appbarChainBtn").click();
-    await expect(page.locator("#chainDropdown")).toBeVisible();
-    // Click on something far away.
-    await page.locator(".logo-text").click();
-    await expect(page.locator("#chainDropdown")).toHaveClass(/hidden/, { timeout: 2_000 });
-    await page.close();
+  test("picking another signer from the dropdown switches the active account", async ({ context, extensionId, serverInfo }) => {
+    const popup = await openConfiguredPopup(context, extensionId, serverInfo);
+    const activeBefore = await popup.locator(".account-item--active").getAttribute("data-address");
+    const target = activeBefore?.toLowerCase() === serverInfo.signer_address.toLowerCase()
+      ? keystoreAddr
+      : serverInfo.signer_address;
+
+    await popup.locator("#appbarSignerBtn").click();
+    const shortTarget = target.slice(0, 6) + "..." + target.slice(-4);
+    await popup.locator(`#signerDropdown .appbar-dropdown-item:has-text("${shortTarget}")`).click();
+
+    await expect(popup.locator(`.account-item[data-address="${target}"]`)).toHaveClass(/account-item--active/, { timeout: 10_000 });
+    const stored = await popup.evaluate(() =>
+      new Promise<any>((resolve) =>
+        chrome.storage.local.get("remoteSignerConfig", (r) => resolve(r.remoteSignerConfig))
+      )
+    );
+    expect(stored?.activeSignerAddress?.toLowerCase()).toBe(target.toLowerCase());
+    await popup.close();
+  });
+
+  test("locked signer in the dropdown is non-clickable and shows 🔒", async ({ context, extensionId, serverInfo }) => {
+    const admin = adminClient(serverInfo);
+    await admin.evm.signers.lock(keystoreAddr);
+
+    try {
+      const popup = await openConfiguredPopup(context, extensionId, serverInfo);
+      const activeBefore = await popup.locator(".account-item--active").getAttribute("data-address");
+
+      await popup.locator("#appbarSignerBtn").click();
+      const lockedRow = popup.locator("#signerDropdown .appbar-dropdown-item--disabled");
+      await expect(lockedRow).toHaveCount(1);
+      await expect(lockedRow).toContainText("🔒");
+      await lockedRow.click({ force: true });
+      await popup.waitForTimeout(400);
+
+      const activeAfter = await popup.locator(".account-item--active").getAttribute("data-address");
+      expect(activeAfter).toBe(activeBefore);
+      await popup.close();
+    } finally {
+      await admin.evm.signers.unlock(keystoreAddr, { password: "header-test-pw" }).catch(() => {});
+    }
   });
 });

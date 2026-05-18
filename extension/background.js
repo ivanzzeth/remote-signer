@@ -6,7 +6,7 @@
     throw Error('Dynamic require of "' + x + '" is not supported');
   });
 
-  // node_modules/@noble/ed25519/index.js
+  // ../pkg/js-client/node_modules/@noble/ed25519/index.js
   var ed25519_CURVE = {
     p: 0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffedn,
     n: 0x1000000000000000000000000000000014def9dea2f79cd65812631a5cf5d3edn,
@@ -92,12 +92,6 @@
       b = a, a = r, x = u, y = v, u = m, v = n;
     }
     return b === 1n ? M(x, md) : err("no inverse");
-  };
-  var callHash = (name) => {
-    const fn = etc[name];
-    if (typeof fn !== "function")
-      err("hashes." + name + " not set");
-    return fn;
   };
   var apoint = (p) => p instanceof Point ? p : err("Point expected");
   var B256 = 2n ** 256n;
@@ -341,7 +335,7 @@
     return { isValid: useRoot1 || useRoot2, value: x };
   };
   var modL_LE = (hash) => modN(bytesToNumLE(hash));
-  var sha512s = (...m) => callHash("sha512Sync")(...m);
+  var sha512a = (...m) => etc.sha512Async(...m);
   var hash2extK = (hashed) => {
     const head = hashed.slice(0, L);
     head[0] &= 248;
@@ -353,8 +347,8 @@
     const pointBytes = point.toBytes();
     return { head, prefix, scalar, point, pointBytes };
   };
-  var getExtendedPublicKey = (priv) => hash2extK(sha512s(toU8(priv, L)));
-  var hashFinishS = (res) => res.finish(sha512s(res.hashable));
+  var getExtendedPublicKeyAsync = (priv) => sha512a(toU8(priv, L)).then(hash2extK);
+  var hashFinishA = (res) => sha512a(res.hashable).then(res.finish);
   var _sign = (e, rBytes, msg) => {
     const { pointBytes: P2, scalar: s } = e;
     const r = modL_LE(rBytes);
@@ -366,11 +360,11 @@
     };
     return { hashable, finish };
   };
-  var sign = (msg, privKey) => {
+  var signAsync = async (msg, privKey) => {
     const m = toU8(msg);
-    const e = getExtendedPublicKey(privKey);
-    const rBytes = sha512s(e.prefix, m);
-    return hashFinishS(_sign(e, rBytes, m));
+    const e = await getExtendedPublicKeyAsync(privKey);
+    const rBytes = await sha512a(e.prefix, m);
+    return hashFinishA(_sign(e, rBytes, m));
   };
   var etc = {
     sha512Async: async (...messages) => {
@@ -439,7 +433,7 @@
     return { p, f };
   };
 
-  // node_modules/@noble/hashes/esm/utils.js
+  // ../pkg/js-client/node_modules/@noble/hashes/esm/utils.js
   function isBytes2(a) {
     return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array";
   }
@@ -495,13 +489,13 @@
     return hashC;
   }
 
-  // node_modules/@noble/hashes/esm/_md.js
+  // ../pkg/js-client/node_modules/@noble/hashes/esm/_md.js
   function setBigUint64(view, byteOffset, value, isLE) {
     if (typeof view.setBigUint64 === "function")
       return view.setBigUint64(byteOffset, value, isLE);
-    const _32n2 = BigInt(32);
+    const _32n = BigInt(32);
     const _u32_max = BigInt(4294967295);
-    const wh = Number(value >> _32n2 & _u32_max);
+    const wh = Number(value >> _32n & _u32_max);
     const wl = Number(value & _u32_max);
     const h2 = isLE ? 4 : 0;
     const l = isLE ? 0 : 4;
@@ -614,61 +608,8 @@
     528734635,
     1541459225
   ]);
-  var SHA512_IV = /* @__PURE__ */ Uint32Array.from([
-    1779033703,
-    4089235720,
-    3144134277,
-    2227873595,
-    1013904242,
-    4271175723,
-    2773480762,
-    1595750129,
-    1359893119,
-    2917565137,
-    2600822924,
-    725511199,
-    528734635,
-    4215389547,
-    1541459225,
-    327033209
-  ]);
 
-  // node_modules/@noble/hashes/esm/_u64.js
-  var U32_MASK64 = /* @__PURE__ */ BigInt(2 ** 32 - 1);
-  var _32n = /* @__PURE__ */ BigInt(32);
-  function fromBig(n, le = false) {
-    if (le)
-      return { h: Number(n & U32_MASK64), l: Number(n >> _32n & U32_MASK64) };
-    return { h: Number(n >> _32n & U32_MASK64) | 0, l: Number(n & U32_MASK64) | 0 };
-  }
-  function split(lst, le = false) {
-    const len = lst.length;
-    let Ah = new Uint32Array(len);
-    let Al = new Uint32Array(len);
-    for (let i = 0; i < len; i++) {
-      const { h: h2, l } = fromBig(lst[i], le);
-      [Ah[i], Al[i]] = [h2, l];
-    }
-    return [Ah, Al];
-  }
-  var shrSH = (h2, _l, s) => h2 >>> s;
-  var shrSL = (h2, l, s) => h2 << 32 - s | l >>> s;
-  var rotrSH = (h2, l, s) => h2 >>> s | l << 32 - s;
-  var rotrSL = (h2, l, s) => h2 << 32 - s | l >>> s;
-  var rotrBH = (h2, l, s) => h2 << 64 - s | l >>> s - 32;
-  var rotrBL = (h2, l, s) => h2 >>> s - 32 | l << 64 - s;
-  function add(Ah, Al, Bh, Bl) {
-    const l = (Al >>> 0) + (Bl >>> 0);
-    return { h: Ah + Bh + (l / 2 ** 32 | 0) | 0, l: l | 0 };
-  }
-  var add3L = (Al, Bl, Cl) => (Al >>> 0) + (Bl >>> 0) + (Cl >>> 0);
-  var add3H = (low, Ah, Bh, Ch) => Ah + Bh + Ch + (low / 2 ** 32 | 0) | 0;
-  var add4L = (Al, Bl, Cl, Dl) => (Al >>> 0) + (Bl >>> 0) + (Cl >>> 0) + (Dl >>> 0);
-  var add4H = (low, Ah, Bh, Ch, Dh) => Ah + Bh + Ch + Dh + (low / 2 ** 32 | 0) | 0;
-  var add5L = (Al, Bl, Cl, Dl, El) => (Al >>> 0) + (Bl >>> 0) + (Cl >>> 0) + (Dl >>> 0) + (El >>> 0);
-  var add5H = (low, Ah, Bh, Ch, Dh, Eh) => Ah + Bh + Ch + Dh + Eh + (low / 2 ** 32 | 0) | 0;
-
-  // node_modules/@noble/hashes/esm/sha2.js
+  // ../pkg/js-client/node_modules/@noble/hashes/esm/sha2.js
   var SHA256_K = /* @__PURE__ */ Uint32Array.from([
     1116352408,
     1899447441,
@@ -806,222 +747,18 @@
       clean(this.buffer);
     }
   };
-  var K512 = /* @__PURE__ */ (() => split([
-    "0x428a2f98d728ae22",
-    "0x7137449123ef65cd",
-    "0xb5c0fbcfec4d3b2f",
-    "0xe9b5dba58189dbbc",
-    "0x3956c25bf348b538",
-    "0x59f111f1b605d019",
-    "0x923f82a4af194f9b",
-    "0xab1c5ed5da6d8118",
-    "0xd807aa98a3030242",
-    "0x12835b0145706fbe",
-    "0x243185be4ee4b28c",
-    "0x550c7dc3d5ffb4e2",
-    "0x72be5d74f27b896f",
-    "0x80deb1fe3b1696b1",
-    "0x9bdc06a725c71235",
-    "0xc19bf174cf692694",
-    "0xe49b69c19ef14ad2",
-    "0xefbe4786384f25e3",
-    "0x0fc19dc68b8cd5b5",
-    "0x240ca1cc77ac9c65",
-    "0x2de92c6f592b0275",
-    "0x4a7484aa6ea6e483",
-    "0x5cb0a9dcbd41fbd4",
-    "0x76f988da831153b5",
-    "0x983e5152ee66dfab",
-    "0xa831c66d2db43210",
-    "0xb00327c898fb213f",
-    "0xbf597fc7beef0ee4",
-    "0xc6e00bf33da88fc2",
-    "0xd5a79147930aa725",
-    "0x06ca6351e003826f",
-    "0x142929670a0e6e70",
-    "0x27b70a8546d22ffc",
-    "0x2e1b21385c26c926",
-    "0x4d2c6dfc5ac42aed",
-    "0x53380d139d95b3df",
-    "0x650a73548baf63de",
-    "0x766a0abb3c77b2a8",
-    "0x81c2c92e47edaee6",
-    "0x92722c851482353b",
-    "0xa2bfe8a14cf10364",
-    "0xa81a664bbc423001",
-    "0xc24b8b70d0f89791",
-    "0xc76c51a30654be30",
-    "0xd192e819d6ef5218",
-    "0xd69906245565a910",
-    "0xf40e35855771202a",
-    "0x106aa07032bbd1b8",
-    "0x19a4c116b8d2d0c8",
-    "0x1e376c085141ab53",
-    "0x2748774cdf8eeb99",
-    "0x34b0bcb5e19b48a8",
-    "0x391c0cb3c5c95a63",
-    "0x4ed8aa4ae3418acb",
-    "0x5b9cca4f7763e373",
-    "0x682e6ff3d6b2b8a3",
-    "0x748f82ee5defb2fc",
-    "0x78a5636f43172f60",
-    "0x84c87814a1f0ab72",
-    "0x8cc702081a6439ec",
-    "0x90befffa23631e28",
-    "0xa4506cebde82bde9",
-    "0xbef9a3f7b2c67915",
-    "0xc67178f2e372532b",
-    "0xca273eceea26619c",
-    "0xd186b8c721c0c207",
-    "0xeada7dd6cde0eb1e",
-    "0xf57d4f7fee6ed178",
-    "0x06f067aa72176fba",
-    "0x0a637dc5a2c898a6",
-    "0x113f9804bef90dae",
-    "0x1b710b35131c471b",
-    "0x28db77f523047d84",
-    "0x32caab7b40c72493",
-    "0x3c9ebe0a15c9bebc",
-    "0x431d67c49c100d4c",
-    "0x4cc5d4becb3e42b6",
-    "0x597f299cfc657e2a",
-    "0x5fcb6fab3ad6faec",
-    "0x6c44198c4a475817"
-  ].map((n) => BigInt(n))))();
-  var SHA512_Kh = /* @__PURE__ */ (() => K512[0])();
-  var SHA512_Kl = /* @__PURE__ */ (() => K512[1])();
-  var SHA512_W_H = /* @__PURE__ */ new Uint32Array(80);
-  var SHA512_W_L = /* @__PURE__ */ new Uint32Array(80);
-  var SHA512 = class extends HashMD {
-    constructor(outputLen = 64) {
-      super(128, outputLen, 16, false);
-      this.Ah = SHA512_IV[0] | 0;
-      this.Al = SHA512_IV[1] | 0;
-      this.Bh = SHA512_IV[2] | 0;
-      this.Bl = SHA512_IV[3] | 0;
-      this.Ch = SHA512_IV[4] | 0;
-      this.Cl = SHA512_IV[5] | 0;
-      this.Dh = SHA512_IV[6] | 0;
-      this.Dl = SHA512_IV[7] | 0;
-      this.Eh = SHA512_IV[8] | 0;
-      this.El = SHA512_IV[9] | 0;
-      this.Fh = SHA512_IV[10] | 0;
-      this.Fl = SHA512_IV[11] | 0;
-      this.Gh = SHA512_IV[12] | 0;
-      this.Gl = SHA512_IV[13] | 0;
-      this.Hh = SHA512_IV[14] | 0;
-      this.Hl = SHA512_IV[15] | 0;
-    }
-    // prettier-ignore
-    get() {
-      const { Ah, Al, Bh, Bl, Ch, Cl, Dh, Dl, Eh, El, Fh, Fl, Gh, Gl, Hh, Hl } = this;
-      return [Ah, Al, Bh, Bl, Ch, Cl, Dh, Dl, Eh, El, Fh, Fl, Gh, Gl, Hh, Hl];
-    }
-    // prettier-ignore
-    set(Ah, Al, Bh, Bl, Ch, Cl, Dh, Dl, Eh, El, Fh, Fl, Gh, Gl, Hh, Hl) {
-      this.Ah = Ah | 0;
-      this.Al = Al | 0;
-      this.Bh = Bh | 0;
-      this.Bl = Bl | 0;
-      this.Ch = Ch | 0;
-      this.Cl = Cl | 0;
-      this.Dh = Dh | 0;
-      this.Dl = Dl | 0;
-      this.Eh = Eh | 0;
-      this.El = El | 0;
-      this.Fh = Fh | 0;
-      this.Fl = Fl | 0;
-      this.Gh = Gh | 0;
-      this.Gl = Gl | 0;
-      this.Hh = Hh | 0;
-      this.Hl = Hl | 0;
-    }
-    process(view, offset) {
-      for (let i = 0; i < 16; i++, offset += 4) {
-        SHA512_W_H[i] = view.getUint32(offset);
-        SHA512_W_L[i] = view.getUint32(offset += 4);
-      }
-      for (let i = 16; i < 80; i++) {
-        const W15h = SHA512_W_H[i - 15] | 0;
-        const W15l = SHA512_W_L[i - 15] | 0;
-        const s0h = rotrSH(W15h, W15l, 1) ^ rotrSH(W15h, W15l, 8) ^ shrSH(W15h, W15l, 7);
-        const s0l = rotrSL(W15h, W15l, 1) ^ rotrSL(W15h, W15l, 8) ^ shrSL(W15h, W15l, 7);
-        const W2h = SHA512_W_H[i - 2] | 0;
-        const W2l = SHA512_W_L[i - 2] | 0;
-        const s1h = rotrSH(W2h, W2l, 19) ^ rotrBH(W2h, W2l, 61) ^ shrSH(W2h, W2l, 6);
-        const s1l = rotrSL(W2h, W2l, 19) ^ rotrBL(W2h, W2l, 61) ^ shrSL(W2h, W2l, 6);
-        const SUMl = add4L(s0l, s1l, SHA512_W_L[i - 7], SHA512_W_L[i - 16]);
-        const SUMh = add4H(SUMl, s0h, s1h, SHA512_W_H[i - 7], SHA512_W_H[i - 16]);
-        SHA512_W_H[i] = SUMh | 0;
-        SHA512_W_L[i] = SUMl | 0;
-      }
-      let { Ah, Al, Bh, Bl, Ch, Cl, Dh, Dl, Eh, El, Fh, Fl, Gh, Gl, Hh, Hl } = this;
-      for (let i = 0; i < 80; i++) {
-        const sigma1h = rotrSH(Eh, El, 14) ^ rotrSH(Eh, El, 18) ^ rotrBH(Eh, El, 41);
-        const sigma1l = rotrSL(Eh, El, 14) ^ rotrSL(Eh, El, 18) ^ rotrBL(Eh, El, 41);
-        const CHIh = Eh & Fh ^ ~Eh & Gh;
-        const CHIl = El & Fl ^ ~El & Gl;
-        const T1ll = add5L(Hl, sigma1l, CHIl, SHA512_Kl[i], SHA512_W_L[i]);
-        const T1h = add5H(T1ll, Hh, sigma1h, CHIh, SHA512_Kh[i], SHA512_W_H[i]);
-        const T1l = T1ll | 0;
-        const sigma0h = rotrSH(Ah, Al, 28) ^ rotrBH(Ah, Al, 34) ^ rotrBH(Ah, Al, 39);
-        const sigma0l = rotrSL(Ah, Al, 28) ^ rotrBL(Ah, Al, 34) ^ rotrBL(Ah, Al, 39);
-        const MAJh = Ah & Bh ^ Ah & Ch ^ Bh & Ch;
-        const MAJl = Al & Bl ^ Al & Cl ^ Bl & Cl;
-        Hh = Gh | 0;
-        Hl = Gl | 0;
-        Gh = Fh | 0;
-        Gl = Fl | 0;
-        Fh = Eh | 0;
-        Fl = El | 0;
-        ({ h: Eh, l: El } = add(Dh | 0, Dl | 0, T1h | 0, T1l | 0));
-        Dh = Ch | 0;
-        Dl = Cl | 0;
-        Ch = Bh | 0;
-        Cl = Bl | 0;
-        Bh = Ah | 0;
-        Bl = Al | 0;
-        const All = add3L(T1l, sigma0l, MAJl);
-        Ah = add3H(All, T1h, sigma0h, MAJh);
-        Al = All | 0;
-      }
-      ({ h: Ah, l: Al } = add(this.Ah | 0, this.Al | 0, Ah | 0, Al | 0));
-      ({ h: Bh, l: Bl } = add(this.Bh | 0, this.Bl | 0, Bh | 0, Bl | 0));
-      ({ h: Ch, l: Cl } = add(this.Ch | 0, this.Cl | 0, Ch | 0, Cl | 0));
-      ({ h: Dh, l: Dl } = add(this.Dh | 0, this.Dl | 0, Dh | 0, Dl | 0));
-      ({ h: Eh, l: El } = add(this.Eh | 0, this.El | 0, Eh | 0, El | 0));
-      ({ h: Fh, l: Fl } = add(this.Fh | 0, this.Fl | 0, Fh | 0, Fl | 0));
-      ({ h: Gh, l: Gl } = add(this.Gh | 0, this.Gl | 0, Gh | 0, Gl | 0));
-      ({ h: Hh, l: Hl } = add(this.Hh | 0, this.Hl | 0, Hh | 0, Hl | 0));
-      this.set(Ah, Al, Bh, Bl, Ch, Cl, Dh, Dl, Eh, El, Fh, Fl, Gh, Gl, Hh, Hl);
-    }
-    roundClean() {
-      clean(SHA512_W_H, SHA512_W_L);
-    }
-    destroy() {
-      clean(this.buffer);
-      this.set(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
-    }
-  };
   var sha256 = /* @__PURE__ */ createHasher(() => new SHA256());
-  var sha512 = /* @__PURE__ */ createHasher(() => new SHA512());
 
-  // node_modules/@noble/hashes/esm/sha256.js
+  // ../pkg/js-client/node_modules/@noble/hashes/esm/sha256.js
   var sha2562 = sha256;
 
-  // node_modules/@noble/hashes/esm/sha512.js
-  var sha5122 = sha512;
-
-  // node_modules/remote-signer-client/dist/index.mjs
+  // ../pkg/js-client/dist/index.mjs
   var __require2 = /* @__PURE__ */ ((x) => typeof __require !== "undefined" ? __require : typeof Proxy !== "undefined" ? new Proxy(x, {
     get: (a, b) => (typeof __require !== "undefined" ? __require : a)[b]
   }) : x)(function(x) {
     if (typeof __require !== "undefined") return __require.apply(this, arguments);
     throw Error('Dynamic require of "' + x + '" is not supported');
   });
-  if (!etc?.sha512Sync) {
-    etc.sha512Sync = (...m) => sha5122(etc.concatBytes(...m));
-  }
   function parsePrivateKey(key) {
     if (key instanceof Uint8Array) {
       if (key.length === 32) {
@@ -1034,7 +771,29 @@
         );
       }
     }
-    const hex = (key.startsWith("0x") ? key.slice(2) : key).trim();
+    const trimmed = key.trim();
+    if (trimmed.includes("BEGIN PRIVATE KEY")) {
+      const match = trimmed.match(
+        /-----BEGIN PRIVATE KEY-----([\s\S]+?)-----END PRIVATE KEY-----/
+      );
+      if (!match) {
+        throw new Error("malformed PKCS#8 PEM block");
+      }
+      const b64 = match[1].replace(/\s+/g, "");
+      const bin = atob(b64);
+      const der = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) {
+        der[i] = bin.charCodeAt(i);
+      }
+      if (der.length < 32) {
+        throw new Error(`PKCS#8 DER too short: ${der.length} bytes`);
+      }
+      return der.slice(-32);
+    }
+    const hex = trimmed.startsWith("0x") ? trimmed.slice(2) : trimmed;
+    if (!/^[0-9a-fA-F]+$/.test(hex)) {
+      throw new Error("expected hex or PKCS#8 PEM input");
+    }
     const bytes = new Uint8Array(
       hex.match(/.{1,2}/g)?.map((byte) => parseInt(byte, 16)) || []
     );
@@ -1053,14 +812,19 @@
     crypto.getRandomValues(bytes);
     return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
   }
-  function signRequestWithNonce(privateKey, timestamp, nonce, method, path, body) {
+  async function signRequestWithNonce(privateKey, timestamp, nonce, method, path, body) {
     const bodyHash = sha2562(body);
-    const message = `${timestamp}|${nonce}|${method}|${path}|${Array.from(
-      bodyHash
-    ).map((b) => b.toString(16).padStart(2, "0")).join("")}`;
+    const message = `${timestamp}|${nonce}|${method}|${path}|${bytesToHex2(bodyHash)}`;
     const messageBytes = new TextEncoder().encode(message);
-    const signature = sign(messageBytes, privateKey);
+    const signature = await signAsync(messageBytes, privateKey);
     return btoa(String.fromCharCode(...Array.from(signature)));
+  }
+  function bytesToHex2(b) {
+    let out = "";
+    for (const v of b) {
+      out += v.toString(16).padStart(2, "0");
+    }
+    return out;
   }
   var RemoteSignerError = class extends Error {
     constructor(message, code) {
@@ -1211,7 +975,7 @@
       const bodyBytes = body ? new TextEncoder().encode(JSON.stringify(body)) : new Uint8Array(0);
       const timestamp = Date.now();
       const nonce = generateNonce();
-      const signature = signRequestWithNonce(
+      const signature = await signRequestWithNonce(
         this.privateKey,
         timestamp,
         nonce,
@@ -1261,12 +1025,9 @@
           data = { message: responseBody };
         }
         if (!response.ok) {
-          const error = data;
-          throw new APIError(
-            error.message || `HTTP ${response.status}`,
-            response.status,
-            error.error
-          );
+          const env = data;
+          const description = env.error || env.message || (typeof data === "string" ? data : "") || `HTTP ${response.status}`;
+          throw new APIError(description, response.status, env.error);
         }
         return data;
       } catch (error) {
@@ -1730,33 +1491,11 @@
     }
     /** Sign an EVM transaction. Returns signed transaction hex. */
     async signTransaction(transaction) {
-      const tx = { ...transaction };
-      if (typeof tx.gas === "string" && /^0x/i.test(tx.gas)) {
-        tx.gas = parseInt(tx.gas, 16);
-      }
-      for (const field of ["gasPrice", "value", "maxFeePerGas", "maxPriorityFeePerGas", "gasFeeCap", "gasTipCap", "nonce"]) {
-        if (typeof tx[field] === "string" && /^0x/i.test(tx[field])) {
-          tx[field] = BigInt(tx[field]).toString();
-        }
-      }
-      if (!tx.txType) {
-        if (tx.maxFeePerGas || tx.gasFeeCap) {
-          tx.txType = "eip1559";
-        } else {
-          tx.txType = "legacy";
-        }
-      }
-      if (tx.maxFeePerGas !== void 0 && tx.txType === "eip1559" && !tx.gasFeeCap) {
-        tx.gasFeeCap = tx.maxFeePerGas;
-      }
-      if (tx.maxPriorityFeePerGas !== void 0 && tx.txType === "eip1559" && !tx.gasTipCap) {
-        tx.gasTipCap = tx.maxPriorityFeePerGas;
-      }
       const resp = await this.signService.execute({
         chain_id: this._chainID,
         signer_address: this.address,
         sign_type: "transaction",
-        payload: { transaction: tx }
+        payload: { transaction }
       });
       return resp.signed_data;
     }
@@ -1884,6 +1623,66 @@
       return this.transport.request(
         "GET",
         "/api/v1/evm/simulate/status",
+        null
+      );
+    }
+  };
+  var EvmBudgetService = class {
+    constructor(transport) {
+      this.transport = transport;
+    }
+    /**
+     * List every budget row visible to the caller.
+     *
+     * Admin/dev see all rows including synthetic simulation budgets;
+     * agents see only budgets attached to rules they own and never see
+     * simulation budgets (signer-level spend across peers is operator
+     * information).
+     */
+    async list() {
+      return this.transport.request(
+        "GET",
+        "/api/v1/evm/budgets",
+        null
+      );
+    }
+    /** Fetch a single budget by its primary key. */
+    async get(id) {
+      return this.transport.request(
+        "GET",
+        `/api/v1/evm/budgets/${encodeURIComponent(id)}`,
+        null
+      );
+    }
+    /** Create a budget for an existing rule. Admin only. */
+    async create(req) {
+      return this.transport.request(
+        "POST",
+        "/api/v1/evm/budgets",
+        req
+      );
+    }
+    /** Patch mutable fields on an existing budget. Admin only. */
+    async update(id, req) {
+      return this.transport.request(
+        "PATCH",
+        `/api/v1/evm/budgets/${encodeURIComponent(id)}`,
+        req
+      );
+    }
+    /** Zero spent/tx_count/alert_sent in one shot. Admin only. */
+    async reset(id) {
+      return this.transport.request(
+        "POST",
+        `/api/v1/evm/budgets/${encodeURIComponent(id)}/reset`,
+        null
+      );
+    }
+    /** Delete a budget row. Admin only. */
+    async delete(id) {
+      await this.transport.request(
+        "DELETE",
+        `/api/v1/evm/budgets/${encodeURIComponent(id)}`,
         null
       );
     }
@@ -2392,6 +2191,7 @@
       this.hdWallets = new EvmHDWalletService(transport, this.sign);
       this.guard = new EvmGuardService(transport);
       this.simulate = new EvmSimulateService(transport);
+      this.budgets = new EvmBudgetService(transport);
     }
   };
   var AuditService = class {
@@ -2611,17 +2411,20 @@
       );
     }
     /**
-     * Get variable hints for a preset (admin only).
+     * Get the full detail for a preset: identity, chain, template ids, and
+     * each operator-overridable variable joined against the referenced
+     * template's variable definition (type/description/default).
      */
-    async vars(id) {
+    async get(id) {
       return this.transport.request(
         "GET",
-        `/api/v1/presets/${encodeURIComponent(id)}/vars`,
+        `/api/v1/presets/${encodeURIComponent(id)}`,
         null
       );
     }
     /**
-     * Apply a preset to create rule/template instances (admin only).
+     * Apply a preset to create rule instances (admin only). Returns one
+     * result entry per materialised rule.
      */
     async apply(id, req) {
       return this.transport.request(
@@ -2637,6 +2440,104 @@
       return this.apply(id, { variables });
     }
   };
+  var RegistryService = class {
+    constructor(transport) {
+      this.transport = transport;
+    }
+    /**
+     * Re-run Template + Preset Registry sync against disk. Returns one
+     * report per kind. Per-file errors come back as entries on
+     * `templates.errors` / `presets.errors` — the rest of the sync still
+     * went through, so the operator can fix one file at a time.
+     */
+    async refresh() {
+      return this.transport.request(
+        "POST",
+        "/api/v1/registry/refresh",
+        null
+      );
+    }
+  };
+  var SettingsService = class {
+    constructor(transport) {
+      this.transport = transport;
+    }
+    /** Fetches the current snapshot for one group. */
+    async get(group) {
+      return this.transport.request(
+        "GET",
+        `/api/v1/admin/settings/${group}`,
+        null
+      );
+    }
+    /**
+     * Replaces the snapshot for one group. The daemon validates the shape per
+     * group; bad input returns 400 with the validation error in the body.
+     */
+    async put(group, snapshot) {
+      return this.transport.request(
+        "PUT",
+        `/api/v1/admin/settings/${group}`,
+        snapshot
+      );
+    }
+  };
+  var WalletService = class {
+    constructor(transport) {
+      this.transport = transport;
+    }
+    async list(filter) {
+      const params = new URLSearchParams();
+      if (filter?.offset !== void 0)
+        params.append("offset", String(filter.offset));
+      if (filter?.limit !== void 0)
+        params.append("limit", String(filter.limit));
+      const qs = params.toString();
+      return this.transport.request(
+        "GET",
+        `/api/v1/wallets${qs ? `?${qs}` : ""}`,
+        null
+      );
+    }
+    async get(id) {
+      return this.transport.request(
+        "GET",
+        `/api/v1/wallets/${encodeURIComponent(id)}`,
+        null
+      );
+    }
+    async create(req) {
+      return this.transport.request("POST", "/api/v1/wallets", req);
+    }
+    async delete(id) {
+      await this.transport.request(
+        "DELETE",
+        `/api/v1/wallets/${encodeURIComponent(id)}`,
+        null
+      );
+    }
+    async listMembers(walletID) {
+      return this.transport.request(
+        "GET",
+        `/api/v1/wallets/${encodeURIComponent(walletID)}/members`,
+        null
+      );
+    }
+    async addMember(walletID, req) {
+      return this.transport.request(
+        "POST",
+        `/api/v1/wallets/${encodeURIComponent(walletID)}/members`,
+        req
+      );
+    }
+    async removeMember(walletID, signerAddress) {
+      await this.transport.request(
+        "DELETE",
+        `/api/v1/wallets/${encodeURIComponent(walletID)}/members/${encodeURIComponent(signerAddress)}`,
+        null
+      );
+    }
+  };
   var RemoteSignerClient = class {
     constructor(config) {
       this.transport = new HttpTransport(config);
@@ -2648,6 +2549,9 @@
       this.apiKeys = new APIKeyService(this.transport);
       this.acls = new ACLService(this.transport);
       this.presets = new PresetService(this.transport);
+      this.registry = new RegistryService(this.transport);
+      this.settings = new SettingsService(this.transport);
+      this.wallets = new WalletService(this.transport);
     }
     /**
      * Health check.
