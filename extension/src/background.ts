@@ -20,6 +20,13 @@ interface StoredConfig {
   apiKeyId: string;
   apiKeyPrivateKey: string;
   selectedChain: number;
+  /**
+   * Address of the signer the user picked as active. The provider is
+   * re-pointed at this address on init via switchAccount(). If unset or no
+   * longer in the usable signer set, the provider falls back to its default
+   * active index. Persisted so the choice survives popup reloads.
+   */
+  activeSignerAddress?: string;
 }
 
 interface EIP1193Request {
@@ -59,13 +66,19 @@ interface PopupOpenManagement {
   type: "popup:openManagement";
 }
 
+interface PopupSwitchAccount {
+  type: "popup:switchAccount";
+  address: string;
+}
+
 type PopupMessage =
   | PopupGetConfig
   | PopupSaveConfig
   | PopupTestConnection
   | PopupGetState
   | PopupGetDashboard
-  | PopupOpenManagement;
+  | PopupOpenManagement
+  | PopupSwitchAccount;
 
 type IncomingMessage = EIP1193Request | StateRequest | PopupMessage;
 
@@ -326,6 +339,19 @@ async function initProvider(): Promise<void> {
       return url;
     },
   });
+
+  // Restore the user's previous active signer choice. If it's no longer in
+  // the usable set (revoked, locked) we silently fall back to the provider's
+  // default and clear the stored value so the popup picks a fresh one.
+  if (cfg.activeSignerAddress && provider.isConnected()) {
+    try {
+      await provider.switchAccount(cfg.activeSignerAddress);
+    } catch (err) {
+      console.warn("[background] stored active signer no longer usable:", err);
+      cfg.activeSignerAddress = undefined;
+      await saveConfig(cfg);
+    }
+  }
 
   console.log("[background] Provider created successfully");
   console.log("  - Connected:", provider.isConnected());
@@ -802,11 +828,37 @@ async function handlePopupGetState() {
   const accounts: string[] = usable.map((s: any) => s.address).filter(Boolean);
   const chainId = `0x${(cfg.selectedChain || 1).toString(16)}`;
 
+  // Compute the active address. Prefer the live provider if available
+  // (kept in sync via popup:switchAccount + wallet_switchEthereumChain),
+  // otherwise fall back to the stored choice, otherwise to the first usable.
+  let activeAddress: string | null = null;
+  if (provider && provider.isConnected()) {
+    activeAddress = provider.selectedAddress;
+  }
+  if (!activeAddress && cfg.activeSignerAddress) {
+    const match = usable.find(
+      (s: any) => s.address?.toLowerCase() === cfg.activeSignerAddress!.toLowerCase()
+    );
+    if (match) activeAddress = match.address;
+  }
+  if (!activeAddress && accounts.length > 0) {
+    activeAddress = accounts[0];
+  }
+
   return {
     type: "popup:state",
     connected: true,
     configured: true,
     accounts,
+    activeAddress,
+    // Full signer list with status flags so the popup can render the
+    // locked/disabled rows greyed out alongside usable ones.
+    signers: signers.map((s: any) => ({
+      address: s.address,
+      type: s.type,
+      enabled: !!s.enabled,
+      locked: !!s.locked,
+    })),
     chainId,
     error: null,
     signerStatus: {
@@ -894,6 +946,29 @@ async function handlePopupOpenManagement() {
   return { type: "popup:managementOpened" };
 }
 
+/**
+ * Switch the active signer for dApp requests.
+ *
+ * The EIP1193Provider holds the source of truth for "active account" — we
+ * delegate to it (so the accountsChanged event fires naturally to every
+ * connected tab) and mirror the choice into chrome.storage so it survives
+ * the next service-worker cold start.
+ */
+async function handlePopupSwitchAccount(msg: PopupSwitchAccount) {
+  await ensureInit();
+  if (!provider) {
+    return { type: "popup:accountSwitched", ok: false, error: initError || "Provider not initialized" };
+  }
+  try {
+    await provider.switchAccount(msg.address);
+  } catch (err: any) {
+    return { type: "popup:accountSwitched", ok: false, error: err?.message || String(err) };
+  }
+  cachedConfig.activeSignerAddress = msg.address;
+  await chrome.storage.local.set({ [configKey()]: cachedConfig });
+  return { type: "popup:accountSwitched", ok: true, address: provider.selectedAddress };
+}
+
 // ── Main Message Handler ─────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener(
@@ -956,6 +1031,11 @@ chrome.runtime.onMessage.addListener(
 
     if (message.type === "popup:openManagement") {
       handlePopupOpenManagement().then(sendResponse);
+      return true;
+    }
+
+    if (message.type === "popup:switchAccount") {
+      handlePopupSwitchAccount(message).then(sendResponse);
       return true;
     }
 
