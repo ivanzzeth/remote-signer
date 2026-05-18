@@ -8,18 +8,37 @@
 </head>
 <body>
   <div id="app">
-    <header>
-      <div class="logo">
+    <header class="appbar">
+      <div class="appbar-brand">
         <span class="logo-icon">RS</span>
-        <span class="logo-text">Remote Signer</span>
+        <div class="appbar-titles">
+          <span class="logo-text">Remote Signer</span>
+          <span class="logo-subtitle">Policy-controlled signing</span>
+        </div>
       </div>
-      <span id="connectionDot" class="dot disconnected" title="Disconnected"></span>
+      <div class="appbar-right">
+        <button id="appbarChainBtn" class="appbar-chip appbar-chip--chain hidden" type="button">
+          <span id="appbarChainLabel">Ethereum</span>
+          <span class="chevron">▾</span>
+        </button>
+        <button id="appbarSignerBtn" class="appbar-chip appbar-chip--signer hidden" type="button">
+          <span class="appbar-avatar" id="appbarAvatar"></span>
+          <span id="appbarSignerLabel">—</span>
+          <span class="chevron">▾</span>
+        </button>
+        <span id="connectionDot" class="dot disconnected" title="Disconnected"></span>
+      </div>
     </header>
+
+    <!-- Header dropdowns (anchored, click-out to dismiss) -->
+    <div id="chainDropdown" class="appbar-dropdown hidden" role="menu"></div>
+    <div id="signerDropdown" class="appbar-dropdown hidden" role="menu"></div>
 
     <!-- CONNECTED STATE -->
     <div id="connectedView" class="view hidden">
       <div class="status-bar">
         <span id="statusText" class="status-text">Connected</span>
+        <span id="roleBadge" class="role-badge hidden"></span>
         <span id="versionBadge" class="badge"></span>
       </div>
       <div class="server-url">
@@ -96,21 +115,16 @@
         <div id="drawerBody" class="drawer-body"></div>
       </div>
 
-      <!-- Chain selector -->
-      <section class="section">
-        <div class="section-header">
-          <span>Chain</span>
-        </div>
-        <select id="chainSelect" class="chain-select">
-          <option value="1">Ethereum (1)</option>
-          <option value="137">Polygon (137)</option>
-          <option value="10">Optimism (10)</option>
-          <option value="42161">Arbitrum (42161)</option>
-          <option value="8453">Base (8453)</option>
-          <option value="56">BSC (56)</option>
-          <option value="11155111">Sepolia (11155111)</option>
-        </select>
-      </section>
+      <!-- Hidden chain state: header chip drives this. -->
+      <select id="chainSelect" hidden>
+        <option value="1">Ethereum (1)</option>
+        <option value="137">Polygon (137)</option>
+        <option value="10">Optimism (10)</option>
+        <option value="42161">Arbitrum (42161)</option>
+        <option value="8453">Base (8453)</option>
+        <option value="56">BSC (56)</option>
+        <option value="11155111">Sepolia (11155111)</option>
+      </select>
 
       <div class="actions">
         <button id="settingsBtn" class="btn btn-secondary">⚙ Settings</button>

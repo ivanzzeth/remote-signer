@@ -32,19 +32,22 @@ body {
   overflow-x: hidden;
 }
 
-/* ── Header ──────────────────────────────────────────────────────────── */
-header {
+/* ── AppBar ──────────────────────────────────────────────────────────── */
+header.appbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
+  padding: 10px 14px;
   border-bottom: 1px solid var(--border);
+  gap: 10px;
+  position: relative;
 }
 
-.logo {
+.appbar-brand {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .logo-icon {
@@ -53,18 +56,118 @@ header {
   justify-content: center;
   width: 28px;
   height: 28px;
-  background: var(--accent);
-  border-radius: 6px;
+  background: linear-gradient(135deg, var(--accent) 0%, #8157e3 100%);
+  border-radius: 7px;
   color: #fff;
   font-weight: 700;
   font-size: 12px;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
 }
 
+.appbar-titles {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
 .logo-text {
   font-weight: 600;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--text-heading);
 }
+.logo-subtitle {
+  font-size: 9px;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.appbar-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.appbar-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  max-width: 140px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.appbar-chip:hover { background: var(--surface-hover); border-color: var(--accent); }
+.appbar-chip.hidden { display: none; }
+.appbar-chip .chevron { color: var(--text-muted); font-size: 9px; }
+.appbar-chip--signer { font-family: "SF Mono", "Fira Code", monospace; font-size: 10px; }
+.appbar-chip--chain { font-size: 11px; }
+.appbar-avatar {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #f7931a, #ffba00);
+}
+
+.appbar-dropdown {
+  position: absolute;
+  top: 50px;
+  right: 14px;
+  z-index: 20;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+  min-width: 200px;
+  max-height: 280px;
+  overflow: auto;
+}
+.appbar-dropdown.hidden { display: none; }
+.appbar-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text);
+}
+.appbar-dropdown-item:hover { background: var(--surface-hover); }
+.appbar-dropdown-item--active { background: var(--surface-hover); border: 1px solid var(--accent); }
+.appbar-dropdown-item--disabled { opacity: 0.55; cursor: not-allowed; }
+.appbar-dropdown-item .item-marker { width: 12px; color: var(--accent); font-weight: 600; }
+.appbar-dropdown-item .item-text { flex: 1; font-family: "SF Mono", "Fira Code", monospace; font-size: 11px; }
+.appbar-dropdown-item .item-meta { color: var(--text-muted); font-size: 10px; }
+
+/* ── Role badge ──────────────────────────────────────────────────────── */
+.role-badge {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: rgba(98, 126, 234, 0.18);
+  color: var(--accent);
+  margin-left: 6px;
+}
+.role-badge.hidden { display: none; }
+.role-badge--admin { background: rgba(247, 147, 26, 0.18); color: #f7931a; }
+.role-badge--agent { background: rgba(98, 126, 234, 0.18); color: var(--accent); }
+.role-badge--unknown { background: rgba(140, 140, 140, 0.18); color: var(--text-muted); }
 
 .dot {
   width: 10px;

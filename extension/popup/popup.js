@@ -45,6 +45,14 @@
     requestDrawer: $("requestDrawer"),
     drawerCloseBtn: $("drawerCloseBtn"),
     drawerBody: $("drawerBody"),
+    appbarChainBtn: $("appbarChainBtn"),
+    appbarChainLabel: $("appbarChainLabel"),
+    appbarSignerBtn: $("appbarSignerBtn"),
+    appbarSignerLabel: $("appbarSignerLabel"),
+    appbarAvatar: $("appbarAvatar"),
+    chainDropdown: $("chainDropdown"),
+    signerDropdown: $("signerDropdown"),
+    roleBadge: $("roleBadge"),
     // Settings
     inputUrl: $("inputUrl"),
     inputKeyId: $("inputKeyId"),
@@ -161,6 +169,143 @@
     return String(s).replace(/[&<>"']/g, (c) => ({
       "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
     })[c]);
+  }
+
+  // ── Header chips (chain + signer) ────────────────────────────────────
+
+  let lastSigners = [];
+  let lastActiveAddress = null;
+
+  function avatarColor(addr) {
+    // Deterministic hue from the address so each signer gets a stable colour.
+    if (!addr) return "#666";
+    let h = 0;
+    for (let i = 2; i < addr.length; i++) h = (h * 31 + addr.charCodeAt(i)) % 360;
+    return `hsl(${h}, 65%, 55%)`;
+  }
+
+  function updateHeaderChips(stateResp) {
+    if (!els.appbarChainBtn || !els.appbarSignerBtn) return;
+    const connected = stateResp && stateResp.connected === true;
+    if (!connected) {
+      els.appbarChainBtn.classList.add("hidden");
+      els.appbarSignerBtn.classList.add("hidden");
+      return;
+    }
+    // Chain
+    const chainIdHex = stateResp.chainId || "0x1";
+    const chainIdDec = parseInt(chainIdHex, 16) || 1;
+    els.appbarChainLabel.textContent = formatChainName(chainIdDec);
+    els.appbarChainBtn.classList.remove("hidden");
+
+    // Signer
+    lastSigners = stateResp.signers || [];
+    lastActiveAddress = stateResp.activeAddress || null;
+    if (lastActiveAddress) {
+      els.appbarSignerLabel.textContent = shortenAddress(lastActiveAddress);
+      els.appbarAvatar.style.background = avatarColor(lastActiveAddress);
+      els.appbarSignerBtn.classList.remove("hidden");
+    } else {
+      els.appbarSignerBtn.classList.add("hidden");
+    }
+  }
+
+  function openDropdown(target) {
+    closeAllDropdowns(target);
+    target.classList.remove("hidden");
+    // Click-outside to dismiss.
+    setTimeout(() => {
+      document.addEventListener("click", onOutsideClick, { once: true, capture: true });
+    }, 0);
+  }
+  function closeAllDropdowns(except) {
+    [els.chainDropdown, els.signerDropdown].forEach((d) => {
+      if (d && d !== except) d.classList.add("hidden");
+    });
+  }
+  function onOutsideClick(e) {
+    const insideChain = els.chainDropdown.contains(e.target) || els.appbarChainBtn.contains(e.target);
+    const insideSigner = els.signerDropdown.contains(e.target) || els.appbarSignerBtn.contains(e.target);
+    if (!insideChain && !insideSigner) {
+      closeAllDropdowns(null);
+    } else {
+      // Re-arm so the next click-out closes it.
+      setTimeout(() => {
+        document.addEventListener("click", onOutsideClick, { once: true, capture: true });
+      }, 0);
+    }
+  }
+
+  function buildChainDropdown() {
+    const chains = [
+      { id: 1, name: "Ethereum" },
+      { id: 137, name: "Polygon" },
+      { id: 10, name: "Optimism" },
+      { id: 42161, name: "Arbitrum" },
+      { id: 8453, name: "Base" },
+      { id: 56, name: "BSC" },
+      { id: 11155111, name: "Sepolia" },
+    ];
+    const current = parseInt(els.chainSelect.value, 10) || 1;
+    els.chainDropdown.innerHTML = "";
+    chains.forEach((c) => {
+      const item = document.createElement("div");
+      item.className = "appbar-dropdown-item" + (c.id === current ? " appbar-dropdown-item--active" : "");
+      item.innerHTML = `
+        <span class="item-marker">${c.id === current ? "✓" : ""}</span>
+        <span class="item-text">${escapeText(c.name)}</span>
+        <span class="item-meta">${c.id}</span>
+      `;
+      item.addEventListener("click", () => {
+        els.chainSelect.value = String(c.id);
+        els.appbarChainLabel.textContent = c.name;
+        closeAllDropdowns(null);
+        handleChainChange();
+      });
+      els.chainDropdown.appendChild(item);
+    });
+  }
+
+  function buildSignerDropdown() {
+    els.signerDropdown.innerHTML = "";
+    if (!lastSigners.length) {
+      els.signerDropdown.innerHTML = '<div class="appbar-dropdown-item appbar-dropdown-item--disabled"><span class="item-text">No signers</span></div>';
+      return;
+    }
+    const activeLower = (lastActiveAddress || "").toLowerCase();
+    lastSigners.forEach((s) => {
+      const usable = s.enabled && !s.locked;
+      const isActive = usable && s.address.toLowerCase() === activeLower;
+      const item = document.createElement("div");
+      item.className = "appbar-dropdown-item" +
+        (isActive ? " appbar-dropdown-item--active" : "") +
+        (usable ? "" : " appbar-dropdown-item--disabled");
+      let badge = "";
+      if (s.locked) badge = "🔒";
+      else if (!s.enabled) badge = "⛔";
+      item.innerHTML = `
+        <span class="item-marker">${isActive ? "✓" : ""}</span>
+        <span class="item-text">${shortenAddress(s.address)}</span>
+        <span class="item-meta">${escapeText(s.type || "")} ${badge}</span>
+      `;
+      if (usable && !isActive) {
+        item.addEventListener("click", () => {
+          closeAllDropdowns(null);
+          onSwitchAccount(s.address);
+        });
+      }
+      els.signerDropdown.appendChild(item);
+    });
+  }
+
+  function renderRoleBadge(role) {
+    if (!els.roleBadge) return;
+    if (!role || role === "unknown") {
+      els.roleBadge.classList.add("hidden");
+      return;
+    }
+    els.roleBadge.textContent = role;
+    els.roleBadge.className = `role-badge role-badge--${role}`;
   }
 
   // ── Tabs + Activity ──────────────────────────────────────────────────
@@ -359,6 +504,7 @@
       renderConnectedState(stateResp);
       renderSignerBanner(stateResp.signerStatus);
       renderAccounts(stateResp.signers || [], stateResp.activeAddress);
+      updateHeaderChips(stateResp);
 
       // Reset activity state — list will be re-fetched if the user opens
       // the tab. Don't auto-fetch on every popup open to save the API call.
@@ -375,6 +521,7 @@
       try {
         const dashboardResp = await send({ type: "popup:getDashboard" });
         renderDashboard(dashboardResp);
+        renderRoleBadge(dashboardResp && dashboardResp.apiKeyRole);
       } catch (err) {
         console.warn("[popup] dashboard fetch failed:", err);
       }
@@ -567,6 +714,22 @@
     }
     if (els.drawerCloseBtn) {
       els.drawerCloseBtn.addEventListener("click", closeRequestDrawer);
+    }
+
+    // Header chips
+    if (els.appbarChainBtn) {
+      els.appbarChainBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        buildChainDropdown();
+        openDropdown(els.chainDropdown);
+      });
+    }
+    if (els.appbarSignerBtn) {
+      els.appbarSignerBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        buildSignerDropdown();
+        openDropdown(els.signerDropdown);
+      });
     }
 
     // Input change tracking
