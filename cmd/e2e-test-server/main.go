@@ -42,6 +42,7 @@ type ServerInfo struct {
 }
 
 const (
+	// Anvil / Hardhat well-known account #0.
 	testSignerPrivateKey = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 	testSignerAddress    = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 )
@@ -173,7 +174,7 @@ func main() {
 
 	// Seed a whitelist rule for the test signer.
 	chainType := types.ChainTypeEVM
-	ruleRepo.Create(ctx, &types.Rule{
+	if ruleCreateErr := ruleRepo.Create(ctx, &types.Rule{
 		ID:          "e2e-test-rule",
 		Name:        "E2E Test Auto-Approve",
 		Description: "Auto-approve all requests for e2e testing",
@@ -183,10 +184,18 @@ func main() {
 		ChainType:   &chainType,
 		Config:      []byte(`{"allowed_signers":["` + testSignerAddress + `"]}`),
 		Enabled:     true,
-		Owner:       "config",
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-	})
+		// AppliedTo must be set explicitly — the rules.applied_to column is
+		// NOT NULL and Gorm wasn't auto-defaulting; an unset value made the
+		// seed insert silently fail (when the error was swallowed) which in
+		// turn caused every signing request to land in "no matching rule".
+		AppliedTo: []string{"*"},
+		Status:    types.RuleStatusActive,
+		Owner:     "config",
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}); ruleCreateErr != nil {
+		fatal("seed whitelist rule: %v", ruleCreateErr)
+	}
 
 	// Auth verifier.
 	nonceStore, _ := storage.NewInMemoryNonceStore(time.Minute)
@@ -200,7 +209,8 @@ func main() {
 	signerManager.DiscoverLockedSigners(ctx)
 	config.SyncSignerOwnership(ctx, signerManager, signerOwnershipRepo, apiKeyRepo, log)
 
-	// Grant non-admin access.
+	// Grant non-admin access to every seeded signer (mirrors the admin's
+	// view so popup tests can switch keys without rebooting fixtures).
 	signerAccessRepo.Grant(ctx, &types.SignerAccess{
 		SignerAddress: testSignerAddress,
 		APIKeyID:      nonAdminAPIKeyID,
@@ -273,12 +283,12 @@ func main() {
 	}
 
 	info := ServerInfo{
-		BaseURL:          baseURL,
-		AdminAPIKeyID:    adminAPIKeyID,
-		AdminAPIKeyHex:   adminAPIKeyHex,
-		NonAdminAPIKeyID: nonAdminAPIKeyID,
+		BaseURL:           baseURL,
+		AdminAPIKeyID:     adminAPIKeyID,
+		AdminAPIKeyHex:    adminAPIKeyHex,
+		NonAdminAPIKeyID:  nonAdminAPIKeyID,
 		NonAdminAPIKeyHex: nonAdminAPIKeyHex,
-		SignerAddress:    testSignerAddress,
+		SignerAddress:     testSignerAddress,
 	}
 	out, _ := json.Marshal(info)
 	fmt.Println(string(out))
