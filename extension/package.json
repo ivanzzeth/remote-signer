@@ -6,8 +6,9 @@
   "scripts": {
     "build": "node build.mjs",
     "prebuild": "npm install",
-    "test:e2e": "npm run build && playwright test",
-    "test:integration": "playwright test --grep @integration"
+    "test:e2e": "npm run build && playwright test --grep-invert @live",
+    "test:integration": "playwright test --grep @integration",
+    "test:live": "LIVE_DAPP_E2E=1 npm run build && LIVE_DAPP_E2E=1 playwright test --grep @live"
   },
   "dependencies": {
     "remote-signer-client": "^0.2.0"

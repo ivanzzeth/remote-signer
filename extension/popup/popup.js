@@ -33,12 +33,16 @@
     requestsStat: $("requestsStat"),
     roleStat: $("roleStat"),
     chainSelect: $("chainSelect"),
+    signerBanner: $("signerBanner"),
+    signerBannerText: $("signerBannerText"),
+    signerBannerAction: $("signerBannerAction"),
     // Settings
     inputUrl: $("inputUrl"),
     inputKeyId: $("inputKeyId"),
     inputPrivateKey: $("inputPrivateKey"),
     togglePwBtn: $("togglePwBtn"),
     connectionError: $("connectionError"),
+    connectionSuccess: $("connectionSuccess"),
     testConnectionBtn: $("testConnectionBtn"),
     saveConfigBtn: $("saveConfigBtn"),
     backToMainBtn: $("backToMainBtn"),
@@ -46,6 +50,7 @@
     settingsBtn: $("settingsBtn"),
     managementBtn: $("managementBtn"),
     disconnectedSettingsBtn: $("disconnectedSettingsBtn"),
+    disconnectedReason: $("disconnectedReason"),
   };
 
   // ── View switching ───────────────────────────────────────────────────
@@ -118,13 +123,18 @@
     });
   }
 
-  function renderDashboard(data) {
-    els.rulesStat.textContent = data.ruleCount ?? "-";
-    els.signersStat.textContent = data.signerCount ?? "-";
-    els.requestsStat.textContent = data.requestCount ?? "-";
-    els.roleStat.textContent = data.apiKeyRole ?? "-";
+  function renderDashboard(data, fallbackAccounts) {
+    els.rulesStat.textContent = data?.ruleCount ?? "-";
+    els.signersStat.textContent = data?.signerCount ?? "-";
+    els.requestsStat.textContent = data?.requestCount ?? "-";
+    els.roleStat.textContent = data?.apiKeyRole ?? "-";
 
-    renderAccounts(data.signers || []);
+    // Prefer the explicit list from getState (usable signers only); fall back
+    // to whatever the dashboard call returned.
+    const list = (fallbackAccounts && fallbackAccounts.length)
+      ? fallbackAccounts
+      : (data?.signers || []);
+    renderAccounts(list);
   }
 
   function renderConnectedState(state) {
@@ -149,77 +159,138 @@
       els.inputPrivateKey.value = config.apiKeyPrivateKey || "";
       els.chainSelect.value = String(config.selectedChain || 1);
 
-      // Check provider state
+      // Check connection state
       const stateResp = await send({ type: "popup:getState" });
-      const isConnected = stateResp.connected;
 
-      if (!config.apiKeyId || !config.apiKeyPrivateKey) {
-        // No config — show disconnected state
+      // Unconfigured → onboarding-style disconnected view.
+      if (stateResp && stateResp.configured === false) {
+        renderDisconnectedReason(null);
         showView("disconnected");
         els.connectionDot.className = "dot disconnected";
         return;
       }
 
-      els.serverUrlDisplay.textContent = config.remoteSignerUrl;
-
-      if (isConnected) {
-        renderConnectedState(stateResp);
-
-        // Fetch dashboard data
-        const dashboardResp = await send({ type: "popup:getDashboard" });
-        renderDashboard(dashboardResp);
-
-        // Set chain
-        const chainIdDecimal = parseInt(stateResp.chainId, 16);
-        els.chainSelect.value = String(chainIdDecimal);
-
-        showView("connected");
-      } else {
-        // Connected state but provider not ready—attempt a connection test
+      // Configured but cannot reach server / auth failed → disconnected with reason.
+      if (!stateResp || stateResp.connected !== true) {
+        renderDisconnectedReason(stateResp?.error || "Unable to reach Remote Signer");
         showView("disconnected");
         els.connectionDot.className = "dot disconnected";
+        return;
       }
+
+      // Connected. Server reachable, auth works. Signer readiness is informational.
+      els.serverUrlDisplay.textContent = config.remoteSignerUrl;
+      renderConnectedState(stateResp);
+      renderSignerBanner(stateResp.signerStatus);
+      renderAccounts(stateResp.accounts || []);
+
+      const chainIdDecimal = parseInt(stateResp.chainId, 16);
+      if (!Number.isNaN(chainIdDecimal)) {
+        els.chainSelect.value = String(chainIdDecimal);
+      }
+
+      // Best-effort dashboard fetch — non-fatal if it fails.
+      try {
+        const dashboardResp = await send({ type: "popup:getDashboard" });
+        renderDashboard(dashboardResp, stateResp.accounts || []);
+      } catch (err) {
+        console.warn("[popup] dashboard fetch failed:", err);
+      }
+
+      showView("connected");
     } catch (err) {
       console.error("[popup] init error:", err);
+      renderDisconnectedReason(err?.message);
       showView("disconnected");
       els.connectionDot.className = "dot disconnected";
     }
+  }
+
+  function renderDisconnectedReason(reason) {
+    if (!els.disconnectedReason) return;
+    if (reason) {
+      els.disconnectedReason.textContent = reason;
+      els.disconnectedReason.dataset.hasError = "true";
+    } else {
+      els.disconnectedReason.textContent = "Configure your connection in Settings";
+      delete els.disconnectedReason.dataset.hasError;
+    }
+  }
+
+  function renderSignerBanner(status) {
+    if (!els.signerBanner || !els.signerBannerText) return;
+    if (!status) {
+      els.signerBanner.classList.add("hidden");
+      return;
+    }
+    const { total, usable, locked, disabled } = status;
+    if (usable > 0) {
+      els.signerBanner.classList.add("hidden");
+      return;
+    }
+    let msg;
+    if (total === 0) {
+      msg = "No signers on this server yet. Import or create one to start signing.";
+    } else if (locked === total) {
+      msg = `All ${total} signer${total === 1 ? "" : "s"} locked. Unlock to enable signing.`;
+    } else if (disabled === total) {
+      msg = `All ${total} signer${total === 1 ? "" : "s"} disabled. Enable one on the server.`;
+    } else {
+      msg = `${total} signer${total === 1 ? "" : "s"} found, none usable (${locked} locked, ${disabled} disabled).`;
+    }
+    els.signerBannerText.textContent = msg;
+    els.signerBanner.classList.remove("hidden");
   }
 
   // ── Settings ─────────────────────────────────────────────────────────
 
   function showSettings() {
     els.connectionError.classList.add("hidden");
+    els.connectionError.textContent = "";
+    if (els.connectionSuccess) {
+      els.connectionSuccess.classList.add("hidden");
+      els.connectionSuccess.textContent = "";
+    }
     showView("settings");
   }
 
   async function testConnection() {
     els.testConnectionBtn.disabled = true;
-    els.testConnectionBtn.textContent = "Testing...";
+    els.testConnectionBtn.textContent = "Testing…";
     els.connectionError.classList.add("hidden");
+    els.connectionError.textContent = "";
+    if (els.connectionSuccess) {
+      els.connectionSuccess.classList.add("hidden");
+      els.connectionSuccess.textContent = "";
+    }
 
     // Save temp config for the test
     const tempConfig = {
       remoteSignerUrl: els.inputUrl.value.trim(),
       apiKeyId: els.inputKeyId.value.trim(),
       apiKeyPrivateKey: els.inputPrivateKey.value.trim(),
-      selectedChain: 1,
+      selectedChain: parseInt(els.chainSelect.value, 10) || 1,
     };
 
-    await send({ type: "popup:saveConfig", config: tempConfig });
-
     try {
+      await send({ type: "popup:saveConfig", config: tempConfig });
       const result = await send({ type: "popup:testConnection" });
-      if (result.ok) {
-        els.connectionError.classList.add("hidden");
-        showView("loading");
-        await initPopup();
+      if (result && result.ok) {
+        const version = result.version ? `v${result.version}` : "connected";
+        const signers = typeof result.signerCount === "number"
+          ? `, ${result.signerCount} signer${result.signerCount === 1 ? "" : "s"}`
+          : "";
+        if (els.connectionSuccess) {
+          els.connectionSuccess.textContent = `✓ Connection successful (${version}${signers})`;
+          els.connectionSuccess.classList.remove("hidden");
+        }
       } else {
-        els.connectionError.textContent = "Connection failed: " + (result.error || "Unknown error");
+        const errMsg = (result && result.error) || "Unknown error";
+        els.connectionError.textContent = "Connection failed: " + errMsg;
         els.connectionError.classList.remove("hidden");
       }
     } catch (err) {
-      els.connectionError.textContent = "Error: " + err.message;
+      els.connectionError.textContent = "Error: " + (err && err.message ? err.message : String(err));
       els.connectionError.classList.remove("hidden");
     } finally {
       els.testConnectionBtn.disabled = false;
@@ -276,6 +347,12 @@
 
     els.testConnectionBtn.addEventListener("click", testConnection);
     els.saveConfigBtn.addEventListener("click", saveConfig);
+
+    if (els.signerBannerAction) {
+      els.signerBannerAction.addEventListener("click", () => {
+        send({ type: "popup:openManagement" });
+      });
+    }
 
     // Input change tracking
     [els.inputUrl, els.inputKeyId, els.inputPrivateKey].forEach((el) => {
