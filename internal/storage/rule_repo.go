@@ -68,7 +68,30 @@ func (r *GormRuleRepository) Create(ctx context.Context, rule *types.Rule) error
 	if rule == nil {
 		return fmt.Errorf("rule cannot be nil")
 	}
+	normalizeRuleForPersist(rule)
 	return r.db.WithContext(ctx).Create(rule).Error
+}
+
+// normalizeRuleForPersist fills in fields that must not be NULL at the DB
+// layer with the engine's semantic defaults. This keeps callers (config
+// loaders, TUI helpers, test harnesses) from having to know the exact NOT
+// NULL surface — and stops empty AppliedTo from quietly failing inserts and
+// dropping the entire rule, which manifests downstream as the misleading
+// "no matching rule and manual approval is disabled" error during signing.
+func normalizeRuleForPersist(rule *types.Rule) {
+	if len(rule.AppliedTo) == 0 {
+		// The whitelist engine treats len==0 as "applies to all callers"
+		// (see scope.go ruleAppliesToCaller). Mirror that here so the row
+		// survives the NOT NULL constraint with semantically-identical
+		// behaviour.
+		rule.AppliedTo = []string{"*"}
+	}
+	if rule.Status == "" {
+		rule.Status = types.RuleStatusActive
+	}
+	if rule.Owner == "" {
+		rule.Owner = "config"
+	}
 }
 
 // Get retrieves a rule by ID
@@ -89,6 +112,7 @@ func (r *GormRuleRepository) Update(ctx context.Context, rule *types.Rule) error
 	if rule == nil {
 		return fmt.Errorf("rule cannot be nil")
 	}
+	normalizeRuleForPersist(rule)
 	return r.db.WithContext(ctx).Save(rule).Error
 }
 
