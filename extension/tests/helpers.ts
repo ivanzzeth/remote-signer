@@ -2,9 +2,31 @@ import type { Page } from "@playwright/test";
 import { fileURLToPath } from "url";
 import path from "path";
 import fs from "fs";
+import { RemoteSignerClient } from "remote-signer-client";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// ── Admin client (runtime state manipulation) ────────────────────────────────
+
+/**
+ * Build a RemoteSignerClient using the admin API key from the running e2e
+ * server. Tests use this when they need to transition backend state into a
+ * configuration the static seed doesn't ship (e.g. locking a signer to
+ * exercise the greyed-out UI path).
+ */
+export function adminClient(serverInfo: {
+  base_url: string;
+  admin_api_key_id: string;
+  admin_api_key_hex: string;
+}): RemoteSignerClient {
+  return new RemoteSignerClient({
+    baseURL: serverInfo.base_url,
+    apiKeyID: serverInfo.admin_api_key_id,
+    privateKey: serverInfo.admin_api_key_hex,
+    httpClient: { fetch: fetch.bind(globalThis) },
+  });
+}
 
 // ── Storage helpers ──────────────────────────────────────────────────────────
 

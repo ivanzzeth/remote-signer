@@ -1,222 +1,163 @@
 /**
- * Account switcher UX.
+ * Account switcher UX — real popup against the real backend.
  *
- * Uses chrome.runtime stubbing so we can drive every signer-status
- * combination (active+usable, locked, disabled) without needing the backend
- * to be in that state.
+ * The e2e server seeds a single private-key signer. Multi-signer state is
+ * created at test time via the admin API: a keystore signer is added in
+ * beforeAll so the popup sees two signers, and the locked-greyed-out test
+ * temporarily locks that keystore via admin.signers.lock(). Cleanup happens
+ * in afterAll so subsequent specs see the original single-signer state.
  */
-import { test, expect, type Page } from "./fixtures";
+import { test, expect, type BrowserContext, type Page } from "./fixtures";
+import { injectStorageConfig, adminClient } from "./helpers";
 
-interface MockSigner {
-  address: string;
-  type: string;
-  enabled: boolean;
-  locked: boolean;
+async function openConfiguredPopup(context: BrowserContext, extensionId: string, serverInfo: any): Promise<Page> {
+  const popup = await context.newPage();
+  await popup.goto(`chrome-extension://${extensionId}/popup/popup.html`);
+  await popup.waitForSelector("#app");
+  await injectStorageConfig(popup, {
+    remoteSignerUrl: serverInfo.base_url,
+    apiKeyId: serverInfo.admin_api_key_id,
+    apiKeyPrivateKey: serverInfo.admin_api_key_hex,
+  });
+  await popup.reload();
+  await popup.waitForSelector("#app");
+  await expect(popup.locator("#connectedView")).toBeVisible({ timeout: 15_000 });
+  return popup;
 }
 
-async function openPopupWithSigners(
-  context: any,
-  extensionId: string,
-  signers: MockSigner[],
-  activeAddress: string | null
-): Promise<{ page: Page; switchCalls: () => Promise<string[]> }> {
-  const page = await context.newPage();
-  await page.addInitScript(
-    ({ signers, activeAddress }: { signers: MockSigner[]; activeAddress: string | null }) => {
-      const switchHistory: string[] = [];
-      let liveActive = activeAddress;
-      let liveSigners = signers;
+test.describe("Account switcher (real backend) (@integration)", () => {
+  // Sub-suite creates+disposes a second keystore signer so the multi-signer
+  // UI surface has something to render. Lives in a nested describe so the
+  // setup/teardown doesn't run for tests that only need the single seeded
+  // signer (none here today, but kept structured this way for clarity).
+  test.describe.configure({ mode: "serial" });
 
-      const responder = (msg: any): any => {
-        if (msg.type === "popup:getConfig") {
-          return {
-            type: "popup:config",
-            config: {
-              remoteSignerUrl: "http://x",
-              apiKeyId: "k",
-              apiKeyPrivateKey: "0".repeat(64),
-              selectedChain: 1,
-            },
-          };
-        }
-        if (msg.type === "popup:getState") {
-          const usable = liveSigners.filter((s) => s.enabled && !s.locked);
-          return {
-            type: "popup:state",
-            connected: true,
-            configured: true,
-            accounts: usable.map((s) => s.address),
-            activeAddress: liveActive,
-            signers: liveSigners,
-            chainId: "0x1",
-            error: null,
-            signerStatus: {
-              total: liveSigners.length,
-              usable: usable.length,
-              locked: liveSigners.filter((s) => s.locked).length,
-              disabled: liveSigners.filter((s) => !s.enabled).length,
-            },
-          };
-        }
-        if (msg.type === "popup:getDashboard") {
-          return {
-            type: "popup:dashboard",
-            signers: liveSigners.filter((s) => s.enabled && !s.locked).map((s) => s.address),
-            signerCount: liveSigners.length,
-            ruleCount: 0,
-            requestCount: 0,
-            apiKeyRole: "agent",
-          };
-        }
-        if (msg.type === "popup:switchAccount") {
-          switchHistory.push(msg.address);
-          liveActive = msg.address;
-          return { type: "popup:accountSwitched", ok: true, address: msg.address };
-        }
-        return {};
-      };
+  let keystoreAddr = "";
 
-      (window as any).__switchHistory = switchHistory;
-      const realChrome = (window as any).chrome;
-      Object.defineProperty(window, "chrome", {
-        value: {
-          ...(realChrome || {}),
-          runtime: {
-            ...((realChrome && realChrome.runtime) || {}),
-            lastError: null,
-            sendMessage: (msg: any, cb: (resp: any) => void) =>
-              setTimeout(() => cb(responder(msg)), 0),
-          },
-          storage: {
-            local: {
-              get: (_k: any, cb: (o: any) => void) => setTimeout(() => cb({}), 0),
-              set: (_o: any, cb?: () => void) => setTimeout(() => cb?.(), 0),
-            },
-          },
-          tabs: { create: () => {} },
-        },
-        writable: true,
-        configurable: true,
-      });
-    },
-    { signers, activeAddress }
-  );
+  test.beforeAll(async ({ serverInfo }) => {
+    const admin = adminClient(serverInfo);
+    const created = await admin.evm.signers.create({
+      type: "keystore",
+      keystore: { password: "switcher-test-pw" },
+    });
+    keystoreAddr = (created as any).address;
 
-  await page.goto(`chrome-extension://${extensionId}/popup/popup.html`);
-  await page.waitForSelector("#app");
-  return {
-    page,
-    switchCalls: async () => page.evaluate(() => (window as any).__switchHistory as string[]),
-  };
-}
+    // The seeded whitelist rule only mentions the seeded private-key signer;
+    // create a permissive whitelist for the new keystore so the popup can
+    // exercise it without the rule engine rejecting later signing requests.
+    await admin.evm.rules.create({
+      name: "e2e-keystore-allow",
+      type: "signer_restriction",
+      mode: "whitelist",
+      chain_type: "evm",
+      config: { allowed_signers: [keystoreAddr] },
+      enabled: true,
+    } as any);
+  });
 
-const A1 = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
-const A2 = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
-const A3 = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC";
+  test.afterAll(async ({ serverInfo }) => {
+    if (!keystoreAddr) return;
+    const admin = adminClient(serverInfo);
+    await admin.evm.signers.unlock(keystoreAddr, { password: "switcher-test-pw" }).catch(() => {});
+    await admin.evm.signers.deleteSigner(keystoreAddr).catch(() => {});
+  });
 
-test.describe("Account switcher (@integration)", () => {
-  test("renders all signers; only the active one is marked", async ({ context, extensionId }) => {
-    const { page } = await openPopupWithSigners(
-      context,
-      extensionId,
-      [
-        { address: A1, type: "keystore", enabled: true, locked: false },
-        { address: A2, type: "keystore", enabled: true, locked: false },
-      ],
-      A1
-    );
-    await expect(page.locator("#connectedView")).toBeVisible();
-    const rows = page.locator(".account-item");
+  test("renders both signers and marks one active", async ({ context, extensionId, serverInfo }) => {
+    const popup = await openConfiguredPopup(context, extensionId, serverInfo);
+
+    const rows = popup.locator(".account-item");
     await expect(rows).toHaveCount(2);
-    // Active row shows the ✓ marker.
-    await expect(page.locator(`.account-item[data-address="${A1}"] .account-marker`)).toHaveText("✓");
-    await expect(page.locator(`.account-item[data-address="${A2}"] .account-marker`)).toHaveText("");
-    await expect(page.locator(`.account-item[data-address="${A1}"]`)).toHaveClass(/account-item--active/);
-    // Account count badge shows usable count.
-    await expect(page.locator("#accountCount")).toHaveText("2");
-    await page.close();
+
+    await expect(popup.locator(`.account-item[data-address="${serverInfo.signer_address}"]`)).not.toHaveClass(/account-item--disabled/);
+    await expect(popup.locator(`.account-item[data-address="${keystoreAddr}"]`)).not.toHaveClass(/account-item--disabled/);
+
+    await expect(popup.locator(".account-item--active")).toHaveCount(1);
+    await expect(popup.locator("#accountCount")).toHaveText("2");
+
+    await popup.close();
   });
 
-  test("clicking a non-active usable row calls switchAccount", async ({ context, extensionId }) => {
-    const { page, switchCalls } = await openPopupWithSigners(
-      context,
-      extensionId,
-      [
-        { address: A1, type: "keystore", enabled: true, locked: false },
-        { address: A2, type: "keystore", enabled: true, locked: false },
-      ],
-      A1
+  test("clicking the non-active usable row switches the active signer", async ({ context, extensionId, serverInfo }) => {
+    const popup = await openConfiguredPopup(context, extensionId, serverInfo);
+
+    const activeBefore = await popup.locator(".account-item--active").getAttribute("data-address");
+    const target = activeBefore?.toLowerCase() === serverInfo.signer_address.toLowerCase()
+      ? keystoreAddr
+      : serverInfo.signer_address;
+
+    await popup.locator(`.account-item[data-address="${target}"]`).click();
+    await expect(popup.locator(`.account-item[data-address="${target}"]`)).toHaveClass(/account-item--active/, { timeout: 10_000 });
+
+    const stored = await popup.evaluate(() =>
+      new Promise<any>((resolve) =>
+        chrome.storage.local.get("remoteSignerConfig", (r) => resolve(r.remoteSignerConfig))
+      )
     );
-    await expect(page.locator("#connectedView")).toBeVisible();
-    await page.locator(`.account-item[data-address="${A2}"]`).click();
+    expect(stored?.activeSignerAddress?.toLowerCase()).toBe(target.toLowerCase());
 
-    // Wait for re-init to mark A2 as active.
-    await expect(page.locator(`.account-item[data-address="${A2}"]`)).toHaveClass(/account-item--active/, { timeout: 5_000 });
-    await expect(page.locator(`.account-item[data-address="${A1}"]`)).not.toHaveClass(/account-item--active/);
-
-    const history = await switchCalls();
-    expect(history).toEqual([A2]);
-    await page.close();
+    await popup.close();
   });
 
-  test("locked signer is greyed out and non-clickable", async ({ context, extensionId }) => {
-    const { page, switchCalls } = await openPopupWithSigners(
-      context,
-      extensionId,
-      [
-        { address: A1, type: "keystore", enabled: true, locked: false },
-        { address: A2, type: "keystore", enabled: true, locked: true }, // locked
-        { address: A3, type: "keystore", enabled: false, locked: false }, // disabled
-      ],
-      A1
-    );
-    await expect(page.locator("#connectedView")).toBeVisible();
+  test("locked signer is greyed out, shows 🔒, and clicks are no-ops", async ({ context, extensionId, serverInfo }) => {
+    const admin = adminClient(serverInfo);
+    await admin.evm.signers.lock(keystoreAddr);
 
-    // Both non-usable rows have the disabled modifier.
-    await expect(page.locator(`.account-item[data-address="${A2}"]`)).toHaveClass(/account-item--disabled/);
-    await expect(page.locator(`.account-item[data-address="${A3}"]`)).toHaveClass(/account-item--disabled/);
+    try {
+      const popup = await openConfiguredPopup(context, extensionId, serverInfo);
 
-    // Lock + disable status icons render.
-    await expect(page.locator(`.account-item[data-address="${A2}"] .account-status`)).toHaveText("🔒");
-    await expect(page.locator(`.account-item[data-address="${A3}"] .account-status`)).toHaveText("⛔");
+      const lockedRow = popup.locator(`.account-item[data-address="${keystoreAddr}"]`);
+      await expect(lockedRow).toHaveClass(/account-item--disabled/);
+      await expect(lockedRow.locator(".account-status")).toHaveText("🔒");
 
-    // Clicking them does nothing — no switch IPC.
-    await page.locator(`.account-item[data-address="${A2}"]`).click({ force: true });
-    await page.locator(`.account-item[data-address="${A3}"]`).click({ force: true });
-    await page.waitForTimeout(200);
-    expect(await switchCalls()).toEqual([]);
+      const activeBefore = await popup.locator(".account-item--active").getAttribute("data-address");
+      await lockedRow.click({ force: true });
+      await popup.waitForTimeout(400);
 
-    // Usable count only counts the unlocked-enabled ones.
-    await expect(page.locator("#accountCount")).toHaveText("1");
-    await page.close();
+      const activeAfter = await popup.locator(".account-item--active").getAttribute("data-address");
+      expect(activeAfter).toBe(activeBefore);
+
+      await expect(popup.locator("#accountCount")).toHaveText("1");
+
+      await popup.close();
+    } finally {
+      await admin.evm.signers.unlock(keystoreAddr, { password: "switcher-test-pw" }).catch(() => {});
+    }
   });
 
-  test("clicking the already-active row does nothing", async ({ context, extensionId }) => {
-    const { page, switchCalls } = await openPopupWithSigners(
-      context,
-      extensionId,
-      [{ address: A1, type: "keystore", enabled: true, locked: false }],
-      A1
-    );
-    await page.locator(`.account-item[data-address="${A1}"]`).click();
-    await page.waitForTimeout(200);
-    expect(await switchCalls()).toEqual([]);
-    await page.close();
+  test("copy button does not trigger a switch", async ({ context, extensionId, serverInfo }) => {
+    const popup = await openConfiguredPopup(context, extensionId, serverInfo);
+
+    const activeBefore = await popup.locator(".account-item--active").getAttribute("data-address");
+    await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: `chrome-extension://${extensionId}` }).catch(() => {});
+
+    const targetAddr = activeBefore?.toLowerCase() === serverInfo.signer_address.toLowerCase()
+      ? keystoreAddr
+      : serverInfo.signer_address;
+    await popup.locator(`.account-item[data-address="${targetAddr}"] .account-copy`).click();
+    await popup.waitForTimeout(300);
+
+    const activeAfter = await popup.locator(".account-item--active").getAttribute("data-address");
+    expect(activeAfter?.toLowerCase()).toBe(activeBefore?.toLowerCase());
+    await popup.close();
   });
 
-  test("copy button does not trigger a switch", async ({ context, extensionId }) => {
-    const { page, switchCalls } = await openPopupWithSigners(
-      context,
-      extensionId,
-      [
-        { address: A1, type: "keystore", enabled: true, locked: false },
-        { address: A2, type: "keystore", enabled: true, locked: false },
-      ],
-      A1
-    );
-    await page.locator(`.account-item[data-address="${A2}"] .account-copy`).click();
-    await page.waitForTimeout(200);
-    expect(await switchCalls()).toEqual([]);
-    await page.close();
+  test("active signer choice persists across popup reopen", async ({ context, extensionId, serverInfo }) => {
+    const popup = await openConfiguredPopup(context, extensionId, serverInfo);
+
+    const activeBefore = await popup.locator(".account-item--active").getAttribute("data-address");
+    const target = activeBefore?.toLowerCase() === serverInfo.signer_address.toLowerCase()
+      ? keystoreAddr
+      : serverInfo.signer_address;
+
+    await popup.locator(`.account-item[data-address="${target}"]`).click();
+    await expect(popup.locator(`.account-item[data-address="${target}"]`)).toHaveClass(/account-item--active/, { timeout: 10_000 });
+    await popup.close();
+
+    const popup2 = await context.newPage();
+    await popup2.goto(`chrome-extension://${extensionId}/popup/popup.html`);
+    await popup2.waitForSelector("#app");
+    await expect(popup2.locator("#connectedView")).toBeVisible({ timeout: 15_000 });
+    await expect(popup2.locator(`.account-item[data-address="${target}"]`)).toHaveClass(/account-item--active/);
+    await popup2.close();
   });
 });

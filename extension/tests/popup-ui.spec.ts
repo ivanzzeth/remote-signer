@@ -198,6 +198,9 @@ test.describe("Popup Connected UI (@integration)", () => {
   });
 
   test("chain selector allows switching the active chain", async ({ context, extensionId, serverInfo }) => {
+    // Chain switching is now driven by the header chip (a dropdown opened
+    // via #appbarChainBtn). The legacy <select id="chainSelect"> still holds
+    // the persisted value but is hidden in the DOM.
     const popup = await context.newPage();
     await popup.goto(`chrome-extension://${extensionId}/popup/popup.html`);
     await popup.waitForSelector("#app");
@@ -211,31 +214,24 @@ test.describe("Popup Connected UI (@integration)", () => {
     const popup2 = await context.newPage();
     await popup2.goto(`chrome-extension://${extensionId}/popup/popup.html`);
     await popup2.waitForSelector("#app");
-    await popup2.waitForTimeout(1000);
+    await expect(popup2.locator("#connectedView")).toBeVisible({ timeout: 15_000 });
 
-    const connectedVisible = await popup2.locator("#connectedView").isVisible().catch(() => false);
+    // Initial chain reflects the storage default.
+    const initialValue = await popup2.locator("#chainSelect").inputValue();
 
-    if (connectedVisible) {
-      // Chain selector should be visible
-      await expect(popup2.locator("#chainSelect")).toBeVisible();
+    // Open header dropdown and switch to Polygon.
+    await popup2.locator("#appbarChainBtn").click();
+    await popup2.locator("#chainDropdown .appbar-dropdown-item:has-text('Polygon')").click();
+    await expect(popup2.locator("#appbarChainLabel")).toHaveText("Polygon");
 
-      // Get current chain value
-      const initialValue = await popup2.locator("#chainSelect").inputValue();
+    // The hidden select tracks the choice.
+    await expect.poll(() => popup2.locator("#chainSelect").inputValue()).toBe("137");
 
-      // Switch to a different chain (Polygon = 137)
-      await popup2.locator("#chainSelect").selectOption("137");
-      await popup2.waitForTimeout(500);
-
-      const newValue = await popup2.locator("#chainSelect").inputValue();
-      expect(newValue).toBe("137");
-
-      // Switch back to original
-      await popup2.locator("#chainSelect").selectOption(initialValue);
-      await popup2.waitForTimeout(300);
-    } else {
-      // If not connected, the chain selector requires connection first
-      // This is expected — skip chain test when not connected
-    }
+    // Switch back to original.
+    await popup2.locator("#appbarChainBtn").click();
+    const initialName = ({ "1": "Ethereum", "137": "Polygon", "10": "Optimism", "42161": "Arbitrum", "8453": "Base", "56": "BSC", "11155111": "Sepolia" } as Record<string, string>)[initialValue] ?? "Ethereum";
+    await popup2.locator(`#chainDropdown .appbar-dropdown-item:has-text("${initialName}")`).click();
+    await expect.poll(() => popup2.locator("#chainSelect").inputValue()).toBe(initialValue);
   });
 
   test("settings view preserves inputs after navigation back", async ({ context, extensionId, serverInfo }) => {
