@@ -3397,6 +3397,50 @@
     await chrome.tabs.create({ url });
     return { type: "popup:managementOpened" };
   }
+  async function handlePopupGetActivity(msg) {
+    const cfg = cachedConfig;
+    if (!cfg.apiKeyId || !cfg.apiKeyPrivateKey) {
+      return { type: "popup:activity", ok: false, error: "Not configured", requests: [] };
+    }
+    let popupClient;
+    try {
+      popupClient = buildPopupClient(cfg);
+    } catch (err2) {
+      return { type: "popup:activity", ok: false, error: err2?.message || String(err2), requests: [] };
+    }
+    try {
+      const filter = { limit: msg.limit ?? 20 };
+      if (msg.status) filter.status = msg.status;
+      const list = await popupClient.evm.requests.list(filter);
+      return {
+        type: "popup:activity",
+        ok: true,
+        requests: list?.requests ?? [],
+        total: list?.total ?? 0,
+        hasMore: !!list?.has_more
+      };
+    } catch (err2) {
+      return { type: "popup:activity", ok: false, error: err2?.message || String(err2), requests: [] };
+    }
+  }
+  async function handlePopupGetRequest(msg) {
+    const cfg = cachedConfig;
+    if (!cfg.apiKeyId || !cfg.apiKeyPrivateKey) {
+      return { type: "popup:request", ok: false, error: "Not configured" };
+    }
+    let popupClient;
+    try {
+      popupClient = buildPopupClient(cfg);
+    } catch (err2) {
+      return { type: "popup:request", ok: false, error: err2?.message || String(err2) };
+    }
+    try {
+      const req = await popupClient.evm.requests.get(msg.requestId);
+      return { type: "popup:request", ok: true, request: req };
+    } catch (err2) {
+      return { type: "popup:request", ok: false, error: err2?.message || String(err2) };
+    }
+  }
   async function handlePopupSwitchAccount(msg) {
     await ensureInit();
     if (!provider) {
@@ -3462,6 +3506,14 @@
       }
       if (message.type === "popup:switchAccount") {
         handlePopupSwitchAccount(message).then(sendResponse);
+        return true;
+      }
+      if (message.type === "popup:getActivity") {
+        handlePopupGetActivity(message).then(sendResponse);
+        return true;
+      }
+      if (message.type === "popup:getRequest") {
+        handlePopupGetRequest(message).then(sendResponse);
         return true;
       }
       return false;

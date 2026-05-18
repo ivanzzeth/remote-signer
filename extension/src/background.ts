@@ -71,6 +71,17 @@ interface PopupSwitchAccount {
   address: string;
 }
 
+interface PopupGetActivity {
+  type: "popup:getActivity";
+  limit?: number;
+  status?: string;
+}
+
+interface PopupGetRequest {
+  type: "popup:getRequest";
+  requestId: string;
+}
+
 type PopupMessage =
   | PopupGetConfig
   | PopupSaveConfig
@@ -78,7 +89,9 @@ type PopupMessage =
   | PopupGetState
   | PopupGetDashboard
   | PopupOpenManagement
-  | PopupSwitchAccount;
+  | PopupSwitchAccount
+  | PopupGetActivity
+  | PopupGetRequest;
 
 type IncomingMessage = EIP1193Request | StateRequest | PopupMessage;
 
@@ -947,6 +960,63 @@ async function handlePopupOpenManagement() {
 }
 
 /**
+ * List recent sign requests for the configured API key.
+ *
+ * The backend filters by api_key_id automatically so an agent only sees
+ * their own requests. We pass the result through largely untouched — the
+ * popup wants the full DTO to render status + sign_type + payload preview.
+ */
+async function handlePopupGetActivity(msg: PopupGetActivity) {
+  const cfg = cachedConfig;
+  if (!cfg.apiKeyId || !cfg.apiKeyPrivateKey) {
+    return { type: "popup:activity", ok: false, error: "Not configured", requests: [] };
+  }
+  let popupClient: RemoteSignerClient;
+  try {
+    popupClient = buildPopupClient(cfg);
+  } catch (err: any) {
+    return { type: "popup:activity", ok: false, error: err?.message || String(err), requests: [] };
+  }
+  try {
+    const filter: any = { limit: msg.limit ?? 20 };
+    if (msg.status) filter.status = msg.status;
+    const list = await popupClient.evm.requests.list(filter);
+    return {
+      type: "popup:activity",
+      ok: true,
+      requests: (list as any)?.requests ?? [],
+      total: (list as any)?.total ?? 0,
+      hasMore: !!(list as any)?.has_more,
+    };
+  } catch (err: any) {
+    return { type: "popup:activity", ok: false, error: err?.message || String(err), requests: [] };
+  }
+}
+
+/**
+ * Fetch full detail for a single request (the popup's detail drawer needs
+ * payload + signature + rule_matched_id, which the list view trims).
+ */
+async function handlePopupGetRequest(msg: PopupGetRequest) {
+  const cfg = cachedConfig;
+  if (!cfg.apiKeyId || !cfg.apiKeyPrivateKey) {
+    return { type: "popup:request", ok: false, error: "Not configured" };
+  }
+  let popupClient: RemoteSignerClient;
+  try {
+    popupClient = buildPopupClient(cfg);
+  } catch (err: any) {
+    return { type: "popup:request", ok: false, error: err?.message || String(err) };
+  }
+  try {
+    const req = await popupClient.evm.requests.get(msg.requestId);
+    return { type: "popup:request", ok: true, request: req };
+  } catch (err: any) {
+    return { type: "popup:request", ok: false, error: err?.message || String(err) };
+  }
+}
+
+/**
  * Switch the active signer for dApp requests.
  *
  * The EIP1193Provider holds the source of truth for "active account" — we
@@ -1036,6 +1106,16 @@ chrome.runtime.onMessage.addListener(
 
     if (message.type === "popup:switchAccount") {
       handlePopupSwitchAccount(message).then(sendResponse);
+      return true;
+    }
+
+    if (message.type === "popup:getActivity") {
+      handlePopupGetActivity(message).then(sendResponse);
+      return true;
+    }
+
+    if (message.type === "popup:getRequest") {
+      handlePopupGetRequest(message).then(sendResponse);
       return true;
     }
 
