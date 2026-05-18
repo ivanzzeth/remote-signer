@@ -17,22 +17,62 @@ test.describe("Extension basic functionality", () => {
     await expect(popup.locator("#inputPrivateKey")).toBeVisible();
   });
 
-  test("can configure extension and test connection", async ({ popup, serverInfo }) => {
-    // Navigate to settings
+  test("Test Connection succeeds with valid credentials and shows success banner", async ({ popup, serverInfo }) => {
+    // Reproduces the bug "Test Connection button has no reaction" — clicking
+    // must produce visible feedback (success banner OR error message).
     await popup.click("#disconnectedSettingsBtn");
     await expect(popup.locator("#settingsView")).toBeVisible();
 
-    // Fill config
     await popup.fill("#inputUrl", serverInfo.base_url);
     await popup.fill("#inputKeyId", serverInfo.admin_api_key_id);
     await popup.fill("#inputPrivateKey", serverInfo.admin_api_key_hex);
 
-    // Test connection
     await popup.click("#testConnectionBtn");
 
-    // Should show a connection result — either success or an error message
-    // Since the service worker lazily initializes, this may need a retry
-    await expect(popup.locator("#connectionError")).not.toBeEmpty({ timeout: 8_000 });
+    // Button must transition through "Testing…" then back to "Test Connection".
+    await expect(popup.locator("#testConnectionBtn")).toHaveText("Test Connection", { timeout: 10_000 });
+
+    // Either success banner is shown (server reachable + auth OK) or error banner is shown.
+    const successVisible = await popup.locator("#connectionSuccess:not(.hidden)").isVisible().catch(() => false);
+    const errorVisible = await popup.locator("#connectionError:not(.hidden)").isVisible().catch(() => false);
+    expect(successVisible || errorVisible).toBe(true);
+
+    // With valid e2e credentials we expect success.
+    await expect(popup.locator("#connectionSuccess")).toBeVisible({ timeout: 10_000 });
+    await expect(popup.locator("#connectionSuccess")).toContainText(/Connection successful/i);
+  });
+
+  test("Test Connection surfaces a clear error for an invalid API key", async ({ popup, serverInfo }) => {
+    await popup.click("#disconnectedSettingsBtn");
+    await expect(popup.locator("#settingsView")).toBeVisible();
+
+    await popup.fill("#inputUrl", serverInfo.base_url);
+    await popup.fill("#inputKeyId", "definitely-not-a-real-key");
+    // 64-byte hex (Go-style) so we exercise the SDK-signing path, not a malformed-key short-circuit.
+    await popup.fill("#inputPrivateKey", "00".repeat(64));
+
+    await popup.click("#testConnectionBtn");
+
+    await expect(popup.locator("#connectionError")).toBeVisible({ timeout: 10_000 });
+    await expect(popup.locator("#connectionError")).toContainText(/(Connection failed|Auth failed|Error)/i);
+    // Crucially: button is re-enabled and reset to "Test Connection" — never stuck on "Testing…".
+    await expect(popup.locator("#testConnectionBtn")).toBeEnabled();
+    await expect(popup.locator("#testConnectionBtn")).toHaveText("Test Connection");
+  });
+
+  test("Test Connection reports a clear error when the URL is unreachable", async ({ popup, serverInfo }) => {
+    await popup.click("#disconnectedSettingsBtn");
+    await expect(popup.locator("#settingsView")).toBeVisible();
+
+    // Pick a port nothing is listening on.
+    await popup.fill("#inputUrl", "http://127.0.0.1:1");
+    await popup.fill("#inputKeyId", serverInfo.admin_api_key_id);
+    await popup.fill("#inputPrivateKey", serverInfo.admin_api_key_hex);
+
+    await popup.click("#testConnectionBtn");
+
+    await expect(popup.locator("#connectionError")).toBeVisible({ timeout: 15_000 });
+    await expect(popup.locator("#connectionError")).toContainText(/(Cannot reach server|Connection failed|Error)/i);
   });
 
   test("can save config and return to main view", async ({ popup, serverInfo }) => {

@@ -329,6 +329,33 @@ header {
 }
 .error.hidden { display: none; }
 
+.success {
+  padding: 8px 16px;
+  margin: 8px 16px;
+  background: rgba(82, 196, 26, 0.12);
+  border: 1px solid rgba(82, 196, 26, 0.35);
+  border-radius: var(--radius-sm);
+  color: var(--success);
+  font-size: 12px;
+}
+.success.hidden { display: none; }
+
+.banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  margin: 8px 16px;
+  background: rgba(255, 184, 0, 0.12);
+  border: 1px solid rgba(255, 184, 0, 0.35);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 12px;
+}
+.banner.hidden { display: none; }
+.banner button { white-space: nowrap; padding: 0; position: static; }
+
 .settings-actions {
   display: flex;
   gap: 8px;

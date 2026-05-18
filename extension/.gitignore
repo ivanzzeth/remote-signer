@@ -1,3 +1,5 @@
 node_modules/
 tests/.e2e-state/
 test-results/
+_metadata/
+playwright-report/

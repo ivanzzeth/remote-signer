@@ -15,6 +15,7 @@
 /build/
 /remote-signer
 /e2e-test-server
+/.e2e-test-server
 /remote-signer-tui
 /audit-monitor
 /cmd/remote-signer/remote-signer

@@ -27,6 +27,12 @@
         <span id="serverUrlDisplay" class="url"></span>
       </div>
 
+      <!-- Signer status banner (shown when 0 usable signers) -->
+      <div id="signerBanner" class="banner hidden">
+        <span id="signerBannerText"></span>
+        <button id="signerBannerAction" class="btn-text">Open Management</button>
+      </div>
+
       <!-- Accounts -->
       <section class="section">
         <div class="section-header">
@@ -104,6 +110,7 @@
       </div>
 
       <div id="connectionError" class="error hidden"></div>
+      <div id="connectionSuccess" class="success hidden"></div>
 
       <div class="settings-actions">
         <button id="testConnectionBtn" class="btn btn-secondary">Test Connection</button>
@@ -117,7 +124,7 @@
       <div class="empty-state">
         <div class="empty-icon">🔌</div>
         <p>Not connected to Remote Signer</p>
-        <p class="hint">Configure your connection in Settings</p>
+        <p id="disconnectedReason" class="hint">Configure your connection in Settings</p>
         <button id="disconnectedSettingsBtn" class="btn btn-primary">Open Settings</button>
       </div>
     </div>

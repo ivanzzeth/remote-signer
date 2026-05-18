@@ -1,6 +1,62 @@
 import { test, expect } from "./fixtures";
 import { injectStorageConfig } from "./helpers";
 
+test.describe("Popup connection transitions (@integration)", () => {
+  test("disconnected view transitions to connected after Save with valid config", async ({ context, extensionId, serverInfo }) => {
+    // Reproduces the bug "after entering correct API key config, popup still shows
+    // 'Not connected to Remote Signer'". After Save with valid creds the popup
+    // must reach the connected view within a reasonable timeout.
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/popup/popup.html`);
+    await popup.waitForSelector("#app");
+
+    // Start clean: open Settings from the disconnected view.
+    await expect(popup.locator("#disconnectedView")).toBeVisible();
+    await popup.click("#disconnectedSettingsBtn");
+    await expect(popup.locator("#settingsView")).toBeVisible();
+
+    await popup.fill("#inputUrl", serverInfo.base_url);
+    await popup.fill("#inputKeyId", serverInfo.admin_api_key_id);
+    await popup.fill("#inputPrivateKey", serverInfo.admin_api_key_hex);
+
+    await popup.click("#saveConfigBtn");
+
+    // Save flips us out of settings; we want to land on the connected view.
+    await expect(popup.locator("#connectedView")).toBeVisible({ timeout: 15_000 });
+    await expect(popup.locator("#statusText")).toHaveText("Connected");
+    await expect(popup.locator("#connectionDot")).toHaveClass(/connected/);
+    await expect(popup.locator("#serverUrlDisplay")).toContainText(serverInfo.base_url);
+
+    await popup.close();
+  });
+
+  test("disconnected view surfaces a clear reason when init fails", async ({ context, extensionId, serverInfo }) => {
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/popup/popup.html`);
+    await popup.waitForSelector("#app");
+
+    // Inject config that points at an unreachable port.
+    await injectStorageConfig(popup, {
+      remoteSignerUrl: "http://127.0.0.1:1",
+      apiKeyId: serverInfo.admin_api_key_id,
+      apiKeyPrivateKey: serverInfo.admin_api_key_hex,
+    });
+    await popup.close();
+
+    const popup2 = await context.newPage();
+    await popup2.goto(`chrome-extension://${extensionId}/popup/popup.html`);
+    await popup2.waitForSelector("#app");
+
+    await expect(popup2.locator("#disconnectedView")).toBeVisible({ timeout: 15_000 });
+    // The "hint" line should now carry a real reason, not the generic prompt.
+    const reason = await popup2.locator("#disconnectedReason").textContent();
+    expect(reason && reason.trim().length).toBeGreaterThan(0);
+    expect(reason).not.toBe("Configure your connection in Settings");
+
+    await popup2.close();
+  });
+});
+
 test.describe("Popup Connected UI (@integration)", () => {
   test("connected state shows green dot and Connected status", async ({ context, extensionId, serverInfo }) => {
     // Pre-configure extension

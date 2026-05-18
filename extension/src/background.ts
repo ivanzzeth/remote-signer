@@ -78,6 +78,52 @@ const DEFAULT_CONFIG: StoredConfig = {
   selectedChain: 1,
 };
 
+const EXTENSION_VERSION =
+  (typeof chrome !== "undefined" && chrome.runtime?.getManifest?.()?.version) || "dev";
+const CLIENT_VERSION_STRING = `RemoteSigner/v${EXTENSION_VERSION}/javascript`;
+
+// ── Chain registry ───────────────────────────────────────────────────────
+//
+// EIP-1193 read RPC methods (eth_call, eth_getBalance, …) and the forwarded
+// methods we add below (eth_sendRawTransaction, eth_feeHistory, …) need an
+// HTTP RPC endpoint per chain. We seed a few well-known public endpoints and
+// let dApps extend the set via wallet_addEthereumChain (EIP-3085).
+
+interface ChainEntry {
+  chainId: number;
+  rpcUrls: string[];
+  chainName?: string;
+  nativeCurrency?: { name: string; symbol: string; decimals: number };
+  blockExplorerUrls?: string[];
+}
+
+const DEFAULT_CHAINS: ChainEntry[] = [
+  { chainId: 1, chainName: "Ethereum", rpcUrls: ["https://eth.llamarpc.com"], nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 } },
+  { chainId: 10, chainName: "Optimism", rpcUrls: ["https://mainnet.optimism.io"], nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 } },
+  { chainId: 56, chainName: "BNB Smart Chain", rpcUrls: ["https://bsc-dataseed.binance.org"], nativeCurrency: { name: "BNB", symbol: "BNB", decimals: 18 } },
+  { chainId: 137, chainName: "Polygon", rpcUrls: ["https://polygon-rpc.com"], nativeCurrency: { name: "POL", symbol: "POL", decimals: 18 } },
+  { chainId: 8453, chainName: "Base", rpcUrls: ["https://mainnet.base.org"], nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 } },
+  { chainId: 42161, chainName: "Arbitrum One", rpcUrls: ["https://arb1.arbitrum.io/rpc"], nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 } },
+  { chainId: 11155111, chainName: "Sepolia", rpcUrls: ["https://ethereum-sepolia-rpc.publicnode.com"], nativeCurrency: { name: "Sepolia Ether", symbol: "ETH", decimals: 18 } },
+];
+
+const chainRegistry: Map<number, ChainEntry> = new Map(
+  DEFAULT_CHAINS.map((c) => [c.chainId, c])
+);
+
+function getRpcUrl(chainId: number): string | undefined {
+  return chainRegistry.get(chainId)?.rpcUrls?.[0];
+}
+
+function rpcOverridesFromRegistry(): Record<number, string> {
+  const out: Record<number, string> = {};
+  for (const [chainId, cfg] of chainRegistry) {
+    const url = cfg.rpcUrls?.[0];
+    if (url) out[chainId] = url;
+  }
+  return out;
+}
+
 // ── Globals ──────────────────────────────────────────────────────────────
 
 declare const self: ServiceWorkerGlobalScope;
@@ -233,8 +279,12 @@ async function initProvider(): Promise<void> {
   provider = await EIP1193Provider.create({
     signersSource: { type: "client", client, chainId: cfg.selectedChain },
     defaultChainId: cfg.selectedChain,
-    rpcOverrides: {},
-    rpcResolver: undefined,
+    rpcOverrides: rpcOverridesFromRegistry(),
+    rpcResolver: async (chainId: number) => {
+      const url = getRpcUrl(chainId);
+      if (!url) throw new Error(`No RPC URL configured for chain ${chainId}`);
+      return url;
+    },
   });
 
   console.log("[background] Provider created successfully");
@@ -282,6 +332,158 @@ async function broadcastEvent(event: string, data: unknown) {
 
 // ── EIP-1193 Handler ─────────────────────────────────────────────────────
 
+interface RpcError {
+  code: number;
+  message: string;
+  data?: unknown;
+}
+
+/**
+ * Forward a JSON-RPC call to the active chain's RPC endpoint.
+ * Returns either a result or an RpcError shaped per JSON-RPC.
+ */
+async function forwardToRpc(
+  method: string,
+  params: unknown
+): Promise<{ result?: unknown; error?: RpcError }> {
+  const chainId = provider ? parseInt(provider.chainId, 16) : 1;
+  const rpcUrl = getRpcUrl(chainId);
+  if (!rpcUrl) {
+    return {
+      error: { code: -32603, message: `No RPC URL configured for chain ${chainId}` },
+    };
+  }
+  try {
+    const res = await fetch(rpcUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: Date.now(),
+        method,
+        params: Array.isArray(params) ? params : [],
+      }),
+    });
+    const json: any = await res.json();
+    if (json.error) {
+      return { error: { code: json.error.code ?? -32603, message: json.error.message ?? "RPC error", data: json.error.data } };
+    }
+    return { result: json.result };
+  } catch (err: any) {
+    return { error: { code: -32603, message: err?.message || String(err) } };
+  }
+}
+
+/**
+ * Handle a wallet_addEthereumChain call (EIP-3085).
+ * If the chain is already known, returns null. Otherwise adds it to the registry.
+ */
+function handleAddEthereumChain(params: unknown): { result?: null; error?: RpcError } {
+  const first = Array.isArray(params) ? (params[0] as any) : undefined;
+  const chainIdHex = first?.chainId;
+  if (typeof chainIdHex !== "string" || !chainIdHex.startsWith("0x")) {
+    return { error: { code: -32602, message: "Invalid chainId parameter" } };
+  }
+  const chainId = parseInt(chainIdHex, 16);
+  if (!Number.isFinite(chainId) || chainId <= 0) {
+    return { error: { code: -32602, message: "Invalid chainId parameter" } };
+  }
+  const rpcUrls: string[] = Array.isArray(first?.rpcUrls) ? first.rpcUrls : [];
+  // If the chain is already in our registry, return null (per spec).
+  if (chainRegistry.has(chainId)) return { result: null };
+  if (rpcUrls.length === 0) {
+    return { error: { code: -32602, message: "wallet_addEthereumChain requires rpcUrls" } };
+  }
+  chainRegistry.set(chainId, {
+    chainId,
+    rpcUrls,
+    chainName: typeof first?.chainName === "string" ? first.chainName : undefined,
+    nativeCurrency: first?.nativeCurrency,
+    blockExplorerUrls: Array.isArray(first?.blockExplorerUrls) ? first.blockExplorerUrls : undefined,
+  });
+  return { result: null };
+}
+
+/**
+ * Try to handle a method outside the SDK provider. The SDK rejects anything
+ * not in its switch with code 4200 (unsupportedMethod); we cover the rest of
+ * the MetaMask-compatible surface so dApps like Uniswap/Polymarket/DeBank
+ * don't fall over on chain-add, fee queries, or permission probes.
+ *
+ * Returns { handled: false } to fall through to the SDK.
+ */
+async function tryHandleExtraMethod(
+  msg: EIP1193Request
+): Promise<{ handled: false } | { handled: true; result?: unknown; error?: RpcError }> {
+  const { method, params } = msg;
+
+  switch (method) {
+    // ── Legacy / informational ─────────────────────────────────────────────
+    case "web3_clientVersion":
+      return { handled: true, result: CLIENT_VERSION_STRING };
+    case "net_listening":
+      return { handled: true, result: true };
+    case "net_peerCount":
+      return { handled: true, result: "0x0" };
+
+    // ── Permissions (EIP-2255) ─────────────────────────────────────────────
+    case "wallet_getPermissions":
+      return { handled: true, result: [{ parentCapability: "eth_accounts" }] };
+    case "wallet_revokePermissions":
+      // We don't gate accounts behind per-origin permissions today, but a
+      // dApp can still call this on logout. Emit accountsChanged([]) so the
+      // dApp UI updates, and return null.
+      broadcastEvent("accountsChanged", []);
+      return { handled: true, result: null };
+
+    // ── Watch asset (EIP-747) ─────────────────────────────────────────────
+    case "wallet_watchAsset":
+      // We don't maintain a token list, but the spec says return true on success.
+      return { handled: true, result: true };
+
+    // ── Capabilities (EIP-5792) ───────────────────────────────────────────
+    case "wallet_getCapabilities":
+      // No atomic-batch support yet — return empty caps per spec.
+      return { handled: true, result: {} };
+
+    // ── Chain management (EIP-3085 / 3326) ────────────────────────────────
+    case "wallet_addEthereumChain":
+      return { handled: true, ...handleAddEthereumChain(params) };
+
+    case "wallet_switchEthereumChain": {
+      const first = Array.isArray(params) ? (params[0] as any) : undefined;
+      const chainIdHex = first?.chainId;
+      if (typeof chainIdHex !== "string" || !chainIdHex.startsWith("0x")) {
+        return { handled: true, error: { code: -32602, message: "Missing or invalid chainId parameter" } };
+      }
+      const chainId = parseInt(chainIdHex, 16);
+      if (!chainRegistry.has(chainId)) {
+        // Per spec, return 4902 so the dApp knows to call wallet_addEthereumChain.
+        return {
+          handled: true,
+          error: { code: 4902, message: `Unrecognized chain ID "${chainIdHex}". Try adding the chain with wallet_addEthereumChain.` },
+        };
+      }
+      // Chain is known — let the SDK perform the actual switch.
+      return { handled: false };
+    }
+
+    // ── Forwarded read / send methods ─────────────────────────────────────
+    // The SDK enumerates most read methods but misses these. Forward to the
+    // active chain's RPC endpoint.
+    case "eth_sendRawTransaction":
+    case "eth_maxPriorityFeePerGas":
+    case "eth_feeHistory":
+    case "eth_getProof":
+    case "eth_blobBaseFee":
+    case "eth_syncing":
+      return { handled: true, ...(await forwardToRpc(method, params)) };
+
+    default:
+      return { handled: false };
+  }
+}
+
 async function handleEIP1193Request(msg: EIP1193Request) {
   await ensureInit();
 
@@ -299,6 +501,15 @@ async function handleEIP1193Request(msg: EIP1193Request) {
       id: msg.id,
       error: { code: -32603, message: "Provider not initialized" },
     };
+  }
+
+  // Pre-SDK dispatch for MetaMask-compatible methods the SDK doesn't cover.
+  const extra = await tryHandleExtraMethod(msg);
+  if (extra.handled) {
+    if (extra.error) {
+      return { type: "web3-eip1193-response", id: msg.id, error: extra.error };
+    }
+    return { type: "web3-eip1193-response", id: msg.id, result: extra.result };
   }
 
   try {
@@ -376,59 +587,31 @@ async function handlePopupSaveConfig(msg: PopupSaveConfig) {
   };
 }
 
-async function makeSignedRequest(
-  urlPath: string,
-  method: string,
-  body?: unknown
-): Promise<{ status: number; body: unknown }> {
-  const cfg = cachedConfig;
-  if (!cfg.apiKeyId || !cfg.apiKeyPrivateKey) {
-    throw new Error("API key not configured");
-  }
-
-  // Build Ed25519-signed headers using SubtleCrypto
-  const timestamp = Date.now().toString();
-  const nonce = Array.from(crypto.getRandomValues(new Uint8Array(16)))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-  const bodyStr = body ? JSON.stringify(body) : "";
-  const bodyHash = await sha256(bodyStr);
-  const signMessage = `${timestamp}|${nonce}|${method}|${urlPath}|${bodyHash}`;
-
-  const signature = await ed25519Sign(
-    hexToBytes(cfg.apiKeyPrivateKey),
-    new TextEncoder().encode(signMessage)
-  );
-
-  const headers: Record<string, string> = {
-    "X-API-Key-ID": cfg.apiKeyId,
-    "X-Timestamp": timestamp,
-    "X-Nonce": nonce,
-    "X-Signature": bytesToBase64(signature),
-    "Content-Type": "application/json",
-  };
-
-  const url = cfg.remoteSignerUrl.replace(/\/$/, "") + urlPath;
-  const fetchOptions: RequestInit = {
-    method,
-    headers,
-  };
-  if (body && method !== "GET") {
-    fetchOptions.body = bodyStr;
-  }
-
-  const res = await fetch(url, fetchOptions);
-  const data = res.headers
-    .get("content-type")
-    ?.includes("application/json")
-    ? await res.json()
-    : await res.text();
-
-  return { status: res.status, body: data };
+/**
+ * Build a transient RemoteSignerClient for popup-driven API calls.
+ *
+ * We reuse the SDK rather than rolling our own Ed25519/PKCS8 path so that
+ * 64-byte Go-style private keys (seed+pubkey) work — the SDK's parsePrivateKey
+ * slices to the 32-byte seed before passing it to @noble/ed25519.
+ */
+function buildPopupClient(cfg: StoredConfig): RemoteSignerClient {
+  return new RemoteSignerClient({
+    baseURL: cfg.remoteSignerUrl,
+    apiKeyID: cfg.apiKeyId,
+    privateKey: cfg.apiKeyPrivateKey,
+    httpClient: { fetch: fetch.bind(self) },
+  });
 }
 
 async function handlePopupTestConnection() {
   const cfg = cachedConfig;
+  if (!cfg.remoteSignerUrl) {
+    return {
+      type: "popup:connectionResult",
+      ok: false,
+      error: "Remote Signer URL not configured",
+    };
+  }
   if (!cfg.apiKeyId || !cfg.apiKeyPrivateKey) {
     return {
       type: "popup:connectionResult",
@@ -437,71 +620,162 @@ async function handlePopupTestConnection() {
     };
   }
 
+  let popupClient: RemoteSignerClient;
   try {
-    // Test /health (no auth needed)
-    const healthUrl = cfg.remoteSignerUrl.replace(/\/$/, "") + "/health";
-    const healthRes = await fetch(healthUrl);
-    const healthData = await healthRes.json();
-    const serverVersion = healthData?.version || "unknown";
-
-    // Test /api/v1/evm/signers (auth required)
-    const { status } = await makeSignedRequest(
-      "/api/v1/evm/signers",
-      "GET"
-    );
-
-    if (status === 200) {
-      return {
-        type: "popup:connectionResult",
-        ok: true,
-        version: serverVersion,
-        url: cfg.remoteSignerUrl,
-      };
-    } else {
-      return {
-        type: "popup:connectionResult",
-        ok: false,
-        error: `Auth failed (HTTP ${status})`,
-      };
-    }
+    popupClient = buildPopupClient(cfg);
   } catch (err: any) {
     return {
       type: "popup:connectionResult",
       ok: false,
-      error: err.message || String(err),
+      error: `Invalid configuration: ${err.message || String(err)}`,
     };
   }
-}
 
-async function handlePopupGetState() {
-  let connected = false;
-  let accounts: string[] = [];
-  let chainId = "0x1";
+  // 1) Health probe (no auth) — verifies URL reachability.
+  let serverVersion = "unknown";
   try {
-    await ensureInit();
-    if (provider && !initError) {
-      connected = provider.isConnected();
-      accounts = (await provider.request({
-        method: "eth_accounts",
-      })) as string[];
-      chainId = provider.chainId;
-    }
-  } catch {}
+    const health = await popupClient.health();
+    serverVersion = health?.version || "unknown";
+  } catch (err: any) {
+    return {
+      type: "popup:connectionResult",
+      ok: false,
+      error: `Cannot reach server: ${err.message || String(err)}`,
+    };
+  }
+
+  // 2) Authenticated probe — verifies API key signing.
+  let signerCount = 0;
+  try {
+    const list = await popupClient.evm.signers.list();
+    signerCount = list?.signers?.length ?? 0;
+  } catch (err: any) {
+    const status = err?.statusCode;
+    const msg = err?.message || String(err);
+    return {
+      type: "popup:connectionResult",
+      ok: false,
+      error: status ? `Auth failed (HTTP ${status}): ${msg}` : `Auth failed: ${msg}`,
+    };
+  }
 
   return {
-    type: "popup:state",
-    connected,
-    accounts,
-    chainId,
+    type: "popup:connectionResult",
+    ok: true,
+    version: serverVersion,
+    url: cfg.remoteSignerUrl,
+    signerCount,
   };
 }
 
-async function safeApiCall(urlPath: string): Promise<{ ok: boolean; data?: any; error?: string }> {
+/**
+ * Popup connection state. "connected" means "we can talk to the configured
+ * server and auth works" — independent of whether the server has any usable
+ * signers. Signer readiness is reported separately via signerStatus so the
+ * UI can show actionable copy ("import a signer", "unlock the locked one")
+ * instead of a misleading "Not connected".
+ */
+async function handlePopupGetState() {
+  const cfg = cachedConfig;
+
+  // Without configured credentials we treat the popup as "not configured".
+  // This is distinct from "configured but can't reach the server".
+  if (!cfg.apiKeyId || !cfg.apiKeyPrivateKey || !cfg.remoteSignerUrl) {
+    return {
+      type: "popup:state",
+      connected: false,
+      configured: false,
+      accounts: [],
+      chainId: `0x${(cfg.selectedChain || 1).toString(16)}`,
+      error: null,
+      signerStatus: null,
+    };
+  }
+
+  // Build a transient SDK client to probe /health + signers without coupling
+  // popup state to the EIP1193Provider's "needs at least one signer to be
+  // connected" semantics. The EIP1193Provider is still lazily initialised on
+  // demand for dApp requests via ensureInit().
+  let popupClient: RemoteSignerClient;
   try {
-    const { status, body } = await makeSignedRequest(urlPath, "GET");
-    return { ok: status === 200, data: body };
+    popupClient = buildPopupClient(cfg);
   } catch (err: any) {
-    return { ok: false, error: err.message };
+    return {
+      type: "popup:state",
+      connected: false,
+      configured: true,
+      accounts: [],
+      chainId: `0x${(cfg.selectedChain || 1).toString(16)}`,
+      error: `Invalid configuration: ${err?.message || String(err)}`,
+      signerStatus: null,
+    };
+  }
+
+  // 1) Server reachability (no auth).
+  try {
+    await popupClient.health();
+  } catch (err: any) {
+    return {
+      type: "popup:state",
+      connected: false,
+      configured: true,
+      accounts: [],
+      chainId: `0x${(cfg.selectedChain || 1).toString(16)}`,
+      error: `Cannot reach server: ${err?.message || String(err)}`,
+      signerStatus: null,
+    };
+  }
+
+  // 2) Auth + signer enumeration.
+  let signers: any[] = [];
+  try {
+    const list = await popupClient.evm.signers.list();
+    signers = (list as any)?.signers ?? [];
+  } catch (err: any) {
+    const status = err?.statusCode;
+    const msg = err?.message || String(err);
+    return {
+      type: "popup:state",
+      connected: false,
+      configured: true,
+      accounts: [],
+      chainId: `0x${(cfg.selectedChain || 1).toString(16)}`,
+      error: status ? `Auth failed (HTTP ${status}): ${msg}` : `Auth failed: ${msg}`,
+      signerStatus: null,
+    };
+  }
+
+  // At this point we're "connected" — the server is reachable and auth works.
+  // Signer readiness is purely informational.
+  const usable = signers.filter((s: any) => s.enabled && !s.locked);
+  const locked = signers.filter((s: any) => s.locked);
+  const disabled = signers.filter((s: any) => !s.enabled);
+
+  const accounts: string[] = usable.map((s: any) => s.address).filter(Boolean);
+  const chainId = `0x${(cfg.selectedChain || 1).toString(16)}`;
+
+  return {
+    type: "popup:state",
+    connected: true,
+    configured: true,
+    accounts,
+    chainId,
+    error: null,
+    signerStatus: {
+      total: signers.length,
+      usable: usable.length,
+      locked: locked.length,
+      disabled: disabled.length,
+    },
+  };
+}
+
+async function safeSdkCall<T>(fn: () => Promise<T>): Promise<{ ok: boolean; data?: T; error?: string }> {
+  try {
+    const data = await fn();
+    return { ok: true, data };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || String(err) };
   }
 }
 
@@ -518,16 +792,28 @@ async function handlePopupGetDashboard() {
     };
   }
 
-  // Fetch all data in parallel
+  let popupClient: RemoteSignerClient;
+  try {
+    popupClient = buildPopupClient(cfg);
+  } catch {
+    return {
+      type: "popup:dashboard",
+      signers: [],
+      signerCount: 0,
+      ruleCount: 0,
+      requestCount: 0,
+      apiKeyRole: "unknown",
+    };
+  }
+
   const [signersResult, rulesResult, requestsResult, apikeysResult] =
     await Promise.all([
-      safeApiCall("/api/v1/evm/signers"),
-      safeApiCall("/api/v1/rules?limit=1"),
-      safeApiCall("/api/v1/requests?limit=100"),
-      safeApiCall("/api/v1/apikeys"),
+      safeSdkCall(() => popupClient.evm.signers.list()),
+      safeSdkCall(() => popupClient.evm.rules.list({ limit: 1 })),
+      safeSdkCall(() => popupClient.evm.requests.list({ limit: 100 })),
+      safeSdkCall(() => popupClient.apiKeys.list()),
     ]);
 
-  // Determine role: if /api/v1/apikeys returns 200, role is "admin"
   let apiKeyRole = "unknown";
   if (apikeysResult.ok) {
     apiKeyRole = "admin";
@@ -535,30 +821,20 @@ async function handlePopupGetDashboard() {
     apiKeyRole = "agent";
   }
 
+  const signersData: any = signersResult.data ?? {};
+  const signerList: any[] = Array.isArray(signersData)
+    ? signersData
+    : signersData.signers ?? [];
+
+  const rulesData: any = rulesResult.data ?? {};
+  const requestsData: any = requestsResult.data ?? {};
+
   return {
     type: "popup:dashboard",
-    signers:
-      signersResult.ok && signersResult.data
-        ? (Array.isArray(signersResult.data)
-            ? signersResult.data
-            : signersResult.data.signers || [])
-        : [],
-    signerCount:
-      signersResult.ok && signersResult.data
-        ? Array.isArray(signersResult.data)
-          ? signersResult.data.length
-          : signersResult.data.signers?.length || 0
-        : 0,
-    ruleCount:
-      rulesResult.ok && rulesResult.data
-        ? rulesResult.data.total || 0
-        : 0,
-    requestCount:
-      requestsResult.ok && requestsResult.data
-        ? Array.isArray(requestsResult.data)
-          ? requestsResult.data.length
-          : requestsResult.data.total || 0
-        : 0,
+    signers: signerList.map((s) => (typeof s === "string" ? s : s?.address)).filter(Boolean),
+    signerCount: signerList.length,
+    ruleCount: rulesData.total ?? (Array.isArray(rulesData.rules) ? rulesData.rules.length : 0),
+    requestCount: requestsData.total ?? (Array.isArray(requestsData.requests) ? requestsData.requests.length : 0),
     apiKeyRole,
   };
 }
@@ -568,85 +844,6 @@ async function handlePopupOpenManagement() {
   const url = cfg.remoteSignerUrl.replace(/\/$/, "");
   await chrome.tabs.create({ url });
   return { type: "popup:managementOpened" };
-}
-
-// ── Crypto Helpers ──────────────────────────────────────────────────────
-
-async function sha256(message: string): Promise<string> {
-  const data = new TextEncoder().encode(message);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-  return Array.from(new Uint8Array(hashBuffer))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-async function ed25519Sign(
-  privateKeyBytes: Uint8Array,
-  message: Uint8Array
-): Promise<Uint8Array> {
-  // Try SubtleCrypto first (Chrome 125+)
-  if (crypto.subtle.sign && crypto.subtle.importKey) {
-    try {
-      // Wrap raw 32-byte key as PKCS8 Ed25519 private key
-      const pkcs8Prefix = hexToBytes(
-        "302e020100300506032b657004220420"
-      );
-      const pkcs8Key = new Uint8Array(
-        pkcs8Prefix.length + privateKeyBytes.length
-      );
-      pkcs8Key.set(pkcs8Prefix);
-      pkcs8Key.set(privateKeyBytes, pkcs8Prefix.length);
-
-      const cryptoKey = await crypto.subtle.importKey(
-        "pkcs8",
-        pkcs8Key,
-        { name: "Ed25519" },
-        false,
-        ["sign"]
-      );
-      const sig = await crypto.subtle.sign("Ed25519", cryptoKey, message);
-      return new Uint8Array(sig);
-    } catch (e) {
-      // Fall through to fallback
-      console.warn("[background] SubtleCrypto Ed25519 not available, using fallback:", e);
-    }
-  }
-
-  // Fallback: pure-JS Ed25519 (single-curve, minimal)
-  return ed25519Fallback(privateKeyBytes, message);
-}
-
-/**
- * Minimal pure-JS Ed25519 implementation.
- * Single-curve operations only — no generic bignum library needed.
- */
-function ed25519Fallback(
-  privateKey: Uint8Array,
-  message: Uint8Array
-): Uint8Array {
-  // This is a placeholder. In production, bundle @noble/ed25519.
-  // For now, throw a descriptive error.
-  throw new Error(
-    "Ed25519 signing requires Chrome 125+ or @noble/ed25519. " +
-    "Install with: npm install @noble/ed25519"
-  );
-}
-
-function hexToBytes(hex: string): Uint8Array {
-  if (hex.startsWith("0x")) hex = hex.slice(2);
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
-  }
-  return bytes;
-}
-
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = "";
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
 }
 
 // ── Main Message Handler ─────────────────────────────────────────────────

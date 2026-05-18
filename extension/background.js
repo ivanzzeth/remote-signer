@@ -1730,11 +1730,33 @@
     }
     /** Sign an EVM transaction. Returns signed transaction hex. */
     async signTransaction(transaction) {
+      const tx = { ...transaction };
+      if (typeof tx.gas === "string" && /^0x/i.test(tx.gas)) {
+        tx.gas = parseInt(tx.gas, 16);
+      }
+      for (const field of ["gasPrice", "value", "maxFeePerGas", "maxPriorityFeePerGas", "gasFeeCap", "gasTipCap", "nonce"]) {
+        if (typeof tx[field] === "string" && /^0x/i.test(tx[field])) {
+          tx[field] = BigInt(tx[field]).toString();
+        }
+      }
+      if (!tx.txType) {
+        if (tx.maxFeePerGas || tx.gasFeeCap) {
+          tx.txType = "eip1559";
+        } else {
+          tx.txType = "legacy";
+        }
+      }
+      if (tx.maxFeePerGas !== void 0 && tx.txType === "eip1559" && !tx.gasFeeCap) {
+        tx.gasFeeCap = tx.maxFeePerGas;
+      }
+      if (tx.maxPriorityFeePerGas !== void 0 && tx.txType === "eip1559" && !tx.gasTipCap) {
+        tx.gasTipCap = tx.maxPriorityFeePerGas;
+      }
       const resp = await this.signService.execute({
         chain_id: this._chainID,
         signer_address: this.address,
         sign_type: "transaction",
-        payload: { transaction }
+        payload: { transaction: tx }
       });
       return resp.signed_data;
     }
@@ -2723,6 +2745,31 @@
     apiKeyPrivateKey: "",
     selectedChain: 1
   };
+  var EXTENSION_VERSION = typeof chrome !== "undefined" && chrome.runtime?.getManifest?.()?.version || "dev";
+  var CLIENT_VERSION_STRING = `RemoteSigner/v${EXTENSION_VERSION}/javascript`;
+  var DEFAULT_CHAINS = [
+    { chainId: 1, chainName: "Ethereum", rpcUrls: ["https://eth.llamarpc.com"], nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 } },
+    { chainId: 10, chainName: "Optimism", rpcUrls: ["https://mainnet.optimism.io"], nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 } },
+    { chainId: 56, chainName: "BNB Smart Chain", rpcUrls: ["https://bsc-dataseed.binance.org"], nativeCurrency: { name: "BNB", symbol: "BNB", decimals: 18 } },
+    { chainId: 137, chainName: "Polygon", rpcUrls: ["https://polygon-rpc.com"], nativeCurrency: { name: "POL", symbol: "POL", decimals: 18 } },
+    { chainId: 8453, chainName: "Base", rpcUrls: ["https://mainnet.base.org"], nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 } },
+    { chainId: 42161, chainName: "Arbitrum One", rpcUrls: ["https://arb1.arbitrum.io/rpc"], nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 } },
+    { chainId: 11155111, chainName: "Sepolia", rpcUrls: ["https://ethereum-sepolia-rpc.publicnode.com"], nativeCurrency: { name: "Sepolia Ether", symbol: "ETH", decimals: 18 } }
+  ];
+  var chainRegistry = new Map(
+    DEFAULT_CHAINS.map((c) => [c.chainId, c])
+  );
+  function getRpcUrl(chainId) {
+    return chainRegistry.get(chainId)?.rpcUrls?.[0];
+  }
+  function rpcOverridesFromRegistry() {
+    const out = {};
+    for (const [chainId, cfg] of chainRegistry) {
+      const url = cfg.rpcUrls?.[0];
+      if (url) out[chainId] = url;
+    }
+    return out;
+  }
   var provider = null;
   var client = null;
   var initPromise = null;
@@ -2841,8 +2888,12 @@
     provider = await EIP1193Provider.create({
       signersSource: { type: "client", client, chainId: cfg.selectedChain },
       defaultChainId: cfg.selectedChain,
-      rpcOverrides: {},
-      rpcResolver: void 0
+      rpcOverrides: rpcOverridesFromRegistry(),
+      rpcResolver: async (chainId) => {
+        const url = getRpcUrl(chainId);
+        if (!url) throw new Error(`No RPC URL configured for chain ${chainId}`);
+        return url;
+      }
     });
     console.log("[background] Provider created successfully");
     console.log("  - Connected:", provider.isConnected());
@@ -2880,6 +2931,112 @@
     } catch {
     }
   }
+  async function forwardToRpc(method, params) {
+    const chainId = provider ? parseInt(provider.chainId, 16) : 1;
+    const rpcUrl = getRpcUrl(chainId);
+    if (!rpcUrl) {
+      return {
+        error: { code: -32603, message: `No RPC URL configured for chain ${chainId}` }
+      };
+    }
+    try {
+      const res = await fetch(rpcUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: Date.now(),
+          method,
+          params: Array.isArray(params) ? params : []
+        })
+      });
+      const json = await res.json();
+      if (json.error) {
+        return { error: { code: json.error.code ?? -32603, message: json.error.message ?? "RPC error", data: json.error.data } };
+      }
+      return { result: json.result };
+    } catch (err2) {
+      return { error: { code: -32603, message: err2?.message || String(err2) } };
+    }
+  }
+  function handleAddEthereumChain(params) {
+    const first = Array.isArray(params) ? params[0] : void 0;
+    const chainIdHex = first?.chainId;
+    if (typeof chainIdHex !== "string" || !chainIdHex.startsWith("0x")) {
+      return { error: { code: -32602, message: "Invalid chainId parameter" } };
+    }
+    const chainId = parseInt(chainIdHex, 16);
+    if (!Number.isFinite(chainId) || chainId <= 0) {
+      return { error: { code: -32602, message: "Invalid chainId parameter" } };
+    }
+    const rpcUrls = Array.isArray(first?.rpcUrls) ? first.rpcUrls : [];
+    if (chainRegistry.has(chainId)) return { result: null };
+    if (rpcUrls.length === 0) {
+      return { error: { code: -32602, message: "wallet_addEthereumChain requires rpcUrls" } };
+    }
+    chainRegistry.set(chainId, {
+      chainId,
+      rpcUrls,
+      chainName: typeof first?.chainName === "string" ? first.chainName : void 0,
+      nativeCurrency: first?.nativeCurrency,
+      blockExplorerUrls: Array.isArray(first?.blockExplorerUrls) ? first.blockExplorerUrls : void 0
+    });
+    return { result: null };
+  }
+  async function tryHandleExtraMethod(msg) {
+    const { method, params } = msg;
+    switch (method) {
+      // ── Legacy / informational ─────────────────────────────────────────────
+      case "web3_clientVersion":
+        return { handled: true, result: CLIENT_VERSION_STRING };
+      case "net_listening":
+        return { handled: true, result: true };
+      case "net_peerCount":
+        return { handled: true, result: "0x0" };
+      // ── Permissions (EIP-2255) ─────────────────────────────────────────────
+      case "wallet_getPermissions":
+        return { handled: true, result: [{ parentCapability: "eth_accounts" }] };
+      case "wallet_revokePermissions":
+        broadcastEvent("accountsChanged", []);
+        return { handled: true, result: null };
+      // ── Watch asset (EIP-747) ─────────────────────────────────────────────
+      case "wallet_watchAsset":
+        return { handled: true, result: true };
+      // ── Capabilities (EIP-5792) ───────────────────────────────────────────
+      case "wallet_getCapabilities":
+        return { handled: true, result: {} };
+      // ── Chain management (EIP-3085 / 3326) ────────────────────────────────
+      case "wallet_addEthereumChain":
+        return { handled: true, ...handleAddEthereumChain(params) };
+      case "wallet_switchEthereumChain": {
+        const first = Array.isArray(params) ? params[0] : void 0;
+        const chainIdHex = first?.chainId;
+        if (typeof chainIdHex !== "string" || !chainIdHex.startsWith("0x")) {
+          return { handled: true, error: { code: -32602, message: "Missing or invalid chainId parameter" } };
+        }
+        const chainId = parseInt(chainIdHex, 16);
+        if (!chainRegistry.has(chainId)) {
+          return {
+            handled: true,
+            error: { code: 4902, message: `Unrecognized chain ID "${chainIdHex}". Try adding the chain with wallet_addEthereumChain.` }
+          };
+        }
+        return { handled: false };
+      }
+      // ── Forwarded read / send methods ─────────────────────────────────────
+      // The SDK enumerates most read methods but misses these. Forward to the
+      // active chain's RPC endpoint.
+      case "eth_sendRawTransaction":
+      case "eth_maxPriorityFeePerGas":
+      case "eth_feeHistory":
+      case "eth_getProof":
+      case "eth_blobBaseFee":
+      case "eth_syncing":
+        return { handled: true, ...await forwardToRpc(method, params) };
+      default:
+        return { handled: false };
+    }
+  }
   async function handleEIP1193Request(msg) {
     await ensureInit();
     if (initError) {
@@ -2895,6 +3052,13 @@
         id: msg.id,
         error: { code: -32603, message: "Provider not initialized" }
       };
+    }
+    const extra = await tryHandleExtraMethod(msg);
+    if (extra.handled) {
+      if (extra.error) {
+        return { type: "web3-eip1193-response", id: msg.id, error: extra.error };
+      }
+      return { type: "web3-eip1193-response", id: msg.id, result: extra.result };
     }
     try {
       const result = await provider.request({
@@ -2962,41 +3126,23 @@
       ok: true
     };
   }
-  async function makeSignedRequest(urlPath, method, body) {
-    const cfg = cachedConfig;
-    if (!cfg.apiKeyId || !cfg.apiKeyPrivateKey) {
-      throw new Error("API key not configured");
-    }
-    const timestamp = Date.now().toString();
-    const nonce = Array.from(crypto.getRandomValues(new Uint8Array(16))).map((b) => b.toString(16).padStart(2, "0")).join("");
-    const bodyStr = body ? JSON.stringify(body) : "";
-    const bodyHash = await sha2563(bodyStr);
-    const signMessage = `${timestamp}|${nonce}|${method}|${urlPath}|${bodyHash}`;
-    const signature = await ed25519Sign(
-      hexToBytes2(cfg.apiKeyPrivateKey),
-      new TextEncoder().encode(signMessage)
-    );
-    const headers = {
-      "X-API-Key-ID": cfg.apiKeyId,
-      "X-Timestamp": timestamp,
-      "X-Nonce": nonce,
-      "X-Signature": bytesToBase64(signature),
-      "Content-Type": "application/json"
-    };
-    const url = cfg.remoteSignerUrl.replace(/\/$/, "") + urlPath;
-    const fetchOptions = {
-      method,
-      headers
-    };
-    if (body && method !== "GET") {
-      fetchOptions.body = bodyStr;
-    }
-    const res = await fetch(url, fetchOptions);
-    const data = res.headers.get("content-type")?.includes("application/json") ? await res.json() : await res.text();
-    return { status: res.status, body: data };
+  function buildPopupClient(cfg) {
+    return new RemoteSignerClient({
+      baseURL: cfg.remoteSignerUrl,
+      apiKeyID: cfg.apiKeyId,
+      privateKey: cfg.apiKeyPrivateKey,
+      httpClient: { fetch: fetch.bind(self) }
+    });
   }
   async function handlePopupTestConnection() {
     const cfg = cachedConfig;
+    if (!cfg.remoteSignerUrl) {
+      return {
+        type: "popup:connectionResult",
+        ok: false,
+        error: "Remote Signer URL not configured"
+      };
+    }
     if (!cfg.apiKeyId || !cfg.apiKeyPrivateKey) {
       return {
         type: "popup:connectionResult",
@@ -3004,65 +3150,131 @@
         error: "API key not configured"
       };
     }
+    let popupClient;
     try {
-      const healthUrl = cfg.remoteSignerUrl.replace(/\/$/, "") + "/health";
-      const healthRes = await fetch(healthUrl);
-      const healthData = await healthRes.json();
-      const serverVersion = healthData?.version || "unknown";
-      const { status } = await makeSignedRequest(
-        "/api/v1/evm/signers",
-        "GET"
-      );
-      if (status === 200) {
-        return {
-          type: "popup:connectionResult",
-          ok: true,
-          version: serverVersion,
-          url: cfg.remoteSignerUrl
-        };
-      } else {
-        return {
-          type: "popup:connectionResult",
-          ok: false,
-          error: `Auth failed (HTTP ${status})`
-        };
-      }
+      popupClient = buildPopupClient(cfg);
     } catch (err2) {
       return {
         type: "popup:connectionResult",
         ok: false,
-        error: err2.message || String(err2)
+        error: `Invalid configuration: ${err2.message || String(err2)}`
       };
     }
-  }
-  async function handlePopupGetState() {
-    let connected = false;
-    let accounts = [];
-    let chainId = "0x1";
+    let serverVersion = "unknown";
     try {
-      await ensureInit();
-      if (provider && !initError) {
-        connected = provider.isConnected();
-        accounts = await provider.request({
-          method: "eth_accounts"
-        });
-        chainId = provider.chainId;
-      }
-    } catch {
+      const health = await popupClient.health();
+      serverVersion = health?.version || "unknown";
+    } catch (err2) {
+      return {
+        type: "popup:connectionResult",
+        ok: false,
+        error: `Cannot reach server: ${err2.message || String(err2)}`
+      };
+    }
+    let signerCount = 0;
+    try {
+      const list = await popupClient.evm.signers.list();
+      signerCount = list?.signers?.length ?? 0;
+    } catch (err2) {
+      const status = err2?.statusCode;
+      const msg = err2?.message || String(err2);
+      return {
+        type: "popup:connectionResult",
+        ok: false,
+        error: status ? `Auth failed (HTTP ${status}): ${msg}` : `Auth failed: ${msg}`
+      };
     }
     return {
-      type: "popup:state",
-      connected,
-      accounts,
-      chainId
+      type: "popup:connectionResult",
+      ok: true,
+      version: serverVersion,
+      url: cfg.remoteSignerUrl,
+      signerCount
     };
   }
-  async function safeApiCall(urlPath) {
+  async function handlePopupGetState() {
+    const cfg = cachedConfig;
+    if (!cfg.apiKeyId || !cfg.apiKeyPrivateKey || !cfg.remoteSignerUrl) {
+      return {
+        type: "popup:state",
+        connected: false,
+        configured: false,
+        accounts: [],
+        chainId: `0x${(cfg.selectedChain || 1).toString(16)}`,
+        error: null,
+        signerStatus: null
+      };
+    }
+    let popupClient;
     try {
-      const { status, body } = await makeSignedRequest(urlPath, "GET");
-      return { ok: status === 200, data: body };
+      popupClient = buildPopupClient(cfg);
     } catch (err2) {
-      return { ok: false, error: err2.message };
+      return {
+        type: "popup:state",
+        connected: false,
+        configured: true,
+        accounts: [],
+        chainId: `0x${(cfg.selectedChain || 1).toString(16)}`,
+        error: `Invalid configuration: ${err2?.message || String(err2)}`,
+        signerStatus: null
+      };
+    }
+    try {
+      await popupClient.health();
+    } catch (err2) {
+      return {
+        type: "popup:state",
+        connected: false,
+        configured: true,
+        accounts: [],
+        chainId: `0x${(cfg.selectedChain || 1).toString(16)}`,
+        error: `Cannot reach server: ${err2?.message || String(err2)}`,
+        signerStatus: null
+      };
+    }
+    let signers = [];
+    try {
+      const list = await popupClient.evm.signers.list();
+      signers = list?.signers ?? [];
+    } catch (err2) {
+      const status = err2?.statusCode;
+      const msg = err2?.message || String(err2);
+      return {
+        type: "popup:state",
+        connected: false,
+        configured: true,
+        accounts: [],
+        chainId: `0x${(cfg.selectedChain || 1).toString(16)}`,
+        error: status ? `Auth failed (HTTP ${status}): ${msg}` : `Auth failed: ${msg}`,
+        signerStatus: null
+      };
+    }
+    const usable = signers.filter((s) => s.enabled && !s.locked);
+    const locked = signers.filter((s) => s.locked);
+    const disabled = signers.filter((s) => !s.enabled);
+    const accounts = usable.map((s) => s.address).filter(Boolean);
+    const chainId = `0x${(cfg.selectedChain || 1).toString(16)}`;
+    return {
+      type: "popup:state",
+      connected: true,
+      configured: true,
+      accounts,
+      chainId,
+      error: null,
+      signerStatus: {
+        total: signers.length,
+        usable: usable.length,
+        locked: locked.length,
+        disabled: disabled.length
+      }
+    };
+  }
+  async function safeSdkCall(fn) {
+    try {
+      const data = await fn();
+      return { ok: true, data };
+    } catch (err2) {
+      return { ok: false, error: err2?.message || String(err2) };
     }
   }
   async function handlePopupGetDashboard() {
@@ -3077,11 +3289,24 @@
         apiKeyRole: "unknown"
       };
     }
+    let popupClient;
+    try {
+      popupClient = buildPopupClient(cfg);
+    } catch {
+      return {
+        type: "popup:dashboard",
+        signers: [],
+        signerCount: 0,
+        ruleCount: 0,
+        requestCount: 0,
+        apiKeyRole: "unknown"
+      };
+    }
     const [signersResult, rulesResult, requestsResult, apikeysResult] = await Promise.all([
-      safeApiCall("/api/v1/evm/signers"),
-      safeApiCall("/api/v1/rules?limit=1"),
-      safeApiCall("/api/v1/requests?limit=100"),
-      safeApiCall("/api/v1/apikeys")
+      safeSdkCall(() => popupClient.evm.signers.list()),
+      safeSdkCall(() => popupClient.evm.rules.list({ limit: 1 })),
+      safeSdkCall(() => popupClient.evm.requests.list({ limit: 100 })),
+      safeSdkCall(() => popupClient.apiKeys.list())
     ]);
     let apiKeyRole = "unknown";
     if (apikeysResult.ok) {
@@ -3089,12 +3314,16 @@
     } else if (signersResult.ok) {
       apiKeyRole = "agent";
     }
+    const signersData = signersResult.data ?? {};
+    const signerList = Array.isArray(signersData) ? signersData : signersData.signers ?? [];
+    const rulesData = rulesResult.data ?? {};
+    const requestsData = requestsResult.data ?? {};
     return {
       type: "popup:dashboard",
-      signers: signersResult.ok && signersResult.data ? Array.isArray(signersResult.data) ? signersResult.data : signersResult.data.signers || [] : [],
-      signerCount: signersResult.ok && signersResult.data ? Array.isArray(signersResult.data) ? signersResult.data.length : signersResult.data.signers?.length || 0 : 0,
-      ruleCount: rulesResult.ok && rulesResult.data ? rulesResult.data.total || 0 : 0,
-      requestCount: requestsResult.ok && requestsResult.data ? Array.isArray(requestsResult.data) ? requestsResult.data.length : requestsResult.data.total || 0 : 0,
+      signers: signerList.map((s) => typeof s === "string" ? s : s?.address).filter(Boolean),
+      signerCount: signerList.length,
+      ruleCount: rulesData.total ?? (Array.isArray(rulesData.rules) ? rulesData.rules.length : 0),
+      requestCount: requestsData.total ?? (Array.isArray(requestsData.requests) ? requestsData.requests.length : 0),
       apiKeyRole
     };
   }
@@ -3103,57 +3332,6 @@
     const url = cfg.remoteSignerUrl.replace(/\/$/, "");
     await chrome.tabs.create({ url });
     return { type: "popup:managementOpened" };
-  }
-  async function sha2563(message) {
-    const data = new TextEncoder().encode(message);
-    const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-    return Array.from(new Uint8Array(hashBuffer)).map((b) => b.toString(16).padStart(2, "0")).join("");
-  }
-  async function ed25519Sign(privateKeyBytes, message) {
-    if (crypto.subtle.sign && crypto.subtle.importKey) {
-      try {
-        const pkcs8Prefix = hexToBytes2(
-          "302e020100300506032b657004220420"
-        );
-        const pkcs8Key = new Uint8Array(
-          pkcs8Prefix.length + privateKeyBytes.length
-        );
-        pkcs8Key.set(pkcs8Prefix);
-        pkcs8Key.set(privateKeyBytes, pkcs8Prefix.length);
-        const cryptoKey = await crypto.subtle.importKey(
-          "pkcs8",
-          pkcs8Key,
-          { name: "Ed25519" },
-          false,
-          ["sign"]
-        );
-        const sig = await crypto.subtle.sign("Ed25519", cryptoKey, message);
-        return new Uint8Array(sig);
-      } catch (e) {
-        console.warn("[background] SubtleCrypto Ed25519 not available, using fallback:", e);
-      }
-    }
-    return ed25519Fallback(privateKeyBytes, message);
-  }
-  function ed25519Fallback(privateKey, message) {
-    throw new Error(
-      "Ed25519 signing requires Chrome 125+ or @noble/ed25519. Install with: npm install @noble/ed25519"
-    );
-  }
-  function hexToBytes2(hex) {
-    if (hex.startsWith("0x")) hex = hex.slice(2);
-    const bytes = new Uint8Array(hex.length / 2);
-    for (let i = 0; i < bytes.length; i++) {
-      bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
-    }
-    return bytes;
-  }
-  function bytesToBase64(bytes) {
-    let binary = "";
-    for (let i = 0; i < bytes.length; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    return btoa(binary);
   }
   chrome.runtime.onMessage.addListener(
     (message, _sender, sendResponse) => {
