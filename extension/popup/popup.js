@@ -36,6 +36,15 @@
     signerBanner: $("signerBanner"),
     signerBannerText: $("signerBannerText"),
     signerBannerAction: $("signerBannerAction"),
+    tabAccountsBtn: $("tabAccountsBtn"),
+    tabActivityBtn: $("tabActivityBtn"),
+    tabAccounts: $("tabAccounts"),
+    tabActivity: $("tabActivity"),
+    activityList: $("activityList"),
+    activityRefreshBtn: $("activityRefreshBtn"),
+    requestDrawer: $("requestDrawer"),
+    drawerCloseBtn: $("drawerCloseBtn"),
+    drawerBody: $("drawerBody"),
     // Settings
     inputUrl: $("inputUrl"),
     inputKeyId: $("inputKeyId"),
@@ -154,6 +163,135 @@
     })[c]);
   }
 
+  // ── Tabs + Activity ──────────────────────────────────────────────────
+
+  let activeTab = "accounts";
+  let activityLoaded = false;
+
+  function selectTab(name) {
+    activeTab = name;
+    const tabs = [
+      { btn: els.tabAccountsBtn, panel: els.tabAccounts, key: "accounts" },
+      { btn: els.tabActivityBtn, panel: els.tabActivity, key: "activity" },
+    ];
+    tabs.forEach((t) => {
+      const active = t.key === name;
+      t.btn.classList.toggle("tabbar-btn--active", active);
+      t.btn.setAttribute("aria-selected", String(active));
+      t.panel.classList.toggle("hidden", !active);
+    });
+    if (name === "activity" && !activityLoaded) {
+      loadActivity();
+    }
+  }
+
+  function formatTimestamp(iso) {
+    if (!iso) return "";
+    try {
+      const d = new Date(iso);
+      const now = Date.now();
+      const diff = (now - d.getTime()) / 1000;
+      if (diff < 60) return `${Math.floor(diff)}s ago`;
+      if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+      if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+      return d.toLocaleDateString();
+    } catch {
+      return iso;
+    }
+  }
+
+  function statusClass(status) {
+    return "activity-status--" + String(status || "").toLowerCase();
+  }
+
+  async function loadActivity() {
+    els.activityList.innerHTML = '<div class="activity-empty">Loading…</div>';
+    try {
+      const resp = await send({ type: "popup:getActivity", limit: 20 });
+      activityLoaded = true;
+      if (!resp || resp.ok === false) {
+        els.activityList.innerHTML = `<div class="activity-error">${escapeText((resp && resp.error) || "Failed to load")}</div>`;
+        return;
+      }
+      const reqs = resp.requests || [];
+      if (reqs.length === 0) {
+        els.activityList.innerHTML = '<div class="activity-empty">No requests yet</div>';
+        return;
+      }
+      els.activityList.innerHTML = "";
+      reqs.forEach((r) => {
+        const div = document.createElement("div");
+        div.className = "activity-item";
+        div.dataset.requestId = r.id;
+        div.innerHTML = `
+          <span class="activity-status ${statusClass(r.status)}">${escapeText(r.status || "")}</span>
+          <div class="activity-main">
+            <div class="activity-row1">
+              <span class="activity-type">${escapeText(r.sign_type || "?")}</span>
+              <span class="activity-chain">chain ${escapeText(r.chain_id || "?")}</span>
+            </div>
+            <div class="activity-row2">
+              <span class="activity-addr">${shortenAddress(r.signer_address || "")}</span>
+              <span class="activity-time">${escapeText(formatTimestamp(r.created_at))}</span>
+            </div>
+          </div>
+        `;
+        div.addEventListener("click", () => openRequestDrawer(r.id));
+        els.activityList.appendChild(div);
+      });
+    } catch (err) {
+      els.activityList.innerHTML = `<div class="activity-error">${escapeText(err?.message || String(err))}</div>`;
+    }
+  }
+
+  async function openRequestDrawer(requestId) {
+    els.drawerBody.innerHTML = '<div class="activity-empty">Loading…</div>';
+    els.requestDrawer.classList.remove("hidden");
+    try {
+      const resp = await send({ type: "popup:getRequest", requestId });
+      if (!resp || resp.ok === false) {
+        els.drawerBody.innerHTML = `<div class="activity-error">${escapeText((resp && resp.error) || "Failed to load")}</div>`;
+        return;
+      }
+      els.drawerBody.innerHTML = renderRequestDetail(resp.request);
+    } catch (err) {
+      els.drawerBody.innerHTML = `<div class="activity-error">${escapeText(err?.message || String(err))}</div>`;
+    }
+  }
+
+  function renderRequestDetail(r) {
+    const row = (label, value) =>
+      value
+        ? `<div class="drawer-row"><span class="drawer-label">${escapeText(label)}</span><span class="drawer-value">${escapeText(value)}</span></div>`
+        : "";
+    let payloadBlock = "";
+    if (r.payload) {
+      const pretty = (() => {
+        try { return JSON.stringify(r.payload, null, 2); } catch { return String(r.payload); }
+      })();
+      payloadBlock = `<div class="drawer-row"><span class="drawer-label">Payload</span><pre class="drawer-payload">${escapeText(pretty)}</pre></div>`;
+    }
+    return [
+      row("Request ID", r.id),
+      row("Status", r.status),
+      row("Sign type", r.sign_type),
+      row("Chain", r.chain_id),
+      row("Signer", r.signer_address),
+      row("Rule matched", r.rule_matched_id),
+      row("Approved by", r.approved_by),
+      row("Approved at", r.approved_at),
+      row("Created", r.created_at),
+      row("Completed", r.completed_at),
+      r.signature ? row("Signature", r.signature) : "",
+      r.error_message ? row("Error", r.error_message) : "",
+      payloadBlock,
+    ].join("");
+  }
+
+  function closeRequestDrawer() {
+    els.requestDrawer.classList.add("hidden");
+  }
+
   async function onSwitchAccount(address) {
     try {
       const resp = await send({ type: "popup:switchAccount", address });
@@ -221,6 +359,12 @@
       renderConnectedState(stateResp);
       renderSignerBanner(stateResp.signerStatus);
       renderAccounts(stateResp.signers || [], stateResp.activeAddress);
+
+      // Reset activity state — list will be re-fetched if the user opens
+      // the tab. Don't auto-fetch on every popup open to save the API call.
+      activityLoaded = false;
+      if (activeTab === "activity") loadActivity();
+      closeRequestDrawer();
 
       const chainIdDecimal = parseInt(stateResp.chainId, 16);
       if (!Number.isNaN(chainIdDecimal)) {
@@ -408,6 +552,21 @@
       els.signerBannerAction.addEventListener("click", () => {
         send({ type: "popup:openManagement" });
       });
+    }
+
+    // Tabs
+    if (els.tabAccountsBtn && els.tabActivityBtn) {
+      els.tabAccountsBtn.addEventListener("click", () => selectTab("accounts"));
+      els.tabActivityBtn.addEventListener("click", () => selectTab("activity"));
+    }
+    if (els.activityRefreshBtn) {
+      els.activityRefreshBtn.addEventListener("click", () => {
+        activityLoaded = false;
+        loadActivity();
+      });
+    }
+    if (els.drawerCloseBtn) {
+      els.drawerCloseBtn.addEventListener("click", closeRequestDrawer);
     }
 
     // Input change tracking

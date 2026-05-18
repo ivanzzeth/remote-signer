@@ -33,39 +33,68 @@
         <button id="signerBannerAction" class="btn-text">Open Management</button>
       </div>
 
-      <!-- Accounts -->
-      <section class="section">
-        <div class="section-header">
-          <span>Accounts</span>
-          <span id="accountCount" class="count-badge"></span>
-        </div>
-        <div id="accountList" class="account-list"></div>
-      </section>
+      <!-- Tab bar -->
+      <nav class="tabbar" role="tablist">
+        <button id="tabAccountsBtn" class="tabbar-btn tabbar-btn--active" role="tab" aria-selected="true" data-tab="accounts">Accounts</button>
+        <button id="tabActivityBtn" class="tabbar-btn" role="tab" aria-selected="false" data-tab="activity">Activity</button>
+      </nav>
 
-      <!-- Dashboard Stats -->
-      <section class="section">
-        <div class="section-header">
-          <span>Dashboard</span>
+      <!-- Accounts tab -->
+      <div id="tabAccounts" class="tabpanel" role="tabpanel">
+        <section class="section">
+          <div class="section-header">
+            <span>Accounts</span>
+            <span id="accountCount" class="count-badge"></span>
+          </div>
+          <div id="accountList" class="account-list"></div>
+        </section>
+
+        <section class="section">
+          <div class="section-header">
+            <span>Dashboard</span>
+          </div>
+          <div class="stats-grid">
+            <div class="stat">
+              <span class="stat-value" id="rulesStat">-</span>
+              <span class="stat-label">Rules</span>
+            </div>
+            <div class="stat">
+              <span class="stat-value" id="signersStat">-</span>
+              <span class="stat-label">Signers</span>
+            </div>
+            <div class="stat">
+              <span class="stat-value" id="requestsStat">-</span>
+              <span class="stat-label">Today</span>
+            </div>
+            <div class="stat">
+              <span class="stat-value" id="roleStat">-</span>
+              <span class="stat-label">Role</span>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- Activity tab -->
+      <div id="tabActivity" class="tabpanel hidden" role="tabpanel">
+        <section class="section">
+          <div class="section-header">
+            <span>Recent Requests</span>
+            <button id="activityRefreshBtn" class="btn-text" type="button" title="Refresh">↻</button>
+          </div>
+          <div id="activityList" class="activity-list">
+            <div class="activity-empty">Loading…</div>
+          </div>
+        </section>
+      </div>
+
+      <!-- Detail drawer (read-only) -->
+      <div id="requestDrawer" class="drawer hidden" role="dialog" aria-modal="true">
+        <div class="drawer-head">
+          <span class="drawer-title">Request</span>
+          <button id="drawerCloseBtn" class="btn-text" type="button">✕</button>
         </div>
-        <div class="stats-grid">
-          <div class="stat">
-            <span class="stat-value" id="rulesStat">-</span>
-            <span class="stat-label">Rules</span>
-          </div>
-          <div class="stat">
-            <span class="stat-value" id="signersStat">-</span>
-            <span class="stat-label">Signers</span>
-          </div>
-          <div class="stat">
-            <span class="stat-value" id="requestsStat">-</span>
-            <span class="stat-label">Today</span>
-          </div>
-          <div class="stat">
-            <span class="stat-value" id="roleStat">-</span>
-            <span class="stat-label">Role</span>
-          </div>
-        </div>
-      </section>
+        <div id="drawerBody" class="drawer-body"></div>
+      </div>
 
       <!-- Chain selector -->
       <section class="section">
