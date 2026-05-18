@@ -2920,6 +2920,15 @@
         return url;
       }
     });
+    if (cfg.activeSignerAddress && provider.isConnected()) {
+      try {
+        await provider.switchAccount(cfg.activeSignerAddress);
+      } catch (err2) {
+        console.warn("[background] stored active signer no longer usable:", err2);
+        cfg.activeSignerAddress = void 0;
+        await saveConfig(cfg);
+      }
+    }
     console.log("[background] Provider created successfully");
     console.log("  - Connected:", provider.isConnected());
     console.log("  - Active account:", provider.selectedAddress);
@@ -3287,11 +3296,33 @@
     const disabled = signers.filter((s) => !s.enabled);
     const accounts = usable.map((s) => s.address).filter(Boolean);
     const chainId = `0x${(cfg.selectedChain || 1).toString(16)}`;
+    let activeAddress = null;
+    if (provider && provider.isConnected()) {
+      activeAddress = provider.selectedAddress;
+    }
+    if (!activeAddress && cfg.activeSignerAddress) {
+      const match = usable.find(
+        (s) => s.address?.toLowerCase() === cfg.activeSignerAddress.toLowerCase()
+      );
+      if (match) activeAddress = match.address;
+    }
+    if (!activeAddress && accounts.length > 0) {
+      activeAddress = accounts[0];
+    }
     return {
       type: "popup:state",
       connected: true,
       configured: true,
       accounts,
+      activeAddress,
+      // Full signer list with status flags so the popup can render the
+      // locked/disabled rows greyed out alongside usable ones.
+      signers: signers.map((s) => ({
+        address: s.address,
+        type: s.type,
+        enabled: !!s.enabled,
+        locked: !!s.locked
+      })),
       chainId,
       error: null,
       signerStatus: {
@@ -3366,6 +3397,20 @@
     await chrome.tabs.create({ url });
     return { type: "popup:managementOpened" };
   }
+  async function handlePopupSwitchAccount(msg) {
+    await ensureInit();
+    if (!provider) {
+      return { type: "popup:accountSwitched", ok: false, error: initError || "Provider not initialized" };
+    }
+    try {
+      await provider.switchAccount(msg.address);
+    } catch (err2) {
+      return { type: "popup:accountSwitched", ok: false, error: err2?.message || String(err2) };
+    }
+    cachedConfig.activeSignerAddress = msg.address;
+    await chrome.storage.local.set({ [configKey()]: cachedConfig });
+    return { type: "popup:accountSwitched", ok: true, address: provider.selectedAddress };
+  }
   chrome.runtime.onMessage.addListener(
     (message, _sender, sendResponse) => {
       if (message.type === "web3-eip1193-request") {
@@ -3413,6 +3458,10 @@
       }
       if (message.type === "popup:openManagement") {
         handlePopupOpenManagement().then(sendResponse);
+        return true;
+      }
+      if (message.type === "popup:switchAccount") {
+        handlePopupSwitchAccount(message).then(sendResponse);
         return true;
       }
       return false;
