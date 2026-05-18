@@ -97,44 +97,82 @@
 
   // ── Dashboard render ─────────────────────────────────────────────────
 
-  function renderAccounts(accounts) {
+  function renderAccounts(signers, activeAddress) {
     els.accountList.innerHTML = "";
-    if (!accounts || accounts.length === 0) {
+    if (!signers || signers.length === 0) {
       els.accountList.innerHTML =
-        '<div class="account-item" style="color:var(--text-muted);cursor:default;font-family:inherit">No accounts</div>';
+        '<div class="account-item account-item--empty">No accounts</div>';
       els.accountCount.textContent = "0";
       return;
     }
-    els.accountCount.textContent = String(accounts.length);
-    accounts.forEach((addr) => {
+    const usableCount = signers.filter((s) => s.enabled && !s.locked).length;
+    els.accountCount.textContent = String(usableCount);
+
+    const activeLower = (activeAddress || "").toLowerCase();
+    signers.forEach((s) => {
+      const addr = s.address;
+      const usable = s.enabled && !s.locked;
+      const isActive = usable && addr.toLowerCase() === activeLower;
+
       const div = document.createElement("div");
-      div.className = "account-item";
+      div.className = "account-item" +
+        (isActive ? " account-item--active" : "") +
+        (usable ? "" : " account-item--disabled");
+      div.dataset.address = addr;
+
+      let statusIcon = "";
+      let title = "";
+      if (s.locked) { statusIcon = "🔒"; title = "Locked — contact your administrator"; }
+      else if (!s.enabled) { statusIcon = "⛔"; title = "Disabled"; }
+      if (title) div.title = title;
+
       div.innerHTML = `
-        <span class="account-dot"></span>
-        <span>${shortenAddress(addr)}</span>
-        <span style="color:var(--text-muted);font-family:inherit;font-size:10px;margin-left:auto;cursor:pointer" title="Copy address" data-addr="${addr}">📋</span>
+        <span class="account-marker">${isActive ? "✓" : ""}</span>
+        <span class="account-address">${shortenAddress(addr)}</span>
+        <span class="account-type">${escapeText(s.type || "")}</span>
+        ${statusIcon ? `<span class="account-status">${statusIcon}</span>` : ""}
+        <button class="account-copy" title="Copy address" data-copy="${addr}">📋</button>
       `;
-      const copyBtn = div.querySelector("[data-addr]");
+
+      const copyBtn = div.querySelector(".account-copy");
       copyBtn.addEventListener("click", (e) => {
         e.stopPropagation();
-        navigator.clipboard.writeText(copyBtn.dataset.addr).catch(() => {});
+        navigator.clipboard.writeText(copyBtn.dataset.copy).catch(() => {});
       });
+
+      if (usable && !isActive) {
+        div.addEventListener("click", () => onSwitchAccount(addr));
+      }
+
       els.accountList.appendChild(div);
     });
   }
 
-  function renderDashboard(data, fallbackAccounts) {
+  function escapeText(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    })[c]);
+  }
+
+  async function onSwitchAccount(address) {
+    try {
+      const resp = await send({ type: "popup:switchAccount", address });
+      if (!resp || resp.ok !== true) {
+        console.warn("[popup] switchAccount failed:", resp && resp.error);
+        return;
+      }
+      // Re-init to pick up the new active address everywhere.
+      await initPopup();
+    } catch (err) {
+      console.warn("[popup] switchAccount threw:", err);
+    }
+  }
+
+  function renderDashboard(data) {
     els.rulesStat.textContent = data?.ruleCount ?? "-";
     els.signersStat.textContent = data?.signerCount ?? "-";
     els.requestsStat.textContent = data?.requestCount ?? "-";
     els.roleStat.textContent = data?.apiKeyRole ?? "-";
-
-    // Prefer the explicit list from getState (usable signers only); fall back
-    // to whatever the dashboard call returned.
-    const list = (fallbackAccounts && fallbackAccounts.length)
-      ? fallbackAccounts
-      : (data?.signers || []);
-    renderAccounts(list);
   }
 
   function renderConnectedState(state) {
@@ -182,7 +220,7 @@
       els.serverUrlDisplay.textContent = config.remoteSignerUrl;
       renderConnectedState(stateResp);
       renderSignerBanner(stateResp.signerStatus);
-      renderAccounts(stateResp.accounts || []);
+      renderAccounts(stateResp.signers || [], stateResp.activeAddress);
 
       const chainIdDecimal = parseInt(stateResp.chainId, 16);
       if (!Number.isNaN(chainIdDecimal)) {
@@ -192,7 +230,7 @@
       // Best-effort dashboard fetch — non-fatal if it fails.
       try {
         const dashboardResp = await send({ type: "popup:getDashboard" });
-        renderDashboard(dashboardResp, stateResp.accounts || []);
+        renderDashboard(dashboardResp);
       } catch (err) {
         console.warn("[popup] dashboard fetch failed:", err);
       }
