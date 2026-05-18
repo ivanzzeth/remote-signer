@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Remote Signer E2E - Uniswap Swap Simulation</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
+    .panel { border: 1px solid #ccc; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+    .panel h3 { margin-top: 0; }
+    pre { background: #f0f0f0; padding: 0.75rem; border-radius: 4px; overflow-x: auto; font-size: 0.85rem; }
+    button { padding: 0.5rem 1rem; margin: 0.25rem; cursor: pointer; border-radius: 4px; border: 1px solid #999; background: #fff; }
+    button:hover { background: #e8e8e8; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .status { display: inline-block; padding: 0.25rem 0.5rem; border-radius: 4px; font-weight: 600; }
+    .status.ok { background: #d4edda; color: #155724; }
+    .status.err { background: #f8d7da; color: #721c24; }
+    .status.pending { background: #fff3cd; color: #856404; }
+    #results { white-space: pre-wrap; word-break: break-word; }
+    #txHashes { white-space: pre-wrap; word-break: break-word; }
+    select, input { padding: 0.5rem; margin: 0.25rem; border-radius: 4px; border: 1px solid #999; font-size: 0.95rem; }
+    .swap-row { display: flex; align-items: center; gap: 0.5rem; margin: 0.5rem 0; }
+    .tx-item { border-left: 3px solid #6c757d; padding-left: 0.5rem; margin: 0.25rem 0; font-size: 0.85rem; }
+    .tx-item.approve { border-left-color: #007bff; }
+    .tx-item.swap { border-left-color: #28a745; }
+  </style>
+</head>
+<body>
+  <h1>Uniswap Swap Simulation</h1>
+  <p>This page simulates the connect &rarr; approve &rarr; swap flow on Uniswap.</p>
+
+  <div class="panel">
+    <h3>Provider State</h3>
+    <p>Available: <span id="providerStatus" class="status pending">checking...</span></p>
+    <p>Chain ID: <span id="chainId">-</span></p>
+    <p>Accounts: <pre id="accounts">-</pre></p>
+    <p>Connected: <span id="connected">-</span></p>
+  </div>
+
+  <div class="panel">
+    <h3>Wallet</h3>
+    <button id="btnConnect">Connect Wallet</button>
+    <span id="walletAddress" style="margin-left: 0.5rem; font-family: monospace;"></span>
+  </div>
+
+  <div class="panel">
+    <h3>Swap</h3>
+    <div class="swap-row">
+      <label>Token In:</label>
+      <select id="tokenIn">
+        <option value="ETH">ETH</option>
+        <option value="USDC">USDC</option>
+        <option value="DAI">DAI</option>
+      </select>
+      <label>Amount:</label>
+      <input id="amountIn" type="text" value="100" style="width: 100px;" />
+    </div>
+    <div class="swap-row">
+      <label>Token Out:</label>
+      <select id="tokenOut">
+        <option value="USDC">USDC</option>
+        <option value="DAI">DAI</option>
+        <option value="ETH" selected>ETH</option>
+      </select>
+    </div>
+    <div class="swap-row" style="gap: 1rem;">
+      <button id="btnApprove">Approve</button>
+      <button id="btnSwap">Swap</button>
+      <button id="btnRejectAndApprove" style="border-color: #dc3545;">Approve (reject by user)</button>
+    </div>
+    <div id="results"></div>
+  </div>
+
+  <div class="panel">
+    <h3>Transaction Hashes</h3>
+    <div id="txHashes"><em>No transactions yet.</em></div>
+  </div>
+
+  <div class="panel">
+    <h3>Event Log</h3>
+    <pre id="eventLog">-</pre>
+  </div>
+
+  <script>
+    (function () {
+      const eventLog = [];
+      function logEvent(name, data) {
+        const entry = new Date().toISOString() + " " + name + " " + JSON.stringify(data);
+        eventLog.unshift(entry);
+        const el = document.getElementById("eventLog");
+        if (el) el.textContent = eventLog.slice(0, 50).join("\n");
+      }
+
+      // Transactions log
+      const txHashes = [];
+      function addTx(type, txHash, label) {
+        txHashes.unshift({ type, txHash, label });
+        const el = document.getElementById("txHashes");
+        el.innerHTML = txHashes.map(t =>
+          '<div class="tx-item ' + t.type + '"><strong>' + t.label + '</strong> ' + t.txHash + '</div>'
+        ).join("");
+      }
+
+      // Poll for provider
+      let checkCount = 0;
+      const checkInterval = setInterval(function () {
+        checkCount++;
+        const provider = window.ethereum;
+        const statusEl = document.getElementById("providerStatus");
+        if (!statusEl) return;
+        if (provider) {
+          clearInterval(checkInterval);
+          statusEl.textContent = "available";
+          statusEl.className = "status ok";
+          document.getElementById("chainId").textContent = provider.chainId || "-";
+          document.getElementById("connected").textContent = String(provider.isConnected ? provider.isConnected() : false);
+
+          if (provider.selectedAddress) {
+            document.getElementById("accounts").textContent = JSON.stringify([provider.selectedAddress]);
+            document.getElementById("walletAddress").textContent = provider.selectedAddress;
+          }
+
+          provider.on("accountsChanged", function (accounts) {
+            logEvent("accountsChanged", accounts);
+            document.getElementById("accounts").textContent = JSON.stringify(accounts);
+            if (accounts && accounts.length) {
+              document.getElementById("walletAddress").textContent = accounts[0];
+            } else {
+              document.getElementById("walletAddress").textContent = "";
+            }
+          });
+          provider.on("chainChanged", function (chainId) {
+            logEvent("chainChanged", chainId);
+            document.getElementById("chainId").textContent = chainId;
+          });
+          provider.on("connect", function (info) {
+            logEvent("connect", info);
+          });
+          provider.on("disconnect", function (error) {
+            logEvent("disconnect", error);
+          });
+        } else if (checkCount > 100) {
+          clearInterval(checkInterval);
+          statusEl.textContent = "unavailable (timeout)";
+          statusEl.className = "status err";
+        }
+      }, 100);
+
+      function showResult(result) {
+        document.getElementById("results").innerHTML = "<pre>" + JSON.stringify(result, null, 2).replace(/</g, "&lt;") + "</pre>";
+      }
+
+      // ── ERC-20 Approve ABI ──────────────────────────────────────────────────
+      // approve(address spender, uint256 amount) — 4-byte selector 095ea7b3
+      function encodeERC20Approve(spender, amount) {
+        var selector = "095ea7b3";
+        var spenderPadded = spender.replace("0x", "").padStart(64, "0");
+        var amountPadded = BigInt(amount).toString(16).padStart(64, "0");
+        return "0x" + selector + spenderPadded + amountPadded;
+      }
+
+      // Uniswap Router and token addresses (test/mainnet-style)
+      var UNISWAP_ROUTER = "0xE592427A0AEce92De3Edee1F18E0157C05861564";
+      var USDC_TOKEN = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
+      var DAI_TOKEN = "0x6B175474E89094C44Da98b954EedeAC495271d0F";
+
+      // ── Connect Wallet ──────────────────────────────────────────────────────
+      document.getElementById("btnConnect").onclick = async function () {
+        var r = await window.ethereum.request({ method: "eth_requestAccounts", params: [] });
+        document.getElementById("accounts").textContent = JSON.stringify(r);
+        if (r && r.length) {
+          document.getElementById("walletAddress").textContent = r[0];
+        }
+        showResult({ ok: true, result: r });
+      };
+
+      // ── Approve ──────────────────────────────────────────────────────────────
+      document.getElementById("btnApprove").onclick = async function () {
+        var accounts = await window.ethereum.request({ method: "eth_accounts", params: [] });
+        if (!accounts || !accounts.length) { showResult({ ok: false, error: "no accounts" }); return; }
+
+        var tokenIn = document.getElementById("tokenIn").value;
+        var amountIn = document.getElementById("amountIn").value;
+
+        // Determine token address
+        var tokenAddress = USDC_TOKEN;
+        if (tokenIn === "DAI") tokenAddress = DAI_TOKEN;
+
+        var approveCalldata = encodeERC20Approve(UNISWAP_ROUTER, amountIn);
+
+        var txParams = {
+          from: accounts[0],
+          to: tokenAddress,
+          data: approveCalldata,
+          value: "0x0"
+        };
+
+        try {
+          var txHash = await window.ethereum.request({ method: "eth_sendTransaction", params: [txParams] });
+          addTx("approve", txHash, "Approve " + tokenIn + " [" + amountIn + "]");
+          showResult({ ok: true, txHash: txHash, label: "Approve " + tokenIn });
+        } catch (err) {
+          showResult({ ok: false, error: { code: err.code, message: err.message } });
+        }
+      };
+
+      // ── Reject scenario: simulate a user rejection ───────────────────────────
+      document.getElementById("btnRejectAndApprove").onclick = async function () {
+        var accounts = await window.ethereum.request({ method: "eth_accounts", params: [] });
+        if (!accounts || !accounts.length) { showResult({ ok: false, error: "no accounts" }); return; }
+
+        var tokenIn = document.getElementById("tokenIn").value;
+        var amountIn = document.getElementById("amountIn").value;
+
+        var tokenAddress = USDC_TOKEN;
+        if (tokenIn === "DAI") tokenAddress = DAI_TOKEN;
+
+        var approveCalldata = encodeERC20Approve(UNISWAP_ROUTER, amountIn);
+
+        var txParams = {
+          from: accounts[0],
+          to: tokenAddress,
+          data: approveCalldata,
+          value: "0x0"
+        };
+
+        // Signal to the test that user should reject, but send anyway
+        // The test can detect this button and validate rejection behavior
+        try {
+          var txHash = await window.ethereum.request({ method: "eth_sendTransaction", params: [txParams] });
+          addTx("approve", txHash, "Approve " + tokenIn + " [" + amountIn + "] (sent despite reject attempt)");
+          showResult({ ok: true, txHash: txHash, label: "Approve " + tokenIn + " (sent)" });
+        } catch (err) {
+          showResult({ ok: false, error: { code: err.code, message: err.message } });
+        }
+      };
+
+      // ── Swap ─────────────────────────────────────────────────────────────────
+      document.getElementById("btnSwap").onclick = async function () {
+        var accounts = await window.ethereum.request({ method: "eth_accounts", params: [] });
+        if (!accounts || !accounts.length) { showResult({ ok: false, error: "no accounts" }); return; }
+
+        var tokenIn = document.getElementById("tokenIn").value;
+        var tokenOut = document.getElementById("tokenOut").value;
+        var amountIn = document.getElementById("amountIn").value;
+
+        // Build swap-like tx params (simulating a Uniswap exactInputSingle call)
+        // Uses WETH address for ETH wrapping
+        var WETH = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
+        var tokenInAddress = USDC_TOKEN;
+        var tokenOutAddress = WETH;
+        if (tokenIn === "DAI") tokenInAddress = DAI_TOKEN;
+        if (tokenOut === "USDC") tokenOutAddress = USDC_TOKEN;
+        if (tokenOut === "DAI") tokenOutAddress = DAI_TOKEN;
+
+        // Simulate swap data (not a real Uniswap exactInput, just realistic-looking tx)
+        var swapData = "0x" +
+          "414bf389" + // exactInputSingle selector (it's what Uniswap V3 uses)
+          "000000000000000000000000" + tokenInAddress.slice(2) +
+          "000000000000000000000000" + tokenOutAddress.slice(2) +
+          "0000000000000000000000000000000000000000000000000000000000000001" + // fee tier
+          "000000000000000000000000" + accounts[0].slice(2) + // recipient
+          BigInt(amountIn).toString(16).padStart(64, "0") + // amountIn
+          "0000000000000000000000000000000000000000000000000000000000000001" + // amountOutMin
+          "0000000000000000000000000000000000000000000000000000000000000000"; // sqrtPriceLimitX96
+
+        var txParams = {
+          from: accounts[0],
+          to: UNISWAP_ROUTER,
+          data: swapData,
+          value: tokenIn === "ETH" ? "0x" + BigInt(amountIn).toString(16) : "0x0"
+        };
+
+        try {
+          var txHash = await window.ethereum.request({ method: "eth_sendTransaction", params: [txParams] });
+          addTx("swap", txHash, "Swap " + amountIn + " " + tokenIn + " → " + tokenOut);
+          showResult({ ok: true, txHash: txHash, label: "Swap " + tokenIn + " → " + tokenOut });
+        } catch (err) {
+          showResult({ ok: false, error: { code: err.code, message: err.message } });
+        }
+      };
+    })();
+  </script>
+</body>
+</html>

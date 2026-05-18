@@ -1,16 +1,19 @@
 {
   "name": "remote-signer-extension",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
-    "prebuild": "npm install"
+    "prebuild": "npm install",
+    "test:e2e": "npm run build && playwright test",
+    "test:integration": "playwright test --grep @integration"
   },
   "dependencies": {
     "remote-signer-client": "^0.2.0"
   },
   "devDependencies": {
-    "esbuild": "^0.28.0"
+    "esbuild": "^0.28.0",
+    "@playwright/test": "^1.52.0"
   }
 }
