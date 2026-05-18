@@ -11,7 +11,7 @@
     "test:live": "LIVE_DAPP_E2E=1 npm run build && LIVE_DAPP_E2E=1 playwright test --grep @live"
   },
   "dependencies": {
-    "remote-signer-client": "^0.2.0"
+    "remote-signer-client": "file:../pkg/js-client"
   },
   "devDependencies": {
     "esbuild": "^0.28.0",
