@@ -173,6 +173,69 @@ function getRpcUrl(chainId: number): string | undefined {
   return chainRegistry.get(chainId)?.rpcUrls?.[0];
 }
 
+// ── Per-origin chain memory ──────────────────────────────────────────────
+//
+// remote-signer is a multi-chain gateway, not a traditional single-chain
+// wallet. There is no reason the extension should impose a global
+// "selectedChain" on every dApp — Polymarket lives on Polygon while
+// Uniswap may be on Mainnet at the same moment. Each origin gets its own
+// chain memory, persisted across SW restarts. The popup's chain chip
+// remains as the default for *new* origins; existing origins remember
+// whatever they (or the user, via popup-driven switch) last chose.
+//
+// Storage shape: { "https://polymarket.com": 137, ... }
+// Stored under a dedicated key so it survives independently of the
+// connection-related config.
+const CHAIN_BY_ORIGIN_KEY = "remote-signer:chainByOrigin";
+let chainByOrigin: Record<string, number> = {};
+let chainByOriginLoaded = false;
+
+async function ensureChainByOriginLoaded(): Promise<void> {
+  if (chainByOriginLoaded) return;
+  await new Promise<void>((resolve) =>
+    chrome.storage.local.get(CHAIN_BY_ORIGIN_KEY, (r) => {
+      const raw = r[CHAIN_BY_ORIGIN_KEY];
+      if (raw && typeof raw === "object") {
+        for (const [k, v] of Object.entries(raw)) {
+          if (typeof v === "number" && v > 0) chainByOrigin[k] = v;
+        }
+      }
+      chainByOriginLoaded = true;
+      resolve();
+    })
+  );
+}
+
+async function persistChainByOrigin(): Promise<void> {
+  try {
+    await chrome.storage.local.set({ [CHAIN_BY_ORIGIN_KEY]: chainByOrigin });
+  } catch {
+    /* best-effort */
+  }
+}
+
+function normalizeOrigin(senderUrl: string | undefined): string | null {
+  if (!senderUrl) return null;
+  try {
+    const u = new URL(senderUrl);
+    // Match what dApps see as window.origin: scheme + host + (port).
+    return u.origin;
+  } catch {
+    return null;
+  }
+}
+
+function getChainForOrigin(origin: string | null): number {
+  if (origin && chainByOrigin[origin]) return chainByOrigin[origin];
+  return cachedConfig.selectedChain || 1;
+}
+
+async function setChainForOrigin(origin: string, chainId: number): Promise<void> {
+  if (chainByOrigin[origin] === chainId) return;
+  chainByOrigin[origin] = chainId;
+  await persistChainByOrigin();
+}
+
 function rpcOverridesFromRegistry(): Record<number, string> {
   const out: Record<number, string> = {};
   for (const [chainId, cfg] of chainRegistry) {
@@ -416,7 +479,13 @@ async function initProvider(): Promise<void> {
   console.log("  - Chain ID:", provider.chainId);
 
   // Forward provider events to all tabs so dApps see them.
-  const events = ["accountsChanged", "chainChanged", "connect", "disconnect"];
+  //
+  // `chainChanged` is intentionally NOT forwarded globally: chain state
+  // is per-origin (see broadcastEventToOrigin in wallet_switchEthereumChain),
+  // so a switch driven by one dApp must NOT ripple into other open dApp
+  // tabs. The popup's chain-chip change still propagates because the
+  // popup goes through its own dedicated message path.
+  const events = ["accountsChanged", "connect", "disconnect"];
   for (const event of events) {
     provider.on(event, (data: unknown) => {
       broadcastEvent(event, data);
@@ -435,6 +504,27 @@ function ensureInit(): Promise<void> {
 }
 
 // ── Event Broadcasting ───────────────────────────────────────────────────
+
+async function broadcastEventToOrigin(origin: string, event: string, data: unknown) {
+  // Per-origin broadcast: only tabs whose page is on `origin` get the
+  // event. Used for chainChanged after wallet_switchEthereumChain, so a
+  // switch on polymarket.com doesn't ripple into an unrelated Uniswap
+  // tab and trip ITS wagmi's chain check.
+  try {
+    const tabs = await chrome.tabs.query({});
+    for (const tab of tabs) {
+      if (tab.id == null || !tab.url) continue;
+      try {
+        if (new URL(tab.url).origin !== origin) continue;
+      } catch {
+        continue;
+      }
+      chrome.tabs
+        .sendMessage(tab.id, { type: "web3-eip1193-event", event, data })
+        .catch(() => {});
+    }
+  } catch {}
+}
 
 async function broadcastEvent(event: string, data: unknown) {
   try {
@@ -536,11 +626,25 @@ function handleAddEthereumChain(params: unknown): { result?: null; error?: RpcEr
  * Returns { handled: false } to fall through to the SDK.
  */
 async function tryHandleExtraMethod(
-  msg: EIP1193Request
+  msg: EIP1193Request,
+  origin: string | null
 ): Promise<{ handled: false } | { handled: true; result?: unknown; error?: RpcError }> {
   const { method, params } = msg;
 
   switch (method) {
+    // ── Chain identity (per-origin) ───────────────────────────────────────
+    // Return the chain THIS origin last used, not a global state. dApps
+    // like Polymarket (Polygon) and Uniswap (Mainnet) can run concurrently
+    // without the extension forcing them onto a single chain.
+    case "eth_chainId":
+    case "net_version": {
+      const chainId = getChainForOrigin(origin);
+      return {
+        handled: true,
+        result: method === "net_version" ? String(chainId) : `0x${chainId.toString(16)}`,
+      };
+    }
+
     // ── Legacy / informational ─────────────────────────────────────────────
     case "web3_clientVersion":
       return { handled: true, result: CLIENT_VERSION_STRING };
@@ -587,8 +691,19 @@ async function tryHandleExtraMethod(
           error: { code: 4902, message: `Unrecognized chain ID "${chainIdHex}". Try adding the chain with wallet_addEthereumChain.` },
         };
       }
-      // Chain is known — let the SDK perform the actual switch.
-      return { handled: false };
+      // Persist this dApp's chain choice. Only THIS origin's view changes;
+      // other open dApps keep whatever chain they were on. Then notify the
+      // origin's own tabs via a scoped chainChanged so wagmi/viem update
+      // their connector cache without confusing concurrent dApps.
+      if (origin) {
+        await setChainForOrigin(origin, chainId);
+        broadcastEventToOrigin(origin, "chainChanged", chainIdHex.toLowerCase());
+      }
+      // We intentionally do NOT delegate to the SDK's wallet_switchEthereumChain
+      // here — that would mutate the SDK's single global chainId and leak
+      // the switch to every other open dApp. Per-origin scoping is the
+      // whole point of this refactor.
+      return { handled: true, result: null };
     }
 
     // ── Forwarded read / send methods ─────────────────────────────────────
@@ -607,8 +722,9 @@ async function tryHandleExtraMethod(
   }
 }
 
-async function handleEIP1193Request(msg: EIP1193Request) {
+async function handleEIP1193Request(msg: EIP1193Request, origin: string | null) {
   await ensureInit();
+  await ensureChainByOriginLoaded();
 
   if (initError) {
     return {
@@ -627,7 +743,7 @@ async function handleEIP1193Request(msg: EIP1193Request) {
   }
 
   // Pre-SDK dispatch for MetaMask-compatible methods the SDK doesn't cover.
-  const extra = await tryHandleExtraMethod(msg);
+  const extra = await tryHandleExtraMethod(msg, origin);
   if (extra.handled) {
     if (extra.error) {
       return { type: "web3-eip1193-response", id: msg.id, error: extra.error };
@@ -635,6 +751,13 @@ async function handleEIP1193Request(msg: EIP1193Request) {
     return { type: "web3-eip1193-response", id: msg.id, result: extra.result };
   }
 
+  // Methods that carry their own chainId in the request (sendTransaction
+  // tx.chainId, signTypedData_v4 domain.chainId) are honored by the
+  // backend regardless of the SDK's global chain state — so multi-chain
+  // signing already works at the gateway layer. personal_sign and
+  // eth_sign are chain-agnostic at the cryptographic level. The
+  // remaining "current chain" use is for the dApp's own eth_chainId
+  // queries, which the per-origin pre-SDK dispatch already handles.
   try {
     const result = await provider.request({
       method: msg.method,
@@ -658,15 +781,16 @@ async function handleEIP1193Request(msg: EIP1193Request) {
   }
 }
 
-async function handleGetState(id: string) {
+async function handleGetState(id: string, origin: string | null) {
   await ensureInit();
+  await ensureChainByOriginLoaded();
 
   if (!provider) {
     return {
       type: "web3-state-response",
       id,
       accounts: [],
-      chainId: "0x1",
+      chainId: `0x${(getChainForOrigin(origin)).toString(16)}`,
       isConnected: false,
     };
   }
@@ -682,7 +806,8 @@ async function handleGetState(id: string) {
     type: "web3-state-response",
     id,
     accounts,
-    chainId: provider.chainId,
+    // Return the chain THIS origin sees, not the SDK's global state.
+    chainId: `0x${(getChainForOrigin(origin)).toString(16)}`,
     isConnected: provider.isConnected(),
   };
 }
@@ -1086,10 +1211,14 @@ async function handlePopupSwitchAccount(msg: PopupSwitchAccount) {
 // ── Main Message Handler ─────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener(
-  (message: IncomingMessage, _sender, sendResponse) => {
+  (message: IncomingMessage, sender, sendResponse) => {
     // ── EIP-1193 ──────────────────────────────────────────────────────
     if (message.type === "web3-eip1193-request") {
-      handleEIP1193Request(message)
+      // Tab-scoped sender → origin. The popup speaks via chrome.runtime
+      // (no tab), so origin is null for those messages — per-origin
+      // chain only applies to real dApp pages.
+      const origin = normalizeOrigin(sender.tab?.url ?? sender.url);
+      handleEIP1193Request(message, origin)
         .then(sendResponse)
         .catch((err) => {
           sendResponse({
@@ -1105,7 +1234,8 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (message.type === "web3-get-state") {
-      handleGetState(message.id)
+      const origin = normalizeOrigin(sender.tab?.url ?? sender.url);
+      handleGetState(message.id, origin)
         .then(sendResponse)
         .catch((err) => {
           sendResponse({

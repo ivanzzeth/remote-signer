@@ -52,29 +52,26 @@ test.describe("Chain persistence across SW restart (@integration)", () => {
     // The chainChanged listener writes back asynchronously — give it a tick.
     await dapp.waitForTimeout(500);
 
-    // Inspect the SDK's own ProviderStorage slot — the canonical source
-    // of truth for chainId / activeAddress. The extension wires the SDK
-    // to a chrome.storage.local-backed adapter under
-    // `remote-signer:provider:<apiKeyId>`.
+    // Chain memory is per-origin now (see chain-per-origin.spec.ts for the
+    // multi-dApp invariant). Inspect the dedicated map under
+    // `remote-signer:chainByOrigin`.
+    const dappOrigin = await dapp.evaluate(() => window.location.origin);
     const popup2 = await context.newPage();
     await popup2.goto(`chrome-extension://${extensionId}/popup/popup.html`);
     await popup2.waitForSelector("#app");
     const storedChain = await popup2.evaluate(
-      (apiKeyId) =>
+      (origin) =>
         new Promise<number | null>((resolve) => {
-          const key = `remote-signer:provider:${apiKeyId}`;
-          chrome.storage.local.get(key, (r) => {
-            const raw = r[key];
-            if (typeof raw !== "string") return resolve(null);
-            try {
-              const parsed = JSON.parse(raw);
-              resolve(typeof parsed?.chainId === "number" ? parsed.chainId : null);
-            } catch {
+          chrome.storage.local.get("remote-signer:chainByOrigin", (r) => {
+            const map = r["remote-signer:chainByOrigin"];
+            if (map && typeof map === "object" && typeof map[origin] === "number") {
+              resolve(map[origin]);
+            } else {
               resolve(null);
             }
           });
         }),
-      serverInfo.admin_api_key_id
+      dappOrigin
     );
     expect(storedChain).toBe(137);
     await popup2.close();

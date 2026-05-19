@@ -1095,6 +1095,17 @@
         );
       }
       if (waitForApproval && (response.status === "pending" || response.status === "authorizing")) {
+        if (this.onPendingApproval) {
+          try {
+            await Promise.resolve(
+              this.onPendingApproval(response.request_id, {
+                signRequest: request,
+                status: response.status
+              })
+            );
+          } catch {
+          }
+        }
         return this.pollForResult(response.request_id);
       }
       throw new SignError(
@@ -2814,6 +2825,48 @@
   function getRpcUrl(chainId) {
     return chainRegistry.get(chainId)?.rpcUrls?.[0];
   }
+  var CHAIN_BY_ORIGIN_KEY = "remote-signer:chainByOrigin";
+  var chainByOrigin = {};
+  var chainByOriginLoaded = false;
+  async function ensureChainByOriginLoaded() {
+    if (chainByOriginLoaded) return;
+    await new Promise(
+      (resolve) => chrome.storage.local.get(CHAIN_BY_ORIGIN_KEY, (r) => {
+        const raw = r[CHAIN_BY_ORIGIN_KEY];
+        if (raw && typeof raw === "object") {
+          for (const [k, v] of Object.entries(raw)) {
+            if (typeof v === "number" && v > 0) chainByOrigin[k] = v;
+          }
+        }
+        chainByOriginLoaded = true;
+        resolve();
+      })
+    );
+  }
+  async function persistChainByOrigin() {
+    try {
+      await chrome.storage.local.set({ [CHAIN_BY_ORIGIN_KEY]: chainByOrigin });
+    } catch {
+    }
+  }
+  function normalizeOrigin(senderUrl) {
+    if (!senderUrl) return null;
+    try {
+      const u = new URL(senderUrl);
+      return u.origin;
+    } catch {
+      return null;
+    }
+  }
+  function getChainForOrigin(origin) {
+    if (origin && chainByOrigin[origin]) return chainByOrigin[origin];
+    return cachedConfig.selectedChain || 1;
+  }
+  async function setChainForOrigin(origin, chainId) {
+    if (chainByOrigin[origin] === chainId) return;
+    chainByOrigin[origin] = chainId;
+    await persistChainByOrigin();
+  }
   function rpcOverridesFromRegistry() {
     const out = {};
     for (const [chainId, cfg] of chainRegistry) {
@@ -2987,7 +3040,7 @@
     console.log("  - Connected:", provider.isConnected());
     console.log("  - Active account:", provider.selectedAddress);
     console.log("  - Chain ID:", provider.chainId);
-    const events = ["accountsChanged", "chainChanged", "connect", "disconnect"];
+    const events = ["accountsChanged", "connect", "disconnect"];
     for (const event of events) {
       provider.on(event, (data) => {
         broadcastEvent(event, data);
@@ -3002,6 +3055,22 @@
       });
     }
     return initPromise;
+  }
+  async function broadcastEventToOrigin(origin, event, data) {
+    try {
+      const tabs = await chrome.tabs.query({});
+      for (const tab of tabs) {
+        if (tab.id == null || !tab.url) continue;
+        try {
+          if (new URL(tab.url).origin !== origin) continue;
+        } catch {
+          continue;
+        }
+        chrome.tabs.sendMessage(tab.id, { type: "web3-eip1193-event", event, data }).catch(() => {
+        });
+      }
+    } catch {
+    }
   }
   async function broadcastEvent(event, data) {
     try {
@@ -3071,9 +3140,21 @@
     });
     return { result: null };
   }
-  async function tryHandleExtraMethod(msg) {
+  async function tryHandleExtraMethod(msg, origin) {
     const { method, params } = msg;
     switch (method) {
+      // ── Chain identity (per-origin) ───────────────────────────────────────
+      // Return the chain THIS origin last used, not a global state. dApps
+      // like Polymarket (Polygon) and Uniswap (Mainnet) can run concurrently
+      // without the extension forcing them onto a single chain.
+      case "eth_chainId":
+      case "net_version": {
+        const chainId = getChainForOrigin(origin);
+        return {
+          handled: true,
+          result: method === "net_version" ? String(chainId) : `0x${chainId.toString(16)}`
+        };
+      }
       // ── Legacy / informational ─────────────────────────────────────────────
       case "web3_clientVersion":
         return { handled: true, result: CLIENT_VERSION_STRING };
@@ -3109,7 +3190,11 @@
             error: { code: 4902, message: `Unrecognized chain ID "${chainIdHex}". Try adding the chain with wallet_addEthereumChain.` }
           };
         }
-        return { handled: false };
+        if (origin) {
+          await setChainForOrigin(origin, chainId);
+          broadcastEventToOrigin(origin, "chainChanged", chainIdHex.toLowerCase());
+        }
+        return { handled: true, result: null };
       }
       // ── Forwarded read / send methods ─────────────────────────────────────
       // The SDK enumerates most read methods but misses these. Forward to the
@@ -3125,8 +3210,9 @@
         return { handled: false };
     }
   }
-  async function handleEIP1193Request(msg) {
+  async function handleEIP1193Request(msg, origin) {
     await ensureInit();
+    await ensureChainByOriginLoaded();
     if (initError) {
       return {
         type: "web3-eip1193-response",
@@ -3141,7 +3227,7 @@
         error: { code: -32603, message: "Provider not initialized" }
       };
     }
-    const extra = await tryHandleExtraMethod(msg);
+    const extra = await tryHandleExtraMethod(msg, origin);
     if (extra.handled) {
       if (extra.error) {
         return { type: "web3-eip1193-response", id: msg.id, error: extra.error };
@@ -3170,14 +3256,15 @@
       };
     }
   }
-  async function handleGetState(id) {
+  async function handleGetState(id, origin) {
     await ensureInit();
+    await ensureChainByOriginLoaded();
     if (!provider) {
       return {
         type: "web3-state-response",
         id,
         accounts: [],
-        chainId: "0x1",
+        chainId: `0x${getChainForOrigin(origin).toString(16)}`,
         isConnected: false
       };
     }
@@ -3192,7 +3279,8 @@
       type: "web3-state-response",
       id,
       accounts,
-      chainId: provider.chainId,
+      // Return the chain THIS origin sees, not the SDK's global state.
+      chainId: `0x${getChainForOrigin(origin).toString(16)}`,
       isConnected: provider.isConnected()
     };
   }
@@ -3510,9 +3598,10 @@
     return { type: "popup:accountSwitched", ok: true, address: provider.selectedAddress };
   }
   chrome.runtime.onMessage.addListener(
-    (message, _sender, sendResponse) => {
+    (message, sender, sendResponse) => {
       if (message.type === "web3-eip1193-request") {
-        handleEIP1193Request(message).then(sendResponse).catch((err2) => {
+        const origin = normalizeOrigin(sender.tab?.url ?? sender.url);
+        handleEIP1193Request(message, origin).then(sendResponse).catch((err2) => {
           sendResponse({
             type: "web3-eip1193-response",
             id: message.id,
@@ -3525,7 +3614,8 @@
         return true;
       }
       if (message.type === "web3-get-state") {
-        handleGetState(message.id).then(sendResponse).catch((err2) => {
+        const origin = normalizeOrigin(sender.tab?.url ?? sender.url);
+        handleGetState(message.id, origin).then(sendResponse).catch((err2) => {
           sendResponse({
             type: "web3-state-response",
             id: message.id,
