@@ -381,6 +381,43 @@ async function initProvider(): Promise<void> {
       broadcastEvent(event, data);
     });
   }
+
+  // Persist state-changing events so user choices survive an MV3
+  // service-worker suspension. Without this, the SDK's in-memory state
+  // wins for the current session but gets clobbered on next SW resume
+  // when we re-init from chrome.storage.local. Symptoms we've seen:
+  //   - wallet_switchEthereumChain(137) survives only until SW restart,
+  //     then wagmi sees chain 1 and throws ConnectorChainMismatchError
+  //     (Polymarket "Request Cancelled" after manual approval).
+  //   - SDK-side account changes (e.g. switchAccount triggered from
+  //     somewhere other than the popup) revert to the default signer on
+  //     SW resume, so a dApp that already cached the new address sees
+  //     accountsChanged go backwards on reconnect.
+  provider.on("chainChanged", async (chainIdHex: unknown) => {
+    if (typeof chainIdHex !== "string") return;
+    const newChainId = parseInt(chainIdHex, 16);
+    if (!Number.isFinite(newChainId) || newChainId <= 0) return;
+    if (cachedConfig.selectedChain === newChainId) return;
+    cachedConfig.selectedChain = newChainId;
+    try {
+      await chrome.storage.local.set({ [configKey()]: cachedConfig });
+    } catch (err) {
+      console.error("[background] Failed to persist chainChanged:", err);
+    }
+  });
+
+  provider.on("accountsChanged", async (accounts: unknown) => {
+    if (!Array.isArray(accounts) || accounts.length === 0) return;
+    const active = typeof accounts[0] === "string" ? (accounts[0] as string).toLowerCase() : undefined;
+    if (!active) return;
+    if (cachedConfig.activeSignerAddress?.toLowerCase() === active) return;
+    cachedConfig.activeSignerAddress = active;
+    try {
+      await chrome.storage.local.set({ [configKey()]: cachedConfig });
+    } catch (err) {
+      console.error("[background] Failed to persist accountsChanged:", err);
+    }
+  });
 }
 
 function ensureInit(): Promise<void> {
