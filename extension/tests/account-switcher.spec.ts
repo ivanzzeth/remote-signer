@@ -8,7 +8,12 @@
  * in afterAll so subsequent specs see the original single-signer state.
  */
 import { test, expect, type BrowserContext, type Page } from "./fixtures";
-import { injectStorageConfig, adminClient } from "./helpers";
+import {
+  injectStorageConfig,
+  adminClient,
+  openDappAndWaitForProvider,
+  dappEIP1193Call,
+} from "./helpers";
 
 async function openConfiguredPopup(context: BrowserContext, extensionId: string, serverInfo: any): Promise<Page> {
   const popup = await context.newPage();
@@ -159,5 +164,69 @@ test.describe("Account switcher (real backend) (@integration)", () => {
     await expect(popup2.locator("#connectedView")).toBeVisible({ timeout: 15_000 });
     await expect(popup2.locator(`.account-item[data-address="${target}"]`)).toHaveClass(/account-item--active/);
     await popup2.close();
+  });
+
+  // This is the test that protects against the bug where popup switches the
+  // active signer but the dApp's window.ethereum doesn't see it — leading
+  // to "Polymarket signs with stale account, server rejects, dApp shows
+  // 'Request Cancelled'" symptom. The popup's UI was always updating; the
+  // bug (if it exists) is whether the SW's accountsChanged broadcast lands
+  // on each open dApp tab.
+  test("popup switch propagates accountsChanged to an open dApp tab", async ({ context, extensionId, serverInfo }) => {
+    // Configure first so the provider has signers loaded.
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/popup/popup.html`);
+    await popup.waitForSelector("#app");
+    await injectStorageConfig(popup, {
+      remoteSignerUrl: serverInfo.base_url,
+      apiKeyId: serverInfo.admin_api_key_id,
+      apiKeyPrivateKey: serverInfo.admin_api_key_hex,
+    });
+    await popup.reload();
+    await expect(popup.locator("#connectedView")).toBeVisible({ timeout: 15_000 });
+
+    // Open dApp after config so window.ethereum is wired.
+    const dapp = await context.newPage();
+    await openDappAndWaitForProvider(dapp);
+
+    // Establish baseline: ask the dApp what it sees right now.
+    const beforeAccounts = await dappEIP1193Call(dapp, "eth_requestAccounts");
+    expect(beforeAccounts.ok).toBe(true);
+    const initialActive: string = (beforeAccounts.result as string[])[0];
+
+    // Pick a switch target the popup considers usable.
+    const target = initialActive.toLowerCase() === serverInfo.signer_address.toLowerCase()
+      ? keystoreAddr
+      : serverInfo.signer_address;
+
+    // Have the dApp page record accountsChanged events into a global so we
+    // can assert on it after the switch.
+    await dapp.evaluate(() => {
+      (window as any).__accountsChangedLog = [];
+      window.ethereum!.on("accountsChanged", (accounts: any) => {
+        (window as any).__accountsChangedLog.push(accounts);
+      });
+    });
+
+    // Switch via the popup row click — the same path a user takes.
+    await popup.locator(`.account-item[data-address="${target}"]`).click();
+    await expect(popup.locator(`.account-item[data-address="${target}"]`)).toHaveClass(/account-item--active/, { timeout: 10_000 });
+
+    // Give the broadcast a moment to land.
+    await dapp.waitForTimeout(500);
+
+    // The dApp should have heard accountsChanged with the new active first.
+    const log = await dapp.evaluate(() => (window as any).__accountsChangedLog as string[][]);
+    expect(log.length).toBeGreaterThan(0);
+    const newAccounts = log[log.length - 1];
+    expect(newAccounts[0].toLowerCase()).toBe(target.toLowerCase());
+
+    // And eth_accounts now returns the switched signer first.
+    const afterAccounts = await dappEIP1193Call(dapp, "eth_accounts");
+    expect(afterAccounts.ok).toBe(true);
+    expect((afterAccounts.result as string[])[0].toLowerCase()).toBe(target.toLowerCase());
+
+    await popup.close();
+    await dapp.close();
   });
 });
