@@ -27,6 +27,23 @@ async function globalTeardown(_config: FullConfig) {
     });
     console.log("[global-teardown] Server stopped");
   }
+
+  const anvil = globalThis.__anvilProcess;
+  if (anvil?.pid) {
+    console.log("[global-teardown] Stopping anvil...");
+    anvil.kill("SIGTERM");
+    await new Promise<void>((resolve) => {
+      const timeout = setTimeout(() => {
+        anvil.kill("SIGKILL");
+        resolve();
+      }, 5_000);
+      anvil.on("close", () => {
+        clearTimeout(timeout);
+        resolve();
+      });
+    });
+    console.log("[global-teardown] Anvil stopped");
+  }
 }
 
 export default globalTeardown;

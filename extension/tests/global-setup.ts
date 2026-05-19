@@ -16,17 +16,80 @@ interface E2EServerInfo {
   non_admin_api_key_id: string;
   non_admin_api_key_hex: string;
   signer_address: string;
+  anvil_url?: string;
+  anvil_chain_id?: number;
 }
 
 declare global {
   var __e2eServerProcess: ChildProcess | undefined;
   var __e2eServerInfo: E2EServerInfo | undefined;
   var __dappServer: http.Server | undefined;
+  var __anvilProcess: ChildProcess | undefined;
+}
+
+// Spawn anvil on a free port so signing+broadcast tests can hit a real RPC
+// without leaving the host. We use Anvil's default mnemonic so its accounts
+// match the testSigner private key the remote-signer already holds — that
+// means signed txs land at an address with plenty of ETH on the local chain.
+async function startAnvil(): Promise<{ url: string; chainId: number; proc: ChildProcess } | null> {
+  // Probe for the binary. Skip if missing — non-tx tests still run.
+  let anvilBin: string | undefined;
+  try {
+    const which = spawn("which", ["anvil"], { stdio: ["ignore", "pipe", "ignore"] });
+    anvilBin = await new Promise<string | undefined>((resolve) => {
+      let buf = "";
+      which.stdout?.on("data", (d: Buffer) => { buf += d.toString(); });
+      which.on("close", () => resolve(buf.trim() || undefined));
+    });
+  } catch {}
+  if (!anvilBin) {
+    console.log("[global-setup] anvil not found on PATH — eth_sendTransaction tests will skip");
+    return null;
+  }
+
+  // Find a free port for anvil (also gives us the URL).
+  const portServer = http.createServer();
+  const port = await new Promise<number>((resolve) => {
+    portServer.listen(0, "127.0.0.1", () => {
+      const addr = portServer.address();
+      resolve(typeof addr === "object" && addr ? addr.port : 0);
+      portServer.close();
+    });
+  });
+  const url = `http://127.0.0.1:${port}`;
+  const chainId = 31337;
+
+  const proc = spawn(anvilBin, ["--port", String(port), "--chain-id", String(chainId), "--silent"], {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  // Wait until anvil's HTTP endpoint accepts a request.
+  for (let i = 0; i < 50; i++) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_chainId", params: [] }),
+      });
+      if (res.ok) {
+        console.log(`[global-setup] anvil ready at ${url} (chainId ${chainId})`);
+        return { url, chainId, proc };
+      }
+    } catch {}
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  proc.kill();
+  console.warn("[global-setup] anvil did not become ready in 5s — eth_sendTransaction tests will skip");
+  return null;
 }
 
 async function globalSetup(_config: FullConfig) {
   const projectRoot = path.resolve(__dirname, "..", "..");
   const bin = path.join(projectRoot, ".e2e-test-server");
+
+  const anvil = await startAnvil();
+  if (anvil) {
+    globalThis.__anvilProcess = anvil.proc;
+  }
 
   // Build the launcher
   await new Promise<void>((resolve, reject) => {
@@ -97,6 +160,18 @@ async function globalSetup(_config: FullConfig) {
   const dappHtml = generateDappPage(info);
   fs.writeFileSync(path.join(outDir, "dapp-test-page.html"), dappHtml);
 
+  // Copy static dApp fixtures (e.g. swap-page.html) into the served dir so
+  // MV3 content scripts inject window.ethereum on them too. file:// pages
+  // don't get the content script; tests that load swap-page.html via file://
+  // hit the 15s waitForFunction timeout, which cascades into 60s per test
+  // and drags the whole suite to a crawl.
+  const fixturesDir = path.join(__dirname, "dapp");
+  if (fs.existsSync(fixturesDir)) {
+    for (const entry of fs.readdirSync(fixturesDir)) {
+      fs.copyFileSync(path.join(fixturesDir, entry), path.join(outDir, entry));
+    }
+  }
+
   // Start a static HTTP file server to serve dApp pages (file:// doesn't work with MV3 content scripts)
   const dappServer = http.createServer((req, res) => {
     let filePath = path.join(outDir, req.url === "/" ? "dapp-test-page.html" : req.url!);
@@ -127,9 +202,18 @@ async function globalSetup(_config: FullConfig) {
 
   globalThis.__dappServer = dappServer;
   globalThis.__e2eServerInfo!.dapp_url = `http://127.0.0.1:${dappPort}`;
+  if (anvil) {
+    globalThis.__e2eServerInfo!.anvil_url = anvil.url;
+    globalThis.__e2eServerInfo!.anvil_chain_id = anvil.chainId;
+  }
 
   // Re-write server.json with dapp_url now included
-  const fullInfo = { ...info, dapp_url: globalThis.__e2eServerInfo!.dapp_url };
+  const fullInfo = {
+    ...info,
+    dapp_url: globalThis.__e2eServerInfo!.dapp_url,
+    anvil_url: globalThis.__e2eServerInfo!.anvil_url,
+    anvil_chain_id: globalThis.__e2eServerInfo!.anvil_chain_id,
+  };
   fs.writeFileSync(path.join(outDir, "server.json"), JSON.stringify(fullInfo, null, 2));
 
   console.log(`[global-setup] DApp file server ready at http://127.0.0.1:${dappPort}`);
