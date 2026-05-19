@@ -17,6 +17,10 @@ export interface E2EServerInfo {
   non_admin_api_key_id: string;
   non_admin_api_key_hex: string;
   signer_address: string;
+  /** Anvil RPC URL — present when global-setup found anvil on PATH. */
+  anvil_url?: string;
+  /** Anvil chain ID (31337 by default). */
+  anvil_chain_id?: number;
 }
 
 export interface ExtensionFixtures {

@@ -108,6 +108,42 @@ export async function openDappAndWaitForProvider(page: Page, timeout = 15_000): 
   await page.waitForFunction(() => !!window.ethereum, { timeout });
 }
 
+/**
+ * Add + switch the active chain to the local anvil instance started by
+ * global-setup. Tests that broadcast transactions call this after opening
+ * the dApp so eth_sendTransaction lands on a real-but-local RPC instead of
+ * the public default (which would rate-limit / reject for lack of funds).
+ *
+ * Returns false when global-setup didn't find anvil on PATH — callers can
+ * use that to skip themselves rather than fail with "no RPC".
+ */
+export async function switchToAnvil(page: Page, serverInfo: {
+  anvil_url?: string;
+  anvil_chain_id?: number;
+}): Promise<boolean> {
+  if (!serverInfo.anvil_url) return false;
+  // Reset anvil state first so each test starts from a clean nonce/block
+  // height — otherwise tests bleed into each other ("nonce too low") as
+  // soon as more than one of them broadcasts.
+  await fetch(serverInfo.anvil_url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "anvil_reset", params: [] }),
+  }).catch(() => {});
+
+  const chainIdHex = "0x" + (serverInfo.anvil_chain_id ?? 31337).toString(16);
+  await dappEIP1193Call(page, "wallet_addEthereumChain", {
+    chainId: chainIdHex,
+    chainName: "Anvil",
+    rpcUrls: [serverInfo.anvil_url],
+    nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+  });
+  const switched = await dappEIP1193Call(page, "wallet_switchEthereumChain", {
+    chainId: chainIdHex,
+  });
+  return switched.ok === true;
+}
+
 /** Call an EIP-1193 method on the dApp page and return the result */
 export async function dappEIP1193Call(
   page: Page,
