@@ -5,6 +5,7 @@
 
 import { RemoteSigner } from "./remote_signer";
 import { ProviderRpcError, providerErrors } from "./provider-errors";
+import type { Transaction } from "./types";
 import type {
   EIP1193ProviderConfig,
   SignersSource,
@@ -12,6 +13,48 @@ import type {
   ProviderConnectInfo,
   ProviderMessage,
 } from "./provider-types";
+
+/**
+ * EIP-1193 transactions arrive with hex-encoded quantity fields (value, gas,
+ * nonce, gasPrice, maxFeePerGas, maxPriorityFeePerGas). Our SDK + backend
+ * use decimal strings for big numbers and Go uint64 for gas/nonce. Convert
+ * at the IO boundary so the rest of the pipeline never has to think about
+ * which encoding it received.
+ */
+function normalizeEip1193Tx(tx: any): Transaction {
+  const hexToDec = (v: any): string | undefined => {
+    if (v == null) return undefined;
+    if (typeof v === "string") {
+      if (v.startsWith("0x") || v.startsWith("0X")) return BigInt(v).toString(10);
+      return v;
+    }
+    if (typeof v === "number" || typeof v === "bigint") return BigInt(v).toString(10);
+    return String(v);
+  };
+  const hexToNum = (v: any): number | undefined => {
+    if (v == null) return undefined;
+    if (typeof v === "number") return v;
+    if (typeof v === "string") {
+      return v.startsWith("0x") || v.startsWith("0X") ? Number(BigInt(v)) : Number(v);
+    }
+    return Number(v);
+  };
+
+  const hasMaxFee = tx.maxFeePerGas != null || tx.maxPriorityFeePerGas != null;
+  const out: Transaction = {
+    to: tx.to,
+    value: hexToDec(tx.value) ?? "0",
+    data: tx.data ?? tx.input,
+    nonce: hexToNum(tx.nonce),
+    // EIP-1193 uses "gas"; our struct names it the same.
+    gas: hexToNum(tx.gas ?? tx.gasLimit) ?? 0,
+    txType: tx.txType ?? (hasMaxFee ? "eip1559" : "legacy"),
+  };
+  if (tx.gasPrice != null) out.gasPrice = hexToDec(tx.gasPrice);
+  if (tx.maxFeePerGas != null) out.gasFeeCap = hexToDec(tx.maxFeePerGas);
+  if (tx.maxPriorityFeePerGas != null) out.gasTipCap = hexToDec(tx.maxPriorityFeePerGas);
+  return out;
+}
 
 /**
  * EIP-1193 compliant Ethereum Provider with multi-account support
@@ -420,10 +463,11 @@ export class EIP1193Provider {
           );
         }
 
-        const signedTx = await signer.signTransaction(tx);
+        const rpcUrl = await this._getRpcUrl();
+        const filled = await this._fillTxDefaults(tx, signer.address, rpcUrl);
+        const signedTx = await signer.signTransaction(normalizeEip1193Tx(filled));
 
         // Broadcast via RPC
-        const rpcUrl = await this._getRpcUrl();
         const response = await fetch(rpcUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -452,7 +496,7 @@ export class EIP1193Provider {
           );
         }
 
-        return await signer.signTransaction(tx);
+        return await signer.signTransaction(normalizeEip1193Tx(tx));
       }
 
       // Read methods - delegate to RPC provider
@@ -554,6 +598,39 @@ export class EIP1193Provider {
     }
 
     return rpcUrl;
+  }
+
+  /**
+   * Fill in transaction defaults that dApps routinely omit — gas, gasPrice
+   * (or EIP-1559 caps), and nonce. The remote-signer backend signs whatever
+   * we hand it, so we have to mimic the same auto-fill MetaMask performs
+   * client-side before signing. Missing fields are fetched from the chain
+   * RPC; values the caller supplied are preserved as-is.
+   */
+  private async _fillTxDefaults(tx: any, fromAddr: string, rpcUrl: string): Promise<any> {
+    const filled = { ...tx, from: tx.from ?? fromAddr };
+    const rpc = async (method: string, params: any[]): Promise<any> => {
+      const res = await fetch(rpcUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: Date.now(), method, params }),
+      });
+      const json: any = await res.json();
+      if (json.error) throw new Error(`${method}: ${json.error.message}`);
+      return json.result;
+    };
+
+    if (filled.nonce == null) {
+      filled.nonce = await rpc("eth_getTransactionCount", [fromAddr, "pending"]);
+    }
+    if (filled.gas == null && filled.gasLimit == null) {
+      filled.gas = await rpc("eth_estimateGas", [{ ...filled, from: fromAddr }]);
+    }
+    const hasFeeCap = filled.maxFeePerGas != null || filled.maxPriorityFeePerGas != null;
+    if (filled.gasPrice == null && !hasFeeCap) {
+      filled.gasPrice = await rpc("eth_gasPrice", []);
+    }
+    return filled;
   }
 
   /**
