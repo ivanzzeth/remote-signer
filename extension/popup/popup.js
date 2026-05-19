@@ -582,6 +582,226 @@
     els.signerBanner.classList.remove("hidden");
   }
 
+  // ── Key file loader (FSA API + drag-drop + legacy input fallback) ────
+
+  // IndexedDB helpers for persisting the last-used FileSystemFileHandle.
+  // Browser security prevents <input type=file> from opening with a
+  // custom default directory, so we instead remember which file the
+  // user picked and re-open it directly on subsequent runs.
+  const HANDLE_DB_NAME = "remote-signer-popup";
+  const HANDLE_STORE = "kv";
+  const HANDLE_KEY = "keyFileHandle";
+
+  function openHandleDB() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(HANDLE_DB_NAME, 1);
+      req.onupgradeneeded = () => req.result.createObjectStore(HANDLE_STORE);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function loadStoredFileHandle() {
+    try {
+      const db = await openHandleDB();
+      return await new Promise((resolve, reject) => {
+        const tx = db.transaction(HANDLE_STORE, "readonly");
+        const req = tx.objectStore(HANDLE_STORE).get(HANDLE_KEY);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => reject(req.error);
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  async function saveStoredFileHandle(handle) {
+    try {
+      const db = await openHandleDB();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(HANDLE_STORE, "readwrite");
+        tx.objectStore(HANDLE_STORE).put(handle, HANDLE_KEY);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    } catch {
+      /* non-fatal: handle persistence is a nice-to-have */
+    }
+  }
+
+  async function clearStoredFileHandle() {
+    try {
+      const db = await openHandleDB();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(HANDLE_STORE, "readwrite");
+        tx.objectStore(HANDLE_STORE).delete(HANDLE_KEY);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    } catch {}
+  }
+
+  function setKeyFileError(msg) {
+    if (!msg) {
+      els.connectionError.classList.add("hidden");
+      els.connectionError.textContent = "";
+      return;
+    }
+    els.connectionError.textContent = msg;
+    els.connectionError.classList.remove("hidden");
+  }
+
+  function applyLoadedKey(text) {
+    els.inputPrivateKey.value = (text || "").trim();
+    els.inputPrivateKey.classList.remove("masked");
+    els.togglePwBtn.textContent = "Hide";
+  }
+
+  function updateKeyFileButton(filename) {
+    if (!els.loadKeyFileBtn) return;
+    if (filename) {
+      els.loadKeyFileBtn.textContent = "Reload " + filename;
+      els.loadKeyFileBtn.title =
+        "Reload from the previously-picked " + filename +
+        " (shift-click to choose a different file)";
+      els.loadKeyFileBtn.dataset.filename = filename;
+    } else {
+      els.loadKeyFileBtn.textContent = "Load from file…";
+      els.loadKeyFileBtn.title =
+        "Load key from a local file (e.g. ~/.remote-signer/apikeys/agent.key.priv)";
+      delete els.loadKeyFileBtn.dataset.filename;
+    }
+  }
+
+  async function readFromHandle(handle) {
+    let perm = await handle.queryPermission({ mode: "read" });
+    if (perm !== "granted") {
+      perm = await handle.requestPermission({ mode: "read" });
+    }
+    if (perm !== "granted") {
+      throw new Error("Permission denied");
+    }
+    const file = await handle.getFile();
+    return file.text();
+  }
+
+  async function pickFileWithFSA(startInHandle) {
+    const opts = {
+      multiple: false,
+      types: [
+        {
+          description: "Remote-Signer API key",
+          accept: { "text/plain": [".priv", ".pem", ".key", ".txt"] },
+        },
+      ],
+    };
+    if (startInHandle) opts.startIn = startInHandle;
+    const [handle] = await window.showOpenFilePicker(opts);
+    return handle;
+  }
+
+  async function loadKeyFromHandle(handle, source) {
+    try {
+      const text = await readFromHandle(handle);
+      applyLoadedKey(text);
+      setKeyFileError("");
+      updateKeyFileButton(handle.name);
+      if (source === "picker") await saveStoredFileHandle(handle);
+    } catch (err) {
+      // Stored handle may have been invalidated (file moved/deleted, or
+      // user-revoked permission). Drop it and fall back to a fresh pick.
+      if (source === "stored") {
+        await clearStoredFileHandle();
+        updateKeyFileButton(null);
+      }
+      setKeyFileError("Failed to read file: " + (err && err.message ? err.message : String(err)));
+    }
+  }
+
+  function setupKeyFileLoader() {
+    if (!els.loadKeyFileBtn) return;
+    const hasFSA = typeof window.showOpenFilePicker === "function";
+
+    // Pre-warm the button label with whichever filename was last used so
+    // returning users see "Reload agent.key.priv" immediately.
+    let storedHandle = null;
+    if (hasFSA) {
+      loadStoredFileHandle().then((h) => {
+        if (h && typeof h.name === "string") {
+          storedHandle = h;
+          updateKeyFileButton(h.name);
+        }
+      });
+    }
+
+    els.loadKeyFileBtn.addEventListener("click", async (event) => {
+      setKeyFileError("");
+      // Modern path: prefer the persisted handle for zero-friction reload.
+      if (hasFSA && storedHandle && !event.shiftKey) {
+        await loadKeyFromHandle(storedHandle, "stored");
+        return;
+      }
+      if (hasFSA) {
+        try {
+          const handle = await pickFileWithFSA(storedHandle);
+          storedHandle = handle;
+          await loadKeyFromHandle(handle, "picker");
+        } catch (err) {
+          // AbortError = user closed dialog; not an error worth surfacing.
+          if (err && err.name !== "AbortError") {
+            setKeyFileError("Failed to open file: " + (err.message || String(err)));
+          }
+        }
+        return;
+      }
+      // Legacy fallback (Firefox/Safari etc.): trigger the <input type=file>.
+      els.keyFileInput.click();
+    });
+
+    // Legacy fallback's change handler. Also used when the user is on a
+    // Chromium build that's missing showOpenFilePicker for some reason.
+    if (els.keyFileInput) {
+      els.keyFileInput.addEventListener("change", async () => {
+        const file = els.keyFileInput.files && els.keyFileInput.files[0];
+        if (!file) return;
+        try {
+          const text = await file.text();
+          applyLoadedKey(text);
+          setKeyFileError("");
+          updateKeyFileButton(file.name);
+        } catch (err) {
+          setKeyFileError("Failed to read file: " + (err && err.message ? err.message : String(err)));
+        } finally {
+          els.keyFileInput.value = "";
+        }
+      });
+    }
+
+    // Drag-and-drop onto the textarea reads the dropped file as a key.
+    const dropTarget = els.inputPrivateKey;
+    dropTarget.addEventListener("dragover", (e) => {
+      if (e.dataTransfer && Array.from(e.dataTransfer.items).some((it) => it.kind === "file")) {
+        e.preventDefault();
+        dropTarget.classList.add("drop-target");
+      }
+    });
+    dropTarget.addEventListener("dragleave", () => dropTarget.classList.remove("drop-target"));
+    dropTarget.addEventListener("drop", async (e) => {
+      dropTarget.classList.remove("drop-target");
+      const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (!file) return;
+      e.preventDefault();
+      try {
+        const text = await file.text();
+        applyLoadedKey(text);
+        setKeyFileError("");
+        updateKeyFileButton(file.name);
+      } catch (err) {
+        setKeyFileError("Failed to read dropped file: " + (err && err.message ? err.message : String(err)));
+      }
+    });
+  }
+
   // ── Settings ─────────────────────────────────────────────────────────
 
   function showSettings() {
@@ -711,31 +931,22 @@
       els.togglePwBtn.textContent = masked ? "Show" : "Hide";
     });
 
-    // "Load from file…" — lets users pick e.g. agent.key.priv from disk
-    // instead of pasting. Browser sandbox prevents reading arbitrary paths,
-    // so the user must select the file once per change.
-    if (els.loadKeyFileBtn && els.keyFileInput) {
-      els.loadKeyFileBtn.addEventListener("click", () => {
-        els.keyFileInput.click();
-      });
-      els.keyFileInput.addEventListener("change", async () => {
-        const file = els.keyFileInput.files && els.keyFileInput.files[0];
-        if (!file) return;
-        try {
-          const text = await file.text();
-          els.inputPrivateKey.value = text.trim();
-          // Force-show the loaded value briefly so the user sees the file
-          // landed; togglePwBtn lets them re-mask it.
-          els.inputPrivateKey.classList.remove("masked");
-          els.togglePwBtn.textContent = "Hide";
-        } catch (err) {
-          els.connectionError.textContent = "Failed to read file: " + (err && err.message ? err.message : String(err));
-          els.connectionError.classList.remove("hidden");
-        } finally {
-          els.keyFileInput.value = "";
-        }
-      });
-    }
+    // "Load from file…" — three input paths:
+    //
+    //   1. File System Access API (Chromium): showOpenFilePicker returns a
+    //      FileSystemFileHandle which we persist in IndexedDB. On subsequent
+    //      popup opens the button switches to "Reload from <filename>" — one
+    //      click re-reads the same file with no dialog, sidestepping the
+    //      "navigate to ~/.remote-signer/apikeys/ every time" friction.
+    //      Browsers won't let extensions set a custom starting path, so the
+    //      persisted handle is the closest we can get.
+    //
+    //   2. Drag-and-drop onto the textarea: handy when the apikeys folder
+    //      is already open in Finder.
+    //
+    //   3. Legacy <input type=file> fallback: for browsers without FSA API
+    //      and as the click target when showOpenFilePicker rejects.
+    setupKeyFileLoader();
 
     els.testConnectionBtn.addEventListener("click", testConnection);
     els.saveConfigBtn.addEventListener("click", saveConfig);

@@ -452,6 +452,11 @@ header.appbar {
   -webkit-text-security: disc;
   text-security: disc;
 }
+.form-group textarea.drop-target {
+  outline: 2px dashed var(--accent, #627EEA);
+  outline-offset: 2px;
+  background: rgba(98, 126, 234, 0.06);
+}
 
 .btn-text {
   position: absolute;
