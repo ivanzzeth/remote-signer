@@ -11,7 +11,36 @@ import {
   RemoteSignerClient,
   EIP1193Provider,
   RemoteSigner,
+  type ProviderStorage,
 } from "remote-signer-client";
+
+// Adapter that exposes chrome.storage.local through the SDK's
+// ProviderStorage interface. Lets the SDK own the load/persist lifecycle
+// for {chainId, activeAddress} — keeps a single source of truth and
+// removes the need for state-mirroring listeners in this file.
+const chromeStorageAdapter: ProviderStorage = {
+  getItem(key: string): Promise<string | null> {
+    return new Promise((resolve) => {
+      chrome.storage.local.get(key, (r) => resolve(typeof r[key] === "string" ? r[key] : null));
+    });
+  },
+  setItem(key: string, value: string): Promise<void> {
+    return new Promise((resolve) => {
+      chrome.storage.local.set({ [key]: value }, () => resolve());
+    });
+  },
+  removeItem(key: string): Promise<void> {
+    return new Promise((resolve) => {
+      chrome.storage.local.remove(key, () => resolve());
+    });
+  },
+};
+
+function providerStorageKey(apiKeyId: string): string {
+  // Per-API-key namespace so multiple agents on the same browser don't
+  // clobber each other's chain/account state.
+  return `remote-signer:provider:${apiKeyId || "default"}`;
+}
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -344,7 +373,10 @@ async function initProvider(): Promise<void> {
     },
   });
 
-  // Auto-fetch signers from backend
+  // Auto-fetch signers from backend. The SDK owns chainId + activeAddress
+  // persistence via the `storage` adapter — on each create() it rehydrates
+  // from chrome.storage.local, on each state-changing event it writes back.
+  // No state-mirroring listeners live in this file any more.
   provider = await EIP1193Provider.create({
     signersSource: { type: "client", client, chainId: cfg.selectedChain },
     defaultChainId: cfg.selectedChain,
@@ -354,12 +386,21 @@ async function initProvider(): Promise<void> {
       if (!url) throw new Error(`No RPC URL configured for chain ${chainId}`);
       return url;
     },
+    storage: chromeStorageAdapter,
+    storageKey: providerStorageKey(cfg.apiKeyId),
   });
 
-  // Restore the user's previous active signer choice. If it's no longer in
-  // the usable set (revoked, locked) we silently fall back to the provider's
-  // default and clear the stored value so the popup picks a fresh one.
-  if (cfg.activeSignerAddress && provider.isConnected()) {
+  // Migration path for users upgrading from versions that stored the
+  // active signer in `cachedConfig.activeSignerAddress` rather than the
+  // SDK's own storage namespace. On first run after upgrade the SDK's
+  // namespace is empty, so we replay the legacy value through
+  // switchAccount() — which the SDK then persists into its own slot, so
+  // subsequent reads come from the canonical source.
+  if (
+    cfg.activeSignerAddress &&
+    provider.isConnected() &&
+    provider.selectedAddress?.toLowerCase() !== cfg.activeSignerAddress.toLowerCase()
+  ) {
     try {
       await provider.switchAccount(cfg.activeSignerAddress);
     } catch (err) {
@@ -374,50 +415,13 @@ async function initProvider(): Promise<void> {
   console.log("  - Active account:", provider.selectedAddress);
   console.log("  - Chain ID:", provider.chainId);
 
-  // Forward provider events to all tabs
+  // Forward provider events to all tabs so dApps see them.
   const events = ["accountsChanged", "chainChanged", "connect", "disconnect"];
   for (const event of events) {
     provider.on(event, (data: unknown) => {
       broadcastEvent(event, data);
     });
   }
-
-  // Persist state-changing events so user choices survive an MV3
-  // service-worker suspension. Without this, the SDK's in-memory state
-  // wins for the current session but gets clobbered on next SW resume
-  // when we re-init from chrome.storage.local. Symptoms we've seen:
-  //   - wallet_switchEthereumChain(137) survives only until SW restart,
-  //     then wagmi sees chain 1 and throws ConnectorChainMismatchError
-  //     (Polymarket "Request Cancelled" after manual approval).
-  //   - SDK-side account changes (e.g. switchAccount triggered from
-  //     somewhere other than the popup) revert to the default signer on
-  //     SW resume, so a dApp that already cached the new address sees
-  //     accountsChanged go backwards on reconnect.
-  provider.on("chainChanged", async (chainIdHex: unknown) => {
-    if (typeof chainIdHex !== "string") return;
-    const newChainId = parseInt(chainIdHex, 16);
-    if (!Number.isFinite(newChainId) || newChainId <= 0) return;
-    if (cachedConfig.selectedChain === newChainId) return;
-    cachedConfig.selectedChain = newChainId;
-    try {
-      await chrome.storage.local.set({ [configKey()]: cachedConfig });
-    } catch (err) {
-      console.error("[background] Failed to persist chainChanged:", err);
-    }
-  });
-
-  provider.on("accountsChanged", async (accounts: unknown) => {
-    if (!Array.isArray(accounts) || accounts.length === 0) return;
-    const active = typeof accounts[0] === "string" ? (accounts[0] as string).toLowerCase() : undefined;
-    if (!active) return;
-    if (cachedConfig.activeSignerAddress?.toLowerCase() === active) return;
-    cachedConfig.activeSignerAddress = active;
-    try {
-      await chrome.storage.local.set({ [configKey()]: cachedConfig });
-    } catch (err) {
-      console.error("[background] Failed to persist accountsChanged:", err);
-    }
-  });
 }
 
 function ensureInit(): Promise<void> {

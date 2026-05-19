@@ -81,6 +81,28 @@ export interface EIP1193ProviderConfig {
    * (chainId) => `https://rpc.chain-${chainId}.example.com`
    */
   rpcResolver?: (chainId: number) => string | Promise<string>;
+
+  /**
+   * Optional backing store for provider state ({chainId, activeAddress}).
+   *
+   * When provided, the SDK auto-loads any previously-persisted state on
+   * create() and writes back on every state-changing event. Pass a
+   * Web-Storage-compatible adapter (chrome.storage.local wrapper in an
+   * extension; window.localStorage in plain web; a Node KV adapter in
+   * server contexts). Omit for ephemeral in-memory state — useful for
+   * one-shot CLI invocations and tests.
+   *
+   * @see ProviderStorage
+   */
+  storage?: import("./provider-storage").ProviderStorage;
+
+  /**
+   * Storage key under which {@link storage} reads/writes provider state.
+   * Defaults to "remote-signer:eip1193". Set a per-API-key value when
+   * multiple agents share a single storage backend so they don't clobber
+   * each other.
+   */
+  storageKey?: string;
 }
 
 /**

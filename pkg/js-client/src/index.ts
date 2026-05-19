@@ -54,6 +54,11 @@ export {
   EIP1193Provider,
   ProviderRpcError,
   providerErrors,
+  MemoryProviderStorage,
+} from "./evm";
+export type {
+  ProviderStorage,
+  PersistedProviderState,
 } from "./evm";
 export type {
   // Shared EVM types
