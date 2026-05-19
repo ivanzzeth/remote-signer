@@ -1,4 +1,5 @@
 import { test, expect } from "./fixtures";
+import { verifyMessage } from "ethers";
 import {
   injectStorageConfig,
   openDappAndWaitForProvider,
@@ -96,6 +97,90 @@ test.describe("personal_sign (@integration)", () => {
 
     expect(result.ok).toBe(false);
     expect(result.error.code).toBe(4100); // unauthorized
+  });
+
+  /**
+   * Polymarket/SIWE regression: viem/wagmi-based dApps (Polymarket, Uniswap,
+   * etc.) hex-encode the UTF-8 SIWE message before calling personal_sign.
+   * The wallet must sign the *decoded* bytes — signing the literal hex
+   * string produces a signature that recovers to the wrong address, which
+   * Polymarket surfaces as "Request Cancelled". Verify the returned
+   * signature recovers to the seeded signer when verified against the
+   * original UTF-8 message.
+   */
+  test("hex-encoded SIWE message: recovered address matches the signer (Polymarket regression)", async ({
+    context,
+    extensionId,
+    serverInfo,
+  }) => {
+    await setupSigningContext(context, extensionId, serverInfo);
+    const page = await context.newPage();
+    await openDappAndWaitForProvider(page);
+
+    const utf8Message =
+      "example.com wants you to sign in with your Ethereum account:\n" +
+      TEST_ACCOUNTS.signer +
+      "\n\nSign-in nonce: e2e-polymarket-regression";
+    const hexMessage = "0x" + Buffer.from(utf8Message, "utf-8").toString("hex");
+
+    const result = await dappEIP1193Call(
+      page,
+      "personal_sign",
+      hexMessage,
+      TEST_ACCOUNTS.signer
+    );
+    expect(result.ok, `personal_sign failed: ${result.ok ? "" : result.error?.message}`).toBe(true);
+    expect(result.result).toMatch(/^0x[a-fA-F0-9]{130}$/);
+
+    // ethers.verifyMessage applies the standard EIP-191 prefix over the
+    // UTF-8 bytes and recovers the signer address. If the wallet had
+    // signed the literal "0x..." hex string instead of the decoded bytes,
+    // recovery would return a different address.
+    const recovered = verifyMessage(utf8Message, result.result);
+    expect(recovered.toLowerCase()).toBe(TEST_ACCOUNTS.signer.toLowerCase());
+  });
+
+  /**
+   * Companion to the above: the same UTF-8 message passed unencoded must
+   * produce a signature that *also* recovers to the signer — and ideally
+   * the *same* signature, since both encodings represent the same payload.
+   */
+  test("plain UTF-8 and hex-encoded forms produce equivalent recoverable signatures", async ({
+    context,
+    extensionId,
+    serverInfo,
+  }) => {
+    await setupSigningContext(context, extensionId, serverInfo);
+    const page = await context.newPage();
+    await openDappAndWaitForProvider(page);
+
+    const msg = "Hello Polymarket";
+
+    const plain = await dappEIP1193Call(
+      page,
+      "personal_sign",
+      msg,
+      TEST_ACCOUNTS.signer
+    );
+    expect(plain.ok).toBe(true);
+
+    const hexed = await dappEIP1193Call(
+      page,
+      "personal_sign",
+      "0x" + Buffer.from(msg, "utf-8").toString("hex"),
+      TEST_ACCOUNTS.signer
+    );
+    expect(hexed.ok).toBe(true);
+
+    expect(verifyMessage(msg, plain.result).toLowerCase()).toBe(
+      TEST_ACCOUNTS.signer.toLowerCase()
+    );
+    expect(verifyMessage(msg, hexed.result).toLowerCase()).toBe(
+      TEST_ACCOUNTS.signer.toLowerCase()
+    );
+    // Deterministic signers (incl. the seeded private-key signer) must
+    // produce byte-identical signatures for the same payload.
+    expect(plain.result).toBe(hexed.result);
   });
 
   test("produces different signatures for different messages", async ({
