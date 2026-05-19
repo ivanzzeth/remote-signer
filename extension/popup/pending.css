@@ -1,0 +1,113 @@
+/*
+ * Standalone window opened by chrome.windows.create({type:"popup"}).
+ * Inherits the same look-and-feel as popup.css for the appbar, but the
+ * body sizes itself to the host window (no fixed 380×600 popup chrome).
+ */
+.pending-body {
+  margin: 0;
+  background: var(--bg, #ffffff);
+  color: var(--text, #111827);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  min-height: 100vh;
+}
+#pendingApp {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.pending-card {
+  padding: 16px 20px 20px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.pending-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(228, 138, 44, 0.12);
+  color: #b15912;
+  font-weight: 600;
+  font-size: 13px;
+}
+.pending-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #e48a2c;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+
+.pending-status.is-done {
+  background: rgba(34, 197, 94, 0.12);
+  color: #047857;
+}
+.pending-status.is-done .pending-dot {
+  background: #22c55e;
+  animation: none;
+}
+.pending-status.is-error {
+  background: rgba(239, 68, 68, 0.12);
+  color: #b91c1c;
+}
+.pending-status.is-error .pending-dot {
+  background: #ef4444;
+  animation: none;
+}
+
+.pending-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--bg-muted, #f3f4f6);
+  border-radius: 8px;
+  font-size: 13px;
+}
+.pending-detail .row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.pending-detail .label {
+  color: var(--text-muted, #6b7280);
+}
+.pending-detail .value {
+  font-weight: 500;
+  text-align: right;
+  word-break: break-all;
+}
+.pending-detail .value.mono {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 12px;
+}
+.pending-detail .value.small {
+  font-size: 11px;
+  color: var(--text-muted, #6b7280);
+}
+
+.pending-hint {
+  font-size: 12px;
+  color: var(--text-muted, #6b7280);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.pending-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: auto;
+}
+.pending-actions .btn {
+  width: 100%;
+}

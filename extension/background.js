@@ -3015,6 +3015,15 @@
         fetch: fetch.bind(self)
       }
     });
+    client.evm.sign.onPendingApproval = (requestId, ctx) => {
+      void openPendingApprovalWindow({
+        requestId,
+        signType: ctx.signRequest.sign_type,
+        signerAddress: ctx.signRequest.signer_address,
+        chainId: ctx.signRequest.chain_id,
+        remoteSignerUrl: cfg.remoteSignerUrl
+      });
+    };
     provider = await EIP1193Provider.create({
       signersSource: { type: "client", client, chainId: cfg.selectedChain },
       defaultChainId: cfg.selectedChain,
@@ -3056,6 +3065,53 @@
     }
     return initPromise;
   }
+  var pendingApprovalWindowId = null;
+  async function openPendingApprovalWindow(ctx) {
+    try {
+      await chrome.action.setBadgeText({ text: "!" });
+      await chrome.action.setBadgeBackgroundColor({ color: "#E48A2C" });
+    } catch {
+    }
+    const params = new URLSearchParams({
+      requestId: ctx.requestId,
+      signType: ctx.signType,
+      signerAddress: ctx.signerAddress,
+      chainId: ctx.chainId,
+      remoteSignerUrl: ctx.remoteSignerUrl
+    });
+    const popupUrl = chrome.runtime.getURL(`popup/pending.html?${params.toString()}`);
+    if (pendingApprovalWindowId != null) {
+      try {
+        const win = await chrome.windows.get(pendingApprovalWindowId);
+        if (win) {
+          await chrome.windows.update(pendingApprovalWindowId, { focused: true });
+          const tabs = await chrome.tabs.query({ windowId: pendingApprovalWindowId });
+          const tabId = tabs[0]?.id;
+          if (tabId != null) await chrome.tabs.update(tabId, { url: popupUrl });
+          return;
+        }
+      } catch {
+        pendingApprovalWindowId = null;
+      }
+    }
+    try {
+      const win = await chrome.windows.create({
+        url: popupUrl,
+        type: "popup",
+        width: 380,
+        height: 520,
+        focused: true
+      });
+      pendingApprovalWindowId = win.id ?? null;
+    } catch (err2) {
+      console.error("[background] Failed to open pending-approval window:", err2);
+    }
+  }
+  chrome.windows?.onRemoved?.addListener?.((windowId) => {
+    if (windowId === pendingApprovalWindowId) {
+      pendingApprovalWindowId = null;
+    }
+  });
   async function broadcastEventToOrigin(origin, event, data) {
     try {
       const tabs = await chrome.tabs.query({});
