@@ -180,7 +180,11 @@ func startDaemon(t *testing.T, opts ...daemonOption) *daemon {
 	args := []string{"server", "start", "-config", configPath}
 
 	cmd := exec.Command(binaryPath, args...)
-	cmd.Env = append(os.Environ(), "REMOTE_SIGNER_HOME="+home)
+	cmd.Env = append(os.Environ(),
+		"REMOTE_SIGNER_HOME="+home,
+		"REMOTE_SIGNER_ADMIN_PASSWORD=integration-test",
+		"REMOTE_SIGNER_KEYSTORE_PASSWORD=integration-test",
+	)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	// New process group so we can send SIGTERM cleanly on cleanup.
@@ -341,7 +345,11 @@ func restartInHome(t *testing.T, home, configPath string, port int) *daemon {
 		t.Fatalf("reopen log: %v", err)
 	}
 	cmd := exec.Command(binaryPath, "server", "start", "-config", configPath)
-	cmd.Env = append(os.Environ(), "REMOTE_SIGNER_HOME="+home)
+	cmd.Env = append(os.Environ(),
+		"REMOTE_SIGNER_HOME="+home,
+		"REMOTE_SIGNER_ADMIN_PASSWORD=integration-test",
+		"REMOTE_SIGNER_KEYSTORE_PASSWORD=integration-test",
+	)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
