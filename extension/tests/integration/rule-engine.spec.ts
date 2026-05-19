@@ -3,6 +3,7 @@ import {
   injectStorageConfig,
   openDappAndWaitForProvider,
   dappEIP1193Call,
+  switchToAnvil,
   TEST_ACCOUNTS,
 } from "../helpers";
 
@@ -64,6 +65,7 @@ test.describe("Rule Engine Integration (@integration)", () => {
     extensionId,
     serverInfo,
   }) => {
+    test.skip(!serverInfo.anvil_url, "anvil not available in this environment");
     await configureExtension(context, extensionId, {
       url: serverInfo.base_url,
       apiKeyId: serverInfo.admin_api_key_id,
@@ -72,17 +74,20 @@ test.describe("Rule Engine Integration (@integration)", () => {
 
     const dapp = await context.newPage();
     await openDappAndWaitForProvider(dapp);
+    expect(await switchToAnvil(dapp, serverInfo)).toBe(true);
 
     // eth_sendTransaction with the known signer should pass rule engine checks
+    // and broadcast cleanly to the local anvil RPC.
     const result = await dappEIP1193Call(dapp, "eth_sendTransaction", {
       from: TEST_ACCOUNTS.signer,
       to: TEST_ACCOUNTS.recipient,
       value: "0x0",
+      gas: "0x5208",
+      gasPrice: "0x3b9aca00",
     });
 
     expect(result.ok).toBe(true);
-    expect(typeof result.result).toBe("string");
-    expect(result.result).toMatch(/^0x[a-fA-F0-9]+$/);
+    expect(result.result).toMatch(/^0x[a-fA-F0-9]{64}$/);
 
     await dapp.close();
   });

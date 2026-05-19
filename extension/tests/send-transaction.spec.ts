@@ -3,6 +3,7 @@ import {
   injectStorageConfig,
   openDappAndWaitForProvider,
   dappEIP1193Call,
+  switchToAnvil,
   TEST_ACCOUNTS,
 } from "./helpers";
 
@@ -117,19 +118,19 @@ test.describe("eth_signTransaction (@integration)", () => {
     expect(result.result.length).toBeGreaterThan(200);
   });
 
-  test("eth_sendTransaction returns error without RPC endpoint", async ({
+  test("eth_sendTransaction signs and broadcasts to anvil", async ({
     context,
     extensionId,
     serverInfo,
   }) => {
+    test.skip(!serverInfo.anvil_url, "anvil not available in this environment");
+
     await setupSigningContext(context, extensionId, serverInfo);
 
     const page = await context.newPage();
     await openDappAndWaitForProvider(page);
+    expect(await switchToAnvil(page, serverInfo)).toBe(true);
 
-    // eth_sendTransaction signs internally then broadcasts to an RPC node.
-    // Without an RPC URL configured, the broadcast step fails, but this test
-    // verifies the signing pipeline is reached and a meaningful error is returned.
     const tx = {
       from: TEST_ACCOUNTS.signer,
       to: TEST_ACCOUNTS.recipient,
@@ -138,16 +139,15 @@ test.describe("eth_signTransaction (@integration)", () => {
       gasPrice: "0x3b9aca00",
     };
 
-    const result = await dappEIP1193Call(
-      page,
-      "eth_sendTransaction",
-      tx
-    );
+    const result = await dappEIP1193Call(page, "eth_sendTransaction", tx);
+    expect(result.ok).toBe(true);
+    // Returns a 32-byte tx hash.
+    expect(result.result).toMatch(/^0x[a-fA-F0-9]{64}$/);
 
-    // The signing step happens before broadcast, but _getRpcUrl will fail
-    // with "No RPC URL configured".
-    expect(result.ok).toBe(false);
-    expect(result.error.message).toContain("RPC URL");
+    // Confirm the tx is actually on the chain by querying anvil.
+    const receipt = await dappEIP1193Call(page, "eth_getTransactionReceipt", result.result);
+    expect(receipt.ok).toBe(true);
+    expect((receipt.result as any)?.transactionHash).toBe(result.result);
   });
 
   test("rejects transaction with unauthorized 'from' address", async ({

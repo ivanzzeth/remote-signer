@@ -1725,6 +1725,39 @@
      */
     rpc: (code, message, data) => new ProviderRpcError(code, message, data)
   };
+  function normalizeEip1193Tx(tx) {
+    const hexToDec = (v) => {
+      if (v == null) return void 0;
+      if (typeof v === "string") {
+        if (v.startsWith("0x") || v.startsWith("0X")) return BigInt(v).toString(10);
+        return v;
+      }
+      if (typeof v === "number" || typeof v === "bigint") return BigInt(v).toString(10);
+      return String(v);
+    };
+    const hexToNum = (v) => {
+      if (v == null) return void 0;
+      if (typeof v === "number") return v;
+      if (typeof v === "string") {
+        return v.startsWith("0x") || v.startsWith("0X") ? Number(BigInt(v)) : Number(v);
+      }
+      return Number(v);
+    };
+    const hasMaxFee = tx.maxFeePerGas != null || tx.maxPriorityFeePerGas != null;
+    const out = {
+      to: tx.to,
+      value: hexToDec(tx.value) ?? "0",
+      data: tx.data ?? tx.input,
+      nonce: hexToNum(tx.nonce),
+      // EIP-1193 uses "gas"; our struct names it the same.
+      gas: hexToNum(tx.gas ?? tx.gasLimit) ?? 0,
+      txType: tx.txType ?? (hasMaxFee ? "eip1559" : "legacy")
+    };
+    if (tx.gasPrice != null) out.gasPrice = hexToDec(tx.gasPrice);
+    if (tx.maxFeePerGas != null) out.gasFeeCap = hexToDec(tx.maxFeePerGas);
+    if (tx.maxPriorityFeePerGas != null) out.gasTipCap = hexToDec(tx.maxPriorityFeePerGas);
+    return out;
+  }
   var EIP1193Provider = class _EIP1193Provider {
     /**
      * Private constructor - use EIP1193Provider.create() instead
@@ -2013,8 +2046,9 @@
               `Address mismatch: expected ${signer.address}, got ${tx.from}`
             );
           }
-          const signedTx = await signer.signTransaction(tx);
           const rpcUrl = await this._getRpcUrl();
+          const filled = await this._fillTxDefaults(tx, signer.address, rpcUrl);
+          const signedTx = await signer.signTransaction(normalizeEip1193Tx(filled));
           const response = await fetch(rpcUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -2039,7 +2073,7 @@
               `Address mismatch: expected ${signer.address}, got ${tx.from}`
             );
           }
-          return await signer.signTransaction(tx);
+          return await signer.signTransaction(normalizeEip1193Tx(tx));
         }
         // Read methods - delegate to RPC provider
         case "eth_blockNumber":
@@ -2119,6 +2153,37 @@
         throw new Error(`No RPC URL configured for chain ${this._chainId}`);
       }
       return rpcUrl;
+    }
+    /**
+     * Fill in transaction defaults that dApps routinely omit — gas, gasPrice
+     * (or EIP-1559 caps), and nonce. The remote-signer backend signs whatever
+     * we hand it, so we have to mimic the same auto-fill MetaMask performs
+     * client-side before signing. Missing fields are fetched from the chain
+     * RPC; values the caller supplied are preserved as-is.
+     */
+    async _fillTxDefaults(tx, fromAddr, rpcUrl) {
+      const filled = { ...tx, from: tx.from ?? fromAddr };
+      const rpc = async (method, params) => {
+        const res = await fetch(rpcUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: Date.now(), method, params })
+        });
+        const json = await res.json();
+        if (json.error) throw new Error(`${method}: ${json.error.message}`);
+        return json.result;
+      };
+      if (filled.nonce == null) {
+        filled.nonce = await rpc("eth_getTransactionCount", [fromAddr, "pending"]);
+      }
+      if (filled.gas == null && filled.gasLimit == null) {
+        filled.gas = await rpc("eth_estimateGas", [{ ...filled, from: fromAddr }]);
+      }
+      const hasFeeCap = filled.maxFeePerGas != null || filled.maxPriorityFeePerGas != null;
+      if (filled.gasPrice == null && !hasFeeCap) {
+        filled.gasPrice = await rpc("eth_gasPrice", []);
+      }
+      return filled;
     }
     /**
      * Switch to a different chain

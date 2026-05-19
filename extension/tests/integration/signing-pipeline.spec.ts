@@ -3,6 +3,7 @@ import {
   injectStorageConfig,
   openDappAndWaitForProvider,
   dappEIP1193Call,
+  switchToAnvil,
   TEST_ACCOUNTS,
 } from "../helpers";
 
@@ -82,21 +83,23 @@ test.describe("Signing Pipeline (@integration)", () => {
     extensionId,
     serverInfo,
   }) => {
+    test.skip(!serverInfo.anvil_url, "anvil not available in this environment");
     await preConfigureExtension(context, extensionId, serverInfo);
 
     const dapp = await context.newPage();
     await openDappAndWaitForProvider(dapp);
+    expect(await switchToAnvil(dapp, serverInfo)).toBe(true);
 
     const result = await dappEIP1193Call(dapp, "eth_sendTransaction", {
       from: TEST_ACCOUNTS.signer,
       to: TEST_ACCOUNTS.recipient,
       value: "0x0",
+      gas: "0x5208",
+      gasPrice: "0x3b9aca00",
     });
 
     expect(result.ok).toBe(true);
-    // Response should be a hex-prefixed hash or signed raw transaction
-    expect(typeof result.result).toBe("string");
-    expect(result.result).toMatch(/^0x[a-fA-F0-9]+$/);
+    expect(result.result).toMatch(/^0x[a-fA-F0-9]{64}$/);
 
     await dapp.close();
   });
