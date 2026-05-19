@@ -1,22 +1,18 @@
 import { test, expect } from "./fixtures";
-import { encodeERC20Transfer } from "./helpers";
+import { encodeERC20Transfer, switchToAnvil } from "./helpers";
 import type { Page, BrowserContext } from "@playwright/test";
-import { fileURLToPath } from "url";
-import path from "path";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const SWAP_PAGE_PATH = path.resolve(__dirname, "dapp", "swap-page.html");
 
 // Test token addresses (same as the swap page uses)
 const USDC_TOKEN = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
 const DAI_TOKEN = "0x6B175474E89094C44Da98b954EedeAC495271d0F";
 const UNISWAP_ROUTER = "0xE592427A0AEce92De3Edee1F18E0157C05861564";
 
-async function openSwapPage(context: BrowserContext): Promise<Page> {
+async function openSwapPage(context: BrowserContext, serverInfo: { dapp_url: string }): Promise<Page> {
   const page = await context.newPage();
-  await page.goto(`file://${SWAP_PAGE_PATH}`);
+  // Must be loaded over http:// — MV3 content scripts don't inject on
+  // file://, which means window.ethereum never appears and every test
+  // hangs at the connectWallet step.
+  await page.goto(`${serverInfo.dapp_url}/swap-page.html`);
   return page;
 }
 
@@ -71,37 +67,28 @@ test.describe("Uniswap Swap Flow (@integration)", () => {
   }) => {
     await configureExtension(context, extensionId, serverInfo);
 
-    const page = await openSwapPage(context);
+    test.skip(!serverInfo.anvil_url, "anvil not available in this environment");
+    const page = await openSwapPage(context, serverInfo);
     const account = await connectWallet(page);
+    expect(await switchToAnvil(page, serverInfo)).toBe(true);
 
     // Select USDC → ETH (default), set amount
     await page.selectOption("#tokenIn", "USDC");
     await page.fill("#amountIn", "100");
 
-    // Click Approve
+    // Click Approve, wait for the txHashes panel to record the new tx
+    // (results has stale "0x..." from the connect-step's account list, so
+    // we can't wait on it).
     await page.click("#btnApprove");
-
-    // Wait for results to show a tx hash
     await page.waitForFunction(
-      () => {
-        const results = document.getElementById("results");
-        return results && results.textContent!.includes("0x");
-      },
+      () => /Approve/.test(document.getElementById("txHashes")?.textContent ?? ""),
       { timeout: 20_000 }
     );
 
-    const resultText = await page.evaluate(
-      () => document.getElementById("results")?.textContent ?? ""
-    );
-
-    // Should contain a tx hash (or an error if the remote-signer doesn't support this yet)
-    expect(resultText.length).toBeGreaterThan(0);
-
-    // Check the tx hashes panel
     const txHashesText = await page.evaluate(
       () => document.getElementById("txHashes")?.textContent ?? ""
     );
-    expect(txHashesText).toMatch(/Approve|0x/);
+    expect(txHashesText).toMatch(/Approve\b.*0x[a-fA-F0-9]{64}/);
 
     await page.close();
   });
@@ -113,32 +100,25 @@ test.describe("Uniswap Swap Flow (@integration)", () => {
   }) => {
     await configureExtension(context, extensionId, serverInfo);
 
-    const page = await openSwapPage(context);
+    test.skip(!serverInfo.anvil_url, "anvil not available in this environment");
+    const page = await openSwapPage(context, serverInfo);
     const account = await connectWallet(page);
+    expect(await switchToAnvil(page, serverInfo)).toBe(true);
 
     await page.fill("#amountIn", "10");
 
-    // Click Swap (tokenIn=ETH, tokenOut=USDC by default)
+    // Click Swap (tokenIn=ETH, tokenOut=USDC by default), wait for the
+    // txHashes panel to record a Swap tx.
     await page.click("#btnSwap");
-
     await page.waitForFunction(
-      () => {
-        const results = document.getElementById("results");
-        return results && results.textContent!.includes("0x");
-      },
+      () => /Swap/.test(document.getElementById("txHashes")?.textContent ?? ""),
       { timeout: 20_000 }
     );
 
-    const resultText = await page.evaluate(
-      () => document.getElementById("results")?.textContent ?? ""
-    );
-    expect(resultText.length).toBeGreaterThan(0);
-
-    // Verify the tx hash appears in the transactions panel
     const txHashesText = await page.evaluate(
       () => document.getElementById("txHashes")?.textContent ?? ""
     );
-    expect(txHashesText).toMatch(/Swap|0x/);
+    expect(txHashesText).toMatch(/Swap\b.*0x[a-fA-F0-9]{64}/);
 
     await page.close();
   });
@@ -150,8 +130,10 @@ test.describe("Uniswap Swap Flow (@integration)", () => {
   }) => {
     await configureExtension(context, extensionId, serverInfo);
 
-    const page = await openSwapPage(context);
+    test.skip(!serverInfo.anvil_url, "anvil not available in this environment");
+    const page = await openSwapPage(context, serverInfo);
     const account = await connectWallet(page);
+    expect(await switchToAnvil(page, serverInfo)).toBe(true);
     expect(account).toMatch(/^0x[a-fA-F0-9]{40}$/);
 
     // Set up a DAI → ETH approve
@@ -206,7 +188,7 @@ test.describe("Uniswap Swap Flow (@integration)", () => {
   }) => {
     await configureExtension(context, extensionId, serverInfo);
 
-    const page = await openSwapPage(context);
+    const page = await openSwapPage(context, serverInfo);
     await connectWallet(page);
 
     // Directly call eth_sendTransaction from the page context, then
@@ -280,34 +262,37 @@ test.describe("Uniswap Swap Flow (@integration)", () => {
     extensionId,
     serverInfo,
   }) => {
+    test.skip(!serverInfo.anvil_url, "anvil not available in this environment");
     await configureExtension(context, extensionId, serverInfo);
 
-    const page = await openSwapPage(context);
+    const page = await openSwapPage(context, serverInfo);
     await connectWallet(page);
+    expect(await switchToAnvil(page, serverInfo)).toBe(true);
 
     // USDC → ETH swap with approval
     await page.selectOption("#tokenIn", "USDC");
     await page.fill("#amountIn", "50");
 
-    // Step 1: Approve
+    // Step 1: Approve; wait for its row to appear in the txHashes panel.
     await page.click("#btnApprove");
-    await page.waitForTimeout(1000);
+    await page.waitForFunction(
+      () => /Approve/.test(document.getElementById("txHashes")?.textContent ?? ""),
+      { timeout: 20_000 }
+    );
 
-    // Step 2: Swap
+    // Step 2: Swap; wait for its row in addition.
     await page.click("#btnSwap");
-    await page.waitForTimeout(1000);
+    await page.waitForFunction(
+      () => /Swap/.test(document.getElementById("txHashes")?.textContent ?? ""),
+      { timeout: 20_000 }
+    );
 
-    // Verify tx hashes panel records both transactions
+    // Verify tx hashes panel recorded both transactions.
     const txCount = await page.evaluate(() => {
       const container = document.getElementById("txHashes");
-      if (!container) return 0;
-      // Count elements with class tx-item
-      return container.querySelectorAll(".tx-item").length;
+      return container ? container.querySelectorAll(".tx-item").length : 0;
     });
-
-    // Should have recorded at least 1 transaction (approve and/or swap)
-    // Remote-signer behavior determines exact count
-    expect(txCount).toBeGreaterThanOrEqual(1);
+    expect(txCount).toBeGreaterThanOrEqual(2);
 
     await page.close();
   });

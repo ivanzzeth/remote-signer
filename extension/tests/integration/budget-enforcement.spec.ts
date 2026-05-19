@@ -1,4 +1,5 @@
 import { test, expect } from "../fixtures";
+import { switchToAnvil } from "../helpers";
 import {
   injectStorageConfig,
   openDappAndWaitForProvider,
@@ -92,6 +93,7 @@ test.describe("Budget Enforcement (@integration)", () => {
     extensionId,
     serverInfo,
   }) => {
+    test.skip(!serverInfo.anvil_url, "anvil not available in this environment");
     await configureExtension(context, extensionId, {
       url: serverInfo.base_url,
       apiKeyId: serverInfo.admin_api_key_id,
@@ -100,17 +102,20 @@ test.describe("Budget Enforcement (@integration)", () => {
 
     const dapp = await context.newPage();
     await openDappAndWaitForProvider(dapp);
+    expect(await switchToAnvil(dapp, serverInfo)).toBe(true);
 
-    // Transaction with zero value should pass budget/value limit check
+    // Transaction with zero value passes budget/value limit check and
+    // lands on anvil cleanly.
     const result = await dappEIP1193Call(dapp, "eth_sendTransaction", {
       from: TEST_ACCOUNTS.signer,
       to: TEST_ACCOUNTS.recipient,
       value: "0x0",
+      gas: "0x5208",
+      gasPrice: "0x3b9aca00",
     });
 
     expect(result.ok).toBe(true);
-    expect(typeof result.result).toBe("string");
-    expect(result.result).toMatch(/^0x[a-fA-F0-9]+$/);
+    expect(result.result).toMatch(/^0x[a-fA-F0-9]{64}$/);
 
     await dapp.close();
   });
@@ -120,6 +125,7 @@ test.describe("Budget Enforcement (@integration)", () => {
     extensionId,
     serverInfo,
   }) => {
+    test.skip(!serverInfo.anvil_url, "anvil not available in this environment");
     await configureExtension(context, extensionId, {
       url: serverInfo.base_url,
       apiKeyId: serverInfo.admin_api_key_id,
@@ -128,6 +134,7 @@ test.describe("Budget Enforcement (@integration)", () => {
 
     const dapp = await context.newPage();
     await openDappAndWaitForProvider(dapp);
+    expect(await switchToAnvil(dapp, serverInfo)).toBe(true);
 
     // Sign a message
     const signResult = await dappEIP1193Call(
@@ -143,6 +150,8 @@ test.describe("Budget Enforcement (@integration)", () => {
       from: TEST_ACCOUNTS.signer,
       to: TEST_ACCOUNTS.recipient,
       value: "0x0",
+      gas: "0x5208",
+      gasPrice: "0x3b9aca00",
     });
     expect(txResult.ok).toBe(true);
 

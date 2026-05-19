@@ -1,19 +1,17 @@
 import { test, expect } from "./fixtures";
 import type { Page, BrowserContext } from "@playwright/test";
-import { fileURLToPath } from "url";
-import path from "path";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const SWAP_PAGE_PATH = path.resolve(__dirname, "dapp", "swap-page.html");
 
 /**
  * Open the swap simulation dApp page in a new tab.
+ *
+ * Must be loaded over http:// — MV3 content scripts don't inject on file://
+ * pages, so window.ethereum never appears and the test hangs at the
+ * waitForFunction step. global-setup serves swap-page.html from the dApp
+ * static server (copies it from tests/dapp/ at startup).
  */
-async function openSwapPage(context: BrowserContext): Promise<Page> {
+async function openSwapPage(context: BrowserContext, serverInfo: { dapp_url: string }): Promise<Page> {
   const page = await context.newPage();
-  await page.goto(`file://${SWAP_PAGE_PATH}`);
+  await page.goto(`${serverInfo.dapp_url}/swap-page.html`);
   return page;
 }
 
@@ -64,10 +62,15 @@ test.describe("Uniswap Connect (@integration)", () => {
     await configureViaPopup(context, extensionId, serverInfo);
 
     // Open the swap page
-    const page = await openSwapPage(context);
-    await page.waitForFunction(() => !!window.ethereum, { timeout: 15_000 });
+    const page = await openSwapPage(context, serverInfo);
+    // The swap page polls window.ethereum on an interval and only flips
+    // #providerStatus once it sees it — wait for the UI string rather than
+    // just window.ethereum existence so we don't race the interval.
+    await page.waitForFunction(
+      () => document.getElementById("providerStatus")?.textContent === "available",
+      { timeout: 15_000 }
+    );
 
-    // Verify provider is available
     const providerAvailable = await page.evaluate(
       () => document.getElementById("providerStatus")?.textContent
     );
@@ -107,7 +110,7 @@ test.describe("Uniswap Connect (@integration)", () => {
   }) => {
     await configureViaPopup(context, extensionId, serverInfo);
 
-    const page = await openSwapPage(context);
+    const page = await openSwapPage(context, serverInfo);
     await page.waitForFunction(() => !!window.ethereum, { timeout: 15_000 });
 
     await page.click("#btnConnect");
@@ -142,7 +145,7 @@ test.describe("Uniswap Connect (@integration)", () => {
   }) => {
     await configureViaPopup(context, extensionId, serverInfo);
 
-    const page = await openSwapPage(context);
+    const page = await openSwapPage(context, serverInfo);
     await page.waitForFunction(() => !!window.ethereum, { timeout: 15_000 });
 
     await page.click("#btnConnect");
