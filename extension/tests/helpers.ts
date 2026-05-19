@@ -105,7 +105,17 @@ export async function openDappAndWaitForProvider(page: Page, timeout = 15_000): 
   const dappUrl = info.dapp_url || `file://${path.resolve(__dirname, ".e2e-state", "dapp-test-page.html")}`;
   await page.goto(dappUrl);
 
-  await page.waitForFunction(() => !!window.ethereum, { timeout });
+  // Wait until the dApp page has both: (a) window.ethereum injected by the
+  // content script's async <script src=inpage.js>, and (b) the page's own
+  // listeners attached. Without the second condition, tests that fire
+  // eth_requestAccounts immediately race the page's "attachListeners"
+  // setup and lose the connect/accountsChanged event.
+  await page.waitForFunction(
+    () =>
+      !!window.ethereum &&
+      document.getElementById("providerStatus")?.textContent === "available",
+    { timeout }
+  );
 }
 
 /**

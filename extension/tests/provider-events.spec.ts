@@ -104,7 +104,7 @@ test.describe("EIP-1193 Provider Events (@integration)", () => {
     }
   });
 
-  test("disconnect event fires on disconnection", async ({ context, extensionId, serverInfo }) => {
+  test("disconnect event fires when the SW broadcasts it", async ({ context, extensionId, serverInfo }) => {
     const popup = await context.newPage();
     await popup.goto(`chrome-extension://${extensionId}/popup/popup.html`);
     await popup.waitForSelector("#app");
@@ -117,26 +117,23 @@ test.describe("EIP-1193 Provider Events (@integration)", () => {
 
     const dapp = await context.newPage();
     await openDappAndWaitForProvider(dapp);
+    await dappEIP1193Call(dapp, "eth_requestAccounts");
+    await dapp.waitForTimeout(200);
 
-    // Connect first
-    const connectResult = await dappEIP1193Call(dapp, "eth_requestAccounts");
+    // Simulate the disconnect broadcast that would arrive from the SW
+    // (e.g. on server unreachable). The inpage proxy listens for
+    // web3-eip1193-event window messages — content-script forwards them
+    // exactly this way in production.
+    await dapp.evaluate(() => {
+      window.postMessage(
+        { type: "web3-eip1193-event", event: "disconnect", data: { code: 4900, message: "Disconnected" } },
+        "*"
+      );
+    });
+    await dapp.waitForTimeout(500);
 
-    if (connectResult.ok) {
-      await dapp.waitForTimeout(300);
-
-      // Simulate disconnect by clearing storage and forcing provider re-eval
-      await dapp.evaluate(() => {
-        // Trigger disconnect by attempting to reload the provider state
-        // The disconnect event fires when the provider loses connection
-        if (window.ethereum && typeof (window.ethereum as any).emit === "function") {
-          (window.ethereum as any).emit("disconnect", { code: 4900, message: "Disconnected" });
-        }
-      });
-      await dapp.waitForTimeout(500);
-
-      const eventLog = await getEventLog(dapp);
-      expect(eventLog).toContain("disconnect");
-    }
+    const eventLog = await getEventLog(dapp);
+    expect(eventLog).toContain("disconnect");
   });
 
   test("event listeners remain active across multiple RPC calls", async ({ context, extensionId, serverInfo }) => {

@@ -6,9 +6,11 @@ test.describe("EIP-1193 dApp Integration (@integration)", () => {
     // Wait for the inpage.js proxy to set up window.ethereum
     await dapp.waitForFunction(() => !!window.ethereum, { timeout: 15_000 });
 
-    const isMetaMask = await dapp.evaluate(() => window.ethereum?.isMetaMask);
-    // remote-signer's inpage does not advertise isMetaMask
-    expect(isMetaMask).toBeUndefined();
+    const isMetaMask = await dapp.evaluate(() => (window.ethereum as any)?.isMetaMask);
+    // The inpage proxy explicitly reports isMetaMask=false — we expose
+    // identity through EIP-6963 announce (rdns = "io.remote-signer")
+    // rather than impersonating MetaMask via the legacy flag.
+    expect(isMetaMask).toBe(false);
   });
 
   test("dApp page can call eth_chainId via extension", async ({ openDapp, serverInfo }) => {
