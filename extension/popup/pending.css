@@ -111,3 +111,57 @@
 .pending-actions .btn {
   width: 100%;
 }
+
+/* Decoded message preview. Lets the operator eyeball SIWE text before
+ * they approve — catches things like dApps embedding the wrong Chain ID,
+ * a spoofed domain, or an unexpected expiration time. */
+.message-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.message-preview-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.message-preview-title {
+  font-size: 12px;
+  color: var(--text-muted, #6b7280);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.message-preview-body {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--bg-muted, #f3f4f6);
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 180px;
+  overflow-y: auto;
+  color: var(--text, #111827);
+}
+.message-chain-warning {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  background: rgba(239, 68, 68, 0.10);
+  color: #b91c1c;
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.message-chain-warning strong {
+  font-weight: 600;
+}
+.message-preview-head .btn-text {
+  position: static;
+  right: auto;
+  bottom: auto;
+}

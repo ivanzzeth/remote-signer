@@ -32,6 +32,11 @@
     openMgmtBtn: $("openMgmtBtn"),
     closeBtn: $("closeBtn"),
     error: $("pendingError"),
+    messagePreviewBlock: $("messagePreviewBlock"),
+    messagePreview: $("messagePreview"),
+    messageChainWarning: $("messageChainWarning"),
+    messageChainWarningText: $("messageChainWarningText"),
+    copyMessageBtn: $("copyMessageBtn"),
   };
 
   // ── Render the request summary ─────────────────────────────────────────
@@ -43,6 +48,82 @@
   els.detailChain.textContent = chainId ? `Chain ${chainId}` : "—";
   els.detailRequestId.textContent = requestId || "—";
   els.detailRequestId.title = requestId;
+
+  // ── Decoded message preview ────────────────────────────────────────────
+  // hex0xToUtf8: dApps using viem/wagmi hex-encode their personal_sign
+  // payload (the canonical SIWE shape on the wire). Decode for display so
+  // operators read the actual text — without this they can't tell what
+  // they're approving (the user-reported Polymarket Chain-ID-mismatch bug
+  // was invisible before this preview).
+  function hex0xToUtf8(maybeHex) {
+    if (typeof maybeHex !== "string") return null;
+    if (!maybeHex.startsWith("0x") || maybeHex.length % 2 !== 0) return null;
+    const body = maybeHex.slice(2);
+    if (!/^[0-9a-fA-F]*$/.test(body)) return null;
+    const bytes = new Uint8Array(body.length / 2);
+    for (let i = 0; i < bytes.length; i++) {
+      bytes[i] = parseInt(body.substr(i * 2, 2), 16);
+    }
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {
+      return null; // not valid UTF-8 (e.g. random bytes)
+    }
+  }
+
+  // Pull the SIWE "Chain ID:" line from a decoded message body. Used to
+  // surface the most common dApp bug we've seen — the message text says
+  // chain X while the request was issued on chain Y (Polymarket 401).
+  function extractSiweChainId(messageText) {
+    if (typeof messageText !== "string") return null;
+    const m = messageText.match(/^\s*Chain ID:\s*(\d+)\s*$/m);
+    return m ? parseInt(m[1], 10) : null;
+  }
+
+  function renderMessageFromRequest(req) {
+    if (!req || !req.payload) return;
+    let body = null;
+    let copyable = "";
+    if (signType === "personal" || signType === "eip191" || signType === "raw_message") {
+      const hex = req.payload.message ?? req.payload.raw_message;
+      const decoded = hex0xToUtf8(hex);
+      body = decoded ?? (typeof hex === "string" ? hex : JSON.stringify(req.payload, null, 2));
+      copyable = body;
+      const messageChainId = extractSiweChainId(decoded);
+      if (messageChainId != null && chainId && messageChainId !== parseInt(chainId, 10)) {
+        // Loud warning: this is exactly the Polymarket "Request Cancelled"
+        // failure mode the user hit — the dApp baked the wrong chain into
+        // the SIWE text so its backend will reject the signature even though
+        // the signature itself is valid.
+        els.messageChainWarning.classList.remove("hidden");
+        els.messageChainWarningText.textContent =
+          `SIWE message says Chain ID ${messageChainId} but the request was issued on chain ${chainId}. ` +
+          `The dApp's backend will likely reject the signature — switch the wallet to chain ${messageChainId} (in the popup) and have the dApp re-issue.`;
+      }
+    } else if (signType === "typed_data" && req.payload.typed_data) {
+      body = JSON.stringify(req.payload.typed_data, null, 2);
+      copyable = body;
+    } else if (signType === "transaction" && req.payload.transaction) {
+      body = JSON.stringify(req.payload.transaction, null, 2);
+      copyable = body;
+    } else {
+      body = JSON.stringify(req.payload, null, 2);
+      copyable = body;
+    }
+    if (body) {
+      els.messagePreview.textContent = body;
+      els.messagePreviewBlock.classList.remove("hidden");
+      els.copyMessageBtn.onclick = async () => {
+        try {
+          await navigator.clipboard.writeText(copyable);
+          els.copyMessageBtn.textContent = "Copied";
+          setTimeout(() => (els.copyMessageBtn.textContent = "Copy"), 1500);
+        } catch {
+          /* clipboard may be denied in popup contexts; ignore */
+        }
+      };
+    }
+  }
 
   // ── Open Management ────────────────────────────────────────────────────
   // The admin UI lives at the backend root. The user lands there, finds
@@ -70,6 +151,7 @@
     if (cls) els.statusPill.classList.add(cls);
   }
 
+  let renderedMessage = false;
   function pollOnce() {
     if (stopped || !requestId) return;
     chrome.runtime.sendMessage(
@@ -85,6 +167,13 @@
           return;
         }
         els.error.classList.add("hidden");
+        // Render the decoded message exactly once — the payload doesn't
+        // change across the request's lifetime, and re-rendering every 2s
+        // would clobber the user's scroll position in the preview pane.
+        if (!renderedMessage) {
+          renderMessageFromRequest(resp.request);
+          renderedMessage = true;
+        }
         const status = resp.request.status;
         switch (status) {
           case "pending":

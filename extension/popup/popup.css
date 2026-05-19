@@ -665,6 +665,25 @@ header.appbar {
   max-height: 200px;
   overflow: auto;
 }
+/* Inline warning surfaced when the decoded SIWE text disagrees with the
+ * sign request's chain_id (the Polymarket "wrong Chain ID baked in"
+ * failure mode). */
+.drawer-warning {
+  padding: 8px 10px;
+  margin: 6px 0;
+  background: rgba(239, 68, 68, 0.10);
+  color: #b91c1c;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.drawer-raw summary {
+  cursor: pointer;
+  padding: 6px 0;
+}
+.drawer-raw[open] summary {
+  margin-bottom: 4px;
+}
 
 .settings-actions {
   display: flex;
