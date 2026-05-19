@@ -62,6 +62,8 @@
     inputKeyId: $("inputKeyId"),
     inputPrivateKey: $("inputPrivateKey"),
     togglePwBtn: $("togglePwBtn"),
+    loadKeyFileBtn: $("loadKeyFileBtn"),
+    keyFileInput: $("keyFileInput"),
     connectionError: $("connectionError"),
     connectionSuccess: $("connectionSuccess"),
     testConnectionBtn: $("testConnectionBtn"),
@@ -478,9 +480,10 @@
       const configResp = await send({ type: "popup:getConfig" });
       config = configResp.config;
 
-      // Fill settings form
+      // Fill settings form. Default the API Key ID to "agent" to match
+      // the standard `~/.remote-signer/apikeys/agent.key.priv` bootstrap.
       els.inputUrl.value = config.remoteSignerUrl || "";
-      els.inputKeyId.value = config.apiKeyId || "";
+      els.inputKeyId.value = config.apiKeyId || "agent";
       els.inputPrivateKey.value = config.apiKeyPrivateKey || "";
       els.chainSelect.value = String(config.selectedChain || 1);
 
@@ -707,6 +710,32 @@
       const masked = els.inputPrivateKey.classList.toggle("masked");
       els.togglePwBtn.textContent = masked ? "Show" : "Hide";
     });
+
+    // "Load from file…" — lets users pick e.g. agent.key.priv from disk
+    // instead of pasting. Browser sandbox prevents reading arbitrary paths,
+    // so the user must select the file once per change.
+    if (els.loadKeyFileBtn && els.keyFileInput) {
+      els.loadKeyFileBtn.addEventListener("click", () => {
+        els.keyFileInput.click();
+      });
+      els.keyFileInput.addEventListener("change", async () => {
+        const file = els.keyFileInput.files && els.keyFileInput.files[0];
+        if (!file) return;
+        try {
+          const text = await file.text();
+          els.inputPrivateKey.value = text.trim();
+          // Force-show the loaded value briefly so the user sees the file
+          // landed; togglePwBtn lets them re-mask it.
+          els.inputPrivateKey.classList.remove("masked");
+          els.togglePwBtn.textContent = "Hide";
+        } catch (err) {
+          els.connectionError.textContent = "Failed to read file: " + (err && err.message ? err.message : String(err));
+          els.connectionError.classList.remove("hidden");
+        } finally {
+          els.keyFileInput.value = "";
+        }
+      });
+    }
 
     els.testConnectionBtn.addEventListener("click", testConnection);
     els.saveConfigBtn.addEventListener("click", saveConfig);

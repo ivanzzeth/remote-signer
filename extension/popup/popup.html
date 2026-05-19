@@ -149,7 +149,11 @@
       <div class="form-group">
         <label for="inputPrivateKey">API Key Private Key</label>
         <textarea id="inputPrivateKey" placeholder="Ed25519 private key — hex or PEM (-----BEGIN PRIVATE KEY-----)" rows="3"></textarea>
-        <button id="togglePwBtn" class="btn-text" type="button">Show</button>
+        <div class="form-group-actions">
+          <button id="loadKeyFileBtn" class="btn-text" type="button" title="Load key from a local file (e.g. ~/.remote-signer/apikeys/agent.key.priv)">Load from file…</button>
+          <button id="togglePwBtn" class="btn-text" type="button">Show</button>
+        </div>
+        <input id="keyFileInput" type="file" accept=".priv,.pem,.key,.txt,application/x-pem-file,text/plain" hidden />
       </div>
 
       <div id="connectionError" class="error hidden"></div>

@@ -99,7 +99,10 @@ type IncomingMessage = EIP1193Request | StateRequest | PopupMessage;
 
 const DEFAULT_CONFIG: StoredConfig = {
   remoteSignerUrl: "http://127.0.0.1:8548",
-  apiKeyId: "",
+  // "agent" is the standard role name used by `remote-signer` when it
+  // bootstraps a local instance (see `~/.remote-signer/apikeys/agent.key.priv`).
+  // Defaulting the field saves the user a step on first run.
+  apiKeyId: "agent",
   apiKeyPrivateKey: "",
   selectedChain: 1,
 };
