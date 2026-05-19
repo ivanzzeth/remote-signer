@@ -193,9 +193,12 @@ test.describe("Live dApp provider integration (@live)", () => {
     const page = await context.newPage();
     page.setDefaultTimeout(NAV_TIMEOUT);
 
-    // Instrument window.ethereum.request as soon as the inpage proxy lands.
-    // Both `window.ethereum` and the EIP-6963-announced provider point at
-    // the same proxy object, so wrapping `.request` captures every call.
+    // Instrument window.ethereum.request — race-free version. The
+    // previous setInterval-50ms hook could miss the first call if the
+    // dApp issued one in the gap between inpage.js setting window.ethereum
+    // and our poll catching it. We now patch from the eip6963:announceProvider
+    // event (fires synchronously inside inpage.js right after the provider
+    // is installed) AND keep a fast-interval fallback.
     await page.addInitScript(() => {
       (window as any).__rpcLog = [] as Array<{
         method: string;
@@ -206,19 +209,17 @@ test.describe("Live dApp provider integration (@live)", () => {
         message?: string;
         t: number;
       }>;
-      let hooked = false;
-      const tryHook = () => {
-        const eth = (window as any).ethereum;
-        if (hooked || !eth || typeof eth.request !== "function") return;
-        const original = eth.request.bind(eth);
-        eth.request = async (args: any) => {
+      function patch(p: any): boolean {
+        if (!p || (p as any).__rpcLogPatched) return true;
+        if (typeof p.request !== "function") return false;
+        (p as any).__rpcLogPatched = true;
+        const original = p.request.bind(p);
+        p.request = async (args: any) => {
           const entry: any = { method: args?.method, params: args?.params, t: Date.now() };
           (window as any).__rpcLog.push(entry);
           try {
             const result = await original(args);
             entry.status = "ok";
-            // Store the full result (we assert on it later). Long values
-            // still show up in the JSON dump — that's fine for diagnostics.
             entry.result = result;
             return result;
           } catch (err: any) {
@@ -228,24 +229,32 @@ test.describe("Live dApp provider integration (@live)", () => {
             throw err;
           }
         };
-        hooked = true;
-      };
-      const iv = setInterval(tryHook, 50);
+        return true;
+      }
+      // EIP-6963 announce fires synchronously from inpage.js — earliest
+      // possible hook point.
+      window.addEventListener("eip6963:announceProvider", (ev: any) => {
+        patch(ev.detail?.provider);
+      });
+      // Belt-and-suspenders: also poll for window.ethereum (some dApps
+      // grab it before EIP-6963 announce is even dispatched).
+      const iv = setInterval(() => {
+        if (patch((window as any).ethereum)) clearInterval(iv);
+      }, 5);
       setTimeout(() => clearInterval(iv), 30_000);
     });
 
     await page.goto("https://polymarket.com/", { waitUntil: "domcontentloaded" });
     await waitForInjectedProvider(page);
 
-    // Pre-switch to Polygon BEFORE clicking Login. Polymarket does NOT
-    // call wallet_switchEthereumChain itself — it just reads eth_chainId
-    // and bakes whatever we return into the SIWE message's "Chain ID:"
-    // line. Their auth backend then rejects with 401 if the SIWE chain
-    // doesn't match Polymarket's expected chain (137). Verified via a
-    // run without this pre-switch: Polymarket made 17 eth_chainId calls
-    // and 0 switchEthereumChain calls. So the user-side workflow MUST
-    // be "switch chain first, then visit dApp" — which the popup chain
-    // chip exists to enable.
+    // Pre-switch to Polygon BEFORE clicking Login. We've verified
+    // empirically (race-free instrument from EIP-6963 announce time)
+    // that Polymarket NEVER calls wallet_requestPermissions /
+    // wallet_addEthereumChain / wallet_switchEthereumChain — only
+    // eth_accounts + eth_chainId + personal_sign. So the wallet has
+    // to be on the right chain BEFORE the dApp queries eth_chainId.
+    // MetaMask UX works for the user because their MM happens to be
+    // on Polygon; not because Polymarket drives a switch.
     await rpc(page, "wallet_switchEthereumChain", [{ chainId: "0x89" }]);
 
     // The login button label has rotated over time; try a few common
