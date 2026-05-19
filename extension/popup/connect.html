@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Remote Signer — Connect</title>
+  <link rel="stylesheet" href="popup.css" />
+  <link rel="stylesheet" href="pending.css" />
+  <link rel="stylesheet" href="connect.css" />
+</head>
+<body class="pending-body">
+  <div id="connectApp">
+    <header class="appbar">
+      <div class="appbar-brand">
+        <span class="logo-icon">RS</span>
+        <div class="appbar-titles">
+          <span class="logo-text">Connect</span>
+          <span class="logo-subtitle">Authorize a site to use this wallet</span>
+        </div>
+      </div>
+    </header>
+
+    <div class="pending-card">
+      <div class="connect-origin">
+        <span class="connect-origin-label">Site</span>
+        <span id="originText" class="connect-origin-value">—</span>
+      </div>
+
+      <section class="connect-section">
+        <div class="connect-section-head">
+          <span class="connect-section-title">Account</span>
+          <span class="connect-section-hint">This site will be able to read this address.</span>
+        </div>
+        <div id="signerList" class="signer-list">
+          <div class="signer-empty">Loading…</div>
+        </div>
+      </section>
+
+      <section class="connect-section">
+        <div class="connect-section-head">
+          <span class="connect-section-title">Network</span>
+          <span class="connect-section-hint">The chain this site will see via eth_chainId.</span>
+        </div>
+        <select id="chainSelect" class="connect-chain-select"></select>
+      </section>
+
+      <div id="connectError" class="error hidden"></div>
+
+      <div class="pending-actions">
+        <button id="connectBtn" class="btn btn-primary" disabled>Connect</button>
+        <button id="cancelBtn" class="btn btn-secondary">Cancel</button>
+      </div>
+    </div>
+  </div>
+  <script src="connect.js"></script>
+</body>
+</html>
