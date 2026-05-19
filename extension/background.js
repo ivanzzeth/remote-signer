@@ -2911,6 +2911,30 @@
         broadcastEvent(event, data);
       });
     }
+    provider.on("chainChanged", async (chainIdHex) => {
+      if (typeof chainIdHex !== "string") return;
+      const newChainId = parseInt(chainIdHex, 16);
+      if (!Number.isFinite(newChainId) || newChainId <= 0) return;
+      if (cachedConfig.selectedChain === newChainId) return;
+      cachedConfig.selectedChain = newChainId;
+      try {
+        await chrome.storage.local.set({ [configKey()]: cachedConfig });
+      } catch (err2) {
+        console.error("[background] Failed to persist chainChanged:", err2);
+      }
+    });
+    provider.on("accountsChanged", async (accounts) => {
+      if (!Array.isArray(accounts) || accounts.length === 0) return;
+      const active = typeof accounts[0] === "string" ? accounts[0].toLowerCase() : void 0;
+      if (!active) return;
+      if (cachedConfig.activeSignerAddress?.toLowerCase() === active) return;
+      cachedConfig.activeSignerAddress = active;
+      try {
+        await chrome.storage.local.set({ [configKey()]: cachedConfig });
+      } catch (err2) {
+        console.error("[background] Failed to persist accountsChanged:", err2);
+      }
+    });
   }
   function ensureInit() {
     if (!initPromise) {
