@@ -33,6 +33,12 @@ export function adminClient(serverInfo: {
 /**
  * Inject config into chrome.storage.local for the extension.
  * Call this before opening the popup so it starts pre-configured.
+ *
+ * Side effect: also pre-grants EIP-2255 permission for the e2e dApp
+ * origin so existing tests that call eth_accounts / eth_requestAccounts
+ * don't trip the Connect popup. Tests that *want* to exercise the
+ * Connect flow should NOT use this helper for the dApp setup — they
+ * can read raw chrome.storage directly or use openDappWithoutPermission.
  */
 export async function injectStorageConfig(
   page: Page,
@@ -54,6 +60,35 @@ export async function injectStorageConfig(
       });
     });
   }, config);
+
+  // Pre-grant permission to the dApp server origin so eth_accounts works
+  // out of the box in tests. The seeded signer address is in server.json.
+  try {
+    const statePath = path.resolve(__dirname, ".e2e-state", "server.json");
+    const info = JSON.parse(fs.readFileSync(statePath, "utf-8"));
+    const dappUrl: string | undefined = info.dapp_url;
+    const signer: string | undefined = info.signer_address;
+    if (dappUrl && signer) {
+      const origin = new URL(dappUrl).origin;
+      await page.evaluate(
+        ({ origin, signer, chainId }) => {
+          return new Promise<void>((resolve) => {
+            chrome.storage.local.get("remote-signer:permittedOrigins", (r) => {
+              const cur = r["remote-signer:permittedOrigins"] || {};
+              cur[origin] = { accounts: [signer], chainId, grantedAt: Date.now() };
+              chrome.storage.local.set(
+                { "remote-signer:permittedOrigins": cur },
+                () => resolve()
+              );
+            });
+          });
+        },
+        { origin, signer: signer.toLowerCase(), chainId: config.selectedChain || 1 }
+      );
+    }
+  } catch {
+    /* best-effort: tests that don't have server.json yet just skip */
+  }
 }
 
 // ── Popup Interactions ───────────────────────────────────────────────────────
@@ -110,6 +145,29 @@ export async function openDappAndWaitForProvider(page: Page, timeout = 15_000): 
   // listeners attached. Without the second condition, tests that fire
   // eth_requestAccounts immediately race the page's "attachListeners"
   // setup and lose the connect/accountsChanged event.
+  await page.waitForFunction(
+    () =>
+      !!window.ethereum &&
+      document.getElementById("providerStatus")?.textContent === "available",
+    { timeout }
+  );
+
+  // EIP-2255 permission gating is in place; injectStorageConfig (called
+  // by every test setup) pre-grants permission for the dApp origin so
+  // eth_accounts / eth_requestAccounts return immediately. Tests that
+  // want to drive the actual Connect popup use openDappWithoutPermission.
+}
+
+/**
+ * Open the dApp test page WITHOUT pre-granting permission. Use this in
+ * specs that test the Connect popup itself — calling eth_requestAccounts
+ * after this will spawn the Connect window the SW manages.
+ */
+export async function openDappWithoutPermission(page: Page, timeout = 15_000): Promise<void> {
+  const statePath = path.resolve(__dirname, ".e2e-state", "server.json");
+  const info = JSON.parse(fs.readFileSync(statePath, "utf-8"));
+  const dappUrl = info.dapp_url || `file://${path.resolve(__dirname, ".e2e-state", "dapp-test-page.html")}`;
+  await page.goto(dappUrl);
   await page.waitForFunction(
     () =>
       !!window.ethereum &&

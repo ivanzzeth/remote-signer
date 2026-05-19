@@ -2827,18 +2827,17 @@
   }
   var CHAIN_BY_ORIGIN_KEY = "remote-signer:chainByOrigin";
   var chainByOrigin = {};
-  var chainByOriginLoaded = false;
   async function ensureChainByOriginLoaded() {
-    if (chainByOriginLoaded) return;
     await new Promise(
       (resolve) => chrome.storage.local.get(CHAIN_BY_ORIGIN_KEY, (r) => {
         const raw = r[CHAIN_BY_ORIGIN_KEY];
+        const rebuilt = {};
         if (raw && typeof raw === "object") {
           for (const [k, v] of Object.entries(raw)) {
-            if (typeof v === "number" && v > 0) chainByOrigin[k] = v;
+            if (typeof v === "number" && v > 0) rebuilt[k] = v;
           }
         }
-        chainByOriginLoaded = true;
+        chainByOrigin = rebuilt;
         resolve();
       })
     );
@@ -2866,6 +2865,154 @@
     if (chainByOrigin[origin] === chainId) return;
     chainByOrigin[origin] = chainId;
     await persistChainByOrigin();
+  }
+  var PERMITTED_ORIGINS_KEY = "remote-signer:permittedOrigins";
+  var permittedOrigins = {};
+  async function ensurePermittedOriginsLoaded() {
+    await new Promise(
+      (resolve) => chrome.storage.local.get(PERMITTED_ORIGINS_KEY, (r) => {
+        const raw = r[PERMITTED_ORIGINS_KEY];
+        const rebuilt = {};
+        if (raw && typeof raw === "object") {
+          for (const [k, v] of Object.entries(raw)) {
+            const p = v;
+            if (p && Array.isArray(p.accounts) && typeof p.chainId === "number" && typeof p.grantedAt === "number") {
+              rebuilt[k] = {
+                accounts: p.accounts.map((a) => String(a).toLowerCase()),
+                chainId: p.chainId,
+                grantedAt: p.grantedAt
+              };
+            }
+          }
+        }
+        permittedOrigins = rebuilt;
+        resolve();
+      })
+    );
+  }
+  async function persistPermittedOrigins() {
+    try {
+      await chrome.storage.local.set({ [PERMITTED_ORIGINS_KEY]: permittedOrigins });
+    } catch {
+    }
+  }
+  function getPermissionForOrigin(origin) {
+    if (!origin) return null;
+    return permittedOrigins[origin] ?? null;
+  }
+  async function setPermissionForOrigin(origin, perm) {
+    permittedOrigins[origin] = perm;
+    await persistPermittedOrigins();
+    await setChainForOrigin(origin, perm.chainId);
+  }
+  async function revokePermissionForOrigin(origin) {
+    if (!permittedOrigins[origin]) return;
+    delete permittedOrigins[origin];
+    await persistPermittedOrigins();
+    broadcastEventToOrigin(origin, "accountsChanged", []);
+  }
+  var pendingConnects = /* @__PURE__ */ new Map();
+  function connectRequestId() {
+    return "cnx-" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+  }
+  async function openConnectWindow(origin, requestId, suggestedChainId) {
+    const params = new URLSearchParams({
+      requestId,
+      origin,
+      suggestedChainId: String(suggestedChainId)
+    });
+    const url = chrome.runtime.getURL(`popup/connect.html?${params.toString()}`);
+    try {
+      const win = await chrome.windows.create({
+        url,
+        type: "popup",
+        width: 380,
+        height: 520,
+        focused: true
+      });
+      const pending = pendingConnects.get(requestId);
+      if (pending && win.id != null) pending.windowId = win.id;
+    } catch (err2) {
+      console.error("[background] Failed to open Connect window:", err2);
+      const pending = pendingConnects.get(requestId);
+      if (pending) {
+        clearTimeout(pending.timeoutHandle);
+        pendingConnects.delete(requestId);
+        pending.reject({ code: -32603, message: "Failed to open Connect window" });
+      }
+    }
+  }
+  chrome.windows?.onRemoved?.addListener?.((windowId) => {
+    for (const [reqId, pending] of pendingConnects) {
+      if (pending.windowId === windowId) {
+        clearTimeout(pending.timeoutHandle);
+        pendingConnects.delete(reqId);
+        pending.reject({ code: 4001, message: "User closed Connect window" });
+      }
+    }
+  });
+  async function requestConnectFromUser(origin, suggestedChainId) {
+    return new Promise((resolve, reject) => {
+      const requestId = connectRequestId();
+      const timeoutHandle = setTimeout(() => {
+        if (pendingConnects.has(requestId)) {
+          pendingConnects.delete(requestId);
+          reject({ code: 4001, message: "Connect request timed out" });
+        }
+      }, 5 * 60 * 1e3);
+      pendingConnects.set(requestId, { origin, resolve, reject, timeoutHandle });
+      void openConnectWindow(origin, requestId, suggestedChainId);
+    });
+  }
+  async function handleConnectApprove(msg) {
+    const pending = pendingConnects.get(msg.requestId);
+    if (!pending) return { ok: false, error: "Unknown or expired request" };
+    if (!Array.isArray(msg.accounts) || msg.accounts.length === 0) {
+      return { ok: false, error: "Must grant at least one account" };
+    }
+    clearTimeout(pending.timeoutHandle);
+    pendingConnects.delete(msg.requestId);
+    const perm = {
+      accounts: msg.accounts.map((a) => a.toLowerCase()),
+      chainId: msg.chainId,
+      grantedAt: Date.now()
+    };
+    await setPermissionForOrigin(pending.origin, perm);
+    pending.resolve(perm);
+    return { ok: true };
+  }
+  async function handleConnectReject(msg) {
+    const pending = pendingConnects.get(msg.requestId);
+    if (!pending) return { ok: false };
+    clearTimeout(pending.timeoutHandle);
+    pendingConnects.delete(msg.requestId);
+    pending.reject({ code: 4001, message: "User rejected the connection request" });
+    return { ok: true };
+  }
+  async function handleConnectGetContext(msg) {
+    const pending = pendingConnects.get(msg.requestId);
+    if (!pending) return { ok: false, error: "Unknown or expired request" };
+    await ensureInit();
+    let signers = [];
+    try {
+      if (provider && provider.isConnected()) {
+        const accounts = await provider.request({ method: "eth_accounts" });
+        signers = accounts.map((address) => ({ address, locked: false, enabled: true }));
+      }
+    } catch {
+    }
+    const chains = Array.from(chainRegistry.values()).map((c) => ({
+      chainId: c.chainId,
+      chainName: c.chainName
+    }));
+    return {
+      ok: true,
+      origin: pending.origin,
+      suggestedChainId: cachedConfig.selectedChain || 1,
+      defaultChainId: cachedConfig.selectedChain || 1,
+      signers,
+      chains
+    };
   }
   function rpcOverridesFromRegistry() {
     const out = {};
@@ -3218,12 +3365,79 @@
         return { handled: true, result: true };
       case "net_peerCount":
         return { handled: true, result: "0x0" };
-      // ── Permissions (EIP-2255) ─────────────────────────────────────────────
-      case "wallet_getPermissions":
-        return { handled: true, result: [{ parentCapability: "eth_accounts" }] };
-      case "wallet_revokePermissions":
-        broadcastEvent("accountsChanged", []);
+      // ── Accounts / permissions (EIP-1102 / EIP-2255) ───────────────────────
+      case "eth_accounts": {
+        const perm = getPermissionForOrigin(origin);
+        return { handled: true, result: perm ? perm.accounts : [] };
+      }
+      case "eth_requestAccounts": {
+        const existing = getPermissionForOrigin(origin);
+        if (existing) {
+          return { handled: true, result: existing.accounts };
+        }
+        if (!origin) {
+          return { handled: false };
+        }
+        try {
+          const perm = await requestConnectFromUser(origin, getChainForOrigin(origin));
+          broadcastEventToOrigin(origin, "accountsChanged", perm.accounts);
+          broadcastEventToOrigin(origin, "chainChanged", `0x${perm.chainId.toString(16)}`);
+          return { handled: true, result: perm.accounts };
+        } catch (err2) {
+          return {
+            handled: true,
+            error: { code: err2?.code ?? 4001, message: err2?.message ?? "User rejected the request" }
+          };
+        }
+      }
+      case "wallet_requestPermissions": {
+        const existing = getPermissionForOrigin(origin);
+        if (!existing) {
+          if (!origin) return { handled: false };
+          try {
+            await requestConnectFromUser(origin, getChainForOrigin(origin));
+          } catch (err2) {
+            return {
+              handled: true,
+              error: { code: err2?.code ?? 4001, message: err2?.message ?? "User rejected the request" }
+            };
+          }
+        }
+        const perm = getPermissionForOrigin(origin);
+        broadcastEventToOrigin(origin || "", "accountsChanged", perm.accounts);
+        return {
+          handled: true,
+          result: [
+            {
+              parentCapability: "eth_accounts",
+              caveats: [{ type: "restrictReturnedAccounts", value: perm.accounts }],
+              date: perm.grantedAt,
+              id: `perm-${perm.grantedAt}`,
+              invoker: origin || "unknown"
+            }
+          ]
+        };
+      }
+      case "wallet_getPermissions": {
+        const perm = getPermissionForOrigin(origin);
+        if (!perm) return { handled: true, result: [] };
+        return {
+          handled: true,
+          result: [
+            {
+              parentCapability: "eth_accounts",
+              caveats: [{ type: "restrictReturnedAccounts", value: perm.accounts }],
+              date: perm.grantedAt,
+              id: `perm-${perm.grantedAt}`,
+              invoker: origin
+            }
+          ]
+        };
+      }
+      case "wallet_revokePermissions": {
+        if (origin) await revokePermissionForOrigin(origin);
         return { handled: true, result: null };
+      }
       // ── Watch asset (EIP-747) ─────────────────────────────────────────────
       case "wallet_watchAsset":
         return { handled: true, result: true };
@@ -3269,6 +3483,7 @@
   async function handleEIP1193Request(msg, origin) {
     await ensureInit();
     await ensureChainByOriginLoaded();
+    await ensurePermittedOriginsLoaded();
     if (initError) {
       return {
         type: "web3-eip1193-response",
@@ -3315,29 +3530,25 @@
   async function handleGetState(id, origin) {
     await ensureInit();
     await ensureChainByOriginLoaded();
+    await ensurePermittedOriginsLoaded();
+    const perm = getPermissionForOrigin(origin);
+    const accounts = perm ? perm.accounts : [];
+    const chainId = `0x${getChainForOrigin(origin).toString(16)}`;
     if (!provider) {
       return {
         type: "web3-state-response",
         id,
-        accounts: [],
-        chainId: `0x${getChainForOrigin(origin).toString(16)}`,
+        accounts,
+        chainId,
         isConnected: false
       };
-    }
-    let accounts = [];
-    try {
-      accounts = await provider.request({
-        method: "eth_accounts"
-      });
-    } catch {
     }
     return {
       type: "web3-state-response",
       id,
       accounts,
-      // Return the chain THIS origin sees, not the SDK's global state.
-      chainId: `0x${getChainForOrigin(origin).toString(16)}`,
-      isConnected: provider.isConnected()
+      chainId,
+      isConnected: provider.isConnected() && accounts.length > 0
     };
   }
   async function handlePopupGetConfig() {
@@ -3641,6 +3852,7 @@
   }
   async function handlePopupSwitchAccount(msg) {
     await ensureInit();
+    await ensurePermittedOriginsLoaded();
     if (!provider) {
       return { type: "popup:accountSwitched", ok: false, error: initError || "Provider not initialized" };
     }
@@ -3651,6 +3863,13 @@
     }
     cachedConfig.activeSignerAddress = msg.address;
     await chrome.storage.local.set({ [configKey()]: cachedConfig });
+    const newActive = msg.address.toLowerCase();
+    for (const [origin, perm] of Object.entries(permittedOrigins)) {
+      const others = perm.accounts.filter((a) => a !== newActive);
+      permittedOrigins[origin] = { ...perm, accounts: [newActive, ...others] };
+      broadcastEventToOrigin(origin, "accountsChanged", permittedOrigins[origin].accounts);
+    }
+    await persistPermittedOrigins();
     return { type: "popup:accountSwitched", ok: true, address: provider.selectedAddress };
   }
   chrome.runtime.onMessage.addListener(
@@ -3714,6 +3933,18 @@
       }
       if (message.type === "popup:getRequest") {
         handlePopupGetRequest(message).then(sendResponse);
+        return true;
+      }
+      if (message.type === "connect:getContext") {
+        handleConnectGetContext(message).then(sendResponse);
+        return true;
+      }
+      if (message.type === "connect:approve") {
+        handleConnectApprove(message).then(sendResponse);
+        return true;
+      }
+      if (message.type === "connect:reject") {
+        handleConnectReject(message).then(sendResponse);
         return true;
       }
       return false;

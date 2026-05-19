@@ -163,7 +163,14 @@
         navigator.clipboard.writeText(copyBtn.dataset.copy).catch(() => {});
       });
 
-      if (usable && !isActive) {
+      // Attach the click handler to every usable row (even the already-
+      // active one). The SDK switchAccount is a no-op when the target
+      // matches the active signer, but handlePopupSwitchAccount also
+      // re-applies the wallet-wide "use this signer everywhere"
+      // intent to permitted origins. That second effect is the reason
+      // a user might re-click the active row — to push it into a dApp
+      // they've granted but who hasn't seen the new active yet.
+      if (usable) {
         div.addEventListener("click", () => onSwitchAccount(addr));
       }
 

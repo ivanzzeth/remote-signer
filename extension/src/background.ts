@@ -188,19 +188,21 @@ function getRpcUrl(chainId: number): string | undefined {
 // connection-related config.
 const CHAIN_BY_ORIGIN_KEY = "remote-signer:chainByOrigin";
 let chainByOrigin: Record<string, number> = {};
-let chainByOriginLoaded = false;
 
+// Read fresh from storage every time — same rationale as
+// ensurePermittedOriginsLoaded: a once-and-cache approach raced with
+// out-of-band writes (e.g. injectStorageConfig from the popup page).
 async function ensureChainByOriginLoaded(): Promise<void> {
-  if (chainByOriginLoaded) return;
   await new Promise<void>((resolve) =>
     chrome.storage.local.get(CHAIN_BY_ORIGIN_KEY, (r) => {
       const raw = r[CHAIN_BY_ORIGIN_KEY];
+      const rebuilt: Record<string, number> = {};
       if (raw && typeof raw === "object") {
         for (const [k, v] of Object.entries(raw)) {
-          if (typeof v === "number" && v > 0) chainByOrigin[k] = v;
+          if (typeof v === "number" && v > 0) rebuilt[k] = v;
         }
       }
-      chainByOriginLoaded = true;
+      chainByOrigin = rebuilt;
       resolve();
     })
   );
@@ -234,6 +236,251 @@ async function setChainForOrigin(origin: string, chainId: number): Promise<void>
   if (chainByOrigin[origin] === chainId) return;
   chainByOrigin[origin] = chainId;
   await persistChainByOrigin();
+}
+
+// ── Per-origin permissions (EIP-2255) ────────────────────────────────────
+//
+// MetaMask 12+ ties two decisions together at first-connect time: WHICH
+// signer accounts an origin can see, and WHICH chain it should observe.
+// Without this gate our extension blindly returned the active signer on
+// eth_accounts to every page — so dApps never had a reason to call
+// eth_requestAccounts, never went through a permission prompt, and
+// never got the chance to pick a chain. End result on Polymarket: SIWE
+// gets built with our default chain (1) and Polymarket's auth API 401s.
+//
+// We persist permissions per origin under "remote-signer:permittedOrigins".
+// `accounts` are address strings (lowercased) that the origin can read;
+// `chainId` is the chain it should observe; `grantedAt` is the ms epoch
+// so wallet_getPermissions can return a stable `date`. The Connect popup
+// (popup/connect.html) writes new entries here; wallet_revokePermissions
+// removes them; eth_accounts and eth_chainId read from them.
+const PERMITTED_ORIGINS_KEY = "remote-signer:permittedOrigins";
+
+interface OriginPermission {
+  accounts: string[];
+  chainId: number;
+  grantedAt: number;
+}
+
+let permittedOrigins: Record<string, OriginPermission> = {};
+
+// Always read from chrome.storage — the once-and-cache approach raced
+// with same-session writers (popup's injectStorageConfig in tests,
+// content-script seed paths) because storage.onChanged dispatches
+// asynchronously. With a tens-of-entries map the cost is negligible
+// and the freshness guarantee removes a whole class of subtle bugs.
+async function ensurePermittedOriginsLoaded(): Promise<void> {
+  await new Promise<void>((resolve) =>
+    chrome.storage.local.get(PERMITTED_ORIGINS_KEY, (r) => {
+      const raw = r[PERMITTED_ORIGINS_KEY];
+      const rebuilt: Record<string, OriginPermission> = {};
+      if (raw && typeof raw === "object") {
+        for (const [k, v] of Object.entries(raw)) {
+          const p = v as any;
+          if (
+            p &&
+            Array.isArray(p.accounts) &&
+            typeof p.chainId === "number" &&
+            typeof p.grantedAt === "number"
+          ) {
+            rebuilt[k] = {
+              accounts: p.accounts.map((a: any) => String(a).toLowerCase()),
+              chainId: p.chainId,
+              grantedAt: p.grantedAt,
+            };
+          }
+        }
+      }
+      permittedOrigins = rebuilt;
+      resolve();
+    })
+  );
+}
+
+async function persistPermittedOrigins(): Promise<void> {
+  try {
+    await chrome.storage.local.set({ [PERMITTED_ORIGINS_KEY]: permittedOrigins });
+  } catch {
+    /* best-effort */
+  }
+}
+
+
+function getPermissionForOrigin(origin: string | null): OriginPermission | null {
+  if (!origin) return null;
+  return permittedOrigins[origin] ?? null;
+}
+
+async function setPermissionForOrigin(origin: string, perm: OriginPermission): Promise<void> {
+  permittedOrigins[origin] = perm;
+  await persistPermittedOrigins();
+  // Per-origin chain mirrors the connect-time chain choice. Until the
+  // dApp later calls wallet_switchEthereumChain, eth_chainId answers
+  // from here.
+  await setChainForOrigin(origin, perm.chainId);
+}
+
+async function revokePermissionForOrigin(origin: string): Promise<void> {
+  if (!permittedOrigins[origin]) return;
+  delete permittedOrigins[origin];
+  await persistPermittedOrigins();
+  // Tell the dApp its account list is now empty so its connector
+  // state machine resets. Don't touch chainByOrigin — the origin can
+  // re-connect on the same chain without retreading the dialog.
+  broadcastEventToOrigin(origin, "accountsChanged", []);
+}
+
+// ── Connect-time prompt: openConnectWindow + pending request bookkeeping ──
+//
+// dApp calls eth_requestAccounts → background looks up the origin's
+// permission record. If missing, we open a small floating window
+// (popup/connect.html) and block the caller until the user clicks
+// Connect or Cancel in that window. On Connect the popup IPCs back
+// with the chain they picked; we persist + resolve. On Cancel (or
+// window close, or timeout) we reject with EIP-1193 code 4001.
+
+interface PendingConnect {
+  origin: string;
+  resolve: (perm: OriginPermission) => void;
+  reject: (err: { code: number; message: string }) => void;
+  windowId?: number;
+  timeoutHandle: ReturnType<typeof setTimeout>;
+}
+const pendingConnects: Map<string, PendingConnect> = new Map();
+
+function connectRequestId(): string {
+  return "cnx-" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+}
+
+async function openConnectWindow(
+  origin: string,
+  requestId: string,
+  suggestedChainId: number
+): Promise<void> {
+  const params = new URLSearchParams({
+    requestId,
+    origin,
+    suggestedChainId: String(suggestedChainId),
+  });
+  const url = chrome.runtime.getURL(`popup/connect.html?${params.toString()}`);
+  try {
+    const win = await chrome.windows.create({
+      url,
+      type: "popup",
+      width: 380,
+      height: 520,
+      focused: true,
+    });
+    const pending = pendingConnects.get(requestId);
+    if (pending && win.id != null) pending.windowId = win.id;
+  } catch (err) {
+    console.error("[background] Failed to open Connect window:", err);
+    const pending = pendingConnects.get(requestId);
+    if (pending) {
+      clearTimeout(pending.timeoutHandle);
+      pendingConnects.delete(requestId);
+      pending.reject({ code: -32603, message: "Failed to open Connect window" });
+    }
+  }
+}
+
+// Drop any pending connect tied to a window the user just closed, so
+// the dApp side promise rejects instead of hanging forever.
+chrome.windows?.onRemoved?.addListener?.((windowId) => {
+  for (const [reqId, pending] of pendingConnects) {
+    if (pending.windowId === windowId) {
+      clearTimeout(pending.timeoutHandle);
+      pendingConnects.delete(reqId);
+      pending.reject({ code: 4001, message: "User closed Connect window" });
+    }
+  }
+});
+
+async function requestConnectFromUser(
+  origin: string,
+  suggestedChainId: number
+): Promise<OriginPermission> {
+  return new Promise<OriginPermission>((resolve, reject) => {
+    const requestId = connectRequestId();
+    const timeoutHandle = setTimeout(() => {
+      if (pendingConnects.has(requestId)) {
+        pendingConnects.delete(requestId);
+        reject({ code: 4001, message: "Connect request timed out" });
+      }
+    }, 5 * 60 * 1000);
+    pendingConnects.set(requestId, { origin, resolve, reject, timeoutHandle });
+    void openConnectWindow(origin, requestId, suggestedChainId);
+  });
+}
+
+async function handleConnectApprove(msg: {
+  requestId: string;
+  accounts: string[];
+  chainId: number;
+}): Promise<{ ok: boolean; error?: string }> {
+  const pending = pendingConnects.get(msg.requestId);
+  if (!pending) return { ok: false, error: "Unknown or expired request" };
+  if (!Array.isArray(msg.accounts) || msg.accounts.length === 0) {
+    return { ok: false, error: "Must grant at least one account" };
+  }
+  clearTimeout(pending.timeoutHandle);
+  pendingConnects.delete(msg.requestId);
+  const perm: OriginPermission = {
+    accounts: msg.accounts.map((a) => a.toLowerCase()),
+    chainId: msg.chainId,
+    grantedAt: Date.now(),
+  };
+  await setPermissionForOrigin(pending.origin, perm);
+  pending.resolve(perm);
+  return { ok: true };
+}
+
+async function handleConnectReject(msg: { requestId: string }): Promise<{ ok: boolean }> {
+  const pending = pendingConnects.get(msg.requestId);
+  if (!pending) return { ok: false };
+  clearTimeout(pending.timeoutHandle);
+  pendingConnects.delete(msg.requestId);
+  pending.reject({ code: 4001, message: "User rejected the connection request" });
+  return { ok: true };
+}
+
+// Read-only IPC the Connect popup uses to render: the list of usable
+// signers (so the user knows what they're about to grant access to),
+// the popup-default chain (as a hint for the chain picker), and the
+// origin/requestId echoed back for confirmation.
+async function handleConnectGetContext(msg: { requestId: string }): Promise<{
+  ok: boolean;
+  origin?: string;
+  suggestedChainId?: number;
+  defaultChainId?: number;
+  signers?: Array<{ address: string; locked?: boolean; enabled?: boolean }>;
+  chains?: Array<{ chainId: number; chainName?: string }>;
+  error?: string;
+}> {
+  const pending = pendingConnects.get(msg.requestId);
+  if (!pending) return { ok: false, error: "Unknown or expired request" };
+  await ensureInit();
+  let signers: Array<{ address: string; locked?: boolean; enabled?: boolean }> = [];
+  try {
+    if (provider && provider.isConnected()) {
+      const accounts = (await provider.request({ method: "eth_accounts" })) as string[];
+      signers = accounts.map((address) => ({ address, locked: false, enabled: true }));
+    }
+  } catch {
+    /* best-effort: caller may proceed without the rich list */
+  }
+  const chains = Array.from(chainRegistry.values()).map((c) => ({
+    chainId: c.chainId,
+    chainName: c.chainName,
+  }));
+  return {
+    ok: true,
+    origin: pending.origin,
+    suggestedChainId: cachedConfig.selectedChain || 1,
+    defaultChainId: cachedConfig.selectedChain || 1,
+    signers,
+    chains,
+  };
 }
 
 function rpcOverridesFromRegistry(): Record<number, string> {
@@ -753,15 +1000,92 @@ async function tryHandleExtraMethod(
     case "net_peerCount":
       return { handled: true, result: "0x0" };
 
-    // ── Permissions (EIP-2255) ─────────────────────────────────────────────
-    case "wallet_getPermissions":
-      return { handled: true, result: [{ parentCapability: "eth_accounts" }] };
-    case "wallet_revokePermissions":
-      // We don't gate accounts behind per-origin permissions today, but a
-      // dApp can still call this on logout. Emit accountsChanged([]) so the
-      // dApp UI updates, and return null.
-      broadcastEvent("accountsChanged", []);
+    // ── Accounts / permissions (EIP-1102 / EIP-2255) ───────────────────────
+    case "eth_accounts": {
+      // EIP-1102: silent read of the *already-granted* account list. An
+      // origin with no permission record gets []. dApps then call
+      // eth_requestAccounts to trigger the Connect prompt.
+      const perm = getPermissionForOrigin(origin);
+      return { handled: true, result: perm ? perm.accounts : [] };
+    }
+
+    case "eth_requestAccounts": {
+      const existing = getPermissionForOrigin(origin);
+      if (existing) {
+        return { handled: true, result: existing.accounts };
+      }
+      if (!origin) {
+        // No origin — popup or extension-internal caller. Fall through
+        // to the SDK provider's default (which honours the active signer).
+        return { handled: false };
+      }
+      try {
+        const perm = await requestConnectFromUser(origin, getChainForOrigin(origin));
+        broadcastEventToOrigin(origin, "accountsChanged", perm.accounts);
+        broadcastEventToOrigin(origin, "chainChanged", `0x${perm.chainId.toString(16)}`);
+        return { handled: true, result: perm.accounts };
+      } catch (err: any) {
+        return {
+          handled: true,
+          error: { code: err?.code ?? 4001, message: err?.message ?? "User rejected the request" },
+        };
+      }
+    }
+
+    case "wallet_requestPermissions": {
+      // EIP-2255 shape: dApps usually pass [{ eth_accounts: {} }]. Treat
+      // any incoming request as "give me eth_accounts" — we don't yet
+      // support snap/endowment permissions. The Connect prompt is shared
+      // with eth_requestAccounts.
+      const existing = getPermissionForOrigin(origin);
+      if (!existing) {
+        if (!origin) return { handled: false };
+        try {
+          await requestConnectFromUser(origin, getChainForOrigin(origin));
+        } catch (err: any) {
+          return {
+            handled: true,
+            error: { code: err?.code ?? 4001, message: err?.message ?? "User rejected the request" },
+          };
+        }
+      }
+      const perm = getPermissionForOrigin(origin)!;
+      broadcastEventToOrigin(origin || "", "accountsChanged", perm.accounts);
+      return {
+        handled: true,
+        result: [
+          {
+            parentCapability: "eth_accounts",
+            caveats: [{ type: "restrictReturnedAccounts", value: perm.accounts }],
+            date: perm.grantedAt,
+            id: `perm-${perm.grantedAt}`,
+            invoker: origin || "unknown",
+          },
+        ],
+      };
+    }
+
+    case "wallet_getPermissions": {
+      const perm = getPermissionForOrigin(origin);
+      if (!perm) return { handled: true, result: [] };
+      return {
+        handled: true,
+        result: [
+          {
+            parentCapability: "eth_accounts",
+            caveats: [{ type: "restrictReturnedAccounts", value: perm.accounts }],
+            date: perm.grantedAt,
+            id: `perm-${perm.grantedAt}`,
+            invoker: origin,
+          },
+        ],
+      };
+    }
+
+    case "wallet_revokePermissions": {
+      if (origin) await revokePermissionForOrigin(origin);
       return { handled: true, result: null };
+    }
 
     // ── Watch asset (EIP-747) ─────────────────────────────────────────────
     case "wallet_watchAsset":
@@ -825,6 +1149,7 @@ async function tryHandleExtraMethod(
 async function handleEIP1193Request(msg: EIP1193Request, origin: string | null) {
   await ensureInit();
   await ensureChainByOriginLoaded();
+  await ensurePermittedOriginsLoaded();
 
   if (initError) {
     return {
@@ -884,31 +1209,31 @@ async function handleEIP1193Request(msg: EIP1193Request, origin: string | null) 
 async function handleGetState(id: string, origin: string | null) {
   await ensureInit();
   await ensureChainByOriginLoaded();
+  await ensurePermittedOriginsLoaded();
+
+  // Accounts are gated by per-origin permissions (EIP-1102). A dApp page
+  // loading fresh — before it has called eth_requestAccounts — should see
+  // accounts=[] so its connector knows to ask for permission.
+  const perm = getPermissionForOrigin(origin);
+  const accounts = perm ? perm.accounts : [];
+  const chainId = `0x${(getChainForOrigin(origin)).toString(16)}`;
 
   if (!provider) {
     return {
       type: "web3-state-response",
       id,
-      accounts: [],
-      chainId: `0x${(getChainForOrigin(origin)).toString(16)}`,
+      accounts,
+      chainId,
       isConnected: false,
     };
   }
-
-  let accounts: string[] = [];
-  try {
-    accounts = (await provider.request({
-      method: "eth_accounts",
-    })) as string[];
-  } catch {}
 
   return {
     type: "web3-state-response",
     id,
     accounts,
-    // Return the chain THIS origin sees, not the SDK's global state.
-    chainId: `0x${(getChainForOrigin(origin)).toString(16)}`,
-    isConnected: provider.isConnected(),
+    chainId,
+    isConnected: provider.isConnected() && accounts.length > 0,
   };
 }
 
@@ -1295,6 +1620,7 @@ async function handlePopupGetRequest(msg: PopupGetRequest) {
  */
 async function handlePopupSwitchAccount(msg: PopupSwitchAccount) {
   await ensureInit();
+  await ensurePermittedOriginsLoaded();
   if (!provider) {
     return { type: "popup:accountSwitched", ok: false, error: initError || "Provider not initialized" };
   }
@@ -1305,6 +1631,20 @@ async function handlePopupSwitchAccount(msg: PopupSwitchAccount) {
   }
   cachedConfig.activeSignerAddress = msg.address;
   await chrome.storage.local.set({ [configKey()]: cachedConfig });
+
+  // Popup-driven account switch is a wallet-wide intent: "this is now my
+  // active signer everywhere." Push the new active to the front of every
+  // granted origin's account list, then re-broadcast accountsChanged so
+  // connected dApps observe the switch. This matches MetaMask's behaviour
+  // when the user picks an account from the global UI.
+  const newActive = msg.address.toLowerCase();
+  for (const [origin, perm] of Object.entries(permittedOrigins)) {
+    const others = perm.accounts.filter((a) => a !== newActive);
+    permittedOrigins[origin] = { ...perm, accounts: [newActive, ...others] };
+    broadcastEventToOrigin(origin, "accountsChanged", permittedOrigins[origin].accounts);
+  }
+  await persistPermittedOrigins();
+
   return { type: "popup:accountSwitched", ok: true, address: provider.selectedAddress };
 }
 
@@ -1390,6 +1730,20 @@ chrome.runtime.onMessage.addListener(
 
     if (message.type === "popup:getRequest") {
       handlePopupGetRequest(message).then(sendResponse);
+      return true;
+    }
+
+    // ── Connect popup IPCs ────────────────────────────────────────────
+    if ((message as any).type === "connect:getContext") {
+      handleConnectGetContext(message as any).then(sendResponse);
+      return true;
+    }
+    if ((message as any).type === "connect:approve") {
+      handleConnectApprove(message as any).then(sendResponse);
+      return true;
+    }
+    if ((message as any).type === "connect:reject") {
+      handleConnectReject(message as any).then(sendResponse);
       return true;
     }
 

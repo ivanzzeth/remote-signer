@@ -1,0 +1,89 @@
+/* Connect popup window — small floating chrome.windows.create. Shares
+ * the pending-body baseline (popup.css + pending.css) and overlays a
+ * permission-grant-specific layout. */
+
+.connect-origin {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 14px;
+  background: var(--bg-muted, #f3f4f6);
+  border-radius: 8px;
+}
+.connect-origin-label {
+  font-size: 11px;
+  color: var(--text-muted, #6b7280);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+.connect-origin-value {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 13px;
+  word-break: break-all;
+}
+
+.connect-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.connect-section-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.connect-section-title {
+  font-size: 12px;
+  color: var(--text-muted, #6b7280);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+.connect-section-hint {
+  font-size: 11px;
+  color: var(--text-muted, #6b7280);
+}
+
+.signer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.signer-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg-muted, #f3f4f6);
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 12px;
+}
+.signer-item input {
+  margin: 0;
+}
+.signer-item.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.signer-empty {
+  padding: 8px;
+  color: var(--text-muted, #6b7280);
+  font-size: 12px;
+}
+
+.connect-chain-select {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 13px;
+  background: var(--bg-muted, #f3f4f6);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text, #111827);
+  outline: none;
+}
+.connect-chain-select:focus {
+  border-color: var(--accent, #627EEA);
+}
