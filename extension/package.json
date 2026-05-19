@@ -14,7 +14,8 @@
     "remote-signer-client": "file:../pkg/js-client"
   },
   "devDependencies": {
+    "@playwright/test": "^1.52.0",
     "esbuild": "^0.28.0",
-    "@playwright/test": "^1.52.0"
+    "ethers": "^6.16.0"
   }
 }
