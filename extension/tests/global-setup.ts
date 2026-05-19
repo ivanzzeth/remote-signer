@@ -281,30 +281,42 @@ function generateDappPage(info: E2EServerInfo): string {
       document.getElementById("eventLog").textContent = eventLog.slice(0, 50).join("\\n");
     }
 
-    // Poll for provider availability
-    let checkCount = 0;
-    const checkInterval = setInterval(() => {
-      checkCount++;
-      const provider = window.ethereum;
+    // Attach listeners as early as possible. The extension's inpage.js
+    // injects window.ethereum at document_start, so by the time this
+    // script runs the provider is normally already defined; we just
+    // fall back to a short poll if it isn't (e.g. very slow page
+    // load).
+    function attachListeners(provider) {
       const statusEl = document.getElementById("providerStatus");
-      if (provider) {
-        clearInterval(checkInterval);
-        statusEl.textContent = "available";
-        statusEl.className = "status ok";
-        document.getElementById("chainId").textContent = provider.chainId || "-";
-        document.getElementById("accounts").textContent = JSON.stringify(provider.selectedAddress ? [provider.selectedAddress] : []);
-        document.getElementById("connected").textContent = String(provider.isConnected?.() ?? false);
+      statusEl.textContent = "available";
+      statusEl.className = "status ok";
+      document.getElementById("chainId").textContent = provider.chainId || "-";
+      document.getElementById("accounts").textContent = JSON.stringify(provider.selectedAddress ? [provider.selectedAddress] : []);
+      document.getElementById("connected").textContent = String(provider.isConnected?.() ?? false);
 
-        provider.on("accountsChanged", (accounts) => logEvent("accountsChanged", accounts));
-        provider.on("chainChanged", (chainId) => logEvent("chainChanged", chainId));
-        provider.on("connect", (info) => logEvent("connect", info));
-        provider.on("disconnect", (error) => logEvent("disconnect", error));
-      } else if (checkCount > 100) {
-        clearInterval(checkInterval);
-        statusEl.textContent = "unavailable (timeout)";
-        statusEl.className = "status err";
-      }
-    }, 100);
+      provider.on("accountsChanged", (accounts) => logEvent("accountsChanged", accounts));
+      provider.on("chainChanged", (chainId) => logEvent("chainChanged", chainId));
+      provider.on("connect", (info) => logEvent("connect", info));
+      provider.on("disconnect", (error) => logEvent("disconnect", error));
+    }
+
+    if (window.ethereum) {
+      attachListeners(window.ethereum);
+    } else {
+      let checkCount = 0;
+      const checkInterval = setInterval(() => {
+        checkCount++;
+        if (window.ethereum) {
+          clearInterval(checkInterval);
+          attachListeners(window.ethereum);
+        } else if (checkCount > 100) {
+          clearInterval(checkInterval);
+          const statusEl = document.getElementById("providerStatus");
+          statusEl.textContent = "unavailable (timeout)";
+          statusEl.className = "status err";
+        }
+      }, 100);
+    }
 
     async function call(method, ...params) {
       try {
