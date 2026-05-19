@@ -1,5 +1,7 @@
 package evm
 
+import "encoding/json"
+
 // EVM sign types (match ethsig interfaces)
 const (
 	SignTypeHash        = "hash"
@@ -58,6 +60,41 @@ type TypedDataDomain struct {
 	ChainId           string `json:"chainId,omitempty"` // decimal string
 	VerifyingContract string `json:"verifyingContract,omitempty"`
 	Salt              string `json:"salt,omitempty"`
+}
+
+// UnmarshalJSON accepts chainId as either a JSON number or string.
+//
+// The EIP-712 standard types chainId as uint256, and most signing libraries
+// serialise it as a plain JSON number ({"chainId": 1}). Our internal
+// representation is a decimal string for arithmetic-free comparison with
+// rule configs, so we coerce here at the IO boundary.
+func (d *TypedDataDomain) UnmarshalJSON(data []byte) error {
+	type alias struct {
+		Name              string          `json:"name,omitempty"`
+		Version           string          `json:"version,omitempty"`
+		ChainId           json.RawMessage `json:"chainId,omitempty"`
+		VerifyingContract string          `json:"verifyingContract,omitempty"`
+		Salt              string          `json:"salt,omitempty"`
+	}
+	var a alias
+	if err := json.Unmarshal(data, &a); err != nil {
+		return err
+	}
+	d.Name = a.Name
+	d.Version = a.Version
+	d.VerifyingContract = a.VerifyingContract
+	d.Salt = a.Salt
+	if len(a.ChainId) > 0 && string(a.ChainId) != "null" {
+		// JSON number — strip nothing, the raw representation is the
+		// decimal we want. JSON string — strip quotes.
+		raw := string(a.ChainId)
+		if len(raw) >= 2 && raw[0] == '"' && raw[len(raw)-1] == '"' {
+			d.ChainId = raw[1 : len(raw)-1]
+		} else {
+			d.ChainId = raw
+		}
+	}
+	return nil
 }
 
 // TransactionPayload represents an Ethereum transaction
