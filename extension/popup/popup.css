@@ -465,6 +465,20 @@ header.appbar {
 }
 .btn-text:hover { color: var(--text); }
 
+/* When multiple .btn-text live in an explicit actions row, lay them out
+ * inline below the textarea instead of stacking absolutely. */
+.form-group-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 4px;
+}
+.form-group-actions .btn-text {
+  position: static;
+  right: auto;
+  bottom: auto;
+}
+
 .error {
   padding: 8px 16px;
   margin: 8px 16px;
