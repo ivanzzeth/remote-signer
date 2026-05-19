@@ -436,6 +436,22 @@ async function initProvider(): Promise<void> {
     },
   });
 
+  // When a sign request enters the manual-approval queue, the dApp's
+  // call hangs while the SDK polls. Without surfacing anything to the
+  // user, they often don't realise an admin action is needed — Polymarket
+  // / wagmi / similar then time out client-side and the user sees a
+  // generic "Request Cancelled". Pop up a small floating window with
+  // the request summary + a button that jumps to the management page.
+  client.evm.sign.onPendingApproval = (requestId, ctx) => {
+    void openPendingApprovalWindow({
+      requestId,
+      signType: ctx.signRequest.sign_type,
+      signerAddress: ctx.signRequest.signer_address,
+      chainId: ctx.signRequest.chain_id,
+      remoteSignerUrl: cfg.remoteSignerUrl,
+    });
+  };
+
   // Auto-fetch signers from backend. The SDK owns chainId + activeAddress
   // persistence via the `storage` adapter — on each create() it rehydrates
   // from chrome.storage.local, on each state-changing event it writes back.
@@ -502,6 +518,90 @@ function ensureInit(): Promise<void> {
   }
   return initPromise;
 }
+
+// ── Pending Approval Window ──────────────────────────────────────────────
+
+// Track the currently-open pending-approval window so we don't spawn a
+// new one for every concurrent sign request. The SW may suspend between
+// requests, so we also check chrome.windows for liveness on each call.
+let pendingApprovalWindowId: number | null = null;
+
+interface PendingApprovalContext {
+  requestId: string;
+  signType: string;
+  signerAddress: string;
+  chainId: string;
+  remoteSignerUrl: string;
+}
+
+async function openPendingApprovalWindow(ctx: PendingApprovalContext): Promise<void> {
+  // Always bump the badge so even if the window is missed (window-creation
+  // denied, popup blocker, etc.) the user has a visible cue.
+  try {
+    await chrome.action.setBadgeText({ text: "!" });
+    await chrome.action.setBadgeBackgroundColor({ color: "#E48A2C" });
+  } catch {
+    /* badge is best-effort */
+  }
+
+  const params = new URLSearchParams({
+    requestId: ctx.requestId,
+    signType: ctx.signType,
+    signerAddress: ctx.signerAddress,
+    chainId: ctx.chainId,
+    remoteSignerUrl: ctx.remoteSignerUrl,
+  });
+  const popupUrl = chrome.runtime.getURL(`popup/pending.html?${params.toString()}`);
+
+  // If a previous pending window is still around, just focus it instead
+  // of stacking yet another one. The pending UI itself shows the most
+  // recent request and polls for completion of all live ones.
+  if (pendingApprovalWindowId != null) {
+    try {
+      const win = await chrome.windows.get(pendingApprovalWindowId);
+      if (win) {
+        await chrome.windows.update(pendingApprovalWindowId, { focused: true });
+        // Re-navigate the popup to the new request (the script reads URL params).
+        const tabs = await chrome.tabs.query({ windowId: pendingApprovalWindowId });
+        const tabId = tabs[0]?.id;
+        if (tabId != null) await chrome.tabs.update(tabId, { url: popupUrl });
+        return;
+      }
+    } catch {
+      // Window no longer exists — fall through and create a fresh one.
+      pendingApprovalWindowId = null;
+    }
+  }
+
+  try {
+    const win = await chrome.windows.create({
+      url: popupUrl,
+      type: "popup",
+      width: 380,
+      height: 520,
+      focused: true,
+    });
+    pendingApprovalWindowId = win.id ?? null;
+  } catch (err) {
+    console.error("[background] Failed to open pending-approval window:", err);
+  }
+}
+
+async function clearPendingApprovalBadge(): Promise<void> {
+  try {
+    await chrome.action.setBadgeText({ text: "" });
+  } catch {
+    /* ignore */
+  }
+}
+
+// Forget the window id when the user closes it so the next pending
+// request creates a fresh window instead of trying to focus a dead one.
+chrome.windows?.onRemoved?.addListener?.((windowId) => {
+  if (windowId === pendingApprovalWindowId) {
+    pendingApprovalWindowId = null;
+  }
+});
 
 // ── Event Broadcasting ───────────────────────────────────────────────────
 

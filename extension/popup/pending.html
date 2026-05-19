@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Remote Signer — Pending Approval</title>
+  <link rel="stylesheet" href="popup.css" />
+  <link rel="stylesheet" href="pending.css" />
+</head>
+<body class="pending-body">
+  <div id="pendingApp">
+    <header class="appbar">
+      <div class="appbar-brand">
+        <span class="logo-icon">RS</span>
+        <div class="appbar-titles">
+          <span class="logo-text">Pending Approval</span>
+          <span class="logo-subtitle">Sign request awaiting operator action</span>
+        </div>
+      </div>
+    </header>
+
+    <div class="pending-card">
+      <div class="pending-status" id="pendingStatus">
+        <span class="pending-dot"></span>
+        <span id="pendingStatusText">Waiting for manual approval</span>
+      </div>
+
+      <div class="pending-detail">
+        <div class="row">
+          <span class="label">Sign type</span>
+          <span class="value" id="detailSignType">—</span>
+        </div>
+        <div class="row">
+          <span class="label">Signer</span>
+          <span class="value mono" id="detailSigner">—</span>
+        </div>
+        <div class="row">
+          <span class="label">Chain</span>
+          <span class="value" id="detailChain">—</span>
+        </div>
+        <div class="row">
+          <span class="label">Request</span>
+          <span class="value mono small" id="detailRequestId">—</span>
+        </div>
+      </div>
+
+      <p class="pending-hint">
+        Approve or reject this request on the management page. Once an admin
+        takes action, this window closes automatically and the dApp receives
+        the signature (or rejection).
+      </p>
+
+      <div class="pending-actions">
+        <button id="openMgmtBtn" class="btn btn-primary">Go to manual approval →</button>
+        <button id="closeBtn" class="btn btn-secondary">Close</button>
+      </div>
+
+      <div id="pendingError" class="error hidden"></div>
+    </div>
+  </div>
+  <script src="pending.js"></script>
+</body>
+</html>

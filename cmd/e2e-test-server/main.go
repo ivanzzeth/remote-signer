@@ -223,6 +223,10 @@ func main() {
 	ruleGenerator, _ := rule.NewDefaultRuleGenerator()
 	approvalService, _ := service.NewApprovalService(ruleRepo, ruleGenerator, notifier, log)
 	signService, _ := service.NewSignService(chainRegistry, requestRepo, ruleEngine, stateMachine, approvalService, log)
+	// Mirror prod's default and let unmatched requests land in the
+	// manual-approval queue (instead of failing immediately). Required for
+	// the pending-approval-window e2e to exercise the queue path.
+	signService.SetManualApprovalEnabled(true)
 
 	// Router.
 	router, err := api.NewRouter(authVerifier, signService, signerManager, ruleRepo, auditRepo, log, api.RouterConfig{

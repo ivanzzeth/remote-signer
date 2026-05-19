@@ -75,9 +75,31 @@ export interface BatchSignResponse {
 // Service
 // ---------------------------------------------------------------------------
 
+/**
+ * Callback fired once per sign request when it enters a "needs manual
+ * approval" state — server returned status `pending` or `authorizing`
+ * after the initial POST /sign. Hosts use this to surface UX hints to
+ * the user (a browser-extension popup, a desktop notification, a Slack
+ * ping) before the SDK blocks in the long-poll loop. The callback is
+ * synchronous-or-Promise; any error it throws is swallowed so it can
+ * never break the signing path.
+ */
+export type OnPendingApproval = (
+  requestId: string,
+  context: { signRequest: SignRequest; status: string }
+) => void | Promise<void>;
+
 export class EvmSignService {
   private pollInterval: number;
   private pollTimeout: number;
+
+  /**
+   * Optional callback fired when a sign request lands in the
+   * manual-approval queue (status = pending | authorizing). Mutable by
+   * design: callers (e.g. a browser extension's service worker)
+   * typically set it once at startup after constructing the client.
+   */
+  public onPendingApproval?: OnPendingApproval;
 
   constructor(
     private readonly transport: HttpTransport,
@@ -147,6 +169,21 @@ export class EvmSignService {
       waitForApproval &&
       (response.status === "pending" || response.status === "authorizing")
     ) {
+      // Best-effort hook for hosts that want to surface a UX prompt
+      // (extension popup, notification, etc.) before we settle into
+      // the long-poll loop. Failures here MUST NOT break signing.
+      if (this.onPendingApproval) {
+        try {
+          await Promise.resolve(
+            this.onPendingApproval(response.request_id, {
+              signRequest: request,
+              status: response.status,
+            })
+          );
+        } catch {
+          /* swallow — UX hook is non-essential */
+        }
+      }
       return this.pollForResult(response.request_id);
     }
 
