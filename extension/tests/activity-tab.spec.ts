@@ -100,11 +100,60 @@ test.describe("Activity tab (real backend) (@integration)", () => {
     await expect(body).toContainText(/Chain/i);
     // The seeded auto-approve rule's id should appear under "Rule matched".
     await expect(body).toContainText(/e2e-test-rule/);
-    // Payload block renders the JSON-stringified payload.
-    await expect(popup.locator(".drawer-payload")).toBeVisible();
+    // Payload block renders the JSON-stringified payload (now under a
+    // collapsed <details> labelled "Raw payload"). After the decoded-
+    // message addition there are TWO .drawer-payload nodes (decoded +
+    // raw); both should be present.
+    await expect(popup.locator(".drawer-payload")).toHaveCount(2);
+    // Decoded message preview: the hex-encoded payload we seeded should
+    // surface as readable UTF-8 in the drawer.
+    await expect(body).toContainText("activity-detail");
 
     await popup.locator("#drawerCloseBtn").click();
     await expect(popup.locator("#requestDrawer")).toHaveClass(/hidden/);
+    await popup.close();
+  });
+
+  test("activity drawer flags Chain-ID mismatch in decoded SIWE", async ({ context, extensionId, serverInfo }) => {
+    await seedExtensionConfig(context, extensionId, serverInfo);
+
+    // Craft a SIWE-shaped message whose internal "Chain ID: 137" line
+    // disagrees with the request's chain_id (which defaults to 1 on a
+    // fresh origin). This is exactly the Polymarket failure mode — a
+    // dApp on Polygon receives a signature over a SIWE that says Chain
+    // ID: 1 and rejects it with 401.
+    const siweText =
+      "polymarket.com wants you to sign in with your Ethereum account:\n" +
+      TEST_ACCOUNTS.signer +
+      "\n\nWelcome.\n\nURI: https://polymarket.com\nVersion: 1\nChain ID: 137\nNonce: e2e-mismatch\nIssued At: 2026-05-19T00:00:00.000Z";
+    const dapp = await context.newPage();
+    await openDappAndWaitForProvider(dapp);
+    const r = await dappEIP1193Call(
+      dapp,
+      "personal_sign",
+      "0x" + Buffer.from(siweText, "utf-8").toString("hex"),
+      TEST_ACCOUNTS.signer
+    );
+    expect(r.ok).toBe(true);
+    await dapp.close();
+
+    const popup = await openConnectedPopup(context, extensionId);
+    await popup.locator("#tabActivityBtn").click();
+    const items = popup.locator(".activity-item");
+    await expect.poll(async () => items.count(), { timeout: 10_000 }).toBeGreaterThanOrEqual(1);
+    await items.first().click();
+    await expect(popup.locator("#requestDrawer")).toBeVisible();
+
+    const body = popup.locator("#drawerBody");
+    // Decoded SIWE text should be visible as-is.
+    await expect(body).toContainText(/Chain ID: 137/);
+    await expect(body).toContainText("Welcome.");
+    // Warning banner appears because chain in message (137) differs
+    // from the request's chain_id (1, the default for new origins).
+    await expect(body.locator(".drawer-warning")).toBeVisible();
+    await expect(body.locator(".drawer-warning")).toContainText(/Chain ID 137/);
+
+    await popup.locator("#drawerCloseBtn").click();
     await popup.close();
   });
 

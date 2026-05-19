@@ -410,17 +410,75 @@
     }
   }
 
+  // Decode a hex-encoded personal_sign / EIP-191 message body back to
+  // UTF-8 so operators can read the SIWE text in the activity drawer.
+  // Returns null when the input isn't even-length valid hex or doesn't
+  // decode as valid UTF-8.
+  function decodeHexMessageToUtf8(maybeHex) {
+    if (typeof maybeHex !== "string") return null;
+    if (!maybeHex.startsWith("0x") || maybeHex.length % 2 !== 0) return null;
+    const body = maybeHex.slice(2);
+    if (!/^[0-9a-fA-F]*$/.test(body)) return null;
+    const bytes = new Uint8Array(body.length / 2);
+    for (let i = 0; i < bytes.length; i++) {
+      bytes[i] = parseInt(body.substr(i * 2, 2), 16);
+    }
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {
+      return null;
+    }
+  }
+
+  function extractSiweChainId(messageText) {
+    if (typeof messageText !== "string") return null;
+    const m = messageText.match(/^\s*Chain ID:\s*(\d+)\s*$/m);
+    return m ? parseInt(m[1], 10) : null;
+  }
+
   function renderRequestDetail(r) {
     const row = (label, value) =>
       value
         ? `<div class="drawer-row"><span class="drawer-label">${escapeText(label)}</span><span class="drawer-value">${escapeText(value)}</span></div>`
         : "";
+
+    // Decoded message preview: for personal_sign / EIP-191 we decode hex
+    // to UTF-8 (SIWE text), for typed_data we pretty-print the JSON, for
+    // transaction we pretty-print the tx object. Surfaces a chain-mismatch
+    // warning when the SIWE text's Chain ID line disagrees with the
+    // request's chain_id — the same failure mode that produced the
+    // Polymarket 401 "Request Cancelled" symptom.
+    let messageBlock = "";
+    if (r.payload) {
+      let decoded = null;
+      let chainWarning = "";
+      if (r.sign_type === "personal" || r.sign_type === "eip191" || r.sign_type === "raw_message") {
+        const hex = r.payload.message ?? r.payload.raw_message;
+        decoded = decodeHexMessageToUtf8(hex) ?? (typeof hex === "string" ? hex : null);
+        if (decoded) {
+          const siweChain = extractSiweChainId(decoded);
+          if (siweChain != null && r.chain_id && siweChain !== parseInt(r.chain_id, 10)) {
+            chainWarning = `<div class="drawer-warning">⚠ SIWE text says Chain ID ${siweChain} but the request was on chain ${escapeText(r.chain_id)}. The dApp's backend will reject this signature even though it's cryptographically valid.</div>`;
+          }
+        }
+      } else if (r.sign_type === "typed_data" && r.payload.typed_data) {
+        try { decoded = JSON.stringify(r.payload.typed_data, null, 2); } catch {}
+      } else if (r.sign_type === "transaction" && r.payload.transaction) {
+        try { decoded = JSON.stringify(r.payload.transaction, null, 2); } catch {}
+      }
+      if (decoded) {
+        messageBlock =
+          chainWarning +
+          `<div class="drawer-row"><span class="drawer-label">Message</span><pre class="drawer-payload">${escapeText(decoded)}</pre></div>`;
+      }
+    }
+
     let payloadBlock = "";
     if (r.payload) {
       const pretty = (() => {
         try { return JSON.stringify(r.payload, null, 2); } catch { return String(r.payload); }
       })();
-      payloadBlock = `<div class="drawer-row"><span class="drawer-label">Payload</span><pre class="drawer-payload">${escapeText(pretty)}</pre></div>`;
+      payloadBlock = `<details class="drawer-row drawer-raw"><summary class="drawer-label">Raw payload</summary><pre class="drawer-payload">${escapeText(pretty)}</pre></details>`;
     }
     return [
       row("Request ID", r.id),
@@ -435,6 +493,7 @@
       row("Completed", r.completed_at),
       r.signature ? row("Signature", r.signature) : "",
       r.error_message ? row("Error", r.error_message) : "",
+      messageBlock,
       payloadBlock,
     ].join("");
   }

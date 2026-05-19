@@ -237,8 +237,15 @@ test.describe("Live dApp provider integration (@live)", () => {
     await page.goto("https://polymarket.com/", { waitUntil: "domcontentloaded" });
     await waitForInjectedProvider(page);
 
-    // Polymarket lives on Polygon — pre-switch so it can't bail with
-    // "wrong chain" on first interaction.
+    // Pre-switch to Polygon BEFORE clicking Login. Polymarket does NOT
+    // call wallet_switchEthereumChain itself — it just reads eth_chainId
+    // and bakes whatever we return into the SIWE message's "Chain ID:"
+    // line. Their auth backend then rejects with 401 if the SIWE chain
+    // doesn't match Polymarket's expected chain (137). Verified via a
+    // run without this pre-switch: Polymarket made 17 eth_chainId calls
+    // and 0 switchEthereumChain calls. So the user-side workflow MUST
+    // be "switch chain first, then visit dApp" — which the popup chain
+    // chip exists to enable.
     await rpc(page, "wallet_switchEthereumChain", [{ chainId: "0x89" }]);
 
     // The login button label has rotated over time; try a few common

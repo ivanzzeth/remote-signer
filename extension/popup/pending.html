@@ -44,6 +44,22 @@
         </div>
       </div>
 
+      <!-- Decoded message preview. Loaded asynchronously from the
+           pending request payload. For personal_sign / EIP-191 we
+           decode hex-encoded bytes back to UTF-8 so SIWE text is
+           readable; for typed_data we render the JSON. -->
+      <div id="messagePreviewBlock" class="message-preview hidden">
+        <div class="message-preview-head">
+          <span class="message-preview-title">Message</span>
+          <button id="copyMessageBtn" class="btn-text" type="button" title="Copy decoded text">Copy</button>
+        </div>
+        <pre id="messagePreview" class="message-preview-body"></pre>
+        <div id="messageChainWarning" class="message-chain-warning hidden">
+          <strong>⚠ Chain mismatch</strong>
+          <span id="messageChainWarningText"></span>
+        </div>
+      </div>
+
       <p class="pending-hint">
         Approve or reject this request on the management page. Once an admin
         takes action, this window closes automatically and the dApp receives
