@@ -241,7 +241,14 @@ func (a *EVMAdapter) Sign(ctx context.Context, signerAddress string, signType st
 		}
 
 	case SignTypePersonal:
-		signature, err = signer.PersonalSign(p.Message)
+		// MetaMask-compatible personal_sign: when the dApp passes a 0x-prefixed
+		// hex string (the canonical form for `DATA` in JSON-RPC and what
+		// viem/wagmi produce), decode it to raw bytes before applying the
+		// EIP-191 prefix. Signing the literal hex string would yield a
+		// signature that doesn't recover to the expected address — observed
+		// as "Request Cancelled" on Polymarket/SIWE flows.
+		msg := decodePersonalSignMessage(p.Message)
+		signature, err = signer.PersonalSign(msg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to sign personal message: %w", err)
 		}
@@ -346,6 +353,32 @@ func (a *EVMAdapter) HasSigner(ctx context.Context, address string) bool {
 }
 
 // Helper functions
+
+// decodePersonalSignMessage normalises the `message` field for personal_sign
+// to match MetaMask semantics: if the input is a 0x-prefixed, even-length,
+// valid hex string, decode the bytes and return them as a string (Go strings
+// are byte-clean — `[]byte(string(b)) == b`). Otherwise return the input
+// unchanged, treating it as a UTF-8 literal.
+//
+// dApps built on viem/wagmi (Polymarket, Uniswap, etc.) hex-encode their
+// SIWE messages before calling `personal_sign`. Signing the literal hex
+// string yields a signature that recovers to the wrong address — the dApp
+// then surfaces the verification failure as a generic "Request Cancelled"
+// error.
+func decodePersonalSignMessage(msg string) string {
+	if len(msg) < 2 || !strings.HasPrefix(msg, "0x") {
+		return msg
+	}
+	body := msg[2:]
+	if len(body) == 0 || len(body)%2 != 0 {
+		return msg
+	}
+	decoded, err := hex.DecodeString(body)
+	if err != nil {
+		return msg
+	}
+	return string(decoded)
+}
 
 // decodeHexData decodes a 0x-prefixed hex string into raw bytes.
 // Returns nil for empty or "0x" input.
