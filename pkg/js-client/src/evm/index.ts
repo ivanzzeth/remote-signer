@@ -52,4 +52,5 @@ export * from "./budgets";
 export * from "./ethsig";
 export * from "./provider-errors";
 export * from "./provider-types";
+export * from "./provider-storage";
 export * from "./eip1193";

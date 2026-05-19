@@ -13,6 +13,13 @@ import type {
   ProviderConnectInfo,
   ProviderMessage,
 } from "./provider-types";
+import {
+  type ProviderStorage,
+  type PersistedProviderState,
+  DEFAULT_PROVIDER_STORAGE_KEY,
+  readPersistedState,
+  writePersistedState,
+} from "./provider-storage";
 
 /**
  * EIP-1193 transactions arrive with hex-encoded quantity fields (value, gas,
@@ -92,6 +99,12 @@ export class EIP1193Provider {
   private _rpcOverrides: Record<number, string>;
   private _rpcResolver?: (chainId: number) => string | Promise<string>;
 
+  // Persistence (optional). When set, every state-changing operation
+  // writes back so a host that re-creates the provider (MV3 SW resume,
+  // long-running Node service restart) keeps the user's last choice.
+  private _storage?: ProviderStorage;
+  private _storageKey: string = DEFAULT_PROVIDER_STORAGE_KEY;
+
   // Event emitter
   private _eventHandlers: Map<string, Set<(...args: any[]) => void>> = new Map();
 
@@ -106,6 +119,22 @@ export class EIP1193Provider {
     this._activeIndex = config.defaultAccountIndex ?? 0;
     this._rpcOverrides = config.rpcOverrides ?? {};
     this._rpcResolver = config.rpcResolver;
+    this._storage = config.storage;
+    this._storageKey = config.storageKey ?? DEFAULT_PROVIDER_STORAGE_KEY;
+  }
+
+  /**
+   * Persist the current chain + active address to the configured storage.
+   * No-op when no storage was provided. Best-effort: failures are swallowed
+   * so a flaky backing store can never break the live request path.
+   */
+  private async _persistState(): Promise<void> {
+    if (!this._storage) return;
+    const state: PersistedProviderState = { chainId: this._chainId };
+    if (this._connected && this._signers.length > 0) {
+      state.activeAddress = this._signers[this._activeIndex].address.toLowerCase();
+    }
+    await writePersistedState(this._storage, this._storageKey, state);
   }
 
   /**
@@ -121,6 +150,31 @@ export class EIP1193Provider {
     const provider = new EIP1193Provider(config);
     await provider._initializeSigners(config.signersSource);
 
+    // Hydrate from persisted state when a storage backend is provided.
+    // The order matters: signers are loaded first (we need their addresses
+    // to map activeAddress → index), then chainId, then activeIndex.
+    // The constructor's defaults are kept as the fallback when there is
+    // no persisted state (first run, or storage that returned null).
+    if (provider._storage) {
+      const persisted = await readPersistedState(provider._storage, provider._storageKey);
+      if (persisted) {
+        if (typeof persisted.chainId === "number" && persisted.chainId > 0) {
+          provider._chainId = persisted.chainId;
+          // Keep the per-signer chainID in sync so subsequent sign calls
+          // hit the right chain on the backend.
+          for (const s of provider._signers) {
+            (s as any)._chainID = String(persisted.chainId);
+          }
+        }
+        if (persisted.activeAddress) {
+          const idx = provider._signers.findIndex(
+            (s) => s.address.toLowerCase() === persisted.activeAddress!.toLowerCase()
+          );
+          if (idx >= 0) provider._activeIndex = idx;
+        }
+      }
+    }
+
     // Validate active index
     if (provider._signers.length > 0) {
       if (provider._activeIndex >= provider._signers.length) {
@@ -132,6 +186,11 @@ export class EIP1193Provider {
       provider._emit("connect", {
         chainId: `0x${provider._chainId.toString(16)}`,
       } as ProviderConnectInfo);
+
+      // Make sure persisted state reflects the final, validated values
+      // even on a first-run create() — so a subsequent re-create() finds
+      // them. Fire-and-forget; we don't block the caller on storage.
+      void provider._persistState();
     }
 
     return provider;
@@ -278,6 +337,7 @@ export class EIP1193Provider {
 
     this._activeIndex = newIndex;
     this._emit("accountsChanged", this._getAccounts());
+    void this._persistState();
   }
 
   /**
@@ -308,6 +368,7 @@ export class EIP1193Provider {
     }
 
     this._emit("accountsChanged", this._getAccounts());
+    void this._persistState();
   }
 
   /**
@@ -358,6 +419,7 @@ export class EIP1193Provider {
     } else {
       this._emit("accountsChanged", this._getAccounts());
     }
+    void this._persistState();
   }
 
   /**
@@ -374,6 +436,7 @@ export class EIP1193Provider {
       code: 1000,
       message: "User disconnected",
     } as any);
+    void this._persistState();
   }
 
   /**
@@ -573,6 +636,7 @@ export class EIP1193Provider {
         console.log("[EIP1193] Emitting accountsChanged:", this._getAccounts());
         this._emit("accountsChanged", this._getAccounts());
 
+        void this._persistState();
         console.log("[EIP1193] wallet_switchEthereumChain completed successfully");
         return null;
       }
@@ -660,6 +724,7 @@ export class EIP1193Provider {
     // Emit both chainChanged and accountsChanged (per EIP-1193)
     this._emit("chainChanged", `0x${newChainId.toString(16)}`);
     this._emit("accountsChanged", this._getAccounts());
+    void this._persistState();
   }
 
   /**

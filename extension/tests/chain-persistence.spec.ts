@@ -52,17 +52,29 @@ test.describe("Chain persistence across SW restart (@integration)", () => {
     // The chainChanged listener writes back asynchronously — give it a tick.
     await dapp.waitForTimeout(500);
 
-    // Read straight from chrome.storage.local from the dApp page; the
-    // popup origin shares the same extension-storage namespace, but
-    // popup-side storage access from a content-script page is denied,
-    // so we re-open the popup to inspect.
+    // Inspect the SDK's own ProviderStorage slot — the canonical source
+    // of truth for chainId / activeAddress. The extension wires the SDK
+    // to a chrome.storage.local-backed adapter under
+    // `remote-signer:provider:<apiKeyId>`.
     const popup2 = await context.newPage();
     await popup2.goto(`chrome-extension://${extensionId}/popup/popup.html`);
     await popup2.waitForSelector("#app");
-    const storedChain = await popup2.evaluate(() =>
-      new Promise<number>((resolve) =>
-        chrome.storage.local.get("remoteSignerConfig", (r) => resolve(r.remoteSignerConfig?.selectedChain))
-      )
+    const storedChain = await popup2.evaluate(
+      (apiKeyId) =>
+        new Promise<number | null>((resolve) => {
+          const key = `remote-signer:provider:${apiKeyId}`;
+          chrome.storage.local.get(key, (r) => {
+            const raw = r[key];
+            if (typeof raw !== "string") return resolve(null);
+            try {
+              const parsed = JSON.parse(raw);
+              resolve(typeof parsed?.chainId === "number" ? parsed.chainId : null);
+            } catch {
+              resolve(null);
+            }
+          });
+        }),
+      serverInfo.admin_api_key_id
     );
     expect(storedChain).toBe(137);
     await popup2.close();

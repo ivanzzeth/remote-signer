@@ -1725,6 +1725,26 @@
      */
     rpc: (code, message, data) => new ProviderRpcError(code, message, data)
   };
+  var DEFAULT_PROVIDER_STORAGE_KEY = "remote-signer:eip1193";
+  async function readPersistedState(storage, key) {
+    try {
+      const raw = await Promise.resolve(storage.getItem(key));
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (typeof parsed !== "object" || parsed === null) return null;
+      if (parsed.chainId != null && typeof parsed.chainId !== "number") return null;
+      if (parsed.activeAddress != null && typeof parsed.activeAddress !== "string") return null;
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+  async function writePersistedState(storage, key, state) {
+    try {
+      await Promise.resolve(storage.setItem(key, JSON.stringify(state)));
+    } catch {
+    }
+  }
   function normalizeEip1193Tx(tx) {
     const hexToDec = (v) => {
       if (v == null) return void 0;
@@ -1766,12 +1786,28 @@
       this._signers = [];
       this._activeIndex = 0;
       this._connected = false;
+      this._storageKey = DEFAULT_PROVIDER_STORAGE_KEY;
       this._eventHandlers = /* @__PURE__ */ new Map();
       this.isMetaMask = true;
       this._chainId = config.defaultChainId ?? 1;
       this._activeIndex = config.defaultAccountIndex ?? 0;
       this._rpcOverrides = config.rpcOverrides ?? {};
       this._rpcResolver = config.rpcResolver;
+      this._storage = config.storage;
+      this._storageKey = config.storageKey ?? DEFAULT_PROVIDER_STORAGE_KEY;
+    }
+    /**
+     * Persist the current chain + active address to the configured storage.
+     * No-op when no storage was provided. Best-effort: failures are swallowed
+     * so a flaky backing store can never break the live request path.
+     */
+    async _persistState() {
+      if (!this._storage) return;
+      const state = { chainId: this._chainId };
+      if (this._connected && this._signers.length > 0) {
+        state.activeAddress = this._signers[this._activeIndex].address.toLowerCase();
+      }
+      await writePersistedState(this._storage, this._storageKey, state);
     }
     /**
      * Create and initialize a new EIP-1193 Provider
@@ -1785,6 +1821,23 @@
     static async create(config) {
       const provider2 = new _EIP1193Provider(config);
       await provider2._initializeSigners(config.signersSource);
+      if (provider2._storage) {
+        const persisted = await readPersistedState(provider2._storage, provider2._storageKey);
+        if (persisted) {
+          if (typeof persisted.chainId === "number" && persisted.chainId > 0) {
+            provider2._chainId = persisted.chainId;
+            for (const s of provider2._signers) {
+              s._chainID = String(persisted.chainId);
+            }
+          }
+          if (persisted.activeAddress) {
+            const idx = provider2._signers.findIndex(
+              (s) => s.address.toLowerCase() === persisted.activeAddress.toLowerCase()
+            );
+            if (idx >= 0) provider2._activeIndex = idx;
+          }
+        }
+      }
       if (provider2._signers.length > 0) {
         if (provider2._activeIndex >= provider2._signers.length) {
           provider2._activeIndex = 0;
@@ -1793,6 +1846,7 @@
         provider2._emit("connect", {
           chainId: `0x${provider2._chainId.toString(16)}`
         });
+        void provider2._persistState();
       }
       return provider2;
     }
@@ -1905,6 +1959,7 @@
       }
       this._activeIndex = newIndex;
       this._emit("accountsChanged", this._getAccounts());
+      void this._persistState();
     }
     /**
      * Add a new account to the provider
@@ -1927,6 +1982,7 @@
         });
       }
       this._emit("accountsChanged", this._getAccounts());
+      void this._persistState();
     }
     /**
      * Remove an account from the provider
@@ -1965,6 +2021,7 @@
       } else {
         this._emit("accountsChanged", this._getAccounts());
       }
+      void this._persistState();
     }
     /**
      * Disconnect provider and clear all accounts
@@ -1977,6 +2034,7 @@
         code: 1e3,
         message: "User disconnected"
       });
+      void this._persistState();
     }
     /**
      * Handle EIP-1193 JSON-RPC requests
@@ -2133,6 +2191,7 @@
           this._emit("chainChanged", `0x${newChainId.toString(16)}`);
           console.log("[EIP1193] Emitting accountsChanged:", this._getAccounts());
           this._emit("accountsChanged", this._getAccounts());
+          void this._persistState();
           console.log("[EIP1193] wallet_switchEthereumChain completed successfully");
           return null;
         }
@@ -2203,6 +2262,7 @@
       });
       this._emit("chainChanged", `0x${newChainId.toString(16)}`);
       this._emit("accountsChanged", this._getAccounts());
+      void this._persistState();
     }
     /**
      * Register an event listener
@@ -2708,6 +2768,26 @@
   };
 
   // src/background.ts
+  var chromeStorageAdapter = {
+    getItem(key) {
+      return new Promise((resolve) => {
+        chrome.storage.local.get(key, (r) => resolve(typeof r[key] === "string" ? r[key] : null));
+      });
+    },
+    setItem(key, value) {
+      return new Promise((resolve) => {
+        chrome.storage.local.set({ [key]: value }, () => resolve());
+      });
+    },
+    removeItem(key) {
+      return new Promise((resolve) => {
+        chrome.storage.local.remove(key, () => resolve());
+      });
+    }
+  };
+  function providerStorageKey(apiKeyId) {
+    return `remote-signer:provider:${apiKeyId || "default"}`;
+  }
   var DEFAULT_CONFIG = {
     remoteSignerUrl: "http://127.0.0.1:8548",
     // "agent" is the standard role name used by `remote-signer` when it
@@ -2890,9 +2970,11 @@
         const url = getRpcUrl(chainId);
         if (!url) throw new Error(`No RPC URL configured for chain ${chainId}`);
         return url;
-      }
+      },
+      storage: chromeStorageAdapter,
+      storageKey: providerStorageKey(cfg.apiKeyId)
     });
-    if (cfg.activeSignerAddress && provider.isConnected()) {
+    if (cfg.activeSignerAddress && provider.isConnected() && provider.selectedAddress?.toLowerCase() !== cfg.activeSignerAddress.toLowerCase()) {
       try {
         await provider.switchAccount(cfg.activeSignerAddress);
       } catch (err2) {
@@ -2911,30 +2993,6 @@
         broadcastEvent(event, data);
       });
     }
-    provider.on("chainChanged", async (chainIdHex) => {
-      if (typeof chainIdHex !== "string") return;
-      const newChainId = parseInt(chainIdHex, 16);
-      if (!Number.isFinite(newChainId) || newChainId <= 0) return;
-      if (cachedConfig.selectedChain === newChainId) return;
-      cachedConfig.selectedChain = newChainId;
-      try {
-        await chrome.storage.local.set({ [configKey()]: cachedConfig });
-      } catch (err2) {
-        console.error("[background] Failed to persist chainChanged:", err2);
-      }
-    });
-    provider.on("accountsChanged", async (accounts) => {
-      if (!Array.isArray(accounts) || accounts.length === 0) return;
-      const active = typeof accounts[0] === "string" ? accounts[0].toLowerCase() : void 0;
-      if (!active) return;
-      if (cachedConfig.activeSignerAddress?.toLowerCase() === active) return;
-      cachedConfig.activeSignerAddress = active;
-      try {
-        await chrome.storage.local.set({ [configKey()]: cachedConfig });
-      } catch (err2) {
-        console.error("[background] Failed to persist accountsChanged:", err2);
-      }
-    });
   }
   function ensureInit() {
     if (!initPromise) {
