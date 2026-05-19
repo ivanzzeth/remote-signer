@@ -108,8 +108,25 @@
         const result = await sendRequest(args.method, args.params);
         if (args.method === "eth_requestAccounts" || args.method === "eth_accounts") {
           if (Array.isArray(result)) {
+            const prev = _accounts;
             _accounts = result;
-            if (result.length > 0) _isConnected = true;
+            // EIP-1193 `connect` event semantics: emit on the first
+            // successful state-establishing call from this dApp. The SW
+            // already fired `connect` once during provider-create, but no
+            // dApp listener was attached yet, so we synthesise it here.
+            if (result.length > 0 && !_isConnected) {
+              _isConnected = true;
+              emitEvent("connect", { chainId: _chainId });
+            }
+            // Same for accountsChanged on first/changed accounts so
+            // dApp listeners reliably hear it.
+            if (
+              args.method === "eth_requestAccounts" ||
+              prev.length !== result.length ||
+              prev.some((a, i) => a !== result[i])
+            ) {
+              emitEvent("accountsChanged", _accounts);
+            }
           }
         }
         if (args.method === "eth_chainId" && typeof result === "string") {
@@ -123,6 +140,22 @@
           eventListeners.set(event, /* @__PURE__ */ new Set());
         }
         eventListeners.get(event).add(handler);
+        // Connect-event timing: the SW emits `connect` exactly once at
+        // provider-create time, and the initial state-sync (getState)
+        // sets _isConnected=true even before any dApp listener attaches.
+        // dApps that subscribe later would never see a connect event.
+        // Fire one now, on the next microtask, so late-attached
+        // listeners see the current state — matches MetaMask's
+        // synthesised replay behaviour.
+        if (event === "connect" && _isConnected) {
+          queueMicrotask(() => {
+            try {
+              handler({ chainId: _chainId });
+            } catch (e) {
+              console.error("[Web3 Agent Browser] connect handler error:", e);
+            }
+          });
+        }
         return provider;
       },
       removeListener(event, handler) {
