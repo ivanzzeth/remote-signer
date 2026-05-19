@@ -100,7 +100,7 @@ presets:
   writeFileSync(join(home, "config.yaml"), cfg.trimStart());
 
   const proc = spawn(binary, ["server", "start"], {
-    env: { ...process.env, REMOTE_SIGNER_HOME: home },
+    env: { ...process.env, REMOTE_SIGNER_HOME: home, REMOTE_SIGNER_KEYSTORE_PASSWORD: "e2e-test-password" },
     stdio: ["ignore", "pipe", "pipe"],
   });
 
