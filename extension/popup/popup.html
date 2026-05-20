@@ -165,8 +165,15 @@
            private-key textarea contains a recognisable EnhancedKeyFile
            JSON (admin keystore). For agent's plaintext PEM the field
            stays hidden so the operator isn't asked a meaningless
-           question. -->
-      <div class="form-group hidden" id="keystorePasswordGroup">
+           question.
+
+           Uses the native `hidden` attribute, not a `hidden` class:
+           popup.css scopes `.hidden` to specific elements
+           (.appbar-chip, .view, .error, ...) and there is no rule for
+           .form-group.hidden, so a class-based toggle wouldn't actually
+           hide the field. The attribute is universally enforced by the
+           browser. -->
+      <div class="form-group" id="keystorePasswordGroup" hidden>
         <label for="inputKeystorePassword">Keystore Password</label>
         <input id="inputKeystorePassword" type="password" autocomplete="current-password" placeholder="Password the keystore was created with" />
         <div class="hint" id="keystorePasswordHint">Encrypted keystore detected — enter the password the daemon was bootstrapped with (or whatever the operator who minted it used). The extension decrypts in the background service worker and stores only the resulting seed.</div>

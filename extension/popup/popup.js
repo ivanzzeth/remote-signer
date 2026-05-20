@@ -763,10 +763,17 @@
   // Toggles the keystore-password group based on what's currently in the
   // private-key textarea. Called on every input change and after file
   // loads, so the form reacts to paste/drop/file-load uniformly.
+  //
+  // Uses the `hidden` HTML attribute (universally enforced by the
+  // browser), NOT a `hidden` CSS class — popup.css's `.hidden` rule is
+  // scoped to specific elements (.view, .error, .appbar-chip, ...) and
+  // does NOT match .form-group, so a class-based toggle was a no-op
+  // and the field stayed visible for PEM input (regression caught by
+  // keystore-support.spec.ts).
   function updateKeystorePasswordVisibility() {
     if (!els.keystorePasswordGroup) return;
     const isKeystore = detectKeystoreJSON(els.inputPrivateKey.value);
-    els.keystorePasswordGroup.classList.toggle("hidden", !isKeystore);
+    els.keystorePasswordGroup.hidden = !isKeystore;
     if (!isKeystore && els.inputKeystorePassword) {
       // Avoid keeping a typed password around when the operator switches
       // back to a plaintext PEM in the same session.
