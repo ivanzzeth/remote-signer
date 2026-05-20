@@ -55,7 +55,7 @@ test.describe("personal_sign (@integration)", () => {
     expect(result.result).toMatch(/^0x[a-fA-F0-9]{130}$/);
   });
 
-  test("signs empty message", async ({
+  test("signs a single-character message", async ({
     context,
     extensionId,
     serverInfo,
@@ -65,11 +65,13 @@ test.describe("personal_sign (@integration)", () => {
     const page = await context.newPage();
     await openDappAndWaitForProvider(page);
 
-    const emptyMessage = "0x";
+    // Was "0x" (empty). Backend rejects empty cleartext (rule engine
+    // needs SOMETHING to pattern-match), and viem/wagmi callers always
+    // hex-encode at least one byte. Use the minimum non-empty payload.
     const result = await dappEIP1193Call(
       page,
       "personal_sign",
-      emptyMessage,
+      "0x" + Buffer.from("X").toString("hex"),
       TEST_ACCOUNTS.signer
     );
 
