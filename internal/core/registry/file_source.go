@@ -83,26 +83,49 @@ type presetYAML struct {
 // FileTemplateSource
 // ---------------------------------------------------------------------------
 
-// FileTemplateSource lists templates from a directory tree on disk. It is
-// the only Source implementation v0.3 ships; remote sources (github, http)
-// land in later phases and reuse the same Registry by implementing the
-// TemplateSource interface.
+// FileTemplateSource lists templates from a directory tree (either an
+// on-disk path or an embedded fs.FS — the io/fs API hides the difference).
+// It is the only Source implementation v0.3 ships; remote sources
+// (github, http) land in later phases and reuse the same Registry by
+// implementing the TemplateSource interface.
 //
 // Layout convention: <root>/<chain_type>/<name>.yaml. The first directory
 // segment becomes ChainType; files at the root (no subdir) are treated
 // as off-chain (ChainType=""). This keeps `ls rules/templates/` legible
 // at a glance — operators see one folder per chain family.
 type FileTemplateSource struct {
-	root string
+	fsys fs.FS  // file system to walk; nil → empty source
+	root string // root path within fsys
 }
 
-// NewFileTemplateSource takes a directory path and returns a Source. The
-// path is not required to exist at construction time: a missing root is
-// equivalent to "no templates" and List returns an empty slice. That
-// makes startup tolerant of fresh installs where the operator has not
-// yet populated rules/templates/.
+// NewFileTemplateSource takes an on-disk directory path and returns a
+// Source. The path is not required to exist at construction time: a
+// missing root is equivalent to "no templates" and List returns an
+// empty slice. That makes startup tolerant of fresh installs where the
+// operator has not yet populated rules/templates/.
+//
+// Empty root is special-cased to "no source" so legacy callers that
+// passed "" (when the config omitted templates_dir) keep their no-op
+// behaviour without a stat round-trip.
 func NewFileTemplateSource(root string) *FileTemplateSource {
-	return &FileTemplateSource{root: root}
+	if root == "" {
+		return &FileTemplateSource{}
+	}
+	// os.DirFS rooted at the directory means our internal "root within
+	// fsys" is "." — the walk starts from the directory contents.
+	return &FileTemplateSource{fsys: os.DirFS(root), root: "."}
+}
+
+// NewFSTemplateSource lets the daemon swap in an embed.FS (or any
+// fs.FS) so the binary's baked-in rule catalogue feeds the Registry
+// when the operator hasn't pointed templates_dir at anything on disk.
+// `root` is the path INSIDE fsys (e.g. "rules/templates" when fsys is
+// the module-root embed.FS).
+func NewFSTemplateSource(fsys fs.FS, root string) *FileTemplateSource {
+	if fsys == nil || root == "" {
+		return &FileTemplateSource{}
+	}
+	return &FileTemplateSource{fsys: fsys, root: root}
 }
 
 // Kind reports RuleSourceFile so Registry's prune step only touches
@@ -118,10 +141,10 @@ func (s *FileTemplateSource) Kind() types.RuleSource {
 // skipped and the error is surfaced via the Registry's SyncReport so a
 // single bad template can't block the rest of the catalogue.
 func (s *FileTemplateSource) List(ctx context.Context) ([]*types.RuleTemplate, error) {
-	if s.root == "" {
+	if s.fsys == nil {
 		return nil, nil
 	}
-	info, err := os.Stat(s.root)
+	info, err := fs.Stat(s.fsys, s.root)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -133,7 +156,7 @@ func (s *FileTemplateSource) List(ctx context.Context) ([]*types.RuleTemplate, e
 	}
 
 	var out []*types.RuleTemplate
-	walkErr := filepath.WalkDir(s.root, func(path string, d fs.DirEntry, err error) error {
+	walkErr := fs.WalkDir(s.fsys, s.root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -165,7 +188,7 @@ func (s *FileTemplateSource) List(ctx context.Context) ([]*types.RuleTemplate, e
 // and assembles a *types.RuleTemplate with the JSON columns populated.
 // Sync-time validation lives in validateTemplate.
 func (s *FileTemplateSource) parseTemplate(path string) (*types.RuleTemplate, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := fs.ReadFile(s.fsys, path)
 	if err != nil {
 		return nil, err
 	}
@@ -300,12 +323,33 @@ func (s *FileTemplateSource) parseTemplate(path string) (*types.RuleTemplate, er
 // rules, same content-hash semantics — kept as a separate type because
 // the parse + validate paths diverge enough that a generic source would
 // hide more than it'd save.
+// FilePresetSource mirrors FileTemplateSource — same disk vs. embedded
+// fs abstraction, same content-hash semantics. Kept as a separate type
+// because the parse + validate paths diverge enough that a generic
+// source would hide more than it'd save.
 type FilePresetSource struct {
+	fsys fs.FS
 	root string
 }
 
+// NewFilePresetSource takes an on-disk directory path. Empty root is
+// special-cased to "no source"; missing directory at List time is also
+// a silent empty result (presets are optional).
 func NewFilePresetSource(root string) *FilePresetSource {
-	return &FilePresetSource{root: root}
+	if root == "" {
+		return &FilePresetSource{}
+	}
+	return &FilePresetSource{fsys: os.DirFS(root), root: "."}
+}
+
+// NewFSPresetSource is the embedded-fs counterpart — daemon falls back
+// to this when no on-disk presets directory is configured (the binary
+// ships with the blessed preset catalogue baked in).
+func NewFSPresetSource(fsys fs.FS, root string) *FilePresetSource {
+	if fsys == nil || root == "" {
+		return &FilePresetSource{}
+	}
+	return &FilePresetSource{fsys: fsys, root: root}
 }
 
 func (s *FilePresetSource) Kind() types.RuleSource {
@@ -313,10 +357,10 @@ func (s *FilePresetSource) Kind() types.RuleSource {
 }
 
 func (s *FilePresetSource) List(ctx context.Context) ([]*types.RulePreset, error) {
-	if s.root == "" {
+	if s.fsys == nil {
 		return nil, nil
 	}
-	info, err := os.Stat(s.root)
+	info, err := fs.Stat(s.fsys, s.root)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -328,7 +372,7 @@ func (s *FilePresetSource) List(ctx context.Context) ([]*types.RulePreset, error
 	}
 
 	var out []*types.RulePreset
-	walkErr := filepath.WalkDir(s.root, func(path string, d fs.DirEntry, err error) error {
+	walkErr := fs.WalkDir(s.fsys, s.root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -352,7 +396,7 @@ func (s *FilePresetSource) List(ctx context.Context) ([]*types.RulePreset, error
 }
 
 func (s *FilePresetSource) parsePreset(path string) (*types.RulePreset, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := fs.ReadFile(s.fsys, path)
 	if err != nil {
 		return nil, err
 	}
