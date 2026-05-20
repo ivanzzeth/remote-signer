@@ -1,6 +1,11 @@
 import { type ReactNode } from "react";
-import { NavLink } from "react-router-dom";
-import { clearCredentials, getCredentials } from "../lib/auth";
+import { NavLink, useNavigate } from "react-router-dom";
+import {
+  clearCredentials,
+  clearStoredKeystore,
+  getCredentials,
+  hasStoredKeystore,
+} from "../lib/auth";
 
 interface LayoutProps {
   children: ReactNode;
@@ -8,6 +13,30 @@ interface LayoutProps {
 
 export function Layout({ children }: LayoutProps) {
   const creds = getCredentials();
+  const navigate = useNavigate();
+  const stored = hasStoredKeystore();
+
+  function onSignOut() {
+    // Clears the in-memory seed but keeps the encrypted keystore so the
+    // next visit only needs the password. The /login route detects the
+    // stored keystore and goes straight to the Unlock screen.
+    clearCredentials();
+    navigate("/login", { replace: true });
+  }
+
+  function onForgetKey() {
+    if (
+      !confirm(
+        "Forget the encrypted key on this device? You'll need to import the private key and set a new password again.",
+      )
+    ) {
+      return;
+    }
+    clearStoredKeystore();
+    clearCredentials();
+    navigate("/login", { replace: true });
+  }
+
   return (
     <div className="flex h-full">
       <aside className="flex w-56 shrink-0 flex-col gap-1 border-r border-ink-200 bg-white px-3 py-5">
@@ -33,14 +62,25 @@ export function Layout({ children }: LayoutProps) {
         <NavItem to="/audit">Audit log</NavItem>
         <NavItem to="/settings">Settings</NavItem>
 
-        <div className="mt-auto border-t border-ink-200 px-3 pt-3">
+        <div className="mt-auto space-y-2 border-t border-ink-200 px-3 pt-3">
           {creds && (
             <button
               type="button"
-              onClick={clearCredentials}
-              className="text-xs text-ink-500 hover:text-ink-900"
+              data-testid="sign-out"
+              onClick={onSignOut}
+              className="block text-xs text-ink-500 hover:text-ink-900"
             >
               Sign out
+            </button>
+          )}
+          {stored && (
+            <button
+              type="button"
+              data-testid="forget-key"
+              onClick={onForgetKey}
+              className="block text-xs text-red-600 hover:text-red-800"
+            >
+              Forget encrypted key
             </button>
           )}
         </div>

@@ -1,9 +1,17 @@
-// In-memory credential store + RemoteSignerClient lifecycle.
+// In-memory credential store + RemoteSignerClient lifecycle, with optional
+// localStorage persistence of the password-encrypted keystore JSON.
 //
-// Phase-8 simplification: the web UI never persists the private key. A page
-// reload requires re-import; this matches the threat model where keys live
-// on disk encrypted (via `remote-signer keystore create`) and only the
-// unwrapped seed ever touches the browser.
+// Threat model:
+//
+//   - The unwrapped 32-byte Ed25519 seed ONLY lives in memory while a
+//     session is unlocked (in `current`). Page reload / tab close drops it.
+//   - The encrypted keystore JSON CAN live in localStorage (see
+//     persistKeystore). It's scrypt(N=2^18) + AES-CTR + keccak256 MAC, the
+//     same shape ethsig/go-ethereum write to disk. An attacker with browser
+//     access reads the ciphertext but still needs the password.
+//   - Logout clears `current` but keeps the keystore JSON, so the operator
+//     just re-enters the password on the next visit. "Reset keystore" wipes
+//     localStorage and forces re-import.
 //
 // All HTTP I/O goes through the linked SDK (`remote-signer-client`), so this
 // module is the single owner of the client instance and broadcasts changes
@@ -79,4 +87,63 @@ export function subscribeAuth(fn: () => void): () => void {
   return () => {
     listeners.delete(fn);
   };
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// localStorage persistence — encrypted keystore + the api-key id label
+// ──────────────────────────────────────────────────────────────────────
+//
+// The keystore JSON itself is scrypt-encrypted; we store the JSON text
+// and the operator-facing id (the api-key id, e.g. "admin") separately
+// so the unlock screen can prefill the id without decrypting.
+
+const KEYSTORE_LS_KEY = "remote-signer:web:keystore";
+const KEYSTORE_ID_LS_KEY = "remote-signer:web:keystore-id";
+
+/** Returns true if a persisted keystore exists in localStorage. */
+export function hasStoredKeystore(): boolean {
+  try {
+    return localStorage.getItem(KEYSTORE_LS_KEY) !== null;
+  } catch {
+    // localStorage may throw in private-mode browsers; treat as absent.
+    return false;
+  }
+}
+
+/** Returns the stored keystore JSON text, or null if absent. */
+export function getStoredKeystoreJSON(): string | null {
+  try {
+    return localStorage.getItem(KEYSTORE_LS_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/** Returns the stored api-key id label, or null if absent. */
+export function getStoredKeystoreID(): string | null {
+  try {
+    return localStorage.getItem(KEYSTORE_ID_LS_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Persists the keystore JSON + id label. Throws on quota / private-mode
+ * errors so the UI can surface "couldn't save to this browser" to the
+ * operator instead of silently losing the key on reload.
+ */
+export function persistKeystore(apiKeyID: string, keystoreJSON: string): void {
+  localStorage.setItem(KEYSTORE_LS_KEY, keystoreJSON);
+  localStorage.setItem(KEYSTORE_ID_LS_KEY, apiKeyID);
+}
+
+/** Removes the persisted keystore + id. No-op if absent. */
+export function clearStoredKeystore(): void {
+  try {
+    localStorage.removeItem(KEYSTORE_LS_KEY);
+    localStorage.removeItem(KEYSTORE_ID_LS_KEY);
+  } catch {
+    // best-effort
+  }
 }
