@@ -1,14 +1,22 @@
 // Browser-side password-encrypted private-key storage.
 //
-// Format: go-ethereum keystore v3 + ethsig's EnhancedKeyFile wrapper.
-// We deliberately match the on-disk format the daemon produces so the
-// same JSON can be imported into the CLI later (and vice versa). The
-// shape is:
+// Format: ethsig's EnhancedKeyFile envelope wrapping go-ethereum's
+// CryptoJSON. We deliberately match the on-disk format the daemon
+// produces so the same JSON can be imported into the CLI later (and
+// vice versa). The shape is:
 //
 //   {
-//     "version":    3,                // ethsig EnhancedKeyFile version
+//     "version":    1,                // EnhancedKeyFile envelope version
+//                                     // (NOT the inner keystore v3 — that
+//                                     //  lives implicitly in the crypto
+//                                     //  block's shape)
 //     "key_type":   "ed25519",        // ethsig key-type tag
-//     "identifier": "<api-key-id>",   // operator-meaningful label
+//     "identifier": "<hex pubkey>",   // ethsig sets this to the hex-encoded
+//                                     //  public key on bootstrap; we keep
+//                                     //  it for the local-encrypt path too
+//                                     //  so the on-disk and in-browser
+//                                     //  representations stay congruent.
+//     "label":      "...",            // operator-meaningful name (optional)
 //     "crypto":    { ...go-ethereum CryptoJSON... }
 //   }
 //
@@ -110,7 +118,7 @@ export async function encryptSeed(
   const mac = computeMac(macKey, ciphertext);
 
   return {
-    version: 3,
+    version: 1,
     key_type: "ed25519",
     identifier,
     crypto: {
@@ -144,9 +152,9 @@ export async function decryptKeystore(
 ): Promise<{ seed: Uint8Array; identifier: string }> {
   const ks: KeystoreFile = typeof json === "string" ? JSON.parse(json) : json;
 
-  if (ks.version !== 3) {
+  if (ks.version !== 1) {
     throw new Error(
-      `unsupported keystore version: ${ks.version} (expected 3)`,
+      `unsupported keystore version: ${ks.version} (expected 1 — the EnhancedKeyFile envelope; the inner crypto block is implicitly keystore v3)`,
     );
   }
   if (ks.key_type !== "ed25519") {

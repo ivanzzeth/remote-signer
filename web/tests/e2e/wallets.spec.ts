@@ -1,23 +1,4 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import {
-  RemoteSignerClient,
-  parsePrivateKey,
-} from "remote-signer-client";
-import { expect, test } from "./fixtures";
-import { getState } from "./global-setup";
-
-function adminClient() {
-  const state = getState();
-  const seed = parsePrivateKey(
-    readFileSync(join(state.home, "apikeys", "admin.key.priv"), "utf8"),
-  );
-  return new RemoteSignerClient({
-    baseURL: `http://127.0.0.1:${process.env.E2E_PORT ?? 18548}`,
-    apiKeyID: "admin",
-    privateKey: seed,
-  });
-}
+import { adminSDKClient, expect, test } from "./fixtures";
 
 test("create wallet + add member + delete via UI", async ({ authedPage }) => {
   // We need a signer to add as a member. Use the SDK to mint one quickly —
@@ -59,7 +40,7 @@ test("add member uses signer picker filtered by type", async ({
 }) => {
   // Seed a keystore signer + import one private-key signer via the SDK so
   // the picker has two distinct types to filter between.
-  const c = adminClient();
+  const c = await adminSDKClient();
   const stamp = Date.now();
   const keystore = await c.evm.signers.create({
     type: "keystore",

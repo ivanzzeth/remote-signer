@@ -1,12 +1,5 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import {
-  RemoteSignerClient,
-  SignError,
-  parsePrivateKey,
-} from "remote-signer-client";
-import { expect, test } from "./fixtures";
-import { getState } from "./global-setup";
+import { SignError } from "remote-signer-client";
+import { adminSDKClient, expect, test } from "./fixtures";
 
 // Full approval round-trip:
 //   1. Admin SDK creates a keystore signer.
@@ -19,22 +12,11 @@ import { getState } from "./global-setup";
 // Seeded via the SDK because creating a real keystore signer is heavier
 // than what a UI-form-driven spec should bear; the focus here is the
 // approval flow itself.
-function adminClient() {
-  const state = getState();
-  const seed = parsePrivateKey(
-    readFileSync(join(state.home, "apikeys", "admin.key.priv"), "utf8"),
-  );
-  return new RemoteSignerClient({
-    baseURL: `http://127.0.0.1:${process.env.E2E_PORT ?? 18548}`,
-    apiKeyID: "admin",
-    privateKey: seed,
-  });
-}
 
 test("approve a pending request via the UI completes it", async ({
   authedPage,
 }) => {
-  const c = adminClient();
+  const c = await adminSDKClient();
 
   const signer = await c.evm.signers.create({
     type: "keystore",

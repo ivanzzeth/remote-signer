@@ -1,32 +1,16 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import {
-  RemoteSignerClient,
-  parsePrivateKey,
-} from "remote-signer-client";
-import { expect, test } from "./fixtures";
-import { getState } from "./global-setup";
+import { adminSDKClient, expect, test } from "./fixtures";
 
 /**
  * Seed a rule via the SDK so we have something to mutate, then drive the
- * UI through the toggle + delete flows.
+ * UI through the toggle + delete flows. The SDK client comes from the
+ * shared fixture (the daemon no longer exports a PEM, so every spec
+ * decrypts the admin keystore via the same cached helper).
  */
-function adminClient() {
-  const state = getState();
-  const seed = parsePrivateKey(
-    readFileSync(join(state.home, "apikeys", "admin.key.priv"), "utf8"),
-  );
-  return new RemoteSignerClient({
-    baseURL: `http://127.0.0.1:${process.env.E2E_PORT ?? 18548}`,
-    apiKeyID: "admin",
-    privateKey: seed,
-  });
-}
 
 test("toggle a rule between enabled/disabled via the UI", async ({
   authedPage,
 }) => {
-  const c = adminClient();
+  const c = await adminSDKClient();
   const rule = await c.evm.rules.create({
     name: `e2e-toggle-${Date.now()}`,
     type: "evm_address_list",
@@ -95,7 +79,7 @@ test("create form Advanced raw-JSON path catches malformed input", async ({
 test("edit a rule's config + name persists across reload", async ({
   authedPage,
 }) => {
-  const c = adminClient();
+  const c = await adminSDKClient();
   const rule = await c.evm.rules.create({
     name: `e2e-edit-${Date.now()}`,
     type: "evm_address_list",
@@ -165,7 +149,7 @@ test("typed editor adds an address through the per-row input", async ({
 
   await authedPage.click("button:has-text('Create rule')");
 
-  const c = adminClient();
+  const c = await adminSDKClient();
   // Find by name (server normalises so just look it up).
   const list = await c.evm.rules.list();
   const created = list.rules.find((r) => r.name === name);
@@ -178,7 +162,7 @@ test("typed editor adds an address through the per-row input", async ({
 test("delete a rule via the UI removes it from the table", async ({
   authedPage,
 }) => {
-  const c = adminClient();
+  const c = await adminSDKClient();
   const rule = await c.evm.rules.create({
     name: `e2e-delete-${Date.now()}`,
     type: "evm_address_list",
