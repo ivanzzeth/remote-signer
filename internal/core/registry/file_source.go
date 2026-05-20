@@ -202,11 +202,31 @@ func (s *FileTemplateSource) parseTemplate(path string) (*types.RuleTemplate, er
 	// Config holds the template body (rules / arbitrary config). Either
 	// `rules:` or `config:` is accepted at the top level; if both are
 	// present, `config:` wins (rules merges in under config.rules).
+	//
+	// When the YAML carries a top-level `rules:` array (a bundle template),
+	// also store the rules under `config.rules_json` as a JSON-encoded
+	// STRING. The bundle instantiator (core/service/template.go,
+	// createInstanceFromBundle) reads from `rules_json` because the
+	// legacy config-file expander used that shape; the registry's
+	// freshly-introduced object-form `rules` field was invisible to
+	// that path, so bundle templates never expanded — every instance
+	// was created with type="" and the rule engine skipped them with
+	// "no evaluator for whitelist rule type".
 	cfg := doc.Config
 	if cfg == nil && len(doc.Rules) > 0 {
 		cfg = map[string]any{"rules": doc.Rules}
 	} else if cfg != nil && len(doc.Rules) > 0 {
 		cfg["rules"] = doc.Rules
+	}
+	if len(doc.Rules) > 0 {
+		rulesJSON, err := marshalJSON(doc.Rules)
+		if err != nil {
+			return nil, fmt.Errorf("rules_json: %w", err)
+		}
+		if cfg == nil {
+			cfg = map[string]any{}
+		}
+		cfg["rules_json"] = string(rulesJSON)
 	}
 	configJSON, err := marshalJSON(cfg)
 	if err != nil {
@@ -235,12 +255,29 @@ func (s *FileTemplateSource) parseTemplate(path string) (*types.RuleTemplate, er
 		enabled = *doc.Enabled
 	}
 
+	// Auto-detect template_bundle: a top-level `rules:` array (with no
+	// explicit `type:`) means the template expands into multiple sub-rules
+	// at instance-creation time. Without this, the type stays "" and
+	// CreateInstance falls into the single-rule path that hands the
+	// empty type straight to the rule engine (which then warns "no
+	// evaluator for whitelist rule type" and skips evaluation entirely).
+	templateType := doc.Type
+	templateMode := doc.Mode
+	if templateType == "" && len(doc.Rules) > 0 {
+		templateType = "template_bundle"
+		if templateMode == "" {
+			if firstMode, ok := doc.Rules[0]["mode"].(string); ok {
+				templateMode = types.RuleMode(firstMode)
+			}
+		}
+	}
+
 	return &types.RuleTemplate{
 		ID:             id,
 		Name:           doc.Name,
 		Description:    doc.Description,
-		Type:           doc.Type,
-		Mode:           doc.Mode,
+		Type:           templateType,
+		Mode:           templateMode,
 		ChainType:      chainType,
 		Variables:      variablesJSON,
 		VariableGroups: groupsJSON,
