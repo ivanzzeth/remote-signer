@@ -141,10 +141,21 @@ func initTemplates(cfg *config.Config, configPath string, templateRepo storage.T
 	if cfg.TemplatesDir != "" {
 		dirTemplates, dirErr := config.LoadTemplatesFromDir(cfg.TemplatesDir, filepath.Dir(configPath), log)
 		if dirErr != nil {
-			return nil, nil, fmt.Errorf("failed to enumerate templates_dir %q: %w", cfg.TemplatesDir, dirErr)
+			// A missing/broken templates_dir is a config issue, not a
+			// data-corruption fatal. Common on a fresh install where the
+			// default config.yaml ships with `templates_dir: rules/templates`
+			// but the operator hasn't copied the repo's rules/ into their
+			// daemon home yet. Warn and continue with whatever inline
+			// cfg.Templates already had — daemon boots, operator can fix
+			// the path later via config.
+			log.Warn("templates_dir unusable — skipping directory load",
+				"dir", cfg.TemplatesDir,
+				"error", dirErr,
+			)
+		} else {
+			allTemplates = append(allTemplates, dirTemplates...)
+			log.Info("templates_dir expanded", "dir", cfg.TemplatesDir, "count", len(dirTemplates))
 		}
-		allTemplates = append(allTemplates, dirTemplates...)
-		log.Info("templates_dir expanded", "dir", cfg.TemplatesDir, "count", len(dirTemplates))
 	}
 	if err := templateInit.SyncFromConfig(context.Background(), allTemplates); err != nil {
 		return nil, nil, fmt.Errorf("failed to sync templates from config: %w", err)

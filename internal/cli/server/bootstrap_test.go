@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"gorm.io/driver/sqlite"
@@ -46,31 +45,27 @@ func discardLogger() *slog.Logger {
 }
 
 func TestBootstrapCreatesAdminWhenEmpty(t *testing.T) {
+	// Pins the post-cleanup contract: bootstrap writes the encrypted
+	// keystore to the CANONICAL path keystorePath (admin.keystore.json),
+	// the public PEM to pubPath, and the DB row — no pointer files, no
+	// hash-derived filenames. Daemon never needs the private key at
+	// runtime; the public-key column on api_keys is the source of truth
+	// for signature verification.
 	t.Setenv("REMOTE_SIGNER_KEYSTORE_PASSWORD", "test-password-12345")
 
 	tmp := t.TempDir()
 	keystoreDir := tmp
-	ptrPath := filepath.Join(tmp, "admin.key.keystore")
+	keystorePath := filepath.Join(tmp, "admin.keystore.json")
 	pubPath := filepath.Join(tmp, "admin.key.pub")
 	repo := newTestRepo(t)
 
-	if err := bootstrapAdminKeyIfNeeded(context.Background(), repo, keystoreDir, ptrPath, pubPath, 0, discardLogger()); err != nil {
+	if err := bootstrapAdminKeyIfNeeded(context.Background(), repo, keystoreDir, keystorePath, pubPath, 0, discardLogger()); err != nil {
 		t.Fatal(err)
 	}
 
-	// Verify pointer file exists and contains a keystore path.
-	ptrData, err := os.ReadFile(ptrPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	keystorePath := strings.TrimSpace(string(ptrData))
-	if keystorePath == "" {
-		t.Fatal("keystore pointer file is empty")
-	}
-
-	// Verify the keystore file exists and is a valid enhanced key file.
+	// Keystore landed at the canonical path.
 	if !keystore.IsEnhancedKeyFile(keystorePath) {
-		t.Errorf("file at pointer path %s is not a valid enhanced keystore", keystorePath)
+		t.Errorf("file at %s is not a valid enhanced keystore", keystorePath)
 	}
 
 	// Verify public key PEM was written.
@@ -115,7 +110,7 @@ func TestBootstrapNoopWhenKeysExist(t *testing.T) {
 	t.Setenv("REMOTE_SIGNER_KEYSTORE_PASSWORD", "test-password-12345")
 
 	tmp := t.TempDir()
-	ptrPath := filepath.Join(tmp, "admin.key.keystore")
+	keystorePath := filepath.Join(tmp, "admin.keystore.json")
 	pubPath := filepath.Join(tmp, "admin.key.pub")
 	repo := newTestRepo(t)
 
@@ -130,54 +125,34 @@ func TestBootstrapNoopWhenKeysExist(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := bootstrapAdminKeyIfNeeded(context.Background(), repo, tmp, ptrPath, pubPath, 0, discardLogger()); err != nil {
+	if err := bootstrapAdminKeyIfNeeded(context.Background(), repo, tmp, keystorePath, pubPath, 0, discardLogger()); err != nil {
 		t.Fatal(err)
 	}
 
 	// No files should be created when the table already has rows.
-	if _, err := os.Stat(ptrPath); !os.IsNotExist(err) {
-		t.Errorf("keystore pointer file should not exist after no-op bootstrap: %v", err)
+	if _, err := os.Stat(keystorePath); !os.IsNotExist(err) {
+		t.Errorf("keystore should not exist after no-op bootstrap: %v", err)
 	}
 }
 
-func TestBootstrapAndUnlockRoundtrip(t *testing.T) {
-	// Pins the post-cleanup contract: bootstrapAdminKeyIfNeeded writes the
-	// keystore + pointer + public-PEM, and unlockAdminKeystoreIfNeeded is
-	// a no-op that does NOT export a plaintext PEM on disk. The daemon's
-	// runtime never needs the admin private key — it only verifies API
-	// request signatures using the public-key column on api_keys.
+func TestBootstrapAdminKeystoreRecoverableEnd2End(t *testing.T) {
+	// Spot-check that the public PEM and the keystore's encoded
+	// identifier (hex pubkey) refer to the same key — guards against a
+	// mis-wire between the two writers. Also exercises
+	// IsEnhancedKeyFile against the stable path so a future format
+	// change has a single asserted regression site.
 	t.Setenv("REMOTE_SIGNER_KEYSTORE_PASSWORD", "test-password-12345")
 
 	tmp := t.TempDir()
 	keystoreDir := tmp
-	ptrPath := filepath.Join(tmp, "admin.key.keystore")
+	keystorePath := filepath.Join(tmp, "admin.keystore.json")
 	pubPath := filepath.Join(tmp, "admin.key.pub")
-	privPath := filepath.Join(tmp, "admin.key.priv")
 	repo := newTestRepo(t)
 
-	if err := bootstrapAdminKeyIfNeeded(context.Background(), repo, keystoreDir, ptrPath, pubPath, 0, discardLogger()); err != nil {
+	if err := bootstrapAdminKeyIfNeeded(context.Background(), repo, keystoreDir, keystorePath, pubPath, 0, discardLogger()); err != nil {
 		t.Fatal(err)
 	}
 
-	// Pointer should exist; keystore file referenced by it should exist;
-	// public PEM should exist; api_keys row should exist.
-	ptrData, err := os.ReadFile(ptrPath)
-	if err != nil {
-		t.Fatalf("read ptr: %v", err)
-	}
-	keystorePath := strings.TrimSpace(string(ptrData))
-	if _, err := os.Stat(keystorePath); err != nil {
-		t.Errorf("keystore file referenced by ptr must exist: %v", err)
-	}
-	if _, err := os.Stat(pubPath); err != nil {
-		t.Errorf("public PEM must exist: %v", err)
-	}
-	if _, err := repo.Get(context.Background(), "admin"); err != nil {
-		t.Errorf("admin api_keys row must exist: %v", err)
-	}
-
-	// Spot-check: the public PEM and keystore identifier (hex pubkey) must
-	// agree. Catches mis-wiring between the two writers.
 	pubPEMBytes, _ := os.ReadFile(pubPath)
 	pubBlock, _ := pem.Decode(pubPEMBytes)
 	if pubBlock == nil || pubBlock.Type != "PUBLIC KEY" {
@@ -199,79 +174,6 @@ func TestBootstrapAndUnlockRoundtrip(t *testing.T) {
 	if info.Identifier != pubFromPEMHex {
 		t.Errorf("keystore identifier = %q, pub PEM = %q", info.Identifier, pubFromPEMHex)
 	}
-
-	// unlockAdminKeystoreIfNeeded should NOT write a plaintext PEM —
-	// that was the regression the cleanup removed.
-	cleanup, err := unlockAdminKeystoreIfNeeded(ptrPath, privPath, discardLogger())
-	if err != nil {
-		t.Fatalf("unlock should be a no-op, got error: %v", err)
-	}
-	if _, err := os.Stat(privPath); !os.IsNotExist(err) {
-		t.Errorf("post-unlock: admin.key.priv MUST NOT exist (cleanup removes PEM exposure); stat err = %v", err)
-	}
-	cleanup()
-
-	// Keystore + pointer survive past unlock; the encrypted copy is the
-	// authoritative source going forward.
-	if _, err := os.Stat(ptrPath); os.IsNotExist(err) {
-		t.Errorf("keystore pointer should survive unlock")
-	}
-	if _, err := os.Stat(keystorePath); os.IsNotExist(err) {
-		t.Errorf("keystore file should survive unlock")
-	}
-}
-
-func TestUnlockNoopWhenNoPointer(t *testing.T) {
-	tmp := t.TempDir()
-	privPath := filepath.Join(tmp, "admin.key.priv")
-
-	cleanup, err := unlockAdminKeystoreIfNeeded(
-		filepath.Join(tmp, "nonexistent.keystore"),
-		privPath,
-		discardLogger(),
-	)
-	if err != nil {
-		t.Fatalf("unlockAdminKeystoreIfNeeded with no pointer should not error: %v", err)
-	}
-	cleanup()
-	if _, err := os.Stat(privPath); !os.IsNotExist(err) {
-		t.Errorf("PEM should not exist when no keystore pointer: %v", err)
-	}
-}
-
-func TestUnlockProactivelyRemovesStalePEM(t *testing.T) {
-	// Pins the cleanup behaviour for an operator upgrading from the
-	// PEM-export-on-startup era: a stale admin.key.priv left behind by
-	// the OLD daemon binary MUST be wiped + removed on the next start,
-	// so a plaintext copy of the seed can't linger on disk indefinitely
-	// after the upgrade. Only fires when the keystore pointer exists
-	// (i.e. the operator IS on the keystore format) — legacy
-	// pure-PEM deployments without a pointer file are left alone.
-	t.Setenv("REMOTE_SIGNER_KEYSTORE_PASSWORD", "test-password-12345")
-
-	tmp := t.TempDir()
-	keystoreDir := tmp
-	ptrPath := filepath.Join(tmp, "admin.key.keystore")
-	pubPath := filepath.Join(tmp, "admin.key.pub")
-	privPath := filepath.Join(tmp, "admin.key.priv")
-	repo := newTestRepo(t)
-
-	if err := bootstrapAdminKeyIfNeeded(context.Background(), repo, keystoreDir, ptrPath, pubPath, 0, discardLogger()); err != nil {
-		t.Fatal(err)
-	}
-	// Simulate the stale state left by the OLD binary.
-	if err := os.WriteFile(privPath, []byte("stale-plaintext-pem"), 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	cleanup, err := unlockAdminKeystoreIfNeeded(ptrPath, privPath, discardLogger())
-	if err != nil {
-		t.Fatalf("unlock should be a no-op, got error: %v", err)
-	}
-	if _, err := os.Stat(privPath); !os.IsNotExist(err) {
-		t.Errorf("stale PEM should have been removed by the cleanup, stat err = %v", err)
-	}
-	cleanup()
 }
 
 func TestBootstrapAgentKeyCreatesWhenNoAgentKey(t *testing.T) {
