@@ -489,12 +489,16 @@ func validateTemplate(doc *templateYAML) error {
 	if doc.Name == "" {
 		return fmt.Errorf("name is required")
 	}
-	// Type and Mode are optional at the template level. A template can
-	// contain multiple rules each with their own type+mode, so we can't
-	// require one canonical value — the migration leaves both empty for
-	// multi-rule templates. When set they must be well-formed; the
-	// chain-specific evaluators reject unknown types at registration
-	// time, so we only police mode strictness here.
+	// Type and Mode are optional at the TOP level only if the template
+	// is a multi-rule bundle (a top-level `rules:` block). Without
+	// either signal the loader has nothing to dispatch on downstream —
+	// the rule it would emit lands in DB with type="" and the engine
+	// silently skips it ("no evaluator for whitelist rule type"). Lock
+	// the contract here so the failure mode surfaces at load time
+	// instead of at sign time.
+	if doc.Type == "" && len(doc.Rules) == 0 {
+		return fmt.Errorf("template must declare either `type:` (single-rule) or `rules:` (bundle); both are empty — engine would silently skip the resulting row")
+	}
 	if doc.Mode != "" && doc.Mode != types.RuleModeWhitelist && doc.Mode != types.RuleModeBlocklist {
 		return fmt.Errorf("mode %q invalid (must be whitelist or blocklist)", doc.Mode)
 	}

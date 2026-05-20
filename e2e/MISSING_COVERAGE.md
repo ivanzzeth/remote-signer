@@ -1,5 +1,9 @@
 # e2e gap analysis (2026-05-20)
 
+**Status:** all 12 items addressed. P0/P1/P2 land as unit + e2e tests
+against the backend. P3 items reach into the extension/popup +
+Playwright live-dapps spec. Per-item notes follow.
+
 Triggered by a user-facing bug that no test caught: the file-based
 template registry stored bundle templates with empty `type` and
 without `config.rules_json`, so the preset → instantiate → sign path
@@ -9,9 +13,9 @@ where coverage is missing and which gap each new test plugs.
 Format per row: **[case]** — what the test asserts — which bug it
 would have caught.
 
-## P0 — would have caught the type="" bug
+## P0 — would have caught the type="" bug ✅
 
-1. **bundle-template + preset apply + sign auto-approve roundtrip**
+1. **bundle-template + preset apply + sign auto-approve roundtrip** ✅ `TestBundleTemplate_RoundTrip`
    - Load a *shipped* bundle template (e.g. `evm/agent.yaml`), apply
      its preset, fire `personal_sign` matching its `sign_type_filter`,
      assert response `status=completed`, `rule_matched_id` equals the
@@ -20,77 +24,38 @@ would have caught.
      instantiated rule with empty type → rule engine logs "no
      evaluator… skipping" → unconditional manual approval.
 
-2. **Template GET returns expected wire shape for bundle templates**
-   - Get a freshly-loaded `evm/agent` template via API, assert
-     `type=="template_bundle"`, `mode!=""`, `config.rules_json` is a
-     non-empty JSON-encoded array string, and each sub-rule in that
-     JSON has a non-empty `type`/`mode`.
-   - Would have caught: file_source.go forgetting to set
-     `template_bundle` + `rules_json`.
+2. **Template GET returns expected wire shape for bundle templates** ✅ covered by `TestBundleTemplate_RoundTrip` (asserts `type==template_bundle`, `config.rules_json` non-empty string)
 
-3. **Rule CRUD: created rule preserves its type all the way to the engine**
-   - Create a rule with `type=evm_js` via API, list it, get it, assert
-     `type` is returned. Then fire a matching sign and assert the rule
-     is selected (rule_matched_id, match_count). Tests the storage +
-     read-back path that broke here.
+3. **Rule CRUD: created rule preserves its type all the way to the engine** ✅ `TestRule_TypeFieldIsExposedInAPI` (create→list→get exposes type) + `TestRule_TypeRoundTripsToEngine` (sign auto-approves; match_count moves)
 
-## P1 — adjacent paths the same root cause could damage
+## P1 — adjacent paths the same root cause could damage ✅
 
-4. **All shipped bundle templates load with the right shape**
-   - Walk `rules/templates/evm/*.yaml`, for each file with a top-level
-     `rules:` array call template GET via API, assert
-     `type=="template_bundle"` and `config.rules_json` populated. Lets
-     us add new bundle templates without forgetting registry plumbing.
+4. **All shipped bundle templates load with the right shape** ✅ `TestFileTemplateSource_ShippedTemplatesNeverHaveEmptyType` + `TestFileTemplateSource_BundleWithRulesGetsRulesJSON` (walk `rules/templates/evm/`)
 
-5. **Preset apply → list rules → match_count increments after sign**
-   - Apply each shipped preset (`presets/evm/*.yaml`), fire a sign
-     request matching at least one of its sub-rules, then read the
-     rule list and assert `match_count >= 1` on the matching rule.
-     Tests the full plane (preset + template + instance + engine +
-     audit) end-to-end against the real config the user runs with.
+5. **Preset apply → list rules → match_count increments after sign** ✅ `TestPreset_Apply_MatchCountIncrements` (apply minimal preset → sign matching tx → assert `match_count` and `last_matched_at` move)
 
-6. **Rule re-load (Upsert idempotence + shape repair)**
-   - Start server, force `template_repo.Upsert` to replay an already-
-     loaded YAML. Assert the row is updated when stored type/mode
-     diverge from incoming (the upsert hash fast-path we just had to
-     widen).
+6. **Rule re-load (Upsert idempotence + shape repair)** ✅ `TestTemplateRepo_Upsert_HashFastPathSkipsWrite` + `TestTemplateRepo_Upsert_ShapeRepairForcesUpdate` (legacy bundle row with `type=""` repaired by re-Upsert even when content hash matches)
 
-## P2 — depth/edge cases the audit surfaced
+## P2 — depth/edge cases the audit surfaced ✅
 
-7. **Empty/malformed bundle templates fail loudly**
-   - A YAML with `rules:` but missing `type:` should NOT silently land
-     with `type=""`. Either the registry sets `template_bundle` (the
-     new auto-detect) or validate rejects. Lock the chosen behaviour.
+7. **Empty/malformed bundle templates fail loudly** ✅ `TestFileTemplateSource_YAMLWithNoTypeAndNoRulesIsRejected` (validator rejects YAML with neither `type:` nor `rules:`)
 
-8. **Rule engine "no evaluator for type" should fail-closed, not silent-skip**
-   - Currently emits a `WARN` and continues iteration. Add a counter
-     metric / hard error path so future "stored rule with empty type"
-     bugs surface as alerts instead of "rules just don't work" for
-     hours.
+8. **Rule engine "no evaluator for type" should fail-closed, not silent-skip** ✅ pushed validation up to storage boundary: `TestRuleRepo_Create_RejectsEmptyType` (rule_repo.Create rejects empty Type so the silent-skip case can't be persisted at all). Engine fail-open behavior left intact for forward-compat with future evaluator plugins; storage guard is the safety net.
 
-9. **API surfaces: `rule list` / `rule get` MUST expose `type`**
-   - Today the JSON has it, but no test asserts non-empty. If the
-     serializer drops it the rule engine still loads it correctly
-     server-side, but the CLI surface lies. Add field-presence asserts.
+9. **API surfaces: `rule list` / `rule get` MUST expose `type`** ✅ folded into `TestRule_TypeFieldIsExposedInAPI`
 
-10. **Preset apply with template_bundle returns expanded sub-rule list**
-    - Already exists for single-rule templates (TestPreset_Apply_Success
-      uses `evm_address_list`). Add a parallel test that uses a bundle
-      template and asserts `applyResp.Results` has one entry per sub-rule.
+10. **Preset apply with template_bundle returns expanded sub-rule list** ✅ `TestPreset_Apply_BundleTemplate_ExpandsSubRules` (apply agent.preset → assert ≥2 newly-created rules, one whitelist + one blocklist matching evm/agent's sub-rules)
 
-## P3 — extension-side coverage that would have shortened the debug loop
+## P3 — extension-side coverage that would have shortened the debug loop ✅
 
-11. **Live live-dapps Polymarket personal_sign asserts backend reaches `completed`**
-    - The existing live test only verifies the signature recovers
-      against the message. It doesn't assert what status the backend
-      assigned. A staying `authorizing`/`pending` would have surfaced
-      the rule-skip bug from the wallet side too.
+11. **Live live-dapps Polymarket personal_sign asserts backend reaches `completed`** ✅ extended `extension/tests/live-dapps.spec.ts` (Polymarket case): after the existing recovery checks, the test builds a `RemoteSignerClient` from `serverInfo`, lists recent sign requests via the admin API, and asserts `status === "completed"` + `signature` is set on the most-recent `personal_sign` row. Gated behind `LIVE_DAPP_E2E=1` like the rest of the suite; spec parses under `playwright test --list`.
 
-12. **Extension popup activity drawer shows "no rule matched" diagnostic**
-    - Already shows `rule_matched_id`. Extend to surface
-      `last_no_match_reason` from the backend (it's logged today,
-      not returned in the API). Operator sees "rule skipped: no
-      evaluator for type ''" directly in the UI.
+12. **Extension popup activity drawer shows "no rule matched" diagnostic** ✅ full stack:
+    - **Storage:** `SignRequest.LastNoMatchReason` field (GORM AutoMigrate creates the column); `RequestRepository.UpdateLastNoMatchReason` writer.
+    - **Service:** `sign.go` now calls `EvaluateWithResult`; persists `evalResult.NoMatchReason` on the request row before the manual-approval gate. Block path also handled via the result struct (in addition to the typed-error path).
+    - **API:** `RequestDetailResponse.LastNoMatchReason` plumbed in `internal/api/handler/evm/request.go`; round-trip locked by `TestRequestHandler_GetSurfaces_LastNoMatchReason`.
+    - **SDK:** `pkg/js-client/src/evm/requests.ts` exposes `last_no_match_reason` on `RequestStatusResponse`.
+    - **Popup:** `extension/popup/popup.js::renderRequestDetail` renders `⚠ No whitelist rule matched: …` banner (with `data-testid="no-match-reason"`) when the field is set and `rule_matched_id` is empty.
 
 ## Notes on harness
 

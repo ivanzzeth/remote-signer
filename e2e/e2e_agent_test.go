@@ -35,7 +35,7 @@ func TestAgent_PresetApply(t *testing.T) {
 	// Apply agent preset — the "Agent Template" is a template_bundle with 3 sub-rules.
 	// The template service expands the bundle into individual evm_js rules.
 	// The preset has no chain matrix, so 1 composite entry x 3 sub-rules = 3 results.
-	applyResp, err := adminClient.Presets.ApplyWithVariables(ctx, "agent.preset.js.yaml", nil)
+	applyResp, err := adminClient.Presets.ApplyWithVariables(ctx, "agent.preset.js", nil)
 	require.NoError(t, err)
 	require.NotNil(t, applyResp)
 
@@ -233,7 +233,7 @@ func TestAgent_APIKey_CanApplyPresets(t *testing.T) {
 	skipIfPresetAPIDisabled(t)
 
 	// Agent CAN apply presets — rules are created with owner=agent, applied_to=["self"]
-	results, err := agentClient.Presets.Apply(ctx, "agent.preset.js.yaml", nil)
+	results, err := agentClient.Presets.Apply(ctx, "agent.preset.js", nil)
 	require.NoError(t, err, "agent should be able to apply presets (self-owned rules)")
 	require.NotNil(t, results)
 }

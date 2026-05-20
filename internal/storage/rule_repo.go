@@ -68,6 +68,16 @@ func (r *GormRuleRepository) Create(ctx context.Context, rule *types.Rule) error
 	if rule == nil {
 		return fmt.Errorf("rule cannot be nil")
 	}
+	// Reject empty Type at the storage boundary. The whitelist engine's
+	// fail-open path silently skips rules whose Type has no registered
+	// evaluator — leaving an empty-type row in the DB makes every
+	// matching sign request fall through to manual approval with no
+	// visible error. Block it here so future bundle-instantiator /
+	// template-substitution bugs surface at Create time, not at sign
+	// time. See commit 3d9feba for the original incident.
+	if rule.Type == "" {
+		return fmt.Errorf("rule.type is required: empty type makes the engine silently skip the rule (no evaluator registered for \"\"). If you meant a bundle, instantiate via the template service instead of writing directly")
+	}
 	normalizeRuleForPersist(rule)
 	return r.db.WithContext(ctx).Create(rule).Error
 }

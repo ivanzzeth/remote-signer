@@ -175,21 +175,63 @@ func TestMain(m *testing.M) {
 			}
 		}
 
-		// Create presets dir for preset API e2e (one preset referencing "E2E Preset Template")
+		// Templates dir mirrors rules/templates/ layout. The FileTemplateSource
+		// derives template IDs from file paths (e.g. "evm/agent.yaml" → "evm/agent"),
+		// so presets reference templates via these stable, file-derived IDs in
+		// `template_ids:`. Copy the shipped catalog so e2e tests can exercise
+		// real templates (`evm/agent`), then layer a small e2e-only template
+		// on top for the preset CRUD tests.
+		templatesDir, err := os.MkdirTemp("", "e2e-templates-*")
+		if err != nil {
+			panic("failed to create templates temp dir: " + err.Error())
+		}
+		repoTemplatesDir := findRepoTemplatesDir()
+		if repoTemplatesDir != "" {
+			if copyErr := copyDir(repoTemplatesDir, templatesDir); copyErr != nil {
+				panic("failed to copy shipped templates: " + copyErr.Error())
+			}
+		}
+		if mkErr := os.MkdirAll(filepath.Join(templatesDir, "evm"), 0755); mkErr != nil {
+			panic("failed to mkdir templates/evm: " + mkErr.Error())
+		}
+		// e2e-only template the preset CRUD tests reference. Simple
+		// evm_address_list keeps the surface small while still flexing
+		// the substitution + apply path.
+		e2ePresetTemplate := []byte(`name: "E2E Preset Template"
+description: "Minimal template used by preset CRUD e2e tests."
+type: evm_address_list
+mode: whitelist
+chain_type: evm
+variables:
+  - name: allowed_address
+    type: address
+    description: "Allowed counterparty address"
+    required: true
+config:
+  addresses:
+    - "${allowed_address}"
+`)
+		if err := os.WriteFile(filepath.Join(templatesDir, "evm", "e2e_preset.yaml"), e2ePresetTemplate, 0644); err != nil {
+			panic("failed to write e2e preset template: " + err.Error())
+		}
+
+		// Create presets dir for preset API e2e. Each preset references
+		// templates by their stable file-derived ID (`template_ids:`).
 		presetsDir, err := os.MkdirTemp("", "e2e-presets-*")
 		if err != nil {
 			panic("failed to create presets temp dir: " + err.Error())
 		}
 		presetContent := []byte(`name: "E2E From Preset"
-template: "E2E Preset Template"
 chain_type: "evm"
 chain_id: "1"
 enabled: true
+template_ids:
+  - evm/e2e_preset
 variables:
-  chain_id: "1"
   allowed_address: "0x0000000000000000000000000000000000000001"
-override_hints:
-  - allowed_address
+operator_overrides:
+  - name: allowed_address
+    required: false
 `)
 		if err := os.WriteFile(filepath.Join(presetsDir, "e2e_minimal.preset.yaml"), presetContent, 0644); err != nil {
 			panic("failed to write e2e preset file: " + err.Error())
@@ -197,9 +239,10 @@ override_hints:
 
 		// Matrix preset: same template, 3 chains with different addresses
 		matrixContent := []byte(`name: "E2E Matrix Preset"
-template: "E2E Preset Template"
 chain_type: "evm"
 enabled: true
+template_ids:
+  - evm/e2e_preset
 matrix:
   - chain_id: "1"
     allowed_address: "0x0000000000000000000000000000000000000001"
@@ -213,25 +256,19 @@ defaults: {}
 			panic("failed to write e2e matrix preset file: " + err.Error())
 		}
 
-		// Agent preset: references "Agent Template" (loaded from config.e2e.yaml), 5-chain matrix
+		// Agent preset: references the shipped Agent template (template_ids:
+		// evm/agent). Matrix expansion is no longer part of the preset
+		// schema, and `defaults:` was folded into `variables:` — every
+		// var the bundle references (including budget_period used in
+		// substitution below) MUST live under variables:.
 		agentPresetContent := []byte(`name: "Agent"
-template_paths:
-  - "rules/templates/agent.template.js.yaml"
-template_names:
-  - "Agent Template"
 chain_type: "evm"
 enabled: true
-matrix:
-  - chain_id: "1"
-  - chain_id: "137"
-  - chain_id: "42161"
-  - chain_id: "10"
-  - chain_id: "8453"
-defaults:
-  max_message_length: "1024"
-  budget_period: "24h"
+template_ids:
+  - evm/agent
 variables:
   max_message_length: "1024"
+  budget_period: "24h"
   trusted_contracts: "0x0000000000000000000000000000000000000001"
 budget:
   dynamic: true
@@ -257,9 +294,11 @@ budget:
   alert_pct: 80
 schedule:
   period: "${budget_period}"
-override_hints:
-  - max_message_length
-  - budget_period
+operator_overrides:
+  - name: max_message_length
+    required: false
+  - name: budget_period
+    required: false
 `)
 		if err := os.WriteFile(filepath.Join(presetsDir, "agent.preset.js.yaml"), agentPresetContent, 0644); err != nil {
 			panic("failed to write agent preset file: " + err.Error())
@@ -270,8 +309,12 @@ override_hints:
 		if err != nil {
 			panic("failed to abs presets dir: " + err.Error())
 		}
+		templatesDirAbs, err := filepath.Abs(templatesDir)
+		if err != nil {
+			panic("failed to abs templates dir: " + err.Error())
+		}
 
-		// Start test server with config.e2e.yaml and presets dir
+		// Start test server with config.e2e.yaml, templates dir, and presets dir
 		testServer, err = NewTestServer(TestServerConfig{
 			Port:                    port,
 			SignerPrivateKey:        testSignerPrivateKey,
@@ -281,6 +324,7 @@ override_hints:
 			NonAdminAPIKeyID:        nonAdminAPIKeyID,
 			NonAdminAPIKeyPublicKey: nonAdminPubKey,
 			ConfigPath:              configPath,
+			TemplatesDir:            templatesDirAbs,
 			PresetsDir:              presetsDirAbs,
 		})
 		if err != nil {
@@ -350,4 +394,54 @@ override_hints:
 	}
 
 	os.Exit(code)
+}
+
+// findRepoTemplatesDir locates rules/templates/ by walking up from the
+// e2e package's cwd. Returns "" if the directory can't be found, in
+// which case the harness still works but only the test-only template is
+// available (presets referencing evm/agent etc. will fail at apply).
+func findRepoTemplatesDir() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	for wd != "/" && wd != "" {
+		candidate := filepath.Join(wd, "rules", "templates")
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			return candidate
+		}
+		parent := filepath.Dir(wd)
+		if parent == wd {
+			break
+		}
+		wd = parent
+	}
+	return ""
+}
+
+// copyDir recursively copies src into dst, creating dst if needed. It
+// preserves file modes but not ownership or symlinks (we don't ship
+// symlinks in rules/templates/). Existing files in dst are overwritten.
+func copyDir(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if info.IsDir() {
+			return os.MkdirAll(target, info.Mode())
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, info.Mode())
+	})
 }
