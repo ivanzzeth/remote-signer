@@ -985,6 +985,24 @@ func (v *SolidityRuleValidator) executeBatchTestScript(ctx context.Context, scri
 		return nil, fmt.Errorf("failed to write batch script: %w", err)
 	}
 
+	// Resolve symlinks before passing to forge. Forge's `--match-path`
+	// compares the flag value against its internally-discovered source
+	// list using EXACT string match — and forge canonicalises paths
+	// while building the source list. On macOS `os.TempDir()` returns
+	// `/var/folders/...`, which is a symlink to `/private/var/folders/...`;
+	// without the resolve below, our `/var/...` flag never matches
+	// forge's `/private/var/...` source entry and forge silently reports
+	// "No tests to run" with NO compilation step. Bug surfaced as 27
+	// "expected revert but passed" false positives in
+	// TestRulesDirectoryValidation when multiple batches ran serially.
+	resolvedScriptPath, resolveErr := filepath.EvalSymlinks(scriptPath)
+	if resolveErr != nil {
+		// Fall back to the raw path — better to attempt the run than
+		// hard-fail on a symlink resolution edge case (e.g. Linux
+		// without symlinks).
+		resolvedScriptPath = scriptPath
+	}
+
 	// Create timeout context if not already set (use evaluator timeout so config applies; cold cache can be slow)
 	execCtx := ctx
 	if _, ok := ctx.Deadline(); !ok {
@@ -1000,7 +1018,7 @@ func (v *SolidityRuleValidator) executeBatchTestScript(ctx context.Context, scri
 	// Execute forge test
 	cmd := exec.CommandContext(execCtx, // #nosec G204 -- forge path is admin-configured, env hardened via safeForgeEnv()
 		v.evaluator.GetFoundryPath(), "test",
-		"--match-path", scriptPath,
+		"--match-path", resolvedScriptPath,
 		"--match-contract", "BatchRuleEvaluatorTest",
 		"--cache-path", filepath.Join(v.evaluator.GetCacheDir(), "forge-cache"),
 		"-vvv", // verbose for revert reasons
