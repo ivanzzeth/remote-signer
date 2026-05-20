@@ -29,7 +29,10 @@ async function preConfigureWithoutGrant(
   extensionId: string,
   serverInfo: any
 ) {
-  // Skip the helper's auto-pre-grant so we drive the Connect flow ourselves.
+  // Disable auto-approve AND skip the helper's pre-grant so the Connect
+  // popup actually fires for these specs. Production default is
+  // autoApproveConnections=true (no popup) — that path is exercised by
+  // the auto-approve specs further down.
   const popup = await context.newPage();
   await popup.goto(`chrome-extension://${extensionId}/popup/popup.html`);
   await popup.waitForSelector("#app");
@@ -42,9 +45,8 @@ async function preConfigureWithoutGrant(
     apiKeyId: serverInfo.admin_api_key_id,
     apiKeyPrivateKey: serverInfo.admin_api_key_hex,
     selectedChain: 1,
+    autoApproveConnections: false,
   });
-  // Also wipe any permission record a previous test in this file may
-  // have left behind.
   await popup.evaluate(() => {
     return new Promise<void>((resolve) =>
       chrome.storage.local.remove("remote-signer:permittedOrigins", () => resolve())

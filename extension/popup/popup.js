@@ -64,6 +64,7 @@
     togglePwBtn: $("togglePwBtn"),
     loadKeyFileBtn: $("loadKeyFileBtn"),
     keyFileInput: $("keyFileInput"),
+    inputAutoApprove: $("inputAutoApprove"),
     connectionError: $("connectionError"),
     connectionSuccess: $("connectionSuccess"),
     testConnectionBtn: $("testConnectionBtn"),
@@ -552,6 +553,9 @@
       els.inputKeyId.value = config.apiKeyId || "agent";
       els.inputPrivateKey.value = config.apiKeyPrivateKey || "";
       els.chainSelect.value = String(config.selectedChain || 1);
+      // Auto-approve defaults to ON; treat undefined as true so users
+      // upgrading from a pre-toggle build don't suddenly see prompts.
+      if (els.inputAutoApprove) els.inputAutoApprove.checked = config.autoApproveConnections !== false;
 
       // Check connection state
       const stateResp = await send({ type: "popup:getState" });
@@ -896,6 +900,7 @@
       apiKeyId: els.inputKeyId.value.trim(),
       apiKeyPrivateKey: els.inputPrivateKey.value.trim(),
       selectedChain: parseInt(els.chainSelect.value, 10) || 1,
+      autoApproveConnections: els.inputAutoApprove ? els.inputAutoApprove.checked : true,
     };
 
     try {
@@ -942,6 +947,7 @@
       apiKeyId: els.inputKeyId.value.trim(),
       apiKeyPrivateKey: els.inputPrivateKey.value.trim(),
       selectedChain: parseInt(els.chainSelect.value, 10) || 1,
+      autoApproveConnections: els.inputAutoApprove ? els.inputAutoApprove.checked : true,
     };
 
     const resp = await send({ type: "popup:saveConfig", config });

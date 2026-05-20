@@ -156,6 +156,16 @@
         <input id="keyFileInput" type="file" accept=".priv,.pem,.key,.txt,application/x-pem-file,text/plain" hidden />
       </div>
 
+      <div class="form-group form-group--toggle">
+        <label class="toggle-row">
+          <input id="inputAutoApprove" type="checkbox" />
+          <span class="toggle-label">
+            <span class="toggle-label-title">Auto-approve dApp connections</span>
+            <span class="toggle-label-hint">Skip the Connect popup — return the active signer + the chain you've selected here to any dApp that asks. Disable to require a per-site prompt.</span>
+          </span>
+        </label>
+      </div>
+
       <div id="connectionError" class="error hidden"></div>
       <div id="connectionSuccess" class="success hidden"></div>
 

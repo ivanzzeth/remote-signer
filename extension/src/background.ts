@@ -56,6 +56,13 @@ interface StoredConfig {
    * active index. Persisted so the choice survives popup reloads.
    */
   activeSignerAddress?: string;
+  /**
+   * When true (default) dApps that call eth_requestAccounts /
+   * wallet_requestPermissions get the active signer + popup's selected
+   * chain back immediately — no Connect popup. Power-users who prefer
+   * an explicit per-site prompt flip this off in Settings.
+   */
+  autoApproveConnections?: boolean;
 }
 
 interface EIP1193Request {
@@ -134,6 +141,7 @@ const DEFAULT_CONFIG: StoredConfig = {
   apiKeyId: "agent",
   apiKeyPrivateKey: "",
   selectedChain: 1,
+  autoApproveConnections: true,
 };
 
 const EXTENSION_VERSION =
@@ -395,6 +403,42 @@ chrome.windows?.onRemoved?.addListener?.((windowId) => {
     }
   }
 });
+
+/**
+ * Acquire a permission for `origin`. If `autoApproveConnections` is on
+ * (the default), grant immediately with the active signer + popup's
+ * selected chain — no Connect popup. Otherwise route through the
+ * interactive Connect window so the user explicitly picks both.
+ */
+async function acquirePermission(origin: string): Promise<OriginPermission> {
+  // Re-read cachedConfig from storage so out-of-band toggle changes
+  // (popup settings save from another window) are seen immediately.
+  // Without this, the SW uses whichever autoApprove value it had at
+  // startup.
+  await loadConfig();
+  if (cachedConfig.autoApproveConnections !== false) {
+    await ensureInit();
+    let accounts: string[] = [];
+    try {
+      if (provider && provider.isConnected()) {
+        accounts = (await provider.request({ method: "eth_accounts" })) as string[];
+      }
+    } catch {
+      /* fall through with empty list — caller will see auth/init error */
+    }
+    if (accounts.length === 0) {
+      throw { code: -32603, message: "No usable signers — open Settings first" };
+    }
+    const perm: OriginPermission = {
+      accounts: accounts.map((a) => a.toLowerCase()),
+      chainId: getChainForOrigin(origin) || cachedConfig.selectedChain || 1,
+      grantedAt: Date.now(),
+    };
+    await setPermissionForOrigin(origin, perm);
+    return perm;
+  }
+  return requestConnectFromUser(origin, getChainForOrigin(origin));
+}
 
 async function requestConnectFromUser(
   origin: string,
@@ -1020,7 +1064,7 @@ async function tryHandleExtraMethod(
         return { handled: false };
       }
       try {
-        const perm = await requestConnectFromUser(origin, getChainForOrigin(origin));
+        const perm = await acquirePermission(origin);
         broadcastEventToOrigin(origin, "accountsChanged", perm.accounts);
         broadcastEventToOrigin(origin, "chainChanged", `0x${perm.chainId.toString(16)}`);
         return { handled: true, result: perm.accounts };
@@ -1036,12 +1080,12 @@ async function tryHandleExtraMethod(
       // EIP-2255 shape: dApps usually pass [{ eth_accounts: {} }]. Treat
       // any incoming request as "give me eth_accounts" — we don't yet
       // support snap/endowment permissions. The Connect prompt is shared
-      // with eth_requestAccounts.
-      const existing = getPermissionForOrigin(origin);
-      if (!existing) {
+      // with eth_requestAccounts (and auto-approved when the toggle is on).
+      let perm = getPermissionForOrigin(origin);
+      if (!perm) {
         if (!origin) return { handled: false };
         try {
-          await requestConnectFromUser(origin, getChainForOrigin(origin));
+          perm = await acquirePermission(origin);
         } catch (err: any) {
           return {
             handled: true,
@@ -1049,7 +1093,6 @@ async function tryHandleExtraMethod(
           };
         }
       }
-      const perm = getPermissionForOrigin(origin)!;
       broadcastEventToOrigin(origin || "", "accountsChanged", perm.accounts);
       return {
         handled: true,
