@@ -67,6 +67,9 @@ type mockRuleEngine struct {
 	matchedRuleID *types.RuleID
 	matchReason   string
 	evalErr       error
+	// noMatchReason lets a test simulate the engine reporting a
+	// diagnostic when no whitelist matched. Empty by default.
+	noMatchReason string
 }
 
 func (e *mockRuleEngine) Evaluate(_ context.Context, _ *types.SignRequest, _ *types.ParsedPayload) (*types.RuleID, string, error) {
@@ -74,7 +77,17 @@ func (e *mockRuleEngine) Evaluate(_ context.Context, _ *types.SignRequest, _ *ty
 }
 
 func (e *mockRuleEngine) EvaluateWithResult(_ context.Context, _ *types.SignRequest, _ *types.ParsedPayload) (*rule.EvaluationResult, error) {
-	return nil, nil
+	if e.evalErr != nil {
+		return nil, e.evalErr
+	}
+	if e.matchedRuleID != nil {
+		return &rule.EvaluationResult{
+			Allowed:     true,
+			AllowedBy:   &types.Rule{ID: *e.matchedRuleID, Name: e.matchReason},
+			AllowReason: e.matchReason,
+		}, nil
+	}
+	return &rule.EvaluationResult{NoMatchReason: e.noMatchReason}, nil
 }
 
 func (e *mockRuleEngine) RegisterEvaluator(_ rule.RuleEvaluator) {}
@@ -167,6 +180,15 @@ func (r *mockRequestRepo) UpdateStatus(_ context.Context, id types.SignRequestID
 		return types.ErrNotFound
 	}
 	req.Status = status
+	return nil
+}
+
+func (r *mockRequestRepo) UpdateLastNoMatchReason(_ context.Context, id types.SignRequestID, reason string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if req, exists := r.requests[id]; exists {
+		req.LastNoMatchReason = reason
+	}
 	return nil
 }
 

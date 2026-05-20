@@ -74,6 +74,14 @@ type SignRequest struct {
 	Signature    []byte `json:"signature,omitempty" gorm:"type:bytea"`
 	SignedData   []byte `json:"signed_data,omitempty" gorm:"type:bytea"` // e.g., signed tx
 	ErrorMessage string `json:"error_message,omitempty" gorm:"type:text"`
+	// LastNoMatchReason captures the reason text the whitelist engine
+	// would have logged when NO rule matched this request. Populated
+	// only when Status transitions to "authorizing" / "pending" via the
+	// no-match path; empty when a rule auto-approved the request. The
+	// activity-drawer reads this to surface "why didn't my rule fire?"
+	// directly in the popup instead of forcing operators to grep
+	// server logs.
+	LastNoMatchReason string `json:"last_no_match_reason,omitempty" gorm:"type:text"`
 
 	// Timestamps
 	CreatedAt   time.Time  `json:"created_at"`

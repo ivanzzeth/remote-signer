@@ -75,9 +75,14 @@ type RequestDetailResponse struct {
 	// column so the UI can render a single consistent "approved by …"
 	// line for all three paths.
 	ApprovalSource string `json:"approval_source,omitempty"`
-	CreatedAt      string `json:"created_at"`
-	UpdatedAt      string `json:"updated_at"`
-	CompletedAt    *string `json:"completed_at,omitempty"`
+	// LastNoMatchReason is the engine's diagnostic when no whitelist rule
+	// matched; empty when a rule auto-approved. The popup activity
+	// drawer renders this so operators see "why didn't my rule fire?"
+	// without grepping server logs.
+	LastNoMatchReason string  `json:"last_no_match_reason,omitempty"`
+	CreatedAt         string  `json:"created_at"`
+	UpdatedAt         string  `json:"updated_at"`
+	CompletedAt       *string `json:"completed_at,omitempty"`
 }
 
 // ListRequestsResponse represents the response for listing requests
@@ -293,19 +298,20 @@ func (h *ListHandler) toDetailResponse(ctx context.Context, req *types.SignReque
 
 func toDetailResponse(ctx context.Context, ruleRepo storage.RuleRepository, req *types.SignRequest, includePayload bool) RequestDetailResponse {
 	resp := RequestDetailResponse{
-		ID:            string(req.ID),
-		APIKeyID:      req.APIKeyID,
-		ChainType:     string(req.ChainType),
-		ChainID:       req.ChainID,
-		SignerAddress: req.SignerAddress,
-		SignType:      req.SignType,
-		Status:        string(req.Status),
-		ClientIP:      req.ClientIP,
-		ErrorMessage:  req.ErrorMessage,
-		RuleMatchedID: req.RuleMatchedID,
-		ApprovedBy:    req.ApprovedBy,
-		CreatedAt:     req.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-		UpdatedAt:     req.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		ID:                string(req.ID),
+		APIKeyID:          req.APIKeyID,
+		ChainType:         string(req.ChainType),
+		ChainID:           req.ChainID,
+		SignerAddress:     req.SignerAddress,
+		SignType:          req.SignType,
+		Status:            string(req.Status),
+		ClientIP:          req.ClientIP,
+		ErrorMessage:      req.ErrorMessage,
+		RuleMatchedID:     req.RuleMatchedID,
+		ApprovedBy:        req.ApprovedBy,
+		LastNoMatchReason: req.LastNoMatchReason,
+		CreatedAt:         req.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		UpdatedAt:         req.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
 	// Only attribute once the request has actually been approved.
 	// Pending/authorizing rows have neither approver nor matched rule

@@ -26,7 +26,7 @@
  */
 import { test, expect, type Page } from "./fixtures";
 import { verifyMessage } from "ethers";
-import { injectStorageConfig } from "./helpers";
+import { adminClient, injectStorageConfig } from "./helpers";
 
 const LIVE = process.env.LIVE_DAPP_E2E === "1";
 
@@ -188,7 +188,7 @@ test.describe("Live dApp provider integration (@live)", () => {
    * dumps the captured RPC log to stdout regardless of pass/fail so we
    * can see exactly what Polymarket is asking for.
    */
-  test("Polymarket: real login UI drives sign request and Polymarket accepts the signature", async ({ context }) => {
+  test("Polymarket: real login UI drives sign request and Polymarket accepts the signature", async ({ context, serverInfo }) => {
     test.setTimeout(180_000);
     const page = await context.newPage();
     page.setDefaultTimeout(NAV_TIMEOUT);
@@ -418,6 +418,48 @@ test.describe("Live dApp provider integration (@live)", () => {
       bodyText.includes("request cancelled") || bodyText.includes("request canceled"),
       "Polymarket shows 'Request Cancelled' after we returned a signature — recovery mismatch?"
     ).toBe(false);
+
+    // Cross-check: ask the BACKEND what status it gave this sign request.
+    // The provider-side success/recovery checks above only prove "our
+    // SDK returned a signature." They don't prove the backend
+    // transitioned the request out of `authorizing`/`pending` — and
+    // that's the exact failure shape the bundle-template bug produced
+    // (rule silently skipped → status stuck at authorizing → SDK
+    // eventually polled to completion via a different path, or threw).
+    // Pulling the audit row here closes that loop from the wallet side.
+    //
+    // P3 #11 in e2e/MISSING_COVERAGE.md.
+    if (personalSignCall) {
+      const admin = adminClient({
+        base_url: serverInfo.base_url,
+        admin_api_key_id: serverInfo.admin_api_key_id,
+        admin_api_key_hex: serverInfo.admin_api_key_hex,
+      });
+      const list = await admin.evm.requests
+        .list({ signer_address: serverInfo.signer_address, limit: 20 })
+        .catch(() => ({ requests: [] } as any));
+      const personalRequests = (list.requests || []).filter(
+        (r: any) => r.sign_type === "personal"
+      );
+      expect(
+        personalRequests.length,
+        "backend MUST have recorded the personal_sign request — the audit row is missing, request_repo dropped it on the floor"
+      ).toBeGreaterThan(0);
+      // List is created_at DESC — index 0 is the most recent. Pin it
+      // because Polymarket's SIWE issues exactly one personal_sign per
+      // login click in this flow.
+      const latest = personalRequests[0];
+      expect(
+        latest.status,
+        `backend status MUST be "completed" — got ${JSON.stringify(latest.status)}. ` +
+          `"authorizing" / "pending" here = rule engine never selected a matching ` +
+          `whitelist rule (the bundle-template bug shape).`
+      ).toBe("completed");
+      // And the sign must have a non-empty signature attached, which
+      // catches a different bug shape (status flips to completed but
+      // signature column never gets populated).
+      expect(latest.signature, "backend MUST have persisted the signature alongside status=completed").toBeTruthy();
+    }
 
     await page.close();
   });

@@ -488,6 +488,14 @@
       })();
       payloadBlock = `<details class="drawer-row drawer-raw"><summary class="drawer-label">Raw payload</summary><pre class="drawer-payload">${escapeText(pretty)}</pre></details>`;
     }
+    // No-match diagnostic: the rule engine's reason text gets pinned on
+    // the request row when no whitelist matched (P3 #12 — replaces the
+    // "rule mysteriously didn't fire, go grep server logs" failure mode
+    // with a one-line in-popup explanation).
+    const noMatchBlock = r.last_no_match_reason && !r.rule_matched_id
+      ? `<div class="drawer-warning" data-testid="no-match-reason">⚠ No whitelist rule matched: ${escapeText(r.last_no_match_reason)}</div>`
+      : "";
+
     return [
       row("Request ID", r.id),
       row("Status", r.status),
@@ -501,6 +509,7 @@
       row("Completed", r.completed_at),
       r.signature ? row("Signature", r.signature) : "",
       r.error_message ? row("Error", r.error_message) : "",
+      noMatchBlock,
       messageBlock,
       payloadBlock,
     ].join("");

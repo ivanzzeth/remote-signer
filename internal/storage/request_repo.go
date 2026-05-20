@@ -40,6 +40,11 @@ type RequestRepository interface {
 	List(ctx context.Context, filter RequestFilter) ([]*types.SignRequest, error)
 	Count(ctx context.Context, filter RequestFilter) (int, error)
 	UpdateStatus(ctx context.Context, id types.SignRequestID, status types.SignRequestStatus) error
+	// UpdateLastNoMatchReason records the whitelist engine's diagnostic
+	// for "no rule matched" so it surfaces in the API + activity drawer.
+	// Best-effort — callers swallow errors because the sign flow has
+	// already moved on to manual approval / simulation.
+	UpdateLastNoMatchReason(ctx context.Context, id types.SignRequestID, reason string) error
 }
 
 // GormRequestRepository implements RequestRepository using GORM
@@ -195,6 +200,19 @@ func (r *GormRequestRepository) UpdateStatus(ctx context.Context, id types.SignR
 	}
 	if result.RowsAffected == 0 {
 		return types.ErrNotFound
+	}
+	return nil
+}
+
+// UpdateLastNoMatchReason persists the engine's no-match diagnostic
+// against the request row. Idempotent on reason (the engine emits the
+// same string for each re-evaluation), and a no-op if the row is gone.
+func (r *GormRequestRepository) UpdateLastNoMatchReason(ctx context.Context, id types.SignRequestID, reason string) error {
+	result := r.db.WithContext(ctx).Model(&types.SignRequest{}).
+		Where("id = ?", id).
+		Update("last_no_match_reason", reason)
+	if result.Error != nil {
+		return fmt.Errorf("failed to update last_no_match_reason: %w", result.Error)
 	}
 	return nil
 }
