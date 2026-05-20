@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/ivanzzeth/ethsig/keystore"
+	"github.com/ivanzzeth/remote-signer/internal/homepath"
 	"github.com/ivanzzeth/remote-signer/pkg/client"
 	"github.com/spf13/cobra"
 )
@@ -67,21 +69,45 @@ func newClientFromFlags(cmd *cobra.Command) (*client.Client, error) {
 	if flagAPIKeyFile != "" && flagAPIKeyKeystore != "" {
 		return nil, fmt.Errorf("--api-key-file and --api-key-keystore are mutually exclusive")
 	}
-	if flagAPIKeyFile == "" && flagAPIKeyKeystore == "" {
-		return nil, fmt.Errorf("one of --api-key-file or --api-key-keystore is required")
+
+	keystorePath := flagAPIKeyKeystore
+	pemPath := flagAPIKeyFile
+
+	// Auto-discover the credential when neither flag is set. The daemon's
+	// bootstrap writes the admin keystore pointer file at the conventional
+	// path; for the admin id we read that pointer to locate the keystore
+	// JSON. For other ids we look for either a sibling keystore ptr or a
+	// legacy <id>.key.priv PEM. This is the "just works" path the operator
+	// wants — `--api-key-id admin` is enough on a daemon home set up by
+	// the post-cleanup binary.
+	if keystorePath == "" && pemPath == "" {
+		discovered, discErr := discoverDefaultCredential(flagAPIKeyID)
+		if discErr != nil {
+			return nil, discErr
+		}
+		if discovered.keystorePath != "" {
+			keystorePath = discovered.keystorePath
+		} else if discovered.pemPath != "" {
+			pemPath = discovered.pemPath
+		} else {
+			return nil, fmt.Errorf(
+				"no credential found for --api-key-id %q; pass --api-key-keystore or --api-key-file, or bootstrap the daemon to write one to ~/.remote-signer/apikeys",
+				flagAPIKeyID,
+			)
+		}
 	}
 
 	var privKey ed25519.PrivateKey
-	if flagAPIKeyKeystore != "" {
-		key, err := loadEd25519FromKeystore(cmd, flagAPIKeyKeystore)
+	if keystorePath != "" {
+		key, err := loadEd25519FromKeystore(cmd, keystorePath)
 		if err != nil {
-			return nil, fmt.Errorf("failed to load key from keystore %s: %w", flagAPIKeyKeystore, err)
+			return nil, fmt.Errorf("failed to load key from keystore %s: %w", keystorePath, err)
 		}
 		privKey = key
 	} else {
-		key, err := loadEd25519PrivateKey(flagAPIKeyFile)
+		key, err := loadEd25519PrivateKey(pemPath)
 		if err != nil {
-			return nil, fmt.Errorf("failed to load private key from %s: %w", flagAPIKeyFile, err)
+			return nil, fmt.Errorf("failed to load private key from %s: %w", pemPath, err)
 		}
 		privKey = key
 	}
@@ -123,7 +149,16 @@ func loadEd25519FromKeystore(cmd *cobra.Command, keystorePath string) (ed25519.P
 	return ed25519.NewKeyFromSeed(rawSeed), nil
 }
 
-// resolveKeystorePassword gets the password from --api-key-password-env or interactive prompt.
+// resolveKeystorePassword gets the password using the documented precedence:
+//
+//  1. --api-key-password-env <NAME>  (explicit operator-named env var)
+//  2. REMOTE_SIGNER_KEYSTORE_PASSWORD env var (the daemon's own convention,
+//     shared across CLI + daemon so an operator can `export` it once and
+//     have everything pick it up without per-tool flags)
+//  3. interactive prompt on stderr
+//
+// Steps 1 and 2 are skipped silently when their inputs are absent; only
+// the explicit --api-key-password-env path errors on missing env var.
 func resolveKeystorePassword(cmd *cobra.Command) ([]byte, error) {
 	if flagAPIKeyPasswordEnv != "" {
 		envVal := os.Getenv(flagAPIKeyPasswordEnv)
@@ -132,9 +167,60 @@ func resolveKeystorePassword(cmd *cobra.Command) ([]byte, error) {
 		}
 		return []byte(envVal), nil
 	}
-
+	if envVal := os.Getenv("REMOTE_SIGNER_KEYSTORE_PASSWORD"); envVal != "" {
+		return []byte(envVal), nil
+	}
 	fmt.Fprint(os.Stderr, "Enter keystore password: ")
 	return keystore.ReadSecret(cmd.Context())
+}
+
+// discoveredCredential captures whichever credential file the auto-discovery
+// path found for the given api-key id. Exactly one of keystorePath / pemPath
+// is populated when err == nil; both empty means nothing was found at the
+// expected locations.
+type discoveredCredential struct {
+	keystorePath string
+	pemPath      string
+}
+
+// discoverDefaultCredential finds the credential file for an api-key id by
+// walking the daemon's conventional layout under
+// $HOME/.remote-signer/apikeys/:
+//
+//   - For "admin": read admin.key.keystore (the bootstrap ptr file) and use
+//     the path inside it. This is the post-cleanup default — the daemon no
+//     longer exports admin.key.priv on startup.
+//   - Fallback for any id: look for <id>.key.priv (legacy PEM). Used by
+//     "agent" (which is still PEM-only) and by operators who haven't yet
+//     migrated their admin key to keystore format.
+//
+// Returns zero discoveredCredential + nil err when nothing matched — the
+// caller should treat that as "user must pass an explicit flag".
+func discoverDefaultCredential(apiKeyID string) (discoveredCredential, error) {
+	if apiKeyID == "admin" {
+		ptrPath, err := homepath.AdminKeystorePtrPath()
+		if err == nil {
+			if data, readErr := os.ReadFile(ptrPath); readErr == nil {
+				keystorePath := strings.TrimSpace(string(data))
+				if keystorePath != "" {
+					if _, statErr := os.Stat(keystorePath); statErr == nil {
+						return discoveredCredential{keystorePath: keystorePath}, nil
+					}
+				}
+			}
+		}
+	}
+
+	// Generic PEM fallback: <api-key-id>.key.priv inside the apikeys dir.
+	apikeysDir, err := homepath.APIKeysDir()
+	if err != nil {
+		return discoveredCredential{}, nil
+	}
+	pemPath := filepath.Join(apikeysDir, apiKeyID+".key.priv")
+	if _, statErr := os.Stat(pemPath); statErr == nil {
+		return discoveredCredential{pemPath: pemPath}, nil
+	}
+	return discoveredCredential{}, nil
 }
 
 // loadEd25519PrivateKey reads a PEM file and extracts the Ed25519 private key.

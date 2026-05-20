@@ -67,7 +67,9 @@ describe("validatePassword", () => {
 describe("encryptSeed + decryptKeystore round-trip", () => {
   it("recovers the original seed with the correct password", async () => {
     const ks = await encryptSeed(TEST_SEED, STRONG_PASSWORD, "admin");
-    expect(ks.version).toBe(3);
+    // version 1 is the EnhancedKeyFile envelope (matches ethsig's daemon
+    // format). The inner keystore v3 shape lives implicitly in crypto.
+    expect(ks.version).toBe(1);
     expect(ks.key_type).toBe("ed25519");
     expect(ks.identifier).toBe("admin");
 
@@ -124,7 +126,8 @@ describe("encryptSeed input validation", () => {
 describe("decryptKeystore input validation", () => {
   it("rejects an unsupported version", async () => {
     const ks = await encryptSeed(TEST_SEED, STRONG_PASSWORD, "admin");
-    const tampered = { ...ks, version: 2 };
+    // Bump past the supported envelope version so the guard fires.
+    const tampered = { ...ks, version: 99 };
     await expect(decryptKeystore(tampered, STRONG_PASSWORD)).rejects.toThrow(
       /version/,
     );

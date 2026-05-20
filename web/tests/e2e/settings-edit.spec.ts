@@ -1,11 +1,4 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import {
-  RemoteSignerClient,
-  parsePrivateKey,
-} from "remote-signer-client";
-import { expect, test } from "./fixtures";
-import { getState } from "./global-setup";
+import { adminSDKClient, expect, test } from "./fixtures";
 
 /**
  * Round-trip: open Settings → security → typed form bumps
@@ -43,15 +36,7 @@ test("security max_request_age edit persists via the typed form", async ({
   await authedPage.getByRole("button", { name: "Save" }).click();
 
   // Cross-check via SDK.
-  const state = getState();
-  const seed = parsePrivateKey(
-    readFileSync(join(state.home, "apikeys", "admin.key.priv"), "utf8"),
-  );
-  const client = new RemoteSignerClient({
-    baseURL: `http://127.0.0.1:${process.env.E2E_PORT ?? 18548}`,
-    apiKeyID: "admin",
-    privateKey: seed,
-  });
+  const client = await adminSDKClient();
   await expect
     .poll(async () => (await client.settings.get("security")).max_request_age, {
       timeout: 5_000,
@@ -78,15 +63,7 @@ test("Advanced raw-JSON fallback still writes the snapshot", async ({
   await textarea.fill(JSON.stringify(raw, null, 2));
   await authedPage.getByRole("button", { name: "Save" }).click();
 
-  const state = getState();
-  const seed = parsePrivateKey(
-    readFileSync(join(state.home, "apikeys", "admin.key.priv"), "utf8"),
-  );
-  const client = new RemoteSignerClient({
-    baseURL: `http://127.0.0.1:${process.env.E2E_PORT ?? 18548}`,
-    apiKeyID: "admin",
-    privateKey: seed,
-  });
+  const client = await adminSDKClient();
   await expect
     .poll(async () => (await client.settings.get("security")).rate_limit_default, {
       timeout: 5_000,

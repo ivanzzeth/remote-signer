@@ -1,11 +1,4 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import {
-  RemoteSignerClient,
-  parsePrivateKey,
-} from "remote-signer-client";
-import { expect, test } from "./fixtures";
-import { getState } from "./global-setup";
+import { adminSDKClient, expect, test } from "./fixtures";
 
 /**
  * Full Budget CRUD lifecycle driven through the UI:
@@ -22,22 +15,11 @@ import { getState } from "./global-setup";
  * collide with leftovers in a shared daemon (the fixture wipes per
  * test class, not per test).
  */
-function adminClient() {
-  const state = getState();
-  const seed = parsePrivateKey(
-    readFileSync(join(state.home, "apikeys", "admin.key.priv"), "utf8"),
-  );
-  return new RemoteSignerClient({
-    baseURL: `http://127.0.0.1:${process.env.E2E_PORT ?? 18548}`,
-    apiKeyID: "admin",
-    privateKey: seed,
-  });
-}
 
 test("create → edit → reset → delete budget through the UI", async ({
   authedPage,
 }) => {
-  const c = adminClient();
+  const c = await adminSDKClient();
   const ruleName = `e2e-budget-rule-${Date.now()}`;
   const rule = await c.evm.rules.create({
     name: ruleName,

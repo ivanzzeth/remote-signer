@@ -140,24 +140,12 @@ func TestBootstrapNoopWhenKeysExist(t *testing.T) {
 	}
 }
 
-// unlockAdminKeystoreHelper runs the unlock flow with a test password and
-// validates the PEM file is written. Returns the privPath for further
-// assertions, and a cleanup function.
-func unlockAdminKeystoreHelper(t *testing.T, ptrPath, privPath string) func() {
-	t.Helper()
-	t.Setenv("REMOTE_SIGNER_ADMIN_PASSWORD", "test-password-12345")
-	cleanup, err := unlockAdminKeystoreIfNeeded(ptrPath, privPath, discardLogger())
-	if err != nil {
-		t.Fatalf("unlockAdminKeystoreIfNeeded: %v", err)
-	}
-	// Verify PEM was written.
-	if _, err := os.Stat(privPath); os.IsNotExist(err) {
-		t.Errorf("PEM file should exist after unlock: %s", privPath)
-	}
-	return cleanup
-}
-
 func TestBootstrapAndUnlockRoundtrip(t *testing.T) {
+	// Pins the post-cleanup contract: bootstrapAdminKeyIfNeeded writes the
+	// keystore + pointer + public-PEM, and unlockAdminKeystoreIfNeeded is
+	// a no-op that does NOT export a plaintext PEM on disk. The daemon's
+	// runtime never needs the admin private key — it only verifies API
+	// request signatures using the public-key column on api_keys.
 	t.Setenv("REMOTE_SIGNER_KEYSTORE_PASSWORD", "test-password-12345")
 
 	tmp := t.TempDir()
@@ -167,56 +155,69 @@ func TestBootstrapAndUnlockRoundtrip(t *testing.T) {
 	privPath := filepath.Join(tmp, "admin.key.priv")
 	repo := newTestRepo(t)
 
-	// Bootstrap the admin key.
 	if err := bootstrapAdminKeyIfNeeded(context.Background(), repo, keystoreDir, ptrPath, pubPath, 0, discardLogger()); err != nil {
 		t.Fatal(err)
 	}
 
-	// Read pointer and keystore info before unlock.
-	ptrData, _ := os.ReadFile(ptrPath)
-	keystorePath := strings.TrimSpace(string(ptrData))
-
-	// Unlock the keystore.
-	cleanup := unlockAdminKeystoreHelper(t, ptrPath, privPath)
-
-	// Verify the PEM is a valid Ed25519 private key.
-	privPEM, _ := os.ReadFile(privPath)
-	block, _ := pem.Decode(privPEM)
-	if block == nil || block.Type != "PRIVATE KEY" {
-		t.Fatalf("priv PEM block invalid: %v", block)
-	}
-	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	// Pointer should exist; keystore file referenced by it should exist;
+	// public PEM should exist; api_keys row should exist.
+	ptrData, err := os.ReadFile(ptrPath)
 	if err != nil {
-		t.Fatalf("priv key not parseable: %v", err)
+		t.Fatalf("read ptr: %v", err)
 	}
-	edPriv, ok := parsed.(ed25519.PrivateKey)
-	if !ok {
-		t.Fatalf("parsed key is not Ed25519: %T", parsed)
+	keystorePath := strings.TrimSpace(string(ptrData))
+	if _, err := os.Stat(keystorePath); err != nil {
+		t.Errorf("keystore file referenced by ptr must exist: %v", err)
+	}
+	if _, err := os.Stat(pubPath); err != nil {
+		t.Errorf("public PEM must exist: %v", err)
+	}
+	if _, err := repo.Get(context.Background(), "admin"); err != nil {
+		t.Errorf("admin api_keys row must exist: %v", err)
 	}
 
-	// Verify the public key from the PEM matches the keystore identifier.
+	// Spot-check: the public PEM and keystore identifier (hex pubkey) must
+	// agree. Catches mis-wiring between the two writers.
+	pubPEMBytes, _ := os.ReadFile(pubPath)
+	pubBlock, _ := pem.Decode(pubPEMBytes)
+	if pubBlock == nil || pubBlock.Type != "PUBLIC KEY" {
+		t.Fatalf("pub PEM block invalid: %v", pubBlock)
+	}
+	pubParsed, err := x509.ParsePKIXPublicKey(pubBlock.Bytes)
+	if err != nil {
+		t.Fatalf("pub key not parseable: %v", err)
+	}
+	pubEd, ok := pubParsed.(ed25519.PublicKey)
+	if !ok {
+		t.Fatalf("pub is not Ed25519: %T", pubParsed)
+	}
+	pubFromPEMHex := hex.EncodeToString(pubEd)
 	info, err := keystore.GetEnhancedKeyInfo(keystorePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	expectedPub := ed25519.PrivateKey(edPriv).Public().(ed25519.PublicKey)
-	expectedPubHex := hex.EncodeToString(expectedPub)
-	if info.Identifier != expectedPubHex {
-		t.Errorf("keystore identifier = %q, PEM public key = %q", info.Identifier, expectedPubHex)
+	if info.Identifier != pubFromPEMHex {
+		t.Errorf("keystore identifier = %q, pub PEM = %q", info.Identifier, pubFromPEMHex)
 	}
 
-	// Run cleanup and verify priv file is removed.
-	cleanup()
+	// unlockAdminKeystoreIfNeeded should NOT write a plaintext PEM —
+	// that was the regression the cleanup removed.
+	cleanup, err := unlockAdminKeystoreIfNeeded(ptrPath, privPath, discardLogger())
+	if err != nil {
+		t.Fatalf("unlock should be a no-op, got error: %v", err)
+	}
 	if _, err := os.Stat(privPath); !os.IsNotExist(err) {
-		t.Errorf("PEM should be removed after cleanup: %v", err)
+		t.Errorf("post-unlock: admin.key.priv MUST NOT exist (cleanup removes PEM exposure); stat err = %v", err)
 	}
+	cleanup()
 
-	// Keystore pointer and keystore file should still exist after cleanup.
+	// Keystore + pointer survive past unlock; the encrypted copy is the
+	// authoritative source going forward.
 	if _, err := os.Stat(ptrPath); os.IsNotExist(err) {
-		t.Errorf("keystore pointer should survive cleanup")
+		t.Errorf("keystore pointer should survive unlock")
 	}
 	if _, err := os.Stat(keystorePath); os.IsNotExist(err) {
-		t.Errorf("keystore file should survive cleanup")
+		t.Errorf("keystore file should survive unlock")
 	}
 }
 
@@ -238,8 +239,15 @@ func TestUnlockNoopWhenNoPointer(t *testing.T) {
 	}
 }
 
-func TestUnlockNoopWhenPEMAlreadyExists(t *testing.T) {
-	t.Setenv("REMOTE_SIGNER_ADMIN_PASSWORD", "test-password-12345")
+func TestUnlockProactivelyRemovesStalePEM(t *testing.T) {
+	// Pins the cleanup behaviour for an operator upgrading from the
+	// PEM-export-on-startup era: a stale admin.key.priv left behind by
+	// the OLD daemon binary MUST be wiped + removed on the next start,
+	// so a plaintext copy of the seed can't linger on disk indefinitely
+	// after the upgrade. Only fires when the keystore pointer exists
+	// (i.e. the operator IS on the keystore format) — legacy
+	// pure-PEM deployments without a pointer file are left alone.
+	t.Setenv("REMOTE_SIGNER_KEYSTORE_PASSWORD", "test-password-12345")
 
 	tmp := t.TempDir()
 	keystoreDir := tmp
@@ -248,32 +256,22 @@ func TestUnlockNoopWhenPEMAlreadyExists(t *testing.T) {
 	privPath := filepath.Join(tmp, "admin.key.priv")
 	repo := newTestRepo(t)
 
-	// Bootstrap and unlock first.
-	t.Setenv("REMOTE_SIGNER_KEYSTORE_PASSWORD", "test-password-12345")
 	if err := bootstrapAdminKeyIfNeeded(context.Background(), repo, keystoreDir, ptrPath, pubPath, 0, discardLogger()); err != nil {
 		t.Fatal(err)
 	}
-	cleanup1 := unlockAdminKeystoreHelper(t, ptrPath, privPath)
-	cleanup1()
-
-	// Second unlock should still work because the PEM was cleaned up.
-	cleanup2 := unlockAdminKeystoreHelper(t, ptrPath, privPath)
-	cleanup2()
-
-	// Write the PEM manually and call unlock again — it should be a no-op.
-	if err := os.WriteFile(privPath, []byte("fake-key"), 0600); err != nil {
+	// Simulate the stale state left by the OLD binary.
+	if err := os.WriteFile(privPath, []byte("stale-plaintext-pem"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	cleanup3, err := unlockAdminKeystoreIfNeeded(ptrPath, privPath, discardLogger())
+
+	cleanup, err := unlockAdminKeystoreIfNeeded(ptrPath, privPath, discardLogger())
 	if err != nil {
-		t.Fatalf("unlock with existing PEM should not error: %v", err)
+		t.Fatalf("unlock should be a no-op, got error: %v", err)
 	}
-	// Verify it did NOT overwrite our file.
-	data, _ := os.ReadFile(privPath)
-	if string(data) != "fake-key" {
-		t.Errorf("unlock should not overwrite existing PEM")
+	if _, err := os.Stat(privPath); !os.IsNotExist(err) {
+		t.Errorf("stale PEM should have been removed by the cleanup, stat err = %v", err)
 	}
-	cleanup3()
+	cleanup()
 }
 
 func TestBootstrapAgentKeyCreatesWhenNoAgentKey(t *testing.T) {
