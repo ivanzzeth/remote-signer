@@ -2806,7 +2806,8 @@
     // Defaulting the field saves the user a step on first run.
     apiKeyId: "agent",
     apiKeyPrivateKey: "",
-    selectedChain: 1
+    selectedChain: 1,
+    autoApproveConnections: true
   };
   var EXTENSION_VERSION = typeof chrome !== "undefined" && chrome.runtime?.getManifest?.()?.version || "dev";
   var CLIENT_VERSION_STRING = `RemoteSigner/v${EXTENSION_VERSION}/javascript`;
@@ -2951,6 +2952,30 @@
       }
     }
   });
+  async function acquirePermission(origin) {
+    await loadConfig();
+    if (cachedConfig.autoApproveConnections !== false) {
+      await ensureInit();
+      let accounts = [];
+      try {
+        if (provider && provider.isConnected()) {
+          accounts = await provider.request({ method: "eth_accounts" });
+        }
+      } catch {
+      }
+      if (accounts.length === 0) {
+        throw { code: -32603, message: "No usable signers \u2014 open Settings first" };
+      }
+      const perm = {
+        accounts: accounts.map((a) => a.toLowerCase()),
+        chainId: getChainForOrigin(origin) || cachedConfig.selectedChain || 1,
+        grantedAt: Date.now()
+      };
+      await setPermissionForOrigin(origin, perm);
+      return perm;
+    }
+    return requestConnectFromUser(origin, getChainForOrigin(origin));
+  }
   async function requestConnectFromUser(origin, suggestedChainId) {
     return new Promise((resolve, reject) => {
       const requestId = connectRequestId();
@@ -3379,7 +3404,7 @@
           return { handled: false };
         }
         try {
-          const perm = await requestConnectFromUser(origin, getChainForOrigin(origin));
+          const perm = await acquirePermission(origin);
           broadcastEventToOrigin(origin, "accountsChanged", perm.accounts);
           broadcastEventToOrigin(origin, "chainChanged", `0x${perm.chainId.toString(16)}`);
           return { handled: true, result: perm.accounts };
@@ -3391,11 +3416,11 @@
         }
       }
       case "wallet_requestPermissions": {
-        const existing = getPermissionForOrigin(origin);
-        if (!existing) {
+        let perm = getPermissionForOrigin(origin);
+        if (!perm) {
           if (!origin) return { handled: false };
           try {
-            await requestConnectFromUser(origin, getChainForOrigin(origin));
+            perm = await acquirePermission(origin);
           } catch (err2) {
             return {
               handled: true,
@@ -3403,7 +3428,6 @@
             };
           }
         }
-        const perm = getPermissionForOrigin(origin);
         broadcastEventToOrigin(origin || "", "accountsChanged", perm.accounts);
         return {
           handled: true,

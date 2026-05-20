@@ -452,6 +452,35 @@ header.appbar {
   -webkit-text-security: disc;
   text-security: disc;
 }
+.form-group--toggle {
+  padding: 4px 0;
+}
+.toggle-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+}
+.toggle-row input[type="checkbox"] {
+  margin-top: 3px;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+.toggle-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.toggle-label-title {
+  font-size: 13px;
+  color: var(--text, #111827);
+}
+.toggle-label-hint {
+  font-size: 11px;
+  color: var(--text-muted, #6b7280);
+  line-height: 1.4;
+}
 .form-group textarea.drop-target {
   outline: 2px dashed var(--accent, #627EEA);
   outline-offset: 2px;
