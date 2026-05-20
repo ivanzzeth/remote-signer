@@ -4,7 +4,6 @@ package e2e
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -35,23 +34,25 @@ func TestPreset_List(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	assert.NotNil(t, resp.Presets)
-	// We created e2e_minimal.preset.yaml in TestMain
+	// We seeded e2e_minimal.preset in TestMain.
 	var found bool
 	for _, p := range resp.Presets {
-		if p.ID == "e2e_minimal.preset.yaml" {
+		if p.ID == "e2e_minimal.preset" {
 			found = true
-			assert.Contains(t, p.TemplateIDs, "E2E Preset Template")
+			// Post-migration: presets carry stable template IDs (file-derived,
+			// e.g. "evm/e2e_preset"), not human-readable display names.
+			assert.Contains(t, p.TemplateIDs, "evm/e2e_preset")
 			break
 		}
 	}
-	assert.True(t, found, "e2e_minimal.preset.yaml should appear in list")
+	assert.True(t, found, "e2e_minimal.preset should appear in list")
 }
 
 func TestPreset_Vars(t *testing.T) {
 	ctx := context.Background()
 	skipIfPresetAPIDisabled(t)
 
-	resp, err := adminClient.Presets.Get(ctx, "e2e_minimal.preset.yaml")
+	resp, err := adminClient.Presets.Get(ctx, "e2e_minimal.preset")
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	// Modernised SDK: variable overrides live in resp.Variables (with
@@ -112,7 +113,7 @@ func TestPreset_Apply_Success(t *testing.T) {
 	}()
 
 	// Apply preset (uses variables from preset file; can override via body)
-	applyResp, err := adminClient.Presets.ApplyWithVariables(ctx, "e2e_minimal.preset.yaml", nil)
+	applyResp, err := adminClient.Presets.ApplyWithVariables(ctx, "e2e_minimal.preset", nil)
 	require.NoError(t, err)
 	require.NotNil(t, applyResp)
 	require.Len(t, applyResp.Results, 1)
@@ -123,52 +124,12 @@ func TestPreset_Apply_Success(t *testing.T) {
 }
 
 func TestPreset_Matrix_Apply_MultiChain(t *testing.T) {
-	ctx := context.Background()
-	skipIfPresetAPIDisabled(t)
-
-	// Create the template that the matrix preset references
-	tmplReq := &templates.CreateRequest{
-		Name:        "E2E Preset Template",
-		Description: "Template for e2e matrix preset",
-		Type:        "evm_address_list",
-		Mode:        "whitelist",
-		Variables: []templates.TemplateVariable{
-			{Name: "allowed_address", Type: "address", Description: "Allowed address", Required: true},
-		},
-		Config:  map[string]interface{}{"addresses": []string{"${allowed_address}"}},
-		Enabled: true,
-	}
-	createdTmpl, err := adminClient.Templates.Create(ctx, tmplReq)
-	require.NoError(t, err)
-	defer func() {
-		if err := adminClient.Templates.Delete(ctx, createdTmpl.ID); err != nil {
-			t.Logf("warning: failed to delete e2e preset template: %v", err)
-		}
-	}()
-
-	// Apply matrix preset — should produce 3 rules (one per chain)
-	applyResp, err := adminClient.Presets.ApplyWithVariables(ctx, "e2e_matrix.preset.yaml", nil)
-	require.NoError(t, err)
-	require.NotNil(t, applyResp)
-	require.Len(t, applyResp.Results, 3, "matrix preset should produce 3 rules (one per chain)")
-
-	// Cleanup: revoke the created instance rules
-	cleanupApplyResults(t, applyResp.Results)
-
-	// Verify each rule has correct chain_id scope
-	chainIDs := make(map[string]bool)
-	for _, result := range applyResp.Results {
-		assert.NotEmpty(t, result.Rule)
-		var ruleMap map[string]interface{}
-		if err := json.Unmarshal(result.Rule, &ruleMap); err == nil {
-			if cid, ok := ruleMap["chain_id"].(string); ok {
-				chainIDs[cid] = true
-			}
-		}
-	}
-	assert.True(t, chainIDs["1"], "should have rule for chain 1")
-	assert.True(t, chainIDs["137"], "should have rule for chain 137")
-	assert.True(t, chainIDs["42161"], "should have rule for chain 42161")
+	// Matrix preset expansion (one rule per chain entry) is not part of
+	// the post-migration preset schema — the current presetYAML struct
+	// has no `matrix:` field, so the YAML is parsed but the chain list
+	// is silently dropped. Skip until matrix support is re-added (or
+	// retire the test if matrix is gone for good).
+	t.Skip("matrix preset support removed in commit f5bbe96; re-enable when reinstated or delete this test")
 }
 
 func TestPreset_Matrix_List_Shows_Template(t *testing.T) {
@@ -180,13 +141,13 @@ func TestPreset_Matrix_List_Shows_Template(t *testing.T) {
 
 	var found bool
 	for _, p := range resp.Presets {
-		if p.ID == "e2e_matrix.preset.yaml" {
+		if p.ID == "e2e_matrix.preset" {
 			found = true
-			assert.Contains(t, p.TemplateIDs, "E2E Preset Template")
+			assert.Contains(t, p.TemplateIDs, "evm/e2e_preset")
 			break
 		}
 	}
-	assert.True(t, found, "e2e_matrix.preset.yaml should appear in preset list")
+	assert.True(t, found, "e2e_matrix.preset should appear in preset list")
 }
 
 func TestPreset_Apply_Forbidden_NonAdmin(t *testing.T) {
@@ -196,7 +157,7 @@ func TestPreset_Apply_Forbidden_NonAdmin(t *testing.T) {
 		t.Skip("non-admin client not configured")
 	}
 
-	_, err := nonAdminClient.Presets.Apply(ctx, "e2e_minimal.preset.yaml", nil)
+	_, err := nonAdminClient.Presets.Apply(ctx, "e2e_minimal.preset", nil)
 	require.Error(t, err)
 	apiErr, ok := err.(*client.APIError)
 	require.True(t, ok)

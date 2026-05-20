@@ -78,6 +78,128 @@ rules:
 	assert.NotEmpty(t, got.Variables, "JSON column populated")
 }
 
+// TestFileTemplateSource_ShippedTemplatesNeverHaveEmptyType walks the
+// real rules/templates tree this codebase ships and asserts that every
+// loaded template comes out with a non-empty type — either a known
+// rule type or "template_bundle". Catches the class of bug where a new
+// shipped template adds a top-level `rules:` block without `type:` and
+// the registry silently stores type="" again.
+func TestFileTemplateSource_ShippedTemplatesNeverHaveEmptyType(t *testing.T) {
+	// Walk up from this file's package dir to find the repo root, then
+	// point at rules/templates/. Keeps the test hermetic to the repo
+	// layout without hard-coding an absolute path.
+	repoRoot := findRepoRoot(t)
+	templatesDir := filepath.Join(repoRoot, "rules", "templates")
+	if _, err := os.Stat(templatesDir); err != nil {
+		t.Skipf("rules/templates not found at %s — skipping shipped-templates check", templatesDir)
+	}
+
+	src := NewFileTemplateSource(templatesDir)
+	items, err := src.List(context.Background())
+	require.NoError(t, err)
+	require.NotEmpty(t, items, "expected at least one shipped template under rules/templates")
+
+	for _, tmpl := range items {
+		// Either it has a recognised rule type, or — when the YAML carried
+		// top-level `rules:` — the auto-detect set type=template_bundle.
+		// Empty is never acceptable; that's the silent-skip footgun.
+		assert.NotEmptyf(t, string(tmpl.Type),
+			"template %q (source_path=%s) ended up with empty type — would silently skip evaluation",
+			tmpl.ID, tmpl.SourcePath)
+	}
+}
+
+// TestFileTemplateSource_BundleWithRulesGetsRulesJSON keeps a finer-
+// grained invariant the shipped-templates walk doesn't actually
+// assert: bundle templates must produce a non-empty config.rules_json
+// string and that string must round-trip JSON with one element per
+// declared sub-rule. The bundle instantiator reads from this exact
+// field; an empty rules_json would silently make every preset apply
+// a no-op.
+func TestFileTemplateSource_BundleWithRulesGetsRulesJSON(t *testing.T) {
+	repoRoot := findRepoRoot(t)
+	templatesDir := filepath.Join(repoRoot, "rules", "templates")
+	if _, err := os.Stat(templatesDir); err != nil {
+		t.Skipf("rules/templates not found — skipping")
+	}
+	src := NewFileTemplateSource(templatesDir)
+	items, err := src.List(context.Background())
+	require.NoError(t, err)
+	checked := 0
+	for _, tmpl := range items {
+		if tmpl.Type != "template_bundle" {
+			continue
+		}
+		var cfg map[string]any
+		require.NoErrorf(t, json.Unmarshal(tmpl.Config, &cfg),
+			"template %q (%s): failed to decode config JSON", tmpl.ID, tmpl.SourcePath)
+		rulesJSON, ok := cfg["rules_json"].(string)
+		require.Truef(t, ok,
+			"bundle template %q (%s) MUST expose config.rules_json as a string", tmpl.ID, tmpl.SourcePath)
+		require.NotEmptyf(t, rulesJSON,
+			"bundle template %q (%s): rules_json must not be empty", tmpl.ID, tmpl.SourcePath)
+		var subRules []map[string]any
+		require.NoErrorf(t, json.Unmarshal([]byte(rulesJSON), &subRules),
+			"template %q: rules_json is not valid JSON", tmpl.ID)
+		require.NotEmptyf(t, subRules,
+			"template %q: bundle must declare at least one sub-rule", tmpl.ID)
+		for i, sub := range subRules {
+			assert.NotEmptyf(t, sub["type"],
+				"template %q sub-rule[%d] has empty type — engine will skip it",
+				tmpl.ID, i)
+		}
+		checked++
+	}
+	require.Greaterf(t, checked, 0,
+		"expected at least one bundle template under rules/templates — none found")
+}
+
+// TestFileTemplateSource_YAMLWithNoTypeAndNoRulesIsRejected pins the
+// edge case where a template YAML neither declares a rule type nor
+// carries a top-level rules: array. Today the loader doesn't enforce
+// this (Type just stays empty), which was exactly the silent-failure
+// mode that ate the agent preset for a day. Lock the contract: if we
+// can't decide whether the row is a bundle OR a known rule type, the
+// loader should refuse rather than ship "" downstream.
+func TestFileTemplateSource_YAMLWithNoTypeAndNoRulesIsRejected(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "evm/broken.yaml", `name: No Type No Rules
+description: Operator forgot both type and rules
+mode: whitelist
+variables: []
+`)
+	src := NewFileTemplateSource(dir)
+	items, listErr := src.List(context.Background())
+	if listErr != nil {
+		// Preferred outcome: loader explicitly rejects with an error.
+		assert.Contains(t, listErr.Error(), "type",
+			"rejection error should mention the missing type field")
+		return
+	}
+	// Acceptable second outcome: it loaded BUT marked as a known rule
+	// type or template_bundle. Empty type with no rules is the one
+	// thing we want to forbid.
+	require.Len(t, items, 1)
+	assert.NotEmpty(t, string(items[0].Type),
+		"YAML with neither type: nor rules: must NOT slip through with empty type — that's the silent-skip bug")
+}
+
+// findRepoRoot walks up from the current package dir until it sees a
+// go.mod. Returns the dir holding go.mod. The shipped-templates tests
+// use this to locate rules/templates without hard-coding paths.
+func findRepoRoot(t *testing.T) string {
+	t.Helper()
+	wd, err := os.Getwd()
+	require.NoError(t, err)
+	for dir := wd; dir != "/" && dir != ""; dir = filepath.Dir(dir) {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+	}
+	t.Fatalf("could not locate repo root from %s", wd)
+	return ""
+}
+
 // TestFileTemplateSource_BundleTemplateAutoDetect pins the registry's
 // behaviour for "bundle" templates (a YAML with a top-level `rules:`
 // array and no explicit `type:`). Without this pin, the registry was
@@ -303,8 +425,11 @@ variables: []
 }
 
 func TestFileTemplateSource_TypeAndModeOptional(t *testing.T) {
-	// Multi-rule templates can't pick one canonical type/mode for the
-	// container. Migration leaves both empty; Registry must accept.
+	// Multi-rule templates need NO top-level type/mode in the YAML —
+	// the loader auto-detects this is a bundle and fills both:
+	// Type="template_bundle" + Mode inherited from the first sub-rule.
+	// (Pre-fix the row landed with Type="" and the engine silently
+	//  skipped every instance — see commit 3d9feba.)
 	dir := t.TempDir()
 	writeFile(t, dir, "evm/multi.yaml", `
 name: Multi-rule container
@@ -321,14 +446,20 @@ rules:
 	items, err := src.List(context.Background())
 	require.NoError(t, err)
 	require.Len(t, items, 1)
-	assert.Equal(t, types.RuleType(""), items[0].Type, "no top-level type required")
-	assert.Equal(t, types.RuleMode(""), items[0].Mode, "no top-level mode required")
+	assert.Equal(t, types.RuleType("template_bundle"), items[0].Type,
+		"YAML with `rules:` but no top-level `type:` MUST be auto-detected as a bundle")
+	assert.Equal(t, types.RuleModeWhitelist, items[0].Mode,
+		"top-level mode inherits from the first sub-rule's mode")
 }
 
 func TestFileTemplateSource_ModeWhenSetMustBeValid(t *testing.T) {
+	// Carries a top-level type: so the "neither type nor rules" guard
+	// doesn't fire — this test specifically checks the mode-strictness
+	// validator.
 	dir := t.TempDir()
 	writeFile(t, dir, "evm/bad_mode.yaml", `
 name: Bad mode
+type: evm_address_list
 mode: maybe
 variables: []
 `)

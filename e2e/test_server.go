@@ -50,6 +50,12 @@ type TestServerConfig struct {
 	ConfigPath string // Path to config.e2e.yaml (default: "config.e2e.yaml")
 	// Optional: presets directory (when set, GET/POST /api/v1/presets are registered)
 	PresetsDir string // Absolute path to dir containing preset YAML files
+	// Optional: templates directory (when set, the file template registry
+	// syncs YAMLs in this dir into the templates table BEFORE presets sync,
+	// so presets can reference templates by their stable file-derived ID.
+	// Layout convention matches the production registry: <root>/<chain>/<name>.yaml
+	// → template ID "chain/name".
+	TemplatesDir string
 }
 
 // TestServer manages a test instance of the remote-signer service
@@ -618,6 +624,17 @@ func (ts *TestServer) Start() error {
 		AuditLogger:         auditLogger,
 		Simulator:           ts.simulator,
 		WalletRepo:          walletRepo,
+	}
+	// Templates registry sync MUST run before preset sync — presets
+	// validate their template_ids against the DB, and FileTemplateSource
+	// derives IDs from path (e.g. "evm/agent"). If a test wants its
+	// presets to reference shipped templates by stable ID, point
+	// TemplatesDir at a tree mirroring rules/templates/ layout.
+	if ts.config.TemplatesDir != "" {
+		tmplSrc := registry.NewFileTemplateSource(ts.config.TemplatesDir)
+		if _, err := registry.NewTemplateRegistry(templateRepo, tmplSrc, log).Sync(context.Background()); err != nil {
+			return fmt.Errorf("e2e template registry sync: %w", err)
+		}
 	}
 	if ts.config.PresetsDir != "" {
 		// e2e tests still seed presets from a tmp dir; the v0.3 handler is

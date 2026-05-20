@@ -333,3 +333,64 @@ func TestGormRuleRepo_List_Pagination(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, list, 2)
 }
+
+// TestRuleRepo_Create_RejectsEmptyType pins the storage boundary that
+// makes the silent-skip footgun loud. The whitelist engine fails OPEN
+// when no evaluator is registered for a rule's type — including the
+// empty string — so an empty-type row in the DB makes every sign
+// request that would have matched it fall through to manual approval,
+// with only a low-priority WARN in the logs. This is the bug shape from
+// the bundle-template incident (commit 3d9feba): the registry stored a
+// bundle with type="" and the engine silently routed every request
+// past it.
+//
+// We block the row at Create time so the next iteration of that bug
+// surfaces as a 500 from the caller, not a quiet status=pending for
+// the operator to chase through audit logs.
+func TestRuleRepo_Create_RejectsEmptyType(t *testing.T) {
+	_, repo := setupRuleRepoTestDB(t)
+	ctx := context.Background()
+
+	rule := &types.Rule{
+		ID:        types.RuleID("rule-empty-type"),
+		Name:      "Empty type rule",
+		Type:      "", // ← the silent-skip footgun
+		Source:    types.RuleSourceConfig,
+		Enabled:   true,
+		AppliedTo: pq.StringArray{"*"},
+	}
+	err := repo.Create(ctx, rule)
+	require.Error(t, err,
+		"rule with empty Type MUST be rejected at the storage boundary — empty type makes the engine silently skip every match")
+	assert.Contains(t, err.Error(), "rule.type is required",
+		"error message MUST point at the missing type field so operators can fix the caller, not the engine")
+
+	// And confirm the row was not persisted (so a transactional caller
+	// can rely on the failure being clean).
+	_, getErr := repo.Get(ctx, types.RuleID("rule-empty-type"))
+	assert.Error(t, getErr,
+		"rejected Create MUST NOT have inserted the row")
+}
+
+// TestRuleRepo_Create_AcceptsNonEmptyType is the matching positive
+// case — proves the new guard doesn't over-reach into the normal path.
+func TestRuleRepo_Create_AcceptsNonEmptyType(t *testing.T) {
+	_, repo := setupRuleRepoTestDB(t)
+	ctx := context.Background()
+
+	rule := &types.Rule{
+		ID:        types.RuleID("rule-typed-ok"),
+		Name:      "Typed rule",
+		Type:      types.RuleTypeEVMAddressList,
+		Mode:      types.RuleModeWhitelist,
+		Source:    types.RuleSourceConfig,
+		Enabled:   true,
+		AppliedTo: pq.StringArray{"*"},
+	}
+	require.NoError(t, repo.Create(ctx, rule),
+		"a rule with a non-empty Type MUST be persisted normally — the guard is empty-only")
+
+	got, err := repo.Get(ctx, types.RuleID("rule-typed-ok"))
+	require.NoError(t, err)
+	assert.Equal(t, types.RuleTypeEVMAddressList, got.Type)
+}

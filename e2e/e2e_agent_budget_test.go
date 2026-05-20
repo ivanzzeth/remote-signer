@@ -50,7 +50,7 @@ func applyAgentPresetForBudget(t *testing.T, variables map[string]string) []stri
 	// Resume approval guard in case previous tests triggered it
 	_ = adminClient.EVM.Guard.Resume(ctx)
 
-	applyResp, err := adminClient.Presets.ApplyWithVariables(ctx, "agent.preset.js.yaml", variables)
+	applyResp, err := adminClient.Presets.ApplyWithVariables(ctx, "agent.preset.js", variables)
 	require.NoError(t, err, "failed to apply agent preset")
 	require.NotNil(t, applyResp)
 	require.NotEmpty(t, applyResp.Results, "agent preset should produce at least one result")
