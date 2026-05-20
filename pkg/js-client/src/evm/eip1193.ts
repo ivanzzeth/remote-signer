@@ -464,11 +464,28 @@ export class EIP1193Provider {
 
       // Signing methods
       case "personal_sign": {
-        const [message, address] = params as [string, string];
+        const [messageParam, address] = params as [string, string];
         const signer = this._getActiveSigner();
 
+        // EIP-1474 / JSON-RPC: personal_sign's data argument is `DATA` —
+        // i.e. 0x-prefixed hex. viem/wagmi/ethers all hex-encode the
+        // UTF-8 message before calling. The remote-signer backend signs
+        // raw UTF-8 (because its rule engine pattern-matches against
+        // the cleartext message), so we MUST decode hex → UTF-8 here at
+        // the EIP-1193 boundary. Pre-multi-account refactor this lived
+        // in _personalSign(); the refactor lost it and SIWE flows broke.
+        const message =
+          typeof messageParam === "string" && messageParam.startsWith("0x") && messageParam.length % 2 === 0 && /^0x[0-9a-fA-F]*$/.test(messageParam)
+            ? new TextDecoder("utf-8", { fatal: false }).decode(
+                new Uint8Array(
+                  (messageParam.slice(2).match(/.{1,2}/g) ?? []).map((b) => parseInt(b, 16))
+                )
+              )
+            : messageParam;
+
         console.log("[EIP1193] personal_sign called:", {
-          message,
+          messageParam,
+          decodedMessage: message,
           address,
           signerAddress: signer.address,
           signerChainId: (signer as any).chainId || (signer as any)._chainID,
