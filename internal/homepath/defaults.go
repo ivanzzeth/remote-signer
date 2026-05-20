@@ -111,14 +111,17 @@ audit_monitor:
   retention_days: 90
   cleanup_interval: 24h
 
-# Rule templates and presets. Operators normally copy the repo's
-# rules/ directory under ~/.remote-signer/ on first install; the
-# daemon then auto-loads everything from these two directories on
-# every boot. Remove these blocks (or point templates_dir / presets.dir
-# elsewhere) if you maintain your own template library. v0.3+: a
-# Source-based remote loader (GitHub) is on the way; until then this
-# is the local-only path.
-templates_dir: rules/templates
-presets:
-  dir: rules/presets
+# Rule templates and presets.
+#
+# By default the daemon uses the rule catalogue baked into the binary —
+# no on-disk copy required, fresh installs auto-bootstrap the agent
+# preset and friends. Override either block to point at your own
+# directory; if the path exists at startup it wins over the embedded
+# catalogue, otherwise we silently fall back to the binary's copy.
+# v0.3+: a Source-based remote loader (GitHub) is on the way; until
+# then templates_dir / presets.dir is the local-only path.
+#
+# templates_dir: /path/to/your/rules/templates
+# presets:
+#   dir: /path/to/your/rules/presets
 `

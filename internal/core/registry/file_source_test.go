@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -714,4 +715,72 @@ func isPathErr(err error) bool {
 		return false
 	}
 	return strings.Contains(err.Error(), "denied") || strings.Contains(err.Error(), "permitted") || pe != nil
+}
+
+// TestFSTemplateSource_ReadsFromEmbedFS pins that NewFSTemplateSource
+// works against an arbitrary fs.FS (the daemon uses this with the
+// embed.FS baked into the binary so a fresh install has rules without
+// any on-disk catalogue copy). Uses testing/fstest.MapFS to build a
+// minimal in-memory subtree.
+func TestFSTemplateSource_ReadsFromEmbedFS(t *testing.T) {
+	fsys := fstest.MapFS{
+		"templates/evm/agent.yaml": &fstest.MapFile{
+			Data: []byte(`name: Agent
+type: evm_address_list
+mode: whitelist
+variables: []
+config:
+  addresses:
+    - "0x0000000000000000000000000000000000000001"
+`),
+		},
+		"templates/off-chain.yaml": &fstest.MapFile{
+			Data: []byte(`name: Off-chain marker
+type: sign_type_restriction
+mode: whitelist
+variables: []
+config:
+  allowed_sign_types: ["personal"]
+`),
+		},
+	}
+	src := NewFSTemplateSource(fsys, "templates")
+	items, err := src.List(context.Background())
+	require.NoError(t, err)
+	require.Len(t, items, 2)
+
+	// IDs are derived from the path relative to the source root and use
+	// forward-slashes. Pinning specific IDs here so the embedded
+	// catalogue's "evm/agent" identifier — which other code refers to
+	// by exact string ("evm/agent" preset → "evm/agent" template) —
+	// keeps producing the same ID whether read from disk or from an
+	// embedded fs.
+	ids := map[string]bool{}
+	for _, it := range items {
+		ids[it.ID] = true
+	}
+	assert.True(t, ids["evm/agent"], "expected id 'evm/agent' from templates/evm/agent.yaml; got %v", ids)
+	assert.True(t, ids["off-chain"], "expected id 'off-chain' from templates/off-chain.yaml; got %v", ids)
+}
+
+// TestFSPresetSource_ReadsFromEmbedFS is the preset counterpart of the
+// template embed-fs test. Same purpose: lock the on-disk and embed-fs
+// reads to produce identical IDs / wire shapes.
+func TestFSPresetSource_ReadsFromEmbedFS(t *testing.T) {
+	fsys := fstest.MapFS{
+		"presets/evm/agent.yaml": &fstest.MapFile{
+			Data: []byte(`name: Agent
+chain_type: evm
+template_ids:
+  - evm/agent
+variables:
+  trusted_contracts: "0x0000000000000000000000000000000000000001"
+`),
+		},
+	}
+	src := NewFSPresetSource(fsys, "presets")
+	items, err := src.List(context.Background())
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	assert.Equal(t, "evm/agent", items[0].ID)
 }
