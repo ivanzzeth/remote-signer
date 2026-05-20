@@ -2,6 +2,7 @@ package registry
 
 import (
 	"context"
+	"encoding/json"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -75,6 +76,66 @@ rules:
 	assert.NotEmpty(t, got.ContentHash)
 	assert.Len(t, got.ContentHash, 64, "SHA256 hex is 64 chars")
 	assert.NotEmpty(t, got.Variables, "JSON column populated")
+}
+
+// TestFileTemplateSource_BundleTemplateAutoDetect pins the registry's
+// behaviour for "bundle" templates (a YAML with a top-level `rules:`
+// array and no explicit `type:`). Without this pin, the registry was
+// storing such templates with type="" and only an object-form
+// config.rules, while the downstream template service's bundle
+// instantiator reads from config.rules_json (string). The mismatch
+// silently turned every preset-applied rule into an empty-type rule
+// that the engine skipped, routing every dApp request to manual
+// approval. Caught in the field on the agent.yaml template — see
+// commit 3d9feba.
+func TestFileTemplateSource_BundleTemplateAutoDetect(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "evm/agent.yaml", `
+name: Agent Signature
+description: Allow personal_sign with a length cap
+variables:
+  - name: max_message_length
+    type: string
+    required: false
+    default: "1024"
+rules:
+  - id: agent-sign
+    name: Agent Signature
+    type: evm_js
+    mode: whitelist
+    config:
+      sign_type_filter: personal_sign
+      script: |
+        function validate(input) { return ok(); }
+`)
+	src := NewFileTemplateSource(dir)
+	items, err := src.List(context.Background())
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+
+	got := items[0]
+	assert.Equal(t, types.RuleType("template_bundle"), got.Type,
+		"YAML with top-level `rules:` and no explicit `type:` MUST be auto-detected as template_bundle")
+	assert.Equal(t, types.RuleModeWhitelist, got.Mode,
+		"bundle mode inherits from the first sub-rule when the YAML has no top-level mode")
+
+	// The bundle instantiator reads config.rules_json (a JSON-encoded
+	// STRING). Object-form config.rules is also still there for
+	// completeness, but the string variant is the wire shape that
+	// triggers expansion.
+	var cfg map[string]any
+	require.NoError(t, json.Unmarshal(got.Config, &cfg))
+	rulesJSON, ok := cfg["rules_json"].(string)
+	require.True(t, ok, "bundle template MUST expose config.rules_json as a JSON string")
+	require.NotEmpty(t, rulesJSON)
+	// Decode and assert each sub-rule carries its type — the
+	// instantiator copies sub-rule.type onto the generated instance,
+	// and that type is what the rule engine looks up an evaluator for.
+	var subRules []map[string]any
+	require.NoError(t, json.Unmarshal([]byte(rulesJSON), &subRules))
+	require.Len(t, subRules, 1)
+	assert.Equal(t, "evm_js", subRules[0]["type"],
+		"sub-rule type MUST round-trip through rules_json — empty type makes the engine silently skip the rule")
 }
 
 func TestFileTemplateSource_OffChainTemplateHasEmptyChainType(t *testing.T) {

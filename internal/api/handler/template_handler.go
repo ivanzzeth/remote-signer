@@ -112,7 +112,13 @@ func (h *TemplateHandler) createTemplate(w http.ResponseWriter, r *http.Request)
 		h.writeError(w, "type is required", http.StatusBadRequest)
 		return
 	}
-	if !validate.IsValidRuleType(req.Type) {
+	// Allow both rule evaluator types AND the meta "template_bundle"
+	// type — the latter expands into multiple sub-rules at instance
+	// time. The file-based registry already accepts this; the API
+	// path was rejecting it, which left bundle templates only
+	// creatable from YAML files and silently broke API-driven CRUD
+	// for the bundle case.
+	if !validate.IsValidRuleType(req.Type) && req.Type != "template_bundle" {
 		h.writeError(w, "invalid rule type", http.StatusBadRequest)
 		return
 	}
