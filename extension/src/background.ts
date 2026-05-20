@@ -13,6 +13,7 @@ import {
   RemoteSigner,
   type ProviderStorage,
 } from "remote-signer-client";
+import { bytesToHex, decryptKeystore } from "./keystore";
 
 // Adapter that exposes chrome.storage.local through the SDK's
 // ProviderStorage interface. Lets the SDK own the load/persist lifecycle
@@ -118,6 +119,19 @@ interface PopupGetRequest {
   requestId: string;
 }
 
+// Decrypts an EnhancedKeyFile keystore JSON. Popup needs this when the
+// operator pastes the admin keystore instead of the agent's plaintext
+// PEM — popup itself can't bundle @noble/hashes (it's not esbuild'd),
+// so the background service worker, which IS bundled, exposes a
+// decrypt-on-demand entrypoint. Result is the 32-byte seed hex, which
+// the popup then persists in chrome.storage exactly like it does for
+// plaintext PEM imports — no encrypted state lives in extension storage.
+interface PopupDecryptKeystore {
+  type: "popup:decryptKeystore";
+  json: string;
+  password: string;
+}
+
 type PopupMessage =
   | PopupGetConfig
   | PopupSaveConfig
@@ -127,7 +141,8 @@ type PopupMessage =
   | PopupOpenManagement
   | PopupSwitchAccount
   | PopupGetActivity
-  | PopupGetRequest;
+  | PopupGetRequest
+  | PopupDecryptKeystore;
 
 type IncomingMessage = EIP1193Request | StateRequest | PopupMessage;
 
@@ -1654,6 +1669,30 @@ async function handlePopupGetRequest(msg: PopupGetRequest) {
 }
 
 /**
+ * Decrypts an EnhancedKeyFile keystore JSON for the popup. Returns the
+ * 32-byte Ed25519 seed as a lowercase hex string (no 0x prefix) — the
+ * format the popup already understands for plaintext key imports. On
+ * wrong password we surface the literal "wrong password" so the popup
+ * UI can render a clean error without leaking which MAC byte mismatched.
+ */
+async function handlePopupDecryptKeystore(msg: PopupDecryptKeystore) {
+  try {
+    const seed = await decryptKeystore(msg.json, msg.password);
+    return {
+      type: "popup:keystoreDecrypted",
+      ok: true,
+      privateKeyHex: bytesToHex(seed),
+    };
+  } catch (err: any) {
+    return {
+      type: "popup:keystoreDecrypted",
+      ok: false,
+      error: err?.message || String(err),
+    };
+  }
+}
+
+/**
  * Switch the active signer for dApp requests.
  *
  * The EIP1193Provider holds the source of truth for "active account" — we
@@ -1773,6 +1812,11 @@ chrome.runtime.onMessage.addListener(
 
     if (message.type === "popup:getRequest") {
       handlePopupGetRequest(message).then(sendResponse);
+      return true;
+    }
+
+    if (message.type === "popup:decryptKeystore") {
+      handlePopupDecryptKeystore(message).then(sendResponse);
       return true;
     }
 

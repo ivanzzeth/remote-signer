@@ -353,7 +353,13 @@ function OnboardForm({
                 <input
                   type="file"
                   className="hidden"
-                  accept=".priv,.pem,.txt,.json,application/x-pem-file,application/json"
+                  // Intentionally no `accept` filter. macOS pickers grey
+                  // out files whose system-assigned MIME doesn't match a
+                  // single hint — `.priv` has no built-in MIME on macOS,
+                  // and any listed `accept=` value left the file un-
+                  // selectable in practice. The Load-file affordance is
+                  // carried by the button label; bad input is caught
+                  // downstream by the parser with a clear error.
                   onChange={onFileChange}
                 />
                 Load file…

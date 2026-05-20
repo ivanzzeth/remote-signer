@@ -61,6 +61,8 @@
     inputUrl: $("inputUrl"),
     inputKeyId: $("inputKeyId"),
     inputPrivateKey: $("inputPrivateKey"),
+    keystorePasswordGroup: $("keystorePasswordGroup"),
+    inputKeystorePassword: $("inputKeystorePassword"),
     togglePwBtn: $("togglePwBtn"),
     loadKeyFileBtn: $("loadKeyFileBtn"),
     keyFileInput: $("keyFileInput"),
@@ -561,6 +563,7 @@
       els.inputUrl.value = config.remoteSignerUrl || "";
       els.inputKeyId.value = config.apiKeyId || "agent";
       els.inputPrivateKey.value = config.apiKeyPrivateKey || "";
+      updateKeystorePasswordVisibility();
       els.chainSelect.value = String(config.selectedChain || 1);
       // Auto-approve defaults to ON; treat undefined as true so users
       // upgrading from a pre-toggle build don't suddenly see prompts.
@@ -734,6 +737,74 @@
     els.inputPrivateKey.value = (text || "").trim();
     els.inputPrivateKey.classList.remove("masked");
     els.togglePwBtn.textContent = "Hide";
+    updateKeystorePasswordVisibility();
+  }
+
+  // True when `text` looks like an EnhancedKeyFile keystore JSON (admin
+  // keystore the daemon ships). Shape-based — the actual decrypt runs in
+  // the background service worker and surfaces a real error for
+  // malformed input.
+  function detectKeystoreJSON(text) {
+    const trimmed = (text || "").trim();
+    if (!trimmed.startsWith("{")) return false;
+    try {
+      const parsed = JSON.parse(trimmed);
+      return (
+        typeof parsed === "object" &&
+        parsed !== null &&
+        "crypto" in parsed &&
+        "version" in parsed
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  // Toggles the keystore-password group based on what's currently in the
+  // private-key textarea. Called on every input change and after file
+  // loads, so the form reacts to paste/drop/file-load uniformly.
+  function updateKeystorePasswordVisibility() {
+    if (!els.keystorePasswordGroup) return;
+    const isKeystore = detectKeystoreJSON(els.inputPrivateKey.value);
+    els.keystorePasswordGroup.classList.toggle("hidden", !isKeystore);
+    if (!isKeystore && els.inputKeystorePassword) {
+      // Avoid keeping a typed password around when the operator switches
+      // back to a plaintext PEM in the same session.
+      els.inputKeystorePassword.value = "";
+    }
+  }
+
+  // Resolves whatever's in the private-key textarea to a plaintext
+  // hex/PEM value the background can persist. For plaintext input
+  // (agent.key.priv PEM, or a hex seed) this is identity. For an
+  // encrypted keystore (admin.keystore.json) we ask the background
+  // service worker to decrypt with the keystore-password field and
+  // return the resulting hex seed. Throws on wrong password / malformed
+  // keystore so the caller can render an error banner.
+  async function resolvePrivateKeyInput() {
+    const text = els.inputPrivateKey.value.trim();
+    if (!detectKeystoreJSON(text)) {
+      return text;
+    }
+    const password = els.inputKeystorePassword
+      ? els.inputKeystorePassword.value
+      : "";
+    if (!password) {
+      throw new Error("Keystore password is required.");
+    }
+    const resp = await send({
+      type: "popup:decryptKeystore",
+      json: text,
+      password,
+    });
+    if (!resp || resp.ok !== true) {
+      const msg = (resp && resp.error) || "decrypt failed";
+      if (msg === "wrong password") {
+        throw new Error("Wrong keystore password.");
+      }
+      throw new Error("Keystore decrypt failed: " + msg);
+    }
+    return resp.privateKeyHex;
   }
 
   function updateKeyFileButton(filename) {
@@ -767,12 +838,14 @@
   async function pickFileWithFSA(startInHandle) {
     const opts = {
       multiple: false,
-      types: [
-        {
-          description: "Remote-Signer API key",
-          accept: { "text/plain": [".priv", ".pem", ".key", ".txt"] },
-        },
-      ],
+      // Intentionally no `types` filter. macOS Finder integration in
+      // Chrome greys out files whose OS-detected MIME doesn't match a
+      // single hint — `.priv` has no system MIME, and any listed
+      // `accept` block left the file un-selectable in practice. The
+      // button label "Load file…" carries the affordance; operators
+      // can pick whatever they like and the parser surfaces a clear
+      // error if the content isn't a valid PEM / hex / keystore.
+      excludeAcceptAllOption: false,
     };
     if (startInHandle) opts.startIn = startInHandle;
     const [handle] = await window.showOpenFilePicker(opts);
@@ -903,11 +976,25 @@
       els.connectionSuccess.textContent = "";
     }
 
+    // Resolve to plaintext seed first — if the operator pasted an
+    // encrypted keystore the background decrypts here and we save the
+    // resulting hex. The keystore JSON itself is never persisted.
+    let resolvedPrivateKey;
+    try {
+      resolvedPrivateKey = await resolvePrivateKeyInput();
+    } catch (err) {
+      els.connectionError.textContent = err && err.message ? err.message : String(err);
+      els.connectionError.classList.remove("hidden");
+      els.testConnectionBtn.disabled = false;
+      els.testConnectionBtn.textContent = "Test Connection";
+      return;
+    }
+
     // Save temp config for the test
     const tempConfig = {
       remoteSignerUrl: els.inputUrl.value.trim(),
       apiKeyId: els.inputKeyId.value.trim(),
-      apiKeyPrivateKey: els.inputPrivateKey.value.trim(),
+      apiKeyPrivateKey: resolvedPrivateKey,
       selectedChain: parseInt(els.chainSelect.value, 10) || 1,
       autoApproveConnections: els.inputAutoApprove ? els.inputAutoApprove.checked : true,
     };
@@ -951,10 +1038,21 @@
     els.connectionError.classList.add("hidden");
     els.connectionError.textContent = "";
 
+    let resolvedPrivateKey;
+    try {
+      resolvedPrivateKey = await resolvePrivateKeyInput();
+    } catch (err) {
+      els.connectionError.textContent = err && err.message ? err.message : String(err);
+      els.connectionError.classList.remove("hidden");
+      els.saveConfigBtn.disabled = false;
+      els.saveConfigBtn.textContent = "Save";
+      return;
+    }
+
     config = {
       remoteSignerUrl: els.inputUrl.value.trim(),
       apiKeyId: els.inputKeyId.value.trim(),
-      apiKeyPrivateKey: els.inputPrivateKey.value.trim(),
+      apiKeyPrivateKey: resolvedPrivateKey,
       selectedChain: parseInt(els.chainSelect.value, 10) || 1,
       autoApproveConnections: els.inputAutoApprove ? els.inputAutoApprove.checked : true,
     };
@@ -1011,6 +1109,12 @@
       const masked = els.inputPrivateKey.classList.toggle("masked");
       els.togglePwBtn.textContent = masked ? "Show" : "Hide";
     });
+
+    // Keystore-password field surfaces / hides as the operator types or
+    // pastes into the private-key textarea. Triggers on every input
+    // event so paste, drop, file-load, and manual typing all keep the
+    // form in sync.
+    els.inputPrivateKey.addEventListener("input", updateKeystorePasswordVisibility);
 
     // "Load from file…" — three input paths:
     //

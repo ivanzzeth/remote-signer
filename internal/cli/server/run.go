@@ -109,26 +109,21 @@ func Run(args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolve admin keystore dir: %w", err)
 	}
-	adminKeystorePtrPath, err := homepath.AdminKeystorePtrPath()
+	adminKeystorePath, err := homepath.AdminKeystorePath()
 	if err != nil {
-		return fmt.Errorf("resolve admin keystore pointer path: %w", err)
+		return fmt.Errorf("resolve admin keystore path: %w", err)
 	}
-	adminPrivPath, adminPubPath, err := homepath.AdminKeyPaths()
+	_, adminPubPath, err := homepath.AdminKeyPaths()
 	if err != nil {
 		return fmt.Errorf("resolve admin key paths: %w", err)
 	}
-	if err := bootstrapAdminKeyIfNeeded(context.Background(), repos.apiKeyRepo, adminKeystoreDir, adminKeystorePtrPath, adminPubPath, cfg.Security.RateLimitDefault, log); err != nil {
+	if err := bootstrapAdminKeyIfNeeded(context.Background(), repos.apiKeyRepo, adminKeystoreDir, adminKeystorePath, adminPubPath, cfg.Security.RateLimitDefault, log); err != nil {
 		return fmt.Errorf("bootstrap admin api key: %w", err)
 	}
-
-	// Unlock the admin keystore if one exists (new bootstrap flow). This
-	// prompts for the keystore password and writes a PEM file at the
-	// traditional privPath so existing CLI tooling continues to work.
-	adminPEMCleanup, err := unlockAdminKeystoreIfNeeded(adminKeystorePtrPath, adminPrivPath, log)
-	if err != nil {
-		return fmt.Errorf("unlock admin keystore: %w", err)
-	}
-	defer adminPEMCleanup()
+	// The daemon never needs the admin private key at runtime — it
+	// verifies API request signatures using the public-key column on
+	// api_keys. CLI / web UI / popup all read the encrypted keystore
+	// directly. No plaintext PEM is ever exported.
 
 	// Auto-bootstrap an agent Ed25519 keypair independently from the
 	// admin key so agents can authenticate without an operator pre-flight.

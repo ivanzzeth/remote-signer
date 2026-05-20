@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/ivanzzeth/ethsig/keystore"
 	"github.com/ivanzzeth/remote-signer/internal/homepath"
@@ -187,26 +186,20 @@ type discoveredCredential struct {
 // walking the daemon's conventional layout under
 // $HOME/.remote-signer/apikeys/:
 //
-//   - For "admin": read admin.key.keystore (the bootstrap ptr file) and use
-//     the path inside it. This is the post-cleanup default — the daemon no
-//     longer exports admin.key.priv on startup.
-//   - Fallback for any id: look for <id>.key.priv (legacy PEM). Used by
-//     "agent" (which is still PEM-only) and by operators who haven't yet
-//     migrated their admin key to keystore format.
+//   - For "admin": stat the canonical admin.keystore.json. Bootstrap
+//     writes it there directly; no pointer files, no hash-named names.
+//   - Fallback for any id: look for <id>.key.priv (plaintext PEM). Used
+//     by "agent" (the service account that has no password protection)
+//     and by any operator who minted their own key as plaintext.
 //
 // Returns zero discoveredCredential + nil err when nothing matched — the
 // caller should treat that as "user must pass an explicit flag".
 func discoverDefaultCredential(apiKeyID string) (discoveredCredential, error) {
 	if apiKeyID == "admin" {
-		ptrPath, err := homepath.AdminKeystorePtrPath()
+		keystorePath, err := homepath.AdminKeystorePath()
 		if err == nil {
-			if data, readErr := os.ReadFile(ptrPath); readErr == nil {
-				keystorePath := strings.TrimSpace(string(data))
-				if keystorePath != "" {
-					if _, statErr := os.Stat(keystorePath); statErr == nil {
-						return discoveredCredential{keystorePath: keystorePath}, nil
-					}
-				}
+			if _, statErr := os.Stat(keystorePath); statErr == nil {
+				return discoveredCredential{keystorePath: keystorePath}, nil
 			}
 		}
 	}

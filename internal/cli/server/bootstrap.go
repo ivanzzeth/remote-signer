@@ -20,19 +20,20 @@ import (
 )
 
 // bootstrapAdminKeyIfNeeded checks whether any API keys exist and, if not,
-// generates an Ed25519 admin keypair via CreateEnhancedKey, stores the
-// resulting keystore path in a pointer file at ptrPath, writes the public
+// generates an Ed25519 admin keypair via CreateEnhancedKey, renames the
+// resulting keystore to the stable path keystorePath, writes the public
 // key to pubPath, and inserts a corresponding api_keys row with
 // source="bootstrap".
 //
 // During bootstrap the operator is prompted on stderr for a new keystore
-// password. The raw Ed25519 private key is never written to disk in
-// plaintext — only the encrypted keystore file persists. On subsequent
-// daemon starts the operator provides this password to unlock the keystore
-// (see unlockAdminKeystoreIfNeeded).
+// password (or it's read from REMOTE_SIGNER_KEYSTORE_PASSWORD). The raw
+// Ed25519 private key is never written to disk in plaintext — only the
+// encrypted keystore file persists. The daemon itself does NOT need the
+// keystore password to start later — admin signature verification uses
+// the public-key column on api_keys.
 //
 // Subsequent launches with a non-empty api_keys table are no-ops.
-func bootstrapAdminKeyIfNeeded(ctx context.Context, repo storage.APIKeyRepository, keystoreDir, ptrPath, pubPath string, defaultRateLimit int, log *slog.Logger) error {
+func bootstrapAdminKeyIfNeeded(ctx context.Context, repo storage.APIKeyRepository, keystoreDir, keystorePath, pubPath string, defaultRateLimit int, log *slog.Logger) error {
 	count, err := repo.Count(ctx, storage.APIKeyFilter{})
 	if err != nil {
 		return fmt.Errorf("count api keys: %w", err)
@@ -41,12 +42,12 @@ func bootstrapAdminKeyIfNeeded(ctx context.Context, repo storage.APIKeyRepositor
 		return nil
 	}
 
-	// If the pointer file already exists (partial bootstrap that created
-	// the keystore but not the DB), we're in a half-done state. The DB
-	// being empty while the keystore exists is anomalous; warn and stop.
-	if _, err := os.Stat(ptrPath); err == nil {
-		log.Warn("admin keystore pointer exists but DB is empty — possible partial bootstrap", "ptr", ptrPath)
-		return fmt.Errorf("admin keystore pointer file %s exists but the api_keys table is empty; delete the pointer file or fix the database", ptrPath)
+	// If the keystore already exists (partial bootstrap that created the
+	// file but not the DB row), we're in a half-done state. The DB being
+	// empty while the keystore exists is anomalous; bail.
+	if _, err := os.Stat(keystorePath); err == nil {
+		log.Warn("admin keystore exists but DB is empty — possible partial bootstrap", "keystore", keystorePath)
+		return fmt.Errorf("admin keystore %s exists but the api_keys table is empty; delete the keystore or fix the database", keystorePath)
 	}
 
 	// The apikeys/ subdir holds every API-credential file the operator may
@@ -73,9 +74,12 @@ func bootstrapAdminKeyIfNeeded(ctx context.Context, repo storage.APIKeyRepositor
 	defer keystore.SecureZeroize(password)
 
 	// CreateEnhancedKey generates an Ed25519 keypair internally, encrypts
-	// it with the supplied password, and writes the keystore JSON file.
+	// it with the supplied password, and writes the keystore JSON file
+	// under a hash-derived filename. We immediately rename it to the
+	// canonical, stable path so operators (and the web UI / popup) know
+	// exactly which file to point at — no indirection, no pointer files.
 	// The returned identifier is the hex-encoded public key.
-	identifier, keystorePath, err := keystore.CreateEnhancedKey(
+	identifier, generatedPath, err := keystore.CreateEnhancedKey(
 		keystoreDir,
 		keystore.KeyTypeEd25519,
 		password,
@@ -84,10 +88,12 @@ func bootstrapAdminKeyIfNeeded(ctx context.Context, repo storage.APIKeyRepositor
 	if err != nil {
 		return fmt.Errorf("create encrypted admin keystore: %w", err)
 	}
-
-	// Write a pointer file so the daemon can find the keystore on restart.
-	if err := os.WriteFile(ptrPath, []byte(keystorePath+"\n"), 0600); err != nil {
-		return fmt.Errorf("write keystore pointer %s: %w", ptrPath, err)
+	if err := os.Rename(generatedPath, keystorePath); err != nil {
+		// If rename fails the keystore exists at the hash-named path but
+		// the daemon won't find it on next start — clean up to avoid
+		// the partial-bootstrap trap above.
+		_ = os.Remove(generatedPath)
+		return fmt.Errorf("rename admin keystore to %s: %w", keystorePath, err)
 	}
 
 	// The identifier from CreateEnhancedKey is the hex-encoded public key.
@@ -128,7 +134,7 @@ func bootstrapAdminKeyIfNeeded(ctx context.Context, repo storage.APIKeyRepositor
 		UpdatedAt:    now,
 	}
 	if err := repo.Create(ctx, apiKey); err != nil {
-		_ = os.Remove(ptrPath)
+		_ = os.Remove(keystorePath)
 		_ = os.Remove(pubPath)
 		return fmt.Errorf("create admin api_key row: %w", err)
 	}
@@ -140,10 +146,10 @@ func bootstrapAdminKeyIfNeeded(ctx context.Context, repo storage.APIKeyRepositor
 	fmt.Fprintln(os.Stderr, "  Public key (hex):   "+pubHex)
 	fmt.Fprintln(os.Stderr, "  Role:               admin")
 	fmt.Fprintln(os.Stderr)
-	fmt.Fprintln(os.Stderr, "  The keystore is the authoritative copy of the private key.")
-	fmt.Fprintln(os.Stderr, "  CLI tools open it directly: pass `--api-key-id admin` with no")
-	fmt.Fprintln(os.Stderr, "  `--api-key-file` / `--api-key-keystore` and the keystore is")
-	fmt.Fprintln(os.Stderr, "  discovered automatically. Password from REMOTE_SIGNER_KEYSTORE_PASSWORD")
+	fmt.Fprintln(os.Stderr, "  The keystore at the path above is the authoritative copy of")
+	fmt.Fprintln(os.Stderr, "  the private key. CLI tools open it directly when you pass")
+	fmt.Fprintln(os.Stderr, "  `--api-key-id admin` with no `--api-key-file` /")
+	fmt.Fprintln(os.Stderr, "  `--api-key-keystore`. Password from REMOTE_SIGNER_KEYSTORE_PASSWORD")
 	fmt.Fprintln(os.Stderr, "  or an interactive prompt. The daemon itself does NOT need the")
 	fmt.Fprintln(os.Stderr, "  password on subsequent starts.")
 	fmt.Fprintln(os.Stderr)

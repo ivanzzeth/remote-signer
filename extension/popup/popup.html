@@ -148,12 +148,28 @@
 
       <div class="form-group">
         <label for="inputPrivateKey">API Key Private Key</label>
-        <textarea id="inputPrivateKey" placeholder="Ed25519 private key — hex or PEM (-----BEGIN PRIVATE KEY-----)" rows="3"></textarea>
+        <textarea id="inputPrivateKey" placeholder="Ed25519 private key (hex / PEM) or encrypted keystore JSON" rows="3"></textarea>
         <div class="form-group-actions">
-          <button id="loadKeyFileBtn" class="btn-text" type="button" title="Load key from a local file (e.g. ~/.remote-signer/apikeys/agent.key.priv)">Load from file…</button>
+          <button id="loadKeyFileBtn" class="btn-text" type="button" title="Load from agent.key.priv (plaintext PEM) or admin.keystore.json (encrypted)">Load from file…</button>
           <button id="togglePwBtn" class="btn-text" type="button">Show</button>
         </div>
-        <input id="keyFileInput" type="file" accept=".priv,.pem,.key,.txt,application/x-pem-file,text/plain" hidden />
+        <!-- No `accept=` filter: macOS Finder greys out files whose
+             system-assigned MIME doesn't match a single hint (e.g. `.priv`
+             has no built-in MIME), so a filter that listed `.priv`
+             explicitly still left the file unselectable. The button
+             label "Load from file…" carries the affordance instead. -->
+        <input id="keyFileInput" type="file" hidden />
+      </div>
+
+      <!-- Keystore password — hidden by default. Surfaced only when the
+           private-key textarea contains a recognisable EnhancedKeyFile
+           JSON (admin keystore). For agent's plaintext PEM the field
+           stays hidden so the operator isn't asked a meaningless
+           question. -->
+      <div class="form-group hidden" id="keystorePasswordGroup">
+        <label for="inputKeystorePassword">Keystore Password</label>
+        <input id="inputKeystorePassword" type="password" autocomplete="current-password" placeholder="Password the keystore was created with" />
+        <div class="hint" id="keystorePasswordHint">Encrypted keystore detected — enter the password the daemon was bootstrapped with (or whatever the operator who minted it used). The extension decrypts in the background service worker and stores only the resulting seed.</div>
       </div>
 
       <div class="form-group form-group--toggle">
