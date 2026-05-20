@@ -2,9 +2,19 @@ package evm
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"encoding/hex"
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ivanzzeth/ethsig"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
 
 func TestEVMAdapter_ParsePayload_PersonalSign(t *testing.T) {
@@ -431,4 +441,182 @@ func TestEVMAdapter_ValidateBasicRequest(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestDecodePersonalSignMessage_UseCases locks the three documented use
+// cases for personal_sign / EIP-191 message handling. The doc-block on
+// decodePersonalSignMessage spells these out in prose; this test pins
+// them as code so any future refactor that breaks one trips here first.
+func TestDecodePersonalSignMessage_UseCases(t *testing.T) {
+	t.Run("USE CASE A — SIWE text hex decodes to original UTF-8", func(t *testing.T) {
+		siwe := "polymarket.com wants you to sign in with your Ethereum account:\n0x21f409aA1a060B22B3ce647d2bDb1C0a9457A0B8\n\nWelcome.\n\nURI: https://polymarket.com\nVersion: 1\nChain ID: 137\nNonce: abc123\nIssued At: 2026-05-20T08:00:00.000Z"
+		hexInput := "0x" + hex.EncodeToString([]byte(siwe))
+
+		got := decodePersonalSignMessage(hexInput)
+
+		assert.Equal(t, []byte(siwe), got,
+			"hex of UTF-8 SIWE MUST round-trip to the original text bytes; rule_engine pattern-matches against these bytes")
+		assert.Equal(t, siwe, string(got),
+			"decoded bytes MUST be a valid UTF-8 string identical to what the dApp constructed")
+	})
+
+	t.Run("USE CASE B — 32-byte binary challenge round-trips byte-for-byte", func(t *testing.T) {
+		// Realistic shape: 32 random bytes (a keccak-ish hash or a
+		// CSPRNG nonce). Contains bytes that are NOT valid UTF-8 — the
+		// previous SDK-side decode mangled this case (the original
+		// OpenSea reverse-lookup bug).
+		challenge := []byte{
+			0x96, 0x2e, 0xd0, 0xbb, 0xff, 0x10, 0xd9, 0xb5,
+			0x77, 0x77, 0xfe, 0x24, 0x2f, 0xe1, 0x70, 0xc4,
+			0xc8, 0xfd, 0xfb, 0x57, 0xc3, 0x8d, 0x3a, 0xcd,
+			0x90, 0x71, 0x79, 0x23, 0x37, 0x56, 0xb6, 0x35,
+		}
+		hexInput := "0x" + hex.EncodeToString(challenge)
+
+		got := decodePersonalSignMessage(hexInput)
+
+		assert.Equal(t, challenge, got,
+			"binary hex MUST round-trip to the SAME 32 bytes the dApp will use in verifyMessage; ANY mangling here re-creates the OpenSea invalid-signature bug")
+		// Sanity: this should NOT be valid UTF-8 — that's the point of
+		// the test. If go decides this IS valid UTF-8 in some future
+		// version, the assertion still passes (we test the bytes, not
+		// UTF-8 status) but the test premise weakens.
+	})
+
+	t.Run("USE CASE C — non-hex string passes through as UTF-8 bytes", func(t *testing.T) {
+		// Legacy: CLI tools / e2e tests POST plain text directly. No
+		// 0x prefix → treat the whole thing as the message bytes.
+		got := decodePersonalSignMessage("hello world")
+		assert.Equal(t, []byte("hello world"), got)
+	})
+
+	t.Run("edge — uppercase 0X prefix is honored", func(t *testing.T) {
+		got := decodePersonalSignMessage("0X48656c6c6f")
+		assert.Equal(t, []byte("Hello"), got,
+			"the standard 0x prefix is case-insensitive; MetaMask accepts both")
+	})
+
+	t.Run("edge — empty 0x is treated as empty hex (zero-byte message)", func(t *testing.T) {
+		got := decodePersonalSignMessage("0x")
+		assert.Equal(t, []byte{}, got,
+			"\"0x\" is valid empty hex; produces a 0-length byte slice (not nil)")
+	})
+
+	t.Run("edge — odd-length 0x falls back to raw bytes", func(t *testing.T) {
+		// Odd length can't be valid hex; safer to keep the original
+		// string as bytes than to reject the request entirely.
+		got := decodePersonalSignMessage("0x1")
+		assert.Equal(t, []byte("0x1"), got)
+	})
+
+	t.Run("edge — non-hex chars after 0x fall back to raw bytes", func(t *testing.T) {
+		got := decodePersonalSignMessage("0xZZ")
+		assert.Equal(t, []byte("0xZZ"), got)
+	})
+
+	t.Run("edge — empty string passes through as empty bytes", func(t *testing.T) {
+		got := decodePersonalSignMessage("")
+		assert.Equal(t, []byte(""), got)
+	})
+}
+
+// TestAdapter_PersonalSign_RecoversToSignerAddress is the integration
+// proof: signing the hex form of a message produces a signature that
+// recovers to the signer's address when verified against the ORIGINAL
+// bytes the dApp would use. Exercises USE CASE A and B end-to-end
+// through ethsig (no DB / no network). If the adapter ever stops
+// hex-decoding before EIP-191 prefixing, this test fails — closing the
+// loop on the OpenSea / Polymarket invalid-signature bug class.
+func TestAdapter_PersonalSign_RecoversToSignerAddress(t *testing.T) {
+	// Stable test signer (deterministic key, not a real wallet).
+	keyHex := "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+	pk, err := crypto.HexToECDSA(keyHex)
+	require.NoError(t, err)
+	addr := crypto.PubkeyToAddress(*pk.Public().(*ecdsa.PublicKey))
+
+	innerSigner, err := ethsig.NewEthPrivateKeySignerFromPrivateKeyHex(keyHex)
+	require.NoError(t, err)
+	signer := ethsig.NewSigner(innerSigner)
+
+	reg := NewEmptySignerRegistry()
+	require.NoError(t, reg.RegisterSigner(addr.Hex(), signer, types.SignerInfo{
+		Address: addr.Hex(),
+		Type:    "private_key",
+		Enabled: true,
+	}))
+	adapter, err := NewEVMAdapter(reg)
+	require.NoError(t, err)
+
+	type tc struct {
+		name        string
+		messageWire string // what arrives in payload.message
+		verifyBytes []byte // what the dApp would pass to ethers.verifyMessage
+	}
+	siwe := "opensea.io wants you to sign in.\nNonce: 42"
+	binChallenge := []byte{
+		0x00, 0x11, 0x22, 0x33, 0xaa, 0xbb, 0xcc, 0xdd,
+		0xff, 0xfe, 0xfd, 0xfc, 0x80, 0x81, 0x82, 0x83,
+		0xff, 0x00, 0x55, 0xaa, 0x12, 0x34, 0x56, 0x78,
+		0x9a, 0xbc, 0xde, 0xf0, 0xde, 0xad, 0xbe, 0xef,
+	}
+	cases := []tc{
+		{
+			name:        "SIWE text hex",
+			messageWire: "0x" + hex.EncodeToString([]byte(siwe)),
+			verifyBytes: []byte(siwe),
+		},
+		{
+			name:        "32-byte binary challenge",
+			messageWire: "0x" + hex.EncodeToString(binChallenge),
+			verifyBytes: binChallenge,
+		},
+		{
+			name:        "non-hex legacy text",
+			messageWire: "hello world",
+			verifyBytes: []byte("hello world"),
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			payload, _ := json.Marshal(EVMSignPayload{Message: c.messageWire})
+			res, err := adapter.Sign(context.Background(), addr.Hex(), SignTypePersonal, "1", payload)
+			require.NoError(t, err)
+			require.NotNil(t, res)
+			require.NotEmpty(t, res.Signature, "adapter MUST produce a signature for valid input")
+
+			// Reconstruct the EIP-191 hash from the bytes the dApp
+			// would verify against and recover the public key.
+			prefix := []byte("\x19Ethereum Signed Message:\n" + itoa(len(c.verifyBytes)))
+			prefixed := append(prefix, c.verifyBytes...)
+			ethHash := crypto.Keccak256(prefixed)
+
+			sig := make([]byte, len(res.Signature))
+			copy(sig, res.Signature)
+			// Normalise V: go-ethereum's crypto.Ecrecover expects V in
+			// {0,1}, ethsig returns {27,28} per EIP-155 / personal_sign.
+			if sig[64] >= 27 {
+				sig[64] -= 27
+			}
+			recovered, err := crypto.SigToPub(ethHash, sig)
+			require.NoError(t, err, "signature MUST be ECDSA-recoverable; mangling would surface here as a recover error")
+			recoveredAddr := crypto.PubkeyToAddress(*recovered)
+			assert.Equal(t, common.HexToAddress(addr.Hex()), recoveredAddr,
+				"recovered address MUST match the signer — mismatch here is the exact OpenSea/Polymarket invalid-signature bug")
+		})
+	}
+}
+
+// itoa keeps the EIP-191 reconstruction self-contained (no strconv
+// dependency for one usage).
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var b []byte
+	for n > 0 {
+		b = append([]byte{byte('0' + n%10)}, b...)
+		n /= 10
+	}
+	return string(b)
 }

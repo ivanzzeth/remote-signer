@@ -235,19 +235,23 @@ func (a *EVMAdapter) Sign(ctx context.Context, signerAddress string, signType st
 		}
 
 	case SignTypeEIP191:
-		signature, err = signer.SignEIP191Message(p.Message)
+		// Hex-aware normalisation lives in decodePersonalSignMessage —
+		// the EIP-1193 wire shape uses hex for BOTH personal_sign and
+		// EIP-191 callers, and we need binary payloads to survive
+		// transport. Go strings are byte-transparent so the
+		// []byte(string) round-trip inside ethsig.PersonalSign /
+		// SignEIP191Message preserves arbitrary bytes.
+		signature, err = signer.SignEIP191Message(string(decodePersonalSignMessage(p.Message)))
 		if err != nil {
 			return nil, fmt.Errorf("failed to sign EIP-191 message: %w", err)
 		}
 
 	case SignTypePersonal:
-		// Backend expects the cleartext message string. Hex-encoded inputs
-		// from EIP-1193 callers (viem/wagmi shape) MUST be decoded by the
-		// caller before reaching here — the rule engine pattern-matches
-		// against the cleartext, so passing hex would defeat content
-		// rules. Our SDK's EIP-1193 layer does the decode (see
-		// pkg/js-client/src/evm/eip1193.ts case "personal_sign").
-		signature, err = signer.PersonalSign(p.Message)
+		// See decodePersonalSignMessage's doc-block for the three use
+		// cases this needs to handle (SIWE text, 32-byte binary
+		// challenge, non-hex legacy text) and why the decode MUST live
+		// at the chain boundary rather than in the SDK.
+		signature, err = signer.PersonalSign(string(decodePersonalSignMessage(p.Message)))
 		if err != nil {
 			return nil, fmt.Errorf("failed to sign personal message: %w", err)
 		}
@@ -332,9 +336,13 @@ func (a *EVMAdapter) ParsePayload(ctx context.Context, signType string, payload 
 		}
 
 	case SignTypePersonal, SignTypeEIP191:
-		// Extract message for personal sign / EIP-191
+		// Surface the SAME bytes that get EIP-191-signed (hex-decoded
+		// when applicable). The popup activity drawer and rule_input
+		// both read from here, and we want everything downstream of
+		// adapter.Sign to see the canonical message.
 		if p.Message != "" {
-			result.Message = &p.Message
+			decoded := string(decodePersonalSignMessage(p.Message))
+			result.Message = &decoded
 		}
 	}
 
@@ -360,6 +368,105 @@ func decodeHexData(hexStr string) ([]byte, error) {
 		return nil, nil
 	}
 	return hex.DecodeString(strings.TrimPrefix(hexStr, "0x"))
+}
+
+// decodePersonalSignMessage normalises the `message` field of a personal_sign
+// or EIP-191 request into the raw bytes that EIP-191 SHOULD prefix. It is the
+// SINGLE authoritative decode point for these sign types — SDKs / Extensions /
+// any HTTP caller should pass the value through unchanged.
+//
+// Why we need this (and why the SDK can't do it alone):
+//
+//	EIP-1474 / EIP-1193 specifies that personal_sign's data argument is
+//	`DATA` — a 0x-prefixed hex string. Every mainstream dApp library
+//	(viem, wagmi, ethers, web3.js) and every reference wallet
+//	(MetaMask, Coinbase Wallet, Rabby) follows this convention: hex
+//	encode the bytes you want signed, pass the hex to the wallet, the
+//	wallet decodes it, then EIP-191-prefixes and signs the underlying
+//	bytes. dApps verify by reconstructing those same bytes server-side
+//	and calling `verifyMessage(originalBytes, sig)`.
+//
+//	If we DON'T decode here, the wallet ends up signing the literal ASCII
+//	hex string "0xabcd…" instead of the bytes the dApp expects — the
+//	signature is valid as ECDSA, but `verifyMessage` reconstructs against
+//	the original bytes and the recovered address won't match.
+//
+//	A previous iteration pushed the decode into the SDK
+//	(pkg/js-client/src/evm/eip1193.ts). That broke USE CASE B below
+//	because JSON can't faithfully carry non-UTF-8 bytes through a
+//	`string` field — the UTF-8 decode mangled binary payloads into
+//	replacement-character soup. The decode HAS to happen after the
+//	hex string lands on the wire, before EIP-191 prefixing.
+//
+// Use cases this MUST get right:
+//
+//	USE CASE A — SIWE text login (OpenSea, Polymarket, Uniswap, ...).
+//	  dApp computes a UTF-8 SIWE string ("polymarket.com wants you to
+//	  sign in with your Ethereum account:\n0x…"), hex-encodes it,
+//	  calls personal_sign(hex, address). We decode hex → original UTF-8
+//	  bytes → EIP-191 prefix those bytes. dApp verifies with the same
+//	  bytes server-side. Rule engine sees valid UTF-8 and message_pattern
+//	  / message_length checks work normally against the cleartext.
+//
+//	USE CASE B — 32-byte binary challenge (OpenSea reverse-lookup,
+//	  ENS reverse, some custom auth flows).
+//	  dApp generates 32 random bytes (or a keccak hash, or any non-text
+//	  blob), hex-encodes it, calls personal_sign(hex, address). We
+//	  decode hex → 32 raw bytes → EIP-191 prefix those bytes. dApp
+//	  verifies against the same 32 raw bytes. Rule engine sees a
+//	  non-UTF-8 byte sequence; text rules (message_pattern /
+//	  message_length-in-chars) fail-open / skip this one — pattern-
+//	  matching binary hashes is meaningless, the right rule for these
+//	  flows is sign_type_allowlist or evm_js inspecting input.sign_type
+//	  + input.personal_sign.message_bytes_len.
+//
+//	USE CASE C — non-hex string (CLI tools, e2e tests posting cleartext
+//	  directly, or any caller that doesn't follow EIP-1474).
+//	  Input doesn't match the 0x-hex shape; we pass it through as raw
+//	  UTF-8 bytes. This preserves the historical "POST a plain string,
+//	  backend signs it" ergonomic and keeps existing tests working.
+//
+// Detection rule (same as MetaMask's):
+//
+//	hex-shape ⇔ starts with "0x" (case-insensitive) AND total length is
+//	even AND every char after 0x is in [0-9a-fA-F]. An "0x" alone is
+//	also valid hex (zero-length message).
+//
+// On detection failure we fall back to UTF-8 bytes of the raw string —
+// strictly safer than rejecting the request, since legacy non-hex callers
+// continue to work.
+func decodePersonalSignMessage(msg string) []byte {
+	if !isHexShape(msg) {
+		return []byte(msg)
+	}
+	body := msg[2:]
+	bytes, err := hex.DecodeString(body)
+	if err != nil {
+		// Shouldn't happen — isHexShape already checked the alphabet —
+		// but if hex.DecodeString ever disagrees, fall back to raw.
+		return []byte(msg)
+	}
+	return bytes
+}
+
+// isHexShape reports whether s looks like a 0x-prefixed even-length hex
+// string. Returns true for "0x" (empty hex), "0xab", "0xABCD", etc.;
+// false for "hello", "0xZ" (bad alphabet), "0x1" (odd length), "" (no
+// prefix).
+func isHexShape(s string) bool {
+	if len(s) < 2 || len(s)%2 != 0 {
+		return false
+	}
+	if s[0] != '0' || (s[1] != 'x' && s[1] != 'X') {
+		return false
+	}
+	for i := 2; i < len(s); i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 func hexToHash(hexStr string) (common.Hash, error) {

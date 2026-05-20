@@ -89,7 +89,17 @@ func BuildRuleInput(req *types.SignRequest, parsed *types.ParsedPayload) (*RuleI
 		if p.Message == "" {
 			return nil, fmt.Errorf("message payload missing")
 		}
-		out.PersonalSign = &RuleInputPersonalSign{Message: p.Message}
+		// Mirror the chain-boundary hex decode so the rule engine sees
+		// EXACTLY the bytes that are about to be EIP-191-signed. Without
+		// this, USE CASE A (SIWE) rules would pattern-match against the
+		// hex string instead of the SIWE text, and USE CASE B (binary
+		// challenge) would have the rule engine inspect the hex string
+		// while the wallet signed the decoded bytes — two different
+		// pictures of the same request. See decodePersonalSignMessage
+		// in adapter.go for the use cases.
+		out.PersonalSign = &RuleInputPersonalSign{
+			Message: string(decodePersonalSignMessage(p.Message)),
+		}
 	default:
 		// hash, raw_message: no transaction/typed_data/personal_sign; RuleInput has sign_type, chain_id, signer only
 	}

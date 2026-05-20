@@ -2070,25 +2070,12 @@
         case "personal_sign": {
           const [messageParam, address] = params;
           const signer = this._getActiveSigner();
-          const message = typeof messageParam === "string" && messageParam.startsWith("0x") && messageParam.length % 2 === 0 && /^0x[0-9a-fA-F]*$/.test(messageParam) ? new TextDecoder("utf-8", { fatal: false }).decode(
-            new Uint8Array(
-              (messageParam.slice(2).match(/.{1,2}/g) ?? []).map((b) => parseInt(b, 16))
-            )
-          ) : messageParam;
-          console.log("[EIP1193] personal_sign called:", {
-            messageParam,
-            decodedMessage: message,
-            address,
-            signerAddress: signer.address,
-            signerChainId: signer.chainId || signer._chainID,
-            providerChainId: this._chainId
-          });
           if (address.toLowerCase() !== signer.address.toLowerCase()) {
             throw providerErrors.unauthorized(
               `Address mismatch: expected ${signer.address}, got ${address}`
             );
           }
-          return await signer.personalSign(message);
+          return await signer.personalSign(messageParam);
         }
         case "eth_sign": {
           const [address, hash] = params;
