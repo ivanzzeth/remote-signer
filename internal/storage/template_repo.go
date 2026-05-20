@@ -158,7 +158,7 @@ func (r *GormTemplateRepository) Upsert(ctx context.Context, tmpl *types.RuleTem
 		return false, fmt.Errorf("template id is required")
 	}
 	var existing types.RuleTemplate
-	err := r.db.WithContext(ctx).Select("id, content_hash").
+	err := r.db.WithContext(ctx).Select("id, content_hash, type, mode").
 		First(&existing, "id = ?", tmpl.ID).Error
 	now := time.Now()
 	if err == gorm.ErrRecordNotFound {
@@ -172,9 +172,15 @@ func (r *GormTemplateRepository) Upsert(ctx context.Context, tmpl *types.RuleTem
 	if err != nil {
 		return false, fmt.Errorf("failed to check existing template: %w", err)
 	}
-	// Skip the write when content_hash matches. Defensive on empty
-	// hash: an unhashed existing row always loses to the incoming one.
-	if existing.ContentHash != "" && existing.ContentHash == tmpl.ContentHash {
+	// Skip the write when content_hash matches AND the stored
+	// type/mode agree with the incoming row. The extra type/mode
+	// guard rescues rows from older registry builds that stored
+	// bundle-style templates with type="" (the bundle dispatch then
+	// silently did nothing). A code change in file_source.go can leave
+	// the YAML file's hash untouched but still need a fresh upsert to
+	// repair the stored shape.
+	if existing.ContentHash != "" && existing.ContentHash == tmpl.ContentHash &&
+		existing.Type == tmpl.Type && existing.Mode == tmpl.Mode {
 		return false, nil
 	}
 	tmpl.UpdatedAt = now
