@@ -106,6 +106,36 @@ func TestRequestHandler_GetSuccess(t *testing.T) {
 	assert.Equal(t, "req-001", resp.ID)
 }
 
+// TestRequestHandler_GetSurfaces_LastNoMatchReason pins the API
+// contract for the activity-drawer no-match diagnostic (P3 #12 in
+// MISSING_COVERAGE.md). When the whitelist engine couldn't find a
+// matching rule, sign.go persists the engine's reason on the request
+// row. The detail endpoint MUST round-trip it so the popup can render
+// "rule skipped: no evaluator for type ''" directly instead of
+// forcing operators to grep server logs.
+func TestRequestHandler_GetSurfaces_LastNoMatchReason(t *testing.T) {
+	signReq := makeSignRequest("req-nomatch", types.StatusAuthorizing)
+	signReq.LastNoMatchReason = "no evaluator registered for whitelist rule type \"\" (rule id=tmpl_42)"
+	svc := &mockSignService{
+		getRequestFn: func(_ context.Context, id types.SignRequestID) (*types.SignRequest, error) {
+			if id == "req-nomatch" {
+				return signReq, nil
+			}
+			return nil, types.ErrNotFound
+		},
+	}
+	h, _ := NewRequestHandler(svc, newMockRuleRepo(), slog.Default())
+	rec := doRequestHandlerReq(t, h, http.MethodGet, "/api/v1/evm/requests/req-nomatch", reqAdminKey())
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp RequestDetailResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t,
+		"no evaluator registered for whitelist rule type \"\" (rule id=tmpl_42)",
+		resp.LastNoMatchReason,
+		"detail endpoint MUST surface last_no_match_reason — popup activity drawer reads this to render the no-match diagnostic without server-log access")
+}
+
 func TestRequestHandler_NotFound(t *testing.T) {
 	svc := &mockSignService{} // getRequestFn returns ErrNotFound by default
 	h, _ := NewRequestHandler(svc, newMockRuleRepo(), slog.Default())

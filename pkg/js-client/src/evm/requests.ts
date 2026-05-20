@@ -35,6 +35,11 @@ export interface RequestStatusResponse {
   // "rule" (whitelist rule matched), "simulation" (simulation fallback
   // allowed it). Empty until the request reaches signing/completed.
   approval_source?: "manual" | "rule" | "simulation";
+  // last_no_match_reason carries the whitelist engine's diagnostic when
+  // no rule matched this request. Surfaced in the activity drawer to
+  // explain why a sign is stuck on manual approval. Empty when a rule
+  // auto-approved.
+  last_no_match_reason?: string;
   created_at: string;
   updated_at: string;
   completed_at?: string;

@@ -242,10 +242,16 @@ func (s *SignService) Sign(ctx context.Context, req *SignRequest) (*SignResponse
 		return nil, fmt.Errorf("failed to reload request: %w", err)
 	}
 
-	// Evaluate rules (two-tier: blocklist first, then whitelist)
-	matchedRuleID, reason, err := s.ruleEngine.Evaluate(ctx, signReq, parsed)
+	// Evaluate rules (two-tier: blocklist first, then whitelist). We use
+	// EvaluateWithResult (not the shorter Evaluate) so we can capture the
+	// engine's NoMatchReason on the request row when nothing matches.
+	// That reason is what the activity-drawer in the popup surfaces, and
+	// it's the diagnostic operators want when "the rule I just created
+	// didn't fire" — sparing them a grep through server logs.
+	evalResult, err := s.ruleEngine.EvaluateWithResult(ctx, signReq, parsed)
 	if err != nil {
-		// Check if blocked by a blocklist rule
+		// Check if blocked by a blocklist rule (delegation path raises this
+		// as a typed error even though EvaluateWithResult exists).
 		var blockedErr *rule.BlockedError
 		if errors.As(err, &blockedErr) {
 			if s.approvalGuard != nil {
@@ -257,11 +263,6 @@ func (s *SignService) Sign(ctx context.Context, req *SignRequest) (*SignResponse
 				"rule_name", blockedErr.RuleName,
 				"reason", blockedErr.Reason,
 			)
-			// Reject immediately - no manual approval possible
-			// SECURITY NOTE (V3-5): Rule names are intentionally included in error responses
-			// to help agents and clients understand which security policy blocked their request.
-			// Rule names are generic (e.g., "Agent Safety") and do not expose specific configuration
-			// details. Accepted risk per security audit v3.
 			rejectReason := fmt.Sprintf("blocked by rule %s: %s", blockedErr.RuleName, blockedErr.Reason)
 			if _, smErr := s.stateMachine.RejectOnAuthorization(ctx, signReq.ID, "system", rejectReason); smErr != nil {
 				s.logger.Error("failed to reject blocked request", "error", smErr)
@@ -276,12 +277,69 @@ func (s *SignService) Sign(ctx context.Context, req *SignRequest) (*SignResponse
 		s.logger.Error("rule evaluation error", "error", err)
 	}
 
+	// EvaluateWithResult also returns the blocked path via the result
+	// struct (in addition to the typed error above) — handle it here for
+	// the non-delegation case.
+	if evalResult != nil && evalResult.Blocked {
+		if s.approvalGuard != nil {
+			s.approvalGuard.RecordRuleRejected()
+		}
+		blockedName := ""
+		blockedID := ""
+		if evalResult.BlockedBy != nil {
+			blockedName = evalResult.BlockedBy.Name
+			blockedID = string(evalResult.BlockedBy.ID)
+		}
+		s.logger.Warn("request blocked by rule",
+			"request_id", signReq.ID,
+			"rule_id", blockedID,
+			"rule_name", blockedName,
+			"reason", evalResult.BlockReason,
+		)
+		rejectReason := fmt.Sprintf("blocked by rule %s: %s", blockedName, evalResult.BlockReason)
+		if _, smErr := s.stateMachine.RejectOnAuthorization(ctx, signReq.ID, "system", rejectReason); smErr != nil {
+			s.logger.Error("failed to reject blocked request", "error", smErr)
+		}
+		return &SignResponse{
+			RequestID: signReq.ID,
+			Status:    types.StatusRejected,
+			Message:   rejectReason,
+		}, nil
+	}
+
+	var matchedRuleID *types.RuleID
+	var reason string
+	var noMatchReason string
+	if evalResult != nil {
+		if evalResult.Allowed && evalResult.AllowedBy != nil {
+			id := evalResult.AllowedBy.ID
+			matchedRuleID = &id
+			reason = evalResult.AllowReason
+		}
+		noMatchReason = evalResult.NoMatchReason
+	}
+
 	if matchedRuleID != nil {
 		// Auto-approved by whitelist rule - proceed to signing
 		if s.approvalGuard != nil {
 			s.approvalGuard.RecordNonManualApproval()
 		}
 		return s.processApprovedRequest(ctx, signReq, matchedRuleID, nil, reason, adapter)
+	}
+
+	// No whitelist match — persist the engine's reason on the request row
+	// so subsequent GET /requests/{id} reads it back. Best-effort: the
+	// request might be moments away from manual-approval or simulation,
+	// so failure here doesn't gate the rest of the flow.
+	if noMatchReason != "" {
+		if upErr := s.requestRepo.UpdateLastNoMatchReason(ctx, signReq.ID, noMatchReason); upErr != nil {
+			s.logger.Warn("failed to persist last_no_match_reason",
+				"request_id", signReq.ID,
+				"error", upErr,
+			)
+		} else {
+			signReq.LastNoMatchReason = noMatchReason
+		}
 	}
 
 	// No whitelist rule matched — strategy role must have explicit rules for all operations.
