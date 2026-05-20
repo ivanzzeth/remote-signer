@@ -467,30 +467,15 @@ export class EIP1193Provider {
         const [messageParam, address] = params as [string, string];
         const signer = this._getActiveSigner();
 
-        // EIP-1474 / JSON-RPC: personal_sign's data argument is `DATA` —
-        // i.e. 0x-prefixed hex. viem/wagmi/ethers all hex-encode the
-        // UTF-8 message before calling. The remote-signer backend signs
-        // raw UTF-8 (because its rule engine pattern-matches against
-        // the cleartext message), so we MUST decode hex → UTF-8 here at
-        // the EIP-1193 boundary. Pre-multi-account refactor this lived
-        // in _personalSign(); the refactor lost it and SIWE flows broke.
-        const message =
-          typeof messageParam === "string" && messageParam.startsWith("0x") && messageParam.length % 2 === 0 && /^0x[0-9a-fA-F]*$/.test(messageParam)
-            ? new TextDecoder("utf-8", { fatal: false }).decode(
-                new Uint8Array(
-                  (messageParam.slice(2).match(/.{1,2}/g) ?? []).map((b) => parseInt(b, 16))
-                )
-              )
-            : messageParam;
-
-        console.log("[EIP1193] personal_sign called:", {
-          messageParam,
-          decodedMessage: message,
-          address,
-          signerAddress: signer.address,
-          signerChainId: (signer as any).chainId || (signer as any)._chainID,
-          providerChainId: this._chainId
-        });
+        // Pass the message through to the backend unchanged. The
+        // remote-signer chain adapter is the SINGLE hex-aware decode
+        // point (internal/chain/evm/adapter.go::decodePersonalSignMessage)
+        // — it normalises both SIWE text payloads (USE CASE A, hex of
+        // UTF-8 text) and binary challenges (USE CASE B, hex of raw
+        // bytes) into the bytes EIP-191 should prefix. Doing the decode
+        // here too would either double-decode (corrupt the message) or
+        // mangle binary payloads on their way through JSON's UTF-8
+        // string field. So: do nothing, let the backend handle it.
 
         // Verify address matches active signer
         if (address.toLowerCase() !== signer.address.toLowerCase()) {
@@ -499,7 +484,7 @@ export class EIP1193Provider {
           );
         }
 
-        return await signer.personalSign(message);
+        return await signer.personalSign(messageParam);
       }
 
       case "eth_sign": {
