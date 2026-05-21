@@ -51,17 +51,34 @@ test("Grant access dropdown defaults to agent and grants successfully", async ({
   await expect(authedPage.locator("tr", { hasText: "agent" }).first())
     .toBeVisible({ timeout: 5_000 });
 
-  // 5. Once granted, "agent" disappears from the dropdown (we filter
-  //    already-granted ids out so the operator can't double-grant).
+  // 5. Once granted, "agent" stays *visible* in the dropdown so the
+  //    operator still understands what api keys exist — but the
+  //    option is disabled (with the "already granted" reason in its
+  //    label) and the daemon's existing-grants table above is the
+  //    audit trail. Hiding granted ids would make the dropdown go
+  //    blank in the common multi-grant case and read as "the UI is
+  //    broken".
   await expect
     .poll(
       async () =>
         await grantSelect.evaluate((el) =>
-          Array.from((el as HTMLSelectElement).options).map((o) => o.value),
+          Array.from((el as HTMLSelectElement).options).map((o) => ({
+            value: o.value,
+            disabled: o.disabled,
+            text: o.textContent,
+          })),
         ),
       { timeout: 3_000 },
     )
-    .not.toContain("agent");
+    .toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          value: "agent",
+          disabled: true,
+          text: expect.stringContaining("already granted"),
+        }),
+      ]),
+    );
 
   // Cleanup: revoke then delete so the next spec sees a clean slate.
   await sdk.evm.signers.revokeAccess(address, "agent");

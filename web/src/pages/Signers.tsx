@@ -772,29 +772,51 @@ function Field({
 
 function AccessPanel({ address }: { address: string }) {
   const access = useApi((c) => c.evm.signers.listAccess(address), [address]);
-  // Names directory drives the grant-to picker. We hide the current
-  // caller (they're already the owner — granting to self would be a
-  // no-op error) and any key that already has access (so the dropdown
-  // doesn't double-list — the existing-grants table above is the
-  // visual cue for them). "agent" is the default because that's the
-  // bootstrap key most operators want to grant to.
+  // Names directory drives the grant-to picker. We show every enabled
+  // key but tag the ones that can't be grant targets — the owner (this
+  // caller) and anyone who already has access. Hiding them instead
+  // makes the dropdown go blank in the common "agent already granted"
+  // case, which reads as "the UI is broken" rather than "there's just
+  // nothing more to do". "agent" is the default when it's still a
+  // valid grantee, otherwise the first eligible key wins.
   const namesApi = useApi((c) => c.apiKeys.names());
   const callerKeyID = getCredentials()?.apiKeyID ?? "";
   const alreadyGranted = new Set((access.data ?? []).map((g) => g.api_key_id));
-  const grantOptions = (namesApi.data?.keys ?? []).filter(
-    (k) => k.id !== callerKeyID && !alreadyGranted.has(k.id),
-  );
+  type GrantOption = {
+    id: string;
+    name: string;
+    role: string;
+    /** Empty string means selectable; otherwise the reason it's not. */
+    disabledReason: string;
+  };
+  const grantOptions: GrantOption[] = (namesApi.data?.keys ?? []).map((k) => ({
+    id: k.id,
+    name: k.name,
+    role: k.role,
+    disabledReason:
+      k.id === callerKeyID
+        ? "owner"
+        : alreadyGranted.has(k.id)
+        ? "already granted"
+        : "",
+  }));
+  const eligible = grantOptions.filter((k) => k.disabledReason === "");
   const defaultGrantKey =
-    grantOptions.find((k) => k.id === "agent")?.id ?? grantOptions[0]?.id ?? "";
+    eligible.find((k) => k.id === "agent")?.id ?? eligible[0]?.id ?? "";
   const [grantKey, setGrantKey] = useState("");
-  // Auto-select once the directory loads; the operator can still pick
-  // a different key, but a sensible default beats an empty <select>.
-  // Only fires when grantKey is empty so a manual choice sticks.
+  // Auto-select once the directory loads (or after the eligible set
+  // shifts — e.g. a revoke re-opens a slot). Only fires when grantKey
+  // is empty OR no longer eligible, so a manual choice sticks until
+  // it becomes invalid.
   useEffect(() => {
-    if (grantKey === "" && defaultGrantKey !== "") {
+    const stillEligible = eligible.some((k) => k.id === grantKey);
+    if (!stillEligible && defaultGrantKey !== "") {
       setGrantKey(defaultGrantKey);
+    } else if (!stillEligible && defaultGrantKey === "") {
+      setGrantKey("");
     }
-  }, [defaultGrantKey, grantKey]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultGrantKey, eligible.length]);
 
   const [transferTo, setTransferTo] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
@@ -934,12 +956,18 @@ function AccessPanel({ address }: { address: string }) {
             >
               {grantOptions.length === 0 ? (
                 <option value="">
-                  {namesApi.loading ? "Loading…" : "No keys available"}
+                  {namesApi.loading ? "Loading…" : "No api keys exist"}
                 </option>
               ) : (
                 grantOptions.map((k) => (
-                  <option key={k.id} value={k.id}>
-                    {k.id} {k.name && `· ${k.name}`}
+                  <option
+                    key={k.id}
+                    value={k.id}
+                    disabled={k.disabledReason !== ""}
+                  >
+                    {k.id}
+                    {k.name && ` · ${k.name}`}
+                    {k.disabledReason && ` (${k.disabledReason})`}
                   </option>
                 ))
               )}
