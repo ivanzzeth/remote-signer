@@ -348,6 +348,16 @@ func Run(args []string) error {
 		if simRuleErr != nil {
 			log.Warn("failed to create simulation budget rule", "error", simRuleErr)
 		} else {
+			// Persist each evaluation's outcome so the web UI's
+			// request-detail preview panel can render without
+			// re-running simulation client-side. Optional —
+			// disabled here means the rule still drives sign
+			// approval, just no DB-backed preview.
+			if simRepo, simRepoErr := storage.NewGormRequestSimulationRepository(db); simRepoErr == nil {
+				simRule.SetSimulationRepo(simRepo)
+			} else {
+				log.Warn("simulation preview disabled: repo init failed", "error", simRepoErr)
+			}
 			signService.SetSimulationRule(simRule)
 			if cfg.Chains.EVM.Simulation.BatchWindow > 0 {
 				simRule.SetBatchConfig(cfg.Chains.EVM.Simulation.BatchWindow, cfg.Chains.EVM.Simulation.BatchMaxSize)

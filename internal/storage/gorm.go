@@ -96,6 +96,7 @@ func NewDB(cfg Config) (*gorm.DB, error) {
 	if err := db.AutoMigrate(
 		&types.SignRequest{},
 		&types.Transaction{},
+		&types.RequestSimulation{},
 		&types.Rule{},
 		&types.RuleTemplate{},
 		&types.RulePreset{},
@@ -146,6 +147,7 @@ func NewDBWithLogger(cfg Config, logLevel logger.LogLevel) (*gorm.DB, error) {
 	if err := db.AutoMigrate(
 		&types.SignRequest{},
 		&types.Transaction{},
+		&types.RequestSimulation{},
 		&types.Rule{},
 		&types.RuleTemplate{},
 		&types.RulePreset{},

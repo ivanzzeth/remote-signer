@@ -99,6 +99,7 @@ func main() {
 	if err := db.AutoMigrate(
 		&types.SignRequest{},
 		&types.Transaction{},
+		&types.RequestSimulation{},
 		&types.Rule{},
 		&types.APIKey{},
 		&types.AuditRecord{},

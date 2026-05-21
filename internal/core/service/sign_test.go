@@ -9,6 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ivanzzeth/remote-signer/internal/chain"
 	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/statemachine"
@@ -1716,4 +1719,73 @@ func TestPreviewRuleForRequest(t *testing.T) {
 			t.Errorf("unexpected error: %v", err)
 		}
 	})
+}
+
+// Pins the long-poll race fix: when an out-of-band actor (popup
+// manual-approve clicked while the sign endpoint was blocked on
+// simulation; another simulation tick driving the same request)
+// already moved the request to a terminal state, processApprovedRequest
+// MUST return the existing signature instead of trying to drive
+// ApproveForSigning a second time. Pre-fix this surfaced as HTTP 500
+// "invalid state transition: cannot move from completed to signing"
+// to the dApp, even though the signature was already in the DB.
+func TestProcessApprovedRequest_AlreadyCompleted_ReturnsCachedSignature(t *testing.T) {
+	f := newSignServiceFixture(t)
+	svc := f.build(t)
+	ctx := context.Background()
+
+	// Seed a request that another path has already taken to completed
+	// (signature + signed_data populated, status final).
+	now := time.Now()
+	signReq := &types.SignRequest{
+		ID:            "req-completed-by-other-path",
+		APIKeyID:      "agent",
+		ChainType:     types.ChainTypeEVM,
+		ChainID:       "56",
+		SignerAddress: "0x53c6",
+		SignType:      "transaction",
+		Status:        types.StatusCompleted,
+		Signature:     []byte("cached-sig"),
+		SignedData:    []byte("cached-signed-tx"),
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	require.NoError(t, f.requestRepo.Create(ctx, signReq))
+
+	// Simulate the racy "simulation said allow, now drive approval"
+	// re-entry: the sign service's late-fired simulation pipeline
+	// reaches processApprovedRequest with a stale local copy.
+	approvedBy := "simulation"
+	resp, err := svc.processApprovedRequest(ctx, signReq, nil, &approvedBy, "simulation-approved", f.adapter)
+	require.NoError(t, err, "must NOT bubble the state-transition error")
+	require.NotNil(t, resp)
+	assert.Equal(t, types.StatusCompleted, resp.Status)
+	assert.Equal(t, []byte("cached-sig"), resp.Signature)
+	assert.Equal(t, []byte("cached-signed-tx"), resp.SignedData)
+}
+
+func TestProcessApprovedRequest_AlreadyRejected_ReturnsRejected(t *testing.T) {
+	f := newSignServiceFixture(t)
+	svc := f.build(t)
+	ctx := context.Background()
+
+	now := time.Now()
+	signReq := &types.SignRequest{
+		ID:           "req-rejected-by-other-path",
+		APIKeyID:     "agent",
+		ChainType:    types.ChainTypeEVM,
+		ChainID:      "56",
+		SignType:     "transaction",
+		Status:       types.StatusRejected,
+		ErrorMessage: "user rejected",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	require.NoError(t, f.requestRepo.Create(ctx, signReq))
+
+	approvedBy := "simulation"
+	resp, err := svc.processApprovedRequest(ctx, signReq, nil, &approvedBy, "simulation-approved", f.adapter)
+	require.NoError(t, err)
+	assert.Equal(t, types.StatusRejected, resp.Status)
+	assert.Contains(t, resp.Message, "user rejected")
 }

@@ -437,6 +437,49 @@ func (s *SignService) processApprovedRequest(
 	reason string,
 	adapter types.ChainAdapter,
 ) (*SignResponse, error) {
+	// Re-fetch the current state — between the time we got `signReq`
+	// and now, an out-of-band actor (operator clicking Approve in the
+	// popup; another simulation tick; SIGHUP rule reload) may have
+	// already completed or rejected the request. The pre-fix path
+	// blindly drove ApproveForSigning and surfaced
+	// "cannot move from completed to signing" as a 500 to the dApp,
+	// even though the signature was sitting in the database. Detect
+	// the race and return what's already there.
+	current, getErr := s.requestRepo.Get(ctx, signReq.ID)
+	if getErr != nil {
+		return nil, fmt.Errorf("failed to re-read request before signing: %w", getErr)
+	}
+	switch current.Status {
+	case types.StatusCompleted:
+		s.logger.Info("request already completed by another path; returning cached signature",
+			"request_id", signReq.ID, "approved_by", approvedBy)
+		return &SignResponse{
+			RequestID:  current.ID,
+			Status:     types.StatusCompleted,
+			Signature:  current.Signature,
+			SignedData: current.SignedData,
+		}, nil
+	case types.StatusRejected, types.StatusFailed:
+		s.logger.Info("request already in terminal non-success state; returning status",
+			"request_id", signReq.ID, "status", current.Status,
+			"approved_by", approvedBy)
+		return &SignResponse{
+			RequestID: current.ID,
+			Status:    current.Status,
+			Message:   current.ErrorMessage,
+		}, nil
+	case types.StatusSigning:
+		// Another goroutine is actively signing this one. Don't double-
+		// drive it; just observe the final state via the existing
+		// caller path. We return signing so the SDK's long-poll keeps
+		// polling for completion (it's only a few hundred ms away).
+		return &SignResponse{
+			RequestID: current.ID,
+			Status:    types.StatusSigning,
+			Message:   "request is being signed by another path",
+		}, nil
+	}
+
 	// Transition to signing
 	if _, err := s.stateMachine.ApproveForSigning(ctx, signReq.ID, ruleID, approvedBy, reason); err != nil {
 		return nil, fmt.Errorf("failed to approve for signing: %w", err)
