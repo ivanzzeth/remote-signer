@@ -103,10 +103,22 @@ export class RemoteSigner implements Signer {
     return resp.signature!;
   }
 
-  /** Sign an EVM transaction. Returns signed transaction hex. */
-  async signTransaction(transaction: Transaction): Promise<string> {
+  /**
+   * Sign an EVM transaction. Returns signed transaction hex.
+   *
+   * `chainIdOverride` (optional) wins over the signer's default
+   * chainID — multi-account/multi-chain dApps pass `tx.chainId`
+   * per request and the resulting EIP-155 `v` MUST be for that
+   * chain or the network rejects the tx (the BSC USDT approve
+   * regression: signer was at chain 1 but the dApp meant chain 56,
+   * the signature went out for mainnet and no chain would mine it).
+   */
+  async signTransaction(
+    transaction: Transaction,
+    chainIdOverride?: string,
+  ): Promise<string> {
     const resp = await this.signService.execute({
-      chain_id: this._chainID,
+      chain_id: chainIdOverride ?? this._chainID,
       signer_address: this.address,
       sign_type: "transaction",
       payload: { transaction },
