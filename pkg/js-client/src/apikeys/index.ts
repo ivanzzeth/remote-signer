@@ -33,6 +33,23 @@ export interface ListAPIKeysResponse {
   total: number;
 }
 
+/**
+ * Lightweight projection returned by GET /api/v1/api-keys/names —
+ * accessible to any authenticated key (no `manage_api_keys` perm
+ * required), so non-admin operators can populate Grant-access or
+ * filter dropdowns without seeing audit-relevant metadata.
+ */
+export interface APIKeyName {
+  id: string;
+  name: string;
+  role: string;
+  enabled: boolean;
+}
+
+export interface ListAPIKeyNamesResponse {
+  keys: APIKeyName[];
+}
+
 export interface CreateAPIKeyRequest {
   id: string;
   name: string;
@@ -69,6 +86,21 @@ export class APIKeyService {
     return this.transport.request<ListAPIKeysResponse>(
       "GET",
       `/api/v1/api-keys${qs ? `?${qs}` : ""}`,
+      null,
+    );
+  }
+
+  /**
+   * Lightweight directory of every enabled API key, accessible to any
+   * authenticated caller — feeds the Signers filter + Grant-access
+   * dropdowns. Returns only id/name/role/enabled; audit-relevant
+   * fields (timestamps, rate limit, source) are intentionally
+   * stripped daemon-side.
+   */
+  async names(): Promise<ListAPIKeyNamesResponse> {
+    return this.transport.request<ListAPIKeyNamesResponse>(
+      "GET",
+      "/api/v1/api-keys/names",
       null,
     );
   }
