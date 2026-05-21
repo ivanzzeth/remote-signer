@@ -119,7 +119,10 @@ func bootstrapAdminKeyIfNeeded(ctx context.Context, repo storage.APIKeyRepositor
 
 	rateLimit := defaultRateLimit
 	if rateLimit <= 0 {
-		rateLimit = 100
+		// Belt-and-suspenders fallback if the caller didn't pass a
+		// configured default. See config.setDefaults for the rationale
+		// behind 10000 vs the historical 100.
+		rateLimit = 10000
 	}
 	now := time.Now()
 	apiKey := &types.APIKey{
@@ -203,7 +206,10 @@ func bootstrapAgentKeyIfNeeded(ctx context.Context, repo storage.APIKeyRepositor
 
 	rateLimit := defaultRateLimit
 	if rateLimit <= 0 {
-		rateLimit = 100
+		// Belt-and-suspenders fallback if the caller didn't pass a
+		// configured default. See config.setDefaults for the rationale
+		// behind 10000 vs the historical 100.
+		rateLimit = 10000
 	}
 	now := time.Now()
 	key := &types.APIKey{

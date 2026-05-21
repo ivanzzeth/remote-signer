@@ -569,7 +569,14 @@ func setDefaults(cfg *Config) {
 	}
 
 	if cfg.Security.RateLimitDefault <= 0 {
-		cfg.Security.RateLimitDefault = 100
+		// 100 req/min was the historical default but turned out to be
+		// far too restrictive for normal wallet usage — a Uniswap-style
+		// swap fires 50+ chain reads in a few seconds, blowing through
+		// the budget and surfacing as opaque "rate limit exceeded"
+		// errors in the dApp (the Permit2Signature regression). 10000
+		// is generous for legitimate bot + interactive use while still
+		// bounding a runaway client.
+		cfg.Security.RateLimitDefault = 10000
 	}
 
 	if cfg.Security.IPRateLimit <= 0 {
