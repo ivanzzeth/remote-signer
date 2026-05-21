@@ -39,12 +39,25 @@ type ServerInfo struct {
 	NonAdminAPIKeyID  string `json:"non_admin_api_key_id"`
 	NonAdminAPIKeyHex string `json:"non_admin_api_key_hex"`
 	SignerAddress     string `json:"signer_address"`
+	// Second pre-unlocked signer for multi-account routing tests.
+	// Specs that only need one signer keep using signer_address.
+	SignerAddress2 string `json:"signer_address_2"`
 }
 
 const (
 	// Anvil / Hardhat well-known account #0.
 	testSignerPrivateKey = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 	testSignerAddress    = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+	// Anvil account #3 — the *second* unlocked signer in the fixture.
+	// Lets multi-account-routing tests prove the EIP1193 provider
+	// routes by request address rather than by the popup's "active"
+	// signer index. Picked #3 specifically because TEST_ACCOUNTS in
+	// helpers.ts already claims anvil #0 (signer), #1 (recipient),
+	// and #2 (treasury) — using one of those here would turn a
+	// "definitely-not-a-signer" recipient into a valid signer and
+	// break specs that rely on the rejection path.
+	testSignerPrivateKey2 = "7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6"
+	testSignerAddress2    = "0x90F79bf6EB2c4f870365E785982E1f101E93b906"
 )
 
 func main() {
@@ -67,6 +80,7 @@ func main() {
 
 	// Set env vars for sign keys.
 	os.Setenv("E2E_TEST_SIGNER_KEY", testSignerPrivateKey)
+	os.Setenv("E2E_TEST_SIGNER_KEY_2", testSignerPrivateKey2)
 
 	// Create in-memory SQLite DB.
 	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared&_journal_mode=WAL&_busy_timeout=5000"), &gorm.Config{
@@ -137,6 +151,7 @@ func main() {
 	pwProvider, _ := evm.NewCompositePasswordProvider(false)
 	pkProvider, _ := evm.NewPrivateKeyProvider(evmRegistry, []evm.PrivateKeyConfig{
 		{Address: testSignerAddress, KeyEnvVar: "E2E_TEST_SIGNER_KEY", Enabled: true},
+		{Address: testSignerAddress2, KeyEnvVar: "E2E_TEST_SIGNER_KEY_2", Enabled: true},
 	})
 	evmRegistry.RegisterProvider(pkProvider)
 
@@ -182,7 +197,7 @@ func main() {
 		Mode:        types.RuleModeWhitelist,
 		Source:      types.RuleSourceConfig,
 		ChainType:   &chainType,
-		Config:      []byte(`{"allowed_signers":["` + testSignerAddress + `"]}`),
+		Config:      []byte(`{"allowed_signers":["` + testSignerAddress + `","` + testSignerAddress2 + `"]}`),
 		Enabled:     true,
 		// AppliedTo must be set explicitly — the rules.applied_to column is
 		// NOT NULL and Gorm wasn't auto-defaulting; an unset value made the
@@ -213,6 +228,11 @@ func main() {
 	// view so popup tests can switch keys without rebooting fixtures).
 	signerAccessRepo.Grant(ctx, &types.SignerAccess{
 		SignerAddress: testSignerAddress,
+		APIKeyID:      nonAdminAPIKeyID,
+		GrantedBy:     adminAPIKeyID,
+	})
+	signerAccessRepo.Grant(ctx, &types.SignerAccess{
+		SignerAddress: testSignerAddress2,
 		APIKeyID:      nonAdminAPIKeyID,
 		GrantedBy:     adminAPIKeyID,
 	})
@@ -293,6 +313,7 @@ func main() {
 		NonAdminAPIKeyID:  nonAdminAPIKeyID,
 		NonAdminAPIKeyHex: nonAdminAPIKeyHex,
 		SignerAddress:     testSignerAddress,
+		SignerAddress2:    testSignerAddress2,
 	}
 	out, _ := json.Marshal(info)
 	fmt.Println(string(out))

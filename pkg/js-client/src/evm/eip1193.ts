@@ -309,6 +309,43 @@ export class EIP1193Provider {
   }
 
   /**
+   * Pick the signer a sign / send request should route through.
+   *
+   * Sign-method parameters carry an address: personal_sign /
+   * signTypedData take it as the second positional, sendTransaction /
+   * signTransaction read it from tx.from. MetaMask et al. route the
+   * call to whatever signer matches that address, NOT to whichever
+   * account the wallet UI happens to call "active". A dApp can
+   * legitimately ask any account it was granted to sign — including
+   * one that isn't currently selected in the popup.
+   *
+   * Behavior:
+   *   - target empty → active signer (legacy callers that omit `from`).
+   *   - target matches some signer in `_signers` → that signer.
+   *   - target provided but unknown → unauthorized, throw early so the
+   *     daemon never sees a request for an address the user hasn't
+   *     unlocked. Matches the original threat model — the SDK is the
+   *     last check before the daemon does its own access gate.
+   *
+   * Match is case-insensitive (EIP-55 vs lowercase) since dApps
+   * routinely lowercase before sending.
+   */
+  private _resolveSigner(target: string | undefined): RemoteSigner {
+    if (!this._connected || this._signers.length === 0) {
+      throw providerErrors.disconnected();
+    }
+    if (!target) return this._signers[this._activeIndex];
+    const wanted = target.toLowerCase();
+    const found = this._signers.find((s) => s.address.toLowerCase() === wanted);
+    if (!found) {
+      throw providerErrors.unauthorized(
+        `Address ${target} is not available in this provider`
+      );
+    }
+    return found;
+  }
+
+  /**
    * Switch active account by address or index
    *
    * @param addressOrIndex Account address (string) or index (number)
@@ -532,7 +569,11 @@ export class EIP1193Provider {
       // Signing methods
       case "personal_sign": {
         const [messageParam, address] = params as [string, string];
-        const signer = this._getActiveSigner();
+        // Route to whichever signer matches the requested address —
+        // multi-account dApps don't pin the "active" account, they
+        // sign for whichever account the user picked. See
+        // _resolveSigner for the full rationale.
+        const signer = this._resolveSigner(address);
 
         // Pass the message through to the backend unchanged. The
         // remote-signer chain adapter is the SINGLE hex-aware decode
@@ -543,27 +584,12 @@ export class EIP1193Provider {
         // here too would either double-decode (corrupt the message) or
         // mangle binary payloads on their way through JSON's UTF-8
         // string field. So: do nothing, let the backend handle it.
-
-        // Verify address matches active signer
-        if (address.toLowerCase() !== signer.address.toLowerCase()) {
-          throw providerErrors.unauthorized(
-            `Address mismatch: expected ${signer.address}, got ${address}`
-          );
-        }
-
         return await signer.personalSign(messageParam);
       }
 
       case "eth_sign": {
         const [address, hash] = params as [string, string];
-        const signer = this._getActiveSigner();
-
-        if (address.toLowerCase() !== signer.address.toLowerCase()) {
-          throw providerErrors.unauthorized(
-            `Address mismatch: expected ${signer.address}, got ${address}`
-          );
-        }
-
+        const signer = this._resolveSigner(address);
         return await signer.signHash(hash);
       }
 
@@ -571,13 +597,7 @@ export class EIP1193Provider {
       case "eth_signTypedData_v3":
       case "eth_signTypedData_v4": {
         const [address, typedData] = params as [string, any];
-        const signer = this._getActiveSigner();
-
-        if (address.toLowerCase() !== signer.address.toLowerCase()) {
-          throw providerErrors.unauthorized(
-            `Address mismatch: expected ${signer.address}, got ${address}`
-          );
-        }
+        const signer = this._resolveSigner(address);
 
         // signTypedData expects typed data object, handle both string and object
         const typedDataObj = typeof typedData === "string" ? JSON.parse(typedData) : typedData;
@@ -586,14 +606,7 @@ export class EIP1193Provider {
 
       case "eth_sendTransaction": {
         const [tx] = params as [any];
-        const signer = this._getActiveSigner();
-
-        // Verify from address if provided
-        if (tx.from && tx.from.toLowerCase() !== signer.address.toLowerCase()) {
-          throw providerErrors.unauthorized(
-            `Address mismatch: expected ${signer.address}, got ${tx.from}`
-          );
-        }
+        const signer = this._resolveSigner(tx.from);
 
         const rpcUrl = await this._getRpcUrl();
         const filled = await this._fillTxDefaults(tx, signer.address, rpcUrl);
@@ -620,14 +633,7 @@ export class EIP1193Provider {
 
       case "eth_signTransaction": {
         const [tx] = params as [any];
-        const signer = this._getActiveSigner();
-
-        if (tx.from && tx.from.toLowerCase() !== signer.address.toLowerCase()) {
-          throw providerErrors.unauthorized(
-            `Address mismatch: expected ${signer.address}, got ${tx.from}`
-          );
-        }
-
+        const signer = this._resolveSigner(tx.from);
         return await signer.signTransaction(normalizeEip1193Tx(tx));
       }
 

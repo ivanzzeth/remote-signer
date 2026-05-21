@@ -47,6 +47,13 @@ export async function injectStorageConfig(
     apiKeyId: string;
     apiKeyPrivateKey: string;
     selectedChain?: number;
+    /**
+     * Pin the popup's active signer at injection time. Useful for
+     * multi-account specs that need to exercise the "ask for the
+     * non-active signer" path deterministically — without this the
+     * SDK falls back to whichever address signers.list returns first.
+     */
+    activeSignerAddress?: string;
   }
 ): Promise<void> {
   await page.evaluate((cfg) => {
