@@ -877,6 +877,86 @@ describe("EIP1193Provider - daemon RPC proxy routing", () => {
     ).rejects.toThrow(/execution reverted.*-32000/i);
   });
 
+  it("eth_sendTransaction routes tx.chainId through proxy + signer (BSC USDT regression)", async () => {
+    // The bug this pins down: popup-global chain was 1 (mainnet),
+    // user opened Uniswap on BSC (chain 56), dApp shipped
+    // `tx.chainId: "0x38"`. Pre-fix the SDK used the global → EIP-155
+    // signed for chain 1 → BSC rejected, mainnet contract didn't
+    // exist, tx orphaned. Fix: tx.chainId wins everywhere — proxy
+    // URL (eth_gasPrice + eth_estimateGas + eth_sendRawTransaction
+    // all targeted at chain 56) and signer envelope chain_id 56.
+    const proxyCall = jest.fn();
+    proxyCall.mockResolvedValueOnce("0x10"); // eth_getTransactionCount
+    proxyCall.mockResolvedValueOnce("0xa"); // eth_gasPrice
+    proxyCall.mockResolvedValueOnce("0xabc"); // eth_sendRawTransaction
+    const mockSigner = createMockSigner("0xACCT", "1");
+    const fakeClient: any = {
+      evm: {
+        rpcProxy: { call: proxyCall },
+        signers: { list: jest.fn() },
+        sign: {},
+      },
+    };
+    const provider = await EIP1193Provider.create({
+      signersSource: { type: "manual", signers: [mockSigner] },
+      defaultChainId: 1, // popup global "mainnet" — the wrong choice
+      client: fakeClient,
+    });
+
+    const tx = {
+      from: "0xACCT",
+      to: "0x55d398326f99059ff775485246999027b3197955", // BSC USDT
+      data: "0x095ea7b3",
+      gas: "0xd25d",
+      chainId: "0x38", // user is on BSC
+    };
+    const result = await provider.request({
+      method: "eth_sendTransaction",
+      params: [tx],
+    });
+    expect(result).toBe("0xabc");
+
+    // Every chain-touching RPC on the dApp's chain (56), not the
+    // popup global (1). Order: nonce → gasPrice → broadcast.
+    expect(proxyCall.mock.calls.map((c) => [c[0], c[1]])).toEqual([
+      [56, "eth_getTransactionCount"],
+      [56, "eth_gasPrice"],
+      [56, "eth_sendRawTransaction"],
+    ]);
+    // Signer envelope chain_id is the dApp's "56", not "1".
+    expect(mockSigner.signTransaction).toHaveBeenCalledWith(
+      expect.anything(),
+      "56",
+    );
+  });
+
+  it("eth_sendTransaction falls back to provider global when tx.chainId is absent", async () => {
+    // Single-chain dApps that don't ship chainId per request keep
+    // working with the popup-global behavior — this is the regression
+    // guard so the BSC USDT fix doesn't accidentally break the
+    // existing single-chain happy path.
+    const proxyCall = jest.fn();
+    proxyCall.mockResolvedValueOnce("0x1"); // nonce
+    proxyCall.mockResolvedValueOnce("0x1"); // gasPrice
+    proxyCall.mockResolvedValueOnce("0xdead"); // broadcast
+    const mockSigner = createMockSigner("0xACCT", "1");
+    const provider = await EIP1193Provider.create({
+      signersSource: { type: "manual", signers: [mockSigner] },
+      defaultChainId: 10,
+      client: { evm: { rpcProxy: { call: proxyCall } } } as any,
+    });
+    await provider.request({
+      method: "eth_sendTransaction",
+      params: [{ from: "0xACCT", to: "0xbeef", gas: "0x5208" }],
+    });
+    // No tx.chainId → use provider default (10).
+    expect(proxyCall.mock.calls.map((c) => c[0])).toEqual([10, 10, 10]);
+    expect(mockSigner.signTransaction).toHaveBeenCalledWith(
+      expect.anything(),
+      undefined, // signer falls back to its own _chainID
+    );
+  });
+
   it("throws a clear error when no client was configured (manual mode without proxy)", async () => {
     // Manual signersSource without an explicit `client` means no
     // proxy route — caller opted out. A read call must therefore

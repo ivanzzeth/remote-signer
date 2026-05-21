@@ -23,6 +23,28 @@ import {
 } from "./provider-storage";
 
 /**
+ * EIP-1193 chainId comes in as a hex string ("0x1", "0x38") or a
+ * raw number depending on the dApp. We need a uint for the daemon
+ * proxy URL and a decimal string for the sign envelope, so normalise
+ * to a number once at the IO boundary. Returns undefined when the
+ * input is absent — that's the "no override, use provider global"
+ * signal.
+ */
+function normalizeChainID(raw: unknown): number | undefined {
+  if (raw == null) return undefined;
+  if (typeof raw === "number") return raw;
+  if (typeof raw === "bigint") return Number(raw);
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    if (trimmed === "") return undefined;
+    return trimmed.startsWith("0x") || trimmed.startsWith("0X")
+      ? Number(BigInt(trimmed))
+      : Number(trimmed);
+  }
+  return undefined;
+}
+
+/**
  * EIP-1193 transactions arrive with hex-encoded quantity fields (value, gas,
  * nonce, gasPrice, maxFeePerGas, maxPriorityFeePerGas). Our SDK + backend
  * use decimal strings for big numbers and Go uint64 for gas/nonce. Convert
@@ -337,6 +359,7 @@ export class EIP1193Provider {
   private async _proxyRPCCall(
     method: string,
     params: unknown[],
+    chainIdOverride?: number,
   ): Promise<unknown> {
     if (!this._client) {
       throw new Error(
@@ -344,7 +367,14 @@ export class EIP1193Provider {
         `— pass one via config.client or use signersSource.type "client" / "hdwallet"`,
       );
     }
-    return await this._client.evm.rpcProxy.call(this._chainId, method, params);
+    // chainIdOverride wins over the provider's global. dApps that ship
+    // a chain-specific tx (`tx.chainId`) MUST be able to broadcast +
+    // pre-fill against THAT chain, regardless of whichever chain the
+    // popup was last viewing — otherwise EIP-155 signatures bind to
+    // the wrong chain (the BSC USDT approve regression) and no
+    // network will mine the result.
+    const chain = chainIdOverride ?? this._chainId;
+    return await this._client.evm.rpcProxy.call(chain, method, params);
   }
 
   /**
@@ -647,17 +677,38 @@ export class EIP1193Provider {
         const [tx] = params as [any];
         const signer = this._resolveSigner(tx.from);
 
-        const filled = await this._fillTxDefaults(tx, signer.address);
-        const signedTx = await signer.signTransaction(normalizeEip1193Tx(filled));
+        // dApp-supplied `tx.chainId` wins over the provider's global.
+        // Without this, popup-on-chain-1 + dApp-on-chain-56 produces
+        // an EIP-155 signature for the wrong chain and the broadcast
+        // is silently rejected by every network (the BSC USDT
+        // regression). normalizeChainID handles both hex strings
+        // ("0x38") and numeric inputs.
+        const txChain = normalizeChainID(tx.chainId);
 
-        // Broadcast through the daemon's wallet RPC proxy.
-        return await this._proxyRPCCall("eth_sendRawTransaction", [signedTx]);
+        const filled = await this._fillTxDefaults(tx, signer.address, txChain);
+        const signedTx = await signer.signTransaction(
+          normalizeEip1193Tx(filled),
+          txChain !== undefined ? String(txChain) : undefined,
+        );
+
+        // Broadcast through the daemon's wallet RPC proxy — also on
+        // the dApp's chain, otherwise the tx hash exists on chain X
+        // but the daemon's eth_sendRawTransaction goes to chain Y.
+        return await this._proxyRPCCall(
+          "eth_sendRawTransaction",
+          [signedTx],
+          txChain,
+        );
       }
 
       case "eth_signTransaction": {
         const [tx] = params as [any];
         const signer = this._resolveSigner(tx.from);
-        return await signer.signTransaction(normalizeEip1193Tx(tx));
+        const txChain = normalizeChainID(tx.chainId);
+        return await signer.signTransaction(
+          normalizeEip1193Tx(tx),
+          txChain !== undefined ? String(txChain) : undefined,
+        );
       }
 
       // Read methods - delegate to RPC provider
@@ -739,23 +790,29 @@ export class EIP1193Provider {
    * performs client-side before signing. Missing fields come from the
    * daemon's RPC proxy; values the caller supplied are preserved as-is.
    */
-  private async _fillTxDefaults(tx: any, fromAddr: string): Promise<any> {
+  private async _fillTxDefaults(
+    tx: any,
+    fromAddr: string,
+    chainIdOverride?: number,
+  ): Promise<any> {
     const filled = { ...tx, from: tx.from ?? fromAddr };
     if (filled.nonce == null) {
       filled.nonce = await this._proxyRPCCall(
         "eth_getTransactionCount",
         [fromAddr, "pending"],
+        chainIdOverride,
       );
     }
     if (filled.gas == null && filled.gasLimit == null) {
       filled.gas = await this._proxyRPCCall(
         "eth_estimateGas",
         [{ ...filled, from: fromAddr }],
+        chainIdOverride,
       );
     }
     const hasFeeCap = filled.maxFeePerGas != null || filled.maxPriorityFeePerGas != null;
     if (filled.gasPrice == null && !hasFeeCap) {
-      filled.gasPrice = await this._proxyRPCCall("eth_gasPrice", []);
+      filled.gasPrice = await this._proxyRPCCall("eth_gasPrice", [], chainIdOverride);
     }
     return filled;
   }

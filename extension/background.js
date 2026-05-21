@@ -1507,10 +1507,19 @@
       });
       return resp.signature;
     }
-    /** Sign an EVM transaction. Returns signed transaction hex. */
-    async signTransaction(transaction) {
+    /**
+     * Sign an EVM transaction. Returns signed transaction hex.
+     *
+     * `chainIdOverride` (optional) wins over the signer's default
+     * chainID — multi-account/multi-chain dApps pass `tx.chainId`
+     * per request and the resulting EIP-155 `v` MUST be for that
+     * chain or the network rejects the tx (the BSC USDT approve
+     * regression: signer was at chain 1 but the dApp meant chain 56,
+     * the signature went out for mainnet and no chain would mine it).
+     */
+    async signTransaction(transaction, chainIdOverride) {
       const resp = await this.signService.execute({
-        chain_id: this._chainID,
+        chain_id: chainIdOverride ?? this._chainID,
         signer_address: this.address,
         sign_type: "transaction",
         payload: { transaction }
@@ -1800,6 +1809,17 @@
     } catch {
     }
   }
+  function normalizeChainID(raw) {
+    if (raw == null) return void 0;
+    if (typeof raw === "number") return raw;
+    if (typeof raw === "bigint") return Number(raw);
+    if (typeof raw === "string") {
+      const trimmed = raw.trim();
+      if (trimmed === "") return void 0;
+      return trimmed.startsWith("0x") || trimmed.startsWith("0X") ? Number(BigInt(trimmed)) : Number(trimmed);
+    }
+    return void 0;
+  }
   function normalizeEip1193Tx(tx) {
     const hexToDec = (v) => {
       if (v == null) return void 0;
@@ -2000,13 +2020,14 @@
      * messages identify the failing layer rather than collapsing
      * everything into "network or connection issue".
      */
-    async _proxyRPCCall(method, params) {
+    async _proxyRPCCall(method, params, chainIdOverride) {
       if (!this._client) {
         throw new Error(
           `EIP1193Provider: ${method} requires a client for the daemon RPC proxy \u2014 pass one via config.client or use signersSource.type "client" / "hdwallet"`
         );
       }
-      return await this._client.evm.rpcProxy.call(this._chainId, method, params);
+      const chain = chainIdOverride ?? this._chainId;
+      return await this._client.evm.rpcProxy.call(chain, method, params);
     }
     /**
      * Pick the signer a sign / send request should route through.
@@ -2246,14 +2267,26 @@
         case "eth_sendTransaction": {
           const [tx] = params;
           const signer = this._resolveSigner(tx.from);
-          const filled = await this._fillTxDefaults(tx, signer.address);
-          const signedTx = await signer.signTransaction(normalizeEip1193Tx(filled));
-          return await this._proxyRPCCall("eth_sendRawTransaction", [signedTx]);
+          const txChain = normalizeChainID(tx.chainId);
+          const filled = await this._fillTxDefaults(tx, signer.address, txChain);
+          const signedTx = await signer.signTransaction(
+            normalizeEip1193Tx(filled),
+            txChain !== void 0 ? String(txChain) : void 0
+          );
+          return await this._proxyRPCCall(
+            "eth_sendRawTransaction",
+            [signedTx],
+            txChain
+          );
         }
         case "eth_signTransaction": {
           const [tx] = params;
           const signer = this._resolveSigner(tx.from);
-          return await signer.signTransaction(normalizeEip1193Tx(tx));
+          const txChain = normalizeChainID(tx.chainId);
+          return await signer.signTransaction(
+            normalizeEip1193Tx(tx),
+            txChain !== void 0 ? String(txChain) : void 0
+          );
         }
         // Read methods - delegate to RPC provider
         case "eth_blockNumber":
@@ -2317,23 +2350,25 @@
      * performs client-side before signing. Missing fields come from the
      * daemon's RPC proxy; values the caller supplied are preserved as-is.
      */
-    async _fillTxDefaults(tx, fromAddr) {
+    async _fillTxDefaults(tx, fromAddr, chainIdOverride) {
       const filled = { ...tx, from: tx.from ?? fromAddr };
       if (filled.nonce == null) {
         filled.nonce = await this._proxyRPCCall(
           "eth_getTransactionCount",
-          [fromAddr, "pending"]
+          [fromAddr, "pending"],
+          chainIdOverride
         );
       }
       if (filled.gas == null && filled.gasLimit == null) {
         filled.gas = await this._proxyRPCCall(
           "eth_estimateGas",
-          [{ ...filled, from: fromAddr }]
+          [{ ...filled, from: fromAddr }],
+          chainIdOverride
         );
       }
       const hasFeeCap = filled.maxFeePerGas != null || filled.maxPriorityFeePerGas != null;
       if (filled.gasPrice == null && !hasFeeCap) {
-        filled.gasPrice = await this._proxyRPCCall("eth_gasPrice", []);
+        filled.gasPrice = await this._proxyRPCCall("eth_gasPrice", [], chainIdOverride);
       }
       return filled;
     }
