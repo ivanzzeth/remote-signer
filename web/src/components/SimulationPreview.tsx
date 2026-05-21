@@ -30,6 +30,7 @@ export function SimulationPreview({
   const [data, setData] = useState<RequestSimulation | null>(null);
   const [pending, setPending] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notFound, setNotFound] = useState(false);
   const [fetchedAt, setFetchedAt] = useState<number | null>(null);
 
   const polling =
@@ -48,14 +49,21 @@ export function SimulationPreview({
         setData(sim);
         setPending(false);
         setError(null);
+        setNotFound(false);
         setFetchedAt(Date.now());
       } catch (err) {
         if (cancelled) return;
-        // 404 = "simulation not yet available" — keep the pending
-        // state visible without surfacing it as a hard error.
+        // 404 = "simulation not yet available". While the request
+        // is still live the pipeline may yet write a row, so keep
+        // the spinner. Once the request reaches a terminal state
+        // with no row on disk, there will never be one — surface
+        // that as a definitive "no snapshot" instead of an infinite
+        // spinner (the common case for requests created before the
+        // simulation-persistence code shipped).
         if (err instanceof APIError && err.statusCode === 404) {
-          setPending(true);
           setError(null);
+          setNotFound(true);
+          setPending(polling);
         } else {
           // Any other error: stop the spinner. Showing "loading…"
           // and an error string side-by-side would just confuse
@@ -106,6 +114,12 @@ export function SimulationPreview({
         <div className="flex items-center gap-2 text-sm text-ink-500">
           <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-ink-300 border-t-accent-500" />
           Evaluating… first simulation takes a few seconds.
+        </div>
+      )}
+
+      {!pending && !data && notFound && !error && (
+        <div className="text-sm text-ink-500">
+          No simulation recorded for this request.
         </div>
       )}
 
