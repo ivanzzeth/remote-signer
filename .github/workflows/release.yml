@@ -53,12 +53,18 @@ jobs:
           npm run build
 
       - name: Build remote-signer (multi-arch, UI embedded)
+        # Inject the bare tag (no leading 'v') into internal/version.Version
+        # via -X ldflag, so `remote-signer version` matches the GitHub
+        # release for each downloaded binary. See GIT.md for the
+        # release-versioning convention.
         run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "Building remote-signer version $VERSION"
           for goos in linux darwin; do
             for goarch in amd64 arm64; do
               GOOS=$goos GOARCH=$goarch CGO_ENABLED=0 go build \
                 -tags embed_web \
-                -ldflags="-s -w" \
+                -ldflags="-s -w -X github.com/ivanzzeth/remote-signer/internal/version.Version=$VERSION" \
                 -o "remote-signer-${goos}-${goarch}" \
                 ./cmd/remote-signer
             done
@@ -83,6 +89,44 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Publish remote-signer-client to npm with the tagged version. Decoupled
+  # from the desktop matrix so an OS-runner outage doesn't block SDK
+  # publishing; runs in parallel with `desktop`. Requires NPM_TOKEN repo
+  # secret — a Granular Access Token scoped to remote-signer-client only,
+  # read + write, bypass-2FA enabled. See GIT.md "Adding NPM_TOKEN secret".
+  sdk-publish:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          # Configure npm to pull auth from NPM_TOKEN env var below.
+          registry-url: 'https://registry.npmjs.org/'
+
+      - name: Sync package version with release tag
+        # `npm version` requires bare semver — strip the leading 'v' from
+        # the git tag. `--allow-same-version` lets us replay a release
+        # without churn when the source already matches.
+        working-directory: pkg/js-client
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "Setting remote-signer-client version to $VERSION"
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+
+      - name: Install + build
+        working-directory: pkg/js-client
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Publish to npm
+        working-directory: pkg/js-client
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
 
   desktop:
     # Each platform builds its own desktop installer. electron-builder
@@ -165,10 +209,15 @@ jobs:
         # filename is the same regardless of GOOS — electron-builder also
         # handles the Windows .exe rename on Windows runs via the
         # extraResources `filter`.
+        #
+        # Same version-injection convention as the main release job —
+        # the daemon shipped inside the installer reports the release
+        # tag from `remote-signer version`.
         run: |
+          VERSION="${GITHUB_REF_NAME#v}"
           GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 go build \
             -tags embed_web \
-            -ldflags="-s -w" \
+            -ldflags="-s -w -X github.com/ivanzzeth/remote-signer/internal/version.Version=$VERSION" \
             -o remote-signer${{ matrix.goos == 'windows' && '.exe' || '' }} \
             ./cmd/remote-signer
 
@@ -178,9 +227,18 @@ jobs:
         # target/arch flags override the defaults baked into package.json.
         # `--publish never` tells electron-builder not to attempt its own
         # upload — the action-gh-release step below owns that.
+        #
+        # Before packaging, sync package.json's "version" field from the
+        # release tag (stripped of leading 'v'). electron-builder reads
+        # this for the installer filename (Remote.Signer-${version}-…),
+        # so without this step the installer ships with the dev sentinel
+        # baked into source and the artefact name doesn't match the tag.
         working-directory: electron
         run: |
           npm ci --no-audit --no-fund
+          TAG="${GITHUB_REF_NAME#v}"
+          echo "Setting electron app version to $TAG"
+          npm version "$TAG" --no-git-tag-version --allow-same-version
           npm run build
           npx electron-builder ${{ matrix.target_args }} --publish never
 

@@ -1,7 +1,7 @@
 {
   "name": "@ivanzzeth/remote-signer-desktop",
   "private": true,
-  "version": "0.4.0-dev",
+  "version": "0.0.0-dev",
   "description": "Electron desktop shell around the remote-signer daemon",
   "main": "dist/main.js",
   "scripts": {
