@@ -4409,13 +4409,20 @@
     return initPromise;
   }
   var pendingSignerRefresh = null;
+  var SIGNER_REFRESH_COOLDOWN_MS = 5e3;
+  var lastSignerRefreshAt = 0;
   async function refreshSignersIgnoringErrors() {
     if (!provider) return;
     if (pendingSignerRefresh) return pendingSignerRefresh;
-    const t0 = Date.now();
+    const now = Date.now();
+    if (now - lastSignerRefreshAt < SIGNER_REFRESH_COOLDOWN_MS) {
+      return;
+    }
+    const t0 = now;
     pendingSignerRefresh = (async () => {
       try {
         await provider.refreshSigners();
+        lastSignerRefreshAt = Date.now();
         refreshLog.debug("refresh ok", { durMs: Date.now() - t0 });
       } catch (err2) {
         refreshLog.warn("refresh failed", {

@@ -862,6 +862,14 @@ function ensureInit(): Promise<void> {
 // share one refresh round-trip, not stampede the daemon.
 let pendingSignerRefresh: Promise<void> | null = null;
 
+// Time-based cooldown: even after in-flight de-dupe, firing a
+// /signers fetch on *every* dApp call is a 5x amplifier (Uniswap
+// hammers ~20 reads / sec during a swap and we'd issue 20 refreshes
+// in lockstep). 5s window covers the realistic case ("CLI just
+// unlocked a signer") without burning the agent's rate-limit budget.
+const SIGNER_REFRESH_COOLDOWN_MS = 5_000;
+let lastSignerRefreshAt = 0;
+
 // Pull a fresh signer list from the daemon and swap it into the
 // provider, so dApp-visible accounts + signing routes always reflect
 // current daemon truth. Best-effort — a transient daemon hiccup
@@ -869,10 +877,15 @@ let pendingSignerRefresh: Promise<void> | null = null;
 async function refreshSignersIgnoringErrors(): Promise<void> {
   if (!provider) return;
   if (pendingSignerRefresh) return pendingSignerRefresh;
-  const t0 = Date.now();
+  const now = Date.now();
+  if (now - lastSignerRefreshAt < SIGNER_REFRESH_COOLDOWN_MS) {
+    return; // honored a refresh recently, skip
+  }
+  const t0 = now;
   pendingSignerRefresh = (async () => {
     try {
       await provider!.refreshSigners();
+      lastSignerRefreshAt = Date.now();
       refreshLog.debug("refresh ok", { durMs: Date.now() - t0 });
     } catch (err) {
       refreshLog.warn("refresh failed", {
