@@ -1,4 +1,4 @@
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { APIError } from "remote-signer-client";
 import type { ListSignersFilter } from "remote-signer-client";
 import {
@@ -772,7 +772,30 @@ function Field({
 
 function AccessPanel({ address }: { address: string }) {
   const access = useApi((c) => c.evm.signers.listAccess(address), [address]);
+  // Names directory drives the grant-to picker. We hide the current
+  // caller (they're already the owner — granting to self would be a
+  // no-op error) and any key that already has access (so the dropdown
+  // doesn't double-list — the existing-grants table above is the
+  // visual cue for them). "agent" is the default because that's the
+  // bootstrap key most operators want to grant to.
+  const namesApi = useApi((c) => c.apiKeys.names());
+  const callerKeyID = getCredentials()?.apiKeyID ?? "";
+  const alreadyGranted = new Set((access.data ?? []).map((g) => g.api_key_id));
+  const grantOptions = (namesApi.data?.keys ?? []).filter(
+    (k) => k.id !== callerKeyID && !alreadyGranted.has(k.id),
+  );
+  const defaultGrantKey =
+    grantOptions.find((k) => k.id === "agent")?.id ?? grantOptions[0]?.id ?? "";
   const [grantKey, setGrantKey] = useState("");
+  // Auto-select once the directory loads; the operator can still pick
+  // a different key, but a sensible default beats an empty <select>.
+  // Only fires when grantKey is empty so a manual choice sticks.
+  useEffect(() => {
+    if (grantKey === "" && defaultGrantKey !== "") {
+      setGrantKey(defaultGrantKey);
+    }
+  }, [defaultGrantKey, grantKey]);
+
   const [transferTo, setTransferTo] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [panelError, setPanelError] = useState<string | null>(null);
@@ -895,15 +918,32 @@ function AccessPanel({ address }: { address: string }) {
           className="mt-2 flex flex-wrap items-end gap-3"
         >
           <div className="flex-1 min-w-[200px]">
-            <label className="mb-1 block text-[11px] uppercase tracking-wide text-ink-500">
-              Grant access to (api key id)
+            <label
+              htmlFor="grant-apikey-select"
+              className="mb-1 block text-[11px] uppercase tracking-wide text-ink-500"
+            >
+              Grant access to (api key)
             </label>
-            <input
-              type="text"
+            <select
+              id="grant-apikey-select"
+              data-testid="grant-apikey"
               value={grantKey}
               onChange={(e) => setGrantKey(e.target.value)}
-              className="w-full rounded-md border border-ink-300 px-2 py-1 text-sm"
-            />
+              disabled={namesApi.loading || grantOptions.length === 0}
+              className="w-full rounded-md border border-ink-300 bg-white px-2 py-1 text-sm disabled:opacity-50"
+            >
+              {grantOptions.length === 0 ? (
+                <option value="">
+                  {namesApi.loading ? "Loading…" : "No keys available"}
+                </option>
+              ) : (
+                grantOptions.map((k) => (
+                  <option key={k.id} value={k.id}>
+                    {k.id} {k.name && `· ${k.name}`}
+                  </option>
+                ))
+              )}
+            </select>
           </div>
           <button
             type="submit"

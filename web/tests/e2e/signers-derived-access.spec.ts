@@ -54,11 +54,11 @@ test("derived HD address opens a functional access panel for the owner", async (
   await derivedRow.click();
   await expect(authedPage.getByText(/not the owner of signer/i)).toHaveCount(0);
 
-  // 5. The Grant form must render and be interactive. Locating by the
-  //    label keeps the assertion stable against surrounding layout.
-  const grantInput = authedPage.locator(
-    "label:has-text('Grant access to') + input",
-  );
-  await expect(grantInput).toBeVisible();
-  await expect(grantInput).toBeEnabled();
+  // 5. The Grant form must render and be interactive. We assert the
+  //    select by its data-testid rather than the visible label so the
+  //    selector survives the input → select migration done in the
+  //    Grant-access dropdown commit.
+  const grantSelect = authedPage.locator("[data-testid=grant-apikey]");
+  await expect(grantSelect).toBeVisible();
+  await expect(grantSelect).toBeEnabled();
 });
