@@ -90,6 +90,8 @@ export type {
   ApproveResponse,
   PreviewRuleRequest,
   PreviewRuleResponse,
+  RequestSimulation,
+  SimulationDecision,
   // Rule types
   RuleType,
   RuleMode,

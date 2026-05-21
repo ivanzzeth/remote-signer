@@ -86,6 +86,16 @@ func initRouterAndServer(
 		Simulator:                    simulator,
 		RPCProvider:                  rpcProvider,
 		SettingsManager:              settingsMgr,
+		RequestRepo:                  repos.requestRepo,
+	}
+	// Simulation preview: the request-detail UI's preview panel
+	// reads this repo. Optional — without it the GET /requests/
+	// {id}/simulation route simply doesn't register and the panel
+	// shows "evaluating" forever.
+	if simRepo, simRepoErr := storage.NewGormRequestSimulationRepository(db); simRepoErr == nil {
+		routerConfig.RequestSimulationRepo = simRepo
+	} else {
+		log.Warn("simulation preview API disabled: repo init failed", "error", simRepoErr)
 	}
 	// Wire the on-chain transaction tracker if we have an RPC + the
 	// repos it needs. Best-effort: a build that omits these still

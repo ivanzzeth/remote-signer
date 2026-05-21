@@ -191,4 +191,59 @@ export class EvmRequestService {
       previewRequest,
     );
   }
+
+  /**
+   * Get the simulation pipeline's most recent evaluation of this
+   * request. Returns a `RequestSimulation` row populated with the
+   * decision, balance changes, decoded events, and contracts the
+   * simulation touched. Throws an APIError(404) when the
+   * simulation hasn't run yet — callers should treat that as
+   * "evaluating, retry in a few seconds" rather than a hard error.
+   *
+   * The web UI's request-detail page polls this every 3s while the
+   * request is pending so the operator sees what the tx would do
+   * before deciding to manually approve.
+   */
+  async getSimulation(requestID: string): Promise<RequestSimulation> {
+    return this.transport.request<RequestSimulation>(
+      "GET",
+      `/api/v1/evm/requests/${requestID}/simulation`,
+      null,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Simulation preview shapes
+// ---------------------------------------------------------------------------
+
+/** Outcome the simulation pipeline would settle on for this request. */
+export type SimulationDecision = "allow" | "deny" | "no_match";
+
+/**
+ * Persisted snapshot of the simulation engine's most recent run
+ * against a sign request. Created lazily on the first eval, upserted
+ * on every re-eval — UIs reading this get the latest known state
+ * without having to track which evaluation tick produced it.
+ */
+export interface RequestSimulation {
+  sign_request_id: string;
+  chain_id: string;
+  decision: SimulationDecision | string;
+  reason?: string;
+  success: boolean;
+  gas_used: number;
+  revert_reason?: string;
+  /** Per-account balance deltas as a JSON-encoded array. */
+  balance_changes?: unknown;
+  /** Decoded event log as a JSON-encoded array. */
+  events?: unknown;
+  /** Distinct event-emitting addresses, sorted. */
+  contracts?: string[];
+  /** Decoded calldata (function + args). Empty for non-transaction sign_types. */
+  decoded_calldata?: unknown;
+  /** Raw SimulationResult JSON — fallback for clients that want to render fields the typed columns don't surface. */
+  raw_result?: unknown;
+  simulated_at: string;
+  updated_at: string;
 }
