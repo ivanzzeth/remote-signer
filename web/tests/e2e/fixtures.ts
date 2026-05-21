@@ -13,14 +13,13 @@ export const KEYSTORE_PASSWORD = "e2e-test-password";
 
 /**
  * Reads the bootstrap admin keystore JSON from the test daemon's home
- * directory. Resolves the actual file path by following the ptr file
- * the daemon writes during bootstrap (the keystore's filename is hash-
- * derived from the public key, so we can't hardcode it).
+ * directory. Post-cleanup the daemon lands the keystore at a single
+ * canonical path (admin.keystore.json) — no ptr file indirection any
+ * more, so we just read it straight.
  */
 export function readAdminKeystoreJSON(): string {
   const state = getState();
-  const ptrPath = join(state.home, "apikeys", "admin.key.keystore");
-  const keystorePath = readFileSync(ptrPath, "utf8").trim();
+  const keystorePath = join(state.home, "apikeys", "admin.keystore.json");
   return readFileSync(keystorePath, "utf8");
 }
 

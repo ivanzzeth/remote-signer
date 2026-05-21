@@ -182,13 +182,39 @@ func (s *SignerAccessService) findParentAddress(hdMgr HDWalletParentResolver, de
 }
 
 // IsOwner returns true if the caller owns the signer.
+//
+// HD-wallet derived addresses don't get their own ownership row — only
+// the primary (parent) address does. When the direct lookup misses, fall
+// back to resolving derived → parent via the wired HD wallet manager and
+// re-check ownership there. Without this, GrantAccess / RevokeAccess /
+// ListAccess / TransferOwnership all 403'd on derived addresses even
+// when the caller legitimately owned the parent wallet.
 func (s *SignerAccessService) IsOwner(ctx context.Context, callerKeyID, signerAddress string) (bool, error) {
 	ownership, err := s.ownershipRepo.Get(ctx, signerAddress)
 	if err != nil {
-		if types.IsNotFound(err) {
+		if !types.IsNotFound(err) {
+			return false, fmt.Errorf("failed to get ownership: %w", err)
+		}
+		// Direct miss — try HD wallet parent resolution.
+		if s.hdWalletMgrFn == nil {
 			return false, nil
 		}
-		return false, fmt.Errorf("failed to get ownership: %w", err)
+		hdMgr, hdErr := s.hdWalletMgrFn()
+		if hdErr != nil || hdMgr == nil {
+			return false, nil
+		}
+		parentAddr, found := s.findParentAddress(hdMgr, signerAddress)
+		if !found {
+			return false, nil
+		}
+		parentOwnership, pErr := s.ownershipRepo.Get(ctx, parentAddr)
+		if pErr != nil {
+			if types.IsNotFound(pErr) {
+				return false, nil
+			}
+			return false, fmt.Errorf("failed to get parent ownership: %w", pErr)
+		}
+		return parentOwnership.OwnerID == callerKeyID, nil
 	}
 	return ownership.OwnerID == callerKeyID, nil
 }
