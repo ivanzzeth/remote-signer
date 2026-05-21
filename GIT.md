@@ -202,7 +202,20 @@ Don't combine the two — once you've shipped a `v0.4.1` fix, leave
 
 ## Running via Docker
 
-Two compose files in the repo root, picked by use case:
+Pre-built images live at **`ghcr.io/ivanzzeth/remote-signer`**, pushed
+by the release workflow for every tag. Available tags:
+
+- `:latest` — newest non-prerelease tag.
+- `:0.3.8`, `:0.4.0`, … — pinned to a specific release.
+- `:0.3`, `:0.4`, … — floating major.minor; tracks patch releases.
+
+Multi-arch: `linux/amd64` + `linux/arm64`. The image starts private —
+make it public at github.com/users/ivanzzeth/packages/container/remote-signer/settings
+if you want unauthenticated `docker pull`.
+
+Two compose files in the repo root, picked by use case. Both default
+to pulling the `:latest` image from ghcr; both still support local
+`docker compose build` if you want to bake source changes.
 
 ### `docker-compose.local.yml` — personal / single-machine
 
@@ -214,10 +227,16 @@ Docker's restart-on-crash and (with a one-line systemd unit or
 migrating any data.
 
 ```bash
-# Build
-docker compose -f docker-compose.local.yml build
+# Pull + run (default — uses the ghcr image, no local build)
+UID=$(id -u) GID=$(id -g) docker compose -f docker-compose.local.yml up -d
 
-# Start (pass UID/GID so the bind mount stays writable)
+# Pin to a specific release:
+REMOTE_SIGNER_IMAGE=ghcr.io/ivanzzeth/remote-signer:0.3.8 \
+  UID=$(id -u) GID=$(id -g) \
+  docker compose -f docker-compose.local.yml up -d
+
+# Build from local source instead of pulling (dev mode):
+docker compose -f docker-compose.local.yml build
 UID=$(id -u) GID=$(id -g) docker compose -f docker-compose.local.yml up -d
 
 # Logs

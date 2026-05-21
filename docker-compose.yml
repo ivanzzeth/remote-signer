@@ -26,6 +26,12 @@ services:
   # Remote Signer Service
   # ==========================================================================
   remote-signer:
+    # Pull the pre-built multi-arch image from ghcr by default; set
+    # REMOTE_SIGNER_IMAGE to a different tag if you want a specific
+    # release (e.g. REMOTE_SIGNER_IMAGE=ghcr.io/ivanzzeth/remote-signer:0.3.8).
+    # The `build:` block below means `docker compose build` still works
+    # if you've checked out source and want to bake local changes.
+    image: ${REMOTE_SIGNER_IMAGE:-ghcr.io/ivanzzeth/remote-signer:latest}
     build:
       context: .
       dockerfile: Dockerfile

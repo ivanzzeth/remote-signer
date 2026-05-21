@@ -16,6 +16,10 @@ on:
 
 permissions:
   contents: write
+  # docker-publish job pushes to ghcr.io with GITHUB_TOKEN; needs
+  # explicit packages:write since the default workflow token grants
+  # only contents:write.
+  packages: write
 
 jobs:
   release:
@@ -248,3 +252,70 @@ jobs:
           files: ${{ matrix.asset_glob }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Multi-arch Docker image push to ghcr. Independent of the desktop
+  # matrix and sdk-publish jobs — runs in parallel after the main
+  # release job creates the GitHub Release object. Uses buildx + qemu
+  # so linux/arm64 cross-builds work from the ubuntu-latest runner.
+  #
+  # Auth is the workflow's built-in GITHUB_TOKEN (no extra secret
+  # required); needs packages:write at the workflow level above.
+  # Resulting image lives at:
+  #
+  #   ghcr.io/ivanzzeth/remote-signer:<tag>
+  #   ghcr.io/ivanzzeth/remote-signer:<major>.<minor>
+  #   ghcr.io/ivanzzeth/remote-signer:latest
+  #
+  # The package starts private. To let `docker pull` work without
+  # auth, flip it to public once on
+  # github.com/users/ivanzzeth/packages/container/remote-signer/settings.
+  docker-publish:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU (multi-arch emulation)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive VERSION (strip leading v)
+        # Mirror the convention used by the Go ldflag inject and the
+        # SDK npm version step — bare semver, no leading 'v'.
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
+
+      - name: Derive image tags
+        # metadata-action produces the list of tags from the git ref.
+        # type=semver,pattern=… extracts components from semver tags.
+        # type=raw,value=latest pins the floating tag to the latest
+        # release; only emitted for non-prerelease tags.
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/remote-signer
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+
+      - name: Build and push (linux/amd64 + linux/arm64)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Same VERSION convention as the Go ldflag + npm version
+          # paths — bare semver, derived above.
+          build-args: |
+            VERSION=${{ env.VERSION }}
