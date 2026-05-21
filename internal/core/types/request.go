@@ -74,6 +74,14 @@ type SignRequest struct {
 	Signature    []byte `json:"signature,omitempty" gorm:"type:bytea"`
 	SignedData   []byte `json:"signed_data,omitempty" gorm:"type:bytea"` // e.g., signed tx
 	ErrorMessage string `json:"error_message,omitempty" gorm:"type:text"`
+	// TransactionID is the FK into the transactions table — set once
+	// the wallet RPC proxy observes an eth_sendRawTransaction whose
+	// payload matches this request's SignedData. Nullable: not every
+	// SignRequest is a transaction (personal_sign / typed_data
+	// requests never get one) and a freshly-signed tx hasn't been
+	// broadcast yet. The transactions row owns all chain-side state
+	// (hash, status, receipt) so this column stays narrow.
+	TransactionID *string `json:"transaction_id,omitempty" gorm:"type:varchar(64);index"`
 	// LastNoMatchReason captures the reason text the whitelist engine
 	// would have logged when NO rule matched this request. Populated
 	// only when Status transitions to "authorizing" / "pending" via the

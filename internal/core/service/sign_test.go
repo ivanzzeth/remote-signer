@@ -192,6 +192,22 @@ func (r *mockRequestRepo) UpdateLastNoMatchReason(_ context.Context, id types.Si
 	return nil
 }
 
+func (r *mockRequestRepo) LookupBySignedData(_ context.Context, _ []byte) (*types.SignRequest, error) {
+	// Not exercised by the sign-service tests — the broadcast linkage
+	// is a TransactionService concern. Returning ErrNotFound is the
+	// safe stub: equivalent to "no broadcast matched yet".
+	return nil, types.ErrNotFound
+}
+
+func (r *mockRequestRepo) SetTransactionID(_ context.Context, id types.SignRequestID, transactionID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if req, exists := r.requests[id]; exists {
+		req.TransactionID = &transactionID
+	}
+	return nil
+}
+
 var _ storage.RequestRepository = (*mockRequestRepo)(nil)
 
 // ---------------------------------------------------------------------------
