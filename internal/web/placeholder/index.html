@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>remote-signer — UI not bundled</title>
+<style>
+  body { font: 14px/1.55 system-ui, sans-serif; max-width: 640px; margin: 80px auto; padding: 0 24px; color: #1f2937; }
+  h1 { font-size: 20px; margin: 0 0 12px; }
+  code { background: #f3f4f6; padding: 1px 6px; border-radius: 4px; font-size: 13px; }
+  ul { padding-left: 20px; }
+  li { margin: 6px 0; }
+  .hint { color: #6b7280; margin-top: 24px; font-size: 13px; }
+  a { color: #2563eb; }
+</style>
+</head>
+<body>
+<h1>UI not bundled</h1>
+<p>This <code>remote-signer</code> binary was built without the embedded
+operator web UI (the default <code>make build</code> target skips it so
+backend contributors don't need a Node toolchain).</p>
+<p>To get the real UI:</p>
+<ul>
+  <li><strong>Production / single binary:</strong> <code>make build-embed</code> — runs vite then re-builds with <code>-tags embed_web</code>.</li>
+  <li><strong>Local dev:</strong> <code>cd web && pnpm dev</code> and open <a href="http://localhost:5173">http://localhost:5173</a> — Vite's dev server proxies <code>/api/*</code> to this daemon.</li>
+</ul>
+<p class="hint">The HTTP API at <code>/api/v1/*</code>, <code>/health</code>, and <code>/metrics</code> works the same in either build.</p>
+</body>
+</html>

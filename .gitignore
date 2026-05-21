@@ -141,3 +141,8 @@ test-results/
 web/test-results/
 playwright-report/
 web/playwright-report/
+
+# Web UI build output. Produced by `make build-embed` (vite → internal/web/dist),
+# embedded into the binary via the `embed_web` build tag. Kept out of git so
+# each hash-named bundle doesn't accumulate ~380 KB of pack history per change.
+internal/web/dist/

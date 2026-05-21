@@ -85,15 +85,18 @@ jobs:
             web/package-lock.json
 
       # SDK is consumed via file:../pkg/js-client, so its dist/ must exist
-      # before `make build` runs `npm ci` for the web workspace.
+      # before `make build-embed` runs `npm ci` for the web workspace.
       - name: Build SDK
         run: |
           cd pkg/js-client
           npm ci --no-audit --no-fund
           npm run build
 
-      - name: Build web bundle + daemon binary
-        run: make build
+      - name: Build daemon binary with embedded UI
+        # Playwright drives the real React app, so this job needs the
+        # build-embed variant (vite first, then `go build -tags embed_web`).
+        # Backend-only jobs can stay on `make build` to skip vite.
+        run: make build-embed
 
       - name: Install Playwright browsers
         run: cd web && npx playwright install --with-deps chromium
