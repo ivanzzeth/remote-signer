@@ -398,6 +398,12 @@ func (r *Router) setupRoutes() error {
 		if accessService != nil {
 			apiKeyHandler.SetAccessService(accessService)
 		}
+		// /names is the lightweight read-only projection any
+		// authenticated key may pull (id + name + role + enabled). Must
+		// land BEFORE the /api/v1/api-keys/ prefix so the standard mux's
+		// longest-match wins and we don't accidentally route through
+		// ServeKeyHTTP (which would treat "names" as an id and 404).
+		r.mux.Handle("/api/v1/api-keys/names", r.withAuth(http.HandlerFunc(apiKeyHandler.ListAPIKeyNames)))
 		r.mux.Handle("/api/v1/api-keys", r.withAuthAndPerm(middleware.PermManageAPIKeys, apiKeyHandler))
 		r.mux.Handle("/api/v1/api-keys/", r.withAuthAndPerm(middleware.PermManageAPIKeys, http.HandlerFunc(apiKeyHandler.ServeKeyHTTP)))
 	}

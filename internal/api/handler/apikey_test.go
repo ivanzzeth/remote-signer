@@ -1402,3 +1402,92 @@ func TestAPIKeyHandler_Delete_AdminListError(t *testing.T) {
 	rr := doAPIKeyItemRequest(t, h, http.MethodDelete, "/api/v1/api-keys/admin-lerr", nil, apikeyAdminKey())
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
 }
+
+// ---------------------------------------------------------------------------
+// Tests: ListAPIKeyNames (lightweight, any-authenticated endpoint)
+// ---------------------------------------------------------------------------
+
+func doAPIKeyNamesRequest(t *testing.T, h *APIKeyHandler, method string, apiKey *types.APIKey) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(method, "/api/v1/api-keys/names", nil)
+	if apiKey != nil {
+		req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, apiKey))
+	}
+	rr := httptest.NewRecorder()
+	h.ListAPIKeyNames(rr, req)
+	return rr
+}
+
+func TestAPIKeyHandler_ListNames_NonAdminAllowed(t *testing.T) {
+	repo := newMockAPIKeyRepo()
+	repo.seed(makeTestAPIKey("admin", "Admin", types.APIKeySourceAPI, true))
+	repo.seed(makeTestAPIKey("agent", "Agent", types.APIKeySourceConfig, true))
+
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	require.NoError(t, err)
+
+	// An agent-role caller (which is forbidden from /api/v1/api-keys at
+	// the router layer) must succeed here — that's the whole point of
+	// the names projection.
+	agentKey := &types.APIKey{ID: "agent", Name: "Agent", Role: types.RoleAgent, Enabled: true}
+	rr := doAPIKeyNamesRequest(t, h, http.MethodGet, agentKey)
+	require.Equal(t, http.StatusOK, rr.Code, "body=%s", rr.Body.String())
+
+	var resp ListAPIKeyNamesResponse
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	assert.Len(t, resp.Keys, 2)
+}
+
+func TestAPIKeyHandler_ListNames_ProjectionStripsAuditFields(t *testing.T) {
+	repo := newMockAPIKeyRepo()
+	repo.seed(makeTestAPIKey("k1", "Name1", types.APIKeySourceAPI, true))
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	require.NoError(t, err)
+
+	rr := doAPIKeyNamesRequest(t, h, http.MethodGet, apikeyAdminKey())
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	// Decode into a loose map so we can pin the surface area —
+	// presence of timestamps / rate_limit / source would be a regression.
+	var raw map[string][]map[string]any
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&raw))
+	require.Len(t, raw["keys"], 1)
+	k := raw["keys"][0]
+	assert.ElementsMatch(t,
+		[]string{"id", "name", "role", "enabled"},
+		mapKeys(k),
+		"names projection must contain only id/name/role/enabled",
+	)
+}
+
+func TestAPIKeyHandler_ListNames_OnlyEnabledKeys(t *testing.T) {
+	repo := newMockAPIKeyRepo()
+	repo.seed(makeTestAPIKey("k1", "Enabled", types.APIKeySourceAPI, true))
+	repo.seed(makeTestAPIKey("k2", "Disabled", types.APIKeySourceAPI, false))
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	require.NoError(t, err)
+
+	rr := doAPIKeyNamesRequest(t, h, http.MethodGet, apikeyAdminKey())
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	var resp ListAPIKeyNamesResponse
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+	require.Len(t, resp.Keys, 1)
+	assert.Equal(t, "k1", resp.Keys[0].ID)
+}
+
+func TestAPIKeyHandler_ListNames_MethodNotAllowed(t *testing.T) {
+	repo := newMockAPIKeyRepo()
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	require.NoError(t, err)
+	rr := doAPIKeyNamesRequest(t, h, http.MethodPost, apikeyAdminKey())
+	assert.Equal(t, http.StatusMethodNotAllowed, rr.Code)
+}
+
+func mapKeys(m map[string]any) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}

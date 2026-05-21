@@ -56,6 +56,28 @@ type ListAPIKeysResponse struct {
 	Total int              `json:"total"`
 }
 
+// APIKeyNameResponse is the projection returned by GET
+// /api/v1/api-keys/names. Strips every audit-relevant timestamp +
+// rate-limit knob so non-admin callers only see the fields a Grant /
+// filter dropdown needs (id / name / role / enabled).
+//
+// Kept distinct from APIKeyResponse so future additions to the full
+// admin response (e.g. usage stats) don't leak into the public-by-
+// authentication name list.
+type APIKeyNameResponse struct {
+	ID      string           `json:"id"`
+	Name    string           `json:"name"`
+	Role    types.APIKeyRole `json:"role"`
+	Enabled bool             `json:"enabled"`
+}
+
+// ListAPIKeyNamesResponse is the envelope for the /names endpoint.
+// Sibling shape to ListAPIKeysResponse so a future paginated names
+// listing can drop in without a breaking change.
+type ListAPIKeyNamesResponse struct {
+	Keys []APIKeyNameResponse `json:"keys"`
+}
+
 // APIKeyHandler handles API key management endpoints.
 type APIKeyHandler struct {
 	repo          storage.APIKeyRepository
@@ -192,6 +214,43 @@ func (h *APIKeyHandler) listAPIKeys(w http.ResponseWriter, r *http.Request) {
 		resp.Keys = append(resp.Keys, toAPIKeyResponse(key))
 	}
 
+	h.writeJSON(w, resp, http.StatusOK)
+}
+
+// ListAPIKeyNames handles GET /api/v1/api-keys/names. Any
+// authenticated key may call it — the response is the minimum needed
+// to populate a Grant-access or filter dropdown (id, name, role,
+// enabled). All audit-relevant fields (timestamps, rate_limit,
+// expires_at, hash) are stripped so non-admins can see who exists
+// without seeing the operational metadata only admins should touch.
+//
+// Today this returns the full enabled set; pagination + free-text
+// search can land later under the same shape if catalogues grow.
+func (h *APIKeyHandler) ListAPIKeyNames(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	// Caller is already authenticated by the router (withAuth, not
+	// withAuthAndPerm) — anyone with a valid signature gets in.
+	keys, err := h.repo.List(r.Context(), storage.APIKeyFilter{
+		EnabledOnly: true,
+		Limit:       500,
+	})
+	if err != nil {
+		h.logger.Error("failed to list api key names", slog.String("error", err.Error()))
+		h.writeError(w, "failed to list api keys", http.StatusInternalServerError)
+		return
+	}
+	resp := ListAPIKeyNamesResponse{Keys: make([]APIKeyNameResponse, 0, len(keys))}
+	for _, k := range keys {
+		resp.Keys = append(resp.Keys, APIKeyNameResponse{
+			ID:      k.ID,
+			Name:    k.Name,
+			Role:    k.Role,
+			Enabled: k.Enabled,
+		})
+	}
 	h.writeJSON(w, resp, http.StatusOK)
 }
 
