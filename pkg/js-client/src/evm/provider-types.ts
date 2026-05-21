@@ -68,19 +68,29 @@ export interface EIP1193ProviderConfig {
   defaultAccountIndex?: number;
 
   /**
-   * Override RPC URLs for specific chain IDs
-   * @example
-   * { 1: "https://eth-mainnet.alchemyapi.io/v2/...", 137: "https://polygon-rpc.com" }
+   * @deprecated Read methods + signed-tx broadcast now route through
+   * the daemon's `/api/v1/evm/rpc/{chainId}` proxy (see
+   * EvmRPCProxyService). Keeping this field for type compatibility
+   * with older callers; new code should pass `client` and let the
+   * proxy resolve upstream.
    */
   rpcOverrides?: Record<number, string>;
 
   /**
-   * Dynamic RPC URL resolver function
-   * Called when a chain ID is not found in rpcOverrides
-   * @example
-   * (chainId) => `https://rpc.chain-${chainId}.example.com`
+   * @deprecated See `rpcOverrides`. The daemon proxy is now the
+   * single source of chain-RPC config.
    */
   rpcResolver?: (chainId: number) => string | Promise<string>;
+
+  /**
+   * RemoteSignerClient used for the wallet RPC proxy
+   * (`client.evm.rpcProxy.call`). Optional when `signersSource.type`
+   * is `"client"` or `"hdwallet"` — the provider extracts it from
+   * there automatically. Required for `"manual"` mode where there's
+   * no signersSource client to fall back on, otherwise read methods
+   * + broadcast will throw at request time.
+   */
+  client?: RemoteSignerClient;
 
   /**
    * Optional backing store for provider state ({chainId, activeAddress}).

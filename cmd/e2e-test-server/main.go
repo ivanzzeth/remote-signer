@@ -8,11 +8,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -248,6 +251,45 @@ func main() {
 	// the pending-approval-window e2e to exercise the queue path.
 	signService.SetManualApprovalEnabled(true)
 
+	// Optional RPC proxy backend pointing at the test fixture's anvil
+	// instance. Anvil serves at root (no chain-prefixed path); the
+	// daemon's RPCProvider expects baseURL/{chainID}, so we stand up
+	// a tiny path-stripping reverse proxy and point RPCProvider at it.
+	// Without this the wallet RPC proxy route doesn't register and
+	// eth_sendTransaction broadcast specs fail with 404.
+	var rpcProvider *evm.RPCProvider
+	anvilURL := strings.TrimSpace(os.Getenv("E2E_ANVIL_URL"))
+	if anvilURL != "" {
+		stripPrefix := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Forward body to anvil at /, dropping the /{chainID} prefix.
+			body, _ := io.ReadAll(r.Body)
+			req, perr := http.NewRequestWithContext(r.Context(), r.Method, anvilURL, strings.NewReader(string(body)))
+			if perr != nil {
+				http.Error(w, perr.Error(), http.StatusBadGateway)
+				return
+			}
+			req.Header = r.Header.Clone()
+			resp, ferr := http.DefaultClient.Do(req)
+			if ferr != nil {
+				http.Error(w, ferr.Error(), http.StatusBadGateway)
+				return
+			}
+			defer resp.Body.Close()
+			for k, vs := range resp.Header {
+				for _, v := range vs {
+					w.Header().Add(k, v)
+				}
+			}
+			w.WriteHeader(resp.StatusCode)
+			_, _ = io.Copy(w, resp.Body)
+		}))
+		var prErr error
+		rpcProvider, prErr = evm.NewRPCProvider(stripPrefix.URL, "")
+		if prErr != nil {
+			fatal("init e2e rpc provider: %v", prErr)
+		}
+	}
+
 	// Router.
 	router, err := api.NewRouter(authVerifier, signService, signerManager, ruleRepo, auditRepo, log, api.RouterConfig{
 		Version:             "e2e-test",
@@ -258,6 +300,7 @@ func main() {
 		BudgetRepo:          budgetRepo,
 		JSEvaluator:         jsEval,
 		WalletRepo:          walletRepo,
+		RPCProvider:         rpcProvider,
 		Template: &api.TemplateConfig{
 			TemplateRepo:    templateRepo,
 			TemplateService: templateService,

@@ -815,81 +815,79 @@ describe("EIP1193Provider - refreshSigners", () => {
   });
 });
 
-describe("EIP1193Provider - RPC error surface", () => {
-  // The user-visible bug these tests pin down: public RPC providers
-  // (llamarpc, ankr, infura) return HTML error pages on rate-limit /
-  // outage. The SDK used to call .json() blindly and surface a cryptic
-  // `SyntaxError: Unexpected token '<'` to the dApp, which Uniswap et
-  // al. render as "network or connection issue" — operators don't
-  // know that the RPC itself is at fault, not their wallet.
+describe("EIP1193Provider - daemon RPC proxy routing", () => {
+  // The provider holds zero RPC knowledge — every read method +
+  // signed-tx broadcast forwards through `client.evm.rpcProxy.call`.
+  // These tests pin the contract: chainId + method + params reach
+  // the proxy unchanged, the result round-trips back, and an upstream
+  // error wraps cleanly so dApps see a useful message.
 
-  const realFetch = globalThis.fetch;
-  afterEach(() => {
-    globalThis.fetch = realFetch;
-  });
-
-  async function buildProviderWithRpc(): Promise<EIP1193Provider> {
+  function buildProviderWithProxy(): Promise<{
+    provider: EIP1193Provider;
+    proxyCall: jest.Mock;
+  }> {
+    const proxyCall = jest.fn();
+    // Minimal client shim — only the path the proxy exercises is
+    // populated. Anything outside `evm.rpcProxy.call` would throw,
+    // which is a feature: it forces tests to be honest about the
+    // surface they're exercising.
+    const fakeClient: any = {
+      evm: {
+        rpcProxy: { call: proxyCall },
+        signers: { list: jest.fn() },
+        hdWallets: { getSigners: jest.fn() },
+        sign: {},
+      },
+    };
     return EIP1193Provider.create({
       signersSource: { type: "manual", signers: [createMockSigner("0xA", "1")] },
       defaultChainId: 1,
-      rpcOverrides: { 1: "https://rpc.example/test" },
-    });
+      client: fakeClient,
+    }).then((provider) => ({ provider, proxyCall }));
   }
 
-  it("surfaces non-JSON RPC responses with the status code + body preview", async () => {
-    const provider = await buildProviderWithRpc();
-    globalThis.fetch = jest.fn().mockResolvedValueOnce({
-      headers: new Map([["content-type", "text/html; charset=utf-8"]]),
-      status: 403,
-      text: async () => "<!DOCTYPE html><html><body>403 forbidden — rate limited</body></html>",
-    } as any) as any;
-    await expect(
-      provider.request({ method: "eth_blockNumber", params: [] })
-    ).rejects.toThrow(/returned non-JSON.*HTTP 403.*text\/html/i);
-  });
-
-  it("surfaces a JSON-RPC error.message + code on a structured failure", async () => {
-    const provider = await buildProviderWithRpc();
-    globalThis.fetch = jest.fn().mockResolvedValueOnce({
-      headers: new Map([["content-type", "application/json"]]),
-      status: 200,
-      text: async () =>
-        JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          error: { code: -32000, message: "execution reverted: ERC20: insufficient" },
-        }),
-    } as any) as any;
-    await expect(
-      provider.request({ method: "eth_call", params: [{}, "latest"] })
-    ).rejects.toThrow(/eth_call failed: execution reverted.*code -32000/i);
-  });
-
-  it("returns result on a healthy JSON response", async () => {
-    const provider = await buildProviderWithRpc();
-    globalThis.fetch = jest.fn().mockResolvedValueOnce({
-      headers: new Map([["content-type", "application/json"]]),
-      status: 200,
-      text: async () =>
-        JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0x1234" }),
-    } as any) as any;
+  it("forwards a read method through evm.rpcProxy.call with chainId + params", async () => {
+    const { provider, proxyCall } = await buildProviderWithProxy();
+    proxyCall.mockResolvedValueOnce("0x1234");
     const block = await provider.request({ method: "eth_blockNumber", params: [] });
     expect(block).toBe("0x1234");
+    expect(proxyCall).toHaveBeenCalledWith(1, "eth_blockNumber", []);
   });
 
-  it("flags malformed JSON without dumping the SyntaxError text", async () => {
-    // A 200 with json content-type but truncated body would have
-    // thrown the original cryptic SyntaxError. We instead wrap it in
-    // a "returned invalid JSON" message so the failing layer is
-    // unambiguous in bug reports.
-    const provider = await buildProviderWithRpc();
-    globalThis.fetch = jest.fn().mockResolvedValueOnce({
-      headers: new Map([["content-type", "application/json"]]),
-      status: 200,
-      text: async () => "{ truncated…",
-    } as any) as any;
+  it("preserves param payloads (eth_call object) on the way to the proxy", async () => {
+    const { provider, proxyCall } = await buildProviderWithProxy();
+    proxyCall.mockResolvedValueOnce("0xabc");
+    const tx = { to: "0xc0ffee", data: "0xdead" };
+    await provider.request({ method: "eth_call", params: [tx, "latest"] });
+    expect(proxyCall).toHaveBeenCalledWith(1, "eth_call", [tx, "latest"]);
+  });
+
+  it("wraps an upstream daemon error so dApp-side messages identify the failing layer", async () => {
+    // The proxy service itself throws a wrapped Error when the
+    // daemon returns an `error` envelope. Surface it on the dApp
+    // side intact so bug reports show "execution reverted: …"
+    // rather than the cryptic SyntaxError the old direct-fetch path
+    // produced from HTML 403 pages.
+    const { provider, proxyCall } = await buildProviderWithProxy();
+    proxyCall.mockRejectedValueOnce(
+      new Error("daemon rpc proxy: execution reverted: ERC20: insufficient (code -32000)"),
+    );
     await expect(
-      provider.request({ method: "eth_blockNumber", params: [] })
-    ).rejects.toThrow(/returned invalid JSON/i);
+      provider.request({ method: "eth_call", params: [{}, "latest"] }),
+    ).rejects.toThrow(/execution reverted.*-32000/i);
+  });
+
+  it("throws a clear error when no client was configured (manual mode without proxy)", async () => {
+    // Manual signersSource without an explicit `client` means no
+    // proxy route — caller opted out. A read call must therefore
+    // fail with a message that names the misconfiguration, not a
+    // confusing TypeError downstream.
+    const provider = await EIP1193Provider.create({
+      signersSource: { type: "manual", signers: [createMockSigner("0xA", "1")] },
+      defaultChainId: 1,
+    });
+    await expect(
+      provider.request({ method: "eth_blockNumber", params: [] }),
+    ).rejects.toThrow(/requires a client for the daemon RPC proxy/i);
   });
 });

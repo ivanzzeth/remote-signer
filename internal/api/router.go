@@ -350,6 +350,18 @@ func (r *Router) setupRoutes() error {
 			return fmt.Errorf("failed to create broadcast handler: %w", bcErr)
 		}
 		r.mux.Handle("/api/v1/evm/broadcast", r.withAuthAndPerm(middleware.PermSignRequest, broadcastHandler))
+
+		// Wallet RPC proxy: browser-extension EIP1193Provider routes
+		// every read method + signed-tx broadcast through here so the
+		// extension doesn't have to ship a list of public RPC URLs.
+		// withAuth (no admin perm) — the handler's allowlist gates
+		// what actually goes upstream, sign methods are explicitly
+		// excluded so a non-admin key can't bypass /sign.
+		rpcProxyHandler, rpErr := evmhandler.NewRPCProxyHandler(r.config.RPCProvider, r.logger)
+		if rpErr != nil {
+			return fmt.Errorf("failed to create rpc proxy handler: %w", rpErr)
+		}
+		r.mux.Handle("/api/v1/evm/rpc/", r.withAuth(rpcProxyHandler))
 	}
 
 	// Batch sign route (optional, requires rule engine; simulation rule is optional)

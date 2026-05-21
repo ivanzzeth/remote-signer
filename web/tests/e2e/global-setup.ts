@@ -90,6 +90,15 @@ chains:
     keystore_dir: "${home}/keystores"
     hd_wallet_dir: "${home}/hd-wallets"
 
+    # Required for the wallet RPC proxy route (POST /api/v1/evm/rpc/
+    # {chainId}) to register on this daemon — gated server-side on
+    # RPCProvider being constructible. Specs that exercise the proxy
+    # path assert the allowlist deterministically; the upstream-call
+    # case is best-effort and tolerates web3gate being unreachable.
+    rpc_gateway:
+      base_url: https://evm.web3gate.xyz/evm
+      cache_ttl: 24h
+
 # Point template + preset loaders at the repo's built-in catalogue so
 # /templates and /presets specs see real data without needing a separate
 # fixture step. Absolute paths bypass the configDir-relative resolver.

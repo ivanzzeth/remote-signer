@@ -6,6 +6,7 @@
 import { RemoteSigner } from "./remote_signer";
 import { ProviderRpcError, providerErrors } from "./provider-errors";
 import type { Transaction } from "./types";
+import type { RemoteSignerClient } from "../client";
 import type {
   EIP1193ProviderConfig,
   SignersSource,
@@ -96,8 +97,12 @@ export class EIP1193Provider {
   private _activeIndex: number = 0;
   private _chainId: number;
   private _connected: boolean = false;
-  private _rpcOverrides: Record<number, string>;
-  private _rpcResolver?: (chainId: number) => string | Promise<string>;
+  // RemoteSignerClient used to call the daemon's RPC proxy. Read
+  // methods + signed-tx broadcast go through `_client.evm.rpcProxy`
+  // — the daemon centralises every chain-RPC config (upstream URL,
+  // API key, rate limit, SSRF guardrails) so this provider holds
+  // zero RPC knowledge.
+  private _client?: RemoteSignerClient;
   // Stashed so refreshSigners() can re-run the same resolution as
   // create(). Without it, a host that just unlocked or added a signer on
   // the daemon side would have to tear down and re-create the entire
@@ -123,10 +128,17 @@ export class EIP1193Provider {
   private constructor(config: EIP1193ProviderConfig) {
     this._chainId = config.defaultChainId ?? 1;
     this._activeIndex = config.defaultAccountIndex ?? 0;
-    this._rpcOverrides = config.rpcOverrides ?? {};
-    this._rpcResolver = config.rpcResolver;
     this._storage = config.storage;
     this._storageKey = config.storageKey ?? DEFAULT_PROVIDER_STORAGE_KEY;
+    // Resolve the SDK client used for the RPC proxy. Explicit config
+    // wins; otherwise extract from signersSource if it carries one.
+    // Manual mode without a client means read methods + broadcast
+    // will throw at call time — that's by design (the caller opted
+    // out of the daemon proxy by not supplying a client).
+    this._client = config.client
+      ?? (config.signersSource.type !== "manual"
+        ? config.signersSource.client
+        : undefined);
   }
 
   /**
@@ -309,60 +321,30 @@ export class EIP1193Provider {
   }
 
   /**
-   * POST a JSON-RPC envelope to the chain RPC and parse the response.
+   * Forward a JSON-RPC method through the daemon's wallet RPC proxy.
    *
-   * Public RPC providers (llamarpc, infura, ankr, etc.) routinely
-   * respond with HTML error pages — 403 captive portals on
-   * rate-limit, 502 from a flaky proxy, the provider's branded
-   * "API key required" landing page. Calling response.json() on
-   * any of those throws a cryptic `SyntaxError: Unexpected token
-   * '<', "<!DOCTYPE "... is not valid JSON` that bubbles up as
-   * the generic "network or connection issue" the dApp displays.
+   * The daemon is the single source of chain-RPC config — it knows
+   * the upstream URL, optional API key, rate-limit budget, and SSRF
+   * guardrails. The provider holds zero RPC knowledge; it just
+   * names the chain and the method.
    *
-   * Check the HTTP status + content-type first so the caller gets
-   * an actionable error message ("RPC returned HTML 403 — likely
-   * rate-limited") instead of a parser hiccup.
+   * Throws when no client was wired (manual signersSource without
+   * an explicit `client` config option); throws with the daemon's
+   * upstream error on transport / RPC failure so dApp-side error
+   * messages identify the failing layer rather than collapsing
+   * everything into "network or connection issue".
    */
-  private async _rpcCall(
-    rpcUrl: string,
+  private async _proxyRPCCall(
     method: string,
     params: unknown[],
   ): Promise<unknown> {
-    const response = await fetch(rpcUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: Date.now(),
-        method,
-        params,
-      }),
-    });
-    const contentType = response.headers.get("content-type") || "";
-    const bodyText = await response.text();
-    if (!contentType.toLowerCase().includes("json")) {
+    if (!this._client) {
       throw new Error(
-        `RPC ${rpcUrl} returned non-JSON (HTTP ${response.status}, content-type=${contentType || "missing"}). ` +
-        `Body starts with: ${bodyText.slice(0, 80).replace(/\s+/g, " ")}…`
+        `EIP1193Provider: ${method} requires a client for the daemon RPC proxy ` +
+        `— pass one via config.client or use signersSource.type "client" / "hdwallet"`,
       );
     }
-    let parsed: { result?: unknown; error?: { code?: number; message?: string } };
-    try {
-      parsed = JSON.parse(bodyText);
-    } catch (e) {
-      throw new Error(
-        `RPC ${rpcUrl} returned invalid JSON (HTTP ${response.status}): ${
-          (e as Error).message
-        }`,
-      );
-    }
-    if (parsed.error) {
-      throw new Error(
-        `RPC ${method} failed: ${parsed.error.message ?? "unknown"}` +
-        (parsed.error.code !== undefined ? ` (code ${parsed.error.code})` : ""),
-      );
-    }
-    return parsed.result;
+    return await this._client.evm.rpcProxy.call(this._chainId, method, params);
   }
 
   /**
@@ -665,12 +647,11 @@ export class EIP1193Provider {
         const [tx] = params as [any];
         const signer = this._resolveSigner(tx.from);
 
-        const rpcUrl = await this._getRpcUrl();
-        const filled = await this._fillTxDefaults(tx, signer.address, rpcUrl);
+        const filled = await this._fillTxDefaults(tx, signer.address);
         const signedTx = await signer.signTransaction(normalizeEip1193Tx(filled));
 
-        // Broadcast via RPC
-        return await this._rpcCall(rpcUrl, "eth_sendRawTransaction", [signedTx]);
+        // Broadcast through the daemon's wallet RPC proxy.
+        return await this._proxyRPCCall("eth_sendRawTransaction", [signedTx]);
       }
 
       case "eth_signTransaction": {
@@ -693,8 +674,7 @@ export class EIP1193Provider {
       case "eth_getTransactionByHash":
       case "eth_getTransactionCount":
       case "eth_getTransactionReceipt": {
-        const rpcUrl = await this._getRpcUrl();
-        return await this._rpcCall(rpcUrl, method, (params as any[]) ?? []);
+        return await this._proxyRPCCall(method, (params as any[]) ?? []);
       }
 
       // Wallet methods
@@ -752,43 +732,30 @@ export class EIP1193Provider {
   /**
    * Get RPC URL for the current chain
    */
-  private async _getRpcUrl(): Promise<string> {
-    let rpcUrl: string | undefined = this._rpcOverrides[this._chainId];
-
-    if (!rpcUrl && this._rpcResolver) {
-      rpcUrl = await this._rpcResolver(this._chainId);
-    }
-
-    if (!rpcUrl) {
-      throw new Error(`No RPC URL configured for chain ${this._chainId}`);
-    }
-
-    return rpcUrl;
-  }
-
   /**
    * Fill in transaction defaults that dApps routinely omit — gas, gasPrice
-   * (or EIP-1559 caps), and nonce. The remote-signer backend signs whatever
-   * we hand it, so we have to mimic the same auto-fill MetaMask performs
-   * client-side before signing. Missing fields are fetched from the chain
-   * RPC; values the caller supplied are preserved as-is.
+   * (or EIP-1559 caps), and nonce. The remote-signer backend signs
+   * whatever we hand it, so we have to mimic the same auto-fill MetaMask
+   * performs client-side before signing. Missing fields come from the
+   * daemon's RPC proxy; values the caller supplied are preserved as-is.
    */
-  private async _fillTxDefaults(tx: any, fromAddr: string, rpcUrl: string): Promise<any> {
+  private async _fillTxDefaults(tx: any, fromAddr: string): Promise<any> {
     const filled = { ...tx, from: tx.from ?? fromAddr };
-    // Reuse the same JSON-RPC helper so non-JSON 403/502 pages surface
-    // with the same actionable error instead of `SyntaxError: Unexpected
-    // token '<'` from inside the defaults-fill path.
-    const rpc = (method: string, params: any[]) => this._rpcCall(rpcUrl, method, params);
-
     if (filled.nonce == null) {
-      filled.nonce = await rpc("eth_getTransactionCount", [fromAddr, "pending"]);
+      filled.nonce = await this._proxyRPCCall(
+        "eth_getTransactionCount",
+        [fromAddr, "pending"],
+      );
     }
     if (filled.gas == null && filled.gasLimit == null) {
-      filled.gas = await rpc("eth_estimateGas", [{ ...filled, from: fromAddr }]);
+      filled.gas = await this._proxyRPCCall(
+        "eth_estimateGas",
+        [{ ...filled, from: fromAddr }],
+      );
     }
     const hasFeeCap = filled.maxFeePerGas != null || filled.maxPriorityFeePerGas != null;
     if (filled.gasPrice == null && !hasFeeCap) {
-      filled.gasPrice = await rpc("eth_gasPrice", []);
+      filled.gasPrice = await this._proxyRPCCall("eth_gasPrice", []);
     }
     return filled;
   }

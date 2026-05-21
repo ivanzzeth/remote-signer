@@ -1705,6 +1705,43 @@
       );
     }
   };
+  var EvmRPCProxyService = class {
+    constructor(transport) {
+      this.transport = transport;
+    }
+    /**
+     * Call a JSON-RPC method through the daemon proxy.
+     *
+     * Returns the parsed `result` field on success and throws on
+     * upstream/transport failures — callers shouldn't have to
+     * unpack the JSON-RPC envelope themselves, but the raw envelope
+     * is available via `callRaw` when needed (e.g., when the result
+     * is meant to round-trip the dApp's original id field).
+     */
+    async call(chainId, method, params = []) {
+      const env = await this.callRaw(chainId, method, params);
+      if (env.error) {
+        throw new Error(
+          `daemon rpc proxy: ${env.error.message ?? "unknown"} (code ${env.error.code ?? "?"})`
+        );
+      }
+      return env.result;
+    }
+    /** Lower-level variant that returns the full JSON-RPC envelope. */
+    async callRaw(chainId, method, params = []) {
+      const body = {
+        jsonrpc: "2.0",
+        id: Date.now(),
+        method,
+        params
+      };
+      return this.transport.request(
+        "POST",
+        `/api/v1/evm/rpc/${encodeURIComponent(String(chainId))}`,
+        body
+      );
+    }
+  };
   var ProviderRpcError = class _ProviderRpcError extends Error {
     constructor(code, message, data) {
       super(message);
@@ -1809,10 +1846,9 @@
       this.isMetaMask = true;
       this._chainId = config.defaultChainId ?? 1;
       this._activeIndex = config.defaultAccountIndex ?? 0;
-      this._rpcOverrides = config.rpcOverrides ?? {};
-      this._rpcResolver = config.rpcResolver;
       this._storage = config.storage;
       this._storageKey = config.storageKey ?? DEFAULT_PROVIDER_STORAGE_KEY;
+      this._client = config.client ?? (config.signersSource.type !== "manual" ? config.signersSource.client : void 0);
     }
     /**
      * Persist the current chain + active address to the configured storage.
@@ -1951,52 +1987,26 @@
       return this._signers[this._activeIndex];
     }
     /**
-     * POST a JSON-RPC envelope to the chain RPC and parse the response.
+     * Forward a JSON-RPC method through the daemon's wallet RPC proxy.
      *
-     * Public RPC providers (llamarpc, infura, ankr, etc.) routinely
-     * respond with HTML error pages — 403 captive portals on
-     * rate-limit, 502 from a flaky proxy, the provider's branded
-     * "API key required" landing page. Calling response.json() on
-     * any of those throws a cryptic `SyntaxError: Unexpected token
-     * '<', "<!DOCTYPE "... is not valid JSON` that bubbles up as
-     * the generic "network or connection issue" the dApp displays.
+     * The daemon is the single source of chain-RPC config — it knows
+     * the upstream URL, optional API key, rate-limit budget, and SSRF
+     * guardrails. The provider holds zero RPC knowledge; it just
+     * names the chain and the method.
      *
-     * Check the HTTP status + content-type first so the caller gets
-     * an actionable error message ("RPC returned HTML 403 — likely
-     * rate-limited") instead of a parser hiccup.
+     * Throws when no client was wired (manual signersSource without
+     * an explicit `client` config option); throws with the daemon's
+     * upstream error on transport / RPC failure so dApp-side error
+     * messages identify the failing layer rather than collapsing
+     * everything into "network or connection issue".
      */
-    async _rpcCall(rpcUrl, method, params) {
-      const response = await fetch(rpcUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: Date.now(),
-          method,
-          params
-        })
-      });
-      const contentType = response.headers.get("content-type") || "";
-      const bodyText = await response.text();
-      if (!contentType.toLowerCase().includes("json")) {
+    async _proxyRPCCall(method, params) {
+      if (!this._client) {
         throw new Error(
-          `RPC ${rpcUrl} returned non-JSON (HTTP ${response.status}, content-type=${contentType || "missing"}). Body starts with: ${bodyText.slice(0, 80).replace(/\s+/g, " ")}\u2026`
+          `EIP1193Provider: ${method} requires a client for the daemon RPC proxy \u2014 pass one via config.client or use signersSource.type "client" / "hdwallet"`
         );
       }
-      let parsed;
-      try {
-        parsed = JSON.parse(bodyText);
-      } catch (e) {
-        throw new Error(
-          `RPC ${rpcUrl} returned invalid JSON (HTTP ${response.status}): ${e.message}`
-        );
-      }
-      if (parsed.error) {
-        throw new Error(
-          `RPC ${method} failed: ${parsed.error.message ?? "unknown"}` + (parsed.error.code !== void 0 ? ` (code ${parsed.error.code})` : "")
-        );
-      }
-      return parsed.result;
+      return await this._client.evm.rpcProxy.call(this._chainId, method, params);
     }
     /**
      * Pick the signer a sign / send request should route through.
@@ -2236,10 +2246,9 @@
         case "eth_sendTransaction": {
           const [tx] = params;
           const signer = this._resolveSigner(tx.from);
-          const rpcUrl = await this._getRpcUrl();
-          const filled = await this._fillTxDefaults(tx, signer.address, rpcUrl);
+          const filled = await this._fillTxDefaults(tx, signer.address);
           const signedTx = await signer.signTransaction(normalizeEip1193Tx(filled));
-          return await this._rpcCall(rpcUrl, "eth_sendRawTransaction", [signedTx]);
+          return await this._proxyRPCCall("eth_sendRawTransaction", [signedTx]);
         }
         case "eth_signTransaction": {
           const [tx] = params;
@@ -2260,8 +2269,7 @@
         case "eth_getTransactionByHash":
         case "eth_getTransactionCount":
         case "eth_getTransactionReceipt": {
-          const rpcUrl = await this._getRpcUrl();
-          return await this._rpcCall(rpcUrl, method, params ?? []);
+          return await this._proxyRPCCall(method, params ?? []);
         }
         // Wallet methods
         case "wallet_requestPermissions": {
@@ -2302,35 +2310,30 @@
     /**
      * Get RPC URL for the current chain
      */
-    async _getRpcUrl() {
-      let rpcUrl = this._rpcOverrides[this._chainId];
-      if (!rpcUrl && this._rpcResolver) {
-        rpcUrl = await this._rpcResolver(this._chainId);
-      }
-      if (!rpcUrl) {
-        throw new Error(`No RPC URL configured for chain ${this._chainId}`);
-      }
-      return rpcUrl;
-    }
     /**
      * Fill in transaction defaults that dApps routinely omit — gas, gasPrice
-     * (or EIP-1559 caps), and nonce. The remote-signer backend signs whatever
-     * we hand it, so we have to mimic the same auto-fill MetaMask performs
-     * client-side before signing. Missing fields are fetched from the chain
-     * RPC; values the caller supplied are preserved as-is.
+     * (or EIP-1559 caps), and nonce. The remote-signer backend signs
+     * whatever we hand it, so we have to mimic the same auto-fill MetaMask
+     * performs client-side before signing. Missing fields come from the
+     * daemon's RPC proxy; values the caller supplied are preserved as-is.
      */
-    async _fillTxDefaults(tx, fromAddr, rpcUrl) {
+    async _fillTxDefaults(tx, fromAddr) {
       const filled = { ...tx, from: tx.from ?? fromAddr };
-      const rpc = (method, params) => this._rpcCall(rpcUrl, method, params);
       if (filled.nonce == null) {
-        filled.nonce = await rpc("eth_getTransactionCount", [fromAddr, "pending"]);
+        filled.nonce = await this._proxyRPCCall(
+          "eth_getTransactionCount",
+          [fromAddr, "pending"]
+        );
       }
       if (filled.gas == null && filled.gasLimit == null) {
-        filled.gas = await rpc("eth_estimateGas", [{ ...filled, from: fromAddr }]);
+        filled.gas = await this._proxyRPCCall(
+          "eth_estimateGas",
+          [{ ...filled, from: fromAddr }]
+        );
       }
       const hasFeeCap = filled.maxFeePerGas != null || filled.maxPriorityFeePerGas != null;
       if (filled.gasPrice == null && !hasFeeCap) {
-        filled.gasPrice = await rpc("eth_gasPrice", []);
+        filled.gasPrice = await this._proxyRPCCall("eth_gasPrice", []);
       }
       return filled;
     }
@@ -2407,6 +2410,7 @@
       this.guard = new EvmGuardService(transport);
       this.simulate = new EvmSimulateService(transport);
       this.budgets = new EvmBudgetService(transport);
+      this.rpcProxy = new EvmRPCProxyService(transport);
     }
   };
   var AuditService = class {
@@ -3904,25 +3908,17 @@
   var EXTENSION_VERSION = typeof chrome !== "undefined" && chrome.runtime?.getManifest?.()?.version || "dev";
   var CLIENT_VERSION_STRING = `RemoteSigner/v${EXTENSION_VERSION}/javascript`;
   var DEFAULT_CHAINS = [
-    // publicnode.com first: llamarpc started rate-limiting Uniswap-volume
-    // dApps with HTML 403 pages that the SDK couldn't even parse — the
-    // failure mode was "Unexpected token '<', '<!DOCTYPE' is not valid
-    // JSON" landing in the dApp as "network or connection issue". Ankr
-    // is the secondary fallback for the eventual multi-URL retry loop.
-    { chainId: 1, chainName: "Ethereum", rpcUrls: ["https://ethereum-rpc.publicnode.com", "https://rpc.ankr.com/eth", "https://eth.llamarpc.com"], nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 } },
-    { chainId: 10, chainName: "Optimism", rpcUrls: ["https://mainnet.optimism.io"], nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 } },
-    { chainId: 56, chainName: "BNB Smart Chain", rpcUrls: ["https://bsc-dataseed.binance.org"], nativeCurrency: { name: "BNB", symbol: "BNB", decimals: 18 } },
-    { chainId: 137, chainName: "Polygon", rpcUrls: ["https://polygon-rpc.com"], nativeCurrency: { name: "POL", symbol: "POL", decimals: 18 } },
-    { chainId: 8453, chainName: "Base", rpcUrls: ["https://mainnet.base.org"], nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 } },
-    { chainId: 42161, chainName: "Arbitrum One", rpcUrls: ["https://arb1.arbitrum.io/rpc"], nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 } },
-    { chainId: 11155111, chainName: "Sepolia", rpcUrls: ["https://ethereum-sepolia-rpc.publicnode.com"], nativeCurrency: { name: "Sepolia Ether", symbol: "ETH", decimals: 18 } }
+    { chainId: 1, chainName: "Ethereum", nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 } },
+    { chainId: 10, chainName: "Optimism", nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 } },
+    { chainId: 56, chainName: "BNB Smart Chain", nativeCurrency: { name: "BNB", symbol: "BNB", decimals: 18 } },
+    { chainId: 137, chainName: "Polygon", nativeCurrency: { name: "POL", symbol: "POL", decimals: 18 } },
+    { chainId: 8453, chainName: "Base", nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 } },
+    { chainId: 42161, chainName: "Arbitrum One", nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 } },
+    { chainId: 11155111, chainName: "Sepolia", nativeCurrency: { name: "Sepolia Ether", symbol: "ETH", decimals: 18 } }
   ];
   var chainRegistry = new Map(
     DEFAULT_CHAINS.map((c) => [c.chainId, c])
   );
-  function getRpcUrl(chainId) {
-    return chainRegistry.get(chainId)?.rpcUrls?.[0];
-  }
   var CHAIN_BY_ORIGIN_KEY = "remote-signer:chainByOrigin";
   var chainByOrigin = {};
   async function ensureChainByOriginLoaded() {
@@ -4153,14 +4149,6 @@
       chains
     };
   }
-  function rpcOverridesFromRegistry() {
-    const out = {};
-    for (const [chainId, cfg] of chainRegistry) {
-      const url = cfg.rpcUrls?.[0];
-      if (url) out[chainId] = url;
-    }
-    return out;
-  }
   var provider = null;
   var client = null;
   var initPromise = null;
@@ -4313,12 +4301,11 @@
     provider = await EIP1193Provider.create({
       signersSource: { type: "client", client, chainId: cfg.selectedChain },
       defaultChainId: cfg.selectedChain,
-      rpcOverrides: rpcOverridesFromRegistry(),
-      rpcResolver: async (chainId) => {
-        const url = getRpcUrl(chainId);
-        if (!url) throw new Error(`No RPC URL configured for chain ${chainId}`);
-        return url;
-      },
+      // Read methods + signed-tx broadcast route through the daemon's
+      // /api/v1/evm/rpc/{chainId} proxy via `client.evm.rpcProxy`. The
+      // provider picks the client up from signersSource automatically,
+      // so no rpcOverrides / rpcResolver config — the daemon's
+      // rpc_gateway is the single source of upstream RPC configuration.
       storage: chromeStorageAdapter,
       storageKey: providerStorageKey(cfg.apiKeyId)
     });
@@ -4455,29 +4442,19 @@
     }
   }
   async function forwardToRpc(method, params) {
-    const chainId = provider ? parseInt(provider.chainId, 16) : 1;
-    const rpcUrl = getRpcUrl(chainId);
-    if (!rpcUrl) {
+    if (!client) {
       return {
-        error: { code: -32603, message: `No RPC URL configured for chain ${chainId}` }
+        error: { code: -32603, message: "Provider not initialized \u2014 open Settings first" }
       };
     }
+    const chainId = provider ? parseInt(provider.chainId, 16) : 1;
     try {
-      const res = await fetch(rpcUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: Date.now(),
-          method,
-          params: Array.isArray(params) ? params : []
-        })
-      });
-      const json = await res.json();
-      if (json.error) {
-        return { error: { code: json.error.code ?? -32603, message: json.error.message ?? "RPC error", data: json.error.data } };
-      }
-      return { result: json.result };
+      const result = await client.evm.rpcProxy.call(
+        chainId,
+        method,
+        Array.isArray(params) ? params : []
+      );
+      return { result };
     } catch (err2) {
       return { error: { code: -32603, message: err2?.message || String(err2) } };
     }
@@ -4492,14 +4469,9 @@
     if (!Number.isFinite(chainId) || chainId <= 0) {
       return { error: { code: -32602, message: "Invalid chainId parameter" } };
     }
-    const rpcUrls = Array.isArray(first?.rpcUrls) ? first.rpcUrls : [];
     if (chainRegistry.has(chainId)) return { result: null };
-    if (rpcUrls.length === 0) {
-      return { error: { code: -32602, message: "wallet_addEthereumChain requires rpcUrls" } };
-    }
     chainRegistry.set(chainId, {
       chainId,
-      rpcUrls,
       chainName: typeof first?.chainName === "string" ? first.chainName : void 0,
       nativeCurrency: first?.nativeCurrency,
       blockExplorerUrls: Array.isArray(first?.blockExplorerUrls) ? first.blockExplorerUrls : void 0

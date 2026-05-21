@@ -179,39 +179,33 @@ const CLIENT_VERSION_STRING = `RemoteSigner/v${EXTENSION_VERSION}/javascript`;
 //
 // EIP-1193 read RPC methods (eth_call, eth_getBalance, …) and the forwarded
 // methods we add below (eth_sendRawTransaction, eth_feeHistory, …) need an
-// HTTP RPC endpoint per chain. We seed a few well-known public endpoints and
-// let dApps extend the set via wallet_addEthereumChain (EIP-3085).
+// Chain metadata catalogue — name + native currency for popup
+// rendering only. Read/broadcast RPC traffic now goes through the
+// daemon's `/api/v1/evm/rpc/{chainId}` proxy (see
+// `EvmRPCProxyService` in the SDK), so the extension no longer
+// ships any chain RPC URLs. The daemon's `rpc_gateway` setting is
+// the single source of upstream-endpoint configuration.
 
 interface ChainEntry {
   chainId: number;
-  rpcUrls: string[];
   chainName?: string;
   nativeCurrency?: { name: string; symbol: string; decimals: number };
   blockExplorerUrls?: string[];
 }
 
 const DEFAULT_CHAINS: ChainEntry[] = [
-  // publicnode.com first: llamarpc started rate-limiting Uniswap-volume
-  // dApps with HTML 403 pages that the SDK couldn't even parse — the
-  // failure mode was "Unexpected token '<', '<!DOCTYPE' is not valid
-  // JSON" landing in the dApp as "network or connection issue". Ankr
-  // is the secondary fallback for the eventual multi-URL retry loop.
-  { chainId: 1, chainName: "Ethereum", rpcUrls: ["https://ethereum-rpc.publicnode.com", "https://rpc.ankr.com/eth", "https://eth.llamarpc.com"], nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 } },
-  { chainId: 10, chainName: "Optimism", rpcUrls: ["https://mainnet.optimism.io"], nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 } },
-  { chainId: 56, chainName: "BNB Smart Chain", rpcUrls: ["https://bsc-dataseed.binance.org"], nativeCurrency: { name: "BNB", symbol: "BNB", decimals: 18 } },
-  { chainId: 137, chainName: "Polygon", rpcUrls: ["https://polygon-rpc.com"], nativeCurrency: { name: "POL", symbol: "POL", decimals: 18 } },
-  { chainId: 8453, chainName: "Base", rpcUrls: ["https://mainnet.base.org"], nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 } },
-  { chainId: 42161, chainName: "Arbitrum One", rpcUrls: ["https://arb1.arbitrum.io/rpc"], nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 } },
-  { chainId: 11155111, chainName: "Sepolia", rpcUrls: ["https://ethereum-sepolia-rpc.publicnode.com"], nativeCurrency: { name: "Sepolia Ether", symbol: "ETH", decimals: 18 } },
+  { chainId: 1, chainName: "Ethereum", nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 } },
+  { chainId: 10, chainName: "Optimism", nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 } },
+  { chainId: 56, chainName: "BNB Smart Chain", nativeCurrency: { name: "BNB", symbol: "BNB", decimals: 18 } },
+  { chainId: 137, chainName: "Polygon", nativeCurrency: { name: "POL", symbol: "POL", decimals: 18 } },
+  { chainId: 8453, chainName: "Base", nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 } },
+  { chainId: 42161, chainName: "Arbitrum One", nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 } },
+  { chainId: 11155111, chainName: "Sepolia", nativeCurrency: { name: "Sepolia Ether", symbol: "ETH", decimals: 18 } },
 ];
 
 const chainRegistry: Map<number, ChainEntry> = new Map(
   DEFAULT_CHAINS.map((c) => [c.chainId, c])
 );
-
-function getRpcUrl(chainId: number): string | undefined {
-  return chainRegistry.get(chainId)?.rpcUrls?.[0];
-}
 
 // ── Per-origin chain memory ──────────────────────────────────────────────
 //
@@ -586,15 +580,6 @@ async function handleConnectGetContext(msg: { requestId: string }): Promise<{
   };
 }
 
-function rpcOverridesFromRegistry(): Record<number, string> {
-  const out: Record<number, string> = {};
-  for (const [chainId, cfg] of chainRegistry) {
-    const url = cfg.rpcUrls?.[0];
-    if (url) out[chainId] = url;
-  }
-  return out;
-}
-
 // ── Globals ──────────────────────────────────────────────────────────────
 
 declare const self: ServiceWorkerGlobalScope;
@@ -809,12 +794,11 @@ async function initProvider(): Promise<void> {
   provider = await EIP1193Provider.create({
     signersSource: { type: "client", client, chainId: cfg.selectedChain },
     defaultChainId: cfg.selectedChain,
-    rpcOverrides: rpcOverridesFromRegistry(),
-    rpcResolver: async (chainId: number) => {
-      const url = getRpcUrl(chainId);
-      if (!url) throw new Error(`No RPC URL configured for chain ${chainId}`);
-      return url;
-    },
+    // Read methods + signed-tx broadcast route through the daemon's
+    // /api/v1/evm/rpc/{chainId} proxy via `client.evm.rpcProxy`. The
+    // provider picks the client up from signersSource automatically,
+    // so no rpcOverrides / rpcResolver config — the daemon's
+    // rpc_gateway is the single source of upstream RPC configuration.
     storage: chromeStorageAdapter,
     storageKey: providerStorageKey(cfg.apiKeyId),
   });
@@ -1035,36 +1019,31 @@ interface RpcError {
 }
 
 /**
- * Forward a JSON-RPC call to the active chain's RPC endpoint.
- * Returns either a result or an RpcError shaped per JSON-RPC.
+ * Forward a JSON-RPC call through the daemon's wallet RPC proxy.
+ *
+ * Covers the methods the SDK's switch doesn't enumerate
+ * (eth_maxPriorityFeePerGas, eth_feeHistory, eth_getProof, …) and
+ * eth_sendRawTransaction. The proxy enforces a method allowlist
+ * server-side — sign methods are blocked there too, so a future
+ * caller can't accidentally widen the surface from here.
  */
 async function forwardToRpc(
   method: string,
   params: unknown
 ): Promise<{ result?: unknown; error?: RpcError }> {
-  const chainId = provider ? parseInt(provider.chainId, 16) : 1;
-  const rpcUrl = getRpcUrl(chainId);
-  if (!rpcUrl) {
+  if (!client) {
     return {
-      error: { code: -32603, message: `No RPC URL configured for chain ${chainId}` },
+      error: { code: -32603, message: "Provider not initialized — open Settings first" },
     };
   }
+  const chainId = provider ? parseInt(provider.chainId, 16) : 1;
   try {
-    const res = await fetch(rpcUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: Date.now(),
-        method,
-        params: Array.isArray(params) ? params : [],
-      }),
-    });
-    const json: any = await res.json();
-    if (json.error) {
-      return { error: { code: json.error.code ?? -32603, message: json.error.message ?? "RPC error", data: json.error.data } };
-    }
-    return { result: json.result };
+    const result = await client.evm.rpcProxy.call(
+      chainId,
+      method,
+      Array.isArray(params) ? params : [],
+    );
+    return { result };
   } catch (err: any) {
     return { error: { code: -32603, message: err?.message || String(err) } };
   }
@@ -1072,7 +1051,16 @@ async function forwardToRpc(
 
 /**
  * Handle a wallet_addEthereumChain call (EIP-3085).
- * If the chain is already known, returns null. Otherwise adds it to the registry.
+ *
+ * Pre-refactor we stored the dApp-supplied rpcUrls and used them for
+ * read/broadcast traffic. With the daemon proxy that's no longer
+ * appropriate — the operator's daemon decides which upstream serves
+ * each chain, not whichever URL the dApp suggested. We still record
+ * the chain metadata (name + native currency) so the popup can show
+ * a sensible label, but rpcUrls is ignored. If the daemon doesn't
+ * have an upstream configured for the chain, the next eth_* call
+ * returns the proxy's "no upstream for chain X" error — which is
+ * the right place to surface that configuration gap.
  */
 function handleAddEthereumChain(params: unknown): { result?: null; error?: RpcError } {
   const first = Array.isArray(params) ? (params[0] as any) : undefined;
@@ -1084,15 +1072,10 @@ function handleAddEthereumChain(params: unknown): { result?: null; error?: RpcEr
   if (!Number.isFinite(chainId) || chainId <= 0) {
     return { error: { code: -32602, message: "Invalid chainId parameter" } };
   }
-  const rpcUrls: string[] = Array.isArray(first?.rpcUrls) ? first.rpcUrls : [];
   // If the chain is already in our registry, return null (per spec).
   if (chainRegistry.has(chainId)) return { result: null };
-  if (rpcUrls.length === 0) {
-    return { error: { code: -32602, message: "wallet_addEthereumChain requires rpcUrls" } };
-  }
   chainRegistry.set(chainId, {
     chainId,
-    rpcUrls,
     chainName: typeof first?.chainName === "string" ? first.chainName : undefined,
     nativeCurrency: first?.nativeCurrency,
     blockExplorerUrls: Array.isArray(first?.blockExplorerUrls) ? first.blockExplorerUrls : undefined,
