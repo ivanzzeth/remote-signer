@@ -6,6 +6,7 @@ import {
   type RequestStatusResponse,
 } from "remote-signer-client";
 import { Badge, Card, ErrorBanner, Loading, shorten } from "../components/ui";
+import { SimulationPreview } from "../components/SimulationPreview";
 import { getClient } from "../lib/auth";
 import { useApi } from "../lib/useApi";
 
@@ -122,6 +123,14 @@ export function RequestDetail() {
           <Card title={payloadCardTitle(data)}>
             <PayloadView req={data} />
           </Card>
+
+          {/* Simulation preview: only for transaction-shaped requests
+              and only while there's any chance the snapshot is fresh
+              (pending = simulation in flight; terminal states show
+              the last snapshot once and stop polling). */}
+          {data.sign_type === "transaction" && (
+            <SimulationPreview requestID={data.id} requestStatus={data.status} />
+          )}
 
           {hasOutcome(data) && (
             <Card title="Outcome">
