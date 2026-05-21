@@ -2,7 +2,6 @@ package storage
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -56,9 +55,9 @@ func TestRequestSimulationRepo_UpsertReplacesExisting(t *testing.T) {
 		Reason:         "",
 		Success:        true,
 		GasUsed:        287_453,
-		BalanceChanges: json.RawMessage(`[{"token":"native","amount":"-100"}]`),
-		Events:         json.RawMessage(`[{"address":"0xabc","event":"Transfer"}]`),
-		Contracts:      json.RawMessage(`["0xabc","0xdef"]`),
+		BalanceChanges: types.JSONBytes(`[{"token":"native","amount":"-100"}]`),
+		Events:         types.JSONBytes(`[{"address":"0xabc","event":"Transfer"}]`),
+		Contracts:      types.JSONBytes(`["0xabc","0xdef"]`),
 		SimulatedAt:    time.Now().Add(time.Second),
 		UpdatedAt:      time.Now().Add(time.Second),
 	}

@@ -197,12 +197,12 @@ func (r *SimulationBudgetRule) recordOutcome(
 		row.RevertReason = sim.RevertReason
 		if len(sim.BalanceChanges) > 0 {
 			if b, err := json.Marshal(sim.BalanceChanges); err == nil {
-				row.BalanceChanges = b
+				row.BalanceChanges = types.JSONBytes(b)
 			}
 		}
 		if len(sim.Events) > 0 {
 			if b, err := json.Marshal(sim.Events); err == nil {
-				row.Events = b
+				row.Events = types.JSONBytes(b)
 			}
 		}
 		// Contracts touched: union of event-emitting addresses.
@@ -210,11 +210,11 @@ func (r *SimulationBudgetRule) recordOutcome(
 		// UI from having to scan events itself.
 		if contracts := contractsFromEvents(sim.Events); len(contracts) > 0 {
 			if b, err := json.Marshal(contracts); err == nil {
-				row.Contracts = b
+				row.Contracts = types.JSONBytes(b)
 			}
 		}
 		if b, err := json.Marshal(sim); err == nil {
-			row.RawResult = b
+			row.RawResult = types.JSONBytes(b)
 		}
 	}
 	if err := r.simulationRepo.Upsert(ctx, row); err != nil {
