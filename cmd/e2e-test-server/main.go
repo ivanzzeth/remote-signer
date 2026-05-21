@@ -291,6 +291,21 @@ func main() {
 		}
 	}
 
+	// Transaction tracking — wired if rpcProvider is too, so the e2e
+	// specs that drive eth_sendTransaction exercise the same path the
+	// production daemon does (proxy → record broadcast → poller).
+	var txService *service.TransactionService
+	if rpcProvider != nil {
+		txRepo, txErr := storage.NewGormTransactionRepository(db)
+		if txErr != nil {
+			fatal("init e2e transaction repo: %v", txErr)
+		}
+		txService, err = service.NewTransactionService(txRepo, requestRepo, rpcProvider, log)
+		if err != nil {
+			fatal("init e2e transaction service: %v", err)
+		}
+	}
+
 	// Router.
 	router, err := api.NewRouter(authVerifier, signService, signerManager, ruleRepo, auditRepo, log, api.RouterConfig{
 		Version:             "e2e-test",
@@ -302,6 +317,7 @@ func main() {
 		JSEvaluator:         jsEval,
 		WalletRepo:          walletRepo,
 		RPCProvider:         rpcProvider,
+		TransactionService:  txService,
 		Template: &api.TemplateConfig{
 			TemplateRepo:    templateRepo,
 			TemplateService: templateService,

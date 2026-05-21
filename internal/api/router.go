@@ -91,6 +91,11 @@ type RouterConfig struct {
 	RuleEngine rule.RuleEngine
 	// RPCProvider is the optional RPC provider for broadcast endpoint.
 	RPCProvider *evm.RPCProvider
+	// TransactionService records eth_sendRawTransaction broadcasts +
+	// hosts the receipt poller. Optional — installations without it
+	// keep the proxy working (broadcasts still go to upstream), they
+	// just lose the per-tx audit row + status tracking.
+	TransactionService evmhandler.TransactionRecorder
 }
 
 // Router handles HTTP routing
@@ -357,7 +362,7 @@ func (r *Router) setupRoutes() error {
 		// withAuth (no admin perm) — the handler's allowlist gates
 		// what actually goes upstream, sign methods are explicitly
 		// excluded so a non-admin key can't bypass /sign.
-		rpcProxyHandler, rpErr := evmhandler.NewRPCProxyHandler(r.config.RPCProvider, r.logger)
+		rpcProxyHandler, rpErr := evmhandler.NewRPCProxyHandler(r.config.RPCProvider, r.config.TransactionService, r.logger)
 		if rpErr != nil {
 			return fmt.Errorf("failed to create rpc proxy handler: %w", rpErr)
 		}

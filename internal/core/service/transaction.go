@@ -281,6 +281,47 @@ func (s *TransactionService) PollPending(ctx context.Context) (
 	return mined, dropped, nil
 }
 
+// Run starts the receipt-polling loop on the supplied interval and
+// blocks until ctx is cancelled. Typically launched as a goroutine
+// from daemon startup; a nil rpc provider short-circuits the loop
+// so installations without an upstream RPC can still construct the
+// service for record-only use.
+//
+// Each tick logs (mined, dropped, err) at info level so the operator
+// can see the receipt-fetch cadence + observe the queue draining.
+// Errors don't abort the loop — a transient upstream blip shouldn't
+// stop us from picking the queue back up on the next tick.
+func (s *TransactionService) Run(ctx context.Context, interval time.Duration) {
+	if s.rpc == nil {
+		s.logger.Info("tx poller: rpc provider not configured, poller disabled")
+		return
+	}
+	if interval <= 0 {
+		interval = 10 * time.Second
+	}
+	s.logger.Info("tx poller: starting", slog.Duration("interval", interval))
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			s.logger.Info("tx poller: shutting down")
+			return
+		case <-ticker.C:
+			mined, dropped, err := s.PollPending(ctx)
+			if err != nil {
+				s.logger.Warn("tx poller: tick failed", slog.String("error", err.Error()))
+				continue
+			}
+			if mined > 0 || dropped > 0 {
+				s.logger.Info("tx poller: tick",
+					slog.Int("mined", mined),
+					slog.Int("dropped", dropped))
+			}
+		}
+	}
+}
+
 // --- helpers ---
 
 func decodeHexBytes(s string) ([]byte, error) {

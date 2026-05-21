@@ -378,6 +378,14 @@ func Run(args []string) error {
 		errCh <- server.Start()
 	}()
 
+	// Background receipt poller. Uses the same context the settings
+	// manager uses so SIGTERM / SIGINT propagate to a clean shutdown.
+	// 10s tick is the default; busy chains can tune via settings
+	// once an exposed knob lands.
+	if rs.TxService != nil {
+		go rs.TxService.Run(settingsCtx, 10*time.Second)
+	}
+
 	for {
 		select {
 		case sig := <-sigCh:
