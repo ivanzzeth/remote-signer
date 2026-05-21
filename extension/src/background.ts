@@ -14,6 +14,18 @@ import {
   type ProviderStorage,
 } from "remote-signer-client";
 import { bytesToHex, decryptKeystore } from "./keystore";
+import { createLogger, describeError } from "./logger";
+
+// One logger per major lifecycle area so SW-console grep ("bg.dispatch")
+// can isolate the dApp hot path from background work like provider init,
+// permission acquisition, or pending-approval window plumbing.
+const log = createLogger("bg");
+const dispatchLog = createLogger("bg.dispatch");
+const permissionLog = createLogger("bg.permission");
+const refreshLog = createLogger("bg.refresh");
+const initLog = createLogger("bg.init");
+const approvalLog = createLogger("bg.approval");
+const connectLog = createLogger("bg.connect");
 
 // Adapter that exposes chrome.storage.local through the SDK's
 // ProviderStorage interface. Lets the SDK own the load/persist lifecycle
@@ -397,7 +409,11 @@ async function openConnectWindow(
     const pending = pendingConnects.get(requestId);
     if (pending && win.id != null) pending.windowId = win.id;
   } catch (err) {
-    console.error("[background] Failed to open Connect window:", err);
+    connectLog.error("failed to open Connect window", {
+      requestId,
+      origin,
+      ...describeError(err),
+    });
     const pending = pendingConnects.get(requestId);
     if (pending) {
       clearTimeout(pending.timeoutHandle);
@@ -431,6 +447,10 @@ async function acquirePermission(origin: string): Promise<OriginPermission> {
   // Without this, the SW uses whichever autoApprove value it had at
   // startup.
   await loadConfig();
+  permissionLog.info("acquire", {
+    origin,
+    autoApprove: cachedConfig.autoApproveConnections !== false,
+  });
   if (cachedConfig.autoApproveConnections !== false) {
     await ensureInit();
     // Always pull a fresh signer list from the daemon at connect time.
@@ -443,11 +463,19 @@ async function acquirePermission(origin: string): Promise<OriginPermission> {
     try {
       if (provider && provider.isConnected()) {
         accounts = (await provider.request({ method: "eth_accounts" })) as string[];
+      } else {
+        permissionLog.warn("provider not connected at acquire time", {
+          providerExists: !!provider,
+        });
       }
-    } catch {
-      /* fall through with empty list — caller will see auth/init error */
+    } catch (err) {
+      // eth_accounts failure is unusual — log so we don't swallow the
+      // signal silently. Fall through with empty list so the existing
+      // "No usable signers" error fires (which the dApp gets to see).
+      permissionLog.warn("eth_accounts failed during acquire", describeError(err));
     }
     if (accounts.length === 0) {
+      permissionLog.error("no usable signers", { origin });
       throw { code: -32603, message: "No usable signers — open Settings first" };
     }
     const perm: OriginPermission = {
@@ -456,6 +484,7 @@ async function acquirePermission(origin: string): Promise<OriginPermission> {
       grantedAt: Date.now(),
     };
     await setPermissionForOrigin(origin, perm);
+    permissionLog.info("granted", { origin, accountCount: perm.accounts.length });
     return perm;
   }
   return requestConnectFromUser(origin, getChainForOrigin(origin));
@@ -648,7 +677,7 @@ async function registerContentScript() {
       },
     ]);
   } catch (e) {
-    console.error("[background] Failed to register content script:", e);
+    initLog.error("failed to register content script", describeError(e));
   }
 }
 
@@ -713,7 +742,7 @@ chrome.webNavigation.onCommitted.addListener(async (details) => {
     });
   } catch (e: any) {
     if (!e.message?.includes("Cannot access")) {
-      console.error("[background] CSP bypass injection failed:", e);
+      initLog.error("CSP bypass injection failed", describeError(e));
     }
   }
 });
@@ -726,18 +755,18 @@ async function initProvider(): Promise<void> {
   if (!cfg.apiKeyPrivateKey) {
     initError =
       "API key not configured. Open extension popup to configure.";
-    console.warn("[background]", initError);
+    initLog.warn(initError);
     return;
   }
 
   if (!cfg.apiKeyId) {
     initError =
       "API key ID not configured. Open extension popup to configure.";
-    console.warn("[background]", initError);
+    initLog.warn(initError);
     return;
   }
 
-  console.log("[background] Initializing provider...", {
+  initLog.info("initializing provider", {
     remoteSignerUrl: cfg.remoteSignerUrl,
     apiKeyId: cfg.apiKeyId,
     chainId: cfg.selectedChain,
@@ -799,16 +828,20 @@ async function initProvider(): Promise<void> {
     try {
       await provider.switchAccount(cfg.activeSignerAddress);
     } catch (err) {
-      console.warn("[background] stored active signer no longer usable:", err);
+      initLog.warn("stored active signer no longer usable", {
+        activeSignerAddress: cfg.activeSignerAddress,
+        ...describeError(err),
+      });
       cfg.activeSignerAddress = undefined;
       await saveConfig(cfg);
     }
   }
 
-  console.log("[background] Provider created successfully");
-  console.log("  - Connected:", provider.isConnected());
-  console.log("  - Active account:", provider.selectedAddress);
-  console.log("  - Chain ID:", provider.chainId);
+  initLog.info("provider ready", {
+    connected: provider.isConnected(),
+    activeAccount: provider.selectedAddress,
+    chainId: provider.chainId,
+  });
 
   // Forward provider events to all tabs so dApps see them.
   //
@@ -829,7 +862,7 @@ function ensureInit(): Promise<void> {
   if (!initPromise) {
     initPromise = initProvider().catch((err) => {
       initError = err.message || String(err);
-      console.error("[background] Provider init failed:", err);
+      initLog.error("provider init failed", describeError(err));
     });
   }
   return initPromise;
@@ -847,11 +880,16 @@ let pendingSignerRefresh: Promise<void> | null = null;
 async function refreshSignersIgnoringErrors(): Promise<void> {
   if (!provider) return;
   if (pendingSignerRefresh) return pendingSignerRefresh;
+  const t0 = Date.now();
   pendingSignerRefresh = (async () => {
     try {
       await provider!.refreshSigners();
+      refreshLog.debug("refresh ok", { durMs: Date.now() - t0 });
     } catch (err) {
-      console.warn("[background] refreshSigners failed:", err);
+      refreshLog.warn("refresh failed", {
+        durMs: Date.now() - t0,
+        ...describeError(err),
+      });
     } finally {
       pendingSignerRefresh = null;
     }
@@ -923,7 +961,7 @@ async function openPendingApprovalWindow(ctx: PendingApprovalContext): Promise<v
     });
     pendingApprovalWindowId = win.id ?? null;
   } catch (err) {
-    console.error("[background] Failed to open pending-approval window:", err);
+    approvalLog.error("failed to open pending-approval window", describeError(err));
   }
 }
 
@@ -1266,12 +1304,29 @@ async function handleEIP1193Request(msg: EIP1193Request, origin: string | null) 
   // permissions; the real network error will surface on the actual call.
   await refreshSignersIgnoringErrors();
 
+  // Entry trace — every dApp method that reaches the SW is logged with
+  // enough context (method, origin, param count) to reconstruct the
+  // sequence post-mortem without dumping potentially-huge param
+  // payloads (typed-data blobs, signed-tx bytes).
+  dispatchLog.info("dApp request", {
+    method: msg.method,
+    origin,
+    paramsLen: Array.isArray(msg.params) ? msg.params.length : 0,
+    id: msg.id,
+  });
+
   // Pre-SDK dispatch for MetaMask-compatible methods the SDK doesn't cover.
   const extra = await tryHandleExtraMethod(msg, origin);
   if (extra.handled) {
     if (extra.error) {
+      dispatchLog.warn("extra-dispatch error", {
+        method: msg.method,
+        id: msg.id,
+        error: extra.error,
+      });
       return { type: "web3-eip1193-response", id: msg.id, error: extra.error };
     }
+    dispatchLog.debug("extra-dispatch result", { method: msg.method, id: msg.id });
     return { type: "web3-eip1193-response", id: msg.id, result: extra.result };
   }
 
@@ -1287,12 +1342,18 @@ async function handleEIP1193Request(msg: EIP1193Request, origin: string | null) 
       method: msg.method,
       params: msg.params,
     });
+    dispatchLog.debug("sdk result", { method: msg.method, id: msg.id });
     return {
       type: "web3-eip1193-response",
       id: msg.id,
       result,
     };
   } catch (err: any) {
+    dispatchLog.error("sdk error", {
+      method: msg.method,
+      id: msg.id,
+      ...describeError(err),
+    });
     return {
       type: "web3-eip1193-response",
       id: msg.id,
