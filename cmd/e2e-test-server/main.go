@@ -307,6 +307,14 @@ func main() {
 		if err != nil {
 			fatal("init e2e transaction service: %v", err)
 		}
+		// Faster grace period for the dropped-tx detector — keeps
+		// dropped-path specs short. Pollers in the real daemon use
+		// the 10-minute default; tests don't have minutes to spare.
+		txService.WithGracePeriod(30 * time.Second)
+		// Launch the receipt poller on a tight 250ms tick so anvil's
+		// instant-mining mode flips rows to mined fast enough for
+		// the e2e to assert in single-digit seconds.
+		go txService.Run(ctx, 250*time.Millisecond)
 	}
 
 	// Router.

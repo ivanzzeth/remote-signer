@@ -50,6 +50,8 @@ export {
   EvmGuardService,
   EvmSimulateService,
   EvmBudgetService,
+  EvmRPCProxyService,
+  EvmTransactionService,
   RemoteSigner,
   EIP1193Provider,
   ProviderRpcError,
@@ -138,6 +140,14 @@ export type {
   ProviderConnectInfo,
   ProviderMessage,
   ProviderErrorCode,
+  // RPC proxy
+  RPCProxyRequest,
+  RPCProxyResponse,
+  // On-chain transactions
+  OnChainTransaction,
+  OnChainTransactionStatus,
+  ListTransactionsFilter,
+  ListTransactionsResponse,
   // Ethsig interfaces
   Signer,
   AddressGetter,

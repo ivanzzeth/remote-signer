@@ -40,6 +40,12 @@ export interface RequestStatusResponse {
   // explain why a sign is stuck on manual approval. Empty when a rule
   // auto-approved.
   last_no_match_reason?: string;
+  // transaction_id is the FK into /api/v1/evm/transactions, set
+  // when the wallet RPC proxy observes an eth_sendRawTransaction
+  // whose payload matches this request's signed_data. Empty for
+  // personal_sign / typed_data requests (never broadcast) and for
+  // tx requests that haven't been broadcast yet.
+  transaction_id?: string;
   created_at: string;
   updated_at: string;
   completed_at?: string;
