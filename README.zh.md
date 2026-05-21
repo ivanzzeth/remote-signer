@@ -46,6 +46,8 @@ UID=$(id -u) GID=$(id -g) docker compose -f docker-compose.local.yml up -d
 
 每个 release 附带 `.dmg`（macOS）、`.exe`（Windows）、`.AppImage`（Linux）安装包，基于 Electron shell 内嵌 daemon。在 [Releases](https://github.com/ivanzzeth/remote-signer/releases) 页面下载。
 
+Electron 本质上就是一个指向本地 `http://127.0.0.1:8548` 的浏览器窗口，所以桌面应用运行的同时，你可以在普通浏览器里打开同一个 URL——同一份 React 应用、同一个 session、同一份 state。适合让桌面端管 daemon 的生命周期（开机自启、崩溃重启），但 UI 用自己的浏览器。
+
 ### TypeScript / JavaScript SDK
 
 ```bash
