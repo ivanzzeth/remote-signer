@@ -209,12 +209,13 @@ func startDaemon(t *testing.T, opts ...daemonOption) *daemon {
 // url returns the daemon's base HTTP URL.
 func (d *daemon) url() string { return fmt.Sprintf("http://127.0.0.1:%d", d.port) }
 
-// adminKeyPath returns the bootstrap admin private-key path. Exists once the
-// daemon has finished booting. Mirrors homepath.AdminKeyPaths() — the
-// bootstrap keypair lives under the apikeys/ subdirectory so every API
-// credential file shares a single location.
-func (d *daemon) adminKeyPath() string {
-	return filepath.Join(d.home, "apikeys", "admin.key.priv")
+// adminKeystorePath returns the bootstrap admin keystore path. Exists once
+// the daemon has finished booting. Mirrors homepath.AdminKeystorePath() —
+// the admin Ed25519 private key lives inside an encrypted keystore file
+// (no plaintext PEM is written; that switch was made in the auth refactor
+// commits eea5e67 / d8d976d).
+func (d *daemon) adminKeystorePath() string {
+	return filepath.Join(d.home, "apikeys", "admin.keystore.json")
 }
 
 // waitReady polls /health every 100ms until it returns 200 or the deadline
@@ -307,14 +308,23 @@ func cli(t *testing.T, args ...string) (stdout, stderr string, err error) {
 
 // runCLI invokes the binary against the daemon with admin credentials
 // pre-filled. Use for `settings`, `api-key`, etc.
+//
+// Auth is keystore-based (encrypted Ed25519 key + password env var) to
+// match the daemon's bootstrap (which writes admin.keystore.json, not a
+// plaintext PEM). The password is the same constant the daemon was
+// started with; see startDaemon for the matching env injection.
 func (d *daemon) runCLI(t *testing.T, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
 	full := append([]string{},
 		"--url", d.url(),
 		"--api-key-id", "admin",
-		"--api-key-file", d.adminKeyPath(),
+		"--api-key-keystore", d.adminKeystorePath(),
+		"--api-key-password-env", "REMOTE_SIGNER_KEYSTORE_PASSWORD",
 	)
 	full = append(full, args...)
+	// cli() inherits os.Environ(); pre-prep REMOTE_SIGNER_KEYSTORE_PASSWORD
+	// via t.Setenv so the test process exposes it to the child binary.
+	t.Setenv("REMOTE_SIGNER_KEYSTORE_PASSWORD", "integration-test")
 	return cli(t, full...)
 }
 
