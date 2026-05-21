@@ -18,6 +18,26 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/validate"
 )
 
+// parseTriBool reads a query value as "true" / "false" / "" — the
+// third state being "no filter". Empty maps to nil so we don't burn
+// CPU iterating signers for a no-op. Any other literal is a 400 at
+// the call site, not silently treated as "no filter" (rejected
+// misspellings beat permissive parsing).
+func parseTriBool(raw string) (*bool, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "":
+		return nil, nil
+	case "true", "1":
+		v := true
+		return &v, nil
+	case "false", "0":
+		v := false
+		return &v, nil
+	default:
+		return nil, errors.New("invalid bool")
+	}
+}
+
 // listSigners handles GET /api/v1/evm/signers
 // All roles see only signers they own or have been granted access to.
 func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
@@ -61,6 +81,35 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 
 	tagFilter := strings.TrimSpace(query.Get("tag"))
 
+	// api_key_id pins the address-allowlist to *another* key's view.
+	// Non-admins may only target their own key — anything else is a
+	// privilege-leak attempt and gets a 403 (cheaper than 200 + empty
+	// list, which would mask a UI bug). Default (nil) keeps the legacy
+	// "caller's own view" behavior.
+	targetKeyID := apiKey.ID
+	if v := strings.TrimSpace(query.Get("api_key_id")); v != "" {
+		if !apiKey.IsAdmin() && v != apiKey.ID {
+			h.writeError(w, "forbidden: only admins can filter by another api key", http.StatusForbidden)
+			return
+		}
+		targetKeyID = v
+	}
+
+	// locked / enabled are tri-state — query absent means either, set
+	// to "true" or "false" pins exactly that state. Reject any other
+	// literal so a misspelled "enabled=yes" 400s instead of silently
+	// becoming "no filter".
+	lockedFilter, err := parseTriBool(query.Get("locked"))
+	if err != nil {
+		h.writeError(w, "invalid locked filter: must be true or false", http.StatusBadRequest)
+		return
+	}
+	enabledFilter, err := parseTriBool(query.Get("enabled"))
+	if err != nil {
+		h.writeError(w, "invalid enabled filter: must be true or false", http.StatusBadRequest)
+		return
+	}
+
 	// Get all signers from manager
 	filter := types.SignerFilter{
 		Type:   signerType,
@@ -74,14 +123,17 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build allowed addresses set from ownership + access
-	ownedAddrs, err := h.accessService.GetOwnedAddresses(r.Context(), apiKey.ID)
+	// Build allowed addresses set from ownership + access for the
+	// targeted key (defaults to caller). Admin lookups against another
+	// key go through the same accessService path — no special-casing,
+	// because the access tables are the single source of truth.
+	ownedAddrs, err := h.accessService.GetOwnedAddresses(r.Context(), targetKeyID)
 	if err != nil {
 		h.logger.Error("failed to get owned addresses", slog.String("error", err.Error()))
 		h.writeError(w, "failed to list signers", http.StatusInternalServerError)
 		return
 	}
-	grantedAddrs, err := h.accessService.GetAccessibleAddresses(r.Context(), apiKey.ID)
+	grantedAddrs, err := h.accessService.GetAccessibleAddresses(r.Context(), targetKeyID)
 	if err != nil {
 		h.logger.Error("failed to get accessible addresses", slog.String("error", err.Error()))
 		h.writeError(w, "failed to list signers", http.StatusInternalServerError)
@@ -143,6 +195,25 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			kept = append(kept, s)
+		}
+		filteredSigners = kept
+	}
+
+	if lockedFilter != nil {
+		var kept []types.SignerInfo
+		for _, s := range filteredSigners {
+			if s.Locked == *lockedFilter {
+				kept = append(kept, s)
+			}
+		}
+		filteredSigners = kept
+	}
+	if enabledFilter != nil {
+		var kept []types.SignerInfo
+		for _, s := range filteredSigners {
+			if s.Enabled == *enabledFilter {
+				kept = append(kept, s)
+			}
 		}
 		filteredSigners = kept
 	}
