@@ -51,6 +51,57 @@ var allowedRPCMethods = map[string]bool{
 	"eth_getTransactionCount": true,
 }
 
+// WalletProxyAllowedMethods is the JSON-RPC allowlist for the
+// browser-extension RPC proxy (POST /api/v1/evm/rpc/{chainID}). Two
+// guiding rules:
+//
+//  1. ANY method that would touch key material on the daemon
+//     (eth_sign, eth_sendTransaction, eth_signTypedData_v4, …) is
+//     OFF the list. Those go through /api/v1/evm/sign so the rule
+//     engine + access gate apply. A user-facing wallet must NEVER be
+//     able to bypass them by calling the read proxy with a sign
+//     method.
+//
+//  2. Reads + broadcast are allowed — the browser needs the same
+//     shape of read traffic any RPC node serves, plus the ability to
+//     push a signed transaction back to the chain (eth_sendRawTransaction).
+//     Subscriptions are intentionally excluded: this is an HTTP
+//     proxy, not a websocket bridge.
+var WalletProxyAllowedMethods = map[string]bool{
+	// Chain / network identity
+	"eth_chainId":        true,
+	"net_version":        true,
+	"net_listening":      true,
+	"web3_clientVersion": true,
+
+	// Reads — block / state / account
+	"eth_blockNumber":            true,
+	"eth_call":                   true,
+	"eth_estimateGas":            true,
+	"eth_feeHistory":             true,
+	"eth_gasPrice":               true,
+	"eth_getBalance":             true,
+	"eth_getBlockByHash":         true,
+	"eth_getBlockByNumber":       true,
+	"eth_getBlockTransactionCountByHash":   true,
+	"eth_getBlockTransactionCountByNumber": true,
+	"eth_getCode":                true,
+	"eth_getLogs":                true,
+	"eth_getStorageAt":           true,
+	"eth_getTransactionByBlockHashAndIndex":   true,
+	"eth_getTransactionByBlockNumberAndIndex": true,
+	"eth_getTransactionByHash":   true,
+	"eth_getTransactionCount":    true,
+	"eth_getTransactionReceipt":  true,
+	"eth_maxPriorityFeePerGas":   true,
+	"eth_syncing":                true,
+
+	// Broadcast — signed tx only. eth_sendTransaction (unsigned) is
+	// intentionally NOT here; that path goes through /sign so the
+	// rule engine + budget tracking applies.
+	"eth_sendRawTransaction": true,
+}
+
 // chainIDPattern validates that chain IDs are numeric only (SSRF prevention).
 var chainIDPattern = regexp.MustCompile(`^[0-9]+$`)
 
@@ -314,6 +365,27 @@ func (p *RPCProvider) SendRawTransaction(ctx context.Context, chainID, signedTxH
 	}
 	params := []interface{}{signedTxHex}
 	return p.doRPCUnchecked(ctx, chainID, "eth_sendRawTransaction", params)
+}
+
+// DoWalletProxyRPC forwards a wallet-side JSON-RPC call (from the
+// browser extension's EIP1193Provider) to the configured upstream
+// after method-allowlist + chainID validation. Reuses the same
+// rate-limit + circuit-breaker + SSRF-resistant transport the JS
+// rule sandbox uses, so a single upstream config covers both.
+//
+// SECURITY: method MUST be in WalletProxyAllowedMethods — the
+// handler at /api/v1/evm/rpc/{chainID} double-checks this so a bug
+// in one layer alone can't open the bypass. Sign methods are never
+// allowed here; those go through /api/v1/evm/sign where the rule
+// engine + budget tracking apply.
+func (p *RPCProvider) DoWalletProxyRPC(ctx context.Context, chainID, method string, params []interface{}) (json.RawMessage, error) {
+	if err := ValidateChainID(chainID); err != nil {
+		return nil, fmt.Errorf("walletProxy: %w", err)
+	}
+	if !WalletProxyAllowedMethods[method] {
+		return nil, fmt.Errorf("method %q is not allowed via the wallet proxy", method)
+	}
+	return p.doRPCRaw(ctx, chainID, method, params)
 }
 
 // GetTransactionReceipt fetches the receipt of a transaction by hash.

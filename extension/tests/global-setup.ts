@@ -105,9 +105,22 @@ async function globalSetup(_config: FullConfig) {
 
   console.log("[global-setup] Starting e2e-test-server...");
 
+  // E2E_ANVIL_URL is consumed by the e2e-test-server to stand up an
+  // RPC proxy backend pointing at the local anvil so the daemon's
+  // /api/v1/evm/rpc/{chainID} route is wired during specs that need
+  // it (e.g. send-transaction's eth_sendTransaction broadcast).
   const proc = spawn(bin, [], {
     cwd: projectRoot,
     stdio: ["ignore", "pipe", "pipe"],
+    env: {
+      ...process.env,
+      ...(anvil
+        ? {
+            E2E_ANVIL_URL: anvil.url,
+            E2E_ANVIL_CHAIN_ID: String(anvil.chainId),
+          }
+        : {}),
+    },
   });
 
   // Collect stderr for failures
