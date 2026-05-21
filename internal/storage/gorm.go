@@ -95,6 +95,7 @@ func NewDB(cfg Config) (*gorm.DB, error) {
 	// - Never change column types incompatibly
 	if err := db.AutoMigrate(
 		&types.SignRequest{},
+		&types.Transaction{},
 		&types.Rule{},
 		&types.RuleTemplate{},
 		&types.RulePreset{},
@@ -144,6 +145,7 @@ func NewDBWithLogger(cfg Config, logLevel logger.LogLevel) (*gorm.DB, error) {
 
 	if err := db.AutoMigrate(
 		&types.SignRequest{},
+		&types.Transaction{},
 		&types.Rule{},
 		&types.RuleTemplate{},
 		&types.RulePreset{},

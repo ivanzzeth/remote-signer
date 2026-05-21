@@ -45,6 +45,18 @@ type RequestRepository interface {
 	// Best-effort — callers swallow errors because the sign flow has
 	// already moved on to manual approval / simulation.
 	UpdateLastNoMatchReason(ctx context.Context, id types.SignRequestID, reason string) error
+	// LookupBySignedData finds the most recent completed sign request
+	// whose SignedData equals the supplied bytes. Used by the wallet
+	// RPC proxy to link an eth_sendRawTransaction broadcast back to
+	// the request that produced it. Returns ErrNotFound when no
+	// match (third-party caller hit the proxy with a payload we
+	// didn't sign).
+	LookupBySignedData(ctx context.Context, signedData []byte) (*types.SignRequest, error)
+	// SetTransactionID stores the FK after the proxy creates a
+	// transactions row. Best-effort — sign_request retains its
+	// completed status even if the back-ref write fails (the txs
+	// table is still the source of truth).
+	SetTransactionID(ctx context.Context, id types.SignRequestID, transactionID string) error
 }
 
 // GormRequestRepository implements RequestRepository using GORM
@@ -213,6 +225,52 @@ func (r *GormRequestRepository) UpdateLastNoMatchReason(ctx context.Context, id 
 		Update("last_no_match_reason", reason)
 	if result.Error != nil {
 		return fmt.Errorf("failed to update last_no_match_reason: %w", result.Error)
+	}
+	return nil
+}
+
+// LookupBySignedData scans recently-completed requests for one whose
+// SignedData equals the supplied bytes. Used by the wallet RPC proxy
+// to associate a fresh eth_sendRawTransaction broadcast with the
+// signing request that produced it. Bytea equality is the cheapest
+// reliable match — hashing the payload would add no precision and
+// requires a column we don't carry.
+//
+// Limited to the last 5 minutes of completed requests to keep the
+// scan bounded on busy deployments; the broadcast typically lands
+// seconds after the sign completes.
+func (r *GormRequestRepository) LookupBySignedData(ctx context.Context, signedData []byte) (*types.SignRequest, error) {
+	if len(signedData) == 0 {
+		return nil, types.ErrNotFound
+	}
+	cutoff := time.Now().Add(-5 * time.Minute)
+	var req types.SignRequest
+	err := r.db.WithContext(ctx).
+		Where("signed_data = ? AND status = ? AND updated_at >= ?",
+			signedData, types.StatusCompleted, cutoff).
+		Order("updated_at DESC").
+		First(&req).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, types.ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to lookup by signed_data: %w", err)
+	}
+	return &req, nil
+}
+
+// SetTransactionID writes the FK linking sign_request → transactions.
+// No-op if the row doesn't exist (returns ErrNotFound) so callers can
+// treat "we lost the race / the request was deleted" as benign.
+func (r *GormRequestRepository) SetTransactionID(ctx context.Context, id types.SignRequestID, transactionID string) error {
+	result := r.db.WithContext(ctx).Model(&types.SignRequest{}).
+		Where("id = ?", id).
+		Update("transaction_id", transactionID)
+	if result.Error != nil {
+		return fmt.Errorf("failed to set transaction_id: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return types.ErrNotFound
 	}
 	return nil
 }
