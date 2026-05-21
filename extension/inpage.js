@@ -7,8 +7,34 @@
       return v.toString(16);
     });
   }
+  // Inline logger mirroring extension/src/logger.ts. inpage runs in
+  // MAIN world (the dApp's page context) — no chrome.* access, so the
+  // level lookup goes through a window-bridged value that content-script
+  // pushes via postMessage when it changes. Default is "info" so the
+  // page console always shows method dispatch and any error.
+  const LOG_LEVEL_RANK_INPAGE = { debug: 0, info: 1, warn: 2, error: 3 };
+  let __inpageLogLevel = "info";
+  window.addEventListener("message", (event) => {
+    const d = event.data;
+    if (d && d.type === "remote-signer:log-level" && typeof d.level === "string"
+        && d.level in LOG_LEVEL_RANK_INPAGE) {
+      __inpageLogLevel = d.level;
+    }
+  });
+  function ipLog(level, msg, fields) {
+    if (LOG_LEVEL_RANK_INPAGE[level] < LOG_LEVEL_RANK_INPAGE[__inpageLogLevel]) return;
+    const d = new Date();
+    const pad = (n, w = 2) => n.toString().padStart(w, "0");
+    const ts = pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" +
+      pad(d.getSeconds()) + "." + pad(d.getMilliseconds(), 3);
+    const prefix = `[${ts}] [${level}] [inpage] ${msg}`;
+    const fn = level === "error" ? console.error
+      : level === "warn" ? console.warn : console.log;
+    if (fields && Object.keys(fields).length > 0) fn(prefix, fields);
+    else fn(prefix);
+  }
   if (window.__web3AgentBrowserInjected) {
-    console.log("[Web3 Agent Browser] Already injected, skipping");
+    ipLog("info", "already injected, skipping");
   } else {
     let emitEvent = function(event, ...args) {
       const handlers = eventListeners.get(event);
@@ -17,13 +43,18 @@
           try {
             handler(...args);
           } catch (e) {
-            console.error(`[Web3 Agent Browser] Event handler error (${event}):`, e);
+            ipLog("error", "event handler threw", { event, error: e?.message || String(e) });
           }
         }
       }
     }, sendRequest = function(method, params) {
       return new Promise((resolve, reject) => {
         const id = uuidv4();
+        ipLog("info", "→ content-script", {
+          method,
+          id,
+          paramsLen: Array.isArray(params) ? params.length : 0
+        });
         pendingRequests.set(id, { resolve, reject });
         window.postMessage(
           {
@@ -37,6 +68,7 @@
         setTimeout(() => {
           if (pendingRequests.has(id)) {
             pendingRequests.delete(id);
+            ipLog("warn", "request timed out", { method, id });
             reject(new Error(`Request timed out: ${method}`));
           }
         }, 3e5);
@@ -68,11 +100,17 @@
         if (pending) {
           pendingRequests.delete(data.id);
           if (data.error) {
+            ipLog("error", "← extension error", {
+              id: data.id,
+              code: data.error.code,
+              message: data.error.message,
+            });
             const err = new Error(data.error.message || "Unknown error");
             err.code = data.error.code || -32603;
             err.data = data.error.data;
             pending.reject(err);
           } else {
+            ipLog("debug", "← extension ok", { id: data.id });
             pending.resolve(data.result);
           }
         }
@@ -152,7 +190,7 @@
             try {
               handler({ chainId: _chainId });
             } catch (e) {
-              console.error("[Web3 Agent Browser] connect handler error:", e);
+              ipLog("error", "connect handler threw", { error: e?.message || String(e) });
             }
           });
         }
@@ -316,18 +354,18 @@
         new CustomEvent("eip6963:announceProvider", { detail: providerDetail })
       );
     });
-    console.log("[Web3 Agent Browser] Provider proxy injected and announced via EIP-6963");
+    ipLog("info", "provider injected + EIP-6963 announced");
     getState().then((state) => {
       _accounts = state.accounts || [];
       _chainId = state.chainId || "0x1";
       _isConnected = state.isConnected || false;
-      console.log("[Web3 Agent Browser] State synced from background:", {
+      ipLog("info", "initial state synced", {
         accounts: _accounts.length,
         chainId: _chainId,
         isConnected: _isConnected
       });
     }).catch((err) => {
-      console.warn("[Web3 Agent Browser] Initial state sync failed:", err.message);
+      ipLog("warn", "initial state sync failed", { message: err?.message || String(err) });
     });
   }
 })();

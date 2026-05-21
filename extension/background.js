@@ -3778,7 +3778,88 @@
     return diff === 0;
   }
 
+  // src/logger.ts
+  var LEVEL_RANK = {
+    debug: 0,
+    info: 1,
+    warn: 2,
+    error: 3
+  };
+  var STORAGE_KEY = "remote-signer:log-level";
+  var currentLevel = "info";
+  function loadLevel() {
+    try {
+      chrome.storage?.local.get(STORAGE_KEY, (r) => {
+        const v = r?.[STORAGE_KEY];
+        if (typeof v === "string" && v in LEVEL_RANK) {
+          currentLevel = v;
+        }
+      });
+    } catch {
+    }
+  }
+  try {
+    chrome.storage?.onChanged?.addListener?.((changes, area) => {
+      if (area !== "local") return;
+      const change = changes[STORAGE_KEY];
+      if (!change) return;
+      const v = change.newValue;
+      if (typeof v === "string" && v in LEVEL_RANK) {
+        currentLevel = v;
+      }
+    });
+  } catch {
+  }
+  loadLevel();
+  function fmtTimestamp() {
+    const d = /* @__PURE__ */ new Date();
+    const pad = (n, w = 2) => n.toString().padStart(w, "0");
+    return pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds()) + "." + pad(d.getMilliseconds(), 3);
+  }
+  function emit(level, source, msg, fields) {
+    if (LEVEL_RANK[level] < LEVEL_RANK[currentLevel]) return;
+    const prefix = `[${fmtTimestamp()}] [${level}] [${source}] ${msg}`;
+    const fn = level === "error" ? console.error : level === "warn" ? console.warn : console.log;
+    if (fields && Object.keys(fields).length > 0) {
+      fn(prefix, fields);
+    } else {
+      fn(prefix);
+    }
+  }
+  function createLogger(source) {
+    return {
+      debug: (msg, fields) => emit("debug", source, msg, fields),
+      info: (msg, fields) => emit("info", source, msg, fields),
+      warn: (msg, fields) => emit("warn", source, msg, fields),
+      error: (msg, fields) => emit("error", source, msg, fields)
+    };
+  }
+  function describeError(err2) {
+    if (err2 == null) return { error: null };
+    if (err2 instanceof Error) {
+      const out = {
+        message: err2.message,
+        name: err2.name
+      };
+      const code = err2.code;
+      if (code !== void 0) out.code = code;
+      const data = err2.data;
+      if (data !== void 0) out.data = data;
+      if (err2.stack) out.stack = err2.stack.split("\n").slice(0, 3).join("\n");
+      return out;
+    }
+    if (typeof err2 === "object") return { ...err2 };
+    return { message: String(err2) };
+  }
+
   // src/background.ts
+  var log = createLogger("bg");
+  var dispatchLog = createLogger("bg.dispatch");
+  var permissionLog = createLogger("bg.permission");
+  var refreshLog = createLogger("bg.refresh");
+  var initLog = createLogger("bg.init");
+  var approvalLog = createLogger("bg.approval");
+  var connectLog = createLogger("bg.connect");
   var chromeStorageAdapter = {
     getItem(key) {
       return new Promise((resolve) => {
@@ -3934,7 +4015,11 @@
       const pending = pendingConnects.get(requestId);
       if (pending && win.id != null) pending.windowId = win.id;
     } catch (err2) {
-      console.error("[background] Failed to open Connect window:", err2);
+      connectLog.error("failed to open Connect window", {
+        requestId,
+        origin,
+        ...describeError(err2)
+      });
       const pending = pendingConnects.get(requestId);
       if (pending) {
         clearTimeout(pending.timeoutHandle);
@@ -3954,6 +4039,10 @@
   });
   async function acquirePermission(origin) {
     await loadConfig();
+    permissionLog.info("acquire", {
+      origin,
+      autoApprove: cachedConfig.autoApproveConnections !== false
+    });
     if (cachedConfig.autoApproveConnections !== false) {
       await ensureInit();
       await refreshSignersIgnoringErrors();
@@ -3961,10 +4050,16 @@
       try {
         if (provider && provider.isConnected()) {
           accounts = await provider.request({ method: "eth_accounts" });
+        } else {
+          permissionLog.warn("provider not connected at acquire time", {
+            providerExists: !!provider
+          });
         }
-      } catch {
+      } catch (err2) {
+        permissionLog.warn("eth_accounts failed during acquire", describeError(err2));
       }
       if (accounts.length === 0) {
+        permissionLog.error("no usable signers", { origin });
         throw { code: -32603, message: "No usable signers \u2014 open Settings first" };
       }
       const perm = {
@@ -3973,6 +4068,7 @@
         grantedAt: Date.now()
       };
       await setPermissionForOrigin(origin, perm);
+      permissionLog.info("granted", { origin, accountCount: perm.accounts.length });
       return perm;
     }
     return requestConnectFromUser(origin, getChainForOrigin(origin));
@@ -4108,7 +4204,7 @@
         }
       ]);
     } catch (e) {
-      console.error("[background] Failed to register content script:", e);
+      initLog.error("failed to register content script", describeError(e));
     }
   }
   chrome.runtime.onInstalled.addListener(() => registerContentScript());
@@ -4160,7 +4256,7 @@
       });
     } catch (e) {
       if (!e.message?.includes("Cannot access")) {
-        console.error("[background] CSP bypass injection failed:", e);
+        initLog.error("CSP bypass injection failed", describeError(e));
       }
     }
   });
@@ -4168,15 +4264,15 @@
     const cfg = await loadConfig();
     if (!cfg.apiKeyPrivateKey) {
       initError = "API key not configured. Open extension popup to configure.";
-      console.warn("[background]", initError);
+      initLog.warn(initError);
       return;
     }
     if (!cfg.apiKeyId) {
       initError = "API key ID not configured. Open extension popup to configure.";
-      console.warn("[background]", initError);
+      initLog.warn(initError);
       return;
     }
-    console.log("[background] Initializing provider...", {
+    initLog.info("initializing provider", {
       remoteSignerUrl: cfg.remoteSignerUrl,
       apiKeyId: cfg.apiKeyId,
       chainId: cfg.selectedChain
@@ -4214,15 +4310,19 @@
       try {
         await provider.switchAccount(cfg.activeSignerAddress);
       } catch (err2) {
-        console.warn("[background] stored active signer no longer usable:", err2);
+        initLog.warn("stored active signer no longer usable", {
+          activeSignerAddress: cfg.activeSignerAddress,
+          ...describeError(err2)
+        });
         cfg.activeSignerAddress = void 0;
         await saveConfig(cfg);
       }
     }
-    console.log("[background] Provider created successfully");
-    console.log("  - Connected:", provider.isConnected());
-    console.log("  - Active account:", provider.selectedAddress);
-    console.log("  - Chain ID:", provider.chainId);
+    initLog.info("provider ready", {
+      connected: provider.isConnected(),
+      activeAccount: provider.selectedAddress,
+      chainId: provider.chainId
+    });
     const events = ["accountsChanged", "connect", "disconnect"];
     for (const event of events) {
       provider.on(event, (data) => {
@@ -4234,7 +4334,7 @@
     if (!initPromise) {
       initPromise = initProvider().catch((err2) => {
         initError = err2.message || String(err2);
-        console.error("[background] Provider init failed:", err2);
+        initLog.error("provider init failed", describeError(err2));
       });
     }
     return initPromise;
@@ -4243,11 +4343,16 @@
   async function refreshSignersIgnoringErrors() {
     if (!provider) return;
     if (pendingSignerRefresh) return pendingSignerRefresh;
+    const t0 = Date.now();
     pendingSignerRefresh = (async () => {
       try {
         await provider.refreshSigners();
+        refreshLog.debug("refresh ok", { durMs: Date.now() - t0 });
       } catch (err2) {
-        console.warn("[background] refreshSigners failed:", err2);
+        refreshLog.warn("refresh failed", {
+          durMs: Date.now() - t0,
+          ...describeError(err2)
+        });
       } finally {
         pendingSignerRefresh = null;
       }
@@ -4293,7 +4398,7 @@
       });
       pendingApprovalWindowId = win.id ?? null;
     } catch (err2) {
-      console.error("[background] Failed to open pending-approval window:", err2);
+      approvalLog.error("failed to open pending-approval window", describeError(err2));
     }
   }
   chrome.windows?.onRemoved?.addListener?.((windowId) => {
@@ -4540,11 +4645,23 @@
       };
     }
     await refreshSignersIgnoringErrors();
+    dispatchLog.info("dApp request", {
+      method: msg.method,
+      origin,
+      paramsLen: Array.isArray(msg.params) ? msg.params.length : 0,
+      id: msg.id
+    });
     const extra = await tryHandleExtraMethod(msg, origin);
     if (extra.handled) {
       if (extra.error) {
+        dispatchLog.warn("extra-dispatch error", {
+          method: msg.method,
+          id: msg.id,
+          error: extra.error
+        });
         return { type: "web3-eip1193-response", id: msg.id, error: extra.error };
       }
+      dispatchLog.debug("extra-dispatch result", { method: msg.method, id: msg.id });
       return { type: "web3-eip1193-response", id: msg.id, result: extra.result };
     }
     try {
@@ -4552,12 +4669,18 @@
         method: msg.method,
         params: msg.params
       });
+      dispatchLog.debug("sdk result", { method: msg.method, id: msg.id });
       return {
         type: "web3-eip1193-response",
         id: msg.id,
         result
       };
     } catch (err2) {
+      dispatchLog.error("sdk error", {
+        method: msg.method,
+        id: msg.id,
+        ...describeError(err2)
+      });
       return {
         type: "web3-eip1193-response",
         id: msg.id,
