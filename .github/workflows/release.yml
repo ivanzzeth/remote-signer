@@ -22,21 +22,31 @@ jobs:
         with:
           go-version-file: 'go.mod'
 
-      - name: Build remote-signer (multi-arch)
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build web UI bundle (vite → internal/web/dist)
+        # Release binaries embed the React SPA via the embed_web build tag
+        # below. The dist directory is gitignored, so it has to be produced
+        # fresh in CI before any go build.
+        run: |
+          cd web
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Build remote-signer (multi-arch, UI embedded)
         run: |
           for goos in linux darwin; do
             for goarch in amd64 arm64; do
               GOOS=$goos GOARCH=$goarch CGO_ENABLED=0 go build \
+                -tags embed_web \
                 -ldflags="-s -w" \
                 -o "remote-signer-${goos}-${goarch}" \
                 ./cmd/remote-signer
             done
           done
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
 
       - name: Build and package Chrome extension
         run: |
