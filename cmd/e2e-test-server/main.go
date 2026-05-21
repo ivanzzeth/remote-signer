@@ -331,6 +331,7 @@ func main() {
 		RPCProvider:         rpcProvider,
 		TransactionService:  txService,
 		TransactionRepo:     txRepo,
+		RequestRepo:         requestRepo,
 		Template: &api.TemplateConfig{
 			TemplateRepo:    templateRepo,
 			TemplateService: templateService,

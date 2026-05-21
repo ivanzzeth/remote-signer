@@ -101,6 +101,16 @@ type RouterConfig struct {
 	// register only when set, so a build without tracking simply
 	// omits the listing surface.
 	TransactionRepo storage.TransactionRepository
+	// RequestSimulationRepo backs the per-request simulation
+	// preview endpoint. Optional — without it the route doesn't
+	// register and the web UI's preview panel just shows
+	// "evaluating" forever.
+	RequestSimulationRepo storage.RequestSimulationRepository
+	// RequestRepo backs handlers that need a direct repo handle
+	// for cross-handler joins (e.g. the simulation handler joins
+	// sign_request.api_key_id for visibility scoping). Optional —
+	// handlers that need it gate their own registration on it.
+	RequestRepo storage.RequestRepository
 }
 
 // Router handles HTTP routing
@@ -278,6 +288,16 @@ func (r *Router) setupRoutes() error {
 	// EVM routes (with auth)
 	r.mux.Handle("/api/v1/evm/sign", r.withAuthAndPerm(middleware.PermSignRequest, signHandler))
 	r.mux.Handle("/api/v1/evm/requests", r.withAuthAndPerm(middleware.PermListOwnRequests, listHandler))
+	var requestSimHandler *evmhandler.RequestSimulationHandler
+	if r.config.RequestSimulationRepo != nil && r.config.RequestRepo != nil {
+		var rsErr error
+		requestSimHandler, rsErr = evmhandler.NewRequestSimulationHandler(
+			r.config.RequestSimulationRepo, r.config.RequestRepo, r.logger,
+		)
+		if rsErr != nil {
+			return fmt.Errorf("failed to create request simulation handler: %w", rsErr)
+		}
+	}
 	r.mux.Handle("/api/v1/evm/requests/", r.withAuth(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		// Route to approval handler if path ends with /approve (admin only)
 		if strings.HasSuffix(req.URL.Path, "/approve") {
@@ -287,6 +307,18 @@ func (r *Router) setupRoutes() error {
 		// Route to preview-rule handler if path ends with /preview-rule (admin only)
 		if strings.HasSuffix(req.URL.Path, "/preview-rule") {
 			middleware.RequirePermission(middleware.PermApproveRequest, r.logger, r.config.AlertService)(previewRuleHandler).ServeHTTP(w, req)
+			return
+		}
+		// Route to simulation handler if path ends with /simulation.
+		// Visibility is enforced inside the handler (non-admin only
+		// sees own); 404 on parent-not-found prevents id-pattern
+		// enumeration by foreign callers.
+		if strings.HasSuffix(req.URL.Path, "/simulation") {
+			if requestSimHandler == nil {
+				http.NotFound(w, req)
+				return
+			}
+			requestSimHandler.ServeHTTP(w, req)
 			return
 		}
 		// Otherwise, route to request handler (any authenticated user can view own requests)
