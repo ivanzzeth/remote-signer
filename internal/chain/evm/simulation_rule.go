@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -110,7 +111,13 @@ type SimulationBudgetRule struct {
 	signerLister      ManagedSignerLister
 	allowanceQuerier  simulation.AllowanceQuerier
 	decimalsAlerter   DecimalsAnomalyAlerter
-	logger            *slog.Logger
+	// simulationRepo persists each evaluation's outcome so the web
+	// UI can render a per-request preview without re-running
+	// simulation client-side. Optional — pre-feature deployments
+	// can leave it nil and the rule still drives sign approval
+	// exactly as before.
+	simulationRepo storage.RequestSimulationRepository
+	logger         *slog.Logger
 
 	// Batch accumulator fields (set via SetBatchConfig + StartAccumulator).
 	batchWindow  time.Duration
@@ -151,6 +158,89 @@ func NewSimulationBudgetRule(
 // may be created after SimulationBudgetRule in the application initialization order.
 func (r *SimulationBudgetRule) SetDecimalsAlerter(a DecimalsAnomalyAlerter) {
 	r.decimalsAlerter = a
+}
+
+// SetSimulationRepo wires the persistence layer the rule uses to
+// record each evaluation's outcome. Setter (not constructor param)
+// because the simulation rule predates the request_simulations table
+// and many existing test fixtures construct the rule without one.
+// Nil is a valid configuration — the rule then doesn't persist
+// anything, which is what older deployments + the test stubs want.
+func (r *SimulationBudgetRule) SetSimulationRepo(repo storage.RequestSimulationRepository) {
+	r.simulationRepo = repo
+}
+
+// recordOutcome upserts the latest evaluation snapshot keyed by
+// sign-request id. Best-effort: a persistence failure logs but does
+// NOT alter the SimulationOutcome the caller is about to return —
+// the sign-approval path is the source of truth, the row is a UI
+// convenience.
+func (r *SimulationBudgetRule) recordOutcome(
+	ctx context.Context,
+	req *types.SignRequest,
+	outcome *SimulationOutcome,
+) {
+	if r.simulationRepo == nil || outcome == nil || req == nil {
+		return
+	}
+	row := &types.RequestSimulation{
+		SignRequestID: string(req.ID),
+		ChainID:       req.ChainID,
+		Decision:      outcome.Decision,
+		Reason:        outcome.Reason,
+		SimulatedAt:   time.Now(),
+		UpdatedAt:     time.Now(),
+	}
+	if sim := outcome.Simulation; sim != nil {
+		row.Success = sim.Success
+		row.GasUsed = sim.GasUsed
+		row.RevertReason = sim.RevertReason
+		if len(sim.BalanceChanges) > 0 {
+			if b, err := json.Marshal(sim.BalanceChanges); err == nil {
+				row.BalanceChanges = b
+			}
+		}
+		if len(sim.Events) > 0 {
+			if b, err := json.Marshal(sim.Events); err == nil {
+				row.Events = b
+			}
+		}
+		// Contracts touched: union of event-emitting addresses.
+		// Lightweight enough to compute here every call; saves the
+		// UI from having to scan events itself.
+		if contracts := contractsFromEvents(sim.Events); len(contracts) > 0 {
+			if b, err := json.Marshal(contracts); err == nil {
+				row.Contracts = b
+			}
+		}
+		if b, err := json.Marshal(sim); err == nil {
+			row.RawResult = b
+		}
+	}
+	if err := r.simulationRepo.Upsert(ctx, row); err != nil {
+		r.logger.Warn("simulation: persist outcome failed",
+			"request_id", req.ID,
+			"error", err)
+	}
+}
+
+// contractsFromEvents returns the unique addresses that emitted
+// events in the simulation. Stable order (sorted) so the UI's diff
+// view doesn't reshuffle on each refresh.
+func contractsFromEvents(events []simulation.SimEvent) []string {
+	if len(events) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(events))
+	for _, ev := range events {
+		seen[strings.ToLower(ev.Address)] = struct{}{}
+	}
+	out := make([]string, 0, len(seen))
+	for a := range seen {
+		out = append(out, a)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Available returns true if the simulation engine is configured and ready.
@@ -220,11 +310,27 @@ func (r *SimulationBudgetRule) hasManagedSignerApproval(ctx context.Context, cha
 //   - decision="no_match": simulator not available, non-transaction, or approval detected
 //     (caller falls through to existing manual-approval / deny logic)
 //   - decision="deny": simulation reverted or budget exceeded
+//
+// Side-effect: on every meaningful return path (i.e. we actually
+// produced a Simulation snapshot, not just bailed on "no simulator"
+// or "wrong sign_type"), the outcome is upserted into
+// request_simulations via recordOutcome — that's how the web UI's
+// preview panel knows what to render. The persist is best-effort
+// and never alters the returned outcome.
 func (r *SimulationBudgetRule) EvaluateSingle(
 	ctx context.Context,
 	req *types.SignRequest,
 	parsed *types.ParsedPayload,
-) (*SimulationOutcome, error) {
+) (outcome *SimulationOutcome, err error) {
+	defer func() {
+		// Only record outcomes that carry an actual Simulation
+		// snapshot. The early-return "no simulator / wrong sign_type"
+		// paths have nothing meaningful to show in the UI.
+		if outcome != nil && outcome.Simulation != nil {
+			r.recordOutcome(ctx, req, outcome)
+		}
+	}()
+
 	if r.simulator == nil {
 		return &SimulationOutcome{Decision: "no_match"}, nil
 	}

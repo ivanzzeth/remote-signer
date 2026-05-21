@@ -277,12 +277,23 @@ func (r *SimulationBudgetRule) fireBatch(batch *pendingBatch) {
 }
 
 // enqueueAndWait sends a request to the accumulator and blocks until the result is ready.
+//
+// Records the outcome into request_simulations on the way out — same
+// best-effort contract as the synchronous EvaluateSingle path, so
+// batch-evaluated requests show up in the web UI preview just like
+// individually-evaluated ones.
 func (r *SimulationBudgetRule) enqueueAndWait(
 	ctx context.Context,
 	req *types.SignRequest,
 	txParams simulation.TxParams,
 	rawPayload []byte,
-) (*SimulationOutcome, error) {
+) (outcome *SimulationOutcome, err error) {
+	defer func() {
+		if outcome != nil && outcome.Simulation != nil {
+			r.recordOutcome(ctx, req, outcome)
+		}
+	}()
+
 	respCh := make(chan simResponse, 1)
 	pending := &pendingSimRequest{
 		chainID:       req.ChainID,
