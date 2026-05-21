@@ -17,10 +17,7 @@
 
 package types
 
-import (
-	"encoding/json"
-	"time"
-)
+import "time"
 
 // RequestSimulation captures one snapshot of the simulation
 // pipeline's view of a sign request. Created lazily by the
@@ -54,17 +51,17 @@ type RequestSimulation struct {
 	// as JSON so we don't have to maintain a separate schema per
 	// field shape. The reading side decodes into typed structures
 	// at the handler boundary.
-	BalanceChanges json.RawMessage `json:"balance_changes,omitempty" gorm:"type:jsonb"`
-	Events         json.RawMessage `json:"events,omitempty" gorm:"type:jsonb"`
-	Contracts      json.RawMessage `json:"contracts,omitempty" gorm:"type:jsonb"`
+	BalanceChanges JSONBytes `json:"balance_changes,omitempty" gorm:"type:jsonb"`
+	Events         JSONBytes `json:"events,omitempty" gorm:"type:jsonb"`
+	Contracts      JSONBytes `json:"contracts,omitempty" gorm:"type:jsonb"`
 	// DecodedCalldata is the parsed (function name + args) view of
 	// the transaction's calldata. Empty for sign_types that don't
 	// carry calldata (personal_sign, typed_data).
-	DecodedCalldata json.RawMessage `json:"decoded_calldata,omitempty" gorm:"type:jsonb"`
+	DecodedCalldata JSONBytes `json:"decoded_calldata,omitempty" gorm:"type:jsonb"`
 	// RawResult is the unmodified SimulationResult JSON — kept as
 	// a debug fallback so we can re-render or analyse a past
 	// snapshot even after the decoded columns above shift shape.
-	RawResult json.RawMessage `json:"raw_result,omitempty" gorm:"type:jsonb"`
+	RawResult JSONBytes `json:"raw_result,omitempty" gorm:"type:jsonb"`
 
 	SimulatedAt time.Time `json:"simulated_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
