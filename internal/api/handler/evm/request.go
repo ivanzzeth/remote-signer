@@ -80,9 +80,14 @@ type RequestDetailResponse struct {
 	// drawer renders this so operators see "why didn't my rule fire?"
 	// without grepping server logs.
 	LastNoMatchReason string  `json:"last_no_match_reason,omitempty"`
-	CreatedAt         string  `json:"created_at"`
-	UpdatedAt         string  `json:"updated_at"`
-	CompletedAt       *string `json:"completed_at,omitempty"`
+	// TransactionID is the FK into /api/v1/evm/transactions; set
+	// when the wallet RPC proxy observes a broadcast whose signed
+	// bytes match this request's signed_data. The web UI renders
+	// it as a status badge + link on the Requests list.
+	TransactionID *string `json:"transaction_id,omitempty"`
+	CreatedAt     string  `json:"created_at"`
+	UpdatedAt     string  `json:"updated_at"`
+	CompletedAt   *string `json:"completed_at,omitempty"`
 }
 
 // ListRequestsResponse represents the response for listing requests
@@ -310,6 +315,7 @@ func toDetailResponse(ctx context.Context, ruleRepo storage.RuleRepository, req 
 		RuleMatchedID:     req.RuleMatchedID,
 		ApprovedBy:        req.ApprovedBy,
 		LastNoMatchReason: req.LastNoMatchReason,
+		TransactionID:     req.TransactionID,
 		CreatedAt:         req.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt:         req.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}

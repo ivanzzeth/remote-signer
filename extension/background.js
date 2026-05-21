@@ -1751,6 +1751,36 @@
       );
     }
   };
+  var EvmTransactionService = class {
+    constructor(transport) {
+      this.transport = transport;
+    }
+    async list(filter) {
+      const params = new URLSearchParams();
+      if (filter?.status) params.append("status", filter.status);
+      if (filter?.chain_id !== void 0) {
+        params.append("chain_id", String(filter.chain_id));
+      }
+      if (filter?.from) params.append("from", filter.from);
+      if (filter?.sign_request_id) params.append("sign_request_id", filter.sign_request_id);
+      if (filter?.api_key_id) params.append("api_key_id", filter.api_key_id);
+      if (filter?.limit !== void 0) params.append("limit", String(filter.limit));
+      if (filter?.offset !== void 0) params.append("offset", String(filter.offset));
+      const qs = params.toString();
+      return this.transport.request(
+        "GET",
+        `/api/v1/evm/transactions${qs ? `?${qs}` : ""}`,
+        null
+      );
+    }
+    async get(id) {
+      return this.transport.request(
+        "GET",
+        `/api/v1/evm/transactions/${encodeURIComponent(id)}`,
+        null
+      );
+    }
+  };
   var ProviderRpcError = class _ProviderRpcError extends Error {
     constructor(code, message, data) {
       super(message);
@@ -2446,6 +2476,7 @@
       this.simulate = new EvmSimulateService(transport);
       this.budgets = new EvmBudgetService(transport);
       this.rpcProxy = new EvmRPCProxyService(transport);
+      this.transactions = new EvmTransactionService(transport);
     }
   };
   var AuditService = class {

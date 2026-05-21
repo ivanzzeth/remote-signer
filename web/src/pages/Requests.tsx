@@ -135,6 +135,7 @@ export function Requests() {
                   <th className="py-1 pr-3 font-normal">Type</th>
                   <th className="py-1 pr-3 font-normal">By</th>
                   <th className="py-1 pr-3 font-normal">Status</th>
+                  <th className="py-1 pr-3 font-normal">On-chain</th>
                   <th className="py-1 font-normal text-right">Action</th>
                 </tr>
               </thead>
@@ -190,6 +191,21 @@ function RequestRow({
       </td>
       <td className="py-1 pr-3">
         <Badge tone={statusTone(req.status)}>{req.status}</Badge>
+      </td>
+      <td
+        className="py-1 pr-3 text-xs"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {req.transaction_id ? (
+          <Link
+            to={`/transactions/${req.transaction_id}`}
+            className="text-accent-600 hover:text-accent-500"
+          >
+            view →
+          </Link>
+        ) : (
+          <span className="text-ink-400">—</span>
+        )}
       </td>
       <td
         className="py-1 text-right"

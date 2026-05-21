@@ -18,6 +18,8 @@ import { Settings } from "./pages/Settings";
 import { Signers } from "./pages/Signers";
 import { TemplateDetail } from "./pages/TemplateDetail";
 import { Templates } from "./pages/Templates";
+import { TransactionDetail } from "./pages/TransactionDetail";
+import { Transactions } from "./pages/Transactions";
 import { Wallets } from "./pages/Wallets";
 
 /**
@@ -56,6 +58,8 @@ export function App() {
         <Route path="/wallets" element={<Wallets />} />
         <Route path="/requests" element={<Requests />} />
         <Route path="/requests/:id" element={<RequestDetail />} />
+        <Route path="/transactions" element={<Transactions />} />
+        <Route path="/transactions/:id" element={<TransactionDetail />} />
         <Route path="/rules" element={<Rules />} />
         <Route path="/templates" element={<Templates />} />
         <Route path="/templates/:id" element={<TemplateDetail />} />
