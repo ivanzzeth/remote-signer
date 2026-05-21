@@ -1951,6 +1951,54 @@
       return this._signers[this._activeIndex];
     }
     /**
+     * POST a JSON-RPC envelope to the chain RPC and parse the response.
+     *
+     * Public RPC providers (llamarpc, infura, ankr, etc.) routinely
+     * respond with HTML error pages — 403 captive portals on
+     * rate-limit, 502 from a flaky proxy, the provider's branded
+     * "API key required" landing page. Calling response.json() on
+     * any of those throws a cryptic `SyntaxError: Unexpected token
+     * '<', "<!DOCTYPE "... is not valid JSON` that bubbles up as
+     * the generic "network or connection issue" the dApp displays.
+     *
+     * Check the HTTP status + content-type first so the caller gets
+     * an actionable error message ("RPC returned HTML 403 — likely
+     * rate-limited") instead of a parser hiccup.
+     */
+    async _rpcCall(rpcUrl, method, params) {
+      const response = await fetch(rpcUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: Date.now(),
+          method,
+          params
+        })
+      });
+      const contentType = response.headers.get("content-type") || "";
+      const bodyText = await response.text();
+      if (!contentType.toLowerCase().includes("json")) {
+        throw new Error(
+          `RPC ${rpcUrl} returned non-JSON (HTTP ${response.status}, content-type=${contentType || "missing"}). Body starts with: ${bodyText.slice(0, 80).replace(/\s+/g, " ")}\u2026`
+        );
+      }
+      let parsed;
+      try {
+        parsed = JSON.parse(bodyText);
+      } catch (e) {
+        throw new Error(
+          `RPC ${rpcUrl} returned invalid JSON (HTTP ${response.status}): ${e.message}`
+        );
+      }
+      if (parsed.error) {
+        throw new Error(
+          `RPC ${method} failed: ${parsed.error.message ?? "unknown"}` + (parsed.error.code !== void 0 ? ` (code ${parsed.error.code})` : "")
+        );
+      }
+      return parsed.result;
+    }
+    /**
      * Pick the signer a sign / send request should route through.
      *
      * Sign-method parameters carry an address: personal_sign /
@@ -2191,21 +2239,7 @@
           const rpcUrl = await this._getRpcUrl();
           const filled = await this._fillTxDefaults(tx, signer.address, rpcUrl);
           const signedTx = await signer.signTransaction(normalizeEip1193Tx(filled));
-          const response = await fetch(rpcUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              jsonrpc: "2.0",
-              id: Date.now(),
-              method: "eth_sendRawTransaction",
-              params: [signedTx]
-            })
-          });
-          const result = await response.json();
-          if (result.error) {
-            throw new Error(result.error.message);
-          }
-          return result.result;
+          return await this._rpcCall(rpcUrl, "eth_sendRawTransaction", [signedTx]);
         }
         case "eth_signTransaction": {
           const [tx] = params;
@@ -2227,21 +2261,7 @@
         case "eth_getTransactionCount":
         case "eth_getTransactionReceipt": {
           const rpcUrl = await this._getRpcUrl();
-          const response = await fetch(rpcUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              jsonrpc: "2.0",
-              id: Date.now(),
-              method,
-              params: params ?? []
-            })
-          });
-          const result = await response.json();
-          if (result.error) {
-            throw new Error(result.error.message);
-          }
-          return result.result;
+          return await this._rpcCall(rpcUrl, method, params ?? []);
         }
         // Wallet methods
         case "wallet_requestPermissions": {
@@ -2301,16 +2321,7 @@
      */
     async _fillTxDefaults(tx, fromAddr, rpcUrl) {
       const filled = { ...tx, from: tx.from ?? fromAddr };
-      const rpc = async (method, params) => {
-        const res = await fetch(rpcUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ jsonrpc: "2.0", id: Date.now(), method, params })
-        });
-        const json = await res.json();
-        if (json.error) throw new Error(`${method}: ${json.error.message}`);
-        return json.result;
-      };
+      const rpc = (method, params) => this._rpcCall(rpcUrl, method, params);
       if (filled.nonce == null) {
         filled.nonce = await rpc("eth_getTransactionCount", [fromAddr, "pending"]);
       }
@@ -3893,7 +3904,12 @@
   var EXTENSION_VERSION = typeof chrome !== "undefined" && chrome.runtime?.getManifest?.()?.version || "dev";
   var CLIENT_VERSION_STRING = `RemoteSigner/v${EXTENSION_VERSION}/javascript`;
   var DEFAULT_CHAINS = [
-    { chainId: 1, chainName: "Ethereum", rpcUrls: ["https://eth.llamarpc.com"], nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 } },
+    // publicnode.com first: llamarpc started rate-limiting Uniswap-volume
+    // dApps with HTML 403 pages that the SDK couldn't even parse — the
+    // failure mode was "Unexpected token '<', '<!DOCTYPE' is not valid
+    // JSON" landing in the dApp as "network or connection issue". Ankr
+    // is the secondary fallback for the eventual multi-URL retry loop.
+    { chainId: 1, chainName: "Ethereum", rpcUrls: ["https://ethereum-rpc.publicnode.com", "https://rpc.ankr.com/eth", "https://eth.llamarpc.com"], nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 } },
     { chainId: 10, chainName: "Optimism", rpcUrls: ["https://mainnet.optimism.io"], nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 } },
     { chainId: 56, chainName: "BNB Smart Chain", rpcUrls: ["https://bsc-dataseed.binance.org"], nativeCurrency: { name: "BNB", symbol: "BNB", decimals: 18 } },
     { chainId: 137, chainName: "Polygon", rpcUrls: ["https://polygon-rpc.com"], nativeCurrency: { name: "POL", symbol: "POL", decimals: 18 } },

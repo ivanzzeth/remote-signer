@@ -309,6 +309,63 @@ export class EIP1193Provider {
   }
 
   /**
+   * POST a JSON-RPC envelope to the chain RPC and parse the response.
+   *
+   * Public RPC providers (llamarpc, infura, ankr, etc.) routinely
+   * respond with HTML error pages — 403 captive portals on
+   * rate-limit, 502 from a flaky proxy, the provider's branded
+   * "API key required" landing page. Calling response.json() on
+   * any of those throws a cryptic `SyntaxError: Unexpected token
+   * '<', "<!DOCTYPE "... is not valid JSON` that bubbles up as
+   * the generic "network or connection issue" the dApp displays.
+   *
+   * Check the HTTP status + content-type first so the caller gets
+   * an actionable error message ("RPC returned HTML 403 — likely
+   * rate-limited") instead of a parser hiccup.
+   */
+  private async _rpcCall(
+    rpcUrl: string,
+    method: string,
+    params: unknown[],
+  ): Promise<unknown> {
+    const response = await fetch(rpcUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: Date.now(),
+        method,
+        params,
+      }),
+    });
+    const contentType = response.headers.get("content-type") || "";
+    const bodyText = await response.text();
+    if (!contentType.toLowerCase().includes("json")) {
+      throw new Error(
+        `RPC ${rpcUrl} returned non-JSON (HTTP ${response.status}, content-type=${contentType || "missing"}). ` +
+        `Body starts with: ${bodyText.slice(0, 80).replace(/\s+/g, " ")}…`
+      );
+    }
+    let parsed: { result?: unknown; error?: { code?: number; message?: string } };
+    try {
+      parsed = JSON.parse(bodyText);
+    } catch (e) {
+      throw new Error(
+        `RPC ${rpcUrl} returned invalid JSON (HTTP ${response.status}): ${
+          (e as Error).message
+        }`,
+      );
+    }
+    if (parsed.error) {
+      throw new Error(
+        `RPC ${method} failed: ${parsed.error.message ?? "unknown"}` +
+        (parsed.error.code !== undefined ? ` (code ${parsed.error.code})` : ""),
+      );
+    }
+    return parsed.result;
+  }
+
+  /**
    * Pick the signer a sign / send request should route through.
    *
    * Sign-method parameters carry an address: personal_sign /
@@ -613,22 +670,7 @@ export class EIP1193Provider {
         const signedTx = await signer.signTransaction(normalizeEip1193Tx(filled));
 
         // Broadcast via RPC
-        const response = await fetch(rpcUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            jsonrpc: "2.0",
-            id: Date.now(),
-            method: "eth_sendRawTransaction",
-            params: [signedTx],
-          }),
-        });
-
-        const result: any = await response.json();
-        if (result.error) {
-          throw new Error(result.error.message);
-        }
-        return result.result;
+        return await this._rpcCall(rpcUrl, "eth_sendRawTransaction", [signedTx]);
       }
 
       case "eth_signTransaction": {
@@ -652,22 +694,7 @@ export class EIP1193Provider {
       case "eth_getTransactionCount":
       case "eth_getTransactionReceipt": {
         const rpcUrl = await this._getRpcUrl();
-        const response = await fetch(rpcUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            jsonrpc: "2.0",
-            id: Date.now(),
-            method,
-            params: (params as any[]) ?? [],
-          }),
-        });
-
-        const result: any = await response.json();
-        if (result.error) {
-          throw new Error(result.error.message);
-        }
-        return result.result;
+        return await this._rpcCall(rpcUrl, method, (params as any[]) ?? []);
       }
 
       // Wallet methods
@@ -748,16 +775,10 @@ export class EIP1193Provider {
    */
   private async _fillTxDefaults(tx: any, fromAddr: string, rpcUrl: string): Promise<any> {
     const filled = { ...tx, from: tx.from ?? fromAddr };
-    const rpc = async (method: string, params: any[]): Promise<any> => {
-      const res = await fetch(rpcUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: Date.now(), method, params }),
-      });
-      const json: any = await res.json();
-      if (json.error) throw new Error(`${method}: ${json.error.message}`);
-      return json.result;
-    };
+    // Reuse the same JSON-RPC helper so non-JSON 403/502 pages surface
+    // with the same actionable error instead of `SyntaxError: Unexpected
+    // token '<'` from inside the defaults-fill path.
+    const rpc = (method: string, params: any[]) => this._rpcCall(rpcUrl, method, params);
 
     if (filled.nonce == null) {
       filled.nonce = await rpc("eth_getTransactionCount", [fromAddr, "pending"]);
