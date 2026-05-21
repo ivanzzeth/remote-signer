@@ -41,6 +41,12 @@
 
 services:
   remote-signer:
+    # Default to pulling the latest release image from ghcr — most
+    # personal-mode users don't want to wait through a Node + Go build.
+    # Override with REMOTE_SIGNER_IMAGE for a pinned tag, or run
+    # `docker compose -f docker-compose.local.yml build` to bake local
+    # source changes against this tag instead.
+    image: ${REMOTE_SIGNER_IMAGE:-ghcr.io/ivanzzeth/remote-signer:latest}
     build:
       context: .
       dockerfile: Dockerfile
