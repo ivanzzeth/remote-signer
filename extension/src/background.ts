@@ -191,7 +191,12 @@ interface ChainEntry {
 }
 
 const DEFAULT_CHAINS: ChainEntry[] = [
-  { chainId: 1, chainName: "Ethereum", rpcUrls: ["https://eth.llamarpc.com"], nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 } },
+  // publicnode.com first: llamarpc started rate-limiting Uniswap-volume
+  // dApps with HTML 403 pages that the SDK couldn't even parse — the
+  // failure mode was "Unexpected token '<', '<!DOCTYPE' is not valid
+  // JSON" landing in the dApp as "network or connection issue". Ankr
+  // is the secondary fallback for the eventual multi-URL retry loop.
+  { chainId: 1, chainName: "Ethereum", rpcUrls: ["https://ethereum-rpc.publicnode.com", "https://rpc.ankr.com/eth", "https://eth.llamarpc.com"], nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 } },
   { chainId: 10, chainName: "Optimism", rpcUrls: ["https://mainnet.optimism.io"], nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 } },
   { chainId: 56, chainName: "BNB Smart Chain", rpcUrls: ["https://bsc-dataseed.binance.org"], nativeCurrency: { name: "BNB", symbol: "BNB", decimals: 18 } },
   { chainId: 137, chainName: "Polygon", rpcUrls: ["https://polygon-rpc.com"], nativeCurrency: { name: "POL", symbol: "POL", decimals: 18 } },

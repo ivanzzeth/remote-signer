@@ -814,3 +814,82 @@ describe("EIP1193Provider - refreshSigners", () => {
     await expect(provider.refreshSigners()).rejects.toThrow(/signersSource/);
   });
 });
+
+describe("EIP1193Provider - RPC error surface", () => {
+  // The user-visible bug these tests pin down: public RPC providers
+  // (llamarpc, ankr, infura) return HTML error pages on rate-limit /
+  // outage. The SDK used to call .json() blindly and surface a cryptic
+  // `SyntaxError: Unexpected token '<'` to the dApp, which Uniswap et
+  // al. render as "network or connection issue" — operators don't
+  // know that the RPC itself is at fault, not their wallet.
+
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  async function buildProviderWithRpc(): Promise<EIP1193Provider> {
+    return EIP1193Provider.create({
+      signersSource: { type: "manual", signers: [createMockSigner("0xA", "1")] },
+      defaultChainId: 1,
+      rpcOverrides: { 1: "https://rpc.example/test" },
+    });
+  }
+
+  it("surfaces non-JSON RPC responses with the status code + body preview", async () => {
+    const provider = await buildProviderWithRpc();
+    globalThis.fetch = jest.fn().mockResolvedValueOnce({
+      headers: new Map([["content-type", "text/html; charset=utf-8"]]),
+      status: 403,
+      text: async () => "<!DOCTYPE html><html><body>403 forbidden — rate limited</body></html>",
+    } as any) as any;
+    await expect(
+      provider.request({ method: "eth_blockNumber", params: [] })
+    ).rejects.toThrow(/returned non-JSON.*HTTP 403.*text\/html/i);
+  });
+
+  it("surfaces a JSON-RPC error.message + code on a structured failure", async () => {
+    const provider = await buildProviderWithRpc();
+    globalThis.fetch = jest.fn().mockResolvedValueOnce({
+      headers: new Map([["content-type", "application/json"]]),
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          error: { code: -32000, message: "execution reverted: ERC20: insufficient" },
+        }),
+    } as any) as any;
+    await expect(
+      provider.request({ method: "eth_call", params: [{}, "latest"] })
+    ).rejects.toThrow(/eth_call failed: execution reverted.*code -32000/i);
+  });
+
+  it("returns result on a healthy JSON response", async () => {
+    const provider = await buildProviderWithRpc();
+    globalThis.fetch = jest.fn().mockResolvedValueOnce({
+      headers: new Map([["content-type", "application/json"]]),
+      status: 200,
+      text: async () =>
+        JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0x1234" }),
+    } as any) as any;
+    const block = await provider.request({ method: "eth_blockNumber", params: [] });
+    expect(block).toBe("0x1234");
+  });
+
+  it("flags malformed JSON without dumping the SyntaxError text", async () => {
+    // A 200 with json content-type but truncated body would have
+    // thrown the original cryptic SyntaxError. We instead wrap it in
+    // a "returned invalid JSON" message so the failing layer is
+    // unambiguous in bug reports.
+    const provider = await buildProviderWithRpc();
+    globalThis.fetch = jest.fn().mockResolvedValueOnce({
+      headers: new Map([["content-type", "application/json"]]),
+      status: 200,
+      text: async () => "{ truncated…",
+    } as any) as any;
+    await expect(
+      provider.request({ method: "eth_blockNumber", params: [] })
+    ).rejects.toThrow(/returned invalid JSON/i);
+  });
+});
