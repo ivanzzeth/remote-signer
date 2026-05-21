@@ -283,6 +283,93 @@ func TestSignerAccessService_HDWalletDerivedAccess(t *testing.T) {
 	assert.True(t, ok)
 }
 
+// IsOwner must resolve HD-wallet derived addresses to the parent
+// ownership row. Pre-fix the access mutation endpoints (GrantAccess /
+// RevokeAccess / ListAccess / TransferOwnership) all 403'd on a derived
+// address because they share this gate.
+func TestSignerAccessService_IsOwner_HDDerivedResolvesParent(t *testing.T) {
+	db := setupTestDB(t)
+	ownershipRepo, err := storage.NewGormSignerOwnershipRepository(db)
+	require.NoError(t, err)
+	accessRepo, err := storage.NewGormSignerAccessRepository(db)
+	require.NoError(t, err)
+	apiKeyRepo, err := storage.NewGormAPIKeyRepository(db)
+	require.NoError(t, err)
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	mockHDMgr := &mockHDWalletResolver{
+		primaryAddrs: []string{"0xPRIMARY"},
+		derived: map[string][]types.SignerInfo{
+			"0xPRIMARY": {{Address: "0xDERIVED1"}, {Address: "0xDERIVED2"}},
+		},
+	}
+	svc, err := NewSignerAccessService(ownershipRepo, accessRepo, apiKeyRepo, func() (HDWalletParentResolver, error) {
+		return mockHDMgr, nil
+	}, logger)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	createTestAPIKey(t, apiKeyRepo, "owner-1", "admin")
+	createTestAPIKey(t, apiKeyRepo, "other-1", "agent")
+	createTestAPIKey(t, apiKeyRepo, "grantee-1", "agent")
+	require.NoError(t, svc.SetOwner(ctx, "0xPRIMARY", "owner-1", types.SignerOwnershipActive))
+
+	// Parent ownership directly: still passes (regression guard).
+	ok, err := svc.IsOwner(ctx, "owner-1", "0xPRIMARY")
+	require.NoError(t, err)
+	assert.True(t, ok)
+
+	// THE BUG: derived address now resolves to parent, owner sees true.
+	ok, err = svc.IsOwner(ctx, "owner-1", "0xDERIVED1")
+	require.NoError(t, err)
+	assert.True(t, ok, "owner of parent must be reported as owner of derived")
+
+	ok, err = svc.IsOwner(ctx, "owner-1", "0xDERIVED2")
+	require.NoError(t, err)
+	assert.True(t, ok)
+
+	// Other identity must still get false even after parent resolution.
+	ok, err = svc.IsOwner(ctx, "other-1", "0xDERIVED1")
+	require.NoError(t, err)
+	assert.False(t, ok)
+
+	// Unknown address (not in HD tree, no ownership row) — false, not error.
+	ok, err = svc.IsOwner(ctx, "owner-1", "0xUNKNOWN")
+	require.NoError(t, err)
+	assert.False(t, ok)
+
+	// End-to-end mutation flow that the bug actually broke: GrantAccess
+	// targeted at a derived address must succeed when the caller owns
+	// the parent, then ListAccess + RevokeAccess against the same
+	// derived address must round-trip.
+	err = svc.GrantAccess(ctx, "owner-1", "0xDERIVED1", "grantee-1")
+	require.NoError(t, err, "GrantAccess on derived must work when parent owned")
+	grants, err := svc.ListAccess(ctx, "owner-1", "0xDERIVED1")
+	require.NoError(t, err)
+	require.Len(t, grants, 1)
+	assert.Equal(t, "grantee-1", grants[0].APIKeyID)
+	require.NoError(t, svc.RevokeAccess(ctx, "owner-1", "0xDERIVED1", "grantee-1"))
+
+	// And the negative: a stranger can't grant on a derived address.
+	err = svc.GrantAccess(ctx, "other-1", "0xDERIVED1", "grantee-1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not the owner")
+}
+
+// Guard against regression of the "no HD manager wired" path — the old
+// code did a single direct lookup and returned (false, nil) on miss.
+// New code must keep that behavior when hdWalletMgrFn is nil.
+func TestSignerAccessService_IsOwner_NoHDManager_MissReturnsFalse(t *testing.T) {
+	db := setupTestDB(t)
+	svc, _, _, apiKeyRepo := setupAccessService(t, db)
+	ctx := context.Background()
+	createTestAPIKey(t, apiKeyRepo, "owner-1", "admin")
+
+	ok, err := svc.IsOwner(ctx, "owner-1", "0xNOTOWNED")
+	require.NoError(t, err)
+	assert.False(t, ok)
+}
+
 func TestNewSignerAccessService_Validation(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
