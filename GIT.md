@@ -199,3 +199,63 @@ stays published. Two recovery paths:
 
 Don't combine the two — once you've shipped a `v0.4.1` fix, leave
 `v0.4.0` alone so the history matches what consumers saw.
+
+## Running via Docker
+
+Two compose files in the repo root, picked by use case:
+
+### `docker-compose.local.yml` — personal / single-machine
+
+Bind-mounts `~/.remote-signer` into the container and runs as the host
+UID, so the SQLite DB, admin keystore, signer keystores, audit log,
+and API keys are the exact files the native daemon was using. You get
+Docker's restart-on-crash and (with a one-line systemd unit or
+`docker compose --restart=always`) auto-start at boot, without
+migrating any data.
+
+```bash
+# Build
+docker compose -f docker-compose.local.yml build
+
+# Start (pass UID/GID so the bind mount stays writable)
+UID=$(id -u) GID=$(id -g) docker compose -f docker-compose.local.yml up -d
+
+# Logs
+docker compose -f docker-compose.local.yml logs -f
+```
+
+No PostgreSQL, no production security hardening — this mode trades
+defence-in-depth for "drop in for the native daemon, change nothing".
+If the host's bootstrap keystore needs a password, pass
+`REMOTE_SIGNER_KEYSTORE_PASSWORD` via env or a `.env` file next to the
+compose.
+
+### `docker-compose.yml` — production / multi-instance
+
+Postgres-backed, host network, full hardening (read-only fs, dropped
+caps, seccomp profile, `IPC_LOCK` for `mlockall`, no swap). Mounts
+repo-relative paths under `./data/` — designed for managed deployments,
+not ad-hoc local use.
+
+```bash
+docker compose up -d
+```
+
+Use this when running multiple replicas behind a load balancer, or
+when you want the operational data on the same host as the source
+checkout rather than under `~`.
+
+### Version stamping inside the image
+
+Both compose files pass a `VERSION` build arg to the Dockerfile. CI's
+release workflow injects the bare tag (`${GITHUB_REF_NAME#v}`), so a
+release image's `remote-signer version` reports the actual tag. For
+local builds set it explicitly when you care:
+
+```bash
+VERSION=$(git describe --tags --always --dirty) \
+  docker compose -f docker-compose.local.yml build
+```
+
+Otherwise the image stamps itself `docker` / `docker-local` so it's
+obvious where a binary came from when triaging an issue.

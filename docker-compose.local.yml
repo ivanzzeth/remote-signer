@@ -1,0 +1,95 @@
+# =============================================================================
+# Local/personal deployment — reuses ~/.remote-signer as-is.
+# =============================================================================
+#
+# Use this compose file when you want Docker's lifecycle benefits
+# (restart-on-crash, auto-start on boot via the host's docker daemon)
+# without migrating the operational data you already have on disk.
+#
+# Differences from docker-compose.yml (the production / multi-instance
+# variant):
+#
+#   - No PostgreSQL service. The daemon uses whichever database your
+#     existing ~/.remote-signer/config.yaml points at — by default the
+#     SQLite file under the same dir.
+#   - Bind-mounts your host's ~/.remote-signer into the container,
+#     so the admin keystore, signers, API keys, audit log, and SQLite
+#     DB are all the exact files you've been running against natively.
+#   - Runs as your host UID:GID so the bind mount stays writable
+#     without `chown -R 1000:1000 ~/.remote-signer` first.
+#   - Drops the production security hardening (read-only fs, cap drops,
+#     seccomp profile, IPC_LOCK) since the threat model here is
+#     "one operator, one machine", not "internet-exposed service".
+#
+# Usage:
+#   # Build the image (one-off; rebuild on Go/web changes):
+#   docker compose -f docker-compose.local.yml build
+#
+#   # Run it. Pass UID/GID so file permissions work on bind mount.
+#   UID=$(id -u) GID=$(id -g) docker compose -f docker-compose.local.yml up -d
+#
+#   # Logs / stop:
+#   docker compose -f docker-compose.local.yml logs -f
+#   docker compose -f docker-compose.local.yml down
+#
+# Switching between native daemon and this container:
+#   - Stop the native daemon (kill PID or `launchctl unload …`).
+#   - `docker compose -f docker-compose.local.yml up -d`.
+#   - The container is now the daemon — same data, same port (8548),
+#     plus restart-on-crash from Docker. To go back, `down` the
+#     container and start the native daemon again.
+
+services:
+  remote-signer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-docker-local}
+    container_name: remote-signer-local
+    restart: unless-stopped
+
+    # Run as the host user so the bind-mounted ~/.remote-signer is
+    # readable/writable without chown gymnastics. Defaults are macOS
+    # Homebrew-style (501); on Linux they're usually 1000 — set
+    # explicitly: `UID=$(id -u) GID=$(id -g) docker compose up`.
+    user: "${UID:-1000}:${GID:-1000}"
+
+    # Host network: binds 127.0.0.1:8548 directly on the host so the
+    # extension, dApps, and CLI work without --url overrides. Matches
+    # the native-daemon experience.
+    network_mode: host
+
+    environment:
+      # The daemon resolves config + data paths under REMOTE_SIGNER_HOME.
+      # /home/signer is writable inside the image; the bind mount below
+      # plants the host's actual data there.
+      REMOTE_SIGNER_HOME: /home/signer/.remote-signer
+
+      # Pass the boot-time admin keystore password from the host's env,
+      # or from a .env file alongside this compose. Avoids embedding
+      # the password in source.
+      REMOTE_SIGNER_KEYSTORE_PASSWORD: ${REMOTE_SIGNER_KEYSTORE_PASSWORD:-}
+
+      # Common proxy passthrough for users behind corporate networks.
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,::1}
+
+    volumes:
+      # The one mount that matters: every piece of operational state
+      # lives under this directory on the host, so a single bind makes
+      # the container indistinguishable from the native daemon.
+      - ${HOME}/.remote-signer:/home/signer/.remote-signer
+
+    # The Dockerfile's default CMD assumes /app/config.yaml; here we
+    # let the daemon find the config the normal way (via the
+    # REMOTE_SIGNER_HOME path it inherited above).
+    command: ["/app/remote-signer", "server", "start"]
+
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-hsts -qO /dev/null http://localhost:8548/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3

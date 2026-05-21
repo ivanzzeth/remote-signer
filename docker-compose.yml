@@ -29,6 +29,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # Inject the build-time version so the image's `remote-signer version`
+        # reports something meaningful. CI / release.yml passes the tag;
+        # locally you can override:
+        #   VERSION=$(git describe --tags --always) docker compose build
+        VERSION: ${VERSION:-docker}
     container_name: remote-signer
     restart: unless-stopped
     # Host network mode: shares host's network stack directly.
