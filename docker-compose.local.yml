@@ -68,9 +68,14 @@ services:
 
     environment:
       # The daemon resolves config + data paths under REMOTE_SIGNER_HOME.
-      # /home/signer is writable inside the image; the bind mount below
-      # plants the host's actual data there.
-      REMOTE_SIGNER_HOME: /home/signer/.remote-signer
+      # We use the host's $HOME path verbatim inside the container so
+      # any absolute paths in the user's existing config.yaml (e.g.
+      #   database.dsn: file:/home/ivan/.remote-signer/remote-signer.db)
+      # resolve identically inside and outside the container. Otherwise
+      # users hit a confusing SQLite CANTOPEN ("out of memory") as
+      # modernc's wrapper surfaces the underlying ENOENT.
+      REMOTE_SIGNER_HOME: ${HOME}/.remote-signer
+      HOME: ${HOME}
 
       # Pass the boot-time admin keystore password from the host's env,
       # or from a .env file alongside this compose. Avoids embedding
@@ -83,10 +88,12 @@ services:
       NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,::1}
 
     volumes:
-      # The one mount that matters: every piece of operational state
-      # lives under this directory on the host, so a single bind makes
-      # the container indistinguishable from the native daemon.
-      - ${HOME}/.remote-signer:/home/signer/.remote-signer
+      # Bind the host's directory to the same path inside the container.
+      # Docker auto-creates the target path, so /home/<host-user>/ exists
+      # in the container even though the base image only ships
+      # /home/signer/. Both sides see the same absolute path → drop-in
+      # for the native daemon.
+      - ${HOME}/.remote-signer:${HOME}/.remote-signer
 
     # The Dockerfile's default CMD assumes /app/config.yaml; here we
     # let the daemon find the config the normal way (via the
