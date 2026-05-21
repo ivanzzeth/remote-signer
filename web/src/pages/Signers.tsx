@@ -1,5 +1,6 @@
 import { Fragment, useState } from "react";
 import { APIError } from "remote-signer-client";
+import type { ListSignersFilter } from "remote-signer-client";
 import {
   Badge,
   Card,
@@ -8,8 +9,15 @@ import {
   Loading,
   PageHeader,
 } from "../components/ui";
-import { getClient } from "../lib/auth";
+import { getClient, getCredentials } from "../lib/auth";
 import { useApi } from "../lib/useApi";
+
+// Tri-state encoding for select inputs: empty string = no filter,
+// "true"/"false" map to the boolean parameter on the SDK side. Keeping
+// it as a string in state lets the <select> control round-trip the
+// "all" option without us having to model a 3-valued boolean in React.
+type TriBool = "" | "true" | "false";
+const tri = (v: TriBool): boolean | undefined => (v === "" ? undefined : v === "true");
 
 /**
  * EVM signers: list + create + unlock/lock + approve + delete. Mirrors the
@@ -21,7 +29,36 @@ import { useApi } from "../lib/useApi";
  * signed HTTPS body.
  */
 export function Signers() {
-  const { data, loading, error, reload } = useApi((c) => c.evm.signers.list());
+  // Filter state. Each control round-trips through useApi's deps so a
+  // change re-fetches the daemon — server-side filtering is the whole
+  // point (no client-side over-listing of an admin's full set).
+  const [filterType, setFilterType] = useState<string>("");
+  const [filterAPIKeyID, setFilterAPIKeyID] = useState<string>("");
+  const [filterLocked, setFilterLocked] = useState<TriBool>("");
+  const [filterEnabled, setFilterEnabled] = useState<TriBool>("");
+
+  const filter: ListSignersFilter = {
+    ...(filterType ? { type: filterType } : {}),
+    ...(filterAPIKeyID ? { api_key_id: filterAPIKeyID } : {}),
+    ...(tri(filterLocked) !== undefined ? { locked: tri(filterLocked) } : {}),
+    ...(tri(filterEnabled) !== undefined ? { enabled: tri(filterEnabled) } : {}),
+  };
+  const { data, loading, error, reload } = useApi(
+    (c) => c.evm.signers.list(filter),
+    [filterType, filterAPIKeyID, filterLocked, filterEnabled],
+  );
+
+  // Names directory feeds two things: the api-key filter dropdown
+  // options AND the admin-detection that decides whether to show the
+  // dropdown at all. Non-admin operators can't filter by another key
+  // (daemon 403s), so hiding the control beats showing a control that
+  // can only error.
+  const namesApi = useApi((c) => c.apiKeys.names());
+  const currentApiKeyID = getCredentials()?.apiKeyID ?? "";
+  const currentRole =
+    namesApi.data?.keys.find((k) => k.id === currentApiKeyID)?.role ?? "";
+  const isAdmin = currentRole === "admin";
+
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -156,6 +193,19 @@ export function Signers() {
 
       {showCreate && <CreateForm onSubmit={create} />}
 
+      <FilterBar
+        type={filterType}
+        onType={setFilterType}
+        apiKeyID={filterAPIKeyID}
+        onAPIKeyID={setFilterAPIKeyID}
+        locked={filterLocked}
+        onLocked={setFilterLocked}
+        enabled={filterEnabled}
+        onEnabled={setFilterEnabled}
+        apiKeyOptions={namesApi.data?.keys ?? []}
+        showAPIKeyFilter={isAdmin}
+      />
+
       <Card>
         {loading && <Loading />}
         {error && <ErrorBanner msg={error} />}
@@ -278,6 +328,118 @@ export function Signers() {
           onSubmit={(password) => unlock(unlockTarget, password)}
         />
       )}
+    </div>
+  );
+}
+
+// Inline filter bar above the signer table. All four controls are
+// independent — clearing one leaves the others in place — and a
+// "—" option encodes "no filter" so the operator can drop a
+// constraint without retyping the others.
+function FilterBar({
+  type,
+  onType,
+  apiKeyID,
+  onAPIKeyID,
+  locked,
+  onLocked,
+  enabled,
+  onEnabled,
+  apiKeyOptions,
+  showAPIKeyFilter,
+}: {
+  type: string;
+  onType: (v: string) => void;
+  apiKeyID: string;
+  onAPIKeyID: (v: string) => void;
+  locked: TriBool;
+  onLocked: (v: TriBool) => void;
+  enabled: TriBool;
+  onEnabled: (v: TriBool) => void;
+  apiKeyOptions: Array<{ id: string; name: string; role: string }>;
+  showAPIKeyFilter: boolean;
+}) {
+  const selectCls =
+    "rounded-md border border-ink-300 bg-white px-2 py-1 text-xs text-ink-900";
+  return (
+    <div
+      data-testid="signers-filter-bar"
+      className="flex flex-wrap items-end gap-3 rounded-md border border-ink-200 bg-ink-50 p-3"
+    >
+      <FilterField label="Type">
+        <select
+          data-testid="filter-type"
+          className={selectCls}
+          value={type}
+          onChange={(e) => onType(e.target.value)}
+        >
+          <option value="">All</option>
+          <option value="keystore">keystore</option>
+          <option value="hd_wallet">hd_wallet</option>
+          <option value="private_key">private_key</option>
+        </select>
+      </FilterField>
+
+      <FilterField label="Locked">
+        <select
+          data-testid="filter-locked"
+          className={selectCls}
+          value={locked}
+          onChange={(e) => onLocked(e.target.value as TriBool)}
+        >
+          <option value="">All</option>
+          <option value="true">locked</option>
+          <option value="false">unlocked</option>
+        </select>
+      </FilterField>
+
+      <FilterField label="Enabled">
+        <select
+          data-testid="filter-enabled"
+          className={selectCls}
+          value={enabled}
+          onChange={(e) => onEnabled(e.target.value as TriBool)}
+        >
+          <option value="">All</option>
+          <option value="true">enabled</option>
+          <option value="false">disabled</option>
+        </select>
+      </FilterField>
+
+      {showAPIKeyFilter && (
+        <FilterField label="API key">
+          <select
+            data-testid="filter-apikey"
+            className={selectCls}
+            value={apiKeyID}
+            onChange={(e) => onAPIKeyID(e.target.value)}
+          >
+            <option value="">All</option>
+            {apiKeyOptions.map((k) => (
+              <option key={k.id} value={k.id}>
+                {k.id} {k.name && `· ${k.name}`}
+              </option>
+            ))}
+          </select>
+        </FilterField>
+      )}
+    </div>
+  );
+}
+
+function FilterField({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="text-[10px] uppercase tracking-wide text-ink-500">
+        {label}
+      </label>
+      {children}
     </div>
   );
 }
