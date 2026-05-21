@@ -19,6 +19,20 @@
 GO ?= go
 NPM ?= npm
 
+# VERSION drives the value baked into `remote-signer version` and the
+# `doctor` output. Sourced from `git describe`:
+#
+#   - On the v0.4.0 tag with a clean tree → "v0.4.0"
+#   - One extra commit after that tag      → "v0.4.0-1-gabc1234"
+#   - Uncommitted changes on top           → "v0.4.0-1-gabc1234-dirty"
+#   - Outside a git checkout               → "dev"
+#
+# CI release.yml overrides via the same -ldflags path with the bare tag
+# string (no leading 'v', no describe suffix) so released binaries report
+# the clean release number. See GIT.md for the convention.
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -w -s -X github.com/ivanzzeth/remote-signer/internal/version.Version=$(VERSION)
+
 help:
 	@echo "Targets:"
 	@echo "  web           Install JS deps and build the React bundle (writes to internal/web/dist)"
@@ -35,10 +49,10 @@ web:
 	cd web && $(NPM) ci --no-audit --no-fund && $(NPM) run build
 
 build:
-	CGO_ENABLED=0 $(GO) build -ldflags="-w -s" -o remote-signer ./cmd/remote-signer
+	CGO_ENABLED=0 $(GO) build -ldflags="$(LDFLAGS)" -o remote-signer ./cmd/remote-signer
 
 build-embed: web
-	CGO_ENABLED=0 $(GO) build -tags embed_web -ldflags="-w -s" -o remote-signer ./cmd/remote-signer
+	CGO_ENABLED=0 $(GO) build -tags embed_web -ldflags="$(LDFLAGS)" -o remote-signer ./cmd/remote-signer
 
 # Pure-Go test pass. Skips the web bundle to keep CI iterations cheap.
 test:
