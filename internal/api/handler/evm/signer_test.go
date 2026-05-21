@@ -533,3 +533,133 @@ func TestListWalletSigners(t *testing.T) {
 		assert.Empty(t, resp.Signers)
 	})
 }
+
+// --- ?api_key_id / ?locked / ?enabled filter tests ---
+
+// Fixture with a deliberate mix of locked/unlocked + enabled/disabled
+// rows owned by two different keys, so each filter can be exercised in
+// isolation and combined without ambiguity in the assertions.
+const (
+	filterAddrA = "0xAAAA111111111111111111111111111111111111" // owner-1, enabled, unlocked
+	filterAddrB = "0xBBBB222222222222222222222222222222222222" // owner-1, enabled, locked
+	filterAddrC = "0xCCCC333333333333333333333333333333333333" // owner-1, disabled, unlocked
+	filterAddrD = "0xDDDD444444444444444444444444444444444444" // owner-2, enabled, unlocked
+)
+
+func newFilterSignerManager() *signerMockSignerManager {
+	return &signerMockSignerManager{
+		listSignersFn: func(_ context.Context, _ types.SignerFilter) (types.SignerListResult, error) {
+			return types.SignerListResult{
+				Signers: []types.SignerInfo{
+					{Address: filterAddrA, Type: string(types.SignerTypeKeystore), Enabled: true, Locked: false},
+					{Address: filterAddrB, Type: string(types.SignerTypeKeystore), Enabled: true, Locked: true},
+					{Address: filterAddrC, Type: string(types.SignerTypeKeystore), Enabled: false, Locked: false},
+					{Address: filterAddrD, Type: string(types.SignerTypeKeystore), Enabled: true, Locked: false},
+				},
+				Total: 4,
+			}, nil
+		},
+	}
+}
+
+func filterOwnerships() []*types.SignerOwnership {
+	return []*types.SignerOwnership{
+		{SignerAddress: filterAddrA, OwnerID: "owner-1", Status: types.SignerOwnershipActive},
+		{SignerAddress: filterAddrB, OwnerID: "owner-1", Status: types.SignerOwnershipActive},
+		{SignerAddress: filterAddrC, OwnerID: "owner-1", Status: types.SignerOwnershipActive},
+		{SignerAddress: filterAddrD, OwnerID: "owner-2", Status: types.SignerOwnershipActive},
+	}
+}
+
+func TestListSigners_Filter_Locked(t *testing.T) {
+	h, err := NewSignerHandler(newFilterSignerManager(), newSignerTestAccessServiceWithOwnerships(t, filterOwnerships()), slog.Default(), false)
+	require.NoError(t, err)
+	admin := &types.APIKey{ID: "owner-1", Role: types.RoleAdmin}
+
+	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?locked=true", admin)
+	require.Equal(t, http.StatusOK, rec.Code)
+	resp := decodeSignerListResponse(t, rec)
+	assert.Equal(t, 1, resp.Total)
+	require.Len(t, resp.Signers, 1)
+	assert.Equal(t, filterAddrB, resp.Signers[0].Address)
+
+	rec = doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?locked=false", admin)
+	require.Equal(t, http.StatusOK, rec.Code)
+	resp = decodeSignerListResponse(t, rec)
+	// owner-1 sees A + C (locked=false among their owned set; B is locked, excluded)
+	assert.Equal(t, 2, resp.Total)
+}
+
+func TestListSigners_Filter_Enabled(t *testing.T) {
+	h, err := NewSignerHandler(newFilterSignerManager(), newSignerTestAccessServiceWithOwnerships(t, filterOwnerships()), slog.Default(), false)
+	require.NoError(t, err)
+	admin := &types.APIKey{ID: "owner-1", Role: types.RoleAdmin}
+
+	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?enabled=false", admin)
+	require.Equal(t, http.StatusOK, rec.Code)
+	resp := decodeSignerListResponse(t, rec)
+	assert.Equal(t, 1, resp.Total)
+	require.Len(t, resp.Signers, 1)
+	assert.Equal(t, filterAddrC, resp.Signers[0].Address)
+}
+
+func TestListSigners_Filter_Combined_LockedAndEnabled(t *testing.T) {
+	h, err := NewSignerHandler(newFilterSignerManager(), newSignerTestAccessServiceWithOwnerships(t, filterOwnerships()), slog.Default(), false)
+	require.NoError(t, err)
+	admin := &types.APIKey{ID: "owner-1", Role: types.RoleAdmin}
+
+	// Only A is enabled && unlocked among owner-1's set.
+	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?enabled=true&locked=false", admin)
+	require.Equal(t, http.StatusOK, rec.Code)
+	resp := decodeSignerListResponse(t, rec)
+	require.Len(t, resp.Signers, 1)
+	assert.Equal(t, filterAddrA, resp.Signers[0].Address)
+}
+
+func TestListSigners_Filter_LockedInvalid_400(t *testing.T) {
+	h, err := NewSignerHandler(newFilterSignerManager(), newSignerTestAccessServiceWithOwnerships(t, filterOwnerships()), slog.Default(), false)
+	require.NoError(t, err)
+	admin := &types.APIKey{ID: "owner-1", Role: types.RoleAdmin}
+
+	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?locked=maybe", admin)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestListSigners_Filter_APIKeyID_AdminViewsOtherKey(t *testing.T) {
+	h, err := NewSignerHandler(newFilterSignerManager(), newSignerTestAccessServiceWithOwnerships(t, filterOwnerships()), slog.Default(), false)
+	require.NoError(t, err)
+	admin := &types.APIKey{ID: "owner-1", Role: types.RoleAdmin}
+
+	// Admin owner-1 asks "what does owner-2 see?". Should hit owner-2's
+	// owned+access set, surfacing only addrD.
+	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?api_key_id=owner-2", admin)
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+	resp := decodeSignerListResponse(t, rec)
+	require.Len(t, resp.Signers, 1)
+	assert.Equal(t, filterAddrD, resp.Signers[0].Address)
+}
+
+func TestListSigners_Filter_APIKeyID_NonAdminCrossKey_403(t *testing.T) {
+	h, err := NewSignerHandler(newFilterSignerManager(), newSignerTestAccessServiceWithOwnerships(t, filterOwnerships()), slog.Default(), false)
+	require.NoError(t, err)
+	nonAdmin := &types.APIKey{ID: "owner-1", Role: types.RoleDev}
+
+	// Non-admin owner-1 attempts to peek at owner-2's signers.
+	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?api_key_id=owner-2", nonAdmin)
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+func TestListSigners_Filter_APIKeyID_NonAdminSelf_200(t *testing.T) {
+	h, err := NewSignerHandler(newFilterSignerManager(), newSignerTestAccessServiceWithOwnerships(t, filterOwnerships()), slog.Default(), false)
+	require.NoError(t, err)
+	nonAdmin := &types.APIKey{ID: "owner-1", Role: types.RoleDev}
+
+	// Non-admin pinning their own key is a no-op vs. default behavior,
+	// but must NOT 403 — otherwise a UI that always sends the filter
+	// would break for non-admin operators.
+	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?api_key_id=owner-1", nonAdmin)
+	require.Equal(t, http.StatusOK, rec.Code)
+	resp := decodeSignerListResponse(t, rec)
+	// owner-1 sees A + B + C (their own three).
+	assert.Equal(t, 3, resp.Total)
+}

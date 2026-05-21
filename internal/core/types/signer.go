@@ -11,9 +11,12 @@ const (
 
 // SignerFilter defines filter options for listing signers
 type SignerFilter struct {
-	Type   *SignerType // Filter by signer type (nil = all types)
-	Offset int
-	Limit  int
+	Type     *SignerType // Filter by signer type (nil = all types)
+	APIKeyID *string     // Filter to signers owned-by or accessible-to this API key (nil = caller's own view)
+	Locked   *bool       // Filter by locked state (nil = either)
+	Enabled  *bool       // Filter by enabled state (nil = either)
+	Offset   int
+	Limit    int
 }
 
 // SignerListResult contains paginated signer list result

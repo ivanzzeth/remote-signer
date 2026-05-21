@@ -25,6 +25,17 @@ export interface SignerInfo {
 
 export interface ListSignersFilter {
   type?: string;
+  /**
+   * Restrict the listing to signers owned-by or accessible-to this API
+   * key. Admins can target any key; non-admins must omit or pass their
+   * own ID — the daemon 403s any other value to prevent cross-key
+   * privilege probing.
+   */
+  api_key_id?: string;
+  /** Tri-state: true / false / undefined (either). */
+  locked?: boolean;
+  /** Tri-state: true / false / undefined (either). */
+  enabled?: boolean;
   offset?: number;
   limit?: number;
 }
@@ -119,6 +130,13 @@ export class EvmSignerService {
   async list(filter?: ListSignersFilter): Promise<ListSignersResponse> {
     const params = new URLSearchParams();
     if (filter?.type) params.append("type", filter.type);
+    if (filter?.api_key_id) params.append("api_key_id", filter.api_key_id);
+    if (typeof filter?.locked === "boolean") {
+      params.append("locked", String(filter.locked));
+    }
+    if (typeof filter?.enabled === "boolean") {
+      params.append("enabled", String(filter.enabled));
+    }
     if (filter?.offset) params.append("offset", filter.offset.toString());
     if (filter?.limit) params.append("limit", filter.limit.toString());
     const qs = params.toString();

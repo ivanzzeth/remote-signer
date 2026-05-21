@@ -84,6 +84,9 @@ func TestSignerType_Constants(t *testing.T) {
 func TestSignerFilter_Defaults(t *testing.T) {
 	filter := SignerFilter{}
 	assert.Nil(t, filter.Type)
+	assert.Nil(t, filter.APIKeyID)
+	assert.Nil(t, filter.Locked)
+	assert.Nil(t, filter.Enabled)
 	assert.Equal(t, 0, filter.Offset)
 	assert.Equal(t, 0, filter.Limit)
 }
