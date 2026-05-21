@@ -1831,6 +1831,7 @@
      */
     static async create(config) {
       const provider2 = new _EIP1193Provider(config);
+      provider2._signersSource = config.signersSource;
       await provider2._initializeSigners(config.signersSource);
       if (provider2._storage) {
         const persisted = await readPersistedState(provider2._storage, provider2._storageKey);
@@ -2030,6 +2031,62 @@
         this._connected = false;
         this._emit("disconnect", providerErrors.disconnected("All accounts removed"));
       } else {
+        this._emit("accountsChanged", this._getAccounts());
+      }
+      void this._persistState();
+    }
+    /**
+     * Re-fetch the signer list from the originally-configured source.
+     *
+     * Use this when the host knows daemon-side state changed out of band —
+     * a CLI `signer unlock`, a new signer created via the popup, a key
+     * deleted by an admin. Without it, the only way to pick up changes is
+     * to re-create the provider (which loses per-origin chain + active
+     * address state).
+     *
+     * Preserves the active address across the refresh when it survives the
+     * new list; otherwise falls back to index 0. Emits accountsChanged if
+     * the address set actually shifted, and a fresh `connect` if we went
+     * from zero accounts to non-zero (the moment a fresh dApp request
+     * could now succeed).
+     *
+     * Throws when there is no stored source (provider not created via
+     * EIP1193Provider.create with a signersSource), so callers don't
+     * silently swallow a config mistake.
+     */
+    async refreshSigners() {
+      if (!this._signersSource) {
+        throw new Error("refreshSigners requires a signersSource \u2014 provider was not created with one");
+      }
+      const prevAddresses = this._signers.map((s) => s.address.toLowerCase());
+      const prevActiveAddress = prevAddresses[this._activeIndex];
+      const wasConnected = this._connected && this._signers.length > 0;
+      await this._initializeSigners(this._signersSource);
+      if (this._signers.length === 0) {
+        this._activeIndex = 0;
+        if (wasConnected) {
+          this._connected = false;
+          this._emit("disconnect", providerErrors.disconnected("All signers gone after refresh"));
+          this._emit("accountsChanged", []);
+          void this._persistState();
+        }
+        return;
+      }
+      if (prevActiveAddress) {
+        const idx = this._signers.findIndex(
+          (s) => s.address.toLowerCase() === prevActiveAddress
+        );
+        this._activeIndex = idx >= 0 ? idx : 0;
+      } else {
+        this._activeIndex = 0;
+      }
+      if (!wasConnected) {
+        this._connected = true;
+        this._emit("connect", { chainId: this.chainId });
+      }
+      const newAddresses = this._signers.map((s) => s.address.toLowerCase());
+      const changed = newAddresses.length !== prevAddresses.length || newAddresses.some((a, i) => a !== prevAddresses[i]);
+      if (changed) {
         this._emit("accountsChanged", this._getAccounts());
       }
       void this._persistState();
@@ -3867,6 +3924,7 @@
     await loadConfig();
     if (cachedConfig.autoApproveConnections !== false) {
       await ensureInit();
+      await refreshSignersIgnoringErrors();
       let accounts = [];
       try {
         if (provider && provider.isConnected()) {
@@ -3929,6 +3987,7 @@
     const pending = pendingConnects.get(msg.requestId);
     if (!pending) return { ok: false, error: "Unknown or expired request" };
     await ensureInit();
+    await refreshSignersIgnoringErrors();
     let signers = [];
     try {
       if (provider && provider.isConnected()) {
@@ -4147,6 +4206,21 @@
       });
     }
     return initPromise;
+  }
+  var pendingSignerRefresh = null;
+  async function refreshSignersIgnoringErrors() {
+    if (!provider) return;
+    if (pendingSignerRefresh) return pendingSignerRefresh;
+    pendingSignerRefresh = (async () => {
+      try {
+        await provider.refreshSigners();
+      } catch (err2) {
+        console.warn("[background] refreshSigners failed:", err2);
+      } finally {
+        pendingSignerRefresh = null;
+      }
+    })();
+    return pendingSignerRefresh;
   }
   var pendingApprovalWindowId = null;
   async function openPendingApprovalWindow(ctx) {
@@ -4433,6 +4507,7 @@
         error: { code: -32603, message: "Provider not initialized" }
       };
     }
+    await refreshSignersIgnoringErrors();
     const extra = await tryHandleExtraMethod(msg, origin);
     if (extra.handled) {
       if (extra.error) {

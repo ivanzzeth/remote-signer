@@ -98,6 +98,12 @@ export class EIP1193Provider {
   private _connected: boolean = false;
   private _rpcOverrides: Record<number, string>;
   private _rpcResolver?: (chainId: number) => string | Promise<string>;
+  // Stashed so refreshSigners() can re-run the same resolution as
+  // create(). Without it, a host that just unlocked or added a signer on
+  // the daemon side would have to tear down and re-create the entire
+  // provider (losing per-origin chain + active-address state) just to
+  // pick the change up.
+  private _signersSource?: SignersSource;
 
   // Persistence (optional). When set, every state-changing operation
   // writes back so a host that re-creates the provider (MV3 SW resume,
@@ -148,6 +154,7 @@ export class EIP1193Provider {
    */
   public static async create(config: EIP1193ProviderConfig): Promise<EIP1193Provider> {
     const provider = new EIP1193Provider(config);
+    provider._signersSource = config.signersSource;
     await provider._initializeSigners(config.signersSource);
 
     // Hydrate from persisted state when a storage backend is provided.
@@ -417,6 +424,66 @@ export class EIP1193Provider {
       this._connected = false;
       this._emit("disconnect", providerErrors.disconnected("All accounts removed"));
     } else {
+      this._emit("accountsChanged", this._getAccounts());
+    }
+    void this._persistState();
+  }
+
+  /**
+   * Re-fetch the signer list from the originally-configured source.
+   *
+   * Use this when the host knows daemon-side state changed out of band —
+   * a CLI `signer unlock`, a new signer created via the popup, a key
+   * deleted by an admin. Without it, the only way to pick up changes is
+   * to re-create the provider (which loses per-origin chain + active
+   * address state).
+   *
+   * Preserves the active address across the refresh when it survives the
+   * new list; otherwise falls back to index 0. Emits accountsChanged if
+   * the address set actually shifted, and a fresh `connect` if we went
+   * from zero accounts to non-zero (the moment a fresh dApp request
+   * could now succeed).
+   *
+   * Throws when there is no stored source (provider not created via
+   * EIP1193Provider.create with a signersSource), so callers don't
+   * silently swallow a config mistake.
+   */
+  public async refreshSigners(): Promise<void> {
+    if (!this._signersSource) {
+      throw new Error("refreshSigners requires a signersSource — provider was not created with one");
+    }
+    const prevAddresses = this._signers.map((s) => s.address.toLowerCase());
+    const prevActiveAddress = prevAddresses[this._activeIndex];
+    const wasConnected = this._connected && this._signers.length > 0;
+    await this._initializeSigners(this._signersSource);
+    if (this._signers.length === 0) {
+      this._activeIndex = 0;
+      if (wasConnected) {
+        this._connected = false;
+        this._emit("disconnect", providerErrors.disconnected("All signers gone after refresh"));
+        this._emit("accountsChanged", []);
+        void this._persistState();
+      }
+      return;
+    }
+    // Try to keep the same active address pinned across the refresh.
+    if (prevActiveAddress) {
+      const idx = this._signers.findIndex(
+        (s) => s.address.toLowerCase() === prevActiveAddress
+      );
+      this._activeIndex = idx >= 0 ? idx : 0;
+    } else {
+      this._activeIndex = 0;
+    }
+    if (!wasConnected) {
+      this._connected = true;
+      this._emit("connect", { chainId: this.chainId } as ProviderConnectInfo);
+    }
+    const newAddresses = this._signers.map((s) => s.address.toLowerCase());
+    const changed =
+      newAddresses.length !== prevAddresses.length ||
+      newAddresses.some((a, i) => a !== prevAddresses[i]);
+    if (changed) {
       this._emit("accountsChanged", this._getAccounts());
     }
     void this._persistState();

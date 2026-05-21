@@ -433,6 +433,12 @@ async function acquirePermission(origin: string): Promise<OriginPermission> {
   await loadConfig();
   if (cachedConfig.autoApproveConnections !== false) {
     await ensureInit();
+    // Always pull a fresh signer list from the daemon at connect time.
+    // The user could have unlocked an HD wallet signer or added a new
+    // keystore from the CLI / popup between provider init and now —
+    // without this refresh, the SW would throw "No usable signers" until
+    // someone reloads the extension. ensureInit guarantees provider!=null.
+    await refreshSignersIgnoringErrors();
     let accounts: string[] = [];
     try {
       if (provider && provider.isConnected()) {
@@ -519,6 +525,10 @@ async function handleConnectGetContext(msg: { requestId: string }): Promise<{
   const pending = pendingConnects.get(msg.requestId);
   if (!pending) return { ok: false, error: "Unknown or expired request" };
   await ensureInit();
+  // Same live-refresh contract as the auto-approve path: a signer
+  // unlocked from CLI between init and the Connect popup opening should
+  // appear in the picker without an extension reload.
+  await refreshSignersIgnoringErrors();
   let signers: Array<{ address: string; locked?: boolean; enabled?: boolean }> = [];
   try {
     if (provider && provider.isConnected()) {
@@ -823,6 +833,30 @@ function ensureInit(): Promise<void> {
     });
   }
   return initPromise;
+}
+
+// In-flight de-dupe: concurrent dApp requests (Polymarket fires
+// eth_chainId + eth_requestAccounts + eth_accounts back-to-back) should
+// share one refresh round-trip, not stampede the daemon.
+let pendingSignerRefresh: Promise<void> | null = null;
+
+// Pull a fresh signer list from the daemon and swap it into the
+// provider, so dApp-visible accounts + signing routes always reflect
+// current daemon truth. Best-effort — a transient daemon hiccup
+// shouldn't break the dApp; the next request will retry.
+async function refreshSignersIgnoringErrors(): Promise<void> {
+  if (!provider) return;
+  if (pendingSignerRefresh) return pendingSignerRefresh;
+  pendingSignerRefresh = (async () => {
+    try {
+      await provider!.refreshSigners();
+    } catch (err) {
+      console.warn("[background] refreshSigners failed:", err);
+    } finally {
+      pendingSignerRefresh = null;
+    }
+  })();
+  return pendingSignerRefresh;
 }
 
 // ── Pending Approval Window ──────────────────────────────────────────────
@@ -1224,6 +1258,13 @@ async function handleEIP1193Request(msg: EIP1193Request, origin: string | null) 
       error: { code: -32603, message: "Provider not initialized" },
     };
   }
+
+  // Best-effort live refresh so dApp-visible state (eth_accounts, signing
+  // routes) reflects daemon truth without forcing extension reload after
+  // CLI signer add/unlock. Errors are swallowed — if the daemon is briefly
+  // unreachable, the cached list is still usable for already-granted
+  // permissions; the real network error will surface on the actual call.
+  await refreshSignersIgnoringErrors();
 
   // Pre-SDK dispatch for MetaMask-compatible methods the SDK doesn't cover.
   const extra = await tryHandleExtraMethod(msg, origin);
