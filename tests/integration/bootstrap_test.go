@@ -3,8 +3,7 @@
 package integration
 
 import (
-	"crypto/x509"
-	"encoding/pem"
+	"encoding/json"
 	"io"
 	"net/http"
 	"os"
@@ -17,8 +16,11 @@ import (
 // directory and asserts the full zero-config story:
 //
 //   - The home dir is created with 0700.
-//   - admin.key.priv exists (0600) and decodes as an Ed25519 PKCS#8 key.
-//   - admin.key.pub exists (0644).
+//   - admin.keystore.json exists (0600) and parses as a v3 enhanced
+//     keystore wrapping the bootstrap Ed25519 private key.
+//   - admin.key.pub exists (0644) — the unencrypted public half is still
+//     written alongside so JWT verification and `doctor` can read it
+//     without unlocking the keystore.
 //   - remote-signer.db exists (DB was migrated).
 //   - /health returns 200 with status=ok.
 func TestBootstrap_FirstLaunch(t *testing.T) {
@@ -32,24 +34,39 @@ func TestBootstrap_FirstLaunch(t *testing.T) {
 		t.Errorf("home perm = %o, want 0700", perm)
 	}
 
-	privPath := d.adminKeyPath()
-	privInfo, err := os.Stat(privPath)
+	ksPath := d.adminKeystorePath()
+	ksInfo, err := os.Stat(ksPath)
 	if err != nil {
-		t.Fatalf("stat admin.key.priv: %v", err)
+		t.Fatalf("stat admin.keystore.json: %v", err)
 	}
-	if perm := privInfo.Mode().Perm(); perm != 0600 {
-		t.Errorf("admin.key.priv perm = %o, want 0600", perm)
+	if perm := ksInfo.Mode().Perm(); perm != 0600 {
+		t.Errorf("admin.keystore.json perm = %o, want 0600", perm)
 	}
-	privPEM, err := os.ReadFile(privPath)
+	// Validate keystore shape — the Ed25519-encrypted format written by
+	// keystore.CreateEnhancedKey carries {version, key_type, identifier,
+	// crypto, label}. We don't decrypt here (that needs the password +
+	// scrypt round-trip, covered by the keystore unit tests); we just
+	// confirm bootstrap wrote a syntactically valid keystore and not a
+	// stray placeholder.
+	ksRaw, err := os.ReadFile(ksPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	block, _ := pem.Decode(privPEM)
-	if block == nil || block.Type != "PRIVATE KEY" {
-		t.Fatalf("admin.key.priv is not a PRIVATE KEY PEM: %v", block)
+	var ks struct {
+		Version    int             `json:"version"`
+		KeyType    string          `json:"key_type"`
+		Identifier string          `json:"identifier"`
+		Crypto     json.RawMessage `json:"crypto"`
+		Label      string          `json:"label"`
 	}
-	if _, err := x509.ParsePKCS8PrivateKey(block.Bytes); err != nil {
-		t.Fatalf("admin.key.priv parse: %v", err)
+	if err := json.Unmarshal(ksRaw, &ks); err != nil {
+		t.Fatalf("admin.keystore.json is not valid JSON: %v", err)
+	}
+	if ks.Version == 0 || ks.KeyType == "" || ks.Identifier == "" || len(ks.Crypto) == 0 {
+		t.Errorf("admin.keystore.json missing required fields: %+v", ks)
+	}
+	if ks.KeyType != "ed25519" {
+		t.Errorf("admin.keystore.json key_type = %q, want ed25519", ks.KeyType)
 	}
 
 	pubPath := filepath.Join(d.home, "apikeys", "admin.key.pub")
@@ -80,12 +97,12 @@ func TestBootstrap_FirstLaunch(t *testing.T) {
 }
 
 // TestBootstrap_SecondLaunchIsNoop boots once, captures the admin key,
-// stops the daemon, and boots again against the same home. The keypair
-// files must be byte-identical (no rotation) and admin auth must still work
-// against the existing credentials.
+// stops the daemon, and boots again against the same home. The keystore
+// + public-key files must be byte-identical (no rotation) and admin auth
+// must still work against the existing credentials.
 func TestBootstrap_SecondLaunchIsNoop(t *testing.T) {
 	d := startDaemon(t)
-	firstPriv, err := os.ReadFile(d.adminKeyPath())
+	firstKS, err := os.ReadFile(d.adminKeystorePath())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,12 +114,12 @@ func TestBootstrap_SecondLaunchIsNoop(t *testing.T) {
 	d.stop()
 
 	d2 := restartInHome(t, home, configPath, port)
-	secondPriv, err := os.ReadFile(d2.adminKeyPath())
+	secondKS, err := os.ReadFile(d2.adminKeystorePath())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(firstPriv) != string(secondPriv) {
-		t.Errorf("admin.key.priv rotated on second launch")
+	if string(firstKS) != string(secondKS) {
+		t.Errorf("admin.keystore.json rotated on second launch")
 	}
 	secondPub, err := os.ReadFile(filepath.Join(d2.home, "apikeys", "admin.key.pub"))
 	if err != nil {
