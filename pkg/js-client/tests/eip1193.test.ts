@@ -366,13 +366,31 @@ describe("EIP1193Provider - RPC Methods", () => {
     expect(signer1.personalSign).toHaveBeenCalledWith("0xmessage");
   });
 
-  it("should throw error when personal_sign address mismatch", async () => {
+  it("rejects personal_sign for an address not in the provider's signer set", async () => {
+    // Pre-fix the provider only routed to the active signer and threw
+    // "Address mismatch" for anything else — that blocked the
+    // legitimate multi-account case where the dApp signs for a
+    // non-active signer the user owns. The check is now flipped:
+    // unknown addresses still error (security), but a wrong-but-known
+    // address falls through to the matched signer.
     await expect(
       provider.request({
         method: "personal_sign",
-        params: ["0xmessage", "0xWrongAddress"],
+        params: ["0xmessage", "0xUnknownToProvider"],
       })
-    ).rejects.toThrow("Address mismatch");
+    ).rejects.toThrow(/not available in this provider/i);
+  });
+
+  it("personal_sign routes to a non-active signer when the dApp asks for one", async () => {
+    // Active is 0xAccount1 (the create() default), but the dApp asks
+    // 0xAccount2 — must hit signer2.personalSign, not signer1's.
+    const sig = await provider.request({
+      method: "personal_sign",
+      params: ["0xmessage", "0xAccount2"],
+    });
+    expect(sig).toBe("0xsignature");
+    expect(signer2.personalSign).toHaveBeenCalledWith("0xmessage");
+    expect(signer1.personalSign).not.toHaveBeenCalled();
   });
 
   it("should sign with eth_sign", async () => {

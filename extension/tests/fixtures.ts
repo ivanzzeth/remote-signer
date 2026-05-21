@@ -17,6 +17,8 @@ export interface E2EServerInfo {
   non_admin_api_key_id: string;
   non_admin_api_key_hex: string;
   signer_address: string;
+  /** Second pre-unlocked signer for multi-account routing specs. */
+  signer_address_2: string;
   /** Anvil RPC URL — present when global-setup found anvil on PATH. */
   anvil_url?: string;
   /** Anvil chain ID (31337 by default). */

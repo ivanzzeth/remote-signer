@@ -16,6 +16,7 @@ interface E2EServerInfo {
   non_admin_api_key_id: string;
   non_admin_api_key_hex: string;
   signer_address: string;
+  signer_address_2: string;
   anvil_url?: string;
   anvil_chain_id?: number;
 }

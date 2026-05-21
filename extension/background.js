@@ -1326,6 +1326,13 @@
     async list(filter) {
       const params = new URLSearchParams();
       if (filter?.type) params.append("type", filter.type);
+      if (filter?.api_key_id) params.append("api_key_id", filter.api_key_id);
+      if (typeof filter?.locked === "boolean") {
+        params.append("locked", String(filter.locked));
+      }
+      if (typeof filter?.enabled === "boolean") {
+        params.append("enabled", String(filter.enabled));
+      }
       if (filter?.offset) params.append("offset", filter.offset.toString());
       if (filter?.limit) params.append("limit", filter.limit.toString());
       const qs = params.toString();
@@ -1944,6 +1951,42 @@
       return this._signers[this._activeIndex];
     }
     /**
+     * Pick the signer a sign / send request should route through.
+     *
+     * Sign-method parameters carry an address: personal_sign /
+     * signTypedData take it as the second positional, sendTransaction /
+     * signTransaction read it from tx.from. MetaMask et al. route the
+     * call to whatever signer matches that address, NOT to whichever
+     * account the wallet UI happens to call "active". A dApp can
+     * legitimately ask any account it was granted to sign — including
+     * one that isn't currently selected in the popup.
+     *
+     * Behavior:
+     *   - target empty → active signer (legacy callers that omit `from`).
+     *   - target matches some signer in `_signers` → that signer.
+     *   - target provided but unknown → unauthorized, throw early so the
+     *     daemon never sees a request for an address the user hasn't
+     *     unlocked. Matches the original threat model — the SDK is the
+     *     last check before the daemon does its own access gate.
+     *
+     * Match is case-insensitive (EIP-55 vs lowercase) since dApps
+     * routinely lowercase before sending.
+     */
+    _resolveSigner(target) {
+      if (!this._connected || this._signers.length === 0) {
+        throw providerErrors.disconnected();
+      }
+      if (!target) return this._signers[this._activeIndex];
+      const wanted = target.toLowerCase();
+      const found = this._signers.find((s) => s.address.toLowerCase() === wanted);
+      if (!found) {
+        throw providerErrors.unauthorized(
+          `Address ${target} is not available in this provider`
+        );
+      }
+      return found;
+    }
+    /**
      * Switch active account by address or index
      *
      * @param addressOrIndex Account address (string) or index (number)
@@ -2126,45 +2169,25 @@
         // Signing methods
         case "personal_sign": {
           const [messageParam, address] = params;
-          const signer = this._getActiveSigner();
-          if (address.toLowerCase() !== signer.address.toLowerCase()) {
-            throw providerErrors.unauthorized(
-              `Address mismatch: expected ${signer.address}, got ${address}`
-            );
-          }
+          const signer = this._resolveSigner(address);
           return await signer.personalSign(messageParam);
         }
         case "eth_sign": {
           const [address, hash] = params;
-          const signer = this._getActiveSigner();
-          if (address.toLowerCase() !== signer.address.toLowerCase()) {
-            throw providerErrors.unauthorized(
-              `Address mismatch: expected ${signer.address}, got ${address}`
-            );
-          }
+          const signer = this._resolveSigner(address);
           return await signer.signHash(hash);
         }
         case "eth_signTypedData":
         case "eth_signTypedData_v3":
         case "eth_signTypedData_v4": {
           const [address, typedData] = params;
-          const signer = this._getActiveSigner();
-          if (address.toLowerCase() !== signer.address.toLowerCase()) {
-            throw providerErrors.unauthorized(
-              `Address mismatch: expected ${signer.address}, got ${address}`
-            );
-          }
+          const signer = this._resolveSigner(address);
           const typedDataObj = typeof typedData === "string" ? JSON.parse(typedData) : typedData;
           return await signer.signTypedData(typedDataObj);
         }
         case "eth_sendTransaction": {
           const [tx] = params;
-          const signer = this._getActiveSigner();
-          if (tx.from && tx.from.toLowerCase() !== signer.address.toLowerCase()) {
-            throw providerErrors.unauthorized(
-              `Address mismatch: expected ${signer.address}, got ${tx.from}`
-            );
-          }
+          const signer = this._resolveSigner(tx.from);
           const rpcUrl = await this._getRpcUrl();
           const filled = await this._fillTxDefaults(tx, signer.address, rpcUrl);
           const signedTx = await signer.signTransaction(normalizeEip1193Tx(filled));
@@ -2186,12 +2209,7 @@
         }
         case "eth_signTransaction": {
           const [tx] = params;
-          const signer = this._getActiveSigner();
-          if (tx.from && tx.from.toLowerCase() !== signer.address.toLowerCase()) {
-            throw providerErrors.unauthorized(
-              `Address mismatch: expected ${signer.address}, got ${tx.from}`
-            );
-          }
+          const signer = this._resolveSigner(tx.from);
           return await signer.signTransaction(normalizeEip1193Tx(tx));
         }
         // Read methods - delegate to RPC provider
@@ -2527,6 +2545,20 @@
       return this.transport.request(
         "GET",
         `/api/v1/api-keys${qs ? `?${qs}` : ""}`,
+        null
+      );
+    }
+    /**
+     * Lightweight directory of every enabled API key, accessible to any
+     * authenticated caller — feeds the Signers filter + Grant-access
+     * dropdowns. Returns only id/name/role/enabled; audit-relevant
+     * fields (timestamps, rate limit, source) are intentionally
+     * stripped daemon-side.
+     */
+    async names() {
+      return this.transport.request(
+        "GET",
+        "/api/v1/api-keys/names",
         null
       );
     }
