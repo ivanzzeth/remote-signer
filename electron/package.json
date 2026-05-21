@@ -26,13 +26,6 @@
       "assets/**/*",
       "package.json"
     ],
-    "extraResources": [
-      {
-        "from": "../remote-signer",
-        "to": "bin/remote-signer",
-        "filter": ["remote-signer"]
-      }
-    ],
     "directories": {
       "buildResources": "assets",
       "output": "out"
@@ -42,17 +35,26 @@
       "target": [
         { "target": "dmg", "arch": ["arm64", "x64"] }
       ],
-      "hardenedRuntime": false
+      "hardenedRuntime": false,
+      "extraResources": [
+        { "from": "../remote-signer", "to": "bin/remote-signer" }
+      ]
     },
     "win": {
       "target": [
         { "target": "nsis", "arch": ["x64"] }
+      ],
+      "extraResources": [
+        { "from": "../remote-signer.exe", "to": "bin/remote-signer.exe" }
       ]
     },
     "linux": {
       "category": "Development",
       "target": [
         { "target": "AppImage", "arch": ["x64", "arm64"] }
+      ],
+      "extraResources": [
+        { "from": "../remote-signer", "to": "bin/remote-signer" }
       ]
     }
   }

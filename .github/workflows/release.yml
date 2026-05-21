@@ -1,5 +1,12 @@
-# Build and publish the unified remote-signer binary on tag push.
-# Requires repo to be public for setup.sh to download without auth.
+# Build and publish multi-platform artefacts on tag push:
+#   - remote-signer Go binaries (linux/darwin × amd64/arm64) with UI embedded
+#   - Chrome extension zip
+#   - Desktop installers (macOS dmg arm64+x64, Windows nsis x64, Linux AppImage x64)
+#
+# All artefacts attach to the same GitHub Release for the pushed tag.
+# softprops/action-gh-release appends when called more than once with the
+# same tag_name, so the desktop matrix jobs run alongside the main `release`
+# job and contribute their installers as additional release assets.
 name: Release
 
 on:
@@ -26,6 +33,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+
+      # The web workspace and the extension both consume the SDK via
+      # `file:../pkg/js-client`, which needs its dist/ to exist before
+      # either `npm ci` resolves. Mirrors the step in ci.yml.
+      - name: Build SDK
+        run: |
+          cd pkg/js-client
+          npm ci --no-audit --no-fund
+          npm run build
 
       - name: Build web UI bundle (vite → internal/web/dist)
         # Release binaries embed the React SPA via the embed_web build tag
@@ -65,5 +81,112 @@ jobs:
             remote-signer-*
             extension/dist/remote-signer-extension.zip
           generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  desktop:
+    # Each platform builds its own desktop installer. electron-builder
+    # cannot cross-compile dmg/exe/AppImage in any reliable way, so the
+    # matrix dispatches to a real runner of the target OS. macOS gets two
+    # runners (one per arch) since the Go binary baked into the dmg has to
+    # match the dmg's arch — building one runner with `lipo`-stitched
+    # universal binary is cleaner long-term but adds a step we don't need
+    # for the first release.
+    #
+    # `needs: release` waits for the main release job to create the Release
+    # object first; the matrix steps then append their installers to it.
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            arch: arm64
+            goos: darwin
+            goarch: arm64
+            target_args: --mac dmg --arm64
+            asset_glob: electron/out/*.dmg
+          - os: macos-13
+            arch: x64
+            goos: darwin
+            goarch: amd64
+            target_args: --mac dmg --x64
+            asset_glob: electron/out/*.dmg
+          - os: ubuntu-latest
+            arch: x64
+            goos: linux
+            goarch: amd64
+            target_args: --linux AppImage --x64
+            asset_glob: electron/out/*.AppImage
+          - os: windows-latest
+            arch: x64
+            goos: windows
+            goarch: amd64
+            target_args: --win nsis --x64
+            asset_glob: electron/out/*.exe
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        # Windows-latest defaults to PowerShell; force bash so the inline
+        # GOOS=... go build syntax (and the same logic in all matrix legs)
+        # works uniformly.
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build SDK
+        run: |
+          cd pkg/js-client
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Build web UI bundle
+        run: |
+          cd web
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Build remote-signer Go binary for this platform
+        # electron/package.json's extraResources.from points at
+        # ./remote-signer at repo root. electron-builder will copy that
+        # exact file into the app bundle's bin/ folder, so we must place
+        # the right arch's binary there before packaging. The Go binary
+        # filename is the same regardless of GOOS — electron-builder also
+        # handles the Windows .exe rename on Windows runs via the
+        # extraResources `filter`.
+        run: |
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 go build \
+            -tags embed_web \
+            -ldflags="-s -w" \
+            -o remote-signer${{ matrix.goos == 'windows' && '.exe' || '' }} \
+            ./cmd/remote-signer
+
+      - name: Compile electron main + package installer
+        # `npm run build` inside electron/ is the tsc compile; we run it
+        # explicitly then drive electron-builder directly so the per-matrix
+        # target/arch flags override the defaults baked into package.json.
+        # `--publish never` tells electron-builder not to attempt its own
+        # upload — the action-gh-release step below owns that.
+        working-directory: electron
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+          npx electron-builder ${{ matrix.target_args }} --publish never
+
+      - name: Upload desktop installer to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.asset_glob }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
