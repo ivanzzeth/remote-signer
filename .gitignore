@@ -134,3 +134,10 @@ verify-setup-polymarket
 /remote-signer-cli
 .playwright-cli/
 pkg/js-client/tests/.test-server-keys.json
+
+# Local-only dev artefacts
+.claude/
+test-results/
+web/test-results/
+playwright-report/
+web/playwright-report/
