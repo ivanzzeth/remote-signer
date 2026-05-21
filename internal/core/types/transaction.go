@@ -95,6 +95,12 @@ type TransactionFilter struct {
 	ChainID       string             // exact match
 	FromAddress   string             // exact match
 	Status        *TransactionStatus // nil = any
-	Limit         int                // default 100, cap 500
-	Offset        int
+	// APIKeyID scopes to transactions whose linked sign_request was
+	// created by this key. Implemented as a subquery against
+	// sign_requests in the Gorm repo. The handler uses it to enforce
+	// per-caller visibility — admins may pass any value, non-admins
+	// only their own.
+	APIKeyID string
+	Limit    int // default 100, cap 500
+	Offset   int
 }
