@@ -414,9 +414,14 @@ func TestSetDefaults_ZeroMaxRequestAge(t *testing.T) {
 }
 
 func TestSetDefaults_ZeroRateLimitDefault(t *testing.T) {
+	// Bumped from the historical 100 to 10000 — see setDefaults
+	// docstring for the regression (Permit2Signature failure when
+	// Uniswap fires 50+ chain reads in a few seconds). The test
+	// pins the new floor so a future "tighten this back down" PR
+	// surfaces in CI instead of as opaque dApp failures.
 	cfg := &Config{}
 	setDefaults(cfg)
-	assert.Equal(t, 100, cfg.Security.RateLimitDefault)
+	assert.Equal(t, 10000, cfg.Security.RateLimitDefault)
 }
 
 func TestSetDefaults_NilNonceRequired(t *testing.T) {
@@ -622,7 +627,7 @@ chains:
 	// Defaults should be applied
 	assert.Equal(t, "127.0.0.1", cfg.Server.Host)
 	assert.Equal(t, 60*time.Second, cfg.Security.MaxRequestAge)
-	assert.Equal(t, 100, cfg.Security.RateLimitDefault)
+	assert.Equal(t, 10000, cfg.Security.RateLimitDefault)
 	require.NotNil(t, cfg.Security.NonceRequired)
 	assert.True(t, *cfg.Security.NonceRequired)
 	assert.Equal(t, "info", cfg.Logger.Level)
