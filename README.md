@@ -32,6 +32,28 @@ bash <(curl -fsSL https://raw.githubusercontent.com/ivanzzeth/remote-signer/main
 git clone https://github.com/ivanzzeth/remote-signer.git && cd remote-signer && ./scripts/setup.sh
 ```
 
+### Docker (personal, drop-in for native daemon)
+
+```bash
+UID=$(id -u) GID=$(id -g) docker compose -f docker-compose.local.yml up -d
+```
+
+Pulls `ghcr.io/ivanzzeth/remote-signer:latest` (multi-arch: `linux/amd64`, `linux/arm64`), bind-mounts your existing `~/.remote-signer` into the container, and adds restart-on-crash. Same SQLite DB, admin keystore, signers, and API keys as the native daemon — switch back and forth without migration.
+
+For production multi-instance behind PostgreSQL, see [`docker-compose.yml`](docker-compose.yml) and [Deployment Guide](docs/deployment.md). For all release-engineering and version conventions, see [GIT.md](GIT.md).
+
+### Desktop app
+
+Each release ships `.dmg` (macOS), `.exe` (Windows), and `.AppImage` (Linux) installers built around an Electron shell that wraps the daemon. Download from the latest [Releases](https://github.com/ivanzzeth/remote-signer/releases) page.
+
+### TypeScript / JavaScript SDK
+
+```bash
+npm install remote-signer-client
+```
+
+Same version cadence as the daemon — `remote-signer-client@0.3.9` matches daemon `v0.3.9`. See [Integration Guide](INTEGRATION.md) for usage.
+
 ## Chrome Extension
 
 Remote Signer ships with a Chrome browser extension that injects an EIP-1193 `window.ethereum` provider into every page, allowing dApps to use your remote-signer service for signing.
@@ -87,6 +109,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system design.
 | [TLS / mTLS Guide](docs/tls.md) | Certificate trust model, generation, production practices |
 | [TUI Guide](docs/tui.md) | Terminal UI: build, run, key bindings |
 | [Testing Guide](docs/testing.md) | Unit tests, E2E, rule validation |
+| [GIT.md](GIT.md) | Release flow, version conventions, NPM_TOKEN setup, Docker compose modes |
 
 ## License
 

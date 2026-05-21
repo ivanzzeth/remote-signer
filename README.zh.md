@@ -32,6 +32,28 @@ bash <(curl -fsSL https://raw.githubusercontent.com/ivanzzeth/remote-signer/main
 git clone https://github.com/ivanzzeth/remote-signer.git && cd remote-signer && ./scripts/setup.sh
 ```
 
+### Docker（个人单机，无缝替换原生 daemon）
+
+```bash
+UID=$(id -u) GID=$(id -g) docker compose -f docker-compose.local.yml up -d
+```
+
+拉 `ghcr.io/ivanzzeth/remote-signer:latest`（multi-arch：`linux/amd64`、`linux/arm64`），把宿主机的 `~/.remote-signer` 挂进容器，自带 restart-on-crash。SQLite 库、admin keystore、signers、API keys 都和原生 daemon 同一份，可以随时切换不用迁移数据。
+
+生产多实例 + PostgreSQL 看 [`docker-compose.yml`](docker-compose.yml) 和 [部署指南](docs/deployment.md)。release 流程与版本约定看 [GIT.md](GIT.md)。
+
+### 桌面应用
+
+每个 release 附带 `.dmg`（macOS）、`.exe`（Windows）、`.AppImage`（Linux）安装包，基于 Electron shell 内嵌 daemon。在 [Releases](https://github.com/ivanzzeth/remote-signer/releases) 页面下载。
+
+### TypeScript / JavaScript SDK
+
+```bash
+npm install remote-signer-client
+```
+
+SDK 版本与 daemon 同步——`remote-signer-client@0.3.9` 对应 daemon `v0.3.9`。用法见 [集成指南](INTEGRATION.md)。
+
 ## Chrome 浏览器插件
 
 Remote Signer 提供 Chrome 浏览器扩展，为每个页面注入 EIP-1193 标准的 `window.ethereum` provider，让 dApp 可以直接使用 remote-signer 服务签名。
@@ -85,6 +107,7 @@ dApp 页面 (MAIN world)  ←postMessage→  content-script (ISOLATED)  ←chrom
 | [TLS / mTLS 指南](docs/tls.md) | 证书信任模型、生成、生产实践 |
 | [TUI 指南](docs/tui.md) | 终端界面：构建、运行、快捷键 |
 | [测试指南](docs/testing.md) | 单元测试、E2E、规则校验 |
+| [GIT.md](GIT.md) | Release 流程、版本约定、NPM_TOKEN 配置、Docker compose 模式 |
 
 ## 许可证
 
