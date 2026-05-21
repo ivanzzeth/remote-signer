@@ -667,3 +667,132 @@ describe("EIP1193Provider - Chain Switching", () => {
     expect(chainChangedHandler).not.toHaveBeenCalled();
   });
 });
+
+describe("EIP1193Provider - refreshSigners", () => {
+  // The scenario these tests pin down: host (the browser extension SW)
+  // starts with N signers cached at create(); user unlocks one more on
+  // the daemon side; the dApp's next request must see the new signer
+  // without an extension reload. refreshSigners() is the SDK contract
+  // that makes that possible.
+
+  it("picks up a new signer unlocked daemon-side without re-creating the provider", async () => {
+    const mockClient = createMockClient();
+    (mockClient.evm.signers.list as jest.Mock).mockResolvedValueOnce({
+      signers: [{ address: "0xA", enabled: true, locked: false, type: "keystore" }],
+    });
+    const provider = await EIP1193Provider.create({
+      signersSource: { type: "client", client: mockClient, chainId: 1 },
+    });
+    expect(((await provider.request({ method: "eth_accounts" })) as string[]).length).toBe(1);
+
+    // Daemon side: a second signer just got unlocked.
+    (mockClient.evm.signers.list as jest.Mock).mockResolvedValueOnce({
+      signers: [
+        { address: "0xA", enabled: true, locked: false, type: "keystore" },
+        { address: "0xB", enabled: true, locked: false, type: "keystore" },
+      ],
+    });
+
+    const accountsChanged = jest.fn();
+    provider.on("accountsChanged", accountsChanged);
+    await provider.refreshSigners();
+
+    const after = (await provider.request({ method: "eth_accounts" })) as string[];
+    expect(after).toEqual(["0xA", "0xB"]);
+    expect(accountsChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves active address when it survives the refresh", async () => {
+    const mockClient = createMockClient();
+    (mockClient.evm.signers.list as jest.Mock).mockResolvedValueOnce({
+      signers: [
+        { address: "0xA", enabled: true, locked: false, type: "keystore" },
+        { address: "0xB", enabled: true, locked: false, type: "keystore" },
+      ],
+    });
+    const provider = await EIP1193Provider.create({
+      signersSource: { type: "client", client: mockClient, chainId: 1 },
+    });
+    await provider.switchAccount("0xB");
+    expect(provider.selectedAddress).toBe("0xB");
+
+    // New signer C added; B and A still around.
+    (mockClient.evm.signers.list as jest.Mock).mockResolvedValueOnce({
+      signers: [
+        { address: "0xA", enabled: true, locked: false, type: "keystore" },
+        { address: "0xB", enabled: true, locked: false, type: "keystore" },
+        { address: "0xC", enabled: true, locked: false, type: "keystore" },
+      ],
+    });
+    await provider.refreshSigners();
+    expect(provider.selectedAddress).toBe("0xB");
+  });
+
+  it("falls back to index 0 when the active address is gone after refresh", async () => {
+    const mockClient = createMockClient();
+    (mockClient.evm.signers.list as jest.Mock).mockResolvedValueOnce({
+      signers: [
+        { address: "0xA", enabled: true, locked: false, type: "keystore" },
+        { address: "0xB", enabled: true, locked: false, type: "keystore" },
+      ],
+    });
+    const provider = await EIP1193Provider.create({
+      signersSource: { type: "client", client: mockClient, chainId: 1 },
+    });
+    await provider.switchAccount("0xB");
+
+    // B was locked / deleted between requests; only A remains.
+    (mockClient.evm.signers.list as jest.Mock).mockResolvedValueOnce({
+      signers: [{ address: "0xA", enabled: true, locked: false, type: "keystore" }],
+    });
+    await provider.refreshSigners();
+    expect(provider.selectedAddress).toBe("0xA");
+  });
+
+  it("starts disconnected → becomes connected and emits 'connect' once a signer appears", async () => {
+    const mockClient = createMockClient();
+    // First call: nothing usable yet (locked HD wallet, say).
+    (mockClient.evm.signers.list as jest.Mock).mockResolvedValueOnce({
+      signers: [{ address: "0xLocked", enabled: true, locked: true, type: "hd_wallet" }],
+    });
+    const provider = await EIP1193Provider.create({
+      signersSource: { type: "client", client: mockClient, chainId: 1 },
+    });
+    expect(provider.isConnected()).toBe(false);
+
+    const connectHandler = jest.fn();
+    provider.on("connect", connectHandler);
+
+    (mockClient.evm.signers.list as jest.Mock).mockResolvedValueOnce({
+      signers: [{ address: "0xLocked", enabled: true, locked: false, type: "hd_wallet" }],
+    });
+    await provider.refreshSigners();
+    expect(provider.isConnected()).toBe(true);
+    expect(connectHandler).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not emit accountsChanged when the signer set is unchanged", async () => {
+    const mockClient = createMockClient();
+    (mockClient.evm.signers.list as jest.Mock).mockResolvedValue({
+      signers: [{ address: "0xA", enabled: true, locked: false, type: "keystore" }],
+    });
+    const provider = await EIP1193Provider.create({
+      signersSource: { type: "client", client: mockClient, chainId: 1 },
+    });
+    const accountsChanged = jest.fn();
+    provider.on("accountsChanged", accountsChanged);
+    await provider.refreshSigners();
+    expect(accountsChanged).not.toHaveBeenCalled();
+  });
+
+  it("throws when no signersSource was stashed (provider created without one)", async () => {
+    // The manual mode still stashes its source, so this guard only trips
+    // for hand-constructed providers; we still pin the contract so
+    // callers don't silently swallow a missing source.
+    const provider = await EIP1193Provider.create({
+      signersSource: { type: "manual", signers: [createMockSigner("0xA", "1")] },
+    });
+    (provider as any)._signersSource = undefined;
+    await expect(provider.refreshSigners()).rejects.toThrow(/signersSource/);
+  });
+});
