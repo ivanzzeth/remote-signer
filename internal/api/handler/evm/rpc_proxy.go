@@ -22,8 +22,10 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	evmchain "github.com/ivanzzeth/remote-signer/internal/chain/evm"
+	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
 
 // RPCProxyBackend is the minimal interface RPCProxyHandler depends
@@ -36,21 +38,37 @@ type RPCProxyBackend interface {
 	) (json.RawMessage, error)
 }
 
+// TransactionRecorder is the slice of TransactionService the proxy
+// needs after observing an eth_sendRawTransaction. Kept narrow so
+// the proxy doesn't pull the whole service interface (poll, dropped
+// detection, etc.) into its dependency graph — those concerns live
+// in the background poller, not on the hot request path.
+type TransactionRecorder interface {
+	RecordBroadcast(ctx context.Context, chainID, signedTxHex string) (*types.Transaction, error)
+}
+
 // RPCProxyHandler implements POST /api/v1/evm/rpc/{chainID}.
 type RPCProxyHandler struct {
-	backend RPCProxyBackend
-	logger  *slog.Logger
+	backend  RPCProxyBackend
+	recorder TransactionRecorder // optional — nil disables tx tracking
+	logger   *slog.Logger
 }
 
 // NewRPCProxyHandler validates dependencies and returns a ready-to-mount handler.
-func NewRPCProxyHandler(backend RPCProxyBackend, logger *slog.Logger) (*RPCProxyHandler, error) {
+// `recorder` may be nil — installations without a TransactionService
+// just lose the per-broadcast audit row; the proxy itself still works.
+func NewRPCProxyHandler(
+	backend RPCProxyBackend,
+	recorder TransactionRecorder,
+	logger *slog.Logger,
+) (*RPCProxyHandler, error) {
 	if backend == nil {
 		return nil, errors.New("rpc backend is required")
 	}
 	if logger == nil {
 		return nil, errors.New("logger is required")
 	}
-	return &RPCProxyHandler{backend: backend, logger: logger}, nil
+	return &RPCProxyHandler{backend: backend, recorder: recorder, logger: logger}, nil
 }
 
 // Compile-time guard: the real RPCProvider satisfies the interface.
@@ -149,11 +167,51 @@ func (h *RPCProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// After a successful broadcast, hand the signed payload to the
+	// TransactionService so it can decode, link to the originating
+	// sign_request, and start tracking on-chain status. Strictly
+	// best-effort: the upstream has already accepted the tx, the
+	// caller gets the success envelope regardless of whether we can
+	// persist the audit row. Background context — the request
+	// context is about to be cancelled when we return.
+	if body.Method == "eth_sendRawTransaction" && h.recorder != nil {
+		h.recordBroadcastAsync(chainID, body.Params)
+	}
+
 	h.writeJSON(w, http.StatusOK, jsonRPCEnvelope{
 		JSONRPC: "2.0",
 		ID:      body.ID,
 		Result:  result,
 	})
+}
+
+// recordBroadcastAsync hands the signed-tx hex to the recorder
+// outside the request goroutine — the upstream broadcast already
+// succeeded and the dApp's response shouldn't wait on our audit
+// path. Param-shape failures (missing arg, non-string) get logged
+// but never bubble to the caller.
+func (h *RPCProxyHandler) recordBroadcastAsync(chainID string, params []interface{}) {
+	if len(params) == 0 {
+		h.logger.Warn("wallet rpc proxy: eth_sendRawTransaction with no params")
+		return
+	}
+	signedHex, ok := params[0].(string)
+	if !ok || signedHex == "" {
+		h.logger.Warn("wallet rpc proxy: eth_sendRawTransaction first param not a hex string")
+		return
+	}
+	go func() {
+		// context.Background — the request ctx is about to be
+		// cancelled. We deliberately don't tie this DB write to the
+		// dApp's connection lifecycle.
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := h.recorder.RecordBroadcast(ctx, chainID, signedHex); err != nil {
+			h.logger.Warn("wallet rpc proxy: record broadcast failed",
+				slog.String("chain_id", chainID),
+				slog.String("error", err.Error()))
+		}
+	}()
 }
 
 // writeRPCError emits a JSON-RPC error envelope at HTTP 200 — see

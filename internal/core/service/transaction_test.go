@@ -165,6 +165,22 @@ func TestTransactionService_RecordBroadcast_BadRLPRecordsSparse(t *testing.T) {
 	assert.Contains(t, row.ErrorMessage, "RLP-decode")
 }
 
+func TestTransactionService_PollPending_NoRPC(t *testing.T) {
+	// Service constructed without an rpc provider can still record,
+	// but PollPending should fail cleanly (not panic) — operators
+	// running record-only configs need a usable error to telemetry.
+	db := newTxServiceTestDB(t)
+	txRepo, err := storage.NewGormTransactionRepository(db)
+	require.NoError(t, err)
+	reqRepo, err := storage.NewGormRequestRepository(db)
+	require.NoError(t, err)
+	svc, err := NewTransactionService(txRepo, reqRepo, nil, txServiceLogger())
+	require.NoError(t, err)
+	_, _, err = svc.PollPending(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "rpc provider")
+}
+
 func TestTransactionService_RecordBroadcast_ChainMismatchStillRecords(t *testing.T) {
 	// This is exactly the BSC USDT regression: signed for chain 1
 	// but the URL path says 56. Record the row anyway — the row

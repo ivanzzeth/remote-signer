@@ -24,6 +24,11 @@ import (
 type RouterAndServer struct {
 	Router *api.Router
 	Server *api.Server
+	// TxService is the on-chain transaction tracker. Exposed so the
+	// daemon's main loop can launch its background receipt poller
+	// alongside the HTTP server. Nil when transaction tracking
+	// wasn't wired (no RPCProvider, repo failure).
+	TxService *service.TransactionService
 }
 
 // initRouterAndServer builds the RouterConfig, registers presets and registries,
@@ -82,6 +87,23 @@ func initRouterAndServer(
 		RPCProvider:                  rpcProvider,
 		SettingsManager:              settingsMgr,
 	}
+	// Wire the on-chain transaction tracker if we have an RPC + the
+	// repos it needs. Best-effort: a build that omits these still
+	// runs, the wallet proxy + sign endpoints just stop populating
+	// the transactions table.
+	var txService *service.TransactionService
+	if rpcProvider != nil {
+		if txRepo, txErr := storage.NewGormTransactionRepository(db); txErr == nil {
+			if txSvc, sErr := service.NewTransactionService(txRepo, repos.requestRepo, rpcProvider, log); sErr == nil {
+				routerConfig.TransactionService = txSvc
+				txService = txSvc
+			} else {
+				log.Warn("transaction tracking disabled: service init failed", "error", sErr)
+			}
+		} else {
+			log.Warn("transaction tracking disabled: repo init failed", "error", txErr)
+		}
+	}
 	_ = resolveLegacyPresetsDir(cfg, configPath)
 	if presetRepo, err := storage.NewGormPresetRepository(db); err == nil {
 		routerConfig.PresetRepo = presetRepo
@@ -121,5 +143,5 @@ func initRouterAndServer(
 	if err != nil {
 		return nil, err
 	}
-	return &RouterAndServer{Router: router, Server: server}, nil
+	return &RouterAndServer{Router: router, Server: server, TxService: txService}, nil
 }
