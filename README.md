@@ -46,6 +46,8 @@ For production multi-instance behind PostgreSQL, see [`docker-compose.yml`](dock
 
 Each release ships `.dmg` (macOS), `.exe` (Windows), and `.AppImage` (Linux) installers built around an Electron shell that wraps the daemon. Download from the latest [Releases](https://github.com/ivanzzeth/remote-signer/releases) page.
 
+The Electron shell is just a browser window pointed at the daemon's local HTTP server (`http://127.0.0.1:8548`), so while the desktop app is running you can open the same UI in any regular browser on the same machine — same React app, same session, same state. Useful when you want the daemon's lifecycle handled by the desktop launcher (auto-start, restart-on-crash) but prefer your normal browser for the UI.
+
 ### TypeScript / JavaScript SDK
 
 ```bash
