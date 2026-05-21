@@ -113,6 +113,49 @@ func TestTransactionRepo_ListPendingOrdering(t *testing.T) {
 	assert.Equal(t, "polled-1m", got[2].ID)
 }
 
+func TestTransactionRepo_ListFilter_APIKeyIDScope(t *testing.T) {
+	// The transactions handler enforces per-caller visibility by
+	// passing APIKeyID to this filter. Test the join via sign_requests
+	// works as intended: only txs whose sign_request.api_key_id
+	// matches the filter come back, regardless of from_address.
+	db := newTxTestDB(t)
+	require.NoError(t, db.AutoMigrate(&types.SignRequest{}))
+	txRepo, err := NewGormTransactionRepository(db)
+	require.NoError(t, err)
+	reqRepo, err := NewGormRequestRepository(db)
+	require.NoError(t, err)
+	ctx := context.Background()
+	now := time.Now()
+
+	// Two sign requests, two keys.
+	require.NoError(t, reqRepo.Create(ctx, &types.SignRequest{
+		ID: "req-alice", APIKeyID: "alice", ChainType: types.ChainTypeEVM,
+		ChainID: "1", Status: types.StatusCompleted, CreatedAt: now,
+	}))
+	require.NoError(t, reqRepo.Create(ctx, &types.SignRequest{
+		ID: "req-bob", APIKeyID: "bob", ChainType: types.ChainTypeEVM,
+		ChainID: "1", Status: types.StatusCompleted, CreatedAt: now,
+	}))
+	require.NoError(t, txRepo.Create(ctx, &types.Transaction{
+		ID: "tx-alice", SignRequestID: "req-alice", ChainID: "1",
+		TxHash: "0x1", Status: types.TxStatusMined, BroadcastedAt: now,
+	}))
+	require.NoError(t, txRepo.Create(ctx, &types.Transaction{
+		ID: "tx-bob", SignRequestID: "req-bob", ChainID: "1",
+		TxHash: "0x2", Status: types.TxStatusMined, BroadcastedAt: now,
+	}))
+	// Orphan tx (no sign request) — must NOT leak to either key.
+	require.NoError(t, txRepo.Create(ctx, &types.Transaction{
+		ID: "tx-orphan", ChainID: "1", TxHash: "0x3",
+		Status: types.TxStatusBroadcasted, BroadcastedAt: now,
+	}))
+
+	got, err := txRepo.List(ctx, types.TransactionFilter{APIKeyID: "alice"})
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "tx-alice", got[0].ID)
+}
+
 func TestTransactionRepo_ListFilter(t *testing.T) {
 	repo, err := NewGormTransactionRepository(newTxTestDB(t))
 	require.NoError(t, err)

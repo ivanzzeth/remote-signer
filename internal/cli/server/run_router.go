@@ -94,6 +94,7 @@ func initRouterAndServer(
 	var txService *service.TransactionService
 	if rpcProvider != nil {
 		if txRepo, txErr := storage.NewGormTransactionRepository(db); txErr == nil {
+			routerConfig.TransactionRepo = txRepo
 			if txSvc, sErr := service.NewTransactionService(txRepo, repos.requestRepo, rpcProvider, log); sErr == nil {
 				routerConfig.TransactionService = txSvc
 				txService = txSvc

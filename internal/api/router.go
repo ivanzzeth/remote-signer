@@ -96,6 +96,11 @@ type RouterConfig struct {
 	// keep the proxy working (broadcasts still go to upstream), they
 	// just lose the per-tx audit row + status tracking.
 	TransactionService evmhandler.TransactionRecorder
+	// TransactionRepo backs the /api/v1/evm/transactions read API.
+	// Optional in the same sense as TransactionService — the routes
+	// register only when set, so a build without tracking simply
+	// omits the listing surface.
+	TransactionRepo storage.TransactionRepository
 }
 
 // Router handles HTTP routing
@@ -367,6 +372,20 @@ func (r *Router) setupRoutes() error {
 			return fmt.Errorf("failed to create rpc proxy handler: %w", rpErr)
 		}
 		r.mux.Handle("/api/v1/evm/rpc/", r.withAuth(rpcProxyHandler))
+	}
+
+	// On-chain transactions read API. Registered independently of
+	// the proxy: even an operator who doesn't broadcast through the
+	// daemon may want to see legacy rows (e.g. ones recorded by an
+	// older build). withAuth — visibility is enforced inside the
+	// handler by joining sign_request.api_key_id against the caller.
+	if r.config.TransactionRepo != nil {
+		txHandler, txErr := evmhandler.NewTransactionsHandler(r.config.TransactionRepo, r.logger)
+		if txErr != nil {
+			return fmt.Errorf("failed to create transactions handler: %w", txErr)
+		}
+		r.mux.Handle("/api/v1/evm/transactions", r.withAuth(txHandler))
+		r.mux.Handle("/api/v1/evm/transactions/", r.withAuth(txHandler))
 	}
 
 	// Batch sign route (optional, requires rule engine; simulation rule is optional)

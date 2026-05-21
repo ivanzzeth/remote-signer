@@ -156,5 +156,12 @@ func (r *GormTransactionRepository) applyFilter(q *gorm.DB, f types.TransactionF
 	if f.Status != nil {
 		q = q.Where("status = ?", *f.Status)
 	}
+	if f.APIKeyID != "" {
+		// Subquery scope to "txs whose linked sign_request belongs to
+		// this api key". Subquery (not join) so the row shape stays
+		// the same — callers don't need to learn about the FK side.
+		q = q.Where("sign_request_id IN (?)",
+			r.db.Table("sign_requests").Select("id").Where("api_key_id = ?", f.APIKeyID))
+	}
 	return q
 }

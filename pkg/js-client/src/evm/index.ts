@@ -12,6 +12,7 @@ import { EvmGuardService } from "./guard";
 import { EvmSimulateService } from "./simulate";
 import { EvmBudgetService } from "./budgets";
 import { EvmRPCProxyService } from "./rpc_proxy";
+import { EvmTransactionService } from "./transactions";
 
 // ---------------------------------------------------------------------------
 // Composite EVM service
@@ -30,6 +31,10 @@ export class EvmService {
   // signed-tx broadcast through this service so the daemon stays the
   // single source of chain-RPC config (URL, API key, rate limit).
   public readonly rpcProxy: EvmRPCProxyService;
+  // On-chain transaction tracker — read-only view over the
+  // /api/v1/evm/transactions endpoints the wallet RPC proxy
+  // populates. UIs use this to surface broadcast → mined status.
+  public readonly transactions: EvmTransactionService;
 
   constructor(transport: HttpTransport, pollInterval: number, pollTimeout: number) {
     this.sign = new EvmSignService(transport, pollInterval, pollTimeout);
@@ -41,6 +46,7 @@ export class EvmService {
     this.simulate = new EvmSimulateService(transport);
     this.budgets = new EvmBudgetService(transport);
     this.rpcProxy = new EvmRPCProxyService(transport);
+    this.transactions = new EvmTransactionService(transport);
   }
 }
 
@@ -56,6 +62,17 @@ export * from "./guard";
 export * from "./simulate";
 export * from "./budgets";
 export * from "./rpc_proxy";
+// transactions: re-export under a distinct surface to avoid clashing
+// with `Transaction` from ./types (the unsigned tx payload that goes
+// INTO sign requests — different concept from the on-chain row this
+// service returns).
+export {
+  EvmTransactionService,
+  type Transaction as OnChainTransaction,
+  type TransactionStatus as OnChainTransactionStatus,
+  type ListTransactionsFilter,
+  type ListTransactionsResponse,
+} from "./transactions";
 export * from "./ethsig";
 export * from "./provider-errors";
 export * from "./provider-types";
