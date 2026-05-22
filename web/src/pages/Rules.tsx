@@ -5,6 +5,7 @@ import {
   type Rule,
   type RuleMode,
   type RuleType,
+  type ValidateRuleResponse,
 } from "remote-signer-client";
 import { AppliedToPicker } from "../components/AppliedToPicker";
 import {
@@ -83,6 +84,24 @@ export function Rules() {
   const [showCreate, setShowCreate] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
+  const [batchValidating, setBatchValidating] = useState(false);
+  const [batchValidationResults, setBatchValidationResults] = useState<ValidateRuleResponse[] | null>(null);
+
+  async function batchValidate() {
+    const client = getClient();
+    if (!client) return;
+    setBatchValidationResults(null);
+    setMutationError(null);
+    setBatchValidating(true);
+    try {
+      const resp = await client.evm.rules.batchValidate();
+      setBatchValidationResults(resp.results);
+    } catch (e) {
+      setMutationError(formatMutationError(e));
+    } finally {
+      setBatchValidating(false);
+    }
+  }
 
   async function create(input: CreateRuleRequest) {
     const client = getClient();
@@ -200,11 +219,74 @@ export function Rules() {
             >
               Refresh
             </button>
+            <button
+              type="button"
+              onClick={batchValidate}
+              disabled={batchValidating}
+              className="rounded-md border border-ink-200 px-3 py-1 text-xs text-ink-700 hover:bg-ink-100 disabled:opacity-50"
+            >
+              {batchValidating ? "Validating…" : "Validate all"}
+            </button>
           </>
         }
       />
 
       {mutationError && <ErrorBanner msg={mutationError} />}
+
+      {batchValidationResults && (
+        <Card title="Batch validation results">
+          <div className="space-y-3">
+            <div className="flex gap-3 text-xs text-ink-600">
+              <span className="text-green-700">
+                {batchValidationResults.filter((r) => r.valid).length} passed
+              </span>
+              {batchValidationResults.filter((r) => !r.valid).length > 0 && (
+                <span className="text-red-700">
+                  {batchValidationResults.filter((r) => !r.valid).length} failed
+                </span>
+              )}
+              <span>{batchValidationResults.length} total</span>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setBatchValidationResults(null)}
+                className="rounded-md border border-ink-200 px-2 py-0.5 text-xs text-ink-700 hover:bg-ink-100"
+              >
+                Dismiss
+              </button>
+            </div>
+            {batchValidationResults.map((r, i) => (
+              <div key={i} className="flex items-start gap-2 text-xs">
+                <span className={r.valid ? "mt-0.5 text-green-600" : "mt-0.5 text-red-600"}>
+                  {r.valid ? "✓" : "✗"}
+                </span>
+                <div className="flex-1">
+                  <div className="text-ink-700">{r.rule_name}</div>
+                  {!r.valid && r.error && (
+                    <div className="text-red-500">{r.error}</div>
+                  )}
+                  {r.results && r.results.length > 0 && (
+                    <div className="mt-1 space-y-1 pl-4">
+                      {r.results.map((tc, j) => (
+                        <div key={j} className="flex items-center gap-1.5 text-[11px]">
+                          <span className={tc.passed ? "text-green-600" : "text-red-600"}>
+                            {tc.passed ? "✓" : "✗"}
+                          </span>
+                          <span className="text-ink-600">{tc.name}</span>
+                          {!tc.passed && tc.reason && (
+                            <span className="text-red-400">— {tc.reason}</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {showCreate && <CreateForm onSubmit={create} />}
 
@@ -392,6 +474,25 @@ function RuleDetailPanel({
     JSON.stringify(rule.config, null, 2),
   );
   const [parseError, setParseError] = useState<string | null>(null);
+  const [validating, setValidating] = useState(false);
+  const [validationResult, setValidationResult] = useState<ValidateRuleResponse | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
+
+  async function validateRule() {
+    setValidationResult(null);
+    setValidationError(null);
+    const c = getClient();
+    if (!c) return;
+    setValidating(true);
+    try {
+      const resp = await c.evm.rules.validate(rule.id);
+      setValidationResult(resp);
+    } catch (e) {
+      setValidationError(formatMutationError(e));
+    } finally {
+      setValidating(false);
+    }
+  }
 
   function save() {
     setParseError(null);
@@ -509,12 +610,68 @@ function RuleDetailPanel({
         </div>
       ) : (
         <div>
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-500">
-            Config
-          </h3>
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-500">
+              Config
+            </h3>
+            {rule.type === "evm_js" && (
+              <button
+                type="button"
+                onClick={validateRule}
+                disabled={validating}
+                className="rounded-md border border-ink-200 px-2 py-0.5 text-xs text-ink-700 hover:bg-ink-100 disabled:opacity-50"
+              >
+                {validating ? "Validating…" : "Validate"}
+              </button>
+            )}
+          </div>
           <pre className="overflow-x-auto rounded border border-ink-200 bg-white p-2 font-mono text-[11px] text-ink-900">
             {JSON.stringify(rule.config, null, 2)}
           </pre>
+        </div>
+      )}
+
+      {validationError && <ErrorBanner msg={validationError} />}
+
+      {validationResult && (
+        <div className="space-y-2 rounded-md border border-ink-200 bg-ink-50 p-2">
+          <div className="flex items-center gap-3 text-xs text-ink-600">
+            <span className="font-semibold uppercase tracking-wide text-ink-500">
+              Validation
+            </span>
+            <span className={validationResult.valid ? "text-green-700" : "text-red-700"}>
+              {validationResult.valid ? "passed" : "failed"}
+            </span>
+            {validationResult.results && (
+              <>
+                <span className="text-green-700">
+                  {validationResult.results.filter((tc) => tc.passed).length} passed
+                </span>
+                {validationResult.results.filter((tc) => !tc.passed).length > 0 && (
+                  <span className="text-red-700">
+                    {validationResult.results.filter((tc) => !tc.passed).length} failed
+                  </span>
+                )}
+                <span>{validationResult.results.length} total</span>
+              </>
+            )}
+          </div>
+          {!validationResult.valid && validationResult.error && (
+            <div className="text-xs text-red-500">{validationResult.error}</div>
+          )}
+          {validationResult.results?.map((tc, i) => (
+            <div key={i} className="flex items-start gap-2 text-xs">
+              <span className={tc.passed ? "mt-0.5 text-green-600" : "mt-0.5 text-red-600"}>
+                {tc.passed ? "✓" : "✗"}
+              </span>
+              <div className="flex-1">
+                <div className="text-ink-700">{tc.name}</div>
+                {!tc.passed && tc.reason && (
+                  <div className="text-red-400">— {tc.reason}</div>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
       )}
 

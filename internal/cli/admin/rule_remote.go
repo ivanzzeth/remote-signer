@@ -286,6 +286,89 @@ func printTable(headers []string, rows [][]string) {
 	}
 }
 
+// --- rule validate ---
+
+var (
+	flagRuleValidateAll bool
+)
+
+var ruleValidateCmd = &cobra.Command{
+	Use:   "validate [rule-id]",
+	Short: "Validate a rule's test cases (evm_js only) or all rules with --all",
+	Args: cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c, err := newClientFromFlags(cmd)
+		if err != nil {
+			return err
+		}
+
+		if flagRuleValidateAll {
+			resp, err := c.EVM.Rules.BatchValidate(cmd.Context())
+			if err != nil {
+				return fmt.Errorf("batch validate: %w", err)
+			}
+			if flagOutputFormat == "json" {
+				return printJSON(resp)
+			}
+			fmt.Printf("Total: %d  Passed: %d  Failed: %d\n", resp.Total, resp.Passed, resp.Failed)
+			for _, r := range resp.Results {
+				status := "PASS"
+				if !r.Valid {
+					status = "FAIL"
+				}
+				fmt.Printf("  %s [%s] %s\n", status, r.Type, r.RuleName)
+				if r.Error != "" {
+					fmt.Printf("    error: %s\n", r.Error)
+				}
+				for _, tc := range r.Results {
+					tcStatus := "✓"
+					if !tc.Passed {
+						tcStatus = "✗"
+					}
+					fmt.Printf("    %s %s", tcStatus, tc.Name)
+					if tc.Reason != "" {
+						fmt.Printf(" (%s)", tc.Reason)
+					}
+					fmt.Println()
+				}
+			}
+			return nil
+		}
+
+		if len(args) == 0 {
+			return fmt.Errorf("rule-id is required (or use --all for batch)")
+		}
+
+		resp, err := c.EVM.Rules.Validate(cmd.Context(), args[0])
+		if err != nil {
+			return fmt.Errorf("validate rule: %w", err)
+		}
+		if flagOutputFormat == "json" {
+			return printJSON(resp)
+		}
+		status := "PASS"
+		if !resp.Valid {
+			status = "FAIL"
+		}
+		fmt.Printf("Rule: %s [%s] %s\n", resp.RuleID, status, resp.RuleName)
+		if resp.Error != "" {
+			fmt.Printf("Error: %s\n", resp.Error)
+		}
+		for _, tc := range resp.Results {
+			tcStatus := "✓"
+			if !tc.Passed {
+				tcStatus = "✗"
+			}
+			fmt.Printf("  %s %s", tcStatus, tc.Name)
+			if tc.Reason != "" {
+				fmt.Printf(" (%s)", tc.Reason)
+			}
+			fmt.Println()
+		}
+		return nil
+	},
+}
+
 // --- registration ---
 
 func init() {
@@ -318,6 +401,8 @@ func init() {
 	ruleUpdateCmd.Flags().StringVar(&flagUpdateDescription, "description", "", "New description")
 	ruleUpdateCmd.Flags().StringArrayVar(&flagUpdateConfig, "set-config", nil, "Set config field (key=value, repeatable)")
 
+	ruleValidateCmd.Flags().BoolVar(&flagRuleValidateAll, "all", false, "Validate all evm_js rules (batch mode)")
+
 	// register all subcommands
 	ruleCmd.AddCommand(ruleListRemoteCmd)
 	ruleCmd.AddCommand(ruleGetCmd)
@@ -328,6 +413,7 @@ func init() {
 	ruleCmd.AddCommand(ruleApproveCmd)
 	ruleCmd.AddCommand(ruleRejectCmd)
 	ruleCmd.AddCommand(ruleBudgetsCmd)
+	ruleCmd.AddCommand(ruleValidateCmd)
 }
 
 // --- rule update ---

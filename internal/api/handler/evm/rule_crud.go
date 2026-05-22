@@ -122,7 +122,15 @@ func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
 	ruleID := types.RuleID(fmt.Sprintf("rule_%s", uuid.New().String()))
 
 	// Marshal config to JSON
-	configJSON, err := json.Marshal(req.Config)
+	configMap := req.Config
+	if configMap == nil {
+		configMap = make(map[string]interface{})
+	}
+	// Store test_cases in config for evm_js rules
+	if ruleType == types.RuleTypeEVMJS && len(req.TestCases) > 0 {
+		configMap["test_cases"] = req.TestCases
+	}
+	configJSON, err := json.Marshal(configMap)
 	if err != nil {
 		h.writeError(w, "invalid config", http.StatusBadRequest)
 		return
@@ -281,7 +289,12 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 			h.writeError(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		configJSON, err := json.Marshal(req.Config)
+			// Preserve test_cases from request if provided
+			configMap := req.Config
+			if rule.Type == types.RuleTypeEVMJS && len(req.TestCases) > 0 {
+				configMap["test_cases"] = req.TestCases
+			}
+			configJSON, err := json.Marshal(configMap)
 		if err != nil {
 			h.writeError(w, "invalid config", http.StatusBadRequest)
 			return

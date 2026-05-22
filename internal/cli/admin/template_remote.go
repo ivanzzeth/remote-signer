@@ -268,4 +268,39 @@ func init() {
 	templateCmd.AddCommand(templateDeleteCmd)
 	templateCmd.AddCommand(templateInstantiateCmd)
 	templateCmd.AddCommand(templateRevokeInstanceCmd)
+	templateCmd.AddCommand(templateValidateCmd)
+}
+
+// --- template validate ---
+
+var templateValidateCmd = &cobra.Command{
+	Use:   "validate <template-id>",
+	Short: "Validate a template's test cases",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c, err := newClientFromFlags(cmd)
+		if err != nil {
+			return err
+		}
+		resp, err := c.Templates.Validate(cmd.Context(), args[0])
+		if err != nil {
+			return fmt.Errorf("validate template: %w", err)
+		}
+		if flagOutputFormat == "json" {
+			return printJSON(resp)
+		}
+		fmt.Printf("Template: %s [%s]\n", resp.TemplateID, resp.TemplateName)
+		fmt.Printf("Total: %d  Passed: %d  Failed: %d\n", resp.Total, resp.Passed, resp.Failed)
+		for _, r := range resp.Results {
+			status := "PASS"
+			if !r.Valid {
+				status = "FAIL"
+			}
+			fmt.Printf("  %s [%s] %s\n", status, r.Type, r.RuleName)
+			if r.Error != "" {
+				fmt.Printf("    error: %s\n", r.Error)
+			}
+		}
+		return nil
+	},
 }

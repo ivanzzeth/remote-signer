@@ -91,3 +91,10 @@ docker-smoke:
 
 desktop-dist: build-embed
 	cd electron && $(NPM) install --no-audit --no-fund && $(NPM) run dist
+
+docker-local:
+	PULL_POLICY=build docker compose -f docker-compose.local.yml up -d
+
+# Build from source via BUILD_MODE (alternative to PULL_POLICY=build):
+#   BUILD_MODE=source make docker-local
+.PHONY: docker-local

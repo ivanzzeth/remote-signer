@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
@@ -109,15 +110,16 @@ func (h *TemplateHandler) instantiateTemplate(w http.ResponseWriter, r *http.Req
 		}
 	}
 
+	// Resolve template for RBAC ownership and validation
+	tmpl, err := h.templateService.ResolveTemplate(r.Context(), instanceReq)
+	if err != nil {
+		h.writeError(w, fmt.Sprintf("failed to resolve template: %s", err.Error()), http.StatusBadRequest)
+		return
+	}
+
 	// Apply RBAC ownership
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey != nil {
-		// Resolve template to get mode for RBAC determination
-		tmpl, err := h.templateService.ResolveTemplate(r.Context(), instanceReq)
-		if err != nil {
-			h.writeError(w, fmt.Sprintf("failed to resolve template: %s", err.Error()), http.StatusBadRequest)
-			return
-		}
 		ownership, err := DetermineRuleOwnership(
 			r.Context(), apiKey, nil,
 			tmpl.Mode, h.requireApproval, h.apiKeyRepo,
@@ -129,6 +131,38 @@ func (h *TemplateHandler) instantiateTemplate(w http.ResponseWriter, r *http.Req
 		instanceReq.Owner = ownership.Owner
 		instanceReq.AppliedTo = []string(ownership.AppliedTo)
 		instanceReq.Status = ownership.Status
+	}
+
+	// Run test case validation before creating (unless skipped)
+	if !req.SkipValidation && h.jsEvaluator != nil {
+		var varDefs []types.TemplateVariable
+		if len(tmpl.Variables) > 0 {
+			json.Unmarshal(tmpl.Variables, &varDefs)
+		}
+		resolvedVars := resolveTemplateDefaults(varDefs, req.Variables)
+		if instanceReq.ChainID != nil {
+			resolvedVars["chain_id"] = *instanceReq.ChainID
+		}
+		resolvedConfig, subErr := service.SubstituteVariables(tmpl.Config, resolvedVars)
+		if subErr != nil {
+			h.writeError(w, fmt.Sprintf("variable substitution for validation failed: %s", subErr.Error()), http.StatusBadRequest)
+			return
+		}
+		results, allPassed := ValidateTemplateConfig(h.jsEvaluator, tmpl.Name, resolvedConfig)
+		if !allPassed {
+			var failures []string
+			for _, r := range results {
+				if !r.Valid && r.Error != "" {
+					failures = append(failures, fmt.Sprintf("%s: %s", r.RuleName, r.Error))
+				}
+			}
+			h.writeError(w, fmt.Sprintf("test case validation failed: %s", strings.Join(failures, "; ")), http.StatusBadRequest)
+			return
+		}
+		h.logger.Debug("template test case validation passed",
+			"template_id", templateID,
+			"results", len(results),
+		)
 	}
 
 	// Create instance

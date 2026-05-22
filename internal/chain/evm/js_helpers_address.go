@@ -28,6 +28,12 @@ func rsAddrListFromExport(listRaw interface{}) []string {
 				}
 			}
 		}
+	case []string:
+		for _, s := range v {
+			if checksum, ok := rsAddrNormalize(s); ok {
+				addrs = append(addrs, checksum)
+			}
+		}
 	case string:
 		for _, part := range strings.Split(v, ",") {
 			if checksum, ok := rsAddrNormalize(part); ok {
@@ -190,5 +196,18 @@ func rsAddrRequireZero(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 			panic(reason)
 		}
 		return rsOk(vm)
+	}
+}
+
+// rsAddrToChecksumList converts a JS array or comma-separated string of addresses
+// to a checksummed array. Invalid addresses are silently skipped.
+func rsAddrToChecksumList(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
+	return func(call sobek.FunctionCall) sobek.Value {
+		if len(call.Arguments) < 1 {
+			return vm.ToValue([]string{})
+		}
+		listRaw := call.Argument(0).Export()
+		addrs := rsAddrListFromExport(listRaw)
+		return vm.ToValue(addrs)
 	}
 }

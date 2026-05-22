@@ -104,7 +104,7 @@ rules:
             allowedContracts: allowedContracts
           });
           require(String(msg.signer || '').trim() !== '', 'missing signer');
-          var safeAddresses = toChecksumAddressList(config.allowed_safe_addresses);
+          var safeAddresses = rs.addr.toChecksumList(config.allowed_safe_addresses);
           rs.addr.requireInList((msg.maker || '').trim(), safeAddresses, 'maker must be allowed Safe address');
           rs.typedData.requireSignerMatch((msg.signer || '').trim(), (input.signer || '').trim(), 'order signer must match signing key');
           return ok();

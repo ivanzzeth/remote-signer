@@ -1440,3 +1440,80 @@ func TestRs_AddrRequireNotInList_InvalidAddr(t *testing.T) {
 	assert.False(t, res.Valid, "invalid address should fail requireNotInList")
 	assert.Contains(t, res.Reason, "blocked")
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// rs.addr.toChecksumList
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestJSHelper_ToChecksumAddressList(t *testing.T) {
+	raw1 := "0x742d35cc6634c0532925a3b844bc454e4438f44e"
+	raw2 := "0x2791bca1f2de4661ed88a30c99a7a9449aa84174"
+	chk1 := common.HexToAddress(raw1).Hex()
+	chk2 := common.HexToAddress(raw2).Hex()
+
+	t.Run("JS array input", func(t *testing.T) {
+		e, _ := NewJSRuleEvaluator(testLogger())
+		script := `function validate(i){
+			var list = rs.addr.toChecksumList(["` + raw1 + `", "` + raw2 + `"]);
+			if (list.length !== 2) return fail("expected 2 items, got " + list.length);
+			if (list[0] !== "` + chk1 + `") return fail("addr1 checksum mismatch: " + list[0]);
+			if (list[1] !== "` + chk2 + `") return fail("addr2 checksum mismatch: " + list[1]);
+			return ok();
+		}`
+		input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+		res := e.wrappedValidate(script, input, nil, nil)
+		assert.True(t, res.Valid, "array input: %s", res.Reason)
+	})
+
+	t.Run("comma-separated string input", func(t *testing.T) {
+		e, _ := NewJSRuleEvaluator(testLogger())
+		script := `function validate(i){
+			var list = rs.addr.toChecksumList("` + raw1 + `,` + raw2 + `");
+			if (list.length !== 2) return fail("expected 2 items, got " + list.length);
+			if (list[0] !== "` + chk1 + `") return fail("addr1 checksum mismatch: " + list[0]);
+			if (list[1] !== "` + chk2 + `") return fail("addr2 checksum mismatch: " + list[1]);
+			return ok();
+		}`
+		input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+		res := e.wrappedValidate(script, input, nil, nil)
+		assert.True(t, res.Valid, "string input: %s", res.Reason)
+	})
+
+	t.Run("mixed-case input preserved", func(t *testing.T) {
+		e, _ := NewJSRuleEvaluator(testLogger())
+		script := `function validate(i){
+			var list = rs.addr.toChecksumList(["` + chk1 + `"]);
+			if (list.length !== 1) return fail("expected 1 item, got " + list.length);
+			if (list[0] !== "` + chk1 + `") return fail("checksum mismatch: " + list[0]);
+			return ok();
+		}`
+		input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+		res := e.wrappedValidate(script, input, nil, nil)
+		assert.True(t, res.Valid, "mixed-case input: %s", res.Reason)
+	})
+
+	t.Run("empty array", func(t *testing.T) {
+		e, _ := NewJSRuleEvaluator(testLogger())
+		script := `function validate(i){
+			var list = rs.addr.toChecksumList([]);
+			if (list.length !== 0) return fail("expected empty list, got " + list.length);
+			return ok();
+		}`
+		input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+		res := e.wrappedValidate(script, input, nil, nil)
+		assert.True(t, res.Valid, "empty array: %s", res.Reason)
+	})
+
+	t.Run("invalid address skipped", func(t *testing.T) {
+		e, _ := NewJSRuleEvaluator(testLogger())
+		script := `function validate(i){
+			var list = rs.addr.toChecksumList(["not_an_address", "` + raw1 + `"]);
+			if (list.length !== 1) return fail("expected 1 item, got " + list.length);
+			if (list[0] !== "` + chk1 + `") return fail("checksum mismatch: " + list[0]);
+			return ok();
+		}`
+		input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
+		res := e.wrappedValidate(script, input, nil, nil)
+		assert.True(t, res.Valid, "invalid address skipped: %s", res.Reason)
+	})
+}

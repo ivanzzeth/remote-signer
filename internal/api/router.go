@@ -535,7 +535,8 @@ func (r *Router) setupRoutes() error {
 			r.config.RulesAPIReadonly,
 			handler.WithTemplateRequireApproval(r.config.RequireApprovalForAgentRules),
 			handler.WithTemplateAPIKeyRepo(r.config.APIKeyRepo),
-		)
+			handler.WithTemplateJSEvaluator(r.config.JSEvaluator),
+			)
 		if err != nil {
 			return err
 		}
@@ -563,6 +564,7 @@ func (r *Router) setupRoutes() error {
 			r.logger,
 			handler.WithPresetRequireApproval(r.config.RequireApprovalForAgentRules),
 			handler.WithPresetAPIKeyRepo(r.config.APIKeyRepo),
+			handler.WithPresetJSEvaluator(r.config.JSEvaluator),
 		)
 		if err != nil {
 			return err

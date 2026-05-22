@@ -399,6 +399,7 @@ type TemplateService struct {
 	DeleteFunc         func(ctx context.Context, templateID string) error
 	InstantiateFunc    func(ctx context.Context, templateID string, req *templates.InstantiateRequest) (*templates.InstantiateResponse, error)
 	RevokeInstanceFunc func(ctx context.Context, ruleID string) (*templates.RevokeInstanceResponse, error)
+	ValidateFunc       func(ctx context.Context, templateID string) (*templates.ValidateTemplateResponse, error)
 	Calls              map[string][]any
 }
 
@@ -466,6 +467,14 @@ func (m *TemplateService) RevokeInstance(ctx context.Context, ruleID string) (*t
 		return m.RevokeInstanceFunc(ctx, ruleID)
 	}
 	return &templates.RevokeInstanceResponse{}, nil
+}
+
+func (m *TemplateService) Validate(ctx context.Context, templateID string) (*templates.ValidateTemplateResponse, error) {
+	m.recordCall("Validate", templateID)
+	if m.ValidateFunc != nil {
+		return m.ValidateFunc(ctx, templateID)
+	}
+	return &templates.ValidateTemplateResponse{}, nil
 }
 
 var _ templates.API = (*TemplateService)(nil)

@@ -113,6 +113,7 @@ type InstantiateTemplateRequest struct {
 	ExpiresIn     *string           `json:"expires_in,omitempty"` // duration string e.g. "24h", "168h"
 	Budget        *BudgetRequest    `json:"budget,omitempty"`
 	Schedule      *ScheduleRequest  `json:"schedule,omitempty"`
+	SkipValidation bool             `json:"skip_validation,omitempty"` // skip test case validation on instantiate
 }
 
 // BudgetRequest represents budget config in an instantiate request

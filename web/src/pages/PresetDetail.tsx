@@ -4,6 +4,7 @@ import {
   APIError,
   type PresetDetail as PresetDetailDTO,
   type PresetVariableDetail,
+  type ValidateRuleResultItem,
 } from "remote-signer-client";
 import { AppliedToPicker } from "../components/AppliedToPicker";
 import {
@@ -135,6 +136,24 @@ function ApplyForm({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<ApplyResult[] | null>(null);
+  const [validating, setValidating] = useState(false);
+  const [validationResults, setValidationResults] = useState<ValidateRuleResultItem[] | null>(null);
+
+  async function validate() {
+    setError(null);
+    setValidationResults(null);
+    const c = getClient();
+    if (!c) return;
+    setValidating(true);
+    try {
+      const resp = await c.presets.validate(preset.id, vars);
+      setValidationResults(resp.results);
+    } catch (ex) {
+      setError(formatErr(ex));
+    } finally {
+      setValidating(false);
+    }
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -238,6 +257,14 @@ function ApplyForm({
 
         <div className="flex gap-2 border-t border-ink-100 pt-3">
           <button
+            type="button"
+            onClick={validate}
+            disabled={validating}
+            className="rounded-md border border-ink-200 px-3 py-1.5 text-sm text-ink-700 hover:bg-ink-100 disabled:opacity-50"
+          >
+            {validating ? "Validating…" : "Validate"}
+          </button>
+          <button
             type="submit"
             disabled={submitting}
             className="rounded-md bg-accent-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-600 disabled:opacity-50"
@@ -246,6 +273,31 @@ function ApplyForm({
             {submitting ? "Applying…" : "Apply preset"}
           </button>
         </div>
+
+        {validationResults && (
+          <div className="-mt-2 space-y-2 rounded-md border border-ink-200 bg-ink-50 p-2">
+            <div className="flex gap-3 text-xs text-ink-600">
+              <span className="text-green-700">
+                {validationResults.filter((r) => r.valid).length} passed
+              </span>
+              {validationResults.filter((r) => !r.valid).length > 0 && (
+                <span className="text-red-700">
+                  {validationResults.filter((r) => !r.valid).length} failed
+                </span>
+              )}
+              <span>{validationResults.length} total</span>
+            </div>
+            {validationResults.map((r, i) => (
+              <div key={i} className="flex items-center gap-2 text-xs">
+                <span className={r.valid ? "text-green-600" : "text-red-600"}>
+                  {r.valid ? "✓" : "✗"}
+                </span>
+                <span className="text-ink-700">{r.rule_name}</span>
+                {!r.valid && r.error && <span className="text-red-500">{r.error}</span>}
+              </div>
+            ))}
+          </div>
+        )}
       </form>
     </Card>
   );
