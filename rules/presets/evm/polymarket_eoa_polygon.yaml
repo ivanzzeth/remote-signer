@@ -11,7 +11,6 @@ variables:
   conditional_tokens_address: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
   safe_proxy_factory_address: "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"
   usdc_bridged_address: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
-  allowed_safe_address_for_testing: "0x1111111111111111111111111111111111111111"
   allowed_safe_addresses: "0x1111111111111111111111111111111111111111"
   clob_auth_domain_name: "ClobAuthDomain"
   clob_auth_domain_version: "1"
@@ -24,6 +23,4 @@ template_ids:
   - evm/polymarket_trading
 operator_overrides:
   - name: allowed_safe_addresses
-    required: false
-  - name: allowed_safe_address_for_testing
     required: false

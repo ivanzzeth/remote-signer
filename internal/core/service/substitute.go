@@ -324,6 +324,56 @@ func asDurationString(name string, v any) (string, error) {
 
 var placeholderRE = regexp.MustCompile(`\$\{([^}]+)\}`)
 
+// SubstituteVariables replaces ${var} placeholders in config JSON with
+// actual values.
+//
+// Deprecated: Prefer SubstituteTyped for new callers. Kept while R8
+// migrates the preset apply / template instance handlers.
+func SubstituteVariables(configJSON []byte, vars map[string]string) ([]byte, error) {
+	result := string(configJSON)
+	for k, v := range vars {
+		result = strings.ReplaceAll(result, "${"+k+"}", v)
+		result = strings.ReplaceAll(result, "${hex:"+k+"}", strings.TrimPrefix(v, "0x"))
+		hex := strings.TrimPrefix(v, "0x")
+		var padded string
+		if len(hex) < 64 {
+			padded = strings.Repeat("0", 64-len(hex)) + hex
+		} else {
+			padded = hex
+		}
+		result = strings.ReplaceAll(result, "${paddedhex:"+k+"}", padded)
+		firstVal := firstOfList(v)
+		result = strings.ReplaceAll(result, "${first:"+k+"}", firstVal)
+		hexFirst := strings.TrimPrefix(firstVal, "0x")
+		result = strings.ReplaceAll(result, "${hex:first:"+k+"}", hexFirst)
+	}
+	if rest := findUnresolvedVars(result); len(rest) > 0 {
+		return nil, fmt.Errorf("unresolved variables: %s", strings.Join(rest, ", "))
+	}
+	return []byte(result), nil
+}
+
+// SubstituteString is a convenience wrapper around SubstituteVariables that
+// works on plain strings instead of byte slices.
+func SubstituteString(s string, vars map[string]string) (string, error) {
+	b, err := SubstituteVariables([]byte(s), vars)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+// firstOfList returns the first non-empty element of a comma-separated list.
+func firstOfList(s string) string {
+	for _, part := range strings.Split(s, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			return part
+		}
+	}
+	return ""
+}
+
 func findUnresolvedVars(s string) []string {
 	matches := placeholderRE.FindAllStringSubmatch(s, -1)
 	if len(matches) == 0 {

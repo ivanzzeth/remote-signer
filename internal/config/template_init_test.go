@@ -4,6 +4,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/ivanzzeth/remote-signer/internal/core/service"
 )
 
 // TestSubstituteVarsInString covers substituteVarsInString: happy path, edge cases, error path, empty.
@@ -56,26 +58,26 @@ func TestSubstituteVarsInString(t *testing.T) {
 			s:       "value=${missing}",
 			vars:    map[string]string{},
 			wantErr: true,
-			errMsg:  "unresolved template variable",
+			errMsg:  "unresolved variables",
 		},
 		{
 			name:    "unresolved variable - error",
 			s:       "a=${a} b=${b}",
 			vars:    map[string]string{"a": "1"},
 			wantErr: true,
-			errMsg:  "unresolved template variable",
+			errMsg:  "unresolved variables",
 		},
 		{
-			name:    "env var syntax with colon - left as-is (no error)",
+			name:    "env var syntax with colon - reported as unresolved (service.SubstituteString is stricter)",
 			s:       "path=${HOME:-/default}",
 			vars:    map[string]string{},
-			want:    "path=${HOME:-/default}",
-			wantErr: false,
+			wantErr: true,
+			errMsg:  "unresolved variables",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := substituteVarsInString(tt.s, tt.vars)
+			got, err := service.SubstituteString(tt.s, tt.vars)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("substituteVarsInString() error = %v, wantErr %v", err, tt.wantErr)
 				return

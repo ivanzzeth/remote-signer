@@ -51,11 +51,6 @@ variables:
     type: address_list
     description: "Comma-separated allowed Safe addresses (Order.maker whitelist)"
     required: true
-  - name: allowed_safe_address_for_testing
-    type: address
-    description: "Single Safe address for test payload (must be in allowed_safe_addresses)"
-    required: false
-    default: ""
   - name: v2_exchange_domain_name
     type: string
     description: "V2 Exchange EIP-712 domain name"
@@ -64,11 +59,6 @@ variables:
     type: string
     description: "V2 Exchange EIP-712 domain version"
     required: true
-  - name: test_wrong_signer
-    type: address
-    description: "Address that differs from allowed_safe_address_for_testing — for signer-mismatch test case"
-    required: false
-    default: ""
 test_variables:
   chain_id: "137"
   exchange_v2_address: "0xE111180000d2663C0091e4f400237545B87B996B"
@@ -83,7 +73,6 @@ test_variables:
   usdc_bridged_address: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
   neg_risk_adapter_address: "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296"
   allowed_safe_addresses: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
-  allowed_safe_address_for_testing: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
   test_wrong_signer: "0xEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE"
   v2_exchange_domain_name: "Polymarket CTF Exchange"
   v2_exchange_domain_version: "2"
@@ -121,7 +110,7 @@ rules:
           input:
             sign_type: "typed_data"
             chain_id: 137
-            signer: "${allowed_safe_address_for_testing}"
+            signer: "${first:allowed_safe_addresses}"
             typed_data:
               primaryType: "Order"
               domain:
@@ -131,8 +120,8 @@ rules:
                 verifyingContract: "${exchange_v2_address}"
               message:
                 salt: "12345"
-                maker: "${allowed_safe_address_for_testing}"
-                signer: "${allowed_safe_address_for_testing}"
+                maker: "${first:allowed_safe_addresses}"
+                signer: "${first:allowed_safe_addresses}"
                 tokenId: "1"
                 makerAmount: "1000000000000000000"
                 takerAmount: "1000000000000000000"
@@ -147,7 +136,7 @@ rules:
           input:
             sign_type: "typed_data"
             chain_id: 137
-            signer: "${allowed_safe_address_for_testing}"
+            signer: "${first:allowed_safe_addresses}"
             typed_data:
               primaryType: "Order"
               domain:
@@ -157,8 +146,8 @@ rules:
                 verifyingContract: "${neg_risk_exchange_v2_address}"
               message:
                 salt: "12345"
-                maker: "${allowed_safe_address_for_testing}"
-                signer: "${allowed_safe_address_for_testing}"
+                maker: "${first:allowed_safe_addresses}"
+                signer: "${first:allowed_safe_addresses}"
                 tokenId: "1"
                 makerAmount: "1000000000000000000"
                 takerAmount: "1000000000000000000"
@@ -173,7 +162,7 @@ rules:
           input:
             sign_type: "typed_data"
             chain_id: 137
-            signer: "${allowed_safe_address_for_testing}"
+            signer: "${first:allowed_safe_addresses}"
             typed_data:
               primaryType: "Order"
               domain:
@@ -183,8 +172,8 @@ rules:
                 verifyingContract: "${exchange_v2_address}"
               message:
                 salt: "12345"
-                maker: "${allowed_safe_address_for_testing}"
-                signer: "${allowed_safe_address_for_testing}"
+                maker: "${first:allowed_safe_addresses}"
+                signer: "${first:allowed_safe_addresses}"
                 tokenId: "1"
                 makerAmount: "1000000000000000000"
                 takerAmount: "1000000000000000000"
@@ -200,7 +189,7 @@ rules:
           input:
             sign_type: "typed_data"
             chain_id: 137
-            signer: "${allowed_safe_address_for_testing}"
+            signer: "${first:allowed_safe_addresses}"
             typed_data:
               primaryType: "Order"
               domain:
@@ -211,7 +200,7 @@ rules:
               message:
                 salt: "12345"
                 maker: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
-                signer: "${allowed_safe_address_for_testing}"
+                signer: "${first:allowed_safe_addresses}"
                 tokenId: "1"
                 makerAmount: "1000000000000000000"
                 takerAmount: "1000000000000000000"
@@ -227,7 +216,7 @@ rules:
           input:
             sign_type: "typed_data"
             chain_id: 137
-            signer: "${allowed_safe_address_for_testing}"
+            signer: "${first:allowed_safe_addresses}"
             typed_data:
               primaryType: "Order"
               domain:
@@ -237,7 +226,7 @@ rules:
                 verifyingContract: "${exchange_v2_address}"
               message:
                 salt: "12345"
-                maker: "${allowed_safe_address_for_testing}"
+                maker: "${first:allowed_safe_addresses}"
                 signer: "${test_wrong_signer}"
                 tokenId: "1"
                 makerAmount: "1000000000000000000"
@@ -380,9 +369,9 @@ rules:
           input:
             sign_type: "transaction"
             chain_id: 137
-            signer: "${allowed_safe_address_for_testing}"
+            signer: "${first:allowed_safe_addresses}"
             transaction:
-              from: "${allowed_safe_address_for_testing}"
+              from: "${first:allowed_safe_addresses}"
               to: "${collateral_token_address}"
               value: "0x0"
               data: "0x095ea7b3000000000000000000000000${hex:exchange_v2_address}ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
@@ -391,9 +380,9 @@ rules:
           input:
             sign_type: "transaction"
             chain_id: 137
-            signer: "${allowed_safe_address_for_testing}"
+            signer: "${first:allowed_safe_addresses}"
             transaction:
-              from: "${allowed_safe_address_for_testing}"
+              from: "${first:allowed_safe_addresses}"
               to: "${collateral_token_address}"
               value: "0x0"
               data: "0x095ea7b3000000000000000000000000${hex:neg_risk_exchange_v2_address}ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
@@ -402,9 +391,9 @@ rules:
           input:
             sign_type: "transaction"
             chain_id: 137
-            signer: "${allowed_safe_address_for_testing}"
+            signer: "${first:allowed_safe_addresses}"
             transaction:
-              from: "${allowed_safe_address_for_testing}"
+              from: "${first:allowed_safe_addresses}"
               to: "${collateral_token_address}"
               value: "0x0"
               data: "0x095ea7b3000000000000000000000000${hex:neg_risk_adapter_address}ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
@@ -413,9 +402,9 @@ rules:
           input:
             sign_type: "transaction"
             chain_id: 137
-            signer: "${allowed_safe_address_for_testing}"
+            signer: "${first:allowed_safe_addresses}"
             transaction:
-              from: "${allowed_safe_address_for_testing}"
+              from: "${first:allowed_safe_addresses}"
               to: "${collateral_token_address}"
               value: "0x0"
               data: "0x095ea7b3000000000000000000000000${hex:ctf_collateral_adapter_address}ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
@@ -424,9 +413,9 @@ rules:
           input:
             sign_type: "transaction"
             chain_id: 137
-            signer: "${allowed_safe_address_for_testing}"
+            signer: "${first:allowed_safe_addresses}"
             transaction:
-              from: "${allowed_safe_address_for_testing}"
+              from: "${first:allowed_safe_addresses}"
               to: "${collateral_token_address}"
               value: "0x0"
               data: "0x095ea7b3000000000000000000000000${hex:neg_risk_ctf_collateral_adapter_address}ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
@@ -435,9 +424,9 @@ rules:
           input:
             sign_type: "transaction"
             chain_id: 137
-            signer: "${allowed_safe_address_for_testing}"
+            signer: "${first:allowed_safe_addresses}"
             transaction:
-              from: "${allowed_safe_address_for_testing}"
+              from: "${first:allowed_safe_addresses}"
               to: "${collateral_token_address}"
               value: "0x0"
               data: "0x095ea7b3000000000000000000000000${hex:collateral_offramp_address}ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
@@ -446,9 +435,9 @@ rules:
           input:
             sign_type: "transaction"
             chain_id: 137
-            signer: "${allowed_safe_address_for_testing}"
+            signer: "${first:allowed_safe_addresses}"
             transaction:
-              from: "${allowed_safe_address_for_testing}"
+              from: "${first:allowed_safe_addresses}"
               to: "${collateral_token_address}"
               value: "0x0"
               data: "0x095ea7b3000000000000000000000000DEADDEADDEADDEADDEADDEADDEADDEADDEADDEADffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
@@ -458,9 +447,9 @@ rules:
           input:
             sign_type: "transaction"
             chain_id: 137
-            signer: "${allowed_safe_address_for_testing}"
+            signer: "${first:allowed_safe_addresses}"
             transaction:
-              from: "${allowed_safe_address_for_testing}"
+              from: "${first:allowed_safe_addresses}"
               to: "${conditional_tokens_address}"
               value: "0x0"
               data: "0xa22cb465000000000000000000000000${hex:exchange_v2_address}0000000000000000000000000000000000000000000000000000000000000001"
@@ -469,9 +458,9 @@ rules:
           input:
             sign_type: "transaction"
             chain_id: 137
-            signer: "${allowed_safe_address_for_testing}"
+            signer: "${first:allowed_safe_addresses}"
             transaction:
-              from: "${allowed_safe_address_for_testing}"
+              from: "${first:allowed_safe_addresses}"
               to: "${conditional_tokens_address}"
               value: "0x0"
               data: "0xa22cb465000000000000000000000000${hex:neg_risk_exchange_v2_address}0000000000000000000000000000000000000000000000000000000000000001"
@@ -480,9 +469,9 @@ rules:
           input:
             sign_type: "transaction"
             chain_id: 137
-            signer: "${allowed_safe_address_for_testing}"
+            signer: "${first:allowed_safe_addresses}"
             transaction:
-              from: "${allowed_safe_address_for_testing}"
+              from: "${first:allowed_safe_addresses}"
               to: "${conditional_tokens_address}"
               value: "0x0"
               data: "0xa22cb465000000000000000000000000DEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD0000000000000000000000000000000000000000000000000000000000000001"
@@ -492,9 +481,9 @@ rules:
           input:
             sign_type: "transaction"
             chain_id: 137
-            signer: "${allowed_safe_address_for_testing}"
+            signer: "${first:allowed_safe_addresses}"
             transaction:
-              from: "${allowed_safe_address_for_testing}"
+              from: "${first:allowed_safe_addresses}"
               to: "${conditional_tokens_address}"
               value: "0x0"
               data: "0xa22cb465000000000000000000000000${hex:exchange_v2_address}0000000000000000000000000000000000000000000000000000000000000000"
@@ -504,77 +493,77 @@ rules:
           input:
             sign_type: "transaction"
             chain_id: 137
-            signer: "${allowed_safe_address_for_testing}"
+            signer: "${first:allowed_safe_addresses}"
             transaction:
-              from: "${allowed_safe_address_for_testing}"
+              from: "${first:allowed_safe_addresses}"
               to: "${collateral_onramp_address}"
               value: "0x0"
-              data: "0xe9b44a0c000000000000000000000000${hex:usdc_address}000000000000000000000000${hex:allowed_safe_address_for_testing}0000000000000000000000000000000000000000000000000de0b6b3a7640000"
+              data: "0xe9b44a0c000000000000000000000000${hex:usdc_address}000000000000000000000000${hex:first:allowed_safe_addresses}0000000000000000000000000000000000000000000000000de0b6b3a7640000"
           expect_pass: true
         - name: "should pass CollateralOnramp wrap with USDC.e"
           input:
             sign_type: "transaction"
             chain_id: 137
-            signer: "${allowed_safe_address_for_testing}"
+            signer: "${first:allowed_safe_addresses}"
             transaction:
-              from: "${allowed_safe_address_for_testing}"
+              from: "${first:allowed_safe_addresses}"
               to: "${collateral_onramp_address}"
               value: "0x0"
-              data: "0xe9b44a0c000000000000000000000000${hex:usdc_bridged_address}000000000000000000000000${hex:allowed_safe_address_for_testing}0000000000000000000000000000000000000000000000000de0b6b3a7640000"
+              data: "0xe9b44a0c000000000000000000000000${hex:usdc_bridged_address}000000000000000000000000${hex:first:allowed_safe_addresses}0000000000000000000000000000000000000000000000000de0b6b3a7640000"
           expect_pass: true
         - name: "should reject CollateralOnramp wrap with disallowed asset"
           input:
             sign_type: "transaction"
             chain_id: 137
-            signer: "${allowed_safe_address_for_testing}"
+            signer: "${first:allowed_safe_addresses}"
             transaction:
-              from: "${allowed_safe_address_for_testing}"
+              from: "${first:allowed_safe_addresses}"
               to: "${collateral_onramp_address}"
               value: "0x0"
-              data: "0xe9b44a0c000000000000000000000000${hex:collateral_token_address}000000000000000000000000${hex:allowed_safe_address_for_testing}0000000000000000000000000000000000000000000000000de0b6b3a7640000"
+              data: "0xe9b44a0c000000000000000000000000${hex:collateral_token_address}000000000000000000000000${hex:first:allowed_safe_addresses}0000000000000000000000000000000000000000000000000de0b6b3a7640000"
           expect_pass: false
           expect_reason: "wrap asset must be USDC or USDC.e"
         - name: "should pass CollateralOfframp unwrap with USDC"
           input:
             sign_type: "transaction"
             chain_id: 137
-            signer: "${allowed_safe_address_for_testing}"
+            signer: "${first:allowed_safe_addresses}"
             transaction:
-              from: "${allowed_safe_address_for_testing}"
+              from: "${first:allowed_safe_addresses}"
               to: "${collateral_offramp_address}"
               value: "0x0"
-              data: "0x095b3356000000000000000000000000${hex:usdc_address}000000000000000000000000${hex:allowed_safe_address_for_testing}0000000000000000000000000000000000000000000000000de0b6b3a7640000"
+              data: "0x095b3356000000000000000000000000${hex:usdc_address}000000000000000000000000${hex:first:allowed_safe_addresses}0000000000000000000000000000000000000000000000000de0b6b3a7640000"
           expect_pass: true
         - name: "should pass CollateralOfframp unwrap with USDC.e"
           input:
             sign_type: "transaction"
             chain_id: 137
-            signer: "${allowed_safe_address_for_testing}"
+            signer: "${first:allowed_safe_addresses}"
             transaction:
-              from: "${allowed_safe_address_for_testing}"
+              from: "${first:allowed_safe_addresses}"
               to: "${collateral_offramp_address}"
               value: "0x0"
-              data: "0x095b3356000000000000000000000000${hex:usdc_bridged_address}000000000000000000000000${hex:allowed_safe_address_for_testing}0000000000000000000000000000000000000000000000000de0b6b3a7640000"
+              data: "0x095b3356000000000000000000000000${hex:usdc_bridged_address}000000000000000000000000${hex:first:allowed_safe_addresses}0000000000000000000000000000000000000000000000000de0b6b3a7640000"
           expect_pass: true
         - name: "should reject CollateralOfframp unwrap with disallowed asset"
           input:
             sign_type: "transaction"
             chain_id: 137
-            signer: "${allowed_safe_address_for_testing}"
+            signer: "${first:allowed_safe_addresses}"
             transaction:
-              from: "${allowed_safe_address_for_testing}"
+              from: "${first:allowed_safe_addresses}"
               to: "${collateral_offramp_address}"
               value: "0x0"
-              data: "0x095b3356000000000000000000000000${hex:collateral_token_address}000000000000000000000000${hex:allowed_safe_address_for_testing}0000000000000000000000000000000000000000000000000de0b6b3a7640000"
+              data: "0x095b3356000000000000000000000000${hex:collateral_token_address}000000000000000000000000${hex:first:allowed_safe_addresses}0000000000000000000000000000000000000000000000000de0b6b3a7640000"
           expect_pass: false
           expect_reason: "unwrap asset must be USDC or USDC.e"
         - name: "should pass USDC.e approve to CollateralOnramp"
           input:
             sign_type: "transaction"
             chain_id: 137
-            signer: "${allowed_safe_address_for_testing}"
+            signer: "${first:allowed_safe_addresses}"
             transaction:
-              from: "${allowed_safe_address_for_testing}"
+              from: "${first:allowed_safe_addresses}"
               to: "${usdc_bridged_address}"
               value: "0x0"
               data: "0x095ea7b3000000000000000000000000${hex:collateral_onramp_address}ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
@@ -583,9 +572,9 @@ rules:
           input:
             sign_type: "transaction"
             chain_id: 137
-            signer: "${allowed_safe_address_for_testing}"
+            signer: "${first:allowed_safe_addresses}"
             transaction:
-              from: "${allowed_safe_address_for_testing}"
+              from: "${first:allowed_safe_addresses}"
               to: "${usdc_bridged_address}"
               value: "0x0"
               data: "0x095ea7b3000000000000000000000000DEADDEADDEADDEADDEADDEADDEADDEADDEADDEADffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
@@ -595,9 +584,9 @@ rules:
           input:
             sign_type: "transaction"
             chain_id: 137
-            signer: "${allowed_safe_address_for_testing}"
+            signer: "${first:allowed_safe_addresses}"
             transaction:
-              from: "${allowed_safe_address_for_testing}"
+              from: "${first:allowed_safe_addresses}"
               to: "${usdc_address}"
               value: "0x0"
               data: "0x095ea7b3000000000000000000000000${hex:collateral_onramp_address}ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
@@ -606,9 +595,9 @@ rules:
           input:
             sign_type: "transaction"
             chain_id: 137
-            signer: "${allowed_safe_address_for_testing}"
+            signer: "${first:allowed_safe_addresses}"
             transaction:
-              from: "${allowed_safe_address_for_testing}"
+              from: "${first:allowed_safe_addresses}"
               to: "${usdc_address}"
               value: "0x0"
               data: "0x095ea7b3000000000000000000000000DEADDEADDEADDEADDEADDEADDEADDEADDEADDEADffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
@@ -618,9 +607,9 @@ rules:
           input:
             sign_type: "transaction"
             chain_id: 137
-            signer: "${allowed_safe_address_for_testing}"
+            signer: "${first:allowed_safe_addresses}"
             transaction:
-              from: "${allowed_safe_address_for_testing}"
+              from: "${first:allowed_safe_addresses}"
               to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
               value: "0x0"
               data: "0x095ea7b3000000000000000000000000DEADDEADDEADDEADDEADDEADDEADDEADDEADDEADffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"

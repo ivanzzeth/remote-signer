@@ -44,10 +44,6 @@ variables:
     type: address
     description: "NegRiskAdapter (YB) contract address"
     required: true
-  - name: signer_address_for_testing
-    type: address
-    description: "EOA signer address for test payloads"
-    required: true
 test_variables:
   chain_id: "56"
   usdt_address: "0x55d398326f99059fF775485246999027B3197955"

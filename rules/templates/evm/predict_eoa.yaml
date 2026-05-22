@@ -54,10 +54,6 @@ variables:
     type: address
     description: "NegRiskAdapter (YB) contract address"
     required: true
-  - name: signer_address_for_testing
-    type: address
-    description: "EOA signer address for test payloads (maker, signer, etc.)"
-    required: true
 # Default values for template validation (BNB Chain mainnet)
 test_variables:
   chain_id: "56"

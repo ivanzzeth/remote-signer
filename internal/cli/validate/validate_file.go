@@ -15,6 +15,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
+	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
 
@@ -66,7 +67,7 @@ func validateFile(ctx context.Context, filePath string, validator *evm.SolidityR
 		if err != nil {
 			return nil, 0, 0, fmt.Errorf("failed to marshal template rules: %w", err)
 		}
-		resolved, err := substituteVarsInString(string(rulesJSON), templateFile.TestVariables)
+		resolved, err := service.SubstituteString(string(rulesJSON), templateFile.TestVariables)
 		if err != nil {
 			return nil, 0, 0, fmt.Errorf("template variable substitution failed: %w", err)
 		}
@@ -191,7 +192,7 @@ func validatePresetFile(ctx context.Context, data []byte, filePath string, valid
 		if err != nil {
 			return nil, 0, 0, fmt.Errorf("failed to marshal template rules for %q: %w", tid, err)
 		}
-		resolved, err := substituteVarsInString(string(rulesJSON), mergedVars)
+		resolved, err := service.SubstituteString(string(rulesJSON), mergedVars)
 		if err != nil {
 			return nil, 0, 0, fmt.Errorf("variable substitution failed for template %q: %w", tid, err)
 		}

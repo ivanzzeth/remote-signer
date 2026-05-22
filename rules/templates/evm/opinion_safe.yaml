@@ -20,10 +20,6 @@ variables:
     type: address
     description: "USDT (BSC) token address"
     required: true
-  - name: allowed_safe_address_for_testing
-    type: address
-    description: "Single Safe address for test payload (to, maker, signer, verifyingContract, etc.)"
-    required: true
   - name: allowed_safe_addresses
     type: string
     description: "Comma-separated list of allowed Safe addresses (for expressions: verifyingContract / txTo). Use in() in rules."
@@ -47,7 +43,6 @@ test_variables:
   conditional_tokens_address: "0xAD1a38cEc043e70E83a3eC30443dB285ED10D774"
   safe_proxy_factory_address: "0xa6B71E26C5e0845f74c812102Ca7114b6a896AB2"
   usdc_bridged_address: "0x55d398326f99059fF775485246999027B3197955"
-  allowed_safe_address_for_testing: "0x01721FF1ddAc86BdB54459E8255d523A0778B780"
   allowed_safe_addresses: "0x01721FF1ddAc86BdB54459E8255d523A0778B780"
   ctf_exchange_domain_name: "OPINION CTF Exchange"
   ctf_exchange_domain_version: "1"
@@ -155,8 +150,8 @@ rules:
                 verifyingContract: "${ctf_exchange_address}"
               message:
                 salt: "12345"
-                maker: "${allowed_safe_address_for_testing}"
-                signer: "${allowed_safe_address_for_testing}"
+                maker: "${first:allowed_safe_addresses}"
+                signer: "${first:allowed_safe_addresses}"
                 taker: "0x0000000000000000000000000000000000000000"
                 tokenId: "1"
                 makerAmount: "1000000000000000000"
@@ -166,7 +161,7 @@ rules:
                 feeRateBps: "100"
                 side: "0"
                 signatureType: "0"
-            signer: "${allowed_safe_address_for_testing}"
+            signer: "${first:allowed_safe_addresses}"
           expect_pass: true
         - name: "should reject non-zero taker"
           input:
@@ -179,8 +174,8 @@ rules:
                 verifyingContract: "${ctf_exchange_address}"
               message:
                 salt: "12345"
-                maker: "${allowed_safe_address_for_testing}"
-                signer: "${allowed_safe_address_for_testing}"
+                maker: "${first:allowed_safe_addresses}"
+                signer: "${first:allowed_safe_addresses}"
                 taker: "0x1111111111111111111111111111111111111111"
                 tokenId: "1"
                 makerAmount: "1000000000000000000"
@@ -190,7 +185,7 @@ rules:
                 feeRateBps: "100"
                 side: "0"
                 signatureType: "0"
-            signer: "${allowed_safe_address_for_testing}"
+            signer: "${first:allowed_safe_addresses}"
           expect_pass: false
           expect_reason: "taker must be zero address"
         - name: "should reject wrong verifying contract"
@@ -204,8 +199,8 @@ rules:
                 verifyingContract: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
               message:
                 salt: "12345"
-                maker: "${allowed_safe_address_for_testing}"
-                signer: "${allowed_safe_address_for_testing}"
+                maker: "${first:allowed_safe_addresses}"
+                signer: "${first:allowed_safe_addresses}"
                 taker: "0x0000000000000000000000000000000000000000"
                 tokenId: "1"
                 makerAmount: "1000000000000000000"
@@ -215,7 +210,7 @@ rules:
                 feeRateBps: "100"
                 side: "0"
                 signatureType: "0"
-            signer: "${allowed_safe_address_for_testing}"
+            signer: "${first:allowed_safe_addresses}"
           expect_pass: false
           expect_reason: "invalid verifying contract"
   # Opinion only uses createProxyWithNonce (tx rule below); no EIP-712 CreateProxy signing.
@@ -373,7 +368,7 @@ rules:
               primaryType: "SafeTx"
               domain:
                 chainId: "${chain_id}"
-                verifyingContract: "${allowed_safe_address_for_testing}"
+                verifyingContract: "${first:allowed_safe_addresses}"
               message:
                 to: "${usdc_bridged_address}"
                 value: "0"
@@ -394,7 +389,7 @@ rules:
               primaryType: "SafeTx"
               domain:
                 chainId: "${chain_id}"
-                verifyingContract: "${allowed_safe_address_for_testing}"
+                verifyingContract: "${first:allowed_safe_addresses}"
               message:
                 to: "${usdc_bridged_address}"
                 value: "1000000000000000000"
@@ -414,7 +409,7 @@ rules:
               primaryType: "SafeTx"
               domain:
                 chainId: "${chain_id}"
-                verifyingContract: "${allowed_safe_address_for_testing}"
+                verifyingContract: "${first:allowed_safe_addresses}"
               message:
                 to: "${usdc_bridged_address}"
                 value: "0"
@@ -434,7 +429,7 @@ rules:
               primaryType: "SafeTx"
               domain:
                 chainId: "${chain_id}"
-                verifyingContract: "${allowed_safe_address_for_testing}"
+                verifyingContract: "${first:allowed_safe_addresses}"
               message:
                 to: "${usdc_bridged_address}"
                 value: "0"
@@ -444,7 +439,7 @@ rules:
                 baseGas: "0"
                 gasPrice: "1000000000"
                 gasToken: "${usdc_bridged_address}"
-                refundReceiver: "${allowed_safe_address_for_testing}"
+                refundReceiver: "${first:allowed_safe_addresses}"
                 nonce: "0"
           expect_pass: false
           expect_reason: "gasPrice must be zero"
@@ -494,7 +489,7 @@ rules:
               primaryType: "SafeTx"
               domain:
                 chainId: "${chain_id}"
-                verifyingContract: "${allowed_safe_address_for_testing}"
+                verifyingContract: "${first:allowed_safe_addresses}"
               message:
                 to: "${usdc_bridged_address}"
                 value: "0"
@@ -514,7 +509,7 @@ rules:
               primaryType: "SafeTx"
               domain:
                 chainId: "${chain_id}"
-                verifyingContract: "${allowed_safe_address_for_testing}"
+                verifyingContract: "${first:allowed_safe_addresses}"
               message:
                 to: "0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD"
                 value: "0"
@@ -535,7 +530,7 @@ rules:
               primaryType: "SafeTx"
               domain:
                 chainId: "${chain_id}"
-                verifyingContract: "${allowed_safe_address_for_testing}"
+                verifyingContract: "${first:allowed_safe_addresses}"
               message:
                 to: "${usdc_bridged_address}"
                 value: "0"
@@ -562,7 +557,7 @@ rules:
               primaryType: "SafeTx"
               domain:
                 chainId: "${chain_id}"
-                verifyingContract: "${allowed_safe_address_for_testing}"
+                verifyingContract: "${first:allowed_safe_addresses}"
               message:
                 to: "${conditional_tokens_address}"
                 value: "0"
@@ -590,7 +585,7 @@ rules:
               primaryType: "SafeTx"
               domain:
                 chainId: "${chain_id}"
-                verifyingContract: "${allowed_safe_address_for_testing}"
+                verifyingContract: "${first:allowed_safe_addresses}"
               message:
                 to: "${usdc_bridged_address}"
                 value: "0"
@@ -609,7 +604,7 @@ rules:
               primaryType: "SafeTx"
               domain:
                 chainId: "${chain_id}"
-                verifyingContract: "${allowed_safe_address_for_testing}"
+                verifyingContract: "${first:allowed_safe_addresses}"
               message:
                 to: "${usdc_bridged_address}"
                 value: "0"
@@ -632,7 +627,7 @@ rules:
               primaryType: "SafeTx"
               domain:
                 chainId: "${chain_id}"
-                verifyingContract: "${allowed_safe_address_for_testing}"
+                verifyingContract: "${first:allowed_safe_addresses}"
               message:
                 to: "${conditional_tokens_address}"
                 value: "0"
@@ -651,7 +646,7 @@ rules:
               primaryType: "SafeTx"
               domain:
                 chainId: "${chain_id}"
-                verifyingContract: "${allowed_safe_address_for_testing}"
+                verifyingContract: "${first:allowed_safe_addresses}"
               message:
                 to: "${conditional_tokens_address}"
                 value: "0"
@@ -670,7 +665,7 @@ rules:
               primaryType: "SafeTx"
               domain:
                 chainId: "${chain_id}"
-                verifyingContract: "${allowed_safe_address_for_testing}"
+                verifyingContract: "${first:allowed_safe_addresses}"
               message:
                 to: "${conditional_tokens_address}"
                 value: "0"
@@ -700,7 +695,7 @@ rules:
               primaryType: "SafeTx"
               domain:
                 chainId: "${chain_id}"
-                verifyingContract: "${allowed_safe_address_for_testing}"
+                verifyingContract: "${first:allowed_safe_addresses}"
               message:
                 to: "${conditional_tokens_address}"
                 value: "0"
@@ -721,7 +716,7 @@ rules:
               primaryType: "SafeTx"
               domain:
                 chainId: "${chain_id}"
-                verifyingContract: "${allowed_safe_address_for_testing}"
+                verifyingContract: "${first:allowed_safe_addresses}"
               message:
                 to: "${conditional_tokens_address}"
                 value: "0"
@@ -742,7 +737,7 @@ rules:
               primaryType: "SafeTx"
               domain:
                 chainId: "${chain_id}"
-                verifyingContract: "${allowed_safe_address_for_testing}"
+                verifyingContract: "${first:allowed_safe_addresses}"
               message:
                 to: "${conditional_tokens_address}"
                 value: "0"
@@ -925,7 +920,7 @@ rules:
       test_cases:
         - name: "should pass execTransaction with zero value"
           input:
-            to: "${allowed_safe_address_for_testing}"
+            to: "${first:allowed_safe_addresses}"
             # execTransaction(to=USDT, value=0, data=0x, operation=0, safeTxGas=0, baseGas=0, gasPrice=0, gasToken=0x0, refundReceiver=0x0, signatures=0x)
             # Function selector: 0x6a761202
             data: "0x6a76120200000000000000000000000055d398326f99059ff775485246999027b319795500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000016000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
@@ -937,34 +932,34 @@ rules:
         # ---------------------------------------------------------------
         - name: "should pass execTransaction with USDT approve to CTF Exchange (real BSC tx 0xe3b7b780)"
           input:
-            to: "${allowed_safe_address_for_testing}"
+            to: "${first:allowed_safe_addresses}"
             data: "0x6a76120200000000000000000000000055d398326f99059ff775485246999027b3197955000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001ddb7000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001c00000000000000000000000000000000000000000000000000000000000000044095ea7b30000000000000000000000005f45344126d6488025b0b84a3a8189f2487a7246ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000419fe78feb525c194e1ef621bad0cfab2461a9aa9c40e3e4be16b4f9df71a761372615acd2cb49c207225fab49752093288b50c1f89ff9908f00bf71b97099d75b1c00000000000000000000000000000000000000000000000000000000000000"
           expect_pass: true
         - name: "should pass execTransaction with USDT approve to CTF conditional tokens (real BSC tx 0x53603a53)"
           input:
-            to: "${allowed_safe_address_for_testing}"
+            to: "${first:allowed_safe_addresses}"
             data: "0x6a76120200000000000000000000000055d398326f99059ff775485246999027b3197955000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001ddb7000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001c00000000000000000000000000000000000000000000000000000000000000044095ea7b3000000000000000000000000ad1a38cec043e70e83a3ec30443db285ed10d774ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000041fed0a5892640bacb332bcf851ebcab546e1e3393f077f83bf3fdfdfc6e21f68b0a009d575b5ee21983d54490408bc900d06dc1c7e472694d6cf5f0bfeb8a1de11c00000000000000000000000000000000000000000000000000000000000000"
           expect_pass: true
         - name: "should pass execTransaction with CTF setApprovalForAll to Exchange (real BSC tx 0x9b1caa61)"
           input:
-            to: "${allowed_safe_address_for_testing}"
+            to: "${first:allowed_safe_addresses}"
             data: "0x6a761202000000000000000000000000ad1a38cec043e70e83a3ec30443db285ed10d77400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000167a3000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001c00000000000000000000000000000000000000000000000000000000000000044a22cb4650000000000000000000000005f45344126d6488025b0b84a3a8189f2487a72460000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000041f85561a214c567e8cc590ca7c9c01f8237ee4596c9657dccb937cd1ab0d1158c3af27a71255f0eef0875b3a832288711e48f6ad02cc3e972c793a4630e7b82d41b00000000000000000000000000000000000000000000000000000000000000"
           expect_pass: true
         - name: "should pass execTransaction with CTF setApprovalForAll to CTF conditional tokens (BSC payload)"
           input:
-            to: "${allowed_safe_address_for_testing}"
+            to: "${first:allowed_safe_addresses}"
             data: "0x6a761202000000000000000000000000ad1a38cec043e70e83a3ec30443db285ed10d77400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000167a3000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001c00000000000000000000000000000000000000000000000000000000000000044a22cb465000000000000000000000000ad1a38cec043e70e83a3ec30443db285ed10d77400000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000417febc9e1b100b3b0bfefa5b6d09bd1dc90ce46ff6dba30c27b734789af22ae2338c70543731199b582a90178f0506bc05eba013b8df6e2cf013dd43d542ef32d1b00000000000000000000000000000000000000000000000000000000000000"
           expect_pass: true
         - name: "should reject execTransaction with non-zero value"
           input:
-            to: "${allowed_safe_address_for_testing}"
+            to: "${first:allowed_safe_addresses}"
             # execTransaction(to=USDT, value=1e18, data=0x, operation=0, safeTxGas=0, baseGas=0, gasPrice=0, gasToken=0x0, refundReceiver=0x0, signatures=0x)
             data: "0x6a76120200000000000000000000000055d398326f99059ff775485246999027b31979550000000000000000000000000000000000000000000000000de0b6b3a76400000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000016000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
           expect_pass: false
           expect_reason: "value must be zero"
         - name: "should reject execTransaction with DELEGATECALL"
           input:
-            to: "${allowed_safe_address_for_testing}"
+            to: "${first:allowed_safe_addresses}"
             # execTransaction with operation=1 (DELEGATECALL)
             data: "0x6a76120200000000000000000000000055d398326f99059ff775485246999027b319795500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000016000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
           expect_pass: false
@@ -973,12 +968,12 @@ rules:
         # Real transaction test case: execTransaction with CTF redeemPositions
         # Source: BSC tx 0x714b3d1f22b043eeeb09b1a65833777c4ac17f4044a04e635c686e8d397d8eb1
         # from: 0x88eD75e9eCE373997221E3c0229e74007C1AD718
-        # to: ${allowed_safe_address_for_testing} (Safe wallet)
+        # to: ${first:allowed_safe_addresses} (Safe wallet)
         # execTransaction(CTF, 0, redeemPositions(USDT,0x0,conditionId,[1,2]), 0, 217890, 0, 0, 0x0, 0x0, sig)
         # ---------------------------------------------------------------
         - name: "should pass execTransaction with real CTF redeemPositions (real tx 0x714b3d)"
           input:
-            to: "${allowed_safe_address_for_testing}"
+            to: "${first:allowed_safe_addresses}"
             data: "0x6a761202000000000000000000000000ad1a38cec043e70e83a3ec30443db285ed10d77400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000353220000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000026000000000000000000000000000000000000000000000000000000000000000e401b7037c00000000000000000000000055d398326f99059ff775485246999027b31979550000000000000000000000000000000000000000000000000000000000000000bd42fb9ac3870c35193d69ca1ad5ea00363d8ee6aba80b910a2003c370597cae0000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000041afaaa7d5183bb28c20af45dc009544b9358e971c25e8335261debdc43b756b3b1cd75457fc9d60ae0b7bd2e45deaf93aa80446f41061424a4d0f46712449e02b1b00000000000000000000000000000000000000000000000000000000000000"
           expect_pass: true
         # ---------------------------------------------------------------
@@ -991,12 +986,12 @@ rules:
         # ---------------------------------------------------------------
         - name: "should pass execTransaction with CTF splitPosition (real split from BSC 0xe6aa70ec)"
           input:
-            to: "${allowed_safe_address_for_testing}"
+            to: "${first:allowed_safe_addresses}"
             data: "0x6a761202000000000000000000000000ad1a38cec043e70e83a3ec30443db285ed10d774000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004154d00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000280000000000000000000000000000000000000000000000000000000000000010472ce427500000000000000000000000055d398326f99059ff775485246999027b319795500000000000000000000000000000000000000000000000000000000000000006e456ad7eb55d579974441fcfff7ddf3cfbf14688a8ed5fe231b084b2553e13400000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000016345785d8a00000000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000419ef2bd672dd25f394750a760407b994439665d948d41597e46c84ab87002a8733b295b95b3b9433aaa3121a05b4e3b345d988992058ffd7e371aeb162955babb1c00000000000000000000000000000000000000000000000000000000000000"
           expect_pass: true
         - name: "should pass execTransaction with CTF mergePositions (real merge from BSC 0x29661702)"
           input:
-            to: "${allowed_safe_address_for_testing}"
+            to: "${first:allowed_safe_addresses}"
             data: "0x6a761202000000000000000000000000ad1a38cec043e70e83a3ec30443db285ed10d774000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003653e0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000028000000000000000000000000000000000000000000000000000000000000001049e7212ad00000000000000000000000055d398326f99059ff775485246999027b31979550000000000000000000000000000000000000000000000000000000000000000edee1dc90bf52ddc3fe5946d4371da8a2eeb1a289ae5374bbc590e1d128ea11900000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000159741dfa023aa000000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000041cbc57f86dc7ee1eb36ff981daf7efc5f624f402a17c26b2b7242d2fecd936de750ec69613661d801e005136cd43596dd3dda5c0fa02471a53a4cdc4ba5096e3a1b00000000000000000000000000000000000000000000000000000000000000"
           expect_pass: true
         - name: "should reject execTransaction with wrong Safe address"

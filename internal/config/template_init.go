@@ -17,6 +17,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/ivanzzeth/remote-signer/internal/audit"
+	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	pkgvalidate "github.com/ivanzzeth/remote-signer/internal/validate"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
@@ -504,7 +505,7 @@ func expandInstanceRule(rule RuleConfig, templates map[string]TemplateConfig) ([
 	// Replace in(expr, ${var}) with in(expr, var) so the body keeps the array variable name
 	// for InMappingArrays; then substitute other ${var} with values
 	rulesJSON = substituteInMappingVarsToIdentifiers(rulesJSON)
-	resolvedJSON, err := substituteVarsInString(rulesJSON, variables)
+	resolvedJSON, err := service.SubstituteString(rulesJSON, variables)
 	if err != nil {
 		return nil, fmt.Errorf("variable substitution failed: %w", err)
 	}
@@ -672,28 +673,6 @@ func fillOptionalTemplateVariables(defs []TemplateVarConfig, vars map[string]str
 			return nil, fmt.Errorf("optional variable %q must declare default", def.Name)
 		}
 		result[def.Name] = *def.Default
-	}
-	return result, nil
-}
-
-// substituteVarsInString replaces ${var} placeholders with values
-func substituteVarsInString(s string, vars map[string]string) (string, error) {
-	result := s
-	for k, v := range vars {
-		result = strings.ReplaceAll(result, "${"+k+"}", v)
-	}
-	// Check for unresolved variables (but ignore ${VAR:-default} env var syntax)
-	// Template variables are simple ${name} without colons
-	if idx := strings.Index(result, "${"); idx >= 0 {
-		// Extract variable name
-		end := strings.Index(result[idx:], "}")
-		if end > 0 {
-			varName := result[idx+2 : idx+end]
-			// Only error if it doesn't look like an env var (no colon)
-			if !strings.Contains(varName, ":") {
-				return "", fmt.Errorf("unresolved template variable: ${%s}", varName)
-			}
-		}
 	}
 	return result, nil
 }

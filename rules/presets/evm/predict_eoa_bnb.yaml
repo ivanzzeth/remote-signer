@@ -1,5 +1,5 @@
 # Preset: Predict.fun EOA (BNB Chain). Auth + enable_trading + trading.
-# Use: remote-signer-cli preset create-from predict_eoa_bnb [--config config.yaml --write] [--set signer_address_for_testing=0x...]
+# Use: remote-signer-cli preset create-from predict_eoa_bnb [--config config.yaml --write]
 # Composes auth (PersonalSign) + enable_trading (approve/setApprovalForAll) + trading (Order + split/merge/redeem + NegRiskAdapter).
 
 name: "Predict.fun EOA (BNB)"
@@ -19,11 +19,8 @@ variables:
   ctf_exchange_yb: "0x6bEb5a40C032AFc305961162d8204CDA16DECFa5"
   neg_risk_exchange_yb: "0x8A289d458f5a134bA40015085A8F50Ffb681B41d"
   neg_risk_adapter_yb: "0x41dCe1A4B8FB5e6327701750aF6231B7CD0B2A40"
-  signer_address_for_testing: "0x1111111111111111111111111111111111111111"
 template_ids:
   - evm/predict_auth
   - evm/predict_enable_trading
   - evm/predict_trading
 operator_overrides:
-  - name: signer_address_for_testing
-    required: false

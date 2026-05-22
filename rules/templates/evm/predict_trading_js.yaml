@@ -47,10 +47,6 @@ variables:
     type: address
     description: "NegRiskExchange (YB) contract address"
     required: true
-  - name: signer_address_for_testing
-    type: address
-    description: "EOA signer address for test payloads (maker, signer, etc.)"
-    required: true
 test_variables:
   chain_id: "56"
   order_domain_name: "predict.fun CTF Exchange"

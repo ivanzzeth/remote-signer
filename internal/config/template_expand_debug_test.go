@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/ivanzzeth/remote-signer/internal/core/service"
 )
 
 // TestTemplateRulesJSON_ContainsPlaceholders verifies that after YAML unmarshal + JSON marshal,
@@ -74,7 +76,7 @@ func TestSubstituteThenUnmarshal_DomainFilled(t *testing.T) {
 	for k, v := range fileContent.TestVariables {
 		variables[k] = v
 	}
-	resolved, err := substituteVarsInString(string(rulesJSON), variables)
+	resolved, err := service.SubstituteString(string(rulesJSON), variables)
 	if err != nil {
 		t.Fatalf("substitute: %v", err)
 	}

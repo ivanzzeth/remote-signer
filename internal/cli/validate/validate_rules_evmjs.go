@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
+	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/ruleconfig"
@@ -132,7 +133,7 @@ func runEVMJSTestCases(
 		}
 		if len(varsForSubst) > 0 {
 			jsonBytes, _ := json.Marshal(inputCopy)
-			subst, err := substituteVarsInString(string(jsonBytes), varsForSubst)
+			subst, err := service.SubstituteString(string(jsonBytes), varsForSubst)
 			if err != nil {
 				tcResult.Passed = false
 				tcResult.Error = fmt.Sprintf("variable substitution: %v", err)
