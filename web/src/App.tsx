@@ -4,6 +4,7 @@ import { Layout } from "./components/Layout";
 import { getCredentials, subscribeAuth } from "./lib/auth";
 import { ApiKeys } from "./pages/ApiKeys";
 import { Audit } from "./pages/Audit";
+import { Bootstrap } from "./pages/Bootstrap";
 import { BudgetDetail } from "./pages/BudgetDetail";
 import { Budgets } from "./pages/Budgets";
 import { Dashboard } from "./pages/Dashboard";
@@ -34,12 +35,65 @@ import { Wallets } from "./pages/Wallets";
  */
 export function App() {
   const [authed, setAuthed] = useState(() => getCredentials() !== null);
+  // needsBootstrap is one of three states:
+  //   null     — still checking GET /api/v1/bootstrap/status
+  //   true     — daemon has no admin api_keys row yet; force Bootstrap page
+  //   false    — admin exists; normal auth flow
+  // Network/parsing errors fall through to `false` so a transient failure
+  // doesn't lock new users out of login — they'll see the login page and
+  // their attempt will surface the real error (401, etc.).
+  const [needsBootstrap, setNeedsBootstrap] = useState<boolean | null>(null);
 
   useEffect(() => {
     return subscribeAuth(() => setAuthed(getCredentials() !== null));
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/v1/bootstrap/status", { headers: { Accept: "application/json" } })
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.statusText)))
+      .then((data: { needs_bootstrap?: boolean }) => {
+        if (!cancelled) {
+          setNeedsBootstrap(Boolean(data.needs_bootstrap));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setNeedsBootstrap(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Order matters: once the operator has a valid credential, the
+  // bootstrap state is no longer relevant — a populated `authed` means
+  // the daemon must have an admin row (otherwise the credentials would
+  // have failed to load). Checking authed before needsBootstrap also
+  // closes a render loop: the Bootstrap page calls setCredentials() on
+  // success, which flips `authed` to true before the next bootstrap-
+  // status refetch could even fire, so we go straight to the dashboard.
   if (!authed) {
+    if (needsBootstrap === null) {
+      // Brief blocking spinner while we figure out which mode we're
+      // in. Without this the login form would flash, then yank over
+      // to the bootstrap page once the fetch returns — confusing on
+      // slow links.
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-ink-50 text-sm text-ink-500">
+          Loading…
+        </div>
+      );
+    }
+
+    if (needsBootstrap) {
+      return (
+        <Routes>
+          <Route path="/bootstrap" element={<Bootstrap />} />
+          <Route path="*" element={<Navigate to="/bootstrap" replace />} />
+        </Routes>
+      );
+    }
+
     return (
       <Routes>
         <Route path="/login" element={<Login />} />

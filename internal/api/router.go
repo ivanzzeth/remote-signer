@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/ivanzzeth/remote-signer/internal/api/handler"
+	"github.com/ivanzzeth/remote-signer/internal/bootstrap"
 	evmhandler "github.com/ivanzzeth/remote-signer/internal/api/handler/evm"
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/audit"
@@ -111,6 +112,15 @@ type RouterConfig struct {
 	// sign_request.api_key_id for visibility scoping). Optional —
 	// handlers that need it gate their own registration on it.
 	RequestRepo storage.RequestRepository
+
+	// BootstrapCreator wires the POST /api/v1/bootstrap/admin handler.
+	// Closure that, given a password, creates the admin keystore and
+	// inserts the matching api_keys row. Supplied by run.go using the
+	// daemon's resolved home paths so the HTTP layer doesn't need to
+	// know where on disk anything lives. Nil → the bootstrap routes
+	// don't register (useful in test harnesses that pre-seed admin
+	// out of band).
+	BootstrapCreator bootstrap.AdminCreator
 }
 
 // Router handles HTTP routing
@@ -165,6 +175,19 @@ func (r *Router) setupRoutes() error {
 
 	// Prometheus metrics (no auth; same port as API)
 	r.mux.Handle("/metrics", middleware.SecurityHeadersMiddleware()(metrics.Handler()))
+
+	// First-run bootstrap (no auth). On an empty api_keys table the daemon
+	// has no public key to verify a signed request against, so requiring
+	// auth here would be a deadlock. The handler enforces single-shot
+	// semantics: once the first POST succeeds, subsequent ones return
+	// 410 Gone. Wiring is gated on a non-nil BootstrapCreator so a daemon
+	// built without the cli/server import (test harness, embedded use)
+	// can opt out cleanly.
+	if r.config.BootstrapCreator != nil && r.config.APIKeyRepo != nil {
+		bootstrapHandler := handler.NewBootstrapHandler(r.config.APIKeyRepo, r.config.BootstrapCreator, r.logger)
+		r.mux.Handle("/api/v1/bootstrap/status", middleware.SecurityHeadersMiddleware()(http.HandlerFunc(bootstrapHandler.ServeStatus)))
+		r.mux.Handle("/api/v1/bootstrap/admin", middleware.SecurityHeadersMiddleware()(http.HandlerFunc(bootstrapHandler.ServeAdmin)))
+	}
 
 	// Create SignerAccessService
 	var accessService *service.SignerAccessService

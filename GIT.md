@@ -4,6 +4,71 @@ This document captures the release-engineering conventions for the
 `remote-signer` monorepo so future contributors (and future-you) can
 operate the pipeline without re-deriving everything from CI logs.
 
+## First-time setup
+
+On the first launch against an empty `~/.remote-signer/`, the daemon
+needs to provision an admin API key. There are three converging paths
+to do that, each suited to a different deployment style:
+
+| Path | When it fires | When to pick it |
+| ---- | ------------- | --------------- |
+| **Env var** — `REMOTE_SIGNER_KEYSTORE_PASSWORD` | At startup, before HTTP comes up | CI / Kubernetes / systemd — anywhere a Secret can be injected as env. The daemon comes up fully configured; no UI dance. |
+| **Web UI** — `/api/v1/bootstrap/admin` | After startup, via the browser | Local desktops / Electron / docker. The daemon boots in a "soft-started" state; the web app detects `needs_bootstrap=true` and prompts for a password with confirm. |
+| **CLI** — `remote-signer api-key bootstrap` | After startup, via terminal | SSH / headless servers / `docker exec` situations where you don't have a browser at hand. Prompts on stdin and calls the same HTTP endpoint the UI uses. |
+
+Properties shared across all three:
+
+- Exactly one wins. The HTTP endpoint enforces single-shot semantics:
+  the second POST gets `410 Gone` with `code=admin_already_exists`. The
+  env-var path silently no-ops on an already-configured daemon.
+- All three converge on `CreateAdminKeystore` in
+  `internal/cli/server/bootstrap.go`. There's one implementation; the
+  paths are just three different ways to hand it a password.
+- The password protects the encrypted Ed25519 keystore the daemon writes
+  to `~/.remote-signer/apikeys/admin.keystore.json`. **There is no
+  recovery if you lose it.**
+- The daemon does NOT need the password on subsequent starts.
+  Signature verification reads the public key from the `api_keys` table.
+
+### Web-UI bootstrap flow
+
+The SPA fetches `GET /api/v1/bootstrap/status` on mount, **before** any
+auth check. If the daemon reports `needs_bootstrap=true`, the route
+guard renders the Bootstrap page (`web/src/pages/Bootstrap.tsx`)
+instead of Login. After a successful POST the page receives the
+encrypted keystore JSON in the response, persists it client-side
+(scrypt-wrapped under the same password the operator just typed), and
+calls `setCredentials()` — so the operator lands directly on the
+dashboard, no extra login round-trip.
+
+### CLI bootstrap flow
+
+```bash
+remote-signer api-key bootstrap --url http://127.0.0.1:8548
+# → prompts for password (twice), POSTs to the daemon, prints
+#   keystore_path + public_key_hex.
+```
+
+The CLI subcommand is the ONLY place a TTY password prompt happens in
+this codebase. The daemon's own startup no longer reads from stdin
+(removed when soft-start landed) — the surprising "I started the
+daemon and nothing happened, oh it's waiting for input" UX is gone.
+
+### Common pitfalls
+
+- **Soft-started daemon, no follow-up.** The daemon logs a single WARN
+  on boot when admin is missing — `bootstrap pending — daemon started
+  without an admin API key`. If you see that line stuck and `/health`
+  is up but `/login` is not loading, the bootstrap page should be
+  reachable. Check the daemon URL in the browser and walk the modal.
+- **410 Gone on a second submit.** Someone else (or you, in another
+  tab) already finished bootstrap. The UI auto-reloads to the login
+  page; the CLI exits non-zero with a clear message.
+- **Forgot the password.** No recovery. Stop the daemon, delete
+  `~/.remote-signer/apikeys/admin.keystore.json` plus the
+  `admin` row in the `api_keys` table (sqlite/postgres directly), and
+  restart — the soft-start flow lets you set a new one.
+
 ## TL;DR — cutting a release
 
 ```bash
@@ -245,9 +310,16 @@ docker compose -f docker-compose.local.yml logs -f
 
 No PostgreSQL, no production security hardening — this mode trades
 defence-in-depth for "drop in for the native daemon, change nothing".
-If the host's bootstrap keystore needs a password, pass
-`REMOTE_SIGNER_KEYSTORE_PASSWORD` via env or a `.env` file next to the
-compose.
+
+**First-run setup**: on a brand-new `~/.remote-signer/`, the
+container starts in soft-started mode (no admin keystore yet). Open
+`http://127.0.0.1:8548` in your browser; the web UI prompts for a new
+admin password (with confirmation), creates the keystore inside the
+mounted home directory, and signs you in. Alternatively, set
+`REMOTE_SIGNER_KEYSTORE_PASSWORD` in the environment (or a `.env` file
+alongside this compose) to have the daemon bootstrap inline at
+startup. See "First-time setup" at the top of this document for the
+full menu.
 
 ### `docker-compose.yml` — production / multi-instance
 
