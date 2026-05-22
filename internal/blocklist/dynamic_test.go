@@ -40,7 +40,7 @@ func waitForSync(t *testing.T, bl *DynamicBlocklist, timeout time.Duration) {
 func TestDynamicBlocklist_URLText(t *testing.T) {
 	// Serve a text file with addresses.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("# OFAC SDN ETH addresses\n0xd882cFc20F52f2599D84b8e8D58C7FB62cfE344b\n0x7F367cC41522cE07553e823bf3be79A889DEbe1B\n\n# comment\ninvalid-not-address\n"))
+		_, _ = w.Write([]byte("# OFAC SDN ETH addresses\n0xd882cFc20F52f2599D84b8e8D58C7FB62cfE344b\n0x7F367cC41522cE07553e823bf3be79A889DEbe1B\n\n# comment\ninvalid-not-address\n"))
 	}))
 	defer srv.Close()
 
@@ -83,7 +83,7 @@ func TestDynamicBlocklist_URLJson(t *testing.T) {
 		},
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(data)
+		_ = json.NewEncoder(w).Encode(data)
 	}))
 	defer srv.Close()
 
@@ -111,7 +111,7 @@ func TestDynamicBlocklist_URLJson(t *testing.T) {
 
 func TestDynamicBlocklist_CachePersistence(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("0xd882cFc20F52f2599D84b8e8D58C7FB62cfE344b\n0x7F367cC41522cE07553e823bf3be79A889DEbe1B\n"))
+		_, _ = w.Write([]byte("0xd882cFc20F52f2599D84b8e8D58C7FB62cfE344b\n0x7F367cC41522cE07553e823bf3be79A889DEbe1B\n"))
 	}))
 	defer srv.Close()
 
@@ -183,7 +183,7 @@ func TestDynamicBlocklist_FailClosed(t *testing.T) {
 
 func TestDynamicBlocklist_CaseInsensitive(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("0xd882cfc20f52f2599d84b8e8d58c7fb62cfe344b\n"))
+		_, _ = w.Write([]byte("0xd882cfc20f52f2599d84b8e8d58c7fb62cfe344b\n"))
 	}))
 	defer srv.Close()
 
@@ -214,7 +214,7 @@ func TestNewSource_RejectsFileScheme(t *testing.T) {
 
 func TestDynamicBlocklist_DoubleStartReturnsError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("0xd882cFc20F52f2599D84b8e8D58C7FB62cfE344b\n"))
+		_, _ = w.Write([]byte("0xd882cFc20F52f2599D84b8e8D58C7FB62cfE344b\n"))
 	}))
 	defer srv.Close()
 
@@ -243,9 +243,9 @@ func TestDynamicBlocklist_ConcurrentIsBlockedDuringSync(t *testing.T) {
 		callCount++
 		// Alternate between different address sets to trigger map replacement.
 		if callCount%2 == 0 {
-			w.Write([]byte("0xd882cFc20F52f2599D84b8e8D58C7FB62cfE344b\n"))
+			_, _ = w.Write([]byte("0xd882cFc20F52f2599D84b8e8D58C7FB62cfE344b\n"))
 		} else {
-			w.Write([]byte("0x7F367cC41522cE07553e823bf3be79A889DEbe1B\n"))
+			_, _ = w.Write([]byte("0x7F367cC41522cE07553e823bf3be79A889DEbe1B\n"))
 		}
 	}))
 	defer srv.Close()
@@ -284,7 +284,7 @@ func TestDynamicBlocklist_ConcurrentIsBlockedDuringSync(t *testing.T) {
 func TestDynamicBlocklist_PartialSyncPreservesFailedSourceAddresses(t *testing.T) {
 	// Source A: always works.
 	srvA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("0xd882cFc20F52f2599D84b8e8D58C7FB62cfE344b\n"))
+		_, _ = w.Write([]byte("0xd882cFc20F52f2599D84b8e8D58C7FB62cfE344b\n"))
 	}))
 	defer srvA.Close()
 
@@ -319,7 +319,7 @@ func TestDynamicBlocklist_PartialSyncPreservesFailedSourceAddresses(t *testing.T
 func TestSource_HTTPErrorReturnsError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("internal error"))
+		_, _ = w.Write([]byte("internal error"))
 	}))
 	defer srv.Close()
 
@@ -337,7 +337,7 @@ func TestSource_BodyTruncation(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		line := "0xd882cFc20F52f2599D84b8e8D58C7FB62cfE344b\n"
 		for written := 0; written < 11*1024*1024; written += len(line) {
-			w.Write([]byte(line))
+			_, _ = w.Write([]byte(line))
 		}
 	}))
 	defer srv.Close()
@@ -371,7 +371,7 @@ func TestSource_InvalidURLSchemes(t *testing.T) {
 // TestSource_JSONInvalidPath verifies error on wrong json_path.
 func TestSource_JSONInvalidPath(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{"data": {"addresses": ["0xd882cFc20F52f2599D84b8e8D58C7FB62cfE344b"]}}`))
+		_, _ = w.Write([]byte(`{"data": {"addresses": ["0xd882cFc20F52f2599D84b8e8D58C7FB62cfE344b"]}}`))
 	}))
 	defer srv.Close()
 
@@ -388,7 +388,7 @@ func TestSource_JSONInvalidPath(t *testing.T) {
 // TestDynamicBlocklist_MetricsReflectState verifies metrics accuracy.
 func TestDynamicBlocklist_MetricsReflectState(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("0xd882cFc20F52f2599D84b8e8D58C7FB62cfE344b\n"))
+		_, _ = w.Write([]byte("0xd882cFc20F52f2599D84b8e8D58C7FB62cfE344b\n"))
 	}))
 	defer srv.Close()
 
@@ -445,7 +445,7 @@ func TestSource_DefaultClientDoesNotFollowRedirects(t *testing.T) {
 	// Target server (should NOT be reached).
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("redirect target was reached; default client should not follow redirects")
-		w.Write([]byte("0xd882cFc20F52f2599D84b8e8D58C7FB62cfE344b\n"))
+		_, _ = w.Write([]byte("0xd882cFc20F52f2599D84b8e8D58C7FB62cfE344b\n"))
 	}))
 	defer target.Close()
 

@@ -95,9 +95,7 @@ func parseBigIntStrict(v interface{}) (*big.Int, bool) {
 	}
 
 	dec := s
-	if strings.HasPrefix(dec, "+") {
-		dec = dec[1:]
-	}
+	dec = strings.TrimPrefix(dec, "+")
 	if dec == "" || len(dec) > rsMaxBigIntInputLen {
 		return nil, false
 	}

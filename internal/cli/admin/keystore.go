@@ -162,7 +162,7 @@ func runKeystoreExport(cmd *cobra.Command, args []string) error {
 	}
 	defer keystore.SecureZeroize(password)
 
-	format := keystore.KeyFormatHex
+	var format keystore.KeyFormat
 	switch flagKeystoreFormat {
 	case "hex":
 		format = keystore.KeyFormatHex

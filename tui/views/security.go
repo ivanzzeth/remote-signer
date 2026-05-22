@@ -274,10 +274,10 @@ func (m *SecurityModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.expanded = m.cursor // expand
 			}
 		case "pgup", "ctrl+u":
-			m.viewport.HalfViewUp()
+			m.viewport.HalfPageUp()
 			return m, nil
 		case "pgdown", "ctrl+d":
-			m.viewport.HalfViewDown()
+			m.viewport.HalfPageDown()
 			return m, nil
 		case "home", "g":
 			m.viewport.GotoTop()

@@ -178,11 +178,6 @@ func (e *SolidityRuleEvaluator) executeScript(ctx context.Context, script string
 	return result.passed, result.reason, result.err
 }
 
-// forgeScriptResult represents the relevant parts of forge script JSON output
-type forgeScriptResult struct {
-	Success bool `json:"success"`
-	Traces  [][]interface{}
-}
 
 // GetTempDir returns the temp directory path
 func (e *SolidityRuleEvaluator) GetTempDir() string {

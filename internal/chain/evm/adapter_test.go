@@ -252,9 +252,8 @@ func TestEVMAdapter_ParsePayload_Transaction(t *testing.T) {
 			} else if tt.expectMethodSig == "" && parsed.MethodSig != nil {
 				// If we don't expect method sig, it should be nil
 				dataHex := strings.TrimPrefix(tt.payload.Transaction.Data, "0x")
-				if tt.payload.Transaction != nil && len(dataHex) < 8 {
-					// This is expected behavior — less than 4 bytes of data
-				}
+				if tt.payload.Transaction != nil && len(dataHex) < 8 { //nolint:staticcheck
+					}
 			}
 
 			if tt.expectContract != "" {

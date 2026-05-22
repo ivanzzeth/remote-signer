@@ -700,11 +700,11 @@ func TestSolidityRuleEvaluator_parseBatchTestOutput_NonSequentialIndices(t *test
 func TestSolidityRuleEvaluator_EvaluateBatch_EmptyRules(t *testing.T) {
 	evaluator := &SolidityRuleEvaluator{logger: testLogger()}
 
-	results, err := evaluator.EvaluateBatch(nil, nil, nil, nil)
+	results, err := evaluator.EvaluateBatch(context.TODO(), nil, nil, nil)
 	require.NoError(t, err)
 	assert.Nil(t, results)
 
-	results, err = evaluator.EvaluateBatch(nil, []*types.Rule{}, nil, nil)
+	results, err = evaluator.EvaluateBatch(context.TODO(), []*types.Rule{}, nil, nil)
 	require.NoError(t, err)
 	assert.Nil(t, results)
 }
@@ -733,7 +733,7 @@ func TestSolidityRuleEvaluator_EvaluateBatch_AllSkipped(t *testing.T) {
 		SignType: "transaction", // Doesn't match filter
 	}
 
-	results, err := evaluator.EvaluateBatch(nil, rules, req, nil)
+	results, err := evaluator.EvaluateBatch(context.TODO(), rules, req, nil)
 	require.NoError(t, err)
 	require.Len(t, results, 2)
 

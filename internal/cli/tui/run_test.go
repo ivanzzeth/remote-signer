@@ -23,7 +23,7 @@ func TestLoadPrivateKeyFromFile_PathValidation(t *testing.T) {
 
 	t.Run("relative path under cwd works", func(t *testing.T) {
 		origWd, _ := os.Getwd()
-		defer os.Chdir(origWd)
+		defer func() { _ = os.Chdir(origWd) }()
 		if err := os.Chdir(dir); err != nil {
 			t.Fatal(err)
 		}
@@ -35,7 +35,7 @@ func TestLoadPrivateKeyFromFile_PathValidation(t *testing.T) {
 
 	t.Run("path traversal rejected", func(t *testing.T) {
 		origWd, _ := os.Getwd()
-		defer os.Chdir(origWd)
+		defer func() { _ = os.Chdir(origWd) }()
 		if err := os.Chdir(dir); err != nil {
 			t.Fatal(err)
 		}
@@ -52,7 +52,7 @@ func TestLoadPrivateKeyFromFile_PathValidation(t *testing.T) {
 	t.Run("absolute path outside cwd rejected", func(t *testing.T) {
 		absKeyPath, _ := filepath.Abs(keyPath)
 		origWd, _ := os.Getwd()
-		defer os.Chdir(origWd)
+		defer func() { _ = os.Chdir(origWd) }()
 		// Chdir to a sibling dir so absKeyPath is not under cwd
 		parent := filepath.Dir(dir)
 		sibling := filepath.Join(parent, "sibling")

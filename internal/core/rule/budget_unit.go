@@ -152,13 +152,6 @@ func isIntegerString(s string) bool {
 	return true
 }
 
-// substituteVarsInStr replaces ${var} with values from the map.
-func substituteVarsInStr(s string, vars map[string]string) string {
-	for k, v := range vars {
-		s = strings.ReplaceAll(s, "${"+k+"}", v)
-	}
-	return s
-}
 
 // variablesToStringMap parses rule.Variables JSON into a string map.
 func variablesToStringMap(variablesJSON []byte) map[string]string {

@@ -2,6 +2,7 @@ package service
 
 import (
 	"strings"
+	"context"
 	"testing"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
@@ -93,7 +94,7 @@ func TestNotifyServiceNotifierSendApprovalRequest_NilRequest(t *testing.T) {
 	// but we can test the nil request guard by constructing the struct directly.
 	notifier := &NotifyServiceNotifier{}
 
-	err := notifier.SendApprovalRequest(nil, nil)
+	err := notifier.SendApprovalRequest(context.TODO(), nil)
 	if err == nil {
 		t.Fatal("expected error for nil request")
 	}

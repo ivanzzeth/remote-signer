@@ -199,8 +199,8 @@ func (s *stubOwnershipRepo) CountByOwnerAndType(_ context.Context, _ string, _ t
 }
 func (s *stubOwnershipRepo) GetBoth(_ context.Context, senderAddress, recipientAddress string) (*types.SignerOwnership, *types.SignerOwnership, error) {
 	// Simple stub implementation for tests
-	sender, _ := s.Get(nil, senderAddress)
-	recipient, _ := s.Get(nil, recipientAddress)
+	sender, _ := s.Get(context.TODO(), senderAddress)
+	recipient, _ := s.Get(context.TODO(), recipientAddress)
 	return sender, recipient, nil
 }
 

@@ -170,16 +170,16 @@ func (m *MetricsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showRaw = !m.showRaw
 			return m, nil
 		case "up", "k":
-			m.viewport.LineUp(1)
+			m.viewport.ScrollUp(1)
 			return m, nil
 		case "down", "j":
-			m.viewport.LineDown(1)
+			m.viewport.ScrollDown(1)
 			return m, nil
 		case "pgup", "ctrl+u":
-			m.viewport.HalfViewUp()
+			m.viewport.HalfPageUp()
 			return m, nil
 		case "pgdown", "ctrl+d":
-			m.viewport.HalfViewDown()
+			m.viewport.HalfPageDown()
 			return m, nil
 		case "home", "g":
 			m.viewport.GotoTop()

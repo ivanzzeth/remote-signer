@@ -95,7 +95,7 @@ func (v *JSRuleValidator) ValidateRule(ctx context.Context, script string, testC
 			if tc.ExpectPass {
 				tcResult.Error = fmt.Sprintf("expected pass but got: %s", jsResult.Reason)
 			} else {
-				tcResult.Error = fmt.Sprintf("expected fail but passed")
+				tcResult.Error = "expected fail but passed"
 			}
 			result.FailedTestCases++
 			result.Valid = false

@@ -50,9 +50,6 @@ var settingsShowCmd = &cobra.Command{
 	},
 }
 
-var (
-	flagSettingsSetGroup string
-)
 
 var settingsSetCmd = &cobra.Command{
 	Use:   "set <group> <key=value> [<key=value> ...]",

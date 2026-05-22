@@ -81,7 +81,7 @@ func (e *ContractMethodEvaluator) Evaluate(ctx context.Context, r *types.Rule, r
 	}
 
 	// Check if contract matches
-	if strings.ToLower(config.Contract) != strings.ToLower(*parsed.Contract) {
+	if !strings.EqualFold(config.Contract, *parsed.Contract) {
 		return false, "", nil
 	}
 

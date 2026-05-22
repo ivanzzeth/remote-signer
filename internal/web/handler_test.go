@@ -3,7 +3,6 @@ package web
 import (
 	"context"
 	"io"
-	"io/fs"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -56,11 +55,6 @@ func (s *memStore) List(_ context.Context) ([]*settings.Setting, error) {
 
 func newMemStore() *memStore {
 	return &memStore{data: make(map[string]*settings.Setting)}
-}
-
-func realDistFS(t *testing.T) fs.FS {
-	t.Helper()
-	return Dist()
 }
 
 func newEnabledHandler(log *slog.Logger) *Handler {

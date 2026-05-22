@@ -495,5 +495,5 @@ func (h *HDWalletHandler) writeError(w http.ResponseWriter, message string, stat
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	// #nosec G104 -- HTTP response write error cannot be meaningfully handled
-	json.NewEncoder(w).Encode(map[string]string{"error": message})
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
 }

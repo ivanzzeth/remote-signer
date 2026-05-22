@@ -216,8 +216,6 @@ type Model struct {
 	previousView  ViewType
 	help          help.Model
 	showHelp      bool
-	err           error
-	statusMsg     string
 
 	// Views
 	dashboard       *views.DashboardModel

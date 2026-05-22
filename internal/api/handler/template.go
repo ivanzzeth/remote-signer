@@ -251,7 +251,7 @@ func (h *TemplateHandler) validateTemplate(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Substitute variables into config
-	resolvedConfig, err := service.SubstituteVariables(tmpl.Config, resolvedVars)
+	resolvedConfig, err := service.SubstituteVariables(tmpl.Config, resolvedVars) //nolint:staticcheck
 	if err != nil {
 		h.writeError(w, fmt.Sprintf("variable substitution failed: %s", err.Error()), http.StatusBadRequest)
 		return
@@ -666,6 +666,6 @@ func resolveTemplateDefaults(defs []types.TemplateVariable, vars map[string]stri
 // resolvedVarsToConfig creates a config map from resolved config JSON.
 func resolvedVarsToConfig(resolvedConfig []byte) map[string]interface{} {
 	var cfg map[string]interface{}
-	json.Unmarshal(resolvedConfig, &cfg)
+	_ = json.Unmarshal(resolvedConfig, &cfg)
 	return cfg
 }

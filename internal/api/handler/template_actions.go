@@ -137,13 +137,13 @@ func (h *TemplateHandler) instantiateTemplate(w http.ResponseWriter, r *http.Req
 	if !req.SkipValidation && h.jsEvaluator != nil {
 		var varDefs []types.TemplateVariable
 		if len(tmpl.Variables) > 0 {
-			json.Unmarshal(tmpl.Variables, &varDefs)
+			_ = json.Unmarshal(tmpl.Variables, &varDefs)
 		}
 		resolvedVars := resolveTemplateDefaults(varDefs, req.Variables)
 		if instanceReq.ChainID != nil {
 			resolvedVars["chain_id"] = *instanceReq.ChainID
 		}
-		resolvedConfig, subErr := service.SubstituteVariables(tmpl.Config, resolvedVars)
+		resolvedConfig, subErr := service.SubstituteVariables(tmpl.Config, resolvedVars) //nolint:staticcheck
 		if subErr != nil {
 			h.writeError(w, fmt.Sprintf("variable substitution for validation failed: %s", subErr.Error()), http.StatusBadRequest)
 			return
