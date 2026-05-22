@@ -21,7 +21,7 @@ func newTestSignerDetailModel(t *testing.T) *SignerDetailModel {
 
 func TestNewSignerDetailModel(t *testing.T) {
 	t.Run("returns error when context is nil", func(t *testing.T) {
-		_, err := NewSignerDetailModel(context.TODO())
+		_, err := NewSignerDetailModel(nil) //nolint:staticcheck // intentionally testing nil context rejection
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "context is required")
 	})
