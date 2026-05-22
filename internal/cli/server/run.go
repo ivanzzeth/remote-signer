@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ivanzzeth/remote-signer/internal/audit"
+	"github.com/ivanzzeth/remote-signer/internal/bootstrap"
 	"github.com/ivanzzeth/remote-signer/internal/chain"
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/config"
@@ -119,6 +120,16 @@ func Run(args []string) error {
 	}
 	if err := bootstrapAdminKeyIfNeeded(context.Background(), repos.apiKeyRepo, adminKeystoreDir, adminKeystorePath, adminPubPath, cfg.Security.RateLimitDefault, log); err != nil {
 		return fmt.Errorf("bootstrap admin api key: %w", err)
+	}
+	// Closure passed to the HTTP layer so the unauthenticated
+	// POST /api/v1/bootstrap/admin route can complete bootstrap when the
+	// env var path is unavailable (docker without secret env, browser-only
+	// users, etc.). The closure captures the resolved paths + rate limit
+	// so callers only have to hand it a password. See SECURITY.md for the
+	// bootstrap state machine.
+	rateLimitForBootstrap := cfg.Security.RateLimitDefault
+	bootstrapCreator := func(ctx context.Context, password []byte) (*bootstrap.AdminResult, error) {
+		return CreateAdminKeystore(ctx, repos.apiKeyRepo, adminKeystoreDir, adminKeystorePath, adminPubPath, password, rateLimitForBootstrap, log)
 	}
 	// The daemon never needs the admin private key at runtime — it
 	// verifies API request signatures using the public-key column on
@@ -369,7 +380,7 @@ func Run(args []string) error {
 	}
 
 	// ---- Router + HTTP server ----
-	rs, err := initRouterAndServer(cfg, configPath, db, repos, authVerifier, signService, evmSignerManager, approvalGuard, securityAlertService, auditLogger, settingsMgr, solidityValidator, jsEval, ipWhitelist, templateService, simulator, rpcProvider, log)
+	rs, err := initRouterAndServer(cfg, configPath, db, repos, authVerifier, signService, evmSignerManager, approvalGuard, securityAlertService, auditLogger, settingsMgr, solidityValidator, jsEval, ipWhitelist, templateService, simulator, rpcProvider, bootstrapCreator, log)
 	if err != nil {
 		return fmt.Errorf("failed to create router: %w", err)
 	}

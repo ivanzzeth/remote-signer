@@ -98,9 +98,10 @@ type daemon struct {
 type daemonOption func(*daemonConfig)
 
 type daemonConfig struct {
-	preWriteConfig bool   // when true, write a custom config.yaml with the allocated port before starting
-	rawConfigYAML  string // override the YAML written when preWriteConfig is set
-	skipReady      bool   // skip polling /health (useful when expecting startup failure)
+	preWriteConfig          bool   // when true, write a custom config.yaml with the allocated port before starting
+	rawConfigYAML           string // override the YAML written when preWriteConfig is set
+	skipReady               bool   // skip polling /health (useful when expecting startup failure)
+	withoutKeystorePassword bool   // drop REMOTE_SIGNER_KEYSTORE_PASSWORD so daemon soft-starts without an admin
 }
 
 // withCustomConfig writes the given YAML as the daemon's config.yaml before
@@ -116,6 +117,15 @@ func withCustomConfig(yaml string) daemonOption {
 // for negative-path tests that assert the process exits with an error.
 func expectStartupFailure() daemonOption {
 	return func(c *daemonConfig) { c.skipReady = true }
+}
+
+// withoutKeystorePassword launches the daemon WITHOUT
+// REMOTE_SIGNER_KEYSTORE_PASSWORD, exercising the soft-start path: the
+// daemon comes up healthy but with no admin api_keys row, waiting for
+// the HTTP bootstrap endpoint (or the CLI subcommand) to finish setup.
+// Used by bootstrap_test.go to drive that flow end-to-end.
+func withoutKeystorePassword() daemonOption {
+	return func(c *daemonConfig) { c.withoutKeystorePassword = true }
 }
 
 // startDaemon builds a fresh tempdir as $REMOTE_SIGNER_HOME, picks a free
@@ -180,11 +190,17 @@ func startDaemon(t *testing.T, opts ...daemonOption) *daemon {
 	args := []string{"server", "start", "-config", configPath}
 
 	cmd := exec.Command(binaryPath, args...)
-	cmd.Env = append(os.Environ(),
+	env := append(os.Environ(),
 		"REMOTE_SIGNER_HOME="+home,
 		"REMOTE_SIGNER_ADMIN_PASSWORD=integration-test",
-		"REMOTE_SIGNER_KEYSTORE_PASSWORD=integration-test",
 	)
+	if !cfg.withoutKeystorePassword {
+		// Default path: env-var bootstrap so the daemon comes up fully
+		// ready (admin api key created at startup). Tests that exercise
+		// the soft-start flow use withoutKeystorePassword to skip this.
+		env = append(env, "REMOTE_SIGNER_KEYSTORE_PASSWORD=integration-test")
+	}
+	cmd.Env = env
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	// New process group so we can send SIGTERM cleanly on cleanup.

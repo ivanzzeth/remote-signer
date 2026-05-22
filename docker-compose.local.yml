@@ -77,9 +77,11 @@ services:
       REMOTE_SIGNER_HOME: ${HOME}/.remote-signer
       HOME: ${HOME}
 
-      # Pass the boot-time admin keystore password from the host's env,
-      # or from a .env file alongside this compose. Avoids embedding
-      # the password in source.
+      # Optional. When set, the daemon bootstraps the admin keystore at
+      # startup using this password. When unset (default), the daemon
+      # comes up "soft-started" and the web UI at http://127.0.0.1:8548
+      # prompts for a password on first visit — set it interactively,
+      # never see this env var. See GIT.md "First-time setup".
       REMOTE_SIGNER_KEYSTORE_PASSWORD: ${REMOTE_SIGNER_KEYSTORE_PASSWORD:-}
 
       # Common proxy passthrough for users behind corporate networks.

@@ -10,6 +10,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/api"
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/audit"
+	"github.com/ivanzzeth/remote-signer/internal/bootstrap"
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/config"
 	"github.com/ivanzzeth/remote-signer/internal/core/auth"
@@ -51,6 +52,7 @@ func initRouterAndServer(
 	templateService *service.TemplateService,
 	simulator simulation.Simulator,
 	rpcProvider *evm.RPCProvider,
+	bootstrapCreator bootstrap.AdminCreator,
 	log *slog.Logger,
 ) (*RouterAndServer, error) {
 	routerConfig := api.RouterConfig{
@@ -87,6 +89,7 @@ func initRouterAndServer(
 		RPCProvider:                  rpcProvider,
 		SettingsManager:              settingsMgr,
 		RequestRepo:                  repos.requestRepo,
+		BootstrapCreator:             bootstrapCreator,
 	}
 	// Simulation preview: the request-detail UI's preview panel
 	// reads this repo. Optional — without it the GET /requests/

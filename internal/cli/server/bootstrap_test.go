@@ -106,7 +106,14 @@ func TestBootstrapCreatesAdminWhenEmpty(t *testing.T) {
 	}
 }
 
-func TestBootstrapNoopWhenKeysExist(t *testing.T) {
+func TestBootstrapNoopWhenAdminExists(t *testing.T) {
+	// Bootstrap is gated on the specific id="admin" row, not "any key
+	// exists". This test pins the no-op path: an existing admin row
+	// must prevent bootstrap from running again (and from clobbering
+	// the password the operator set previously). The companion test
+	// TestBootstrapCreatesAdminAlongsideNonAdminKey covers the
+	// orthogonal case: a non-admin key (e.g. the agent provisioned
+	// independently) must NOT block admin bootstrap.
 	t.Setenv("REMOTE_SIGNER_KEYSTORE_PASSWORD", "test-password-12345")
 
 	tmp := t.TempDir()
@@ -115,12 +122,12 @@ func TestBootstrapNoopWhenKeysExist(t *testing.T) {
 	repo := newTestRepo(t)
 
 	if err := repo.Create(context.Background(), &types.APIKey{
-		ID:           "preexisting",
-		Name:         "leftover",
+		ID:           "admin",
+		Name:         "admin (pre-existing)",
 		PublicKeyHex: "00",
-		Role:         types.RoleStrategy,
+		Role:         types.RoleAdmin,
 		Enabled:      true,
-		Source:       types.APIKeySourceAPI,
+		Source:       types.APIKeySourceBootstrap,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -129,9 +136,71 @@ func TestBootstrapNoopWhenKeysExist(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// No files should be created when the table already has rows.
+	// No files should be created when an admin row already exists.
 	if _, err := os.Stat(keystorePath); !os.IsNotExist(err) {
 		t.Errorf("keystore should not exist after no-op bootstrap: %v", err)
+	}
+}
+
+func TestBootstrapCreatesAdminAlongsideNonAdminKey(t *testing.T) {
+	// Regression guard for the startup ordering "agent bootstrap runs
+	// before admin bootstrap": a non-admin api_keys row (typically the
+	// agent provisioned by bootstrapAgentKeyIfNeeded) must NOT
+	// short-circuit the admin bootstrap. The id="admin" lookup is the
+	// only signal that matters. A count-based check (the previous
+	// implementation) would have falsely flagged the daemon as
+	// "already configured" once the agent row landed.
+	t.Setenv("REMOTE_SIGNER_KEYSTORE_PASSWORD", "test-password-12345")
+
+	tmp := t.TempDir()
+	keystorePath := filepath.Join(tmp, "admin.keystore.json")
+	pubPath := filepath.Join(tmp, "admin.key.pub")
+	repo := newTestRepo(t)
+
+	if err := repo.Create(context.Background(), &types.APIKey{
+		ID:           "agent",
+		Name:         "agent (bootstrap)",
+		PublicKeyHex: "00",
+		Role:         types.RoleAgent,
+		Enabled:      true,
+		Source:       types.APIKeySourceBootstrap,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := bootstrapAdminKeyIfNeeded(context.Background(), repo, tmp, keystorePath, pubPath, 0, discardLogger()); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(keystorePath); err != nil {
+		t.Errorf("admin keystore should have been created despite agent row: %v", err)
+	}
+	if got, err := repo.Get(context.Background(), "admin"); err != nil || got == nil {
+		t.Errorf("admin row not in repo after bootstrap: got=%v err=%v", got, err)
+	}
+}
+
+func TestBootstrap_SoftStartWithoutEnvVar(t *testing.T) {
+	// When neither the env var nor a TTY is available, bootstrap must
+	// not block daemon startup. The function returns nil (so the
+	// caller proceeds to start the HTTP server) and writes nothing to
+	// disk. The HTTP bootstrap endpoint takes over from here.
+	tmp := t.TempDir()
+	keystorePath := filepath.Join(tmp, "admin.keystore.json")
+	pubPath := filepath.Join(tmp, "admin.key.pub")
+	repo := newTestRepo(t)
+	// Explicitly unset the env var in case the test environment
+	// inherited it.
+	t.Setenv("REMOTE_SIGNER_KEYSTORE_PASSWORD", "")
+
+	if err := bootstrapAdminKeyIfNeeded(context.Background(), repo, tmp, keystorePath, pubPath, 0, discardLogger()); err != nil {
+		t.Fatalf("soft-start should return nil, got: %v", err)
+	}
+	if _, err := os.Stat(keystorePath); !os.IsNotExist(err) {
+		t.Errorf("keystore should not exist after soft-start: %v", err)
+	}
+	if got, err := repo.Get(context.Background(), "admin"); err == nil && got != nil {
+		t.Errorf("admin row should not be in repo after soft-start; got %+v", got)
 	}
 }
 
