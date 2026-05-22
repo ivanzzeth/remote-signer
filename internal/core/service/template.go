@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
-	"regexp"
 	"strings"
 	"time"
 
@@ -181,6 +180,10 @@ func (s *TemplateService) createInstanceFromResolved(
 	}
 	resolvedVars := resolveDefaults(varDefs, req.Variables)
 	injectReservedVariables(resolvedVars, req, s.logger)
+	// Merge in test_variables so test-case placeholders in the config
+	// (e.g. ${test_wrong_signer}) resolve during substitution. These
+	// only appear in test case input data, never in actual rule config.
+	s.mergeTestVariables(resolvedVars, tmpl)
 	resolvedConfig, err := SubstituteVariables(tmpl.Config, resolvedVars)
 	if err != nil {
 		return nil, fmt.Errorf("variable substitution failed: %w", err)
@@ -604,47 +607,22 @@ func injectReservedVariables(vars map[string]string, req *CreateInstanceRequest,
 	}
 }
 
-// SubstituteVariables replaces ${var} placeholders in config JSON with
-// actual values.
-//
-// Deprecated: This is the pre-R5 string-only substituter. New callers
-// should use SubstituteTyped (substitute.go) which respects the
-// variable's declared type so bool/list/json values land as proper JSON
-// literals rather than quoted strings. Kept while R8 migrates the
-// preset apply / template instance handlers; will be removed when
-// the last call site is rewritten.
-func SubstituteVariables(configJSON []byte, vars map[string]string) ([]byte, error) {
-	result := string(configJSON)
-	for k, v := range vars {
-		// Normal variable substitution (full value, e.g. "0xABCD")
-		result = strings.ReplaceAll(result, "${"+k+"}", v)
-		// Hex-only variable substitution (strips 0x prefix)
-		result = strings.ReplaceAll(result, "${hex:"+k+"}", strings.TrimPrefix(v, "0x"))
-		// ABI-padded hex substitution: pads a 20-byte address to 32 bytes (left-padded with zeros)
-		// Example: if addr = "0xABCD", then ${paddedhex:addr} → "000000000000000000000000000000000000000000000000000000000000ABCD"
-		hex := strings.TrimPrefix(v, "0x")
-		var padded string
-		if len(hex) < 64 {
-			padded = strings.Repeat("0", 64-len(hex)) + hex
-		} else {
-			padded = hex
-		}
-		result = strings.ReplaceAll(result, "${paddedhex:"+k+"}", padded)
+// mergeTestVariables merges tmpl.TestVariables into vars so that
+// test-case placeholders (e.g. ${test_wrong_signer}) resolve during
+// substitution. User-supplied variables (already in vars) take precedence.
+func (s *TemplateService) mergeTestVariables(vars map[string]string, tmpl *types.RuleTemplate) {
+	if len(tmpl.TestVariables) == 0 {
+		return
 	}
-	// Check for unresolved variables
-	if strings.Contains(result, "${") {
-		// Find unresolved variable names for error message
-		re := regexp.MustCompile(`\$\{([^}]+)\}`)
-		matches := re.FindAllStringSubmatch(result, -1)
-		var unresolved []string
-		for _, m := range matches {
-			if len(m) >= 2 {
-				unresolved = append(unresolved, m[1])
-			}
-		}
-		return nil, fmt.Errorf("unresolved variables: %s", strings.Join(unresolved, ", "))
+	var tv map[string]string
+	if err := json.Unmarshal(tmpl.TestVariables, &tv); err != nil {
+		return
 	}
-	return []byte(result), nil
+	for k, v := range tv {
+		if _, exists := vars[k]; !exists {
+			vars[k] = v
+		}
+	}
 }
 
 // reservedVariables are auto-injected from rule scope and should not be

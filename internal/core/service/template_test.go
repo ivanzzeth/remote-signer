@@ -2555,6 +2555,68 @@ func TestCreateInstance_SkipValidationFlow(t *testing.T) {
 		}
 	})
 
+	t.Run("evm_js_template_with_test_variables_placeholders", func(t *testing.T) {
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		cfg := map[string]interface{}{
+			"max_value": "${max_value}",
+			"test_cases": []map[string]interface{}{
+				{
+					"name": "should reject wrong signer",
+					"input": map[string]interface{}{
+						"value":  "100",
+						"signer": "${test_wrong_signer}",
+					},
+					"expect_pass": false,
+				},
+			},
+		}
+		configJSON, err := json.Marshal(cfg)
+		if err != nil {
+			t.Fatalf("failed to marshal config: %v", err)
+		}
+
+		tmpl := &types.RuleTemplate{
+			ID:        "tmpl-evmjs-tv",
+			Name:      "EVM JS With Test Variables",
+			Type:      types.RuleTypeEVMJS,
+			Mode:      types.RuleModeWhitelist,
+			Variables: mustJSON([]types.TemplateVariable{
+				{Name: "max_value", Type: "bigint", Required: true},
+			}),
+			TestVariables: mustJSON(map[string]string{
+				"test_wrong_signer": "0xEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE",
+			}),
+			Config:    configJSON,
+			Source:    types.RuleSourceConfig,
+			Enabled:   true,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}
+		seedTemplate(t, tmplRepo, tmpl)
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		result, err := svc.CreateInstance(ctx, &CreateInstanceRequest{
+			TemplateID: "tmpl-evmjs-tv",
+			Variables:  map[string]string{"max_value": "1000000"},
+		})
+		if err != nil {
+			t.Fatalf("CreateInstance should resolve test_variables placeholders, got: %v", err)
+		}
+		if result.Rule == nil {
+			t.Fatal("expected non-nil rule")
+		}
+		if strings.Contains(string(result.Rule.Config), "${test_wrong_signer}") {
+			t.Error("expected test_wrong_signer to be substituted in instance config")
+		}
+	})
+
 	t.Run("evm_js_template_non_whitelist_mode", func(t *testing.T) {
 		tmplRepo := newMockTemplateRepo()
 		ruleRepo := newMockRuleRepo()

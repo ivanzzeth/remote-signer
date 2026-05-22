@@ -26,10 +26,6 @@ variables:
     type: address
     description: "USDC.e (Bridged) token address"
     required: true
-  - name: allowed_safe_address_for_testing
-    type: address
-    description: "Single Safe address for test payload"
-    required: true
   - name: allowed_safe_addresses
     type: string
     description: "Comma-separated allowed Safe addresses"
@@ -62,7 +58,6 @@ test_variables:
   conditional_tokens_address: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
   safe_proxy_factory_address: "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"
   usdc_bridged_address: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
-  allowed_safe_address_for_testing: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
   allowed_safe_addresses: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
   clob_auth_domain_name: "ClobAuthDomain"
   clob_auth_domain_version: "1"

@@ -9,8 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
+	"runtime"
 	"testing"
 	"time"
 
@@ -60,10 +60,15 @@ type templateRuleFile struct {
 }
 
 // substituteVarsInString replaces ${var} placeholders with values from vars.
+// Supports ${hex:var}, ${first:var}, and ${hex:first:var} syntax.
 func substituteVarsInString(s string, vars map[string]string) (string, error) {
 	result := s
 	for k, v := range vars {
 		result = strings.ReplaceAll(result, "${"+k+"}", v)
+		result = strings.ReplaceAll(result, "${hex:"+k+"}", strings.TrimPrefix(v, "0x"))
+		firstVal := firstOfList(v)
+		result = strings.ReplaceAll(result, "${first:"+k+"}", firstVal)
+		result = strings.ReplaceAll(result, "${hex:first:"+k+"}", strings.TrimPrefix(firstVal, "0x"))
 	}
 	if idx := strings.Index(result, "${"); idx >= 0 {
 		end := strings.Index(result[idx:], "}")
@@ -75,6 +80,17 @@ func substituteVarsInString(s string, vars map[string]string) (string, error) {
 		}
 	}
 	return result, nil
+}
+
+// firstOfList returns the first non-empty element of a comma-separated list.
+func firstOfList(s string) string {
+	for _, part := range strings.Split(s, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			return part
+		}
+	}
+	return ""
 }
 
 // projectRoot returns the project root by walking up from the current test file.
