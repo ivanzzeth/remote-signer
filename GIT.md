@@ -293,7 +293,7 @@ migrating any data.
 
 ```bash
 # Pull + run (default — uses the ghcr image, no local build)
-UID=$(id -u) GID=$(id -g) docker compose -f docker-compose.local.yml up -d
+HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose -f docker-compose.local.yml up -d
 
 # Pin to a specific release:
 REMOTE_SIGNER_IMAGE=ghcr.io/ivanzzeth/remote-signer:0.3.8 \
@@ -302,7 +302,7 @@ REMOTE_SIGNER_IMAGE=ghcr.io/ivanzzeth/remote-signer:0.3.8 \
 
 # Build from local source instead of pulling (dev mode):
 docker compose -f docker-compose.local.yml build
-UID=$(id -u) GID=$(id -g) docker compose -f docker-compose.local.yml up -d
+HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose -f docker-compose.local.yml up -d
 
 # Logs
 docker compose -f docker-compose.local.yml logs -f

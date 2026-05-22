@@ -35,7 +35,7 @@ git clone https://github.com/ivanzzeth/remote-signer.git && cd remote-signer && 
 ### Docker (personal, drop-in for native daemon)
 
 ```bash
-UID=$(id -u) GID=$(id -g) docker compose -f docker-compose.local.yml up -d
+HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose -f docker-compose.local.yml up -d
 ```
 
 Pulls `ghcr.io/ivanzzeth/remote-signer:latest` (multi-arch: `linux/amd64`, `linux/arm64`), bind-mounts your existing `~/.remote-signer` into the container, and adds restart-on-crash. Same SQLite DB, admin keystore, signers, and API keys as the native daemon — switch back and forth without migration.

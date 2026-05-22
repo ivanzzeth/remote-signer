@@ -35,7 +35,7 @@ git clone https://github.com/ivanzzeth/remote-signer.git && cd remote-signer && 
 ### Docker（个人单机，无缝替换原生 daemon）
 
 ```bash
-UID=$(id -u) GID=$(id -g) docker compose -f docker-compose.local.yml up -d
+HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose -f docker-compose.local.yml up -d
 ```
 
 拉 `ghcr.io/ivanzzeth/remote-signer:latest`（multi-arch：`linux/amd64`、`linux/arm64`），把宿主机的 `~/.remote-signer` 挂进容器，自带 restart-on-crash。SQLite 库、admin keystore、signers、API keys 都和原生 daemon 同一份，可以随时切换不用迁移数据。
