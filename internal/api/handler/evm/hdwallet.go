@@ -84,6 +84,15 @@ type signerInfoResponse struct {
 	Address string `json:"address"`
 	Type    string `json:"type"`
 	Enabled bool   `json:"enabled"`
+	// Mirror types.SignerInfo's full surface so the web UI's HD wallet
+	// detail panel can render derivation index, lock state, and the
+	// parent-address backreference. Earlier versions dropped these
+	// fields here on the way out, so listDerived's JSON looked like
+	// {address, type, enabled} only — the UI fell back to "—" for
+	// every index column.
+	Locked            bool    `json:"locked"`
+	HDParentAddress   string  `json:"hd_parent_address,omitempty"`
+	HDDerivationIndex *uint32 `json:"hd_derivation_index,omitempty"`
 }
 
 type deriveRequest struct {
@@ -463,9 +472,12 @@ func toSignerInfoResponseList(infos []types.SignerInfo) []signerInfoResponse {
 	result := make([]signerInfoResponse, len(infos))
 	for i, info := range infos {
 		result[i] = signerInfoResponse{
-			Address: info.Address,
-			Type:    info.Type,
-			Enabled: info.Enabled,
+			Address:           info.Address,
+			Type:              info.Type,
+			Enabled:           info.Enabled,
+			Locked:            info.Locked,
+			HDParentAddress:   info.HDParentAddress,
+			HDDerivationIndex: info.HDDerivationIndex,
 		}
 	}
 	return result
