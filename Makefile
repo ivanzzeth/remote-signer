@@ -80,5 +80,14 @@ clean:
 desktop-dev: build-embed
 	cd electron && $(NPM) install --no-audit --no-fund && $(NPM) start
 
+# Spin up a real Linux VM via OrbStack, sync the current tree into
+# it, and exercise the docker-compose.local.yml flow end-to-end.
+# Catches Linux-specific bugs (bind-mount permissions, gosu / userns)
+# that macOS Docker Desktop hides — needed because the project ships
+# a non-trivial entrypoint script that doesn't behave the same way
+# under the macOS Docker VM. Requires `brew install orbstack` first.
+docker-smoke:
+	sh scripts/docker-smoke-linux.sh
+
 desktop-dist: build-embed
 	cd electron && $(NPM) install --no-audit --no-fund && $(NPM) run dist
