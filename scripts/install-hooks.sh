@@ -140,7 +140,20 @@ else
     FAILED=1
 fi
 
-# 5. Gitleaks
+# 5. golangci-lint
+if command -v golangci-lint &> /dev/null; then
+    echo -n "Running golangci-lint... "
+    if golangci-lint run --timeout 3m ./... 2>&1; then
+        echo -e "${GREEN}OK${NC}"
+    else
+        echo -e "${RED}FAIL${NC}"
+        FAILED=1
+    fi
+else
+    echo -e "${YELLOW}SKIP (golangci-lint not installed)${NC}"
+fi
+
+# 6. Gitleaks
 if command -v gitleaks &> /dev/null; then
     echo -n "Running gitleaks... "
     if gitleaks protect --staged --no-banner --exit-code 1 2>/dev/null; then
@@ -154,7 +167,7 @@ else
     echo -e "${YELLOW}SKIP (gitleaks not installed)${NC}"
 fi
 
-# 6. Rule validation
+# 7. Rule validation
 STAGED_RULES=$(git diff --cached --name-only --diff-filter=ACM | grep '^rules/.*\.yaml$' || true)
 if [ -n "$STAGED_RULES" ]; then
     echo -n "Validating rule files... "
