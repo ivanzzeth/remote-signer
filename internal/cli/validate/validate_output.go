@@ -10,15 +10,34 @@ import (
 )
 
 // substituteVarsInString replaces ${var} placeholders with values from vars.
+// Also handles ${hex:var} (strips 0x prefix) and ${paddedhex:var}
+// (left-pads hex to 64 chars without 0x), matching the service layer's
+// SubstituteVariables behavior.
 // Returns an error if any ${name} (without colon) remains after substitution.
 func substituteVarsInString(s string, vars map[string]string) (string, error) {
 	result := s
 	for k, v := range vars {
 		result = strings.ReplaceAll(result, "${"+k+"}", v)
+		// Hex-only: strips 0x prefix
+		hexVal := strings.TrimPrefix(v, "0x")
+		result = strings.ReplaceAll(result, "${hex:"+k+"}", hexVal)
+		// ABI-padded hex: left-pads to 64 hex chars
+		var padded string
+		if len(hexVal) < 64 {
+			padded = strings.Repeat("0", 64-len(hexVal)) + hexVal
+		} else {
+			padded = hexVal
+		}
+		result = strings.ReplaceAll(result, "${paddedhex:"+k+"}", padded)
 	}
+	// Check for unresolved variables (but ignore ${VAR:-default} env var syntax)
+	// Template variables are simple ${name} without colons
 	if idx := strings.Index(result, "${"); idx >= 0 {
-		if end := strings.Index(result[idx:], "}"); end > 0 {
+		// Extract variable name
+		end := strings.Index(result[idx:], "}")
+		if end > 0 {
 			varName := result[idx+2 : idx+end]
+			// Only error if it doesn't look like an env var (no colon)
 			if !strings.Contains(varName, ":") {
 				return "", fmt.Errorf("unresolved template variable: ${%s}", varName)
 			}

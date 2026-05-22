@@ -616,7 +616,20 @@ func injectReservedVariables(vars map[string]string, req *CreateInstanceRequest,
 func SubstituteVariables(configJSON []byte, vars map[string]string) ([]byte, error) {
 	result := string(configJSON)
 	for k, v := range vars {
+		// Normal variable substitution (full value, e.g. "0xABCD")
 		result = strings.ReplaceAll(result, "${"+k+"}", v)
+		// Hex-only variable substitution (strips 0x prefix)
+		result = strings.ReplaceAll(result, "${hex:"+k+"}", strings.TrimPrefix(v, "0x"))
+		// ABI-padded hex substitution: pads a 20-byte address to 32 bytes (left-padded with zeros)
+		// Example: if addr = "0xABCD", then ${paddedhex:addr} → "000000000000000000000000000000000000000000000000000000000000ABCD"
+		hex := strings.TrimPrefix(v, "0x")
+		var padded string
+		if len(hex) < 64 {
+			padded = strings.Repeat("0", 64-len(hex)) + hex
+		} else {
+			padded = hex
+		}
+		result = strings.ReplaceAll(result, "${paddedhex:"+k+"}", padded)
 	}
 	// Check for unresolved variables
 	if strings.Contains(result, "${") {

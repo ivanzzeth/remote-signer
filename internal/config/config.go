@@ -461,6 +461,71 @@ func ExpandEnvWithDefaults(s string) string {
 	return result
 }
 
+// LoadUnvalidated loads config without rejecting legacy sections (api_keys, templates, rules).
+// Used by e2e tests that need to exercise config-sourced templates and rules that are no longer
+// valid in production configs (since v0.3.0 broke api_keys/templates/rules out of config.yaml).
+// For production use, call Load() instead.
+func LoadUnvalidated(path string) (*Config, error) {
+	if path == "" {
+		return nil, fmt.Errorf("config path is required")
+	}
+
+	data, err := os.ReadFile(path) // #nosec G304
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	expandedData := ExpandEnvWithDefaults(string(data))
+
+	cfg := &Config{}
+	if err := yaml.Unmarshal([]byte(expandedData), cfg); err != nil {
+		return nil, fmt.Errorf("failed to parse config file: %w", err)
+	}
+
+	if dsn := os.Getenv("DATABASE_DSN"); dsn != "" {
+		cfg.Database.DSN = dsn
+	}
+
+	setDefaults(cfg)
+
+	// Run validation WITHOUT the breaking-changes checks (api_keys, templates, rules).
+	if err := validateSkipBreakingChanges(cfg); err != nil {
+		return nil, fmt.Errorf("config validation failed: %w", err)
+	}
+
+	return cfg, nil
+}
+
+// validateSkipBreakingChanges validates config but skips the v0.3.0 breaking-change
+// checks that reject api_keys/templates/rules in config.yaml. Used by LoadUnvalidated.
+func validateSkipBreakingChanges(cfg *Config) error {
+	if cfg.Server.Port <= 0 || cfg.Server.Port > 65535 {
+		return fmt.Errorf("invalid server port: %d", cfg.Server.Port)
+	}
+
+	if cfg.Database.DSN == "" {
+		return fmt.Errorf("database DSN is required")
+	}
+
+	if cfg.Chains.EVM == nil || !cfg.Chains.EVM.Enabled {
+		return fmt.Errorf("at least one chain must be enabled")
+	}
+
+	if cfg.Server.TLS.Enabled {
+		if cfg.Server.TLS.CertFile == "" {
+			return fmt.Errorf("TLS is enabled but cert_file is not set")
+		}
+		if cfg.Server.TLS.KeyFile == "" {
+			return fmt.Errorf("TLS is enabled but key_file is not set")
+		}
+		if cfg.Server.TLS.CAFile == "" {
+			return fmt.Errorf("TLS is enabled but ca_file is not set")
+		}
+	}
+
+	return nil
+}
+
 // validate validates the configuration
 func validate(cfg *Config) error {
 	if cfg.Server.Port <= 0 || cfg.Server.Port > 65535 {

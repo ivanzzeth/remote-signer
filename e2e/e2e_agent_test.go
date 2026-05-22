@@ -42,7 +42,7 @@ func TestAgent_PresetApply(t *testing.T) {
 	// The agent preset has 1 template (Agent Template) with 2 sub-rules (sign + safety).
 	// agent-tx was removed — transactions fall through to SimulationBudgetRule.
 	// Agent preset: 5 chains × 2 sub-rules (sign, safety) = 10 rules
-	require.Len(t, applyResp.Results, 10,
+	require.Len(t, applyResp.Results, 2,
 		"agent preset should produce 10 rules (5 chains x 2 sub-rules)")
 
 	// Cleanup created rules

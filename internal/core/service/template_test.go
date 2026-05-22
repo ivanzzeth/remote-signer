@@ -586,14 +586,74 @@ func TestSubstituteVariables(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error for multiple unresolved variables")
 		}
-		// Should list all unresolved
 		for _, name := range []string{"x", "y", "z"} {
 			if !strings.Contains(err.Error(), name) {
 				t.Errorf("error should mention unresolved variable '%s', got: %v", name, err)
 			}
 		}
 	})
+
+	t.Run("hex_prefix", func(t *testing.T) {
+		config := []byte(`{"address_hex":"${hex:addr}"}`)
+		vars := map[string]string{"addr": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"}
+
+		result, err := SubstituteVariables(config, vars)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		expected := `{"address_hex":"A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"}`
+		if string(result) != expected {
+			t.Errorf("expected %s, got %s", expected, string(result))
+		}
+	})
+
+	t.Run("paddedhex_prefix", func(t *testing.T) {
+		config := []byte(`{"address_padded":"${paddedhex:addr}"}`)
+		vars := map[string]string{"addr": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"}
+
+		result, err := SubstituteVariables(config, vars)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		expected := `{"address_padded":"000000000000000000000000A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"}`
+		if string(result) != expected {
+			t.Errorf("expected %s, got %s", expected, string(result))
+		}
+	})
+
+	t.Run("hex_and_paddedhex_mixed", func(t *testing.T) {
+		config := []byte(`{"hex":"${hex:addr}","raw":"${addr}","padded":"${paddedhex:addr}"}`)
+		vars := map[string]string{"addr": "0x1234"}
+
+		result, err := SubstituteVariables(config, vars)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		expected := `{"hex":"1234","raw":"0x1234","padded":"0000000000000000000000000000000000000000000000000000000000001234"}`
+		if string(result) != expected {
+			t.Errorf("expected %s, got %s", expected, string(result))
+		}
+	})
+
+	t.Run("paddedhex_no_0x_prefix", func(t *testing.T) {
+		config := []byte(`{"padded":"${paddedhex:val}"}`)
+		vars := map[string]string{"val": "abcd"}
+
+		result, err := SubstituteVariables(config, vars)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		expected := `{"padded":"000000000000000000000000000000000000000000000000000000000000abcd"}`
+		if string(result) != expected {
+			t.Errorf("expected %s, got %s", expected, string(result))
+		}
+	})
 }
+
 
 func TestCreateInstance(t *testing.T) {
 	ctx := context.Background()

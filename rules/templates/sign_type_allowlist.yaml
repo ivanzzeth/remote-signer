@@ -21,6 +21,9 @@ variables:
     required: true
     placeholder: '["transaction"]'
 
+test_variables:
+  allowed_sign_types: '["transaction", "personal_sign"]'
+
 rules:
   - id: "sign-type-allowlist"
     name: "Allowed sign types"
