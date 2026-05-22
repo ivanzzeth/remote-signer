@@ -89,8 +89,9 @@ func (s *Service) Get(ctx context.Context, id string) (*DetailResponse, error) {
 
 // ApplyRequest is the body for POST /api/v1/presets/:id/apply.
 type ApplyRequest struct {
-	Variables map[string]string `json:"variables,omitempty"`
-	AppliedTo []string          `json:"applied_to,omitempty"`
+	Variables      map[string]string `json:"variables,omitempty"`
+	AppliedTo      []string          `json:"applied_to,omitempty"`
+	SkipValidation bool              `json:"skip_validation,omitempty"`
 }
 
 // ApplyResultItem is one entry in the apply response.
@@ -102,6 +103,25 @@ type ApplyResultItem struct {
 // ApplyResponse is the response for POST /api/v1/presets/:id/apply (201).
 type ApplyResponse struct {
 	Results []ApplyResultItem `json:"results"`
+}
+
+// ValidatePresetResponse is the response for POST /api/v1/presets/{id}/validate.
+type ValidatePresetResponse struct {
+	PresetID   string      `json:"preset_id"`
+	PresetName string      `json:"preset_name"`
+	Results    []*PresetValidateResultItem `json:"results,omitempty"`
+	Total      int         `json:"total"`
+	Passed     int         `json:"passed"`
+	Failed     int         `json:"failed"`
+}
+
+// PresetValidateResultItem is a single rule result in preset validation.
+type PresetValidateResultItem struct {
+	RuleName string `json:"rule_name"`
+	Type     string `json:"type"`
+	Mode     string `json:"mode"`
+	Valid    bool   `json:"valid"`
+	Error    string `json:"error,omitempty"`
 }
 
 // Apply applies a preset and creates template instances in one transaction (admin only).
@@ -122,4 +142,20 @@ func (s *Service) Apply(ctx context.Context, id string, req *ApplyRequest) (*App
 // ApplyWithVariables is a convenience that calls Apply with the given variables.
 func (s *Service) ApplyWithVariables(ctx context.Context, id string, variables map[string]string) (*ApplyResponse, error) {
 	return s.Apply(ctx, id, &ApplyRequest{Variables: variables})
+}
+
+// Validate runs test case validation for a preset (POST /api/v1/presets/{id}/validate).
+// Resolves preset-level variables, substitutes them into each referenced template's
+// config and test inputs, then runs tests via the JS sandbox.
+func (s *Service) Validate(ctx context.Context, id string, variables map[string]string) (*ValidatePresetResponse, error) {
+	path := "/api/v1/presets/" + url.PathEscape(id) + "/validate"
+	body := struct {
+		Variables map[string]string `json:"variables,omitempty"`
+	}{Variables: variables}
+	var resp ValidatePresetResponse
+	err := s.transport.Request(ctx, http.MethodPost, path, body, &resp, http.StatusOK)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }

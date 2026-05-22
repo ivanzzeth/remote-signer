@@ -159,3 +159,26 @@ func (s *RuleService) ListBudgets(ctx context.Context, ruleID string) ([]RuleBud
 	}
 	return budgets, nil
 }
+
+// Validate validates a single rule's test cases (POST /api/v1/evm/rules/{ruleID}/validate).
+// Only meaningful for evm_js rules.
+func (s *RuleService) Validate(ctx context.Context, ruleID string) (*ValidateRuleResponse, error) {
+	path := fmt.Sprintf("/api/v1/evm/rules/%s/validate", url.PathEscape(ruleID))
+	var resp ValidateRuleResponse
+	err := s.transport.Request(ctx, http.MethodPost, path, nil, &resp, http.StatusOK)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// BatchValidate validates all evm_js rules' test cases using the full engine
+// (POST /api/v1/evm/rules/validate). This catches cross-rule interference.
+func (s *RuleService) BatchValidate(ctx context.Context) (*BatchValidateResponse, error) {
+	var resp BatchValidateResponse
+	err := s.transport.Request(ctx, http.MethodPost, "/api/v1/evm/rules/validate", nil, &resp, http.StatusOK)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}

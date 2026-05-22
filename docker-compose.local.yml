@@ -43,17 +43,22 @@
 
 services:
   remote-signer:
-    # Default to pulling the latest release image from ghcr — most
-    # personal-mode users don't want to wait through a Node + Go build.
-    # Override with REMOTE_SIGNER_IMAGE for a pinned tag, or run
-    # `docker compose -f docker-compose.local.yml build` to bake local
-    # source changes against this tag instead.
+    # Default to pulling the latest release image from ghcr. Most
+    # personal-mode users prefer not to wait through a Node + Go build.
+    # To always build from source:
+    #   BUILD_MODE=source docker compose -f docker-compose.local.yml up -d
+    # (this sets PULL_POLICY=build under the hood).
+    # BUILD_MODE=pull → PULL_POLICY=always (always pull pre-built image).
+    # Unset (default) → PULL_POLICY=missing (use cached/pulled, fall back to build).
+    # PULL_POLICY takes explicit precedence over BUILD_MODE when both are set.
+    # PULL_POLICY values: build, missing (default), always, never.
     image: ${REMOTE_SIGNER_IMAGE:-ghcr.io/ivanzzeth/remote-signer:latest}
     build:
       context: .
       dockerfile: Dockerfile
       args:
         VERSION: ${VERSION:-docker-local}
+    pull_policy: ${PULL_POLICY:-missing}
     container_name: remote-signer-local
     restart: unless-stopped
 

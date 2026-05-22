@@ -114,3 +114,29 @@ type RuleBudget struct {
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
+
+// ValidateTestResult is a per-test-case result in a validate response.
+type ValidateTestResult struct {
+	Name       string `json:"name"`
+	Passed     bool   `json:"passed"`
+	ActualPass bool   `json:"actual_pass"`
+	Reason     string `json:"reason,omitempty"`
+}
+
+// ValidateRuleResponse is the response for POST /api/v1/evm/rules/{id}/validate.
+type ValidateRuleResponse struct {
+	RuleID   string               `json:"rule_id"`
+	RuleName string               `json:"rule_name"`
+	Type     string               `json:"type"`
+	Valid    bool                 `json:"valid"`
+	Results  []ValidateTestResult `json:"results,omitempty"`
+	Error    string               `json:"error,omitempty"`
+}
+
+// BatchValidateResponse is the response for POST /api/v1/evm/rules/validate.
+type BatchValidateResponse struct {
+	Results []ValidateRuleResponse `json:"results"`
+	Total   int                    `json:"total"`
+	Passed  int                    `json:"passed"`
+	Failed  int                    `json:"failed"`
+}

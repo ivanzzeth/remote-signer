@@ -225,12 +225,16 @@ func injectRsHelpers(vm *sobek.Runtime) error {
 	if err := addrObj.Set("isZero", vm.ToValue(rsAddrIsZero(vm))); err != nil {
 		return err
 	}
-	if err := addrObj.Set("requireZero", vm.ToValue(rsAddrRequireZero(vm))); err != nil {
-		return err
-	}
-	if err := rs.Set("addr", addrObj); err != nil {
-		return err
-	}
+		if err := addrObj.Set("requireZero", vm.ToValue(rsAddrRequireZero(vm))); err != nil {
+			return err
+		}
+		if err := addrObj.Set("toChecksumList", vm.ToValue(rsAddrToChecksumList(vm))); err != nil {
+			return err
+		}
+		if err := rs.Set("addr", addrObj); err != nil {
+			return err
+		}
+
 
 	// rs.int — strict integer parsing
 	intObj := vm.NewObject()

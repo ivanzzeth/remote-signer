@@ -137,11 +137,40 @@ export interface InstantiateRequest {
   expires_in?: string;
   budget?: BudgetConfig;
   schedule?: ScheduleConfig;
+  skip_validation?: boolean;
 }
 
 export interface InstantiateResponse {
   rule: Record<string, any>;
   budget?: Record<string, any>;
+}
+
+/** Result of a single test case validation */
+export interface ValidateTestResult {
+  name: string;
+  passed: boolean;
+  actual_pass: boolean;
+  reason?: string;
+}
+
+/** Result of a single rule validation */
+export interface ValidateRuleResultItem {
+  rule_name: string;
+  type: string;
+  mode: string;
+  valid: boolean;
+  error?: string;
+  results?: ValidateTestResult[];
+}
+
+/** Response from POST /api/v1/templates/{id}/validate */
+export interface ValidateTemplateResponse {
+  template_id: string;
+  template_name: string;
+  results: ValidateRuleResultItem[];
+  total: number;
+  passed: number;
+  failed: number;
 }
 
 export interface RevokeInstanceResponse {
@@ -226,6 +255,17 @@ export class TemplateService {
       "POST",
       `/api/v1/templates/${templateID}/instantiate`,
       req,
+    );
+  }
+
+  /**
+   * Validate test cases for a template.
+   */
+  async validate(templateID: string): Promise<ValidateTemplateResponse> {
+    return this.transport.request<ValidateTemplateResponse>(
+      "POST",
+      `/api/v1/templates/${templateID}/validate`,
+      null,
     );
   }
 

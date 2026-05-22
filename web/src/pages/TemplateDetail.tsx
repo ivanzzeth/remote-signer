@@ -4,6 +4,7 @@ import {
   APIError,
   type Template,
   type TemplateVariable,
+  type ValidateRuleResultItem,
 } from "remote-signer-client";
 import {
   Badge,
@@ -107,6 +108,8 @@ function TemplateView({
       </Card>
 
       <RulesCard tmpl={tmpl} />
+
+      <TemplateValidatePanel tmpl={tmpl} />
 
       <InstantiateForm tmpl={tmpl} onApplied={onApplied} />
     </>
@@ -620,6 +623,92 @@ function FormRow({
         {help && <div className="mt-1 text-[11px] text-ink-500">{help}</div>}
       </div>
     </div>
+  );
+}
+
+function TemplateValidatePanel({ tmpl }: { tmpl: Template }) {
+  const [validating, setValidating] = useState(false);
+  const [results, setResults] = useState<ValidateRuleResultItem[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function run() {
+    setError(null);
+    setResults(null);
+    const c = getClient();
+    if (!c) return;
+    setValidating(true);
+    try {
+      const resp = await c.templates.validate(tmpl.id);
+      setResults(resp.results);
+    } catch (ex) {
+      setError(formatErr(ex));
+    } finally {
+      setValidating(false);
+    }
+  }
+
+  const passCount = results?.filter((r) => r.valid).length ?? 0;
+  const failCount = results?.filter((r) => !r.valid).length ?? 0;
+
+  return (
+    <Card title="Test case validation">
+      <div className="space-y-3">
+        {error && (
+          <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+            {error}
+          </div>
+        )}
+
+        {results && (
+          <div className="space-y-2">
+            <div className="flex gap-3 text-xs text-ink-600">
+              <span className="text-green-700">{passCount} passed</span>
+              {failCount > 0 && <span className="text-red-700">{failCount} failed</span>}
+              <span>{results.length} total</span>
+            </div>
+            {results.map((r, i) => (
+              <div key={i} className="rounded-md border border-ink-200 p-2">
+                <div className="flex items-center gap-2 text-sm">
+                  <span className={r.valid ? "text-green-600" : "text-red-600"}>
+                    {r.valid ? "✓" : "✗"}
+                  </span>
+                  <span className="font-medium text-ink-900">{r.rule_name}</span>
+                  <Badge tone={r.valid ? "green" : "red"}>{r.valid ? "pass" : "fail"}</Badge>
+                  {r.type && <span className="font-mono text-[10px] text-ink-500">{r.type}</span>}
+                </div>
+                {!r.valid && r.error && (
+                  <div className="ml-5 mt-1 text-xs text-red-600">{r.error}</div>
+                )}
+                {r.results && r.results.length > 0 && (
+                  <div className="ml-5 mt-2 space-y-1">
+                    {r.results.map((tc, j) => (
+                      <div key={j} className="flex items-center gap-2 text-xs">
+                        <span className={tc.passed ? "text-green-600" : "text-red-600"}>
+                          {tc.passed ? "●" : "○"}
+                        </span>
+                        <span className="text-ink-700">{tc.name}</span>
+                        {!tc.passed && tc.reason && (
+                          <span className="text-red-500">{tc.reason}</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={run}
+          disabled={validating}
+          className="rounded-md border border-ink-200 px-3 py-1 text-xs text-ink-700 hover:bg-ink-100 disabled:opacity-50"
+        >
+          {validating ? "Validating…" : results ? "Re-validate" : "Validate test cases"}
+        </button>
+      </div>
+    </Card>
   );
 }
 

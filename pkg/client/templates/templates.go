@@ -119,6 +119,19 @@ func (s *Service) RevokeInstance(ctx context.Context, ruleID string) (*RevokeIns
 	return &resp, nil
 }
 
+// Validate runs test case validation for a template (POST /api/v1/templates/{templateID}/validate).
+// Resolves test_variables from the template definition, substitutes them into each rule's
+// config and test input, then runs tests via the JS sandbox.
+func (s *Service) Validate(ctx context.Context, templateID string) (*ValidateTemplateResponse, error) {
+	path := fmt.Sprintf("/api/v1/templates/%s/validate", url.PathEscape(templateID))
+	var resp ValidateTemplateResponse
+	err := s.transport.Request(ctx, http.MethodPost, path, nil, &resp, http.StatusOK)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // API defines the template service interface.
 type API interface {
 	List(ctx context.Context, filter *ListFilter) (*ListResponse, error)
@@ -128,6 +141,7 @@ type API interface {
 	Delete(ctx context.Context, templateID string) error
 	Instantiate(ctx context.Context, templateID string, req *InstantiateRequest) (*InstantiateResponse, error)
 	RevokeInstance(ctx context.Context, ruleID string) (*RevokeInstanceResponse, error)
+	Validate(ctx context.Context, templateID string) (*ValidateTemplateResponse, error)
 }
 
 // Compile-time interface check.

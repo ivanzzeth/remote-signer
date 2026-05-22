@@ -113,6 +113,32 @@ export interface RuleBudget {
   updated_at: string;
 }
 
+/** Result of a single test case validation */
+export interface ValidateTestResult {
+  name: string;
+  passed: boolean;
+  actual_pass: boolean;
+  reason?: string;
+}
+
+/** Response from POST /api/v1/evm/rules/{id}/validate */
+export interface ValidateRuleResponse {
+  rule_id: string;
+  rule_name: string;
+  type: string;
+  valid: boolean;
+  results?: ValidateTestResult[];
+  error?: string;
+}
+
+/** Response from POST /api/v1/evm/rules/validate (batch) */
+export interface BatchValidateResponse {
+  results: ValidateRuleResponse[];
+  total: number;
+  passed: number;
+  failed: number;
+}
+
 // ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
@@ -223,6 +249,28 @@ export class EvmRuleService {
       "POST",
       `/api/v1/evm/rules/${encodeURIComponent(ruleID)}/reject`,
       { reason },
+    );
+  }
+
+  /**
+   * Validate a single rule's test cases (POST /api/v1/evm/rules/{ruleID}/validate).
+   */
+  async validate(ruleID: string): Promise<ValidateRuleResponse> {
+    return this.transport.request<ValidateRuleResponse>(
+      "POST",
+      `/api/v1/evm/rules/${encodeURIComponent(ruleID)}/validate`,
+      null,
+    );
+  }
+
+  /**
+   * Batch validate all evm_js rules' test cases (POST /api/v1/evm/rules/validate).
+   */
+  async batchValidate(): Promise<BatchValidateResponse> {
+    return this.transport.request<BatchValidateResponse>(
+      "POST",
+      "/api/v1/evm/rules/validate",
+      null,
     );
   }
 }

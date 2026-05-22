@@ -150,6 +150,30 @@ func (h *RuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Sub-resource: /api/v1/evm/rules/validate (batch validate — no rule ID, admin only)
+	if path == "validate" && r.Method == http.MethodPost {
+		if !apiKey.IsAdmin() {
+			h.writeError(w, "forbidden: admin role required", http.StatusForbidden)
+			return
+		}
+		h.validateRules(w, r)
+		return
+	}
+
+	// Sub-resource: /api/v1/evm/rules/{id}/validate (admin only)
+	if strings.HasSuffix(path, "/validate") {
+		ruleID := strings.TrimSuffix(path, "/validate")
+		ruleID = strings.Trim(ruleID, "/")
+		if ruleID != "" && !strings.Contains(ruleID, "/") && r.Method == http.MethodPost {
+			if !apiKey.IsAdmin() {
+				h.writeError(w, "forbidden: admin role required", http.StatusForbidden)
+				return
+			}
+			h.validateRule(w, r, ruleID)
+			return
+		}
+	}
+
 	// Sub-resource: /api/v1/evm/rules/{id}/budgets
 	// Accept any rule ID that is a single path segment (config-expanded IDs like erc20-schedule_erc20-transfer-limit).
 	if strings.HasSuffix(path, "/budgets") {

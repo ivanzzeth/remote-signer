@@ -2331,3 +2331,300 @@ func TestInjectReservedVariables(t *testing.T) {
 		}
 	})
 }
+
+// ---------------------------------------------------------------------------
+// TestCreateInstance_SkipValidationFlow — verifies that the service layer
+// does NOT reject evm_js or bundle templates based on test_cases validation.
+// Validation decisions happen at the handler level, not the service level.
+// ---------------------------------------------------------------------------
+
+func TestCreateInstance_SkipValidationFlow(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("evm_js_template_basic_creation", func(t *testing.T) {
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		tmpl := &types.RuleTemplate{
+			ID:        "tmpl-evmjs-1",
+			Name:      "EVM JS Template",
+			Type:      types.RuleTypeEVMJS,
+			Mode:      types.RuleModeWhitelist,
+			Variables: mustJSON([]types.TemplateVariable{
+				{Name: "max_value", Type: "bigint", Required: true},
+			}),
+			Config:    []byte(`{"max_value":"${max_value}"}`),
+			Source:    types.RuleSourceConfig,
+			Enabled:   true,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}
+		seedTemplate(t, tmplRepo, tmpl)
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		result, err := svc.CreateInstance(ctx, &CreateInstanceRequest{
+			TemplateID: "tmpl-evmjs-1",
+			Variables:  map[string]string{"max_value": "1000000"},
+		})
+		if err != nil {
+			t.Fatalf("CreateInstance failed: %v", err)
+		}
+		if result.Rule == nil {
+			t.Fatal("expected non-nil rule")
+		}
+		if result.Rule.Type != types.RuleTypeEVMJS {
+			t.Errorf("expected type %q, got %q", types.RuleTypeEVMJS, result.Rule.Type)
+		}
+		if result.Rule.Mode != types.RuleModeWhitelist {
+			t.Errorf("expected mode %q, got %q", types.RuleModeWhitelist, result.Rule.Mode)
+		}
+		if result.Rule.Source != types.RuleSourceInstance {
+			t.Errorf("expected source %q, got %q", types.RuleSourceInstance, result.Rule.Source)
+		}
+	})
+
+	t.Run("evm_js_template_with_test_cases", func(t *testing.T) {
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		// test_cases data — service layer should NOT validate this.
+		// Validation rejection happens at the handler level.
+		testCases := map[string]interface{}{
+			"test_cases": []map[string]interface{}{
+				{
+					"input":    map[string]interface{}{"value": "100"},
+					"expected": map[string]interface{}{"valid": true},
+				},
+				{
+					"input":    map[string]interface{}{"value": "99999999999999999999999999999999999999999999999999999999999"},
+					"expected": map[string]interface{}{"valid": false, "reason": "exceeds_max"},
+				},
+			},
+		}
+		configJSON, err := json.Marshal(testCases)
+		if err != nil {
+			t.Fatalf("failed to marshal test cases: %v", err)
+		}
+
+		tmpl := &types.RuleTemplate{
+			ID:        "tmpl-evmjs-tc",
+			Name:      "EVM JS With Test Cases",
+			Type:      types.RuleTypeEVMJS,
+			Mode:      types.RuleModeWhitelist,
+			Variables: mustJSON([]types.TemplateVariable{
+				{Name: "max_value", Type: "bigint", Required: true},
+			}),
+			Config:    configJSON,
+			Source:    types.RuleSourceConfig,
+			Enabled:   true,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}
+		seedTemplate(t, tmplRepo, tmpl)
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		// Service layer should succeed — validation rejection happens at the handler level
+		result, err := svc.CreateInstance(ctx, &CreateInstanceRequest{
+			TemplateID: "tmpl-evmjs-tc",
+			Variables:  map[string]string{"max_value": "1000000"},
+		})
+		if err != nil {
+			t.Fatalf("CreateInstance should succeed at service layer, got: %v", err)
+		}
+		if result.Rule == nil {
+			t.Fatal("expected non-nil rule")
+		}
+		// Config should be preserved (contain test_cases)
+		var configMap map[string]interface{}
+		if err := json.Unmarshal(result.Rule.Config, &configMap); err != nil {
+			t.Fatalf("failed to unmarshal result config: %v", err)
+		}
+		if _, ok := configMap["test_cases"]; !ok {
+			t.Error("expected test_cases in instance config")
+		}
+	})
+
+	t.Run("evm_js_template_without_test_cases", func(t *testing.T) {
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		tmpl := &types.RuleTemplate{
+			ID:        "tmpl-evmjs-notc",
+			Name:      "EVM JS No Test Cases",
+			Type:      types.RuleTypeEVMJS,
+			Mode:      types.RuleModeWhitelist,
+			Variables: mustJSON([]types.TemplateVariable{
+				{Name: "max_value", Type: "bigint", Required: true},
+			}),
+			Config:    []byte(`{"max_value":"${max_value}"}`),
+			Source:    types.RuleSourceConfig,
+			Enabled:   true,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}
+		seedTemplate(t, tmplRepo, tmpl)
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		result, err := svc.CreateInstance(ctx, &CreateInstanceRequest{
+			TemplateID: "tmpl-evmjs-notc",
+			Variables:  map[string]string{"max_value": "500000"},
+		})
+		if err != nil {
+			t.Fatalf("CreateInstance failed: %v", err)
+		}
+		if result.Rule == nil {
+			t.Fatal("expected non-nil rule")
+		}
+		if result.Rule.Type != types.RuleTypeEVMJS {
+			t.Errorf("expected type %q, got %q", types.RuleTypeEVMJS, result.Rule.Type)
+		}
+	})
+
+	t.Run("evm_js_template_non_whitelist_mode", func(t *testing.T) {
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		tmpl := &types.RuleTemplate{
+			ID:        "tmpl-evmjs-block",
+			Name:      "EVM JS Blocklist",
+			Type:      types.RuleTypeEVMJS,
+			Mode:      types.RuleModeBlocklist,
+			Variables: mustJSON([]types.TemplateVariable{
+				{Name: "max_value", Type: "bigint", Required: true},
+			}),
+			Config:    []byte(`{"max_value":"${max_value}"}`),
+			Source:    types.RuleSourceConfig,
+			Enabled:   true,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}
+		seedTemplate(t, tmplRepo, tmpl)
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		result, err := svc.CreateInstance(ctx, &CreateInstanceRequest{
+			TemplateID: "tmpl-evmjs-block",
+			Variables:  map[string]string{"max_value": "100"},
+		})
+		if err != nil {
+			t.Fatalf("CreateInstance failed: %v", err)
+		}
+		if result.Rule == nil {
+			t.Fatal("expected non-nil rule")
+		}
+		if result.Rule.Mode != types.RuleModeBlocklist {
+			t.Errorf("expected mode %q, got %q", types.RuleModeBlocklist, result.Rule.Mode)
+		}
+	})
+
+	t.Run("bundle_template_expansion", func(t *testing.T) {
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		subRules := []bundleSubRule{
+			{
+				Name: "Address Whitelist",
+				Type: string(types.RuleTypeEVMAddressList),
+				Mode: string(types.RuleModeWhitelist),
+				Config: map[string]interface{}{
+					"addresses": []string{"0x1111111111111111111111111111111111111111"},
+				},
+				Enabled: true,
+			},
+			{
+				Name: "Value Limit",
+				Type: string(types.RuleTypeEVMValueLimit),
+				Mode: string(types.RuleModeBlocklist),
+				Config: map[string]interface{}{
+					"max_value": "1000000000000000000",
+				},
+				Enabled: true,
+			},
+		}
+		subRulesJSON, err := json.Marshal(subRules)
+		if err != nil {
+			t.Fatalf("failed to marshal sub-rules: %v", err)
+		}
+
+		bundleConfig := map[string]interface{}{
+			"rules_json": string(subRulesJSON),
+		}
+		bundleConfigJSON, err := json.Marshal(bundleConfig)
+		if err != nil {
+			t.Fatalf("failed to marshal bundle config: %v", err)
+		}
+
+		tmpl := &types.RuleTemplate{
+			ID:        "tmpl-bundle-1",
+			Name:      "Composite Bundle",
+			Type:      "template_bundle",
+			Mode:      types.RuleModeWhitelist,
+			Config:    bundleConfigJSON,
+			Source:    types.RuleSourceConfig,
+			Enabled:   true,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}
+		seedTemplate(t, tmplRepo, tmpl)
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		result, err := svc.CreateInstance(ctx, &CreateInstanceRequest{
+			TemplateID: "tmpl-bundle-1",
+			Variables:  map[string]string{},
+		})
+		if err != nil {
+			t.Fatalf("CreateInstance failed: %v", err)
+		}
+		if result.Rule == nil {
+			t.Fatal("expected non-nil first sub-rule")
+		}
+		if len(result.SubRules) != 2 {
+			t.Fatalf("expected 2 sub-rules, got %d", len(result.SubRules))
+		}
+		if result.SubRules[0].Type != types.RuleTypeEVMAddressList {
+			t.Errorf("expected first sub-rule type %q, got %q", types.RuleTypeEVMAddressList, result.SubRules[0].Type)
+		}
+		if result.SubRules[0].Mode != types.RuleModeWhitelist {
+			t.Errorf("expected first sub-rule mode %q, got %q", types.RuleModeWhitelist, result.SubRules[0].Mode)
+		}
+		if result.SubRules[1].Type != types.RuleTypeEVMValueLimit {
+			t.Errorf("expected second sub-rule type %q, got %q", types.RuleTypeEVMValueLimit, result.SubRules[1].Type)
+		}
+		if result.SubRules[1].Mode != types.RuleModeBlocklist {
+			t.Errorf("expected second sub-rule mode %q, got %q", types.RuleModeBlocklist, result.SubRules[1].Mode)
+		}
+		if result.SubRules[0].Source != types.RuleSourceInstance {
+			t.Errorf("expected sub-rule source %q, got %q", types.RuleSourceInstance, result.SubRules[0].Source)
+		}
+		if result.Budget != nil {
+			t.Error("expected nil budget when none specified")
+		}
+		if len(result.SubBudgets) != 0 {
+			t.Errorf("expected 0 sub-budgets, got %d", len(result.SubBudgets))
+		}
+	})
+}

@@ -101,6 +101,9 @@ export type {
   ListRulesResponse,
   CreateRuleRequest,
   UpdateRuleRequest,
+  ValidateTestResult,
+  ValidateRuleResponse,
+  BatchValidateResponse,
   // Signer types
   SignerInfo,
   ListSignersFilter,
@@ -186,6 +189,9 @@ export type {
   InstantiateRequest,
   InstantiateResponse,
   RevokeInstanceResponse,
+  ValidateTestResult as TemplateValidateTestResult,
+  ValidateRuleResultItem,
+  ValidateTemplateResponse,
 } from "./templates";
 
 // API Keys
@@ -212,6 +218,7 @@ export type {
   ApplyPresetRequest,
   ApplyResultItem,
   ApplyPresetResponse,
+  ValidatePresetResponse,
 } from "./presets";
 
 // Registry (hot-reload templates and presets from disk)

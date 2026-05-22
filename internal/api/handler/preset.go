@@ -14,6 +14,7 @@ import (
 
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/audit"
+	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
@@ -62,6 +63,7 @@ type PresetHandler struct {
 	templateRepo    storage.TemplateRepository
 	db              *gorm.DB
 	templateSvc     *service.TemplateService
+	jsEvaluator     *evm.JSRuleEvaluator
 	readOnly        bool
 	logger          *slog.Logger
 	auditLogger     *audit.AuditLogger
@@ -82,6 +84,11 @@ func WithPresetRequireApproval(v bool) PresetHandlerOption {
 // validation during DetermineRuleOwnership.
 func WithPresetAPIKeyRepo(repo storage.APIKeyRepository) PresetHandlerOption {
 	return func(h *PresetHandler) { h.apiKeyRepo = repo }
+}
+
+// WithPresetJSEvaluator sets the JS rule evaluator for preset validation.
+func WithPresetJSEvaluator(eval *evm.JSRuleEvaluator) PresetHandlerOption {
+	return func(h *PresetHandler) { h.jsEvaluator = eval }
 }
 
 // NewPresetHandler returns a Registry-backed preset handler. presetRepo
@@ -145,13 +152,18 @@ func (h *PresetHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	// Detect known sub-actions (just /apply for now). Anything matching
-	// "<id>/apply" treats everything before "/apply" as the encoded ID.
+	// Detect known sub-actions. Anything matching
+	// "<id>/apply" or "<id>/validate" treats everything before the
+	// sub-action suffix as the encoded ID.
 	encodedID := rawPath
 	sub := ""
 	if strings.HasSuffix(rawPath, "/apply") {
 		encodedID = strings.TrimSuffix(rawPath, "/apply")
 		sub = "apply"
+	}
+	if strings.HasSuffix(rawPath, "/validate") {
+		encodedID = strings.TrimSuffix(rawPath, "/validate")
+		sub = "validate"
 	}
 	id, err := url.PathUnescape(encodedID)
 	if err != nil {
@@ -172,6 +184,18 @@ func (h *PresetHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.apply(w, r, id)
+		return
+	}
+	if sub == "validate" {
+		if r.Method != http.MethodPost {
+			h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !middleware.GetAPIKey(r.Context()).IsAdmin() {
+			h.writeError(w, "forbidden: admin role required", http.StatusForbidden)
+			return
+		}
+		h.validatePreset(w, r, id)
 		return
 	}
 	h.writeError(w, "not found", http.StatusNotFound)
@@ -327,6 +351,222 @@ func (h *PresetHandler) collectTemplateVarDefs(ctx context.Context, ids []string
 }
 
 // ---------------------------------------------------------------------------
+// Validate
+// ---------------------------------------------------------------------------
+
+// validatePresetResponse is the response for POST /api/v1/presets/{id}/validate.
+type validatePresetResponse struct {
+	PresetID   string                     `json:"preset_id"`
+	PresetName string                     `json:"preset_name"`
+	Results    []*validateRuleResultItem  `json:"results,omitempty"`
+	Total      int                        `json:"total"`
+	Passed     int                        `json:"passed"`
+	Failed     int                        `json:"failed"`
+}
+
+// validatePreset handles POST /api/v1/presets/{id}/validate.
+// Loads the preset, resolves variables (test_variables + preset defaults +
+// operator overrides), substitutes into each template's config, then runs
+// each rule's test cases through the JS evaluator.
+func (h *PresetHandler) validatePreset(w http.ResponseWriter, r *http.Request, id string) {
+	if h.jsEvaluator == nil {
+		h.writeError(w, "JS evaluator not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	p, err := h.presetRepo.Get(r.Context(), id)
+	if err != nil {
+		h.writeError(w, "preset not found", http.StatusNotFound)
+		return
+	}
+
+	templateIDs, err := decodeStringSlice(p.TemplateIDs)
+	if err != nil || len(templateIDs) == 0 {
+		h.writeError(w, "preset has no template_ids", http.StatusBadRequest)
+		return
+	}
+
+	presetVars, _ := decodeStringMap(p.Variables)
+
+	// Optional: parse request body for optional variable overrides
+	var reqVars map[string]string
+	if r.Body != nil && r.ContentLength > 0 {
+		var body struct {
+			Variables map[string]string `json:"variables"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err == nil && body.Variables != nil {
+			reqVars = body.Variables
+		}
+	}
+	mergedVars := make(map[string]string, len(presetVars))
+	for k, v := range presetVars {
+		mergedVars[k] = v
+	}
+	for k, v := range reqVars {
+		mergedVars[k] = v
+	}
+
+	// Add chain scope
+	if p.ChainID != "" {
+		mergedVars["chain_id"] = p.ChainID
+	}
+
+	var results []*validateRuleResultItem
+	totalPassed := 0
+	totalFailed := 0
+
+	for _, tid := range templateIDs {
+		tmpl, err := h.templateRepo.Get(r.Context(), tid)
+		if err != nil {
+			continue // skip unresolvable templates
+		}
+
+		// Resolve defaults + test_variables from template
+		var varDefs []types.TemplateVariable
+		if len(tmpl.Variables) > 0 {
+			json.Unmarshal(tmpl.Variables, &varDefs)
+		}
+		var testVars map[string]string
+		if len(tmpl.TestVariables) > 0 {
+			json.Unmarshal(tmpl.TestVariables, &testVars)
+		}
+		resolvedVars := resolveTemplateDefaults(varDefs, testVars)
+		// Merge preset/request vars on top (they take precedence)
+		for k, v := range mergedVars {
+			resolvedVars[k] = v
+		}
+
+		// Substitute variables into config
+		resolvedConfig, subErr := service.SubstituteVariables(tmpl.Config, resolvedVars)
+		if subErr != nil {
+			results = append(results, &validateRuleResultItem{
+				RuleName: tmpl.Name,
+				Type:     string(tmpl.Type),
+				Mode:     string(tmpl.Mode),
+				Valid:    false,
+				Error:    fmt.Sprintf("variable substitution failed: %s", subErr.Error()),
+			})
+			totalFailed++
+			continue
+		}
+
+		// Run template validation
+		ruleResults := h.runTemplateValidation(tmpl, resolvedConfig)
+		for _, rr := range ruleResults {
+			results = append(results, rr)
+			if rr.Valid {
+				totalPassed++
+			} else {
+				totalFailed++
+			}
+		}
+	}
+
+	resp := validatePresetResponse{
+		PresetID:   p.ID,
+		PresetName: p.Name,
+		Results:    results,
+		Total:      len(results),
+		Passed:     totalPassed,
+		Failed:     totalFailed,
+	}
+	h.writeJSON(w, resp, http.StatusOK)
+}
+
+// runTemplateValidation runs test cases from a template's resolved config.
+func (h *PresetHandler) runTemplateValidation(tmpl *types.RuleTemplate, resolvedConfig []byte) []*validateRuleResultItem {
+	// Parse the resolved config
+	var configDoc struct {
+		Rules []struct {
+			ID     string                 `json:"id"`
+			Name   string                 `json:"name"`
+			Type   string                 `json:"type"`
+			Mode   string                 `json:"mode"`
+			Config map[string]interface{} `json:"config"`
+		} `json:"rules"`
+	}
+	if err := json.Unmarshal(resolvedConfig, &configDoc); err != nil {
+		// Try flat config
+		return []*validateRuleResultItem{{
+			RuleName: tmpl.Name,
+			Type:     string(tmpl.Type),
+			Mode:     string(tmpl.Mode),
+			Valid:    true,
+			Error:    "no rules array in config (skipped)",
+		}}
+	}
+
+	var results []*validateRuleResultItem
+	for _, rule := range configDoc.Rules {
+		item := &validateRuleResultItem{
+			RuleName: rule.Name,
+			Type:     rule.Type,
+			Mode:     rule.Mode,
+		}
+
+		if rule.Type != string(types.RuleTypeEVMJS) {
+			item.Valid = true
+			results = append(results, item)
+			continue
+		}
+
+		// Extract test_cases
+		testCasesRaw, hasTC := rule.Config["test_cases"]
+		if !hasTC || testCasesRaw == nil {
+			item.Valid = true
+			results = append(results, item)
+			continue
+		}
+		tcJSON, _ := json.Marshal(testCasesRaw)
+		var testCases []evmhandlerJSRuleTestCase
+		if json.Unmarshal(tcJSON, &testCases) != nil || len(testCases) == 0 {
+			item.Valid = true
+			results = append(results, item)
+			continue
+		}
+
+		// Extract script
+		scriptRaw, ok := rule.Config["script"]
+		if !ok {
+			item.Error = "no script in rule config"
+			results = append(results, item)
+			continue
+		}
+		script, ok := scriptRaw.(string)
+		if !ok {
+			item.Error = "script is not a string"
+			results = append(results, item)
+			continue
+		}
+
+		// Build config map
+		cfgMap := make(map[string]interface{})
+		for k, v := range rule.Config {
+			if k != "script" && k != "test_cases" && k != "description" {
+				cfgMap[k] = v
+			}
+		}
+
+		// Run test cases
+		var failedCases []string
+		for _, tc := range testCases {
+			result := runJSTestCase(h.jsEvaluator, script, cfgMap, tc, types.RuleMode(rule.Mode))
+			if !result.Passed {
+				failedCases = append(failedCases, fmt.Sprintf("%s: %s", result.Name, result.Reason))
+			}
+		}
+		if len(failedCases) > 0 {
+			item.Valid = false
+			item.Error = fmt.Sprintf("%d test case(s) failed", len(failedCases))
+		} else {
+			item.Valid = true
+		}
+		results = append(results, item)
+	}
+	return results
+}
+
+// ---------------------------------------------------------------------------
 // Apply
 // ---------------------------------------------------------------------------
 
@@ -335,8 +575,9 @@ func (h *PresetHandler) collectTemplateVarDefs(ctx context.Context, ids []string
 // here fall back to the preset's defaults (which themselves fall back
 // to the template's declared defaults).
 type ApplyPresetRequest struct {
-	Variables map[string]string `json:"variables"`
-	AppliedTo []string          `json:"applied_to,omitempty"`
+	Variables      map[string]string `json:"variables"`
+	AppliedTo      []string          `json:"applied_to,omitempty"`
+	SkipValidation bool              `json:"skip_validation,omitempty"` // skip test case validation on apply
 }
 
 func (h *PresetHandler) apply(w http.ResponseWriter, r *http.Request, id string) {
@@ -436,8 +677,58 @@ func (h *PresetHandler) apply(w http.ResponseWriter, r *http.Request, id string)
 	budget, _ := decodeAnyMap(budgetBytes)
 	schedule, _ := decodeAnyMap(scheduleBytes)
 
+	// Run test case validation before creating (unless skipped)
+	if !body.SkipValidation && h.jsEvaluator != nil {
+		validationVars := make(map[string]string, len(mergedVars))
+		for k, v := range mergedVars {
+			validationVars[k] = v
+		}
+		if p.ChainID != "" {
+			validationVars["chain_id"] = p.ChainID
+		}
+		for _, tid := range templateIDs {
+			tmpl, tErr := h.templateRepo.Get(r.Context(), tid)
+			if tErr != nil {
+				continue
+			}
+			var varDefs []types.TemplateVariable
+			if len(tmpl.Variables) > 0 {
+				json.Unmarshal(tmpl.Variables, &varDefs)
+			}
+			var testVars map[string]string
+			if len(tmpl.TestVariables) > 0 {
+				json.Unmarshal(tmpl.TestVariables, &testVars)
+			}
+			resolvedVars := resolveTemplateDefaults(varDefs, testVars)
+			for k, v := range validationVars {
+				resolvedVars[k] = v
+			}
+			resolvedConfig, subErr := service.SubstituteVariables(tmpl.Config, resolvedVars)
+			if subErr != nil {
+				h.writeError(w, fmt.Sprintf("template %q: variable substitution for validation failed: %s", tid, subErr.Error()), http.StatusBadRequest)
+				return
+			}
+			_, allPassed := ValidateTemplateConfig(h.jsEvaluator, tmpl.Name, resolvedConfig)
+			if !allPassed {
+				results, _ := ValidateTemplateConfig(h.jsEvaluator, tmpl.Name, resolvedConfig)
+				var failures []string
+				for _, r := range results {
+					if !r.Valid && r.Error != "" {
+						failures = append(failures, fmt.Sprintf("%s: %s", r.RuleName, r.Error))
+					}
+				}
+				h.writeError(w, fmt.Sprintf("preset %q: test case validation failed for template %q: %s", id, tid, strings.Join(failures, "; ")), http.StatusBadRequest)
+				return
+			}
+		}
+		h.logger.Debug("preset test case validation passed",
+			"preset_id", id,
+			"template_ids", templateIDs,
+		)
+	}
+
 	// Build one CreateInstanceRequest per template_id. They all share
-	// the merged variables, budget, schedule, and chain scope — that's
+	// the merged variables, budget, schedule, and chain scope that's
 	// the entire point of a multi-template preset.
 	resolved, err := h.resolveInstances(r.Context(), apiKey, body.AppliedTo, p, templateIDs, mergedVars, budget, schedule)
 	if err != nil {

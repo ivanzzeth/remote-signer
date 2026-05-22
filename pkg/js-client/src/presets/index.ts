@@ -65,6 +65,7 @@ export interface PresetDetail {
 export interface ApplyPresetRequest {
   variables?: Record<string, string>;
   applied_to?: string[];
+  skip_validation?: boolean;
 }
 
 export interface ApplyResultItem {
@@ -74,6 +75,16 @@ export interface ApplyResultItem {
 
 export interface ApplyPresetResponse {
   results: ApplyResultItem[];
+}
+
+/** Response from POST /api/v1/presets/{id}/validate */
+export interface ValidatePresetResponse {
+  preset_id: string;
+  preset_name: string;
+  results: import("../templates").ValidateRuleResultItem[];
+  total: number;
+  passed: number;
+  failed: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -130,5 +141,20 @@ export class PresetService {
     variables: Record<string, string>,
   ): Promise<ApplyPresetResponse> {
     return this.apply(id, { variables });
+  }
+
+  /**
+   * Validate test cases for a preset (admin only).
+   * Optionally override variables to test different configurations.
+   */
+  async validate(
+    id: string,
+    variables?: Record<string, string>,
+  ): Promise<ValidatePresetResponse> {
+    return this.transport.request<ValidatePresetResponse>(
+      "POST",
+      `/api/v1/presets/${encodeURIComponent(id)}/validate`,
+      variables ? { variables } : null,
+    );
   }
 }

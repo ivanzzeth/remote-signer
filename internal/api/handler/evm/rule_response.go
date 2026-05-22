@@ -86,6 +86,32 @@ type RejectRuleRequest struct {
 	Reason string `json:"reason"`
 }
 
+// ValidateTestResult represents the result of a single test case validation
+type ValidateTestResult struct {
+	Name       string `json:"name"`
+	Passed     bool   `json:"passed"`
+	ActualPass bool   `json:"actual_pass"`
+	Reason     string `json:"reason,omitempty"`
+}
+
+// ValidateRuleResponse represents the response for rule validation
+type ValidateRuleResponse struct {
+	RuleID  string               `json:"rule_id"`
+	RuleName string              `json:"rule_name"`
+	Type    string               `json:"type"`
+	Valid   bool                 `json:"valid"`
+	Results []ValidateTestResult `json:"results,omitempty"`
+	Error   string               `json:"error,omitempty"`
+}
+
+// BatchValidateResponse represents the response for batch rule validation
+type BatchValidateResponse struct {
+	Results []ValidateRuleResponse `json:"results"`
+	Total   int                    `json:"total"`
+	Passed  int                    `json:"passed"`
+	Failed  int                    `json:"failed"`
+}
+
 func (h *RuleHandler) toRuleResponse(rule *types.Rule) RuleResponse {
 	resp := RuleResponse{
 		ID:          string(rule.ID),
