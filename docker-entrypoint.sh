@@ -52,12 +52,28 @@ TARGET_GID="${HOST_GID:-1000}"
 # we only fix the mount-point itself, not arbitrary content inside.
 # Files the daemon writes from this point on inherit ownership from
 # its dropped-uid identity, which is what we want.
+#
+# We deliberately do NOT suppress errors here. Earlier versions did
+# `|| true` and the suppression masked userns-remap / read-only-mount
+# failures — the chown would silently fail, gosu would drop privileges,
+# and the daemon would loop on "permission denied" with no clue why.
+# A loud abort here gives operators a clear signal to investigate
+# (manual chown, daemon config check, etc.).
 if [ -n "${REMOTE_SIGNER_HOME}" ]; then
+    echo "[entrypoint] ensuring ${REMOTE_SIGNER_HOME} is owned by ${TARGET_UID}:${TARGET_GID}" >&2
     mkdir -p "${REMOTE_SIGNER_HOME}"
-    # `chown` may fail if the kernel refuses (read-only mount, userns
-    # remap quirks). Treat it as advisory: if chown didn't take, gosu
-    # will fail loudly below and the operator gets a clear error.
-    chown "${TARGET_UID}:${TARGET_GID}" "${REMOTE_SIGNER_HOME}" 2>/dev/null || true
+    if ! chown "${TARGET_UID}:${TARGET_GID}" "${REMOTE_SIGNER_HOME}"; then
+        echo "[entrypoint] FATAL: chown ${REMOTE_SIGNER_HOME} → ${TARGET_UID}:${TARGET_GID} failed." >&2
+        echo "[entrypoint]   Likely causes:" >&2
+        echo "[entrypoint]     - docker daemon has userns-remap configured;" >&2
+        echo "[entrypoint]       remap maps container-root to a host uid that doesn't" >&2
+        echo "[entrypoint]       have CAP_CHOWN on the bind-mount target." >&2
+        echo "[entrypoint]     - bind mount source is on a filesystem that refuses chown" >&2
+        echo "[entrypoint]       (NFS without root_squash, certain FUSE mounts)." >&2
+        echo "[entrypoint]   Workaround: run \`sudo chown -R \$(id -u):\$(id -g) ${REMOTE_SIGNER_HOME}\`" >&2
+        echo "[entrypoint]               on the host before \`docker compose up\`." >&2
+        exit 1
+    fi
 fi
 
 # Drop to the target uid and exec the daemon. gosu is signal-transparent
