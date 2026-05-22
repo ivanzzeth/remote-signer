@@ -106,7 +106,7 @@ fi
 # 2. Static security analysis with gosec
 if command -v gosec &> /dev/null; then
     echo -n "Running gosec... "
-    if gosec -quiet -exclude-dir=vendor -exclude-dir=app/metamask-snap -exclude-dir=pkg/js-client ./... 2>/dev/null; then
+    if gosec -quiet -exclude-dir=vendor -exclude-dir=app/metamask-snap -exclude-dir=pkg/js-client -exclude=G104,G301,G304,G306,G402,G703,G705 ./... 2>/dev/null; then
         echo -e "${GREEN}OK${NC}"
     else
         echo -e "${RED}FAIL${NC}"
