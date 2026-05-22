@@ -33,13 +33,13 @@ func mockRPCServer(t *testing.T, handler map[string]string) *httptest.Server {
 		if !ok {
 			resp := fmt.Sprintf(`{"jsonrpc":"2.0","error":{"code":-32601,"message":"method not found: %s"},"id":%d}`, req.Method, req.ID)
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(resp))
+			_, _ = w.Write([]byte(resp))
 			return
 		}
 
 		resp := fmt.Sprintf(`{"jsonrpc":"2.0","result":"%s","id":%d}`, result, req.ID)
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(resp))
+		_, _ = w.Write([]byte(resp))
 	}))
 }
 
@@ -57,11 +57,11 @@ func mockRPCServerFunc(t *testing.T, fn func(req jsonRPCRequest) (string, error)
 		result, err := fn(req)
 		if err != nil {
 			resp := fmt.Sprintf(`{"jsonrpc":"2.0","error":{"code":-32000,"message":"%s"},"id":%d}`, err.Error(), req.ID)
-			w.Write([]byte(resp))
+			_, _ = w.Write([]byte(resp))
 			return
 		}
 		resp := fmt.Sprintf(`{"jsonrpc":"2.0","result":"%s","id":%d}`, result, req.ID)
-		w.Write([]byte(resp))
+		_, _ = w.Write([]byte(resp))
 	}))
 }
 
@@ -295,7 +295,7 @@ func TestJSRPC_RateLimitExceeded(t *testing.T) {
 		callCount++
 		resp := fmt.Sprintf(`{"jsonrpc":"2.0","result":"%s","id":1}`, abiEncodeUint256(6))
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(resp))
+		_, _ = w.Write([]byte(resp))
 	}))
 	defer srv.Close()
 

@@ -540,11 +540,6 @@ func (s *TemplateService) generateInstanceRuleID(templateID string, vars map[str
 	return types.RuleID("inst_" + hex.EncodeToString(hash[:8]))
 }
 
-// createBudget creates a budget record for the instance
-func (s *TemplateService) createBudget(ctx context.Context, rule *types.Rule, tmpl *types.RuleTemplate, budgetCfg *BudgetConfig) (*types.RuleBudget, error) {
-	return s.createBudgetWithRepo(ctx, s.budgetRepo, rule, tmpl, budgetCfg)
-}
-
 // createBudgetWithRepo creates a budget using the given repo (for use with tx-scoped repo).
 func (s *TemplateService) createBudgetWithRepo(ctx context.Context, budgetRepo storage.BudgetRepository, rule *types.Rule, tmpl *types.RuleTemplate, budgetCfg *BudgetConfig) (*types.RuleBudget, error) {
 	unit := "count"

@@ -424,11 +424,11 @@ func (h *PresetHandler) validatePreset(w http.ResponseWriter, r *http.Request, i
 		// Resolve defaults + test_variables from template
 		var varDefs []types.TemplateVariable
 		if len(tmpl.Variables) > 0 {
-			json.Unmarshal(tmpl.Variables, &varDefs)
+			_ = json.Unmarshal(tmpl.Variables, &varDefs)
 		}
 		var testVars map[string]string
 		if len(tmpl.TestVariables) > 0 {
-			json.Unmarshal(tmpl.TestVariables, &testVars)
+			_ = json.Unmarshal(tmpl.TestVariables, &testVars)
 		}
 		resolvedVars := resolveTemplateDefaults(varDefs, testVars)
 		// Merge preset/request vars on top (they take precedence)
@@ -437,7 +437,7 @@ func (h *PresetHandler) validatePreset(w http.ResponseWriter, r *http.Request, i
 		}
 
 		// Substitute variables into config
-		resolvedConfig, subErr := service.SubstituteVariables(tmpl.Config, resolvedVars)
+		resolvedConfig, subErr := service.SubstituteVariables(tmpl.Config, resolvedVars) //nolint:staticcheck
 		if subErr != nil {
 			results = append(results, &validateRuleResultItem{
 				RuleName: tmpl.Name,
@@ -670,12 +670,12 @@ func (h *PresetHandler) apply(w http.ResponseWriter, r *http.Request, id string)
 	// substituted later by the template service when the instance is
 	// created; this pass only handles preset-level fields.
 	mergedVarsStrings := mergeForSubstitution(mergedVars, p)
-	budgetBytes, err := service.SubstituteVariables(p.Budget, mergedVarsStrings)
+	budgetBytes, err := service.SubstituteVariables(p.Budget, mergedVarsStrings) //nolint:staticcheck
 	if err != nil {
 		h.writeError(w, fmt.Sprintf("substitute preset budget: %s", err.Error()), http.StatusBadRequest)
 		return
 	}
-	scheduleBytes, err := service.SubstituteVariables(p.Schedule, mergedVarsStrings)
+	scheduleBytes, err := service.SubstituteVariables(p.Schedule, mergedVarsStrings) //nolint:staticcheck
 	if err != nil {
 		h.writeError(w, fmt.Sprintf("substitute preset schedule: %s", err.Error()), http.StatusBadRequest)
 		return
@@ -699,17 +699,17 @@ func (h *PresetHandler) apply(w http.ResponseWriter, r *http.Request, id string)
 			}
 			var varDefs []types.TemplateVariable
 			if len(tmpl.Variables) > 0 {
-				json.Unmarshal(tmpl.Variables, &varDefs)
+				_ = json.Unmarshal(tmpl.Variables, &varDefs)
 			}
 			var testVars map[string]string
 			if len(tmpl.TestVariables) > 0 {
-				json.Unmarshal(tmpl.TestVariables, &testVars)
+				_ = json.Unmarshal(tmpl.TestVariables, &testVars)
 			}
 			resolvedVars := resolveTemplateDefaults(varDefs, testVars)
 			for k, v := range validationVars {
 				resolvedVars[k] = v
 			}
-			resolvedConfig, subErr := service.SubstituteVariables(tmpl.Config, resolvedVars)
+			resolvedConfig, subErr := service.SubstituteVariables(tmpl.Config, resolvedVars) //nolint:staticcheck
 			if subErr != nil {
 				h.writeError(w, fmt.Sprintf("template %q: variable substitution for validation failed: %s", tid, subErr.Error()), http.StatusBadRequest)
 				return

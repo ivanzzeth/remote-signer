@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -621,26 +620,6 @@ func expandInstanceRule(rule RuleConfig, templates map[string]TemplateConfig) ([
 	return templateRules, nil
 }
 
-// injectChainIDIntoTestCases sets chain_id in each test case's input to match the
-// rule's scope. Without this, test cases default to chain_id=1 and the rule engine's
-// scope filter rejects them for non-chain-1 rules.
-func injectChainIDIntoTestCases(testCases []TestCaseConfig, chainID string) {
-	if chainID == "" {
-		return
-	}
-	// Parse as int for JSON numeric type (chain_id in test input is numeric)
-	chainIDNum, err := strconv.ParseInt(chainID, 10, 64)
-	for i := range testCases {
-		if testCases[i].Input == nil {
-			continue
-		}
-		if err == nil {
-			testCases[i].Input["chain_id"] = chainIDNum
-		} else {
-			testCases[i].Input["chain_id"] = chainID
-		}
-	}
-}
 
 // instanceScopeSuffix returns a suffix like "evm-137" from the instance rule's
 // scope fields (chain_type, chain_id).  Returns "" if no scope is set.

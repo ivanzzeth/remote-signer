@@ -1164,10 +1164,6 @@ func (v *SolidityRuleValidator) modeString(mode ValidationMode) string {
 	}
 }
 
-// validateSyntaxForMode compiles the Solidity code to check for syntax errors based on mode
-func (v *SolidityRuleValidator) validateSyntaxForMode(ctx context.Context, code string, mode ValidationMode) (*SyntaxError, error) {
-	return v.validateSyntaxForModeWithStruct(ctx, code, mode, nil, nil)
-}
 
 // validateSyntaxForModeWithStruct compiles the Solidity code to check for syntax errors based on mode
 // If structDef is provided, it will be used for struct-based syntax checking in TypedDataExpression mode

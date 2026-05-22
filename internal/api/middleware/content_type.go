@@ -22,7 +22,7 @@ func ContentTypeMiddleware() func(http.Handler) http.Handler {
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusUnsupportedMediaType)
 					// #nosec G104 -- HTTP response write error cannot be meaningfully handled
-					json.NewEncoder(w).Encode(map[string]string{
+					_ = json.NewEncoder(w).Encode(map[string]string{
 						"error": "Content-Type must be application/json",
 					})
 					return

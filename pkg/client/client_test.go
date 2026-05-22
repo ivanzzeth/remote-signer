@@ -128,7 +128,7 @@ func TestClient_Health(t *testing.T) {
 		assert.Equal(t, http.MethodGet, r.Method)
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(client.HealthResponse{
+		_ = json.NewEncoder(w).Encode(client.HealthResponse{
 			Status:  "healthy",
 			Version: "1.0.0",
 		})
@@ -178,7 +178,7 @@ func TestClient_Sign_AutoApproved(t *testing.T) {
 		assert.True(t, ed25519.Verify(publicKey, []byte(message), sigBytes))
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(evm.SignResponse{
+		_ = json.NewEncoder(w).Encode(evm.SignResponse{
 			RequestID:  "req_123",
 			Status:     evm.StatusCompleted,
 			Signature:  "0x" + hex.EncodeToString(make([]byte, 65)),
@@ -214,7 +214,7 @@ func TestClient_Sign_PendingApproval(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 
 		if r.URL.Path == "/api/v1/evm/sign" {
-			json.NewEncoder(w).Encode(evm.SignResponse{
+			_ = json.NewEncoder(w).Encode(evm.SignResponse{
 				RequestID: "req_456",
 				Status:    evm.StatusAuthorizing,
 				Message:   "pending manual approval",
@@ -225,12 +225,12 @@ func TestClient_Sign_PendingApproval(t *testing.T) {
 		if r.URL.Path == "/api/v1/evm/requests/req_456" {
 			requestCount++
 			if requestCount < 3 {
-				json.NewEncoder(w).Encode(evm.RequestStatus{
+				_ = json.NewEncoder(w).Encode(evm.RequestStatus{
 					ID:     "req_456",
 					Status: evm.StatusAuthorizing,
 				})
 			} else {
-				json.NewEncoder(w).Encode(evm.RequestStatus{
+				_ = json.NewEncoder(w).Encode(evm.RequestStatus{
 					ID:        "req_456",
 					Status:    evm.StatusCompleted,
 					Signature: "0x" + hex.EncodeToString(make([]byte, 65)),
@@ -269,7 +269,7 @@ func TestClient_Sign_Rejected(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(evm.SignResponse{
+		_ = json.NewEncoder(w).Encode(evm.SignResponse{
 			RequestID: "req_789",
 			Status:    evm.StatusRejected,
 			Message:   "request rejected by admin",
@@ -305,7 +305,7 @@ func TestClient_GetRequest(t *testing.T) {
 		assert.Equal(t, "/api/v1/evm/requests/req_test", r.URL.Path)
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(evm.RequestStatus{
+		_ = json.NewEncoder(w).Encode(evm.RequestStatus{
 			ID:            "req_test",
 			ChainType:     "evm",
 			ChainID:       "1",
@@ -391,7 +391,7 @@ func TestSignError_Is(t *testing.T) {
 
 func readAndRestoreBody(r *http.Request) ([]byte, error) {
 	body := make([]byte, r.ContentLength)
-	r.Body.Read(body)
+	_, _ = r.Body.Read(body)
 	return body, nil
 }
 
@@ -423,16 +423,16 @@ func TestRemoteSigner_PersonalSign(t *testing.T) {
 		assert.Equal(t, "/api/v1/evm/sign", r.URL.Path)
 
 		var req evm.SignRequest
-		json.NewDecoder(r.Body).Decode(&req)
+		_ = json.NewDecoder(r.Body).Decode(&req)
 
 		assert.Equal(t, evm.SignTypePersonal, req.SignType)
 
 		var payload evm.MessagePayload
-		json.Unmarshal(req.Payload, &payload)
+		_ = json.Unmarshal(req.Payload, &payload)
 		assert.Equal(t, "Hello, World!", payload.Message)
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(evm.SignResponse{
+		_ = json.NewEncoder(w).Encode(evm.SignResponse{
 			RequestID: "req_sig",
 			Status:    evm.StatusCompleted,
 			Signature: "0x" + hex.EncodeToString(expectedSig),
@@ -463,16 +463,16 @@ func TestRemoteSigner_SignHash(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req evm.SignRequest
-		json.NewDecoder(r.Body).Decode(&req)
+		_ = json.NewDecoder(r.Body).Decode(&req)
 
 		assert.Equal(t, evm.SignTypeHash, req.SignType)
 
 		var payload evm.HashPayload
-		json.Unmarshal(req.Payload, &payload)
+		_ = json.Unmarshal(req.Payload, &payload)
 		assert.Equal(t, testHash.Hex(), payload.Hash)
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(evm.SignResponse{
+		_ = json.NewEncoder(w).Encode(evm.SignResponse{
 			RequestID: "req_hash",
 			Status:    evm.StatusCompleted,
 			Signature: "0x" + hex.EncodeToString(expectedSig),

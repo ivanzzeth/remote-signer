@@ -111,9 +111,9 @@ func TestCleanup(t *testing.T) {
 	ctx := context.Background()
 
 	// Add some nonces with short TTL
-	store.CheckAndStore(ctx, "key-1", "n1", 10*time.Millisecond)
-	store.CheckAndStore(ctx, "key-1", "n2", 10*time.Millisecond)
-	store.CheckAndStore(ctx, "key-1", "n3", time.Hour) // this one doesn't expire
+	_, _ = store.CheckAndStore(ctx, "key-1", "n1", 10*time.Millisecond)
+	_, _ = store.CheckAndStore(ctx, "key-1", "n2", 10*time.Millisecond)
+	_, _ = store.CheckAndStore(ctx, "key-1", "n3", time.Hour) // this one doesn't expire
 
 	time.Sleep(20 * time.Millisecond)
 

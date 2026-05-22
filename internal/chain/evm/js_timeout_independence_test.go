@@ -49,7 +49,7 @@ func TestJSTimeout_RPCCallDoesNotConsumeJSBudget(t *testing.T) {
 		}
 		resp := fmt.Sprintf(`{"jsonrpc":"2.0","result":"%s","id":%d}`, abiEncodeUint256(18), req.ID)
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(resp))
+		_, _ = w.Write([]byte(resp))
 	}))
 	defer srv.Close()
 
@@ -94,7 +94,7 @@ func TestJSTimeout_CumulativeRPCTimeExceedsLimit(t *testing.T) {
 		}
 		resp := fmt.Sprintf(`{"jsonrpc":"2.0","result":"%s","id":%d}`, abiEncodeUint256(6), req.ID)
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(resp))
+		_, _ = w.Write([]byte(resp))
 	}))
 	defer srv.Close()
 
@@ -193,7 +193,7 @@ func TestJSTimeout_Web3CallAlsoPausesTimer(t *testing.T) {
 		}
 		resp := fmt.Sprintf(`{"jsonrpc":"2.0","result":"%s","id":%d}`, abiEncodeUint256(42), req.ID)
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(resp))
+		_, _ = w.Write([]byte(resp))
 	}))
 	defer srv.Close()
 

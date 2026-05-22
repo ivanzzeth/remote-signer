@@ -352,11 +352,7 @@ func (s *rpcSimulator) parseCallResult(call ethSimCallResult, from, to, value st
 func ethSimLogsToTxLogs(logs []ethSimLog) []TxLog {
 	out := make([]TxLog, len(logs))
 	for i, l := range logs {
-		out[i] = TxLog{
-			Address: l.Address,
-			Topics:  l.Topics,
-			Data:    l.Data,
-		}
+		out[i] = TxLog(l)
 	}
 	return out
 }

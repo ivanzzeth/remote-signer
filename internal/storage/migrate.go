@@ -36,10 +36,7 @@ func runMigrations(db *gorm.DB, dsn string) error {
 		// GORM sqlite DSN uses "file:./path?params" or "file::memory:?cache=shared".
 		// Strip "file:" prefix so golang-migrate doesn't treat "file" as host.
 		// For in-memory DBs (":memory:" or "::memory:"), keep as-is after stripping "file:".
-		cleaned := dsn
-		if strings.HasPrefix(cleaned, "file:") {
-			cleaned = strings.TrimPrefix(cleaned, "file:")
-		}
+		cleaned := strings.TrimPrefix(dsn, "file:")
 		migrateURL = "sqlite://" + cleaned
 		embedPath = "migrations/sqlite"
 	default:

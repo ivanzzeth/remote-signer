@@ -24,11 +24,11 @@ func TestRPCSimulator_ResponseSizeLimit(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		// Write a valid-looking JSON prefix, then pad to exceed 1MB.
 		prefix := `{"jsonrpc":"2.0","id":1,"result":[{"calls":[{"status":"0x1","gasUsed":"0x5208","returnData":"0x","logs":[]}]}],"padding":"`
-		w.Write([]byte(prefix))
+		_, _ = w.Write([]byte(prefix))
 		// Write padding to exceed 1MB limit.
 		padding := strings.Repeat("A", 2*1024*1024)
-		w.Write([]byte(padding))
-		w.Write([]byte(`"}`))
+		_, _ = w.Write([]byte(padding))
+		_, _ = w.Write([]byte(`"}`))
 	}))
 	defer srv.Close()
 

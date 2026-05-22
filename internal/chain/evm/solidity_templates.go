@@ -192,15 +192,6 @@ contract RuleEvaluator {
 }
 `
 
-// solidityBatchTypedDataTestTemplate is for batch testing multiple typed data rules in a single contract
-// This significantly reduces compilation time by compiling once instead of N times
-const solidityBatchTypedDataTestTemplate = `// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
-
-contract BatchRuleEvaluatorTest {
-    {{.TestFunctions}}
-}
-`
 
 // solidityTypedDataFunctionsTemplate is for EIP-712 typed data validation using struct-based functions
 // Context variables use prefixes to avoid conflicts with user-defined field names:

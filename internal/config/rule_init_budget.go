@@ -134,7 +134,7 @@ func syncDynamicBudgetFromConfig(ctx context.Context, rule *types.Rule, tmpl *ty
 	}
 
 	// Collect known_units from the instance budget config (preset-generated)
-	knownUnitsRaw, _ := substituted["known_units"]
+	knownUnitsRaw := substituted["known_units"]
 	knownUnits := make(map[string]map[string]interface{})
 	switch ku := knownUnitsRaw.(type) {
 	case map[string]interface{}:

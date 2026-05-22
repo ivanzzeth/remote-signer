@@ -163,11 +163,6 @@ func (r *raceBudgetRepo) budgetCount(ruleID types.RuleID) int {
 	return count
 }
 
-func (r *raceBudgetRepo) wasDeleted(id string) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.deleted[id]
-}
 
 // TestAutoCreateDynamicBudget_TOCTOU_ConcurrentUnitsRespectMax verifies that concurrent
 // creation of dynamic budget units for different tokens respects MaxDynamicUnits.

@@ -615,5 +615,5 @@ func (h *APIKeyHandler) writeError(w http.ResponseWriter, msg string, code int) 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	// #nosec G104 -- HTTP response write error cannot be meaningfully handled
-	json.NewEncoder(w).Encode(map[string]string{"error": msg})
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }

@@ -593,13 +593,6 @@ func formatOptionalTime(t *time.Time) string {
 	return t.Format(time.RFC3339)
 }
 
-func adminStyle(isAdmin bool) lipgloss.Style {
-	if isAdmin {
-		return lipgloss.NewStyle().Foreground(styles.ErrorColor).Bold(true)
-	}
-	return styles.MutedColor
-}
-
 func enabledStyle(isEnabled bool) lipgloss.Style {
 	if isEnabled {
 		return styles.SuccessStyle

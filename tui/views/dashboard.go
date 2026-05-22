@@ -229,23 +229,17 @@ func (m *DashboardModel) renderError() string {
 }
 
 func (m *DashboardModel) renderDashboard() string {
-	var sections []string
-
 	// Status section
 	statusBox := m.renderStatusSection()
-	sections = append(sections, statusBox)
 
 	// Request counts section
 	requestsBox := m.renderRequestsSection()
-	sections = append(sections, requestsBox)
 
 	// Rules section
 	rulesBox := m.renderRulesSection()
-	sections = append(sections, rulesBox)
 
 	// Security config section
 	securityBox := m.renderSecuritySection()
-	sections = append(sections, securityBox)
 
 	// Join sections horizontally if there's room
 	topRow := lipgloss.JoinHorizontal(lipgloss.Top, statusBox, "  ", requestsBox)
