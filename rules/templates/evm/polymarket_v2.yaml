@@ -64,6 +64,11 @@ variables:
     type: string
     description: "V2 Exchange EIP-712 domain version"
     required: true
+  - name: test_wrong_signer
+    type: address
+    description: "Address that differs from allowed_safe_address_for_testing — for signer-mismatch test case"
+    required: false
+    default: ""
 test_variables:
   chain_id: "137"
   exchange_v2_address: "0xE111180000d2663C0091e4f400237545B87B996B"
@@ -79,6 +84,7 @@ test_variables:
   neg_risk_adapter_address: "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296"
   allowed_safe_addresses: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
   allowed_safe_address_for_testing: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+  test_wrong_signer: "0xEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE"
   v2_exchange_domain_name: "Polymarket CTF Exchange"
   v2_exchange_domain_version: "2"
 rules:
@@ -232,7 +238,7 @@ rules:
               message:
                 salt: "12345"
                 maker: "${allowed_safe_address_for_testing}"
-                signer: "0x1111111111111111111111111111111111111111"
+                signer: "${test_wrong_signer}"
                 tokenId: "1"
                 makerAmount: "1000000000000000000"
                 takerAmount: "1000000000000000000"

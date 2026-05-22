@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -35,6 +36,15 @@ func validateFile(ctx context.Context, filePath string, validator *evm.SolidityR
 	data, err := os.ReadFile(filePath) // #nosec G304 -- filePath is CLI argument
 	if err != nil {
 		return nil, 0, 0, fmt.Errorf("failed to read file: %w", err)
+	}
+
+	// Detect preset files (have template_ids key) vs template/rule files
+	var rawMap map[string]any
+	if err := yaml.Unmarshal(data, &rawMap); err != nil {
+		return nil, 0, 0, fmt.Errorf("failed to parse YAML: %w", err)
+	}
+	if _, ok := rawMap["template_ids"]; ok {
+		return validatePresetFile(ctx, data, filePath, validator, msgValidator, jsValidator, log, verbose)
 	}
 
 	// Try template format first (has variables + rules)
@@ -83,6 +93,129 @@ func validateFile(ctx context.Context, filePath string, validator *evm.SolidityR
 
 	// Template files use isolated engines (per-rule) so other rules don't interfere with template test cases.
 	return validateRules(ctx, rules, validator, msgValidator, jsValidator, templateFile.TestVariables, log, verbose, false)
+}
+
+// validatePresetFile validates a preset YAML file by finding each referenced
+// template, merging preset variables, and running the existing template
+// validation pipeline.
+func validatePresetFile(ctx context.Context, data []byte, filePath string, validator *evm.SolidityRuleValidator, msgValidator *evm.MessagePatternRuleValidator, jsValidator *evm.JSRuleValidator, log *slog.Logger, verbose bool) ([]ValidationFileResult, int, int, error) {
+	var raw map[string]any
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return nil, 0, 0, fmt.Errorf("failed to parse preset YAML: %w", err)
+	}
+
+	// Extract template_ids
+	templateIDsRaw, ok := raw["template_ids"]
+	if !ok {
+		return nil, 0, 0, fmt.Errorf("preset file has no template_ids")
+	}
+	templateIDsRawSlice, ok := templateIDsRaw.([]interface{})
+	if !ok {
+		return nil, 0, 0, fmt.Errorf("template_ids must be a list")
+	}
+	templateIDs := make([]string, 0, len(templateIDsRawSlice))
+	for _, t := range templateIDsRawSlice {
+		s, ok := t.(string)
+		if !ok {
+			return nil, 0, 0, fmt.Errorf("template_ids entry must be a string")
+		}
+		templateIDs = append(templateIDs, s)
+	}
+
+	// Extract preset variables
+	presetVarsRaw, _ := raw["variables"].(map[string]interface{})
+	presetVars := interfaceMapToStringMap(presetVarsRaw)
+
+	// Inject chain_id from preset top-level into variables
+	if chainID, ok := raw["chain_id"].(string); ok && chainID != "" {
+		presetVars["chain_id"] = chainID
+	}
+
+	// Derive templates root: replace /presets/ with /templates/, go up one level
+	templatesCandidate := strings.Replace(filePath, "/presets/", "/templates/", 1)
+	if templatesCandidate == filePath {
+		// Fallback for edge-case paths
+		templatesCandidate = filepath.Join(filepath.Dir(filePath), "..", "templates")
+	}
+	templatesRoot := filepath.Dir(filepath.Dir(templatesCandidate))
+
+	// Collect ALL rules from ALL templates first, then validate them together
+	// so delegate_to cross-references between templates resolve correctly.
+	var allRules []RuleConfig
+	mergedVars := make(map[string]string)
+	// Base: collect template test_variables from each template
+	for _, tid := range templateIDs {
+		tmplPath := filepath.Join(templatesRoot, tid+".yaml")
+		tmplData, err := os.ReadFile(tmplPath)
+		if err != nil {
+			log.Warn("Preset references unresolvable template", "template_id", tid, "path", tmplPath, "error", err)
+			continue
+		}
+		var tmplFile TemplateFile
+		if err := yaml.Unmarshal(tmplData, &tmplFile); err != nil {
+			log.Warn("Failed to parse template file referenced by preset", "template_id", tid, "path", tmplPath, "error", err)
+			continue
+		}
+		if len(tmplFile.Rules) == 0 {
+			log.Warn("Template has no rules, skipping", "template_id", tid)
+			continue
+		}
+		// Collect test_variables from each template
+		for k, v := range tmplFile.TestVariables {
+			if _, exists := mergedVars[k]; !exists {
+				mergedVars[k] = v
+			}
+		}
+	}
+	// Preset variables override template test_variables
+	for k, v := range presetVars {
+		mergedVars[k] = v
+	}
+
+	for _, tid := range templateIDs {
+		tmplPath := filepath.Join(templatesRoot, tid+".yaml")
+		tmplData, err := os.ReadFile(tmplPath)
+		if err != nil {
+			continue
+		}
+		var tmplFile TemplateFile
+		if err := yaml.Unmarshal(tmplData, &tmplFile); err != nil {
+			continue
+		}
+		if len(tmplFile.Rules) == 0 {
+			continue
+		}
+
+		// Substitute variables into template rules
+		rulesJSON, err := json.Marshal(tmplFile.Rules)
+		if err != nil {
+			return nil, 0, 0, fmt.Errorf("failed to marshal template rules for %q: %w", tid, err)
+		}
+		resolved, err := substituteVarsInString(string(rulesJSON), mergedVars)
+		if err != nil {
+			return nil, 0, 0, fmt.Errorf("variable substitution failed for template %q: %w", tid, err)
+		}
+		var resolvedRules []RuleConfig
+		if err := json.Unmarshal([]byte(resolved), &resolvedRules); err != nil {
+			return nil, 0, 0, fmt.Errorf("failed to unmarshal resolved rules for template %q: %w", tid, err)
+		}
+
+		// Set mergedVars as TestVariables so validateRules seeds the JS engine with preset values
+		for i := range resolvedRules {
+			resolvedRules[i].TestVariables = mergedVars
+		}
+
+		allRules = append(allRules, resolvedRules...)
+	}
+
+	if len(allRules) == 0 {
+		return nil, 0, 0, fmt.Errorf("no valid rules found in preset templates")
+	}
+
+	extractTestCasesFromConfig(allRules)
+
+	// Validate ALL rules together so delegate_to cross-references work
+	return validateRules(ctx, allRules, validator, msgValidator, jsValidator, mergedVars, log, verbose, true)
 }
 
 // extractTestCasesFromConfig moves test_cases out of the Config map and onto
