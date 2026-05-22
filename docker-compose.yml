@@ -43,6 +43,13 @@ services:
         VERSION: ${VERSION:-docker}
     container_name: remote-signer
     restart: unless-stopped
+    # Pin the container's runtime user so the Dockerfile entrypoint
+    # short-circuits its root-only chown / gosu step. The prod posture
+    # below (cap_drop ALL + read_only fs) would otherwise reject gosu
+    # for lack of CAP_SETUID. The local compose drops `user:` and lets
+    # the entrypoint drop privileges itself — bind mount UX, not
+    # threat-model symmetry.
+    user: "signer"
     # Host network mode: shares host's network stack directly.
     # This allows IP whitelist to see real client IPs (Docker bridge NAT
     # would otherwise rewrite all source IPs to the gateway address).

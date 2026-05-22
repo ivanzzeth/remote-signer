@@ -57,20 +57,21 @@ services:
     container_name: remote-signer-local
     restart: unless-stopped
 
-    # Run as the host user so the bind-mounted ~/.remote-signer is
-    # readable/writable without chown gymnastics. We use HOST_UID /
-    # HOST_GID rather than UID / GID because bash treats UID as a
-    # readonly builtin — `UID=$(id -u) docker compose ...` silently
-    # fails to export the var, and compose falls back to defaults
-    # which don't match a non-1000 user on the host. HOST_UID has
-    # no such collision.
+    # Container starts as root and the entrypoint chown's the
+    # bind-mounted home dir before dropping privileges via gosu —
+    # see docker-entrypoint.sh. We pass HOST_UID / HOST_GID as env
+    # vars (not as `user:`) so the entrypoint can both fix ownership
+    # AND drop to the right uid. Without this dance, a `docker
+    # compose up` on a host that never had ~/.remote-signer fails
+    # at startup because docker auto-creates the bind target as
+    # root:root and the daemon process (uid 1000) can't write there.
     #
     # Usage:
     #   HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose -f docker-compose.local.yml up -d
     #
     # Or drop them in a .env file alongside this compose and compose
-    # picks them up automatically.
-    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    # picks them up automatically. Defaults to 1000:1000 (matches
+    # the first user on most Linux installs).
 
     # Host network: binds 127.0.0.1:8548 directly on the host so the
     # extension, dApps, and CLI work without --url overrides. Matches
@@ -87,6 +88,12 @@ services:
       # modernc's wrapper surfaces the underlying ENOENT.
       REMOTE_SIGNER_HOME: ${HOME}/.remote-signer
       HOME: ${HOME}
+
+      # Entrypoint reads these to chown the bind mount + drop privileges
+      # to the matching uid before exec'ing the daemon. See
+      # docker-entrypoint.sh for the full rationale.
+      HOST_UID: ${HOST_UID:-1000}
+      HOST_GID: ${HOST_GID:-1000}
 
       # Optional. When set, the daemon bootstraps the admin keystore at
       # startup using this password. When unset (default), the daemon
