@@ -76,17 +76,21 @@ FROM debian:bookworm-slim
 
 # ca-certificates for outbound TLS (gateway RPC, notifications).
 # git is kept because foundry's `forge install` clones repos at first use;
-# tzdata so log timestamps make sense; wget for the healthcheck.
+# tzdata so log timestamps make sense; wget for the healthcheck;
+# gosu for the entrypoint's drop-to-non-root step (avoids a sudo install
+# and matches the pattern used by the official postgres / mysql images).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     git \
+    gosu \
     tzdata \
     wget \
     && rm -rf /var/lib/apt/lists/*
 
-# Non-root user. uid 1000 by default; docker-compose.local.yml can override
-# at runtime via `user: ${UID}:${GID}` so bind-mounted ~/.remote-signer
-# from the host stays readable to the host user.
+# Non-root user. uid 1000 by default; the entrypoint can override at
+# runtime via HOST_UID / HOST_GID so a bind-mounted ~/.remote-signer
+# from the host stays readable to the host user even when the docker
+# daemon auto-created the mount target as root.
 RUN useradd -m -u 1000 signer
 WORKDIR /app
 
@@ -98,11 +102,21 @@ RUN mkdir -p /app/data /app/data/keystores /app/data/hd-wallets /var/cache/remot
 # Example config; users typically override via volume mount or env.
 COPY config.example.yaml /app/config.example.yaml
 
-USER signer
+# Entrypoint handles the bind-mount-ownership / drop-privileges dance so
+# a bare `docker compose up` works for new users without manual chown.
+# See docker-entrypoint.sh for the full flow + rationale.
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# IMPORTANT: container starts as root, not as `signer`. The entrypoint
+# decides whether to drop to HOST_UID:HOST_GID (default: signer's 1000)
+# after fixing the bind mount's ownership. Compose files / docker run
+# can still pin `user: …` to bypass the entrypoint's auto-uid path.
 
 EXPOSE 8548
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:8548/health || exit 1
 
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["/app/remote-signer", "server", "start", "-config", "/app/config.yaml"]
