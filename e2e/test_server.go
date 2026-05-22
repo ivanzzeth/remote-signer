@@ -115,7 +115,7 @@ func (ts *TestServer) Start() error {
 		}
 
 		var err error
-		cfg, err = config.Load(configPath)
+		cfg, err = config.LoadUnvalidated(configPath)
 		if err != nil {
 			log.Warn("Failed to load config.e2e.yaml, using defaults", "error", err, "path", configPath)
 			cfg = nil

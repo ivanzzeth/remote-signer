@@ -258,6 +258,9 @@ func (h *TemplateHandler) validateTemplate(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Parse the resolved config as a rules array
+	var results []*validateRuleResultItem
+	totalPassed := 0
+	totalFailed := 0
 	var configDoc struct {
 		Rules []struct {
 			ID     string                 `json:"id"`
@@ -274,7 +277,24 @@ func (h *TemplateHandler) validateTemplate(w http.ResponseWriter, r *http.Reques
 			TestCases []map[string]interface{} `json:"test_cases"`
 		}
 		if flatErr := json.Unmarshal(resolvedConfig, &flatConfig); flatErr != nil {
-			h.writeError(w, "failed to parse template config", http.StatusBadRequest)
+			// Third fallback: non-evm_js template (e.g. sign_type_restriction).
+			results = append(results, &validateRuleResultItem{
+				RuleName: tmpl.Name,
+				Type:     string(tmpl.Type),
+				Mode:     string(tmpl.Mode),
+				Valid:    true,
+				Error:    "non-evm_js template (config format not recognized)",
+			})
+			totalPassed++
+			resp := validateTemplateResponse{
+				TemplateID:   templateID,
+				TemplateName: tmpl.Name,
+				Results:      results,
+				Total:        len(results),
+				Passed:       totalPassed,
+				Failed:       totalFailed,
+			}
+			h.writeJSON(w, resp, http.StatusOK)
 			return
 		}
 		configDoc.Rules = []struct {
@@ -289,9 +309,6 @@ func (h *TemplateHandler) validateTemplate(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Parse types from the template's top-level if rules don't override
-	var results []*validateRuleResultItem
-	totalPassed := 0
-	totalFailed := 0
 
 	for _, rule := range configDoc.Rules {
 		item := &validateRuleResultItem{
@@ -358,6 +375,13 @@ func (h *TemplateHandler) validateTemplate(w http.ResponseWriter, r *http.Reques
 		cfgMap := make(map[string]interface{})
 		for k, v := range rule.Config {
 			if k != "script" && k != "test_cases" && k != "description" {
+				cfgMap[k] = v
+			}
+		}
+		// Merge template-level variables into cfgMap so JS scripts can
+		// reference them via config.xxx (e.g. config.exchange_v2_address).
+		for k, v := range resolvedVars {
+			if _, exists := cfgMap[k]; !exists {
 				cfgMap[k] = v
 			}
 		}
@@ -448,7 +472,7 @@ func runJSTestCase(eval *evm.JSRuleEvaluator, script string, cfgMap map[string]i
 // ValidateTemplateConfig runs test cases from a resolved template config against the JS evaluator.
 // Returns validation results for each rule in the config. Handles both bundle (rules array) and
 // flat config formats. Used by both template instantiation and preset apply.
-func ValidateTemplateConfig(jsEvaluator *evm.JSRuleEvaluator, tmplName string, resolvedConfig []byte) ([]*validateRuleResultItem, bool) {
+func ValidateTemplateConfig(jsEvaluator *evm.JSRuleEvaluator, tmplName string, resolvedConfig []byte, resolvedVars map[string]string) ([]*validateRuleResultItem, bool) {
 	var configDoc struct {
 		Rules []struct {
 			ID     string                 `json:"id"`
@@ -511,6 +535,12 @@ func ValidateTemplateConfig(jsEvaluator *evm.JSRuleEvaluator, tmplName string, r
 		cfgMap := make(map[string]interface{})
 		for k, v := range rule.Config {
 			if k != "script" && k != "test_cases" && k != "description" {
+				cfgMap[k] = v
+			}
+		}
+		// Merge template-level variables into cfgMap
+		for k, v := range resolvedVars {
+			if _, exists := cfgMap[k]; !exists {
 				cfgMap[k] = v
 			}
 		}

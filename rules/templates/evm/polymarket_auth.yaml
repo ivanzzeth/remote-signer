@@ -11,10 +11,16 @@ variables:
     type: string
     description: "ClobAuth EIP-712 domain version"
     required: true
+  - name: allowed_safe_address
+    type: address
+    description: "Allowed Safe address for ClobAuth test payloads"
+    required: false
+    default: ""
 test_variables:
   chain_id: "137"
   clob_auth_domain_name: "ClobAuthDomain"
   clob_auth_domain_version: "1"
+  allowed_safe_address: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
 rules:
   - id: "polymarket-clob-auth"
     name: "Polymarket CLOB Auth Signature"
@@ -57,7 +63,7 @@ rules:
                 version: "${clob_auth_domain_version}"
                 chainId: "${chain_id}"
               message:
-                address: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+                address: "${allowed_safe_address}"
                 timestamp: "1704067200"
                 nonce: "12345"
                 message: "This message attests that I control the given wallet"
@@ -71,7 +77,7 @@ rules:
                 version: "${clob_auth_domain_version}"
                 chainId: "${chain_id}"
               message:
-                address: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+                address: "${allowed_safe_address}"
                 timestamp: "1704067200"
                 nonce: "12345"
                 message: "This message attests that I control the given wallet"
@@ -86,7 +92,7 @@ rules:
                 version: "${clob_auth_domain_version}"
                 chainId: "56"
               message:
-                address: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
+                address: "${allowed_safe_address}"
                 timestamp: "1704067200"
                 nonce: "12345"
                 message: "This message attests that I control the given wallet"

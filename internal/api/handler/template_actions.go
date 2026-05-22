@@ -148,7 +148,7 @@ func (h *TemplateHandler) instantiateTemplate(w http.ResponseWriter, r *http.Req
 			h.writeError(w, fmt.Sprintf("variable substitution for validation failed: %s", subErr.Error()), http.StatusBadRequest)
 			return
 		}
-		results, allPassed := ValidateTemplateConfig(h.jsEvaluator, tmpl.Name, resolvedConfig)
+		results, allPassed := ValidateTemplateConfig(h.jsEvaluator, tmpl.Name, resolvedConfig, resolvedVars)
 		if !allPassed {
 			var failures []string
 			for _, r := range results {

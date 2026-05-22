@@ -77,8 +77,41 @@ func validateFile(ctx context.Context, filePath string, validator *evm.SolidityR
 		return nil, 0, 0, fmt.Errorf("rule id validation: %w", err)
 	}
 
+	// Some templates nest test_cases inside the config map rather than at the
+	// rule level. Extract them so the validation pipeline can find them.
+	extractTestCasesFromConfig(rules)
+
 	// Template files use isolated engines (per-rule) so other rules don't interfere with template test cases.
 	return validateRules(ctx, rules, validator, msgValidator, jsValidator, templateFile.TestVariables, log, verbose, false)
+}
+
+// extractTestCasesFromConfig moves test_cases out of the Config map and onto
+// the RuleConfig.TestCases field when they were nested inside config in YAML.
+// This handles templates like polymarket_v2.yaml where test_cases is a peer of
+// script/description inside the config: block rather than a rule-level field.
+// Does NOT delete from config so other validators (e.g. solidity) can still
+// find test_cases in the config JSON.
+func extractTestCasesFromConfig(rules []RuleConfig) {
+	for i, r := range rules {
+		if len(r.TestCases) > 0 {
+			continue // already at rule level
+		}
+		tcRaw, ok := r.Config["test_cases"]
+		if !ok {
+			continue
+		}
+		tcJSON, err := json.Marshal(tcRaw)
+		if err != nil {
+			continue
+		}
+		var tcs []TestCaseConfig
+		if err := json.Unmarshal(tcJSON, &tcs); err != nil {
+			continue
+		}
+		if len(tcs) > 0 {
+			rules[i].TestCases = tcs
+		}
+	}
 }
 
 // validateExplicitRuleIDsLocal ensures every rule has an explicit id (for validate-rules local RuleConfig).

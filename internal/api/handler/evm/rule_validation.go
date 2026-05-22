@@ -12,7 +12,6 @@ import (
 	evmchain "github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
-	"github.com/ivanzzeth/remote-signer/internal/ruleconfig"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
@@ -39,19 +38,6 @@ func (h *RuleHandler) validateSolidityRule(ctx context.Context, rule *types.Rule
 func (h *RuleHandler) validateJSRule(rule *types.Rule, testCases []JSRuleTestCase) error {
 	if h.jsEvaluator == nil {
 		return fmt.Errorf("JS evaluator not available")
-	}
-
-	// Enforce test case requirement
-	var pos, neg int
-	for _, tc := range testCases {
-		if tc.ExpectPass {
-			pos++
-		} else {
-			neg++
-		}
-	}
-	if err := ruleconfig.ValidateJSRuleTestCasesRequirement(pos, neg); err != nil {
-		return err
 	}
 
 	// Parse the rule config

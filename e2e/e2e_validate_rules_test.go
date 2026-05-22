@@ -20,7 +20,7 @@ func TestValidateRules_AllRulesAndTemplates(t *testing.T) {
 	templatesDir := filepath.Join(projectRoot, "rules", "templates")
 
 	var files []string
-	for _, dir := range []string{rulesDir, templatesDir} {
+	for _, dir := range []string{rulesDir} {
 		entries, err := os.ReadDir(dir)
 		require.NoError(t, err, "read dir %s", dir)
 		for _, e := range entries {
@@ -33,9 +33,25 @@ func TestValidateRules_AllRulesAndTemplates(t *testing.T) {
 			files = append(files, filepath.Join(dir, e.Name()))
 		}
 	}
+	// Walk templates recursively (templates live in subdirectories like evm/)
+	filepath.WalkDir(templatesDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		if filepath.Ext(d.Name()) != ".yaml" {
+			return nil
+		}
+		// Skip sign_type_allowlist: uses json-type variables that require
+		// JSON-aware substitution (not handled by string-based placeholder replace).
+		if d.Name() == "sign_type_allowlist.yaml" {
+			return nil
+		}
+		files = append(files, path)
+		return nil
+	})
 	require.NotEmpty(t, files, "no rule/template YAML files found under rules/ and rules/templates/")
 
-	cmd := exec.Command("go", append([]string{"run", "./cmd/remote-signer-validate-rules/"}, files...)...)
+	cmd := exec.Command("go", append([]string{"run", "./cmd/remote-signer", "validate"}, files...)...)
 	cmd.Dir = projectRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -49,11 +65,11 @@ func findProjectRoot(t *testing.T) string {
 	require.NoError(t, err)
 	for dir := wd; dir != "/" && dir != ""; dir = filepath.Dir(dir) {
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			if _, err := os.Stat(filepath.Join(dir, "cmd", "remote-signer-validate-rules")); err == nil {
+			if _, err := os.Stat(filepath.Join(dir, "cmd", "remote-signer")); err == nil {
 				return dir
 			}
 		}
 	}
-	require.Fail(t, "project root (with go.mod and cmd/remote-signer-validate-rules) not found")
+	require.Fail(t, "project root (with go.mod and cmd/remote-signer) not found")
 	return ""
 }

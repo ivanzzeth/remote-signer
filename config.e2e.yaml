@@ -90,107 +90,107 @@ templates:
     type: "file"
     enabled: true
     config:
-      path: "rules/templates/safe.template.js.yaml"
+      path: "rules/templates/evm/safe.yaml"
   - name: "Multisend Template"
     type: "file"
     enabled: true
     config:
-      path: "rules/templates/multisend.template.js.yaml"
+      path: "rules/templates/evm/multisend.yaml"
   - name: "ERC20 Template"
     type: "file"
     enabled: true
     config:
-      path: "rules/templates/erc20.template.js.yaml"
+      path: "rules/templates/evm/erc20.yaml"
   - name: "Native Transfer Template"
     type: "file"
     enabled: true
     config:
-      path: "rules/templates/native_transfer.template.js.yaml"
+      path: "rules/templates/evm/native_transfer.yaml"
   - name: "ERC721 Template"
     type: "file"
     enabled: true
     config:
-      path: "rules/templates/erc721.template.js.yaml"
+      path: "rules/templates/evm/erc721.yaml"
   - name: "WETH Template"
     type: "file"
     enabled: true
     config:
-      path: "rules/templates/weth.template.js.yaml"
+      path: "rules/templates/evm/weth.yaml"
   - name: "ERC1155 Template"
     type: "file"
     enabled: true
     config:
-      path: "rules/templates/erc1155.template.js.yaml"
+      path: "rules/templates/evm/erc1155.yaml"
   - name: "ERC20 Permit Template"
     type: "file"
     enabled: true
     config:
-      path: "rules/templates/erc20_permit.template.js.yaml"
+      path: "rules/templates/evm/erc20_permit.yaml"
   - name: "DEX Swap Template"
     type: "file"
     enabled: true
     config:
-      path: "rules/templates/dex_swap.template.js.yaml"
+      path: "rules/templates/evm/dex_swap.yaml"
   - name: "Staking Template"
     type: "file"
     enabled: true
     config:
-      path: "rules/templates/staking.template.js.yaml"
+      path: "rules/templates/evm/staking.yaml"
   - name: "Global Blocklist Template"
     type: "file"
     enabled: true
     config:
-      path: "rules/templates/global_blocklist.template.js.yaml"
+      path: "rules/templates/evm/global_blocklist.yaml"
   - name: "Contract Call Guard Template"
     type: "file"
     enabled: true
     config:
-      path: "rules/templates/contract_call_guard.template.js.yaml"
+      path: "rules/templates/evm/contract_call_guard.yaml"
   - name: "Max Gas Cap Template"
     type: "file"
     enabled: true
     config:
-      path: "rules/templates/max_gas_cap.template.js.yaml"
+      path: "rules/templates/evm/max_gas_cap.yaml"
   - name: "ERC721 Permit Template"
     type: "file"
     enabled: true
     config:
-      path: "rules/templates/erc721_permit.template.js.yaml"
+      path: "rules/templates/evm/erc721_permit.yaml"
   - name: "Meta Transaction Template"
     type: "file"
     enabled: true
     config:
-      path: "rules/templates/meta_transaction.template.js.yaml"
+      path: "rules/templates/evm/meta_transaction.yaml"
   - name: "EIP-4337 UserOp Template"
     type: "file"
     enabled: true
     config:
-      path: "rules/templates/eip4337_userop.template.js.yaml"
+      path: "rules/templates/evm/eip4337_userop.yaml"
   - name: "EIP-3009 Transfer Auth Template"
     type: "file"
     enabled: true
     config:
-      path: "rules/templates/eip3009_transfer_auth.template.js.yaml"
+      path: "rules/templates/evm/eip3009_transfer_auth.yaml"
   - name: "EIP-1559 Fee Guard Template"
     type: "file"
     enabled: true
     config:
-      path: "rules/templates/eip1559_fee_guard.template.js.yaml"
+      path: "rules/templates/evm/eip1559_fee_guard.yaml"
   - name: "DEX Swap V3/V4 Template"
     type: "file"
     enabled: true
     config:
-      path: "rules/templates/dex_swap_v3.template.js.yaml"
+      path: "rules/templates/evm/dex_swap_v3.yaml"
   - name: "Polymarket Template"
     type: "file"
     enabled: true
     config:
-      path: "rules/templates/polymarket.template.js.yaml"
+      path: "rules/templates/evm/polymarket.yaml"
   - name: "Agent Template"
     type: "file"
     enabled: true
     config:
-      path: "rules/templates/agent.template.js.yaml"
+      path: "rules/templates/evm/agent.yaml"
 
 # Rules for e2e testing
 # Rules can be defined here (config source) or via API (api source)

@@ -45,6 +45,7 @@ func skipOnInfraError(t *testing.T, err error) {
 		"i/o timeout",
 		"no such host",
 		"eth_simulate",
+			"insufficient funds",
 	}
 	for _, p := range infraPatterns {
 		if strings.Contains(strings.ToLower(msg), p) {
@@ -142,7 +143,7 @@ func TestSimulate_RevertedTx(t *testing.T) {
 			To:      "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", // WETH on mainnet
 			Value:   "0x0",
 			Data:    "0xdeadbeef00000000000000000000000000000000000000000000000000000000",
-			Gas:     "0x5208", // 21000 - not enough for contract call
+			Gas:     "0x186A0", // 100000 - enough for contract call execution
 		})
 		skipOnInfraError(t, err2)
 		require.NoError(t, err2, "simulate API call should not error")

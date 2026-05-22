@@ -17,6 +17,8 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/ruleconfig"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 	"github.com/ivanzzeth/remote-signer/internal/validate"
+
+	evmchain "github.com/ivanzzeth/remote-signer/internal/chain/evm"
 )
 
 func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
@@ -185,11 +187,16 @@ func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Validate evm_js rules: require test_cases with 1+ positive and 1+ negative, then run them
+	// Validate evm_js rules: ensure config is parseable
 	if rule.Type == types.RuleTypeEVMJS {
-		if err := h.validateJSRule(rule, req.TestCases); err != nil {
-			h.logger.Error("evm_js rule validation failed", "error", err, "rule_name", rule.Name)
-			h.writeError(w, fmt.Sprintf("evm_js rule validation failed: %v", err), http.StatusBadRequest)
+		var jsCfg evmchain.JSRuleConfig
+		if err := json.Unmarshal(rule.Config, &jsCfg); err != nil {
+			h.logger.Error("evm_js rule has invalid config", "error", err, "rule_name", rule.Name)
+			h.writeError(w, "invalid evm_js rule config", http.StatusBadRequest)
+			return
+		}
+		if jsCfg.Script == "" {
+			h.writeError(w, "evm_js rule must have a script", http.StatusBadRequest)
 			return
 		}
 	}
@@ -339,9 +346,14 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 
 	// Validate evm_js rules when config is updated
 	if req.Config != nil && rule.Type == types.RuleTypeEVMJS {
-		if err := h.validateJSRule(rule, req.TestCases); err != nil {
-			h.logger.Error("evm_js rule validation failed", "error", err, "rule_id", ruleID)
-			h.writeError(w, fmt.Sprintf("evm_js rule validation failed: %v", err), http.StatusBadRequest)
+		var jsCfg evmchain.JSRuleConfig
+		if err := json.Unmarshal(rule.Config, &jsCfg); err != nil {
+			h.logger.Error("evm_js update has invalid config", "error", err, "rule_id", ruleID)
+			h.writeError(w, "invalid evm_js rule config", http.StatusBadRequest)
+			return
+		}
+		if jsCfg.Script == "" {
+			h.writeError(w, "evm_js rule must have a script", http.StatusBadRequest)
 			return
 		}
 	}

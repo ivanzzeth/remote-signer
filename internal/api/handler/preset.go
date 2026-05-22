@@ -451,7 +451,7 @@ func (h *PresetHandler) validatePreset(w http.ResponseWriter, r *http.Request, i
 		}
 
 		// Run template validation
-		ruleResults := h.runTemplateValidation(tmpl, resolvedConfig)
+		ruleResults := h.runTemplateValidation(tmpl, resolvedConfig, resolvedVars)
 		for _, rr := range ruleResults {
 			results = append(results, rr)
 			if rr.Valid {
@@ -474,7 +474,7 @@ func (h *PresetHandler) validatePreset(w http.ResponseWriter, r *http.Request, i
 }
 
 // runTemplateValidation runs test cases from a template's resolved config.
-func (h *PresetHandler) runTemplateValidation(tmpl *types.RuleTemplate, resolvedConfig []byte) []*validateRuleResultItem {
+func (h *PresetHandler) runTemplateValidation(tmpl *types.RuleTemplate, resolvedConfig []byte, resolvedVars map[string]string) []*validateRuleResultItem {
 	// Parse the resolved config
 	var configDoc struct {
 		Rules []struct {
@@ -485,7 +485,7 @@ func (h *PresetHandler) runTemplateValidation(tmpl *types.RuleTemplate, resolved
 			Config map[string]interface{} `json:"config"`
 		} `json:"rules"`
 	}
-	if err := json.Unmarshal(resolvedConfig, &configDoc); err != nil {
+	if err := json.Unmarshal(resolvedConfig, &configDoc); err != nil || len(configDoc.Rules) == 0 {
 		// Try flat config
 		return []*validateRuleResultItem{{
 			RuleName: tmpl.Name,
@@ -543,6 +543,12 @@ func (h *PresetHandler) runTemplateValidation(tmpl *types.RuleTemplate, resolved
 		cfgMap := make(map[string]interface{})
 		for k, v := range rule.Config {
 			if k != "script" && k != "test_cases" && k != "description" {
+				cfgMap[k] = v
+			}
+		}
+		// Merge template-level variables into cfgMap
+		for k, v := range resolvedVars {
+			if _, exists := cfgMap[k]; !exists {
 				cfgMap[k] = v
 			}
 		}
@@ -708,9 +714,9 @@ func (h *PresetHandler) apply(w http.ResponseWriter, r *http.Request, id string)
 				h.writeError(w, fmt.Sprintf("template %q: variable substitution for validation failed: %s", tid, subErr.Error()), http.StatusBadRequest)
 				return
 			}
-			_, allPassed := ValidateTemplateConfig(h.jsEvaluator, tmpl.Name, resolvedConfig)
+			_, allPassed := ValidateTemplateConfig(h.jsEvaluator, tmpl.Name, resolvedConfig, resolvedVars)
 			if !allPassed {
-				results, _ := ValidateTemplateConfig(h.jsEvaluator, tmpl.Name, resolvedConfig)
+				results, _ := ValidateTemplateConfig(h.jsEvaluator, tmpl.Name, resolvedConfig, resolvedVars)
 				var failures []string
 				for _, r := range results {
 					if !r.Valid && r.Error != "" {

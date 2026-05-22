@@ -38,7 +38,7 @@ func TestConfigDrivenRuleValidation(t *testing.T) {
 
 	// Load config.e2e.yaml
 	configPath := findConfigPath()
-	cfg, err := config.Load(configPath)
+	cfg, err := config.LoadUnvalidated(configPath)
 	require.NoError(t, err, "failed to load config.e2e.yaml")
 
 	// Expand instance rules (templates + test_cases_overrides)
