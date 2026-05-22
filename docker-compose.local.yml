@@ -25,8 +25,10 @@
 #   # Build the image (one-off; rebuild on Go/web changes):
 #   docker compose -f docker-compose.local.yml build
 #
-#   # Run it. Pass UID/GID so file permissions work on bind mount.
-#   UID=$(id -u) GID=$(id -g) docker compose -f docker-compose.local.yml up -d
+#   # Run it. Pass HOST_UID/HOST_GID so file permissions work on the
+#   # bind mount. The non-obvious names (vs plain UID/GID) sidestep
+#   # bash's readonly builtin — see the `user:` field below.
+#   HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose -f docker-compose.local.yml up -d
 #
 #   # Logs / stop:
 #   docker compose -f docker-compose.local.yml logs -f
@@ -56,10 +58,19 @@ services:
     restart: unless-stopped
 
     # Run as the host user so the bind-mounted ~/.remote-signer is
-    # readable/writable without chown gymnastics. Defaults are macOS
-    # Homebrew-style (501); on Linux they're usually 1000 — set
-    # explicitly: `UID=$(id -u) GID=$(id -g) docker compose up`.
-    user: "${UID:-1000}:${GID:-1000}"
+    # readable/writable without chown gymnastics. We use HOST_UID /
+    # HOST_GID rather than UID / GID because bash treats UID as a
+    # readonly builtin — `UID=$(id -u) docker compose ...` silently
+    # fails to export the var, and compose falls back to defaults
+    # which don't match a non-1000 user on the host. HOST_UID has
+    # no such collision.
+    #
+    # Usage:
+    #   HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose -f docker-compose.local.yml up -d
+    #
+    # Or drop them in a .env file alongside this compose and compose
+    # picks them up automatically.
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
 
     # Host network: binds 127.0.0.1:8548 directly on the host so the
     # extension, dApps, and CLI work without --url overrides. Matches
