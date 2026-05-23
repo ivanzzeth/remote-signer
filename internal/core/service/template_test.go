@@ -2750,3 +2750,413 @@ func TestCreateInstance_SkipValidationFlow(t *testing.T) {
 		}
 	})
 }
+
+// ---------------------------------------------------------------------------
+// TestCreateInstanceWithTx
+// ---------------------------------------------------------------------------
+
+func TestCreateInstanceWithTx(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("basic_creation_with_variables", func(t *testing.T) {
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		vars := []types.TemplateVariable{
+			{Name: "target_address", Type: "address", Required: true},
+		}
+		config := []byte(`{"addresses":["${target_address}"]}`)
+		tmpl := makeTemplate("tmpl-tx", "Tx Template", vars, config)
+		seedTemplate(t, tmplRepo, tmpl)
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		// Use CreateInstanceWithTx with separate repos
+		result, err := svc.CreateInstanceWithTx(ctx, ruleRepo, budgetRepo, &CreateInstanceRequest{
+			TemplateID: "tmpl-tx",
+			Variables: map[string]string{
+				"target_address": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			},
+		})
+		if err != nil {
+			t.Fatalf("CreateInstanceWithTx failed: %v", err)
+		}
+		if result.Rule == nil {
+			t.Fatal("expected non-nil rule")
+		}
+		if result.Rule.Source != types.RuleSourceInstance {
+			t.Errorf("expected source %q", types.RuleSourceInstance)
+		}
+	})
+
+	t.Run("nil_request", func(t *testing.T) {
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		_, err = svc.CreateInstanceWithTx(ctx, ruleRepo, budgetRepo, nil)
+		if err == nil {
+			t.Fatal("expected error for nil request")
+		}
+		if !strings.Contains(err.Error(), "request is required") {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("nil_repos", func(t *testing.T) {
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		_, err = svc.CreateInstanceWithTx(ctx, nil, nil, &CreateInstanceRequest{
+			TemplateID: "tmpl-whatever",
+			Variables:  map[string]string{},
+		})
+		if err == nil {
+			t.Fatal("expected error for nil repos")
+		}
+		if !strings.Contains(err.Error(), "rule and budget repositories are required") {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// TestCreateInstanceFromResolvedWithTx
+// ---------------------------------------------------------------------------
+
+func TestCreateInstanceFromResolvedWithTx(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("nil_template_nil_request", func(t *testing.T) {
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		_, err = svc.CreateInstanceFromResolvedWithTx(ctx, ruleRepo, budgetRepo, nil, nil)
+		if err == nil {
+			t.Fatal("expected error for nil template")
+		}
+		if !strings.Contains(err.Error(), "template and request are required") {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("nil_repos", func(t *testing.T) {
+		tmplRepo := newMockTemplateRepo()
+		svc, err := NewTemplateService(tmplRepo, newMockRuleRepo(), newMockBudgetRepo(), newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		_, err = svc.CreateInstanceFromResolvedWithTx(ctx, nil, nil, &types.RuleTemplate{ID: "t"}, &CreateInstanceRequest{
+			Variables: map[string]string{},
+		})
+		if err == nil {
+			t.Fatal("expected error for nil repos")
+		}
+		if !strings.Contains(err.Error(), "rule and budget repositories are required") {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// TestResolveTemplate
+// ---------------------------------------------------------------------------
+
+func TestResolveTemplate(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("by_id", func(t *testing.T) {
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		tmpl := makeTemplate("resolve-id", "Resolve By ID", nil, []byte(`{}`))
+		seedTemplate(t, tmplRepo, tmpl)
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		got, err := svc.ResolveTemplate(ctx, &CreateInstanceRequest{TemplateID: "resolve-id"})
+		if err != nil {
+			t.Fatalf("ResolveTemplate failed: %v", err)
+		}
+		if got.ID != "resolve-id" {
+			t.Errorf("expected template id 'resolve-id', got %q", got.ID)
+		}
+	})
+
+	t.Run("by_name", func(t *testing.T) {
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		tmpl := makeTemplate("resolve-name", "Resolve By Name", nil, []byte(`{}`))
+		seedTemplate(t, tmplRepo, tmpl)
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		got, err := svc.ResolveTemplate(ctx, &CreateInstanceRequest{TemplateName: "Resolve By Name"})
+		if err != nil {
+			t.Fatalf("ResolveTemplate failed: %v", err)
+		}
+		if got.Name != "Resolve By Name" {
+			t.Errorf("expected name 'Resolve By Name', got %q", got.Name)
+		}
+	})
+
+	t.Run("no_id_or_name", func(t *testing.T) {
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		_, err = svc.ResolveTemplate(ctx, &CreateInstanceRequest{})
+		if err == nil {
+			t.Fatal("expected error for missing template_id or template_name")
+		}
+		if !strings.Contains(err.Error(), "template_id or template_name is required") {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// TestBundleRollbackRules - tests that rollbackRules is called on bundle
+// expansion failure
+// ---------------------------------------------------------------------------
+
+func TestBundleRollbackRules(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("bundle_expansion_rollback_on_create_failure", func(t *testing.T) {
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		subRules := []bundleSubRule{
+			{
+				ID:      "sub1",
+				Name:    "First Rule",
+				Type:    string(types.RuleTypeEVMAddressList),
+				Mode:    string(types.RuleModeWhitelist),
+				Config:  map[string]interface{}{"addresses": []string{"0x1111111111111111111111111111111111111111"}},
+				Enabled: true,
+			},
+			{
+				ID:      "sub2",
+				Name:    "Second Rule",
+				Type:    string(types.RuleTypeEVMValueLimit),
+				Mode:    string(types.RuleModeBlocklist),
+				Config:  map[string]interface{}{"max_value": "1000000000000000000"},
+				Enabled: true,
+			},
+		}
+		subRulesJSON, err := json.Marshal(subRules)
+		if err != nil {
+			t.Fatalf("failed to marshal sub-rules: %v", err)
+		}
+
+		bundleConfig := map[string]interface{}{
+			"rules_json": string(subRulesJSON),
+		}
+		bundleConfigJSON, err := json.Marshal(bundleConfig)
+		if err != nil {
+			t.Fatalf("failed to marshal bundle config: %v", err)
+		}
+
+		tmpl := &types.RuleTemplate{
+			ID:        "tmpl-bundle-rollback",
+			Name:      "Rollback Bundle",
+			Type:      "template_bundle",
+			Mode:      types.RuleModeWhitelist,
+			Config:    bundleConfigJSON,
+			Source:    types.RuleSourceConfig,
+			Enabled:   true,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}
+		seedTemplate(t, tmplRepo, tmpl)
+
+		// Create a rule repo that fails on the second create
+		failAfterFirst := &failAfterCountRuleRepo{
+			RuleRepository: ruleRepo,
+			failAfter:      1, // fail on the second Create call
+			callCount:      0,
+		}
+
+		svc, err := NewTemplateService(tmplRepo, failAfterFirst, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		_, err = svc.CreateInstance(ctx, &CreateInstanceRequest{
+			TemplateID: "tmpl-bundle-rollback",
+			Variables:  map[string]string{},
+		})
+		if err == nil {
+			t.Fatal("expected error when rule creation fails mid-bundle")
+		}
+		if !strings.Contains(err.Error(), "failed to create sub-rule") {
+			t.Errorf("expected sub-rule creation error, got: %v", err)
+		}
+
+		// Verify that the first sub-rule was rolled back (deleted)
+		remaining, err := ruleRepo.List(ctx, storage.RuleFilter{})
+		if err != nil {
+			t.Fatalf("failed to list rules: %v", err)
+		}
+		if len(remaining) != 0 {
+			t.Errorf("expected 0 rules after rollback, got %d", len(remaining))
+		}
+	})
+
+	t.Run("bundle_expansion_with_budget_rollback", func(t *testing.T) {
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		subRules := []bundleSubRule{
+			{
+				ID:      "sub-bgt-1",
+				Name:    "Rule With Budget",
+				Type:    string(types.RuleTypeEVMAddressList),
+				Mode:    string(types.RuleModeWhitelist),
+				Config:  map[string]interface{}{"addresses": []string{"0x1111111111111111111111111111111111111111"}},
+				Enabled: true,
+			},
+			{
+				ID:      "sub-bgt-2",
+				Name:    "Second Rule With Budget",
+				Type:    string(types.RuleTypeEVMValueLimit),
+				Mode:    string(types.RuleModeBlocklist),
+				Config:  map[string]interface{}{"max_value": "1000000000000000000"},
+				Enabled: true,
+			},
+		}
+		subRulesJSON, err := json.Marshal(subRules)
+		if err != nil {
+			t.Fatalf("failed to marshal sub-rules: %v", err)
+		}
+
+		bundleConfig := map[string]interface{}{
+			"rules_json": string(subRulesJSON),
+		}
+		bundleConfigJSON, err := json.Marshal(bundleConfig)
+		if err != nil {
+			t.Fatalf("failed to marshal bundle config: %v", err)
+		}
+
+		metering := types.BudgetMetering{
+			Method: "tx_value",
+			Unit:   "eth",
+		}
+
+		tmpl := &types.RuleTemplate{
+			ID:             "tmpl-bundle-bgt-roll",
+			Name:           "Budget Rollback Bundle",
+			Type:           "template_bundle",
+			Mode:           types.RuleModeWhitelist,
+			Config:         bundleConfigJSON,
+			BudgetMetering: mustJSON(metering),
+			Source:         types.RuleSourceConfig,
+			Enabled:        true,
+			CreatedAt:      time.Now(),
+			UpdatedAt:      time.Now(),
+		}
+		seedTemplate(t, tmplRepo, tmpl)
+
+		// Create a budget repo that fails on the first create
+		failBudget := &failOnceBudgetRepo{
+			BudgetRepository: budgetRepo,
+		}
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, failBudget, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		_, err = svc.CreateInstance(ctx, &CreateInstanceRequest{
+			TemplateID: "tmpl-bundle-bgt-roll",
+			Variables:  map[string]string{},
+			Budget: &BudgetConfig{
+				MaxTotal: "1000",
+				MaxPerTx: "100",
+			},
+		})
+		if err == nil {
+			t.Fatal("expected error when budget creation fails")
+		}
+		if !strings.Contains(err.Error(), "failed to create budget for sub-rule") {
+			t.Errorf("expected budget creation error, got: %v", err)
+		}
+
+		// Verify that the sub-rule created before budget failure was rolled back
+		remaining, err := ruleRepo.List(ctx, storage.RuleFilter{})
+		if err != nil {
+			t.Fatalf("failed to list rules: %v", err)
+		}
+		if len(remaining) != 0 {
+			t.Errorf("expected 0 rules after budget rollback, got %d", len(remaining))
+		}
+	})
+}
+
+// failAfterCountRuleRepo wraps RuleRepository and fails Create after N calls.
+type failAfterCountRuleRepo struct {
+	storage.RuleRepository
+	failAfter int
+	callCount int
+}
+
+func (r *failAfterCountRuleRepo) Create(ctx context.Context, rule *types.Rule) error {
+	r.callCount++
+	if r.callCount > r.failAfter {
+		return fmt.Errorf("simulated creation failure")
+	}
+	return r.RuleRepository.Create(ctx, rule)
+}
+
+// failOnceBudgetRepo wraps BudgetRepository and fails its first Create.
+type failOnceBudgetRepo struct {
+	storage.BudgetRepository
+	firstCreate bool
+}
+
+func (r *failOnceBudgetRepo) Create(ctx context.Context, budget *types.RuleBudget) error {
+	if !r.firstCreate {
+		r.firstCreate = true
+		return r.BudgetRepository.Create(ctx, budget)
+	}
+	return fmt.Errorf("simulated budget creation failure")
+}
