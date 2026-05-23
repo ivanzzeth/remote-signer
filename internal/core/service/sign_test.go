@@ -12,7 +12,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/ivanzzeth/remote-signer/internal/audit"
 	"github.com/ivanzzeth/remote-signer/internal/chain"
+	evmchain "github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/statemachine"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
@@ -1788,4 +1790,45 @@ func TestProcessApprovedRequest_AlreadyRejected_ReturnsRejected(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, types.StatusRejected, resp.Status)
 	assert.Contains(t, resp.Message, "user rejected")
+}
+
+// ---------------------------------------------------------------------------
+// TestSetAuditLogger
+// ---------------------------------------------------------------------------
+
+func TestSetAuditLogger(t *testing.T) {
+	f := newSignServiceFixture(t)
+	svc := f.build(t)
+
+	if svc.auditLogger != nil {
+		t.Error("expected auditLogger to default to nil")
+	}
+
+	al, err := audit.NewAuditLogger(newMockAuditRepo(), newTestLogger())
+	if err != nil {
+		t.Fatalf("failed to create audit logger: %v", err)
+	}
+	svc.SetAuditLogger(al)
+	if svc.auditLogger != al {
+		t.Error("auditLogger was not set correctly")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestSetSimulationRule
+// ---------------------------------------------------------------------------
+
+func TestSetSimulationRule(t *testing.T) {
+	f := newSignServiceFixture(t)
+	svc := f.build(t)
+
+	if svc.simulationRule != nil {
+		t.Error("expected simulationRule to default to nil")
+	}
+
+	rule := &evmchain.SimulationBudgetRule{}
+	svc.SetSimulationRule(rule)
+	if svc.simulationRule != rule {
+		t.Error("simulationRule was not set correctly")
+	}
 }

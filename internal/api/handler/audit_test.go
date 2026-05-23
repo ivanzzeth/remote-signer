@@ -27,8 +27,9 @@ import (
 type mockAuditRepo struct {
 	records []*types.AuditRecord
 	// When set, Query/Count return these errors instead of normal results.
-	queryErr error
-	countErr error
+	queryErr          error
+	countErr          error
+	getByRequestIDErr error // when set, GetByRequestID returns this error
 }
 
 func newMockAuditRepo() *mockAuditRepo {
@@ -114,6 +115,9 @@ func (r *mockAuditRepo) Count(_ context.Context, filter storage.AuditFilter) (in
 }
 
 func (r *mockAuditRepo) GetByRequestID(_ context.Context, requestID types.SignRequestID) ([]*types.AuditRecord, error) {
+	if r.getByRequestIDErr != nil {
+		return nil, r.getByRequestIDErr
+	}
 	var out []*types.AuditRecord
 	for _, rec := range r.records {
 		if rec.SignRequestID != nil && *rec.SignRequestID == requestID {
