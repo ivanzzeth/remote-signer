@@ -101,10 +101,11 @@ type ScheduleConfig struct {
 // For template_bundle templates, SubRules and SubBudgets contain all expanded sub-rules;
 // Rule/Budget point to the first sub-rule for backward compatibility.
 type CreateInstanceResult struct {
-	Rule       *types.Rule         `json:"rule"`
-	Budget     *types.RuleBudget   `json:"budget,omitempty"`
-	SubRules   []*types.Rule       `json:"sub_rules,omitempty"`
-	SubBudgets []*types.RuleBudget `json:"sub_budgets,omitempty"`
+	Rule         *types.Rule            `json:"rule"`
+	Budget       *types.RuleBudget      `json:"budget,omitempty"`
+	SubRules     []*types.Rule          `json:"sub_rules,omitempty"`
+	SubBudgets   []*types.RuleBudget    `json:"sub_budgets,omitempty"`
+	SubRuleIDMap map[string]types.RuleID `json:"-"`
 }
 
 // CreateInstance creates a rule instance from a template with bound variables
@@ -286,8 +287,14 @@ type bundleSubRule struct {
 }
 
 // createInstanceFromBundle expands a template_bundle into individual sub-rules,
-// creating each as a separate rule in the database. This matches the CLI behavior
-// in expandInstanceRule (internal/config/template_init.go).
+// creating each as a separate rule in the database. Uses a two-pass approach:
+//  1. First pass: generate IDs for all sub-rules, build template-ID-to-actual-ID map
+//  2. Resolve delegate_to/delegate_to_by_target cross-references using the map
+//  3. Second pass: persist rules with resolved configs
+//
+// This ensures that cross-template delegation references using template YAML IDs
+// (e.g., safe.yaml's delegate_to: "polymarket-v2-transactions") resolve to the
+// correct inst_<hash> rule IDs before any rule is persisted.
 func (s *TemplateService) createInstanceFromBundle(
 	ctx context.Context,
 	ruleRepo storage.RuleRepository,
@@ -297,7 +304,6 @@ func (s *TemplateService) createInstanceFromBundle(
 	resolvedVars map[string]string,
 	resolvedConfig []byte,
 ) (*CreateInstanceResult, error) {
-	// Parse the resolved config to extract rules_json
 	var configMap map[string]interface{}
 	if err := json.Unmarshal(resolvedConfig, &configMap); err != nil {
 		return nil, fmt.Errorf("failed to parse resolved bundle config: %w", err)
@@ -307,7 +313,6 @@ func (s *TemplateService) createInstanceFromBundle(
 		return nil, fmt.Errorf("template_bundle %q has no rules_json in config", tmpl.Name)
 	}
 
-	// Parse the sub-rules
 	var subRules []bundleSubRule
 	if err := json.Unmarshal([]byte(rulesJSON), &subRules); err != nil {
 		return nil, fmt.Errorf("failed to parse bundle rules_json: %w", err)
@@ -323,36 +328,33 @@ func (s *TemplateService) createInstanceFromBundle(
 
 	baseName := s.resolveInstanceName(req, tmpl)
 
-	result := &CreateInstanceResult{
-		SubRules:   make([]*types.Rule, 0, len(subRules)),
-		SubBudgets: make([]*types.RuleBudget, 0),
+	// ---- Pass 1: generate IDs and build the template-ID→actual-ID map ----
+	type pendingSubRule struct {
+		rule   *types.Rule
+		config map[string]interface{}
 	}
-
-	var createdRuleIDs []types.RuleID // track for rollback
+	subIDToRuleID := make(map[string]types.RuleID)
+	pending := make([]pendingSubRule, 0, len(subRules))
 
 	for _, sub := range subRules {
 		subConfigJSON, err := json.Marshal(sub.Config)
 		if err != nil {
-			s.rollbackRules(ctx, ruleRepo, createdRuleIDs)
 			return nil, fmt.Errorf("failed to marshal sub-rule config: %w", err)
 		}
 
-		// Inject instance variables into sub-rule config for evaluators
 		var subConfig map[string]interface{}
 		if err := json.Unmarshal(subConfigJSON, &subConfig); err != nil {
-			s.rollbackRules(ctx, ruleRepo, createdRuleIDs)
 			return nil, fmt.Errorf("failed to parse sub-rule config: %w", err)
 		}
 		for k, v := range resolvedVars {
 			subConfig[k] = v
 		}
+
 		subConfigJSON, err = json.Marshal(subConfig)
 		if err != nil {
-			s.rollbackRules(ctx, ruleRepo, createdRuleIDs)
 			return nil, fmt.Errorf("failed to re-marshal sub-rule config: %w", err)
 		}
 
-		// Generate a unique ID per sub-rule using the sub-rule's id/name as differentiator
 		subIDSuffix := sub.ID
 		if subIDSuffix == "" {
 			subIDSuffix = sub.Name
@@ -364,7 +366,6 @@ func (s *TemplateService) createInstanceFromBundle(
 			ruleName = baseName + " / " + sub.Name
 		}
 
-		// Determine ownership: prefer RBAC fields from handler, fall back to legacy defaults
 		owner := "config"
 		if req.Owner != "" {
 			owner = req.Owner
@@ -398,7 +399,6 @@ func (s *TemplateService) createInstanceFromBundle(
 			UpdatedAt:   time.Now(),
 		}
 
-		// Apply scope from request
 		if req.ChainType != nil {
 			ct := types.ChainType(*req.ChainType)
 			rule.ChainType = &ct
@@ -409,16 +409,12 @@ func (s *TemplateService) createInstanceFromBundle(
 		if req.SignerAddress != nil {
 			rule.SignerAddress = req.SignerAddress
 		}
-
-		// Expiry
 		if req.ExpiresAt != nil {
 			rule.ExpiresAt = req.ExpiresAt
 		} else if req.ExpiresIn != nil {
 			expiresAt := time.Now().Add(*req.ExpiresIn)
 			rule.ExpiresAt = &expiresAt
 		}
-
-		// Schedule
 		if req.Schedule != nil {
 			rule.BudgetPeriod = &req.Schedule.Period
 			if req.Schedule.StartAt != nil {
@@ -429,34 +425,60 @@ func (s *TemplateService) createInstanceFromBundle(
 			}
 		}
 
-		if err := ruleRepo.Create(ctx, rule); err != nil {
-			s.rollbackRules(ctx, ruleRepo, createdRuleIDs)
-			return nil, fmt.Errorf("failed to create sub-rule %q: %w", sub.Name, err)
+		if sub.ID != "" {
+			subIDToRuleID[sub.ID] = subRuleID
 		}
-		createdRuleIDs = append(createdRuleIDs, rule.ID)
-		result.SubRules = append(result.SubRules, rule)
+		pending = append(pending, pendingSubRule{rule: rule, config: subConfig})
+	}
 
-		// Create budget for each sub-rule if budget is specified
+	// ---- Resolve delegate_to references using the template-ID→actual-ID map ----
+	// Sub-rules may reference each other by template YAML ID (e.g., safe.yaml has
+	// delegate_to: "polymarket-v2-transactions"). Resolve to actual inst_<hash> IDs.
+	for i, p := range pending {
+		newConfig, changed, err := ResolveDelegateToConfig(p.config, subIDToRuleID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve delegate config for sub-rule %q: %w", p.rule.Name, err)
+		}
+		if changed {
+			pending[i].rule.Config = newConfig
+		}
+	}
+
+	// ---- Pass 2: persist all rules ----
+	result := &CreateInstanceResult{
+		SubRules:     make([]*types.Rule, 0, len(pending)),
+		SubBudgets:   make([]*types.RuleBudget, 0),
+		SubRuleIDMap: subIDToRuleID,
+	}
+	var createdRuleIDs []types.RuleID
+
+	for _, p := range pending {
+		if err := ruleRepo.Create(ctx, p.rule); err != nil {
+			s.rollbackRules(ctx, ruleRepo, createdRuleIDs)
+			return nil, fmt.Errorf("failed to create sub-rule %q: %w", p.rule.Name, err)
+		}
+		createdRuleIDs = append(createdRuleIDs, p.rule.ID)
+		result.SubRules = append(result.SubRules, p.rule)
+
 		if req.Budget != nil {
-			budget, err := s.createBudgetWithRepo(ctx, budgetRepo, rule, tmpl, req.Budget)
+			budget, err := s.createBudgetWithRepo(ctx, budgetRepo, p.rule, tmpl, req.Budget)
 			if err != nil {
 				s.rollbackRules(ctx, ruleRepo, createdRuleIDs)
-				return nil, fmt.Errorf("failed to create budget for sub-rule %q: %w", sub.Name, err)
+				return nil, fmt.Errorf("failed to create budget for sub-rule %q: %w", p.rule.Name, err)
 			}
 			result.SubBudgets = append(result.SubBudgets, budget)
 		}
 
 		s.logger.Info("Created sub-rule from template bundle",
-			"rule_id", rule.ID,
-			"sub_rule_name", sub.Name,
+			"rule_id", p.rule.ID,
+			"sub_rule_name", p.rule.Name,
 			"template_id", tmpl.ID,
 			"template_name", tmpl.Name,
-			"type", sub.Type,
-			"mode", sub.Mode,
+			"type", p.rule.Type,
+			"mode", p.rule.Mode,
 		)
 	}
 
-	// Set Rule to the first sub-rule for backward compatibility
 	if len(result.SubRules) > 0 {
 		result.Rule = result.SubRules[0]
 	}
@@ -481,6 +503,60 @@ func (s *TemplateService) generateBundleSubRuleID(templateID string, vars map[st
 	data := fmt.Sprintf("instance:%s:%v:%s:%d", templateID, vars, subRuleSuffix, time.Now().UnixNano())
 	hash := sha256.Sum256([]byte(data))
 	return types.RuleID("inst_" + hex.EncodeToString(hash[:8]))
+}
+
+// ResolveDelegateToConfig resolves delegate_to and delegate_to_by_target references
+// in a rule config map using the provided template-ID→rule-ID map.
+// Returns the new marshalled config, whether it changed, and any error.
+// This is exported so that callers (e.g., preset apply) can resolve cross-template
+// references after all instances have been created.
+func ResolveDelegateToConfig(cfg map[string]interface{}, ruleIDMap map[string]types.RuleID) ([]byte, bool, error) {
+	changed := false
+
+	if d, _ := cfg["delegate_to"].(string); d != "" {
+		parts := strings.Split(d, ",")
+		for j, part := range parts {
+			part = strings.TrimSpace(part)
+			if actualID, ok := ruleIDMap[part]; ok {
+				parts[j] = string(actualID)
+				changed = true
+			}
+		}
+		if changed {
+			cfg["delegate_to"] = strings.Join(parts, ",")
+		}
+	}
+
+	if dtbt, _ := cfg["delegate_to_by_target"].(string); dtbt != "" {
+		pairs := strings.Split(dtbt, ",")
+		btChanged := false
+		for j, pair := range pairs {
+			pair = strings.TrimSpace(pair)
+			idx := strings.Index(pair, ":")
+			if idx <= 0 {
+				continue
+			}
+			rulePart := strings.TrimSpace(pair[idx+1:])
+			if actualID, ok := ruleIDMap[rulePart]; ok {
+				pairs[j] = pair[:idx+1] + string(actualID)
+				btChanged = true
+			}
+		}
+		if btChanged {
+			cfg["delegate_to_by_target"] = strings.Join(pairs, ",")
+			changed = true
+		}
+	}
+
+	if !changed {
+		return nil, false, nil
+	}
+
+	newConfig, err := json.Marshal(cfg)
+	if err != nil {
+		return nil, true, fmt.Errorf("failed to marshal resolved config: %w", err)
+	}
+	return newConfig, true, nil
 }
 
 // RevokeInstance disables a rule instance and deletes its budgets

@@ -3,12 +3,15 @@
 package e2e
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ivanzzeth/remote-signer/pkg/client/presets"
 )
 
 // TestE2E_PolymarketV2_ValidateAfterJSFix validates the polymarket_v2 template
@@ -98,8 +101,11 @@ func TestE2E_PolymarketV2_SignTypedDataOrder(t *testing.T) {
 	if resp.StatusCode == http.StatusNotFound {
 		t.Skipf("Preset %q not available (expected in shipped catalog)", presetName)
 	}
-	require.Equal(t, http.StatusCreated, resp.StatusCode,
-		"preset apply should return 201, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusCreated {
+		var errBody map[string]interface{}
+		json.NewDecoder(resp.Body).Decode(&errBody)
+		t.Fatalf("preset apply should return 201, got %d, body: %+v", resp.StatusCode, errBody)
+	}
 
 	var applyResult struct {
 		Results []json.RawMessage `json:"results"`
@@ -158,16 +164,14 @@ func TestE2E_PolymarketV2_SignTypedDataOrder(t *testing.T) {
 	}
 
 	signReq := map[string]interface{}{
-		"chain_type":       "evm",
-		"chain_id":         chainID,
-		"signer_address":   testSignerAddress,
-		"sign_type":        "typed_data",
-		"typed_data":       orderTypedData,
-		"wait_for_approval": false,
+		"chain_type":     "evm",
+		"chain_id":       chainID,
+		"signer_address": testSignerAddress,
+		"sign_type":      "typed_data",
+		"payload":        map[string]interface{}{"typed_data": orderTypedData},
 	}
 
-	signBody, _ := json.Marshal(signReq)
-	signResp := doRawRequest(t, http.MethodPost, "/api/v1/evm/sign/typed_data", signBody)
+	signResp := doRawRequest(t, http.MethodPost, "/api/v1/evm/sign", signReq)
 	defer signResp.Body.Close()
 
 	if signResp.StatusCode == http.StatusForbidden {
@@ -193,4 +197,236 @@ func TestE2E_PolymarketV2_SignTypedDataOrder(t *testing.T) {
 	}
 
 	t.Log("Polymarket V2 regression test: PASSED")
+}
+
+// TestE2E_PolymarketV2Safe_SignAndDelegate applies the polymarket_v2_safe_polygon
+// preset and tests the Safe delegation flow: SafeTx with inner V2 protocol calls
+// are delegated to polymarket-v2-transactions, DELEGATECALL is rejected, and V2
+// Order signatures pass the polymarket-v2-order-signature rule.
+func TestE2E_PolymarketV2Safe_SignAndDelegate(t *testing.T) {
+	ctx := context.Background()
+	ensureGuardResumed(t)
+	if useExternalServer {
+		t.Skip("Polymarket V2 Safe test requires internal server with shipped presets")
+	}
+
+	presetID := "evm/polymarket_v2_safe_polygon"
+	applyResp, err := adminClient.Presets.Apply(ctx, presetID, &presets.ApplyRequest{
+		Variables:      map[string]string{"allowed_safe_addresses": testSignerAddress},
+		SkipValidation: true,
+	})
+	require.NoError(t, err, "preset apply should succeed")
+	require.NotNil(t, applyResp)
+	require.GreaterOrEqual(t, len(applyResp.Results), 1,
+		"preset apply should produce at least 1 rule result")
+	t.Logf("Polymarket V2 Safe preset applied: %d rule(s)", len(applyResp.Results))
+	snapshotRules(t)
+	// Also register cleanup for apply results
+	cleanupApplyResults(t, applyResp.Results)
+
+	chainID := "137"
+
+	// ---------------------------------------------------------------
+	// 1. SafeTx delegation: pUSD approve to ExchangeV2 via Safe
+	//    Safe template matches SafeTx → delegates to polymarket-v2-transactions
+	//    which validates pUSD approve to ExchangeV2
+	// ---------------------------------------------------------------
+	safeTxTypedData := map[string]interface{}{
+		"types": map[string]interface{}{
+			"EIP712Domain": []eip712TypeField{
+				{Name: "chainId", Type: "uint256"},
+				{Name: "verifyingContract", Type: "address"},
+			},
+			"SafeTx": []eip712TypeField{
+				{Name: "to", Type: "address"},
+				{Name: "value", Type: "uint256"},
+				{Name: "data", Type: "bytes"},
+				{Name: "operation", Type: "uint8"},
+				{Name: "safeTxGas", Type: "uint256"},
+				{Name: "baseGas", Type: "uint256"},
+				{Name: "gasPrice", Type: "uint256"},
+				{Name: "gasToken", Type: "address"},
+				{Name: "refundReceiver", Type: "address"},
+				{Name: "nonce", Type: "uint256"},
+			},
+		},
+		"primaryType": "SafeTx",
+		"domain": map[string]interface{}{
+			"chainId":           chainID,
+			"verifyingContract": testSignerAddress,
+		},
+		"message": map[string]interface{}{
+			"to":             "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB", // pUSD
+			"value":          "0",
+			"data":           "0x095ea7b3000000000000000000000000E111180000d2663C0091e4f400237545B87B996Bffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+			"operation":      "0",
+			"safeTxGas":      "0",
+			"baseGas":        "0",
+			"gasPrice":       "0",
+			"gasToken":       "0x0000000000000000000000000000000000000000",
+			"refundReceiver": "0x0000000000000000000000000000000000000000",
+			"nonce":          "0",
+		},
+	}
+
+	safeTxSignReq := map[string]interface{}{
+		"chain_type":     "evm",
+		"chain_id":       chainID,
+		"signer_address": testSignerAddress,
+		"sign_type":      "typed_data",
+		"payload":        map[string]interface{}{"typed_data": safeTxTypedData},
+	}
+
+	safeTxResp := doRawRequest(t, http.MethodPost, "/api/v1/evm/sign", safeTxSignReq)
+	defer safeTxResp.Body.Close()
+
+	if safeTxResp.StatusCode == http.StatusForbidden {
+		var errBody struct {
+			Error   string `json:"error"`
+			Message string `json:"message"`
+		}
+		json.NewDecoder(safeTxResp.Body).Decode(&errBody)
+		t.Fatalf("SafeTx delegation REJECTED (REGRESSION): %s - %s", errBody.Error, errBody.Message)
+	}
+	assert.True(t, safeTxResp.StatusCode == http.StatusOK || safeTxResp.StatusCode == http.StatusAccepted,
+		"SafeTx delegation should return 200 or 202, got %d", safeTxResp.StatusCode)
+	t.Log("SafeTx delegation: PASSED (delegated to polymarket-v2-transactions)")
+
+	// ---------------------------------------------------------------
+	// 2. V2 Order signature: maker and signer both testSignerAddress
+	// ---------------------------------------------------------------
+	orderTypedData := map[string]interface{}{
+		"types": map[string]interface{}{
+			"EIP712Domain": []eip712TypeField{
+				{Name: "name", Type: "string"},
+				{Name: "version", Type: "string"},
+				{Name: "chainId", Type: "uint256"},
+				{Name: "verifyingContract", Type: "address"},
+			},
+			"Order": []eip712TypeField{
+				{Name: "salt", Type: "uint256"},
+				{Name: "maker", Type: "address"},
+				{Name: "signer", Type: "address"},
+				{Name: "tokenId", Type: "uint256"},
+				{Name: "makerAmount", Type: "uint256"},
+				{Name: "takerAmount", Type: "uint256"},
+				{Name: "side", Type: "uint8"},
+				{Name: "signatureType", Type: "uint8"},
+				{Name: "timestamp", Type: "uint256"},
+				{Name: "metadata", Type: "bytes32"},
+				{Name: "builder", Type: "bytes32"},
+				{Name: "expiration", Type: "uint256"},
+			},
+		},
+		"primaryType": "Order",
+		"domain": map[string]interface{}{
+			"name":              "Polymarket CTF Exchange",
+			"version":           "2",
+			"chainId":           chainID,
+			"verifyingContract": "0xE111180000d2663C0091e4f400237545B87B996B",
+		},
+		"message": map[string]interface{}{
+			"salt":          "12345",
+			"maker":         testSignerAddress,
+			"signer":        testSignerAddress,
+			"tokenId":       "1",
+			"makerAmount":   "1000000000000000000",
+			"takerAmount":   "1000000000000000000",
+			"side":          "0",
+			"signatureType": "0",
+			"timestamp":     "1704067200",
+			"metadata":      "0x0000000000000000000000000000000000000000000000000000000000000000",
+			"builder":       "0x0000000000000000000000000000000000000000000000000000000000000000",
+			"expiration":    "1893456000",
+		},
+	}
+
+	orderSignReq := map[string]interface{}{
+		"chain_type":     "evm",
+		"chain_id":       chainID,
+		"signer_address": testSignerAddress,
+		"sign_type":      "typed_data",
+		"payload":        map[string]interface{}{"typed_data": orderTypedData},
+	}
+
+	orderResp := doRawRequest(t, http.MethodPost, "/api/v1/evm/sign", orderSignReq)
+	defer orderResp.Body.Close()
+
+	if orderResp.StatusCode == http.StatusForbidden {
+		var errBody struct {
+			Error   string `json:"error"`
+			Message string `json:"message"`
+		}
+		json.NewDecoder(orderResp.Body).Decode(&errBody)
+		t.Fatalf("V2 Order signature REJECTED (REGRESSION): %s - %s", errBody.Error, errBody.Message)
+	}
+	assert.True(t, orderResp.StatusCode == http.StatusOK || orderResp.StatusCode == http.StatusAccepted,
+		"V2 Order should return 200 or 202, got %d", orderResp.StatusCode)
+	t.Log("V2 Order signature: PASSED")
+
+	// ---------------------------------------------------------------
+	// 3. DELEGATECALL SafeTx → must be rejected (safe-block-delegatecall)
+	// ---------------------------------------------------------------
+	delegateCallSafeTx := map[string]interface{}{
+		"types": map[string]interface{}{
+			"EIP712Domain": []eip712TypeField{
+				{Name: "chainId", Type: "uint256"},
+				{Name: "verifyingContract", Type: "address"},
+			},
+			"SafeTx": []eip712TypeField{
+				{Name: "to", Type: "address"},
+				{Name: "value", Type: "uint256"},
+				{Name: "data", Type: "bytes"},
+				{Name: "operation", Type: "uint8"},
+				{Name: "safeTxGas", Type: "uint256"},
+				{Name: "baseGas", Type: "uint256"},
+				{Name: "gasPrice", Type: "uint256"},
+				{Name: "gasToken", Type: "address"},
+				{Name: "refundReceiver", Type: "address"},
+				{Name: "nonce", Type: "uint256"},
+			},
+		},
+		"primaryType": "SafeTx",
+		"domain": map[string]interface{}{
+			"chainId":           chainID,
+			"verifyingContract": testSignerAddress,
+		},
+		"message": map[string]interface{}{
+			"to":             "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB",
+			"value":          "0",
+			"data":           "0x095ea7b3000000000000000000000000E111180000d2663C0091e4f400237545B87B996Bffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+			"operation":      "1", // DELEGATECALL
+			"safeTxGas":      "0",
+			"baseGas":        "0",
+			"gasPrice":       "0",
+			"gasToken":       "0x0000000000000000000000000000000000000000",
+			"refundReceiver": "0x0000000000000000000000000000000000000000",
+			"nonce":          "0",
+		},
+	}
+
+	dcSignReq := map[string]interface{}{
+		"chain_type":     "evm",
+		"chain_id":       chainID,
+		"signer_address": testSignerAddress,
+		"sign_type":      "typed_data",
+		"payload":        map[string]interface{}{"typed_data": delegateCallSafeTx},
+	}
+
+	dcResp := doRawRequest(t, http.MethodPost, "/api/v1/evm/sign", dcSignReq)
+	defer dcResp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, dcResp.StatusCode,
+		"DELEGATECALL SafeTx rejection should return 200 (blocked result, not 403), got %d", dcResp.StatusCode)
+
+	var dcRespBody struct {
+		Status  string `json:"status"`
+		Message string `json:"message"`
+	}
+	json.NewDecoder(dcResp.Body).Decode(&dcRespBody)
+	assert.Equal(t, "rejected", dcRespBody.Status,
+		"DELEGATECALL SafeTx should be rejected, got status=%q message=%s", dcRespBody.Status, dcRespBody.Message)
+	t.Logf("DELEGATECALL rejection: %s - %s", dcRespBody.Status, dcRespBody.Message)
+
+	t.Log("Polymarket V2 Safe E2E: ALL PASSED")
 }

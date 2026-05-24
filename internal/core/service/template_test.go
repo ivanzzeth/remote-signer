@@ -2749,8 +2749,116 @@ func TestCreateInstance_SkipValidationFlow(t *testing.T) {
 			t.Errorf("expected 0 sub-budgets, got %d", len(result.SubBudgets))
 		}
 	})
-}
 
+	t.Run("bundle_template_delegate_to_resolution", func(t *testing.T) {
+		tmplRepo := newMockTemplateRepo()
+		ruleRepo := newMockRuleRepo()
+		budgetRepo := newMockBudgetRepo()
+
+		subRules := []bundleSubRule{
+			{
+				ID:   "target-rule",
+				Name: "Target Rule",
+				Type: string(types.RuleTypeEVMJS),
+				Mode: string(types.RuleModeWhitelist),
+				Config: map[string]interface{}{
+					"expression": "true",
+				},
+				Enabled: true,
+			},
+			{
+				ID:   "delegator-rule",
+				Name: "Delegator Rule",
+				Type: string(types.RuleTypeEVMJS),
+				Mode: string(types.RuleModeWhitelist),
+				Config: map[string]interface{}{
+					"delegate_to": "target-rule",
+				},
+				Enabled: true,
+			},
+		}
+		subRulesJSON, err := json.Marshal(subRules)
+		if err != nil {
+			t.Fatalf("failed to marshal sub-rules: %v", err)
+		}
+
+		bundleConfig := map[string]interface{}{
+			"rules_json": string(subRulesJSON),
+		}
+		bundleConfigJSON, err := json.Marshal(bundleConfig)
+		if err != nil {
+			t.Fatalf("failed to marshal bundle config: %v", err)
+		}
+
+		tmpl := &types.RuleTemplate{
+			ID:        "tmpl-delegate-bundle",
+			Name:      "Delegate Bundle",
+			Type:      "template_bundle",
+			Mode:      types.RuleModeWhitelist,
+			Config:    bundleConfigJSON,
+			Source:    types.RuleSourceConfig,
+			Enabled:   true,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}
+		seedTemplate(t, tmplRepo, tmpl)
+
+		svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+		if err != nil {
+			t.Fatalf("failed to create service: %v", err)
+		}
+
+		result, err := svc.CreateInstance(ctx, &CreateInstanceRequest{
+			TemplateID: "tmpl-delegate-bundle",
+			Variables:  map[string]string{},
+		})
+		if err != nil {
+			t.Fatalf("CreateInstance failed: %v", err)
+		}
+		if len(result.SubRules) != 2 {
+			t.Fatalf("expected 2 sub-rules, got %d", len(result.SubRules))
+		}
+
+		// The target rule should have an inst_<hash> ID
+		targetRule := result.SubRules[0]
+		if !strings.HasPrefix(string(targetRule.ID), "inst_") {
+			t.Errorf("expected target rule ID to start with 'inst_', got %q", targetRule.ID)
+		}
+
+		// The delegator rule's config should have delegate_to pointing to the target's actual ID
+		delegatorRule := result.SubRules[1]
+		var delegatorCfg map[string]interface{}
+		if err := json.Unmarshal(delegatorRule.Config, &delegatorCfg); err != nil {
+			t.Fatalf("failed to parse delegator config: %v", err)
+		}
+		gotDelegate, _ := delegatorCfg["delegate_to"].(string)
+		if gotDelegate != string(targetRule.ID) {
+			t.Errorf("expected delegate_to to be resolved to %q, got %q", targetRule.ID, gotDelegate)
+		}
+
+		// Verify SubRuleIDMap is populated
+		if result.SubRuleIDMap == nil {
+			t.Error("expected non-nil SubRuleIDMap")
+		} else {
+			if mappedID, ok := result.SubRuleIDMap["target-rule"]; !ok {
+				t.Error("expected SubRuleIDMap to contain 'target-rule'")
+			} else if mappedID != targetRule.ID {
+				t.Errorf("expected SubRuleIDMap['target-rule'] = %q, got %q", targetRule.ID, mappedID)
+			}
+		}
+
+		// Verify no __sub_rule_id artifact remains in config
+		if _, ok := delegatorCfg["__sub_rule_id"]; ok {
+			t.Error("unexpected __sub_rule_id in delegator config")
+		}
+		var targetCfg map[string]interface{}
+		if err := json.Unmarshal(targetRule.Config, &targetCfg); err == nil {
+			if _, ok := targetCfg["__sub_rule_id"]; ok {
+				t.Error("unexpected __sub_rule_id in target config")
+			}
+		}
+	})
+}
 // ---------------------------------------------------------------------------
 // TestCreateInstanceWithTx
 // ---------------------------------------------------------------------------
@@ -3159,4 +3267,179 @@ func (r *failOnceBudgetRepo) Create(ctx context.Context, budget *types.RuleBudge
 		return r.BudgetRepository.Create(ctx, budget)
 	}
 	return fmt.Errorf("simulated budget creation failure")
+}
+
+func TestResolveDelegateToConfig(t *testing.T) {
+	t.Run("resolves_single_delegate_to", func(t *testing.T) {
+		cfg := map[string]interface{}{
+			"delegate_to": "target-rule",
+			"expression":  "true",
+		}
+		ruleIDMap := map[string]types.RuleID{
+			"target-rule": "inst_abc12345",
+		}
+
+		newConfig, changed, err := ResolveDelegateToConfig(cfg, ruleIDMap)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !changed {
+			t.Fatal("expected changed=true")
+		}
+
+		var result map[string]interface{}
+		if err := json.Unmarshal(newConfig, &result); err != nil {
+			t.Fatalf("failed to unmarshal result: %v", err)
+		}
+		if got, _ := result["delegate_to"].(string); got != "inst_abc12345" {
+			t.Errorf("expected delegate_to=inst_abc12345, got %q", got)
+		}
+		if got, _ := result["expression"].(string); got != "true" {
+			t.Errorf("expected expression=true, got %q", got)
+		}
+	})
+
+	t.Run("resolves_comma_separated_delegate_to", func(t *testing.T) {
+		cfg := map[string]interface{}{
+			"delegate_to": "rule-a, rule-b",
+		}
+		ruleIDMap := map[string]types.RuleID{
+			"rule-a": "inst_a111",
+			"rule-b": "inst_b222",
+			"rule-c": "inst_c333",
+		}
+
+		newConfig, changed, err := ResolveDelegateToConfig(cfg, ruleIDMap)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !changed {
+			t.Fatal("expected changed=true")
+		}
+
+		var result map[string]interface{}
+		if err := json.Unmarshal(newConfig, &result); err != nil {
+			t.Fatalf("failed to unmarshal result: %v", err)
+		}
+		got, _ := result["delegate_to"].(string)
+		if got != "inst_a111,inst_b222" {
+			t.Errorf("expected delegate_to=inst_a111,inst_b222, got %q", got)
+		}
+	})
+
+	t.Run("skips_unknown_delegate_to", func(t *testing.T) {
+		cfg := map[string]interface{}{
+			"delegate_to": "unknown-rule",
+		}
+		ruleIDMap := map[string]types.RuleID{
+			"other-rule": "inst_abc12345",
+		}
+
+		_, changed, err := ResolveDelegateToConfig(cfg, ruleIDMap)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if changed {
+			t.Fatal("expected changed=false for unknown rule")
+		}
+	})
+
+	t.Run("no_op_when_no_delegate_keys", func(t *testing.T) {
+		cfg := map[string]interface{}{
+			"expression": "true",
+			"addresses":  "0x1234",
+		}
+		ruleIDMap := map[string]types.RuleID{"x": "inst_x"}
+
+		_, changed, err := ResolveDelegateToConfig(cfg, ruleIDMap)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if changed {
+			t.Fatal("expected changed=false when no delegate keys present")
+		}
+	})
+
+	t.Run("resolves_delegate_to_by_target", func(t *testing.T) {
+		cfg := map[string]interface{}{
+			"delegate_to_by_target": "some-target:target-rule",
+		}
+		ruleIDMap := map[string]types.RuleID{
+			"target-rule": "inst_abc12345",
+		}
+
+		newConfig, changed, err := ResolveDelegateToConfig(cfg, ruleIDMap)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !changed {
+			t.Fatal("expected changed=true")
+		}
+
+		var result map[string]interface{}
+		if err := json.Unmarshal(newConfig, &result); err != nil {
+			t.Fatalf("failed to unmarshal result: %v", err)
+		}
+		got, _ := result["delegate_to_by_target"].(string)
+		if got != "some-target:inst_abc12345" {
+			t.Errorf("expected delegate_to_by_target=some-target:inst_abc12345, got %q", got)
+		}
+	})
+
+	t.Run("resolves_comma_separated_delegate_to_by_target", func(t *testing.T) {
+		cfg := map[string]interface{}{
+			"delegate_to_by_target": "target-a:rule-a, target-b:rule-b",
+		}
+		ruleIDMap := map[string]types.RuleID{
+			"rule-a": "inst_a111",
+			"rule-b": "inst_b222",
+		}
+
+		newConfig, changed, err := ResolveDelegateToConfig(cfg, ruleIDMap)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !changed {
+			t.Fatal("expected changed=true")
+		}
+
+		var result map[string]interface{}
+		if err := json.Unmarshal(newConfig, &result); err != nil {
+			t.Fatalf("failed to unmarshal result: %v", err)
+		}
+		got, _ := result["delegate_to_by_target"].(string)
+		if got != "target-a:inst_a111,target-b:inst_b222" {
+			t.Errorf("expected delegate_to_by_target=target-a:inst_a111,target-b:inst_b222, got %q", got)
+		}
+	})
+
+	t.Run("both_delegate_to_and_delegate_to_by_target", func(t *testing.T) {
+		cfg := map[string]interface{}{
+			"delegate_to":          "rule-a",
+			"delegate_to_by_target": "tx:rule-b",
+		}
+		ruleIDMap := map[string]types.RuleID{
+			"rule-a": "inst_a111",
+			"rule-b": "inst_b222",
+		}
+
+		newConfig, changed, err := ResolveDelegateToConfig(cfg, ruleIDMap)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !changed {
+			t.Fatal("expected changed=true")
+		}
+
+		var result map[string]interface{}
+		if err := json.Unmarshal(newConfig, &result); err != nil {
+			t.Fatalf("failed to unmarshal result: %v", err)
+		}
+		if got, _ := result["delegate_to"].(string); got != "inst_a111" {
+			t.Errorf("expected delegate_to=inst_a111, got %q", got)
+		}
+		if got, _ := result["delegate_to_by_target"].(string); got != "tx:inst_b222" {
+			t.Errorf("expected delegate_to_by_target=tx:inst_b222, got %q", got)
+		}
+	})
 }

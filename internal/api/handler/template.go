@@ -653,9 +653,7 @@ func resolveTemplateDefaults(defs []types.TemplateVariable, vars map[string]stri
 			continue
 		}
 		if s, ok := def.Default.(string); ok {
-			if s != "" {
-				result[def.Name] = s
-			}
+			result[def.Name] = s
 			continue
 		}
 		result[def.Name] = fmt.Sprint(def.Default)

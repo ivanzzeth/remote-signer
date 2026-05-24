@@ -215,11 +215,61 @@ config:
 			panic("failed to write e2e preset template: " + err.Error())
 		}
 
+		// Delegate target template (bundle with named sub-rule) — used by crosstemplate delegate e2e.
+		e2eDelegateTargetTemplate := []byte(`name: "E2E Delegate Target"
+type: template_bundle
+mode: whitelist
+chain_type: evm
+rules:
+  - id: "e2e-target"
+    name: "Target Rule"
+    type: "evm_js"
+    mode: "whitelist"
+    enabled: true
+    config:
+      expression: "false"
+  - id: "e2e-extra"
+    name: "Extra Rule"
+    type: "evm_js"
+    mode: "whitelist"
+    enabled: true
+    config:
+      expression: "true"
+`)
+		if err := os.WriteFile(filepath.Join(templatesDir, "evm", "e2e_bundle_target.yaml"), e2eDelegateTargetTemplate, 0644); err != nil {
+			panic("failed to write e2e bundle target template: " + err.Error())
+		}
+
+		// Delegator template (single rule referencing bundle sub-rule via variable).
+		e2eDelegatorTemplate := []byte(`name: "E2E Delegator"
+type: evm_js
+mode: whitelist
+chain_type: evm
+variables:
+  - name: delegate_to
+    type: string
+    description: "Target sub-rule ID to delegate to"
+    required: true
+config:
+  delegate_to: "${delegate_to}"
+  expression: "true"
+`)
+		if err := os.WriteFile(filepath.Join(templatesDir, "evm", "e2e_delegator.yaml"), e2eDelegatorTemplate, 0644); err != nil {
+			panic("failed to write e2e delegator template: " + err.Error())
+		}
+
 		// Create presets dir for preset API e2e. Each preset references
 		// templates by their stable file-derived ID (`template_ids:`).
 		presetsDir, err := os.MkdirTemp("", "e2e-presets-*")
 		if err != nil {
 			panic("failed to create presets temp dir: " + err.Error())
+		}
+		// Copy shipped presets so tests can reference e.g. polymarket_v2_safe_polygon.
+		repoPresetsDir := findRepoPresetsDir()
+		if repoPresetsDir != "" {
+			if copyErr := copyDir(repoPresetsDir, presetsDir); copyErr != nil {
+				panic("failed to copy shipped presets: " + copyErr.Error())
+			}
 		}
 		presetContent := []byte(`name: "E2E From Preset"
 chain_type: "evm"
@@ -235,6 +285,23 @@ operator_overrides:
 `)
 		if err := os.WriteFile(filepath.Join(presetsDir, "e2e_minimal.preset.yaml"), presetContent, 0644); err != nil {
 			panic("failed to write e2e preset file: " + err.Error())
+		}
+
+		// Cross-template delegate preset: references evm/e2e_bundle_target (bundle)
+		// and evm/e2e_delegator (single rule that delegates to a bundle sub-rule).
+		// Verifies that delegate_to is resolved across templates (not just within a bundle).
+		delegatePresetContent := []byte(`name: "E2E Cross-Template Delegate"
+chain_type: "evm"
+chain_id: "1"
+enabled: true
+template_ids:
+  - evm/e2e_bundle_target
+  - evm/e2e_delegator
+variables:
+  delegate_to: "e2e-target"
+`)
+		if err := os.WriteFile(filepath.Join(presetsDir, "e2e_delegate.preset.yaml"), delegatePresetContent, 0644); err != nil {
+			panic("failed to write e2e delegate preset: " + err.Error())
 		}
 
 		// Matrix preset: same template, 3 chains with different addresses
@@ -400,6 +467,25 @@ operator_overrides:
 // e2e package's cwd. Returns "" if the directory can't be found, in
 // which case the harness still works but only the test-only template is
 // available (presets referencing evm/agent etc. will fail at apply).
+func findRepoPresetsDir() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	for wd != "/" && wd != "" {
+		candidate := filepath.Join(wd, "rules", "presets")
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			return candidate
+		}
+		parent := filepath.Dir(wd)
+		if parent == wd {
+			break
+		}
+		wd = parent
+	}
+	return ""
+}
+
 func findRepoTemplatesDir() string {
 	wd, err := os.Getwd()
 	if err != nil {

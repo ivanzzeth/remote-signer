@@ -131,12 +131,13 @@ func TestResolveTemplateDefaults_NilDefaultSkipped(t *testing.T) {
 	assert.Empty(t, got, "nil default produces no entry")
 }
 
-func TestResolveTemplateDefaults_EmptyStringDefaultSkipped(t *testing.T) {
+func TestResolveTemplateDefaults_EmptyStringDefault(t *testing.T) {
 	defs := []types.TemplateVariable{
 		{Name: "a", Default: ""},
 	}
 	got := resolveTemplateDefaults(defs, nil)
-	assert.Empty(t, got, "empty string default produces no entry")
+	require.Len(t, got, 1, "empty string default should produce an entry")
+	assert.Equal(t, "", got["a"], "empty string default should be used")
 }
 
 func TestResolveTemplateDefaults_NilVars(t *testing.T) {
