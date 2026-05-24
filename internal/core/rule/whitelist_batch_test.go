@@ -66,6 +66,10 @@ func (m *mockRuleRepository) IncrementMatchCount(ctx context.Context, id types.R
 	return nil
 }
 
+func (m *mockRuleRepository) ValidateDelegateRefs(ctx context.Context, rule *types.Rule) error {
+	return nil
+}
+
 // mockEvaluator implements RuleEvaluator for testing
 type mockEvaluator struct {
 	evaluateFunc func(ctx context.Context, rule *types.Rule, req *types.SignRequest, parsed *types.ParsedPayload) (bool, string, error)

@@ -42,6 +42,10 @@ func (r *budgetExceededRuleRepo) IncrementMatchCount(ctx context.Context, id typ
 	return nil
 }
 
+func (r *budgetExceededRuleRepo) ValidateDelegateRefs(ctx context.Context, rule *types.Rule) error {
+	return nil
+}
+
 func (r *budgetExceededRuleRepo) List(ctx context.Context, filter storage.RuleFilter) ([]*types.Rule, error) {
 	return r.rules, nil
 }

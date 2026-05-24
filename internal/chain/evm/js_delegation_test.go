@@ -45,6 +45,10 @@ func (r *delegationRuleRepo) IncrementMatchCount(ctx context.Context, id types.R
 	return nil
 }
 
+func (r *delegationRuleRepo) ValidateDelegateRefs(ctx context.Context, rule *types.Rule) error {
+	return nil
+}
+
 func TestDelegation_Single_AllowedByDelegateRule(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 

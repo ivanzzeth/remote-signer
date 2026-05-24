@@ -77,6 +77,10 @@ func (m *mockRuleRepo) IncrementMatchCount(_ context.Context, _ types.RuleID) er
 	return nil
 }
 
+func (m *mockRuleRepo) ValidateDelegateRefs(_ context.Context, _ *types.Rule) error {
+	return nil
+}
+
 // mockBudgetRepo implements storage.BudgetRepository for listBudgets tests.
 type mockBudgetRepo struct {
 	listByRuleID func(context.Context, types.RuleID) ([]*types.RuleBudget, error)

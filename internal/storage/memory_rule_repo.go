@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -155,6 +156,59 @@ func (r *MemoryRuleRepository) ListByChainType(ctx context.Context, chainType ty
 
 // IncrementMatchCount is a no-op for in-memory repo.
 func (r *MemoryRuleRepository) IncrementMatchCount(ctx context.Context, id types.RuleID) error {
+	return nil
+}
+
+// ValidateDelegateRefs validates that delegate targets exist in the in-memory store.
+func (r *MemoryRuleRepository) ValidateDelegateRefs(ctx context.Context, rule *types.Rule) error {
+	if rule == nil || len(rule.Config) == 0 {
+		return nil
+	}
+	var cfg map[string]interface{}
+	if err := json.Unmarshal(rule.Config, &cfg); err != nil {
+		return fmt.Errorf("failed to parse config for delegate validation: %w", err)
+	}
+
+	var targets []string
+	if d, _ := cfg["delegate_to"].(string); d != "" {
+		for _, part := range strings.Split(d, ",") {
+			part = strings.TrimSpace(part)
+			if strings.HasPrefix(part, "inst_") {
+				targets = append(targets, part)
+			}
+		}
+	}
+	if dtbt, _ := cfg["delegate_to_by_target"].(string); dtbt != "" {
+		for _, pair := range strings.Split(dtbt, ",") {
+			pair = strings.TrimSpace(pair)
+			idx := strings.Index(pair, ":")
+			if idx <= 0 {
+				continue
+			}
+			rulePart := strings.TrimSpace(pair[idx+1:])
+			if strings.HasPrefix(rulePart, "inst_") {
+				targets = append(targets, rulePart)
+			}
+		}
+	}
+
+	if len(targets) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]bool, len(targets))
+	for _, t := range targets {
+		if seen[t] {
+			continue
+		}
+		seen[t] = true
+		r.mu.RLock()
+		_, exists := r.rules[types.RuleID(t)]
+		r.mu.RUnlock()
+		if !exists {
+			return fmt.Errorf("delegate target %q not found in database", t)
+		}
+	}
 	return nil
 }
 
