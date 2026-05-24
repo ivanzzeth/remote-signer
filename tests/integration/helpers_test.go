@@ -312,9 +312,29 @@ func (d *daemon) dumpLog() {
 
 // cli runs the binary one-shot (no daemon) with the given args. Stdin is
 // empty; stdout and stderr are returned along with the exit error.
+//
+// The environment is cleaned of auth-related env vars that would conflict
+// with explicit --api-key-* flags (e.g. REMOTE_SIGNER_API_KEY_FILE from the
+// developer's shell leaking into the child process). runCLI sets its own
+// auth flags explicitly and relies on this filter.
 func cli(t *testing.T, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
 	cmd := exec.Command(binaryPath, args...)
+	// Strip conflicting auth env vars so the child binary only sees whatever
+	// the caller explicitly injected via t.Setenv or the flag values.
+	var cleanEnv []string
+	for _, e := range os.Environ() {
+		key, _, _ := strings.Cut(e, "=")
+		switch key {
+		case "REMOTE_SIGNER_API_KEY_ID", "REMOTE_SIGNER_API_KEY_FILE",
+			"REMOTE_SIGNER_API_KEY_KEYSTORE", "REMOTE_SIGNER_API_KEY_PASSWORD_ENV",
+			"REMOTE_SIGNER_TLS_CA", "REMOTE_SIGNER_TLS_CERT", "REMOTE_SIGNER_TLS_KEY",
+			"REMOTE_SIGNER_URL":
+			continue
+		}
+		cleanEnv = append(cleanEnv, e)
+	}
+	cmd.Env = cleanEnv
 	var outBuf, errBuf bytes.Buffer
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &errBuf
