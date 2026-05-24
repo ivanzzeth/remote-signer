@@ -89,7 +89,7 @@ func TestE2E_PolymarketV2_SignTypedDataOrder(t *testing.T) {
 	presetName := "polymarket_v2_eoa_polygon"
 	applyReq := map[string]interface{}{
 		"variables": map[string]string{
-			"allowed_safe_addresses": testSignerAddress,
+			"allowed_safe_addresses": testSigner2Address,
 		},
 		"skip_validation": true,
 	}
@@ -212,7 +212,7 @@ func TestE2E_PolymarketV2Safe_SignAndDelegate(t *testing.T) {
 
 	presetID := "evm/polymarket_v2_safe_polygon"
 	applyResp, err := adminClient.Presets.Apply(ctx, presetID, &presets.ApplyRequest{
-		Variables:      map[string]string{"allowed_safe_addresses": testSignerAddress},
+		Variables:      map[string]string{"allowed_safe_addresses": testSigner2Address},
 		SkipValidation: true,
 	})
 	require.NoError(t, err, "preset apply should succeed")
@@ -253,7 +253,7 @@ func TestE2E_PolymarketV2Safe_SignAndDelegate(t *testing.T) {
 		"primaryType": "SafeTx",
 		"domain": map[string]interface{}{
 			"chainId":           chainID,
-			"verifyingContract": testSignerAddress,
+			"verifyingContract": testSigner2Address,
 		},
 		"message": map[string]interface{}{
 			"to":             "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB", // pUSD
@@ -293,7 +293,7 @@ func TestE2E_PolymarketV2Safe_SignAndDelegate(t *testing.T) {
 	t.Log("SafeTx delegation: PASSED (delegated to polymarket-v2-transactions)")
 
 	// ---------------------------------------------------------------
-	// 2. V2 Order signature: maker and signer both testSignerAddress
+	// 2. V2 Order signature: maker (Safe) != signer (EOA)
 	// ---------------------------------------------------------------
 	orderTypedData := map[string]interface{}{
 		"types": map[string]interface{}{
@@ -327,7 +327,7 @@ func TestE2E_PolymarketV2Safe_SignAndDelegate(t *testing.T) {
 		},
 		"message": map[string]interface{}{
 			"salt":          "12345",
-			"maker":         testSignerAddress,
+			"maker":         testSigner2Address,
 			"signer":        testSignerAddress,
 			"tokenId":       "1",
 			"makerAmount":   "1000000000000000000",
@@ -389,7 +389,7 @@ func TestE2E_PolymarketV2Safe_SignAndDelegate(t *testing.T) {
 		"primaryType": "SafeTx",
 		"domain": map[string]interface{}{
 			"chainId":           chainID,
-			"verifyingContract": testSignerAddress,
+			"verifyingContract": testSigner2Address,
 		},
 		"message": map[string]interface{}{
 			"to":             "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB",
