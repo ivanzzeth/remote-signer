@@ -4,12 +4,16 @@ package e2e
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ivanzzeth/remote-signer/pkg/client"
+	"github.com/ivanzzeth/remote-signer/pkg/client/evm"
 	"github.com/ivanzzeth/remote-signer/pkg/client/templates"
 )
 
@@ -24,6 +28,30 @@ func skipIfPresetAPIDisabled(t *testing.T) {
 		}
 		require.NoError(t, err)
 	}
+}
+
+// decodeRuleConfig decodes a config field from a Rule fetched via the API.
+// The API stores config as a base64-encoded JSON string, so we need to
+// first extract the base64 string, decode it, then JSON-unmarshal.
+func decodeRuleConfig(t *testing.T, rule evm.Rule) map[string]interface{} {
+	t.Helper()
+	var cfg map[string]interface{}
+	if len(rule.Config) == 0 {
+		return cfg
+	}
+	var b64 string
+	if err := json.Unmarshal(rule.Config, &b64); err != nil {
+		return cfg
+	}
+	raw, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		t.Logf("warning: config is not base64: %v", err)
+		return cfg
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Logf("warning: config json decode: %v", err)
+	}
+	return cfg
 }
 
 func TestPreset_List(t *testing.T) {
@@ -148,6 +176,91 @@ func TestPreset_Matrix_List_Shows_Template(t *testing.T) {
 		}
 	}
 	assert.True(t, found, "e2e_matrix.preset should appear in preset list")
+}
+
+func TestPreset_Apply_CrossTemplateDelegate(t *testing.T) {
+	ctx := context.Background()
+	skipIfPresetAPIDisabled(t)
+
+	// The delegate preset references evm/e2e_bundle_target (bundle with
+	// sub-rules "e2e-target" and "e2e-extra") and evm/e2e_delegator
+	// (single rule with delegate_to: "${delegate_to}").
+	// This test verifies that cross-template delegate_to references are
+	// resolved from raw sub-rule IDs (e.g. "e2e-target") to inst_<hash>
+	// format in Phase 2 of commitInstances.
+
+	snapshotRules(t)
+
+	resp, err := adminClient.Presets.ApplyWithVariables(ctx, "e2e_delegate.preset", nil)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Len(t, resp.Results, 3, "expected 3 rules (2 bundle sub-rules + 1 delegator)")
+
+	// Decode each result into an SDK Rule and collect configs.
+	type ruleEntry struct {
+		rule   evm.Rule
+		config map[string]interface{}
+	}
+	createdRules := make(map[string]*ruleEntry)
+
+	for _, result := range resp.Results {
+		var r evm.Rule
+		require.NoError(t, json.Unmarshal(result.Rule, &r))
+		require.NotEmpty(t, r.ID, "apply result rule should have an id")
+		createdRules[r.ID] = &ruleEntry{rule: r, config: decodeRuleConfig(t, r)}
+	}
+
+	// Locate the delegator rule (the one with delegate_to in config)
+	var delegatorEntry *ruleEntry
+	var delegatorRuleID string
+	for id, entry := range createdRules {
+		if entry.config != nil {
+			if _, ok := entry.config["delegate_to"]; ok {
+				delegatorEntry = entry
+				delegatorRuleID = id
+				break
+			}
+		}
+	}
+	require.NotNil(t, delegatorEntry, "delegator rule with delegate_to should exist")
+	require.NotEmpty(t, delegatorRuleID)
+
+	// Verify delegate_to is resolved to inst_<hash> format
+	delegateTo, _ := delegatorEntry.config["delegate_to"].(string)
+	require.NotEmpty(t, delegateTo, "delegate_to should not be empty")
+	assert.True(t, strings.HasPrefix(delegateTo, "inst_"),
+		"delegate_to should be resolved to inst_<hash> format, got %q", delegateTo)
+
+	// Verify the delegated-to rule actually exists among the created rules
+	_, ok := createdRules[delegateTo]
+	require.True(t, ok, "delegated rule %q should exist in apply results", delegateTo)
+	t.Logf("Cross-template delegate resolved: %s -> %s (target name: %s)",
+		delegatorRuleID, delegateTo, createdRules[delegateTo].rule.Name)
+
+	// Also verify via the API that the delegated rule exists
+	fetched, err := adminClient.EVM.Rules.Get(ctx, delegateTo)
+	require.NoError(t, err, "delegated rule should be fetchable via API")
+	fetchedCfg := decodeRuleConfig(t, *fetched)
+	// The target rule should NOT have delegate_to (it's the bundle sub-rule, not the delegator)
+	_, hasDelegate := fetchedCfg["delegate_to"]
+	assert.False(t, hasDelegate, "bundle sub-rule should not have delegate_to in config")
+
+	// Verify the second bundle sub-rule (e2e-extra) also exists as inst_<hash>
+	var extraRuleID string
+	for id := range createdRules {
+		if strings.HasPrefix(id, "inst_") && id != delegateTo {
+			extraRuleID = id
+			break
+		}
+	}
+	require.NotEmpty(t, extraRuleID, "second bundle sub-rule (e2e-extra) should exist as inst_<hash>")
+	_, err = adminClient.EVM.Rules.Get(ctx, extraRuleID)
+	require.NoError(t, err, "second bundle sub-rule should be fetchable via API")
+	t.Logf("Second bundle sub-rule: %s", extraRuleID)
+
+	// Verify the delegator rule itself is fetchable
+	_, err = adminClient.EVM.Rules.Get(ctx, delegatorRuleID)
+	require.NoError(t, err, "delegator rule should be fetchable via API")
 }
 
 func TestPreset_Apply_Forbidden_NonAdmin(t *testing.T) {

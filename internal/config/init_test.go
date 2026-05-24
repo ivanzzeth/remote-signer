@@ -2253,6 +2253,81 @@ func TestExpandInstanceRule_MultipleRulesNoConfigID(t *testing.T) {
 	assert.Equal(t, "", result[1].Id)
 }
 
+func TestExpandInstanceRule_DelegateToResolved(t *testing.T) {
+	// Two sub-rules, where one delegates to the other by template YAML ID.
+	// After expansion with an instance ID, the delegate_to should be
+	// rewritten to the prefixed actual rule ID.
+	rulesJSON := `[{"id":"child-rule","name":"Child","type":"evm_js","mode":"whitelist","enabled":true,"config":{"expression":"true"}},{"id":"parent-rule","name":"Parent","type":"evm_js","mode":"whitelist","enabled":true,"config":{"delegate_to":"child-rule"}}]`
+	templates := map[string]TemplateConfig{
+		"tmpl": {Name: "tmpl", Enabled: true, Config: map[string]interface{}{"rules_json": rulesJSON}},
+	}
+	rule := RuleConfig{
+		Type: "instance", Name: "inst", Enabled: true,
+		Config: map[string]interface{}{"template": "tmpl", "id": "my-instance"},
+	}
+	result, err := expandInstanceRule(rule, templates)
+	require.NoError(t, err)
+	require.Len(t, result, 2)
+
+	// child-rule: id should be "my-instance_child-rule"
+	childRule := result[0]
+	assert.Equal(t, "my-instance_child-rule", childRule.Id)
+
+	// parent-rule: id should be "my-instance_parent-rule"
+	parentRule := result[1]
+	assert.Equal(t, "my-instance_parent-rule", parentRule.Id)
+
+	// parent config's delegate_to should now point to the prefixed child ID
+	gotDelegate, _ := parentRule.Config["delegate_to"].(string)
+	assert.Equal(t, "my-instance_child-rule", gotDelegate,
+		"delegate_to should be resolved to prefixed child rule ID")
+}
+
+func TestExpandInstanceRule_DelegateToResolved_ScopeSuffix(t *testing.T) {
+	// No explicit instance ID: uses scope-based suffix (chain type + chain ID)
+	rulesJSON := `[{"id":"child-rule","name":"Child","type":"evm_js","mode":"whitelist","enabled":true,"config":{"expression":"true"}},{"id":"parent-rule","name":"Parent","type":"evm_js","mode":"whitelist","enabled":true,"config":{"delegate_to":"child-rule"}}]`
+	templates := map[string]TemplateConfig{
+		"tmpl": {Name: "tmpl", Enabled: true, Config: map[string]interface{}{"rules_json": rulesJSON}},
+	}
+	rule := RuleConfig{
+		Type: "instance", Name: "inst", Enabled: true,
+		ChainType: "evm", ChainID: "137",
+		Config: map[string]interface{}{"template": "tmpl"},
+	}
+	result, err := expandInstanceRule(rule, templates)
+	require.NoError(t, err)
+	require.Len(t, result, 2)
+
+	expectedChildID := "child-rule-evm-137"
+	expectedParentID := "parent-rule-evm-137"
+
+	assert.Equal(t, expectedChildID, result[0].Id)
+	assert.Equal(t, expectedParentID, result[1].Id)
+
+	gotDelegate, _ := result[1].Config["delegate_to"].(string)
+	assert.Equal(t, expectedChildID, gotDelegate,
+		"delegate_to should resolve to scope-suffixed child rule ID")
+}
+
+func TestExpandInstanceRule_DelegateToByTargetResolved(t *testing.T) {
+	rulesJSON := `[{"id":"child-rule","name":"Child","type":"evm_js","mode":"whitelist","enabled":true,"config":{"expression":"true"}},{"id":"parent-rule","name":"Parent","type":"evm_js","mode":"whitelist","enabled":true,"config":{"delegate_to_by_target":"0xabc:child-rule"}}]`
+	templates := map[string]TemplateConfig{
+		"tmpl": {Name: "tmpl", Enabled: true, Config: map[string]interface{}{"rules_json": rulesJSON}},
+	}
+	rule := RuleConfig{
+		Type: "instance", Name: "inst", Enabled: true,
+		Config: map[string]interface{}{"template": "tmpl", "id": "my-inst"},
+	}
+	result, err := expandInstanceRule(rule, templates)
+	require.NoError(t, err)
+	require.Len(t, result, 2)
+
+	assert.Equal(t, "my-inst_child-rule", result[0].Id)
+	gotDTBT, _ := result[1].Config["delegate_to_by_target"].(string)
+	assert.Equal(t, "0xabc:my-inst_child-rule", gotDTBT,
+		"delegate_to_by_target should be resolved to prefixed child rule ID")
+}
+
 func TestExpandInstanceRules_MixedTypes(t *testing.T) {
 	rulesJSON := `[{"name":"From Template","type":"evm_address_list","mode":"whitelist","enabled":true,"config":{"addresses":["0x1234567890abcdef1234567890abcdef12345678"]}}]`
 	templates := []TemplateConfig{

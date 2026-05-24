@@ -357,22 +357,39 @@ func TestE2E_ValidateTemplate(t *testing.T) {
 	ctx := context.Background()
 
 	// Find a known template from the registry. Prefer evm/agent (has evm_js test_cases).
+	// Skip e2e-only helper templates (source=file) that may lack test_variables
+	// needed for validation, e.g. e2e_delegator with delegate_to but no test_variables.
 	templatesResp, err := adminClient.Templates.List(ctx, nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, templatesResp.Templates, "at least one template must be synced")
 
-	// Pick the first evm_js template with test_cases, or fall back to any template.
 	var targetID string
 	for _, tmpl := range templatesResp.Templates {
-		if tmpl.Type == "evm_js" {
+		if tmpl.ID == "evm/agent" {
 			targetID = tmpl.ID
 			break
 		}
 	}
-	if targetID == "" && len(templatesResp.Templates) > 0 {
-		targetID = templatesResp.Templates[0].ID
+	if targetID == "" {
+		// Fallback: pick any config-source evm_js template.
+		// Skip file-source e2e helpers (e.g. e2e_delegator with delegate_to but no test_variables).
+		for _, tmpl := range templatesResp.Templates {
+			if tmpl.Type == "evm_js" && tmpl.Source == "config" {
+				targetID = tmpl.ID
+				break
+			}
+		}
 	}
-	require.NotEmpty(t, targetID, "no template found for validate test")
+	if targetID == "" {
+		// Last fallback: first config-source template
+		for _, tmpl := range templatesResp.Templates {
+			if tmpl.Source == "config" {
+				targetID = tmpl.ID
+				break
+			}
+		}
+	}
+	require.NotEmpty(t, targetID, "no suitable template found for validate test")
 
 	var vresp validateTemplateResponse
 	rawSignedRequest(t, http.MethodPost, "/api/v1/templates/"+targetID+"/validate", nil, &vresp)

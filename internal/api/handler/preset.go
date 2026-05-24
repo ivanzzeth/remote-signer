@@ -850,10 +850,18 @@ func (h *PresetHandler) commitInstances(ctx context.Context, resolved []resolved
 			return errTx
 		}
 		results = make([]map[string]interface{}, 0, len(resolved))
+
+		// Phase 1: create all instances and collect sub-rule ID maps
+		globalSubRuleIDMap := make(map[string]types.RuleID)
+		var allRules []*types.Rule
+
 		for _, item := range resolved {
 			result, err := h.templateSvc.CreateInstanceFromResolvedWithTx(ctx, ruleRepoTx, budgetRepoTx, item.tmpl, item.req)
 			if err != nil {
 				return fmt.Errorf("create instance for %q: %w", item.req.TemplateID, err)
+			}
+			for k, v := range result.SubRuleIDMap {
+				globalSubRuleIDMap[k] = v
 			}
 			if len(result.SubRules) > 0 {
 				for i, subRule := range result.SubRules {
@@ -862,6 +870,7 @@ func (h *PresetHandler) commitInstances(ctx context.Context, resolved []resolved
 						entry["budget"] = result.SubBudgets[i]
 					}
 					results = append(results, entry)
+					allRules = append(allRules, subRule)
 				}
 				continue
 			}
@@ -870,7 +879,28 @@ func (h *PresetHandler) commitInstances(ctx context.Context, resolved []resolved
 				entry["budget"] = result.Budget
 			}
 			results = append(results, entry)
+			allRules = append(allRules, result.Rule)
 		}
+
+		// Phase 2: resolve cross-template delegate_to references using the global map
+		for _, rule := range allRules {
+			var cfg map[string]interface{}
+			if err := json.Unmarshal(rule.Config, &cfg); err != nil {
+				h.logger.Warn("failed to unmarshal config for delegate resolution", "rule_id", rule.ID, "error", err)
+				continue
+			}
+			newConfig, changed, err := service.ResolveDelegateToConfig(cfg, globalSubRuleIDMap)
+			if err != nil {
+				return fmt.Errorf("resolve delegate config for rule %q: %w", rule.Name, err)
+			}
+			if changed {
+				rule.Config = newConfig
+				if err := ruleRepoTx.Update(ctx, rule); err != nil {
+					return fmt.Errorf("update rule %q with resolved config: %w", rule.Name, err)
+				}
+			}
+		}
+
 		return nil
 	})
 	return results, err

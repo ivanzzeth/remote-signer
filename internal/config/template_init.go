@@ -590,32 +590,43 @@ func expandInstanceRule(rule RuleConfig, templates map[string]TemplateConfig) ([
 	}
 	instanceID, hasInstanceID := rule.Config["id"].(string)
 	instanceID = strings.TrimSpace(instanceID)
+
+	// Track original template YAML ID → prefixed rule ID so delegate_to
+	// cross-references (e.g. "polymarket-v2-transactions") resolve correctly.
+	subIDMap := make(map[string]string)
+
 	if hasInstanceID && instanceID != "" {
 		if len(templateRules) == 1 {
+			if templateRules[0].Id != "" {
+				subIDMap[templateRules[0].Id] = instanceID
+			}
 			templateRules[0].Id = instanceID
 		} else {
-			// Prefix only rules that already have an id, so multiple instances of the same template get unique ids; leave empty id as-is
 			for idx := range templateRules {
 				tid := strings.TrimSpace(templateRules[idx].Id)
 				if tid != "" {
+					subIDMap[tid] = instanceID + "_" + tid
 					templateRules[idx].Id = instanceID + "_" + tid
 				}
 			}
 		}
 	} else if len(templateRules) > 0 {
-		// No explicit instance id — derive a scope-based suffix so that multiple
-		// instances of the same template (e.g. USDC on chain 1 vs chain 137) get
-		// unique sub-rule IDs.  Format: "{original_id}-{chain_type}-{chain_id}".
 		scopeSuffix := instanceScopeSuffix(rule)
 		if scopeSuffix != "" {
 			for idx := range templateRules {
 				tid := strings.TrimSpace(templateRules[idx].Id)
 				if tid != "" {
+					subIDMap[tid] = tid + "-" + scopeSuffix
 					templateRules[idx].Id = tid + "-" + scopeSuffix
 				}
 			}
 		}
 	}
+
+	// Resolve delegate_to/delegate_to_by_target cross-references within this instance.
+	// Sub-rules reference each other by template YAML ID (e.g. "polymarket-v2-transactions"),
+	// but the actual rule IDs have been prefixed above.
+	resolveDelegateToRefs(templateRules, subIDMap)
 
 	return templateRules, nil
 }
@@ -623,6 +634,58 @@ func expandInstanceRule(rule RuleConfig, templates map[string]TemplateConfig) ([
 
 // instanceScopeSuffix returns a suffix like "evm-137" from the instance rule's
 // scope fields (chain_type, chain_id).  Returns "" if no scope is set.
+// resolveDelegateToRefs updates delegate_to and delegate_to_by_target in each
+// sub-rule's config so template YAML IDs (e.g. "polymarket-v2-transactions")
+// are replaced with the actual prefixed rule IDs.
+func resolveDelegateToRefs(rules []RuleConfig, idMap map[string]string) {
+	if len(idMap) == 0 {
+		return
+	}
+	for idx := range rules {
+		if rules[idx].Config == nil {
+			continue
+		}
+		cfg := rules[idx].Config
+
+		// Resolve delegate_to (comma-separated rule IDs)
+		if d, _ := cfg["delegate_to"].(string); d != "" {
+			parts := strings.Split(d, ",")
+			changed := false
+			for i, part := range parts {
+				part = strings.TrimSpace(part)
+				if actualID, ok := idMap[part]; ok && actualID != rules[idx].Id {
+					parts[i] = actualID
+					changed = true
+				}
+			}
+			if changed {
+				cfg["delegate_to"] = strings.Join(parts, ",")
+			}
+		}
+
+		// Resolve delegate_to_by_target ("addr:rule_id,addr:rule_id" — only rule_id portions)
+		if dtbt, _ := cfg["delegate_to_by_target"].(string); dtbt != "" {
+			pairs := strings.Split(dtbt, ",")
+			changed := false
+			for i, pair := range pairs {
+				pair = strings.TrimSpace(pair)
+				idx := strings.Index(pair, ":")
+				if idx <= 0 {
+					continue
+				}
+				rulePart := strings.TrimSpace(pair[idx+1:])
+				if actualID, ok := idMap[rulePart]; ok {
+					pairs[i] = pair[:idx+1] + actualID
+					changed = true
+				}
+			}
+			if changed {
+				cfg["delegate_to_by_target"] = strings.Join(pairs, ",")
+			}
+		}
+	}
+}
+
 func instanceScopeSuffix(rule RuleConfig) string {
 	parts := make([]string, 0, 2)
 	if rule.ChainType != "" {
