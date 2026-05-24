@@ -201,20 +201,48 @@ func (e *SolidityRuleEvaluator) GetTimeout() time.Duration {
 
 // ensureForgeStd installs forge-std in the given directory if lib/forge-std does not exist.
 // Required for request-as-input scripts that use vm.env* and vm.parseBytes.
+//
+// To avoid re-downloading forge-std for every test's isolated temp directory (which
+// caused the pre-commit hook to timeout), this function uses a global cache at
+// $HOME/.cache/remote-signer/forge-std. The first call installs forge-std to the
+// cache, and subsequent calls symlink from it.
 func ensureForgeStd(dir, foundryPath string) error {
 	libForgeStd := filepath.Join(dir, "lib", "forge-std")
 	if _, err := os.Stat(filepath.Join(libForgeStd, "src")); err == nil {
 		return nil
 	}
+
+	// Check global cache to avoid repeated downloads.
+	homeDir, _ := os.UserHomeDir()
+	cacheDir := filepath.Join(homeDir, ".cache", "remote-signer")
+	cachedForgeStd := filepath.Join(cacheDir, "forge-std")
+	if _, err := os.Stat(filepath.Join(cachedForgeStd, "lib", "forge-std", "src")); err != nil {
+		// Install to global cache.
+		if err := os.MkdirAll(filepath.Join(cachedForgeStd, "lib"), 0700); err != nil {
+			return fmt.Errorf("create cache lib dir: %w", err)
+		}
+		cacheFoundryConfig := `[profile.default]
+src = "."
+libs = ["lib"]
+`
+		if err := os.WriteFile(filepath.Join(cachedForgeStd, "foundry.toml"), []byte(cacheFoundryConfig), 0600); err != nil {
+			return fmt.Errorf("create cache foundry.toml: %w", err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, foundryPath, "install", "foundry-rs/forge-std", "--no-git")
+		cmd.Dir = cachedForgeStd
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("forge install forge-std (cache): %w, output: %s", err, string(out))
+		}
+	}
+
+	// Symlink from cache.
 	if err := os.MkdirAll(filepath.Join(dir, "lib"), 0700); err != nil {
 		return fmt.Errorf("create lib dir: %w", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, foundryPath, "install", "foundry-rs/forge-std", "--no-git")
-	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("forge install forge-std: %w, output: %s", err, string(out))
+	if err := os.Symlink(filepath.Join(cachedForgeStd, "lib", "forge-std"), libForgeStd); err != nil {
+		return fmt.Errorf("symlink forge-std: %w", err)
 	}
 	return nil
 }
