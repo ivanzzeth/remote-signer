@@ -80,6 +80,21 @@ type CreateInstanceRequest struct {
 
 	// Optional: periodic renewal (session with schedule)
 	Schedule *ScheduleConfig `json:"schedule,omitempty"`
+
+	// CrossTemplateIDMap maps template sub-rule IDs (YAML IDs) to actual
+	// instance rule IDs (inst_<hash>) from other templates in the same batch.
+	// Used by BatchCreateInstances to resolve delegate_to cross-references
+	// before persisting. Single-instance callers leave this nil.
+	CrossTemplateIDMap map[string]types.RuleID `json:"-"`
+
+	// PrecomputedRuleID overrides auto-generation of the rule ID.
+	// Set by BatchCreateInstances Phase 1 so the ID matches what was
+	// already published to CrossTemplateIDMap.
+	PrecomputedRuleID types.RuleID `json:"-"`
+
+	// PrecomputedSubRuleIDs maps sub-rule ID suffix → pre-computed rule ID.
+	// Same purpose as PrecomputedRuleID but for template_bundle sub-rules.
+	PrecomputedSubRuleIDs map[string]types.RuleID `json:"-"`
 }
 
 // BudgetConfig defines budget limits for an instance
@@ -108,6 +123,12 @@ type CreateInstanceResult struct {
 	SubRuleIDMap map[string]types.RuleID `json:"-"`
 }
 
+// BatchCreateItem pairs a resolved template with its creation request for batch operations.
+type BatchCreateItem struct {
+	Template *types.RuleTemplate
+	Request  *CreateInstanceRequest
+}
+
 // CreateInstance creates a rule instance from a template with bound variables
 func (s *TemplateService) CreateInstance(ctx context.Context, req *CreateInstanceRequest) (*CreateInstanceResult, error) {
 	if req == nil {
@@ -121,7 +142,7 @@ func (s *TemplateService) CreateInstance(ctx context.Context, req *CreateInstanc
 	}
 
 	// Delegate to createInstanceFromResolved which handles both single-rule and bundle templates
-	return s.createInstanceFromResolved(ctx, s.ruleRepo, s.budgetRepo, tmpl, req)
+	return s.createInstanceFromResolved(ctx, s.ruleRepo, s.budgetRepo, tmpl, req, nil)
 }
 
 // CreateInstanceWithTx creates a rule instance from a template using the given repos (e.g. tx-scoped).
@@ -142,7 +163,135 @@ func (s *TemplateService) CreateInstanceWithTx(
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve template: %w", err)
 	}
-	return s.createInstanceFromResolved(ctx, ruleRepo, budgetRepo, tmpl, req)
+	return s.createInstanceFromResolved(ctx, ruleRepo, budgetRepo, tmpl, req, nil)
+}
+
+// BatchCreateInstances creates multiple rule instances in a single batch,
+// resolving cross-template delegate_to references before any rule is persisted.
+// Each item must have a resolved Template (from ResolveTemplate) and Request.
+// Uses the provided repos (typically tx-scoped) for all DB operations.
+//
+// Phase 1: pre-compute all instance IDs across all items, building a combined
+// map of template sub-rule ID → actual inst_<hash> ID.
+// Phase 2: inject the combined map into each request's CrossTemplateIDMap,
+// then create each instance. Inside createInstanceFromResolved/Bundle, the
+// delegate_to/delegate_to_by_target fields are resolved before persisting.
+//
+// After creation, each result's SubRuleIDMap is merged into the global map
+// so that templates later in the batch can reference rules created earlier.
+func (s *TemplateService) BatchCreateInstances(
+	ctx context.Context,
+	ruleRepo storage.RuleRepository,
+	budgetRepo storage.BudgetRepository,
+	items []BatchCreateItem,
+) ([]*CreateInstanceResult, error) {
+	if len(items) == 0 {
+		return nil, nil
+	}
+
+	// Phase 1: pre-compute all rule IDs and build cross-template ID map
+	globalSubRuleIDMap := make(map[string]types.RuleID)
+	type pendingItem struct {
+		item         BatchCreateItem
+		resolvedVars map[string]string
+	}
+	pending := make([]pendingItem, 0, len(items))
+
+	for _, item := range items {
+		if item.Template == nil {
+			return nil, fmt.Errorf("template is required for item %q", item.Request.TemplateID)
+		}
+		if item.Request == nil {
+			return nil, fmt.Errorf("request is required for template %q", item.Template.ID)
+		}
+
+		var varDefs []types.TemplateVariable
+		if len(item.Template.Variables) > 0 {
+			if err := json.Unmarshal(item.Template.Variables, &varDefs); err != nil {
+				return nil, fmt.Errorf("failed to parse template variables for %q: %w", item.Template.ID, err)
+			}
+		}
+		if err := validateVariables(varDefs, item.Request.Variables); err != nil {
+			return nil, fmt.Errorf("variable validation failed for %q: %w", item.Template.ID, err)
+		}
+		resolvedVars := resolveDefaults(varDefs, item.Request.Variables)
+		injectReservedVariables(resolvedVars, item.Request, s.logger)
+		s.mergeTestVariables(resolvedVars, item.Template)
+
+		// Pre-compute rule IDs for this template
+		if err := s.collectRuleIDs(globalSubRuleIDMap, item.Template, item.Request, resolvedVars); err != nil {
+			return nil, fmt.Errorf("pre-compute IDs for %q: %w", item.Template.ID, err)
+		}
+
+		pending = append(pending, pendingItem{item: item, resolvedVars: resolvedVars})
+	}
+
+	// Phase 2: inject cross-template map and create each instance
+	results := make([]*CreateInstanceResult, 0, len(pending))
+	for _, p := range pending {
+		p.item.Request.CrossTemplateIDMap = globalSubRuleIDMap
+
+		result, err := s.createInstanceFromResolved(ctx, ruleRepo, budgetRepo, p.item.Template, p.item.Request, p.resolvedVars)
+		if err != nil {
+			return nil, fmt.Errorf("create instance for %q: %w", p.item.Request.TemplateID, err)
+		}
+
+		// Merge this result's sub-rule IDs into the global map for later items
+		for k, v := range result.SubRuleIDMap {
+			globalSubRuleIDMap[k] = v
+		}
+		results = append(results, result)
+	}
+
+	return results, nil
+}
+
+// collectRuleIDs pre-computes the rule IDs that a template will generate and
+// adds them to the provided map. For bundle templates, each sub-rule ID is
+// mapped. For single-rule templates, the template ID itself is the key.
+// The precomputed IDs are also stored on the request (PrecomputedRuleID /
+// PrecomputedSubRuleIDs) so Phase 2 of BatchCreateInstances reuses them.
+func (s *TemplateService) collectRuleIDs(m map[string]types.RuleID, tmpl *types.RuleTemplate, req *CreateInstanceRequest, resolvedVars map[string]string) error {
+	if tmpl.Type == "template_bundle" {
+		configMap := make(map[string]interface{})
+		resolvedConfig, err := SubstituteVariables(tmpl.Config, resolvedVars)
+		if err != nil {
+			return fmt.Errorf("variable substitution failed: %w", err)
+		}
+		if err := json.Unmarshal(resolvedConfig, &configMap); err != nil {
+			return fmt.Errorf("failed to parse resolved bundle config: %w", err)
+		}
+		rulesJSON, ok := configMap["rules_json"].(string)
+		if !ok {
+			return fmt.Errorf("template_bundle %q has no rules_json", tmpl.Name)
+		}
+		var subRules []bundleSubRule
+		if err := json.Unmarshal([]byte(rulesJSON), &subRules); err != nil {
+			return fmt.Errorf("failed to parse bundle rules_json: %w", err)
+		}
+		precomputed := make(map[string]types.RuleID, len(subRules))
+		for _, sub := range subRules {
+			subIDSuffix := sub.ID
+			if subIDSuffix == "" {
+				subIDSuffix = sub.Name
+			}
+			subRuleID := req.PrecomputedSubRuleIDs[subIDSuffix]
+			if subRuleID == "" {
+				subRuleID = s.generateBundleSubRuleID(tmpl.ID, resolvedVars, subIDSuffix)
+			}
+			precomputed[subIDSuffix] = subRuleID
+			if sub.ID != "" {
+				m[sub.ID] = subRuleID
+			}
+		}
+		req.PrecomputedSubRuleIDs = precomputed
+		return nil
+	}
+
+	ruleID := s.generateInstanceRuleID(tmpl.ID, resolvedVars)
+	m[tmpl.ID] = ruleID
+	req.PrecomputedRuleID = ruleID
+	return nil
 }
 
 // CreateInstanceFromResolvedWithTx creates a rule instance using an already-resolved template and tx-scoped repos.
@@ -160,7 +309,7 @@ func (s *TemplateService) CreateInstanceFromResolvedWithTx(
 	if ruleRepo == nil || budgetRepo == nil {
 		return nil, fmt.Errorf("rule and budget repositories are required")
 	}
-	return s.createInstanceFromResolved(ctx, ruleRepo, budgetRepo, tmpl, req)
+	return s.createInstanceFromResolved(ctx, ruleRepo, budgetRepo, tmpl, req, nil)
 }
 
 func (s *TemplateService) createInstanceFromResolved(
@@ -169,6 +318,7 @@ func (s *TemplateService) createInstanceFromResolved(
 	budgetRepo storage.BudgetRepository,
 	tmpl *types.RuleTemplate,
 	req *CreateInstanceRequest,
+	precomputedVars map[string]string,
 ) (*CreateInstanceResult, error) {
 	var varDefs []types.TemplateVariable
 	if len(tmpl.Variables) > 0 {
@@ -176,18 +326,36 @@ func (s *TemplateService) createInstanceFromResolved(
 			return nil, fmt.Errorf("failed to parse template variables: %w", err)
 		}
 	}
-	if err := validateVariables(varDefs, req.Variables); err != nil {
-		return nil, fmt.Errorf("variable validation failed: %w", err)
+	resolvedVars := precomputedVars
+	if resolvedVars == nil {
+		if err := validateVariables(varDefs, req.Variables); err != nil {
+			return nil, fmt.Errorf("variable validation failed: %w", err)
+		}
+		resolvedVars = resolveDefaults(varDefs, req.Variables)
+		injectReservedVariables(resolvedVars, req, s.logger)
+		s.mergeTestVariables(resolvedVars, tmpl)
 	}
-	resolvedVars := resolveDefaults(varDefs, req.Variables)
-	injectReservedVariables(resolvedVars, req, s.logger)
-	// Merge in test_variables so test-case placeholders in the config
-	// (e.g. ${test_wrong_signer}) resolve during substitution. These
-	// only appear in test case input data, never in actual rule config.
-	s.mergeTestVariables(resolvedVars, tmpl)
+
 	resolvedConfig, err := SubstituteVariables(tmpl.Config, resolvedVars)
 	if err != nil {
 		return nil, fmt.Errorf("variable substitution failed: %w", err)
+	}
+
+	// Resolve cross-template delegate_to references before persisting.
+	// The CrossTemplateIDMap is populated by BatchCreateInstances for
+	// multi-template presets. Single-instance callers leave it nil.
+	if req.CrossTemplateIDMap != nil {
+		var cfg map[string]interface{}
+		if err := json.Unmarshal(resolvedConfig, &cfg); err != nil {
+			return nil, fmt.Errorf("failed to parse resolved config for delegate resolution: %w", err)
+		}
+		newConfig, changed, err := ResolveDelegateToConfig(cfg, req.CrossTemplateIDMap)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve delegate config: %w", err)
+		}
+		if changed {
+			resolvedConfig = newConfig
+		}
 	}
 
 	// If template is a bundle, expand into sub-rules
@@ -195,7 +363,10 @@ func (s *TemplateService) createInstanceFromResolved(
 		return s.createInstanceFromBundle(ctx, ruleRepo, budgetRepo, tmpl, req, resolvedVars, resolvedConfig)
 	}
 
-	ruleID := s.generateInstanceRuleID(tmpl.ID, resolvedVars)
+	ruleID := req.PrecomputedRuleID
+	if ruleID == "" {
+		ruleID = s.generateInstanceRuleID(tmpl.ID, resolvedVars)
+	}
 	variablesJSON, err := json.Marshal(resolvedVars)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal resolved variables: %w", err)
@@ -326,6 +497,23 @@ func (s *TemplateService) createInstanceFromBundle(
 		return nil, fmt.Errorf("failed to marshal resolved variables: %w", err)
 	}
 
+	// Build a set of variable names declared by this template so we only inject
+	// declared variables into sub-rule configs. Variables from other templates
+	// (e.g. delegate_to leaking from safe into polymarket_v2) must not leak in.
+	var tmplVarDefs []types.TemplateVariable
+	if len(tmpl.Variables) > 0 {
+		if err := json.Unmarshal(tmpl.Variables, &tmplVarDefs); err != nil {
+			return nil, fmt.Errorf("failed to parse template variables: %w", err)
+		}
+	}
+	declaredVars := make(map[string]bool, len(tmplVarDefs)+len(reservedVariables))
+	for _, def := range tmplVarDefs {
+		declaredVars[def.Name] = true
+	}
+	for rv := range reservedVariables {
+		declaredVars[rv] = true
+	}
+
 	baseName := s.resolveInstanceName(req, tmpl)
 
 	// ---- Pass 1: generate IDs and build the template-ID→actual-ID map ----
@@ -347,7 +535,9 @@ func (s *TemplateService) createInstanceFromBundle(
 			return nil, fmt.Errorf("failed to parse sub-rule config: %w", err)
 		}
 		for k, v := range resolvedVars {
-			subConfig[k] = v
+			if declaredVars[k] {
+				subConfig[k] = v
+			}
 		}
 
 		subConfigJSON, err = json.Marshal(subConfig)
@@ -431,18 +621,30 @@ func (s *TemplateService) createInstanceFromBundle(
 		pending = append(pending, pendingSubRule{rule: rule, config: subConfig})
 	}
 
-	// ---- Resolve delegate_to references using the template-ID→actual-ID map ----
-	// Sub-rules may reference each other by template YAML ID (e.g., safe.yaml has
-	// delegate_to: "polymarket-v2-transactions"). Resolve to actual inst_<hash> IDs.
-	for i, p := range pending {
-		newConfig, changed, err := ResolveDelegateToConfig(p.config, subIDToRuleID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to resolve delegate config for sub-rule %q: %w", p.rule.Name, err)
+		// ---- Build combined resolution map ----
+		// Merge cross-template IDs (from BatchCreateInstances) into local
+		// sub-rule IDs so delegate_to can reference rules from other templates.
+		resolveMap := subIDToRuleID
+		if req.CrossTemplateIDMap != nil {
+			resolveMap = make(map[string]types.RuleID, len(subIDToRuleID)+len(req.CrossTemplateIDMap))
+			for k, v := range subIDToRuleID {
+				resolveMap[k] = v
+			}
+			for k, v := range req.CrossTemplateIDMap {
+				resolveMap[k] = v
+			}
 		}
-		if changed {
-			pending[i].rule.Config = newConfig
+
+		// ---- Resolve delegate_to references using the combined map ----
+		for i, p := range pending {
+			newConfig, changed, err := ResolveDelegateToConfig(p.config, resolveMap)
+			if err != nil {
+				return nil, fmt.Errorf("failed to resolve delegate config for sub-rule %q: %w", p.rule.Name, err)
+			}
+			if changed {
+				pending[i].rule.Config = newConfig
+			}
 		}
-	}
 
 	// ---- Pass 2: persist all rules ----
 	result := &CreateInstanceResult{

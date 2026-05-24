@@ -263,6 +263,10 @@ func (r *mockRuleRepo) IncrementMatchCount(_ context.Context, id types.RuleID) e
 	return nil
 }
 
+func (r *mockRuleRepo) ValidateDelegateRefs(_ context.Context, _ *types.Rule) error {
+	return nil
+}
+
 type mockBudgetRepo struct {
 	mu      sync.RWMutex
 	budgets map[string]*types.RuleBudget

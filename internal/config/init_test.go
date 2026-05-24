@@ -206,6 +206,10 @@ func (m *mockRuleRepository) IncrementMatchCount(_ context.Context, _ types.Rule
 	return nil
 }
 
+func (m *mockRuleRepository) ValidateDelegateRefs(_ context.Context, _ *types.Rule) error {
+	return nil
+}
+
 func (m *mockRuleRepository) RunInTransaction(_ context.Context, fn func(storage.RuleRepository) error) error {
 	return fn(m)
 }
@@ -367,6 +371,10 @@ func (e *errorRuleRepository) IncrementMatchCount(_ context.Context, _ types.Rul
 	return nil
 }
 
+func (e *errorRuleRepository) ValidateDelegateRefs(_ context.Context, _ *types.Rule) error {
+	return nil
+}
+
 func (e *errorRuleRepository) RunInTransaction(_ context.Context, fn func(storage.RuleRepository) error) error {
 	return fn(e)
 }
@@ -503,6 +511,10 @@ func (f *failUpdateRuleRepo) IncrementMatchCount(ctx context.Context, id types.R
 	return f.base.IncrementMatchCount(ctx, id)
 }
 
+func (f *failUpdateRuleRepo) ValidateDelegateRefs(_ context.Context, _ *types.Rule) error {
+	return nil
+}
+
 func (f *failUpdateRuleRepo) RunInTransaction(ctx context.Context, fn func(storage.RuleRepository) error) error {
 	return fn(f)
 }
@@ -533,6 +545,10 @@ func (f *failDeleteRuleRepo) ListByChainType(ctx context.Context, ct types.Chain
 }
 func (f *failDeleteRuleRepo) IncrementMatchCount(ctx context.Context, id types.RuleID) error {
 	return f.base.IncrementMatchCount(ctx, id)
+}
+
+func (f *failDeleteRuleRepo) ValidateDelegateRefs(_ context.Context, _ *types.Rule) error {
+	return nil
 }
 
 func (f *failDeleteRuleRepo) RunInTransaction(ctx context.Context, fn func(storage.RuleRepository) error) error {

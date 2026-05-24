@@ -228,6 +228,10 @@ func (r *mockRuleRepo) IncrementMatchCount(_ context.Context, id types.RuleID) e
 	return nil
 }
 
+func (r *mockRuleRepo) ValidateDelegateRefs(_ context.Context, _ *types.Rule) error {
+	return nil
+}
+
 // mockBudgetRepo is an in-memory implementation of storage.BudgetRepository.
 type mockBudgetRepo struct {
 	mu      sync.RWMutex

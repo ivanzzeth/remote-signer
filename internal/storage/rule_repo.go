@@ -2,7 +2,9 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -33,6 +35,11 @@ type RuleRepository interface {
 	Count(ctx context.Context, filter RuleFilter) (int, error)
 	ListByChainType(ctx context.Context, chainType types.ChainType) ([]*types.Rule, error)
 	IncrementMatchCount(ctx context.Context, id types.RuleID) error
+	// ValidateDelegateRefs checks that all delegate_to and delegate_to_by_target
+	// inst_<hash> references in a rule's config exist as rules in the database.
+	// This enforces referential integrity for references embedded in the JSONB
+	// config column. No-op for rules without delegate references.
+	ValidateDelegateRefs(ctx context.Context, rule *types.Rule) error
 }
 
 // Transactional is implemented by repositories that support atomic operations.
@@ -88,6 +95,91 @@ func (r *GormRuleRepository) Create(ctx context.Context, rule *types.Rule) error
 // NULL surface — and stops empty AppliedTo from quietly failing inserts and
 // dropping the entire rule, which manifests downstream as the misleading
 // "no matching rule and manual approval is disabled" error during signing.
+// ValidateDelegateRefs checks that all delegate_to and delegate_to_by_target
+// references in a rule's config JSON point to existing rules in the database.
+// This enforces referential integrity for the inst_<hash> rule ID references
+// embedded inside the JSONB config column, where a standard SQL FK cannot reach.
+// Only validates inst_-prefixed rule IDs; YAML template IDs are skipped.
+func (r *GormRuleRepository) ValidateDelegateRefs(ctx context.Context, rule *types.Rule) error {
+	if rule == nil || len(rule.Config) == 0 {
+		return nil
+	}
+	var cfg map[string]interface{}
+	if err := json.Unmarshal(rule.Config, &cfg); err != nil {
+		return fmt.Errorf("failed to parse config for delegate validation: %w", err)
+	}
+
+	// Collect inst_<hash> targets from delegate_to
+	var targets []string
+	if d, _ := cfg["delegate_to"].(string); d != "" {
+		for _, part := range strings.Split(d, ",") {
+			part = strings.TrimSpace(part)
+			if strings.HasPrefix(part, "inst_") {
+				targets = append(targets, part)
+			}
+		}
+	}
+
+	// Collect from delegate_to_by_target: "target-name:inst_<hash>,..."
+	if dtbt, _ := cfg["delegate_to_by_target"].(string); dtbt != "" {
+		for _, pair := range strings.Split(dtbt, ",") {
+			pair = strings.TrimSpace(pair)
+			idx := strings.Index(pair, ":")
+			if idx <= 0 {
+				continue
+			}
+			rulePart := strings.TrimSpace(pair[idx+1:])
+			if strings.HasPrefix(rulePart, "inst_") {
+				targets = append(targets, rulePart)
+			}
+		}
+	}
+
+	if len(targets) == 0 {
+		return nil
+	}
+
+	// Deduplicate
+	seen := make(map[string]bool, len(targets))
+	unique := make([]string, 0, len(targets))
+	for _, t := range targets {
+		if !seen[t] {
+			seen[t] = true
+			unique = append(unique, t)
+		}
+	}
+
+	// Batch check existence — count matching rows
+	var count int64
+	if err := r.db.WithContext(ctx).Model(&types.Rule{}).
+		Where("id IN ?", unique).
+		Count(&count).Error; err != nil {
+		return fmt.Errorf("failed to check delegate targets: %w", err)
+	}
+	if int(count) != len(unique) {
+		// Build a set of found IDs
+		found := make(map[string]bool, count)
+		var foundRules []struct{ ID string }
+		if err := r.db.WithContext(ctx).Model(&types.Rule{}).
+			Select("id").
+			Where("id IN ?", unique).
+			Find(&foundRules).Error; err == nil {
+			for _, fr := range foundRules {
+				found[fr.ID] = true
+			}
+		}
+		var missing []string
+		for _, t := range unique {
+			if !found[t] {
+				missing = append(missing, t)
+			}
+		}
+		return fmt.Errorf("delegate target(s) not found in database: %v", missing)
+	}
+
+	return nil
+}
+
 func normalizeRuleForPersist(rule *types.Rule) {
 	if len(rule.AppliedTo) == 0 {
 		// The whitelist engine treats len==0 as "applies to all callers"
