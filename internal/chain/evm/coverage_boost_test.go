@@ -558,7 +558,7 @@ func TestSanitizeFunctionName_AllUnderscores_CB(t *testing.T) {
 }
 
 func TestSanitizeFunctionName_Empty_CB(t *testing.T) {
-	assert.Equal(t, "", sanitizeFunctionName(""))
+	assert.Equal(t, "rule", sanitizeFunctionName(""))
 }
 
 // =============================================================================

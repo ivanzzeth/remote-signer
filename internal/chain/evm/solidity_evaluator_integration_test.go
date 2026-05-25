@@ -221,9 +221,14 @@ func TestIntegration_SolidityRuleValidator_SyntaxValidation(t *testing.T) {
 				Expression: tt.expression,
 				TestCases: []SolidityTestCase{
 					{
-						Name:       "dummy test",
-						Input:      SolidityTestInput{Value: "0"},
+						Name:       "should pass",
+						Input:      SolidityTestInput{Value: "0", To: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"},
 						ExpectPass: true,
+					},
+					{
+						Name:       "should revert",
+						Input:      SolidityTestInput{Value: "2000000000000000000", To: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"},
+						ExpectPass: false,
 					},
 				},
 			}
@@ -321,6 +326,11 @@ func TestIntegration_SolidityRuleValidator_FailingTestCase(t *testing.T) {
 				Input:      SolidityTestInput{Value: "2000000000000000000"},
 				ExpectPass: true, // This is wrong - should be false
 			},
+			{
+				Name:       "correctly expects revert for 2 ETH",
+				Input:      SolidityTestInput{Value: "2000000000000000000"},
+				ExpectPass: false,
+			},
 		},
 	}
 
@@ -338,9 +348,10 @@ func TestIntegration_SolidityRuleValidator_FailingTestCase(t *testing.T) {
 
 	assert.False(t, result.Valid, "rule should be invalid due to failing test case")
 	assert.Equal(t, 1, result.FailedTestCases, "should have 1 failed test case")
-	assert.Len(t, result.TestCaseResults, 1)
-	assert.False(t, result.TestCaseResults[0].Passed, "test case should fail")
+	assert.Len(t, result.TestCaseResults, 2)
+	assert.False(t, result.TestCaseResults[0].Passed, "test case 0 should fail")
 	assert.Contains(t, result.TestCaseResults[0].Error, "expected pass but got revert")
+	assert.True(t, result.TestCaseResults[1].Passed, "test case 1 should pass")
 }
 
 // TestIntegration_SolidityRuleEvaluator_Evaluate tests the full Evaluate method
@@ -680,9 +691,14 @@ func TestIntegration_FunctionMode_SyntaxError(t *testing.T) {
         `,
 		TestCases: []SolidityTestCase{
 			{
-				Name:       "dummy",
+				Name:       "should detect syntax error",
 				Input:      SolidityTestInput{},
 				ExpectPass: true,
+			},
+			{
+				Name:       "second test case for validator",
+				Input:      SolidityTestInput{},
+				ExpectPass: false,
 			},
 		},
 	}
@@ -804,8 +820,8 @@ func TestIntegration_TypedDataExpression_DomainValidation(t *testing.T) {
 
 	// Only allow specific domain contract
 	expression := `
-		require(domainContract == 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48, "invalid contract");
-		require(domainChainId == 1, "invalid chain");
+		require(eip712_domainContract == 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48, "invalid contract");
+		require(eip712_domainChainId == 1, "invalid chain");
 	`
 
 	tests := []struct {
@@ -890,9 +906,16 @@ func TestIntegration_TypedDataExpression_Validator(t *testing.T) {
 
 	config := SolidityExpressionConfig{
 		TypedDataExpression: `
-			require(value <= 1000000000000000000, "exceeds 1 token limit");
-			require(spender != address(0), "invalid spender");
+			require(permit.value <= 1000000000000000000, "exceeds 1 token limit");
+			require(permit.spender != address(0), "invalid spender");
 		`,
+		TypedDataStruct: `struct Permit {
+			address owner;
+			address spender;
+			uint256 value;
+			uint256 nonce;
+			uint256 deadline;
+		}`,
 		SignTypeFilter: "typed_data",
 		Description:    "Permit validation: max 1 token, no zero address spender",
 		TestCases: []SolidityTestCase{
@@ -1005,9 +1028,12 @@ func TestIntegration_TypedDataExpression_SyntaxError(t *testing.T) {
 			// Missing semicolon
 			require(value <= 1000000000000000000, "exceeds limit")
 		`,
+		TypedDataStruct: `struct Permit {
+			uint256 value;
+		}`,
 		TestCases: []SolidityTestCase{
 			{
-				Name: "dummy",
+				Name: "should detect syntax error",
 				Input: SolidityTestInput{
 					TypedData: &TypedDataTestInput{
 						PrimaryType: "Permit",
@@ -1017,6 +1043,18 @@ func TestIntegration_TypedDataExpression_SyntaxError(t *testing.T) {
 					},
 				},
 				ExpectPass: true,
+			},
+			{
+				Name: "second test case for validator",
+				Input: SolidityTestInput{
+					TypedData: &TypedDataTestInput{
+						PrimaryType: "Permit",
+						Message: map[string]interface{}{
+							"value": "100",
+						},
+					},
+				},
+				ExpectPass: false,
 			},
 		},
 	}

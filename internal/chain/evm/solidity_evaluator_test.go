@@ -1,3 +1,5 @@
+//go:build integration
+
 package evm
 
 import (
@@ -388,10 +390,6 @@ func TestSolidityTestInput_Defaults(t *testing.T) {
 	assert.Empty(t, input.Signer)
 }
 
-// Helper function
-func strPtr(s string) *string {
-	return &s
-}
 
 // TestEvaluate_WhitelistTransaction_CalldataMissingOrTooShort ensures that in whitelist mode,
 // transaction rules (Functions or Expression) fail when parsed is nil or RawData has fewer than 4 bytes (no selector).

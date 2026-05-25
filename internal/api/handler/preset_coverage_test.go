@@ -1,3 +1,5 @@
+//go:build integration
+
 package handler
 
 import (
@@ -16,7 +18,6 @@ import (
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 
-	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
@@ -54,12 +55,6 @@ func newPresetEnvWithJSEval(t *testing.T) (*presetTestEnv, *evm.JSRuleEvaluator)
 	)
 	require.NoError(t, err)
 	return &presetTestEnv{handler: h, db: db, template: tmplRepo, preset: presetRepo}, eval
-}
-
-func contextWithKey(t *testing.T, role types.APIKeyRole, id string) context.Context {
-	t.Helper()
-	return context.WithValue(context.Background(), middleware.APIKeyContextKey,
-		&types.APIKey{ID: id, Role: role, Enabled: true})
 }
 
 func TestPresetHandler_Validate_Success(t *testing.T) {

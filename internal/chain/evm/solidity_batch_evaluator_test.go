@@ -3,8 +3,6 @@ package evm
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -12,11 +10,6 @@ import (
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
-
-// testLogger returns a logger suitable for use in tests
-func testLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-}
 
 // =============================================================================
 // CanBatchEvaluate Tests

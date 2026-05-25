@@ -314,7 +314,7 @@ func (v *SolidityRuleValidator) validateRulesBatchForMode(ctx context.Context, r
 	// Collect all test cases with their rule indices
 	var allTestCases []testCaseWithRule
 
-	// Parse all rules and collect test cases
+	// Parse all rules and collect test cases (exclude rules that already failed parsing/security)
 	for i, rule := range rules {
 		var config SolidityExpressionConfig
 		if err := json.Unmarshal(rule.Config, &config); err != nil {
@@ -344,7 +344,7 @@ func (v *SolidityRuleValidator) validateRulesBatchForMode(ctx context.Context, r
 			continue
 		}
 
-		// Collect test cases
+		// Collect test cases (will be filtered after syntax check)
 		for _, tc := range config.TestCases {
 			allTestCases = append(allTestCases, testCaseWithRule{
 				ruleIndex: i,
@@ -356,6 +356,8 @@ func (v *SolidityRuleValidator) validateRulesBatchForMode(ctx context.Context, r
 	}
 
 	// Validate syntax for all rules first (can be cached). Use rule config as single source of truth.
+	// Track which rules passed syntax - only their test cases will be included in batch script.
+	rulesWithValidSyntax := make(map[int]bool)
 	for i, rule := range rules {
 		var config SolidityExpressionConfig
 		if err := json.Unmarshal(rule.Config, &config); err != nil {
@@ -412,24 +414,46 @@ func (v *SolidityRuleValidator) validateRulesBatchForMode(ctx context.Context, r
 			allValid = false
 			continue
 		}
+		rulesWithValidSyntax[i] = true
 	}
 
-	// Generate batch test contract with all test cases
-	// This allows us to compile once and run all tests
-	batchScript, err := v.generateBatchTestScript(rules, mode, allTestCases)
+	// Filter test cases: only include from rules with valid syntax
+	// Rules with syntax errors would break the batch compilation
+	var validTestCases []testCaseWithRule
+	for _, tc := range allTestCases {
+		if rulesWithValidSyntax[tc.ruleIndex] {
+			validTestCases = append(validTestCases, tc)
+		}
+	}
+
+	// If no rules have valid syntax, return early (all results already set)
+	if len(validTestCases) == 0 {
+		return &BatchValidationResult{
+			Results: results,
+			Valid:   allValid,
+		}, nil
+	}
+
+	// Generate batch test contract with valid test cases only
+	batchScript, err := v.generateBatchTestScript(rules, mode, validTestCases)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate batch test script: %w", err)
 	}
 
 	// Execute batch test contract (compile once, run all tests)
-	batchResults, err := v.executeBatchTestScript(ctx, batchScript, len(rules), allTestCases)
+	batchResults, err := v.executeBatchTestScript(ctx, batchScript, len(rules), validTestCases)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute batch test: %w", err)
 	}
 
 	// Map batch results back to individual rule results
-	// batchResults are ordered the same as allTestCases
+	// batchResults are ordered the same as validTestCases
 	for i, rule := range rules {
+		// Skip rules that already have results (syntax errors, config errors, etc.)
+		if results[i].SyntaxError != nil {
+			continue
+		}
+
 		var config SolidityExpressionConfig
 		if err := json.Unmarshal(rule.Config, &config); err != nil {
 			results[i] = ValidationResult{
@@ -444,7 +468,7 @@ func (v *SolidityRuleValidator) validateRulesBatchForMode(ctx context.Context, r
 
 		// Find test cases for this rule and map batch results
 		testCaseIndex := 0
-		for batchIdx, tcwr := range allTestCases {
+		for batchIdx, tcwr := range validTestCases {
 			if tcwr.ruleIndex == i {
 				if batchIdx < len(batchResults) && testCaseIndex < len(result.TestCaseResults) {
 					result.TestCaseResults[testCaseIndex] = batchResults[batchIdx]
@@ -945,6 +969,9 @@ func (v *SolidityRuleValidator) generateBatchTestScript(rules []*types.Rule, mod
 
 // sanitizeFunctionName sanitizes a rule name to be a valid Solidity function name
 func sanitizeFunctionName(name string) string {
+	if name == "" {
+		name = "rule"
+	}
 	// Replace invalid characters with underscores
 	re := regexp.MustCompile(`[^a-zA-Z0-9_]`)
 	sanitized := re.ReplaceAllString(name, "_")

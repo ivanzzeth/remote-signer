@@ -1,10 +1,10 @@
+//go:build integration
+
 package evm
 
 import (
 	"context"
 	"encoding/json"
-
-	"log/slog"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -21,25 +21,6 @@ import (
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
-
-func newTestRPCServer(t *testing.T, handler http.HandlerFunc) (*httptest.Server, *RPCProvider) {
-	t.Helper()
-	srv := httptest.NewServer(handler)
-	provider, err := NewRPCProvider(srv.URL, "")
-	require.NoError(t, err)
-	return srv, provider
-}
-
-func newTestLogger() *slog.Logger {
-	return slog.New(slog.DiscardHandler)
-}
-
-func mustNewRegistry(t *testing.T) *SignerRegistry {
-	t.Helper()
-	r, err := NewSignerRegistry(SignerConfig{})
-	require.NoError(t, err)
-	return r
-}
 
 // =============================================================================
 // rpc_provider.go: GetTransactionCount
