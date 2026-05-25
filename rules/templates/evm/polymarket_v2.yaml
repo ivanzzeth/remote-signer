@@ -308,14 +308,16 @@ rules:
               require(data.length >= 8 + 164 * 2, 'invalid split/merge data length');
               var dec2 = abi.decode(calldata.payloadHex, ['address', 'bytes32', 'bytes32', 'uint256[]', 'uint256']);
               require(dec2 && dec2.length >= 2, 'split/merge decode failed');
-              require(rs.addr.inList(toChecksum(dec2[0]), [pUSD]), 'collateral must be pUSD');
+              var ctfCollateral = toChecksum(dec2[0]);
+              require(ctfCollateral === '0x0000000000000000000000000000000000000000' || rs.addr.inList(ctfCollateral, [pUSD]), 'collateral must be pUSD or zero');
               return ok();
             }
             if (sel === redeemSel) {
               require(data.length >= 8 + 132 * 2, 'invalid redeem data length');
               var dec3 = abi.decode(calldata.payloadHex, ['address', 'bytes32', 'bytes32', 'uint256[]']);
               require(dec3 && dec3.length >= 1, 'redeem decode failed');
-              require(rs.addr.inList(toChecksum(dec3[0]), [pUSD]), 'collateral must be pUSD');
+              var ctfCollateralRedeem = toChecksum(dec3[0]);
+              require(ctfCollateralRedeem === '0x0000000000000000000000000000000000000000' || rs.addr.inList(ctfCollateralRedeem, [pUSD]), 'collateral must be pUSD or zero');
               return ok();
             }
           }
@@ -607,6 +609,39 @@ rules:
               data: "0x095ea7b3000000000000000000000000DEADDEADDEADDEADDEADDEADDEADDEADDEADDEADffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
           expect_pass: false
           expect_reason: "approve spender must be CollateralOnramp"
+        - name: "should pass CtfCollateralAdapter mergePositions with address(0) collateral"
+          input:
+            sign_type: "transaction"
+            chain_id: 137
+            signer: "${first:allowed_safe_addresses}"
+            transaction:
+              from: "${first:allowed_safe_addresses}"
+              to: "${ctf_collateral_adapter_address}"
+              value: "0x0"
+              data: "0x9e7212ad00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000"
+          expect_pass: true
+        - name: "should pass CtfCollateralAdapter redeem with address(0) collateral"
+          input:
+            sign_type: "transaction"
+            chain_id: 137
+            signer: "${first:allowed_safe_addresses}"
+            transaction:
+              from: "${first:allowed_safe_addresses}"
+              to: "${ctf_collateral_adapter_address}"
+              value: "0x0"
+              data: "0x01b7037c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000"
+          expect_pass: true
+        - name: "should pass CtfCollateralAdapter split with address(0) collateral"
+          input:
+            sign_type: "transaction"
+            chain_id: 137
+            signer: "${first:allowed_safe_addresses}"
+            transaction:
+              from: "${first:allowed_safe_addresses}"
+              to: "${ctf_collateral_adapter_address}"
+              value: "0x0"
+              data: "0x72ce427500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000"
+          expect_pass: true
         - name: "should pass NegRisk mergePositions with address(0) collateral"
           input:
             sign_type: "transaction"
