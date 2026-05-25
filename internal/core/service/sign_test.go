@@ -2088,3 +2088,64 @@ func TestSign_EvalErrorNotBlocked(t *testing.T) {
 		t.Errorf("expected status %q, got %q", types.StatusAuthorizing, resp.Status)
 	}
 }
+
+func TestProcessApprovedRequest_ReFetchFails(t *testing.T) {
+	f := newSignServiceFixture(t)
+	svc := f.build(t)
+	ctx := context.Background()
+
+	now := time.Now()
+	signReq := &types.SignRequest{
+		ID:            "req-fetch-fail",
+		APIKeyID:      "agent",
+		ChainType:     types.ChainTypeEVM,
+		ChainID:       "56",
+		SignerAddress: "0xsigner",
+		SignType:      "transaction",
+		Status:        types.StatusAuthorizing,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	require.NoError(t, f.requestRepo.Create(ctx, signReq))
+
+	// Delete the request so re-fetch fails
+	f.requestRepo.mu.Lock()
+	delete(f.requestRepo.requests, "req-fetch-fail")
+	f.requestRepo.mu.Unlock()
+
+	approvedBy := "admin"
+	_, err := svc.processApprovedRequest(ctx, signReq, nil, &approvedBy, "manual-approve", f.adapter)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to re-read request before signing")
+}
+
+func TestProcessApprovedRequest_NonLockedSigningError(t *testing.T) {
+	f := newSignServiceFixture(t)
+	f.adapter.signErr = fmt.Errorf("RPC connection refused")
+	f.adapter.signResult = nil
+	svc := f.build(t)
+	ctx := context.Background()
+
+	now := time.Now()
+	signReq := &types.SignRequest{
+		ID:            "req-sign-rpc-err",
+		APIKeyID:      "agent",
+		ChainType:     types.ChainTypeEVM,
+		ChainID:       "56",
+		SignerAddress: "0xsigner",
+		SignType:      "transaction",
+		Status:        types.StatusAuthorizing,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	require.NoError(t, f.requestRepo.Create(ctx, signReq))
+
+	ruleID := types.RuleID("rule-rpc-err")
+	_, err := svc.processApprovedRequest(ctx, signReq, &ruleID, nil, "auto-approved", f.adapter)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "signing failed")
+
+	got, err := f.requestRepo.Get(ctx, "req-sign-rpc-err")
+	require.NoError(t, err)
+	assert.Equal(t, types.StatusFailed, got.Status)
+}
