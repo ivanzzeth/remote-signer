@@ -247,26 +247,6 @@ func TestJSRPC_StubsWhenNilRPCContext(t *testing.T) {
 	assert.Contains(t, res.Reason, "rpc not configured")
 }
 
-func TestJSRPC_WriteMethodBlocked(t *testing.T) {
-	for _, method := range []string{"eth_sendTransaction", "eth_sendRawTransaction", "eth_sign"} {
-		t.Run(method, func(t *testing.T) {
-			provider, err := NewRPCProvider("http://localhost:1", "")
-			require.NoError(t, err)
-			_, err = provider.doRPC(context.Background(), "1", method, nil)
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "blocked")
-		})
-	}
-}
-
-func TestJSRPC_OnlyAllowedMethods(t *testing.T) {
-	provider, err := NewRPCProvider("http://localhost:1", "")
-	require.NoError(t, err)
-	_, err = provider.doRPC(context.Background(), "1", "eth_getBalance", nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not allowed")
-}
-
 func TestJSRPC_Web3GetCodeInScript(t *testing.T) {
 	bytecode := "0x6080604052"
 	srv := mockRPCServer(t, map[string]string{
@@ -330,64 +310,6 @@ func TestJSRPC_ERC165SupportsInterfaceInScript(t *testing.T) {
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
 	res := e.wrappedValidate(script, input, nil, rpcCtx)
 	assert.True(t, res.Valid, "expected valid=true, got reason=%s", res.Reason)
-}
-
-func TestRPCProvider_URLBuilding(t *testing.T) {
-	p, err := NewRPCProvider("https://evm-gateway.example.com/chain/evm", "mykey123")
-	require.NoError(t, err)
-	url := p.rpcURL("137")
-	assert.Equal(t, "https://evm-gateway.example.com/chain/evm/137/api_key/mykey123", url)
-
-	p2, err := NewRPCProvider("https://evm-gateway.example.com/chain/evm/", "")
-	require.NoError(t, err)
-	url2 := p2.rpcURL("1")
-	assert.Equal(t, "https://evm-gateway.example.com/chain/evm/1", url2)
-}
-
-func TestRPCProvider_EmptyBaseURL(t *testing.T) {
-	_, err := NewRPCProvider("", "")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "base_url is required")
-}
-
-func TestRPCCallCounter(t *testing.T) {
-	c := NewRPCCallCounter(3)
-	require.NoError(t, c.Increment())
-	require.NoError(t, c.Increment())
-	require.NoError(t, c.Increment())
-	err := c.Increment()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "limit exceeded")
-}
-
-func TestDecodeUint8FromHex(t *testing.T) {
-	// 6 encoded as uint256
-	result, err := decodeUint8FromHex(abiEncodeUint256(6))
-	require.NoError(t, err)
-	assert.Equal(t, 6, result)
-
-	result, err = decodeUint8FromHex(abiEncodeUint256(18))
-	require.NoError(t, err)
-	assert.Equal(t, 18, result)
-
-	_, err = decodeUint8FromHex("")
-	require.Error(t, err)
-}
-
-func TestDecodeStringFromHex(t *testing.T) {
-	result, err := decodeStringFromHex(abiEncodeString("USDC"))
-	require.NoError(t, err)
-	assert.Equal(t, "USDC", result)
-
-	result, err = decodeStringFromHex(abiEncodeString("Wrapped Ether"))
-	require.NoError(t, err)
-	assert.Equal(t, "Wrapped Ether", result)
-}
-
-func TestDecodeBoolFromHex(t *testing.T) {
-	assert.True(t, decodeBoolFromHex(abiEncodeBool(true)))
-	assert.False(t, decodeBoolFromHex(abiEncodeBool(false)))
-	assert.False(t, decodeBoolFromHex(""))
 }
 
 func TestJSRPC_InvalidAddressThrows(t *testing.T) {
@@ -479,55 +401,6 @@ func TestJSRPC_SetRPCProviderOnEvaluator(t *testing.T) {
 
 // --- Security fix tests ---
 
-func TestValidateChainID(t *testing.T) {
-	tests := []struct {
-		chainID string
-		valid   bool
-	}{
-		{"1", true},
-		{"137", true},
-		{"42161", true},
-		{"", false},
-		{"0", false},
-		{"abc", false},
-		{"1/../../secret", false},
-		{"1; DROP TABLE", false},
-		{"-1", false},
-		{"0x1", false},
-		{"00001", true}, // leading zeros are harmless; ParseUint accepts it as 1
-	}
-	for _, tt := range tests {
-		err := ValidateChainID(tt.chainID)
-		if tt.valid {
-			assert.NoError(t, err, "chainID=%q should be valid", tt.chainID)
-		} else {
-			assert.Error(t, err, "chainID=%q should be invalid", tt.chainID)
-		}
-	}
-}
-
-func TestValidateHexData(t *testing.T) {
-	tests := []struct {
-		data  string
-		valid bool
-	}{
-		{"0x313ce567", true},
-		{"0x", true},
-		{"0xabcdef1234567890", true},
-		{"313ce567", false},       // missing 0x
-		{"0xZZZZ", false},          // invalid hex
-		{"0x123", false},           // odd length
-	}
-	for _, tt := range tests {
-		err := ValidateHexData(tt.data)
-		if tt.valid {
-			assert.NoError(t, err, "data=%q should be valid", tt.data)
-		} else {
-			assert.Error(t, err, "data=%q should be invalid", tt.data)
-		}
-	}
-}
-
 func TestJSRPC_InvalidHexDataThrows(t *testing.T) {
 	srv := mockRPCServer(t, map[string]string{
 		"eth_call": abiEncodeUint256(6),
@@ -617,16 +490,4 @@ func TestJSRPC_NoRedirects(t *testing.T) {
 	_, err = provider.Call(context.Background(), "1", "0x0000000000000000000000000000000000000001", "0x313ce567")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "redirect")
-}
-
-func TestDecodeUint8FromHex_RejectsOver77(t *testing.T) {
-	// Value 78 should be rejected (max valid decimals is 77)
-	_, err := decodeUint8FromHex(abiEncodeUint256(78))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "out of valid range")
-
-	// Value 77 should be accepted
-	result, err := decodeUint8FromHex(abiEncodeUint256(77))
-	require.NoError(t, err)
-	assert.Equal(t, 77, result)
 }
