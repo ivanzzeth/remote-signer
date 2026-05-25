@@ -262,3 +262,83 @@ func TestSubstituteTyped_MixedSubstitutions(t *testing.T) {
 	assert.Equal(t, true, got["on"])
 	assert.Equal(t, "v2-suffix", got["tag"])
 }
+
+// ---------------------------------------------------------------------------
+// jsonEncodeTyped — remaining paths
+// ---------------------------------------------------------------------------
+
+func TestJsonEncodeTyped_BoolRejectsNonBoolString(t *testing.T) {
+	defs := []types.TemplateVariable{{Name: "flag", Type: types.VarTypeBool}}
+	cfg := []byte(`{"enabled":"${flag}"}`)
+	_, err := SubstituteTyped(cfg, defs, map[string]any{"flag": "notabool"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not a bool")
+}
+
+func TestJsonEncodeTyped_BoolRejectsNonBoolInt(t *testing.T) {
+	defs := []types.TemplateVariable{{Name: "flag", Type: types.VarTypeBool}}
+	cfg := []byte(`{"enabled":"${flag}"}`)
+	_, err := SubstituteTyped(cfg, defs, map[string]any{"flag": 42})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot coerce int to bool")
+}
+
+func TestJsonEncodeTyped_UnknownTypeReturnsError(t *testing.T) {
+	defs := []types.TemplateVariable{{Name: "x", Type: types.VariableType("unknown_type")}}
+	cfg := []byte(`{"val":"${x}"}`)
+	_, err := SubstituteTyped(cfg, defs, map[string]any{"x": "hello"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown type")
+}
+
+func TestJsonEncodeTyped_VarTypeBytes(t *testing.T) {
+	defs := []types.TemplateVariable{{Name: "sig", Type: types.VarTypeBytes}}
+	cfg := []byte(`{"signature":"${sig}"}`)
+	out, err := SubstituteTyped(cfg, defs, map[string]any{"sig": "0xabcdef"})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"signature":"0xabcdef"}`, string(out))
+}
+
+func TestJsonEncodeTyped_VarTypeBytes4(t *testing.T) {
+	defs := []types.TemplateVariable{{Name: "selector", Type: types.VarTypeBytes4}}
+	cfg := []byte(`{"selector":"${selector}"}`)
+	out, err := SubstituteTyped(cfg, defs, map[string]any{"selector": "0xa9059cbb"})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"selector":"0xa9059cbb"}`, string(out))
+}
+
+func TestJsonEncodeTyped_VarTypeEnum(t *testing.T) {
+	defs := []types.TemplateVariable{{Name: "network", Type: types.VarTypeEnum}}
+	cfg := []byte(`{"network":"${network}"}`)
+	out, err := SubstituteTyped(cfg, defs, map[string]any{"network": "mainnet"})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"network":"mainnet"}`, string(out))
+}
+
+// ---------------------------------------------------------------------------
+// inlineStringForm — remaining paths
+// ---------------------------------------------------------------------------
+
+func TestSubstituteTyped_InlineBigIntValue(t *testing.T) {
+	defs := []types.TemplateVariable{{Name: "amount", Type: types.VarTypeBigInt}}
+	cfg := []byte(`{"tag":"amount=${amount}"}`)
+	out, err := SubstituteTyped(cfg, defs, map[string]any{"amount": "1000000000000000000"})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"tag":"amount=1000000000000000000"}`, string(out))
+}
+
+func TestSubstituteTyped_InlineDurationValue(t *testing.T) {
+	defs := []types.TemplateVariable{{Name: "ttl", Type: types.VarTypeDuration}}
+	cfg := []byte(`{"header":"Cache-Control: max-age=${ttl}"}`)
+	out, err := SubstituteTyped(cfg, defs, map[string]any{"ttl": "3600s"})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"header":"Cache-Control: max-age=3600s"}`, string(out))
+}
+
+func TestSubstituteTyped_InlineBigIntSentinel(t *testing.T) {
+	defs := []types.TemplateVariable{{Name: "cap", Type: types.VarTypeBigInt}}
+	cfg := []byte(`{"value":"max=${cap}"}`)
+	out, err := SubstituteTyped(cfg, defs, map[string]any{"cap": "-1"})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"value":"max=-1"}`, string(out))
+}

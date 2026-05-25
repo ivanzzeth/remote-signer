@@ -49,6 +49,42 @@ func setupAccessService(t *testing.T, db *gorm.DB) (*SignerAccessService, storag
 	return svc, ownershipRepo, accessRepo, apiKeyRepo
 }
 
+// setupTestDBWithWallets includes wallet tables for wallet-based access tests.
+func setupTestDBWithWallets(t *testing.T) *gorm.DB {
+	t.Helper()
+	dbFile := fmt.Sprintf("file:%s?mode=memory&cache=private", t.Name())
+	db, err := gorm.Open(sqlite.Open(dbFile), &gorm.Config{
+		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
+	})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(
+		&types.APIKey{},
+		&types.SignerOwnership{},
+		&types.SignerAccess{},
+		&types.Wallet{},
+		&types.WalletMember{},
+	))
+	return db
+}
+
+func setupAccessServiceWithWallet(t *testing.T, db *gorm.DB) (*SignerAccessService, storage.SignerOwnershipRepository, storage.SignerAccessRepository, storage.APIKeyRepository, storage.WalletRepository) {
+	t.Helper()
+	ownershipRepo, err := storage.NewGormSignerOwnershipRepository(db)
+	require.NoError(t, err)
+	accessRepo, err := storage.NewGormSignerAccessRepository(db)
+	require.NoError(t, err)
+	apiKeyRepo, err := storage.NewGormAPIKeyRepository(db)
+	require.NoError(t, err)
+	walletRepo, err := storage.NewGormWalletRepository(db)
+	require.NoError(t, err)
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	svc, err := NewSignerAccessService(ownershipRepo, accessRepo, apiKeyRepo, nil, logger)
+	require.NoError(t, err)
+	svc.SetWalletRepo(walletRepo)
+	return svc, ownershipRepo, accessRepo, apiKeyRepo, walletRepo
+}
+
 func createTestAPIKey(t *testing.T, repo storage.APIKeyRepository, id, role string) {
 	t.Helper()
 	err := repo.Create(context.Background(), &types.APIKey{
@@ -597,4 +633,124 @@ func TestSignerAccessService_CountOwnedSigners(t *testing.T) {
 	count, err = svc.CountOwnedSigners(ctx, "nobody")
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), count)
+}
+
+// ---------------------------------------------------------------------------
+// checkWalletAccess tests
+// ---------------------------------------------------------------------------
+
+func TestCheckAccess_WalletOwner(t *testing.T) {
+	db := setupTestDBWithWallets(t)
+	svc, _, _, apiKeyRepo, walletRepo := setupAccessServiceWithWallet(t, db)
+	ctx := context.Background()
+
+	createTestAPIKey(t, apiKeyRepo, "wallet-owner", "admin")
+
+	// Create a wallet owned by wallet-owner
+	wallet := &types.Wallet{
+		ID:      "wallet-1",
+		Name:    "Test Wallet",
+		OwnerID: "wallet-owner",
+	}
+	require.NoError(t, walletRepo.Create(ctx, wallet))
+
+	// Add signer to wallet
+	require.NoError(t, walletRepo.AddMember(ctx, &types.WalletMember{
+		WalletID:      "wallet-1",
+		SignerAddress: "0xWALLET",
+	}))
+
+	// Set ownership for the signer so checkDirectAccess runs first
+	require.NoError(t, svc.SetOwner(ctx, "0xWALLET", "other-owner", types.SignerOwnershipActive))
+
+	// wallet-owner should NOT have direct access (other-owner owns it)
+	// but checkWalletAccess should grant access via wallet ownership
+	ok, err := svc.CheckAccess(ctx, "wallet-owner", "0xWALLET")
+	require.NoError(t, err)
+	assert.True(t, ok)
+}
+
+func TestCheckAccess_WalletMemberAccess(t *testing.T) {
+	db := setupTestDBWithWallets(t)
+	svc, _, _, apiKeyRepo, walletRepo := setupAccessServiceWithWallet(t, db)
+	ctx := context.Background()
+
+	createTestAPIKey(t, apiKeyRepo, "wallet-member", "agent")
+
+	// Create a wallet owned by someone else
+	wallet := &types.Wallet{
+		ID:      "wallet-2",
+		Name:    "Shared Wallet",
+		OwnerID: "wallet-owner-2",
+	}
+	require.NoError(t, walletRepo.Create(ctx, wallet))
+
+	// Add signer to wallet
+	require.NoError(t, walletRepo.AddMember(ctx, &types.WalletMember{
+		WalletID:      "wallet-2",
+		SignerAddress: "0xSHARED",
+	}))
+
+	// Set ownership for the signer
+	require.NoError(t, svc.SetOwner(ctx, "0xSHARED", "wallet-owner-2", types.SignerOwnershipActive))
+
+	// Grant wallet-member access via wallet_id. Use a different signer_address
+	// so HasAccess (signer_address + api_key_id) won't match, forcing the
+	// checkWalletAccess → HasAccessViaWallet path.
+	err := db.WithContext(ctx).Create(&types.SignerAccess{
+		ID:            "access-wm",
+		SignerAddress: "0xUNRELATED",
+		APIKeyID:      "wallet-member",
+		GrantedBy:     "wallet-owner-2",
+		WalletID:      "wallet-2",
+	}).Error
+	require.NoError(t, err)
+
+	ok, err := svc.CheckAccess(ctx, "wallet-member", "0xSHARED")
+	require.NoError(t, err)
+	assert.True(t, ok)
+}
+
+func TestCheckAccess_NoWalletAccess(t *testing.T) {
+	db := setupTestDBWithWallets(t)
+	svc, _, _, apiKeyRepo, walletRepo := setupAccessServiceWithWallet(t, db)
+	ctx := context.Background()
+
+	createTestAPIKey(t, apiKeyRepo, "stranger", "agent")
+
+	// Create a wallet
+	wallet := &types.Wallet{
+		ID:      "wallet-3",
+		Name:    "Private Wallet",
+		OwnerID: "someone-else",
+	}
+	require.NoError(t, walletRepo.Create(ctx, wallet))
+
+	// Add signer to wallet
+	require.NoError(t, walletRepo.AddMember(ctx, &types.WalletMember{
+		WalletID:      "wallet-3",
+		SignerAddress: "0xPRIVATE",
+	}))
+
+	// Set ownership — stranger does NOT own it
+	require.NoError(t, svc.SetOwner(ctx, "0xPRIVATE", "someone-else", types.SignerOwnershipActive))
+
+	ok, err := svc.CheckAccess(ctx, "stranger", "0xPRIVATE")
+	require.NoError(t, err)
+	assert.False(t, ok)
+}
+
+func TestCheckAccess_NoWalletsForSigner(t *testing.T) {
+	db := setupTestDBWithWallets(t)
+	svc, _, _, apiKeyRepo, _ := setupAccessServiceWithWallet(t, db)
+	ctx := context.Background()
+
+	createTestAPIKey(t, apiKeyRepo, "owner-1", "admin")
+
+	// Signer has no wallets — ownership check passes directly
+	require.NoError(t, svc.SetOwner(ctx, "0xNOWALLET", "owner-1", types.SignerOwnershipActive))
+
+	ok, err := svc.CheckAccess(ctx, "owner-1", "0xNOWALLET")
+	require.NoError(t, err)
+	assert.True(t, ok)
 }

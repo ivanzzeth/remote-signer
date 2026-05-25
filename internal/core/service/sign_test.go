@@ -74,7 +74,9 @@ type mockRuleEngine struct {
 	evalErr       error
 	// noMatchReason lets a test simulate the engine reporting a
 	// diagnostic when no whitelist matched. Empty by default.
-	noMatchReason string
+	noMatchReason     string
+	// evalResultOverride completely overrides EvaluateWithResult when non-nil.
+	evalResultOverride *rule.EvaluationResult
 }
 
 func (e *mockRuleEngine) Evaluate(_ context.Context, _ *types.SignRequest, _ *types.ParsedPayload) (*types.RuleID, string, error) {
@@ -82,6 +84,9 @@ func (e *mockRuleEngine) Evaluate(_ context.Context, _ *types.SignRequest, _ *ty
 }
 
 func (e *mockRuleEngine) EvaluateWithResult(_ context.Context, _ *types.SignRequest, _ *types.ParsedPayload) (*rule.EvaluationResult, error) {
+	if e.evalResultOverride != nil {
+		return e.evalResultOverride, nil
+	}
 	if e.evalErr != nil {
 		return nil, e.evalErr
 	}
@@ -904,8 +909,150 @@ func TestSign(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// TestSetApprovalGuard
+// TestSign — EvalResult.Blocked path (blocked via delegation, not BlockedError)
 // ---------------------------------------------------------------------------
+
+func TestSign_BlockedByResult(t *testing.T) {
+	ctx := context.Background()
+	f := newSignServiceFixture(t)
+	// Set up: EvaluateWithResult returns Blocked=true (delegation case, not BlockedError)
+	f.ruleEngine.evalErr = nil
+	f.ruleEngine.matchedRuleID = nil
+	svc := f.build(t)
+
+	// Override EvaluateWithResult to return a blocked result
+	f.ruleEngine.evalResultOverride = &rule.EvaluationResult{
+		Blocked:   true,
+		BlockedBy: &types.Rule{ID: "delegated-blocklist", Name: "Delegated Block Rule"},
+		BlockReason: "delegated blocking",
+	}
+
+	resp, err := svc.Sign(ctx, &SignRequest{
+		ChainType:     types.ChainTypeEVM,
+		ChainID:       "1",
+		SignerAddress: "0xsigner",
+		SignType:      "eth_signTransaction",
+		Payload:       []byte(`{}`),
+	})
+	if err != nil {
+		t.Fatalf("Sign should not error for blocked result: %v", err)
+	}
+	if resp.Status != types.StatusRejected {
+		t.Errorf("expected status %q, got %q", types.StatusRejected, resp.Status)
+	}
+}
+
+func TestSign_BlockedByResult_WithGuard(t *testing.T) {
+	ctx := context.Background()
+	f := newSignServiceFixture(t)
+	f.ruleEngine.matchedRuleID = nil
+	svc := f.build(t)
+
+	f.ruleEngine.evalResultOverride = &rule.EvaluationResult{
+		Blocked:     true,
+		BlockedBy:   &types.Rule{ID: "blocked-guard", Name: "Blocked"},
+		BlockReason: "blocked by delegation",
+	}
+
+	guard, _ := NewManualApprovalGuard(ManualApprovalGuardConfig{
+		Window:    5 * time.Minute,
+		MinSamples: 1000,
+		Logger:    newTestLogger(),
+	})
+	svc.SetApprovalGuard(guard)
+
+	resp, err := svc.Sign(ctx, &SignRequest{
+		ChainType:     types.ChainTypeEVM,
+		ChainID:       "1",
+		SignerAddress: "0xsigner",
+		SignType:      "eth_signTransaction",
+		Payload:       []byte(`{}`),
+	})
+	if err != nil {
+		t.Fatalf("Sign should not error for blocked result: %v", err)
+	}
+	if resp.Status != types.StatusRejected {
+		t.Errorf("expected status %q, got %q", types.StatusRejected, resp.Status)
+	}
+}
+
+func TestSign_NoMatchReasonPersisted(t *testing.T) {
+	ctx := context.Background()
+	f := newSignServiceFixture(t)
+	f.ruleEngine.matchedRuleID = nil
+	f.ruleEngine.noMatchReason = "no rule matched the transaction"
+	svc := f.build(t)
+	svc.SetManualApprovalEnabled(true)
+
+	resp, err := svc.Sign(ctx, &SignRequest{
+		ChainType:     types.ChainTypeEVM,
+		ChainID:       "1",
+		SignerAddress: "0xsigner",
+		SignType:      "eth_signTransaction",
+		Payload:       []byte(`{}`),
+	})
+	if err != nil {
+		t.Fatalf("Sign failed: %v", err)
+	}
+	if resp.Status != types.StatusAuthorizing {
+		t.Errorf("expected status %q, got %q", types.StatusAuthorizing, resp.Status)
+	}
+}
+
+func TestSign_StrategyRoleNoMatchWithGuard(t *testing.T) {
+	ctx := context.Background()
+	f := newSignServiceFixture(t)
+	f.ruleEngine.matchedRuleID = nil
+	svc := f.build(t)
+
+	guard, _ := NewManualApprovalGuard(ManualApprovalGuardConfig{
+		Window:    5 * time.Minute,
+		MinSamples: 1000,
+		Logger:    newTestLogger(),
+	})
+	svc.SetApprovalGuard(guard)
+
+	resp, err := svc.Sign(ctx, &SignRequest{
+		APIKeyID:      "strategy-key-1",
+		APIKeyRole:    types.RoleStrategy,
+		ChainType:     types.ChainTypeEVM,
+		ChainID:       "1",
+		SignerAddress: "0xsigner",
+		SignType:      "eth_signTransaction",
+		Payload:       []byte(`{}`),
+	})
+	if err != nil {
+		t.Fatalf("Sign should not error for strategy rejection: %v", err)
+	}
+	if resp.Status != types.StatusRejected {
+		t.Errorf("expected status %q, got %q", types.StatusRejected, resp.Status)
+	}
+	if !strings.Contains(resp.Message, "strategy role requires explicit rules") {
+		t.Errorf("expected strategy role rejection, got: %q", resp.Message)
+	}
+}
+
+func TestSign_AuditLoggerOnSignRequest(t *testing.T) {
+	ctx := context.Background()
+	f := newSignServiceFixture(t)
+	ruleID := types.RuleID("rule-1")
+	f.ruleEngine.matchedRuleID = &ruleID
+	svc := f.build(t)
+
+	al, err := audit.NewAuditLogger(f.auditRepo, newTestLogger())
+	require.NoError(t, err)
+	svc.SetAuditLogger(al)
+
+	resp, err := svc.Sign(ctx, &SignRequest{
+		ChainType:     types.ChainTypeEVM,
+		ChainID:       "1",
+		SignerAddress: "0xsigner",
+		SignType:      "eth_signTransaction",
+		Payload:       []byte(`{}`),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, types.StatusCompleted, resp.Status)
+}
 
 func TestSetApprovalGuard(t *testing.T) {
 	f := newSignServiceFixture(t)
