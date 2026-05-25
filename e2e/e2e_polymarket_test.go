@@ -430,3 +430,82 @@ func TestE2E_PolymarketV2Safe_SignAndDelegate(t *testing.T) {
 
 	t.Log("Polymarket V2 Safe E2E: ALL PASSED")
 }
+
+// TestE2E_PolymarketV2Safe_ClobAuth tests ClobAuth typed_data signing through
+// the polymarket_v2_safe_polygon preset. This is the regression test for the
+// v2 preset missing evm/polymarket_auth template (bot's ClobAuth sign requests
+// were getting 403 "no matching whitelist rule found").
+func TestE2E_PolymarketV2Safe_ClobAuth(t *testing.T) {
+	ctx := context.Background()
+	ensureGuardResumed(t)
+	if useExternalServer {
+		t.Skip("Polymarket V2 Safe ClobAuth test requires internal server with shipped presets")
+	}
+
+	presetID := "evm/polymarket_v2_safe_polygon"
+	applyResp, err := adminClient.Presets.Apply(ctx, presetID, &presets.ApplyRequest{
+		Variables:      map[string]string{"allowed_safe_addresses": testSigner2Address},
+		SkipValidation: true,
+	})
+	require.NoError(t, err, "preset apply should succeed")
+	require.NotNil(t, applyResp)
+	require.GreaterOrEqual(t, len(applyResp.Results), 1,
+		"preset apply should produce at least 1 rule result")
+	t.Logf("Polymarket V2 Safe preset applied: %d rule(s)", len(applyResp.Results))
+	snapshotRules(t)
+	cleanupApplyResults(t, applyResp.Results)
+
+	chainID := "137"
+
+	// ClobAuth typed_data — same structure the polymarket-airdrop bot sends
+	clobAuthTypedData := map[string]interface{}{
+		"types": map[string]interface{}{
+			"EIP712Domain": []eip712TypeField{
+				{Name: "name", Type: "string"},
+				{Name: "version", Type: "string"},
+				{Name: "chainId", Type: "uint256"},
+			},
+			"ClobAuth": []eip712TypeField{
+				{Name: "address", Type: "address"},
+				{Name: "timestamp", Type: "string"},
+				{Name: "nonce", Type: "uint256"},
+				{Name: "message", Type: "string"},
+			},
+		},
+		"primaryType": "ClobAuth",
+		"domain": map[string]interface{}{
+			"name":    "ClobAuthDomain",
+			"version": "1",
+			"chainId": chainID,
+		},
+		"message": map[string]interface{}{
+			"address":   testSignerAddress,
+			"timestamp": "1704067200",
+			"nonce":     "12345",
+			"message":   "This message attests that I control the given wallet",
+		},
+	}
+
+	signReq := map[string]interface{}{
+		"chain_type":     "evm",
+		"chain_id":       chainID,
+		"signer_address": testSignerAddress,
+		"sign_type":      "typed_data",
+		"payload":        map[string]interface{}{"typed_data": clobAuthTypedData},
+	}
+
+	resp := doRawRequest(t, http.MethodPost, "/api/v1/evm/sign", signReq)
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusForbidden {
+		var errBody struct {
+			Error   string `json:"error"`
+			Message string `json:"message"`
+		}
+		json.NewDecoder(resp.Body).Decode(&errBody)
+		t.Fatalf("ClobAuth signature REJECTED (REGRESSION): %s - %s", errBody.Error, errBody.Message)
+	}
+	assert.True(t, resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusAccepted,
+		"ClobAuth should return 200 or 202, got %d", resp.StatusCode)
+	t.Log("Polymarket V2 Safe ClobAuth: PASSED")
+}
