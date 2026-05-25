@@ -18,6 +18,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/statemachine"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/simulation"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
@@ -109,8 +110,11 @@ var _ rule.RuleEngine = (*mockRuleEngine)(nil)
 // ---------------------------------------------------------------------------
 
 type mockRequestRepo struct {
-	mu       sync.RWMutex
-	requests map[types.SignRequestID]*types.SignRequest
+	mu        sync.RWMutex
+	requests  map[types.SignRequestID]*types.SignRequest
+	createErr error // if set, Create returns this error
+	getErr    error // if set, Get returns this error on calls beyond the first
+	getCount  int   // how many times Get has been called
 }
 
 func newMockRequestRepo() *mockRequestRepo {
@@ -118,6 +122,9 @@ func newMockRequestRepo() *mockRequestRepo {
 }
 
 func (r *mockRequestRepo) Create(_ context.Context, req *types.SignRequest) error {
+	if r.createErr != nil {
+		return r.createErr
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, exists := r.requests[req.ID]; exists {
@@ -129,6 +136,9 @@ func (r *mockRequestRepo) Create(_ context.Context, req *types.SignRequest) erro
 }
 
 func (r *mockRequestRepo) Get(_ context.Context, id types.SignRequestID) (*types.SignRequest, error) {
+	if r.getErr != nil && r.getErr != types.ErrNotFound {
+		return nil, r.getErr
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	req, ok := r.requests[id]
@@ -2148,4 +2158,195 @@ func TestProcessApprovedRequest_NonLockedSigningError(t *testing.T) {
 	got, err := f.requestRepo.Get(ctx, "req-sign-rpc-err")
 	require.NoError(t, err)
 	assert.Equal(t, types.StatusFailed, got.Status)
+}
+
+func TestSign_CreateRequestFails(t *testing.T) {
+	ctx := context.Background()
+	f := newSignServiceFixture(t)
+	f.requestRepo.createErr = fmt.Errorf("database connection lost")
+	svc := f.build(t)
+
+	_, err := svc.Sign(ctx, &SignRequest{
+		ChainType:     types.ChainTypeEVM,
+		ChainID:       "1",
+		SignerAddress: "0xsigner",
+		SignType:      "eth_signTransaction",
+		Payload:       []byte(`{}`),
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to create request")
+}
+
+func TestSign_SimulationRuleNotAvailable(t *testing.T) {
+	ctx := context.Background()
+	f := newSignServiceFixture(t)
+	f.ruleEngine.matchedRuleID = nil
+	svc := f.build(t)
+	svc.SetManualApprovalEnabled(true)
+
+	// Set a simulation rule that is not available (nil simulator)
+	simRule, err := evmchain.NewSimulationBudgetRule(nil, nil, nil, nil, nil, nil, newTestLogger())
+	require.NoError(t, err)
+	svc.SetSimulationRule(simRule)
+
+	resp, err := svc.Sign(ctx, &SignRequest{
+		ChainType:     types.ChainTypeEVM,
+		ChainID:       "1",
+		SignerAddress: "0xsigner",
+		SignType:      "eth_signTransaction",
+		Payload:       []byte(`{}`),
+	})
+	require.NoError(t, err)
+	// NotAvailable → falls through to manual approval
+	assert.Equal(t, types.StatusAuthorizing, resp.Status)
+}
+
+// ---------------------------------------------------------------------------
+// Mock simulator (implements simulation.Simulator)
+// ---------------------------------------------------------------------------
+
+type mockSimulator struct {
+	simulateResult      *simulation.SimulationResult
+	simulateErr         error
+	simulateBatchResult *simulation.BatchSimulationResult
+	simulateBatchErr    error
+}
+
+func (m *mockSimulator) Simulate(_ context.Context, _ *simulation.SimulationRequest) (*simulation.SimulationResult, error) {
+	return m.simulateResult, m.simulateErr
+}
+
+func (m *mockSimulator) SimulateBatch(_ context.Context, _ *simulation.BatchSimulationRequest) (*simulation.BatchSimulationResult, error) {
+	return m.simulateBatchResult, m.simulateBatchErr
+}
+
+func (m *mockSimulator) SyncIfDirty(_ context.Context, _ string) error { return nil }
+func (m *mockSimulator) MarkDirty(_ string)                            {}
+func (m *mockSimulator) Status(_ context.Context) *simulation.ManagerStatus {
+	return &simulation.ManagerStatus{Enabled: true}
+}
+func (m *mockSimulator) Close() error { return nil }
+
+var _ simulation.Simulator = (*mockSimulator)(nil)
+
+// ---------------------------------------------------------------------------
+// TestSign — simulation fallback paths (lines 367-399 in sign.go)
+// ---------------------------------------------------------------------------
+
+func TestSign_SimulationAllow(t *testing.T) {
+	ctx := context.Background()
+	f := newSignServiceFixture(t)
+	f.ruleEngine.matchedRuleID = nil
+	svc := f.build(t)
+	svc.SetManualApprovalEnabled(true)
+
+	// Set up simulation rule with a simulator that returns "allow"
+	sim := &mockSimulator{
+		simulateResult: &simulation.SimulationResult{
+			Success:        true,
+			GasUsed:        21000,
+			BalanceChanges: nil,
+			Events:         nil,
+		},
+	}
+	simRule, err := evmchain.NewSimulationBudgetRule(sim, nil, nil, nil, nil, nil, newTestLogger())
+	require.NoError(t, err)
+	svc.SetSimulationRule(simRule)
+
+	resp, err := svc.Sign(ctx, &SignRequest{
+		ChainType:     types.ChainTypeEVM,
+		ChainID:       "1",
+		SignerAddress: "0xsigner",
+		SignType:      "transaction",
+		Payload:       []byte(`{"to":"0xrecipient","value":"0x0","data":"0x"}`),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, types.StatusCompleted, resp.Status)
+}
+
+func TestSign_SimulationDeny_Reverted(t *testing.T) {
+	ctx := context.Background()
+	f := newSignServiceFixture(t)
+	f.ruleEngine.matchedRuleID = nil
+	svc := f.build(t)
+
+	// Simulation returns a reverted result → deny
+	sim := &mockSimulator{
+		simulateResult: &simulation.SimulationResult{
+			Success:      false,
+			RevertReason: "execution reverted: insufficient balance",
+		},
+	}
+	simRule, err := evmchain.NewSimulationBudgetRule(sim, nil, nil, nil, nil, nil, newTestLogger())
+	require.NoError(t, err)
+	svc.SetSimulationRule(simRule)
+
+	resp, err := svc.Sign(ctx, &SignRequest{
+		ChainType:     types.ChainTypeEVM,
+		ChainID:       "1",
+		SignerAddress: "0xsigner",
+		SignType:      "transaction",
+		Payload:       []byte(`{"to":"0xrecipient","value":"0x0","data":"0x"}`),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, types.StatusRejected, resp.Status)
+	assert.Contains(t, resp.Message, "simulation reverted")
+}
+
+func TestSign_SimulationDeny_NoRevertReason(t *testing.T) {
+	ctx := context.Background()
+	f := newSignServiceFixture(t)
+	f.ruleEngine.matchedRuleID = nil
+	svc := f.build(t)
+
+	// Simulation denies with empty revert reason
+	sim := &mockSimulator{
+		simulateResult: &simulation.SimulationResult{
+			Success:      false,
+			RevertReason: "",
+		},
+	}
+	simRule, err := evmchain.NewSimulationBudgetRule(sim, nil, nil, nil, nil, nil, newTestLogger())
+	require.NoError(t, err)
+	svc.SetSimulationRule(simRule)
+
+	resp, err := svc.Sign(ctx, &SignRequest{
+		ChainType:     types.ChainTypeEVM,
+		ChainID:       "1",
+		SignerAddress: "0xsigner",
+		SignType:      "transaction",
+		Payload:       []byte(`{"to":"0xrecipient","value":"0x0","data":"0x"}`),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, types.StatusRejected, resp.Status)
+	assert.Contains(t, resp.Message, "transaction simulation reverted")
+}
+
+func TestSign_BlockedByDelegationResult_WithGuard(t *testing.T) {
+	ctx := context.Background()
+	f := newSignServiceFixture(t)
+	f.ruleEngine.matchedRuleID = nil
+	f.ruleEngine.evalResultOverride = &rule.EvaluationResult{
+		Blocked:     true,
+		BlockedBy:   &types.Rule{ID: "delegated-block", Name: "Delegated Block"},
+		BlockReason: "delegation blocked",
+	}
+	svc := f.build(t)
+
+	guard, _ := NewManualApprovalGuard(ManualApprovalGuardConfig{
+		Window:    5 * time.Minute,
+		MinSamples: 1000,
+		Logger:    newTestLogger(),
+	})
+	svc.SetApprovalGuard(guard)
+
+	resp, err := svc.Sign(ctx, &SignRequest{
+		ChainType:     types.ChainTypeEVM,
+		ChainID:       "1",
+		SignerAddress: "0xsigner",
+		SignType:      "eth_signTransaction",
+		Payload:       []byte(`{}`),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, types.StatusRejected, resp.Status)
 }
