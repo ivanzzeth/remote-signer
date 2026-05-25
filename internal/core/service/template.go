@@ -367,6 +367,13 @@ func (s *TemplateService) createInstanceFromResolved(
 	if ruleID == "" {
 		ruleID = s.generateInstanceRuleID(tmpl.ID, resolvedVars)
 	}
+	// Resolve delegate_to in Variables so the JS runtime (which passes
+	// Variables as config to scripts) reads resolved IDs, not template IDs.
+	if len(req.CrossTemplateIDMap) > 0 {
+		if err := resolveDelegateToInVars(resolvedVars, req.CrossTemplateIDMap); err != nil {
+			return nil, fmt.Errorf("failed to resolve delegate_to in variables: %w", err)
+		}
+	}
 	variablesJSON, err := json.Marshal(resolvedVars)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal resolved variables: %w", err)
@@ -549,7 +556,10 @@ func (s *TemplateService) createInstanceFromBundle(
 		if subIDSuffix == "" {
 			subIDSuffix = sub.Name
 		}
-		subRuleID := s.generateBundleSubRuleID(tmpl.ID, resolvedVars, subIDSuffix)
+		subRuleID := req.PrecomputedSubRuleIDs[subIDSuffix]
+			if subRuleID == "" {
+				subRuleID = s.generateBundleSubRuleID(tmpl.ID, resolvedVars, subIDSuffix)
+			}
 
 		ruleName := baseName
 		if len(subRules) > 1 {
@@ -646,6 +656,25 @@ func (s *TemplateService) createInstanceFromBundle(
 			}
 		}
 
+		// Resolve delegate_to in Variables JSON so the JS runtime (which
+		// passes Variables as config to scripts) reads resolved IDs.
+		// Without this, the script returns the unresolved template-level
+		// ID (e.g. "polymarket-v2-transactions") as the delegation target,
+		// which doesn't exist in the DB.
+		if len(req.CrossTemplateIDMap) > 0 {
+			if err := resolveDelegateToInVars(resolvedVars, resolveMap); err != nil {
+				return nil, fmt.Errorf("failed to resolve delegate_to in variables for bundle %q: %w", tmpl.Name, err)
+			}
+			var err error
+			variablesJSON, err = json.Marshal(resolvedVars)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal resolved variables: %w", err)
+			}
+			for i := range pending {
+				pending[i].rule.Variables = variablesJSON
+			}
+		}
+
 	// ---- Pass 2: persist all rules ----
 	result := &CreateInstanceResult{
 		SubRules:     make([]*types.Rule, 0, len(pending)),
@@ -705,6 +734,45 @@ func (s *TemplateService) generateBundleSubRuleID(templateID string, vars map[st
 	data := fmt.Sprintf("instance:%s:%v:%s:%d", templateID, vars, subRuleSuffix, time.Now().UnixNano())
 	hash := sha256.Sum256([]byte(data))
 	return types.RuleID("inst_" + hex.EncodeToString(hash[:8]))
+}
+
+// resolveDelegateToInVars resolves delegate_to and delegate_to_by_target references
+// in the Variables map (string→string) so the JS runtime reads resolved DB rule IDs.
+func resolveDelegateToInVars(vars map[string]string, resolveMap map[string]types.RuleID) error {
+	if dt, ok := vars["delegate_to"]; ok && dt != "" {
+		parts := strings.Split(dt, ",")
+		changed := false
+		for j, part := range parts {
+			part = strings.TrimSpace(part)
+			if actualID, ok := resolveMap[part]; ok {
+				parts[j] = string(actualID)
+				changed = true
+			}
+		}
+		if changed {
+			vars["delegate_to"] = strings.Join(parts, ",")
+		}
+	}
+	if dtbt, ok := vars["delegate_to_by_target"]; ok && dtbt != "" {
+		pairs := strings.Split(dtbt, ",")
+		changed := false
+		for j, pair := range pairs {
+			pair = strings.TrimSpace(pair)
+			idx := strings.Index(pair, ":")
+			if idx <= 0 {
+				continue
+			}
+			rulePart := strings.TrimSpace(pair[idx+1:])
+			if actualID, ok := resolveMap[rulePart]; ok {
+				pairs[j] = pair[:idx+1] + string(actualID)
+				changed = true
+			}
+		}
+		if changed {
+			vars["delegate_to_by_target"] = strings.Join(pairs, ",")
+		}
+	}
+	return nil
 }
 
 // ResolveDelegateToConfig resolves delegate_to and delegate_to_by_target references
