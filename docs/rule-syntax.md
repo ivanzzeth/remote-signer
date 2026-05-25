@@ -620,6 +620,120 @@ Only the field matching `sign_type` is populated; others are `null`.
         expect_pass: false
 ```
 
+### Built-in Helpers (`rs.*`)
+
+`evm_js` rules have access to a structured API under the `rs` global object. All `require*` and assert helpers throw JS exceptions on validation failure through Go's `panic(vm.ToValue(reason))` — a Sobek-aware panic that the runtime translates into catchable JS errors.
+
+#### `rs.typedData`
+
+| Method | Description |
+|--------|-------------|
+| `rs.typedData.match(input, primaryType)` | Check if input matches a primary type. Returns `{ matched, domain, message }` |
+| `rs.typedData.require(input, primaryType)` | Require input to be typed_data with the given primaryType |
+| `rs.typedData.requireDomain(domain, opts)` | Validate domain: chainId and optionally verifyingContract in allowedContracts list |
+| `rs.typedData.requireSignerMatch(domain, signer)` | Require domain signer matches request signer |
+
+#### `rs.addr`
+
+| Method | Description |
+|--------|-------------|
+| `rs.addr.inList(addr, csv)` | Check if address (case-insensitive) is in comma-separated list |
+| `rs.addr.notInList(addr, csv)` | Check if address is NOT in list |
+| `rs.addr.requireInList(addr, csv, reason)` | Require addr in list, throw if not |
+| `rs.addr.requireNotInList(addr, csv, reason)` | Require addr NOT in list, throw if found |
+| `rs.addr.requireInListIfNonEmpty(addr, csv, reason)` | Require addr in list only if list is non-empty |
+| `rs.addr.isZero(addr)` | Check if address is zero address |
+| `rs.addr.requireZero(addr, reason)` | Require address to equal zero address |
+| `rs.addr.toChecksumList(csv)` | Normalize comma-separated addresses to checksum format |
+
+#### `rs.bigint`
+
+| Method | Description |
+|--------|-------------|
+| `rs.bigint.parse(val)` | Parse decimal or hex string to JS BigInt |
+| `rs.bigint.uint256(val)` | Coerce to uint256 |
+| `rs.bigint.int256(val)` | Coerce to int256 |
+| `rs.bigint.requireLte(a, b, reason)` | Require a <= b (compare as bigint) |
+| `rs.bigint.requireEq(a, b, reason)` | Require a === b |
+| `rs.bigint.requireZero(val, reason)` | Require value to be zero |
+
+#### `rs.int`
+
+| Method | Description |
+|--------|-------------|
+| `rs.int.parseUint(val)` | Parse unsigned integer from string |
+| `rs.int.requireLte(a, b, reason)` | Require a <= b |
+| `rs.int.requireEq(a, b, reason)` | Require a === b |
+
+#### `rs.tx`
+
+| Method | Description |
+|--------|-------------|
+| `rs.tx.require(input)` | Require input to be a transaction |
+| `rs.tx.getCalldata(input)` | Get calldata from transaction input |
+
+#### `rs.config`
+
+| Method | Description |
+|--------|-------------|
+| `rs.config.requireNonEmpty(key, reason)` | Throw if config variable is missing or empty |
+
+#### `rs.delegate`
+
+| Method | Description |
+|--------|-------------|
+| `rs.delegate.resolveByTarget(addr, delegateMap, defaultRule)` | Resolve delegation target rule ID by address |
+
+#### `rs.multisend`
+
+| Method | Description |
+|--------|-------------|
+| `rs.multisend.parseBatch(data)` | Parse Gnosis MultiSend batch calldata, returns array of `{ to, value, data }` |
+
+#### `rs.gnosis.safe`
+
+| Method | Description |
+|--------|-------------|
+| `rs.gnosis.safe.parseExecTransactionData(data)` | Parse Safe execTransaction calldata, returns `{ valid, reason?, innerTo, innerHex, valueZero, operationCALL }` |
+
+#### `rs.hex`
+
+| Method | Description |
+|--------|-------------|
+| `rs.hex.requireZero32(value, reason)` | Require bytes32 value to be zero |
+
+### Error Handling: `try/catch` with `rs.*` Helpers
+
+All `rs.*.require*` functions throw JS exceptions on validation failure. They use `panic(vm.ToValue(reason))` in Go — a Sobek-aware panic that the runtime translates into JS errors catchable by `try/catch`.
+
+This enables **blocklist rules to selectively skip validation** when a request doesn't match the rule's scope:
+
+```javascript
+// Blocklist: block SafeTx with DELEGATECALL only for known Safes.
+// For unknown Safe addresses, skip this rule (return ok) instead of blocking.
+try {
+  rs.typedData.requireDomain(domain, {
+    chainId: chainId,
+    allowedContracts: config.allowed_safe_addresses
+  });
+} catch (e) { return ok(); }
+// If we reach here, the Safe is known — continue validation
+rs.int.requireEq(msg.operation, 0, 'only CALL allowed');
+return ok();
+```
+
+If the exception is NOT caught by JS `try/catch`, it propagates to `wrappedValidate`'s Go `recover()`, which logs a warning and returns `Valid: false`. This means an **uncaught `rs.*` exception in a blocklist rule causes the request to be blocked** (fail-closed), while in a whitelist rule it causes a deny (fail-open — the rule is skipped).
+
+**Rules for rule authors:**
+- Use `try/catch` around `rs.*` helpers when the failure should skip the rule rather than reject the request.
+- Always catch specific validation failures — never use a blanket `try/catch` around the entire `validate()` function.
+- When `try/catch` is not used, an `rs.*` failure behaves as `return fail(reason)`.
+
+**Rules for Go contributor:**
+- New `rs.*` helper functions MUST use `panic(vm.ToValue(reason))`, never bare `panic(reason)`.
+- Bare Go panics bypass Sobek's JS exception translation and are uncatchable from JS.
+- See `internal/chain/evm/js_helpers.go` SAFETY comment for details.
+
 ---
 
 ## Rule Type: `evm_dynamic_blocklist`

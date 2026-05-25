@@ -596,12 +596,14 @@ func (e *JSRuleEvaluator) wrappedValidate(script string, input *RuleInput, confi
 		}()
 		res, callErr = fn(sobek.Undefined(), inputVal)
 	}()
-	if err := panicErr; err != nil {
-		return JSRuleValidateResult{Valid: false, Reason: sanitizeReason("", extractJSExceptionMessage(err.Error()), true)}
-	}
-	if err := callErr; err != nil {
-		return JSRuleValidateResult{Valid: false, Reason: sanitizeReason("", extractJSExceptionMessage(err.Error()), true)}
-	}
+		if err := panicErr; err != nil {
+			e.logger.Warn("JS rule panicked (uncaught by JS try/catch)", "error", extractJSExceptionMessage(err.Error()))
+			return JSRuleValidateResult{Valid: false, Reason: sanitizeReason("", extractJSExceptionMessage(err.Error()), true)}
+		}
+		if err := callErr; err != nil {
+			e.logger.Warn("JS rule threw exception (uncaught)", "error", extractJSExceptionMessage(err.Error()))
+			return JSRuleValidateResult{Valid: false, Reason: sanitizeReason("", extractJSExceptionMessage(err.Error()), true)}
+		}
 
 	if res == nil || isUndefined(res) {
 		return JSRuleValidateResult{Valid: false, Reason: sanitizeReason("invalid_shape", "invalid return shape", false)}

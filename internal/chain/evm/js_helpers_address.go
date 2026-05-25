@@ -88,7 +88,7 @@ func rsAddrNotInList(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 func rsAddrRequireInList(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 	return func(call sobek.FunctionCall) sobek.Value {
 		if len(call.Arguments) < 3 {
-			panic("requireInList needs addr, list, reason")
+			panic(vm.ToValue("requireInList needs addr, list, reason"))
 		}
 		reason := ""
 		if r := call.Argument(2); r != nil && !r.Equals(sobek.Undefined()) {
@@ -102,14 +102,14 @@ func rsAddrRequireInList(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value
 		if rsAddrInListCore(addrStr, listRaw) {
 			return rsOk(vm)
 		}
-		panic(reason)
+		panic(vm.ToValue(reason))
 	}
 }
 
 func rsAddrRequireNotInList(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 	return func(call sobek.FunctionCall) sobek.Value {
 		if len(call.Arguments) < 3 {
-			panic("requireNotInList needs addr, list, reason")
+			panic(vm.ToValue("requireNotInList needs addr, list, reason"))
 		}
 		reason := ""
 		if r := call.Argument(2); r != nil && !r.Equals(sobek.Undefined()) {
@@ -121,13 +121,13 @@ func rsAddrRequireNotInList(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Va
 		}
 		// Validate address first to prevent malformed addresses from bypassing blocklist.
 		if _, ok := rsAddrNormalize(addrStr); !ok {
-			panic(reason)
+			panic(vm.ToValue(reason))
 		}
 		listRaw := call.Argument(1).Export()
 		if !rsAddrInListCore(addrStr, listRaw) {
 			return rsOk(vm)
 		}
-		panic(reason)
+		panic(vm.ToValue(reason))
 	}
 }
 
@@ -136,7 +136,7 @@ func rsAddrRequireNotInList(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Va
 func rsAddrRequireInListIfNonEmpty(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 	return func(call sobek.FunctionCall) sobek.Value {
 		if len(call.Arguments) < 3 {
-			panic("requireInListIfNonEmpty needs addr, list, reason")
+			panic(vm.ToValue("requireInListIfNonEmpty needs addr, list, reason"))
 		}
 		reason := ""
 		if r := call.Argument(2); r != nil && !r.Equals(sobek.Undefined()) {
@@ -153,14 +153,14 @@ func rsAddrRequireInListIfNonEmpty(vm *sobek.Runtime) func(sobek.FunctionCall) s
 		}
 		addrChecksum, ok := rsAddrNormalize(addrStr)
 		if !ok {
-			panic(reason)
+			panic(vm.ToValue(reason))
 		}
 		for _, a := range addrs {
 			if addrChecksum == a {
 				return rsOk(vm)
 			}
 		}
-		panic(reason)
+		panic(vm.ToValue(reason))
 	}
 }
 
@@ -181,7 +181,7 @@ func rsAddrIsZero(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 func rsAddrRequireZero(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 	return func(call sobek.FunctionCall) sobek.Value {
 		if len(call.Arguments) < 2 {
-			panic("requireZero needs addr, reason")
+			panic(vm.ToValue("requireZero needs addr, reason"))
 		}
 		reason := ""
 		if r := call.Argument(1); r != nil && !r.Equals(sobek.Undefined()) {
@@ -193,7 +193,7 @@ func rsAddrRequireZero(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 		}
 		zeroAddr := common.Address{}
 		if !common.IsHexAddress(addrStr) || common.HexToAddress(addrStr) != zeroAddr {
-			panic(reason)
+			panic(vm.ToValue(reason))
 		}
 		return rsOk(vm)
 	}

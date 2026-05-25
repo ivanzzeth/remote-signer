@@ -1192,6 +1192,168 @@ function validateBudget(i){ return { unit: "native" }; }`
 	assert.Contains(t, err.Error(), "amount")
 }
 
+// TestJSRuleEvaluator_GoPanicBypassesJSTryCatch reproduces the bug where Go functions
+// (e.g. requireDomain, requireInList) call bare panic(reason), which Sobek does NOT convert
+// to a JS exception — it propagates as a Go panic to wrappedValidate's defer/recover.
+// JS try/catch silently fails, the result is Valid: false, and a blocklist rule fires incorrectly.
+// This is the root cause of Safe DELEGATECALL blocklist blocking the Polymarket airdrop bot.
+//
+// The test emulates the exact safe.yaml "Safe block DELEGATECALL" blocklist pattern (lines 51-65):
+//
+//	function validate(input) {
+//	  var m = rs.typedData.match(input, 'SafeTx');
+//	  if (!m.matched) return ok();
+//	  ...
+//	  try {
+//	    rs.typedData.requireDomain(domain, { chainId: ..., allowedContracts: config.allowed_safe_addresses });
+//	  } catch (e) { return ok(); }
+//	  rs.int.requireEq(msg.operation, 0, 'only CALL allowed');
+//	  return ok();
+//	}
+//
+// When requireDomain panics because verifyingContract is not in allowed_safe_addresses,
+// the try/catch should catch it and return ok(). But bare Go panic() goes straight to
+// wrappedValidate's Go recover(), bypassing JS catch entirely.
+func TestJSRuleEvaluator_GoPanicBypassesJSTryCatch(t *testing.T) {
+	e, err := NewJSRuleEvaluator(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})))
+	require.NoError(t, err)
+
+	// This is the exact safe.yaml blocklist structure (simplified).
+	// The rule has allowed_safe_addresses=["0x1111..."]. The request uses
+	// verifyingContract="0xdb44..." which is NOT in the allowed list.
+	// JS try/catch is SUPPOSED to catch requireDomain's exception and return ok().
+	// Due to the Go panic bypass bug, it doesn't.
+	script := `function validate(input) {
+		var m = rs.typedData.match(input, 'SafeTx');
+		if (!m.matched) return ok();
+		var domain = m.domain || {};
+		try {
+			rs.typedData.requireDomain(domain, {
+				chainId: 137,
+				allowedContracts: ['0x1111111111111111111111111111111111111111']
+			});
+		} catch (e) { return ok(); }
+		rs.int.requireEq(m.message.operation, 0, 'only CALL allowed');
+		return ok();
+	}`
+
+	cfg := JSRuleConfig{Script: script, SignTypeFilter: "typed_data"}
+	rule := &types.Rule{
+		ID:     "safe-block-delegatecall",
+		Type:   types.RuleTypeEVMJS,
+		Mode:   types.RuleModeBlocklist,
+		Config: mustMarshalJSON(cfg),
+	}
+
+	typedDataPayload := mustMarshalJSON(map[string]interface{}{
+		"typed_data": map[string]interface{}{
+		"types": map[string]interface{}{
+			"EIP712Domain": []map[string]string{
+				{"name": "chainId", "type": "uint256"},
+				{"name": "verifyingContract", "type": "address"},
+			},
+			"SafeTx": []map[string]string{
+				{"name": "to", "type": "address"},
+				{"name": "value", "type": "uint256"},
+				{"name": "data", "type": "bytes"},
+				{"name": "operation", "type": "uint8"},
+				{"name": "safeTxGas", "type": "uint256"},
+				{"name": "nonce", "type": "uint256"},
+			},
+		},
+		"primaryType": "SafeTx",
+		"domain": map[string]string{
+			"chainId":           "137",
+			"verifyingContract": "0xdb44cf4ce5e57193c2245901179f3c403b5cec30",
+		},
+		"message": map[string]interface{}{
+			"to":        "0xAdA200001000ef00D07553cEE7006808F895c6F1",
+			"value":     "0",
+			"data":      "0x9e7212ad0000000000000000000000000000000000000000000000000000000000000000",
+			"operation": "0",
+			"safeTxGas": "1088718",
+			"nonce":     "84",
+			},
+		},
+	})
+
+	req := &types.SignRequest{
+		ChainID:       "137",
+		SignerAddress: "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837",
+		SignType:      SignTypeTypedData,
+		Payload:       typedDataPayload,
+	}
+
+	matched, reason, err := e.Evaluate(context.Background(), rule, req, nil)
+	require.NoError(t, err)
+
+	// BUG: The verifyingContract is NOT in allowed_safe_addresses. The try/catch
+	// should catch the exception and return ok() — meaning the blocklist should NOT fire.
+	// But bare Go panic bypasses JS catch → wrappedValidate returns Valid: false →
+	// blocklist fires (matched=true). This is the production bug.
+	assert.False(t, matched,
+		"BUG: blocklist should NOT fire — try/catch should catch requireDomain exception and return ok() for unknown Safe addresses.\n"+
+			"Instead Go panic() bypasses JS try/catch, causing wrappedValidate to return Valid: false, and blocklist fires.\n"+
+			"reason=%s", reason)
+}
+
+// TestJSRuleEvaluator_GoPanicBypassesJSTryCatch_RsHelpers verifies that each rs.*.require*
+// function uses bare panic() which bypasses JS try/catch. When all helpers are fixed to use
+// throw (panic(vm.ToValue(...))), the JS catch will work and this test will pass.
+func TestJSRuleEvaluator_GoPanicBypassesJSTryCatch_RsHelpers_RequireDomain(t *testing.T) {
+	e, err := NewJSRuleEvaluator(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})))
+	require.NoError(t, err)
+
+	// requireDomain is called with an unknown verifyingContract inside try/catch.
+	// If requireDomain throws a catchable JS error, try/catch works → ok() → Valid: true.
+	// If requireDomain panics (Go panic), try/catch fails → Valid: false (because recover catches it).
+	script := `function validate(input) {
+		var domain = { chainId: '1', verifyingContract: '0xdb44cf4ce5e57193c2245901179f3c403b5cec30' };
+		try {
+			rs.typedData.requireDomain(domain, {
+				chainId: 1,
+				allowedContracts: ['0x1111111111111111111111111111111111111111']
+			});
+		} catch (e) {
+			if (String(e).indexOf('invalid verifying contract') >= 0) return ok();
+			return fail('unexpected error: ' + e);
+		}
+		return fail('should have thrown');
+	}`
+
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"}
+
+	res := e.wrappedValidate(script, input, nil, nil)
+	assert.True(t, res.Valid,
+		"BUG: Go panic() in requireDomain bypasses JS try/catch. "+
+			"Expected Valid=true (catch → ok()), got Valid=false with reason=%q", res.Reason)
+}
+
+// TestJSRuleEvaluator_GoPanicBypassesJSTryCatch_RsHelpers_RequireInList verifies the same bug
+// for rs.addr.requireInList.
+func TestJSRuleEvaluator_GoPanicBypassesJSTryCatch_RsHelpers_RequireInList(t *testing.T) {
+	e, err := NewJSRuleEvaluator(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})))
+	require.NoError(t, err)
+
+	script := `function validate(input) {
+		try {
+			rs.addr.requireInList('0xdb44cf4ce5e57193c2245901179f3c403b5cec30',
+				['0x1111111111111111111111111111111111111111'],
+				'not in list');
+		} catch (e) {
+			if (String(e).indexOf('not in list') >= 0) return ok();
+			return fail('unexpected error: ' + e);
+		}
+		return fail('should have thrown');
+	}`
+
+	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"}
+	res := e.wrappedValidate(script, input, nil, nil)
+	assert.True(t, res.Valid,
+		"BUG: Go panic() in requireInList bypasses JS try/catch. "+
+			"Expected Valid=true (catch → ok()), got Valid=false with reason=%q", res.Reason)
+}
+
 func TestJSRuleEvaluator_EvaluateBudget_DynamicUnitEmptyUnit(t *testing.T) {
 	e, err := NewJSRuleEvaluator(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})))
 	require.NoError(t, err)

@@ -55,6 +55,9 @@ rules:
           var chainId = parseInt(config.chain_id, 10) || 0;
           var domain = m.domain || {};
           var msg = m.message || {};
+          // try/catch works because requireDomain uses panic(vm.ToValue(...))
+          // which Sobek translates into a JS exception. If the Safe is unknown,
+          // we skip this blocklist rule (return ok) instead of blocking.
           try {
             rs.typedData.requireDomain(domain, {
               chainId: chainId,
