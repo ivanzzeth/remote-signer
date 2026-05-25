@@ -12,9 +12,12 @@ import (
 	"github.com/grafana/sobek"
 )
 
-// SAFETY: All rs.* require/assert functions panic on failure. The caller (wrappedValidate)
-// MUST have defer/recover to catch panics and convert them into fail results. Never call
-// rs.* helper functions outside wrappedValidate without proper panic recovery.
+// SAFETY: All rs.* require/assert functions use panic(vm.ToValue(reason)) — a Sobek-aware
+// panic that the runtime translates into a JS exception. JS try/catch CAN catch these errors,
+// allowing rules to selectively ignore validation failures (e.g. return ok() for unknown Safe
+// addresses instead of blocking). If not caught by JS, the panic propagates to wrappedValidate's
+// Go recover(), which converts it to Valid: false (with a warning log). Never call rs.* helper
+// functions outside wrappedValidate without proper panic recovery.
 
 // injectHelpers injects rule-engine globals: fail(reason), ok(), eq, keccak256, selector, toChecksum,
 // isAddress, toWei, fromWei, and abi.encode / abi.decode (via go-ethereum/accounts/abi, Solidity-aligned).
@@ -358,7 +361,7 @@ func rsOk(vm *sobek.Runtime) sobek.Value {
 func rsConfigRequireNonEmpty(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 	return func(call sobek.FunctionCall) sobek.Value {
 		if len(call.Arguments) < 2 {
-			panic("requireNonEmpty needs key, reason")
+			panic(vm.ToValue("requireNonEmpty needs key, reason"))
 		}
 		key := strings.TrimSpace(call.Argument(0).String())
 		reason := ""
@@ -367,19 +370,19 @@ func rsConfigRequireNonEmpty(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.V
 		}
 		configVal := vm.Get("config")
 		if configVal == nil || configVal.Equals(sobek.Undefined()) {
-			panic(reason)
+			panic(vm.ToValue(reason))
 		}
 		configMap, _ := configVal.Export().(map[string]interface{})
 		if configMap == nil {
-			panic(reason)
+			panic(vm.ToValue(reason))
 		}
 		v, exists := configMap[key]
 		if !exists || v == nil {
-			panic(reason)
+			panic(vm.ToValue(reason))
 		}
 		s := strings.TrimSpace(fmt.Sprintf("%v", v))
 		if s == "" {
-			panic(reason)
+			panic(vm.ToValue(reason))
 		}
 		return rsOk(vm)
 	}

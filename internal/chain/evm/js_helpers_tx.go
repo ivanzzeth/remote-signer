@@ -99,31 +99,31 @@ func rsSafeParseExecTransactionData(vm *sobek.Runtime) func(sobek.FunctionCall) 
 func rsTxRequire(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 	return func(call sobek.FunctionCall) sobek.Value {
 		if len(call.Arguments) < 1 || call.Argument(0) == nil || call.Argument(0).Equals(sobek.Undefined()) {
-			panic("missing input")
+			panic(vm.ToValue("missing input"))
 		}
 		inputEx := call.Argument(0).Export()
 		inputMap, ok := inputEx.(map[string]interface{})
 		if !ok {
-			panic("invalid input")
+			panic(vm.ToValue("invalid input"))
 		}
 		signType, _ := inputMap["sign_type"].(string)
 		if signType != "transaction" {
-			panic("transaction only")
+			panic(vm.ToValue("transaction only"))
 		}
 		txRaw := inputMap["transaction"]
 		if txRaw == nil {
-			panic("missing tx fields")
+			panic(vm.ToValue("missing tx fields"))
 		}
 		txMap, ok := txRaw.(map[string]interface{})
 		if !ok {
-			panic("missing tx fields")
+			panic(vm.ToValue("missing tx fields"))
 		}
 		if _, hasTo := txMap["to"]; !hasTo {
-			panic("missing tx fields")
+			panic(vm.ToValue("missing tx fields"))
 		}
 		dataRaw := txMap["data"]
 		if dataRaw == nil {
-			panic("missing tx fields")
+			panic(vm.ToValue("missing tx fields"))
 		}
 		dataStr := ""
 		if s, ok := dataRaw.(string); ok {
@@ -131,7 +131,7 @@ func rsTxRequire(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 		}
 		dataHex := strings.TrimPrefix(strings.TrimPrefix(dataStr, "0x"), "0X")
 		if len(dataHex) < 8 {
-			panic("calldata too short")
+			panic(vm.ToValue("calldata too short"))
 		}
 		sel := "0x" + dataHex[:8]
 		payloadHex := "0x" + dataHex[8:]

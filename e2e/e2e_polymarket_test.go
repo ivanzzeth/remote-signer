@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -428,10 +429,266 @@ func TestE2E_PolymarketV2Safe_SignAndDelegate(t *testing.T) {
 		"DELEGATECALL SafeTx should be rejected, got status=%q message=%s", dcRespBody.Status, dcRespBody.Message)
 	t.Logf("DELEGATECALL rejection: %s - %s", dcRespBody.Status, dcRespBody.Message)
 
+	// ---------------------------------------------------------------
+	// 4. Unknown Safe + CALL → blocklist MUST skip via try/catch
+	//    Regression: before the panic(vm.ToValue(...)) fix, bare Go
+	//    panic bypassed JS try/catch and this request was wrongly
+	//    blocked with "invalid verifying contract". After the fix,
+	//    the blocklist returns ok() (skip), and the request should
+	//    NOT be rejected by the blocklist rule.
+	// ---------------------------------------------------------------
+	unknownSafeTx := map[string]interface{}{
+		"types": map[string]interface{}{
+			"EIP712Domain": []eip712TypeField{
+				{Name: "chainId", Type: "uint256"},
+				{Name: "verifyingContract", Type: "address"},
+			},
+			"SafeTx": []eip712TypeField{
+				{Name: "to", Type: "address"},
+				{Name: "value", Type: "uint256"},
+				{Name: "data", Type: "bytes"},
+				{Name: "operation", Type: "uint8"},
+				{Name: "safeTxGas", Type: "uint256"},
+				{Name: "baseGas", Type: "uint256"},
+				{Name: "gasPrice", Type: "uint256"},
+				{Name: "gasToken", Type: "address"},
+				{Name: "refundReceiver", Type: "address"},
+				{Name: "nonce", Type: "uint256"},
+			},
+		},
+		"primaryType": "SafeTx",
+		"domain": map[string]interface{}{
+			"chainId":           chainID,
+			"verifyingContract": "0x000000000000000000000000000000000000dEaD", // NOT in allowed_safe_addresses
+		},
+		"message": map[string]interface{}{
+			"to":             "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB",
+			"value":          "0",
+			"data":           "0x",
+			"operation":      "0", // CALL — valid operation
+			"safeTxGas":      "0",
+			"baseGas":        "0",
+			"gasPrice":       "0",
+			"gasToken":       "0x0000000000000000000000000000000000000000",
+			"refundReceiver": "0x0000000000000000000000000000000000000000",
+			"nonce":          "0",
+		},
+	}
+
+	unknownSafeReq := map[string]interface{}{
+		"chain_type":     "evm",
+		"chain_id":       chainID,
+		"signer_address": testSignerAddress,
+		"sign_type":      "typed_data",
+		"payload":        map[string]interface{}{"typed_data": unknownSafeTx},
+	}
+
+	unknownResp := doRawRequest(t, http.MethodPost, "/api/v1/evm/sign", unknownSafeReq)
+	defer unknownResp.Body.Close()
+
+	// The request should NOT be blocked with "invalid verifying contract".
+	// Before the fix, bare Go panic bypassed JS try/catch and returned 403/blocked.
+	// After the fix, the blocklist skips this request via try/catch → ok(),
+	// and it falls through to manual approval or no-matching-rule result.
+	var unknownBody struct {
+		Status  string `json:"status"`
+		Message string `json:"message"`
+		Error   string `json:"error"`
+	}
+	json.NewDecoder(unknownResp.Body).Decode(&unknownBody)
+	assert.NotContains(t, unknownBody.Message, "invalid verifying contract",
+		"REGRESSION: unknown Safe should not be blocked by safe-block-delegatecall; blocklist must skip via try/catch")
+	assert.NotContains(t, unknownBody.Error, "invalid verifying contract",
+		"REGRESSION: unknown Safe should not be blocked by safe-block-delegatecall; blocklist must skip via try/catch")
+	t.Logf("Unknown Safe skip: status=%q message=%q — blocklist correctly skipped via try/catch", unknownBody.Status, unknownBody.Message)
+
 	t.Log("Polymarket V2 Safe E2E: ALL PASSED")
 }
 
-// TestE2E_PolymarketV2Safe_ClobAuth tests ClobAuth typed_data signing through
+// TestE2E_PolymarketV2Safe_ProductionRequest reproduces the exact
+// production SafeTx that was rejected with "invalid verifying contract".
+// Safe: 0xdb44cf4ce5e57193c2245901179f3c403b5cec30 on Polygon (137).
+func TestE2E_PolymarketV2Safe_ProductionRequest(t *testing.T) {
+	ctx := context.Background()
+	ensureGuardResumed(t)
+	if useExternalServer {
+		t.Skip("Polymarket V2 Safe production test requires internal server")
+	}
+
+	prodSafeAddress := "0xdb44cf4ce5e57193c2245901179f3c403b5cec30"
+
+	presetID := "evm/polymarket_v2_safe_polygon"
+	applyResp, err := adminClient.Presets.Apply(ctx, presetID, &presets.ApplyRequest{
+		Variables:      map[string]string{"allowed_safe_addresses": prodSafeAddress},
+		SkipValidation: true,
+	})
+	require.NoError(t, err, "preset apply should succeed")
+	require.NotNil(t, applyResp)
+	require.GreaterOrEqual(t, len(applyResp.Results), 1)
+	t.Logf("Preset applied: %d rule(s)", len(applyResp.Results))
+	snapshotRules(t)
+	cleanupApplyResults(t, applyResp.Results)
+
+	// Exact production SafeTx from the bot's airdrop claim tx.
+	prodSafeTx := map[string]interface{}{
+		"types": map[string]interface{}{
+			"EIP712Domain": []eip712TypeField{
+				{Name: "chainId", Type: "uint256"},
+				{Name: "verifyingContract", Type: "address"},
+			},
+			"SafeTx": []eip712TypeField{
+				{Name: "to", Type: "address"},
+				{Name: "value", Type: "uint256"},
+				{Name: "data", Type: "bytes"},
+				{Name: "operation", Type: "uint8"},
+				{Name: "safeTxGas", Type: "uint256"},
+				{Name: "baseGas", Type: "uint256"},
+				{Name: "gasPrice", Type: "uint256"},
+				{Name: "gasToken", Type: "address"},
+				{Name: "refundReceiver", Type: "address"},
+				{Name: "nonce", Type: "uint256"},
+			},
+		},
+		"primaryType": "SafeTx",
+		"domain": map[string]interface{}{
+			"chainId":           "137",
+			"verifyingContract": prodSafeAddress,
+		},
+		"message": map[string]interface{}{
+			"baseGas":        "0",
+			"data":           "0x9e7212ad0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000025fb28382075f418a944a781a9f8840e2f541152eea0d9798d1cabfa1466adbb00000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000005fac30000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002",
+			"gasPrice":       "0",
+			"gasToken":       "0x0000000000000000000000000000000000000000",
+			"nonce":          "84",
+			"operation":      "0",
+			"refundReceiver": "0x0000000000000000000000000000000000000000",
+			"safeTxGas":      "1088718",
+			"to":             "0xAdA200001000ef00D07553cEE7006808F895c6F1",
+			"value":          "0",
+		},
+	}
+
+	signReq := map[string]interface{}{
+		"chain_type":     "evm",
+		"chain_id":       "137",
+		"signer_address": testSignerAddress,
+		"sign_type":      "typed_data",
+		"payload":        map[string]interface{}{"typed_data": prodSafeTx},
+	}
+
+	resp := doRawRequest(t, http.MethodPost, "/api/v1/evm/sign", signReq)
+	defer resp.Body.Close()
+
+	var body struct {
+		Status  string `json:"status"`
+		Message string `json:"message"`
+		Error   string `json:"error"`
+	}
+	json.NewDecoder(resp.Body).Decode(&body)
+
+	// This must NOT be forbidden or rejected with "invalid verifying contract".
+	if resp.StatusCode == http.StatusForbidden {
+		t.Fatalf("PRODUCTION REQUEST REJECTED (REGRESSION): status=%d error=%q message=%q",
+			resp.StatusCode, body.Error, body.Message)
+	}
+	assert.True(t, resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusAccepted,
+		"production request should return 200 or 202, got %d", resp.StatusCode)
+	assert.NotContains(t, body.Error+body.Message, "invalid verifying contract",
+		"production request must not be rejected by safe-block-delegatecall")
+	t.Logf("Production SafeTx: status=%d status_field=%q", resp.StatusCode, body.Status)
+}
+
+// TestE2E_PolymarketV2Safe_PresetApplyConfigBug verifies that when applying
+// the preset with allowed_safe_addresses, the resulting rule's config actually
+// contains the provided Safe address (not just the tx_to addresses).
+func TestE2E_PolymarketV2Safe_PresetApplyConfigBug(t *testing.T) {
+	ctx := context.Background()
+	ensureGuardResumed(t)
+	if useExternalServer {
+		t.Skip("config check requires internal server")
+	}
+
+	testSafeAddr := "0xAbCdEf1234567890aBcDeF1234567890AbcDeF01"
+
+	presetID := "evm/polymarket_v2_safe_polygon"
+	applyResp, err := adminClient.Presets.Apply(ctx, presetID, &presets.ApplyRequest{
+		Variables:      map[string]string{"allowed_safe_addresses": testSafeAddr},
+		SkipValidation: true,
+	})
+	require.NoError(t, err, "preset apply should succeed")
+	snapshotRules(t)
+	cleanupApplyResults(t, applyResp.Results)
+
+	// Find the "Safe SafeTx and execTransaction" rule and verify its config.
+	var safeRuleID string
+	for _, item := range applyResp.Results {
+		var rule struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(item.Rule, &rule); err != nil {
+			continue
+		}
+		if strings.Contains(rule.Name, "SafeTx and execTransaction") {
+			safeRuleID = rule.ID
+			break
+		}
+	}
+	require.NotEmpty(t, safeRuleID, "SafeTx whitelist rule not found in apply results")
+
+	// Fetch the rule and check its config.
+	rule, err := adminClient.EVM.Rules.Get(ctx, safeRuleID)
+	require.NoError(t, err, "failed to fetch rule %s", safeRuleID)
+
+	var config map[string]interface{}
+	require.NoError(t, json.Unmarshal(rule.Config, &config), "failed to parse rule config")
+
+	addrsStr, _ := config["allowed_safe_addresses"].(string)
+	t.Logf("Rule %s config.allowed_safe_addresses = %q", safeRuleID, addrsStr)
+
+	// The provided Safe address MUST be present in allowed_safe_addresses.
+	assert.Contains(t, addrsStr, testSafeAddr,
+		"allowed_safe_addresses=%q must contain the user-provided Safe address %q", addrsStr, testSafeAddr)
+
+	// Also verify that no apply was done WITHOUT overrides (the preset
+	// default is "0x1111...1111" — confirm the flow is working correctly).
+	t.Run("default_placeholder_only", func(t *testing.T) {
+		applyResp2, err := adminClient.Presets.Apply(ctx, presetID, &presets.ApplyRequest{
+			SkipValidation: true,
+		})
+		require.NoError(t, err, "preset apply without overrides should succeed")
+		cleanupApplyResults(t, applyResp2.Results)
+
+		var safeRuleID2 string
+		for _, item := range applyResp2.Results {
+			var rule struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			}
+			if err := json.Unmarshal(item.Rule, &rule); err != nil {
+				continue
+			}
+			if strings.Contains(rule.Name, "SafeTx and execTransaction") {
+				safeRuleID2 = rule.ID
+				break
+			}
+		}
+		require.NotEmpty(t, safeRuleID2)
+		rule2, err := adminClient.EVM.Rules.Get(ctx, safeRuleID2)
+		require.NoError(t, err)
+		var config2 map[string]interface{}
+		require.NoError(t, json.Unmarshal(rule2.Config, &config2))
+		addrsStr2, _ := config2["allowed_safe_addresses"].(string)
+
+		t.Logf("Default preset (no overrides): allowed_safe_addresses=%q", addrsStr2)
+		// With no overrides, should use preset default "0x1111...1111"
+		assert.Contains(t, addrsStr2, "0x1111111111111111111111111111111111111111",
+			"without overrides, allowed_safe_addresses should be preset default")
+		assert.NotContains(t, addrsStr2, "0xC011a7E12a19f7B", // NOT the tx_to addresses
+			"allowed_safe_addresses should NOT contain contract addresses")
+	})
+}
+
 // the polymarket_v2_safe_polygon preset. This is the regression test for the
 // v2 preset missing evm/polymarket_auth template (bot's ClobAuth sign requests
 // were getting 403 "no matching whitelist rule found").

@@ -193,7 +193,7 @@ func rsBigIntInt256(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 func rsBigIntRequireLte(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 	return func(call sobek.FunctionCall) sobek.Value {
 		if len(call.Arguments) < 3 {
-			panic("requireLte needs a, b, reason")
+			panic(vm.ToValue("requireLte needs a, b, reason"))
 		}
 		reason := ""
 		if r := call.Argument(2); r != nil && !r.Equals(sobek.Undefined()) {
@@ -209,14 +209,14 @@ func rsBigIntRequireLte(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value 
 		}
 		a, ok := parseBigIntStrict(call.Argument(0).Export())
 		if !ok {
-			panic(reason)
+			panic(vm.ToValue(reason))
 		}
 		b, ok := parseBigIntStrict(maxRaw)
 		if !ok {
-			panic(reason)
+			panic(vm.ToValue(reason))
 		}
 		if a.Cmp(b) > 0 {
-			panic(reason)
+			panic(vm.ToValue(reason))
 		}
 		return rsOk(vm)
 	}
@@ -225,7 +225,7 @@ func rsBigIntRequireLte(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value 
 func rsBigIntRequireZero(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 	return func(call sobek.FunctionCall) sobek.Value {
 		if len(call.Arguments) < 2 {
-			panic("requireZero needs amount, reason")
+			panic(vm.ToValue("requireZero needs amount, reason"))
 		}
 		reason := ""
 		if r := call.Argument(1); r != nil && !r.Equals(sobek.Undefined()) {
@@ -233,10 +233,10 @@ func rsBigIntRequireZero(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value
 		}
 		n, ok := parseBigIntStrict(call.Argument(0).Export())
 		if !ok {
-			panic(reason)
+			panic(vm.ToValue(reason))
 		}
 		if n.Sign() != 0 {
-			panic(reason)
+			panic(vm.ToValue(reason))
 		}
 		return rsOk(vm)
 	}
@@ -245,7 +245,7 @@ func rsBigIntRequireZero(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value
 func rsBigIntRequireEq(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 	return func(call sobek.FunctionCall) sobek.Value {
 		if len(call.Arguments) < 3 {
-			panic("requireEq needs a, b, reason")
+			panic(vm.ToValue("requireEq needs a, b, reason"))
 		}
 		reason := ""
 		if r := call.Argument(2); r != nil && !r.Equals(sobek.Undefined()) {
@@ -253,14 +253,14 @@ func rsBigIntRequireEq(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 		}
 		a, ok := parseBigIntStrict(call.Argument(0).Export())
 		if !ok {
-			panic(reason)
+			panic(vm.ToValue(reason))
 		}
 		b, ok := parseBigIntStrict(call.Argument(1).Export())
 		if !ok {
-			panic(reason)
+			panic(vm.ToValue(reason))
 		}
 		if a.Cmp(b) != 0 {
-			panic(reason)
+			panic(vm.ToValue(reason))
 		}
 		return rsOk(vm)
 	}
@@ -325,7 +325,7 @@ func rsIntParseUint(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 func rsIntRequireLte(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 	return func(call sobek.FunctionCall) sobek.Value {
 		if len(call.Arguments) < 3 {
-			panic("requireLte needs value, max, reason")
+			panic(vm.ToValue("requireLte needs value, max, reason"))
 		}
 		reason := ""
 		if r := call.Argument(2); r != nil && !r.Equals(sobek.Undefined()) {
@@ -333,14 +333,14 @@ func rsIntRequireLte(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 		}
 		u, ok := parseUintStrict(call.Argument(0).Export())
 		if !ok {
-			panic(reason)
+			panic(vm.ToValue(reason))
 		}
 		max, ok := parseUintStrict(call.Argument(1).Export())
 		if !ok {
-			panic(reason)
+			panic(vm.ToValue(reason))
 		}
 		if u > max {
-			panic(reason)
+			panic(vm.ToValue(reason))
 		}
 		return rsOk(vm)
 	}
@@ -349,7 +349,7 @@ func rsIntRequireLte(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 func rsIntRequireEq(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 	return func(call sobek.FunctionCall) sobek.Value {
 		if len(call.Arguments) < 3 {
-			panic("requireEq needs value, want, reason")
+			panic(vm.ToValue("requireEq needs value, want, reason"))
 		}
 		reason := ""
 		if r := call.Argument(2); r != nil && !r.Equals(sobek.Undefined()) {
@@ -357,14 +357,14 @@ func rsIntRequireEq(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 		}
 		u, ok := parseUintStrict(call.Argument(0).Export())
 		if !ok {
-			panic(reason)
+			panic(vm.ToValue(reason))
 		}
 		want, ok := parseUintStrict(call.Argument(1).Export())
 		if !ok {
-			panic(reason)
+			panic(vm.ToValue(reason))
 		}
 		if u != want {
-			panic(reason)
+			panic(vm.ToValue(reason))
 		}
 		return rsOk(vm)
 	}

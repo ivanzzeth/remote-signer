@@ -14,35 +14,35 @@ import (
 func rsTypedDataRequire(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 	return func(call sobek.FunctionCall) sobek.Value {
 		if len(call.Arguments) < 2 {
-			panic("require needs input, primaryType")
+			panic(vm.ToValue("require needs input, primaryType"))
 		}
 		primaryType := ""
 		if p := call.Argument(1); p != nil && !p.Equals(sobek.Undefined()) {
 			primaryType = strings.TrimSpace(p.String())
 		}
 		if primaryType == "" {
-			panic("primaryType required")
+			panic(vm.ToValue("primaryType required"))
 		}
 		inputEx := call.Argument(0).Export()
 		inputMap, ok := inputEx.(map[string]interface{})
 		if !ok {
-			panic("invalid input")
+			panic(vm.ToValue("invalid input"))
 		}
 		signType, _ := inputMap["sign_type"].(string)
 		if signType != "typed_data" {
-			panic("sign_type must be typed_data")
+			panic(vm.ToValue("sign_type must be typed_data"))
 		}
 		tdRaw := inputMap["typed_data"]
 		if tdRaw == nil {
-			panic("not " + primaryType)
+			panic(vm.ToValue("not " + primaryType))
 		}
 		tdMap, ok := tdRaw.(map[string]interface{})
 		if !ok {
-			panic("not " + primaryType)
+			panic(vm.ToValue("not " + primaryType))
 		}
 		pt, _ := tdMap["primaryType"].(string)
 		if strings.TrimSpace(pt) != primaryType {
-			panic("not " + primaryType)
+			panic(vm.ToValue("not " + primaryType))
 		}
 		domain := map[string]interface{}{}
 		if d, ok := tdMap["domain"].(map[string]interface{}); ok {
@@ -115,7 +115,7 @@ func rsTypedDataMatch(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 func rsTypedDataRequireDomain(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 	return func(call sobek.FunctionCall) sobek.Value {
 		if len(call.Arguments) < 2 {
-			panic("requireDomain needs domain, opts")
+			panic(vm.ToValue("requireDomain needs domain, opts"))
 		}
 		domainEx := call.Argument(0).Export()
 		domainMap, ok := domainEx.(map[string]interface{})
@@ -125,7 +125,7 @@ func rsTypedDataRequireDomain(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.
 		optsEx := call.Argument(1).Export()
 		optsMap, ok := optsEx.(map[string]interface{})
 		if !ok {
-			panic("invalid opts")
+			panic(vm.ToValue("invalid opts"))
 		}
 		wantName, hasName := optsMap["name"].(string)
 		if hasName {
@@ -139,7 +139,7 @@ func rsTypedDataRequireDomain(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.
 		if hasName {
 			gotName := strings.TrimSpace(fmt.Sprintf("%v", domainMap["name"]))
 			if gotName != wantName {
-				panic("invalid domain name")
+				panic(vm.ToValue("invalid domain name"))
 			}
 		}
 		if hasVersion {
@@ -148,7 +148,7 @@ func rsTypedDataRequireDomain(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.
 				gotVersion = strings.TrimSpace(fmt.Sprintf("%v", v))
 			}
 			if gotVersion != wantVersion {
-				panic("invalid domain version")
+				panic(vm.ToValue("invalid domain version"))
 			}
 		}
 		gotChainId := extractChainId(domainMap["chainId"])
@@ -161,7 +161,7 @@ func rsTypedDataRequireDomain(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.
 					}
 				}
 			}
-			panic(chainReason)
+			panic(vm.ToValue(chainReason))
 		}
 		requireVC := true
 		if b, ok := optsMap["requireVerifyingContract"].(bool); ok {
@@ -173,11 +173,11 @@ func rsTypedDataRequireDomain(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.
 		}
 		vcRaw := domainMap["verifyingContract"]
 		if vcRaw == nil {
-			panic("invalid verifying contract")
+			panic(vm.ToValue("invalid verifying contract"))
 		}
 		vcStr := strings.TrimSpace(fmt.Sprintf("%v", vcRaw))
 		if !common.IsHexAddress(vcStr) {
-			panic("invalid verifying contract")
+			panic(vm.ToValue("invalid verifying contract"))
 		}
 		vcChecksum := common.HexToAddress(vcStr).Hex()
 		if hasAllowed {
@@ -208,7 +208,7 @@ func rsTypedDataRequireDomain(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.
 				}
 			}
 			if !found {
-				panic("invalid verifying contract")
+				panic(vm.ToValue("invalid verifying contract"))
 			}
 		}
 		return rsOk(vm)
@@ -255,7 +255,7 @@ func extractChainId(v interface{}) int {
 func rsTypedDataRequireSignerMatch(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 	return func(call sobek.FunctionCall) sobek.Value {
 		if len(call.Arguments) < 3 {
-			panic("requireSignerMatch needs msgSigner, inputSigner, reason")
+			panic(vm.ToValue("requireSignerMatch needs msgSigner, inputSigner, reason"))
 		}
 		reason := ""
 		if r := call.Argument(2); r != nil && !r.Equals(sobek.Undefined()) {
@@ -270,10 +270,10 @@ func rsTypedDataRequireSignerMatch(vm *sobek.Runtime) func(sobek.FunctionCall) s
 			inputStr = strings.TrimSpace(a.String())
 		}
 		if !common.IsHexAddress(msgStr) || !common.IsHexAddress(inputStr) {
-			panic(reason)
+			panic(vm.ToValue(reason))
 		}
 		if common.HexToAddress(msgStr).Hex() != common.HexToAddress(inputStr).Hex() {
-			panic(reason)
+			panic(vm.ToValue(reason))
 		}
 		return rsOk(vm)
 	}
