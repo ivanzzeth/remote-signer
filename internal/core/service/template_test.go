@@ -13,6 +13,8 @@ import (
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
@@ -390,6 +392,16 @@ func mustJSON(v any) []byte {
 }
 
 // seedTemplate inserts a template directly into the mock repo for test setup.
+// errorDeleteRuleRepo wraps storage.RuleRepository but always fails Delete calls.
+// It is used to test rollbackRules error path.
+type errorDeleteRuleRepo struct {
+	storage.RuleRepository
+}
+
+func (r *errorDeleteRuleRepo) Delete(_ context.Context, _ types.RuleID) error {
+	return fmt.Errorf("delete failed")
+}
+
 func seedTemplate(t *testing.T, repo *mockTemplateRepo, tmpl *types.RuleTemplate) {
 	t.Helper()
 	if err := repo.Create(context.Background(), tmpl); err != nil {
@@ -4064,4 +4076,67 @@ func TestBatchCreateInstances_VariablesNotCorrupted(t *testing.T) {
 		}
 		t.Logf("V2 Rule %q (%s): allowed_safe_addresses = %q (correct)", r.Name, r.ID, gotSafeAddr)
 	}
+}
+
+func TestBatchCreateInstances_Errors(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("empty items", func(t *testing.T) {
+		svc, err := NewTemplateService(newMockTemplateRepo(), newMockRuleRepo(), newMockBudgetRepo(), newTestLogger())
+		require.NoError(t, err)
+		results, err := svc.BatchCreateInstances(ctx, newMockRuleRepo(), newMockBudgetRepo(), nil)
+		assert.NoError(t, err)
+		assert.Nil(t, results)
+	})
+
+	t.Run("nil template", func(t *testing.T) {
+		svc, err := NewTemplateService(newMockTemplateRepo(), newMockRuleRepo(), newMockBudgetRepo(), newTestLogger())
+		require.NoError(t, err)
+		items := []BatchCreateItem{
+			{
+				Template: nil,
+				Request:  &CreateInstanceRequest{TemplateID: "tmpl1"},
+			},
+		}
+		results, err := svc.BatchCreateInstances(ctx, newMockRuleRepo(), newMockBudgetRepo(), items)
+		assert.Error(t, err)
+		assert.Nil(t, results)
+		assert.Contains(t, err.Error(), "template is required")
+	})
+
+	t.Run("nil request", func(t *testing.T) {
+		svc, err := NewTemplateService(newMockTemplateRepo(), newMockRuleRepo(), newMockBudgetRepo(), newTestLogger())
+		require.NoError(t, err)
+		tmpl := &types.RuleTemplate{
+			ID:        "tmpl-no-req",
+			Name:      "No Request",
+			Type:      types.RuleTypeEVMAddressList,
+			Mode:      types.RuleModeWhitelist,
+			Config:    json.RawMessage(`{"addresses":["0x1111111111111111111111111111111111111111"]}`),
+			Source:    types.RuleSourceConfig,
+			Enabled:   true,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}
+		items := []BatchCreateItem{
+			{
+				Template: tmpl,
+				Request:  nil,
+			},
+		}
+		results, err := svc.BatchCreateInstances(ctx, newMockRuleRepo(), newMockBudgetRepo(), items)
+		assert.Error(t, err)
+		assert.Nil(t, results)
+		assert.Contains(t, err.Error(), "request is required")
+	})
+}
+
+func TestRollbackRules_ErrorPath(t *testing.T) {
+	svc, err := NewTemplateService(newMockTemplateRepo(), newMockRuleRepo(), newMockBudgetRepo(), newTestLogger())
+	require.NoError(t, err)
+
+	ruleRepo := &errorDeleteRuleRepo{RuleRepository: newMockRuleRepo()}
+
+	// rollbackRules logs errors instead of panicking when Delete fails
+	svc.rollbackRules(context.Background(), ruleRepo, []types.RuleID{"rule-does-not-exist"})
 }
