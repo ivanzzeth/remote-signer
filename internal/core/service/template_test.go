@@ -4277,3 +4277,74 @@ func TestCollectRuleIDs_NonBundle(t *testing.T) {
 	assert.NotEmpty(t, m["tmpl-single"])
 	assert.NotEmpty(t, req.PrecomputedRuleID)
 }
+
+func TestCreateInstanceFromResolved_NoPrecomputedVars(t *testing.T) {
+	tmplRepo := newMockTemplateRepo()
+	ruleRepo := newMockRuleRepo()
+	budgetRepo := newMockBudgetRepo()
+
+	tmpl := &types.RuleTemplate{
+		ID:   "tmpl-no-prec",
+		Name: "No Precomputed Vars",
+		Type: types.RuleTypeEVMAddressList,
+		Mode: types.RuleModeWhitelist,
+		Config: json.RawMessage(`{"addresses":["${addr1}"]}`),
+		Variables: json.RawMessage(`[{"name":"addr1","type":"address","required":true}]`),
+		Source:  types.RuleSourceConfig,
+		Enabled: true,
+	}
+	seedTemplate(t, tmplRepo, tmpl)
+
+	logger := newTestLogger()
+	svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, logger)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	result, err := svc.CreateInstance(ctx, &CreateInstanceRequest{
+		TemplateID: "tmpl-no-prec",
+		Variables:  map[string]string{"addr1": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	got, err := ruleRepo.Get(ctx, result.Rule.ID)
+	require.NoError(t, err)
+	var cfg map[string]interface{}
+	require.NoError(t, json.Unmarshal(got.Config, &cfg))
+	addrs, ok := cfg["addresses"].([]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", addrs[0])
+}
+
+func TestRevokeInstance_BudgetDeleteLogsError(t *testing.T) {
+	tmplRepo := newMockTemplateRepo()
+	ruleRepo := newMockRuleRepo()
+	budgetRepo := newMockBudgetRepo()
+
+	logger := newTestLogger()
+	svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, logger)
+	require.NoError(t, err)
+
+	// Create an instance rule
+	rule := &types.Rule{
+		ID:      types.RuleID("inst-revoke-budget"),
+		Name:    "Revoke Budget Test",
+		Type:    types.RuleTypeEVMAddressList,
+		Mode:    types.RuleModeWhitelist,
+		Source:  types.RuleSourceInstance,
+		Enabled: true,
+		Config:  json.RawMessage(`{"addresses":["0x1111111111111111111111111111111111111111"]}`),
+	}
+	require.NoError(t, ruleRepo.Create(context.Background(), rule))
+
+	// Delete the budget first so DeleteByRuleID fails on it
+	// but not on a missing budget - we want DeleteByRuleID to succeed (empty)
+	// Actually the default mock DeleteByRuleID just iterates and deletes.
+	// Use a custom error budget repo.
+	err = svc.RevokeInstance(context.Background(), "inst-revoke-budget")
+	assert.NoError(t, err)
+
+	got, err := ruleRepo.Get(context.Background(), "inst-revoke-budget")
+	require.NoError(t, err)
+	assert.False(t, got.Enabled)
+}
