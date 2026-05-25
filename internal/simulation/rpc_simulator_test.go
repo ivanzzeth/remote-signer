@@ -1,19 +1,15 @@
+//go:build integration
+
 package simulation
 
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 )
-
-func testLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-}
 
 // TestRPCSimulator_ResponseSizeLimit verifies that oversized RPC responses
 // are rejected because the truncated body cannot be parsed as valid JSON.

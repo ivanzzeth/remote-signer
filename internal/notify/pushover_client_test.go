@@ -11,13 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// roundTripFunc implements http.RoundTripper using a plain function.
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
-	return f(req)
-}
-
 // ---------- NewPushoverClient ----------
 
 func TestNewPushoverClient_EmptyToken(t *testing.T) {
@@ -65,37 +58,6 @@ func TestMaskUserKey_Short(t *testing.T) {
 func TestMaskUserKey_Normal(t *testing.T) {
 	assert.Equal(t, "abcd***fghi", maskUserKey("abcdefghi")) // 9 chars
 	assert.Equal(t, "abcd***uvwx", maskUserKey("abcdefghijklmnopqrstuvwx"))
-}
-
-// ---------- helpers for mock HTTP responses ----------
-
-// newJSONResponse builds an *http.Response with the given status and JSON body.
-func newJSONResponse(status int, v interface{}) *http.Response {
-	body, _ := json.Marshal(v)
-	return &http.Response{
-		StatusCode: status,
-		Header:     http.Header{"Content-Type": []string{"application/json"}},
-		Body:       io.NopCloser(bytesReader(body)),
-	}
-}
-
-// bytesReader wraps a byte slice into a reader for use in http.Response.Body.
-func bytesReader(b []byte) io.Reader {
-	return &byteReadCloser{data: b}
-}
-
-type byteReadCloser struct {
-	data []byte
-	off  int
-}
-
-func (r *byteReadCloser) Read(p []byte) (int, error) {
-	if r.off >= len(r.data) {
-		return 0, io.EOF
-	}
-	n := copy(p, r.data[r.off:])
-	r.off += n
-	return n, nil
 }
 
 // newPushoverClientWithRT creates a PushoverClient with zero retry delay

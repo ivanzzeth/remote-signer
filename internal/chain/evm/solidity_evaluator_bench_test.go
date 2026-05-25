@@ -1,3 +1,5 @@
+//go:build integration
+
 // Benchmarks for evm_solidity_expression rule evaluation.
 //
 // Target: 100ms–2s per request (forge script subprocess). Typical: ~50–150ms per Evaluate.

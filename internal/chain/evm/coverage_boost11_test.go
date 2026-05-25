@@ -1,3 +1,5 @@
+//go:build integration
+
 // Package evm provides EVM-specific chain logic for the Remote Signer.
 package evm
 

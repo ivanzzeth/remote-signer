@@ -1,9 +1,10 @@
-# Runs on every push to dev/main and every PR. Three independent jobs:
+# Runs on every push to dev/main and every PR. Independent jobs:
 #
-#   - go-test     : unit suite (`go test ./...`)
-#   - integration : black-box CLI/HTTP harness behind the `integration` tag
-#   - web-e2e     : Playwright drives the embedded React UI against a real
-#                   daemon spawned by globalSetup
+#   - go-test          : unit suite (`go test ./...`)
+#   - go-test-integration : unit + internal integration tests
+#   - integration      : black-box CLI/HTTP harness behind the `integration` tag
+#   - web-e2e          : Playwright drives the embedded React UI against a real
+#                        daemon spawned by globalSetup
 #
 # Jobs are split so a failing integration run doesn't mask a unit regression
 # in the PR check UI.
@@ -25,6 +26,17 @@ jobs:
           cache: true
       - name: go test ./...
         run: go test ./...
+
+  go-test-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+      - name: go test -tags integration ./internal/...
+        run: go test -tags integration ./internal/...
 
   integration:
     runs-on: ubuntu-latest

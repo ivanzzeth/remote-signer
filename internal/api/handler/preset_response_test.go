@@ -1,3 +1,5 @@
+//go:build integration
+
 package handler
 
 import (
@@ -57,22 +59,6 @@ func newPresetTestEnv(t *testing.T) *presetTestEnv {
 	)
 	require.NoError(t, err)
 	return &presetTestEnv{handler: h, db: db, template: tmplRepo, preset: presetRepo}
-}
-
-// adminCtx returns a context carrying an admin API key — list and
-// detail need PermReadPresets, apply needs PermApplyPreset; admin has
-// both.
-func adminCtx(t *testing.T) context.Context {
-	t.Helper()
-	return context.WithValue(context.Background(), middleware.APIKeyContextKey,
-		&types.APIKey{ID: "admin", Role: types.RoleAdmin})
-}
-
-func mustJSONP(t *testing.T, v any) []byte {
-	t.Helper()
-	b, err := json.Marshal(v)
-	require.NoError(t, err)
-	return b
 }
 
 // seedPresetTemplate puts a template directly into the preset test's

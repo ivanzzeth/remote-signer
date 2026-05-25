@@ -13,7 +13,7 @@
 # out of version control (each vite hash was previously adding ~380 KB
 # per UI change to history).
 
-.PHONY: help build build-embed web test integration clean tidy desktop-dev desktop-dist
+.PHONY: help build build-embed web test test-unit test-integration integration clean tidy desktop-dev desktop-dist
 
 # Pick up the system Go install when goenv complains about a missing toolchain.
 GO ?= go
@@ -38,7 +38,9 @@ help:
 	@echo "  web           Install JS deps and build the React bundle (writes to internal/web/dist)"
 	@echo "  build         Build the daemon binary, no embedded UI (placeholder page)"
 	@echo "  build-embed   Build the daemon binary with the React UI embedded (release-equivalent)"
-	@echo "  test          Run the Go unit + storage test suite"
+	@echo "  test          Run unit tests only (go test ./...)"
+	@echo "  test-unit     Alias for test"
+	@echo "  test-integration  Run unit + internal integration tests"
 	@echo "  integration   Run black-box integration tests against a freshly built binary"
 	@echo "  desktop-dev   Launch the Electron desktop shell against the local build"
 	@echo "  desktop-dist  Package signed installers via electron-builder (mac/win/linux)"
@@ -55,8 +57,16 @@ build-embed: web
 	CGO_ENABLED=0 $(GO) build -tags embed_web -ldflags="$(LDFLAGS)" -o remote-signer ./cmd/remote-signer
 
 # Pure-Go test pass. Skips the web bundle to keep CI iterations cheap.
-test:
+test: test-unit
+
+# Unit tests only — no build tag.
+test-unit:
 	$(GO) test ./...
+
+# Unit + internal integration tests.
+# Runs the same suite as the pre-commit hook.
+test-integration:
+	$(GO) test -tags integration ./internal/...
 
 # Black-box CLI/HTTP integration tests. Uses the build tag so plain
 # `go test ./...` stays fast.

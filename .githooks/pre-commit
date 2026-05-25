@@ -1,0 +1,7 @@
+#!/bin/sh
+# Pre-commit hook: run unit + internal integration tests.
+# Excludes chain/evm forge-based tests (require foundry) and e2e tests.
+set -e
+
+echo "==> Running unit + internal integration tests..."
+go test -tags integration ./internal/...
