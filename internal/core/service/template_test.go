@@ -4204,3 +4204,76 @@ func TestCollectRuleIDs_Errors(t *testing.T) {
 		assert.Equal(t, types.RuleID("precomputed-id-123"), req.PrecomputedSubRuleIDs["sub1"])
 	})
 }
+
+func TestCollectRuleIDs_SubRuleNoID(t *testing.T) {
+	svc, err := NewTemplateService(newMockTemplateRepo(), newMockRuleRepo(), newMockBudgetRepo(), newTestLogger())
+	require.NoError(t, err)
+
+	// Sub-rule with no ID field uses Name as suffix
+	tmpl := &types.RuleTemplate{
+		ID:   "tmpl-no-sub-id",
+		Name: "No Sub ID Bundle",
+		Type: "template_bundle",
+		Mode: types.RuleModeWhitelist,
+		Config: json.RawMessage(`{"rules_json":"[{\"name\":\"NoIDRule\",\"type\":\"evm_js\",\"mode\":\"whitelist\",\"config\":{\"script\":\"true\"},\"enabled\":true}]"}`),
+		Source:  types.RuleSourceConfig,
+		Enabled: true,
+	}
+	req := &CreateInstanceRequest{TemplateID: "tmpl-no-sub-id"}
+	vars := map[string]string{}
+	m := make(map[string]types.RuleID)
+	err = svc.collectRuleIDs(m, tmpl, req, vars)
+	assert.NoError(t, err)
+	// No sub-rule ID in map (sub has no id field), but PrecomputedSubRuleIDs has entry keyed by Name
+	assert.Empty(t, m)
+	assert.Contains(t, req.PrecomputedSubRuleIDs, "NoIDRule")
+}
+
+func TestBatchCreateInstances_CollectRuleIDsError(t *testing.T) {
+	ctx := context.Background()
+	svc, err := NewTemplateService(newMockTemplateRepo(), newMockRuleRepo(), newMockBudgetRepo(), newTestLogger())
+	require.NoError(t, err)
+
+	// Template bundle with ${nonexistent} var - collectRuleIDs will fail on substitution
+	tmpl := &types.RuleTemplate{
+		ID:   "tmpl-collect-fail",
+		Name: "Collect Fail Bundle",
+		Type: "template_bundle",
+		Mode: types.RuleModeWhitelist,
+		Config: json.RawMessage(`{"rules_json":"[{\"id\":\"sub1\",\"name\":\"Rule\",\"type\":\"evm_js\",\"mode\":\"whitelist\",\"config\":{\"script\":\"${nonexistent}\"},\"enabled\":true}]"}`),
+		Source:  types.RuleSourceConfig,
+		Enabled: true,
+	}
+	items := []BatchCreateItem{
+		{
+			Template: tmpl,
+			Request:  &CreateInstanceRequest{TemplateID: "tmpl-collect-fail"},
+		},
+	}
+	results, err := svc.BatchCreateInstances(ctx, newMockRuleRepo(), newMockBudgetRepo(), items)
+	assert.Error(t, err)
+	assert.Nil(t, results)
+	assert.Contains(t, err.Error(), "pre-compute IDs")
+}
+
+func TestCollectRuleIDs_NonBundle(t *testing.T) {
+	svc, err := NewTemplateService(newMockTemplateRepo(), newMockRuleRepo(), newMockBudgetRepo(), newTestLogger())
+	require.NoError(t, err)
+
+	tmpl := &types.RuleTemplate{
+		ID:   "tmpl-single",
+		Name: "Single Rule",
+		Type: types.RuleTypeEVMAddressList,
+		Mode: types.RuleModeWhitelist,
+		Config: json.RawMessage(`{"addresses":["0x1111111111111111111111111111111111111111"]}`),
+		Source:  types.RuleSourceConfig,
+		Enabled: true,
+	}
+	req := &CreateInstanceRequest{TemplateID: "tmpl-single"}
+	vars := map[string]string{}
+	m := make(map[string]types.RuleID)
+	err = svc.collectRuleIDs(m, tmpl, req, vars)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, m["tmpl-single"])
+	assert.NotEmpty(t, req.PrecomputedRuleID)
+}
