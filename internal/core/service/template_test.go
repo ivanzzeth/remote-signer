@@ -3273,6 +3273,92 @@ func (r *failOnceBudgetRepo) Create(ctx context.Context, budget *types.RuleBudge
 	return fmt.Errorf("simulated budget creation failure")
 }
 
+func TestResolveDelegateToInVars(t *testing.T) {
+	t.Run("resolves_delegate_to_in_vars", func(t *testing.T) {
+		vars := map[string]string{
+			"delegate_to": "polymarket-v2-transactions",
+			"chain_id":    "137",
+		}
+		resolveMap := map[string]types.RuleID{
+			"polymarket-v2-transactions": "inst_e75b86be47495806",
+		}
+		if err := resolveDelegateToInVars(vars, resolveMap); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if vars["delegate_to"] != "inst_e75b86be47495806" {
+			t.Errorf("expected delegate_to=inst_e75b86be47495806, got %q", vars["delegate_to"])
+		}
+	})
+
+	t.Run("resolves_comma_separated_delegate_to_in_vars", func(t *testing.T) {
+		vars := map[string]string{
+			"delegate_to": "rule-a, rule-b",
+		}
+		resolveMap := map[string]types.RuleID{
+			"rule-a": "inst_a111",
+			"rule-b": "inst_b222",
+		}
+		if err := resolveDelegateToInVars(vars, resolveMap); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if vars["delegate_to"] != "inst_a111,inst_b222" {
+			t.Errorf("expected delegate_to=inst_a111,inst_b222, got %q", vars["delegate_to"])
+		}
+	})
+
+	t.Run("skips_unknown_delegate_to_in_vars", func(t *testing.T) {
+		vars := map[string]string{
+			"delegate_to": "unknown-rule",
+		}
+		resolveMap := map[string]types.RuleID{"other-rule": "inst_xxx"}
+		if err := resolveDelegateToInVars(vars, resolveMap); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if vars["delegate_to"] != "unknown-rule" {
+			t.Errorf("expected delegate_to=unknown-rule unchanged, got %q", vars["delegate_to"])
+		}
+	})
+
+	t.Run("resolves_delegate_to_by_target_in_vars", func(t *testing.T) {
+		vars := map[string]string{
+			"delegate_to_by_target": "some-addr:target-rule",
+		}
+		resolveMap := map[string]types.RuleID{"target-rule": "inst_xyz"}
+		if err := resolveDelegateToInVars(vars, resolveMap); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if vars["delegate_to_by_target"] != "some-addr:inst_xyz" {
+			t.Errorf("expected delegate_to_by_target=some-addr:inst_xyz, got %q", vars["delegate_to_by_target"])
+		}
+	})
+
+	t.Run("handles_empty_delegate_to", func(t *testing.T) {
+		vars := map[string]string{
+			"chain_id": "137",
+		}
+		resolveMap := map[string]types.RuleID{"target": "inst_xxx"}
+		if err := resolveDelegateToInVars(vars, resolveMap); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("handles_delegate_to_with_extra_spaces", func(t *testing.T) {
+		vars := map[string]string{
+			"delegate_to": "  rule-a  ,  rule-b  ",
+		}
+		resolveMap := map[string]types.RuleID{
+			"rule-a": "inst_a",
+			"rule-b": "inst_b",
+		}
+		if err := resolveDelegateToInVars(vars, resolveMap); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if vars["delegate_to"] != "inst_a,inst_b" {
+			t.Errorf("expected delegate_to=inst_a,inst_b, got %q", vars["delegate_to"])
+		}
+	})
+}
+
 func TestResolveDelegateToConfig(t *testing.T) {
 	t.Run("resolves_single_delegate_to", func(t *testing.T) {
 		cfg := map[string]interface{}{
@@ -3446,4 +3532,536 @@ func TestResolveDelegateToConfig(t *testing.T) {
 			t.Errorf("expected delegate_to_by_target=tx:inst_b222, got %q", got)
 		}
 	})
+}
+
+// TestBatchCreateInstances_CrossTemplateDelegateToResolution verifies that
+// BatchCreateInstances resolves delegate_to in BOTH Config and Variables JSON.
+// This is the regression test for the bug where the JS runtime returned
+// unresolved template IDs (e.g. "polymarket-v2-transactions") as delegation
+// targets because Variables JSON was not resolved.
+func TestBatchCreateInstances_CrossTemplateDelegateToResolution(t *testing.T) {
+	tmplRepo := newMockTemplateRepo()
+	ruleRepo := newMockRuleRepo()
+	budgetRepo := newMockBudgetRepo()
+	logger := newTestLogger()
+	svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, logger)
+	if err != nil {
+		t.Fatalf("failed to create template service: %v", err)
+	}
+
+	chainID := "137"
+
+	// ---- Template A: "target" template (polymarket_v2-like) ----
+	// Has rules_json with a sub-rule "my-target-rule" that we want to delegate TO.
+	targetRulesJSON := `[{"id":"my-target-rule","name":"Target Rule","type":"evm_js","mode":"whitelist","enabled":true,"config":{"script":"function validate(input) { var tx = input.transaction; require(tx && tx.to, 'missing to'); return ok(); }"}}]`
+	templateT := &types.RuleTemplate{
+		ID:         "evm/target",
+		Name:       "Target Template",
+		Type:       "template_bundle",
+		Mode:       types.RuleModeWhitelist,
+		Config:     json.RawMessage(mustMarshalJSON(map[string]interface{}{"rules_json": targetRulesJSON})),
+		Variables:  json.RawMessage(`[]`),
+		Source:     types.RuleSourceConfig,
+		Enabled:    true,
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
+	}
+	if err := tmplRepo.Create(context.Background(), templateT); err != nil {
+		t.Fatalf("failed to seed target template: %v", err)
+	}
+
+	// ---- Template B: "caller" template (safe-like) ----
+	// Has rules_json with a sub-rule that delegates TO "my-target-rule".
+	callerRulesJSON := `[{"id":"safe-block-delegatecall","name":"Block DELEGATECALL","type":"evm_js","mode":"blocklist","enabled":true,"config":{"delegate_to":"","script":"function validate(input) { return ok(); }"}},{"id":"safe-safetx-exec-transaction","name":"SafeTx execTransaction","type":"evm_js","mode":"whitelist","enabled":true,"config":{"delegate_to":"${delegate_to}","delegate_mode":"${delegate_mode}","script":"function validate(input) { var res = resolveDelegateTo(); if (res) return { valid: true, payload: { sign_type: 'transaction', chain_id: config.chain_id, signer: '0x0000000000000000000000000000000000000001', transaction: { from: '0x0000000000000000000000000000000000000001', to: '0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB', value: '0x0', data: '0x095ea7b3' } }, delegate_to: res }; return ok(); } function resolveDelegateTo() { return config.delegate_to; }"}}]`
+	callerVars := []types.TemplateVariable{
+		{Name: "delegate_to", Type: types.VarTypeString, Required: false, Default: ""},
+		{Name: "delegate_mode", Type: types.VarTypeString, Required: false, Default: "single"},
+	}
+	templateC := &types.RuleTemplate{
+		ID:         "evm/caller",
+		Name:       "Caller Template",
+		Type:       "template_bundle",
+		Mode:       types.RuleModeWhitelist,
+		Config:     json.RawMessage(mustMarshalJSON(map[string]interface{}{"rules_json": callerRulesJSON})),
+		Variables:  mustJSON(callerVars),
+		Source:     types.RuleSourceConfig,
+		Enabled:    true,
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
+	}
+	if err := tmplRepo.Create(context.Background(), templateC); err != nil {
+		t.Fatalf("failed to seed caller template: %v", err)
+	}
+
+	// ---- ACT: BatchCreateInstances with cross-template delegate_to ----
+	results, err := svc.BatchCreateInstances(context.Background(), ruleRepo, budgetRepo, []BatchCreateItem{
+		{
+			Template: templateT,
+			Request: &CreateInstanceRequest{
+				TemplateID: "evm/target",
+				Name:       "Target Instance",
+				Variables:  map[string]string{},
+				ChainID:    &chainID,
+			},
+		},
+		{
+			Template: templateC,
+			Request: &CreateInstanceRequest{
+				TemplateID: "evm/caller",
+				Name:       "Caller Instance",
+				Variables: map[string]string{
+					"delegate_to": "my-target-rule",
+				},
+				ChainID: &chainID,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BatchCreateInstances failed: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+
+	// ---- ASSERT: Find the SafeTx rule in the caller template's sub-rules ----
+	var safetxRule *types.Rule
+	for _, result := range results[1].SubRules {
+		if strings.Contains(result.Name, "SafeTx") {
+			safetxRule = result
+			break
+		}
+	}
+	if safetxRule == nil {
+		t.Fatal("SafeTx sub-rule should exist in caller instance")
+	}
+
+	// ---- ASSERT: Config delegate_to is resolved ----
+	var configMap map[string]interface{}
+	if err := json.Unmarshal(safetxRule.Config, &configMap); err != nil {
+		t.Fatalf("failed to unmarshal config: %v", err)
+	}
+	dt, _ := configMap["delegate_to"].(string)
+	if dt == "" {
+		t.Fatal("Config delegate_to should be non-empty")
+	}
+	if dt == "my-target-rule" {
+		t.Fatalf("Config delegate_to should be resolved to inst_<hash>, not template ID, got %q", dt)
+	}
+	if !strings.HasPrefix(dt, "inst_") {
+		t.Fatalf("Config delegate_to should start with inst_, got %q", dt)
+	}
+
+	// ---- ASSERT: Variables delegate_to is ALSO resolved (THE KEY BUG FIX) ----
+	if safetxRule.Variables == nil {
+		t.Fatal("Variables JSON should not be nil")
+	}
+	var variablesMap map[string]string
+	if err := json.Unmarshal(safetxRule.Variables, &variablesMap); err != nil {
+		t.Fatalf("failed to unmarshal variables: %v", err)
+	}
+	varsDt := variablesMap["delegate_to"]
+	if varsDt == "" {
+		t.Fatal("Variables delegate_to should be non-empty")
+	}
+	if varsDt == "my-target-rule" {
+		t.Fatalf("Variables delegate_to should be resolved to inst_<hash>, not template ID (REGRESSION), got %q", varsDt)
+	}
+	if !strings.HasPrefix(varsDt, "inst_") {
+		t.Fatalf("Variables delegate_to should start with inst_, got %q", varsDt)
+	}
+
+	// ---- ASSERT: Config and Variables delegate_to match ----
+	if dt != varsDt {
+		t.Fatalf("Config and Variables delegate_to must match: config=%q variables=%q", dt, varsDt)
+	}
+
+	// ---- ASSERT: The target rule exists and has the expected ID ----
+	targetRule, err := ruleRepo.Get(context.Background(), types.RuleID(dt))
+	if err != nil {
+		t.Fatalf("failed to get target rule %q: %v", dt, err)
+	}
+	if targetRule == nil {
+		t.Fatal("target rule should not be nil")
+	}
+
+	t.Logf("Cross-template delegate_to resolution: Config=%q Variables=%q Target=%q", dt, varsDt, targetRule.ID)
+}
+
+func mustMarshalJSON(v interface{}) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
+// TestBatchCreateInstances_PolymarketV2SafePreset reproduces the exact preset
+// apply flow for the Polymarket V2 Safe (Polygon) preset, which includes 3
+// template_bundle templates that share variables including delegate_to.
+// It verifies that every delegate_to ID in every persisted rule's Variables
+// resolves to a rule that actually exists in the DB.
+func TestBatchCreateInstances_PolymarketV2SafePreset(t *testing.T) {
+	tmplRepo := newMockTemplateRepo()
+	ruleRepo := newMockRuleRepo()
+	budgetRepo := newMockBudgetRepo()
+	logger := newTestLogger()
+	svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, logger)
+	if err != nil {
+		t.Fatalf("failed to create template service: %v", err)
+	}
+
+	chainID := "137"
+
+	// ---- Template 1: polymarket_safe_init (simplified) ----
+	initRulesJSON := `[{"id":"polymarket-clob-auth","name":"CLOB Auth","type":"evm_js","mode":"whitelist","enabled":true,"config":{"script":"function validate(input) { return ok(); }"}},{"id":"polymarket-safe-wallet-creation","name":"Safe Wallet Creation","type":"evm_js","mode":"whitelist","enabled":true,"config":{"script":"function validate(input) { return ok(); }"}}]`
+	templateInit := &types.RuleTemplate{
+		ID:        "evm/polymarket_safe_init",
+		Name:      "Polymarket CLOB Auth Signature",
+		Type:      "template_bundle",
+		Mode:      types.RuleModeWhitelist,
+		Config:    json.RawMessage(mustMarshalJSON(map[string]interface{}{"rules_json": initRulesJSON})),
+		Variables: json.RawMessage(`[{"name":"safe_proxy_factory_address","type":"address","required":true},{"name":"safe_factory_domain_name","type":"string","required":true},{"name":"clob_auth_domain_name","type":"string","required":true},{"name":"clob_auth_domain_version","type":"string","required":true}]`),
+		Source:    types.RuleSourceConfig,
+		Enabled:   true,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	if err := tmplRepo.Create(context.Background(), templateInit); err != nil {
+		t.Fatalf("failed to seed init template: %v", err)
+	}
+
+	// ---- Template 2: polymarket_v2 (simplified) ----
+	v2RulesJSON := `[{"id":"polymarket-v2-order-signature","name":"V2 Order Signature","type":"evm_js","mode":"whitelist","enabled":true,"config":{"script":"function validate(input) { return ok(); }"}},{"id":"polymarket-v2-transactions","name":"Polymarket V2 transactions","type":"evm_js","mode":"whitelist","enabled":true,"config":{"script":"function validate(input) { return ok(); }"}}]`
+	templateV2 := &types.RuleTemplate{
+		ID:        "evm/polymarket_v2",
+		Name:      "Polymarket V2 CLOB Order & Transactions",
+		Type:      "template_bundle",
+		Mode:      types.RuleModeWhitelist,
+		Config:    json.RawMessage(mustMarshalJSON(map[string]interface{}{"rules_json": v2RulesJSON})),
+		Variables: json.RawMessage(`[{"name":"exchange_v2_address","type":"address","required":true},{"name":"collateral_token_address","type":"address","required":true},{"name":"conditional_tokens_address","type":"address","required":true}]`),
+		Source:    types.RuleSourceConfig,
+		Enabled:   true,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	if err := tmplRepo.Create(context.Background(), templateV2); err != nil {
+		t.Fatalf("failed to seed v2 template: %v", err)
+	}
+
+	// ---- Template 3: safe (simplified) ----
+	safeRulesJSON := `[{"id":"safe-block-delegatecall","name":"Block DELEGATECALL","type":"evm_js","mode":"blocklist","enabled":true,"config":{"script":"function validate(input) { return ok(); }"}},{"id":"safe-safetx-exec-transaction","name":"SafeTx execTransaction","type":"evm_js","mode":"whitelist","enabled":true,"config":{"delegate_to":"${delegate_to}","delegate_mode":"${delegate_mode}","script":"function validate(input) { var res = resolveDelegateTo(); if (res) return { valid: true, payload: { sign_type: 'transaction', chain_id: config.chain_id, signer: '0x0000000000000000000000000000000000000001', transaction: { from: '0x0000000000000000000000000000000000000001', to: '0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB', value: '0x0', data: '0x095ea7b3' } }, delegate_to: res }; return ok(); } function resolveDelegateTo() { return config.delegate_to; }"}}]`
+	safeVars := []types.TemplateVariable{
+		{Name: "allowed_safe_addresses", Type: types.VarTypeString, Required: true},
+		{Name: "allowed_safe_tx_to_addresses", Type: types.VarTypeString, Required: true},
+		{Name: "delegate_to", Type: types.VarTypeString, Required: false, Default: ""},
+		{Name: "delegate_mode", Type: types.VarTypeString, Required: false, Default: "single"},
+	}
+	templateSafe := &types.RuleTemplate{
+		ID:        "evm/safe",
+		Name:      "Safe block DELEGATECALL",
+		Type:      "template_bundle",
+		Mode:      types.RuleModeWhitelist,
+		Config:    json.RawMessage(mustMarshalJSON(map[string]interface{}{"rules_json": safeRulesJSON})),
+		Variables: mustJSON(safeVars),
+		Source:    types.RuleSourceConfig,
+		Enabled:   true,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	if err := tmplRepo.Create(context.Background(), templateSafe); err != nil {
+		t.Fatalf("failed to seed safe template: %v", err)
+	}
+
+	// ---- Shared preset variables (exactly what the preset YAML provides) ----
+	sharedVars := map[string]string{
+		"safe_proxy_factory_address":      "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b",
+		"safe_factory_domain_name":        "Polymarket Contract Proxy Factory",
+		"clob_auth_domain_name":           "ClobAuthDomain",
+		"clob_auth_domain_version":        "1",
+		"exchange_v2_address":             "0xE111180000d2663C0091e4f400237545B87B996B",
+		"collateral_token_address":        "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB",
+		"conditional_tokens_address":      "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045",
+		"allowed_safe_addresses":          "0x1111111111111111111111111111111111111111",
+		"allowed_safe_tx_to_addresses":    "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB",
+		"delegate_to":                     "polymarket-v2-transactions",
+		"delegate_mode":                   "single",
+	}
+
+	// ---- ACT: BatchCreateInstances with all 3 templates ----
+	results, err := svc.BatchCreateInstances(context.Background(), ruleRepo, budgetRepo, []BatchCreateItem{
+		{Template: templateInit, Request: &CreateInstanceRequest{TemplateID: "evm/polymarket_safe_init", Name: "Init Instance", Variables: copyMap(sharedVars), ChainID: &chainID}},
+		{Template: templateV2, Request: &CreateInstanceRequest{TemplateID: "evm/polymarket_v2", Name: "V2 Instance", Variables: copyMap(sharedVars), ChainID: &chainID}},
+		{Template: templateSafe, Request: &CreateInstanceRequest{TemplateID: "evm/safe", Name: "Safe Instance", Variables: copyMap(sharedVars), ChainID: &chainID}},
+	})
+	if err != nil {
+		t.Fatalf("BatchCreateInstances failed: %v", err)
+	}
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+
+	// ---- COLLECT all created rules ----
+	var allRules []*types.Rule
+	for _, result := range results {
+		allRules = append(allRules, result.SubRules...)
+	}
+	t.Logf("Created %d rules total", len(allRules))
+	for _, r := range allRules {
+		t.Logf("  Rule: id=%s name=%q type=%s mode=%s", r.ID, r.Name, r.Type, r.Mode)
+	}
+
+	// ---- ASSERT 1: All delegate_to IDs in Variables resolve to existing rules ----
+	existingIDs := make(map[types.RuleID]bool)
+	for _, r := range allRules {
+		existingIDs[r.ID] = true
+	}
+
+	var delegateTargets []types.RuleID
+	for _, r := range allRules {
+		if r.Variables == nil {
+			continue
+		}
+		var vars map[string]string
+		if err := json.Unmarshal(r.Variables, &vars); err != nil {
+			t.Fatalf("failed to unmarshal variables for rule %s: %v", r.ID, err)
+		}
+		dt, ok := vars["delegate_to"]
+		if !ok || dt == "" {
+			continue
+		}
+		delegateTargets = append(delegateTargets, types.RuleID(dt))
+		if !existingIDs[types.RuleID(dt)] {
+			t.Errorf("Rule %q (%s) has delegate_to=%q which does NOT exist in DB. Existing IDs: %v",
+				r.Name, r.ID, dt, existingIDs)
+		} else {
+			t.Logf("  OK: Rule %q (%s) delegates to %q (exists)", r.Name, r.ID, dt)
+		}
+	}
+	if len(delegateTargets) == 0 {
+		t.Error("Expected at least one rule with delegate_to in Variables, found none")
+	}
+
+	// ---- ASSERT 2: The SafeTx rule's delegate_to must equal the V2 transactions rule's ID ----
+	var v2TxRule *types.Rule
+	var safetxRule *types.Rule
+	for _, r := range allRules {
+		if r.Name == "V2 Instance / Polymarket V2 transactions" {
+			v2TxRule = r
+		}
+		if strings.Contains(r.Name, "SafeTx") {
+			safetxRule = r
+		}
+	}
+	if v2TxRule == nil {
+		t.Fatal("V2 transactions rule not found")
+	}
+	if safetxRule == nil {
+		t.Fatal("SafeTx rule not found")
+	}
+
+	var safetxVars map[string]string
+	if err := json.Unmarshal(safetxRule.Variables, &safetxVars); err != nil {
+		t.Fatalf("failed to unmarshal SafeTx variables: %v", err)
+	}
+	safetxDelegateTo := safetxVars["delegate_to"]
+	if safetxDelegateTo != string(v2TxRule.ID) {
+		t.Errorf("SafeTx delegate_to=%q but V2 transactions rule ID=%q. The delegation chain is BROKEN.",
+			safetxDelegateTo, v2TxRule.ID)
+	} else {
+		t.Logf("  OK: SafeTx delegate_to=%q matches V2 transactions rule ID=%q", safetxDelegateTo, v2TxRule.ID)
+	}
+
+	// ---- ASSERT 3: Config delegate_to also resolves correctly ----
+	var safetxConfig map[string]interface{}
+	if err := json.Unmarshal(safetxRule.Config, &safetxConfig); err != nil {
+		t.Fatalf("failed to unmarshal SafeTx config: %v", err)
+	}
+	configDt, _ := safetxConfig["delegate_to"].(string)
+	if configDt != string(v2TxRule.ID) {
+		t.Errorf("SafeTx Config delegate_to=%q but V2 transactions rule ID=%q", configDt, v2TxRule.ID)
+	} else {
+		t.Logf("  OK: SafeTx Config delegate_to=%q matches V2 transactions rule ID=%q", configDt, v2TxRule.ID)
+	}
+
+	t.Log("Polymarket V2 Safe preset flow: all delegate_to resolutions verified")
+}
+
+func copyMap(src map[string]string) map[string]string {
+	dst := make(map[string]string, len(src))
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
+}
+
+// TestBatchCreateInstances_VariablesNotCorrupted reproduces the bug where
+// allowed_safe_addresses in the DB contains allowed_safe_tx_to_addresses
+// values instead of the preset-defined Safe address. Two templates that
+// share a variable name (allowed_safe_addresses) must preserve the value
+// from the preset, not get cross-contaminated.
+func TestBatchCreateInstances_VariablesNotCorrupted(t *testing.T) {
+	tmplRepo := newMockTemplateRepo()
+	ruleRepo := newMockRuleRepo()
+	budgetRepo := newMockBudgetRepo()
+	logger := newTestLogger()
+	svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, logger)
+	if err != nil {
+		t.Fatalf("failed to create template service: %v", err)
+	}
+
+	chainID := "137"
+
+	// Template 0: safe_init template (like real polymarket_safe_init.yaml) -
+	// does NOT declare allowed_safe_addresses or allowed_safe_tx_to_addresses
+	initVarDefs := []types.TemplateVariable{
+		{Name: "safe_proxy_factory_address", Type: types.VarTypeString, Required: true},
+		{Name: "safe_factory_domain_name", Type: types.VarTypeString, Required: true},
+		{Name: "clob_auth_domain_name", Type: types.VarTypeString, Required: true},
+		{Name: "clob_auth_domain_version", Type: types.VarTypeString, Required: true},
+	}
+	initRulesJSON := `[{"id":"clob-auth","name":"CLOB Auth","type":"evm_js","mode":"whitelist","enabled":true,"config":{"script":"function validate(input) { return ok(); }"}},{"id":"safe-wallet-creation","name":"Safe Wallet Creation","type":"evm_js","mode":"whitelist","enabled":true,"config":{"script":"function validate(input) { return ok(); }"}}]`
+	templateInit := &types.RuleTemplate{
+		ID:        "evm/polymarket_safe_init",
+		Name:      "Polymarket Safe Init",
+		Type:      "template_bundle",
+		Mode:      types.RuleModeWhitelist,
+		Config:    json.RawMessage(mustMarshalJSON(map[string]interface{}{"rules_json": initRulesJSON})),
+		Variables: mustJSON(initVarDefs),
+		Source:    types.RuleSourceConfig,
+		Enabled:   true,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	if err := tmplRepo.Create(context.Background(), templateInit); err != nil {
+		t.Fatalf("failed to seed init template: %v", err)
+	}
+
+	// Template 1: V2 template (like real polymarket_v2.yaml) - declares
+	// allowed_safe_addresses for Order.maker whitelist
+	v2VarDefs := []types.TemplateVariable{
+		{Name: "exchange_v2_address", Type: types.VarTypeString, Required: true},
+		{Name: "collateral_token_address", Type: types.VarTypeString, Required: true},
+		{Name: "conditional_tokens_address", Type: types.VarTypeString, Required: true},
+		{Name: "allowed_safe_addresses", Type: types.VarTypeString, Required: true},
+	}
+	v2RulesJSON := `[{"id":"v2-order-sig","name":"V2 Order Signature","type":"evm_js","mode":"whitelist","enabled":true,"config":{"script":"function validate(input) { return ok(); }"}},{"id":"v2-transactions","name":"V2 Transactions","type":"evm_js","mode":"whitelist","enabled":true,"config":{"script":"function validate(input) { return ok(); }"}}]`
+	templateV2 := &types.RuleTemplate{
+		ID:        "evm/polymarket_v2",
+		Name:      "Polymarket V2",
+		Type:      "template_bundle",
+		Mode:      types.RuleModeWhitelist,
+		Config:    json.RawMessage(mustMarshalJSON(map[string]interface{}{"rules_json": v2RulesJSON})),
+		Variables: mustJSON(v2VarDefs),
+		Source:    types.RuleSourceConfig,
+		Enabled:   true,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	if err := tmplRepo.Create(context.Background(), templateV2); err != nil {
+		t.Fatalf("failed to seed v2 template: %v", err)
+	}
+
+	// Template 2: Safe template (like real safe.yaml) - also declares
+	// allowed_safe_addresses for verifyingContract
+	safeVarDefs := []types.TemplateVariable{
+		{Name: "allowed_safe_addresses", Type: types.VarTypeString, Required: true},
+		{Name: "allowed_safe_tx_to_addresses", Type: types.VarTypeString, Required: true},
+		{Name: "delegate_to", Type: types.VarTypeString, Required: false, Default: ""},
+		{Name: "delegate_mode", Type: types.VarTypeString, Required: false, Default: "single"},
+	}
+	safeRulesJSON := `[{"id":"safe-block-delegatecall","name":"Block DELEGATECALL","type":"evm_js","mode":"blocklist","enabled":true,"config":{"script":"function validate(input) { return ok(); }"}},{"id":"safe-safetx-exec-transaction","name":"SafeTx execTransaction","type":"evm_js","mode":"whitelist","enabled":true,"config":{"delegate_to":"${delegate_to}","delegate_mode":"${delegate_mode}","script":"function validate(input) { return ok(); }"}}]`
+	templateSafe := &types.RuleTemplate{
+		ID:        "evm/safe",
+		Name:      "Safe",
+		Type:      "template_bundle",
+		Mode:      types.RuleModeWhitelist,
+		Config:    json.RawMessage(mustMarshalJSON(map[string]interface{}{"rules_json": safeRulesJSON})),
+		Variables: mustJSON(safeVarDefs),
+		Source:    types.RuleSourceConfig,
+		Enabled:   true,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	if err := tmplRepo.Create(context.Background(), templateSafe); err != nil {
+		t.Fatalf("failed to seed safe template: %v", err)
+	}
+
+	// Shared preset variables (exactly what the preset YAML provides)
+	// allowed_safe_addresses = placeholder Safe address (operator overrides this)
+	// allowed_safe_tx_to_addresses = protocol contract addresses
+	sharedVars := map[string]string{
+		"safe_proxy_factory_address":  "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b",
+		"safe_factory_domain_name":    "Polymarket Contract Proxy Factory",
+		"clob_auth_domain_name":       "ClobAuthDomain",
+		"clob_auth_domain_version":    "1",
+		"exchange_v2_address":         "0xE111180000d2663C0091e4f400237545B87B996B",
+		"collateral_token_address":    "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB",
+		"conditional_tokens_address":  "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045",
+		"allowed_safe_addresses":      "0x1111111111111111111111111111111111111111",
+		"allowed_safe_tx_to_addresses": "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB,0x4D97DCd97eC945f40cF65F87097ACe5EA0476045",
+		"delegate_to":                 "v2-transactions",
+		"delegate_mode":               "single",
+	}
+
+	results, err := svc.BatchCreateInstances(context.Background(), ruleRepo, budgetRepo, []BatchCreateItem{
+		{Template: templateInit, Request: &CreateInstanceRequest{TemplateID: "evm/polymarket_safe_init", Name: "Init Instance", Variables: copyMap(sharedVars), ChainID: &chainID}},
+		{Template: templateV2, Request: &CreateInstanceRequest{TemplateID: "evm/polymarket_v2", Name: "V2 Instance", Variables: copyMap(sharedVars), ChainID: &chainID}},
+		{Template: templateSafe, Request: &CreateInstanceRequest{TemplateID: "evm/safe", Name: "Safe Instance", Variables: copyMap(sharedVars), ChainID: &chainID}},
+	})
+	if err != nil {
+		t.Fatalf("BatchCreateInstances failed: %v", err)
+	}
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+
+	// Collect all rules and verify their Variables JSON
+	var allRules []*types.Rule
+	for _, result := range results {
+		allRules = append(allRules, result.SubRules...)
+	}
+
+	expectedSafeAddresses := "0x1111111111111111111111111111111111111111"
+	expectedSafeTxToAddresses := "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB,0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+
+	for _, r := range allRules {
+		if r.Variables == nil {
+			t.Errorf("Rule %q (%s): Variables is nil", r.Name, r.ID)
+			continue
+		}
+		var vars map[string]string
+		if err := json.Unmarshal(r.Variables, &vars); err != nil {
+			t.Fatalf("Rule %q (%s): failed to unmarshal Variables: %v", r.Name, r.ID, err)
+		}
+
+		gotSafeAddr := vars["allowed_safe_addresses"]
+		gotSafeTxTo := vars["allowed_safe_tx_to_addresses"]
+
+		// allowed_safe_addresses must be the placeholder, NOT the protocol addresses
+		if gotSafeAddr != expectedSafeAddresses {
+			t.Errorf("Rule %q (%s): allowed_safe_addresses = %q, want %q (was it corrupted with allowed_safe_tx_to_addresses?)",
+				r.Name, r.ID, gotSafeAddr, expectedSafeAddresses)
+		}
+
+		// allowed_safe_tx_to_addresses must be the protocol addresses
+		if gotSafeTxTo != expectedSafeTxToAddresses {
+			t.Errorf("Rule %q (%s): allowed_safe_tx_to_addresses = %q, want %q",
+				r.Name, r.ID, gotSafeTxTo, expectedSafeTxToAddresses)
+		}
+	}
+
+	// Verify the V2 rules also have the correct allowed_safe_addresses
+	for _, r := range allRules {
+		if !strings.Contains(r.Name, "V2") {
+			continue
+		}
+		var vars map[string]string
+		_ = json.Unmarshal(r.Variables, &vars)
+		gotSafeAddr := vars["allowed_safe_addresses"]
+		if gotSafeAddr != expectedSafeAddresses {
+			t.Errorf("V2 Rule %q (%s): allowed_safe_addresses = %q, want %q",
+				r.Name, r.ID, gotSafeAddr, expectedSafeAddresses)
+		}
+		t.Logf("V2 Rule %q (%s): allowed_safe_addresses = %q (correct)", r.Name, r.ID, gotSafeAddr)
+	}
 }
