@@ -4348,3 +4348,71 @@ func TestRevokeInstance_BudgetDeleteLogsError(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, got.Enabled)
 }
+
+func TestRevokeInstance_NonInstanceRule(t *testing.T) {
+	tmplRepo := newMockTemplateRepo()
+	ruleRepo := newMockRuleRepo()
+	budgetRepo := newMockBudgetRepo()
+
+	svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+	require.NoError(t, err)
+
+	// Create a config-sourced rule (not an instance)
+	rule := &types.Rule{
+		ID:      types.RuleID("config-rule"),
+		Name:    "Config Rule",
+		Type:    types.RuleTypeEVMAddressList,
+		Mode:    types.RuleModeWhitelist,
+		Source:  types.RuleSourceConfig,
+		Enabled: true,
+		Config:  json.RawMessage(`{"addresses":["0x1111111111111111111111111111111111111111"]}`),
+	}
+	require.NoError(t, ruleRepo.Create(context.Background(), rule))
+
+	err = svc.RevokeInstance(context.Background(), "config-rule")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not an instance")
+}
+
+func TestCreateInstanceFromBundle_Errors(t *testing.T) {
+	tmplRepo := newMockTemplateRepo()
+	ruleRepo := newMockRuleRepo()
+	budgetRepo := newMockBudgetRepo()
+
+	svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+	require.NoError(t, err)
+
+	t.Run("empty sub-rules", func(t *testing.T) {
+		tmpl := &types.RuleTemplate{
+			ID:   "tmpl-empty-bundle",
+			Name: "Empty Bundle",
+			Type: "template_bundle",
+			Mode: types.RuleModeWhitelist,
+			Config: json.RawMessage(`{"rules_json":"[]"}`),
+			Source:  types.RuleSourceConfig,
+			Enabled: true,
+		}
+		seedTemplate(t, tmplRepo, tmpl)
+		req := &CreateInstanceRequest{TemplateID: "tmpl-empty-bundle"}
+		_, err := svc.CreateInstance(context.Background(), req)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "has no sub-rules")
+	})
+
+	t.Run("malformed rules_json", func(t *testing.T) {
+		tmpl := &types.RuleTemplate{
+			ID:   "tmpl-malformed-bundle",
+			Name: "Malformed Bundle",
+			Type: "template_bundle",
+			Mode: types.RuleModeWhitelist,
+			Config: json.RawMessage(`{"rules_json":"not-json"}`),
+			Source:  types.RuleSourceConfig,
+			Enabled: true,
+		}
+		seedTemplate(t, tmplRepo, tmpl)
+		req := &CreateInstanceRequest{TemplateID: "tmpl-malformed-bundle"}
+		_, err := svc.CreateInstance(context.Background(), req)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to parse bundle rules_json")
+	})
+}
