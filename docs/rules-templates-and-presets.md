@@ -532,3 +532,290 @@ All presets live under `rules/presets/`.
 | **Inline / file rules** | `config.rules` (type other than `instance` / `file`) or external YAML | Static or file-loaded rules without template expansion. |
 
 For validation of template files (with `test_variables`) or full config (with templates + instance + file rules), use **remote-signer validate** or `remote-signer validate`. See [testing.md](testing.md) and [configuration.md](configuration.md).
+
+---
+
+## 8. Server-side preset apply (V2 / template_ids format)
+
+### 8.1 Overview
+
+Starting from v0.4+, presets can be applied directly through the server API (`POST /api/v1/presets/{id}/apply`) without a config file or CLI. The new format uses a top-level `template_ids` list rather than the old `rules:` list.
+
+**Old format** (CLI-only, deprecated for server):
+```yaml
+rules:
+  - name: "..."
+    type: "instance"
+    config:
+      template: "Polymarket Safe Template"
+      variables: { chain_id: "137", ... }
+```
+
+**New format** (server API + CLI):
+```yaml
+name: "Polymarket V2 Safe rules (Polygon)"
+chain_type: "evm"
+chain_id: "137"
+enabled: true
+variables:
+  allowed_safe_addresses: "0x1111...,0x2222..."
+  exchange_v2_address: "0xE11118..."
+  delegate_to: "polymarket-v2-transactions"   # YAML sub-rule ID
+  delegate_mode: "single"
+template_ids:
+  - evm/polymarket_safe_init
+  - evm/polymarket_v2
+  - evm/safe
+```
+
+Key differences:
+- **`template_ids`** replaces `template_paths`/`template_names` — canonical DB template IDs (e.g. `evm/polymarket_v2`).
+- **Single `variables` block** shared across all templates. Each template only uses the variables it declares; extras are ignored.
+- **Preset YAML variables** can reference sub-rule YAML IDs for `delegate_to` (see §9). These get resolved to `inst_<hash>` DB IDs during apply.
+
+### 8.2 Server apply flow
+
+```
+POST /api/v1/presets/{id}/apply
+  │
+  ├─ Parse body: { "variables": { "key": "val", ... } }
+  │     └─ Merge body.variables into preset's defaults
+  │
+  ├─ resolveInstances(): for each template_id in preset.template_ids
+  │     └─ Create one CreateInstanceRequest (shared variables, budget, schedule)
+  │
+  ├─ commitInstances() in single DB transaction:
+  │     └─ BatchCreateInstances():
+  │          ├─ Phase 1: collectRuleIDs → globalSubRuleIDMap[YAML_ID] = inst_<hash>
+  │          │     └─ For each template, pre-compute all sub-rule IDs
+  │          │     └─ template_bundle: one inst_<hash> per sub-rule
+  │          │     └─ Non-bundle: one inst_<hash> for the single rule
+  │          │
+  │          ├─ Phase 2: for each template, inject CrossTemplateIDMap (= globalSubRuleIDMap)
+  │          │     └─ createInstanceFromResolved()
+  │          │          ├─ bundle => createInstanceFromBundle()
+  │          │          │     └─ Resolve delegate_to in Config JSON + Variables JSON
+  │          │          │     └─ Persist each sub-rule
+  │          │          └─ non-bundle => create single rule
+  │          │
+  │          └─ Merge SubRuleIDMap back into globalSubRuleIDMap
+  │
+  └─ ValidateDelegateRefs: verify all delegate_to targets exist in DB
+```
+
+**Why Phase 1 + Phase 2?** When template A (e.g. `safe`) needs to delegate to template B (e.g. `polymarket_v2`), we need to know B's `inst_<hash>` IDs before creating A's rules. Phase 1 pre-computes all IDs, Phase 2 resolves cross-references before any rule hits the DB.
+
+### 8.3 Preset variables: operator_overrides
+
+```yaml
+operator_overrides:
+  - name: allowed_safe_addresses
+    required: false          # false = can keep preset default
+```
+
+Variables listed in `operator_overrides` can be overridden at apply time via `--set` (CLI) or `{"variables": {...}}` (API). Variables not listed are baked from the preset's defaults and cannot be changed.
+
+---
+
+## 9. template_bundle
+
+### 9.1 Auto-detection
+
+A template that has a top-level `rules:` array in its YAML and no explicit `type:` is auto-detected as `template_bundle`:
+
+```go
+// internal/core/registry/file_source.go:289
+if templateType == "" && len(doc.Rules) > 0 {
+    templateType = "template_bundle"
+}
+```
+
+A `template_bundle` is NOT stored as a single rule. At instance-creation time it is **expanded** into one rule per entry in the `rules:` array.
+
+### 9.2 Example: evm/polymarket_v2
+
+```yaml
+# rules/templates/evm/polymarket_v2.yaml (condensed)
+name: Polymarket V2 CLOB Order & Transactions
+variables:
+  - name: exchange_v2_address
+    type: address
+    required: true
+  # ... more variables ...
+rules:
+  - id: "polymarket-v2-order-signature"
+    name: "Polymarket V2 Order Signature"
+    type: "evm_js"
+    mode: "whitelist"
+    config: { sign_type_filter: "typed_data", script: "..." }
+  - id: "polymarket-v2-transactions"
+    name: "Polymarket V2 transactions"
+    type: "evm_js"
+    mode: "whitelist"
+    config: { sign_type_filter: "transaction", script: "..." }
+```
+
+When instantiated, this single template expands into **2 DB rules** with IDs like `inst_<hash1>` and `inst_<hash2>`.
+
+### 9.3 Bundle expansion: createInstanceFromBundle
+
+The function `createInstanceFromBundle` (`internal/core/service/template.go:476`) handles expansion in two passes:
+
+**Pass 1 — ID generation**: For each sub-rule in `rules[]`, generate a deterministic `inst_<hash>` ID using:
+```go
+func generateBundleSubRuleID(templateID string, vars map[string]string, subRuleSuffix string) types.RuleID {
+    data := fmt.Sprintf("instance:%s:%v:%s:%d", templateID, vars, subRuleSuffix, time.Now().UnixNano())
+    hash := sha256.Sum256([]byte(data))
+    return types.RuleID("inst_" + hex.EncodeToString(hash[:8]))
+}
+```
+Build `subIDToRuleID[YAML_ID] = inst_<hash>` map.
+
+**Pass 2 — Resolve + persist**: Merge subIDToRuleID with CrossTemplateIDMap (from BatchCreateInstances), resolve `delegate_to` in both Config JSON and Variables JSON, then persist all rules.
+
+### 9.4 Config vs Variables
+
+Each rule has two separate JSON columns in the DB:
+
+| Column | Content | Used by |
+|--------|---------|---------|
+| `config` | Rule-specific config (script, sign_type_filter, chain_id, etc.) | Rule engine type evaluator |
+| `variables` | All template variables (string→string map) | **JS runtime as `config` object** |
+
+Critical: the **JS runtime** (`js_evaluator.go`) passes Variables as the `config` object to scripts. So if a JS script reads `config.delegate_to`, it reads from the **Variables** column, not the **Config** column.
+
+This means `delegate_to` resolution must happen in **both** places:
+- Config JSON: for rules that reference `delegate_to` in their config
+- Variables JSON: for JS scripts that read `delegate_to` via `config.delegate_to`
+
+---
+
+## 10. Delegate mechanism
+
+### 10.1 What delegation means
+
+A whitelist rule can **delegate** inner call validation to another rule. The outer rule validates the wrapper (e.g. SafeTx structure), extracts the inner payload, and tells the engine: "also validate this inner payload against rule X."
+
+### 10.2 Polymarket V2 Safe delegation chain
+
+```
+Client submits SafeTx typed_data:
+  { domain: { verifyingContract: Safe_0xbD59 }, message: { to: pUSD_addr, data: approve(...) } }
+       │
+       ▼
+Rule engine processes blocklist first:
+  1. safe-block-delegatecall (blocklist): checks operation=0, passes
+       │
+       ▼
+Rule engine processes whitelist:
+  2. safe-safetx-exec-transaction (whitelist):
+       JS validates SafeTx structure (verifyingContract, value=0, inner to in allowlist)
+       JS returns { valid: true, delegate_to: "inst_<hash>", payload: { sign_type: "transaction", ... } }
+       │
+       ▼
+Rule engine follows delegate_to:
+  3. polymarket-v2-transactions (whitelist):
+       JS validates inner calldata (pUSD approve to allowed spender, CTF operations, etc.)
+       Returns ok() → request approved
+```
+
+### 10.3 How delegate_to is set in Safe template
+
+The delegate_to rule ID is a **template variable**, not hardcoded:
+
+```yaml
+# safe.yaml
+variables:
+  - name: delegate_to
+    type: string
+    description: "Default target rule ID when delegating"
+    required: false
+    default: ""
+  - name: delegate_to_by_target
+    type: string
+    description: "'addr:rule_id,addr:rule_id' to route by inner to"
+    required: false
+    default: ""
+  - name: delegate_mode
+    type: string
+    default: "single"
+
+rules:
+  - id: "safe-safetx-exec-transaction"
+    config:
+      delegate_to: "${delegate_to}"       # resolved at instance creation
+      delegate_mode: "${delegate_mode}"
+      script: |
+        function validate(input) {
+          // ... validate SafeTx ...
+          var delegateTo = rs.delegate.resolveByTarget(
+            innerToChecksum,
+            config.delegate_to_by_target,   // reads from Variables (as config)
+            config.delegate_to              // reads from Variables (as config)
+          );
+          if (delegateTo) return { valid: true, payload: payload, delegate_to: delegateTo };
+          return ok();
+        }
+```
+
+The preset sets `delegate_to: "polymarket-v2-transactions"` (YAML sub-rule ID). During BatchCreateInstances, this gets resolved to the actual `inst_<hash>` ID.
+
+---
+
+## 11. Cross-template delegate_to resolution
+
+### 11.1 The problem
+
+Templates are authored with human-readable sub-rule IDs in YAML:
+- Safe template: `delegate_to: "polymarket-v2-transactions"`
+- Polymarket V2 template: sub-rule `id: "polymarket-v2-transactions"`
+
+But DB rules have generated IDs: `inst_e13315fcf459b983`.
+
+When Safe's JS script returns `config.delegate_to` as the delegation target, the engine looks up that ID in the DB. If Variables still contains `"polymarket-v2-transactions"` (YAML ID) instead of `"inst_<hash>"` (DB ID), the lookup fails.
+
+### 11.2 Resolution: BatchCreateInstances two-phase
+
+**Phase 1 — `collectRuleIDs`**: For each template in the batch, pre-compute the `inst_<hash>` IDs for all sub-rules:
+
+```
+globalSubRuleIDMap = {
+  "polymarket-v2-order-signature": "inst_abc123...",    // from evm/polymarket_v2
+  "polymarket-v2-transactions":    "inst_def456...",    // from evm/polymarket_v2
+  "polymarket-clob-auth":          "inst_ghi789...",    // from evm/polymarket_safe_init
+  "safe-block-delegatecall":       "inst_jkl012...",    // from evm/safe
+  "safe-safetx-exec-transaction":  "inst_mno345...",    // from evm/safe
+}
+```
+
+**Phase 2 — Resolution before persist**: Each template's `CrossTemplateIDMap` is set to `globalSubRuleIDMap`. Then:
+1. `ResolveDelegateToConfig()` resolves `delegate_to` in Config JSON
+2. `resolveDelegateToInVars()` resolves `delegate_to` + `delegate_to_by_target` in Variables JSON
+3. For bundles: resolved values are written back to `pending[i].rule.Variables` and `pending[i].rule.Config`
+4. Rules are persisted
+
+### 11.3 Key code paths
+
+| Location | Function | What it resolves |
+|----------|----------|-----------------|
+| `template.go:352` | `ResolveDelegateToConfig` | Config JSON `delegate_to` / `delegate_to_by_target` |
+| `template.go:738` | `resolveDelegateToInVars` | Variables JSON `delegate_to` / `delegate_to_by_target` |
+| `template.go:182` | `BatchCreateInstances` | Orchestrates Phase 1 + Phase 2 |
+| `template.go:476` | `createInstanceFromBundle` | Bundle expansion + delegate resolution |
+| `template.go:221` | `collectRuleIDs` | Pre-computes IDs into globalSubRuleIDMap |
+
+### 11.4 Debug query
+
+```sql
+-- Check that delegate_to targets exist
+SELECT r.id, r.name, r.status,
+       json_extract(r.variables, '$.delegate_to') as dt,
+       CASE WHEN t.id IS NOT NULL THEN 'OK' ELSE 'MISSING' END as target_status
+FROM rules r
+LEFT JOIN rules t ON json_extract(r.variables, '$.delegate_to') = t.id
+WHERE r.source='instance'
+  AND json_extract(r.variables, '$.delegate_to') IS NOT NULL
+  AND json_extract(r.variables, '$.delegate_to') != '';
+```
+
+All rows should show `target_status = OK`. `MISSING` indicates the YAML-level `delegate_to` value was not resolved to an `inst_<hash>` ID before persistence.
