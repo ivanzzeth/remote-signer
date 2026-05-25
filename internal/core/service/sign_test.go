@@ -1939,6 +1939,91 @@ func TestProcessApprovedRequest_AlreadyRejected_ReturnsRejected(t *testing.T) {
 	assert.Contains(t, resp.Message, "user rejected")
 }
 
+func TestProcessApprovedRequest_AlreadySigning_ReturnsInProgress(t *testing.T) {
+	f := newSignServiceFixture(t)
+	svc := f.build(t)
+	ctx := context.Background()
+
+	now := time.Now()
+	signReq := &types.SignRequest{
+		ID:            "req-signing-by-other-path",
+		APIKeyID:      "agent",
+		ChainType:     types.ChainTypeEVM,
+		ChainID:       "56",
+		SignerAddress: "0xsigner",
+		SignType:      "transaction",
+		Status:        types.StatusSigning,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	require.NoError(t, f.requestRepo.Create(ctx, signReq))
+
+	approvedBy := "simulation"
+	resp, err := svc.processApprovedRequest(ctx, signReq, nil, &approvedBy, "simulation-approved", f.adapter)
+	require.NoError(t, err)
+	assert.Equal(t, types.StatusSigning, resp.Status)
+	assert.Contains(t, resp.Message, "being signed by another path")
+}
+
+func TestProcessApprovedRequest_AlreadyFailed_ReturnsFailed(t *testing.T) {
+	f := newSignServiceFixture(t)
+	svc := f.build(t)
+	ctx := context.Background()
+
+	now := time.Now()
+	signReq := &types.SignRequest{
+		ID:            "req-failed-by-other-path",
+		APIKeyID:      "agent",
+		ChainType:     types.ChainTypeEVM,
+		ChainID:       "56",
+		SignerAddress: "0xsigner",
+		SignType:      "transaction",
+		Status:        types.StatusFailed,
+		ErrorMessage:  "hardware error",
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	require.NoError(t, f.requestRepo.Create(ctx, signReq))
+
+	approvedBy := "simulation"
+	resp, err := svc.processApprovedRequest(ctx, signReq, nil, &approvedBy, "simulation-approved", f.adapter)
+	require.NoError(t, err)
+	assert.Equal(t, types.StatusFailed, resp.Status)
+	assert.Contains(t, resp.Message, "hardware error")
+}
+
+func TestProcessApprovedRequest_LockedSigner_RevertsToAuthorizing(t *testing.T) {
+	f := newSignServiceFixture(t)
+	f.adapter.signErr = fmt.Errorf("failed to get signer: signer is locked")
+	f.adapter.signResult = nil
+	svc := f.build(t)
+	ctx := context.Background()
+
+	now := time.Now()
+	signReq := &types.SignRequest{
+		ID:            "req-sign-locked",
+		APIKeyID:      "agent",
+		ChainType:     types.ChainTypeEVM,
+		ChainID:       "56",
+		SignerAddress: "0xsigner",
+		SignType:      "transaction",
+		Status:        types.StatusAuthorizing,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	require.NoError(t, f.requestRepo.Create(ctx, signReq))
+
+	ruleID := types.RuleID("rule-locked")
+	_, err := svc.processApprovedRequest(ctx, signReq, &ruleID, nil, "auto-approved", f.adapter)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "is locked")
+
+	// Verify request reverted to authorizing (not failed)
+	got, err := f.requestRepo.Get(ctx, "req-sign-locked")
+	require.NoError(t, err)
+	assert.Equal(t, types.StatusAuthorizing, got.Status)
+}
+
 // ---------------------------------------------------------------------------
 // TestSetAuditLogger
 // ---------------------------------------------------------------------------
