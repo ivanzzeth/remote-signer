@@ -199,3 +199,45 @@ func TestTransactionService_RecordBroadcast_ChainMismatchStillRecords(t *testing
 	require.NoError(t, err)
 	assert.Equal(t, "56", row.ChainID) // we record what the URL said
 }
+
+func TestTransactionService_RecordBroadcast_InvalidHex(t *testing.T) {
+	db := newTxServiceTestDB(t)
+	txRepo, err := storage.NewGormTransactionRepository(db)
+	require.NoError(t, err)
+	reqRepo, err := storage.NewGormRequestRepository(db)
+	require.NoError(t, err)
+	svc, err := NewTransactionService(txRepo, reqRepo, nil, txServiceLogger())
+	require.NoError(t, err)
+
+	_, err = svc.RecordBroadcast(context.Background(), "1", "zzz")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "decode")
+}
+
+func TestTransactionService_NewTransactionService_Errors(t *testing.T) {
+	t.Run("nil repo", func(t *testing.T) {
+		_, err := NewTransactionService(nil, nil, nil, txServiceLogger())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "transaction repository is required")
+	})
+
+	t.Run("nil request repo", func(t *testing.T) {
+		db := newTxServiceTestDB(t)
+		txRepo, err := storage.NewGormTransactionRepository(db)
+		require.NoError(t, err)
+		_, err = NewTransactionService(txRepo, nil, nil, txServiceLogger())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "request repository is required")
+	})
+
+	t.Run("nil logger", func(t *testing.T) {
+		db := newTxServiceTestDB(t)
+		txRepo, err := storage.NewGormTransactionRepository(db)
+		require.NoError(t, err)
+		reqRepo, err := storage.NewGormRequestRepository(db)
+		require.NoError(t, err)
+		_, err = NewTransactionService(txRepo, reqRepo, nil, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "logger is required")
+	})
+}
