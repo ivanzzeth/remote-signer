@@ -2064,3 +2064,27 @@ func TestSetSimulationRule(t *testing.T) {
 		t.Error("simulationRule was not set correctly")
 	}
 }
+
+func TestSign_EvalErrorNotBlocked(t *testing.T) {
+	ctx := context.Background()
+	f := newSignServiceFixture(t)
+	// A non-BlockedError eval error should log and continue to manual approval
+	f.ruleEngine.matchedRuleID = nil
+	f.ruleEngine.evalErr = fmt.Errorf("evaluation engine timeout")
+	svc := f.build(t)
+	svc.SetManualApprovalEnabled(true)
+
+	resp, err := svc.Sign(ctx, &SignRequest{
+		ChainType:     types.ChainTypeEVM,
+		ChainID:       "1",
+		SignerAddress: "0xsigner",
+		SignType:      "eth_signTransaction",
+		Payload:       []byte(`{}`),
+	})
+	if err != nil {
+		t.Fatalf("Sign should not error on non-blocking eval error: %v", err)
+	}
+	if resp.Status != types.StatusAuthorizing {
+		t.Errorf("expected status %q, got %q", types.StatusAuthorizing, resp.Status)
+	}
+}
