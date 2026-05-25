@@ -4140,3 +4140,67 @@ func TestRollbackRules_ErrorPath(t *testing.T) {
 	// rollbackRules logs errors instead of panicking when Delete fails
 	svc.rollbackRules(context.Background(), ruleRepo, []types.RuleID{"rule-does-not-exist"})
 }
+
+func TestCollectRuleIDs_Errors(t *testing.T) {
+	svc, err := NewTemplateService(newMockTemplateRepo(), newMockRuleRepo(), newMockBudgetRepo(), newTestLogger())
+	require.NoError(t, err)
+
+	t.Run("substitution error in bundle", func(t *testing.T) {
+		// Config references a variable that doesn't exist - SubstituteVariables will fail
+		tmpl := &types.RuleTemplate{
+			ID:   "tmpl-bad-subst",
+			Name: "Bad Subst Bundle",
+			Type: "template_bundle",
+			Mode: types.RuleModeWhitelist,
+			Config: json.RawMessage(`{"rules_json":"[{\"id\":\"sub1\",\"name\":\"Rule\",\"type\":\"evm_js\",\"mode\":\"whitelist\",\"config\":{\"script\":\"${nonexistent}\"},\"enabled\":true}]"}`),
+			Source:  types.RuleSourceConfig,
+			Enabled: true,
+		}
+		req := &CreateInstanceRequest{TemplateID: "tmpl-bad-subst"}
+		vars := map[string]string{}
+		m := make(map[string]types.RuleID)
+		err := svc.collectRuleIDs(m, tmpl, req, vars)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "variable substitution failed")
+	})
+
+	t.Run("missing rules_json in bundle", func(t *testing.T) {
+		tmpl := &types.RuleTemplate{
+			ID:     "tmpl-no-rules",
+			Name:   "No Rules Bundle",
+			Type:   "template_bundle",
+			Mode:   types.RuleModeWhitelist,
+			Config: json.RawMessage(`{"not_rules":"something"}`),
+			Source:  types.RuleSourceConfig,
+			Enabled: true,
+		}
+		req := &CreateInstanceRequest{TemplateID: "tmpl-no-rules"}
+		vars := map[string]string{}
+		m := make(map[string]types.RuleID)
+		err := svc.collectRuleIDs(m, tmpl, req, vars)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "has no rules_json")
+	})
+
+	t.Run("precomputed sub rule IDs used", func(t *testing.T) {
+		tmpl := &types.RuleTemplate{
+			ID:   "tmpl-precomputed",
+			Name: "Precomputed Bundle",
+			Type: "template_bundle",
+			Mode: types.RuleModeWhitelist,
+			Config: json.RawMessage(`{"rules_json":"[{\"id\":\"sub1\",\"name\":\"Rule\",\"type\":\"evm_js\",\"mode\":\"whitelist\",\"config\":{\"script\":\"true\"},\"enabled\":true}]"}`),
+			Source:  types.RuleSourceConfig,
+			Enabled: true,
+		}
+		req := &CreateInstanceRequest{
+			TemplateID:           "tmpl-precomputed",
+			PrecomputedSubRuleIDs: map[string]types.RuleID{"sub1": "precomputed-id-123"},
+		}
+		vars := map[string]string{}
+		m := make(map[string]types.RuleID)
+		err := svc.collectRuleIDs(m, tmpl, req, vars)
+		assert.NoError(t, err)
+		assert.Equal(t, types.RuleID("precomputed-id-123"), m["sub1"])
+		assert.Equal(t, types.RuleID("precomputed-id-123"), req.PrecomputedSubRuleIDs["sub1"])
+	})
+}
