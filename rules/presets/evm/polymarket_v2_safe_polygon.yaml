@@ -1,6 +1,6 @@
 # Preset: Polymarket V2 Safe (Polygon). V2 order + V2 transactions + Safe delegation.
 # Use: remote-signer-cli preset create-from polymarket_v2_safe_polygon [--config config.yaml --write] [--set allowed_safe_addresses=0xYourSafe]
-# Composes Polymarket V2 Template + Safe Template (delegate_to polymarket-v2-transactions for execTransaction).
+# Composes Polymarket Auth + CreateSafe + V2 Template + Safe Template (delegate_to polymarket-v2-transactions for execTransaction).
 name: "Polymarket V2 Safe rules (Polygon)"
 chain_type: "evm"
 chain_id: "137"
@@ -23,10 +23,12 @@ variables:
   delegate_mode: "single"
   clob_auth_domain_name: "ClobAuthDomain"
   clob_auth_domain_version: "1"
+  safe_proxy_factory_address: "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"
   v2_exchange_domain_name: "Polymarket CTF Exchange"
   v2_exchange_domain_version: "2"
   safe_factory_domain_name: "Polymarket Contract Proxy Factory"
 template_ids:
+  - evm/polymarket_safe_init
   - evm/polymarket_v2
   - evm/safe
 operator_overrides:
