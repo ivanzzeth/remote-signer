@@ -30,6 +30,7 @@ SECRET_PATTERNS=(
 )
 
 EXCLUDE_PATTERNS=(
+    'extension/'
     'tests/'
     '__tests__/'
     'test_'

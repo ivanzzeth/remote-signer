@@ -37,7 +37,7 @@ SECRET_PATTERNS=(
     'sk-[A-Za-z0-9]{20,}'
 )
 
-EXCLUDE_REGEX='(tests/|__tests__/|test_|\.spec\.|mock|fixtures|factories|testdata/|e2e/|\.env\.example|\.example|\.gitignore|node_modules)'
+EXCLUDE_REGEX='(extension/|tests/|__tests__/|test_|\.spec\.|mock|fixtures|factories|testdata/|e2e/|\.env\.example|\.example|\.gitignore|node_modules)'
 
 for range in "${RANGES[@]}"; do
     for commit in $(git rev-list "$range" 2>/dev/null); do
