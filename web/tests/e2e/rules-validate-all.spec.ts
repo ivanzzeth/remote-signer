@@ -44,6 +44,6 @@ test("Rules page shows Validate all button and batch results", async ({
 
   // At least our created rules should be in the results.
   await expect(
-    authedPage.locator(`text=e2e-batch-valid-${ts}`),
+    authedPage.locator(`text=e2e-batch-valid-${ts}`).first(),
   ).toBeVisible();
 });

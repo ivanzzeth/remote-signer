@@ -50,8 +50,9 @@ test("Rules detail panel shows Validate button for evm_js rules", async ({
     row.locator("..").locator("text=total"),
   ).toBeVisible();
 
-  // Test case name should be visible.
+  // Test case name should be visible (use .first() — text appears both in
+  // raw config JSON and in the results panel).
   await expect(
-    row.locator("..").locator("text=should pass simple validation"),
+    row.locator("..").locator("text=should pass simple validation").first(),
   ).toBeVisible();
 });
