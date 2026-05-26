@@ -1,3 +1,4 @@
+try { importScripts("bg-config.js"); } catch(e) {}
 (() => {
   var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
     get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
@@ -1213,6 +1214,25 @@
         previewRequest
       );
     }
+    /**
+     * Get the simulation pipeline's most recent evaluation of this
+     * request. Returns a `RequestSimulation` row populated with the
+     * decision, balance changes, decoded events, and contracts the
+     * simulation touched. Throws an APIError(404) when the
+     * simulation hasn't run yet — callers should treat that as
+     * "evaluating, retry in a few seconds" rather than a hard error.
+     *
+     * The web UI's request-detail page polls this every 3s while the
+     * request is pending so the operator sees what the tx would do
+     * before deciding to manually approve.
+     */
+    async getSimulation(requestID) {
+      return this.transport.request(
+        "GET",
+        `/api/v1/evm/requests/${requestID}/simulation`,
+        null
+      );
+    }
   };
   var EvmRuleService = class {
     constructor(transport) {
@@ -1313,6 +1333,26 @@
         "POST",
         `/api/v1/evm/rules/${encodeURIComponent(ruleID)}/reject`,
         { reason }
+      );
+    }
+    /**
+     * Validate a single rule's test cases (POST /api/v1/evm/rules/{ruleID}/validate).
+     */
+    async validate(ruleID) {
+      return this.transport.request(
+        "POST",
+        `/api/v1/evm/rules/${encodeURIComponent(ruleID)}/validate`,
+        null
+      );
+    }
+    /**
+     * Batch validate all evm_js rules' test cases (POST /api/v1/evm/rules/validate).
+     */
+    async batchValidate() {
+      return this.transport.request(
+        "POST",
+        "/api/v1/evm/rules/validate",
+        null
       );
     }
   };
@@ -2598,6 +2638,16 @@
       );
     }
     /**
+     * Validate test cases for a template.
+     */
+    async validate(templateID) {
+      return this.transport.request(
+        "POST",
+        `/api/v1/templates/${templateID}/validate`,
+        null
+      );
+    }
+    /**
      * Revoke (delete) a rule instance created from a template.
      */
     async revokeInstance(ruleID) {
@@ -2737,6 +2787,17 @@
      */
     async applyWithVariables(id, variables) {
       return this.apply(id, { variables });
+    }
+    /**
+     * Validate test cases for a preset (admin only).
+     * Optionally override variables to test different configurations.
+     */
+    async validate(id, variables) {
+      return this.transport.request(
+        "POST",
+        `/api/v1/presets/${encodeURIComponent(id)}/validate`,
+        variables ? { variables } : null
+      );
     }
   };
   var RegistryService = class {
@@ -4220,10 +4281,25 @@
   var initPromise = null;
   var initError = null;
   var cachedConfig = { ...DEFAULT_CONFIG };
+  var isProxyMode = false;
   function configKey() {
     return `remoteSignerConfig`;
   }
+  var PROXY_MODE_SENTINEL = "0000000000000000000000000000000000000000000000000000000000000000";
   async function loadConfig() {
+    const w3cfg = self.__WEB3_AGENT_BROWSER_CONFIG__;
+    if (w3cfg && typeof w3cfg.proxyUrl === "string") {
+      isProxyMode = true;
+      cachedConfig = {
+        remoteSignerUrl: w3cfg.proxyUrl,
+        apiKeyId: w3cfg.apiKeyId || "agent",
+        apiKeyPrivateKey: PROXY_MODE_SENTINEL,
+        selectedChain: typeof w3cfg.chainId === "number" ? w3cfg.chainId : 1,
+        autoApproveConnections: true
+      };
+      return cachedConfig;
+    }
+    isProxyMode = false;
     const result = await chrome.storage.local.get(configKey());
     if (result[configKey()]) {
       cachedConfig = result[configKey()];

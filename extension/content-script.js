@@ -132,6 +132,21 @@ window.addEventListener("message", (event) => {
     return;
   }
 
+  // Account switch (from popup or headless call)
+  if (data.type === "popup:switchAccount" && data.address) {
+    chrome.runtime.sendMessage(
+      { type: "popup:switchAccount", address: data.address },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          window.postMessage({ ...data, ok: false, error: chrome.runtime.lastError.message }, "*");
+          return;
+        }
+        window.postMessage({ type: "popup:accountSwitched", id: data.id, ...response }, "*");
+      }
+    );
+    return;
+  }
+
   // State query relay
   if (data.type === "web3-get-state" && data.id) {
     chrome.runtime.sendMessage(

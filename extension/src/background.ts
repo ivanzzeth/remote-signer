@@ -6,6 +6,12 @@
  * and direct HTTP communication with remote-signer (no proxy).
  *
  * Config is stored in chrome.storage.local and managed through the popup.
+ *
+ * Proxy/CLI mode (web3-agent-browser / headless launchers):
+ *   When extension/background.js is loaded with a preceding
+ *   importScripts("bg-config.js") call, self.__WEB3_AGENT_BROWSER_CONFIG__
+ *   is injected at bundle top. loadConfig() detects this and reads runtime
+ *   config from there — no chrome.storage, no popup interaction needed.
  */
 import {
   RemoteSignerClient,
@@ -580,9 +586,26 @@ async function handleConnectGetContext(msg: { requestId: string }): Promise<{
   };
 }
 
-// ── Globals ──────────────────────────────────────────────────────────────
+// ── Proxy/CLI mode interface ───────────────────────────────────────────────
+//
+// When the extension is loaded headlessly (e.g. via web3-agent-browser), the
+// launcher writes extension/bg-config.js which sets this global. loadConfig()
+// detects it and returns a StoredConfig that routes through the proxy instead
+// of requiring interactive popup configuration.
+interface ProxyModeConfig {
+  proxyUrl: string;
+  signerAddresses: string[];
+  chainId: number;
+  rpcOverrides: Record<number, string>;
+  rpcGatewayUrl: string;
+  apiKeyId: string;
+}
 
-declare const self: ServiceWorkerGlobalScope;
+declare const self: ServiceWorkerGlobalScope & {
+  __WEB3_AGENT_BROWSER_CONFIG__?: ProxyModeConfig;
+};
+
+// ── Globals ──────────────────────────────────────────────────────────────
 
 let provider: EIP1193Provider | null = null;
 let client: RemoteSignerClient | null = null;
@@ -590,13 +613,41 @@ let initPromise: Promise<void> | null = null;
 let initError: string | null = null;
 let cachedConfig: StoredConfig = { ...DEFAULT_CONFIG };
 
+/** True when config was loaded from bg-config.js (proxy/CLI mode). */
+let isProxyMode = false;
+
 // ── Config ───────────────────────────────────────────────────────────────
 
 function configKey(): string {
   return `remoteSignerConfig`;
 }
 
+/**
+ * Sentinel used as apiKeyPrivateKey in proxy mode. Must be a valid Ed25519
+ * hex key (64 hex chars) because RemoteSignerClient attempts to parse it
+ * during construction. The proxy at remoteSignerUrl handles real request
+ * signing and ignores this value entirely. Match of the existing
+ * web3-agent-browser value for full compatibility.
+ */
+const PROXY_MODE_SENTINEL = "0000000000000000000000000000000000000000000000000000000000000000";
+
 async function loadConfig(): Promise<StoredConfig> {
+  // Proxy/CLI mode: config injected at bundle top via importScripts("bg-config.js")
+  const w3cfg = (self as any).__WEB3_AGENT_BROWSER_CONFIG__;
+  if (w3cfg && typeof w3cfg.proxyUrl === "string") {
+    isProxyMode = true;
+    cachedConfig = {
+      remoteSignerUrl: w3cfg.proxyUrl,
+      apiKeyId: w3cfg.apiKeyId || "agent",
+      apiKeyPrivateKey: PROXY_MODE_SENTINEL,
+      selectedChain: typeof w3cfg.chainId === "number" ? w3cfg.chainId : 1,
+      autoApproveConnections: true,
+    };
+    return cachedConfig;
+  }
+
+  // Normal interactive mode: read from chrome.storage (configured via popup)
+  isProxyMode = false;
   const result = await chrome.storage.local.get(configKey());
   if (result[configKey()]) {
     cachedConfig = result[configKey()];
