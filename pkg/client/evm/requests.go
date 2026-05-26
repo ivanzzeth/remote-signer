@@ -85,3 +85,14 @@ func (s *RequestService) PreviewRule(ctx context.Context, requestID string, req 
 	}
 	return &resp, nil
 }
+
+// GetSimulation returns the simulation result for a pending sign request.
+func (s *RequestService) GetSimulation(ctx context.Context, requestID string) (*SimulateResponse, error) {
+	path := fmt.Sprintf("/api/v1/evm/requests/%s/simulation", url.PathEscape(requestID))
+	var result SimulateResponse
+	err := s.transport.Request(ctx, http.MethodGet, path, nil, &result, http.StatusOK)
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}

@@ -32,6 +32,11 @@ impl SignService {
         self.sign_with_options(req, false)
     }
 
+    pub fn execute_batch(&self, reqs: Vec<SignRequest>) -> Result<Vec<SignResponse>, Error> {
+        self.transport
+            .request_json(Method::POST, "/api/v1/evm/sign/batch", Some(&reqs), Some(&[200, 201, 202]))
+    }
+
     fn sign_with_options(&self, req: &SignRequest, wait_for_approval: bool) -> Result<SignResponse, Error> {
         let resp: SignResponse = self.transport.request_json(
             Method::POST,

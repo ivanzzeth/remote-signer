@@ -39,6 +39,11 @@ type CreateRequest struct {
 	RateLimit int    `json:"rate_limit,omitempty"`
 }
 
+// APIKeyNamesResponse represents the response from listing API key names.
+type APIKeyNamesResponse struct {
+	Names []string `json:"names"`
+}
+
 // UpdateRequest represents a request to update an API key.
 type UpdateRequest struct {
 	Name      *string `json:"name,omitempty"`

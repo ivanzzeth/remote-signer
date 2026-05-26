@@ -4,6 +4,7 @@ use ed25519_dalek::SigningKey;
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
 
+use crate::acls;
 use crate::apikeys;
 use crate::audit;
 use crate::error::Error;
@@ -59,6 +60,7 @@ pub struct Client {
     pub templates: templates::Service,
     pub apikeys: apikeys::Service,
     pub presets: presets::Service,
+    pub acls: acls::Service,
 
     transport: Transport,
 }
@@ -100,6 +102,7 @@ impl Client {
             templates: templates::Service::new(transport.clone()),
             apikeys: apikeys::Service::new(transport.clone()),
             presets: presets::Service::new(transport.clone()),
+            acls: acls::Service::new(transport.clone()),
             evm,
             transport,
         })

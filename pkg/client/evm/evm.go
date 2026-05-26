@@ -7,29 +7,33 @@ import (
 
 // Service groups all EVM-related sub-services.
 type Service struct {
-	Sign        *SignService
-	Requests    *RequestService
-	Rules       *RuleService
-	Signers     *SignerService
-	HDWallets   *HDWalletService
-	Guard       *GuardService
-	Simulate    *SimulateService
-	Broadcast   *BroadcastService
-	Wallets     *WalletService
+	Sign         *SignService
+	Requests     *RequestService
+	Rules        *RuleService
+	Signers      *SignerService
+	HDWallets    *HDWalletService
+	Guard        *GuardService
+	Simulate     *SimulateService
+	Broadcast    *BroadcastService
+	Wallets      *WalletService
+	Budgets      *BudgetService
+	Transactions *TransactionService
 }
 
 // NewService creates a new EVM service group.
 func NewService(t *transport.Transport) *Service {
 	sign := &SignService{transport: t}
 	return &Service{
-		Sign:        sign,
-		Requests:    &RequestService{transport: t},
-		Rules:       &RuleService{transport: t},
-		Signers:     &SignerService{transport: t},
-		HDWallets:   &HDWalletService{transport: t, sign: sign},
-		Guard:       &GuardService{transport: t},
-		Simulate:    &SimulateService{transport: t},
-		Broadcast:   &BroadcastService{transport: t},
-		Wallets:     &WalletService{transport: t},
+		Sign:         sign,
+		Requests:     &RequestService{transport: t},
+		Rules:        &RuleService{transport: t},
+		Signers:      &SignerService{transport: t},
+		HDWallets:    &HDWalletService{transport: t, sign: sign},
+		Guard:        &GuardService{transport: t},
+		Simulate:     &SimulateService{transport: t},
+		Broadcast:    &BroadcastService{transport: t},
+		Wallets:      &WalletService{transport: t},
+		Budgets:      &BudgetService{transport: t},
+		Transactions: &TransactionService{transport: t},
 	}
 }

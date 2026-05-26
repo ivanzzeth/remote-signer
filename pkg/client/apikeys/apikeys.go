@@ -85,6 +85,16 @@ func (s *Service) Update(ctx context.Context, id string, req *UpdateRequest) (*A
 	return &key, nil
 }
 
+// ListNames lists API key names (lightweight endpoint for dropdowns).
+func (s *Service) ListNames(ctx context.Context) (*APIKeyNamesResponse, error) {
+	var resp APIKeyNamesResponse
+	err := s.transport.Request(ctx, http.MethodGet, "/api/v1/api-keys/names", nil, &resp, http.StatusOK)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // Delete deletes an API key (admin only, API-sourced keys only).
 func (s *Service) Delete(ctx context.Context, id string) error {
 	path := fmt.Sprintf("/api/v1/api-keys/%s", url.PathEscape(id))
@@ -94,6 +104,7 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 // API defines the API key service interface.
 type API interface {
 	List(ctx context.Context, filter *ListFilter) (*ListResponse, error)
+	ListNames(ctx context.Context) (*APIKeyNamesResponse, error)
 	Get(ctx context.Context, id string) (*APIKey, error)
 	Create(ctx context.Context, req *CreateRequest) (*APIKey, error)
 	Update(ctx context.Context, id string, req *UpdateRequest) (*APIKey, error)

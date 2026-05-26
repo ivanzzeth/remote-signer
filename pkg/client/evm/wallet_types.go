@@ -40,6 +40,12 @@ type ListWalletsResponse struct {
 	HasMore bool     `json:"has_more"`
 }
 
+// UpdateWalletRequest represents a request to update a wallet.
+type UpdateWalletRequest struct {
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
 // AddWalletMemberRequest represents a request to add a signer member to a wallet.
 type AddWalletMemberRequest struct {
 	SignerAddress string `json:"signer_address"`

@@ -75,9 +75,21 @@ func (s *Service) List(ctx context.Context, filter *ListFilter) (*ListResponse, 
 	return &listResp, nil
 }
 
+// ListByRequestID lists audit records for a specific sign request ID.
+func (s *Service) ListByRequestID(ctx context.Context, requestID string) (*ListResponse, error) {
+	path := fmt.Sprintf("/api/v1/audit/requests/%s", url.PathEscape(requestID))
+	var resp ListResponse
+	err := s.transport.Request(ctx, http.MethodGet, path, nil, &resp, http.StatusOK)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // API defines the audit service interface.
 type API interface {
 	List(ctx context.Context, filter *ListFilter) (*ListResponse, error)
+	ListByRequestID(ctx context.Context, requestID string) (*ListResponse, error)
 }
 
 // Compile-time interface check.

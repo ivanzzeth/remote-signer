@@ -18,6 +18,7 @@ type RequestAPI interface {
 	List(ctx context.Context, filter *ListRequestsFilter) (*ListRequestsResponse, error)
 	Approve(ctx context.Context, requestID string, req *ApproveRequest) (*ApproveResponse, error)
 	PreviewRule(ctx context.Context, requestID string, req *PreviewRuleRequest) (*PreviewRuleResponse, error)
+	GetSimulation(ctx context.Context, requestID string) (*SimulateResponse, error)
 }
 
 // RuleAPI defines the rule CRUD operations interface.
@@ -57,10 +58,12 @@ type WalletAPI interface {
 	Create(ctx context.Context, req *CreateWalletRequest) (*Wallet, error)
 	Get(ctx context.Context, id string) (*Wallet, error)
 	List(ctx context.Context, filter *ListWalletsFilter) (*ListWalletsResponse, error)
+	Update(ctx context.Context, id string, req *UpdateWalletRequest) (*Wallet, error)
 	Delete(ctx context.Context, id string) error
 	AddMember(ctx context.Context, walletID string, req *AddWalletMemberRequest) (*WalletMember, error)
 	RemoveMember(ctx context.Context, walletID, signerAddress string) error
 	ListMembers(ctx context.Context, walletID string) (*ListWalletMembersResponse, error)
+	ListSigners(ctx context.Context, walletID string) ([]Signer, error)
 }
 
 // GuardAPI defines the approval guard interface.
@@ -73,13 +76,45 @@ type RemoteSignerAPI interface {
 	NewRemoteSigner(sign *SignService, address common.Address, chainID string) *RemoteSigner
 }
 
+// BudgetAPI defines the standalone budget CRUD operations interface.
+type BudgetAPI interface {
+	List(ctx context.Context, filter *BudgetListFilter) (*ListBudgetsResponse, error)
+	Create(ctx context.Context, req *CreateBudgetRequest) (*Budget, error)
+	Get(ctx context.Context, id string) (*Budget, error)
+	Update(ctx context.Context, id string, req *UpdateBudgetRequest) (*Budget, error)
+	Delete(ctx context.Context, id string) error
+	Reset(ctx context.Context, id string) (*Budget, error)
+}
+
+// TransactionAPI defines the on-chain transaction query interface.
+type TransactionAPI interface {
+	List(ctx context.Context, filter *ListTransactionsFilter) (*ListTransactionsResponse, error)
+	Get(ctx context.Context, id string) (*TransactionRecord, error)
+}
+
+// SimulateAPI defines the simulation operations interface.
+type SimulateAPI interface {
+	Status(ctx context.Context) (*SimulationStatusResponse, error)
+	Simulate(ctx context.Context, req *SimulateRequest) (*SimulateResponse, error)
+	SimulateBatch(ctx context.Context, req *SimulateBatchRequest) (*SimulateBatchResponse, error)
+}
+
+// BroadcastAPI defines the broadcast operations interface.
+type BroadcastAPI interface {
+	Broadcast(ctx context.Context, req *BroadcastRequest) (*BroadcastResponse, error)
+}
+
 // Compile-time interface checks.
 var (
-	_ SignAPI     = (*SignService)(nil)
-	_ RequestAPI  = (*RequestService)(nil)
-	_ RuleAPI     = (*RuleService)(nil)
-	_ SignerAPI   = (*SignerService)(nil)
-	_ HDWalletAPI = (*HDWalletService)(nil)
-	_ GuardAPI  = (*GuardService)(nil)
-	_ WalletAPI = (*WalletService)(nil)
+	_ SignAPI        = (*SignService)(nil)
+	_ RequestAPI     = (*RequestService)(nil)
+	_ RuleAPI        = (*RuleService)(nil)
+	_ SignerAPI      = (*SignerService)(nil)
+	_ HDWalletAPI    = (*HDWalletService)(nil)
+	_ GuardAPI       = (*GuardService)(nil)
+	_ WalletAPI      = (*WalletService)(nil)
+	_ BudgetAPI      = (*BudgetService)(nil)
+	_ TransactionAPI = (*TransactionService)(nil)
+	_ SimulateAPI    = (*SimulateService)(nil)
+	_ BroadcastAPI   = (*BroadcastService)(nil)
 )
