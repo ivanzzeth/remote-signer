@@ -1,7 +1,114 @@
-#!/bin/sh
-# Pre-commit hook: run unit + internal integration tests.
-# Excludes chain/evm forge-based tests (require foundry) and e2e tests.
+#!/bin/bash
+# pre-commit hook: secret scan + go vet + unit+integration tests
 set -e
 
-echo "==> Running unit + internal integration tests..."
-go test -tags integration ./internal/...
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+VIOLATIONS=0
+
+# ─── 1. Secret leak detection ──────────────────────────────────
+echo "→ Scanning for secrets in staged files..."
+
+SECRET_PATTERNS=(
+    # Ed25519 private keys (64 hex chars, common in remote-signer configs)
+    'ed25519:[[:space:]]*[0-9a-fA-F]{64,128}'
+    # secp256k1 / Ethereum private keys (64 hex chars)
+    'private_key:[[:space:]]*"?0x[0-9a-fA-F]{64}"?'
+    # Keystore passwords in config
+    'keystore_password:[[:space:]]*"[^"]{8,}"'
+    'password:[[:space:]]*"[^"]{8,}"'
+    # Generic API key assignments
+    'api_key:[[:space:]]*"?[A-Za-z0-9+/=]{32,}"?'
+    # Private key files
+    '-----BEGIN\s+(RSA|EC|DSA|OPENSSH|PRIVATE)\s+KEY-----'
+    # GitHub tokens
+    '(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36}'
+    # Common API key patterns
+    'sk-[A-Za-z0-9]{20,}'
+)
+
+EXCLUDE_PATTERNS=(
+    'tests/'
+    '__tests__/'
+    'test_'
+    '.spec.'
+    'mock'
+    'fixtures'
+    'factories'
+    '.env.example'
+    '.example'
+    '.gitignore'
+    'testdata/'
+    'e2e/'
+)
+
+should_exclude() {
+    local file="$1"
+    for pat in "${EXCLUDE_PATTERNS[@]}"; do
+        if echo "$file" | grep -q "$pat"; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+while IFS= read -r file; do
+    [ -z "$file" ] && continue
+    should_exclude "$file" && continue
+
+    for pattern in "${SECRET_PATTERNS[@]}"; do
+        if git diff --cached --name-only --diff-filter=ACM | grep -Fxq "$file"; then
+            match=$(git show ":${file}" 2>/dev/null | grep -Pn -- "$pattern" || true)
+            if [ -n "$match" ]; then
+                echo -e "${RED}⚠ SECRET in ${file}:${NC}"
+                echo "$match" | head -3 | while read -r line; do
+                    echo "   $line"
+                done
+                VIOLATIONS=$((VIOLATIONS + 1))
+            fi
+        fi
+    done
+done < <(git diff --cached --name-only --diff-filter=ACM)
+
+if [ $VIOLATIONS -gt 0 ]; then
+    echo -e "${RED}❌ Found $VIOLATIONS secret(s). Commit rejected.${NC}"
+    exit 1
+fi
+echo "   ✅ No secrets detected."
+
+# ─── 2. Large file check ───────────────────────────────────────
+echo "→ Checking for large files (>1MB)..."
+LARGE_FILES=()
+MAX_SIZE=$((1 * 1024 * 1024))
+
+while IFS= read -r file; do
+    [ -z "$file" ] && continue
+    obj_size=$(git show ":${file}" 2>/dev/null | wc -c || echo 0)
+    if [ "$obj_size" -gt "$MAX_SIZE" ]; then
+        LARGE_FILES+=("$file ($(numfmt --to=iec-i $obj_size 2>/dev/null || echo "${obj_size} bytes"))")
+    fi
+done < <(git diff --cached --name-only --diff-filter=ACM)
+
+if [ ${#LARGE_FILES[@]} -gt 0 ]; then
+    echo -e "${YELLOW}⚠ Large files staged:${NC}"
+    for f in "${LARGE_FILES[@]}"; do
+        echo "   - $f"
+    done
+    echo -e "${YELLOW}   Use Git LFS or .gitignore for large files.${NC}"
+    exit 1
+fi
+echo "   ✅ No large files."
+
+# ─── 3. Go vet ─────────────────────────────────────────────────
+echo "→ Running go vet..."
+(cd "$REPO_ROOT" && go vet ./... 2>&1) || exit 1
+echo "   ✅ go vet passed."
+
+# ─── 4. Unit + internal integration tests ───────────────────────
+echo "→ Running unit + integration tests..."
+(cd "$REPO_ROOT" && go test -tags integration ./internal/... 2>&1) || exit 1
+echo "   ✅ Tests passed."
+
+echo "✅ All pre-commit checks passed."

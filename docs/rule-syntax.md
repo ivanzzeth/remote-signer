@@ -572,6 +572,77 @@ Only the field matching `sign_type` is populated; others are `null`.
 - **whitelist**: allow if `validate()` returns `{ valid: true }`
 - **blocklist**: block if `validate()` returns `{ valid: true }`
 
+### The `config` Object and Template Variables
+
+When an `evm_js` rule is instantiated from a template, the **template's Variables** (`config.variables` in the instance rule) are injected into the JS sandbox as the global `config` object. Every template variable becomes a property on `config`:
+
+```javascript
+// Template declares: variables: [{ name: "chain_id", ... }, { name: "allowed_addresses", ... }]
+// Instance supplies:   variables: { chain_id: "137", allowed_addresses: "0xabc,0xdef" }
+// In JS:              config.chain_id === "137", config.allowed_addresses === "0xabc,0xdef"
+```
+
+All `config.*` values are **strings** (they come from the JSON Variables map). Use `rs.int.parseUint()` or `rs.bigint.parse()` for numeric comparisons:
+
+```javascript
+var threshold = rs.int.parseUint(config.threshold);
+rs.int.requireLte(amount, threshold, "amount exceeds threshold");
+```
+
+During **test case validation**, the `config` object is seeded from the template's `test_variables` (not instance variables):
+
+```yaml
+# Template YAML
+test_variables:
+  chain_id: "137"
+  allowed_addresses: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+```
+
+This allows templates to be validated in isolation (`remote-signer validate`) without needing a real instance. The validation pipeline:
+1. Loads `test_variables` from the template
+2. Resolves variable defaults (if a variable has `default:` but no entry in `test_variables`)
+3. Substitutes `${var}` placeholders in rule configs with the resolved values
+4. Seeds the JS `config` object from the resolved variables
+5. Runs each `test_case` with `config` available in the sandbox
+
+### Test Cases
+
+Each `evm_js` rule must include at least 2 test cases (1 positive + 1 negative). Test cases validate that the script behaves correctly with the template's `test_variables`.
+
+```yaml
+test_cases:
+  - name: "allow transfer to whitelisted address"
+    input:
+      sign_type: "transaction"
+      chain_id: 137
+      signer: "0x..."
+      transaction:
+        from: "0x..."
+        to: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+        value: "0x0"
+        data: "0xa9059cbb0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc4"
+    expect_pass: true
+
+  - name: "block transfer to unknown address"
+    input:
+      sign_type: "transaction"
+      chain_id: 137
+      signer: "0x..."
+      transaction:
+        from: "0x..."
+        to: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+        value: "0x0"
+        data: "0xa9059cbb000000000000000000000000deaddeaddeaddeaddeaddeaddeaddeaddeaddead"
+    expect_pass: false
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | Yes | Descriptive test name |
+| `input` | object | Yes | The `RuleInput` passed to `validate(input)` |
+| `expect_pass` | bool | Yes | Expected outcome: `true` = should pass, `false` = should be blocked |
+| `expect_reason` | string | No | If set, the rejection reason must contain this substring |
+
 ### Example
 
 ```yaml

@@ -50,7 +50,36 @@ If no whitelist rule matches and no blocklist rule triggers, the request enters 
 
 Rules can be parameterized (via Templates) or written inline. Rule types include address lists, value limits, contract method restrictions, Solidity expressions, JavaScript sandbox rules, and message pattern matching.
 
-Rules support **delegation**: a whitelist rule can delegate inner call validation to other rules, forming recursive validation chains (e.g. a Safe transaction delegates to MultiSend, which delegates each inner transfer to an ERC20 rule). Delegation has depth limits and cycle detection.
+Rules support **delegation**: a whitelist rule can delegate inner call validation to other rules, forming recursive validation chains. Delegation has depth limits and cycle detection.
+
+#### Delegation architecture
+
+Delegation enables a whitelist rule to unpack a wrapper payload (e.g. a Gnosis Safe `execTransaction`) and forward the inner calldata to another rule for further validation. The engine recursively evaluates the inner payload against the target rule(s).
+
+**Two ways to set the target rule ID:**
+
+| Source | Mechanism | Precedence |
+|--------|-----------|-----------|
+| Script return value | `validate()` returns `{ valid: true, delegate_to: "inst_abc..." }` | Higher — overrides config |
+| Config / template variable | `config.delegate_to` (set via Variables) | Lower — fallback |
+
+**Two delegation modes:**
+
+| Mode | Behavior |
+|------|----------|
+| `single` (default) | Forward one payload. Try each target rule; any one passing = allowed. |
+| `per_item` | Extract an array from payload (keyed by `items_key`). Each item must be allowed by at least one target. Used by MultiSend to validate each inner transfer individually. |
+
+**Security constraints:**
+
+- **Depth limit**: `DelegationMaxDepth = 6` — prevents infinite recursion.
+- **Cycle detection**: Tracks visited rule IDs along the delegation path. If a rule appears twice in a path, evaluation fails.
+- **Blocklist re-evaluation**: Delegated inner payloads are always run through blocklist rules before being evaluated against the target whitelist rule. This prevents delegation from being used to bypass global blocklists.
+- **Item limit**: `DelegationMaxItems = 256` — caps `per_item` array size.
+
+**Cross-template delegation:** Templates reference target sub-rules by YAML-level IDs (e.g. `polymarket-v2-transactions`). During instance creation, `BatchCreateInstances` resolves these to DB-level `inst_<hash>` IDs via a two-phase process: Phase 1 pre-computes all sub-rule IDs into a global map; Phase 2 resolves `delegate_to` references in both Config JSON and Variables JSON before persisting.
+
+See [Rules, Templates & Presets](docs/rules-templates-and-presets.md#10-delegate-mechanism) for the full delegation mechanism including YAML-level configuration and debug queries.
 
 ### Template
 
