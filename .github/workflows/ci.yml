@@ -35,6 +35,10 @@ jobs:
         with:
           go-version-file: 'go.mod'
           cache: true
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
       - name: go test -tags integration ./internal/...
         run: go test -tags integration ./internal/...
 
