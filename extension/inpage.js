@@ -247,6 +247,35 @@
       // EIP-1193 enable (deprecated but some dApps use it)
       async enable() {
         return await provider.request({ method: "eth_requestAccounts" });
+      },
+      // Switch active account by address or index (non-EIP-1193 extension)
+      async switchAccount(addressOrIndex) {
+        return new Promise((resolve, reject) => {
+          const id = uuidv4();
+          const timer = setTimeout(() => {
+            cleanup();
+            reject(new Error("switchAccount timed out"));
+          }, 15000);
+          function handleResponse(event2) {
+            const d = event2.data;
+            if (!d || d.type !== "popup:accountSwitched" || d.id !== id) return;
+            cleanup();
+            if (d.ok === false) {
+              reject(new Error(d.error || "switchAccount failed"));
+            } else {
+              resolve(d);
+            }
+          }
+          function cleanup() {
+            clearTimeout(timer);
+            window.removeEventListener("message", handleResponse);
+          }
+          window.addEventListener("message", handleResponse);
+          window.postMessage(
+            { type: "popup:switchAccount", id, address: addressOrIndex },
+            "*"
+          );
+        });
       }
     };
     Object.defineProperty(window, "ethereum", {
