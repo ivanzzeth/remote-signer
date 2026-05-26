@@ -1,4 +1,4 @@
-import { type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 /**
  * Page-level shell every list page uses. Renders the title + subtitle and
@@ -111,4 +111,74 @@ export function Badge({
 export function shorten(s: string, head = 10, tail = 6): string {
   if (s.length <= head + tail + 1) return s;
   return `${s.slice(0, head)}…${s.slice(-tail)}`;
+}
+
+/**
+ * Collapsible code/JSON block with a copy button. Default max-h is 96
+ * (384px); pass a smaller `maxH` for compact mode. Pass `defaultOpen=true`
+ * to start expanded (default: collapsed).
+ *
+ * The collapse/expand toggle and copy button are always visible in the
+ * header bar so the operator never has to scroll to find them.
+ */
+export function CodeBlock({
+  body,
+  lang = "json",
+  maxH = 96,
+  defaultOpen = false,
+  title,
+}: {
+  body: string;
+  lang?: string;
+  maxH?: number;
+  defaultOpen?: boolean;
+  title?: string;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(body);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard not available — ignore */
+    }
+  }
+
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between gap-2 text-[10px] uppercase tracking-wider text-ink-500">
+        <div className="flex items-center gap-2 truncate">
+          {title && <span className="truncate">{title}</span>}
+          <span className="shrink-0 font-mono">{lang}</span>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className="rounded px-1.5 py-0.5 text-[10px] text-ink-500 hover:bg-ink-100"
+          >
+            {open ? "Collapse" : "Expand"}
+          </button>
+          <button
+            type="button"
+            onClick={copy}
+            className="rounded px-1.5 py-0.5 text-[10px] text-ink-500 hover:bg-ink-100"
+          >
+            {copied ? "Copied!" : "Copy"}
+          </button>
+        </div>
+      </div>
+      <pre
+        className={`overflow-auto rounded bg-ink-50 p-2 font-mono text-[11px] leading-snug text-ink-800 ${
+          open ? "" : "max-h-[" + maxH * 4 + "px]"
+        }`}
+        style={!open ? { maxHeight: `${maxH * 4}px` } : undefined}
+      >
+        {body}
+      </pre>
+    </div>
+  );
 }

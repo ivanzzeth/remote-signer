@@ -11,6 +11,7 @@ import { AppliedToPicker } from "../components/AppliedToPicker";
 import {
   Badge,
   Card,
+  CodeBlock,
   Empty,
   ErrorBanner,
   Loading,
@@ -297,7 +298,7 @@ export function Rules() {
           (data.rules.length === 0 ? (
             <Empty msg="No rules defined. Sign requests will be evaluated against the daemon's default policy (manual approval if configured)." />
           ) : (
-            <table className="w-full text-left text-sm">
+            <table className="w-full text-left text-sm" style={{ tableLayout: "fixed" }}>
               <thead className="text-xs uppercase text-ink-500">
                 <tr>
                   <th className="py-1 pr-3 font-normal">Name</th>
@@ -421,7 +422,7 @@ export function Rules() {
                   </tr>
                   {expanded === r.id && (
                     <tr className="border-t border-ink-100 bg-ink-50">
-                      <td colSpan={6} className="px-4 py-3">
+                      <td colSpan={6} className="min-w-0 overflow-x-auto px-4 py-3">
                         <RuleDetailPanel
                           rule={r}
                           editing={editing === r.id}
@@ -625,9 +626,28 @@ function RuleDetailPanel({
               </button>
             )}
           </div>
-          <pre className="overflow-x-auto rounded border border-ink-200 bg-white p-2 font-mono text-[11px] text-ink-900">
-            {JSON.stringify(rule.config, null, 2)}
-          </pre>
+          <CodeBlock
+            body={JSON.stringify(rule.config, null, 2)}
+            lang="json"
+            maxH={24}
+            title="Config"
+          />
+          {(rule.owner || rule.approved_by) && (
+            <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-xs text-ink-500">
+              {rule.owner && (
+                <span>
+                  <span className="text-ink-400">Created by</span>{" "}
+                  <span className="font-mono text-ink-700">{rule.owner}</span>
+                </span>
+              )}
+              {rule.approved_by && (
+                <span>
+                  <span className="text-ink-400">Approved by</span>{" "}
+                  <span className="font-mono text-ink-700">{rule.approved_by}</span>
+                </span>
+              )}
+            </div>
+          )}
         </div>
       )}
 

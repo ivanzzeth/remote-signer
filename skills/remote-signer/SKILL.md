@@ -258,6 +258,23 @@ Client → Ed25519 Auth → Middleware Pipeline → Handler → SignService
 # → Prints private key path ONCE to stderr
 ```
 
+### Remote CLI Auth Flags
+
+Every remote API command shares these persistent flags (also configurable via env vars):
+
+| Flag | Env Var | Description |
+|------|---------|-------------|
+| `--url` | `REMOTE_SIGNER_URL` | Server URL (default: `https://localhost:8548`) |
+| `--api-key-id` | `REMOTE_SIGNER_API_KEY_ID` | API key ID (required) |
+| `--api-key-file` | `REMOTE_SIGNER_API_KEY_FILE` | Path to Ed25519 private key PEM |
+| `--api-key-keystore` | `REMOTE_SIGNER_API_KEY_KEYSTORE` | Path to encrypted keystore (mutually exclusive with `--api-key-file`) |
+| `--output` / `-o` | — | Output format: `table` (default), `json`, `yaml` |
+| `--json` | — | Shorthand for `-o json` |
+
+Auth auto-discovery: when neither `--api-key-file` nor `--api-key-keystore` is set, the CLI auto-discovers:
+- For `--api-key-id admin`: looks for `admin.keystore.json` in `~/.remote-signer/apikeys/`
+- For other IDs: looks for `<id>.key.priv` PEM in `~/.remote-signer/apikeys/`
+
 ### Key Commands
 
 ```bash
@@ -281,11 +298,47 @@ Client → Ed25519 Auth → Middleware Pipeline → Handler → SignService
 ./remote-signer evm simulate tx --chain-id 1 --from 0x... --to 0x...
 ./remote-signer evm broadcast <signed-tx-hex> --chain-id 1
 
-# Presets
-./remote-signer preset list
-./remote-signer preset create-from polymarket_safe_polygon --write --config config.yaml \
-  --set allowed_safe_addresses=0xYourSafe
+# Template management (remote CRUD via daemon API)
+./remote-signer template list [--type evm_js] [--source uploaded] [--limit 50]
+./remote-signer template get <template-id>                 # Full details with test cases & variables
+./remote-signer template validate <template-id>            # Run test cases on server
+./remote-signer template create -f template.yaml            # Upload new template
+./remote-signer template update <template-id> -f update.yaml
+./remote-signer template delete <template-id>
+./remote-signer template instantiate <template-id> -f req.yaml  # Create rule instance from template
+./remote-signer template revoke-instance <rule-id>
+
+# Local preset management (file-based, in rules/presets/)
+./remote-signer preset list [--presets-dir rules/presets]   # List local preset files
+./remote-signer preset vars <preset-name>                   # Show variable descriptions
+./remote-signer preset create-from <preset-name>            # Output rule YAML to stdout
+./remote-signer preset create-from <preset-name> --config config.yaml --write \
+  --set chain_id=56 --set token_address=0x...               # Merge rules into config
+
+# Remote preset management (via daemon API)
+./remote-signer preset remote-list                          # List presets from server
+./remote-signer preset remote-get <preset-id>               # Get preset + variables table
+./remote-signer preset apply <preset-id> \                  # Apply preset via API (creates rules)
+  --set chain_id=56 --set token_address=0x... \
+  --set max_approve_amount=0 --set allowed_spenders=0x... \
+  --api-key-id admin
+./remote-signer preset validate <preset-id> \               # Validate preset test cases
+  --set chain_id=56 --set token_address=0x... \
+  --api-key-id admin
 ```
+
+### Remote Preset Apply Protocol (Least-Privilege)
+
+Before applying a preset to create rules, you MUST:
+
+1. **Query variables**: `preset remote-get <id>` to see all variables with descriptions, types, and defaults
+2. **Query template**: `template get <template-id>` to see the full template with variable constraints
+3. **Assess each variable's default danger** — the universal rule:
+   - `""` (empty) with `requireInListIfNonEmpty()` = **any value allowed** (no restriction)
+   - `"-1"` with `requireLte()` = **no cap** (unlimited)
+4. **Fill EVERY variable** that controls scope — never leave optional variables at permissive defaults
+5. **Ask the user** before deciding final values. Do not pick values yourself.
+6. For the detailed protocol, see the `remote-signer-rule-development` skill.
 
 ### Bootstrap (first-time admin setup)
 

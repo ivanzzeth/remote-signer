@@ -9,6 +9,7 @@ import {
 import {
   Badge,
   Card,
+  CodeBlock,
   ErrorBanner,
   Loading,
   PageHeader,
@@ -200,16 +201,18 @@ function RuleDetail({ rule }: { rule: SubRule }) {
   return (
     <div className="ml-5 mt-2 space-y-3 border-l-2 border-ink-100 pl-3 text-xs">
       {script && (
-        <CodeBlock title="config.script" body={script} lang="js" />
+        <CodeBlock body={script} lang="js" maxH={12} defaultOpen title="config.script" />
       )}
       {expression && (
-        <CodeBlock title="config.expression" body={expression} lang="sol" />
+        <CodeBlock body={expression} lang="sol" maxH={12} defaultOpen title="config.expression" />
       )}
       {Object.keys(otherCfg).length > 0 && (
         <CodeBlock
-          title={script || expression ? "config (other)" : "config"}
           body={JSON.stringify(otherCfg, null, 2)}
           lang="json"
+          maxH={12}
+          defaultOpen
+          title={script || expression ? "config (other)" : "config"}
         />
       )}
       {testCases.length > 0 && (
@@ -217,47 +220,20 @@ function RuleDetail({ rule }: { rule: SubRule }) {
           <summary className="cursor-pointer text-ink-700">
             Test cases ({testCases.length})
           </summary>
-          <CodeBlock
-            title=""
-            body={JSON.stringify(testCases, null, 2)}
-            lang="json"
-            compact
-          />
+          <div className="mt-1">
+            <CodeBlock
+              body={JSON.stringify(testCases, null, 2)}
+              lang="json"
+              maxH={12}
+              defaultOpen
+            />
+          </div>
         </details>
       )}
     </div>
   );
 }
 
-function CodeBlock({
-  title,
-  body,
-  lang,
-  compact,
-}: {
-  title: string;
-  body: string;
-  lang: string;
-  compact?: boolean;
-}) {
-  return (
-    <div>
-      {title && (
-        <div className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-wider text-ink-500">
-          <span>{title}</span>
-          <span className="font-mono">{lang}</span>
-        </div>
-      )}
-      <pre
-        className={`overflow-auto rounded bg-ink-50 p-2 font-mono text-[11px] leading-snug text-ink-800 ${
-          compact ? "max-h-48" : "max-h-96"
-        }`}
-      >
-        {body}
-      </pre>
-    </div>
-  );
-}
 
 interface SubRule {
   id?: string;

@@ -5,7 +5,7 @@ import {
   type RequestStatus,
   type RequestStatusResponse,
 } from "remote-signer-client";
-import { Badge, Card, ErrorBanner, Loading, shorten } from "../components/ui";
+import { Badge, Card, CodeBlock, ErrorBanner, Loading, shorten } from "../components/ui";
 import { SimulationPreview } from "../components/SimulationPreview";
 import { getClient } from "../lib/auth";
 import { useApi } from "../lib/useApi";
@@ -345,9 +345,12 @@ function Highlight({
 
 function JsonBlock({ value }: { value: unknown }) {
   return (
-    <pre className="max-h-96 overflow-auto rounded-md border border-ink-200 bg-ink-50 p-3 font-mono text-xs leading-relaxed text-ink-800">
-      {JSON.stringify(value, null, 2)}
-    </pre>
+    <CodeBlock
+      body={JSON.stringify(value, null, 2)}
+      lang="json"
+      maxH={24}
+      defaultOpen
+    />
   );
 }
 
@@ -460,14 +463,13 @@ function ApprovalAttribution({ req }: { req: RequestStatusResponse }) {
 
 function HexBlock({ label, value }: { label: string; value: string }) {
   return (
-    <div>
-      <div className="mb-1 text-[11px] uppercase tracking-wider text-ink-500">
-        {label}
-      </div>
-      <code className="block break-all rounded-md border border-ink-200 bg-ink-50 p-3 font-mono text-xs text-ink-800">
-        {value}
-      </code>
-    </div>
+    <CodeBlock
+      body={value}
+      lang="hex"
+      maxH={12}
+      defaultOpen
+      title={label}
+    />
   );
 }
 
