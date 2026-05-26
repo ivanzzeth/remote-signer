@@ -10,10 +10,10 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/ivanzzeth/remote-signer/internal/api/handler"
-	"github.com/ivanzzeth/remote-signer/internal/bootstrap"
 	evmhandler "github.com/ivanzzeth/remote-signer/internal/api/handler/evm"
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/audit"
+	"github.com/ivanzzeth/remote-signer/internal/bootstrap"
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/config"
 	"github.com/ivanzzeth/remote-signer/internal/core/auth"
@@ -536,7 +536,8 @@ func (r *Router) setupRoutes() error {
 			handler.WithTemplateRequireApproval(r.config.RequireApprovalForAgentRules),
 			handler.WithTemplateAPIKeyRepo(r.config.APIKeyRepo),
 			handler.WithTemplateJSEvaluator(r.config.JSEvaluator),
-			)
+			handler.WithTemplateSolidityValidator(r.config.SolidityValidator),
+		)
 		if err != nil {
 			return err
 		}
@@ -565,6 +566,7 @@ func (r *Router) setupRoutes() error {
 			handler.WithPresetRequireApproval(r.config.RequireApprovalForAgentRules),
 			handler.WithPresetAPIKeyRepo(r.config.APIKeyRepo),
 			handler.WithPresetJSEvaluator(r.config.JSEvaluator),
+			handler.WithPresetSolidityValidator(r.config.SolidityValidator),
 		)
 		if err != nil {
 			return err

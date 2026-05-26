@@ -111,13 +111,14 @@ chains:
       batch_window: "1s"                   # accumulation window for future batch sign fallback
       batch_max_size: 20                   # max txs per batch
 
-    # Foundry configuration for Solidity expression rules
-    foundry:
-      enabled: true
-      forge_path: ""
-      cache_dir: "./data/forge-cache"
-      temp_dir: "./data/forge-workspace"
-      timeout: "30s"
+    # Foundry (forge) for Solidity expression rules. Default: auto-detect from PATH.
+    # Uncomment to explicitly disable, or to override default paths:
+    #foundry:
+    #  enabled: false
+    #  forge_path: ""                    # empty = auto-detect from PATH
+    #  cache_dir: "./data/forge-cache"   # compiled script cache
+    #  temp_dir: "./data/forge-workspace"
+    #  timeout: "30s"
 
 notify:
   slack:

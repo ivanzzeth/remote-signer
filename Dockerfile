@@ -1,4 +1,9 @@
 # =============================================================================
+# Stage 0: Foundry toolchain — provides forge for Solidity rule evaluation
+# =============================================================================
+FROM ghcr.io/foundry-rs/foundry:latest AS foundry
+
+# =============================================================================
 # Stage 1: Build the JS SDK and the React UI bundle
 # =============================================================================
 #
@@ -95,6 +100,10 @@ RUN useradd -m -u 1000 signer
 WORKDIR /app
 
 COPY --from=gobuilder /remote-signer /app/remote-signer
+
+# forge for Solidity expression rule evaluation (compiled + validated at sign-time).
+# Cast and anvil are intentionally omitted — only forge is needed at runtime.
+COPY --from=foundry /usr/local/bin/forge /usr/local/bin/forge
 
 RUN mkdir -p /app/data /app/data/keystores /app/data/hd-wallets /var/cache/remote-signer/forge && \
     chown -R signer:signer /app /var/cache/remote-signer

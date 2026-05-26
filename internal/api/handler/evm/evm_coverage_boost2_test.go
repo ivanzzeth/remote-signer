@@ -581,6 +581,50 @@ func TestCreateRule_AgentBlockedSolidity(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
 
+func TestCreateRule_SolidityForgeUnavailable(t *testing.T) {
+	repo := newMockRuleRepo()
+	h, err := NewRuleHandler(repo, slog.Default()) // no WithSolidityValidator
+	require.NoError(t, err)
+
+	body := CreateRuleRequest{
+		Name: "sol-no-forge",
+		Type: string(types.RuleTypeEVMSolidityExpression),
+		Mode: "whitelist",
+		Config: map[string]interface{}{
+			"expression": "true",
+		},
+		Enabled: true,
+	}
+	rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules", body, ruleAdminKey())
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	assert.Contains(t, rec.Body.String(), "forge not available")
+}
+
+func TestUpdateRule_SolidityForgeUnavailable(t *testing.T) {
+	repo := newMockRuleRepo()
+	ct := types.ChainTypeEVM
+	rule := &types.Rule{
+		ID:        "rule_sol_upd",
+		Name:      "sol-upd",
+		Type:      types.RuleTypeEVMSolidityExpression,
+		Mode:      types.RuleModeWhitelist,
+		Source:    types.RuleSourceAPI,
+		ChainType: &ct,
+		Config:    json.RawMessage(`{"expression":"true"}`),
+		Enabled:   true,
+		Owner:     "admin-key",
+	}
+	repo.addRule(rule)
+
+	h, err := NewRuleHandler(repo, slog.Default()) // no WithSolidityValidator
+	require.NoError(t, err)
+
+	body := `{"name":"updated-sol"}`
+	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	assert.Contains(t, rec.Body.String(), "forge not available")
+}
+
 func TestCreateRule_MaxRulesExceeded(t *testing.T) {
 	repo := newMockRuleRepo()
 	h, err := NewRuleHandler(repo, slog.Default(),

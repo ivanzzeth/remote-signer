@@ -99,8 +99,7 @@ services:
         soft: -1
         hard: -1
     environment:
-      # PATH: /app/data/foundry first so forge/cast match repo layout (./data/foundry/)
-      PATH: "/app/data/foundry:/usr/local/bin:/usr/bin:/bin"
+      # PATH prioritises /usr/local/bin (forge) over system defaults.
       # Database connection (host network: connect via localhost, port exposed by postgres container)
       DATABASE_DSN: "postgres://${POSTGRES_USER:-signer}:${POSTGRES_PASSWORD:-signer_password}@127.0.0.1:${POSTGRES_PORT:-25432}/${POSTGRES_DB:-remote_signer}?sslmode=disable"
       # Optional: additional signers
@@ -124,7 +123,10 @@ services:
       - ./certs:/app/certs:ro
       - ./data/keystores:/app/data/keystores
       - ./data/hd-wallets:/app/data/hd-wallets
-      - ./data/foundry:/app/data/foundry:ro
+      # forge is now built into the Docker image (COPY --from=foundry).
+      # The host bind mount below is left commented-out as an optional
+      # override for custom forge builds:
+      # - ./data/foundry:/app/data/foundry:ro
       - ./data/forge-workspace:/app/data/forge-workspace
       - ./data/forge-cache:/app/data/forge-cache
       # Solc compiler cache: forge auto-downloads solc by pragma version (bind mount so signer can write)

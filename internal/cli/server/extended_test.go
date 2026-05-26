@@ -109,7 +109,8 @@ func TestApplyNotifySnapshot(t *testing.T) {
 }
 
 func TestEVMSnapshotConversionRoundTrip(t *testing.T) {
-	foundryCfg := config.FoundryConfig{Enabled: true, ForgePath: "/usr/bin/forge", Timeout: 30 * time.Second}
+	solidityEnabled := true
+	foundryCfg := config.FoundryConfig{Enabled: &solidityEnabled, ForgePath: "/usr/bin/forge", Timeout: 30 * time.Second}
 	foundrySnap := foundryToSnapshot(foundryCfg)
 	if !foundrySnap.Enabled || foundrySnap.ForgePath != "/usr/bin/forge" {
 		t.Fatalf("foundry: %+v", foundrySnap)
@@ -183,7 +184,7 @@ func TestApplyEVMSnapshots(t *testing.T) {
 		&settings.RPCGatewaySnapshot{BaseURL: "https://rpc.test"},
 		&settings.MaterialCheckSnapshot{Enabled: true, Interval: 1 * time.Hour},
 	)
-	if !cfg.Chains.EVM.Foundry.Enabled || cfg.Chains.EVM.Foundry.ForgePath != "/test/forge" {
+	if !cfg.Chains.EVM.Foundry.FoundryEnabled() || cfg.Chains.EVM.Foundry.ForgePath != "/test/forge" {
 		t.Fatal("foundry not applied")
 	}
 	if !cfg.Chains.EVM.Simulation.Enabled || cfg.Chains.EVM.Simulation.Timeout != 10*time.Second {

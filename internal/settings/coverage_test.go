@@ -179,13 +179,13 @@ func TestSeedAuditMonitor(t *testing.T) {
 	err := SeedAuditMonitor(ctx, store, &AuditMonitorSnapshot{Enabled: true, Interval: 5 * time.Minute})
 	require.NoError(t, err)
 
-	// Second call is no-op
+	// Second call overwrites because first was also bootstrap-created.
 	err = SeedAuditMonitor(ctx, store, &AuditMonitorSnapshot{Enabled: false})
 	require.NoError(t, err)
 
 	mgr := NewManager(store, discardLog())
 	require.NoError(t, mgr.Reload(ctx))
-	assert.True(t, mgr.AuditMonitor().Enabled)
+	assert.False(t, mgr.AuditMonitor().Enabled)
 }
 
 func TestSeedBlocklist(t *testing.T) {
@@ -200,7 +200,7 @@ func TestSeedBlocklist(t *testing.T) {
 
 	mgr := NewManager(store, discardLog())
 	require.NoError(t, mgr.Reload(ctx))
-	assert.True(t, mgr.Blocklist().Enabled)
+	assert.False(t, mgr.Blocklist().Enabled)
 }
 
 func TestSeedSimulation(t *testing.T) {
@@ -215,7 +215,7 @@ func TestSeedSimulation(t *testing.T) {
 
 	mgr := NewManager(store, discardLog())
 	require.NoError(t, mgr.Reload(ctx))
-	assert.True(t, mgr.Simulation().Enabled)
+	assert.False(t, mgr.Simulation().Enabled)
 }
 
 func TestSeedRPCGateway(t *testing.T) {
@@ -225,12 +225,13 @@ func TestSeedRPCGateway(t *testing.T) {
 	err := SeedRPCGateway(ctx, store, &RPCGatewaySnapshot{BaseURL: "https://rpc.example.com"})
 	require.NoError(t, err)
 
+	// Overwrites because first was also bootstrap-created.
 	err = SeedRPCGateway(ctx, store, &RPCGatewaySnapshot{BaseURL: "https://other.example.com"})
 	require.NoError(t, err)
 
 	mgr := NewManager(store, discardLog())
 	require.NoError(t, mgr.Reload(ctx))
-	assert.Equal(t, "https://rpc.example.com", mgr.RPCGateway().BaseURL)
+	assert.Equal(t, "https://other.example.com", mgr.RPCGateway().BaseURL)
 }
 
 func TestSeedMaterialCheck(t *testing.T) {
@@ -245,7 +246,7 @@ func TestSeedMaterialCheck(t *testing.T) {
 
 	mgr := NewManager(store, discardLog())
 	require.NoError(t, mgr.Reload(ctx))
-	assert.True(t, mgr.MaterialCheck().Enabled)
+	assert.False(t, mgr.MaterialCheck().Enabled)
 }
 
 // =============================================================================

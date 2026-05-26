@@ -21,6 +21,26 @@ A secure, policy-driven signing service for EVM chains. Controls **what** gets s
 | **Go SDK** | `pkg/client` — resource-based Go client (`client.EVM.Sign.Execute`, `client.Templates.Get`, etc.) |
 | **Rust SDK** | `pkg/rs-client` — native Rust client with Ed25519 authentication |
 
+### Solidity Expression Rules
+
+The `evm_solidity_expression` rule type requires **forge** (Foundry) to compile and evaluate Solidity expressions at sign-time. If forge is unavailable, the server starts without Solidity support, and all Solidity rule operations (create, update, instantiate, preset apply) return HTTP 503.
+
+**Install forge:**
+
+```bash
+# Recommended: foundryup (macOS, Linux, WSL)
+curl -L https://foundry.paradigm.xyz | bash
+foundryup
+
+# Homebrew (macOS / Linux)
+brew install foundry
+
+# Verify
+forge --version
+```
+
+The Docker image includes forge automatically via multi-stage build — no host installation needed.
+
 ## Quick Start
 
 ### One-Command Single-Instance (SQLite, no Docker, no config)

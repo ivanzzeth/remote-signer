@@ -466,3 +466,62 @@ func TestPresetHandler_Apply_BadRequestBody(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "invalid request body")
 }
+
+func TestPresetHandler_Apply_SolidityForgeUnavailable(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
+		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
+	})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&types.RulePreset{}, &types.RuleTemplate{}))
+
+	tmplRepo, err := storage.NewGormTemplateRepository(db)
+	require.NoError(t, err)
+	presetRepo, err := storage.NewGormPresetRepository(db)
+	require.NoError(t, err)
+
+	// Seed a solidity template
+	tmpl := &types.RuleTemplate{
+		ID:          "evm/sol-tmpl",
+		Name:        "Solidity Template",
+		Type:        types.RuleTypeEVMSolidityExpression,
+		Mode:        types.RuleModeWhitelist,
+		ChainType:   types.ChainType("evm"),
+		Source:      types.RuleSourceFile,
+		ContentHash: "h1",
+		Enabled:     true,
+		Config:      mustJSONP(t, map[string]interface{}{"expression": "true"}),
+	}
+	err = tmplRepo.Create(context.Background(), tmpl)
+	require.NoError(t, err)
+
+	// Seed a preset that references the solidity template
+	err = presetRepo.Create(context.Background(), &types.RulePreset{
+		ID:          "evm/sol-preset",
+		Name:        "Solidity Preset",
+		ChainType:   types.ChainType("evm"),
+		TemplateIDs: mustJSONP(t, []string{"evm/sol-tmpl"}),
+		Source:      types.RuleSourceFile,
+		ContentHash: "h2",
+		Enabled:     true,
+	})
+	require.NoError(t, err)
+
+	// No WithPresetSolidityValidator → solidityValidator is nil
+	handler, err := NewPresetHandler(
+		presetRepo,
+		tmplRepo,
+		db,
+		&service.TemplateService{},
+		false,
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+	require.NoError(t, err)
+
+	ctx := contextWithKey(t, types.RoleAdmin, "admin-key")
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/presets/evm%2Fsol-preset/apply",
+		strings.NewReader(`{}`)).WithContext(ctx)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	assert.Contains(t, w.Body.String(), "forge not available")
+}

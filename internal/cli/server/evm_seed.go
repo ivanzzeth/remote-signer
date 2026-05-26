@@ -12,7 +12,7 @@ import (
 // foundryToSnapshot lifts cfg.Chains.EVM.Foundry into the settings snapshot.
 func foundryToSnapshot(f config.FoundryConfig) *settings.FoundrySnapshot {
 	return &settings.FoundrySnapshot{
-		Enabled:   f.Enabled,
+		Enabled:   f.FoundryEnabled(),
 		ForgePath: f.ForgePath,
 		CacheDir:  f.CacheDir,
 		TempDir:   f.TempDir,
@@ -110,8 +110,9 @@ func applyEVMSnapshots(cfg *config.Config,
 		return
 	}
 	if foundry != nil {
+		enabled := foundry.Enabled
 		cfg.Chains.EVM.Foundry = config.FoundryConfig{
-			Enabled:   foundry.Enabled,
+			Enabled:   &enabled,
 			ForgePath: foundry.ForgePath,
 			CacheDir:  foundry.CacheDir,
 			TempDir:   foundry.TempDir,
