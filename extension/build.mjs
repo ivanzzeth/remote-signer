@@ -20,6 +20,15 @@ await esbuild.build({
   outfile: path.join(__dirname, "background.js"),
   minify: false,
   sourcemap: false,
+  banner: {
+    // Proxy/CLI mode support: web3-agent-browser (and other headless
+    // launchers) inject runtime config via importScripts("bg-config.js"),
+    // which sets self.__WEB3_AGENT_BROWSER_CONFIG__. When this file
+    // exists the extension reads its config from there and skips
+    // chrome.storage, enabling zero-click headless operation.
+    // Swallowed silently so interactive popup users never notice.
+    js: 'try { importScripts("bg-config.js"); } catch(e) {}',
+  },
   define: {
     "process.env.NODE_ENV": '"production"',
     global: "self",
