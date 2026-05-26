@@ -60,8 +60,15 @@ func SeedWeb(ctx context.Context, store Store, s *WebSnapshot) error {
 }
 
 func seedIfMissing(ctx context.Context, store Store, key Group, value any) error {
-	_, err := store.Get(ctx, key)
+	row, err := store.Get(ctx, key)
 	if err == nil {
+		// Overwrite rows that a previous version's bootstrap wrote so
+		// code-default changes propagate on upgrade without clobbering
+		// values set by an admin through the API/UI.
+		if row.UpdatedBy == UpdatedByBootstrap {
+			mgr := &Manager{store: store, interval: DefaultRefreshInterval}
+			return mgr.put(ctx, key, value, UpdatedByBootstrap)
+		}
 		return nil
 	}
 	if !errors.Is(err, ErrNotFound) {

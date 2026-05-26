@@ -443,7 +443,7 @@ func (ts *TestServer) Start() error {
 	// Register Solidity expression evaluator for blocklist rules (optional - requires forge)
 	// Use config if available, otherwise use defaults
 	var solidityEvalConfig evm.SolidityEvaluatorConfig
-	if cfg != nil && cfg.Chains.EVM != nil && cfg.Chains.EVM.Foundry.Enabled {
+	if cfg != nil && cfg.Chains.EVM != nil && cfg.Chains.EVM.Foundry.FoundryEnabled() {
 		solidityEvalConfig = evm.SolidityEvaluatorConfig{
 			ForgePath: cfg.Chains.EVM.Foundry.ForgePath,
 			CacheDir:  cfg.Chains.EVM.Foundry.CacheDir,

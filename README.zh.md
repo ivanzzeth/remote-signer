@@ -6,6 +6,26 @@
 
 面向 EVM 链的安全、策略驱动的签名服务。通过规则引擎控制**签什么**，而不仅是**谁可以签**。
 
+### Solidity 表达式规则
+
+`evm_solidity_expression` 规则类型需要 **forge**（Foundry）在签名时编译和评估 Solidity 表达式。如果 forge 不可用，服务器启动时将禁用 Solidity 支持，所有 Solidity 规则操作（创建、更新、实例化、预设应用）返回 HTTP 503。
+
+**安装 forge：**
+
+```bash
+# 推荐：foundryup（macOS、Linux、WSL）
+curl -L https://foundry.paradigm.xyz | bash
+foundryup
+
+# Homebrew（macOS / Linux）
+brew install foundry
+
+# 验证
+forge --version
+```
+
+Docker 镜像通过多阶段构建自动包含 forge — 无需在宿主机安装。
+
 ## 快速开始
 
 ### 一条命令单实例启动（SQLite，零配置）

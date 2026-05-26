@@ -224,11 +224,16 @@ type SignerMaterialCheckConfig struct {
 
 // FoundryConfig contains Foundry (forge) configuration for Solidity rules
 type FoundryConfig struct {
-	Enabled   bool          `yaml:"enabled"`
+	Enabled   *bool         `yaml:"enabled"`  // nil = auto-detect (default), true = enable, false = explicitly disable
 	ForgePath string        `yaml:"forge_path"` // path to forge binary, empty = auto-detect from PATH
 	CacheDir  string        `yaml:"cache_dir"`  // cache directory for compiled scripts
 	TempDir   string        `yaml:"temp_dir"`   // workspace dir for rule scripts and lib/forge-std; empty = os.TempDir()/remote-signer-rules. For Docker, set to /app/data/forge-workspace and mount repo data/forge-workspace.
 	Timeout   time.Duration `yaml:"timeout"`    // max execution time per rule (default: 30s)
+}
+
+// FoundryEnabled returns true if Foundry is not explicitly disabled.
+func (f FoundryConfig) FoundryEnabled() bool {
+	return f.Enabled == nil || *f.Enabled
 }
 
 // SimulationConfig contains transaction simulation engine configuration.

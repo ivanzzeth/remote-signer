@@ -457,6 +457,75 @@ func TestInstantiateTemplate_InvalidJSONBody(t *testing.T) {
 	assert.Contains(t, errResp.Error, "invalid request body")
 }
 
+func TestInstantiateTemplate_SolidityForgeUnavailable(t *testing.T) {
+	tmplRepo := newMockTemplateRepo()
+	ruleRepo := newMockRuleRepo()
+	budgetRepo := newMockBudgetRepo()
+
+	// Single solidity template — templateContainsSolidity returns true
+	tmpl := &types.RuleTemplate{
+		ID:      "tmpl-sol",
+		Name:    "Solidity Template",
+		Type:    types.RuleTypeEVMSolidityExpression,
+		Mode:    types.RuleModeWhitelist,
+		Config:  []byte(`{"expression":"true"}`),
+		Source:  types.RuleSourceAPI,
+		Enabled: true,
+	}
+	tmpl.CreatedAt = time.Now()
+	tmpl.UpdatedAt = time.Now()
+	seedTemplate(t, tmplRepo, tmpl)
+
+	svc := newTemplateService(t, tmplRepo, ruleRepo, budgetRepo)
+	h, err := NewTemplateHandler(tmplRepo, svc, newTestLogger(), false) // no WithTemplateSolidityValidator
+	require.NoError(t, err)
+
+	reqBody := map[string]interface{}{"variables": map[string]string{}}
+	rr := doRequest(t, h, http.MethodPost, "/api/v1/templates/tmpl-sol/instantiate", reqBody, testAPIKey())
+	assert.Equal(t, http.StatusServiceUnavailable, rr.Code)
+	assert.Contains(t, rr.Body.String(), "forge not available")
+}
+
+func TestInstantiateTemplate_SolidityForgeUnavailable_Bundle(t *testing.T) {
+	tmplRepo := newMockTemplateRepo()
+	ruleRepo := newMockRuleRepo()
+	budgetRepo := newMockBudgetRepo()
+
+	// template_bundle with a solidity sub-rule
+	tmpl := &types.RuleTemplate{
+		ID:   "tmpl-bundle-sol",
+		Name: "Bundle With Solidity",
+		Type: "template_bundle",
+		Mode: types.RuleModeWhitelist,
+		Config: mustJSONP(t, map[string]interface{}{
+			"rules": []map[string]interface{}{
+				{
+					"name": "sub-sol",
+					"type": "evm_solidity_expression",
+					"mode": "whitelist",
+					"config": map[string]interface{}{
+						"expression": "true",
+					},
+				},
+			},
+		}),
+		Source:  types.RuleSourceAPI,
+		Enabled: true,
+	}
+	tmpl.CreatedAt = time.Now()
+	tmpl.UpdatedAt = time.Now()
+	seedTemplate(t, tmplRepo, tmpl)
+
+	svc := newTemplateService(t, tmplRepo, ruleRepo, budgetRepo)
+	h, err := NewTemplateHandler(tmplRepo, svc, newTestLogger(), false) // no WithTemplateSolidityValidator
+	require.NoError(t, err)
+
+	reqBody := map[string]interface{}{"variables": map[string]string{}}
+	rr := doRequest(t, h, http.MethodPost, "/api/v1/templates/tmpl-bundle-sol/instantiate", reqBody, testAPIKey())
+	assert.Equal(t, http.StatusServiceUnavailable, rr.Code)
+	assert.Contains(t, rr.Body.String(), "forge not available")
+}
+
 func TestInstantiateTemplate_ResolveTemplateError(t *testing.T) {
 	// Use the errTemplateRepo to inject a get error — ResolveTemplate calls repo.Get internally
 	repo := newErrTemplateRepo()

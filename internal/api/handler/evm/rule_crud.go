@@ -178,8 +178,12 @@ func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
 		rule.SignerAddress = req.SignerAddress
 	}
 
-	// Validate Solidity expression rules if validator is available
-	if rule.Type == types.RuleTypeEVMSolidityExpression && h.solidityValidator != nil {
+	// Reject solidity rules when forge is unavailable
+	if rule.Type == types.RuleTypeEVMSolidityExpression {
+		if h.solidityValidator == nil {
+			h.writeError(w, "solidity expression rules require forge; forge not available", http.StatusServiceUnavailable)
+			return
+		}
 		if err := h.validateSolidityRule(r.Context(), rule); err != nil {
 			h.logger.Error("rule validation failed", "error", err, "rule_type", rule.Type)
 			h.writeError(w, "rule validation failed", http.StatusBadRequest)
@@ -296,12 +300,12 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 			h.writeError(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-			// Preserve test_cases from request if provided
-			configMap := req.Config
-			if rule.Type == types.RuleTypeEVMJS && len(req.TestCases) > 0 {
-				configMap["test_cases"] = req.TestCases
-			}
-			configJSON, err := json.Marshal(configMap)
+		// Preserve test_cases from request if provided
+		configMap := req.Config
+		if rule.Type == types.RuleTypeEVMJS && len(req.TestCases) > 0 {
+			configMap["test_cases"] = req.TestCases
+		}
+		configJSON, err := json.Marshal(configMap)
 		if err != nil {
 			h.writeError(w, "invalid config", http.StatusBadRequest)
 			return
@@ -335,12 +339,18 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 	}
 	rule.UpdatedAt = time.Now()
 
-	// Validate Solidity expression rules if config was updated and validator is available
-	if req.Config != nil && rule.Type == types.RuleTypeEVMSolidityExpression && h.solidityValidator != nil {
-		if err := h.validateSolidityRule(r.Context(), rule); err != nil {
-			h.logger.Error("rule validation failed", "error", err, "rule_id", ruleID)
-			h.writeError(w, "rule validation failed", http.StatusBadRequest)
+	// Reject solidity rules when forge is unavailable
+	if rule.Type == types.RuleTypeEVMSolidityExpression {
+		if h.solidityValidator == nil {
+			h.writeError(w, "solidity expression rules require forge; forge not available", http.StatusServiceUnavailable)
 			return
+		}
+		if req.Config != nil {
+			if err := h.validateSolidityRule(r.Context(), rule); err != nil {
+				h.logger.Error("rule validation failed", "error", err, "rule_id", ruleID)
+				h.writeError(w, "rule validation failed", http.StatusBadRequest)
+				return
+			}
 		}
 	}
 

@@ -117,6 +117,12 @@ func (h *TemplateHandler) instantiateTemplate(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Reject solidity templates when forge is unavailable
+	if h.solidityValidator == nil && templateContainsSolidity(tmpl) {
+		h.writeError(w, "solidity expression rules require forge; forge not available", http.StatusServiceUnavailable)
+		return
+	}
+
 	// Apply RBAC ownership
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey != nil {

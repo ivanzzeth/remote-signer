@@ -135,6 +135,16 @@ chains:
 | `temp_dir` | string | -- | Workspace directory with forge-std |
 | `timeout` | duration | `30s` | Max execution time per rule evaluation |
 
+### Auto-detection
+
+When `forge_path` is empty, the server auto-detects `forge` from `$PATH`. If found, the Solidity rule evaluator is enabled automatically.
+
+If forge is not found:
+- **Auto-detect** (`forge_path: ""`): a warning is logged and the server starts without Solidity support. All Solidity-related API operations (rule creation/update, template instantiation, preset apply) return **503 Service Unavailable**.
+- **Explicit path** (e.g. `forge_path: "/usr/bin/forge"`): a fatal error is raised — the admin explicitly configured a path that doesn't exist.
+
+Installing forge after startup requires a server restart. Use `foundryup` (recommended) or any other installation method. In the Docker image, `forge` is included via multi-stage build from `ghcr.io/foundry-rs/foundry`.
+
 ## Simulation
 
 Transaction simulation uses `eth_simulateV1` through `rpc_gateway` to predict balance changes, gas usage, and approval detection.

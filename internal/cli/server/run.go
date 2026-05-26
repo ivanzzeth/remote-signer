@@ -183,7 +183,7 @@ func Run(args []string) error {
 	// ---- Rule validation (before signer init to avoid password prompts) ----
 	var solidityEval *evm.SolidityRuleEvaluator
 	var solidityValidator *evm.SolidityRuleValidator
-	if cfg.Chains.EVM != nil && cfg.Chains.EVM.Foundry.Enabled {
+	if cfg.Chains.EVM != nil && cfg.Chains.EVM.Foundry.FoundryEnabled() {
 		solidityEval, err = evm.NewSolidityRuleEvaluator(evm.SolidityEvaluatorConfig{
 			ForgePath: cfg.Chains.EVM.Foundry.ForgePath,
 			CacheDir:  cfg.Chains.EVM.Foundry.CacheDir,
@@ -191,23 +191,47 @@ func Run(args []string) error {
 			Timeout:   cfg.Chains.EVM.Foundry.Timeout,
 		}, log)
 		if err != nil {
-			return fmt.Errorf("failed to create Solidity rule evaluator: %w", err)
+			// Auto-detect mode (forge_path empty): warn and disable solidity.
+			// Explicit path: fatal — admin explicitly configured a bad path.
+			if cfg.Chains.EVM.Foundry.ForgePath == "" {
+				log.Warn("forge not found in PATH, solidity expression rules disabled", "error", err)
+				solidityEval = nil
+			} else {
+				return fmt.Errorf("forge not found at configured path %q: %w", cfg.Chains.EVM.Foundry.ForgePath, err)
+			}
 		}
-		log.Info("Solidity expression evaluator created (Foundry)")
+		if solidityEval != nil {
+			log.Info("Solidity expression evaluator created (Foundry)")
 
-		solidityValidator, err = evm.NewSolidityRuleValidator(solidityEval, log)
-		if err != nil {
-			return fmt.Errorf("failed to create Solidity rule validator: %w", err)
-		}
+			solidityValidator, err = evm.NewSolidityRuleValidator(solidityEval, log)
+			if err != nil {
+				return fmt.Errorf("failed to create Solidity rule validator: %w", err)
+			}
 
-		if err := validateSolidityRules(context.Background(), repos.ruleRepo, solidityEval, log); err != nil {
-			return fmt.Errorf("rule validation failed: %w", err)
+			if err := validateSolidityRules(context.Background(), repos.ruleRepo, solidityEval, log); err != nil {
+				return fmt.Errorf("rule validation failed: %w", err)
+			}
 		}
 	}
 	if solidityEval == nil {
 		for _, r := range expandedRulesWithFiles {
 			if r.Type == string(types.RuleTypeEVMSolidityExpression) && r.Enabled {
-				return fmt.Errorf("config contains enabled evm_solidity_expression rule %q but Foundry is disabled; enable chains.evm.foundry.enabled or remove the rule", r.Name)
+				return fmt.Errorf("config contains enabled evm_solidity_expression rule %q but Foundry is unavailable; install forge (brew install foundry / foundryup) or remove the rule", r.Name)
+			}
+		}
+		// Warn about DB rules too — API may have created solidity rules
+		// on a previous run when forge was available.
+		dbRules, dbErr := repos.ruleRepo.List(context.Background(), storage.RuleFilter{Limit: -1})
+		if dbErr != nil {
+			log.Warn("failed to list DB rules for solidity check", "error", dbErr)
+		} else {
+			for _, r := range dbRules {
+				if r.Type == types.RuleTypeEVMSolidityExpression && r.Enabled {
+					log.Warn("evm_solidity_expression rule exists in DB but Foundry is unavailable; enable forge or disable the rule",
+						"rule_id", r.ID,
+						"rule_name", r.Name,
+					)
+				}
 			}
 		}
 	}

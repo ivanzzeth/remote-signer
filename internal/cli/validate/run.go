@@ -95,7 +95,7 @@ func Run(args []string) error {
 			return fmt.Errorf("load config for foundry paths: %w", loadErr)
 		}
 		configDir := filepath.Dir(*configPath)
-		if cfg.Chains.EVM != nil && cfg.Chains.EVM.Foundry.Enabled {
+		if cfg.Chains.EVM != nil && cfg.Chains.EVM.Foundry.FoundryEnabled() {
 			if cfg.Chains.EVM.Foundry.CacheDir != "" {
 				cacheDirectory = resolvePath(configDir, cfg.Chains.EVM.Foundry.CacheDir)
 			}

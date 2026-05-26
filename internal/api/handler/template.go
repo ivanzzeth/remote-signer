@@ -17,13 +17,14 @@ import (
 
 // TemplateHandler handles template management and instance creation endpoints
 type TemplateHandler struct {
-	templateRepo    storage.TemplateRepository
-	templateService *service.TemplateService
-	jsEvaluator     *evm.JSRuleEvaluator
-	readOnly        bool // when true, block all template mutations via API
-	logger          *slog.Logger
-	requireApproval bool
-	apiKeyRepo      storage.APIKeyRepository
+	templateRepo      storage.TemplateRepository
+	templateService   *service.TemplateService
+	jsEvaluator       *evm.JSRuleEvaluator
+	solidityValidator *evm.SolidityRuleValidator
+	readOnly          bool // when true, block all template mutations via API
+	logger            *slog.Logger
+	requireApproval   bool
+	apiKeyRepo        storage.APIKeyRepository
 }
 
 // TemplateHandlerOption is a functional option for TemplateHandler.
@@ -47,6 +48,13 @@ func WithTemplateAPIKeyRepo(repo storage.APIKeyRepository) TemplateHandlerOption
 func WithTemplateJSEvaluator(eval *evm.JSRuleEvaluator) TemplateHandlerOption {
 	return func(h *TemplateHandler) {
 		h.jsEvaluator = eval
+	}
+}
+
+// WithTemplateSolidityValidator sets the Solidity rule validator for template instantiation gating.
+func WithTemplateSolidityValidator(v *evm.SolidityRuleValidator) TemplateHandlerOption {
+	return func(h *TemplateHandler) {
+		h.solidityValidator = v
 	}
 }
 
@@ -184,12 +192,12 @@ func (h *TemplateHandler) ServeInstanceHTTP(w http.ResponseWriter, r *http.Reque
 
 // validateTemplateResponse is the response for POST /api/v1/templates/{id}/validate.
 type validateTemplateResponse struct {
-	TemplateID   string                     `json:"template_id"`
-	TemplateName string                     `json:"template_name"`
-	Results      []*validateRuleResultItem  `json:"results,omitempty"`
-	Total        int                        `json:"total"`
-	Passed       int                        `json:"passed"`
-	Failed       int                        `json:"failed"`
+	TemplateID   string                    `json:"template_id"`
+	TemplateName string                    `json:"template_name"`
+	Results      []*validateRuleResultItem `json:"results,omitempty"`
+	Total        int                       `json:"total"`
+	Passed       int                       `json:"passed"`
+	Failed       int                       `json:"failed"`
 }
 
 // validateRuleResultItem is a single rule's validation result.
@@ -273,7 +281,7 @@ func (h *TemplateHandler) validateTemplate(w http.ResponseWriter, r *http.Reques
 	if err := json.Unmarshal(resolvedConfig, &configDoc); err != nil {
 		// Try flat config directly (non-bundle templates)
 		var flatConfig struct {
-			Script    string                 `json:"script"`
+			Script    string                   `json:"script"`
 			TestCases []map[string]interface{} `json:"test_cases"`
 		}
 		if flatErr := json.Unmarshal(resolvedConfig, &flatConfig); flatErr != nil {

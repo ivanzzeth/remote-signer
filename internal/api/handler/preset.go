@@ -59,16 +59,17 @@ func intFromMap(m map[string]any, key string) int {
 //	POST /api/v1/presets/{id}/apply  — create rule instance(s), one per
 //	                                    template_id, in a single tx
 type PresetHandler struct {
-	presetRepo      storage.PresetRepository
-	templateRepo    storage.TemplateRepository
-	db              *gorm.DB
-	templateSvc     *service.TemplateService
-	jsEvaluator     *evm.JSRuleEvaluator
-	readOnly        bool
-	logger          *slog.Logger
-	auditLogger     *audit.AuditLogger
-	requireApproval bool
-	apiKeyRepo      storage.APIKeyRepository
+	presetRepo        storage.PresetRepository
+	templateRepo      storage.TemplateRepository
+	db                *gorm.DB
+	templateSvc       *service.TemplateService
+	jsEvaluator       *evm.JSRuleEvaluator
+	solidityValidator *evm.SolidityRuleValidator
+	readOnly          bool
+	logger            *slog.Logger
+	auditLogger       *audit.AuditLogger
+	requireApproval   bool
+	apiKeyRepo        storage.APIKeyRepository
 }
 
 // PresetHandlerOption is a functional option for PresetHandler.
@@ -89,6 +90,11 @@ func WithPresetAPIKeyRepo(repo storage.APIKeyRepository) PresetHandlerOption {
 // WithPresetJSEvaluator sets the JS rule evaluator for preset validation.
 func WithPresetJSEvaluator(eval *evm.JSRuleEvaluator) PresetHandlerOption {
 	return func(h *PresetHandler) { h.jsEvaluator = eval }
+}
+
+// WithPresetSolidityValidator sets the Solidity rule validator for preset apply gating.
+func WithPresetSolidityValidator(v *evm.SolidityRuleValidator) PresetHandlerOption {
+	return func(h *PresetHandler) { h.solidityValidator = v }
 }
 
 // NewPresetHandler returns a Registry-backed preset handler. presetRepo
@@ -356,12 +362,12 @@ func (h *PresetHandler) collectTemplateVarDefs(ctx context.Context, ids []string
 
 // validatePresetResponse is the response for POST /api/v1/presets/{id}/validate.
 type validatePresetResponse struct {
-	PresetID   string                     `json:"preset_id"`
-	PresetName string                     `json:"preset_name"`
-	Results    []*validateRuleResultItem  `json:"results,omitempty"`
-	Total      int                        `json:"total"`
-	Passed     int                        `json:"passed"`
-	Failed     int                        `json:"failed"`
+	PresetID   string                    `json:"preset_id"`
+	PresetName string                    `json:"preset_name"`
+	Results    []*validateRuleResultItem `json:"results,omitempty"`
+	Total      int                       `json:"total"`
+	Passed     int                       `json:"passed"`
+	Failed     int                       `json:"failed"`
 }
 
 // validatePreset handles POST /api/v1/presets/{id}/validate.
@@ -643,6 +649,20 @@ func (h *PresetHandler) apply(w http.ResponseWriter, r *http.Request, id string)
 		if v, ok := body.Variables[ov.Name]; !ok || v == "" {
 			h.writeError(w, fmt.Sprintf("required override %q not supplied", ov.Name), http.StatusBadRequest)
 			return
+		}
+	}
+
+	// Reject solidity preset templates when forge is unavailable
+	if h.solidityValidator == nil {
+		for _, tid := range templateIDs {
+			tmpl, tmplErr := h.templateRepo.Get(r.Context(), tid)
+			if tmplErr != nil {
+				continue
+			}
+			if templateContainsSolidity(tmpl) {
+				h.writeError(w, "solidity expression rules require forge; forge not available", http.StatusServiceUnavailable)
+				return
+			}
 		}
 	}
 
