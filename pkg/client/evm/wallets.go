@@ -62,6 +62,17 @@ func (s *WalletService) List(ctx context.Context, filter *ListWalletsFilter) (*L
 	return &resp, nil
 }
 
+// Update updates a wallet by ID.
+func (s *WalletService) Update(ctx context.Context, id string, req *UpdateWalletRequest) (*Wallet, error) {
+	var wallet Wallet
+	path := fmt.Sprintf("/api/v1/wallets/%s", id)
+	err := s.transport.Request(ctx, http.MethodPatch, path, req, &wallet, http.StatusOK)
+	if err != nil {
+		return nil, err
+	}
+	return &wallet, nil
+}
+
 // Delete deletes a wallet by ID (cascade deletes members).
 func (s *WalletService) Delete(ctx context.Context, id string) error {
 	path := fmt.Sprintf("/api/v1/wallets/%s", id)
@@ -95,4 +106,17 @@ func (s *WalletService) ListMembers(ctx context.Context, walletID string) (*List
 		return nil, err
 	}
 	return &resp, nil
+}
+
+// ListSigners lists signers belonging to a wallet (GET /api/v1/evm/wallets/{walletID}/signers).
+func (s *WalletService) ListSigners(ctx context.Context, walletID string) ([]Signer, error) {
+	path := fmt.Sprintf("/api/v1/evm/wallets/%s/signers", walletID)
+	var result struct {
+		Signers []Signer `json:"signers"`
+	}
+	err := s.transport.Request(ctx, http.MethodGet, path, nil, &result, http.StatusOK)
+	if err != nil {
+		return nil, err
+	}
+	return result.Signers, nil
 }

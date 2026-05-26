@@ -350,3 +350,134 @@ pub struct DeriveAddressResponse {
 pub struct ListDerivedAddressesResponse {
     pub derived: Vec<SignerInfo>,
 }
+
+// ── Signer lifecycle ──
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransferOwnershipRequest {
+    pub new_owner_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GrantAccessRequest {
+    pub api_key_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SignerAccessEntry {
+    pub api_key_id: String,
+    pub granted_by: String,
+    pub created_at: OffsetDateTime,
+}
+
+// ── Broadcast ──
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BroadcastRequest {
+    pub chain_id: String,
+    pub signed_tx_hex: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BroadcastResponse {
+    pub tx_hash: String,
+}
+
+// ── Simulation ──
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimulateRequest {
+    pub chain_id: String,
+    pub from: String,
+    pub to: String,
+    #[serde(default)]
+    pub value: Option<String>,
+    #[serde(default)]
+    pub data: Option<String>,
+    #[serde(default)]
+    pub gas: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimulateResponse {
+    pub success: bool,
+    pub gas_used: u64,
+    pub balance_changes: Vec<BalanceChange>,
+    pub events: Vec<SimEvent>,
+    pub has_approval: bool,
+    #[serde(default)]
+    pub revert_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BalanceChange {
+    pub token: String,
+    pub standard: String,
+    pub amount: String,
+    pub direction: String,
+    #[serde(default)]
+    pub token_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimEvent {
+    pub address: String,
+    pub event: String,
+    pub standard: String,
+    pub args: std::collections::HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimulateBatchRequest {
+    pub chain_id: String,
+    pub from: String,
+    pub transactions: Vec<SimulateTx>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimulateTx {
+    pub to: String,
+    #[serde(default)]
+    pub value: Option<String>,
+    #[serde(default)]
+    pub data: Option<String>,
+    #[serde(default)]
+    pub gas: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimulateBatchResponse {
+    pub results: Vec<SimulateResult>,
+    pub net_balance_changes: Vec<BalanceChange>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimulateResult {
+    pub index: i32,
+    pub success: bool,
+    pub gas_used: u64,
+    pub balance_changes: Vec<BalanceChange>,
+    pub events: Vec<SimEvent>,
+    pub has_approval: bool,
+    #[serde(default)]
+    pub revert_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimulationStatusResponse {
+    pub enabled: bool,
+    pub engine_version: String,
+    pub chains: std::collections::HashMap<String, ChainStatus>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChainStatus {
+    pub status: String,
+    pub port: i32,
+    #[serde(default)]
+    pub block_number: Option<String>,
+    pub restart_count: i32,
+    pub dirty: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+}

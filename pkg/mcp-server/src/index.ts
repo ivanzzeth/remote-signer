@@ -24,7 +24,7 @@ import * as crypto from "crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { RemoteSignerClient } from "remote-signer-client";
+import { RemoteSignerClient, HttpTransport } from "remote-signer-client";
 
 // ---------------------------------------------------------------------------
 // Resolve private key: from hex env or from PEM file path
@@ -124,6 +124,16 @@ const tlsConfig = readTLSConfig();
 // ---------------------------------------------------------------------------
 
 const client = new RemoteSignerClient({
+  baseURL: BASE_URL,
+  apiKeyID: API_KEY_ID,
+  privateKey: PRIVATE_KEY,
+  pollInterval: 2000,
+  pollTimeout: 300000,
+  ...(tlsConfig && { httpClient: { tls: tlsConfig } }),
+});
+
+// Standalone transport for endpoints the JS client doesn't cover yet.
+const transport = new HttpTransport({
   baseURL: BASE_URL,
   apiKeyID: API_KEY_ID,
   privateKey: PRIVATE_KEY,
@@ -1887,7 +1897,7 @@ server.registerTool(
   },
   async ({ id }) => {
     try {
-      const response = await client.presets.get(id);
+      const response = await transport.request("GET", `/api/v1/presets/${encodeURIComponent(id)}`, null);
       return ok(response);
     } catch (error) {
       return err(error);
@@ -1922,6 +1932,476 @@ server.registerTool(
     try {
       const response = await client.presets.apply(id, { variables, applied_to });
       return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_sign_batch  --  POST /api/v1/evm/sign/batch
+// ===========================================================================
+
+server.registerTool(
+  "evm_sign_batch",
+  {
+    title: "Sign Batch",
+    description:
+      "Submit a batch of signing requests atomically. " +
+      "If any transaction fails rules/budget/simulation, the entire batch is rejected.",
+    inputSchema: {
+      requests: z.array(z.object({
+        chain_id: z.string().describe("Chain ID"),
+        signer_address: z.string().describe("Signer address (0x-prefixed)"),
+        sign_type: z.enum(["transaction","personal","typed_data","hash","eip191","raw_message"]).describe("Sign type"),
+        transaction: z.record(z.any()).optional().describe("Transaction payload (required for sign_type=transaction)"),
+        message: z.string().optional().describe("Message (for personal/eip191 signs)"),
+        hash: z.string().optional().describe("Hash (for hash sign)"),
+        typed_data: z.record(z.any()).optional().describe("Typed data (for typed_data sign)"),
+        raw_message: z.string().optional().describe("Raw message (for raw_message sign)"),
+      })).describe("Array of signing requests"),
+    },
+  },
+  async ({ requests }) => {
+    try {
+      const response = await client.evm.sign.executeBatch({ requests: requests as any });
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: evm_get_request_simulation  --  GET /api/v1/evm/requests/{id}/simulation
+// ===========================================================================
+
+server.registerTool(
+  "evm_get_request_simulation",
+  {
+    title: "Get Request Simulation",
+    description:
+      "Get the simulation result associated with a signing request, " +
+      "if simulation was performed before signing.",
+    inputSchema: {
+      request_id: z.string().describe("The signing request ID"),
+    },
+  },
+  async ({ request_id }) => {
+    try {
+      const response = await transport.request("GET", `/api/v1/evm/requests/${encodeURIComponent(request_id)}/simulation`, null);
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: list_api_key_names  --  GET /api/v1/api-keys/names
+// ===========================================================================
+
+server.registerTool(
+  "list_api_key_names",
+  {
+    title: "List API Key Names",
+    description:
+      "List API key names (lightweight endpoint for dropdowns). " +
+      "Returns only names, not full key details.",
+    inputSchema: {},
+  },
+  async () => {
+    try {
+      const response = await transport.request("GET", "/api/v1/api-keys/names", null);
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Tool: list_audit_by_request  --  GET /api/v1/audit/requests/{request_id}
+// ===========================================================================
+
+server.registerTool(
+  "list_audit_by_request",
+  {
+    title: "List Audit by Request",
+    description:
+      "List audit log records for a specific signing request ID.",
+    inputSchema: {
+      request_id: z.string().describe("Signing request ID to get audit records for"),
+    },
+  },
+  async ({ request_id }) => {
+    try {
+      const response = await transport.request("GET", `/api/v1/audit/requests/${encodeURIComponent(request_id)}`, null);
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Budget CRUD tools  --  /api/v1/evm/budgets
+// ===========================================================================
+
+server.registerTool(
+  "list_budgets",
+  {
+    title: "List Budgets",
+    description:
+      "List all standalone budgets with optional filters for rule_id, limit, and offset.",
+    inputSchema: {
+      rule_id: z.string().optional().describe("Filter by rule ID"),
+      limit: z.number().optional().describe("Max results (default 50)"),
+      offset: z.number().optional().describe("Pagination offset"),
+    },
+  },
+  async ({ rule_id, limit, offset }) => {
+    try {
+      const params = new URLSearchParams();
+      if (rule_id) params.set("rule_id", rule_id);
+      if (limit) params.set("limit", String(limit));
+      if (offset) params.set("offset", String(offset));
+      const qs = params.toString();
+      const path = `/api/v1/evm/budgets${qs ? "?" + qs : ""}`;
+      const response = await transport.request("GET", path, null);
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+server.registerTool(
+  "create_budget",
+  {
+    title: "Create Budget",
+    description: "Create a standalone budget for an existing rule.",
+    inputSchema: {
+      rule_id: z.string().describe("Rule ID to attach budget to"),
+      unit: z.string().describe("Budget unit (e.g. 'usdc', 'native')"),
+      max_total: z.string().describe("Maximum total spend"),
+      max_per_tx: z.string().describe("Maximum per-transaction spend"),
+      max_tx_count: z.number().optional().describe("Maximum transaction count"),
+      alert_pct: z.number().optional().describe("Alert percentage threshold"),
+    },
+  },
+  async ({ rule_id, unit, max_total, max_per_tx, max_tx_count, alert_pct }) => {
+    try {
+      const response = await transport.request("POST", "/api/v1/evm/budgets", {
+        rule_id, unit, max_total, max_per_tx, max_tx_count, alert_pct,
+      });
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+server.registerTool(
+  "get_budget",
+  {
+    title: "Get Budget",
+    description: "Get a budget by ID.",
+    inputSchema: {
+      id: z.string().describe("Budget ID"),
+    },
+  },
+  async ({ id }) => {
+    try {
+      const response = await transport.request("GET", `/api/v1/evm/budgets/${encodeURIComponent(id)}`, null);
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+server.registerTool(
+  "update_budget",
+  {
+    title: "Update Budget",
+    description: "Update a budget by ID (PATCH).",
+    inputSchema: {
+      id: z.string().describe("Budget ID"),
+      max_total: z.string().optional().describe("New max total"),
+      max_per_tx: z.string().optional().describe("New max per-tx"),
+      max_tx_count: z.number().optional().describe("New max tx count"),
+      alert_pct: z.number().optional().describe("New alert percentage"),
+    },
+  },
+  async ({ id, max_total, max_per_tx, max_tx_count, alert_pct }) => {
+    try {
+      const response = await transport.request("PATCH", `/api/v1/evm/budgets/${encodeURIComponent(id)}`, {
+        max_total, max_per_tx, max_tx_count, alert_pct,
+      });
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+server.registerTool(
+  "delete_budget",
+  {
+    title: "Delete Budget",
+    description: "Delete a budget by ID.",
+    inputSchema: {
+      id: z.string().describe("Budget ID"),
+    },
+  },
+  async ({ id }) => {
+    try {
+      await transport.request("DELETE", `/api/v1/evm/budgets/${encodeURIComponent(id)}`, null);
+      return ok({ success: true });
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+server.registerTool(
+  "reset_budget",
+  {
+    title: "Reset Budget",
+    description: "Reset a budget counter (sets spent back to 0).",
+    inputSchema: {
+      id: z.string().describe("Budget ID"),
+    },
+  },
+  async ({ id }) => {
+    try {
+      const response = await transport.request("POST", `/api/v1/evm/budgets/${encodeURIComponent(id)}/reset`, null);
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Transaction tools  --  /api/v1/evm/transactions
+// ===========================================================================
+
+server.registerTool(
+  "list_transactions",
+  {
+    title: "List Transactions",
+    description:
+      "List on-chain transaction records with optional filters for status, signer, chain, limit, offset.",
+    inputSchema: {
+      status: z.string().optional().describe("Filter by transaction status"),
+      signer_address: z.string().optional().describe("Filter by signer address"),
+      chain_id: z.string().optional().describe("Filter by chain ID"),
+      limit: z.number().optional().describe("Max results"),
+      offset: z.number().optional().describe("Pagination offset"),
+    },
+  },
+  async ({ status, signer_address, chain_id, limit, offset }) => {
+    try {
+      const params = new URLSearchParams();
+      if (status) params.set("status", status);
+      if (signer_address) params.set("signer_address", signer_address);
+      if (chain_id) params.set("chain_id", chain_id);
+      if (limit) params.set("limit", String(limit));
+      if (offset) params.set("offset", String(offset));
+      const qs = params.toString();
+      const path = `/api/v1/evm/transactions${qs ? "?" + qs : ""}`;
+      const response = await transport.request("GET", path, null);
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+server.registerTool(
+  "get_transaction",
+  {
+    title: "Get Transaction",
+    description: "Get an on-chain transaction record by ID.",
+    inputSchema: {
+      id: z.string().describe("Transaction record ID"),
+    },
+  },
+  async ({ id }) => {
+    try {
+      const response = await transport.request("GET", `/api/v1/evm/transactions/${encodeURIComponent(id)}`, null);
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+// ===========================================================================
+// Wallet CRUD tools  --  /api/v1/wallets
+// ===========================================================================
+
+server.registerTool(
+  "list_wallets",
+  {
+    title: "List Wallets",
+    description: "List wallets with optional filters for limit and offset.",
+    inputSchema: {
+      limit: z.number().optional().describe("Max results"),
+      offset: z.number().optional().describe("Pagination offset"),
+    },
+  },
+  async ({ limit, offset }) => {
+    try {
+      const params = new URLSearchParams();
+      if (limit) params.set("limit", String(limit));
+      if (offset) params.set("offset", String(offset));
+      const qs = params.toString();
+      const path = `/api/v1/wallets${qs ? "?" + qs : ""}`;
+      const response = await transport.request("GET", path, null);
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+server.registerTool(
+  "get_wallet",
+  {
+    title: "Get Wallet",
+    description: "Get a wallet by ID.",
+    inputSchema: {
+      id: z.string().describe("Wallet ID"),
+    },
+  },
+  async ({ id }) => {
+    try {
+      const response = await transport.request("GET", `/api/v1/wallets/${encodeURIComponent(id)}`, null);
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+server.registerTool(
+  "create_wallet",
+  {
+    title: "Create Wallet",
+    description: "Create a new wallet.",
+    inputSchema: {
+      name: z.string().describe("Wallet name"),
+      description: z.string().optional().describe("Wallet description"),
+    },
+  },
+  async ({ name, description }) => {
+    try {
+      const response = await transport.request("POST", "/api/v1/wallets", { name, description });
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+server.registerTool(
+  "update_wallet",
+  {
+    title: "Update Wallet",
+    description: "Update a wallet by ID (PATCH).",
+    inputSchema: {
+      id: z.string().describe("Wallet ID"),
+      name: z.string().optional().describe("New wallet name"),
+      description: z.string().optional().describe("New wallet description"),
+    },
+  },
+  async ({ id, name, description }) => {
+    try {
+      const response = await transport.request("PATCH", `/api/v1/wallets/${encodeURIComponent(id)}`, { name, description });
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+server.registerTool(
+  "delete_wallet",
+  {
+    title: "Delete Wallet",
+    description: "Delete a wallet by ID (cascade deletes members).",
+    inputSchema: {
+      id: z.string().describe("Wallet ID"),
+    },
+  },
+  async ({ id }) => {
+    try {
+      await transport.request("DELETE", `/api/v1/wallets/${encodeURIComponent(id)}`, null);
+      return ok({ success: true });
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+server.registerTool(
+  "list_wallet_members",
+  {
+    title: "List Wallet Members",
+    description: "List members of a wallet.",
+    inputSchema: {
+      wallet_id: z.string().describe("Wallet ID"),
+    },
+  },
+  async ({ wallet_id }) => {
+    try {
+      const response = await transport.request("GET", `/api/v1/wallets/${encodeURIComponent(wallet_id)}/members`, null);
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+server.registerTool(
+  "add_wallet_member",
+  {
+    title: "Add Wallet Member",
+    description: "Add a signer to a wallet.",
+    inputSchema: {
+      wallet_id: z.string().describe("Wallet ID"),
+      signer_address: z.string().describe("Signer address (0x-prefixed)"),
+    },
+  },
+  async ({ wallet_id, signer_address }) => {
+    try {
+      const response = await transport.request("POST", `/api/v1/wallets/${encodeURIComponent(wallet_id)}/members`, {
+        signer_address,
+      });
+      return ok(response);
+    } catch (error) {
+      return err(error);
+    }
+  }
+);
+
+server.registerTool(
+  "remove_wallet_member",
+  {
+    title: "Remove Wallet Member",
+    description: "Remove a signer from a wallet.",
+    inputSchema: {
+      wallet_id: z.string().describe("Wallet ID"),
+      signer_address: z.string().describe("Signer address to remove"),
+    },
+  },
+  async ({ wallet_id, signer_address }) => {
+    try {
+      await transport.request("DELETE", `/api/v1/wallets/${encodeURIComponent(wallet_id)}/members/${encodeURIComponent(signer_address)}`, null);
+      return ok({ success: true });
     } catch (error) {
       return err(error);
     }

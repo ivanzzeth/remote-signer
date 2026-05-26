@@ -5,6 +5,8 @@ mod rules;
 mod signers;
 mod hdwallets;
 mod guard;
+mod broadcast;
+mod simulate;
 mod types;
 
 pub use service::Service;
@@ -14,4 +16,6 @@ pub use rules::RuleService;
 pub use signers::SignerService;
 pub use hdwallets::HdWalletService;
 pub use guard::GuardService;
+pub use broadcast::BroadcastService;
+pub use simulate::SimulateService;
 pub use types::*;

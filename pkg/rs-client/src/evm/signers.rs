@@ -3,7 +3,7 @@ use reqwest::Method;
 use crate::error::Error;
 use crate::transport::transport::Transport;
 
-use super::{CreateSignerRequest, CreateSignerResponse, ListSignersFilter, ListSignersResponse, LockSignerResponse, Signer, UnlockSignerRequest, UnlockSignerResponse};
+use super::{CreateSignerRequest, CreateSignerResponse, GrantAccessRequest, ListSignersFilter, ListSignersResponse, LockSignerResponse, SignerAccessEntry, TransferOwnershipRequest, UnlockSignerRequest, UnlockSignerResponse};
 
 #[derive(Clone)]
 pub struct SignerService {
@@ -53,5 +53,55 @@ impl SignerService {
         let path = format!("/api/v1/evm/signers/{}/lock", urlencoding::encode(address));
         self.transport
             .request_json(Method::POST, &path, Option::<&()>::None, Some(&[200]))
+    }
+
+    pub fn approve_signer(&self, address: &str) -> Result<(), Error> {
+        let path = format!("/api/v1/evm/signers/{}/approve", urlencoding::encode(address));
+        let _ = self
+            .transport
+            .request_raw(Method::POST, &path, Option::<&()>::None, Some(&[200]))?;
+        Ok(())
+    }
+
+    pub fn transfer_ownership(&self, address: &str, req: &TransferOwnershipRequest) -> Result<(), Error> {
+        let path = format!("/api/v1/evm/signers/{}/transfer", urlencoding::encode(address));
+        let _ = self
+            .transport
+            .request_raw(Method::POST, &path, Some(req), Some(&[200]))?;
+        Ok(())
+    }
+
+    pub fn delete_signer(&self, address: &str) -> Result<(), Error> {
+        let path = format!("/api/v1/evm/signers/{}", urlencoding::encode(address));
+        let _ = self
+            .transport
+            .request_raw(Method::DELETE, &path, Option::<&()>::None, Some(&[204]))?;
+        Ok(())
+    }
+
+    pub fn grant_access(&self, address: &str, req: &GrantAccessRequest) -> Result<(), Error> {
+        let path = format!("/api/v1/evm/signers/{}/access", urlencoding::encode(address));
+        let _ = self
+            .transport
+            .request_raw(Method::POST, &path, Some(req), Some(&[200]))?;
+        Ok(())
+    }
+
+    pub fn revoke_access(&self, address: &str, api_key_id: &str) -> Result<(), Error> {
+        let path = format!(
+            "/api/v1/evm/signers/{}/access/{}",
+            urlencoding::encode(address),
+            urlencoding::encode(api_key_id)
+        );
+        let _ = self
+            .transport
+            .request_raw(Method::DELETE, &path, Option::<&()>::None, Some(&[200]))?;
+        Ok(())
+    }
+
+    pub fn list_access(&self, address: &str) -> Result<Vec<SignerAccessEntry>, Error> {
+        let path = format!("/api/v1/evm/signers/{}/access", urlencoding::encode(address));
+        self.transport
+            .request_json(Method::GET, &path, Option::<&()>::None, Some(&[200]))
     }
 }

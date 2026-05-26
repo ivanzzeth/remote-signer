@@ -159,6 +159,22 @@ Client → Ed25519 Auth → Middleware Pipeline → Handler → SignService
 7. Signing — 链适配器执行加密签名
 8. Audit logging — 全链路审计记录
 
+## 开发流程：变更影响面检查
+
+当 API 端点（handler）新增/修改/删除，或数据模型（storage GORM model）变更时，**务必**检查以下
+联动项是否也需要更新。遗漏这些会导致 SDK/MCP 接口缺失或不一致：
+
+| 影响面 | 位置 | 检查方法 |
+|--------|------|---------|
+| Go SDK | `pkg/client/` | `go build ./pkg/client/...` — 确认 service + types + mock 覆盖新端点 |
+| Rust SDK | `pkg/rs-client/` | `cargo check` — 确认 service + types 覆盖新端点 |
+| JS Client | `pkg/mcp-server/node_modules/remote-signer-client/` | 检查 `.d.ts`，必要时提 PR 更新 npm 包 |
+| MCP Server | `pkg/mcp-server/src/index.ts` | `npm run build` — 确认新工具或参数变更已反映 |
+| Skills | `skills/remote-signer/SKILL.md` | MCP tools 列表、签名流程、CLI 示例是否需要更新 |
+
+**原则**：API 变更是源头；SDK 是自动可推导的（对照 handler 检查 1:1 映射）；MCP 工具是 SDK 的薄封装；
+Skills 是面向 AI Agent 的使用文档。
+
 ## 关键决策记录
 
 - Go 项目，monorepo（cmd + internal + pkg）

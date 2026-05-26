@@ -90,4 +90,21 @@ impl RuleService {
         self.transport
             .request_json(Method::GET, &path, Option::<&()>::None, Some(&[200]))
     }
+
+    pub fn approve_rule(&self, rule_id: &str) -> Result<(), Error> {
+        let path = format!("/api/v1/evm/rules/{}/approve", urlencoding::encode(rule_id));
+        let _ = self
+            .transport
+            .request_raw(Method::POST, &path, Option::<&()>::None, Some(&[200]))?;
+        Ok(())
+    }
+
+    pub fn reject_rule(&self, rule_id: &str, reason: &str) -> Result<(), Error> {
+        let path = format!("/api/v1/evm/rules/{}/reject", urlencoding::encode(rule_id));
+        let body = serde_json::json!({"reason": reason});
+        let _ = self
+            .transport
+            .request_raw(Method::POST, &path, Some(&body), Some(&[200]))?;
+        Ok(())
+    }
 }

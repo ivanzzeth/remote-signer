@@ -49,12 +49,13 @@ var _ evm.SignAPI = (*SignService)(nil)
 
 // RequestService is a mock implementation of evm.RequestAPI.
 type RequestService struct {
-	mu              sync.RWMutex
-	GetFunc         func(ctx context.Context, requestID string) (*evm.RequestStatus, error)
-	ListFunc        func(ctx context.Context, filter *evm.ListRequestsFilter) (*evm.ListRequestsResponse, error)
-	ApproveFunc     func(ctx context.Context, requestID string, req *evm.ApproveRequest) (*evm.ApproveResponse, error)
-	PreviewRuleFunc func(ctx context.Context, requestID string, req *evm.PreviewRuleRequest) (*evm.PreviewRuleResponse, error)
-	Calls           map[string][]any
+	mu               sync.RWMutex
+	GetFunc          func(ctx context.Context, requestID string) (*evm.RequestStatus, error)
+	ListFunc         func(ctx context.Context, filter *evm.ListRequestsFilter) (*evm.ListRequestsResponse, error)
+	ApproveFunc      func(ctx context.Context, requestID string, req *evm.ApproveRequest) (*evm.ApproveResponse, error)
+	PreviewRuleFunc  func(ctx context.Context, requestID string, req *evm.PreviewRuleRequest) (*evm.PreviewRuleResponse, error)
+	GetSimulationFunc func(ctx context.Context, requestID string) (*evm.SimulateResponse, error)
+	Calls            map[string][]any
 }
 
 func NewRequestService() *RequestService {
@@ -97,6 +98,14 @@ func (m *RequestService) PreviewRule(ctx context.Context, requestID string, req 
 		return m.PreviewRuleFunc(ctx, requestID, req)
 	}
 	return &evm.PreviewRuleResponse{}, nil
+}
+
+func (m *RequestService) GetSimulation(ctx context.Context, requestID string) (*evm.SimulateResponse, error) {
+	m.recordCall("GetSimulation", requestID)
+	if m.GetSimulationFunc != nil {
+		return m.GetSimulationFunc(ctx, requestID)
+	}
+	return &evm.SimulateResponse{}, nil
 }
 
 var _ evm.RequestAPI = (*RequestService)(nil)
@@ -364,9 +373,10 @@ var _ evm.GuardAPI = (*GuardService)(nil)
 
 // AuditService is a mock implementation of audit.API.
 type AuditService struct {
-	mu       sync.RWMutex
-	ListFunc func(ctx context.Context, filter *audit.ListFilter) (*audit.ListResponse, error)
-	Calls    map[string][]any
+	mu                sync.RWMutex
+	ListFunc          func(ctx context.Context, filter *audit.ListFilter) (*audit.ListResponse, error)
+	ListByRequestIDFunc func(ctx context.Context, requestID string) (*audit.ListResponse, error)
+	Calls             map[string][]any
 }
 
 func NewAuditService() *AuditService {
@@ -383,6 +393,14 @@ func (m *AuditService) List(ctx context.Context, filter *audit.ListFilter) (*aud
 	m.recordCall("List", filter)
 	if m.ListFunc != nil {
 		return m.ListFunc(ctx, filter)
+	}
+	return &audit.ListResponse{Records: []audit.Record{}}, nil
+}
+
+func (m *AuditService) ListByRequestID(ctx context.Context, requestID string) (*audit.ListResponse, error) {
+	m.recordCall("ListByRequestID", requestID)
+	if m.ListByRequestIDFunc != nil {
+		return m.ListByRequestIDFunc(ctx, requestID)
 	}
 	return &audit.ListResponse{Records: []audit.Record{}}, nil
 }
@@ -481,13 +499,14 @@ var _ templates.API = (*TemplateService)(nil)
 
 // APIKeyService is a mock implementation of apikeys.API.
 type APIKeyService struct {
-	mu         sync.RWMutex
-	ListFunc   func(ctx context.Context, filter *apikeys.ListFilter) (*apikeys.ListResponse, error)
-	GetFunc    func(ctx context.Context, id string) (*apikeys.APIKey, error)
-	CreateFunc func(ctx context.Context, req *apikeys.CreateRequest) (*apikeys.APIKey, error)
-	UpdateFunc func(ctx context.Context, id string, req *apikeys.UpdateRequest) (*apikeys.APIKey, error)
-	DeleteFunc func(ctx context.Context, id string) error
-	Calls      map[string][]any
+	mu            sync.RWMutex
+	ListFunc      func(ctx context.Context, filter *apikeys.ListFilter) (*apikeys.ListResponse, error)
+	ListNamesFunc func(ctx context.Context) (*apikeys.APIKeyNamesResponse, error)
+	GetFunc       func(ctx context.Context, id string) (*apikeys.APIKey, error)
+	CreateFunc    func(ctx context.Context, req *apikeys.CreateRequest) (*apikeys.APIKey, error)
+	UpdateFunc    func(ctx context.Context, id string, req *apikeys.UpdateRequest) (*apikeys.APIKey, error)
+	DeleteFunc    func(ctx context.Context, id string) error
+	Calls         map[string][]any
 }
 
 func NewAPIKeyService() *APIKeyService {
@@ -506,6 +525,14 @@ func (m *APIKeyService) List(ctx context.Context, filter *apikeys.ListFilter) (*
 		return m.ListFunc(ctx, filter)
 	}
 	return &apikeys.ListResponse{}, nil
+}
+
+func (m *APIKeyService) ListNames(ctx context.Context) (*apikeys.APIKeyNamesResponse, error) {
+	m.recordCall("ListNames")
+	if m.ListNamesFunc != nil {
+		return m.ListNamesFunc(ctx)
+	}
+	return &apikeys.APIKeyNamesResponse{}, nil
 }
 
 func (m *APIKeyService) Get(ctx context.Context, id string) (*apikeys.APIKey, error) {
@@ -548,10 +575,12 @@ type WalletService struct {
 	CreateFunc       func(ctx context.Context, req *evm.CreateWalletRequest) (*evm.Wallet, error)
 	GetFunc          func(ctx context.Context, id string) (*evm.Wallet, error)
 	ListFunc         func(ctx context.Context, filter *evm.ListWalletsFilter) (*evm.ListWalletsResponse, error)
+	UpdateFunc       func(ctx context.Context, id string, req *evm.UpdateWalletRequest) (*evm.Wallet, error)
 	DeleteFunc       func(ctx context.Context, id string) error
 	AddMemberFunc    func(ctx context.Context, walletID string, req *evm.AddWalletMemberRequest) (*evm.WalletMember, error)
 	RemoveMemberFunc func(ctx context.Context, walletID, signerAddress string) error
 	ListMembersFunc  func(ctx context.Context, walletID string) (*evm.ListWalletMembersResponse, error)
+	ListSignersFunc  func(ctx context.Context, walletID string) ([]evm.Signer, error)
 	Calls            map[string][]any
 }
 
@@ -595,6 +624,22 @@ func (m *WalletService) Delete(ctx context.Context, id string) error {
 		return m.DeleteFunc(ctx, id)
 	}
 	return nil
+}
+
+func (m *WalletService) Update(ctx context.Context, id string, req *evm.UpdateWalletRequest) (*evm.Wallet, error) {
+	m.recordCall("Update", id, req)
+	if m.UpdateFunc != nil {
+		return m.UpdateFunc(ctx, id, req)
+	}
+	return &evm.Wallet{}, nil
+}
+
+func (m *WalletService) ListSigners(ctx context.Context, walletID string) ([]evm.Signer, error) {
+	m.recordCall("ListSigners", walletID)
+	if m.ListSignersFunc != nil {
+		return m.ListSignersFunc(ctx, walletID)
+	}
+	return nil, nil
 }
 
 func (m *WalletService) AddMember(ctx context.Context, walletID string, req *evm.AddWalletMemberRequest) (*evm.WalletMember, error) {

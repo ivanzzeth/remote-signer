@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use crate::transport::transport::Transport;
 
-use super::{GuardService, HdWalletService, RequestService, RuleService, SignService, SignerService};
+use super::{BroadcastService, GuardService, HdWalletService, RequestService, RuleService, SignService, SignerService, SimulateService};
 
 #[derive(Clone)]
 pub struct Service {
@@ -12,6 +12,8 @@ pub struct Service {
     pub signers: SignerService,
     pub hdwallets: HdWalletService,
     pub guard: GuardService,
+    pub broadcast: BroadcastService,
+    pub simulate: SimulateService,
 }
 
 impl Service {
@@ -22,6 +24,8 @@ impl Service {
             rules: RuleService::new(transport.clone()),
             signers: SignerService::new(transport.clone()),
             hdwallets: HdWalletService::new(transport.clone()),
+            broadcast: BroadcastService::new(transport.clone()),
+            simulate: SimulateService::new(transport.clone()),
             guard: GuardService::new(transport),
             sign,
         }

@@ -3,7 +3,7 @@ use reqwest::Method;
 use crate::error::Error;
 use crate::transport::transport::Transport;
 
-use super::{ApproveRequest, ApproveResponse, ListRequestsFilter, ListRequestsResponse, PreviewRuleRequest, PreviewRuleResponse, RequestStatus};
+use super::{ApproveRequest, ApproveResponse, ListRequestsFilter, ListRequestsResponse, PreviewRuleRequest, PreviewRuleResponse, RequestStatus, SimulateResponse};
 
 #[derive(Clone)]
 pub struct RequestService {
@@ -68,5 +68,14 @@ impl RequestService {
         );
         self.transport
             .request_json(Method::POST, &path, Some(req), Some(&[200]))
+    }
+
+    pub fn get_simulation(&self, request_id: &str) -> Result<SimulateResponse, Error> {
+        let path = format!(
+            "/api/v1/evm/requests/{}/simulation",
+            urlencoding::encode(request_id)
+        );
+        self.transport
+            .request_json(Method::GET, &path, Option::<&()>::None, Some(&[200]))
     }
 }

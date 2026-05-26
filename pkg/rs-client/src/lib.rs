@@ -2,6 +2,7 @@ mod client;
 mod error;
 pub mod transport;
 
+pub mod acls;
 pub mod apikeys;
 pub mod audit;
 pub mod evm;
