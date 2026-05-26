@@ -1,5 +1,5 @@
 ---
-name: rule-development
+name: remote-signer-rule-development
 description: Remote Signer rule development guide. Covers evm_js rules, solidity expression rules, templates, presets, delegate_to mechanism, and rs.* helper functions.
 ---
 

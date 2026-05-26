@@ -193,6 +193,7 @@ ln -sf .agents .windsurf
 
 | 技能 | 文件 | 说明 |
 |------|------|------|
+| `remote-signer` | `skills/remote-signer/SKILL.md` | Remote Signer 综合指南：CLI/MCP 使用、签名流程（tx/typed data/personal）、RBAC 权限、TLS/mTLS、IP whitelist、SDK 集成 |
+| `remote-signer-rule-development` | `skills/remote-signer-rule-development/SKILL.md` | Remote Signer 规则开发（evm_js, solidity, templates, presets, delegate_to） |
 | `go-testing` | `skills/go-testing/SKILL.md` | Go 测试模式（table-driven, subtests, benchmarks, fuzzing, coverage） |
 | `go-security` | `skills/go-security/SKILL.md` | Go 安全审计（keystore, 密钥管理, 输入校验） |
-| `rule-development` | `skills/rule-development/SKILL.md` | Remote Signer 规则开发（evm_js, solidity, templates, presets, delegate_to） |
