@@ -808,13 +808,18 @@ func (h *PresetHandler) resolveInstances(
 		if err != nil {
 			return nil, fmt.Errorf("template %q: %w", tid, err)
 		}
+		// Determine chain_id: operator --set override wins, then preset default.
+		ruleChainID := preset.ChainID
+		if v, ok := mergedVars["chain_id"]; ok && v != "" {
+			ruleChainID = v
+		}
 		req := &service.CreateInstanceRequest{
 			TemplateID:   tmpl.ID,
 			TemplateName: tmpl.Name,
 			Name:         preset.Name + " — " + tmpl.Name,
 			Variables:    cloneStringMap(mergedVars),
 			ChainType:    strPtrIfNotEmpty(string(preset.ChainType)),
-			ChainID:      strPtrIfNotEmpty(preset.ChainID),
+			ChainID:      strPtrIfNotEmpty(ruleChainID),
 		}
 		if len(budget) > 0 {
 			req.Budget = &service.BudgetConfig{

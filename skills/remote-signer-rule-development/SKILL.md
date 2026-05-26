@@ -212,7 +212,52 @@ rules:
 
 Presets bundle template references with default variable values. See `rules/presets/` for examples.
 
-**Server API apply format:**
+### Preset Variables & Default Danger Levels
+
+When a template function receives empty string for allowlists, the validation **passes** (no restriction).
+When it receives "-1" for amount caps, the validation **passes** (no limit).
+
+| Default | Meaning | Danger |
+|---------|---------|--------|
+| `""` (empty string) | `requireInListIfNonEmpty()` → **any value allowed** | HIGH — no restriction |
+| `"-1"` | `requireLte(-1)` → **no cap** | HIGH — unlimited |
+| `"0"` | Block all | SAFE |
+| Specific address/value | Restricted to that value | SAFE |
+
+### Using CLI to Inspect Presets & Templates (Do NOT Hardcode Variable Tables)
+
+Presets and templates change over time. NEVER hardcode variable tables in prompts or skills. Always use the CLI to query live data:
+
+```bash
+# Step 1: List available presets
+./remote-signer preset remote-list --api-key-id admin
+
+# Step 2: Get full preset details (variables, defaults, descriptions)
+./remote-signer preset remote-get <preset-id> --api-key-id admin
+
+# Step 3: Get the linked template to see validation logic
+# Find template_id from preset remote-get output, then:
+./remote-signer template get <template-id> --api-key-id admin
+```
+
+The `preset remote-get` output includes a variables table with NAME, TYPE, REQUIRED, DEFAULT, and DESCRIPTION. The `template get` output shows the full template YAML including JS validation code with `requireInListIfNonEmpty()`, `requireLte()`, etc.
+
+### Preset Apply Protocol (Least-Privilege)
+
+Before applying a preset that creates rules on the daemon, follow this protocol:
+
+1. **Query preset details**: `preset remote-get <preset-id>` — see all variables, types, descriptions, defaults
+2. **Query template**: `template get <template-id>` — see full validation logic, especially `requireInListIfNonEmpty` and `requireLte` behavior
+3. **Assess each variable's default danger** (universal rule, does not depend on specific presets):
+   - `""` (empty string) with `requireInListIfNonEmpty()` → **any value allowed** (no restriction)
+   - `"-1"` with `requireLte()` → **no cap** (unlimited)
+   - Non-empty value → restricted to that value (safe)
+4. **Fill EVERY variable** that controls scope — do NOT leave optional variables at permissive defaults
+5. **Ask the user** before deciding final values. Present each variable's default, its risk, and what values make sense.
+6. Only after user confirms, run: `preset apply <preset-id> --set key=value --set key=value ...`
+
+### Server API apply format
+
 ```yaml
 name: "My Preset"
 chain_type: "evm"
@@ -222,6 +267,17 @@ variables:
 template_ids:
   - evm/my_template
 ```
+
+## Chain ID Resolution
+
+When a preset applies via daemon API (`preset apply <id> --set chain_id=56`):
+
+1. Preset's `chain_id` field sets the rule scope (which chains the rule matches)
+2. `--set chain_id=X` overrides preset's `chain_id` for the rule scope
+3. `chain_id` is also injected as a **reserved variable** — available as `${chain_id}` in template substitution
+4. If the preset has no `chain_id`, the rule matches **all chains** (nil scope)
+
+Fix for hardcoded chain_id: if a preset was shipped with `chain_id: "1"` and you want to override, use `--set chain_id=<target>`. The variable value wins over the preset field.
 
 ## Validation
 
