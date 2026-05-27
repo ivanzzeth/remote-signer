@@ -1373,3 +1373,153 @@ function validateBudget(i){ return { amount: 1n, unit: "" }; }`
 	assert.Contains(t, err.Error(), "unit")
 }
 
+// ------- resolveRuleConfig tests -------
+
+func TestResolveRuleConfig_VariablesOnly(t *testing.T) {
+	rule := &types.Rule{
+		Variables: mustMarshalJSON(map[string]string{
+			"router_address": "0x1111111111111111111111111111111111111111",
+			"weth_address":   "0x2222222222222222222222222222222222222222",
+		}),
+	}
+	config := resolveRuleConfig(rule, "1")
+	assert.Equal(t, "0x1111111111111111111111111111111111111111", config["router_address"])
+	assert.Equal(t, "0x2222222222222222222222222222222222222222", config["weth_address"])
+	assert.Equal(t, "1", config["chain_id"])
+}
+
+func TestResolveRuleConfig_MatrixOverridesVariables(t *testing.T) {
+	rule := &types.Rule{
+		Variables: mustMarshalJSON(map[string]string{
+			"router_address": "0x1111111111111111111111111111111111111111",
+			"weth_address":   "0x2222222222222222222222222222222222222222",
+		}),
+		Matrix: mustMarshalJSON([]map[string]interface{}{
+			{
+				"chain_id":       "1",
+				"router_address": "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+			},
+			{
+				"chain_id":       "137",
+				"router_address": "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+				"weth_address":   "0xCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+			},
+		}),
+	}
+
+	// chain_id=1: router_address overridden, weth_address comes from Variables
+	config1 := resolveRuleConfig(rule, "1")
+	assert.Equal(t, "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", config1["router_address"])
+	assert.Equal(t, "0x2222222222222222222222222222222222222222", config1["weth_address"])
+	assert.Equal(t, "1", config1["chain_id"])
+
+	// chain_id=137: both overridden
+	config137 := resolveRuleConfig(rule, "137")
+	assert.Equal(t, "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB", config137["router_address"])
+	assert.Equal(t, "0xCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC", config137["weth_address"])
+	assert.Equal(t, "137", config137["chain_id"])
+
+	// chain_id=56: no matching row → Variables only
+	config56 := resolveRuleConfig(rule, "56")
+	assert.Equal(t, "0x1111111111111111111111111111111111111111", config56["router_address"])
+	assert.Equal(t, "0x2222222222222222222222222222222222222222", config56["weth_address"])
+	assert.Equal(t, "56", config56["chain_id"])
+}
+
+func TestResolveRuleConfig_NoVariables(t *testing.T) {
+	rule := &types.Rule{}
+	config := resolveRuleConfig(rule, "1")
+	assert.Equal(t, "1", config["chain_id"])
+	assert.Len(t, config, 1)
+}
+
+func TestResolveRuleConfig_EmptyChainID(t *testing.T) {
+	rule := &types.Rule{
+		Variables: mustMarshalJSON(map[string]string{"key": "value"}),
+		Matrix: mustMarshalJSON([]map[string]interface{}{
+			{"chain_id": "1", "key": "overridden"},
+		}),
+	}
+	config := resolveRuleConfig(rule, "")
+	assert.Equal(t, "value", config["key"], "empty chain_id should return Variables only")
+	assert.Equal(t, "", config["chain_id"])
+}
+
+func TestResolveRuleConfig_NilMatrix(t *testing.T) {
+	rule := &types.Rule{
+		Variables: mustMarshalJSON(map[string]string{"key": "value"}),
+		Matrix:    nil,
+	}
+	config := resolveRuleConfig(rule, "1")
+	assert.Equal(t, "value", config["key"])
+	assert.Equal(t, "1", config["chain_id"])
+}
+
+func TestResolveRuleConfig_InvalidMatrixJSON(t *testing.T) {
+	rule := &types.Rule{
+		Variables: mustMarshalJSON(map[string]string{"key": "value"}),
+		Matrix:    []byte("not valid json"),
+	}
+	config := resolveRuleConfig(rule, "1")
+	assert.Equal(t, "value", config["key"])
+	assert.Equal(t, "1", config["chain_id"])
+}
+
+func TestResolveRuleConfig_MatrixRowWithoutChainID(t *testing.T) {
+	rule := &types.Rule{
+		Variables: mustMarshalJSON(map[string]string{"key": "value"}),
+		Matrix: mustMarshalJSON([]map[string]interface{}{
+			{"other_field": 123},
+		}),
+	}
+	config := resolveRuleConfig(rule, "1")
+	assert.Equal(t, "value", config["key"], "row without chain_id should not match")
+	assert.Equal(t, "1", config["chain_id"])
+}
+
+// Test that Evaluate uses resolveRuleConfig with Matrix
+func TestJSRuleEvaluator_Evaluate_WithMatrix(t *testing.T) {
+	e, err := NewJSRuleEvaluator(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})))
+	require.NoError(t, err)
+
+	script := `function validate(i){
+	if (config.chain_id !== "137") return fail("wrong chain_id: " + config.chain_id);
+	if (config.router_address !== "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB") return fail("wrong router: " + config.router_address);
+	if (config.weth_address !== "0xCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC") return fail("wrong weth: " + config.weth_address);
+	return ok();
+}`
+	cfg := JSRuleConfig{Script: script}
+	rule := &types.Rule{
+		ID:   "test-matrix-eval",
+		Type: types.RuleTypeEVMJS,
+		Mode: types.RuleModeWhitelist,
+		Variables: mustMarshalJSON(map[string]string{
+			"router_address": "0x1111111111111111111111111111111111111111",
+			"weth_address":   "0x2222222222222222222222222222222222222222",
+		}),
+		Matrix: mustMarshalJSON([]map[string]interface{}{
+			{
+				"chain_id":       "137",
+				"router_address": "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+				"weth_address":   "0xCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+			},
+		}),
+		Config: mustMarshalJSON(cfg),
+	}
+
+	req := &types.SignRequest{
+		ChainID:       "137",
+		SignerAddress: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+		SignType:      SignTypeTransaction,
+		Payload:       []byte(`{"transaction":{"to":"0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD","value":"0","data":"0x","gas":21000,"gasPrice":"0","txType":"legacy"}}`),
+	}
+	parsed := &types.ParsedPayload{
+		Recipient: strPtrForRuleInput("0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD"),
+		Value:     strPtrForRuleInput("0"),
+	}
+
+	matched, reason, err := e.Evaluate(context.Background(), rule, req, parsed)
+	require.NoError(t, err)
+	assert.True(t, matched, "should match with Matrix overrides, got reason=%s", reason)
+}
+

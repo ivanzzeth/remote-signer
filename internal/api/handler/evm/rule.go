@@ -36,6 +36,7 @@ var blockedDevRuleTypes = map[types.RuleType]bool{
 type RuleHandler struct {
 	ruleRepo          storage.RuleRepository
 	budgetRepo        storage.BudgetRepository
+	templateRepo      storage.TemplateRepository
 	apiKeyRepo        storage.APIKeyRepository
 	solidityValidator *evmchain.SolidityRuleValidator
 	jsEvaluator       *evmchain.JSRuleEvaluator
@@ -70,10 +71,19 @@ func WithAuditLogger(al *audit.AuditLogger) RuleHandlerOption {
 	}
 }
 
-// WithBudgetRepo sets the budget repository for GET /api/v1/evm/rules/{id}/budgets.
+// WithBudgetRepo sets the budget repository for GET /api/v1/evm/rules/{id}/budgets
+// and budget auto-migration during rule updates.
 func WithBudgetRepo(repo storage.BudgetRepository) RuleHandlerOption {
 	return func(h *RuleHandler) {
 		h.budgetRepo = repo
+	}
+}
+
+// WithTemplateRepo sets the template repository for budget auto-migration
+// when Variables affecting the budget unit are changed during rule updates.
+func WithTemplateRepo(repo storage.TemplateRepository) RuleHandlerOption {
+	return func(h *RuleHandler) {
+		h.templateRepo = repo
 	}
 }
 

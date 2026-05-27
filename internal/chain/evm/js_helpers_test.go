@@ -80,15 +80,15 @@ func TestJsValueToAbiArg_Address_Valid(t *testing.T) {
 }
 
 func TestJsValueToAbiArg_Address_Invalid(t *testing.T) {
-	result, err := jsValueToAbiArg("address", "not_an_address")
-	require.NoError(t, err)
-	assert.Equal(t, common.Address{}, result)
+	_, err := jsValueToAbiArg("address", "not_an_address")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "address")
 }
 
 func TestJsValueToAbiArg_Address_NotString(t *testing.T) {
-	result, err := jsValueToAbiArg("address", 42)
-	require.NoError(t, err)
-	assert.Equal(t, common.Address{}, result)
+	_, err := jsValueToAbiArg("address", 42)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "address")
 }
 
 func TestJsValueToAbiArg_Uint256_String(t *testing.T) {
@@ -105,9 +105,9 @@ func TestJsValueToAbiArg_Uint256_Float64(t *testing.T) {
 }
 
 func TestJsValueToAbiArg_Uint256_InvalidString(t *testing.T) {
-	result, err := jsValueToAbiArg("uint256", "not_a_number")
-	require.NoError(t, err)
-	assert.Equal(t, big.NewInt(0), result)
+	_, err := jsValueToAbiArg("uint256", "not_a_number")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid decimal")
 }
 
 func TestJsValueToAbiArg_Uint8(t *testing.T) {
@@ -117,9 +117,9 @@ func TestJsValueToAbiArg_Uint8(t *testing.T) {
 }
 
 func TestJsValueToAbiArg_Uint8_Overflow(t *testing.T) {
-	result, err := jsValueToAbiArg("uint8", "256")
-	require.NoError(t, err)
-	assert.Equal(t, big.NewInt(0), result)
+	_, err := jsValueToAbiArg("uint8", "256")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "overflows uint8")
 }
 
 func TestJsValueToAbiArg_Uint16(t *testing.T) {
@@ -129,9 +129,9 @@ func TestJsValueToAbiArg_Uint16(t *testing.T) {
 }
 
 func TestJsValueToAbiArg_Uint16_Overflow(t *testing.T) {
-	result, err := jsValueToAbiArg("uint16", "65536")
-	require.NoError(t, err)
-	assert.Equal(t, big.NewInt(0), result)
+	_, err := jsValueToAbiArg("uint16", "65536")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "overflows uint16")
 }
 
 func TestJsValueToAbiArg_Uint32(t *testing.T) {
@@ -141,9 +141,9 @@ func TestJsValueToAbiArg_Uint32(t *testing.T) {
 }
 
 func TestJsValueToAbiArg_Uint32_Overflow(t *testing.T) {
-	result, err := jsValueToAbiArg("uint32", "4294967296")
-	require.NoError(t, err)
-	assert.Equal(t, big.NewInt(0), result)
+	_, err := jsValueToAbiArg("uint32", "4294967296")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "overflows uint32")
 }
 
 func TestJsValueToAbiArg_Uint64(t *testing.T) {
@@ -160,9 +160,9 @@ func TestJsValueToAbiArg_Uint_Default(t *testing.T) {
 }
 
 func TestJsValueToAbiArg_Uint_UnsupportedType(t *testing.T) {
-	result, err := jsValueToAbiArg("uint256", []string{"array"})
-	require.NoError(t, err)
-	assert.Equal(t, big.NewInt(0), result)
+	_, err := jsValueToAbiArg("uint256", []string{"array"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "expected string or number")
 }
 
 func TestJsValueToAbiArg_Int256(t *testing.T) {
@@ -208,15 +208,15 @@ func TestJsValueToAbiArg_Int_Default(t *testing.T) {
 }
 
 func TestJsValueToAbiArg_Int_InvalidString(t *testing.T) {
-	result, err := jsValueToAbiArg("int256", "nope")
-	require.NoError(t, err)
-	assert.Equal(t, big.NewInt(0), result)
+	_, err := jsValueToAbiArg("int256", "nope")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid decimal")
 }
 
 func TestJsValueToAbiArg_Int_UnsupportedType(t *testing.T) {
-	result, err := jsValueToAbiArg("int256", []string{"arr"})
-	require.NoError(t, err)
-	assert.Equal(t, big.NewInt(0), result)
+	_, err := jsValueToAbiArg("int256", []string{"arr"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "expected string or number")
 }
 
 func TestJsValueToAbiArg_Bool_True(t *testing.T) {
@@ -232,9 +232,9 @@ func TestJsValueToAbiArg_Bool_False(t *testing.T) {
 }
 
 func TestJsValueToAbiArg_Bool_NotBool(t *testing.T) {
-	result, err := jsValueToAbiArg("bool", "true")
-	require.NoError(t, err)
-	assert.Equal(t, false, result) // type assertion fails → zero value
+	_, err := jsValueToAbiArg("bool", "true")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "bool expected")
 }
 
 func TestJsValueToAbiArg_Bytes32_Valid(t *testing.T) {
@@ -245,15 +245,15 @@ func TestJsValueToAbiArg_Bytes32_Valid(t *testing.T) {
 }
 
 func TestJsValueToAbiArg_Bytes32_Invalid_ShortHex(t *testing.T) {
-	result, err := jsValueToAbiArg("bytes32", "0x1234")
-	require.NoError(t, err)
-	assert.Equal(t, common.Hash{}, result)
+	_, err := jsValueToAbiArg("bytes32", "0x1234")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "bytes32 must be 32 bytes")
 }
 
 func TestJsValueToAbiArg_Bytes32_NotString(t *testing.T) {
-	result, err := jsValueToAbiArg("bytes32", 42)
-	require.NoError(t, err)
-	assert.Equal(t, common.Hash{}, result)
+	_, err := jsValueToAbiArg("bytes32", 42)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "bytes32 must be a hex string")
 }
 
 func TestJsValueToAbiArg_Bytes_HexString(t *testing.T) {
@@ -271,13 +271,13 @@ func TestJsValueToAbiArg_String(t *testing.T) {
 func TestJsValueToAbiArg_String_NotString(t *testing.T) {
 	_, err := jsValueToAbiArg("string", 42)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unsupported value for string")
+	assert.Contains(t, err.Error(), "must be a string")
 }
 
 func TestJsValueToAbiArg_Bytes_NotString(t *testing.T) {
 	_, err := jsValueToAbiArg("bytes", 42)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unsupported value for bytes")
+	assert.Contains(t, err.Error(), "must be a string")
 }
 
 func TestJsValueToAbiArg_UnsupportedType(t *testing.T) {
@@ -430,14 +430,15 @@ func TestJSHelper_Keccak256_Hex(t *testing.T) {
 
 func TestJSHelper_Keccak256_InvalidHex(t *testing.T) {
 	e, _ := NewJSRuleEvaluator(testLogger())
+	// keccak256 now throws on invalid hex — caught by wrappedValidate as Valid: false
 	script := `function validate(i){
-		var h = keccak256("0xGGGG");
-		if (h !== null && h !== undefined) return fail("expected null for invalid hex");
+		keccak256("0xGGGG");
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
 	res := e.wrappedValidate(script, input, nil, nil)
-	assert.True(t, res.Valid, "keccak256 invalid hex: %s", res.Reason)
+	assert.False(t, res.Valid, "keccak256 should throw on invalid hex")
+	assert.Contains(t, res.Reason, "keccak256")
 }
 
 func TestJSHelper_Selector(t *testing.T) {
@@ -490,14 +491,15 @@ func TestJSHelper_ToWei(t *testing.T) {
 
 func TestJSHelper_ToWei_Invalid(t *testing.T) {
 	e, _ := NewJSRuleEvaluator(testLogger())
+	// toWei now throws on invalid input — caught by wrappedValidate as Valid: false
 	script := `function validate(i){
-		var wei = toWei("not_a_number");
-		if (wei !== "0") return fail("toWei should return 0 for invalid: " + wei);
+		toWei("not_a_number");
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
 	res := e.wrappedValidate(script, input, nil, nil)
-	assert.True(t, res.Valid, "toWei invalid: %s", res.Reason)
+	assert.False(t, res.Valid, "toWei should throw on invalid input")
+	assert.Contains(t, res.Reason, "toWei")
 }
 
 func TestJSHelper_FromWei(t *testing.T) {
@@ -514,14 +516,15 @@ func TestJSHelper_FromWei(t *testing.T) {
 
 func TestJSHelper_FromWei_Invalid(t *testing.T) {
 	e, _ := NewJSRuleEvaluator(testLogger())
+	// fromWei now throws on invalid input — caught by wrappedValidate as Valid: false
 	script := `function validate(i){
-		var eth = fromWei("not_valid");
-		if (eth !== "0") return fail("fromWei should return 0 for invalid: " + eth);
+		fromWei("not_valid");
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
 	res := e.wrappedValidate(script, input, nil, nil)
-	assert.True(t, res.Valid, "fromWei invalid: %s", res.Reason)
+	assert.False(t, res.Valid, "fromWei should throw on invalid input")
+	assert.Contains(t, res.Reason, "fromWei")
 }
 
 func TestJSHelper_Eq(t *testing.T) {
@@ -539,51 +542,54 @@ func TestJSHelper_Eq(t *testing.T) {
 
 func TestJSHelper_AbiEncode_TooFewArgs(t *testing.T) {
 	e, _ := NewJSRuleEvaluator(testLogger())
+	// abi.encode now throws on missing args — caught by wrappedValidate as Valid: false
 	script := `function validate(i){
-		var enc = abi.encode();
-		if (enc !== "0x") return fail("should return 0x for no args: " + enc);
+		abi.encode();
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
 	res := e.wrappedValidate(script, input, nil, nil)
-	assert.True(t, res.Valid, "abi.encode no args: %s", res.Reason)
+	assert.False(t, res.Valid, "abi.encode should throw on missing args")
+	assert.Contains(t, res.Reason, "abi.encode")
 }
 
 func TestJSHelper_AbiDecode_TooFewArgs(t *testing.T) {
 	e, _ := NewJSRuleEvaluator(testLogger())
+	// abi.decode now throws on missing args — caught by wrappedValidate as Valid: false
 	script := `function validate(i){
-		var dec = abi.decode();
-		if (dec.length !== 0) return fail("should return empty array for no args");
+		abi.decode();
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
 	res := e.wrappedValidate(script, input, nil, nil)
-	assert.True(t, res.Valid, "abi.decode no args: %s", res.Reason)
+	assert.False(t, res.Valid, "abi.decode should throw on missing args")
+	assert.Contains(t, res.Reason, "abi.decode")
 }
 
 func TestJSHelper_AbiDecode_InvalidHex(t *testing.T) {
 	e, _ := NewJSRuleEvaluator(testLogger())
+	// abi.decode now throws on invalid hex — caught by wrappedValidate as Valid: false
 	script := `function validate(i){
-		var dec = abi.decode("not_hex", ["uint256"]);
-		if (dec.length !== 0) return fail("should return empty for invalid hex");
+		abi.decode("not_hex", ["uint256"]);
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
 	res := e.wrappedValidate(script, input, nil, nil)
-	assert.True(t, res.Valid, "abi.decode invalid hex: %s", res.Reason)
+	assert.False(t, res.Valid, "abi.decode should throw on invalid hex")
+	assert.Contains(t, res.Reason, "abi.decode")
 }
 
 func TestJSHelper_AbiEncode_TypeMismatch(t *testing.T) {
 	e, _ := NewJSRuleEvaluator(testLogger())
-	// 3 types but 2 values → should return "0x"
+	// abi.encode now throws on type/value mismatch — caught by wrappedValidate as Valid: false
 	script := `function validate(i){
-		var enc = abi.encode(["uint256", "address", "bool"], ["100", "0x742d35cc6634c0532925a3b844bc454e4438f44e"]);
-		if (enc !== "0x") return fail("should return 0x for mismatched args: " + enc);
+		abi.encode(["uint256", "address", "bool"], ["100", "0x742d35cc6634c0532925a3b844bc454e4438f44e"]);
 		return ok();
 	}`
 	input := &RuleInput{SignType: "transaction", ChainID: 1, Signer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}
 	res := e.wrappedValidate(script, input, nil, nil)
-	assert.True(t, res.Valid, "abi.encode mismatch: %s", res.Reason)
+	assert.False(t, res.Valid, "abi.encode should throw on mismatch")
+	assert.Contains(t, res.Reason, "abi.encode")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

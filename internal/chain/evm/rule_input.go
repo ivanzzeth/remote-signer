@@ -58,7 +58,10 @@ func BuildRuleInput(req *types.SignRequest, parsed *types.ParsedPayload) (*RuleI
 		if p.Transaction.To != nil {
 			to = common.HexToAddress(*p.Transaction.To).Hex()
 		}
-		valueHex := toHexWei(p.Transaction.Value)
+		valueHex, err := toHexWei(p.Transaction.Value)
+		if err != nil {
+			return nil, fmt.Errorf("transaction value: %w", err)
+		}
 		gasStr := ""
 		if p.Transaction.Gas > 0 {
 			gasStr = strconv.FormatUint(p.Transaction.Gas, 10)
@@ -132,15 +135,17 @@ func mapEVMSignTypeToRuleInput(signType string) string {
 }
 
 // toHexWei converts decimal wei string to 0x-prefixed hex (for RuleInput value).
-func toHexWei(dec string) string {
+// Returns error when value is not a valid decimal integer, including hex strings like "0x..." — these
+// must be converted to decimal before calling.
+func toHexWei(dec string) (string, error) {
 	if dec == "" {
-		return "0x0"
+		return "0x0", nil
 	}
 	var b big.Int
 	if _, ok := b.SetString(dec, 10); !ok {
-		return "0x0"
+		return "", fmt.Errorf("value must be a decimal integer, got %q", dec)
 	}
-	return "0x" + b.Text(16)
+	return "0x" + b.Text(16), nil
 }
 
 func normalizeHex(s string) string {

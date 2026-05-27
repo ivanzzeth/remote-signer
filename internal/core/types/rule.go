@@ -106,6 +106,15 @@ type Rule struct {
 	TemplateID *string `json:"template_id,omitempty" gorm:"type:varchar(128)"`
 	Variables  []byte  `json:"variables,omitempty" gorm:"type:jsonb"` // map[string]string — bound variable values
 
+	// Matrix is an optional per-chain variable override table.
+	// When non-nil, the evaluator resolves variables for a request by first
+	// loading Variables (defaults), then looking up Matrix[chain_id] and
+	// merging the per-chain overrides on top. ChainID on the rule is nil
+	// when Matrix is used — the rule matches ALL chains, but variables are
+	// resolved per-request based on the sign-request's chain_id.
+	// Stored as JSONB: []map[string]interface{}.
+	Matrix []byte `json:"matrix,omitempty" gorm:"type:jsonb"`
+
 	// Schedule fields — for periodic budget renewal
 	// When BudgetPeriod is set, the instance automatically renews its budget
 	// at each period boundary. ExpiresAt still controls the overall lifetime.

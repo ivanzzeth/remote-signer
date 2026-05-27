@@ -836,10 +836,6 @@ func TestToRuleResponse_BudgetPeriod(t *testing.T) {
 	assert.NotNil(t, resp.LastMatchedAt)
 }
 
-func strPtr(s string) *string {
-	return &s
-}
-
 // ---------------------------------------------------------------------------
 // createSigner additional coverage (signer_create.go:18 — 71.8%)
 // ---------------------------------------------------------------------------

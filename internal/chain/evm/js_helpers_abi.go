@@ -57,7 +57,7 @@ func jsValueToAbiArg(typ string, val interface{}) (interface{}, error) {
 	case "address":
 		s, ok := val.(string)
 		if !ok || !common.IsHexAddress(s) {
-			return common.Address{}, nil
+			return nil, fmt.Errorf("address must be a hex address string")
 		}
 		return common.HexToAddress(s), nil
 	case "uint256", "uint8", "uint16", "uint32", "uint64", "uint":
@@ -65,28 +65,33 @@ func jsValueToAbiArg(typ string, val interface{}) (interface{}, error) {
 	case "int256", "int8", "int16", "int32", "int64", "int":
 		return toBigIntOrInt(val, typ)
 	case "bool":
-		b, _ := val.(bool)
+		b, ok := val.(bool)
+		if !ok {
+			return nil, fmt.Errorf("bool expected, got %T", val)
+		}
 		return b, nil
 	case "bytes32":
 		s, ok := val.(string)
 		if !ok {
-			return common.Hash{}, nil
+			return nil, fmt.Errorf("bytes32 must be a hex string")
 		}
 		s = strings.TrimPrefix(s, "0x")
 		if len(s) != 64 {
-			return common.Hash{}, nil
+			return nil, fmt.Errorf("bytes32 must be 32 bytes (64 hex chars)")
 		}
 		return common.HexToHash("0x" + s), nil
 	case "bytes", "string":
-		// dynamic types: pass through; Pack expects []byte or string
 		if s, ok := val.(string); ok {
 			if typ == "bytes" && strings.HasPrefix(s, "0x") {
-				b, _ := hex.DecodeString(strings.TrimPrefix(s, "0x"))
+				b, err := hex.DecodeString(strings.TrimPrefix(s, "0x"))
+				if err != nil {
+					return nil, fmt.Errorf("bytes: invalid hex: %w", err)
+				}
 				return b, nil
 			}
 			return s, nil
 		}
-		return nil, fmt.Errorf("unsupported value for %s", typ)
+		return nil, fmt.Errorf("%s must be a string", typ)
 	default:
 		return nil, fmt.Errorf("unsupported abi type %s", typ)
 	}
@@ -97,35 +102,34 @@ func toBigIntOrUint(val interface{}, typ string) (interface{}, error) {
 	switch v := val.(type) {
 	case string:
 		if _, ok := b.SetString(v, 10); !ok {
-			return big.NewInt(0), nil
+			return nil, fmt.Errorf("invalid decimal string %q for %s", v, typ)
 		}
 	case float64:
 		b.SetInt64(int64(v))
 	default:
-		return big.NewInt(0), nil
+		return nil, fmt.Errorf("expected string or number for %s, got %T", typ, val)
 	}
-	// go-ethereum Pack for uint8/16/32/64 accepts *big.Int or native uint; Unpack returns byte/uint16/uint32/uint64 for small uints
 	switch typ {
 	case "uint8":
 		if b.IsUint64() && b.Uint64() <= 0xff {
 			return byte(b.Uint64()), nil // #nosec G115 -- bounds checked above
 		}
-		return big.NewInt(0), nil
+		return nil, fmt.Errorf("value %s overflows uint8", b.String())
 	case "uint16":
 		if b.IsUint64() && b.Uint64() <= 0xffff {
 			return uint16(b.Uint64()), nil // #nosec G115 -- bounds checked above
 		}
-		return big.NewInt(0), nil
+		return nil, fmt.Errorf("value %s overflows uint16", b.String())
 	case "uint32":
 		if b.IsUint64() && b.Uint64() <= 0xffffffff {
 			return uint32(b.Uint64()), nil // #nosec G115 -- bounds checked above
 		}
-		return big.NewInt(0), nil
+		return nil, fmt.Errorf("value %s overflows uint32", b.String())
 	case "uint64":
 		if b.IsUint64() {
 			return b.Uint64(), nil
 		}
-		return big.NewInt(0), nil
+		return nil, fmt.Errorf("value %s overflows uint64", b.String())
 	default:
 		return &b, nil
 	}
@@ -136,12 +140,12 @@ func toBigIntOrInt(val interface{}, typ string) (interface{}, error) {
 	switch v := val.(type) {
 	case string:
 		if _, ok := b.SetString(v, 10); !ok {
-			return big.NewInt(0), nil
+			return nil, fmt.Errorf("invalid decimal string %q for %s", v, typ)
 		}
 	case float64:
 		b.SetInt64(int64(v))
 	default:
-		return big.NewInt(0), nil
+		return nil, fmt.Errorf("expected string or number for %s, got %T", typ, val)
 	}
 	switch typ {
 	case "int8", "int16", "int32", "int64":

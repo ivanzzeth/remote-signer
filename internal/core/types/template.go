@@ -98,6 +98,12 @@ type RulePreset struct {
 	// variable map.
 	Budget            []byte     `json:"budget,omitempty" gorm:"type:jsonb"`
 	Schedule          []byte     `json:"schedule,omitempty" gorm:"type:jsonb"`
+	// Matrix is an optional per-chain variable override table for
+	// presets that use the rule-level Matrix feature. One rule
+	// created from this preset serves all chains; the evaluator
+	// resolves variables per request by looking up Matrix[chain_id].
+	// Stored as JSONB: []map[string]any.
+	Matrix            []byte     `json:"matrix,omitempty" gorm:"type:jsonb"`
 	Enabled           bool       `json:"enabled" gorm:"index"`
 	Source            RuleSource `json:"source" gorm:"type:varchar(32);index"`
 	SourcePath        string     `json:"source_path,omitempty" gorm:"type:varchar(512)"`

@@ -3,9 +3,11 @@
 package evm
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -337,6 +339,32 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 	if len(req.AppliedTo) > 0 && apiKey.IsAdmin() {
 		rule.AppliedTo = pq.StringArray(req.AppliedTo)
 	}
+
+	// Save old variables for budget auto-migration
+	oldVariables := make([]byte, len(rule.Variables))
+	copy(oldVariables, rule.Variables)
+
+	// Variables: replace entire set with the given map
+	if req.Variables != nil {
+		varsJSON, err := json.Marshal(req.Variables)
+		if err != nil {
+			h.writeError(w, "invalid variables: failed to marshal JSON", http.StatusBadRequest)
+			return
+		}
+		rule.Variables = varsJSON
+	}
+
+	// Matrix: replace entire per-chain override table
+	if req.Matrix != nil {
+		// Empty array clears the matrix
+		matrixJSON, err := json.Marshal(req.Matrix)
+		if err != nil {
+			h.writeError(w, "invalid matrix: failed to marshal JSON", http.StatusBadRequest)
+			return
+		}
+		rule.Matrix = matrixJSON
+	}
+
 	rule.UpdatedAt = time.Now()
 
 	// Reject solidity rules when forge is unavailable
@@ -375,10 +403,91 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 		return
 	}
 
+	// Auto-migrate budget when variables affecting budget unit changed
+	if req.Variables != nil && rule.TemplateID != nil && h.budgetRepo != nil && h.templateRepo != nil {
+		h.migrateBudgetOnVariableChange(r.Context(), rule, oldVariables)
+	}
+
 	h.logger.Info("rule updated", "rule_id", ruleID)
 	if h.auditLogger != nil {
 		clientIP, _ := r.Context().Value(middleware.ClientIPContextKey).(string)
 		h.auditLogger.LogRuleUpdated(r.Context(), apiKey.ID, clientIP, rule.ID, rule.Name, oldConfig, rule.Config)
 	}
 	h.writeJSON(w, h.toRuleResponse(rule), http.StatusOK)
+}
+
+// resolveBudgetUnit computes the budget unit string by substituting rule variables
+// into the template's BudgetMetering.Unit template. Returns "count" as fallback.
+func resolveBudgetUnit(variables []byte, unitTemplate string) string {
+	if unitTemplate == "" {
+		return "count"
+	}
+	if !strings.Contains(unitTemplate, "${") || len(variables) == 0 {
+		return unitTemplate
+	}
+	var vars map[string]string
+	if err := json.Unmarshal(variables, &vars); err != nil {
+		return unitTemplate
+	}
+	result := unitTemplate
+	for k, v := range vars {
+		result = strings.ReplaceAll(result, "${"+k+"}", v)
+	}
+	return result
+}
+
+// migrateBudgetOnVariableChange checks whether variable changes cause the budget
+// unit to change. If so, it creates a new budget for the new unit (keeping the
+// old one for audit trail) and copies the budget limits from the old budget.
+func (h *RuleHandler) migrateBudgetOnVariableChange(ctx context.Context, rule *types.Rule, oldVariables []byte) {
+	tmpl, err := h.templateRepo.Get(ctx, *rule.TemplateID)
+	if err != nil {
+		h.logger.Warn("budget migration: failed to get template, skipping", "rule_id", rule.ID, "template_id", *rule.TemplateID, "error", err)
+		return
+	}
+
+	var metering types.BudgetMetering
+	if len(tmpl.BudgetMetering) == 0 {
+		return
+	}
+	if err := json.Unmarshal(tmpl.BudgetMetering, &metering); err != nil || metering.Unit == "" {
+		return
+	}
+
+	oldUnit := resolveBudgetUnit(oldVariables, metering.Unit)
+	newUnit := resolveBudgetUnit(rule.Variables, metering.Unit)
+	if oldUnit == newUnit {
+		return
+	}
+
+	h.logger.Info("budget unit changed, auto-migrating", "rule_id", rule.ID, "old_unit", oldUnit, "new_unit", newUnit)
+
+	newBudget := &types.RuleBudget{
+		ID:       types.BudgetID(rule.ID, newUnit),
+		RuleID:   rule.ID,
+		Unit:     newUnit,
+		MaxTotal: "0",
+		MaxPerTx: "0",
+		Spent:    "0",
+	}
+
+	// Try to copy limits from the old budget
+	oldBudget, err := h.budgetRepo.Get(ctx, types.BudgetID(rule.ID, oldUnit))
+	if err == nil && oldBudget != nil {
+		newBudget.MaxTotal = oldBudget.MaxTotal
+		newBudget.MaxPerTx = oldBudget.MaxPerTx
+		newBudget.AlertPct = oldBudget.AlertPct
+		newBudget.MaxTxCount = oldBudget.MaxTxCount
+	}
+
+	created, wasCreated, err := h.budgetRepo.CreateOrGet(ctx, newBudget)
+	if err != nil {
+		h.logger.Error("budget migration: failed to create new budget", "rule_id", rule.ID, "error", err)
+		return
+	}
+	if wasCreated {
+		h.logger.Info("budget migration: created new budget for unit change",
+			"rule_id", rule.ID, "budget_id", created.ID, "old_unit", oldUnit, "new_unit", newUnit,
+			"max_total", newBudget.MaxTotal)
+	}
 }

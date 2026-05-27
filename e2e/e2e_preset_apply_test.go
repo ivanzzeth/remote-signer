@@ -88,10 +88,9 @@ func TestE2E_PresetApply_KeyPresets(t *testing.T) {
 			wantRuleCount: 1, // dex-swap
 		},
 		{
-			name:          "uniswap_v2",
-			presetID:      "evm/uniswap_v2",
-			wantRuleCount: 1,
-			skipReason:    "matrix expansion not supported post-migration (chain_id embedded in matrix)",
+			name:          "uniswap",
+			presetID:      "evm/uniswap",
+			wantRuleCount: 1, // single rule with Matrix covering all chains
 		},
 	}
 

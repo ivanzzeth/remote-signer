@@ -72,19 +72,26 @@ func TestMapEVMSignTypeToRuleInput(t *testing.T) {
 
 func TestToHexWei(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    string
-		expected string
+		name        string
+		input       string
+		expected    string
+		expectError bool
 	}{
-		{"empty", "", "0x0"},
-		{"zero", "0", "0x0"},
-		{"one ETH", "1000000000000000000", "0xde0b6b3a7640000"},
-		{"invalid", "not_a_number", "0x0"},
-		{"small", "255", "0xff"},
+		{"empty", "", "0x0", false},
+		{"zero", "0", "0x0", false},
+		{"one ETH", "1000000000000000000", "0xde0b6b3a7640000", false},
+		{"invalid", "not_a_number", "", true},
+		{"small", "255", "0xff", false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.expected, toHexWei(tc.input))
+			result, err := toHexWei(tc.input)
+			if tc.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tc.expected, result)
+			}
 		})
 	}
 }

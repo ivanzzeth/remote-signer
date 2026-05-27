@@ -27,6 +27,8 @@ type RuleResponse struct {
 	Immutable         bool            `json:"immutable,omitempty"`
 	SignerAddress     *string         `json:"signer_address,omitempty"`
 	Config            json.RawMessage `json:"config,omitempty"`
+	Variables         json.RawMessage `json:"variables,omitempty"`
+	Matrix            json.RawMessage `json:"matrix,omitempty"`
 	Enabled           bool            `json:"enabled"`
 	CreatedAt         string          `json:"created_at"`
 	UpdatedAt         string          `json:"updated_at"`
@@ -73,6 +75,8 @@ type UpdateRuleRequest struct {
 	Description   string                 `json:"description,omitempty"`
 	Type          string                 `json:"type,omitempty"`
 	Config        map[string]interface{} `json:"config,omitempty"`
+	Variables     map[string]string      `json:"variables,omitempty"`
+	Matrix        []map[string]any       `json:"matrix,omitempty"`
 	ChainType     *string                `json:"chain_type,omitempty"`
 	ChainID       *string                `json:"chain_id,omitempty"`
 	SignerAddress *string                `json:"signer_address,omitempty"`
@@ -165,6 +169,12 @@ func (h *RuleHandler) toRuleResponse(rule *types.Rule) RuleResponse {
 	if rule.BudgetPeriodStart != nil {
 		s := rule.BudgetPeriodStart.Format(time.RFC3339)
 		resp.BudgetPeriodStart = &s
+	}
+	if rule.Variables != nil {
+		resp.Variables = json.RawMessage(rule.Variables)
+	}
+	if rule.Matrix != nil {
+		resp.Matrix = json.RawMessage(rule.Matrix)
 	}
 
 	return resp

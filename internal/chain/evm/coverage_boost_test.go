@@ -414,39 +414,39 @@ func TestExportTypesSpecs_ValidArray_CB(t *testing.T) {
 // =============================================================================
 
 func TestToBigIntOrUint_UnsupportedType_CB(t *testing.T) {
-	result, err := toBigIntOrUint(true, "uint256") // bool is not supported
-	require.NoError(t, err)
-	assert.NotNil(t, result)
+	_, err := toBigIntOrUint(true, "uint256") // bool is not supported
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "expected string or number")
 }
 
 func TestToBigIntOrUint_Uint8Overflow_CB(t *testing.T) {
-	result, err := toBigIntOrUint("256", "uint8") // exceeds 0xff
-	require.NoError(t, err)
-	assert.NotNil(t, result) // returns big.NewInt(0)
+	_, err := toBigIntOrUint("256", "uint8") // exceeds 0xff
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "overflows uint8")
 }
 
 func TestToBigIntOrUint_Uint16Overflow_CB(t *testing.T) {
-	result, err := toBigIntOrUint("65536", "uint16") // exceeds 0xffff
-	require.NoError(t, err)
-	assert.NotNil(t, result)
+	_, err := toBigIntOrUint("65536", "uint16") // exceeds 0xffff
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "overflows uint16")
 }
 
 func TestToBigIntOrUint_Uint32Overflow_CB(t *testing.T) {
-	result, err := toBigIntOrUint("4294967296", "uint32") // exceeds 0xffffffff
-	require.NoError(t, err)
-	assert.NotNil(t, result)
+	_, err := toBigIntOrUint("4294967296", "uint32") // exceeds 0xffffffff
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "overflows uint32")
 }
 
 func TestToBigIntOrUint_Uint64Overflow_CB(t *testing.T) {
-	result, err := toBigIntOrUint("18446744073709551616", "uint64") // exceeds max uint64
-	require.NoError(t, err)
-	assert.NotNil(t, result)
+	_, err := toBigIntOrUint("18446744073709551616", "uint64") // exceeds max uint64
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "overflows uint64")
 }
 
 func TestToBigIntOrUint_InvalidString_CB(t *testing.T) {
-	result, err := toBigIntOrUint("not_a_number", "uint256")
-	require.NoError(t, err)
-	assert.NotNil(t, result)
+	_, err := toBigIntOrUint("not_a_number", "uint256")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid decimal")
 }
 
 func TestToBigIntOrUint_Float64_CB(t *testing.T) {

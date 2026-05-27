@@ -21,8 +21,10 @@ type Rule struct {
 	ApprovedBy        *string    `json:"approved_by,omitempty"`
 	Immutable         bool       `json:"immutable,omitempty"`
 	SignerAddress     *string    `json:"signer_address,omitempty"`
-	Config            RuleConfig `json:"config,omitempty"`
-	Enabled           bool       `json:"enabled"`
+	Config            RuleConfig      `json:"config,omitempty"`
+	Variables         json.RawMessage `json:"variables,omitempty"`
+	Matrix            json.RawMessage `json:"matrix,omitempty"`
+	Enabled           bool            `json:"enabled"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
 	ExpiresAt         *time.Time `json:"expires_at,omitempty"`
@@ -94,6 +96,8 @@ type UpdateRuleRequest struct {
 	Description string                 `json:"description,omitempty"`
 	Type        string                 `json:"type,omitempty"`
 	Config      map[string]interface{} `json:"config,omitempty"`
+	Variables   map[string]string      `json:"variables,omitempty"`
+	Matrix      []map[string]any       `json:"matrix,omitempty"`
 	Enabled     bool                   `json:"enabled"`
 	AppliedTo   []string               `json:"applied_to,omitempty"`
 	TestCases   []JSRuleTestCase       `json:"test_cases,omitempty"`

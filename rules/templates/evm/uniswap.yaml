@@ -1,0 +1,665 @@
+# Unified Uniswap template (evm_js) — V2 + V3 + V4 swap + ERC20 approve + WETH + Permit2.
+# Single rule dispatches by tx.to to the appropriate validator.
+# Uses per-chain Matrix overrides so one rule serves all chains.
+
+name: Uniswap (swap + approve + WETH)
+variables:
+  - name: v2_router_address
+    type: address
+    description: "Uniswap V2 Router contract address"
+    required: true
+  - name: v3_router_address
+    type: address
+    description: "Uniswap V3 SwapRouter contract address"
+    required: true
+  - name: universal_router_address
+    type: address
+    description: "Uniswap Universal Router (V4) contract address"
+    required: true
+  - name: weth_address
+    type: address
+    description: "Wrapped native token address (WETH/WMATIC/WBNB/WAVAX)"
+    required: true
+  - name: permit2_address
+    type: address
+    description: "Permit2 contract address (same across all chains)"
+    required: false
+    default: "0x000000000022D473030F116dDEE9F6B43aC78BA3"
+  - name: allowed_token_in
+    type: address_list
+    description: "Comma-separated allowed input token addresses. Empty = any."
+    required: false
+    default: ""
+  - name: allowed_token_out
+    type: address_list
+    description: "Comma-separated allowed output token addresses. Empty = any."
+    required: false
+    default: ""
+  - name: max_amount_in
+    type: string
+    description: "Max input amount per operation, in token smallest unit. -1 = no cap."
+    required: false
+    default: "-1"
+test_variables:
+  chain_id: "1"
+  v2_router_address: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
+  v3_router_address: "0xE592427A0AEce92De3Edee1F18E0157C05861564"
+  universal_router_address: "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD"
+  weth_address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+  permit2_address: "0x000000000022D473030F116dDEE9F6B43aC78BA3"
+  allowed_token_in: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2,0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+  allowed_token_out: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2,0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+  max_amount_in: "1000000000000000000"
+rules:
+  - id: "uniswap"
+    name: "Uniswap (swap + approve + WETH)"
+    type: "evm_js"
+    mode: "whitelist"
+    enabled: true
+    description: "Validates Uniswap V2/V3/V4 swaps, ERC20 approve, WETH wrap/unwrap, and Permit2"
+    config:
+      sign_type_filter: "transaction"
+      script: |
+        function validate(input) {
+          var ctx = rs.tx.require(input);
+
+          var approveSel = selector('approve(address,uint256)');
+          var depositSel = selector('deposit()');
+          var withdrawSel = selector('withdraw(uint256)');
+          var permitSel = selector('permit(address,address,uint160,uint48,uint48)');
+          var permitTransferFromSel = selector('permitTransferFrom(((address,uint160,uint48),(address,uint256),address,uint256),((address,uint256),address,uint256))');
+
+          // Build the set of known swap router addresses dynamically from config
+          var routers = [];
+          if (config.v2_router_address) routers.push(config.v2_router_address);
+          if (config.v3_router_address) routers.push(config.v3_router_address);
+          if (config.universal_router_address) routers.push(config.universal_router_address);
+
+          // --- Swap: V2, V3, V4 ---
+          if (routers.length > 0 && rs.addr.inList(ctx.tx.to, routers)) {
+            return validateSwap(ctx, input.signer);
+          }
+
+          // --- ERC20 approve: spender must be a known Uniswap router (checked in validateApprove) ---
+          if (eq(ctx.selector, approveSel)) {
+            return validateApprove(ctx.payloadHex, input.signer);
+          }
+
+          // --- WETH wrap/unwrap ---
+          if (rs.addr.eq(ctx.tx.to, config.weth_address)) {
+            if (eq(ctx.selector, depositSel)) return validateWETHDeposit(ctx.tx);
+            if (eq(ctx.selector, withdrawSel)) return validateWETHWithdraw(ctx.payloadHex, input.signer);
+            revert('unknown WETH method');
+          }
+
+          // --- Permit2 ---
+          if (rs.addr.eq(ctx.tx.to, config.permit2_address)) {
+            if (eq(ctx.selector, permitSel)) return ok();
+            if (eq(ctx.selector, permitTransferFromSel)) return ok();
+            revert('unknown Permit2 method');
+          }
+
+          revert('not a recognized Uniswap interaction');
+        }
+
+        function isSwapRouter(addr) {
+          return rs.addr.inList(addr, [config.v2_router_address, config.v3_router_address, config.universal_router_address]);
+        }
+
+        // ---- Swap validation ----
+
+        function validateSwap(ctx, signer) {
+          // V2 method selectors
+          var v2Sel5 = selector('swapExactTokensForTokens(uint256,uint256,address[],address,uint256)');
+          var v2Sel6 = selector('swapTokensForExactTokens(uint256,uint256,address[],address,uint256)');
+          var v2Sel3 = selector('swapExactTokensForETH(uint256,uint256,address[],address,uint256)');
+          var v2Sel4 = selector('swapTokensForExactETH(uint256,uint256,address[],address,uint256)');
+          var v2Sel1 = selector('swapExactETHForTokens(uint256,address[],address,uint256)');
+          var v2Sel2 = selector('swapETHForExactTokens(uint256,address[],address,uint256)');
+
+          // V3 method selectors
+          var exactInputSingleSel = selector('exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))');
+          var exactOutputSingleSel = selector('exactOutputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))');
+
+          // V2 matching
+          if (eq(ctx.selector, v2Sel5) || eq(ctx.selector, v2Sel6) || eq(ctx.selector, v2Sel3) || eq(ctx.selector, v2Sel4)) {
+            return validateV2Swap5(ctx.payloadHex, signer);
+          }
+          if (eq(ctx.selector, v2Sel1) || eq(ctx.selector, v2Sel2)) {
+            return validateV2Swap4(ctx.payloadHex, signer);
+          }
+
+          // V3 matching
+          if (eq(ctx.selector, exactInputSingleSel)) return validateExactInputSingle(ctx.payloadHex, signer);
+          if (eq(ctx.selector, exactOutputSingleSel)) return validateExactOutputSingle(ctx.payloadHex, signer);
+
+          // V4 Universal Router methods are whitelisted but not deeply validated
+          var executeSel = selector('execute(bytes,bytes[],uint256)');
+          var multicallDeadlineSel = selector('multicall(uint256,bytes[])');
+          var multicallSel = selector('multicall(bytes[])');
+          var sweepSel = selector('sweep(address,address,uint256)');
+          var unwrapWETH9Sel = selector('unwrapWETH9(uint256,address)');
+          var unwrapWETH9FeeSel = selector('unwrapWETH9WithFee(uint256,address,uint256,address)');
+          var paySel = selector('pay(address,address,uint256)');
+          var payPortionSel = selector('payPortion(address,address,uint256,address,uint256)');
+
+          if (eq(ctx.selector, executeSel) || eq(ctx.selector, multicallDeadlineSel) ||
+              eq(ctx.selector, multicallSel) || eq(ctx.selector, sweepSel) ||
+              eq(ctx.selector, unwrapWETH9Sel) || eq(ctx.selector, unwrapWETH9FeeSel) ||
+              eq(ctx.selector, paySel) || eq(ctx.selector, payPortionSel)) {
+            return ok();
+          }
+
+          revert('method not allowed');
+        }
+
+        function validateV2Swap5(payloadHex, signer) {
+          var dec = abi.decode(payloadHex, ['uint256', 'uint256', 'address[]', 'address', 'uint256']);
+          require(dec && dec.length === 5, 'swap decode failed');
+          var amountIn = dec[0];
+          var path = dec[2];
+          var to = dec[3];
+          require(isAddress(to), 'invalid recipient');
+          rs.addr.requireInList(to, [signer], 'recipient must be signer');
+          rs.bigint.requireLte(amountIn, config.max_amount_in, 'amountIn exceeds cap');
+          require(path && path.length >= 2, 'path must have >= 2 tokens');
+          rs.addr.requireInListIfNonEmpty(path[0], config.allowed_token_in, 'tokenIn not allowed');
+          rs.addr.requireInListIfNonEmpty(path[path.length - 1], config.allowed_token_out, 'tokenOut not allowed');
+          return ok();
+        }
+
+        function validateV2Swap4(payloadHex, signer) {
+          var dec = abi.decode(payloadHex, ['uint256', 'address[]', 'address', 'uint256']);
+          require(dec && dec.length === 4, 'swap decode failed');
+          var path = dec[1];
+          var to = dec[2];
+          require(isAddress(to), 'invalid recipient');
+          rs.addr.requireInList(to, [signer], 'recipient must be signer');
+          require(path && path.length >= 2, 'path must have >= 2 tokens');
+          rs.addr.requireInListIfNonEmpty(path[0], config.allowed_token_in, 'tokenIn not allowed');
+          rs.addr.requireInListIfNonEmpty(path[path.length - 1], config.allowed_token_out, 'tokenOut not allowed');
+          return ok();
+        }
+
+        function validateExactInputSingle(payloadHex, signer) {
+          var dec = abi.decode(payloadHex, [
+            { type: 'tuple', components: [
+              { name: 'tokenIn', type: 'address' },
+              { name: 'tokenOut', type: 'address' },
+              { name: 'fee', type: 'uint24' },
+              { name: 'recipient', type: 'address' },
+              { name: 'deadline', type: 'uint256' },
+              { name: 'amountIn', type: 'uint256' },
+              { name: 'amountOutMinimum', type: 'uint256' },
+              { name: 'sqrtPriceLimitX96', type: 'uint160' }
+            ]}
+          ]);
+          require(dec && dec.length === 1, 'exactInputSingle decode failed');
+          var params = dec[0];
+          require(isAddress(params.recipient), 'invalid recipient');
+          rs.addr.requireInList(params.recipient, [signer], 'recipient must be signer');
+          rs.addr.requireInListIfNonEmpty(params.tokenIn, config.allowed_token_in, 'tokenIn not allowed');
+          rs.addr.requireInListIfNonEmpty(params.tokenOut, config.allowed_token_out, 'tokenOut not allowed');
+          rs.bigint.requireLte(params.amountIn, config.max_amount_in, 'amountIn exceeds cap');
+          return ok();
+        }
+
+        function validateExactOutputSingle(payloadHex, signer) {
+          var dec = abi.decode(payloadHex, [
+            { type: 'tuple', components: [
+              { name: 'tokenIn', type: 'address' },
+              { name: 'tokenOut', type: 'address' },
+              { name: 'fee', type: 'uint24' },
+              { name: 'recipient', type: 'address' },
+              { name: 'deadline', type: 'uint256' },
+              { name: 'amountOut', type: 'uint256' },
+              { name: 'amountInMaximum', type: 'uint256' },
+              { name: 'sqrtPriceLimitX96', type: 'uint160' }
+            ]}
+          ]);
+          require(dec && dec.length === 1, 'exactOutputSingle decode failed');
+          var params = dec[0];
+          require(isAddress(params.recipient), 'invalid recipient');
+          rs.addr.requireInList(params.recipient, [signer], 'recipient must be signer');
+          rs.addr.requireInListIfNonEmpty(params.tokenIn, config.allowed_token_in, 'tokenIn not allowed');
+          rs.addr.requireInListIfNonEmpty(params.tokenOut, config.allowed_token_out, 'tokenOut not allowed');
+          rs.bigint.requireLte(params.amountInMaximum, config.max_amount_in, 'amountInMaximum exceeds cap');
+          return ok();
+        }
+
+        // ---- ERC20 approve ----
+
+        function validateApprove(payloadHex, signer) {
+          var dec = abi.decode(payloadHex, ['address', 'uint256']);
+          require(dec && dec.length === 2, 'approve decode failed');
+          var spender = dec[0];
+          var amount = dec[1];
+          require(isAddress(spender), 'invalid spender address');
+          // Spender must be a known Uniswap router
+          require(isSwapRouter(spender), 'spender must be a known Uniswap router');
+          rs.bigint.requireLte(amount, config.max_amount_in, 'approve amount exceeds cap');
+          return ok();
+        }
+
+        // ---- WETH ----
+
+        function validateWETHDeposit(tx) {
+          // deposit() has no params; value is the amount
+          rs.bigint.requireLte(tx.value, config.max_amount_in, 'deposit amount exceeds cap');
+          return ok();
+        }
+
+        function validateWETHWithdraw(payloadHex, signer) {
+          var dec = abi.decode(payloadHex, ['uint256']);
+          require(dec && dec.length === 1, 'withdraw decode failed');
+          var amount = dec[0];
+          rs.bigint.requireLte(amount, config.max_amount_in, 'withdraw amount exceeds cap');
+          return ok();
+        }
+    test_cases:
+      # ── V2 pass cases ──
+      - name: "pass: V2 swapExactTokensForTokens"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
+            value: "0"
+            data: "0x38ed17390000000000000000000000000000000000000000000000000de0b6b3a76400000000000000000000000000000000000000000000000000000000000035a4e90000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266000000000000000000000000000000000000000000000000000000174876e7ff0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+        expect_pass: true
+      - name: "pass: V2 swapTokensForExactTokens"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
+            value: "0"
+            data: "0x8803dbee000000000000000000000000000000000000000000000000000000003b9aca000000000000000000000000000000000000000000000000000de0b6b3a764000000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb9226600000000000000000000000000000000000000000000000000000002540be3ff0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+        expect_pass: true
+      - name: "pass: V2 swapExactTokensForETH"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
+            value: "0"
+            data: "0x18cbafe50000000000000000000000000000000000000000000000000de0b6b3a7640000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb9226600000000000000000000000000000000000000000000000000000002540be3ff0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+        expect_pass: true
+      - name: "pass: V2 swapTokensForExactETH"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
+            value: "0"
+            data: "0x4a25d94a0000000000000000000000000000000000000000000000000de0b6b3a7640000000000000000000000000000000000000000000000000000000000007735940000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb9226600000000000000000000000000000000000000000000000000000002540be3ff0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+        expect_pass: true
+      - name: "pass: V2 swapExactETHForTokens"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
+            value: "0"
+            data: "0x7ff36ab500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000080000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb9226600000000000000000000000000000000000000000000000000000002540be3ff0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+        expect_pass: true
+      - name: "pass: V2 swapETHForExactTokens"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
+            value: "0"
+            data: "0xfb3bdb41000000000000000000000000000000000000000000000000000000003b9aca000000000000000000000000000000000000000000000000000000000000000080000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb9226600000000000000000000000000000000000000000000000000000002540be3ff0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+        expect_pass: true
+      # ── V3 pass cases ──
+      - name: "pass: V3 exactInputSingle"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0xE592427A0AEce92De3Edee1F18E0157C05861564"
+            value: "0"
+            data: "0x414bf389000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb480000000000000000000000000000000000000000000000000000000000000bb8000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266000000000000000000000000000000000000000000000000000000174876e7ff0000000000000000000000000000000000000000000000000de0b6b3a76400000000000000000000000000000000000000000000000000000000000035a4e9000000000000000000000000000000000000000000000000000000000000000000"
+            methodId: "0x414bf389"
+        expect_pass: true
+      - name: "pass: V3 exactOutputSingle"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0xE592427A0AEce92De3Edee1F18E0157C05861564"
+            value: "0"
+            data: "0xdb3e2198000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb480000000000000000000000000000000000000000000000000000000000000bb8000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb9226600000000000000000000000000000000000000000000000000000002540be3ff000000000000000000000000000000000000000000000000000000003b9aca000000000000000000000000000000000000000000000000000de0b6b3a76400000000000000000000000000000000000000000000000000000000000000000000"
+            methodId: "0xdb3e2198"
+        expect_pass: true
+      # ── V4 Universal Router pass cases ──
+      - name: "pass: V4 execute"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD"
+            value: "0"
+            data: "0x3593564c0000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000002540be3ff00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+            methodId: "0x3593564c"
+        expect_pass: true
+      - name: "pass: V4 multicall with deadline"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD"
+            value: "0"
+            data: "0x5ae401dc00000000000000000000000000000000000000000000000000000002540be3ff00000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000000"
+            methodId: "0x5ae401dc"
+        expect_pass: true
+      - name: "pass: V4 multicall basic"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD"
+            value: "0"
+            data: "0xac9650d800000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000000"
+            methodId: "0xac9650d8"
+        expect_pass: true
+      - name: "pass: V4 sweep"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD"
+            value: "0"
+            data: "0x62c06767000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb922660000000000000000000000000000000000000000000000000000000000000000"
+            methodId: "0x62c06767"
+        expect_pass: true
+      - name: "pass: V4 unwrapWETH9"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD"
+            value: "0"
+            data: "0x49404b7c0000000000000000000000000000000000000000000000000de0b6b3a7640000000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+            methodId: "0x49404b7c"
+        expect_pass: true
+      - name: "pass: V4 unwrapWETH9WithFee"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD"
+            value: "0"
+            data: "0x9b2c0a370000000000000000000000000000000000000000000000000de0b6b3a7640000000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb9226600000000000000000000000000000000000000000000000000000000000001f40000000000000000000000000000000000000000000000000000000000000001"
+            methodId: "0x9b2c0a37"
+        expect_pass: true
+      - name: "pass: V4 pay"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD"
+            value: "0"
+            data: "0xb3d76188000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266000000000000000000000000000000000000000000000000000000003b9aca00"
+            methodId: "0xb3d76188"
+        expect_pass: true
+      - name: "pass: V4 payPortion"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD"
+            value: "0"
+            data: "0x13d2f038000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266000000000000000000000000000000000000000000000000000000003b9aca000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000001e"
+            methodId: "0x13d2f038"
+        expect_pass: true
+      # ── ERC20 approve pass ──
+      - name: "pass: ERC20 approve to V2 router"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+            value: "0"
+            data: "0x095ea7b30000000000000000000000007a250d5630B4cF539739dF2C5dAcb4c659F2488D0000000000000000000000000000000000000000000000000de0b6b3a7640000"
+        expect_pass: true
+      - name: "pass: ERC20 approve to V3 router"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+            value: "0"
+            data: "0x095ea7b3000000000000000000000000e592427a0aece92de3edee1f18e0157c058615640000000000000000000000000000000000000000000000000de0b6b3a7640000"
+        expect_pass: true
+      # ── WETH pass cases ──
+      - name: "pass: WETH deposit"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+            value: "1000000000000000000"
+            data: "0xd0e30db0"
+        expect_pass: true
+      - name: "pass: WETH withdraw"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+            value: "0"
+            data: "0x2e1a7d4d0000000000000000000000000000000000000000000000000de0b6b3a7640000"
+        expect_pass: true
+      # ── Permit2 pass cases ──
+      - name: "pass: Permit2 permit"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0x000000000022D473030F116dDEE9F6B43aC78BA3"
+            value: "0"
+            data: "0x05a77180000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266000000000000000000000000e592427a0aece92de3edee1f18e0157c05861564000000000000000000000000ffffffffffffffffffffffffffffffffffffffff000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002540be3ff"
+        expect_pass: true
+      # ── Reject cases ──
+      - name: "reject: tx to non-Uniswap address"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
+            to: "0x000000000000000000000000000000000000dEaD"
+            value: "0"
+            data: "0x38ed17390000000000000000000000000000000000000000000000000de0b6b3a76400000000000000000000000000000000000000000000000000000000000035a4e90000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000174876e7ff0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+        expect_pass: false
+        expect_reason: "not a recognized Uniswap interaction"
+      - name: "reject: disallowed method on V2 router"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
+            to: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
+            value: "0"
+            data: "0x06fdde03"
+        expect_pass: false
+        expect_reason: "method not allowed"
+      - name: "reject: V3 swap recipient not signer"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
+            to: "0xE592427A0AEce92De3Edee1F18E0157C05861564"
+            value: "0"
+            data: "0x414bf389000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb480000000000000000000000000000000000000000000000000000000000000bb8000000000000000000000000000000000000000000000000000000000000dead000000000000000000000000000000000000000000000000000000174876e7ff0000000000000000000000000000000000000000000000000de0b6b3a76400000000000000000000000000000000000000000000000000000000000035a4e9000000000000000000000000000000000000000000000000000000000000000000"
+            methodId: "0x414bf389"
+        expect_pass: false
+        expect_reason: "recipient must be signer"
+      - name: "reject: tokenIn not in allowed_token_in list"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
+            value: "0"
+            data: "0x38ed17390000000000000000000000000000000000000000000000000de0b6b3a7640000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb9226600000000000000000000000000000000000000000000000000000002540be3ff00000000000000000000000000000000000000000000000000000000000000020000000000000000000000006b175474e89094c44da98b954eedeac495271d0f000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+        expect_pass: false
+        expect_reason: "tokenIn not allowed"
+      - name: "reject: tokenOut not in allowed_token_out list"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
+            value: "0"
+            data: "0x38ed17390000000000000000000000000000000000000000000000000de0b6b3a7640000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb9226600000000000000000000000000000000000000000000000000000002540be3ff0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc20000000000000000000000006b175474e89094c44da98b954eedeac495271d0f"
+        expect_pass: false
+        expect_reason: "tokenOut not allowed"
+      - name: "reject: V2 swap amountIn exceeds max_amount_in"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
+            value: "0"
+            data: "0x38ed17390000000000000000000000000000000000000000000000004563918244f40000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb9226600000000000000000000000000000000000000000000000000000002540be3ff0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+        expect_pass: false
+        expect_reason: "amountIn exceeds cap"
+      - name: "reject: V3 swap amountIn exceeds max_amount_in"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0xE592427A0AEce92De3Edee1F18E0157C05861564"
+            value: "0"
+            data: "0x414bf389000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb480000000000000000000000000000000000000000000000000000000000000bb8000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb9226600000000000000000000000000000000000000000000000000000002540be3ff0000000000000000000000000000000000000000000000004563918244f4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+            methodId: "0x414bf389"
+        expect_pass: false
+        expect_reason: "amountIn exceeds cap"
+      - name: "reject: ERC20 approve to non-router spender"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+            value: "0"
+            data: "0x095ea7b30000000000000000000000006b175474e89094c44da98b954eedeac495271d0f0000000000000000000000000000000000000000000000000de0b6b3a7640000"
+        expect_pass: false
+        expect_reason: "spender must be a known Uniswap router"
+      - name: "reject: WETH deposit amount exceeds max_amount_in"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+            value: "5000000000000000000"
+            data: "0xd0e30db0"
+        expect_pass: false
+        expect_reason: "deposit amount exceeds cap"
+      - name: "reject: WETH withdraw amount exceeds max_amount_in"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+            value: "0"
+            data: "0x2e1a7d4d000000000000000000000000000000000000000000000004563918244f400000"
+        expect_pass: false
+        expect_reason: "withdraw amount exceeds cap"
+      - name: "reject: unknown method on WETH"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+            value: "0"
+            data: "0xdeadbeef"
+        expect_pass: false
+        expect_reason: "unknown WETH method"
+      - name: "reject: unknown method on Permit2"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0x000000000022D473030F116dDEE9F6B43aC78BA3"
+            value: "0"
+            data: "0xdeadbeef"
+        expect_pass: false
+        expect_reason: "unknown Permit2 method"
+      - name: "reject: approve amount exceeds max_amount_in"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+            value: "0"
+            data: "0x095ea7b30000000000000000000000007a250d5630B4cF539739dF2C5dAcb4c659F2488D000000000000000000000000000000000000000000000004563918244f400000"
+        expect_pass: false
+        expect_reason: "approve amount exceeds cap"

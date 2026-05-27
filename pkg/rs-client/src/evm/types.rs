@@ -165,6 +165,10 @@ pub struct Rule {
     pub budget_period: Option<String>,
     #[serde(default)]
     pub budget_period_start: Option<String>,
+    #[serde(default)]
+    pub variables: Option<serde_json::Value>,
+    #[serde(default)]
+    pub matrix: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -215,6 +219,10 @@ pub struct UpdateRuleRequest {
     pub config: Option<serde_json::Value>,
     #[serde(default)]
     pub enabled: Option<bool>,
+    #[serde(default)]
+    pub variables: Option<std::collections::HashMap<String, String>>,
+    #[serde(default)]
+    pub matrix: Option<Vec<serde_json::Value>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

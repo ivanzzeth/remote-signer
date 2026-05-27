@@ -756,17 +756,17 @@ func TestInjectHelpers_Selector_NoArgs_CB5(t *testing.T) {
 func TestInjectHelpers_AbiEncode_NoArgs_CB5(t *testing.T) {
 	vm := sobek.New()
 	_ = injectHelpers(vm)
-	val, err := vm.RunString(`abi.encode()`)
-	require.NoError(t, err)
-	assert.Equal(t, "0x", val.String())
+	_, err := vm.RunString(`abi.encode()`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "abi.encode")
 }
 
 func TestInjectHelpers_AbiDecode_NoArgs_CB5(t *testing.T) {
 	vm := sobek.New()
 	_ = injectHelpers(vm)
-	val, err := vm.RunString(`JSON.stringify(abi.decode())`)
-	require.NoError(t, err)
-	assert.Contains(t, val.String(), "[]")
+	_, err := vm.RunString(`JSON.stringify(abi.decode())`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "abi.decode")
 }
 
 

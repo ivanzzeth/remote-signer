@@ -81,6 +81,9 @@ type CreateInstanceRequest struct {
 	// Optional: periodic renewal (session with schedule)
 	Schedule *ScheduleConfig `json:"schedule,omitempty"`
 
+	// Optional: per-chain variable overrides stored as JSONB on the rule.
+	Matrix json.RawMessage `json:"matrix,omitempty"`
+
 	// CrossTemplateIDMap maps template sub-rule IDs (YAML IDs) to actual
 	// instance rule IDs (inst_<hash>) from other templates in the same batch.
 	// Used by BatchCreateInstances to resolve delegate_to cross-references
@@ -608,6 +611,9 @@ func (s *TemplateService) createInstanceFromBundle(
 		}
 		if req.SignerAddress != nil {
 			rule.SignerAddress = req.SignerAddress
+		}
+		if len(req.Matrix) > 0 {
+			rule.Matrix = []byte(req.Matrix)
 		}
 		if req.ExpiresAt != nil {
 			rule.ExpiresAt = req.ExpiresAt
