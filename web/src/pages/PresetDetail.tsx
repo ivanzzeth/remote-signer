@@ -100,6 +100,10 @@ export function PresetDetail() {
             </Card>
           )}
 
+          {data.matrix && data.matrix.length > 0 && (
+            <MatrixTable matrix={data.matrix} />
+          )}
+
           <ApplyForm
             preset={data}
             onApplied={() => navigate("/rules")}
@@ -138,6 +142,13 @@ function ApplyForm({
   const [success, setSuccess] = useState<ApplyResult[] | null>(null);
   const [validating, setValidating] = useState(false);
   const [validationResults, setValidationResults] = useState<ValidateRuleResultItem[] | null>(null);
+
+  const hasMatrix = preset.matrix && preset.matrix.length > 0;
+  // When a preset has a Matrix, the per-variable inputs are just overrides
+  // on top of per-chain values — collapse them by default to keep the form
+  // clean. Toggle to "Advanced" for the rare case where an operator needs
+  // to override the fallback defaults.
+  const [showVarOverrides, setShowVarOverrides] = useState(false);
 
   async function validate() {
     setError(null);
@@ -236,6 +247,42 @@ function ApplyForm({
         {preset.variables.length === 0 ? (
           <div className="rounded-md border border-ink-200 bg-ink-50 px-3 py-2 text-xs text-ink-700">
             This preset declares no override hints — apply with defaults.
+          </div>
+        ) : hasMatrix ? (
+          <div className="rounded-md border border-ink-200 bg-ink-50">
+            <div className="flex items-center justify-between px-3 py-2">
+              <div>
+                <span className="text-sm text-ink-700">
+                  {preset.variables.length} fallback default
+                  {preset.variables.length === 1 ? "" : "s"}
+                </span>
+                <span className="ml-2 text-xs text-ink-500">
+                  Matrix rows override these per chain; changing a value here won't affect any Matrix row. Edit individual chain values after applying via Rules → rule → PATCH.
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowVarOverrides((s) => !s)}
+                className="rounded-md border border-ink-200 px-2 py-0.5 text-xs text-ink-700 hover:bg-ink-100"
+              >
+                {showVarOverrides ? "Collapse" : "Advanced"}
+              </button>
+            </div>
+            {showVarOverrides && (
+              <>
+                <div className="border-t border-ink-100 px-3 py-1.5 text-xs text-amber-700 bg-amber-50">
+                  These are fallback defaults for chains not in the Matrix. To change a specific chain's address, apply first, then PATCH the rule's matrix from the Rules page.
+                </div>
+                {preset.variables.map((v) => (
+                  <VariableRow
+                    key={v.name}
+                    variable={v}
+                    value={vars[v.name] ?? ""}
+                    onChange={(val) => setVars((s) => ({ ...s, [v.name]: val }))}
+                  />
+                ))}
+              </>
+            )}
           </div>
         ) : (
           preset.variables.map((v) => (
@@ -472,3 +519,60 @@ function formatErr(e: unknown): string {
   if (e instanceof Error) return e.message;
   return String(e);
 }
+
+function MatrixTable({ matrix }: { matrix: Record<string, any>[] }) {
+  if (!matrix || matrix.length === 0) return null;
+  const chainKey = "chain_id";
+  // Collect all column keys across all rows, put chain_id first.
+  const colSet = new Set<string>();
+  for (const row of matrix) {
+    for (const k of Object.keys(row)) colSet.add(k);
+  }
+  const cols = [chainKey, ...Array.from(colSet).filter((k) => k !== chainKey)];
+
+  return (
+    <Card title={`Matrix (${matrix.length} chain${matrix.length === 1 ? "" : "s"})`}>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-xs" style={{ tableLayout: "auto" }}>
+          <thead>
+            <tr className="border-b border-ink-200">
+              {cols.map((col) => (
+                <th
+                  key={col}
+                  className="whitespace-nowrap px-2 py-1 font-mono font-normal text-ink-500"
+                >
+                  {col}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {matrix.map((row, i) => (
+              <tr key={i} className="border-t border-ink-100 hover:bg-ink-50">
+                {cols.map((col) => {
+                  const val = row[col];
+                  const display =
+                    val === undefined || val === null
+                      ? ""
+                      : typeof val === "object"
+                        ? JSON.stringify(val)
+                        : String(val);
+                  return (
+                    <td
+                      key={col}
+                      className="max-w-[200px] truncate whitespace-nowrap px-2 py-1 font-mono text-ink-700"
+                      title={display}
+                    >
+                      {display}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+

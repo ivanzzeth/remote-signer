@@ -74,6 +74,7 @@ type DetailResponse struct {
 	Enabled     bool             `json:"enabled"`
 	TemplateIDs []string         `json:"template_ids"`
 	Variables   []VariableDetail `json:"variables"`
+	Matrix      json.RawMessage   `json:"matrix,omitempty"`
 }
 
 // Get returns rich detail for a preset (admin only).

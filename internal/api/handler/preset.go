@@ -275,6 +275,7 @@ type PresetDetailResponse struct {
 	Enabled     bool                   `json:"enabled"`
 	TemplateIDs []string               `json:"template_ids"`
 	Variables   []PresetVariableDetail `json:"variables"`
+	Matrix      json.RawMessage        `json:"matrix,omitempty"`
 }
 
 func (h *PresetHandler) detail(w http.ResponseWriter, r *http.Request, id string) {
@@ -323,6 +324,7 @@ func (h *PresetHandler) detail(w http.ResponseWriter, r *http.Request, id string
 		Enabled:     p.Enabled,
 		TemplateIDs: templateIDs,
 		Variables:   out,
+		Matrix:      p.Matrix,
 	}, http.StatusOK)
 }
 
@@ -842,6 +844,9 @@ func (h *PresetHandler) resolveInstances(
 				}
 				req.Schedule = &service.ScheduleConfig{Period: d}
 			}
+		}
+		if len(preset.Matrix) > 0 {
+			req.Matrix = json.RawMessage(preset.Matrix)
 		}
 
 		ownership, err := DetermineRuleOwnership(

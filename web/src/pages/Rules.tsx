@@ -151,7 +151,7 @@ export function Rules() {
 
   async function update(
     id: string,
-    patch: { name?: string; description?: string; config?: Record<string, unknown> },
+    patch: { name?: string; description?: string; config?: Record<string, unknown>; variables?: Record<string, string>; matrix?: Record<string, any>[] },
   ) {
     const client = getClient();
     if (!client) return;
@@ -457,6 +457,8 @@ function RuleDetailPanel({
     name?: string;
     description?: string;
     config?: Record<string, unknown>;
+    variables?: Record<string, string>;
+    matrix?: Record<string, any>[];
   }) => void;
   busy: boolean;
 }) {
@@ -474,6 +476,14 @@ function RuleDetailPanel({
   const [rawJson, setRawJson] = useState(() =>
     JSON.stringify(rule.config, null, 2),
   );
+  const [editVars, setEditVars] = useState(() =>
+    rule.variables ? JSON.stringify(rule.variables, null, 2) : "",
+  );
+  const [editMatrix, setEditMatrix] = useState(() =>
+    rule.matrix && Array.isArray(rule.matrix) ? JSON.stringify(rule.matrix, null, 2) : "",
+  );
+  const [showVarsEditor, setShowVarsEditor] = useState(false);
+  const [showMatrixEditor, setShowMatrixEditor] = useState(false);
   const [parseError, setParseError] = useState<string | null>(null);
   const [validating, setValidating] = useState(false);
   const [validationResult, setValidationResult] = useState<ValidateRuleResponse | null>(null);
@@ -506,11 +516,38 @@ function RuleDetailPanel({
         return;
       }
     }
-    onSave({
+    const patch: {
+      name?: string;
+      description?: string;
+      config?: Record<string, unknown>;
+      variables?: Record<string, string>;
+      matrix?: Record<string, any>[];
+    } = {
       name: name.trim(),
       description: description.trim(),
       config: payload,
-    });
+    };
+    if (editVars.trim()) {
+      try {
+        patch.variables = JSON.parse(editVars);
+      } catch (e) {
+        setParseError("Variables: " + (e instanceof Error ? e.message : "invalid JSON"));
+        return;
+      }
+    } else if (rule.variables && Object.keys(rule.variables).length > 0) {
+      patch.variables = {};
+    }
+    if (editMatrix.trim()) {
+      try {
+        patch.matrix = JSON.parse(editMatrix);
+      } catch (e) {
+        setParseError("Matrix: " + (e instanceof Error ? e.message : "invalid JSON"));
+        return;
+      }
+    } else if (rule.matrix && Array.isArray(rule.matrix) && rule.matrix.length > 0) {
+      patch.matrix = [];
+    }
+    onSave(patch);
   }
 
   return (
@@ -590,6 +627,81 @@ function RuleDetailPanel({
             )}
           </div>
           {parseError && <ErrorBanner msg={parseError} />}
+
+          {/* Variables / Matrix editors — only shown for evm_js rules (the type that supports them) */}
+          {(rule.type === "evm_js") && (
+            <div className="space-y-2 rounded-md border border-ink-200 p-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] uppercase tracking-wide text-ink-500">
+                  Variables / Matrix
+                </span>
+              </div>
+
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setShowVarsEditor((s) => !s)}
+                  className="flex w-full items-center justify-between rounded-md border border-ink-100 px-2 py-1 text-left text-xs text-ink-700 hover:bg-ink-50"
+                >
+                  <span>
+                    Variables{" "}
+                    <span className="text-ink-400">
+                      ({rule.variables ? Object.keys(rule.variables).length : 0} keys)
+                    </span>
+                  </span>
+                  <span className="text-[10px] text-ink-500">{showVarsEditor ? "▲" : "▼"}</span>
+                </button>
+                {showVarsEditor && (
+                  <div className="mt-1">
+                    <textarea
+                      value={editVars}
+                      onChange={(e) => setEditVars(e.target.value)}
+                      rows={Math.max(3, editVars.split("\n").length)}
+                      spellCheck={false}
+                      placeholder='{"max_amount_in": "5000000000000000000"}'
+                      className="block w-full rounded-md border border-ink-300 p-2 font-mono text-[11px]"
+                    />
+                    <div className="mt-1 text-[10px] text-ink-500">
+                      Clear to reset (sends empty object).
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setShowMatrixEditor((s) => !s)}
+                  className="flex w-full items-center justify-between rounded-md border border-ink-100 px-2 py-1 text-left text-xs text-ink-700 hover:bg-ink-50"
+                >
+                  <span>
+                    Matrix{" "}
+                    <span className="text-ink-400">
+                      ({rule.matrix && Array.isArray(rule.matrix) ? (rule.matrix as Record<string, any>[]).length : 0} rows)
+                    </span>
+                  </span>
+                  <span className="text-[10px] text-ink-500">{showMatrixEditor ? "▲" : "▼"}</span>
+                </button>
+                {showMatrixEditor && (
+                  <div className="mt-1">
+                    <textarea
+                      value={editMatrix}
+                      onChange={(e) => setEditMatrix(e.target.value)}
+                      rows={Math.max(6, editMatrix.split("\n").length)}
+                      spellCheck={false}
+                      placeholder='[{"chain_id": "1", "v2_router_address": "0x..."}]'
+                      className="block w-full rounded-md border border-ink-300 p-2 font-mono text-[11px]"
+                    />
+                    <div className="mt-1 text-[10px] text-ink-500">
+                      JSON array of objects, each with &quot;chain_id&quot;. Clear to remove all rows.
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {parseError && <ErrorBanner msg={parseError} />}
           <div className="flex justify-end gap-2">
             <button
               type="button"
@@ -646,6 +758,29 @@ function RuleDetailPanel({
                   <span className="font-mono text-ink-700">{rule.approved_by}</span>
                 </span>
               )}
+            </div>
+          )}
+
+          {rule.variables && Object.keys(rule.variables).length > 0 && (
+            <div className="mt-3">
+              <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-500">
+                Variables
+              </h3>
+              <CodeBlock
+                body={JSON.stringify(rule.variables, null, 2)}
+                lang="json"
+                maxH={12}
+                title="Variables"
+              />
+            </div>
+          )}
+
+          {rule.matrix && Array.isArray(rule.matrix) && (rule.matrix as Record<string, any>[]).length > 0 && (
+            <div className="mt-3">
+              <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-500">
+                Matrix
+              </h3>
+              <RuleMatrixTable matrix={rule.matrix as Record<string, any>[]} />
             </div>
           )}
         </div>
@@ -1527,4 +1662,57 @@ function formatMutationError(e: unknown): string {
   if (e instanceof APIError) return `HTTP ${e.statusCode}: ${e.message}`;
   if (e instanceof Error) return e.message;
   return String(e);
+}
+
+function RuleMatrixTable({ matrix }: { matrix: Record<string, any>[] }) {
+  if (!matrix || matrix.length === 0) return null;
+  const chainKey = "chain_id";
+  const colSet = new Set<string>();
+  for (const row of matrix) {
+    for (const k of Object.keys(row)) colSet.add(k);
+  }
+  const cols = [chainKey, ...Array.from(colSet).filter((k) => k !== chainKey)];
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-left text-xs" style={{ tableLayout: "auto" }}>
+        <thead>
+          <tr className="border-b border-ink-200">
+            {cols.map((col) => (
+              <th
+                key={col}
+                className="whitespace-nowrap px-2 py-1 font-mono font-normal text-ink-500"
+              >
+                {col}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {matrix.map((row, i) => (
+            <tr key={i} className="border-t border-ink-100">
+              {cols.map((col) => {
+                const val = row[col];
+                const display =
+                  val === undefined || val === null
+                    ? ""
+                    : typeof val === "object"
+                      ? JSON.stringify(val)
+                      : String(val);
+                return (
+                  <td
+                    key={col}
+                    className="max-w-[200px] truncate whitespace-nowrap px-2 py-1 font-mono text-ink-700"
+                    title={display}
+                  >
+                    {display}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }

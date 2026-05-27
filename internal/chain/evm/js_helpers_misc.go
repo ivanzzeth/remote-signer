@@ -121,6 +121,9 @@ func rsDelegateResolveByTarget(vm *sobek.Runtime) func(sobek.FunctionCall) sobek
 		if len(pairs) > rsMaxDelegatePairs {
 			return vm.ToValue(defaultRule)
 		}
+		if !common.IsHexAddress(innerTo) {
+			return vm.ToValue(defaultRule)
+		}
 		innerChecksum := common.HexToAddress(innerTo).Hex()
 		for _, pair := range pairs {
 			idx := strings.Index(pair, ":")

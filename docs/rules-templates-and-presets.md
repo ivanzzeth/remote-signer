@@ -497,9 +497,7 @@ All presets live under `rules/presets/`.
 | `dex_swap.preset.js.yaml` | DEX swap V2 rules |
 | `dex_swap_v3.preset.js.yaml` | DEX swap V3/V4 rules |
 | `staking.preset.js.yaml` | Staking contract rules |
-| `uniswap_v2.preset.js.yaml` | Uniswap V2 Router across major EVM chains (**matrix format**) |
-| `uniswap_v3.preset.js.yaml` | Uniswap V3 SwapRouter across major EVM chains (**matrix format**) |
-| `uniswap_v4.preset.js.yaml` | Uniswap V4 Universal Router across major EVM chains (**matrix format**) |
+| `uniswap.preset.yaml` | Unified Uniswap V2+V3+V4 swap + ERC20 approve + WETH + Permit2 across 7 major EVM chains (**single rule, rule-level Matrix**) |
 
 #### Gasless / Meta-TX Presets
 
@@ -518,7 +516,7 @@ All presets live under `rules/presets/`.
 | `max_gas_cap.preset.js.yaml` | Max gas cap per transaction |
 | `eip1559_fee_guard.preset.js.yaml` | EIP-1559 fee guard (gas + value cap) |
 
-**Matrix format presets** (`uniswap_v2`, `uniswap_v3`, `uniswap_v4`, `usdc`) create one rule per chain with chain-specific contract addresses. They deploy across multiple EVM chains in a single apply.
+**Rule-level Matrix presets** (`uniswap`, `usdc`) create a single rule with per-chain address overrides via the rule's Matrix table. They cover multiple EVM chains with one rule; the evaluator resolves `config.*` per chain_id at runtime.
 
 ---
 

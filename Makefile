@@ -47,7 +47,10 @@ help:
 	@echo "  tidy          Tidy go.mod"
 	@echo "  clean         Remove build artefacts"
 
-web:
+js-client:
+	cd pkg/js-client && $(NPM) ci --no-audit --no-fund && $(NPM) run build
+
+web: js-client
 	cd web && $(NPM) ci --no-audit --no-fund && $(NPM) run build
 
 build:

@@ -60,7 +60,7 @@ func injectHelpers(vm *sobek.Runtime) error {
 			var err error
 			data, err = hex.DecodeString(strings.TrimPrefix(s, "0x"))
 			if err != nil {
-				return vm.ToValue(nil)
+				panic(vm.ToValue("keccak256: invalid hex string"))
 			}
 		} else {
 			data = []byte(s)
@@ -96,7 +96,7 @@ func injectHelpers(vm *sobek.Runtime) error {
 		eth := call.Argument(0).String()
 		var b big.Int
 		if _, ok := b.SetString(eth, 10); !ok {
-			return vm.ToValue("0")
+			panic(vm.ToValue("toWei: invalid decimal string"))
 		}
 		var mul big.Int
 		mul.Exp(big.NewInt(10), big.NewInt(18), nil)
@@ -109,7 +109,7 @@ func injectHelpers(vm *sobek.Runtime) error {
 		wei := call.Argument(0).String()
 		var b big.Int
 		if _, ok := b.SetString(wei, 10); !ok {
-			return vm.ToValue("0")
+			panic(vm.ToValue("fromWei: invalid decimal string"))
 		}
 		var div big.Int
 		div.Exp(big.NewInt(10), big.NewInt(18), nil)
@@ -124,32 +124,32 @@ func injectHelpers(vm *sobek.Runtime) error {
 	abiObj := vm.NewObject()
 	if err := abiObj.Set("encode", vm.ToValue(func(call sobek.FunctionCall) sobek.Value {
 		if len(call.Arguments) < 2 {
-			return vm.ToValue("0x")
+			panic(vm.ToValue("abi.encode: need types and values"))
 		}
 		typesSpecs, ok := exportTypesSpecs(call.Argument(0))
 		if !ok {
-			return vm.ToValue("0x")
+			panic(vm.ToValue("abi.encode: types must be array"))
 		}
 		valuesExport := call.Argument(1).Export()
 		valuesSlice, ok := valuesExport.([]interface{})
 		if !ok || len(typesSpecs) != len(valuesSlice) {
-			return vm.ToValue("0x")
+			panic(vm.ToValue("abi.encode: values must be array matching types length"))
 		}
 		args, err := typesToArgumentsFromSpecs(typesSpecs)
 		if err != nil {
-			return vm.ToValue("0x")
+			panic(vm.ToValue("abi.encode: " + err.Error()))
 		}
 		goValues := make([]interface{}, 0, len(args))
 		for i := range args {
 			goVal, err := convertValueForPack(args[i].Type, valuesSlice[i])
 			if err != nil {
-				return vm.ToValue("0x")
+				panic(vm.ToValue("abi.encode: " + err.Error()))
 			}
 			goValues = append(goValues, goVal)
 		}
 		out, err := args.Pack(goValues...)
 		if err != nil {
-			return vm.ToValue("0x")
+			panic(vm.ToValue("abi.encode: " + err.Error()))
 		}
 		return vm.ToValue("0x" + hex.EncodeToString(out))
 	})); err != nil {
@@ -157,25 +157,25 @@ func injectHelpers(vm *sobek.Runtime) error {
 	}
 	if err := abiObj.Set("decode", vm.ToValue(func(call sobek.FunctionCall) sobek.Value {
 		if len(call.Arguments) < 2 {
-			return vm.ToValue([]interface{}{})
+			panic(vm.ToValue("abi.decode: need data and types"))
 		}
 		dataHex := call.Argument(0).String()
 		raw := strings.TrimPrefix(strings.TrimPrefix(dataHex, "0x"), "0X")
 		data, err := hex.DecodeString(raw)
 		if err != nil {
-			return vm.ToValue([]interface{}{})
+			panic(vm.ToValue("abi.decode: invalid hex data"))
 		}
 		typesSpecs, ok := exportTypesSpecs(call.Argument(1))
 		if !ok {
-			return vm.ToValue([]interface{}{})
+			panic(vm.ToValue("abi.decode: types must be array"))
 		}
 		args, err := typesToArgumentsFromSpecs(typesSpecs)
 		if err != nil {
-			return vm.ToValue([]interface{}{})
+			panic(vm.ToValue("abi.decode: " + err.Error()))
 		}
 		unpacked, err := args.UnpackValues(data)
 		if err != nil {
-			return vm.ToValue([]interface{}{})
+			panic(vm.ToValue("abi.decode: " + err.Error()))
 		}
 		out := make([]interface{}, 0, len(unpacked))
 		for _, v := range unpacked {
@@ -211,6 +211,9 @@ func injectRsHelpers(vm *sobek.Runtime) error {
 	// rs.addr
 	addrObj := vm.NewObject()
 	if err := addrObj.Set("inList", vm.ToValue(rsAddrInList(vm))); err != nil {
+		return err
+	}
+	if err := addrObj.Set("eq", vm.ToValue(rsAddrEq(vm))); err != nil {
 		return err
 	}
 	if err := addrObj.Set("notInList", vm.ToValue(rsAddrNotInList(vm))); err != nil {

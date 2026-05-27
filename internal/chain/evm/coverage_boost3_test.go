@@ -401,23 +401,29 @@ func TestInjectRsHelpers_NoError(t *testing.T) {
 // =============================================================================
 
 func TestToHexWei_Empty(t *testing.T) {
-	assert.Equal(t, "0x0", toHexWei(""))
+	result, err := toHexWei("")
+	assert.NoError(t, err)
+	assert.Equal(t, "0x0", result)
 }
 
 func TestToHexWei_Invalid(t *testing.T) {
-	assert.Equal(t, "0x0", toHexWei("not-a-number"))
+	_, err := toHexWei("not-a-number")
+	assert.Error(t, err)
 }
 
 func TestToHexWei_Valid(t *testing.T) {
-	assert.Equal(t, "0x1", toHexWei("1"))
-	// 1 wei = 1
-	assert.Equal(t, "0x1", toHexWei("1"))
-	// 1000 wei
-	assert.Equal(t, "0x3e8", toHexWei("1000"))
+	result, err := toHexWei("1")
+	assert.NoError(t, err)
+	assert.Equal(t, "0x1", result)
+	result, err = toHexWei("1000")
+	assert.NoError(t, err)
+	assert.Equal(t, "0x3e8", result)
 }
 
 func TestToHexWei_Zero(t *testing.T) {
-	assert.Equal(t, "0x0", toHexWei("0"))
+	result, err := toHexWei("0")
+	assert.NoError(t, err)
+	assert.Equal(t, "0x0", result)
 }
 
 // =============================================================================

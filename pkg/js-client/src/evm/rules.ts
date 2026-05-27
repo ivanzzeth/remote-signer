@@ -45,6 +45,10 @@ export interface Rule {
   /** ["*"] = all keys, ["self"] = owner only, ["key-1", ...] = specific keys. */
   applied_to?: string[];
   config: Record<string, any>;
+  /** Rule-level variables (key-value pairs) injected into JS evaluator as config.*. */
+  variables?: Record<string, string>;
+  /** Per-chain Matrix rows; each row must include "chain_id". Overrides Variables for that chain. */
+  matrix?: Record<string, any>[];
   enabled: boolean;
   expires_at?: string;
   created_at: string;
@@ -93,6 +97,10 @@ export interface UpdateRuleRequest {
   description?: string;
   mode?: RuleMode;
   config?: Record<string, any>;
+  /** Rule-level variables (key-value pairs); when passed, updates variables for all chains. */
+  variables?: Record<string, string>;
+  /** Per-chain Matrix overrides; each row must include "chain_id". */
+  matrix?: Record<string, any>[];
   enabled?: boolean;
   expires_at?: string;
 }

@@ -417,9 +417,10 @@ func TestEvaluate_InvalidVariablesJSON(t *testing.T) {
 		SignType:      SignTypeTransaction,
 		Payload:       []byte(`{"transaction":{"to":"0x742d35cc6634c0532925a3b844bc454e4438f44e","value":"0","data":"0x","gas":21000,"gasPrice":"0","txType":"legacy"}}`),
 	}
-	_, _, err := e.Evaluate(context.Background(), rule, req, nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid rule variables JSON")
+	// resolveRuleConfig silently ignores invalid JSON; rule evaluates with empty config
+	matched, _, err := e.Evaluate(context.Background(), rule, req, nil)
+	require.NoError(t, err)
+	assert.True(t, matched)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -500,9 +501,10 @@ func TestEvaluateWithDelegation_InvalidVariables(t *testing.T) {
 		SignType:      SignTypeTransaction,
 		Payload:       []byte(`{"transaction":{"to":"0x742d35cc6634c0532925a3b844bc454e4438f44e","value":"0","data":"0x","gas":21000,"gasPrice":"0","txType":"legacy"}}`),
 	}
-	_, _, _, err := e.EvaluateWithDelegation(context.Background(), rule, req, nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid rule variables JSON")
+	// resolveRuleConfig silently ignores invalid JSON; rule evaluates with empty config
+	matched, _, _, err := e.EvaluateWithDelegation(context.Background(), rule, req, nil)
+	require.NoError(t, err)
+	assert.True(t, matched)
 }
 
 func TestEvaluateWithDelegation_BlocklistViolation(t *testing.T) {

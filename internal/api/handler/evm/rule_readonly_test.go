@@ -81,16 +81,29 @@ func (m *mockRuleRepo) ValidateDelegateRefs(_ context.Context, _ *types.Rule) er
 	return nil
 }
 
-// mockBudgetRepo implements storage.BudgetRepository for listBudgets tests.
+// mockBudgetRepo implements storage.BudgetRepository for listBudgets and budget migration tests.
 type mockBudgetRepo struct {
-	listByRuleID func(context.Context, types.RuleID) ([]*types.RuleBudget, error)
-	listAll      func(context.Context) ([]*types.RuleBudget, error)
-	getFn        func(context.Context, string) (*types.RuleBudget, error)
-	updateFn     func(context.Context, *types.RuleBudget) error
-	deleteFn     func(context.Context, string) error
+	listByRuleID  func(context.Context, types.RuleID) ([]*types.RuleBudget, error)
+	listAll       func(context.Context) ([]*types.RuleBudget, error)
+	getFn         func(context.Context, string) (*types.RuleBudget, error)
+	createFn      func(context.Context, *types.RuleBudget) error
+	createOrGetFn func(context.Context, *types.RuleBudget) (*types.RuleBudget, bool, error)
+	updateFn      func(context.Context, *types.RuleBudget) error
+	deleteFn      func(context.Context, string) error
 }
 
-func (m *mockBudgetRepo) Create(_ context.Context, _ *types.RuleBudget) error   { return nil }
+func (m *mockBudgetRepo) Create(ctx context.Context, b *types.RuleBudget) error {
+	if m.createFn != nil {
+		return m.createFn(ctx, b)
+	}
+	return nil
+}
+func (m *mockBudgetRepo) CreateOrGet(ctx context.Context, b *types.RuleBudget) (*types.RuleBudget, bool, error) {
+	if m.createOrGetFn != nil {
+		return m.createOrGetFn(ctx, b)
+	}
+	return b, true, nil
+}
 func (m *mockBudgetRepo) GetByRuleID(_ context.Context, _ types.RuleID, _ string) (*types.RuleBudget, error) {
 	return nil, nil
 }
@@ -139,9 +152,6 @@ func (m *mockBudgetRepo) MarkAlertSent(_ context.Context, _ types.RuleID, _ stri
 }
 func (m *mockBudgetRepo) CountByRuleID(_ context.Context, _ types.RuleID) (int, error) {
 	return 0, nil
-}
-func (m *mockBudgetRepo) CreateOrGet(_ context.Context, budget *types.RuleBudget) (*types.RuleBudget, bool, error) {
-	return budget, true, nil
 }
 
 // addRule adds a rule to the mock repo directly.

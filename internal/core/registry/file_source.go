@@ -73,6 +73,8 @@ type presetYAML struct {
 	ChainID           string                  `yaml:"chain_id,omitempty"`
 	TemplateIDs       []string                `yaml:"template_ids"`
 	Variables         map[string]any          `yaml:"variables,omitempty"`
+	Defaults          map[string]any          `yaml:"defaults,omitempty"`
+	Matrix            []map[string]any        `yaml:"matrix,omitempty"`
 	OperatorOverrides []types.OperatorOverride `yaml:"operator_overrides,omitempty"`
 	Budget            map[string]any          `yaml:"budget,omitempty"`
 	Schedule          map[string]any          `yaml:"schedule,omitempty"`
@@ -419,6 +421,18 @@ func (s *FilePresetSource) parsePreset(path string) (*types.RulePreset, error) {
 		return nil, err
 	}
 
+	// Merge defaults into variables (defaults is an alias, used by matrix presets)
+	if len(doc.Defaults) > 0 {
+		if doc.Variables == nil {
+			doc.Variables = make(map[string]any)
+		}
+		for k, v := range doc.Defaults {
+			if _, exists := doc.Variables[k]; !exists {
+				doc.Variables[k] = v
+			}
+		}
+	}
+
 	templateIDsJSON, err := marshalJSON(doc.TemplateIDs)
 	if err != nil {
 		return nil, fmt.Errorf("template_ids: %w", err)
@@ -451,6 +465,13 @@ func (s *FilePresetSource) parsePreset(path string) (*types.RulePreset, error) {
 			return nil, fmt.Errorf("schedule: %w", err)
 		}
 	}
+	var matrixJSON []byte
+	if len(doc.Matrix) > 0 {
+		matrixJSON, err = marshalJSON(doc.Matrix)
+		if err != nil {
+			return nil, fmt.Errorf("matrix: %w", err)
+		}
+	}
 
 	relPath, _ := filepath.Rel(s.root, path)
 	relPath = filepath.ToSlash(relPath)
@@ -471,6 +492,7 @@ func (s *FilePresetSource) parsePreset(path string) (*types.RulePreset, error) {
 		OperatorOverrides: overridesJSON,
 		Budget:            budgetJSON,
 		Schedule:          scheduleJSON,
+		Matrix:            matrixJSON,
 		Enabled:           enabled,
 		Source:            types.RuleSourceFile,
 		SourcePath:        relPath,

@@ -93,6 +93,37 @@ func (e *JSRuleEvaluator) buildRPCContext(ctx context.Context, chainID string) *
 	}
 }
 
+// resolveRuleConfig merges r.Variables (base defaults) with the per-chain
+// override from r.Matrix for the given chainID. When Matrix is nil/empty,
+// only Variables are returned (backward compatible). The resulting map is
+// safe to pass as the JS `config` object.
+func resolveRuleConfig(r *types.Rule, chainID string) map[string]interface{} {
+	configObj := make(map[string]interface{})
+	if r.Variables != nil {
+		_ = json.Unmarshal(r.Variables, &configObj)
+	}
+	// Always inject the request's chain_id so scripts can reference config.chain_id
+	configObj["chain_id"] = chainID
+
+	if chainID == "" || r.Matrix == nil {
+		return configObj
+	}
+	var matrix []map[string]interface{}
+	if err := json.Unmarshal(r.Matrix, &matrix); err != nil {
+		return configObj
+	}
+	for _, row := range matrix {
+		cid, _ := row["chain_id"].(string)
+		if cid == chainID {
+			for k, v := range row {
+				configObj[k] = v
+			}
+			break
+		}
+	}
+	return configObj
+}
+
 // Type returns the rule type this evaluator handles.
 func (e *JSRuleEvaluator) Type() types.RuleType {
 	return types.RuleTypeEVMJS
@@ -162,13 +193,7 @@ func (e *JSRuleEvaluator) Evaluate(ctx context.Context, r *types.Rule, req *type
 		return false, "", fmt.Errorf("evm_js rule script is empty")
 	}
 
-	configObj := make(map[string]interface{})
-	if r.Variables != nil {
-		if err := json.Unmarshal(r.Variables, &configObj); err != nil {
-			return false, "", fmt.Errorf("invalid rule variables JSON: %w", err)
-		}
-	}
-
+	configObj := resolveRuleConfig(r, req.ChainID)
 	rpcCtx := e.buildRPCContext(ctx, req.ChainID)
 	result := e.wrappedValidate(cfg.Script, ruleInput, configObj, rpcCtx)
 
@@ -206,13 +231,7 @@ func (e *JSRuleEvaluator) EvaluateWithDelegation(ctx context.Context, r *types.R
 		return false, "", nil, fmt.Errorf("evm_js rule script is empty")
 	}
 
-	configObj := make(map[string]interface{})
-	if r.Variables != nil {
-		if err := json.Unmarshal(r.Variables, &configObj); err != nil {
-			return false, "", nil, fmt.Errorf("invalid rule variables JSON: %w", err)
-		}
-	}
-
+	configObj := resolveRuleConfig(r, req.ChainID)
 	rpcCtx := e.buildRPCContext(ctx, req.ChainID)
 	result := e.wrappedValidate(cfg.Script, ruleInput, configObj, rpcCtx)
 
@@ -313,12 +332,7 @@ func (e *JSRuleEvaluator) EvaluateBudget(ctx context.Context, r *types.Rule, req
 	if cfg.Script == "" {
 		return nil, fmt.Errorf("evm_js rule script is empty")
 	}
-	configObj := make(map[string]interface{})
-	if r.Variables != nil {
-		if err := json.Unmarshal(r.Variables, &configObj); err != nil {
-			return nil, fmt.Errorf("invalid rule variables JSON: %w", err)
-		}
-	}
+	configObj := resolveRuleConfig(r, req.ChainID)
 	rpcCtx := e.buildRPCContext(ctx, req.ChainID)
 	return e.wrappedValidateBudget(cfg.Script, ruleInput, configObj, rpcCtx)
 }
@@ -333,12 +347,7 @@ func (e *JSRuleEvaluator) EvaluateBudgetWithInput(ctx context.Context, r *types.
 	if cfg.Script == "" {
 		return nil, fmt.Errorf("evm_js rule script is empty")
 	}
-	configObj := make(map[string]interface{})
-	if r.Variables != nil {
-		if err := json.Unmarshal(r.Variables, &configObj); err != nil {
-			return nil, fmt.Errorf("invalid rule variables JSON: %w", err)
-		}
-	}
+	configObj := resolveRuleConfig(r, fmt.Sprintf("%d", input.ChainID))
 	return e.wrappedValidateBudget(cfg.Script, input, configObj, nil)
 }
 

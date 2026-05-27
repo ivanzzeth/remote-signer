@@ -27,6 +27,12 @@ impl Service {
             .request_json(Method::GET, &path, Option::<&()>::None, Some(&[200]))
     }
 
+    pub fn get(&self, id: &str) -> Result<DetailResponse, Error> {
+        let path = format!("/api/v1/presets/{}", urlencoding::encode(id));
+        self.transport
+            .request_json(Method::GET, &path, Option::<&()>::None, Some(&[200]))
+    }
+
     pub fn apply(&self, id: &str, req: Option<&ApplyRequest>) -> Result<ApplyResponse, Error> {
         let path = format!("/api/v1/presets/{}/apply", urlencoding::encode(id));
         let r = req.unwrap_or(&ApplyRequest { variables: None });
@@ -39,7 +45,17 @@ impl Service {
 pub struct PresetEntry {
     pub id: String,
     #[serde(default)]
-    pub template_names: Vec<String>,
+    pub name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub chain_type: Option<String>,
+    #[serde(default)]
+    pub chain_id: Option<String>,
+    #[serde(default)]
+    pub template_ids: Vec<String>,
+    #[serde(default)]
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,6 +80,40 @@ pub struct ApplyResultItem {
     pub rule: serde_json::Value,
     #[serde(default)]
     pub budget: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VariableDetail {
+    pub name: String,
+    #[serde(rename = "type", default)]
+    pub field_type: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub default_value: Option<String>,
+    #[serde(default)]
+    pub required: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DetailResponse {
+    pub id: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub chain_type: Option<String>,
+    #[serde(default)]
+    pub chain_id: Option<String>,
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub template_ids: Vec<String>,
+    #[serde(default)]
+    pub variables: Vec<VariableDetail>,
+    #[serde(default)]
+    pub matrix: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

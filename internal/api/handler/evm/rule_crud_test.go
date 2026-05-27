@@ -14,6 +14,7 @@ import (
 
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
 // --- Helpers ---
@@ -430,3 +431,214 @@ func TestRuleHandler_MethodNotAllowed(t *testing.T) {
 	rec := doRuleRequest(t, h, http.MethodPut, "/api/v1/evm/rules", nil, ruleAdminKey())
 	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
 }
+
+// --- Update with Variables and Matrix ---
+
+func TestRuleHandler_UpdateRule_Variables(t *testing.T) {
+	repo := newMockRuleRepo()
+	rule := newAPIRule()
+	rule.Owner = "admin-key"
+	repo.addRule(rule)
+
+	h, err := NewRuleHandler(repo, slog.Default())
+	require.NoError(t, err)
+
+	body := map[string]interface{}{
+		"variables": map[string]string{
+			"router_address": "0xABCD000000000000000000000000000000000000",
+			"max_amount":     "1000000",
+		},
+	}
+	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var resp RuleResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+
+	var vars map[string]string
+	require.NoError(t, json.Unmarshal(resp.Variables, &vars))
+	assert.Equal(t, "0xABCD000000000000000000000000000000000000", vars["router_address"])
+	assert.Equal(t, "1000000", vars["max_amount"])
+}
+
+func TestRuleHandler_UpdateRule_Matrix(t *testing.T) {
+	repo := newMockRuleRepo()
+	rule := newAPIRule()
+	rule.Owner = "admin-key"
+	repo.addRule(rule)
+
+	h, err := NewRuleHandler(repo, slog.Default())
+	require.NoError(t, err)
+
+	body := map[string]interface{}{
+		"matrix": []map[string]any{
+			{
+				"chain_id":       "1",
+				"router_address": "0x1111111111111111111111111111111111111111",
+			},
+			{
+				"chain_id":       "137",
+				"router_address": "0x2222222222222222222222222222222222222222",
+			},
+		},
+	}
+	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var resp RuleResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+
+	var matrix []map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Matrix, &matrix))
+	assert.Len(t, matrix, 2)
+	assert.Equal(t, "1", matrix[0]["chain_id"])
+	assert.Equal(t, "137", matrix[1]["chain_id"])
+}
+
+func TestRuleHandler_UpdateRule_ClearMatrix(t *testing.T) {
+	repo := newMockRuleRepo()
+	rule := newAPIRule()
+	rule.Owner = "admin-key"
+	rule.Matrix = json.RawMessage(`[{"chain_id":"1","key":"val"}]`)
+	repo.addRule(rule)
+
+	h, err := NewRuleHandler(repo, slog.Default())
+	require.NoError(t, err)
+
+	body := map[string]interface{}{
+		"matrix": []map[string]any{},
+	}
+	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var resp RuleResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+
+	var matrix []map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Matrix, &matrix))
+	assert.Len(t, matrix, 0)
+}
+
+// --- Budget migration tests ---
+
+type mockTemplateRepo struct {
+	getFn func(ctx context.Context, id string) (*types.RuleTemplate, error)
+}
+
+func (m *mockTemplateRepo) Create(ctx context.Context, tmpl *types.RuleTemplate) error { return nil }
+func (m *mockTemplateRepo) Get(ctx context.Context, id string) (*types.RuleTemplate, error) {
+	if m.getFn != nil {
+		return m.getFn(ctx, id)
+	}
+	return nil, types.ErrNotFound
+}
+func (m *mockTemplateRepo) GetByName(ctx context.Context, name string) (*types.RuleTemplate, error) {
+	return nil, types.ErrNotFound
+}
+func (m *mockTemplateRepo) Update(ctx context.Context, tmpl *types.RuleTemplate) error { return nil }
+func (m *mockTemplateRepo) Delete(ctx context.Context, id string) error                { return nil }
+func (m *mockTemplateRepo) List(ctx context.Context, filter storage.TemplateFilter) ([]*types.RuleTemplate, error) {
+	return nil, nil
+}
+func (m *mockTemplateRepo) Count(ctx context.Context, filter storage.TemplateFilter) (int, error) { return 0, nil }
+func (m *mockTemplateRepo) Upsert(ctx context.Context, tmpl *types.RuleTemplate) (bool, error) {
+	return false, nil
+}
+func (m *mockTemplateRepo) ListIDsBySource(ctx context.Context, source types.RuleSource) ([]string, error) {
+	return nil, nil
+}
+func (m *mockTemplateRepo) DeleteBySourceExcept(ctx context.Context, source types.RuleSource, keepIDs []string) (int64, error) {
+	return 0, nil
+}
+func (m *mockTemplateRepo) DeleteMany(ctx context.Context, ids []string) error { return nil }
+
+func newMockBudgetRepo() *mockBudgetRepo {
+	return &mockBudgetRepo{}
+}
+
+func TestRuleHandler_UpdateRule_BudgetMigration(t *testing.T) {
+	repo := newMockRuleRepo()
+	rule := newAPIRule()
+	rule.Owner = "admin-key"
+	rule.TemplateID = strPtr("evm/erc20")
+	rule.Variables = json.RawMessage(`{"chain_id":"1","token_address":"0xUSDC"}`)
+	repo.addRule(rule)
+
+	budgetMetering := json.RawMessage(`{"method":"calldata_param","unit":"${chain_id}:${token_address}","param_index":1,"param_type":"uint256"}`)
+	tmplRepo := &mockTemplateRepo{
+		getFn: func(ctx context.Context, id string) (*types.RuleTemplate, error) {
+			return &types.RuleTemplate{
+				ID:             id,
+				Name:           "ERC20",
+				BudgetMetering: budgetMetering,
+			}, nil
+		},
+	}
+
+	oldBudget := &types.RuleBudget{
+		ID:       types.BudgetID(rule.ID, "1:0xUSDC"),
+		RuleID:   rule.ID,
+		Unit:     "1:0xUSDC",
+		MaxTotal: "1000000",
+		MaxPerTx: "100000",
+		AlertPct: 80,
+	}
+	var createdOrGotBudget *types.RuleBudget
+	budgetRepo := &mockBudgetRepo{
+		getFn: func(ctx context.Context, id string) (*types.RuleBudget, error) {
+			if id == types.BudgetID(rule.ID, "1:0xUSDC") {
+				return oldBudget, nil
+			}
+			return nil, types.ErrNotFound
+		},
+		createOrGetFn: func(ctx context.Context, budget *types.RuleBudget) (*types.RuleBudget, bool, error) {
+			createdOrGotBudget = budget
+			return budget, true, nil
+		},
+	}
+
+	h, err := NewRuleHandler(repo, slog.Default(),
+		WithTemplateRepo(tmplRepo),
+		WithBudgetRepo(budgetRepo),
+	)
+	require.NoError(t, err)
+
+	// PATCH variables changing chain_id from 1 to 137
+	body := map[string]interface{}{
+		"variables": map[string]string{
+			"chain_id":      "137",
+			"token_address": "0xUSDC",
+		},
+	}
+	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	// Verify budget was migrated: new unit = "137:0xUSDC"
+	require.NotNil(t, createdOrGotBudget, "budget migration should create a new budget")
+	assert.Equal(t, types.BudgetID(rule.ID, "137:0xUSDC"), createdOrGotBudget.ID)
+	assert.Equal(t, "137:0xUSDC", createdOrGotBudget.Unit)
+	assert.Equal(t, "1000000", createdOrGotBudget.MaxTotal, "should copy MaxTotal from old budget")
+	assert.Equal(t, "100000", createdOrGotBudget.MaxPerTx, "should copy MaxPerTx from old budget")
+	assert.Equal(t, 80, createdOrGotBudget.AlertPct, "should copy AlertPct from old budget")
+}
+
+func TestRuleHandler_UpdateRule_BudgetMigrationNoTemplateRepo(t *testing.T) {
+	repo := newMockRuleRepo()
+	rule := newAPIRule()
+	rule.Owner = "admin-key"
+	rule.TemplateID = strPtr("evm/erc20")
+	rule.Variables = json.RawMessage(`{"chain_id":"1"}`)
+	repo.addRule(rule)
+
+	// No template repo or budget repo — migration should be skipped silently
+	h, err := NewRuleHandler(repo, slog.Default())
+	require.NoError(t, err)
+
+	body := map[string]interface{}{
+		"variables": map[string]string{"chain_id": "137"},
+	}
+	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func strPtr(s string) *string { return &s }

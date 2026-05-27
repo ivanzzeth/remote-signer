@@ -57,6 +57,28 @@ func rsAddrInListCore(addrStr string, listRaw interface{}) bool {
 	return false
 }
 
+func rsAddrEq(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
+	return func(call sobek.FunctionCall) sobek.Value {
+		if len(call.Arguments) < 2 {
+			return vm.ToValue(false)
+		}
+		a := ""
+		if arg := call.Argument(0); arg != nil && !arg.Equals(sobek.Undefined()) {
+			a = strings.TrimSpace(arg.String())
+		}
+		b := ""
+		if arg := call.Argument(1); arg != nil && !arg.Equals(sobek.Undefined()) {
+			b = strings.TrimSpace(arg.String())
+		}
+		ca, okA := rsAddrNormalize(a)
+		cb, okB := rsAddrNormalize(b)
+		if !okA || !okB {
+			return vm.ToValue(false)
+		}
+		return vm.ToValue(ca == cb)
+	}
+}
+
 func rsAddrInList(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 	return func(call sobek.FunctionCall) sobek.Value {
 		if len(call.Arguments) < 2 {
@@ -80,6 +102,10 @@ func rsAddrNotInList(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value {
 		if a := call.Argument(0); a != nil && !a.Equals(sobek.Undefined()) {
 			addrStr = strings.TrimSpace(a.String())
 		}
+		// Validate address first — invalid address is NOT "not in list", it's an error.
+		if _, ok := rsAddrNormalize(addrStr); !ok {
+			return vm.ToValue(false)
+		}
 		listRaw := call.Argument(1).Export()
 		return vm.ToValue(!rsAddrInListCore(addrStr, listRaw))
 	}
@@ -97,6 +123,10 @@ func rsAddrRequireInList(vm *sobek.Runtime) func(sobek.FunctionCall) sobek.Value
 		addrStr := ""
 		if a := call.Argument(0); a != nil && !a.Equals(sobek.Undefined()) {
 			addrStr = strings.TrimSpace(a.String())
+		}
+		// Validate address first — invalid address should fail, not silently pass.
+		if _, ok := rsAddrNormalize(addrStr); !ok {
+			panic(vm.ToValue(reason))
 		}
 		listRaw := call.Argument(1).Export()
 		if rsAddrInListCore(addrStr, listRaw) {

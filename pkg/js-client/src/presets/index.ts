@@ -60,6 +60,8 @@ export interface PresetDetail {
   enabled: boolean;
   template_ids: string[];
   variables: PresetVariableDetail[];
+  /** Per-chain Matrix rows; each row includes "chain_id" and per-chain variable values. */
+  matrix?: Record<string, any>[];
 }
 
 export interface ApplyPresetRequest {
