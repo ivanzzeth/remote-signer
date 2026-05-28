@@ -19,7 +19,7 @@ const (
 // persistent ownership metadata keyed by address.
 type SignerOwnership struct {
 	SignerAddress string                `json:"signer_address" gorm:"primaryKey;type:varchar(42)"`
-	OwnerID       string                `json:"owner_id" gorm:"type:varchar(64);not null;index"`
+	OwnerID       string                `json:"owner_id" gorm:"type:varchar(64);not null;index;constraint:OnDelete:RESTRICT"`
 	SignerType    SignerType            `json:"signer_type" gorm:"type:varchar(20);not null;default:'keystore'"`
 	Status        SignerOwnershipStatus `json:"status" gorm:"type:varchar(20);not null;default:'active'"`
 	DisplayName   string                `json:"display_name" gorm:"type:varchar(256);not null;default:''"`

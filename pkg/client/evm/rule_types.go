@@ -21,10 +21,12 @@ type Rule struct {
 	ApprovedBy        *string    `json:"approved_by,omitempty"`
 	Immutable         bool       `json:"immutable,omitempty"`
 	SignerAddress     *string    `json:"signer_address,omitempty"`
-	Config            RuleConfig      `json:"config,omitempty"`
-	Variables         json.RawMessage `json:"variables,omitempty"`
-	Matrix            json.RawMessage `json:"matrix,omitempty"`
-	Enabled           bool            `json:"enabled"`
+	TemplateID        *string          `json:"template_id,omitempty"`
+	Config            RuleConfig        `json:"config,omitempty"`
+	Variables         json.RawMessage   `json:"variables,omitempty"`
+	VariableDefs      []RuleVariableDef `json:"variable_defs,omitempty"`
+	Matrix            json.RawMessage   `json:"matrix,omitempty"`
+	Enabled           bool              `json:"enabled"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
 	ExpiresAt         *time.Time `json:"expires_at,omitempty"`
@@ -32,6 +34,21 @@ type Rule struct {
 	LastMatchedAt     *time.Time `json:"last_matched_at,omitempty"`
 	BudgetPeriod      string     `json:"budget_period,omitempty"`      // e.g. "24h0m0s" when schedule.period is set
 	BudgetPeriodStart *string    `json:"budget_period_start,omitempty"` // RFC3339
+}
+
+// RuleVariableDef exposes a template variable's metadata alongside its current bound value.
+type RuleVariableDef struct {
+	Name         string   `json:"name"`
+	Type         string   `json:"type,omitempty"`
+	Label        string   `json:"label,omitempty"`
+	Description  string   `json:"description,omitempty"`
+	Required     bool     `json:"required"`
+	DefaultValue string   `json:"default_value,omitempty"`
+	Placeholder  string   `json:"placeholder,omitempty"`
+	Hint         string   `json:"hint,omitempty"`
+	Options      []string `json:"options,omitempty"`
+	Sensitive    bool     `json:"sensitive,omitempty"`
+	Value        string   `json:"value,omitempty"`
 }
 
 // RuleConfig represents the configuration for a rule.

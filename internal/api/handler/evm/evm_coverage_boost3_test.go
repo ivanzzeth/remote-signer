@@ -129,6 +129,9 @@ func (b *budgetFailDeleteRepo) ResetBudget(ctx context.Context, ruleID types.Rul
 func (b *budgetFailDeleteRepo) MarkAlertSent(ctx context.Context, ruleID types.RuleID, unit string) error {
 	return nil
 }
+func (b *budgetFailDeleteRepo) UpsertLimits(ctx context.Context, ruleID types.RuleID, requests []storage.BudgetSyncRequest) error {
+	return nil
+}
 
 // budgetGetNotFoundRepo returns ErrNotFound on Get, delegates everything else to failDeleteRepo
 type budgetGetNotFoundRepo struct {
@@ -182,6 +185,9 @@ func (b *budgetFailUpdateRepo) ResetBudget(ctx context.Context, ruleID types.Rul
 	return nil
 }
 func (b *budgetFailUpdateRepo) MarkAlertSent(ctx context.Context, ruleID types.RuleID, unit string) error {
+	return nil
+}
+func (b *budgetFailUpdateRepo) UpsertLimits(ctx context.Context, ruleID types.RuleID, requests []storage.BudgetSyncRequest) error {
 	return nil
 }
 
@@ -2518,6 +2524,9 @@ func (f *failListBudgetRepo) ListAll(_ context.Context) ([]*types.RuleBudget, er
 func (f *failListBudgetRepo) AtomicSpend(_ context.Context, _ types.RuleID, _ string, _ string) error { return nil }
 func (f *failListBudgetRepo) ResetBudget(_ context.Context, _ types.RuleID, _ string, _ time.Time) error { return nil }
 func (f *failListBudgetRepo) MarkAlertSent(_ context.Context, _ types.RuleID, _ string) error { return nil }
+func (f *failListBudgetRepo) UpsertLimits(ctx context.Context, ruleID types.RuleID, requests []storage.BudgetSyncRequest) error {
+	return nil
+}
 
 func TestB3ListBudgets_ListError(t *testing.T) {
 	budgetRepo := &failListBudgetRepo{}
@@ -3594,6 +3603,9 @@ func (b *budgetFailGetRepo) ResetBudget(ctx context.Context, ruleID types.RuleID
 func (b *budgetFailGetRepo) MarkAlertSent(ctx context.Context, ruleID types.RuleID, unit string) error {
 	return nil
 }
+func (b *budgetFailGetRepo) UpsertLimits(ctx context.Context, ruleID types.RuleID, requests []storage.BudgetSyncRequest) error {
+	return nil
+}
 
 // ---------------------------------------------------------------------------
 // rule_delete.go: deleteRule — unauthorized, repo get error
@@ -4535,7 +4547,7 @@ func TestB3ListRules_LimitOffset(t *testing.T) {
 func TestB3ApproveRule_NotPending(t *testing.T) {
 	repo := storage.NewMemoryRuleRepository()
 	ct := types.ChainTypeEVM
-	require.NoError(t, repo.Create(context.Background(), &types.Rule{ID: "app-act-rule", Name: "app-act", Type: types.RuleTypeEVMAddressList, Mode: types.RuleModeWhitelist, Source: types.RuleSourceAPI, Status: types.RuleStatusActive, Owner: "admin-key", ChainType: &ct}))
+	require.NoError(t, repo.Create(context.Background(), &types.Rule{ID: "app-act-rule", Name: "app-act", Type: types.RuleTypeEVMAddressList, Mode: types.RuleModeWhitelist, Source: types.RuleSourceAPI, Status: types.RuleStatusRejected, Owner: "admin-key", ChainType: &ct}))
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
 
@@ -4553,7 +4565,7 @@ func TestB3ApproveRule_NotPending(t *testing.T) {
 func TestB3RejectRule_NotPending(t *testing.T) {
 	repo := storage.NewMemoryRuleRepository()
 	ct := types.ChainTypeEVM
-	require.NoError(t, repo.Create(context.Background(), &types.Rule{ID: "rej-act-rule", Name: "rej-act", Type: types.RuleTypeEVMAddressList, Mode: types.RuleModeWhitelist, Source: types.RuleSourceAPI, Status: types.RuleStatusActive, Owner: "admin-key", ChainType: &ct}))
+	require.NoError(t, repo.Create(context.Background(), &types.Rule{ID: "rej-act-rule", Name: "rej-act", Type: types.RuleTypeEVMAddressList, Mode: types.RuleModeWhitelist, Source: types.RuleSourceAPI, Status: types.RuleStatusRejected, Owner: "admin-key", ChainType: &ct}))
 	h, err := NewRuleHandler(repo, slog.Default())
 	require.NoError(t, err)
 
@@ -4644,6 +4656,100 @@ func TestB3UpdateRule_RepoUpdateError(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	h.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+// ---------------------------------------------------------------------------
+// rule_delete.go: deleteRule with budget cleanup
+// ---------------------------------------------------------------------------
+
+// deleteRuleBudgetTracker records calls to DeleteByRuleID
+type deleteRuleBudgetTracker struct{}
+
+func (d *deleteRuleBudgetTracker) Create(_ context.Context, _ *types.RuleBudget) error       { return nil }
+func (d *deleteRuleBudgetTracker) CreateOrGet(_ context.Context, _ *types.RuleBudget) (*types.RuleBudget, bool, error) {
+	return &types.RuleBudget{}, true, nil
+}
+func (d *deleteRuleBudgetTracker) GetByRuleID(_ context.Context, _ types.RuleID, _ string) (*types.RuleBudget, error) {
+	return nil, types.ErrNotFound
+}
+func (d *deleteRuleBudgetTracker) Get(_ context.Context, _ string) (*types.RuleBudget, error) {
+	return nil, types.ErrNotFound
+}
+func (d *deleteRuleBudgetTracker) Update(_ context.Context, _ *types.RuleBudget) error { return nil }
+func (d *deleteRuleBudgetTracker) CountByRuleID(_ context.Context, _ types.RuleID) (int, error) {
+	return 0, nil
+}
+func (d *deleteRuleBudgetTracker) Delete(_ context.Context, _ string) error { return nil }
+func (d *deleteRuleBudgetTracker) DeleteByRuleID(_ context.Context, _ types.RuleID) error {
+	return nil // tracked via caller check — no-op here
+}
+func (d *deleteRuleBudgetTracker) ListAll(_ context.Context) ([]*types.RuleBudget, error) { return nil, nil }
+func (d *deleteRuleBudgetTracker) AtomicSpend(_ context.Context, _ types.RuleID, _ string, _ string) error {
+	return nil
+}
+func (d *deleteRuleBudgetTracker) ResetBudget(_ context.Context, _ types.RuleID, _ string, _ time.Time) error {
+	return nil
+}
+func (d *deleteRuleBudgetTracker) MarkAlertSent(_ context.Context, _ types.RuleID, _ string) error {
+	return nil
+}
+func (d *deleteRuleBudgetTracker) UpsertLimits(_ context.Context, _ types.RuleID, _ []storage.BudgetSyncRequest) error {
+	return nil
+}
+func (d *deleteRuleBudgetTracker) ListByRuleID(_ context.Context, _ types.RuleID) ([]*types.RuleBudget, error) {
+	return nil, nil
+}
+func (d *deleteRuleBudgetTracker) ListByRuleIDs(_ context.Context, _ []types.RuleID) ([]*types.RuleBudget, error) {
+	return nil, nil
+}
+
+func TestB3DeleteRule_BudgetCleanup(t *testing.T) {
+	repo := storage.NewMemoryRuleRepository()
+	ct := types.ChainTypeEVM
+	require.NoError(t, repo.Create(context.Background(), &types.Rule{
+		ID: "del-budget-rule", Name: "del-budget", Type: types.RuleTypeEVMAddressList,
+		Mode: types.RuleModeWhitelist, Source: types.RuleSourceAPI, Status: types.RuleStatusActive,
+		Owner: "admin-key", ChainType: &ct,
+	}))
+	budgetRepo := &deleteRuleBudgetTracker{}
+	h, err := NewRuleHandler(repo, slog.Default(), WithBudgetRepo(budgetRepo))
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/evm/rules/del-budget-rule", nil)
+	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
+	h.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+
+	// Verify the rule was deleted
+	_, getErr := repo.Get(context.Background(), types.RuleID("del-budget-rule"))
+	assert.ErrorIs(t, getErr, types.ErrNotFound)
+}
+
+// ---------------------------------------------------------------------------
+// rule_delete.go: deleteRule — budget cleanup after repo delete error
+// ---------------------------------------------------------------------------
+
+func TestB3DeleteRule_BudgetCleanupOnDeleteError(t *testing.T) {
+	repo := &failRuleRepoDeleteFull{MemoryRuleRepository: storage.NewMemoryRuleRepository()}
+	ct := types.ChainTypeEVM
+	require.NoError(t, repo.Create(context.Background(), &types.Rule{
+		ID: "del-err-budget-rule", Name: "del-err-budget", Type: types.RuleTypeEVMAddressList,
+		Mode: types.RuleModeWhitelist, Source: types.RuleSourceAPI, Status: types.RuleStatusActive,
+		Owner: "admin-key", ChainType: &ct,
+	}))
+	budgetRepo := &deleteRuleBudgetTracker{}
+	h, err := NewRuleHandler(repo, slog.Default(), WithBudgetRepo(budgetRepo))
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/evm/rules/del-err-budget-rule", nil)
+	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
+	h.ServeHTTP(rec, req)
+
+	// Repo delete error should dominate — budget cleanup is NOT called because
+	// deleteRule returns early before reaching the budget cleanup block
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 

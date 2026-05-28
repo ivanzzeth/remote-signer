@@ -310,7 +310,7 @@ func TestPhase4_RejectChangesPendingToRejected(t *testing.T) {
 func TestPhase4_ApproveNonPendingRule_BadRequest(t *testing.T) {
 	repo := newMockRuleRepo()
 	rule := newAPIRule()
-	rule.Status = types.RuleStatusActive
+	rule.Status = types.RuleStatusRejected
 	repo.addRule(rule)
 
 	h, err := NewRuleHandler(repo, slog.Default())

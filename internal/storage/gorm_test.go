@@ -46,7 +46,7 @@ func TestNewDB_EmptyDSN(t *testing.T) {
 }
 
 func TestNewDB_SQLiteInMemory(t *testing.T) {
-	db, err := NewDB(Config{DSN: "file::memory:"})
+	db, err := NewDB(Config{DSN: "file::memory:?cache=shared"})
 	require.NoError(t, err)
 	assert.NotNil(t, db)
 }
@@ -59,7 +59,7 @@ func TestNewDBWithLogger_EmptyDSN(t *testing.T) {
 }
 
 func TestNewDBWithLogger_SQLiteInMemory(t *testing.T) {
-	db, err := NewDBWithLogger(Config{DSN: "file::memory:"}, 1)
+	db, err := NewDBWithLogger(Config{DSN: "file::memory:?cache=shared"}, 1)
 	require.NoError(t, err)
 	assert.NotNil(t, db)
 }

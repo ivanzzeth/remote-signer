@@ -119,6 +119,9 @@ func (h *RuleHandler) listRules(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, r := range rules {
 		rr := h.toRuleResponse(r)
+		if !redact {
+			h.enrichVariableDefs(&rr, r)
+		}
 		if redact {
 			rr.Config = nil
 		}
@@ -154,6 +157,8 @@ func (h *RuleHandler) getRule(w http.ResponseWriter, r *http.Request, ruleID str
 	// Agent keys get redacted responses (no script source in config)
 	if apiKey != nil && apiKey.IsAgent() {
 		rr.Config = nil
+	} else {
+		h.enrichVariableDefs(&rr, gotRule)
 	}
 	h.writeJSON(w, rr, http.StatusOK)
 }
@@ -197,12 +202,15 @@ func (h *RuleHandler) approveRule(w http.ResponseWriter, r *http.Request, ruleID
 		return
 	}
 
-	if rule.Status != types.RuleStatusPendingApproval {
+	// Idempotent: already active rules can be "approved" again without error.
+	if rule.Status != types.RuleStatusPendingApproval && rule.Status != types.RuleStatusActive {
 		h.writeError(w, fmt.Sprintf("rule is not pending approval (current status: %s)", rule.Status), http.StatusBadRequest)
 		return
 	}
 
-	rule.Status = types.RuleStatusActive
+	if rule.Status == types.RuleStatusPendingApproval {
+		rule.Status = types.RuleStatusActive
+	}
 	approvedBy := apiKey.ID
 	rule.ApprovedBy = &approvedBy
 	rule.UpdatedAt = time.Now()
@@ -251,7 +259,8 @@ func (h *RuleHandler) rejectRule(w http.ResponseWriter, r *http.Request, ruleID 
 		return
 	}
 
-	if rule.Status != types.RuleStatusPendingApproval {
+	// Allow rejecting pending_approval or active rules (idempotent for rejected).
+	if rule.Status != types.RuleStatusPendingApproval && rule.Status != types.RuleStatusActive {
 		h.writeError(w, fmt.Sprintf("rule is not pending approval (current status: %s)", rule.Status), http.StatusBadRequest)
 		return
 	}

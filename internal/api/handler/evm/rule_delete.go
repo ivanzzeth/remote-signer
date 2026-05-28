@@ -59,6 +59,16 @@ func (h *RuleHandler) deleteRule(w http.ResponseWriter, r *http.Request, ruleID 
 		return
 	}
 
+	// Clean up associated budgets. The FK constraint handles this via ON
+	// DELETE CASCADE, but defensive cleanup ensures budgets don't linger if
+	// the FK is missing (e.g. pre-existing SQLite databases without PRAGMA
+	// foreign_keys enabled during AutoMigrate).
+	if h.budgetRepo != nil {
+		if err := h.budgetRepo.DeleteByRuleID(r.Context(), rule.ID); err != nil {
+			h.logger.Warn("failed to clean up budgets on rule delete", "error", err, "rule_id", ruleID)
+		}
+	}
+
 	h.logger.Info("rule deleted", "rule_id", ruleID)
 	if h.auditLogger != nil {
 		clientIP, _ := r.Context().Value(middleware.ClientIPContextKey).(string)

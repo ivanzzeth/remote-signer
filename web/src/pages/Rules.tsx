@@ -5,6 +5,7 @@ import {
   type Rule,
   type RuleMode,
   type RuleType,
+  type RuleVariableDef,
   type ValidateRuleResponse,
 } from "remote-signer-client";
 import { AppliedToPicker } from "../components/AppliedToPicker";
@@ -476,8 +477,8 @@ function RuleDetailPanel({
   const [rawJson, setRawJson] = useState(() =>
     JSON.stringify(rule.config, null, 2),
   );
-  const [editVars, setEditVars] = useState(() =>
-    rule.variables ? JSON.stringify(rule.variables, null, 2) : "",
+  const [editVars, setEditVars] = useState<Record<string, string>>(() =>
+    (rule.variables && Object.keys(rule.variables).length > 0) ? { ...rule.variables } : {},
   );
   const [editMatrix, setEditMatrix] = useState(() =>
     rule.matrix && Array.isArray(rule.matrix) ? JSON.stringify(rule.matrix, null, 2) : "",
@@ -527,13 +528,8 @@ function RuleDetailPanel({
       description: description.trim(),
       config: payload,
     };
-    if (editVars.trim()) {
-      try {
-        patch.variables = JSON.parse(editVars);
-      } catch (e) {
-        setParseError("Variables: " + (e instanceof Error ? e.message : "invalid JSON"));
-        return;
-      }
+    if (Object.keys(editVars).length > 0) {
+      patch.variables = { ...editVars };
     } else if (rule.variables && Object.keys(rule.variables).length > 0) {
       patch.variables = {};
     }
@@ -628,7 +624,7 @@ function RuleDetailPanel({
           </div>
           {parseError && <ErrorBanner msg={parseError} />}
 
-          {/* Variables / Matrix editors — only shown for evm_js rules (the type that supports them) */}
+          {/* Variables / Matrix editors */}
           {(rule.type === "evm_js") && (
             <div className="space-y-2 rounded-md border border-ink-200 p-3">
               <div className="flex items-center justify-between">
@@ -637,36 +633,52 @@ function RuleDetailPanel({
                 </span>
               </div>
 
-              <div>
-                <button
-                  type="button"
-                  onClick={() => setShowVarsEditor((s) => !s)}
-                  className="flex w-full items-center justify-between rounded-md border border-ink-100 px-2 py-1 text-left text-xs text-ink-700 hover:bg-ink-50"
-                >
-                  <span>
-                    Variables{" "}
-                    <span className="text-ink-400">
-                      ({rule.variables ? Object.keys(rule.variables).length : 0} keys)
+              {/* Typed variable editor when variable_defs are available */}
+              {rule.variable_defs && rule.variable_defs.length > 0 ? (
+                <TypedVariablesEditor
+                  defs={rule.variable_defs}
+                  values={editVars}
+                  onChange={(name, val) => setEditVars((s) => ({ ...s, [name]: val }))}
+                />
+              ) : (
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setShowVarsEditor((s) => !s)}
+                    className="flex w-full items-center justify-between rounded-md border border-ink-100 px-2 py-1 text-left text-xs text-ink-700 hover:bg-ink-50"
+                  >
+                    <span>
+                      Variables{" "}
+                      <span className="text-ink-400">
+                        ({Object.keys(editVars).length} keys)
+                      </span>
                     </span>
-                  </span>
-                  <span className="text-[10px] text-ink-500">{showVarsEditor ? "▲" : "▼"}</span>
-                </button>
-                {showVarsEditor && (
-                  <div className="mt-1">
-                    <textarea
-                      value={editVars}
-                      onChange={(e) => setEditVars(e.target.value)}
-                      rows={Math.max(3, editVars.split("\n").length)}
-                      spellCheck={false}
-                      placeholder='{"max_amount_in": "5000000000000000000"}'
-                      className="block w-full rounded-md border border-ink-300 p-2 font-mono text-[11px]"
-                    />
-                    <div className="mt-1 text-[10px] text-ink-500">
-                      Clear to reset (sends empty object).
+                    <span className="text-[10px] text-ink-500">{showVarsEditor ? "▲" : "▼"}</span>
+                  </button>
+                  {showVarsEditor && (
+                    <div className="mt-1">
+                      <textarea
+                        value={JSON.stringify(editVars, null, 2)}
+                        onChange={(e) => {
+                          try {
+                            const parsed = JSON.parse(e.target.value);
+                            setEditVars(parsed);
+                          } catch {
+                            // let operator fix JSON
+                          }
+                        }}
+                        rows={Math.max(3, Object.keys(editVars).length + 2)}
+                        spellCheck={false}
+                        placeholder='{"max_amount_in": "5000000000000000000"}'
+                        className="block w-full rounded-md border border-ink-300 p-2 font-mono text-[11px]"
+                      />
+                      <div className="mt-1 text-[10px] text-ink-500">
+                        Clear to reset (sends empty object).
+                      </div>
                     </div>
-                  </div>
-                )}
-              </div>
+                  )}
+                </div>
+              )}
 
               <div>
                 <button
@@ -766,12 +778,16 @@ function RuleDetailPanel({
               <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-500">
                 Variables
               </h3>
-              <CodeBlock
-                body={JSON.stringify(rule.variables, null, 2)}
-                lang="json"
-                maxH={12}
-                title="Variables"
-              />
+              {rule.variable_defs && rule.variable_defs.length > 0 ? (
+                <VariablesViewTable defs={rule.variable_defs} />
+              ) : (
+                <CodeBlock
+                  body={JSON.stringify(rule.variables, null, 2)}
+                  lang="json"
+                  maxH={12}
+                  title="Variables"
+                />
+              )}
             </div>
           )}
 
@@ -1662,6 +1678,174 @@ function formatMutationError(e: unknown): string {
   if (e instanceof APIError) return `HTTP ${e.statusCode}: ${e.message}`;
   if (e instanceof Error) return e.message;
   return String(e);
+}
+
+function TypedVariablesEditor({
+  defs,
+  values,
+  onChange,
+}: {
+  defs: RuleVariableDef[];
+  values: Record<string, string>;
+  onChange: (name: string, val: string) => void;
+}) {
+  return (
+    <div className="space-y-3">
+      {defs.map((def) => {
+        const value = values[def.name] ?? "";
+        const label = def.label || def.name;
+        const hasDefault = def.default_value !== undefined && def.default_value !== "";
+
+        // bool → checkbox
+        if (def.type === "bool") {
+          const checked = value === "true";
+          return (
+            <div key={def.name} className="flex items-center gap-3 rounded-md border border-ink-100 p-2">
+              <div className="flex-1">
+                <div className="text-xs text-ink-700">{label}</div>
+                {def.description && <div className="text-[10px] text-ink-500">{def.description}</div>}
+              </div>
+              <label className="inline-flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={(e) => onChange(def.name, e.target.checked ? "true" : "false")}
+                />
+                <span className="text-xs text-ink-600">{checked ? "true" : "false"}</span>
+              </label>
+              {hasDefault && <span className="text-[10px] text-ink-400">default: {def.default_value}</span>}
+            </div>
+          );
+        }
+
+        // address_list / bigint_list / json → textarea
+        if (def.type === "address_list" || def.type === "bigint_list" || def.type === "json") {
+          const rows = def.type === "json" ? 4 : 2;
+          return (
+            <div key={def.name} className="rounded-md border border-ink-100 p-2">
+              <div className="mb-1 flex items-center justify-between">
+                <span className="text-xs text-ink-700">{label}</span>
+                {def.required && <span className="text-[10px] text-red-500">required</span>}
+              </div>
+              {def.description && <div className="mb-1 text-[10px] text-ink-500">{def.description}</div>}
+              <textarea
+                value={value}
+                onChange={(e) => onChange(def.name, e.target.value)}
+                rows={rows}
+                spellCheck={false}
+                placeholder={def.placeholder || def.default_value || ""}
+                className="w-full rounded-md border border-ink-300 px-2 py-1 font-mono text-[11px]"
+              />
+              {hasDefault && <div className="mt-1 text-[10px] text-ink-400">default: {def.default_value}</div>}
+            </div>
+          );
+        }
+
+        // enum → select
+        if (def.type === "enum" && def.options && def.options.length > 0) {
+          return (
+            <div key={def.name} className="rounded-md border border-ink-100 p-2">
+              <div className="mb-1 flex items-center justify-between">
+                <span className="text-xs text-ink-700">{label}</span>
+                {def.required && <span className="text-[10px] text-red-500">required</span>}
+              </div>
+              {def.description && <div className="mb-1 text-[10px] text-ink-500">{def.description}</div>}
+              <select
+                value={value}
+                onChange={(e) => onChange(def.name, e.target.value)}
+                className="w-full rounded-md border border-ink-300 px-2 py-1 font-mono text-[11px]"
+              >
+                <option value="">—</option>
+                {def.options.map((opt) => (
+                  <option key={opt} value={opt}>{opt}</option>
+                ))}
+              </select>
+              {hasDefault && <div className="mt-1 text-[10px] text-ink-400">default: {def.default_value}</div>}
+            </div>
+          );
+        }
+
+        // address / bigint / bytes / bytes4 → monospace input
+        // string / duration → regular input
+        const isMono =
+          def.type === "address" ||
+          def.type === "bigint" ||
+          def.type === "bytes" ||
+          def.type === "bytes4";
+
+        return (
+          <div key={def.name} className="rounded-md border border-ink-100 p-2">
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-xs text-ink-700">
+                {label}
+                {def.type && (
+                  <span className="ml-1 font-mono text-[10px] uppercase text-ink-400">[{def.type}]</span>
+                )}
+              </span>
+              {def.required && <span className="text-[10px] text-red-500">required</span>}
+            </div>
+            {def.description && <div className="mb-1 text-[10px] text-ink-500">{def.description}</div>}
+            <input
+              type={def.sensitive ? "password" : "text"}
+              value={value}
+              onChange={(e) => onChange(def.name, e.target.value)}
+              placeholder={def.placeholder || def.default_value || ""}
+              className={`w-full rounded-md border border-ink-300 px-2 py-1 text-sm ${isMono ? "font-mono" : ""}`}
+            />
+            {hasDefault && <div className="mt-1 text-[10px] text-ink-400">default: {def.default_value}</div>}
+            {def.hint && <div className="mt-1 text-[10px] text-ink-500">{def.hint}</div>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function VariablesViewTable({ defs }: { defs: RuleVariableDef[] }) {
+  return (
+    <div className="overflow-x-auto rounded-md border border-ink-200">
+      <table className="w-full text-left text-xs">
+        <thead>
+          <tr className="border-b border-ink-200 bg-ink-50">
+            <th className="whitespace-nowrap px-2 py-1.5 font-mono font-normal text-ink-500">Name</th>
+            <th className="whitespace-nowrap px-2 py-1.5 font-normal text-ink-500">Type</th>
+            <th className="whitespace-nowrap px-2 py-1.5 font-normal text-ink-500">Value</th>
+            <th className="whitespace-nowrap px-2 py-1.5 font-normal text-ink-500">Default</th>
+          </tr>
+        </thead>
+        <tbody>
+          {defs.map((def) => (
+            <tr key={def.name} className="border-t border-ink-100">
+              <td className="whitespace-nowrap px-2 py-1 font-mono text-ink-700">
+                {def.label || def.name}
+                {def.required && <span className="ml-1 text-red-500">*</span>}
+              </td>
+              <td className="whitespace-nowrap px-2 py-1">
+                <span className="rounded bg-ink-100 px-1.5 py-0.5 font-mono text-[10px] uppercase text-ink-600">
+                  {def.type || "string"}
+                </span>
+              </td>
+              <td className="max-w-[300px] truncate whitespace-nowrap px-2 py-1 font-mono text-ink-700" title={def.value ?? ""}>
+                {def.sensitive ? "••••••••" : truncateAddr(def.value ?? "", def.type)}
+              </td>
+              <td className="whitespace-nowrap px-2 py-1 font-mono text-[11px] text-ink-400">
+                {def.default_value || "—"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function truncateAddr(val: string, type?: string): string {
+  if (!val) return val;
+  if (type === "address" && val.startsWith("0x") && val.length > 12) {
+    return val.slice(0, 6) + "..." + val.slice(-4);
+  }
+  if (val.length > 60) return val.slice(0, 57) + "...";
+  return val;
 }
 
 function RuleMatrixTable({ matrix }: { matrix: Record<string, any>[] }) {

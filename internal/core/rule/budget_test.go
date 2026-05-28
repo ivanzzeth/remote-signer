@@ -149,6 +149,10 @@ func (m *mockBudgetRepoForRenewal) CreateOrGet(_ context.Context, budget *types.
 	return budget, true, nil
 }
 
+func (m *mockBudgetRepoForRenewal) UpsertLimits(_ context.Context, _ types.RuleID, _ []storage.BudgetSyncRequest) error {
+	return nil
+}
+
 // mockTemplateRepoForBudget returns a template with count_only BudgetMetering.
 type mockTemplateRepoForBudget struct {
 	tmpl *types.RuleTemplate
@@ -395,6 +399,10 @@ func (m *dynamicBudgetRepo) CreateOrGet(ctx context.Context, budget *types.RuleB
 	m.state[key] = budget
 	cp := *budget
 	return &cp, true, nil
+}
+
+func (m *dynamicBudgetRepo) UpsertLimits(_ context.Context, _ types.RuleID, _ []storage.BudgetSyncRequest) error {
+	return nil
 }
 
 // TestBudgetChecker_DynamicBudget_AutoCreateKnownUnit tests that when JS returns {amount, unit}
@@ -1288,9 +1296,8 @@ func TestBudgetChecker_DynamicBudget_InstanceOverridesNativeTotal(t *testing.T) 
 	assert.False(t, ok2, "second spend should exceed budget (0.004+0.002 > 0.005)")
 }
 
-// TestSubstituteMeteringJSON_UnresolvedVariable leaves ${unknown} in the string.
-// The budget checker will see the literal "${unknown}" as max_total, which will fail
-// when trying to parse it as a number — this is correct fail-closed behavior.
+// TestSubstituteMeteringJSON_UnresolvedVariable replaces unresolved ${var}
+// with -1 so JSON remains valid for unmarshal.
 func TestSubstituteMeteringJSON_UnresolvedVariable(t *testing.T) {
 	metering := types.BudgetMetering{
 		Method:  "js",
@@ -1313,8 +1320,8 @@ func TestSubstituteMeteringJSON_UnresolvedVariable(t *testing.T) {
 	require.NoError(t, json.Unmarshal(result, &resolved))
 
 	// The unresolved ${nonexistent_var} stays as-is — will fail at budget enforcement
-	assert.Equal(t, "${nonexistent_var}", resolved.KnownUnits["native"].MaxTotal,
-		"unresolved variable should remain as literal string")
+	assert.Equal(t, "-1", resolved.KnownUnits["native"].MaxTotal,
+		"unresolved variable should be replaced with -1")
 }
 
 // TestBudgetChecker_DynamicBudget_UnresolvedMaxTotal_FailsClosed tests that when

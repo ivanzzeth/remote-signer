@@ -259,6 +259,9 @@ func (r *Router) setupRoutes() error {
 	if r.config.BudgetRepo != nil {
 		ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithBudgetRepo(r.config.BudgetRepo))
 	}
+	if r.config.Template != nil && r.config.Template.TemplateRepo != nil {
+		ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithTemplateRepo(r.config.Template.TemplateRepo))
+	}
 	if r.config.RulesAPIReadonly {
 		ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithReadOnly())
 	}

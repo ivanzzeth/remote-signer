@@ -616,6 +616,10 @@ func (m *mockBudgetRepoForCreate) CreateOrGet(_ context.Context, budget *types.R
 	return budget, true, nil
 }
 
+func (m *mockBudgetRepoForCreate) UpsertLimits(_ context.Context, _ types.RuleID, _ []storage.BudgetSyncRequest) error {
+	return nil
+}
+
 // createBudgetFromInstanceConfig accepts empty for optional fields (template variable instantiated to empty)
 func TestCreateBudgetFromInstanceConfig_AcceptsEmptyOptionalFields(t *testing.T) {
 	ctx := context.Background()
@@ -762,6 +766,10 @@ func (s *spyBudgetRepo) CountByRuleID(_ context.Context, _ types.RuleID) (int, e
 }
 func (s *spyBudgetRepo) CreateOrGet(_ context.Context, budget *types.RuleBudget) (*types.RuleBudget, bool, error) {
 	return budget, true, nil
+}
+
+func (s *spyBudgetRepo) UpsertLimits(_ context.Context, _ types.RuleID, _ []storage.BudgetSyncRequest) error {
+	return nil
 }
 
 func TestSyncBudgetFromConfig_DeletesStaleUnits(t *testing.T) {

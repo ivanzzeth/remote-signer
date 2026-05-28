@@ -3,7 +3,9 @@
 package evm
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -26,8 +28,10 @@ type RuleResponse struct {
 	ApprovedBy        *string         `json:"approved_by,omitempty"`
 	Immutable         bool            `json:"immutable,omitempty"`
 	SignerAddress     *string         `json:"signer_address,omitempty"`
+	TemplateID        *string         `json:"template_id,omitempty"`
 	Config            json.RawMessage `json:"config,omitempty"`
 	Variables         json.RawMessage `json:"variables,omitempty"`
+	VariableDefs      []VariableDef   `json:"variable_defs,omitempty"`
 	Matrix            json.RawMessage `json:"matrix,omitempty"`
 	Enabled           bool            `json:"enabled"`
 	CreatedAt         string          `json:"created_at"`
@@ -37,6 +41,23 @@ type RuleResponse struct {
 	LastMatchedAt     *string         `json:"last_matched_at,omitempty"`
 	BudgetPeriod      string          `json:"budget_period,omitempty"`       // e.g. "24h0m0s"; set when schedule.period is configured
 	BudgetPeriodStart *string         `json:"budget_period_start,omitempty"` // RFC3339; when first period began
+}
+
+// VariableDef exposes a template variable's metadata alongside its current
+// bound value so the UI can render typed controls without a separate template
+// fetch. Mirrors PresetVariableDetail but includes the current value.
+type VariableDef struct {
+	Name         string `json:"name"`
+	Type         string `json:"type,omitempty"`
+	Label        string `json:"label,omitempty"`
+	Description  string `json:"description,omitempty"`
+	Required     bool   `json:"required"`
+	DefaultValue string `json:"default_value,omitempty"`
+	Placeholder  string `json:"placeholder,omitempty"`
+	Hint         string `json:"hint,omitempty"`
+	Options      []string `json:"options,omitempty"`
+	Sensitive    bool   `json:"sensitive,omitempty"`
+	Value        string `json:"value,omitempty"`
 }
 
 // ListRulesResponse represents the response for listing rules
@@ -170,6 +191,10 @@ func (h *RuleHandler) toRuleResponse(rule *types.Rule) RuleResponse {
 		s := rule.BudgetPeriodStart.Format(time.RFC3339)
 		resp.BudgetPeriodStart = &s
 	}
+	if rule.TemplateID != nil {
+		tid := *rule.TemplateID
+		resp.TemplateID = &tid
+	}
 	if rule.Variables != nil {
 		resp.Variables = json.RawMessage(rule.Variables)
 	}
@@ -178,6 +203,85 @@ func (h *RuleHandler) toRuleResponse(rule *types.Rule) RuleResponse {
 	}
 
 	return resp
+}
+
+// enrichVariableDefs attaches template-level variable metadata + current
+// bound values when the rule has a template_id. If the template repo is
+// unavailable or the template can't be found, the response simply omits
+// variable_defs — the UI falls back to raw Variables display.
+func (h *RuleHandler) enrichVariableDefs(resp *RuleResponse, rule *types.Rule) {
+	if h.templateRepo == nil || rule.TemplateID == nil || *rule.TemplateID == "" {
+		return
+	}
+
+	tmpl, err := h.templateRepo.Get(context.Background(), *rule.TemplateID)
+	if err != nil || tmpl == nil || len(tmpl.Variables) == 0 {
+		return
+	}
+
+	var defs []types.TemplateVariable
+	if err := json.Unmarshal(tmpl.Variables, &defs); err != nil {
+		h.logger.Warn("enrichVariableDefs: decode template variables", "template_id", *rule.TemplateID, "error", err)
+		return
+	}
+
+	// Decode current bound values (map[string]string stored as JSONB)
+	var bound map[string]string
+	if rule.Variables != nil {
+		if err := json.Unmarshal(rule.Variables, &bound); err != nil {
+			h.logger.Debug("enrichVariableDefs: decode rule variables", "rule_id", string(rule.ID), "error", err)
+			bound = nil
+		}
+	}
+
+	out := make([]VariableDef, 0, len(defs))
+	for _, def := range defs {
+		entry := VariableDef{
+			Name:        def.Name,
+			Type:        string(def.Type),
+			Label:       def.Label,
+			Description: def.Description,
+			Required:    def.Required,
+			Placeholder: def.Placeholder,
+			Hint:        def.Hint,
+			Options:     def.Options,
+			Sensitive:   def.Sensitive,
+		}
+		entry.DefaultValue = stringifyDefault(def.Default)
+		if v, ok := bound[def.Name]; ok {
+			entry.Value = v
+		}
+		out = append(out, entry)
+	}
+	resp.VariableDefs = out
+}
+
+// stringifyDefault converts a TemplateVariable.Default (any) to its JSON-safe
+// string form for wire transport. nil → "".
+func stringifyDefault(v any) string {
+	if v == nil {
+		return ""
+	}
+	switch t := v.(type) {
+	case string:
+		return t
+	case bool:
+		if t {
+			return "true"
+		}
+		return "false"
+	case float64:
+		if t == float64(int64(t)) {
+			return fmt.Sprintf("%d", int64(t))
+		}
+		return fmt.Sprintf("%v", t)
+	default:
+		b, err := json.Marshal(v)
+		if err != nil {
+			return fmt.Sprintf("%v", v)
+		}
+		return string(b)
+	}
 }
 
 func (h *RuleHandler) writeJSON(w http.ResponseWriter, data interface{}, status int) {

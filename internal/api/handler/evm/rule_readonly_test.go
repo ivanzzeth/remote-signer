@@ -83,13 +83,14 @@ func (m *mockRuleRepo) ValidateDelegateRefs(_ context.Context, _ *types.Rule) er
 
 // mockBudgetRepo implements storage.BudgetRepository for listBudgets and budget migration tests.
 type mockBudgetRepo struct {
-	listByRuleID  func(context.Context, types.RuleID) ([]*types.RuleBudget, error)
-	listAll       func(context.Context) ([]*types.RuleBudget, error)
-	getFn         func(context.Context, string) (*types.RuleBudget, error)
-	createFn      func(context.Context, *types.RuleBudget) error
-	createOrGetFn func(context.Context, *types.RuleBudget) (*types.RuleBudget, bool, error)
-	updateFn      func(context.Context, *types.RuleBudget) error
-	deleteFn      func(context.Context, string) error
+	listByRuleID    func(context.Context, types.RuleID) ([]*types.RuleBudget, error)
+	listAll         func(context.Context) ([]*types.RuleBudget, error)
+	getFn           func(context.Context, string) (*types.RuleBudget, error)
+	createFn        func(context.Context, *types.RuleBudget) error
+	createOrGetFn   func(context.Context, *types.RuleBudget) (*types.RuleBudget, bool, error)
+	updateFn        func(context.Context, *types.RuleBudget) error
+	deleteFn        func(context.Context, string) error
+	upsertLimitsFn  func(context.Context, types.RuleID, []storage.BudgetSyncRequest) error
 }
 
 func (m *mockBudgetRepo) Create(ctx context.Context, b *types.RuleBudget) error {
@@ -144,6 +145,12 @@ func (m *mockBudgetRepo) Get(ctx context.Context, id string) (*types.RuleBudget,
 func (m *mockBudgetRepo) Update(ctx context.Context, budget *types.RuleBudget) error {
 	if m.updateFn != nil {
 		return m.updateFn(ctx, budget)
+	}
+	return nil
+}
+func (m *mockBudgetRepo) UpsertLimits(ctx context.Context, ruleID types.RuleID, requests []storage.BudgetSyncRequest) error {
+	if m.upsertLimitsFn != nil {
+		return m.upsertLimitsFn(ctx, ruleID, requests)
 	}
 	return nil
 }

@@ -12,8 +12,8 @@ import (
 // Unique constraint: (RuleID, Unit)
 type RuleBudget struct {
 	ID         string    `json:"id" gorm:"primaryKey;type:varchar(64)"` // SHA256 hex of (ruleID, unit) via BudgetID()
-	RuleID     RuleID    `json:"rule_id" gorm:"index;type:varchar(64)"`
-	Unit       string    `json:"unit" gorm:"type:varchar(512)"` // 256*2: safe limit, supports chain_id:address:uint256_hex etc.
+	RuleID     RuleID    `json:"rule_id" gorm:"index;type:varchar(64);not null;uniqueIndex:idx_rule_budgets_rule_unit;constraint:OnDelete:CASCADE"`
+	Unit       string    `json:"unit" gorm:"type:varchar(512);not null;uniqueIndex:idx_rule_budgets_rule_unit"` // 256*2: safe limit, supports chain_id:address:uint256_hex etc.
 	MaxTotal   string    `json:"max_total" gorm:"type:varchar(128)"`           // max total spend per period (or lifetime if no schedule)
 	MaxPerTx   string    `json:"max_per_tx" gorm:"type:varchar(128)"`          // max spend per transaction
 	Spent      string    `json:"spent" gorm:"type:varchar(128);default:'0'"`   // current period spend

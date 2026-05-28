@@ -873,6 +873,9 @@ func (r *stubBudgetRepo) MarkAlertSent(ctx context.Context, ruleID types.RuleID,
 	r.markAlertSentUnit = unit
 	return r.markAlertSentErr
 }
+func (r *stubBudgetRepo) UpsertLimits(ctx context.Context, ruleID types.RuleID, requests []storage.BudgetSyncRequest) error {
+	return nil
+}
 
 // stubTemplateRepo is a minimal TemplateRepository for unit tests.
 type stubTemplateRepo struct {

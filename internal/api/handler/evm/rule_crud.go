@@ -15,6 +15,7 @@ import (
 
 	"github.com/ivanzzeth/remote-signer/internal/api/handler"
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
+	rulepkg "github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/ruleconfig"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
@@ -396,16 +397,48 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 		}
 	}
 
-	// Update rule
-	if err := h.ruleRepo.Update(r.Context(), rule); err != nil {
-		h.logger.Error("failed to update rule", "error", err, "rule_id", ruleID)
-		h.writeError(w, "failed to update rule", http.StatusInternalServerError)
-		return
-	}
+	// Update rule and sync budget limits atomically when variables changed.
+	if req.Variables != nil && rule.TemplateID != nil && *rule.TemplateID != "" &&
+		h.budgetRepo != nil && h.templateRepo != nil {
 
-	// Auto-migrate budget when variables affecting budget unit changed
-	if req.Variables != nil && rule.TemplateID != nil && h.budgetRepo != nil && h.templateRepo != nil {
-		h.migrateBudgetOnVariableChange(r.Context(), rule, oldVariables)
+		// Pre-resolve budget sync requests outside the transaction.
+		// templateRepo.Get() opens its own DB connection - calling it inside
+		// a GORM transaction serializes on SQLite and causes deadlocks.
+		budgetRequests := h.prepareBudgetSync(r.Context(), rule)
+
+		txRepo, ok := h.ruleRepo.(storage.RuleBudgetTransactional)
+		if ok {
+			err = txRepo.RunInRuleBudgetTransaction(r.Context(), func(txRule storage.RuleRepository, txBudget storage.BudgetRepository) error {
+				if err := txRule.Update(r.Context(), rule); err != nil {
+					return fmt.Errorf("update rule: %w", err)
+				}
+				if len(budgetRequests) > 0 {
+					return txBudget.UpsertLimits(r.Context(), rule.ID, budgetRequests)
+				}
+				return nil
+			})
+			if err != nil {
+				h.logger.Error("failed to update rule with budget sync", "error", err, "rule_id", ruleID)
+				h.writeError(w, "failed to update rule", http.StatusInternalServerError)
+				return
+			}
+		} else {
+			// Non-transactional fallback (in-memory repos)
+			if err := h.ruleRepo.Update(r.Context(), rule); err != nil {
+				h.logger.Error("failed to update rule", "error", err, "rule_id", ruleID)
+				h.writeError(w, "failed to update rule", http.StatusInternalServerError)
+				return
+			}
+			if len(budgetRequests) > 0 {
+				h.budgetRepo.UpsertLimits(r.Context(), rule.ID, budgetRequests)
+			}
+		}
+	} else {
+		if err := h.ruleRepo.Update(r.Context(), rule); err != nil {
+			h.logger.Error("failed to update rule", "error", err, "rule_id", ruleID)
+			h.writeError(w, "failed to update rule", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	h.logger.Info("rule updated", "rule_id", ruleID)
@@ -416,8 +449,71 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 	h.writeJSON(w, h.toRuleResponse(rule), http.StatusOK)
 }
 
-// resolveBudgetUnit computes the budget unit string by substituting rule variables
-// into the template's BudgetMetering.Unit template. Returns "count" as fallback.
+// prepareBudgetSync resolves template BudgetMetering against current rule
+// variables and returns BudgetSyncRequests ready for upsert. Template fetching
+// happens outside any DB transaction to avoid SQLite serialization deadlocks.
+func (h *RuleHandler) prepareBudgetSync(ctx context.Context, rule *types.Rule) []storage.BudgetSyncRequest {
+	tmpl, err := h.templateRepo.Get(ctx, *rule.TemplateID)
+	if err != nil {
+		h.logger.Warn("budget sync: failed to get template, skipping", "rule_id", rule.ID, "template_id", *rule.TemplateID, "error", err)
+		return nil
+	}
+
+	if len(tmpl.BudgetMetering) == 0 {
+		return nil
+	}
+
+	resolvedJSON := rulepkg.SubstituteMeteringJSON(tmpl.BudgetMetering, rule.Variables)
+	var metering types.BudgetMetering
+	if err := json.Unmarshal(resolvedJSON, &metering); err != nil {
+		h.logger.Warn("budget sync: failed to unmarshal budget metering", "rule_id", rule.ID, "error", err)
+		return nil
+	}
+
+	if metering.Dynamic {
+		return buildDynamicBudgetRequests(&metering)
+	}
+	return buildStaticBudgetRequests(rule.Variables, &metering)
+}
+
+func buildDynamicBudgetRequests(metering *types.BudgetMetering) []storage.BudgetSyncRequest {
+	var requests []storage.BudgetSyncRequest
+	for unitName, conf := range metering.KnownUnits {
+		unit := rulepkg.NormalizeBudgetUnit(unitName)
+		maxTotal := conf.MaxTotal
+		if maxTotal == "" {
+			maxTotal = "-1"
+		}
+		maxPerTx := conf.MaxPerTx
+		if maxPerTx == "" {
+			maxPerTx = "-1"
+		}
+		alertPct := conf.AlertPct
+		if alertPct <= 0 {
+			alertPct = 80
+		}
+		requests = append(requests, storage.BudgetSyncRequest{
+			Unit:       unit,
+			MaxTotal:   maxTotal,
+			MaxPerTx:   maxPerTx,
+			MaxTxCount: conf.MaxTxCount,
+			AlertPct:   alertPct,
+		})
+	}
+	return requests
+}
+
+func buildStaticBudgetRequests(variables []byte, metering *types.BudgetMetering) []storage.BudgetSyncRequest {
+	unit := resolveBudgetUnit(variables, metering.Unit)
+	return []storage.BudgetSyncRequest{{
+		Unit:     unit,
+		MaxTotal: "-1",
+		MaxPerTx: "-1",
+		AlertPct: 80,
+	}}
+}
+
+// resolveBudgetUnit substitutes rule variables into a budget unit template string.
 func resolveBudgetUnit(variables []byte, unitTemplate string) string {
 	if unitTemplate == "" {
 		return "count"
@@ -434,60 +530,4 @@ func resolveBudgetUnit(variables []byte, unitTemplate string) string {
 		result = strings.ReplaceAll(result, "${"+k+"}", v)
 	}
 	return result
-}
-
-// migrateBudgetOnVariableChange checks whether variable changes cause the budget
-// unit to change. If so, it creates a new budget for the new unit (keeping the
-// old one for audit trail) and copies the budget limits from the old budget.
-func (h *RuleHandler) migrateBudgetOnVariableChange(ctx context.Context, rule *types.Rule, oldVariables []byte) {
-	tmpl, err := h.templateRepo.Get(ctx, *rule.TemplateID)
-	if err != nil {
-		h.logger.Warn("budget migration: failed to get template, skipping", "rule_id", rule.ID, "template_id", *rule.TemplateID, "error", err)
-		return
-	}
-
-	var metering types.BudgetMetering
-	if len(tmpl.BudgetMetering) == 0 {
-		return
-	}
-	if err := json.Unmarshal(tmpl.BudgetMetering, &metering); err != nil || metering.Unit == "" {
-		return
-	}
-
-	oldUnit := resolveBudgetUnit(oldVariables, metering.Unit)
-	newUnit := resolveBudgetUnit(rule.Variables, metering.Unit)
-	if oldUnit == newUnit {
-		return
-	}
-
-	h.logger.Info("budget unit changed, auto-migrating", "rule_id", rule.ID, "old_unit", oldUnit, "new_unit", newUnit)
-
-	newBudget := &types.RuleBudget{
-		ID:       types.BudgetID(rule.ID, newUnit),
-		RuleID:   rule.ID,
-		Unit:     newUnit,
-		MaxTotal: "0",
-		MaxPerTx: "0",
-		Spent:    "0",
-	}
-
-	// Try to copy limits from the old budget
-	oldBudget, err := h.budgetRepo.Get(ctx, types.BudgetID(rule.ID, oldUnit))
-	if err == nil && oldBudget != nil {
-		newBudget.MaxTotal = oldBudget.MaxTotal
-		newBudget.MaxPerTx = oldBudget.MaxPerTx
-		newBudget.AlertPct = oldBudget.AlertPct
-		newBudget.MaxTxCount = oldBudget.MaxTxCount
-	}
-
-	created, wasCreated, err := h.budgetRepo.CreateOrGet(ctx, newBudget)
-	if err != nil {
-		h.logger.Error("budget migration: failed to create new budget", "rule_id", rule.ID, "error", err)
-		return
-	}
-	if wasCreated {
-		h.logger.Info("budget migration: created new budget for unit change",
-			"rule_id", rule.ID, "budget_id", created.ID, "old_unit", oldUnit, "new_unit", newUnit,
-			"max_total", newBudget.MaxTotal)
-	}
 }

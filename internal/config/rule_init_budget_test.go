@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
 // ---------------------------------------------------------------------------
@@ -334,6 +335,10 @@ func (m *mockBudgetRepository) ListAll(ctx context.Context) ([]*types.RuleBudget
 }
 
 func (m *mockBudgetRepository) MarkAlertSent(ctx context.Context, ruleID types.RuleID, unit string) error {
+	return nil
+}
+
+func (m *mockBudgetRepository) UpsertLimits(_ context.Context, _ types.RuleID, _ []storage.BudgetSyncRequest) error {
 	return nil
 }
 

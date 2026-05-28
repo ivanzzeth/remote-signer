@@ -10,7 +10,7 @@ type Wallet struct {
 	ID          string    `json:"id" gorm:"primaryKey;type:varchar(36)"`
 	Name        string    `json:"name" gorm:"type:varchar(255);not null"`
 	Description string    `json:"description" gorm:"type:text"`
-	OwnerID     string    `json:"owner_id" gorm:"type:varchar(64);not null;index"`
+	OwnerID     string    `json:"owner_id" gorm:"type:varchar(64);not null;index;constraint:OnDelete:RESTRICT"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
