@@ -152,6 +152,8 @@ pub struct Rule {
     #[serde(default)]
     pub signer_address: Option<String>,
     #[serde(default)]
+    pub template_id: Option<String>,
+    #[serde(default)]
     pub config: Option<serde_json::Value>,
     pub enabled: bool,
     pub created_at: OffsetDateTime,
@@ -168,7 +170,43 @@ pub struct Rule {
     #[serde(default)]
     pub variables: Option<serde_json::Value>,
     #[serde(default)]
+    pub variable_defs: Option<Vec<RuleVariableDef>>,
+    #[serde(default)]
     pub matrix: Option<serde_json::Value>,
+    #[serde(default)]
+    pub owner: Option<String>,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub approved_by: Option<String>,
+    #[serde(default)]
+    pub immutable: bool,
+    #[serde(default)]
+    pub applied_to: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuleVariableDef {
+    pub name: String,
+    #[serde(default)]
+    pub r#type: Option<String>,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    pub required: bool,
+    #[serde(default)]
+    pub default_value: Option<String>,
+    #[serde(default)]
+    pub placeholder: Option<String>,
+    #[serde(default)]
+    pub hint: Option<String>,
+    #[serde(default)]
+    pub options: Option<Vec<String>>,
+    #[serde(default)]
+    pub sensitive: bool,
+    #[serde(default)]
+    pub value: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

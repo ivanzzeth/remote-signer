@@ -45,7 +45,7 @@ func DeriveApprovalSource(ruleMatchedID *string, approvedBy *string) string {
 // SignRequest is chain-agnostic; payload is chain-specific JSON
 type SignRequest struct {
 	ID        SignRequestID `json:"id" gorm:"primaryKey;type:varchar(64)"`
-	APIKeyID  string        `json:"api_key_id" gorm:"index;type:varchar(64)"`
+	APIKeyID  string        `json:"api_key_id" gorm:"index;type:varchar(64);constraint:OnDelete:RESTRICT"`
 
 	// Chain identification
 	ChainType ChainType `json:"chain_type" gorm:"index;type:varchar(32)"` // "evm", "solana", etc.
@@ -60,7 +60,7 @@ type SignRequest struct {
 	Status SignRequestStatus `json:"status" gorm:"index;type:varchar(16)"`
 
 	// Authorization
-	RuleMatchedID *string    `json:"rule_matched_id,omitempty" gorm:"type:varchar(64)"`
+	RuleMatchedID *string    `json:"rule_matched_id,omitempty" gorm:"type:varchar(64);constraint:OnDelete:SET NULL"`
 	ApprovedBy    *string    `json:"approved_by,omitempty" gorm:"type:varchar(128)"`
 	ApprovedAt    *time.Time `json:"approved_at,omitempty"`
 	// ApprovalSource records which gate let this request through:

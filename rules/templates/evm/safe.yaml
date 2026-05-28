@@ -240,7 +240,7 @@ rules:
               refundReceiver: "0x0000000000000000000000000000000000000000"
               nonce: "0"
         expect_pass: false
-        expect_reason: "invalid verifying contract"
+        expect_reason: "verifyingContract must be allowed Safe"
       - name: "SafeTx reject: inner to not in allowed_safe_tx_to_addresses"
         input:
           sign_type: "typed_data"

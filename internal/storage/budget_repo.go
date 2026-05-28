@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -9,6 +10,16 @@ import (
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
+
+// BudgetSyncRequest carries resolved limit values for a single budget unit,
+// used when variables change and budget limits must be re-resolved from a template.
+type BudgetSyncRequest struct {
+	Unit       string
+	MaxTotal   string
+	MaxPerTx   string
+	MaxTxCount int
+	AlertPct   int
+}
 
 // BudgetRepository defines the interface for budget persistence
 type BudgetRepository interface {
@@ -29,6 +40,10 @@ type BudgetRepository interface {
 	// NOT permit changes to id/rule_id/unit/created_at — those define
 	// the row's identity and the budget hash.
 	Update(ctx context.Context, budget *types.RuleBudget) error
+	// UpsertLimits creates or updates budget limit fields for each request.
+	// Does NOT touch spent, tx_count, or alert_sent (runtime counters).
+	// Uses a single transaction so all units are synced atomically.
+	UpsertLimits(ctx context.Context, ruleID types.RuleID, requests []BudgetSyncRequest) error
 	// CountByRuleID returns the number of distinct budget units for a rule.
 	// SECURITY: Used to enforce MaxDynamicUnits limit to prevent budget amplification attacks.
 	CountByRuleID(ctx context.Context, ruleID types.RuleID) (int, error)
@@ -308,4 +323,65 @@ func (r *GormBudgetRepository) Update(ctx context.Context, budget *types.RuleBud
 		return types.ErrNotFound
 	}
 	return nil
+}
+
+// UpsertLimits creates or updates budget limit fields for each request.
+// Does NOT touch spent, tx_count, or alert_sent (runtime counters).
+// Uses a single transaction so all units are synced atomically.
+func (r *GormBudgetRepository) UpsertLimits(ctx context.Context, ruleID types.RuleID, requests []BudgetSyncRequest) error {
+	if len(requests) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, req := range requests {
+			id := types.BudgetID(ruleID, req.Unit)
+			now := time.Now()
+
+			res := tx.Model(&types.RuleBudget{}).
+				Where("id = ?", id).
+				Updates(map[string]any{
+					"max_total":    req.MaxTotal,
+					"max_per_tx":   req.MaxPerTx,
+					"max_tx_count": req.MaxTxCount,
+					"alert_pct":    req.AlertPct,
+					"updated_at":   now,
+				})
+			if res.Error != nil {
+				return fmt.Errorf("upsert budget limit for unit %s: %w", req.Unit, res.Error)
+			}
+			if res.RowsAffected > 0 {
+				continue
+			}
+
+			budget := &types.RuleBudget{
+				ID:         id,
+				RuleID:     ruleID,
+				Unit:       req.Unit,
+				MaxTotal:   req.MaxTotal,
+				MaxPerTx:   req.MaxPerTx,
+				MaxTxCount: req.MaxTxCount,
+				AlertPct:   req.AlertPct,
+				Spent:      "0",
+				CreatedAt:  now,
+				UpdatedAt:  now,
+			}
+			if err := tx.Create(budget).Error; err != nil {
+				if errors.Is(err, gorm.ErrDuplicatedKey) {
+					if err2 := tx.Model(&types.RuleBudget{}).Where("id = ?", id).
+						Updates(map[string]any{
+							"max_total":    req.MaxTotal,
+							"max_per_tx":   req.MaxPerTx,
+							"max_tx_count": req.MaxTxCount,
+							"alert_pct":    req.AlertPct,
+							"updated_at":   now,
+						}).Error; err2 != nil {
+						return fmt.Errorf("upsert budget limit for unit %s (retry): %w", req.Unit, err2)
+					}
+					continue
+				}
+				return fmt.Errorf("create budget for unit %s: %w", req.Unit, err)
+			}
+		}
+		return nil
+	})
 }

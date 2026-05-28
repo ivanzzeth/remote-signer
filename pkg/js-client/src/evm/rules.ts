@@ -45,14 +45,32 @@ export interface Rule {
   /** ["*"] = all keys, ["self"] = owner only, ["key-1", ...] = specific keys. */
   applied_to?: string[];
   config: Record<string, any>;
+  /** template_id links back to the template this rule was instantiated from. */
+  template_id?: string;
   /** Rule-level variables (key-value pairs) injected into JS evaluator as config.*. */
   variables?: Record<string, string>;
+  /** Template variable metadata joined with current bound values. Enables typed editor controls. */
+  variable_defs?: RuleVariableDef[];
   /** Per-chain Matrix rows; each row must include "chain_id". Overrides Variables for that chain. */
   matrix?: Record<string, any>[];
   enabled: boolean;
   expires_at?: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface RuleVariableDef {
+  name: string;
+  type?: string;
+  label?: string;
+  description?: string;
+  required: boolean;
+  default_value?: string;
+  placeholder?: string;
+  hint?: string;
+  options?: string[];
+  sensitive?: boolean;
+  value?: string;
 }
 
 export interface ListRulesFilter {

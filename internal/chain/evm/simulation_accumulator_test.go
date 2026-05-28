@@ -429,6 +429,9 @@ func (m *accMockBudgetRepo) CountByRuleID(_ context.Context, _ types.RuleID) (in
 func (m *accMockBudgetRepo) CreateOrGet(_ context.Context, b *types.RuleBudget) (*types.RuleBudget, bool, error) {
 	return b, true, nil
 }
+func (m *accMockBudgetRepo) UpsertLimits(_ context.Context, _ types.RuleID, _ []storage.BudgetSyncRequest) error {
+	return nil
+}
 
 type accMockSignerLister struct {
 	signers map[string]bool

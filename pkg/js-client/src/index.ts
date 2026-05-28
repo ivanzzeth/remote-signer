@@ -96,6 +96,7 @@ export type {
   RuleType,
   RuleMode,
   Rule,
+  RuleVariableDef,
   RuleBudget,
   ListRulesFilter,
   ListRulesResponse,

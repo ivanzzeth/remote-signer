@@ -367,6 +367,10 @@ func (r *mockBudgetRepo) CreateOrGet(_ context.Context, budget *types.RuleBudget
 	return budget, true, nil
 }
 
+func (r *mockBudgetRepo) UpsertLimits(_ context.Context, _ types.RuleID, _ []storage.BudgetSyncRequest) error {
+	return nil
+}
+
 // helper to count budgets in the mock repo
 func (r *mockBudgetRepo) count() int {
 	r.mu.RLock()

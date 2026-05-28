@@ -247,7 +247,7 @@ func TestRuleHandler_ApproveRule_Success(t *testing.T) {
 func TestRuleHandler_ApproveRule_NotPending(t *testing.T) {
 	repo := newMockRuleRepo()
 	rule := newAPIRule()
-	rule.Status = types.RuleStatusActive
+	rule.Status = types.RuleStatusRejected
 	repo.addRule(rule)
 
 	h, err := NewRuleHandler(repo, slog.Default())
@@ -313,7 +313,7 @@ func TestRuleHandler_RejectRule_NotAdmin(t *testing.T) {
 func TestRuleHandler_RejectRule_NotPending(t *testing.T) {
 	repo := newMockRuleRepo()
 	rule := newAPIRule()
-	rule.Status = types.RuleStatusActive
+	rule.Status = types.RuleStatusRejected
 	repo.addRule(rule)
 
 	h, err := NewRuleHandler(repo, slog.Default())
@@ -575,25 +575,11 @@ func TestRuleHandler_UpdateRule_BudgetMigration(t *testing.T) {
 		},
 	}
 
-	oldBudget := &types.RuleBudget{
-		ID:       types.BudgetID(rule.ID, "1:0xUSDC"),
-		RuleID:   rule.ID,
-		Unit:     "1:0xUSDC",
-		MaxTotal: "1000000",
-		MaxPerTx: "100000",
-		AlertPct: 80,
-	}
-	var createdOrGotBudget *types.RuleBudget
+	var upsertedRequests []storage.BudgetSyncRequest
 	budgetRepo := &mockBudgetRepo{
-		getFn: func(ctx context.Context, id string) (*types.RuleBudget, error) {
-			if id == types.BudgetID(rule.ID, "1:0xUSDC") {
-				return oldBudget, nil
-			}
-			return nil, types.ErrNotFound
-		},
-		createOrGetFn: func(ctx context.Context, budget *types.RuleBudget) (*types.RuleBudget, bool, error) {
-			createdOrGotBudget = budget
-			return budget, true, nil
+		upsertLimitsFn: func(ctx context.Context, ruleID types.RuleID, requests []storage.BudgetSyncRequest) error {
+			upsertedRequests = requests
+			return nil
 		},
 	}
 
@@ -613,13 +599,12 @@ func TestRuleHandler_UpdateRule_BudgetMigration(t *testing.T) {
 	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, ruleAdminKey())
 	assert.Equal(t, http.StatusOK, rec.Code)
 
-	// Verify budget was migrated: new unit = "137:0xUSDC"
-	require.NotNil(t, createdOrGotBudget, "budget migration should create a new budget")
-	assert.Equal(t, types.BudgetID(rule.ID, "137:0xUSDC"), createdOrGotBudget.ID)
-	assert.Equal(t, "137:0xUSDC", createdOrGotBudget.Unit)
-	assert.Equal(t, "1000000", createdOrGotBudget.MaxTotal, "should copy MaxTotal from old budget")
-	assert.Equal(t, "100000", createdOrGotBudget.MaxPerTx, "should copy MaxPerTx from old budget")
-	assert.Equal(t, 80, createdOrGotBudget.AlertPct, "should copy AlertPct from old budget")
+	// Verify budget was synced: new unit = "137:0xUSDC" via UpsertLimits
+	require.Len(t, upsertedRequests, 1, "budget sync should upsert one budget record")
+	assert.Equal(t, "137:0xUSDC", upsertedRequests[0].Unit)
+	assert.Equal(t, "-1", upsertedRequests[0].MaxTotal, "static budget uses default max_total")
+	assert.Equal(t, "-1", upsertedRequests[0].MaxPerTx, "static budget uses default max_per_tx")
+	assert.Equal(t, 80, upsertedRequests[0].AlertPct)
 }
 
 func TestRuleHandler_UpdateRule_BudgetMigrationNoTemplateRepo(t *testing.T) {

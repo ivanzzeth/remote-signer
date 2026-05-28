@@ -34,10 +34,10 @@ func TestE2E_AgentPresetApply_CreatesSelfOwnedRules(t *testing.T) {
 	require.NotNil(t, results)
 
 	// Clean up created rules
-	cleanupApplyResults(t, results)
+	cleanupApplyResults(t, results.Results)
 
 	// Verify each created rule is owned by the agent key and scoped to self
-	for i, result := range results {
+	for i, result := range results.Results {
 		var ruleMap map[string]interface{}
 		err := json.Unmarshal(result.Rule, &ruleMap)
 		require.NoError(t, err, "result %d should be valid JSON", i)

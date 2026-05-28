@@ -549,6 +549,9 @@ func (m *mockSimBudgetRepo) Update(_ context.Context, _ *types.RuleBudget) error
 func (m *mockSimBudgetRepo) MarkAlertSent(_ context.Context, _ types.RuleID, _ string) error {
 	return nil
 }
+func (m *mockSimBudgetRepo) UpsertLimits(_ context.Context, _ types.RuleID, _ []storage.BudgetSyncRequest) error {
+	return nil
+}
 
 // setCount overrides CountByRuleID for a specific ruleID.
 func (m *mockSimBudgetRepo) setCount(ruleID types.RuleID, count int) {

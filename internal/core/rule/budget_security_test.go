@@ -149,6 +149,9 @@ func (r *raceBudgetRepo) Update(_ context.Context, _ *types.RuleBudget) error {
 func (r *raceBudgetRepo) MarkAlertSent(_ context.Context, _ types.RuleID, _ string) error {
 	return nil
 }
+func (r *raceBudgetRepo) UpsertLimits(_ context.Context, _ types.RuleID, _ []storage.BudgetSyncRequest) error {
+	return nil
+}
 
 func (r *raceBudgetRepo) budgetCount(ruleID types.RuleID) int {
 	r.mu.Lock()
@@ -343,6 +346,9 @@ func (r *alertCaptureBudgetRepo) ResetBudget(_ context.Context, _ types.RuleID, 
 	return nil
 }
 func (r *alertCaptureBudgetRepo) MarkAlertSent(_ context.Context, _ types.RuleID, _ string) error {
+	return nil
+}
+func (r *alertCaptureBudgetRepo) UpsertLimits(_ context.Context, _ types.RuleID, _ []storage.BudgetSyncRequest) error {
 	return nil
 }
 

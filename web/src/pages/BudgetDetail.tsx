@@ -144,11 +144,21 @@ function BudgetView({
           </span>
         }
         actions={
-          <Badge
-            tone={budget.kind === "simulation" ? "yellow" : "neutral"}
-          >
-            {budget.kind}
-          </Badge>
+          <div className="flex items-center gap-2">
+            {budget.kind === "rule" && budget.rule_id && !budget.rule_id.startsWith("sim:") && (
+              <Link
+                to="/rules"
+                className="text-xs text-accent-600 hover:text-accent-500"
+              >
+                View rule
+              </Link>
+            )}
+            <Badge
+              tone={budget.kind === "simulation" ? "yellow" : "neutral"}
+            >
+              {budget.kind}
+            </Badge>
+          </div>
         }
       />
 

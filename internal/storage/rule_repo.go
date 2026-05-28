@@ -48,6 +48,12 @@ type Transactional interface {
 	RunInTransaction(ctx context.Context, fn func(txRepo RuleRepository) error) error
 }
 
+// RuleBudgetTransactional provides a transaction spanning both RuleRepository
+// and BudgetRepository, used when rule updates must be atomic with budget changes.
+type RuleBudgetTransactional interface {
+	RunInRuleBudgetTransaction(ctx context.Context, fn func(txRule RuleRepository, txBudget BudgetRepository) error) error
+}
+
 // GormRuleRepository implements RuleRepository using GORM
 type GormRuleRepository struct {
 	db *gorm.DB
@@ -67,6 +73,17 @@ func (r *GormRuleRepository) RunInTransaction(ctx context.Context, fn func(txRep
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		txRepo := &GormRuleRepository{db: tx}
 		return fn(txRepo)
+	})
+}
+
+// RunInRuleBudgetTransaction runs fn within a database transaction, passing
+// both a transactional RuleRepository and BudgetRepository so that rule
+// and budget mutations are atomic.
+func (r *GormRuleRepository) RunInRuleBudgetTransaction(ctx context.Context, fn func(txRule RuleRepository, txBudget BudgetRepository) error) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		txRule := &GormRuleRepository{db: tx}
+		txBudget := &GormBudgetRepository{db: tx}
+		return fn(txRule, txBudget)
 	})
 }
 

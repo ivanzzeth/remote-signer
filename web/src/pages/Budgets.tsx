@@ -207,6 +207,23 @@ function BudgetRowView({ entry }: { entry: BudgetEntry }) {
 }
 
 function PrimaryCell({ entry }: { entry: BudgetEntry }) {
+  if (entry.kind === "rule" && entry.rule_id && !entry.rule_id.startsWith("sim:")) {
+    return (
+      <>
+        <Link
+          to="/rules"
+          className="text-ink-900 hover:text-accent-600 hover:underline"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {entry.rule_name || entry.rule_id}
+        </Link>
+        <div className="font-mono text-[11px] text-ink-500">
+          {entry.rule_type ? `${entry.rule_type} · ` : ""}
+          {entry.rule_id}
+        </div>
+      </>
+    );
+  }
   if (entry.kind === "rule") {
     return (
       <>

@@ -23,14 +23,8 @@ import (
 // sqliteDriverName matches the name modernc.org/sqlite registers with database/sql.
 const sqliteDriverName = "sqlite"
 
-// tuneConnectionPool applies engine-specific pool settings. SQLite is
-// single-writer at the file level; modernc.org/sqlite under concurrent
-// gorm.Save / Transaction calls reports
-// "cannot start a transaction within a transaction" when two goroutines
-// share a connection that is mid-tx. Capping MaxOpenConns to 1 serialises
-// the writer and matches the single-instance deployment model the binary
-// is built for. Postgres deployments keep gorm's defaults.
-func tuneConnectionPool(db *gorm.DB, dsn string) error {
+// tuneSQLite applies engine-specific pool settings and enables foreign keys.
+func tuneSQLite(db *gorm.DB, dsn string) error {
 	if !strings.HasPrefix(dsn, "file:") && !strings.HasSuffix(dsn, ".db") {
 		return nil
 	}
@@ -40,6 +34,12 @@ func tuneConnectionPool(db *gorm.DB, dsn string) error {
 	}
 	sqlDB.SetMaxOpenConns(1)
 	sqlDB.SetMaxIdleConns(1)
+
+	// SQLite disables foreign keys by default. GORM's constraint tag
+	// (OnDelete:CASCADE) has no effect unless foreign_keys PRAGMA is ON.
+	if err := db.Exec("PRAGMA foreign_keys = ON").Error; err != nil {
+		return fmt.Errorf("enable foreign_keys pragma: %w", err)
+	}
 	return nil
 }
 
@@ -84,39 +84,27 @@ func NewDB(cfg Config) (*gorm.DB, error) {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
-	if err := tuneConnectionPool(db, cfg.DSN); err != nil {
+	if err := tuneSQLite(db, cfg.DSN); err != nil {
 		return nil, fmt.Errorf("failed to tune connection pool: %w", err)
 	}
 
-	// Auto-migrate all models (backward-compatible schema changes only)
-	// Rules for schema evolution:
-	// - Only ADD columns (never remove)
-	// - New columns must be nullable or have defaults
-	// - Never change column types incompatibly
-	if err := db.AutoMigrate(
-		&types.SignRequest{},
-		&types.Transaction{},
-		&types.RequestSimulation{},
-		&types.Rule{},
-		&types.RuleTemplate{},
-		&types.RulePreset{},
-		&types.RuleBudget{},
-		&types.APIKey{},
-		&types.AuditRecord{},
-		&types.TokenMetadata{},
-		&types.Signer{},
-		&types.SignerOwnership{},
-		&types.SignerAccess{},
-		&types.Wallet{},
-		&types.WalletMember{},
-		&settings.Setting{},
-	); err != nil {
-		return nil, fmt.Errorf("failed to auto-migrate: %w", err)
+	if err := autoMigrate(db); err != nil {
+		return nil, err
 	}
 
 	// Run versioned SQL migrations (e.g. widen columns) from internal/storage/migrations/<dialect>/
 	if err := runMigrations(db, cfg.DSN); err != nil {
 		return nil, fmt.Errorf("migrations: %w", err)
+	}
+
+	// Backfill FK constraints on existing SQLite databases. GORM's
+	// AutoMigrate leaves existing tables untouched and only adds FKs on
+	// fresh CREATE TABLE statements. ensureForeignKeys recreates tables
+	// that are missing their FK, matching what the GORM struct tags
+	// declare. Postgres handles this via standard ALTER TABLE ADD
+	// CONSTRAINT migration files.
+	if err := ensureForeignKeys(db, cfg.DSN); err != nil {
+		return nil, fmt.Errorf("ensure foreign keys: %w", err)
 	}
 
 	return db, nil
@@ -140,10 +128,26 @@ func NewDBWithLogger(cfg Config, logLevel logger.LogLevel) (*gorm.DB, error) {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
-	if err := tuneConnectionPool(db, cfg.DSN); err != nil {
+	if err := tuneSQLite(db, cfg.DSN); err != nil {
 		return nil, fmt.Errorf("failed to tune connection pool: %w", err)
 	}
 
+	if err := autoMigrate(db); err != nil {
+		return nil, err
+	}
+
+	if err := runMigrations(db, cfg.DSN); err != nil {
+		return nil, fmt.Errorf("migrations: %w", err)
+	}
+
+	if err := ensureForeignKeys(db, cfg.DSN); err != nil {
+		return nil, fmt.Errorf("ensure foreign keys: %w", err)
+	}
+
+	return db, nil
+}
+
+func autoMigrate(db *gorm.DB) error {
 	if err := db.AutoMigrate(
 		&types.SignRequest{},
 		&types.Transaction{},
@@ -162,12 +166,7 @@ func NewDBWithLogger(cfg Config, logLevel logger.LogLevel) (*gorm.DB, error) {
 		&types.WalletMember{},
 		&settings.Setting{},
 	); err != nil {
-		return nil, fmt.Errorf("failed to auto-migrate: %w", err)
+		return fmt.Errorf("failed to auto-migrate: %w", err)
 	}
-
-	if err := runMigrations(db, cfg.DSN); err != nil {
-		return nil, fmt.Errorf("migrations: %w", err)
-	}
-
-	return db, nil
+	return nil
 }

@@ -89,6 +89,10 @@ func SubstituteMeteringJSON(meteringJSON []byte, variablesJSON []byte) []byte {
 		// we also replace the quoted form to handle: "max_tx_count":"${var}" → "max_tx_count":50
 		s = strings.ReplaceAll(s, "${"+k+"}", v)
 	}
+	// Replace any remaining unresolved ${...} with -1 so the JSON remains valid.
+	// String fields (max_total, max_per_tx) get "-1" = unlimited; int fields
+	// (max_tx_count, decimals, alert_pct) get -1 after unquoteIntFields below.
+	s = replaceRemainingPlaceholders(s)
 	// Fix quoted integers: When a template has e.g. max_tx_count: ${var} in YAML,
 	// it becomes "max_tx_count":"50" in JSON after substitution. For int fields,
 	// JSON unmarshal expects unquoted numbers. Detect and fix this pattern.
@@ -130,6 +134,20 @@ func unquoteIntFields(jsonStr string, fields []string) string {
 		}
 	}
 	return jsonStr
+}
+
+func replaceRemainingPlaceholders(s string) string {
+	for {
+		start := strings.Index(s, "${")
+		if start < 0 {
+			return s
+		}
+		end := strings.Index(s[start:], "}")
+		if end < 0 {
+			return s
+		}
+		s = s[:start] + "-1" + s[start+end+1:]
+	}
 }
 
 // isIntegerString returns true if s is a valid integer (optionally negative).

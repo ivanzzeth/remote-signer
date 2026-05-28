@@ -129,6 +129,10 @@ func (m *budgetExceededBudgetRepo) CreateOrGet(_ context.Context, budget *types.
 	return budget, true, nil
 }
 
+func (m *budgetExceededBudgetRepo) UpsertLimits(_ context.Context, _ types.RuleID, _ []storage.BudgetSyncRequest) error {
+	return nil
+}
+
 // budgetExceededTemplateRepo returns a template with count_only metering for any ID.
 type budgetExceededTemplateRepo struct {
 	metering []byte

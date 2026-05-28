@@ -134,16 +134,19 @@ func mapEVMSignTypeToRuleInput(signType string) string {
 	}
 }
 
-// toHexWei converts decimal wei string to 0x-prefixed hex (for RuleInput value).
-// Returns error when value is not a valid decimal integer, including hex strings like "0x..." — these
-// must be converted to decimal before calling.
-func toHexWei(dec string) (string, error) {
-	if dec == "" {
+// toHexWei normalizes a wei value string to 0x-prefixed hex.
+// Accepts both decimal ("0", "1000000") and hex ("0x0", "0x1bc16d674ec80000") inputs.
+func toHexWei(val string) (string, error) {
+	if val == "" {
 		return "0x0", nil
 	}
 	var b big.Int
-	if _, ok := b.SetString(dec, 10); !ok {
-		return "", fmt.Errorf("value must be a decimal integer, got %q", dec)
+	base := 10
+	if strings.HasPrefix(val, "0x") || strings.HasPrefix(val, "0X") {
+		base = 0 // big.Int auto-detects 0x prefix
+	}
+	if _, ok := b.SetString(val, base); !ok {
+		return "", fmt.Errorf("invalid wei value %q", val)
 	}
 	return "0x" + b.Text(16), nil
 }
