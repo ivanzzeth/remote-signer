@@ -180,6 +180,18 @@ func (r *mockRequestRepo) List(_ context.Context, filter storage.RequestFilter) 
 	defer r.mu.RUnlock()
 	var out []*types.SignRequest
 	for _, req := range r.requests {
+		if len(filter.Status) > 0 {
+			found := false
+			for _, s := range filter.Status {
+				if req.Status == s {
+					found = true
+					break
+				}
+			}
+			if !found {
+				continue
+			}
+		}
 		cp := *req
 		out = append(out, &cp)
 	}
@@ -2350,3 +2362,115 @@ func TestSign_BlockedByDelegationResult_WithGuard(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, types.StatusRejected, resp.Status)
 }
+
+// ---------------------------------------------------------------------------
+// ReevaluatePending
+// ---------------------------------------------------------------------------
+
+func TestReevaluatePending_NoAuthorizingRequests(t *testing.T) {
+	f := newSignServiceFixture(t)
+	svc := f.build(t)
+
+	// No requests in the repo — should complete without error.
+	svc.ReevaluatePending(context.Background(), "test")
+	// No panic, no side effects.
+}
+
+func TestReevaluatePending_MatchesAndApproves(t *testing.T) {
+	f := newSignServiceFixture(t)
+
+	// Create an authorizing request.
+	reqID := types.SignRequestID("req-1")
+	f.requestRepo.Create(context.Background(), &types.SignRequest{
+		ID:            reqID,
+		ChainType:     types.ChainTypeEVM,
+		ChainID:       "1",
+		SignerAddress: "0x1111111111111111111111111111111111111111",
+		SignType:      "transaction",
+		Payload:       []byte(`{"transaction":{"from":"0x1111111111111111111111111111111111111111","to":"0x2222222222222222222222222222222222222222","value":"0x0","data":"0x"}}`),
+		Status:        types.StatusAuthorizing,
+	})
+	// Remove signer check so ProcessApproval doesn't fail on HasSigner.
+	f.adapter.hasSigner = true
+
+	// Rule engine returns a match.
+	f.ruleEngine.matchedRuleID = ptrID(types.RuleID("test-rule"))
+	f.ruleEngine.matchReason = "mock match"
+
+	svc := f.build(t)
+	svc.ReevaluatePending(context.Background(), "test")
+
+	// The request should now be completed.
+	req, err := f.requestRepo.Get(context.Background(), reqID)
+	require.NoError(t, err)
+	assert.Equal(t, types.StatusCompleted, req.Status)
+}
+
+func TestReevaluatePending_NoMatchLeavesPending(t *testing.T) {
+	f := newSignServiceFixture(t)
+
+	reqID := types.SignRequestID("req-2")
+	f.requestRepo.Create(context.Background(), &types.SignRequest{
+		ID:            reqID,
+		ChainType:     types.ChainTypeEVM,
+		ChainID:       "1",
+		SignerAddress: "0x1111111111111111111111111111111111111111",
+		SignType:      "transaction",
+		Payload:       []byte(`{"transaction":{"from":"0x1111111111111111111111111111111111111111","to":"0x2222222222222222222222222222222222222222","value":"0x0","data":"0x"}}`),
+		Status:        types.StatusAuthorizing,
+	})
+
+	// Rule engine returns no match.
+	f.ruleEngine.matchedRuleID = nil
+
+	svc := f.build(t)
+	svc.ReevaluatePending(context.Background(), "test")
+
+	req, err := f.requestRepo.Get(context.Background(), reqID)
+	require.NoError(t, err)
+	assert.Equal(t, types.StatusAuthorizing, req.Status, "unmatched request should remain authorizing")
+}
+
+func TestReevaluatePending_SkipsNonAuthorizing(t *testing.T) {
+	f := newSignServiceFixture(t)
+
+	// Completed request — should be skipped.
+	f.requestRepo.Create(context.Background(), &types.SignRequest{
+		ID:            types.SignRequestID("req-done"),
+		ChainType:     types.ChainTypeEVM,
+		ChainID:       "1",
+		SignerAddress: "0x1111111111111111111111111111111111111111",
+		SignType:      "transaction",
+		Payload:       []byte(`{}`),
+		Status:        types.StatusCompleted,
+	})
+
+	f.ruleEngine.matchedRuleID = ptrID(types.RuleID("test-rule"))
+	f.ruleEngine.matchReason = "mock match"
+
+	svc := f.build(t)
+	// Should not try to approve a completed request.
+	svc.ReevaluatePending(context.Background(), "test")
+	// No panic — completed requests are filtered out.
+}
+
+func TestReevaluatePending_ParseErrorSkip(t *testing.T) {
+	f := newSignServiceFixture(t)
+
+	f.requestRepo.Create(context.Background(), &types.SignRequest{
+		ID:            types.SignRequestID("req-bad"),
+		ChainType:     types.ChainTypeEVM,
+		ChainID:       "1",
+		SignerAddress: "0x1111111111111111111111111111111111111111",
+		SignType:      "transaction",
+		Payload:       []byte(`not-json`),
+		Status:        types.StatusAuthorizing,
+	})
+	f.adapter.parseErr = fmt.Errorf("parse error")
+
+	svc := f.build(t)
+	svc.ReevaluatePending(context.Background(), "test")
+	// No panic — parse errors are logged and skipped.
+}
+
+func ptrID(id types.RuleID) *types.RuleID { return &id }

@@ -27,6 +27,7 @@ type Rule struct {
 	VariableDefs      []RuleVariableDef `json:"variable_defs,omitempty"`
 	Matrix            json.RawMessage   `json:"matrix,omitempty"`
 	Enabled           bool              `json:"enabled"`
+	Priority          int               `json:"priority"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
 	ExpiresAt         *time.Time `json:"expires_at,omitempty"`
@@ -105,6 +106,7 @@ type CreateRuleRequest struct {
 	Immutable     bool                   `json:"immutable,omitempty"`
 	AppliedTo     []string               `json:"applied_to,omitempty"`
 	TestCases     []JSRuleTestCase       `json:"test_cases,omitempty"`
+	Priority      *int                   `json:"priority,omitempty"`
 }
 
 // UpdateRuleRequest represents a request to update an existing rule.
@@ -118,6 +120,7 @@ type UpdateRuleRequest struct {
 	Enabled     bool                   `json:"enabled"`
 	AppliedTo   []string               `json:"applied_to,omitempty"`
 	TestCases   []JSRuleTestCase       `json:"test_cases,omitempty"`
+	Priority    *int                   `json:"priority,omitempty"`
 }
 
 // RuleBudget represents a budget record for a rule instance (GET /api/v1/evm/rules/{id}/budgets).

@@ -14,7 +14,7 @@ func TestHasPermission_AdminHasAll(t *testing.T) {
 	allPerms := []Permission{
 		PermSignRequest, PermListOwnRequests, PermListAllRequests, PermApproveRequest,
 		PermListRules, PermCreateRuleSelf, PermCreateRuleAny, PermModifyOwnRule, PermModifyAnyRule,
-		PermDeleteOwnRule, PermDeleteAnyRule, PermApproveRule,
+		PermDeleteOwnRule, PermDeleteAnyRule, PermApproveRule, PermPreviewRule,
 		PermReadBudgets, PermReadTemplates, PermInstantiateTemplate, PermReadPresets, PermApplyPreset,
 		PermReadSigners, PermCreateSigners, PermUnlockSigner,
 		PermReadHDWallets, PermCreateHDWallet,
@@ -29,6 +29,7 @@ func TestHasPermission_DevPermissions(t *testing.T) {
 	allowed := []Permission{
 		PermSignRequest, PermListOwnRequests, PermListAllRequests,
 		PermListRules, PermCreateRuleSelf, PermModifyOwnRule, PermDeleteOwnRule,
+		PermPreviewRule,
 		PermReadBudgets, PermReadTemplates, PermReadPresets,
 		PermReadSigners, PermCreateSigners, PermReadHDWallets,
 		PermReadAudit, PermReadMetrics,
@@ -52,6 +53,7 @@ func TestHasPermission_AgentPermissions(t *testing.T) {
 	allowed := []Permission{
 		PermSignRequest, PermListOwnRequests,
 		PermListRules, PermCreateRuleSelf, PermModifyOwnRule, PermDeleteOwnRule,
+		PermPreviewRule,
 		PermReadBudgets, PermReadTemplates, PermReadPresets,
 		PermInstantiateTemplate, PermApplyPreset,
 		PermReadSigners, PermCreateSigners, PermReadHDWallets,
@@ -73,7 +75,7 @@ func TestHasPermission_AgentPermissions(t *testing.T) {
 
 func TestHasPermission_StrategyPermissions(t *testing.T) {
 	allowed := []Permission{
-		PermSignRequest, PermListOwnRequests, PermReadSigners,
+		PermSignRequest, PermListOwnRequests, PermPreviewRule, PermReadSigners,
 	}
 	denied := []Permission{
 		PermListAllRequests, PermApproveRequest,
@@ -244,6 +246,12 @@ func TestRBACAccessControlMatrix(t *testing.T) {
 		{"create rule any - admin", PermCreateRuleAny, adminKey, http.StatusOK, true},
 		{"create rule any - dev denied", PermCreateRuleAny, devKey, http.StatusForbidden, false},
 		{"create rule any - agent denied", PermCreateRuleAny, agentKey, http.StatusForbidden, false},
+
+		// Preview rule: all roles
+		{"preview rule - admin", PermPreviewRule, adminKey, http.StatusOK, true},
+		{"preview rule - dev", PermPreviewRule, devKey, http.StatusOK, true},
+		{"preview rule - agent", PermPreviewRule, agentKey, http.StatusOK, true},
+		{"preview rule - strategy", PermPreviewRule, strategyKey, http.StatusOK, true},
 	}
 
 	for _, tc := range tests {

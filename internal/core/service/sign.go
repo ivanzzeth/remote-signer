@@ -44,6 +44,7 @@ type SignServiceAPI interface {
 	CountRequests(ctx context.Context, filter storage.RequestFilter) (int, error)
 	ProcessApproval(ctx context.Context, requestID types.SignRequestID, req *ApprovalRequest) (*ApprovalResponse, error)
 	PreviewRuleForRequest(ctx context.Context, requestID types.SignRequestID, opts *rule.RuleGenerateOptions) (*types.Rule, error)
+	ReevaluatePending(ctx context.Context, callerName string)
 }
 
 // Compile-time interface check.
@@ -645,4 +646,73 @@ func (s *SignService) ProcessApproval(ctx context.Context, requestID types.SignR
 	}
 
 	return response, nil
+}
+
+// ReevaluatePending re-evaluates all authorizing (pending manual approval)
+// requests against the current rule set. When a new whitelist rule is
+// created or a pending rule is approved, this can auto-approve requests
+// that the new rule matches. Called asynchronously from rule handlers.
+func (s *SignService) ReevaluatePending(ctx context.Context, callerName string) {
+	adapter, err := s.chainRegistry.Get(types.ChainTypeEVM)
+	if err != nil {
+		s.logger.Error("reevaluate: no EVM adapter", "error", err)
+		return
+	}
+
+	// Fetch all authorizing requests with no limit.
+	filter := storage.RequestFilter{
+		Status: []types.SignRequestStatus{types.StatusAuthorizing},
+	}
+	aRequests, listErr := s.requestRepo.List(ctx, filter)
+	if listErr != nil {
+		s.logger.Error("reevaluate: failed to list authorizing requests", "error", listErr)
+		return
+	}
+
+	if len(aRequests) == 0 {
+		return
+	}
+
+	s.logger.Info("reevaluating pending requests against new rule",
+		"trigger", callerName,
+		"pending_count", len(aRequests),
+	)
+
+	approved := 0
+	for _, req := range aRequests {
+		parsed, parseErr := adapter.ParsePayload(ctx, req.SignType, req.Payload)
+		if parseErr != nil {
+			continue
+		}
+		evalResult, evalErr := s.ruleEngine.EvaluateWithResult(ctx, req, parsed)
+		if evalErr != nil || !evalResult.Allowed {
+			continue
+		}
+
+		s.logger.Info("auto-approving request via new rule",
+			"request_id", req.ID,
+			"rule_id", evalResult.AllowedBy.ID,
+			"trigger", callerName,
+		)
+		if _, err := s.ProcessApproval(ctx, req.ID, &ApprovalRequest{
+			Approved:   true,
+			ApprovedBy: "system:rule-activated",
+		}); err != nil {
+			s.logger.Warn("reevaluate: failed to auto-approve",
+				"request_id", req.ID,
+				"rule_id", evalResult.AllowedBy.ID,
+				"error", err,
+			)
+			continue
+		}
+		approved++
+	}
+
+	if approved > 0 {
+		s.logger.Info("reevaluate complete",
+			"trigger", callerName,
+			"approved", approved,
+			"evaluated", len(aRequests),
+		)
+	}
 }

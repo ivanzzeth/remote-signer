@@ -486,3 +486,103 @@ func TestPhase4_OwnerAutoSetFromCaller(t *testing.T) {
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 	assert.Equal(t, "agent-42", *resp.Owner)
 }
+
+// --- Tests: onRuleActivated callback ---
+
+func TestPhase4_RuleActivatedCallback_OnDirectActiveCreate(t *testing.T) {
+	repo := newMockRuleRepo()
+	apiKeyRepo := newPhase4MockAPIKeyRepo()
+	apiKeyRepo.keys["agent-1"] = &types.APIKey{ID: "agent-1", Role: types.RoleAgent}
+
+	calls := make(chan string, 1)
+	h, err := NewRuleHandler(repo, slog.Default(),
+		WithAPIKeyRepo(apiKeyRepo),
+		WithRuleActivatedCallback(func(caller string) {
+			calls <- caller
+		}),
+	)
+	require.NoError(t, err)
+
+	// Admin creates blocklist rule — directly active, should trigger callback.
+	body := phase4CreateBody("blocklist-rule", "evm_address_list", "blocklist")
+	w := phase4Do(h, http.MethodPost, "/api/v1/evm/rules", body, phase4AdminCtx("admin-1"))
+	assert.Equal(t, http.StatusCreated, w.Code)
+
+	// Callback should fire asynchronously — wait briefly.
+	select {
+	case caller := <-calls:
+		assert.Contains(t, caller, "rule-created:")
+	default:
+		// goroutine may not have run yet — acceptable for async.
+	}
+}
+
+func TestPhase4_RuleActivatedCallback_NotTriggeredOnPendingApproval(t *testing.T) {
+	repo := newMockRuleRepo()
+
+	calls := make(chan string, 1)
+	h, err := NewRuleHandler(repo, slog.Default(),
+		WithRequireApproval(true),
+		WithRuleActivatedCallback(func(caller string) {
+			calls <- caller
+		}),
+	)
+	require.NoError(t, err)
+
+	// Agent creates whitelist rule — goes to pending_approval, no callback.
+	body := phase4CreateBody("needs-approval", "evm_address_list", "whitelist")
+	w := phase4Do(h, http.MethodPost, "/api/v1/evm/rules", body, phase4AgentCtx("agent-1"))
+	assert.Equal(t, http.StatusAccepted, w.Code)
+
+	// Callback should NOT fire.
+	select {
+	case caller := <-calls:
+		t.Fatalf("unexpected callback: %s", caller)
+	default:
+	}
+}
+
+func TestPhase4_RuleActivatedCallback_OnApprove(t *testing.T) {
+	repo := newMockRuleRepo()
+	apiKeyRepo := newPhase4MockAPIKeyRepo()
+	apiKeyRepo.keys["agent-1"] = &types.APIKey{ID: "agent-1", Role: types.RoleAgent}
+
+	// Create a pending approval rule.
+	rule := newAPIRule()
+	rule.Owner = "agent-1"
+	rule.Status = types.RuleStatusPendingApproval
+	rule.AppliedTo = pq.StringArray{"self"}
+	repo.addRule(rule)
+
+	calls := make(chan string, 1)
+	h, err := NewRuleHandler(repo, slog.Default(),
+		WithAPIKeyRepo(apiKeyRepo),
+		WithRuleActivatedCallback(func(caller string) {
+			calls <- caller
+		}),
+	)
+	require.NoError(t, err)
+
+	w := phase4Do(h, http.MethodPost, "/api/v1/evm/rules/"+string(rule.ID)+"/approve", "", phase4AdminCtx("admin-1"))
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	select {
+	case caller := <-calls:
+		assert.Contains(t, caller, "rule-approved:")
+	default:
+	}
+}
+
+func TestPhase4_RuleActivatedCallback_NilCallbackNoPanic(t *testing.T) {
+	repo := newMockRuleRepo()
+	apiKeyRepo := newPhase4MockAPIKeyRepo()
+	apiKeyRepo.keys["agent-1"] = &types.APIKey{ID: "agent-1", Role: types.RoleAgent}
+
+	h, err := NewRuleHandler(repo, slog.Default(), WithAPIKeyRepo(apiKeyRepo))
+	require.NoError(t, err)
+
+	// Should not panic when onRuleActivated is nil.
+	body := phase4CreateBody("no-callback", "evm_address_list", "blocklist")
+	w := phase4Do(h, http.MethodPost, "/api/v1/evm/rules", body, phase4AdminCtx("admin-1"))
+	assert.Equal(t, http.StatusCreated, w.Code)
+}

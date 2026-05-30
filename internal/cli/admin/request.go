@@ -233,6 +233,27 @@ var requestPreviewRuleCmd = &cobra.Command{
 	},
 }
 
+// ── request simulation ─────────────────────────────────────────────────────
+
+var requestSimulationCmd = &cobra.Command{
+	Use:   "simulation <request-id>",
+	Short: "Get simulation result for a signing request",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c, err := newClientFromFlags(cmd)
+		if err != nil {
+			return err
+		}
+
+		resp, err := c.EVM.Requests.GetSimulation(context.Background(), args[0])
+		if err != nil {
+			return fmt.Errorf("get simulation failed: %w", err)
+		}
+
+		return printJSON(resp)
+	},
+}
+
 // ── guard resume ────────────────────────────────────────────────────────────
 
 var guardCmd = &cobra.Command{
@@ -282,6 +303,7 @@ func init() {
 	requestCmd.AddCommand(requestApproveCmd)
 	requestCmd.AddCommand(requestRejectCmd)
 	requestCmd.AddCommand(requestPreviewRuleCmd)
+	requestCmd.AddCommand(requestSimulationCmd)
 
 	guardCmd.AddCommand(guardResumeCmd)
 }

@@ -122,6 +122,7 @@ type Rule struct {
 	BudgetPeriodStart *time.Time     `json:"budget_period_start,omitempty"` // when the first period begins (SQLite: datetime, PostgreSQL: timestamptz)
 
 	Enabled   bool       `json:"enabled" gorm:"index"`
+	Priority  int        `json:"priority" gorm:"index;default:100"` // lower = higher priority, 1 is highest
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`

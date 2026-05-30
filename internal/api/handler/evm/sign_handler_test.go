@@ -73,6 +73,8 @@ func (m *mockSignService) PreviewRuleForRequest(ctx context.Context, requestID t
 	return nil, fmt.Errorf("not implemented")
 }
 
+func (m *mockSignService) ReevaluatePending(ctx context.Context, callerName string) {}
+
 // --- Helpers ---
 
 func doSignRequest(t *testing.T, h *SignHandler, method, path string, body interface{}, apiKey *types.APIKey) *httptest.ResponseRecorder {

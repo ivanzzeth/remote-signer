@@ -161,6 +161,7 @@ func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
 		AppliedTo:   appliedTo,
 		Status:      status,
 		Immutable:   immutable,
+		Priority:    coalescePriority(req.Priority),
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
@@ -219,6 +220,12 @@ func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
 	if h.auditLogger != nil {
 		clientIP, _ := r.Context().Value(middleware.ClientIPContextKey).(string)
 		h.auditLogger.LogRuleCreated(r.Context(), apiKey.ID, clientIP, rule.ID, rule.Name)
+	}
+
+	// When a rule is created directly as active, re-evaluate pending
+	// requests so they can be auto-approved by the new rule.
+	if rule.Status == types.RuleStatusActive && h.onRuleActivated != nil {
+		go h.onRuleActivated("rule-created:" + string(rule.ID))
 	}
 
 	responseStatus := http.StatusCreated
@@ -317,6 +324,9 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 	}
 	if req.Enabled != nil {
 		rule.Enabled = *req.Enabled
+	}
+	if req.Priority != nil {
+		rule.Priority = *req.Priority
 	}
 	if req.ChainType != nil {
 		if !validate.IsValidChainType(*req.ChainType) {
@@ -530,4 +540,14 @@ func resolveBudgetUnit(variables []byte, unitTemplate string) string {
 		result = strings.ReplaceAll(result, "${"+k+"}", v)
 	}
 	return result
+}
+
+func coalescePriority(p *int) int {
+	if p == nil {
+		return 100 // default
+	}
+	if *p < 1 {
+		return 1 // minimum
+	}
+	return *p
 }

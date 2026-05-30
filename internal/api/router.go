@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -272,6 +273,11 @@ func (r *Router) setupRoutes() error {
 		ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithMaxRulesPerKey(r.config.MaxRulesPerAPIKey))
 	}
 	ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithRequireApproval(r.config.RequireApprovalForAgentRules))
+	if r.signService != nil {
+		ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithRuleActivatedCallback(func(callerName string) {
+			r.signService.ReevaluatePending(context.Background(), callerName)
+		}))
+	}
 	ruleHandler, err := evmhandler.NewRuleHandler(r.ruleRepo, r.logger, ruleHandlerOpts...)
 	if err != nil {
 		return err
@@ -330,9 +336,9 @@ func (r *Router) setupRoutes() error {
 			middleware.RequirePermission(middleware.PermApproveRequest, r.logger, r.config.AlertService)(approvalHandler).ServeHTTP(w, req)
 			return
 		}
-		// Route to preview-rule handler if path ends with /preview-rule (admin only)
+		// Route to preview-rule handler if path ends with /preview-rule
 		if strings.HasSuffix(req.URL.Path, "/preview-rule") {
-			middleware.RequirePermission(middleware.PermApproveRequest, r.logger, r.config.AlertService)(previewRuleHandler).ServeHTTP(w, req)
+			middleware.RequirePermission(middleware.PermPreviewRule, r.logger, r.config.AlertService)(previewRuleHandler).ServeHTTP(w, req)
 			return
 		}
 		// Route to simulation handler if path ends with /simulation.

@@ -216,17 +216,19 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 	}
 	e.mu.RUnlock()
 
-	// Separate rules by mode
+	// Separate rules by mode, then sort each group by priority
+	// (1 = highest priority). Equal priorities are tie-broken by created_at.
 	var blocklistRules []*types.Rule
 	var whitelistRules []*types.Rule
 	for _, rule := range rules {
 		if rule.Mode == types.RuleModeBlocklist {
 			blocklistRules = append(blocklistRules, rule)
 		} else {
-			// Default to whitelist mode for backward compatibility
 			whitelistRules = append(whitelistRules, rule)
 		}
 	}
+	sortRulesByPriority(blocklistRules)
+	sortRulesByPriority(whitelistRules)
 
 	e.logger.Debug("evaluating rules",
 		"request_id", req.ID,

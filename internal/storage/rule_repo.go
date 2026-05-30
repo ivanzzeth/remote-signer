@@ -288,7 +288,7 @@ func (r *GormRuleRepository) List(ctx context.Context, filter RuleFilter) ([]*ty
 	}
 	// When filter.Limit == -1, no LIMIT clause is applied (fetch all matching rules)
 
-	query = query.Order("created_at DESC")
+	query = query.Order("priority ASC, created_at DESC")
 
 	var rules []*types.Rule
 	err := query.Find(&rules).Error
