@@ -152,7 +152,7 @@ export function Rules() {
 
   async function update(
     id: string,
-    patch: { name?: string; description?: string; config?: Record<string, unknown>; variables?: Record<string, string>; matrix?: Record<string, any>[] },
+    patch: { name?: string; description?: string; config?: Record<string, unknown>; variables?: Record<string, string>; matrix?: Record<string, any>[]; priority?: number },
   ) {
     const client = getClient();
     if (!client) return;
@@ -303,6 +303,7 @@ export function Rules() {
               <thead className="text-xs uppercase text-ink-500">
                 <tr>
                   <th className="py-1 pr-3 font-normal">Name</th>
+                  <th className="py-1 pr-1 w-10 text-center font-normal">#</th>
                   <th className="py-1 pr-3 font-normal">Type</th>
                   <th className="py-1 pr-3 font-normal">Mode</th>
                   <th className="py-1 pr-3 font-normal">Source</th>
@@ -324,6 +325,9 @@ export function Rules() {
                       <div className="font-mono text-[11px] text-ink-500">
                         {r.id}
                       </div>
+                    </td>
+                    <td className="py-1 pr-3 w-10 text-center font-mono text-xs text-ink-500">
+                      {r.priority}
                     </td>
                     <td className="py-1 pr-3 font-mono text-xs text-ink-700">
                       {r.type}
@@ -460,6 +464,7 @@ function RuleDetailPanel({
     config?: Record<string, unknown>;
     variables?: Record<string, string>;
     matrix?: Record<string, any>[];
+    priority?: number;
   }) => void;
   busy: boolean;
 }) {
@@ -470,6 +475,7 @@ function RuleDetailPanel({
   const signersApi = useApi((c) => c.evm.signers.list(), [editing]);
   const [name, setName] = useState(rule.name);
   const [description, setDescription] = useState(rule.description ?? "");
+  const [editPriority, setEditPriority] = useState(rule.priority);
   const [config, setConfig] = useState<Record<string, unknown>>(() => ({
     ...rule.config,
   }));
@@ -523,6 +529,7 @@ function RuleDetailPanel({
       config?: Record<string, unknown>;
       variables?: Record<string, string>;
       matrix?: Record<string, any>[];
+      priority?: number;
     } = {
       name: name.trim(),
       description: description.trim(),
@@ -543,6 +550,9 @@ function RuleDetailPanel({
     } else if (rule.matrix && Array.isArray(rule.matrix) && rule.matrix.length > 0) {
       patch.matrix = [];
     }
+    if (editPriority !== rule.priority) {
+      patch.priority = editPriority;
+    }
     onSave(patch);
   }
 
@@ -553,7 +563,7 @@ function RuleDetailPanel({
           <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-500">
             Edit rule
           </h3>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
             <div>
               <label className="mb-1 block text-[11px] uppercase tracking-wide text-ink-500">
                 Name
@@ -562,6 +572,18 @@ function RuleDetailPanel({
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
+                className="w-full rounded-md border border-ink-300 px-2 py-1 text-sm"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-[11px] uppercase tracking-wide text-ink-500">
+                Priority
+              </label>
+              <input
+                type="number"
+                min={1}
+                value={editPriority}
+                onChange={(e) => setEditPriority(parseInt(e.target.value, 10) || 1)}
                 className="w-full rounded-md border border-ink-300 px-2 py-1 text-sm"
               />
             </div>
@@ -758,6 +780,10 @@ function RuleDetailPanel({
           />
           {(rule.owner || rule.approved_by) && (
             <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-xs text-ink-500">
+              <span>
+                <span className="text-ink-400">Priority</span>{" "}
+                <span className="font-mono text-ink-700">{rule.priority}</span>
+              </span>
               {rule.owner && (
                 <span>
                   <span className="text-ink-400">Created by</span>{" "}

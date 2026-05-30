@@ -67,11 +67,11 @@ func runRuleListRemote(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Total: %d\n", resp.Total)
 	printTable(
-		[]string{"ID", "NAME", "TYPE", "MODE", "ENABLED", "STATUS"},
+		[]string{"PRI", "ID", "NAME", "TYPE", "MODE", "ENABLED", "STATUS"},
 		func() [][]string {
 			rows := make([][]string, len(resp.Rules))
 			for i, r := range resp.Rules {
-				rows[i] = []string{r.ID, r.Name, r.Type, r.Mode, strconv.FormatBool(r.Enabled), r.Status}
+				rows[i] = []string{strconv.Itoa(r.Priority), r.ID, r.Name, r.Type, r.Mode, strconv.FormatBool(r.Enabled), r.Status}
 			}
 			return rows
 		}(),
@@ -400,6 +400,7 @@ func init() {
 	ruleUpdateCmd.Flags().StringVar(&flagUpdateName, "name", "", "New rule name")
 	ruleUpdateCmd.Flags().StringVar(&flagUpdateDescription, "description", "", "New description")
 	ruleUpdateCmd.Flags().StringArrayVar(&flagUpdateConfig, "set-config", nil, "Set config field (key=value, repeatable)")
+	ruleUpdateCmd.Flags().IntVar(&flagUpdatePriority, "priority", 0, "Rule priority (lower = higher, 1 is highest)")
 
 	ruleValidateCmd.Flags().BoolVar(&flagRuleValidateAll, "all", false, "Validate all evm_js rules (batch mode)")
 
@@ -422,6 +423,8 @@ var (
 	flagUpdateName        string
 	flagUpdateDescription string
 	flagUpdateConfig      []string
+	flagUpdatePriority    int
+	flagCreatePriority    int
 )
 
 var ruleUpdateCmd = &cobra.Command{

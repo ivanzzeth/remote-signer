@@ -30,6 +30,7 @@ const (
 	PermDeleteOwnRule  Permission = "delete_own_rule"
 	PermDeleteAnyRule  Permission = "delete_any_rule"
 	PermApproveRule    Permission = "approve_rule"
+	PermPreviewRule    Permission = "preview_rule"    // preview rule for a request (read-only, no mutation)
 
 	// Budgets
 	PermReadBudgets   Permission = "read_budgets"
@@ -93,6 +94,7 @@ var rolePermissions = map[types.APIKeyRole]map[Permission]bool{
 		PermDeleteOwnRule:       true,
 		PermDeleteAnyRule:       true,
 		PermApproveRule:         true,
+		PermPreviewRule:         true,
 		PermReadBudgets:         true,
 		PermManageBudgets:       true,
 		PermReadTemplates:       true,
@@ -121,6 +123,7 @@ var rolePermissions = map[types.APIKeyRole]map[Permission]bool{
 		PermCreateRuleSelf:      true,
 		PermModifyOwnRule:       true,
 		PermDeleteOwnRule:       true,
+		PermPreviewRule:         true,
 		PermReadBudgets:         true,
 		PermReadTemplates:       true,
 		PermReadPresets:         true,
@@ -138,6 +141,7 @@ var rolePermissions = map[types.APIKeyRole]map[Permission]bool{
 		PermCreateRuleSelf:      true, // declarative only, enforced in handler
 		PermModifyOwnRule:       true, // declarative only
 		PermDeleteOwnRule:       true,
+		PermPreviewRule:         true,
 		PermReadBudgets:         true, // own rules only, enforced in handler
 		PermReadTemplates:       true,
 		PermReadPresets:         true,
@@ -151,6 +155,7 @@ var rolePermissions = map[types.APIKeyRole]map[Permission]bool{
 	types.RoleStrategy: {
 		PermSignRequest:     true,
 		PermListOwnRequests: true,
+		PermPreviewRule:     true,
 		PermReadSigners:     true, // own signers only, read-only
 	},
 }

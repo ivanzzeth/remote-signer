@@ -19,16 +19,21 @@ Headers:
 
 ## RBAC Roles
 
-This table is the **single source of truth** for what each role can do. Consult it before attempting any operation.
+**This table is the single source of truth.** Consult it before attempting any operation.
 
-| Capability | `role: admin` | `role: dev` | `role: agent` | `role: strategy` |
+| Capability | `admin` | `dev` | `agent` | `strategy` |
 |------------|:---:|:---:|:---:|:---:|
 | Submit sign requests | Yes | Yes | Yes | Yes |
-| View own request status | Yes | Yes | Yes | Yes |
+| View own request status + payload | Yes | Yes | Yes | Yes |
+| View own request simulation | Yes | Yes | Yes | Yes |
+| Preview rule for a request | Yes | Yes | Yes | Yes |
+| Read rules | Yes | No | Yes | No |
+| Read budgets | Yes | No | Yes | No |
+| Create rules | Yes | No | Yes | No |
+| Update own rules | Yes | No | Yes | No |
+| List signers (scoped to key) | Yes | Yes | Yes | Yes |
 | View all request status | Yes | No | No | No |
-| Approve/reject requests (signer owner) | Yes | No | No | No |
-| Manage rules (CRUD) | Yes | No | No | No |
-| Read rules/budgets | Yes | No | Yes | No |
+| Approve/reject requests | Yes | No | No | No |
 | Create signers (keystore/HD) | Yes | No | No | No |
 | Manage API keys | Yes | No | No | No |
 | View audit logs | Yes | No | No | No |
@@ -36,8 +41,8 @@ This table is the **single source of truth** for what each role can do. Consult 
 
 ### Critical RBAC rules for AI agents:
 
-- **`agent` role**: Can only SUBMIT sign requests and VIEW own request status. Cannot approve, cannot list all requests, cannot manage rules. If a request enters `authorizing` status, the agent MUST tell the user to approve it with admin credentials — the agent cannot do it itself.
-- **`admin` role**: Full access. Use admin keystore (`~/.remote-signer/apikeys/admin.keystore.json`) for approve/reject/rule management operations.
+- **`agent` role**: Can submit sign requests, inspect stuck requests (get payload, check simulation), read rules/budgets, create and update whitelist rules. **Cannot approve requests, manage API keys, or create signers.** When a request enters `authorizing`, the agent should self-service by updating whitelist rules (see remote-signer SKILL.md "Unified Signing Workflow"). If unsafe or rule update requires approval (`require_approval`), the agent tells the user to approve with admin credentials.
+- **`admin` role**: Full access. Use admin keystore (`~/.remote-signer/apikeys/admin.keystore.json`) for approve/reject/rule-approve operations.
 - **Signer ownership**: Only the API key that created a signer (or someone granted access) can approve/reject requests for that signer.
 
 ## Scoping Fields

@@ -54,6 +54,7 @@ export interface Rule {
   /** Per-chain Matrix rows; each row must include "chain_id". Overrides Variables for that chain. */
   matrix?: Record<string, any>[];
   enabled: boolean;
+  priority: number;
   expires_at?: string;
   created_at: string;
   updated_at: string;

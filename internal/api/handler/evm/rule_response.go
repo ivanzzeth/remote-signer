@@ -34,6 +34,7 @@ type RuleResponse struct {
 	VariableDefs      []VariableDef   `json:"variable_defs,omitempty"`
 	Matrix            json.RawMessage `json:"matrix,omitempty"`
 	Enabled           bool            `json:"enabled"`
+	Priority          int             `json:"priority"`
 	CreatedAt         string          `json:"created_at"`
 	UpdatedAt         string          `json:"updated_at"`
 	ExpiresAt         *string         `json:"expires_at,omitempty"`
@@ -87,6 +88,7 @@ type CreateRuleRequest struct {
 	Enabled       bool                   `json:"enabled"`
 	Immutable     bool                   `json:"immutable,omitempty"`
 	AppliedTo     []string               `json:"applied_to,omitempty"`
+	Priority      *int                   `json:"priority,omitempty"`
 	TestCases     []JSRuleTestCase       `json:"test_cases,omitempty"` // required for evm_js rules
 }
 
@@ -103,6 +105,7 @@ type UpdateRuleRequest struct {
 	SignerAddress *string                `json:"signer_address,omitempty"`
 	Enabled       *bool                  `json:"enabled,omitempty"`
 	AppliedTo     []string               `json:"applied_to,omitempty"`
+	Priority      *int                   `json:"priority,omitempty"`
 	TestCases     []JSRuleTestCase       `json:"test_cases,omitempty"` // required for evm_js when updating config
 }
 
@@ -147,6 +150,7 @@ func (h *RuleHandler) toRuleResponse(rule *types.Rule) RuleResponse {
 		Source:      string(rule.Source),
 		Config:      rule.Config,
 		Enabled:     rule.Enabled,
+		Priority:    rule.Priority,
 		CreatedAt:   rule.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:   rule.UpdatedAt.Format(time.RFC3339),
 		MatchCount:  rule.MatchCount,

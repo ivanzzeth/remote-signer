@@ -45,6 +45,7 @@ type RuleHandler struct {
 	logger            *slog.Logger
 	maxRulesPerKey    int  // per-key rule count limit (0 = no limit)
 	requireApproval   bool // require admin approval for agent whitelist rules
+	onRuleActivated   func(callerName string) // optional callback when rule becomes active
 }
 
 // RuleHandlerOption is a functional option for RuleHandler
@@ -112,6 +113,16 @@ func WithMaxRulesPerKey(max int) RuleHandlerOption {
 func WithRequireApproval(require bool) RuleHandlerOption {
 	return func(h *RuleHandler) {
 		h.requireApproval = require
+	}
+}
+
+// WithRuleActivatedCallback sets a callback invoked (asynchronously) when a
+// rule transitions to active. It re-evaluates pending approval requests
+// against the updated rule set so a newly-active whitelist rule can
+// auto-approve requests that were waiting.
+func WithRuleActivatedCallback(cb func(callerName string)) RuleHandlerOption {
+	return func(h *RuleHandler) {
+		h.onRuleActivated = cb
 	}
 }
 

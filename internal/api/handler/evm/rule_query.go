@@ -226,6 +226,12 @@ func (h *RuleHandler) approveRule(w http.ResponseWriter, r *http.Request, ruleID
 		clientIP, _ := r.Context().Value(middleware.ClientIPContextKey).(string)
 		h.auditLogger.LogRuleApproved(r.Context(), apiKey.ID, clientIP, rule.ID, rule.Owner)
 	}
+
+	// Re-evaluate pending requests against the newly-active rule.
+	if h.onRuleActivated != nil {
+		go h.onRuleActivated("rule-approved:" + ruleID)
+	}
+
 	h.writeJSON(w, h.toRuleResponse(rule), http.StatusOK)
 }
 
