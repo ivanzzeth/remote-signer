@@ -55,6 +55,8 @@ export interface Rule {
   matrix?: Record<string, any>[];
   enabled: boolean;
   priority: number;
+  budget_period?: string;
+  budget_period_start?: string;
   expires_at?: string;
   created_at: string;
   updated_at: string;
@@ -109,6 +111,9 @@ export interface CreateRuleRequest {
   config: Record<string, any>;
   enabled?: boolean;
   expires_at?: string;
+  priority?: number;
+  /** Budget renewal period e.g. "24h". Empty string "" to disable. */
+  budget_period?: string;
 }
 
 export interface UpdateRuleRequest {
@@ -122,6 +127,9 @@ export interface UpdateRuleRequest {
   matrix?: Record<string, any>[];
   enabled?: boolean;
   expires_at?: string;
+  priority?: number;
+  /** Budget renewal period e.g. "24h". Empty string "" to disable. */
+  budget_period?: string;
 }
 
 /** Budget record for a rule (GET /api/v1/evm/rules/{id}/budgets). */

@@ -106,6 +106,7 @@ type UpdateRuleRequest struct {
 	Enabled       *bool                  `json:"enabled,omitempty"`
 	AppliedTo     []string               `json:"applied_to,omitempty"`
 	Priority      *int                   `json:"priority,omitempty"`
+	BudgetPeriod  *string                `json:"budget_period,omitempty"`  // e.g. "24h"; null/"" = no periodic renewal
 	TestCases     []JSRuleTestCase       `json:"test_cases,omitempty"` // required for evm_js when updating config
 }
 

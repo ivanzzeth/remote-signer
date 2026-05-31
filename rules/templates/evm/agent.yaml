@@ -103,6 +103,7 @@ rules:
 
   # ── agent-sign: allow personal_sign and typed_data ──
   - id: "agent-sign"
+    priority: 10000
     name: "Agent Signature"
     type: "evm_js"
     mode: "whitelist"
@@ -395,6 +396,7 @@ rules:
         expect_reason: "missing domain.verifyingContract"
   # ── agent-safety: block dangerous admin function selectors ──
   - id: "agent-safety"
+    priority: 10000
     name: "Agent Safety"
     type: "evm_js"
     mode: "blocklist"
