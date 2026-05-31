@@ -152,7 +152,7 @@ export function Rules() {
 
   async function update(
     id: string,
-    patch: { name?: string; description?: string; config?: Record<string, unknown>; variables?: Record<string, string>; matrix?: Record<string, any>[]; priority?: number },
+    patch: { name?: string; description?: string; config?: Record<string, unknown>; variables?: Record<string, string>; matrix?: Record<string, any>[]; priority?: number; budget_period?: string },
   ) {
     const client = getClient();
     if (!client) return;
@@ -476,6 +476,7 @@ function RuleDetailPanel({
   const [name, setName] = useState(rule.name);
   const [description, setDescription] = useState(rule.description ?? "");
   const [editPriority, setEditPriority] = useState(rule.priority);
+  const [editBudgetPeriod, setEditBudgetPeriod] = useState(rule.budget_period || "");
   const [config, setConfig] = useState<Record<string, unknown>>(() => ({
     ...rule.config,
   }));
@@ -530,6 +531,7 @@ function RuleDetailPanel({
       variables?: Record<string, string>;
       matrix?: Record<string, any>[];
       priority?: number;
+      budget_period?: string;
     } = {
       name: name.trim(),
       description: description.trim(),
@@ -552,6 +554,9 @@ function RuleDetailPanel({
     }
     if (editPriority !== rule.priority) {
       patch.priority = editPriority;
+    }
+    if (editBudgetPeriod !== rule.budget_period) {
+      patch.budget_period = editBudgetPeriod || undefined;
     }
     onSave(patch);
   }
@@ -586,6 +591,21 @@ function RuleDetailPanel({
                 onChange={(e) => setEditPriority(parseInt(e.target.value, 10) || 1)}
                 className="w-full rounded-md border border-ink-300 px-2 py-1 text-sm"
               />
+            </div>
+            <div>
+              <label className="mb-1 block text-[11px] uppercase tracking-wide text-ink-500">
+                Budget Renewal
+              </label>
+              <input
+                type="text"
+                placeholder="24h"
+                value={editBudgetPeriod}
+                onChange={(e) => setEditBudgetPeriod(e.target.value)}
+                className="w-full rounded-md border border-ink-300 px-2 py-1 text-sm"
+              />
+              <div className="text-[10px] text-ink-400 mt-0.5">
+                Period like 24h, 7d. Empty = no auto-renew.
+              </div>
             </div>
             <div>
               <label className="mb-1 block text-[11px] uppercase tracking-wide text-ink-500">

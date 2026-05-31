@@ -328,6 +328,21 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 	if req.Priority != nil {
 		rule.Priority = *req.Priority
 	}
+	if req.BudgetPeriod != nil {
+		if *req.BudgetPeriod == "" {
+			rule.BudgetPeriod = nil
+			rule.BudgetPeriodStart = nil
+		} else {
+			d, err := time.ParseDuration(*req.BudgetPeriod)
+			if err != nil || d <= 0 {
+				h.writeError(w, "invalid budget_period: must be a valid duration like 24h, 7d (7*24h)", http.StatusBadRequest)
+				return
+			}
+			rule.BudgetPeriod = &d
+			now := time.Now()
+			rule.BudgetPeriodStart = &now
+		}
+	}
 	if req.ChainType != nil {
 		if !validate.IsValidChainType(*req.ChainType) {
 			h.writeError(w, "invalid chain_type: must be one of evm, solana, cosmos", http.StatusBadRequest)
