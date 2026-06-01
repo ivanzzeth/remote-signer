@@ -675,6 +675,22 @@ func TestSubstituteVariables(t *testing.T) {
 }
 
 
+// mustResolveConfig reproduces what the rule engine does at evaluation time:
+// it substitutes the rule's Variables into its template-form Config. Instance
+// rules persist Config with ${var} placeholders (Variables is the single source
+// of truth), so create-time tests assert the RESOLVED config equals the expected
+// value — the same guarantee as before, checked at the evaluation layer.
+func mustResolveConfig(t *testing.T, r *types.Rule) string {
+	t.Helper()
+	vars := map[string]string{}
+	if len(r.Variables) > 0 {
+		require.NoError(t, json.Unmarshal(r.Variables, &vars))
+	}
+	out, err := SubstituteVariables(r.Config, vars)
+	require.NoError(t, err)
+	return string(out)
+}
+
 func TestCreateInstance(t *testing.T) {
 	ctx := context.Background()
 
@@ -729,10 +745,10 @@ func TestCreateInstance(t *testing.T) {
 			t.Errorf("expected template ID 'tmpl-1', got %v", result.Rule.TemplateID)
 		}
 
-		// Config should have the variable substituted
+		// Config is stored template-form; resolving Variables yields the value.
 		expectedConfig := `{"addresses":["0x1234567890abcdef1234567890abcdef12345678"]}`
-		if string(result.Rule.Config) != expectedConfig {
-			t.Errorf("expected config %s, got %s", expectedConfig, string(result.Rule.Config))
+		if got := mustResolveConfig(t, result.Rule); got != expectedConfig {
+			t.Errorf("expected resolved config %s, got %s", expectedConfig, got)
 		}
 
 		// Rule should be enabled
@@ -877,8 +893,8 @@ func TestCreateInstance(t *testing.T) {
 		}
 
 		expectedConfig := `{"max_value":"1000000"}`
-		if string(result.Rule.Config) != expectedConfig {
-			t.Errorf("expected config %s, got %s", expectedConfig, string(result.Rule.Config))
+		if got := mustResolveConfig(t, result.Rule); got != expectedConfig {
+			t.Errorf("expected resolved config %s, got %s", expectedConfig, got)
 		}
 	})
 
@@ -908,8 +924,8 @@ func TestCreateInstance(t *testing.T) {
 		}
 
 		expectedConfig := `{"max_value":"5000000"}`
-		if string(result.Rule.Config) != expectedConfig {
-			t.Errorf("expected config %s, got %s", expectedConfig, string(result.Rule.Config))
+		if got := mustResolveConfig(t, result.Rule); got != expectedConfig {
+			t.Errorf("expected resolved config %s, got %s", expectedConfig, got)
 		}
 	})
 
@@ -2120,8 +2136,8 @@ func TestReservedVariableChainID(t *testing.T) {
 
 		// Config should have chain_id substituted from scope
 		expectedConfig := `{"chain":"137","token":"0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"}`
-		if string(result.Rule.Config) != expectedConfig {
-			t.Errorf("config mismatch:\nwant: %s\ngot:  %s", expectedConfig, string(result.Rule.Config))
+		if got := mustResolveConfig(t, result.Rule); got != expectedConfig {
+			t.Errorf("config mismatch:\nwant: %s\ngot:  %s", expectedConfig, got)
 		}
 
 		// Variables JSON should contain chain_id
@@ -2173,8 +2189,8 @@ func TestReservedVariableChainID(t *testing.T) {
 
 		// Config should use scope chain_id (137), not user's (1)
 		expectedConfig := `{"chain":"137","token":"0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"}`
-		if string(result.Rule.Config) != expectedConfig {
-			t.Errorf("config mismatch:\nwant: %s\ngot:  %s", expectedConfig, string(result.Rule.Config))
+		if got := mustResolveConfig(t, result.Rule); got != expectedConfig {
+			t.Errorf("config mismatch:\nwant: %s\ngot:  %s", expectedConfig, got)
 		}
 
 		// Stored variable should be 137
@@ -2219,8 +2235,8 @@ func TestReservedVariableChainID(t *testing.T) {
 		}
 
 		expectedConfig := `{"chain":"56","token":"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`
-		if string(result.Rule.Config) != expectedConfig {
-			t.Errorf("config mismatch:\nwant: %s\ngot:  %s", expectedConfig, string(result.Rule.Config))
+		if got := mustResolveConfig(t, result.Rule); got != expectedConfig {
+			t.Errorf("config mismatch:\nwant: %s\ngot:  %s", expectedConfig, got)
 		}
 	})
 
@@ -2351,8 +2367,8 @@ func TestReservedVariableChainID(t *testing.T) {
 		}
 
 		expectedConfig := `{"chain":"42161","token":"0xcccccccccccccccccccccccccccccccccccccccc"}`
-		if string(result.Rule.Config) != expectedConfig {
-			t.Errorf("config mismatch:\nwant: %s\ngot:  %s", expectedConfig, string(result.Rule.Config))
+		if got := mustResolveConfig(t, result.Rule); got != expectedConfig {
+			t.Errorf("config mismatch:\nwant: %s\ngot:  %s", expectedConfig, got)
 		}
 	})
 }
@@ -2632,8 +2648,10 @@ func TestCreateInstance_SkipValidationFlow(t *testing.T) {
 		if result.Rule == nil {
 			t.Fatal("expected non-nil rule")
 		}
-		if strings.Contains(string(result.Rule.Config), "${test_wrong_signer}") {
-			t.Error("expected test_wrong_signer to be substituted in instance config")
+		// Config is template-form; resolving Variables (which include merged
+		// test_variables) must leave no unresolved test_wrong_signer placeholder.
+		if strings.Contains(mustResolveConfig(t, result.Rule), "${test_wrong_signer}") {
+			t.Error("expected test_wrong_signer to resolve from merged test variables")
 		}
 	})
 
@@ -3651,9 +3669,10 @@ func TestBatchCreateInstances_CrossTemplateDelegateToResolution(t *testing.T) {
 		t.Fatal("SafeTx sub-rule should exist in caller instance")
 	}
 
-	// ---- ASSERT: Config delegate_to is resolved ----
+	// ---- ASSERT: resolved Config delegate_to is the inst ID (Config is stored
+	// template-form; resolving Variables yields the resolved delegate target) ----
 	var configMap map[string]interface{}
-	if err := json.Unmarshal(safetxRule.Config, &configMap); err != nil {
+	if err := json.Unmarshal([]byte(mustResolveConfig(t, safetxRule)), &configMap); err != nil {
 		t.Fatalf("failed to unmarshal config: %v", err)
 	}
 	dt, _ := configMap["delegate_to"].(string)
@@ -3887,9 +3906,10 @@ func TestBatchCreateInstances_PolymarketV2SafePreset(t *testing.T) {
 		t.Logf("  OK: SafeTx delegate_to=%q matches V2 transactions rule ID=%q", safetxDelegateTo, v2TxRule.ID)
 	}
 
-	// ---- ASSERT 3: Config delegate_to also resolves correctly ----
+	// ---- ASSERT 3: resolved Config delegate_to also matches (template-form
+	// Config resolves to the inst ID via the rule's Variables) ----
 	var safetxConfig map[string]interface{}
-	if err := json.Unmarshal(safetxRule.Config, &safetxConfig); err != nil {
+	if err := json.Unmarshal([]byte(mustResolveConfig(t, safetxRule)), &safetxConfig); err != nil {
 		t.Fatalf("failed to unmarshal SafeTx config: %v", err)
 	}
 	configDt, _ := safetxConfig["delegate_to"].(string)
@@ -4313,8 +4333,9 @@ func TestCreateInstanceFromResolved_NoPrecomputedVars(t *testing.T) {
 
 	got, err := ruleRepo.Get(ctx, result.Rule.ID)
 	require.NoError(t, err)
+	// Config is template-form; resolving Variables yields the bound address.
 	var cfg map[string]interface{}
-	require.NoError(t, json.Unmarshal(got.Config, &cfg))
+	require.NoError(t, json.Unmarshal([]byte(mustResolveConfig(t, got)), &cfg))
 	addrs, ok := cfg["addresses"].([]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", addrs[0])
