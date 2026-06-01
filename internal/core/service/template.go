@@ -339,31 +339,42 @@ func (s *TemplateService) createInstanceFromResolved(
 		s.mergeTestVariables(resolvedVars, tmpl)
 	}
 
-	resolvedConfig, err := SubstituteVariables(tmpl.Config, resolvedVars)
-	if err != nil {
+	// Validate that every ${var} placeholder resolves with the bound variables.
+	// We do NOT persist the substituted result: instance rules store their Config
+	// in TEMPLATE form (placeholders intact) and the rule engine substitutes
+	// Variables (+Matrix+chain_id) live at evaluation. Variables is the single
+	// source of truth — editing it takes effect with no rendered snapshot to
+	// drift. This call is kept purely to fail fast on unresolved/unknown
+	// variables at create time. Cross-template delegate_to references are
+	// resolved in Variables below (resolveDelegateToInVars), so the live
+	// substitution of ${delegate_to} yields the correct inst IDs.
+	if _, err := SubstituteVariables(tmpl.Config, resolvedVars); err != nil {
 		return nil, fmt.Errorf("variable substitution failed: %w", err)
 	}
 
-	// Resolve cross-template delegate_to references before persisting.
-	// The CrossTemplateIDMap is populated by BatchCreateInstances for
-	// multi-template presets. Single-instance callers leave it nil.
+	// If template is a bundle, expand into sub-rules (each stored template-form).
+	if tmpl.Type == "template_bundle" {
+		return s.createInstanceFromBundle(ctx, ruleRepo, budgetRepo, tmpl, req, resolvedVars)
+	}
+
+	// Config is persisted template-form so Variables resolve live at evaluation.
+	// However, cross-template delegate_to LITERALS (e.g. "polymarket-transactions")
+	// reference rule IDs generated at create time via CrossTemplateIDMap and
+	// cannot be recovered at eval, so resolve them now. ${delegate_to} variable
+	// placeholders are left intact and resolve from Variables at evaluation.
+	storedConfig := append([]byte(nil), tmpl.Config...)
 	if req.CrossTemplateIDMap != nil {
 		var cfg map[string]interface{}
-		if err := json.Unmarshal(resolvedConfig, &cfg); err != nil {
-			return nil, fmt.Errorf("failed to parse resolved config for delegate resolution: %w", err)
+		if err := json.Unmarshal(storedConfig, &cfg); err != nil {
+			return nil, fmt.Errorf("failed to parse config for delegate resolution: %w", err)
 		}
 		newConfig, changed, err := ResolveDelegateToConfig(cfg, req.CrossTemplateIDMap)
 		if err != nil {
 			return nil, fmt.Errorf("failed to resolve delegate config: %w", err)
 		}
 		if changed {
-			resolvedConfig = newConfig
+			storedConfig = newConfig
 		}
-	}
-
-	// If template is a bundle, expand into sub-rules
-	if tmpl.Type == "template_bundle" {
-		return s.createInstanceFromBundle(ctx, ruleRepo, budgetRepo, tmpl, req, resolvedVars, resolvedConfig)
 	}
 
 	ruleID := req.PrecomputedRuleID
@@ -404,7 +415,7 @@ func (s *TemplateService) createInstanceFromResolved(
 		Type:        tmpl.Type,
 		Mode:        tmpl.Mode,
 		Source:      types.RuleSourceInstance,
-		Config:      resolvedConfig,
+		Config:      storedConfig, // template-form (delegate literals resolved); Variables resolved live at eval
 		TemplateID:  &tmpl.ID,
 		Variables:   variablesJSON,
 		Enabled:     true,
@@ -483,11 +494,12 @@ func (s *TemplateService) createInstanceFromBundle(
 	tmpl *types.RuleTemplate,
 	req *CreateInstanceRequest,
 	resolvedVars map[string]string,
-	resolvedConfig []byte,
 ) (*CreateInstanceResult, error) {
+	// Parse rules_json from the TEMPLATE-form config (placeholders intact): each
+	// sub-rule is persisted template-form and resolved live at evaluation.
 	var configMap map[string]interface{}
-	if err := json.Unmarshal(resolvedConfig, &configMap); err != nil {
-		return nil, fmt.Errorf("failed to parse resolved bundle config: %w", err)
+	if err := json.Unmarshal(tmpl.Config, &configMap); err != nil {
+		return nil, fmt.Errorf("failed to parse bundle template config: %w", err)
 	}
 	rulesJSON, ok := configMap["rules_json"].(string)
 	if !ok {
@@ -507,23 +519,6 @@ func (s *TemplateService) createInstanceFromBundle(
 		return nil, fmt.Errorf("failed to marshal resolved variables: %w", err)
 	}
 
-	// Build a set of variable names declared by this template so we only inject
-	// declared variables into sub-rule configs. Variables from other templates
-	// (e.g. delegate_to leaking from safe into polymarket_v2) must not leak in.
-	var tmplVarDefs []types.TemplateVariable
-	if len(tmpl.Variables) > 0 {
-		if err := json.Unmarshal(tmpl.Variables, &tmplVarDefs); err != nil {
-			return nil, fmt.Errorf("failed to parse template variables: %w", err)
-		}
-	}
-	declaredVars := make(map[string]bool, len(tmplVarDefs)+len(reservedVariables))
-	for _, def := range tmplVarDefs {
-		declaredVars[def.Name] = true
-	}
-	for rv := range reservedVariables {
-		declaredVars[rv] = true
-	}
-
 	baseName := s.resolveInstanceName(req, tmpl)
 
 	// ---- Pass 1: generate IDs and build the template-ID→actual-ID map ----
@@ -535,6 +530,9 @@ func (s *TemplateService) createInstanceFromBundle(
 	pending := make([]pendingSubRule, 0, len(subRules))
 
 	for _, sub := range subRules {
+		// Persist the sub-rule config in TEMPLATE form (no variable injection):
+		// Variables are substituted live at evaluation, so the engine-evaluated
+		// config always reflects the rule's current Variables.
 		subConfigJSON, err := json.Marshal(sub.Config)
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal sub-rule config: %w", err)
@@ -543,16 +541,6 @@ func (s *TemplateService) createInstanceFromBundle(
 		var subConfig map[string]interface{}
 		if err := json.Unmarshal(subConfigJSON, &subConfig); err != nil {
 			return nil, fmt.Errorf("failed to parse sub-rule config: %w", err)
-		}
-		for k, v := range resolvedVars {
-			if declaredVars[k] {
-				subConfig[k] = v
-			}
-		}
-
-		subConfigJSON, err = json.Marshal(subConfig)
-		if err != nil {
-			return nil, fmt.Errorf("failed to re-marshal sub-rule config: %w", err)
 		}
 
 		subIDSuffix := sub.ID

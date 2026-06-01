@@ -108,8 +108,13 @@ make clean              # 清理构建产物
 ### 开发命令
 
 ```bash
-# 启动服务（SQLite，单实例）
+# 启动服务（SQLite，单实例，前台运行）
 ./remote-signer
+
+# 后台运行（本地开发默认用法）：分离进程，日志写入 ~/.remote-signer/remote-signer.log
+./remote-signer server start --daemon
+./remote-signer server stop            # 优雅停止（读取 ~/.remote-signer/remote-signer.pid）
+tail -f ~/.remote-signer/remote-signer.log
 
 # 启动 TUI
 ./remote-signer tui
