@@ -20,18 +20,28 @@ test("agent preset apply creates rules visible in Rules list", async ({
     (r: { rule: { id: string } }) => r.rule.id,
   );
 
-  await authedPage.click("text=Rules");
+  try {
+    await authedPage.click("text=Rules");
 
-  // Each created rule should appear in the table.
-  for (const id of ruleIDs) {
-    // The expanded detail panel shows the rule ID in a monospace font.
-    // Use the SDK to get the name, then locate in the table.
-    const rule = await c.evm.rules.get(id);
-    await expect(
-      authedPage.locator("tr", {
-        has: authedPage.locator(`text=${rule.name}`),
-      }),
-    ).toBeVisible();
+    // Each created rule should appear in the table.
+    for (const id of ruleIDs) {
+      // The expanded detail panel shows the rule ID in a monospace font.
+      // Use the SDK to get the name, then locate in the table.
+      const rule = await c.evm.rules.get(id);
+      await expect(
+        authedPage.locator("tr", {
+          has: authedPage.locator(`text=${rule.name}`),
+        }),
+      ).toBeVisible();
+    }
+  } finally {
+    // Clean up: the agent preset's whitelist rules (e.g. "Agent Signature",
+    // which allows personal_sign) are created active and applied broadly. The
+    // suite shares one daemon serially, so leaving them active auto-approves
+    // requests in later specs (e.g. requests-approve). Revoke them here.
+    for (const id of ruleIDs) {
+      await c.evm.rules.delete(id).catch(() => {});
+    }
   }
 });
 

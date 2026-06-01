@@ -49,7 +49,8 @@ test("Template detail shows CodeBlock for evm_js sub-rules", async ({
   const c = await adminSDKClient();
 
   // List templates — find one with sub-rules (e.g. the Agent template).
-  const templates = await c.templates.list();
+  // list() returns an envelope ({ templates, total }), not a bare array.
+  const { templates } = await c.templates.list();
   const agentTmpl = templates.find(
     (t: { id: string }) => t.id === "evm/agent",
   );
@@ -65,10 +66,18 @@ test("Template detail shows CodeBlock for evm_js sub-rules", async ({
   await expect(link).toBeVisible();
   await link.click();
 
-  // The template detail page should show CodeBlocks for sub-rule scripts.
-  // Look for the Expand button (rendered by CodeBlock).
+  // Sub-rules are listed collapsed behind a ▶ toggle; expand the first one to
+  // reveal its evm_js script CodeBlock.
+  const subRuleToggle = authedPage
+    .getByRole("button", { name: /Agent Signature/ })
+    .first();
+  await expect(subRuleToggle).toBeVisible({ timeout: 10_000 });
+  await subRuleToggle.click();
+
+  // The expanded sub-rule should show a CodeBlock for its script. The toggle
+  // reads "Expand" or "Collapse" depending on initial state; Copy is always present.
   await expect(
-    authedPage.locator("button:has-text('Expand')").first(),
+    authedPage.getByRole("button", { name: /Expand|Collapse/ }).first(),
   ).toBeVisible({ timeout: 10_000 });
 
   // The Copy button should also be present.
@@ -112,11 +121,12 @@ test("Request detail shows CodeBlock for non-transaction payload", async ({
   // Click the row to navigate to the detail page.
   await row.click();
 
-  // The detail page should render a CodeBlock for the payload JSON.
-  // If the request status is still pending/authorizing, look for the
-  // CodeBlock expand/copy buttons in the Payload/Message card.
+  // The detail page should render a CodeBlock for the payload JSON. The
+  // CodeBlock's toggle reads "Expand" or "Collapse" depending on whether the
+  // content starts collapsed (short payloads render expanded → "Collapse"), so
+  // match either; the Copy button is always present.
   await expect(
-    authedPage.locator("button:has-text('Expand')").first(),
+    authedPage.getByRole("button", { name: /Expand|Collapse/ }).first(),
   ).toBeVisible({ timeout: 10_000 });
 
   await expect(

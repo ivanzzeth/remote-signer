@@ -55,6 +55,25 @@ curl -sSLf -o remote-signer \
 
 First launch creates `~/.remote-signer/` with a default config (SQLite, `:8548`, no TLS) and generates an admin Ed25519 keypair. The private key path is printed once to stderr.
 
+### Run in the background (`--daemon`)
+
+`./remote-signer` (or `server start`) runs in the foreground and logs to the terminal. For **local development this is the recommended way to run it** — start it detached, keep your terminal free, and stop it when done:
+
+```bash
+remote-signer server start --daemon     # fork to background, return immediately
+remote-signer server stop                # graceful shutdown
+```
+
+- `--daemon` re-executes the process detached from the terminal (new session on Unix, detached process on Windows) and redirects stdout/stderr to **`~/.remote-signer/remote-signer.log`**. The parent prints the child PID and the log path, then exits.
+- The running PID is written to `~/.remote-signer/remote-signer.pid`; `server stop` reads it, sends a graceful stop signal, and waits for the HTTP server to drain (override the wait with `--timeout`, default `30s`).
+- Tail the log with `tail -f ~/.remote-signer/remote-signer.log`.
+- All other flags work alongside `--daemon`, e.g. `remote-signer server start --daemon --config ./config.yaml`.
+
+```bash
+tail -f ~/.remote-signer/remote-signer.log   # follow logs
+remote-signer server stop --timeout 10s      # stop, waiting up to 10s
+```
+
 ### Interactive Setup
 
 ```bash

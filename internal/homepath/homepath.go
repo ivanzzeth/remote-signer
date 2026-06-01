@@ -19,6 +19,8 @@ import (
 
 const (
 	configFile             = "config.yaml"
+	logFile                = "remote-signer.log"
+	pidFile                = "remote-signer.pid"
 	sqliteFile             = "remote-signer.db"
 	apiKeysSubdir          = "apikeys"
 	signerKeystoresSubdir  = "keystores"
@@ -62,6 +64,27 @@ func ConfigPath() (string, error) {
 		return "", err
 	}
 	return filepath.Join(h, configFile), nil
+}
+
+// LogPath returns the daemon log file path inside the home dir
+// (~/.remote-signer/remote-signer.log).
+func LogPath() (string, error) {
+	h, err := Home()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(h, logFile), nil
+}
+
+// PIDPath returns the daemon PID file path inside the home dir
+// (~/.remote-signer/remote-signer.pid). `server start` writes it; `server stop`
+// reads it.
+func PIDPath() (string, error) {
+	h, err := Home()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(h, pidFile), nil
 }
 
 // SQLitePath returns the default SQLite database path inside the home dir.

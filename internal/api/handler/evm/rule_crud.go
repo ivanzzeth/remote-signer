@@ -391,6 +391,11 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 		rule.Matrix = matrixJSON
 	}
 
+	// NOTE: instance rules store their Config in template form (${var}
+	// placeholders) and the rule engine substitutes Variables live at
+	// evaluation, so updating Variables here takes effect immediately with no
+	// Config re-render required.
+
 	rule.UpdatedAt = time.Now()
 
 	// Reject solidity rules when forge is unavailable

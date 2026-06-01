@@ -150,7 +150,10 @@ test.describe("SimulationPreview on RequestDetail", () => {
 // block the daemon's own queries.
 function sqliteExec(dbPath: string, stmts: string[]): void {
   for (const stmt of stmts) {
-    execFileSync("sqlite3", [dbPath, stmt], {
+    // `.timeout` makes the CLI wait for the daemon's WAL write lock instead of
+    // failing instantly with "database is locked" — the daemon runs concurrently
+    // and may hold the lock when these direct writes fire.
+    execFileSync("sqlite3", ["-cmd", ".timeout 10000", dbPath, stmt], {
       stdio: ["ignore", "ignore", "inherit"],
     });
   }
