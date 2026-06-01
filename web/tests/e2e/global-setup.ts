@@ -83,6 +83,11 @@ security:
   # admin key — bump generously so tests don't fight the rate limiter.
   rate_limit_default: 100000
   ip_rate_limit: 100000
+  # The suite runs serially against one shared admin key and creates many
+  # signers across specs (signers/wallets/requests). The production default
+  # of 5 keystores per key exhausts mid-run and cascades failures, so raise
+  # it generously for the test daemon.
+  max_keystores_per_key: 100000
 
 chains:
   evm:
