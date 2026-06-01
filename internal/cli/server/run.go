@@ -34,11 +34,18 @@ func Run(args []string) error {
 	fs := flag.NewFlagSet("remote-signer server start", flag.ContinueOnError)
 	configFlag := fs.String("config", "", "path to config file (default: ~/.remote-signer/config.yaml, falling back to ./config.yaml; auto-generated on first run)")
 	envFile := fs.String("env", ".env", "path to .env file (optional, ignored if not exists)")
+	daemonFlag := fs.Bool("daemon", false, "run in the background, logging to ~/.remote-signer/remote-signer.log (use `server stop` to stop it)")
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {
 			return nil
 		}
 		return err
+	}
+
+	// Background mode: re-exec this binary detached and return so the foreground
+	// process exits. The child runs the same start path with daemonizedEnv set.
+	if *daemonFlag && os.Getenv(daemonizedEnv) != "1" {
+		return daemonize(args)
 	}
 
 	// ---- Environment and config loading ----
@@ -422,6 +429,11 @@ func Run(args []string) error {
 		log.Info("Starting HTTP server", "host", cfg.Server.Host, "port", cfg.Server.Port)
 		errCh <- server.Start()
 	}()
+
+	// Record the PID so `server stop` can find this daemon, and clean it up on
+	// exit. Applies to both foreground and backgrounded (--daemon) runs.
+	writePIDFile()
+	defer removePIDFile()
 
 	// Background receipt poller. Uses the same context the settings
 	// manager uses so SIGTERM / SIGINT propagate to a clean shutdown.

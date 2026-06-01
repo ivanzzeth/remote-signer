@@ -71,7 +71,9 @@ func (h *RuleHandler) validateRule(w http.ResponseWriter, r *http.Request, ruleI
 		return
 	}
 
-	testCases, err := testCasesFromConfig(rule.Config)
+	// Resolve template-form Config so test cases run with concrete variable values.
+	effConfig := evmchain.EffectiveConfig(rule)
+	testCases, err := testCasesFromConfig(effConfig)
 	if err != nil {
 		h.writeError(w, fmt.Sprintf("failed to parse test_cases from config: %v", err), http.StatusBadRequest)
 		return
@@ -87,7 +89,7 @@ func (h *RuleHandler) validateRule(w http.ResponseWriter, r *http.Request, ruleI
 		return
 	}
 
-	results, valid := h.runJSTestCases(rule, testCases)
+	results, valid := h.runJSTestCases(rule, effConfig, testCases)
 	resp := ValidateRuleResponse{
 		RuleID:   string(rule.ID),
 		RuleName: rule.Name,
@@ -102,13 +104,13 @@ func (h *RuleHandler) validateRule(w http.ResponseWriter, r *http.Request, ruleI
 }
 
 // runJSTestCases runs test cases against a rule and returns per-case results plus overall validity.
-func (h *RuleHandler) runJSTestCases(rule *types.Rule, testCases []JSRuleTestCase) ([]ValidateTestResult, bool) {
+func (h *RuleHandler) runJSTestCases(rule *types.Rule, effConfig []byte, testCases []JSRuleTestCase) ([]ValidateTestResult, bool) {
 	if h.jsEvaluator == nil {
 		return nil, false
 	}
 
 	var cfg evmchain.JSRuleConfig
-	if err := json.Unmarshal(rule.Config, &cfg); err != nil {
+	if err := json.Unmarshal(effConfig, &cfg); err != nil {
 		return nil, false
 	}
 
@@ -136,10 +138,10 @@ func (h *RuleHandler) runJSTestCases(rule *types.Rule, testCases []JSRuleTestCas
 			continue
 		}
 
-		var cfgMap map[string]interface{}
-		if len(rule.Config) > 0 {
-			_ = json.Unmarshal(rule.Config, &cfgMap)
-		}
+		// The config object must match what the engine builds at runtime: the
+		// rule's Variables (+Matrix+chain_id), NOT the stored Config keys. Instance
+		// rules keep variable values only in Variables, so resolve here.
+		cfgMap := evmchain.RuleConfigObject(rule)
 		evalResult := h.jsEvaluator.ValidateWithInput(cfg.Script, ruleInput, cfgMap)
 
 		actualPass := evalResult.Valid
@@ -223,13 +225,17 @@ func (h *RuleHandler) validateRuleIsolated(rule *types.Rule) ValidateRuleRespons
 		Type:     string(rule.Type),
 	}
 
-	testCases, err := testCasesFromConfig(rule.Config)
+	// Resolve the rule's template-form Config (Variables substituted) so stored
+	// test cases — whose inputs use ${var} placeholders like
+	// ${first:allowed_safe_addresses} or ${chain_id} — run with concrete values.
+	effConfig := evmchain.EffectiveConfig(rule)
+	testCases, err := testCasesFromConfig(effConfig)
 	if err != nil || len(testCases) == 0 {
 		resp.Valid = true
 		return resp
 	}
 
-	results, valid := h.runJSTestCases(rule, testCases)
+	results, valid := h.runJSTestCases(rule, effConfig, testCases)
 	resp.Results = results
 	resp.Valid = valid
 	if !valid {
@@ -278,7 +284,7 @@ func (h *RuleHandler) validateRulesFullEngine(jsRules []*types.Rule, allRules []
 			Type:     string(rule.Type),
 		}
 
-		testCases, tcerr := testCasesFromConfig(rule.Config)
+		testCases, tcerr := testCasesFromConfig(evmchain.EffectiveConfig(rule))
 		if tcerr != nil || len(testCases) == 0 {
 			resp.Valid = true
 			results = append(results, resp)

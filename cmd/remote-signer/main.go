@@ -73,11 +73,21 @@ func newServerCmd() *cobra.Command {
 	cmd.AddCommand(&cobra.Command{
 		Use:                "start",
 		Short:              "Start the remote-signer daemon",
-		Long:               "Start the remote-signer HTTP service. Flags are forwarded to the server implementation, e.g. `remote-signer server start -config config.yaml -env .env`.",
+		Long:               "Start the remote-signer HTTP service. Flags are forwarded to the server implementation, e.g. `remote-signer server start -config config.yaml -env .env`. Pass `--daemon` to run in the background (logs to ~/.remote-signer/remote-signer.log); stop it with `remote-signer server stop`.",
 		DisableFlagParsing: true,
 		SilenceErrors:      true, // server.Run prints its own diagnostics; main.go renders the final error
 		RunE: func(_ *cobra.Command, args []string) error {
 			return server.Run(args)
+		},
+	})
+	cmd.AddCommand(&cobra.Command{
+		Use:                "stop",
+		Short:              "Stop the background remote-signer daemon",
+		Long:               "Stop a daemon started with `server start --daemon`. Reads the PID file at ~/.remote-signer/remote-signer.pid and waits for a graceful exit.",
+		DisableFlagParsing: true,
+		SilenceErrors:      true,
+		RunE: func(_ *cobra.Command, args []string) error {
+			return server.Stop(args)
 		},
 	})
 	return cmd

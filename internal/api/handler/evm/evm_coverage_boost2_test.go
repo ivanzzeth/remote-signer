@@ -158,7 +158,7 @@ func TestRunJSTestCases_NoEvaluator(t *testing.T) {
 	tcs := []JSRuleTestCase{
 		{Name: "tc1", Input: map[string]interface{}{"sign_type": "transaction"}, ExpectPass: true},
 	}
-	results, valid := h.runJSTestCases(rule, tcs)
+	results, valid := h.runJSTestCases(rule, rule.Config, tcs)
 	assert.False(t, valid, "should be invalid when no JS evaluator")
 	assert.Nil(t, results, "results should be nil when jsEvaluator is nil")
 }
@@ -182,7 +182,7 @@ func TestRunJSTestCases_InvalidConfig(t *testing.T) {
 	tcs := []JSRuleTestCase{
 		{Name: "tc1", Input: map[string]interface{}{"sign_type": "transaction"}, ExpectPass: true},
 	}
-	results, valid := h.runJSTestCases(rule, tcs)
+	results, valid := h.runJSTestCases(rule, rule.Config, tcs)
 	assert.False(t, valid)
 	assert.Nil(t, results)
 }
@@ -206,7 +206,7 @@ func TestRunJSTestCases_InvalidInput(t *testing.T) {
 	tcs := []JSRuleTestCase{
 		{Name: "bad-tc", Input: nil, ExpectPass: true},
 	}
-	results, valid := h.runJSTestCases(rule, tcs)
+	results, valid := h.runJSTestCases(rule, rule.Config, tcs)
 	assert.False(t, valid)
 	assert.Len(t, results, 1)
 	assert.False(t, results[0].Passed)

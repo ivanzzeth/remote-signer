@@ -204,6 +204,15 @@ func (e *WhitelistRuleEngine) EvaluateWithResult(ctx context.Context, req *types
 	// Only rules with status="active" AND matching applied_to are evaluated.
 	rules = FilterRulesForCaller(rules, req.APIKeyID)
 
+	// Resolve each rule to its effective form for this request: instance rules
+	// have their Variables (+Matrix+chain_id) substituted live into the
+	// template-form Config. This is the single chokepoint that makes Variables
+	// the source of truth for every rule type — no rendered Config snapshot to
+	// drift. Direct rules pass through unchanged.
+	for i, r := range rules {
+		rules[i] = resolveEffectiveRule(r, req.ChainID)
+	}
+
 	// SECURITY: Take a single RLock to filter rules and snapshot evaluators atomically.
 	// This eliminates the window where evaluators could change between filterRulesBySignType
 	// and the main evaluation loop. After Seal() is called at startup, the evaluators map
@@ -558,6 +567,7 @@ func (e *WhitelistRuleEngine) resolveDelegation(ctx context.Context, originalReq
 					NoMatchReason: "delegation target rule not found: " + string(targetID),
 				}, nil
 			}
+			targetRule = resolveEffectiveRule(targetRule, req2.ChainID)
 			path2 := make(map[types.RuleID]bool)
 			for k, v := range path {
 				path2[k] = v
@@ -641,6 +651,7 @@ func (e *WhitelistRuleEngine) resolveDelegation(ctx context.Context, originalReq
 						NoMatchReason: "delegation target rule not found: " + string(targetID),
 					}, nil
 				}
+				targetRule = resolveEffectiveRule(targetRule, req2.ChainID)
 				path2 := make(map[types.RuleID]bool)
 				for k, v := range path {
 					path2[k] = v
@@ -859,6 +870,12 @@ func (e *WhitelistRuleEngine) evaluateBlocklistForRequest(ctx context.Context, r
 
 	// Phase 3: Filter rules by caller's API key ID (applied_to + status scoping).
 	rules = FilterRulesForCaller(rules, req.APIKeyID)
+
+	// Resolve to effective form (Variables substituted into template Config),
+	// same as the primary evaluation path.
+	for i, r := range rules {
+		rules[i] = resolveEffectiveRule(r, req.ChainID)
+	}
 
 	e.mu.RLock()
 	rules = e.filterRulesBySignType(rules, req.SignType)
