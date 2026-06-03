@@ -174,12 +174,13 @@ test("request rejection path", async () => {
     // no matching rule it parks as pending/authorizing.
     let requestId = "";
     try {
-      await admin.evm.sign.executeAsync({
+      const resp = await admin.evm.sign.executeAsync({
         chain_id: "1",
         signer_address: signer.address,
         sign_type: "personal",
         payload: { message: "0x48656c6c6f" },
       });
+      requestId = resp.request_id;
     } catch (e) {
       if (!(e instanceof SignError)) throw e;
       expect(["pending", "authorizing"]).toContain(e.status);
