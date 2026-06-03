@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "pretest:e2e": "cd .. && make build",
+    "pretest:e2e": "cd .. && make build-embed",
     "test:e2e": "playwright test"
   },
   "dependencies": {
