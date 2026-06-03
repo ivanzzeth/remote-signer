@@ -154,12 +154,6 @@ jobs:
             goarch: arm64
             target_args: --mac dmg --arm64
             asset_glob: electron/out/*.dmg
-          - os: macos-13
-            arch: x64
-            goos: darwin
-            goarch: amd64
-            target_args: --mac dmg --x64
-            asset_glob: electron/out/*.dmg
           - os: ubuntu-latest
             arch: x64
             goos: linux

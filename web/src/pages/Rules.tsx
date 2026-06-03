@@ -152,7 +152,7 @@ export function Rules() {
 
   async function update(
     id: string,
-    patch: { name?: string; description?: string; config?: Record<string, unknown>; variables?: Record<string, string>; matrix?: Record<string, any>[]; priority?: number; budget_period?: string },
+    patch: { name?: string; description?: string; config?: Record<string, unknown>; variables?: Record<string, string>; matrix?: Record<string, any>[]; priority?: number; budget_period?: string; applied_to?: string[] },
   ) {
     const client = getClient();
     if (!client) return;
@@ -477,6 +477,7 @@ function RuleDetailPanel({
   const [description, setDescription] = useState(rule.description ?? "");
   const [editPriority, setEditPriority] = useState(rule.priority);
   const [editBudgetPeriod, setEditBudgetPeriod] = useState(rule.budget_period || "");
+  const [editAppliedTo, setEditAppliedTo] = useState(rule.applied_to || []);
   const [config, setConfig] = useState<Record<string, unknown>>(() => ({
     ...rule.config,
   }));
@@ -532,6 +533,7 @@ function RuleDetailPanel({
       matrix?: Record<string, any>[];
       priority?: number;
       budget_period?: string;
+      applied_to?: string[];
     } = {
       name: name.trim(),
       description: description.trim(),
@@ -557,6 +559,9 @@ function RuleDetailPanel({
     }
     if (editBudgetPeriod !== rule.budget_period) {
       patch.budget_period = editBudgetPeriod || undefined;
+    }
+    if (JSON.stringify(editAppliedTo) !== JSON.stringify(rule.applied_to)) {
+      patch.applied_to = editAppliedTo;
     }
     onSave(patch);
   }
@@ -756,6 +761,12 @@ function RuleDetailPanel({
           )}
 
           {parseError && <ErrorBanner msg={parseError} />}
+          <div className="border-t border-ink-200 pt-3 mb-2">
+            <label className="mb-1 block text-[11px] uppercase tracking-wide text-ink-500">
+              Applied To (which API keys this rule applies to)
+            </label>
+            <AppliedToPicker value={editAppliedTo} onChange={setEditAppliedTo} />
+          </div>
           <div className="flex justify-end gap-2">
             <button
               type="button"
