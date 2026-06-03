@@ -48,6 +48,29 @@ export async function adminSDKClient(): Promise<RemoteSignerClient> {
   });
 }
 
+let cachedAgentClient: RemoteSignerClient | null = null;
+
+/**
+ * Returns a `RemoteSignerClient` authenticated as the agent role. Used by
+ * RBAC/security specs to verify that agent-scoped operations are rejected
+ * (e.g. agent cannot approve requests, cannot create global rules, cannot
+ * read other keys' signers). The daemon auto-bootstraps an agent Ed25519
+ * keypair at apikeys/agent.key.priv — we read it directly (PKCS#8 PEM,
+ * accepted natively by the SDK's parsePrivateKey).
+ */
+export function agentSDKClient(): RemoteSignerClient {
+  if (!cachedAgentClient) {
+    const state = getState();
+    const pem = readFileSync(join(state.home, "apikeys", "agent.key.priv"), "utf8");
+    cachedAgentClient = new RemoteSignerClient({
+      baseURL: `http://127.0.0.1:${process.env.E2E_PORT ?? 18548}`,
+      apiKeyID: "agent",
+      privateKey: pem,
+    });
+  }
+  return cachedAgentClient;
+}
+
 // Auth fixture: arrives logged in as the bootstrap admin. Each test gets a
 // fresh page in a fresh storage state, so credentials don't leak across
 // specs (the SPA only keeps them in memory anyway).

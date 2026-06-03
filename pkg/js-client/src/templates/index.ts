@@ -274,8 +274,8 @@ export class TemplateService {
    */
   async revokeInstance(ruleID: string): Promise<RevokeInstanceResponse> {
     return this.transport.request<RevokeInstanceResponse>(
-      "DELETE",
-      `/api/v1/templates/instances/${ruleID}`,
+      "POST",
+      `/api/v1/templates/instances/${ruleID}/revoke`,
       null,
     );
   }
