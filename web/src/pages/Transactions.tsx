@@ -13,6 +13,7 @@ import {
   PageHeader,
   shorten,
 } from "../components/ui";
+import { getCredentials } from "../lib/auth";
 import { useApi } from "../lib/useApi";
 
 const STATUSES: OnChainTransactionStatus[] = [
@@ -21,6 +22,17 @@ const STATUSES: OnChainTransactionStatus[] = [
   "dropped",
   "failed",
 ];
+
+const SIGN_TYPES = [
+  "personal",
+  "typed_data",
+  "transaction",
+  "hash",
+  "raw_message",
+  "eip191",
+] as const;
+
+const ROLES = ["admin", "dev", "agent", "strategy"] as const;
 
 /**
  * On-chain transactions surface: every eth_sendRawTransaction the
@@ -34,16 +46,35 @@ const STATUSES: OnChainTransactionStatus[] = [
 export function Transactions() {
   const [status, setStatus] = useState<OnChainTransactionStatus | "">("");
   const [chainID, setChainID] = useState("");
+  const [fromAddress, setFromAddress] = useState("");
+  const [signType, setSignType] = useState("");
+  const [apiKeyID, setAPIKeyID] = useState("");
+  const [role, setRole] = useState("");
+
+  const namesApi = useApi((c) => c.apiKeys.names());
+  const currentApiKeyID = getCredentials()?.apiKeyID ?? "";
+  const currentRole =
+    namesApi.data?.keys.find((k) => k.id === currentApiKeyID)?.role ?? "";
+  const showAdminFilters = currentRole === "admin" || currentRole === "dev";
 
   const filter = {
     limit: 50,
     ...(status ? { status } : {}),
     ...(chainID ? { chain_id: chainID } : {}),
+    ...(fromAddress ? { from: fromAddress } : {}),
+    ...(signType ? { sign_type: signType } : {}),
+    ...(showAdminFilters && apiKeyID ? { api_key_id: apiKeyID } : {}),
+    ...(showAdminFilters && role ? { role } : {}),
   };
   const { data, loading, error, reload } = useApi(
     (c) => c.evm.transactions.list(filter),
-    [status, chainID],
+    [status, chainID, fromAddress, signType, apiKeyID, role],
   );
+
+  const selectCls =
+    "rounded-md border border-ink-300 bg-white px-2 py-1 text-sm text-ink-900";
+  const inputCls =
+    "rounded-md border border-ink-300 bg-white px-2 py-1 text-sm text-ink-900";
 
   return (
     <div className="space-y-6">
@@ -62,39 +93,96 @@ export function Transactions() {
       />
 
       <Card>
-        <div className="mb-4 flex flex-wrap items-end gap-3">
-          <div>
-            <label className="mb-1 block text-[11px] uppercase tracking-wide text-ink-500">
-              Status
-            </label>
+        <div
+          data-testid="transactions-filter-bar"
+          className="mb-4 flex flex-wrap items-end gap-3 rounded-md border border-ink-200 bg-ink-50 p-3"
+        >
+          <FilterField label="Status">
             <select
               value={status}
               onChange={(e) =>
                 setStatus(e.target.value as OnChainTransactionStatus | "")
               }
-              className="rounded-md border border-ink-300 px-2 py-1 text-sm"
+              className={selectCls}
             >
-              <option value="">all</option>
+              <option value="">All</option>
               {STATUSES.map((s) => (
                 <option key={s} value={s}>
                   {s}
                 </option>
               ))}
             </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-[11px] uppercase tracking-wide text-ink-500">
-              Chain ID
-            </label>
+          </FilterField>
+
+          <FilterField label="From">
+            <input
+              type="text"
+              value={fromAddress}
+              onChange={(e) => setFromAddress(e.target.value.trim())}
+              placeholder="0x…"
+              className={`${inputCls} w-44 font-mono text-xs`}
+            />
+          </FilterField>
+
+          <FilterField label="Chain ID">
             <input
               type="text"
               inputMode="numeric"
               value={chainID}
               onChange={(e) => setChainID(e.target.value.trim())}
               placeholder="e.g. 1"
-              className="w-24 rounded-md border border-ink-300 px-2 py-1 text-sm"
+              className={`${inputCls} w-24`}
             />
-          </div>
+          </FilterField>
+
+          <FilterField label="Sign type">
+            <select
+              value={signType}
+              onChange={(e) => setSignType(e.target.value)}
+              className={selectCls}
+            >
+              <option value="">All</option>
+              {SIGN_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+          </FilterField>
+
+          {showAdminFilters && (
+            <>
+              <FilterField label="API key">
+                <select
+                  value={apiKeyID}
+                  onChange={(e) => setAPIKeyID(e.target.value)}
+                  className={selectCls}
+                >
+                  <option value="">All</option>
+                  {(namesApi.data?.keys ?? []).map((k) => (
+                    <option key={k.id} value={k.id}>
+                      {k.id} {k.name && `· ${k.name}`}
+                    </option>
+                  ))}
+                </select>
+              </FilterField>
+
+              <FilterField label="Role">
+                <select
+                  value={role}
+                  onChange={(e) => setRole(e.target.value)}
+                  className={selectCls}
+                >
+                  <option value="">All</option>
+                  {ROLES.map((r) => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))}
+                </select>
+              </FilterField>
+            </>
+          )}
         </div>
 
         {loading && <Loading />}
@@ -123,6 +211,23 @@ export function Transactions() {
             </table>
           ))}
       </Card>
+    </div>
+  );
+}
+
+function FilterField({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="text-[10px] uppercase tracking-wide text-ink-500">
+        {label}
+      </label>
+      {children}
     </div>
   );
 }
@@ -164,13 +269,6 @@ function TxRow({ tx }: { tx: OnChainTransaction }) {
   );
 }
 
-// statusLabel and statusTone collapse the (status, receipt_status)
-// pair into a single human-readable label + tone. A mined tx with
-// receipt_status=0 is on-chain BUT reverted — distinct from a
-// dropped tx that never made it, distinct from a failed broadcast
-// that the upstream rejected outright. Keeping the distinction in
-// the badge text avoids "mined" giving the operator a false-success
-// impression.
 function statusLabel(tx: OnChainTransaction): string {
   if (tx.status === "mined") {
     if (tx.receipt_status === 0) return "reverted";

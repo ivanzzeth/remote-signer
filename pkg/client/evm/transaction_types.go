@@ -32,6 +32,10 @@ type ListTransactionsFilter struct {
 	Status        string
 	SignerAddress string
 	ChainID       string
+	SignType      string
+	SignRequestID string
+	APIKeyID      string
+	Role          string
 	Limit         int
 	Offset        int
 }

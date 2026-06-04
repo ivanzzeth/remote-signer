@@ -29,10 +29,22 @@ func (s *TransactionService) List(ctx context.Context, filter *ListTransactionsF
 			params = append(params, fmt.Sprintf("status=%s", filter.Status))
 		}
 		if filter.SignerAddress != "" {
-			params = append(params, fmt.Sprintf("signer_address=%s", filter.SignerAddress))
+			params = append(params, fmt.Sprintf("from=%s", filter.SignerAddress))
 		}
 		if filter.ChainID != "" {
 			params = append(params, fmt.Sprintf("chain_id=%s", filter.ChainID))
+		}
+		if filter.SignType != "" {
+			params = append(params, fmt.Sprintf("sign_type=%s", filter.SignType))
+		}
+		if filter.SignRequestID != "" {
+			params = append(params, fmt.Sprintf("sign_request_id=%s", filter.SignRequestID))
+		}
+		if filter.APIKeyID != "" {
+			params = append(params, fmt.Sprintf("api_key_id=%s", filter.APIKeyID))
+		}
+		if filter.Role != "" {
+			params = append(params, fmt.Sprintf("role=%s", filter.Role))
 		}
 		if filter.Limit > 0 {
 			params = append(params, fmt.Sprintf("limit=%d", filter.Limit))

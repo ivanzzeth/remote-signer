@@ -29,6 +29,6 @@ test("Audit page loads + filtering by event_type reissues the query", async ({
   await expect(authedPage.locator("text=No matching audit events")).toBeVisible();
 
   // Clear filters restores the unfiltered view.
-  await authedPage.click("text=clear filters");
+  await authedPage.click("text=Clear filters");
   await expect(authedPage.locator("tbody tr").first()).toBeVisible();
 });

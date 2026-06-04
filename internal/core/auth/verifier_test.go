@@ -19,7 +19,8 @@ import (
 // --- mocks ---
 
 type mockAPIKeyRepo struct {
-	getFn func(ctx context.Context, id string) (*types.APIKey, error)
+	getFn           func(ctx context.Context, id string) (*types.APIKey, error)
+	updateLastUsed  func(ctx context.Context, id string) error
 }
 
 func (m *mockAPIKeyRepo) Create(_ context.Context, _ *types.APIKey) error { return nil }
@@ -32,7 +33,12 @@ func (m *mockAPIKeyRepo) List(_ context.Context, _ storage.APIKeyFilter) ([]*typ
 	return nil, nil
 }
 func (m *mockAPIKeyRepo) Count(_ context.Context, _ storage.APIKeyFilter) (int, error) { return 0, nil }
-func (m *mockAPIKeyRepo) UpdateLastUsed(_ context.Context, _ string) error    { return nil }
+func (m *mockAPIKeyRepo) UpdateLastUsed(ctx context.Context, id string) error {
+	if m.updateLastUsed != nil {
+		return m.updateLastUsed(ctx, id)
+	}
+	return nil
+}
 func (m *mockAPIKeyRepo) DeleteBySourceExcluding(_ context.Context, _ string, _ []string) (int64, error) {
 	return 0, nil
 }
@@ -273,6 +279,36 @@ func TestVerifyRequest_Success(t *testing.T) {
 	key, err := v.VerifyRequest(context.Background(), "test-key-1", ts, sig, "POST", "/api/sign", []byte(`{"data":"test"}`))
 	require.NoError(t, err)
 	assert.Equal(t, "test-key-1", key.ID)
+}
+
+func TestVerifyRequest_Success_UpdatesLastUsed(t *testing.T) {
+	pub, priv := generateKeyPair(t)
+	ts := time.Now().UnixMilli()
+	sig := SignRequest(priv, ts, "GET", "/health", nil)
+
+	done := make(chan string, 1)
+	repo := &mockAPIKeyRepo{
+		getFn: func(_ context.Context, id string) (*types.APIKey, error) {
+			return validAPIKey(pub), nil
+		},
+		updateLastUsed: func(_ context.Context, id string) error {
+			done <- id
+			return nil
+		},
+	}
+	cfg := Config{MaxRequestAge: 60 * time.Second, NonceRequired: false}
+	v, err := NewVerifier(repo, cfg)
+	require.NoError(t, err)
+
+	_, err = v.VerifyRequest(context.Background(), "test-key-1", ts, sig, "GET", "/health", nil)
+	require.NoError(t, err)
+
+	select {
+	case got := <-done:
+		assert.Equal(t, "test-key-1", got)
+	case <-time.After(2 * time.Second):
+		t.Fatal("UpdateLastUsed was not called")
+	}
 }
 
 func TestVerifyRequestWithNonce_Success(t *testing.T) {

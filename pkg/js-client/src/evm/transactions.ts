@@ -47,9 +47,14 @@ export interface ListTransactionsFilter {
   chain_id?: string | number;
   /** Filter to txs sent from this address (case-insensitive). */
   from?: string;
+  /** Alias for `from` — same server param after normalization. */
+  signer_address?: string;
+  sign_type?: string;
   sign_request_id?: string;
-  /** Admin-only override; non-admins are auto-scoped to their key. */
+  /** Admin/dev only override; non-admins are auto-scoped to their key. */
   api_key_id?: string;
+  /** Admin/dev only */
+  role?: string;
   limit?: number;
   offset?: number;
 }
@@ -70,8 +75,11 @@ export class EvmTransactionService {
       params.append("chain_id", String(filter.chain_id));
     }
     if (filter?.from) params.append("from", filter.from);
+    else if (filter?.signer_address) params.append("from", filter.signer_address);
+    if (filter?.sign_type) params.append("sign_type", filter.sign_type);
     if (filter?.sign_request_id) params.append("sign_request_id", filter.sign_request_id);
     if (filter?.api_key_id) params.append("api_key_id", filter.api_key_id);
+    if (filter?.role) params.append("role", filter.role);
     if (filter?.limit !== undefined) params.append("limit", String(filter.limit));
     if (filter?.offset !== undefined) params.append("offset", String(filter.offset));
     const qs = params.toString();

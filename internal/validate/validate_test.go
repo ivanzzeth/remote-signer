@@ -356,7 +356,7 @@ func TestValidRuleSources(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 func TestValidAuditEventTypes_Count(t *testing.T) {
-	assert.Equal(t, 23, len(ValidAuditEventTypes), "expected 23 audit event types")
+	assert.Equal(t, 27, len(ValidAuditEventTypes), "expected 27 audit event types")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

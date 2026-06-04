@@ -4,6 +4,7 @@ import {
   type BudgetEntry,
   type HealthResponse as SDKHealthResponse,
 } from "remote-signer-client";
+import { auditSeverityTone } from "../components/AuditTimeline";
 import {
   Badge,
   Card,
@@ -15,6 +16,7 @@ import {
   shorten,
 } from "../components/ui";
 import { getClient, getCredentials } from "../lib/auth";
+import { useCanReadAudit } from "../lib/rbac";
 import { useApi } from "../lib/useApi";
 import { ProgressBar, pctUsed } from "./Budgets";
 
@@ -50,7 +52,10 @@ interface HotBudget {
 export function Dashboard() {
   const creds = getCredentials();
   const health = useApi((c) => c.health() as Promise<HealthResponse>);
-  const audit = useApi((c) => c.audit.list({ limit: 5 }));
+  const canReadAudit = useCanReadAudit();
+  const audit = useApi((c) =>
+    c.audit.list({ limit: 8, exclude_event_type: "api_request" }),
+  );
 
   // Single GET /api/v1/evm/budgets — surfaces both rule and simulation
   // budgets in one shot. Refreshes only on mount; /budgets has a Refresh
@@ -166,54 +171,64 @@ export function Dashboard() {
         </Card>
       )}
 
-      <Card title="Recent audit events">
-        {audit.loading && <Loading />}
-        {audit.error && <ErrorBanner msg={audit.error} />}
-        {audit.data &&
-          (audit.data.records.length === 0 ? (
-            <Empty msg="No events yet." />
-          ) : (
-            <table className="w-full text-left text-sm">
-              <thead className="text-xs uppercase text-ink-500">
-                <tr>
-                  <th className="py-1 pr-3 font-normal">When</th>
-                  <th className="py-1 pr-3 font-normal">Event</th>
-                  <th className="py-1 pr-3 font-normal">Actor</th>
-                  <th className="py-1 font-normal">Severity</th>
-                </tr>
-              </thead>
-              <tbody>
-                {audit.data.records.map((r) => (
-                  <tr key={r.id} className="border-t border-ink-100">
-                    <td className="py-1 pr-3 font-mono text-xs text-ink-700">
-                      {r.timestamp}
-                    </td>
-                    <td className="py-1 pr-3">{r.event_type}</td>
-                    <td className="py-1 pr-3 font-mono text-xs text-ink-700">
-                      {r.api_key_id || "—"}
-                    </td>
-                    <td className="py-1">
-                      <Badge tone={severityTone(r.severity)}>
-                        {r.severity}
-                      </Badge>
-                    </td>
+      {canReadAudit && (
+        <Card
+          title="Recent audit events"
+          actions={
+            <Link
+              to="/audit"
+              className="text-xs text-accent-600 hover:text-accent-500"
+            >
+              full log →
+            </Link>
+          }
+        >
+          {audit.loading && <Loading />}
+          {audit.error && <ErrorBanner msg={audit.error} />}
+          {audit.data &&
+            (audit.data.records.length === 0 ? (
+              <Empty msg="No events yet." />
+            ) : (
+              <table className="w-full text-left text-sm">
+                <thead className="text-xs uppercase text-ink-500">
+                  <tr>
+                    <th className="py-1 pr-3 font-normal">When</th>
+                    <th className="py-1 pr-3 font-normal">Event</th>
+                    <th className="py-1 pr-3 font-normal">API key</th>
+                    <th className="py-1 pr-3 font-normal">IP</th>
+                    <th className="py-1 font-normal">Severity</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          ))}
-      </Card>
+                </thead>
+                <tbody>
+                  {audit.data.records.map((r) => (
+                    <tr key={r.id} className="border-t border-ink-100">
+                      <td className="py-1 pr-3 font-mono text-xs text-ink-700">
+                        {r.timestamp}
+                      </td>
+                      <td className="py-1 pr-3 text-xs">{r.event_type}</td>
+                      <td className="py-1 pr-3 font-mono text-xs text-ink-700">
+                        {r.api_key_id || "—"}
+                      </td>
+                      <td className="py-1 pr-3 font-mono text-xs text-ink-700">
+                        {r.actor_address || "—"}
+                      </td>
+                      <td className="py-1">
+                        <Badge tone={auditSeverityTone(r.severity)}>
+                          {r.severity}
+                        </Badge>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ))}
+          {health.data?.security?.audit_retention_days != null && (
+            <p className="mt-3 text-[11px] text-ink-500">
+              Retention: {health.data.security.audit_retention_days} days
+            </p>
+          )}
+        </Card>
+      )}
     </div>
   );
-}
-
-function severityTone(sev: string): "neutral" | "yellow" | "red" {
-  switch (sev) {
-    case "critical":
-      return "red";
-    case "warning":
-      return "yellow";
-    default:
-      return "neutral";
-  }
 }

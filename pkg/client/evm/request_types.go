@@ -11,12 +11,16 @@ type ListRequestsResponse struct {
 
 // ListRequestsFilter contains filter options for listing requests.
 type ListRequestsFilter struct {
-	Status        string
-	SignerAddress string
-	ChainID       string
-	Limit         int
-	Cursor        *string
-	CursorID      *string
+	Status            string
+	SignerAddress     string
+	ChainID           string
+	SignType          string
+	TransactionStatus string
+	APIKeyID          string
+	Role              string
+	Limit             int
+	Cursor            *string
+	CursorID          *string
 }
 
 // ApproveRequest represents a request to approve a signing request.

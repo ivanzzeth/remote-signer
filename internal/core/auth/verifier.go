@@ -222,6 +222,15 @@ func (v *Verifier) verifyRequestInternal(
 		}
 	}
 
+	if v.apiKeyRepo != nil {
+		keyID := apiKey.ID
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			_ = v.apiKeyRepo.UpdateLastUsed(ctx, keyID)
+		}()
+	}
+
 	return apiKey, nil
 }
 

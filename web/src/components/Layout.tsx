@@ -6,6 +6,7 @@ import {
   getCredentials,
   hasStoredKeystore,
 } from "../lib/auth";
+import { useCanReadAudit } from "../lib/rbac";
 
 interface LayoutProps {
   children: ReactNode;
@@ -15,11 +16,9 @@ export function Layout({ children }: LayoutProps) {
   const creds = getCredentials();
   const navigate = useNavigate();
   const stored = hasStoredKeystore();
+  const canReadAudit = useCanReadAudit();
 
   function onSignOut() {
-    // Clears the in-memory seed but keeps the encrypted keystore so the
-    // next visit only needs the password. The /login route detects the
-    // stored keystore and goes straight to the Unlock screen.
     clearCredentials();
     navigate("/login", { replace: true });
   }
@@ -60,7 +59,7 @@ export function Layout({ children }: LayoutProps) {
         <NavItem to="/presets">Presets</NavItem>
         <NavItem to="/budgets">Budgets</NavItem>
         <NavItem to="/api-keys">API Keys</NavItem>
-        <NavItem to="/audit">Audit log</NavItem>
+        {canReadAudit && <NavItem to="/audit">Audit log</NavItem>}
         <NavItem to="/settings">Settings</NavItem>
 
         <div className="mt-auto space-y-2 border-t border-ink-200 px-3 pt-3">

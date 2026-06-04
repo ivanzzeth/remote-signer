@@ -56,6 +56,12 @@ export interface ListRequestsFilter {
   status?: RequestStatus;
   signer_address?: string;
   chain_id?: string;
+  sign_type?: string;
+  transaction_status?: "none" | "broadcasted" | "mined" | "dropped" | "failed";
+  /** Admin/dev only */
+  api_key_id?: string;
+  /** Admin/dev only */
+  role?: string;
   limit?: number;
   cursor?: string;
   cursor_id?: string;
@@ -147,6 +153,18 @@ export class EvmRequestService {
     }
     if (filter?.chain_id) {
       params.append("chain_id", filter.chain_id);
+    }
+    if (filter?.sign_type) {
+      params.append("sign_type", filter.sign_type);
+    }
+    if (filter?.transaction_status) {
+      params.append("transaction_status", filter.transaction_status);
+    }
+    if (filter?.api_key_id) {
+      params.append("api_key_id", filter.api_key_id);
+    }
+    if (filter?.role) {
+      params.append("role", filter.role);
     }
     if (filter?.limit) {
       params.append("limit", filter.limit.toString());

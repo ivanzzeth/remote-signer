@@ -31,6 +31,9 @@ func (s *Service) List(ctx context.Context, filter *ListFilter) (*ListResponse, 
 		if filter.EventType != "" {
 			params = append(params, fmt.Sprintf("event_type=%s", filter.EventType))
 		}
+		if filter.ExcludeEventTypes != "" {
+			params = append(params, fmt.Sprintf("exclude_event_type=%s", url.QueryEscape(filter.ExcludeEventTypes)))
+		}
 		if filter.Severity != "" {
 			params = append(params, fmt.Sprintf("severity=%s", filter.Severity))
 		}
@@ -39,6 +42,9 @@ func (s *Service) List(ctx context.Context, filter *ListFilter) (*ListResponse, 
 		}
 		if filter.SignerAddress != "" {
 			params = append(params, fmt.Sprintf("signer_address=%s", filter.SignerAddress))
+		}
+		if filter.SignRequestID != "" {
+			params = append(params, fmt.Sprintf("sign_request_id=%s", url.QueryEscape(filter.SignRequestID)))
 		}
 		if filter.ChainType != "" {
 			params = append(params, fmt.Sprintf("chain_type=%s", filter.ChainType))

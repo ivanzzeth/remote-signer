@@ -35,15 +35,17 @@ type ListResponse struct {
 
 // ListFilter contains filter options for listing audit records.
 type ListFilter struct {
-	EventType     string
-	Severity      string
-	APIKeyID      string
-	SignerAddress string
-	ChainType     string
-	ChainID       string
-	StartTime     *time.Time
-	EndTime       *time.Time
-	Limit         int
-	Cursor        *string
-	CursorID      *string
+	EventType         string
+	ExcludeEventTypes string
+	Severity          string
+	APIKeyID          string
+	SignerAddress     string
+	SignRequestID     string
+	ChainType         string
+	ChainID           string
+	StartTime         *time.Time
+	EndTime           *time.Time
+	Limit             int
+	Cursor            *string
+	CursorID          *string
 }
