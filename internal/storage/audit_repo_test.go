@@ -224,10 +224,48 @@ func TestAuditRepo_GetByRequestID(t *testing.T) {
 	_, repo := setupAuditRepoTestDB(t)
 	ctx := context.Background()
 
-	// NOTE: GetByRequestID uses buildFilterQuery with "request_id" column name,
-	// but the GORM model field SignRequestID maps to "sign_request_id".
-	// This means the query will fail with SQLite. We verify it at least
-	// does not panic and returns the expected database error.
-	_, err := repo.GetByRequestID(ctx, types.SignRequestID("req-audit-1"))
-	assert.Error(t, err, "expected error due to column name mismatch in buildFilterQuery")
+	reqID := types.SignRequestID("req-audit-1")
+	require.NoError(t, repo.Log(ctx, &types.AuditRecord{
+		ID:            "audit-req-1",
+		EventType:     types.AuditEventTypeSignRequest,
+		Severity:      types.AuditSeverityInfo,
+		Timestamp:     time.Now(),
+		APIKeyID:      "key-1",
+		SignRequestID: &reqID,
+	}))
+	require.NoError(t, repo.Log(ctx, &types.AuditRecord{
+		ID:        "audit-other",
+		EventType: types.AuditEventTypeAuthSuccess,
+		Severity:  types.AuditSeverityInfo,
+		Timestamp: time.Now(),
+		APIKeyID:  "key-1",
+	}))
+
+	got, err := repo.GetByRequestID(ctx, reqID)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, types.AuditID("audit-req-1"), got[0].ID)
+}
+
+func TestAuditRepo_Query_ExcludeEventType(t *testing.T) {
+	_, repo := setupAuditRepoTestDB(t)
+	ctx := context.Background()
+	now := time.Now()
+
+	require.NoError(t, repo.Log(ctx, &types.AuditRecord{
+		ID: "audit-api", EventType: types.AuditEventTypeAPIRequest,
+		Severity: types.AuditSeverityInfo, Timestamp: now, APIKeyID: "key-1",
+	}))
+	require.NoError(t, repo.Log(ctx, &types.AuditRecord{
+		ID: "audit-sign", EventType: types.AuditEventTypeSignRequest,
+		Severity: types.AuditSeverityInfo, Timestamp: now, APIKeyID: "key-1",
+	}))
+
+	got, err := repo.Query(ctx, AuditFilter{
+		ExcludeEventTypes: []types.AuditEventType{types.AuditEventTypeAPIRequest},
+		Limit:             10,
+	})
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, types.AuditEventTypeSignRequest, got[0].EventType)
 }

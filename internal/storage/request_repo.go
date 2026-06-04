@@ -16,7 +16,15 @@ type RequestFilter struct {
 	SignerAddress *string
 	ChainType     *types.ChainType
 	ChainID       *string
-	Status        []types.SignRequestStatus
+	SignType      *string
+	// APIKeyRole filters to requests whose api_key_id belongs to a key
+	// with this role (admin-only query param).
+	APIKeyRole *types.APIKeyRole
+	// TransactionStatus filters by linked on-chain row status.
+	// "none" means no transaction_id is set; other values match
+	// transactions.status (broadcasted, mined, dropped, failed).
+	TransactionStatus *string
+	Status            []types.SignRequestStatus
 	// Cursor-based pagination (preferred over Offset)
 	// Cursor is the created_at timestamp of the last item from previous page
 	Cursor *time.Time
@@ -197,6 +205,22 @@ func (r *GormRequestRepository) buildFilterQuery(ctx context.Context, filter Req
 	}
 	if len(filter.Status) > 0 {
 		query = query.Where("status IN ?", filter.Status)
+	}
+	if filter.SignType != nil {
+		query = query.Where("sign_type = ?", *filter.SignType)
+	}
+	if filter.APIKeyRole != nil {
+		query = query.Where("api_key_id IN (?)",
+			r.db.Table("api_keys").Select("id").Where("role = ?", *filter.APIKeyRole))
+	}
+	if filter.TransactionStatus != nil {
+		switch *filter.TransactionStatus {
+		case "none":
+			query = query.Where("transaction_id IS NULL OR transaction_id = ''")
+		default:
+			query = query.Where("transaction_id IN (?)",
+				r.db.Table("transactions").Select("id").Where("status = ?", *filter.TransactionStatus))
+		}
 	}
 
 	return query

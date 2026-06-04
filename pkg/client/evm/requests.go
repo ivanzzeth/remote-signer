@@ -41,6 +41,18 @@ func (s *RequestService) List(ctx context.Context, filter *ListRequestsFilter) (
 		if filter.ChainID != "" {
 			params = append(params, fmt.Sprintf("chain_id=%s", filter.ChainID))
 		}
+		if filter.SignType != "" {
+			params = append(params, fmt.Sprintf("sign_type=%s", filter.SignType))
+		}
+		if filter.TransactionStatus != "" {
+			params = append(params, fmt.Sprintf("transaction_status=%s", filter.TransactionStatus))
+		}
+		if filter.APIKeyID != "" {
+			params = append(params, fmt.Sprintf("api_key_id=%s", url.QueryEscape(filter.APIKeyID)))
+		}
+		if filter.Role != "" {
+			params = append(params, fmt.Sprintf("role=%s", filter.Role))
+		}
 		if filter.Limit > 0 {
 			params = append(params, fmt.Sprintf("limit=%d", filter.Limit))
 		}

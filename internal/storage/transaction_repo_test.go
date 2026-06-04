@@ -192,3 +192,43 @@ func TestTransactionRepo_ListFilter(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, from0xaa, 2)
 }
+
+func TestTransactionRepo_ListFilter_SignTypeAndRole(t *testing.T) {
+	db := newTxTestDB(t)
+	require.NoError(t, db.AutoMigrate(&types.SignRequest{}, &types.APIKey{}))
+	reqRepo, err := NewGormRequestRepository(db)
+	require.NoError(t, err)
+	txRepo, err := NewGormTransactionRepository(db)
+	require.NoError(t, err)
+	ctx := context.Background()
+	now := time.Now()
+
+	require.NoError(t, db.Create(&types.APIKey{ID: "agent-key", Role: types.RoleAgent, Enabled: true}).Error)
+	require.NoError(t, db.Create(&types.APIKey{ID: "admin-key", Role: types.RoleAdmin, Enabled: true}).Error)
+	require.NoError(t, reqRepo.Create(ctx, &types.SignRequest{
+		ID: "req-agent", APIKeyID: "agent-key", ChainType: types.ChainTypeEVM,
+		ChainID: "1", SignType: "transaction", Status: types.StatusCompleted, CreatedAt: now,
+	}))
+	require.NoError(t, reqRepo.Create(ctx, &types.SignRequest{
+		ID: "req-admin", APIKeyID: "admin-key", ChainType: types.ChainTypeEVM,
+		ChainID: "1", SignType: "typed_data", Status: types.StatusCompleted, CreatedAt: now,
+	}))
+	require.NoError(t, txRepo.Create(ctx, &types.Transaction{
+		ID: "tx-agent", SignRequestID: "req-agent", ChainID: "1", TxHash: "0xa",
+		Status: types.TxStatusBroadcasted, BroadcastedAt: now,
+	}))
+	require.NoError(t, txRepo.Create(ctx, &types.Transaction{
+		ID: "tx-admin", SignRequestID: "req-admin", ChainID: "1", TxHash: "0xb",
+		Status: types.TxStatusBroadcasted, BroadcastedAt: now,
+	}))
+
+	byType, err := txRepo.List(ctx, types.TransactionFilter{SignType: "transaction"})
+	require.NoError(t, err)
+	require.Len(t, byType, 1)
+	assert.Equal(t, "tx-agent", byType[0].ID)
+
+	byRole, err := txRepo.List(ctx, types.TransactionFilter{APIKeyRole: types.RoleAgent})
+	require.NoError(t, err)
+	require.Len(t, byRole, 1)
+	assert.Equal(t, "tx-agent", byRole[0].ID)
+}

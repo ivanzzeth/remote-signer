@@ -167,7 +167,7 @@ export type {
 } from "./evm";
 
 // Audit
-export { AuditService } from "./audit";
+export { AuditService, ALL_AUDIT_EVENT_TYPES } from "./audit";
 export type {
   AuditEventType,
   AuditRecord,

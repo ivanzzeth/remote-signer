@@ -15,7 +15,7 @@ import {
   PageHeader,
   shorten,
 } from "../components/ui";
-import { getClient } from "../lib/auth";
+import { getClient, getCredentials } from "../lib/auth";
 import { useApi } from "../lib/useApi";
 
 const STATUSES: RequestStatus[] = [
@@ -27,6 +27,19 @@ const STATUSES: RequestStatus[] = [
   "failed",
 ];
 
+const SIGN_TYPES = [
+  "personal",
+  "typed_data",
+  "transaction",
+  "hash",
+  "raw_message",
+  "eip191",
+] as const;
+
+const TX_STATUSES = ["none", "broadcasted", "mined", "dropped", "failed"] as const;
+
+const ROLES = ["admin", "dev", "agent", "strategy"] as const;
+
 /**
  * Sign-request queue overview. Rows link out to /requests/:id for the
  * full payload + action view; the only inline actions are Approve and
@@ -34,20 +47,37 @@ const STATUSES: RequestStatus[] = [
  * common operator gesture.
  */
 export function Requests() {
-  // Default to "all" so freshly-landed operators see history + active
-  // queue together; filtering by `authorizing` is one click away and
-  // restoring it as the default hid completed/rejected from view.
   const [status, setStatus] = useState<RequestStatus | "">("");
+  const [signerAddress, setSignerAddress] = useState("");
+  const [chainID, setChainID] = useState("");
+  const [signType, setSignType] = useState("");
+  const [transactionStatus, setTransactionStatus] = useState<
+    (typeof TX_STATUSES)[number] | ""
+  >("");
+  const [apiKeyID, setAPIKeyID] = useState("");
+  const [role, setRole] = useState("");
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+
+  const namesApi = useApi((c) => c.apiKeys.names());
+  const currentApiKeyID = getCredentials()?.apiKeyID ?? "";
+  const currentRole =
+    namesApi.data?.keys.find((k) => k.id === currentApiKeyID)?.role ?? "";
+  const showAdminFilters = currentRole === "admin" || currentRole === "dev";
 
   const filter: ListRequestsFilter = {
     limit: 50,
     ...(status ? { status } : {}),
+    ...(signerAddress ? { signer_address: signerAddress } : {}),
+    ...(chainID ? { chain_id: chainID } : {}),
+    ...(signType ? { sign_type: signType } : {}),
+    ...(transactionStatus ? { transaction_status: transactionStatus } : {}),
+    ...(showAdminFilters && apiKeyID ? { api_key_id: apiKeyID } : {}),
+    ...(showAdminFilters && role ? { role } : {}),
   };
   const { data, loading, error, reload } = useApi(
     (c) => c.evm.requests.list(filter),
-    [status],
+    [status, signerAddress, chainID, signType, transactionStatus, apiKeyID, role],
   );
 
   async function approve(id: string) {
@@ -81,6 +111,11 @@ export function Requests() {
     }
   }
 
+  const selectCls =
+    "rounded-md border border-ink-300 bg-white px-2 py-1 text-sm text-ink-900";
+  const inputCls =
+    "rounded-md border border-ink-300 bg-white px-2 py-1 text-sm text-ink-900";
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -100,24 +135,111 @@ export function Requests() {
       {mutationError && <ErrorBanner msg={mutationError} />}
 
       <Card>
-        <div className="mb-4 flex flex-wrap items-end gap-3">
-          <div>
-            <label className="mb-1 block text-[11px] uppercase tracking-wide text-ink-500">
-              Status
-            </label>
+        <div
+          data-testid="requests-filter-bar"
+          className="mb-4 flex flex-wrap items-end gap-3 rounded-md border border-ink-200 bg-ink-50 p-3"
+        >
+          <FilterField label="Status">
             <select
               value={status}
               onChange={(e) => setStatus(e.target.value as RequestStatus | "")}
-              className="rounded-md border border-ink-300 px-2 py-1 text-sm"
+              className={selectCls}
             >
-              <option value="">all</option>
+              <option value="">All</option>
               {STATUSES.map((s) => (
                 <option key={s} value={s}>
                   {s}
                 </option>
               ))}
             </select>
-          </div>
+          </FilterField>
+
+          <FilterField label="Signer">
+            <input
+              type="text"
+              value={signerAddress}
+              onChange={(e) => setSignerAddress(e.target.value.trim())}
+              placeholder="0x…"
+              className={`${inputCls} w-44 font-mono text-xs`}
+            />
+          </FilterField>
+
+          <FilterField label="Chain ID">
+            <input
+              type="text"
+              inputMode="numeric"
+              value={chainID}
+              onChange={(e) => setChainID(e.target.value.trim())}
+              placeholder="e.g. 1"
+              className={`${inputCls} w-24`}
+            />
+          </FilterField>
+
+          <FilterField label="Sign type">
+            <select
+              value={signType}
+              onChange={(e) => setSignType(e.target.value)}
+              className={selectCls}
+            >
+              <option value="">All</option>
+              {SIGN_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+          </FilterField>
+
+          <FilterField label="On-chain">
+            <select
+              value={transactionStatus}
+              onChange={(e) =>
+                setTransactionStatus(e.target.value as (typeof TX_STATUSES)[number] | "")
+              }
+              className={selectCls}
+            >
+              <option value="">All</option>
+              {TX_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </FilterField>
+
+          {showAdminFilters && (
+            <>
+              <FilterField label="API key">
+                <select
+                  value={apiKeyID}
+                  onChange={(e) => setAPIKeyID(e.target.value)}
+                  className={selectCls}
+                >
+                  <option value="">All</option>
+                  {(namesApi.data?.keys ?? []).map((k) => (
+                    <option key={k.id} value={k.id}>
+                      {k.id} {k.name && `· ${k.name}`}
+                    </option>
+                  ))}
+                </select>
+              </FilterField>
+
+              <FilterField label="Role">
+                <select
+                  value={role}
+                  onChange={(e) => setRole(e.target.value)}
+                  className={selectCls}
+                >
+                  <option value="">All</option>
+                  {ROLES.map((r) => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))}
+                </select>
+              </FilterField>
+            </>
+          )}
         </div>
 
         {loading && <Loading />}
@@ -153,6 +275,23 @@ export function Requests() {
             </table>
           ))}
       </Card>
+    </div>
+  );
+}
+
+function FilterField({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="text-[10px] uppercase tracking-wide text-ink-500">
+        {label}
+      </label>
+      {children}
     </div>
   );
 }

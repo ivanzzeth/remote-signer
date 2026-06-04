@@ -240,6 +240,59 @@ func TestRequestRepo_List_WithFilters(t *testing.T) {
 	assert.Equal(t, types.SignRequestID("req-filt-1"), list[0].ID)
 }
 
+func TestRequestRepo_List_AdvancedFilters(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&types.SignRequest{}, &types.APIKey{}, &types.Transaction{}))
+	repo, err := NewGormRequestRepository(db)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	require.NoError(t, db.Create(&types.APIKey{ID: "agent-key", Role: types.RoleAgent, Enabled: true}).Error)
+	require.NoError(t, db.Create(&types.APIKey{ID: "admin-key", Role: types.RoleAdmin, Enabled: true}).Error)
+
+	txID := "tx-mined-1"
+	require.NoError(t, db.Create(&types.Transaction{
+		ID: txID, ChainID: "1", TxHash: "0xabc", Status: types.TxStatusMined,
+		BroadcastedAt: time.Now(),
+	}).Error)
+
+	signType := "typed_data"
+	role := types.RoleAgent
+	txStatus := string(types.TxStatusMined)
+	txIDPtr := txID
+
+	require.NoError(t, repo.Create(ctx, &types.SignRequest{
+		ID: "req-adv-1", APIKeyID: "agent-key", ChainType: types.ChainTypeEVM,
+		ChainID: "56", SignerAddress: "0x111", SignType: signType,
+		Status: types.StatusCompleted, TransactionID: &txIDPtr, CreatedAt: time.Now(),
+	}))
+	require.NoError(t, repo.Create(ctx, &types.SignRequest{
+		ID: "req-adv-2", APIKeyID: "admin-key", ChainType: types.ChainTypeEVM,
+		ChainID: "1", SignerAddress: "0x222", SignType: "transaction",
+		Status: types.StatusCompleted, CreatedAt: time.Now(),
+	}))
+
+	bySignType, err := repo.List(ctx, RequestFilter{SignType: &signType, Limit: 10})
+	require.NoError(t, err)
+	assert.Len(t, bySignType, 1)
+	assert.Equal(t, types.SignRequestID("req-adv-1"), bySignType[0].ID)
+
+	byRole, err := repo.List(ctx, RequestFilter{APIKeyRole: &role, Limit: 10})
+	require.NoError(t, err)
+	assert.Len(t, byRole, 1)
+
+	byTx, err := repo.List(ctx, RequestFilter{TransactionStatus: &txStatus, Limit: 10})
+	require.NoError(t, err)
+	assert.Len(t, byTx, 1)
+
+	none := "none"
+	noTx, err := repo.List(ctx, RequestFilter{TransactionStatus: &none, Limit: 10})
+	require.NoError(t, err)
+	assert.Len(t, noTx, 1)
+	assert.Equal(t, types.SignRequestID("req-adv-2"), noTx[0].ID)
+}
+
 func TestRequestRepo_List_CursorPagination(t *testing.T) {
 	_, repo := setupRequestRepoTestDB(t)
 	ctx := context.Background()

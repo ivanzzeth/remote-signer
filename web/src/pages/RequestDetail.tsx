@@ -6,8 +6,10 @@ import {
   type RequestStatusResponse,
 } from "remote-signer-client";
 import { Badge, Card, CodeBlock, ErrorBanner, Loading, shorten } from "../components/ui";
+import { AuditTimelineTable } from "../components/AuditTimeline";
 import { SimulationPreview } from "../components/SimulationPreview";
 import { getClient } from "../lib/auth";
+import { useCanReadAudit } from "../lib/rbac";
 import { useApi } from "../lib/useApi";
 
 /**
@@ -26,10 +28,21 @@ export function RequestDetail() {
   const navigate = useNavigate();
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const canReadAudit = useCanReadAudit();
 
   const { data, loading, error, reload } = useApi(
     (c) => c.evm.requests.get(id),
     [id],
+  );
+
+  const audit = useApi(
+    async (c) => {
+      if (!canReadAudit) {
+        return { records: [], total: 0, has_more: false };
+      }
+      return c.audit.listByRequest(id);
+    },
+    [id, canReadAudit],
   );
 
   async function approve() {
@@ -135,6 +148,16 @@ export function RequestDetail() {
           {hasOutcome(data) && (
             <Card title="Outcome">
               <OutcomeView req={data} />
+            </Card>
+          )}
+
+          {canReadAudit && (
+            <Card title="Audit timeline">
+              {audit.loading && <Loading />}
+              {audit.error && <ErrorBanner msg={audit.error} />}
+              {audit.data && (
+                <AuditTimelineTable records={audit.data.records} expandable />
+              )}
             </Card>
           )}
         </>

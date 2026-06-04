@@ -23,6 +23,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
+	"github.com/ivanzzeth/remote-signer/internal/validate"
 )
 
 // TransactionsHandler implements GET /api/v1/evm/transactions[/{id}].
@@ -77,15 +78,35 @@ type TransactionsListResponse struct {
 
 func (h *TransactionsHandler) list(w http.ResponseWriter, r *http.Request, apiKey *types.APIKey) {
 	q := r.URL.Query()
+	from := q.Get("from")
+	if from == "" {
+		from = q.Get("signer_address")
+	}
 	filter := types.TransactionFilter{
 		SignRequestID: q.Get("sign_request_id"),
 		ChainID:       q.Get("chain_id"),
-		FromAddress:   q.Get("from"),
+		FromAddress:   from,
 		APIKeyID:      q.Get("api_key_id"),
+		SignType:      q.Get("sign_type"),
 	}
 	if s := q.Get("status"); s != "" {
 		st := types.TransactionStatus(s)
 		filter.Status = &st
+	}
+	if roleStr := q.Get("role"); roleStr != "" {
+		if !types.IsValidAPIKeyRole(roleStr) {
+			h.writeError(w, http.StatusBadRequest, "invalid role")
+			return
+		}
+		filter.APIKeyRole = types.APIKeyRole(roleStr)
+	}
+	if filter.SignType != "" && !validate.ValidSignTypes[filter.SignType] {
+		h.writeError(w, http.StatusBadRequest, "invalid sign_type")
+		return
+	}
+	if filter.FromAddress != "" && !validate.IsValidEthereumAddress(filter.FromAddress) {
+		h.writeError(w, http.StatusBadRequest, "invalid from address")
+		return
 	}
 	if v := q.Get("limit"); v != "" {
 		n, err := strconv.Atoi(v)
@@ -104,17 +125,18 @@ func (h *TransactionsHandler) list(w http.ResponseWriter, r *http.Request, apiKe
 		filter.Offset = n
 	}
 
-	// Visibility gate. Non-admin callers may NOT see rows belonging
+	// Visibility gate. Non-admin/dev callers may NOT see rows belonging
 	// to another api key — pin server-side so a bad client can't
 	// bypass via a hand-rolled query string. Mirrors the
 	// /signers?api_key_id behavior (signer_crud.go).
-	if !apiKey.IsAdmin() {
+	if !apiKey.IsAdmin() && !apiKey.IsDev() {
 		if filter.APIKeyID != "" && filter.APIKeyID != apiKey.ID {
 			h.writeError(w, http.StatusForbidden,
 				"forbidden: only admins can filter by another api key")
 			return
 		}
 		filter.APIKeyID = apiKey.ID
+		filter.APIKeyRole = ""
 	}
 
 	total, err := h.repo.Count(r.Context(), filter)
@@ -152,7 +174,7 @@ func (h *TransactionsHandler) get(w http.ResponseWriter, r *http.Request, apiKey
 	// Implementing via the filter saves a separate lookup — request
 	// the row by ID + APIKeyID; a mismatch comes back as not-found,
 	// matching the standard 404-on-no-permission posture.
-	if !apiKey.IsAdmin() {
+	if !apiKey.IsAdmin() && !apiKey.IsDev() {
 		owned, ownErr := h.repo.List(r.Context(), types.TransactionFilter{APIKeyID: apiKey.ID, Limit: 1, Offset: 0, SignRequestID: tx.SignRequestID})
 		if ownErr != nil || len(owned) == 0 || owned[0].ID != tx.ID {
 			h.writeError(w, http.StatusNotFound, "transaction not found")

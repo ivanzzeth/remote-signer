@@ -163,5 +163,14 @@ func (r *GormTransactionRepository) applyFilter(q *gorm.DB, f types.TransactionF
 		q = q.Where("sign_request_id IN (?)",
 			r.db.Table("sign_requests").Select("id").Where("api_key_id = ?", f.APIKeyID))
 	}
+	if f.SignType != "" {
+		q = q.Where("sign_request_id IN (?)",
+			r.db.Table("sign_requests").Select("id").Where("sign_type = ?", f.SignType))
+	}
+	if f.APIKeyRole != "" {
+		q = q.Where("sign_request_id IN (?)",
+			r.db.Table("sign_requests").Select("id").Where("api_key_id IN (?)",
+				r.db.Table("api_keys").Select("id").Where("role = ?", f.APIKeyRole)))
+	}
 	return q
 }

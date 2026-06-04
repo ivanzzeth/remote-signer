@@ -95,6 +95,10 @@ type TransactionFilter struct {
 	ChainID       string             // exact match
 	FromAddress   string             // exact match
 	Status        *TransactionStatus // nil = any
+	// SignType filters via the linked sign_request row.
+	SignType string
+	// APIKeyRole filters via sign_request → api_keys join (admin-only).
+	APIKeyRole APIKeyRole
 	// APIKeyID scopes to transactions whose linked sign_request was
 	// created by this key. Implemented as a subquery against
 	// sign_requests in the Gorm repo. The handler uses it to enforce

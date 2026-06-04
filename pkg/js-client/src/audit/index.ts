@@ -1,5 +1,5 @@
 /**
- * Audit service: list audit log records.
+ * Audit service: list audit log records and per-request timelines.
  */
 
 import { HttpTransport } from "../transport";
@@ -8,6 +8,7 @@ import { HttpTransport } from "../transport";
 // Types
 // ---------------------------------------------------------------------------
 
+/** All audit event types emitted by the daemon. */
 export type AuditEventType =
   | "auth_success"
   | "auth_failure"
@@ -22,21 +23,64 @@ export type AuditEventType =
   | "rule_created"
   | "rule_updated"
   | "rule_deleted"
-  | "rate_limit_hit";
+  | "rule_approved"
+  | "rule_rejected"
+  | "rate_limit_hit"
+  | "api_request"
+  | "config_reloaded"
+  | "template_synced"
+  | "apikey_synced"
+  | "signer_created"
+  | "signer_locked"
+  | "signer_unlocked"
+  | "signer_auto_locked"
+  | "hdwallet_created"
+  | "hdwallet_derived"
+  | "preset_applied";
+
+export const ALL_AUDIT_EVENT_TYPES: AuditEventType[] = [
+  "auth_success",
+  "auth_failure",
+  "sign_request",
+  "sign_complete",
+  "sign_failed",
+  "sign_rejected",
+  "rule_matched",
+  "approval_request",
+  "approval_granted",
+  "approval_denied",
+  "rule_created",
+  "rule_updated",
+  "rule_deleted",
+  "rule_approved",
+  "rule_rejected",
+  "rate_limit_hit",
+  "api_request",
+  "config_reloaded",
+  "template_synced",
+  "apikey_synced",
+  "signer_created",
+  "signer_locked",
+  "signer_unlocked",
+  "signer_auto_locked",
+  "hdwallet_created",
+  "hdwallet_derived",
+  "preset_applied",
+];
 
 export interface AuditRecord {
   id: string;
-  event_type: AuditEventType;
+  event_type: AuditEventType | string;
   severity: "info" | "warning" | "critical";
   timestamp: string;
-  api_key_id: string;
+  api_key_id?: string;
   actor_address?: string;
   sign_request_id?: string;
   signer_address?: string;
   chain_type?: string;
   chain_id?: string;
   rule_id?: string;
-  details?: Record<string, any>;
+  details?: Record<string, unknown> | unknown[];
   error_message?: string;
   request_method?: string;
   request_path?: string;
@@ -44,9 +88,12 @@ export interface AuditRecord {
 
 export interface ListAuditFilter {
   event_type?: AuditEventType;
+  /** Comma-separated list of event types to omit from results. */
+  exclude_event_type?: string;
   severity?: "info" | "warning" | "critical";
   api_key_id?: string;
   signer_address?: string;
+  sign_request_id?: string;
   chain_type?: string;
   chain_id?: string;
   start_time?: string; // RFC3339
@@ -79,6 +126,9 @@ export class AuditService {
     if (filter?.event_type) {
       params.append("event_type", filter.event_type);
     }
+    if (filter?.exclude_event_type) {
+      params.append("exclude_event_type", filter.exclude_event_type);
+    }
     if (filter?.severity) {
       params.append("severity", filter.severity);
     }
@@ -87,6 +137,9 @@ export class AuditService {
     }
     if (filter?.signer_address) {
       params.append("signer_address", filter.signer_address);
+    }
+    if (filter?.sign_request_id) {
+      params.append("sign_request_id", filter.sign_request_id);
     }
     if (filter?.chain_type) {
       params.append("chain_type", filter.chain_type);
@@ -114,5 +167,16 @@ export class AuditService {
     const path = `/api/v1/audit${queryString ? `?${queryString}` : ""}`;
 
     return this.transport.request<ListAuditResponse>("GET", path, null);
+  }
+
+  /**
+   * List audit records for a single sign request (chronological timeline).
+   */
+  async listByRequest(requestID: string): Promise<ListAuditResponse> {
+    return this.transport.request<ListAuditResponse>(
+      "GET",
+      `/api/v1/audit/requests/${encodeURIComponent(requestID)}`,
+      null,
+    );
   }
 }

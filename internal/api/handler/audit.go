@@ -172,6 +172,26 @@ func (h *AuditHandler) listAuditRecords(w http.ResponseWriter, r *http.Request) 
 		ct := types.ChainType(chainType)
 		filter.ChainType = &ct
 	}
+	if chainID := query.Get("chain_id"); chainID != "" {
+		if _, err := strconv.ParseUint(chainID, 10, 64); err != nil {
+			h.writeError(w, "invalid chain_id: must be a positive decimal integer", http.StatusBadRequest)
+			return
+		}
+		filter.ChainID = &chainID
+	}
+	if excludeStr := query.Get("exclude_event_type"); excludeStr != "" {
+		for _, part := range strings.Split(excludeStr, ",") {
+			et := strings.TrimSpace(part)
+			if et == "" {
+				continue
+			}
+			if !validate.IsValidAuditEventType(et) {
+				h.writeError(w, fmt.Sprintf("invalid exclude_event_type: %s", et), http.StatusBadRequest)
+				return
+			}
+			filter.ExcludeEventTypes = append(filter.ExcludeEventTypes, types.AuditEventType(et))
+		}
+	}
 	if startTimeStr := query.Get("start_time"); startTimeStr != "" {
 		startTime, err := time.Parse(time.RFC3339, startTimeStr)
 		if err != nil {

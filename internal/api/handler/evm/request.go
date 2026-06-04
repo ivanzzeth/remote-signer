@@ -146,6 +146,14 @@ func (h *RequestHandler) getRequest(w http.ResponseWriter, r *http.Request, apiK
 	h.writeJSON(w, h.toDetailResponse(r.Context(), req, true), http.StatusOK)
 }
 
+var validTransactionStatuses = map[string]bool{
+	"none":        true,
+	string(types.TxStatusBroadcasted): true,
+	string(types.TxStatusMined):       true,
+	string(types.TxStatusDropped):     true,
+	string(types.TxStatusFailed):      true,
+}
+
 // ListHandler handles listing requests
 type ListHandler struct {
 	signService service.SignServiceAPI
@@ -218,6 +226,33 @@ func (h *ListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			filter.Status = append(filter.Status, status)
+		}
+	}
+	if signType := query.Get("sign_type"); signType != "" {
+		if !validate.ValidSignTypes[signType] {
+			h.writeError(w, fmt.Sprintf("invalid sign_type filter: %s", signType), http.StatusBadRequest)
+			return
+		}
+		filter.SignType = &signType
+	}
+	if txStatus := query.Get("transaction_status"); txStatus != "" {
+		if !validTransactionStatuses[txStatus] {
+			h.writeError(w, fmt.Sprintf("invalid transaction_status filter: %s", txStatus), http.StatusBadRequest)
+			return
+		}
+		filter.TransactionStatus = &txStatus
+	}
+	if apiKey.IsAdmin() || apiKey.IsDev() {
+		if apiKeyID := query.Get("api_key_id"); apiKeyID != "" {
+			filter.APIKeyID = &apiKeyID
+		}
+		if roleStr := query.Get("role"); roleStr != "" {
+			if !types.IsValidAPIKeyRole(roleStr) {
+				h.writeError(w, fmt.Sprintf("invalid role filter: %s", roleStr), http.StatusBadRequest)
+				return
+			}
+			role := types.APIKeyRole(roleStr)
+			filter.APIKeyRole = &role
 		}
 	}
 

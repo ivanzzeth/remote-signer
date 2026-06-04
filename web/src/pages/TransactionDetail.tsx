@@ -1,6 +1,7 @@
 import { Link, useParams } from "react-router-dom";
 import type { ReactNode } from "react";
 import type { OnChainTransaction } from "remote-signer-client";
+import { AuditTimelineTable } from "../components/AuditTimeline";
 import {
   Badge,
   Card,
@@ -8,11 +9,9 @@ import {
   Loading,
   PageHeader,
 } from "../components/ui";
+import { useCanReadAudit } from "../lib/rbac";
 import { useApi } from "../lib/useApi";
 
-// Local helper — the shared `ui` module doesn't export Mono yet and
-// every page that needs it inlines its own. Keeping the same one-
-// liner shape so future consolidation is mechanical.
 function Mono({ children }: { children: ReactNode }) {
   return <span className="font-mono text-xs text-ink-900">{children}</span>;
 }
@@ -25,9 +24,20 @@ function Mono({ children }: { children: ReactNode }) {
  */
 export function TransactionDetail() {
   const { id = "" } = useParams<{ id: string }>();
+  const canReadAudit = useCanReadAudit();
   const { data, loading, error } = useApi(
     (c) => c.evm.transactions.get(id),
     [id],
+  );
+
+  const audit = useApi(
+    async (c) => {
+      if (!canReadAudit || !data?.sign_request_id) {
+        return { records: [], total: 0, has_more: false };
+      }
+      return c.audit.listByRequest(data.sign_request_id);
+    },
+    [canReadAudit, data?.sign_request_id],
   );
 
   return (
@@ -47,7 +57,20 @@ export function TransactionDetail() {
 
       {loading && <Loading />}
       {error && <ErrorBanner msg={error} />}
-      {data && <TxDetail tx={data} />}
+      {data && (
+        <>
+          <TxDetail tx={data} />
+          {canReadAudit && data.sign_request_id && (
+            <Card title="Sign-request audit timeline">
+              {audit.loading && <Loading />}
+              {audit.error && <ErrorBanner msg={audit.error} />}
+              {audit.data && (
+                <AuditTimelineTable records={audit.data.records} expandable />
+              )}
+            </Card>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -86,8 +109,8 @@ function TxDetail({ tx }: { tx: OnChainTransaction }) {
               {tx.receipt_status === undefined
                 ? "—"
                 : tx.receipt_status === 1
-                ? "success (1)"
-                : "revert (0)"}
+                  ? "success (1)"
+                  : "revert (0)"}
             </Mono>
           </Field>
           {tx.error_message && (
