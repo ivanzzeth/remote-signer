@@ -401,14 +401,27 @@ func init() {
 	ruleUpdateCmd.Flags().StringVar(&flagUpdateDescription, "description", "", "New description")
 	ruleUpdateCmd.Flags().StringArrayVar(&flagUpdateConfig, "set-config", nil, "Set config field (key=value, repeatable)")
 	ruleUpdateCmd.Flags().IntVar(&flagUpdatePriority, "priority", 0, "Rule priority (lower = higher, 1 is highest)")
+	ruleUpdateCmd.Flags().StringArrayVar(&flagUpdateVars, "set-var", nil, "Set variables field (key=value, repeatable)")
 
 	ruleValidateCmd.Flags().BoolVar(&flagRuleValidateAll, "all", false, "Validate all evm_js rules (batch mode)")
+
+	// propose flags
+	ruleProposeCmd.Flags().StringVar(&flagProposeName, "name", "", "Proposed rule name")
+	ruleProposeCmd.Flags().StringVar(&flagProposeDescription, "description", "", "Proposed description")
+	ruleProposeCmd.Flags().StringArrayVar(&flagProposeConfig, "set-config", nil, "Set config field (key=value, repeatable)")
+	ruleProposeCmd.Flags().StringArrayVar(&flagProposeVars, "set-var", nil, "Set variables field (key=value, repeatable)")
+	ruleProposeCmd.Flags().IntVar(&flagProposePriority, "priority", 0, "Rule priority (lower = higher, 1 is highest)")
+	ruleProposeCmd.Flags().StringVar(&flagProposeChainType, "chain-type", "", "Chain type (e.g. ethereum)")
+	ruleProposeCmd.Flags().StringVar(&flagProposeChainID, "chain-id", "", "Chain ID (e.g. 1 for mainnet)")
+	ruleProposeCmd.Flags().StringVar(&flagProposeSignerAddr, "signer-address", "", "Signer address for the rule instance")
+	ruleProposeCmd.Flags().StringVar(&flagProposeBudgetPeriod, "budget-period", "", "Budget period (e.g. daily, weekly, monthly)")
 
 	// register all subcommands
 	ruleCmd.AddCommand(ruleListRemoteCmd)
 	ruleCmd.AddCommand(ruleGetCmd)
 	ruleCmd.AddCommand(ruleCreateCmd)
 	ruleCmd.AddCommand(ruleUpdateCmd)
+	ruleCmd.AddCommand(ruleProposeCmd)
 	ruleCmd.AddCommand(ruleDeleteCmd)
 	ruleCmd.AddCommand(ruleToggleCmd)
 	ruleCmd.AddCommand(ruleApproveCmd)
@@ -425,6 +438,18 @@ var (
 	flagUpdateConfig      []string
 	flagUpdatePriority    int
 	flagCreatePriority    int
+	flagUpdateVars        []string
+
+	// propose flags
+	flagProposeName        string
+	flagProposeDescription string
+	flagProposeConfig      []string
+	flagProposeVars        []string
+	flagProposePriority    int
+	flagProposeChainType   string
+	flagProposeChainID     string
+	flagProposeSignerAddr  string
+	flagProposeBudgetPeriod string
 )
 
 var ruleUpdateCmd = &cobra.Command{
@@ -462,6 +487,17 @@ Example:
 			}
 		}
 
+		if len(flagUpdateVars) > 0 {
+			req.Variables = make(map[string]string)
+			for _, kv := range flagUpdateVars {
+				parts := strings.SplitN(kv, "=", 2)
+				if len(parts) != 2 {
+					return fmt.Errorf("invalid --set-var format %q, expected key=value", kv)
+				}
+				req.Variables[parts[0]] = parts[1]
+			}
+		}
+
 		rule, err := c.EVM.Rules.Update(cmd.Context(), args[0], req)
 		if err != nil {
 			return fmt.Errorf("update rule: %w", err)
@@ -472,6 +508,90 @@ Example:
 		}
 
 		fmt.Printf("Rule %s updated\n", rule.ID)
+		return nil
+	},
+}
+
+// --- rule propose ---
+
+var ruleProposeCmd = &cobra.Command{
+	Use:   "propose <rule-id>",
+	Short: "Propose changes to a rule (requires admin approval)",
+	Long: `Propose changes to an existing rule. The proposal creates a new rule row
+with ProposalFor set to the target rule ID. Admin must approve the proposal
+for changes to take effect on the target.
+
+Example:
+  rule propose agent-sign-evm --set-var "max_amount=100" --priority 1`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c, err := newClientFromFlags(cmd)
+		if err != nil {
+			return err
+		}
+
+		req := &evm.ProposeRuleRequest{}
+
+		if flagProposeName != "" {
+			req.Name = flagProposeName
+		}
+		if flagProposeDescription != "" {
+			req.Description = flagProposeDescription
+		}
+
+		if len(flagProposeConfig) > 0 {
+			req.Config = make(map[string]interface{})
+			for _, kv := range flagProposeConfig {
+				parts := strings.SplitN(kv, "=", 2)
+				if len(parts) != 2 {
+					return fmt.Errorf("invalid --set-config format %q, expected key=value", kv)
+				}
+				req.Config[parts[0]] = parts[1]
+			}
+		}
+
+		if len(flagProposeVars) > 0 {
+			req.Variables = make(map[string]string)
+			for _, kv := range flagProposeVars {
+				parts := strings.SplitN(kv, "=", 2)
+				if len(parts) != 2 {
+					return fmt.Errorf("invalid --set-var format %q, expected key=value", kv)
+				}
+				req.Variables[parts[0]] = parts[1]
+			}
+		}
+
+		if flagProposePriority != 0 {
+			p := flagProposePriority
+			req.Priority = &p
+		}
+		if flagProposeChainType != "" {
+			ct := flagProposeChainType
+			req.ChainType = &ct
+		}
+		if flagProposeChainID != "" {
+			cid := flagProposeChainID
+			req.ChainID = &cid
+		}
+		if flagProposeSignerAddr != "" {
+			sa := flagProposeSignerAddr
+			req.SignerAddress = &sa
+		}
+		if flagProposeBudgetPeriod != "" {
+			bp := flagProposeBudgetPeriod
+			req.BudgetPeriod = &bp
+		}
+
+		rule, err := c.EVM.Rules.Propose(cmd.Context(), args[0], req)
+		if err != nil {
+			return fmt.Errorf("propose rule: %w", err)
+		}
+
+		if flagOutputFormat == "json" {
+			return printJSON(rule)
+		}
+
+		fmt.Printf("Proposal created for rule %s (proposal ID: %s)\n", args[0], rule.ID)
 		return nil
 	},
 }

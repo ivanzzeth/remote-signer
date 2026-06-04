@@ -324,33 +324,14 @@ func (bc *BudgetChecker) checkDynamicBudget(
 
 // checkPeriodicRenewal checks if the budget needs to be reset for a new period
 func (bc *BudgetChecker) checkPeriodicRenewal(ctx context.Context, rule *types.Rule, budget *types.RuleBudget, unit string) error {
-	if rule.BudgetPeriod == nil || rule.BudgetPeriodStart == nil {
-		return nil // No periodic renewal
-	}
-
-	now := time.Now()
-	period := *rule.BudgetPeriod
-	start := *rule.BudgetPeriodStart
-
-	if period <= 0 || now.Before(start) {
+	needs, currentPeriodStart := NeedsPeriodReset(rule, budget, time.Now())
+	if !needs {
 		return nil
 	}
-
-	// Calculate current period
-	elapsed := now.Sub(start)
-	periodIndex := int64(elapsed / period)
-	currentPeriodStart := start.Add(time.Duration(periodIndex) * period)
-
-	// If budget was updated before current period, it belongs to an old period — reset
-	if budget.UpdatedAt.Before(currentPeriodStart) {
-		bc.logger.Info("resetting budget for new period",
-			"rule_id", rule.ID,
-			"unit", unit,
-			"period_index", periodIndex,
-			"current_period_start", currentPeriodStart,
-		)
-		return bc.budgetRepo.ResetBudget(ctx, rule.ID, unit, currentPeriodStart)
-	}
-
-	return nil
+	bc.logger.Info("resetting budget for new period",
+		"rule_id", rule.ID,
+		"unit", unit,
+		"current_period_start", currentPeriodStart,
+	)
+	return bc.budgetRepo.ResetBudget(ctx, rule.ID, unit, currentPeriodStart)
 }

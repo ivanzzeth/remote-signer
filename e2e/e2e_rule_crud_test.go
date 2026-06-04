@@ -193,3 +193,105 @@ func TestRule_NonAdminCannotListRules(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, 403, apiErr.StatusCode)
 }
+
+// --- Proposal approve ---
+
+func TestRule_ProposeAndApprove(t *testing.T) {
+	ctx := context.Background()
+
+	// Admin creates a target rule
+	rule := &evm.CreateRuleRequest{
+		Name:    "Test Rule - Proposal Target",
+		Type:    "evm_value_limit",
+		Mode:    "whitelist",
+		Enabled: true,
+		Config:  map[string]interface{}{"max_value": "100"},
+	}
+	created, err := adminClient.EVM.Rules.Create(ctx, rule)
+	require.NoError(t, err)
+	require.NotNil(t, created)
+	assert.Contains(t, string(created.Config), `"max_value":"100"`)
+	t.Logf("created target rule: %s", created.ID)
+
+	// Agent proposes a change to the target rule
+	proposal, err := adminClient.EVM.Rules.Propose(ctx, created.ID, &evm.ProposeRuleRequest{
+		Config: map[string]interface{}{"max_value": "500"},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, proposal)
+	assert.Equal(t, created.ID, *proposal.ProposalFor, "proposal should reference target")
+	assert.Equal(t, "pending_approval", proposal.Status)
+	assert.False(t, proposal.Enabled, "proposals are never active")
+	t.Logf("created proposal: %s -> target %s", proposal.ID, *proposal.ProposalFor)
+
+	// Target rule is unchanged (proposal not yet approved)
+	targetBefore, err := adminClient.EVM.Rules.Get(ctx, created.ID)
+	require.NoError(t, err)
+	assert.Contains(t, string(targetBefore.Config), `"max_value":"100"`, "target should be unchanged before approval")
+
+	// Admin approves the proposal
+	approved, err := adminClient.EVM.Rules.Approve(ctx, proposal.ID)
+	require.NoError(t, err)
+	require.NotNil(t, approved)
+	assert.Equal(t, created.ID, approved.ID, "approve response should return target rule")
+	assert.Equal(t, "active", approved.Status)
+	t.Logf("approved proposal, response target ID: %s", approved.ID)
+
+	// Target rule is now updated
+	targetAfter, err := adminClient.EVM.Rules.Get(ctx, created.ID)
+	require.NoError(t, err)
+	assert.Contains(t, string(targetAfter.Config), `"max_value":"500"`, "target should be updated after approval")
+
+	// Proposal is deleted (not found)
+	_, err = adminClient.EVM.Rules.Get(ctx, proposal.ID)
+	require.Error(t, err, "proposal should be deleted after approval")
+
+	// Cleanup
+	require.NoError(t, adminClient.EVM.Rules.Delete(ctx, created.ID))
+}
+
+func TestRule_ProposeAndReject(t *testing.T) {
+	ctx := context.Background()
+
+	// Admin creates a target rule
+	rule := &evm.CreateRuleRequest{
+		Name:    "Test Rule - Proposal Reject",
+		Type:    "evm_value_limit",
+		Mode:    "whitelist",
+		Enabled: true,
+		Config:  map[string]interface{}{"max_value": "200"},
+	}
+	created, err := adminClient.EVM.Rules.Create(ctx, rule)
+	require.NoError(t, err)
+	require.NotNil(t, created)
+	t.Logf("created target rule: %s", created.ID)
+
+	// Propose a change
+	proposal, err := adminClient.EVM.Rules.Propose(ctx, created.ID, &evm.ProposeRuleRequest{
+		Config: map[string]interface{}{"max_value": "999"},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, proposal)
+	assert.Equal(t, "pending_approval", proposal.Status)
+	t.Logf("created proposal: %s", proposal.ID)
+
+	// Reject the proposal
+	rejected, err := adminClient.EVM.Rules.Reject(ctx, proposal.ID, "not needed")
+	require.NoError(t, err)
+	require.NotNil(t, rejected)
+	assert.Equal(t, "rejected", rejected.Status)
+
+	// Target rule is unchanged
+	targetAfter, err := adminClient.EVM.Rules.Get(ctx, created.ID)
+	require.NoError(t, err)
+	assert.Contains(t, string(targetAfter.Config), `"max_value":"200"`, "target should NOT change after rejection")
+
+	// Proposal is still findable (rejected, not deleted)
+	rejectedProposal, err := adminClient.EVM.Rules.Get(ctx, proposal.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "rejected", rejectedProposal.Status)
+
+	// Cleanup
+	require.NoError(t, adminClient.EVM.Rules.Delete(ctx, created.ID))
+	require.NoError(t, adminClient.EVM.Rules.Delete(ctx, proposal.ID))
+}

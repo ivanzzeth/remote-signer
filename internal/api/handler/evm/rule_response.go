@@ -27,6 +27,8 @@ type RuleResponse struct {
 	Status            string          `json:"status,omitempty"`
 	ApprovedBy        *string         `json:"approved_by,omitempty"`
 	Immutable         bool            `json:"immutable,omitempty"`
+	ProposalFor     *string         `json:"proposal_for,omitempty"`
+	RejectionReason *string         `json:"rejection_reason,omitempty"`
 	SignerAddress     *string         `json:"signer_address,omitempty"`
 	TemplateID        *string         `json:"template_id,omitempty"`
 	Config            json.RawMessage `json:"config,omitempty"`
@@ -110,6 +112,23 @@ type UpdateRuleRequest struct {
 	TestCases     []JSRuleTestCase       `json:"test_cases,omitempty"` // required for evm_js when updating config
 }
 
+// ProposeRuleRequest represents a request to propose changes to an existing rule.
+// The proposal creates a new rule row with ProposalFor set to the target rule ID.
+// Admin must approve the proposal for changes to take effect on the target.
+type ProposeRuleRequest struct {
+	Name          string                 `json:"name,omitempty"`
+	Description   string                 `json:"description,omitempty"`
+	Type          string                 `json:"type,omitempty"`
+	Config        map[string]interface{} `json:"config,omitempty"`
+	Variables     map[string]string      `json:"variables,omitempty"`
+	Matrix        []map[string]any       `json:"matrix,omitempty"`
+	ChainType     *string                `json:"chain_type,omitempty"`
+	ChainID       *string                `json:"chain_id,omitempty"`
+	SignerAddress *string                `json:"signer_address,omitempty"`
+	Priority      *int                   `json:"priority,omitempty"`
+	BudgetPeriod  *string                `json:"budget_period,omitempty"`
+}
+
 // RejectRuleRequest represents a request body for POST /evm/rules/:id/reject
 type RejectRuleRequest struct {
 	Reason string `json:"reason"`
@@ -157,6 +176,12 @@ func (h *RuleHandler) toRuleResponse(rule *types.Rule) RuleResponse {
 		MatchCount:  rule.MatchCount,
 		Immutable:   rule.Immutable,
 	}
+
+	if rule.ProposalFor != nil {
+		pf := string(*rule.ProposalFor)
+		resp.ProposalFor = &pf
+	}
+	resp.RejectionReason = rule.RejectionReason
 
 	if rule.ChainType != nil {
 		ct := string(*rule.ChainType)

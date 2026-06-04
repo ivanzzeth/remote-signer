@@ -12,6 +12,12 @@ import { getClient } from "../lib/auth";
 import { useApi } from "../lib/useApi";
 import { BudgetForm } from "../components/BudgetForm";
 import { ProgressBar, pctUsed } from "./Budgets";
+import {
+  formatBudgetPeriod,
+  formatPeriodWindow,
+  timeUntil,
+  unitLabel,
+} from "../lib/budgetDisplay";
 
 /**
  * Per-budget detail view. Shows everything the row stores, plus
@@ -35,7 +41,17 @@ export function BudgetDetail() {
   );
 
   async function reset() {
-    if (!confirm("Reset spent + tx_count to zero?")) return;
+    if (!data) return;
+    const label = unitLabel(data);
+    const msg = [
+      "Reset spend?",
+      "",
+      `Unit: ${label}`,
+      `(${data.unit})`,
+      "",
+      `Spent ${data.spent} → 0, tx_count → 0`,
+    ].join("\n");
+    if (!confirm(msg)) return;
     const c = getClient();
     if (!c) return;
     setBusy(true);
@@ -128,6 +144,11 @@ function BudgetView({
   onDelete: () => void;
 }) {
   const pct = pctUsed(budget);
+  const label = unitLabel(budget);
+  const periodLabel = formatBudgetPeriod(budget.budget_period);
+  const windowLabel = formatPeriodWindow(budget.period_start, budget.period_ends_at);
+  const active = budget.enforces_limit && !budget.is_stale_placeholder;
+
   return (
     <>
       <PageHeader
@@ -137,10 +158,9 @@ function BudgetView({
             : "Simulation budget"
         }
         subtitle={
-          <span className="font-mono text-xs">
-            {budget.kind === "simulation"
-              ? `Signer ${budget.signer_address}`
-              : `${budget.rule_type || "rule"} · ${budget.rule_id}`}
+          <span className="text-sm text-ink-700">
+            {label}
+            <span className="ml-2 font-mono text-xs text-ink-500">{budget.unit}</span>
           </span>
         }
         actions={
@@ -153,14 +173,35 @@ function BudgetView({
                 View rule
               </Link>
             )}
-            <Badge
-              tone={budget.kind === "simulation" ? "yellow" : "neutral"}
-            >
-              {budget.kind}
-            </Badge>
+            {budget.is_stale_placeholder ? (
+              <Badge tone="neutral">Unused template</Badge>
+            ) : active ? (
+              <Badge tone="green">Active</Badge>
+            ) : (
+              <Badge tone={budget.kind === "simulation" ? "yellow" : "neutral"}>
+                {budget.kind}
+              </Badge>
+            )}
           </div>
         }
       />
+
+      {budget.is_stale_placeholder && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          This row is a template placeholder and is not debited at sign time. Reset the
+          chain-scoped row under Active limits on the rule page instead.
+        </div>
+      )}
+
+      {active && pct >= 100 && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          Budget limit reached on this row. Use <strong>Reset spend</strong> to clear
+          immediately
+          {budget.period_ends_at
+            ? `, or wait until ${timeUntil(budget.period_ends_at) ?? "period end"}.`
+            : "."}
+        </div>
+      )}
 
       <Card title="Usage">
         <div className="space-y-3">
@@ -181,12 +222,55 @@ function BudgetView({
         </div>
       </Card>
 
+      {periodLabel && (
+        <Card title="Current period">
+          <FieldGrid>
+            <Field label="Period">
+              <Mono>{periodLabel}</Mono>
+            </Field>
+            {budget.period_start && (
+              <Field label="Started">
+                <Mono>{budget.period_start}</Mono>
+              </Field>
+            )}
+            {budget.period_ends_at && (
+              <Field label="Resets at">
+                <Mono>
+                  {budget.period_ends_at}
+                  {timeUntil(budget.period_ends_at)
+                    ? ` (${timeUntil(budget.period_ends_at)})`
+                    : ""}
+                </Mono>
+              </Field>
+            )}
+            {windowLabel && (
+              <Field label="Window">
+                <Mono>{windowLabel}</Mono>
+              </Field>
+            )}
+          </FieldGrid>
+        </Card>
+      )}
+
+      {active && budget.unit.includes(":") && (
+        <Card title="Debited when">
+          <p className="text-sm text-ink-700">
+            This row is enforced when matching signatures are approved for the scoped
+            unit below.
+          </p>
+          <p className="mt-2 font-mono text-xs text-ink-500">{budget.unit}</p>
+        </Card>
+      )}
+
       <Card title="Configuration">
         <FieldGrid>
           <Field label="ID">
             <Mono>{budget.id}</Mono>
           </Field>
-          <Field label="Unit">
+          <Field label="Unit display">
+            <Mono>{label}</Mono>
+          </Field>
+          <Field label="Storage unit">
             <Mono>{budget.unit}</Mono>
           </Field>
           <Field label="Max total">

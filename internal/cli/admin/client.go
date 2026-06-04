@@ -29,6 +29,20 @@ var (
 	flagJSON             bool
 )
 
+// resolveAPIKeyFileDefault resolves the --api-key-file default.
+// It respects REMOTE_SIGNER_API_KEY_FILE but only if the file actually exists;
+// a stale env var pointing to a missing file silently falls through so that
+// the auto-discovery path in newClientFromFlags can find the correct credential.
+func resolveAPIKeyFileDefault() string {
+	path := os.Getenv("REMOTE_SIGNER_API_KEY_FILE")
+	if path != "" {
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+	return ""
+}
+
 // registerAuthFlags adds persistent auth flags to the root command.
 // Supports environment variables: REMOTE_SIGNER_URL, REMOTE_SIGNER_API_KEY_ID, REMOTE_SIGNER_API_KEY_FILE,
 // REMOTE_SIGNER_TLS_CA, REMOTE_SIGNER_TLS_CERT, REMOTE_SIGNER_TLS_KEY
@@ -36,7 +50,7 @@ func registerAuthFlags(rootCmd *cobra.Command) {
 	pf := rootCmd.PersistentFlags()
 	pf.StringVar(&flagURL, "url", getEnvOrDefault("REMOTE_SIGNER_URL", "https://localhost:8548"), "Remote signer server URL (env: REMOTE_SIGNER_URL)")
 	pf.StringVar(&flagAPIKeyID, "api-key-id", os.Getenv("REMOTE_SIGNER_API_KEY_ID"), "API key ID for authentication (env: REMOTE_SIGNER_API_KEY_ID)")
-	pf.StringVar(&flagAPIKeyFile, "api-key-file", os.Getenv("REMOTE_SIGNER_API_KEY_FILE"), "Path to Ed25519 private key PEM file (env: REMOTE_SIGNER_API_KEY_FILE)")
+	pf.StringVar(&flagAPIKeyFile, "api-key-file", resolveAPIKeyFileDefault(), "Path to Ed25519 private key PEM file (env: REMOTE_SIGNER_API_KEY_FILE)")
 	pf.StringVar(&flagAPIKeyKeystore, "api-key-keystore", os.Getenv("REMOTE_SIGNER_API_KEY_KEYSTORE"), "Path to Ed25519 encrypted keystore file (mutually exclusive with --api-key-file) (env: REMOTE_SIGNER_API_KEY_KEYSTORE)")
 	pf.StringVar(&flagAPIKeyPasswordEnv, "api-key-password-env", "", "Environment variable name containing the keystore password (for CI; default: interactive prompt)")
 	pf.StringVar(&flagTLSCA, "tls-ca", os.Getenv("REMOTE_SIGNER_TLS_CA"), "CA certificate for TLS verification (env: REMOTE_SIGNER_TLS_CA)")

@@ -89,6 +89,7 @@ type mockBudgetRepo struct {
 	createFn        func(context.Context, *types.RuleBudget) error
 	createOrGetFn   func(context.Context, *types.RuleBudget) (*types.RuleBudget, bool, error)
 	updateFn        func(context.Context, *types.RuleBudget) error
+	resetFn         func(context.Context, types.RuleID, string, time.Time) error
 	deleteFn        func(context.Context, string) error
 	upsertLimitsFn  func(context.Context, types.RuleID, []storage.BudgetSyncRequest) error
 }
@@ -118,7 +119,10 @@ func (m *mockBudgetRepo) DeleteByRuleID(_ context.Context, _ types.RuleID) error
 func (m *mockBudgetRepo) AtomicSpend(_ context.Context, _ types.RuleID, _, _ string) error {
 	return nil
 }
-func (m *mockBudgetRepo) ResetBudget(_ context.Context, _ types.RuleID, _ string, _ time.Time) error {
+func (m *mockBudgetRepo) ResetBudget(ctx context.Context, ruleID types.RuleID, unit string, currentPeriodStart time.Time) error {
+	if m.resetFn != nil {
+		return m.resetFn(ctx, ruleID, unit, currentPeriodStart)
+	}
 	return nil
 }
 func (m *mockBudgetRepo) ListByRuleID(ctx context.Context, ruleID types.RuleID) ([]*types.RuleBudget, error) {

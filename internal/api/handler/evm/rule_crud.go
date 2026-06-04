@@ -479,6 +479,267 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 	h.writeJSON(w, h.toRuleResponse(rule), http.StatusOK)
 }
 
+// proposeRule handles POST /api/v1/evm/rules/{id}/propose
+// Creates a shadow-copy proposal for modifying a rule the caller doesn't own.
+// Agent-created proposals require admin approval before taking effect.
+func (h *RuleHandler) proposeRule(w http.ResponseWriter, r *http.Request, targetRuleID string) {
+	apiKey := middleware.GetAPIKey(r.Context())
+	if apiKey == nil {
+		h.writeError(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Only agent and admin can propose (dev uses direct PATCH on own rules)
+	if !apiKey.IsAgent() && !apiKey.IsAdmin() {
+		h.writeError(w, "permission denied: only agents and admins can propose rule changes", http.StatusForbidden)
+		return
+	}
+
+	// Read-only check
+	if h.readOnly {
+		h.writeError(w, "rule mutations are disabled in read-only mode", http.StatusForbidden)
+		return
+	}
+
+	var req ProposeRuleRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeError(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Validate at least one field is being changed
+	if req.Name == "" && req.Description == "" && req.Config == nil && req.Variables == nil &&
+		req.Matrix == nil && req.ChainType == nil && req.ChainID == nil &&
+		req.SignerAddress == nil && req.Priority == nil && req.BudgetPeriod == nil &&
+		req.Type == "" {
+		h.writeError(w, "at least one field must be changed in a proposal", http.StatusBadRequest)
+		return
+	}
+
+	// Validate type if specified
+	if req.Type != "" {
+		if !validate.IsValidRuleType(req.Type) {
+			h.writeError(w, "invalid rule type: "+req.Type, http.StatusBadRequest)
+			return
+		}
+		if apiKey.IsAgent() && blockedAgentRuleTypes[types.RuleType(req.Type)] {
+			h.writeError(w, fmt.Sprintf("agent role cannot change rule type to %q", req.Type), http.StatusForbidden)
+			return
+		}
+	}
+
+	// Load target rule
+	targetRule, err := h.ruleRepo.Get(r.Context(), types.RuleID(targetRuleID))
+	if err != nil {
+		if types.IsNotFound(err) {
+			h.writeError(w, "target rule not found", http.StatusNotFound)
+			return
+		}
+		h.logger.Error("failed to get target rule", "error", err, "rule_id", targetRuleID)
+		h.writeError(w, "failed to get target rule", http.StatusInternalServerError)
+		return
+	}
+
+	// Validate target rule
+	if targetRule.Source == types.RuleSourceConfig {
+		h.writeError(w, "cannot propose changes to config-sourced rules", http.StatusForbidden)
+		return
+	}
+	if targetRule.Immutable {
+		h.writeError(w, "cannot modify immutable rule", http.StatusForbidden)
+		return
+	}
+	if targetRule.ProposalFor != nil {
+		h.writeError(w, "cannot propose changes to a rule that is itself a proposal", http.StatusBadRequest)
+		return
+	}
+	if targetRule.Status != types.RuleStatusActive && targetRule.Status != types.RuleStatusPendingApproval {
+		h.writeError(w, fmt.Sprintf("target rule is not active (current status: %s)", targetRule.Status), http.StatusBadRequest)
+		return
+	}
+
+	// Check for existing pending proposal from this API key on the same target.
+	// RuleFilter does not expose ProposalFor or Status columns directly, so we
+	// list by Owner and filter in memory.
+	existing, err := h.ruleRepo.List(r.Context(), storage.RuleFilter{
+		Owner: &apiKey.ID,
+		Limit: 100,
+	})
+	if err == nil {
+		for _, rl := range existing {
+			if rl.ProposalFor != nil && string(*rl.ProposalFor) == targetRuleID &&
+				rl.Status == types.RuleStatusPendingApproval {
+				h.writeError(w, "a pending proposal from you already exists for this rule", http.StatusConflict)
+				return
+			}
+		}
+	}
+
+	// Check per-key rule count limit
+	if h.maxRulesPerKey > 0 {
+		ownerID := apiKey.ID
+		count, err := h.ruleRepo.Count(r.Context(), storage.RuleFilter{Owner: &ownerID})
+		if err != nil {
+			h.logger.Error("failed to count rules for owner", "error", err, "owner", ownerID)
+			h.writeError(w, "failed to check rule count", http.StatusInternalServerError)
+			return
+		}
+		if count >= h.maxRulesPerKey {
+			h.writeError(w, fmt.Sprintf("rule limit exceeded: maximum %d rules per API key", h.maxRulesPerKey), http.StatusForbidden)
+			return
+		}
+	}
+
+	// Determine the effective type for config validation
+	effectiveType := targetRule.Type
+	if req.Type != "" {
+		effectiveType = types.RuleType(req.Type)
+	}
+
+	// Validate config if provided
+	if req.Config != nil {
+		if err := ruleconfig.ValidateRuleConfig(string(effectiveType), req.Config); err != nil {
+			h.writeError(w, "invalid config: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Validate optional scope fields
+	if req.ChainType != nil {
+		if !validate.IsValidChainType(*req.ChainType) {
+			h.writeError(w, "invalid chain_type: must be one of evm, solana, cosmos", http.StatusBadRequest)
+			return
+		}
+	}
+	if req.SignerAddress != nil {
+		if !validate.IsValidEthereumAddress(*req.SignerAddress) {
+			h.writeError(w, "invalid signer_address: must be 0x followed by 40 hex characters", http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Build proposal rule by deep-copying the target and overlaying requested changes
+	now := time.Now()
+	proposal := &types.Rule{
+		ID:            types.RuleID(fmt.Sprintf("rule_%s", uuid.New().String())),
+		Name:          targetRule.Name,
+		Description:   targetRule.Description,
+		Type:          targetRule.Type,
+		Mode:          targetRule.Mode,
+		Source:        types.RuleSourceAPI,
+		ChainType:     targetRule.ChainType,
+		ChainID:       targetRule.ChainID,
+		SignerAddress: targetRule.SignerAddress,
+		Owner:         apiKey.ID,
+		AppliedTo:     targetRule.AppliedTo,
+		Status:        types.RuleStatusPendingApproval,
+		Immutable:     false,
+		TemplateID:    targetRule.TemplateID,
+		Priority:      targetRule.Priority,
+		Enabled:       false, // proposals are never active
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	// Deep-copy byte slices from target
+	if len(targetRule.Config) > 0 {
+		proposal.Config = make([]byte, len(targetRule.Config))
+		copy(proposal.Config, targetRule.Config)
+	}
+	if len(targetRule.Variables) > 0 {
+		proposal.Variables = make([]byte, len(targetRule.Variables))
+		copy(proposal.Variables, targetRule.Variables)
+	}
+	if len(targetRule.Matrix) > 0 {
+		proposal.Matrix = make([]byte, len(targetRule.Matrix))
+		copy(proposal.Matrix, targetRule.Matrix)
+	}
+	if targetRule.BudgetPeriod != nil {
+		bp := *targetRule.BudgetPeriod
+		proposal.BudgetPeriod = &bp
+	}
+	if targetRule.ExpiresAt != nil {
+		et := *targetRule.ExpiresAt
+		proposal.ExpiresAt = &et
+	}
+	// Set proposal linkage
+	pf := types.RuleID(targetRuleID)
+	proposal.ProposalFor = &pf
+
+	// Overlay proposed changes
+	if req.Name != "" {
+		proposal.Name = req.Name
+	}
+	if req.Description != "" {
+		proposal.Description = req.Description
+	}
+	if req.Type != "" {
+		proposal.Type = types.RuleType(req.Type)
+	}
+	if req.Config != nil {
+		configJSON, err := json.Marshal(req.Config)
+		if err != nil {
+			h.writeError(w, "failed to marshal config", http.StatusInternalServerError)
+			return
+		}
+		proposal.Config = configJSON
+	}
+	if req.Variables != nil {
+		varsJSON, err := json.Marshal(req.Variables)
+		if err != nil {
+			h.writeError(w, "failed to marshal variables", http.StatusInternalServerError)
+			return
+		}
+		proposal.Variables = varsJSON
+	}
+	if req.Matrix != nil {
+		matrixJSON, err := json.Marshal(req.Matrix)
+		if err != nil {
+			h.writeError(w, "failed to marshal matrix", http.StatusInternalServerError)
+			return
+		}
+		proposal.Matrix = matrixJSON
+	}
+	if req.ChainType != nil {
+		ct := types.ChainType(*req.ChainType)
+		proposal.ChainType = &ct
+	}
+	if req.ChainID != nil {
+		proposal.ChainID = req.ChainID
+	}
+	if req.SignerAddress != nil {
+		proposal.SignerAddress = req.SignerAddress
+	}
+	if req.Priority != nil {
+		proposal.Priority = *req.Priority
+	}
+	if req.BudgetPeriod != nil {
+		if *req.BudgetPeriod == "" {
+			proposal.BudgetPeriod = nil
+		} else {
+			d, err := time.ParseDuration(*req.BudgetPeriod)
+			if err != nil {
+				h.writeError(w, "invalid budget_period: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+			proposal.BudgetPeriod = &d
+		}
+	}
+
+	// Persist proposal
+	if err := h.ruleRepo.Create(r.Context(), proposal); err != nil {
+		h.logger.Error("failed to create proposal", "error", err)
+		h.writeError(w, "failed to create proposal", http.StatusInternalServerError)
+		return
+	}
+
+	h.logger.Info("rule proposal created", "proposal_id", proposal.ID, "target_id", targetRuleID, "proposed_by", apiKey.ID)
+	if h.auditLogger != nil {
+		clientIP, _ := r.Context().Value(middleware.ClientIPContextKey).(string)
+		h.auditLogger.LogRuleCreated(r.Context(), apiKey.ID, clientIP, proposal.ID, proposal.Name)
+	}
+
+	h.writeJSON(w, h.toRuleResponse(proposal), http.StatusAccepted)
+}
 // prepareBudgetSync resolves template BudgetMetering against current rule
 // variables and returns BudgetSyncRequests ready for upsert. Template fetching
 // happens outside any DB transaction to avoid SQLite serialization deadlocks.

@@ -240,6 +240,12 @@ func TestHDWalletProvider_CreateAndDerive(t *testing.T) {
 	derivedList, err := provider.ListDerivedAddresses(primaryAddr)
 	require.NoError(t, err)
 	assert.Len(t, derivedList, 5) // 0, 1, 2, 3, 4
+	for i, d := range derivedList {
+		require.NotNil(t, d.HDDerivationIndex, "derived[%d] missing hd_derivation_index", i)
+		assert.Equal(t, primaryAddr, d.HDParentAddress)
+	}
+	require.NotNil(t, derivedList[0].HDDerivationIndex)
+	assert.Equal(t, uint32(0), *derivedList[0].HDDerivationIndex)
 
 	// List HD wallets
 	wallets := provider.ListHDWallets()

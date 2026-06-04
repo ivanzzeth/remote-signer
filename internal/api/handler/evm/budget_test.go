@@ -358,6 +358,19 @@ func TestBudgetItemHandler(t *testing.T) {
 			store[b.ID] = &cp
 			return nil
 		}
+		budgets.resetFn = func(_ context.Context, ruleID types.RuleID, unit string, _ time.Time) error {
+			for id, b := range store {
+				if b.RuleID == ruleID && b.Unit == unit {
+					cp := *b
+					cp.Spent = "0"
+					cp.TxCount = 0
+					cp.AlertSent = false
+					store[id] = &cp
+					return nil
+				}
+			}
+			return types.ErrNotFound
+		}
 		budgets.deleteFn = func(_ context.Context, id string) error {
 			if _, ok := store[id]; !ok {
 				return types.ErrNotFound

@@ -26,6 +26,9 @@ test("create HD wallet + derive a child index via the UI", async ({
   const derivedTable = authedPage.locator("text=Derived addresses").locator(
     "xpath=ancestor::div[1]//table",
   );
+  const primaryIndexCell = derivedTable.locator("tbody tr").first().locator("td").nth(1);
+  await expect(primaryIndexCell).toHaveText("0");
+
   const before = await derivedTable.locator("tbody tr").count();
   await authedPage.fill("input[type=number]", "7");
   await authedPage.click("button:has-text('Derive')");

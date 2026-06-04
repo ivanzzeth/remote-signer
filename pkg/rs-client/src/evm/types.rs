@@ -183,6 +183,10 @@ pub struct Rule {
     pub immutable: bool,
     #[serde(default)]
     pub applied_to: Option<Vec<String>>,
+    #[serde(default)]
+    pub proposal_for: Option<String>,
+    #[serde(default)]
+    pub rejection_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -261,6 +265,33 @@ pub struct UpdateRuleRequest {
     pub variables: Option<std::collections::HashMap<String, String>>,
     #[serde(default)]
     pub matrix: Option<Vec<serde_json::Value>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ProposeRuleRequest {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(rename = "type")]
+    #[serde(default)]
+    pub rule_type: Option<String>,
+    #[serde(default)]
+    pub config: Option<serde_json::Value>,
+    #[serde(default)]
+    pub variables: Option<std::collections::HashMap<String, String>>,
+    #[serde(default)]
+    pub matrix: Option<Vec<serde_json::Value>>,
+    #[serde(default)]
+    pub chain_type: Option<String>,
+    #[serde(default)]
+    pub chain_id: Option<String>,
+    #[serde(default)]
+    pub signer_address: Option<String>,
+    #[serde(default)]
+    pub priority: Option<i32>,
+    #[serde(default)]
+    pub budget_period: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
