@@ -9,6 +9,7 @@ import {
   type ValidateRuleResponse,
 } from "remote-signer-client";
 import { AppliedToPicker } from "../components/AppliedToPicker";
+import { RuleBudgetsPanel } from "../components/RuleBudgetsPanel";
 import {
   Badge,
   Card,
@@ -472,6 +473,8 @@ function RuleDetailPanel({
     (c) => c.evm.rules.listBudgets(rule.id),
     [rule.id],
   );
+  const [budgetBusy, setBudgetBusy] = useState(false);
+  const [budgetMutationError, setBudgetMutationError] = useState<string | null>(null);
   const signersApi = useApi((c) => c.evm.signers.list(), [editing]);
   const [name, setName] = useState(rule.name);
   const [description, setDescription] = useState(rule.description ?? "");
@@ -903,49 +906,43 @@ function RuleDetailPanel({
         </div>
       )}
 
-      <div>
-        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-500">
-          Budgets
-        </h3>
-        {budgets.loading && <Loading />}
-        {budgets.error && <ErrorBanner msg={budgets.error} />}
-        {budgets.data &&
-          (budgets.data.length === 0 ? (
-            <Empty msg="No budgets attached to this rule." />
-          ) : (
-            <table className="w-full text-left text-sm">
-              <thead className="text-xs uppercase text-ink-500">
-                <tr>
-                  <th className="py-1 pr-3 font-normal">Unit</th>
-                  <th className="py-1 pr-3 font-normal">Spent / Max</th>
-                  <th className="py-1 pr-3 font-normal">Tx</th>
-                  <th className="py-1 font-normal">Alert</th>
-                </tr>
-              </thead>
-              <tbody>
-                {budgets.data.map((b) => (
-                  <tr key={b.id} className="border-t border-ink-100">
-                    <td className="py-1 pr-3 font-mono text-xs text-ink-700">
-                      {b.unit}
-                    </td>
-                    <td className="py-1 pr-3 font-mono text-xs text-ink-700">
-                      {b.spent} / {b.max_total}
-                    </td>
-                    <td className="py-1 pr-3 font-mono text-xs text-ink-700">
-                      {b.tx_count}
-                      {b.max_tx_count ? ` / ${b.max_tx_count}` : ""}
-                    </td>
-                    <td className="py-1">
-                      <Badge tone={b.alert_sent ? "red" : "neutral"}>
-                        {b.alert_pct}% {b.alert_sent ? "(sent)" : ""}
-                      </Badge>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ))}
-      </div>
+      <RuleBudgetsPanel
+        rule={rule}
+        budgets={budgets.data ?? undefined}
+        loading={budgets.loading}
+        error={budgetMutationError || budgets.error}
+        busy={budgetBusy}
+        onRefresh={() => {
+          setBudgetMutationError(null);
+          budgets.reload();
+        }}
+        onResetAll={async () => {
+          const c = getClient();
+          if (!c) return;
+          const active = (budgets.data ?? []).filter(
+            (b) => b.enforces_limit && !b.is_stale_placeholder,
+          );
+          if (active.length === 0) return;
+          const names = active.map((b) => b.unit_display || b.unit).join(", ");
+          if (
+            !confirm(
+              `Reset spend on ${active.length} enforcing budget row(s)?\n\n${names}`,
+            )
+          ) {
+            return;
+          }
+          setBudgetBusy(true);
+          setBudgetMutationError(null);
+          try {
+            await c.evm.rules.resetAllBudgets(rule.id);
+            budgets.reload();
+          } catch (e) {
+            setBudgetMutationError(formatMutationError(e));
+          } finally {
+            setBudgetBusy(false);
+          }
+        }}
+      />
     </div>
   );
 }

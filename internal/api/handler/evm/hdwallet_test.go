@@ -681,11 +681,25 @@ func TestHDWalletHandler_DeriveBatch_Error(t *testing.T) {
 
 func TestHDWalletHandler_ListDerived(t *testing.T) {
 	sm := newDefaultMockSignerManager()
+	ix0 := uint32(0)
+	ix1 := uint32(1)
 	sm.hdWalletMgr.listDerivedAddrsFn = func(primaryAddr string) ([]types.SignerInfo, error) {
 		assert.Equal(t, "0x1111111111111111111111111111111111111111", primaryAddr)
 		return []types.SignerInfo{
-			{Address: "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", Type: "hd_wallet", Enabled: true},
-			{Address: "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB", Type: "hd_wallet", Enabled: false},
+			{
+				Address:           "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+				Type:              "hd_wallet",
+				Enabled:           true,
+				HDParentAddress:   primaryAddr,
+				HDDerivationIndex: &ix0,
+			},
+			{
+				Address:           "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+				Type:              "hd_wallet",
+				Enabled:           false,
+				HDParentAddress:   primaryAddr,
+				HDDerivationIndex: &ix1,
+			},
 		}, nil
 	}
 	h := newTestHDWalletHandler(t, sm)
@@ -699,8 +713,12 @@ func TestHDWalletHandler_ListDerived(t *testing.T) {
 	require.Len(t, resp.Derived, 2)
 	assert.Equal(t, "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", resp.Derived[0].Address)
 	assert.True(t, resp.Derived[0].Enabled)
+	require.NotNil(t, resp.Derived[0].HDDerivationIndex)
+	assert.Equal(t, uint32(0), *resp.Derived[0].HDDerivationIndex)
 	assert.Equal(t, "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB", resp.Derived[1].Address)
 	assert.False(t, resp.Derived[1].Enabled)
+	require.NotNil(t, resp.Derived[1].HDDerivationIndex)
+	assert.Equal(t, uint32(1), *resp.Derived[1].HDDerivationIndex)
 }
 
 func TestHDWalletHandler_ListDerived_Error(t *testing.T) {

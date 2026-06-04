@@ -95,8 +95,8 @@ remote-signer/
 ## 常用命令
 
 ```bash
-make build              # 构建 daemon 二进制
-make build-embed        # 构建带 Web UI 的二进制（生产等效）
+make build-embed        # ⬅ 默认用这个！构建带 Web UI 的二进制（生产等效）
+make build              # 仅构建 daemon 二进制（无 Web UI，仅限开发调试用）
 make test               # 纯单元测试（无 build tag，快速）
 make test-unit          # 同 make test
 make test-integration   # 单元 + 内部集成测试（pre-commit hook 等效）
@@ -175,7 +175,7 @@ Client → Ed25519 Auth → Middleware Pipeline → Handler → SignService
 | Rust SDK | `pkg/rs-client/` | `cargo check` — 确认 service + types 覆盖新端点 |
 | JS Client | `pkg/mcp-server/node_modules/remote-signer-client/` | 检查 `.d.ts`，必要时提 PR 更新 npm 包 |
 | MCP Server | `pkg/mcp-server/src/index.ts` | `npm run build` — 确认新工具或参数变更已反映 |
-| Skills | `skills/remote-signer/SKILL.md` | MCP tools 列表、签名流程、CLI 示例是否需要更新 |
+| Skills | `skills/remote-signer-agent/SKILL.md` | Agent RBAC、签名流程、authorizing 自助、CLI 示例是否需要更新 |
 
 **原则**：API 变更是源头；SDK 是自动可推导的（对照 handler 检查 1:1 映射）；MCP 工具是 SDK 的薄封装；
 Skills 是面向 AI Agent 的使用文档。
@@ -210,11 +210,13 @@ ln -sf .agents .windsurf
 
 ## AI Agent 可用技能
 
-项目中 `skills/` 目录提供以下技能，实现阶段按需调用：
+> ⚠️ **强制规则**：凡是涉及 agent 侧 remote-signer 操作（CLI 调用、签名流程、RBAC 权限、agent 规则 CRUD、authorizing 卡住处理），必须先调用 `remote-signer-agent` 技能获取当前正确的 CLI 用法、RBAC 权限表和操作步骤，严禁凭训练数据猜测。
+
+项目中 `skills/` 目录提供以下技能：
 
 | 技能 | 文件 | 说明 |
 |------|------|------|
-| `remote-signer` | `skills/remote-signer/SKILL.md` | Remote Signer 综合指南：CLI/MCP 使用、签名流程（tx/typed data/personal）、RBAC 权限、TLS/mTLS、IP whitelist、SDK 集成 |
+| `remote-signer-agent` | `skills/remote-signer-agent/SKILL.md` | Agent 侧操作：agent API key、RBAC、签名流程、authorizing 自助、agent 规则更新 |
 | `remote-signer-rule-development` | `skills/remote-signer-rule-development/SKILL.md` | Remote Signer 规则开发（evm_js, solidity, templates, presets, delegate_to） |
 | `go-testing` | `skills/go-testing/SKILL.md` | Go 测试模式（table-driven, subtests, benchmarks, fuzzing, coverage） |
 | `go-security` | `skills/go-security/SKILL.md` | Go 安全审计（keystore, 密钥管理, 输入校验） |

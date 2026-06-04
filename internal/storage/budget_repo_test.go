@@ -115,6 +115,31 @@ func TestBudgetRepo_AtomicSpend_ExceedTotal(t *testing.T) {
 	assert.Equal(t, 1, got.TxCount)
 }
 
+func TestBudgetRepo_AtomicSpend_UnlimitedTxCountWhenNegative(t *testing.T) {
+	_, repo := setupBudgetTestDB(t)
+	ctx := context.Background()
+
+	budget := &types.RuleBudget{
+		ID:         "budget-unlimited-tx",
+		RuleID:     types.RuleID("rule-unlimited-tx"),
+		Unit:       "permit",
+		MaxTotal:   "-1",
+		MaxPerTx:   "-1",
+		Spent:      "0",
+		TxCount:    0,
+		MaxTxCount: -1,
+	}
+	require.NoError(t, repo.Create(ctx, budget))
+
+	err := repo.AtomicSpend(ctx, types.RuleID("rule-unlimited-tx"), "permit", "0")
+	require.NoError(t, err)
+
+	got, err := repo.GetByRuleID(ctx, types.RuleID("rule-unlimited-tx"), "permit")
+	require.NoError(t, err)
+	assert.Equal(t, "0", got.Spent)
+	assert.Equal(t, 1, got.TxCount)
+}
+
 func TestBudgetRepo_AtomicSpend_ExceedTxCount(t *testing.T) {
 	_, repo := setupBudgetTestDB(t)
 	ctx := context.Background()

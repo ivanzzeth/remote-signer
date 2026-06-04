@@ -395,11 +395,7 @@ func (p *HDWalletProvider) DeriveAddress(ctx context.Context, primaryAddr string
 		logger.EVM().Warn().Str("primary_address", primaryAddr).Err(err).Msg("failed to persist derivation state")
 	}
 
-	info := types.SignerInfo{
-		Address: addr.Hex(),
-		Type:    string(types.SignerTypeHDWallet),
-		Enabled: true,
-	}
+	info := hdDerivedSignerInfo(addr, primaryAddr, index)
 
 	logger.EVM().Info().Str("primary_address", primaryAddr).Uint64("index", uint64(index)).Str("derived_address", addr.Hex()).Msg("address derived")
 
@@ -433,21 +429,13 @@ func (p *HDWalletProvider) DeriveAddresses(ctx context.Context, primaryAddr stri
 			// Already exists is not an error — it was previously derived
 			if err == types.ErrAlreadyExists {
 				state.derivedIndices = appendUniqueUint32(state.derivedIndices, idx)
-				result = append(result, types.SignerInfo{
-					Address: addr.Hex(),
-					Type:    string(types.SignerTypeHDWallet),
-					Enabled: true,
-				})
+				result = append(result, hdDerivedSignerInfo(addr, primaryAddr, idx))
 				continue
 			}
 			return nil, err
 		}
 		state.derivedIndices = appendUniqueUint32(state.derivedIndices, idx)
-		result = append(result, types.SignerInfo{
-			Address: addr.Hex(),
-			Type:    string(types.SignerTypeHDWallet),
-			Enabled: true,
-		})
+		result = append(result, hdDerivedSignerInfo(addr, primaryAddr, idx))
 	}
 
 	if err := p.derivStore.Save(addrKey, state.derivedIndices); err != nil {
@@ -534,9 +522,27 @@ func (p *HDWalletProvider) ListDerivedAddresses(primaryAddr string) ([]types.Sig
 	return result, nil
 }
 
+// hdDerivedSignerInfo builds SignerInfo for an HD wallet address at a derivation index.
+func hdDerivedSignerInfo(addr common.Address, primaryAddr string, index uint32) types.SignerInfo {
+	idx := index
+	return types.SignerInfo{
+		Address:           addr.Hex(),
+		Type:              string(types.SignerTypeHDWallet),
+		Enabled:           true,
+		HDParentAddress:   primaryAddr,
+		HDDerivationIndex: &idx,
+	}
+}
+
 // registerDerivedSigner creates an ethsig.Signer from a derived key and registers it.
 // Must be called with p.mu held (or during construction when no concurrency).
 func (p *HDWalletProvider) registerDerivedSigner(addr common.Address, wallet *keystore.HDWallet, index uint32, state *hdWalletState) error {
+	primaryAddr, err := wallet.DeriveAddress(0)
+	if err != nil {
+		return fmt.Errorf("failed to derive primary address: %w", err)
+	}
+	primaryHex := primaryAddr.Hex()
+
 	// Check if already registered
 	addrKey := normalizeAddress(addr.Hex())
 	if p.registry.HasSigner(addrKey) {
@@ -546,11 +552,7 @@ func (p *HDWalletProvider) registerDerivedSigner(addr common.Address, wallet *ke
 				return types.ErrAlreadyExists
 			}
 		}
-		state.derived = append(state.derived, types.SignerInfo{
-			Address: addr.Hex(),
-			Type:    string(types.SignerTypeHDWallet),
-			Enabled: true,
-		})
+		state.derived = append(state.derived, hdDerivedSignerInfo(addr, primaryHex, index))
 		return types.ErrAlreadyExists
 	}
 
@@ -562,11 +564,7 @@ func (p *HDWalletProvider) registerDerivedSigner(addr common.Address, wallet *ke
 	keySigner := ethsig.NewEthPrivateKeySigner(privKey)
 	signer := ethsig.NewSigner(keySigner)
 
-	info := types.SignerInfo{
-		Address: addr.Hex(),
-		Type:    string(types.SignerTypeHDWallet),
-		Enabled: true,
-	}
+	info := hdDerivedSignerInfo(addr, primaryHex, index)
 
 	if err := p.registry.RegisterSigner(addr.Hex(), signer, info); err != nil {
 		return fmt.Errorf("failed to register derived signer %s: %w", addr.Hex(), err)
@@ -669,11 +667,7 @@ func (p *HDWalletProvider) UnlockSigner(ctx context.Context, address string, pas
 			}
 			keySigner := ethsig.NewEthPrivateKeySigner(privKey)
 			primarySigner = ethsig.NewSigner(keySigner)
-			state.derived = append(state.derived, types.SignerInfo{
-				Address: addr.Hex(),
-				Type:    string(types.SignerTypeHDWallet),
-				Enabled: true,
-			})
+			state.derived = append(state.derived, hdDerivedSignerInfo(addr, address, 0))
 			continue
 		}
 		if err := p.registerDerivedSigner(addr, wallet, idx, state); err != nil {

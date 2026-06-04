@@ -45,6 +45,12 @@ export interface BudgetEntry {
   max_tx_count: number;
   created_at: string;
   updated_at: string;
+  unit_display?: string;
+  budget_period?: string;
+  period_start?: string;
+  period_ends_at?: string;
+  enforces_limit?: boolean;
+  is_stale_placeholder?: boolean;
 }
 
 /** Response envelope for the list endpoint. */

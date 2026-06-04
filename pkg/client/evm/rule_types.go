@@ -35,6 +35,8 @@ type Rule struct {
 	LastMatchedAt     *time.Time `json:"last_matched_at,omitempty"`
 	BudgetPeriod      string     `json:"budget_period,omitempty"`      // e.g. "24h0m0s" when schedule.period is set
 	BudgetPeriodStart *string    `json:"budget_period_start,omitempty"` // RFC3339
+	ProposalFor       *string    `json:"proposal_for,omitempty"`
+	RejectionReason   *string    `json:"rejection_reason,omitempty"`
 }
 
 // RuleVariableDef exposes a template variable's metadata alongside its current bound value.
@@ -121,6 +123,23 @@ type UpdateRuleRequest struct {
 	AppliedTo   []string               `json:"applied_to,omitempty"`
 	TestCases   []JSRuleTestCase       `json:"test_cases,omitempty"`
 	Priority    *int                   `json:"priority,omitempty"`
+}
+
+// ProposeRuleRequest represents a request to propose changes to an existing rule.
+// The proposal creates a new rule row with ProposalFor set to the target rule ID.
+// Admin must approve the proposal for changes to take effect on the target.
+type ProposeRuleRequest struct {
+	Name          string                 `json:"name,omitempty"`
+	Description   string                 `json:"description,omitempty"`
+	Type          string                 `json:"type,omitempty"`
+	Config        map[string]interface{} `json:"config,omitempty"`
+	Variables     map[string]string      `json:"variables,omitempty"`
+	Matrix        []map[string]any       `json:"matrix,omitempty"`
+	ChainType     *string                `json:"chain_type,omitempty"`
+	ChainID       *string                `json:"chain_id,omitempty"`
+	SignerAddress *string                `json:"signer_address,omitempty"`
+	Priority      *int                   `json:"priority,omitempty"`
+	BudgetPeriod  *string                `json:"budget_period,omitempty"`
 }
 
 // RuleBudget represents a budget record for a rule instance (GET /api/v1/evm/rules/{id}/budgets).

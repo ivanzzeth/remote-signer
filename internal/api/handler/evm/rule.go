@@ -195,6 +195,16 @@ func (h *RuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Sub-resource: /api/v1/evm/rules/{id}/budgets/reset
+	if strings.HasSuffix(path, "/budgets/reset") {
+		ruleID := strings.TrimSuffix(path, "/budgets/reset")
+		ruleID = strings.Trim(ruleID, "/")
+		if ruleID != "" && !strings.Contains(ruleID, "/") && len(ruleID) <= 128 && r.Method == http.MethodPost && h.budgetRepo != nil {
+			h.resetAllBudgets(w, r, ruleID)
+			return
+		}
+	}
+
 	// Sub-resource: /api/v1/evm/rules/{id}/budgets
 	// Accept any rule ID that is a single path segment (config-expanded IDs like erc20-schedule_erc20-transfer-limit).
 	if strings.HasSuffix(path, "/budgets") {
@@ -220,6 +230,14 @@ func (h *RuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ruleID = strings.Trim(ruleID, "/")
 		if ruleID != "" && !strings.Contains(ruleID, "/") && r.Method == http.MethodPost {
 			h.rejectRule(w, r, ruleID)
+			return
+		}
+	}
+	if strings.HasSuffix(path, "/propose") {
+		ruleID := strings.TrimSuffix(path, "/propose")
+		ruleID = strings.Trim(ruleID, "/")
+		if ruleID != "" && !strings.Contains(ruleID, "/") && r.Method == http.MethodPost {
+			h.proposeRule(w, r, ruleID)
 			return
 		}
 	}

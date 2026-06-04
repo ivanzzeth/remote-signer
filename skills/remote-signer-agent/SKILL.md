@@ -1,18 +1,16 @@
 ---
-name: remote-signer
+name: remote-signer-agent
 description: >
-  Policy-driven EVM signing service. Use when the user mentions signing transactions,
-  typed data, messages, or hashes through remote-signer. Covers pre-flight checks,
-  signing flow, RBAC permissions, and troubleshooting auth/approval issues.
-  When web3-agent-browser detects a request stuck in `authorizing`, the agent MUST
-  delegate to this skill for the self-service unblock workflow.
-  For installation, CLI reference, TLS setup, or SDK integration, consult the
-  corresponding reference file.
+  Agent-facing remote-signer operations with the agent API key. Use when the agent
+  submits or inspects sign requests, reads/updates agent-owned rules, checks budgets,
+  or unblocks `authorizing` requests via self-service whitelist updates. Covers
+  pre-flight checks, agent RBAC, and the authorizing unblock workflow. For
+  installation, admin operations, TLS, or SDK integration, see reference files.
 ---
 
-# Remote Signer
+# Remote Signer — Agent
 
-Policy-driven signing service for EVM chains. Controls **what** gets signed through a rule engine, not just **who** can sign.
+Agent operations against remote-signer using the **agent** API key. Admin-only actions (approve requests, manage keys, create signers) are documented for user handoff, not agent execution.
 
 ## When to Activate
 

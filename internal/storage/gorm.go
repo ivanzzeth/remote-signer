@@ -3,6 +3,7 @@ package storage
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	// Pure-Go SQLite driver. Registers under database/sql name "sqlite", which
 	// detectDialector passes to gorm.io/driver/sqlite via Config.DriverName so
@@ -79,6 +80,9 @@ func NewDB(cfg Config) (*gorm.DB, error) {
 
 	db, err := gorm.Open(dialector, &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
+		NowFunc: func() time.Time {
+			return time.Now().UTC()
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
@@ -107,6 +111,10 @@ func NewDB(cfg Config) (*gorm.DB, error) {
 		return nil, fmt.Errorf("ensure foreign keys: %w", err)
 	}
 
+	if err := repairLegacyTimestamps(db); err != nil {
+		return nil, fmt.Errorf("repair legacy timestamps: %w", err)
+	}
+
 	return db, nil
 }
 
@@ -123,6 +131,9 @@ func NewDBWithLogger(cfg Config, logLevel logger.LogLevel) (*gorm.DB, error) {
 
 	db, err := gorm.Open(dialector, &gorm.Config{
 		Logger: logger.Default.LogMode(logLevel),
+		NowFunc: func() time.Time {
+			return time.Now().UTC()
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
@@ -142,6 +153,10 @@ func NewDBWithLogger(cfg Config, logLevel logger.LogLevel) (*gorm.DB, error) {
 
 	if err := ensureForeignKeys(db, cfg.DSN); err != nil {
 		return nil, fmt.Errorf("ensure foreign keys: %w", err)
+	}
+
+	if err := repairLegacyTimestamps(db); err != nil {
+		return nil, fmt.Errorf("repair legacy timestamps: %w", err)
 	}
 
 	return db, nil

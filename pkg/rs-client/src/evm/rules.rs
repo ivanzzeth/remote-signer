@@ -3,7 +3,7 @@ use reqwest::Method;
 use crate::error::Error;
 use crate::transport::transport::Transport;
 
-use super::{CreateRuleRequest, ListRulesFilter, ListRulesResponse, Rule, RuleBudget, UpdateRuleRequest};
+use super::{CreateRuleRequest, ListRulesFilter, ListRulesResponse, ProposeRuleRequest, Rule, RuleBudget, UpdateRuleRequest};
 
 #[derive(Clone)]
 pub struct RuleService {
@@ -106,5 +106,11 @@ impl RuleService {
             .transport
             .request_raw(Method::POST, &path, Some(&body), Some(&[200]))?;
         Ok(())
+    }
+
+    pub fn propose_rule(&self, rule_id: &str, req: &ProposeRuleRequest) -> Result<Rule, Error> {
+        let path = format!("/api/v1/evm/rules/{}/propose", urlencoding::encode(rule_id));
+        self.transport
+            .request_json(Method::POST, &path, Some(req), Some(&[202]))
     }
 }

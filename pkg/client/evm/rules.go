@@ -146,6 +146,19 @@ func (s *RuleService) Reject(ctx context.Context, ruleID string, reason string) 
 	return &rule, nil
 }
 
+// Propose proposes changes to an existing rule (POST /api/v1/evm/rules/{ruleID}/propose).
+// The proposal creates a new rule row with ProposalFor set to the target rule ID.
+// Admin must approve the proposal for changes to take effect on the target.
+func (s *RuleService) Propose(ctx context.Context, ruleID string, req *ProposeRuleRequest) (*Rule, error) {
+	path := fmt.Sprintf("/api/v1/evm/rules/%s/propose", url.PathEscape(ruleID))
+	var rule Rule
+	err := s.transport.Request(ctx, http.MethodPost, path, req, &rule, http.StatusAccepted)
+	if err != nil {
+		return nil, err
+	}
+	return &rule, nil
+}
+
 // ListBudgets returns budgets for a rule (GET /api/v1/evm/rules/{ruleID}/budgets).
 func (s *RuleService) ListBudgets(ctx context.Context, ruleID string) ([]RuleBudget, error) {
 	path := fmt.Sprintf("/api/v1/evm/rules/%s/budgets", url.PathEscape(ruleID))

@@ -105,6 +105,7 @@ export type {
   ValidateTestResult,
   ValidateRuleResponse,
   BatchValidateResponse,
+  ProposeRuleRequest,
   // Signer types
   SignerInfo,
   ListSignersFilter,

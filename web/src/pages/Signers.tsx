@@ -10,6 +10,7 @@ import {
   PageHeader,
 } from "../components/ui";
 import { getClient, getCredentials } from "../lib/auth";
+import { isHDWalletPrimary } from "../lib/hdSigner";
 import { useApi } from "../lib/useApi";
 
 // Tri-state encoding for select inputs: empty string = no filter,
@@ -237,6 +238,11 @@ export function Signers() {
                       <div className="font-mono text-xs text-ink-900">
                         {s.address}
                       </div>
+                      {isHDWalletPrimary(s) && (
+                        <span data-testid="hd-primary-badge">
+                          <Badge tone="neutral">primary</Badge>
+                        </span>
+                      )}
                       {s.display_name && (
                         <div className="text-[11px] text-ink-500">
                           {s.display_name}

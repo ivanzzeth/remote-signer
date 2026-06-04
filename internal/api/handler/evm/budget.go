@@ -14,6 +14,7 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/api/handler"
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/audit"
+	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
@@ -96,6 +97,12 @@ type BudgetEntry struct {
 	AlertSent     bool   `json:"alert_sent"`
 	CreatedAt     string `json:"created_at"`
 	UpdatedAt     string `json:"updated_at"`
+	UnitDisplay        string `json:"unit_display,omitempty"`
+	BudgetPeriod       string `json:"budget_period,omitempty"`
+	PeriodStart        string `json:"period_start,omitempty"`
+	PeriodEndsAt       string `json:"period_ends_at,omitempty"`
+	EnforcesLimit      bool   `json:"enforces_limit"`
+	IsStalePlaceholder bool   `json:"is_stale_placeholder,omitempty"`
 }
 
 // ListBudgetsResponse wraps the list so future pagination metadata has a
@@ -164,8 +171,13 @@ func (h *BudgetListHandler) handleList(w http.ResponseWriter, r *http.Request, a
 	}
 
 	entries := make([]BudgetEntry, 0, len(budgets))
+	unitsByRule := make(map[types.RuleID][]string, len(budgets))
 	for _, b := range budgets {
-		entry, ok := h.annotate(r.Context(), apiKey, b)
+		unitsByRule[b.RuleID] = append(unitsByRule[b.RuleID], b.Unit)
+	}
+	for _, b := range budgets {
+		b = h.maybeRenewBudget(r, b)
+		entry, ok := h.annotate(r.Context(), apiKey, b, unitsByRule[b.RuleID])
 		if !ok {
 			continue
 		}
@@ -269,7 +281,7 @@ func (h *BudgetListHandler) handleCreate(w http.ResponseWriter, r *http.Request,
 // annotate enriches a budget row with rule/simulation metadata and
 // performs per-key authorization. Returns (entry, true) when the caller
 // is allowed to see the row, (zero, false) otherwise.
-func (h *BudgetListHandler) annotate(ctx context.Context, apiKey *types.APIKey, b *types.RuleBudget) (BudgetEntry, bool) {
+func (h *BudgetListHandler) annotate(ctx context.Context, apiKey *types.APIKey, b *types.RuleBudget, siblingUnits []string) (BudgetEntry, bool) {
 	entry := BudgetEntry{
 		ID:         b.ID,
 		RuleID:     string(b.RuleID),
@@ -296,6 +308,7 @@ func (h *BudgetListHandler) annotate(ctx context.Context, apiKey *types.APIKey, 
 		if !apiKey.IsAdmin() && !apiKey.IsDev() {
 			return BudgetEntry{}, false
 		}
+		applyBudgetUX(&entry, nil, b, siblingUnits)
 		return entry, true
 	}
 
@@ -309,12 +322,14 @@ func (h *BudgetListHandler) annotate(ctx context.Context, apiKey *types.APIKey, 
 		if !apiKey.IsAdmin() && !apiKey.IsDev() {
 			return BudgetEntry{}, false
 		}
+		applyBudgetUX(&entry, nil, b, siblingUnits)
 		return entry, true
 	}
 	entry.RuleName = rule.Name
 	entry.RuleType = string(rule.Type)
 	entry.RuleMode = string(rule.Mode)
 	entry.RuleOwner = rule.Owner
+	applyBudgetUX(&entry, rule, b, siblingUnits)
 
 	if apiKey.IsAdmin() || apiKey.IsDev() {
 		return entry, true
@@ -360,6 +375,7 @@ func (h *BudgetListHandler) annotateFromRule(rule *types.Rule, b *types.RuleBudg
 		CreatedAt:  b.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:  b.UpdatedAt.Format(time.RFC3339),
 	}
+	applyBudgetUX(&entry, rule, b, []string{b.Unit})
 	return entry, true
 }
 
@@ -459,6 +475,7 @@ func (h *BudgetItemHandler) handleGet(w http.ResponseWriter, r *http.Request, ap
 	if !ok {
 		return
 	}
+	b = h.maybeRenewBudget(r, b)
 	entry, allowed := h.annotate(r.Context(), apiKey, b)
 	if !allowed {
 		h.writeError(w, "not found", http.StatusNotFound)
@@ -552,10 +569,7 @@ func (h *BudgetItemHandler) handleReset(w http.ResponseWriter, r *http.Request, 
 	if !ok {
 		return
 	}
-	b.Spent = "0"
-	b.TxCount = 0
-	b.AlertSent = false
-	if err := h.budgetRepo.Update(r.Context(), b); err != nil {
+	if err := h.budgetRepo.ResetBudget(r.Context(), b.RuleID, b.Unit, time.Time{}); err != nil {
 		if types.IsNotFound(err) {
 			h.writeError(w, "budget not found", http.StatusNotFound)
 			return
@@ -631,12 +645,14 @@ func (h *BudgetItemHandler) annotate(ctx context.Context, apiKey *types.APIKey, 
 		CreatedAt:  b.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:  b.UpdatedAt.Format(time.RFC3339),
 	}
+	siblingUnits := h.siblingUnits(ctx, b.RuleID)
 	if strings.HasPrefix(string(b.RuleID), "sim:") {
 		entry.Kind = BudgetKindSimulation
 		entry.SignerAddress = strings.TrimPrefix(string(b.RuleID), "sim:")
 		if !apiKey.IsAdmin() && !apiKey.IsDev() {
 			return BudgetEntry{}, false
 		}
+		applyBudgetUX(&entry, nil, b, siblingUnits)
 		return entry, true
 	}
 	entry.Kind = BudgetKindRule
@@ -645,12 +661,14 @@ func (h *BudgetItemHandler) annotate(ctx context.Context, apiKey *types.APIKey, 
 		if !apiKey.IsAdmin() && !apiKey.IsDev() {
 			return BudgetEntry{}, false
 		}
+		applyBudgetUX(&entry, nil, b, siblingUnits)
 		return entry, true
 	}
 	entry.RuleName = rule.Name
 	entry.RuleType = string(rule.Type)
 	entry.RuleMode = string(rule.Mode)
 	entry.RuleOwner = rule.Owner
+	applyBudgetUX(&entry, rule, b, siblingUnits)
 	if apiKey.IsAdmin() || apiKey.IsDev() {
 		return entry, true
 	}
@@ -658,6 +676,20 @@ func (h *BudgetItemHandler) annotate(ctx context.Context, apiKey *types.APIKey, 
 		return entry, true
 	}
 	return BudgetEntry{}, false
+}
+
+func (h *BudgetItemHandler) siblingUnits(ctx context.Context, ruleID types.RuleID) []string {
+	list, err := h.budgetRepo.ListByRuleID(ctx, ruleID)
+	if err != nil {
+		return nil
+	}
+	units := make([]string, 0, len(list))
+	for _, row := range list {
+		if row != nil {
+			units = append(units, row.Unit)
+		}
+	}
+	return units
 }
 
 func (h *BudgetItemHandler) writeJSON(w http.ResponseWriter, v any, status int) {
@@ -670,6 +702,38 @@ func (h *BudgetItemHandler) writeJSON(w http.ResponseWriter, v any, status int) 
 
 func (h *BudgetItemHandler) writeError(w http.ResponseWriter, message string, status int) {
 	h.writeJSON(w, handler.ErrorResponse{Error: message}, status)
+}
+
+func (h *BudgetListHandler) maybeRenewBudget(r *http.Request, b *types.RuleBudget) *types.RuleBudget {
+	return maybeRenewBudget(r.Context(), h.budgetRepo, h.ruleRepo, b)
+}
+
+func (h *BudgetItemHandler) maybeRenewBudget(r *http.Request, b *types.RuleBudget) *types.RuleBudget {
+	return maybeRenewBudget(r.Context(), h.budgetRepo, h.ruleRepo, b)
+}
+
+// maybeRenewBudget applies periodic budget renewal on read so the UI reflects
+// the current period without requiring a sign attempt first.
+func maybeRenewBudget(ctx context.Context, budgetRepo storage.BudgetRepository, ruleRepo storage.RuleRepository, b *types.RuleBudget) *types.RuleBudget {
+	if b == nil || strings.HasPrefix(string(b.RuleID), "sim:") {
+		return b
+	}
+	gotRule, err := ruleRepo.Get(ctx, b.RuleID)
+	if err != nil {
+		return b
+	}
+	needs, periodStart := rule.NeedsPeriodReset(gotRule, b, time.Now())
+	if !needs {
+		return b
+	}
+	if err := budgetRepo.ResetBudget(ctx, b.RuleID, b.Unit, periodStart); err != nil {
+		return b
+	}
+	fresh, err := budgetRepo.Get(ctx, b.ID)
+	if err != nil || fresh == nil {
+		return b
+	}
+	return fresh
 }
 
 // --- shared validators ---

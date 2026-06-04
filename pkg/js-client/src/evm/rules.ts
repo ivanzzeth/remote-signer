@@ -36,10 +36,14 @@ export interface Rule {
   signer_address?: string;
   /** API key that created the rule. "config" for rules sourced from config.yaml. */
   owner?: string;
-  /** Approval state: "active", "pending_approval", "rejected", "revoked". */
+  /** Approval state: "active", "pending_approval", "rejected", "revoked", "superseded". */
   status?: string;
   /** Admin key id that approved a pending rule. */
   approved_by?: string;
+  /** When set, this rule is a proposal for the referenced rule ID. */
+  proposal_for?: string;
+  /** Reason for rejection (set when status is "rejected" or "superseded"). */
+  rejection_reason?: string;
   /** Rules with immutable=true cannot be edited or deleted via API. */
   immutable?: boolean;
   /** ["*"] = all keys, ["self"] = owner only, ["key-1", ...] = specific keys. */
@@ -146,6 +150,12 @@ export interface RuleBudget {
   max_tx_count: number;
   created_at: string;
   updated_at: string;
+  unit_display?: string;
+  budget_period?: string;
+  period_start?: string;
+  period_ends_at?: string;
+  enforces_limit?: boolean;
+  is_stale_placeholder?: boolean;
 }
 
 /** Result of a single test case validation */
@@ -172,6 +182,22 @@ export interface BatchValidateResponse {
   total: number;
   passed: number;
   failed: number;
+}
+
+/** Request to propose changes to an existing rule (POST /api/v1/evm/rules/{id}/propose). */
+export interface ProposeRuleRequest {
+  name?: string;
+  description?: string;
+  type?: RuleType;
+  config?: Record<string, any>;
+  variables?: Record<string, string>;
+  matrix?: Record<string, any>[];
+  chain_type?: string;
+  chain_id?: string;
+  signer_address?: string;
+  priority?: number;
+  /** Budget renewal period e.g. "24h". Empty string "" to disable. */
+  budget_period?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -265,8 +291,19 @@ export class EvmRuleService {
     return list ?? [];
   }
 
+  /** Reset spent/tx_count on all enforcing, non-stale budget rows for a rule. Admin only. */
+  async resetAllBudgets(ruleID: string): Promise<{ reset: number }> {
+    return this.transport.request<{ reset: number }>(
+      "POST",
+      `/api/v1/evm/rules/${encodeURIComponent(ruleID)}/budgets/reset`,
+      null,
+    );
+  }
+
   /**
    * Approve a pending rule (POST /api/v1/evm/rules/{ruleID}/approve).
+   * For proposals (rules with proposal_for set), this applies the proposed
+   * changes to the target rule and deletes the proposal row.
    */
   async approve(ruleID: string): Promise<Rule> {
     return this.transport.request<Rule>(
@@ -284,6 +321,19 @@ export class EvmRuleService {
       "POST",
       `/api/v1/evm/rules/${encodeURIComponent(ruleID)}/reject`,
       { reason },
+    );
+  }
+
+  /**
+   * Propose changes to an existing rule (POST /api/v1/evm/rules/{ruleID}/propose).
+   * Creates a new pending proposal row referencing the target rule.
+   * Admin must approve the proposal for changes to take effect.
+   */
+  async propose(ruleID: string, req: ProposeRuleRequest): Promise<Rule> {
+    return this.transport.request<Rule>(
+      "POST",
+      `/api/v1/evm/rules/${encodeURIComponent(ruleID)}/propose`,
+      req,
     );
   }
 

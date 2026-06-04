@@ -161,19 +161,24 @@ func syncDynamicBudgetFromConfig(ctx context.Context, rule *types.Rule, tmpl *ty
 		}
 	}
 
-	// Build set of expected units
+	// Build set of expected units and known base names for stale-row cleanup.
+	chainID := rulepkg.ResolveRuleChainID(rule)
 	expectedUnits := make(map[string]bool)
+	knownBaseNames := make(map[string]bool)
 	for unitName := range knownUnits {
-		expectedUnits[rulepkg.NormalizeBudgetUnit(unitName)] = true
+		base := rulepkg.NormalizeBudgetUnit(unitName)
+		knownBaseNames[base] = true
+		scoped := rulepkg.ScopeDynamicUnit(chainID, unitName)
+		expectedUnits[scoped] = true
 	}
 
-	// Remove stale budgets (units no longer in known_units)
+	// Remove stale budgets: unprefixed template rows when chain-scoped, or units dropped from config.
 	existingList, err := budgetRepo.ListByRuleID(ctx, rule.ID)
 	if err != nil {
 		return fmt.Errorf("list budgets for rule: %w", err)
 	}
 	for _, b := range existingList {
-		if !expectedUnits[b.Unit] {
+		if !expectedUnits[b.Unit] && rulepkg.IsKnownUnitFamily(b.Unit, knownBaseNames) {
 			if delErr := budgetRepo.Delete(ctx, b.ID); delErr != nil {
 				return fmt.Errorf("delete stale budget %s (unit=%s): %w", b.ID, b.Unit, delErr)
 			}
@@ -182,7 +187,7 @@ func syncDynamicBudgetFromConfig(ctx context.Context, rule *types.Rule, tmpl *ty
 
 	// Create budget records for each known_unit (idempotent via CreateOrGet)
 	for unitName, unitConf := range knownUnits {
-		unit := rulepkg.NormalizeBudgetUnit(unitName)
+		unit := rulepkg.ScopeDynamicUnit(chainID, unitName)
 		maxTotal := stringFromMapField(unitConf, "max_total")
 		maxPerTx := stringFromMapField(unitConf, "max_per_tx")
 		maxTxCount := 0

@@ -12,6 +12,7 @@ import {
 } from "../components/ui";
 import { useApi } from "../lib/useApi";
 import { BudgetForm } from "../components/BudgetForm";
+import { formatBudgetPeriod, timeUntil, unitLabel } from "../lib/budgetDisplay";
 
 /**
  * Operator budgets overview. Single GET /api/v1/evm/budgets call: the
@@ -27,6 +28,7 @@ import { BudgetForm } from "../components/BudgetForm";
  */
 export function Budgets() {
   const [creating, setCreating] = useState(false);
+  const [showStale, setShowStale] = useState(false);
   const [searchParams] = useSearchParams();
   // signer filter — set when arriving from a sign request detail page's
   // simulation-approval link, so the operator lands on the row that
@@ -39,11 +41,14 @@ export function Budgets() {
   );
 
   const entries = data?.budgets ?? [];
+  const visibleEntries = showStale
+    ? entries
+    : entries.filter((e) => !e.is_stale_placeholder);
   const filtered = signerFilter
-    ? entries.filter((e) =>
+    ? visibleEntries.filter((e) =>
         (e.signer_address || "").toLowerCase() === signerFilter,
       )
-    : entries;
+    : visibleEntries;
   const sortedByHot = [...filtered].sort(
     (a, b) => pctUsed(b) - pctUsed(a) || compareName(a, b),
   );
@@ -56,7 +61,15 @@ export function Budgets() {
         title="Budgets"
         subtitle="Spend limits the daemon debits as it signs — by rule and by simulation fallback."
         actions={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-1 text-xs text-ink-600">
+              <input
+                type="checkbox"
+                checked={showStale}
+                onChange={(e) => setShowStale(e.target.checked)}
+              />
+              Show unused template rows
+            </label>
             <button
               type="button"
               onClick={reload}
@@ -182,8 +195,10 @@ function BudgetRowView({ entry }: { entry: BudgetEntry }) {
       <td className="py-1 pr-3 align-top">
         <PrimaryCell entry={entry} />
       </td>
-      <td className="py-1 pr-3 font-mono text-xs text-ink-700">
-        {entry.unit}
+      <td className="py-1 pr-3 align-top font-mono text-xs text-ink-700">
+        <div>{unitLabel(entry)}</div>
+        <div className="text-[10px] text-ink-400">{entry.unit}</div>
+        {entry.is_stale_placeholder && <Badge tone="neutral">Unused</Badge>}
       </td>
       <td className="py-1 pr-3">
         <ProgressBar pct={pct} />
@@ -201,6 +216,11 @@ function BudgetRowView({ entry }: { entry: BudgetEntry }) {
           threshold={entry.alert_pct}
           sent={entry.alert_sent}
         />
+        {entry.period_ends_at && entry.enforces_limit && (
+          <div className="mt-0.5 text-[10px] text-ink-500">
+            renew {timeUntil(entry.period_ends_at) ?? formatBudgetPeriod(entry.budget_period) ?? ""}
+          </div>
+        )}
       </td>
     </tr>
   );

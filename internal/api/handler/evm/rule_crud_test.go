@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -329,6 +330,109 @@ func TestRuleHandler_RejectRule_NotFound(t *testing.T) {
 	require.NoError(t, err)
 
 	rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/nonexistent/reject", nil, ruleAdminKey())
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+// --- Proposal approve ---
+
+func TestRuleHandler_ApproveProposal_Success(t *testing.T) {
+	repo := newMockRuleRepo()
+	target := newAPIRule()
+	target.Status = types.RuleStatusActive
+	target.Name = "original-name"
+	target.Config = json.RawMessage(`{"addresses":["0x1111"]}`)
+	repo.addRule(target)
+
+	proposalID := types.RuleID("rule_proposal-00000000-0000-0000-0000-000000000099")
+	pf := target.ID
+	proposal := &types.Rule{
+		ID:          proposalID,
+		Name:        "proposed-name",
+		Type:        types.RuleTypeEVMAddressList,
+		Mode:        types.RuleModeWhitelist,
+		Source:      types.RuleSourceAPI,
+		Owner:       "agent-key",
+		Config:      json.RawMessage(`{"addresses":["0x2222"]}`),
+		Status:      types.RuleStatusPendingApproval,
+		ProposalFor: &pf,
+		Enabled:     false,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+	repo.addRule(proposal)
+
+	h, err := NewRuleHandler(repo, slog.Default())
+	require.NoError(t, err)
+
+	rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/"+string(proposalID)+"/approve", nil, ruleAdminKey())
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	// Response returns the TARGET rule, not the proposal
+	var resp RuleResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, string(target.ID), resp.ID)
+	assert.Equal(t, "proposed-name", resp.Name)
+	assert.Equal(t, string(types.RuleStatusActive), resp.Status)
+
+	// Target rule updated in repo
+	updatedTarget, err := repo.Get(t.Context(), target.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "proposed-name", updatedTarget.Name)
+	assert.Equal(t, string(types.RuleStatusActive), string(updatedTarget.Status))
+	assert.Equal(t, `{"addresses":["0x2222"]}`, string(updatedTarget.Config))
+
+	// Proposal deleted
+	_, err = repo.Get(t.Context(), proposalID)
+	require.ErrorIs(t, err, types.ErrNotFound)
+}
+
+func TestRuleHandler_ApproveProposal_TargetUpdated(t *testing.T) {
+	repo := newMockRuleRepo()
+	target := newAPIRule()
+	target.Status = types.RuleStatusActive
+	target.Owner = "admin-key"
+	repo.addRule(target)
+
+	pf := target.ID
+	proposal := &types.Rule{
+		ID:          "rule_proposal-00000000-0000-0000-0000-000000000098",
+		Name:        target.Name,
+		Type:        types.RuleTypeEVMAddressList,
+		Mode:        types.RuleModeWhitelist,
+		Source:      types.RuleSourceAPI,
+		Owner:       "agent-key",
+		Config:      json.RawMessage(`{"addresses":["0xdeadbeef"]}`),
+		Status:      types.RuleStatusPendingApproval,
+		ProposalFor: &pf,
+		Enabled:     false,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+	repo.addRule(proposal)
+
+	h, err := NewRuleHandler(repo, slog.Default())
+	require.NoError(t, err)
+
+	rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/"+string(proposal.ID)+"/approve", nil, ruleAdminKey())
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	// Target config updated
+	updated, err := repo.Get(t.Context(), target.ID)
+	require.NoError(t, err)
+	assert.Equal(t, `{"addresses":["0xdeadbeef"]}`, string(updated.Config))
+
+	// Only target remains in list (proposal deleted)
+	rules, err := repo.List(t.Context(), storage.RuleFilter{Limit: 100})
+	require.NoError(t, err)
+	assert.Len(t, rules, 1, "proposal should be deleted, only target remains")
+	assert.Equal(t, target.ID, rules[0].ID)
+}
+
+func TestRuleHandler_ApproveProposal_ProposalNotFound(t *testing.T) {
+	h, err := NewRuleHandler(newMockRuleRepo(), slog.Default())
+	require.NoError(t, err)
+
+	rec := doRuleRequest(t, h, http.MethodPost, "/api/v1/evm/rules/nonexistent-proposal/approve", nil, ruleAdminKey())
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 

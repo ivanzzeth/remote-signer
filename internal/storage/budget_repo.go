@@ -89,7 +89,7 @@ func (r *GormBudgetRepository) Create(ctx context.Context, budget *types.RuleBud
 	if budget == nil {
 		return fmt.Errorf("budget cannot be nil")
 	}
-	now := time.Now()
+	now := time.Now().UTC()
 	budget.CreatedAt = now
 	budget.UpdatedAt = now
 	return r.db.WithContext(ctx).Create(budget).Error
@@ -117,7 +117,7 @@ func (r *GormBudgetRepository) CreateOrGet(ctx context.Context, budget *types.Ru
 		}
 
 		// Not found — create
-		now := time.Now()
+		now := time.Now().UTC()
 		budget.CreatedAt = now
 		budget.UpdatedAt = now
 		createErr := tx.Create(budget).Error
@@ -190,6 +190,7 @@ func (r *GormBudgetRepository) DeleteByRuleID(ctx context.Context, ruleID types.
 func (r *GormBudgetRepository) AtomicSpend(ctx context.Context, ruleID types.RuleID, unit string, amount string) error {
 	// Use raw SQL for atomic conditional update
 	// The WHERE clause ensures we only update if within budget
+	now := formatDBTime(time.Now().UTC())
 	result := r.db.WithContext(ctx).Exec(`
 		UPDATE rule_budgets
 		SET spent = CAST(CAST(spent AS NUMERIC) + CAST(? AS NUMERIC) AS TEXT),
@@ -197,8 +198,8 @@ func (r *GormBudgetRepository) AtomicSpend(ctx context.Context, ruleID types.Rul
 		    updated_at = ?
 		WHERE rule_id = ? AND unit = ?
 		  AND (max_total = '-1' OR CAST(spent AS NUMERIC) + CAST(? AS NUMERIC) <= CAST(max_total AS NUMERIC))
-		  AND (max_tx_count = 0 OR tx_count < max_tx_count)
-	`, amount, time.Now(), ruleID, unit, amount)
+		  AND (max_tx_count <= 0 OR tx_count < max_tx_count)
+	`, amount, now, ruleID, unit, amount)
 
 	if result.Error != nil {
 		return fmt.Errorf("failed to atomic spend: %w", result.Error)
@@ -212,9 +213,19 @@ func (r *GormBudgetRepository) AtomicSpend(ctx context.Context, ruleID types.Rul
 }
 
 // ResetBudget resets the budget for a new period.
-// Uses conditional WHERE on updated_at to ensure idempotent reset.
-// Only resets if the budget was last updated before the current period start.
+// The caller must already have decided renewal is needed (NeedsPeriodReset).
 func (r *GormBudgetRepository) ResetBudget(ctx context.Context, ruleID types.RuleID, unit string, currentPeriodStart time.Time) error {
+	_ = currentPeriodStart // retained for audit/logging at call sites
+	return r.forceResetBudget(ctx, ruleID, unit)
+}
+
+// ForceResetBudget clears runtime counters unconditionally (operator manual reset).
+func (r *GormBudgetRepository) ForceResetBudget(ctx context.Context, ruleID types.RuleID, unit string) error {
+	return r.forceResetBudget(ctx, ruleID, unit)
+}
+
+func (r *GormBudgetRepository) forceResetBudget(ctx context.Context, ruleID types.RuleID, unit string) error {
+	now := formatDBTime(time.Now().UTC())
 	result := r.db.WithContext(ctx).Exec(`
 		UPDATE rule_budgets
 		SET spent = '0',
@@ -222,14 +233,14 @@ func (r *GormBudgetRepository) ResetBudget(ctx context.Context, ruleID types.Rul
 		    alert_sent = false,
 		    updated_at = ?
 		WHERE rule_id = ? AND unit = ?
-		  AND updated_at < ?
-	`, time.Now(), ruleID, unit, currentPeriodStart)
+	`, now, ruleID, unit)
 
 	if result.Error != nil {
 		return fmt.Errorf("failed to reset budget: %w", result.Error)
 	}
-
-	// RowsAffected == 0 is OK — means already reset (idempotent)
+	if result.RowsAffected == 0 {
+		return types.ErrNotFound
+	}
 	return nil
 }
 
@@ -250,7 +261,7 @@ func (r *GormBudgetRepository) MarkAlertSent(ctx context.Context, ruleID types.R
 		SET alert_sent = true,
 		    updated_at = ?
 		WHERE rule_id = ? AND unit = ?
-	`, time.Now(), ruleID, unit)
+	`, formatDBTime(time.Now().UTC()), ruleID, unit)
 	if result.Error != nil {
 		return fmt.Errorf("failed to mark alert sent: %w", result.Error)
 	}
@@ -303,7 +314,7 @@ func (r *GormBudgetRepository) Update(ctx context.Context, budget *types.RuleBud
 	if budget.ID == "" {
 		return fmt.Errorf("budget id is required")
 	}
-	budget.UpdatedAt = time.Now()
+	budget.UpdatedAt = time.Now().UTC()
 	result := r.db.WithContext(ctx).Model(&types.RuleBudget{}).
 		Where("id = ?", budget.ID).
 		Updates(map[string]any{
@@ -335,7 +346,7 @@ func (r *GormBudgetRepository) UpsertLimits(ctx context.Context, ruleID types.Ru
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for _, req := range requests {
 			id := types.BudgetID(ruleID, req.Unit)
-			now := time.Now()
+			now := time.Now().UTC()
 
 			res := tx.Model(&types.RuleBudget{}).
 				Where("id = ?", id).

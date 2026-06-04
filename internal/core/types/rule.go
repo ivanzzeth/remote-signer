@@ -69,6 +69,7 @@ const (
 	RuleStatusPendingApproval RuleStatus = "pending_approval"
 	RuleStatusRejected        RuleStatus = "rejected"
 	RuleStatusRevoked         RuleStatus = "revoked"
+	RuleStatusSuperseded RuleStatus = "superseded"
 )
 
 // Rule represents a signing authorization rule
@@ -98,6 +99,15 @@ type Rule struct {
 	ApprovedBy *string `json:"approved_by,omitempty" gorm:"type:varchar(64)"`
 	// Immutable: when true, rule cannot be modified or deleted via API.
 	Immutable bool `json:"immutable" gorm:"default:false"`
+
+	// ProposalFor is set when this rule is a proposed update to another rule.
+	// It points to the target rule ID. nil means this is a regular rule, not a proposal.
+	// When the proposal is approved, the changes are applied to the target rule and
+	// this proposal row is marked rejected (preserving the audit trail).
+	ProposalFor *RuleID `json:"proposal_for,omitempty" gorm:"index;type:varchar(64)"`
+
+	// RejectionReason stores why an admin rejected a pending_approval rule or proposal.
+	RejectionReason *string `json:"rejection_reason,omitempty" gorm:"type:text"`
 
 	// Chain-specific config stored as JSON
 	Config []byte `json:"config" gorm:"type:jsonb"`
