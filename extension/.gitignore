@@ -3,3 +3,6 @@ tests/.e2e-state/
 test-results/
 _metadata/
 playwright-report/
+
+# Runtime config injected by web3-agent-browser start (importScripts in background.js)
+bg-config.js
