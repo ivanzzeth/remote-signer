@@ -201,38 +201,44 @@ export function Requests() {
 
     setBulkBusy(true);
     setMutationError(null);
-    let okCount = 0;
-    const failures: string[] = [];
 
-    for (const id of ids) {
-      try {
-        await client.evm.requests.approve(id, { approved });
-        okCount++;
-      } catch (e) {
-        failures.push(`${shorten(id, 8, 4)}: ${formatErr(e)}`);
-      }
-    }
-
-    setSelected(new Set());
-    reload();
-    setBulkBusy(false);
-
-    if (failures.length === 0) {
-      toast({
-        title: approved
-          ? `Approved ${okCount} request(s).`
-          : `Rejected ${okCount} request(s).`,
-        tone: "success",
+    try {
+      const batch = await client.evm.requests.batchApprove({
+        request_ids: ids,
+        approved,
       });
-    } else {
-      const msg = `${okCount} succeeded, ${failures.length} failed. ${failures.slice(0, 3).join("; ")}`;
-      setMutationError(msg);
-      if (okCount > 0) {
+
+      setSelected(new Set());
+      reload();
+
+      const { succeeded, failed, idempotent } = batch.summary;
+      const failures = batch.results
+        .filter((r) => r.error)
+        .map((r) => `${shorten(r.request_id, 8, 4)}: ${r.error}`);
+
+      if (failed === 0) {
+        const idemNote =
+          idempotent > 0 ? ` (${idempotent} already in target state)` : "";
         toast({
-          title: `${okCount} request(s) updated; ${failures.length} failed.`,
-          tone: "info",
+          title: approved
+            ? `Approved ${succeeded} request(s).${idemNote}`
+            : `Rejected ${succeeded} request(s).${idemNote}`,
+          tone: "success",
         });
+      } else {
+        const msg = `${succeeded} succeeded, ${failed} failed. ${failures.slice(0, 3).join("; ")}`;
+        setMutationError(msg);
+        if (succeeded > 0) {
+          toast({
+            title: `${succeeded} request(s) updated; ${failed} failed.`,
+            tone: "info",
+          });
+        }
       }
+    } catch (e) {
+      setMutationError(formatErr(e));
+    } finally {
+      setBulkBusy(false);
     }
   }
 

@@ -81,6 +81,34 @@ export interface ListRequestsResponse {
   has_more: boolean;
 }
 
+/** Batch approve/reject request */
+export interface BatchApproveRequest {
+  request_ids: string[];
+  approved: boolean;
+}
+
+/** Per-item result from batch approve */
+export interface BatchApproveItemResult {
+  request_id: string;
+  status?: RequestStatus;
+  signature?: string;
+  signed_data?: string;
+  message?: string;
+  idempotent: boolean;
+  error?: string;
+}
+
+/** Batch approve response */
+export interface BatchApproveResponse {
+  results: BatchApproveItemResult[];
+  summary: {
+    total: number;
+    succeeded: number;
+    failed: number;
+    idempotent: number;
+  };
+}
+
 /** Approve request */
 export interface ApproveRequest {
   approved: boolean;
@@ -198,6 +226,21 @@ export class EvmRequestService {
       "POST",
       `/api/v1/evm/requests/${requestID}/approve`,
       approveRequest,
+    );
+  }
+
+  /**
+   * Approve or reject many pending requests in one server-side call.
+   * Each item is processed independently; partial success is normal.
+   * Re-applying the same decision is idempotent per request.
+   */
+  async batchApprove(
+    batchRequest: BatchApproveRequest,
+  ): Promise<BatchApproveResponse> {
+    return this.transport.request<BatchApproveResponse>(
+      "POST",
+      "/api/v1/evm/requests/batch-approve",
+      batchRequest,
     );
   }
 

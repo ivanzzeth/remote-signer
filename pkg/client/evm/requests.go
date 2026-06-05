@@ -87,6 +87,16 @@ func (s *RequestService) Approve(ctx context.Context, requestID string, req *App
 	return &resp, nil
 }
 
+// BatchApprove approves or rejects many pending signing requests in one call.
+func (s *RequestService) BatchApprove(ctx context.Context, req *BatchApproveRequest) (*BatchApproveResponse, error) {
+	var resp BatchApproveResponse
+	err := s.transport.Request(ctx, http.MethodPost, "/api/v1/evm/requests/batch-approve", req, &resp, http.StatusOK)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // PreviewRule previews the rule that would be generated for a pending request.
 func (s *RequestService) PreviewRule(ctx context.Context, requestID string, req *PreviewRuleRequest) (*PreviewRuleResponse, error) {
 	path := fmt.Sprintf("/api/v1/evm/requests/%s/preview-rule", url.PathEscape(requestID))

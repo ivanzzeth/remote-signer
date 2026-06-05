@@ -43,6 +43,7 @@ type SignServiceAPI interface {
 	ListRequests(ctx context.Context, filter storage.RequestFilter) ([]*types.SignRequest, error)
 	CountRequests(ctx context.Context, filter storage.RequestFilter) (int, error)
 	ProcessApproval(ctx context.Context, requestID types.SignRequestID, req *ApprovalRequest) (*ApprovalResponse, error)
+	ProcessBatchApproval(ctx context.Context, requestIDs []types.SignRequestID, req *ApprovalRequest) (*BatchApprovalResponse, error)
 	PreviewRuleForRequest(ctx context.Context, requestID types.SignRequestID, opts *rule.RuleGenerateOptions) (*types.Rule, error)
 	RuleGenerationInfoForRequest(ctx context.Context, requestID types.SignRequestID) (*RuleGenerationInfo, error)
 	ReevaluatePending(ctx context.Context, callerName string)
@@ -544,8 +545,11 @@ type ApprovalRequest struct {
 
 // ApprovalResponse represents the response to an approval request
 type ApprovalResponse struct {
-	SignResponse *SignResponse `json:"sign_response"`
-	GeneratedRule *types.Rule  `json:"generated_rule,omitempty"`
+	SignResponse  *SignResponse `json:"sign_response"`
+	GeneratedRule *types.Rule   `json:"generated_rule,omitempty"`
+	// Idempotent is true when the request was already in the requested outcome
+	// (e.g. reject replay on an already-rejected row).
+	Idempotent bool `json:"idempotent,omitempty"`
 }
 
 // PreviewRuleForRequest generates a rule preview for a pending request
@@ -621,8 +625,11 @@ func (s *SignService) ProcessApproval(ctx context.Context, requestID types.SignR
 		return nil, fmt.Errorf("failed to get request: %w", err)
 	}
 
-	if signReq.Status != types.StatusAuthorizing {
-		return nil, fmt.Errorf("request is not pending approval (status: %s)", signReq.Status)
+	if idemResp, handled, idemErr := resolveApprovalIdempotency(signReq, req.Approved); handled {
+		if idemErr != nil {
+			return nil, idemErr
+		}
+		return idemResp, nil
 	}
 
 	if !req.Approved {
