@@ -28,6 +28,7 @@ type mockSignService struct {
 	listRequestsFn      func(ctx context.Context, filter storage.RequestFilter) ([]*types.SignRequest, error)
 	countRequestsFn     func(ctx context.Context, filter storage.RequestFilter) (int, error)
 	processApprovalFn   func(ctx context.Context, requestID types.SignRequestID, req *service.ApprovalRequest) (*service.ApprovalResponse, error)
+	processBatchApprovalFn func(ctx context.Context, requestIDs []types.SignRequestID, req *service.ApprovalRequest) (*service.BatchApprovalResponse, error)
 	previewRuleFn              func(ctx context.Context, requestID types.SignRequestID, opts *rule.RuleGenerateOptions) (*types.Rule, error)
 	ruleGenerationInfoFn       func(ctx context.Context, requestID types.SignRequestID) (*service.RuleGenerationInfo, error)
 }
@@ -65,6 +66,34 @@ func (m *mockSignService) ProcessApproval(ctx context.Context, requestID types.S
 		return m.processApprovalFn(ctx, requestID, req)
 	}
 	return nil, fmt.Errorf("not implemented")
+}
+
+func (m *mockSignService) ProcessBatchApproval(ctx context.Context, requestIDs []types.SignRequestID, req *service.ApprovalRequest) (*service.BatchApprovalResponse, error) {
+	if m.processBatchApprovalFn != nil {
+		return m.processBatchApprovalFn(ctx, requestIDs, req)
+	}
+	results := make([]service.BatchApprovalItemResult, 0, len(requestIDs))
+	summary := service.BatchApprovalSummary{Total: len(requestIDs)}
+	for _, id := range requestIDs {
+		resp, err := m.ProcessApproval(ctx, id, req)
+		item := service.BatchApprovalItemResult{RequestID: id}
+		if err != nil {
+			item.Error = err.Error()
+			summary.Failed++
+		} else {
+			item.Status = resp.SignResponse.Status
+			item.Signature = resp.SignResponse.Signature
+			item.SignedData = resp.SignResponse.SignedData
+			item.Message = resp.SignResponse.Message
+			item.Idempotent = resp.Idempotent
+			summary.Succeeded++
+			if item.Idempotent {
+				summary.Idempotent++
+			}
+		}
+		results = append(results, item)
+	}
+	return &service.BatchApprovalResponse{Results: results, Summary: summary}, nil
 }
 
 func (m *mockSignService) PreviewRuleForRequest(ctx context.Context, requestID types.SignRequestID, opts *rule.RuleGenerateOptions) (*types.Rule, error) {

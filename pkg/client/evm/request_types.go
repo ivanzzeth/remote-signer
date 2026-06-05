@@ -42,6 +42,37 @@ type ApproveResponse struct {
 	GeneratedRule *Rule  `json:"generated_rule,omitempty"`
 }
 
+// BatchApproveRequest approves or rejects many requests at once.
+type BatchApproveRequest struct {
+	RequestIDs []string `json:"request_ids"`
+	Approved   bool     `json:"approved"`
+}
+
+// BatchApproveItemResult is one row in a batch approve response.
+type BatchApproveItemResult struct {
+	RequestID  string `json:"request_id"`
+	Status     string `json:"status,omitempty"`
+	Signature  string `json:"signature,omitempty"`
+	SignedData string `json:"signed_data,omitempty"`
+	Message    string `json:"message,omitempty"`
+	Idempotent bool   `json:"idempotent"`
+	Error      string `json:"error,omitempty"`
+}
+
+// BatchApproveSummary aggregates batch outcomes.
+type BatchApproveSummary struct {
+	Total      int `json:"total"`
+	Succeeded  int `json:"succeeded"`
+	Failed     int `json:"failed"`
+	Idempotent int `json:"idempotent"`
+}
+
+// BatchApproveResponse is returned by BatchApprove.
+type BatchApproveResponse struct {
+	Results []BatchApproveItemResult `json:"results"`
+	Summary BatchApproveSummary      `json:"summary"`
+}
+
 // PreviewRuleRequest represents a request to preview a rule for approval.
 type PreviewRuleRequest struct {
 	RuleType string `json:"rule_type"`

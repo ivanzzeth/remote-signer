@@ -2,6 +2,7 @@ package evm
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -183,6 +184,10 @@ func (h *ApprovalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.signService.ProcessApproval(r.Context(), types.SignRequestID(requestID), approvalReq)
 	if err != nil {
 		h.logger.Error("failed to process approval", "error", err, "request_id", requestID)
+		if errors.Is(err, service.ErrApprovalConflict) {
+			h.writeError(w, err.Error(), http.StatusConflict)
+			return
+		}
 		// A locked signer is an operator-actionable state, not an internal
 		// fault — surface 423 with the underlying reason so the UI can
 		// prompt the user to unlock before retrying. Any wording containing

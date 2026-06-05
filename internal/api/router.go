@@ -245,6 +245,11 @@ func (r *Router) setupRoutes() error {
 		return err
 	}
 
+	batchApprovalHandler, err := evmhandler.NewBatchApprovalHandler(r.signService, accessService, r.logger)
+	if err != nil {
+		return err
+	}
+
 	previewRuleHandler, err := evmhandler.NewPreviewRuleHandler(r.signService, r.logger)
 	if err != nil {
 		return err
@@ -323,6 +328,7 @@ func (r *Router) setupRoutes() error {
 	// EVM routes (with auth)
 	r.mux.Handle("/api/v1/evm/sign", r.withAuthAndPerm(middleware.PermSignRequest, signHandler))
 	r.mux.Handle("/api/v1/evm/requests", r.withAuthAndPerm(middleware.PermListOwnRequests, listHandler))
+	r.mux.Handle("/api/v1/evm/requests/batch-approve", r.withAuthAndPerm(middleware.PermApproveRequest, batchApprovalHandler))
 	var requestSimHandler *evmhandler.RequestSimulationHandler
 	if r.config.RequestSimulationRepo != nil && r.config.RequestRepo != nil {
 		var rsErr error
