@@ -15,7 +15,9 @@ export function RequestBlockerBanner({
       ? "border-red-200 bg-red-50 text-red-900"
       : blocker.kind === "rule_matched_stuck"
         ? "border-amber-200 bg-amber-50 text-amber-950"
-        : "border-ink-200 bg-ink-50 text-ink-800";
+        : blocker.kind === "sign_failed"
+          ? "border-orange-200 bg-orange-50 text-orange-950"
+          : "border-ink-200 bg-ink-50 text-ink-800";
 
   return (
     <div

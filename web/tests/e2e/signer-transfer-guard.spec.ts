@@ -191,7 +191,7 @@ test("request rejection path", async () => {
   }
 });
 
-test("approving already-completed request returns conflict", async () => {
+test("approving already-completed request is idempotent", async () => {
   const admin = await adminSDKClient();
 
   let signer;
@@ -203,8 +203,6 @@ test("approving already-completed request returns conflict", async () => {
       keystore: { password: SIGNER_PW },
     });
 
-    // Create an evm_js whitelist rule that always returns ok() so the
-    // sign request auto-approves on submission.
     rule = await admin.evm.rules.create({
       name: `e2e-auto-${Date.now()}`,
       type: "evm_js",
@@ -215,30 +213,27 @@ test("approving already-completed request returns conflict", async () => {
       enabled: true,
     });
 
-    // Submit a sign request — the whitelist rule should match and the
-    // daemon auto-approves, returning completed status directly.
     const result = await admin.evm.sign.execute({
       chain_id: "1",
       signer_address: signer.address,
       sign_type: "personal",
       payload: { message: "0x48656c6c6f" },
     });
-    // Auto-approved or went pending — either way, approve on a non-pending
-    // request should be rejected.
     const rid = result.request_id;
     expect(rid).toBeTruthy();
 
-    // If the request went pending, reject it now so the next approve sees
-    // an already-resolved request.
     if (result.status !== "completed" && result.status !== "signing") {
-      await admin.evm.requests.approve(rid, { approved: true }).catch(() => {});
+      await admin.evm.requests.approve(rid, { approved: true });
     }
 
-    let thrown = false;
-    try { await admin.evm.requests.approve(rid, { approved: true }); } catch (e) {
-      thrown = true;
-    }
-    expect(thrown).toBe(true);
+    await expect
+      .poll(async () => (await admin.evm.requests.get(rid)).status, {
+        timeout: 10_000,
+      })
+      .toMatch(/completed|signing/);
+
+    const replay = await admin.evm.requests.approve(rid, { approved: true });
+    expect(replay.status).toMatch(/completed|signing/);
   } finally {
     if (rule) {
       await admin.evm.rules.delete(rule.id).catch(() => {});

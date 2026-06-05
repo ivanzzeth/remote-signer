@@ -314,6 +314,7 @@ function CreateForm({
   return (
     <Card title="New API key">
       <form
+        data-testid="apikey-create-form"
         onSubmit={(e) => {
           e.preventDefault();
           onSubmit({
@@ -325,13 +326,25 @@ function CreateForm({
         }}
         className="grid grid-cols-1 gap-3 md:grid-cols-4"
       >
-        <Field label="ID" value={id} onChange={setId} required />
-        <Field label="Name (optional)" value={name} onChange={setName} />
+        <Field
+          label="ID"
+          value={id}
+          onChange={setId}
+          required
+          testId="apikey-create-id"
+        />
+        <Field
+          label="Name (optional)"
+          value={name}
+          onChange={setName}
+          testId="apikey-create-name"
+        />
         <div>
           <label className="mb-1 block text-[11px] uppercase tracking-wide text-ink-500">
             Role
           </label>
           <select
+            data-testid="apikey-create-role"
             value={role}
             onChange={(e) => setRole(e.target.value as Role)}
             className="w-full rounded-md border border-ink-300 px-2 py-1 text-sm"
@@ -352,6 +365,7 @@ function CreateForm({
         <div className="md:col-span-4">
           <button
             type="submit"
+            data-testid="apikey-create-submit"
             disabled={!id.trim()}
             className="rounded-md bg-accent-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-600 disabled:cursor-not-allowed disabled:bg-ink-300"
           >
@@ -418,12 +432,14 @@ function Field({
   onChange,
   required,
   type = "text",
+  testId,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   required?: boolean;
   type?: string;
+  testId?: string;
 }) {
   return (
     <div>
@@ -432,6 +448,7 @@ function Field({
       </label>
       <input
         type={type}
+        data-testid={testId}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         required={required}

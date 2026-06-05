@@ -20,12 +20,13 @@ test("Rules page renders", async ({ authedPage }) => {
 });
 
 test("API Keys page lists the bootstrap admin", async ({ authedPage }) => {
-  await authedPage.click("text=API Keys");
+  await authedPage.getByRole("link", { name: "API Keys", exact: true }).click();
   await expect(
     authedPage.getByRole("heading", { name: "API Keys" }),
   ).toBeVisible();
-  // The admin key always exists post-bootstrap; its role is "admin".
-  const row = authedPage.locator("tr", { has: authedPage.locator("text=admin") }).first();
+  const row = authedPage.locator("tbody tr").filter({
+    has: authedPage.locator("td:first-child .font-mono", { hasText: "admin" }),
+  }).first();
   await expect(row).toBeVisible();
-  await expect(authedPage.locator("text=enabled").first()).toBeVisible();
+  await expect(row.getByText("enabled")).toBeVisible();
 });

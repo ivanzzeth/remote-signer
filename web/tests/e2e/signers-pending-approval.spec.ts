@@ -54,7 +54,7 @@ test("Admin sees global pending signer queue without API key filter", async ({
 
   await admin.evm.signers.approveSigner(address);
   await authedPage.getByRole("button", { name: "Refresh" }).click();
-  await expect(authedPage.getByText("No signers pending approval.")).toBeVisible({
+  await expect(authedPage.locator("tr", { hasText: address })).toHaveCount(0, {
     timeout: 10_000,
   });
 

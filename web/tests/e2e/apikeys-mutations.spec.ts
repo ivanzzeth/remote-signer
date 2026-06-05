@@ -1,45 +1,60 @@
 import { expect, test } from "./fixtures";
 
+function createForm(authedPage: import("@playwright/test").Page) {
+  return authedPage.locator("form").filter({
+    has: authedPage.getByRole("button", { name: "Generate keypair & create" }),
+  });
+}
+
+async function openCreateForm(authedPage: import("@playwright/test").Page) {
+  await authedPage.getByRole("link", { name: "API Keys", exact: true }).click();
+  await expect(authedPage.getByRole("heading", { name: "API Keys" })).toBeVisible();
+  await authedPage.getByRole("button", { name: "New API key" }).click();
+  return createForm(authedPage);
+}
+
+async function createApiKey(
+  authedPage: import("@playwright/test").Page,
+  id: string,
+  opts?: { name?: string; role?: string },
+) {
+  const form = await openCreateForm(authedPage);
+  await form.locator("input").nth(0).fill(id);
+  if (opts?.name) {
+    await form.locator("input").nth(1).fill(opts.name);
+  }
+  await form.locator("select").selectOption(opts?.role ?? "dev");
+  await form.getByRole("button", { name: "Generate keypair & create" }).click();
+}
+
+function apiKeyRow(authedPage: import("@playwright/test").Page, id: string) {
+  return authedPage.locator("tbody tr").filter({
+    has: authedPage.locator("td:first-child .font-mono", { hasText: id }),
+  });
+}
+
 test("create new API key surfaces the one-time PEM panel", async ({
   authedPage,
 }) => {
-  await authedPage.click("text=API Keys");
-  await authedPage.click("button:has-text('New API key')");
-
-  // Use a unique id so the spec is rerunnable against the same daemon
-  // instance — the daemon's DB persists for the duration of globalSetup.
   const id = `e2e-create-${Date.now()}`;
-  await authedPage.fill("input >> nth=0", id); // ID field
-  await authedPage.fill("input >> nth=1", `${id} name`); // Name field
-  await authedPage.selectOption("select", "dev");
-  await authedPage.click("button:has-text('Generate keypair & create')");
+  await createApiKey(authedPage, id, { name: `${id} name` });
 
-  // One-time panel must surface BEGIN PRIVATE KEY — that's the operator's
-  // single chance to copy the seed. Match on the BEGIN marker rather than
-  // the panel heading because React renders the heading's quotes with
-  // typographic curly quotes (`&ldquo;`/`&rdquo;`).
   await expect(authedPage.locator("text=Save the private key for")).toBeVisible();
   await expect(authedPage.locator(`text=${id}`).first()).toBeVisible();
   await expect(authedPage.locator("text=-----BEGIN PRIVATE KEY-----")).toBeVisible();
 
-  // New row appears in the table after reload triggered by create().
-  const row = authedPage.locator("tr", { has: authedPage.locator(`text=${id}`).first() });
-  await expect(row).toBeVisible();
+  await expect(apiKeyRow(authedPage, id)).toBeVisible();
 });
 
 test("disable + re-enable round-trips through the daemon", async ({
   authedPage,
 }) => {
-  await authedPage.click("text=API Keys");
-  await authedPage.click("button:has-text('New API key')");
   const id = `e2e-toggle-${Date.now()}`;
-  await authedPage.fill("input >> nth=0", id);
-  await authedPage.selectOption("select", "dev");
-  await authedPage.click("button:has-text('Generate keypair & create')");
+  await createApiKey(authedPage, id);
   await expect(authedPage.locator("text=-----BEGIN PRIVATE KEY-----")).toBeVisible();
   await authedPage.click("text=Dismiss");
 
-  const row = authedPage.locator("tr", { has: authedPage.locator(`text=${id}`).first() });
+  const row = apiKeyRow(authedPage, id);
   await expect(row.getByText("enabled")).toBeVisible();
   await row.getByRole("button", { name: "Disable" }).click();
   await expect(row.getByText("disabled")).toBeVisible();
@@ -50,37 +65,29 @@ test("disable + re-enable round-trips through the daemon", async ({
 test("edit API-sourced key name + rate_limit persists", async ({
   authedPage,
 }) => {
-  await authedPage.click("text=API Keys");
-  await authedPage.click("button:has-text('New API key')");
-
   const id = `e2e-edit-${Date.now()}`;
-  await authedPage.fill("input >> nth=0", id);
-  await authedPage.selectOption("select", "dev");
-  await authedPage.click("button:has-text('Generate keypair & create')");
+  await createApiKey(authedPage, id);
   await authedPage.click("text=Dismiss");
 
-  const row = authedPage.locator("tr", {
-    has: authedPage.locator(`text=${id}`).first(),
-  });
+  const row = apiKeyRow(authedPage, id);
   await row.getByRole("button", { name: "Edit" }).click();
 
-  // Edit panel is the only <form> on the page (Create dialog was dismissed).
   const editPanel = authedPage.locator("form").last();
   await editPanel.locator("input").nth(0).fill(`${id}-renamed`);
   await editPanel.locator("input[type=number]").fill("42");
   await editPanel.getByRole("button", { name: "Save" }).click();
 
-  // Renamed row reflects the new label below the id.
   await expect(
     authedPage.locator(`text=${id}-renamed`).first(),
   ).toBeVisible({ timeout: 5_000 });
 });
 
 test("admin key cannot be deleted from the UI", async ({ authedPage }) => {
-  await authedPage.click("text=API Keys");
-  const adminRow = authedPage.locator("tr", {
-    has: authedPage.locator("text=admin").first(),
-  });
+  await authedPage.getByRole("link", { name: "API Keys", exact: true }).click();
+  await expect(authedPage.getByRole("heading", { name: "API Keys" })).toBeVisible();
+  const adminRow = authedPage.locator("tbody tr").filter({
+    has: authedPage.locator("td:first-child .font-mono", { hasText: "admin" }),
+  }).first();
   const del = adminRow.getByRole("button", { name: "Delete" });
   await expect(del).toBeDisabled();
 });

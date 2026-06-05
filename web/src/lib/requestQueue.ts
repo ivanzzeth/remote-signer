@@ -9,11 +9,21 @@ export function isActionableRequestStatus(status: RequestStatus): boolean {
 export type RequestBlockerKind =
   | "signer_locked"
   | "rule_matched_stuck"
-  | "no_rule";
+  | "no_rule"
+  | "sign_failed";
 
 export interface RequestBlocker {
   kind: RequestBlockerKind;
   message: string;
+}
+
+function normalizeSignFailureMessage(raw: string): RequestBlocker | null {
+  const msg = raw.trim();
+  if (!msg) return null;
+  if (/locked/i.test(msg)) {
+    return { kind: "signer_locked", message: msg };
+  }
+  return { kind: "sign_failed", message: msg };
 }
 
 export function buildLockedSignerSet(
@@ -29,11 +39,20 @@ export function buildLockedSignerSet(
 export function getRequestBlocker(
   req: Pick<
     RequestStatusResponse,
-    "status" | "signer_address" | "rule_matched_id" | "last_no_match_reason"
+    | "status"
+    | "signer_address"
+    | "rule_matched_id"
+    | "last_no_match_reason"
+    | "error_message"
   >,
   lockedSigners: ReadonlySet<string>,
 ): RequestBlocker | null {
   if (!isActionableRequestStatus(req.status)) return null;
+
+  if (req.error_message?.trim()) {
+    const fromErr = normalizeSignFailureMessage(req.error_message);
+    if (fromErr) return fromErr;
+  }
 
   if (lockedSigners.has(req.signer_address.toLowerCase())) {
     return {

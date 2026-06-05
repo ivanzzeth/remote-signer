@@ -49,6 +49,30 @@ describe("requestQueue", () => {
     expect(blocker?.kind).toBe("rule_matched_stuck");
   });
 
+  it("prefers persisted error_message over locked-signer set", () => {
+    const blocker = getRequestBlocker(
+      {
+        status: "authorizing",
+        signer_address: ADDR,
+        error_message: "signing failed: signer is locked",
+      },
+      new Set(),
+    );
+    expect(blocker?.kind).toBe("signer_locked");
+  });
+
+  it("shows generic sign_failed for other persisted errors", () => {
+    const blocker = getRequestBlocker(
+      {
+        status: "authorizing",
+        signer_address: ADDR,
+        error_message: "signing failed: RPC timeout",
+      },
+      new Set(),
+    );
+    expect(blocker?.kind).toBe("sign_failed");
+  });
+
   it("summarizes unique locked signers in queue", () => {
     const locked = buildLockedSignerSet([{ address: ADDR, locked: true }]);
     const addrs = summarizeLockedSignersInRequests(

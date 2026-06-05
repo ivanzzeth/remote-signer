@@ -208,9 +208,10 @@ function BudgetRow({
   const pct = pctUsed(b);
   const label = unitLabel(b);
   const active = b.enforces_limit && !b.is_stale_placeholder;
+  const chainDebit = /^\d+:/.test(b.unit);
 
   return (
-    <tr className={`border-t border-ink-100 ${active ? "border-l-2 border-l-green-500" : ""}`}>
+    <tr className={`border-t border-ink-100 ${active ? "border-l-2 border-l-green-500 bg-green-50/30" : ""}`}>
       <td className="py-1 pr-3 align-top">
         <Link
           to={`/budgets/${encodeURIComponent(b.id)}`}
@@ -220,6 +221,11 @@ function BudgetRow({
         </Link>
         {!compact && (
           <div className="font-mono text-[10px] text-ink-400">{b.unit}</div>
+        )}
+        {chainDebit && active && (
+          <div className="mt-0.5">
+            <Badge tone="neutral">chain debit</Badge>
+          </div>
         )}
       </td>
       <td className="py-1 pr-3 align-top">

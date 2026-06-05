@@ -69,6 +69,13 @@ export function Requests() {
   const [busy, setBusy] = useState<string | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [listCursor, setListCursor] = useState<{ c: string; id: string } | null>(
+    null,
+  );
+  const [cursorHistory, setCursorHistory] = useState<
+    Array<{ c: string; id: string } | null>
+  >([]);
+  const [selectAllBusy, setSelectAllBusy] = useState(false);
 
   const namesApi = useApi((c) => c.apiKeys.names());
   const currentApiKeyID = getCredentials()?.apiKeyID ?? "";
@@ -81,19 +88,45 @@ export function Requests() {
   const lockedSigners = useLockedSignerAddresses();
   const selectAllRef = useRef<HTMLInputElement>(null);
 
+  const baseFilter = useMemo((): ListRequestsFilter => {
+    return {
+      limit: REQUEST_LIST_PAGE_SIZE,
+      ...(status ? { status } : {}),
+      ...(signerAddress ? { signer_address: signerAddress } : {}),
+      ...(chainID ? { chain_id: chainID } : {}),
+      ...(signType ? { sign_type: signType } : {}),
+      ...(transactionStatus ? { transaction_status: transactionStatus } : {}),
+      ...(showAdminFilters && apiKeyID ? { api_key_id: apiKeyID } : {}),
+      ...(showAdminFilters && role ? { role } : {}),
+    };
+  }, [
+    status,
+    signerAddress,
+    chainID,
+    signType,
+    transactionStatus,
+    apiKeyID,
+    role,
+    showAdminFilters,
+  ]);
+
   const filter: ListRequestsFilter = {
-    limit: REQUEST_LIST_PAGE_SIZE,
-    ...(status ? { status } : {}),
-    ...(signerAddress ? { signer_address: signerAddress } : {}),
-    ...(chainID ? { chain_id: chainID } : {}),
-    ...(signType ? { sign_type: signType } : {}),
-    ...(transactionStatus ? { transaction_status: transactionStatus } : {}),
-    ...(showAdminFilters && apiKeyID ? { api_key_id: apiKeyID } : {}),
-    ...(showAdminFilters && role ? { role } : {}),
+    ...baseFilter,
+    ...(listCursor ? { cursor: listCursor.c, cursor_id: listCursor.id } : {}),
   };
   const { data, loading, error, reload } = useApi(
     (c) => c.evm.requests.list(filter),
-    [status, signerAddress, chainID, signType, transactionStatus, apiKeyID, role],
+    [
+      status,
+      signerAddress,
+      chainID,
+      signType,
+      transactionStatus,
+      apiKeyID,
+      role,
+      listCursor?.c,
+      listCursor?.id,
+    ],
   );
 
   const requests = data?.requests ?? [];
@@ -119,7 +152,50 @@ export function Requests() {
 
   useEffect(() => {
     setSelected(new Set());
+    setListCursor(null);
+    setCursorHistory([]);
   }, [status, signerAddress, chainID, signType, transactionStatus, apiKeyID, role]);
+
+  function goNextPage() {
+    if (!data?.next_cursor || !data?.next_cursor_id) return;
+    setCursorHistory((h) => [...h, listCursor]);
+    setListCursor({ c: data.next_cursor, id: data.next_cursor_id });
+  }
+
+  function goPrevPage() {
+    setCursorHistory((h) => {
+      const copy = [...h];
+      const prev = copy.pop() ?? null;
+      setListCursor(prev);
+      return copy;
+    });
+  }
+
+  async function selectAllMatching() {
+    const client = getClient();
+    if (!client) return;
+    setSelectAllBusy(true);
+    setMutationError(null);
+    try {
+      const resp = await client.evm.requests.list({ ...baseFilter, limit: 200 });
+      const ids = resp.requests
+        .filter((r) => isActionableRequestStatus(r.status))
+        .map((r) => r.id);
+      setSelected(new Set(ids));
+      if (resp.has_more) {
+        toast({
+          title: `Selected ${ids.length} actionable requests (first 200 matches). Narrow filters to select more.`,
+          tone: "info",
+        });
+      }
+    } catch (e) {
+      setMutationError(formatErr(e));
+    } finally {
+      setSelectAllBusy(false);
+    }
+  }
+
+  const pageNumber = cursorHistory.length + 1;
 
   useEffect(() => {
     const el = selectAllRef.current;
@@ -382,10 +458,7 @@ export function Requests() {
             data-testid="requests-bulk-toolbar"
             className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-accent-200 bg-accent-50 px-3 py-2 text-sm"
           >
-            <span className="text-ink-700">
-              {selected.size} selected
-              {data?.has_more ? " (this page only)" : ""}
-            </span>
+            <span className="text-ink-700">{selected.size} selected</span>
             <button
               type="button"
               disabled={bulkBusy}
@@ -413,11 +486,52 @@ export function Requests() {
           </div>
         )}
 
-        {data?.has_more && (
-          <p className="mb-2 text-xs text-ink-500">
-            Showing first {requests.length} matches — narrow filters or use signer
-            filter to bulk-process a backlog.
-          </p>
+        {canApprove && data && data.total > 0 && (
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <button
+              type="button"
+              data-testid="requests-select-all-matching"
+              disabled={selectAllBusy || bulkBusy}
+              onClick={() => void selectAllMatching()}
+              className="rounded-md border border-ink-200 px-2 py-1 text-xs text-ink-700 hover:bg-ink-100 disabled:opacity-50"
+            >
+              Select all matching (≤200)
+            </button>
+          </div>
+        )}
+
+        {data && (data.requests.length > 0 || data.total > 0) && (
+          <div
+            data-testid="requests-pagination"
+            className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-ink-600"
+          >
+            <span>
+              Showing {requests.length}
+              {typeof data.total === "number" ? ` of ${data.total}` : ""}
+              {(cursorHistory.length > 0 || data.has_more) && ` · page ${pageNumber}`}
+              {selected.size > 0 && ` · ${selected.size} selected across pages`}
+            </span>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                data-testid="requests-page-prev"
+                disabled={cursorHistory.length === 0 || loading}
+                onClick={goPrevPage}
+                className="rounded-md border border-ink-200 px-2 py-1 text-xs text-ink-700 hover:bg-ink-100 disabled:opacity-50"
+              >
+                Previous
+              </button>
+              <button
+                type="button"
+                data-testid="requests-page-next"
+                disabled={!data.has_more || loading}
+                onClick={goNextPage}
+                className="rounded-md border border-ink-200 px-2 py-1 text-xs text-ink-700 hover:bg-ink-100 disabled:opacity-50"
+              >
+                Next
+              </button>
+            </div>
+          </div>
         )}
 
         {loading && <Loading />}
@@ -562,10 +676,14 @@ function RequestRow({
                 ? "text-red-700"
                 : blocker.kind === "rule_matched_stuck"
                   ? "text-amber-800"
-                  : "text-ink-600"
+                  : blocker.kind === "sign_failed"
+                    ? "text-orange-800"
+                    : "text-ink-600"
             }`}
           >
-            {blocker.kind === "signer_locked" ? "Signer locked" : blocker.message}
+            {blocker.kind === "signer_locked"
+              ? "Signer locked"
+              : blocker.message}
           </p>
         )}
       </td>
