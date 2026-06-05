@@ -1,4 +1,4 @@
-import { adminSDKClient, expect, test } from "./fixtures";
+import { adminSDKClient, acceptConfirm, expect, test } from "./fixtures";
 
 /**
  * Full Budget CRUD lifecycle driven through the UI:
@@ -69,16 +69,16 @@ test("create → edit → reset → delete budget through the UI", async ({
   await authedPage.getByTestId("budget-form-submit").click();
   await expect(authedPage.locator("text=9999999").first()).toBeVisible();
 
-  // --- Reset spend (handle confirm() dialog) ---
-  authedPage.once("dialog", (d) => d.accept());
+  // --- Reset spend ---
   await authedPage.getByTestId("budget-reset").click();
+  await acceptConfirm(authedPage);
   // After reset, the spent counter in the Usage card reads exactly "0".
   await expect(authedPage.getByTestId("budget-spent")).toHaveText("0");
   await expect(authedPage.getByTestId("budget-tx-count")).toHaveText("0");
 
   // --- Delete ---
-  authedPage.once("dialog", (d) => d.accept());
   await authedPage.getByTestId("budget-delete").click();
+  await acceptConfirm(authedPage);
   await expect(
     authedPage.getByRole("heading", { name: "Budgets", exact: true }),
   ).toBeVisible();

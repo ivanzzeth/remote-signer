@@ -17,6 +17,7 @@ import { Requests } from "./pages/Requests";
 import { Rules } from "./pages/Rules";
 import { Settings } from "./pages/Settings";
 import { Signers } from "./pages/Signers";
+import { Simulate } from "./pages/Simulate";
 import { TemplateDetail } from "./pages/TemplateDetail";
 import { Templates } from "./pages/Templates";
 import { TransactionDetail } from "./pages/TransactionDetail";
@@ -114,6 +115,7 @@ export function App() {
         <Route path="/requests/:id" element={<RequestDetail />} />
         <Route path="/transactions" element={<Transactions />} />
         <Route path="/transactions/:id" element={<TransactionDetail />} />
+        <Route path="/simulate" element={<Simulate />} />
         <Route path="/rules" element={<Rules />} />
         <Route path="/templates" element={<Templates />} />
         <Route path="/templates/:id" element={<TemplateDetail />} />

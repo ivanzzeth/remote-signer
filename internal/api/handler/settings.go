@@ -23,11 +23,18 @@ type SettingsHandler struct {
 	mgr   *settings.Manager
 	log   *slog.Logger
 	audit *audit.AuditLogger // optional
+
+	onSecurityUpdated func()
 }
 
 // NewSettingsHandler returns a handler bound to the given settings manager.
 func NewSettingsHandler(mgr *settings.Manager, log *slog.Logger) *SettingsHandler {
 	return &SettingsHandler{mgr: mgr, log: log}
+}
+
+// SetOnSecurityUpdated registers a hook invoked after security settings are saved.
+func (h *SettingsHandler) SetOnSecurityUpdated(fn func()) {
+	h.onSecurityUpdated = fn
 }
 
 // SetAuditLogger wires an audit logger; writes record [admin, group, summary]
@@ -82,6 +89,9 @@ func (h *SettingsHandler) handlePut(w http.ResponseWriter, r *http.Request, grou
 		if err := h.mgr.UpdateSecurity(r.Context(), &patch, actor); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+		if h.onSecurityUpdated != nil {
+			h.onSecurityUpdated()
 		}
 		h.recordAudit(r.Context(), actor, group, &patch)
 		writeSettingsJSON(w, http.StatusOK, h.mgr.Security())

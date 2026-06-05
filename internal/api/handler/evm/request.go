@@ -85,6 +85,13 @@ type RequestDetailResponse struct {
 	// bytes match this request's signed_data. The web UI renders
 	// it as a status badge + link on the Requests list.
 	TransactionID *string `json:"transaction_id,omitempty"`
+	// GeneratableRuleTypes lists rule types whose config can be auto-derived
+	// from this request's payload. Only populated on GET detail while the
+	// request is pending/authorizing — drives the approval panel dropdown.
+	GeneratableRuleTypes []string `json:"generatable_rule_types,omitempty"`
+	// RuleGenerationHints carries optional defaults for generatable types
+	// (e.g. max_value for evm_value_limit from the transaction value).
+	RuleGenerationHints *RuleGenerationHints `json:"rule_generation_hints,omitempty"`
 	CreatedAt     string  `json:"created_at"`
 	UpdatedAt     string  `json:"updated_at"`
 	CompletedAt   *string `json:"completed_at,omitempty"`
@@ -97,6 +104,11 @@ type ListRequestsResponse struct {
 	NextCursor   *string                 `json:"next_cursor,omitempty"`
 	NextCursorID *string                 `json:"next_cursor_id,omitempty"`
 	HasMore      bool                    `json:"has_more"`
+}
+
+// RuleGenerationHints carries optional defaults when generating rules from a request.
+type RuleGenerationHints struct {
+	MaxValue *string `json:"max_value,omitempty"`
 }
 
 // ServeHTTP handles GET /api/v1/evm/requests/{id}
@@ -143,7 +155,31 @@ func (h *RequestHandler) getRequest(w http.ResponseWriter, r *http.Request, apiK
 		return
 	}
 
-	h.writeJSON(w, h.toDetailResponse(r.Context(), req, true), http.StatusOK)
+	h.writeJSON(w, enrichDetailWithRuleGeneration(r.Context(), h.signService, h.toDetailResponse(r.Context(), req, true)), http.StatusOK)
+}
+
+func enrichDetailWithRuleGeneration(
+	ctx context.Context,
+	signService service.SignServiceAPI,
+	resp RequestDetailResponse,
+) RequestDetailResponse {
+	if resp.Status != string(types.StatusAuthorizing) && resp.Status != string(types.StatusPending) {
+		return resp
+	}
+
+	info, err := signService.RuleGenerationInfoForRequest(ctx, types.SignRequestID(resp.ID))
+	if err != nil || len(info.Types) == 0 {
+		return resp
+	}
+
+	resp.GeneratableRuleTypes = make([]string, len(info.Types))
+	for i, t := range info.Types {
+		resp.GeneratableRuleTypes[i] = string(t)
+	}
+	if info.SuggestedMaxValue != nil {
+		resp.RuleGenerationHints = &RuleGenerationHints{MaxValue: info.SuggestedMaxValue}
+	}
+	return resp
 }
 
 var validTransactionStatuses = map[string]bool{

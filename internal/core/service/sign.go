@@ -44,6 +44,7 @@ type SignServiceAPI interface {
 	CountRequests(ctx context.Context, filter storage.RequestFilter) (int, error)
 	ProcessApproval(ctx context.Context, requestID types.SignRequestID, req *ApprovalRequest) (*ApprovalResponse, error)
 	PreviewRuleForRequest(ctx context.Context, requestID types.SignRequestID, opts *rule.RuleGenerateOptions) (*types.Rule, error)
+	RuleGenerationInfoForRequest(ctx context.Context, requestID types.SignRequestID) (*RuleGenerationInfo, error)
 	ReevaluatePending(ctx context.Context, callerName string)
 }
 
@@ -576,6 +577,32 @@ func (s *SignService) PreviewRuleForRequest(ctx context.Context, requestID types
 	}
 
 	return preview, nil
+}
+
+// RuleGenerationInfoForRequest returns rule types the approval UI may offer for
+// auto-generation, based on parsing the request payload.
+func (s *SignService) RuleGenerationInfoForRequest(ctx context.Context, requestID types.SignRequestID) (*RuleGenerationInfo, error) {
+	signReq, err := s.requestRepo.Get(ctx, requestID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get request: %w", err)
+	}
+
+	if signReq.Status != types.StatusAuthorizing && signReq.Status != types.StatusPending {
+		return &RuleGenerationInfo{}, nil
+	}
+
+	adapter, err := s.chainRegistry.Get(signReq.ChainType)
+	if err != nil {
+		return nil, fmt.Errorf("unsupported chain type: %w", err)
+	}
+
+	parsed, err := adapter.ParsePayload(ctx, signReq.SignType, signReq.Payload)
+	if err != nil {
+		s.logger.Warn("failed to parse payload for rule generation info", "error", err, "request_id", requestID)
+		parsed = &types.ParsedPayload{RawData: signReq.Payload}
+	}
+
+	return s.approvalService.RuleGenerationInfo(parsed), nil
 }
 
 // SupportedRuleTypes returns the rule types that can be generated

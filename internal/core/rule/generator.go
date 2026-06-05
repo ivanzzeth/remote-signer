@@ -3,11 +3,14 @@ package rule
 import (
 	"encoding/json"
 	"fmt"
+	"math/big"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/validate"
 )
 
 // RuleGenerateOptions specifies how to generate a rule from an approved request
@@ -56,6 +59,10 @@ type RuleGenerator interface {
 
 	// SupportedTypes returns the rule types this generator can create
 	SupportedTypes() []types.RuleType
+
+	// ApplicableFromParsed returns rule types whose config can be derived from
+	// the parsed request payload (used by approval UI to show only valid options).
+	ApplicableFromParsed(parsed *types.ParsedPayload) ([]types.RuleType, *string)
 }
 
 // DefaultRuleGenerator generates rules from approved transactions
@@ -87,6 +94,59 @@ func (g *DefaultRuleGenerator) SupportedTypes() []types.RuleType {
 		types.RuleTypeEVMContractMethod,
 		types.RuleTypeEVMValueLimit,
 	}
+}
+
+// ApplicableFromParsed inspects parsed payload fields and returns only rule
+// types the generator can auto-fill without operator-supplied config.
+func (g *DefaultRuleGenerator) ApplicableFromParsed(parsed *types.ParsedPayload) ([]types.RuleType, *string) {
+	if parsed == nil {
+		return nil, nil
+	}
+
+	var out []types.RuleType
+	var suggestedMax *string
+
+	if parsed.Recipient != nil && strings.TrimSpace(*parsed.Recipient) != "" {
+		out = append(out, types.RuleTypeEVMAddressList)
+	}
+	if parsed.Contract != nil && parsed.MethodSig != nil &&
+		strings.TrimSpace(*parsed.Contract) != "" &&
+		strings.TrimSpace(*parsed.MethodSig) != "" {
+		out = append(out, types.RuleTypeEVMContractMethod)
+	}
+	if dec, ok := nonZeroWeiDecimal(parsed.Value); ok {
+		out = append(out, types.RuleTypeEVMValueLimit)
+		suggestedMax = &dec
+	}
+
+	return out, suggestedMax
+}
+
+func nonZeroWeiDecimal(value *string) (string, bool) {
+	if value == nil {
+		return "", false
+	}
+	raw := strings.TrimSpace(*value)
+	if raw == "" {
+		return "", false
+	}
+
+	if strings.HasPrefix(raw, "0x") || strings.HasPrefix(raw, "0X") {
+		n := new(big.Int)
+		hexPart := strings.TrimPrefix(strings.TrimPrefix(raw, "0x"), "0X")
+		if hexPart == "" {
+			return "", false
+		}
+		if _, ok := n.SetString(hexPart, 16); !ok || n.Sign() == 0 {
+			return "", false
+		}
+		return n.String(), true
+	}
+
+	if !validate.IsValidWeiDecimal(raw) || raw == "0" {
+		return "", false
+	}
+	return raw, true
 }
 
 // Preview generates a rule preview without saving

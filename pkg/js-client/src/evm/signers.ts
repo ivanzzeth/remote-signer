@@ -21,6 +21,11 @@ export interface SignerInfo {
   /** True for HD-derived child addresses (the parent address is in primary_address). */
   primary_address?: string;
   hd_derivation_index?: number;
+  /** Local keystore material: present, missing, corrupted. */
+  material_status?: string;
+  material_checked_at?: string;
+  material_missing_at?: string;
+  material_error?: string;
 }
 
 export interface ListSignersFilter {
@@ -36,12 +41,19 @@ export interface ListSignersFilter {
   locked?: boolean;
   /** Tri-state: true / false / undefined (either). */
   enabled?: boolean;
+  /**
+   * Admin-only global queue filter. When set to `pending_approval`, returns
+   * every signer awaiting admin approval across all API keys.
+   */
+  ownership_status?: "pending_approval";
   offset?: number;
   limit?: number;
 }
 
 export interface ListSignersResponse {
   signers: SignerInfo[];
+  total?: number;
+  has_more?: boolean;
 }
 
 /**
@@ -136,6 +148,9 @@ export class EvmSignerService {
     }
     if (typeof filter?.enabled === "boolean") {
       params.append("enabled", String(filter.enabled));
+    }
+    if (filter?.ownership_status) {
+      params.append("ownership_status", filter.ownership_status);
     }
     if (filter?.offset) params.append("offset", filter.offset.toString());
     if (filter?.limit) params.append("limit", filter.limit.toString());

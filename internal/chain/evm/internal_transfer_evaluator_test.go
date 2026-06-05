@@ -84,6 +84,16 @@ func (m *mockOwnershipRepo) GetByOwner(ctx context.Context, ownerID string) ([]*
 	return m.GetByOwnerID(ctx, ownerID)
 }
 
+func (m *mockOwnershipRepo) GetByStatus(_ context.Context, status types.SignerOwnershipStatus) ([]*types.SignerOwnership, error) {
+	var result []*types.SignerOwnership
+	for _, ownership := range m.ownerships {
+		if ownership.Status == status {
+			result = append(result, ownership)
+		}
+	}
+	return result, nil
+}
+
 func (m *mockOwnershipRepo) UpdateOwner(ctx context.Context, signerAddress, newOwnerID string) error {
 	ownership, exists := m.ownerships[signerAddress]
 	if !exists {

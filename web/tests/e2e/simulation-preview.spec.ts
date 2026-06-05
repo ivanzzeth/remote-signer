@@ -1,7 +1,7 @@
-import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { expect, test } from "./fixtures";
 import { getState } from "./global-setup";
+import { sqliteExec } from "./sqlite";
 
 // The web/tests/e2e harness daemon doesn't ship a configured
 // simulator (no anvil-backed eth_simulateV1, no upstream gateway
@@ -47,7 +47,7 @@ test.describe("SimulationPreview on RequestDetail", () => {
          '[{"token":"native","standard":"native","amount":"-1000000","direction":"outflow"}]',
          '[{"address":"0xabc","event":"Transfer","standard":"erc20","args":{"from":"0x1","to":"0x2","amount":"1"}}]',
          '["0xabc","0xdef"]',
-         '{}', '{}',
+         '{"function":"transfer(address,uint256)"}', '{}',
          '${now}', '${now}')`,
     ]);
 
@@ -72,6 +72,7 @@ test.describe("SimulationPreview on RequestDetail", () => {
     // seeded row.
     await expect(authedPage.getByText("287,453")).toBeVisible();
     await expect(authedPage.getByText(/Balance changes/i)).toBeVisible();
+    await expect(authedPage.getByText(/Decoded calldata/i)).toBeVisible();
     await expect(authedPage.getByText(/Contracts touched/i)).toBeVisible();
     await expect(authedPage.getByText("0xabc")).toBeVisible();
 
@@ -143,18 +144,3 @@ test.describe("SimulationPreview on RequestDetail", () => {
     await expect(authedPage.getByText("Simulation preview")).toHaveCount(0);
   });
 });
-
-// sqliteExec shells out to the system sqlite3 CLI to run a sequence
-// of SQL statements. macOS + Linux runners both ship sqlite3; the
-// daemon's WAL mode means concurrent writes from this process don't
-// block the daemon's own queries.
-function sqliteExec(dbPath: string, stmts: string[]): void {
-  for (const stmt of stmts) {
-    // `.timeout` makes the CLI wait for the daemon's WAL write lock instead of
-    // failing instantly with "database is locked" — the daemon runs concurrently
-    // and may hold the lock when these direct writes fire.
-    execFileSync("sqlite3", ["-cmd", ".timeout 10000", dbPath, stmt], {
-      stdio: ["ignore", "ignore", "inherit"],
-    });
-  }
-}

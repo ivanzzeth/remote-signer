@@ -1,16 +1,18 @@
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
-  APIError,
   type RequestStatus,
   type RequestStatusResponse,
 } from "remote-signer-client";
 import { Badge, Card, CodeBlock, ErrorBanner, Loading, shorten } from "../components/ui";
 import { AuditTimelineTable } from "../components/AuditTimeline";
+import { RequestBlockerBanner } from "../components/RequestBlockerBanner";
+import { RequestApprovalPanel } from "../components/RequestApprovalPanel";
 import { SimulationPreview } from "../components/SimulationPreview";
-import { getClient } from "../lib/auth";
-import { useCanReadAudit } from "../lib/rbac";
+import { getRequestBlocker } from "../lib/requestQueue";
+import { useCanApproveRequest, useCanReadAudit } from "../lib/rbac";
 import { useApi } from "../lib/useApi";
+import { useLockedSignerAddresses } from "../lib/useLockedSigners";
 
 /**
  * Request detail view. Pulls the daemon's authoritative
@@ -26,9 +28,10 @@ import { useApi } from "../lib/useApi";
 export function RequestDetail() {
   const { id = "" } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [mutationError, setMutationError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const canReadAudit = useCanReadAudit();
+  const canApprove = useCanApproveRequest();
+  const lockedSigners = useLockedSignerAddresses();
 
   const { data, loading, error, reload } = useApi(
     (c) => c.evm.requests.get(id),
@@ -45,36 +48,10 @@ export function RequestDetail() {
     [id, canReadAudit],
   );
 
-  async function approve() {
-    const client = getClient();
-    if (!client) return;
-    setBusy(true);
-    setMutationError(null);
-    try {
-      await client.evm.requests.approve(id, { approved: true });
-      reload();
-    } catch (e) {
-      setMutationError(formatErr(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function reject() {
-    if (!confirm("Reject this request? It cannot be re-approved later.")) return;
-    const client = getClient();
-    if (!client) return;
-    setBusy(true);
-    setMutationError(null);
-    try {
-      await client.evm.requests.approve(id, { approved: false });
-      reload();
-    } catch (e) {
-      setMutationError(formatErr(e));
-    } finally {
-      setBusy(false);
-    }
-  }
+  const blocker = useMemo(
+    () => (data ? getRequestBlocker(data, lockedSigners) : null),
+    [data, lockedSigners],
+  );
 
   return (
     <div className="space-y-6 pb-24">
@@ -96,11 +73,16 @@ export function RequestDetail() {
 
       {loading && <Loading />}
       {error && <ErrorBanner msg={error} />}
-      {mutationError && <ErrorBanner msg={mutationError} />}
 
       {data && (
         <>
           <Hero req={data} />
+          {blocker && (
+            <RequestBlockerBanner
+              blocker={blocker}
+              signerAddress={data.signer_address}
+            />
+          )}
 
           <Card title="Request">
             <FieldGrid>
@@ -128,6 +110,23 @@ export function RequestDetail() {
               {data.completed_at && (
                 <Field label="Completed">
                   <Mono>{data.completed_at}</Mono>
+                </Field>
+              )}
+              {data.transaction_id && (
+                <Field label="On-chain tx">
+                  <Link
+                    to={`/transactions/${data.transaction_id}`}
+                    className="font-mono text-xs text-accent-600 hover:text-accent-500"
+                  >
+                    {data.transaction_id}
+                  </Link>
+                </Field>
+              )}
+              {data.last_no_match_reason && (
+                <Field label="No rule match">
+                  <span className="text-sm text-yellow-900">
+                    {data.last_no_match_reason}
+                  </span>
                 </Field>
               )}
             </FieldGrid>
@@ -163,14 +162,19 @@ export function RequestDetail() {
         </>
       )}
 
-      {data && (data.status === "pending" || data.status === "authorizing") && (
-        <ActionBar
-          busy={busy}
-          onApprove={approve}
-          onReject={reject}
-          onCancel={() => navigate("/requests")}
-        />
-      )}
+      {data &&
+        canApprove &&
+        (data.status === "pending" || data.status === "authorizing") && (
+          <RequestApprovalPanel
+            requestID={data.id}
+            generatableRuleTypes={data.generatable_rule_types ?? []}
+            suggestedMaxValue={data.rule_generation_hints?.max_value}
+            busy={busy}
+            onBusy={setBusy}
+            onDone={reload}
+            onCancel={() => navigate("/requests")}
+          />
+        )}
     </div>
   );
 }
@@ -496,55 +500,6 @@ function HexBlock({ label, value }: { label: string; value: string }) {
   );
 }
 
-// --- Action bar -----------------------------------------------------
-
-function ActionBar({
-  busy,
-  onApprove,
-  onReject,
-  onCancel,
-}: {
-  busy: boolean;
-  onApprove: () => void;
-  onReject: () => void;
-  onCancel: () => void;
-}) {
-  return (
-    <div className="fixed inset-x-0 bottom-0 z-10 border-t border-ink-200 bg-white/95 backdrop-blur">
-      <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-8 py-3">
-        <div className="text-xs text-ink-500">
-          Waiting for a decision — approve hands this off to the signer.
-        </div>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded-md border border-ink-200 px-3 py-1.5 text-sm text-ink-700 hover:bg-ink-100"
-          >
-            Back
-          </button>
-          <button
-            type="button"
-            onClick={onReject}
-            disabled={busy}
-            className="rounded-md border border-red-300 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50"
-          >
-            Reject
-          </button>
-          <button
-            type="button"
-            onClick={onApprove}
-            disabled={busy}
-            className="rounded-md bg-accent-500 px-4 py-1.5 text-sm font-medium text-white hover:bg-accent-600 disabled:opacity-50"
-          >
-            Approve
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // --- Formatting helpers --------------------------------------------
 
 function formatValueParts(v: string | undefined): { eth: string; wei: string } {
@@ -596,10 +551,4 @@ function statusTone(s: RequestStatus): "neutral" | "green" | "red" | "yellow" {
     default:
       return "neutral";
   }
-}
-
-function formatErr(e: unknown): string {
-  if (e instanceof APIError) return `HTTP ${e.statusCode}: ${e.message}`;
-  if (e instanceof Error) return e.message;
-  return String(e);
 }

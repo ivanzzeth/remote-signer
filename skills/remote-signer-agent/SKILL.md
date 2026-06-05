@@ -67,9 +67,11 @@ If the signer list is **empty**, diagnose the cause:
 | Symptom | Likely Cause | Fix |
 |---------|-------------|-----|
 | `[]` (admin) | No signers created yet | Admin creates a signer |
-| `[]` (agent) | No signers assigned to this agent | Admin grants access: `remote-signer evm signer grant-access <address> --api-key-id agent --api-key-id admin` |
-| Signer exists but `locked: true` | Signer was locked | Admin unlocks |
+| `[]` (agent) | No signers assigned to this agent | Admin grants access: `evm signer access grant <address> --to agent` (as owner/admin) |
+| Signer exists, `status: pending_approval` | Non-admin created signer; admin must approve **signer** before any sign | Admin: `evm signer approve <address>` or Web UI Signers → Approve |
+| Signer exists but `locked: true` | Signer was locked | Owner/admin unlocks: `evm signer unlock <address>` |
 | Signer exists but `enabled: false` | Signer is disabled | Admin enables it |
+| `403 not authorized for this signer` on sign | Often `pending_approval` (misleading message) or no access grant | Approve signer first; check `evm signer access list <address>` |
 | `material_status: missing` | Keystore file not on disk | Check `~/.remote-signer/keystores/` |
 
 **Do NOT guess or assume signer availability.** Always run the diagnosis above and report the exact cause.
@@ -110,15 +112,16 @@ The agent should always use the **agent** API key for every operation it perform
 | Update own rules | Yes | agent | `evm rule update <id> --api-key-id agent` |
 | Create rules | Yes | agent | `evm rule create --api-key-id agent` |
 | List signers available to agent | Yes | agent | `evm signer list --api-key-id agent` |
-| Approve/reject requests | **No** | admin | `evm request approve --api-key-id admin` |
+| Create signers (keystore) | Yes | agent | `evm signer create` → **`pending_approval` until admin `evm signer approve`** |
+| Approve/reject sign **requests** | **No** | admin | `evm request approve/reject --api-key-id admin` |
+| Approve pending **signers** | **No** | admin | `evm signer approve <address> --api-key-id admin` |
 | View all requests (all users) | **No** | admin | `evm request list --api-key-id admin` |
 | Manage API keys | **No** | admin | `api-key create/delete --api-key-id admin` |
-| Create signers | **No** | admin | `evm signer create --api-key-id admin` |
 | Manage templates | **No** | admin | `template create/update/delete --api-key-id admin` |
 
 **Critical rules:**
-- The agent **can** inspect stuck requests, read rules/budgets, check simulations, and update whitelist rules — all with its own agent key.
-- The agent **cannot** approve requests, manage API keys, or create signers. These require admin.
+- The agent **can** inspect stuck requests, read rules/budgets, check simulations, update whitelist rules, and **create signers** (they start as `pending_approval`).
+- The agent **cannot** approve sign requests, approve signers, or manage API keys. These require admin.
 - When a `require_approval` rule update creates a pending rule, only admin can approve the rule change. Once approved, the server auto-approves matching stuck requests.
 - **Every CLI command in this skill MUST show which key to use.** `--api-key-id agent` for agent operations, `--api-key-id admin` for user operations.
 

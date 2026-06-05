@@ -5,14 +5,14 @@ import {
   type SettingsGroup,
   type SettingsSnapshot,
 } from "remote-signer-client";
-import {
-  Card,
-  Empty,
-  ErrorBanner,
-  Loading,
-  PageHeader,
-} from "../components/ui";
+import { PageHeader, Card, Empty, ErrorBanner, Loading } from "../components/ui";
+import { AdminSecurityPanel } from "../components/AdminSecurityPanel";
 import { getClient } from "../lib/auth";
+import {
+  formatDuration,
+  isDurationField,
+  parseDuration,
+} from "../lib/settingsDuration";
 
 type GroupState =
   | { status: "loading" }
@@ -88,6 +88,8 @@ export function Settings() {
         title="Settings"
         subtitle="Runtime-mutable configuration. Saved per group; the daemon validates each PUT."
       />
+
+      <AdminSecurityPanel />
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-[14rem_1fr]">
         <nav className="rounded-lg border border-ink-200 bg-white p-2">
@@ -281,38 +283,6 @@ function GroupEditor({
 }
 
 // --- Field rendering --------------------------------------------------------
-
-const DURATION_KEY_RE = /(timeout|_age|_window|_after|_interval|_ttl)$/;
-const NS_PER = {
-  ns: 1,
-  us: 1_000,
-  µs: 1_000,
-  ms: 1_000_000,
-  s: 1_000_000_000,
-  m: 60_000_000_000,
-  h: 3_600_000_000_000,
-} as const;
-
-function isDurationField(key: string, value: unknown): boolean {
-  return typeof value === "number" && DURATION_KEY_RE.test(key);
-}
-
-function formatDuration(ns: number): string {
-  if (ns === 0) return "0s";
-  if (ns % NS_PER.h === 0) return `${ns / NS_PER.h}h`;
-  if (ns % NS_PER.m === 0) return `${ns / NS_PER.m}m`;
-  if (ns % NS_PER.s === 0) return `${ns / NS_PER.s}s`;
-  if (ns % NS_PER.ms === 0) return `${ns / NS_PER.ms}ms`;
-  return `${ns}ns`;
-}
-
-function parseDuration(s: string): number | null {
-  const m = s.trim().match(/^(-?\d+(?:\.\d+)?)\s*(ns|us|µs|ms|s|m|h)$/i);
-  if (!m) return null;
-  const n = parseFloat(m[1]);
-  const unit = m[2].toLowerCase() as keyof typeof NS_PER;
-  return Math.round(n * NS_PER[unit]);
-}
 
 function FieldRow({
   path,

@@ -360,6 +360,21 @@ func (s *SignerAccessService) GetAccessibleAddresses(ctx context.Context, apiKey
 	return s.accessRepo.ListAccessibleAddresses(ctx, apiKeyID)
 }
 
+// GetAddressesByOwnershipStatus returns signer addresses whose ownership row
+// matches the given status. Used by admins to list the global pending-approval
+// queue without guessing which API key owns each signer.
+func (s *SignerAccessService) GetAddressesByOwnershipStatus(ctx context.Context, status types.SignerOwnershipStatus) ([]string, error) {
+	ownerships, err := s.ownershipRepo.GetByStatus(ctx, status)
+	if err != nil {
+		return nil, err
+	}
+	addrs := make([]string, len(ownerships))
+	for i, o := range ownerships {
+		addrs[i] = o.SignerAddress
+	}
+	return addrs, nil
+}
+
 // TransferOwnership atomically transfers signer ownership to a new owner and clears the access list.
 // Only the current owner can transfer. The old owner loses ALL access.
 func (s *SignerAccessService) TransferOwnership(ctx context.Context, callerKeyID, signerAddress, newOwnerID string) error {

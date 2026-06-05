@@ -124,8 +124,8 @@ test("Forget encrypted key resets back to onboarding", async ({ page }) => {
     page.getByRole("heading", { name: "Dashboard" }),
   ).toBeVisible({ timeout: 30_000 });
 
-  page.once("dialog", (d) => d.accept());
   await page.click('[data-testid="forget-key"]');
+  await page.getByTestId("confirm-dialog-confirm").click();
 
   await expect(page).toHaveURL(/\/login$/);
   await expect(

@@ -32,18 +32,19 @@ Headers:
 | Create rules | Yes | No | Yes | No |
 | Update own rules | Yes | No | Yes | No |
 | List signers (scoped to key) | Yes | Yes | Yes | Yes |
+| Create signers (keystore) | Yes | Yes | Yes | No |
 | View all request status | Yes | No | No | No |
-| Approve/reject requests | Yes | No | No | No |
-| Create signers (keystore/HD) | Yes | No | No | No |
+| Approve/reject sign requests | Yes | No | No | No |
+| Approve pending signers | Yes | No | No | No |
 | Manage API keys | Yes | No | No | No |
 | View audit logs | Yes | No | No | No |
 | Manage templates | Yes | No | No | No |
 
 ### Critical RBAC rules for AI agents:
 
-- **`agent` role**: Can submit sign requests, inspect stuck requests (get payload, check simulation), read rules/budgets, create and update whitelist rules. **Cannot approve requests, manage API keys, or create signers.** When a request enters `authorizing`, the agent should self-service by updating whitelist rules (see remote-signer SKILL.md "Unified Signing Workflow"). If unsafe or rule update requires approval (`require_approval`), the agent tells the user to approve with admin credentials.
+- **`agent` role**: Can submit sign requests, create signers (**`pending_approval` until admin approves the signer**), inspect stuck requests, read rules/budgets, create/update whitelist rules. **Cannot approve sign requests or signers, or manage API keys.** When a request enters `authorizing`, self-service via whitelist rules first; if unsafe, tell the user to approve with admin credentials.
 - **`admin` role**: Full access. Use admin keystore (`~/.remote-signer/apikeys/admin.keystore.json`) for approve/reject/rule-approve operations.
-- **Signer ownership**: Only the API key that created a signer (or someone granted access) can approve/reject requests for that signer.
+- **Signer ownership**: The API key that **creates** a signer is its **owner**. For **sign request** approve/reject and preview-rule during manual approval, **`admin` may act on any request** (typical when `agent` owns the signer). Non-admin roles may preview only requests they submitted.
 
 ## Scoping Fields
 
@@ -62,17 +63,23 @@ API keys can be further restricted:
 ## Signer Ownership Model
 
 - The API key that **creates** a signer becomes its **owner**
-- Only the owner can approve/reject pending requests for that signer
+- Only the owner can approve/reject pending requests for that signer **unless the caller is admin** (manual approval queue in the Web UI)
 - The owner can grant/revoke access to other API keys
 - The owner can transfer ownership to another API key (clears access list)
 
 ```bash
-# Grant access
-./remote-signer evm signer grant-access 0xSignerAddr --api-key-id agent-key
+# Grant access (owner only)
+./remote-signer evm signer access grant 0xSignerAddr --to agent-key-id \
+  --url http://127.0.0.1:8548 --api-key-id owner --api-key-file ~/.remote-signer/apikeys/agent.key.priv
 
 # Revoke access
-./remote-signer evm signer revoke-access 0xSignerAddr agent-key
+./remote-signer evm signer access revoke 0xSignerAddr agent-key-id
+
+# Approve a pending signer (admin only; required before non-admin-owned signers can sign)
+./remote-signer evm signer approve 0xSignerAddr \
+  --url http://127.0.0.1:8548 --api-key-id admin \
+  --api-key-keystore ~/.remote-signer/apikeys/admin.keystore.json
 
 # Transfer ownership
-./remote-signer evm signer transfer-ownership 0xSignerAddr --new-owner-id new-admin
+./remote-signer evm signer transfer 0xSignerAddr --to new-owner-id
 ```

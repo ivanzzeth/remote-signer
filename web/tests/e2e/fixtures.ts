@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { test as base, expect } from "@playwright/test";
+import { test as base, expect, type Page } from "@playwright/test";
 import { RemoteSignerClient } from "remote-signer-client";
 import { decryptKeystore } from "../../src/lib/keystore";
 import { getState } from "./global-setup";
@@ -10,6 +10,11 @@ import { getState } from "./global-setup";
 // an admin.key.priv PEM and the web UI's onboarding flow takes the
 // keystore JSON directly with this same password.
 export const KEYSTORE_PASSWORD = "e2e-test-password";
+
+/** Accept the in-app confirm modal (replaces native window.confirm). */
+export async function acceptConfirm(page: Page): Promise<void> {
+  await page.getByTestId("confirm-dialog-confirm").click();
+}
 
 /**
  * Reads the bootstrap admin keystore JSON from the test daemon's home

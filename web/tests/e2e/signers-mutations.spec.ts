@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures";
+import { acceptConfirm, expect, test } from "./fixtures";
 
 const PASSWORD = "e2e-signer-pw-9k7g";
 
@@ -35,9 +35,9 @@ test("create + lock + unlock + delete via the UI", async ({ authedPage }) => {
   await authedPage.locator("button:has-text('Unlock')").last().click();
   await expect(row.getByText("unlocked")).toBeVisible();
 
-  // Delete (auto-accept the native confirm).
-  authedPage.once("dialog", (d) => d.accept());
+  // Delete
   await row.getByRole("button", { name: "Delete" }).click();
+  await acceptConfirm(authedPage);
   await expect(authedPage.locator("text=e2e-signer")).toHaveCount(0);
 });
 
@@ -68,8 +68,8 @@ test("import existing private key produces the expected EVM address", async ({
   await expect(row.getByText("unlocked")).toBeVisible();
 
   // Clean up so subsequent specs don't see this signer.
-  authedPage.once("dialog", (d) => d.accept());
   await row.getByRole("button", { name: "Delete" }).click();
+  await acceptConfirm(authedPage);
 });
 
 test("import from v3 keystore JSON registers the keystore's address", async ({

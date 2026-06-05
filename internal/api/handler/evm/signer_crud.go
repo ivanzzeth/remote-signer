@@ -110,6 +110,18 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ownershipStatusFilter := strings.TrimSpace(query.Get("ownership_status"))
+	if ownershipStatusFilter != "" {
+		if ownershipStatusFilter != string(types.SignerOwnershipPendingApproval) {
+			h.writeError(w, "invalid ownership_status filter: must be pending_approval", http.StatusBadRequest)
+			return
+		}
+		if !apiKey.IsAdmin() {
+			h.writeError(w, "forbidden: only admins can list signers pending approval", http.StatusForbidden)
+			return
+		}
+	}
+
 	// Get all signers from manager
 	filter := types.SignerFilter{
 		Type:   signerType,
@@ -127,25 +139,41 @@ func (h *SignerHandler) listSigners(w http.ResponseWriter, r *http.Request) {
 	// targeted key (defaults to caller). Admin lookups against another
 	// key go through the same accessService path — no special-casing,
 	// because the access tables are the single source of truth.
-	ownedAddrs, err := h.accessService.GetOwnedAddresses(r.Context(), targetKeyID)
-	if err != nil {
-		h.logger.Error("failed to get owned addresses", slog.String("error", err.Error()))
-		h.writeError(w, "failed to list signers", http.StatusInternalServerError)
-		return
-	}
-	grantedAddrs, err := h.accessService.GetAccessibleAddresses(r.Context(), targetKeyID)
-	if err != nil {
-		h.logger.Error("failed to get accessible addresses", slog.String("error", err.Error()))
-		h.writeError(w, "failed to list signers", http.StatusInternalServerError)
-		return
-	}
-
+	//
+	// ownership_status=pending_approval switches to a global admin queue:
+	// every signer awaiting approval across all API keys, without requiring
+	// the operator to guess which key created each signer.
 	allowedSet := make(map[string]bool)
-	for _, a := range ownedAddrs {
-		allowedSet[strings.ToLower(a)] = true
-	}
-	for _, a := range grantedAddrs {
-		allowedSet[strings.ToLower(a)] = true
+	if ownershipStatusFilter == string(types.SignerOwnershipPendingApproval) {
+		pendingAddrs, pErr := h.accessService.GetAddressesByOwnershipStatus(r.Context(), types.SignerOwnershipPendingApproval)
+		if pErr != nil {
+			h.logger.Error("failed to get pending approval signers", slog.String("error", pErr.Error()))
+			h.writeError(w, "failed to list signers", http.StatusInternalServerError)
+			return
+		}
+		for _, a := range pendingAddrs {
+			allowedSet[strings.ToLower(a)] = true
+		}
+	} else {
+		ownedAddrs, err := h.accessService.GetOwnedAddresses(r.Context(), targetKeyID)
+		if err != nil {
+			h.logger.Error("failed to get owned addresses", slog.String("error", err.Error()))
+			h.writeError(w, "failed to list signers", http.StatusInternalServerError)
+			return
+		}
+		grantedAddrs, err := h.accessService.GetAccessibleAddresses(r.Context(), targetKeyID)
+		if err != nil {
+			h.logger.Error("failed to get accessible addresses", slog.String("error", err.Error()))
+			h.writeError(w, "failed to list signers", http.StatusInternalServerError)
+			return
+		}
+
+		for _, a := range ownedAddrs {
+			allowedSet[strings.ToLower(a)] = true
+		}
+		for _, a := range grantedAddrs {
+			allowedSet[strings.ToLower(a)] = true
+		}
 	}
 
 	// Also include HD wallet derived addresses whose parent is allowed

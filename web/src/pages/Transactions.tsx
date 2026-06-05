@@ -50,6 +50,7 @@ export function Transactions() {
   const [signType, setSignType] = useState("");
   const [apiKeyID, setAPIKeyID] = useState("");
   const [role, setRole] = useState("");
+  const [signRequestID, setSignRequestID] = useState("");
 
   const namesApi = useApi((c) => c.apiKeys.names());
   const currentApiKeyID = getCredentials()?.apiKeyID ?? "";
@@ -65,10 +66,11 @@ export function Transactions() {
     ...(signType ? { sign_type: signType } : {}),
     ...(showAdminFilters && apiKeyID ? { api_key_id: apiKeyID } : {}),
     ...(showAdminFilters && role ? { role } : {}),
+    ...(signRequestID ? { sign_request_id: signRequestID } : {}),
   };
   const { data, loading, error, reload } = useApi(
     (c) => c.evm.transactions.list(filter),
-    [status, chainID, fromAddress, signType, apiKeyID, role],
+    [status, chainID, fromAddress, signType, apiKeyID, role, signRequestID],
   );
 
   const selectCls =
@@ -148,6 +150,17 @@ export function Transactions() {
                 </option>
               ))}
             </select>
+          </FilterField>
+
+          <FilterField label="Sign request">
+            <input
+              type="text"
+              value={signRequestID}
+              onChange={(e) => setSignRequestID(e.target.value.trim())}
+              placeholder="uuid"
+              data-testid="transactions-filter-sign-request"
+              className={`${inputCls} w-36 font-mono text-xs`}
+            />
           </FilterField>
 
           {showAdminFilters && (

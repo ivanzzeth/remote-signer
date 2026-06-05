@@ -2,11 +2,19 @@ package handler
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+
+	_ "modernc.org/sqlite"
+
+	"github.com/ivanzzeth/remote-signer/internal/core/service"
+	"github.com/ivanzzeth/remote-signer/internal/settings"
 )
 
 // ---------------------------------------------------------------------------
@@ -70,4 +78,75 @@ func TestSetSecurityConfig_ResponseShape(t *testing.T) {
 	assert.Equal(t, "45s", resp.Security.SignTimeout)
 	assert.Equal(t, 30, resp.Security.AuditRetentionDays)
 	assert.True(t, resp.Security.ContentTypeValidation)
+}
+
+func TestApprovalGuardHealth_FromRuntimeSettings(t *testing.T) {
+	mgr := settings.NewManager(newHealthTestStore(t), slog.Default())
+	sec := settings.DefaultSecurity()
+	sec.ApprovalGuard.Enabled = true
+	if err := mgr.UpdateSecurity(t.Context(), sec, settings.UpdatedBySystem); err != nil {
+		t.Fatalf("update security: %v", err)
+	}
+
+	guard, err := service.NewManualApprovalGuard(service.ManualApprovalGuardConfig{
+		Logger:                slog.Default(),
+		Window:                time.Minute,
+		RejectionThresholdPct: 50,
+		MinSamples:            1,
+		ResumeAfter:           time.Minute,
+	})
+	assert.NoError(t, err)
+	guard.RecordRuleRejected()
+
+	h := NewHealthHandler("v2.0.0")
+	h.SetSecurityConfig(0, 30*time.Second, 7)
+	h.SetSettingsManager(mgr)
+	h.SetApprovalGuard(guard)
+
+	req := httptest.NewRequest("GET", "/health", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	var resp HealthResponse
+	err = json.NewDecoder(w.Body).Decode(&resp)
+	assert.NoError(t, err)
+	assert.NotNil(t, resp.Security)
+	assert.NotNil(t, resp.Security.ApprovalGuard)
+	assert.True(t, resp.Security.ApprovalGuard.Enabled)
+	assert.True(t, resp.Security.ApprovalGuard.Paused)
+}
+
+func TestApprovalGuardHealth_DisabledOmitsBlock(t *testing.T) {
+	mgr := settings.NewManager(newHealthTestStore(t), slog.Default())
+
+	h := NewHealthHandler("v2.0.0")
+	h.SetSecurityConfig(0, 30*time.Second, 7)
+	h.SetSettingsManager(mgr)
+	h.SetApprovalGuard(nil)
+
+	req := httptest.NewRequest("GET", "/health", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	var resp HealthResponse
+	err := json.NewDecoder(w.Body).Decode(&resp)
+	assert.NoError(t, err)
+	assert.NotNil(t, resp.Security)
+	assert.Nil(t, resp.Security.ApprovalGuard)
+}
+
+func newHealthTestStore(t *testing.T) settings.Store {
+	t.Helper()
+	db, err := gorm.Open(sqlite.New(sqlite.Config{DSN: ":memory:", DriverName: "sqlite"}), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&settings.Setting{}); err != nil {
+		t.Fatal(err)
+	}
+	store, err := settings.NewGormStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return store
 }

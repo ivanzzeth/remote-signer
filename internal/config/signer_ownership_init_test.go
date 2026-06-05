@@ -97,6 +97,16 @@ func (m *mockSignerOwnershipRepository) GetByOwner(_ context.Context, ownerID st
 	return nil, nil
 }
 
+func (m *mockSignerOwnershipRepository) GetByStatus(_ context.Context, status types.SignerOwnershipStatus) ([]*types.SignerOwnership, error) {
+	var result []*types.SignerOwnership
+	for _, o := range m.ownerships {
+		if o.Status == status {
+			result = append(result, o)
+		}
+	}
+	return result, nil
+}
+
 func (m *mockSignerOwnershipRepository) Delete(_ context.Context, signerAddress string) error {
 	return nil
 }

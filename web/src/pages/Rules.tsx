@@ -1,7 +1,9 @@
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   APIError,
   type CreateRuleRequest,
+  type ListRulesFilter,
   type Rule,
   type RuleMode,
   type RuleType,
@@ -19,7 +21,9 @@ import {
   Loading,
   PageHeader,
 } from "../components/ui";
-import { getClient } from "../lib/auth";
+import { useConfirm } from "../components/feedback";
+import { getClient, getCredentials } from "../lib/auth";
+import { useShouldProposeRuleChanges } from "../lib/rbac";
 import { useApi } from "../lib/useApi";
 
 const RULE_TYPES: RuleType[] = [
@@ -81,7 +85,31 @@ const CONFIG_TEMPLATES: Record<RuleType, Record<string, unknown>> = {
  * typed forms without sacrificing safety.
  */
 export function Rules() {
-  const { data, loading, error, reload } = useApi((c) => c.evm.rules.list());
+  const shouldPropose = useShouldProposeRuleChanges();
+  const confirm = useConfirm();
+  const [searchParams] = useSearchParams();
+  const [filterType, setFilterType] = useState<RuleType | "">("");
+  const [filterMode, setFilterMode] = useState<RuleMode | "">("");
+  const [filterEnabled, setFilterEnabled] = useState<"" | "true" | "false">("");
+  const [filterChainType, setFilterChainType] = useState("");
+  const [filterSigner, setFilterSigner] = useState("");
+
+  const listFilter: ListRulesFilter = {
+    ...(filterType ? { type: filterType } : {}),
+    ...(filterMode ? { mode: filterMode } : {}),
+    ...(filterEnabled === "true"
+      ? { enabled: true }
+      : filterEnabled === "false"
+        ? { enabled: false }
+        : {}),
+    ...(filterChainType ? { chain_type: filterChainType } : {}),
+    ...(filterSigner ? { signer_address: filterSigner } : {}),
+  };
+
+  const { data, loading, error, reload } = useApi(
+    (c) => c.evm.rules.list(listFilter),
+    [filterType, filterMode, filterEnabled, filterChainType, filterSigner],
+  );
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -89,6 +117,11 @@ export function Rules() {
   const [editing, setEditing] = useState<string | null>(null);
   const [batchValidating, setBatchValidating] = useState(false);
   const [batchValidationResults, setBatchValidationResults] = useState<ValidateRuleResponse[] | null>(null);
+
+  useEffect(() => {
+    const ruleId = searchParams.get("rule_id");
+    if (ruleId) setExpanded(ruleId);
+  }, [searchParams]);
 
   async function batchValidate() {
     const client = getClient();
@@ -152,16 +185,62 @@ export function Rules() {
   }
 
   async function update(
-    id: string,
-    patch: { name?: string; description?: string; config?: Record<string, unknown>; variables?: Record<string, string>; matrix?: Record<string, any>[]; priority?: number; budget_period?: string; applied_to?: string[] },
+    rule: Rule,
+    patch: {
+      name?: string;
+      description?: string;
+      config?: Record<string, unknown>;
+      variables?: Record<string, string>;
+      matrix?: Record<string, any>[];
+      priority?: number;
+      budget_period?: string;
+      applied_to?: string[];
+    },
   ) {
     const client = getClient();
     if (!client) return;
-    setBusy(id);
+    const creds = getCredentials();
+    const owner = rule.owner || "";
+    const usePropose =
+      shouldPropose &&
+      owner !== "" &&
+      owner !== "config" &&
+      owner !== creds?.apiKeyID;
+
+    setBusy(rule.id);
     setMutationError(null);
     try {
-      await client.evm.rules.update(id, patch);
+      if (usePropose) {
+        await client.evm.rules.propose(rule.id, patch);
+      } else {
+        await client.evm.rules.update(rule.id, patch);
+      }
       setEditing(null);
+      reload();
+    } catch (e) {
+      setMutationError(formatMutationError(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function revokeTemplateInstance(ruleID: string) {
+    const ok = await confirm({
+      title: "Revoke template instance",
+      message:
+        "Revoke this template instance? The rule row is removed; the template remains.",
+      confirmLabel: "Revoke",
+      tone: "danger",
+    });
+    if (!ok) {
+      return;
+    }
+    const client = getClient();
+    if (!client) return;
+    setBusy(ruleID);
+    setMutationError(null);
+    try {
+      await client.templates.revokeInstance(ruleID);
       reload();
     } catch (e) {
       setMutationError(formatMutationError(e));
@@ -186,7 +265,13 @@ export function Rules() {
   }
 
   async function destroy(id: string, name: string) {
-    if (!confirm(`Delete rule "${name}"? This cannot be undone.`)) return;
+    const ok = await confirm({
+      title: "Delete rule",
+      message: `Delete rule "${name}"? This cannot be undone.`,
+      confirmLabel: "Delete",
+      tone: "danger",
+    });
+    if (!ok) return;
     const client = getClient();
     if (!client) return;
     setBusy(id);
@@ -293,6 +378,52 @@ export function Rules() {
 
       {showCreate && <CreateForm onSubmit={create} />}
 
+      <Card title="Filters" data-testid="rules-filter-bar">
+        <div className="flex flex-wrap items-end gap-3">
+          <FilterSelect
+            label="Type"
+            value={filterType}
+            onChange={(v) => setFilterType(v as RuleType | "")}
+            options={[{ v: "", l: "All" }, ...RULE_TYPES.map((t) => ({ v: t, l: t }))]}
+          />
+          <FilterSelect
+            label="Mode"
+            value={filterMode}
+            onChange={(v) => setFilterMode(v as RuleMode | "")}
+            options={[
+              { v: "", l: "All" },
+              { v: "whitelist", l: "whitelist" },
+              { v: "blocklist", l: "blocklist" },
+            ]}
+          />
+          <FilterSelect
+            label="Enabled"
+            value={filterEnabled}
+            onChange={(v) =>
+              setFilterEnabled(v as "" | "true" | "false")
+            }
+            options={[
+              { v: "", l: "All" },
+              { v: "true", l: "enabled" },
+              { v: "false", l: "disabled" },
+            ]}
+          />
+          <FilterInput
+            label="Chain type"
+            value={filterChainType}
+            onChange={setFilterChainType}
+            placeholder="evm"
+            testId="rules-filter-chain-type"
+          />
+          <FilterInput
+            label="Signer"
+            value={filterSigner}
+            onChange={setFilterSigner}
+            placeholder="0x…"
+          />
+        </div>
+      </Card>
+
       <Card>
         {loading && <Loading />}
         {error && <ErrorBanner msg={error} />}
@@ -356,6 +487,11 @@ export function Rules() {
                           >
                             {r.status}
                           </Badge>
+                        )}
+                        {r.proposal_for && (
+                          <span className="font-mono text-[10px] text-ink-500">
+                            proposal → {r.proposal_for}
+                          </span>
                         )}
                       </div>
                     </td>
@@ -433,7 +569,12 @@ export function Rules() {
                           rule={r}
                           editing={editing === r.id}
                           onCancelEdit={() => setEditing(null)}
-                          onSave={(patch) => update(r.id, patch)}
+                          onSave={(patch) => update(r, patch)}
+                          onRevokeInstance={
+                            r.template_id
+                              ? () => revokeTemplateInstance(r.id)
+                              : undefined
+                          }
                           busy={busy === r.id}
                         />
                       </td>
@@ -454,6 +595,7 @@ function RuleDetailPanel({
   editing,
   onCancelEdit,
   onSave,
+  onRevokeInstance,
   busy,
 }: {
   rule: Rule;
@@ -466,9 +608,13 @@ function RuleDetailPanel({
     variables?: Record<string, string>;
     matrix?: Record<string, any>[];
     priority?: number;
+    budget_period?: string;
+    applied_to?: string[];
   }) => void;
+  onRevokeInstance?: () => void;
   busy: boolean;
 }) {
+  const confirm = useConfirm();
   const budgets = useApi(
     (c) => c.evm.rules.listBudgets(rule.id),
     [rule.id],
@@ -812,12 +958,34 @@ function RuleDetailPanel({
             maxH={24}
             title="Config"
           />
-          {(rule.owner || rule.approved_by) && (
+          {(rule.owner ||
+            rule.approved_by ||
+            rule.template_id ||
+            rule.expires_at ||
+            rule.proposal_for) && (
             <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-xs text-ink-500">
               <span>
                 <span className="text-ink-400">Priority</span>{" "}
                 <span className="font-mono text-ink-700">{rule.priority}</span>
               </span>
+              {rule.template_id && (
+                <span>
+                  <span className="text-ink-400">Template</span>{" "}
+                  <span className="font-mono text-ink-700">{rule.template_id}</span>
+                </span>
+              )}
+              {rule.proposal_for && (
+                <span>
+                  <span className="text-ink-400">Proposes</span>{" "}
+                  <span className="font-mono text-ink-700">{rule.proposal_for}</span>
+                </span>
+              )}
+              {rule.expires_at && (
+                <span>
+                  <span className="text-ink-400">Expires</span>{" "}
+                  <span className="font-mono text-ink-700">{rule.expires_at}</span>
+                </span>
+              )}
               {rule.owner && (
                 <span>
                   <span className="text-ink-400">Created by</span>{" "}
@@ -829,6 +997,16 @@ function RuleDetailPanel({
                   <span className="text-ink-400">Approved by</span>{" "}
                   <span className="font-mono text-ink-700">{rule.approved_by}</span>
                 </span>
+              )}
+              {onRevokeInstance && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={onRevokeInstance}
+                  className="rounded-md border border-red-200 px-2 py-0.5 text-red-700 hover:bg-red-50 disabled:opacity-50"
+                >
+                  Revoke template instance
+                </button>
               )}
             </div>
           )}
@@ -924,11 +1102,12 @@ function RuleDetailPanel({
           );
           if (active.length === 0) return;
           const names = active.map((b) => b.unit_display || b.unit).join(", ");
-          if (
-            !confirm(
-              `Reset spend on ${active.length} enforcing budget row(s)?\n\n${names}`,
-            )
-          ) {
+          const ok = await confirm({
+            title: "Reset budget spend",
+            message: `Reset spend on ${active.length} enforcing budget row(s)?\n\n${names}`,
+            confirmLabel: "Reset",
+          });
+          if (!ok) {
             return;
           }
           setBudgetBusy(true);
@@ -1900,6 +2079,67 @@ function truncateAddr(val: string, type?: string): string {
   }
   if (val.length > 60) return val.slice(0, 57) + "...";
   return val;
+}
+
+function FilterSelect({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: Array<{ v: string; l: string }>;
+}) {
+  return (
+    <div>
+      <label className="mb-1 block text-[11px] uppercase tracking-wide text-ink-500">
+        {label}
+      </label>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="rounded-md border border-ink-300 bg-white px-2 py-1 text-sm text-ink-900"
+      >
+        {options.map((o) => (
+          <option key={o.v || "__all"} value={o.v}>
+            {o.l}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+function FilterInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+  testId,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  testId?: string;
+}) {
+  return (
+    <div>
+      <label className="mb-1 block text-[11px] uppercase tracking-wide text-ink-500">
+        {label}
+      </label>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        data-testid={testId}
+        className="rounded-md border border-ink-300 bg-white px-2 py-1 font-mono text-sm text-ink-900"
+      />
+    </div>
+  );
 }
 
 function RuleMatrixTable({ matrix }: { matrix: Record<string, any>[] }) {

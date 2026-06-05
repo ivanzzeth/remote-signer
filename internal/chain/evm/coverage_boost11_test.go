@@ -464,6 +464,9 @@ func (m *mockSignerOwnershipRepo) Get(_ context.Context, _ string) (*types.Signe
 func (m *mockSignerOwnershipRepo) GetByOwner(_ context.Context, _ string) ([]*types.SignerOwnership, error) {
 	return nil, nil
 }
+func (m *mockSignerOwnershipRepo) GetByStatus(_ context.Context, _ types.SignerOwnershipStatus) ([]*types.SignerOwnership, error) {
+	return nil, nil
+}
 func (m *mockSignerOwnershipRepo) Delete(_ context.Context, _ string) error {
 	return nil
 }

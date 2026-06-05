@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   APIError,
@@ -6,6 +6,8 @@ import {
   type RequestStatus,
   type RequestStatusResponse,
 } from "remote-signer-client";
+import { LockedSignersQueueBanner } from "../components/RequestBlockerBanner";
+import { useConfirm, useToast } from "../components/feedback";
 import {
   Badge,
   Card,
@@ -16,7 +18,15 @@ import {
   shorten,
 } from "../components/ui";
 import { getClient, getCredentials } from "../lib/auth";
+import {
+  getRequestBlocker,
+  isActionableRequestStatus,
+  REQUEST_LIST_PAGE_SIZE,
+  summarizeLockedSignersInRequests,
+} from "../lib/requestQueue";
+import { useCanApproveRequest } from "../lib/rbac";
 import { useApi } from "../lib/useApi";
+import { useLockedSignerAddresses } from "../lib/useLockedSigners";
 
 const STATUSES: RequestStatus[] = [
   "pending",
@@ -42,9 +52,8 @@ const ROLES = ["admin", "dev", "agent", "strategy"] as const;
 
 /**
  * Sign-request queue overview. Rows link out to /requests/:id for the
- * full payload + action view; the only inline actions are Approve and
- * Reject for rows whose status still admits them, which is the most
- * common operator gesture.
+ * full payload + action view; inline Approve/Reject plus bulk selection
+ * for pending/authorizing rows when the operator has approval permission.
  */
 export function Requests() {
   const [status, setStatus] = useState<RequestStatus | "">("");
@@ -58,15 +67,22 @@ export function Requests() {
   const [role, setRole] = useState("");
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
 
   const namesApi = useApi((c) => c.apiKeys.names());
   const currentApiKeyID = getCredentials()?.apiKeyID ?? "";
   const currentRole =
     namesApi.data?.keys.find((k) => k.id === currentApiKeyID)?.role ?? "";
   const showAdminFilters = currentRole === "admin" || currentRole === "dev";
+  const canApprove = useCanApproveRequest();
+  const confirm = useConfirm();
+  const toast = useToast();
+  const lockedSigners = useLockedSignerAddresses();
+  const selectAllRef = useRef<HTMLInputElement>(null);
 
   const filter: ListRequestsFilter = {
-    limit: 50,
+    limit: REQUEST_LIST_PAGE_SIZE,
     ...(status ? { status } : {}),
     ...(signerAddress ? { signer_address: signerAddress } : {}),
     ...(chainID ? { chain_id: chainID } : {}),
@@ -79,6 +95,55 @@ export function Requests() {
     (c) => c.evm.requests.list(filter),
     [status, signerAddress, chainID, signType, transactionStatus, apiKeyID, role],
   );
+
+  const requests = data?.requests ?? [];
+
+  const actionableOnPage = useMemo(
+    () => requests.filter((r) => isActionableRequestStatus(r.status)),
+    [requests],
+  );
+
+  const actionableIds = useMemo(
+    () => actionableOnPage.map((r) => r.id),
+    [actionableOnPage],
+  );
+
+  const allActionableSelected =
+    actionableIds.length > 0 && actionableIds.every((id) => selected.has(id));
+  const someSelected = selected.size > 0;
+
+  const lockedInQueue = useMemo(
+    () => summarizeLockedSignersInRequests(requests, lockedSigners),
+    [requests, lockedSigners],
+  );
+
+  useEffect(() => {
+    setSelected(new Set());
+  }, [status, signerAddress, chainID, signType, transactionStatus, apiKeyID, role]);
+
+  useEffect(() => {
+    const el = selectAllRef.current;
+    if (el) {
+      el.indeterminate = someSelected && !allActionableSelected;
+    }
+  }, [someSelected, allActionableSelected]);
+
+  function toggleOne(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    if (allActionableSelected) {
+      setSelected(new Set());
+      return;
+    }
+    setSelected(new Set(actionableIds));
+  }
 
   async function approve(id: string) {
     const client = getClient();
@@ -96,7 +161,13 @@ export function Requests() {
   }
 
   async function reject(id: string) {
-    if (!confirm("Reject this request? It cannot be re-approved later.")) return;
+    const ok = await confirm({
+      title: "Reject request",
+      message: "Reject this request? It cannot be re-approved later.",
+      confirmLabel: "Reject",
+      tone: "danger",
+    });
+    if (!ok) return;
     const client = getClient();
     if (!client) return;
     setBusy(id);
@@ -111,6 +182,60 @@ export function Requests() {
     }
   }
 
+  async function bulkDecide(approved: boolean) {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+
+    if (!approved) {
+      const ok = await confirm({
+        title: `Reject ${ids.length} request(s)?`,
+        message: "Rejected requests cannot be re-approved later.",
+        confirmLabel: `Reject ${ids.length}`,
+        tone: "danger",
+      });
+      if (!ok) return;
+    }
+
+    const client = getClient();
+    if (!client) return;
+
+    setBulkBusy(true);
+    setMutationError(null);
+    let okCount = 0;
+    const failures: string[] = [];
+
+    for (const id of ids) {
+      try {
+        await client.evm.requests.approve(id, { approved });
+        okCount++;
+      } catch (e) {
+        failures.push(`${shorten(id, 8, 4)}: ${formatErr(e)}`);
+      }
+    }
+
+    setSelected(new Set());
+    reload();
+    setBulkBusy(false);
+
+    if (failures.length === 0) {
+      toast({
+        title: approved
+          ? `Approved ${okCount} request(s).`
+          : `Rejected ${okCount} request(s).`,
+        tone: "success",
+      });
+    } else {
+      const msg = `${okCount} succeeded, ${failures.length} failed. ${failures.slice(0, 3).join("; ")}`;
+      setMutationError(msg);
+      if (okCount > 0) {
+        toast({
+          title: `${okCount} request(s) updated; ${failures.length} failed.`,
+          tone: "info",
+        });
+      }
+    }
+  }
+
   const selectCls =
     "rounded-md border border-ink-300 bg-white px-2 py-1 text-sm text-ink-900";
   const inputCls =
@@ -120,7 +245,7 @@ export function Requests() {
     <div className="space-y-6">
       <PageHeader
         title="Sign requests"
-        subtitle="Approve or reject pending requests; click a row for full details."
+        subtitle="Approve or reject pending requests; select rows for bulk actions."
         actions={
           <button
             type="button"
@@ -133,6 +258,10 @@ export function Requests() {
       />
 
       {mutationError && <ErrorBanner msg={mutationError} />}
+
+      {!loading && lockedInQueue.length > 0 && (
+        <LockedSignersQueueBanner addresses={lockedInQueue} />
+      )}
 
       <Card>
         <div
@@ -242,6 +371,49 @@ export function Requests() {
           )}
         </div>
 
+        {canApprove && someSelected && (
+          <div
+            data-testid="requests-bulk-toolbar"
+            className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-accent-200 bg-accent-50 px-3 py-2 text-sm"
+          >
+            <span className="text-ink-700">
+              {selected.size} selected
+              {data?.has_more ? " (this page only)" : ""}
+            </span>
+            <button
+              type="button"
+              disabled={bulkBusy}
+              onClick={() => bulkDecide(true)}
+              className="rounded-md bg-accent-500 px-3 py-1 text-xs font-medium text-white hover:bg-accent-600 disabled:opacity-50"
+            >
+              Approve selected
+            </button>
+            <button
+              type="button"
+              disabled={bulkBusy}
+              onClick={() => bulkDecide(false)}
+              className="rounded-md border border-red-200 px-3 py-1 text-xs text-red-700 hover:bg-red-50 disabled:opacity-50"
+            >
+              Reject selected
+            </button>
+            <button
+              type="button"
+              disabled={bulkBusy}
+              onClick={() => setSelected(new Set())}
+              className="rounded-md border border-ink-200 px-3 py-1 text-xs text-ink-600 hover:bg-white disabled:opacity-50"
+            >
+              Clear
+            </button>
+          </div>
+        )}
+
+        {data?.has_more && (
+          <p className="mb-2 text-xs text-ink-500">
+            Showing first {requests.length} matches — narrow filters or use signer
+            filter to bulk-process a backlog.
+          </p>
+        )}
+
         {loading && <Loading />}
         {error && <ErrorBanner msg={error} />}
         {data &&
@@ -251,6 +423,22 @@ export function Requests() {
             <table className="w-full text-left text-sm">
               <thead className="text-xs uppercase text-ink-500">
                 <tr>
+                  {canApprove && (
+                    <th className="w-8 py-1 pr-2 font-normal">
+                      <input
+                        ref={selectAllRef}
+                        type="checkbox"
+                        data-testid="requests-select-all"
+                        checked={allActionableSelected}
+                        disabled={
+                          bulkBusy || actionableIds.length === 0
+                        }
+                        onChange={toggleSelectAll}
+                        aria-label="Select all actionable requests on this page"
+                        className="rounded border-ink-300"
+                      />
+                    </th>
+                  )}
                   <th className="py-1 pr-3 font-normal">When</th>
                   <th className="py-1 pr-3 font-normal">Signer</th>
                   <th className="py-1 pr-3 font-normal">Chain</th>
@@ -266,7 +454,11 @@ export function Requests() {
                   <RequestRow
                     key={r.id}
                     req={r}
-                    busy={busy === r.id}
+                    busy={busy === r.id || bulkBusy}
+                    canApprove={canApprove}
+                    selected={selected.has(r.id)}
+                    lockedSigners={lockedSigners}
+                    onToggleSelect={() => toggleOne(r.id)}
                     onApprove={() => approve(r.id)}
                     onReject={() => reject(r.id)}
                   />
@@ -299,22 +491,49 @@ function FilterField({
 function RequestRow({
   req,
   busy,
+  canApprove,
+  selected,
+  lockedSigners,
+  onToggleSelect,
   onApprove,
   onReject,
 }: {
   req: RequestStatusResponse;
   busy: boolean;
+  canApprove: boolean;
+  selected: boolean;
+  lockedSigners: ReadonlySet<string>;
+  onToggleSelect: () => void;
   onApprove: () => void;
   onReject: () => void;
 }) {
   const navigate = useNavigate();
-  const actionable = req.status === "pending" || req.status === "authorizing";
+  const actionable = isActionableRequestStatus(req.status);
+  const blocker = getRequestBlocker(req, lockedSigners);
 
   return (
     <tr
       className="cursor-pointer border-t border-ink-100 hover:bg-ink-50"
       onClick={() => navigate(`/requests/${req.id}`)}
     >
+      {canApprove && (
+        <td
+          className="py-1 pr-2 align-top"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {actionable ? (
+            <input
+              type="checkbox"
+              data-testid={`request-row-select-${req.id}`}
+              checked={selected}
+              disabled={busy}
+              onChange={onToggleSelect}
+              aria-label={`Select request ${req.id}`}
+              className="rounded border-ink-300"
+            />
+          ) : null}
+        </td>
+      )}
       <td className="py-1 pr-3 font-mono text-xs text-ink-700">
         {req.created_at}
       </td>
@@ -328,8 +547,21 @@ function RequestRow({
       <td className="py-1 pr-3 font-mono text-xs text-ink-700">
         {req.api_key_id}
       </td>
-      <td className="py-1 pr-3">
+      <td className="py-1 pr-3 align-top">
         <Badge tone={statusTone(req.status)}>{req.status}</Badge>
+        {blocker && (
+          <p
+            className={`mt-1 max-w-[14rem] text-[10px] leading-snug ${
+              blocker.kind === "signer_locked"
+                ? "text-red-700"
+                : blocker.kind === "rule_matched_stuck"
+                  ? "text-amber-800"
+                  : "text-ink-600"
+            }`}
+          >
+            {blocker.kind === "signer_locked" ? "Signer locked" : blocker.message}
+          </p>
+        )}
       </td>
       <td
         className="py-1 pr-3 text-xs"
@@ -350,7 +582,7 @@ function RequestRow({
         className="py-1 text-right"
         onClick={(e) => e.stopPropagation()}
       >
-        {actionable ? (
+        {actionable && canApprove ? (
           <div className="inline-flex gap-1">
             <button
               type="button"

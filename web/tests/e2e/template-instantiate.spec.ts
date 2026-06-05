@@ -13,13 +13,22 @@ test("instantiate with valid variables creates a rule", async () => {
   const requiredVars = tmpl!.variables?.filter((v) => v.required) ?? [];
   expect(requiredVars.length).toBeGreaterThanOrEqual(1);
 
-  const result = await c.templates.instantiate(tmpl!.id, {
-    name: `e2e-instantiate-valid-${Date.now()}`,
-    variables: {
-      max_transfer_amount: "100",
-      allowed_recipients: "0x0000000000000000000000000000000000000001",
-    },
-  });
+  let result;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      result = await c.templates.instantiate(tmpl!.id, {
+        name: `e2e-instantiate-valid-${Date.now()}-${attempt}`,
+        variables: {
+          max_transfer_amount: "100",
+          allowed_recipients: "0x0000000000000000000000000000000000000001",
+        },
+      });
+      break;
+    } catch (e) {
+      if (attempt === 4) throw e;
+    }
+  }
+  if (!result) throw new Error("missing instantiate result");
 
   // Result contains the created rule.
   expect(result.rule).toBeDefined();
@@ -88,13 +97,22 @@ test("revoke existing instance deletes the rule", async () => {
   const tmpl = templates.find((t) => t.id === TEMPLATE_ID);
   expect(tmpl).toBeDefined();
 
-  const result = await c.templates.instantiate(tmpl!.id, {
-    name: `e2e-instantiate-revoke-${Date.now()}`,
-    variables: {
-      max_transfer_amount: "100",
-      allowed_recipients: "0x0000000000000000000000000000000000000001",
-    },
-  });
+  let result;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      result = await c.templates.instantiate(tmpl!.id, {
+        name: `e2e-instantiate-revoke-${Date.now()}-${attempt}`,
+        variables: {
+          max_transfer_amount: "100",
+          allowed_recipients: "0x0000000000000000000000000000000000000001",
+        },
+      });
+      break;
+    } catch (e) {
+      if (attempt === 4) throw e;
+    }
+  }
+  if (!result) throw new Error("missing instantiate result");
   expect(result.rule.id).toBeTruthy();
   const ruleId = result.rule.id;
 

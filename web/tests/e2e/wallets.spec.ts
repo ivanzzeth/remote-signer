@@ -1,4 +1,4 @@
-import { adminSDKClient, expect, test } from "./fixtures";
+import { adminSDKClient, acceptConfirm, expect, test } from "./fixtures";
 
 test("create wallet + add member + delete via UI", async ({ authedPage }) => {
   // We need a signer to add as a member. Use the SDK to mint one quickly —
@@ -29,9 +29,9 @@ test("create wallet + add member + delete via UI", async ({ authedPage }) => {
   ).toBeVisible();
   await expect(authedPage.locator("text=No members yet")).toBeVisible();
 
-  // Delete the wallet (auto-accept the native confirm).
-  authedPage.once("dialog", (d) => d.accept());
+  // Delete the wallet.
   await row.getByRole("button", { name: "Delete" }).click();
+  await acceptConfirm(authedPage);
   await expect(authedPage.locator(`text=${walletName}`)).toHaveCount(0);
 });
 
@@ -88,8 +88,8 @@ test("add member uses signer picker filtered by type", async ({
   const memberRow = authedPage.locator("tr", {
     has: authedPage.locator(`text=${keystore.address}`),
   });
-  authedPage.once("dialog", (d) => d.accept()); // remove member confirm
   await memberRow.getByRole("button", { name: "Remove" }).click();
-  authedPage.once("dialog", (d) => d.accept()); // delete wallet confirm
+  await acceptConfirm(authedPage);
   await row.getByRole("button", { name: "Delete" }).click();
+  await acceptConfirm(authedPage);
 });

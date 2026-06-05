@@ -59,8 +59,6 @@ test("Signers page filters by type / locked / enabled and pins API key picker to
   await expect(authedPage.locator("[data-testid=filter-apikey]")).toBeVisible();
 
   // Cleanup so subsequent specs see a clean signer set.
-  authedPage.once("dialog", (d) => d.accept());
   await sdk.evm.signers.deleteSigner((a as any).address);
-  authedPage.once("dialog", (d) => d.accept());
   await sdk.evm.signers.deleteSigner((b as any).address);
 });
