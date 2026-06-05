@@ -105,7 +105,12 @@ export function AuditRecordDetail({ record }: { record: AuditRecord }) {
       )}
       {record.rule_id && (
         <DetailItem label="Rule">
-          <span className="font-mono text-xs">{record.rule_id}</span>
+          <Link
+            to={`/rules?rule_id=${encodeURIComponent(record.rule_id)}`}
+            className="font-mono text-xs text-accent-600 hover:text-accent-500"
+          >
+            {record.rule_id}
+          </Link>
         </DetailItem>
       )}
       {(record.request_method || record.request_path) && (

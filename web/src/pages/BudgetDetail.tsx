@@ -8,7 +8,9 @@ import {
   Loading,
   PageHeader,
 } from "../components/ui";
+import { useConfirm } from "../components/feedback";
 import { getClient } from "../lib/auth";
+import { useCanManageBudgets } from "../lib/rbac";
 import { useApi } from "../lib/useApi";
 import { BudgetForm } from "../components/BudgetForm";
 import { ProgressBar, pctUsed } from "./Budgets";
@@ -31,6 +33,8 @@ import {
 export function BudgetDetail() {
   const { id = "" } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const canManage = useCanManageBudgets();
+  const confirm = useConfirm();
   const [editing, setEditing] = useState(false);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -51,7 +55,12 @@ export function BudgetDetail() {
       "",
       `Spent ${data.spent} → 0, tx_count → 0`,
     ].join("\n");
-    if (!confirm(msg)) return;
+    const ok = await confirm({
+      title: "Reset budget spend",
+      message: msg,
+      confirmLabel: "Reset",
+    });
+    if (!ok) return;
     const c = getClient();
     if (!c) return;
     setBusy(true);
@@ -67,7 +76,14 @@ export function BudgetDetail() {
   }
 
   async function remove() {
-    if (!confirm("Delete this budget? Simulation budgets will be auto-recreated on next outflow.")) return;
+    const ok = await confirm({
+      title: "Delete budget",
+      message:
+        "Delete this budget? Simulation budgets will be auto-recreated on next outflow.",
+      confirmLabel: "Delete",
+      tone: "danger",
+    });
+    if (!ok) return;
     const c = getClient();
     if (!c) return;
     setBusy(true);
@@ -107,6 +123,7 @@ export function BudgetDetail() {
         <BudgetView
           budget={data}
           busy={busy}
+          canManage={canManage}
           onEdit={() => setEditing(true)}
           onReset={reset}
           onDelete={remove}
@@ -133,12 +150,14 @@ export function BudgetDetail() {
 function BudgetView({
   budget,
   busy,
+  canManage,
   onEdit,
   onReset,
   onDelete,
 }: {
   budget: BudgetEntry;
   busy: boolean;
+  canManage: boolean;
   onEdit: () => void;
   onReset: () => void;
   onDelete: () => void;
@@ -304,7 +323,8 @@ function BudgetView({
           <button
             type="button"
             onClick={onEdit}
-            disabled={busy}
+            disabled={busy || !canManage}
+            title={canManage ? undefined : "Requires admin role"}
             className="rounded-md bg-accent-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-600 disabled:opacity-50"
             data-testid="budget-edit"
           >
@@ -313,7 +333,8 @@ function BudgetView({
           <button
             type="button"
             onClick={onReset}
-            disabled={busy}
+            disabled={busy || !canManage}
+            title={canManage ? undefined : "Requires admin role"}
             className="rounded-md border border-ink-300 px-3 py-1.5 text-sm text-ink-700 hover:bg-ink-100 disabled:opacity-50"
             data-testid="budget-reset"
           >
@@ -322,7 +343,8 @@ function BudgetView({
           <button
             type="button"
             onClick={onDelete}
-            disabled={busy}
+            disabled={busy || !canManage}
+            title={canManage ? undefined : "Requires admin role"}
             className="rounded-md border border-red-300 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50"
             data-testid="budget-delete"
           >

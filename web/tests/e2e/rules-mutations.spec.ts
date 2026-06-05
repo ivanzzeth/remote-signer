@@ -1,4 +1,4 @@
-import { adminSDKClient, expect, test } from "./fixtures";
+import { adminSDKClient, acceptConfirm, expect, test } from "./fixtures";
 
 /**
  * Seed a rule via the SDK so we have something to mutate, then drive the
@@ -147,13 +147,24 @@ test("typed editor adds an address through the per-row input", async ({
     .nth(1)
     .fill("0x000000000000000000000000000000000000DEAD");
 
+  const createResp = authedPage.waitForResponse(
+    (r) =>
+      r.url().includes("/api/v1/evm/rules") &&
+      r.request().method() === "POST" &&
+      r.ok(),
+  );
   await authedPage.click("button:has-text('Create rule')");
+  await createResp;
 
   const c = await adminSDKClient();
-  // Find by name (server normalises so just look it up).
-  const list = await c.evm.rules.list();
-  const created = list.rules.find((r) => r.name === name);
-  expect(created).toBeTruthy();
+  let created;
+  await expect
+    .poll(async () => {
+      const list = await c.evm.rules.list();
+      created = list.rules.find((r) => r.name === name);
+      return created;
+    }, { timeout: 10_000 })
+    .toBeTruthy();
   expect(
     (created!.config as { addresses: string[] }).addresses,
   ).toContain("0x000000000000000000000000000000000000DEAD");
@@ -179,9 +190,8 @@ test("delete a rule via the UI removes it from the table", async ({
   });
   await expect(row).toBeVisible();
 
-  // Auto-accept the native confirm() the page raises.
-  authedPage.once("dialog", (d) => d.accept());
   await row.getByRole("button", { name: "Delete" }).click();
+  await acceptConfirm(authedPage);
 
   await expect(
     authedPage.locator(`text=${rule.name}`),

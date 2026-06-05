@@ -14,7 +14,9 @@ import {
   PageHeader,
   shorten,
 } from "../components/ui";
+import { useConfirm } from "../components/feedback";
 import { getClient } from "../lib/auth";
+import { useCanManageAPIKeys } from "../lib/rbac";
 import { useApi } from "../lib/useApi";
 
 const ROLES = ["admin", "dev", "agent", "strategy"] as const;
@@ -40,6 +42,8 @@ interface NewKeyState {
  * is displayed once in a one-time panel and never persisted.
  */
 export function ApiKeys() {
+  const canManage = useCanManageAPIKeys();
+  const confirm = useConfirm();
   const { data, loading, error, reload } = useApi((c) => c.apiKeys.list());
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -84,7 +88,13 @@ export function ApiKeys() {
   }
 
   async function destroy(id: string) {
-    if (!confirm(`Delete API key "${id}"? This cannot be undone.`)) return;
+    const ok = await confirm({
+      title: "Delete API key",
+      message: `Delete API key "${id}"? This cannot be undone.`,
+      confirmLabel: "Delete",
+      tone: "danger",
+    });
+    if (!ok) return;
     const client = getClient();
     if (!client) return;
     setBusy(id);
@@ -148,7 +158,8 @@ export function ApiKeys() {
             <button
               type="button"
               onClick={() => setShowCreate((s) => !s)}
-              className="rounded-md bg-accent-500 px-3 py-1 text-xs font-medium text-white hover:bg-accent-600"
+              disabled={!canManage}
+              className="rounded-md bg-accent-500 px-3 py-1 text-xs font-medium text-white hover:bg-accent-600 disabled:opacity-50"
             >
               {showCreate ? "Cancel" : "New API key"}
             </button>
@@ -181,6 +192,7 @@ export function ApiKeys() {
                 <tr>
                   <th className="py-1 pr-3 font-normal">ID / Name</th>
                   <th className="py-1 pr-3 font-normal">Role</th>
+                  <th className="py-1 pr-3 font-normal">Rate limit</th>
                   <th className="py-1 pr-3 font-normal">Source</th>
                   <th className="py-1 pr-3 font-normal">Last used</th>
                   <th className="py-1 pr-3 font-normal">Status</th>
@@ -206,6 +218,11 @@ export function ApiKeys() {
                         {k.role}
                       </Badge>
                     </td>
+                    <td className="py-1 pr-3 font-mono text-xs text-ink-700">
+                      {k.rate_limit != null && k.rate_limit > 0
+                        ? `${k.rate_limit}/min`
+                        : "—"}
+                    </td>
                     <td className="py-1 pr-3 text-xs text-ink-500">
                       {k.source}
                     </td>
@@ -221,7 +238,7 @@ export function ApiKeys() {
                       <div className="flex gap-2">
                         <button
                           type="button"
-                          disabled={busy === k.id}
+                          disabled={busy === k.id || !canManage}
                           onClick={() => toggle(k.id, k.enabled)}
                           className="rounded-md border border-ink-200 px-2 py-0.5 text-xs text-ink-700 hover:bg-ink-100 disabled:opacity-50"
                         >
@@ -229,7 +246,9 @@ export function ApiKeys() {
                         </button>
                         <button
                           type="button"
-                          disabled={busy === k.id || k.source !== "api"}
+                          disabled={
+                            busy === k.id || k.source !== "api" || !canManage
+                          }
                           onClick={() =>
                             setEditing((id) => (id === k.id ? null : k.id))
                           }
@@ -244,7 +263,9 @@ export function ApiKeys() {
                         </button>
                         <button
                           type="button"
-                          disabled={busy === k.id || k.id === "admin"}
+                          disabled={
+                            busy === k.id || k.id === "admin" || !canManage
+                          }
                           onClick={() => destroy(k.id)}
                           title={
                             k.id === "admin"
@@ -260,7 +281,7 @@ export function ApiKeys() {
                   </tr>
                   {editing === k.id && (
                     <tr className="border-t border-ink-100 bg-ink-50">
-                      <td colSpan={6} className="px-4 py-3">
+                      <td colSpan={7} className="px-4 py-3">
                         <EditForm
                           apiKey={k}
                           busy={busy === k.id}

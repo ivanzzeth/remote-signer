@@ -131,6 +131,33 @@ func TestApprovalHandler_RequestNotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
+func TestApprovalHandler_AdminCanApproveNonOwnedSigner(t *testing.T) {
+	signReq := pendingSignRequest()
+	signReq.APIKeyID = "agent-key"
+	svc := &mockSignService{
+		getRequestFn: func(_ context.Context, _ types.SignRequestID) (*types.SignRequest, error) {
+			return signReq, nil
+		},
+		processApprovalFn: func(_ context.Context, _ types.SignRequestID, req *service.ApprovalRequest) (*service.ApprovalResponse, error) {
+			assert.True(t, req.Approved)
+			return &service.ApprovalResponse{
+				SignResponse: &service.SignResponse{
+					RequestID: "req-pending-001",
+					Status:    types.StatusCompleted,
+				},
+			}, nil
+		},
+	}
+	accessSvc := newFlexAccessService(t, map[string]string{
+		"0x1111111111111111111111111111111111111111": "agent-key",
+	})
+	h, _ := NewApprovalHandler(svc, accessSvc, slog.Default(), false)
+
+	body := ApprovalAPIRequest{Approved: true}
+	rec := doApprovalRequest(t, h, http.MethodPost, "/api/v1/evm/requests/req-pending-001/approve", body, approvalOtherKey())
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
 func TestApprovalHandler_NotOwner(t *testing.T) {
 	signReq := pendingSignRequest()
 	svc := &mockSignService{
@@ -138,14 +165,15 @@ func TestApprovalHandler_NotOwner(t *testing.T) {
 			return signReq, nil
 		},
 	}
-	// Signer owned by "owner-key", but caller is "other-key"
+	// Signer owned by "owner-key", but caller is dev without approve permission.
 	accessSvc := newFlexAccessService(t, map[string]string{
 		"0x1111111111111111111111111111111111111111": "owner-key",
 	})
 	h, _ := NewApprovalHandler(svc, accessSvc, slog.Default(), false)
 
 	body := ApprovalAPIRequest{Approved: true}
-	rec := doApprovalRequest(t, h, http.MethodPost, "/api/v1/evm/requests/req-pending-001/approve", body, approvalOtherKey())
+	devKey := &types.APIKey{ID: "dev-key", Name: "Dev", Role: types.RoleDev, Enabled: true}
+	rec := doApprovalRequest(t, h, http.MethodPost, "/api/v1/evm/requests/req-pending-001/approve", body, devKey)
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 	assert.Contains(t, rec.Body.String(), "signer owner")
 }
@@ -369,8 +397,50 @@ func TestPreviewRuleHandler_NotRequestOwner(t *testing.T) {
 	}
 	h, _ := NewPreviewRuleHandler(svc, slog.Default())
 	body := PreviewRuleAPIRequest{RuleType: "evm_address_list", RuleMode: "whitelist"}
-	rec := doApprovalRequest(t, h, http.MethodPost, "/api/v1/evm/requests/req-pending-001/preview-rule", body, approvalOtherKey())
+	agentKey := &types.APIKey{ID: "agent-key", Name: "Agent", Role: types.RoleAgent, Enabled: true}
+	rec := doApprovalRequest(t, h, http.MethodPost, "/api/v1/evm/requests/req-pending-001/preview-rule", body, agentKey)
 	assert.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+func TestPreviewRuleHandler_AdminCanPreviewOtherKeyRequest(t *testing.T) {
+	signReq := pendingSignRequest()
+	signReq.APIKeyID = "agent-key"
+	ct := types.ChainTypeEVM
+	svc := &mockSignService{
+		getRequestFn: func(_ context.Context, _ types.SignRequestID) (*types.SignRequest, error) {
+		 return signReq, nil
+		},
+		previewRuleFn: func(_ context.Context, _ types.SignRequestID, opts *rule.RuleGenerateOptions) (*types.Rule, error) {
+			return &types.Rule{
+				ID:        "preview-rule-agent",
+				Name:      "Auto-generated rule",
+				Type:      opts.RuleType,
+				Mode:      opts.RuleMode,
+				ChainType: &ct,
+			}, nil
+		},
+	}
+	h, _ := NewPreviewRuleHandler(svc, slog.Default())
+	body := PreviewRuleAPIRequest{RuleType: "evm_address_list", RuleMode: "whitelist"}
+	rec := doApprovalRequest(t, h, http.MethodPost, "/api/v1/evm/requests/req-pending-001/preview-rule", body, approvalAdminKey())
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestPreviewRuleHandler_GeneratorErrorSurfacesClientMessage(t *testing.T) {
+	signReq := pendingSignRequest()
+	svc := &mockSignService{
+		getRequestFn: func(_ context.Context, _ types.SignRequestID) (*types.SignRequest, error) {
+			return signReq, nil
+		},
+		previewRuleFn: func(_ context.Context, _ types.SignRequestID, _ *rule.RuleGenerateOptions) (*types.Rule, error) {
+			return nil, fmt.Errorf("failed to preview rule: failed to generate rule preview: cannot generate address list rule: no recipient in payload")
+		},
+	}
+	h, _ := NewPreviewRuleHandler(svc, slog.Default())
+	body := PreviewRuleAPIRequest{RuleType: "evm_address_list", RuleMode: "whitelist"}
+	rec := doApprovalRequest(t, h, http.MethodPost, "/api/v1/evm/requests/req-pending-001/preview-rule", body, approvalAdminKey())
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "cannot generate address list rule")
 }
 
 func TestPreviewRuleHandler_Success(t *testing.T) {

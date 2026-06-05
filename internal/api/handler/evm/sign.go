@@ -161,6 +161,11 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"api_key_id", apiKey.ID,
 			"signer_address", req.SignerAddress,
 		)
+		if ownership, ownErr := h.accessService.GetOwnership(r.Context(), req.SignerAddress); ownErr == nil && ownership != nil &&
+			ownership.Status == types.SignerOwnershipPendingApproval {
+			h.writeError(w, "signer pending admin approval (run: evm signer approve <address>)", http.StatusForbidden)
+			return
+		}
 		if h.alertService != nil {
 			clientIP, _ := r.Context().Value(middleware.ClientIPContextKey).(string)
 			h.alertService.Alert(middleware.AlertSignerDenied, apiKey.ID,

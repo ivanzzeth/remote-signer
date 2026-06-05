@@ -46,6 +46,11 @@ export interface RequestStatusResponse {
   // personal_sign / typed_data requests (never broadcast) and for
   // tx requests that haven't been broadcast yet.
   transaction_id?: string;
+  /** Rule types auto-generatable from this request payload (detail GET, pending/authorizing only). */
+  generatable_rule_types?: string[];
+  rule_generation_hints?: {
+    max_value?: string;
+  };
   created_at: string;
   updated_at: string;
   completed_at?: string;

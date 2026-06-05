@@ -133,6 +133,18 @@ func (s *ApprovalService) SupportedRuleTypes() []types.RuleType {
 	return s.ruleGenerator.SupportedTypes()
 }
 
+// RuleGenerationInfo describes auto-generatable rule types for a parsed payload.
+type RuleGenerationInfo struct {
+	Types             []types.RuleType
+	SuggestedMaxValue *string
+}
+
+// RuleGenerationInfo returns rule types whose config can be derived from parsed.
+func (s *ApprovalService) RuleGenerationInfo(parsed *types.ParsedPayload) *RuleGenerationInfo {
+	types, max := s.ruleGenerator.ApplicableFromParsed(parsed)
+	return &RuleGenerationInfo{Types: types, SuggestedMaxValue: max}
+}
+
 // NoopNotifier is a notifier that does nothing (used when notifications are disabled)
 type NoopNotifier struct{}
 

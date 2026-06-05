@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import {
   type BudgetEntry,
   type HealthResponse as SDKHealthResponse,
+  type ListSignersResponse,
 } from "remote-signer-client";
 import { auditSeverityTone } from "../components/AuditTimeline";
 import {
@@ -16,7 +17,7 @@ import {
   shorten,
 } from "../components/ui";
 import { getClient, getCredentials } from "../lib/auth";
-import { useCanReadAudit } from "../lib/rbac";
+import { useCanApproveSigner, useCanReadAudit } from "../lib/rbac";
 import { useApi } from "../lib/useApi";
 import { ProgressBar, pctUsed } from "./Budgets";
 
@@ -53,6 +54,25 @@ export function Dashboard() {
   const creds = getCredentials();
   const health = useApi((c) => c.health() as Promise<HealthResponse>);
   const canReadAudit = useCanReadAudit();
+  const canApproveSigner = useCanApproveSigner();
+  const pendingRequests = useApi((c) =>
+    c.evm.requests.list({ status: "pending", limit: 1 }),
+  );
+  const authorizingRequests = useApi((c) =>
+    c.evm.requests.list({ status: "authorizing", limit: 1 }),
+  );
+  const pendingSigners = useApi<ListSignersResponse>(
+    (c) => {
+      if (!canApproveSigner) {
+        return Promise.resolve({ signers: [], total: 0 });
+      }
+      return c.evm.signers.list({
+        ownership_status: "pending_approval",
+        limit: 1,
+      });
+    },
+    [canApproveSigner],
+  );
   const audit = useApi((c) =>
     c.audit.list({ limit: 8, exclude_event_type: "api_request" }),
   );
@@ -104,12 +124,37 @@ export function Dashboard() {
             <dl className="space-y-1 text-sm">
               <Row k="Status" v={health.data.status} mono />
               <Row k="Version" v={health.data.version} mono />
-              {health.data.security?.sign_timeout && (
-                <Row
-                  k="Sign timeout"
-                  v={health.data.security.sign_timeout}
-                  mono
-                />
+              {health.data.security && (
+                <>
+                  <Row
+                    k="Auto-lock"
+                    v={health.data.security.auto_lock_timeout ?? "—"}
+                    mono
+                  />
+                  <Row
+                    k="Sign timeout"
+                    v={health.data.security.sign_timeout ?? "—"}
+                    mono
+                  />
+                  <Row
+                    k="Audit retention"
+                    v={
+                      health.data.security.audit_retention_days != null
+                        ? `${health.data.security.audit_retention_days} days`
+                        : "—"
+                    }
+                    mono
+                  />
+                  <Row
+                    k="Content-Type check"
+                    v={
+                      health.data.security.content_type_validation
+                        ? "enabled"
+                        : "disabled"
+                    }
+                    mono
+                  />
+                </>
               )}
             </dl>
           )}
@@ -126,6 +171,82 @@ export function Dashboard() {
           )}
         </Card>
       </section>
+
+      <Card
+        title="Sign request queue"
+        data-testid="dashboard-request-queue"
+        actions={
+          <Link
+            to="/requests"
+            className="text-xs text-accent-600 hover:text-accent-500"
+          >
+            all requests →
+          </Link>
+        }
+      >
+        <dl className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
+          <div>
+            <dt className="text-[10px] uppercase tracking-wide text-ink-500">
+              Pending
+            </dt>
+            <dd className="mt-1 font-mono text-lg text-ink-900">
+              {pendingRequests.loading
+                ? "…"
+                : (pendingRequests.data?.total ?? 0)}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-[10px] uppercase tracking-wide text-ink-500">
+              Authorizing
+            </dt>
+            <dd className="mt-1 font-mono text-lg text-ink-900">
+              {authorizingRequests.loading
+                ? "…"
+                : (authorizingRequests.data?.total ?? 0)}
+            </dd>
+          </div>
+        </dl>
+        {(pendingRequests.error || authorizingRequests.error) && (
+          <ErrorBanner
+            msg={pendingRequests.error || authorizingRequests.error || ""}
+          />
+        )}
+      </Card>
+
+      {canApproveSigner && (
+        <Card
+          title="Signers pending approval"
+          data-testid="dashboard-signer-approval-queue"
+          actions={
+            <Link
+              to="/signers?ownership_status=pending_approval"
+              className="text-xs text-accent-600 hover:text-accent-500"
+            >
+              review signers →
+            </Link>
+          }
+        >
+          <p className="mb-3 text-xs text-ink-600">
+            Non-admin API keys create signers in{" "}
+            <span className="font-mono">pending_approval</span> until an admin
+            approves them here. This count is global — not limited to your
+            session key.
+          </p>
+          <dl className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
+            <div>
+              <dt className="text-[10px] uppercase tracking-wide text-ink-500">
+                Awaiting approval
+              </dt>
+              <dd className="mt-1 font-mono text-lg text-ink-900">
+                {pendingSigners.loading
+                  ? "…"
+                  : (pendingSigners.data?.total ?? 0)}
+              </dd>
+            </div>
+          </dl>
+          {pendingSigners.error && <ErrorBanner msg={pendingSigners.error} />}
+        </Card>
+      )}
 
       {hotBudgets && hotBudgets.length > 0 && (
         <Card
@@ -222,11 +343,6 @@ export function Dashboard() {
                 </tbody>
               </table>
             ))}
-          {health.data?.security?.audit_retention_days != null && (
-            <p className="mt-3 text-[11px] text-ink-500">
-              Retention: {health.data.security.audit_retention_days} days
-            </p>
-          )}
         </Card>
       )}
     </div>

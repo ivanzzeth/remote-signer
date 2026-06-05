@@ -31,6 +31,7 @@ export function Audit() {
   const [signerAddress, setSignerAddress] = useState("");
   const [signRequestID, setSignRequestID] = useState("");
   const [chainID, setChainID] = useState("");
+  const [chainType, setChainType] = useState("");
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
   const [includeHTTP, setIncludeHTTP] = useState(false);
@@ -53,6 +54,7 @@ export function Audit() {
     ...(signerAddress ? { signer_address: signerAddress } : {}),
     ...(signRequestID ? { sign_request_id: signRequestID } : {}),
     ...(chainID ? { chain_id: chainID } : {}),
+    ...(chainType ? { chain_type: chainType } : {}),
     ...(startTime ? { start_time: toRFC3339(startTime) } : {}),
     ...(endTime ? { end_time: toRFC3339(endTime) } : {}),
     ...(cursor ? { cursor: cursor.c, cursor_id: cursor.id } : {}),
@@ -65,6 +67,7 @@ export function Audit() {
     signerAddress,
     signRequestID,
     chainID,
+    chainType,
     startTime,
     endTime,
     includeHTTP,
@@ -112,6 +115,7 @@ export function Audit() {
     signerAddress ||
     signRequestID ||
     chainID ||
+    chainType ||
     startTime ||
     endTime ||
     includeHTTP;
@@ -233,6 +237,20 @@ export function Audit() {
             />
           </FilterField>
 
+          <FilterField label="Chain type">
+            <input
+              type="text"
+              value={chainType}
+              onChange={(e) => {
+                setChainType(e.target.value.trim());
+                resetCursor();
+              }}
+              placeholder="evm"
+              data-testid="audit-filter-chain-type"
+              className={`${inputCls} w-24 font-mono text-xs`}
+            />
+          </FilterField>
+
           <FilterField label="From">
             <input
               type="datetime-local"
@@ -279,6 +297,7 @@ export function Audit() {
                 setSignerAddress("");
                 setSignRequestID("");
                 setChainID("");
+                setChainType("");
                 setStartTime("");
                 setEndTime("");
                 setIncludeHTTP(false);

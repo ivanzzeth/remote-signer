@@ -111,25 +111,29 @@ func (h *ApprovalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Authorization: only the signer's owner can approve requests.
-	// This prevents a compromised agent API key from self-approving transactions
-	// on signers it doesn't own. If agent key A submits a request for a signer
-	// owned by admin key B, only B can approve it.
 	ownership, err := h.accessService.GetOwnership(r.Context(), signReq.SignerAddress)
 	if err != nil {
 		h.logger.Error("failed to get signer ownership", "signer", signReq.SignerAddress, "error", err)
 		h.writeError(w, "failed to verify signer ownership", http.StatusInternalServerError)
 		return
 	}
-	if ownership.OwnerID != apiKey.ID {
-		h.logger.Warn("approval denied: caller is not signer owner",
-			"request_id", requestID,
-			"caller_api_key", apiKey.ID,
-			"signer_owner", ownership.OwnerID,
-			"signer_address", signReq.SignerAddress,
-		)
-		h.writeError(w, "not authorized: only the signer owner can approve requests", http.StatusForbidden)
-		return
+
+	// Authorization for manual approval:
+	// - Admin (PermApproveRequest) may approve any authorizing request — the
+	//   typical ops path when an agent-owned signer submits a request.
+	// - Other roles cannot reach this handler (RBAC middleware); the owner
+	//   check remains as defense-in-depth if that ever changes.
+	if !middleware.HasPermission(apiKey.Role, middleware.PermApproveRequest) {
+		if ownership.OwnerID != apiKey.ID {
+			h.logger.Warn("approval denied: caller is not signer owner",
+				"request_id", requestID,
+				"caller_api_key", apiKey.ID,
+				"signer_owner", ownership.OwnerID,
+				"signer_address", signReq.SignerAddress,
+			)
+			h.writeError(w, "not authorized: only the signer owner can approve requests", http.StatusForbidden)
+			return
+		}
 	}
 
 	// Block auto-rule creation when rules API is readonly
@@ -297,8 +301,11 @@ func (h *PreviewRuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if the API key owns this request
-	if signReq.APIKeyID != apiKey.ID {
+	// Authorization for preview:
+	// - Admin may preview any request (same queue they approve in the UI).
+	// - Everyone else may preview only requests they submitted.
+	if !middleware.HasPermission(apiKey.Role, middleware.PermApproveRequest) &&
+		signReq.APIKeyID != apiKey.ID {
 		h.writeError(w, "not authorized to preview rule for this request", http.StatusForbidden)
 		return
 	}
@@ -317,11 +324,32 @@ func (h *PreviewRuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	preview, err := h.signService.PreviewRuleForRequest(r.Context(), types.SignRequestID(requestID), ruleOpts)
 	if err != nil {
 		h.logger.Error("failed to preview rule", "error", err, "request_id", requestID)
-		h.writeError(w, "failed to preview rule", http.StatusBadRequest)
+		h.writeError(w, previewRuleClientError(err), http.StatusBadRequest)
 		return
 	}
 
 	h.writeJSON(w, preview, http.StatusOK)
+}
+
+// previewRuleClientError maps generator/service failures to operator-facing text.
+// Auth and validation errors are returned verbatim earlier in the handler.
+func previewRuleClientError(err error) string {
+	if err == nil {
+		return "failed to preview rule"
+	}
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "not pending approval"):
+		return "request is not awaiting approval"
+	case strings.Contains(msg, "cannot generate address list rule"):
+		return "cannot generate address list rule: transaction requests need a recipient (to) address"
+	case strings.Contains(msg, "cannot generate contract method rule"):
+		return "cannot generate contract method rule: transaction requests need contract calldata"
+	case strings.Contains(msg, "max_value is required"):
+		return "max_value is required for evm_value_limit rule type"
+	default:
+		return "failed to preview rule"
+	}
 }
 
 func (h *PreviewRuleHandler) writeJSON(w http.ResponseWriter, data interface{}, status int) {

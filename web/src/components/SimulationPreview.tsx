@@ -165,6 +165,7 @@ function SimDetail({ sim }: { sim: RequestSimulation }) {
       )}
 
       <BalanceChanges value={sim.balance_changes} />
+      <DecodedCalldata value={sim.decoded_calldata} />
       <EventsList value={sim.events} />
       <ContractsList contracts={sim.contracts} />
     </div>
@@ -205,6 +206,25 @@ function BalanceChanges({ value }: { value: unknown }) {
           );
         })}
       </ul>
+    </section>
+  );
+}
+
+function DecodedCalldata({ value }: { value: unknown }) {
+  if (value == null) return null;
+  const text =
+    typeof value === "string"
+      ? value
+      : JSON.stringify(value, null, 2);
+  if (!text || text === "{}" || text === "null") return null;
+  return (
+    <section>
+      <h4 className="mb-2 text-[11px] uppercase tracking-wide text-ink-500">
+        Decoded calldata
+      </h4>
+      <pre className="max-h-48 overflow-auto rounded border border-ink-200 bg-white p-2 font-mono text-[11px] text-ink-800">
+        {text}
+      </pre>
     </section>
   );
 }

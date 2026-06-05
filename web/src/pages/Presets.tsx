@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { type PresetEntry } from "remote-signer-client";
+import { RegistryRefreshButton } from "../components/RegistryRefreshButton";
 import {
   Badge,
   Card,
@@ -45,13 +46,16 @@ export function Presets() {
         title="Presets"
         subtitle="Pre-configured rule combinations — apply with a few variables and the daemon creates the rule(s), budgets, and schedule."
         actions={
-          <button
-            type="button"
-            onClick={reload}
-            className="rounded-md border border-ink-200 px-3 py-1 text-xs text-ink-700 hover:bg-ink-100"
-          >
-            Refresh
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <RegistryRefreshButton onDone={reload} />
+            <button
+              type="button"
+              onClick={reload}
+              className="rounded-md border border-ink-200 px-3 py-1 text-xs text-ink-700 hover:bg-ink-100"
+            >
+              Refresh
+            </button>
+          </div>
         }
       />
 

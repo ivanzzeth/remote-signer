@@ -10,6 +10,7 @@ import {
   PageHeader,
   shorten,
 } from "../components/ui";
+import { useCanManageBudgets } from "../lib/rbac";
 import { useApi } from "../lib/useApi";
 import { BudgetForm } from "../components/BudgetForm";
 import { formatBudgetPeriod, timeUntil, unitLabel } from "../lib/budgetDisplay";
@@ -27,6 +28,7 @@ import { formatBudgetPeriod, timeUntil, unitLabel } from "../lib/budgetDisplay";
  * accrues against signers under it).
  */
 export function Budgets() {
+  const canManage = useCanManageBudgets();
   const [creating, setCreating] = useState(false);
   const [showStale, setShowStale] = useState(false);
   const [searchParams] = useSearchParams();
@@ -80,7 +82,9 @@ export function Budgets() {
             <button
               type="button"
               onClick={() => setCreating((v) => !v)}
-              className="rounded-md bg-accent-500 px-3 py-1 text-xs font-medium text-white hover:bg-accent-600"
+              disabled={!canManage}
+              title={canManage ? undefined : "Requires admin role"}
+              className="rounded-md bg-accent-500 px-3 py-1 text-xs font-medium text-white hover:bg-accent-600 disabled:opacity-50"
               data-testid="budget-new"
             >
               {creating ? "Cancel" : "New budget"}

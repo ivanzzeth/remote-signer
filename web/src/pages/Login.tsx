@@ -14,6 +14,7 @@ import {
   encryptSeed,
   validatePassword,
 } from "../lib/keystore";
+import { useConfirm } from "../components/feedback";
 
 // detectKeystoreJSON returns true when the operator's pasted/uploaded key
 // material looks like an encrypted keystore (post-cleanup the daemon ships
@@ -91,6 +92,7 @@ function UnlockForm({
   navigate: ReturnType<typeof useNavigate>;
   onReset: () => void;
 }) {
+  const confirm = useConfirm();
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -176,12 +178,15 @@ function UnlockForm({
           <button
             type="button"
             data-testid="reset-keystore"
-            onClick={() => {
-              if (
-                confirm(
+            onClick={async () => {
+              const ok = await confirm({
+                title: "Forget encrypted key",
+                message:
                   "Forget the encrypted key on this device? You'll need to import the private key and set a new password again.",
-                )
-              ) {
+                confirmLabel: "Forget",
+                tone: "danger",
+              });
+              if (ok) {
                 onReset();
               }
             }}

@@ -136,6 +136,7 @@ type Router struct {
 	ipWhitelist   *middleware.IPWhitelist
 	logger        *slog.Logger
 	config        RouterConfig
+	healthHandler *handler.HealthHandler
 }
 
 // NewRouter creates a new router
@@ -170,9 +171,11 @@ func NewRouter(
 
 func (r *Router) setupRoutes() error {
 	// Health check (no auth required, but with security headers)
-	healthHandler := handler.NewHealthHandler(r.config.Version)
-	healthHandler.SetSecurityConfig(r.config.AutoLockTimeout, r.config.SignTimeout, r.config.AuditRetentionDays)
-	r.mux.Handle("/health", middleware.SecurityHeadersMiddleware()(healthHandler))
+	r.healthHandler = handler.NewHealthHandler(r.config.Version)
+	r.healthHandler.SetSecurityConfig(r.config.AutoLockTimeout, r.config.SignTimeout, r.config.AuditRetentionDays)
+	r.healthHandler.SetSettingsManager(r.config.SettingsManager)
+	r.syncApprovalGuard()
+	r.mux.Handle("/health", middleware.SecurityHeadersMiddleware()(r.healthHandler))
 
 	// Prometheus metrics (no auth; same port as API)
 	r.mux.Handle("/metrics", middleware.SecurityHeadersMiddleware()(metrics.Handler()))
@@ -391,10 +394,9 @@ func (r *Router) setupRoutes() error {
 		r.mux.Handle("/api/v1/evm/budgets/", r.withAuthAndPerm(middleware.PermReadBudgets, budgetItemHandler))
 	}
 
-	// Approval guard resume (admin only)
-	if r.config.ApprovalGuard != nil {
-		r.mux.Handle("/api/v1/evm/guard/resume", r.withAuthAndPerm(middleware.PermResumeGuard, http.HandlerFunc(r.handleGuardResume)))
-	}
+	// Approval guard resume (admin only). Route is always registered; handler
+	// returns 501 when security.approval_guard.enabled is false.
+	r.mux.Handle("/api/v1/evm/guard/resume", r.withAuthAndPerm(middleware.PermResumeGuard, http.HandlerFunc(r.handleGuardResume)))
 
 	// Signer management routes
 	// GET: PermReadSigners (all roles); POST: PermCreateSigners checked in handler
@@ -532,6 +534,7 @@ func (r *Router) setupRoutes() error {
 		if r.config.AuditLogger != nil {
 			settingsHandler.SetAuditLogger(r.config.AuditLogger)
 		}
+		settingsHandler.SetOnSecurityUpdated(r.syncApprovalGuard)
 		r.mux.Handle("/api/v1/admin/settings/", r.withAuthAndPerm(middleware.PermManageSettings, settingsHandler))
 	}
 
@@ -668,14 +671,62 @@ func (r *Router) handleGuardResume(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if r.config.SettingsManager == nil || !r.config.SettingsManager.Security().ApprovalGuard.Enabled {
+		http.Error(w, "approval guard is disabled in runtime settings", http.StatusNotImplemented)
+		return
+	}
 	if r.config.ApprovalGuard == nil {
-		http.Error(w, "approval guard not configured", http.StatusNotImplemented)
+		r.syncApprovalGuard()
+	}
+	if r.config.ApprovalGuard == nil {
+		http.Error(w, "approval guard failed to start; check daemon logs", http.StatusServiceUnavailable)
 		return
 	}
 	r.config.ApprovalGuard.Resume()
 	w.Header().Set("Content-Type", "application/json")
 	if _, err := w.Write([]byte(`{"ok":true,"message":"approval guard resumed"}`)); err != nil {
 		r.logger.Error("failed to write guard resume response", "error", err)
+	}
+}
+
+// syncApprovalGuard wires the live ManualApprovalGuard from runtime security
+// settings. Called at startup and after PUT /api/v1/admin/settings/security.
+func (r *Router) syncApprovalGuard() {
+	if r.config.SettingsManager == nil {
+		return
+	}
+	ag := r.config.SettingsManager.Security().ApprovalGuard
+	if !ag.Enabled {
+		r.config.ApprovalGuard = nil
+		r.signService.SetApprovalGuard(nil)
+		if r.healthHandler != nil {
+			r.healthHandler.SetApprovalGuard(nil)
+		}
+		return
+	}
+	if r.config.ApprovalGuard == nil {
+		guard, err := service.NewManualApprovalGuard(service.ManualApprovalGuardConfig{
+			Window:                ag.Window,
+			RejectionThresholdPct: ag.RejectionThresholdPct,
+			MinSamples:            ag.MinSamples,
+			ResumeAfter:           ag.ResumeAfter,
+			Logger:                r.logger,
+		})
+		if err != nil {
+			r.logger.Error("failed to create approval guard from runtime settings", "error", err)
+			return
+		}
+		r.config.ApprovalGuard = guard
+		r.logger.Info("approval guard enabled from runtime settings",
+			"window", ag.Window,
+			"rejection_threshold_pct", ag.RejectionThresholdPct,
+			"min_samples", ag.MinSamples,
+			"resume_after", ag.ResumeAfter,
+		)
+	}
+	r.signService.SetApprovalGuard(r.config.ApprovalGuard)
+	if r.healthHandler != nil {
+		r.healthHandler.SetApprovalGuard(r.config.ApprovalGuard)
 	}
 }
 

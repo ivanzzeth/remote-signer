@@ -7,6 +7,7 @@ import {
   Loading,
   PageHeader,
 } from "../components/ui";
+import { useConfirm } from "../components/feedback";
 import { getClient } from "../lib/auth";
 import { useApi } from "../lib/useApi";
 
@@ -18,6 +19,7 @@ import { useApi } from "../lib/useApi";
  * together.
  */
 export function Wallets() {
+  const confirm = useConfirm();
   const { data, loading, error, reload } = useApi((c) => c.wallets.list());
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -41,7 +43,13 @@ export function Wallets() {
   }
 
   async function destroy(id: string, name: string) {
-    if (!confirm(`Delete wallet "${name}"? Members are unaffected.`)) return;
+    const ok = await confirm({
+      title: "Delete wallet",
+      message: `Delete wallet "${name}"? Members are unaffected.`,
+      confirmLabel: "Delete",
+      tone: "danger",
+    });
+    if (!ok) return;
     const client = getClient();
     if (!client) return;
     setBusy(id);
@@ -178,6 +186,7 @@ function WalletRow({
 }
 
 function MembersPanel({ walletID }: { walletID: string }) {
+  const confirm = useConfirm();
   const members = useApi(
     (c) => c.wallets.listMembers(walletID),
     [walletID],
@@ -225,7 +234,13 @@ function MembersPanel({ walletID }: { walletID: string }) {
   }
 
   async function remove(signerAddress: string) {
-    if (!confirm(`Remove ${signerAddress} from this wallet?`)) return;
+    const ok = await confirm({
+      title: "Remove member",
+      message: `Remove ${signerAddress} from this wallet?`,
+      confirmLabel: "Remove",
+      tone: "danger",
+    });
+    if (!ok) return;
     const client = getClient();
     if (!client) return;
     setBusy(signerAddress);

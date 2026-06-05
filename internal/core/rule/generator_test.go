@@ -73,6 +73,59 @@ func TestDefaultRuleGenerator_SupportedTypes(t *testing.T) {
 // Generate: address list
 // ─────────────────────────────────────────────────────────────────────────────
 
+func TestDefaultRuleGenerator_ApplicableFromParsed(t *testing.T) {
+	gen, _ := NewDefaultRuleGenerator()
+
+	recipient := "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+	contract := "0xabc"
+	method := "0xa9059cbb"
+	value := "1000"
+	hexValue := "0x3e8"
+
+	t.Run("nil payload", func(t *testing.T) {
+		got, max := gen.ApplicableFromParsed(nil)
+		assert.Nil(t, got)
+		assert.Nil(t, max)
+	})
+
+	t.Run("transfer with recipient only", func(t *testing.T) {
+		got, max := gen.ApplicableFromParsed(&types.ParsedPayload{Recipient: &recipient})
+		assert.Equal(t, []types.RuleType{types.RuleTypeEVMAddressList}, got)
+		assert.Nil(t, max)
+	})
+
+	t.Run("contract call", func(t *testing.T) {
+		got, max := gen.ApplicableFromParsed(&types.ParsedPayload{
+			Recipient: &contract,
+			Contract:  &contract,
+			MethodSig: &method,
+		})
+		assert.Equal(t, []types.RuleType{
+			types.RuleTypeEVMAddressList,
+			types.RuleTypeEVMContractMethod,
+		}, got)
+		assert.Nil(t, max)
+	})
+
+	t.Run("non-zero value adds value limit", func(t *testing.T) {
+		got, max := gen.ApplicableFromParsed(&types.ParsedPayload{
+			Recipient: &recipient,
+			Value:     &value,
+		})
+		assert.Contains(t, got, types.RuleTypeEVMAddressList)
+		assert.Contains(t, got, types.RuleTypeEVMValueLimit)
+		require.NotNil(t, max)
+		assert.Equal(t, "1000", *max)
+	})
+
+	t.Run("hex value", func(t *testing.T) {
+		got, max := gen.ApplicableFromParsed(&types.ParsedPayload{Value: &hexValue})
+		assert.Equal(t, []types.RuleType{types.RuleTypeEVMValueLimit}, got)
+		require.NotNil(t, max)
+		assert.Equal(t, "1000", *max)
+	})
+}
+
 func TestGenerate_AddressList_Whitelist(t *testing.T) {
 	gen, _ := NewDefaultRuleGenerator()
 

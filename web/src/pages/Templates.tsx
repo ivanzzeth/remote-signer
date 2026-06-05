@@ -12,6 +12,7 @@ import {
   Loading,
   PageHeader,
 } from "../components/ui";
+import { RegistryRefreshButton } from "../components/RegistryRefreshButton";
 import { useApi } from "../lib/useApi";
 
 /**
@@ -47,13 +48,16 @@ export function Templates() {
         title="Templates"
         subtitle="Parameterised rule shapes shipped with the daemon — pick one, fill the variables, get a concrete rule."
         actions={
-          <button
-            type="button"
-            onClick={reload}
-            className="rounded-md border border-ink-200 px-3 py-1 text-xs text-ink-700 hover:bg-ink-100"
-          >
-            Refresh
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <RegistryRefreshButton onDone={reload} />
+            <button
+              type="button"
+              onClick={reload}
+              className="rounded-md border border-ink-200 px-3 py-1 text-xs text-ink-700 hover:bg-ink-100"
+            >
+              Refresh
+            </button>
+          </div>
         }
       />
 

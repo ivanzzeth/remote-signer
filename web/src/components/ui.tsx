@@ -30,13 +30,17 @@ export function Card({
   title,
   children,
   actions,
+  ...rest
 }: {
   title?: string;
   children: ReactNode;
   actions?: ReactNode;
-}) {
+} & React.HTMLAttributes<HTMLElement>) {
   return (
-    <section className="rounded-lg border border-ink-200 bg-white p-5">
+    <section
+      className="rounded-lg border border-ink-200 bg-white p-5"
+      {...rest}
+    >
       {(title || actions) && (
         <div className="mb-3 flex items-center justify-between">
           {title && (

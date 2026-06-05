@@ -48,6 +48,13 @@ func (g *mockRuleGenerator) SupportedTypes() []types.RuleType {
 	return g.types
 }
 
+func (g *mockRuleGenerator) ApplicableFromParsed(_ *types.ParsedPayload) ([]types.RuleType, *string) {
+	if len(g.types) > 0 {
+		return g.types, nil
+	}
+	return nil, nil
+}
+
 // ---------------------------------------------------------------------------
 // TestNewApprovalService
 // ---------------------------------------------------------------------------

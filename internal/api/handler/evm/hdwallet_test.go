@@ -191,6 +191,9 @@ func (s *stubOwnershipRepo) Get(_ context.Context, addr string) (*types.SignerOw
 func (s *stubOwnershipRepo) GetByOwner(_ context.Context, _ string) ([]*types.SignerOwnership, error) {
 	return nil, nil
 }
+func (s *stubOwnershipRepo) GetByStatus(_ context.Context, _ types.SignerOwnershipStatus) ([]*types.SignerOwnership, error) {
+	return nil, nil
+}
 func (s *stubOwnershipRepo) Delete(_ context.Context, _ string) error                { return nil }
 func (s *stubOwnershipRepo) UpdateOwner(_ context.Context, _, _ string) error         { return nil }
 func (s *stubOwnershipRepo) CountByOwner(_ context.Context, _ string) (int64, error)  { return 0, nil }

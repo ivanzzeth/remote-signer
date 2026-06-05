@@ -21,6 +21,8 @@ type SignerOwnershipRepository interface {
 	// If an address is not found, that ownership will be nil (not an error).
 	GetBoth(ctx context.Context, senderAddress, recipientAddress string) (*types.SignerOwnership, *types.SignerOwnership, error)
 	GetByOwner(ctx context.Context, ownerID string) ([]*types.SignerOwnership, error)
+	// GetByStatus returns all ownership rows in the given status (e.g. pending_approval).
+	GetByStatus(ctx context.Context, status types.SignerOwnershipStatus) ([]*types.SignerOwnership, error)
 	Delete(ctx context.Context, signerAddress string) error
 	UpdateOwner(ctx context.Context, signerAddress, newOwnerID string) error
 	CountByOwner(ctx context.Context, ownerID string) (int64, error)
@@ -100,6 +102,15 @@ func (r *GormSignerOwnershipRepository) GetBoth(ctx context.Context, senderAddre
 func (r *GormSignerOwnershipRepository) GetByOwner(ctx context.Context, ownerID string) ([]*types.SignerOwnership, error) {
 	var ownerships []*types.SignerOwnership
 	err := r.db.WithContext(ctx).Where("owner_id = ?", ownerID).Find(&ownerships).Error
+	if err != nil {
+		return nil, err
+	}
+	return ownerships, nil
+}
+
+func (r *GormSignerOwnershipRepository) GetByStatus(ctx context.Context, status types.SignerOwnershipStatus) ([]*types.SignerOwnership, error) {
+	var ownerships []*types.SignerOwnership
+	err := r.db.WithContext(ctx).Where("status = ?", status).Find(&ownerships).Error
 	if err != nil {
 		return nil, err
 	}

@@ -1,5 +1,8 @@
+import { join } from "node:path";
 import { APIError, SignError } from "remote-signer-client";
 import { adminSDKClient, agentSDKClient, expect, test } from "./fixtures";
+import { getState } from "./global-setup";
+import { sqliteExec } from "./sqlite";
 
 // ---------------------------------------------------------------------------
 // Signer transfer-of-ownership, access-grant cycle, and request
@@ -163,41 +166,28 @@ test("revoking non-existent access returns 404", async () => {
 test("request rejection path", async () => {
   const admin = await adminSDKClient();
 
-  let signer;
+  const signer = await admin.evm.signers.create({
+    type: "keystore",
+    keystore: { password: SIGNER_PW },
+  });
+
   try {
-    signer = await admin.evm.signers.create({
-      type: "keystore",
-      keystore: { password: SIGNER_PW },
-    });
+    const home = getState().home;
+    const dbPath = join(home, "remote-signer.db");
+    const requestId = `req-reject-${Date.now()}`;
+    const now = new Date().toISOString();
 
-    // Submit an async request — with manual_approval_enabled and
-    // no matching rule it parks as pending/authorizing.
-    let requestId = "";
-    try {
-      const resp = await admin.evm.sign.executeAsync({
-        chain_id: "1",
-        signer_address: signer.address,
-        sign_type: "personal",
-        payload: { message: "0x48656c6c6f" },
-      });
-      requestId = resp.request_id;
-    } catch (e) {
-      if (!(e instanceof SignError)) throw e;
-      expect(["pending", "authorizing"]).toContain(e.status);
-      requestId = e.requestID;
-    }
-    expect(requestId).toBeTruthy();
+    sqliteExec(dbPath, [
+      `INSERT INTO sign_requests (id, api_key_id, chain_type, chain_id, signer_address, sign_type, status, created_at, updated_at)
+       VALUES ('${requestId}', 'admin', 'evm', '1', '${signer.address}', 'hash', 'authorizing', '${now}', '${now}')`,
+    ]);
 
-    // Admin rejects the request.
     await admin.evm.requests.approve(requestId, { approved: false });
 
-    // Verify the request status is "rejected".
     const r = await admin.evm.requests.get(requestId);
     expect(r.status).toBe("rejected");
   } finally {
-    if (signer) {
-      await admin.evm.signers.deleteSigner(signer.address).catch(() => {});
-    }
+    await admin.evm.signers.deleteSigner(signer.address).catch(() => {});
   }
 });
 

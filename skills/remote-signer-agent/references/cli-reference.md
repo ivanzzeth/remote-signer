@@ -26,6 +26,10 @@ Auth auto-discovery: when neither `--api-key-file` nor `--api-key-keystore` is s
 - For `--api-key-id admin`: looks for `admin.keystore.json` in `~/.remote-signer/apikeys/`
 - For other IDs: looks for `<id>.key.priv` PEM in `~/.remote-signer/apikeys/`
 
+**Local HTTP daemon (TLS off):** add `--url http://127.0.0.1:8548 --tls-skip-verify`. Do **not** pass `--config` on API commands — `--config` is only for `server start` and offline `config`/`preset` subcommands.
+
+Run `./remote-signer doctor --url http://127.0.0.1:8548 --tls-skip-verify` to sanity-check reachability and key paths.
+
 ## Key Commands
 
 ```bash
@@ -37,15 +41,26 @@ Auth auto-discovery: when neither `--api-key-file` nor `--api-key-keystore` is s
 # API Key management (requires admin auth)
 ./remote-signer api-key keygen --out ./my-key
 ./remote-signer api-key create --id my-key --name "My Key" --role dev \
-  --public-key <hex> --url http://localhost:8548 \
-  --api-key-id admin --api-key-file ~/.remote-signer/apikeys/admin.key.priv
+  --public-key <hex> --url http://127.0.0.1:8548 --tls-skip-verify \
+  --api-key-id admin --api-key-keystore ~/.remote-signer/apikeys/admin.keystore.json
 ./remote-signer api-key list
 ./remote-signer api-key delete my-key
 
+# Sign (subcommands — there is no --sign-type / --payload on the parent command)
+./remote-signer evm sign tx --signer 0xYourAddr --chain-id 1 \
+  --to 0xRecipient --value 0 --data 0x --gas 21000 --tx-type legacy \
+  --url http://127.0.0.1:8548 --api-key-id agent \
+  --api-key-file ~/.remote-signer/apikeys/agent.key.priv --tls-skip-verify
+./remote-signer evm sign personal --signer 0xYourAddr --message "hello"
+./remote-signer evm sign hash --signer 0xYourAddr --hash 0x<64-hex-bytes>
+
 # EVM operations
-./remote-signer evm request list [--status authorizing]
+./remote-signer evm request list [--status authorizing] \
+  --url http://127.0.0.1:8548 --api-key-id admin \
+  --api-key-keystore ~/.remote-signer/apikeys/admin.keystore.json --tls-skip-verify
 ./remote-signer evm request approve <request-id>
 ./remote-signer evm request reject <request-id>
+./remote-signer evm signer approve <signer-address>   # approve pending signer (admin)
 ./remote-signer evm simulate tx --chain-id 1 --from 0x... --to 0x...
 ./remote-signer evm broadcast <signed-tx-hex> --chain-id 1
 

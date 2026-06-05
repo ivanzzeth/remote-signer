@@ -6,7 +6,13 @@ import {
   getCredentials,
   hasStoredKeystore,
 } from "../lib/auth";
-import { useCanReadAudit } from "../lib/rbac";
+import {
+  useCanManageAPIKeys,
+  useCanManageSettings,
+  useCanReadAudit,
+  useCanSignOrSimulate,
+} from "../lib/rbac";
+import { useConfirm } from "./feedback";
 
 interface LayoutProps {
   children: ReactNode;
@@ -17,20 +23,25 @@ export function Layout({ children }: LayoutProps) {
   const navigate = useNavigate();
   const stored = hasStoredKeystore();
   const canReadAudit = useCanReadAudit();
+  const canManageAPIKeys = useCanManageAPIKeys();
+  const canManageSettings = useCanManageSettings();
+  const canSimulate = useCanSignOrSimulate();
+  const confirm = useConfirm();
 
   function onSignOut() {
     clearCredentials();
     navigate("/login", { replace: true });
   }
 
-  function onForgetKey() {
-    if (
-      !confirm(
+  async function onForgetKey() {
+    const ok = await confirm({
+      title: "Forget stored key",
+      message:
         "Forget the encrypted key on this device? You'll need to import the private key and set a new password again.",
-      )
-    ) {
-      return;
-    }
+      confirmLabel: "Forget",
+      tone: "danger",
+    });
+    if (!ok) return;
     clearStoredKeystore();
     clearCredentials();
     navigate("/login", { replace: true });
@@ -54,13 +65,14 @@ export function Layout({ children }: LayoutProps) {
         <NavItem to="/wallets">Wallets</NavItem>
         <NavItem to="/requests">Requests</NavItem>
         <NavItem to="/transactions">Transactions</NavItem>
+        {canSimulate && <NavItem to="/simulate">Simulate</NavItem>}
         <NavItem to="/rules">Rules</NavItem>
         <NavItem to="/templates">Templates</NavItem>
         <NavItem to="/presets">Presets</NavItem>
         <NavItem to="/budgets">Budgets</NavItem>
-        <NavItem to="/api-keys">API Keys</NavItem>
+        {canManageAPIKeys && <NavItem to="/api-keys">API Keys</NavItem>}
         {canReadAudit && <NavItem to="/audit">Audit log</NavItem>}
-        <NavItem to="/settings">Settings</NavItem>
+        {canManageSettings && <NavItem to="/settings">Settings</NavItem>}
 
         <div className="mt-auto space-y-2 border-t border-ink-200 px-3 pt-3">
           {creds && (

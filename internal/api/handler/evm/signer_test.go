@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -78,13 +79,27 @@ type signerStubOwnershipRepo struct {
 func (s *signerStubOwnershipRepo) Upsert(_ context.Context, _ *types.SignerOwnership) error {
 	return nil
 }
-func (s *signerStubOwnershipRepo) Get(_ context.Context, _ string) (*types.SignerOwnership, error) {
+func (s *signerStubOwnershipRepo) Get(_ context.Context, addr string) (*types.SignerOwnership, error) {
+	for _, o := range s.ownerships {
+		if strings.EqualFold(o.SignerAddress, addr) {
+			return o, nil
+		}
+	}
 	return nil, types.ErrNotFound
 }
 func (s *signerStubOwnershipRepo) GetByOwner(_ context.Context, ownerID string) ([]*types.SignerOwnership, error) {
 	var result []*types.SignerOwnership
 	for _, o := range s.ownerships {
 		if o.OwnerID == ownerID {
+			result = append(result, o)
+		}
+	}
+	return result, nil
+}
+func (s *signerStubOwnershipRepo) GetByStatus(_ context.Context, status types.SignerOwnershipStatus) ([]*types.SignerOwnership, error) {
+	var result []*types.SignerOwnership
+	for _, o := range s.ownerships {
+		if o.Status == status {
 			result = append(result, o)
 		}
 	}
@@ -544,6 +559,7 @@ const (
 	filterAddrB = "0xBBBB222222222222222222222222222222222222" // owner-1, enabled, locked
 	filterAddrC = "0xCCCC333333333333333333333333333333333333" // owner-1, disabled, unlocked
 	filterAddrD = "0xDDDD444444444444444444444444444444444444" // owner-2, enabled, unlocked
+	filterAddrE = "0xEEEE555555555555555555555555555555555555" // owner-2, pending_approval
 )
 
 func newFilterSignerManager() *signerMockSignerManager {
@@ -555,8 +571,9 @@ func newFilterSignerManager() *signerMockSignerManager {
 					{Address: filterAddrB, Type: string(types.SignerTypeKeystore), Enabled: true, Locked: true},
 					{Address: filterAddrC, Type: string(types.SignerTypeKeystore), Enabled: false, Locked: false},
 					{Address: filterAddrD, Type: string(types.SignerTypeKeystore), Enabled: true, Locked: false},
+					{Address: filterAddrE, Type: string(types.SignerTypeKeystore), Enabled: true, Locked: false},
 				},
-				Total: 4,
+				Total: 5,
 			}, nil
 		},
 	}
@@ -568,6 +585,7 @@ func filterOwnerships() []*types.SignerOwnership {
 		{SignerAddress: filterAddrB, OwnerID: "owner-1", Status: types.SignerOwnershipActive},
 		{SignerAddress: filterAddrC, OwnerID: "owner-1", Status: types.SignerOwnershipActive},
 		{SignerAddress: filterAddrD, OwnerID: "owner-2", Status: types.SignerOwnershipActive},
+		{SignerAddress: filterAddrE, OwnerID: "owner-2", Status: types.SignerOwnershipPendingApproval},
 	}
 }
 
@@ -631,12 +649,15 @@ func TestListSigners_Filter_APIKeyID_AdminViewsOtherKey(t *testing.T) {
 	admin := &types.APIKey{ID: "owner-1", Role: types.RoleAdmin}
 
 	// Admin owner-1 asks "what does owner-2 see?". Should hit owner-2's
-	// owned+access set, surfacing only addrD.
+	// owned+access set (active + pending signers owned by owner-2).
 	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?api_key_id=owner-2", admin)
 	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
 	resp := decodeSignerListResponse(t, rec)
-	require.Len(t, resp.Signers, 1)
-	assert.Equal(t, filterAddrD, resp.Signers[0].Address)
+	require.Len(t, resp.Signers, 2)
+	assert.Equal(t, 2, resp.Total)
+	addrs := []string{resp.Signers[0].Address, resp.Signers[1].Address}
+	assert.Contains(t, addrs, filterAddrD)
+	assert.Contains(t, addrs, filterAddrE)
 }
 
 func TestListSigners_Filter_APIKeyID_NonAdminCrossKey_403(t *testing.T) {
@@ -662,4 +683,44 @@ func TestListSigners_Filter_APIKeyID_NonAdminSelf_200(t *testing.T) {
 	resp := decodeSignerListResponse(t, rec)
 	// owner-1 sees A + B + C (their own three).
 	assert.Equal(t, 3, resp.Total)
+}
+
+func TestListSigners_Filter_OwnershipStatus_PendingApproval_AdminGlobal(t *testing.T) {
+	h, err := NewSignerHandler(newFilterSignerManager(), newSignerTestAccessServiceWithOwnerships(t, filterOwnerships()), slog.Default(), false)
+	require.NoError(t, err)
+	admin := &types.APIKey{ID: "owner-1", Role: types.RoleAdmin}
+
+	// Default admin view (owner-1 scope) does not include owner-2's pending signer.
+	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers", admin)
+	require.Equal(t, http.StatusOK, rec.Code)
+	resp := decodeSignerListResponse(t, rec)
+	assert.Equal(t, 3, resp.Total)
+
+	// Global pending queue surfaces cross-key signers without api_key_id guesswork.
+	rec = doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?ownership_status=pending_approval", admin)
+	require.Equal(t, http.StatusOK, rec.Code)
+	resp = decodeSignerListResponse(t, rec)
+	require.Len(t, resp.Signers, 1)
+	assert.Equal(t, 1, resp.Total)
+	assert.Equal(t, filterAddrE, resp.Signers[0].Address)
+	assert.Equal(t, "owner-2", resp.Signers[0].OwnerID)
+	assert.Equal(t, "pending_approval", resp.Signers[0].Status)
+}
+
+func TestListSigners_Filter_OwnershipStatus_PendingApproval_NonAdmin_403(t *testing.T) {
+	h, err := NewSignerHandler(newFilterSignerManager(), newSignerTestAccessServiceWithOwnerships(t, filterOwnerships()), slog.Default(), false)
+	require.NoError(t, err)
+	nonAdmin := &types.APIKey{ID: "owner-1", Role: types.RoleAgent}
+
+	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?ownership_status=pending_approval", nonAdmin)
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+func TestListSigners_Filter_OwnershipStatus_Invalid_400(t *testing.T) {
+	h, err := NewSignerHandler(newFilterSignerManager(), newSignerTestAccessServiceWithOwnerships(t, filterOwnerships()), slog.Default(), false)
+	require.NoError(t, err)
+	admin := &types.APIKey{ID: "owner-1", Role: types.RoleAdmin}
+
+	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?ownership_status=active", admin)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }

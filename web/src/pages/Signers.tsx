@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { APIError } from "remote-signer-client";
-import type { ListSignersFilter } from "remote-signer-client";
+import type { ListSignersFilter, ListSignersResponse } from "remote-signer-client";
 import {
   Badge,
   Card,
@@ -9,7 +10,12 @@ import {
   Loading,
   PageHeader,
 } from "../components/ui";
+import { useConfirm } from "../components/feedback";
 import { getClient, getCredentials } from "../lib/auth";
+import {
+  useCanApproveSigner,
+  useCanUnlockSigners,
+} from "../lib/rbac";
 import { isHDWalletPrimary } from "../lib/hdSigner";
 import { useApi } from "../lib/useApi";
 
@@ -30,6 +36,11 @@ const tri = (v: TriBool): boolean | undefined => (v === "" ? undefined : v === "
  * signed HTTPS body.
  */
 export function Signers() {
+  const confirm = useConfirm();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const pendingQueueView =
+    searchParams.get("ownership_status") === "pending_approval";
+
   // Filter state. Each control round-trips through useApi's deps so a
   // change re-fetches the daemon — server-side filtering is the whole
   // point (no client-side over-listing of an admin's full set).
@@ -40,13 +51,16 @@ export function Signers() {
 
   const filter: ListSignersFilter = {
     ...(filterType ? { type: filterType } : {}),
-    ...(filterAPIKeyID ? { api_key_id: filterAPIKeyID } : {}),
+    ...(!pendingQueueView && filterAPIKeyID
+      ? { api_key_id: filterAPIKeyID }
+      : {}),
     ...(tri(filterLocked) !== undefined ? { locked: tri(filterLocked) } : {}),
     ...(tri(filterEnabled) !== undefined ? { enabled: tri(filterEnabled) } : {}),
+    ...(pendingQueueView ? { ownership_status: "pending_approval" } : {}),
   };
   const { data, loading, error, reload } = useApi(
     (c) => c.evm.signers.list(filter),
-    [filterType, filterAPIKeyID, filterLocked, filterEnabled],
+    [filterType, filterAPIKeyID, filterLocked, filterEnabled, pendingQueueView],
   );
 
   // Names directory feeds two things: the api-key filter dropdown
@@ -59,6 +73,34 @@ export function Signers() {
   const currentRole =
     namesApi.data?.keys.find((k) => k.id === currentApiKeyID)?.role ?? "";
   const isAdmin = currentRole === "admin";
+  const canUnlock = useCanUnlockSigners();
+  const canApproveSigner = useCanApproveSigner();
+
+  const pendingGlobal = useApi<ListSignersResponse>(
+    (c) => {
+      if (!isAdmin) {
+        return Promise.resolve({ signers: [], total: 0 });
+      }
+      return c.evm.signers.list({
+        ownership_status: "pending_approval",
+        limit: 1,
+      });
+    },
+    [isAdmin],
+  );
+  const pendingGlobalCount = pendingGlobal.data?.total ?? 0;
+
+  function setPendingQueueView(enabled: boolean) {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (enabled) {
+        next.set("ownership_status", "pending_approval");
+      } else {
+        next.delete("ownership_status");
+      }
+      return next;
+    });
+  }
 
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -137,6 +179,7 @@ export function Signers() {
     try {
       await client.evm.signers.approveSigner(address);
       reload();
+      pendingGlobal.reload();
     } catch (e) {
       setMutationError(formatErr(e));
     } finally {
@@ -145,12 +188,13 @@ export function Signers() {
   }
 
   async function destroy(address: string) {
-    if (
-      !confirm(
-        `Delete signer ${address}? Ownership and access records are removed; the keystore on disk is untouched.`,
-      )
-    )
-      return;
+    const ok = await confirm({
+      title: "Delete signer",
+      message: `Delete signer ${address}? Ownership and access records are removed; the keystore on disk is untouched.`,
+      confirmLabel: "Delete",
+      tone: "danger",
+    });
+    if (!ok) return;
     const client = getClient();
     if (!client) return;
     setBusy(address);
@@ -192,6 +236,53 @@ export function Signers() {
 
       {mutationError && <ErrorBanner msg={mutationError} />}
 
+      {isAdmin && !pendingQueueView && pendingGlobalCount > 0 && (
+        <div
+          data-testid="signers-pending-banner"
+          className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950"
+        >
+          <p className="font-medium">
+            {pendingGlobalCount} signer{pendingGlobalCount === 1 ? "" : "s"}{" "}
+            awaiting admin approval
+          </p>
+          <p className="mt-1 text-xs text-amber-900/80">
+            The default list shows only signers owned by or granted to your
+            session key ({currentApiKeyID || "this session"}). Agent or operator
+            keys create signers that stay hidden here until you open the global
+            approval queue.
+          </p>
+          <button
+            type="button"
+            data-testid="signers-pending-banner-cta"
+            onClick={() => setPendingQueueView(true)}
+            className="mt-2 text-xs font-medium text-accent-700 hover:text-accent-600"
+          >
+            Review pending signers →
+          </button>
+        </div>
+      )}
+
+      {pendingQueueView && (
+        <div
+          data-testid="signers-pending-view-hint"
+          className="rounded-md border border-accent-200 bg-accent-50 px-4 py-3 text-sm text-ink-900"
+        >
+          <p className="font-medium">Global pending approval queue</p>
+          <p className="mt-1 text-xs text-ink-600">
+            Every signer below was created by a non-admin API key and cannot
+            sign until you approve it. Owner and status are shown in the table below.
+          </p>
+          <button
+            type="button"
+            data-testid="signers-pending-view-exit"
+            onClick={() => setPendingQueueView(false)}
+            className="mt-2 text-xs text-accent-700 hover:text-accent-600"
+          >
+            ← Back to my session signers
+          </button>
+        </div>
+      )}
+
       {showCreate && <CreateForm onSubmit={create} />}
 
       <FilterBar
@@ -204,7 +295,11 @@ export function Signers() {
         enabled={filterEnabled}
         onEnabled={setFilterEnabled}
         apiKeyOptions={namesApi.data?.keys ?? []}
-        showAPIKeyFilter={isAdmin}
+        showAPIKeyFilter={isAdmin && !pendingQueueView}
+        showViewFilter={isAdmin}
+        pendingQueueView={pendingQueueView}
+        onPendingQueueView={setPendingQueueView}
+        sessionApiKeyID={currentApiKeyID}
       />
 
       <Card>
@@ -212,7 +307,13 @@ export function Signers() {
         {error && <ErrorBanner msg={error} />}
         {data &&
           (data.signers.length === 0 ? (
-            <Empty msg="No signers configured. Click New signer to generate a fresh keystore-backed key." />
+            <Empty
+              msg={
+                pendingQueueView
+                  ? "No signers pending approval."
+                  : "No signers configured. Click New signer to generate a fresh keystore-backed key."
+              }
+            />
           ) : (
             <table className="w-full text-left text-sm">
               <thead className="text-xs uppercase text-ink-500">
@@ -221,7 +322,11 @@ export function Signers() {
                   <th className="py-1 pr-3 font-normal">Type</th>
                   <th className="py-1 pr-3 font-normal">Enabled</th>
                   <th className="py-1 pr-3 font-normal">Locked</th>
-                  <th className="py-1 pr-3 font-normal">Ownership</th>
+                  <th className="py-1 pr-3 font-normal" data-testid="signers-col-material">
+                    Material
+                  </th>
+                  <th className="py-1 pr-3 font-normal">Owner</th>
+                  <th className="py-1 pr-3 font-normal">Status</th>
                   <th className="py-1 font-normal">Actions</th>
                 </tr>
               </thead>
@@ -260,12 +365,17 @@ export function Signers() {
                         {s.locked ? "locked" : "unlocked"}
                       </Badge>
                     </td>
-                    <td className="py-1 pr-3 text-xs text-ink-700">
-                      {s.status === "pending_approval" ? (
-                        <Badge tone="yellow">pending_approval</Badge>
-                      ) : (
-                        s.status || "active"
-                      )}
+                    <td className="py-1 pr-3">
+                      <MaterialBadge status={s.material_status} />
+                    </td>
+                    <td
+                      className="py-1 pr-3 font-mono text-xs text-ink-900"
+                      data-testid="signer-owner"
+                    >
+                      {s.owner_id || "—"}
+                    </td>
+                    <td className="py-1 pr-3">
+                      <OwnershipStatusBadge status={s.status} />
                     </td>
                     <td className="py-1">
                       <div
@@ -273,6 +383,7 @@ export function Signers() {
                         onClick={(e) => e.stopPropagation()}
                       >
                         {s.locked ? (
+                          canUnlock ? (
                           <button
                             type="button"
                             disabled={busy === s.address}
@@ -281,6 +392,7 @@ export function Signers() {
                           >
                             Unlock
                           </button>
+                          ) : null
                         ) : (
                           <button
                             type="button"
@@ -291,7 +403,7 @@ export function Signers() {
                             Lock
                           </button>
                         )}
-                        {s.status === "pending_approval" && (
+                        {s.status === "pending_approval" && canApproveSigner && (
                           <button
                             type="button"
                             disabled={busy === s.address}
@@ -314,7 +426,7 @@ export function Signers() {
                   </tr>
                   {expanded === s.address && (
                     <tr className="border-t border-ink-100 bg-ink-50">
-                      <td colSpan={6} className="px-4 py-3">
+                      <td colSpan={8} className="px-4 py-3">
                         <AccessPanel address={s.address} />
                       </td>
                     </tr>
@@ -353,6 +465,10 @@ function FilterBar({
   onEnabled,
   apiKeyOptions,
   showAPIKeyFilter,
+  showViewFilter,
+  pendingQueueView,
+  onPendingQueueView,
+  sessionApiKeyID,
 }: {
   type: string;
   onType: (v: string) => void;
@@ -364,6 +480,10 @@ function FilterBar({
   onEnabled: (v: TriBool) => void;
   apiKeyOptions: Array<{ id: string; name: string; role: string }>;
   showAPIKeyFilter: boolean;
+  showViewFilter: boolean;
+  pendingQueueView: boolean;
+  onPendingQueueView: (enabled: boolean) => void;
+  sessionApiKeyID: string;
 }) {
   const selectCls =
     "rounded-md border border-ink-300 bg-white px-2 py-1 text-xs text-ink-900";
@@ -372,6 +492,26 @@ function FilterBar({
       data-testid="signers-filter-bar"
       className="flex flex-wrap items-end gap-3 rounded-md border border-ink-200 bg-ink-50 p-3"
     >
+      {showViewFilter && (
+        <FilterField label="View">
+          <select
+            data-testid="filter-view"
+            className={selectCls}
+            value={pendingQueueView ? "pending_approval" : "session"}
+            onChange={(e) =>
+              onPendingQueueView(e.target.value === "pending_approval")
+            }
+          >
+            <option value="session">
+              My session signers{sessionApiKeyID ? ` (${sessionApiKeyID})` : ""}
+            </option>
+            <option value="pending_approval">
+              Pending approval (all API keys)
+            </option>
+          </select>
+        </FilterField>
+      )}
+
       <FilterField label="Type">
         <select
           data-testid="filter-type"
@@ -413,14 +553,15 @@ function FilterBar({
       </FilterField>
 
       {showAPIKeyFilter && (
-        <FilterField label="API key">
+        <FilterField label="API key scope">
           <select
             data-testid="filter-apikey"
             className={selectCls}
             value={apiKeyID}
             onChange={(e) => onAPIKeyID(e.target.value)}
+            title="Inspect another key's owned/granted signers. Does not include the global pending queue."
           >
-            <option value="">All</option>
+            <option value="">This session only</option>
             {apiKeyOptions.map((k) => (
               <option key={k.id} value={k.id}>
                 {k.id} {k.name && `· ${k.name}`}
@@ -777,6 +918,7 @@ function Field({
 }
 
 function AccessPanel({ address }: { address: string }) {
+  const confirm = useConfirm();
   const access = useApi((c) => c.evm.signers.listAccess(address), [address]);
   // Names directory drives the grant-to picker. We show every enabled
   // key but tag the ones that can't be grant targets — the owner (this
@@ -848,7 +990,13 @@ function AccessPanel({ address }: { address: string }) {
   }
 
   async function revoke(apiKeyID: string) {
-    if (!confirm(`Revoke ${apiKeyID}'s access to this signer?`)) return;
+    const ok = await confirm({
+      title: "Revoke access",
+      message: `Revoke ${apiKeyID}'s access to this signer?`,
+      confirmLabel: "Revoke",
+      tone: "danger",
+    });
+    if (!ok) return;
     const client = getClient();
     if (!client) return;
     setBusy(apiKeyID);
@@ -865,12 +1013,13 @@ function AccessPanel({ address }: { address: string }) {
 
   async function transfer() {
     if (!transferTo.trim()) return;
-    if (
-      !confirm(
-        `Transfer ownership to ${transferTo}? The old owner loses ALL access. This cannot be undone from the UI.`,
-      )
-    )
-      return;
+    const ok = await confirm({
+      title: "Transfer ownership",
+      message: `Transfer ownership to ${transferTo}? The old owner loses ALL access. This cannot be undone from the UI.`,
+      confirmLabel: "Transfer",
+      tone: "danger",
+    });
+    if (!ok) return;
     const client = getClient();
     if (!client) return;
     setBusy("transfer");
@@ -1026,6 +1175,33 @@ function AccessPanel({ address }: { address: string }) {
       </div>
     </div>
   );
+}
+
+function MaterialBadge({ status }: { status?: string }) {
+  if (!status) return <span className="text-ink-400">—</span>;
+  const styles: Record<string, string> = {
+    ok: "bg-green-100 text-green-800",
+    missing: "bg-amber-100 text-amber-800",
+    invalid: "bg-red-100 text-red-800",
+  };
+  return (
+    <span
+      className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-medium uppercase ${styles[status] ?? "bg-ink-100 text-ink-600"}`}
+    >
+      {status}
+    </span>
+  );
+}
+
+function OwnershipStatusBadge({ status }: { status?: string }) {
+  if (!status) return <span className="text-ink-400">—</span>;
+  if (status === "pending_approval") {
+    return <Badge tone="yellow">pending_approval</Badge>;
+  }
+  if (status === "active") {
+    return <Badge tone="green">active</Badge>;
+  }
+  return <Badge tone="neutral">{status}</Badge>;
 }
 
 function formatErr(e: unknown): string {

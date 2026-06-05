@@ -28,7 +28,8 @@ type mockSignService struct {
 	listRequestsFn      func(ctx context.Context, filter storage.RequestFilter) ([]*types.SignRequest, error)
 	countRequestsFn     func(ctx context.Context, filter storage.RequestFilter) (int, error)
 	processApprovalFn   func(ctx context.Context, requestID types.SignRequestID, req *service.ApprovalRequest) (*service.ApprovalResponse, error)
-	previewRuleFn       func(ctx context.Context, requestID types.SignRequestID, opts *rule.RuleGenerateOptions) (*types.Rule, error)
+	previewRuleFn              func(ctx context.Context, requestID types.SignRequestID, opts *rule.RuleGenerateOptions) (*types.Rule, error)
+	ruleGenerationInfoFn       func(ctx context.Context, requestID types.SignRequestID) (*service.RuleGenerationInfo, error)
 }
 
 func (m *mockSignService) Sign(ctx context.Context, req *service.SignRequest) (*service.SignResponse, error) {
@@ -71,6 +72,13 @@ func (m *mockSignService) PreviewRuleForRequest(ctx context.Context, requestID t
 		return m.previewRuleFn(ctx, requestID, opts)
 	}
 	return nil, fmt.Errorf("not implemented")
+}
+
+func (m *mockSignService) RuleGenerationInfoForRequest(ctx context.Context, requestID types.SignRequestID) (*service.RuleGenerationInfo, error) {
+	if m.ruleGenerationInfoFn != nil {
+		return m.ruleGenerationInfoFn(ctx, requestID)
+	}
+	return &service.RuleGenerationInfo{}, nil
 }
 
 func (m *mockSignService) ReevaluatePending(ctx context.Context, callerName string) {}
