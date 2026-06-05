@@ -26,13 +26,21 @@ test("bulk reject selected pending requests", async ({ authedPage }) => {
   }
   expect(requestIds).toHaveLength(2);
 
-  await authedPage.click("text=Requests");
-  await authedPage.selectOption("select:near(:text('Status'))", "pending");
-
-  const shortPrefix = signer.address.slice(0, 10);
+  await authedPage.getByRole("link", { name: "Requests", exact: true }).click();
   await expect(
-    authedPage.locator("tr", { has: authedPage.locator(`text=${shortPrefix}`) }),
-  ).toHaveCount(2, { timeout: 10_000 });
+    authedPage.getByRole("heading", { name: "Sign requests" }),
+  ).toBeVisible();
+
+  await authedPage.getByPlaceholder("0x…").fill(signer.address);
+
+  await expect
+    .poll(async () => {
+      const rows = authedPage.locator("tbody tr").filter({
+        has: authedPage.locator(`text=${signer.address.slice(0, 10)}`),
+      });
+      return rows.count();
+    }, { timeout: 10_000 })
+    .toBe(2);
 
   await authedPage.getByTestId("requests-select-all").check();
   await expect(authedPage.getByTestId("requests-bulk-toolbar")).toBeVisible();
