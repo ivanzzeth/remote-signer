@@ -66,11 +66,11 @@ func (s *rpcSimulator) Simulate(ctx context.Context, req *SimulationRequest) (*S
 	calls := []ethSimCall{{
 		From:  req.From,
 		To:    req.To,
-		Value: normalizeHex(req.Value),
+		Value: normalizeRPCQuantity(req.Value),
 		Data:  req.Data,
 	}}
-	if req.Gas != "" {
-		calls[0].Gas = req.Gas
+	if gas := normalizeRPCGasOptional(req.Gas); gas != "" {
+		calls[0].Gas = gas
 	}
 
 	resp, err := s.callSimulateV1(ctx, req.ChainID, calls)
@@ -105,11 +105,11 @@ func (s *rpcSimulator) SimulateBatch(ctx context.Context, req *BatchSimulationRe
 		calls[i] = ethSimCall{
 			From:  req.From,
 			To:    tx.To,
-			Value: normalizeHex(tx.Value),
+			Value: normalizeRPCQuantity(tx.Value),
 			Data:  tx.Data,
 		}
-		if tx.Gas != "" {
-			calls[i].Gas = tx.Gas
+		if gas := normalizeRPCGasOptional(tx.Gas); gas != "" {
+			calls[i].Gas = gas
 		}
 	}
 
@@ -370,16 +370,6 @@ func ethSimLogsToTxLogs(logs []ethSimLog) []TxLog {
 		out[i] = TxLog(l)
 	}
 	return out
-}
-
-func normalizeHex(s string) string {
-	if s == "" || s == "0" || s == "0x" {
-		return "0x0"
-	}
-	if !strings.HasPrefix(s, "0x") {
-		return "0x" + s
-	}
-	return s
 }
 
 func hexVal(c byte) int {
