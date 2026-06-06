@@ -40,6 +40,23 @@ const (
 
 // ParseEvents parses token standard events from transaction receipt logs.
 func ParseEvents(logs []TxLog) []SimEvent {
+	return ParseEventsWithRegistry(context.Background(), logs, GlobalSignatureRegistry())
+}
+
+// ParseEventsWithRegistry parses builtin token events and registry-resolved custom events.
+func ParseEventsWithRegistry(ctx context.Context, logs []TxLog, reg *SignatureRegistry) []SimEvent {
+	builtin := parseBuiltinEvents(logs)
+	registry := parseRegistryEvents(ctx, reg, logs, builtinEventTopics)
+	if len(registry) == 0 {
+		return builtin
+	}
+	out := make([]SimEvent, 0, len(builtin)+len(registry))
+	out = append(out, builtin...)
+	out = append(out, registry...)
+	return out
+}
+
+func parseBuiltinEvents(logs []TxLog) []SimEvent {
 	events := make([]SimEvent, 0, len(logs))
 
 	for _, log := range logs {
@@ -105,7 +122,7 @@ func parseTransferEvent(log TxLog) *SimEvent {
 		to := topicToAddress(log.Topics[2])
 		value := dataToHexValue(log.Data, 0)
 
-		return &SimEvent{
+		e := verifiedEvent(SimEvent{
 			Address:  strings.ToLower(log.Address),
 			Event:    "Transfer",
 			Standard: "erc20",
@@ -114,7 +131,8 @@ func parseTransferEvent(log TxLog) *SimEvent {
 				"to":    to,
 				"value": value,
 			},
-		}
+		}, log.Topics[0], "Transfer(address,address,uint256)")
+		return &e
 	}
 
 	if len(log.Topics) == 4 {
@@ -123,7 +141,7 @@ func parseTransferEvent(log TxLog) *SimEvent {
 		to := topicToAddress(log.Topics[2])
 		tokenID := topicToUint256(log.Topics[3])
 
-		return &SimEvent{
+		e := verifiedEvent(SimEvent{
 			Address:  strings.ToLower(log.Address),
 			Event:    "Transfer",
 			Standard: "erc721",
@@ -132,7 +150,8 @@ func parseTransferEvent(log TxLog) *SimEvent {
 				"to":      to,
 				"tokenId": tokenID,
 			},
-		}
+		}, log.Topics[0], "Transfer(address,address,uint256)")
+		return &e
 	}
 
 	return nil
@@ -152,7 +171,7 @@ func parseTransferSingleEvent(log TxLog) *SimEvent {
 	id := dataToHexValue(log.Data, 0)
 	value := dataToHexValue(log.Data, 1)
 
-	return &SimEvent{
+	return verifiedEventPtr(SimEvent{
 		Address:  strings.ToLower(log.Address),
 		Event:    "TransferSingle",
 		Standard: "erc1155",
@@ -163,7 +182,7 @@ func parseTransferSingleEvent(log TxLog) *SimEvent {
 			"id":       id,
 			"value":    value,
 		},
-	}
+	}, log.Topics[0], "TransferSingle(address,address,address,uint256,uint256)")
 }
 
 // parseTransferBatchEvent parses ERC1155 TransferBatch events.
@@ -184,7 +203,7 @@ func parseTransferBatchEvent(log TxLog) []SimEvent {
 
 	events := make([]SimEvent, 0, len(ids))
 	for i := 0; i < len(ids) && i < len(values); i++ {
-		events = append(events, SimEvent{
+		events = append(events, verifiedEvent(SimEvent{
 			Address:  strings.ToLower(log.Address),
 			Event:    "TransferBatch",
 			Standard: "erc1155",
@@ -195,7 +214,7 @@ func parseTransferBatchEvent(log TxLog) []SimEvent {
 				"id":       ids[i],
 				"value":    values[i],
 			},
-		})
+		}, log.Topics[0], "TransferBatch(address,address,address,uint256[],uint256[])"))
 	}
 
 	return events
@@ -212,7 +231,7 @@ func parseDepositEvent(log TxLog) *SimEvent {
 	dst := topicToAddress(log.Topics[1])
 	wad := dataToHexValue(log.Data, 0)
 
-	return &SimEvent{
+	return verifiedEventPtr(SimEvent{
 		Address:  strings.ToLower(log.Address),
 		Event:    "Deposit",
 		Standard: "weth",
@@ -220,7 +239,7 @@ func parseDepositEvent(log TxLog) *SimEvent {
 			"dst": dst,
 			"wad": wad,
 		},
-	}
+	}, log.Topics[0], "Deposit(address,uint256)")
 }
 
 // parseWithdrawalEvent parses WETH Withdrawal events.
@@ -234,7 +253,7 @@ func parseWithdrawalEvent(log TxLog) *SimEvent {
 	src := topicToAddress(log.Topics[1])
 	wad := dataToHexValue(log.Data, 0)
 
-	return &SimEvent{
+	return verifiedEventPtr(SimEvent{
 		Address:  strings.ToLower(log.Address),
 		Event:    "Withdrawal",
 		Standard: "weth",
@@ -242,7 +261,7 @@ func parseWithdrawalEvent(log TxLog) *SimEvent {
 			"src": src,
 			"wad": wad,
 		},
-	}
+	}, log.Topics[0], "Withdrawal(address,uint256)")
 }
 
 // parseApprovalEvent parses ERC20/ERC721 Approval events.
@@ -268,12 +287,12 @@ func parseApprovalEvent(log TxLog) *SimEvent {
 		args["value"] = dataToHexValue(log.Data, 0)
 	}
 
-	return &SimEvent{
+	return verifiedEventPtr(SimEvent{
 		Address:  strings.ToLower(log.Address),
 		Event:    "Approval",
 		Standard: standard,
 		Args:     args,
-	}
+	}, log.Topics[0], approvalSignature(standard))
 }
 
 // parseApprovalForAllEvent parses ERC721/ERC1155 ApprovalForAll events.
@@ -285,7 +304,7 @@ func parseApprovalForAllEvent(log TxLog) *SimEvent {
 	owner := topicToAddress(log.Topics[1])
 	operator := topicToAddress(log.Topics[2])
 
-	return &SimEvent{
+	return verifiedEventPtr(SimEvent{
 		Address:  strings.ToLower(log.Address),
 		Event:    "ApprovalForAll",
 		Standard: "erc721",
@@ -293,7 +312,7 @@ func parseApprovalForAllEvent(log TxLog) *SimEvent {
 			"owner":    owner,
 			"operator": operator,
 		},
-	}
+	}, log.Topics[0], "ApprovalForAll(address,address,bool)")
 }
 
 // AllowanceQuerier queries on-chain ERC20 allowance for approval detection.
@@ -491,4 +510,24 @@ func parseUint64FromHex(hex string) uint64 {
 	val := new(big.Int)
 	val.SetString(hex, 16)
 	return val.Uint64()
+}
+
+func verifiedEvent(e SimEvent, topic0, signature string) SimEvent {
+	e.Source = sourceBuiltin
+	e.Confidence = confidenceVerified
+	e.Topic0 = strings.ToLower(topic0)
+	e.Signature = signature
+	return e
+}
+
+func verifiedEventPtr(e SimEvent, topic0, signature string) *SimEvent {
+	out := verifiedEvent(e, topic0, signature)
+	return &out
+}
+
+func approvalSignature(standard string) string {
+	if standard == "erc721" {
+		return "Approval(address,address,uint256)"
+	}
+	return "Approval(address,address,uint256)"
 }

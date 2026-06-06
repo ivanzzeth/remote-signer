@@ -66,7 +66,7 @@ async function openRequestDetail(
   });
 }
 
-test("walkthrough step 1 — Simulate page runs dry-run and surfaces a result", async ({
+test("walkthrough step 1 — Simulations page runs dry-run and surfaces a result", async ({
   authedPage,
 }) => {
   const admin = await adminSDKClient();
@@ -75,7 +75,7 @@ test("walkthrough step 1 — Simulate page runs dry-run and surfaces a result", 
     keystore: { password: "e2e-simulate-run-pw" },
   });
 
-  await authedPage.getByRole("link", { name: "Simulate" }).click();
+  await authedPage.getByRole("link", { name: "Simulations" }).click();
   await expect(authedPage.getByTestId("simulate-page")).toBeVisible();
 
   const txInputs = authedPage.getByTestId("simulate-page").locator("input");
@@ -85,7 +85,7 @@ test("walkthrough step 1 — Simulate page runs dry-run and surfaces a result", 
   const simReq = authedPage.waitForRequest((req) =>
     req.url().includes("/api/v1/evm/simulate") && req.method() === "POST",
   );
-  await authedPage.getByRole("button", { name: "Simulate", exact: true }).click();
+  await authedPage.getByTestId("simulations-run-button").click();
   await simReq;
 
   // E2E daemon may not register the simulate handler (404). Either outcome

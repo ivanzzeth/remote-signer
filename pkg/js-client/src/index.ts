@@ -134,6 +134,10 @@ export type {
   SimulateBatchResponse,
   ChainStatusDTO,
   SimulationStatusResponse,
+  ListSimulationsFilter,
+  SimulationHistoryItem,
+  ListSimulationsResponse,
+  RevertDetailDTO,
   // Budgets
   BudgetKind,
   BudgetEntry,

@@ -7,6 +7,7 @@ import (
 
 	"github.com/ivanzzeth/remote-signer/internal/simulation"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -88,31 +89,34 @@ func (s *stubSimulationRepo) Upsert(_ context.Context, _ *types.RequestSimulatio
 func (s *stubSimulationRepo) GetByRequestID(_ context.Context, _ string) (*types.RequestSimulation, error) {
 	return nil, types.ErrNotFound
 }
+func (s *stubSimulationRepo) List(_ context.Context, _ storage.ListRequestSimulationsFilter) ([]*types.RequestSimulation, bool, error) {
+	return nil, false, nil
+}
 
 func TestRecordOutcome_NilRepo(t *testing.T) {
 	r, err := NewSimulationBudgetRule(&mockSimulator{}, nil, nil, nil, nil, nil, simTestLogger())
 	require.NoError(t, err)
-	r.recordOutcome(context.Background(), &types.SignRequest{ID: "req1"},
+	r.recordOutcome(context.Background(), &types.SignRequest{ID: "req1"}, nil,
 		&SimulationOutcome{Decision: "allow", Simulation: &simulation.SimulationResult{Success: true}})
 }
 
 func TestRecordOutcome_NilOutcome(t *testing.T) {
 	r, err := NewSimulationBudgetRule(&mockSimulator{}, nil, nil, nil, nil, nil, simTestLogger())
 	require.NoError(t, err)
-	r.recordOutcome(context.Background(), &types.SignRequest{ID: "req1"}, nil)
+	r.recordOutcome(context.Background(), &types.SignRequest{ID: "req1"}, nil, nil)
 }
 
 func TestRecordOutcome_NilReq(t *testing.T) {
 	r, err := NewSimulationBudgetRule(&mockSimulator{}, nil, nil, nil, nil, nil, simTestLogger())
 	require.NoError(t, err)
-	r.recordOutcome(context.Background(), nil,
+	r.recordOutcome(context.Background(), nil, nil,
 		&SimulationOutcome{Decision: "allow", Simulation: &simulation.SimulationResult{Success: true}})
 }
 
 func TestRecordOutcome_NilSimulation(t *testing.T) {
 	r, err := NewSimulationBudgetRule(&mockSimulator{}, nil, nil, nil, nil, nil, simTestLogger())
 	require.NoError(t, err)
-	r.recordOutcome(context.Background(), &types.SignRequest{ID: "req1"},
+	r.recordOutcome(context.Background(), &types.SignRequest{ID: "req1"}, nil,
 		&SimulationOutcome{Decision: "no_match"})
 }
 
@@ -124,6 +128,7 @@ func TestRecordOutcome_WithRepo(t *testing.T) {
 
 	r.recordOutcome(context.Background(),
 		&types.SignRequest{ID: "req1", ChainID: "1"},
+		nil,
 		&SimulationOutcome{
 			Decision: "allow",
 			Simulation: &simulation.SimulationResult{
@@ -148,6 +153,7 @@ func TestRecordOutcome_Reverted(t *testing.T) {
 
 	r.recordOutcome(context.Background(),
 		&types.SignRequest{ID: "req2", ChainID: "137"},
+		nil,
 		&SimulationOutcome{
 			Decision: "deny",
 			Simulation: &simulation.SimulationResult{

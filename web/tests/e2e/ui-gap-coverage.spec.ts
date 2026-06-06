@@ -34,20 +34,18 @@ test("Dashboard shows signers pending approval queue for admin", async ({
   ).toHaveAttribute("href", "/signers?ownership_status=pending_approval");
 });
 
-test("Simulate page loads from nav with engine status", async ({
+test("Simulations page loads from nav with engine status", async ({
   authedPage,
 }) => {
-  await authedPage.getByRole("link", { name: "Simulate" }).click();
+  await authedPage.getByRole("link", { name: "Simulations" }).click();
   await expect(authedPage.getByTestId("simulate-page")).toBeVisible();
   await expect(
-    authedPage.getByRole("heading", { name: "Simulate" }),
+    authedPage.getByRole("heading", { name: "Simulations" }),
   ).toBeVisible();
   await expect(
     authedPage.getByRole("heading", { name: "Transaction" }),
   ).toBeVisible();
-  await expect(
-    authedPage.getByRole("button", { name: "Simulate", exact: true }),
-  ).toBeVisible();
+  await expect(authedPage.getByTestId("simulations-run-button")).toBeVisible();
 });
 
 test("Settings shows admin security panel (IP ACL + guard resume)", async ({

@@ -178,6 +178,7 @@ func (r *SimulationBudgetRule) SetSimulationRepo(repo storage.RequestSimulationR
 func (r *SimulationBudgetRule) recordOutcome(
 	ctx context.Context,
 	req *types.SignRequest,
+	parsed *types.ParsedPayload,
 	outcome *SimulationOutcome,
 ) {
 	if r.simulationRepo == nil || outcome == nil || req == nil {
@@ -195,6 +196,9 @@ func (r *SimulationBudgetRule) recordOutcome(
 		row.Success = sim.Success
 		row.GasUsed = sim.GasUsed
 		row.RevertReason = sim.RevertReason
+		if sim.RevertData != "" && row.RevertReason != "" && !strings.Contains(row.RevertReason, sim.RevertData) {
+			row.RevertReason = sim.RevertReason + " · data " + sim.RevertData
+		}
 		if len(sim.BalanceChanges) > 0 {
 			if b, err := json.Marshal(sim.BalanceChanges); err == nil {
 				row.BalanceChanges = types.JSONBytes(b)
@@ -216,6 +220,9 @@ func (r *SimulationBudgetRule) recordOutcome(
 		if b, err := json.Marshal(sim); err == nil {
 			row.RawResult = types.JSONBytes(b)
 		}
+	}
+	if decoded := decodedCalldataFromParsed(parsed); len(decoded) > 0 {
+		row.DecodedCalldata = decoded
 	}
 	if err := r.simulationRepo.Upsert(ctx, row); err != nil {
 		r.logger.Warn("simulation: persist outcome failed",
@@ -327,7 +334,7 @@ func (r *SimulationBudgetRule) EvaluateSingle(
 		// snapshot. The early-return "no simulator / wrong sign_type"
 		// paths have nothing meaningful to show in the UI.
 		if outcome != nil && outcome.Simulation != nil {
-			r.recordOutcome(ctx, req, outcome)
+			r.recordOutcome(ctx, req, parsed, outcome)
 		}
 	}()
 
@@ -350,7 +357,7 @@ func (r *SimulationBudgetRule) EvaluateSingle(
 	// If batch accumulator is active, enqueue and wait for batch result.
 	if r.accumulatorActive() {
 		txp := simulation.TxParams{To: to, Value: value, Data: data, Gas: gas}
-		return r.enqueueAndWait(ctx, req, txp, req.Payload)
+		return r.enqueueAndWait(ctx, req, parsed, txp, req.Payload)
 	}
 
 	// Simulate (synchronous single-tx path)
@@ -868,4 +875,36 @@ func extractTxParamsForSimulation(parsed *types.ParsedPayload) (to, value, data,
 	}
 
 	return to, value, data, gas, nil
+}
+
+// decodedCalldataFromParsed builds a lightweight JSON snapshot of parsed
+// tx fields for the request_simulations.decoded_calldata column.
+func decodedCalldataFromParsed(parsed *types.ParsedPayload) types.JSONBytes {
+	if parsed == nil {
+		return nil
+	}
+	m := make(map[string]string, 4)
+	if parsed.Recipient != nil && *parsed.Recipient != "" {
+		m["to"] = *parsed.Recipient
+	}
+	if parsed.Value != nil && *parsed.Value != "" {
+		m["value"] = *parsed.Value
+	}
+	if parsed.MethodSig != nil && *parsed.MethodSig != "" {
+		m["method_sig"] = *parsed.MethodSig
+	}
+	if parsed.Contract != nil && *parsed.Contract != "" {
+		m["contract"] = *parsed.Contract
+	}
+	if len(parsed.RawData) > 0 {
+		m["raw_data"] = fmt.Sprintf("0x%x", parsed.RawData)
+	}
+	if len(m) == 0 {
+		return nil
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return nil
+	}
+	return types.JSONBytes(b)
 }
