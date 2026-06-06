@@ -39,6 +39,14 @@ type SimulationResult struct {
 	RawLogs        []TxLog         `json:"-"` // raw logs for deep event analysis (not serialized to API)
 	HasApproval    bool            `json:"has_approval"`
 	RevertReason   string          `json:"revert_reason,omitempty"`
+	// RevertData is the raw 0x-prefixed revert payload (custom error selector + args).
+	RevertData       string            `json:"revert_data,omitempty"`
+	RevertSelector   string            `json:"revert_selector,omitempty"`
+	RevertSignature  string            `json:"revert_signature,omitempty"`
+	RevertSource     string            `json:"revert_source,omitempty"`
+	RevertConfidence string            `json:"revert_confidence,omitempty"`
+	RevertCandidates []string          `json:"revert_candidates,omitempty"`
+	RevertArgs       map[string]string `json:"revert_args,omitempty"`
 }
 
 // BatchSimulationResult is the result of simulating a batch of transactions.
@@ -82,8 +90,13 @@ type ChainStatus struct {
 
 // SimEvent represents a parsed event from simulation.
 type SimEvent struct {
-	Address  string            `json:"address"`
-	Event    string            `json:"event"`    // "Transfer", "Approval", "Deposit", etc.
-	Standard string            `json:"standard"` // "erc20", "erc721", "erc1155", "weth"
-	Args     map[string]string `json:"args"`
+	Address    string            `json:"address"`
+	Event      string            `json:"event"`    // "Transfer", "Approval", "Deposit", etc.
+	Standard   string            `json:"standard"` // "erc20", "erc721", "erc1155", "weth", "custom"
+	Args       map[string]string `json:"args"`
+	Topic0     string            `json:"topic0,omitempty"`
+	Signature  string            `json:"signature,omitempty"`
+	Source     string            `json:"source,omitempty"`     // "builtin", "registry"
+	Confidence string            `json:"confidence,omitempty"` // "verified", "inferred"
+	Candidates []string          `json:"candidates,omitempty"`
 }

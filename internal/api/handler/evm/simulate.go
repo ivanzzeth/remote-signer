@@ -48,7 +48,14 @@ type SimulateResponse struct {
 	BalanceChanges []BalanceChangeJSON       `json:"balance_changes"`
 	Events         []simulation.SimEvent     `json:"events"`
 	HasApproval    bool                      `json:"has_approval"`
-	RevertReason   string                    `json:"revert_reason,omitempty"`
+	RevertReason     string            `json:"revert_reason,omitempty"`
+	RevertData       string            `json:"revert_data,omitempty"`
+	RevertSelector   string            `json:"revert_selector,omitempty"`
+	RevertSignature  string            `json:"revert_signature,omitempty"`
+	RevertSource     string            `json:"revert_source,omitempty"`
+	RevertConfidence string            `json:"revert_confidence,omitempty"`
+	RevertCandidates []string          `json:"revert_candidates,omitempty"`
+	RevertArgs       map[string]string `json:"revert_args,omitempty"`
 }
 
 // BalanceChangeJSON is the JSON-friendly representation of a BalanceChange.
@@ -89,7 +96,14 @@ type SimulateResultJSON struct {
 	BalanceChanges []BalanceChangeJSON  `json:"balance_changes"`
 	Events         []simulation.SimEvent `json:"events"`
 	HasApproval    bool                 `json:"has_approval"`
-	RevertReason   string               `json:"revert_reason,omitempty"`
+	RevertReason     string               `json:"revert_reason,omitempty"`
+	RevertData       string               `json:"revert_data,omitempty"`
+	RevertSelector   string               `json:"revert_selector,omitempty"`
+	RevertSignature  string               `json:"revert_signature,omitempty"`
+	RevertSource     string               `json:"revert_source,omitempty"`
+	RevertConfidence string               `json:"revert_confidence,omitempty"`
+	RevertCandidates []string             `json:"revert_candidates,omitempty"`
+	RevertArgs       map[string]string    `json:"revert_args,omitempty"`
 }
 
 // ServeHTTP handles POST /api/v1/evm/simulate.
@@ -139,12 +153,19 @@ func (h *SimulateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := SimulateResponse{
-		Success:        result.Success,
-		GasUsed:        result.GasUsed,
-		BalanceChanges: toBalanceChangeJSON(result.BalanceChanges),
-		Events:         result.Events,
-		HasApproval:    result.HasApproval,
-		RevertReason:   result.RevertReason,
+		Success:          result.Success,
+		GasUsed:          result.GasUsed,
+		BalanceChanges:   toBalanceChangeJSON(result.BalanceChanges),
+		Events:           result.Events,
+		HasApproval:      result.HasApproval,
+		RevertReason:     result.RevertReason,
+		RevertData:       result.RevertData,
+		RevertSelector:   result.RevertSelector,
+		RevertSignature:  result.RevertSignature,
+		RevertSource:     result.RevertSource,
+		RevertConfidence: result.RevertConfidence,
+		RevertCandidates: result.RevertCandidates,
+		RevertArgs:       result.RevertArgs,
 	}
 
 	h.writeJSON(w, resp, http.StatusOK)
@@ -218,13 +239,20 @@ func (h *SimulateHandler) ServeBatchHTTP(w http.ResponseWriter, r *http.Request)
 	results := make([]SimulateResultJSON, len(result.Results))
 	for i, r := range result.Results {
 		results[i] = SimulateResultJSON{
-			Index:          i,
-			Success:        r.Success,
-			GasUsed:        r.GasUsed,
-			BalanceChanges: toBalanceChangeJSON(r.BalanceChanges),
-			Events:         r.Events,
-			HasApproval:    r.HasApproval,
-			RevertReason:   r.RevertReason,
+			Index:            i,
+			Success:          r.Success,
+			GasUsed:          r.GasUsed,
+			BalanceChanges:   toBalanceChangeJSON(r.BalanceChanges),
+			Events:           r.Events,
+			HasApproval:      r.HasApproval,
+			RevertReason:     r.RevertReason,
+			RevertData:       r.RevertData,
+			RevertSelector:   r.RevertSelector,
+			RevertSignature:  r.RevertSignature,
+			RevertSource:     r.RevertSource,
+			RevertConfidence: r.RevertConfidence,
+			RevertCandidates: r.RevertCandidates,
+			RevertArgs:       r.RevertArgs,
 		}
 	}
 

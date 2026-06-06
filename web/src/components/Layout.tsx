@@ -65,7 +65,7 @@ export function Layout({ children }: LayoutProps) {
         <NavItem to="/wallets">Wallets</NavItem>
         <NavItem to="/requests">Requests</NavItem>
         <NavItem to="/transactions">Transactions</NavItem>
-        {canSimulate && <NavItem to="/simulate">Simulate</NavItem>}
+        {canSimulate && <NavItem to="/simulate">Simulations</NavItem>}
         <NavItem to="/rules">Rules</NavItem>
         <NavItem to="/templates">Templates</NavItem>
         <NavItem to="/presets">Presets</NavItem>

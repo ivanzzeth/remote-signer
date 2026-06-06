@@ -285,12 +285,13 @@ func (r *SimulationBudgetRule) fireBatch(batch *pendingBatch) {
 func (r *SimulationBudgetRule) enqueueAndWait(
 	ctx context.Context,
 	req *types.SignRequest,
+	parsed *types.ParsedPayload,
 	txParams simulation.TxParams,
 	rawPayload []byte,
 ) (outcome *SimulationOutcome, err error) {
 	defer func() {
 		if outcome != nil && outcome.Simulation != nil {
-			r.recordOutcome(ctx, req, outcome)
+			r.recordOutcome(ctx, req, parsed, outcome)
 		}
 	}()
 

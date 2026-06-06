@@ -425,6 +425,15 @@ func (r *Router) setupRoutes() error {
 		r.mux.Handle("/api/v1/evm/simulate/status", r.withAuthAndPerm(middleware.PermSignRequest, http.HandlerFunc(simulateHandler.ServeStatusHTTP)))
 	}
 
+	// Simulation history (persisted snapshots from the sign pipeline).
+	if r.config.RequestSimulationRepo != nil {
+		simHistHandler, shErr := evmhandler.NewSimulationHistoryHandler(r.config.RequestSimulationRepo, r.logger)
+		if shErr != nil {
+			return fmt.Errorf("failed to create simulation history handler: %w", shErr)
+		}
+		r.mux.Handle("/api/v1/evm/simulations", r.withAuthAndPerm(middleware.PermSignRequest, simHistHandler))
+	}
+
 	// Broadcast route (optional, requires RPC provider)
 	if r.config.RPCProvider != nil {
 		broadcastHandler, bcErr := evmhandler.NewBroadcastHandler(r.config.RPCProvider, r.logger)

@@ -84,7 +84,7 @@ func (s *rpcSimulator) Simulate(ctx context.Context, req *SimulationRequest) (*S
 		return nil, fmt.Errorf("empty simulation response")
 	}
 
-	result := s.parseCallResult(resp[0].Calls[0], req.From, req.To, req.Value)
+	result := s.parseCallResult(ctx, resp[0].Calls[0], req.From, req.To, req.Value)
 
 	status := metrics.SimStatusSuccess
 	if !result.Success {
@@ -131,7 +131,7 @@ func (s *rpcSimulator) SimulateBatch(ctx context.Context, req *BatchSimulationRe
 
 	allChanges := make(map[balanceKey]*big.Int)
 	for i, tx := range req.Transactions {
-		r := s.parseCallResult(resp[0].Calls[i], req.From, tx.To, tx.Value)
+		r := s.parseCallResult(ctx, resp[0].Calls[i], req.From, tx.To, tx.Value)
 		result.Results[i] = *r
 
 		// Accumulate net balance changes
@@ -239,6 +239,7 @@ type ethSimLog struct {
 type ethSimError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
+	Data    string `json:"data,omitempty"`
 }
 
 type ethSimBlockResult struct {
@@ -310,7 +311,7 @@ func (s *rpcSimulator) callSimulateV1(ctx context.Context, chainID string, calls
 
 // ── Result parsing ──────────────────────────────────────────────────────────
 
-func (s *rpcSimulator) parseCallResult(call ethSimCallResult, from, to, value string) *SimulationResult {
+func (s *rpcSimulator) parseCallResult(ctx context.Context, call ethSimCallResult, from, to, value string) *SimulationResult {
 	gasUsed := uint64(0)
 	if call.GasUsed != "" {
 		g := new(big.Int)
@@ -320,28 +321,42 @@ func (s *rpcSimulator) parseCallResult(call ethSimCallResult, from, to, value st
 
 	success := call.Status == "0x1"
 
-	// Parse events from logs (reuse existing parser)
+	// Parse events from logs (builtin + registry-resolved).
 	rawLogs := ethSimLogsToTxLogs(call.Logs)
-	events := ParseEvents(rawLogs)
-	balanceChanges := ComputeBalanceChanges(events, from, to, value)
+	allEvents := ParseEventsWithRegistry(ctx, rawLogs, GlobalSignatureRegistry())
+	policyEvents := verifiedEventsOnly(allEvents)
+	balanceChanges := ComputeBalanceChanges(policyEvents, from, to, value)
 
 	// Mark HasApproval if any approval event exists (unfiltered).
 	// The simulation budget rule re-checks with managed signer filtering.
-	hasApproval := DetectApproval(context.Background(), events, nil, "", nil)
+	hasApproval := DetectApproval(context.Background(), policyEvents, nil, "", nil)
 
 	result := &SimulationResult{
 		Success:        success,
 		GasUsed:        gasUsed,
 		BalanceChanges: balanceChanges,
-		Events:         events,
+		Events:         allEvents,
 		RawLogs:        rawLogs,
 		HasApproval:    hasApproval,
 	}
 
 	if !success {
-		result.RevertReason = "transaction reverted"
-		if call.ReturnData != "" && call.ReturnData != "0x" {
-			result.RevertReason = decodeRevertReason(call.ReturnData)
+		errData := ""
+		if call.Error != nil {
+			errData = call.Error.Data
+		}
+		if revertData := revertDataFromCall(call.ReturnData, errData); revertData != "" {
+			rev := ResolveRevert(ctx, GlobalSignatureRegistry(), revertData)
+			result.RevertData = rev.Data
+			result.RevertReason = rev.Reason
+			result.RevertSelector = rev.Selector
+			result.RevertSignature = rev.Signature
+			result.RevertSource = rev.Source
+			result.RevertConfidence = rev.Confidence
+			result.RevertCandidates = rev.Candidates
+			result.RevertArgs = rev.DecodedArgs
+		} else {
+			result.RevertReason = "transaction reverted"
 		}
 	}
 
@@ -365,46 +380,6 @@ func normalizeHex(s string) string {
 		return "0x" + s
 	}
 	return s
-}
-
-func decodeRevertReason(data string) string {
-	// Try to decode Error(string) selector: 0x08c379a0
-	data = strings.TrimPrefix(data, "0x")
-	if len(data) < 8 {
-		return "transaction reverted"
-	}
-	if data[:8] == "08c379a0" && len(data) >= 136 {
-		// offset(32) + length(32) + string data
-		lenHex := data[72:136]
-		strLen := new(big.Int)
-		strLen.SetString(lenHex, 16)
-		l := int(strLen.Int64())
-		strStart := 136
-		strEnd := strStart + l*2
-		if strEnd <= len(data) {
-			bs, err := hexDecode(data[strStart:strEnd])
-			if err == nil {
-				return string(bs)
-			}
-		}
-	}
-	return "transaction reverted (0x" + data[:8] + "...)"
-}
-
-func hexDecode(s string) ([]byte, error) {
-	if len(s)%2 != 0 {
-		s = "0" + s
-	}
-	b := make([]byte, len(s)/2)
-	for i := 0; i < len(b); i++ {
-		hi := hexVal(s[i*2])
-		lo := hexVal(s[i*2+1])
-		if hi < 0 || lo < 0 {
-			return nil, fmt.Errorf("invalid hex char")
-		}
-		b[i] = byte(hi<<4 | lo) // #nosec G115 -- hi and lo are 0-15, shift+or fits in byte
-	}
-	return b, nil
 }
 
 func hexVal(c byte) int {

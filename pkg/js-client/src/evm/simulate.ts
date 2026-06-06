@@ -33,16 +33,32 @@ export interface SimEventDTO {
   event: string;
   standard: string;
   args: Record<string, string>;
+  topic0?: string;
+  signature?: string;
+  source?: string;
+  confidence?: string;
+  candidates?: string[];
+}
+
+/** Structured revert metadata from the simulation engine. */
+export interface RevertDetailDTO {
+  revert_reason?: string;
+  revert_data?: string;
+  revert_selector?: string;
+  revert_signature?: string;
+  revert_source?: string;
+  revert_confidence?: string;
+  revert_candidates?: string[];
+  revert_args?: Record<string, string>;
 }
 
 /** Response from simulating a single transaction. */
-export interface SimulateResponse {
+export interface SimulateResponse extends RevertDetailDTO {
   success: boolean;
   gas_used: number;
   balance_changes: BalanceChangeDTO[];
   events: SimEventDTO[];
   has_approval: boolean;
-  revert_reason?: string;
 }
 
 /** A single transaction in a batch simulate request. */
@@ -61,14 +77,13 @@ export interface SimulateBatchRequest {
 }
 
 /** Per-transaction result in a batch simulate response. */
-export interface SimulateResultDTO {
+export interface SimulateResultDTO extends RevertDetailDTO {
   index: number;
   success: boolean;
   gas_used: number;
   balance_changes: BalanceChangeDTO[];
   events: SimEventDTO[];
   has_approval: boolean;
-  revert_reason?: string;
 }
 
 /** Response from simulating a batch of transactions. */
@@ -92,6 +107,37 @@ export interface SimulationStatusResponse {
   enabled: boolean;
   engine_version: string;
   chains: Record<string, ChainStatusDTO>;
+}
+
+/** Filter for GET /api/v1/evm/simulations. */
+export interface ListSimulationsFilter {
+  decision?: string;
+  chain_id?: string;
+  success?: boolean;
+  limit?: number;
+  cursor?: string;
+  cursor_id?: string;
+}
+
+/** Summary row from persisted simulation history. */
+export interface SimulationHistoryItem {
+  sign_request_id: string;
+  chain_id: string;
+  decision: string;
+  reason?: string;
+  success: boolean;
+  gas_used: number;
+  revert_reason?: string;
+  simulated_at: string;
+  updated_at: string;
+}
+
+/** Response from GET /api/v1/evm/simulations. */
+export interface ListSimulationsResponse {
+  simulations: SimulationHistoryItem[];
+  has_more: boolean;
+  next_cursor?: string;
+  next_cursor_id?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -130,6 +176,27 @@ export class EvmSimulateService {
     return this.transport.request<SimulationStatusResponse>(
       "GET",
       "/api/v1/evm/simulate/status",
+      null,
+    );
+  }
+
+  /**
+   * List persisted simulation snapshots from the sign pipeline.
+   */
+  async list(filter?: ListSimulationsFilter): Promise<ListSimulationsResponse> {
+    const params = new URLSearchParams();
+    if (filter?.decision) params.append("decision", filter.decision);
+    if (filter?.chain_id) params.append("chain_id", filter.chain_id);
+    if (filter?.success !== undefined) {
+      params.append("success", filter.success ? "true" : "false");
+    }
+    if (filter?.limit) params.append("limit", String(filter.limit));
+    if (filter?.cursor) params.append("cursor", filter.cursor);
+    if (filter?.cursor_id) params.append("cursor_id", filter.cursor_id);
+    const qs = params.toString();
+    return this.transport.request<ListSimulationsResponse>(
+      "GET",
+      `/api/v1/evm/simulations${qs ? `?${qs}` : ""}`,
       null,
     );
   }
