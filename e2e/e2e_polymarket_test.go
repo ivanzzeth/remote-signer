@@ -92,7 +92,6 @@ func TestE2E_PolymarketV2_SignTypedDataOrder(t *testing.T) {
 		"variables": map[string]string{
 			"allowed_safe_addresses": testSigner2Address,
 		},
-		"skip_validation": true,
 	}
 	body, _ := json.Marshal(applyReq)
 
@@ -214,7 +213,6 @@ func TestE2E_PolymarketV2Safe_SignAndDelegate(t *testing.T) {
 	presetID := "evm/polymarket_v2_safe_polygon"
 	applyResp, err := adminClient.Presets.Apply(ctx, presetID, &presets.ApplyRequest{
 		Variables:      map[string]string{"allowed_safe_addresses": testSigner2Address},
-		SkipValidation: true,
 	})
 	require.NoError(t, err, "preset apply should succeed")
 	require.NotNil(t, applyResp)
@@ -520,7 +518,6 @@ func TestE2E_PolymarketV2Safe_ProductionRequest(t *testing.T) {
 	presetID := "evm/polymarket_v2_safe_polygon"
 	applyResp, err := adminClient.Presets.Apply(ctx, presetID, &presets.ApplyRequest{
 		Variables:      map[string]string{"allowed_safe_addresses": prodSafeAddress},
-		SkipValidation: true,
 	})
 	require.NoError(t, err, "preset apply should succeed")
 	require.NotNil(t, applyResp)
@@ -613,7 +610,6 @@ func TestE2E_PolymarketV2Safe_PresetApplyConfigBug(t *testing.T) {
 	presetID := "evm/polymarket_v2_safe_polygon"
 	applyResp, err := adminClient.Presets.Apply(ctx, presetID, &presets.ApplyRequest{
 		Variables:      map[string]string{"allowed_safe_addresses": testSafeAddr},
-		SkipValidation: true,
 	})
 	require.NoError(t, err, "preset apply should succeed")
 	snapshotRules(t)
@@ -654,7 +650,6 @@ func TestE2E_PolymarketV2Safe_PresetApplyConfigBug(t *testing.T) {
 	// default is "0x1111...1111" — confirm the flow is working correctly).
 	t.Run("default_placeholder_only", func(t *testing.T) {
 		applyResp2, err := adminClient.Presets.Apply(ctx, presetID, &presets.ApplyRequest{
-			SkipValidation: true,
 		})
 		require.NoError(t, err, "preset apply without overrides should succeed")
 		cleanupApplyResults(t, applyResp2.Results)
@@ -702,7 +697,6 @@ func TestE2E_PolymarketV2Safe_ClobAuth(t *testing.T) {
 	presetID := "evm/polymarket_v2_safe_polygon"
 	applyResp, err := adminClient.Presets.Apply(ctx, presetID, &presets.ApplyRequest{
 		Variables:      map[string]string{"allowed_safe_addresses": testSigner2Address},
-		SkipValidation: true,
 	})
 	require.NoError(t, err, "preset apply should succeed")
 	require.NotNil(t, applyResp)

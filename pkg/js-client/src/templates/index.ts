@@ -137,7 +137,8 @@ export interface InstantiateRequest {
   expires_in?: string;
   budget?: BudgetConfig;
   schedule?: ScheduleConfig;
-  skip_validation?: boolean;
+  // FORCED VALIDATION — do not send skip_validation. Server rejects it (fund-loss risk).
+  // skip_validation?: boolean;
 }
 
 export interface InstantiateResponse {

@@ -14,8 +14,9 @@ import (
 var (
 	presetApplySetFlags       []string
 	presetApplyAppliedToFlags []string
-	presetApplySkipValidation bool
-	presetValidateSetFlags    []string
+	// FORCED VALIDATION — presetApplySkipValidation intentionally removed.
+	// presetApplySkipValidation bool
+	presetValidateSetFlags []string
 )
 
 var presetApplyCmd = &cobra.Command{
@@ -39,9 +40,11 @@ var presetApplyCmd = &cobra.Command{
 
 		presetName := args[0]
 		req := &presets.ApplyRequest{
-			Variables:      variables,
-			AppliedTo:      presetApplyAppliedToFlags,
-			SkipValidation: presetApplySkipValidation,
+			Variables: variables,
+			AppliedTo: presetApplyAppliedToFlags,
+			// SkipValidation: presetApplySkipValidation,
+			// FORCED VALIDATION — never send skip_validation on apply (fund-loss risk).
+			// Fix template test_cases or use: preset validate <id>
 		}
 		resp, err := c.Presets.Apply(cmd.Context(), presetName, req)
 		if err != nil {
@@ -197,7 +200,10 @@ var presetRemoteGetCmd = &cobra.Command{
 func init() {
 	presetApplyCmd.Flags().StringArrayVar(&presetApplySetFlags, "set", nil, "Variable override (key=value, repeatable)")
 	presetApplyCmd.Flags().StringSliceVar(&presetApplyAppliedToFlags, "applied-to", nil, "Scope rules to specific API key IDs (comma-separated or repeatable)")
-	presetApplyCmd.Flags().BoolVar(&presetApplySkipValidation, "skip-validation", false, "Skip test case validation on apply")
+	// FORCED VALIDATION — --skip-validation permanently removed from CLI.
+	// Bypassing test_cases on apply can deploy broken signing rules → fund loss.
+	// Use `preset validate <id>` to debug; fix templates instead of skipping.
+	// presetApplyCmd.Flags().BoolVar(&presetApplySkipValidation, "skip-validation", false, "Skip test case validation on apply")
 	presetCmd.AddCommand(presetApplyCmd)
 
 	presetValidateCmd.Flags().StringArrayVar(&presetValidateSetFlags, "set", nil, "Variable override (key=value, repeatable)")

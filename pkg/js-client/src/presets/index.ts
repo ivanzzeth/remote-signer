@@ -67,7 +67,8 @@ export interface PresetDetail {
 export interface ApplyPresetRequest {
   variables?: Record<string, string>;
   applied_to?: string[];
-  skip_validation?: boolean;
+  // FORCED VALIDATION — do not send skip_validation. Server rejects it (fund-loss risk).
+  // skip_validation?: boolean;
 }
 
 export interface ApplyResultItem {

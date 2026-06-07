@@ -127,7 +127,8 @@ type InstantiateRequest struct {
 	ExpiresIn      *string           `json:"expires_in,omitempty"`
 	Budget         *BudgetConfig     `json:"budget,omitempty"`
 	Schedule       *ScheduleConfig   `json:"schedule,omitempty"`
-	SkipValidation bool              `json:"skip_validation,omitempty"`
+	// FORCED VALIDATION — do not send skip_validation. Server rejects it (fund-loss risk).
+	// SkipValidation bool `json:"skip_validation,omitempty"`
 }
 
 // BudgetConfig defines budget limits for an instance.

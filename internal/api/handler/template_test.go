@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
+	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
@@ -445,11 +447,21 @@ func newTemplateService(t *testing.T, tmplRepo *mockTemplateRepo, ruleRepo *mock
 	return svc
 }
 
+func testJSEvaluator(t *testing.T) *evm.JSRuleEvaluator {
+	t.Helper()
+	eval, err := evm.NewJSRuleEvaluator(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("NewJSRuleEvaluator: %v", err)
+	}
+	return eval
+}
+
 // newHandler creates a TemplateHandler with mock repos and a real TemplateService.
+// JS evaluator is always attached — instantiate requires forced validation (see validation_mandatory.go).
 func newHandler(t *testing.T, tmplRepo *mockTemplateRepo, ruleRepo *mockRuleRepo, budgetRepo *mockBudgetRepo) *TemplateHandler {
 	t.Helper()
 	svc := newTemplateService(t, tmplRepo, ruleRepo, budgetRepo)
-	h, err := NewTemplateHandler(tmplRepo, svc, newTestLogger(), false)
+	h, err := NewTemplateHandler(tmplRepo, svc, newTestLogger(), false, WithTemplateJSEvaluator(testJSEvaluator(t)))
 	if err != nil {
 		t.Fatalf("failed to create TemplateHandler: %v", err)
 	}
