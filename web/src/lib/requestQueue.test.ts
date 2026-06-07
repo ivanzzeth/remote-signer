@@ -6,7 +6,7 @@ import {
   summarizeLockedSignersInRequests,
 } from "./requestQueue";
 
-const ADDR = "0x764602FeaD618416E42b48c633d90869fF19759E";
+const ADDR = "0x0000000000000000000000000000000000000001";
 
 describe("requestQueue", () => {
   it("detects locked signer blocker", () => {

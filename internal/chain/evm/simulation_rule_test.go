@@ -138,7 +138,7 @@ func TestSimulationBudgetRule_SwapWithApproval_TracksBudget(t *testing.T) {
 			HasApproval: true,
 			Events: []simulation.SimEvent{
 				{Event: "Approval", Standard: "erc20", Args: map[string]string{
-					"owner": "0x764602fead618416e42b48c633d90869ff19759e", "spender": "0x3b86917369b83a6892f553609f3c2f439c184e31", "value": "0",
+					"owner": "0x0000000000000000000000000000000000000001", "spender": "0x3b86917369b83a6892f553609f3c2f439c184e31", "value": "0",
 				}},
 				{Event: "Transfer", Standard: "erc20"},
 			},
@@ -155,7 +155,7 @@ func TestSimulationBudgetRule_SwapWithApproval_TracksBudget(t *testing.T) {
 	val := "0"
 	outcome, err := r.EvaluateSingle(context.Background(), &types.SignRequest{
 		ChainID:       "137",
-		SignerAddress: "0x764602FeaD618416E42b48c633d90869fF19759E",
+		SignerAddress: "0x0000000000000000000000000000000000000001",
 		SignType:      SignTypeTransaction,
 	}, &types.ParsedPayload{
 		Recipient: &to,
@@ -188,7 +188,7 @@ func TestSimulationBudgetRule_SwapNoApproval_Allow(t *testing.T) {
 	val := "0"
 	outcome, err := r.EvaluateSingle(context.Background(), &types.SignRequest{
 		ChainID:       "137",
-		SignerAddress: "0x764602FeaD618416E42b48c633d90869fF19759E",
+		SignerAddress: "0x0000000000000000000000000000000000000001",
 		SignType:      SignTypeTransaction,
 	}, &types.ParsedPayload{
 		Recipient: &to,
@@ -238,13 +238,13 @@ func TestSimulationBudgetRule_BatchApproveAndSwap_TracksBudget(t *testing.T) {
 		simulateBatchResult: &simulation.BatchSimulationResult{
 			Results: []simulation.SimulationResult{
 				{Success: true, HasApproval: true, Events: []simulation.SimEvent{
-					{Event: "Approval", Args: map[string]string{"owner": "0x764602fead618416e42b48c633d90869ff19759e", "value": "1000000"}},
+					{Event: "Approval", Args: map[string]string{"owner": "0x0000000000000000000000000000000000000001", "value": "1000000"}},
 				}},
 				{
 					Success:     true,
 					HasApproval: true,
 					Events: []simulation.SimEvent{
-						{Event: "Approval", Args: map[string]string{"owner": "0x764602fead618416e42b48c633d90869ff19759e", "value": "0"}}, // transferFrom side effect
+						{Event: "Approval", Args: map[string]string{"owner": "0x0000000000000000000000000000000000000001", "value": "0"}}, // transferFrom side effect
 					},
 					BalanceChanges: []simulation.BalanceChange{
 						{Token: "0x2791bca1f2de4661ed88a30c99a7a9449aa84174", Amount: big.NewInt(-1000000), Direction: "outflow"},
@@ -265,7 +265,7 @@ func TestSimulationBudgetRule_BatchApproveAndSwap_TracksBudget(t *testing.T) {
 		{To: "0x2791bca1f2de4661ed88a30c99a7a9449aa84174", Value: "0", Data: "0x095ea7b3"},
 		{To: "0x057cfd839aa88994d1a8a8c6d336cf21550f05ef", Value: "0", Data: "0xf2c42696"},
 	}
-	outcome, err := r.EvaluateBatch(context.Background(), "137", "0x764602FeaD618416E42b48c633d90869fF19759E", txParams)
+	outcome, err := r.EvaluateBatch(context.Background(), "137", "0x0000000000000000000000000000000000000001", txParams)
 	require.NoError(t, err)
 	// Budget passes (no repo), but approval detected → manual approval required
 	assert.Equal(t, "no_match", outcome.Decision)
