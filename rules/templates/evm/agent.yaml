@@ -98,8 +98,9 @@ rules:
   # Unknown calldata fell back to tx_count — actual token spending was invisible.
   # With simulation fallback, every transaction's real balance impact is tracked.
   #
-  # approve/increaseAllowance transactions will not match any whitelist rule,
-  # so they naturally route to manual approval (no simulation needed).
+  # On-chain ERC20/ERC721/ERC1155 approve auth is handled by evm/erc20, evm/erc721,
+  # evm/erc1155 templates composed in the Agent preset (trusted_contracts).
+  # Other transactions fall through to SimulationBudgetRule.
 
   # ── agent-sign: allow personal_sign and typed_data ──
   - id: "agent-sign"

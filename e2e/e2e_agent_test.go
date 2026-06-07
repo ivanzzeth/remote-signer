@@ -26,24 +26,21 @@ import (
 // Agent Preset Apply Tests
 // =============================================================================
 
-// TestAgent_PresetApply deploys the agent preset via API and verifies that
-// 3 sub-rules are created (agent-tx, agent-sign, agent-safety) from the template bundle.
+// TestAgent_PresetApply deploys the e2e-only agent.preset.js preset (evm/agent
+// template only, no ERC20/721/1155 composite) and verifies sign + safety rules.
 func TestAgent_PresetApply(t *testing.T) {
 	ctx := context.Background()
 	skipIfPresetAPIDisabled(t)
 
-	// Apply agent preset — the "Agent Template" is a template_bundle with 3 sub-rules.
-	// The template service expands the bundle into individual evm_js rules.
-	// The preset has no chain matrix, so 1 composite entry x 3 sub-rules = 3 results.
+	// agent.preset.js references only evm/agent (sign + safety). Token-auth
+	// templates are composed by the shipped evm/agent preset — see
+	// TestE2E_PresetApply_KeyPresets/agent and agent bundle sub-rules.
 	applyResp, err := adminClient.Presets.ApplyWithVariables(ctx, "agent.preset.js", nil)
 	require.NoError(t, err)
 	require.NotNil(t, applyResp)
 
-	// The agent preset has 1 template (Agent Template) with 2 sub-rules (sign + safety).
-	// agent-tx was removed — transactions fall through to SimulationBudgetRule.
-	// Agent preset: 5 chains × 2 sub-rules (sign, safety) = 10 rules
 	require.Len(t, applyResp.Results, 2,
-		"agent preset should produce 10 rules (5 chains x 2 sub-rules)")
+		"agent.preset.js should produce 2 rules (agent-sign + agent-safety)")
 
 	// Cleanup created rules
 	cleanupApplyResults(t, applyResp.Results)

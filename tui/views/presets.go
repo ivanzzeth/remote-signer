@@ -83,7 +83,7 @@ func (m *PresetsModel) Refresh() tea.Cmd {
 
 func (m *PresetsModel) loadData() tea.Cmd {
 	return func() tea.Msg {
-		resp, err := m.svc.List(m.ctx)
+		resp, err := m.svc.List(m.ctx, "")
 		if err != nil {
 			return PresetsDataMsg{Err: err}
 		}

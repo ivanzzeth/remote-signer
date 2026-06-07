@@ -111,6 +111,42 @@ func TestPresetHandler_List_ReturnsTemplateIDs(t *testing.T) {
 		"template_ids must surface as a list; this is what the UI columns key off")
 }
 
+func TestPresetHandler_List_QueryFilter(t *testing.T) {
+	env := newPresetTestEnv(t)
+	seedPresetRow(t, env, &types.RulePreset{
+		ID:          "evm/stargate",
+		Name:        "Stargate",
+		Description: "Aori bridge",
+		ChainType:   types.ChainType("evm"),
+		TemplateIDs: mustJSONP(t, []string{"evm/erc20", "evm/aori"}),
+		Source:      types.RuleSourceFile,
+		ContentHash: "h1",
+		Enabled:     true,
+	})
+	seedPresetRow(t, env, &types.RulePreset{
+		ID:          "evm/uniswap",
+		Name:        "Uniswap",
+		Description: "Swap",
+		ChainType:   types.ChainType("evm"),
+		TemplateIDs: mustJSONP(t, []string{"evm/uniswap"}),
+		Source:      types.RuleSourceFile,
+		ContentHash: "h2",
+		Enabled:     true,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/presets?q=stargate", nil).WithContext(adminCtx(t))
+	w := httptest.NewRecorder()
+	env.handler.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp struct {
+		Presets []PresetListItem `json:"presets"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Presets, 1)
+	assert.Equal(t, "evm/stargate", resp.Presets[0].ID)
+}
+
 // ---------------------------------------------------------------------------
 // Detail — slash IDs round-trip via EscapedPath
 // ---------------------------------------------------------------------------

@@ -1,46 +1,45 @@
 # Preset: Agent (evm_js) — AI agent with simulation-based budget tracking.
-# Two sub-rules: agent-sign (whitelist), agent-safety (blocklist).
-# Transaction signing has NO whitelist rule — falls through to SimulationBudgetRule
-# which forks the chain, simulates the tx, and tracks real token outflows.
+# Composes evm/agent (sign + safety) with ERC20/ERC721/ERC1155 auth templates so
+# on-chain approve/setApprovalForAll to trusted_contracts auto-approve.
+# Other transactions fall through to SimulationBudgetRule (simulation + budget).
 #
 # No chain_id restriction — agent can interact with ANY chain.
-# Budget tracks spending per {chain_id}:{token} dynamically.
 #
 # Usage:
 #   remote-signer-cli preset create-from agent.preset.js.yaml \
 #     --set max_native_total=1 --set max_native_per_tx=0.1 \
 #     --set max_unknown_token_total=1000 \
+#     --set trusted_contracts=0xRouter,0xBridge \
 #     --config config.yaml --write
-#
-# All budget values are overridable via --set. Defaults are conservative.
-# Budget amounts use unit_decimal mode — human-readable (e.g. "1" = 1 ETH, "1000" = 1000 USDC).
-# Token decimals are auto-queried from chain via rpc_gateway.
 
 name: "Agent"
 chain_type: "evm"
 # No chain_id — matches ALL chains. Budget isolates per chain automatically.
 enabled: true
 variables:
-  # Personal sign message length limit (bytes)
   max_message_length: "1024"
-  # Budget period (reset interval)
   budget_period: "24h"
-  # Native token budget (human-readable, e.g. "1" = 1 ETH/MATIC/BNB)
   max_native_total: "1"
   max_native_per_tx: "0.1"
-  # Transaction count budget (for calls not matching known token patterns)
   max_tx_count: "1000"
-  # Signature count budget (personal_sign + typed_data)
   max_sign_count: "500"
-  # Unknown token default budget (human-readable, decimals auto-queried)
   max_unknown_token_total: "1000"
   max_unknown_token_per_tx: "100"
   max_unknown_token_tx_count: "50"
-  # Comma-separated trusted contract addresses shared across signature types.
-  # Permit: spender must be in this list. Non-Permit typed_data: verifyingContract must be in this list.
-  # If empty, ALL Permit signatures are blocked (fail-closed). Set to known DEX routers.
-  # Example: "0x3b86917369b83a6892f553609f3c2f439c184e31"
+  # Unified trust list: Permit/typed_data (agent-sign) + ERC20 approve spender +
+  # ERC721 approve/setApprovalForAll + ERC1155 setApprovalForAll.
   trusted_contracts: ""
+  # ERC20 composite (evm/erc20 template)
+  token_address: ""
+  allowed_spenders: ""
+  allowed_recipients: ""
+  allowed_transfer_from: ""
+  max_transfer_amount: "0"
+  max_approve_amount: "-1"
+  # ERC721 / ERC1155 composite
+  allowed_approve_to: ""
+  allowed_operators: ""
+  auth_only: "true"
 budget:
   dynamic: true
   unit_decimal: true
@@ -67,6 +66,9 @@ schedule:
   period: "${budget_period}"
 template_ids:
   - evm/agent
+  - evm/erc20
+  - evm/erc721
+  - evm/erc1155
 operator_overrides:
   - name: max_message_length
     required: false
@@ -87,4 +89,22 @@ operator_overrides:
   - name: max_unknown_token_tx_count
     required: false
   - name: trusted_contracts
+    required: false
+  - name: token_address
+    required: false
+  - name: allowed_spenders
+    required: false
+  - name: allowed_recipients
+    required: false
+  - name: allowed_transfer_from
+    required: false
+  - name: max_transfer_amount
+    required: false
+  - name: max_approve_amount
+    required: false
+  - name: allowed_approve_to
+    required: false
+  - name: allowed_operators
+    required: false
+  - name: auth_only
     required: false

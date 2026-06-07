@@ -1,19 +1,17 @@
 # Build targets for the remote-signer monorepo.
 #
 # Two build modes:
-#   make build         → Go-only binary. Serves a placeholder web page;
-#                        no Node toolchain needed. Use this for backend
-#                        dev, CI test passes, etc.
-#   make build-embed   → Runs vite first, then `go build -tags embed_web`
-#                        to bake the real React bundle into the binary.
-#                        Use this for releases or local UI testing.
+#   make build         → Default. Alias for build-embed (React UI baked in).
+#   make build-embed   → Same as build: vite + `go build -tags embed_web`.
+#   make build-cli     → Go-only binary, placeholder "UI not bundled" page;
+#                        no Node toolchain. Backend-only / fast CI iteration.
 #
 # The split exists so the repo doesn't have to track internal/web/dist —
 # vite emits there at build-embed time, and .gitignore keeps the artefacts
 # out of version control (each vite hash was previously adding ~380 KB
 # per UI change to history).
 
-.PHONY: help build build-embed web test test-unit test-integration integration clean tidy desktop-dev desktop-dist
+.PHONY: help build build-embed build-cli web test test-unit test-integration integration clean tidy desktop-dev desktop-dist
 
 # Pick up the system Go install when goenv complains about a missing toolchain.
 GO ?= go
@@ -36,8 +34,9 @@ LDFLAGS := -w -s -X github.com/ivanzzeth/remote-signer/internal/version.Version=
 help:
 	@echo "Targets:"
 	@echo "  web           Install JS deps and build the React bundle (writes to internal/web/dist)"
-	@echo "  build         Build the daemon binary, no embedded UI (placeholder page)"
-	@echo "  build-embed   Build the daemon binary with the React UI embedded (release-equivalent)"
+	@echo "  build         Build daemon with embedded React UI (default; same as build-embed)"
+	@echo "  build-embed   Same as build"
+	@echo "  build-cli     Go-only binary, no embedded UI (placeholder page; fast backend dev)"
 	@echo "  test          Run unit tests only (go test ./...)"
 	@echo "  test-unit     Alias for test"
 	@echo "  test-integration  Run unit + internal integration tests"
@@ -53,11 +52,13 @@ js-client:
 web: js-client
 	cd web && $(NPM) ci --no-audit --no-fund && $(NPM) run build
 
-build:
-	CGO_ENABLED=0 $(GO) build -ldflags="$(LDFLAGS)" -o remote-signer ./cmd/remote-signer
+build: build-embed
 
 build-embed: web
 	CGO_ENABLED=0 $(GO) build -tags embed_web -ldflags="$(LDFLAGS)" -o remote-signer ./cmd/remote-signer
+
+build-cli:
+	CGO_ENABLED=0 $(GO) build -ldflags="$(LDFLAGS)" -o remote-signer ./cmd/remote-signer
 
 # Pure-Go test pass. Skips the web bundle to keep CI iterations cheap.
 test: test-unit

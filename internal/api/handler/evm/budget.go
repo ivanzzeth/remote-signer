@@ -435,6 +435,25 @@ func (h *BudgetItemHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if strings.HasPrefix(tail, "by-rule/") {
+		ruleID := strings.TrimPrefix(tail, "by-rule/")
+		ruleID = strings.Trim(ruleID, "/")
+		if ruleID == "" {
+			h.writeError(w, "rule_id is required", http.StatusBadRequest)
+			return
+		}
+		if r.Method != http.MethodDelete {
+			h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !middleware.HasPermission(apiKey.Role, middleware.PermManageBudgets) {
+			h.writeError(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		h.handleDeleteByRuleID(w, r, apiKey, ruleID)
+		return
+	}
+
 	if strings.HasSuffix(tail, "/reset") {
 		id := strings.TrimSuffix(tail, "/reset")
 		if r.Method != http.MethodPost {
@@ -589,6 +608,50 @@ func (h *BudgetItemHandler) handleReset(w http.ResponseWriter, r *http.Request, 
 	h.writeJSON(w, entry, http.StatusOK)
 }
 
+func (h *BudgetItemHandler) handleDeleteByRuleID(w http.ResponseWriter, r *http.Request, apiKey *types.APIKey, ruleID string) {
+	if !isBudgetCleanupRuleID(ruleID) {
+		h.writeError(w, "invalid rule_id format for budget cleanup", http.StatusBadRequest)
+		return
+	}
+	budgets, err := h.budgetRepo.ListByRuleID(r.Context(), types.RuleID(ruleID))
+	if err != nil {
+		h.logger.Error("failed to list budgets for rule", "error", err, "rule_id", ruleID)
+		h.writeError(w, "failed to list budgets", http.StatusInternalServerError)
+		return
+	}
+	deletedBudgets := 0
+	if len(budgets) > 0 {
+		if err := h.budgetRepo.DeleteByRuleID(r.Context(), types.RuleID(ruleID)); err != nil {
+			h.logger.Error("failed to delete budgets by rule", "error", err, "rule_id", ruleID)
+			h.writeError(w, "failed to delete budgets", http.StatusInternalServerError)
+			return
+		}
+		deletedBudgets = len(budgets)
+	}
+
+	// Orphan synthetic placeholder: budgets already gone but sim:0x... rule row remains.
+	deletedPlaceholder := false
+	if isSyntheticBudgetRuleID(ruleID) {
+		if err := h.ruleRepo.Delete(r.Context(), types.RuleID(ruleID)); err == nil {
+			deletedPlaceholder = true
+		} else if !types.IsNotFound(err) {
+			h.logger.Error("failed to delete synthetic rule placeholder", "error", err, "rule_id", ruleID)
+			h.writeError(w, "failed to delete synthetic rule placeholder", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if deletedBudgets == 0 && !deletedPlaceholder {
+		h.writeError(w, "no budgets or synthetic rule placeholder found for rule", http.StatusNotFound)
+		return
+	}
+	if h.auditLogger != nil {
+		h.auditLogger.LogBudgetMutation(r.Context(), apiKey.ID, "delete_by_rule", ruleID,
+			fmt.Sprintf("deleted %d budget row(s), placeholder_removed=%v", deletedBudgets, deletedPlaceholder))
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *BudgetItemHandler) handleDelete(w http.ResponseWriter, r *http.Request, apiKey *types.APIKey, id string) {
 	b, ok := h.loadBudget(w, r, id)
 	if !ok {
@@ -603,11 +666,27 @@ func (h *BudgetItemHandler) handleDelete(w http.ResponseWriter, r *http.Request,
 		h.writeError(w, "failed to delete budget", http.StatusInternalServerError)
 		return
 	}
+	h.maybeDeleteOrphanSyntheticRule(r.Context(), b.RuleID)
 	if h.auditLogger != nil {
 		h.auditLogger.LogBudgetMutation(r.Context(), apiKey.ID, "delete", b.ID,
 			fmt.Sprintf("rule=%s unit=%s", b.RuleID, b.Unit))
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// maybeDeleteOrphanSyntheticRule removes the sim:0x... placeholder rule when
+// the last budget row for that signer has been deleted.
+func (h *BudgetItemHandler) maybeDeleteOrphanSyntheticRule(ctx context.Context, ruleID types.RuleID) {
+	if !isSyntheticBudgetRuleID(string(ruleID)) {
+		return
+	}
+	remaining, err := h.budgetRepo.ListByRuleID(ctx, ruleID)
+	if err != nil || len(remaining) > 0 {
+		return
+	}
+	if err := h.ruleRepo.Delete(ctx, ruleID); err != nil && !types.IsNotFound(err) {
+		h.logger.Warn("failed to delete orphan synthetic rule after budget delete", "error", err, "rule_id", ruleID)
+	}
 }
 
 // loadBudget fetches by ID. Writes the appropriate error response and

@@ -19,7 +19,7 @@ import (
 // bootstrapAgentPresetIfNeeded checks whether any instance rules owned by
 // "agent" already exist and, if not, loads the evm/agent preset from the
 // DB (populated by registry sync on the same boot) and creates rule instances
-// for each sub-rule in the template.
+// for each sub-rule in every composed template.
 //
 // Rules are associated with the agent API key so they have the correct RBAC
 // ownership at first launch. Subsequent boots are no-ops.
@@ -37,37 +37,69 @@ func bootstrapAgentPresetIfNeeded(
 		return nil
 	}
 
-	preset, tmpl, err := loadAgentPresetAndTemplate(ctx, presetRepo, templateRepo, log)
+	preset, err := presetRepo.Get(ctx, "evm/agent")
 	if err != nil {
-		return err
+		if types.IsNotFound(err) {
+			log.Info("agent preset not found in registry, skipping bootstrap")
+			return nil
+		}
+		return fmt.Errorf("get agent preset: %w", err)
 	}
-	if preset == nil {
+	if !preset.Enabled {
+		log.Info("agent preset is disabled, skipping bootstrap")
 		return nil
 	}
 
-	configDoc, err := parseTemplateConfig(tmpl.Config)
+	templateIDs, err := decodeStringSlice(preset.TemplateIDs)
+	if err != nil {
+		return fmt.Errorf("decode agent preset template_ids: %w", err)
+	}
+	if len(templateIDs) == 0 {
+		log.Info("agent preset has no template_ids, skipping bootstrap")
+		return nil
+	}
+
+	allVarDefs, err := collectTemplateVarDefs(ctx, templateRepo, templateIDs)
 	if err != nil {
 		return err
 	}
-
-	resolved, err := resolvePresetVariables(preset.Variables, tmpl.Variables)
+	resolved, err := resolvePresetVariables(preset.Variables, allVarDefs)
 	if err != nil {
 		return fmt.Errorf("resolve preset variables: %w", err)
 	}
 
-	created, err := createRulesFromConfig(ctx, ruleRepo, budgetRepo, configDoc, resolved, preset.ChainType, tmpl.ID, log)
-	if err != nil {
-		return err
+	created := 0
+	for _, templateID := range templateIDs {
+		tmpl, err := templateRepo.Get(ctx, templateID)
+		if err != nil {
+			if types.IsNotFound(err) {
+				log.Info("agent bootstrap: template not found, skipping", "template_id", templateID)
+				continue
+			}
+			return fmt.Errorf("get template %q: %w", templateID, err)
+		}
+
+		configDoc, err := parseTemplateConfig(tmpl.Config)
+		if err != nil {
+			return err
+		}
+
+		n, err := createRulesFromConfig(ctx, ruleRepo, budgetRepo, configDoc, resolved, preset.ChainType, templateID, log)
+		if err != nil {
+			return err
+		}
+		created += n
 	}
+
 	if created == 0 {
-		return fmt.Errorf("no enabled sub-rules found in agent template")
+		return fmt.Errorf("no enabled sub-rules found in agent preset templates")
 	}
 
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, "[BOOTSTRAP] Agent preset \"evm/agent\" applied —", fmt.Sprintf("%d rule(s)", created), "created for \"agent\" API key.")
 	fmt.Fprintln(os.Stderr)
 
-	log.Info("bootstrap agent preset applied", "rules_created", created)
+	log.Info("bootstrap agent preset applied", "rules_created", created, "template_count", len(templateIDs))
 	return nil
 }
 
@@ -81,47 +113,25 @@ func hasInstanceRules(ctx context.Context, ruleRepo storage.RuleRepository) (boo
 	return count > 0, nil
 }
 
-// loadAgentPresetAndTemplate loads the evm/agent preset and template from the
-// DB. Returns nil, nil (no error) when the preset or template is not found
-// or disabled.
-func loadAgentPresetAndTemplate(
-	ctx context.Context,
-	presetRepo storage.PresetRepository,
-	templateRepo storage.TemplateRepository,
-	log *slog.Logger,
-) (*types.RulePreset, *types.RuleTemplate, error) {
-	preset, err := presetRepo.Get(ctx, "evm/agent")
-	if err != nil {
-		if types.IsNotFound(err) {
-			log.Info("agent preset not found in registry, skipping bootstrap")
-			return nil, nil, nil
-		}
-		return nil, nil, fmt.Errorf("get agent preset: %w", err)
-	}
-	if !preset.Enabled {
-		log.Info("agent preset is disabled, skipping bootstrap")
-		return nil, nil, nil
-	}
-
-	tmpl, err := templateRepo.Get(ctx, "evm/agent")
-	if err != nil {
-		if types.IsNotFound(err) {
-			log.Info("agent template not found in registry, skipping bootstrap")
-			return nil, nil, nil
-		}
-		return nil, nil, fmt.Errorf("get agent template: %w", err)
-	}
-	return preset, tmpl, nil
-}
-
 type templateSubRule struct {
 	ID          string         `json:"id"`
 	Name        string         `json:"name"`
 	Type        string         `json:"type"`
 	Mode        string         `json:"mode"`
+	Priority    *int           `json:"priority,omitempty"`
 	Enabled     bool           `json:"enabled"`
 	Description string         `json:"description"`
 	Config      map[string]any `json:"config"`
+}
+
+func coalesceAgentRulePriority(p *int) int {
+	if p == nil {
+		return 100
+	}
+	if *p < 1 {
+		return 1
+	}
+	return *p
 }
 
 type templateConfigDoc struct {
@@ -137,36 +147,64 @@ func parseTemplateConfig(configJSON []byte) (*templateConfigDoc, error) {
 	return &doc, nil
 }
 
-// resolvePresetVariables merges preset variable overrides with template
-// variable defaults and injects chain_id=1.
-func resolvePresetVariables(presetVarsJSON, tmplVarsJSON []byte) (map[string]string, error) {
+type templateVarDef struct {
+	Name    string `json:"name"`
+	Default any    `json:"default,omitempty"`
+}
+
+// collectTemplateVarDefs merges variable definitions from all composed templates.
+// First occurrence wins (same semantics as preset apply).
+func collectTemplateVarDefs(ctx context.Context, templateRepo storage.TemplateRepository, templateIDs []string) ([]templateVarDef, error) {
+	seen := make(map[string]struct{})
+	var defs []templateVarDef
+	for _, id := range templateIDs {
+		tmpl, err := templateRepo.Get(ctx, id)
+		if err != nil {
+			if types.IsNotFound(err) {
+				continue
+			}
+			return nil, fmt.Errorf("get template %q: %w", id, err)
+		}
+		if len(tmpl.Variables) == 0 {
+			continue
+		}
+		var varDefs []templateVarDef
+		if err := json.Unmarshal(tmpl.Variables, &varDefs); err != nil {
+			return nil, fmt.Errorf("parse template variables for %q: %w", id, err)
+		}
+		for _, def := range varDefs {
+			if _, ok := seen[def.Name]; ok {
+				continue
+			}
+			seen[def.Name] = struct{}{}
+			defs = append(defs, def)
+		}
+	}
+	return defs, nil
+}
+
+// resolvePresetVariables merges preset variable overrides with template defaults.
+// Agent preset is chain-agnostic — chain_id is not injected.
+func resolvePresetVariables(presetVarsJSON []byte, varDefs []templateVarDef) (map[string]string, error) {
 	presetVars, err := decodeStringMap(presetVarsJSON)
 	if err != nil {
 		return nil, fmt.Errorf("decode preset variables: %w", err)
 	}
 
-	var varDefs []struct {
-		Name    string `json:"name"`
-		Default any    `json:"default,omitempty"`
-	}
-	if len(tmplVarsJSON) > 0 {
-		if err := json.Unmarshal(tmplVarsJSON, &varDefs); err != nil {
-			return nil, fmt.Errorf("parse template variables: %w", err)
-		}
-	}
-
-	resolved := make(map[string]string, len(presetVars))
+	resolved := make(map[string]string, len(presetVars)+len(varDefs))
 	for k, v := range presetVars {
 		resolved[k] = v
 	}
 	for _, def := range varDefs {
-		if _, ok := resolved[def.Name]; !ok && def.Default != nil {
-			if s, ok := def.Default.(string); ok && s != "" {
+		if _, ok := resolved[def.Name]; ok {
+			continue
+		}
+		if def.Default != nil {
+			if s, ok := def.Default.(string); ok {
 				resolved[def.Name] = s
 			}
 		}
 	}
-	resolved["chain_id"] = "1"
 	return resolved, nil
 }
 
@@ -195,14 +233,14 @@ func createRulesFromConfig(
 			return created, fmt.Errorf("inject variables for sub-rule %q: %w", sub.Name, err)
 		}
 
-		ruleID := types.RuleID("inst_" + hashForID("evm/agent", resolved, sub.ID, time.Now().UnixNano()))
+		ruleID := types.RuleID("inst_" + hashForID(templateID, resolved, sub.ID, time.Now().UnixNano()))
 		if err := createRule(ctx, ruleRepo, ruleID, sub, configWithVars, variablesJSON, chainType, templateID); err != nil {
 			return created, fmt.Errorf("create sub-rule %q: %w", sub.Name, err)
 		}
 		created++
 
 		log.Info("bootstrap agent preset: created rule",
-			"rule_id", ruleID, "name", sub.Name, "type", sub.Type, "mode", sub.Mode,
+			"rule_id", ruleID, "template_id", templateID, "name", sub.Name, "type", sub.Type, "mode", sub.Mode,
 		)
 
 		if types.RuleMode(sub.Mode) == types.RuleModeWhitelist {
@@ -243,6 +281,7 @@ func createRule(
 		Description: sub.Description,
 		Type:        types.RuleType(sub.Type),
 		Mode:        types.RuleMode(sub.Mode),
+		Priority:    coalesceAgentRulePriority(sub.Priority),
 		Source:      types.RuleSourceInstance,
 		Config:      configJSON,
 		TemplateID:  &templateID,
@@ -286,6 +325,18 @@ func hashForID(templateID string, vars map[string]string, subID string, nano int
 	data := fmt.Sprintf("instance:%s:%v:%s:%d", templateID, vars, subID, nano)
 	hash := sha256.Sum256([]byte(data))
 	return hex.EncodeToString(hash[:8])
+}
+
+// decodeStringSlice decodes a JSONB column as []string.
+func decodeStringSlice(b []byte) ([]string, error) {
+	if len(b) == 0 {
+		return nil, nil
+	}
+	var out []string
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // decodeStringMap decodes a JSONB column ([]byte) as map[string]string,

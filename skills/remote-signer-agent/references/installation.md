@@ -28,6 +28,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/ivanzzeth/remote-signer/main
 git clone https://github.com/ivanzzeth/remote-signer.git && cd remote-signer && make build
 ```
 
+`make build` embeds the Web UI (runs vite + `-tags embed_web`). Backend-only fast build without Node: `make build-cli` (serves "UI not bundled" placeholder).
+
 ## Docker (personal)
 
 ```bash

@@ -87,9 +87,17 @@ func TestBootstrapAgentPresetCreatesRules(t *testing.T) {
 		"max_unknown_token_per_tx":    "100",
 		"max_unknown_token_tx_count":  "50",
 		"trusted_contracts":           "",
+		"token_address":               "",
+		"allowed_spenders":            "",
+		"allowed_recipients":          "",
+		"max_transfer_amount":         "0",
+		"max_approve_amount":          "-1",
+		"allowed_approve_to":          "",
+		"allowed_operators":           "",
+		"auth_only":                   "true",
 	}
 	presetVarsJSON, _ := json.Marshal(presetVars)
-	presetTemplateIDsJSON, _ := json.Marshal([]string{"evm/agent"})
+	presetTemplateIDsJSON, _ := json.Marshal([]string{"evm/agent", "evm/erc20", "evm/erc721", "evm/erc1155"})
 	if err := presetRepo.Create(context.Background(), &types.RulePreset{
 		ID:          "evm/agent",
 		Name:        "Agent",
@@ -112,6 +120,7 @@ func TestBootstrapAgentPresetCreatesRules(t *testing.T) {
 		"rules": []map[string]any{
 			{
 				"id":          "agent-sign",
+				"priority":    10000,
 				"name":        "Agent Signature",
 				"type":        "evm_js",
 				"mode":        "whitelist",
@@ -125,6 +134,7 @@ func TestBootstrapAgentPresetCreatesRules(t *testing.T) {
 			},
 			{
 				"id":          "agent-safety",
+				"priority":    10000,
 				"name":        "Agent Safety",
 				"type":        "evm_js",
 				"mode":        "blocklist",
@@ -139,16 +149,18 @@ func TestBootstrapAgentPresetCreatesRules(t *testing.T) {
 	}
 	tmplConfigJSON, _ := json.Marshal(tmplConfig)
 	if err := templateRepo.Create(context.Background(), &types.RuleTemplate{
-		ID:      "evm/agent",
-		Name:    "Agent Signature",
-		Type:    "template_bundle",
+		ID:        "evm/agent",
+		Name:      "Agent Signature",
+		Type:      "template_bundle",
 		Variables: tmplVarsJSON,
-		Config:  tmplConfigJSON,
-		Source:  types.RuleSourceFile,
-		Enabled: true,
+		Config:    tmplConfigJSON,
+		Source:    types.RuleSourceFile,
+		Enabled:   true,
 	}); err != nil {
 		t.Fatal(err)
 	}
+
+	seedMinimalTokenTemplates(t, templateRepo)
 
 	// Run bootstrap.
 	if err := bootstrapAgentPresetIfNeeded(context.Background(), presetRepo, templateRepo, ruleRepo, budgetRepo, discardLogger()); err != nil {
@@ -161,10 +173,13 @@ func TestBootstrapAgentPresetCreatesRules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rules) != 2 {
-		t.Fatalf("expected 2 rules, got %d", len(rules))
+	if len(rules) != 6 {
+		t.Fatalf("expected 6 rules (agent×2 + erc20×2 + erc721×1 + erc1155×1), got %d", len(rules))
 	}
 	for _, r := range rules {
+		if r.Priority != 10000 {
+			t.Errorf("rule %q: priority = %d, want 10000", r.ID, r.Priority)
+		}
 		if r.Owner != "agent" {
 			t.Errorf("rule %q: owner = %q, want agent", r.ID, r.Owner)
 		}
@@ -193,6 +208,45 @@ func TestBootstrapAgentPresetCreatesRules(t *testing.T) {
 	}
 	if len(budgets) == 0 {
 		t.Fatal("expected at least 1 budget for whitelist rule")
+	}
+}
+
+func seedMinimalTokenTemplates(t *testing.T, templateRepo storage.TemplateRepository) {
+	t.Helper()
+	ctx := context.Background()
+
+	erc20Config, _ := json.Marshal(map[string]any{
+		"rules": []map[string]any{
+			{"id": "erc20-transfer-limit", "priority": 10000, "name": "ERC20 transfer", "type": "evm_js", "mode": "whitelist", "enabled": true, "config": map[string]any{}},
+			{"id": "erc20-approve-limit", "priority": 10000, "name": "ERC20 approve", "type": "evm_js", "mode": "whitelist", "enabled": true, "config": map[string]any{}},
+		},
+	})
+	if err := templateRepo.Create(ctx, &types.RuleTemplate{
+		ID: "evm/erc20", Name: "ERC20", Type: "template_bundle", Config: erc20Config, Source: types.RuleSourceFile, Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	erc721Config, _ := json.Marshal(map[string]any{
+		"rules": []map[string]any{
+			{"id": "erc721-transfer-approve-allowlists", "priority": 10000, "name": "ERC721", "type": "evm_js", "mode": "whitelist", "enabled": true, "config": map[string]any{}},
+		},
+	})
+	if err := templateRepo.Create(ctx, &types.RuleTemplate{
+		ID: "evm/erc721", Name: "ERC721", Type: "template_bundle", Config: erc721Config, Source: types.RuleSourceFile, Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	erc1155Config, _ := json.Marshal(map[string]any{
+		"rules": []map[string]any{
+			{"id": "erc1155-transfer-approve-allowlists", "priority": 10000, "name": "ERC1155", "type": "evm_js", "mode": "whitelist", "enabled": true, "config": map[string]any{}},
+		},
+	})
+	if err := templateRepo.Create(ctx, &types.RuleTemplate{
+		ID: "evm/erc1155", Name: "ERC1155", Type: "template_bundle", Config: erc1155Config, Source: types.RuleSourceFile, Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 

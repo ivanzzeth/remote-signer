@@ -16,12 +16,11 @@
 </head>
 <body>
 <h1>UI not bundled</h1>
-<p>This <code>remote-signer</code> binary was built without the embedded
-operator web UI (the default <code>make build</code> target skips it so
-backend contributors don't need a Node toolchain).</p>
+<p>This <code>remote-signer</code> binary was built with <code>make build-cli</code>
+(Go-only, no embedded operator web UI).</p>
 <p>To get the real UI:</p>
 <ul>
-  <li><strong>Production / single binary:</strong> <code>make build-embed</code> — runs vite then re-builds with <code>-tags embed_web</code>.</li>
+  <li><strong>Default / production:</strong> <code>make build</code> (or <code>make build-embed</code>) — runs vite then re-builds with <code>-tags embed_web</code>.</li>
   <li><strong>Local dev:</strong> <code>cd web && pnpm dev</code> and open <a href="http://localhost:5173">http://localhost:5173</a> — Vite's dev server proxies <code>/api/*</code> to this daemon.</li>
 </ul>
 <p class="hint">The HTTP API at <code>/api/v1/*</code>, <code>/health</code>, and <code>/metrics</code> works the same in either build.</p>

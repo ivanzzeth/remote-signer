@@ -4,8 +4,8 @@
 // (the Makefile's `build` target). Serves a small static placeholder
 // page instead of the full Vite-built operator UI.
 //
-// This exists so backend contributors can `make build` without a Node
-// toolchain. Release builds use `make build-embed` which sets the
+// This exists so backend contributors can `make build-cli` without a Node
+// toolchain. Default `make build` / `make build-embed` sets the
 // `embed_web` build tag and pulls in embed_on.go to bake the real UI.
 
 package web

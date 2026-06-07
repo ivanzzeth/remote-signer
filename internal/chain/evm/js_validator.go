@@ -27,11 +27,12 @@ func ValidateJSCodeSecurity(code string) *SecurityError {
 
 // JSTestCase defines a test case for evm_js rule validation (from YAML test_cases).
 type JSTestCase struct {
-	Name                string                 `json:"name" yaml:"name"`
-	Input               map[string]interface{} `json:"input" yaml:"input"`
-	ExpectPass          bool                   `json:"expect_pass" yaml:"expect_pass"`
-	ExpectReason        string                 `json:"expect_reason,omitempty" yaml:"expect_reason,omitempty"`
-	ExpectBudgetAmount  string                 `json:"expect_budget_amount,omitempty" yaml:"expect_budget_amount,omitempty"` // when set, validateBudget(input) must return this amount
+	Name               string                 `json:"name" yaml:"name"`
+	Input              map[string]interface{} `json:"input" yaml:"input"`
+	Variables          map[string]string      `json:"variables,omitempty" yaml:"variables,omitempty"`
+	ExpectPass         bool                   `json:"expect_pass" yaml:"expect_pass"`
+	ExpectReason       string                 `json:"expect_reason,omitempty" yaml:"expect_reason,omitempty"`
+	ExpectBudgetAmount string                 `json:"expect_budget_amount,omitempty" yaml:"expect_budget_amount,omitempty"` // when set, validateBudget(input) must return this amount
 }
 
 // JSRuleValidator validates evm_js rules by running their test_cases.
@@ -63,13 +64,15 @@ func (v *JSRuleValidator) ValidateRule(ctx context.Context, script string, testC
 		return &ValidationResult{Valid: false}, fmt.Errorf("security check failed: %s", secErr.Message)
 	}
 
-	configObj := make(map[string]interface{})
-	for k, val := range testVariables {
-		configObj[k] = val
-	}
-
 	result := &ValidationResult{Valid: true}
 	for _, tc := range testCases {
+		configObj := make(map[string]interface{}, len(testVariables)+len(tc.Variables))
+		for k, val := range testVariables {
+			configObj[k] = val
+		}
+		for k, val := range tc.Variables {
+			configObj[k] = val
+		}
 		tcResult := TestCaseResult{
 			Name:           tc.Name,
 			ExpectedPass:   tc.ExpectPass,

@@ -474,8 +474,19 @@ type bundleSubRule struct {
 	Description string                 `json:"description,omitempty"`
 	Type        string                 `json:"type"`
 	Mode        string                 `json:"mode"`
+	Priority    *int                   `json:"priority,omitempty"`
 	Config      map[string]interface{} `json:"config"`
 	Enabled     bool                   `json:"enabled"`
+}
+
+func coalesceBundlePriority(p *int) int {
+	if p == nil {
+		return 100 // default matches types.Rule gorm default
+	}
+	if *p < 1 {
+		return 1
+	}
+	return *p
 }
 
 // createInstanceFromBundle expands a template_bundle into individual sub-rules,
@@ -578,6 +589,7 @@ func (s *TemplateService) createInstanceFromBundle(
 			Description: sub.Description,
 			Type:        types.RuleType(sub.Type),
 			Mode:        types.RuleMode(sub.Mode),
+			Priority:    coalesceBundlePriority(sub.Priority),
 			Source:      types.RuleSourceInstance,
 			Config:      subConfigJSON,
 			TemplateID:  &tmpl.ID,
@@ -714,9 +726,16 @@ func (s *TemplateService) createInstanceFromBundle(
 	return result, nil
 }
 
-// rollbackRules deletes all previously created rules (used on bundle expansion failure).
+// rollbackRules deletes all previously created rules and their budgets (used on
+// bundle expansion failure). Budgets are removed first so rows cannot linger
+// when FK CASCADE is unavailable.
 func (s *TemplateService) rollbackRules(ctx context.Context, ruleRepo storage.RuleRepository, ruleIDs []types.RuleID) {
 	for _, id := range ruleIDs {
+		if s.budgetRepo != nil {
+			if err := s.budgetRepo.DeleteByRuleID(ctx, id); err != nil {
+				s.logger.Error("failed to rollback sub-rule budgets", "rule_id", id, "error", err)
+			}
+		}
 		if err := ruleRepo.Delete(ctx, id); err != nil {
 			s.logger.Error("failed to rollback sub-rule creation", "rule_id", id, "error", err)
 		}
@@ -1018,7 +1037,9 @@ func validateVariables(defs []types.TemplateVariable, vars map[string]string) er
 func validateVariableType(name string, varType types.VariableType, value string) error {
 	switch varType {
 	case types.VarTypeAddress:
-		if !isValidAddress(value) {
+		// Empty means optional / unconstrained (e.g. Agent preset token_address
+		// for approve-any-token). Same convention as address_list entries.
+		if value != "" && !isValidAddress(value) {
 			return fmt.Errorf("variable '%s': invalid address format '%s'", name, value)
 		}
 	case types.VarTypeBigInt:

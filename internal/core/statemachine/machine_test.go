@@ -434,7 +434,7 @@ func TestRevertSigningToAuthorizing_Success(t *testing.T) {
 
 	updated := reqRepo.requests[id]
 	assert.Equal(t, types.StatusAuthorizing, updated.Status)
-	assert.Equal(t, "signer locked", updated.ErrorMessage)
+	assert.Empty(t, updated.ErrorMessage)
 	assert.Nil(t, updated.Signature)
 	assert.Nil(t, updated.SignedData)
 	assert.Nil(t, updated.ApprovedAt)

@@ -87,6 +87,12 @@ func (s *BudgetService) Delete(ctx context.Context, id string) error {
 	return s.transport.Request(ctx, http.MethodDelete, path, nil, nil, http.StatusOK, http.StatusNoContent)
 }
 
+// DeleteByRuleID deletes all budget rows for a rule_id (orphan cleanup).
+func (s *BudgetService) DeleteByRuleID(ctx context.Context, ruleID string) error {
+	path := fmt.Sprintf("/api/v1/evm/budgets/by-rule/%s", ruleID)
+	return s.transport.Request(ctx, http.MethodDelete, path, nil, nil, http.StatusOK, http.StatusNoContent)
+}
+
 // Reset resets a budget counter.
 func (s *BudgetService) Reset(ctx context.Context, id string) (*Budget, error) {
 	path := fmt.Sprintf("/api/v1/evm/budgets/%s/reset", id)

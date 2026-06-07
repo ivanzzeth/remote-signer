@@ -21,7 +21,7 @@ import (
 func skipIfPresetAPIDisabled(t *testing.T) {
 	t.Helper()
 	ctx := context.Background()
-	_, err := adminClient.Presets.List(ctx)
+	_, err := adminClient.Presets.List(ctx, "")
 	if err != nil {
 		if apiErr, ok := err.(*client.APIError); ok && apiErr.StatusCode == 404 {
 			t.Skip("preset API not enabled (presets.dir not set or route not registered)")
@@ -58,7 +58,7 @@ func TestPreset_List(t *testing.T) {
 	ctx := context.Background()
 	skipIfPresetAPIDisabled(t)
 
-	resp, err := adminClient.Presets.List(ctx)
+	resp, err := adminClient.Presets.List(ctx, "")
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	assert.NotNil(t, resp.Presets)
@@ -164,7 +164,7 @@ func TestPreset_Matrix_List_Shows_Template(t *testing.T) {
 	ctx := context.Background()
 	skipIfPresetAPIDisabled(t)
 
-	resp, err := adminClient.Presets.List(ctx)
+	resp, err := adminClient.Presets.List(ctx, "")
 	require.NoError(t, err)
 
 	var found bool
