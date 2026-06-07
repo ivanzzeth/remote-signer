@@ -594,9 +594,10 @@ func (h *PresetHandler) runTemplateValidation(tmpl *types.RuleTemplate, resolved
 // here fall back to the preset's defaults (which themselves fall back
 // to the template's declared defaults).
 type ApplyPresetRequest struct {
-	Variables      map[string]string `json:"variables"`
-	AppliedTo      []string          `json:"applied_to,omitempty"`
-	SkipValidation bool              `json:"skip_validation,omitempty"` // skip test case validation on apply
+	Variables map[string]string `json:"variables"`
+	AppliedTo []string          `json:"applied_to,omitempty"`
+	// Parsed only to reject — never honored. See validation_mandatory.go.
+	SkipValidation bool `json:"skip_validation,omitempty"` //nolint:staticcheck // kept to detect forbidden client requests
 }
 
 func (h *PresetHandler) apply(w http.ResponseWriter, r *http.Request, id string) {
@@ -710,55 +711,64 @@ func (h *PresetHandler) apply(w http.ResponseWriter, r *http.Request, id string)
 	budget, _ := decodeAnyMap(budgetBytes)
 	schedule, _ := decodeAnyMap(scheduleBytes)
 
-	// Run test case validation before creating (unless skipped)
-	if !body.SkipValidation && h.jsEvaluator != nil {
-		validationVars := make(map[string]string, len(mergedVars))
-		for k, v := range mergedVars {
-			validationVars[k] = v
-		}
-		if p.ChainID != "" {
-			validationVars["chain_id"] = p.ChainID
-		}
-		for _, tid := range templateIDs {
-			tmpl, tErr := h.templateRepo.Get(r.Context(), tid)
-			if tErr != nil {
-				continue
-			}
-			var varDefs []types.TemplateVariable
-			if len(tmpl.Variables) > 0 {
-				_ = json.Unmarshal(tmpl.Variables, &varDefs)
-			}
-			var testVars map[string]string
-			if len(tmpl.TestVariables) > 0 {
-				_ = json.Unmarshal(tmpl.TestVariables, &testVars)
-			}
-			resolvedVars := resolveTemplateDefaults(varDefs, testVars)
-			for k, v := range validationVars {
-				resolvedVars[k] = v
-			}
-			resolvedConfig, subErr := service.SubstituteVariables(tmpl.Config, resolvedVars) //nolint:staticcheck
-			if subErr != nil {
-				h.writeError(w, fmt.Sprintf("template %q: variable substitution for validation failed: %s", tid, subErr.Error()), http.StatusBadRequest)
-				return
-			}
-			_, allPassed := ValidateTemplateConfig(h.jsEvaluator, tmpl.Name, resolvedConfig, resolvedVars)
-			if !allPassed {
-				results, _ := ValidateTemplateConfig(h.jsEvaluator, tmpl.Name, resolvedConfig, resolvedVars)
-				var failures []string
-				for _, r := range results {
-					if !r.Valid && r.Error != "" {
-						failures = append(failures, fmt.Sprintf("%s: %s", r.RuleName, r.Error))
-					}
-				}
-				h.writeError(w, fmt.Sprintf("preset %q: test case validation failed for template %q: %s", id, tid, strings.Join(failures, "; ")), http.StatusBadRequest)
-				return
-			}
-		}
-		h.logger.Debug("preset test case validation passed",
-			"preset_id", id,
-			"template_ids", templateIDs,
-		)
+	// FORCED VALIDATION — see validation_mandatory.go. Do not restore optional skip.
+	if body.SkipValidation {
+		h.writeError(w, errSkipValidationForbidden, http.StatusBadRequest)
+		return
 	}
+	if h.jsEvaluator == nil {
+		h.writeError(w, "test case validation required for preset apply but JS evaluator is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	// Previously (REMOVED — fund-loss risk):
+	//   if !body.SkipValidation && h.jsEvaluator != nil { ... }
+	// That allowed skip_validation:true / --skip-validation to bypass test_cases.
+	validationVars := make(map[string]string, len(mergedVars))
+	for k, v := range mergedVars {
+		validationVars[k] = v
+	}
+	if p.ChainID != "" {
+		validationVars["chain_id"] = p.ChainID
+	}
+	for _, tid := range templateIDs {
+		tmpl, tErr := h.templateRepo.Get(r.Context(), tid)
+		if tErr != nil {
+			continue
+		}
+		var varDefs []types.TemplateVariable
+		if len(tmpl.Variables) > 0 {
+			_ = json.Unmarshal(tmpl.Variables, &varDefs)
+		}
+		var testVars map[string]string
+		if len(tmpl.TestVariables) > 0 {
+			_ = json.Unmarshal(tmpl.TestVariables, &testVars)
+		}
+		resolvedVars := resolveTemplateDefaults(varDefs, testVars)
+		for k, v := range validationVars {
+			resolvedVars[k] = v
+		}
+		resolvedConfig, subErr := service.SubstituteVariables(tmpl.Config, resolvedVars) //nolint:staticcheck
+		if subErr != nil {
+			h.writeError(w, fmt.Sprintf("template %q: variable substitution for validation failed: %s", tid, subErr.Error()), http.StatusBadRequest)
+			return
+		}
+		_, allPassed := ValidateTemplateConfig(h.jsEvaluator, tmpl.Name, resolvedConfig, resolvedVars)
+		if !allPassed {
+			results, _ := ValidateTemplateConfig(h.jsEvaluator, tmpl.Name, resolvedConfig, resolvedVars)
+			var failures []string
+			for _, r := range results {
+				if !r.Valid && r.Error != "" {
+					failures = append(failures, fmt.Sprintf("%s: %s", r.RuleName, r.Error))
+				}
+			}
+			h.writeError(w, fmt.Sprintf("preset %q: test case validation failed for template %q: %s", id, tid, strings.Join(failures, "; ")), http.StatusBadRequest)
+			return
+		}
+	}
+	h.logger.Debug("preset test case validation passed",
+		"preset_id", id,
+		"template_ids", templateIDs,
+	)
 
 	// Build one CreateInstanceRequest per template_id. They all share
 	// the merged variables, budget, schedule, and chain scope that's

@@ -139,37 +139,45 @@ func (h *TemplateHandler) instantiateTemplate(w http.ResponseWriter, r *http.Req
 		instanceReq.Status = ownership.Status
 	}
 
-	// Run test case validation before creating (unless skipped)
-	if !req.SkipValidation && h.jsEvaluator != nil {
-		var varDefs []types.TemplateVariable
-		if len(tmpl.Variables) > 0 {
-			_ = json.Unmarshal(tmpl.Variables, &varDefs)
-		}
-		resolvedVars := resolveTemplateDefaults(varDefs, req.Variables)
-		if instanceReq.ChainID != nil {
-			resolvedVars["chain_id"] = *instanceReq.ChainID
-		}
-		resolvedConfig, subErr := service.SubstituteVariables(tmpl.Config, resolvedVars) //nolint:staticcheck
-		if subErr != nil {
-			h.writeError(w, fmt.Sprintf("variable substitution for validation failed: %s", subErr.Error()), http.StatusBadRequest)
-			return
-		}
-		results, allPassed := ValidateTemplateConfig(h.jsEvaluator, tmpl.Name, resolvedConfig, resolvedVars)
-		if !allPassed {
-			var failures []string
-			for _, r := range results {
-				if !r.Valid && r.Error != "" {
-					failures = append(failures, fmt.Sprintf("%s: %s", r.RuleName, r.Error))
-				}
-			}
-			h.writeError(w, fmt.Sprintf("test case validation failed: %s", strings.Join(failures, "; ")), http.StatusBadRequest)
-			return
-		}
-		h.logger.Debug("template test case validation passed",
-			"template_id", templateID,
-			"results", len(results),
-		)
+	// FORCED VALIDATION — see validation_mandatory.go. Do not restore optional skip.
+	if req.SkipValidation {
+		h.writeError(w, errSkipValidationForbidden, http.StatusBadRequest)
+		return
 	}
+	if h.jsEvaluator == nil {
+		h.writeError(w, "test case validation required for template instantiate but JS evaluator is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	// Previously (REMOVED — fund-loss risk):
+	//   if !req.SkipValidation && h.jsEvaluator != nil { ... }
+	var varDefs []types.TemplateVariable
+	if len(tmpl.Variables) > 0 {
+		_ = json.Unmarshal(tmpl.Variables, &varDefs)
+	}
+	resolvedVars := resolveTemplateDefaults(varDefs, req.Variables)
+	if instanceReq.ChainID != nil {
+		resolvedVars["chain_id"] = *instanceReq.ChainID
+	}
+	resolvedConfig, subErr := service.SubstituteVariables(tmpl.Config, resolvedVars) //nolint:staticcheck
+	if subErr != nil {
+		h.writeError(w, fmt.Sprintf("variable substitution for validation failed: %s", subErr.Error()), http.StatusBadRequest)
+		return
+	}
+	results, allPassed := ValidateTemplateConfig(h.jsEvaluator, tmpl.Name, resolvedConfig, resolvedVars)
+	if !allPassed {
+		var failures []string
+		for _, r := range results {
+			if !r.Valid && r.Error != "" {
+				failures = append(failures, fmt.Sprintf("%s: %s", r.RuleName, r.Error))
+			}
+		}
+		h.writeError(w, fmt.Sprintf("test case validation failed: %s", strings.Join(failures, "; ")), http.StatusBadRequest)
+		return
+	}
+	h.logger.Debug("template test case validation passed",
+		"template_id", templateID,
+		"results", len(results),
+	)
 
 	// Create instance
 	result, err := h.templateService.CreateInstance(r.Context(), instanceReq)

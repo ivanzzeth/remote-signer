@@ -96,9 +96,10 @@ func (s *Service) Get(ctx context.Context, id string) (*DetailResponse, error) {
 
 // ApplyRequest is the body for POST /api/v1/presets/:id/apply.
 type ApplyRequest struct {
-	Variables      map[string]string `json:"variables,omitempty"`
-	AppliedTo      []string          `json:"applied_to,omitempty"`
-	SkipValidation bool              `json:"skip_validation,omitempty"`
+	Variables map[string]string `json:"variables,omitempty"`
+	AppliedTo []string          `json:"applied_to,omitempty"`
+	// FORCED VALIDATION — do not send skip_validation. Server rejects it (fund-loss risk).
+	// SkipValidation bool `json:"skip_validation,omitempty"`
 }
 
 // ApplyResultItem is one entry in the apply response.

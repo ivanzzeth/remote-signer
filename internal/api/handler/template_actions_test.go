@@ -387,18 +387,17 @@ func TestInstantiateTemplate_TestCaseValidationFailure(t *testing.T) {
 	assert.Contains(t, errResp.Error, "test case validation failed")
 }
 
-func TestInstantiateTemplate_TestCaseValidationSkipped(t *testing.T) {
+func TestInstantiateTemplate_SkipValidationForbidden(t *testing.T) {
 	tmplRepo := newMockTemplateRepo()
 	ruleRepo := newMockRuleRepo()
 	budgetRepo := newMockBudgetRepo()
 
-	// Same failing template but skip_validation=true
 	tmpl := &types.RuleTemplate{
 		ID:      "tmpl-skip-val",
-		Name:    "Skip Validation",
+		Name:    "Skip Validation Forbidden",
 		Type:    types.RuleTypeEVMJS,
 		Mode:    types.RuleModeWhitelist,
-		Config:  []byte(`{"script":"function validate(input) { return {valid: false}; }","test_cases":[{"name":"tc1","input":{"sign_type":"transaction","chain_id":"1","signer":"0x742d35Cc6634C0532925a3b844Bc454e4438f44e","transaction":{"to":"0xRecipientAddress0000000000000000000000000000","value":"0","data":"0x"}},"expect_pass":true}]}`),
+		Config:  []byte(`{"script":"function validate(input) { return {valid: true}; }"}`),
 		Source:  types.RuleSourceConfig,
 		Enabled: true,
 	}
@@ -416,8 +415,10 @@ func TestInstantiateTemplate_TestCaseValidationSkipped(t *testing.T) {
 		"skip_validation": true,
 	}
 	rr := doRequest(t, h, http.MethodPost, "/api/v1/templates/tmpl-skip-val/instantiate", reqBody, testAPIKey())
-	// Should succeed because validation is skipped
-	assert.Equal(t, http.StatusCreated, rr.Code)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	var errResp ErrorResponse
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&errResp))
+	assert.Contains(t, errResp.Error, "skip_validation is forbidden")
 }
 
 func TestInstantiateTemplate_ReadOnlyBlocks(t *testing.T) {

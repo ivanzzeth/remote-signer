@@ -113,7 +113,8 @@ type InstantiateTemplateRequest struct {
 	ExpiresIn     *string           `json:"expires_in,omitempty"` // duration string e.g. "24h", "168h"
 	Budget        *BudgetRequest    `json:"budget,omitempty"`
 	Schedule      *ScheduleRequest  `json:"schedule,omitempty"`
-	SkipValidation bool             `json:"skip_validation,omitempty"` // skip test case validation on instantiate
+	// Parsed only to reject — never honored. See validation_mandatory.go.
+	SkipValidation bool `json:"skip_validation,omitempty"` //nolint:staticcheck // kept to detect forbidden client requests
 }
 
 // BudgetRequest represents budget config in an instantiate request
