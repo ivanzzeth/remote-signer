@@ -10,7 +10,7 @@ describe("prefillFromRequest", () => {
       api_key_id: "agent",
       chain_type: "evm",
       chain_id: "56",
-      signer_address: "0x764602FeaD618416E42b48c633d90869fF19759E",
+      signer_address: "0x0000000000000000000000000000000000000001",
       sign_type: "transaction",
       status: "rejected",
       created_at: now,
@@ -27,7 +27,7 @@ describe("prefillFromRequest", () => {
 
     expect(fields).toEqual({
       chainID: "56",
-      from: "0x764602FeaD618416E42b48c633d90869fF19759E",
+      from: "0x0000000000000000000000000000000000000001",
       to: "0x8b844f885672f333bc0042cb669255f93a4c1e6b",
       value: "0",
       data: "0xdeadbeef",

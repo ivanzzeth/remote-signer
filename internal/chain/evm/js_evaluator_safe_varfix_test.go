@@ -67,13 +67,13 @@ func TestSafeRule_ConfigDrivenByVariables(t *testing.T) {
 
 	const newSafe = "0x8faE526C4cfE0b799003d2110F92C40499c6609f"
 
-	payload := []byte(`{"transaction":{"from":"0x764602FeaD618416E42b48c633d90869fF19759E","to":"` +
+	payload := []byte(`{"transaction":{"from":"0x0000000000000000000000000000000000000001","to":"` +
 		newSafe + `","value":"0","data":"` + blockedData + `","nonce":91,"gas":382186}}`)
 
 	req := &types.SignRequest{
 		ID:            "61aa2f8a-e9a1-49e3-8d81-fd8788ed2db8",
 		ChainID:       "137",
-		SignerAddress: "0x764602FeaD618416E42b48c633d90869fF19759E",
+		SignerAddress: "0x0000000000000000000000000000000000000001",
 		SignType:      SignTypeTransaction,
 		Payload:       payload,
 	}
