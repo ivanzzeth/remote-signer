@@ -44,6 +44,13 @@ func ScopeDynamicUnit(chainID, rawUnit string) string {
 	return unit
 }
 
+// IsRuntimeDynamicBudgetUnit reports auto-created token/permit rows that must
+// survive config sync (not listed in template known_units).
+func IsRuntimeDynamicBudgetUnit(unit string) bool {
+	unit = strings.ToLower(strings.TrimSpace(unit))
+	return strings.Contains(unit, "0x")
+}
+
 // IsKnownUnitFamily reports whether a budget row belongs to template known_units
 // (prefixed or legacy unprefixed), as opposed to ad-hoc runtime units like token:permit.
 func IsKnownUnitFamily(unit string, knownBaseNames map[string]bool) bool {

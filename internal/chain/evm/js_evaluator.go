@@ -98,9 +98,15 @@ func (e *JSRuleEvaluator) buildRPCContext(ctx context.Context, chainID string) *
 // only Variables are returned (backward compatible). The resulting map is
 // safe to pass as the JS `config` object.
 func resolveRuleConfig(r *types.Rule, chainID string) map[string]interface{} {
-	configObj := make(map[string]interface{})
+	stringVars := map[string]string{}
 	if r.Variables != nil {
-		_ = json.Unmarshal(r.Variables, &configObj)
+		_ = json.Unmarshal(r.Variables, &stringVars)
+	}
+	stringVars = applyTemplateDefaultsToStringMap(r, stringVars)
+
+	configObj := make(map[string]interface{}, len(stringVars)+1)
+	for k, v := range stringVars {
+		configObj[k] = v
 	}
 	// Always inject the request's chain_id so scripts can reference config.chain_id
 	configObj["chain_id"] = chainID

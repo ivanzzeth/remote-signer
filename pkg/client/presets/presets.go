@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/ivanzzeth/remote-signer/pkg/client/internal/transport"
 )
@@ -41,10 +42,15 @@ type ListResponse struct {
 	Presets []PresetEntry `json:"presets"`
 }
 
-// List returns all presets (admin only).
-func (s *Service) List(ctx context.Context) (*ListResponse, error) {
+// List returns presets visible to the caller. Pass query for case-insensitive
+// fuzzy filter on id, name, description, and template_ids (GET ?q=).
+func (s *Service) List(ctx context.Context, query string) (*ListResponse, error) {
+	path := "/api/v1/presets"
+	if strings.TrimSpace(query) != "" {
+		path += "?q=" + url.QueryEscape(strings.TrimSpace(query))
+	}
 	var out ListResponse
-	err := s.transport.Request(ctx, http.MethodGet, "/api/v1/presets", nil, &out, http.StatusOK)
+	err := s.transport.Request(ctx, http.MethodGet, path, nil, &out, http.StatusOK)
 	if err != nil {
 		return nil, err
 	}

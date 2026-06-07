@@ -5,6 +5,7 @@ package e2e
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -62,10 +63,10 @@ func TestE2E_PresetApply_KeyPresets(t *testing.T) {
 			wantRuleCount: 1, // global-blocklist
 		},
 		{
-			// agent bundle: agent-sign + agent-safety
+			// agent composite: agent×2 + erc20×2 + erc721×1 + erc1155×1
 			name:          "agent",
 			presetID:      "evm/agent",
-			wantRuleCount: 2,
+			wantRuleCount: 6,
 		},
 		{
 			name:          "meta_transaction",
@@ -171,24 +172,34 @@ func TestE2E_PresetApply_VerifyConfigs(t *testing.T) {
 
 		resp, err := adminClient.Presets.ApplyWithVariables(ctx, "evm/agent", nil)
 		require.NoError(t, err)
-		require.Len(t, resp.Results, 2, "agent preset should create 2 sub-rules")
+		require.Len(t, resp.Results, 6,
+			"agent preset should create 6 rules (agent×2 + erc20×2 + erc721×1 + erc1155×1)")
 
-		var hasSign, hasSafety bool
+		var hasSign, hasSafety, hasERC20Approve, hasERC721, hasERC1155 bool
 		for _, result := range resp.Results {
 			var ruleMap map[string]interface{}
 			require.NoError(t, json.Unmarshal(result.Rule, &ruleMap))
 			name, _ := ruleMap["name"].(string)
 			mode, _ := ruleMap["mode"].(string)
 			t.Logf("Agent sub-rule: name=%s, mode=%s", name, mode)
-			if mode == "whitelist" {
+			switch {
+			case strings.Contains(name, "Signature") || strings.Contains(name, "agent-sign"):
 				hasSign = true
-			}
-			if mode == "blocklist" {
+			case strings.Contains(name, "Safety") || strings.Contains(name, "agent-safety"):
 				hasSafety = true
+			case strings.Contains(name, "approve") || strings.Contains(name, "Approve"):
+				hasERC20Approve = true
+			case strings.Contains(name, "ERC721") || strings.Contains(name, "721"):
+				hasERC721 = true
+			case strings.Contains(name, "ERC1155") || strings.Contains(name, "1155"):
+				hasERC1155 = true
 			}
 		}
-		assert.True(t, hasSign, "agent preset should include a whitelist rule (agent-sign)")
-		assert.True(t, hasSafety, "agent preset should include a blocklist rule (agent-safety)")
+		assert.True(t, hasSign, "agent preset should include agent-sign whitelist rule")
+		assert.True(t, hasSafety, "agent preset should include agent-safety blocklist rule")
+		assert.True(t, hasERC20Approve, "agent preset should include erc20-approve-limit rule")
+		assert.True(t, hasERC721, "agent preset should include erc721 auth rule")
+		assert.True(t, hasERC1155, "agent preset should include erc1155 auth rule")
 	})
 
 	t.Run("global_blocklist mode", func(t *testing.T) {

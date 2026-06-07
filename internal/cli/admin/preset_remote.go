@@ -101,6 +101,8 @@ var presetValidateCmd = &cobra.Command{
 
 // --- preset remote-list ---
 
+var presetRemoteListQuery string
+
 var presetRemoteListCmd = &cobra.Command{
 	Use:   "remote-list",
 	Short: "List presets from server API",
@@ -110,7 +112,7 @@ var presetRemoteListCmd = &cobra.Command{
 			return err
 		}
 
-		resp, err := c.Presets.List(cmd.Context())
+		resp, err := c.Presets.List(cmd.Context(), presetRemoteListQuery)
 		if err != nil {
 			return fmt.Errorf("list presets: %w", err)
 		}
@@ -201,6 +203,7 @@ func init() {
 	presetValidateCmd.Flags().StringArrayVar(&presetValidateSetFlags, "set", nil, "Variable override (key=value, repeatable)")
 	presetCmd.AddCommand(presetValidateCmd)
 
+	presetRemoteListCmd.Flags().StringVar(&presetRemoteListQuery, "q", "", "Fuzzy search filter (id, name, description, template_ids)")
 	presetCmd.AddCommand(presetRemoteListCmd)
 	presetCmd.AddCommand(presetRemoteGetCmd)
 }

@@ -2389,6 +2389,21 @@ func TestValidateVariablesSkipsReserved(t *testing.T) {
 	}
 }
 
+func TestValidateVariables_OptionalEmptyAddress(t *testing.T) {
+	defs := []types.TemplateVariable{
+		{Name: "token_address", Type: types.VarTypeAddress, Required: false},
+	}
+	if err := validateVariables(defs, map[string]string{"token_address": ""}); err != nil {
+		t.Fatalf("optional empty address should validate: %v", err)
+	}
+	if err := validateVariableType("token_address", types.VarTypeAddress, ""); err != nil {
+		t.Fatalf("empty address type should be valid: %v", err)
+	}
+	if err := validateVariableType("token_address", types.VarTypeAddress, "not-an-address"); err == nil {
+		t.Fatal("non-empty invalid address should fail")
+	}
+}
+
 func TestInjectReservedVariables(t *testing.T) {
 	logger := newTestLogger()
 
@@ -4397,6 +4412,39 @@ func TestRevokeInstance_NonInstanceRule(t *testing.T) {
 	err = svc.RevokeInstance(context.Background(), "config-rule")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not an instance")
+}
+
+func TestCreateInstanceFromBundle_PreservesSubRulePriority(t *testing.T) {
+	tmplRepo := newMockTemplateRepo()
+	ruleRepo := newMockRuleRepo()
+	budgetRepo := newMockBudgetRepo()
+
+	svc, err := NewTemplateService(tmplRepo, ruleRepo, budgetRepo, newTestLogger())
+	require.NoError(t, err)
+
+	tmpl := &types.RuleTemplate{
+		ID:   "tmpl-priority-bundle",
+		Name: "Priority Bundle",
+		Type: "template_bundle",
+		Mode: types.RuleModeWhitelist,
+		Config: json.RawMessage(`{"rules_json":"[{\"id\":\"high\",\"name\":\"High\",\"type\":\"evm_js\",\"mode\":\"whitelist\",\"priority\":10000,\"config\":{\"script\":\"true\"},\"enabled\":true},{\"id\":\"default\",\"name\":\"Default\",\"type\":\"evm_js\",\"mode\":\"whitelist\",\"config\":{\"script\":\"true\"},\"enabled\":true}]"}`),
+		Source:  types.RuleSourceConfig,
+		Enabled: true,
+	}
+	seedTemplate(t, tmplRepo, tmpl)
+
+	result, err := svc.CreateInstance(context.Background(), &CreateInstanceRequest{TemplateID: "tmpl-priority-bundle"})
+	require.NoError(t, err)
+	require.Len(t, result.SubRules, 2)
+
+	for _, r := range result.SubRules {
+		if strings.Contains(r.Name, "High") {
+			assert.Equal(t, 10000, r.Priority)
+		}
+		if strings.Contains(r.Name, "Default") {
+			assert.Equal(t, 100, r.Priority)
+		}
+	}
 }
 
 func TestCreateInstanceFromBundle_Errors(t *testing.T) {

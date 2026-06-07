@@ -53,7 +53,7 @@ func intFromMap(m map[string]any, key string) int {
 //
 // Endpoints:
 //
-//	GET  /api/v1/presets             — list visible presets
+//	GET  /api/v1/presets             — list visible presets (?q= fuzzy filter)
 //	GET  /api/v1/presets/{id}        — detail, joins variable defs from
 //	                                    referenced templates
 //	POST /api/v1/presets/{id}/apply  — create rule instance(s), one per
@@ -230,10 +230,11 @@ func (h *PresetHandler) list(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, "failed to list presets", http.StatusInternalServerError)
 		return
 	}
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
 	out := make([]PresetListItem, 0, len(rows))
 	for _, p := range rows {
 		ids, _ := decodeStringSlice(p.TemplateIDs)
-		out = append(out, PresetListItem{
+		item := PresetListItem{
 			ID:          p.ID,
 			Name:        p.Name,
 			Description: p.Description,
@@ -241,7 +242,11 @@ func (h *PresetHandler) list(w http.ResponseWriter, r *http.Request) {
 			ChainID:     p.ChainID,
 			TemplateIDs: ids,
 			Enabled:     p.Enabled,
-		})
+		}
+		if !presetMatchesQuery(item, query) {
+			continue
+		}
+		out = append(out, item)
 	}
 	h.writeJSON(w, map[string]interface{}{"presets": out}, http.StatusOK)
 }

@@ -5,6 +5,7 @@ package registry
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -155,6 +156,189 @@ func TestFileTemplateSource_BundleWithRulesGetsRulesJSON(t *testing.T) {
 	}
 	require.Greaterf(t, checked, 0,
 		"expected at least one bundle template under rules/templates — none found")
+}
+
+// TestFilePresetSource_AgentPresetComposesTokenAuthTemplates locks the
+// shipped evm/agent preset to compose agent + ERC20/721/1155 templates and
+// expose auth_only / trusted_contracts variables for token authorization.
+func TestFilePresetSource_AgentPresetComposesTokenAuthTemplates(t *testing.T) {
+	repoRoot := findRepoRoot(t)
+	presetsDir := filepath.Join(repoRoot, "rules", "presets")
+	if _, err := os.Stat(presetsDir); err != nil {
+		t.Skipf("rules/presets not found at %s — skipping", presetsDir)
+	}
+
+	src := NewFilePresetSource(presetsDir)
+	items, err := src.List(context.Background())
+	require.NoError(t, err)
+
+	var agentPreset *types.RulePreset
+	for _, p := range items {
+		if p.ID == "evm/agent" {
+			agentPreset = p
+			break
+		}
+	}
+	require.NotNil(t, agentPreset, "shipped evm/agent preset must exist")
+
+	var templateIDs []string
+	require.NoError(t, json.Unmarshal(agentPreset.TemplateIDs, &templateIDs))
+	assert.Equal(t, []string{"evm/agent", "evm/erc20", "evm/erc721", "evm/erc1155"}, templateIDs)
+
+	var vars map[string]any
+	require.NoError(t, json.Unmarshal(agentPreset.Variables, &vars))
+	for _, key := range []string{"trusted_contracts", "auth_only", "max_transfer_amount", "max_approve_amount"} {
+		assert.Contains(t, vars, key, "agent preset must expose %s for token-auth composition", key)
+	}
+	assert.Equal(t, "true", vars["auth_only"])
+	assert.Equal(t, "0", vars["max_transfer_amount"])
+}
+
+// TestAgentBundleTemplates_SubRulePriority10000 ensures agent-composed bundle
+// templates ship priority 10000 on every sub-rule so preset apply does not
+// fall back to the default 100 and interfere with higher-priority rules.
+func TestAgentBundleTemplates_SubRulePriority10000(t *testing.T) {
+	repoRoot := findRepoRoot(t)
+	templatesDir := filepath.Join(repoRoot, "rules", "templates", "evm")
+	if _, err := os.Stat(templatesDir); err != nil {
+		t.Skipf("rules/templates/evm not found — skipping")
+	}
+
+	const wantPriority = 10000
+	for _, name := range []string{"agent.yaml", "erc20.yaml", "erc721.yaml", "erc1155.yaml"} {
+		t.Run(name, func(t *testing.T) {
+			src := NewFileTemplateSource(filepath.Join(repoRoot, "rules", "templates"))
+			items, err := src.List(context.Background())
+			require.NoError(t, err)
+
+			var tmpl *types.RuleTemplate
+			wantID := "evm/" + strings.TrimSuffix(name, ".yaml")
+			for _, item := range items {
+				if item.ID == wantID {
+					tmpl = item
+					break
+				}
+			}
+			require.NotNil(t, tmpl, "template %s must exist", wantID)
+
+			var cfg map[string]any
+			require.NoError(t, json.Unmarshal(tmpl.Config, &cfg))
+			rulesJSON, ok := cfg["rules_json"].(string)
+			require.True(t, ok, "bundle template %s must expose rules_json", wantID)
+
+			var subRules []map[string]any
+			require.NoError(t, json.Unmarshal([]byte(rulesJSON), &subRules))
+			require.NotEmpty(t, subRules, "template %s must have sub-rules", wantID)
+			for _, sub := range subRules {
+				id, _ := sub["id"].(string)
+				priority, ok := sub["priority"].(float64)
+				require.True(t, ok, "sub-rule %q in %s must set priority", id, wantID)
+				assert.Equal(t, float64(wantPriority), priority,
+					"sub-rule %q in %s must use agent priority %d", id, wantID, wantPriority)
+			}
+		})
+	}
+}
+
+// TestAgentPresetVariables_ValidateAgainstShippedTokenTemplates ensures
+// evm/agent preset composite variables (empty token_address) pass template
+// variable validation for erc20/erc721/erc1155 — regression for preset apply.
+func TestAgentPresetVariables_ValidateAgainstShippedTokenTemplates(t *testing.T) {
+	repoRoot := findRepoRoot(t)
+	templatesDir := filepath.Join(repoRoot, "rules", "templates")
+	presetsDir := filepath.Join(repoRoot, "rules", "presets")
+	if _, err := os.Stat(templatesDir); err != nil {
+		t.Skipf("rules/templates not found — skipping")
+	}
+
+	tmplSrc := NewFileTemplateSource(templatesDir)
+	templates, err := tmplSrc.List(context.Background())
+	require.NoError(t, err)
+
+	presetSrc := NewFilePresetSource(presetsDir)
+	presets, err := presetSrc.List(context.Background())
+	require.NoError(t, err)
+
+	var agentPreset *types.RulePreset
+	for _, p := range presets {
+		if p.ID == "evm/agent" {
+			agentPreset = p
+			break
+		}
+	}
+	require.NotNil(t, agentPreset)
+
+	var presetVars map[string]string
+	require.NoError(t, json.Unmarshal(agentPreset.Variables, &presetVars))
+	// Coerce preset YAML values to strings (same as preset apply path).
+	for k, v := range presetVars {
+		presetVars[k] = fmt.Sprint(v)
+	}
+
+	byID := make(map[string]*types.RuleTemplate, len(templates))
+	for _, tmpl := range templates {
+		byID[tmpl.ID] = tmpl
+	}
+
+	for _, templateID := range []string{"evm/erc20", "evm/erc721", "evm/erc1155"} {
+		tmpl, ok := byID[templateID]
+		require.True(t, ok, "shipped template %s must exist", templateID)
+
+		var varDefs []types.TemplateVariable
+		require.NoError(t, json.Unmarshal(tmpl.Variables, &varDefs))
+
+		// Build vars map: only keys declared by template, from preset.
+		vars := make(map[string]string)
+		for _, def := range varDefs {
+			if v, ok := presetVars[def.Name]; ok {
+				vars[def.Name] = v
+			}
+		}
+
+		require.NoError(t, validateShippedTemplateVariables(varDefs, vars),
+			"agent preset variables must validate for %s", templateID)
+	}
+}
+
+// validateShippedTemplateVariables mirrors service.validateVariables without
+// importing service (avoids circular deps in registry tests).
+func validateShippedTemplateVariables(defs []types.TemplateVariable, vars map[string]string) error {
+	for _, def := range defs {
+		val, provided := vars[def.Name]
+		if !provided {
+			continue
+		}
+		switch def.Type {
+		case types.VarTypeAddress:
+			if val != "" && !isValidShippedAddress(val) {
+				return fmt.Errorf("variable '%s': invalid address format '%s'", def.Name, val)
+			}
+		case types.VarTypeAddressList:
+			for _, part := range strings.Split(val, ",") {
+				part = strings.TrimSpace(part)
+				if part != "" && !isValidShippedAddress(part) {
+					return fmt.Errorf("variable '%s': invalid address in list '%s'", def.Name, part)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func isValidShippedAddress(s string) bool {
+	if !strings.HasPrefix(s, "0x") && !strings.HasPrefix(s, "0X") {
+		return false
+	}
+	hex := s[2:]
+	if len(hex) != 40 {
+		return false
+	}
+	for _, c := range hex {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
+			return false
+		}
+	}
+	return true
 }
 
 // TestFileTemplateSource_YAMLWithNoTypeAndNoRulesIsRejected pins the

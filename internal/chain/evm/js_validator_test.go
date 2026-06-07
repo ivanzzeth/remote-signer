@@ -171,6 +171,30 @@ func TestValidateRule_WithTestVariables(t *testing.T) {
 	assert.True(t, result.Valid)
 }
 
+func TestValidateRule_PerTestCaseVariables(t *testing.T) {
+	e, _ := NewJSRuleEvaluator(testLogger())
+	v, _ := NewJSRuleValidator(e, testLogger())
+
+	script := `function validate(i){ if (config.mode === "strict") return fail("strict"); return ok(); }`
+	testCases := []JSTestCase{
+		{
+			Name:       "default mode passes",
+			Input:      map[string]interface{}{"signer": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8", "sign_type": "transaction", "chain_id": float64(1)},
+			ExpectPass: true,
+		},
+		{
+			Name:        "strict mode fails",
+			Variables:   map[string]string{"mode": "strict"},
+			Input:       map[string]interface{}{"signer": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8", "sign_type": "transaction", "chain_id": float64(1)},
+			ExpectPass:  false,
+			ExpectReason: "strict",
+		},
+	}
+	result, err := v.ValidateRule(context.Background(), script, testCases, map[string]string{"mode": "relaxed"})
+	require.NoError(t, err)
+	assert.True(t, result.Valid)
+}
+
 func TestValidateRule_MultipleTestCases(t *testing.T) {
 	e, _ := NewJSRuleEvaluator(testLogger())
 	v, _ := NewJSRuleValidator(e, testLogger())

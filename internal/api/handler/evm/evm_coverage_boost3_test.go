@@ -182,7 +182,7 @@ func (b *budgetFailUpdateRepo) AtomicSpend(ctx context.Context, ruleID types.Rul
 	return nil
 }
 func (b *budgetFailUpdateRepo) ResetBudget(ctx context.Context, ruleID types.RuleID, unit string, currentPeriodStart time.Time) error {
-	return nil
+	return fmt.Errorf("reset error")
 }
 func (b *budgetFailUpdateRepo) MarkAlertSent(ctx context.Context, ruleID types.RuleID, unit string) error {
 	return nil
@@ -1944,7 +1944,7 @@ func TestB3BudgetItem_HandleResetUpdateError(t *testing.T) {
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
-	// budgetFailUpdateRepo returns a budget on Get but fails on Update
+	// budgetFailUpdateRepo returns a budget on Get but fails on ResetBudget
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
@@ -2569,7 +2569,7 @@ func TestB3BudgetItem_AnnotateRuleMissingNonAdmin(t *testing.T) {
 
 	b := &types.RuleBudget{ID: "budget-1", RuleID: "nonexistent-rule", Unit: "usdc"}
 	apiKey := &types.APIKey{ID: "agent-key", Role: types.APIKeyRole("agent"), Enabled: true}
-	_, ok := h.annotate(context.Background(), apiKey, b, nil)
+	_, ok := h.annotate(context.Background(), apiKey, b)
 	assert.False(t, ok)
 }
 
@@ -2582,7 +2582,7 @@ func TestB3BudgetItem_AnnotateSimBudgetNonAdmin(t *testing.T) {
 
 	b := &types.RuleBudget{ID: "sim-budget", RuleID: "sim:0x1234", Unit: "usdc"}
 	apiKey := &types.APIKey{ID: "agent-key", Role: types.APIKeyRole("agent"), Enabled: true}
-	_, ok := h.annotate(context.Background(), apiKey, b, nil)
+	_, ok := h.annotate(context.Background(), apiKey, b)
 	assert.False(t, ok)
 }
 
@@ -2595,7 +2595,7 @@ func TestB3BudgetItem_AnnotateSimBudgetDev(t *testing.T) {
 
 	b := &types.RuleBudget{ID: "sim-budget", RuleID: "sim:0x1234", Unit: "usdc"}
 	apiKey := &types.APIKey{ID: "dev-key", Role: types.APIKeyRole("dev"), Enabled: true}
-	entry, ok := h.annotate(context.Background(), apiKey, b, nil)
+	entry, ok := h.annotate(context.Background(), apiKey, b)
 	assert.True(t, ok)
 	assert.Equal(t, BudgetKindSimulation, entry.Kind)
 }
@@ -2613,7 +2613,7 @@ func TestB3BudgetItem_AnnotateNonOwnerRule(t *testing.T) {
 
 	b := &types.RuleBudget{ID: "budget-1", RuleID: "rule_1", Unit: "usdc"}
 	apiKey := &types.APIKey{ID: "my-key", Role: types.APIKeyRole("viewer"), Enabled: true}
-	_, ok := h.annotate(context.Background(), apiKey, b, nil)
+	_, ok := h.annotate(context.Background(), apiKey, b)
 	assert.False(t, ok)
 }
 

@@ -244,7 +244,7 @@ func (h *RuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Specific rule operations: /api/v1/evm/rules/{id}
 	ruleID := strings.Trim(path, "/")
-	if !ruleIDPattern.MatchString(ruleID) {
+	if !isRulePathID(ruleID) {
 		h.writeError(w, "invalid rule_id format", http.StatusBadRequest)
 		return
 	}
@@ -254,6 +254,10 @@ func (h *RuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		h.deleteRule(w, r, ruleID)
 	case http.MethodPatch:
+		if isSyntheticBudgetRuleID(ruleID) {
+			h.writeError(w, "cannot modify synthetic simulation budget rule", http.StatusForbidden)
+			return
+		}
 		h.updateRule(w, r, ruleID)
 	default:
 		h.writeError(w, "method not allowed", http.StatusMethodNotAllowed)

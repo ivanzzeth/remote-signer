@@ -18,12 +18,12 @@ git config core.hooksPath .githooks
 ### 2. 构建 & 运行
 
 ```bash
-# 纯 Go 二进制构建（无需 Node）
+# 默认：带 Web UI 的二进制
 make build
 ./remote-signer
 
-# 或带 Web UI 的构建
-make build-embed
+# 仅 Go、无 UI（无需 Node，后端快速迭代）
+make build-cli
 ./remote-signer
 ```
 
@@ -105,8 +105,8 @@ docker compose up -d
 
 ```bash
 # 构建
-make build              # Go 二进制（无 Web UI）
-make build-embed        # 带 Web UI 的二进制
+make build              # 默认：带 Web UI
+make build-cli          # Go 二进制（无 Web UI）
 
 # 测试
 make test               # 单元测试

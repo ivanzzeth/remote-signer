@@ -210,9 +210,10 @@ func (sm *StateMachine) RevertSigningToAuthorizing(ctx context.Context, reqID ty
 	now := time.Now()
 	expectedStatus := req.Status
 	req.Status = types.StatusAuthorizing
-	// Keep the transient failure reason on the row so list/detail UIs can
-	// explain why authorizing persists without joining audit or signers.
-	req.ErrorMessage = reason
+	// Clear the row error — transient sign failures are recorded in audit
+	// and returned to the immediate caller; persisting them here would leak
+	// stale messages into the next approval attempt after unlock.
+	req.ErrorMessage = ""
 	req.Signature = nil
 	req.SignedData = nil
 	req.ApprovedAt = nil

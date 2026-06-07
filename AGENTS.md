@@ -95,8 +95,9 @@ remote-signer/
 ## 常用命令
 
 ```bash
-make build-embed        # ⬅ 默认用这个！构建带 Web UI 的二进制（生产等效）
-make build              # 仅构建 daemon 二进制（无 Web UI，仅限开发调试用）
+make build              # ⬅ 默认：带 Web UI 的二进制（= build-embed）
+make build-embed        # 同 make build
+make build-cli          # 仅 Go 二进制（无 Web UI，后端快速迭代用）
 make test               # 纯单元测试（无 build tag，快速）
 make test-unit          # 同 make test
 make test-integration   # 单元 + 内部集成测试（pre-commit hook 等效）

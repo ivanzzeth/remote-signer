@@ -83,14 +83,22 @@ Run `./remote-signer doctor --url http://127.0.0.1:8548 --tls-skip-verify` to sa
 
 # Remote preset management (via daemon API)
 ./remote-signer preset remote-list
+./remote-signer preset remote-list --q stargate   # fuzzy search (API: GET /api/v1/presets?q=)
 ./remote-signer preset remote-get <preset-id>
+# Agent can apply presets (creates rules owner=agent, applied_to=self):
+./remote-signer preset apply <preset-id> \
+  --set max_input_amount=1000000000000000000 \
+  --url http://127.0.0.1:8548 \
+  --api-key-id agent --api-key-file ~/.remote-signer/apikeys/agent.key.priv
+
+# Admin may also apply (broader applied_to scope):
 ./remote-signer preset apply <preset-id> \
   --set chain_id=56 --set token_address=0x... \
-  --set max_approve_amount=0 --set allowed_spenders=0x... \
-  --api-key-id admin
+  --url http://127.0.0.1:8548 --api-key-id admin
+
 ./remote-signer preset validate <preset-id> \
   --set chain_id=56 --set token_address=0x... \
-  --api-key-id admin
+  --url http://127.0.0.1:8548 --api-key-id agent
 ```
 
 ## Remote Preset Apply Protocol (Least-Privilege)

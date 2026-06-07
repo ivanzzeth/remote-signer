@@ -178,10 +178,11 @@ func syncDynamicBudgetFromConfig(ctx context.Context, rule *types.Rule, tmpl *ty
 		return fmt.Errorf("list budgets for rule: %w", err)
 	}
 	for _, b := range existingList {
-		if !expectedUnits[b.Unit] && rulepkg.IsKnownUnitFamily(b.Unit, knownBaseNames) {
-			if delErr := budgetRepo.Delete(ctx, b.ID); delErr != nil {
-				return fmt.Errorf("delete stale budget %s (unit=%s): %w", b.ID, b.Unit, delErr)
-			}
+		if expectedUnits[b.Unit] || rulepkg.IsRuntimeDynamicBudgetUnit(b.Unit) {
+			continue
+		}
+		if delErr := budgetRepo.Delete(ctx, b.ID); delErr != nil {
+			return fmt.Errorf("delete stale budget %s (unit=%s): %w", b.ID, b.Unit, delErr)
 		}
 	}
 

@@ -28,3 +28,10 @@ func TestIsKnownUnitFamily(t *testing.T) {
 	assert.True(t, IsKnownUnitFamily("sign_count", known))
 	assert.False(t, IsKnownUnitFamily("56:0xabc:permit", known))
 }
+
+func TestIsRuntimeDynamicBudgetUnit(t *testing.T) {
+	assert.True(t, IsRuntimeDynamicBudgetUnit("137:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"))
+	assert.True(t, IsRuntimeDynamicBudgetUnit("56:0xabc:permit"))
+	assert.False(t, IsRuntimeDynamicBudgetUnit("native"))
+	assert.False(t, IsRuntimeDynamicBudgetUnit("old_unit"))
+}

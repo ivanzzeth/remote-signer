@@ -288,6 +288,9 @@ func Run(args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create JS rule evaluator: %w", err)
 	}
+	if err := evm.LoadTemplateVariableDefs(context.Background(), repos.templateRepo); err != nil {
+		log.Warn("failed to load template variable defaults for rule evaluation", "error", err)
+	}
 	ruleEngine.RegisterEvaluator(jsEval)
 	budgetChecker.SetJSEvaluator(jsEval)
 
@@ -399,6 +402,11 @@ func Run(args []string) error {
 				simRule.SetSimulationRepo(simRepo)
 			} else {
 				log.Warn("simulation preview disabled: repo init failed", "error", simRepoErr)
+			}
+			if ensurer, ok := repos.ruleRepo.(storage.SyntheticRuleEnsurer); ok {
+				simRule.SetSyntheticRuleEnsurer(ensurer)
+			} else {
+				log.Warn("simulation budget auto-create disabled: rule repo lacks synthetic rule support")
 			}
 			signService.SetSimulationRule(simRule)
 			if cfg.Chains.EVM.Simulation.BatchWindow > 0 {

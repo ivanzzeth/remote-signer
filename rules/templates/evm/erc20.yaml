@@ -7,8 +7,14 @@ name: ERC20 transfer/transferFrom limit
 variables:
   - name: token_address
     type: address
-    description: "ERC20 token contract address"
-    required: true
+    description: "ERC20 token contract address. Empty = any token (Agent composite preset)."
+    required: false
+    default: ""
+  - name: trusted_contracts
+    type: address_list
+    description: "Agent preset: fallback allowlist when allowed_spenders is empty."
+    required: false
+    default: ""
   - name: max_transfer_amount
     type: string
     description: "Budget cap: max amount per transfer/transferFrom, in token smallest unit (same as calldata uint256). E.g. USDC 6 decimals → 1000000 = 1 USDC. -1 = no cap, 0 = block all; empty in preset → -1."
@@ -26,12 +32,14 @@ variables:
     default: "24h"
   - name: allowed_recipients
     type: address_list
-    description: "Comma-separated addresses allowed as transfer(to) or transferFrom(..., to). REQUIRED: must explicitly list allowed recipient addresses."
-    required: true
+    description: "Comma-separated addresses allowed as transfer(to) or transferFrom(..., to). Empty = any recipient."
+    required: false
+    default: ""
   - name: allowed_spenders
     type: address_list
-    description: "Comma-separated addresses allowed as approve(spender). REQUIRED: must explicitly list allowed spender addresses."
-    required: true
+    description: "Comma-separated addresses allowed as approve(spender). Empty uses trusted_contracts."
+    required: false
+    default: ""
   - name: allowed_transfer_from
     type: address_list
     # SECURITY: When empty, any 'from' address is allowed in transferFrom. This is acceptable for the
@@ -49,10 +57,12 @@ test_variables:
   max_transfer_amount: "1000000000"
   max_approve_amount: "1000000000000000000"
   allowed_recipients: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
-  allowed_spenders: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+  allowed_spenders: ""
+  trusted_contracts: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
   allowed_transfer_from: ""
 rules:
   - id: "erc20-transfer-limit"
+    priority: 10000
     name: "ERC20 transfer/transferFrom limit"
     type: "evm_js"
     mode: "whitelist"
@@ -61,11 +71,17 @@ rules:
     config:
       sign_type_filter: "transaction"
       script: |
+        function requireTokenContract(ctx) {
+          var token = config.token_address;
+          if (!token) return ok();
+          if (!isAddress(token)) return fail('invalid token config');
+          if (!rs.addr.inList(ctx.tx.to, [token])) return fail('wrong contract');
+          return ok();
+        }
         function validate(input) {
           var ctx = rs.tx.require(input);
-          var token = config.token_address;
-          require(token && isAddress(token), 'invalid token config');
-          require(rs.addr.inList(ctx.tx.to, [token]), 'wrong contract');
+          var tokenCheck = requireTokenContract(ctx);
+          if (!tokenCheck.valid) return tokenCheck;
           var transferSel = selector('transfer(address,uint256)');
           var transferFromSel = selector('transferFrom(address,address,uint256)');
           if (eq(ctx.selector, transferSel)) return validateTransfer(ctx.payloadHex);
@@ -173,6 +189,7 @@ rules:
         expect_pass: false
         expect_reason: "only transfer, transferFrom allowed"
   - id: "erc20-approve-limit"
+    priority: 10000
     name: "ERC20 approve limit"
     type: "evm_js"
     mode: "whitelist"
@@ -181,11 +198,20 @@ rules:
     config:
       sign_type_filter: "transaction"
       script: |
+        function requireTokenContract(ctx) {
+          var token = config.token_address;
+          if (!token) return ok();
+          if (!isAddress(token)) return fail('invalid token config');
+          if (!rs.addr.inList(ctx.tx.to, [token])) return fail('wrong contract');
+          return ok();
+        }
+        function allowedSpenders() {
+          return config.allowed_spenders || config.trusted_contracts || '';
+        }
         function validate(input) {
           var ctx = rs.tx.require(input);
-          var token = config.token_address;
-          require(token && isAddress(token), 'invalid token config');
-          require(rs.addr.inList(ctx.tx.to, [token]), 'wrong contract');
+          var tokenCheck = requireTokenContract(ctx);
+          if (!tokenCheck.valid) return tokenCheck;
           var approveSel = selector('approve(address,uint256)');
           if (eq(ctx.selector, approveSel)) return validateApprove(ctx.payloadHex);
           revert('only approve allowed');
@@ -204,7 +230,7 @@ rules:
           require(dec && dec.length === 2, 'approve decode failed');
           var spender = dec[0]; var amount = dec[1];
           require(isAddress(spender), 'approve spender invalid');
-          rs.addr.requireInListIfNonEmpty(spender, config.allowed_spenders, 'approve spender not allowed');
+          rs.addr.requireInListIfNonEmpty(spender, allowedSpenders(), 'approve spender not allowed');
           rs.bigint.requireLte(amount, config.max_approve_amount, 'approve exceeds cap');
           return ok();
         }
@@ -248,3 +274,48 @@ rules:
             methodId: "0xa9059cbb"
         expect_pass: false
         expect_reason: "only approve allowed"
+      - name: "approve: reject spender not in trusted_contracts"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
+            to: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            value: "0x0"
+            data: "0x095ea7b3000000000000000000000000deaddeaddeaddeaddeaddeaddeaddeaddead0000000000000000000000000000000000000000000000000000000000000000"
+            methodId: "0x095ea7b3"
+        expect_pass: false
+        expect_reason: "approve spender not allowed"
+      - name: "agent mode: transfer blocked when max_transfer_amount is 0"
+        variables:
+          max_transfer_amount: "0"
+          token_address: ""
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
+            to: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            value: "0x0"
+            data: "0xa9059cbb0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc40000000000000000000000000000000000000000000000000000000000000000"
+            methodId: "0xa9059cbb"
+        expect_pass: false
+        expect_reason: "transfer exceeds cap"
+      - name: "agent mode: approve any token via trusted_contracts"
+        variables:
+          token_address: ""
+          allowed_spenders: ""
+          trusted_contracts: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+        input:
+          sign_type: "transaction"
+          chain_id: 56
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0x55d398326f99059fF775485246999027B3197955"
+            value: "0x0"
+            data: "0x095ea7b30000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc40000000000000000000000000000000000000000000000000000000000000001"
+            methodId: "0x095ea7b3"
+        expect_pass: true

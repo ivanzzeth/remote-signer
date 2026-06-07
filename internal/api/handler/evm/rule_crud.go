@@ -370,14 +370,19 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 	oldVariables := make([]byte, len(rule.Variables))
 	copy(oldVariables, rule.Variables)
 
-	// Variables: replace entire set with the given map
+	// Variables: merge patch into existing set (partial --set-var must not drop other keys)
 	if req.Variables != nil {
-		varsJSON, err := json.Marshal(req.Variables)
+		patchJSON, err := json.Marshal(req.Variables)
 		if err != nil {
 			h.writeError(w, "invalid variables: failed to marshal JSON", http.StatusBadRequest)
 			return
 		}
-		rule.Variables = varsJSON
+		merged, err := rulepkg.MergeVariablesJSON(rule.Variables, patchJSON)
+		if err != nil {
+			h.writeError(w, "invalid variables: failed to merge JSON", http.StatusBadRequest)
+			return
+		}
+		rule.Variables = merged
 	}
 
 	// Matrix: replace entire per-chain override table
@@ -476,6 +481,14 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 		clientIP, _ := r.Context().Value(middleware.ClientIPContextKey).(string)
 		h.auditLogger.LogRuleUpdated(r.Context(), apiKey.ID, clientIP, rule.ID, rule.Name, oldConfig, rule.Config)
 	}
+
+	// Active rule updates (e.g. agent self-service trusted_contracts) take
+	// effect immediately — re-evaluate authorizing requests so matching
+	// ones can auto-approve under the new policy.
+	if rule.Status == types.RuleStatusActive && h.onRuleActivated != nil {
+		go h.onRuleActivated("rule-updated:" + ruleID)
+	}
+
 	h.writeJSON(w, h.toRuleResponse(rule), http.StatusOK)
 }
 
@@ -684,12 +697,17 @@ func (h *RuleHandler) proposeRule(w http.ResponseWriter, r *http.Request, target
 		proposal.Config = configJSON
 	}
 	if req.Variables != nil {
-		varsJSON, err := json.Marshal(req.Variables)
+		patchJSON, err := json.Marshal(req.Variables)
 		if err != nil {
 			h.writeError(w, "failed to marshal variables", http.StatusInternalServerError)
 			return
 		}
-		proposal.Variables = varsJSON
+		merged, err := rulepkg.MergeVariablesJSON(proposal.Variables, patchJSON)
+		if err != nil {
+			h.writeError(w, "failed to merge variables", http.StatusInternalServerError)
+			return
+		}
+		proposal.Variables = merged
 	}
 	if req.Matrix != nil {
 		matrixJSON, err := json.Marshal(req.Matrix)

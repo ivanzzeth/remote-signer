@@ -153,4 +153,16 @@ export class EvmBudgetService {
       null,
     );
   }
+
+  /**
+   * Delete all budget rows for a rule_id, and remove orphan sim:0x...
+   * placeholder rules when budgets are already gone. Admin only.
+   */
+  async deleteByRuleID(ruleID: string): Promise<void> {
+    await this.transport.request<void>(
+      "DELETE",
+      `/api/v1/evm/budgets/by-rule/${encodeURIComponent(ruleID)}`,
+      null,
+    );
+  }
 }

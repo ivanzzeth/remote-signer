@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from "react";
 
 export type ToastTone = "success" | "error" | "info";
@@ -27,6 +28,17 @@ export interface ConfirmOptions {
   tone?: "default" | "danger";
 }
 
+export interface PromptOptions {
+  title: string;
+  message?: string;
+  placeholder?: string;
+  defaultValue?: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  tone?: "default" | "danger";
+  multiline?: boolean;
+}
+
 interface ToastItem extends ToastInput {
   id: string;
 }
@@ -35,9 +47,14 @@ interface PendingConfirm extends ConfirmOptions {
   resolve: (accepted: boolean) => void;
 }
 
+interface PendingPrompt extends PromptOptions {
+  resolve: (value: string | null) => void;
+}
+
 interface FeedbackContextValue {
   pushToast: (input: ToastInput) => void;
   confirm: (options: ConfirmOptions) => Promise<boolean>;
+  prompt: (options: PromptOptions) => Promise<string | null>;
 }
 
 const FeedbackContext = createContext<FeedbackContextValue | null>(null);
@@ -53,8 +70,11 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(
     null,
   );
+  const [pendingPrompt, setPendingPrompt] = useState<PendingPrompt | null>(null);
   const titleId = useId();
   const descId = useId();
+  const promptTitleId = useId();
+  const promptDescId = useId();
 
   const pushToast = useCallback((input: ToastInput) => {
     const id = crypto.randomUUID();
@@ -71,9 +91,22 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const prompt = useCallback((options: PromptOptions) => {
+    return new Promise<string | null>((resolve) => {
+      setPendingPrompt({ ...options, resolve });
+    });
+  }, []);
+
   const closeConfirm = useCallback((accepted: boolean) => {
     setPendingConfirm((current) => {
       current?.resolve(accepted);
+      return null;
+    });
+  }, []);
+
+  const closePrompt = useCallback((value: string | null) => {
+    setPendingPrompt((current) => {
+      current?.resolve(value);
       return null;
     });
   }, []);
@@ -87,9 +120,18 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [pendingConfirm, closeConfirm]);
 
+  useEffect(() => {
+    if (!pendingPrompt) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closePrompt(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [pendingPrompt, closePrompt]);
+
   const value = useMemo(
-    () => ({ pushToast, confirm }),
-    [pushToast, confirm],
+    () => ({ pushToast, confirm, prompt }),
+    [pushToast, confirm, prompt],
   );
 
   return (
@@ -103,6 +145,15 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
           descId={descId}
           onCancel={() => closeConfirm(false)}
           onConfirm={() => closeConfirm(true)}
+        />
+      )}
+      {pendingPrompt && (
+        <PromptDialog
+          {...pendingPrompt}
+          titleId={promptTitleId}
+          descId={promptDescId}
+          onCancel={() => closePrompt(null)}
+          onConfirm={(value) => closePrompt(value)}
         />
       )}
     </FeedbackContext.Provider>
@@ -228,10 +279,124 @@ function ConfirmDialog({
   );
 }
 
+function PromptDialog({
+  title,
+  message,
+  placeholder,
+  defaultValue = "",
+  confirmLabel = "Confirm",
+  cancelLabel = "Cancel",
+  tone = "default",
+  multiline = false,
+  titleId,
+  descId,
+  onCancel,
+  onConfirm,
+}: PendingPrompt & {
+  titleId: string;
+  descId: string;
+  onCancel: () => void;
+  onConfirm: (value: string) => void;
+}) {
+  const [value, setValue] = useState(defaultValue);
+  const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  const confirmClass =
+    tone === "danger"
+      ? "bg-red-600 hover:bg-red-700"
+      : "bg-accent-500 hover:bg-accent-600";
+
+  const inputClass =
+    "w-full rounded-md border border-ink-300 px-2 py-1.5 text-sm text-ink-900 focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500";
+
+  return (
+    <div
+      className="fixed inset-0 z-[110] flex items-center justify-center bg-black/30 p-4"
+      onClick={onCancel}
+      data-testid="prompt-dialog-backdrop"
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={message ? descId : undefined}
+        data-testid="prompt-dialog"
+        className="w-full max-w-md rounded-lg border border-ink-200 bg-white p-5 shadow-lg"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 id={titleId} className="text-sm font-semibold text-ink-900">
+          {title}
+        </h2>
+        {message && (
+          <p
+            id={descId}
+            className="mt-2 whitespace-pre-wrap text-sm text-ink-600"
+          >
+            {message}
+          </p>
+        )}
+        <div className="mt-4">
+          {multiline ? (
+            <textarea
+              ref={inputRef as RefObject<HTMLTextAreaElement>}
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              placeholder={placeholder}
+              rows={3}
+              data-testid="prompt-dialog-input"
+              className={inputClass}
+            />
+          ) : (
+            <input
+              ref={inputRef as RefObject<HTMLInputElement>}
+              type="text"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              placeholder={placeholder}
+              data-testid="prompt-dialog-input"
+              className={inputClass}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  onConfirm(value);
+                }
+              }}
+            />
+          )}
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            data-testid="prompt-dialog-cancel"
+            onClick={onCancel}
+            className="rounded-md border border-ink-200 px-3 py-1.5 text-xs text-ink-700 hover:bg-ink-100"
+          >
+            {cancelLabel}
+          </button>
+          <button
+            type="button"
+            data-testid="prompt-dialog-confirm"
+            onClick={() => onConfirm(value)}
+            className={`rounded-md px-3 py-1.5 text-xs font-medium text-white ${confirmClass}`}
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function useFeedbackContext(): FeedbackContextValue {
   const ctx = useContext(FeedbackContext);
   if (!ctx) {
-    throw new Error("useToast/useConfirm must be used within FeedbackProvider");
+    throw new Error(
+      "useToast/useConfirm/usePrompt must be used within FeedbackProvider",
+    );
   }
   return ctx;
 }
@@ -244,4 +409,9 @@ export function useToast() {
 export function useConfirm() {
   const { confirm } = useFeedbackContext();
   return confirm;
+}
+
+export function usePrompt() {
+  const { prompt } = useFeedbackContext();
+  return prompt;
 }

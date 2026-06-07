@@ -122,8 +122,8 @@ jobs:
       - name: Build daemon binary with embedded UI
         # Playwright drives the real React app, so this job needs the
         # build-embed variant (vite first, then `go build -tags embed_web`).
-        # Backend-only jobs can stay on `make build` to skip vite.
-        run: make build-embed
+        # Backend-only jobs can use `make build-cli` to skip vite.
+        run: make build
 
       - name: Install Playwright browsers
         run: cd web && npx playwright install --with-deps chromium

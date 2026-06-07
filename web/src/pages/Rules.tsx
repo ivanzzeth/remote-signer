@@ -21,7 +21,7 @@ import {
   Loading,
   PageHeader,
 } from "../components/ui";
-import { useConfirm } from "../components/feedback";
+import { useConfirm, usePrompt } from "../components/feedback";
 import { getClient, getCredentials } from "../lib/auth";
 import { useShouldProposeRuleChanges } from "../lib/rbac";
 import { useApi } from "../lib/useApi";
@@ -87,6 +87,7 @@ const CONFIG_TEMPLATES: Record<RuleType, Record<string, unknown>> = {
 export function Rules() {
   const shouldPropose = useShouldProposeRuleChanges();
   const confirm = useConfirm();
+  const prompt = usePrompt();
   const [searchParams] = useSearchParams();
   const [filterType, setFilterType] = useState<RuleType | "">("");
   const [filterMode, setFilterMode] = useState<RuleMode | "">("");
@@ -168,8 +169,16 @@ export function Rules() {
   }
 
   async function reject(id: string) {
-    const reason = prompt("Reject this rule — reason?");
-    if (reason === null) return; // user cancelled
+    const reason = await prompt({
+      title: "Reject this rule",
+      message: "Optionally provide a reason for rejection.",
+      placeholder: "Reason",
+      confirmLabel: "Reject",
+      cancelLabel: "Cancel",
+      tone: "danger",
+      multiline: true,
+    });
+    if (reason === null) return;
     const client = getClient();
     if (!client) return;
     setBusy(id);
@@ -265,10 +274,13 @@ export function Rules() {
   }
 
   async function destroy(id: string, name: string) {
+    const isSyntheticSim = id.startsWith("sim:0x");
     const ok = await confirm({
-      title: "Delete rule",
-      message: `Delete rule "${name}"? This cannot be undone.`,
-      confirmLabel: "Delete",
+      title: isSyntheticSim ? "Remove simulation placeholder" : "Delete rule",
+      message: isSyntheticSim
+        ? `Remove orphaned simulation budget placeholder for ${name}? Budget rows were already deleted; this clears the internal rule row.`
+        : `Delete rule "${name}"? This cannot be undone.`,
+      confirmLabel: isSyntheticSim ? "Remove" : "Delete",
       tone: "danger",
     });
     if (!ok) return;
@@ -277,6 +289,16 @@ export function Rules() {
     setBusy(id);
     setMutationError(null);
     try {
+      if (isSyntheticSim) {
+        try {
+          await client.evm.budgets.deleteByRuleID(id);
+        } catch (e) {
+          // Budgets may already be gone; fall through to rule delete.
+          if (!(e instanceof APIError) || e.statusCode !== 404) {
+            throw e;
+          }
+        }
+      }
       await client.evm.rules.delete(id);
       reload();
     } catch (e) {

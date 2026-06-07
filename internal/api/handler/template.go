@@ -429,6 +429,7 @@ func (h *TemplateHandler) validateTemplate(w http.ResponseWriter, r *http.Reques
 type evmhandlerJSRuleTestCase struct {
 	Name       string                 `json:"name"`
 	Input      map[string]interface{} `json:"input"`
+	Variables  map[string]string      `json:"variables,omitempty"`
 	ExpectPass bool                   `json:"expect_pass"`
 }
 
@@ -454,7 +455,17 @@ func runJSTestCase(eval *evm.JSRuleEvaluator, script string, cfgMap map[string]i
 			Reason string
 		}{Name: tc.Name, Passed: false, Reason: fmt.Sprintf("build input: %v", err)}
 	}
-	result := eval.ValidateWithInput(script, ruleInput, cfgMap)
+	effectiveCfg := cfgMap
+	if len(tc.Variables) > 0 {
+		effectiveCfg = make(map[string]interface{}, len(cfgMap)+len(tc.Variables))
+		for k, v := range cfgMap {
+			effectiveCfg[k] = v
+		}
+		for k, v := range tc.Variables {
+			effectiveCfg[k] = v
+		}
+	}
+	result := eval.ValidateWithInput(script, ruleInput, effectiveCfg)
 	actualPass := result.Valid
 	if actualPass != tc.ExpectPass {
 		if tc.ExpectPass {

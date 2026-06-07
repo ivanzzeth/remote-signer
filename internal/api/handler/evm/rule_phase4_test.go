@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/lib/pq"
 	"github.com/stretchr/testify/assert"
@@ -570,6 +571,85 @@ func TestPhase4_RuleActivatedCallback_OnApprove(t *testing.T) {
 	case caller := <-calls:
 		assert.Contains(t, caller, "rule-approved:")
 	default:
+	}
+}
+
+func TestPhase4_RuleActivatedCallback_OnActiveRuleUpdate(t *testing.T) {
+	repo := newMockRuleRepo()
+	apiKeyRepo := newPhase4MockAPIKeyRepo()
+	apiKeyRepo.keys["agent-1"] = &types.APIKey{ID: "agent-1", Role: types.RoleAgent}
+
+	rule := newAPIRule()
+	rule.Owner = "agent-1"
+	rule.Status = types.RuleStatusActive
+	rule.AppliedTo = pq.StringArray{"self"}
+	rule.Variables = json.RawMessage(`{"trusted_contracts":"0x1111"}`)
+	repo.addRule(rule)
+
+	calls := make(chan string, 1)
+	h, err := NewRuleHandler(repo, slog.Default(),
+		WithAPIKeyRepo(apiKeyRepo),
+		WithRuleActivatedCallback(func(caller string) {
+			calls <- caller
+		}),
+	)
+	require.NoError(t, err)
+
+	body := `{"variables":{"trusted_contracts":"0x1111,0x2222"}}`
+	w := phase4Do(h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID), body, phase4AgentCtx("agent-1"))
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	select {
+	case caller := <-calls:
+		assert.Contains(t, caller, "rule-updated:")
+		assert.Contains(t, caller, string(rule.ID))
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("expected onRuleActivated callback after active rule update")
+	}
+}
+
+func TestPhase4_RuleActivatedCallback_OnApproveProposal(t *testing.T) {
+	repo := newMockRuleRepo()
+	target := newAPIRule()
+	target.Status = types.RuleStatusActive
+	target.Owner = "admin-1"
+	target.Variables = json.RawMessage(`{"trusted_contracts":"0x1111"}`)
+	repo.addRule(target)
+
+	proposalID := types.RuleID("rule_proposal-00000000-0000-0000-0000-000000000099")
+	pf := target.ID
+	proposal := &types.Rule{
+		ID:          proposalID,
+		Name:        target.Name,
+		Type:        types.RuleTypeEVMAddressList,
+		Mode:        types.RuleModeWhitelist,
+		Source:      types.RuleSourceAPI,
+		Owner:       "agent-1",
+		Variables:   json.RawMessage(`{"trusted_contracts":"0x1111,0xStargate"}`),
+		Status:      types.RuleStatusPendingApproval,
+		ProposalFor: &pf,
+		Enabled:     true,
+		CreatedAt:   target.CreatedAt,
+		UpdatedAt:   target.UpdatedAt,
+	}
+	repo.addRule(proposal)
+
+	calls := make(chan string, 1)
+	h, err := NewRuleHandler(repo, slog.Default(),
+		WithRuleActivatedCallback(func(caller string) {
+			calls <- caller
+		}),
+	)
+	require.NoError(t, err)
+
+	w := phase4Do(h, http.MethodPost, "/api/v1/evm/rules/"+string(proposalID)+"/approve", "", phase4AdminCtx("admin-1"))
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	select {
+	case caller := <-calls:
+		assert.Contains(t, caller, "proposal-approved:")
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("expected onRuleActivated callback after proposal approval")
 	}
 }
 

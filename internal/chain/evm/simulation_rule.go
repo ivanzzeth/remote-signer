@@ -106,6 +106,7 @@ type DecimalsAnomalyAlerter interface {
 type SimulationBudgetRule struct {
 	simulator         simulation.Simulator
 	budgetRepo        storage.BudgetRepository
+	ruleEnsurer       storage.SyntheticRuleEnsurer
 	budgetPolicy      SimBudgetPolicy
 	decimalsQuerier   rule.DecimalsQuerier
 	signerLister      ManagedSignerLister
@@ -168,6 +169,12 @@ func (r *SimulationBudgetRule) SetDecimalsAlerter(a DecimalsAnomalyAlerter) {
 // anything, which is what older deployments + the test stubs want.
 func (r *SimulationBudgetRule) SetSimulationRepo(repo storage.RequestSimulationRepository) {
 	r.simulationRepo = repo
+}
+
+// SetSyntheticRuleEnsurer wires the rules repository used to create
+// disabled sim:<signer> placeholder rows before auto-creating budgets.
+func (r *SimulationBudgetRule) SetSyntheticRuleEnsurer(ensurer storage.SyntheticRuleEnsurer) {
+	r.ruleEnsurer = ensurer
 }
 
 // recordOutcome upserts the latest evaluation snapshot keyed by
@@ -682,6 +689,12 @@ func (r *SimulationBudgetRule) autoCreateBudget(
 	// Convert human-readable to raw (e.g. "100" with 6 decimals → "100000000")
 	maxTotal := humanToRaw(maxTotalHuman, decimals)
 	maxPerTx := humanToRaw(maxPerTxHuman, decimals)
+
+	if r.ruleEnsurer != nil {
+		if err := r.ruleEnsurer.EnsureSyntheticBudgetRule(ctx, signerAddress); err != nil {
+			return nil, fmt.Errorf("failed to ensure synthetic simulation rule: %w", err)
+		}
+	}
 
 	newBudget := &types.RuleBudget{
 		ID:       types.BudgetID(syntheticRuleID, unit),

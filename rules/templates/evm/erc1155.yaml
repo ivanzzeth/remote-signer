@@ -7,12 +7,24 @@ name: ERC1155 transfer/approve with allowlists
 variables:
   - name: token_address
     type: address
-    description: "ERC1155 multi-token contract address"
-    required: true
+    description: "ERC1155 multi-token contract address. Empty = any collection (Agent composite preset)."
+    required: false
+    default: ""
+  - name: trusted_contracts
+    type: address_list
+    description: "Agent preset: fallback for allowed_operators when empty."
+    required: false
+    default: ""
+  - name: auth_only
+    type: string
+    description: "When true, only setApprovalForAll(true) is allowed (Agent preset)."
+    required: false
+    default: "false"
   - name: allowed_recipients
     type: address_list
-    description: "Comma-separated addresses allowed as transfer 'to'. REQUIRED: must explicitly list allowed recipient addresses."
-    required: true
+    description: "Comma-separated addresses allowed as transfer 'to'. Empty = any recipient."
+    required: false
+    default: ""
   - name: allowed_transfer_from
     type: address_list
     # SECURITY: When empty, any 'from' address is allowed in safeTransferFrom/safeBatchTransferFrom.
@@ -23,16 +35,20 @@ variables:
     default: ""
   - name: allowed_operators
     type: address_list
-    description: "Comma-separated addresses allowed as setApprovalForAll(operator). REQUIRED: must explicitly list allowed operator addresses."
-    required: true
+    description: "Comma-separated addresses allowed as setApprovalForAll(operator). Empty uses trusted_contracts."
+    required: false
+    default: ""
 test_variables:
   chain_id: "1"
   token_address: "0x495f947276749Ce646f68AC8c248420045cb7b5e"
   allowed_recipients: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
-  allowed_operators: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+  allowed_operators: ""
+  trusted_contracts: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
   allowed_transfer_from: ""
+  auth_only: "false"
 rules:
   - id: "erc1155-transfer-approve-allowlists"
+    priority: 10000
     name: "ERC1155 transfer/approve with allowlists"
     type: "evm_js"
     mode: "whitelist"
@@ -41,14 +57,30 @@ rules:
     config:
       sign_type_filter: "transaction"
       script: |
+        function isAuthOnly() {
+          return config.auth_only === 'true' || config.auth_only === true;
+        }
+        function requireTokenContract(ctx) {
+          var token = config.token_address;
+          if (!token) return ok();
+          if (!isAddress(token)) return fail('invalid token config');
+          if (!rs.addr.inList(ctx.tx.to, [token])) return fail('wrong contract');
+          return ok();
+        }
+        function trustedOperators() {
+          return config.allowed_operators || config.trusted_contracts || '';
+        }
         function validate(input) {
           var ctx = rs.tx.require(input);
-          var token = config.token_address;
-          require(token && isAddress(token), 'invalid token config');
-          require(rs.addr.inList(ctx.tx.to, [token]), 'wrong contract');
+          var tokenCheck = requireTokenContract(ctx);
+          if (!tokenCheck.valid) return tokenCheck;
           var safeTransferFromSel = selector('safeTransferFrom(address,address,uint256,uint256,bytes)');
           var safeBatchTransferFromSel = selector('safeBatchTransferFrom(address,address,uint256[],uint256[],bytes)');
           var setApprovalForAllSel = selector('setApprovalForAll(address,bool)');
+          if (isAuthOnly()) {
+            if (eq(ctx.selector, setApprovalForAllSel)) return validateSetApprovalForAll(ctx.payloadHex);
+            revert('auth_only: only setApprovalForAll allowed');
+          }
           if (eq(ctx.selector, safeTransferFromSel)) return validateSafeTransferFrom(ctx.payloadHex);
           if (eq(ctx.selector, safeBatchTransferFromSel)) return validateSafeBatchTransferFrom(ctx.payloadHex);
           if (eq(ctx.selector, setApprovalForAllSel)) return validateSetApprovalForAll(ctx.payloadHex);
@@ -79,7 +111,7 @@ rules:
           require(dec && dec.length === 2, 'setApprovalForAll decode failed');
           var operator = dec[0];
           require(isAddress(operator), 'setApprovalForAll operator invalid');
-          rs.addr.requireInListIfNonEmpty(operator, config.allowed_operators, 'setApprovalForAll operator not allowed');
+          rs.addr.requireInListIfNonEmpty(operator, trustedOperators(), 'setApprovalForAll operator not allowed');
           return ok();
         }
     test_cases:
@@ -153,3 +185,34 @@ rules:
             data: "0x06fdde03"
         expect_pass: false
         expect_reason: "only safeTransferFrom, safeBatchTransferFrom, setApprovalForAll allowed"
+      - name: "auth_only: reject safeTransferFrom"
+        variables:
+          auth_only: "true"
+          token_address: ""
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0x495f947276749Ce646f68AC8c248420045cb7b5e"
+            value: "0"
+            data: "0xf242432a000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb922660000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc40000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000"
+        expect_pass: false
+        expect_reason: "auth_only: only setApprovalForAll allowed"
+      - name: "auth_only: setApprovalForAll via trusted_contracts on any collection"
+        variables:
+          auth_only: "true"
+          token_address: ""
+          allowed_operators: ""
+          trusted_contracts: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          transaction:
+            from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+            to: "0x495f947276749Ce646f68AC8c248420045cb7b5e"
+            value: "0"
+            data: "0xa22cb4650000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc40000000000000000000000000000000000000000000000000000000000000001"
+        expect_pass: true
