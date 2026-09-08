@@ -106,6 +106,60 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+## Signer traits
+
+Signing is behind traits (`src/signer.rs`) mirroring the `ethsig` interfaces the
+Go SDK implements, so the backend is swappable: `RemoteSigner` talks to the
+remote-signer service, but a local keystore, an HSM/KMS client or a test double
+satisfies the same traits without the calling code changing.
+
+| Trait | Signs |
+|---|---|
+| `AddressGetter` | — (exposes the address) |
+| `HashSigner` | 32 pre-hashed bytes, no prefix |
+| `RawMessageSigner` | raw bytes, no prefix |
+| `Eip191Signer` | EIP-191 message |
+| `PersonalSigner` | `personal_sign` (EIP-191 `0x45`) |
+| `TypedDataSigner` | EIP-712 typed data |
+| `TransactionSigner` | transaction → encoded signed tx bytes |
+
+Async counterparts (`AsyncTransactionSigner`, …) come with the `async` feature.
+All are object-safe, so the backend can be chosen at runtime:
+
+```rust
+use remote_signer_client::evm::Transaction;
+use remote_signer_client::signer::{AsyncRemoteSigner, AsyncTransactionSigner};
+
+let signer: Box<dyn AsyncTransactionSigner> = Box::new(AsyncRemoteSigner::new(
+    client.evm.sign.clone(),
+    "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+    "56",
+));
+
+let tx = Transaction::eip1559("0", 210_000, "1000000000", "5000000000")
+    .to("0x...")
+    .data("0x...")
+    .nonce(41);
+
+let signed_tx_bytes = signer.sign_transaction(&tx).await?;
+```
+
+`AsyncRemoteSigner` submits without waiting for approval, so a rule requiring a
+human surfaces immediately instead of blocking (see below).
+
+### Typed payloads
+
+`SignRequest::payload` is a raw `serde_json::Value`. `evm::Transaction` and the
+`*Payload` types build the exact JSON the server expects, so callers no longer
+hand-assemble it.
+
+**Nonce:** leaving `nonce` unset makes the *server* fetch it with a single
+`eth_getTransactionCount`. That is fine for interactive wallet use and unsafe
+for concurrent automated signing on one address — two in-flight requests can be
+handed the same nonce. Automated callers should assign nonces themselves and
+always call `.nonce(n)`; `Transaction::has_explicit_nonce()` is there to assert
+on.
+
 ## Pending approvals
 
 `execute()` waits for a request that lands in `pending`/`authorizing` to be
@@ -121,12 +175,14 @@ immediately with the request id. In an automated flow a request reaching
 ```
 src/
   client.rs              Client / AsyncClient
+  signer.rs              signer traits + RemoteSigner / AsyncRemoteSigner
   transport/
     common.rs            request signing, status handling, TLS setup (shared)
     transport.rs         blocking transport
     async_transport.rs   non-blocking transport (feature = "async")
   evm/
     paths.rs             endpoint paths and query strings (shared)
+    payloads.rs          typed sign payloads (Transaction, HashPayload, ...)
     sign.rs              SignService / AsyncSignService + approval state machine
     ...                  one file per service, blocking and async side by side
 ```
