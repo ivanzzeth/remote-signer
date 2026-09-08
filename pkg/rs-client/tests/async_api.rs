@@ -335,3 +335,93 @@ async fn http_error_codes_map_to_typed_errors() {
         assert!(matched, "status {code} produced unexpected error: {err:?}");
     }
 }
+
+#[tokio::test]
+async fn async_remote_signer_signs_a_transaction() {
+    use remote_signer_client::evm::Transaction;
+    use remote_signer_client::signer::{AddressGetter, AsyncRemoteSigner, AsyncTransactionSigner};
+
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/api/v1/evm/sign"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "request_id": "req-1",
+            "status": STATUS_COMPLETED,
+            "signed_data": "0x0a0b0c",
+        })))
+        .mount(&server)
+        .await;
+
+    let client = AsyncClient::new(common::config(&server.uri())).expect("client");
+    let signer = AsyncRemoteSigner::new(
+        client.evm.sign.clone(),
+        "0x1111111111111111111111111111111111111111",
+        "56",
+    );
+
+    assert_eq!(signer.address(), "0x1111111111111111111111111111111111111111");
+
+    let tx = Transaction::eip1559("0", 21000, "1", "2")
+        .to("0x2222222222222222222222222222222222222222")
+        .nonce(41);
+
+    let raw = signer.sign_transaction(&tx).await.expect("sign");
+    assert_eq!(raw, vec![0x0a, 0x0b, 0x0c]);
+}
+
+#[tokio::test]
+async fn async_remote_signer_does_not_wait_for_approval() {
+    use remote_signer_client::evm::Transaction;
+    use remote_signer_client::signer::{AsyncRemoteSigner, AsyncTransactionSigner};
+
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/api/v1/evm/sign"))
+        .respond_with(
+            ResponseTemplate::new(202).set_body_json(common::sign_response(STATUS_PENDING)),
+        )
+        .mount(&server)
+        .await;
+
+    // No poll endpoint mounted — reaching it would 404 and fail the test.
+    let client = AsyncClient::new(common::config(&server.uri())).expect("client");
+    let signer = AsyncRemoteSigner::new(client.evm.sign.clone(), "0xabc", "56");
+
+    let err = signer
+        .sign_transaction(&Transaction::legacy("0", 21000, "1").nonce(1))
+        .await
+        .expect_err("must not wait for a human");
+
+    assert!(matches!(err, Error::Sign(e) if e.status == STATUS_PENDING));
+}
+
+#[tokio::test]
+async fn async_signer_is_usable_behind_a_trait_object() {
+    use remote_signer_client::evm::Transaction;
+    use remote_signer_client::signer::{AsyncRemoteSigner, AsyncTransactionSigner};
+
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/api/v1/evm/sign"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "request_id": "req-1",
+            "status": STATUS_COMPLETED,
+            "signed_data": "AQID",
+        })))
+        .mount(&server)
+        .await;
+
+    let client = AsyncClient::new(common::config(&server.uri())).expect("client");
+    let signer: Box<dyn AsyncTransactionSigner> =
+        Box::new(AsyncRemoteSigner::new(client.evm.sign.clone(), "0xabc", "56"));
+
+    // base64 signed_data decodes the same as hex would.
+    let raw = signer
+        .sign_transaction(&Transaction::legacy("0", 21000, "1").nonce(1))
+        .await
+        .expect("sign");
+    assert_eq!(raw, vec![1, 2, 3]);
+}

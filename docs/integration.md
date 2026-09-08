@@ -328,6 +328,40 @@ approved by a human. Callers on a latency budget should use
 request id. A request reaching `pending` in an automated flow usually means a
 rule is missing rather than that a human is about to approve it.
 
+### Signer Traits
+
+Signing sits behind object-safe traits (`signer::TransactionSigner`,
+`signer::PersonalSigner`, …) mirroring the `ethsig` interfaces the Go SDK
+implements. `RemoteSigner` / `AsyncRemoteSigner` are the remote-signer-backed
+implementations; a local keystore, HSM/KMS client or test double satisfies the
+same traits, so the backend is swappable at runtime.
+
+```rust
+use remote_signer_client::evm::Transaction;
+use remote_signer_client::signer::{AsyncRemoteSigner, AsyncTransactionSigner};
+
+let signer: Box<dyn AsyncTransactionSigner> = Box::new(AsyncRemoteSigner::new(
+    client.evm.sign.clone(),
+    "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+    "56",
+));
+
+let tx = Transaction::eip1559("0", 210_000, "1000000000", "5000000000")
+    .to("0x...")
+    .data("0x...")
+    .nonce(41);
+
+let signed_tx_bytes = signer.sign_transaction(&tx).await?;
+```
+
+`evm::Transaction` and the `*Payload` types produce the exact JSON the server
+expects, replacing hand-built `serde_json::Value` payloads.
+
+**Nonce:** an unset `nonce` makes the server fetch it with a single
+`eth_getTransactionCount` — safe for interactive wallets, unsafe for concurrent
+automated signing on one address. Automated callers should assign nonces
+themselves and always set it.
+
 ### Authentication
 
 Requests are signed with Ed25519. The message format matches the server middleware:

@@ -26,6 +26,7 @@ pub mod acls;
 pub mod apikeys;
 pub mod audit;
 pub mod evm;
+pub mod signer;
 pub mod presets;
 pub mod templates;
 
