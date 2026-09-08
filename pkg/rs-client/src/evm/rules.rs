@@ -1,9 +1,21 @@
 use reqwest::Method;
 
 use crate::error::Error;
+use crate::evm::paths;
 use crate::transport::transport::Transport;
 
-use super::{CreateRuleRequest, ListRulesFilter, ListRulesResponse, ProposeRuleRequest, Rule, RuleBudget, UpdateRuleRequest};
+use super::{
+    CreateRuleRequest, ListRulesFilter, ListRulesResponse, ProposeRuleRequest, Rule, RuleBudget,
+    UpdateRuleRequest,
+};
+
+fn toggle_body(enabled: bool) -> serde_json::Value {
+    serde_json::json!({ "enabled": enabled })
+}
+
+fn reject_body(reason: &str) -> serde_json::Value {
+    serde_json::json!({ "reason": reason })
+}
 
 #[derive(Clone)]
 pub struct RuleService {
@@ -16,101 +28,218 @@ impl RuleService {
     }
 
     pub fn list(&self, filter: Option<&ListRulesFilter>) -> Result<ListRulesResponse, Error> {
-        let mut path = String::from("/api/v1/evm/rules");
-        let mut params = vec![];
-        if let Some(f) = filter {
-            if let Some(v) = &f.chain_type {
-                params.push(format!("chain_type={}", urlencoding::encode(v)));
-            }
-            if let Some(v) = &f.signer_address {
-                params.push(format!("signer_address={}", urlencoding::encode(v)));
-            }
-            if let Some(v) = &f.api_key_id {
-                params.push(format!("api_key_id={}", urlencoding::encode(v)));
-            }
-            if let Some(v) = &f.rule_type {
-                params.push(format!("type={}", urlencoding::encode(v)));
-            }
-            if let Some(v) = &f.mode {
-                params.push(format!("mode={}", urlencoding::encode(v)));
-            }
-            if let Some(v) = f.enabled {
-                params.push(format!("enabled={}", v));
-            }
-            if let Some(v) = f.limit {
-                params.push(format!("limit={}", v));
-            }
-            if let Some(v) = f.offset {
-                params.push(format!("offset={}", v));
-            }
-        }
-        if !params.is_empty() {
-            path.push('?');
-            path.push_str(&params.join("&"));
-        }
-
-        self.transport
-            .request_json(Method::GET, &path, Option::<&()>::None, Some(&[200]))
+        self.transport.request_json(
+            Method::GET,
+            &paths::rules_list(filter),
+            Option::<&()>::None,
+            Some(&[200]),
+        )
     }
 
     pub fn get(&self, rule_id: &str) -> Result<Rule, Error> {
-        let path = format!("/api/v1/evm/rules/{}", urlencoding::encode(rule_id));
-        self.transport
-            .request_json(Method::GET, &path, Option::<&()>::None, Some(&[200]))
+        self.transport.request_json(
+            Method::GET,
+            &paths::rule(rule_id),
+            Option::<&()>::None,
+            Some(&[200]),
+        )
     }
 
     pub fn create(&self, req: &CreateRuleRequest) -> Result<Rule, Error> {
         self.transport
-            .request_json(Method::POST, "/api/v1/evm/rules", Some(req), Some(&[200, 201]))
+            .request_json(Method::POST, paths::RULES, Some(req), Some(&[200, 201]))
     }
 
     pub fn update(&self, rule_id: &str, req: &UpdateRuleRequest) -> Result<Rule, Error> {
-        let path = format!("/api/v1/evm/rules/{}", urlencoding::encode(rule_id));
         self.transport
-            .request_json(Method::PATCH, &path, Some(req), Some(&[200]))
+            .request_json(Method::PATCH, &paths::rule(rule_id), Some(req), Some(&[200]))
     }
 
     pub fn delete(&self, rule_id: &str) -> Result<(), Error> {
-        let path = format!("/api/v1/evm/rules/{}", urlencoding::encode(rule_id));
-        let _ = self
-            .transport
-            .request_raw(Method::DELETE, &path, Option::<&()>::None, Some(&[200, 204]))?;
+        self.transport.request_raw(
+            Method::DELETE,
+            &paths::rule(rule_id),
+            Option::<&()>::None,
+            Some(&[200, 204]),
+        )?;
         Ok(())
     }
 
     pub fn toggle(&self, rule_id: &str, enabled: bool) -> Result<Rule, Error> {
-        let path = format!("/api/v1/evm/rules/{}", urlencoding::encode(rule_id));
-        let body = serde_json::json!({"enabled": enabled});
-        self.transport
-            .request_json(Method::PATCH, &path, Some(&body), Some(&[200]))
+        self.transport.request_json(
+            Method::PATCH,
+            &paths::rule(rule_id),
+            Some(&toggle_body(enabled)),
+            Some(&[200]),
+        )
     }
 
     pub fn list_budgets(&self, rule_id: &str) -> Result<Vec<RuleBudget>, Error> {
-        let path = format!("/api/v1/evm/rules/{}/budgets", urlencoding::encode(rule_id));
-        self.transport
-            .request_json(Method::GET, &path, Option::<&()>::None, Some(&[200]))
+        self.transport.request_json(
+            Method::GET,
+            &paths::rule_budgets(rule_id),
+            Option::<&()>::None,
+            Some(&[200]),
+        )
     }
 
     pub fn approve_rule(&self, rule_id: &str) -> Result<(), Error> {
-        let path = format!("/api/v1/evm/rules/{}/approve", urlencoding::encode(rule_id));
-        let _ = self
-            .transport
-            .request_raw(Method::POST, &path, Option::<&()>::None, Some(&[200]))?;
+        self.transport.request_raw(
+            Method::POST,
+            &paths::rule_approve(rule_id),
+            Option::<&()>::None,
+            Some(&[200]),
+        )?;
         Ok(())
     }
 
     pub fn reject_rule(&self, rule_id: &str, reason: &str) -> Result<(), Error> {
-        let path = format!("/api/v1/evm/rules/{}/reject", urlencoding::encode(rule_id));
-        let body = serde_json::json!({"reason": reason});
-        let _ = self
-            .transport
-            .request_raw(Method::POST, &path, Some(&body), Some(&[200]))?;
+        self.transport.request_raw(
+            Method::POST,
+            &paths::rule_reject(rule_id),
+            Some(&reject_body(reason)),
+            Some(&[200]),
+        )?;
         Ok(())
     }
 
     pub fn propose_rule(&self, rule_id: &str, req: &ProposeRuleRequest) -> Result<Rule, Error> {
-        let path = format!("/api/v1/evm/rules/{}/propose", urlencoding::encode(rule_id));
-        self.transport
-            .request_json(Method::POST, &path, Some(req), Some(&[202]))
+        self.transport.request_json(
+            Method::POST,
+            &paths::rule_propose(rule_id),
+            Some(req),
+            Some(&[202]),
+        )
     }
 }
+
+#[cfg(feature = "async")]
+mod asynchronous {
+    use super::*;
+    use crate::transport::async_transport::AsyncTransport;
+
+    /// Non-blocking counterpart of [`RuleService`].
+    #[derive(Clone)]
+    pub struct AsyncRuleService {
+        transport: AsyncTransport,
+    }
+
+    impl AsyncRuleService {
+        pub fn new(transport: AsyncTransport) -> Self {
+            Self { transport }
+        }
+
+        pub async fn list(
+            &self,
+            filter: Option<&ListRulesFilter>,
+        ) -> Result<ListRulesResponse, Error> {
+            self.transport
+                .request_json(
+                    Method::GET,
+                    &paths::rules_list(filter),
+                    Option::<&()>::None,
+                    Some(&[200]),
+                )
+                .await
+        }
+
+        pub async fn get(&self, rule_id: &str) -> Result<Rule, Error> {
+            self.transport
+                .request_json(
+                    Method::GET,
+                    &paths::rule(rule_id),
+                    Option::<&()>::None,
+                    Some(&[200]),
+                )
+                .await
+        }
+
+        pub async fn create(&self, req: &CreateRuleRequest) -> Result<Rule, Error> {
+            self.transport
+                .request_json(Method::POST, paths::RULES, Some(req), Some(&[200, 201]))
+                .await
+        }
+
+        pub async fn update(&self, rule_id: &str, req: &UpdateRuleRequest) -> Result<Rule, Error> {
+            self.transport
+                .request_json(Method::PATCH, &paths::rule(rule_id), Some(req), Some(&[200]))
+                .await
+        }
+
+        pub async fn delete(&self, rule_id: &str) -> Result<(), Error> {
+            self.transport
+                .request_raw(
+                    Method::DELETE,
+                    &paths::rule(rule_id),
+                    Option::<&()>::None,
+                    Some(&[200, 204]),
+                )
+                .await?;
+            Ok(())
+        }
+
+        pub async fn toggle(&self, rule_id: &str, enabled: bool) -> Result<Rule, Error> {
+            self.transport
+                .request_json(
+                    Method::PATCH,
+                    &paths::rule(rule_id),
+                    Some(&toggle_body(enabled)),
+                    Some(&[200]),
+                )
+                .await
+        }
+
+        pub async fn list_budgets(&self, rule_id: &str) -> Result<Vec<RuleBudget>, Error> {
+            self.transport
+                .request_json(
+                    Method::GET,
+                    &paths::rule_budgets(rule_id),
+                    Option::<&()>::None,
+                    Some(&[200]),
+                )
+                .await
+        }
+
+        pub async fn approve_rule(&self, rule_id: &str) -> Result<(), Error> {
+            self.transport
+                .request_raw(
+                    Method::POST,
+                    &paths::rule_approve(rule_id),
+                    Option::<&()>::None,
+                    Some(&[200]),
+                )
+                .await?;
+            Ok(())
+        }
+
+        pub async fn reject_rule(&self, rule_id: &str, reason: &str) -> Result<(), Error> {
+            self.transport
+                .request_raw(
+                    Method::POST,
+                    &paths::rule_reject(rule_id),
+                    Some(&reject_body(reason)),
+                    Some(&[200]),
+                )
+                .await?;
+            Ok(())
+        }
+
+        pub async fn propose_rule(
+            &self,
+            rule_id: &str,
+            req: &ProposeRuleRequest,
+        ) -> Result<Rule, Error> {
+            self.transport
+                .request_json(
+                    Method::POST,
+                    &paths::rule_propose(rule_id),
+                    Some(req),
+                    Some(&[202]),
+                )
+                .await
+        }
+    }
+}
+
+#[cfg(feature = "async")]
+pub use asynchronous::AsyncRuleService;

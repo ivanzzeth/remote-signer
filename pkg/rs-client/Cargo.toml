@@ -9,6 +9,9 @@ description = "Rust SDK for the remote-signer service"
 default = ["rustls-tls"]
 rustls-tls = ["reqwest/rustls-tls"]
 native-tls = ["reqwest/native-tls"]
+# Non-blocking API: AsyncClient / AsyncTransport / Async*Service.
+# Additive — the blocking API is unchanged when this is enabled.
+async = ["dep:tokio"]
 
 [dependencies]
 base64 = "0.22"
@@ -24,6 +27,12 @@ ed25519-dalek = { version = "2", features = ["rand_core", "pkcs8", "pem"] }
 time = { version = "0.3", features = ["serde", "serde-well-known", "parsing", "formatting"] }
 url = "2"
 urlencoding = "2"
+tokio = { version = "1", features = ["time"], optional = true }
 
 [dev-dependencies]
 assert_matches = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+wiremock = "0.6"
+
+[package.metadata.docs.rs]
+all-features = true

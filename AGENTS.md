@@ -173,7 +173,7 @@ Client → Ed25519 Auth → Middleware Pipeline → Handler → SignService
 | 影响面 | 位置 | 检查方法 |
 |--------|------|---------|
 | Go SDK | `pkg/client/` | `go build ./pkg/client/...` — 确认 service + types + mock 覆盖新端点 |
-| Rust SDK | `pkg/rs-client/` | `cargo check` — 确认 service + types 覆盖新端点 |
+| Rust SDK | `pkg/rs-client/` | `cargo test --features async` + `cargo clippy --all-targets --features async` — 确认 blocking 与 async 两套 service 都覆盖新端点，端点路径加到 `src/evm/paths.rs` |
 | JS Client | `pkg/mcp-server/node_modules/remote-signer-client/` | 检查 `.d.ts`，必要时提 PR 更新 npm 包 |
 | MCP Server | `pkg/mcp-server/src/index.ts` | `npm run build` — 确认新工具或参数变更已反映 |
 | Skills | `skills/remote-signer-agent/SKILL.md` | Agent RBAC、签名流程、authorizing 自助、CLI 示例是否需要更新 |
