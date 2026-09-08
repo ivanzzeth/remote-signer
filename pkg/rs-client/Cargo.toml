@@ -21,7 +21,7 @@ sha2 = "0.10"
 thiserror = "2"
 zeroize = "1"
 ed25519-dalek = { version = "2", features = ["rand_core", "pkcs8", "pem"] }
-time = { version = "0.3", features = ["serde", "parsing", "formatting"] }
+time = { version = "0.3", features = ["serde", "serde-well-known", "parsing", "formatting"] }
 url = "2"
 urlencoding = "2"
 
