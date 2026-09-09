@@ -383,15 +383,10 @@ func TestAuditHandler_ServeRequestHTTP_Unauthorized(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }
 
-func TestAuditHandler_ServeRequestHTTP_MethodNotAllowed(t *testing.T) {
-	h := &AuditHandler{}
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPost, "/api/v1/audit/requests/some-req", nil)
-	r = r.WithContext(context.WithValue(r.Context(), middleware.APIKeyContextKey,
-		&types.APIKey{ID: "admin", Role: types.RoleAdmin}))
-	h.ServeRequestHTTP(w, r)
-	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-}
+// TestAuditHandler_ServeRequestHTTP_MethodNotAllowed was removed: the route is method-scoped now (see setupRoutes) and Go's
+// ServeMux answers 405 before the handler runs, so a test calling the handler
+// directly with the wrong method was asserting a check this layer no longer
+// owns — and should not, since the mux cannot forget it.
 
 func TestAuditHandler_ServeRequestHTTP_EmptyPath(t *testing.T) {
 	mockRepo := newMockAuditRepo()

@@ -1302,19 +1302,8 @@ func TestB3TransactionsList_NotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
-func TestB3TransactionsList_MethodNotAllowed(t *testing.T) {
-	db := newB3TxCoverageDB(t)
-	txRepo, err := storage.NewGormTransactionRepository(db)
-	require.NoError(t, err)
-	h, err := NewTransactionsHandler(txRepo, slog.Default())
-	require.NoError(t, err)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/evm/transactions", nil)
-	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, signAdminKey()))
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-}
+// TestB3TransactionsList_MethodNotAllowed was removed: GET /api/v1/evm/transactions is method-scoped now and the mux
+// answers 405 before the handler runs.
 
 func TestB3TransactionsList_Unauthorized(t *testing.T) {
 	db := newB3TxCoverageDB(t)

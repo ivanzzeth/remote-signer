@@ -10,4 +10,4 @@ write_helpers             1   # ✅ 2026-09-10:48 → 1。48 份实现收进 int
                                # 收编进去会让 respond 包知道一个它不该知道的协议。
 router_config_fields     30   # RouterConfig 的字段;它是服务定位器,不是配置。
                                # 2026-09-10:40 → 30,十个运行时可改的开关不再冻在这里(改为闭包实时读快照)
-manual_method_checks     35   # 手写 r.Method != http.MethodX
+manual_method_checks     29   # 手写 r.Method != http.MethodX

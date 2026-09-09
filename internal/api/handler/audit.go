@@ -79,10 +79,8 @@ func (h *AuditHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if r.Method != http.MethodGet {
-		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-		return
-	}
+	// ⛔ No method check: the route is method-scoped (see setupRoutes) and Go's
+	// ServeMux answers 405 for anything else before this runs.
 
 	h.listAuditRecords(w, r)
 }
@@ -95,10 +93,8 @@ func (h *AuditHandler) ServeRequestHTTP(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if r.Method != http.MethodGet {
-		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-		return
-	}
+	// ⛔ No method check: the route is method-scoped (see setupRoutes) and Go's
+	// ServeMux answers 405 for anything else before this runs.
 
 	// Extract request ID from path: /api/v1/audit/requests/{requestID}
 	requestID := strings.TrimPrefix(r.URL.Path, "/api/v1/audit/requests/")

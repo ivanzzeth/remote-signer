@@ -47,10 +47,8 @@ func NewTransactionsHandler(repo storage.TransactionRepository, logger *slog.Log
 // ServeHTTP routes /api/v1/evm/transactions (list) and
 // /api/v1/evm/transactions/{id} (item).
 func (h *TransactionsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-		return
-	}
+	// ⛔ No method check: the route is method-scoped (see setupRoutes) and Go's
+	// ServeMux answers 405 for anything else before this runs.
 	apiKey := middleware.GetAPIKey(r.Context())
 	if apiKey == nil {
 		respond.Error(w, "unauthorized", http.StatusUnauthorized, h.logger)

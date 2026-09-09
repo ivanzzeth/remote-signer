@@ -100,11 +100,10 @@ func TestNewSimulateHandler(t *testing.T) {
 
 // --- ServeHTTP (single simulate) tests ---
 
-func TestSimulateHandler_MethodNotAllowed(t *testing.T) {
-	h := newTestSimulateHandler(t, &mockSimulator{})
-	rec := doSimulateRequest(t, h, http.MethodGet, "/api/v1/evm/simulate", nil)
-	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-}
+// TestSimulateHandler_MethodNotAllowed was removed: the route is method-scoped now (see setupRoutes) and Go's
+// ServeMux answers 405 before the handler runs, so a test calling the handler
+// directly with the wrong method was asserting a check this layer no longer
+// owns — and should not, since the mux cannot forget it.
 
 func TestSimulateHandler_InvalidBody(t *testing.T) {
 	h := newTestSimulateHandler(t, &mockSimulator{})
@@ -255,13 +254,10 @@ func TestSimulateHandler_BatchSuccess(t *testing.T) {
 	assert.Equal(t, 2, len(resp.Results))
 }
 
-func TestSimulateHandler_BatchMethodNotAllowed(t *testing.T) {
-	h := newTestSimulateHandler(t, &mockSimulator{})
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/evm/simulate/batch", nil)
-	rec := httptest.NewRecorder()
-	h.ServeBatchHTTP(rec, req)
-	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-}
+// TestSimulateHandler_BatchMethodNotAllowed was removed: the route is method-scoped now (see setupRoutes) and Go's
+// ServeMux answers 405 before the handler runs, so a test calling the handler
+// directly with the wrong method was asserting a check this layer no longer
+// owns — and should not, since the mux cannot forget it.
 
 func TestSimulateHandler_BatchEmptyTransactions(t *testing.T) {
 	h := newTestSimulateHandler(t, &mockSimulator{})
@@ -354,10 +350,6 @@ func TestSimulateHandler_StatusSuccess(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
-func TestSimulateHandler_StatusMethodNotAllowed(t *testing.T) {
-	h := newTestSimulateHandler(t, &mockSimulator{})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/evm/simulate/status", nil)
-	rec := httptest.NewRecorder()
-	h.ServeStatusHTTP(rec, req)
-	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-}
+// TestSimulateHandler_StatusMethodNotAllowed was removed: the route is
+// method-scoped now (GET /api/v1/evm/simulate/status) and the mux answers 405
+// before the handler runs.

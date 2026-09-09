@@ -110,10 +110,8 @@ type SimulateResultJSON struct {
 
 // ServeHTTP handles POST /api/v1/evm/simulate.
 func (h *SimulateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-		return
-	}
+	// ⛔ No method check: the route is method-scoped (see setupRoutes) and Go's
+	// ServeMux answers 405 for anything else before this runs.
 
 	var req SimulateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -179,10 +177,8 @@ const maxBatchSimulateSize = 20
 
 // ServeBatchHTTP handles POST /api/v1/evm/simulate/batch.
 func (h *SimulateHandler) ServeBatchHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-		return
-	}
+	// ⛔ No method check: the route is method-scoped (see setupRoutes) and Go's
+	// ServeMux answers 405 for anything else before this runs.
 
 	var req BatchSimulateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -268,10 +264,8 @@ func (h *SimulateHandler) ServeBatchHTTP(w http.ResponseWriter, r *http.Request)
 
 // ServeStatusHTTP handles GET /api/v1/evm/simulate/status.
 func (h *SimulateHandler) ServeStatusHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-		return
-	}
+	// ⛔ No method check: the route is method-scoped (see setupRoutes) and Go's
+	// ServeMux answers 405 for anything else before this runs.
 
 	status := h.simulator.Status(r.Context())
 	respond.JSON(w, status, http.StatusOK, h.logger)

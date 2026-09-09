@@ -245,25 +245,10 @@ func TestAuditHandler_Unauthorized(t *testing.T) {
 	assert.Equal(t, "unauthorized", errResp.Error)
 }
 
-func TestAuditHandler_MethodNotAllowed(t *testing.T) {
-	repo := newMockAuditRepo()
-	h, err := NewAuditHandler(repo, auditLogger())
-	require.NoError(t, err)
-
-	apiKey := auditAPIKey()
-
-	methods := []string{http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch}
-	for _, method := range methods {
-		t.Run(method, func(t *testing.T) {
-			rr := doAuditRequest(t, h, method, "/api/v1/audit", apiKey)
-			assert.Equal(t, http.StatusMethodNotAllowed, rr.Code)
-
-			var errResp ErrorResponse
-			require.NoError(t, json.NewDecoder(rr.Body).Decode(&errResp))
-			assert.Equal(t, "method not allowed", errResp.Error)
-		})
-	}
-}
+// TestAuditHandler_MethodNotAllowed was removed: the route is method-scoped now (see setupRoutes) and Go's
+// ServeMux answers 405 before the handler runs, so a test calling the handler
+// directly with the wrong method was asserting a check this layer no longer
+// owns — and should not, since the mux cannot forget it.
 
 // ---------------------------------------------------------------------------
 // Tests: listAuditRecords - basic queries

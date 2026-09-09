@@ -208,12 +208,5 @@ func TestTransactionsHandler_Unauthorized(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
-func TestTransactionsHandler_NonGET(t *testing.T) {
-	db := newTxHandlerDB(t)
-	repo, _ := storage.NewGormTransactionRepository(db)
-	h, err := NewTransactionsHandler(repo, slog.Default())
-	require.NoError(t, err)
-	admin := &types.APIKey{ID: "admin-key", Role: types.RoleAdmin}
-	rec := doTxRequest(t, h, http.MethodPost, "/api/v1/evm/transactions", admin)
-	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-}
+// TestTransactionsHandler_NonGET was removed: GET /api/v1/evm/transactions is
+// method-scoped now and the mux answers 405 before the handler runs.

@@ -432,9 +432,9 @@ func (r *Router) setupRoutes() error {
 		if simErr != nil {
 			return fmt.Errorf("failed to create simulate handler: %w", simErr)
 		}
-		r.mux.Handle("/api/v1/evm/simulate", r.withAuthAndPerm(middleware.PermSignRequest, simulateHandler))
-		r.mux.Handle("/api/v1/evm/simulate/batch", r.withAuthAndPerm(middleware.PermSignRequest, http.HandlerFunc(simulateHandler.ServeBatchHTTP)))
-		r.mux.Handle("/api/v1/evm/simulate/status", r.withAuthAndPerm(middleware.PermSignRequest, http.HandlerFunc(simulateHandler.ServeStatusHTTP)))
+		r.handlePerm("POST /api/v1/evm/simulate", middleware.PermSignRequest, simulateHandler)
+		r.handlePerm("POST /api/v1/evm/simulate/batch", middleware.PermSignRequest, http.HandlerFunc(simulateHandler.ServeBatchHTTP))
+		r.handlePerm("GET /api/v1/evm/simulate/status", middleware.PermSignRequest, http.HandlerFunc(simulateHandler.ServeStatusHTTP))
 	}
 
 	// Simulation history (persisted snapshots from the sign pipeline).
@@ -477,8 +477,8 @@ func (r *Router) setupRoutes() error {
 		if txErr != nil {
 			return fmt.Errorf("failed to create transactions handler: %w", txErr)
 		}
-		r.mux.Handle("/api/v1/evm/transactions", r.withAuth(txHandler))
-		r.mux.Handle("/api/v1/evm/transactions/", r.withAuth(txHandler))
+		r.mux.Handle("GET /api/v1/evm/transactions", r.withAuth(txHandler))
+		r.mux.Handle("GET /api/v1/evm/transactions/", r.withAuth(txHandler))
 	}
 
 	// Batch sign route (optional, requires rule engine; simulation rule is optional)
@@ -503,8 +503,13 @@ func (r *Router) setupRoutes() error {
 	}
 
 	// Audit routes
-	r.mux.Handle("/api/v1/audit", r.withAuthAndPerm(middleware.PermReadAudit, auditHandler))
-	r.mux.Handle("/api/v1/audit/requests/", r.withAuthAndPerm(middleware.PermReadAudit, http.HandlerFunc(auditHandler.ServeRequestHTTP)))
+	// ⚠️ Method-scoped registrations. Go's ServeMux answers 405 itself when a
+	// pattern matches the path but not the method, so the handler no longer
+	// hand-rolls `if r.Method != …`. Thirty-five of those checks existed and
+	// forgetting one means a GET reaching a write path — a mistake the mux
+	// cannot make.
+	r.handlePerm("GET /api/v1/audit", middleware.PermReadAudit, auditHandler)
+	r.handlePerm("GET /api/v1/audit/requests/", middleware.PermReadAudit, http.HandlerFunc(auditHandler.ServeRequestHTTP))
 
 	// Set rule repo on access service for cascade cleanup
 	if accessService != nil {
