@@ -330,8 +330,8 @@ func main() {
 		WalletRepo:          walletRepo,
 		RPCProvider:         rpcProvider,
 		TransactionService:  txService,
-		TransactionRepo:     txRepo,
 		RequestRepo:         requestRepo,
+		Modules:             mustTxModule(txRepo, log),
 		Template: &api.TemplateConfig{
 			TemplateRepo:    templateRepo,
 			TemplateService: templateService,
@@ -409,4 +409,15 @@ func fatal(format string, args ...interface{}) {
 	out, _ := json.Marshal(map[string]string{"error": err})
 	fmt.Fprintln(os.Stderr, string(out))
 	os.Exit(1)
+}
+
+// mustTxModule builds the transactions feature module, or none when the repo is
+// missing. The harness mirrors the daemon's wiring so the two serve the same
+// routes.
+func mustTxModule(repo storage.TransactionRepository, log *slog.Logger) []api.Module {
+	m, err := api.NewTransactionsModule(repo, log)
+	if err != nil || m == nil {
+		return nil
+	}
+	return []api.Module{m}
 }

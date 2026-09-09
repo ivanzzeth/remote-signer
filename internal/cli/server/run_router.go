@@ -79,8 +79,12 @@ func initRouterAndServer(
 		RPCProvider:         rpcProvider,
 		SettingsManager:     settingsMgr,
 		RequestRepo:         repos.requestRepo,
-		BootstrapCreator:    bootstrapCreator,
 	}
+	// Feature modules: built here, in the composition root, so the router does
+	// not need a field per dependency in order to decide whether a route exists.
+	// A module whose precondition is unmet returns nil and is simply not mounted.
+	routerConfig.Modules = append(routerConfig.Modules,
+		api.NewBootstrapModule(repos.apiKeyRepo, bootstrapCreator, log))
 	// Simulation preview: the request-detail UI's preview panel
 	// reads this repo. Optional — without it the GET /requests/
 	// {id}/simulation route simply doesn't register and the panel
@@ -97,7 +101,11 @@ func initRouterAndServer(
 	var txService *service.TransactionService
 	if rpcProvider != nil {
 		if txRepo, txErr := storage.NewGormTransactionRepository(db); txErr == nil {
-			routerConfig.TransactionRepo = txRepo
+			if txMod, modErr := api.NewTransactionsModule(txRepo, log); modErr == nil {
+				routerConfig.Modules = append(routerConfig.Modules, txMod)
+			} else {
+				log.Warn("transactions API disabled: module init failed", "error", modErr)
+			}
 			if txSvc, sErr := service.NewTransactionService(txRepo, repos.requestRepo, rpcProvider, log); sErr == nil {
 				routerConfig.TransactionService = txSvc
 				txService = txSvc

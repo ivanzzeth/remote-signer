@@ -85,3 +85,38 @@ func isMutating(pattern string) bool {
 	}
 	return false
 }
+
+// TestModules_ReportWhatWasMounted is the property the Module interface exists
+// for: what a daemon serves should be readable, not inferred from which of 30
+// RouterConfig fields happened to be non-nil.
+//
+// A module that cannot be built is absent from the list rather than half-built —
+// bootstrap without a creator is the case in point, and saying so at
+// construction beats a nil check at each route.
+func TestModules_ReportWhatWasMounted(t *testing.T) {
+	r := &Router{routePerms: map[string]middleware.Permission{}}
+
+	// A module whose precondition is unmet returns nil and must not appear.
+	r.mountModules(NewBootstrapModule(nil, nil, nil))
+	if got := r.Modules(); len(got) != 0 {
+		t.Fatalf("mounted %v, want nothing — bootstrap has no creator", got)
+	}
+
+	r.mountModules(&stubModule{name: "stub"})
+	got := r.Modules()
+	if len(got) != 1 || got[0] != "stub" {
+		t.Fatalf("Modules() = %v, want [stub]", got)
+	}
+
+	// The slice must be a copy; handing out the router's own would let a caller
+	// rewrite the record of what is served.
+	got[0] = "tampered"
+	if r.Modules()[0] != "stub" {
+		t.Fatal("Modules() handed out the router's own slice")
+	}
+}
+
+type stubModule struct{ name string }
+
+func (m *stubModule) Name() string          { return m.name }
+func (m *stubModule) Routes(RouteRegistrar) {}

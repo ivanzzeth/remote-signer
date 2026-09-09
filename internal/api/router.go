@@ -14,7 +14,6 @@ import (
 	evmhandler "github.com/ivanzzeth/remote-signer/internal/api/handler/evm"
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/audit"
-	"github.com/ivanzzeth/remote-signer/internal/bootstrap"
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/core/auth"
 	"github.com/ivanzzeth/remote-signer/internal/core/ports"
@@ -36,6 +35,15 @@ type TemplateConfig struct {
 
 // RouterConfig contains configuration for the router
 type RouterConfig struct {
+	// Modules are feature slices built by the composition root, each holding its
+	// own dependencies and registering its own routes.
+	//
+	// ⭐ New features belong here, not in a new field below. Every field in this
+	// struct is a dependency the router must know about in order to decide
+	// whether a route exists — which is why reading setupRoutes cannot tell you
+	// what a daemon serves. A module answers that itself; see module.go.
+	Modules []Module
+
 	Version                  string
 	IPWhitelistConfig        *middleware.IPWhitelist
 	IPWhitelistConfigForRead *ports.IPWhitelist // optional: for GET /api/v1/acls/ip-whitelist (admin, read-only)
@@ -92,7 +100,6 @@ type RouterConfig struct {
 	// Optional in the same sense as TransactionService — the routes
 	// register only when set, so a build without tracking simply
 	// omits the listing surface.
-	TransactionRepo storage.TransactionRepository
 	// RequestSimulationRepo backs the per-request simulation
 	// preview endpoint. Optional — without it the route doesn't
 	// register and the web UI's preview panel just shows
@@ -111,11 +118,11 @@ type RouterConfig struct {
 	// know where on disk anything lives. Nil → the bootstrap routes
 	// don't register (useful in test harnesses that pre-seed admin
 	// out of band).
-	BootstrapCreator bootstrap.AdminCreator
 }
 
 // Router handles HTTP routing
 type Router struct {
+	modules []string
 	// routePerms records the permission each pattern was registered with, so the
 	// route table can be asserted without standing up a live router. Permission
 	// is a property of the route now — see the budget registrations — and a
@@ -183,11 +190,7 @@ func (r *Router) setupRoutes() error {
 	// 410 Gone. Wiring is gated on a non-nil BootstrapCreator so a daemon
 	// built without the cli/server import (test harness, embedded use)
 	// can opt out cleanly.
-	if r.config.BootstrapCreator != nil && r.config.APIKeyRepo != nil {
-		bootstrapHandler := handler.NewBootstrapHandler(r.config.APIKeyRepo, r.config.BootstrapCreator, r.logger)
-		r.mux.Handle("GET /api/v1/bootstrap/status", middleware.SecurityHeadersMiddleware()(http.HandlerFunc(bootstrapHandler.ServeStatus)))
-		r.mux.Handle("POST /api/v1/bootstrap/admin", middleware.SecurityHeadersMiddleware()(http.HandlerFunc(bootstrapHandler.ServeAdmin)))
-	}
+	r.mountModules(r.config.Modules...)
 
 	// Create SignerAccessService
 	var accessService *service.SignerAccessService
@@ -489,14 +492,6 @@ func (r *Router) setupRoutes() error {
 	// daemon may want to see legacy rows (e.g. ones recorded by an
 	// older build). withAuth — visibility is enforced inside the
 	// handler by joining sign_request.api_key_id against the caller.
-	if r.config.TransactionRepo != nil {
-		txHandler, txErr := evmhandler.NewTransactionsHandler(r.config.TransactionRepo, r.logger)
-		if txErr != nil {
-			return fmt.Errorf("failed to create transactions handler: %w", txErr)
-		}
-		r.mux.Handle("GET /api/v1/evm/transactions", r.withAuth(txHandler))
-		r.mux.Handle("GET /api/v1/evm/transactions/", r.withAuth(txHandler))
-	}
 
 	// Batch sign route (optional, requires rule engine; simulation rule is optional)
 	if r.config.RuleEngine != nil && accessService != nil {
