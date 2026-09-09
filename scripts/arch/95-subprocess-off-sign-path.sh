@@ -41,9 +41,30 @@ n=$(arch_prod_files internal | grep -c solidity)
 arch_ratchet_count "⑩b solidity 源文件数" "$(b solidity_files)" "$n" \
     "同上。" "$BASE" || fail=1
 
-n=$(grep -rho 'evm_solidity_expression' rules/ 2>/dev/null | wc -l)
-arch_ratchet_count "⑩b rules/ 里的 solidity 规则引用" "$(b rules_references)" "$n" \
-    "把模板/preset 迁到 evm_js。⚠️ 这个功能默认关着,所以这些规则在出厂配置下是跑不了的。" "$BASE" || fail=1
+# ⚠️ 数的是**真实规则声明**(`type: evm_solidity_expression`),不是「提及次数」。
+# 第一版数 grep 命中数 = 88,而其中 15 处是注释里的
+# 「Filename *.template.js.yaml = 完全由 evm_js 驱动(无 evm_solidity_expression)」——
+# 也就是说改一句注释门禁就红,而往一个注释里已经提过它的模板中加一条真规则,
+# 门禁反而不响。度量错了方向的门禁比没有更糟。
+n=$(grep -rhE '^\s*type:\s*"?evm_solidity_expression"?\s*$' rules/ 2>/dev/null | wc -l)
+arch_ratchet_count "⑩b rules/ 里的 solidity 规则声明" "$(b rules_declarations)" "$n" \
+    "把模板迁到 evm_js。⚠️ 这个功能默认关着,所以带这些规则的模板在出厂配置下装不上。" "$BASE" || fail=1
+
+# ⑩b' 终点线:还有几个出厂 preset 因为引用了带 solidity 的模板而在默认配置下装不上。
+# 这个数字降到 0 = solidity 引擎可以真的删掉了。
+sol_tmpl=$(grep -rlE '^\s*type:\s*"?evm_solidity_expression"?\s*$' rules/templates/ 2>/dev/null \
+    | xargs -r -n1 basename | sed 's/\.yaml$//' | sort -u)
+broken=0
+for pf in rules/presets/evm/*.yaml; do
+    [ -f "$pf" ] || continue
+    for t in $sol_tmpl; do
+        if grep -qE "^\s*-\s*\"?(evm/)?${t}\"?\s*$" "$pf" 2>/dev/null; then
+            broken=$((broken + 1)); break
+        fi
+    done
+done
+arch_ratchet_count "⑩b 默认配置下装不上的 preset" "$(b presets_needing_forge)" "$broken" \
+    "把它引用的模板迁到 evm_js(predict_eoa_bnb 已有 _js 版可参照)。" "$BASE" || fail=1
 
 # ⑩c —— 硬约束:出厂配置的默认值就是这个决定本身。
 for f in config.example.yaml config.full.yaml; do
