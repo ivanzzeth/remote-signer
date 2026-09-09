@@ -9,10 +9,10 @@ import (
 
 // IPWhitelistResponse is the read-only IP whitelist config (admin only).
 type IPWhitelistResponse struct {
-	Enabled         bool     `json:"enabled"`
-	AllowedIPs      []string `json:"allowed_ips"`
-	TrustProxy      bool     `json:"trust_proxy"`
-	TrustedProxies  []string `json:"trusted_proxies"`
+	Enabled        bool     `json:"enabled"`
+	AllowedIPs     []string `json:"allowed_ips"`
+	TrustProxy     bool     `json:"trust_proxy"`
+	TrustedProxies []string `json:"trusted_proxies"`
 }
 
 // Service provides read-only ACL operations (admin only).

@@ -364,4 +364,3 @@ func isNullReceipt(raw json.RawMessage) bool {
 	t := strings.TrimSpace(string(raw))
 	return t == "" || t == "null"
 }
-

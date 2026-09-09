@@ -26,18 +26,18 @@ type APIKeysDataMsg struct {
 
 // APIKeysModel represents the API keys list and detail view.
 type APIKeysModel struct {
-	apikeysSvc apikeys.API
-	ctx         context.Context
-	width       int
-	height      int
-	spinner     spinner.Model
-	loading     bool
-	err         error
-	keys        []apikeys.APIKey
-	total       int
-	selectedIdx int
-	offset      int
-	limit       int
+	apikeysSvc   apikeys.API
+	ctx          context.Context
+	width        int
+	height       int
+	spinner      spinner.Model
+	loading      bool
+	err          error
+	keys         []apikeys.APIKey
+	total        int
+	selectedIdx  int
+	offset       int
+	limit        int
 	sourceFilter string
 	showFilter   bool
 	filterInput  textinput.Model
@@ -74,7 +74,7 @@ func newAPIKeysModelFromService(svc apikeys.API, ctx context.Context) (*APIKeysM
 	ti.Width = 40
 
 	return &APIKeysModel{
-		apikeysSvc: svc,
+		apikeysSvc:  svc,
 		ctx:         ctx,
 		spinner:     s,
 		loading:     true,

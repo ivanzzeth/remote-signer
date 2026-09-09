@@ -475,17 +475,21 @@ type mockPresetRepoStub struct{}
 
 func newMockPresetRepo() *mockPresetRepoStub { return &mockPresetRepoStub{} }
 
-func (m *mockPresetRepoStub) Create(_ context.Context, _ *types.RulePreset) error    { return nil }
+func (m *mockPresetRepoStub) Create(_ context.Context, _ *types.RulePreset) error { return nil }
 func (m *mockPresetRepoStub) Get(_ context.Context, _ string) (*types.RulePreset, error) {
 	return nil, types.ErrNotFound
 }
 func (m *mockPresetRepoStub) List(_ context.Context, _ storage.PresetFilter) ([]*types.RulePreset, error) {
 	return nil, nil
 }
-func (m *mockPresetRepoStub) Update(_ context.Context, _ *types.RulePreset) error              { return nil }
-func (m *mockPresetRepoStub) Delete(_ context.Context, _ string) error                         { return nil }
-func (m *mockPresetRepoStub) Count(_ context.Context, _ storage.PresetFilter) (int, error)     { return 0, nil }
-func (m *mockPresetRepoStub) Upsert(_ context.Context, _ *types.RulePreset) (bool, error)      { return false, nil }
+func (m *mockPresetRepoStub) Update(_ context.Context, _ *types.RulePreset) error { return nil }
+func (m *mockPresetRepoStub) Delete(_ context.Context, _ string) error            { return nil }
+func (m *mockPresetRepoStub) Count(_ context.Context, _ storage.PresetFilter) (int, error) {
+	return 0, nil
+}
+func (m *mockPresetRepoStub) Upsert(_ context.Context, _ *types.RulePreset) (bool, error) {
+	return false, nil
+}
 func (m *mockPresetRepoStub) ListIDsBySource(_ context.Context, _ types.RuleSource) ([]string, error) {
 	return nil, nil
 }

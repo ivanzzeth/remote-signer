@@ -54,7 +54,7 @@ type AutoLockCallback func(address string)
 // SignerManagerImpl implements SignerManager
 type SignerManagerImpl struct {
 	registry        *SignerRegistry
-	autoLockTimeout time.Duration           // 0 means disabled
+	autoLockTimeout time.Duration // 0 means disabled
 	autoLockTimers  map[string]*time.Timer
 	timerMu         sync.Mutex
 	onAutoLock      AutoLockCallback // optional callback for auto-lock notifications

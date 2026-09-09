@@ -334,7 +334,7 @@ func TestSecurity_BlocklistBypass_AddressCasing(t *testing.T) {
 
 	for _, addr := range casings {
 		t.Run("casing_"+addr[38:], func(t *testing.T) {
-			resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+			resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 				ChainID:       chainID,
 				SignerAddress: signerAddress,
 				SignType:      "transaction",
@@ -376,7 +376,7 @@ func TestSecurity_ValueLimitBypass_Overflow(t *testing.T) {
 			name = name[:10]
 		}
 		t.Run("value_"+name, func(t *testing.T) {
-			resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+			resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 				ChainID:       chainID,
 				SignerAddress: signerAddress,
 				SignType:      "transaction",
@@ -415,7 +415,7 @@ func TestSecurity_ConcurrentApproval_RaceCondition(t *testing.T) {
 
 	// Submit a sign request that requires manual approval
 	// Use 'personal' sign type to avoid Solidity rule Fail-Closed issues with 'transaction'
-	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "personal",
@@ -851,7 +851,7 @@ func TestRedTeam_AddressBlocklist_BypassViaPersonalSign(t *testing.T) {
 	// Attack: personal_sign has no tx.To → parsed.Recipient is nil
 	// The AddressListEvaluator returns (false, "", nil) → "no violation"
 	// So the blocklist is silently bypassed.
-	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "personal",
@@ -898,7 +898,7 @@ func TestRedTeam_ValueLimitBlocklist_BypassViaNilValue(t *testing.T) {
 
 	// Attack: personal_sign has no value → parsed.Value is nil
 	// ValueLimitEvaluator returns (false, "", nil) → "no violation"
-	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "personal",
@@ -936,7 +936,7 @@ func TestRedTeam_ContractMethodBlocklist_BypassViaPlainTransfer(t *testing.T) {
 
 	// Attack: plain ETH transfer (no data) → parsed.MethodSig is nil
 	// ContractMethodEvaluator returns (false, "", nil) → "no violation"
-	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "transaction",
@@ -990,7 +990,7 @@ func TestRedTeam_BlocklistPrecedence_OverridesWhitelist(t *testing.T) {
 	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, blocklistRule.ID) }()
 
 	// Attack: send 1 ETH to treasury — whitelisted address but exceeds blocklist value limit
-	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "transaction",
@@ -1039,7 +1039,7 @@ func TestRedTeam_SignTypeBlocklist_OverridesWhitelist(t *testing.T) {
 	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, whitelistRule.ID) }()
 
 	// Attack: send personal_sign — both blocklist and whitelist match "personal"
-	_, err = adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+	_, err = adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "personal",
@@ -1085,7 +1085,7 @@ func TestRedTeam_MultiRule_WhitelistAddress_BlocklistValue(t *testing.T) {
 
 	// Sub-test A: 1 ETH to treasury → MUST be blocked by value limit blocklist
 	t.Run("high_value_blocked", func(t *testing.T) {
-		resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+		resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 			ChainID:       chainID,
 			SignerAddress: signerAddress,
 			SignType:      "transaction",
@@ -1102,7 +1102,7 @@ func TestRedTeam_MultiRule_WhitelistAddress_BlocklistValue(t *testing.T) {
 	// ALL transaction requests will be rejected. This is expected behavior — we verify
 	// that the value limit blocklist itself does not block low-value transactions.
 	t.Run("low_value_allowed", func(t *testing.T) {
-		resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+		resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 			ChainID:       chainID,
 			SignerAddress: signerAddress,
 			SignType:      "transaction",
@@ -1153,7 +1153,7 @@ func TestRedTeam_ValueLimit_ExactBoundary(t *testing.T) {
 
 	// Sub-test A: value == limit exactly → NOT blocked (Cmp returns 0, not > 0)
 	t.Run("at_boundary_passes", func(t *testing.T) {
-		resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+		resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 			ChainID:       chainID,
 			SignerAddress: signerAddress,
 			SignType:      "transaction",
@@ -1170,7 +1170,7 @@ func TestRedTeam_ValueLimit_ExactBoundary(t *testing.T) {
 
 	// Sub-test B: value == limit + 1 wei → BLOCKED
 	t.Run("above_boundary_blocked", func(t *testing.T) {
-		resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+		resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 			ChainID:       chainID,
 			SignerAddress: signerAddress,
 			SignType:      "transaction",
@@ -1206,7 +1206,7 @@ func TestRedTeam_ValueLimit_ZeroValue(t *testing.T) {
 
 	// Sub-test A: value=0 → NOT blocked (0 > 0 is false)
 	t.Run("zero_value_passes", func(t *testing.T) {
-		resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+		resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 			ChainID:       chainID,
 			SignerAddress: signerAddress,
 			SignType:      "transaction",
@@ -1221,7 +1221,7 @@ func TestRedTeam_ValueLimit_ZeroValue(t *testing.T) {
 
 	// Sub-test B: value=1 wei → BLOCKED (1 > 0 is true)
 	t.Run("one_wei_blocked", func(t *testing.T) {
-		resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+		resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 			ChainID:       chainID,
 			SignerAddress: signerAddress,
 			SignType:      "transaction",
@@ -1255,7 +1255,7 @@ func TestRedTeam_AddressBlocklist_ZeroAddress(t *testing.T) {
 	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, rule.ID) }()
 
 	// Attack: send tx to zero address
-	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "transaction",
@@ -1291,7 +1291,7 @@ func TestRedTeam_DisabledBlocklistRule_AttackWindow(t *testing.T) {
 	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, rule.ID) }()
 
 	// Step 1: Verify the rule blocks when enabled
-	resp1, err1 := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+	resp1, err1 := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "transaction",
@@ -1308,7 +1308,7 @@ func TestRedTeam_DisabledBlocklistRule_AttackWindow(t *testing.T) {
 	require.NoError(t, err)
 
 	// Step 3: Attack during disabled window — should NOT be blocked
-	resp2, err2 := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+	resp2, err2 := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "transaction",
@@ -1327,7 +1327,7 @@ func TestRedTeam_DisabledBlocklistRule_AttackWindow(t *testing.T) {
 	require.NoError(t, err)
 
 	// Step 5: Verify the rule blocks again
-	resp3, err3 := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+	resp3, err3 := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "transaction",
@@ -1363,7 +1363,7 @@ func TestRedTeam_SignerRestriction_BlocklistMode(t *testing.T) {
 	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, rule.ID) }()
 
 	// Attack: use the blocked signer to sign
-	_, err = adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+	_, err = adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "personal",
@@ -1401,7 +1401,7 @@ func TestRedTeam_WhitelistDoesNotOverApprove_PersonalSign(t *testing.T) {
 
 	// Send personal_sign — the address whitelist cannot match (nil recipient)
 	// NOTE: Other whitelist rules (signer_restriction, sign_type) may still auto-approve
-	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "personal",
@@ -1442,7 +1442,7 @@ func TestRedTeam_NullScopeRule_AppliesToAllSigners(t *testing.T) {
 	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, rule.ID) }()
 
 	// Attack: send 1 ETH — the global (NULL scope) rule should still block
-	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "transaction",
@@ -1479,14 +1479,14 @@ func TestRedTeam_AddressBlocklist_CasingNormalization(t *testing.T) {
 
 	// Attack: send tx with different casing variants of the same address
 	casings := []string{
-		upperCaseAddr,                                         // original
-		"0x1111111111111111111111111111111111111111",           // lowercase (same here since all 1s)
-		"0X1111111111111111111111111111111111111111",           // 0X prefix
+		upperCaseAddr, // original
+		"0x1111111111111111111111111111111111111111", // lowercase (same here since all 1s)
+		"0X1111111111111111111111111111111111111111", // 0X prefix
 	}
 
 	for _, addr := range casings {
 		t.Run("casing_"+addr[:6], func(t *testing.T) {
-			resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+			resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 				ChainID:       chainID,
 				SignerAddress: signerAddress,
 				SignType:      "transaction",
@@ -1669,7 +1669,7 @@ func TestRedTeam_SignerPermission_CaseSensitiveBypass(t *testing.T) {
 	// After fix: strings.EqualFold makes comparison case-insensitive
 	upperAddress := "0xF39FD6E51AAD88F6F4CE6AB8827279CFFFB92266"
 
-	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: upperAddress,
 		SignType:      "personal",
@@ -1704,7 +1704,7 @@ func TestRedTeam_PreviewRule_NonAdminAccess(t *testing.T) {
 	// Submit a personal_sign request as ADMIN first (to get a request ID).
 	// Use personal sign to avoid Solidity rule Fail-Closed in test env.
 	// The request may be auto-approved or fail with "authorizing" status.
-	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "personal",
@@ -1801,7 +1801,7 @@ func TestRedTeam_HashPayload_InvalidHex(t *testing.T) {
 	invalidHash := "0x" + strings.Repeat("GG", 32)
 	assert.Equal(t, 66, len(invalidHash), "test setup: invalid hash should be 66 chars")
 
-	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "hash",
@@ -1917,7 +1917,7 @@ func TestRedTeam_PayloadSize_LargeTransactionData(t *testing.T) {
 	payload := fmt.Sprintf(`{"transaction":{"to":"%s","value":"0","gas":21000,"gasPrice":"20000000000","txType":"legacy","data":"%s"}}`,
 		treasuryAddress, hexData)
 
-	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "transaction",
@@ -1944,7 +1944,7 @@ func TestRedTeam_SignHandler_InvalidSignType(t *testing.T) {
 	ctx := context.Background()
 
 	// Attack: use an invalid sign_type to bypass validation
-	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "evil_type",
@@ -1963,7 +1963,7 @@ func TestRedTeam_SignHandler_InvalidSignerAddress(t *testing.T) {
 	// Attack: signer_address without valid Ethereum format
 	for _, addr := range []string{"0xINVALID", "not_an_address", "0x123", "0x" + strings.Repeat("GG", 20)} {
 		t.Run("addr_"+addr[:min(len(addr), 16)], func(t *testing.T) {
-			resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+			resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 				ChainID:       chainID,
 				SignerAddress: addr,
 				SignType:      "personal",
@@ -1988,7 +1988,7 @@ func TestRedTeam_SignHandler_InvalidChainID(t *testing.T) {
 			name = "empty"
 		}
 		t.Run("chainid_"+name, func(t *testing.T) {
-			resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+			resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 				ChainID:       id,
 				SignerAddress: signerAddress,
 				SignType:      "personal",
@@ -2017,7 +2017,7 @@ func TestRedTeam_SignHandler_NegativeTransactionValue(t *testing.T) {
 		}
 	}`)
 
-	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "transaction",
@@ -2045,7 +2045,7 @@ func TestRedTeam_SignHandler_NegativeGasPrice(t *testing.T) {
 		}
 	}`)
 
-	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "transaction",
@@ -2073,7 +2073,7 @@ func TestRedTeam_SignHandler_InvalidToAddress(t *testing.T) {
 		}
 	}`)
 
-	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "transaction",
@@ -2094,7 +2094,7 @@ func TestRedTeam_SignHandler_OversizedPayload(t *testing.T) {
 	bigValue := strings.Repeat("A", 3*1024*1024)
 	payload := json.RawMessage(fmt.Sprintf(`{"message":"%s"}`, bigValue))
 
-	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "personal",
@@ -2114,7 +2114,7 @@ func TestRedTeam_SignHandler_OversizedMessage(t *testing.T) {
 	bigMessage := strings.Repeat("B", 2*1024*1024)
 	payload := json.RawMessage(fmt.Sprintf(`{"message":"%s"}`, bigMessage))
 
-	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "personal",
@@ -2144,7 +2144,7 @@ func TestRedTeam_SignHandler_OversizedTxData(t *testing.T) {
 		}
 	}`, bigData))
 
-	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "transaction",
@@ -2341,7 +2341,7 @@ func TestRedTeam_PT5_FakeTokenApprove(t *testing.T) {
 							"0000000000000000000000005B38Da6a701c568545dCfcB03FcB875f56beddC4" +
 							"000000000000000000000000000000000000000000000000000000001DCD6500",
 					},
-					"expect_pass": false,
+					"expect_pass":   false,
 					"expect_reason": "target must be real USDC",
 				},
 			},
@@ -2359,7 +2359,7 @@ func TestRedTeam_PT5_FakeTokenApprove(t *testing.T) {
 		"0000000000000000000000005B38Da6a701c568545dCfcB03FcB875f56beddC4" +
 		"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
 
-	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "transaction",
@@ -2430,7 +2430,7 @@ func TestRedTeam_PT5_FakeTokenTransfer(t *testing.T) {
 							"0000000000000000000000005B38Da6a701c568545dCfcB03FcB875f56beddC4" +
 							"000000000000000000000000000000000000000000000000000000003B9ACA00",
 					},
-					"expect_pass": false,
+					"expect_pass":   false,
 					"expect_reason": "target must be real USDC",
 				},
 			},
@@ -2448,7 +2448,7 @@ func TestRedTeam_PT5_FakeTokenTransfer(t *testing.T) {
 		"0000000000000000000000005B38Da6a701c568545dCfcB03FcB875f56beddC4" +
 		"000000000000000000000000000000000000000000000000000000012A05F200"
 
-	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "transaction",
@@ -2560,7 +2560,7 @@ func TestRedTeam_PT5_ExecTxDelegatecall(t *testing.T) {
 							"0000000000000000000000000000000000000000000000000000000000000000" +
 							"0000000000000000000000000000000000000000000000000000000000000000",
 					},
-					"expect_pass": false,
+					"expect_pass":   false,
 					"expect_reason": "operation must be zero (Call only)",
 				},
 			},
@@ -2589,7 +2589,7 @@ func TestRedTeam_PT5_ExecTxDelegatecall(t *testing.T) {
 		"0000000000000000000000000000000000000000000000000000000000000000" +
 		"0000000000000000000000000000000000000000000000000000000000000000"
 
-	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "transaction",
@@ -2697,7 +2697,7 @@ func TestRedTeam_PT5_ExecTxGasDrain(t *testing.T) {
 							"0000000000000000000000000000000000000000000000000000000000000000" +
 							"0000000000000000000000000000000000000000000000000000000000000000",
 					},
-					"expect_pass": false,
+					"expect_pass":   false,
 					"expect_reason": "gasPrice must be zero to prevent drain",
 				},
 			},
@@ -2726,7 +2726,7 @@ func TestRedTeam_PT5_ExecTxGasDrain(t *testing.T) {
 		"0000000000000000000000000000000000000000000000000000000000000000" +
 		"0000000000000000000000000000000000000000000000000000000000000000"
 
-	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "transaction",
@@ -2839,7 +2839,7 @@ func TestRedTeam_PT5_FakeExchangeOrder(t *testing.T) {
 							},
 						},
 					},
-					"expect_pass": false,
+					"expect_pass":   false,
 					"expect_reason": "verifyingContract must be the real exchange",
 				},
 			},
@@ -2851,7 +2851,7 @@ func TestRedTeam_PT5_FakeExchangeOrder(t *testing.T) {
 	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, rule.ID) }()
 
 	// ATTACK: Send an Order with a FAKE verifyingContract
-	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "typed_data",
@@ -3008,7 +3008,7 @@ func TestRedTeam_PT5_SafeTxDelegatecall(t *testing.T) {
 							},
 						},
 					},
-					"expect_pass": false,
+					"expect_pass":   false,
 					"expect_reason": "operation must be zero (Call only)",
 				},
 			},
@@ -3020,7 +3020,7 @@ func TestRedTeam_PT5_SafeTxDelegatecall(t *testing.T) {
 	defer func() { _ = adminClient.EVM.Rules.Delete(ctx, rule.ID) }()
 
 	// ATTACK: Send SafeTx EIP-712 with operation=1 (DelegateCall)
-	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx,&evm.SignRequest{
+	resp, err := adminClient.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
 		ChainID:       chainID,
 		SignerAddress: signerAddress,
 		SignType:      "typed_data",

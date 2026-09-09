@@ -26,15 +26,15 @@ import (
 // ---------------------------------------------------------------------------
 
 type mockAPIKeyRepo struct {
-	createFn                func(ctx context.Context, key *types.APIKey) error
-	getFn                   func(ctx context.Context, id string) (*types.APIKey, error)
-	updateFn                func(ctx context.Context, key *types.APIKey) error
-	deleteFn                func(ctx context.Context, id string) error
-	listFn                  func(ctx context.Context, filter storage.APIKeyFilter) ([]*types.APIKey, error)
-	countFn                 func(ctx context.Context, filter storage.APIKeyFilter) (int, error)
-	updateLastUsedFn        func(ctx context.Context, id string) error
-	deleteBySourceExclFn    func(ctx context.Context, source string, excludeIDs []string) (int64, error)
-	backfillSourceFn        func(ctx context.Context, defaultSource string) (int64, error)
+	createFn             func(ctx context.Context, key *types.APIKey) error
+	getFn                func(ctx context.Context, id string) (*types.APIKey, error)
+	updateFn             func(ctx context.Context, key *types.APIKey) error
+	deleteFn             func(ctx context.Context, id string) error
+	listFn               func(ctx context.Context, filter storage.APIKeyFilter) ([]*types.APIKey, error)
+	countFn              func(ctx context.Context, filter storage.APIKeyFilter) (int, error)
+	updateLastUsedFn     func(ctx context.Context, id string) error
+	deleteBySourceExclFn func(ctx context.Context, source string, excludeIDs []string) (int64, error)
+	backfillSourceFn     func(ctx context.Context, defaultSource string) (int64, error)
 
 	// stored keys for default implementations
 	keys map[string]*types.APIKey

@@ -19,28 +19,28 @@ import (
 
 // AuditModel represents the audit logs view
 type AuditModel struct {
-	audit_svc      audit.API
-	requests_svc   evm.RequestAPI
-	ctx            context.Context
-	width          int
-	height         int
-	spinner        spinner.Model
-	loading        bool
-	err            error
-	records        []audit.Record
-	total          int
-	selectedIdx    int
-	limit          int
-	eventFilter    string
-	severityFilter string
-	showFilter     bool
-	filterInput    textinput.Model
-	filterType     string // "event" or "severity"
-	showDetail         bool
-	detailScroll       int // scroll offset for detail view
-	detailRequest      *evm.RequestStatus
-	detailRequestLoad  bool
-	detailRequestErr   error
+	audit_svc         audit.API
+	requests_svc      evm.RequestAPI
+	ctx               context.Context
+	width             int
+	height            int
+	spinner           spinner.Model
+	loading           bool
+	err               error
+	records           []audit.Record
+	total             int
+	selectedIdx       int
+	limit             int
+	eventFilter       string
+	severityFilter    string
+	showFilter        bool
+	filterInput       textinput.Model
+	filterType        string // "event" or "severity"
+	showDetail        bool
+	detailScroll      int // scroll offset for detail view
+	detailRequest     *evm.RequestStatus
+	detailRequestLoad bool
+	detailRequestErr  error
 	// Cursor-based pagination
 	cursor        *string
 	cursorID      *string

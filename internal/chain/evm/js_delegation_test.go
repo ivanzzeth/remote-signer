@@ -58,16 +58,16 @@ func TestDelegation_Single_AllowedByDelegateRule(t *testing.T) {
 		"script": targetScript,
 	})
 	targetRule := &types.Rule{
-		ID:         "rule-target",
-		Name:       "Target",
-		Type:       types.RuleTypeEVMJS,
-		Mode:       types.RuleModeWhitelist,
-		Config:     targetConfig,
+		ID:            "rule-target",
+		Name:          "Target",
+		Type:          types.RuleTypeEVMJS,
+		Mode:          types.RuleModeWhitelist,
+		Config:        targetConfig,
 		ChainType:     delegationPtrChainType(types.ChainTypeEVM),
 		ChainID:       delegationStrPtr("1"),
-		Owner:      "api1",
-		SignerAddress:  delegationStrPtr("0x70997970C51812dc3A010C7d01b50e0d17dc79C8"),
-		Enabled:    true,
+		Owner:         "api1",
+		SignerAddress: delegationStrPtr("0x70997970C51812dc3A010C7d01b50e0d17dc79C8"),
+		Enabled:       true,
 	}
 
 	// Delegate rule: valid + payload (inner tx) + delegate_to in config
@@ -83,21 +83,21 @@ func TestDelegation_Single_AllowedByDelegateRule(t *testing.T) {
 		};
 	}`
 	delegateConfig := mustMarshalJSON(map[string]interface{}{
-		"script":         delegateScript,
-		"delegate_to":    "rule-target",
-		"delegate_mode":  "single",
+		"script":        delegateScript,
+		"delegate_to":   "rule-target",
+		"delegate_mode": "single",
 	})
 	delegateRule := &types.Rule{
-		ID:         "rule-delegate",
-		Name:       "Delegate",
-		Type:       types.RuleTypeEVMJS,
-		Mode:       types.RuleModeWhitelist,
-		Config:     delegateConfig,
+		ID:            "rule-delegate",
+		Name:          "Delegate",
+		Type:          types.RuleTypeEVMJS,
+		Mode:          types.RuleModeWhitelist,
+		Config:        delegateConfig,
 		ChainType:     delegationPtrChainType(types.ChainTypeEVM),
 		ChainID:       delegationStrPtr("1"),
-		Owner:      "api1",
-		SignerAddress:  delegationStrPtr("0x70997970C51812dc3A010C7d01b50e0d17dc79C8"),
-		Enabled:    true,
+		Owner:         "api1",
+		SignerAddress: delegationStrPtr("0x70997970C51812dc3A010C7d01b50e0d17dc79C8"),
+		Enabled:       true,
 	}
 
 	repo := &delegationRuleRepo{
@@ -114,13 +114,13 @@ func TestDelegation_Single_AllowedByDelegateRule(t *testing.T) {
 	engine.RegisterEvaluator(jsEval)
 
 	req := &types.SignRequest{
-		ID:             "req-1",
-		APIKeyID:       "api1",
-		ChainType:      types.ChainTypeEVM,
-		ChainID:        "1",
-		SignerAddress:  "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
-		SignType:       SignTypeTransaction,
-		Payload:        []byte(`{"transaction":{"to":"0x742d35Cc6634C0532925a3b844Bc454e4438f44e","value":"1000000000000000000","data":"0x","gas":21000,"gasPrice":"0","txType":"legacy"}}`),
+		ID:            "req-1",
+		APIKeyID:      "api1",
+		ChainType:     types.ChainTypeEVM,
+		ChainID:       "1",
+		SignerAddress: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+		SignType:      SignTypeTransaction,
+		Payload:       []byte(`{"transaction":{"to":"0x742d35Cc6634C0532925a3b844Bc454e4438f44e","value":"1000000000000000000","data":"0x","gas":21000,"gasPrice":"0","txType":"legacy"}}`),
 	}
 	parsed := &types.ParsedPayload{
 		Recipient: strPtrForRuleInput("0x742d35Cc6634C0532925a3b844Bc454e4438f44e"),
@@ -141,7 +141,7 @@ func TestDelegation_ScriptReturnedDelegateTo(t *testing.T) {
 
 	targetRule := &types.Rule{
 		ID: "rule-target", Name: "Target", Type: types.RuleTypeEVMJS, Mode: types.RuleModeWhitelist,
-		Config: mustMarshalJSON(map[string]interface{}{"script": `function validate(i){ return { valid: true }; }`}),
+		Config:    mustMarshalJSON(map[string]interface{}{"script": `function validate(i){ return { valid: true }; }`}),
 		ChainType: delegationPtrChainType(types.ChainTypeEVM), ChainID: delegationStrPtr("1"),
 		Owner: "api1", SignerAddress: delegationStrPtr("0x70997970C51812dc3A010C7d01b50e0d17dc79C8"), Enabled: true,
 	}
@@ -151,7 +151,7 @@ func TestDelegation_ScriptReturnedDelegateTo(t *testing.T) {
 	}`
 	delegateRule := &types.Rule{
 		ID: "rule-delegate", Name: "Delegate", Type: types.RuleTypeEVMJS, Mode: types.RuleModeWhitelist,
-		Config: mustMarshalJSON(map[string]interface{}{"script": delegateScript}),
+		Config:    mustMarshalJSON(map[string]interface{}{"script": delegateScript}),
 		ChainType: delegationPtrChainType(types.ChainTypeEVM), ChainID: delegationStrPtr("1"),
 		Owner: "api1", SignerAddress: delegationStrPtr("0x70997970C51812dc3A010C7d01b50e0d17dc79C8"), Enabled: true,
 	}
@@ -227,4 +227,4 @@ func TestDelegation_Cycle_Rejected(t *testing.T) {
 }
 
 func delegationPtrChainType(c types.ChainType) *types.ChainType { return &c }
-func delegationStrPtr(s string) *string                          { return &s }
+func delegationStrPtr(s string) *string                         { return &s }

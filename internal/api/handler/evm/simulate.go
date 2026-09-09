@@ -43,19 +43,19 @@ type SimulateRequest struct {
 
 // SimulateResponse is the JSON response for POST /api/v1/evm/simulate.
 type SimulateResponse struct {
-	Success        bool                      `json:"success"`
-	GasUsed        uint64                    `json:"gas_used"`
-	BalanceChanges []BalanceChangeJSON       `json:"balance_changes"`
-	Events         []simulation.SimEvent     `json:"events"`
-	HasApproval    bool                      `json:"has_approval"`
-	RevertReason     string            `json:"revert_reason,omitempty"`
-	RevertData       string            `json:"revert_data,omitempty"`
-	RevertSelector   string            `json:"revert_selector,omitempty"`
-	RevertSignature  string            `json:"revert_signature,omitempty"`
-	RevertSource     string            `json:"revert_source,omitempty"`
-	RevertConfidence string            `json:"revert_confidence,omitempty"`
-	RevertCandidates []string          `json:"revert_candidates,omitempty"`
-	RevertArgs       map[string]string `json:"revert_args,omitempty"`
+	Success          bool                  `json:"success"`
+	GasUsed          uint64                `json:"gas_used"`
+	BalanceChanges   []BalanceChangeJSON   `json:"balance_changes"`
+	Events           []simulation.SimEvent `json:"events"`
+	HasApproval      bool                  `json:"has_approval"`
+	RevertReason     string                `json:"revert_reason,omitempty"`
+	RevertData       string                `json:"revert_data,omitempty"`
+	RevertSelector   string                `json:"revert_selector,omitempty"`
+	RevertSignature  string                `json:"revert_signature,omitempty"`
+	RevertSource     string                `json:"revert_source,omitempty"`
+	RevertConfidence string                `json:"revert_confidence,omitempty"`
+	RevertCandidates []string              `json:"revert_candidates,omitempty"`
+	RevertArgs       map[string]string     `json:"revert_args,omitempty"`
 }
 
 // BalanceChangeJSON is the JSON-friendly representation of a BalanceChange.
@@ -69,9 +69,9 @@ type BalanceChangeJSON struct {
 
 // BatchSimulateRequest is the JSON request body for POST /api/v1/evm/simulate/batch.
 type BatchSimulateRequest struct {
-	ChainID      string              `json:"chain_id"`
-	From         string              `json:"from"`
-	Transactions []TxParamsJSON      `json:"transactions"`
+	ChainID      string         `json:"chain_id"`
+	From         string         `json:"from"`
+	Transactions []TxParamsJSON `json:"transactions"`
 }
 
 // TxParamsJSON is a single transaction in a batch.
@@ -90,20 +90,20 @@ type BatchSimulateResponse struct {
 
 // SimulateResultJSON is a per-tx result in a batch response.
 type SimulateResultJSON struct {
-	Index          int                  `json:"index"`
-	Success        bool                 `json:"success"`
-	GasUsed        uint64               `json:"gas_used"`
-	BalanceChanges []BalanceChangeJSON  `json:"balance_changes"`
-	Events         []simulation.SimEvent `json:"events"`
-	HasApproval    bool                 `json:"has_approval"`
-	RevertReason     string               `json:"revert_reason,omitempty"`
-	RevertData       string               `json:"revert_data,omitempty"`
-	RevertSelector   string               `json:"revert_selector,omitempty"`
-	RevertSignature  string               `json:"revert_signature,omitempty"`
-	RevertSource     string               `json:"revert_source,omitempty"`
-	RevertConfidence string               `json:"revert_confidence,omitempty"`
-	RevertCandidates []string             `json:"revert_candidates,omitempty"`
-	RevertArgs       map[string]string    `json:"revert_args,omitempty"`
+	Index            int                   `json:"index"`
+	Success          bool                  `json:"success"`
+	GasUsed          uint64                `json:"gas_used"`
+	BalanceChanges   []BalanceChangeJSON   `json:"balance_changes"`
+	Events           []simulation.SimEvent `json:"events"`
+	HasApproval      bool                  `json:"has_approval"`
+	RevertReason     string                `json:"revert_reason,omitempty"`
+	RevertData       string                `json:"revert_data,omitempty"`
+	RevertSelector   string                `json:"revert_selector,omitempty"`
+	RevertSignature  string                `json:"revert_signature,omitempty"`
+	RevertSource     string                `json:"revert_source,omitempty"`
+	RevertConfidence string                `json:"revert_confidence,omitempty"`
+	RevertCandidates []string              `json:"revert_candidates,omitempty"`
+	RevertArgs       map[string]string     `json:"revert_args,omitempty"`
 }
 
 // ServeHTTP handles POST /api/v1/evm/simulate.

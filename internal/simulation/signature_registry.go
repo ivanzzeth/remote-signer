@@ -63,9 +63,9 @@ func NewSignatureRegistry(baseURL string, ttl time.Duration) *SignatureRegistry 
 		ttl = 24 * time.Hour
 	}
 	return &SignatureRegistry{
-		baseURL: strings.TrimSuffix(baseURL, "/"),
-		client:  &http.Client{Timeout: defaultRegistryHTTPTimeout},
-		ttl:     ttl,
+		baseURL:   strings.TrimSuffix(baseURL, "/"),
+		client:    &http.Client{Timeout: defaultRegistryHTTPTimeout},
+		ttl:       ttl,
 		funcSigs:  make(map[string]cacheEntry),
 		eventSigs: make(map[string]cacheEntry),
 	}

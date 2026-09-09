@@ -1055,12 +1055,12 @@ func TestGormRequestRepo_LookupBySignedData_Found(t *testing.T) {
 
 	signedData := []byte("signed-tx-bytes-123")
 	req := &types.SignRequest{
-		ID:         "req-lookup-1",
-		APIKeyID:   "key-lookup",
-		ChainType:  types.ChainTypeEVM,
-		ChainID:    "1",
-		Status:     types.StatusCompleted,
-		SignedData: signedData,
+		ID:          "req-lookup-1",
+		APIKeyID:    "key-lookup",
+		ChainType:   types.ChainTypeEVM,
+		ChainID:     "1",
+		Status:      types.StatusCompleted,
+		SignedData:  signedData,
 		CompletedAt: func() *time.Time { t := time.Now(); return &t }(),
 	}
 	require.NoError(t, repo.Create(ctx, req))

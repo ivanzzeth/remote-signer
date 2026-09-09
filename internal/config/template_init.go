@@ -18,8 +18,8 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/audit"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
-	pkgvalidate "github.com/ivanzzeth/remote-signer/internal/validate"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
+	pkgvalidate "github.com/ivanzzeth/remote-signer/internal/validate"
 )
 
 // TemplateFileType is the special template type for including templates from external files
@@ -135,8 +135,8 @@ func (i *TemplateInitializer) GetLoadedTemplates(templates []TemplateConfig) ([]
 //
 // Filename convention: a template file is anything matching either of:
 //
-//   *.template.yaml          (e.g. polymarket_safe.template.yaml)
-//   *.template.js.yaml       (e.g. erc20.template.js.yaml)
+//	*.template.yaml          (e.g. polymarket_safe.template.yaml)
+//	*.template.js.yaml       (e.g. erc20.template.js.yaml)
 //
 // The template's name is derived from the filename (basename without
 // the .template.* suffix), but the file's own `variables:` /
@@ -630,7 +630,6 @@ func expandInstanceRule(rule RuleConfig, templates map[string]TemplateConfig) ([
 
 	return templateRules, nil
 }
-
 
 // instanceScopeSuffix returns a suffix like "evm-137" from the instance rule's
 // scope fields (chain_type, chain_id).  Returns "" if no scope is set.

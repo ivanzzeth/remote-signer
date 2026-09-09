@@ -38,7 +38,7 @@ type APIKey struct {
 	Name         string `json:"name" gorm:"type:varchar(255)"`
 	PublicKeyHex string `json:"public_key" gorm:"type:varchar(128)"` // Ed25519 public key, hex encoded
 
-	RateLimit int        `json:"rate_limit" gorm:"default:100"`                           // requests per minute
+	RateLimit int        `json:"rate_limit" gorm:"default:100"`                            // requests per minute
 	Role      APIKeyRole `json:"role" gorm:"type:varchar(32);not null;default:'strategy'"` // admin/dev/agent/strategy
 
 	Enabled bool `json:"enabled" gorm:"index;default:true"`

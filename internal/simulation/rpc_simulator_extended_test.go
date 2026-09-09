@@ -123,11 +123,11 @@ func TestDecodeRevertReason_CustomReasonLong(t *testing.T) {
 
 func TestHexDecode(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    string
-		want     []byte
-		wantErr  bool
-		errMsg   string
+		name    string
+		input   string
+		want    []byte
+		wantErr bool
+		errMsg  string
 	}{
 		{name: "even length", input: "deadbeef", want: []byte{0xde, 0xad, 0xbe, 0xef}},
 		{name: "odd length pads with 0", input: "abc", want: []byte{0x0a, 0xbc}},
@@ -1095,9 +1095,9 @@ func TestDetectApproval_NonParsableValue(t *testing.T) {
 func TestDetectApproval_ApprovalForAll(t *testing.T) {
 	events := []SimEvent{
 		{
-			Event: "ApprovalForAll",
+			Event:    "ApprovalForAll",
 			Standard: "erc721",
-			Args:  map[string]string{"owner": "0xabc"},
+			Args:     map[string]string{"owner": "0xabc"},
 		},
 	}
 	result := DetectApproval(context.Background(), events, nil, "", nil)
@@ -1130,9 +1130,9 @@ func TestDetectApproval_ApprovalForAllEmptyValue(t *testing.T) {
 	// ApprovalForAll with empty value: should still be detected
 	events := []SimEvent{
 		{
-			Event: "ApprovalForAll",
+			Event:    "ApprovalForAll",
 			Standard: "erc721",
-			Args:  map[string]string{"owner": "0xabc", "value": ""},
+			Args:     map[string]string{"owner": "0xabc", "value": ""},
 		},
 	}
 	result := DetectApproval(context.Background(), events, nil, "", nil)

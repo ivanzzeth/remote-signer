@@ -21,13 +21,13 @@ const (
 
 	// EVM-specific rule types (prefixed)
 	// Mode (whitelist/blocklist) determines behavior, not the type name
-	RuleTypeEVMAddressList         RuleType = "evm_address_list"         // address list (whitelist mode = allow, blocklist mode = block)
-	RuleTypeEVMContractMethod      RuleType = "evm_contract_method"      // contract method restriction
-	RuleTypeEVMValueLimit          RuleType = "evm_value_limit"          // value limit check
-	RuleTypeEVMSolidityExpression  RuleType = "evm_solidity_expression"  // Solidity expression rules (Foundry-based)
-	RuleTypeEVMJS                  RuleType = "evm_js"                    // JS rules (in-process Sobek); validate(input) → { valid, reason?, payload? }
-	RuleTypeEVMDynamicBlocklist    RuleType = "evm_dynamic_blocklist"    // Dynamic blocklist: runtime-synced from external URLs (OFAC, scam DBs)
-	RuleTypeEVMInternalTransfer    RuleType = "evm_internal_transfer"    // Internal transfer: same-owner signer transfers (whitelist-only)
+	RuleTypeEVMAddressList        RuleType = "evm_address_list"        // address list (whitelist mode = allow, blocklist mode = block)
+	RuleTypeEVMContractMethod     RuleType = "evm_contract_method"     // contract method restriction
+	RuleTypeEVMValueLimit         RuleType = "evm_value_limit"         // value limit check
+	RuleTypeEVMSolidityExpression RuleType = "evm_solidity_expression" // Solidity expression rules (Foundry-based)
+	RuleTypeEVMJS                 RuleType = "evm_js"                  // JS rules (in-process Sobek); validate(input) → { valid, reason?, payload? }
+	RuleTypeEVMDynamicBlocklist   RuleType = "evm_dynamic_blocklist"   // Dynamic blocklist: runtime-synced from external URLs (OFAC, scam DBs)
+	RuleTypeEVMInternalTransfer   RuleType = "evm_internal_transfer"   // Internal transfer: same-owner signer transfers (whitelist-only)
 )
 
 // RuleSource represents where the rule came from
@@ -69,7 +69,7 @@ const (
 	RuleStatusPendingApproval RuleStatus = "pending_approval"
 	RuleStatusRejected        RuleStatus = "rejected"
 	RuleStatusRevoked         RuleStatus = "revoked"
-	RuleStatusSuperseded RuleStatus = "superseded"
+	RuleStatusSuperseded      RuleStatus = "superseded"
 )
 
 // Rule represents a signing authorization rule
@@ -128,8 +128,8 @@ type Rule struct {
 	// Schedule fields — for periodic budget renewal
 	// When BudgetPeriod is set, the instance automatically renews its budget
 	// at each period boundary. ExpiresAt still controls the overall lifetime.
-	BudgetPeriod      *time.Duration `json:"budget_period,omitempty" gorm:"type:bigint"`         // e.g. 24h, 7*24h
-	BudgetPeriodStart *time.Time     `json:"budget_period_start,omitempty"` // when the first period begins (SQLite: datetime, PostgreSQL: timestamptz)
+	BudgetPeriod      *time.Duration `json:"budget_period,omitempty" gorm:"type:bigint"` // e.g. 24h, 7*24h
+	BudgetPeriodStart *time.Time     `json:"budget_period_start,omitempty"`              // when the first period begins (SQLite: datetime, PostgreSQL: timestamptz)
 
 	Enabled   bool       `json:"enabled" gorm:"index"`
 	Priority  int        `json:"priority" gorm:"index;default:100"` // lower = higher priority, 1 is highest

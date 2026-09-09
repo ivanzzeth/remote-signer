@@ -251,4 +251,3 @@ func init() {
 	simulateCmd.AddCommand(simulateBatchCmd)
 	simulateCmd.AddCommand(simulateStatusCmd)
 }
-

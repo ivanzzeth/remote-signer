@@ -28,12 +28,12 @@ import (
 // errors. Tests poke at lastMethod/lastParams to verify what the
 // handler actually forwarded.
 type stubProxyBackend struct {
-	resultFor map[string]json.RawMessage
-	errFor    map[string]error
-	lastChain string
+	resultFor  map[string]json.RawMessage
+	errFor     map[string]error
+	lastChain  string
 	lastMethod string
 	lastParams []interface{}
-	calls     int
+	calls      int
 }
 
 func (s *stubProxyBackend) DoWalletProxyRPC(
@@ -316,8 +316,8 @@ func TestRPCProxy_PassesParamsThrough(t *testing.T) {
 // the proxy's recorder-call shape without standing up the real
 // TransactionService + Gorm chain.
 type stubRecorder struct {
-	mu      sync.Mutex
-	calls   []struct{ chainID, signed string }
+	mu       sync.Mutex
+	calls    []struct{ chainID, signed string }
 	failNext error
 }
 

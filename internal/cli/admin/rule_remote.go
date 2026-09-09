@@ -295,7 +295,7 @@ var (
 var ruleValidateCmd = &cobra.Command{
 	Use:   "validate [rule-id]",
 	Short: "Validate a rule's test cases (evm_js only) or all rules with --all",
-	Args: cobra.MaximumNArgs(1),
+	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c, err := newClientFromFlags(cmd)
 		if err != nil {
@@ -441,14 +441,14 @@ var (
 	flagUpdateVars        []string
 
 	// propose flags
-	flagProposeName        string
-	flagProposeDescription string
-	flagProposeConfig      []string
-	flagProposeVars        []string
-	flagProposePriority    int
-	flagProposeChainType   string
-	flagProposeChainID     string
-	flagProposeSignerAddr  string
+	flagProposeName         string
+	flagProposeDescription  string
+	flagProposeConfig       []string
+	flagProposeVars         []string
+	flagProposePriority     int
+	flagProposeChainType    string
+	flagProposeChainID      string
+	flagProposeSignerAddr   string
 	flagProposeBudgetPeriod string
 )
 

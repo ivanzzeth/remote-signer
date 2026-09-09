@@ -80,11 +80,11 @@ func parseRegistryEvents(ctx context.Context, reg *SignatureRegistry, logs []TxL
 }
 
 var builtinEventTopics = map[string]struct{}{
-	strings.ToLower(transferTopic0):         {},
+	strings.ToLower(transferTopic0):       {},
 	strings.ToLower(transferSingleTopic0): {},
 	strings.ToLower(transferBatchTopic0):  {},
-	strings.ToLower(depositTopic0):          {},
-	strings.ToLower(withdrawalTopic0):       {},
-	strings.ToLower(approvalTopic0):         {},
-	strings.ToLower(approvalForAllTopic0):   {},
+	strings.ToLower(depositTopic0):        {},
+	strings.ToLower(withdrawalTopic0):     {},
+	strings.ToLower(approvalTopic0):       {},
+	strings.ToLower(approvalForAllTopic0): {},
 }

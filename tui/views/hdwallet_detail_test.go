@@ -177,7 +177,7 @@ func TestHDWalletDetailModel_DeriveSingle(t *testing.T) {
 		// LoadWallet resets actionResult, so just check the derive form is cleared
 		// and a reload command is returned
 		assert.True(t, m.loading) // LoadWallet sets loading
-		assert.NotNil(t, cmd)    // LoadWallet command
+		assert.NotNil(t, cmd)     // LoadWallet command
 	})
 
 	t.Run("derive error shows message", func(t *testing.T) {
@@ -407,4 +407,3 @@ func TestHDWalletDetailModel_Navigation(t *testing.T) {
 		assert.Equal(t, 0, m.selectedIdx)
 	})
 }
-

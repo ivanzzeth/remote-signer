@@ -41,8 +41,12 @@ func (s *stubTemplateRepo) Delete(_ context.Context, _ string) error            
 func (s *stubTemplateRepo) List(_ context.Context, _ storage.TemplateFilter) ([]*types.RuleTemplate, error) {
 	return nil, nil
 }
-func (s *stubTemplateRepo) Count(_ context.Context, _ storage.TemplateFilter) (int, error) { return 0, nil }
-func (s *stubTemplateRepo) Upsert(_ context.Context, _ *types.RuleTemplate) (bool, error) { return false, nil }
+func (s *stubTemplateRepo) Count(_ context.Context, _ storage.TemplateFilter) (int, error) {
+	return 0, nil
+}
+func (s *stubTemplateRepo) Upsert(_ context.Context, _ *types.RuleTemplate) (bool, error) {
+	return false, nil
+}
 func (s *stubTemplateRepo) ListIDsBySource(_ context.Context, _ types.RuleSource) ([]string, error) {
 	return nil, nil
 }
@@ -117,14 +121,18 @@ func (s *stubBudgetRepo) DeleteByRuleID(ctx context.Context, id types.RuleID) er
 	}
 	return nil
 }
-func (s *stubBudgetRepo) AtomicSpend(_ context.Context, _ types.RuleID, _, _ string) error { return nil }
+func (s *stubBudgetRepo) AtomicSpend(_ context.Context, _ types.RuleID, _, _ string) error {
+	return nil
+}
 func (s *stubBudgetRepo) ResetBudget(_ context.Context, _ types.RuleID, _ string, _ time.Time) error {
 	return nil
 }
 func (s *stubBudgetRepo) MarkAlertSent(_ context.Context, _ types.RuleID, _ string) error { return nil }
-func (s *stubBudgetRepo) CountByRuleID(_ context.Context, _ types.RuleID) (int, error)   { return 0, nil }
-func (s *stubBudgetRepo) Get(_ context.Context, _ string) (*types.RuleBudget, error)     { return nil, types.ErrNotFound }
-func (s *stubBudgetRepo) Update(_ context.Context, _ *types.RuleBudget) error            { return nil }
+func (s *stubBudgetRepo) CountByRuleID(_ context.Context, _ types.RuleID) (int, error)    { return 0, nil }
+func (s *stubBudgetRepo) Get(_ context.Context, _ string) (*types.RuleBudget, error) {
+	return nil, types.ErrNotFound
+}
+func (s *stubBudgetRepo) Update(_ context.Context, _ *types.RuleBudget) error { return nil }
 func (s *stubBudgetRepo) GetByRuleID(ctx context.Context, ruleID types.RuleID, unit string) (*types.RuleBudget, error) {
 	if s.spyBudgetRepo != nil {
 		return s.spyBudgetRepo.GetByRuleID(ctx, ruleID, unit)

@@ -11,14 +11,14 @@ import (
 
 // RevertResolution is the structured output of revert decoding.
 type RevertResolution struct {
-	Reason       string
-	Data         string
-	Selector     string
-	Signature    string
-	Source       string
-	Confidence   string
-	DecodedArgs  map[string]string `json:"decoded_args,omitempty"`
-	Candidates   []string          `json:"candidates,omitempty"`
+	Reason      string
+	Data        string
+	Selector    string
+	Signature   string
+	Source      string
+	Confidence  string
+	DecodedArgs map[string]string `json:"decoded_args,omitempty"`
+	Candidates  []string          `json:"candidates,omitempty"`
 }
 
 // ResolveRevert decodes revert data using builtin decoders first, then the signature registry.
@@ -27,7 +27,7 @@ func ResolveRevert(ctx context.Context, reg *SignatureRegistry, data string) Rev
 	hex := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(data)), "0x")
 	res := RevertResolution{
 		Data:       data,
-		Source:       sourceRegistry,
+		Source:     sourceRegistry,
 		Confidence: confidenceUnknown,
 	}
 	if len(hex) < 8 {

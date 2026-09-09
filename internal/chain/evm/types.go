@@ -99,8 +99,8 @@ func (d *TypedDataDomain) UnmarshalJSON(data []byte) error {
 
 // TransactionPayload represents an Ethereum transaction
 type TransactionPayload struct {
-	To        *string `json:"to,omitempty"` // nil for contract creation
-	Value     string  `json:"value"`        // wei as decimal string
+	To        *string `json:"to,omitempty"`   // nil for contract creation
+	Value     string  `json:"value"`          // wei as decimal string
 	Data      string  `json:"data,omitempty"` // 0x-prefixed hex string
 	Nonce     *uint64 `json:"nonce,omitempty"`
 	Gas       uint64  `json:"gas"`

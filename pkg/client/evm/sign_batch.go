@@ -27,11 +27,11 @@ type BatchSignResponse struct {
 
 // BatchSignResultDTO is a per-tx result in a batch sign response.
 type BatchSignResultDTO struct {
-	Index      int                `json:"index"`
-	RequestID  string             `json:"request_id,omitempty"`
-	Signature  string             `json:"signature,omitempty"`
-	SignedData string             `json:"signed_data,omitempty"`
-	Simulation *SimulateResponse  `json:"simulation,omitempty"`
+	Index      int               `json:"index"`
+	RequestID  string            `json:"request_id,omitempty"`
+	Signature  string            `json:"signature,omitempty"`
+	SignedData string            `json:"signed_data,omitempty"`
+	Simulation *SimulateResponse `json:"simulation,omitempty"`
 }
 
 // ExecuteBatch submits a batch of signing requests atomically.

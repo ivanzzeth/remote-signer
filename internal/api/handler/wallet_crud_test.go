@@ -62,17 +62,25 @@ func TestNewWalletHandler_NilLogger(t *testing.T) {
 // minimal mock for constructor test
 type mockWalletRepo struct{}
 
-func (m *mockWalletRepo) Create(_ context.Context, _ *types.Wallet) error { return nil }
+func (m *mockWalletRepo) Create(_ context.Context, _ *types.Wallet) error        { return nil }
 func (m *mockWalletRepo) Get(_ context.Context, _ string) (*types.Wallet, error) { return nil, nil }
-func (m *mockWalletRepo) List(_ context.Context, _ types.WalletFilter) (*types.WalletListResult, error) { return nil, nil }
-func (m *mockWalletRepo) Update(_ context.Context, _ *types.Wallet) error { return nil }
-func (m *mockWalletRepo) Delete(_ context.Context, _ string) error { return nil }
+func (m *mockWalletRepo) List(_ context.Context, _ types.WalletFilter) (*types.WalletListResult, error) {
+	return nil, nil
+}
+func (m *mockWalletRepo) Update(_ context.Context, _ *types.Wallet) error          { return nil }
+func (m *mockWalletRepo) Delete(_ context.Context, _ string) error                 { return nil }
 func (m *mockWalletRepo) AddMember(_ context.Context, _ *types.WalletMember) error { return nil }
-func (m *mockWalletRepo) RemoveMember(_ context.Context, _, _ string) error { return nil }
-func (m *mockWalletRepo) ListMembers(_ context.Context, _ string) ([]types.WalletMember, error) { return nil, nil }
+func (m *mockWalletRepo) RemoveMember(_ context.Context, _, _ string) error        { return nil }
+func (m *mockWalletRepo) ListMembers(_ context.Context, _ string) ([]types.WalletMember, error) {
+	return nil, nil
+}
 func (m *mockWalletRepo) IsMember(_ context.Context, _, _ string) (bool, error) { return false, nil }
-func (m *mockWalletRepo) GetWalletsForSigner(_ context.Context, _ string) ([]types.Wallet, error) { return nil, nil }
-func (m *mockWalletRepo) GetWalletsForSigners(_ context.Context, _ []string) (map[string][]types.Wallet, error) { return nil, nil }
+func (m *mockWalletRepo) GetWalletsForSigner(_ context.Context, _ string) ([]types.Wallet, error) {
+	return nil, nil
+}
+func (m *mockWalletRepo) GetWalletsForSigners(_ context.Context, _ []string) (map[string][]types.Wallet, error) {
+	return nil, nil
+}
 
 // ---------------------------------------------------------------------------
 // ServeHTTP — list / create routing

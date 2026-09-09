@@ -67,22 +67,22 @@ type validateRuleResultItem struct {
 
 // validateTemplateResponse mirrors handler.validateTemplateResponse.
 type validateTemplateResponse struct {
-	TemplateID   string                  `json:"template_id"`
-	TemplateName string                  `json:"template_name"`
+	TemplateID   string                    `json:"template_id"`
+	TemplateName string                    `json:"template_name"`
 	Results      []*validateRuleResultItem `json:"results,omitempty"`
-	Total        int                     `json:"total"`
-	Passed       int                     `json:"passed"`
-	Failed       int                     `json:"failed"`
+	Total        int                       `json:"total"`
+	Passed       int                       `json:"passed"`
+	Failed       int                       `json:"failed"`
 }
 
 // validatePresetResponse mirrors handler.validatePresetResponse.
 type validatePresetResponse struct {
-	PresetID   string                  `json:"preset_id"`
-	PresetName string                  `json:"preset_name"`
+	PresetID   string                    `json:"preset_id"`
+	PresetName string                    `json:"preset_name"`
 	Results    []*validateRuleResultItem `json:"results,omitempty"`
-	Total      int                     `json:"total"`
-	Passed     int                     `json:"passed"`
-	Failed     int                     `json:"failed"`
+	Total      int                       `json:"total"`
+	Passed     int                       `json:"passed"`
+	Failed     int                       `json:"failed"`
 }
 
 // rawSignedRequest sends an authenticated JSON request using Ed25519 signing and
@@ -183,13 +183,13 @@ func TestE2E_ValidateRuleEndpoint(t *testing.T) {
 			"script": script,
 			"test_cases": []map[string]interface{}{
 				{
-					"name":       "pass: chain 1",
-					"input":      map[string]interface{}{"sign_type": "personal", "chain_id": 1, "signer": signerAddress, "personal_sign": map[string]interface{}{"message": "hi"}},
+					"name":        "pass: chain 1",
+					"input":       map[string]interface{}{"sign_type": "personal", "chain_id": 1, "signer": signerAddress, "personal_sign": map[string]interface{}{"message": "hi"}},
 					"expect_pass": true,
 				},
 				{
-					"name":         "fail: chain 999",
-					"input":        map[string]interface{}{"sign_type": "personal", "chain_id": 999, "signer": signerAddress, "personal_sign": map[string]interface{}{"message": "hi"}},
+					"name":          "fail: chain 999",
+					"input":         map[string]interface{}{"sign_type": "personal", "chain_id": 999, "signer": signerAddress, "personal_sign": map[string]interface{}{"message": "hi"}},
 					"expect_pass":   false,
 					"expect_reason": "chain 999 blocked",
 				},

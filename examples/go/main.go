@@ -129,7 +129,7 @@ func main() {
 			Message: "Hello from Go client example!",
 		})
 		resp, err := c.EVM.Sign.ExecuteAsync(ctx, &evm.SignRequest{
-			ChainID:      "1",
+			ChainID:       "1",
 			SignerAddress: signer.Address,
 			SignType:      evm.SignTypePersonal,
 			Payload:       payload,

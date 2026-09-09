@@ -15,39 +15,39 @@ import "time"
 // the row came from, and ContentHash lets Sync skip unchanged files in
 // O(1) instead of re-serialising every row on each boot.
 type RuleTemplate struct {
-	ID             string     `json:"id" gorm:"primaryKey;type:varchar(128)"`
-	Name           string     `json:"name" gorm:"type:varchar(255)"` // human-friendly display label
-	Description    string     `json:"description,omitempty" gorm:"type:text"`
-	Type           RuleType   `json:"type" gorm:"type:varchar(64)"`
-	Mode           RuleMode   `json:"mode" gorm:"type:varchar(16)"`
+	ID          string   `json:"id" gorm:"primaryKey;type:varchar(128)"`
+	Name        string   `json:"name" gorm:"type:varchar(255)"` // human-friendly display label
+	Description string   `json:"description,omitempty" gorm:"type:text"`
+	Type        RuleType `json:"type" gorm:"type:varchar(64)"`
+	Mode        RuleMode `json:"mode" gorm:"type:varchar(16)"`
 	// ChainType narrows the template to one chain family. Empty value
 	// is the off-chain bucket — rules that don't care which network
 	// (sign_type_allowlist, rate_limit, time_window, ...).
-	ChainType      ChainType  `json:"chain_type,omitempty" gorm:"type:varchar(32);index"`
-	Variables      []byte     `json:"variables" gorm:"type:jsonb"`        // []TemplateVariable
+	ChainType ChainType `json:"chain_type,omitempty" gorm:"type:varchar(32);index"`
+	Variables []byte    `json:"variables" gorm:"type:jsonb"` // []TemplateVariable
 	// VariableGroups is an optional UI-only directive for grouping
 	// long forms into collapsible sections. Empty = one flat list.
 	VariableGroups []byte     `json:"variable_groups,omitempty" gorm:"type:jsonb"` // []VariableGroup
-	Config         []byte     `json:"config" gorm:"type:jsonb"`           // Template config with ${var} (contains rules array)
+	Config         []byte     `json:"config" gorm:"type:jsonb"`                    // Template config with ${var} (contains rules array)
 	BudgetMetering []byte     `json:"budget_metering,omitempty" gorm:"type:jsonb"` // *BudgetMetering (nullable)
 	TestVariables  []byte     `json:"test_variables,omitempty" gorm:"type:jsonb"`  // map[string]string for template validation
 	Source         RuleSource `json:"source" gorm:"type:varchar(32);index"`
 	// SourcePath records where the row came from — a relative file
 	// path for file sources, a URL for future github/http sources.
 	// Empty for source=api (created via POST).
-	SourcePath     string     `json:"source_path,omitempty" gorm:"type:varchar(512)"`
+	SourcePath string `json:"source_path,omitempty" gorm:"type:varchar(512)"`
 	// SourceRef pins a remote ref (commit SHA, tag, branch). File
 	// sources leave this empty; remote sources should always populate
 	// it so cached rows can be invalidated when the ref moves.
-	SourceRef      string     `json:"source_ref,omitempty" gorm:"type:varchar(128)"`
+	SourceRef string `json:"source_ref,omitempty" gorm:"type:varchar(128)"`
 	// ContentHash is SHA256 hex of the source YAML. Registry.Sync
 	// compares this against the file's current hash before doing any
 	// JSON marshalling, so unchanged templates touch one column read
 	// per startup.
-	ContentHash    string     `json:"content_hash,omitempty" gorm:"type:varchar(64);index"`
-	Enabled        bool       `json:"enabled" gorm:"index"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	ContentHash string    `json:"content_hash,omitempty" gorm:"type:varchar(64);index"`
+	Enabled     bool      `json:"enabled" gorm:"index"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // TableName specifies the table name for GORM
@@ -70,47 +70,47 @@ type OperatorOverride struct {
 // with one POST. Until v0.3 presets lived only as YAML files on disk;
 // the Registry now upserts them into this table so:
 //
-//   1. remote sources (github, http) have a stable cache location, and
-//   2. the API can serve list/detail without rescanning the filesystem.
+//  1. remote sources (github, http) have a stable cache location, and
+//  2. the API can serve list/detail without rescanning the filesystem.
 //
 // Identity + provenance fields mirror RuleTemplate so the same Sync
 // machinery applies to both kinds.
 type RulePreset struct {
-	ID                string     `json:"id" gorm:"primaryKey;type:varchar(128)"`
-	Name              string     `json:"name" gorm:"type:varchar(255)"`
-	Description       string     `json:"description,omitempty" gorm:"type:text"`
-	ChainType         ChainType  `json:"chain_type,omitempty" gorm:"type:varchar(32);index"`
-	ChainID           string     `json:"chain_id,omitempty" gorm:"type:varchar(32)"`
+	ID          string    `json:"id" gorm:"primaryKey;type:varchar(128)"`
+	Name        string    `json:"name" gorm:"type:varchar(255)"`
+	Description string    `json:"description,omitempty" gorm:"type:text"`
+	ChainType   ChainType `json:"chain_type,omitempty" gorm:"type:varchar(32);index"`
+	ChainID     string    `json:"chain_id,omitempty" gorm:"type:varchar(32)"`
 	// TemplateIDs is the list of template canonical IDs this preset
 	// instantiates. JSON-encoded []string. Composite presets target
 	// multiple templates with shared variables/budget/schedule.
-	TemplateIDs       []byte     `json:"template_ids" gorm:"type:jsonb"`
+	TemplateIDs []byte `json:"template_ids" gorm:"type:jsonb"`
 	// Variables is the preset's own default values for the targeted
 	// templates' variables. JSON-encoded map[string]any so the typed
 	// shape (bool, []string, etc.) survives the round-trip.
-	Variables         []byte     `json:"variables,omitempty" gorm:"type:jsonb"`
+	Variables []byte `json:"variables,omitempty" gorm:"type:jsonb"`
 	// OperatorOverrides is JSON-encoded []OperatorOverride — which
 	// variables the operator can/must change at apply time. Variables
 	// not listed here are baked from the preset's Variables map.
-	OperatorOverrides []byte     `json:"operator_overrides,omitempty" gorm:"type:jsonb"`
+	OperatorOverrides []byte `json:"operator_overrides,omitempty" gorm:"type:jsonb"`
 	// Budget / Schedule are JSON-encoded maps; values may contain
 	// ${var} which is substituted at apply time against the resolved
 	// variable map.
-	Budget            []byte     `json:"budget,omitempty" gorm:"type:jsonb"`
-	Schedule          []byte     `json:"schedule,omitempty" gorm:"type:jsonb"`
+	Budget   []byte `json:"budget,omitempty" gorm:"type:jsonb"`
+	Schedule []byte `json:"schedule,omitempty" gorm:"type:jsonb"`
 	// Matrix is an optional per-chain variable override table for
 	// presets that use the rule-level Matrix feature. One rule
 	// created from this preset serves all chains; the evaluator
 	// resolves variables per request by looking up Matrix[chain_id].
 	// Stored as JSONB: []map[string]any.
-	Matrix            []byte     `json:"matrix,omitempty" gorm:"type:jsonb"`
-	Enabled           bool       `json:"enabled" gorm:"index"`
-	Source            RuleSource `json:"source" gorm:"type:varchar(32);index"`
-	SourcePath        string     `json:"source_path,omitempty" gorm:"type:varchar(512)"`
-	SourceRef         string     `json:"source_ref,omitempty" gorm:"type:varchar(128)"`
-	ContentHash       string     `json:"content_hash,omitempty" gorm:"type:varchar(64);index"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
+	Matrix      []byte     `json:"matrix,omitempty" gorm:"type:jsonb"`
+	Enabled     bool       `json:"enabled" gorm:"index"`
+	Source      RuleSource `json:"source" gorm:"type:varchar(32);index"`
+	SourcePath  string     `json:"source_path,omitempty" gorm:"type:varchar(512)"`
+	SourceRef   string     `json:"source_ref,omitempty" gorm:"type:varchar(128)"`
+	ContentHash string     `json:"content_hash,omitempty" gorm:"type:varchar(64);index"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
 // TableName specifies the table name for GORM
@@ -124,24 +124,24 @@ func (RulePreset) TableName() string {
 //
 // Semantics by type:
 //
-//   address       string — chain-specific format (EVM 0x+40hex, Solana
-//                          base58, etc.); the surrounding template's
-//                          chain_type field decides validation
-//   address_list  []string
-//   bigint        string — decimal big integer (precision-safe); sentinel
-//                          "-1" allowed where the rule supports it.
-//                          Replaces the EVM-flavored "uint256" name —
-//                          same on-the-wire shape, chain-neutral name.
-//   bigint_list   []string
-//   string        string
-//   bool          bool
-//   bytes         string — 0x + even-length hex
-//   bytes4        string — 0x + 8 hex (EVM function selector; kept as a
-//                          named alias so calldata-param rules stay
-//                          legible. Same wire format as bytes.)
-//   duration      string — Go time.ParseDuration form ("30s", "24h")
-//   enum          string — must appear in the variable's Options
-//   json          any   — opaque; only syntactic validation
+//	address       string — chain-specific format (EVM 0x+40hex, Solana
+//	                       base58, etc.); the surrounding template's
+//	                       chain_type field decides validation
+//	address_list  []string
+//	bigint        string — decimal big integer (precision-safe); sentinel
+//	                       "-1" allowed where the rule supports it.
+//	                       Replaces the EVM-flavored "uint256" name —
+//	                       same on-the-wire shape, chain-neutral name.
+//	bigint_list   []string
+//	string        string
+//	bool          bool
+//	bytes         string — 0x + even-length hex
+//	bytes4        string — 0x + 8 hex (EVM function selector; kept as a
+//	                       named alias so calldata-param rules stay
+//	                       legible. Same wire format as bytes.)
+//	duration      string — Go time.ParseDuration form ("30s", "24h")
+//	enum          string — must appear in the variable's Options
+//	json          any   — opaque; only syntactic validation
 type VariableType string
 
 const (
@@ -248,8 +248,8 @@ type VariableGroup struct {
 // on the template so extraction semantics stay fixed—operators tune limits per instance without
 // accidentally changing how amounts are measured.
 type BudgetMetering struct {
-	Method     string `json:"method" yaml:"method"`                          // "none", "count_only", "calldata_param", "typed_data_field", "tx_value", "js"
-	Unit       string `json:"unit" yaml:"unit"`                              // custom unit: "usdt", "auth", "eth"
+	Method     string `json:"method" yaml:"method"`                               // "none", "count_only", "calldata_param", "typed_data_field", "tx_value", "js"
+	Unit       string `json:"unit" yaml:"unit"`                                   // custom unit: "usdt", "auth", "eth"
 	ParamIndex int    `json:"param_index,omitempty" yaml:"param_index,omitempty"` // for calldata_param
 	ParamType  string `json:"param_type,omitempty" yaml:"param_type,omitempty"`   // for calldata_param: "uint256", etc.
 	FieldPath  string `json:"field_path,omitempty" yaml:"field_path,omitempty"`   // for typed_data_field: "message.amount"
@@ -257,10 +257,10 @@ type BudgetMetering struct {
 
 	// Dynamic budget: when true, validateBudget may return {amount, unit} and the unit
 	// is resolved at evaluation time rather than being fixed at rule creation.
-	Dynamic      bool                `json:"dynamic,omitempty" yaml:"dynamic,omitempty"`
-	UnitDecimal  bool                `json:"unit_decimal,omitempty" yaml:"unit_decimal,omitempty"`
-	KnownUnits   map[string]UnitConf `json:"known_units,omitempty" yaml:"known_units,omitempty"`
-	UnknownDefault *UnitConf         `json:"unknown_default,omitempty" yaml:"unknown_default,omitempty"`
+	Dynamic        bool                `json:"dynamic,omitempty" yaml:"dynamic,omitempty"`
+	UnitDecimal    bool                `json:"unit_decimal,omitempty" yaml:"unit_decimal,omitempty"`
+	KnownUnits     map[string]UnitConf `json:"known_units,omitempty" yaml:"known_units,omitempty"`
+	UnknownDefault *UnitConf           `json:"unknown_default,omitempty" yaml:"unknown_default,omitempty"`
 
 	// SECURITY: MaxDynamicUnits caps the number of distinct dynamic budget units per rule.
 	// Without this, an attacker could target N different tokens to get N * max_total effective budget.

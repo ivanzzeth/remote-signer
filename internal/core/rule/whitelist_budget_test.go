@@ -21,9 +21,9 @@ type budgetExceededRuleRepo struct {
 	rules []*types.Rule
 }
 
-func (r *budgetExceededRuleRepo) Create(ctx context.Context, rule *types.Rule) error   { return nil }
-func (r *budgetExceededRuleRepo) Update(ctx context.Context, rule *types.Rule) error   { return nil }
-func (r *budgetExceededRuleRepo) Delete(ctx context.Context, id types.RuleID) error    { return nil }
+func (r *budgetExceededRuleRepo) Create(ctx context.Context, rule *types.Rule) error { return nil }
+func (r *budgetExceededRuleRepo) Update(ctx context.Context, rule *types.Rule) error { return nil }
+func (r *budgetExceededRuleRepo) Delete(ctx context.Context, id types.RuleID) error  { return nil }
 func (r *budgetExceededRuleRepo) Get(ctx context.Context, id types.RuleID) (*types.Rule, error) {
 	for _, x := range r.rules {
 		if x.ID == id {
@@ -68,8 +68,10 @@ func newBudgetExceededBudgetRepo() *budgetExceededBudgetRepo {
 	}
 }
 
-func (m *budgetExceededBudgetRepo) Create(ctx context.Context, budget *types.RuleBudget) error { return nil }
-func (m *budgetExceededBudgetRepo) Delete(ctx context.Context, id string) error               { return nil }
+func (m *budgetExceededBudgetRepo) Create(ctx context.Context, budget *types.RuleBudget) error {
+	return nil
+}
+func (m *budgetExceededBudgetRepo) Delete(ctx context.Context, id string) error { return nil }
 func (m *budgetExceededBudgetRepo) DeleteByRuleID(ctx context.Context, ruleID types.RuleID) error {
 	return nil
 }
@@ -146,12 +148,16 @@ func newBudgetExceededTemplateRepo() *budgetExceededTemplateRepo {
 func (r *budgetExceededTemplateRepo) Get(ctx context.Context, id string) (*types.RuleTemplate, error) {
 	return &types.RuleTemplate{ID: id, BudgetMetering: r.metering}, nil
 }
-func (r *budgetExceededTemplateRepo) Create(ctx context.Context, tmpl *types.RuleTemplate) error   { return nil }
+func (r *budgetExceededTemplateRepo) Create(ctx context.Context, tmpl *types.RuleTemplate) error {
+	return nil
+}
 func (r *budgetExceededTemplateRepo) GetByName(ctx context.Context, name string) (*types.RuleTemplate, error) {
 	return nil, nil
 }
-func (r *budgetExceededTemplateRepo) Update(ctx context.Context, tmpl *types.RuleTemplate) error { return nil }
-func (r *budgetExceededTemplateRepo) Delete(ctx context.Context, id string) error                 { return nil }
+func (r *budgetExceededTemplateRepo) Update(ctx context.Context, tmpl *types.RuleTemplate) error {
+	return nil
+}
+func (r *budgetExceededTemplateRepo) Delete(ctx context.Context, id string) error { return nil }
 func (r *budgetExceededTemplateRepo) List(ctx context.Context, filter storage.TemplateFilter) ([]*types.RuleTemplate, error) {
 	return nil, nil
 }
@@ -191,7 +197,7 @@ func TestWhitelistRuleEngine_BudgetExceeded_SkipsToNextRule(t *testing.T) {
 	// Evaluator that matches both rules (batch path returns both passed)
 	engine.RegisterEvaluator(&mockBatchEvaluator{
 		mockEvaluator: mockEvaluator{},
-		canBatchFunc: func(rules []*types.Rule) bool { return true },
+		canBatchFunc:  func(rules []*types.Rule) bool { return true },
 		evaluateBatchFunc: func(ctx context.Context, rules []*types.Rule, req *types.SignRequest, parsed *types.ParsedPayload) ([]BatchEvaluationResult, error) {
 			return []BatchEvaluationResult{
 				{RuleID: types.RuleID("rule-budget-1"), Passed: true, Reason: "match1"},

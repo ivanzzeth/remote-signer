@@ -22,9 +22,9 @@ import (
 // ---------------------------------------------------------------------------
 
 type mockAuditRepoLogger struct {
-	mu        sync.Mutex
-	records   []*types.AuditRecord
-	logErr    error // optional error to return from Log
+	mu      sync.Mutex
+	records []*types.AuditRecord
+	logErr  error // optional error to return from Log
 }
 
 func (m *mockAuditRepoLogger) Log(_ context.Context, record *types.AuditRecord) error {

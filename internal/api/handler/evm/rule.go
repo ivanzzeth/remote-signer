@@ -43,8 +43,8 @@ type RuleHandler struct {
 	auditLogger       *audit.AuditLogger
 	readOnly          bool // when true, block all rule mutations via API
 	logger            *slog.Logger
-	maxRulesPerKey    int  // per-key rule count limit (0 = no limit)
-	requireApproval   bool // require admin approval for agent whitelist rules
+	maxRulesPerKey    int                     // per-key rule count limit (0 = no limit)
+	requireApproval   bool                    // require admin approval for agent whitelist rules
 	onRuleActivated   func(callerName string) // optional callback when rule becomes active
 }
 

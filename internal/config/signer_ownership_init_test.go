@@ -13,8 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
-		"github.com/ivanzzeth/remote-signer/internal/storage"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
 // mockSignerManager implements evm.SignerManager for testing.

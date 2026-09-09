@@ -28,12 +28,12 @@ type hdWalletState struct {
 
 // HDWalletProvider manages HD wallet signers.
 type HDWalletProvider struct {
-	registry       *SignerRegistry
-	walletDir      string
-	derivStore     *DerivationStateStore
-	mu             sync.RWMutex
-	wallets        map[string]*hdWalletState // primaryAddr (checksummed) -> state
-	lockedPaths    map[string]string          // primaryAddr (checksummed) -> filePath
+	registry    *SignerRegistry
+	walletDir   string
+	derivStore  *DerivationStateStore
+	mu          sync.RWMutex
+	wallets     map[string]*hdWalletState // primaryAddr (checksummed) -> state
+	lockedPaths map[string]string         // primaryAddr (checksummed) -> filePath
 }
 
 // NewHDWalletProvider creates an HDWalletProvider and loads all configured HD wallets.

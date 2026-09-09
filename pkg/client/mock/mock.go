@@ -49,13 +49,13 @@ var _ evm.SignAPI = (*SignService)(nil)
 
 // RequestService is a mock implementation of evm.RequestAPI.
 type RequestService struct {
-	mu               sync.RWMutex
-	GetFunc          func(ctx context.Context, requestID string) (*evm.RequestStatus, error)
-	ListFunc         func(ctx context.Context, filter *evm.ListRequestsFilter) (*evm.ListRequestsResponse, error)
-	ApproveFunc      func(ctx context.Context, requestID string, req *evm.ApproveRequest) (*evm.ApproveResponse, error)
-	PreviewRuleFunc  func(ctx context.Context, requestID string, req *evm.PreviewRuleRequest) (*evm.PreviewRuleResponse, error)
+	mu                sync.RWMutex
+	GetFunc           func(ctx context.Context, requestID string) (*evm.RequestStatus, error)
+	ListFunc          func(ctx context.Context, filter *evm.ListRequestsFilter) (*evm.ListRequestsResponse, error)
+	ApproveFunc       func(ctx context.Context, requestID string, req *evm.ApproveRequest) (*evm.ApproveResponse, error)
+	PreviewRuleFunc   func(ctx context.Context, requestID string, req *evm.PreviewRuleRequest) (*evm.PreviewRuleResponse, error)
 	GetSimulationFunc func(ctx context.Context, requestID string) (*evm.SimulateResponse, error)
-	Calls            map[string][]any
+	Calls             map[string][]any
 }
 
 func NewRequestService() *RequestService {
@@ -193,14 +193,14 @@ var _ evm.RuleAPI = (*RuleService)(nil)
 
 // SignerService is a mock implementation of evm.SignerAPI.
 type SignerService struct {
-	mu                     sync.RWMutex
-	ListFunc               func(ctx context.Context, filter *evm.ListSignersFilter) (*evm.ListSignersResponse, error)
-	CreateFunc             func(ctx context.Context, req *evm.CreateSignerRequest) (*evm.Signer, error)
-	UnlockFunc             func(ctx context.Context, address string, req *evm.UnlockSignerRequest) (*evm.UnlockSignerResponse, error)
-	LockFunc               func(ctx context.Context, address string) (*evm.LockSignerResponse, error)
-	PatchSignerLabelsFunc  func(ctx context.Context, address string, req *evm.PatchSignerLabelsRequest) (*evm.Signer, error)
-	DeleteFunc             func(ctx context.Context, address string) error
-	Calls                  map[string][]any
+	mu                    sync.RWMutex
+	ListFunc              func(ctx context.Context, filter *evm.ListSignersFilter) (*evm.ListSignersResponse, error)
+	CreateFunc            func(ctx context.Context, req *evm.CreateSignerRequest) (*evm.Signer, error)
+	UnlockFunc            func(ctx context.Context, address string, req *evm.UnlockSignerRequest) (*evm.UnlockSignerResponse, error)
+	LockFunc              func(ctx context.Context, address string) (*evm.LockSignerResponse, error)
+	PatchSignerLabelsFunc func(ctx context.Context, address string, req *evm.PatchSignerLabelsRequest) (*evm.Signer, error)
+	DeleteFunc            func(ctx context.Context, address string) error
+	Calls                 map[string][]any
 }
 
 func NewSignerService() *SignerService {
@@ -373,10 +373,10 @@ var _ evm.GuardAPI = (*GuardService)(nil)
 
 // AuditService is a mock implementation of audit.API.
 type AuditService struct {
-	mu                sync.RWMutex
-	ListFunc          func(ctx context.Context, filter *audit.ListFilter) (*audit.ListResponse, error)
+	mu                  sync.RWMutex
+	ListFunc            func(ctx context.Context, filter *audit.ListFilter) (*audit.ListResponse, error)
 	ListByRequestIDFunc func(ctx context.Context, requestID string) (*audit.ListResponse, error)
-	Calls             map[string][]any
+	Calls               map[string][]any
 }
 
 func NewAuditService() *AuditService {

@@ -30,20 +30,20 @@ const (
 	PermDeleteOwnRule  Permission = "delete_own_rule"
 	PermDeleteAnyRule  Permission = "delete_any_rule"
 	PermApproveRule    Permission = "approve_rule"
-	PermPreviewRule   Permission = "preview_rule"   // preview rule for a request (read-only, no mutation)
-	PermProposeRule   Permission = "propose_rule"   // propose changes to any rule (creates pending proposal)
+	PermPreviewRule    Permission = "preview_rule" // preview rule for a request (read-only, no mutation)
+	PermProposeRule    Permission = "propose_rule" // propose changes to any rule (creates pending proposal)
 
 	// Budgets
 	PermReadBudgets   Permission = "read_budgets"
 	PermManageBudgets Permission = "manage_budgets" // create/update/reset/delete; admin only
 
 	// Templates
-	PermReadTemplates      Permission = "read_templates"
+	PermReadTemplates       Permission = "read_templates"
 	PermInstantiateTemplate Permission = "instantiate_template"
 
 	// Presets
-	PermReadPresets  Permission = "read_presets"
-	PermApplyPreset  Permission = "apply_preset"
+	PermReadPresets Permission = "read_presets"
+	PermApplyPreset Permission = "apply_preset"
 
 	// Signers
 	PermReadSigners   Permission = "read_signers"
@@ -118,23 +118,23 @@ var rolePermissions = map[types.APIKeyRole]map[Permission]bool{
 		PermManageSettings:      true,
 	},
 	types.RoleDev: {
-		PermSignRequest:         true,
-		PermListOwnRequests:     true,
-		PermListAllRequests:     true,
-		PermListRules:           true,
-		PermCreateRuleSelf:      true,
-		PermModifyOwnRule:       true,
-		PermDeleteOwnRule:       true,
-		PermPreviewRule:         true,
-		PermProposeRule:         true,
-		PermReadBudgets:         true,
-		PermReadTemplates:       true,
-		PermReadPresets:         true,
-		PermReadSigners:         true,
-		PermCreateSigners:       true,
-		PermReadHDWallets:       true,
-		PermReadAudit:           true,
-		PermReadMetrics:         true,
+		PermSignRequest:     true,
+		PermListOwnRequests: true,
+		PermListAllRequests: true,
+		PermListRules:       true,
+		PermCreateRuleSelf:  true,
+		PermModifyOwnRule:   true,
+		PermDeleteOwnRule:   true,
+		PermPreviewRule:     true,
+		PermProposeRule:     true,
+		PermReadBudgets:     true,
+		PermReadTemplates:   true,
+		PermReadPresets:     true,
+		PermReadSigners:     true,
+		PermCreateSigners:   true,
+		PermReadHDWallets:   true,
+		PermReadAudit:       true,
+		PermReadMetrics:     true,
 		PermManageWallets:   true,
 	},
 	types.RoleAgent: {
@@ -154,7 +154,7 @@ var rolePermissions = map[types.APIKeyRole]map[Permission]bool{
 		PermReadSigners:         true, // own signers only
 		PermCreateSigners:       true,
 		PermReadHDWallets:       true, // own wallets only
-		PermManageWallets:   true, // own wallets only
+		PermManageWallets:       true, // own wallets only
 	},
 	types.RoleStrategy: {
 		PermSignRequest:     true,

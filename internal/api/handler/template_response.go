@@ -12,12 +12,12 @@ import (
 
 // TemplateResponse represents a template in API responses
 type TemplateResponse struct {
-	ID             string                `json:"id"`
-	Name           string                `json:"name"`
-	Description    string                `json:"description,omitempty"`
-	Type           string                `json:"type"`
-	Mode           string                `json:"mode"`
-	Source         string                `json:"source"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Type        string `json:"type"`
+	Mode        string `json:"mode"`
+	Source      string `json:"source"`
 	// ChainType surfaces the template's chain family — empty for off-chain
 	// templates (sign_type_allowlist etc.). The UI uses this for the
 	// "Chain" column and for filtering; before R10 the column showed
@@ -37,22 +37,22 @@ type TemplateResponse struct {
 // Carries every UI-relevant field so the typed-widget dispatch on the
 // frontend (R10) doesn't have to make a second roundtrip per variable.
 type TemplateVarResponse struct {
-	Name        string   `json:"name"`
-	Type        string   `json:"type"`
-	Label       string   `json:"label,omitempty"`
-	Description string   `json:"description,omitempty"`
-	Required    bool     `json:"required"`
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Label       string `json:"label,omitempty"`
+	Description string `json:"description,omitempty"`
+	Required    bool   `json:"required"`
 	// Default is `any` server-side; the SDK types it as `unknown` and
 	// stringifies in the UI when needed. Round-trip via json.RawMessage
 	// preserves the natural shape (string / number / bool / array).
 	Default     json.RawMessage `json:"default,omitempty"`
-	Placeholder string   `json:"placeholder,omitempty"`
-	Hint        string   `json:"hint,omitempty"`
-	Options     []string `json:"options,omitempty"`
-	Sensitive   bool     `json:"sensitive,omitempty"`
-	Pattern     string   `json:"pattern,omitempty"`
-	Min         *string  `json:"min,omitempty"`
-	Max         *string  `json:"max,omitempty"`
+	Placeholder string          `json:"placeholder,omitempty"`
+	Hint        string          `json:"hint,omitempty"`
+	Options     []string        `json:"options,omitempty"`
+	Sensitive   bool            `json:"sensitive,omitempty"`
+	Pattern     string          `json:"pattern,omitempty"`
+	Min         *string         `json:"min,omitempty"`
+	Max         *string         `json:"max,omitempty"`
 }
 
 // ListTemplatesResponse represents the response for listing templates
@@ -63,12 +63,12 @@ type ListTemplatesResponse struct {
 
 // CreateTemplateRequest represents a request to create a new template via API
 type CreateTemplateRequest struct {
-	Name           string                 `json:"name"`
-	Description    string                 `json:"description,omitempty"`
-	Type           string                 `json:"type"`
-	Mode           string                 `json:"mode"`
-	Variables      []TemplateVarRequest   `json:"variables,omitempty"`
-	Config         map[string]interface{} `json:"config"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description,omitempty"`
+	Type        string                 `json:"type"`
+	Mode        string                 `json:"mode"`
+	Variables   []TemplateVarRequest   `json:"variables,omitempty"`
+	Config      map[string]interface{} `json:"config"`
 	// BudgetMetering (optional) configures how a template instance measures "spend amount"
 	// for budget enforcement.
 	//

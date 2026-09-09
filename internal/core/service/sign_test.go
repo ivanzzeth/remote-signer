@@ -75,7 +75,7 @@ type mockRuleEngine struct {
 	evalErr       error
 	// noMatchReason lets a test simulate the engine reporting a
 	// diagnostic when no whitelist matched. Empty by default.
-	noMatchReason     string
+	noMatchReason string
 	// evalResultOverride completely overrides EvaluateWithResult when non-nil.
 	evalResultOverride *rule.EvaluationResult
 }
@@ -651,9 +651,9 @@ func TestSign(t *testing.T) {
 		svc := f.build(t)
 
 		guard, err := NewManualApprovalGuard(ManualApprovalGuardConfig{
-			Window:    time.Minute,
+			Window:                time.Minute,
 			RejectionThresholdPct: 1, MinSamples: 1,
-			Logger:    newTestLogger(),
+			Logger: newTestLogger(),
 		})
 		if err != nil {
 			t.Fatalf("failed to create guard: %v", err)
@@ -707,9 +707,9 @@ func TestSign(t *testing.T) {
 		svc := f.build(t)
 
 		guard, err := NewManualApprovalGuard(ManualApprovalGuardConfig{
-			Window:    5 * time.Minute,
+			Window:     5 * time.Minute,
 			MinSamples: 1000,
-			Logger:    newTestLogger(),
+			Logger:     newTestLogger(),
 		})
 		if err != nil {
 			t.Fatalf("failed to create guard: %v", err)
@@ -747,9 +747,9 @@ func TestSign(t *testing.T) {
 		svc := f.build(t)
 
 		guard, err := NewManualApprovalGuard(ManualApprovalGuardConfig{
-			Window:    5 * time.Minute,
+			Window:     5 * time.Minute,
 			MinSamples: 1000,
-			Logger:    newTestLogger(),
+			Logger:     newTestLogger(),
 		})
 		if err != nil {
 			t.Fatalf("failed to create guard: %v", err)
@@ -777,9 +777,9 @@ func TestSign(t *testing.T) {
 		svc := f.build(t)
 
 		guard, err := NewManualApprovalGuard(ManualApprovalGuardConfig{
-			Window:    5 * time.Minute,
+			Window:     5 * time.Minute,
 			MinSamples: 1000,
-			Logger:    newTestLogger(),
+			Logger:     newTestLogger(),
 		})
 		if err != nil {
 			t.Fatalf("failed to create guard: %v", err)
@@ -805,9 +805,9 @@ func TestSign(t *testing.T) {
 		svc.SetManualApprovalEnabled(true)
 
 		guard, err := NewManualApprovalGuard(ManualApprovalGuardConfig{
-			Window:    5 * time.Minute,
+			Window:     5 * time.Minute,
 			MinSamples: 1000,
-			Logger:    newTestLogger(),
+			Logger:     newTestLogger(),
 		})
 		if err != nil {
 			t.Fatalf("failed to create guard: %v", err)
@@ -944,8 +944,8 @@ func TestSign_BlockedByResult(t *testing.T) {
 
 	// Override EvaluateWithResult to return a blocked result
 	f.ruleEngine.evalResultOverride = &rule.EvaluationResult{
-		Blocked:   true,
-		BlockedBy: &types.Rule{ID: "delegated-blocklist", Name: "Delegated Block Rule"},
+		Blocked:     true,
+		BlockedBy:   &types.Rule{ID: "delegated-blocklist", Name: "Delegated Block Rule"},
 		BlockReason: "delegated blocking",
 	}
 
@@ -977,9 +977,9 @@ func TestSign_BlockedByResult_WithGuard(t *testing.T) {
 	}
 
 	guard, _ := NewManualApprovalGuard(ManualApprovalGuardConfig{
-		Window:    5 * time.Minute,
+		Window:     5 * time.Minute,
 		MinSamples: 1000,
-		Logger:    newTestLogger(),
+		Logger:     newTestLogger(),
 	})
 	svc.SetApprovalGuard(guard)
 
@@ -1028,9 +1028,9 @@ func TestSign_StrategyRoleNoMatchWithGuard(t *testing.T) {
 	svc := f.build(t)
 
 	guard, _ := NewManualApprovalGuard(ManualApprovalGuardConfig{
-		Window:    5 * time.Minute,
+		Window:     5 * time.Minute,
 		MinSamples: 1000,
-		Logger:    newTestLogger(),
+		Logger:     newTestLogger(),
 	})
 	svc.SetApprovalGuard(guard)
 
@@ -1081,9 +1081,9 @@ func TestSetApprovalGuard(t *testing.T) {
 	svc := f.build(t)
 
 	guard, err := NewManualApprovalGuard(ManualApprovalGuardConfig{
-		Window:    time.Minute,
+		Window:     time.Minute,
 		MinSamples: 1000,
-		Logger:    newTestLogger(),
+		Logger:     newTestLogger(),
 	})
 	if err != nil {
 		t.Fatalf("failed to create guard: %v", err)
@@ -2346,9 +2346,9 @@ func TestSign_BlockedByDelegationResult_WithGuard(t *testing.T) {
 	svc := f.build(t)
 
 	guard, _ := NewManualApprovalGuard(ManualApprovalGuardConfig{
-		Window:    5 * time.Minute,
+		Window:     5 * time.Minute,
 		MinSamples: 1000,
-		Logger:    newTestLogger(),
+		Logger:     newTestLogger(),
 	})
 	svc.SetApprovalGuard(guard)
 

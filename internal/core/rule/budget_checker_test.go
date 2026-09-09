@@ -170,10 +170,10 @@ func TestBudgetChecker_PerTxLimitExceeded_Real(t *testing.T) {
 	metering, _ := json.Marshal(types.BudgetMetering{Method: "tx_value"})
 	tr := &stubTemplateRepo{tmpl: &types.RuleTemplate{ID: "t1", BudgetMetering: metering}}
 	br := &stubBudgetRepo{budget: &types.RuleBudget{
-		MaxTotal:   "1000000000000000000",  // 1 ETH total
-		MaxPerTx:   "100000000000000000",   // 0.1 ETH per tx
-		Spent:      "0",
-		UpdatedAt:  time.Now(),
+		MaxTotal:  "1000000000000000000", // 1 ETH total
+		MaxPerTx:  "100000000000000000",  // 0.1 ETH per tx
+		Spent:     "0",
+		UpdatedAt: time.Now(),
 	}}
 	bc := NewBudgetChecker(br, tr, slog.Default())
 	rule := &types.Rule{ID: "r1", TemplateID: ptrStr("t1")}
@@ -520,8 +520,8 @@ func TestFilterRulesBySignType_NonApplicableEvaluator(t *testing.T) {
 func TestFilterRulesBySignType_ApplicableFilter(t *testing.T) {
 	engine, _ := NewWhitelistRuleEngine(&mockRuleRepository{}, slog.Default())
 	engine.RegisterEvaluator(&signTypeFilterEvaluator{
-		ruleType:       "typed",
-		appliesTo:      "transaction",
+		ruleType:  "typed",
+		appliesTo: "transaction",
 	})
 	rules := []*types.Rule{
 		{Type: "typed", Name: "applies"},
@@ -806,18 +806,18 @@ func ptrStr(s string) *string { return &s }
 
 // stubBudgetRepo is a minimal BudgetRepository for unit tests.
 type stubBudgetRepo struct {
-	budget               *types.RuleBudget
-	getErr               error
-	atomicErr            error
-	atomicSpendCalled    bool
+	budget                *types.RuleBudget
+	getErr                error
+	atomicErr             error
+	atomicSpendCalled     bool
 	lastAtomicSpendAmount string
 	lastAtomicSpendRuleID types.RuleID
 	lastAtomicSpendUnit   string
-	lastUnit             string
-	markAlertSentCalled  bool
-	markAlertSentRuleID  types.RuleID
-	markAlertSentUnit    string
-	markAlertSentErr     error
+	lastUnit              string
+	markAlertSentCalled   bool
+	markAlertSentRuleID   types.RuleID
+	markAlertSentUnit     string
+	markAlertSentErr      error
 }
 
 func (r *stubBudgetRepo) Create(ctx context.Context, budget *types.RuleBudget) error { return nil }
@@ -827,7 +827,7 @@ func (r *stubBudgetRepo) CreateOrGet(ctx context.Context, budget *types.RuleBudg
 func (r *stubBudgetRepo) CountByRuleID(ctx context.Context, ruleID types.RuleID) (int, error) {
 	return 0, nil
 }
-func (r *stubBudgetRepo) Delete(ctx context.Context, id string) error               { return nil }
+func (r *stubBudgetRepo) Delete(ctx context.Context, id string) error { return nil }
 func (r *stubBudgetRepo) DeleteByRuleID(ctx context.Context, ruleID types.RuleID) error {
 	return nil
 }
@@ -910,12 +910,12 @@ func (r *stubTemplateRepo) Get(ctx context.Context, id string) (*types.RuleTempl
 	}
 	return nil, types.ErrNotFound
 }
-func (r *stubTemplateRepo) Create(ctx context.Context, tmpl *types.RuleTemplate) error  { return nil }
+func (r *stubTemplateRepo) Create(ctx context.Context, tmpl *types.RuleTemplate) error { return nil }
 func (r *stubTemplateRepo) GetByName(ctx context.Context, name string) (*types.RuleTemplate, error) {
 	return nil, nil
 }
 func (r *stubTemplateRepo) Update(ctx context.Context, tmpl *types.RuleTemplate) error { return nil }
-func (r *stubTemplateRepo) Delete(ctx context.Context, id string) error                 { return nil }
+func (r *stubTemplateRepo) Delete(ctx context.Context, id string) error                { return nil }
 func (r *stubTemplateRepo) List(ctx context.Context, filter storage.TemplateFilter) ([]*types.RuleTemplate, error) {
 	return nil, nil
 }

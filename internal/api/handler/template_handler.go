@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
-	"github.com/ivanzzeth/remote-signer/internal/validate"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
+	"github.com/ivanzzeth/remote-signer/internal/validate"
 )
 
 func (h *TemplateHandler) listTemplates(w http.ResponseWriter, r *http.Request) {

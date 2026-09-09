@@ -408,7 +408,7 @@ func TestPreviewRuleHandler_AdminCanPreviewOtherKeyRequest(t *testing.T) {
 	ct := types.ChainTypeEVM
 	svc := &mockSignService{
 		getRequestFn: func(_ context.Context, _ types.SignRequestID) (*types.SignRequest, error) {
-		 return signReq, nil
+			return signReq, nil
 		},
 		previewRuleFn: func(_ context.Context, _ types.SignRequestID, opts *rule.RuleGenerateOptions) (*types.Rule, error) {
 			return &types.Rule{

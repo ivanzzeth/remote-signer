@@ -114,22 +114,22 @@ func TestPolymarketV2_TemplateTestCases(t *testing.T) {
 
 	// Config values matching the template's test_variables.
 	config := map[string]interface{}{
-		"exchange_v2_address":            "0xE111180000d2663C0091e4f400237545B87B996B",
-		"neg_risk_exchange_v2_address":   "0xe2222d279d744050d28e00520010520000310F59",
-		"collateral_token_address":       "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB",
-		"conditional_tokens_address":     "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045",
-		"ctf_collateral_adapter_address": "0xADa100874d00e3331D00F2007a9c336a65009718",
+		"exchange_v2_address":                     "0xE111180000d2663C0091e4f400237545B87B996B",
+		"neg_risk_exchange_v2_address":            "0xe2222d279d744050d28e00520010520000310F59",
+		"collateral_token_address":                "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB",
+		"conditional_tokens_address":              "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045",
+		"ctf_collateral_adapter_address":          "0xADa100874d00e3331D00F2007a9c336a65009718",
 		"neg_risk_ctf_collateral_adapter_address": "0xAdA200001000ef00D07553cEE7006808F895c6F1",
-		"collateral_onramp_address":             "0x93070a847efEf7F70739046A929D47a521F5B8ee",
-		"collateral_offramp_address":            "0x2957922Eb93258b93368531d39fAcCA3B4dC5854",
-		"usdc_address":                          "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
-		"usdc_bridged_address":                  "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
-		"neg_risk_adapter_address":              "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296",
-		"allowed_safe_addresses":                "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837",
-		"allowed_safe_address_for_testing":      "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837",
-		"chain_id":                              "137",
-		"v2_exchange_domain_name":               "Polymarket CTF Exchange",
-		"v2_exchange_domain_version":            "2",
+		"collateral_onramp_address":               "0x93070a847efEf7F70739046A929D47a521F5B8ee",
+		"collateral_offramp_address":              "0x2957922Eb93258b93368531d39fAcCA3B4dC5854",
+		"usdc_address":                            "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+		"usdc_bridged_address":                    "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+		"neg_risk_adapter_address":                "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296",
+		"allowed_safe_addresses":                  "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837",
+		"allowed_safe_address_for_testing":        "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837",
+		"chain_id":                                "137",
+		"v2_exchange_domain_name":                 "Polymarket CTF Exchange",
+		"v2_exchange_domain_version":              "2",
 	}
 
 	exchangeV2 := "0xE111180000d2663C0091e4f400237545B87B996B"
@@ -137,10 +137,10 @@ func TestPolymarketV2_TemplateTestCases(t *testing.T) {
 	safeAddress := "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837"
 
 	tests := []struct {
-		name          string
-		input         *RuleInput
-		expectPass    bool
-		expectReason  string
+		name         string
+		input        *RuleInput
+		expectPass   bool
+		expectReason string
 	}{
 		{
 			name: "valid Order with ExchangeV2",
@@ -502,22 +502,22 @@ func TestPolymarketV2_TransactionTestCases(t *testing.T) {
 	}`
 
 	config := map[string]interface{}{
-		"exchange_v2_address":            "0xE111180000d2663C0091e4f400237545B87B996B",
-		"neg_risk_exchange_v2_address":   "0xe2222d279d744050d28e00520010520000310F59",
-		"collateral_token_address":       "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB",
-		"conditional_tokens_address":     "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045",
-		"ctf_collateral_adapter_address": "0xADa100874d00e3331D00F2007a9c336a65009718",
+		"exchange_v2_address":                     "0xE111180000d2663C0091e4f400237545B87B996B",
+		"neg_risk_exchange_v2_address":            "0xe2222d279d744050d28e00520010520000310F59",
+		"collateral_token_address":                "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB",
+		"conditional_tokens_address":              "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045",
+		"ctf_collateral_adapter_address":          "0xADa100874d00e3331D00F2007a9c336a65009718",
 		"neg_risk_ctf_collateral_adapter_address": "0xAdA200001000ef00D07553cEE7006808F895c6F1",
-		"collateral_onramp_address":             "0x93070a847efEf7F70739046A929D47a521F5B8ee",
-		"collateral_offramp_address":            "0x2957922Eb93258b93368531d39fAcCA3B4dC5854",
-		"usdc_address":                          "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
-		"usdc_bridged_address":                  "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
-		"neg_risk_adapter_address":              "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296",
-		"allowed_safe_addresses":                "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837",
-		"allowed_safe_address_for_testing":      "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837",
-		"chain_id":                        "137",
-		"v2_exchange_domain_name":         "Polymarket CTF Exchange",
-		"v2_exchange_domain_version":      "2",
+		"collateral_onramp_address":               "0x93070a847efEf7F70739046A929D47a521F5B8ee",
+		"collateral_offramp_address":              "0x2957922Eb93258b93368531d39fAcCA3B4dC5854",
+		"usdc_address":                            "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+		"usdc_bridged_address":                    "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+		"neg_risk_adapter_address":                "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296",
+		"allowed_safe_addresses":                  "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837",
+		"allowed_safe_address_for_testing":        "0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837",
+		"chain_id":                                "137",
+		"v2_exchange_domain_name":                 "Polymarket CTF Exchange",
+		"v2_exchange_domain_version":              "2",
 	}
 
 	pUSD := "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
@@ -906,7 +906,6 @@ func TestPolymarketV2_TransactionTestCases(t *testing.T) {
 	}
 }
 
-
 func TestJSRuleEvaluator_Evaluate_WhitelistReject(t *testing.T) {
 	e, err := NewJSRuleEvaluator(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})))
 	require.NoError(t, err)
@@ -1247,32 +1246,32 @@ func TestJSRuleEvaluator_GoPanicBypassesJSTryCatch(t *testing.T) {
 
 	typedDataPayload := mustMarshalJSON(map[string]interface{}{
 		"typed_data": map[string]interface{}{
-		"types": map[string]interface{}{
-			"EIP712Domain": []map[string]string{
-				{"name": "chainId", "type": "uint256"},
-				{"name": "verifyingContract", "type": "address"},
+			"types": map[string]interface{}{
+				"EIP712Domain": []map[string]string{
+					{"name": "chainId", "type": "uint256"},
+					{"name": "verifyingContract", "type": "address"},
+				},
+				"SafeTx": []map[string]string{
+					{"name": "to", "type": "address"},
+					{"name": "value", "type": "uint256"},
+					{"name": "data", "type": "bytes"},
+					{"name": "operation", "type": "uint8"},
+					{"name": "safeTxGas", "type": "uint256"},
+					{"name": "nonce", "type": "uint256"},
+				},
 			},
-			"SafeTx": []map[string]string{
-				{"name": "to", "type": "address"},
-				{"name": "value", "type": "uint256"},
-				{"name": "data", "type": "bytes"},
-				{"name": "operation", "type": "uint8"},
-				{"name": "safeTxGas", "type": "uint256"},
-				{"name": "nonce", "type": "uint256"},
+			"primaryType": "SafeTx",
+			"domain": map[string]string{
+				"chainId":           "137",
+				"verifyingContract": "0xdb44cf4ce5e57193c2245901179f3c403b5cec30",
 			},
-		},
-		"primaryType": "SafeTx",
-		"domain": map[string]string{
-			"chainId":           "137",
-			"verifyingContract": "0xdb44cf4ce5e57193c2245901179f3c403b5cec30",
-		},
-		"message": map[string]interface{}{
-			"to":        "0xAdA200001000ef00D07553cEE7006808F895c6F1",
-			"value":     "0",
-			"data":      "0x9e7212ad0000000000000000000000000000000000000000000000000000000000000000",
-			"operation": "0",
-			"safeTxGas": "1088718",
-			"nonce":     "84",
+			"message": map[string]interface{}{
+				"to":        "0xAdA200001000ef00D07553cEE7006808F895c6F1",
+				"value":     "0",
+				"data":      "0x9e7212ad0000000000000000000000000000000000000000000000000000000000000000",
+				"operation": "0",
+				"safeTxGas": "1088718",
+				"nonce":     "84",
 			},
 		},
 	})
@@ -1522,4 +1521,3 @@ func TestJSRuleEvaluator_Evaluate_WithMatrix(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, matched, "should match with Matrix overrides, got reason=%s", reason)
 }
-

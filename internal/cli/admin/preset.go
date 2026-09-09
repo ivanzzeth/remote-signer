@@ -273,7 +273,7 @@ func mergeCompositePresetIntoConfig(configPath string, rules []config.RuleConfig
 	if err := os.WriteFile(configPath, out, 0600); err != nil {
 		return fmt.Errorf("write config: %w", err)
 	}
-		fmt.Fprintf(os.Stderr, "Updated rules in %s (%d rule(s) from preset)\n", configPath, len(rules))
+	fmt.Fprintf(os.Stderr, "Updated rules in %s (%d rule(s) from preset)\n", configPath, len(rules))
 	return nil
 }
 

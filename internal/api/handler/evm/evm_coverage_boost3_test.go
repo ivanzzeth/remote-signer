@@ -2511,19 +2511,35 @@ type failListBudgetRepo struct{}
 func (f *failListBudgetRepo) ListByRuleID(_ context.Context, _ types.RuleID) ([]*types.RuleBudget, error) {
 	return nil, fmt.Errorf("list error")
 }
-func (f *failListBudgetRepo) ListByRuleIDs(_ context.Context, _ []types.RuleID) ([]*types.RuleBudget, error) { return nil, nil }
+func (f *failListBudgetRepo) ListByRuleIDs(_ context.Context, _ []types.RuleID) ([]*types.RuleBudget, error) {
+	return nil, nil
+}
 func (f *failListBudgetRepo) Create(_ context.Context, _ *types.RuleBudget) error { return nil }
-func (f *failListBudgetRepo) CreateOrGet(_ context.Context, _ *types.RuleBudget) (*types.RuleBudget, bool, error) { return nil, false, nil }
-func (f *failListBudgetRepo) GetByRuleID(_ context.Context, _ types.RuleID, _ string) (*types.RuleBudget, error) { return nil, nil }
-func (f *failListBudgetRepo) Get(_ context.Context, _ string) (*types.RuleBudget, error) { return nil, nil }
+func (f *failListBudgetRepo) CreateOrGet(_ context.Context, _ *types.RuleBudget) (*types.RuleBudget, bool, error) {
+	return nil, false, nil
+}
+func (f *failListBudgetRepo) GetByRuleID(_ context.Context, _ types.RuleID, _ string) (*types.RuleBudget, error) {
+	return nil, nil
+}
+func (f *failListBudgetRepo) Get(_ context.Context, _ string) (*types.RuleBudget, error) {
+	return nil, nil
+}
 func (f *failListBudgetRepo) Update(_ context.Context, _ *types.RuleBudget) error { return nil }
-func (f *failListBudgetRepo) CountByRuleID(_ context.Context, _ types.RuleID) (int, error) { return 0, nil }
-func (f *failListBudgetRepo) Delete(_ context.Context, _ string) error { return nil }
+func (f *failListBudgetRepo) CountByRuleID(_ context.Context, _ types.RuleID) (int, error) {
+	return 0, nil
+}
+func (f *failListBudgetRepo) Delete(_ context.Context, _ string) error               { return nil }
 func (f *failListBudgetRepo) DeleteByRuleID(_ context.Context, _ types.RuleID) error { return nil }
 func (f *failListBudgetRepo) ListAll(_ context.Context) ([]*types.RuleBudget, error) { return nil, nil }
-func (f *failListBudgetRepo) AtomicSpend(_ context.Context, _ types.RuleID, _ string, _ string) error { return nil }
-func (f *failListBudgetRepo) ResetBudget(_ context.Context, _ types.RuleID, _ string, _ time.Time) error { return nil }
-func (f *failListBudgetRepo) MarkAlertSent(_ context.Context, _ types.RuleID, _ string) error { return nil }
+func (f *failListBudgetRepo) AtomicSpend(_ context.Context, _ types.RuleID, _ string, _ string) error {
+	return nil
+}
+func (f *failListBudgetRepo) ResetBudget(_ context.Context, _ types.RuleID, _ string, _ time.Time) error {
+	return nil
+}
+func (f *failListBudgetRepo) MarkAlertSent(_ context.Context, _ types.RuleID, _ string) error {
+	return nil
+}
 func (f *failListBudgetRepo) UpsertLimits(ctx context.Context, ruleID types.RuleID, requests []storage.BudgetSyncRequest) error {
 	return nil
 }
@@ -3005,20 +3021,34 @@ type stubWalletRepo struct{}
 func (s *stubWalletRepo) GetWalletsForSigners(_ context.Context, addresses []string) (map[string][]types.Wallet, error) {
 	return nil, nil
 }
-func (s *stubWalletRepo) GetWalletsForSigner(_ context.Context, _ string) ([]types.Wallet, error) { return nil, nil }
-func (s *stubWalletRepo) Create(_ context.Context, _ *types.Wallet) error                         { return nil }
-func (s *stubWalletRepo) Get(_ context.Context, _ string) (*types.Wallet, error)                  { return nil, nil }
-func (s *stubWalletRepo) GetByName(_ context.Context, _ string) (*types.Wallet, error)            { return nil, nil }
-func (s *stubWalletRepo) GetBySignerAddress(_ context.Context, _ string) ([]*types.Wallet, error) { return nil, nil }
-func (s *stubWalletRepo) List(_ context.Context, _ types.WalletFilter) (*types.WalletListResult, error) { return nil, nil }
-func (s *stubWalletRepo) Update(_ context.Context, _ *types.Wallet) error                        { return nil }
-func (s *stubWalletRepo) Delete(_ context.Context, _ string) error                               { return nil }
-func (s *stubWalletRepo) AddSignerToWallet(_ context.Context, _ string, _ string) error          { return nil }
-func (s *stubWalletRepo) RemoveSignerFromWallet(_ context.Context, _ string, _ string) error     { return nil }
-func (s *stubWalletRepo) AddMember(_ context.Context, _ *types.WalletMember) error               { return nil }
-func (s *stubWalletRepo) RemoveMember(_ context.Context, _ string, _ string) error               { return nil }
-func (s *stubWalletRepo) ListMembers(_ context.Context, _ string) ([]types.WalletMember, error)  { return nil, nil }
-func (s *stubWalletRepo) IsMember(_ context.Context, _ string, _ string) (bool, error)           { return false, nil }
+func (s *stubWalletRepo) GetWalletsForSigner(_ context.Context, _ string) ([]types.Wallet, error) {
+	return nil, nil
+}
+func (s *stubWalletRepo) Create(_ context.Context, _ *types.Wallet) error        { return nil }
+func (s *stubWalletRepo) Get(_ context.Context, _ string) (*types.Wallet, error) { return nil, nil }
+func (s *stubWalletRepo) GetByName(_ context.Context, _ string) (*types.Wallet, error) {
+	return nil, nil
+}
+func (s *stubWalletRepo) GetBySignerAddress(_ context.Context, _ string) ([]*types.Wallet, error) {
+	return nil, nil
+}
+func (s *stubWalletRepo) List(_ context.Context, _ types.WalletFilter) (*types.WalletListResult, error) {
+	return nil, nil
+}
+func (s *stubWalletRepo) Update(_ context.Context, _ *types.Wallet) error               { return nil }
+func (s *stubWalletRepo) Delete(_ context.Context, _ string) error                      { return nil }
+func (s *stubWalletRepo) AddSignerToWallet(_ context.Context, _ string, _ string) error { return nil }
+func (s *stubWalletRepo) RemoveSignerFromWallet(_ context.Context, _ string, _ string) error {
+	return nil
+}
+func (s *stubWalletRepo) AddMember(_ context.Context, _ *types.WalletMember) error { return nil }
+func (s *stubWalletRepo) RemoveMember(_ context.Context, _ string, _ string) error { return nil }
+func (s *stubWalletRepo) ListMembers(_ context.Context, _ string) ([]types.WalletMember, error) {
+	return nil, nil
+}
+func (s *stubWalletRepo) IsMember(_ context.Context, _ string, _ string) (bool, error) {
+	return false, nil
+}
 
 type walletRepoSignerManager struct {
 	signerMockSignerManager
@@ -3181,13 +3211,13 @@ func TestB3BudgetItem_UpdateAllFields(t *testing.T) {
 	require.NoError(t, err)
 
 	body := map[string]interface{}{
-		"max_total":   "1000",
-		"max_per_tx":  "100",
+		"max_total":    "1000",
+		"max_per_tx":   "100",
 		"max_tx_count": 50,
-		"alert_pct":   80,
-		"alert_sent":  true,
-		"spent":       "50",
-		"tx_count":    5,
+		"alert_pct":    80,
+		"alert_sent":   true,
+		"spent":        "50",
+		"tx_count":     5,
 	}
 	data, _ := json.Marshal(body)
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/evm/budgets/budget-upd", bytes.NewBuffer(data))
@@ -3534,20 +3564,34 @@ type failWalletRepo struct{}
 func (f *failWalletRepo) GetWalletsForSigners(_ context.Context, _ []string) (map[string][]types.Wallet, error) {
 	return nil, fmt.Errorf("wallet repo error")
 }
-func (f *failWalletRepo) GetWalletsForSigner(_ context.Context, _ string) ([]types.Wallet, error) { return nil, nil }
-func (f *failWalletRepo) Create(_ context.Context, _ *types.Wallet) error                         { return nil }
-func (f *failWalletRepo) Get(_ context.Context, _ string) (*types.Wallet, error)                  { return nil, nil }
-func (f *failWalletRepo) GetByName(_ context.Context, _ string) (*types.Wallet, error)            { return nil, nil }
-func (f *failWalletRepo) GetBySignerAddress(_ context.Context, _ string) ([]*types.Wallet, error) { return nil, nil }
-func (f *failWalletRepo) List(_ context.Context, _ types.WalletFilter) (*types.WalletListResult, error) { return nil, nil }
-func (f *failWalletRepo) Update(_ context.Context, _ *types.Wallet) error                        { return nil }
-func (f *failWalletRepo) Delete(_ context.Context, _ string) error                               { return nil }
-func (f *failWalletRepo) AddSignerToWallet(_ context.Context, _ string, _ string) error          { return nil }
-func (f *failWalletRepo) RemoveSignerFromWallet(_ context.Context, _ string, _ string) error     { return nil }
-func (f *failWalletRepo) AddMember(_ context.Context, _ *types.WalletMember) error               { return nil }
-func (f *failWalletRepo) RemoveMember(_ context.Context, _ string, _ string) error               { return nil }
-func (f *failWalletRepo) ListMembers(_ context.Context, _ string) ([]types.WalletMember, error)  { return nil, nil }
-func (f *failWalletRepo) IsMember(_ context.Context, _ string, _ string) (bool, error)           { return false, nil }
+func (f *failWalletRepo) GetWalletsForSigner(_ context.Context, _ string) ([]types.Wallet, error) {
+	return nil, nil
+}
+func (f *failWalletRepo) Create(_ context.Context, _ *types.Wallet) error        { return nil }
+func (f *failWalletRepo) Get(_ context.Context, _ string) (*types.Wallet, error) { return nil, nil }
+func (f *failWalletRepo) GetByName(_ context.Context, _ string) (*types.Wallet, error) {
+	return nil, nil
+}
+func (f *failWalletRepo) GetBySignerAddress(_ context.Context, _ string) ([]*types.Wallet, error) {
+	return nil, nil
+}
+func (f *failWalletRepo) List(_ context.Context, _ types.WalletFilter) (*types.WalletListResult, error) {
+	return nil, nil
+}
+func (f *failWalletRepo) Update(_ context.Context, _ *types.Wallet) error               { return nil }
+func (f *failWalletRepo) Delete(_ context.Context, _ string) error                      { return nil }
+func (f *failWalletRepo) AddSignerToWallet(_ context.Context, _ string, _ string) error { return nil }
+func (f *failWalletRepo) RemoveSignerFromWallet(_ context.Context, _ string, _ string) error {
+	return nil
+}
+func (f *failWalletRepo) AddMember(_ context.Context, _ *types.WalletMember) error { return nil }
+func (f *failWalletRepo) RemoveMember(_ context.Context, _ string, _ string) error { return nil }
+func (f *failWalletRepo) ListMembers(_ context.Context, _ string) ([]types.WalletMember, error) {
+	return nil, nil
+}
+func (f *failWalletRepo) IsMember(_ context.Context, _ string, _ string) (bool, error) {
+	return false, nil
+}
 
 // failGetOwnedAccessRepo fails on ListAccessibleAddresses
 type failGetOwnedAccessRepo struct {
@@ -3837,7 +3881,7 @@ func TestB3CreateSigner_BothKeysProvided2(t *testing.T) {
 		"type": "keystore",
 		"keystore": map[string]interface{}{
 			"password": "testpass", "private_key_hex": "abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234",
-			"keystore_json":   `{"version":3}`,
+			"keystore_json": `{"version":3}`,
 		},
 	}
 	data, _ := json.Marshal(body)
@@ -4131,7 +4175,7 @@ func (f *failRuleRepoDeleteFull) Delete(_ context.Context, _ types.RuleID) error
 }
 
 func TestB3DeleteRule_RepoDeleteError(t *testing.T) {
-		repo := &failRuleRepoDeleteFull{MemoryRuleRepository: storage.NewMemoryRuleRepository()}
+	repo := &failRuleRepoDeleteFull{MemoryRuleRepository: storage.NewMemoryRuleRepository()}
 	ct := types.ChainTypeEVM
 	require.NoError(t, repo.Create(context.Background(), &types.Rule{ID: "del-err-rule", Name: "del-err", Type: types.RuleTypeEVMAddressList, Mode: types.RuleModeWhitelist, Source: types.RuleSourceAPI, Status: types.RuleStatusActive, Owner: "admin-key", ChainType: &ct}))
 	h, err := NewRuleHandler(repo, slog.Default())
@@ -4380,8 +4424,6 @@ func TestB3ListWalletSigners_ManagerListError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
-
-
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 // signer_create.go: createSigner — CreateSigner manager error
@@ -4466,11 +4508,9 @@ func TestB3NewHDWalletHandler_NilSignerManager(t *testing.T) {
 	assert.Error(t, err)
 }
 
-
 // ---------------------------------------------------------------------------
 // signer_crud.go: handleDeleteSigner — provider delete error
 // ---------------------------------------------------------------------------
-
 
 // ---------------------------------------------------------------------------
 // rule_query.go: approveRule — not found
@@ -4576,7 +4616,6 @@ func TestB3RejectRule_NotPending(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
-
 // ---------------------------------------------------------------------------
 // rule_crud.go: createRule — invalid chain_type
 // ---------------------------------------------------------------------------
@@ -4666,7 +4705,7 @@ func TestB3UpdateRule_RepoUpdateError(t *testing.T) {
 // deleteRuleBudgetTracker records calls to DeleteByRuleID
 type deleteRuleBudgetTracker struct{}
 
-func (d *deleteRuleBudgetTracker) Create(_ context.Context, _ *types.RuleBudget) error       { return nil }
+func (d *deleteRuleBudgetTracker) Create(_ context.Context, _ *types.RuleBudget) error { return nil }
 func (d *deleteRuleBudgetTracker) CreateOrGet(_ context.Context, _ *types.RuleBudget) (*types.RuleBudget, bool, error) {
 	return &types.RuleBudget{}, true, nil
 }
@@ -4684,7 +4723,9 @@ func (d *deleteRuleBudgetTracker) Delete(_ context.Context, _ string) error { re
 func (d *deleteRuleBudgetTracker) DeleteByRuleID(_ context.Context, _ types.RuleID) error {
 	return nil // tracked via caller check — no-op here
 }
-func (d *deleteRuleBudgetTracker) ListAll(_ context.Context) ([]*types.RuleBudget, error) { return nil, nil }
+func (d *deleteRuleBudgetTracker) ListAll(_ context.Context) ([]*types.RuleBudget, error) {
+	return nil, nil
+}
 func (d *deleteRuleBudgetTracker) AtomicSpend(_ context.Context, _ types.RuleID, _ string, _ string) error {
 	return nil
 }
@@ -4752,7 +4793,6 @@ func TestB3DeleteRule_BudgetCleanupOnDeleteError(t *testing.T) {
 	// deleteRule returns early before reaching the budget cleanup block
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
-
 
 // Helpers
 // ---------------------------------------------------------------------------

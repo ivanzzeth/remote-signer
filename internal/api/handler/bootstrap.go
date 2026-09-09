@@ -16,12 +16,12 @@ import (
 // soft-started daemon's admin setup:
 //
 //   - GET  /api/v1/bootstrap/status   reports whether bootstrap is still
-//                                     needed. Always reachable; idempotent.
+//     needed. Always reachable; idempotent.
 //   - POST /api/v1/bootstrap/admin    accepts {"password": "..."}, creates
-//                                     the admin keystore + api_keys row,
-//                                     and returns the keystore paths.
-//                                     Succeeds exactly once; subsequent
-//                                     calls return 410 Gone.
+//     the admin keystore + api_keys row,
+//     and returns the keystore paths.
+//     Succeeds exactly once; subsequent
+//     calls return 410 Gone.
 //
 // Both routes deliberately skip the auth middleware. Authentication
 // requires the api_keys table to already contain a verifying public key —

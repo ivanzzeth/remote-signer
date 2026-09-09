@@ -21,10 +21,10 @@ func TestNewACLHandler(t *testing.T) {
 
 func TestACLHandler_ServeHTTP_GET_WithWhitelist(t *testing.T) {
 	cfg := &config.IPWhitelistConfig{
-		Enabled:         true,
-		AllowedIPs:      []string{"10.0.0.1", "192.168.1.0/24"},
-		TrustProxy:      true,
-		TrustedProxies:  []string{"10.0.0.0/8"},
+		Enabled:        true,
+		AllowedIPs:     []string{"10.0.0.1", "192.168.1.0/24"},
+		TrustProxy:     true,
+		TrustedProxies: []string{"10.0.0.0/8"},
 	}
 	h := NewACLHandler(cfg)
 

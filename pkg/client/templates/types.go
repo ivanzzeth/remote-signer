@@ -26,15 +26,15 @@ const (
 
 // Template represents a rule template.
 type Template struct {
-	ID             string             `json:"id"`
-	Name           string             `json:"name"`
-	Description    string             `json:"description,omitempty"`
-	Type           string             `json:"type"`
-	Mode           string             `json:"mode"`
-	Source         string             `json:"source"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Type        string `json:"type"`
+	Mode        string `json:"mode"`
+	Source      string `json:"source"`
 	// ChainType narrows the template to one chain family. Empty for
 	// off-chain templates (sign_type_allowlist, future rate_limit, ...).
-	ChainType      string             `json:"chain_type,omitempty"`
+	ChainType string `json:"chain_type,omitempty"`
 	// SourcePath is the relative path under the configured source root,
 	// e.g. "evm/erc20.yaml" for file sources. Empty for source=api.
 	SourcePath     string             `json:"source_path,omitempty"`
@@ -116,17 +116,17 @@ type UpdateRequest struct {
 
 // InstantiateRequest represents a request to create a rule instance from a template.
 type InstantiateRequest struct {
-	TemplateName   string            `json:"template_name,omitempty"`
-	Name           string            `json:"name,omitempty"`
-	Variables      map[string]string `json:"variables"`
-	ChainType      *string           `json:"chain_type,omitempty"`
-	ChainID        *string           `json:"chain_id,omitempty"`
-	APIKeyID       *string           `json:"api_key_id,omitempty"`
-	SignerAddress  *string           `json:"signer_address,omitempty"`
-	ExpiresAt      *time.Time        `json:"expires_at,omitempty"`
-	ExpiresIn      *string           `json:"expires_in,omitempty"`
-	Budget         *BudgetConfig     `json:"budget,omitempty"`
-	Schedule       *ScheduleConfig   `json:"schedule,omitempty"`
+	TemplateName  string            `json:"template_name,omitempty"`
+	Name          string            `json:"name,omitempty"`
+	Variables     map[string]string `json:"variables"`
+	ChainType     *string           `json:"chain_type,omitempty"`
+	ChainID       *string           `json:"chain_id,omitempty"`
+	APIKeyID      *string           `json:"api_key_id,omitempty"`
+	SignerAddress *string           `json:"signer_address,omitempty"`
+	ExpiresAt     *time.Time        `json:"expires_at,omitempty"`
+	ExpiresIn     *string           `json:"expires_in,omitempty"`
+	Budget        *BudgetConfig     `json:"budget,omitempty"`
+	Schedule      *ScheduleConfig   `json:"schedule,omitempty"`
 	// FORCED VALIDATION — do not send skip_validation. Server rejects it (fund-loss risk).
 	// SkipValidation bool `json:"skip_validation,omitempty"`
 }
@@ -169,10 +169,10 @@ type ValidateRuleResultItem struct {
 
 // ValidateTemplateResponse is the response for POST /api/v1/templates/{id}/validate.
 type ValidateTemplateResponse struct {
-	TemplateID   string                  `json:"template_id"`
-	TemplateName string                  `json:"template_name"`
+	TemplateID   string                    `json:"template_id"`
+	TemplateName string                    `json:"template_name"`
 	Results      []*ValidateRuleResultItem `json:"results,omitempty"`
-	Total        int                     `json:"total"`
-	Passed       int                     `json:"passed"`
-	Failed       int                     `json:"failed"`
+	Total        int                       `json:"total"`
+	Passed       int                       `json:"passed"`
+	Failed       int                       `json:"failed"`
 }

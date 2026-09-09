@@ -11,8 +11,8 @@ import (
 
 // guardEvent records a single request outcome within the sliding window.
 type guardEvent struct {
-	ts        time.Time
-	rejected  bool // true = rejection (manual-approval or rule-blocked), false = auto-approved
+	ts       time.Time
+	rejected bool // true = rejection (manual-approval or rule-blocked), false = auto-approved
 }
 
 // ManualApprovalGuard pauses all sign requests when the rejection rate within a
@@ -22,18 +22,18 @@ type guardEvent struct {
 //
 // After resumeAfter duration it auto-resumes so the team has time to respond.
 type ManualApprovalGuard struct {
-	window              time.Duration
-	rejectionThreshPct  float64 // 0-100 percentage
-	minSamples          int
-	resumeAfter         time.Duration
-	notifySvc           *notify.NotifyService
-	channel             *notify.Channel
-	logger              *slog.Logger
-	mu                  sync.Mutex
-	paused              bool
-	events              []guardEvent // sliding window of timestamped outcomes
-	resumeTimer         *time.Timer  // nil when not paused or no auto-resume
-	nowFunc             func() time.Time // for testing; defaults to time.Now
+	window             time.Duration
+	rejectionThreshPct float64 // 0-100 percentage
+	minSamples         int
+	resumeAfter        time.Duration
+	notifySvc          *notify.NotifyService
+	channel            *notify.Channel
+	logger             *slog.Logger
+	mu                 sync.Mutex
+	paused             bool
+	events             []guardEvent     // sliding window of timestamped outcomes
+	resumeTimer        *time.Timer      // nil when not paused or no auto-resume
+	nowFunc            func() time.Time // for testing; defaults to time.Now
 }
 
 // ManualApprovalGuardConfig configures the guard.
@@ -45,7 +45,7 @@ type ManualApprovalGuardConfig struct {
 	RejectionThresholdPct float64
 	// MinSamples is the minimum number of events within the window before the
 	// rejection rate check is applied. Default: 10.
-	MinSamples  int
+	MinSamples int
 	// ResumeAfter is the pause duration after which to auto-resume (e.g. 2h); 0 = no auto-resume.
 	ResumeAfter time.Duration
 	NotifySvc   *notify.NotifyService
@@ -54,9 +54,9 @@ type ManualApprovalGuardConfig struct {
 }
 
 const (
-	defaultWindow              = time.Hour
-	defaultRejectionThreshPct  = 50.0
-	defaultMinSamples          = 10
+	defaultWindow             = time.Hour
+	defaultRejectionThreshPct = 50.0
+	defaultMinSamples         = 10
 )
 
 // NewManualApprovalGuard creates a new guard. NotifySvc and Channel may be nil when disabled.

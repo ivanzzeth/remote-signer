@@ -22,7 +22,7 @@ import (
 func (e *SolidityRuleEvaluator) executeScript(ctx context.Context, script string, requestEnv []string, filePathHint ...string) (bool, string, error) {
 	// Calculate script hash for caching/naming
 	hash := sha256.Sum256([]byte(script))
-	hashStr := hex.EncodeToString(hash[:8]) // Use first 8 bytes for shorter filename
+	hashStr := hex.EncodeToString(hash[:8])    // Use first 8 bytes for shorter filename
 	fullHashStr := hex.EncodeToString(hash[:]) // Full hash for cache key
 
 	// When request data is passed via env, same script can produce different results -> do not use execution cache
@@ -177,7 +177,6 @@ func (e *SolidityRuleEvaluator) executeScript(ctx context.Context, script string
 
 	return result.passed, result.reason, result.err
 }
-
 
 // GetTempDir returns the temp directory path
 func (e *SolidityRuleEvaluator) GetTempDir() string {

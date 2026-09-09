@@ -60,10 +60,10 @@ type Transaction struct {
 	Status TransactionStatus `json:"status" gorm:"index;type:varchar(16)"`
 
 	// Mined details — nullable until the poller observes the receipt.
-	BlockNumber    *uint64 `json:"block_number,omitempty"`
-	BlockHash      string  `json:"block_hash,omitempty" gorm:"type:varchar(80)"`
-	TxIndex        *uint64 `json:"tx_index,omitempty"`
-	GasUsed        *uint64 `json:"gas_used,omitempty"`
+	BlockNumber *uint64 `json:"block_number,omitempty"`
+	BlockHash   string  `json:"block_hash,omitempty" gorm:"type:varchar(80)"`
+	TxIndex     *uint64 `json:"tx_index,omitempty"`
+	GasUsed     *uint64 `json:"gas_used,omitempty"`
 	// ReceiptStatus: 0 = on-chain revert, 1 = success. Nil while not
 	// yet mined; nil after dropped/failed.
 	ReceiptStatus *uint8 `json:"receipt_status,omitempty"`

@@ -37,7 +37,7 @@ func TestSecurityYAMLView(t *testing.T) {
 
 func TestNotifyYAMLToSnapshot(t *testing.T) {
 	cfg := &notify.Config{
-		Slack: &notify.SlackConfig{Enabled: true, BotToken: "xoxb-123"},
+		Slack:    &notify.SlackConfig{Enabled: true, BotToken: "xoxb-123"},
 		Telegram: &notify.TelegramConfig{Enabled: true, BotToken: "tg-456"},
 	}
 	channels := &notify.Channel{

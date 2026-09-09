@@ -41,7 +41,7 @@ func TestHexToUint64(t *testing.T) {
 		{"", 0, false},
 		{"0xGG", 0, false},
 		{"nothex", 0, false},
-		{"1", 1, true},  // without 0x prefix
+		{"1", 1, true}, // without 0x prefix
 		{"ff", 255, true},
 	}
 
@@ -102,11 +102,11 @@ func TestDecodeHexBytes(t *testing.T) {
 		assert.Equal(t, []byte{0xde, 0xad, 0xbe, 0xef}, b)
 	})
 
-		t.Run("empty_string", func(t *testing.T) {
-			b, err := decodeHexBytes("")
-			assert.NoError(t, err)
-			assert.Empty(t, b)
-		})
+	t.Run("empty_string", func(t *testing.T) {
+		b, err := decodeHexBytes("")
+		assert.NoError(t, err)
+		assert.Empty(t, b)
+	})
 
 	t.Run("invalid_hex", func(t *testing.T) {
 		_, err := decodeHexBytes("0xgggg")

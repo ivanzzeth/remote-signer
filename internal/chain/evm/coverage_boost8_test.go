@@ -367,10 +367,10 @@ func TestSolidityRuleEvaluator_Evaluate_SignTypeFilterSkip(t *testing.T) {
 		}),
 	}
 	req := &types.SignRequest{
-		SignType:       "typed_data",
-		SignerAddress:  "0x1234567890123456789012345678901234567890",
-		ChainID:        "1",
-		Payload:        []byte(`{"typed_data":{"types":{"EIP712Domain":[]},"primaryType":"EIP712Domain","domain":{},"message":{}}}`),
+		SignType:      "typed_data",
+		SignerAddress: "0x1234567890123456789012345678901234567890",
+		ChainID:       "1",
+		Payload:       []byte(`{"typed_data":{"types":{"EIP712Domain":[]},"primaryType":"EIP712Domain","domain":{},"message":{}}}`),
 	}
 
 	passed, reason, err := e.Evaluate(bgCtx, rule, req, nil)

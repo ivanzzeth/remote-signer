@@ -223,11 +223,11 @@ type ethSimV1Params struct {
 }
 
 type ethSimCallResult struct {
-	Status     string          `json:"status"` // "0x1" success, "0x0" revert
-	GasUsed    string          `json:"gasUsed"`
-	ReturnData string          `json:"returnData"`
-	Logs       []ethSimLog     `json:"logs"`
-	Error      *ethSimError    `json:"error,omitempty"`
+	Status     string       `json:"status"` // "0x1" success, "0x0" revert
+	GasUsed    string       `json:"gasUsed"`
+	ReturnData string       `json:"returnData"`
+	Logs       []ethSimLog  `json:"logs"`
+	Error      *ethSimError `json:"error,omitempty"`
 }
 
 type ethSimLog struct {

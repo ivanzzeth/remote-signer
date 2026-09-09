@@ -15,10 +15,10 @@ import (
 // personalSignReq creates a personal sign request for the given signer address.
 func personalSignReq(signerAddr string) *evm.SignRequest {
 	return &evm.SignRequest{
-		ChainID:      chainID,
+		ChainID:       chainID,
 		SignerAddress: signerAddr,
-		SignType:     evm.SignTypePersonal,
-		Payload:      []byte(`{"message":"access-test"}`),
+		SignType:      evm.SignTypePersonal,
+		Payload:       []byte(`{"message":"access-test"}`),
 	}
 }
 

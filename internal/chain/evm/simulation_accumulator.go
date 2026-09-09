@@ -322,4 +322,3 @@ func (r *SimulationBudgetRule) enqueueAndWait(
 func (r *SimulationBudgetRule) accumulatorActive() bool {
 	return r.batchWindow > 0 && r.pendingCh != nil
 }
-

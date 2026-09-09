@@ -37,10 +37,10 @@ func NewSimulationHistoryHandler(
 
 // ListSimulationsResponse is the JSON envelope for simulation history.
 type ListSimulationsResponse struct {
-	Simulations []*SimulationHistoryItem `json:"simulations"`
-	HasMore     bool                     `json:"has_more"`
-	NextCursor  string                   `json:"next_cursor,omitempty"`
-	NextCursorID string                  `json:"next_cursor_id,omitempty"`
+	Simulations  []*SimulationHistoryItem `json:"simulations"`
+	HasMore      bool                     `json:"has_more"`
+	NextCursor   string                   `json:"next_cursor,omitempty"`
+	NextCursorID string                   `json:"next_cursor_id,omitempty"`
 }
 
 // SimulationHistoryItem is a list-row view of a persisted simulation snapshot.

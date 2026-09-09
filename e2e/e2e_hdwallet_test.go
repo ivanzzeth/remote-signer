@@ -165,9 +165,9 @@ func TestHDWallet_DerivedAddressCanSign(t *testing.T) {
 
 	signResp, err := adminClient.EVM.Sign.Execute(ctx, &evm.SignRequest{
 		ChainID:       chainID,
-		SignerAddress:  primaryAddr,
-		SignType:       "personal",
-		Payload:        payload,
+		SignerAddress: primaryAddr,
+		SignType:      "personal",
+		Payload:       payload,
 	})
 	require.NoError(t, err)
 	require.NotNil(t, signResp)

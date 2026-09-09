@@ -20,25 +20,25 @@ func TestAddDelegationTargets_DirectChain(t *testing.T) {
 
 	// Create delegate_to target rule
 	targetRule := &types.Rule{
-		ID:          "target-1",
-		Name:        "Target Rule",
-		Type:        types.RuleTypeEVMAddressList,
-		Mode:        types.RuleModeWhitelist,
-		Enabled:     true,
-		Config:      json.RawMessage(`{"addresses":["0x123"]}`),
-		ChainType:   ptr(types.ChainTypeEVM),
+		ID:        "target-1",
+		Name:      "Target Rule",
+		Type:      types.RuleTypeEVMAddressList,
+		Mode:      types.RuleModeWhitelist,
+		Enabled:   true,
+		Config:    json.RawMessage(`{"addresses":["0x123"]}`),
+		ChainType: ptr(types.ChainTypeEVM),
 	}
 	allRulesMap[targetRule.ID] = targetRule
 
 	// Create delegating rule that delegates to target-1
 	delegatingRule := &types.Rule{
-		ID:          "delegator-1",
-		Name:        "Delegating Rule",
-		Type:        types.RuleTypeEVMJS,
-		Mode:        types.RuleModeWhitelist,
-		Enabled:     true,
-		Config:      json.RawMessage(`{"delegate_to":"target-1"}`),
-		ChainType:   ptr(types.ChainTypeEVM),
+		ID:        "delegator-1",
+		Name:      "Delegating Rule",
+		Type:      types.RuleTypeEVMJS,
+		Mode:      types.RuleModeWhitelist,
+		Enabled:   true,
+		Config:    json.RawMessage(`{"delegate_to":"target-1"}`),
+		ChainType: ptr(types.ChainTypeEVM),
 	}
 
 	visited := make(map[types.RuleID]bool)
@@ -218,7 +218,7 @@ func TestBuildIsolatedEngine_Basic(t *testing.T) {
 
 	var evalCalled bool
 	dummyEval := &dummyEvaluator{
-		ruleType:   types.RuleTypeEVMAddressList,
+		ruleType: types.RuleTypeEVMAddressList,
 		evaluateFn: func(ctx context.Context, rule *types.Rule, req *types.SignRequest, parsed *types.ParsedPayload) (bool, string, error) {
 			evalCalled = true
 			// Only match whitelist rules, not blocklist

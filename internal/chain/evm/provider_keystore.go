@@ -7,9 +7,9 @@ import (
 	"os"
 	"sync"
 
+	gethkeystore "github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
-	gethkeystore "github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ivanzzeth/ethsig"
 	"github.com/ivanzzeth/ethsig/keystore"
 

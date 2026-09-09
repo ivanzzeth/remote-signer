@@ -9,8 +9,8 @@ import (
 
 func TestAbiDecodeTransferFromPayload(t *testing.T) {
 	// transferFrom(from, to, amount): 3 x 32 bytes = 96 bytes. Each address is 24 zero hex + 40 address hex.
-	from := "000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266" // 64
-	to := "0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc4"   // 64
+	from := "000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266"   // 64
+	to := "0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc4"     // 64
 	amount := "0000000000000000000000000000000000000000000000000000000000000000" // 64
 	raw := from + to + amount
 	data, err := hex.DecodeString(raw)

@@ -231,7 +231,7 @@ func TestCloneRule_DeepCopy(t *testing.T) {
 		ID:            "r1",
 		ChainType:     &evm,
 		ChainID:       &chain,
-		Owner:      key,
+		Owner:         key,
 		SignerAddress: &signer,
 	}
 
@@ -351,7 +351,7 @@ func TestMemoryRuleRepo_List_CombinedFilters(t *testing.T) {
 	list, err := repo.List(ctx, RuleFilter{
 		ChainType:     &evm,
 		ChainID:       &chain1,
-		Owner:      &key1,
+		Owner:         &key1,
 		SignerAddress: &signer1,
 		Type:          &ruleType,
 		Source:        &source,

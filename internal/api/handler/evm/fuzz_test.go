@@ -12,9 +12,9 @@ func FuzzSignRequestParsing(f *testing.F) {
 	f.Add([]byte(`{}`))
 	f.Add([]byte(`{"chain_id":"1","signer_address":"0xabc","sign_type":"transaction","payload":{}}`))
 	f.Add([]byte(`{"chain_id":"","signer_address":"","sign_type":"","payload":null}`))
-	f.Add([]byte(`{"chain_id":1}`))                                                     // wrong type
-	f.Add([]byte(`{"payload":"not-an-object"}`))                                         // payload as string
-	f.Add([]byte(`{"payload":12345}`))                                                   // payload as number
+	f.Add([]byte(`{"chain_id":1}`))                                                            // wrong type
+	f.Add([]byte(`{"payload":"not-an-object"}`))                                               // payload as string
+	f.Add([]byte(`{"payload":12345}`))                                                         // payload as number
 	f.Add([]byte(`{"chain_id":"1","signer_address":"0x` + string(make([]byte, 10000)) + `"}`)) // oversized address
 	f.Add([]byte("null"))
 	f.Add([]byte("[]"))

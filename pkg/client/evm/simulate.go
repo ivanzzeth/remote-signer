@@ -24,12 +24,12 @@ type SimulateRequest struct {
 
 // SimulateResponse is the response from simulating a single transaction.
 type SimulateResponse struct {
-	Success        bool              `json:"success"`
-	GasUsed        uint64            `json:"gas_used"`
+	Success        bool               `json:"success"`
+	GasUsed        uint64             `json:"gas_used"`
 	BalanceChanges []BalanceChangeDTO `json:"balance_changes"`
-	Events         []SimEventDTO     `json:"events"`
-	HasApproval    bool              `json:"has_approval"`
-	RevertReason   string            `json:"revert_reason,omitempty"`
+	Events         []SimEventDTO      `json:"events"`
+	HasApproval    bool               `json:"has_approval"`
+	RevertReason   string             `json:"revert_reason,omitempty"`
 }
 
 // BalanceChangeDTO is a balance change in API responses.
@@ -51,8 +51,8 @@ type SimEventDTO struct {
 
 // SimulateBatchRequest is the request for simulating multiple transactions.
 type SimulateBatchRequest struct {
-	ChainID      string         `json:"chain_id"`
-	From         string         `json:"from"`
+	ChainID      string          `json:"chain_id"`
+	From         string          `json:"from"`
 	Transactions []SimulateTxDTO `json:"transactions"`
 }
 

@@ -18,12 +18,12 @@ import (
 
 // BudgetChecker checks and deducts budget for rule instances
 type BudgetChecker struct {
-	budgetRepo       storage.BudgetRepository
-	templateRepo     storage.TemplateRepository
-	notifier         BudgetAlertNotifier
-	jsEvaluator      BudgetJSEvaluator // optional: for method "js" budget metering
-	decimalsQuerier  DecimalsQuerier    // optional: for auto-querying ERC20 decimals when unit_decimal is true
-	logger           *slog.Logger
+	budgetRepo      storage.BudgetRepository
+	templateRepo    storage.TemplateRepository
+	notifier        BudgetAlertNotifier
+	jsEvaluator     BudgetJSEvaluator // optional: for method "js" budget metering
+	decimalsQuerier DecimalsQuerier   // optional: for auto-querying ERC20 decimals when unit_decimal is true
+	logger          *slog.Logger
 
 	// decimalsCache caches queried decimals results keyed by "chainID:address" (lowercased).
 	// SECURITY: Cache is per BudgetChecker instance; decimals are immutable for deployed tokens.

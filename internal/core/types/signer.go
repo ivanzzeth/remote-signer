@@ -28,9 +28,9 @@ type SignerListResult struct {
 
 // CreateSignerRequest is the request to create a new signer
 type CreateSignerRequest struct {
-	Type     SignerType             `json:"type"`
-	Keystore *CreateKeystoreParams  `json:"keystore,omitempty"`  // Required when type=keystore
-	HDWallet *CreateHDWalletParams  `json:"hd_wallet,omitempty"` // Required when type=hd_wallet
+	Type     SignerType            `json:"type"`
+	Keystore *CreateKeystoreParams `json:"keystore,omitempty"`  // Required when type=keystore
+	HDWallet *CreateHDWalletParams `json:"hd_wallet,omitempty"` // Required when type=hd_wallet
 }
 
 // TypedParams returns the type-specific params for provider dispatch.

@@ -80,7 +80,7 @@ type DetailResponse struct {
 	Enabled     bool             `json:"enabled"`
 	TemplateIDs []string         `json:"template_ids"`
 	Variables   []VariableDetail `json:"variables"`
-	Matrix      json.RawMessage   `json:"matrix,omitempty"`
+	Matrix      json.RawMessage  `json:"matrix,omitempty"`
 }
 
 // Get returns rich detail for a preset (admin only).
@@ -115,12 +115,12 @@ type ApplyResponse struct {
 
 // ValidatePresetResponse is the response for POST /api/v1/presets/{id}/validate.
 type ValidatePresetResponse struct {
-	PresetID   string      `json:"preset_id"`
-	PresetName string      `json:"preset_name"`
+	PresetID   string                      `json:"preset_id"`
+	PresetName string                      `json:"preset_name"`
 	Results    []*PresetValidateResultItem `json:"results,omitempty"`
-	Total      int         `json:"total"`
-	Passed     int         `json:"passed"`
-	Failed     int         `json:"failed"`
+	Total      int                         `json:"total"`
+	Passed     int                         `json:"passed"`
+	Failed     int                         `json:"failed"`
 }
 
 // PresetValidateResultItem is a single rule result in preset validation.

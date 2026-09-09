@@ -383,7 +383,7 @@ func TestValidate_SimulationEnabledWithoutBudgetDefaults(t *testing.T) {
 func TestValidate_SimulationEnabledWithBudgetDefaults(t *testing.T) {
 	cfg := validConfig()
 	cfg.Chains.EVM.Simulation = SimulationConfig{
-		Enabled:            true,
+		Enabled:              true,
 		BudgetNativeMaxTotal: "0.01",
 	}
 	err := validate(cfg)

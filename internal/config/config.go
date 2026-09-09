@@ -20,16 +20,16 @@ import (
 
 // Config is the root configuration structure
 type Config struct {
-	Server           ServerConfig            `yaml:"server"`
-	Database         storage.Config          `yaml:"database"`
-	Chains           ChainsConfig            `yaml:"chains"`
-	Notify           notify.Config           `yaml:"notify"`
-	NotifyChannel    notify.Channel          `yaml:"notify_channels"`
-	AuditMonitor     audit.MonitorConfig     `yaml:"audit_monitor"`
-	Security         SecurityConfig          `yaml:"security"`
-	Logger           LoggerConfig            `yaml:"logger"`
-	APIKeys          []APIKeyConfig          `yaml:"api_keys"`
-	Templates        []TemplateConfig        `yaml:"templates"`
+	Server        ServerConfig        `yaml:"server"`
+	Database      storage.Config      `yaml:"database"`
+	Chains        ChainsConfig        `yaml:"chains"`
+	Notify        notify.Config       `yaml:"notify"`
+	NotifyChannel notify.Channel      `yaml:"notify_channels"`
+	AuditMonitor  audit.MonitorConfig `yaml:"audit_monitor"`
+	Security      SecurityConfig      `yaml:"security"`
+	Logger        LoggerConfig        `yaml:"logger"`
+	APIKeys       []APIKeyConfig      `yaml:"api_keys"`
+	Templates     []TemplateConfig    `yaml:"templates"`
 	// TemplatesDir is an optional directory whose *.template*.yaml files
 	// are auto-enumerated into TemplateConfig entries at sync time.
 	// Enumerating each file by hand in Templates is verbose; this
@@ -224,7 +224,7 @@ type SignerMaterialCheckConfig struct {
 
 // FoundryConfig contains Foundry (forge) configuration for Solidity rules
 type FoundryConfig struct {
-	Enabled   *bool         `yaml:"enabled"`  // nil = auto-detect (default), true = enable, false = explicitly disable
+	Enabled   *bool         `yaml:"enabled"`    // nil = auto-detect (default), true = enable, false = explicitly disable
 	ForgePath string        `yaml:"forge_path"` // path to forge binary, empty = auto-detect from PATH
 	CacheDir  string        `yaml:"cache_dir"`  // cache directory for compiled scripts
 	TempDir   string        `yaml:"temp_dir"`   // workspace dir for rule scripts and lib/forge-std; empty = os.TempDir()/remote-signer-rules. For Docker, set to /app/data/forge-workspace and mount repo data/forge-workspace.
@@ -238,8 +238,8 @@ func (f FoundryConfig) FoundryEnabled() bool {
 
 // SimulationConfig contains transaction simulation engine configuration.
 type SimulationConfig struct {
-	Enabled bool          `yaml:"enabled"`
-	Timeout time.Duration `yaml:"timeout"` // per-simulation timeout (default: 60s)
+	Enabled      bool          `yaml:"enabled"`
+	Timeout      time.Duration `yaml:"timeout"`        // per-simulation timeout (default: 60s)
 	BatchWindow  time.Duration `yaml:"batch_window"`   // accumulation window for single sign fallback (default: 5s; 0 = disabled)
 	BatchMaxSize int           `yaml:"batch_max_size"` // max txs per batch (default: 20)
 	// Budget defaults for auto-created simulation budget records (human-readable units).

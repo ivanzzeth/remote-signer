@@ -39,15 +39,15 @@ var fileExtensions = map[string]struct{}{
 // A top-level `chain_type:` in the YAML overrides the directory inference
 // for the rare off-chain template that happens to sit under a chain dir.
 type templateYAML struct {
-	Name           string                  `yaml:"name"`
-	Description    string                  `yaml:"description,omitempty"`
-	Type           types.RuleType          `yaml:"type"`
-	Mode           types.RuleMode          `yaml:"mode"`
-	ChainType      types.ChainType         `yaml:"chain_type,omitempty"`
+	Name           string                   `yaml:"name"`
+	Description    string                   `yaml:"description,omitempty"`
+	Type           types.RuleType           `yaml:"type"`
+	Mode           types.RuleMode           `yaml:"mode"`
+	ChainType      types.ChainType          `yaml:"chain_type,omitempty"`
 	Variables      []types.TemplateVariable `yaml:"variables"`
 	VariableGroups []types.VariableGroup    `yaml:"variable_groups,omitempty"`
-	Rules          []map[string]any        `yaml:"rules,omitempty"`
-	Config         map[string]any          `yaml:"config,omitempty"`
+	Rules          []map[string]any         `yaml:"rules,omitempty"`
+	Config         map[string]any           `yaml:"config,omitempty"`
 	// BudgetMetering and TestVariables are kept untyped because they
 	// can contain ${var} placeholders pre-substitution — e.g.
 	//   budget_metering:
@@ -55,9 +55,9 @@ type templateYAML struct {
 	// won't unmarshal into types.BudgetMetering until substitution
 	// resolves the placeholders. The Registry stores raw bytes; the
 	// substituter and downstream evaluators do typed parsing.
-	BudgetMetering map[string]any    `yaml:"budget_metering,omitempty"`
-	TestVariables  map[string]any    `yaml:"test_variables,omitempty"`
-	Enabled        *bool             `yaml:"enabled,omitempty"`
+	BudgetMetering map[string]any `yaml:"budget_metering,omitempty"`
+	TestVariables  map[string]any `yaml:"test_variables,omitempty"`
+	Enabled        *bool          `yaml:"enabled,omitempty"`
 }
 
 // presetYAML is the wire shape for a preset file. As with templates, ID
@@ -67,18 +67,18 @@ type templateYAML struct {
 // OperatorOverrides replaces `override_hints` (string array) with a
 // struct so per-variable required-ness can be expressed.
 type presetYAML struct {
-	Name              string                  `yaml:"name"`
-	Description       string                  `yaml:"description,omitempty"`
-	ChainType         types.ChainType         `yaml:"chain_type,omitempty"`
-	ChainID           string                  `yaml:"chain_id,omitempty"`
-	TemplateIDs       []string                `yaml:"template_ids"`
-	Variables         map[string]any          `yaml:"variables,omitempty"`
-	Defaults          map[string]any          `yaml:"defaults,omitempty"`
-	Matrix            []map[string]any        `yaml:"matrix,omitempty"`
+	Name              string                   `yaml:"name"`
+	Description       string                   `yaml:"description,omitempty"`
+	ChainType         types.ChainType          `yaml:"chain_type,omitempty"`
+	ChainID           string                   `yaml:"chain_id,omitempty"`
+	TemplateIDs       []string                 `yaml:"template_ids"`
+	Variables         map[string]any           `yaml:"variables,omitempty"`
+	Defaults          map[string]any           `yaml:"defaults,omitempty"`
+	Matrix            []map[string]any         `yaml:"matrix,omitempty"`
 	OperatorOverrides []types.OperatorOverride `yaml:"operator_overrides,omitempty"`
-	Budget            map[string]any          `yaml:"budget,omitempty"`
-	Schedule          map[string]any          `yaml:"schedule,omitempty"`
-	Enabled           *bool                   `yaml:"enabled,omitempty"`
+	Budget            map[string]any           `yaml:"budget,omitempty"`
+	Schedule          map[string]any           `yaml:"schedule,omitempty"`
+	Enabled           *bool                    `yaml:"enabled,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

@@ -14,8 +14,8 @@ import (
 
 	"github.com/ivanzzeth/remote-signer/internal/api/middleware"
 	"github.com/ivanzzeth/remote-signer/internal/audit"
-	"github.com/ivanzzeth/remote-signer/internal/settings"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
+	"github.com/ivanzzeth/remote-signer/internal/settings"
 )
 
 // ---------------------------------------------------------------------------

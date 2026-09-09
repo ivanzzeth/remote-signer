@@ -18,19 +18,19 @@ import (
 )
 
 const (
-	configFile             = "config.yaml"
-	logFile                = "remote-signer.log"
-	pidFile                = "remote-signer.pid"
-	sqliteFile             = "remote-signer.db"
-	apiKeysSubdir          = "apikeys"
-	signerKeystoresSubdir  = "keystores"
-	adminPrivKeyFile       = "admin.key.priv"
-	adminPubKeyFile        = "admin.key.pub"
-	adminKeystoreFile      = "admin.keystore.json"
-	agentPrivKeyFile       = "agent.key.priv"
-	agentPubKeyFile        = "agent.key.pub"
-	envHome                = "REMOTE_SIGNER_HOME"
-	envConfig              = "REMOTE_SIGNER_CONFIG"
+	configFile            = "config.yaml"
+	logFile               = "remote-signer.log"
+	pidFile               = "remote-signer.pid"
+	sqliteFile            = "remote-signer.db"
+	apiKeysSubdir         = "apikeys"
+	signerKeystoresSubdir = "keystores"
+	adminPrivKeyFile      = "admin.key.priv"
+	adminPubKeyFile       = "admin.key.pub"
+	adminKeystoreFile     = "admin.keystore.json"
+	agentPrivKeyFile      = "agent.key.priv"
+	agentPubKeyFile       = "agent.key.pub"
+	envHome               = "REMOTE_SIGNER_HOME"
+	envConfig             = "REMOTE_SIGNER_CONFIG"
 )
 
 // Home returns the remote-signer per-user home directory path without creating it.

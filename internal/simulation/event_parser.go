@@ -477,7 +477,7 @@ func parseTransferBatchData(data string) (ids []string, values []string) {
 	idsOffset := parseUint64FromHex(data[0:64])
 	valuesOffset := parseUint64FromHex(data[64:128])
 
-	ids = parseUint256Array(data, idsOffset*2)     // *2 because offsets are in bytes, data is hex chars
+	ids = parseUint256Array(data, idsOffset*2) // *2 because offsets are in bytes, data is hex chars
 	values = parseUint256Array(data, valuesOffset*2)
 
 	return ids, values

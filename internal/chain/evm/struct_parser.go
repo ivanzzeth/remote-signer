@@ -12,8 +12,8 @@ import (
 
 // StructDefinition represents a parsed Solidity struct
 type StructDefinition struct {
-	Name   string            // struct name (e.g., "Order")
-	Fields []TypedDataField  // ordered list of fields
+	Name   string           // struct name (e.g., "Order")
+	Fields []TypedDataField // ordered list of fields
 }
 
 // parseStructDefinition extracts struct name and fields from Solidity struct syntax

@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	sourceBuiltin   = "builtin"
-	sourceRegistry  = "registry"
+	sourceBuiltin      = "builtin"
+	sourceRegistry     = "registry"
 	confidenceVerified = "verified"
 	confidenceInferred = "inferred"
 	confidenceUnknown  = "unknown"

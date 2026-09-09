@@ -192,11 +192,11 @@ func TestTLS_ServerStartsWithTLS(t *testing.T) {
 
 	// Create and start TLS test server with mTLS enabled
 	ts, err := NewTestServer(TestServerConfig{
-		Port:            port,
+		Port:             port,
 		SignerPrivateKey: testSignerPrivateKey,
 		SignerAddress:    testSignerAddress,
-		APIKeyID:        adminKeyID,
-		APIKeyPublicKey: adminPubKey,
+		APIKeyID:         adminKeyID,
+		APIKeyPublicKey:  adminPubKey,
 	})
 	require.NoError(t, err)
 	ts.tlsCerts = certs // store certs so waitForTLSReady can use client cert
@@ -294,11 +294,11 @@ func TestTLS_ServerWithTLSOnlyNoMTLS(t *testing.T) {
 
 	// Create TLS server WITHOUT mTLS (client_auth: false)
 	ts, err := NewTestServer(TestServerConfig{
-		Port:            port,
+		Port:             port,
 		SignerPrivateKey: testSignerPrivateKey,
 		SignerAddress:    testSignerAddress,
-		APIKeyID:        adminKeyID,
-		APIKeyPublicKey: adminPubKey,
+		APIKeyID:         adminKeyID,
+		APIKeyPublicKey:  adminPubKey,
 	})
 	require.NoError(t, err)
 
@@ -365,11 +365,11 @@ func TestTLS_SigningOverMTLS(t *testing.T) {
 	defer os.Unsetenv("E2E_TEST_SIGNER_KEY")
 
 	ts, err := NewTestServer(TestServerConfig{
-		Port:            port,
+		Port:             port,
 		SignerPrivateKey: testSignerPrivateKey,
 		SignerAddress:    testSignerAddress,
-		APIKeyID:        adminKeyID,
-		APIKeyPublicKey: adminPubKey,
+		APIKeyID:         adminKeyID,
+		APIKeyPublicKey:  adminPubKey,
 	})
 	require.NoError(t, err)
 	ts.tlsCerts = certs // store certs so waitForTLSReady can use client cert

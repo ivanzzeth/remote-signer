@@ -42,7 +42,7 @@ type BatchSignHandler struct {
 type BatchSignHandlerConfig struct {
 	SignService    service.SignServiceAPI
 	SignerManager  evm.SignerManager
-	AccessService *service.SignerAccessService
+	AccessService  *service.SignerAccessService
 	SimulationRule *evm.SimulationBudgetRule
 	RuleEngine     rule.RuleEngine
 	Logger         *slog.Logger
@@ -265,7 +265,7 @@ func (h *BatchSignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			APIKeyID:      apiKey.ID,
 			ChainType:     types.ChainTypeEVM,
 			ChainID:       req.Requests[i].ChainID,
-			SignerAddress:  req.Requests[i].SignerAddress,
+			SignerAddress: req.Requests[i].SignerAddress,
 			SignType:      req.Requests[i].SignType,
 			Payload:       payloads[i],
 			ClientIP:      clientIP,
@@ -312,13 +312,13 @@ func (h *BatchSignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					to = *ep.Transaction.To
 				}
 				// Convert decimal value to hex for JSON-RPC
-			hexValue := decimalToHex(ep.Transaction.Value)
-			txParams[i] = simulation.TxParams{
-				To:    to,
-				Value: hexValue,
-				Data:  ep.Transaction.Data,
-				Gas:   fmt.Sprintf("0x%x", ep.Transaction.Gas),
-			}
+				hexValue := decimalToHex(ep.Transaction.Value)
+				txParams[i] = simulation.TxParams{
+					To:    to,
+					Value: hexValue,
+					Data:  ep.Transaction.Data,
+					Gas:   fmt.Sprintf("0x%x", ep.Transaction.Gas),
+				}
 			}
 
 			outcome, simErr := h.simulationRule.EvaluateBatch(signCtx, firstChainID, firstSigner, txParams)
@@ -362,7 +362,7 @@ func (h *BatchSignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			APIKeyRole:    apiKey.Role,
 			ChainType:     types.ChainTypeEVM,
 			ChainID:       item.ChainID,
-			SignerAddress:  item.SignerAddress,
+			SignerAddress: item.SignerAddress,
 			SignType:      item.SignType,
 			Payload:       payloads[i],
 			ClientIP:      clientIP,

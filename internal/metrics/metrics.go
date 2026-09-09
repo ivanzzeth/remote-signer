@@ -69,8 +69,8 @@ func init() {
 const (
 	OutcomeNoMatch = "no_match" // evaluated, did not match
 	OutcomeAllow   = "allow"    // whitelist match (allowed)
-	OutcomeBlock   = "block"   // blocklist match (blocked)
-	OutcomeError   = "error"   // evaluation error
+	OutcomeBlock   = "block"    // blocklist match (blocked)
+	OutcomeError   = "error"    // evaluation error
 )
 
 // RecordRuleEvaluation records a rule evaluation for metrics (duration and count by outcome).
@@ -82,10 +82,10 @@ func RecordRuleEvaluation(ruleType, outcome string, duration time.Duration) {
 
 // Sign request outcome for request-level metrics
 const (
-	SignOutcomeOK        = "ok"        // 200, signed or pending
-	SignOutcomeNotFound  = "not_found" // 404, signer not found
-	SignOutcomeRejected  = "rejected"  // 403, manual approval disabled or not authorized
-	SignOutcomeError     = "error"     // 500, internal error
+	SignOutcomeOK       = "ok"        // 200, signed or pending
+	SignOutcomeNotFound = "not_found" // 404, signer not found
+	SignOutcomeRejected = "rejected"  // 403, manual approval disabled or not authorized
+	SignOutcomeError    = "error"     // 500, internal error
 )
 
 // RecordSignRequestDuration records the end-to-end duration of a sign request (from handler start to response).

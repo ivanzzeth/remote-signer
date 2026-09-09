@@ -23,7 +23,7 @@ import (
 // recompilation overhead (each new workspace costs ~12s). Stale script files are
 // removed between subtests to prevent incompatible signatures from polluting compilation.
 type sharedSolidityEvaluator struct {
-	e        *SolidityRuleEvaluator
+	e         *SolidityRuleEvaluator
 	workspace string
 }
 
@@ -236,7 +236,7 @@ func TestEvaluate_Expression_All(t *testing.T) {
 	t.Run("Pass", func(t *testing.T) {
 		s.cleanScripts(t)
 		rule := &types.Rule{
-			Mode: types.RuleModeWhitelist,
+			Mode:   types.RuleModeWhitelist,
 			Config: mustJSONMarshal(t, SolidityExpressionConfig{Expression: "require(true);"}),
 		}
 		req := &types.SignRequest{ChainID: "1", SignerAddress: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"}

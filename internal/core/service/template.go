@@ -110,8 +110,8 @@ type BudgetConfig struct {
 
 // ScheduleConfig defines periodic budget renewal
 type ScheduleConfig struct {
-	Period  time.Duration `json:"period"`              // e.g. 24h, 168h (7 days)
-	StartAt *time.Time   `json:"start_at,omitempty"`  // default: now
+	Period  time.Duration `json:"period"`             // e.g. 24h, 168h (7 days)
+	StartAt *time.Time    `json:"start_at,omitempty"` // default: now
 }
 
 // CreateInstanceResult contains the created rule(s) and optional budget(s).
@@ -119,10 +119,10 @@ type ScheduleConfig struct {
 // For template_bundle templates, SubRules and SubBudgets contain all expanded sub-rules;
 // Rule/Budget point to the first sub-rule for backward compatibility.
 type CreateInstanceResult struct {
-	Rule         *types.Rule            `json:"rule"`
-	Budget       *types.RuleBudget      `json:"budget,omitempty"`
-	SubRules     []*types.Rule          `json:"sub_rules,omitempty"`
-	SubBudgets   []*types.RuleBudget    `json:"sub_budgets,omitempty"`
+	Rule         *types.Rule             `json:"rule"`
+	Budget       *types.RuleBudget       `json:"budget,omitempty"`
+	SubRules     []*types.Rule           `json:"sub_rules,omitempty"`
+	SubBudgets   []*types.RuleBudget     `json:"sub_budgets,omitempty"`
 	SubRuleIDMap map[string]types.RuleID `json:"-"`
 }
 
@@ -559,9 +559,9 @@ func (s *TemplateService) createInstanceFromBundle(
 			subIDSuffix = sub.Name
 		}
 		subRuleID := req.PrecomputedSubRuleIDs[subIDSuffix]
-			if subRuleID == "" {
-				subRuleID = s.generateBundleSubRuleID(tmpl.ID, resolvedVars, subIDSuffix)
-			}
+		if subRuleID == "" {
+			subRuleID = s.generateBundleSubRuleID(tmpl.ID, resolvedVars, subIDSuffix)
+		}
 
 		ruleName := baseName
 		if len(subRules) > 1 {
@@ -637,49 +637,49 @@ func (s *TemplateService) createInstanceFromBundle(
 		pending = append(pending, pendingSubRule{rule: rule, config: subConfig})
 	}
 
-		// ---- Build combined resolution map ----
-		// Merge cross-template IDs (from BatchCreateInstances) into local
-		// sub-rule IDs so delegate_to can reference rules from other templates.
-		resolveMap := subIDToRuleID
-		if req.CrossTemplateIDMap != nil {
-			resolveMap = make(map[string]types.RuleID, len(subIDToRuleID)+len(req.CrossTemplateIDMap))
-			for k, v := range subIDToRuleID {
-				resolveMap[k] = v
-			}
-			for k, v := range req.CrossTemplateIDMap {
-				resolveMap[k] = v
-			}
+	// ---- Build combined resolution map ----
+	// Merge cross-template IDs (from BatchCreateInstances) into local
+	// sub-rule IDs so delegate_to can reference rules from other templates.
+	resolveMap := subIDToRuleID
+	if req.CrossTemplateIDMap != nil {
+		resolveMap = make(map[string]types.RuleID, len(subIDToRuleID)+len(req.CrossTemplateIDMap))
+		for k, v := range subIDToRuleID {
+			resolveMap[k] = v
 		}
+		for k, v := range req.CrossTemplateIDMap {
+			resolveMap[k] = v
+		}
+	}
 
-		// ---- Resolve delegate_to references using the combined map ----
-		for i, p := range pending {
-			newConfig, changed, err := ResolveDelegateToConfig(p.config, resolveMap)
-			if err != nil {
-				return nil, fmt.Errorf("failed to resolve delegate config for sub-rule %q: %w", p.rule.Name, err)
-			}
-			if changed {
-				pending[i].rule.Config = newConfig
-			}
+	// ---- Resolve delegate_to references using the combined map ----
+	for i, p := range pending {
+		newConfig, changed, err := ResolveDelegateToConfig(p.config, resolveMap)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve delegate config for sub-rule %q: %w", p.rule.Name, err)
 		}
+		if changed {
+			pending[i].rule.Config = newConfig
+		}
+	}
 
-		// Resolve delegate_to in Variables JSON so the JS runtime (which
-		// passes Variables as config to scripts) reads resolved IDs.
-		// Without this, the script returns the unresolved template-level
-		// ID (e.g. "polymarket-v2-transactions") as the delegation target,
-		// which doesn't exist in the DB.
-		if len(req.CrossTemplateIDMap) > 0 {
-			if err := resolveDelegateToInVars(resolvedVars, resolveMap); err != nil {
-				return nil, fmt.Errorf("failed to resolve delegate_to in variables for bundle %q: %w", tmpl.Name, err)
-			}
-			var err error
-			variablesJSON, err = json.Marshal(resolvedVars)
-			if err != nil {
-				return nil, fmt.Errorf("failed to marshal resolved variables: %w", err)
-			}
-			for i := range pending {
-				pending[i].rule.Variables = variablesJSON
-			}
+	// Resolve delegate_to in Variables JSON so the JS runtime (which
+	// passes Variables as config to scripts) reads resolved IDs.
+	// Without this, the script returns the unresolved template-level
+	// ID (e.g. "polymarket-v2-transactions") as the delegation target,
+	// which doesn't exist in the DB.
+	if len(req.CrossTemplateIDMap) > 0 {
+		if err := resolveDelegateToInVars(resolvedVars, resolveMap); err != nil {
+			return nil, fmt.Errorf("failed to resolve delegate_to in variables for bundle %q: %w", tmpl.Name, err)
 		}
+		var err error
+		variablesJSON, err = json.Marshal(resolvedVars)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal resolved variables: %w", err)
+		}
+		for i := range pending {
+			pending[i].rule.Variables = variablesJSON
+		}
+	}
 
 	// ---- Pass 2: persist all rules ----
 	result := &CreateInstanceResult{

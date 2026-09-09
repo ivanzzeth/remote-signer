@@ -63,7 +63,7 @@ func TestSubstituteBudgetValue(t *testing.T) {
 	t.Run("map string interface with vars", func(t *testing.T) {
 		vars := map[string]string{"token": "0xabc"}
 		m := map[string]interface{}{
-			"unit":     "${token}",
+			"unit":      "${token}",
 			"max_total": "100",
 		}
 		result := substituteBudgetValue(m, vars)
@@ -76,7 +76,7 @@ func TestSubstituteBudgetValue(t *testing.T) {
 	t.Run("map interface interface with vars", func(t *testing.T) {
 		vars := map[string]string{"token": "0xdef"}
 		m := map[interface{}]interface{}{
-			"unit":      "${token}",
+			"unit":       "${token}",
 			"max_per_tx": "50",
 		}
 		result := substituteBudgetValue(m, vars)

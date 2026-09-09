@@ -14,7 +14,7 @@ import (
 type Channel struct {
 	Slack    []string `yaml:"slack,omitempty"`    // Slack channel IDs
 	Pushover []string `yaml:"pushover,omitempty"` // Pushover user keys
-	Webhook  []string `yaml:"webhook,omitempty"`   // Webhook URLs
+	Webhook  []string `yaml:"webhook,omitempty"`  // Webhook URLs
 	Telegram []string `yaml:"telegram,omitempty"` // Telegram chat IDs or @channel
 }
 
@@ -26,12 +26,12 @@ type SlackConfig struct {
 
 // PushoverConfig holds Pushover notification channel configuration.
 type PushoverConfig struct {
-	Enabled    bool `yaml:"enabled"`
+	Enabled    bool   `yaml:"enabled"`
 	AppToken   string `yaml:"app_token"`
-	Retry      int  `yaml:"retry"`
-	Expire     int  `yaml:"expire"`
-	MaxRetries int  `yaml:"max_retries"`
-	RetryDelay int  `yaml:"retry_delay"`
+	Retry      int    `yaml:"retry"`
+	Expire     int    `yaml:"expire"`
+	MaxRetries int    `yaml:"max_retries"`
+	RetryDelay int    `yaml:"retry_delay"`
 }
 
 // WebhookConfig configures the generic webhook notification channel.

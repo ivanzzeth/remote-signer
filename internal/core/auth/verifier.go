@@ -86,12 +86,13 @@ func NewVerifierWithNonceStore(apiKeyRepo storage.APIKeyRepository, nonceStore s
 	}, nil
 }
 
-
 // VerifyRequest verifies the signature of an API request (legacy format without nonce)
 // The client signs: {timestamp}|{method}|{path}|{sha256(body)}
 // Deprecated: Use VerifyRequestWithNonce for better replay protection
 func (v *Verifier) VerifyRequest(
-	ctx interface{ Value(key interface{}) interface{} },
+	ctx interface {
+		Value(key interface{}) interface{}
+	},
 	apiKeyID string,
 	timestamp int64,
 	signature string,
@@ -120,7 +121,9 @@ func (v *Verifier) VerifyRequestWithNonce(
 
 // verifyRequestInternal is the internal implementation that handles all formats
 func (v *Verifier) verifyRequestInternal(
-	ctx interface{ Value(key interface{}) interface{} },
+	ctx interface {
+		Value(key interface{}) interface{}
+	},
 	apiKeyID string,
 	timestamp int64,
 	nonce string,
@@ -262,4 +265,3 @@ func SignRequestWithNonce(privateKey ed25519.PrivateKey, timestamp int64, nonce 
 	signature := ed25519.Sign(privateKey, []byte(message))
 	return base64.StdEncoding.EncodeToString(signature)
 }
-

@@ -111,7 +111,7 @@ func TestRequestHandler_GetSuccess(t *testing.T) {
 // MISSING_COVERAGE.md). When the whitelist engine couldn't find a
 // matching rule, sign.go persists the engine's reason on the request
 // row. The detail endpoint MUST round-trip it so the popup can render
-// "rule skipped: no evaluator for type ''" directly instead of
+// "rule skipped: no evaluator for type ”" directly instead of
 // forcing operators to grep server logs.
 func TestRequestHandler_GetSurfaces_LastNoMatchReason(t *testing.T) {
 	signReq := makeSignRequest("req-nomatch", types.StatusAuthorizing)

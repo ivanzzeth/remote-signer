@@ -259,4 +259,3 @@ func initTestServices(
 
 	return server, nil
 }
-

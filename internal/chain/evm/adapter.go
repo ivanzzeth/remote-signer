@@ -19,9 +19,9 @@ import (
 
 // Payload size limits for validation
 const (
-	maxTransactionDataSize = 128 * 1024   // 128 KB
-	maxMessageSize         = 1024 * 1024  // 1 MB
-	maxRawMessageSize      = 256 * 1024   // 256 KB
+	maxTransactionDataSize = 128 * 1024      // 128 KB
+	maxMessageSize         = 1024 * 1024     // 1 MB
+	maxRawMessageSize      = 256 * 1024      // 256 KB
 	maxPayloadSize         = 2 * 1024 * 1024 // 2 MB (basic check: whole payload)
 )
 

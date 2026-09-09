@@ -166,7 +166,6 @@ func (r *raceBudgetRepo) budgetCount(ruleID types.RuleID) int {
 	return count
 }
 
-
 // TestAutoCreateDynamicBudget_TOCTOU_ConcurrentUnitsRespectMax verifies that concurrent
 // creation of dynamic budget units for different tokens respects MaxDynamicUnits.
 // This is the V3-6 fix: post-create verification catches TOCTOU race on unit count.
@@ -325,7 +324,7 @@ func (r *alertCaptureBudgetRepo) CreateOrGet(_ context.Context, budget *types.Ru
 func (r *alertCaptureBudgetRepo) CountByRuleID(_ context.Context, _ types.RuleID) (int, error) {
 	return 0, nil
 }
-func (r *alertCaptureBudgetRepo) Delete(_ context.Context, _ string) error              { return nil }
+func (r *alertCaptureBudgetRepo) Delete(_ context.Context, _ string) error               { return nil }
 func (r *alertCaptureBudgetRepo) DeleteByRuleID(_ context.Context, _ types.RuleID) error { return nil }
 func (r *alertCaptureBudgetRepo) ListByRuleID(_ context.Context, _ types.RuleID) ([]*types.RuleBudget, error) {
 	return nil, nil

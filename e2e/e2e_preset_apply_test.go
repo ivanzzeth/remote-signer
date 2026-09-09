@@ -27,7 +27,7 @@ func TestE2E_PresetApply_KeyPresets(t *testing.T) {
 	tests := []struct {
 		name          string
 		presetID      string
-		wantRuleCount int // expected number of rules created
+		wantRuleCount int    // expected number of rules created
 		skipReason    string // non-empty = skip with this reason
 	}{
 		{

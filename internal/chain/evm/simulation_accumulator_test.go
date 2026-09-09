@@ -42,10 +42,12 @@ func (m *accMockSimulator) SimulateBatch(_ context.Context, req *simulation.Batc
 	return &simulation.BatchSimulationResult{Results: results}, nil
 }
 
-func (m *accMockSimulator) SyncIfDirty(_ context.Context, _ string) error   { return nil }
-func (m *accMockSimulator) MarkDirty(_ string)                              {}
-func (m *accMockSimulator) Status(_ context.Context) *simulation.ManagerStatus { return &simulation.ManagerStatus{} }
-func (m *accMockSimulator) Close() error                                    { return nil }
+func (m *accMockSimulator) SyncIfDirty(_ context.Context, _ string) error { return nil }
+func (m *accMockSimulator) MarkDirty(_ string)                            {}
+func (m *accMockSimulator) Status(_ context.Context) *simulation.ManagerStatus {
+	return &simulation.ManagerStatus{}
+}
+func (m *accMockSimulator) Close() error { return nil }
 
 // --- Helpers ---
 
@@ -304,7 +306,7 @@ func TestAccumulator_ApprovalDetected_NoMatchAll(t *testing.T) {
 					Events: []simulation.SimEvent{
 						{
 							Event:    "Approval",
-							Address: "0x1111111111111111111111111111111111111111",
+							Address:  "0x1111111111111111111111111111111111111111",
 							Standard: "erc20",
 							Args: map[string]string{
 								"owner":   "0x1111111111111111111111111111111111111111",
@@ -387,14 +389,14 @@ type accMockBudgetRepo struct {
 	getByRuleIDFn func(ctx context.Context, ruleID types.RuleID, unit string) (*types.RuleBudget, error)
 }
 
-func (m *accMockBudgetRepo) Create(_ context.Context, _ *types.RuleBudget) error   { return nil }
+func (m *accMockBudgetRepo) Create(_ context.Context, _ *types.RuleBudget) error { return nil }
 func (m *accMockBudgetRepo) GetByRuleID(ctx context.Context, ruleID types.RuleID, unit string) (*types.RuleBudget, error) {
 	if m.getByRuleIDFn != nil {
 		return m.getByRuleIDFn(ctx, ruleID, unit)
 	}
 	return nil, types.ErrNotFound
 }
-func (m *accMockBudgetRepo) Delete(_ context.Context, _ string) error              { return nil }
+func (m *accMockBudgetRepo) Delete(_ context.Context, _ string) error               { return nil }
 func (m *accMockBudgetRepo) DeleteByRuleID(_ context.Context, _ types.RuleID) error { return nil }
 func (m *accMockBudgetRepo) AtomicSpend(ctx context.Context, ruleID types.RuleID, unit, amount string) error {
 	if m.atomicSpendFn != nil {

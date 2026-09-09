@@ -56,8 +56,8 @@ func TestMapEVMSignTypeToRuleInput(t *testing.T) {
 		{SignTypeTypedData, "typed_data"},
 		{SignTypePersonal, "personal_sign"},
 		{SignTypeEIP191, "personal_sign"},
-		{SignTypeHash, "hash"},       // default passthrough
-		{"custom", "custom"},         // default passthrough
+		{SignTypeHash, "hash"}, // default passthrough
+		{"custom", "custom"},   // default passthrough
 	}
 	for _, tc := range tests {
 		t.Run(tc.input, func(t *testing.T) {

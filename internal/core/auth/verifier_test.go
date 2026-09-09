@@ -19,8 +19,8 @@ import (
 // --- mocks ---
 
 type mockAPIKeyRepo struct {
-	getFn           func(ctx context.Context, id string) (*types.APIKey, error)
-	updateLastUsed  func(ctx context.Context, id string) error
+	getFn          func(ctx context.Context, id string) (*types.APIKey, error)
+	updateLastUsed func(ctx context.Context, id string) error
 }
 
 func (m *mockAPIKeyRepo) Create(_ context.Context, _ *types.APIKey) error { return nil }

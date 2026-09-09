@@ -20,10 +20,10 @@ const (
 	AuditEventTypeSignRejected AuditEventType = "sign_rejected"
 
 	// Authorization events
-	AuditEventTypeRuleMatched      AuditEventType = "rule_matched"
-	AuditEventTypeApprovalRequest  AuditEventType = "approval_request"
-	AuditEventTypeApprovalGranted  AuditEventType = "approval_granted"
-	AuditEventTypeApprovalDenied   AuditEventType = "approval_denied"
+	AuditEventTypeRuleMatched     AuditEventType = "rule_matched"
+	AuditEventTypeApprovalRequest AuditEventType = "approval_request"
+	AuditEventTypeApprovalGranted AuditEventType = "approval_granted"
+	AuditEventTypeApprovalDenied  AuditEventType = "approval_denied"
 
 	// Rule management events
 	AuditEventTypeRuleCreated  AuditEventType = "rule_created"
@@ -39,9 +39,9 @@ const (
 	AuditEventTypeAPIRequest AuditEventType = "api_request"
 
 	// Config sync events
-	AuditEventTypeConfigReloaded  AuditEventType = "config_reloaded"
-	AuditEventTypeTemplateSynced  AuditEventType = "template_synced"
-	AuditEventTypeAPIKeySynced    AuditEventType = "apikey_synced" // #nosec G101 -- not a credential, audit event type name
+	AuditEventTypeConfigReloaded AuditEventType = "config_reloaded"
+	AuditEventTypeTemplateSynced AuditEventType = "template_synced"
+	AuditEventTypeAPIKeySynced   AuditEventType = "apikey_synced" // #nosec G101 -- not a credential, audit event type name
 
 	// Signer management events
 	AuditEventTypeSignerCreated    AuditEventType = "signer_created"

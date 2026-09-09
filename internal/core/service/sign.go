@@ -59,10 +59,10 @@ type SignService struct {
 	ruleEngine            rule.RuleEngine
 	stateMachine          *statemachine.StateMachine
 	approvalService       *ApprovalService
-	auditLogger           *audit.AuditLogger   // optional: persistent audit logging
-	approvalGuard         *ManualApprovalGuard        // optional: pauses requests when too many consecutive manual-approval outcomes
+	auditLogger           *audit.AuditLogger             // optional: persistent audit logging
+	approvalGuard         *ManualApprovalGuard           // optional: pauses requests when too many consecutive manual-approval outcomes
 	simulationRule        *evmchain.SimulationBudgetRule // optional: simulation-based budget fallback for unmatched transactions
-	manualApprovalEnabled bool                         // when false, no whitelist match → reject immediately
+	manualApprovalEnabled bool                           // when false, no whitelist match → reject immediately
 	logger                *slog.Logger
 }
 
@@ -134,14 +134,14 @@ var ErrStrategyRoleSimulationBlocked = errors.New("strategy role request has no 
 
 // SignRequest represents a request to sign data
 type SignRequest struct {
-	APIKeyID      string          `json:"api_key_id"`
+	APIKeyID      string           `json:"api_key_id"`
 	APIKeyRole    types.APIKeyRole `json:"api_key_role"`
-	ChainType     types.ChainType `json:"chain_type"`
-	ChainID       string          `json:"chain_id"`
-	SignerAddress string          `json:"signer_address"`
-	SignType      string          `json:"sign_type"`
-	Payload       []byte          `json:"payload"`
-	ClientIP      string          `json:"client_ip"` // source IP (set by handler from request context)
+	ChainType     types.ChainType  `json:"chain_type"`
+	ChainID       string           `json:"chain_id"`
+	SignerAddress string           `json:"signer_address"`
+	SignType      string           `json:"sign_type"`
+	Payload       []byte           `json:"payload"`
+	ClientIP      string           `json:"client_ip"` // source IP (set by handler from request context)
 }
 
 // SignResponse represents the response to a sign request
@@ -538,8 +538,8 @@ func (s *SignService) CountRequests(ctx context.Context, filter storage.RequestF
 
 // ApprovalRequest represents the request to approve or reject a signing request
 type ApprovalRequest struct {
-	Approved   bool                     `json:"approved"`
-	ApprovedBy string                   `json:"approved_by"`
+	Approved   bool                      `json:"approved"`
+	ApprovedBy string                    `json:"approved_by"`
 	RuleOpts   *rule.RuleGenerateOptions `json:"rule_opts,omitempty"` // Optional: generate rule with these options
 }
 

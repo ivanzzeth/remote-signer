@@ -12,8 +12,8 @@ import (
 	"strings"
 
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
-	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/rule"
+	"github.com/ivanzzeth/remote-signer/internal/core/service"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/ruleconfig"
 	"github.com/ivanzzeth/remote-signer/internal/storage"

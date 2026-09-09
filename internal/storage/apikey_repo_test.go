@@ -36,10 +36,10 @@ func TestAPIKeyRepo_Create(t *testing.T) {
 	ctx := context.Background()
 
 	key := &types.APIKey{
-		ID:       "key-1",
-		Name:     "Test Key",
-		Enabled:  true,
-		Role: types.RoleDev,
+		ID:      "key-1",
+		Name:    "Test Key",
+		Enabled: true,
+		Role:    types.RoleDev,
 	}
 	err := repo.Create(ctx, key)
 	require.NoError(t, err)

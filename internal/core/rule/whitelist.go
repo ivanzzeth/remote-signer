@@ -81,13 +81,13 @@ func (e *WhitelistRuleEngine) logScopeMismatch(rule *types.Rule, req *types.Sign
 // it's skipped and the next whitelist rule is evaluated. This ensures that one
 // failing whitelist rule doesn't prevent other valid whitelist rules from matching.
 type WhitelistRuleEngine struct {
-	repo                  storage.RuleRepository
-	evaluators            map[types.RuleType]RuleEvaluator
-	budgetChecker         *BudgetChecker // optional: budget checking for template instances
-	delegationConverter   DelegationPayloadConverter
-	mu                    sync.RWMutex
-	sealed                bool // once true, RegisterEvaluator is forbidden (server is accepting requests)
-	logger                *slog.Logger
+	repo                storage.RuleRepository
+	evaluators          map[types.RuleType]RuleEvaluator
+	budgetChecker       *BudgetChecker // optional: budget checking for template instances
+	delegationConverter DelegationPayloadConverter
+	mu                  sync.RWMutex
+	sealed              bool // once true, RegisterEvaluator is forbidden (server is accepting requests)
+	logger              *slog.Logger
 }
 
 // RuleEngineOption is a functional option for WhitelistRuleEngine
@@ -540,8 +540,8 @@ func (e *WhitelistRuleEngine) resolveDelegation(ctx context.Context, originalReq
 		req2, parsed2, err := e.delegationConverter(ctx, delegation.Payload, delegation.Mode)
 		if err != nil {
 			e.logger.Info("delegation single convert failed",
-					"from_rule_id", fromRule.ID, "from_rule_name", fromRule.Name,
-					"error", err)
+				"from_rule_id", fromRule.ID, "from_rule_name", fromRule.Name,
+				"error", err)
 			return &EvaluationResult{Allowed: false, NoMatchReason: "delegation single convert failed: " + err.Error()}, nil
 		}
 		req2.APIKeyID = originalReq.APIKeyID

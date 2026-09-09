@@ -270,10 +270,10 @@ func TestExpandInstanceRules_OptionalVarsFilled(t *testing.T) {
 func TestExpandInstanceRules_NonInstancePassthrough(t *testing.T) {
 	rules := []RuleConfig{
 		{
-			Name: "File Rule",
-			Type: "file",
-			Mode: "whitelist",
-			Config: map[string]interface{}{"path": "rules/foo.yaml"},
+			Name:    "File Rule",
+			Type:    "file",
+			Mode:    "whitelist",
+			Config:  map[string]interface{}{"path": "rules/foo.yaml"},
 			Enabled: true,
 		},
 	}
@@ -376,9 +376,9 @@ func TestLoadTemplateFromFileStatic_MissingPath(t *testing.T) {
 // TestLoadTemplateFromFileStatic_InvalidPathType returns error when path is not string.
 func TestLoadTemplateFromFileStatic_InvalidPathType(t *testing.T) {
 	fileCfg := TemplateConfig{
-		Name:   "T",
-		Type:   TemplateFileType,
-		Config: map[string]interface{}{"path": 123},
+		Name:    "T",
+		Type:    TemplateFileType,
+		Config:  map[string]interface{}{"path": 123},
 		Enabled: true,
 	}
 	_, err := loadTemplateFromFileStatic(fileCfg, t.TempDir(), nil)

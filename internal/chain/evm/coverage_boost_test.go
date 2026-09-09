@@ -1472,9 +1472,9 @@ func TestDelegatePayloadToSignRequest_RuleInputPayload_CB(t *testing.T) {
 func TestDelegatePayloadToSignRequest_StructPayload_CB(t *testing.T) {
 	// Test with a generic struct that gets marshaled to JSON
 	type customPayload struct {
-		SignType string                 `json:"sign_type"`
-		ChainID  float64                `json:"chain_id"`
-		Signer   string                 `json:"signer"`
+		SignType string  `json:"sign_type"`
+		ChainID  float64 `json:"chain_id"`
+		Signer   string  `json:"signer"`
 	}
 	payload := customPayload{
 		SignType: "personal_sign",

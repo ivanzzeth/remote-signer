@@ -11,16 +11,16 @@ import (
 type Module string
 
 const (
-	ModuleAPI         Module = "api"
-	ModuleAuth        Module = "auth"
-	ModuleChain       Module = "chain"
-	ModuleEVM         Module = "evm"
-	ModuleNotify      Module = "notify"
-	ModuleRule        Module = "rule"
-	ModuleService     Module = "service"
+	ModuleAPI          Module = "api"
+	ModuleAuth         Module = "auth"
+	ModuleChain        Module = "chain"
+	ModuleEVM          Module = "evm"
+	ModuleNotify       Module = "notify"
+	ModuleRule         Module = "rule"
+	ModuleService      Module = "service"
 	ModuleStateMachine Module = "statemachine"
-	ModuleStorage     Module = "storage"
-	ModuleSystem      Module = "system"
+	ModuleStorage      Module = "storage"
+	ModuleSystem       Module = "system"
 )
 
 var (

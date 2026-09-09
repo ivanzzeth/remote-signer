@@ -36,8 +36,8 @@ type RequestDetailModel struct {
 	showApprove   bool
 	showReject    bool
 	generateRule  bool
-	ruleTypeIdx   int    // Index into ruleTypes
-	ruleModeIdx   int    // Index into ruleModes
+	ruleTypeIdx   int // Index into ruleTypes
+	ruleModeIdx   int // Index into ruleModes
 	ruleNameInput textinput.Model
 	maxValueInput textinput.Model
 	activeInput   string // "name" or "maxvalue"

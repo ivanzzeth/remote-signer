@@ -663,14 +663,16 @@ func TestCreateRule_MaxRulesExceeded(t *testing.T) {
 
 type stubAPIKeyRepo struct{}
 
-func (s *stubAPIKeyRepo) Create(_ context.Context, _ *types.APIKey) error             { return nil }
-func (s *stubAPIKeyRepo) Get(_ context.Context, _ string) (*types.APIKey, error)      { return &types.APIKey{ID: "test-key", Role: types.RoleAdmin, Enabled: true}, nil }
-func (s *stubAPIKeyRepo) Update(_ context.Context, _ *types.APIKey) error             { return nil }
-func (s *stubAPIKeyRepo) Delete(_ context.Context, _ string) error                    { return nil }
+func (s *stubAPIKeyRepo) Create(_ context.Context, _ *types.APIKey) error { return nil }
+func (s *stubAPIKeyRepo) Get(_ context.Context, _ string) (*types.APIKey, error) {
+	return &types.APIKey{ID: "test-key", Role: types.RoleAdmin, Enabled: true}, nil
+}
+func (s *stubAPIKeyRepo) Update(_ context.Context, _ *types.APIKey) error { return nil }
+func (s *stubAPIKeyRepo) Delete(_ context.Context, _ string) error        { return nil }
 func (s *stubAPIKeyRepo) List(_ context.Context, _ storage.APIKeyFilter) ([]*types.APIKey, error) {
 	return nil, nil
 }
-func (s *stubAPIKeyRepo) UpdateLastUsed(_ context.Context, _ string) error            { return nil }
+func (s *stubAPIKeyRepo) UpdateLastUsed(_ context.Context, _ string) error             { return nil }
 func (s *stubAPIKeyRepo) Count(_ context.Context, _ storage.APIKeyFilter) (int, error) { return 0, nil }
 func (s *stubAPIKeyRepo) DeleteBySourceExcluding(_ context.Context, _ string, _ []string) (int64, error) {
 	return 0, nil

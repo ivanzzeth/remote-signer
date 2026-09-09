@@ -57,9 +57,9 @@ func TestValidateExplicitRuleIDsLocal_MissingIDs(t *testing.T) {
 func TestExtractTestCasesFromConfig_AlreadyAtRuleLevel(t *testing.T) {
 	rules := []RuleConfig{
 		{
-			Name:     "has_test_cases",
+			Name:      "has_test_cases",
 			TestCases: []TestCaseConfig{{Name: "tc1"}},
-			Config:   map[string]any{},
+			Config:    map[string]any{},
 		},
 	}
 	extractTestCasesFromConfig(rules)

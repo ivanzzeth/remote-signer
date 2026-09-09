@@ -47,8 +47,8 @@ var dangerousPatterns = []*regexp.Regexp{
 
 	// Network access
 	regexp.MustCompile(`(?i)vm\s*\.\s*rpc\s*\(`),        // vm.rpc() - external RPC calls
-	regexp.MustCompile(`(?i)vm\s*\.\s*createFork\s*\(`),  // vm.createFork() - network access
-	regexp.MustCompile(`(?i)vm\s*\.\s*selectFork\s*\(`),  // vm.selectFork() - network access
+	regexp.MustCompile(`(?i)vm\s*\.\s*createFork\s*\(`), // vm.createFork() - network access
+	regexp.MustCompile(`(?i)vm\s*\.\s*selectFork\s*\(`), // vm.selectFork() - network access
 
 	// Transaction broadcasting (could initiate real on-chain transactions)
 	regexp.MustCompile(`(?i)vm\s*\.\s*broadcast\s*\(`),      // vm.broadcast() - broadcast next tx
@@ -85,10 +85,10 @@ func ValidateSolidityCodeSecurity(code string) *SecurityError {
 
 // SolidityRuleValidator validates Solidity expression rules before storage
 type SolidityRuleValidator struct {
-	evaluator      *SolidityRuleEvaluator
-	logger         *slog.Logger
-	syntaxCache    map[string]bool // script hash -> syntax valid
-	syntaxCacheMu  sync.RWMutex
+	evaluator     *SolidityRuleEvaluator
+	logger        *slog.Logger
+	syntaxCache   map[string]bool // script hash -> syntax valid
+	syntaxCacheMu sync.RWMutex
 }
 
 // BatchValidationResult contains results for batch validation
@@ -502,8 +502,8 @@ type testCaseWithRule struct {
 // generateBatchTestScript generates a single test contract with all test cases
 // This significantly reduces compilation time by compiling once instead of N times
 func (v *SolidityRuleValidator) generateBatchTestScript(rules []*types.Rule, mode ValidationMode, allTestCases []testCaseWithRule) (string, error) {
-	var testFunctions []string      // test functions placed INSIDE BatchRuleEvaluatorTest
-	var topLevelContracts []string  // helper contracts placed OUTSIDE BatchRuleEvaluatorTest
+	var testFunctions []string     // test functions placed INSIDE BatchRuleEvaluatorTest
+	var topLevelContracts []string // helper contracts placed OUTSIDE BatchRuleEvaluatorTest
 
 	switch mode {
 	case ValidationModeExpression:
@@ -1066,8 +1066,8 @@ func (v *SolidityRuleValidator) executeBatchTestScript(ctx context.Context, scri
 	// Initialize all results with default values
 	for i, tcwr := range allTestCases {
 		results[i] = TestCaseResult{
-			Name:         tcwr.tc.Name,
-			ExpectedPass: tcwr.tc.ExpectPass,
+			Name:           tcwr.tc.Name,
+			ExpectedPass:   tcwr.tc.ExpectPass,
 			ExpectedReason: tcwr.tc.ExpectReason,
 		}
 	}
@@ -1190,7 +1190,6 @@ func (v *SolidityRuleValidator) modeString(mode ValidationMode) string {
 		return "unknown"
 	}
 }
-
 
 // validateSyntaxForModeWithStruct compiles the Solidity code to check for syntax errors based on mode
 // If structDef is provided, it will be used for struct-based syntax checking in TypedDataExpression mode

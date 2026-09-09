@@ -189,11 +189,11 @@ func TestIPWhitelist_GetClientIP(t *testing.T) {
 			expectedIP: "192.168.1.100",
 		},
 		{
-			name:        "with X-Forwarded-For but trust_proxy disabled",
-			trustProxy:  false,
-			remoteAddr:  "192.168.1.1:12345",
-			xForwarded:  "203.0.113.50",
-			expectedIP:  "192.168.1.1", // Should ignore X-Forwarded-For
+			name:       "with X-Forwarded-For but trust_proxy disabled",
+			trustProxy: false,
+			remoteAddr: "192.168.1.1:12345",
+			xForwarded: "203.0.113.50",
+			expectedIP: "192.168.1.1", // Should ignore X-Forwarded-For
 		},
 		{
 			name:           "with X-Forwarded-For from trusted proxy",

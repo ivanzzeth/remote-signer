@@ -28,9 +28,9 @@ var ErrCannotCreateSimulationBudget = errors.New("simulation budgets are created
 
 // BudgetListHandler serves the /api/v1/evm/budgets collection:
 //
-//   GET  /api/v1/evm/budgets   — every budget row (PermReadBudgets)
-//   POST /api/v1/evm/budgets   — create a budget for an existing rule
-//                                (PermManageBudgets, refuses sim:* IDs)
+//	GET  /api/v1/evm/budgets   — every budget row (PermReadBudgets)
+//	POST /api/v1/evm/budgets   — create a budget for an existing rule
+//	                             (PermManageBudgets, refuses sim:* IDs)
 //
 // Per-rule listing under /rules/{id}/budgets remains and still drives
 // the rule-detail view; this endpoint exists because synthetic
@@ -75,28 +75,28 @@ const (
 // the storage RuleBudget plus annotations resolved server-side so clients
 // don't need a second roundtrip.
 type BudgetEntry struct {
-	ID         string     `json:"id"`
-	Kind       BudgetKind `json:"kind"`
-	RuleID     string     `json:"rule_id"`
-	RuleName   string     `json:"rule_name,omitempty"`
-	RuleType   string     `json:"rule_type,omitempty"`
-	RuleMode   string     `json:"rule_mode,omitempty"`
-	RuleOwner  string     `json:"rule_owner,omitempty"`
+	ID        string     `json:"id"`
+	Kind      BudgetKind `json:"kind"`
+	RuleID    string     `json:"rule_id"`
+	RuleName  string     `json:"rule_name,omitempty"`
+	RuleType  string     `json:"rule_type,omitempty"`
+	RuleMode  string     `json:"rule_mode,omitempty"`
+	RuleOwner string     `json:"rule_owner,omitempty"`
 	// SignerAddress is set for kind=simulation budgets, decoded from the
 	// "sim:<address>" rule_id used by the simulation fallback. Real-rule
 	// budgets keep this empty (the signer is implicit from the rule's
 	// own scope).
-	SignerAddress string `json:"signer_address,omitempty"`
-	Unit          string `json:"unit"`
-	MaxTotal      string `json:"max_total"`
-	MaxPerTx      string `json:"max_per_tx"`
-	Spent         string `json:"spent"`
-	TxCount       int    `json:"tx_count"`
-	MaxTxCount    int    `json:"max_tx_count"`
-	AlertPct      int    `json:"alert_pct"`
-	AlertSent     bool   `json:"alert_sent"`
-	CreatedAt     string `json:"created_at"`
-	UpdatedAt     string `json:"updated_at"`
+	SignerAddress      string `json:"signer_address,omitempty"`
+	Unit               string `json:"unit"`
+	MaxTotal           string `json:"max_total"`
+	MaxPerTx           string `json:"max_per_tx"`
+	Spent              string `json:"spent"`
+	TxCount            int    `json:"tx_count"`
+	MaxTxCount         int    `json:"max_tx_count"`
+	AlertPct           int    `json:"alert_pct"`
+	AlertSent          bool   `json:"alert_sent"`
+	CreatedAt          string `json:"created_at"`
+	UpdatedAt          string `json:"updated_at"`
 	UnitDisplay        string `json:"unit_display,omitempty"`
 	BudgetPeriod       string `json:"budget_period,omitempty"`
 	PeriodStart        string `json:"period_start,omitempty"`
@@ -381,10 +381,10 @@ func (h *BudgetListHandler) annotateFromRule(rule *types.Rule, b *types.RuleBudg
 
 // BudgetItemHandler serves the per-budget routes:
 //
-//   GET    /api/v1/evm/budgets/{id}          — detail   (PermReadBudgets)
-//   PATCH  /api/v1/evm/budgets/{id}          — update   (PermManageBudgets)
-//   DELETE /api/v1/evm/budgets/{id}          — delete   (PermManageBudgets)
-//   POST   /api/v1/evm/budgets/{id}/reset    — reset    (PermManageBudgets)
+//	GET    /api/v1/evm/budgets/{id}          — detail   (PermReadBudgets)
+//	PATCH  /api/v1/evm/budgets/{id}          — update   (PermManageBudgets)
+//	DELETE /api/v1/evm/budgets/{id}          — delete   (PermManageBudgets)
+//	POST   /api/v1/evm/budgets/{id}/reset    — reset    (PermManageBudgets)
 //
 // {id} is the budget primary key — either the SHA256 hash returned by
 // BudgetID(rule_id, unit) for real-rule budgets, or the literal
@@ -841,4 +841,3 @@ func isValidBudgetAmount(s string) bool {
 	}
 	return n.Sign() >= 0
 }
-

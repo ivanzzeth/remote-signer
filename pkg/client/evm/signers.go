@@ -135,4 +135,3 @@ func (s *SignerService) PatchSignerLabels(ctx context.Context, address string, r
 	}
 	return &out, nil
 }
-

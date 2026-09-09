@@ -170,7 +170,6 @@ func isIntegerString(s string) bool {
 	return true
 }
 
-
 // variablesToStringMap parses rule.Variables JSON into a string map.
 func variablesToStringMap(variablesJSON []byte) map[string]string {
 	if len(variablesJSON) == 0 {

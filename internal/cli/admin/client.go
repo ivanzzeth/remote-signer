@@ -16,17 +16,17 @@ import (
 
 // Auth flag variables (bound to persistent flags on rootCmd)
 var (
-	flagURL              string
-	flagAPIKeyID         string
-	flagAPIKeyFile       string
-	flagAPIKeyKeystore   string
+	flagURL               string
+	flagAPIKeyID          string
+	flagAPIKeyFile        string
+	flagAPIKeyKeystore    string
 	flagAPIKeyPasswordEnv string
-	flagTLSCA            string
-	flagTLSCert          string
-	flagTLSKey           string
-	flagTLSSkipVerify    bool
-	flagOutputFormat     string
-	flagJSON             bool
+	flagTLSCA             string
+	flagTLSCert           string
+	flagTLSKey            string
+	flagTLSSkipVerify     bool
+	flagOutputFormat      string
+	flagJSON              bool
 )
 
 // resolveAPIKeyFileDefault resolves the --api-key-file default.

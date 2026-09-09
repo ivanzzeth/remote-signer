@@ -674,7 +674,6 @@ func TestSubstituteVariables(t *testing.T) {
 	})
 }
 
-
 // mustResolveConfig reproduces what the rule engine does at evaluation time:
 // it substitutes the rule's Variables into its template-form Config. Instance
 // rules persist Config with ${var} placeholders (Variables is the single source
@@ -1120,7 +1119,7 @@ func TestCreateInstance(t *testing.T) {
 		result, err := svc.CreateInstance(ctx, &CreateInstanceRequest{
 			TemplateID: "tmpl-unit-subst",
 			Variables: map[string]string{
-				"chain_id":       "137",
+				"chain_id":      "137",
 				"token_address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
 			},
 			Budget: &BudgetConfig{
@@ -2179,7 +2178,7 @@ func TestReservedVariableChainID(t *testing.T) {
 			TemplateID: "tmpl-oldstyle",
 			ChainID:    &chainID,
 			Variables: map[string]string{
-				"chain_id":      "1",                                          // user says chain 1 — should be overridden
+				"chain_id":      "1", // user says chain 1 — should be overridden
 				"token_address": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
 			},
 		})
@@ -2458,10 +2457,10 @@ func TestCreateInstance_SkipValidationFlow(t *testing.T) {
 		budgetRepo := newMockBudgetRepo()
 
 		tmpl := &types.RuleTemplate{
-			ID:        "tmpl-evmjs-1",
-			Name:      "EVM JS Template",
-			Type:      types.RuleTypeEVMJS,
-			Mode:      types.RuleModeWhitelist,
+			ID:   "tmpl-evmjs-1",
+			Name: "EVM JS Template",
+			Type: types.RuleTypeEVMJS,
+			Mode: types.RuleModeWhitelist,
 			Variables: mustJSON([]types.TemplateVariable{
 				{Name: "max_value", Type: "bigint", Required: true},
 			}),
@@ -2524,10 +2523,10 @@ func TestCreateInstance_SkipValidationFlow(t *testing.T) {
 		}
 
 		tmpl := &types.RuleTemplate{
-			ID:        "tmpl-evmjs-tc",
-			Name:      "EVM JS With Test Cases",
-			Type:      types.RuleTypeEVMJS,
-			Mode:      types.RuleModeWhitelist,
+			ID:   "tmpl-evmjs-tc",
+			Name: "EVM JS With Test Cases",
+			Type: types.RuleTypeEVMJS,
+			Mode: types.RuleModeWhitelist,
 			Variables: mustJSON([]types.TemplateVariable{
 				{Name: "max_value", Type: "bigint", Required: true},
 			}),
@@ -2571,10 +2570,10 @@ func TestCreateInstance_SkipValidationFlow(t *testing.T) {
 		budgetRepo := newMockBudgetRepo()
 
 		tmpl := &types.RuleTemplate{
-			ID:        "tmpl-evmjs-notc",
-			Name:      "EVM JS No Test Cases",
-			Type:      types.RuleTypeEVMJS,
-			Mode:      types.RuleModeWhitelist,
+			ID:   "tmpl-evmjs-notc",
+			Name: "EVM JS No Test Cases",
+			Type: types.RuleTypeEVMJS,
+			Mode: types.RuleModeWhitelist,
 			Variables: mustJSON([]types.TemplateVariable{
 				{Name: "max_value", Type: "bigint", Required: true},
 			}),
@@ -2630,10 +2629,10 @@ func TestCreateInstance_SkipValidationFlow(t *testing.T) {
 		}
 
 		tmpl := &types.RuleTemplate{
-			ID:        "tmpl-evmjs-tv",
-			Name:      "EVM JS With Test Variables",
-			Type:      types.RuleTypeEVMJS,
-			Mode:      types.RuleModeWhitelist,
+			ID:   "tmpl-evmjs-tv",
+			Name: "EVM JS With Test Variables",
+			Type: types.RuleTypeEVMJS,
+			Mode: types.RuleModeWhitelist,
 			Variables: mustJSON([]types.TemplateVariable{
 				{Name: "max_value", Type: "bigint", Required: true},
 			}),
@@ -2676,10 +2675,10 @@ func TestCreateInstance_SkipValidationFlow(t *testing.T) {
 		budgetRepo := newMockBudgetRepo()
 
 		tmpl := &types.RuleTemplate{
-			ID:        "tmpl-evmjs-block",
-			Name:      "EVM JS Blocklist",
-			Type:      types.RuleTypeEVMJS,
-			Mode:      types.RuleModeBlocklist,
+			ID:   "tmpl-evmjs-block",
+			Name: "EVM JS Blocklist",
+			Type: types.RuleTypeEVMJS,
+			Mode: types.RuleModeBlocklist,
 			Variables: mustJSON([]types.TemplateVariable{
 				{Name: "max_value", Type: "bigint", Required: true},
 			}),
@@ -2912,6 +2911,7 @@ func TestCreateInstance_SkipValidationFlow(t *testing.T) {
 		}
 	})
 }
+
 // ---------------------------------------------------------------------------
 // TestCreateInstanceWithTx
 // ---------------------------------------------------------------------------
@@ -3554,7 +3554,7 @@ func TestResolveDelegateToConfig(t *testing.T) {
 
 	t.Run("both_delegate_to_and_delegate_to_by_target", func(t *testing.T) {
 		cfg := map[string]interface{}{
-			"delegate_to":          "rule-a",
+			"delegate_to":           "rule-a",
 			"delegate_to_by_target": "tx:rule-b",
 		}
 		ruleIDMap := map[string]types.RuleID{
@@ -3604,16 +3604,16 @@ func TestBatchCreateInstances_CrossTemplateDelegateToResolution(t *testing.T) {
 	// Has rules_json with a sub-rule "my-target-rule" that we want to delegate TO.
 	targetRulesJSON := `[{"id":"my-target-rule","name":"Target Rule","type":"evm_js","mode":"whitelist","enabled":true,"config":{"script":"function validate(input) { var tx = input.transaction; require(tx && tx.to, 'missing to'); return ok(); }"}}]`
 	templateT := &types.RuleTemplate{
-		ID:         "evm/target",
-		Name:       "Target Template",
-		Type:       "template_bundle",
-		Mode:       types.RuleModeWhitelist,
-		Config:     json.RawMessage(mustMarshalJSON(map[string]interface{}{"rules_json": targetRulesJSON})),
-		Variables:  json.RawMessage(`[]`),
-		Source:     types.RuleSourceConfig,
-		Enabled:    true,
-		CreatedAt:  time.Now(),
-		UpdatedAt:  time.Now(),
+		ID:        "evm/target",
+		Name:      "Target Template",
+		Type:      "template_bundle",
+		Mode:      types.RuleModeWhitelist,
+		Config:    json.RawMessage(mustMarshalJSON(map[string]interface{}{"rules_json": targetRulesJSON})),
+		Variables: json.RawMessage(`[]`),
+		Source:    types.RuleSourceConfig,
+		Enabled:   true,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
 	}
 	if err := tmplRepo.Create(context.Background(), templateT); err != nil {
 		t.Fatalf("failed to seed target template: %v", err)
@@ -3627,16 +3627,16 @@ func TestBatchCreateInstances_CrossTemplateDelegateToResolution(t *testing.T) {
 		{Name: "delegate_mode", Type: types.VarTypeString, Required: false, Default: "single"},
 	}
 	templateC := &types.RuleTemplate{
-		ID:         "evm/caller",
-		Name:       "Caller Template",
-		Type:       "template_bundle",
-		Mode:       types.RuleModeWhitelist,
-		Config:     json.RawMessage(mustMarshalJSON(map[string]interface{}{"rules_json": callerRulesJSON})),
-		Variables:  mustJSON(callerVars),
-		Source:     types.RuleSourceConfig,
-		Enabled:    true,
-		CreatedAt:  time.Now(),
-		UpdatedAt:  time.Now(),
+		ID:        "evm/caller",
+		Name:      "Caller Template",
+		Type:      "template_bundle",
+		Mode:      types.RuleModeWhitelist,
+		Config:    json.RawMessage(mustMarshalJSON(map[string]interface{}{"rules_json": callerRulesJSON})),
+		Variables: mustJSON(callerVars),
+		Source:    types.RuleSourceConfig,
+		Enabled:   true,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
 	}
 	if err := tmplRepo.Create(context.Background(), templateC); err != nil {
 		t.Fatalf("failed to seed caller template: %v", err)
@@ -3824,17 +3824,17 @@ func TestBatchCreateInstances_PolymarketV2SafePreset(t *testing.T) {
 
 	// ---- Shared preset variables (exactly what the preset YAML provides) ----
 	sharedVars := map[string]string{
-		"safe_proxy_factory_address":      "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b",
-		"safe_factory_domain_name":        "Polymarket Contract Proxy Factory",
-		"clob_auth_domain_name":           "ClobAuthDomain",
-		"clob_auth_domain_version":        "1",
-		"exchange_v2_address":             "0xE111180000d2663C0091e4f400237545B87B996B",
-		"collateral_token_address":        "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB",
-		"conditional_tokens_address":      "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045",
-		"allowed_safe_addresses":          "0x1111111111111111111111111111111111111111",
-		"allowed_safe_tx_to_addresses":    "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB",
-		"delegate_to":                     "polymarket-v2-transactions",
-		"delegate_mode":                   "single",
+		"safe_proxy_factory_address":   "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b",
+		"safe_factory_domain_name":     "Polymarket Contract Proxy Factory",
+		"clob_auth_domain_name":        "ClobAuthDomain",
+		"clob_auth_domain_version":     "1",
+		"exchange_v2_address":          "0xE111180000d2663C0091e4f400237545B87B996B",
+		"collateral_token_address":     "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB",
+		"conditional_tokens_address":   "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045",
+		"allowed_safe_addresses":       "0x1111111111111111111111111111111111111111",
+		"allowed_safe_tx_to_addresses": "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB",
+		"delegate_to":                  "polymarket-v2-transactions",
+		"delegate_mode":                "single",
 	}
 
 	// ---- ACT: BatchCreateInstances with all 3 templates ----
@@ -4041,17 +4041,17 @@ func TestBatchCreateInstances_VariablesNotCorrupted(t *testing.T) {
 	// allowed_safe_addresses = placeholder Safe address (operator overrides this)
 	// allowed_safe_tx_to_addresses = protocol contract addresses
 	sharedVars := map[string]string{
-		"safe_proxy_factory_address":  "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b",
-		"safe_factory_domain_name":    "Polymarket Contract Proxy Factory",
-		"clob_auth_domain_name":       "ClobAuthDomain",
-		"clob_auth_domain_version":    "1",
-		"exchange_v2_address":         "0xE111180000d2663C0091e4f400237545B87B996B",
-		"collateral_token_address":    "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB",
-		"conditional_tokens_address":  "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045",
-		"allowed_safe_addresses":      "0x1111111111111111111111111111111111111111",
+		"safe_proxy_factory_address":   "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b",
+		"safe_factory_domain_name":     "Polymarket Contract Proxy Factory",
+		"clob_auth_domain_name":        "ClobAuthDomain",
+		"clob_auth_domain_version":     "1",
+		"exchange_v2_address":          "0xE111180000d2663C0091e4f400237545B87B996B",
+		"collateral_token_address":     "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB",
+		"conditional_tokens_address":   "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045",
+		"allowed_safe_addresses":       "0x1111111111111111111111111111111111111111",
 		"allowed_safe_tx_to_addresses": "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB,0x4D97DCd97eC945f40cF65F87097ACe5EA0476045",
-		"delegate_to":                 "v2-transactions",
-		"delegate_mode":               "single",
+		"delegate_to":                  "v2-transactions",
+		"delegate_mode":                "single",
 	}
 
 	results, err := svc.BatchCreateInstances(context.Background(), ruleRepo, budgetRepo, []BatchCreateItem{
@@ -4187,11 +4187,11 @@ func TestCollectRuleIDs_Errors(t *testing.T) {
 	t.Run("substitution error in bundle", func(t *testing.T) {
 		// Config references a variable that doesn't exist - SubstituteVariables will fail
 		tmpl := &types.RuleTemplate{
-			ID:   "tmpl-bad-subst",
-			Name: "Bad Subst Bundle",
-			Type: "template_bundle",
-			Mode: types.RuleModeWhitelist,
-			Config: json.RawMessage(`{"rules_json":"[{\"id\":\"sub1\",\"name\":\"Rule\",\"type\":\"evm_js\",\"mode\":\"whitelist\",\"config\":{\"script\":\"${nonexistent}\"},\"enabled\":true}]"}`),
+			ID:      "tmpl-bad-subst",
+			Name:    "Bad Subst Bundle",
+			Type:    "template_bundle",
+			Mode:    types.RuleModeWhitelist,
+			Config:  json.RawMessage(`{"rules_json":"[{\"id\":\"sub1\",\"name\":\"Rule\",\"type\":\"evm_js\",\"mode\":\"whitelist\",\"config\":{\"script\":\"${nonexistent}\"},\"enabled\":true}]"}`),
 			Source:  types.RuleSourceConfig,
 			Enabled: true,
 		}
@@ -4205,11 +4205,11 @@ func TestCollectRuleIDs_Errors(t *testing.T) {
 
 	t.Run("missing rules_json in bundle", func(t *testing.T) {
 		tmpl := &types.RuleTemplate{
-			ID:     "tmpl-no-rules",
-			Name:   "No Rules Bundle",
-			Type:   "template_bundle",
-			Mode:   types.RuleModeWhitelist,
-			Config: json.RawMessage(`{"not_rules":"something"}`),
+			ID:      "tmpl-no-rules",
+			Name:    "No Rules Bundle",
+			Type:    "template_bundle",
+			Mode:    types.RuleModeWhitelist,
+			Config:  json.RawMessage(`{"not_rules":"something"}`),
 			Source:  types.RuleSourceConfig,
 			Enabled: true,
 		}
@@ -4223,16 +4223,16 @@ func TestCollectRuleIDs_Errors(t *testing.T) {
 
 	t.Run("precomputed sub rule IDs used", func(t *testing.T) {
 		tmpl := &types.RuleTemplate{
-			ID:   "tmpl-precomputed",
-			Name: "Precomputed Bundle",
-			Type: "template_bundle",
-			Mode: types.RuleModeWhitelist,
-			Config: json.RawMessage(`{"rules_json":"[{\"id\":\"sub1\",\"name\":\"Rule\",\"type\":\"evm_js\",\"mode\":\"whitelist\",\"config\":{\"script\":\"true\"},\"enabled\":true}]"}`),
+			ID:      "tmpl-precomputed",
+			Name:    "Precomputed Bundle",
+			Type:    "template_bundle",
+			Mode:    types.RuleModeWhitelist,
+			Config:  json.RawMessage(`{"rules_json":"[{\"id\":\"sub1\",\"name\":\"Rule\",\"type\":\"evm_js\",\"mode\":\"whitelist\",\"config\":{\"script\":\"true\"},\"enabled\":true}]"}`),
 			Source:  types.RuleSourceConfig,
 			Enabled: true,
 		}
 		req := &CreateInstanceRequest{
-			TemplateID:           "tmpl-precomputed",
+			TemplateID:            "tmpl-precomputed",
 			PrecomputedSubRuleIDs: map[string]types.RuleID{"sub1": "precomputed-id-123"},
 		}
 		vars := map[string]string{}
@@ -4250,11 +4250,11 @@ func TestCollectRuleIDs_SubRuleNoID(t *testing.T) {
 
 	// Sub-rule with no ID field uses Name as suffix
 	tmpl := &types.RuleTemplate{
-		ID:   "tmpl-no-sub-id",
-		Name: "No Sub ID Bundle",
-		Type: "template_bundle",
-		Mode: types.RuleModeWhitelist,
-		Config: json.RawMessage(`{"rules_json":"[{\"name\":\"NoIDRule\",\"type\":\"evm_js\",\"mode\":\"whitelist\",\"config\":{\"script\":\"true\"},\"enabled\":true}]"}`),
+		ID:      "tmpl-no-sub-id",
+		Name:    "No Sub ID Bundle",
+		Type:    "template_bundle",
+		Mode:    types.RuleModeWhitelist,
+		Config:  json.RawMessage(`{"rules_json":"[{\"name\":\"NoIDRule\",\"type\":\"evm_js\",\"mode\":\"whitelist\",\"config\":{\"script\":\"true\"},\"enabled\":true}]"}`),
 		Source:  types.RuleSourceConfig,
 		Enabled: true,
 	}
@@ -4275,11 +4275,11 @@ func TestBatchCreateInstances_CollectRuleIDsError(t *testing.T) {
 
 	// Template bundle with ${nonexistent} var - collectRuleIDs will fail on substitution
 	tmpl := &types.RuleTemplate{
-		ID:   "tmpl-collect-fail",
-		Name: "Collect Fail Bundle",
-		Type: "template_bundle",
-		Mode: types.RuleModeWhitelist,
-		Config: json.RawMessage(`{"rules_json":"[{\"id\":\"sub1\",\"name\":\"Rule\",\"type\":\"evm_js\",\"mode\":\"whitelist\",\"config\":{\"script\":\"${nonexistent}\"},\"enabled\":true}]"}`),
+		ID:      "tmpl-collect-fail",
+		Name:    "Collect Fail Bundle",
+		Type:    "template_bundle",
+		Mode:    types.RuleModeWhitelist,
+		Config:  json.RawMessage(`{"rules_json":"[{\"id\":\"sub1\",\"name\":\"Rule\",\"type\":\"evm_js\",\"mode\":\"whitelist\",\"config\":{\"script\":\"${nonexistent}\"},\"enabled\":true}]"}`),
 		Source:  types.RuleSourceConfig,
 		Enabled: true,
 	}
@@ -4300,11 +4300,11 @@ func TestCollectRuleIDs_NonBundle(t *testing.T) {
 	require.NoError(t, err)
 
 	tmpl := &types.RuleTemplate{
-		ID:   "tmpl-single",
-		Name: "Single Rule",
-		Type: types.RuleTypeEVMAddressList,
-		Mode: types.RuleModeWhitelist,
-		Config: json.RawMessage(`{"addresses":["0x1111111111111111111111111111111111111111"]}`),
+		ID:      "tmpl-single",
+		Name:    "Single Rule",
+		Type:    types.RuleTypeEVMAddressList,
+		Mode:    types.RuleModeWhitelist,
+		Config:  json.RawMessage(`{"addresses":["0x1111111111111111111111111111111111111111"]}`),
 		Source:  types.RuleSourceConfig,
 		Enabled: true,
 	}
@@ -4323,14 +4323,14 @@ func TestCreateInstanceFromResolved_NoPrecomputedVars(t *testing.T) {
 	budgetRepo := newMockBudgetRepo()
 
 	tmpl := &types.RuleTemplate{
-		ID:   "tmpl-no-prec",
-		Name: "No Precomputed Vars",
-		Type: types.RuleTypeEVMAddressList,
-		Mode: types.RuleModeWhitelist,
-		Config: json.RawMessage(`{"addresses":["${addr1}"]}`),
+		ID:        "tmpl-no-prec",
+		Name:      "No Precomputed Vars",
+		Type:      types.RuleTypeEVMAddressList,
+		Mode:      types.RuleModeWhitelist,
+		Config:    json.RawMessage(`{"addresses":["${addr1}"]}`),
 		Variables: json.RawMessage(`[{"name":"addr1","type":"address","required":true}]`),
-		Source:  types.RuleSourceConfig,
-		Enabled: true,
+		Source:    types.RuleSourceConfig,
+		Enabled:   true,
 	}
 	seedTemplate(t, tmplRepo, tmpl)
 
@@ -4423,11 +4423,11 @@ func TestCreateInstanceFromBundle_PreservesSubRulePriority(t *testing.T) {
 	require.NoError(t, err)
 
 	tmpl := &types.RuleTemplate{
-		ID:   "tmpl-priority-bundle",
-		Name: "Priority Bundle",
-		Type: "template_bundle",
-		Mode: types.RuleModeWhitelist,
-		Config: json.RawMessage(`{"rules_json":"[{\"id\":\"high\",\"name\":\"High\",\"type\":\"evm_js\",\"mode\":\"whitelist\",\"priority\":10000,\"config\":{\"script\":\"true\"},\"enabled\":true},{\"id\":\"default\",\"name\":\"Default\",\"type\":\"evm_js\",\"mode\":\"whitelist\",\"config\":{\"script\":\"true\"},\"enabled\":true}]"}`),
+		ID:      "tmpl-priority-bundle",
+		Name:    "Priority Bundle",
+		Type:    "template_bundle",
+		Mode:    types.RuleModeWhitelist,
+		Config:  json.RawMessage(`{"rules_json":"[{\"id\":\"high\",\"name\":\"High\",\"type\":\"evm_js\",\"mode\":\"whitelist\",\"priority\":10000,\"config\":{\"script\":\"true\"},\"enabled\":true},{\"id\":\"default\",\"name\":\"Default\",\"type\":\"evm_js\",\"mode\":\"whitelist\",\"config\":{\"script\":\"true\"},\"enabled\":true}]"}`),
 		Source:  types.RuleSourceConfig,
 		Enabled: true,
 	}
@@ -4457,11 +4457,11 @@ func TestCreateInstanceFromBundle_Errors(t *testing.T) {
 
 	t.Run("empty sub-rules", func(t *testing.T) {
 		tmpl := &types.RuleTemplate{
-			ID:   "tmpl-empty-bundle",
-			Name: "Empty Bundle",
-			Type: "template_bundle",
-			Mode: types.RuleModeWhitelist,
-			Config: json.RawMessage(`{"rules_json":"[]"}`),
+			ID:      "tmpl-empty-bundle",
+			Name:    "Empty Bundle",
+			Type:    "template_bundle",
+			Mode:    types.RuleModeWhitelist,
+			Config:  json.RawMessage(`{"rules_json":"[]"}`),
 			Source:  types.RuleSourceConfig,
 			Enabled: true,
 		}
@@ -4474,11 +4474,11 @@ func TestCreateInstanceFromBundle_Errors(t *testing.T) {
 
 	t.Run("malformed rules_json", func(t *testing.T) {
 		tmpl := &types.RuleTemplate{
-			ID:   "tmpl-malformed-bundle",
-			Name: "Malformed Bundle",
-			Type: "template_bundle",
-			Mode: types.RuleModeWhitelist,
-			Config: json.RawMessage(`{"rules_json":"not-json"}`),
+			ID:      "tmpl-malformed-bundle",
+			Name:    "Malformed Bundle",
+			Type:    "template_bundle",
+			Mode:    types.RuleModeWhitelist,
+			Config:  json.RawMessage(`{"rules_json":"not-json"}`),
 			Source:  types.RuleSourceConfig,
 			Enabled: true,
 		}

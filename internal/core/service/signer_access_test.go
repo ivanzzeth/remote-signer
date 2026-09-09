@@ -554,37 +554,37 @@ func TestSignerAccessService_CleanupForDeletedKey(t *testing.T) {
 
 	// Create a rule owned by key-to-delete
 	ownedRule := &types.Rule{
-		ID:      "rule-owned",
-		Name:    "Owned Rule",
-		Type:    "evm_address_list",
-		Mode:    "whitelist",
-		Owner:   "key-to-delete",
+		ID:        "rule-owned",
+		Name:      "Owned Rule",
+		Type:      "evm_address_list",
+		Mode:      "whitelist",
+		Owner:     "key-to-delete",
 		AppliedTo: []string{"key-to-delete"},
-		Enabled: true,
+		Enabled:   true,
 	}
 	require.NoError(t, ruleRepo.Create(ctx, ownedRule))
 
 	// Create a rule that has key-to-delete in applied_to along with other key
 	sharedRule := &types.Rule{
-		ID:      "rule-shared",
-		Name:    "Shared Rule",
-		Type:    "evm_address_list",
-		Mode:    "whitelist",
-		Owner:   "other-key",
+		ID:        "rule-shared",
+		Name:      "Shared Rule",
+		Type:      "evm_address_list",
+		Mode:      "whitelist",
+		Owner:     "other-key",
 		AppliedTo: []string{"key-to-delete", "other-key"},
-		Enabled: true,
+		Enabled:   true,
 	}
 	require.NoError(t, ruleRepo.Create(ctx, sharedRule))
 
 	// Create a rule that only has key-to-delete in applied_to (should be deleted)
 	soloRule := &types.Rule{
-		ID:      "rule-solo",
-		Name:    "Solo Rule",
-		Type:    "evm_address_list",
-		Mode:    "whitelist",
-		Owner:   "other-key",
+		ID:        "rule-solo",
+		Name:      "Solo Rule",
+		Type:      "evm_address_list",
+		Mode:      "whitelist",
+		Owner:     "other-key",
 		AppliedTo: []string{"key-to-delete"},
-		Enabled: true,
+		Enabled:   true,
 	}
 	require.NoError(t, ruleRepo.Create(ctx, soloRule))
 

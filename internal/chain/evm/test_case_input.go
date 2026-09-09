@@ -33,8 +33,8 @@ func TestCaseInputToSignRequest(input map[string]interface{}) (*types.SignReques
 	req := &types.SignRequest{
 		ChainType:     types.ChainTypeEVM,
 		ChainID:       chainID,
-		SignerAddress:  signer,
-		SignType:       signType,
+		SignerAddress: signer,
+		SignType:      signType,
 	}
 	parsed := &types.ParsedPayload{}
 

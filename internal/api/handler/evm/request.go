@@ -55,21 +55,21 @@ func NewRequestHandler(signService service.SignServiceAPI, ruleRepo storage.Rule
 // RequestDetailResponse represents a detailed request response (GET /api/v1/evm/requests/{id}).
 // Payload is included so operators can inspect full request content for debugging and rule analysis.
 type RequestDetailResponse struct {
-	ID               string          `json:"id"`
-	APIKeyID         string          `json:"api_key_id"`
-	ChainType        string          `json:"chain_type"`
-	ChainID          string          `json:"chain_id"`
-	SignerAddress    string          `json:"signer_address"`
-	SignType         string          `json:"sign_type"`
-	Status           string          `json:"status"`
-	ClientIP         string          `json:"client_ip,omitempty"`
-	Payload          json.RawMessage `json:"payload,omitempty"`
-	Signature        string          `json:"signature,omitempty"`
-	SignedData       string          `json:"signed_data,omitempty"`
-	ErrorMessage     string          `json:"error_message,omitempty"`
-	RuleMatchedID    *string         `json:"rule_matched_id,omitempty"`
-	RuleMatchedName  *string         `json:"rule_matched_name,omitempty"`
-	ApprovedBy       *string         `json:"approved_by,omitempty"`
+	ID              string          `json:"id"`
+	APIKeyID        string          `json:"api_key_id"`
+	ChainType       string          `json:"chain_type"`
+	ChainID         string          `json:"chain_id"`
+	SignerAddress   string          `json:"signer_address"`
+	SignType        string          `json:"sign_type"`
+	Status          string          `json:"status"`
+	ClientIP        string          `json:"client_ip,omitempty"`
+	Payload         json.RawMessage `json:"payload,omitempty"`
+	Signature       string          `json:"signature,omitempty"`
+	SignedData      string          `json:"signed_data,omitempty"`
+	ErrorMessage    string          `json:"error_message,omitempty"`
+	RuleMatchedID   *string         `json:"rule_matched_id,omitempty"`
+	RuleMatchedName *string         `json:"rule_matched_name,omitempty"`
+	ApprovedBy      *string         `json:"approved_by,omitempty"`
 	// ApprovalSource is one of "manual", "rule", "simulation" once the
 	// request has been approved. Emitted even when the row predates the
 	// column so the UI can render a single consistent "approved by …"
@@ -79,7 +79,7 @@ type RequestDetailResponse struct {
 	// matched; empty when a rule auto-approved. The popup activity
 	// drawer renders this so operators see "why didn't my rule fire?"
 	// without grepping server logs.
-	LastNoMatchReason string  `json:"last_no_match_reason,omitempty"`
+	LastNoMatchReason string `json:"last_no_match_reason,omitempty"`
 	// TransactionID is the FK into /api/v1/evm/transactions; set
 	// when the wallet RPC proxy observes a broadcast whose signed
 	// bytes match this request's signed_data. The web UI renders
@@ -92,9 +92,9 @@ type RequestDetailResponse struct {
 	// RuleGenerationHints carries optional defaults for generatable types
 	// (e.g. max_value for evm_value_limit from the transaction value).
 	RuleGenerationHints *RuleGenerationHints `json:"rule_generation_hints,omitempty"`
-	CreatedAt     string  `json:"created_at"`
-	UpdatedAt     string  `json:"updated_at"`
-	CompletedAt   *string `json:"completed_at,omitempty"`
+	CreatedAt           string               `json:"created_at"`
+	UpdatedAt           string               `json:"updated_at"`
+	CompletedAt         *string              `json:"completed_at,omitempty"`
 }
 
 // ListRequestsResponse represents the response for listing requests
@@ -183,7 +183,7 @@ func enrichDetailWithRuleGeneration(
 }
 
 var validTransactionStatuses = map[string]bool{
-	"none":        true,
+	"none":                            true,
 	string(types.TxStatusBroadcasted): true,
 	string(types.TxStatusMined):       true,
 	string(types.TxStatusDropped):     true,

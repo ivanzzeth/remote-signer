@@ -23,14 +23,14 @@ import (
 // --- Mock SignService ---
 
 type mockSignService struct {
-	signFn              func(ctx context.Context, req *service.SignRequest) (*service.SignResponse, error)
-	getRequestFn        func(ctx context.Context, id types.SignRequestID) (*types.SignRequest, error)
-	listRequestsFn      func(ctx context.Context, filter storage.RequestFilter) ([]*types.SignRequest, error)
-	countRequestsFn     func(ctx context.Context, filter storage.RequestFilter) (int, error)
-	processApprovalFn   func(ctx context.Context, requestID types.SignRequestID, req *service.ApprovalRequest) (*service.ApprovalResponse, error)
+	signFn                 func(ctx context.Context, req *service.SignRequest) (*service.SignResponse, error)
+	getRequestFn           func(ctx context.Context, id types.SignRequestID) (*types.SignRequest, error)
+	listRequestsFn         func(ctx context.Context, filter storage.RequestFilter) ([]*types.SignRequest, error)
+	countRequestsFn        func(ctx context.Context, filter storage.RequestFilter) (int, error)
+	processApprovalFn      func(ctx context.Context, requestID types.SignRequestID, req *service.ApprovalRequest) (*service.ApprovalResponse, error)
 	processBatchApprovalFn func(ctx context.Context, requestIDs []types.SignRequestID, req *service.ApprovalRequest) (*service.BatchApprovalResponse, error)
-	previewRuleFn              func(ctx context.Context, requestID types.SignRequestID, opts *rule.RuleGenerateOptions) (*types.Rule, error)
-	ruleGenerationInfoFn       func(ctx context.Context, requestID types.SignRequestID) (*service.RuleGenerationInfo, error)
+	previewRuleFn          func(ctx context.Context, requestID types.SignRequestID, opts *rule.RuleGenerateOptions) (*types.Rule, error)
+	ruleGenerationInfoFn   func(ctx context.Context, requestID types.SignRequestID) (*service.RuleGenerationInfo, error)
 }
 
 func (m *mockSignService) Sign(ctx context.Context, req *service.SignRequest) (*service.SignResponse, error) {

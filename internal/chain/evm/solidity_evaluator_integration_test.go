@@ -1600,4 +1600,3 @@ func TestIntegration_BatchEvaluate_CacheHit(t *testing.T) {
 	assert.Equal(t, results1[0].Passed, results2[0].Passed)
 	assert.Equal(t, results1[1].Passed, results2[1].Passed)
 }
-

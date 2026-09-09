@@ -20,10 +20,10 @@ func TestValidateSignTypeRestrictionConfig(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "missing allowed_sign_types",
-			config: map[string]interface{}{},
+			name:    "missing allowed_sign_types",
+			config:  map[string]interface{}{},
 			wantErr: true,
-			errMsg: "required",
+			errMsg:  "required",
 		},
 		{
 			name: "allowed_sign_types as string (comma-separated) rejected",
@@ -97,7 +97,7 @@ func TestValidateEVMJSConfig_SignTypeFilter(t *testing.T) {
 		{
 			name: "valid script with sign_type_filter string",
 			config: map[string]interface{}{
-				"script":            "function validate(i){ return { valid: true }; }",
+				"script":           "function validate(i){ return { valid: true }; }",
 				"sign_type_filter": "typed_data,transaction",
 			},
 			wantErr: false,
@@ -105,7 +105,7 @@ func TestValidateEVMJSConfig_SignTypeFilter(t *testing.T) {
 		{
 			name: "sign_type_filter as array rejected",
 			config: map[string]interface{}{
-				"script": "function validate(i){ return { valid: true }; }",
+				"script":           "function validate(i){ return { valid: true }; }",
 				"sign_type_filter": []interface{}{"typed_data", "transaction"},
 			},
 			wantErr: true,
@@ -114,7 +114,7 @@ func TestValidateEVMJSConfig_SignTypeFilter(t *testing.T) {
 		{
 			name: "sign_type_filter invalid token",
 			config: map[string]interface{}{
-				"script":            "function validate(i){ return { valid: true }; }",
+				"script":           "function validate(i){ return { valid: true }; }",
 				"sign_type_filter": "typed_data,invalid",
 			},
 			wantErr: true,
@@ -174,8 +174,8 @@ func TestValidateAddressListConfig(t *testing.T) {
 			errMsg:  "not a valid Ethereum address",
 		},
 		{
-			name: "missing addresses",
-			config: map[string]interface{}{},
+			name:    "missing addresses",
+			config:  map[string]interface{}{},
 			wantErr: true,
 			errMsg:  "addresses is required",
 		},
@@ -217,8 +217,8 @@ func TestValidateValueLimitConfig(t *testing.T) {
 			errMsg:  "must be a string",
 		},
 		{
-			name: "missing max_value",
-			config: map[string]interface{}{},
+			name:    "missing max_value",
+			config:  map[string]interface{}{},
 			wantErr: true,
 			errMsg:  "max_value is required",
 		},
@@ -276,8 +276,8 @@ func TestValidateContractMethodConfig(t *testing.T) {
 			errMsg:  "4-byte",
 		},
 		{
-			name: "missing method_sigs",
-			config: map[string]interface{}{},
+			name:    "missing method_sigs",
+			config:  map[string]interface{}{},
 			wantErr: true,
 			errMsg:  "method_sigs is required",
 		},
@@ -333,8 +333,8 @@ func TestValidateSignerRestrictionConfig(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "missing allowed_signers",
-			config: map[string]interface{}{},
+			name:    "missing allowed_signers",
+			config:  map[string]interface{}{},
 			wantErr: true,
 			errMsg:  "allowed_signers is required",
 		},

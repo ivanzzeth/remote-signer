@@ -241,8 +241,8 @@ func TestAgentBudget_SignCount_ExhaustsLimit(t *testing.T) {
 	ruleIDs := applyAgentPresetForBudget(t, map[string]string{
 		"max_sign_count": "3",
 		// Set high limits for other budget types so they don't interfere
-		"max_tx_count":    "10000",
-		"max_native_total": "1000",
+		"max_tx_count":      "10000",
+		"max_native_total":  "1000",
 		"max_native_per_tx": "100",
 	})
 	// sign_count budget is tracked by the agent-sign sub-rule (handles personal_sign)
@@ -278,9 +278,9 @@ func TestAgentBudget_SignCount_ExhaustsLimit(t *testing.T) {
 func TestAgentBudget_TxCount_ExhaustsLimit(t *testing.T) {
 	t.Skip("tx budget now handled by SimulationBudgetRule which requires RPC gateway — not available in E2E test server")
 	ruleIDs := applyAgentPresetForBudget(t, map[string]string{
-		"max_tx_count":    "3",
-		"max_sign_count":  "10000",
-		"max_native_total": "1000",
+		"max_tx_count":      "3",
+		"max_sign_count":    "10000",
+		"max_native_total":  "1000",
 		"max_native_per_tx": "100",
 	})
 	_ = findChain1RuleID(t, ruleIDs)
@@ -317,11 +317,11 @@ func TestAgentBudget_TxCount_ExhaustsLimit(t *testing.T) {
 //   - max_native_per_tx=0.2 (ETH -> 200000000000000000 wei)
 //
 // Then:
-//   1. Send 0.1 ETH -> should pass (fits within both total and per-tx)
-//   2. Send 0.1 ETH -> should pass (cumulative 0.2 ETH, still within total)
-//   3. Send 0.3 ETH -> should fail (per-tx limit 0.2 ETH exceeded, even though total has room)
-//   4. Send 0.15 ETH -> should pass (cumulative 0.35 ETH, within total)
-//   5. Send 0.2 ETH -> should fail (cumulative 0.55 ETH > total 0.5 ETH)
+//  1. Send 0.1 ETH -> should pass (fits within both total and per-tx)
+//  2. Send 0.1 ETH -> should pass (cumulative 0.2 ETH, still within total)
+//  3. Send 0.3 ETH -> should fail (per-tx limit 0.2 ETH exceeded, even though total has room)
+//  4. Send 0.15 ETH -> should pass (cumulative 0.35 ETH, within total)
+//  5. Send 0.2 ETH -> should fail (cumulative 0.55 ETH > total 0.5 ETH)
 func TestAgentBudget_Native_TotalAndPerTx(t *testing.T) {
 	t.Skip("tx budget now handled by SimulationBudgetRule which requires RPC gateway — not available in E2E test server")
 	ruleIDs := applyAgentPresetForBudget(t, map[string]string{
@@ -545,8 +545,8 @@ function validateBudget(input) {
 }`,
 		},
 		BudgetMetering: map[string]interface{}{
-			"method":      "js",
-			"dynamic":     true,
+			"method":       "js",
+			"dynamic":      true,
 			"unit_decimal": true,
 			"known_units": map[string]interface{}{
 				"tx_count": map[string]interface{}{

@@ -70,7 +70,7 @@ func TestSigner_LockAndUnlock_Keystore(t *testing.T) {
 	require.NoError(t, err)
 
 	_, signErr := adminClient.EVM.Sign.Execute(ctx, &evm.SignRequest{
-		ChainID:      chainID,
+		ChainID:       chainID,
 		SignerAddress: addr,
 		SignType:      "personal",
 		Payload:       payload,

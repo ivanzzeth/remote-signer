@@ -255,9 +255,9 @@ func TestCoverage_PresetHandler_WriteError(t *testing.T) {
 
 type brokenWriter struct{}
 
-func (brokenWriter) Header() http.Header           { return http.Header{} }
-func (brokenWriter) Write([]byte) (int, error)     { return 0, fmt.Errorf("write error") }
-func (brokenWriter) WriteHeader(int)               {}
+func (brokenWriter) Header() http.Header       { return http.Header{} }
+func (brokenWriter) Write([]byte) (int, error) { return 0, fmt.Errorf("write error") }
+func (brokenWriter) WriteHeader(int)           {}
 
 func TestCoverage_WriteSettingsJSON_WriteError(t *testing.T) {
 	writeSettingsJSON(brokenWriter{}, http.StatusOK, map[string]interface{}{"foo": "bar"})

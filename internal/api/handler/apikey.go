@@ -37,8 +37,8 @@ type APIKeyResponse struct {
 type CreateAPIKeyRequest struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
-	PublicKey string `json:"public_key"` // Ed25519 public key, hex or base64 DER
-	Role      string `json:"role"`       // admin, dev, agent, strategy
+	PublicKey string `json:"public_key"`           // Ed25519 public key, hex or base64 DER
+	Role      string `json:"role"`                 // admin, dev, agent, strategy
 	RateLimit int    `json:"rate_limit,omitempty"` // default 100
 }
 

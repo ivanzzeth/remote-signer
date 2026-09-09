@@ -171,13 +171,13 @@ func TestBudgetRepo_ResetBudget(t *testing.T) {
 	ctx := context.Background()
 
 	budget := &types.RuleBudget{
-		ID:         "budget-5",
-		RuleID:     types.RuleID("rule-5"),
-		Unit:       "count",
-		MaxTotal:   "10",
-		Spent:      "5",
-		TxCount:    2,
-		AlertSent:  true,
+		ID:        "budget-5",
+		RuleID:    types.RuleID("rule-5"),
+		Unit:      "count",
+		MaxTotal:  "10",
+		Spent:     "5",
+		TxCount:   2,
+		AlertSent: true,
 	}
 	require.NoError(t, repo.Create(ctx, budget))
 
@@ -198,9 +198,9 @@ func TestBudgetRepo_DeleteByRuleID(t *testing.T) {
 	ctx := context.Background()
 
 	budget := &types.RuleBudget{
-		ID:     "budget-6",
-		RuleID: types.RuleID("rule-6"),
-		Unit:   "count",
+		ID:       "budget-6",
+		RuleID:   types.RuleID("rule-6"),
+		Unit:     "count",
 		MaxTotal: "10",
 	}
 	require.NoError(t, repo.Create(ctx, budget))

@@ -40,10 +40,10 @@ func TestACLHandler_NilConfig(t *testing.T) {
 func TestACLHandler_WithConfig(t *testing.T) {
 	// When ipWhitelist is non-nil, ServeHTTP returns the config values.
 	cfg := &config.IPWhitelistConfig{
-		Enabled:         true,
-		AllowedIPs:      []string{"10.0.0.1", "10.0.0.2"},
-		TrustProxy:      true,
-		TrustedProxies:  []string{"192.168.1.1"},
+		Enabled:        true,
+		AllowedIPs:     []string{"10.0.0.1", "10.0.0.2"},
+		TrustProxy:     true,
+		TrustedProxies: []string{"192.168.1.1"},
 	}
 	h := NewACLHandler(cfg)
 
@@ -88,10 +88,10 @@ func TestACLHandler_WrongPath(t *testing.T) {
 func TestACLHandler_EmptyConfigSlices(t *testing.T) {
 	// Empty but non-nil slices should be preserved.
 	cfg := &config.IPWhitelistConfig{
-		Enabled:         true,
-		AllowedIPs:      []string{},
-		TrustProxy:      false,
-		TrustedProxies:  []string{},
+		Enabled:        true,
+		AllowedIPs:     []string{},
+		TrustProxy:     false,
+		TrustedProxies: []string{},
 	}
 	h := NewACLHandler(cfg)
 

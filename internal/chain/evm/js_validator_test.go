@@ -183,10 +183,10 @@ func TestValidateRule_PerTestCaseVariables(t *testing.T) {
 			ExpectPass: true,
 		},
 		{
-			Name:        "strict mode fails",
-			Variables:   map[string]string{"mode": "strict"},
-			Input:       map[string]interface{}{"signer": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8", "sign_type": "transaction", "chain_id": float64(1)},
-			ExpectPass:  false,
+			Name:         "strict mode fails",
+			Variables:    map[string]string{"mode": "strict"},
+			Input:        map[string]interface{}{"signer": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8", "sign_type": "transaction", "chain_id": float64(1)},
+			ExpectPass:   false,
 			ExpectReason: "strict",
 		},
 	}

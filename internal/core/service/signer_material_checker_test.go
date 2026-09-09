@@ -25,9 +25,9 @@ import (
 // ---------------------------------------------------------------------------
 
 type mockSignerManagerForMaterial struct {
-	mu         sync.Mutex
-	signers    []types.SignerInfo
-	hierarchy  map[string]evmchain.HDHierarchyInfo
+	mu        sync.Mutex
+	signers   []types.SignerInfo
+	hierarchy map[string]evmchain.HDHierarchyInfo
 }
 
 func newMockSignerManagerForMaterial(signers ...types.SignerInfo) *mockSignerManagerForMaterial {
@@ -401,8 +401,8 @@ func TestRunOnce(t *testing.T) {
 		// Wire hierarchy so derivedAddr maps to primaryAddr
 		idx := uint32(0)
 		mgr.hierarchy[derivedAddr] = evmchain.HDHierarchyInfo{
-			ParentAddress:    primaryAddr,
-			DerivationIndex:  idx,
+			ParentAddress:   primaryAddr,
+			DerivationIndex: idx,
 		}
 
 		repo := newMockSignerRepo()
@@ -435,8 +435,8 @@ func TestRunOnce(t *testing.T) {
 		)
 		idx := uint32(1)
 		mgr.hierarchy[derivedAddr] = evmchain.HDHierarchyInfo{
-			ParentAddress:    primaryAddr,
-			DerivationIndex:  idx,
+			ParentAddress:   primaryAddr,
+			DerivationIndex: idx,
 		}
 
 		// Use a non-existent HD wallet dir

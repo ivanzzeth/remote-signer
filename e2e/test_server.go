@@ -65,9 +65,9 @@ type TestServer struct {
 	db         *gorm.DB
 	cancelFunc context.CancelFunc
 	baseURL    string
-	tlsCerts   *tlsCerts                   // set by StartWithTLS for mTLS health-check
-	ruleEngine *rule.WhitelistRuleEngine   // exposed for dynamic evaluator registration in e2e tests
-	simulator  simulation.Simulator // optional: RPC eth_simulateV1 for simulation e2e tests
+	tlsCerts   *tlsCerts                 // set by StartWithTLS for mTLS health-check
+	ruleEngine *rule.WhitelistRuleEngine // exposed for dynamic evaluator registration in e2e tests
+	simulator  simulation.Simulator      // optional: RPC eth_simulateV1 for simulation e2e tests
 }
 
 // NewTestServer creates a new test server instance

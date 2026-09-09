@@ -25,8 +25,8 @@ const (
 	rpcMaxCallsPerEval = 10
 
 	// Global rate limiter defaults
-	rpcGlobalRatePerSec  = 50  // max RPC calls per second across all evaluations
-	rpcGlobalBurstSize   = 100 // token bucket burst
+	rpcGlobalRatePerSec = 50  // max RPC calls per second across all evaluations
+	rpcGlobalBurstSize  = 100 // token bucket burst
 
 	// Circuit breaker defaults
 	circuitBreakerThreshold = 10 // consecutive errors to trip
@@ -75,26 +75,26 @@ var WalletProxyAllowedMethods = map[string]bool{
 	"web3_clientVersion": true,
 
 	// Reads — block / state / account
-	"eth_blockNumber":            true,
-	"eth_call":                   true,
-	"eth_estimateGas":            true,
-	"eth_feeHistory":             true,
-	"eth_gasPrice":               true,
-	"eth_getBalance":             true,
-	"eth_getBlockByHash":         true,
-	"eth_getBlockByNumber":       true,
-	"eth_getBlockTransactionCountByHash":   true,
-	"eth_getBlockTransactionCountByNumber": true,
-	"eth_getCode":                true,
-	"eth_getLogs":                true,
-	"eth_getStorageAt":           true,
+	"eth_blockNumber":                         true,
+	"eth_call":                                true,
+	"eth_estimateGas":                         true,
+	"eth_feeHistory":                          true,
+	"eth_gasPrice":                            true,
+	"eth_getBalance":                          true,
+	"eth_getBlockByHash":                      true,
+	"eth_getBlockByNumber":                    true,
+	"eth_getBlockTransactionCountByHash":      true,
+	"eth_getBlockTransactionCountByNumber":    true,
+	"eth_getCode":                             true,
+	"eth_getLogs":                             true,
+	"eth_getStorageAt":                        true,
 	"eth_getTransactionByBlockHashAndIndex":   true,
 	"eth_getTransactionByBlockNumberAndIndex": true,
-	"eth_getTransactionByHash":   true,
-	"eth_getTransactionCount":    true,
-	"eth_getTransactionReceipt":  true,
-	"eth_maxPriorityFeePerGas":   true,
-	"eth_syncing":                true,
+	"eth_getTransactionByHash":                true,
+	"eth_getTransactionCount":                 true,
+	"eth_getTransactionReceipt":               true,
+	"eth_maxPriorityFeePerGas":                true,
+	"eth_syncing":                             true,
 
 	// Broadcast — signed tx only. eth_sendTransaction (unsigned) is
 	// intentionally NOT here; that path goes through /sign so the

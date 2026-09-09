@@ -61,23 +61,23 @@ const (
 
 // SecurityModel represents the security overview view.
 type SecurityModel struct {
-	health    healthChecker
-	rules     evm.RuleAPI
-	signers   evm.SignerAPI
-	audit     auditLister
-	apikeys   apiKeyLister
-	ctx       context.Context
-	width     int
-	height    int
-	spinner   spinner.Model
-	loading   bool
-	err       error
-	data      *SecurityData
-	expanded  sectionIndex // currently expanded section (-1 = none)
-	cursor    sectionIndex // keyboard cursor
-	subTab    int          // 0=Overview, 1=Events
-	viewport  viewport.Model
-	vpReady   bool
+	health   healthChecker
+	rules    evm.RuleAPI
+	signers  evm.SignerAPI
+	audit    auditLister
+	apikeys  apiKeyLister
+	ctx      context.Context
+	width    int
+	height   int
+	spinner  spinner.Model
+	loading  bool
+	err      error
+	data     *SecurityData
+	expanded sectionIndex // currently expanded section (-1 = none)
+	cursor   sectionIndex // keyboard cursor
+	subTab   int          // 0=Overview, 1=Events
+	viewport viewport.Model
+	vpReady  bool
 }
 
 // GetSubTab returns the current Security sub-tab (0=Overview, 1=Events).

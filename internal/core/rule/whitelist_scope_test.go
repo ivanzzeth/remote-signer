@@ -65,4 +65,3 @@ func TestRuleScopeMatches_ExpectedReq2Shape(t *testing.T) {
 	rule := &types.Rule{ChainType: &ct, ChainID: &chainID}
 	require.True(t, ruleScopeMatches(rule, req2), "canonical shape must match")
 }
-

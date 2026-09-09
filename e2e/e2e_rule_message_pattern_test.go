@@ -23,7 +23,7 @@ func TestRule_MessagePattern_AllowsMatching(t *testing.T) {
 		Mode:      "whitelist",
 		ChainType: &chainType,
 		Config: map[string]interface{}{
-			"pattern":     "^E2E-msg-ok$",
+			"pattern":    "^E2E-msg-ok$",
 			"sign_types": []string{"personal"},
 		},
 		Enabled: true,
@@ -47,7 +47,7 @@ func TestRule_MessagePattern_RejectsMatchingBlocklist(t *testing.T) {
 		Mode:      "blocklist",
 		ChainType: &chainType,
 		Config: map[string]interface{}{
-			"pattern":     "^E2E-block-msg$",
+			"pattern":    "^E2E-block-msg$",
 			"sign_types": []string{"personal"},
 		},
 		Enabled: true,

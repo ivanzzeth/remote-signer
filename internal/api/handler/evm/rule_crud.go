@@ -758,6 +758,7 @@ func (h *RuleHandler) proposeRule(w http.ResponseWriter, r *http.Request, target
 
 	h.writeJSON(w, h.toRuleResponse(proposal), http.StatusAccepted)
 }
+
 // prepareBudgetSync resolves template BudgetMetering against current rule
 // variables and returns BudgetSyncRequests ready for upsert. Template fetching
 // happens outside any DB transaction to avoid SQLite serialization deadlocks.

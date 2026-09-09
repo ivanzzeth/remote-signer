@@ -89,7 +89,7 @@ func TestTreasuryExample_AddressWhitelistAllowsListedAddresses(t *testing.T) {
 	// Main treasury: should pass
 	toMain := common.HexToAddress(treasuryAddress)
 	txMain := types.NewTx(&types.LegacyTx{
-		Nonce:    108, GasPrice: big.NewInt(20000000000), Gas: 21000,
+		Nonce: 108, GasPrice: big.NewInt(20000000000), Gas: 21000,
 		To: &toMain, Value: big.NewInt(100000000000000000), Data: nil,
 	})
 	signedMain, err := signer.SignTransactionWithChainID(txMain, chainIDBig)
@@ -99,7 +99,7 @@ func TestTreasuryExample_AddressWhitelistAllowsListedAddresses(t *testing.T) {
 	// Backup treasury: should pass
 	toBackup := common.HexToAddress(treasuryExampleBackup)
 	txBackup := types.NewTx(&types.LegacyTx{
-		Nonce:    109, GasPrice: big.NewInt(20000000000), Gas: 21000,
+		Nonce: 109, GasPrice: big.NewInt(20000000000), Gas: 21000,
 		To: &toBackup, Value: big.NewInt(100000000000000000), Data: nil,
 	})
 	signedBackup, err := signer.SignTransactionWithChainID(txBackup, chainIDBig)

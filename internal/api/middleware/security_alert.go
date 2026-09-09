@@ -13,32 +13,32 @@ import (
 type SecurityAlertType string
 
 const (
-	AlertIPBlocked     SecurityAlertType = "ip_blocked"
-	AlertAuthFailure   SecurityAlertType = "auth_failure"
-	AlertNonceReplay   SecurityAlertType = "nonce_replay"
-	AlertDisabledKey   SecurityAlertType = "disabled_key"
-	AlertExpiredKey     SecurityAlertType = "expired_key"
-	AlertAdminDenied   SecurityAlertType = "admin_denied"
-	AlertRateLimitIP   SecurityAlertType = "rate_limit_ip"
-	AlertRateLimitKey  SecurityAlertType = "rate_limit_key"
+	AlertIPBlocked        SecurityAlertType = "ip_blocked"
+	AlertAuthFailure      SecurityAlertType = "auth_failure"
+	AlertNonceReplay      SecurityAlertType = "nonce_replay"
+	AlertDisabledKey      SecurityAlertType = "disabled_key"
+	AlertExpiredKey       SecurityAlertType = "expired_key"
+	AlertAdminDenied      SecurityAlertType = "admin_denied"
+	AlertRateLimitIP      SecurityAlertType = "rate_limit_ip"
+	AlertRateLimitKey     SecurityAlertType = "rate_limit_key"
 	AlertChainDenied      SecurityAlertType = "chain_denied"
 	AlertSignerDenied     SecurityAlertType = "signer_denied"
 	AlertSignerAutoLocked SecurityAlertType = "signer_auto_locked"
 	AlertAuditDBFailure   SecurityAlertType = "audit_db_failure"
 
 	// High-risk admin operation alerts (real-time notification on privileged changes)
-	AlertSignerCreated    SecurityAlertType = "signer_created"
-	AlertSignerUnlocked   SecurityAlertType = "signer_unlocked"
-	AlertSignerLocked     SecurityAlertType = "signer_locked"
-	AlertHDWalletCreated  SecurityAlertType = "hdwallet_created"
-	AlertHDWalletDerived  SecurityAlertType = "hdwallet_derived"
-	AlertRuleCreated      SecurityAlertType = "rule_created"
-	AlertRuleUpdated      SecurityAlertType = "rule_updated"
-	AlertRuleDeleted      SecurityAlertType = "rule_deleted"
-	AlertConfigReloaded   SecurityAlertType = "config_reloaded"
-	AlertTemplateSynced   SecurityAlertType = "template_synced"
-	AlertAPIKeySynced     SecurityAlertType = "apikey_synced" // #nosec G101 -- not a credential, alert type name
-	AlertPresetApplied    SecurityAlertType = "preset_applied"
+	AlertSignerCreated   SecurityAlertType = "signer_created"
+	AlertSignerUnlocked  SecurityAlertType = "signer_unlocked"
+	AlertSignerLocked    SecurityAlertType = "signer_locked"
+	AlertHDWalletCreated SecurityAlertType = "hdwallet_created"
+	AlertHDWalletDerived SecurityAlertType = "hdwallet_derived"
+	AlertRuleCreated     SecurityAlertType = "rule_created"
+	AlertRuleUpdated     SecurityAlertType = "rule_updated"
+	AlertRuleDeleted     SecurityAlertType = "rule_deleted"
+	AlertConfigReloaded  SecurityAlertType = "config_reloaded"
+	AlertTemplateSynced  SecurityAlertType = "template_synced"
+	AlertAPIKeySynced    SecurityAlertType = "apikey_synced" // #nosec G101 -- not a credential, alert type name
+	AlertPresetApplied   SecurityAlertType = "preset_applied"
 )
 
 // SecurityAlertService sends real-time security alerts with per-source

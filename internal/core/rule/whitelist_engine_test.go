@@ -500,11 +500,11 @@ func TestRuleScopeMatches(t *testing.T) {
 
 // delegationEvaluator implements EvaluatorWithDelegation for testing
 type delegationEvaluator struct {
-	ruleType       types.RuleType
-	matched        bool
-	reason         string
-	delegation     *DelegationRequest
-	err            error
+	ruleType   types.RuleType
+	matched    bool
+	reason     string
+	delegation *DelegationRequest
+	err        error
 }
 
 func (d *delegationEvaluator) Type() types.RuleType { return d.ruleType }
@@ -822,11 +822,11 @@ func TestDelegation_PerItem_OneItemFails(t *testing.T) {
 
 func TestDelegationItems(t *testing.T) {
 	tests := []struct {
-		name     string
-		payload  interface{}
-		key      string
-		wantErr  bool
-		wantLen  int
+		name    string
+		payload interface{}
+		key     string
+		wantErr bool
+		wantLen int
 	}{
 		{"nil payload", nil, "items", true, 0},
 		{"empty key", map[string]interface{}{"items": []interface{}{}}, "", true, 0},

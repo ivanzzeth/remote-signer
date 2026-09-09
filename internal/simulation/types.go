@@ -64,11 +64,11 @@ type TxLog struct {
 
 // BalanceChange represents a token balance change from simulation.
 type BalanceChange struct {
-	Token     string   `json:"token"`               // token contract address, or "native" for ETH
-	Standard  string   `json:"standard"`             // "erc20", "erc721", "erc1155", "native", "weth"
-	Amount    *big.Int `json:"amount"`               // positive = inflow, negative = outflow
-	Direction string   `json:"direction"`            // "inflow" or "outflow"
-	TokenID   *big.Int `json:"token_id,omitempty"`   // non-nil for ERC721/ERC1155
+	Token     string   `json:"token"`              // token contract address, or "native" for ETH
+	Standard  string   `json:"standard"`           // "erc20", "erc721", "erc1155", "native", "weth"
+	Amount    *big.Int `json:"amount"`             // positive = inflow, negative = outflow
+	Direction string   `json:"direction"`          // "inflow" or "outflow"
+	TokenID   *big.Int `json:"token_id,omitempty"` // non-nil for ERC721/ERC1155
 }
 
 // ManagerStatus is the overall status of the simulation engine.
@@ -80,9 +80,9 @@ type ManagerStatus struct {
 
 // ChainStatus is reserved for per-chain simulator health (RPC backend returns empty chains).
 type ChainStatus struct {
-	Status       string `json:"status"`                  // "healthy" or "unhealthy"
+	Status       string `json:"status"` // "healthy" or "unhealthy"
 	Port         int    `json:"port"`
-	BlockNumber  string `json:"block_number,omitempty"`   // hex block number from eth_blockNumber
+	BlockNumber  string `json:"block_number,omitempty"` // hex block number from eth_blockNumber
 	RestartCount int    `json:"restart_count"`
 	Dirty        bool   `json:"dirty"`
 	Error        string `json:"error,omitempty"`

@@ -263,8 +263,8 @@ func TestValueLimitEvaluator_Whitelist(t *testing.T) {
 		wantMatched bool
 	}{
 		{"within limit", "500000000000000000", true},      // 0.5 ETH
-		{"exactly at limit", "1000000000000000000", true},  // 1 ETH
-		{"exceeds limit", "2000000000000000000", false},    // 2 ETH
+		{"exactly at limit", "1000000000000000000", true}, // 1 ETH
+		{"exceeds limit", "2000000000000000000", false},   // 2 ETH
 		{"zero value", "0", true},
 	}
 

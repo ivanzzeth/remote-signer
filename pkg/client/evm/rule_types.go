@@ -7,36 +7,36 @@ import (
 
 // Rule represents an authorization rule.
 type Rule struct {
-	ID                string     `json:"id"`
-	Name              string     `json:"name"`
-	Description       string     `json:"description,omitempty"`
-	Type              string     `json:"type"`
-	Mode              string     `json:"mode"`
-	Source            string     `json:"source"`
-	ChainType         *string    `json:"chain_type,omitempty"`
-	ChainID           *string    `json:"chain_id,omitempty"`
-	Owner             *string    `json:"owner,omitempty"`
-	AppliedTo         []string   `json:"applied_to,omitempty"`
-	Status            string     `json:"status,omitempty"`
-	ApprovedBy        *string    `json:"approved_by,omitempty"`
-	Immutable         bool       `json:"immutable,omitempty"`
-	SignerAddress     *string    `json:"signer_address,omitempty"`
-	TemplateID        *string          `json:"template_id,omitempty"`
+	ID                string            `json:"id"`
+	Name              string            `json:"name"`
+	Description       string            `json:"description,omitempty"`
+	Type              string            `json:"type"`
+	Mode              string            `json:"mode"`
+	Source            string            `json:"source"`
+	ChainType         *string           `json:"chain_type,omitempty"`
+	ChainID           *string           `json:"chain_id,omitempty"`
+	Owner             *string           `json:"owner,omitempty"`
+	AppliedTo         []string          `json:"applied_to,omitempty"`
+	Status            string            `json:"status,omitempty"`
+	ApprovedBy        *string           `json:"approved_by,omitempty"`
+	Immutable         bool              `json:"immutable,omitempty"`
+	SignerAddress     *string           `json:"signer_address,omitempty"`
+	TemplateID        *string           `json:"template_id,omitempty"`
 	Config            RuleConfig        `json:"config,omitempty"`
 	Variables         json.RawMessage   `json:"variables,omitempty"`
 	VariableDefs      []RuleVariableDef `json:"variable_defs,omitempty"`
 	Matrix            json.RawMessage   `json:"matrix,omitempty"`
 	Enabled           bool              `json:"enabled"`
 	Priority          int               `json:"priority"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
-	ExpiresAt         *time.Time `json:"expires_at,omitempty"`
-	MatchCount        uint64     `json:"match_count"`
-	LastMatchedAt     *time.Time `json:"last_matched_at,omitempty"`
-	BudgetPeriod      string     `json:"budget_period,omitempty"`      // e.g. "24h0m0s" when schedule.period is set
-	BudgetPeriodStart *string    `json:"budget_period_start,omitempty"` // RFC3339
-	ProposalFor       *string    `json:"proposal_for,omitempty"`
-	RejectionReason   *string    `json:"rejection_reason,omitempty"`
+	CreatedAt         time.Time         `json:"created_at"`
+	UpdatedAt         time.Time         `json:"updated_at"`
+	ExpiresAt         *time.Time        `json:"expires_at,omitempty"`
+	MatchCount        uint64            `json:"match_count"`
+	LastMatchedAt     *time.Time        `json:"last_matched_at,omitempty"`
+	BudgetPeriod      string            `json:"budget_period,omitempty"`       // e.g. "24h0m0s" when schedule.period is set
+	BudgetPeriodStart *string           `json:"budget_period_start,omitempty"` // RFC3339
+	ProposalFor       *string           `json:"proposal_for,omitempty"`
+	RejectionReason   *string           `json:"rejection_reason,omitempty"`
 }
 
 // RuleVariableDef exposes a template variable's metadata alongside its current bound value.

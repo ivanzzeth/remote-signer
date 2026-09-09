@@ -49,7 +49,7 @@ type PresetMeta struct {
 type PresetRule struct {
 	TemplateName string
 	Name         string
-	Mode         string                 // e.g. "whitelist" or "blocklist"; defaults to "whitelist" if empty in YAML
+	Mode         string // e.g. "whitelist" or "blocklist"; defaults to "whitelist" if empty in YAML
 	Variables    map[string]string
 	ChainType    string
 	ChainID      string
@@ -230,12 +230,12 @@ func ParsePresetFile(data []byte, overrides map[string]string) ([]PresetRule, er
 			}
 			r := PresetRule{
 				TemplateName: templateName,
-				Name:        ruleName,
-				Mode:        single.Mode,
-				Variables:   copyStringMap(varsStr),
-				ChainType:   single.ChainType,
-				ChainID:     single.ChainID,
-				Enabled:     single.Enabled,
+				Name:         ruleName,
+				Mode:         single.Mode,
+				Variables:    copyStringMap(varsStr),
+				ChainType:    single.ChainType,
+				ChainID:      single.ChainID,
+				Enabled:      single.Enabled,
 			}
 			if len(single.Budget) > 0 {
 				r.Budget = substituteBudgetMapVars(copyMapInterface(single.Budget), variables)
@@ -262,12 +262,12 @@ func ParsePresetFile(data []byte, overrides map[string]string) ([]PresetRule, er
 		}
 		r := PresetRule{
 			TemplateName: single.Template,
-			Name:        single.Name,
-			Mode:        single.Mode,
-			Variables:   mapInterfaceToStringMap(variables),
-			ChainType:   single.ChainType,
-			ChainID:     single.ChainID,
-			Enabled:     single.Enabled,
+			Name:         single.Name,
+			Mode:         single.Mode,
+			Variables:    mapInterfaceToStringMap(variables),
+			ChainType:    single.ChainType,
+			ChainID:      single.ChainID,
+			Enabled:      single.Enabled,
 		}
 		if len(single.Budget) > 0 {
 			r.Budget = substituteBudgetMapVars(copyMapInterface(single.Budget), variables)
@@ -315,10 +315,10 @@ func ParsePresetFile(data []byte, overrides map[string]string) ([]PresetRule, er
 			TemplateName: templateName,
 			Name:         r.Name,
 			Mode:         r.Mode,
-			Variables:   mapInterfaceToStringMap(vars),
-			ChainType:   r.ChainType,
-			ChainID:     r.ChainID,
-			Enabled:     r.Enabled,
+			Variables:    mapInterfaceToStringMap(vars),
+			ChainType:    r.ChainType,
+			ChainID:      r.ChainID,
+			Enabled:      r.Enabled,
 		}
 		if b, ok := r.Config["budget"].(map[string]interface{}); ok && len(b) > 0 {
 			pr.Budget = substituteBudgetMapVars(copyMapInterface(b), vars)

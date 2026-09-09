@@ -120,8 +120,8 @@ func TestResolveAndSyncBudgetLimits_VariableChangeSyncsLimits(t *testing.T) {
 	rec := doRuleRequest(t, h, http.MethodPatch, "/api/v1/evm/rules/"+string(rule.ID),
 		map[string]interface{}{
 			"variables": map[string]string{
-				"max_sign_count":  "250",
-				"max_tx_count":    "100",
+				"max_sign_count":   "250",
+				"max_tx_count":     "100",
 				"max_native_total": "10",
 			},
 		}, ruleAdminKey())

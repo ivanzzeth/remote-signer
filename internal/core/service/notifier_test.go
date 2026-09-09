@@ -1,8 +1,8 @@
 package service
 
 import (
-	"strings"
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"

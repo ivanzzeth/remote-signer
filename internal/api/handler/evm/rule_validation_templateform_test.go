@@ -27,15 +27,15 @@ func TestRuleValidate_TemplateFormConfig(t *testing.T) {
 	// the chain matches config.chain_id. Config is TEMPLATE FORM: allowed and the
 	// test-case inputs reference ${...} placeholders resolved from Variables.
 	rule := &types.Rule{
-		ID:        "inst_tf",
-		Name:      "Template-form rule",
-		Type:      types.RuleTypeEVMJS,
-		Mode:      types.RuleModeWhitelist,
-		Source:    types.RuleSourceInstance,
-		ChainType: &ct,
-		ChainID:   &chainID,
+		ID:         "inst_tf",
+		Name:       "Template-form rule",
+		Type:       types.RuleTypeEVMJS,
+		Mode:       types.RuleModeWhitelist,
+		Source:     types.RuleSourceInstance,
+		ChainType:  &ct,
+		ChainID:    &chainID,
 		TemplateID: strPtr("evm/x"),
-		Variables: json.RawMessage(`{"allowed":"0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA,0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB","chain_id":"137"}`),
+		Variables:  json.RawMessage(`{"allowed":"0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA,0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB","chain_id":"137"}`),
 		Config: json.RawMessage(`{
 			"script": "function validate(input){ require(input.chain_id===parseInt(config.chain_id,10),'must be on configured chain'); require(rs.addr.inList(input.transaction.to, config.allowed),'to not allowed'); return ok(); }",
 			"allowed": "${allowed}",

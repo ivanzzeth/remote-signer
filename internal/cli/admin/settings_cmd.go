@@ -50,7 +50,6 @@ var settingsShowCmd = &cobra.Command{
 	},
 }
 
-
 var settingsSetCmd = &cobra.Command{
 	Use:   "set <group> <key=value> [<key=value> ...]",
 	Short: "Patch one or more fields of a settings group",

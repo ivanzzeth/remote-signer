@@ -30,6 +30,7 @@ const defaultSimMaxDynamicUnits = 100
 //     naturally route to manual approval)
 //   - Extract net balance changes -> feed outflows into budget engine
 //   - Budget passes -> allow; budget exceeded -> deny
+//
 // SimBudgetDefaults configures auto-created budget records for unknown tokens.
 // Values are in human-readable units (e.g. "100" = 100 USDC, "0.01" = 0.01 ETH).
 // Decimals are auto-queried from chain via DecimalsQuerier.
@@ -72,7 +73,7 @@ func NewStaticSimBudgetPolicy(autoCreate bool, defaults *SimBudgetDefaults) *Sta
 	return &StaticSimBudgetPolicy{autoCreate: autoCreate, defaults: defaults}
 }
 
-func (p *StaticSimBudgetPolicy) AutoCreate() bool         { return p.autoCreate }
+func (p *StaticSimBudgetPolicy) AutoCreate() bool             { return p.autoCreate }
 func (p *StaticSimBudgetPolicy) Defaults() *SimBudgetDefaults { return p.defaults }
 
 // ManagedSignerLister returns the set of all signer addresses managed by the system.
@@ -104,14 +105,14 @@ type DecimalsAnomalyAlerter interface {
 }
 
 type SimulationBudgetRule struct {
-	simulator         simulation.Simulator
-	budgetRepo        storage.BudgetRepository
-	ruleEnsurer       storage.SyntheticRuleEnsurer
-	budgetPolicy      SimBudgetPolicy
-	decimalsQuerier   rule.DecimalsQuerier
-	signerLister      ManagedSignerLister
-	allowanceQuerier  simulation.AllowanceQuerier
-	decimalsAlerter   DecimalsAnomalyAlerter
+	simulator        simulation.Simulator
+	budgetRepo       storage.BudgetRepository
+	ruleEnsurer      storage.SyntheticRuleEnsurer
+	budgetPolicy     SimBudgetPolicy
+	decimalsQuerier  rule.DecimalsQuerier
+	signerLister     ManagedSignerLister
+	allowanceQuerier simulation.AllowanceQuerier
+	decimalsAlerter  DecimalsAnomalyAlerter
 	// simulationRepo persists each evaluation's outcome so the web
 	// UI can render a per-request preview without re-running
 	// simulation client-side. Optional — pre-feature deployments
@@ -264,15 +265,15 @@ func (r *SimulationBudgetRule) Available() bool {
 
 // SimulationOutcome represents the result of simulation-based evaluation.
 type SimulationOutcome struct {
-	Decision   string                         // "allow", "deny", "no_match"
-	Reason     string                         // human-readable reason for deny
-	Simulation *simulation.SimulationResult   // non-nil when simulation ran
+	Decision   string                       // "allow", "deny", "no_match"
+	Reason     string                       // human-readable reason for deny
+	Simulation *simulation.SimulationResult // non-nil when simulation ran
 }
 
 // BatchSimulationOutcome represents the result of batch simulation-based evaluation.
 type BatchSimulationOutcome struct {
-	Decision   string                              // "allow", "deny", "no_match"
-	Simulation *simulation.BatchSimulationResult   // non-nil when simulation ran
+	Decision   string                            // "allow", "deny", "no_match"
+	Simulation *simulation.BatchSimulationResult // non-nil when simulation ran
 }
 
 // EVMAdapterSignerLister adapts EVMAdapter to ManagedSignerLister.

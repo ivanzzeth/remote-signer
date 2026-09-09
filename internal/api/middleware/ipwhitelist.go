@@ -14,14 +14,14 @@ import (
 
 // IPWhitelist holds the parsed IP whitelist configuration
 type IPWhitelist struct {
-	enabled        bool
-	allowedIPs     map[string]struct{} // exact IP matches
-	allowedCIDRs   []*net.IPNet        // CIDR ranges
-	trustProxy     bool
-	trustedProxies map[string]struct{} // exact trusted proxy IP matches
-	trustedProxyCIDRs []*net.IPNet     // trusted proxy CIDR ranges
-	logger         *slog.Logger
-	alertService   *SecurityAlertService
+	enabled           bool
+	allowedIPs        map[string]struct{} // exact IP matches
+	allowedCIDRs      []*net.IPNet        // CIDR ranges
+	trustProxy        bool
+	trustedProxies    map[string]struct{} // exact trusted proxy IP matches
+	trustedProxyCIDRs []*net.IPNet        // trusted proxy CIDR ranges
+	logger            *slog.Logger
+	alertService      *SecurityAlertService
 }
 
 // NewIPWhitelist creates a new IP whitelist from configuration

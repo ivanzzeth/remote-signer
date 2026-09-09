@@ -121,14 +121,14 @@ func setupFuzzVerifier(t testing.TB) (*auth.Verifier, ed25519.PublicKey, ed25519
 // Goal: ensure no panics or unexpected crashes from malformed headers.
 func FuzzAuthMiddleware_Headers(f *testing.F) {
 	// Seed corpus with representative inputs
-	f.Add("", "", "", "")                              // all empty
-	f.Add("test-key", "not-a-number", "badsig", "")   // invalid timestamp
-	f.Add("test-key", "1700000000000", "badsig", "")   // invalid signature
-	f.Add("unknown-key", "1700000000000", "dGVzdA==", "abc") // unknown key
-	f.Add("test-key", "99999999999999999", "dGVzdA==", "nonce123") // future timestamp
-	f.Add("test-key", "0", "dGVzdA==", "nonce123")     // epoch timestamp
-	f.Add("test-key", "-1", "dGVzdA==", "nonce123")    // negative timestamp
-	f.Add("test-key", "1700000000000", "", "nonce123")  // empty signature
+	f.Add("", "", "", "")                                                  // all empty
+	f.Add("test-key", "not-a-number", "badsig", "")                        // invalid timestamp
+	f.Add("test-key", "1700000000000", "badsig", "")                       // invalid signature
+	f.Add("unknown-key", "1700000000000", "dGVzdA==", "abc")               // unknown key
+	f.Add("test-key", "99999999999999999", "dGVzdA==", "nonce123")         // future timestamp
+	f.Add("test-key", "0", "dGVzdA==", "nonce123")                         // epoch timestamp
+	f.Add("test-key", "-1", "dGVzdA==", "nonce123")                        // negative timestamp
+	f.Add("test-key", "1700000000000", "", "nonce123")                     // empty signature
 	f.Add("test-key", "1700000000000", "!!!invalid-base64!!!", "nonce123") // bad base64
 
 	verifier, _, _ := setupFuzzVerifier(f)

@@ -327,16 +327,16 @@ func TestBudgetItemHandler(t *testing.T) {
 		})
 		now := time.Now()
 		seed := &types.RuleBudget{
-			ID:         "budget-id-1",
-			RuleID:     "rule_target",
-			Unit:       "1:native",
-			MaxTotal:   "1000",
-			MaxPerTx:   "100",
-			Spent:      "500",
-			AlertPct:   80,
-			TxCount:    5,
-			CreatedAt:  now,
-			UpdatedAt:  now,
+			ID:        "budget-id-1",
+			RuleID:    "rule_target",
+			Unit:      "1:native",
+			MaxTotal:  "1000",
+			MaxPerTx:  "100",
+			Spent:     "500",
+			AlertPct:  80,
+			TxCount:   5,
+			CreatedAt: now,
+			UpdatedAt: now,
 		}
 		budgets := &mockBudgetRepo{listAll: func(ctx context.Context) ([]*types.RuleBudget, error) {
 			return []*types.RuleBudget{seed}, nil

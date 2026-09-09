@@ -146,7 +146,9 @@ func (b *budgetDeleteByRuleIDFailRepo) GetByRuleID(_ context.Context, _ types.Ru
 func (b *budgetDeleteByRuleIDFailRepo) Get(_ context.Context, _ string) (*types.RuleBudget, error) {
 	return nil, types.ErrNotFound
 }
-func (b *budgetDeleteByRuleIDFailRepo) Update(_ context.Context, _ *types.RuleBudget) error { return nil }
+func (b *budgetDeleteByRuleIDFailRepo) Update(_ context.Context, _ *types.RuleBudget) error {
+	return nil
+}
 func (b *budgetDeleteByRuleIDFailRepo) CountByRuleID(_ context.Context, _ types.RuleID) (int, error) {
 	return 0, nil
 }

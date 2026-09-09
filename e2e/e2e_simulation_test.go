@@ -45,7 +45,7 @@ func skipOnInfraError(t *testing.T, err error) {
 		"i/o timeout",
 		"no such host",
 		"eth_simulate",
-			"insufficient funds",
+		"insufficient funds",
 	}
 	for _, p := range infraPatterns {
 		if strings.Contains(strings.ToLower(msg), p) {

@@ -23,7 +23,7 @@ import (
 type mockBudgetRepoForRenewal struct {
 	mu sync.Mutex
 	// key: ruleID + ":" + unit
-	state    map[string]*types.RuleBudget
+	state     map[string]*types.RuleBudget
 	resetCall *struct {
 		RuleID             types.RuleID
 		Unit               string
@@ -49,8 +49,10 @@ func newMockBudgetRepoForRenewal(updatedAt time.Time, spent, maxTotal string) *m
 	}
 }
 
-func (m *mockBudgetRepoForRenewal) Create(ctx context.Context, budget *types.RuleBudget) error { return nil }
-func (m *mockBudgetRepoForRenewal) Delete(ctx context.Context, id string) error               { return nil }
+func (m *mockBudgetRepoForRenewal) Create(ctx context.Context, budget *types.RuleBudget) error {
+	return nil
+}
+func (m *mockBudgetRepoForRenewal) Delete(ctx context.Context, id string) error { return nil }
 func (m *mockBudgetRepoForRenewal) DeleteByRuleID(ctx context.Context, ruleID types.RuleID) error {
 	return nil
 }
@@ -165,12 +167,16 @@ func (m *mockTemplateRepoForBudget) Get(ctx context.Context, id string) (*types.
 	return nil, types.ErrNotFound
 }
 
-func (m *mockTemplateRepoForBudget) Create(ctx context.Context, tmpl *types.RuleTemplate) error   { return nil }
+func (m *mockTemplateRepoForBudget) Create(ctx context.Context, tmpl *types.RuleTemplate) error {
+	return nil
+}
 func (m *mockTemplateRepoForBudget) GetByName(ctx context.Context, name string) (*types.RuleTemplate, error) {
 	return nil, nil
 }
-func (m *mockTemplateRepoForBudget) Update(ctx context.Context, tmpl *types.RuleTemplate) error { return nil }
-func (m *mockTemplateRepoForBudget) Delete(ctx context.Context, id string) error                 { return nil }
+func (m *mockTemplateRepoForBudget) Update(ctx context.Context, tmpl *types.RuleTemplate) error {
+	return nil
+}
+func (m *mockTemplateRepoForBudget) Delete(ctx context.Context, id string) error { return nil }
 func (m *mockTemplateRepoForBudget) List(ctx context.Context, filter storage.TemplateFilter) ([]*types.RuleTemplate, error) {
 	return nil, nil
 }
@@ -211,8 +217,8 @@ func TestBudgetChecker_CheckAndDeductBudget_PeriodicRenewal_ResetsThenAllowsSpen
 	bc := NewBudgetChecker(mockBudget, mockTmpl, slog.Default())
 
 	rule := &types.Rule{
-		ID:                 types.RuleID("rule-period"),
-		TemplateID:         ptrString("tmpl-1"),
+		ID:                types.RuleID("rule-period"),
+		TemplateID:        ptrString("tmpl-1"),
 		BudgetPeriod:      &period,
 		BudgetPeriodStart: &periodStart,
 	}
@@ -300,9 +306,9 @@ func TestDecimalToRaw(t *testing.T) {
 
 // dynamicBudgetRepo extends mockBudgetRepoForRenewal with Create tracking.
 type dynamicBudgetRepo struct {
-	mu       sync.Mutex
-	state    map[string]*types.RuleBudget
-	created  []*types.RuleBudget
+	mu      sync.Mutex
+	state   map[string]*types.RuleBudget
+	created []*types.RuleBudget
 }
 
 func newDynamicBudgetRepo() *dynamicBudgetRepo {
@@ -330,8 +336,10 @@ func (m *dynamicBudgetRepo) GetByRuleID(ctx context.Context, ruleID types.RuleID
 	return nil, types.ErrNotFound
 }
 
-func (m *dynamicBudgetRepo) Delete(ctx context.Context, id string) error               { return nil }
-func (m *dynamicBudgetRepo) DeleteByRuleID(ctx context.Context, ruleID types.RuleID) error { return nil }
+func (m *dynamicBudgetRepo) Delete(ctx context.Context, id string) error { return nil }
+func (m *dynamicBudgetRepo) DeleteByRuleID(ctx context.Context, ruleID types.RuleID) error {
+	return nil
+}
 func (m *dynamicBudgetRepo) ListByRuleID(ctx context.Context, ruleID types.RuleID) ([]*types.RuleBudget, error) {
 	return nil, nil
 }
@@ -677,9 +685,9 @@ func TestBudgetChecker_DynamicBudget_ConcurrentAutoCreate(t *testing.T) {
 
 // mockDecimalsQuerier implements DecimalsQuerier for testing.
 type mockDecimalsQuerier struct {
-	mu       sync.Mutex
-	results  map[string]int // key: chainID + ":" + address (lowercased)
-	err      error
+	mu        sync.Mutex
+	results   map[string]int // key: chainID + ":" + address (lowercased)
+	err       error
 	callCount int
 }
 
@@ -1024,7 +1032,7 @@ func TestSubstituteMeteringJSON_SubstitutesKnownUnits(t *testing.T) {
 		Dynamic:     true,
 		UnitDecimal: true,
 		KnownUnits: map[string]types.UnitConf{
-			"native": {MaxTotal: "${max_native_total}", MaxPerTx: "${max_native_per_tx}", Decimals: 18},
+			"native":   {MaxTotal: "${max_native_total}", MaxPerTx: "${max_native_per_tx}", Decimals: 18},
 			"tx_count": {MaxTotal: "${max_tx_count}", MaxPerTx: "1", Decimals: 0},
 		},
 		UnknownDefault: &types.UnitConf{

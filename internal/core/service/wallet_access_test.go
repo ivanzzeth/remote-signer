@@ -94,4 +94,3 @@ func TestCheckAccess_ViaWalletGrant(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, ok)
 }
-

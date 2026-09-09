@@ -114,10 +114,10 @@ func (m *mockOwnershipRepo) GetByOwnerID(ctx context.Context, ownerID string) ([
 }
 
 func TestNewInternalTransferEvaluator_NilRepo(t *testing.T) {
-		eval, err := NewInternalTransferEvaluator(nil)
-		assert.NotNil(t, eval)
-		assert.NoError(t, err)
-	}
+	eval, err := NewInternalTransferEvaluator(nil)
+	assert.NotNil(t, eval)
+	assert.NoError(t, err)
+}
 
 func TestETHTransfer_SameOwner(t *testing.T) {
 	// Setup: two signers owned by same owner

@@ -10,7 +10,7 @@ import (
 
 // IPWhitelistResponse is the read-only response for GET /api/v1/acls/ip-whitelist.
 type IPWhitelistResponse struct {
-	Enabled         bool     `json:"enabled"`
+	Enabled        bool     `json:"enabled"`
 	AllowedIPs     []string `json:"allowed_ips"`
 	TrustProxy     bool     `json:"trust_proxy"`
 	TrustedProxies []string `json:"trusted_proxies"`
@@ -38,10 +38,10 @@ func (h *ACLHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := IPWhitelistResponse{
-		Enabled:         false,
-		AllowedIPs:      nil,
-		TrustProxy:      false,
-		TrustedProxies:  nil,
+		Enabled:        false,
+		AllowedIPs:     nil,
+		TrustProxy:     false,
+		TrustedProxies: nil,
 	}
 	if h.ipWhitelist != nil {
 		resp.Enabled = h.ipWhitelist.Enabled

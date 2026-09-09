@@ -624,7 +624,6 @@ func TestSignersModel_CreateHDWalletDerive(t *testing.T) {
 	})
 }
 
-
 func TestValidatePassword(t *testing.T) {
 	t.Run("rejects short password", func(t *testing.T) {
 		errMsg, warnMsg := validatePassword("Abc1!xyz")
@@ -787,4 +786,3 @@ func TestSignersModel_deleteSignerCmd(t *testing.T) {
 	assert.NoError(t, msg.Err)
 	assert.Equal(t, "0xdead", gotAddr)
 }
-

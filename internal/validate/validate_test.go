@@ -73,7 +73,7 @@ func TestIsValidWeiDecimal(t *testing.T) {
 		{"scientific notation", "1e18", false},
 		{"letters", "abc", false},
 		{"mixed", "100abc", false},
-		{"leading space trimmed valid", " 100", true},   // TrimSpace → "100" → valid
+		{"leading space trimmed valid", " 100", true},  // TrimSpace → "100" → valid
 		{"trailing space trimmed valid", "100 ", true}, // TrimSpace → "100" → valid
 	}
 

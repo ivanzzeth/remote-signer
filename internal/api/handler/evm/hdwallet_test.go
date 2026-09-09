@@ -22,12 +22,12 @@ import (
 // --- Mock HDWalletManager ---
 
 type mockHDWalletManager struct {
-	createWalletFn      func(ctx context.Context, params types.CreateHDWalletParams) (*evmchain.HDWalletInfo, error)
-	importWalletFn      func(ctx context.Context, params types.ImportHDWalletParams) (*evmchain.HDWalletInfo, error)
-	deriveAddressFn     func(ctx context.Context, primaryAddr string, index uint32) (*types.SignerInfo, error)
-	deriveAddressesFn   func(ctx context.Context, primaryAddr string, start, count uint32) ([]types.SignerInfo, error)
-	listHDWalletsFn     func() []evmchain.HDWalletInfo
-	listDerivedAddrsFn  func(primaryAddr string) ([]types.SignerInfo, error)
+	createWalletFn     func(ctx context.Context, params types.CreateHDWalletParams) (*evmchain.HDWalletInfo, error)
+	importWalletFn     func(ctx context.Context, params types.ImportHDWalletParams) (*evmchain.HDWalletInfo, error)
+	deriveAddressFn    func(ctx context.Context, primaryAddr string, index uint32) (*types.SignerInfo, error)
+	deriveAddressesFn  func(ctx context.Context, primaryAddr string, start, count uint32) ([]types.SignerInfo, error)
+	listHDWalletsFn    func() []evmchain.HDWalletInfo
+	listDerivedAddrsFn func(primaryAddr string) ([]types.SignerInfo, error)
 }
 
 func (m *mockHDWalletManager) CreateHDWallet(ctx context.Context, params types.CreateHDWalletParams) (*evmchain.HDWalletInfo, error) {
@@ -123,7 +123,7 @@ func (m *mockHDWalletManager) ListPrimaryAddresses() []string {
 type mockSignerManager struct {
 	hdWalletMgr    *mockHDWalletManager
 	hdWalletMgrErr error
-	hdHierarchy      map[string]evmchain.HDHierarchyInfo // optional; GetHDHierarchy return value
+	hdHierarchy    map[string]evmchain.HDHierarchyInfo // optional; GetHDHierarchy return value
 }
 
 func (m *mockSignerManager) CreateSigner(_ context.Context, _ types.CreateSignerRequest) (*types.SignerInfo, error) {
@@ -184,8 +184,8 @@ func (s *stubOwnershipRepo) Get(_ context.Context, addr string) (*types.SignerOw
 	// Default: return ownership for test-admin so access checks pass in tests
 	return &types.SignerOwnership{
 		SignerAddress: addr,
-		OwnerID:      "test-admin",
-		Status:       types.SignerOwnershipActive,
+		OwnerID:       "test-admin",
+		Status:        types.SignerOwnershipActive,
 	}, nil
 }
 func (s *stubOwnershipRepo) GetByOwner(_ context.Context, _ string) ([]*types.SignerOwnership, error) {
@@ -195,8 +195,8 @@ func (s *stubOwnershipRepo) GetByStatus(_ context.Context, _ types.SignerOwnersh
 	return nil, nil
 }
 func (s *stubOwnershipRepo) Delete(_ context.Context, _ string) error                { return nil }
-func (s *stubOwnershipRepo) UpdateOwner(_ context.Context, _, _ string) error         { return nil }
-func (s *stubOwnershipRepo) CountByOwner(_ context.Context, _ string) (int64, error)  { return 0, nil }
+func (s *stubOwnershipRepo) UpdateOwner(_ context.Context, _, _ string) error        { return nil }
+func (s *stubOwnershipRepo) CountByOwner(_ context.Context, _ string) (int64, error) { return 0, nil }
 func (s *stubOwnershipRepo) CountByOwnerAndType(_ context.Context, _ string, _ types.SignerType) (int64, error) {
 	return 0, nil
 }
@@ -209,17 +209,17 @@ func (s *stubOwnershipRepo) GetBoth(_ context.Context, senderAddress, recipientA
 
 type stubAccessRepo struct{}
 
-func (s *stubAccessRepo) Grant(_ context.Context, _ *types.SignerAccess) error         { return nil }
-func (s *stubAccessRepo) Revoke(_ context.Context, _, _ string) error                  { return nil }
+func (s *stubAccessRepo) Grant(_ context.Context, _ *types.SignerAccess) error { return nil }
+func (s *stubAccessRepo) Revoke(_ context.Context, _, _ string) error          { return nil }
 func (s *stubAccessRepo) List(_ context.Context, _ string) ([]*types.SignerAccess, error) {
 	return nil, nil
 }
-func (s *stubAccessRepo) HasAccess(_ context.Context, _, _ string) (bool, error)       { return false, nil }
+func (s *stubAccessRepo) HasAccess(_ context.Context, _, _ string) (bool, error) { return false, nil }
 func (s *stubAccessRepo) HasAccessViaWallet(_ context.Context, _, _ string) (bool, error) {
 	return false, nil
 }
-func (s *stubAccessRepo) DeleteBySigner(_ context.Context, _ string) error             { return nil }
-func (s *stubAccessRepo) DeleteByAPIKey(_ context.Context, _ string) error             { return nil }
+func (s *stubAccessRepo) DeleteBySigner(_ context.Context, _ string) error { return nil }
+func (s *stubAccessRepo) DeleteByAPIKey(_ context.Context, _ string) error { return nil }
 func (s *stubAccessRepo) ListAccessibleAddresses(_ context.Context, _ string) ([]string, error) {
 	return nil, nil
 }
@@ -284,9 +284,9 @@ func newDefaultMockSignerManager() *mockSignerManager {
 // adminAPIKey returns a test admin API key for injection into request context.
 func adminAPIKey() *types.APIKey {
 	return &types.APIKey{
-		ID:    "test-admin",
-		Name:  "Test Admin",
-		Role:  types.RoleAdmin,
+		ID:   "test-admin",
+		Name: "Test Admin",
+		Role: types.RoleAdmin,
 	}
 }
 

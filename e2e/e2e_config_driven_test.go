@@ -143,9 +143,9 @@ func TestConfigDriven_ERC20RuleHasSchedule(t *testing.T) {
 }
 
 const (
-	erc20ScheduleToken    = "0x0000000000000000000000000000000000000001"
-	erc20ScheduleUnit     = "1:0x0000000000000000000000000000000000000001"
-	erc20ScheduleSigner   = erc20BudgetSigner
+	erc20ScheduleToken     = "0x0000000000000000000000000000000000000001"
+	erc20ScheduleUnit      = "1:0x0000000000000000000000000000000000000001"
+	erc20ScheduleSigner    = erc20BudgetSigner
 	erc20ScheduleRecipient = erc20BudgetRecipient
 )
 
@@ -246,16 +246,16 @@ func erc20TransferData(recipient string, amount *big.Int) string {
 }
 
 const (
-	erc20BudgetToken    = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+	erc20BudgetToken     = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
 	erc20BudgetRecipient = "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
-	erc20BudgetUnit     = "1:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
-	erc20BudgetSigner   = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+	erc20BudgetUnit      = "1:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+	erc20BudgetSigner    = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 
 	// Tokens for additional budget e2e (max_tx_count, max_per_tx=0, -1 unlimited)
-	erc20TxCountToken     = "0x0000000000000000000000000000000000000002"
-	erc20ZeroPerTxToken   = "0x0000000000000000000000000000000000000003"
-	erc20PerTxUnlimited   = "0x0000000000000000000000000000000000000004"
-	erc20TotalUnlimited   = "0x0000000000000000000000000000000000000005"
+	erc20TxCountToken   = "0x0000000000000000000000000000000000000002"
+	erc20ZeroPerTxToken = "0x0000000000000000000000000000000000000003"
+	erc20PerTxUnlimited = "0x0000000000000000000000000000000000000004"
+	erc20TotalUnlimited = "0x0000000000000000000000000000000000000005"
 )
 
 // TestConfigDriven_ERC20Budget_DeductedOnSign signs one ERC20 transfer (amount 100); expects success and budget spent increases.
@@ -572,7 +572,7 @@ func testCaseInputToSignRequest(input map[string]interface{}) (*evm.SignRequest,
 	}
 
 	req := &evm.SignRequest{
-		ChainID:      chainID,
+		ChainID:       chainID,
 		SignerAddress: signer,
 		SignType:      signType,
 	}

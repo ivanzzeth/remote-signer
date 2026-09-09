@@ -23,12 +23,12 @@ import (
 // newPresetApplyTestEnv wires a PresetHandler with a real TemplateService
 // backed by an in-memory SQLite database, suitable for testing commitInstances.
 type presetApplyTestEnv struct {
-	handler    *PresetHandler
-	db         *gorm.DB
-	tmplRepo   storage.TemplateRepository
-	presetRepo storage.PresetRepository
-	ruleRepo   storage.RuleRepository
-	budgetRepo storage.BudgetRepository
+	handler     *PresetHandler
+	db          *gorm.DB
+	tmplRepo    storage.TemplateRepository
+	presetRepo  storage.PresetRepository
+	ruleRepo    storage.RuleRepository
+	budgetRepo  storage.BudgetRepository
 	templateSvc *service.TemplateService
 }
 

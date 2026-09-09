@@ -192,7 +192,6 @@ contract RuleEvaluator {
 }
 `
 
-
 // solidityTypedDataFunctionsTemplate is for EIP-712 typed data validation using struct-based functions
 // Context variables use prefixes to avoid conflicts with user-defined field names:
 // - eip712_* : EIP-712 domain context

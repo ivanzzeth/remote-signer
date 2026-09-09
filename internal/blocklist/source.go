@@ -23,7 +23,7 @@ type Source interface {
 // SourceConfig defines a blocklist source in configuration.
 type SourceConfig struct {
 	Name     string `yaml:"name" json:"name"`
-	Type     string `yaml:"type" json:"type"`         // "url_text" or "url_json"
+	Type     string `yaml:"type" json:"type"` // "url_text" or "url_json"
 	URL      string `yaml:"url" json:"url"`
 	JSONPath string `yaml:"json_path" json:"json_path"` // for url_json: dot-separated key path to address array (e.g. "addresses" or "data.addresses")
 }

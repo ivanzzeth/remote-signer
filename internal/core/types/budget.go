@@ -14,13 +14,13 @@ type RuleBudget struct {
 	ID         string    `json:"id" gorm:"primaryKey;type:varchar(64)"` // SHA256 hex of (ruleID, unit) via BudgetID()
 	RuleID     RuleID    `json:"rule_id" gorm:"index;type:varchar(64);not null;uniqueIndex:idx_rule_budgets_rule_unit;constraint:OnDelete:CASCADE"`
 	Unit       string    `json:"unit" gorm:"type:varchar(512);not null;uniqueIndex:idx_rule_budgets_rule_unit"` // 256*2: safe limit, supports chain_id:address:uint256_hex etc.
-	MaxTotal   string    `json:"max_total" gorm:"type:varchar(128)"`           // max total spend per period (or lifetime if no schedule)
-	MaxPerTx   string    `json:"max_per_tx" gorm:"type:varchar(128)"`          // max spend per transaction
-	Spent      string    `json:"spent" gorm:"type:varchar(128);default:'0'"`   // current period spend
-	AlertPct   int       `json:"alert_pct" gorm:"default:80"`                  // alert threshold percentage
-	AlertSent  bool      `json:"alert_sent" gorm:"default:false"`              // whether alert was sent this period
-	TxCount    int       `json:"tx_count" gorm:"default:0"`                    // transactions in current period
-	MaxTxCount int       `json:"max_tx_count" gorm:"default:0"`                // 0 = unlimited
+	MaxTotal   string    `json:"max_total" gorm:"type:varchar(128)"`                                            // max total spend per period (or lifetime if no schedule)
+	MaxPerTx   string    `json:"max_per_tx" gorm:"type:varchar(128)"`                                           // max spend per transaction
+	Spent      string    `json:"spent" gorm:"type:varchar(128);default:'0'"`                                    // current period spend
+	AlertPct   int       `json:"alert_pct" gorm:"default:80"`                                                   // alert threshold percentage
+	AlertSent  bool      `json:"alert_sent" gorm:"default:false"`                                               // whether alert was sent this period
+	TxCount    int       `json:"tx_count" gorm:"default:0"`                                                     // transactions in current period
+	MaxTxCount int       `json:"max_tx_count" gorm:"default:0"`                                                 // 0 = unlimited
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }

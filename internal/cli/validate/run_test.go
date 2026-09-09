@@ -32,7 +32,9 @@ func projectRoot(t *testing.T) string {
 
 // TestConfigExampleYAMLValidates ensures config.example.yaml loads, expands, and all
 // enabled Solidity expression rules pass validation. Same pipeline as:
-//   go run ./cmd/remote-signer-validate-rules/ -config config.example.yaml
+//
+//	go run ./cmd/remote-signer-validate-rules/ -config config.example.yaml
+//
 // If this test fails, config.example.yaml or the expanded rules are broken; fix the
 // config or the validator so that the example config validates.
 func TestConfigExampleYAMLValidates(t *testing.T) {

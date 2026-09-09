@@ -19,13 +19,13 @@ type HDWalletParentResolver interface {
 
 // SignerAccessService manages signer ownership and access control.
 type SignerAccessService struct {
-	ownershipRepo  storage.SignerOwnershipRepository
-	accessRepo     storage.SignerAccessRepository
-	apiKeyRepo     storage.APIKeyRepository
-	ruleRepo       storage.RuleRepository
-	walletRepo storage.WalletRepository
-	hdWalletMgrFn  func() (HDWalletParentResolver, error)
-	logger         *slog.Logger
+	ownershipRepo storage.SignerOwnershipRepository
+	accessRepo    storage.SignerAccessRepository
+	apiKeyRepo    storage.APIKeyRepository
+	ruleRepo      storage.RuleRepository
+	walletRepo    storage.WalletRepository
+	hdWalletMgrFn func() (HDWalletParentResolver, error)
+	logger        *slog.Logger
 }
 
 // NewSignerAccessService creates a new SignerAccessService.

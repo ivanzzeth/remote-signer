@@ -17,10 +17,10 @@ import (
 
 // ApprovalHandler handles manual approval requests
 type ApprovalHandler struct {
-	signService    service.SignServiceAPI
-	accessService  *service.SignerAccessService
-	rulesReadOnly  bool // when true, block auto-rule creation during approval
-	logger         *slog.Logger
+	signService   service.SignServiceAPI
+	accessService *service.SignerAccessService
+	rulesReadOnly bool // when true, block auto-rule creation during approval
+	logger        *slog.Logger
 }
 
 // NewApprovalHandler creates a new approval handler
@@ -53,11 +53,11 @@ type ApprovalAPIRequest struct {
 
 // ApprovalAPIResponse represents the response for an approval request
 type ApprovalAPIResponse struct {
-	RequestID     string     `json:"request_id"`
-	Status        string     `json:"status"`
-	Signature     string     `json:"signature,omitempty"`
-	SignedData    string     `json:"signed_data,omitempty"`
-	Message       string     `json:"message,omitempty"`
+	RequestID     string      `json:"request_id"`
+	Status        string      `json:"status"`
+	Signature     string      `json:"signature,omitempty"`
+	SignedData    string      `json:"signed_data,omitempty"`
+	Message       string      `json:"message,omitempty"`
 	GeneratedRule *types.Rule `json:"generated_rule,omitempty"`
 }
 

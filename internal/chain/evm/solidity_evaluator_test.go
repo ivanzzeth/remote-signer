@@ -65,9 +65,9 @@ func TestProcessInOperatorToMappings_InvalidAddressFiltered(t *testing.T) {
 	arrays := map[string][]string{
 		"addrs": {
 			"0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837", // valid
-			"not_an_address",                               // invalid — must be skipped
-			"0xZZZZ",                                       // invalid — must be skipped
-			"",                                             // empty — must be skipped
+			"not_an_address", // invalid — must be skipped
+			"0xZZZZ",         // invalid — must be skipped
+			"",               // empty — must be skipped
 		},
 	}
 	got := processInOperatorToMappings(source, arrays)
@@ -389,7 +389,6 @@ func TestSolidityTestInput_Defaults(t *testing.T) {
 	assert.Empty(t, input.ChainID)
 	assert.Empty(t, input.Signer)
 }
-
 
 // TestEvaluate_WhitelistTransaction_CalldataMissingOrTooShort ensures that in whitelist mode,
 // transaction rules (Functions or Expression) fail when parsed is nil or RawData has fewer than 4 bytes (no selector).

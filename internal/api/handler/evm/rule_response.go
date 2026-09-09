@@ -27,8 +27,8 @@ type RuleResponse struct {
 	Status            string          `json:"status,omitempty"`
 	ApprovedBy        *string         `json:"approved_by,omitempty"`
 	Immutable         bool            `json:"immutable,omitempty"`
-	ProposalFor     *string         `json:"proposal_for,omitempty"`
-	RejectionReason *string         `json:"rejection_reason,omitempty"`
+	ProposalFor       *string         `json:"proposal_for,omitempty"`
+	RejectionReason   *string         `json:"rejection_reason,omitempty"`
 	SignerAddress     *string         `json:"signer_address,omitempty"`
 	TemplateID        *string         `json:"template_id,omitempty"`
 	Config            json.RawMessage `json:"config,omitempty"`
@@ -50,17 +50,17 @@ type RuleResponse struct {
 // bound value so the UI can render typed controls without a separate template
 // fetch. Mirrors PresetVariableDetail but includes the current value.
 type VariableDef struct {
-	Name         string `json:"name"`
-	Type         string `json:"type,omitempty"`
-	Label        string `json:"label,omitempty"`
-	Description  string `json:"description,omitempty"`
-	Required     bool   `json:"required"`
-	DefaultValue string `json:"default_value,omitempty"`
-	Placeholder  string `json:"placeholder,omitempty"`
-	Hint         string `json:"hint,omitempty"`
+	Name         string   `json:"name"`
+	Type         string   `json:"type,omitempty"`
+	Label        string   `json:"label,omitempty"`
+	Description  string   `json:"description,omitempty"`
+	Required     bool     `json:"required"`
+	DefaultValue string   `json:"default_value,omitempty"`
+	Placeholder  string   `json:"placeholder,omitempty"`
+	Hint         string   `json:"hint,omitempty"`
 	Options      []string `json:"options,omitempty"`
-	Sensitive    bool   `json:"sensitive,omitempty"`
-	Value        string `json:"value,omitempty"`
+	Sensitive    bool     `json:"sensitive,omitempty"`
+	Value        string   `json:"value,omitempty"`
 }
 
 // ListRulesResponse represents the response for listing rules
@@ -108,8 +108,8 @@ type UpdateRuleRequest struct {
 	Enabled       *bool                  `json:"enabled,omitempty"`
 	AppliedTo     []string               `json:"applied_to,omitempty"`
 	Priority      *int                   `json:"priority,omitempty"`
-	BudgetPeriod  *string                `json:"budget_period,omitempty"`  // e.g. "24h"; null/"" = no periodic renewal
-	TestCases     []JSRuleTestCase       `json:"test_cases,omitempty"` // required for evm_js when updating config
+	BudgetPeriod  *string                `json:"budget_period,omitempty"` // e.g. "24h"; null/"" = no periodic renewal
+	TestCases     []JSRuleTestCase       `json:"test_cases,omitempty"`    // required for evm_js when updating config
 }
 
 // ProposeRuleRequest represents a request to propose changes to an existing rule.
@@ -144,12 +144,12 @@ type ValidateTestResult struct {
 
 // ValidateRuleResponse represents the response for rule validation
 type ValidateRuleResponse struct {
-	RuleID  string               `json:"rule_id"`
-	RuleName string              `json:"rule_name"`
-	Type    string               `json:"type"`
-	Valid   bool                 `json:"valid"`
-	Results []ValidateTestResult `json:"results,omitempty"`
-	Error   string               `json:"error,omitempty"`
+	RuleID   string               `json:"rule_id"`
+	RuleName string               `json:"rule_name"`
+	Type     string               `json:"type"`
+	Valid    bool                 `json:"valid"`
+	Results  []ValidateTestResult `json:"results,omitempty"`
+	Error    string               `json:"error,omitempty"`
 }
 
 // BatchValidateResponse represents the response for batch rule validation

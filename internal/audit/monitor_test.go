@@ -283,12 +283,12 @@ func TestNewMonitor_Validation(t *testing.T) {
 	log := testLogger()
 
 	tests := []struct {
-		name      string
-		repo      storage.AuditRepository
-		svc       *notify.NotifyService
-		ch        *notify.Channel
-		log       *slog.Logger
-		wantErr   string
+		name    string
+		repo    storage.AuditRepository
+		svc     *notify.NotifyService
+		ch      *notify.Channel
+		log     *slog.Logger
+		wantErr string
 	}{
 		{
 			name:    "nil audit repository",
@@ -698,9 +698,9 @@ func TestMonitor_ScanWithMixedAnomalyTypes(t *testing.T) {
 	signer := "0xbad"
 	for i := 0; i < 4; i++ {
 		repo.records = append(repo.records, &types.AuditRecord{
-			EventType:    types.AuditEventTypeSignRejected,
+			EventType:     types.AuditEventTypeSignRejected,
 			SignerAddress: &signer,
-			Timestamp:    now,
+			Timestamp:     now,
 		})
 	}
 

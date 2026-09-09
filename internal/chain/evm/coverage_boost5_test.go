@@ -769,8 +769,6 @@ func TestInjectHelpers_AbiDecode_NoArgs_CB5(t *testing.T) {
 	assert.Contains(t, err.Error(), "abi.decode")
 }
 
-
-
 func TestRsAddrIsZero_NoArgs_CB5(t *testing.T) {
 	vm := sobek.New()
 	_ = injectHelpers(vm)
@@ -778,7 +776,6 @@ func TestRsAddrIsZero_NoArgs_CB5(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "false", val.String())
 }
-
 
 // =============================================================================
 // adapter.go: Sign with invalid JSON

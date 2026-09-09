@@ -726,7 +726,9 @@ func (m *mockTemplateRepo) Delete(ctx context.Context, id string) error         
 func (m *mockTemplateRepo) List(ctx context.Context, filter storage.TemplateFilter) ([]*types.RuleTemplate, error) {
 	return nil, nil
 }
-func (m *mockTemplateRepo) Count(ctx context.Context, filter storage.TemplateFilter) (int, error) { return 0, nil }
+func (m *mockTemplateRepo) Count(ctx context.Context, filter storage.TemplateFilter) (int, error) {
+	return 0, nil
+}
 func (m *mockTemplateRepo) Upsert(ctx context.Context, tmpl *types.RuleTemplate) (bool, error) {
 	return false, nil
 }

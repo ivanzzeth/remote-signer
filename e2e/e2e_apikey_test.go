@@ -159,11 +159,10 @@ func TestAPIKey_Create_ReadonlyMode(t *testing.T) {
 	require.NoError(t, err)
 
 	req := &apikeys.CreateRequest{
-		ID:              "e2e-readonly-test-key",
-		Name:            "E2E Readonly Test",
-		PublicKey:       hex.EncodeToString(pubKey),
-		Role:            "strategy",
-
+		ID:        "e2e-readonly-test-key",
+		Name:      "E2E Readonly Test",
+		PublicKey: hex.EncodeToString(pubKey),
+		Role:      "strategy",
 	}
 
 	key, createErr := adminClient.APIKeys.Create(ctx, req)
@@ -197,12 +196,11 @@ func TestAPIKey_Create_And_Get(t *testing.T) {
 	require.NoError(t, err)
 
 	req := &apikeys.CreateRequest{
-		ID:              "e2e-create-get-test-key",
-		Name:            "E2E Create Get Test",
-		PublicKey:       hex.EncodeToString(pubKey),
-		Role:            "strategy",
-		RateLimit:       200,
-
+		ID:        "e2e-create-get-test-key",
+		Name:      "E2E Create Get Test",
+		PublicKey: hex.EncodeToString(pubKey),
+		Role:      "strategy",
+		RateLimit: 200,
 	}
 
 	created, err := adminClient.APIKeys.Create(ctx, req)
@@ -280,11 +278,10 @@ func TestAPIKey_Update_APISource(t *testing.T) {
 	require.NoError(t, err)
 
 	created, err := adminClient.APIKeys.Create(ctx, &apikeys.CreateRequest{
-		ID:              "e2e-update-test-key",
-		Name:            "E2E Update Test Original",
-		PublicKey:       hex.EncodeToString(pubKey),
-		Role:            "strategy",
-
+		ID:        "e2e-update-test-key",
+		Name:      "E2E Update Test Original",
+		PublicKey: hex.EncodeToString(pubKey),
+		Role:      "strategy",
 	})
 	if err != nil {
 		apiErr, ok := err.(*client.APIError)
@@ -353,11 +350,10 @@ func TestAPIKey_Delete_APISource(t *testing.T) {
 	require.NoError(t, err)
 
 	created, err := adminClient.APIKeys.Create(ctx, &apikeys.CreateRequest{
-		ID:              "e2e-delete-test-key",
-		Name:            "E2E Delete Test",
-		PublicKey:       hex.EncodeToString(pubKey),
-		Role:            "strategy",
-
+		ID:        "e2e-delete-test-key",
+		Name:      "E2E Delete Test",
+		PublicKey: hex.EncodeToString(pubKey),
+		Role:      "strategy",
 	})
 	if err != nil {
 		apiErr, ok := err.(*client.APIError)
@@ -444,11 +440,10 @@ func TestAPIKey_NonAdminCannotCreate(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = nonAdminClient.APIKeys.Create(ctx, &apikeys.CreateRequest{
-		ID:              "e2e-nonadmin-create-attempt",
-		Name:            "Should Not Be Created",
-		PublicKey:       hex.EncodeToString(pubKey),
-		Role:            "strategy",
-
+		ID:        "e2e-nonadmin-create-attempt",
+		Name:      "Should Not Be Created",
+		PublicKey: hex.EncodeToString(pubKey),
+		Role:      "strategy",
 	})
 	require.Error(t, err)
 

@@ -122,15 +122,15 @@ func (r *GormRequestRepository) CompareAndUpdate(ctx context.Context, req *types
 		Model(&types.SignRequest{}).
 		Where("id = ? AND status = ?", req.ID, expectedStatus).
 		Updates(map[string]interface{}{
-			"status":         req.Status,
+			"status":          req.Status,
 			"rule_matched_id": req.RuleMatchedID,
-			"approved_by":    req.ApprovedBy,
-			"approved_at":    req.ApprovedAt,
-			"signature":      req.Signature,
-			"signed_data":    req.SignedData,
-			"error_message":  req.ErrorMessage,
-			"completed_at":   req.CompletedAt,
-			"updated_at":     req.UpdatedAt,
+			"approved_by":     req.ApprovedBy,
+			"approved_at":     req.ApprovedAt,
+			"signature":       req.Signature,
+			"signed_data":     req.SignedData,
+			"error_message":   req.ErrorMessage,
+			"completed_at":    req.CompletedAt,
+			"updated_at":      req.UpdatedAt,
 		})
 	if result.Error != nil {
 		return fmt.Errorf("failed to update request: %w", result.Error)

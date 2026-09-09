@@ -27,9 +27,9 @@ type RuleInputTransaction struct {
 // RuleInputTypedData is the EIP-712 subset (standard shape).
 type RuleInputTypedData struct {
 	Types       map[string][]TypedDataField `json:"types"`
-	PrimaryType string                       `json:"primaryType"`
-	Domain      TypedDataDomain              `json:"domain"`
-	Message     map[string]interface{}       `json:"message"`
+	PrimaryType string                      `json:"primaryType"`
+	Domain      TypedDataDomain             `json:"domain"`
+	Message     map[string]interface{}      `json:"message"`
 }
 
 // RuleInputPersonalSign is the EIP-191 personal sign subset.

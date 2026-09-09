@@ -99,8 +99,8 @@ func checkSwapEnabled(log *slog.Logger) {
 //     from ever paging them out — even if swap is somehow enabled.
 //   - Acts as defense-in-depth on top of swap disabling (cgroup/swapoff).
 //   - Requires CAP_IPC_LOCK capability. In Docker:
-//       cap_add:
-//         - IPC_LOCK
+//     cap_add:
+//   - IPC_LOCK
 func hardenProcessMemory(log *slog.Logger) {
 	// 1. Disable core dumps and /proc/<pid>/mem access
 	//    prctl(PR_SET_DUMPABLE, 0)

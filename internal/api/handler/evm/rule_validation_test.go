@@ -70,14 +70,14 @@ func TestRuleValidate_SingleRule(t *testing.T) {
 		repo := newMockRuleRepo()
 		ct := types.ChainTypeEVM
 		rule := &types.Rule{
-			ID:          "rule_js_no_tc",
-			Name:        "js-no-tc",
-			Type:        types.RuleTypeEVMJS,
-			Mode:        types.RuleModeWhitelist,
-			Source:      types.RuleSourceAPI,
-			ChainType:   &ct,
-			Config:      json.RawMessage(`{"script":"function validate(input) { return { valid: true }; }"}`),
-			Enabled:     true,
+			ID:        "rule_js_no_tc",
+			Name:      "js-no-tc",
+			Type:      types.RuleTypeEVMJS,
+			Mode:      types.RuleModeWhitelist,
+			Source:    types.RuleSourceAPI,
+			ChainType: &ct,
+			Config:    json.RawMessage(`{"script":"function validate(input) { return { valid: true }; }"}`),
+			Enabled:   true,
 		}
 		repo.addRule(rule)
 
@@ -312,4 +312,3 @@ func TestRuleValidate_Batch(t *testing.T) {
 		}
 	})
 }
-

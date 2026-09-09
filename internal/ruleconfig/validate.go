@@ -15,6 +15,7 @@ import (
 var methodSigRegex = regexp.MustCompile(`^0x[0-9a-fA-F]{8}$`)
 
 const maxExpressionLength = 10 * 1024
+
 var dangerousSolidityPatterns = regexp.MustCompile(`(?i)\b(selfdestruct|delegatecall|create2|suicide)\b`)
 
 // ValidateRuleConfig validates config map for the given rule type.

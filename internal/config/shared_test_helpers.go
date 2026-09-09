@@ -343,15 +343,15 @@ type errorRuleRepository struct {
 	deleteErr error
 }
 
-func (e *errorRuleRepository) Create(_ context.Context, _ *types.Rule) error     { return e.createErr }
+func (e *errorRuleRepository) Create(_ context.Context, _ *types.Rule) error { return e.createErr }
 func (e *errorRuleRepository) Get(_ context.Context, _ types.RuleID) (*types.Rule, error) {
 	if e.getErr != nil {
 		return nil, e.getErr
 	}
 	return nil, types.ErrNotFound
 }
-func (e *errorRuleRepository) Update(_ context.Context, _ *types.Rule) error     { return e.updateErr }
-func (e *errorRuleRepository) Delete(_ context.Context, _ types.RuleID) error    { return e.deleteErr }
+func (e *errorRuleRepository) Update(_ context.Context, _ *types.Rule) error  { return e.updateErr }
+func (e *errorRuleRepository) Delete(_ context.Context, _ types.RuleID) error { return e.deleteErr }
 func (e *errorRuleRepository) List(_ context.Context, _ storage.RuleFilter) ([]*types.Rule, error) {
 	return nil, e.listErr
 }
@@ -414,11 +414,11 @@ func (e *errorTemplateRepository) DeleteMany(_ context.Context, _ []string) erro
 }
 
 type errorAPIKeyRepository struct {
-	getErr                  error
-	createErr               error
-	updateErr               error
-	backfillSourceErr       error
-	deleteBySourceExclErr   error
+	getErr                error
+	createErr             error
+	updateErr             error
+	backfillSourceErr     error
+	deleteBySourceExclErr error
 }
 
 func (e *errorAPIKeyRepository) Create(_ context.Context, _ *types.APIKey) error { return e.createErr }
@@ -629,4 +629,3 @@ func testLogger() *slog.Logger {
 
 // hexPubKey is a valid 64-char hex Ed25519 public key for test use.
 const hexPubKey = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
-

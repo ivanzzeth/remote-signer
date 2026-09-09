@@ -272,10 +272,10 @@ func TestGormRuleRepo_List_AllFilters(t *testing.T) {
 		Source:        types.RuleSourceAPI,
 		ChainType:     &evm,
 		ChainID:       &chainID,
-		Owner:      apiKeyID,
+		Owner:         apiKeyID,
 		SignerAddress: &signerAddr,
 		Enabled:       true,
-		AppliedTo: pq.StringArray{"self"},
+		AppliedTo:     pq.StringArray{"self"},
 	}
 	require.NoError(t, repo.Create(ctx, rule))
 
@@ -284,7 +284,7 @@ func TestGormRuleRepo_List_AllFilters(t *testing.T) {
 	list, err := repo.List(ctx, RuleFilter{
 		ChainType:     &evm,
 		ChainID:       &chainID,
-		Owner:      &apiKeyID,
+		Owner:         &apiKeyID,
 		SignerAddress: &signerAddr,
 		Type:          &ruleType,
 		Source:        &ruleSource,
@@ -300,7 +300,7 @@ func TestGormRuleRepo_List_AllFilters(t *testing.T) {
 	count, err := repo.Count(ctx, RuleFilter{
 		ChainType:     &evm,
 		ChainID:       &chainID,
-		Owner:      &apiKeyID,
+		Owner:         &apiKeyID,
 		SignerAddress: &signerAddr,
 		Type:          &ruleType,
 		Source:        &ruleSource,

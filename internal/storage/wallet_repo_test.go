@@ -109,12 +109,12 @@ func TestWalletRepo_Delete_CascadeMembers(t *testing.T) {
 
 	// Add two members
 	require.NoError(t, repo.AddMember(ctx, &types.WalletMember{
-		WalletID: coll.ID,
-		SignerAddress:     "0xWallet1",
+		WalletID:      coll.ID,
+		SignerAddress: "0xWallet1",
 	}))
 	require.NoError(t, repo.AddMember(ctx, &types.WalletMember{
-		WalletID: coll.ID,
-		SignerAddress:     "0xWallet2",
+		WalletID:      coll.ID,
+		SignerAddress: "0xWallet2",
 	}))
 
 	// Verify members exist
@@ -252,8 +252,8 @@ func TestWalletRepo_AddMember(t *testing.T) {
 	require.NoError(t, repo.Create(ctx, coll))
 
 	member := &types.WalletMember{
-		WalletID: coll.ID,
-		SignerAddress:     "0x1234567890abcdef1234567890abcdef12345678",
+		WalletID:      coll.ID,
+		SignerAddress: "0x1234567890abcdef1234567890abcdef12345678",
 	}
 	err := repo.AddMember(ctx, member)
 	require.NoError(t, err)
@@ -276,8 +276,8 @@ func TestWalletRepo_AddMember_NestedCollectionDenied(t *testing.T) {
 
 	// Try to add coll2 as a member of coll1 (should fail)
 	member := &types.WalletMember{
-		WalletID: coll1.ID,
-		SignerAddress:     coll2.ID,
+		WalletID:      coll1.ID,
+		SignerAddress: coll2.ID,
 	}
 	err := repo.AddMember(ctx, member)
 	require.Error(t, err)
@@ -293,8 +293,8 @@ func TestWalletRepo_RemoveMember(t *testing.T) {
 
 	walletID := "0x1234567890abcdef1234567890abcdef12345678"
 	require.NoError(t, repo.AddMember(ctx, &types.WalletMember{
-		WalletID: coll.ID,
-		SignerAddress:     walletID,
+		WalletID:      coll.ID,
+		SignerAddress: walletID,
 	}))
 
 	err := repo.RemoveMember(ctx, coll.ID, walletID)
@@ -322,8 +322,8 @@ func TestWalletRepo_IsMember(t *testing.T) {
 
 	walletID := "0x1234567890abcdef1234567890abcdef12345678"
 	require.NoError(t, repo.AddMember(ctx, &types.WalletMember{
-		WalletID: coll.ID,
-		SignerAddress:     walletID,
+		WalletID:      coll.ID,
+		SignerAddress: walletID,
 	}))
 
 	isMember, err := repo.IsMember(ctx, coll.ID, walletID)
@@ -346,12 +346,12 @@ func TestWalletRepo_GetCollectionsForWallet(t *testing.T) {
 
 	walletID := "0xWallet"
 	require.NoError(t, repo.AddMember(ctx, &types.WalletMember{
-		WalletID: coll1.ID,
-		SignerAddress:     walletID,
+		WalletID:      coll1.ID,
+		SignerAddress: walletID,
 	}))
 	require.NoError(t, repo.AddMember(ctx, &types.WalletMember{
-		WalletID: coll2.ID,
-		SignerAddress:     walletID,
+		WalletID:      coll2.ID,
+		SignerAddress: walletID,
 	}))
 
 	collections, err := repo.GetWalletsForSigner(ctx, walletID)

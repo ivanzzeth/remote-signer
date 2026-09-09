@@ -35,9 +35,9 @@ type HDWalletConfig struct {
 
 // PrivateKeyConfig defines a private key signer configuration
 type PrivateKeyConfig struct {
-	Address   string `yaml:"address"`    // Expected address (for verification)
-	KeyEnvVar string `yaml:"key_env"`    // Environment variable containing hex private key
-	Enabled   bool   `yaml:"enabled"`    // Whether this signer is enabled
+	Address   string `yaml:"address"` // Expected address (for verification)
+	KeyEnvVar string `yaml:"key_env"` // Environment variable containing hex private key
+	Enabled   bool   `yaml:"enabled"` // Whether this signer is enabled
 }
 
 // KeystoreConfig defines a keystore signer configuration
@@ -53,8 +53,8 @@ type KeystoreConfig struct {
 type SignerRegistry struct {
 	mu        sync.RWMutex
 	signers   map[string]*ethsig.Signer           // address -> signer (flat, O(1) lookup)
-	info      map[string]types.SignerInfo           // address -> metadata
-	providers map[types.SignerType]SignerProvider    // type -> provider
+	info      map[string]types.SignerInfo         // address -> metadata
+	providers map[types.SignerType]SignerProvider // type -> provider
 }
 
 // NewEmptySignerRegistry creates an empty registry for provider-based initialization.

@@ -42,6 +42,6 @@ type WalletFilter struct {
 // WalletListResult contains paginated wallet list result.
 type WalletListResult struct {
 	Wallets []Wallet
-	Total       int
-	HasMore     bool
+	Total   int
+	HasMore bool
 }

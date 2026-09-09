@@ -173,12 +173,12 @@ type NotifySlackProvider struct {
 
 // NotifyPushoverProvider holds Pushover service config (app token, retry).
 type NotifyPushoverProvider struct {
-	Enabled    bool `json:"enabled"`
+	Enabled    bool   `json:"enabled"`
 	AppToken   string `json:"app_token"`
-	Retry      int  `json:"retry"`
-	Expire     int  `json:"expire"`
-	MaxRetries int  `json:"max_retries"`
-	RetryDelay int  `json:"retry_delay"`
+	Retry      int    `json:"retry"`
+	Expire     int    `json:"expire"`
+	MaxRetries int    `json:"max_retries"`
+	RetryDelay int    `json:"retry_delay"`
 }
 
 // NotifyWebhookProvider holds webhook service config (headers, timeout).

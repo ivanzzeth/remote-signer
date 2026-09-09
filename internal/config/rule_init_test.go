@@ -579,12 +579,16 @@ func TestCreateBudgetFromInstanceConfig_RequiresUnit(t *testing.T) {
 // mockBudgetRepoForCreate implements only Create for tests that need a non-nil BudgetRepository
 type mockBudgetRepoForCreate struct{}
 
-func (m *mockBudgetRepoForCreate) Create(ctx context.Context, budget *types.RuleBudget) error { return nil }
+func (m *mockBudgetRepoForCreate) Create(ctx context.Context, budget *types.RuleBudget) error {
+	return nil
+}
 func (m *mockBudgetRepoForCreate) GetByRuleID(ctx context.Context, ruleID types.RuleID, unit string) (*types.RuleBudget, error) {
 	return nil, nil
 }
-func (m *mockBudgetRepoForCreate) Delete(ctx context.Context, id string) error   { return nil }
-func (m *mockBudgetRepoForCreate) DeleteByRuleID(ctx context.Context, ruleID types.RuleID) error { return nil }
+func (m *mockBudgetRepoForCreate) Delete(ctx context.Context, id string) error { return nil }
+func (m *mockBudgetRepoForCreate) DeleteByRuleID(ctx context.Context, ruleID types.RuleID) error {
+	return nil
+}
 func (m *mockBudgetRepoForCreate) AtomicSpend(ctx context.Context, ruleID types.RuleID, unit, amount string) error {
 	return nil
 }
@@ -629,7 +633,7 @@ func TestCreateBudgetFromInstanceConfig_AcceptsEmptyOptionalFields(t *testing.T)
 
 	// unit required; optional fields can be empty (e.g. ${max_transfer_amount} → "")
 	budgetMap := map[string]interface{}{
-		"unit":        "1:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+		"unit":       "1:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
 		"max_total":  "${max_transfer_amount}", // resolves to ""
 		"max_per_tx": "",
 		"alert_pct":  "",
@@ -659,8 +663,8 @@ func TestResolveBudgetUnit_FromBudgetMapWithVariables(t *testing.T) {
 func TestResolveBudgetUnit_FromTemplateMeteringFallback(t *testing.T) {
 	rule := &types.Rule{ID: "r1", Variables: []byte(`{"chain_id":"56","token":"0xabc"}`)}
 	tmpl := &types.RuleTemplate{
-		ID:              "t1",
-		BudgetMetering:  []byte(`{"method":"count_only","unit":"${chain_id}:${token}"}`),
+		ID:             "t1",
+		BudgetMetering: []byte(`{"method":"count_only","unit":"${chain_id}:${token}"}`),
 	}
 	budgetMap := map[string]interface{}{"unit": ":", "max_total": "100"} // invalid unit, triggers fallback
 
@@ -708,7 +712,7 @@ func TestResolveBudgetUnit_Normalized(t *testing.T) {
 type spyBudgetRepo struct {
 	listByRuleIDCalls   []types.RuleID
 	listByRuleIDReturn  []*types.RuleBudget
-	listErr             error // if set, ListByRuleID returns this error
+	listErr             error    // if set, ListByRuleID returns this error
 	deleteCalls         []string // IDs deleted
 	createCalls         []*types.RuleBudget
 	getByRuleIDReturn   map[string]*types.RuleBudget // key "ruleID|unit"
@@ -754,7 +758,9 @@ func (s *spyBudgetRepo) DeleteByRuleID(ctx context.Context, ruleID types.RuleID)
 	s.deleteByRuleIDCalls = append(s.deleteByRuleIDCalls, ruleID)
 	return nil
 }
-func (s *spyBudgetRepo) AtomicSpend(ctx context.Context, ruleID types.RuleID, unit, amount string) error { return nil }
+func (s *spyBudgetRepo) AtomicSpend(ctx context.Context, ruleID types.RuleID, unit, amount string) error {
+	return nil
+}
 func (s *spyBudgetRepo) ResetBudget(ctx context.Context, ruleID types.RuleID, unit string, t time.Time) error {
 	return nil
 }

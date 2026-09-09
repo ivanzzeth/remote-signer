@@ -16,18 +16,18 @@ import (
 
 // PresetDetailModel shows a single preset's vars and allows Apply.
 type PresetDetailModel struct {
-	svc       *presets.Service
-	ctx       context.Context
-	width     int
-	height    int
-	presetID  string
-	hints     []string
-	spinner   spinner.Model
-	loading   bool
-	applying  bool
-	err       error
-	success   string
-	goBack    bool
+	svc      *presets.Service
+	ctx      context.Context
+	width    int
+	height   int
+	presetID string
+	hints    []string
+	spinner  spinner.Model
+	loading  bool
+	applying bool
+	err      error
+	success  string
+	goBack   bool
 }
 
 // PresetVarsMsg is sent when vars are loaded.

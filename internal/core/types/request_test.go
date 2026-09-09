@@ -11,10 +11,10 @@ func TestDeriveApprovalSource(t *testing.T) {
 	ruleID := "rule_001"
 
 	cases := []struct {
-		name      string
-		rule      *string
-		approver  *string
-		want      string
+		name     string
+		rule     *string
+		approver *string
+		want     string
 	}{
 		{name: "manual_wins_over_rule", rule: &ruleID, approver: &admin, want: ApprovalSourceManual},
 		{name: "manual_no_rule", rule: nil, approver: &admin, want: ApprovalSourceManual},

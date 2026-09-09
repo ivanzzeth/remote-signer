@@ -143,7 +143,7 @@ func TestParseBigIntStrict_Float64NonInteger(t *testing.T) {
 
 func TestParseBigIntStrict_Float64TooLarge(t *testing.T) {
 	_, ok := parseBigIntStrict(float64(1 << 62)) // still fits in float64 exactly
-	assert.True(t, ok) // (1<<62) is representable exactly
+	assert.True(t, ok)                           // (1<<62) is representable exactly
 }
 
 func TestParseBigIntStrict_DefaultCase(t *testing.T) {
@@ -281,8 +281,8 @@ func TestDecodeUint8FromHex_InvalidHex(t *testing.T) {
 
 func TestDecodeUint8FromHex_TooLarge(t *testing.T) {
 	_, err := decodeUint8FromHex("0xff")
-	assert.Error(t, err)                                   // > 77
-	assert.Contains(t, err.Error(), "out of valid range")  // > maxValidDecimals
+	assert.Error(t, err)                                  // > 77
+	assert.Contains(t, err.Error(), "out of valid range") // > maxValidDecimals
 }
 
 func TestDecodeUint8FromHex_Valid(t *testing.T) {

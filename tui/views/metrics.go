@@ -52,9 +52,9 @@ type MetricsModel struct {
 	showRaw     bool
 
 	signCounts  map[string]float64 // outcome -> count
-	ruleCounts  map[string]float64  // outcome -> count
-	signLatency []latencyRow        // per (chain_type, sign_type)
-	ruleLatency []latencyRow        // per rule_type
+	ruleCounts  map[string]float64 // outcome -> count
+	signLatency []latencyRow       // per (chain_type, sign_type)
+	ruleLatency []latencyRow       // per rule_type
 }
 
 type MetricsDataMsg struct {
@@ -369,8 +369,8 @@ func parsePrometheusLatency(raw string) (signLatency []latencyRow, ruleLatency [
 func computeSignLatencyRows(series map[string][]bucketPoint) []latencyRow {
 	// Group by (chain_type, sign_type) and find best series (max total)
 	type keyCount struct {
-		key   string // "chain_type,sign_type"
-		total float64
+		key    string // "chain_type,sign_type"
+		total  float64
 		points []bucketPoint
 	}
 	byGroup := map[string]keyCount{}

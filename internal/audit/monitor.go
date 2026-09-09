@@ -36,8 +36,8 @@ type MonitorConfig struct {
 	HighFreqThreshold        int `yaml:"high_freq_threshold"`        // requests per hour (default: 100)
 	// Retention: automatically delete audit records older than RetentionDays.
 	// Default: 90 days. Set to 0 to disable cleanup.
-	RetentionDays    int           `yaml:"retention_days"`
-	CleanupInterval  time.Duration `yaml:"cleanup_interval"` // how often to run cleanup (default: 24h)
+	RetentionDays   int           `yaml:"retention_days"`
+	CleanupInterval time.Duration `yaml:"cleanup_interval"` // how often to run cleanup (default: 24h)
 }
 
 func (c *MonitorConfig) setDefaults() {

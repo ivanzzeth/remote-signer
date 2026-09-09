@@ -28,8 +28,8 @@ type HighRiskOperationFunc func(eventType types.AuditEventType, apiKeyID, source
 type AuditLogger struct {
 	repo                storage.AuditRepository
 	logger              *slog.Logger
-	onLogFailure        AuditLogFailureFunc    // optional: alert on persistence failure
-	onHighRiskOperation HighRiskOperationFunc  // optional: alert on privileged admin operations
+	onLogFailure        AuditLogFailureFunc   // optional: alert on persistence failure
+	onHighRiskOperation HighRiskOperationFunc // optional: alert on privileged admin operations
 }
 
 // NewAuditLogger creates a new AuditLogger.
@@ -314,11 +314,11 @@ func (a *AuditLogger) LogAPIKeySynced(ctx context.Context, action, keyID, keyNam
 func (a *AuditLogger) LogSignerCreated(ctx context.Context, apiKeyID, clientIP, address, signerType string) {
 	addr := address
 	a.log(ctx, &types.AuditRecord{
-		EventType:    types.AuditEventTypeSignerCreated,
-		APIKeyID:     apiKeyID,
-		ActorAddress: clientIP,
+		EventType:     types.AuditEventTypeSignerCreated,
+		APIKeyID:      apiKeyID,
+		ActorAddress:  clientIP,
 		SignerAddress: &addr,
-		ErrorMessage: fmt.Sprintf("signer created: type=%s", signerType),
+		ErrorMessage:  fmt.Sprintf("signer created: type=%s", signerType),
 	})
 }
 
@@ -326,9 +326,9 @@ func (a *AuditLogger) LogSignerCreated(ctx context.Context, apiKeyID, clientIP, 
 func (a *AuditLogger) LogSignerLocked(ctx context.Context, apiKeyID, clientIP, address string) {
 	addr := address
 	a.log(ctx, &types.AuditRecord{
-		EventType:    types.AuditEventTypeSignerLocked,
-		APIKeyID:     apiKeyID,
-		ActorAddress: clientIP,
+		EventType:     types.AuditEventTypeSignerLocked,
+		APIKeyID:      apiKeyID,
+		ActorAddress:  clientIP,
 		SignerAddress: &addr,
 	})
 }
@@ -337,9 +337,9 @@ func (a *AuditLogger) LogSignerLocked(ctx context.Context, apiKeyID, clientIP, a
 func (a *AuditLogger) LogSignerUnlocked(ctx context.Context, apiKeyID, clientIP, address string) {
 	addr := address
 	a.log(ctx, &types.AuditRecord{
-		EventType:    types.AuditEventTypeSignerUnlocked,
-		APIKeyID:     apiKeyID,
-		ActorAddress: clientIP,
+		EventType:     types.AuditEventTypeSignerUnlocked,
+		APIKeyID:      apiKeyID,
+		ActorAddress:  clientIP,
 		SignerAddress: &addr,
 	})
 }
@@ -348,11 +348,11 @@ func (a *AuditLogger) LogSignerUnlocked(ctx context.Context, apiKeyID, clientIP,
 func (a *AuditLogger) LogHDWalletCreated(ctx context.Context, apiKeyID, clientIP, primaryAddress, action string) {
 	addr := primaryAddress
 	a.log(ctx, &types.AuditRecord{
-		EventType:    types.AuditEventTypeHDWalletCreated,
-		APIKeyID:     apiKeyID,
-		ActorAddress: clientIP,
+		EventType:     types.AuditEventTypeHDWalletCreated,
+		APIKeyID:      apiKeyID,
+		ActorAddress:  clientIP,
 		SignerAddress: &addr,
-		ErrorMessage: fmt.Sprintf("hdwallet %s", action),
+		ErrorMessage:  fmt.Sprintf("hdwallet %s", action),
 	})
 }
 
@@ -360,11 +360,11 @@ func (a *AuditLogger) LogHDWalletCreated(ctx context.Context, apiKeyID, clientIP
 func (a *AuditLogger) LogHDWalletDerived(ctx context.Context, apiKeyID, clientIP, primaryAddress string, count int) {
 	addr := primaryAddress
 	a.log(ctx, &types.AuditRecord{
-		EventType:    types.AuditEventTypeHDWalletDerived,
-		APIKeyID:     apiKeyID,
-		ActorAddress: clientIP,
+		EventType:     types.AuditEventTypeHDWalletDerived,
+		APIKeyID:      apiKeyID,
+		ActorAddress:  clientIP,
 		SignerAddress: &addr,
-		ErrorMessage: fmt.Sprintf("derived %d addresses", count),
+		ErrorMessage:  fmt.Sprintf("derived %d addresses", count),
 	})
 }
 
@@ -372,10 +372,10 @@ func (a *AuditLogger) LogHDWalletDerived(ctx context.Context, apiKeyID, clientIP
 func (a *AuditLogger) LogSignerAutoLocked(ctx context.Context, address string) {
 	addr := address
 	a.log(ctx, &types.AuditRecord{
-		EventType:    types.AuditEventTypeSignerAutoLocked,
-		ActorAddress: "system",
+		EventType:     types.AuditEventTypeSignerAutoLocked,
+		ActorAddress:  "system",
 		SignerAddress: &addr,
-		ErrorMessage: "signer auto-locked due to timeout",
+		ErrorMessage:  "signer auto-locked due to timeout",
 	})
 }
 
@@ -389,17 +389,17 @@ var highRiskEvents = map[types.AuditEventType]bool{
 	types.AuditEventTypeHDWalletCreated:  true,
 	types.AuditEventTypeHDWalletDerived:  true,
 	// Rule management
-	types.AuditEventTypeRuleCreated:      true,
-	types.AuditEventTypeRuleUpdated:      true,
-	types.AuditEventTypeRuleDeleted:      true,
-	types.AuditEventTypeRuleApproved:     true,
-	types.AuditEventTypeRuleRejected:     true,
+	types.AuditEventTypeRuleCreated:  true,
+	types.AuditEventTypeRuleUpdated:  true,
+	types.AuditEventTypeRuleDeleted:  true,
+	types.AuditEventTypeRuleApproved: true,
+	types.AuditEventTypeRuleRejected: true,
 	// Config sync (startup + SIGHUP reload) — only fires on actual changes
-	types.AuditEventTypeConfigReloaded:   true,
-	types.AuditEventTypeTemplateSynced:   true,
-	types.AuditEventTypeAPIKeySynced:     true,
+	types.AuditEventTypeConfigReloaded: true,
+	types.AuditEventTypeTemplateSynced: true,
+	types.AuditEventTypeAPIKeySynced:   true,
 	// Preset apply
-	types.AuditEventTypePresetApplied:    true,
+	types.AuditEventTypePresetApplied: true,
 }
 
 // IsHighRiskEvent returns true if the event type should trigger a real-time alert.

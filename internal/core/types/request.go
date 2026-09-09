@@ -44,16 +44,16 @@ func DeriveApprovalSource(ruleMatchedID *string, approvedBy *string) string {
 
 // SignRequest is chain-agnostic; payload is chain-specific JSON
 type SignRequest struct {
-	ID        SignRequestID `json:"id" gorm:"primaryKey;type:varchar(64)"`
-	APIKeyID  string        `json:"api_key_id" gorm:"index;type:varchar(64);constraint:OnDelete:RESTRICT"`
+	ID       SignRequestID `json:"id" gorm:"primaryKey;type:varchar(64)"`
+	APIKeyID string        `json:"api_key_id" gorm:"index;type:varchar(64);constraint:OnDelete:RESTRICT"`
 
 	// Chain identification
 	ChainType ChainType `json:"chain_type" gorm:"index;type:varchar(32)"` // "evm", "solana", etc.
 	ChainID   string    `json:"chain_id" gorm:"type:varchar(32)"`         // e.g., "1" for Ethereum mainnet
 
 	SignerAddress string `json:"signer_address" gorm:"index;type:varchar(128)"`
-	SignType      string `json:"sign_type" gorm:"type:varchar(32)"`  // chain-specific sign type
-	Payload       []byte `json:"payload" gorm:"type:jsonb"`          // chain-specific payload
+	SignType      string `json:"sign_type" gorm:"type:varchar(32)"` // chain-specific sign type
+	Payload       []byte `json:"payload" gorm:"type:jsonb"`         // chain-specific payload
 
 	ClientIP string `json:"client_ip" gorm:"type:varchar(64)"` // source IP of the sign request (set from context)
 

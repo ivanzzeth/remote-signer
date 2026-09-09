@@ -42,12 +42,12 @@ func getSignerPassword() string {
 // registry should produce when it parses an `evm/agent.yaml`-style
 // file), instantiates it through the templates endpoint, and asserts:
 //
-//	1. The created template advertises type="template_bundle".
-//	2. The instantiated rule carries the SUB-RULE's type (not the
-//	   bundle's type — that's the whole point of bundle expansion).
-//	3. A personal_sign matching the rule's sign_type_filter is
-//	   auto-approved (status=completed) — not silently queued for
-//	   manual approval.
+//  1. The created template advertises type="template_bundle".
+//  2. The instantiated rule carries the SUB-RULE's type (not the
+//     bundle's type — that's the whole point of bundle expansion).
+//  3. A personal_sign matching the rule's sign_type_filter is
+//     auto-approved (status=completed) — not silently queued for
+//     manual approval.
 func TestBundleTemplate_RoundTrip(t *testing.T) {
 	ensureGuardResumed(t)
 	ctx := context.Background()

@@ -22,9 +22,9 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/homepath"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
-	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
 
 func main() {

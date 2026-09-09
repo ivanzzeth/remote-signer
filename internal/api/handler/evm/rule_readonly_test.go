@@ -83,13 +83,13 @@ func (m *mockRuleRepo) ValidateDelegateRefs(_ context.Context, _ *types.Rule) er
 
 // mockBudgetRepo implements storage.BudgetRepository for listBudgets and budget migration tests.
 type mockBudgetRepo struct {
-	listByRuleID    func(context.Context, types.RuleID) ([]*types.RuleBudget, error)
-	listAll         func(context.Context) ([]*types.RuleBudget, error)
-	getFn           func(context.Context, string) (*types.RuleBudget, error)
-	createFn        func(context.Context, *types.RuleBudget) error
-	createOrGetFn   func(context.Context, *types.RuleBudget) (*types.RuleBudget, bool, error)
-	updateFn        func(context.Context, *types.RuleBudget) error
-	resetFn         func(context.Context, types.RuleID, string, time.Time) error
+	listByRuleID     func(context.Context, types.RuleID) ([]*types.RuleBudget, error)
+	listAll          func(context.Context) ([]*types.RuleBudget, error)
+	getFn            func(context.Context, string) (*types.RuleBudget, error)
+	createFn         func(context.Context, *types.RuleBudget) error
+	createOrGetFn    func(context.Context, *types.RuleBudget) (*types.RuleBudget, bool, error)
+	updateFn         func(context.Context, *types.RuleBudget) error
+	resetFn          func(context.Context, types.RuleID, string, time.Time) error
 	deleteFn         func(context.Context, string) error
 	deleteByRuleIDFn func(context.Context, types.RuleID) error
 	upsertLimitsFn   func(context.Context, types.RuleID, []storage.BudgetSyncRequest) error
@@ -180,8 +180,8 @@ func (m *mockRuleRepo) addRule(rule *types.Rule) {
 
 func adminCtx() context.Context {
 	return context.WithValue(context.Background(), middleware.APIKeyContextKey, &types.APIKey{
-		ID:    "admin-key",
-		Role:  types.RoleAdmin,
+		ID:   "admin-key",
+		Role: types.RoleAdmin,
 	})
 }
 

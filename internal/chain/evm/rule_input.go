@@ -35,7 +35,7 @@ func BuildRuleInput(req *types.SignRequest, parsed *types.ParsedPayload) (*RuleI
 	out := &RuleInput{
 		SignType: signType,
 		ChainID:  chainID,
-		Signer:    signer,
+		Signer:   signer,
 	}
 
 	var p EVMSignPayload

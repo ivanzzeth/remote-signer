@@ -234,7 +234,6 @@ func TestSignerRegistry_Close(t *testing.T) {
 	require.NoError(t, err)
 }
 
-
 // delegation_convert.go -- DelegatePayloadToSignRequest edge cases
 
 func TestNewDelegatePayloadToSignRequest_NilPayload(t *testing.T) {
