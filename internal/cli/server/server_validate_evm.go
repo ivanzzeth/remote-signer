@@ -143,9 +143,7 @@ func validateEVMJSRulesAtStartup(ctx context.Context, expandedRules []config.Rul
 			if len(varsForSubst) > 0 {
 				jsonBytes, _ := json.Marshal(inputCopy)
 				s := string(jsonBytes)
-				for k, v := range varsForSubst {
-					s = strings.ReplaceAll(s, "${"+k+"}", v)
-				}
+				s = rule.ExpandPlaceholders(s, varsForSubst)
 				if err := json.Unmarshal([]byte(s), &inputCopy); err != nil {
 					failed = append(failed, fmt.Sprintf("%s test %q: variable substitution: %v", cfg.Name, tc.Name, err))
 					continue

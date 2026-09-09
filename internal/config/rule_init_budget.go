@@ -57,11 +57,10 @@ func substituteBudgetValue(v interface{}, vars map[string]string) interface{} {
 	}
 	switch val := v.(type) {
 	case string:
-		s := val
-		for k, vv := range vars {
-			s = strings.ReplaceAll(s, "${"+k+"}", vv)
-		}
-		return s
+		// Same expansion the engine performs — see rule/substitution.go. The
+		// bare-${k}-only version this replaces left ${first:x} and ${hex:x}
+		// unexpanded in budget configs written from YAML.
+		return rulepkg.ExpandPlaceholders(val, vars)
 	case map[string]interface{}:
 		return substituteBudgetMapVars(val, vars)
 	case map[interface{}]interface{}:
@@ -237,9 +236,7 @@ func resolveBudgetUnit(rule *types.Rule, tmpl *types.RuleTemplate, budgetMap map
 			unitRaw = u
 		}
 	}
-	for k, v := range vars {
-		unitRaw = strings.ReplaceAll(unitRaw, "${"+k+"}", v)
-	}
+	unitRaw = rulepkg.ExpandPlaceholders(unitRaw, vars)
 	unit := strings.TrimSpace(unitRaw)
 	substituted := substituteBudgetMapVars(budgetMap, vars)
 	if substituted == nil {
@@ -262,9 +259,7 @@ func resolveBudgetUnit(rule *types.Rule, tmpl *types.RuleTemplate, budgetMap map
 			resolvedBM := rulepkg.SubstituteMeteringJSON(tmpl.BudgetMetering, rule.Variables)
 			if err := json.Unmarshal(resolvedBM, &metering); err == nil && metering.Unit != "" {
 				unitFallback := metering.Unit
-				for k, v := range vars {
-					unitFallback = strings.ReplaceAll(unitFallback, "${"+k+"}", v)
-				}
+				unitFallback = rulepkg.ExpandPlaceholders(unitFallback, vars)
 				unitFallback = strings.TrimSpace(unitFallback)
 				if unitFallback != "" && !strings.Contains(unitFallback, "${") {
 					unit = unitFallback
@@ -290,9 +285,7 @@ func createBudgetFromInstanceConfig(ctx context.Context, rule *types.Rule, tmpl 
 			unitRaw = u
 		}
 	}
-	for k, v := range vars {
-		unitRaw = strings.ReplaceAll(unitRaw, "${"+k+"}", v)
-	}
+	unitRaw = rulepkg.ExpandPlaceholders(unitRaw, vars)
 	unit := strings.TrimSpace(unitRaw)
 	substituted := substituteBudgetMapVars(budgetMap, vars)
 	if substituted == nil {
@@ -315,9 +308,7 @@ func createBudgetFromInstanceConfig(ctx context.Context, rule *types.Rule, tmpl 
 			resolvedBM := rulepkg.SubstituteMeteringJSON(tmpl.BudgetMetering, rule.Variables)
 			if err := json.Unmarshal(resolvedBM, &metering); err == nil && metering.Unit != "" {
 				unitFallback := metering.Unit
-				for k, v := range vars {
-					unitFallback = strings.ReplaceAll(unitFallback, "${"+k+"}", v)
-				}
+				unitFallback = rulepkg.ExpandPlaceholders(unitFallback, vars)
 				unitFallback = strings.TrimSpace(unitFallback)
 				if unitFallback != "" && !strings.Contains(unitFallback, "${") {
 					unit = unitFallback

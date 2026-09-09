@@ -918,9 +918,8 @@ func (s *TemplateService) createBudgetWithRepo(ctx context.Context, budgetRepo p
 			if strings.Contains(unit, "${") && len(rule.Variables) > 0 {
 				var vars map[string]string
 				if err := json.Unmarshal(rule.Variables, &vars); err == nil {
-					for k, v := range vars {
-						unit = strings.ReplaceAll(unit, "${"+k+"}", v)
-					}
+					// Same expansion the engine performs — see rule/substitution.go.
+					unit = rulepkg.ExpandPlaceholders(unit, vars)
 				}
 			}
 		}

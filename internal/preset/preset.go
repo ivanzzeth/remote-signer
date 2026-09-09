@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ivanzzeth/remote-signer/internal/core/rule"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -560,11 +562,16 @@ func substituteMapVars(m map[string]interface{}, variables map[string]interface{
 func substituteVarInValue(v interface{}, variables map[string]interface{}) interface{} {
 	switch val := v.(type) {
 	case string:
-		s := val
+		// ⚠️ This used to expand only the bare ${k} form, so a preset using
+		// ${first:x} or ${hex:x} kept its placeholder here while the engine
+		// expanded it at evaluation — the two disagreeing about what the same
+		// preset means. rule.ExpandPlaceholders knows all five forms and is the
+		// implementation the engine runs.
+		strVars := make(map[string]string, len(variables))
 		for k, vv := range variables {
-			s = strings.ReplaceAll(s, "${"+k+"}", fmt.Sprintf("%v", vv))
+			strVars[k] = fmt.Sprintf("%v", vv)
 		}
-		return s
+		return rule.ExpandPlaceholders(val, strVars)
 	case map[string]interface{}:
 		return substituteMapVars(val, variables)
 	case map[interface{}]interface{}:

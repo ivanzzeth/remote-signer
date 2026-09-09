@@ -84,21 +84,11 @@ func SubstituteConfigVars(configJSON []byte, vars map[string]string) []byte {
 }
 
 func substituteConfigVars(configJSON []byte, vars map[string]string) []byte {
-	result := string(configJSON)
-	for k, v := range vars {
-		result = strings.ReplaceAll(result, "${"+k+"}", v)
-		hexv := strings.TrimPrefix(v, "0x")
-		result = strings.ReplaceAll(result, "${hex:"+k+"}", hexv)
-		padded := hexv
-		if len(hexv) < 64 {
-			padded = strings.Repeat("0", 64-len(hexv)) + hexv
-		}
-		result = strings.ReplaceAll(result, "${paddedhex:"+k+"}", padded)
-		first := FirstOfList(v)
-		result = strings.ReplaceAll(result, "${first:"+k+"}", first)
-		result = strings.ReplaceAll(result, "${hex:first:"+k+"}", strings.TrimPrefix(first, "0x"))
-	}
-	return []byte(result)
+	// Evaluation-time: expand and accept whatever is left. A matrix rule
+	// legitimately carries placeholders that only a per-chain row supplies, so
+	// leftovers here are not an error. The strict counterpart is
+	// service.SubstituteVariables, and both run the same expansion.
+	return []byte(ExpandPlaceholders(string(configJSON), vars))
 }
 
 // FirstOfList returns the first non-empty, trimmed element of a

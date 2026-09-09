@@ -88,7 +88,7 @@ func SubstituteTyped(configJSON []byte, defs []types.TemplateVariable, vars map[
 		}
 	}
 
-	if rest := findUnresolvedVars(result); len(rest) > 0 {
+	if rest := rule.UnresolvedPlaceholders(result); len(rest) > 0 {
 		return nil, fmt.Errorf("unresolved variables: %s", strings.Join(rest, ", "))
 	}
 
@@ -332,24 +332,12 @@ var placeholderRE = regexp.MustCompile(`\$\{([^}]+)\}`)
 // Deprecated: Prefer SubstituteTyped for new callers. Kept while R8
 // migrates the preset apply / template instance handlers.
 func SubstituteVariables(configJSON []byte, vars map[string]string) ([]byte, error) {
-	result := string(configJSON)
-	for k, v := range vars {
-		result = strings.ReplaceAll(result, "${"+k+"}", v)
-		result = strings.ReplaceAll(result, "${hex:"+k+"}", strings.TrimPrefix(v, "0x"))
-		hex := strings.TrimPrefix(v, "0x")
-		var padded string
-		if len(hex) < 64 {
-			padded = strings.Repeat("0", 64-len(hex)) + hex
-		} else {
-			padded = hex
-		}
-		result = strings.ReplaceAll(result, "${paddedhex:"+k+"}", padded)
-		firstVal := rule.FirstOfList(v)
-		result = strings.ReplaceAll(result, "${first:"+k+"}", firstVal)
-		hexFirst := strings.TrimPrefix(firstVal, "0x")
-		result = strings.ReplaceAll(result, "${hex:first:"+k+"}", hexFirst)
-	}
-	if rest := findUnresolvedVars(result); len(rest) > 0 {
+	// Validation-time: same expansion as the engine performs, then refuse
+	// anything still unexpanded. The refusal is the only difference between
+	// this and rule.substituteConfigVars — see rule/substitution.go for why
+	// that difference must be a branch and not a second implementation.
+	result := rule.ExpandPlaceholders(string(configJSON), vars)
+	if rest := rule.UnresolvedPlaceholders(result); len(rest) > 0 {
 		return nil, fmt.Errorf("unresolved variables: %s", strings.Join(rest, ", "))
 	}
 	return []byte(result), nil
@@ -363,20 +351,4 @@ func SubstituteString(s string, vars map[string]string) (string, error) {
 		return "", err
 	}
 	return string(b), nil
-}
-
-func findUnresolvedVars(s string) []string {
-	matches := placeholderRE.FindAllStringSubmatch(s, -1)
-	if len(matches) == 0 {
-		return nil
-	}
-	seen := make(map[string]bool, len(matches))
-	var out []string
-	for _, m := range matches {
-		if !seen[m[1]] {
-			seen[m[1]] = true
-			out = append(out, m[1])
-		}
-	}
-	return out
 }

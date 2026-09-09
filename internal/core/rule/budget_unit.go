@@ -81,14 +81,12 @@ func SubstituteMeteringJSON(meteringJSON []byte, variablesJSON []byte) []byte {
 	if len(vars) == 0 {
 		return meteringJSON
 	}
-	s := string(meteringJSON)
-	for k, v := range vars {
-		// Replace "${var}" (with quotes) with the bare value for numeric contexts.
-		// e.g. "max_tx_count":"${max_unknown_token_tx_count}" → "max_tx_count":"50"
-		// The JSON string value "50" works for string fields, and for int fields
-		// we also replace the quoted form to handle: "max_tx_count":"${var}" → "max_tx_count":50
-		s = strings.ReplaceAll(s, "${"+k+"}", v)
-	}
+	// Same expansion the engine performs — see substitution.go. Metering JSON
+	// carries the same placeholder forms as a rule config does, so it must
+	// resolve them the same way; the bare-${k}-only loop this replaces left
+	// ${first:x} and ${hex:x} in place, and the -1 fallback below then silently
+	// turned them into "unlimited".
+	s := ExpandPlaceholders(string(meteringJSON), vars)
 	// Replace any remaining unresolved ${...} with -1 so the JSON remains valid.
 	// String fields (max_total, max_per_tx) get "-1" = unlimited; int fields
 	// (max_tx_count, decimals, alert_pct) get -1 after unquoteIntFields below.
@@ -203,11 +201,15 @@ func substituteUnitVariables(unit string, variablesJSON []byte) string {
 	if err := json.Unmarshal(variablesJSON, &raw); err != nil || len(raw) == 0 {
 		return unit
 	}
+	strVars := make(map[string]string, len(raw))
 	for k, v := range raw {
 		if v == nil {
 			continue
 		}
-		unit = strings.ReplaceAll(unit, "${"+k+"}", fmt.Sprintf("%v", v))
+		strVars[k] = fmt.Sprintf("%v", v)
 	}
-	return unit
+	// A budget unit is a key other rows are matched against — "1:0xA0b8…" — so
+	// an unexpanded ${token_address} here means spend lands on a different row
+	// than the limit it should be checked against.
+	return ExpandPlaceholders(unit, strVars)
 }

@@ -838,9 +838,9 @@ func resolveBudgetUnit(variables []byte, unitTemplate string) string {
 		return unitTemplate
 	}
 	result := unitTemplate
-	for k, v := range vars {
-		result = strings.ReplaceAll(result, "${"+k+"}", v)
-	}
+	// Same expansion the engine performs — see rule/substitution.go. Rolling a
+	// bare-${k} loop here would resolve fewer forms than evaluation does.
+	result = rulepkg.ExpandPlaceholders(result, vars)
 	return result
 }
 

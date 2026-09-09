@@ -313,22 +313,22 @@ func TestAsDurationString(t *testing.T) {
 
 func TestFindUnresolvedVars(t *testing.T) {
 	t.Run("no_placeholders", func(t *testing.T) {
-		rest := findUnresolvedVars(`{"a": 1}`)
+		rest := rule.UnresolvedPlaceholders(`{"a": 1}`)
 		assert.Nil(t, rest)
 	})
 
 	t.Run("single_unresolved", func(t *testing.T) {
-		rest := findUnresolvedVars(`${x}`)
+		rest := rule.UnresolvedPlaceholders(`${x}`)
 		assert.Equal(t, []string{"x"}, rest)
 	})
 
 	t.Run("multiple_deduplicated", func(t *testing.T) {
-		rest := findUnresolvedVars(`${x} ${y} ${x}`)
+		rest := rule.UnresolvedPlaceholders(`${x} ${y} ${x}`)
 		assert.ElementsMatch(t, []string{"x", "y"}, rest)
 	})
 
 	t.Run("none_unresolved", func(t *testing.T) {
-		rest := findUnresolvedVars(`{"a": "fixed"}`)
+		rest := rule.UnresolvedPlaceholders(`{"a": "fixed"}`)
 		assert.Nil(t, rest)
 	})
 }

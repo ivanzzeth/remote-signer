@@ -215,23 +215,14 @@ func varMap(r *types.Rule) map[string]string {
 	return vars
 }
 
-// substituteVars mirrors core/rule.substituteConfigVars (loose).
+// substituteVars is rule.ExpandPlaceholders.
+//
+// ⚠️ It used to be a copy, and its own comment said so: "mirrors
+// core/rule.substituteConfigVars (loose)". A migration that rewrites every rule
+// in the database is the last place that should expand placeholders slightly
+// differently from the engine that will evaluate them afterwards.
 func substituteVars(configJSON []byte, vars map[string]string) []byte {
-	result := string(configJSON)
-	for k, v := range vars {
-		result = strings.ReplaceAll(result, "${"+k+"}", v)
-		hexv := strings.TrimPrefix(v, "0x")
-		result = strings.ReplaceAll(result, "${hex:"+k+"}", hexv)
-		padded := hexv
-		if len(hexv) < 64 {
-			padded = strings.Repeat("0", 64-len(hexv)) + hexv
-		}
-		result = strings.ReplaceAll(result, "${paddedhex:"+k+"}", padded)
-		first := firstOfList(v)
-		result = strings.ReplaceAll(result, "${first:"+k+"}", first)
-		result = strings.ReplaceAll(result, "${hex:first:"+k+"}", strings.TrimPrefix(first, "0x"))
-	}
-	return []byte(result)
+	return []byte(rulepkg.ExpandPlaceholders(string(configJSON), vars))
 }
 
 func firstOfList(s string) string {
