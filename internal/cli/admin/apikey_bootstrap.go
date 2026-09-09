@@ -104,9 +104,9 @@ func runAPIKeyBootstrap(cmd *cobra.Command, _ []string) error {
 	// confirmation copy on its own.
 	if !keystore.IsTerminal() {
 		return fmt.Errorf(
-			"stdin is not a terminal; cannot prompt for password securely.\n" +
-				"Either run this command interactively, or restart the daemon with " +
-				"REMOTE_SIGNER_KEYSTORE_PASSWORD set in its environment.",
+			"stdin is not a terminal, cannot prompt for password securely — " +
+				"run this command interactively, or restart the daemon with " +
+				"REMOTE_SIGNER_KEYSTORE_PASSWORD set in its environment",
 		)
 	}
 	password, err := keystore.ReadPasswordWithConfirm(ctx, "Enter NEW admin keystore password")

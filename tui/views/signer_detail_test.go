@@ -21,7 +21,10 @@ func newTestSignerDetailModel(t *testing.T) *SignerDetailModel {
 
 func TestNewSignerDetailModel(t *testing.T) {
 	t.Run("returns error when context is nil", func(t *testing.T) {
-		_, err := NewSignerDetailModel(nil) //nolint:staticcheck // intentionally testing nil context rejection
+		//lint:ignore SA1012 本用例就是要验证 nil context 被拒 —— 传 context.TODO 就测不到了。
+		// ⚠️ 原来写的是 //nolint:staticcheck,那是 golangci-lint 的语法,staticcheck 不认,
+		// 等于没有抑制。
+		_, err := NewSignerDetailModel(nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "context is required")
 	})

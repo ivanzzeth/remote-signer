@@ -143,6 +143,7 @@ func (p *PushoverClient) SendNotification(userKey, message string, priority int,
 			if len(result.Errors) > 0 {
 				errMsg = result.Errors[0]
 			}
+			//lint:ignore ST1005 专有名词(Slack/Pushover)开头 —— Go 风格指南允许
 			lastErr = fmt.Errorf("Pushover API error: %s", errMsg)
 			log.Warn().
 				Err(lastErr).

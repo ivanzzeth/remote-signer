@@ -60,6 +60,7 @@ func (s *SlackClient) GetChannelMembers(channelID string) ([]string, error) {
 	}
 
 	if !result.OK {
+		//lint:ignore ST1005 专有名词(Slack/Pushover)开头 —— Go 风格指南允许
 		return nil, fmt.Errorf("Slack API error: %s", result.Error)
 	}
 
@@ -118,6 +119,7 @@ func (s *SlackClient) GetUserInfo(userID string) (*UserInfo, error) {
 	}
 
 	if !result.OK {
+		//lint:ignore ST1005 专有名词(Slack/Pushover)开头 —— Go 风格指南允许
 		return nil, fmt.Errorf("Slack API error: %s", result.Error)
 	}
 
@@ -167,8 +169,8 @@ func (s *SlackClient) PostMessage(channelID, message string) error {
 	defer resp.Body.Close()
 
 	var result struct {
-		OK    bool   `json:"ok"`
-		Error string `json:"error"`
+		OK      bool   `json:"ok"`
+		Error   string `json:"error"`
 		Warning string `json:"warning,omitempty"`
 	}
 
@@ -188,6 +190,7 @@ func (s *SlackClient) PostMessage(channelID, message string) error {
 			Str("warning", result.Warning).
 			Int("status_code", resp.StatusCode).
 			Msg("Slack API returned error")
+		//lint:ignore ST1005 专有名词(Slack/Pushover)开头 —— Go 风格指南允许
 		return fmt.Errorf("Slack API error: %s", result.Error)
 	}
 
@@ -216,6 +219,7 @@ func (s *SlackClient) ReplyToChannel(responseURL, message, responseType string) 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		//lint:ignore ST1005 专有名词(Slack/Pushover)开头 —— Go 风格指南允许
 		return fmt.Errorf("Slack response error: status %d", resp.StatusCode)
 	}
 
@@ -265,6 +269,7 @@ func (s *SlackClient) FindUserByName(username string) (string, error) {
 	}
 
 	if !result.OK {
+		//lint:ignore ST1005 专有名词(Slack/Pushover)开头 —— Go 风格指南允许
 		return "", fmt.Errorf("Slack API error: %s", result.Error)
 	}
 
@@ -319,6 +324,7 @@ func (s *SlackClient) filterBots(userIDs []string) ([]string, error) {
 	}
 
 	if !result.OK {
+		//lint:ignore ST1005 专有名词(Slack/Pushover)开头 —— Go 风格指南允许
 		return nil, fmt.Errorf("Slack API error: %s", result.Error)
 	}
 

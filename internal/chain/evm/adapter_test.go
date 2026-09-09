@@ -22,13 +22,13 @@ func TestEVMAdapter_ParsePayload_PersonalSign(t *testing.T) {
 	adapter := &EVMAdapter{}
 
 	tests := []struct {
-		name           string
-		signType       string
-		payload        EVMSignPayload
-		expectMessage  string
-		expectHasMsg   bool
-		expectRecip    bool
-		expectValue    bool
+		name            string
+		signType        string
+		payload         EVMSignPayload
+		expectMessage   string
+		expectHasMsg    bool
+		expectRecip     bool
+		expectValue     bool
 		expectMethodSig bool
 	}{
 		{
@@ -251,9 +251,16 @@ func TestEVMAdapter_ParsePayload_Transaction(t *testing.T) {
 				}
 			} else if tt.expectMethodSig == "" && parsed.MethodSig != nil {
 				// If we don't expect method sig, it should be nil
-				dataHex := strings.TrimPrefix(tt.payload.Transaction.Data, "0x")
-				if tt.payload.Transaction != nil && len(dataHex) < 8 { //nolint:staticcheck
+				// ⚠️ 这里原本是个**空分支**(带一句无效的 //nolint:staticcheck ——
+				// staticcheck 不认 nolint 语法)。于是「不期望 method_sig 却解出了
+				// method_sig」这件事一直没有任何断言,用例白跑。
+				if tt.payload.Transaction != nil {
+					dataHex := strings.TrimPrefix(tt.payload.Transaction.Data, "0x")
+					if len(dataHex) < 8 {
+						t.Errorf("calldata %q 不足 4 字节 selector,却解析出 method_sig %q",
+							dataHex, *parsed.MethodSig)
 					}
+				}
 			}
 
 			if tt.expectContract != "" {
