@@ -50,10 +50,8 @@ type BroadcastResponse struct {
 
 // ServeHTTP handles POST /api/v1/evm/broadcast.
 func (h *BroadcastHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-		return
-	}
+	// ⛔ No method check: the route is method-scoped (see setupRoutes) and Go's
+	// ServeMux answers 405 before this runs.
 
 	var req BroadcastRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

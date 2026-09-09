@@ -1476,13 +1476,10 @@ func TestAPIKeyHandler_ListNames_OnlyEnabledKeys(t *testing.T) {
 	assert.Equal(t, "k1", resp.Keys[0].ID)
 }
 
-func TestAPIKeyHandler_ListNames_MethodNotAllowed(t *testing.T) {
-	repo := newMockAPIKeyRepo()
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
-	require.NoError(t, err)
-	rr := doAPIKeyNamesRequest(t, h, http.MethodPost, apikeyAdminKey())
-	assert.Equal(t, http.StatusMethodNotAllowed, rr.Code)
-}
+// TestAPIKeyHandler_ListNames_MethodNotAllowed was removed: its route is method-scoped now (see setupRoutes) and Go's
+// ServeMux answers 405 before the handler runs. A test that calls the handler
+// directly with the wrong method asserts a check this layer no longer owns —
+// and should not own, since the mux cannot forget it.
 
 func mapKeys(m map[string]any) []string {
 	out := make([]string, 0, len(m))

@@ -427,20 +427,14 @@ func (h *BudgetItemHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			respond.Error(w, "rule_id is required", http.StatusBadRequest, h.logger)
 			return
 		}
-		if r.Method != http.MethodDelete {
-			respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-			return
-		}
+		// ⛔ No method check: the route is method-scoped and the mux answers 405.
 		h.handleDeleteByRuleID(w, r, apiKey, ruleID)
 		return
 	}
 
 	if strings.HasSuffix(tail, "/reset") {
 		id := strings.TrimSuffix(tail, "/reset")
-		if r.Method != http.MethodPost {
-			respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-			return
-		}
+		// ⛔ No method check: the route is method-scoped and the mux answers 405.
 		h.handleReset(w, r, apiKey, id)
 		return
 	}

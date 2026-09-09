@@ -193,14 +193,8 @@ func TestRPCProxy_MissingMethod(t *testing.T) {
 	assert.Equal(t, -32600, env.Error.Code)
 }
 
-func TestRPCProxy_NonPOST(t *testing.T) {
-	h, err := NewRPCProxyHandler(&stubProxyBackend{}, nil, proxyLogger())
-	require.NoError(t, err)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/evm/rpc/1", nil)
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-}
+// TestRPCProxy_NonPOST was removed: its route is method-scoped now and the mux answers 405 before
+// the handler runs.
 
 func TestRPCProxy_UpstreamErrorInEnvelope(t *testing.T) {
 	// Upstream RPC went sideways — handler must surface the real

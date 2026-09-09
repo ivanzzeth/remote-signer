@@ -171,7 +171,7 @@ func (r *Router) setupRoutes() error {
 	r.healthHandler.SetSecurityConfig(r.config.AuditRetentionDays)
 	r.healthHandler.SetSettingsManager(r.config.SettingsManager)
 	r.syncApprovalGuard()
-	r.mux.Handle("/health", middleware.SecurityHeadersMiddleware()(r.healthHandler))
+	r.mux.Handle("GET /health", middleware.SecurityHeadersMiddleware()(r.healthHandler))
 
 	// Prometheus metrics (no auth; same port as API)
 	r.mux.Handle("/metrics", middleware.SecurityHeadersMiddleware()(metrics.Handler()))
@@ -185,8 +185,8 @@ func (r *Router) setupRoutes() error {
 	// can opt out cleanly.
 	if r.config.BootstrapCreator != nil && r.config.APIKeyRepo != nil {
 		bootstrapHandler := handler.NewBootstrapHandler(r.config.APIKeyRepo, r.config.BootstrapCreator, r.logger)
-		r.mux.Handle("/api/v1/bootstrap/status", middleware.SecurityHeadersMiddleware()(http.HandlerFunc(bootstrapHandler.ServeStatus)))
-		r.mux.Handle("/api/v1/bootstrap/admin", middleware.SecurityHeadersMiddleware()(http.HandlerFunc(bootstrapHandler.ServeAdmin)))
+		r.mux.Handle("GET /api/v1/bootstrap/status", middleware.SecurityHeadersMiddleware()(http.HandlerFunc(bootstrapHandler.ServeStatus)))
+		r.mux.Handle("POST /api/v1/bootstrap/admin", middleware.SecurityHeadersMiddleware()(http.HandlerFunc(bootstrapHandler.ServeAdmin)))
 	}
 
 	// Create SignerAccessService
@@ -317,9 +317,9 @@ func (r *Router) setupRoutes() error {
 	}
 
 	// EVM routes (with auth)
-	r.mux.Handle("/api/v1/evm/sign", r.withAuthAndPerm(middleware.PermSignRequest, signHandler))
+	r.handlePerm("POST /api/v1/evm/sign", middleware.PermSignRequest, signHandler)
 	r.mux.Handle("/api/v1/evm/requests", r.withAuthAndPerm(middleware.PermListOwnRequests, listHandler))
-	r.mux.Handle("/api/v1/evm/requests/batch-approve", r.withAuthAndPerm(middleware.PermApproveRequest, batchApprovalHandler))
+	r.handlePerm("POST /api/v1/evm/requests/batch-approve", middleware.PermApproveRequest, batchApprovalHandler)
 	var requestSimHandler *evmhandler.RequestSimulationHandler
 	if r.config.RequestSimulationRepo != nil && r.config.RequestRepo != nil {
 		var rsErr error
@@ -420,10 +420,27 @@ func (r *Router) setupRoutes() error {
 	r.handlePerm("GET /api/v1/evm/signers", middleware.PermReadSigners, signerHandler)
 	r.handlePerm("POST /api/v1/evm/signers", middleware.PermCreateSigners, signerHandler)
 	// Signer action routes: /api/v1/evm/signers/{address}/unlock, /lock (admin only via PermUnlockSigner in handler)
+	// The four POST-only actions get their own method-scoped patterns so the mux
+	// rejects a GET rather than the handler doing it four times. The prefix
+	// registration stays for /signers/{address}/access, which legitimately
+	// serves GET, POST and DELETE on one path.
+	//
+	// ⚠️ Permission is unchanged (PermReadSigners) — unlock/lock/approve/transfer
+	// enforce ownership and role inside, against the signer being acted on,
+	// which is a resource-scoped decision the route cannot make. Same reason
+	// approval.go keeps its check; see the note in
+	// scripts/lib/arch-baseline/inline-permission-checks.txt.
+	for _, action := range []string{"unlock", "lock", "approve", "transfer"} {
+		r.handlePerm("POST /api/v1/evm/signers/{address}/"+action,
+			middleware.PermReadSigners, http.HandlerFunc(signerHandler.HandleSignerAction))
+	}
 	r.mux.Handle("/api/v1/evm/signers/", r.withAuthAndPerm(middleware.PermReadSigners, http.HandlerFunc(signerHandler.HandleSignerAction)))
 
 	// HD wallet management routes
 	r.mux.Handle("/api/v1/evm/hd-wallets", r.withAuth(hdWalletHandler))
+	// derive is POST-only, derived is GET-only; the prefix keeps serving the rest.
+	r.mux.Handle("POST /api/v1/evm/hd-wallets/{address}/derive", r.withAuth(hdWalletHandler))
+	r.mux.Handle("GET /api/v1/evm/hd-wallets/{address}/derived", r.withAuth(hdWalletHandler))
 	r.mux.Handle("/api/v1/evm/hd-wallets/", r.withAuth(hdWalletHandler))
 
 	// Simulation routes (optional, requires simulation engine)
@@ -452,7 +469,7 @@ func (r *Router) setupRoutes() error {
 		if bcErr != nil {
 			return fmt.Errorf("failed to create broadcast handler: %w", bcErr)
 		}
-		r.mux.Handle("/api/v1/evm/broadcast", r.withAuthAndPerm(middleware.PermSignRequest, broadcastHandler))
+		r.handlePerm("POST /api/v1/evm/broadcast", middleware.PermSignRequest, broadcastHandler)
 
 		// Wallet RPC proxy: browser-extension EIP1193Provider routes
 		// every read method + signed-tx broadcast through here so the
@@ -464,7 +481,7 @@ func (r *Router) setupRoutes() error {
 		if rpErr != nil {
 			return fmt.Errorf("failed to create rpc proxy handler: %w", rpErr)
 		}
-		r.mux.Handle("/api/v1/evm/rpc/", r.withAuth(rpcProxyHandler))
+		r.mux.Handle("POST /api/v1/evm/rpc/", r.withAuth(rpcProxyHandler))
 	}
 
 	// On-chain transactions read API. Registered independently of
@@ -499,7 +516,7 @@ func (r *Router) setupRoutes() error {
 		}
 		batchSignHandler.SetSignTimeout(
 			r.liveDuration(func(s *settings.SecuritySnapshot) time.Duration { return s.SignTimeout }))
-		r.mux.Handle("/api/v1/evm/sign/batch", r.withAuthAndPerm(middleware.PermSignRequest, batchSignHandler))
+		r.handlePerm("POST /api/v1/evm/sign/batch", middleware.PermSignRequest, batchSignHandler)
 	}
 
 	// Audit routes
@@ -536,7 +553,7 @@ func (r *Router) setupRoutes() error {
 		// land BEFORE the /api/v1/api-keys/ prefix so the standard mux's
 		// longest-match wins and we don't accidentally route through
 		// ServeKeyHTTP (which would treat "names" as an id and 404).
-		r.mux.Handle("/api/v1/api-keys/names", r.withAuth(http.HandlerFunc(apiKeyHandler.ListAPIKeyNames)))
+		r.mux.Handle("GET /api/v1/api-keys/names", r.withAuth(http.HandlerFunc(apiKeyHandler.ListAPIKeyNames)))
 		r.mux.Handle("/api/v1/api-keys", r.withAuthAndPerm(middleware.PermManageAPIKeys, apiKeyHandler))
 		r.mux.Handle("/api/v1/api-keys/", r.withAuthAndPerm(middleware.PermManageAPIKeys, http.HandlerFunc(apiKeyHandler.ServeKeyHTTP)))
 	}
@@ -554,7 +571,7 @@ func (r *Router) setupRoutes() error {
 	// ACLs read-only routes (admin only): IP whitelist config
 	if r.config.IPWhitelistConfigForRead != nil {
 		aclHandler := handler.NewACLHandler(r.config.IPWhitelistConfigForRead)
-		r.mux.Handle("/api/v1/acls/ip-whitelist", r.withAuthAndPerm(middleware.PermReadACLs, aclHandler))
+		r.handlePerm("GET /api/v1/acls/ip-whitelist", middleware.PermReadACLs, aclHandler)
 	}
 
 	// Runtime-mutable settings (admin only). PUT against /api/v1/admin/settings/security
@@ -638,7 +655,7 @@ func (r *Router) setupRoutes() error {
 		if err != nil {
 			return err
 		}
-		r.mux.Handle("/api/v1/registry/refresh", r.withAuthAndPerm(middleware.PermApplyPreset, refreshHandler))
+		r.handlePerm("POST /api/v1/registry/refresh", middleware.PermApplyPreset, refreshHandler)
 	}
 
 	// Web UI catch-all. Must be registered LAST so every explicit

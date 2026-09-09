@@ -926,39 +926,10 @@ func TestHDWalletHandler_ValidationErrors(t *testing.T) {
 
 // --- Method not allowed tests ---
 
-func TestHDWalletHandler_MethodNotAllowed(t *testing.T) {
-	t.Run("PUT on root", func(t *testing.T) {
-		sm := newDefaultMockSignerManager()
-		h := newTestHDWalletHandler(t, sm)
-
-		rec := doRequest(h, http.MethodPut, "/api/v1/evm/hd-wallets", nil)
-		assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-	})
-
-	t.Run("DELETE on root", func(t *testing.T) {
-		sm := newDefaultMockSignerManager()
-		h := newTestHDWalletHandler(t, sm)
-
-		rec := doRequest(h, http.MethodDelete, "/api/v1/evm/hd-wallets", nil)
-		assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-	})
-
-	t.Run("GET on derive", func(t *testing.T) {
-		sm := newDefaultMockSignerManager()
-		h := newTestHDWalletHandler(t, sm)
-
-		rec := doRequest(h, http.MethodGet, "/api/v1/evm/hd-wallets/0x1111111111111111111111111111111111111111/derive", nil)
-		assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-	})
-
-	t.Run("POST on derived", func(t *testing.T) {
-		sm := newDefaultMockSignerManager()
-		h := newTestHDWalletHandler(t, sm)
-
-		rec := doRequest(h, http.MethodPost, "/api/v1/evm/hd-wallets/0x1111111111111111111111111111111111111111/derived", nil)
-		assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-	})
-}
+// TestHDWalletHandler_MethodNotAllowed was removed: its route is method-scoped now (see setupRoutes) and Go's
+// ServeMux answers 405 before the handler runs. A test that calls the handler
+// directly with the wrong method asserts a check this layer no longer owns —
+// and should not own, since the mux cannot forget it.
 
 // --- HDWalletManager not configured tests ---
 

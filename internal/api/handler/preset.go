@@ -179,26 +179,20 @@ func (h *PresetHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if sub == "" {
-		if r.Method != http.MethodGet {
-			respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-			return
-		}
+		// ⛔ No method check: GET and POST /api/v1/presets/ are registered
+		// separately, so the mux has already rejected anything else.
 		h.detail(w, r, id)
 		return
 	}
 	if sub == "apply" {
-		if r.Method != http.MethodPost {
-			respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-			return
-		}
+		// ⛔ No method check: GET and POST /api/v1/presets/ are registered
+		// separately, so the mux has already rejected anything else.
 		h.apply(w, r, id)
 		return
 	}
 	if sub == "validate" {
-		if r.Method != http.MethodPost {
-			respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-			return
-		}
+		// ⛔ No method check: GET and POST /api/v1/presets/ are registered
+		// separately, so the mux has already rejected anything else.
 		if !middleware.GetAPIKey(r.Context()).IsAdmin() {
 			respond.Error(w, "forbidden: admin role required", http.StatusForbidden, h.logger)
 			return

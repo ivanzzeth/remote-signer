@@ -187,17 +187,8 @@ func TestNewBatchSignHandler_Valid(t *testing.T) {
 // BatchSignHandler ServeHTTP tests
 // ---------------------------------------------------------------------------
 
-func TestBatchSignHandler_MethodNotAllowed(t *testing.T) {
-	accessSvc := newSignerTestAccessService(t)
-	h := newBatchSignHandler(t, BatchSignHandlerConfig{
-		SignService:   &mockBatchSignService{},
-		AccessService: accessSvc,
-		RuleEngine:    &mockRuleEngine{},
-		Logger:        slog.Default(),
-	})
-	rec := doBatchSignRequest(t, h, http.MethodGet, "/api/v1/evm/sign/batch", nil, signAdminKey())
-	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-}
+// TestBatchSignHandler_MethodNotAllowed was removed: its route is method-scoped now and the mux answers 405 before
+// the handler runs.
 
 func TestBatchSignHandler_Unauthorized(t *testing.T) {
 	accessSvc := newSignerTestAccessService(t)
@@ -802,16 +793,8 @@ func TestHandleApproveSigner_Success(t *testing.T) {
 	assert.Equal(t, "approved", resp["status"])
 }
 
-func TestHandleApproveSigner_MethodNotAllowed(t *testing.T) {
-	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
-	require.NoError(t, err)
-
-	adminKey := &types.APIKey{ID: "admin-key", Role: types.RoleAdmin, Enabled: true}
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodGet,
-		"/api/v1/evm/signers/0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/approve", nil, adminKey)
-	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-}
+// TestHandleApproveSigner_MethodNotAllowed was removed: its route is method-scoped now and the mux answers 405 before
+// the handler runs.
 
 // ---------------------------------------------------------------------------
 // handleTransferOwnership tests (signer_locking.go:167 - 0% coverage)
@@ -882,15 +865,8 @@ func TestHandleTransferOwnership_Success(t *testing.T) {
 	assert.Equal(t, "new-owner", resp["new_owner_id"])
 }
 
-func TestHandleTransferOwnership_MethodNotAllowed(t *testing.T) {
-	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
-	require.NoError(t, err)
-
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodGet,
-		"/api/v1/evm/signers/"+testAddr+"/transfer", nil, testOwnerAPIKey())
-	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-}
+// TestHandleTransferOwnership_MethodNotAllowed was removed: its route is method-scoped now and the mux answers 405 before
+// the handler runs.
 
 // ---------------------------------------------------------------------------
 // handleLock additional coverage tests (signer_locking.go:81)

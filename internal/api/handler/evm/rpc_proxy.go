@@ -117,10 +117,8 @@ type jsonRPCError struct {
 // 4xx — those aren't JSON-RPC responses at all, just transport
 // fault.
 func (h *RPCProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		respond.Error(w, "method not allowed: use POST", http.StatusMethodNotAllowed, h.logger)
-		return
-	}
+	// ⛔ No method check: the route is method-scoped (see setupRoutes) and Go's
+	// ServeMux answers 405 before this runs.
 
 	chainID := strings.TrimPrefix(r.URL.Path, "/api/v1/evm/rpc/")
 	chainID = strings.TrimSuffix(chainID, "/")

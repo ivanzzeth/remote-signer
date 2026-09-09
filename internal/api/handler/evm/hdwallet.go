@@ -171,16 +171,8 @@ func (h *HDWalletHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		switch action {
 		case "derive":
-			if r.Method != http.MethodPost {
-				respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-				return
-			}
 			h.deriveAddresses(w, r, address)
 		case "derived":
-			if r.Method != http.MethodGet {
-				respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-				return
-			}
 			h.listDerived(w, r, address)
 		default:
 			respond.Error(w, "unknown action", http.StatusNotFound, h.logger)

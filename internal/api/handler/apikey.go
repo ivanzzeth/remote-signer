@@ -229,10 +229,7 @@ func (h *APIKeyHandler) listAPIKeys(w http.ResponseWriter, r *http.Request) {
 // Today this returns the full enabled set; pagination + free-text
 // search can land later under the same shape if catalogues grow.
 func (h *APIKeyHandler) ListAPIKeyNames(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-		return
-	}
+	// ⛔ No method check: GET /api/v1/api-keys/names is method-scoped.
 	// Caller is already authenticated by the router (withAuth, not
 	// withAuthAndPerm) — anyone with a valid signature gets in.
 	keys, err := h.repo.List(r.Context(), storage.APIKeyFilter{

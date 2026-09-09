@@ -124,10 +124,8 @@ func (h *HealthHandler) approvalGuardHealth() *ApprovalGuardHealth {
 
 // ServeHTTP handles GET /health
 func (h *HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+	// ⛔ No method check: the route is method-scoped (see setupRoutes) and Go's
+	// ServeMux answers 405 before this runs.
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

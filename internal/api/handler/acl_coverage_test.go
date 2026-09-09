@@ -62,19 +62,10 @@ func TestACLHandler_WithConfig(t *testing.T) {
 	assert.Equal(t, []string{"192.168.1.1"}, resp.TrustedProxies)
 }
 
-func TestACLHandler_MethodNotAllowed(t *testing.T) {
-	h := NewACLHandler(nil)
-
-	methods := []string{http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch}
-	for _, method := range methods {
-		t.Run(method, func(t *testing.T) {
-			req := httptest.NewRequest(method, "/api/v1/acls/ip-whitelist", nil)
-			w := httptest.NewRecorder()
-			h.ServeHTTP(w, req)
-			assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-		})
-	}
-}
+// TestACLHandler_MethodNotAllowed was removed: its route is method-scoped now (see setupRoutes) and Go's
+// ServeMux answers 405 before the handler runs. A test that calls the handler
+// directly with the wrong method asserts a check this layer no longer owns —
+// and should not own, since the mux cannot forget it.
 
 func TestACLHandler_WrongPath(t *testing.T) {
 	h := NewACLHandler(nil)

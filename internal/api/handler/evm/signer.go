@@ -125,30 +125,18 @@ func (h *SignerHandler) HandleSignerAction(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// ⛔ No per-action method checks: each of these four has its own
+	// method-scoped route (POST /api/v1/evm/signers/{address}/<action>), so the
+	// mux answers 405 before this switch runs. `access` below is the exception —
+	// it serves three methods on one path and dispatches on them itself.
 	switch action {
 	case "unlock":
-		if r.Method != http.MethodPost {
-			respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-			return
-		}
 		h.handleUnlock(w, r, address)
 	case "lock":
-		if r.Method != http.MethodPost {
-			respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-			return
-		}
 		h.handleLock(w, r, address)
 	case "approve":
-		if r.Method != http.MethodPost {
-			respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-			return
-		}
 		h.handleApproveSigner(w, r, address)
 	case "transfer":
-		if r.Method != http.MethodPost {
-			respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
-			return
-		}
 		h.handleTransferOwnership(w, r, address)
 	case "access":
 		extra := ""

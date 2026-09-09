@@ -70,10 +70,7 @@ type statusResponse struct {
 // "is bootstrap still required?". Anything richer would invite tying UI
 // behaviour to mutable backend state and complicate the unauth contract.
 func (h *BootstrapHandler) ServeStatus(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		respond.JSON(w, map[string]string{"error": "method not allowed"}, http.StatusMethodNotAllowed, h.log)
-		return
-	}
+	// ⛔ No method check: the route is method-scoped and the mux answers 405.
 	// "Needs bootstrap" specifically means "no admin api key yet". The
 	// agent api_keys row is provisioned independently at every first
 	// start (bootstrapAgentKeyIfNeeded), so any count-based check would
@@ -112,10 +109,7 @@ type adminRequest struct {
 // succeed; the 410 tells the UI to drop the bootstrap flow and route the
 // user to the regular login page instead.
 func (h *BootstrapHandler) ServeAdmin(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		respond.JSON(w, map[string]string{"error": "method not allowed"}, http.StatusMethodNotAllowed, h.log)
-		return
-	}
+	// ⛔ No method check: the route is method-scoped and the mux answers 405.
 	var req adminRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respond.JSON(w, map[string]string{"error": "invalid request body"}, http.StatusBadRequest, h.log)

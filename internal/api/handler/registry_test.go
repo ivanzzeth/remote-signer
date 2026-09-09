@@ -201,15 +201,8 @@ rules: [{id: r, name: r, type: evm_address_list, mode: whitelist}]
 // check. internal/api/route_permissions_test.go asserts the property for every
 // route instead of the ones someone wrote a case for.
 
-func TestRegistryRefresh_RejectsNonPOST(t *testing.T) {
-	env := newRefreshTestEnv(t)
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/registry/refresh", nil)
-	r = r.WithContext(context.WithValue(r.Context(), middleware.APIKeyContextKey,
-		&types.APIKey{ID: "admin", Role: types.RoleAdmin}))
-	w := httptest.NewRecorder()
-	env.handler.ServeHTTP(w, r)
-	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-}
+// TestRegistryRefresh_RejectsNonPOST was removed: its route is method-scoped now and the mux answers 405 before
+// the handler runs.
 
 // ---------------------------------------------------------------------------
 // Per-file errors surface as RefreshError entries

@@ -10,4 +10,15 @@ write_helpers             1   # ✅ 2026-09-10:48 → 1。48 份实现收进 int
                                # 收编进去会让 respond 包知道一个它不该知道的协议。
 router_config_fields     30   # RouterConfig 的字段;它是服务定位器,不是配置。
                                # 2026-09-10:40 → 30,十个运行时可改的开关不再冻在这里(改为闭包实时读快照)
-manual_method_checks     29   # 手写 r.Method != http.MethodX
+manual_method_checks      7   # 手写 r.Method != http.MethodX
+                               # ✅ 2026-09-10:35 → 7。二十余条路由改成按方法注册
+                               # (`GET /api/v1/audit`、`POST /api/v1/evm/sign`、
+                               # `POST /api/v1/evm/signers/{address}/unlock` …),
+                               # Go 的 ServeMux 自己回 405,handler 里那些判断随之
+                               # 变成死代码。忘了写一条 mux 做不到。
+                               #
+                               # 剩下 7 处都在**按路径分发的闭包**里
+                               # (/api/v1/evm/requests/ 与 /api/v1/templates/ 各自
+                               # 在一个 handler 内部再按子路径分派),要消掉它们得先把
+                               # 那两个闭包拆成按子路径注册的路由 —— 那是 feature
+                               # module 那一步的一部分,见 router_config_fields。

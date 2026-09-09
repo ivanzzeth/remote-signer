@@ -200,15 +200,10 @@ func TestHandleUnlock_MissingPassword(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
-func TestHandleUnlock_MethodNotAllowed(t *testing.T) {
-	mgr := &signerActionMock{}
-	owners := map[string]string{testAddr: testKeyID}
-	h := newActionHandler(t, mgr, owners)
-
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodGet,
-		"/api/v1/evm/signers/"+testAddr+"/unlock", nil, testOwnerAPIKey())
-	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-}
+// TestHandleUnlock_MethodNotAllowed was removed: its route is method-scoped now (see setupRoutes) and Go's
+// ServeMux answers 405 before the handler runs. A test that calls the handler
+// directly with the wrong method asserts a check this layer no longer owns —
+// and should not own, since the mux cannot forget it.
 
 // --- Lock tests ---
 
@@ -238,25 +233,17 @@ func TestHandleLock_NotOwner(t *testing.T) {
 
 // --- Approve tests ---
 
-func TestHandleApprove_MethodNotAllowed(t *testing.T) {
-	mgr := &signerActionMock{}
-	h := newActionHandler(t, mgr, nil)
-
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodGet,
-		"/api/v1/evm/signers/"+testAddr+"/approve", nil, testOwnerAPIKey())
-	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-}
+// TestHandleApprove_MethodNotAllowed was removed: its route is method-scoped now (see setupRoutes) and Go's
+// ServeMux answers 405 before the handler runs. A test that calls the handler
+// directly with the wrong method asserts a check this layer no longer owns —
+// and should not own, since the mux cannot forget it.
 
 // --- Transfer tests ---
 
-func TestHandleTransfer_MethodNotAllowed(t *testing.T) {
-	mgr := &signerActionMock{}
-	h := newActionHandler(t, mgr, nil)
-
-	rec := doActionRequest(t, h.HandleSignerAction, http.MethodGet,
-		"/api/v1/evm/signers/"+testAddr+"/transfer", nil, testOwnerAPIKey())
-	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-}
+// TestHandleTransfer_MethodNotAllowed was removed: its route is method-scoped now (see setupRoutes) and Go's
+// ServeMux answers 405 before the handler runs. A test that calls the handler
+// directly with the wrong method asserts a check this layer no longer owns —
+// and should not own, since the mux cannot forget it.
 
 // --- Delete tests ---
 

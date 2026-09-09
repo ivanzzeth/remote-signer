@@ -28,10 +28,8 @@ func NewACLHandler(ipWhitelist *ports.IPWhitelist) *ACLHandler {
 
 // ServeHTTP handles GET /api/v1/acls/ip-whitelist only.
 func (h *ACLHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+	// ⛔ No method check: the route is method-scoped (see setupRoutes) and Go's
+	// ServeMux answers 405 before this runs.
 	if r.URL.Path != "/api/v1/acls/ip-whitelist" {
 		http.NotFound(w, r)
 		return

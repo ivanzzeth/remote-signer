@@ -965,29 +965,14 @@ func TestPresetHandler_ServeHTTP_UnknownSubAction(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
-func TestPresetHandler_ServeHTTP_GetSingleMethodNotAllowed(t *testing.T) {
-	env := newPresetTestEnv(t)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/presets/evm%2Fp", nil).WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	env.handler.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-}
+// TestPresetHandler_ServeHTTP_GetSingleMethodNotAllowed was removed: its route is method-scoped now and the mux answers 405 before
+// the handler runs.
 
-func TestPresetHandler_ServeHTTP_ApplyMethodNotAllowed(t *testing.T) {
-	env := newPresetTestEnv(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/presets/evm%2Fp/apply", nil).WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	env.handler.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-}
+// TestPresetHandler_ServeHTTP_ApplyMethodNotAllowed was removed: its route is method-scoped now and the mux answers 405 before
+// the handler runs.
 
-func TestPresetHandler_ServeHTTP_ValidateMethodNotAllowed(t *testing.T) {
-	env := newPresetTestEnv(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/presets/evm%2Fp/validate", nil).WithContext(adminCtx(t))
-	w := httptest.NewRecorder()
-	env.handler.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-}
+// TestPresetHandler_ServeHTTP_ValidateMethodNotAllowed was removed: its route is method-scoped now and the mux answers 405 before
+// the handler runs.
 
 // ---------------------------------------------------------------------------
 // List — error path

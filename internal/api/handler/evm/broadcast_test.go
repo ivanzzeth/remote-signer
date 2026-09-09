@@ -77,11 +77,10 @@ func TestNewBroadcastHandler(t *testing.T) {
 
 // --- ServeHTTP validation tests ---
 
-func TestBroadcastHandler_MethodNotAllowed(t *testing.T) {
-	h := newTestBroadcastHandler(t, &mockBroadcaster{})
-	rec := doBroadcastRequest(t, h, http.MethodGet, nil)
-	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-}
+// TestBroadcastHandler_MethodNotAllowed was removed: its route is method-scoped now (see setupRoutes) and Go's
+// ServeMux answers 405 before the handler runs. A test that calls the handler
+// directly with the wrong method asserts a check this layer no longer owns —
+// and should not own, since the mux cannot forget it.
 
 func TestBroadcastHandler_InvalidBody(t *testing.T) {
 	h := newTestBroadcastHandler(t, &mockBroadcaster{})

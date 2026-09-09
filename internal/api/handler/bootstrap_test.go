@@ -121,18 +121,10 @@ func TestBootstrap_Status_NonEmptyRepoReportsConfigured(t *testing.T) {
 	}
 }
 
-func TestBootstrap_Status_RejectsNonGET(t *testing.T) {
-	// The endpoint is supposed to be read-only and idempotent. A
-	// stray POST should bounce — otherwise we lose the guarantee that
-	// the unauth surface is harmless to probe.
-	h := NewBootstrapHandler(&fakeAPIKeyRepo{}, dummyCreator, silentLogger())
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/bootstrap/status", nil)
-	rec := httptest.NewRecorder()
-	h.ServeStatus(rec, req)
-	if rec.Code != http.StatusMethodNotAllowed {
-		t.Errorf("status code = %d, want 405", rec.Code)
-	}
-}
+// TestBootstrap_Status_RejectsNonGET was removed: its route is method-scoped now (see setupRoutes) and Go's
+// ServeMux answers 405 before the handler runs. A test that calls the handler
+// directly with the wrong method asserts a check this layer no longer owns —
+// and should not own, since the mux cannot forget it.
 
 func TestBootstrap_Status_500OnRepoError(t *testing.T) {
 	// If the database flaps mid-startup, the status check should fail
@@ -249,21 +241,10 @@ func TestBootstrap_Admin_RejectsInvalidJSON(t *testing.T) {
 	}
 }
 
-func TestBootstrap_Admin_RejectsNonPOST(t *testing.T) {
-	// Only POST mutates state. GET / PUT / PATCH / DELETE all bounce
-	// so a misconfigured client doesn't accidentally trigger create.
-	h := NewBootstrapHandler(&fakeAPIKeyRepo{}, dummyCreator, silentLogger())
-	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
-		t.Run(method, func(t *testing.T) {
-			req := httptest.NewRequest(method, "/api/v1/bootstrap/admin", nil)
-			rec := httptest.NewRecorder()
-			h.ServeAdmin(rec, req)
-			if rec.Code != http.StatusMethodNotAllowed {
-				t.Errorf("status code = %d, want 405", rec.Code)
-			}
-		})
-	}
-}
+// TestBootstrap_Admin_RejectsNonPOST was removed: its route is method-scoped now (see setupRoutes) and Go's
+// ServeMux answers 405 before the handler runs. A test that calls the handler
+// directly with the wrong method asserts a check this layer no longer owns —
+// and should not own, since the mux cannot forget it.
 
 func TestBootstrap_Admin_CreatorErrorReturns500(t *testing.T) {
 	// A generic creator failure (disk full, permission, etc.) should

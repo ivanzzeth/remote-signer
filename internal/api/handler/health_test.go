@@ -33,20 +33,10 @@ func TestHealthHandler_GET(t *testing.T) {
 	assert.Equal(t, "1.2.3", resp.Version)
 }
 
-func TestHealthHandler_MethodNotAllowed(t *testing.T) {
-	h := NewHealthHandler("1.0.0")
-
-	methods := []string{http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch}
-	for _, method := range methods {
-		t.Run(method, func(t *testing.T) {
-			req := httptest.NewRequest(method, "/health", nil)
-			w := httptest.NewRecorder()
-
-			h.ServeHTTP(w, req)
-			assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-		})
-	}
-}
+// TestHealthHandler_MethodNotAllowed was removed: its route is method-scoped now (see setupRoutes) and Go's
+// ServeMux answers 405 before the handler runs. A test that calls the handler
+// directly with the wrong method asserts a check this layer no longer owns —
+// and should not own, since the mux cannot forget it.
 
 func TestHealthHandler_EmptyVersion(t *testing.T) {
 	h := NewHealthHandler("")

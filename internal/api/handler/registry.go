@@ -71,10 +71,8 @@ type RefreshError struct {
 }
 
 func (h *RegistryRefreshHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeRegistryError(w, h.logger, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+	// ⛔ No method check: the route is method-scoped (see setupRoutes) and Go's
+	// ServeMux answers 405 before this runs.
 	// ⛔ No permission check here: the route registers PermApplyPreset
 	// (refresh and apply both touch the catalogue and both want admin), and a
 	// second copy of the same gate is a place for the two to disagree later.
