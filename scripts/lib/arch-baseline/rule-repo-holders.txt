@@ -1,0 +1,34 @@
+# 允许拿到 rule repo 句柄的文件(会进生产二进制的那些)。
+#
+# 为什么要管这个:能拿到 rule repo 就能往 `rules` 表写行,而**一条规则就是一次
+# 资金授权**。目前有 8 条独立的写入路径,各带(或不带)自己的校验 —— 2026-06 的
+# `7379347 fix: enforce mandatory validation on preset apply and template instantiate`
+# 就是其中两条漏了校验的修补。
+#
+# ⛔ 加新文件到这张表 = 开第 9 条写入路径。先问:能不能走已有的服务?
+# 目标态是把写入收口到 core/rule 的单一 Writer,然后这张表缩到个位数。
+#
+# ⚠️ 「拿到句柄」包含**接口名和具体构造两种形态**:`storage.RuleRepository` 与
+# `storage.NewGormRuleRepository(db)`。第一版只认前者,于是 preset.go 那条真实
+# 写入路径在门禁眼里根本不存在。
+
+cmd/migrate-config-templateform/main.go     # ⚠️ 债:一次性迁移工具,直接改 rule.Config;跑完该删
+internal/api/handler/evm/budget.go          # budget CRUD 需要读 rule 做归属校验
+internal/api/handler/evm/request.go         # 只读:签名请求详情里带上命中的规则
+internal/api/handler/evm/rule.go            # rule 路由分发
+internal/api/handler/evm/rule_crud.go       # ✅ API 写入路径,有 ValidateRuleConfig
+internal/api/handler/evm/rule_delete.go     # 只删
+internal/api/handler/evm/rule_query.go      # 查询 + IncrementMatchCount
+internal/api/handler/preset.go              # ✅ preset apply 写入路径,校验在 handler 层
+internal/api/router.go                      # wiring:把 repo 传给 handler
+internal/cli/server/agent_seed.go           # ⚠️ 债:preset-apply 的第三份抄本,见 rule-write-unvalidated.txt
+internal/cli/server/run_init.go             # wiring
+internal/cli/server/server_validate.go      # 启动期校验(只读)
+internal/cli/server/server_validate_evm.go  # 启动期校验 + 回写校验结果
+internal/config/rule_init.go                # config YAML → DB 的初始化器
+internal/config/rule_init_sync.go           # 同上
+internal/config/rule_init_sync_rule.go      # ✅ 有 ValidateRuleConfig
+internal/core/rule/whitelist.go             # 求值期读规则(只读)
+internal/core/service/approval.go           # ⚠️ 债:审批时生成规则,不校验
+internal/core/service/signer_access.go      # ⚠️ 债:授权变更时改规则,不校验
+internal/core/service/template.go           # ⚠️ 债:模板实例化,校验在 HTTP 层

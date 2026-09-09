@@ -1,0 +1,13 @@
+# internal/core 里 import 了 internal/chain/evm 的文件。
+#
+# core 是领域层,evm 是**一条具体链的实现**。这个方向反了:领域层认识了它的
+# 一个实现,于是加第二条链要改领域层。
+#
+# 具体形态:SignService 有 `simulationRule *evmchain.SimulationBudgetRule` 字段。
+# 明明 types.ChainAdapter 是个干净的 6 方法接口,chain.Registry 也在。
+#
+# ⛔ 只许缩。目标是 0 —— 到 0 那天这个文件删掉,门禁改成硬约束。
+
+internal/core/service/sign.go                     # 🔴 SignService 持有 evm 的具体规则类型
+internal/core/service/signer_material_checker.go  # 校验签名材料时直接用 evm 的地址推导
+internal/core/service/transaction.go              # 交易解析走了 evm 的具体实现

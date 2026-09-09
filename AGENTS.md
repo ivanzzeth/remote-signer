@@ -160,7 +160,7 @@ go test -tags e2e ./e2e/...
 测试带 `integration` tag。一个名叫「仓储·真 SQLite」而实际跑纯测试的层会骗人。
 
 判据：**这个 bug 最早能在哪一层被抓到？** 那就是它该待的层。
-详见 [TESTING.md](TESTING.md)（含 5 条已负向验证的结构/架构门禁）。
+详见 [TESTING.md](TESTING.md)。`make check` 现有 **15 条已负向验证的门禁**：5 条测试结构（`scripts/check-tests.sh`）+ 10 条架构约束（`scripts/arch/*.sh`，每条一个文件、可单独跑）。其中 arch/90 钉住「门禁清单与 TESTING.md 一致」——这句话本身漂过一次。
 
 ## 架构概览
 
@@ -213,7 +213,7 @@ Skills 是面向 AI Agent 的使用文档。
 - 测试三层 build tag：无 tag（unit）/ `integration` / `e2e`
 - LAYER 分层与 tag 正交，定义在 `scripts/lib/layers.sh`（唯一事实来源）；`unit` 为算出来的余量
 - `make check` 承载结构/架构门禁，每条都做过负向验证；pre-commit 只跑 check + unit（秒级）
-- 共享 test helpers 放在 untagged `shared_test_helpers.go`，确保所有 tier 可复用
+- 共享 test helpers 放在 **untagged `shared_test_helpers_test.go`**：不带 build tag 所以每个 tier 都编译得到，`_test.go` 后缀所以不进守护进程二进制（Go 按后缀判断，不看名字里有没有 test）
 - `AGENTS.md` 是 AI 配置的唯一规范源，`.agents/` 存放 skills/agents 引用
 - `./skills/` 对外发布（`npx skills` 安装），`.agents/skills/` symlink 指向它
 

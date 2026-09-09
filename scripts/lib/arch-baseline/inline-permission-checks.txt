@@ -1,0 +1,15 @@
+# 在 **handler 函数体内**做 HasPermission 检查的文件。
+#
+# 🔴 权限检查在函数体里 = 漏写一个 handler 就是权限绕过,而漏写这件事没有任何
+# 东西会提醒你。放在路由层(internal/api/middleware/rbac.go)时,「没登记 = 拒绝」
+# 是默认行为 —— 那才是 fail-closed。
+#
+# ⛔ 只许缩,目标 0。新增一行 = 又一个只能靠人眼保证的权限点。
+
+internal/api/handler/evm/approval.go
+internal/api/handler/evm/batch_approval.go
+internal/api/handler/evm/budget.go
+internal/api/handler/evm/rule_query.go
+internal/api/handler/evm/signer_create.go
+internal/api/handler/preset.go
+internal/api/handler/registry.go

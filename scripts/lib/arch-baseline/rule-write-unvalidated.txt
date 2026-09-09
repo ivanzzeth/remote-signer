@@ -1,0 +1,21 @@
+# 拿到 rule repo、会写库、但**同一文件里没有 ruleconfig.ValidateRuleConfig** 的文件。
+#
+# 这张表就是「A 类问题」的重构 TODO 清单:每一行都是一条能绕过规则格式校验写进
+# `rules` 表的路径。校验目前被放在 internal/api/handler/validation_mandatory.go
+# —— **HTTP 层的策略,不是领域的不变量**,所以从 CLI / 启动种子 / 内部服务
+# 进来的写入全部绕过它。
+#
+# ⛔ 这张表**只许缩**。新增一行 = 新开一条无校验的资金授权写入路径,
+# 那正是 7379347 修的那个 bug 的形状。
+#
+# ⚠️ 判据是**保守**的:只要文件拿到 rule repo 且有任何 .Create( / .Update( 就算,
+# 哪怕写的是 budget 行。宁可多登记两个(有人会来删),不可漏掉一条(没人会发现)。
+
+cmd/migrate-config-templateform/main.go     # ⚠️ 一次性迁移工具:整表重写 rule.Config 且不校验
+internal/api/handler/evm/budget.go          # 写的是 budget 行,不是 rule —— 可从表里去掉,需先确认
+internal/api/handler/evm/rule_query.go      # IncrementMatchCount,不改 config —— 同上
+internal/cli/server/agent_seed.go           # 🔴 真债:自己重写了一份 preset apply,直接 ruleRepo.Create
+internal/cli/server/server_validate_evm.go  # 回写启动期校验结论,不改 config
+internal/core/service/approval.go           # 🔴 真债:从签名请求生成新规则
+internal/core/service/signer_access.go      # 🔴 真债:授权变更时改 rule.Config
+internal/core/service/template.go           # 🔴 真债:模板实例化的唯一入口,校验在 HTTP 层

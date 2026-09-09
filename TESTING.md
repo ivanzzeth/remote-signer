@@ -40,16 +40,26 @@ Use e2e when the test needs:
 
 ## Shared Test Helpers
 
-Shared test helpers (mock types, constructors, utility functions) go into **untagged** files named `shared_test_helpers.go`. This ensures both unit and integration test files can use them.
+Shared test helpers (mock types, constructors, utility functions) go into
+**untagged `_test.go`** files named `shared_test_helpers_test.go`. Untagged means
+every tier's test binary compiles them, so unit *and* integration tests can share
+one copy; the `_test.go` suffix keeps them out of the production binary.
 
-Example:
 ```go
-// shared_test_helpers.go (no build tag)
+// shared_test_helpers_test.go (no build tag)
 package mypackage
 
 type mockRepo struct { ... }
 func newTestLogger() *slog.Logger { ... }
 ```
+
+⛔ The `_test.go` suffix is not optional. These files were named
+`shared_test_helpers.go` until 2026-09-09, and Go decides what ships by the
+**`_test.go` suffix**, not by whether the name contains "test" — so seven files
+worth of mock repositories, plus `import "testing"`, were compiled into the
+`remote-signer` daemon, the process that holds the private keys. Gate ④ in
+`scripts/check-tests.sh` now fails on any untagged, non-`_test.go` file that
+carries a test-only signal.
 
 ## How to Run
 
@@ -92,9 +102,34 @@ illusion that someone is watching.
 | `check-tests.sh` ① | Every `*_test.go` is compiled by some layer | `e2e/` held 46 test files while the Makefile had **no e2e target at all** — that tier had never been run by `make` |
 | `check-tests.sh` ② | No filename collides with a GOOS/GOARCH | `e2e_rule_evm_js_test.go`'s `_js` suffix = `GOOS=js`. 576 lines, 10 test funcs, **never once ran** on linux — and `go test` stayed green and silent |
 | `check-tests.sh` ③ | Files in `e2e/`, `tests/integration/` carry their build tag | A missing tag doesn't skip the test — it drags it into the untagged tier, so a test that needs a live daemon runs in the unit layer and shows up as "the unit layer is flaky" |
-| `check-arch.sh` ① | `ValidateWithInput` is called only from `internal/chain/evm/testcase_runner.go` | template/preset/rule validation each kept its own copy of the test-case loop; two of them substituted variables *before* validating, so **matrix presets validated every test case against the wrong chain** — silently, for months |
-| `check-arch.sh` ③ | `signer` / `test_signer` / `from` hold only allowlisted or structurally-impossible addresses | `b922718` scrubbed operator wallets once; new aori/stargate work reintroduced the same address **23 times**, 2 of them buried inside calldata hex (`…000764602fead…`) where grepping for the address misses them. This submodule is open-source, so a real EOA in a signer field publishes someone's wallet |
-| `check-arch.sh` ② | Every preset's `template_ids` resolve | A dangling id makes `preset apply` install one rule fewer **without erroring** — it surfaces later as "a signature mysteriously went to `authorizing`" |
+| `check-tests.sh` ④ | No test-only file reaches the production binary | Seven `shared_test_helpers.go` files carried **no build tag**, so every mock repository — and `import "testing"` — was compiled into the daemon that holds the private keys. The old arch gate skipped them by matching the `_test` *substring*; Go decides by the `_test.go` **suffix**. Two criteria that disagree is a blind spot the gate cannot see into |
+| `check-tests.sh` ⑤ 🔒 | `*coverage_boost*_test.go` only shrinks | 13 files, 15,819 lines — 12% of the test code, named after the metric they move rather than the behaviour they describe. Their failures say "a line was not reached", not "this broke", so nobody fixes one; it gets commented out |
+| `arch/10` | `ValidateWithInput` is called only from `internal/chain/evm/testcase_runner.go` | template/preset/rule validation each kept its own copy of the test-case loop; two of them substituted variables *before* validating, so **matrix presets validated every test case against the wrong chain** — silently, for months |
+| `arch/20` | Every preset's `template_ids` resolve | A dangling id makes `preset apply` install one rule fewer **without erroring** — it surfaces later as "a signature mysteriously went to `authorizing`" |
+| `arch/30` | `signer` / `test_signer` / `from` hold only allowlisted or structurally-impossible addresses | `b922718` scrubbed operator wallets once; new aori/stargate work reintroduced the same address **23 times**, 2 of them buried inside calldata hex (`…000764602fead…`) where grepping for the address misses them. This submodule is open-source, so a real EOA in a signer field publishes someone's wallet |
+| `arch/40` 🔒 | Only baselined files hold a rule-repo handle, and the "writes without `ValidateRuleConfig`" set only shrinks | A rule **is** a spending authorization. Mandatory validation lives in `internal/api/handler/validation_mandatory.go` — an HTTP-layer policy, not a domain invariant — so CLI, startup seeding and internal services bypass it. `7379347` fixed two instances of exactly that shape; the structure that produced them is unchanged |
+| `arch/50` 🔒 | GORM stays inside `internal/storage`; `internal/core` does not import `internal/chain/evm`; `internal/config` does not import business packages | `SignService` holds a concrete `*evmchain.SimulationBudgetRule`, so adding a second chain means editing the domain layer. `internal/config` is a second bootstrap layer wearing the name "config" — nobody dares touch it |
+| `arch/60` 🔒 | The set of `${var}` substitution implementations only shrinks | Validation uses the strict one (`core/service/substitute.go`, reports errors); evaluation uses the lenient one (`core/rule/effective_config.go`, never errors). One divergence between them = a rule whose test cases are green authorizing something else at runtime |
+| `arch/70` 🔒 | Per-handler `write*` helpers, `RouterConfig` fields and hand-rolled method checks only go down; no new in-handler `HasPermission` | 48 write helpers in **three different argument orders** — swap two and it still compiles (`any` + `int`), shipping errors inside a 200. A permission check in a function body means forgetting one is a bypass, and nothing reports it |
+| `arch/80` 🔒 | No new struct field freezes a `SecuritySnapshot` knob at construction time | `internal/settings/model.go` promises settings become "effective without a daemon restart". For 20 of the 21 capture sites that is false: the value is frozen into `RouterConfig` at boot and captured by handler constructors. Editing `rules_api_readonly` in the Web UI changes the DB, changes the snapshot, and changes **nothing** |
+| `arch/90` | Every `scripts/arch/NN-*.sh` has a row in the table above, every `arch/NN` named here exists, and each script is executable and runnable standalone | This table said "5 gates" while 7 existed — the count was never updated when gates 6 and 7 landed. The damage is not the wrong number: a newcomer reads it as the complete list and never learns `scripts/arch/` exists, so the next gate gets bolted somewhere else. The gate caught itself on its first run |
+| `arch/95` 🔒 | Only baselined files spawn subprocesses; the Solidity engine's size and its footprint in `rules/` only shrink; shipped configs keep `foundry.enabled: false` | Evaluating an `evm_solidity_expression` rule forks `forge script` — a Solidity compiler and an EVM — inside the daemon holding the private keys, **on the signing path**: hundreds of ms to seconds per signature, and forge's attack surface lands in the one process that must not be compromised. It was made opt-in on 2026-09-09; "default off" is a one-line change to undo and nothing would have made a sound |
+
+🔒 = **ratchet**, not a hard rule. These describe debt that grew over three
+years, so "must be zero" would be red today — and a permanently red gate is not a
+gate: people put `|| true` on it or drop it from `STEPS`. Instead each one registers
+today's violations in [`scripts/lib/arch-baseline/`](scripts/lib/arch-baseline/) and
+fails on two things: a violation **not** in the baseline (don't add more), and a
+baseline entry that no longer exists (you fixed it — now delete the line, so the
+baseline cannot become a permanent amnesty list). Those baseline files, each line
+annotated with why it is still there, are also the refactor TODO list.
+
+Each gate lives in its own file under [`scripts/arch/`](scripts/arch/) and runs
+standalone, which is what you want while fixing one:
+
+```bash
+./scripts/arch/50-dependency-direction.sh
+```
 
 The address gate is **allowlist-shaped and fail-closed**: an unregistered address is
 assumed to be a real wallet ([`scripts/lib/approved-test-addresses.txt`](scripts/lib/approved-test-addresses.txt)).
@@ -133,11 +168,11 @@ zero-IO; it can only slow down because someone added IO or the test data explode
 
 1. Decide the tier based on the criteria above
 2. If adding an integration test, put `//go:build integration` on line 1, followed by a blank line, then `package <name>`
-3. If adding shared helpers (mocks, constructors), put them in an untagged `shared_test_helpers.go` file
+3. If adding shared helpers (mocks, constructors), put them in an untagged `shared_test_helpers_test.go` file — untagged so every tier sees them, `_test.go` so they stay out of the daemon binary
 4. Never import integration-tagged packages or symbols from unit test files
 
 ## File Naming Conventions
 
 - `*_test.go` — standard Go test file
-- `shared_test_helpers.go` — shared mocks, constructors, utilities (untagged)
+- `shared_test_helpers_test.go` — shared mocks, constructors, utilities (untagged, so all tiers compile them)
 - No special naming needed for integration vs unit files; the build tag is the differentiator

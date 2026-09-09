@@ -1,0 +1,6 @@
+# firstOfList 的抄本。纯函数,两份就是纯粹的抄 —— 没有任何设计取舍可言。
+#
+# ⛔ 只许缩,目标 1。到 1 那天把这个门禁改成硬约束(> 1 即红)。
+
+internal/core/rule/effective_config.go
+internal/core/service/substitute.go

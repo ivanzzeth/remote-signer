@@ -1,0 +1,11 @@
+# 会 fork 子进程的非测试文件。
+#
+# 这个进程持有私钥 —— 每个子进程都是一次「把别人的攻击面拉进我的地址空间」。
+#
+# ⛔ 只许缩。加一行之前先问:这件事非得在签名守护进程里做吗?
+
+internal/chain/evm/solidity_batch_exec.go  # 🔴 fork forge:批量执行 solidity 规则
+internal/chain/evm/solidity_evaluator.go   # 🔴 fork forge:求值期(签名路径上)
+internal/chain/evm/solidity_execution.go   # 🔴 fork forge script + forge install
+internal/chain/evm/solidity_validator.go   # fork forge:校验期(不在签名路径上,但同一个进程)
+internal/cli/server/daemonize.go           # 起自己(--daemon):这条是合理的

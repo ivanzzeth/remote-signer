@@ -106,6 +106,81 @@ check_tag() {
 check_tag e2e e2e
 check_tag tests/integration integration
 
+# ---------- ④ 测试代码不许进生产二进制 ----------
+#
+# 判据是**结构性**的:一个 `.go` 文件要么以 `_test.go` 结尾(编译器不会把它放进
+# 二进制),要么带 `//go:build` 约束,否则它就在守护进程里 —— 而那个进程持有私钥。
+#
+# 本仓库踩过(2026-09-09 审计发现):7 个 `shared_test_helpers.go` **不带任何 tag**,
+# 全套 mock repository 连同 `import "testing"` 一起编译进了 remote-signer 二进制。
+# 名字里带 test 骗过了所有人,包括当时的架构门禁 —— 它按 `_test` **子串**过滤,
+# 于是把这些文件当成测试代码跳过了;而 Go 编译器按 `_test.go` **后缀**判断,不跳。
+# 两套判据不一致 = 门禁看不见的盲区。
+#
+# 修法是改名 `shared_test_helpers.go` → `shared_test_helpers_test.go`:不带 build tag
+# 的 `_test.go` 对**每个** tag 的测试二进制都编译,所以「所有 tier 可复用」这条
+# 原有性质原封不动,只是不再进生产二进制。
+#
+# ⛔ 三条信号,每条都窄。第一版用「文件名里有 test」,当场误报两个:
+#   internal/chain/evm/test_case_input.go / testcase_runner.go —— 那是**生产代码**,
+#   实现规则 DSL 里的 `test_cases` 字段(领域概念,不是 Go 测试)。
+# 会误报的门禁最后会被 `|| true` 掉,所以宁可收窄到只认下面三种:
+#   (a) 名字里 `_test_` 作为**独立词段**出现(`shared_test_helpers.go`)——
+#       它离「真的是测试文件」只差一次改名,而领域词 `testcase` / `test_case_input`
+#       不含前置下划线,不会命中
+#   (b) import "testing"      —— 标准库里的测试包,生产代码没有理由碰它
+#   (c) import testify        —— 纯测试依赖
+#
+# 判据:*把某个 helper 改回不带后缀,这条门禁会不会红?* 会。
+#      *把 test_case_input.go 放回来,它会不会红?* 不会。两个方向都验过。
+echo "==> 测试代码不进生产二进制"
+while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    head -5 "$f" | grep -q '^//go:build ' && continue
+    printf '  ✗ %s —— 测试辅助代码,但没有 `_test.go` 后缀也没有 build tag\n' "$f" >&2
+    printf '     它会被编译进 remote-signer 二进制(那个进程持有私钥)。\n' >&2
+    printf '     改法:改名为 `%s_test.go`;不带 tag 的 _test.go 对每个 tier 都可见,\n' "${f%.go}" >&2
+    printf '           跨 tier 复用不受影响。\n' >&2
+    fail=1
+done < <(
+    {
+        find . -name '*_test_*.go' -not -name '*_test.go' \
+            -not -path './vendor/*' -not -path '*/node_modules/*'
+        grep -rlE '^[[:space:]]*("testing"|[a-z]* *"github.com/stretchr/testify)' \
+            --include='*.go' . 2>/dev/null \
+            | grep -v '_test\.go$' | grep -v '/vendor/' | grep -v '/node_modules/'
+    } | sort -u
+)
+
+# ---------- ⑤ coverage_boost 测试只许缩 ----------
+#
+# 13 个文件、15,819 行,占测试代码的 12%。文件名直说了它们存在的理由是**抬覆盖率
+# 数字**,不是描述行为 —— 那种测试的失败信息读不出「什么坏了」,只读得出
+# 「某一行没被走到」,于是没人修,只会被注掉。
+#
+# ⛔ 不删,只上棘轮:里面混着少数**唯一覆盖某条错误路径**的用例,盲删会掉真覆盖。
+# 正确的做法是逐个看:能说清它测的是什么行为的,改名搬去对应的 _test.go;
+# 说不清的,删。两种做法都让这个数字变小。
+#
+# ⚠️ 变小也红 —— 那一刻正是把基线改小的时候(一行编辑)。
+echo "==> coverage_boost 测试只许缩"
+CB_BASE=scripts/lib/arch-baseline/coverage-boost.txt
+cb() { sed 's/#.*//' "$CB_BASE" | awk -v k="$1" '$1==k{print $2}'; }
+cb_files=$(find . -name '*coverage_boost*_test.go' -not -path './vendor/*' | wc -l)
+cb_lines=$(find . -name '*coverage_boost*_test.go' -not -path './vendor/*' -exec cat {} + 2>/dev/null | wc -l)
+for pair in "files:$cb_files" "lines:$cb_lines"; do
+    k=${pair%%:*}; actual=${pair#*:}; base=$(cb "$k")
+    if [ "$actual" -gt "$base" ]; then
+        printf '  ✗ coverage_boost %s:%s → %s(涨了)\n' "$k" "$base" "$actual" >&2
+        printf '     改法:新测试写进对应的 _test.go 并起个说明行为的名字,别往 coverage_boost 里塞。\n' >&2
+        fail=1
+    elif [ "$actual" -lt "$base" ]; then
+        printf '  ✗ coverage_boost %s:实际 %s < 基线 %s —— 缩了,请把 %s 里的数字改成 %s\n' \
+            "$k" "$actual" "$base" "$CB_BASE" "$actual" >&2
+        fail=1
+    fi
+done
+
 if [ "$fail" -ne 0 ]; then
     echo >&2
     echo "FAIL: 测试结构违规(见上)。" >&2

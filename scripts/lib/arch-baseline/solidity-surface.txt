@@ -1,0 +1,13 @@
+# solidity 规则引擎的规模。⛔ 只许往下改 —— 变小也红,那一刻正是把数字改小的时候。
+#
+# 方向已定:evm_js(sobek,进程内,不 fork)取代 evm_solidity_expression。
+# 2026-09-09 已把 solidity 改成 opt-in、默认关。棘轮保证这次迁移不会停在半路,
+# 更不会反向长回去。
+#
+# ⚠️ rules_references 这个数字有个刺眼的含义:出厂配置默认关着 solidity,
+# 而 rules/ 里还有 88 处引用 —— 那些模板在默认配置下是装不上的。
+# 它降到 0 的那天,solidity 引擎才真的能删。
+
+solidity_lines      4162   # arch_prod_files internal | grep solidity 的总行数
+solidity_files        11   # 同上的文件数
+rules_references      88   # rules/ 下 evm_solidity_expression 的出现次数

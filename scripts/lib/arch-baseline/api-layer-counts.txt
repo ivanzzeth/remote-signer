@@ -1,0 +1,9 @@
+# API 层的计数基线。⛔ 只许往下改 —— 实际数字**变小也红**,那一刻正是把这里
+# 改小的时候(一行编辑)。放过它,基线就永远停在今天的高位。
+#
+# 用计数而不是文件集合的理由:这四条的重构方式是「一次抽干净」,过程中数字会
+# 大幅下跌;用集合的话每改一个文件都要重写整张表,那种门禁人会绕过。
+
+write_helpers            48   # 各 handler 自己的 writeJSON/writeError,三种参数顺序
+router_config_fields     40   # RouterConfig 的字段;它是服务定位器,不是配置
+manual_method_checks     35   # 手写 r.Method != http.MethodX

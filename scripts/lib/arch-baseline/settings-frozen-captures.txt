@@ -1,0 +1,33 @@
+# 把 SecuritySnapshot 的开关**存成结构体字段**的地方(文件 <TAB> 结构体.字段)。
+#
+# 每一行都是一处「文档说能热改、实际改了没用」:值在构造那一刻冻住,
+# 之后 Web UI / CLI 改 DB 都碰不到它。而 internal/settings/model.go 的包注释
+# 明写「become effective without a daemon restart」—— 对这 21 处全是假的。
+#
+# 唯一的例外是 ApprovalGuard:router.syncApprovalGuard() 会回写,它是真的活的。
+# 其余 20 处没有任何同步机制。
+#
+# ⛔ 只许缩。修法是在请求路径上现读 settingsMgr.Security().<字段>。
+# 修一处就从这里删一行 —— 门禁会因为「基线里有已经不存在的条目」提醒你删。
+
+internal/api/handler/acl.go	ACLHandler.ipWhitelist
+internal/api/handler/evm/hdwallet.go	HDWalletHandler.maxHDWalletsPerKey
+internal/api/handler/evm/sign.go	SignHandler.signTimeout
+internal/api/handler/evm/sign_batch.go	BatchSignHandler.signTimeout
+internal/api/handler/evm/signer.go	SignerHandler.maxKeystoresPerKey
+internal/api/handler/health.go	HealthHandler.approvalGuard
+internal/api/handler/health.go	SecurityConfigInfo.ApprovalGuard
+internal/api/handler/health.go	SecurityConfigInfo.AutoLockTimeout
+internal/api/handler/health.go	SecurityConfigInfo.SignTimeout
+internal/api/router.go	Router.ipWhitelist
+internal/api/router.go	RouterConfig.APIKeysAPIReadonly
+internal/api/router.go	RouterConfig.ApprovalGuard
+internal/api/router.go	RouterConfig.AutoLockTimeout
+internal/api/router.go	RouterConfig.IPRateLimit
+internal/api/router.go	RouterConfig.MaxHDWalletsPerKey
+internal/api/router.go	RouterConfig.MaxKeystoresPerKey
+internal/api/router.go	RouterConfig.MaxRulesPerAPIKey
+internal/api/router.go	RouterConfig.RequireApprovalForAgentRules
+internal/api/router.go	RouterConfig.RulesAPIReadonly
+internal/api/router.go	RouterConfig.SignTimeout
+internal/api/router.go	RouterConfig.SignersAPIReadonly
