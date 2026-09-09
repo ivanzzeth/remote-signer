@@ -10,6 +10,8 @@ import (
 	"os"
 	"time"
 
+	rulepkg "github.com/ivanzzeth/remote-signer/internal/core/rule"
+
 	"github.com/lib/pq"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
@@ -287,6 +289,12 @@ func createRule(
 	}
 	ct := types.ChainType(string(chainType))
 	rule.ChainType = &ct
+	// The startup seeder is the path furthest from the HTTP handler where the
+	// mandatory check used to live, and it writes agent rules — the ones that
+	// auto-approve without a human. See rule.ValidateRuleForWrite.
+	if err := rulepkg.ValidateRuleForWrite(rule); err != nil {
+		return fmt.Errorf("agent preset rule %q is invalid: %w", rule.Name, err)
+	}
 	return ruleRepo.Create(ctx, rule)
 }
 

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 	"github.com/ivanzzeth/remote-signer/internal/validate"
@@ -488,7 +489,16 @@ func (s *SignerAccessService) CleanupForDeletedKey(ctx context.Context, apiKeyID
 			}
 		} else {
 			r.AppliedTo = newAppliedTo
-			if updateErr := s.ruleRepo.Update(ctx, r); updateErr != nil {
+			// UpdateMetadata, not Update: this narrows applied_to and does not
+			// touch Config. Revoking a signer's access must not be blocked by a
+			// rule that is already malformed — that would keep the access alive.
+			// Going through the writer states that in code rather than in a
+			// comment, which is also what the rule-write gate reads.
+			w, wErr := rule.NewWriter(s.ruleRepo)
+			if wErr != nil {
+				return fmt.Errorf("rule writer: %w", wErr)
+			}
+			if updateErr := w.UpdateMetadata(ctx, r); updateErr != nil {
 				return fmt.Errorf("failed to update rule %s applied_to: %w", r.ID, updateErr)
 			}
 		}

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	rulepkg "github.com/ivanzzeth/remote-signer/internal/core/rule"
+
 	"github.com/lib/pq"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
@@ -450,6 +452,12 @@ func (s *TemplateService) createInstanceFromResolved(
 			rule.BudgetPeriodStart = &now
 		}
 	}
+	// Template instantiation is the path 7379347 had to patch at the HTTP layer.
+	// The check belongs here, where every caller passes — API, preset apply, CLI
+	// and the startup seeder alike.
+	if err := rulepkg.ValidateRuleForWrite(rule); err != nil {
+		return nil, fmt.Errorf("instantiated rule is invalid: %w", err)
+	}
 	if err := ruleRepo.Create(ctx, rule); err != nil {
 		return nil, fmt.Errorf("failed to create rule: %w", err)
 	}
@@ -684,6 +692,10 @@ func (s *TemplateService) createInstanceFromBundle(
 	var createdRuleIDs []types.RuleID
 
 	for _, p := range pending {
+		if err := rulepkg.ValidateRuleForWrite(p.rule); err != nil {
+			s.rollbackRules(ctx, ruleRepo, createdRuleIDs)
+			return nil, fmt.Errorf("sub-rule %q is invalid: %w", p.rule.Name, err)
+		}
 		if err := ruleRepo.Create(ctx, p.rule); err != nil {
 			s.rollbackRules(ctx, ruleRepo, createdRuleIDs)
 			return nil, fmt.Errorf("failed to create sub-rule %q: %w", p.rule.Name, err)
@@ -849,6 +861,9 @@ func (s *TemplateService) RevokeInstance(ctx context.Context, ruleID types.RuleI
 
 	rule.Enabled = false
 	rule.UpdatedAt = time.Now()
+	// ⛔ No validation here: this only flips Enabled. Requiring a valid config to
+	// disable a rule would mean a malformed one could never be switched off.
+	// See rule.Writer.UpdateMetadata.
 	if err := s.ruleRepo.Update(ctx, rule); err != nil {
 		return fmt.Errorf("failed to disable rule: %w", err)
 	}

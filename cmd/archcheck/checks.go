@@ -384,7 +384,19 @@ func checkRuleWrite(r *repo) ([]finding, error) {
 			return true
 		})
 
-		validates := strings.Contains(sourceOf(f), "ruleconfig.ValidateRuleConfig")
+		// The chokepoint is rule.ValidateRuleForWrite (see internal/core/rule/writer.go).
+		// ruleconfig.ValidateRuleConfig still counts: it is what the chokepoint
+		// calls, and the HTTP handlers that validate a request body before
+		// building a rule legitimately call it directly.
+		src := sourceOf(f)
+		// UpdateMetadata counts as well: it is the writer's documented way of
+		// saying "this write carries no config", and saying it in code is what
+		// distinguishes a deliberate exception from a forgotten check. See
+		// internal/core/rule/writer.go for why disabling a malformed rule must
+		// not require the rule to be valid.
+		validates := strings.Contains(src, "ValidateRuleForWrite") ||
+			strings.Contains(src, "UpdateMetadata(") ||
+			strings.Contains(src, "ruleconfig.ValidateRuleConfig")
 
 		key := f.Path
 		msg := "holds a rule-repo handle"

@@ -1386,10 +1386,11 @@ func TestProcessApproval(t *testing.T) {
 		// Set up approval service with a working rule generator
 		recipient := "0xrecipient"
 		genRule := &types.Rule{
-			ID:   "gen-rule-from-approval",
-			Name: "Allow: 0xrecipient",
-			Type: types.RuleTypeEVMAddressList,
-			Mode: types.RuleModeWhitelist,
+			ID:     "gen-rule-from-approval",
+			Name:   "Allow: 0xrecipient",
+			Type:   types.RuleTypeEVMAddressList,
+			Mode:   types.RuleModeWhitelist,
+			Config: []byte(`{"addresses":["0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"]}`),
 		}
 		ruleRepo := newMockRuleRepo()
 		approvalSvc, err := NewApprovalService(
@@ -1596,10 +1597,11 @@ func TestProcessApproval(t *testing.T) {
 		f := newSignServiceFixture(t)
 
 		genRule := &types.Rule{
-			ID:   "gen-rule-parse-err",
-			Name: "Rule from parse error",
-			Type: types.RuleTypeEVMAddressList,
-			Mode: types.RuleModeWhitelist,
+			ID:     "gen-rule-parse-err",
+			Name:   "Rule from parse error",
+			Type:   types.RuleTypeEVMAddressList,
+			Mode:   types.RuleModeWhitelist,
+			Config: []byte(`{"addresses":["0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"]}`),
 		}
 		approvalSvc, err := NewApprovalService(
 			newMockRuleRepo(),
@@ -1693,9 +1695,10 @@ func TestPreviewRuleForRequest(t *testing.T) {
 
 		// Set up approval service with a preview-returning generator
 		previewRule := &types.Rule{
-			ID:   "preview-1",
-			Name: "Preview Rule",
-			Type: types.RuleTypeEVMAddressList,
+			ID:     "preview-1",
+			Name:   "Preview Rule",
+			Type:   types.RuleTypeEVMAddressList,
+			Config: []byte(`{"addresses":["0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"]}`),
 		}
 		approvalSvc, err := NewApprovalService(
 			newMockRuleRepo(),

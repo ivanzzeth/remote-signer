@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -422,11 +423,42 @@ func seedRule(t *testing.T, repo *mockRuleRepo, rule *types.Rule) {
 }
 
 // makeTemplate builds a minimal RuleTemplate with sensible defaults.
+// makeTemplate builds a template whose declared Type matches the config it is
+// given.
+//
+// ⚠️ It used to hardcode evm_address_list while callers passed value-limit and
+// evm_js configs, so the fixtures described rules that could not exist: an
+// address-list rule whose config has max_value and no addresses. Nothing
+// noticed until the rule-write chokepoint started validating, because nothing
+// ever evaluated them. Inferring the type from the config keeps the two in step
+// rather than letting them drift apart again.
+// ruleTypeForConfig picks the rule type whose validator matches the fixture's
+// config shape.
+func ruleTypeForConfig(config json.RawMessage) types.RuleType {
+	switch {
+	case bytes.Contains(config, []byte("max_value")):
+		return types.RuleTypeEVMValueLimit
+	case bytes.Contains(config, []byte("\"script\"")):
+		return types.RuleTypeEVMJS
+	case bytes.Contains(config, []byte("\"addresses\":[")):
+		return types.RuleTypeEVMAddressList
+	// Fixtures whose config is an arbitrary bag of ${var} placeholders are
+	// exercising substitution, not any rule type's semantics. evm_address_list
+	// happens to have the strictest validator, so declaring them as that made
+	// them fail the rule-write chokepoint for a reason unrelated to what they
+	// test. message_pattern only needs a pattern, so they carry one.
+	case !bytes.Contains(config, []byte("\"addresses\"")) && !bytes.Contains(config, []byte("max_value")):
+		return types.RuleTypeMessagePattern
+	default:
+		return types.RuleTypeEVMAddressList
+	}
+}
+
 func makeTemplate(id, name string, vars []types.TemplateVariable, config json.RawMessage) *types.RuleTemplate {
 	return &types.RuleTemplate{
 		ID:        id,
 		Name:      name,
-		Type:      types.RuleTypeEVMAddressList,
+		Type:      ruleTypeForConfig(config),
 		Mode:      types.RuleModeWhitelist,
 		Variables: mustJSON(vars),
 		Config:    config,
@@ -1106,7 +1138,7 @@ func TestCreateInstance(t *testing.T) {
 			Method: "js",
 			Unit:   "${chain_id}:${token_address}",
 		}
-		configUnitSubst := []byte(`{"chain_id":"${chain_id}","token":"${token_address}"}`)
+		configUnitSubst := []byte(`{"chain_id":"${chain_id}","token":"${token_address}","pattern":".*"}`)
 		tmpl := makeTemplate("tmpl-unit-subst", "Unit Substitution", vars, configUnitSubst)
 		tmpl.BudgetMetering = mustJSON(metering)
 		seedTemplate(t, tmplRepo, tmpl)
@@ -1733,7 +1765,7 @@ func TestValidateVariableType_Extended(t *testing.T) {
 		vars := []types.TemplateVariable{
 			{Name: "addrs", Type: "address_list", Required: true},
 		}
-		config := []byte(`{"addresses":"${addrs}"}`)
+		config := []byte(`{"addrs":"${addrs}","pattern":".*"}`)
 		tmpl := makeTemplate("tmpl-addrlist", "Address List", vars, config)
 		seedTemplate(t, tmplRepo, tmpl)
 
@@ -1764,7 +1796,7 @@ func TestValidateVariableType_Extended(t *testing.T) {
 		vars := []types.TemplateVariable{
 			{Name: "addrs", Type: "address_list", Required: true},
 		}
-		config := []byte(`{"addresses":"${addrs}"}`)
+		config := []byte(`{"addrs":"${addrs}","pattern":".*"}`)
 		tmpl := makeTemplate("tmpl-addrlist-inv", "Invalid Address List", vars, config)
 		seedTemplate(t, tmplRepo, tmpl)
 
@@ -1795,7 +1827,7 @@ func TestValidateVariableType_Extended(t *testing.T) {
 		vars := []types.TemplateVariable{
 			{Name: "amounts", Type: "bigint_list", Required: true},
 		}
-		config := []byte(`{"amounts":"${amounts}"}`)
+		config := []byte(`{"amounts":"${amounts}","pattern":".*"}`)
 		tmpl := makeTemplate("tmpl-uintlist", "Uint256 List", vars, config)
 		seedTemplate(t, tmplRepo, tmpl)
 
@@ -1826,7 +1858,7 @@ func TestValidateVariableType_Extended(t *testing.T) {
 		vars := []types.TemplateVariable{
 			{Name: "amounts", Type: "bigint_list", Required: true},
 		}
-		config := []byte(`{"amounts":"${amounts}"}`)
+		config := []byte(`{"amounts":"${amounts}","pattern":".*"}`)
 		tmpl := makeTemplate("tmpl-uintlist-inv", "Invalid Uint256 List", vars, config)
 		seedTemplate(t, tmplRepo, tmpl)
 
@@ -2282,7 +2314,7 @@ func TestReservedVariableChainID(t *testing.T) {
 		vars := []types.TemplateVariable{
 			{Name: "token_address", Type: "address", Required: true},
 		}
-		config := []byte(`{"token":"${token_address}"}`)
+		config := []byte(`{"script":"function validate(input) { return ok(); }","token":"${token_address}"}`)
 		budgetMetering := mustJSON(types.BudgetMetering{
 			Method: "js",
 			Unit:   "${chain_id}:${token_address}",
@@ -2464,7 +2496,7 @@ func TestCreateInstance_SkipValidationFlow(t *testing.T) {
 			Variables: mustJSON([]types.TemplateVariable{
 				{Name: "max_value", Type: "bigint", Required: true},
 			}),
-			Config:    []byte(`{"max_value":"${max_value}"}`),
+			Config:    []byte(`{"script":"function validate(input) { return ok(); }","max_value":"${max_value}"}`),
 			Source:    types.RuleSourceConfig,
 			Enabled:   true,
 			CreatedAt: time.Now(),
@@ -2503,9 +2535,16 @@ func TestCreateInstance_SkipValidationFlow(t *testing.T) {
 		ruleRepo := newMockRuleRepo()
 		budgetRepo := newMockBudgetRepo()
 
-		// test_cases data — service layer should NOT validate this.
-		// Validation rejection happens at the handler level.
+		// ⚠️ The service layer DOES validate config shape now (2026-09-10): the
+		// rule-write chokepoint moved out of the HTTP handler so that the CLI,
+		// the startup seeder and internal callers pass through it too. What stays
+		// a handler concern is *running* the test_cases and rejecting
+		// skip_validation — which is what this test is about.
+		//
+		// The script is therefore not decoration: an evm_js rule without one is a
+		// row the engine cannot evaluate, and the chokepoint rejects it.
 		testCases := map[string]interface{}{
+			"script": "function validate(input) { return ok(); }",
 			"test_cases": []map[string]interface{}{
 				{
 					"input":    map[string]interface{}{"value": "100"},
@@ -2577,7 +2616,7 @@ func TestCreateInstance_SkipValidationFlow(t *testing.T) {
 			Variables: mustJSON([]types.TemplateVariable{
 				{Name: "max_value", Type: "bigint", Required: true},
 			}),
-			Config:    []byte(`{"max_value":"${max_value}"}`),
+			Config:    []byte(`{"script":"function validate(input) { return ok(); }","max_value":"${max_value}"}`),
 			Source:    types.RuleSourceConfig,
 			Enabled:   true,
 			CreatedAt: time.Now(),
@@ -2611,6 +2650,7 @@ func TestCreateInstance_SkipValidationFlow(t *testing.T) {
 		budgetRepo := newMockBudgetRepo()
 
 		cfg := map[string]interface{}{
+			"script":    "function validate(input) { return ok(); }",
 			"max_value": "${max_value}",
 			"test_cases": []map[string]interface{}{
 				{
@@ -2682,7 +2722,7 @@ func TestCreateInstance_SkipValidationFlow(t *testing.T) {
 			Variables: mustJSON([]types.TemplateVariable{
 				{Name: "max_value", Type: "bigint", Required: true},
 			}),
-			Config:    []byte(`{"max_value":"${max_value}"}`),
+			Config:    []byte(`{"script":"function validate(input) { return ok(); }","max_value":"${max_value}"}`),
 			Source:    types.RuleSourceConfig,
 			Enabled:   true,
 			CreatedAt: time.Now(),
@@ -2814,6 +2854,7 @@ func TestCreateInstance_SkipValidationFlow(t *testing.T) {
 				Type: string(types.RuleTypeEVMJS),
 				Mode: string(types.RuleModeWhitelist),
 				Config: map[string]interface{}{
+					"script":     "function validate(input) { return ok(); }",
 					"expression": "true",
 				},
 				Enabled: true,
@@ -2824,6 +2865,7 @@ func TestCreateInstance_SkipValidationFlow(t *testing.T) {
 				Type: string(types.RuleTypeEVMJS),
 				Mode: string(types.RuleModeWhitelist),
 				Config: map[string]interface{}{
+					"script":      "function validate(input) { return ok(); }",
 					"delegate_to": "target-rule",
 				},
 				Enabled: true,

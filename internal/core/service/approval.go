@@ -113,6 +113,13 @@ func (s *ApprovalService) GenerateRule(ctx context.Context, req *types.SignReque
 		return nil, fmt.Errorf("failed to generate rule: %w", err)
 	}
 
+	// A rule generated from an approved request is still a spending
+	// authorization, and this path used to write it straight to the database:
+	// the mandatory check lived in the HTTP handler, which this does not go
+	// through. See rule.ValidateRuleForWrite.
+	if err := rule.ValidateRuleForWrite(newRule); err != nil {
+		return nil, fmt.Errorf("generated rule is invalid: %w", err)
+	}
 	if err := s.ruleRepo.Create(ctx, newRule); err != nil {
 		return nil, fmt.Errorf("failed to create rule: %w", err)
 	}

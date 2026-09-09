@@ -314,6 +314,9 @@ func (h *RuleHandler) approveRule(w http.ResponseWriter, r *http.Request, ruleID
 	rule.ApprovedBy = &approvedBy
 	rule.UpdatedAt = time.Now()
 
+	// ⛔ No validation: approving sets ApprovedBy/UpdatedAt and nothing else.
+	// A rule that fails validation should be rejectable and disableable, not
+	// stuck. See rule.Writer.UpdateMetadata.
 	if err := h.ruleRepo.Update(r.Context(), rule); err != nil {
 		h.logger.Error("failed to approve rule", "error", err, "rule_id", ruleID)
 		respond.Error(w, "failed to approve rule", http.StatusInternalServerError, h.logger)
@@ -498,6 +501,10 @@ func (h *RuleHandler) approveProposal(w http.ResponseWriter, r *http.Request, pr
 				return
 			}
 		} else {
+			if vErr := rule.ValidateRuleForWrite(target); vErr != nil {
+				respond.Error(w, "rule failed validation: "+vErr.Error(), http.StatusBadRequest, h.logger)
+				return
+			}
 			if err := h.ruleRepo.Update(r.Context(), target); err != nil {
 				h.logger.Error("failed to update target rule from proposal", "error", err)
 				respond.Error(w, "failed to apply proposal changes", http.StatusInternalServerError, h.logger)

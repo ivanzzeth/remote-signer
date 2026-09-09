@@ -15,6 +15,12 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/storage"
 )
 
+// An evm_js rule with no script is not a rule — it is a row that the engine
+// cannot evaluate. These fixtures used an empty config, which the rule-write
+// chokepoint rejects (config.script is required), so they now carry the
+// smallest script that is actually a rule.
+const minimalJSRule = "function validate(input) { return ok(); }"
+
 func newTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.New(sqlite.Config{DSN: ":memory:", DriverName: "sqlite"}), &gorm.Config{})
@@ -217,8 +223,8 @@ func seedMinimalTokenTemplates(t *testing.T, templateRepo storage.TemplateReposi
 
 	erc20Config, _ := json.Marshal(map[string]any{
 		"rules": []map[string]any{
-			{"id": "erc20-transfer-limit", "priority": 10000, "name": "ERC20 transfer", "type": "evm_js", "mode": "whitelist", "enabled": true, "config": map[string]any{}},
-			{"id": "erc20-approve-limit", "priority": 10000, "name": "ERC20 approve", "type": "evm_js", "mode": "whitelist", "enabled": true, "config": map[string]any{}},
+			{"id": "erc20-transfer-limit", "priority": 10000, "name": "ERC20 transfer", "type": "evm_js", "mode": "whitelist", "enabled": true, "config": map[string]any{"script": minimalJSRule}},
+			{"id": "erc20-approve-limit", "priority": 10000, "name": "ERC20 approve", "type": "evm_js", "mode": "whitelist", "enabled": true, "config": map[string]any{"script": minimalJSRule}},
 		},
 	})
 	if err := templateRepo.Create(ctx, &types.RuleTemplate{
@@ -229,7 +235,7 @@ func seedMinimalTokenTemplates(t *testing.T, templateRepo storage.TemplateReposi
 
 	erc721Config, _ := json.Marshal(map[string]any{
 		"rules": []map[string]any{
-			{"id": "erc721-transfer-approve-allowlists", "priority": 10000, "name": "ERC721", "type": "evm_js", "mode": "whitelist", "enabled": true, "config": map[string]any{}},
+			{"id": "erc721-transfer-approve-allowlists", "priority": 10000, "name": "ERC721", "type": "evm_js", "mode": "whitelist", "enabled": true, "config": map[string]any{"script": minimalJSRule}},
 		},
 	})
 	if err := templateRepo.Create(ctx, &types.RuleTemplate{
@@ -240,7 +246,7 @@ func seedMinimalTokenTemplates(t *testing.T, templateRepo storage.TemplateReposi
 
 	erc1155Config, _ := json.Marshal(map[string]any{
 		"rules": []map[string]any{
-			{"id": "erc1155-transfer-approve-allowlists", "priority": 10000, "name": "ERC1155", "type": "evm_js", "mode": "whitelist", "enabled": true, "config": map[string]any{}},
+			{"id": "erc1155-transfer-approve-allowlists", "priority": 10000, "name": "ERC1155", "type": "evm_js", "mode": "whitelist", "enabled": true, "config": map[string]any{"script": minimalJSRule}},
 		},
 	})
 	if err := templateRepo.Create(ctx, &types.RuleTemplate{

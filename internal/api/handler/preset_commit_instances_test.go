@@ -142,6 +142,9 @@ func TestCommitInstances_CrossTemplateDelegate(t *testing.T) {
 			"type": string(types.RuleTypeEVMJS),
 			"mode": string(types.RuleModeWhitelist),
 			"config": map[string]interface{}{
+				// An evm_js rule needs a script: without one the engine has
+				// nothing to evaluate, and the rule-write chokepoint rejects it.
+				"script":     "function validate(input) { return ok(); }",
 				"expression": "true",
 			},
 			"enabled": true,
@@ -151,6 +154,8 @@ func TestCommitInstances_CrossTemplateDelegate(t *testing.T) {
 
 	// Template B: single-rule template with delegate_to referencing the bundle's sub-rule
 	seedSimpleTemplate(t, env, "evm/safe", "Safe", map[string]interface{}{
+		// evm_js needs a script; a delegator is still a rule the engine runs.
+		"script":      "function validate(input) { return ok(); }",
 		"delegate_to": "polymarket-transactions",
 	})
 
@@ -237,6 +242,9 @@ func TestCommitInstances_CrossTemplateDelegate_NoChangeNeeded(t *testing.T) {
 			"type": string(types.RuleTypeEVMJS),
 			"mode": string(types.RuleModeWhitelist),
 			"config": map[string]interface{}{
+				// An evm_js rule needs a script: without one the engine has
+				// nothing to evaluate, and the rule-write chokepoint rejects it.
+				"script":     "function validate(input) { return ok(); }",
 				"expression": "true",
 			},
 			"enabled": true,
@@ -246,6 +254,7 @@ func TestCommitInstances_CrossTemplateDelegate_NoChangeNeeded(t *testing.T) {
 
 	// Template B: simple rule without any delegate_to
 	seedSimpleTemplate(t, env, "tmpl/beta", "Beta", map[string]interface{}{
+		"script":     "function validate(input) { return ok(); }",
 		"expression": "true",
 	})
 
@@ -278,6 +287,9 @@ func TestCommitInstances_MultipleDelegateRules(t *testing.T) {
 			"type": string(types.RuleTypeEVMJS),
 			"mode": string(types.RuleModeWhitelist),
 			"config": map[string]interface{}{
+				// An evm_js rule needs a script: without one the engine has
+				// nothing to evaluate, and the rule-write chokepoint rejects it.
+				"script":     "function validate(input) { return ok(); }",
 				"expression": "true",
 			},
 			"enabled": true,
@@ -288,6 +300,9 @@ func TestCommitInstances_MultipleDelegateRules(t *testing.T) {
 			"type": string(types.RuleTypeEVMJS),
 			"mode": string(types.RuleModeWhitelist),
 			"config": map[string]interface{}{
+				// An evm_js rule needs a script: without one the engine has
+				// nothing to evaluate, and the rule-write chokepoint rejects it.
+				"script":     "function validate(input) { return ok(); }",
 				"expression": "true",
 			},
 			"enabled": true,
@@ -297,6 +312,8 @@ func TestCommitInstances_MultipleDelegateRules(t *testing.T) {
 
 	// Safe template with delegate_to referencing both
 	seedSimpleTemplate(t, env, "evm/safe_v2", "Safe V2", map[string]interface{}{
+		// evm_js needs a script; a delegator is still a rule the engine runs.
+		"script":      "function validate(input) { return ok(); }",
 		"delegate_to": "auth-rule, tx-rule",
 	})
 

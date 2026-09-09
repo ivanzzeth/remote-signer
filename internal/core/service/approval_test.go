@@ -185,10 +185,11 @@ func TestPreviewRule(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		expectedRule := &types.Rule{
-			ID:   "preview_123",
-			Name: "Preview Rule",
-			Type: types.RuleTypeEVMAddressList,
-			Mode: types.RuleModeWhitelist,
+			ID:     "preview_123",
+			Name:   "Preview Rule",
+			Type:   types.RuleTypeEVMAddressList,
+			Mode:   types.RuleModeWhitelist,
+			Config: []byte(`{"addresses":["0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"]}`),
 		}
 		gen := &mockRuleGenerator{previewRule: expectedRule}
 		svc, err := NewApprovalService(newMockRuleRepo(), gen, &mockNotifier{}, newTestLogger())
@@ -278,6 +279,11 @@ func TestGenerateRule(t *testing.T) {
 			Name: "Generated Rule",
 			Type: types.RuleTypeEVMAddressList,
 			Mode: types.RuleModeWhitelist,
+			// An evm_address_list rule with no addresses is not a rule: depending
+			// on how the engine reads an empty allowlist it authorises nobody or
+			// everybody. The rule-write chokepoint rejects it, so the fixture now
+			// models a rule that could actually exist.
+			Config: []byte(`{"addresses":["0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"]}`),
 		}
 		gen := &mockRuleGenerator{genRule: genRule}
 		ruleRepo := newMockRuleRepo()
@@ -362,10 +368,11 @@ func TestGenerateRule(t *testing.T) {
 
 	t.Run("repo_create_error", func(t *testing.T) {
 		genRule := &types.Rule{
-			ID:   "gen-dup",
-			Name: "Dup Rule",
-			Type: types.RuleTypeEVMAddressList,
-			Mode: types.RuleModeWhitelist,
+			ID:     "gen-dup",
+			Name:   "Dup Rule",
+			Type:   types.RuleTypeEVMAddressList,
+			Mode:   types.RuleModeWhitelist,
+			Config: []byte(`{"addresses":["0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"]}`),
 		}
 		gen := &mockRuleGenerator{genRule: genRule}
 		ruleRepo := newMockRuleRepo()

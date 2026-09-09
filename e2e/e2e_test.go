@@ -227,6 +227,10 @@ rules:
     mode: "whitelist"
     enabled: true
     config:
+      # evm_js needs a script — without one there is nothing for the engine to
+      # evaluate, and the rule-write chokepoint rejects the row.
+      script: |
+        function validate(input) { return fail('target rule denies'); }
       expression: "false"
   - id: "e2e-extra"
     name: "Extra Rule"
@@ -234,6 +238,8 @@ rules:
     mode: "whitelist"
     enabled: true
     config:
+      script: |
+        function validate(input) { return ok(); }
       expression: "true"
 `)
 		if err := os.WriteFile(filepath.Join(templatesDir, "evm", "e2e_bundle_target.yaml"), e2eDelegateTargetTemplate, 0644); err != nil {
@@ -251,6 +257,8 @@ variables:
     description: "Target sub-rule ID to delegate to"
     required: true
 config:
+  script: |
+    function validate(input) { return ok(); }
   delegate_to: "${delegate_to}"
   expression: "true"
 `)

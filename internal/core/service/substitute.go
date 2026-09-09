@@ -3,12 +3,13 @@ package service
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"math/big"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )

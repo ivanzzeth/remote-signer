@@ -88,6 +88,11 @@ var checks = []checkDef{
 func main() {
 	baselineDir := flag.String("baseline", "scripts/lib/arch-baseline/ast", "directory holding baseline files")
 	showUnclassified := flag.Bool("unclassified", false, "list packages that match no layer and exit")
+	// ⚠️ -list prints the complete current finding set, which is what a baseline
+	// file must contain. The normal output prints only what *differs* from the
+	// baseline, and regenerating a baseline from that diff silently drops every
+	// entry that was already in it.
+	listOnly := flag.Bool("list", false, "print every current finding (baseline contents) and exit")
 	flag.Parse()
 
 	r, err := loadRepo(".")
@@ -98,6 +103,28 @@ func main() {
 
 	if *showUnclassified {
 		listUnclassified(r)
+		return
+	}
+
+	if *listOnly {
+		for _, c := range checks {
+			if len(flag.Args()) > 0 && !contains(flag.Args(), c.Name) {
+				continue
+			}
+			found, err := c.Run(r)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "archcheck %s: %v\n", c.Name, err)
+				os.Exit(2)
+			}
+			seen := map[string]bool{}
+			for _, f := range found {
+				if seen[f.Key] {
+					continue
+				}
+				seen[f.Key] = true
+				fmt.Println(f.Key)
+			}
+		}
 		return
 	}
 
@@ -215,4 +242,13 @@ func readBaseline(path string) (map[string]bool, error) {
 		}
 	}
 	return out, nil
+}
+
+func contains(xs []string, s string) bool {
+	for _, x := range xs {
+		if x == s {
+			return true
+		}
+	}
+	return false
 }

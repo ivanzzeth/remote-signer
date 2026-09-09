@@ -1,9 +1,10 @@
 package service
 
 import (
-	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"math/big"
 	"testing"
+
+	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

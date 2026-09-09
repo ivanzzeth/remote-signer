@@ -7,6 +7,7 @@ import (
 
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
+
 	// The "sqlite" (singular) driver uses modernc.org/sqlite — pure Go, no CGO.
 	// The "sqlite3" driver pulls mattn/go-sqlite3 which would force CGO into the
 	// release/Docker build.

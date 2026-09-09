@@ -22,6 +22,8 @@ import (
 	"reflect"
 	"strings"
 
+	rulepkg "github.com/ivanzzeth/remote-signer/internal/core/rule"
+
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/homepath"
 	"github.com/ivanzzeth/remote-signer/internal/storage"
@@ -106,6 +108,13 @@ func run(dsn string, apply bool) error {
 		fmt.Printf("OK    %s (%s)\n", r.ID, r.Name)
 		if apply {
 			r.Config = candidate
+			// This tool rewrites Config wholesale, which makes it a rule-write
+			// path like any other — and the one most likely to produce a
+			// malformed row, since it is transforming every rule in the database
+			// at once. See rule.ValidateRuleForWrite.
+			if err := rulepkg.ValidateRuleForWrite(r); err != nil {
+				return fmt.Errorf("rule %s would be invalid after migration: %w", r.ID, err)
+			}
 			if err := ruleRepo.Update(ctx, r); err != nil {
 				return fmt.Errorf("update rule %s: %w", r.ID, err)
 			}
