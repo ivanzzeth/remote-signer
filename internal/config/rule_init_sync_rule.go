@@ -102,6 +102,9 @@ func (i *RuleInitializer) syncRule(ctx context.Context, repo storage.RuleReposit
 		Source:      types.RuleSourceConfig,
 		Config:      configJSON,
 		Enabled:     ruleCfg.Enabled,
+		// Without this the template's `priority:` was dropped on this path only —
+		// see types.CoalesceRulePriority for what that cost.
+		Priority: types.CoalesceRulePriority(ruleCfg.Priority),
 	}
 	// Prepare variables map; chain_id will be injected from rule-level scope below.
 	variables := make(map[string]interface{})

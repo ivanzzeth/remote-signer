@@ -112,6 +112,7 @@ type RuleConfig struct {
 	Variables     map[string]interface{} `yaml:"variables,omitempty" json:"variables,omitempty"`           // instance/template variable values (e.g. for evm_js config)
 	TestVariables map[string]string      `yaml:"test_variables,omitempty" json:"test_variables,omitempty"` // from template; used for running test cases at startup so expectations match
 	TestCases     []TestCaseConfig       `yaml:"test_cases,omitempty" json:"test_cases,omitempty"`         // test cases for validation (evm_js, solidity, etc.)
+	Priority      *int                   `yaml:"priority,omitempty" json:"priority,omitempty"`             // nil = default 100; lower = evaluated first (1 highest)
 	Enabled       bool                   `yaml:"enabled" json:"enabled"`
 }
 

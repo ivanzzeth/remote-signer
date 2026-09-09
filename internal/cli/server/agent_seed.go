@@ -124,15 +124,7 @@ type templateSubRule struct {
 	Config      map[string]any `json:"config"`
 }
 
-func coalesceAgentRulePriority(p *int) int {
-	if p == nil {
-		return 100
-	}
-	if *p < 1 {
-		return 1
-	}
-	return *p
-}
+func coalesceAgentRulePriority(p *int) int { return types.CoalesceRulePriority(p) }
 
 type templateConfigDoc struct {
 	Rules []templateSubRule `json:"rules"`

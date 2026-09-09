@@ -479,15 +479,9 @@ type bundleSubRule struct {
 	Enabled     bool                   `json:"enabled"`
 }
 
-func coalesceBundlePriority(p *int) int {
-	if p == nil {
-		return 100 // default matches types.Rule gorm default
-	}
-	if *p < 1 {
-		return 1
-	}
-	return *p
-}
+// coalesceBundlePriority delegates to the single implementation; kept as a
+// named wrapper because the call site reads better with the bundle wording.
+func coalesceBundlePriority(p *int) int { return types.CoalesceRulePriority(p) }
 
 // createInstanceFromBundle expands a template_bundle into individual sub-rules,
 // creating each as a separate rule in the database. Uses a two-pass approach:

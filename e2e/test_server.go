@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/lib/pq"
@@ -89,8 +90,20 @@ func (ts *TestServer) Start() error {
 	os.Setenv("E2E_TEST_SIGNER2_KEY", testSigner2PrivateKey)
 
 	// Create logger
+	// Warn by default (a full e2e run is noisy enough); E2E_LOG_LEVEL=debug when
+	// you are chasing "the sign succeeded but the wrong rule matched" — the rule
+	// that matched is only visible at info/debug.
+	logLevel := slog.LevelWarn
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("E2E_LOG_LEVEL"))) {
+	case "debug":
+		logLevel = slog.LevelDebug
+	case "info":
+		logLevel = slog.LevelInfo
+	case "error":
+		logLevel = slog.LevelError
+	}
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelWarn, // Reduce noise in tests
+		Level: logLevel,
 	}))
 
 	// Load config from config.e2e.yaml if ConfigPath is set

@@ -201,6 +201,14 @@ rules:
   # Used by TestRule_TransactionToTreasuryPasses
   - name: "Allow transfers to treasury"
     id: "e2e-treasury"
+    # priority 20000: these four are demo rules for the rule-type tests, and each
+    # of them auto-approves broadly (any tx from the test signer / any value under
+    # 10 ETH). At the default 100 they answered first and shadowed every budgeted
+    # instance rule, so the budget e2e tests signed successfully and then found
+    # spent=0. Lower number = evaluated first, so 20000 puts them behind the
+    # instance rules (10000) — they still match when nothing specific does, which
+    # is all their own tests require.
+    priority: 20000
     type: "evm_address_list"
     mode: "whitelist"
     enabled: true
@@ -235,6 +243,14 @@ rules:
   # Can be tested via API: TestRule_ValueLimitRuleBlocks
   - name: "Max 10 ETH per transaction"
     id: "e2e-max-10-eth"
+    # priority 20000: these four are demo rules for the rule-type tests, and each
+    # of them auto-approves broadly (any tx from the test signer / any value under
+    # 10 ETH). At the default 100 they answered first and shadowed every budgeted
+    # instance rule, so the budget e2e tests signed successfully and then found
+    # spent=0. Lower number = evaluated first, so 20000 puts them behind the
+    # instance rules (10000) — they still match when nothing specific does, which
+    # is all their own tests require.
+    priority: 20000
     type: "evm_value_limit"
     mode: "whitelist"
     signer_address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
@@ -246,6 +262,14 @@ rules:
   # Used by TestRule_SignerRestrictionAllowsTestSigner
   - name: "Allow hot wallet signer"
     id: "e2e-signer-restriction"
+    # priority 20000: these four are demo rules for the rule-type tests, and each
+    # of them auto-approves broadly (any tx from the test signer / any value under
+    # 10 ETH). At the default 100 they answered first and shadowed every budgeted
+    # instance rule, so the budget e2e tests signed successfully and then found
+    # spent=0. Lower number = evaluated first, so 20000 puts them behind the
+    # instance rules (10000) — they still match when nothing specific does, which
+    # is all their own tests require.
+    priority: 20000
     type: "signer_restriction"
     mode: "whitelist"
     enabled: true
@@ -258,6 +282,14 @@ rules:
   # Used by TestRule_SignTypeRestrictionAllowsTransaction, TestRule_SignTypeRestrictionAllowsPersonalSign
   - name: "Allow common signing methods"
     id: "e2e-sign-type-restriction"
+    # priority 20000: these four are demo rules for the rule-type tests, and each
+    # of them auto-approves broadly (any tx from the test signer / any value under
+    # 10 ETH). At the default 100 they answered first and shadowed every budgeted
+    # instance rule, so the budget e2e tests signed successfully and then found
+    # spent=0. Lower number = evaluated first, so 20000 puts them behind the
+    # instance rules (10000) — they still match when nothing specific does, which
+    # is all their own tests require.
+    priority: 20000
     type: "sign_type_restriction"
     mode: "whitelist"
     enabled: true

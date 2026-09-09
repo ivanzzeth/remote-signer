@@ -141,6 +141,35 @@ type Rule struct {
 	LastMatchedAt *time.Time `json:"last_matched_at,omitempty"`
 }
 
+// CoalesceRulePriority turns an optional YAML/JSON `priority` into the value
+// stored on Rule.Priority.
+//
+// nil (author wrote no priority) → 100, matching the GORM column default, so a
+// rule that says nothing keeps sorting where it always did.
+// < 1 → 1, because 1 is the documented maximum and a 0 or negative would sort
+// ahead of it and silently outrank every rule an author *did* prioritise.
+//
+// ⚠️ Callers: this is the ONLY implementation. There were two — one in
+// core/service (template instantiation via API / preset apply) and one in
+// cli/server (agent preset seeding) — and a third path, config.yaml instance
+// expansion, had none at all: `config.RuleConfig` carried no Priority field, so
+// `priority: 10000` written in a template was silently dropped by
+// json.Unmarshal and the rule landed at the default 100. The same template
+// therefore produced differently-ordered rules depending on which path created
+// it, and whitelist order decides which spending authorization applies.
+// Found 2026-09-09 by an e2e budget test: a broad `evm_value_limit` fixture rule
+// matched an ERC20 transfer first, so the budgeted rule was never reached and
+// its budget stayed at 0.
+func CoalesceRulePriority(p *int) int {
+	if p == nil {
+		return 100
+	}
+	if *p < 1 {
+		return 1
+	}
+	return *p
+}
+
 // TableName specifies the table name for GORM
 func (Rule) TableName() string {
 	return "rules"
