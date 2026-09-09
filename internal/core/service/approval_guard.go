@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ivanzzeth/remote-signer/internal/notify"
+	"github.com/ivanzzeth/remote-signer/internal/core/ports"
 )
 
 // guardEvent records a single request outcome within the sliding window.
@@ -26,8 +26,8 @@ type ManualApprovalGuard struct {
 	rejectionThreshPct float64 // 0-100 percentage
 	minSamples         int
 	resumeAfter        time.Duration
-	notifySvc          *notify.NotifyService
-	channel            *notify.Channel
+	notifySvc          ports.Notifier
+	channel            *ports.NotifyChannel
 	logger             *slog.Logger
 	mu                 sync.Mutex
 	paused             bool
@@ -48,8 +48,8 @@ type ManualApprovalGuardConfig struct {
 	MinSamples int
 	// ResumeAfter is the pause duration after which to auto-resume (e.g. 2h); 0 = no auto-resume.
 	ResumeAfter time.Duration
-	NotifySvc   *notify.NotifyService
-	Channel     *notify.Channel
+	NotifySvc   ports.Notifier
+	Channel     *ports.NotifyChannel
 	Logger      *slog.Logger
 }
 

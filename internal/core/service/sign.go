@@ -10,9 +10,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/ivanzzeth/remote-signer/internal/audit"
-	"github.com/ivanzzeth/remote-signer/internal/chain"
-	evmchain "github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/core/ports"
 	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/statemachine"
@@ -54,21 +51,21 @@ var _ SignServiceAPI = (*SignService)(nil)
 
 // SignService orchestrates the signing request lifecycle
 type SignService struct {
-	chainRegistry         *chain.Registry
+	chainRegistry         ports.ChainRegistry
 	requestRepo           ports.RequestRepository
 	ruleEngine            rule.RuleEngine
 	stateMachine          *statemachine.StateMachine
 	approvalService       *ApprovalService
-	auditLogger           *audit.AuditLogger             // optional: persistent audit logging
-	approvalGuard         *ManualApprovalGuard           // optional: pauses requests when too many consecutive manual-approval outcomes
-	simulationRule        *evmchain.SimulationBudgetRule // optional: simulation-based budget fallback for unmatched transactions
-	manualApprovalEnabled bool                           // when false, no whitelist match → reject immediately
+	auditLogger           ports.SignAuditSink             // optional: persistent audit logging
+	approvalGuard         *ManualApprovalGuard            // optional: pauses requests when too many consecutive manual-approval outcomes
+	simulationRule        ports.SimulationBudgetEvaluator // optional: simulation-based budget fallback for unmatched transactions
+	manualApprovalEnabled bool                            // when false, no whitelist match → reject immediately
 	logger                *slog.Logger
 }
 
 // NewSignService creates a new sign service
 func NewSignService(
-	chainRegistry *chain.Registry,
+	chainRegistry ports.ChainRegistry,
 	requestRepo ports.RequestRepository,
 	ruleEngine rule.RuleEngine,
 	stateMachine *statemachine.StateMachine,
@@ -105,7 +102,7 @@ func NewSignService(
 }
 
 // SetAuditLogger sets the audit logger for persistent event logging.
-func (s *SignService) SetAuditLogger(al *audit.AuditLogger) {
+func (s *SignService) SetAuditLogger(al ports.SignAuditSink) {
 	s.auditLogger = al
 }
 
@@ -124,7 +121,7 @@ func (s *SignService) SetManualApprovalEnabled(enabled bool) {
 // SetSimulationRule sets the optional simulation-based budget fallback rule.
 // When set, unmatched transactions are simulated via eth_simulateV1 and budget
 // is checked against actual token outflows before signing.
-func (s *SignService) SetSimulationRule(rule *evmchain.SimulationBudgetRule) {
+func (s *SignService) SetSimulationRule(rule ports.SimulationBudgetEvaluator) {
 	s.simulationRule = rule
 }
 

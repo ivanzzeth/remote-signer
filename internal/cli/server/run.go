@@ -410,7 +410,7 @@ func Run(args []string) error {
 			} else {
 				log.Warn("simulation budget auto-create disabled: rule repo lacks synthetic rule support")
 			}
-			signService.SetSimulationRule(simRule)
+			signService.SetSimulationRule(evm.NewSimulationBudgetPort(simRule))
 			if cfg.Chains.EVM.Simulation.BatchWindow > 0 {
 				simRule.SetBatchConfig(cfg.Chains.EVM.Simulation.BatchWindow, cfg.Chains.EVM.Simulation.BatchMaxSize)
 				simRule.StartAccumulator()

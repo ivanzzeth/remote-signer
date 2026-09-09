@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/ivanzzeth/remote-signer/internal/config"
+	"github.com/ivanzzeth/remote-signer/internal/core/ports"
 )
 
 // IPWhitelistResponse is the read-only response for GET /api/v1/acls/ip-whitelist.
@@ -18,11 +18,11 @@ type IPWhitelistResponse struct {
 
 // ACLHandler handles admin-only, read-only ACL endpoints (e.g. IP whitelist).
 type ACLHandler struct {
-	ipWhitelist *config.IPWhitelistConfig
+	ipWhitelist *ports.IPWhitelist
 }
 
 // NewACLHandler creates an ACL handler. ipWhitelist may be nil (returns empty/disabled).
-func NewACLHandler(ipWhitelist *config.IPWhitelistConfig) *ACLHandler {
+func NewACLHandler(ipWhitelist *ports.IPWhitelist) *ACLHandler {
 	return &ACLHandler{ipWhitelist: ipWhitelist}
 }
 

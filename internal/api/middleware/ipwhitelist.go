@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ivanzzeth/remote-signer/internal/config"
+	"github.com/ivanzzeth/remote-signer/internal/core/ports"
 )
 
 // IPWhitelist holds the parsed IP whitelist configuration
@@ -25,7 +25,7 @@ type IPWhitelist struct {
 }
 
 // NewIPWhitelist creates a new IP whitelist from configuration
-func NewIPWhitelist(cfg config.IPWhitelistConfig, logger *slog.Logger) (*IPWhitelist, error) {
+func NewIPWhitelist(cfg ports.IPWhitelist, logger *slog.Logger) (*IPWhitelist, error) {
 	w := &IPWhitelist{
 		enabled:           cfg.Enabled,
 		allowedIPs:        make(map[string]struct{}),

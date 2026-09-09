@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ivanzzeth/remote-signer/internal/core/ports"
+
 	"gopkg.in/yaml.v3"
 
 	"github.com/ivanzzeth/remote-signer/internal/audit"
@@ -401,23 +403,11 @@ type ApprovalGuardConfig struct {
 	ResumeAfter           time.Duration `yaml:"resume_after"`            // pause duration after which to auto-resume (e.g. 2h)
 }
 
-// IPWhitelistConfig contains IP whitelist settings
-type IPWhitelistConfig struct {
-	// Enabled controls whether IP whitelist is enforced
-	Enabled bool `yaml:"enabled"`
-	// AllowedIPs is a list of allowed IP addresses or CIDR ranges
-	// Examples: "192.168.1.1", "10.0.0.0/8", "::1"
-	AllowedIPs []string `yaml:"allowed_ips"`
-	// TrustProxy enables parsing X-Forwarded-For and X-Real-IP headers
-	// WARNING: Only enable this if running behind a trusted reverse proxy
-	TrustProxy bool `yaml:"trust_proxy"`
-	// TrustedProxies is a list of IP addresses or CIDR ranges of trusted reverse proxies
-	// When TrustProxy is true, X-Forwarded-For/X-Real-IP headers are only honored
-	// if the request's direct RemoteAddr matches one of these entries.
-	// If TrustProxy is true but TrustedProxies is empty, proxy headers are ignored
-	// (fail-closed: no trusted proxies means no header trust).
-	TrustedProxies []string `yaml:"trusted_proxies"`
-}
+// IPWhitelistConfig is ports.IPWhitelist, kept here as an alias so YAML
+// decoding and existing callers keep working. It is a list of addresses and two
+// booleans — the delivery layer needs that shape to decide whether to let a
+// request in, and had to import this package (the composition root) to name it.
+type IPWhitelistConfig = ports.IPWhitelist
 
 // LoggerConfig contains logging configuration
 type LoggerConfig struct {

@@ -54,20 +54,11 @@ func (a *AuditLogger) SetOnHighRiskOperation(fn HighRiskOperationFunc) {
 	a.onHighRiskOperation = fn
 }
 
-// SeverityForEvent returns the appropriate severity for each event type.
+// SeverityForEvent is types.SeverityForEvent, kept here so existing callers
+// keep compiling. The mapping is a property of the event types themselves, not
+// of this logger — see the note on the moved function.
 func SeverityForEvent(eventType types.AuditEventType) types.AuditSeverity {
-	switch eventType {
-	case types.AuditEventTypeAuthFailure, types.AuditEventTypeSignRejected, types.AuditEventTypeSignFailed:
-		return types.AuditSeverityCritical
-	case types.AuditEventTypeApprovalDenied, types.AuditEventTypeRateLimitHit:
-		return types.AuditSeverityWarning
-	case types.AuditEventTypeSignerAutoLocked:
-		return types.AuditSeverityCritical
-	case types.AuditEventTypeSignerCreated, types.AuditEventTypeSignerUnlocked, types.AuditEventTypeHDWalletCreated, types.AuditEventTypePresetApplied:
-		return types.AuditSeverityWarning
-	default:
-		return types.AuditSeverityInfo
-	}
+	return types.SeverityForEvent(eventType)
 }
 
 // LogAuthSuccess logs a successful authentication event.

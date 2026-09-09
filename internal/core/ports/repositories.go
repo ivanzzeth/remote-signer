@@ -350,3 +350,18 @@ type SignerListFilter struct {
 type SignerOwnershipTransactional interface {
 	RunInTransaction(ctx context.Context, fn func(txOwnership SignerOwnershipRepository, txAccess SignerAccessRepository) error) error
 }
+
+// SignAuditSink is what the signing service needs from an audit log: somewhere
+// to record that a request was made and that it went to approval.
+//
+// ⚠️ Two methods, not the audit logger's full surface. The service asked for
+// *audit.AuditLogger before, so it depended on an adapter — and on the thirty
+// other methods that type has — to call two. A port describes what the caller
+// needs; the implementation is free to be larger.
+//
+// Nil is a legal value at the call site: audit logging is optional, and a
+// service that panics without it would make the logger mandatory by accident.
+type SignAuditSink interface {
+	LogSignRequest(ctx context.Context, req *types.SignRequest)
+	LogApprovalRequest(ctx context.Context, req *types.SignRequest)
+}

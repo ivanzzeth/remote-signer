@@ -16,8 +16,8 @@ import (
 	"github.com/ivanzzeth/remote-signer/internal/audit"
 	"github.com/ivanzzeth/remote-signer/internal/bootstrap"
 	"github.com/ivanzzeth/remote-signer/internal/chain/evm"
-	"github.com/ivanzzeth/remote-signer/internal/config"
 	"github.com/ivanzzeth/remote-signer/internal/core/auth"
+	"github.com/ivanzzeth/remote-signer/internal/core/ports"
 	"github.com/ivanzzeth/remote-signer/internal/core/registry"
 	"github.com/ivanzzeth/remote-signer/internal/core/rule"
 	"github.com/ivanzzeth/remote-signer/internal/core/service"
@@ -38,7 +38,7 @@ type TemplateConfig struct {
 type RouterConfig struct {
 	Version                  string
 	IPWhitelistConfig        *middleware.IPWhitelist
-	IPWhitelistConfigForRead *config.IPWhitelistConfig // optional: for GET /api/v1/acls/ip-whitelist (admin, read-only)
+	IPWhitelistConfigForRead *ports.IPWhitelist // optional: for GET /api/v1/acls/ip-whitelist (admin, read-only)
 	SolidityValidator        *evm.SolidityRuleValidator
 	JSEvaluator              *evm.JSRuleEvaluator
 	Template                 *TemplateConfig

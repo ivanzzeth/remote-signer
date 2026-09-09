@@ -4,22 +4,22 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ivanzzeth/remote-signer/internal/core/ports"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
-	"github.com/ivanzzeth/remote-signer/internal/notify"
 )
 
 // NotifyServiceNotifier implements Notifier using NotifyService
 type NotifyServiceNotifier struct {
-	notifyService *notify.NotifyService
-	channels      *notify.Channel
+	notifyService ports.Notifier
+	channels      *ports.NotifyChannel
 	priority      int
 	sound         string
 }
 
 // NotifyServiceNotifierConfig configuration for NotifyServiceNotifier
 type NotifyServiceNotifierConfig struct {
-	NotifyService *notify.NotifyService
-	Channels      *notify.Channel
+	NotifyService ports.Notifier
+	Channels      *ports.NotifyChannel
 	Priority      int    // Pushover priority (default: 1 for high)
 	Sound         string // Pushover sound (default: "persistent")
 }

@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ivanzzeth/remote-signer/internal/core/ports"
+
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 	"github.com/ivanzzeth/remote-signer/internal/logger"
 )
@@ -14,11 +16,10 @@ import (
 // Compile-time check that SignerManagerImpl implements SignerManager.
 var _ SignerManager = (*SignerManagerImpl)(nil)
 
-// HDHierarchyInfo stores parent-child relationship for HD derived addresses
-type HDHierarchyInfo struct {
-	ParentAddress   string
-	DerivationIndex uint32
-}
+// HDHierarchyInfo is ports.HDHierarchyInfo. Declaring it there lets
+// SignerManagerImpl satisfy ports.SignerInventory structurally, so the
+// use-case layer can name what it needs without importing this package.
+type HDHierarchyInfo = ports.HDHierarchyInfo
 
 // SignerManager manages signer lifecycle operations
 type SignerManager interface {

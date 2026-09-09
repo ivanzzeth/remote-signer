@@ -2083,10 +2083,12 @@ func TestSetSimulationRule(t *testing.T) {
 		t.Error("expected simulationRule to default to nil")
 	}
 
-	rule := &evmchain.SimulationBudgetRule{}
-	svc.SetSimulationRule(rule)
-	if svc.simulationRule != rule {
-		t.Error("simulationRule was not set correctly")
+	// The service holds a ports.SimulationBudgetEvaluator now, not the concrete
+	// rule, so identity against the rule is no longer the thing to assert — that
+	// the setter installed something is.
+	svc.SetSimulationRule(evmchain.NewSimulationBudgetPort(&evmchain.SimulationBudgetRule{}))
+	if svc.simulationRule == nil {
+		t.Error("simulationRule was not set")
 	}
 }
 
@@ -2202,7 +2204,7 @@ func TestSign_SimulationRuleNotAvailable(t *testing.T) {
 	// Set a simulation rule that is not available (nil simulator)
 	simRule, err := evmchain.NewSimulationBudgetRule(nil, nil, nil, nil, nil, nil, newTestLogger())
 	require.NoError(t, err)
-	svc.SetSimulationRule(simRule)
+	svc.SetSimulationRule(evmchain.NewSimulationBudgetPort(simRule))
 
 	resp, err := svc.Sign(ctx, &SignRequest{
 		ChainType:     types.ChainTypeEVM,
@@ -2266,7 +2268,7 @@ func TestSign_SimulationAllow(t *testing.T) {
 	}
 	simRule, err := evmchain.NewSimulationBudgetRule(sim, nil, nil, nil, nil, nil, newTestLogger())
 	require.NoError(t, err)
-	svc.SetSimulationRule(simRule)
+	svc.SetSimulationRule(evmchain.NewSimulationBudgetPort(simRule))
 
 	resp, err := svc.Sign(ctx, &SignRequest{
 		ChainType:     types.ChainTypeEVM,
@@ -2294,7 +2296,7 @@ func TestSign_SimulationDeny_Reverted(t *testing.T) {
 	}
 	simRule, err := evmchain.NewSimulationBudgetRule(sim, nil, nil, nil, nil, nil, newTestLogger())
 	require.NoError(t, err)
-	svc.SetSimulationRule(simRule)
+	svc.SetSimulationRule(evmchain.NewSimulationBudgetPort(simRule))
 
 	resp, err := svc.Sign(ctx, &SignRequest{
 		ChainType:     types.ChainTypeEVM,
@@ -2323,7 +2325,7 @@ func TestSign_SimulationDeny_NoRevertReason(t *testing.T) {
 	}
 	simRule, err := evmchain.NewSimulationBudgetRule(sim, nil, nil, nil, nil, nil, newTestLogger())
 	require.NoError(t, err)
-	svc.SetSimulationRule(simRule)
+	svc.SetSimulationRule(evmchain.NewSimulationBudgetPort(simRule))
 
 	resp, err := svc.Sign(ctx, &SignRequest{
 		ChainType:     types.ChainTypeEVM,

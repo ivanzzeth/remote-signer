@@ -35,7 +35,6 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/google/uuid"
 
-	evmchain "github.com/ivanzzeth/remote-signer/internal/chain/evm"
 	"github.com/ivanzzeth/remote-signer/internal/core/ports"
 	"github.com/ivanzzeth/remote-signer/internal/core/types"
 )
@@ -51,7 +50,7 @@ const DroppedTxGracePeriod = 10 * time.Minute
 type TransactionService struct {
 	repo        ports.TransactionRepository
 	requestRepo ports.RequestRepository
-	rpc         *evmchain.RPCProvider
+	rpc         ports.ReceiptFetcher
 	logger      *slog.Logger
 	gracePeriod time.Duration
 }
@@ -62,7 +61,7 @@ type TransactionService struct {
 func NewTransactionService(
 	repo ports.TransactionRepository,
 	requestRepo ports.RequestRepository,
-	rpc *evmchain.RPCProvider,
+	rpc ports.ReceiptFetcher,
 	logger *slog.Logger,
 ) (*TransactionService, error) {
 	if repo == nil {

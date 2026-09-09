@@ -1,28 +1,25 @@
 # Clean Architecture 依赖方向的违规边(importing-pkg -> imported-pkg)。
 # 由 cmd/archcheck 用 AST 读 import 得出;层的定义在 cmd/archcheck/layers.go。
 #
-# ✅ 2026-09-10:13 → 8。五条 core/* -> internal/storage 全部消除。
-#    修法:仓储接口、它们的查询结构、以及调用方要匹配的哨兵错误,搬进
-#    internal/core/ports —— **由使用它们的那一层声明**;internal/storage 实现,
-#    并用 `type X = ports.X` 别名回来,所以几百处 storage.RuleRepository 调用
-#    一行都没改,而每个类型仍然只有一个定义。
+# ✅ 2026-09-10:13 → 0。这张表现在是空的。
 #
-# ⚠️ 别名必须是 `type X = ports.X`(同一类型两个名字),不能写成 `type X ports.X`
-#    —— 后者是新类型,两者会悄悄不再互换。
+# 走过的路,按顺序:
+#   13 → 8  仓储接口、查询结构、哨兵错误搬进 internal/core/ports,
+#           由 internal/storage 实现并以 `type X = ports.X` 别名回来。
+#           五条 core/* -> storage 一次消除。
+#    8 → 7  SeverityForEvent 搬到 core/types —— 它是事件类型的分类,
+#           不是审计设施的行为。
+#    7 → 5  SignAuditSink(2 个方法)与 Notifier + NotifyChannel:
+#           service 此前为了调 Send 而依赖整个通知传输层。
+#    5 → 4  ChainRegistry / SimulationBudgetEvaluator / SignerInventory。
+#           SimulationOutcome 只保留 Decision 与 Reason 两个字段 —— 签名路径
+#           只读这两个,完整结果属于仿真引擎和渲染它的 UI。形状不同,所以
+#           evm 侧提供 SimulationBudgetPort 做映射(adapter -> usecase 是
+#           允许方向)。
+#    4 → 3  ReceiptFetcher(1 个方法),取代整个 RPCProvider。
+#    3 → 0  IPWhitelistConfig 搬进 ports —— 它是地址列表加两个开关,
+#           delivery 层为了判断放不放行,此前要 import 组装根。
 #
-# 剩下的 8 条:
-#   · api -> config(3):handler 直接读 config.Config,而不是拿装配好的值
-#   · core/service -> audit/notify/chain/chain-evm(4):领域层认识了具体实现,
-#     其中 chain/evm 那条最贵 —— 加第二条链要改领域层
-#   · core/statemachine -> audit(1)
-#
-# ⛔ 只许缩。⛔ 也不许通过放宽 layers.go 的 MayImport 让某条消失。
-
-internal/api -> internal/config
-internal/api/handler -> internal/config
-internal/api/middleware -> internal/config
-internal/core/service -> internal/audit
-internal/core/service -> internal/chain
-internal/core/service -> internal/chain/evm
-internal/core/service -> internal/notify
-internal/core/statemachine -> internal/audit
+# ⛔ 保持 0。⛔ 尤其不许通过放宽 layers.go 的 MayImport 让某条消失 ——
+# 那是把尺子改短来让人变高。真要新增一条,先问:内层需要的那个东西,
+# 能不能由内层声明成接口,让外层去满足?上面六步全是这一个动作。

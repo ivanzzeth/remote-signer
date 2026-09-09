@@ -6,17 +6,17 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ivanzzeth/remote-signer/internal/core/ports"
+
 	"github.com/ivanzzeth/remote-signer/internal/logger"
 	"github.com/rs/zerolog"
 )
 
-// Channel specifies which concrete channels to deliver to.
-type Channel struct {
-	Slack    []string `yaml:"slack,omitempty"`    // Slack channel IDs
-	Pushover []string `yaml:"pushover,omitempty"` // Pushover user keys
-	Webhook  []string `yaml:"webhook,omitempty"`  // Webhook URLs
-	Telegram []string `yaml:"telegram,omitempty"` // Telegram chat IDs or @channel
-}
+// Channel is ports.NotifyChannel — the destination list — kept here as an
+// alias so config and existing callers keep compiling. It is plain data
+// describing where a message goes, so it belongs with the interface that takes
+// it rather than with the transport that delivers it.
+type Channel = ports.NotifyChannel
 
 // SlackConfig holds Slack notification channel configuration.
 type SlackConfig struct {
