@@ -17,29 +17,68 @@ rules:
         - "0xa9059cbb"  # transfer(address,uint256)
         - "0x095ea7b3"  # approve(address,uint256)
 
-  # ERC20 transfer limits using Solidity expression
+  # ERC20 transfer limits, in evm_js.
+  #
+  # ⚠️ This example used evm_solidity_expression. That rule type is opt-in and
+  # off by default because evaluating one forks `forge script` — a Solidity
+  # compiler and an EVM — inside the process holding the private keys, on the
+  # signing path. An example that only works after the operator turns that on is
+  # not much of an example. evm_js (sobek, in-process, no subprocess) expresses
+  # the same limits.
   - id: "erc20-transfer-amount-validation"
     name: "ERC20 transfer amount validation"
-    type: "evm_solidity_expression"
+    type: "evm_js"
     mode: "whitelist"
     enabled: true
     description: "Validate ERC20 transfers with amount limits"
     config:
-      functions: |
-        function transfer(address to, uint256 amount) external {
-            require(amount <= 1000000 * 10**18, "exceeds 1M token limit");
-            require(to != address(0), "invalid recipient");
+      sign_type_filter: "transaction"
+      script: |
+        // 1M tokens at 18 decimals. A string, not a bigint literal: rs.bigint.requireLte
+        // parses its bound, and a literal ending in 'n' silently compared wrong.
+        var MAX_TRANSFER = '1000000000000000000000000';
+
+        function validate(input) {
+          var ctx = rs.tx.require(input);
+          var transferSel = selector('transfer(address,uint256)');
+          var approveSel = selector('approve(address,uint256)');
+
+          if (eq(ctx.selector, transferSel)) {
+            var dec = abi.decode(ctx.payloadHex, ['address', 'uint256']);
+            require(dec && dec.length === 2, 'transfer decode failed');
+            require(!rs.addr.isZero(dec[0]), 'invalid recipient');
+            rs.bigint.requireLte(dec[1], MAX_TRANSFER, 'exceeds 1M token limit');
+            return ok();
+          }
+          if (eq(ctx.selector, approveSel)) {
+            var d = abi.decode(ctx.payloadHex, ['address', 'uint256']);
+            require(d && d.length === 2, 'approve decode failed');
+            require(!rs.addr.isZero(d[0]), 'cannot approve zero address');
+            return ok();
+          }
+          revert('only transfer and approve allowed');
         }
-        function approve(address spender, uint256 amount) external {
-            require(spender != address(0), "cannot approve zero address");
-        }
-      test_cases:
-        - name: "should pass transfer 500k tokens"
-          input:
+    test_cases:
+      - name: "should pass transfer 500k tokens"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
+            to: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            value: "0x0"
             data: "0xa9059cbb0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc400000000000000000000000000000000000000000000006c6b935b8bbd400000"
-          expect_pass: true
-        - name: "should reject transfer to zero address"
-          input:
+        expect_pass: true
+      - name: "should reject transfer to zero address"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
+            to: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            value: "0x0"
             data: "0xa9059cbb000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006c6b935b8bbd400000"
-          expect_pass: false
-          expect_reason: "invalid recipient"
+        expect_pass: false
+        expect_reason: "invalid recipient"

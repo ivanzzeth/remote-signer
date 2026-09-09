@@ -279,7 +279,19 @@ func TestRulesDirectoryValidation(t *testing.T) {
 		}
 	}
 
-	require.NotEmpty(t, allRules, "no Solidity expression rules found across all files")
+	// ⚠️ Not an assertion any more: as of 2026-09-10 rules/ contains zero
+	// evm_solidity_expression rules. The nine templates and four rule files that
+	// used them were deleted — no preset referenced them, and the engine is
+	// opt-in and off by default, so they could not be applied on a default
+	// install anyway.
+	//
+	// The test stays because the engine stays: an operator who turns Foundry on
+	// and writes their own Solidity rules is still supported, and if a Solidity
+	// rule is ever added back to rules/ this validates it. With none present
+	// there is nothing to validate, which is a pass, not a failure.
+	if len(allRules) == 0 {
+		t.Skip("no evm_solidity_expression rules in rules/ — nothing to validate")
+	}
 	t.Logf("Validating %d Solidity expression rules from %d plain + %d template files", len(allRules), len(yamlFiles), len(templateFiles))
 
 	// Batch validate all rules

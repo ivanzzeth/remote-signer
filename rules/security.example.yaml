@@ -3,31 +3,61 @@
 # Whitelist rules then determine allowed sign types.
 
 rules:
+  # ⚠️ This example used evm_solidity_expression. That rule type is opt-in and
+  # off by default — evaluating one forks `forge script` inside the process
+  # holding the private keys — so an example written in it does not run on a
+  # default install. evm_js needs nothing turned on.
+  #
+  # ⛔ Note the mode: blocklist. A blocklist rule that errors is treated as a
+  # block (fail-closed), which is the whole point of putting the dangerous
+  # addresses here rather than in a whitelist.
   - id: "block-malicious-addresses"
     name: "Block malicious addresses"
-    type: "evm_solidity_expression"
+    type: "evm_js"
     mode: "blocklist"
     enabled: true
     description: "Block transfers to burn address and zero address"
     config:
-      expression: |
-        require(to != 0x000000000000000000000000000000000000dEaD, "blocked: burn address");
-        require(to != address(0), "blocked: zero address");
-      test_cases:
-        - name: "should pass for normal address"
-          input:
+      sign_type_filter: "transaction"
+      script: |
+        var BURN = '0x000000000000000000000000000000000000dEaD';
+
+        function validate(input) {
+          // ⛔ Not rs.tx.require: that insists on a decodable calldata, and a
+          // plain value transfer has none. This rule only looks at the
+          // destination, so requiring calldata would let a bare transfer to the
+          // burn address through — the exact case it exists to stop.
+          require(input.sign_type === 'transaction', 'not a transaction');
+          var tx = input.transaction || {};
+          var to = tx.to || '';
+          require(!rs.addr.eq(to, BURN), 'blocked: burn address');
+          require(!rs.addr.isZero(to), 'blocked: zero address');
+          return ok();
+        }
+    test_cases:
+      - name: "should pass for normal address"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
             to: "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4"
-          expect_pass: true
-        - name: "should block burn address"
-          input:
+            value: "0x0"
+            data: "0x"
+        expect_pass: true
+      - name: "should block burn address"
+        input:
+          sign_type: "transaction"
+          chain_id: 1
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
             to: "0x000000000000000000000000000000000000dEaD"
-          expect_pass: false
-          expect_reason: "blocked: burn address"
-        - name: "should block zero address"
-          input:
-            to: "0x0000000000000000000000000000000000000000"
-          expect_pass: false
-          expect_reason: "blocked: zero address"
+            value: "0x0"
+            data: "0x"
+        expect_pass: false
+        expect_reason: "blocked: burn address"
 
   - id: "allowed-signing-methods"
     name: "Allowed signing methods"
