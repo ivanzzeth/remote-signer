@@ -33,6 +33,16 @@ LAYERS=(
     "blackbox|integration| ./tests/integration/..."
     # 端到端:真起 daemon
     "e2e|e2e| ./e2e/..."
+    # ⭐ 非 go test 的层:tag 写 `@cmd`,第三段就是要执行的 shell 命令。
+    #
+    # 为什么必须把它登记在这里,而不是「CI 里有就行」:web-e2e 在 CI 里红着
+    # **20 个用例**,而本地 `make test LAYER=all` 全绿 —— 因为 make 根本不认识
+    # 这一层。这与 2026-09-09 发现的「e2e/ 46 个文件从没被 make 跑过」是同一个
+    # 形状:一个 tier 只要不在这张表里,它的红就没人看得见。
+    #
+    # ⚠️ 它要 node + playwright 浏览器,比 e2e 还慢,所以不进 all —— 见
+    # run-tests.sh 的 SLOW_LAYERS / OPT_IN_LAYERS。
+    "web-e2e|@cmd|cd web && npm run test:e2e"
 )
 
 layer_tag()   { local l; for l in "${LAYERS[@]}"; do [ "${l%%|*}" = "$1" ] && { local r=${l#*|}; echo "${r%%|*}"; return; }; done; return 1; }

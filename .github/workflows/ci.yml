@@ -24,8 +24,12 @@ jobs:
         with:
           go-version-file: 'go.mod'
           cache: true
-      - name: go test ./...
-        run: go test ./...
+      # ⛔ Do not spell the packages out here. scripts/lib/layers.sh is the
+      # single source of truth for what each tier runs; a second copy in CI
+      # drifts, and the way it shows up is "a tier is green locally and not run
+      # at all in CI", which is what happened to e2e.
+      - name: make test LAYER=unit http cli
+        run: make test
 
   go-test-integration:
     runs-on: ubuntu-latest
@@ -40,7 +44,7 @@ jobs:
         with:
           version: stable
       - name: go test -tags integration ./internal/...
-        run: go test -tags integration ./internal/...
+        run: make test LAYER=integration
 
   integration:
     runs-on: ubuntu-latest
@@ -51,7 +55,29 @@ jobs:
           go-version-file: 'go.mod'
           cache: true
       - name: go test -tags integration ./tests/integration/...
-        run: go test -tags integration ./tests/integration/...
+        run: make test LAYER=blackbox
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: pkg/js-client/package-lock.json
+      # e2e_javascript_client_test.go drives the JS SDK against the daemon.
+      - name: Build SDK
+        run: |
+          cd pkg/js-client
+          npm ci --no-audit --no-fund
+          npm run build
+      - name: make test LAYER=e2e
+        run: make test LAYER=e2e
 
   extension-build:
     runs-on: ubuntu-latest
@@ -128,10 +154,10 @@ jobs:
       - name: Install Playwright browsers
         run: cd web && npx playwright install --with-deps chromium
 
-      - name: Run Playwright e2e
+      - name: make test LAYER=web-e2e
         env:
           CI: 'true'
-        run: cd web && npx playwright test
+        run: make test LAYER=web-e2e
 
       - name: Upload Playwright report on failure
         if: failure()

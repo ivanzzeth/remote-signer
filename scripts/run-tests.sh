@@ -15,15 +15,20 @@ source scripts/lib/layers.sh
 GO=${GO:-go}
 DEFAULT_LAYERS="unit http cli"
 SLOW_LAYERS="integration blackbox e2e"
+# ⚠️ 需要 node + playwright 浏览器(`npx playwright install chromium`),装不上的
+# 机器上会红在环境而不是代码 —— 所以 `all` 不含它,必须显式 LAYER=web-e2e。
+# ⛔ 但它**必须**留在 layers.sh 里:不在那张表里的 tier,红了没人看得见。
+OPT_IN_LAYERS="web-e2e"
 
 want=${1:-}
 case "$want" in
     "")    layers=$DEFAULT_LAYERS ;;
     all)   layers="$DEFAULT_LAYERS $SLOW_LAYERS" ;;
+    everything) layers="$DEFAULT_LAYERS $SLOW_LAYERS $OPT_IN_LAYERS" ;;
     *)
         if ! layer_raw "$want" >/dev/null 2>&1; then
             echo "FAIL: 没有 LAYER=$want" >&2
-            echo "      可选: $(layer_names | tr '\n' ' ')(或 all)" >&2
+            echo "      可选: $(layer_names | tr '\n' ' ')(或 all / everything)" >&2
             exit 1
         fi
         layers=$want ;;
@@ -35,6 +40,13 @@ runflag=()
 rc=0
 for name in $layers; do
     tag=$(layer_tag "$name")
+    # 非 go test 的层:第三段就是命令,原样执行。
+    if [ "$tag" = "@cmd" ]; then
+        cmd=$(layer_raw "$name")
+        printf '==> %s 层 (%s)\n' "$name" "$cmd"
+        bash -c "$cmd" || rc=1
+        continue
+    fi
     pkgs=$(layer_pkgs "$name")
     if [ -z "$(printf '%s' "$pkgs" | tr -d ' ')" ]; then
         echo "==> $name 层:没有匹配的包,跳过"; continue

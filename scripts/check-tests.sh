@@ -49,7 +49,11 @@ find . -name '*_test.go' -not -path './vendor/*' -printf '%p\n' \
 
 # COVERED:各层 pattern 在自己 tag 下真的编译到的文件
 for name in $(layer_names); do
-    tag=$(layer_tag "$name"); pkgs=$(layer_pkgs "$name")
+    tag=$(layer_tag "$name")
+    # @cmd 层不是 go test(web-e2e 跑的是 playwright),它覆盖不到 *_test.go,
+    # 也不该被拿去喂 go list。
+    [ "$tag" = "@cmd" ] && continue
+    pkgs=$(layer_pkgs "$name")
     test_files_of "$tag" $pkgs >> "$covered_list"
 done
 sort -u -o "$covered_list" "$covered_list"
@@ -180,6 +184,42 @@ for pair in "files:$cb_files" "lines:$cb_lines"; do
         fail=1
     fi
 done
+
+# ---------- ⑥ 每一层都必须在 CI 里被跑到 ----------
+#
+# 一个 tier 只要 CI 不跑,它的红就没人看得见 —— 而本仓库连续踩到两次:
+#   · e2e/ 46 个测试文件,Makefile 里一个目标都没有(2026-09-09 发现)
+#   · 补上 make 目标之后,CI 里**依然没有 e2e job** —— 那 21 个失败被修好的那天,
+#     CI 也不会因此变绿或变红,因为它压根不跑(2026-09-10 发现)
+#   · web-e2e 反过来:CI 跑,而 make 不认识它,20 个失败在本地全量里是看不见的
+#
+# 判据:*把某一层从 CI 里删掉,这条门禁会不会红?* 会。
+#
+# ⚠️ 判定方式是「CI 里必须出现 `make test LAYER=<名>`」,而不是「出现某个
+# go test 命令」。这样 CI 与 layers.sh 共用同一个执行器,包列表只有一份 ——
+# CI 里手抄一份 go test 正是上一次漂掉的原因。
+echo "==> 每一层都在 CI 里被跑到"
+CI_YML=.github/workflows/ci.yml
+if [ ! -f "$CI_YML" ]; then
+    printf '  ✗ 找不到 %s\n' "$CI_YML" >&2
+    fail=1
+else
+    for name in $(layer_names); do
+        # 默认层由不带 LAYER 的 `make test` 一起跑到
+        case "$name" in
+            unit|http|cli)
+                grep -qE '^\s+run: make test\s*$' "$CI_YML" && continue
+                printf '  ✗ %s 层:CI 里没有裸 `make test`(默认层 unit/http/cli 靠它跑)\n' "$name" >&2
+                fail=1; continue ;;
+        esac
+        if ! grep -qE "run: make test LAYER=$name\b" "$CI_YML"; then
+            printf '  ✗ %s 层:CI 里没有 `make test LAYER=%s` —— 这一层的红没人看得见\n' "$name" "$name" >&2
+            printf '     改法:在 %s 加一个 job 跑它;要真的不跑就先把它从 layers.sh 删掉,\n' "$CI_YML" >&2
+            printf '           别让一个登记在册却无人执行的层继续假装存在。\n' >&2
+            fail=1
+        fi
+    done
+fi
 
 if [ "$fail" -ne 0 ]; then
     echo >&2
