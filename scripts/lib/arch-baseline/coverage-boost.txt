@@ -3,27 +3,27 @@
 # 这些文件的名字直说了存在理由是抬覆盖率数字,不是描述行为。后果:它们的失败
 # 信息读不出「什么坏了」,只读得出「某一行没被走到」——于是没人修,只会被注掉。
 #
-# ⛔ 2026-09-10 实测:审计里「先跑一遍确认无独占覆盖,然后删掉」这条建议
-#    **执行不了**,证据如下(go test -tags integration -cover,移走这 13 个文件前后):
+# ⛔ 审计里「确认无独占覆盖后删掉」这条**执行不了**,实测(go test -cover,
+#    移走全部 boost 文件前后):
 #
-#      internal/api/handler        92.0% → 89.1%   (−2.9pp)
-#      internal/api/handler/evm    71.4% → 53.5%   (−17.9pp)
-#      internal/chain/evm          83.4% → 编译失败
+#      internal/api/handler        92.0% → 89.1%
+#      internal/api/handler/evm    71.4% → 53.5%
+#      internal/chain/evm          83.4% → 70.4%
 #
-#    第三行是关键:coverage_boost_test.go 里定义着 mockPasswordProvider 等
-#    **共享 helper**,同包其它测试依赖它们。也就是说这些文件不只是覆盖率填充,
-#    它们同时是这个包的测试基础设施。
+#    17.9 个点不是噪声,是别处没有的错误路径覆盖。整体删除会掉真覆盖。
 #
-#    17.9pp 也不是噪声 —— 那是真实的、别处没有的错误路径覆盖。整体删除会让
-#    handler/evm 的覆盖率掉回一半出头。
+# ✅ 2026-09-10 已完成第一步(共享 helper 归位):
+#    chain/evm 那一行此前是「**编译失败**」—— mockPasswordProvider 与
+#    transferCalldata 定义在 boost 文件里,而普通的 provider / solidity 测试依赖
+#    它们。也就是说这些文件同时是该包的测试基础设施,删不掉不是因为覆盖率,
+#    是因为别的测试编译不过。两个 helper 已搬进 shared_test_helpers_test.go,
+#    现在移走 boost 文件那个包能正常编译并跑。
 #
-# 所以正确的做法**不是删**,是逐个看:
-#   · 共享 helper → 搬去同包的 shared_test_helpers_test.go(那是它们该待的地方)
+# 剩下两步(都让下面的数字变小,且都不掉覆盖):
 #   · 能说清测的是什么行为的 → 改名搬去对应的 _test.go
 #   · 说不清的 → 才删
-# 三种做法都让下面的数字变小,而且都不会掉覆盖。
 #
 # ⚠️ 变小也红 —— 那一刻正是把基线改小的时候(一行编辑)。
 
 files      13
-lines   15701
+lines   15681

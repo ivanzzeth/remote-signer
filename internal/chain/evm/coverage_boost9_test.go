@@ -4,7 +4,6 @@ package evm
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -65,15 +64,6 @@ func defaultRequestEnv() []string {
 		"RULE_CHAIN_ID=1",
 		"RULE_SIGNER=0x5B38Da6a701c568545dCfcB03FcB875f56beddC4",
 	}
-}
-
-func transferCalldata() []byte {
-	b, _ := hex.DecodeString(
-		"a9059cbb" +
-			"0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc4" +
-			"0000000000000000000000000000000000000000000000000000000000000001",
-	)
-	return b
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

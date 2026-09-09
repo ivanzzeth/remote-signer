@@ -1311,16 +1311,6 @@ func TestNewSignerRegistryWithProvider_DisabledKeystoreSkipped_CB(t *testing.T) 
 	assert.Len(t, signers, 1)
 }
 
-// mockPasswordProvider for testing
-type mockPasswordProvider struct {
-	password []byte
-	err      error
-}
-
-func (m *mockPasswordProvider) GetPassword(address string, config KeystoreConfig) ([]byte, error) {
-	return m.password, m.err
-}
-
 // =============================================================================
 // signer.go: ListSigners and GetSigner (0% -> covered)
 // =============================================================================

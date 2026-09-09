@@ -1,6 +1,7 @@
 package evm
 
 import (
+	"encoding/hex"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -40,4 +41,29 @@ func testLogger() *slog.Logger {
 // strPtr returns a pointer to the given string.
 func strPtr(s string) *string {
 	return &s
+}
+
+// mockPasswordProvider returns a fixed password (or error) for any address.
+//
+// ⚠️ It lived in coverage_boost_test.go, which meant the ordinary provider tests
+// could not compile without a file whose stated purpose is moving a coverage
+// number. Shared test infrastructure belongs here — see TESTING.md.
+type mockPasswordProvider struct {
+	password []byte
+	err      error
+}
+
+func (m *mockPasswordProvider) GetPassword(address string, config KeystoreConfig) ([]byte, error) {
+	return m.password, m.err
+}
+
+// transferCalldata is an ERC20 transfer(to, 1) call, used by several tests that
+// need a well-formed payload without caring what is in it.
+func transferCalldata() []byte {
+	b, _ := hex.DecodeString(
+		"a9059cbb" +
+			"0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc4" +
+			"0000000000000000000000000000000000000000000000000000000000000001",
+	)
+	return b
 }
