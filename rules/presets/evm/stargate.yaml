@@ -1,0 +1,112 @@
+# Preset: Stargate Fast Swaps (Aori-powered cross-chain bridge).
+# Single preset across all Aori-supported source chains; per-chain Matrix overrides
+# contract addresses, spenders, srcEid, and source-chain input tokens.
+#
+# Sign flow: (1) ERC20 approve to Aori contract (2) Aori Order typed_data.
+# Address sources: GET https://api.aori.io/chains , GET https://api.aori.io/tokens
+# Domain: GET https://api.aori.io/domain
+#
+# Pattern: same as presets/evm/uniswap.yaml — defaults + matrix, no preset chain_id.
+
+name: "Stargate"
+chain_type: "evm"
+enabled: true
+defaults:
+  domain_name: "Aori"
+  domain_version: "0.3.1"
+  token_address: ""  # empty = any token on source chain; approve spender restricted per matrix
+  max_approve_amount: "-1"
+  max_transfer_amount: "0"
+  max_input_amount: "-1"
+  max_output_amount: "-1"
+  allowed_recipients: ""
+  allowed_transfer_from: ""
+  # Required by evm/aori / evm/erc20 templates; matrix rows override per chain at eval time.
+  aori_contract_address: "0xffe691a6ddb5d2645321e0a920c2e7bdd00dd3d8"
+  allowed_spenders: "0xffe691a6ddb5d2645321e0a920c2e7bdd00dd3d8"
+  allowed_src_eids: "30102"
+  allowed_input_tokens: ""
+  allowed_dst_eids: "30101,30111,30333,30102,30390,30396,30398,30184,30383,30110"
+  allowed_output_tokens: "0x00000000efe302beaa2b3e6e1b18d08d69a9012a,0x000ae314e2a2172a039b26378814c252734f556a,0x01bff41798a0bcf287b996046ca68b395dbc1071,0x0a1a1a107e45b7ced86833863f482bc5f4ed82ef,0x0b2c639c533813f4aa9d7837caf62653d097ff85,0x0b3e328455c4059eeb9e3f84b5543f74e24e7e1b,0x0c880f6761f1af8d9aa9c466984b80dab9a8c9e8,0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82,0x1abaea1f7c830bd89acc67ec4af516284b1bc33c,0x1f32b1c2345538c0c6f582fcb022739c4a194ebb,0x2170ed0880ac9a755fd29b2688956bd959f933f8,0x2260fac5e5542a773aa44fbcfedf7c193bc2c599,0x28b7e77f82b25b95953825f1e3ea0e36c1c29861,0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f,0x35751007a407ca6feffe80b3cb397736d2cf4dbe,0x3bd359c1119da7da1d913d1c4d2b7c461115433a,0x405fbc9004d857903bfd6b3357792d71a50726b0,0x4200000000000000000000000000000000000006,0x4200000000000000000000000000000000000042,0x437cc33344a0b27a429f795ff6b469c72698b291,0x4c9edd5852cd905f086c759e8383e09bff1e68b3,0x55d398326f99059ff775485246999027b3197955,0x5979d7b546e38e414f7e9822514be443a4800529,0x5d3a1ff2b6bab83b63cd9ad0787074081a52ef34,0x6100e367285b01f48d07953803a2d8dca5d19873,0x64351fc9810adad17a690e4e1717df5e7e085160,0x68749665ff8d2d112fa859aa293f07a622782f38,0x68f180fcce6836688e9084f035309e29bf0a2095,0x6982508145454ce325ddbe47a25d4ec3d2311933,0x6985884c4392d348587b19cb9eaaf157f13271cd,0x6b175474e89094c44da98b954eedeac495271d0f,0x6c3ea9036406852006290770bedfcaba0e23a0e8,0x6c84a8f1c29108f47a79964b5fe888d4f4d0de40,0x7130d2a12b9bcbfae4f2634d864a1ee1ce3ead9c,0x73a15fed60bf67631dc6cd7bc5b6e8da8190acf5,0x754704bc059f8c67012fed69bc8a327a5aafb603,0x779ded0c9e1022225f8e0630b35a9b54be713736,0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0,0x7f5c764cbc14f9669b88837ca1490cca17c31607,0x808507121b80c02388fad14726482e061b8da827,0x8236a87084f8b84306f72007f36f2618a5634494,0x8292bb45bf1ee4d140127049757c2e0ff06317ed,0x82af49447d8a07e3bd95bd0d56f35241523fbab1,0x833589fcd6edb6e08f4c7c32d4f71b54bda02913,0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d,0x912ce59144191c1204e64559fe8253a0e49e6548,0x940181a94a35a4569e4529a3cdfb74e38fd98631,0x94b008aa00579c1307b0ef2c499ad98a8ce58e58,0x9895d81bb462a195b4922ed7de0e3acd007c32cb,0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48,0xaf88d065e77c8cc2239327c5edb3a432268e5831,0xb0f70c0bd6fd87dbeb7c10dc692a2a6106817072,0xb8ce59fc3717ada4c02eadf9682a9e934f625ebb,0xba5ddd1f9d7f570dc94a51479a000e3bce967196,0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c,0xbdf43ecadc5cef51b7d1772f722e40596bc1788b,0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2,0xc1cba3fcea344f92d9239c08c0568f6f2f0ee452,0xc50673edb3a7b94e8cad8a7d4e0cd68864e33edf,0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf,0xce24439f2d9c6a2289f741120fe202248b666666,0xc2132d05d31c914a87c6611c10748aeb04b58e8f,0xd533a949740bb3306d119cc777fa900ba034cd52,0xd5f7838f5c461feff7fe49ea5ebaf7728bb0adfa,0xda10009cbd5d07dd0cecc66161fc93d7c9000da1,0xdac17f958d2ee523a2206206994597c13d831ec7,0xe7cd86e13ac4309349f30b3435a9d337750fc82d,0xe80772eaf6e2e18b651f160bc9158b2a5cafca65,0xee8c0e9f1bffb4eb878d8f15f368a02a35481242,0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee,0xf939e0a03fb07f59a73314e73794be0e57ac1b4e,0xf97f4df75117a78c1a5a0dbb814af92458539fb4,0xfafddbb3fc7688494971a79cc65dca3ef82079e7,0xfc5a1a6eb076a2c7ad06ed22c90d7e710e35ad0a,0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9,0xfdd22ce6d1f66bc0ec89b20bf16ccb6670f55a5a,0xfde4c96c8593536e31f229ea8f37b2ada2699bb2,0xff970a61a04b1ca14834a43f5de4533ebddb5cc8"
+  allowed_pool_contracts: ""
+  max_native_fee: "-1"
+template_ids:
+  - evm/erc20
+  - evm/aori
+  - evm/stargate_ioft
+matrix:
+  # --- ethereum (1) ---
+  - chain_id: "1"
+    aori_contract_address: "0x0736bdc975af0675b9a045384efed91360d25479"
+    allowed_spenders: "0x0736bdc975af0675b9a045384efed91360d25479"
+    allowed_src_eids: "30101"
+    allowed_input_tokens: "0x00000000efe302beaa2b3e6e1b18d08d69a9012a,0x1abaea1f7c830bd89acc67ec4af516284b1bc33c,0x2260fac5e5542a773aa44fbcfedf7c193bc2c599,0x437cc33344a0b27a429f795ff6b469c72698b291,0x4c9edd5852cd905f086c759e8383e09bff1e68b3,0x64351fc9810adad17a690e4e1717df5e7e085160,0x68749665ff8d2d112fa859aa293f07a622782f38,0x6982508145454ce325ddbe47a25d4ec3d2311933,0x6b175474e89094c44da98b954eedeac495271d0f,0x6c3ea9036406852006290770bedfcaba0e23a0e8,0x73a15fed60bf67631dc6cd7bc5b6e8da8190acf5,0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0,0x808507121b80c02388fad14726482e061b8da827,0x8236a87084f8b84306f72007f36f2618a5634494,0x8292bb45bf1ee4d140127049757c2e0ff06317ed,0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48,0xbdf43ecadc5cef51b7d1772f722e40596bc1788b,0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2,0xc50673edb3a7b94e8cad8a7d4e0cd68864e33edf,0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf,0xd533a949740bb3306d119cc777fa900ba034cd52,0xd5f7838f5c461feff7fe49ea5ebaf7728bb0adfa,0xdac17f958d2ee523a2206206994597c13d831ec7,0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee,0xf939e0a03fb07f59a73314e73794be0e57ac1b4e"
+  # --- optimism (10) ---
+  - chain_id: "10"
+    aori_contract_address: "0xc6868edf1d2a7a8b759856cb8afa333210dfeda6"
+    allowed_spenders: "0xc6868edf1d2a7a8b759856cb8afa333210dfeda6"
+    allowed_src_eids: "30111"
+    allowed_input_tokens: "0x01bff41798a0bcf287b996046ca68b395dbc1071,0x0b2c639c533813f4aa9d7837caf62653d097ff85,0x1f32b1c2345538c0c6f582fcb022739c4a194ebb,0x4200000000000000000000000000000000000006,0x4200000000000000000000000000000000000042,0x68f180fcce6836688e9084f035309e29bf0a2095,0x6c84a8f1c29108f47a79964b5fe888d4f4d0de40,0x7f5c764cbc14f9669b88837ca1490cca17c31607,0x94b008aa00579c1307b0ef2c499ad98a8ce58e58,0xda10009cbd5d07dd0cecc66161fc93d7c9000da1,0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  # --- rootstock (30) ---
+  - chain_id: "30"
+    aori_contract_address: "0xffe691a6ddb5d2645321e0a920c2e7bdd00dd3d8"
+    allowed_spenders: "0xffe691a6ddb5d2645321e0a920c2e7bdd00dd3d8"
+    allowed_src_eids: "30333"
+    allowed_input_tokens: "0x779ded0c9e1022225f8e0630b35a9b54be713736"
+  # --- bsc (56) ---
+  - chain_id: "56"
+    aori_contract_address: "0xffe691a6ddb5d2645321e0a920c2e7bdd00dd3d8"
+    allowed_spenders: "0xffe691a6ddb5d2645321e0a920c2e7bdd00dd3d8,0x138EB30f73BC423c6455C53df6D89CB01d9eBc63,0x962Bd449E630b0d928f308Ce63f1A21F02576057"
+    allowed_pool_contracts: "0x138EB30f73BC423c6455C53df6D89CB01d9eBc63,0x962Bd449E630b0d928f308Ce63f1A21F02576057"
+    allowed_src_eids: "30102"
+    allowed_input_tokens: "0x000ae314e2a2172a039b26378814c252734f556a,0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82,0x2170ed0880ac9a755fd29b2688956bd959f933f8,0x405fbc9004d857903bfd6b3357792d71a50726b0,0x55d398326f99059ff775485246999027b3197955,0x7130d2a12b9bcbfae4f2634d864a1ee1ce3ead9c,0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d,0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c,0xce24439f2d9c6a2289f741120fe202248b666666,0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  # --- monad (143) ---
+  - chain_id: "143"
+    aori_contract_address: "0xffe691a6ddb5d2645321e0a920c2e7bdd00dd3d8"
+    allowed_spenders: "0xffe691a6ddb5d2645321e0a920c2e7bdd00dd3d8"
+    allowed_src_eids: "30390"
+    allowed_input_tokens: "0x00000000efe302beaa2b3e6e1b18d08d69a9012a,0x3bd359c1119da7da1d913d1c4d2b7c461115433a,0x754704bc059f8c67012fed69bc8a327a5aafb603,0xe7cd86e13ac4309349f30b3435a9d337750fc82d,0xee8c0e9f1bffb4eb878d8f15f368a02a35481242,0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  # --- stable (988) ---
+  - chain_id: "988"
+    aori_contract_address: "0xffe691a6ddb5d2645321e0a920c2e7bdd00dd3d8"
+    allowed_spenders: "0xffe691a6ddb5d2645321e0a920c2e7bdd00dd3d8"
+    allowed_src_eids: "30396"
+    allowed_input_tokens: "0x779ded0c9e1022225f8e0630b35a9b54be713736"
+  # --- megaeth (4326) ---
+  - chain_id: "4326"
+    aori_contract_address: "0xffe691a6ddb5d2645321e0a920c2e7bdd00dd3d8"
+    allowed_spenders: "0xffe691a6ddb5d2645321e0a920c2e7bdd00dd3d8"
+    allowed_src_eids: "30398"
+    allowed_input_tokens: "0x28b7e77f82b25b95953825f1e3ea0e36c1c29861,0x4200000000000000000000000000000000000006,0xb0f70c0bd6fd87dbeb7c10dc692a2a6106817072,0xb8ce59fc3717ada4c02eadf9682a9e934f625ebb,0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee,0xfafddbb3fc7688494971a79cc65dca3ef82079e7"
+  # --- base (8453) ---
+  - chain_id: "8453"
+    aori_contract_address: "0xc6868edf1d2a7a8b759856cb8afa333210dfeda6"
+    allowed_spenders: "0xc6868edf1d2a7a8b759856cb8afa333210dfeda6"
+    allowed_src_eids: "30184"
+    allowed_input_tokens: "0x0b3e328455c4059eeb9e3f84b5543f74e24e7e1b,0x4200000000000000000000000000000000000006,0x6985884c4392d348587b19cb9eaaf157f13271cd,0x833589fcd6edb6e08f4c7c32d4f71b54bda02913,0x940181a94a35a4569e4529a3cdfb74e38fd98631,0xc1cba3fcea344f92d9239c08c0568f6f2f0ee452,0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf,0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee,0xfde4c96c8593536e31f229ea8f37b2ada2699bb2"
+  # --- plasma (9745) ---
+  - chain_id: "9745"
+    aori_contract_address: "0xffe691a6ddb5d2645321e0a920c2e7bdd00dd3d8"
+    allowed_spenders: "0xffe691a6ddb5d2645321e0a920c2e7bdd00dd3d8"
+    allowed_src_eids: "30383"
+    allowed_input_tokens: "0x6100e367285b01f48d07953803a2d8dca5d19873,0x9895d81bb462a195b4922ed7de0e3acd007c32cb,0xb8ce59fc3717ada4c02eadf9682a9e934f625ebb,0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  # --- arbitrum (42161) ---
+  - chain_id: "42161"
+    aori_contract_address: "0xc6868edf1d2a7a8b759856cb8afa333210dfeda6"
+    allowed_spenders: "0xc6868edf1d2a7a8b759856cb8afa333210dfeda6"
+    allowed_src_eids: "30110"
+    allowed_input_tokens: "0x0a1a1a107e45b7ced86833863f482bc5f4ed82ef,0x0c880f6761f1af8d9aa9c466984b80dab9a8c9e8,0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f,0x35751007a407ca6feffe80b3cb397736d2cf4dbe,0x437cc33344a0b27a429f795ff6b469c72698b291,0x5979d7b546e38e414f7e9822514be443a4800529,0x5d3a1ff2b6bab83b63cd9ad0787074081a52ef34,0x6985884c4392d348587b19cb9eaaf157f13271cd,0x82af49447d8a07e3bd95bd0d56f35241523fbab1,0x912ce59144191c1204e64559fe8253a0e49e6548,0xaf88d065e77c8cc2239327c5edb3a432268e5831,0xba5ddd1f9d7f570dc94a51479a000e3bce967196,0xda10009cbd5d07dd0cecc66161fc93d7c9000da1,0xe80772eaf6e2e18b651f160bc9158b2a5cafca65,0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee,0xf97f4df75117a78c1a5a0dbb814af92458539fb4,0xfc5a1a6eb076a2c7ad06ed22c90d7e710e35ad0a,0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9,0xfdd22ce6d1f66bc0ec89b20bf16ccb6670f55a5a,0xff970a61a04b1ca14834a43f5de4533ebddb5cc8"
+# No preset-level budget: multi-chain matrix has no single chain_id at apply time (same as uniswap.yaml).
+operator_overrides:
+  - name: max_approve_amount
+    required: false
+  - name: max_input_amount
+    required: false
+  - name: max_output_amount
+    required: false
+  - name: allowed_dst_eids
+    required: false
+  - name: allowed_output_tokens
+    required: false
+  - name: allowed_input_tokens
+    required: false

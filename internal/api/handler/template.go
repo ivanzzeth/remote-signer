@@ -258,161 +258,50 @@ func (h *TemplateHandler) validateTemplate(w http.ResponseWriter, r *http.Reques
 		resolvedVars["chain_id"] = testVars["chain_id"]
 	}
 
-	// Substitute variables into config
-	resolvedConfig, err := service.SubstituteVariables(tmpl.Config, resolvedVars) //nolint:staticcheck
-	if err != nil {
+	if err := validateRequiredTemplateVars(varDefs, resolvedVars); err != nil {
+		h.writeError(w, fmt.Sprintf("variable substitution failed: %s", err.Error()), http.StatusBadRequest)
+		return
+	}
+	// Dry-run: ensure all ${var} placeholders in config resolve (without mutating config;
+	// test case inputs are substituted per chain_id inside RunJSTestCases).
+	//lint:ignore SA1019 R8 迁移未完成:SubstituteTyped 需要变量定义,语义也不同(带类型转换),
+	// 而这里只要一次「占位符是否都能解析」的 dry-run。换过去要先确认 typed 版对
+	// 未解析占位符的报错行为一致 —— 那是 R8 的范围,不是本次重构的。
+	if _, err := service.SubstituteVariables(tmpl.Config, resolvedVars); err != nil {
 		h.writeError(w, fmt.Sprintf("variable substitution failed: %s", err.Error()), http.StatusBadRequest)
 		return
 	}
 
-	// Parse the resolved config as a rules array
-	var results []*validateRuleResultItem
-	totalPassed := 0
-	totalFailed := 0
-	var configDoc struct {
-		Rules []struct {
-			ID     string                 `json:"id"`
-			Name   string                 `json:"name"`
-			Type   string                 `json:"type"`
-			Mode   string                 `json:"mode"`
-			Config map[string]interface{} `json:"config"`
-		} `json:"rules"`
-	}
-	if err := json.Unmarshal(resolvedConfig, &configDoc); err != nil {
-		// Try flat config directly (non-bundle templates)
-		var flatConfig struct {
-			Script    string                   `json:"script"`
-			TestCases []map[string]interface{} `json:"test_cases"`
-		}
-		if flatErr := json.Unmarshal(resolvedConfig, &flatConfig); flatErr != nil {
-			// Third fallback: non-evm_js template (e.g. sign_type_restriction).
-			results = append(results, &validateRuleResultItem{
+	configForValidate := normalizeTemplateConfigForValidation(tmpl, tmpl.Config)
+	if isUnrecognizedTemplateConfig(tmpl.Config) {
+		h.writeJSON(w, validateTemplateResponse{
+			TemplateID:   templateID,
+			TemplateName: tmpl.Name,
+			Results: []*validateRuleResultItem{{
 				RuleName: tmpl.Name,
 				Type:     string(tmpl.Type),
 				Mode:     string(tmpl.Mode),
 				Valid:    true,
 				Error:    "non-evm_js template (config format not recognized)",
-			})
-			totalPassed++
-			resp := validateTemplateResponse{
-				TemplateID:   templateID,
-				TemplateName: tmpl.Name,
-				Results:      results,
-				Total:        len(results),
-				Passed:       totalPassed,
-				Failed:       totalFailed,
-			}
-			h.writeJSON(w, resp, http.StatusOK)
-			return
-		}
-		configDoc.Rules = []struct {
-			ID     string                 `json:"id"`
-			Name   string                 `json:"name"`
-			Type   string                 `json:"type"`
-			Mode   string                 `json:"mode"`
-			Config map[string]interface{} `json:"config"`
-		}{
-			{Name: tmpl.Name, Type: string(tmpl.Type), Mode: string(tmpl.Mode), Config: resolvedVarsToConfig(resolvedConfig)},
-		}
+			}},
+			Total:  1,
+			Passed: 1,
+			Failed: 0,
+		}, http.StatusOK)
+		return
 	}
 
-	// Parse types from the template's top-level if rules don't override
-
-	for _, rule := range configDoc.Rules {
-		item := &validateRuleResultItem{
-			RuleName: rule.Name,
-			Type:     rule.Type,
-			Mode:     rule.Mode,
-		}
-
-		if rule.Type != string(types.RuleTypeEVMJS) {
-			item.Valid = true
-			item.Error = "non-evm_js rules are not validated"
-			results = append(results, item)
+	results, allPassed := ValidateTemplateConfig(h.jsEvaluator, tmpl.Name, configForValidate, resolvedVars)
+	totalPassed := 0
+	totalFailed := 0
+	for _, r := range results {
+		if r.Valid {
 			totalPassed++
-			continue
-		}
-
-		// Extract test_cases from the rule's config
-		testCasesRaw, hasTC := rule.Config["test_cases"]
-		if !hasTC || testCasesRaw == nil {
-			item.Valid = true
-			results = append(results, item)
-			totalPassed++
-			continue
-		}
-		tcJSON, err := json.Marshal(testCasesRaw)
-		if err != nil {
-			item.Error = fmt.Sprintf("invalid test_cases: %v", err)
-			results = append(results, item)
-			totalFailed++
-			continue
-		}
-		var testCases []evmhandlerJSRuleTestCase
-		if err := json.Unmarshal(tcJSON, &testCases); err != nil {
-			item.Error = fmt.Sprintf("invalid test_cases: %v", err)
-			results = append(results, item)
-			totalFailed++
-			continue
-		}
-
-		if len(testCases) == 0 {
-			item.Valid = true
-			results = append(results, item)
-			totalPassed++
-			continue
-		}
-
-		// Extract script from config
-		scriptRaw, ok := rule.Config["script"]
-		if !ok {
-			item.Error = "no script in rule config"
-			results = append(results, item)
-			totalFailed++
-			continue
-		}
-		script, ok := scriptRaw.(string)
-		if !ok {
-			item.Error = "script is not a string"
-			results = append(results, item)
-			totalFailed++
-			continue
-		}
-
-		// Build config map excluding script and test_cases
-		cfgMap := make(map[string]interface{})
-		for k, v := range rule.Config {
-			if k != "script" && k != "test_cases" && k != "description" {
-				cfgMap[k] = v
-			}
-		}
-		// Merge template-level variables into cfgMap so JS scripts can
-		// reference them via config.xxx (e.g. config.exchange_v2_address).
-		for k, v := range resolvedVars {
-			if _, exists := cfgMap[k]; !exists {
-				cfgMap[k] = v
-			}
-		}
-
-		// Run each test case
-		var failedCases []string
-		for _, tc := range testCases {
-			result := runJSTestCase(h.jsEvaluator, script, cfgMap, tc, types.RuleMode(rule.Mode))
-			if !result.Passed {
-				failedCases = append(failedCases, fmt.Sprintf("%s: %s", result.Name, result.Reason))
-			}
-		}
-
-		if len(failedCases) > 0 {
-			item.Valid = false
-			item.Error = fmt.Sprintf("%d test case(s) failed", len(failedCases))
-			totalFailed++
 		} else {
-			item.Valid = true
-			totalPassed++
+			totalFailed++
 		}
-		results = append(results, item)
 	}
+	_ = allPassed
 
 	resp := validateTemplateResponse{
 		TemplateID:   tmpl.ID,
@@ -433,65 +322,100 @@ type evmhandlerJSRuleTestCase struct {
 	ExpectPass bool                   `json:"expect_pass"`
 }
 
-// runJSTestCase runs a single test case against the JS evaluator.
+// runJSTestCase runs a single test case via the shared evm.RunJSTestCases path.
 func runJSTestCase(eval *evm.JSRuleEvaluator, script string, cfgMap map[string]interface{}, tc evmhandlerJSRuleTestCase, mode types.RuleMode) struct {
 	Name   string
 	Passed bool
 	Reason string
 } {
-	req, parsed, err := evm.TestCaseInputToSignRequest(tc.Input)
-	if err != nil {
+	vars := cfgMapToStringVars(cfgMap)
+	jsTC := evm.JSTestCase{
+		Name:       tc.Name,
+		Input:      tc.Input,
+		Variables:  tc.Variables,
+		ExpectPass: tc.ExpectPass,
+	}
+	results, _ := eval.RunJSTestCases(script, []evm.JSTestCase{jsTC}, evm.VarsEvalContext(vars))
+	if len(results) == 0 {
 		return struct {
 			Name   string
 			Passed bool
 			Reason string
-		}{Name: tc.Name, Passed: false, Reason: fmt.Sprintf("invalid input: %v", err)}
+		}{Name: tc.Name, Passed: false, Reason: "no result"}
 	}
-	ruleInput, err := evm.BuildRuleInput(req, parsed)
-	if err != nil {
-		return struct {
-			Name   string
-			Passed bool
-			Reason string
-		}{Name: tc.Name, Passed: false, Reason: fmt.Sprintf("build input: %v", err)}
-	}
-	effectiveCfg := cfgMap
-	if len(tc.Variables) > 0 {
-		effectiveCfg = make(map[string]interface{}, len(cfgMap)+len(tc.Variables))
-		for k, v := range cfgMap {
-			effectiveCfg[k] = v
-		}
-		for k, v := range tc.Variables {
-			effectiveCfg[k] = v
-		}
-	}
-	result := eval.ValidateWithInput(script, ruleInput, effectiveCfg)
-	actualPass := result.Valid
-	if actualPass != tc.ExpectPass {
-		if tc.ExpectPass {
-			return struct {
-				Name   string
-				Passed bool
-				Reason string
-			}{Name: tc.Name, Passed: false, Reason: fmt.Sprintf("expected pass but got: %s", result.Reason)}
-		}
-		return struct {
-			Name   string
-			Passed bool
-			Reason string
-		}{Name: tc.Name, Passed: false, Reason: "expected fail but passed"}
-	}
+	r := results[0]
 	return struct {
 		Name   string
 		Passed bool
 		Reason string
-	}{Name: tc.Name, Passed: true}
+	}{Name: r.Name, Passed: r.Passed, Reason: r.Reason}
 }
 
-// ValidateTemplateConfig runs test cases from a resolved template config against the JS evaluator.
-// Returns validation results for each rule in the config. Handles both bundle (rules array) and
-// flat config formats. Used by both template instantiation and preset apply.
-func ValidateTemplateConfig(jsEvaluator *evm.JSRuleEvaluator, tmplName string, resolvedConfig []byte, resolvedVars map[string]string) ([]*validateRuleResultItem, bool) {
+func cfgMapToStringVars(cfg map[string]interface{}) map[string]string {
+	if cfg == nil {
+		return nil
+	}
+	out := make(map[string]string, len(cfg))
+	for k, v := range cfg {
+		out[k] = fmt.Sprint(v)
+	}
+	return out
+}
+
+func handlerTestCasesToEVM(cases []evmhandlerJSRuleTestCase) []evm.JSTestCase {
+	out := make([]evm.JSTestCase, len(cases))
+	for i, tc := range cases {
+		out[i] = evm.JSTestCase{
+			Name:       tc.Name,
+			Input:      tc.Input,
+			Variables:  tc.Variables,
+			ExpectPass: tc.ExpectPass,
+		}
+	}
+	return out
+}
+
+// normalizeTemplateConfigForValidation wraps flat template configs as a rules bundle.
+func normalizeTemplateConfigForValidation(tmpl *types.RuleTemplate, rawConfig []byte) []byte {
+	var configDoc struct {
+		Rules []json.RawMessage `json:"rules"`
+	}
+	if json.Unmarshal(rawConfig, &configDoc) == nil && len(configDoc.Rules) > 0 {
+		return rawConfig
+	}
+	// ⚠️ 「**没有** rules 键」才是 flat 模板;「rules 键在、但是空数组」已经是
+	// bundle 形态,只是没有规则 —— 不许包装。
+	// 包装它的后果:`{"rules":[]}` 被裹成一条以整个 config 为 config 的合成规则,
+	// 于是「这个模板是空的」这个信号被抹掉,ValidateTemplateConfig 再也走不到
+	// 「no rules array in config (skipped)」那条分支,改而去校验一条根本不存在的
+	// 规则 —— 校验结果绿,而模板其实一条规则都没有。
+	var probe map[string]json.RawMessage
+	if json.Unmarshal(rawConfig, &probe) == nil {
+		if _, hasRules := probe["rules"]; hasRules {
+			return rawConfig
+		}
+	}
+	var flat map[string]interface{}
+	if json.Unmarshal(rawConfig, &flat) != nil {
+		return rawConfig
+	}
+	bundle, err := json.Marshal(map[string]interface{}{
+		"rules": []map[string]interface{}{{
+			"name":   tmpl.Name,
+			"type":   tmpl.Type,
+			"mode":   tmpl.Mode,
+			"config": flat,
+		}},
+	})
+	if err != nil {
+		return rawConfig
+	}
+	return bundle
+}
+
+// ValidateTemplateConfig runs test cases from template-form config against the JS evaluator.
+// resolvedVars supplies variable values; test case inputs are substituted per test chain_id.
+func ValidateTemplateConfig(jsEvaluator *evm.JSRuleEvaluator, tmplName string, templateConfig []byte, resolvedVars map[string]string) ([]*validateRuleResultItem, bool) {
 	var configDoc struct {
 		Rules []struct {
 			ID     string                 `json:"id"`
@@ -501,7 +425,7 @@ func ValidateTemplateConfig(jsEvaluator *evm.JSRuleEvaluator, tmplName string, r
 			Config map[string]interface{} `json:"config"`
 		} `json:"rules"`
 	}
-	if err := json.Unmarshal(resolvedConfig, &configDoc); err != nil || len(configDoc.Rules) == 0 {
+	if err := json.Unmarshal(templateConfig, &configDoc); err != nil || len(configDoc.Rules) == 0 {
 		return []*validateRuleResultItem{{
 			RuleName: tmplName,
 			Type:     "",
@@ -551,23 +475,13 @@ func ValidateTemplateConfig(jsEvaluator *evm.JSRuleEvaluator, tmplName string, r
 			results = append(results, item)
 			continue
 		}
-		cfgMap := make(map[string]interface{})
-		for k, v := range rule.Config {
-			if k != "script" && k != "test_cases" && k != "description" {
-				cfgMap[k] = v
-			}
-		}
-		// Merge template-level variables into cfgMap
-		for k, v := range resolvedVars {
-			if _, exists := cfgMap[k]; !exists {
-				cfgMap[k] = v
-			}
-		}
+		runResults, rulePassed := jsEvaluator.RunJSTestCases(script, handlerTestCasesToEVM(testCases), evm.VarsEvalContext(resolvedVars))
 		var failedCases []string
-		for _, tc := range testCases {
-			result := runJSTestCase(jsEvaluator, script, cfgMap, tc, types.RuleMode(rule.Mode))
-			if !result.Passed {
-				failedCases = append(failedCases, fmt.Sprintf("%s: %s", result.Name, result.Reason))
+		if !rulePassed {
+			for _, result := range runResults {
+				if !result.Passed {
+					failedCases = append(failedCases, fmt.Sprintf("%s: %s", result.Name, result.Reason))
+				}
 			}
 		}
 		if len(failedCases) > 0 {
@@ -659,6 +573,29 @@ func ValidateConfigTestCases(jsEvaluator *evm.JSRuleEvaluator, ruleType types.Ru
 
 // resolveTemplateDefaults fills in default values from template variable definitions,
 // preferring the provided vars (test_variables) over defaults.
+func validateRequiredTemplateVars(defs []types.TemplateVariable, vars map[string]string) error {
+	for _, def := range defs {
+		if !def.Required {
+			continue
+		}
+		if v, ok := vars[def.Name]; !ok || strings.TrimSpace(v) == "" {
+			return fmt.Errorf("required variable %q is missing", def.Name)
+		}
+	}
+	return nil
+}
+
+func isUnrecognizedTemplateConfig(raw []byte) bool {
+	var rules struct {
+		Rules []json.RawMessage `json:"rules"`
+	}
+	if json.Unmarshal(raw, &rules) == nil && len(rules.Rules) > 0 {
+		return false
+	}
+	var flat map[string]interface{}
+	return json.Unmarshal(raw, &flat) != nil
+}
+
 func resolveTemplateDefaults(defs []types.TemplateVariable, vars map[string]string) map[string]string {
 	result := make(map[string]string, len(vars))
 	for k, v := range vars {

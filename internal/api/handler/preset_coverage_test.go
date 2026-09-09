@@ -258,8 +258,7 @@ func TestRunTemplateValidation_SkipsNonJSRules(t *testing.T) {
 	})
 
 	results := env.handler.runTemplateValidation(
-		&types.RuleTemplate{Name: "Test", Type: types.RuleTypeSignTypeRestriction, Mode: types.RuleModeWhitelist},
-		[]byte(`{"rules":[{"name":"r1","type":"sign_type_restriction","mode":"whitelist","config":{"allowed_sign_types":["transaction"]}}]}`),
+		&types.RuleTemplate{Name: "Test", Type: types.RuleTypeSignTypeRestriction, Mode: types.RuleModeWhitelist, Config: []byte(`{"rules":[{"name":"r1","type":"sign_type_restriction","mode":"whitelist","config":{"allowed_sign_types":["transaction"]}}]}`)},
 		nil,
 	)
 	require.Len(t, results, 1)
@@ -268,15 +267,13 @@ func TestRunTemplateValidation_SkipsNonJSRules(t *testing.T) {
 
 func TestRunTemplateValidation_NonBundleConfig(t *testing.T) {
 	env, _ := newPresetEnvWithJSEval(t)
-	resolvedConfig := []byte(`{"script":"function validate(input){return{valid:true}}","test_cases":[]}`)
+	flatConfig := []byte(`{"script":"function validate(input){return{valid:true}}","test_cases":[]}`)
 	results := env.handler.runTemplateValidation(
-		&types.RuleTemplate{Name: "Test", Type: types.RuleTypeEVMJS, Mode: types.RuleModeWhitelist},
-		resolvedConfig,
+		&types.RuleTemplate{Name: "Test", Type: types.RuleTypeEVMJS, Mode: types.RuleModeWhitelist, Config: flatConfig},
 		nil,
 	)
 	require.Len(t, results, 1)
 	assert.True(t, results[0].Valid)
-	assert.Contains(t, results[0].Error, "no rules array")
 }
 
 // ---------------------------------------------------------------------------

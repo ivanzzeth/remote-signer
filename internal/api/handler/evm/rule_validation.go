@@ -71,9 +71,9 @@ func (h *RuleHandler) validateRule(w http.ResponseWriter, r *http.Request, ruleI
 		return
 	}
 
-	// Resolve template-form Config so test cases run with concrete variable values.
-	effConfig := evmchain.EffectiveConfig(rule)
-	testCases, err := testCasesFromConfig(effConfig)
+	// Keep template-form test cases; per-case ${var} substitution happens in runJSTestCases
+	// using the test input's chain_id (required for matrix presets).
+	testCases, err := testCasesFromConfig(rule.Config)
 	if err != nil {
 		h.writeError(w, fmt.Sprintf("failed to parse test_cases from config: %v", err), http.StatusBadRequest)
 		return
@@ -89,7 +89,7 @@ func (h *RuleHandler) validateRule(w http.ResponseWriter, r *http.Request, ruleI
 		return
 	}
 
-	results, valid := h.runJSTestCases(rule, effConfig, testCases)
+	results, valid := h.runJSTestCases(rule, rule.Config, testCases)
 	resp := ValidateRuleResponse{
 		RuleID:   string(rule.ID),
 		RuleName: rule.Name,
@@ -117,47 +117,23 @@ func (h *RuleHandler) runJSTestCases(rule *types.Rule, effConfig []byte, testCas
 	results := make([]ValidateTestResult, 0, len(testCases))
 	allPassed := true
 
-	for _, tc := range testCases {
-		result := ValidateTestResult{Name: tc.Name}
-		req, parsed, err := evmchain.TestCaseInputToSignRequest(tc.Input)
-		if err != nil {
-			result.Passed = false
-			result.ActualPass = false
-			result.Reason = fmt.Sprintf("invalid input: %v", err)
-			allPassed = false
-			results = append(results, result)
-			continue
+	jsCases := make([]evmchain.JSTestCase, len(testCases))
+	for i, tc := range testCases {
+		jsCases[i] = evmchain.JSTestCase{
+			Name:         tc.Name,
+			Input:        tc.Input,
+			ExpectPass:   tc.ExpectPass,
+			ExpectReason: tc.ExpectReason,
 		}
-		ruleInput, err := evmchain.BuildRuleInput(req, parsed)
-		if err != nil {
-			result.Passed = false
-			result.ActualPass = false
-			result.Reason = fmt.Sprintf("build input: %v", err)
-			allPassed = false
-			results = append(results, result)
-			continue
-		}
-
-		// The config object must match what the engine builds at runtime: the
-		// rule's Variables (+Matrix+chain_id), NOT the stored Config keys. Instance
-		// rules keep variable values only in Variables, so resolve here.
-		cfgMap := evmchain.RuleConfigObject(rule)
-		evalResult := h.jsEvaluator.ValidateWithInput(cfg.Script, ruleInput, cfgMap)
-
-		actualPass := evalResult.Valid
-		if rule.Mode == types.RuleModeBlocklist { //nolint:staticcheck
-			}
-
-		result.ActualPass = actualPass
-		result.Reason = evalResult.Reason
-
-		if actualPass == tc.ExpectPass {
-			result.Passed = true
-		} else {
-			result.Passed = false
-			allPassed = false
-		}
-		results = append(results, result)
+	}
+	runResults, allPassed := h.jsEvaluator.RunJSTestCases(cfg.Script, jsCases, evmchain.MatrixRuleEvalContext(rule))
+	for _, run := range runResults {
+		results = append(results, ValidateTestResult{
+			Name:       run.Name,
+			Passed:     run.Passed,
+			ActualPass: run.ActualPass,
+			Reason:     run.Reason,
+		})
 	}
 
 	return results, allPassed
@@ -225,17 +201,13 @@ func (h *RuleHandler) validateRuleIsolated(rule *types.Rule) ValidateRuleRespons
 		Type:     string(rule.Type),
 	}
 
-	// Resolve the rule's template-form Config (Variables substituted) so stored
-	// test cases — whose inputs use ${var} placeholders like
-	// ${first:allowed_safe_addresses} or ${chain_id} — run with concrete values.
-	effConfig := evmchain.EffectiveConfig(rule)
-	testCases, err := testCasesFromConfig(effConfig)
+	testCases, err := testCasesFromConfig(rule.Config)
 	if err != nil || len(testCases) == 0 {
 		resp.Valid = true
 		return resp
 	}
 
-	results, valid := h.runJSTestCases(rule, effConfig, testCases)
+	results, valid := h.runJSTestCases(rule, rule.Config, testCases)
 	resp.Results = results
 	resp.Valid = valid
 	if !valid {
@@ -284,7 +256,7 @@ func (h *RuleHandler) validateRulesFullEngine(jsRules []*types.Rule, allRules []
 			Type:     string(rule.Type),
 		}
 
-		testCases, tcerr := testCasesFromConfig(evmchain.EffectiveConfig(rule))
+		testCases, tcerr := testCasesFromConfig(rule.Config)
 		if tcerr != nil || len(testCases) == 0 {
 			resp.Valid = true
 			results = append(results, resp)
@@ -297,7 +269,14 @@ func (h *RuleHandler) validateRulesFullEngine(jsRules []*types.Rule, allRules []
 
 		for _, tc := range testCases {
 			tcr := ValidateTestResult{Name: tc.Name}
-			req, parsed, err := evmchain.TestCaseInputToSignRequest(tc.Input)
+			chainID := evmchain.ChainIDFromTestInput(tc.Input)
+			subInput, subErr := evmchain.SubstituteTestCaseInput(tc.Input, evmchain.RuleVarMapForChain(rule, chainID))
+			if subErr != nil {
+				tcr.Reason = fmt.Sprintf("substitute input: %v", subErr)
+				tcResults = append(tcResults, tcr)
+				continue
+			}
+			req, parsed, err := evmchain.TestCaseInputToSignRequest(subInput)
 			if err != nil {
 				tcr.Reason = fmt.Sprintf("invalid input: %v", err)
 				tcResults = append(tcResults, tcr)

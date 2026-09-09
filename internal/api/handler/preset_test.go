@@ -117,10 +117,10 @@ func TestResolveInstances_WithBudget(t *testing.T) {
 	preset := &types.RulePreset{ID: "evm/p", Name: "P"}
 	apiKey := &types.APIKey{ID: "admin-key", Role: types.RoleAdmin}
 	budget := map[string]any{
-		"max_total":   "1000000",
-		"max_per_tx":  "100000",
+		"max_total":    "1000000",
+		"max_per_tx":   "100000",
 		"max_tx_count": 10.0,
-		"alert_pct":   80.0,
+		"alert_pct":    80.0,
 	}
 
 	resolved, err := env.handler.resolveInstances(ctx, apiKey, nil, preset,
@@ -324,7 +324,7 @@ func TestPresetHandler_Apply_NoDB(t *testing.T) {
 	require.NoError(t, presetRepo.Create(context.Background(), &types.RulePreset{
 		ID: "evm/test", Name: "Test", Enabled: true,
 		TemplateIDs: mustJSONP(t, []string{"evm/tmpl"}),
-		Source: types.RuleSourceFile, ContentHash: "h",
+		Source:      types.RuleSourceFile, ContentHash: "h",
 	}))
 	h, err := NewPresetHandler(presetRepo, tmplRepo, nil, &service.TemplateService{},
 		false, slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -351,9 +351,9 @@ func TestPresetHandler_Apply_MissingRequiredOverride(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, presetRepo.Create(context.Background(), &types.RulePreset{
 		ID: "evm/test", Name: "Test", Enabled: true,
-		TemplateIDs:      mustJSONP(t, []string{"evm/tmpl"}),
+		TemplateIDs:       mustJSONP(t, []string{"evm/tmpl"}),
 		OperatorOverrides: mustJSONP(t, []types.OperatorOverride{{Name: "my_override", Required: true}}),
-		Source:           types.RuleSourceFile, ContentHash: "h",
+		Source:            types.RuleSourceFile, ContentHash: "h",
 	}))
 	h, err := NewPresetHandler(presetRepo, tmplRepo, db, &service.TemplateService{},
 		false, slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -382,12 +382,18 @@ func TestPresetHandler_Apply_RequiredOverrideSupplied(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, presetRepo.Create(context.Background(), &types.RulePreset{
 		ID: "evm/test", Name: "Test", Enabled: true,
-		TemplateIDs:      mustJSONP(t, []string{"evm/tmpl"}),
+		TemplateIDs:       mustJSONP(t, []string{"evm/tmpl"}),
 		OperatorOverrides: mustJSONP(t, []types.OperatorOverride{{Name: "my_override", Required: true}}),
-		Source:           types.RuleSourceFile, ContentHash: "h",
+		Source:            types.RuleSourceFile, ContentHash: "h",
 	}))
+	// ⚠️ 必须注入 JS evaluator:强制校验(validation_mandatory.go)在 evaluator 为 nil 时
+	// **fail-closed 返回 503**,请求根本走不到 resolveInstances。本用例要验的是
+	// 「必填 override 给了之后会继续往下走」,所以得让强制校验有能力真的跑起来 ——
+	// 否则断言的其实是「没配 evaluator」,和用例名无关。
+	evalr, err := evm.NewJSRuleEvaluator(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	require.NoError(t, err)
 	h, err := NewPresetHandler(presetRepo, tmplRepo, db, &service.TemplateService{},
-		false, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		false, slog.New(slog.NewTextHandler(io.Discard, nil)), WithPresetJSEvaluator(evalr))
 	require.NoError(t, err)
 	ctx := context.WithValue(context.Background(), middleware.APIKeyContextKey,
 		&types.APIKey{ID: "admin", Role: types.RoleAdmin})
@@ -500,8 +506,8 @@ func TestRunTemplateValidation_JSRuleWithTestCasesPass(t *testing.T) {
 		}]
 	}`)
 	results := h.runTemplateValidation(
-		&types.RuleTemplate{Name: "Test", Type: types.RuleTypeEVMJS, Mode: types.RuleModeWhitelist},
-		config, nil)
+		&types.RuleTemplate{Name: "Test", Type: types.RuleTypeEVMJS, Mode: types.RuleModeWhitelist, Config: config},
+		nil)
 	require.Len(t, results, 1)
 	assert.True(t, results[0].Valid)
 	assert.Equal(t, "js-rule", results[0].RuleName)
@@ -521,8 +527,8 @@ func TestRunTemplateValidation_JSRuleWithTestCasesFail(t *testing.T) {
 		}]
 	}`)
 	results := h.runTemplateValidation(
-		&types.RuleTemplate{Name: "Test", Type: types.RuleTypeEVMJS, Mode: types.RuleModeWhitelist},
-		config, nil)
+		&types.RuleTemplate{Name: "Test", Type: types.RuleTypeEVMJS, Mode: types.RuleModeWhitelist, Config: config},
+		nil)
 	require.Len(t, results, 1)
 	assert.False(t, results[0].Valid)
 	assert.Contains(t, results[0].Error, "test case(s) failed")
@@ -539,8 +545,8 @@ func TestRunTemplateValidation_JSRuleNoTestCases(t *testing.T) {
 		}]
 	}`)
 	results := h.runTemplateValidation(
-		&types.RuleTemplate{Name: "Test", Type: types.RuleTypeEVMJS, Mode: types.RuleModeWhitelist},
-		config, nil)
+		&types.RuleTemplate{Name: "Test", Type: types.RuleTypeEVMJS, Mode: types.RuleModeWhitelist, Config: config},
+		nil)
 	require.Len(t, results, 1)
 	assert.True(t, results[0].Valid)
 }
@@ -556,8 +562,8 @@ func TestRunTemplateValidation_JSRuleNoScript(t *testing.T) {
 		}]
 	}`)
 	results := h.runTemplateValidation(
-		&types.RuleTemplate{Name: "Test", Type: types.RuleTypeEVMJS, Mode: types.RuleModeWhitelist},
-		config, nil)
+		&types.RuleTemplate{Name: "Test", Type: types.RuleTypeEVMJS, Mode: types.RuleModeWhitelist, Config: config},
+		nil)
 	require.Len(t, results, 1)
 	assert.Contains(t, results[0].Error, "no script")
 }
@@ -573,8 +579,8 @@ func TestRunTemplateValidation_JSRuleScriptNotString(t *testing.T) {
 		}]
 	}`)
 	results := h.runTemplateValidation(
-		&types.RuleTemplate{Name: "Test", Type: types.RuleTypeEVMJS, Mode: types.RuleModeWhitelist},
-		config, nil)
+		&types.RuleTemplate{Name: "Test", Type: types.RuleTypeEVMJS, Mode: types.RuleModeWhitelist, Config: config},
+		nil)
 	require.Len(t, results, 1)
 	assert.Contains(t, results[0].Error, "script is not a string")
 }
@@ -588,8 +594,8 @@ func TestRunTemplateValidation_MultipleRules(t *testing.T) {
 		]
 	}`)
 	results := h.runTemplateValidation(
-		&types.RuleTemplate{Name: "Test", Type: types.RuleTypeEVMJS, Mode: types.RuleModeWhitelist},
-		config, nil)
+		&types.RuleTemplate{Name: "Test", Type: types.RuleTypeEVMJS, Mode: types.RuleModeWhitelist, Config: config},
+		nil)
 	require.Len(t, results, 2)
 	assert.True(t, results[0].Valid) // non-JS rule always valid
 	assert.True(t, results[1].Valid) // JS rule with passing tests
@@ -599,8 +605,8 @@ func TestRunTemplateValidation_EmptyRulesArray(t *testing.T) {
 	h, _ := newValidationEnv(t)
 	config := []byte(`{"rules":[]}`)
 	results := h.runTemplateValidation(
-		&types.RuleTemplate{Name: "Test", Type: types.RuleTypeEVMJS, Mode: types.RuleModeWhitelist},
-		config, nil)
+		&types.RuleTemplate{Name: "Test", Type: types.RuleTypeEVMJS, Mode: types.RuleModeWhitelist, Config: config},
+		nil)
 	require.Len(t, results, 1)
 	assert.True(t, results[0].Valid)
 	assert.Contains(t, results[0].Error, "no rules array")
@@ -617,8 +623,8 @@ func TestRunTemplateValidation_NilTestCases(t *testing.T) {
 		}]
 	}`)
 	results := h.runTemplateValidation(
-		&types.RuleTemplate{Name: "Test", Type: types.RuleTypeEVMJS, Mode: types.RuleModeWhitelist},
-		config, nil)
+		&types.RuleTemplate{Name: "Test", Type: types.RuleTypeEVMJS, Mode: types.RuleModeWhitelist, Config: config},
+		nil)
 	require.Len(t, results, 1)
 	assert.True(t, results[0].Valid)
 }
@@ -634,8 +640,8 @@ func TestRunTemplateValidation_EmptyTestCases(t *testing.T) {
 		}]
 	}`)
 	results := h.runTemplateValidation(
-		&types.RuleTemplate{Name: "Test", Type: types.RuleTypeEVMJS, Mode: types.RuleModeWhitelist},
-		config, nil)
+		&types.RuleTemplate{Name: "Test", Type: types.RuleTypeEVMJS, Mode: types.RuleModeWhitelist, Config: config},
+		nil)
 	require.Len(t, results, 1)
 	assert.True(t, results[0].Valid)
 }
@@ -651,8 +657,8 @@ func TestRunTemplateValidation_InvalidTestCasesJSON(t *testing.T) {
 		}]
 	}`)
 	results := h.runTemplateValidation(
-		&types.RuleTemplate{Name: "Test", Type: types.RuleTypeEVMJS, Mode: types.RuleModeWhitelist},
-		config, nil)
+		&types.RuleTemplate{Name: "Test", Type: types.RuleTypeEVMJS, Mode: types.RuleModeWhitelist, Config: config},
+		nil)
 	require.Len(t, results, 1)
 	assert.True(t, results[0].Valid)
 }
@@ -697,7 +703,7 @@ func TestPresetHandler_Validate_WithBodyVariables(t *testing.T) {
 	eval, err := evm.NewJSRuleEvaluator(slog.New(slog.NewTextHandler(io.Discard, nil)))
 	require.NoError(t, err)
 	require.NoError(t, presetRepo.Create(context.Background(), &types.RulePreset{
-		ID:      "evm/vp", Name: "VP", Enabled: true,
+		ID: "evm/vp", Name: "VP", Enabled: true,
 		TemplateIDs: mustJSONP(t, []string{"evm/vtmpl"}),
 		Variables:   mustJSONP(t, map[string]string{"def_var": "default"}),
 		Source:      types.RuleSourceFile, ContentHash: "h",

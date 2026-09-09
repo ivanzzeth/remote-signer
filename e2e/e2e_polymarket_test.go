@@ -212,7 +212,7 @@ func TestE2E_PolymarketV2Safe_SignAndDelegate(t *testing.T) {
 
 	presetID := "evm/polymarket_v2_safe_polygon"
 	applyResp, err := adminClient.Presets.Apply(ctx, presetID, &presets.ApplyRequest{
-		Variables:      map[string]string{"allowed_safe_addresses": testSigner2Address},
+		Variables: map[string]string{"allowed_safe_addresses": testSigner2Address},
 	})
 	require.NoError(t, err, "preset apply should succeed")
 	require.NotNil(t, applyResp)
@@ -517,7 +517,7 @@ func TestE2E_PolymarketV2Safe_ProductionRequest(t *testing.T) {
 
 	presetID := "evm/polymarket_v2_safe_polygon"
 	applyResp, err := adminClient.Presets.Apply(ctx, presetID, &presets.ApplyRequest{
-		Variables:      map[string]string{"allowed_safe_addresses": prodSafeAddress},
+		Variables: map[string]string{"allowed_safe_addresses": prodSafeAddress},
 	})
 	require.NoError(t, err, "preset apply should succeed")
 	require.NotNil(t, applyResp)
@@ -595,8 +595,17 @@ func TestE2E_PolymarketV2Safe_ProductionRequest(t *testing.T) {
 	t.Logf("Production SafeTx: status=%d status_field=%q", resp.StatusCode, body.Status)
 }
 
+// ruleVariablesString returns a variable value from the rule's Variables JSON
+// (live evaluation map). Config.script does NOT embed allowed_safe_addresses.
+func ruleVariablesString(t *testing.T, raw json.RawMessage, key string) string {
+	t.Helper()
+	var vars map[string]string
+	require.NoError(t, json.Unmarshal(raw, &vars), "parse rule variables")
+	return vars[key]
+}
+
 // TestE2E_PolymarketV2Safe_PresetApplyConfigBug verifies that when applying
-// the preset with allowed_safe_addresses, the resulting rule's config actually
+// the preset with allowed_safe_addresses, the resulting rule's Variables actually
 // contains the provided Safe address (not just the tx_to addresses).
 func TestE2E_PolymarketV2Safe_PresetApplyConfigBug(t *testing.T) {
 	ctx := context.Background()
@@ -609,7 +618,7 @@ func TestE2E_PolymarketV2Safe_PresetApplyConfigBug(t *testing.T) {
 
 	presetID := "evm/polymarket_v2_safe_polygon"
 	applyResp, err := adminClient.Presets.Apply(ctx, presetID, &presets.ApplyRequest{
-		Variables:      map[string]string{"allowed_safe_addresses": testSafeAddr},
+		Variables: map[string]string{"allowed_safe_addresses": testSafeAddr},
 	})
 	require.NoError(t, err, "preset apply should succeed")
 	snapshotRules(t)
@@ -632,15 +641,12 @@ func TestE2E_PolymarketV2Safe_PresetApplyConfigBug(t *testing.T) {
 	}
 	require.NotEmpty(t, safeRuleID, "SafeTx whitelist rule not found in apply results")
 
-	// Fetch the rule and check its config.
+	// Fetch the rule and check its Variables (resolved at evaluation, not in config.script).
 	rule, err := adminClient.EVM.Rules.Get(ctx, safeRuleID)
 	require.NoError(t, err, "failed to fetch rule %s", safeRuleID)
 
-	var config map[string]interface{}
-	require.NoError(t, json.Unmarshal(rule.Config, &config), "failed to parse rule config")
-
-	addrsStr, _ := config["allowed_safe_addresses"].(string)
-	t.Logf("Rule %s config.allowed_safe_addresses = %q", safeRuleID, addrsStr)
+	addrsStr := ruleVariablesString(t, rule.Variables, "allowed_safe_addresses")
+	t.Logf("Rule %s variables.allowed_safe_addresses = %q", safeRuleID, addrsStr)
 
 	// The provided Safe address MUST be present in allowed_safe_addresses.
 	assert.Contains(t, addrsStr, testSafeAddr,
@@ -649,8 +655,7 @@ func TestE2E_PolymarketV2Safe_PresetApplyConfigBug(t *testing.T) {
 	// Also verify that no apply was done WITHOUT overrides (the preset
 	// default is "0x1111...1111" — confirm the flow is working correctly).
 	t.Run("default_placeholder_only", func(t *testing.T) {
-		applyResp2, err := adminClient.Presets.Apply(ctx, presetID, &presets.ApplyRequest{
-		})
+		applyResp2, err := adminClient.Presets.Apply(ctx, presetID, &presets.ApplyRequest{})
 		require.NoError(t, err, "preset apply without overrides should succeed")
 		cleanupApplyResults(t, applyResp2.Results)
 
@@ -671,9 +676,7 @@ func TestE2E_PolymarketV2Safe_PresetApplyConfigBug(t *testing.T) {
 		require.NotEmpty(t, safeRuleID2)
 		rule2, err := adminClient.EVM.Rules.Get(ctx, safeRuleID2)
 		require.NoError(t, err)
-		var config2 map[string]interface{}
-		require.NoError(t, json.Unmarshal(rule2.Config, &config2))
-		addrsStr2, _ := config2["allowed_safe_addresses"].(string)
+		addrsStr2 := ruleVariablesString(t, rule2.Variables, "allowed_safe_addresses")
 
 		t.Logf("Default preset (no overrides): allowed_safe_addresses=%q", addrsStr2)
 		// With no overrides, should use preset default "0x1111...1111"
@@ -696,7 +699,7 @@ func TestE2E_PolymarketV2Safe_ClobAuth(t *testing.T) {
 
 	presetID := "evm/polymarket_v2_safe_polygon"
 	applyResp, err := adminClient.Presets.Apply(ctx, presetID, &presets.ApplyRequest{
-		Variables:      map[string]string{"allowed_safe_addresses": testSigner2Address},
+		Variables: map[string]string{"allowed_safe_addresses": testSigner2Address},
 	})
 	require.NoError(t, err, "preset apply should succeed")
 	require.NotNil(t, applyResp)

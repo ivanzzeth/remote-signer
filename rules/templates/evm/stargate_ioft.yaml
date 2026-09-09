@@ -1,0 +1,102 @@
+# Stargate V2 IOFT Pool send template (evm_js).
+# Covers IStargate.send / sendToken on Pool/OFT contracts (ioft_pool engine).
+# UI evidence: BSC USDT -> Polygon USDT0 uses approve spender + send() to 0x138EB30...
+
+name: Stargate V2 IOFT send
+variables:
+  - name: allowed_pool_contracts
+    type: address_list
+    description: "Comma-separated Stargate V2 Pool/OFT addresses (send tx.to)"
+    required: true
+  - name: allowed_dst_eids
+    type: string
+    description: "Comma-separated LayerZero dstEid values allowed in SendParam. Empty = any."
+    required: false
+    default: ""
+  - name: max_native_fee
+    type: string
+    description: "Max tx.value (native fee) in wei. -1 = no cap."
+    required: false
+    default: "-1"
+test_variables:
+  chain_id: "56"
+  allowed_pool_contracts: "0x138EB30f73BC423c6455C53df6D89CB01d9eBc63"
+  allowed_dst_eids: "30109"
+  max_native_fee: "-1"
+  test_signer: "0x0000000000000000000000000000000000000001"
+rules:
+  - id: "stargate-ioft-send"
+    name: "Stargate V2 IOFT send"
+    type: "evm_js"
+    mode: "whitelist"
+    enabled: true
+    description: "Whitelist Stargate Pool send/sendToken; refundAddress must match signer"
+    config:
+      sign_type_filter: "transaction"
+      script: |
+        function parseUintList(csv) {
+          var out = [];
+          if (!csv) return out;
+          String(csv).split(',').forEach(function(part) {
+            var n = parseInt(String(part).trim(), 10);
+            if (!isNaN(n)) out.push(n);
+          });
+          return out;
+        }
+        function refundFromSendCalldata(dataHex) {
+          var hex = String(dataHex || '').toLowerCase().replace(/^0x/, '');
+          if (hex.length < 200) return '';
+          return '0x' + hex.slice(136 + 24, 136 + 64);
+        }
+        function validate(input) {
+          var ctx = rs.tx.require(input);
+          rs.addr.requireInList(ctx.tx.to, config.allowed_pool_contracts, 'pool not allowed');
+          var sendSel = '0xc7c7f5b3';
+          var sendTokenSel = '0xcbef2aa9';
+          var sel = (ctx.selector || '').toLowerCase();
+          require(sel === sendSel || sel === sendTokenSel, 'method not allowed');
+          rs.bigint.requireLte(ctx.tx.value || '0', config.max_native_fee, 'native fee exceeds cap');
+          var refund = refundFromSendCalldata(ctx.tx.data || '');
+          require(isAddress(refund), 'invalid refund address');
+          rs.addr.requireInList(refund, [String(input.signer || '').toLowerCase()], 'refund must be signer');
+          return ok();
+        }
+    test_cases:
+      - name: "pass: BSC USDT pool send with signer refund"
+        input:
+          sign_type: "transaction"
+          chain_id: 56
+          signer: "0x0000000000000000000000000000000000000001"
+          transaction:
+            from: "0x0000000000000000000000000000000000000001"
+            to: "0x138EB30f73BC423c6455C53df6D89CB01d9eBc63"
+            value: "1000000000000000"
+            data: "0xc7c7f5b3000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000001"
+            methodId: "0xc7c7f5b3"
+        expect_pass: true
+      - name: "reject: wrong pool contract"
+        input:
+          sign_type: "transaction"
+          chain_id: 56
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
+            to: "0x000000000000000000000000000000000000dEaD"
+            value: "0"
+            data: "0xc7c7f5b300000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000002"
+            methodId: "0xc7c7f5b3"
+        expect_pass: false
+        expect_reason: "pool not allowed"
+      - name: "reject: refund not signer"
+        input:
+          sign_type: "transaction"
+          chain_id: 56
+          signer: "0x0000000000000000000000000000000000000002"
+          transaction:
+            from: "0x0000000000000000000000000000000000000002"
+            to: "0x138EB30f73BC423c6455C53df6D89CB01d9eBc63"
+            value: "0"
+            data: "0xc7c7f5b3000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000001"
+            methodId: "0xc7c7f5b3"
+        expect_pass: false
+        expect_reason: "refund must be signer"

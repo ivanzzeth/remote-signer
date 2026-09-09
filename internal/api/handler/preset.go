@@ -449,22 +449,27 @@ func (h *PresetHandler) validatePreset(w http.ResponseWriter, r *http.Request, i
 			resolvedVars[k] = v
 		}
 
-		// Substitute variables into config
-		resolvedConfig, subErr := service.SubstituteVariables(tmpl.Config, resolvedVars) //nolint:staticcheck
-		if subErr != nil {
+		// ⚠️ 必填变量校验必须和 validateTemplate 那条路**对称**。重构后一度只有
+		// template 那条在查 required,preset 这条没查 —— 于是「preset 少给一个必填
+		// 变量」会**校验通过**,而 apply 之后规则里留着未解析的 ${var}。
+		if err := validateRequiredTemplateVars(varDefs, resolvedVars); err != nil {
 			results = append(results, &validateRuleResultItem{
 				RuleName: tmpl.Name,
 				Type:     string(tmpl.Type),
 				Mode:     string(tmpl.Mode),
 				Valid:    false,
-				Error:    fmt.Sprintf("variable substitution failed: %s", subErr.Error()),
+				Error:    fmt.Sprintf("variable substitution failed: %s", err.Error()),
 			})
 			totalFailed++
 			continue
 		}
 
-		// Run template validation
-		ruleResults := h.runTemplateValidation(tmpl, resolvedConfig, resolvedVars)
+		// Run template validation (template-form config; per-test substitution in evm.RunJSTestCases)
+		// ⚠️ 走 normalize,与 runTemplateValidation / validateTemplate 一致 ——
+		// 三个入口喂给 ValidateTemplateConfig 的形状必须相同,否则 flat 模板
+		// 只在其中一条路上被正确处理。
+		ruleResults, _ := ValidateTemplateConfig(h.jsEvaluator, tmpl.Name,
+			normalizeTemplateConfigForValidation(tmpl, tmpl.Config), resolvedVars)
 		for _, rr := range ruleResults {
 			results = append(results, rr)
 			if rr.Valid {
@@ -486,102 +491,10 @@ func (h *PresetHandler) validatePreset(w http.ResponseWriter, r *http.Request, i
 	h.writeJSON(w, resp, http.StatusOK)
 }
 
-// runTemplateValidation runs test cases from a template's resolved config.
-func (h *PresetHandler) runTemplateValidation(tmpl *types.RuleTemplate, resolvedConfig []byte, resolvedVars map[string]string) []*validateRuleResultItem {
-	// Parse the resolved config
-	var configDoc struct {
-		Rules []struct {
-			ID     string                 `json:"id"`
-			Name   string                 `json:"name"`
-			Type   string                 `json:"type"`
-			Mode   string                 `json:"mode"`
-			Config map[string]interface{} `json:"config"`
-		} `json:"rules"`
-	}
-	if err := json.Unmarshal(resolvedConfig, &configDoc); err != nil || len(configDoc.Rules) == 0 {
-		// Try flat config
-		return []*validateRuleResultItem{{
-			RuleName: tmpl.Name,
-			Type:     string(tmpl.Type),
-			Mode:     string(tmpl.Mode),
-			Valid:    true,
-			Error:    "no rules array in config (skipped)",
-		}}
-	}
-
-	var results []*validateRuleResultItem
-	for _, rule := range configDoc.Rules {
-		item := &validateRuleResultItem{
-			RuleName: rule.Name,
-			Type:     rule.Type,
-			Mode:     rule.Mode,
-		}
-
-		if rule.Type != string(types.RuleTypeEVMJS) {
-			item.Valid = true
-			results = append(results, item)
-			continue
-		}
-
-		// Extract test_cases
-		testCasesRaw, hasTC := rule.Config["test_cases"]
-		if !hasTC || testCasesRaw == nil {
-			item.Valid = true
-			results = append(results, item)
-			continue
-		}
-		tcJSON, _ := json.Marshal(testCasesRaw)
-		var testCases []evmhandlerJSRuleTestCase
-		if json.Unmarshal(tcJSON, &testCases) != nil || len(testCases) == 0 {
-			item.Valid = true
-			results = append(results, item)
-			continue
-		}
-
-		// Extract script
-		scriptRaw, ok := rule.Config["script"]
-		if !ok {
-			item.Error = "no script in rule config"
-			results = append(results, item)
-			continue
-		}
-		script, ok := scriptRaw.(string)
-		if !ok {
-			item.Error = "script is not a string"
-			results = append(results, item)
-			continue
-		}
-
-		// Build config map
-		cfgMap := make(map[string]interface{})
-		for k, v := range rule.Config {
-			if k != "script" && k != "test_cases" && k != "description" {
-				cfgMap[k] = v
-			}
-		}
-		// Merge template-level variables into cfgMap
-		for k, v := range resolvedVars {
-			if _, exists := cfgMap[k]; !exists {
-				cfgMap[k] = v
-			}
-		}
-
-		// Run test cases
-		var failedCases []string
-		for _, tc := range testCases {
-			result := runJSTestCase(h.jsEvaluator, script, cfgMap, tc, types.RuleMode(rule.Mode))
-			if !result.Passed {
-				failedCases = append(failedCases, fmt.Sprintf("%s: %s", result.Name, result.Reason))
-			}
-		}
-		if len(failedCases) > 0 {
-			item.Valid = false
-			item.Error = fmt.Sprintf("%d test case(s) failed", len(failedCases))
-		} else {
-			item.Valid = true
-		}
-		results = append(results, item)
-	}
+// runTemplateValidation runs test cases via the shared ValidateTemplateConfig path.
+func (h *PresetHandler) runTemplateValidation(tmpl *types.RuleTemplate, resolvedVars map[string]string) []*validateRuleResultItem {
+	config := normalizeTemplateConfigForValidation(tmpl, tmpl.Config)
+	results, _ := ValidateTemplateConfig(h.jsEvaluator, tmpl.Name, config, resolvedVars)
 	return results
 }
 
@@ -698,12 +611,16 @@ func (h *PresetHandler) apply(w http.ResponseWriter, r *http.Request, id string)
 	// substituted later by the template service when the instance is
 	// created; this pass only handles preset-level fields.
 	mergedVarsStrings := mergeForSubstitution(mergedVars, p)
-	budgetBytes, err := service.SubstituteVariables(p.Budget, mergedVarsStrings) //nolint:staticcheck
+	//lint:ignore SA1019 R8 迁移未完成:SubstituteTyped 需要 []types.TemplateVariable 定义,不是 drop-in。
+	// ⚠️ 原写的 //nolint:staticcheck 是 golangci-lint 语法,staticcheck 不认 —— 等于没抑制。
+	budgetBytes, err := service.SubstituteVariables(p.Budget, mergedVarsStrings)
 	if err != nil {
 		h.writeError(w, fmt.Sprintf("substitute preset budget: %s", err.Error()), http.StatusBadRequest)
 		return
 	}
-	scheduleBytes, err := service.SubstituteVariables(p.Schedule, mergedVarsStrings) //nolint:staticcheck
+	//lint:ignore SA1019 R8 迁移未完成:SubstituteTyped 需要 []types.TemplateVariable 定义,不是 drop-in。
+	// ⚠️ 原写的 //nolint:staticcheck 是 golangci-lint 语法,staticcheck 不认 —— 等于没抑制。
+	scheduleBytes, err := service.SubstituteVariables(p.Schedule, mergedVarsStrings)
 	if err != nil {
 		h.writeError(w, fmt.Sprintf("substitute preset schedule: %s", err.Error()), http.StatusBadRequest)
 		return
@@ -747,14 +664,9 @@ func (h *PresetHandler) apply(w http.ResponseWriter, r *http.Request, id string)
 		for k, v := range validationVars {
 			resolvedVars[k] = v
 		}
-		resolvedConfig, subErr := service.SubstituteVariables(tmpl.Config, resolvedVars) //nolint:staticcheck
-		if subErr != nil {
-			h.writeError(w, fmt.Sprintf("template %q: variable substitution for validation failed: %s", tid, subErr.Error()), http.StatusBadRequest)
-			return
-		}
-		_, allPassed := ValidateTemplateConfig(h.jsEvaluator, tmpl.Name, resolvedConfig, resolvedVars)
+		_, allPassed := ValidateTemplateConfig(h.jsEvaluator, tmpl.Name, tmpl.Config, resolvedVars)
 		if !allPassed {
-			results, _ := ValidateTemplateConfig(h.jsEvaluator, tmpl.Name, resolvedConfig, resolvedVars)
+			results, _ := ValidateTemplateConfig(h.jsEvaluator, tmpl.Name, tmpl.Config, resolvedVars)
 			var failures []string
 			for _, r := range results {
 				if !r.Valid && r.Error != "" {

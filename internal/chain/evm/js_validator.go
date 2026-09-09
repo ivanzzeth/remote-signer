@@ -64,61 +64,52 @@ func (v *JSRuleValidator) ValidateRule(ctx context.Context, script string, testC
 		return &ValidationResult{Valid: false}, fmt.Errorf("security check failed: %s", secErr.Message)
 	}
 
-	result := &ValidationResult{Valid: true}
-	for _, tc := range testCases {
-		configObj := make(map[string]interface{}, len(testVariables)+len(tc.Variables))
-		for k, val := range testVariables {
-			configObj[k] = val
-		}
-		for k, val := range tc.Variables {
-			configObj[k] = val
-		}
+	runResults, allPassed := v.evaluator.RunJSTestCases(script, testCases, VarsEvalContext(testVariables))
+	result := &ValidationResult{Valid: allPassed}
+	for i, tc := range testCases {
+		run := runResults[i]
 		tcResult := TestCaseResult{
 			Name:           tc.Name,
 			ExpectedPass:   tc.ExpectPass,
 			ExpectedReason: tc.ExpectReason,
+			Passed:         run.Passed,
+			ActualPass:     run.ActualPass,
+			ActualReason:   run.Reason,
 		}
-
-		ruleInput, err := MapToRuleInput(tc.Input)
-		if err != nil {
-			tcResult.Passed = false
-			tcResult.Error = fmt.Sprintf("invalid input: %v", err)
-			result.TestCaseResults = append(result.TestCaseResults, tcResult)
+		if !run.Passed {
+			tcResult.Error = run.Reason
 			result.FailedTestCases++
 			result.Valid = false
-			continue
-		}
-
-		jsResult := v.evaluator.ValidateWithInput(script, ruleInput, configObj)
-		tcResult.ActualPass = jsResult.Valid
-		tcResult.ActualReason = jsResult.Reason
-
-		if tc.ExpectPass != jsResult.Valid {
-			tcResult.Passed = false
-			if tc.ExpectPass {
-				tcResult.Error = fmt.Sprintf("expected pass but got: %s", jsResult.Reason)
-			} else {
-				tcResult.Error = "expected fail but passed"
-			}
-			result.FailedTestCases++
-			result.Valid = false
-		} else if tc.ExpectReason != "" && !strings.Contains(jsResult.Reason, tc.ExpectReason) {
-			tcResult.Passed = false
-			tcResult.Error = fmt.Sprintf("expected reason containing %q but got %q", tc.ExpectReason, jsResult.Reason)
-			result.FailedTestCases++
-			result.Valid = false
-		} else {
-			tcResult.Passed = true
 		}
 
 		// If expect_budget_amount is set, run validateBudget(input) and compare
 		if tc.ExpectBudgetAmount != "" && tcResult.Passed {
+			chainID := ChainIDFromTestInput(tc.Input)
+			vars := VarsEvalContext(testVariables).VarsForChain(chainID)
+			subInput, subErr := SubstituteTestCaseInput(tc.Input, vars)
+			if subErr != nil {
+				tcResult.Passed = false
+				tcResult.Error = fmt.Sprintf("substitute input: %v", subErr)
+				result.FailedTestCases++
+				result.Valid = false
+				result.TestCaseResults = append(result.TestCaseResults, tcResult)
+				continue
+			}
+			ruleInput, err := MapToRuleInput(subInput)
+			if err != nil {
+				tcResult.Passed = false
+				tcResult.Error = fmt.Sprintf("invalid input: %v", err)
+				result.FailedTestCases++
+				result.Valid = false
+				result.TestCaseResults = append(result.TestCaseResults, tcResult)
+				continue
+			}
 			cfg := JSRuleConfig{Script: script}
 			minimalRule := &types.Rule{
-				ID:         "test",
-				Type:       types.RuleTypeEVMJS,
-				Config:     mustMarshal(cfg),
-				Variables:  mustMarshalStringMap(testVariables),
+				ID:        "test",
+				Type:      types.RuleTypeEVMJS,
+				Config:    mustMarshal(cfg),
+				Variables: mustMarshalStringMap(testVariables),
 			}
 			budgetResult, err := v.evaluator.EvaluateBudgetWithInput(ctx, minimalRule, ruleInput)
 			if err != nil {
@@ -144,6 +135,15 @@ func (v *JSRuleValidator) ValidateRule(ctx context.Context, script string, testC
 		result.TestCaseResults = append(result.TestCaseResults, tcResult)
 	}
 	return result, nil
+}
+
+// MapToRuleInputFromTestCase substitutes template-form input then converts to RuleInput.
+func MapToRuleInputFromTestCase(input map[string]interface{}, vars map[string]string) (*RuleInput, error) {
+	sub, err := SubstituteTestCaseInput(input, vars)
+	if err != nil {
+		return nil, err
+	}
+	return MapToRuleInput(sub)
 }
 
 func mustMarshalStringMap(m map[string]string) []byte {

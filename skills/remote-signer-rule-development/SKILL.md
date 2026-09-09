@@ -17,34 +17,65 @@ description: Remote Signer rule development guide. Covers evm_js templates, pres
 
 **Naming:** template = protocol/engine (`aori`); preset = dApp/scenario (`stargate`). Do not combine names (`stargate-aori`).
 
+## Prerequisites (read before writing rules)
+
+**Contract research comes first.** Follow web3-agent-browser [playbooks/INTEGRATION.md](../../web3-agent-browser/playbooks/INTEGRATION.md):
+
+| Phase | Output | This skill starts at |
+|-------|--------|----------------------|
+| 1 | `registry/<dapp>.yaml` — addresses, interfaces, `sign_flows` | — |
+| 2 | UI README — step → sign mapping | — |
+| 3 | Templates + preset | **here** |
+| 4 | Playbook code | after validate green |
+
+Do not write templates from training data. Spenders and `verifyingContract` must match registry (sourced from official APIs).
+
+Stargate contract reference: [playbooks/stargate/bridge/CONTRACTS.md](../../web3-agent-browser/playbooks/stargate/bridge/CONTRACTS.md)
+
+---
+
 ## Authoring workflow
 
 ```
-1. Observe real sign requests (approve, typed_data, tx)
-2. Write template(s) under ~/.remote-signer/rules/templates/
+0. registry/<dapp>.yaml complete (Phase 1 INTEGRATION.md) — sign_flows per engine
+1. UI walk captured (Phase 2) — reconcile approve spender / tx.to / typed_data domain
+2. Write one template per engine (evm/aori, evm/stargate_ioft TBD, evm/erc20 for approve)
 3. remote-signer validate -v ~/.remote-signer/rules/templates/evm/<protocol>.yaml
-4. Write preset under ~/.remote-signer/rules/presets/
-5. preset remote-get → assess default danger → ask user → preset apply
-6. UI Reload from disk (or restart if config changed)
+4. Write preset: template_ids + matrix per source chain_id
+5. preset validate <preset> — all test_cases green (no skip_validation)
+6. preset remote-get → assess danger → ask user → preset apply
+7. Reload from disk; E2E each golden route
 ```
 
-**Upstream contribution (optional, when stable):** clone the [remote-signer](https://github.com/ivanzzeth/remote-signer) project, add templates/presets there, open a PR. Operators without that repo never need this step.
+**Upstream contribution (optional, when stable):** add templates/presets to [remote-signer](https://github.com/ivanzzeth/remote-signer) repo; open PR only after step 5 passes for every golden route.
 
-### Case study: Stargate Fast Swaps (Aori)
+### Case study: Stargate bridge (two engines)
 
-Stargate UI (`stargate.finance/transfer`) uses **Aori** as execution engine — not the same protocol.
+`stargate.finance/transfer` is **one UI**, **two execution engines**. Rules must cover **each** `sign_flow` in `registry/stargate.yaml`.
+
+#### Engine A: `aori_fast_swap` (e.g. BSC → Arbitrum)
+
+When **both** chains appear in `GET https://api.aori.io/chains`.
 
 | Step | Sign type | What |
 |------|-----------|------|
-| 1 | `transaction` | ERC20 `approve` → Aori contract (`0xffe691...` on BSC) |
-| 2 | `typed_data` | Aori `Order` EIP-712 (`domain.name: Aori`, `version: 0.3.1`) |
+| 1 | `transaction` | ERC20 `approve` → Aori (`0xffe691...` on BSC) |
+| 2 | `typed_data` | EIP-712 `Order` (`domain: Aori 0.3.1`) |
 
-**On-disk artifacts:**
+Templates: `evm/erc20` + `evm/aori`. Solver later calls `deposit(Order, sig)` — user does not sign that tx.
 
-- `~/.remote-signer/rules/templates/evm/aori.yaml` — Order typed_data validation
-- `~/.remote-signer/rules/presets/evm/stargate.yaml` — composes `evm/erc20` + `evm/aori` (multi-chain via **matrix**, same pattern as `uniswap.yaml`)
+#### Engine B: `ioft_pool` (e.g. BSC → Polygon)
 
-**Order fields** (from `GET https://api.aori.io/domain`):
+When destination **not** in Aori `/chains` (Polygon has no Aori deployment).
+
+| Step | Sign type | What |
+|------|-----------|------|
+| 1 | `transaction` | ERC20 `approve` → **StargatePool** (`0x138EB30...` BSC USDT) |
+| 2 | `transaction` | `IStargate.send(SendParam, ...)` to same pool address |
+
+Templates needed: `evm/erc20` + **`evm/stargate_ioft` (not written yet)**. No EIP-712 Order.
+
+**Order fields** (Aori only — `GET https://api.aori.io/domain`):
 
 ```
 Order(uint128 inputAmount, uint128 outputAmount, address inputToken, address outputToken,
@@ -52,33 +83,18 @@ Order(uint128 inputAmount, uint128 outputAmount, address inputToken, address out
       address offerer, address recipient)
 ```
 
-**Security (required in `aori` template):**
+**Security (`aori` template):**
 
-- `offerer` must match `input.signer` (payer on source chain)
-- `recipient` must match `input.signer` (destination output must land on the signing key — blocks draining to arbitrary addresses)
+- `offerer` and `recipient` must match `input.signer`
 
-**Multi-chain preset (Stargate):** Do **not** put `chain_id: "56"` on the preset. Stargate is cross-chain; one preset covers all Aori source chains:
+**Multi-chain preset:** no preset-level `chain_id`; use `defaults` + `matrix` (see `uniswap.yaml`). Matrix row sets per-chain `allowed_spenders` — **Aori address OR Pool address depending on route engine**.
 
-```yaml
-name: "Stargate"
-chain_type: "evm"
-# no chain_id — one rule instance per template, matrix resolves per request chain
-defaults:
-  domain_name: "Aori"
-  allowed_dst_eids: "..."      # all LayerZero eids from GET https://api.aori.io/chains
-  allowed_output_tokens: "..." # all routable tokens from GET https://api.aori.io/tokens
-matrix:
-  - chain_id: "56"
-    aori_contract_address: "0xffe691..."   # from /chains
-    allowed_spenders: "0xffe691..."        # erc20 approve spender
-    allowed_src_eids: "30102"
-    allowed_input_tokens: "..."            # that chain's tokens from /tokens
-template_ids: [evm/erc20, evm/aori]
-```
+**Anti-patterns:**
 
-Reference: `~/.remote-signer/rules/presets/evm/uniswap.yaml` (`defaults` + `matrix`, no preset `chain_id`).
-
-**Anti-pattern:** Do not whitelist Aori `Order` via generic `evm/agent` `trusted_contracts`. Use a dedicated `aori` template like Polymarket uses `polymarket_v2`. Do not split Stargate into per-chain presets.
+- Treating all Stargate as Aori-only
+- `trusted_contracts` on agent preset instead of dedicated templates
+- `preset apply` / commit after only one golden route
+- Skipping `preset validate` or `skip_validation`
 
 ## File layout
 
@@ -312,10 +328,11 @@ One rule instance + `matrix: [{ chain_id, ...vars }]`. At evaluation, `effective
 
 ## Checklist before going live
 
-- [ ] Observed real sign requests captured (types, domain, calldata)
-- [ ] Template with explicit rule `id`s and ≥1 negative `test_cases`
-- [ ] `remote-signer validate -v` passes on `~/.remote-signer/rules/...`
-- [ ] Preset composes only needed `template_ids` (no generic agent-sign hack)
-- [ ] All scope variables filled in preset (tokens, contracts, eids, caps)
-- [ ] User confirmed variable values before `preset apply`
-- [ ] Reload from disk (or restart) picked up files; tested against authorizing re-eval
+- [ ] `registry/<dapp>.yaml` filled from official APIs (INTEGRATION Phase 1)
+- [ ] Each `sign_flow` in registry has a matching template
+- [ ] UI walk reconciled: spender / tx.to / verifyingContract match registry
+- [ ] Template rule `id`s + negative `test_cases` per engine
+- [ ] `remote-signer validate -v` passes on all templates
+- [ ] `preset validate` passes — **every** golden route's engine covered
+- [ ] User confirmed caps before `preset apply`
+- [ ] E2E on each golden route; no real addresses in git

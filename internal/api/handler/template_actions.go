@@ -158,12 +158,7 @@ func (h *TemplateHandler) instantiateTemplate(w http.ResponseWriter, r *http.Req
 	if instanceReq.ChainID != nil {
 		resolvedVars["chain_id"] = *instanceReq.ChainID
 	}
-	resolvedConfig, subErr := service.SubstituteVariables(tmpl.Config, resolvedVars) //nolint:staticcheck
-	if subErr != nil {
-		h.writeError(w, fmt.Sprintf("variable substitution for validation failed: %s", subErr.Error()), http.StatusBadRequest)
-		return
-	}
-	results, allPassed := ValidateTemplateConfig(h.jsEvaluator, tmpl.Name, resolvedConfig, resolvedVars)
+	results, allPassed := ValidateTemplateConfig(h.jsEvaluator, tmpl.Name, tmpl.Config, resolvedVars)
 	if !allPassed {
 		var failures []string
 		for _, r := range results {

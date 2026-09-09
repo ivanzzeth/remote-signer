@@ -1,0 +1,233 @@
+# Aori protocol template (evm_js) — cross-chain Order EIP-712 for Stargate Fast Swaps and other Aori integrations.
+# Order type (api.aori.io/domain): Order(uint128 inputAmount,uint128 outputAmount,address inputToken,
+# address outputToken,uint32 startTime,uint32 endTime,uint32 srcEid,uint32 dstEid,address offerer,address recipient)
+
+name: Aori Order Signature
+variables:
+  - name: aori_contract_address
+    type: address
+    description: "Aori protocol contract on this chain (verifyingContract)"
+    required: true
+  - name: domain_name
+    type: string
+    description: "EIP-712 domain name (Aori API: name)"
+    required: true
+  - name: domain_version
+    type: string
+    description: "EIP-712 domain version (Aori API: version)"
+    required: true
+  - name: allowed_input_tokens
+    type: address_list
+    description: "Comma-separated inputToken addresses allowed in Order. Empty = any."
+    required: false
+    default: ""
+  - name: allowed_output_tokens
+    type: address_list
+    description: "Comma-separated outputToken addresses allowed in Order. Empty = any."
+    required: false
+    default: ""
+  - name: allowed_src_eids
+    type: string
+    description: "Comma-separated LayerZero srcEid values (e.g. 30102 for BSC). Empty = any."
+    required: false
+    default: ""
+  - name: allowed_dst_eids
+    type: string
+    description: "Comma-separated LayerZero dstEid values (e.g. 30110 for Arbitrum). Empty = any."
+    required: false
+    default: ""
+  - name: max_input_amount
+    type: string
+    description: "Max Order inputAmount (uint128, token smallest unit). -1 = no cap."
+    required: false
+    default: "-1"
+  - name: max_output_amount
+    type: string
+    description: "Max Order outputAmount (uint128). -1 = no cap."
+    required: false
+    default: "-1"
+test_variables:
+  chain_id: "56"
+  aori_contract_address: "0xffe691a6ddb5d2645321e0a920c2e7bdd00dd3d8"
+  domain_name: "Aori"
+  domain_version: "0.3.1"
+  allowed_input_tokens: "0x55d398326f99059fF775485246999027B3197955"
+  allowed_output_tokens: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9"
+  allowed_src_eids: "30102"
+  allowed_dst_eids: "30110"
+  max_input_amount: "-1"
+  max_output_amount: "-1"
+  test_signer: "0x0000000000000000000000000000000000000001"
+rules:
+  - id: "aori-order-signature"
+    name: "Aori Order Signature"
+    type: "evm_js"
+    mode: "whitelist"
+    enabled: true
+    chain_id: "${chain_id}"
+    description: "Validate Aori cross-chain Order EIP-712 signatures"
+    config:
+      sign_type_filter: "typed_data"
+      script: |
+        function parseUintList(csv) {
+          var out = [];
+          if (!csv) return out;
+          String(csv).split(',').forEach(function(part) {
+            var n = parseInt(String(part).trim(), 10);
+            if (!isNaN(n)) out.push(n);
+          });
+          return out;
+        }
+        function requireUintInListIfNonEmpty(val, listCsv, label) {
+          var allowed = parseUintList(listCsv);
+          if (allowed.length === 0) return;
+          var n = parseInt(String(val), 10);
+          if (isNaN(n) || allowed.indexOf(n) < 0) revert(label + ' not allowed');
+        }
+        function validate(input) {
+          var ctx = rs.typedData.require(input, 'Order');
+          var domain = ctx.domain || {};
+          var msg = ctx.message || {};
+          // Aori domain omits chainId (api.aori.io/domain: name, version, verifyingContract only).
+          require(
+            parseInt(String(input.chain_id), 10) === parseInt(String(config.chain_id), 10),
+            'must be on configured chain'
+          );
+          rs.typedData.requireDomain(domain, {
+            name: config.domain_name,
+            version: config.domain_version,
+            allowedContracts: [config.aori_contract_address]
+          });
+          var offerer = String(msg.offerer || '').trim();
+          require(offerer !== '', 'missing offerer');
+          rs.typedData.requireSignerMatch(offerer, String(input.signer || '').trim(), 'offerer must match signing key');
+          var recipient = String(msg.recipient || '').trim();
+          require(recipient !== '', 'missing recipient');
+          require(isAddress(recipient), 'recipient invalid');
+          rs.typedData.requireSignerMatch(recipient, String(input.signer || '').trim(), 'recipient must match signing key');
+          rs.addr.requireInListIfNonEmpty(String(msg.inputToken || '').trim(), config.allowed_input_tokens, 'inputToken not allowed');
+          rs.addr.requireInListIfNonEmpty(String(msg.outputToken || '').trim(), config.allowed_output_tokens, 'outputToken not allowed');
+          requireUintInListIfNonEmpty(msg.srcEid, config.allowed_src_eids, 'srcEid');
+          requireUintInListIfNonEmpty(msg.dstEid, config.allowed_dst_eids, 'dstEid');
+          rs.bigint.requireLte(msg.inputAmount, config.max_input_amount, 'inputAmount exceeds cap');
+          rs.bigint.requireLte(msg.outputAmount, config.max_output_amount, 'outputAmount exceeds cap');
+          return ok();
+        }
+      test_cases:
+        - name: "pass valid BSC→Arbitrum USDT Order"
+          input:
+            sign_type: "typed_data"
+            chain_id: 56
+            signer: "0x0000000000000000000000000000000000000001"
+            typed_data:
+              primaryType: "Order"
+              domain:
+                name: "Aori"
+                version: "0.3.1"
+                verifyingContract: "${aori_contract_address}"
+              message:
+                inputAmount: "1000000000000000000"
+                outputAmount: "990000000000000000"
+                inputToken: "0x55d398326f99059fF775485246999027B3197955"
+                outputToken: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9"
+                startTime: "1704067200"
+                endTime: "1704070800"
+                srcEid: 30102
+                dstEid: 30110
+                offerer: "0x0000000000000000000000000000000000000001"
+                recipient: "0x0000000000000000000000000000000000000001"
+          expect_pass: true
+        - name: "reject wrong domain version"
+          input:
+            sign_type: "typed_data"
+            chain_id: 56
+            signer: "0x0000000000000000000000000000000000000001"
+            typed_data:
+              primaryType: "Order"
+              domain:
+                name: "Aori"
+                version: "0.0.0"
+                verifyingContract: "${aori_contract_address}"
+              message:
+                inputAmount: "1000000000000000000"
+                outputAmount: "990000000000000000"
+                inputToken: "0x55d398326f99059fF775485246999027B3197955"
+                outputToken: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9"
+                startTime: "1704067200"
+                endTime: "1704070800"
+                srcEid: 30102
+                dstEid: 30110
+                offerer: "0x0000000000000000000000000000000000000001"
+                recipient: "0x0000000000000000000000000000000000000001"
+          expect_pass: false
+        - name: "reject offerer not matching signer"
+          input:
+            sign_type: "typed_data"
+            chain_id: 56
+            signer: "0x0000000000000000000000000000000000000001"
+            typed_data:
+              primaryType: "Order"
+              domain:
+                name: "Aori"
+                version: "0.3.1"
+                verifyingContract: "${aori_contract_address}"
+              message:
+                inputAmount: "1000000000000000000"
+                outputAmount: "990000000000000000"
+                inputToken: "0x55d398326f99059fF775485246999027B3197955"
+                outputToken: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9"
+                startTime: "1704067200"
+                endTime: "1704070800"
+                srcEid: 30102
+                dstEid: 30110
+                offerer: "0x0000000000000000000000000000000000000002"
+                recipient: "0x0000000000000000000000000000000000000001"
+          expect_pass: false
+        - name: "reject dstEid not in allowlist"
+          input:
+            sign_type: "typed_data"
+            chain_id: 56
+            signer: "0x0000000000000000000000000000000000000001"
+            typed_data:
+              primaryType: "Order"
+              domain:
+                name: "Aori"
+                version: "0.3.1"
+                verifyingContract: "${aori_contract_address}"
+              message:
+                inputAmount: "1000000000000000000"
+                outputAmount: "990000000000000000"
+                inputToken: "0x55d398326f99059fF775485246999027B3197955"
+                outputToken: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9"
+                startTime: "1704067200"
+                endTime: "1704070800"
+                srcEid: 30102
+                dstEid: 99999
+                offerer: "0x0000000000000000000000000000000000000001"
+                recipient: "0x0000000000000000000000000000000000000001"
+          expect_pass: false
+          expect_reason: "dstEid not allowed"
+        - name: "reject recipient not matching signer"
+          input:
+            sign_type: "typed_data"
+            chain_id: 56
+            signer: "0x0000000000000000000000000000000000000001"
+            typed_data:
+              primaryType: "Order"
+              domain:
+                name: "Aori"
+                version: "0.3.1"
+                verifyingContract: "${aori_contract_address}"
+              message:
+                inputAmount: "1000000000000000000"
+                outputAmount: "990000000000000000"
+                inputToken: "0x55d398326f99059fF775485246999027B3197955"
+                outputToken: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9"
+                startTime: "1704067200"
+                endTime: "1704070800"
+                srcEid: 30102
+                dstEid: 30110
+                offerer: "0x0000000000000000000000000000000000000001"
+                recipient: "0x0000000000000000000000000000000000000002"
+          expect_pass: false
+          expect_reason: "recipient must match signing key"

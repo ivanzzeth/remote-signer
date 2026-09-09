@@ -75,10 +75,14 @@ func effectiveVarMap(r *types.Rule, chainID string) map[string]string {
 	return vars
 }
 
-// substituteConfigVars replaces ${var} and its hex/first variants for each
+// SubstituteConfigVars replaces ${var} and its hex/first variants for each
 // variable. It mirrors service.SubstituteVariables but lives here to avoid an
 // import cycle (core/service imports core/rule) and is intentionally loose: it
 // returns the result without erroring on any leftover ${...} placeholder.
+func SubstituteConfigVars(configJSON []byte, vars map[string]string) []byte {
+	return substituteConfigVars(configJSON, vars)
+}
+
 func substituteConfigVars(configJSON []byte, vars map[string]string) []byte {
 	result := string(configJSON)
 	for k, v := range vars {
