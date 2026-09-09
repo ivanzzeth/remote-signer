@@ -1,0 +1,41 @@
+# 谁能拿到 rule repo 句柄,以及其中谁写库时不校验。
+# 由 cmd/archcheck 用 AST 判定:只看**声明**(字段/参数/var 的类型是
+# storage.RuleRepository,或调用 storage.NewGormRuleRepository),注释里提到
+# 这个类型不算。
+#
+# 为什么这条最该被钉住:一条规则就是一次**资金授权** —— 它决定哪些交易不经
+# 人工就自动签掉。强制校验目前在 internal/api/handler/validation_mandatory.go,
+# 那是 **HTTP 层的策略,不是领域不变量**,所以 CLI / 启动种子 / 内部服务全绕过。
+# 2026-06 的 `7379347` 修的就是这个形状的两个实例。
+#
+# ⚠️ 带 [writes-unvalidated] 的是「同一文件里对 rule repo 调了 Create/Update
+# 且没有 ruleconfig.ValidateRuleConfig」。这一判定是**文件内**的,不是调用图:
+# repo 穿过三个文件的辅助函数就跟不住了 —— 所以基线钉的是**持有者**,不是调用点。
+#
+# ⚠️ 它取代了 scripts/arch/40 那条 grep 门禁。grep 版把本文件的注释当成了违规
+# (和 Solidity 棘轮数注释是同一个毛病),而且把 budget.go / server_validate_evm.go
+# 误列进「写库不校验」—— 它们持有 rule repo,但 Create/Update 调的是别的 repo。
+# 8 条收窄到 5 条,而且 5 条都是真的。
+#
+# ⛔ 加新行 = 又开一条能绕过规则格式校验的资金授权写入路径。
+
+cmd/migrate-config-templateform/main.go
+internal/api/handler/evm/budget.go
+internal/api/handler/evm/request.go
+internal/api/handler/evm/rule.go
+internal/api/handler/evm/rule_crud.go
+internal/api/handler/evm/rule_delete.go
+internal/api/handler/evm/rule_query.go [writes-unvalidated]
+internal/api/handler/preset.go
+internal/api/router.go
+internal/cli/server/agent_seed.go [writes-unvalidated]
+internal/cli/server/run_init.go
+internal/cli/server/server_validate.go
+internal/cli/server/server_validate_evm.go
+internal/config/rule_init.go
+internal/config/rule_init_sync.go
+internal/config/rule_init_sync_rule.go
+internal/core/rule/whitelist.go
+internal/core/service/approval.go [writes-unvalidated]
+internal/core/service/signer_access.go [writes-unvalidated]
+internal/core/service/template.go [writes-unvalidated]

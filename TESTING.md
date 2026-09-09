@@ -107,7 +107,7 @@ illusion that someone is watching.
 | `arch/10` | `ValidateWithInput` is called only from `internal/chain/evm/testcase_runner.go` | template/preset/rule validation each kept its own copy of the test-case loop; two of them substituted variables *before* validating, so **matrix presets validated every test case against the wrong chain** — silently, for months |
 | `arch/20` | Every preset's `template_ids` resolve | A dangling id makes `preset apply` install one rule fewer **without erroring** — it surfaces later as "a signature mysteriously went to `authorizing`" |
 | `arch/30` | `signer` / `test_signer` / `from` hold only allowlisted or structurally-impossible addresses | `b922718` scrubbed operator wallets once; new aori/stargate work reintroduced the same address **23 times**, 2 of them buried inside calldata hex (`…000764602fead…`) where grepping for the address misses them. This submodule is open-source, so a real EOA in a signer field publishes someone's wallet |
-| `arch/40` 🔒 | Only baselined files hold a rule-repo handle, and the "writes without `ValidateRuleConfig`" set only shrinks | A rule **is** a spending authorization. Mandatory validation lives in `internal/api/handler/validation_mandatory.go` — an HTTP-layer policy, not a domain invariant — so CLI, startup seeding and internal services bypass it. `7379347` fixed two instances of exactly that shape; the structure that produced them is unchanged |
+| `arch/05` 🔒 | **AST**, not text: Clean Architecture dependency direction; settings knobs frozen into struct fields; rule-repo holders and unvalidated writers; `write*` helpers with more than one argument order | Every grep gate here carries a note about a case its text criterion got wrong, and two were the same mistake: the Solidity ratchet counted `evm_solidity_expression` in comments, and the retired grep gate `40-rule-write-chokepoint` flagged `cmd/archcheck`'s own doc comment for the words `storage.RuleRepository`. Reading declarations instead of lines also widened what is visible — grep saw 3 files breaking dependency direction, the AST sees **13 package edges**, including the `internal/api → internal/config` class it never reported at all |
 | `arch/50` 🔒 | GORM stays inside `internal/storage`; `internal/core` does not import `internal/chain/evm`; `internal/config` does not import business packages | `SignService` holds a concrete `*evmchain.SimulationBudgetRule`, so adding a second chain means editing the domain layer. `internal/config` is a second bootstrap layer wearing the name "config" — nobody dares touch it |
 | `arch/60` 🔒 | The set of `${var}` substitution implementations only shrinks | Validation uses the strict one (`core/service/substitute.go`, reports errors); evaluation uses the lenient one (`core/rule/effective_config.go`, never errors). One divergence between them = a rule whose test cases are green authorizing something else at runtime |
 | `arch/70` 🔒 | Per-handler `write*` helpers, `RouterConfig` fields and hand-rolled method checks only go down; no new in-handler `HasPermission` | 48 write helpers in **three different argument orders** — swap two and it still compiles (`any` + `int`), shipping errors inside a 200. A permission check in a function body means forgetting one is a bypass, and nothing reports it |
@@ -123,6 +123,22 @@ fails on two things: a violation **not** in the baseline (don't add more), and a
 baseline entry that no longer exists (you fixed it — now delete the line, so the
 baseline cannot become a permanent amnesty list). Those baseline files, each line
 annotated with why it is still there, are also the refactor TODO list.
+
+The AST gate is [`cmd/archcheck`](cmd/archcheck), standard library only (no
+golangci-lint, no new module dependency — this repo's public SDK shares the
+module) and it parses the whole tree in about 0.2s. Layers are declared in
+[`cmd/archcheck/layers.go`](cmd/archcheck/layers.go); each carries the reason
+the constraint exists, so a violation reads as an arrow pointing the wrong way
+rather than as a lint code. Run one check, or find packages nobody has assigned
+a layer to:
+
+```bash
+go run ./cmd/archcheck layers
+go run ./cmd/archcheck -unclassified
+```
+
+⛔ Widening a layer's `MayImport` to silence a violation is shortening the ruler
+to make someone taller. The baseline is where a violation goes, with its reason.
 
 Each gate lives in its own file under [`scripts/arch/`](scripts/arch/) and runs
 standalone, which is what you want while fixing one:

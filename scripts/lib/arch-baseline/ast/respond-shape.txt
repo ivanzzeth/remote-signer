@@ -1,0 +1,19 @@
+# 少数派参数顺序的 write helper。
+#
+# writeJSON 有 (w, any, int) 22 份 和 (w, int, any) 5 份;writeError 有
+# (w, string, int) 19 份 和 (w, int, string) 3 份。**两种都编译得过** ——
+# 传反了不报错,线上表现是 200 里塞着错误体,没有任何测试必然会发现。
+#
+# 这张表只列少数派:多数派就是事实上的约定,先让这几个对齐,再把整批 48 个
+# 方法收进共享的 respond 包。
+#
+# ⛔ 只许缩,目标 0。
+
+internal/api/handler/bootstrap.go:BootstrapHandler.writeJSON
+internal/api/handler/evm/request_simulation.go:RequestSimulationHandler.writeError
+internal/api/handler/evm/request_simulation.go:RequestSimulationHandler.writeJSON
+internal/api/handler/evm/rpc_proxy.go:RPCProxyHandler.writeJSON
+internal/api/handler/evm/simulation_history.go:SimulationHistoryHandler.writeError
+internal/api/handler/evm/simulation_history.go:SimulationHistoryHandler.writeJSON
+internal/api/handler/evm/transactions.go:TransactionsHandler.writeError
+internal/api/handler/evm/transactions.go:TransactionsHandler.writeJSON
