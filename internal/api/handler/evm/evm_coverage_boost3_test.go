@@ -2010,7 +2010,7 @@ func TestB3CreateSigner_ResourceLimitExceeded(t *testing.T) {
 
 	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
-	h.SetMaxKeystoresPerKey(1)
+	h.SetMaxKeystoresPerKey(func() int { return 1 })
 
 	body := map[string]interface{}{
 		"type": "keystore",
@@ -3174,7 +3174,7 @@ func TestB3CreateSigner_ResourceLimitError(t *testing.T) {
 	require.NoError(t, err)
 	h, err := NewSignerHandler(mgr, svc, slog.Default(), nil)
 	require.NoError(t, err)
-	h.SetMaxKeystoresPerKey(0) // no limit — just exercise create flow
+	h.SetMaxKeystoresPerKey(func() int { return 0 }) // no limit — just exercise create flow
 
 	body := map[string]interface{}{
 		"type":     "keystore",

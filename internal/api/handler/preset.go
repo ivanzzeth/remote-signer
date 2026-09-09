@@ -70,7 +70,7 @@ type PresetHandler struct {
 	readOnly          func() bool
 	logger            *slog.Logger
 	auditLogger       *audit.AuditLogger
-	requireApproval   bool
+	requireApproval   func() bool
 	apiKeyRepo        storage.APIKeyRepository
 }
 
@@ -79,7 +79,7 @@ type PresetHandlerOption func(*PresetHandler)
 
 // WithPresetRequireApproval enables admin approval for agent whitelist
 // rules created via preset.
-func WithPresetRequireApproval(v bool) PresetHandlerOption {
+func WithPresetRequireApproval(v func() bool) PresetHandlerOption {
 	return func(h *PresetHandler) { h.requireApproval = v }
 }
 
@@ -781,7 +781,7 @@ func (h *PresetHandler) resolveInstances(
 
 		ownership, err := DetermineRuleOwnership(
 			ctx, apiKey, appliedTo,
-			tmpl.Mode, h.requireApproval, h.apiKeyRepo,
+			tmpl.Mode, h.requireApprovalValue(), h.apiKeyRepo,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("RBAC for template %q: %w", tid, err)
@@ -983,4 +983,13 @@ func (h *PresetHandler) isReadOnly() bool {
 		return false
 	}
 	return h.readOnly()
+}
+
+// requireApprovalValue reads the setting at request time — see
+// Router.liveReadOnly for why it must not be a captured bool.
+func (h *PresetHandler) requireApprovalValue() bool {
+	if h.requireApproval == nil {
+		return false
+	}
+	return h.requireApproval()
 }

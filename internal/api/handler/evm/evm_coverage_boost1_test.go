@@ -582,7 +582,7 @@ func TestBatchSignHandler_BatchSignSetters(t *testing.T) {
 
 	assert.NotPanics(t, func() {
 		h.SetAlertService(nil)
-		h.SetSignTimeout(0)
+		h.SetSignTimeout(func() time.Duration { return 0 })
 	})
 }
 
@@ -629,7 +629,7 @@ func TestSignHandler_Setters(t *testing.T) {
 
 	assert.NotPanics(t, func() {
 		h.SetAlertService(nil)
-		h.SetSignTimeout(10 * time.Second)
+		h.SetSignTimeout(func() time.Duration { return 10 * time.Second })
 		h.SetSignerRepo(&stubSignerRepo{})
 	})
 }
@@ -645,7 +645,7 @@ func TestSignerHandler_Setters(t *testing.T) {
 
 	assert.NotPanics(t, func() {
 		h.SetAuditLogger(&audit.AuditLogger{})
-		h.SetMaxKeystoresPerKey(5)
+		h.SetMaxKeystoresPerKey(func() int { return 5 })
 		h.SetSignerRepo(&stubSignerRepo{})
 	})
 }
@@ -661,7 +661,7 @@ func TestHDWalletHandler_Setters(t *testing.T) {
 
 	assert.NotPanics(t, func() {
 		h.SetAuditLogger(&audit.AuditLogger{})
-		h.SetMaxHDWalletsPerKey(3)
+		h.SetMaxHDWalletsPerKey(func() int { return 3 })
 	})
 }
 
@@ -1222,10 +1222,10 @@ func TestRuleHandler_WithReadOnly(t *testing.T) {
 }
 
 func TestRuleHandler_WithRequireApproval(t *testing.T) {
-	h, err := NewRuleHandler(newMockRuleRepo(), slog.Default(), WithRequireApproval(true))
+	h, err := NewRuleHandler(newMockRuleRepo(), slog.Default(), WithRequireApproval(func() bool { return true }))
 	require.NoError(t, err)
 	require.NotNil(t, h)
-	assert.True(t, h.requireApproval)
+	assert.True(t, h.requireApprovalValue())
 }
 
 // ---------------------------------------------------------------------------

@@ -2,33 +2,21 @@
 # 由 cmd/archcheck 读 settings.SecuritySnapshot 的字段表 + 扫 internal/api 的
 # 结构体字段得出 —— 快照加字段时这张表会自动跟着长,不用手抄。
 #
-# 每一行都是一处「文档说能热改、实际改了没用」:值在构造那一刻冻住,之后
-# Web UI / CLI 改 DB 都碰不到它。而 internal/settings/model.go 的包注释明写
-# 「become effective without a daemon restart」。
+# ✅ 2026-09-10:21 → 2。所有真正的开关都解冻了 —— handler 持有
+# func() bool / func() int / func() time.Duration,由 Router.liveReadOnly /
+# liveInt / liveDuration 生成的闭包在**每次请求**时读快照。
+# 行为由 internal/api/handler/readonly_live_test.go 钉住。
 #
 # ⚠️ 只认标量类型(bool/int/string/time.Duration/[]string)。同名但持有服务对象的
-# 字段不算 —— RouterConfig.ApprovalGuard 是 guard 本身,而且是唯一真的活的那个
+# 字段不算 —— RouterConfig.ApprovalGuard 是 guard 本身,而且它一直是活的
 # (router.syncApprovalGuard 会回写)。
 #
-# ✅ 2026-09-10:三个 *_api_readonly 开关已解冻(16 → 13)。它们现在由
-# Router.liveReadOnly 生成的闭包在**每次请求**时读快照,handler 持有的是
-# func() bool 而不是 bool。行为由 internal/api/handler/readonly_live_test.go
-# 钉住 —— 那个测试翻转数据源两次,验证 handler 跟着变。
+# 剩下两条是 **/health 的响应 DTO 字段**,不是被冻住的开关:它们由
+# securityConfigNow() 每次请求从快照重算(格式化规则见 applySecurityDurations),
+# 结构体字段只是响应体的形状。检查按字段名匹配,分不出「持有配置」和
+# 「报告配置」,所以它们留在这里,理由写在这。
 #
-# ⛔ 只许缩,目标 0。修法是在请求路径上现读 settingsMgr.Security().<字段>。
-# ⚠️ 其中 6 处是**路由注册期**消费的(router.go 里 `if r.config.X { 不注册 }`),
-# 那几条必须先做 feature module 自注册才动得了 —— 见 arch/70。
+# ⛔ 新增一行 = 又有人把一个运行时可改的开关拷进了结构体。
 
-internal/api.RouterConfig.AutoLockTimeout
-internal/api.RouterConfig.IPRateLimit
-internal/api.RouterConfig.MaxHDWalletsPerKey
-internal/api.RouterConfig.MaxKeystoresPerKey
-internal/api.RouterConfig.MaxRulesPerAPIKey
-internal/api.RouterConfig.RequireApprovalForAgentRules
-internal/api.RouterConfig.SignTimeout
 internal/api/handler.SecurityConfigInfo.AutoLockTimeout
 internal/api/handler.SecurityConfigInfo.SignTimeout
-internal/api/handler/evm.BatchSignHandler.signTimeout
-internal/api/handler/evm.HDWalletHandler.maxHDWalletsPerKey
-internal/api/handler/evm.SignHandler.signTimeout
-internal/api/handler/evm.SignerHandler.maxKeystoresPerKey

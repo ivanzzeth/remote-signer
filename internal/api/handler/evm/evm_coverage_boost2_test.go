@@ -628,8 +628,8 @@ func TestUpdateRule_SolidityForgeUnavailable(t *testing.T) {
 func TestCreateRule_MaxRulesExceeded(t *testing.T) {
 	repo := newMockRuleRepo()
 	h, err := NewRuleHandler(repo, slog.Default(),
-		WithMaxRulesPerKey(1),
-		WithRequireApproval(true),
+		WithMaxRulesPerKey(func() int { return 1 }),
+		WithRequireApproval(func() bool { return true }),
 		WithAPIKeyRepo(&stubAPIKeyRepo{}))
 	require.NoError(t, err)
 
@@ -847,8 +847,8 @@ func TestCreateSigner_ResourceLimitExceeded(t *testing.T) {
 	accessSvc := newSignerTestAccessService(t)
 	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
-	h.SetMaxKeystoresPerKey(0) // 0 = no limit, so should not block
-	h.SetMaxKeystoresPerKey(1)
+	h.SetMaxKeystoresPerKey(func() int { return 0 }) // 0 = no limit, so should not block
+	h.SetMaxKeystoresPerKey(func() int { return 1 })
 
 	// First creation succeeds
 	h.signerManager = &signerMockSignerManager{

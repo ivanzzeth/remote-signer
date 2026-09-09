@@ -319,7 +319,7 @@ func TestInstantiateTemplate_RBACOwnershipError(t *testing.T) {
 
 	h := newHandler(t, tmplRepo, ruleRepo, budgetRepo)
 	// Enable requireApproval so agent + whitelist triggers pending
-	h.requireApproval = true
+	h.requireApproval = func() bool { return true }
 
 	// Use an agent key
 	agentKey := &types.APIKey{ID: "agent-1", Role: types.RoleAgent, Enabled: true}

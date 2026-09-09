@@ -25,7 +25,7 @@ type TemplateHandler struct {
 	solidityValidator *evm.SolidityRuleValidator
 	readOnly          func() bool // when true, block all template mutations via API
 	logger            *slog.Logger
-	requireApproval   bool
+	requireApproval   func() bool
 	apiKeyRepo        storage.APIKeyRepository
 }
 
@@ -33,7 +33,7 @@ type TemplateHandler struct {
 type TemplateHandlerOption func(*TemplateHandler)
 
 // WithTemplateRequireApproval enables admin approval for agent whitelist rules created via template instantiation.
-func WithTemplateRequireApproval(v bool) TemplateHandlerOption {
+func WithTemplateRequireApproval(v func() bool) TemplateHandlerOption {
 	return func(h *TemplateHandler) {
 		h.requireApproval = v
 	}
@@ -635,4 +635,13 @@ func (h *TemplateHandler) isReadOnly() bool {
 		return false
 	}
 	return h.readOnly()
+}
+
+// requireApprovalValue reads the setting at request time — see
+// Router.liveReadOnly for why it must not be a captured bool.
+func (h *TemplateHandler) requireApprovalValue() bool {
+	if h.requireApproval == nil {
+		return false
+	}
+	return h.requireApproval()
 }

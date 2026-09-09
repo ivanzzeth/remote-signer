@@ -349,7 +349,7 @@ func TestPhase4_RuleCountLimitEnforcedForAgent(t *testing.T) {
 		repo.addRule(r)
 	}
 
-	h, err := NewRuleHandler(repo, slog.Default(), WithMaxRulesPerKey(3))
+	h, err := NewRuleHandler(repo, slog.Default(), WithMaxRulesPerKey(func() int { return 3 }))
 	require.NoError(t, err)
 
 	body := phase4CreateBody("one-too-many", "evm_address_list", "whitelist")
@@ -369,7 +369,7 @@ func TestPhase4_RuleCountLimitNotEnforcedForAdmin(t *testing.T) {
 		repo.addRule(r)
 	}
 
-	h, err := NewRuleHandler(repo, slog.Default(), WithMaxRulesPerKey(3))
+	h, err := NewRuleHandler(repo, slog.Default(), WithMaxRulesPerKey(func() int { return 3 }))
 	require.NoError(t, err)
 
 	body := phase4CreateBody("admin-rule", "evm_address_list", "whitelist")
@@ -382,7 +382,7 @@ func TestPhase4_RuleCountLimitNotEnforcedForAdmin(t *testing.T) {
 
 func TestPhase4_RequireApproval_AgentWhitelist_PendingApproval(t *testing.T) {
 	repo := newMockRuleRepo()
-	h, err := NewRuleHandler(repo, slog.Default(), WithRequireApproval(true))
+	h, err := NewRuleHandler(repo, slog.Default(), WithRequireApproval(func() bool { return true }))
 	require.NoError(t, err)
 
 	body := phase4CreateBody("whitelist-needs-approval", "evm_address_list", "whitelist")
@@ -396,7 +396,7 @@ func TestPhase4_RequireApproval_AgentWhitelist_PendingApproval(t *testing.T) {
 
 func TestPhase4_RequireApproval_AgentBlocklist_ActiveImmediately(t *testing.T) {
 	repo := newMockRuleRepo()
-	h, err := NewRuleHandler(repo, slog.Default(), WithRequireApproval(true))
+	h, err := NewRuleHandler(repo, slog.Default(), WithRequireApproval(func() bool { return true }))
 	require.NoError(t, err)
 
 	body := phase4CreateBody("blocklist-always-active", "evm_address_list", "blocklist")
@@ -523,7 +523,7 @@ func TestPhase4_RuleActivatedCallback_NotTriggeredOnPendingApproval(t *testing.T
 
 	calls := make(chan string, 1)
 	h, err := NewRuleHandler(repo, slog.Default(),
-		WithRequireApproval(true),
+		WithRequireApproval(func() bool { return true }),
 		WithRuleActivatedCallback(func(caller string) {
 			calls <- caller
 		}),

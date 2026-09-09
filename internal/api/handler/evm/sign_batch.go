@@ -37,7 +37,7 @@ type BatchSignHandler struct {
 	ruleEngine     rule.RuleEngine
 	logger         *slog.Logger
 	alertService   *middleware.SecurityAlertService
-	signTimeout    time.Duration
+	signTimeout    func() time.Duration
 }
 
 // BatchSignHandlerConfig contains dependencies for the BatchSignHandler.
@@ -80,7 +80,7 @@ func (h *BatchSignHandler) SetAlertService(alertService *middleware.SecurityAler
 }
 
 // SetSignTimeout sets the context timeout for sign operations.
-func (h *BatchSignHandler) SetSignTimeout(d time.Duration) {
+func (h *BatchSignHandler) SetSignTimeout(d func() time.Duration) {
 	h.signTimeout = d
 }
 
@@ -208,7 +208,7 @@ func (h *BatchSignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Set up timeout
-	signTimeout := h.signTimeout
+	signTimeout := h.signTimeoutValue()
 	if signTimeout == 0 {
 		signTimeout = 30 * time.Second
 	}
@@ -434,4 +434,15 @@ func decimalToHex(decimal string) string {
 		return "0x0"
 	}
 	return "0x" + val.Text(16)
+}
+
+// signTimeoutValue reads the setting at request time. See Router.liveDuration /
+// liveBool: the snapshot behind it is reloaded from the database, so a value
+// captured at construction freezes at boot. nil keeps the previous meaning of
+// "unset" — the handler falls back to its own default.
+func (h *BatchSignHandler) signTimeoutValue() time.Duration {
+	if h.signTimeout == nil {
+		return 0
+	}
+	return h.signTimeout()
 }

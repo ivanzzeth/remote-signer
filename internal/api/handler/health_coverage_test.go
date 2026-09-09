@@ -22,46 +22,71 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestSetSecurityConfig_AutoLockDisabled(t *testing.T) {
-	h := NewHealthHandler("1.0.0")
-	h.SetSecurityConfig(0, 30*time.Second, 7)
-	assert.NotNil(t, h.securityConfig)
-	assert.Equal(t, "disabled", h.securityConfig.AutoLockTimeout)
+	// The durations are runtime mutable, so they are rendered per request from
+	// the settings snapshot rather than baked in at wiring time; the formatting
+	// rules are what this asserts.
+	var info SecurityConfigInfo
+	applySecurityDurations(&info, 0, 30*time.Second)
+	assert.Equal(t, "disabled", info.AutoLockTimeout)
 }
 
 func TestSetSecurityConfig_AutoLockEnabled(t *testing.T) {
-	h := NewHealthHandler("1.0.0")
-	h.SetSecurityConfig(5*time.Minute, 30*time.Second, 7)
-	assert.Equal(t, "5m0s", h.securityConfig.AutoLockTimeout)
+	// The durations are runtime mutable, so they are rendered per request from
+	// the settings snapshot rather than baked in at wiring time; the formatting
+	// rules are what this asserts.
+	var info SecurityConfigInfo
+	applySecurityDurations(&info, 5*time.Minute, 30*time.Second)
+	assert.Equal(t, "5m0s", info.AutoLockTimeout)
 }
 
 func TestSetSecurityConfig_DefaultSignTimeout(t *testing.T) {
-	h := NewHealthHandler("1.0.0")
-	h.SetSecurityConfig(5*time.Minute, 0, 7)
-	assert.Equal(t, "30s", h.securityConfig.SignTimeout)
+	// The durations are runtime mutable, so they are rendered per request from
+	// the settings snapshot rather than baked in at wiring time; the formatting
+	// rules are what this asserts.
+	var info SecurityConfigInfo
+	applySecurityDurations(&info, 5*time.Minute, 0)
+	assert.Equal(t, "30s", info.SignTimeout)
 }
 
 func TestSetSecurityConfig_CustomSignTimeout(t *testing.T) {
-	h := NewHealthHandler("1.0.0")
-	h.SetSecurityConfig(5*time.Minute, 60*time.Second, 7)
-	assert.Equal(t, "1m0s", h.securityConfig.SignTimeout)
+	// The durations are runtime mutable, so they are rendered per request from
+	// the settings snapshot rather than baked in at wiring time; the formatting
+	// rules are what this asserts.
+	var info SecurityConfigInfo
+	applySecurityDurations(&info, 5*time.Minute, 60*time.Second)
+	assert.Equal(t, "1m0s", info.SignTimeout)
 }
 
 func TestSetSecurityConfig_RetentionZero(t *testing.T) {
 	h := NewHealthHandler("1.0.0")
-	h.SetSecurityConfig(5*time.Minute, 30*time.Second, 0)
+	h.SetSecurityConfig(0)
 	assert.Equal(t, 0, h.securityConfig.AuditRetentionDays)
 }
 
 func TestSetSecurityConfig_AlwaysSetsContentTypeValidation(t *testing.T) {
 	h := NewHealthHandler("1.0.0")
-	h.SetSecurityConfig(0, 30*time.Second, 7)
+	h.SetSecurityConfig(7)
 	assert.True(t, h.securityConfig.ContentTypeValidation)
 }
 
 func TestSetSecurityConfig_ResponseShape(t *testing.T) {
-	// Verify the security config shows up in the health response JSON.
+	// /health reports what the daemon is doing *now*, so the two runtime-mutable
+	// durations must come from the live settings snapshot rather than from
+	// whatever they were at wiring time. Seeding them here and reading them back
+	// out of the response body is what makes that claim testable — before
+	// 2026-09-10 they were baked in by SetSecurityConfig and the endpoint
+	// happily reported a value that had since been changed.
+	mgr := settings.NewManager(newHealthTestStore(t), slog.Default())
+	sec := settings.DefaultSecurity()
+	sec.AutoLockTimeout = 10 * time.Minute
+	sec.SignTimeout = 45 * time.Second
+	if err := mgr.UpdateSecurity(t.Context(), sec, settings.UpdatedBySystem); err != nil {
+		t.Fatalf("update security: %v", err)
+	}
+
 	h := NewHealthHandler("v2.0.0")
-	h.SetSecurityConfig(10*time.Minute, 45*time.Second, 30)
+	h.SetSettingsManager(mgr)
+	h.SetSecurityConfig(30)
 
 	req := httptest.NewRequest("GET", "/health", nil)
 	w := httptest.NewRecorder()
@@ -99,7 +124,7 @@ func TestApprovalGuardHealth_FromRuntimeSettings(t *testing.T) {
 	guard.RecordRuleRejected()
 
 	h := NewHealthHandler("v2.0.0")
-	h.SetSecurityConfig(0, 30*time.Second, 7)
+	h.SetSecurityConfig(7)
 	h.SetSettingsManager(mgr)
 	h.SetApprovalGuard(guard)
 
@@ -120,7 +145,7 @@ func TestApprovalGuardHealth_DisabledOmitsBlock(t *testing.T) {
 	mgr := settings.NewManager(newHealthTestStore(t), slog.Default())
 
 	h := NewHealthHandler("v2.0.0")
-	h.SetSecurityConfig(0, 30*time.Second, 7)
+	h.SetSecurityConfig(7)
 	h.SetSettingsManager(mgr)
 	h.SetApprovalGuard(nil)
 

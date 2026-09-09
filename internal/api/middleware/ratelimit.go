@@ -132,16 +132,28 @@ func (r *RateLimiter) StartCleanupRoutine(interval time.Duration, stop <-chan st
 // IPRateLimitMiddleware creates a pre-auth rate limiting middleware based on client IP.
 // Protects against unauthenticated flood attacks (e.g. brute-force with invalid API keys).
 // If limit <= 0, IP rate limiting is disabled (pass-through).
-func IPRateLimitMiddleware(limiter *RateLimiter, ipWhitelist *IPWhitelist, limit int, alertServices ...*SecurityAlertService) func(http.Handler) http.Handler {
+// ⚠️ `limit` is a function, not an int, and the disabled check moved inside the
+// request handler. Both for the same reason: security.ip_rate_limit lives in
+// settings.SecuritySnapshot, which is reloaded from the database. Taking the
+// int here froze it at boot, and returning `next` once when it happened to be 0
+// meant the middleware could never be switched on afterwards at all — the chain
+// was already built without it. nil or <= 0 is pass-through, evaluated per
+// request.
+func IPRateLimitMiddleware(limiter *RateLimiter, ipWhitelist *IPWhitelist, limitFn func() int, alertServices ...*SecurityAlertService) func(http.Handler) http.Handler {
 	var alertService *SecurityAlertService
 	if len(alertServices) > 0 {
 		alertService = alertServices[0]
 	}
 	return func(next http.Handler) http.Handler {
-		if limit <= 0 {
-			return next // disabled
-		}
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			limit := 0
+			if limitFn != nil {
+				limit = limitFn()
+			}
+			if limit <= 0 {
+				next.ServeHTTP(w, r) // disabled right now
+				return
+			}
 			clientIP, ok := r.Context().Value(ClientIPContextKey).(string)
 			if !ok || clientIP == "" {
 				clientIP = ResolveClientIP(r, ipWhitelist)

@@ -208,11 +208,11 @@ func TestAggregateRuleModes_AllEmptyModes(t *testing.T) {
 
 func TestWithPresetRequireApproval(t *testing.T) {
 	h := &PresetHandler{}
-	WithPresetRequireApproval(true)(h)
-	assert.True(t, h.requireApproval)
+	WithPresetRequireApproval(func() bool { return true })(h)
+	assert.True(t, h.requireApprovalValue())
 
-	WithPresetRequireApproval(false)(h)
-	assert.False(t, h.requireApproval)
+	WithPresetRequireApproval(func() bool { return false })(h)
+	assert.False(t, h.requireApprovalValue())
 }
 
 func TestWithPresetAPIKeyRepo(t *testing.T) {
@@ -244,11 +244,11 @@ func TestPresetHandler_SetAuditLogger(t *testing.T) {
 
 func TestWithTemplateRequireApproval(t *testing.T) {
 	h := &TemplateHandler{}
-	WithTemplateRequireApproval(true)(h)
-	assert.True(t, h.requireApproval)
+	WithTemplateRequireApproval(func() bool { return true })(h)
+	assert.True(t, h.requireApprovalValue())
 
-	WithTemplateRequireApproval(false)(h)
-	assert.False(t, h.requireApproval)
+	WithTemplateRequireApproval(func() bool { return false })(h)
+	assert.False(t, h.requireApprovalValue())
 }
 
 func TestWithTemplateAPIKeyRepo(t *testing.T) {

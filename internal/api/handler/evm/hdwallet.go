@@ -24,7 +24,7 @@ type HDWalletHandler struct {
 	signerManager      evmchain.SignerManager
 	accessService      *service.SignerAccessService
 	readOnly           func() bool // when true, block HD wallet creation/derive via API
-	maxHDWalletsPerKey int         // resource limit: max HD wallets per API key (0 = no limit)
+	maxHDWalletsPerKey func() int  // resource limit: max HD wallets per API key (0 = no limit)
 	logger             *slog.Logger
 	auditLogger        *audit.AuditLogger // optional: audit logging
 }
@@ -35,7 +35,7 @@ func (h *HDWalletHandler) SetAuditLogger(al *audit.AuditLogger) {
 }
 
 // SetMaxHDWalletsPerKey sets the resource limit for maximum HD wallets per API key.
-func (h *HDWalletHandler) SetMaxHDWalletsPerKey(max int) {
+func (h *HDWalletHandler) SetMaxHDWalletsPerKey(max func() int) {
 	h.maxHDWalletsPerKey = max
 }
 
@@ -195,7 +195,7 @@ func (h *HDWalletHandler) createOrImport(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Enforce resource limit: max HD wallets per key
-	if h.maxHDWalletsPerKey > 0 {
+	if h.maxHDWalletsPerKeyValue() > 0 {
 		apiKey := middleware.GetAPIKey(r.Context())
 		if apiKey != nil {
 			// BUGFIX: Count only HD wallets, not all signer types
@@ -205,8 +205,8 @@ func (h *HDWalletHandler) createOrImport(w http.ResponseWriter, r *http.Request)
 				respond.Error(w, "failed to check resource limits", http.StatusInternalServerError, h.logger)
 				return
 			}
-			if int(count) >= h.maxHDWalletsPerKey {
-				respond.Error(w, fmt.Sprintf("resource limit exceeded: maximum %d HD wallets per API key", h.maxHDWalletsPerKey), http.StatusForbidden, h.logger)
+			if int(count) >= h.maxHDWalletsPerKeyValue() {
+				respond.Error(w, fmt.Sprintf("resource limit exceeded: maximum %d HD wallets per API key", h.maxHDWalletsPerKeyValue()), http.StatusForbidden, h.logger)
 				return
 			}
 		}
@@ -502,4 +502,14 @@ func (h *HDWalletHandler) isReadOnly() bool {
 		return false
 	}
 	return h.readOnly()
+}
+
+// maxHDWalletsPerKeyValue reads the limit at request time. See Router.liveInt: the setting
+// behind it is runtime mutable, so a value captured at construction freezes at
+// boot. nil means unset, which these fields already meant as 0.
+func (h *HDWalletHandler) maxHDWalletsPerKeyValue() int {
+	if h.maxHDWalletsPerKey == nil {
+		return 0
+	}
+	return h.maxHDWalletsPerKey()
 }

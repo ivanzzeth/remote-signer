@@ -47,21 +47,50 @@ func NewHealthHandler(version string) *HealthHandler {
 	}
 }
 
-// SetSecurityConfig sets the security config info for the health response.
-func (h *HealthHandler) SetSecurityConfig(autoLockTimeout time.Duration, signTimeout time.Duration, retentionDays int) {
-	autoLockStr := "disabled"
-	if autoLockTimeout > 0 {
-		autoLockStr = autoLockTimeout.String()
-	}
-	signTimeoutStr := signTimeout.String()
-	if signTimeout == 0 {
-		signTimeoutStr = "30s"
-	}
+// SetSecurityConfig sets the parts of the health response that are not runtime
+// mutable. Retention comes from config.yaml and has no settings snapshot field.
+//
+// ⚠️ AutoLockTimeout and SignTimeout used to be baked in here too. They live in
+// settings.SecuritySnapshot, which is reloaded from the database, so /health
+// reported whatever they were at boot — an endpoint whose job is to say what
+// the daemon is currently doing, answering with a stale value. They are read
+// per request now, in securityConfigNow.
+func (h *HealthHandler) SetSecurityConfig(retentionDays int) {
 	h.securityConfig = &SecurityConfigInfo{
-		AutoLockTimeout:       autoLockStr,
-		SignTimeout:           signTimeoutStr,
 		AuditRetentionDays:    retentionDays,
 		ContentTypeValidation: true,
+	}
+}
+
+// securityConfigNow renders the security block for one response, taking the
+// runtime-mutable values from the live snapshot.
+func (h *HealthHandler) securityConfigNow() *SecurityConfigInfo {
+	if h.securityConfig == nil {
+		return nil
+	}
+	out := *h.securityConfig
+	autoLock, signTimeout := time.Duration(0), time.Duration(0)
+	if h.settingsMgr != nil {
+		if snap := h.settingsMgr.Security(); snap != nil {
+			autoLock, signTimeout = snap.AutoLockTimeout, snap.SignTimeout
+		}
+	}
+	applySecurityDurations(&out, autoLock, signTimeout)
+	return &out
+}
+
+// applySecurityDurations renders the two runtime-mutable durations into the
+// health payload. Split out so it can be tested without standing up a settings
+// manager — the formatting (0 → "disabled" for auto-lock, 0 → the 30s default
+// for sign timeout) is the part with rules in it.
+func applySecurityDurations(out *SecurityConfigInfo, autoLock, signTimeout time.Duration) {
+	out.AutoLockTimeout = "disabled"
+	if autoLock > 0 {
+		out.AutoLockTimeout = autoLock.String()
+	}
+	out.SignTimeout = "30s"
+	if signTimeout > 0 {
+		out.SignTimeout = signTimeout.String()
 	}
 }
 
@@ -103,7 +132,7 @@ func (h *HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
-	security := h.securityConfig
+	security := h.securityConfigNow()
 	if security != nil {
 		copied := *security
 		if ag := h.approvalGuardHealth(); ag != nil {

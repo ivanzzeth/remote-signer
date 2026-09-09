@@ -45,8 +45,8 @@ type RuleHandler struct {
 	auditLogger       *audit.AuditLogger
 	readOnly          func() bool // when true, block all rule mutations via API
 	logger            *slog.Logger
-	maxRulesPerKey    int                     // per-key rule count limit (0 = no limit)
-	requireApproval   bool                    // require admin approval for agent whitelist rules
+	maxRulesPerKey    func() int              // per-key rule count limit (0 = no limit)
+	requireApproval   func() bool             // require admin approval for agent whitelist rules
 	onRuleActivated   func(callerName string) // optional callback when rule becomes active
 }
 
@@ -105,14 +105,14 @@ func WithAPIKeyRepo(repo storage.APIKeyRepository) RuleHandlerOption {
 }
 
 // WithMaxRulesPerKey sets the per-key rule count limit.
-func WithMaxRulesPerKey(max int) RuleHandlerOption {
+func WithMaxRulesPerKey(max func() int) RuleHandlerOption {
 	return func(h *RuleHandler) {
 		h.maxRulesPerKey = max
 	}
 }
 
 // WithRequireApproval enables admin approval for agent whitelist rules.
-func WithRequireApproval(require bool) RuleHandlerOption {
+func WithRequireApproval(require func() bool) RuleHandlerOption {
 	return func(h *RuleHandler) {
 		h.requireApproval = require
 	}
@@ -274,4 +274,25 @@ func (h *RuleHandler) isReadOnly() bool {
 		return false
 	}
 	return h.readOnly()
+}
+
+// maxRulesPerKeyValue reads the limit at request time. See Router.liveInt: the setting
+// behind it is runtime mutable, so a value captured at construction freezes at
+// boot. nil means unset, which these fields already meant as 0.
+func (h *RuleHandler) maxRulesPerKeyValue() int {
+	if h.maxRulesPerKey == nil {
+		return 0
+	}
+	return h.maxRulesPerKey()
+}
+
+// requireApprovalValue reads the setting at request time. See Router.liveDuration /
+// liveBool: the snapshot behind it is reloaded from the database, so a value
+// captured at construction freezes at boot. nil keeps the previous meaning of
+// "unset" — the handler falls back to its own default.
+func (h *RuleHandler) requireApprovalValue() bool {
+	if h.requireApproval == nil {
+		return false
+	}
+	return h.requireApproval()
 }

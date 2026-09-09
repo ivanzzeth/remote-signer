@@ -56,6 +56,30 @@ notify_channels:
 security:
   max_request_age: "60s"
   rate_limit_default: 1000
+  # ⚠️ The suite hammers 127.0.0.1 far past any production-shaped limit, so this
+  # has to be raised the same way rate_limit_default already is.
+  #
+  # It was not needed before 2026-09-10 only because IP rate limiting was
+  # silently off here: the middleware read cfg.Security.IPRateLimit, which this
+  # file never set, and decided *once at wiring time* to return the next handler
+  # unchanged. The setting is read per request from the settings snapshot now —
+  # where it defaults to 200/min — so it applies, and the suite trips it.
+  ip_rate_limit: 1000000
+  # ⚠️ Same story as ip_rate_limit, for the same reason. Each of these used to be
+  # unset here, and each was consumed as `if value > 0 { apply it }` at wiring
+  # time — so leaving it unset did not mean "use the default", it meant the limit
+  # was never installed at all. Reading them from the settings snapshot per
+  # request (2026-09-10) makes the defaults apply, and the defaults are
+  # production-shaped: 5 keystores, 3 HD wallets, 50 rules per key, and agent
+  # rules requiring admin approval. The suite creates more than that and expects
+  # its rules to activate immediately.
+  #
+  # ⛔ Do not "fix" a future failure here by lowering these back to 0. Zero now
+  # means zero.
+  max_keystores_per_key: 10000
+  max_hd_wallets_per_key: 10000
+  max_rules_per_api_key: 10000
+  require_approval_for_agent_rules: false
   nonce_required: true
   # E2E: enable manual approval so tests that expect "pending" (e.g. approval flow) pass
   manual_approval_enabled: true

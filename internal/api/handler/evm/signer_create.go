@@ -36,15 +36,15 @@ func (h *SignerHandler) createSigner(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Enforce resource limit: max keystores per key
-	if h.maxKeystoresPerKey > 0 {
+	if h.maxKeystoresPerKeyValue() > 0 {
 		count, countErr := h.accessService.CountOwnedSigners(r.Context(), apiKey.ID)
 		if countErr != nil {
 			h.logger.Error("failed to count owned signers", slog.String("error", countErr.Error()))
 			respond.Error(w, "failed to check resource limits", http.StatusInternalServerError, h.logger)
 			return
 		}
-		if int(count) >= h.maxKeystoresPerKey {
-			respond.Error(w, fmt.Sprintf("resource limit exceeded: maximum %d keystores per API key", h.maxKeystoresPerKey), http.StatusForbidden, h.logger)
+		if int(count) >= h.maxKeystoresPerKeyValue() {
+			respond.Error(w, fmt.Sprintf("resource limit exceeded: maximum %d keystores per API key", h.maxKeystoresPerKeyValue()), http.StatusForbidden, h.logger)
 			return
 		}
 	}

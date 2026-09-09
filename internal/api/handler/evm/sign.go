@@ -29,7 +29,7 @@ type SignHandler struct {
 	signerRepo    storage.SignerRepository
 	logger        *slog.Logger
 	alertService  *middleware.SecurityAlertService
-	signTimeout   time.Duration // context timeout for sign operations (default: 30s)
+	signTimeout   func() time.Duration // context timeout for sign operations (default: 30s)
 }
 
 // SetAlertService sets the security alert service for real-time notifications.
@@ -38,7 +38,7 @@ func (h *SignHandler) SetAlertService(alertService *middleware.SecurityAlertServ
 }
 
 // SetSignTimeout sets the context timeout for sign operations.
-func (h *SignHandler) SetSignTimeout(d time.Duration) {
+func (h *SignHandler) SetSignTimeout(d func() time.Duration) {
 	h.signTimeout = d
 }
 
@@ -202,7 +202,7 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ClientIP:      clientIP,
 	}
 
-	signTimeout := h.signTimeout
+	signTimeout := h.signTimeoutValue()
 	if signTimeout == 0 {
 		signTimeout = 30 * time.Second
 	}
@@ -275,4 +275,15 @@ func (h *SignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respond.JSON(w, signResp, http.StatusOK, h.logger)
+}
+
+// signTimeoutValue reads the setting at request time. See Router.liveDuration /
+// liveBool: the snapshot behind it is reloaded from the database, so a value
+// captured at construction freezes at boot. nil keeps the previous meaning of
+// "unset" — the handler falls back to its own default.
+func (h *SignHandler) signTimeoutValue() time.Duration {
+	if h.signTimeout == nil {
+		return 0
+	}
+	return h.signTimeout()
 }

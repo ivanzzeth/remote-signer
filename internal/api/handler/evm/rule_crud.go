@@ -79,7 +79,7 @@ func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Per-key rule count limit (admin exempt)
-	if !apiKey.IsAdmin() && h.maxRulesPerKey > 0 {
+	if !apiKey.IsAdmin() && h.maxRulesPerKeyValue() > 0 {
 		ownerID := apiKey.ID
 		count, err := h.ruleRepo.Count(r.Context(), storage.RuleFilter{Owner: &ownerID})
 		if err != nil {
@@ -87,8 +87,8 @@ func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
 			respond.Error(w, "failed to check rule count", http.StatusInternalServerError, h.logger)
 			return
 		}
-		if count >= h.maxRulesPerKey {
-			respond.Error(w, fmt.Sprintf("rule limit exceeded: maximum %d rules per API key", h.maxRulesPerKey), http.StatusForbidden, h.logger)
+		if count >= h.maxRulesPerKeyValue() {
+			respond.Error(w, fmt.Sprintf("rule limit exceeded: maximum %d rules per API key", h.maxRulesPerKeyValue()), http.StatusForbidden, h.logger)
 			return
 		}
 	}
@@ -96,7 +96,7 @@ func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
 	// Determine owner, applied_to, and status via shared RBAC logic
 	ownership, err := handler.DetermineRuleOwnership(
 		r.Context(), apiKey, req.AppliedTo,
-		types.RuleMode(req.Mode), h.requireApproval, h.apiKeyRepo,
+		types.RuleMode(req.Mode), h.requireApprovalValue(), h.apiKeyRepo,
 	)
 	if err != nil {
 		respond.Error(w, err.Error(), http.StatusBadRequest, h.logger)
@@ -591,7 +591,7 @@ func (h *RuleHandler) proposeRule(w http.ResponseWriter, r *http.Request, target
 	}
 
 	// Check per-key rule count limit
-	if h.maxRulesPerKey > 0 {
+	if h.maxRulesPerKeyValue() > 0 {
 		ownerID := apiKey.ID
 		count, err := h.ruleRepo.Count(r.Context(), storage.RuleFilter{Owner: &ownerID})
 		if err != nil {
@@ -599,8 +599,8 @@ func (h *RuleHandler) proposeRule(w http.ResponseWriter, r *http.Request, target
 			respond.Error(w, "failed to check rule count", http.StatusInternalServerError, h.logger)
 			return
 		}
-		if count >= h.maxRulesPerKey {
-			respond.Error(w, fmt.Sprintf("rule limit exceeded: maximum %d rules per API key", h.maxRulesPerKey), http.StatusForbidden, h.logger)
+		if count >= h.maxRulesPerKeyValue() {
+			respond.Error(w, fmt.Sprintf("rule limit exceeded: maximum %d rules per API key", h.maxRulesPerKeyValue()), http.StatusForbidden, h.logger)
 			return
 		}
 	}

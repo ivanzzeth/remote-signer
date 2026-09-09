@@ -188,7 +188,7 @@ func TestResolveInstances_AgentWhitelistRequiresApproval(t *testing.T) {
 	tmpl.Mode = types.RuleModeWhitelist
 	require.NoError(t, env.tmplRepo.Update(context.Background(), tmpl))
 
-	env.handler.requireApproval = true
+	env.handler.requireApproval = func() bool { return true }
 	preset := &types.RulePreset{ID: "evm/p", Name: "P"}
 	apiKey := &types.APIKey{ID: "agent-key", Role: types.RoleAgent}
 

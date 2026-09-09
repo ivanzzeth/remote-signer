@@ -22,7 +22,7 @@ type SignerHandler struct {
 	signerRepo         storage.SignerRepository
 	walletRepo         storage.WalletRepository
 	readOnly           func() bool // when true, block signer creation via API
-	maxKeystoresPerKey int         // resource limit: max keystores per API key (0 = no limit)
+	maxKeystoresPerKey func() int  // resource limit: max keystores per API key (0 = no limit)
 	logger             *slog.Logger
 	auditLogger        *audit.AuditLogger // optional: audit logging
 }
@@ -67,7 +67,7 @@ func (h *SignerHandler) SetAuditLogger(al *audit.AuditLogger) {
 }
 
 // SetMaxKeystoresPerKey sets the resource limit for maximum keystores per API key.
-func (h *SignerHandler) SetMaxKeystoresPerKey(max int) {
+func (h *SignerHandler) SetMaxKeystoresPerKey(max func() int) {
 	h.maxKeystoresPerKey = max
 }
 
@@ -219,4 +219,14 @@ func (h *SignerHandler) isReadOnly() bool {
 		return false
 	}
 	return h.readOnly()
+}
+
+// maxKeystoresPerKeyValue reads the limit at request time. See Router.liveInt: the setting
+// behind it is runtime mutable, so a value captured at construction freezes at
+// boot. nil means unset, which these fields already meant as 0.
+func (h *SignerHandler) maxKeystoresPerKeyValue() int {
+	if h.maxKeystoresPerKey == nil {
+		return 0
+	}
+	return h.maxKeystoresPerKey()
 }

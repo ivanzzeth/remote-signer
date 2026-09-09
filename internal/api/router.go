@@ -36,26 +36,21 @@ type TemplateConfig struct {
 
 // RouterConfig contains configuration for the router
 type RouterConfig struct {
-	Version                      string
-	IPWhitelistConfig            *middleware.IPWhitelist
-	IPWhitelistConfigForRead     *config.IPWhitelistConfig // optional: for GET /api/v1/acls/ip-whitelist (admin, read-only)
-	IPRateLimit                  int                       // requests per minute per IP (pre-auth); 0 = use default (200)
-	SolidityValidator            *evm.SolidityRuleValidator
-	JSEvaluator                  *evm.JSRuleEvaluator
-	Template                     *TemplateConfig
-	ApprovalGuard                *service.ManualApprovalGuard      // optional: for admin resume endpoint
-	APIKeyRepo                   storage.APIKeyRepository          // optional: for signer access visibility and API key management
-	SignerOwnershipRepo          storage.SignerOwnershipRepository // for signer ownership tracking
-	SignerAccessRepo             storage.SignerAccessRepository    // for signer access grants
-	SignerRepo                   storage.SignerRepository          // DB signer inventory/material status
-	AlertService                 *middleware.SecurityAlertService  // optional: real-time security alerts
-	AuditLogger                  *audit.AuditLogger                // optional: persistent audit logging
-	SignTimeout                  time.Duration                     // context timeout for sign operations (default: 30s)
-	AutoLockTimeout              time.Duration                     // signer auto-lock timeout (for health endpoint)
-	AuditRetentionDays           int                               // audit log retention days (for health endpoint)
-	BudgetRepo                   storage.BudgetRepository          // optional: for GET /api/v1/evm/rules/{id}/budgets
-	MaxRulesPerAPIKey            int                               // per-key rule count limit (0 = no limit, default 50)
-	RequireApprovalForAgentRules bool                              // require admin approval for agent whitelist rules
+	Version                  string
+	IPWhitelistConfig        *middleware.IPWhitelist
+	IPWhitelistConfigForRead *config.IPWhitelistConfig // optional: for GET /api/v1/acls/ip-whitelist (admin, read-only)
+	SolidityValidator        *evm.SolidityRuleValidator
+	JSEvaluator              *evm.JSRuleEvaluator
+	Template                 *TemplateConfig
+	ApprovalGuard            *service.ManualApprovalGuard      // optional: for admin resume endpoint
+	APIKeyRepo               storage.APIKeyRepository          // optional: for signer access visibility and API key management
+	SignerOwnershipRepo      storage.SignerOwnershipRepository // for signer ownership tracking
+	SignerAccessRepo         storage.SignerAccessRepository    // for signer access grants
+	SignerRepo               storage.SignerRepository          // DB signer inventory/material status
+	AlertService             *middleware.SecurityAlertService  // optional: real-time security alerts
+	AuditLogger              *audit.AuditLogger                // optional: persistent audit logging
+	AuditRetentionDays       int                               // audit log retention days (for health endpoint)
+	BudgetRepo               storage.BudgetRepository          // optional: for GET /api/v1/evm/rules/{id}/budgets
 	// Preset API (admin-only). Presets live in the DB after v0.3 Registry
 	// sync; the handler reads them from PresetRepo and writes apply
 	// results in PresetsDB transactions. Both are required to register
@@ -78,8 +73,6 @@ type RouterConfig struct {
 	SettingsManager *settings.Manager
 
 	// Resource limits
-	MaxKeystoresPerKey int // max keystores per API key (0 = no limit, default 5)
-	MaxHDWalletsPerKey int // max HD wallets per API key (0 = no limit, default 3)
 	// Simulation engine (optional). When set, POST /api/v1/evm/simulate, /simulate/batch, and /sign/batch are registered.
 	Simulator simulation.Simulator
 	// SimulationRule is the built-in simulation budget fallback rule (optional).
@@ -169,7 +162,7 @@ func NewRouter(
 func (r *Router) setupRoutes() error {
 	// Health check (no auth required, but with security headers)
 	r.healthHandler = handler.NewHealthHandler(r.config.Version)
-	r.healthHandler.SetSecurityConfig(r.config.AutoLockTimeout, r.config.SignTimeout, r.config.AuditRetentionDays)
+	r.healthHandler.SetSecurityConfig(r.config.AuditRetentionDays)
 	r.healthHandler.SetSettingsManager(r.config.SettingsManager)
 	r.syncApprovalGuard()
 	r.mux.Handle("/health", middleware.SecurityHeadersMiddleware()(r.healthHandler))
@@ -223,9 +216,8 @@ func (r *Router) setupRoutes() error {
 	if r.config.AlertService != nil {
 		signHandler.SetAlertService(r.config.AlertService)
 	}
-	if r.config.SignTimeout > 0 {
-		signHandler.SetSignTimeout(r.config.SignTimeout)
-	}
+	signHandler.SetSignTimeout(
+		r.liveDuration(func(s *settings.SecuritySnapshot) time.Duration { return s.SignTimeout }))
 
 	requestHandler, err := evmhandler.NewRequestHandler(r.signService, r.ruleRepo, r.logger)
 	if err != nil {
@@ -273,10 +265,9 @@ func (r *Router) setupRoutes() error {
 	if r.config.APIKeyRepo != nil {
 		ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithAPIKeyRepo(r.config.APIKeyRepo))
 	}
-	if r.config.MaxRulesPerAPIKey > 0 {
-		ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithMaxRulesPerKey(r.config.MaxRulesPerAPIKey))
-	}
-	ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithRequireApproval(r.config.RequireApprovalForAgentRules))
+	ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithMaxRulesPerKey(
+		r.liveInt(func(s *settings.SecuritySnapshot) int { return s.MaxRulesPerAPIKey })))
+	ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithRequireApproval(r.liveReadOnly(func(s *settings.SecuritySnapshot) bool { return s.RequireApprovalForAgentRules })))
 	if r.signService != nil {
 		ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithRuleActivatedCallback(func(callerName string) {
 			r.signService.ReevaluatePending(context.Background(), callerName)
@@ -300,9 +291,8 @@ func (r *Router) setupRoutes() error {
 	if r.config.AuditLogger != nil {
 		signerHandler.SetAuditLogger(r.config.AuditLogger)
 	}
-	if r.config.MaxKeystoresPerKey > 0 {
-		signerHandler.SetMaxKeystoresPerKey(r.config.MaxKeystoresPerKey)
-	}
+	signerHandler.SetMaxKeystoresPerKey(
+		r.liveInt(func(s *settings.SecuritySnapshot) int { return s.MaxKeystoresPerKey }))
 
 	hdWalletHandler, err := evmhandler.NewHDWalletHandler(r.signerManager, accessService, r.logger, r.liveReadOnly(func(s *settings.SecuritySnapshot) bool { return s.SignersAPIReadonly }))
 	if err != nil {
@@ -311,9 +301,8 @@ func (r *Router) setupRoutes() error {
 	if r.config.AuditLogger != nil {
 		hdWalletHandler.SetAuditLogger(r.config.AuditLogger)
 	}
-	if r.config.MaxHDWalletsPerKey > 0 {
-		hdWalletHandler.SetMaxHDWalletsPerKey(r.config.MaxHDWalletsPerKey)
-	}
+	hdWalletHandler.SetMaxHDWalletsPerKey(
+		r.liveInt(func(s *settings.SecuritySnapshot) int { return s.MaxHDWalletsPerKey }))
 
 	// Audit handler
 	auditHandler, err := handler.NewAuditHandler(r.auditRepo, r.logger)
@@ -481,9 +470,8 @@ func (r *Router) setupRoutes() error {
 		if r.config.AlertService != nil {
 			batchSignHandler.SetAlertService(r.config.AlertService)
 		}
-		if r.config.SignTimeout > 0 {
-			batchSignHandler.SetSignTimeout(r.config.SignTimeout)
-		}
+		batchSignHandler.SetSignTimeout(
+			r.liveDuration(func(s *settings.SecuritySnapshot) time.Duration { return s.SignTimeout }))
 		r.mux.Handle("/api/v1/evm/sign/batch", r.withAuthAndPerm(middleware.PermSignRequest, batchSignHandler))
 	}
 
@@ -556,7 +544,7 @@ func (r *Router) setupRoutes() error {
 			r.config.Template.TemplateService,
 			r.logger,
 			r.liveReadOnly(func(s *settings.SecuritySnapshot) bool { return s.RulesAPIReadonly }),
-			handler.WithTemplateRequireApproval(r.config.RequireApprovalForAgentRules),
+			handler.WithTemplateRequireApproval(r.liveReadOnly(func(s *settings.SecuritySnapshot) bool { return s.RequireApprovalForAgentRules })),
 			handler.WithTemplateAPIKeyRepo(r.config.APIKeyRepo),
 			handler.WithTemplateJSEvaluator(r.config.JSEvaluator),
 			handler.WithTemplateSolidityValidator(r.config.SolidityValidator),
@@ -586,7 +574,7 @@ func (r *Router) setupRoutes() error {
 			r.config.Template.TemplateService,
 			r.liveReadOnly(func(s *settings.SecuritySnapshot) bool { return s.RulesAPIReadonly }),
 			r.logger,
-			handler.WithPresetRequireApproval(r.config.RequireApprovalForAgentRules),
+			handler.WithPresetRequireApproval(r.liveReadOnly(func(s *settings.SecuritySnapshot) bool { return s.RequireApprovalForAgentRules })),
 			handler.WithPresetAPIKeyRepo(r.config.APIKeyRepo),
 			handler.WithPresetJSEvaluator(r.config.JSEvaluator),
 			handler.WithPresetSolidityValidator(r.config.SolidityValidator),
@@ -637,7 +625,7 @@ func (r *Router) withAuth(h http.Handler) http.Handler {
 		middleware.RecoveryMiddleware(r.logger),
 		middleware.ClientIPMiddleware(r.ipWhitelist),
 		middleware.LoggingMiddleware(r.logger, r.config.AuditLogger),
-		middleware.IPRateLimitMiddleware(r.rateLimiter, r.ipWhitelist, r.config.IPRateLimit, r.config.AlertService),
+		middleware.IPRateLimitMiddleware(r.rateLimiter, r.ipWhitelist, r.liveInt(func(s *settings.SecuritySnapshot) int { return s.IPRateLimit }), r.config.AlertService),
 		middleware.AuthMiddleware(r.authVerifier, r.logger, r.config.AuditLogger, r.config.AlertService),
 		middleware.RateLimitMiddleware(r.rateLimiter, r.config.AuditLogger, r.config.AlertService),
 		middleware.ContentTypeMiddleware(),
@@ -656,7 +644,7 @@ func (r *Router) withAuthAndPerm(perm middleware.Permission, h http.Handler) htt
 		middleware.RecoveryMiddleware(r.logger),
 		middleware.ClientIPMiddleware(r.ipWhitelist),
 		middleware.LoggingMiddleware(r.logger, r.config.AuditLogger),
-		middleware.IPRateLimitMiddleware(r.rateLimiter, r.ipWhitelist, r.config.IPRateLimit, r.config.AlertService),
+		middleware.IPRateLimitMiddleware(r.rateLimiter, r.ipWhitelist, r.liveInt(func(s *settings.SecuritySnapshot) int { return s.IPRateLimit }), r.config.AlertService),
 		middleware.AuthMiddleware(r.authVerifier, r.logger, r.config.AuditLogger, r.config.AlertService),
 		middleware.RequirePermission(perm, r.logger, r.config.AlertService),
 		middleware.RateLimitMiddleware(r.rateLimiter, r.config.AuditLogger, r.config.AlertService),
@@ -773,6 +761,40 @@ func (r *Router) liveReadOnly(pick func(*settings.SecuritySnapshot) bool) func()
 		snap := mgr.Security()
 		if snap == nil {
 			return false
+		}
+		return pick(snap)
+	}
+}
+
+// liveInt and liveDuration are liveReadOnly for the knobs that are not bools.
+//
+// Same reason, same shape: settings.SecuritySnapshot is reloaded from the
+// database, so a value read here at wiring time freezes at boot. The zero
+// value returned when there is no settings manager means "no limit" /
+// "use the handler default", which is what these fields meant when unset.
+func (r *Router) liveInt(pick func(*settings.SecuritySnapshot) int) func() int {
+	if r.config.SettingsManager == nil {
+		return nil
+	}
+	mgr := r.config.SettingsManager
+	return func() int {
+		snap := mgr.Security()
+		if snap == nil {
+			return 0
+		}
+		return pick(snap)
+	}
+}
+
+func (r *Router) liveDuration(pick func(*settings.SecuritySnapshot) time.Duration) func() time.Duration {
+	if r.config.SettingsManager == nil {
+		return nil
+	}
+	mgr := r.config.SettingsManager
+	return func() time.Duration {
+		snap := mgr.Security()
+		if snap == nil {
+			return 0
 		}
 		return pick(snap)
 	}

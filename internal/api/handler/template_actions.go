@@ -130,7 +130,7 @@ func (h *TemplateHandler) instantiateTemplate(w http.ResponseWriter, r *http.Req
 	if apiKey != nil {
 		ownership, err := DetermineRuleOwnership(
 			r.Context(), apiKey, nil,
-			tmpl.Mode, h.requireApproval, h.apiKeyRepo,
+			tmpl.Mode, h.requireApprovalValue(), h.apiKeyRepo,
 		)
 		if err != nil {
 			respond.Error(w, err.Error(), http.StatusBadRequest, h.logger)

@@ -17,7 +17,7 @@ func TestIPRateLimitMiddleware_WithClientIPInContext(t *testing.T) {
 	rl := NewRateLimiter(logger)
 	wl := &IPWhitelist{enabled: false}
 
-	mw := IPRateLimitMiddleware(rl, wl, 5)
+	mw := IPRateLimitMiddleware(rl, wl, func() int { return 5 })
 
 	callCount := 0
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -42,7 +42,7 @@ func TestIPRateLimitMiddleware_ExceedsRateLimit(t *testing.T) {
 	rl := NewRateLimiter(logger)
 	wl := &IPWhitelist{enabled: false}
 
-	mw := IPRateLimitMiddleware(rl, wl, 2)
+	mw := IPRateLimitMiddleware(rl, wl, func() int { return 2 })
 
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -74,7 +74,7 @@ func TestIPRateLimitMiddleware_WithoutClientIPInContext(t *testing.T) {
 	wl, err := NewIPWhitelist(cfg, logger)
 	assert.NoError(t, err)
 
-	mw := IPRateLimitMiddleware(rl, wl, 100)
+	mw := IPRateLimitMiddleware(rl, wl, func() int { return 100 })
 
 	called := false
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -97,7 +97,7 @@ func TestIPRateLimitMiddleware_DisabledWithZeroLimit(t *testing.T) {
 	wl := &IPWhitelist{enabled: false}
 
 	// limit <= 0 means pass-through.
-	mw := IPRateLimitMiddleware(rl, wl, 0)
+	mw := IPRateLimitMiddleware(rl, wl, func() int { return 0 })
 
 	called := false
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
