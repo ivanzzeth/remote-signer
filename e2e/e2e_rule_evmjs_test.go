@@ -149,7 +149,7 @@ func TestRule_SafeMultisendERC20Chain(t *testing.T) {
 	// Gnosis MultiSend packed: op(1) + to(20) + value(32) + dataLen(32) + data. One tx: CALL to USDC, transfer(recipient, 0)
 	transferCalldata := "a9059cbb" + // transfer(address,uint256)
 		strings.Repeat("0", 24) + strings.ToLower(recipient[2:]) + // address 32 bytes
-		"0000000000000000000000000000000000000000000000000000000000000000"   // amount
+		"0000000000000000000000000000000000000000000000000000000000000000" // amount
 	batch := "00" + // CALL
 		strings.Repeat("0", 24) + strings.ToLower(usdcAddress[2:]) + // to 20 bytes
 		"0000000000000000000000000000000000000000000000000000000000000000" + // value
@@ -187,16 +187,16 @@ func TestRule_SafeMultisendERC20Chain(t *testing.T) {
 			VerifyingContract: safeAddress,
 		},
 		Message: map[string]interface{}{
-			"to":               multisendAddress,
-			"value":            "0",
-			"data":             safeTxData,
-			"operation":        "0",
-			"safeTxGas":        "0",
-			"baseGas":          "0",
-			"gasPrice":         "0",
-			"gasToken":         "0x0000000000000000000000000000000000000000",
-			"refundReceiver":   "0x0000000000000000000000000000000000000000",
-			"nonce":            "0",
+			"to":             multisendAddress,
+			"value":          "0",
+			"data":           safeTxData,
+			"operation":      "0",
+			"safeTxGas":      "0",
+			"baseGas":        "0",
+			"gasPrice":       "0",
+			"gasToken":       "0x0000000000000000000000000000000000000000",
+			"refundReceiver": "0x0000000000000000000000000000000000000000",
+			"nonce":          "0",
 		},
 	}
 
@@ -275,16 +275,16 @@ func TestRule_SafeMultisendMultiDelegate(t *testing.T) {
 			VerifyingContract: safeAddress,
 		},
 		Message: map[string]interface{}{
-			"to":               multisendAddress,
-			"value":            "0",
-			"data":             safeTxData,
-			"operation":        "0",
-			"safeTxGas":        "0",
-			"baseGas":          "0",
-			"gasPrice":         "0",
-			"gasToken":         "0x0000000000000000000000000000000000000000",
-			"refundReceiver":   "0x0000000000000000000000000000000000000000",
-			"nonce":            "0",
+			"to":             multisendAddress,
+			"value":          "0",
+			"data":           safeTxData,
+			"operation":      "0",
+			"safeTxGas":      "0",
+			"baseGas":        "0",
+			"gasPrice":       "0",
+			"gasToken":       "0x0000000000000000000000000000000000000000",
+			"refundReceiver": "0x0000000000000000000000000000000000000000",
+			"nonce":          "0",
 		},
 	}
 
@@ -339,16 +339,16 @@ func TestRule_PolymarketSafeChain(t *testing.T) {
 			VerifyingContract: safeAddress,
 		},
 		Message: map[string]interface{}{
-			"to":               usdcAddress,
-			"value":            "0",
-			"data":             "0x" + approveCalldata,
-			"operation":        "0",
-			"safeTxGas":        "0",
-			"baseGas":          "0",
-			"gasPrice":         "0",
-			"gasToken":         "0x0000000000000000000000000000000000000000",
-			"refundReceiver":   "0x0000000000000000000000000000000000000000",
-			"nonce":            "0",
+			"to":             usdcAddress,
+			"value":          "0",
+			"data":           "0x" + approveCalldata,
+			"operation":      "0",
+			"safeTxGas":      "0",
+			"baseGas":        "0",
+			"gasPrice":       "0",
+			"gasToken":       "0x0000000000000000000000000000000000000000",
+			"refundReceiver": "0x0000000000000000000000000000000000000000",
+			"nonce":          "0",
 		},
 	}
 
@@ -400,16 +400,16 @@ func TestRule_PolymarketSafeChain_CTFSetApprovalForAll(t *testing.T) {
 			VerifyingContract: safeAddress,
 		},
 		Message: map[string]interface{}{
-			"to":               ctfAddress,
-			"value":            "0",
-			"data":             "0x" + setApprovalCalldata,
-			"operation":        "0",
-			"safeTxGas":        "0",
-			"baseGas":          "0",
-			"gasPrice":         "0",
-			"gasToken":         "0x0000000000000000000000000000000000000000",
-			"refundReceiver":   "0x0000000000000000000000000000000000000000",
-			"nonce":            "0",
+			"to":             ctfAddress,
+			"value":          "0",
+			"data":           "0x" + setApprovalCalldata,
+			"operation":      "0",
+			"safeTxGas":      "0",
+			"baseGas":        "0",
+			"gasPrice":       "0",
+			"gasToken":       "0x0000000000000000000000000000000000000000",
+			"refundReceiver": "0x0000000000000000000000000000000000000000",
+			"nonce":          "0",
 		},
 	}
 
@@ -460,16 +460,16 @@ func TestRule_PolymarketSafeChain_RejectDelegateCall(t *testing.T) {
 			VerifyingContract: safeAddress,
 		},
 		Message: map[string]interface{}{
-			"to":               usdcAddress,
-			"value":            "0",
-			"data":             "0x" + approveCalldata,
-			"operation":        "1", // DELEGATECALL: must be rejected
-			"safeTxGas":        "0",
-			"baseGas":          "0",
-			"gasPrice":         "0",
-			"gasToken":         "0x0000000000000000000000000000000000000000",
-			"refundReceiver":   "0x0000000000000000000000000000000000000000",
-			"nonce":            "0",
+			"to":             usdcAddress,
+			"value":          "0",
+			"data":           "0x" + approveCalldata,
+			"operation":      "1", // DELEGATECALL: must be rejected
+			"safeTxGas":      "0",
+			"baseGas":        "0",
+			"gasPrice":       "0",
+			"gasToken":       "0x0000000000000000000000000000000000000000",
+			"refundReceiver": "0x0000000000000000000000000000000000000000",
+			"nonce":          "0",
 		},
 	}
 
@@ -522,16 +522,16 @@ func TestRule_PolymarketSafeChain_CTFRedeemPositions(t *testing.T) {
 			VerifyingContract: safeAddress,
 		},
 		Message: map[string]interface{}{
-			"to":               ctfAddress,
-			"value":            "0",
-			"data":             redeemPositionsData,
-			"operation":        "0",
-			"safeTxGas":        "217890",
-			"baseGas":          "0",
-			"gasPrice":         "0",
-			"gasToken":         "0x0000000000000000000000000000000000000000",
-			"refundReceiver":   "0x0000000000000000000000000000000000000000",
-			"nonce":            "0",
+			"to":             ctfAddress,
+			"value":          "0",
+			"data":           redeemPositionsData,
+			"operation":      "0",
+			"safeTxGas":      "217890",
+			"baseGas":        "0",
+			"gasPrice":       "0",
+			"gasToken":       "0x0000000000000000000000000000000000000000",
+			"refundReceiver": "0x0000000000000000000000000000000000000000",
+			"nonce":          "0",
 		},
 	}
 

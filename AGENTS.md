@@ -98,10 +98,15 @@ remote-signer/
 make build              # ⬅ 默认：带 Web UI 的二进制（= build-embed）
 make build-embed        # 同 make build
 make build-cli          # 仅 Go 二进制（无 Web UI，后端快速迭代用）
-make test               # 纯单元测试（无 build tag，快速）
-make test-unit          # 同 make test
-make test-integration   # 单元 + 内部集成测试（pre-commit hook 等效）
-make integration        # 黑盒集成测试
+make check              # ⬅ 秒级反馈（≈13s）：fmt/vet/staticcheck/测试结构/架构约束
+make test               # 默认层（unit http cli，≈16s 冷跑）
+make test LAYER=unit    # 只跑单元层（零/低 IO，最快）
+make test LAYER=e2e     # 端到端（真起 daemon）
+make test LAYER=all     # 全部层级
+make test LAYER=unit RUN=TestFoo   # 再按用例名收窄
+make test-unit          # = make test LAYER=unit
+make test-integration   # = make test LAYER=integration
+make integration        # = make test LAYER=blackbox
 make tidy               # go mod tidy
 make clean              # 清理构建产物
 ```
@@ -133,11 +138,29 @@ go test -tags e2e ./e2e/...
 
 ### 测试分层
 
-| 层级 | Build Tag | 运行命令 | 特点 |
-|------|-----------|---------|------|
-| 单元 | 无（默认） | `go test ./...` | 纯内存，无 DB/FS/网络 |
-| 集成 | `integration` | `go test -tags integration ./internal/...` | GORM+SQLite, httptest, 真实 FS |
-| E2E | `e2e` | `go test -tags e2e ./e2e/...` | 全服务，链上 RPC |
+**两个正交的轴**，别混：
+
+- **Build tag = 这个测试允许碰什么**（tier）：无 tag / `integration` / `e2e`
+- **LAYER = 你现在要跑哪一片**（反馈速度）：定义在 `scripts/lib/layers.sh`，
+  **唯一事实来源** —— ⛔ 不要在 Makefile 或别处另抄一份包列表
+
+| LAYER | 包 | Build Tag | 冷跑 |
+|-------|-----|-----------|------|
+| `unit` | `@rest`（**算出来的余量**：无 tag 全部包 − http/cli 已认领） | 无 | 5.3s |
+| `http` | `internal/api/...` | 无 | 2.5s |
+| `cli` | `internal/cli`,`internal/web`,`tui`,`pkg` | 无 | 7.8s |
+| `integration` | `internal/...`（真 SQLite 的仓储测试在这里） | `integration` | 慢 |
+| `blackbox` | `tests/integration/...` | `integration` | 慢 |
+| `e2e` | `e2e/...` | `e2e` | 慢 |
+
+⭐ `unit` 是**余量**而非写死列表 —— 这样**新包不可能逃出所有层**。写死的那一版
+漏了 7 个包，它们的单测只在慢层被顺带跑到，而全量仍然是绿的。
+
+⚠️ **没有 `repo` 层**：`internal/storage` 的无 tag 测试其实是纯内存的，真仓储
+测试带 `integration` tag。一个名叫「仓储·真 SQLite」而实际跑纯测试的层会骗人。
+
+判据：**这个 bug 最早能在哪一层被抓到？** 那就是它该待的层。
+详见 [TESTING.md](TESTING.md)（含 5 条已负向验证的结构/架构门禁）。
 
 ## 架构概览
 
@@ -188,6 +211,8 @@ Skills 是面向 AI Agent 的使用文档。
 - SQLite 默认（单实例），PostgreSQL 可选（多实例）
 - Web UI 通过 `embed_web` build tag 嵌入二进制
 - 测试三层 build tag：无 tag（unit）/ `integration` / `e2e`
+- LAYER 分层与 tag 正交，定义在 `scripts/lib/layers.sh`（唯一事实来源）；`unit` 为算出来的余量
+- `make check` 承载结构/架构门禁，每条都做过负向验证；pre-commit 只跑 check + unit（秒级）
 - 共享 test helpers 放在 untagged `shared_test_helpers.go`，确保所有 tier 可复用
 - `AGENTS.md` 是 AI 配置的唯一规范源，`.agents/` 存放 skills/agents 引用
 - `./skills/` 对外发布（`npx skills` 安装），`.agents/skills/` symlink 指向它

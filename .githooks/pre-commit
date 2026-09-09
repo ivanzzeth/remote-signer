@@ -102,14 +102,24 @@ if [ ${#LARGE_FILES[@]} -gt 0 ]; then
 fi
 echo "   ✅ No large files."
 
-# ─── 3. Go vet ─────────────────────────────────────────────────
-echo "→ Running go vet..."
-(cd "$REPO_ROOT" && go vet ./... 2>&1) || exit 1
-echo "   ✅ go vet passed."
+# ─── 3. 门禁 + 单元层 ───────────────────────────────────────────
+#
+# ⛔ 这里**只跑秒级的东西**:`make check`(≈13s,含 fmt/vet/staticcheck/
+# 测试结构/架构约束)+ 单元层(≈5s)。
+#
+# ⚠️ 上一版跑的是 `go test -tags integration ./internal/...` —— 实测 **208 秒**,
+# 而且长期是**红的**(uniswap_template_test.go 一个 unused import,只在
+# integration tag 下暴露)。也就是说那段时间所有提交都在 `--no-verify`,
+# 门禁等于不存在。慢到一定程度人就会绕过,那比没有 hook 更糟:
+# 它制造「有门禁」的错觉。
+#
+# 慢层(integration / blackbox / e2e)由 pre-push、CI 和发版前
+# `make test LAYER=all` 兜底。判据:*人会不会为了省这段时间绕过它?*
+echo "→ Running make check (fmt/vet/staticcheck/test-structure/arch)..."
+(cd "$REPO_ROOT" && make check) || exit 1
 
-# ─── 4. Unit + internal integration tests ───────────────────────
-echo "→ Running unit + integration tests..."
-(cd "$REPO_ROOT" && go test -tags integration ./internal/... 2>&1) || exit 1
-echo "   ✅ Tests passed."
+echo "→ Running unit layer..."
+(cd "$REPO_ROOT" && make test LAYER=unit) || exit 1
+echo "   ✅ check + unit passed."
 
 echo "✅ All pre-commit checks passed."

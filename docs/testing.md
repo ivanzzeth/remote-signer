@@ -3,8 +3,12 @@
 ## Unit Tests
 
 ```bash
-go test ./...
+make test LAYER=unit      # zero/low-IO slice, ~5s
+make test                 # default layers: unit http cli
 ```
+
+Layers are defined in [`scripts/lib/layers.sh`](../scripts/lib/layers.sh); see
+[`TESTING.md`](../TESTING.md) for the tier/layer doctrine and the structure gates.
 
 On resource-constrained machines:
 
@@ -19,7 +23,8 @@ E2E tests verify the complete signing workflow against a running server.
 ### Internal Test Server (Default)
 
 ```bash
-go test -tags=e2e ./e2e/...
+make test LAYER=e2e
+# equivalently: go test -tags=e2e ./e2e/...
 ```
 
 For a closer match to pre-commit runs:

@@ -1,0 +1,44 @@
+# 允许出现在 `signer` / `test_signer` / `from` 位置的地址白名单。
+#
+# 判据:这三个字段在语义上**就是签名私钥对应的地址**。一个真实 EOA 出现在那里,
+# 只可能是某个人的钱包 —— 而 remote-signer 是**对外开源**的子模块。
+#
+# ⛔ 白名单是 fail-closed 的:没登记过的地址一律当成真实钱包(红)。
+# 方向和 lingxiao 的 `an_unknown_tool_is_assumed_to_write` 一样 ——
+# 最坏后果是多改一个占位符(有人会来报),而不是某人的钱包被公开(没人会发现)。
+#
+# 加一行之前先问:*这个地址是谁创建的?* 答不上来就别加。
+
+# —— 通用占位符 ——
+0x0000000000000000000000000000000000000000
+0x0000000000000000000000000000000000000001
+0x0000000000000000000000000000000000000002
+0x1234567890123456789012345678901234567890
+0xDEADDEADDEADDEADDEADDEADDEADDEADDEADDEAD
+
+# —— 公认的本地测试账户 ——
+# Hardhat / Anvil 的 account #0(助记词 "test test … junk" 派生),
+# 全世界的测试都在用它,不属于任何人。
+0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+# Hardhat / Anvil account #1(同一助记词的第二个派生地址)
+0x70997970C51812dc3A010C7d01b50e0d17dc79C8
+
+# —— Polymarket / Predict 相关,已由仓库所有者确认**不是私人钱包** ——
+# (2026-09-09 确认。⚠️ 它们出现在 rules/templates/evm/polymarket*.yaml 的
+#  allowed_safe_address / maker / from 等**会随二进制分发**的默认值里,
+#  所以「不属于任何人」这一点是登记的前提 —— 若日后发现其实是某人的地址,
+#  要连带清理 templates/ 的默认值,不只是测试数据。)
+0xaC52BebecA7f5FA1561fa9Ab8DA136602D21b837
+0x53c68c954f85a29d2098e90addaf41baf2ff0a50
+0x88eD75e9eCE373997221E3c0229e74007C1AD718
+
+# —— 公开流传的示例/本地链账户(不属于任何个人) ——
+# ⚠️ 只有**低熵**地址(<=3 种十六进制字符,如 0x1111…/0xdead…)由 check-arch.sh
+# 的结构性判据自动放行;下面这些熵是正常的,必须逐个登记。
+0x5B38Da6a701c568545dCfcB03FcB875f56beddC4   # Remix IDE 默认账户 #0
+0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2   # Hardhat / Anvil account #2
+0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045   # vitalik.eth,教程里最常被引用的公开地址
+0x742d35Cc6634C0532925a3b844Bc454e4438f44e   # 广泛流传的示例地址(既有模板测试夹具)
+0x5e1f62dac767b0491e3ce72469c217365d5b48cc   # 既有 simulation 测试夹具
+0x1234567890abcdef1234567890abcdef12345678   # 顺序型占位符
+0xabcdef1234567890abcdef1234567890abcdef12   # 顺序型占位符
