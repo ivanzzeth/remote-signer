@@ -269,19 +269,19 @@ func TestWithTemplateJSEvaluator(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestNewPresetHandler_NilPresetRepo(t *testing.T) {
-	_, err := NewPresetHandler(nil, nil, nil, nil, false, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	_, err := NewPresetHandler(nil, nil, nil, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "preset repository")
 }
 
 func TestNewPresetHandler_NilTemplateRepo(t *testing.T) {
-	_, err := NewPresetHandler(newMockPresetRepo(), nil, nil, nil, false, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	_, err := NewPresetHandler(newMockPresetRepo(), nil, nil, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "template repository")
 }
 
 func TestNewPresetHandler_NilLogger(t *testing.T) {
-	_, err := NewPresetHandler(newMockPresetRepo(), &mockTemplateRepo{}, nil, nil, false, nil)
+	_, err := NewPresetHandler(newMockPresetRepo(), &mockTemplateRepo{}, nil, nil, nil, nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "logger")
 }

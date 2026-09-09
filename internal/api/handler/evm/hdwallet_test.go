@@ -270,7 +270,7 @@ func newTestHDWalletHandler(t *testing.T, sm evmchain.SignerManager) *HDWalletHa
 	t.Helper()
 	logger := slog.Default()
 	accessSvc := newTestAccessService(t)
-	h, err := NewHDWalletHandler(sm, accessSvc, logger, false)
+	h, err := NewHDWalletHandler(sm, accessSvc, logger, nil)
 	require.NoError(t, err)
 	return h
 }
@@ -324,7 +324,7 @@ func decodeJSON(t *testing.T, rec *httptest.ResponseRecorder, v interface{}) {
 
 func TestNewHDWalletHandler_NilSignerManager(t *testing.T) {
 	accessSvc := newTestAccessService(t)
-	_, err := NewHDWalletHandler(nil, accessSvc, slog.Default(), false)
+	_, err := NewHDWalletHandler(nil, accessSvc, slog.Default(), nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "signer manager is required")
 }
@@ -332,7 +332,7 @@ func TestNewHDWalletHandler_NilSignerManager(t *testing.T) {
 func TestNewHDWalletHandler_NilLogger(t *testing.T) {
 	sm := newDefaultMockSignerManager()
 	accessSvc := newTestAccessService(t)
-	_, err := NewHDWalletHandler(sm, accessSvc, nil, false)
+	_, err := NewHDWalletHandler(sm, accessSvc, nil, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "logger is required")
 }

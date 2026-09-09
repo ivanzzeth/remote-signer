@@ -84,7 +84,7 @@ type ListAPIKeyNamesResponse struct {
 type APIKeyHandler struct {
 	repo          storage.APIKeyRepository
 	accessService AccessServiceForKeyDelete // optional: for signer ownership checks + cascade
-	readOnly      bool
+	readOnly      func() bool
 	logger        *slog.Logger
 	auditLogger   *audit.AuditLogger
 }
@@ -96,7 +96,7 @@ type AccessServiceForKeyDelete interface {
 }
 
 // NewAPIKeyHandler creates a new API key handler.
-func NewAPIKeyHandler(repo storage.APIKeyRepository, logger *slog.Logger, readOnly bool) (*APIKeyHandler, error) {
+func NewAPIKeyHandler(repo storage.APIKeyRepository, logger *slog.Logger, readOnly func() bool) (*APIKeyHandler, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("API key repository is required")
 	}
@@ -274,7 +274,7 @@ func (h *APIKeyHandler) getAPIKey(w http.ResponseWriter, r *http.Request, id str
 
 // createAPIKey handles POST /api/v1/api-keys.
 func (h *APIKeyHandler) createAPIKey(w http.ResponseWriter, r *http.Request) {
-	if h.readOnly {
+	if h.isReadOnly() {
 		respond.Error(w, "API key management is disabled", http.StatusForbidden, h.logger)
 		return
 	}
@@ -385,7 +385,7 @@ func (h *APIKeyHandler) createAPIKey(w http.ResponseWriter, r *http.Request) {
 
 // updateAPIKey handles PUT /api/v1/api-keys/{id}.
 func (h *APIKeyHandler) updateAPIKey(w http.ResponseWriter, r *http.Request, id string) {
-	if h.readOnly {
+	if h.isReadOnly() {
 		respond.Error(w, "API key management is disabled", http.StatusForbidden, h.logger)
 		return
 	}
@@ -477,7 +477,7 @@ func (h *APIKeyHandler) updateAPIKey(w http.ResponseWriter, r *http.Request, id 
 
 // deleteAPIKey handles DELETE /api/v1/api-keys/{id}.
 func (h *APIKeyHandler) deleteAPIKey(w http.ResponseWriter, r *http.Request, id string) {
-	if h.readOnly {
+	if h.isReadOnly() {
 		respond.Error(w, "API key management is disabled", http.StatusForbidden, h.logger)
 		return
 	}
@@ -601,4 +601,23 @@ func toAPIKeyResponse(key *types.APIKey) APIKeyResponse {
 		LastUsedAt: key.LastUsedAt,
 		ExpiresAt:  key.ExpiresAt,
 	}
+}
+
+// readOnly reports whether write operations are blocked right now.
+//
+// It is a function, not a bool, because the setting behind it is runtime
+// mutable: settings.SecuritySnapshot is reloaded from the database, and a
+// value copied into this struct at construction would freeze at boot. That
+// was the actual behaviour until 2026-09-10 — internal/settings/model.go
+// promises settings become "effective without a daemon restart", and for this
+// one, flipping it in the Web UI changed the database, changed the snapshot,
+// and changed nothing else.
+//
+// nil means "never read-only", which is the permissive direction; the router
+// only leaves it nil when there is no settings manager at all (tests).
+func (h *APIKeyHandler) isReadOnly() bool {
+	if h.readOnly == nil {
+		return false
+	}
+	return h.readOnly()
 }

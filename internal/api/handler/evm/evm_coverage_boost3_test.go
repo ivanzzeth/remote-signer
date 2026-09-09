@@ -642,7 +642,7 @@ func TestB3HandleDeleteSigner_IsOwnerError(t *testing.T) {
 			return fmt.Errorf("delete error")
 		},
 	}
-	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	rec := doActionRequest(t, h.HandleSignerAction, http.MethodDelete,
@@ -660,7 +660,7 @@ func TestB3HandleDeleteSigner_IsOwnerError(t *testing.T) {
 
 func TestB3HandleTransferOwnership_InvalidBody2(t *testing.T) {
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(&signerActionMock{}, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(&signerActionMock{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	rec := doActionRequest(t, h.HandleSignerAction, http.MethodPost,
@@ -670,7 +670,7 @@ func TestB3HandleTransferOwnership_InvalidBody2(t *testing.T) {
 
 func TestB3HandleTransferOwnership_MissingNewOwner(t *testing.T) {
 	accessSvc := newFlexAccessService(t, map[string]string{testAddr: testKeyID})
-	h, err := NewSignerHandler(&signerActionMock{}, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(&signerActionMock{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	body := map[string]string{}
@@ -1135,7 +1135,7 @@ func TestB3BudgetItem_UpdateForbiddenNonAdmin(t *testing.T) {
 
 func TestB3HandleWalletSigners_MethodNotAllowed(t *testing.T) {
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/evm/wallets/0xwallet/signers", nil)
@@ -1151,7 +1151,7 @@ func TestB3HandleWalletSigners_MethodNotAllowed(t *testing.T) {
 
 func TestB3ListSigners_InvalidTypeFilter(t *testing.T) {
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?type=invalid_type", signAdminKey())
@@ -1611,7 +1611,7 @@ func TestB3HandleRevokeAccess_Success(t *testing.T) {
 
 func TestB3SetWalletRepo(t *testing.T) {
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 	h.SetWalletRepo(nil)
 	// Just verify no panic
@@ -1655,7 +1655,7 @@ func TestB3BudgetItem_HandleGetSimBudget(t *testing.T) {
 
 func TestB3CreateSigner_ReadOnly(t *testing.T) {
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), true)
+	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), func() bool { return true })
 	require.NoError(t, err)
 
 	rec := doSignerRequest(t, h, http.MethodPost, "/api/v1/evm/signers", signAdminKey())
@@ -1664,7 +1664,7 @@ func TestB3CreateSigner_ReadOnly(t *testing.T) {
 
 func TestB3CreateSigner_PermissionDenied(t *testing.T) {
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	noPermKey := &types.APIKey{ID: "no-perm", Role: types.APIKeyRole("viewer"), Enabled: true}
@@ -1674,7 +1674,7 @@ func TestB3CreateSigner_PermissionDenied(t *testing.T) {
 
 func TestB3CreateSigner_InvalidBody(t *testing.T) {
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/evm/signers", bytes.NewBufferString("bad json"))
@@ -1696,7 +1696,7 @@ func TestB3ListSigners_StatusFilter(t *testing.T) {
 			return types.SignerListResult{Total: 0, HasMore: false}, nil
 		},
 	}
-	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?status=active", signAdminKey())
@@ -1722,7 +1722,7 @@ func TestB3ListSigners_EnabledFilter(t *testing.T) {
 			return types.SignerListResult{Total: 0, HasMore: false}, nil
 		},
 	}
-	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?enabled=true", signAdminKey())
@@ -2008,7 +2008,7 @@ func TestB3CreateSigner_ResourceLimitExceeded(t *testing.T) {
 	// Add one owned signer
 	require.NoError(t, accessSvc.SetOwner(context.Background(), testAddr, "admin-key", types.SignerOwnershipActive))
 
-	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 	h.SetMaxKeystoresPerKey(1)
 
@@ -2030,7 +2030,7 @@ func TestB3CreateSigner_ResourceLimitExceeded(t *testing.T) {
 
 func TestB3CreateSigner_BothKeysProvided(t *testing.T) {
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	body := map[string]interface{}{
@@ -2068,7 +2068,7 @@ func TestB3HandleDeleteSigner_OwnershipCheckError(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/evm/signers/"+testAddr, nil)
@@ -2123,7 +2123,7 @@ func TestB3ListSigners_InvalidType(t *testing.T) {
 			return types.SignerListResult{Total: 0, HasMore: false}, nil
 		},
 	}
-	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?type=invalid", signAdminKey())
@@ -2132,7 +2132,7 @@ func TestB3ListSigners_InvalidType(t *testing.T) {
 
 func TestB3ListSigners_InvalidOffset(t *testing.T) {
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?offset=-1", signAdminKey())
@@ -2141,7 +2141,7 @@ func TestB3ListSigners_InvalidOffset(t *testing.T) {
 
 func TestB3ListSigners_InvalidLimit(t *testing.T) {
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?limit=-1", signAdminKey())
@@ -2155,7 +2155,7 @@ func TestB3ListSigners_ForbiddenAPIKeyFilter(t *testing.T) {
 			return types.SignerListResult{Total: 0, HasMore: false}, nil
 		},
 	}
-	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	agentKey := &types.APIKey{ID: "agent-key", Role: types.RoleAgent, Enabled: true}
@@ -2165,7 +2165,7 @@ func TestB3ListSigners_ForbiddenAPIKeyFilter(t *testing.T) {
 
 func TestB3ListSigners_InvalidLockedFilter(t *testing.T) {
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?locked=invalid", signAdminKey())
@@ -2174,7 +2174,7 @@ func TestB3ListSigners_InvalidLockedFilter(t *testing.T) {
 
 func TestB3ListSigners_InvalidEnabledFilter(t *testing.T) {
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers?enabled=invalid", signAdminKey())
@@ -2183,7 +2183,7 @@ func TestB3ListSigners_InvalidEnabledFilter(t *testing.T) {
 
 func TestB3ListSigners_ListError(t *testing.T) {
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers", signAdminKey())
@@ -2197,7 +2197,7 @@ func TestB3ListSigners_ListError(t *testing.T) {
 
 func TestB3ListWalletSigners_InvalidOffset(t *testing.T) {
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/wallets/test-wallet/signers?offset=-1", signAdminKey())
@@ -2206,7 +2206,7 @@ func TestB3ListWalletSigners_InvalidOffset(t *testing.T) {
 
 func TestB3ListWalletSigners_InvalidLimit(t *testing.T) {
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/wallets/test-wallet/signers?limit=-1", signAdminKey())
@@ -2215,7 +2215,7 @@ func TestB3ListWalletSigners_InvalidLimit(t *testing.T) {
 
 func TestB3ListWalletSigners_ListError(t *testing.T) {
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/wallets/test-wallet/signers", signAdminKey())
@@ -2229,7 +2229,7 @@ func TestB3ListWalletSigners_GetOwnershipError(t *testing.T) {
 		},
 	}
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/wallets/test-wallet/signers", testOwnerAPIKey())
@@ -2648,7 +2648,7 @@ func TestB3HandlePatchSignerLabels_Success(t *testing.T) {
 	flexRepo := &flexOwnershipRepo{owners: map[string]string{testAddr: testKeyID}}
 	accessSvc, err := service.NewSignerAccessService(flexRepo, &signerStubAccessRepo{}, &signerStubAPIKeyRepo{}, nil, slog.Default())
 	require.NoError(t, err)
-	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	body := map[string]interface{}{"display_name": "New Name", "tags": []string{"tag1"}}
@@ -2717,7 +2717,7 @@ func TestB3ListWalletSigners_WithValidOffsetLimit(t *testing.T) {
 		},
 	}
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	rec := doSignerRequest(t, h, http.MethodGet,
@@ -2736,7 +2736,7 @@ func TestB3ListWalletSigners_ExcludeHDDerived(t *testing.T) {
 		},
 	}
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	rec := doSignerRequest(t, h, http.MethodGet,
@@ -2910,7 +2910,7 @@ func TestB3HandleDeleteSigner_IsOwnerError2(t *testing.T) {
 		slog.Default(),
 	)
 	require.NoError(t, err)
-	h, err := NewSignerHandler(&signerActionMock{}, svc, slog.Default(), false)
+	h, err := NewSignerHandler(&signerActionMock{}, svc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	rec := doActionRequest(t, h.HandleSignerAction, http.MethodDelete,
@@ -3065,7 +3065,7 @@ func TestB3ListSigners_WalletEnrichment(t *testing.T) {
 	sm := &walletRepoSignerManager{}
 	owners := map[string]string{testAddr: testKeyID}
 	accessSvc := newFlexAccessService(t, owners)
-	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 	h.SetWalletRepo(&stubWalletRepo{})
 
@@ -3104,7 +3104,7 @@ func TestB3ListWalletSigners_OffsetBeyondTotal(t *testing.T) {
 		},
 	}
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	rec := doSignerRequest(t, h, http.MethodGet,
@@ -3123,7 +3123,7 @@ func TestB3ListWalletSigners_LimitCap(t *testing.T) {
 		},
 	}
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	rec := doSignerRequest(t, h, http.MethodGet,
@@ -3141,7 +3141,7 @@ func TestB3CreateSigner_ValidationError(t *testing.T) {
 		return nil, fmt.Errorf("validation failed")
 	}
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	body := map[string]interface{}{
@@ -3172,7 +3172,7 @@ func TestB3CreateSigner_ResourceLimitError(t *testing.T) {
 		countRepo, &signerStubAccessRepo{}, &signerStubAPIKeyRepo{}, nil, slog.Default(),
 	)
 	require.NoError(t, err)
-	h, err := NewSignerHandler(mgr, svc, slog.Default(), false)
+	h, err := NewSignerHandler(mgr, svc, slog.Default(), nil)
 	require.NoError(t, err)
 	h.SetMaxKeystoresPerKey(0) // no limit — just exercise create flow
 
@@ -3300,7 +3300,7 @@ func TestB3HandleTransferOwnership_AuditLogger(t *testing.T) {
 	mgr := &signerActionMock{}
 	owners := map[string]string{testAddr: testKeyID}
 	svc := newFlexAccessService(t, owners)
-	h, err := NewSignerHandler(mgr, svc, slog.Default(), false)
+	h, err := NewSignerHandler(mgr, svc, slog.Default(), nil)
 	require.NoError(t, err)
 	body := map[string]string{"new_owner_id": "yet-another"}
 	rec := doActionRequest(t, h.HandleSignerAction, http.MethodPost,
@@ -3352,7 +3352,7 @@ func TestB3HandleDeleteSigner_WithAuditLogger(t *testing.T) {
 
 	owners := map[string]string{testAddr: testKeyID}
 	svc := newFlexAccessService(t, owners)
-	h, err := NewSignerHandler(mgr, svc, slog.Default(), false)
+	h, err := NewSignerHandler(mgr, svc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	rec := doActionRequest(t, h.HandleSignerAction, http.MethodDelete,
@@ -3524,7 +3524,7 @@ func TestB3ListWalletSigners_SortByAddress(t *testing.T) {
 		getHDHierarchyFn: func() map[string]evmchain.HDHierarchyInfo { return nil },
 	}
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	rec := doSignerRequest(t, h, http.MethodGet,
@@ -3542,7 +3542,7 @@ func TestB3CreateSigner_AuditLoggerImport(t *testing.T) {
 		return &types.SignerInfo{Address: testAddr, Type: "keystore", Enabled: true}, nil
 	}
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	body := map[string]interface{}{
@@ -3709,7 +3709,7 @@ func TestB3GetRule_ScopedForAgent(t *testing.T) {
 func TestB3Approval_InvalidPath(t *testing.T) {
 	mockSignService := &mockSignService{}
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewApprovalHandler(mockSignService, accessSvc, slog.Default(), false)
+	h, err := NewApprovalHandler(mockSignService, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/evm/requests/approve", nil)
@@ -3726,7 +3726,7 @@ func TestB3Approval_InvalidPath(t *testing.T) {
 func TestB3ListWalletSigners_InvalidOffset2(t *testing.T) {
 	sm := &signerMockSignerManager{}
 	svc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(sm, svc, slog.Default(), false)
+	h, err := NewSignerHandler(sm, svc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	rec := doSignerRequest(t, h, http.MethodGet,
@@ -3737,7 +3737,7 @@ func TestB3ListWalletSigners_InvalidOffset2(t *testing.T) {
 func TestB3ListWalletSigners_InvalidLimit2(t *testing.T) {
 	sm := &signerMockSignerManager{}
 	svc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(sm, svc, slog.Default(), false)
+	h, err := NewSignerHandler(sm, svc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	rec := doSignerRequest(t, h, http.MethodGet,
@@ -3763,7 +3763,7 @@ func TestB3ListWalletSigners_ValidOffsetAndLimit(t *testing.T) {
 	owners := map[string]string{"0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA": testKeyID}
 	svc := newFlexAccessService(t, owners)
 
-	h, err := NewSignerHandler(sm, svc, slog.Default(), false)
+	h, err := NewSignerHandler(sm, svc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	rec := doSignerRequest(t, h, http.MethodGet,
@@ -3790,7 +3790,7 @@ func TestB3ListSigners_WalletEnrichmentError(t *testing.T) {
 		{SignerAddress: "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", OwnerID: "admin-key", Status: types.SignerOwnershipActive},
 	}
 	accessSvc := newSignerTestAccessServiceWithOwnerships(t, owners)
-	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 	h.SetWalletRepo(&failWalletRepo{})
 
@@ -3822,7 +3822,7 @@ func TestB3ListSigners_GetAccessibleAddressesError(t *testing.T) {
 		},
 	}
 	svc := newFailGetOwnedAccessService(t)
-	h, err := NewSignerHandler(sm, svc, slog.Default(), false)
+	h, err := NewSignerHandler(sm, svc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	rec := doSignerRequest(t, h, http.MethodGet, "/api/v1/evm/signers", signAdminKey())
@@ -3854,7 +3854,7 @@ func TestB3PatchSignerLabels_SignerNotFoundAfterPatch(t *testing.T) {
 		Status:        types.SignerOwnershipActive,
 	}))
 
-	h, err := NewSignerHandler(sm, svc, slog.Default(), false)
+	h, err := NewSignerHandler(sm, svc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	body := map[string]interface{}{"display_name": "new-name"}
@@ -3874,7 +3874,7 @@ func TestB3PatchSignerLabels_SignerNotFoundAfterPatch(t *testing.T) {
 func TestB3CreateSigner_BothKeysProvided2(t *testing.T) {
 	mgr := &signerActionMock{}
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	body := map[string]interface{}{
@@ -4098,7 +4098,7 @@ func TestB3DeleteRule_ReadOnly(t *testing.T) {
 	repo := storage.NewMemoryRuleRepository()
 	ct := types.ChainTypeEVM
 	require.NoError(t, repo.Create(context.Background(), &types.Rule{ID: "del-ro-rule", Name: "del-ro", Type: types.RuleTypeEVMAddressList, Mode: types.RuleModeWhitelist, Source: types.RuleSourceAPI, Status: types.RuleStatusActive, Owner: "admin-key", ChainType: &ct}))
-	h, err := NewRuleHandler(repo, slog.Default(), WithReadOnly())
+	h, err := NewRuleHandler(repo, slog.Default(), WithReadOnly(func() bool { return true }))
 	require.NoError(t, err)
 
 	rec := httptest.NewRecorder()
@@ -4194,7 +4194,7 @@ func TestB3DeleteRule_RepoDeleteError(t *testing.T) {
 
 func TestB3CreateRule_ReadOnly(t *testing.T) {
 	repo := storage.NewMemoryRuleRepository()
-	h, err := NewRuleHandler(repo, slog.Default(), WithReadOnly())
+	h, err := NewRuleHandler(repo, slog.Default(), WithReadOnly(func() bool { return true }))
 	require.NoError(t, err)
 
 	body := map[string]interface{}{"name": "test", "type": "evm_address_list", "mode": "whitelist"}
@@ -4215,7 +4215,7 @@ func TestB3UpdateRule_ReadOnly(t *testing.T) {
 	repo := storage.NewMemoryRuleRepository()
 	ct := types.ChainTypeEVM
 	require.NoError(t, repo.Create(context.Background(), &types.Rule{ID: "upd-ro-rule", Name: "upd-ro", Type: types.RuleTypeEVMAddressList, Mode: types.RuleModeWhitelist, Source: types.RuleSourceAPI, Status: types.RuleStatusActive, Owner: "admin-key", ChainType: &ct}))
-	h, err := NewRuleHandler(repo, slog.Default(), WithReadOnly())
+	h, err := NewRuleHandler(repo, slog.Default(), WithReadOnly(func() bool { return true }))
 	require.NoError(t, err)
 
 	body := map[string]interface{}{"name": "updated"}
@@ -4341,7 +4341,7 @@ func TestB3DeleteSigner_SignerNotFound(t *testing.T) {
 		{SignerAddress: testAddr, OwnerID: testKeyID, Status: types.SignerOwnershipActive},
 	}
 	svc := newSignerTestAccessServiceWithOwnerships(t, owners)
-	h, err := NewSignerHandler(sm, svc, slog.Default(), false)
+	h, err := NewSignerHandler(sm, svc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	rec := doActionRequest(t, h.HandleSignerAction, http.MethodDelete,
@@ -4364,7 +4364,7 @@ func TestB3DeleteSigner_SignerNotFound(t *testing.T) {
 func TestB3CreateSigner_Unauthorized(t *testing.T) {
 	mgr := &signerActionMock{}
 	svc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(mgr, svc, slog.Default(), false)
+	h, err := NewSignerHandler(mgr, svc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	body := map[string]interface{}{"type": "keystore", "keystore": map[string]interface{}{"password": "testpass", "private_key_hex": "abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234"}}
@@ -4397,7 +4397,7 @@ func TestB3ListWalletSigners_LimitCapped(t *testing.T) {
 	}
 	owners := map[string]string{"0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA": testKeyID}
 	svc := newFlexAccessService(t, owners)
-	h, err := NewSignerHandler(sm, svc, slog.Default(), false)
+	h, err := NewSignerHandler(sm, svc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	rec := doSignerRequest(t, h, http.MethodGet,
@@ -4416,7 +4416,7 @@ func TestB3ListWalletSigners_ManagerListError(t *testing.T) {
 		},
 	}
 	svc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(sm, svc, slog.Default(), false)
+	h, err := NewSignerHandler(sm, svc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	rec := doSignerRequest(t, h, http.MethodGet,
@@ -4438,7 +4438,7 @@ func TestB3CreateSigner_ManagerError(t *testing.T) {
 		},
 	}
 	svc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(mgr, svc, slog.Default(), false)
+	h, err := NewSignerHandler(mgr, svc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	body := map[string]interface{}{"type": "keystore", "keystore": map[string]interface{}{"password": "testpass", "private_key_hex": "abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234"}}
@@ -4494,7 +4494,7 @@ func TestB3CreateRule_TypeRequired(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestB3NewHDWalletHandler_NilAccessService(t *testing.T) {
-	_, err := NewHDWalletHandler(nil, nil, slog.Default(), false)
+	_, err := NewHDWalletHandler(nil, nil, slog.Default(), nil)
 	assert.Error(t, err)
 }
 
@@ -4504,7 +4504,7 @@ func TestB3NewHDWalletHandler_NilAccessService(t *testing.T) {
 
 func TestB3NewHDWalletHandler_NilSignerManager(t *testing.T) {
 	svc := newSignerTestAccessService(t)
-	_, err := NewHDWalletHandler(nil, svc, slog.Default(), false)
+	_, err := NewHDWalletHandler(nil, svc, slog.Default(), nil)
 	assert.Error(t, err)
 }
 

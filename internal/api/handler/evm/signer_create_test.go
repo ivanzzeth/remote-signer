@@ -21,7 +21,7 @@ import (
 func TestCreateSigner_ReadOnly(t *testing.T) {
 	mgr := &signerMockSignerManager{}
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), true) // readOnly=true
+	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), func() bool { return true }) // readOnly=true
 	require.NoError(t, err)
 
 	body := `{"type":"keystore","keystore":{"password":"test123"}}`
@@ -39,7 +39,7 @@ func TestCreateSigner_ReadOnly(t *testing.T) {
 func TestCreateSigner_Unauthorized(t *testing.T) {
 	mgr := &signerMockSignerManager{}
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	body := `{"type":"keystore","keystore":{"password":"test123"}}`
@@ -55,7 +55,7 @@ func TestCreateSigner_Unauthorized(t *testing.T) {
 func TestCreateSigner_PermissionDenied(t *testing.T) {
 	mgr := &signerMockSignerManager{}
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	body := `{"type":"keystore","keystore":{"password":"test123"}}`
@@ -73,7 +73,7 @@ func TestCreateSigner_PermissionDenied(t *testing.T) {
 func TestCreateSigner_InvalidBody(t *testing.T) {
 	mgr := &signerMockSignerManager{}
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/evm/signers", bytes.NewBufferString("bad json"))
@@ -97,7 +97,7 @@ func TestCreateSigner_Success(t *testing.T) {
 		},
 	}
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	body := `{"type":"keystore","keystore":{"password":"test123"}}`

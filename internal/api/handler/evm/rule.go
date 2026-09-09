@@ -43,7 +43,7 @@ type RuleHandler struct {
 	solidityValidator *evmchain.SolidityRuleValidator
 	jsEvaluator       *evmchain.JSRuleEvaluator
 	auditLogger       *audit.AuditLogger
-	readOnly          bool // when true, block all rule mutations via API
+	readOnly          func() bool // when true, block all rule mutations via API
 	logger            *slog.Logger
 	maxRulesPerKey    int                     // per-key rule count limit (0 = no limit)
 	requireApproval   bool                    // require admin approval for agent whitelist rules
@@ -91,9 +91,9 @@ func WithTemplateRepo(repo storage.TemplateRepository) RuleHandlerOption {
 }
 
 // WithReadOnly disables all rule mutation endpoints (create/update/delete).
-func WithReadOnly() RuleHandlerOption {
+func WithReadOnly(src func() bool) RuleHandlerOption {
 	return func(h *RuleHandler) {
-		h.readOnly = true
+		h.readOnly = src
 	}
 }
 
@@ -264,4 +264,14 @@ func (h *RuleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		respond.Error(w, "method not allowed", http.StatusMethodNotAllowed, h.logger)
 	}
+}
+
+// isReadOnly reports whether write operations are blocked right now. See the
+// note on Router.liveReadOnly: the setting behind it is runtime mutable, so a
+// bool captured at construction freezes at boot.
+func (h *RuleHandler) isReadOnly() bool {
+	if h.readOnly == nil {
+		return false
+	}
+	return h.readOnly()
 }

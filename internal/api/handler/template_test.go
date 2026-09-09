@@ -461,7 +461,7 @@ func testJSEvaluator(t *testing.T) *evm.JSRuleEvaluator {
 func newHandler(t *testing.T, tmplRepo *mockTemplateRepo, ruleRepo *mockRuleRepo, budgetRepo *mockBudgetRepo) *TemplateHandler {
 	t.Helper()
 	svc := newTemplateService(t, tmplRepo, ruleRepo, budgetRepo)
-	h, err := NewTemplateHandler(tmplRepo, svc, newTestLogger(), false, WithTemplateJSEvaluator(testJSEvaluator(t)))
+	h, err := NewTemplateHandler(tmplRepo, svc, newTestLogger(), nil, WithTemplateJSEvaluator(testJSEvaluator(t)))
 	if err != nil {
 		t.Fatalf("failed to create TemplateHandler: %v", err)
 	}
@@ -606,7 +606,7 @@ func TestNewTemplateHandler(t *testing.T) {
 	svc := newTemplateService(t, tmplRepo, ruleRepo, budgetRepo)
 
 	t.Run("all_valid_args", func(t *testing.T) {
-		h, err := NewTemplateHandler(tmplRepo, svc, logger, false)
+		h, err := NewTemplateHandler(tmplRepo, svc, logger, nil)
 		if err != nil {
 			t.Fatalf("expected no error, got: %v", err)
 		}
@@ -616,7 +616,7 @@ func TestNewTemplateHandler(t *testing.T) {
 	})
 
 	t.Run("nil_template_repo", func(t *testing.T) {
-		_, err := NewTemplateHandler(nil, svc, logger, false)
+		_, err := NewTemplateHandler(nil, svc, logger, nil)
 		if err == nil {
 			t.Fatal("expected error for nil template repository")
 		}
@@ -626,7 +626,7 @@ func TestNewTemplateHandler(t *testing.T) {
 	})
 
 	t.Run("nil_template_service", func(t *testing.T) {
-		_, err := NewTemplateHandler(tmplRepo, nil, logger, false)
+		_, err := NewTemplateHandler(tmplRepo, nil, logger, nil)
 		if err == nil {
 			t.Fatal("expected error for nil template service")
 		}
@@ -636,7 +636,7 @@ func TestNewTemplateHandler(t *testing.T) {
 	})
 
 	t.Run("nil_logger", func(t *testing.T) {
-		_, err := NewTemplateHandler(tmplRepo, svc, nil, false)
+		_, err := NewTemplateHandler(tmplRepo, svc, nil, nil)
 		if err == nil {
 			t.Fatal("expected error for nil logger")
 		}

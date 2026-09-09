@@ -54,7 +54,7 @@ func newPresetTestEnv(t *testing.T) *presetTestEnv {
 		tmplRepo,
 		db,
 		nil, /* templateSvc — not exercised by these tests */
-		false,
+		nil,
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 	)
 	require.NoError(t, err)

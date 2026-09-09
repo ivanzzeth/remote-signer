@@ -224,7 +224,7 @@ func newErrHandler(t *testing.T, tmplRepo *errTemplateRepo) *TemplateHandler {
 	if err != nil {
 		t.Fatalf("failed to create TemplateService: %v", err)
 	}
-	h, err := NewTemplateHandler(tmplRepo, svc, newTestLogger(), false)
+	h, err := NewTemplateHandler(tmplRepo, svc, newTestLogger(), nil)
 	if err != nil {
 		t.Fatalf("failed to create TemplateHandler: %v", err)
 	}

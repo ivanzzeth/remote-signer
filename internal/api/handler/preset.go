@@ -67,7 +67,7 @@ type PresetHandler struct {
 	templateSvc       *service.TemplateService
 	jsEvaluator       *evm.JSRuleEvaluator
 	solidityValidator *evm.SolidityRuleValidator
-	readOnly          bool
+	readOnly          func() bool
 	logger            *slog.Logger
 	auditLogger       *audit.AuditLogger
 	requireApproval   bool
@@ -108,7 +108,7 @@ func NewPresetHandler(
 	templateRepo storage.TemplateRepository,
 	db *gorm.DB,
 	templateSvc *service.TemplateService,
-	readOnly bool,
+	readOnly func() bool,
 	logger *slog.Logger,
 	opts ...PresetHandlerOption,
 ) (*PresetHandler, error) {
@@ -522,7 +522,7 @@ func (h *PresetHandler) apply(w http.ResponseWriter, r *http.Request, id string)
 		respond.Error(w, "forbidden: apply_preset permission required", http.StatusForbidden, h.logger)
 		return
 	}
-	if h.readOnly {
+	if h.isReadOnly() {
 		respond.Error(w, "preset apply is disabled (security.rules_api_readonly)", http.StatusForbidden, h.logger)
 		return
 	}
@@ -974,3 +974,13 @@ func strPtrIfNotEmpty(s string) *string {
 // ---------------------------------------------------------------------------
 // Response helpers
 // ---------------------------------------------------------------------------
+
+// isReadOnly reports whether write operations are blocked right now. See the
+// note on Router.liveReadOnly: the setting behind it is runtime mutable, so a
+// bool captured at construction freezes at boot.
+func (h *PresetHandler) isReadOnly() bool {
+	if h.readOnly == nil {
+		return false
+	}
+	return h.readOnly()
+}

@@ -21,8 +21,8 @@ type SignerHandler struct {
 	accessService      *service.SignerAccessService
 	signerRepo         storage.SignerRepository
 	walletRepo         storage.WalletRepository
-	readOnly           bool // when true, block signer creation via API
-	maxKeystoresPerKey int  // resource limit: max keystores per API key (0 = no limit)
+	readOnly           func() bool // when true, block signer creation via API
+	maxKeystoresPerKey int         // resource limit: max keystores per API key (0 = no limit)
 	logger             *slog.Logger
 	auditLogger        *audit.AuditLogger // optional: audit logging
 }
@@ -33,7 +33,7 @@ type TransferOwnershipRequest struct {
 }
 
 // NewSignerHandler creates a new signer handler
-func NewSignerHandler(signerManager evm.SignerManager, accessService *service.SignerAccessService, logger *slog.Logger, readOnly bool) (*SignerHandler, error) {
+func NewSignerHandler(signerManager evm.SignerManager, accessService *service.SignerAccessService, logger *slog.Logger, readOnly func() bool) (*SignerHandler, error) {
 	if signerManager == nil {
 		return nil, fmt.Errorf("signer manager is required")
 	}
@@ -200,4 +200,23 @@ func (h *SignerHandler) HandleWalletSigners(w http.ResponseWriter, r *http.Reque
 	}
 
 	h.listWalletSigners(w, r, walletID)
+}
+
+// readOnly reports whether write operations are blocked right now.
+//
+// It is a function, not a bool, because the setting behind it is runtime
+// mutable: settings.SecuritySnapshot is reloaded from the database, and a
+// value copied into this struct at construction would freeze at boot. That
+// was the actual behaviour until 2026-09-10 — internal/settings/model.go
+// promises settings become "effective without a daemon restart", and for this
+// one, flipping it in the Web UI changed the database, changed the snapshot,
+// and changed nothing else.
+//
+// nil means "never read-only", which is the permissive direction; the router
+// only leaves it nil when there is no settings manager at all (tests).
+func (h *SignerHandler) isReadOnly() bool {
+	if h.readOnly == nil {
+		return false
+	}
+	return h.readOnly()
 }

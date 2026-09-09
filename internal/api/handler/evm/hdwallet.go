@@ -23,8 +23,8 @@ import (
 type HDWalletHandler struct {
 	signerManager      evmchain.SignerManager
 	accessService      *service.SignerAccessService
-	readOnly           bool // when true, block HD wallet creation/derive via API
-	maxHDWalletsPerKey int  // resource limit: max HD wallets per API key (0 = no limit)
+	readOnly           func() bool // when true, block HD wallet creation/derive via API
+	maxHDWalletsPerKey int         // resource limit: max HD wallets per API key (0 = no limit)
 	logger             *slog.Logger
 	auditLogger        *audit.AuditLogger // optional: audit logging
 }
@@ -40,7 +40,7 @@ func (h *HDWalletHandler) SetMaxHDWalletsPerKey(max int) {
 }
 
 // NewHDWalletHandler creates a new HD wallet handler.
-func NewHDWalletHandler(signerManager evmchain.SignerManager, accessService *service.SignerAccessService, logger *slog.Logger, readOnly bool) (*HDWalletHandler, error) {
+func NewHDWalletHandler(signerManager evmchain.SignerManager, accessService *service.SignerAccessService, logger *slog.Logger, readOnly func() bool) (*HDWalletHandler, error) {
 	if signerManager == nil {
 		return nil, fmt.Errorf("signer manager is required")
 	}
@@ -189,7 +189,7 @@ func (h *HDWalletHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *HDWalletHandler) createOrImport(w http.ResponseWriter, r *http.Request) {
-	if h.readOnly {
+	if h.isReadOnly() {
 		respond.Error(w, "HD wallet creation via API is disabled (security.signers_api_readonly)", http.StatusForbidden, h.logger)
 		return
 	}
@@ -349,7 +349,7 @@ func (h *HDWalletHandler) listWallets(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *HDWalletHandler) deriveAddresses(w http.ResponseWriter, r *http.Request, primaryAddr string) {
-	if h.readOnly {
+	if h.isReadOnly() {
 		respond.Error(w, "HD wallet derive via API is disabled (security.signers_api_readonly)", http.StatusForbidden, h.logger)
 		return
 	}
@@ -483,4 +483,23 @@ func toSignerInfoResponseList(infos []types.SignerInfo) []signerInfoResponse {
 		}
 	}
 	return result
+}
+
+// readOnly reports whether write operations are blocked right now.
+//
+// It is a function, not a bool, because the setting behind it is runtime
+// mutable: settings.SecuritySnapshot is reloaded from the database, and a
+// value copied into this struct at construction would freeze at boot. That
+// was the actual behaviour until 2026-09-10 — internal/settings/model.go
+// promises settings become "effective without a daemon restart", and for this
+// one, flipping it in the Web UI changed the database, changed the snapshot,
+// and changed nothing else.
+//
+// nil means "never read-only", which is the permissive direction; the router
+// only leaves it nil when there is no settings manager at all (tests).
+func (h *HDWalletHandler) isReadOnly() bool {
+	if h.readOnly == nil {
+		return false
+	}
+	return h.readOnly()
 }

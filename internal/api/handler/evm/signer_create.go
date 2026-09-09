@@ -18,7 +18,7 @@ import (
 
 // createSigner handles POST /api/v1/evm/signers
 func (h *SignerHandler) createSigner(w http.ResponseWriter, r *http.Request) {
-	if h.readOnly {
+	if h.isReadOnly() {
 		respond.Error(w, "signer creation via API is disabled (security.signers_api_readonly)", http.StatusForbidden, h.logger)
 		return
 	}

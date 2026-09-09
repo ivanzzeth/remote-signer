@@ -640,7 +640,7 @@ func TestSignHandler_Setters(t *testing.T) {
 
 func TestSignerHandler_Setters(t *testing.T) {
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	assert.NotPanics(t, func() {
@@ -656,7 +656,7 @@ func TestSignerHandler_Setters(t *testing.T) {
 
 func TestHDWalletHandler_Setters(t *testing.T) {
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewHDWalletHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), false)
+	h, err := NewHDWalletHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	assert.NotPanics(t, func() {
@@ -717,7 +717,7 @@ func TestHandleApproveSigner_AdminRequired(t *testing.T) {
 	accessSvc, err := service.NewSignerAccessService(ownershipRepo, accessRepo, apiKeyRepo, nil, slog.Default())
 	require.NoError(t, err)
 
-	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	devKey := &types.APIKey{ID: "dev-key", Role: types.RoleDev, Enabled: true}
@@ -741,7 +741,7 @@ func TestHandleApproveSigner_NotFound(t *testing.T) {
 	accessSvc, err := service.NewSignerAccessService(ownershipRepo, accessRepo, apiKeyRepo, nil, slog.Default())
 	require.NoError(t, err)
 
-	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	adminKey := &types.APIKey{ID: "admin-key", Role: types.RoleAdmin, Enabled: true}
@@ -765,7 +765,7 @@ func TestHandleApproveSigner_AlreadyActive(t *testing.T) {
 	accessSvc, err := service.NewSignerAccessService(ownershipRepo, accessRepo, apiKeyRepo, nil, slog.Default())
 	require.NoError(t, err)
 
-	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	adminKey := &types.APIKey{ID: "admin-key", Role: types.RoleAdmin, Enabled: true}
@@ -789,7 +789,7 @@ func TestHandleApproveSigner_Success(t *testing.T) {
 	accessSvc, err := service.NewSignerAccessService(ownershipRepo, accessRepo, apiKeyRepo, nil, slog.Default())
 	require.NoError(t, err)
 
-	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	adminKey := &types.APIKey{ID: "admin-key", Role: types.RoleAdmin, Enabled: true}
@@ -804,7 +804,7 @@ func TestHandleApproveSigner_Success(t *testing.T) {
 
 func TestHandleApproveSigner_MethodNotAllowed(t *testing.T) {
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	adminKey := &types.APIKey{ID: "admin-key", Role: types.RoleAdmin, Enabled: true}
@@ -842,7 +842,7 @@ func TestHandleTransferOwnership_NotOwner(t *testing.T) {
 	accessSvc, err := service.NewSignerAccessService(ownershipRepo, accessRepo, apiKeyRepo, nil, slog.Default())
 	require.NoError(t, err)
 
-	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	strangerKey := &types.APIKey{ID: "stranger-key", Role: types.RoleDev, Enabled: true}
@@ -867,7 +867,7 @@ func TestHandleTransferOwnership_Success(t *testing.T) {
 	accessSvc, err := service.NewSignerAccessService(ownershipRepo, accessRepo, apiKeyRepo, nil, slog.Default())
 	require.NoError(t, err)
 
-	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	ownerKey := &types.APIKey{ID: "owner-key", Role: types.RoleAdmin, Enabled: true}
@@ -884,7 +884,7 @@ func TestHandleTransferOwnership_Success(t *testing.T) {
 
 func TestHandleTransferOwnership_MethodNotAllowed(t *testing.T) {
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	rec := doActionRequest(t, h.HandleSignerAction, http.MethodGet,
@@ -1046,7 +1046,7 @@ func TestSignerInfoByAddress_Found(t *testing.T) {
 		},
 	}
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	info, err := h.signerInfoByAddress(context.Background(), "0x1111111111111111111111111111111111111111")
@@ -1065,7 +1065,7 @@ func TestSignerInfoByAddress_NotFound(t *testing.T) {
 		},
 	}
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	_, err = h.signerInfoByAddress(context.Background(), "0x9999999999999999999999999999999999999999")
@@ -1079,7 +1079,7 @@ func TestSignerInfoByAddress_ListError(t *testing.T) {
 		},
 	}
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	_, err = h.signerInfoByAddress(context.Background(), "0x1111111111111111111111111111111111111111")
@@ -1130,7 +1130,7 @@ func TestHandlePatchSignerLabels_SignerNotFoundViaInfo(t *testing.T) {
 		listSignersFn: func(_ context.Context, _ types.SignerFilter) (types.SignerListResult, error) {
 			return types.SignerListResult{Signers: nil, Total: 0}, nil
 		},
-	}, accessSvc, slog.Default(), false)
+	}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	ownerKey := &types.APIKey{ID: "owner-key", Role: types.RoleAdmin, Enabled: true}
@@ -1156,7 +1156,7 @@ func TestSignerIsHDDerivedNonPrimary_EmptyHierarchy(t *testing.T) {
 		},
 	}
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 	assert.False(t, h.signerIsHDDerivedNonPrimary("0x1111"))
 }
@@ -1170,7 +1170,7 @@ func TestSignerIsHDDerivedNonPrimary_NotInHierarchy(t *testing.T) {
 		},
 	}
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 	assert.False(t, h.signerIsHDDerivedNonPrimary("0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"))
 }
@@ -1188,7 +1188,7 @@ func TestSignerIsHDDerivedNonPrimary_IsDerived(t *testing.T) {
 		},
 	}
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 	// Pass lowercase; the handler normalizes via HexToAddress().Hex()
 	assert.True(t, h.signerIsHDDerivedNonPrimary("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"))
@@ -1215,10 +1215,10 @@ func TestRuleHandler_WithAuditLogger(t *testing.T) {
 }
 
 func TestRuleHandler_WithReadOnly(t *testing.T) {
-	h, err := NewRuleHandler(newMockRuleRepo(), slog.Default(), WithReadOnly())
+	h, err := NewRuleHandler(newMockRuleRepo(), slog.Default(), WithReadOnly(func() bool { return true }))
 	require.NoError(t, err)
 	require.NotNil(t, h)
-	assert.True(t, h.readOnly)
+	assert.True(t, h.isReadOnly())
 }
 
 func TestRuleHandler_WithRequireApproval(t *testing.T) {

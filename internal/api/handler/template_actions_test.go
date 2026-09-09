@@ -33,7 +33,7 @@ func newHandlerNoJS(t *testing.T) *TemplateHandler {
 	budgetRepo := newMockBudgetRepo()
 	svc, err := service.NewTemplateService(repo, ruleRepo, budgetRepo, newTestLogger())
 	require.NoError(t, err)
-	h, err := NewTemplateHandler(repo, svc, newTestLogger(), false)
+	h, err := NewTemplateHandler(repo, svc, newTestLogger(), nil)
 	require.NoError(t, err)
 	return h
 }
@@ -80,7 +80,7 @@ func TestValidateTemplate_NilJSEvaluator(t *testing.T) {
 	budgetRepo := newMockBudgetRepo()
 	svc, err := service.NewTemplateService(repo, ruleRepo, budgetRepo, newTestLogger())
 	require.NoError(t, err)
-	hNilJS, err := NewTemplateHandler(repo, svc, newTestLogger(), false)
+	hNilJS, err := NewTemplateHandler(repo, svc, newTestLogger(), nil)
 	require.NoError(t, err)
 
 	rr := doValidateRequest(t, hNilJS, "tmpl-no-js", nil, testAPIKey())
@@ -343,7 +343,7 @@ func TestInstantiateTemplate_SubstitutionErrorInValidation(t *testing.T) {
 	require.NoError(t, err)
 
 	svc := newTemplateService(t, tmplRepo, ruleRepo, budgetRepo)
-	h, err := NewTemplateHandler(tmplRepo, svc, newTestLogger(), false, WithTemplateJSEvaluator(eval))
+	h, err := NewTemplateHandler(tmplRepo, svc, newTestLogger(), nil, WithTemplateJSEvaluator(eval))
 	require.NoError(t, err)
 
 	// Don't provide the required variable
@@ -376,7 +376,7 @@ func TestInstantiateTemplate_TestCaseValidationFailure(t *testing.T) {
 	require.NoError(t, err)
 
 	svc := newTemplateService(t, tmplRepo, ruleRepo, budgetRepo)
-	h, err := NewTemplateHandler(tmplRepo, svc, newTestLogger(), false, WithTemplateJSEvaluator(eval))
+	h, err := NewTemplateHandler(tmplRepo, svc, newTestLogger(), nil, WithTemplateJSEvaluator(eval))
 	require.NoError(t, err)
 
 	reqBody := map[string]interface{}{"variables": map[string]string{}}
@@ -407,7 +407,7 @@ func TestInstantiateTemplate_SkipValidationForbidden(t *testing.T) {
 	require.NoError(t, err)
 
 	svc := newTemplateService(t, tmplRepo, ruleRepo, budgetRepo)
-	h, err := NewTemplateHandler(tmplRepo, svc, newTestLogger(), false, WithTemplateJSEvaluator(eval))
+	h, err := NewTemplateHandler(tmplRepo, svc, newTestLogger(), nil, WithTemplateJSEvaluator(eval))
 	require.NoError(t, err)
 
 	reqBody := map[string]interface{}{
@@ -427,7 +427,7 @@ func TestInstantiateTemplate_ReadOnlyBlocks(t *testing.T) {
 	budgetRepo := newMockBudgetRepo()
 
 	svc := newTemplateService(t, tmplRepo, ruleRepo, budgetRepo)
-	h, err := NewTemplateHandler(tmplRepo, svc, newTestLogger(), true)
+	h, err := NewTemplateHandler(tmplRepo, svc, newTestLogger(), func() bool { return true })
 	require.NoError(t, err)
 
 	rr := doRequest(t, h, http.MethodPost, "/api/v1/templates/tmpl-1/instantiate", map[string]interface{}{}, testAPIKey())
@@ -478,7 +478,7 @@ func TestInstantiateTemplate_SolidityForgeUnavailable(t *testing.T) {
 	seedTemplate(t, tmplRepo, tmpl)
 
 	svc := newTemplateService(t, tmplRepo, ruleRepo, budgetRepo)
-	h, err := NewTemplateHandler(tmplRepo, svc, newTestLogger(), false) // no WithTemplateSolidityValidator
+	h, err := NewTemplateHandler(tmplRepo, svc, newTestLogger(), nil) // no WithTemplateSolidityValidator
 	require.NoError(t, err)
 
 	reqBody := map[string]interface{}{"variables": map[string]string{}}
@@ -518,7 +518,7 @@ func TestInstantiateTemplate_SolidityForgeUnavailable_Bundle(t *testing.T) {
 	seedTemplate(t, tmplRepo, tmpl)
 
 	svc := newTemplateService(t, tmplRepo, ruleRepo, budgetRepo)
-	h, err := NewTemplateHandler(tmplRepo, svc, newTestLogger(), false) // no WithTemplateSolidityValidator
+	h, err := NewTemplateHandler(tmplRepo, svc, newTestLogger(), nil) // no WithTemplateSolidityValidator
 	require.NoError(t, err)
 
 	reqBody := map[string]interface{}{"variables": map[string]string{}}
@@ -536,7 +536,7 @@ func TestInstantiateTemplate_ResolveTemplateError(t *testing.T) {
 	budgetRepo := newMockBudgetRepo()
 	svc, err := service.NewTemplateService(repo, ruleRepo, budgetRepo, newTestLogger())
 	require.NoError(t, err)
-	h, err := NewTemplateHandler(repo, svc, newTestLogger(), false)
+	h, err := NewTemplateHandler(repo, svc, newTestLogger(), nil)
 	require.NoError(t, err)
 
 	reqBody := map[string]interface{}{"variables": map[string]string{}}

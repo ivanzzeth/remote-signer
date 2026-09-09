@@ -29,7 +29,7 @@ func setupValidateHandler(t *testing.T) (*TemplateHandler, *mockTemplateRepo) {
 		repo,
 		&service.TemplateService{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		false,
+		nil,
 		WithTemplateJSEvaluator(eval),
 	)
 	require.NoError(t, err)
@@ -91,7 +91,7 @@ func TestCoverage_ValidateTemplate_MethodNotAllowed(t *testing.T) {
 func TestCoverage_ValidateTemplate_NoJSEvaluator(t *testing.T) {
 	repo := newMockTemplateRepo()
 	handler, err := NewTemplateHandler(repo, &service.TemplateService{},
-		slog.New(slog.NewTextHandler(io.Discard, nil)), false)
+		slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
 	require.NoError(t, err)
 	require.NoError(t, repo.Create(context.TODO(), &types.RuleTemplate{
 		ID: "evm/js", Name: "JS Rule", Type: types.RuleTypeEVMJS,
@@ -222,7 +222,7 @@ func TestCoverage_WriteSettingsJSON_WriteError(t *testing.T) {
 
 func TestCoverage_ListAPIKeyNames_Success(t *testing.T) {
 	mock := newMockAPIKeyRepo()
-	h, err := NewAPIKeyHandler(mock, slog.New(slog.NewTextHandler(io.Discard, nil)), false)
+	h, err := NewAPIKeyHandler(mock, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
 	require.NoError(t, err)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/api-keys/names", nil).WithContext(adminCtx(t))
 	w := httptest.NewRecorder()
@@ -235,7 +235,7 @@ func TestCoverage_ListAPIKeyNames_RepoError(t *testing.T) {
 	mock.listFn = func(_ context.Context, _ storage.APIKeyFilter) ([]*types.APIKey, error) {
 		return nil, fmt.Errorf("list failed")
 	}
-	h, err := NewAPIKeyHandler(mock, slog.New(slog.NewTextHandler(io.Discard, nil)), false)
+	h, err := NewAPIKeyHandler(mock, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
 	require.NoError(t, err)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/api-keys/names", nil).WithContext(adminCtx(t))
 	w := httptest.NewRecorder()

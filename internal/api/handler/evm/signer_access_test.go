@@ -61,7 +61,7 @@ func TestGrantAccess_HTTP_HDDerivedAddressResolvesParent(t *testing.T) {
 
 	require.NoError(t, accessSvc.SetOwner(context.Background(), primary, ownerID, types.SignerOwnershipActive))
 
-	h, err := NewSignerHandler(newSignerManagerWithAll(), accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(newSignerManagerWithAll(), accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	ownerKey := &types.APIKey{ID: ownerID, Name: "owner", Role: types.RoleAdmin, Enabled: true}

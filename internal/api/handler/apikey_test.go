@@ -251,19 +251,19 @@ func TestNewAPIKeyHandler(t *testing.T) {
 	logger := apikeyLogger()
 
 	t.Run("valid_args", func(t *testing.T) {
-		h, err := NewAPIKeyHandler(repo, logger, false)
+		h, err := NewAPIKeyHandler(repo, logger, nil)
 		require.NoError(t, err)
 		assert.NotNil(t, h)
 	})
 
 	t.Run("nil_repo_returns_error", func(t *testing.T) {
-		_, err := NewAPIKeyHandler(nil, logger, false)
+		_, err := NewAPIKeyHandler(nil, logger, nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "API key repository is required")
 	})
 
 	t.Run("nil_logger_returns_error", func(t *testing.T) {
-		_, err := NewAPIKeyHandler(repo, nil, false)
+		_, err := NewAPIKeyHandler(repo, nil, nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "logger is required")
 	})
@@ -278,7 +278,7 @@ func TestAPIKeyHandler_List_Success(t *testing.T) {
 	repo.seed(makeTestAPIKey("key-1", "Key One", types.APIKeySourceAPI, true))
 	repo.seed(makeTestAPIKey("key-2", "Key Two", types.APIKeySourceConfig, true))
 
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	rr := doAPIKeyWalletRequest(t, h, http.MethodGet, "/api/v1/api-keys", nil, apikeyAdminKey())
@@ -303,7 +303,7 @@ func TestAPIKeyHandler_List_WithSourceFilter(t *testing.T) {
 	repo.seed(makeTestAPIKey("key-api-1", "API Key", types.APIKeySourceAPI, true))
 	repo.seed(makeTestAPIKey("key-cfg-1", "Config Key", types.APIKeySourceConfig, true))
 
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	rr := doAPIKeyWalletRequest(t, h, http.MethodGet, "/api/v1/api-keys?source=api", nil, apikeyAdminKey())
@@ -321,7 +321,7 @@ func TestAPIKeyHandler_List_WithEnabledFilter(t *testing.T) {
 	repo.seed(makeTestAPIKey("key-en", "Enabled Key", types.APIKeySourceAPI, true))
 	repo.seed(makeTestAPIKey("key-dis", "Disabled Key", types.APIKeySourceAPI, false))
 
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	rr := doAPIKeyWalletRequest(t, h, http.MethodGet, "/api/v1/api-keys?enabled=true", nil, apikeyAdminKey())
@@ -336,7 +336,7 @@ func TestAPIKeyHandler_List_WithEnabledFilter(t *testing.T) {
 
 func TestAPIKeyHandler_List_InvalidEnabledParam(t *testing.T) {
 	repo := newMockAPIKeyRepo()
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	rr := doAPIKeyWalletRequest(t, h, http.MethodGet, "/api/v1/api-keys?enabled=notbool", nil, apikeyAdminKey())
@@ -349,7 +349,7 @@ func TestAPIKeyHandler_List_InvalidEnabledParam(t *testing.T) {
 
 func TestAPIKeyHandler_List_InvalidLimitParam(t *testing.T) {
 	repo := newMockAPIKeyRepo()
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	rr := doAPIKeyWalletRequest(t, h, http.MethodGet, "/api/v1/api-keys?limit=abc", nil, apikeyAdminKey())
@@ -362,7 +362,7 @@ func TestAPIKeyHandler_List_InvalidLimitParam(t *testing.T) {
 
 func TestAPIKeyHandler_List_NegativeLimitParam(t *testing.T) {
 	repo := newMockAPIKeyRepo()
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	rr := doAPIKeyWalletRequest(t, h, http.MethodGet, "/api/v1/api-keys?limit=-1", nil, apikeyAdminKey())
@@ -381,7 +381,7 @@ func TestAPIKeyHandler_List_LimitClamping(t *testing.T) {
 		return 0, nil
 	}
 
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	rr := doAPIKeyWalletRequest(t, h, http.MethodGet, "/api/v1/api-keys?limit=500", nil, apikeyAdminKey())
@@ -392,7 +392,7 @@ func TestAPIKeyHandler_List_LimitClamping(t *testing.T) {
 
 func TestAPIKeyHandler_List_InvalidOffsetParam(t *testing.T) {
 	repo := newMockAPIKeyRepo()
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	rr := doAPIKeyWalletRequest(t, h, http.MethodGet, "/api/v1/api-keys?offset=abc", nil, apikeyAdminKey())
@@ -401,7 +401,7 @@ func TestAPIKeyHandler_List_InvalidOffsetParam(t *testing.T) {
 
 func TestAPIKeyHandler_List_NegativeOffsetParam(t *testing.T) {
 	repo := newMockAPIKeyRepo()
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	rr := doAPIKeyWalletRequest(t, h, http.MethodGet, "/api/v1/api-keys?offset=-5", nil, apikeyAdminKey())
@@ -414,7 +414,7 @@ func TestAPIKeyHandler_List_Error(t *testing.T) {
 		return nil, fmt.Errorf("database connection lost")
 	}
 
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	rr := doAPIKeyWalletRequest(t, h, http.MethodGet, "/api/v1/api-keys", nil, apikeyAdminKey())
@@ -431,7 +431,7 @@ func TestAPIKeyHandler_List_CountError(t *testing.T) {
 		return 0, fmt.Errorf("count query timeout")
 	}
 
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	rr := doAPIKeyWalletRequest(t, h, http.MethodGet, "/api/v1/api-keys", nil, apikeyAdminKey())
@@ -444,7 +444,7 @@ func TestAPIKeyHandler_List_CountError(t *testing.T) {
 
 func TestAPIKeyHandler_List_Empty(t *testing.T) {
 	repo := newMockAPIKeyRepo()
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	rr := doAPIKeyWalletRequest(t, h, http.MethodGet, "/api/v1/api-keys", nil, apikeyAdminKey())
@@ -466,7 +466,7 @@ func TestAPIKeyHandler_Get_Success(t *testing.T) {
 	key := makeTestAPIKey("key-get-1", "Get Key", types.APIKeySourceAPI, true)
 	repo.seed(key)
 
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	rr := doAPIKeyItemRequest(t, h, http.MethodGet, "/api/v1/api-keys/key-get-1", nil, apikeyAdminKey())
@@ -482,7 +482,7 @@ func TestAPIKeyHandler_Get_Success(t *testing.T) {
 
 func TestAPIKeyHandler_Get_NotFound(t *testing.T) {
 	repo := newMockAPIKeyRepo()
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	rr := doAPIKeyItemRequest(t, h, http.MethodGet, "/api/v1/api-keys/nonexistent", nil, apikeyAdminKey())
@@ -499,7 +499,7 @@ func TestAPIKeyHandler_Get_InternalError(t *testing.T) {
 		return nil, fmt.Errorf("database error")
 	}
 
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	rr := doAPIKeyItemRequest(t, h, http.MethodGet, "/api/v1/api-keys/key-1", nil, apikeyAdminKey())
@@ -512,7 +512,7 @@ func TestAPIKeyHandler_Get_NoPublicKey(t *testing.T) {
 	key.PublicKeyHex = "secret_public_key_hex_value"
 	repo.seed(key)
 
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	rr := doAPIKeyItemRequest(t, h, http.MethodGet, "/api/v1/api-keys/key-nopub", nil, apikeyAdminKey())
@@ -526,7 +526,7 @@ func TestAPIKeyHandler_Get_NoPublicKey(t *testing.T) {
 
 func TestAPIKeyHandler_Get_EmptyID(t *testing.T) {
 	repo := newMockAPIKeyRepo()
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	// Path with no ID after prefix
@@ -544,7 +544,7 @@ func TestAPIKeyHandler_Get_EmptyID(t *testing.T) {
 
 func TestAPIKeyHandler_Create_Success(t *testing.T) {
 	repo := newMockAPIKeyRepo()
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	reqBody := CreateAPIKeyRequest{
@@ -573,7 +573,7 @@ func TestAPIKeyHandler_Create_Success(t *testing.T) {
 
 func TestAPIKeyHandler_Create_WithCustomRateLimit(t *testing.T) {
 	repo := newMockAPIKeyRepo()
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	reqBody := CreateAPIKeyRequest{
@@ -594,7 +594,7 @@ func TestAPIKeyHandler_Create_WithCustomRateLimit(t *testing.T) {
 
 func TestAPIKeyHandler_Create_ReadOnly(t *testing.T) {
 	repo := newMockAPIKeyRepo()
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), true) // readOnly=true
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), func() bool { return true }) // readOnly=true
 	require.NoError(t, err)
 
 	reqBody := CreateAPIKeyRequest{
@@ -613,7 +613,7 @@ func TestAPIKeyHandler_Create_ReadOnly(t *testing.T) {
 
 func TestAPIKeyHandler_Create_InvalidID_Empty(t *testing.T) {
 	repo := newMockAPIKeyRepo()
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	reqBody := CreateAPIKeyRequest{
@@ -632,7 +632,7 @@ func TestAPIKeyHandler_Create_InvalidID_Empty(t *testing.T) {
 
 func TestAPIKeyHandler_Create_InvalidID_TooLong(t *testing.T) {
 	repo := newMockAPIKeyRepo()
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	longID := strings.Repeat("a", 65)
@@ -652,7 +652,7 @@ func TestAPIKeyHandler_Create_InvalidID_TooLong(t *testing.T) {
 
 func TestAPIKeyHandler_Create_InvalidID_SpecialChars(t *testing.T) {
 	repo := newMockAPIKeyRepo()
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	badIDs := []string{"key with spaces", "key@special", "key/slash", "key.dot", "key_underscore"}
@@ -676,7 +676,7 @@ func TestAPIKeyHandler_Create_InvalidID_SpecialChars(t *testing.T) {
 
 func TestAPIKeyHandler_Create_ValidIDWithHyphens(t *testing.T) {
 	repo := newMockAPIKeyRepo()
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	reqBody := CreateAPIKeyRequest{
@@ -692,7 +692,7 @@ func TestAPIKeyHandler_Create_ValidIDWithHyphens(t *testing.T) {
 
 func TestAPIKeyHandler_Create_MissingName(t *testing.T) {
 	repo := newMockAPIKeyRepo()
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	reqBody := CreateAPIKeyRequest{
@@ -711,7 +711,7 @@ func TestAPIKeyHandler_Create_MissingName(t *testing.T) {
 
 func TestAPIKeyHandler_Create_NameTooLong(t *testing.T) {
 	repo := newMockAPIKeyRepo()
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	reqBody := CreateAPIKeyRequest{
@@ -730,7 +730,7 @@ func TestAPIKeyHandler_Create_NameTooLong(t *testing.T) {
 
 func TestAPIKeyHandler_Create_MissingPublicKey(t *testing.T) {
 	repo := newMockAPIKeyRepo()
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	reqBody := CreateAPIKeyRequest{
@@ -751,7 +751,7 @@ func TestAPIKeyHandler_Create_DuplicateID(t *testing.T) {
 	repo := newMockAPIKeyRepo()
 	repo.seed(makeTestAPIKey("dup-key", "Existing", types.APIKeySourceAPI, true))
 
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	reqBody := CreateAPIKeyRequest{
@@ -771,7 +771,7 @@ func TestAPIKeyHandler_Create_DuplicateID(t *testing.T) {
 
 func TestAPIKeyHandler_Create_InvalidJSON(t *testing.T) {
 	repo := newMockAPIKeyRepo()
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/api-keys", bytes.NewBufferString("{broken json"))
@@ -790,7 +790,7 @@ func TestAPIKeyHandler_Create_InvalidJSON(t *testing.T) {
 
 func TestAPIKeyHandler_Create_MethodNotAllowed(t *testing.T) {
 	repo := newMockAPIKeyRepo()
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	rr := doAPIKeyWalletRequest(t, h, http.MethodPut, "/api/v1/api-keys", nil, apikeyAdminKey())
@@ -810,7 +810,7 @@ func TestAPIKeyHandler_Create_RepoGetFailsAfterCreate(t *testing.T) {
 		return nil, fmt.Errorf("transient error")
 	}
 
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	reqBody := CreateAPIKeyRequest{
@@ -838,7 +838,7 @@ func TestAPIKeyHandler_Update_Success(t *testing.T) {
 	key := makeTestAPIKey("upd-key", "Original", types.APIKeySourceAPI, true)
 	repo.seed(key)
 
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	newName := "Updated Name"
@@ -865,7 +865,7 @@ func TestAPIKeyHandler_Update_AllFields(t *testing.T) {
 	key := makeTestAPIKey("upd-all", "Original", types.APIKeySourceAPI, true)
 	repo.seed(key)
 
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	newName := "All Updated"
@@ -892,7 +892,7 @@ func TestAPIKeyHandler_Update_AllFields(t *testing.T) {
 
 func TestAPIKeyHandler_Update_ReadOnly(t *testing.T) {
 	repo := newMockAPIKeyRepo()
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), true)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), func() bool { return true })
 	require.NoError(t, err)
 
 	newName := "Updated"
@@ -911,7 +911,7 @@ func TestAPIKeyHandler_Update_ConfigSource(t *testing.T) {
 	key := makeTestAPIKey("cfg-key", "Config Key", types.APIKeySourceConfig, true)
 	repo.seed(key)
 
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	newName := "Updated"
@@ -927,7 +927,7 @@ func TestAPIKeyHandler_Update_ConfigSource(t *testing.T) {
 
 func TestAPIKeyHandler_Update_NotFound(t *testing.T) {
 	repo := newMockAPIKeyRepo()
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	newName := "Updated"
@@ -943,7 +943,7 @@ func TestAPIKeyHandler_Update_InternalGetError(t *testing.T) {
 		return nil, fmt.Errorf("database error")
 	}
 
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	newName := "Updated"
@@ -958,7 +958,7 @@ func TestAPIKeyHandler_Update_InvalidJSON(t *testing.T) {
 	key := makeTestAPIKey("bad-json-key", "Bad JSON Key", types.APIKeySourceAPI, true)
 	repo.seed(key)
 
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/api-keys/bad-json-key", bytes.NewBufferString("{broken"))
@@ -980,7 +980,7 @@ func TestAPIKeyHandler_Update_EmptyName(t *testing.T) {
 	key := makeTestAPIKey("empty-name-key", "Original", types.APIKeySourceAPI, true)
 	repo.seed(key)
 
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	emptyName := ""
@@ -999,7 +999,7 @@ func TestAPIKeyHandler_Update_NameTooLong(t *testing.T) {
 	key := makeTestAPIKey("long-name-key", "Original", types.APIKeySourceAPI, true)
 	repo.seed(key)
 
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	longName := strings.Repeat("n", 256)
@@ -1021,7 +1021,7 @@ func TestAPIKeyHandler_Update_RepoUpdateError(t *testing.T) {
 		return fmt.Errorf("constraint violation")
 	}
 
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	newName := "New Name"
@@ -1044,7 +1044,7 @@ func TestAPIKeyHandler_Delete_Success(t *testing.T) {
 	key := makeTestAPIKey("del-key", "Delete Key", types.APIKeySourceAPI, true)
 	repo.seed(key)
 
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	rr := doAPIKeyItemRequest(t, h, http.MethodDelete, "/api/v1/api-keys/del-key", nil, apikeyAdminKey())
@@ -1057,7 +1057,7 @@ func TestAPIKeyHandler_Delete_Success(t *testing.T) {
 
 func TestAPIKeyHandler_Delete_ReadOnly(t *testing.T) {
 	repo := newMockAPIKeyRepo()
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), true)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), func() bool { return true })
 	require.NoError(t, err)
 
 	rr := doAPIKeyItemRequest(t, h, http.MethodDelete, "/api/v1/api-keys/some-key", nil, apikeyAdminKey())
@@ -1073,7 +1073,7 @@ func TestAPIKeyHandler_Delete_ConfigSource(t *testing.T) {
 	key := makeTestAPIKey("cfg-del-key", "Config Key", types.APIKeySourceConfig, true)
 	repo.seed(key)
 
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	rr := doAPIKeyItemRequest(t, h, http.MethodDelete, "/api/v1/api-keys/cfg-del-key", nil, apikeyAdminKey())
@@ -1086,7 +1086,7 @@ func TestAPIKeyHandler_Delete_ConfigSource(t *testing.T) {
 
 func TestAPIKeyHandler_Delete_NotFound(t *testing.T) {
 	repo := newMockAPIKeyRepo()
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	rr := doAPIKeyItemRequest(t, h, http.MethodDelete, "/api/v1/api-keys/nonexistent", nil, apikeyAdminKey())
@@ -1099,7 +1099,7 @@ func TestAPIKeyHandler_Delete_InternalGetError(t *testing.T) {
 		return nil, fmt.Errorf("database error")
 	}
 
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	rr := doAPIKeyItemRequest(t, h, http.MethodDelete, "/api/v1/api-keys/some-key", nil, apikeyAdminKey())
@@ -1114,7 +1114,7 @@ func TestAPIKeyHandler_Delete_RepoDeleteError(t *testing.T) {
 		return fmt.Errorf("foreign key constraint")
 	}
 
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	rr := doAPIKeyItemRequest(t, h, http.MethodDelete, "/api/v1/api-keys/del-err-key", nil, apikeyAdminKey())
@@ -1134,7 +1134,7 @@ func TestAPIKeyHandler_Delete_RepoDeleteNotFoundRace(t *testing.T) {
 		return types.ErrNotFound
 	}
 
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	rr := doAPIKeyItemRequest(t, h, http.MethodDelete, "/api/v1/api-keys/del-race-key", nil, apikeyAdminKey())
@@ -1147,7 +1147,7 @@ func TestAPIKeyHandler_Delete_RepoDeleteNotFoundRace(t *testing.T) {
 
 func TestAPIKeyHandler_ServeKeyHTTP_MethodNotAllowed(t *testing.T) {
 	repo := newMockAPIKeyRepo()
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	methods := []string{http.MethodPost, http.MethodPatch}
@@ -1204,7 +1204,7 @@ func TestToAPIKeyResponse_IncludesOptionalTimeFields(t *testing.T) {
 
 func TestAPIKeyHandler_Create_NoContextAPIKey(t *testing.T) {
 	repo := newMockAPIKeyRepo()
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	reqBody := CreateAPIKeyRequest{
@@ -1250,7 +1250,7 @@ func TestAPIKeyHandler_Create_RateLimitBounds(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := newMockAPIKeyRepo()
-			h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+			h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 			require.NoError(t, err)
 
 			reqBody := CreateAPIKeyRequest{
@@ -1269,7 +1269,7 @@ func TestAPIKeyHandler_Create_RateLimitBounds(t *testing.T) {
 
 func TestAPIKeyHandler_Create_PublicKeyTooLong(t *testing.T) {
 	repo := newMockAPIKeyRepo()
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	reqBody := CreateAPIKeyRequest{
@@ -1304,7 +1304,7 @@ func TestAPIKeyHandler_Update_RateLimitBounds(t *testing.T) {
 			key := makeTestAPIKey("rl-upd-key", "RL Key", types.APIKeySourceAPI, true)
 			repo.seed(key)
 
-			h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+			h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 			require.NoError(t, err)
 
 			rl := tc.rateLimit
@@ -1323,7 +1323,7 @@ func TestAPIKeyHandler_Delete_LastAdminKey(t *testing.T) {
 	adminKey.Role = types.RoleAdmin
 	repo.seed(adminKey)
 
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	rr := doAPIKeyItemRequest(t, h, http.MethodDelete, "/api/v1/api-keys/only-admin", nil, apikeyAdminKey())
@@ -1344,7 +1344,7 @@ func TestAPIKeyHandler_Delete_AdminKeyWithOtherAdmins(t *testing.T) {
 	repo.seed(admin1)
 	repo.seed(admin2)
 
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	rr := doAPIKeyItemRequest(t, h, http.MethodDelete, "/api/v1/api-keys/admin-1", nil, apikeyAdminKey())
@@ -1364,7 +1364,7 @@ func TestAPIKeyHandler_Delete_NonAdminKeySkipsAdminCheck(t *testing.T) {
 	key.Role = types.RoleStrategy
 	repo.seed(key)
 
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	rr := doAPIKeyItemRequest(t, h, http.MethodDelete, "/api/v1/api-keys/non-admin", nil, apikeyAdminKey())
@@ -1380,7 +1380,7 @@ func TestAPIKeyHandler_Delete_AdminCountError(t *testing.T) {
 		return 0, fmt.Errorf("count error")
 	}
 
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	rr := doAPIKeyItemRequest(t, h, http.MethodDelete, "/api/v1/api-keys/admin-err", nil, apikeyAdminKey())
@@ -1396,7 +1396,7 @@ func TestAPIKeyHandler_Delete_AdminListError(t *testing.T) {
 		return nil, fmt.Errorf("list error")
 	}
 
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	rr := doAPIKeyItemRequest(t, h, http.MethodDelete, "/api/v1/api-keys/admin-lerr", nil, apikeyAdminKey())
@@ -1423,7 +1423,7 @@ func TestAPIKeyHandler_ListNames_NonAdminAllowed(t *testing.T) {
 	repo.seed(makeTestAPIKey("admin", "Admin", types.APIKeySourceAPI, true))
 	repo.seed(makeTestAPIKey("agent", "Agent", types.APIKeySourceConfig, true))
 
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	// An agent-role caller (which is forbidden from /api/v1/api-keys at
@@ -1441,7 +1441,7 @@ func TestAPIKeyHandler_ListNames_NonAdminAllowed(t *testing.T) {
 func TestAPIKeyHandler_ListNames_ProjectionStripsAuditFields(t *testing.T) {
 	repo := newMockAPIKeyRepo()
 	repo.seed(makeTestAPIKey("k1", "Name1", types.APIKeySourceAPI, true))
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	rr := doAPIKeyNamesRequest(t, h, http.MethodGet, apikeyAdminKey())
@@ -1464,7 +1464,7 @@ func TestAPIKeyHandler_ListNames_OnlyEnabledKeys(t *testing.T) {
 	repo := newMockAPIKeyRepo()
 	repo.seed(makeTestAPIKey("k1", "Enabled", types.APIKeySourceAPI, true))
 	repo.seed(makeTestAPIKey("k2", "Disabled", types.APIKeySourceAPI, false))
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 
 	rr := doAPIKeyNamesRequest(t, h, http.MethodGet, apikeyAdminKey())
@@ -1478,7 +1478,7 @@ func TestAPIKeyHandler_ListNames_OnlyEnabledKeys(t *testing.T) {
 
 func TestAPIKeyHandler_ListNames_MethodNotAllowed(t *testing.T) {
 	repo := newMockAPIKeyRepo()
-	h, err := NewAPIKeyHandler(repo, apikeyLogger(), false)
+	h, err := NewAPIKeyHandler(repo, apikeyLogger(), nil)
 	require.NoError(t, err)
 	rr := doAPIKeyNamesRequest(t, h, http.MethodPost, apikeyAdminKey())
 	assert.Equal(t, http.StatusMethodNotAllowed, rr.Code)

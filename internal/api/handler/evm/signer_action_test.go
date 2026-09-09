@@ -115,7 +115,7 @@ func doActionRequest(t *testing.T, handler http.HandlerFunc, method, path string
 func newActionHandler(t *testing.T, mgr *signerActionMock, owners map[string]string) *SignerHandler {
 	t.Helper()
 	accessSvc := newFlexAccessService(t, owners)
-	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 	return h
 }

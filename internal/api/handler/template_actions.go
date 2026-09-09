@@ -29,7 +29,7 @@ func (h *TemplateHandler) deleteTemplate(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	if h.readOnly {
+	if h.isReadOnly() {
 		respond.Error(w, "template deletion via API is disabled (security.rules_api_readonly)", http.StatusForbidden, h.logger)
 		return
 	}
@@ -55,7 +55,7 @@ func (h *TemplateHandler) deleteTemplate(w http.ResponseWriter, r *http.Request,
 }
 
 func (h *TemplateHandler) instantiateTemplate(w http.ResponseWriter, r *http.Request, templateID string) {
-	if h.readOnly {
+	if h.isReadOnly() {
 		respond.Error(w, "template instantiation via API is disabled (security.rules_api_readonly)", http.StatusForbidden, h.logger)
 		return
 	}
@@ -230,7 +230,7 @@ func (h *TemplateHandler) instantiateTemplate(w http.ResponseWriter, r *http.Req
 }
 
 func (h *TemplateHandler) revokeInstance(w http.ResponseWriter, r *http.Request, ruleID string) {
-	if h.readOnly {
+	if h.isReadOnly() {
 		respond.Error(w, "instance revocation via API is disabled (security.rules_api_readonly)", http.StatusForbidden, h.logger)
 		return
 	}

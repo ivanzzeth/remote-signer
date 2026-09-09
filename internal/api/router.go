@@ -48,9 +48,6 @@ type RouterConfig struct {
 	SignerOwnershipRepo          storage.SignerOwnershipRepository // for signer ownership tracking
 	SignerAccessRepo             storage.SignerAccessRepository    // for signer access grants
 	SignerRepo                   storage.SignerRepository          // DB signer inventory/material status
-	RulesAPIReadonly             bool                              // block rule/template mutations via API
-	SignersAPIReadonly           bool                              // block signer/HD-wallet creation via API
-	APIKeysAPIReadonly           bool                              // block API key management via API
 	AlertService                 *middleware.SecurityAlertService  // optional: real-time security alerts
 	AuditLogger                  *audit.AuditLogger                // optional: persistent audit logging
 	SignTimeout                  time.Duration                     // context timeout for sign operations (default: 30s)
@@ -240,7 +237,7 @@ func (r *Router) setupRoutes() error {
 		return err
 	}
 
-	approvalHandler, err := evmhandler.NewApprovalHandler(r.signService, accessService, r.logger, r.config.RulesAPIReadonly)
+	approvalHandler, err := evmhandler.NewApprovalHandler(r.signService, accessService, r.logger, r.liveReadOnly(func(s *settings.SecuritySnapshot) bool { return s.RulesAPIReadonly }))
 	if err != nil {
 		return err
 	}
@@ -271,9 +268,8 @@ func (r *Router) setupRoutes() error {
 	if r.config.Template != nil && r.config.Template.TemplateRepo != nil {
 		ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithTemplateRepo(r.config.Template.TemplateRepo))
 	}
-	if r.config.RulesAPIReadonly {
-		ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithReadOnly())
-	}
+	ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithReadOnly(
+		r.liveReadOnly(func(s *settings.SecuritySnapshot) bool { return s.RulesAPIReadonly })))
 	if r.config.APIKeyRepo != nil {
 		ruleHandlerOpts = append(ruleHandlerOpts, evmhandler.WithAPIKeyRepo(r.config.APIKeyRepo))
 	}
@@ -291,7 +287,7 @@ func (r *Router) setupRoutes() error {
 		return err
 	}
 
-	signerHandler, err := evmhandler.NewSignerHandler(r.signerManager, accessService, r.logger, r.config.SignersAPIReadonly)
+	signerHandler, err := evmhandler.NewSignerHandler(r.signerManager, accessService, r.logger, r.liveReadOnly(func(s *settings.SecuritySnapshot) bool { return s.SignersAPIReadonly }))
 	if err != nil {
 		return err
 	}
@@ -308,7 +304,7 @@ func (r *Router) setupRoutes() error {
 		signerHandler.SetMaxKeystoresPerKey(r.config.MaxKeystoresPerKey)
 	}
 
-	hdWalletHandler, err := evmhandler.NewHDWalletHandler(r.signerManager, accessService, r.logger, r.config.SignersAPIReadonly)
+	hdWalletHandler, err := evmhandler.NewHDWalletHandler(r.signerManager, accessService, r.logger, r.liveReadOnly(func(s *settings.SecuritySnapshot) bool { return s.SignersAPIReadonly }))
 	if err != nil {
 		return err
 	}
@@ -505,7 +501,7 @@ func (r *Router) setupRoutes() error {
 
 	// API key management routes (admin only)
 	if r.config.APIKeyRepo != nil {
-		apiKeyHandler, err := handler.NewAPIKeyHandler(r.config.APIKeyRepo, r.logger, r.config.APIKeysAPIReadonly)
+		apiKeyHandler, err := handler.NewAPIKeyHandler(r.config.APIKeyRepo, r.logger, r.liveReadOnly(func(s *settings.SecuritySnapshot) bool { return s.APIKeysAPIReadonly }))
 		if err != nil {
 			return err
 		}
@@ -559,7 +555,7 @@ func (r *Router) setupRoutes() error {
 			r.config.Template.TemplateRepo,
 			r.config.Template.TemplateService,
 			r.logger,
-			r.config.RulesAPIReadonly,
+			r.liveReadOnly(func(s *settings.SecuritySnapshot) bool { return s.RulesAPIReadonly }),
 			handler.WithTemplateRequireApproval(r.config.RequireApprovalForAgentRules),
 			handler.WithTemplateAPIKeyRepo(r.config.APIKeyRepo),
 			handler.WithTemplateJSEvaluator(r.config.JSEvaluator),
@@ -588,7 +584,7 @@ func (r *Router) setupRoutes() error {
 			r.config.Template.TemplateRepo,
 			r.config.PresetsDB,
 			r.config.Template.TemplateService,
-			r.config.RulesAPIReadonly,
+			r.liveReadOnly(func(s *settings.SecuritySnapshot) bool { return s.RulesAPIReadonly }),
 			r.logger,
 			handler.WithPresetRequireApproval(r.config.RequireApprovalForAgentRules),
 			handler.WithPresetAPIKeyRepo(r.config.APIKeyRepo),
@@ -753,4 +749,31 @@ func (r *Router) Handler() http.Handler {
 // StartRateLimitCleanup starts the rate limit cleanup routine
 func (r *Router) StartRateLimitCleanup(stop <-chan struct{}) {
 	r.rateLimiter.StartCleanupRoutine(5*time.Minute, stop) // every 5 minutes
+}
+
+// liveReadOnly returns a closure reading one of the *_api_readonly switches
+// from the runtime settings snapshot on every call.
+//
+// ⚠️ Returning the value instead of the closure is the bug this replaces:
+// settings.SecuritySnapshot is reloaded from the database, so a bool captured
+// here freezes at boot. internal/settings/model.go promises these become
+// "effective without a daemon restart"; before 2026-09-10 flipping
+// rules_api_readonly in the Web UI changed the database, changed the snapshot,
+// and changed no behaviour at all.
+//
+// nil when there is no settings manager — the handlers read that as "never
+// read-only". Only tests construct a Router without one; the daemon always has
+// one (initSettingsStore) and so does the e2e harness.
+func (r *Router) liveReadOnly(pick func(*settings.SecuritySnapshot) bool) func() bool {
+	if r.config.SettingsManager == nil {
+		return nil
+	}
+	mgr := r.config.SettingsManager
+	return func() bool {
+		snap := mgr.Security()
+		if snap == nil {
+			return false
+		}
+		return pick(snap)
+	}
 }

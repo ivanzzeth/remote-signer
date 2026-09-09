@@ -23,7 +23,7 @@ type TemplateHandler struct {
 	templateService   *service.TemplateService
 	jsEvaluator       *evm.JSRuleEvaluator
 	solidityValidator *evm.SolidityRuleValidator
-	readOnly          bool // when true, block all template mutations via API
+	readOnly          func() bool // when true, block all template mutations via API
 	logger            *slog.Logger
 	requireApproval   bool
 	apiKeyRepo        storage.APIKeyRepository
@@ -65,7 +65,7 @@ func NewTemplateHandler(
 	templateRepo storage.TemplateRepository,
 	templateService *service.TemplateService,
 	logger *slog.Logger,
-	readOnly bool,
+	readOnly func() bool,
 	opts ...TemplateHandlerOption,
 ) (*TemplateHandler, error) {
 	if templateRepo == nil {
@@ -625,4 +625,14 @@ func resolvedVarsToConfig(resolvedConfig []byte) map[string]interface{} {
 	var cfg map[string]interface{}
 	_ = json.Unmarshal(resolvedConfig, &cfg)
 	return cfg
+}
+
+// isReadOnly reports whether write operations are blocked right now. See the
+// note on Router.liveReadOnly: the setting behind it is runtime mutable, so a
+// bool captured at construction freezes at boot.
+func (h *TemplateHandler) isReadOnly() bool {
+	if h.readOnly == nil {
+		return false
+	}
+	return h.readOnly()
 }

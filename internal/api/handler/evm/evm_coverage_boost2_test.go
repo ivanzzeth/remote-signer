@@ -401,7 +401,7 @@ func TestHandleTransferOwnership_TransferToSelf(t *testing.T) {
 	accessSvc, err := service.NewSignerAccessService(ownershipRepo, accessRepo, apiKeyRepo, nil, slog.Default())
 	require.NoError(t, err)
 
-	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	ownerKey := &types.APIKey{ID: "owner-key", Role: types.RoleAdmin, Enabled: true}
@@ -439,7 +439,7 @@ func TestHandleDeleteSigner_NotFound(t *testing.T) {
 
 func TestCreateRule_ReadOnly(t *testing.T) {
 	repo := newMockRuleRepo()
-	h, err := NewRuleHandler(repo, slog.Default(), WithReadOnly())
+	h, err := NewRuleHandler(repo, slog.Default(), WithReadOnly(func() bool { return true }))
 	require.NoError(t, err)
 
 	body := CreateRuleRequest{
@@ -691,7 +691,7 @@ func TestUpdateRule_ReadOnly(t *testing.T) {
 	rule.Owner = "admin-key"
 	repo.addRule(rule)
 
-	h, err := NewRuleHandler(repo, slog.Default(), WithReadOnly())
+	h, err := NewRuleHandler(repo, slog.Default(), WithReadOnly(func() bool { return true }))
 	require.NoError(t, err)
 
 	body := `{"name":"updated"}`
@@ -845,7 +845,7 @@ func TestToRuleResponse_BudgetPeriod(t *testing.T) {
 func TestCreateSigner_ResourceLimitExceeded(t *testing.T) {
 	mgr := &signerMockSignerManager{}
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 	h.SetMaxKeystoresPerKey(0) // 0 = no limit, so should not block
 	h.SetMaxKeystoresPerKey(1)
@@ -883,7 +883,7 @@ func TestCreateSigner_BothPrivateKeyAndKeystoreJSON(t *testing.T) {
 		},
 	}
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(mgr, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	body := `{"type":"keystore","keystore":{"password":"test123","private_key_hex":"0xabc","keystore_json":"{}"}}`
@@ -904,7 +904,7 @@ func TestCreateSigner_BothPrivateKeyAndKeystoreJSON(t *testing.T) {
 func TestListWalletSigners_InvalidOffset(t *testing.T) {
 	accessSvc := newSignerTestAccessService(t)
 	sm := &signerMockSignerManager{}
-	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	adminAPIKey := &types.APIKey{ID: "admin-key", Role: types.RoleAdmin}
@@ -920,7 +920,7 @@ func TestListWalletSigners_InvalidOffset(t *testing.T) {
 func TestListWalletSigners_InvalidLimit(t *testing.T) {
 	accessSvc := newSignerTestAccessService(t)
 	sm := &signerMockSignerManager{}
-	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	adminAPIKey := &types.APIKey{ID: "admin-key", Role: types.RoleAdmin}
@@ -940,7 +940,7 @@ func TestListWalletSigners_ListError(t *testing.T) {
 			return types.SignerListResult{}, errors.New("list failed")
 		},
 	}
-	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	adminAPIKey := &types.APIKey{ID: "admin-key", Role: types.RoleAdmin}
@@ -971,7 +971,7 @@ func TestHandleApproveSigner_GetOwnershipError(t *testing.T) {
 	accessSvc, err := service.NewSignerAccessService(ownershipRepo, accessRepo, apiKeyRepo, nil, slog.Default())
 	require.NoError(t, err)
 
-	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	adminKey := &types.APIKey{ID: "admin-key", Role: types.RoleAdmin, Enabled: true}
@@ -1070,7 +1070,7 @@ func TestHandlePatchSignerLabels_InfoListError(t *testing.T) {
 		listSignersFn: func(_ context.Context, _ types.SignerFilter) (types.SignerListResult, error) {
 			return types.SignerListResult{}, errors.New("list failed")
 		},
-	}, accessSvc, slog.Default(), false)
+	}, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	ownerKey := &types.APIKey{ID: "owner-key", Role: types.RoleAdmin, Enabled: true}
@@ -1118,7 +1118,7 @@ func TestListSigners_FilterByTag(t *testing.T) {
 		},
 	}
 
-	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	adminKey := &types.APIKey{ID: "owner-key", Role: types.RoleAdmin}

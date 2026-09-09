@@ -33,7 +33,7 @@ func (h *RuleHandler) deleteRule(w http.ResponseWriter, r *http.Request, ruleID 
 		return
 	}
 
-	if h.readOnly {
+	if h.isReadOnly() {
 		respond.Error(w, "rule deletion via API is disabled (security.rules_api_readonly)", http.StatusForbidden, h.logger)
 		return
 	}

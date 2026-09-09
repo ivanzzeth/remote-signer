@@ -70,25 +70,25 @@ func TestNewApprovalHandler(t *testing.T) {
 	accessSvc := newSignerTestAccessService(t)
 
 	t.Run("nil_sign_service", func(t *testing.T) {
-		_, err := NewApprovalHandler(nil, accessSvc, slog.Default(), false)
+		_, err := NewApprovalHandler(nil, accessSvc, slog.Default(), nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "sign service is required")
 	})
 
 	t.Run("nil_access_service", func(t *testing.T) {
-		_, err := NewApprovalHandler(&mockSignService{}, nil, slog.Default(), false)
+		_, err := NewApprovalHandler(&mockSignService{}, nil, slog.Default(), nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "access service is required")
 	})
 
 	t.Run("nil_logger", func(t *testing.T) {
-		_, err := NewApprovalHandler(&mockSignService{}, accessSvc, nil, false)
+		_, err := NewApprovalHandler(&mockSignService{}, accessSvc, nil, nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "logger is required")
 	})
 
 	t.Run("valid", func(t *testing.T) {
-		h, err := NewApprovalHandler(&mockSignService{}, accessSvc, slog.Default(), false)
+		h, err := NewApprovalHandler(&mockSignService{}, accessSvc, slog.Default(), nil)
 		require.NoError(t, err)
 		assert.NotNil(t, h)
 	})
@@ -98,21 +98,21 @@ func TestNewApprovalHandler(t *testing.T) {
 
 func TestApprovalHandler_MethodNotAllowed(t *testing.T) {
 	accessSvc := newSignerTestAccessService(t)
-	h, _ := NewApprovalHandler(&mockSignService{}, accessSvc, slog.Default(), false)
+	h, _ := NewApprovalHandler(&mockSignService{}, accessSvc, slog.Default(), nil)
 	rec := doApprovalRequest(t, h, http.MethodGet, "/api/v1/evm/requests/req-001/approve", nil, approvalAdminKey())
 	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
 }
 
 func TestApprovalHandler_Unauthorized(t *testing.T) {
 	accessSvc := newSignerTestAccessService(t)
-	h, _ := NewApprovalHandler(&mockSignService{}, accessSvc, slog.Default(), false)
+	h, _ := NewApprovalHandler(&mockSignService{}, accessSvc, slog.Default(), nil)
 	rec := doApprovalRequest(t, h, http.MethodPost, "/api/v1/evm/requests/req-001/approve", nil, nil)
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
 func TestApprovalHandler_InvalidBody(t *testing.T) {
 	accessSvc := newSignerTestAccessService(t)
-	h, _ := NewApprovalHandler(&mockSignService{}, accessSvc, slog.Default(), false)
+	h, _ := NewApprovalHandler(&mockSignService{}, accessSvc, slog.Default(), nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/evm/requests/req-001/approve", bytes.NewBufferString("bad json"))
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), middleware.APIKeyContextKey, approvalAdminKey()))
@@ -124,7 +124,7 @@ func TestApprovalHandler_InvalidBody(t *testing.T) {
 func TestApprovalHandler_RequestNotFound(t *testing.T) {
 	svc := &mockSignService{} // getRequestFn returns ErrNotFound by default
 	accessSvc := newSignerTestAccessService(t)
-	h, _ := NewApprovalHandler(svc, accessSvc, slog.Default(), false)
+	h, _ := NewApprovalHandler(svc, accessSvc, slog.Default(), nil)
 
 	body := ApprovalAPIRequest{Approved: true}
 	rec := doApprovalRequest(t, h, http.MethodPost, "/api/v1/evm/requests/nonexistent/approve", body, approvalAdminKey())
@@ -151,7 +151,7 @@ func TestApprovalHandler_AdminCanApproveNonOwnedSigner(t *testing.T) {
 	accessSvc := newFlexAccessService(t, map[string]string{
 		"0x1111111111111111111111111111111111111111": "agent-key",
 	})
-	h, _ := NewApprovalHandler(svc, accessSvc, slog.Default(), false)
+	h, _ := NewApprovalHandler(svc, accessSvc, slog.Default(), nil)
 
 	body := ApprovalAPIRequest{Approved: true}
 	rec := doApprovalRequest(t, h, http.MethodPost, "/api/v1/evm/requests/req-pending-001/approve", body, approvalOtherKey())
@@ -169,7 +169,7 @@ func TestApprovalHandler_NotOwner(t *testing.T) {
 	accessSvc := newFlexAccessService(t, map[string]string{
 		"0x1111111111111111111111111111111111111111": "owner-key",
 	})
-	h, _ := NewApprovalHandler(svc, accessSvc, slog.Default(), false)
+	h, _ := NewApprovalHandler(svc, accessSvc, slog.Default(), nil)
 
 	body := ApprovalAPIRequest{Approved: true}
 	devKey := &types.APIKey{ID: "dev-key", Name: "Dev", Role: types.RoleDev, Enabled: true}
@@ -198,7 +198,7 @@ func TestApprovalHandler_Approve_Success(t *testing.T) {
 	accessSvc := newFlexAccessService(t, map[string]string{
 		"0x1111111111111111111111111111111111111111": "owner-key",
 	})
-	h, _ := NewApprovalHandler(svc, accessSvc, slog.Default(), false)
+	h, _ := NewApprovalHandler(svc, accessSvc, slog.Default(), nil)
 
 	body := ApprovalAPIRequest{Approved: true}
 	rec := doApprovalRequest(t, h, http.MethodPost, "/api/v1/evm/requests/req-pending-001/approve", body, approvalAdminKey())
@@ -231,7 +231,7 @@ func TestApprovalHandler_Reject_Success(t *testing.T) {
 	accessSvc := newFlexAccessService(t, map[string]string{
 		"0x1111111111111111111111111111111111111111": "owner-key",
 	})
-	h, _ := NewApprovalHandler(svc, accessSvc, slog.Default(), false)
+	h, _ := NewApprovalHandler(svc, accessSvc, slog.Default(), nil)
 
 	body := ApprovalAPIRequest{Approved: false}
 	rec := doApprovalRequest(t, h, http.MethodPost, "/api/v1/evm/requests/req-pending-001/approve", body, approvalAdminKey())
@@ -255,7 +255,7 @@ func TestApprovalHandler_ProcessError(t *testing.T) {
 	accessSvc := newFlexAccessService(t, map[string]string{
 		"0x1111111111111111111111111111111111111111": "owner-key",
 	})
-	h, _ := NewApprovalHandler(svc, accessSvc, slog.Default(), false)
+	h, _ := NewApprovalHandler(svc, accessSvc, slog.Default(), nil)
 
 	body := ApprovalAPIRequest{Approved: true}
 	rec := doApprovalRequest(t, h, http.MethodPost, "/api/v1/evm/requests/req-pending-001/approve", body, approvalAdminKey())
@@ -279,7 +279,7 @@ func TestApprovalHandler_ProcessError_LockedSigner_Returns423(t *testing.T) {
 	accessSvc := newFlexAccessService(t, map[string]string{
 		"0x1111111111111111111111111111111111111111": "owner-key",
 	})
-	h, _ := NewApprovalHandler(svc, accessSvc, slog.Default(), false)
+	h, _ := NewApprovalHandler(svc, accessSvc, slog.Default(), nil)
 
 	body := ApprovalAPIRequest{Approved: true}
 	rec := doApprovalRequest(t, h, http.MethodPost, "/api/v1/evm/requests/req-pending-001/approve", body, approvalAdminKey())
@@ -297,7 +297,7 @@ func TestApprovalHandler_RulesReadOnly_BlocksAutoRule(t *testing.T) {
 	accessSvc := newFlexAccessService(t, map[string]string{
 		"0x1111111111111111111111111111111111111111": "owner-key",
 	})
-	h, _ := NewApprovalHandler(svc, accessSvc, slog.Default(), true) // rulesReadOnly=true
+	h, _ := NewApprovalHandler(svc, accessSvc, slog.Default(), func() bool { return true }) // rulesReadOnly=true
 
 	body := ApprovalAPIRequest{Approved: true, RuleType: "evm_address_list", RuleMode: "whitelist"}
 	rec := doApprovalRequest(t, h, http.MethodPost, "/api/v1/evm/requests/req-pending-001/approve", body, approvalAdminKey())
@@ -315,7 +315,7 @@ func TestApprovalHandler_InvalidRuleType(t *testing.T) {
 	accessSvc := newFlexAccessService(t, map[string]string{
 		"0x1111111111111111111111111111111111111111": "owner-key",
 	})
-	h, _ := NewApprovalHandler(svc, accessSvc, slog.Default(), false)
+	h, _ := NewApprovalHandler(svc, accessSvc, slog.Default(), nil)
 
 	body := ApprovalAPIRequest{Approved: true, RuleType: "bad_type"}
 	rec := doApprovalRequest(t, h, http.MethodPost, "/api/v1/evm/requests/req-pending-001/approve", body, approvalAdminKey())

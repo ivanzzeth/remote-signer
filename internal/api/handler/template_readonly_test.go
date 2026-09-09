@@ -19,7 +19,7 @@ func TestTemplateHandler_ReadOnly_CreateBlocked(t *testing.T) {
 	budgetRepo := newMockBudgetRepo()
 	svc := newTemplateService(t, tmplRepo, ruleRepo, budgetRepo)
 
-	h, err := NewTemplateHandler(tmplRepo, svc, newTestLogger(), true)
+	h, err := NewTemplateHandler(tmplRepo, svc, newTestLogger(), func() bool { return true })
 	require.NoError(t, err)
 
 	body := `{"name":"test","type":"evm_address_list","mode":"whitelist","config":{"addresses":["0x01"]},"enabled":true}`
@@ -50,7 +50,7 @@ func TestTemplateHandler_ReadOnly_UpdateBlocked(t *testing.T) {
 	}
 	require.NoError(t, tmplRepo.Create(context.Background(), tmpl))
 
-	h, err := NewTemplateHandler(tmplRepo, svc, newTestLogger(), true)
+	h, err := NewTemplateHandler(tmplRepo, svc, newTestLogger(), func() bool { return true })
 	require.NoError(t, err)
 
 	body := `{"name":"updated"}`
@@ -81,7 +81,7 @@ func TestTemplateHandler_ReadOnly_DeleteBlocked(t *testing.T) {
 	}
 	require.NoError(t, tmplRepo.Create(context.Background(), tmpl))
 
-	h, err := NewTemplateHandler(tmplRepo, svc, newTestLogger(), true)
+	h, err := NewTemplateHandler(tmplRepo, svc, newTestLogger(), func() bool { return true })
 	require.NoError(t, err)
 
 	r := httptest.NewRequest(http.MethodDelete, "/api/v1/templates/tmpl_api_2", nil)
@@ -100,7 +100,7 @@ func TestTemplateHandler_ReadOnly_InstantiateBlocked(t *testing.T) {
 	budgetRepo := newMockBudgetRepo()
 	svc := newTemplateService(t, tmplRepo, ruleRepo, budgetRepo)
 
-	h, err := NewTemplateHandler(tmplRepo, svc, newTestLogger(), true)
+	h, err := NewTemplateHandler(tmplRepo, svc, newTestLogger(), func() bool { return true })
 	require.NoError(t, err)
 
 	body := `{"variables":{}}`
@@ -120,7 +120,7 @@ func TestTemplateHandler_ReadOnly_RevokeBlocked(t *testing.T) {
 	budgetRepo := newMockBudgetRepo()
 	svc := newTemplateService(t, tmplRepo, ruleRepo, budgetRepo)
 
-	h, err := NewTemplateHandler(tmplRepo, svc, newTestLogger(), true)
+	h, err := NewTemplateHandler(tmplRepo, svc, newTestLogger(), func() bool { return true })
 	require.NoError(t, err)
 
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/templates/instances/rule_1/revoke", nil)
@@ -139,7 +139,7 @@ func TestTemplateHandler_ReadOnly_GetAllowed(t *testing.T) {
 	budgetRepo := newMockBudgetRepo()
 	svc := newTemplateService(t, tmplRepo, ruleRepo, budgetRepo)
 
-	h, err := NewTemplateHandler(tmplRepo, svc, newTestLogger(), true)
+	h, err := NewTemplateHandler(tmplRepo, svc, newTestLogger(), func() bool { return true })
 	require.NoError(t, err)
 
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/templates", nil)

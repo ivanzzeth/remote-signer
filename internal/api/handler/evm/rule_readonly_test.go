@@ -221,7 +221,7 @@ func newConfigRule() *types.Rule {
 
 func TestRuleHandler_ReadOnly_CreateBlocked(t *testing.T) {
 	repo := newMockRuleRepo()
-	h, err := NewRuleHandler(repo, slog.Default(), WithReadOnly())
+	h, err := NewRuleHandler(repo, slog.Default(), WithReadOnly(func() bool { return true }))
 	require.NoError(t, err)
 
 	body := `{"name":"test","type":"evm_address_list","mode":"whitelist","config":{"addresses":["0x0000000000000000000000000000000000000001"]},"enabled":true}`
@@ -240,7 +240,7 @@ func TestRuleHandler_ReadOnly_UpdateBlocked(t *testing.T) {
 	rule := newAPIRule()
 	repo.addRule(rule)
 
-	h, err := NewRuleHandler(repo, slog.Default(), WithReadOnly())
+	h, err := NewRuleHandler(repo, slog.Default(), WithReadOnly(func() bool { return true }))
 	require.NoError(t, err)
 
 	body := `{"name":"updated"}`
@@ -259,7 +259,7 @@ func TestRuleHandler_ReadOnly_DeleteBlocked(t *testing.T) {
 	rule := newAPIRule()
 	repo.addRule(rule)
 
-	h, err := NewRuleHandler(repo, slog.Default(), WithReadOnly())
+	h, err := NewRuleHandler(repo, slog.Default(), WithReadOnly(func() bool { return true }))
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/evm/rules/"+string(rule.ID), nil)
@@ -277,7 +277,7 @@ func TestRuleHandler_ReadOnly_GetAllowed(t *testing.T) {
 	rule := newAPIRule()
 	repo.addRule(rule)
 
-	h, err := NewRuleHandler(repo, slog.Default(), WithReadOnly())
+	h, err := NewRuleHandler(repo, slog.Default(), WithReadOnly(func() bool { return true }))
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/evm/rules/"+string(rule.ID), nil)
@@ -291,7 +291,7 @@ func TestRuleHandler_ReadOnly_GetAllowed(t *testing.T) {
 
 func TestRuleHandler_ReadOnly_ListAllowed(t *testing.T) {
 	repo := newMockRuleRepo()
-	h, err := NewRuleHandler(repo, slog.Default(), WithReadOnly())
+	h, err := NewRuleHandler(repo, slog.Default(), WithReadOnly(func() bool { return true }))
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/evm/rules", nil)

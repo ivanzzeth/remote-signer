@@ -62,7 +62,7 @@ func newPresetApplyTestEnv(t *testing.T) *presetApplyTestEnv {
 		tmplRepo,
 		db,
 		templateSvc,
-		false,
+		nil,
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 	)
 	requireNoErr(t, err)

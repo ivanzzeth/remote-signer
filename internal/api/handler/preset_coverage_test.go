@@ -49,7 +49,7 @@ func newPresetEnvWithJSEval(t *testing.T) (*presetTestEnv, *evm.JSRuleEvaluator)
 		tmplRepo,
 		db,
 		nil, /* templateSvc — not needed for validate */
-		false,
+		nil,
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		WithPresetJSEvaluator(eval),
 	)
@@ -297,7 +297,7 @@ func TestPresetHandler_Apply_ReadOnly(t *testing.T) {
 		tmplRepo,
 		db,
 		nil, /* templateSvc */
-		true,
+		func() bool { return true },
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 	)
 	require.NoError(t, err)
@@ -328,7 +328,7 @@ func TestPresetHandler_Apply_NoTemplateSvc(t *testing.T) {
 		tmplRepo,
 		db,
 		nil, /* templateSvc */
-		false,
+		nil,
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 	)
 	require.NoError(t, err)
@@ -368,7 +368,7 @@ func TestPresetHandler_Apply_DisabledPreset(t *testing.T) {
 		tmplRepo,
 		db,
 		&service.TemplateService{},
-		false,
+		nil,
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 	)
 	require.NoError(t, err)
@@ -408,7 +408,7 @@ func TestPresetHandler_Apply_NoTemplateIDs(t *testing.T) {
 		tmplRepo,
 		db,
 		&service.TemplateService{},
-		false,
+		nil,
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 	)
 	require.NoError(t, err)
@@ -449,7 +449,7 @@ func TestPresetHandler_Apply_BadRequestBody(t *testing.T) {
 		tmplRepo,
 		db,
 		&service.TemplateService{}, // non-nil, so templateSvc check passes
-		false,
+		nil,
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 	)
 	require.NoError(t, err)
@@ -509,7 +509,7 @@ func TestPresetHandler_Apply_SolidityForgeUnavailable(t *testing.T) {
 		tmplRepo,
 		db,
 		&service.TemplateService{},
-		false,
+		nil,
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 	)
 	require.NoError(t, err)

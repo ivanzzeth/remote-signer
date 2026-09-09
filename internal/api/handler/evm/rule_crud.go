@@ -27,7 +27,7 @@ import (
 )
 
 func (h *RuleHandler) createRule(w http.ResponseWriter, r *http.Request) {
-	if h.readOnly {
+	if h.isReadOnly() {
 		respond.Error(w, "rule creation via API is disabled (security.rules_api_readonly)", http.StatusForbidden, h.logger)
 		return
 	}
@@ -262,7 +262,7 @@ func (h *RuleHandler) updateRule(w http.ResponseWriter, r *http.Request, ruleID 
 		return
 	}
 
-	if h.readOnly {
+	if h.isReadOnly() {
 		respond.Error(w, "rule updates via API are disabled (security.rules_api_readonly)", http.StatusForbidden, h.logger)
 		return
 	}
@@ -511,7 +511,7 @@ func (h *RuleHandler) proposeRule(w http.ResponseWriter, r *http.Request, target
 	}
 
 	// Read-only check
-	if h.readOnly {
+	if h.isReadOnly() {
 		respond.Error(w, "rule mutations are disabled in read-only mode", http.StatusForbidden, h.logger)
 		return
 	}

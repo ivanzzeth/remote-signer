@@ -293,7 +293,7 @@ func newApplyEnvWithRepo(t *testing.T, preset *types.RulePreset, templateSvc *se
 	if preset != nil {
 		require.NoError(t, presetRepo.Create(context.Background(), preset))
 	}
-	h, err := NewPresetHandler(presetRepo, tmplRepo, db, templateSvc, false,
+	h, err := NewPresetHandler(presetRepo, tmplRepo, db, templateSvc, nil,
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 	require.NoError(t, err)
 	return h
@@ -327,7 +327,7 @@ func TestPresetHandler_Apply_NoDB(t *testing.T) {
 		Source:      types.RuleSourceFile, ContentHash: "h",
 	}))
 	h, err := NewPresetHandler(presetRepo, tmplRepo, nil, &service.TemplateService{},
-		false, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	require.NoError(t, err)
 	ctx := context.WithValue(context.Background(), middleware.APIKeyContextKey,
 		&types.APIKey{ID: "admin", Role: types.RoleAdmin})
@@ -356,7 +356,7 @@ func TestPresetHandler_Apply_MissingRequiredOverride(t *testing.T) {
 		Source:            types.RuleSourceFile, ContentHash: "h",
 	}))
 	h, err := NewPresetHandler(presetRepo, tmplRepo, db, &service.TemplateService{},
-		false, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	require.NoError(t, err)
 	ctx := context.WithValue(context.Background(), middleware.APIKeyContextKey,
 		&types.APIKey{ID: "admin", Role: types.RoleAdmin})
@@ -393,7 +393,7 @@ func TestPresetHandler_Apply_RequiredOverrideSupplied(t *testing.T) {
 	evalr, err := evm.NewJSRuleEvaluator(slog.New(slog.NewTextHandler(io.Discard, nil)))
 	require.NoError(t, err)
 	h, err := NewPresetHandler(presetRepo, tmplRepo, db, &service.TemplateService{},
-		false, slog.New(slog.NewTextHandler(io.Discard, nil)), WithPresetJSEvaluator(evalr))
+		nil, slog.New(slog.NewTextHandler(io.Discard, nil)), WithPresetJSEvaluator(evalr))
 	require.NoError(t, err)
 	ctx := context.WithValue(context.Background(), middleware.APIKeyContextKey,
 		&types.APIKey{ID: "admin", Role: types.RoleAdmin})
@@ -426,7 +426,7 @@ func TestPresetHandler_Apply_BudgetSubstitutionError(t *testing.T) {
 		Source:      types.RuleSourceFile, ContentHash: "h",
 	}))
 	h, err := NewPresetHandler(presetRepo, tmplRepo, db, &service.TemplateService{},
-		false, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	require.NoError(t, err)
 	ctx := context.WithValue(context.Background(), middleware.APIKeyContextKey,
 		&types.APIKey{ID: "admin", Role: types.RoleAdmin})
@@ -457,7 +457,7 @@ func TestPresetHandler_Apply_ScheduleSubstitutionError(t *testing.T) {
 		Source:      types.RuleSourceFile, ContentHash: "h",
 	}))
 	h, err := NewPresetHandler(presetRepo, tmplRepo, db, &service.TemplateService{},
-		false, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	require.NoError(t, err)
 	ctx := context.WithValue(context.Background(), middleware.APIKeyContextKey,
 		&types.APIKey{ID: "admin", Role: types.RoleAdmin})
@@ -486,7 +486,7 @@ func newValidationEnv(t *testing.T) (*PresetHandler, *evm.JSRuleEvaluator) {
 	require.NoError(t, err)
 	eval, err := evm.NewJSRuleEvaluator(slog.New(slog.NewTextHandler(io.Discard, nil)))
 	require.NoError(t, err)
-	h, err := NewPresetHandler(presetRepo, tmplRepo, db, nil, false,
+	h, err := NewPresetHandler(presetRepo, tmplRepo, db, nil, nil,
 		slog.New(slog.NewTextHandler(io.Discard, nil)), WithPresetJSEvaluator(eval))
 	require.NoError(t, err)
 	return h, eval
@@ -678,7 +678,7 @@ func TestPresetHandler_Validate_NoJSEvaluator(t *testing.T) {
 	tmplRepo, err := storage.NewGormTemplateRepository(db)
 	require.NoError(t, err)
 	// No JS evaluator
-	h, err := NewPresetHandler(presetRepo, tmplRepo, db, nil, false,
+	h, err := NewPresetHandler(presetRepo, tmplRepo, db, nil, nil,
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 	require.NoError(t, err)
 	ctx := contextWithKey(t, types.RoleAdmin, "admin")
@@ -715,7 +715,7 @@ func TestPresetHandler_Validate_WithBodyVariables(t *testing.T) {
 			"rules": []map[string]interface{}{{"name": "r1", "type": "sign_type_restriction", "mode": "whitelist", "config": map[string]interface{}{"allowed_sign_types": []string{"transaction"}}}},
 		}),
 	}))
-	h, err := NewPresetHandler(presetRepo, tmplRepo, db, nil, false,
+	h, err := NewPresetHandler(presetRepo, tmplRepo, db, nil, nil,
 		slog.New(slog.NewTextHandler(io.Discard, nil)), WithPresetJSEvaluator(eval))
 	require.NoError(t, err)
 	ctx := contextWithKey(t, types.RoleAdmin, "admin")
@@ -754,7 +754,7 @@ func TestPresetHandler_Validate_SubstitutionFailure(t *testing.T) {
 		Config:    []byte(`{"rules":[{"name":"r1","type":"evm_js","mode":"whitelist","config":{"script":"function validate(input){return{valid:true}}","allowed_addresses":"${nonexistent_var}"}}]}`),
 		Variables: mustJSONP(t, []types.TemplateVariable{{Name: "nonexistent_var", Type: types.VarTypeString, Required: true}}),
 	}))
-	h, err := NewPresetHandler(presetRepo, tmplRepo, db, nil, false,
+	h, err := NewPresetHandler(presetRepo, tmplRepo, db, nil, nil,
 		slog.New(slog.NewTextHandler(io.Discard, nil)), WithPresetJSEvaluator(eval))
 	require.NoError(t, err)
 	ctx := contextWithKey(t, types.RoleAdmin, "admin")
@@ -793,7 +793,7 @@ func TestPresetHandler_Validate_WithChainID(t *testing.T) {
 			"rules": []map[string]interface{}{{"name": "r1", "type": "sign_type_restriction", "mode": "whitelist", "config": map[string]interface{}{"allowed_sign_types": []string{"transaction"}}}},
 		}),
 	}))
-	h, err := NewPresetHandler(presetRepo, tmplRepo, db, nil, false,
+	h, err := NewPresetHandler(presetRepo, tmplRepo, db, nil, nil,
 		slog.New(slog.NewTextHandler(io.Discard, nil)), WithPresetJSEvaluator(eval))
 	require.NoError(t, err)
 	ctx := contextWithKey(t, types.RoleAdmin, "admin")
@@ -829,7 +829,7 @@ func TestPresetHandler_Validate_TemplateNotFound_Continues(t *testing.T) {
 			"rules": []map[string]interface{}{{"name": "r1", "type": "sign_type_restriction", "mode": "whitelist", "config": map[string]interface{}{"allowed_sign_types": []string{"transaction"}}}},
 		}),
 	}))
-	h, err := NewPresetHandler(presetRepo, tmplRepo, db, nil, false,
+	h, err := NewPresetHandler(presetRepo, tmplRepo, db, nil, nil,
 		slog.New(slog.NewTextHandler(io.Discard, nil)), WithPresetJSEvaluator(eval))
 	require.NoError(t, err)
 	ctx := contextWithKey(t, types.RoleAdmin, "admin")
@@ -867,7 +867,7 @@ func TestPresetHandler_Validate_NilBody(t *testing.T) {
 			"rules": []map[string]interface{}{{"name": "r1", "type": "sign_type_restriction", "mode": "whitelist", "config": map[string]interface{}{"allowed_sign_types": []string{"transaction"}}}},
 		}),
 	}))
-	h, err := NewPresetHandler(presetRepo, tmplRepo, db, nil, false,
+	h, err := NewPresetHandler(presetRepo, tmplRepo, db, nil, nil,
 		slog.New(slog.NewTextHandler(io.Discard, nil)), WithPresetJSEvaluator(eval))
 	require.NoError(t, err)
 	ctx := contextWithKey(t, types.RoleAdmin, "admin")
@@ -1003,7 +1003,7 @@ func TestPresetHandler_List_RepoError(t *testing.T) {
 	require.NoError(t, err)
 	tmplRepo, err := storage.NewGormTemplateRepository(db)
 	require.NoError(t, err)
-	h, err := NewPresetHandler(presetRepo, tmplRepo, db, nil, false,
+	h, err := NewPresetHandler(presetRepo, tmplRepo, db, nil, nil,
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 	require.NoError(t, err)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/presets", nil).WithContext(adminCtx(t))

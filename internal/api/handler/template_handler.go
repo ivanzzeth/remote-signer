@@ -94,7 +94,7 @@ func (h *TemplateHandler) getTemplate(w http.ResponseWriter, r *http.Request, te
 }
 
 func (h *TemplateHandler) createTemplate(w http.ResponseWriter, r *http.Request) {
-	if h.readOnly {
+	if h.isReadOnly() {
 		respond.Error(w, "template creation via API is disabled (security.rules_api_readonly)", http.StatusForbidden, h.logger)
 		return
 	}
@@ -229,7 +229,7 @@ func (h *TemplateHandler) updateTemplate(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	if h.readOnly {
+	if h.isReadOnly() {
 		respond.Error(w, "template updates via API are disabled (security.rules_api_readonly)", http.StatusForbidden, h.logger)
 		return
 	}

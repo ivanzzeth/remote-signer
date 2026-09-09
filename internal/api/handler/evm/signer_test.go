@@ -234,27 +234,27 @@ func newSignerManagerWithAll() *signerMockSignerManager {
 func TestNewSignerHandler(t *testing.T) {
 	t.Run("nil signer manager returns error", func(t *testing.T) {
 		accessSvc := newSignerTestAccessService(t)
-		_, err := NewSignerHandler(nil, accessSvc, slog.Default(), false)
+		_, err := NewSignerHandler(nil, accessSvc, slog.Default(), nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "signer manager is required")
 	})
 
 	t.Run("nil access service returns error", func(t *testing.T) {
-		_, err := NewSignerHandler(&signerMockSignerManager{}, nil, slog.Default(), false)
+		_, err := NewSignerHandler(&signerMockSignerManager{}, nil, slog.Default(), nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "access service is required")
 	})
 
 	t.Run("nil logger returns error", func(t *testing.T) {
 		accessSvc := newSignerTestAccessService(t)
-		_, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, nil, false)
+		_, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, nil, nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "logger is required")
 	})
 
 	t.Run("all deps provided", func(t *testing.T) {
 		accessSvc := newSignerTestAccessService(t)
-		h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), false)
+		h, err := NewSignerHandler(&signerMockSignerManager{}, accessSvc, slog.Default(), nil)
 		require.NoError(t, err)
 		require.NotNil(t, h)
 	})
@@ -273,7 +273,7 @@ func TestListSigners_NonAdmin_SeesOwned(t *testing.T) {
 	}
 	accessSvc := newSignerTestAccessServiceWithOwnerships(t, ownerships)
 
-	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	apiKey := &types.APIKey{
@@ -304,7 +304,7 @@ func TestListSigners_Admin_SeesOwned(t *testing.T) {
 	}
 	accessSvc := newSignerTestAccessServiceWithOwnerships(t, ownerships)
 
-	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	adminAPIKey := &types.APIKey{
@@ -324,7 +324,7 @@ func TestListSigners_Admin_SeesOwned(t *testing.T) {
 func TestListSigners_Unauthorized(t *testing.T) {
 	sm := newSignerManagerWithAll()
 	accessSvc := newSignerTestAccessService(t)
-	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	// No API key in context
@@ -360,7 +360,7 @@ func TestListSigners_IncludesHDParentInJSON(t *testing.T) {
 	}
 	accessSvc := newSignerTestAccessServiceWithOwnerships(t, ownerships)
 
-	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	adminAPIKey := &types.APIKey{
@@ -413,7 +413,7 @@ func TestListSigners_ExcludeHDDerived(t *testing.T) {
 	}
 	accessSvc := newSignerTestAccessServiceWithOwnerships(t, ownerships)
 
-	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	adminAPIKey := &types.APIKey{
@@ -474,7 +474,7 @@ func TestListWalletSigners(t *testing.T) {
 	}
 	accessSvc := newSignerTestAccessServiceWithOwnerships(t, ownerships)
 
-	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), false)
+	h, err := NewSignerHandler(sm, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	adminAPIKey := &types.APIKey{
@@ -590,7 +590,7 @@ func filterOwnerships() []*types.SignerOwnership {
 }
 
 func TestListSigners_Filter_Locked(t *testing.T) {
-	h, err := NewSignerHandler(newFilterSignerManager(), newSignerTestAccessServiceWithOwnerships(t, filterOwnerships()), slog.Default(), false)
+	h, err := NewSignerHandler(newFilterSignerManager(), newSignerTestAccessServiceWithOwnerships(t, filterOwnerships()), slog.Default(), nil)
 	require.NoError(t, err)
 	admin := &types.APIKey{ID: "owner-1", Role: types.RoleAdmin}
 
@@ -609,7 +609,7 @@ func TestListSigners_Filter_Locked(t *testing.T) {
 }
 
 func TestListSigners_Filter_Enabled(t *testing.T) {
-	h, err := NewSignerHandler(newFilterSignerManager(), newSignerTestAccessServiceWithOwnerships(t, filterOwnerships()), slog.Default(), false)
+	h, err := NewSignerHandler(newFilterSignerManager(), newSignerTestAccessServiceWithOwnerships(t, filterOwnerships()), slog.Default(), nil)
 	require.NoError(t, err)
 	admin := &types.APIKey{ID: "owner-1", Role: types.RoleAdmin}
 
@@ -622,7 +622,7 @@ func TestListSigners_Filter_Enabled(t *testing.T) {
 }
 
 func TestListSigners_Filter_Combined_LockedAndEnabled(t *testing.T) {
-	h, err := NewSignerHandler(newFilterSignerManager(), newSignerTestAccessServiceWithOwnerships(t, filterOwnerships()), slog.Default(), false)
+	h, err := NewSignerHandler(newFilterSignerManager(), newSignerTestAccessServiceWithOwnerships(t, filterOwnerships()), slog.Default(), nil)
 	require.NoError(t, err)
 	admin := &types.APIKey{ID: "owner-1", Role: types.RoleAdmin}
 
@@ -635,7 +635,7 @@ func TestListSigners_Filter_Combined_LockedAndEnabled(t *testing.T) {
 }
 
 func TestListSigners_Filter_LockedInvalid_400(t *testing.T) {
-	h, err := NewSignerHandler(newFilterSignerManager(), newSignerTestAccessServiceWithOwnerships(t, filterOwnerships()), slog.Default(), false)
+	h, err := NewSignerHandler(newFilterSignerManager(), newSignerTestAccessServiceWithOwnerships(t, filterOwnerships()), slog.Default(), nil)
 	require.NoError(t, err)
 	admin := &types.APIKey{ID: "owner-1", Role: types.RoleAdmin}
 
@@ -644,7 +644,7 @@ func TestListSigners_Filter_LockedInvalid_400(t *testing.T) {
 }
 
 func TestListSigners_Filter_APIKeyID_AdminViewsOtherKey(t *testing.T) {
-	h, err := NewSignerHandler(newFilterSignerManager(), newSignerTestAccessServiceWithOwnerships(t, filterOwnerships()), slog.Default(), false)
+	h, err := NewSignerHandler(newFilterSignerManager(), newSignerTestAccessServiceWithOwnerships(t, filterOwnerships()), slog.Default(), nil)
 	require.NoError(t, err)
 	admin := &types.APIKey{ID: "owner-1", Role: types.RoleAdmin}
 
@@ -661,7 +661,7 @@ func TestListSigners_Filter_APIKeyID_AdminViewsOtherKey(t *testing.T) {
 }
 
 func TestListSigners_Filter_APIKeyID_NonAdminCrossKey_403(t *testing.T) {
-	h, err := NewSignerHandler(newFilterSignerManager(), newSignerTestAccessServiceWithOwnerships(t, filterOwnerships()), slog.Default(), false)
+	h, err := NewSignerHandler(newFilterSignerManager(), newSignerTestAccessServiceWithOwnerships(t, filterOwnerships()), slog.Default(), nil)
 	require.NoError(t, err)
 	nonAdmin := &types.APIKey{ID: "owner-1", Role: types.RoleDev}
 
@@ -671,7 +671,7 @@ func TestListSigners_Filter_APIKeyID_NonAdminCrossKey_403(t *testing.T) {
 }
 
 func TestListSigners_Filter_APIKeyID_NonAdminSelf_200(t *testing.T) {
-	h, err := NewSignerHandler(newFilterSignerManager(), newSignerTestAccessServiceWithOwnerships(t, filterOwnerships()), slog.Default(), false)
+	h, err := NewSignerHandler(newFilterSignerManager(), newSignerTestAccessServiceWithOwnerships(t, filterOwnerships()), slog.Default(), nil)
 	require.NoError(t, err)
 	nonAdmin := &types.APIKey{ID: "owner-1", Role: types.RoleDev}
 
@@ -686,7 +686,7 @@ func TestListSigners_Filter_APIKeyID_NonAdminSelf_200(t *testing.T) {
 }
 
 func TestListSigners_Filter_OwnershipStatus_PendingApproval_AdminGlobal(t *testing.T) {
-	h, err := NewSignerHandler(newFilterSignerManager(), newSignerTestAccessServiceWithOwnerships(t, filterOwnerships()), slog.Default(), false)
+	h, err := NewSignerHandler(newFilterSignerManager(), newSignerTestAccessServiceWithOwnerships(t, filterOwnerships()), slog.Default(), nil)
 	require.NoError(t, err)
 	admin := &types.APIKey{ID: "owner-1", Role: types.RoleAdmin}
 
@@ -708,7 +708,7 @@ func TestListSigners_Filter_OwnershipStatus_PendingApproval_AdminGlobal(t *testi
 }
 
 func TestListSigners_Filter_OwnershipStatus_PendingApproval_NonAdmin_403(t *testing.T) {
-	h, err := NewSignerHandler(newFilterSignerManager(), newSignerTestAccessServiceWithOwnerships(t, filterOwnerships()), slog.Default(), false)
+	h, err := NewSignerHandler(newFilterSignerManager(), newSignerTestAccessServiceWithOwnerships(t, filterOwnerships()), slog.Default(), nil)
 	require.NoError(t, err)
 	nonAdmin := &types.APIKey{ID: "owner-1", Role: types.RoleAgent}
 
@@ -717,7 +717,7 @@ func TestListSigners_Filter_OwnershipStatus_PendingApproval_NonAdmin_403(t *test
 }
 
 func TestListSigners_Filter_OwnershipStatus_Invalid_400(t *testing.T) {
-	h, err := NewSignerHandler(newFilterSignerManager(), newSignerTestAccessServiceWithOwnerships(t, filterOwnerships()), slog.Default(), false)
+	h, err := NewSignerHandler(newFilterSignerManager(), newSignerTestAccessServiceWithOwnerships(t, filterOwnerships()), slog.Default(), nil)
 	require.NoError(t, err)
 	admin := &types.APIKey{ID: "owner-1", Role: types.RoleAdmin}
 

@@ -21,12 +21,12 @@ import (
 type ApprovalHandler struct {
 	signService   service.SignServiceAPI
 	accessService *service.SignerAccessService
-	rulesReadOnly bool // when true, block auto-rule creation during approval
+	rulesReadOnly func() bool // when true, block auto-rule creation during approval
 	logger        *slog.Logger
 }
 
 // NewApprovalHandler creates a new approval handler
-func NewApprovalHandler(signService service.SignServiceAPI, accessService *service.SignerAccessService, logger *slog.Logger, rulesReadOnly bool) (*ApprovalHandler, error) {
+func NewApprovalHandler(signService service.SignServiceAPI, accessService *service.SignerAccessService, logger *slog.Logger, rulesReadOnly func() bool) (*ApprovalHandler, error) {
 	if signService == nil {
 		return nil, fmt.Errorf("sign service is required")
 	}
@@ -140,7 +140,7 @@ func (h *ApprovalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Block auto-rule creation when rules API is readonly
-	if req.RuleType != "" && h.rulesReadOnly {
+	if req.RuleType != "" && h.isReadOnly() {
 		respond.Error(w, "auto-rule creation during approval is disabled (security.rules_api_readonly)", http.StatusForbidden, h.logger)
 		return
 	}
@@ -357,4 +357,23 @@ func previewRuleClientError(err error) string {
 	default:
 		return "failed to preview rule"
 	}
+}
+
+// readOnly reports whether write operations are blocked right now.
+//
+// It is a function, not a bool, because the setting behind it is runtime
+// mutable: settings.SecuritySnapshot is reloaded from the database, and a
+// value copied into this struct at construction would freeze at boot. That
+// was the actual behaviour until 2026-09-10 — internal/settings/model.go
+// promises settings become "effective without a daemon restart", and for this
+// one, flipping it in the Web UI changed the database, changed the snapshot,
+// and changed nothing else.
+//
+// nil means "never read-only", which is the permissive direction; the router
+// only leaves it nil when there is no settings manager at all (tests).
+func (h *ApprovalHandler) isReadOnly() bool {
+	if h.rulesReadOnly == nil {
+		return false
+	}
+	return h.rulesReadOnly()
 }

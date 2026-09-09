@@ -74,7 +74,7 @@ func newStrictAccessService(t *testing.T, ownerships map[string]*types.SignerOwn
 func TestNewSignerResponse_NonHDWallet(t *testing.T) {
 	mgr := &mockSignerManager{hdWalletMgrErr: types.ErrHDWalletNotConfigured}
 	accessSvc := newStrictAccessService(t, nil)
-	handler, err := NewSignerHandler(mgr, accessSvc, slog.Default(), false)
+	handler, err := NewSignerHandler(mgr, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	resp := handler.newSignerResponse(context.Background(), types.SignerInfo{
@@ -116,7 +116,7 @@ func TestNewSignerResponse_HDWallet_PrimaryUnlocked(t *testing.T) {
 		},
 	})
 
-	handler, err := NewSignerHandler(mgr, accessSvc, slog.Default(), false)
+	handler, err := NewSignerHandler(mgr, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	resp := handler.newSignerResponse(context.Background(), types.SignerInfo{
@@ -146,7 +146,7 @@ func TestNewSignerResponse_HDWallet_PrimaryLocked(t *testing.T) {
 	}
 	accessSvc := newStrictAccessService(t, nil)
 
-	handler, err := NewSignerHandler(mgr, accessSvc, slog.Default(), false)
+	handler, err := NewSignerHandler(mgr, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	resp := handler.newSignerResponse(context.Background(), types.SignerInfo{
@@ -191,7 +191,7 @@ func TestNewSignerResponse_HDWallet_DerivedInheritsOwnership(t *testing.T) {
 		},
 	})
 
-	handler, err := NewSignerHandler(mgr, accessSvc, slog.Default(), false)
+	handler, err := NewSignerHandler(mgr, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	resp := handler.newSignerResponse(context.Background(), types.SignerInfo{
@@ -222,7 +222,7 @@ func TestNewSignerResponse_HDWallet_DerivedLocked(t *testing.T) {
 	}
 	accessSvc := newStrictAccessService(t, nil)
 
-	handler, err := NewSignerHandler(mgr, accessSvc, slog.Default(), false)
+	handler, err := NewSignerHandler(mgr, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	resp := handler.newSignerResponse(context.Background(), types.SignerInfo{
@@ -273,7 +273,7 @@ func TestNewSignerResponse_HDWallet_DerivedWithOwnOwnership(t *testing.T) {
 		},
 	})
 
-	handler, err := NewSignerHandler(mgr, accessSvc, slog.Default(), false)
+	handler, err := NewSignerHandler(mgr, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	resp := handler.newSignerResponse(context.Background(), types.SignerInfo{
@@ -320,7 +320,7 @@ func TestNewSignerResponse_HDWallet_MultipleWallets(t *testing.T) {
 		},
 	})
 
-	handler, err := NewSignerHandler(mgr, accessSvc, slog.Default(), false)
+	handler, err := NewSignerHandler(mgr, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	// Derived of unlocked wallet 2
@@ -347,7 +347,7 @@ func TestNewSignerResponse_HDWallet_ManagerError(t *testing.T) {
 	mgr := &mockSignerManager{hdWalletMgrErr: types.ErrHDWalletNotConfigured}
 	accessSvc := newStrictAccessService(t, nil)
 
-	handler, err := NewSignerHandler(mgr, accessSvc, slog.Default(), false)
+	handler, err := NewSignerHandler(mgr, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	resp := handler.newSignerResponse(context.Background(), types.SignerInfo{
@@ -383,7 +383,7 @@ func TestNewSignerResponse_HDWallet_CaseInsensitive(t *testing.T) {
 		},
 	})
 
-	handler, err := NewSignerHandler(mgr, accessSvc, slog.Default(), false)
+	handler, err := NewSignerHandler(mgr, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	// Primary with lowercase
@@ -440,7 +440,7 @@ func TestNewSignerResponse_HDWallet_DerivedHierarchyUsesCanonicalAddressKey(t *t
 		},
 	})
 
-	handler, err := NewSignerHandler(mgr, accessSvc, slog.Default(), false)
+	handler, err := NewSignerHandler(mgr, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	resp := handler.newSignerResponse(context.Background(), types.SignerInfo{
@@ -474,7 +474,7 @@ func TestNewSignerResponse_HDWallet_PrimaryUnlocked_StaleDBRecordIgnored(t *test
 		},
 	}
 	accessSvc := newStrictAccessService(t, nil)
-	handler, err := NewSignerHandler(mgr, accessSvc, slog.Default(), false)
+	handler, err := NewSignerHandler(mgr, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	// DB row is still stale from before the unlock (material_check hasn't ticked).
@@ -526,7 +526,7 @@ func TestNewSignerResponse_HDWallet_DerivedUnlocked_StaleDBRecordIgnored(t *test
 		},
 	}
 	accessSvc := newStrictAccessService(t, nil)
-	handler, err := NewSignerHandler(mgr, accessSvc, slog.Default(), false)
+	handler, err := NewSignerHandler(mgr, accessSvc, slog.Default(), nil)
 	require.NoError(t, err)
 
 	handler.SetSignerRepo(&stubSignerRepo{records: map[string]*types.Signer{
